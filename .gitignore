@@ -1,0 +1,12 @@
+# Binaries (root only, not internal/felt/)
+/felt
+*.exe
+
+# Local state (these are user-specific)
+.felt/
+.dots/
+
+# IDE
+.idea/
+.vscode/
+*.swp
