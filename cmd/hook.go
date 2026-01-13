@@ -1,9 +1,13 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
+	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/cailmdaley/felt/internal/felt"
 	"github.com/spf13/cobra"
@@ -73,10 +77,33 @@ and recently closed fibers for context.`,
 	},
 }
 
+var hookSyncCmd = &cobra.Command{
+	Use:   "sync",
+	Short: "Sync TodoWrite items to felt fibers",
+	Long: `Syncs Claude Code's TodoWrite tool output to felt fibers.
+
+This hook reads TodoWrite JSON from stdin and:
+- Creates new fibers for new todos (kind: todo)
+- Updates fiber status when todo status changes
+- Closes fibers when todos are completed
+- Closes fibers with "Abandoned from TodoWrite" when todos disappear
+
+Configure in ~/.claude/settings.json:
+  "PostToolUse": [{
+    "matcher": "TodoWrite",
+    "hooks": [{"type": "command", "command": "felt hook sync"}]
+  }]`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runHookSync(os.Stdin)
+	},
+}
+
 func init() {
 	rootCmd.AddCommand(hookCmd)
 	rootCmd.AddCommand(primeCmd)
 	hookCmd.AddCommand(hookSessionCmd)
+	hookCmd.AddCommand(hookSyncCmd)
 }
 
 func minimalOutput() string {
@@ -152,13 +179,28 @@ func formatSessionOutput(felts []*felt.Felt, g *felt.Graph) string {
 }
 
 // formatFiberEntry formats a single fiber for hook output.
-// Shows kind label when not the default "task" kind.
+// Two-line format: icon + ID, then indented title with metadata.
 func formatFiberEntry(icon string, f *felt.Felt) string {
-	kindStr := ""
+	// Line 1: status + ID
+	line1 := fmt.Sprintf("%s %s\n", icon, f.ID)
+
+	// Line 2: indented title with metadata (kind, deps)
+	var meta []string
 	if f.Kind != felt.DefaultKind {
-		kindStr = fmt.Sprintf(" [%s]", f.Kind)
+		meta = append(meta, f.Kind)
 	}
-	return fmt.Sprintf("%s %s%s  %s\n", icon, f.ID, kindStr, f.Title)
+	if len(f.DependsOn) > 0 {
+		meta = append(meta, fmt.Sprintf("%d deps", len(f.DependsOn)))
+	}
+
+	metaStr := ""
+	if len(meta) > 0 {
+		metaStr = fmt.Sprintf(" (%s)", strings.Join(meta, ", "))
+	}
+
+	line2 := fmt.Sprintf("    %s%s\n", f.Title, metaStr)
+
+	return line1 + line2
 }
 
 func formatPrimeOutput(felts []*felt.Felt, g *felt.Graph) string {
@@ -291,4 +333,211 @@ func formatClosedFiberSummary(f *felt.Felt) string {
 
 	sb.WriteString("\n")
 	return sb.String()
+}
+
+// =============================================================================
+// TodoWrite Sync Hook
+// =============================================================================
+
+const (
+	todoKind        = "todo"
+	mappingFileName = "todo-mapping.json"
+)
+
+// hookEnvelope is the structure Claude Code sends to PostToolUse hooks.
+type hookEnvelope struct {
+	ToolName  string          `json:"tool_name"`
+	ToolInput json.RawMessage `json:"tool_input"`
+}
+
+// todoWriteInput is the structure of TodoWrite's tool_input.
+type todoWriteInput struct {
+	Todos []todoItem `json:"todos"`
+}
+
+// todoItem represents a single TodoWrite item.
+type todoItem struct {
+	Content    string `json:"content"`
+	Status     string `json:"status"`
+	ActiveForm string `json:"activeForm,omitempty"`
+}
+
+// todoMapping maps todo content strings to fiber IDs.
+type todoMapping map[string]string
+
+// runHookSync processes TodoWrite output and syncs to felt fibers.
+func runHookSync(r io.Reader) error {
+	// Read stdin
+	input, err := io.ReadAll(r)
+	if err != nil {
+		return fmt.Errorf("reading stdin: %w", err)
+	}
+	if len(input) == 0 {
+		return nil // Empty input, nothing to do
+	}
+
+	// Parse envelope
+	var envelope hookEnvelope
+	if err := json.Unmarshal(input, &envelope); err != nil {
+		return nil // Invalid JSON, silently ignore (not our hook)
+	}
+
+	// Only process TodoWrite
+	if envelope.ToolName != "TodoWrite" {
+		return nil
+	}
+
+	// Parse TodoWrite input
+	var todoInput todoWriteInput
+	if err := json.Unmarshal(envelope.ToolInput, &todoInput); err != nil {
+		return nil // Invalid TodoWrite input, silently ignore
+	}
+
+	// Find or create felt repository
+	root, err := felt.FindProjectRoot()
+	if err != nil {
+		// No felt repo - try to initialize in current directory
+		root, err = os.Getwd()
+		if err != nil {
+			return nil // Can't determine directory, silently ignore
+		}
+	}
+
+	storage := felt.NewStorage(root)
+	if !storage.Exists() {
+		if err := storage.Init(); err != nil {
+			return nil // Can't init, silently ignore
+		}
+	}
+
+	// Load mapping
+	mapping, err := loadTodoMapping(root)
+	if err != nil {
+		mapping = make(todoMapping)
+	}
+
+	// Track which todos we've seen (for abandoned detection)
+	seen := make(map[string]bool)
+
+	// Process each todo
+	for _, todo := range todoInput.Todos {
+		if todo.Content == "" {
+			continue
+		}
+		seen[todo.Content] = true
+
+		switch todo.Status {
+		case "completed":
+			// Close the fiber if it exists
+			if fiberID, ok := mapping[todo.Content]; ok {
+				if f, err := storage.Read(fiberID); err == nil && !f.IsClosed() {
+					now := time.Now()
+					f.Status = felt.StatusClosed
+					f.ClosedAt = &now
+					f.CloseReason = "Completed via TodoWrite"
+					_ = storage.Write(f)
+				}
+				delete(mapping, todo.Content)
+			}
+
+		case "in_progress":
+			if fiberID, ok := mapping[todo.Content]; ok {
+				// Update existing fiber to active
+				if f, err := storage.Read(fiberID); err == nil && !f.IsClosed() {
+					if f.Status != felt.StatusActive {
+						f.Status = felt.StatusActive
+						_ = storage.Write(f)
+					}
+				}
+			} else {
+				// Create new fiber
+				f, err := felt.New(todo.Content)
+				if err != nil {
+					continue
+				}
+				f.Kind = todoKind
+				f.Status = felt.StatusActive
+				if todo.ActiveForm != "" && todo.ActiveForm != todo.Content {
+					f.Body = todo.ActiveForm
+				}
+				if err := storage.Write(f); err == nil {
+					mapping[todo.Content] = f.ID
+				}
+			}
+
+		case "pending":
+			if fiberID, ok := mapping[todo.Content]; ok {
+				// Update existing fiber to open
+				if f, err := storage.Read(fiberID); err == nil && !f.IsClosed() {
+					if f.Status != felt.StatusOpen {
+						f.Status = felt.StatusOpen
+						_ = storage.Write(f)
+					}
+				}
+			} else {
+				// Create new fiber
+				f, err := felt.New(todo.Content)
+				if err != nil {
+					continue
+				}
+				f.Kind = todoKind
+				f.Status = felt.StatusOpen
+				if todo.ActiveForm != "" && todo.ActiveForm != todo.Content {
+					f.Body = todo.ActiveForm
+				}
+				if err := storage.Write(f); err == nil {
+					mapping[todo.Content] = f.ID
+				}
+			}
+		}
+	}
+
+	// Close abandoned fibers (in mapping but not in current todos)
+	for content, fiberID := range mapping {
+		if !seen[content] {
+			if f, err := storage.Read(fiberID); err == nil && !f.IsClosed() {
+				now := time.Now()
+				f.Status = felt.StatusClosed
+				f.ClosedAt = &now
+				f.CloseReason = "Abandoned from TodoWrite"
+				_ = storage.Write(f)
+			}
+			delete(mapping, content)
+		}
+	}
+
+	// Save mapping
+	_ = saveTodoMapping(root, mapping)
+
+	return nil
+}
+
+// mappingPath returns the path to the todo mapping file.
+func mappingPath(root string) string {
+	return root + string(os.PathSeparator) + felt.DirName + string(os.PathSeparator) + mappingFileName
+}
+
+// loadTodoMapping loads the todo-to-fiber mapping from disk.
+func loadTodoMapping(root string) (todoMapping, error) {
+	data, err := os.ReadFile(mappingPath(root))
+	if err != nil {
+		return nil, err
+	}
+
+	var mapping todoMapping
+	if err := json.Unmarshal(data, &mapping); err != nil {
+		return nil, err
+	}
+
+	return mapping, nil
+}
+
+// saveTodoMapping saves the todo-to-fiber mapping to disk.
+func saveTodoMapping(root string, mapping todoMapping) error {
+	data, err := json.MarshalIndent(mapping, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(mappingPath(root), data, 0644)
 }

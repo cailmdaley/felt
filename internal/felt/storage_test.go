@@ -308,7 +308,10 @@ func TestFindProjectRoot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FindProjectRoot() error: %v", err)
 	}
-	if found != rootDir {
+	// Resolve symlinks for comparison (macOS has /var -> /private/var)
+	wantResolved, _ := filepath.EvalSymlinks(rootDir)
+	foundResolved, _ := filepath.EvalSymlinks(found)
+	if foundResolved != wantResolved {
 		t.Errorf("FindProjectRoot() = %q, want %q", found, rootDir)
 	}
 }

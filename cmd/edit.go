@@ -218,7 +218,7 @@ var findCmd = &cobra.Command{
 		}
 
 		for _, f := range matches {
-			fmt.Printf("%s %s  %s\n", statusIcon(f.Status), f.ID, f.Title)
+			printFeltTwoLine(f)
 		}
 
 		return nil

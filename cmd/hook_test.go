@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -78,7 +79,7 @@ func TestFormatSessionOutput(t *testing.T) {
 	if !strings.Contains(output, "## Active Fibers") {
 		t.Error("missing active fibers section")
 	}
-	if !strings.Contains(output, "◐ active-task-12345678  Active task") {
+	if !strings.Contains(output, "◐ active-task-12345678\n    Active task") {
 		t.Error("missing active task entry")
 	}
 
@@ -86,7 +87,7 @@ func TestFormatSessionOutput(t *testing.T) {
 	if !strings.Contains(output, "## Ready Fibers (unblocked)") {
 		t.Error("missing ready fibers section")
 	}
-	if !strings.Contains(output, "○ ready-task-87654321  Ready task") {
+	if !strings.Contains(output, "○ ready-task-87654321\n    Ready task") {
 		t.Error("missing ready task entry")
 	}
 
@@ -279,14 +280,14 @@ func TestFormatSessionOutput_KindLabels(t *testing.T) {
 		t.Error("default 'task' kind should not show label")
 	}
 
-	// Decision should have [decision] label
-	if !strings.Contains(output, "design-api-87654321 [decision]  Design REST API") {
-		t.Errorf("decision fiber should show [decision] label, got output:\n%s", output)
+	// Decision should have (decision) in metadata
+	if !strings.Contains(output, "○ design-api-87654321\n    Design REST API (decision)") {
+		t.Errorf("decision fiber should show (decision) label, got output:\n%s", output)
 	}
 
-	// Question should have [question] label
-	if !strings.Contains(output, "research-lib-abcdef12 [question]  Which library?") {
-		t.Errorf("question fiber should show [question] label, got output:\n%s", output)
+	// Question should have (question) in metadata
+	if !strings.Contains(output, "○ research-lib-abcdef12\n    Which library? (question)") {
+		t.Errorf("question fiber should show (question) label, got output:\n%s", output)
 	}
 }
 
@@ -305,7 +306,7 @@ func TestFormatFiberEntry(t *testing.T) {
 				Title: "Implement auth",
 				Kind:  felt.DefaultKind,
 			},
-			expected: "◐ impl-auth-12345678  Implement auth\n",
+			expected: "◐ impl-auth-12345678\n    Implement auth\n",
 		},
 		{
 			name: "decision kind - shows label",
@@ -315,7 +316,7 @@ func TestFormatFiberEntry(t *testing.T) {
 				Title: "Design REST API",
 				Kind:  "decision",
 			},
-			expected: "○ design-api-87654321 [decision]  Design REST API\n",
+			expected: "○ design-api-87654321\n    Design REST API (decision)\n",
 		},
 		{
 			name: "spec kind - shows label",
@@ -325,7 +326,7 @@ func TestFormatFiberEntry(t *testing.T) {
 				Title: "API specification",
 				Kind:  "spec",
 			},
-			expected: "○ api-spec-abcdef12 [spec]  API specification\n",
+			expected: "○ api-spec-abcdef12\n    API specification (spec)\n",
 		},
 	}
 
@@ -600,5 +601,120 @@ func TestFormatClosedFiberSummary(t *testing.T) {
 				t.Error("missing close reason prefix")
 			}
 		})
+	}
+}
+
+func TestRunHookSync(t *testing.T) {
+	// Create a temp directory for testing
+	tmpDir := t.TempDir()
+
+	// Change to temp directory for the test
+	oldWd, _ := os.Getwd()
+	defer os.Chdir(oldWd)
+	os.Chdir(tmpDir)
+
+	// Test 1: Create new todos
+	input := `{"tool_name":"TodoWrite","tool_input":{"todos":[{"content":"Task one","status":"pending","activeForm":"Working on task one"},{"content":"Task two","status":"in_progress","activeForm":"Doing task two"}]}}`
+
+	err := runHookSync(strings.NewReader(input))
+	if err != nil {
+		t.Fatalf("runHookSync failed: %v", err)
+	}
+
+	// Verify .felt directory was created
+	storage := felt.NewStorage(tmpDir)
+	if !storage.Exists() {
+		t.Error(".felt directory should exist")
+	}
+
+	// Verify fibers were created
+	felts, err := storage.List()
+	if err != nil {
+		t.Fatalf("List failed: %v", err)
+	}
+	if len(felts) != 2 {
+		t.Errorf("expected 2 fibers, got %d", len(felts))
+	}
+
+	// Check statuses and kinds
+	for _, f := range felts {
+		if f.Kind != todoKind {
+			t.Errorf("expected kind %q, got %q", todoKind, f.Kind)
+		}
+		if f.Title == "Task one" && f.Status != felt.StatusOpen {
+			t.Errorf("Task one should be open, got %s", f.Status)
+		}
+		if f.Title == "Task two" && f.Status != felt.StatusActive {
+			t.Errorf("Task two should be active, got %s", f.Status)
+		}
+	}
+
+	// Test 2: Complete one todo, abandon the other
+	input2 := `{"tool_name":"TodoWrite","tool_input":{"todos":[{"content":"Task two","status":"completed","activeForm":"Doing task two"}]}}`
+
+	err = runHookSync(strings.NewReader(input2))
+	if err != nil {
+		t.Fatalf("runHookSync (round 2) failed: %v", err)
+	}
+
+	// Reload fibers
+	felts, err = storage.List()
+	if err != nil {
+		t.Fatalf("List (round 2) failed: %v", err)
+	}
+
+	// Both should be closed now
+	closedCount := 0
+	for _, f := range felts {
+		if f.IsClosed() {
+			closedCount++
+			// Check close reasons
+			if f.Title == "Task one" && f.CloseReason != "Abandoned from TodoWrite" {
+				t.Errorf("Task one should be abandoned, got reason: %s", f.CloseReason)
+			}
+			if f.Title == "Task two" && f.CloseReason != "Completed via TodoWrite" {
+				t.Errorf("Task two should be completed, got reason: %s", f.CloseReason)
+			}
+		}
+	}
+	if closedCount != 2 {
+		t.Errorf("expected 2 closed fibers, got %d", closedCount)
+	}
+
+	// Verify mapping is empty after all todos processed
+	mapping, err := loadTodoMapping(tmpDir)
+	if err != nil {
+		t.Fatalf("loadTodoMapping failed: %v", err)
+	}
+	if len(mapping) != 0 {
+		t.Errorf("mapping should be empty, got %d entries", len(mapping))
+	}
+}
+
+func TestRunHookSync_IgnoresNonTodoWrite(t *testing.T) {
+	tmpDir := t.TempDir()
+	oldWd, _ := os.Getwd()
+	defer os.Chdir(oldWd)
+	os.Chdir(tmpDir)
+
+	// Non-TodoWrite input should be silently ignored
+	input := `{"tool_name":"Bash","tool_input":{"command":"ls"}}`
+
+	err := runHookSync(strings.NewReader(input))
+	if err != nil {
+		t.Fatalf("runHookSync should not error on non-TodoWrite: %v", err)
+	}
+
+	// No .felt directory should be created
+	storage := felt.NewStorage(tmpDir)
+	if storage.Exists() {
+		t.Error(".felt directory should not be created for non-TodoWrite")
+	}
+}
+
+func TestRunHookSync_EmptyInput(t *testing.T) {
+	err := runHookSync(strings.NewReader(""))
+	if err != nil {
+		t.Errorf("empty input should not error: %v", err)
 	}
 }

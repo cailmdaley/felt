@@ -98,33 +98,37 @@ func statusIcon(status string) string {
 }
 
 // printFeltTwoLine prints a felt in two-line format for better scannability:
-// Line 1: status icon + ID + tags
-// Line 2: indented title
+// Line 1: status icon + ID
+// Line 2: indented title with metadata
 func printFeltTwoLine(f *felt.Felt) {
+	fmt.Print(formatFeltTwoLine(f))
+}
+
+// formatFeltTwoLine returns a felt in two-line format.
+// Used by ls, ready, find, and hook commands for consistent output.
+func formatFeltTwoLine(f *felt.Felt) string {
 	icon := statusIcon(f.Status)
 
-	// Build tags string
-	var tagsStr string
-	for _, tag := range f.Tags {
-		tagsStr += fmt.Sprintf(" [%s]", tag)
-	}
+	// Line 1: status + ID
+	line1 := fmt.Sprintf("%s %s\n", icon, f.ID)
 
-	// Line 1: status + ID + tags
-	fmt.Printf("%s %s%s\n", icon, f.ID, tagsStr)
-
-	// Line 2: indented title with optional metadata
-	meta := ""
+	// Line 2: indented title with metadata (kind, deps)
+	var meta []string
 	if f.Kind != felt.DefaultKind {
-		meta = fmt.Sprintf(" (%s)", f.Kind)
+		meta = append(meta, f.Kind)
 	}
 	if len(f.DependsOn) > 0 {
-		if meta != "" {
-			meta += fmt.Sprintf(" (%d deps)", len(f.DependsOn))
-		} else {
-			meta = fmt.Sprintf(" (%d deps)", len(f.DependsOn))
-		}
+		meta = append(meta, fmt.Sprintf("%d deps", len(f.DependsOn)))
 	}
-	fmt.Printf("  %s%s\n", f.Title, meta)
+
+	metaStr := ""
+	if len(meta) > 0 {
+		metaStr = fmt.Sprintf(" (%s)", strings.Join(meta, ", "))
+	}
+
+	line2 := fmt.Sprintf("    %s%s\n", f.Title, metaStr)
+
+	return line1 + line2
 }
 
 func init() {
