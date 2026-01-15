@@ -120,12 +120,22 @@ func init() {
 // Also allow bare "felt <title>" as shorthand for "felt add <title>"
 func init() {
 	rootCmd.Args = cobra.ArbitraryArgs
+
+	// Copy add command flags to root so "felt <title> -a dep" works
+	rootCmd.Flags().StringVarP(&addDesc, "description", "d", "", "Description/body text")
+	rootCmd.Flags().StringVarP(&addKind, "kind", "k", "", "Kind (task, spec, thread, etc)")
+	rootCmd.Flags().IntVarP(&addPriority, "priority", "p", 2, "Priority (0-4, lower=more urgent)")
+	rootCmd.Flags().StringArrayVarP(&addDeps, "depends-on", "a", nil, "Dependency ID (repeatable)")
+	rootCmd.Flags().StringVarP(&addDue, "due", "D", "", "Due date (YYYY-MM-DD)")
+	rootCmd.Flags().StringArrayVarP(&addTags, "tag", "t", nil, "Tag (repeatable)")
+	rootCmd.Flags().StringVarP(&addReason, "reason", "r", "", "Close reason (creates fiber already closed)")
+
 	originalRun := rootCmd.RunE
 	rootCmd.RunE = func(cmd *cobra.Command, args []string) error {
 		if len(args) == 1 && !isSubcommand(args[0]) {
 			// Treat as "felt add <title>"
-			// Call RunE directly to avoid infinite recursion through Execute()
-			return addCmd.RunE(addCmd, args)
+			// Flags are already parsed into the add* variables since we share them
+			return addCmd.RunE(cmd, args)
 		}
 		if originalRun != nil {
 			return originalRun(cmd, args)
