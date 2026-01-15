@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/cailmdaley/felt/internal/felt"
 	"github.com/spf13/cobra"
@@ -19,11 +20,26 @@ var (
 	findTags   []string
 )
 
+// Edit command flags
+var (
+	editPriority int
+	editKind     string
+	editTitle    string
+	editDue      string
+	editDeps     []string
+)
+
 var editCmd = &cobra.Command{
 	Use:   "edit <id>",
-	Short: "Open a felt in $EDITOR",
-	Long:  `Opens the felt's markdown file in your default editor.`,
-	Args:  cobra.ExactArgs(1),
+	Short: "Modify a felt's properties or open in $EDITOR",
+	Long: `Modifies a felt's properties via flags, or opens in $EDITOR if no flags given.
+
+Examples:
+  felt edit abc123 --priority 1
+  felt edit abc123 --kind decision --title "New title"
+  felt edit abc123 --depends-on other-fiber-id
+  felt edit abc123                  # opens in $EDITOR`,
+	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		root, err := felt.FindProjectRoot()
 		if err != nil {
@@ -36,18 +52,95 @@ var editCmd = &cobra.Command{
 			return err
 		}
 
-		editor := os.Getenv("EDITOR")
-		if editor == "" {
-			editor = "vim"
+		// Check if any modification flags were provided
+		hasFlags := cmd.Flags().Changed("priority") ||
+			cmd.Flags().Changed("kind") ||
+			cmd.Flags().Changed("title") ||
+			cmd.Flags().Changed("due") ||
+			cmd.Flags().Changed("depends-on")
+
+		if !hasFlags {
+			// No flags: open in editor
+			editor := os.Getenv("EDITOR")
+			if editor == "" {
+				editor = "vim"
+			}
+
+			path := storage.Path(f.ID)
+			editorCmd := exec.Command(editor, path)
+			editorCmd.Stdin = os.Stdin
+			editorCmd.Stdout = os.Stdout
+			editorCmd.Stderr = os.Stderr
+
+			return editorCmd.Run()
 		}
 
-		path := storage.Path(f.ID)
-		editorCmd := exec.Command(editor, path)
-		editorCmd.Stdin = os.Stdin
-		editorCmd.Stdout = os.Stdout
-		editorCmd.Stderr = os.Stderr
+		// Apply flag modifications
+		if cmd.Flags().Changed("priority") {
+			f.Priority = editPriority
+		}
+		if cmd.Flags().Changed("kind") {
+			f.Kind = editKind
+		}
+		if cmd.Flags().Changed("title") {
+			f.Title = editTitle
+		}
+		if cmd.Flags().Changed("due") {
+			if editDue == "" {
+				f.Due = nil
+			} else {
+				due, err := time.Parse("2006-01-02", editDue)
+				if err != nil {
+					return fmt.Errorf("invalid due date (use YYYY-MM-DD): %w", err)
+				}
+				f.Due = &due
+			}
+		}
+		if cmd.Flags().Changed("depends-on") {
+			// Resolve and add dependencies
+			for _, dep := range editDeps {
+				depFelt, err := storage.Find(dep)
+				if err != nil {
+					return fmt.Errorf("dependency %q: %w", dep, err)
+				}
 
-		return editorCmd.Run()
+				// Check if already linked
+				alreadyLinked := false
+				for _, d := range f.DependsOn {
+					if d == depFelt.ID {
+						alreadyLinked = true
+						break
+					}
+				}
+				if alreadyLinked {
+					continue
+				}
+
+				// Add dependency
+				f.DependsOn = append(f.DependsOn, depFelt.ID)
+			}
+
+			// Check for cycles
+			felts, err := storage.List()
+			if err != nil {
+				return err
+			}
+			g := felt.BuildGraph(felts)
+			g.Nodes[f.ID] = f
+			g.Upstream[f.ID] = f.DependsOn
+			for _, depID := range f.DependsOn {
+				if g.DetectCycle(f.ID, depID) {
+					return fmt.Errorf("adding dependency would create a cycle")
+				}
+			}
+		}
+
+		if err := storage.Write(f); err != nil {
+			return err
+		}
+
+		fmt.Printf("Updated %s\n", f.ID)
+		return nil
 	},
 }
 
@@ -301,6 +394,15 @@ func init() {
 	rootCmd.AddCommand(linkCmd)
 	rootCmd.AddCommand(unlinkCmd)
 	rootCmd.AddCommand(findCmd)
+
+	// Edit command flags
+	editCmd.Flags().IntVarP(&editPriority, "priority", "p", 2, "Set priority (0-4, lower=more urgent)")
+	editCmd.Flags().StringVarP(&editKind, "kind", "k", "", "Set kind (task, spec, thread, etc)")
+	editCmd.Flags().StringVarP(&editTitle, "title", "t", "", "Set title")
+	editCmd.Flags().StringVarP(&editDue, "due", "D", "", "Set due date (YYYY-MM-DD, empty to clear)")
+	editCmd.Flags().StringArrayVarP(&editDeps, "depends-on", "a", nil, "Add dependency (repeatable)")
+
+	// Find command flags
 	findCmd.Flags().StringVarP(&findKind, "kind", "k", "", "Filter by kind")
 	findCmd.Flags().BoolVarP(&findExact, "exact", "e", false, "Exact title match only")
 	findCmd.Flags().BoolVarP(&findRegex, "regex", "r", false, "Treat query as regular expression")

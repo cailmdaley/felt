@@ -29,6 +29,13 @@ var showCmd = &cobra.Command{
 			return outputJSON(f)
 		}
 
+		// Build graph for downstream lookup
+		felts, err := storage.List()
+		if err != nil {
+			return err
+		}
+		graph := felt.BuildGraph(felts)
+
 		// Header
 		fmt.Printf("ID:       %s\n", f.ID)
 		fmt.Printf("Repo:     %s\n", root)
@@ -41,9 +48,18 @@ var showCmd = &cobra.Command{
 			fmt.Printf("Tags:     %s\n", strings.Join(f.Tags, ", "))
 		}
 		fmt.Printf("Priority: %d\n", f.Priority)
+
+		// Dependencies (upstream - what this depends on)
 		if len(f.DependsOn) > 0 {
-			fmt.Printf("Depends:  %s\n", strings.Join(f.DependsOn, ", "))
+			fmt.Printf("Upstream: %s\n", formatDeps(graph, f.DependsOn))
 		}
+
+		// Dependents (downstream - what depends on this)
+		downstream := graph.Downstream[f.ID]
+		if len(downstream) > 0 {
+			fmt.Printf("Downstream: %s\n", formatDeps(graph, downstream))
+		}
+
 		if f.Due != nil {
 			fmt.Printf("Due:      %s\n", f.Due.Format("2006-01-02"))
 		}
@@ -62,6 +78,37 @@ var showCmd = &cobra.Command{
 
 		return nil
 	},
+}
+
+// formatDeps formats dependency IDs, showing title for context
+func formatDeps(g *felt.Graph, ids []string) string {
+	if len(ids) == 0 {
+		return ""
+	}
+	if len(ids) == 1 {
+		if f, ok := g.Nodes[ids[0]]; ok {
+			return fmt.Sprintf("%s (%s)", ids[0], truncateTitle(f.Title, 30))
+		}
+		return ids[0]
+	}
+	// Multiple deps: list on separate lines
+	var lines []string
+	for _, id := range ids {
+		if f, ok := g.Nodes[id]; ok {
+			lines = append(lines, fmt.Sprintf("\n  - %s (%s)", id, truncateTitle(f.Title, 30)))
+		} else {
+			lines = append(lines, fmt.Sprintf("\n  - %s", id))
+		}
+	}
+	return strings.Join(lines, "")
+}
+
+// truncateTitle shortens a title to maxLen chars
+func truncateTitle(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen-1] + "…"
 }
 
 func init() {
