@@ -165,7 +165,7 @@ felt prime                        # full context for session recovery
 ### Add Flags
 
 ```bash
--d, --description "text"          # body text
+-b, --body "text"                 # body text
 -k, --kind spec                   # kind (task, spec, decision, etc.)
 -p, --priority 1                  # 0-4, lower = more urgent
 -a, --depends-on <id>             # dependency (repeatable)

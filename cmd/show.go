@@ -8,6 +8,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var showBodyOnly bool
+
 var showCmd = &cobra.Command{
 	Use:   "show <id>",
 	Short: "Show details of a felt",
@@ -25,6 +27,12 @@ var showCmd = &cobra.Command{
 			return err
 		}
 
+		// --body flag: output only the body (for piping)
+		if showBodyOnly {
+			fmt.Print(f.Body)
+			return nil
+		}
+
 		if jsonOutput {
 			return outputJSON(f)
 		}
@@ -38,7 +46,6 @@ var showCmd = &cobra.Command{
 
 		// Header
 		fmt.Printf("ID:       %s\n", f.ID)
-		fmt.Printf("Repo:     %s\n", root)
 		fmt.Printf("Title:    %s\n", f.Title)
 		fmt.Printf("Status:   %s\n", f.Status)
 		if f.Kind != felt.DefaultKind {
@@ -113,4 +120,5 @@ func truncateTitle(s string, maxLen int) string {
 
 func init() {
 	rootCmd.AddCommand(showCmd)
+	showCmd.Flags().BoolVarP(&showBodyOnly, "body", "b", false, "Output only the body (for piping)")
 }

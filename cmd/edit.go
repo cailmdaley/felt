@@ -27,6 +27,7 @@ var (
 	editTitle    string
 	editDue      string
 	editDeps     []string
+	editBody     string
 )
 
 var editCmd = &cobra.Command{
@@ -57,7 +58,8 @@ Examples:
 			cmd.Flags().Changed("kind") ||
 			cmd.Flags().Changed("title") ||
 			cmd.Flags().Changed("due") ||
-			cmd.Flags().Changed("depends-on")
+			cmd.Flags().Changed("depends-on") ||
+			cmd.Flags().Changed("body")
 
 		if !hasFlags {
 			// No flags: open in editor
@@ -84,6 +86,9 @@ Examples:
 		}
 		if cmd.Flags().Changed("title") {
 			f.Title = editTitle
+		}
+		if cmd.Flags().Changed("body") {
+			f.Body = editBody
 		}
 		if cmd.Flags().Changed("due") {
 			if editDue == "" {
@@ -399,6 +404,7 @@ func init() {
 	editCmd.Flags().IntVarP(&editPriority, "priority", "p", 2, "Set priority (0-4, lower=more urgent)")
 	editCmd.Flags().StringVarP(&editKind, "kind", "k", "", "Set kind (task, spec, thread, etc)")
 	editCmd.Flags().StringVarP(&editTitle, "title", "t", "", "Set title")
+	editCmd.Flags().StringVarP(&editBody, "body", "b", "", "Set body text")
 	editCmd.Flags().StringVarP(&editDue, "due", "D", "", "Set due date (YYYY-MM-DD, empty to clear)")
 	editCmd.Flags().StringArrayVarP(&editDeps, "depends-on", "a", nil, "Add dependency (repeatable)")
 

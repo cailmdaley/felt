@@ -20,9 +20,8 @@ var setupClaudeCmd = &cobra.Command{
 	Short: "Setup Claude Code integration",
 	Long: `Install felt hooks into Claude Code settings.
 
-Adds two hooks:
+Adds:
   - SessionStart: felt hook session (shows active/ready fibers)
-  - PostToolUse (TodoWrite): felt hook sync (syncs todos to fibers)
 
 Use --uninstall to remove the hooks.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -83,13 +82,6 @@ func installClaudeHooks() error {
 		fmt.Println("· SessionStart hook already installed")
 	}
 
-	// Add PostToolUse hook for TodoWrite
-	if addHook(hooks, "PostToolUse", "TodoWrite", "felt hook sync") {
-		fmt.Println("✓ Added PostToolUse hook: felt hook sync (matcher: TodoWrite)")
-	} else {
-		fmt.Println("· PostToolUse (TodoWrite) hook already installed")
-	}
-
 	// Write settings back
 	data, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
@@ -134,10 +126,6 @@ func uninstallClaudeHooks() error {
 	removed := false
 	if removeHook(hooks, "SessionStart", "felt hook session") {
 		fmt.Println("✓ Removed SessionStart hook")
-		removed = true
-	}
-	if removeHook(hooks, "PostToolUse", "felt hook sync") {
-		fmt.Println("✓ Removed PostToolUse (TodoWrite) hook")
 		removed = true
 	}
 

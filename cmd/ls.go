@@ -19,7 +19,9 @@ var (
 var lsCmd = &cobra.Command{
 	Use:   "ls",
 	Short: "List felts",
-	Long:  `Lists all felts, optionally filtered by status or kind.`,
+	Long: `Lists felts, showing open and active by default.
+
+Use -s to filter: open, active, closed, or all.`,
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		root, err := felt.FindProjectRoot()
@@ -36,7 +38,13 @@ var lsCmd = &cobra.Command{
 		// Filter
 		var filtered []*felt.Felt
 		for _, f := range felts {
-			if lsStatus != "" && f.Status != lsStatus {
+			// Status filter: default to open+active, "all" shows everything
+			if lsStatus == "" {
+				// Default: show open and active only
+				if f.Status != felt.StatusOpen && f.Status != felt.StatusActive {
+					continue
+				}
+			} else if lsStatus != "all" && f.Status != lsStatus {
 				continue
 			}
 			if lsKind != "" && f.Kind != lsKind {
@@ -133,7 +141,7 @@ func formatFeltTwoLine(f *felt.Felt) string {
 
 func init() {
 	rootCmd.AddCommand(lsCmd)
-	lsCmd.Flags().StringVarP(&lsStatus, "status", "s", "", "Filter by status (open, active, closed)")
+	lsCmd.Flags().StringVarP(&lsStatus, "status", "s", "", "Filter by status (open, active, closed, all)")
 	lsCmd.Flags().StringVarP(&lsKind, "kind", "k", "", "Filter by kind")
 	lsCmd.Flags().StringArrayVarP(&lsTags, "tag", "t", nil, "Filter by tag (repeatable, AND logic)")
 }

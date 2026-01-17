@@ -9,7 +9,7 @@ import (
 )
 
 var (
-	addDesc     string
+	addBody     string
 	addKind     string
 	addPriority int
 	addDeps     []string
@@ -45,8 +45,8 @@ var addCmd = &cobra.Command{
 		}
 
 		// Apply flags
-		if addDesc != "" {
-			f.Body = addDesc
+		if addBody != "" {
+			f.Body = addBody
 		}
 		if addKind != "" {
 			f.Kind = addKind
@@ -108,7 +108,7 @@ var addCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(addCmd)
-	addCmd.Flags().StringVarP(&addDesc, "description", "d", "", "Description/body text")
+	addCmd.Flags().StringVarP(&addBody, "body", "b", "", "Body text")
 	addCmd.Flags().StringVarP(&addKind, "kind", "k", "", "Kind (task, spec, thread, etc)")
 	addCmd.Flags().IntVarP(&addPriority, "priority", "p", 2, "Priority (0-4, lower=more urgent)")
 	addCmd.Flags().StringArrayVarP(&addDeps, "depends-on", "a", nil, "Dependency ID (repeatable)")
@@ -122,7 +122,7 @@ func init() {
 	rootCmd.Args = cobra.ArbitraryArgs
 
 	// Copy add command flags to root so "felt <title> -a dep" works
-	rootCmd.Flags().StringVarP(&addDesc, "description", "d", "", "Description/body text")
+	rootCmd.Flags().StringVarP(&addBody, "body", "b", "", "Body text")
 	rootCmd.Flags().StringVarP(&addKind, "kind", "k", "", "Kind (task, spec, thread, etc)")
 	rootCmd.Flags().IntVarP(&addPriority, "priority", "p", 2, "Priority (0-4, lower=more urgent)")
 	rootCmd.Flags().StringArrayVarP(&addDeps, "depends-on", "a", nil, "Dependency ID (repeatable)")

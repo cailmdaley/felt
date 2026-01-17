@@ -56,4 +56,4 @@ Add to `~/.claude/settings.json`:
 
 **`felt hook session`** — compact context for session start (active + ready fibers, core rules).
 
-**`felt prime`** — full context recovery after compaction/clear (active with bodies, ready with descriptions, recently closed).
+**`felt prime`** — full context recovery after compaction/clear (active with bodies, ready with bodies, recently closed).
