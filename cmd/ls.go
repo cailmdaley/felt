@@ -13,6 +13,8 @@ var (
 	lsStatus   string
 	lsKind     string
 	lsTags     []string
+	lsRecent   int
+	lsBody     bool
 	readyTags  []string
 )
 
@@ -66,16 +68,42 @@ Use -s to filter: open, active, closed, or all.`,
 			filtered = append(filtered, f)
 		}
 
-		// Sort by priority, then creation time
-		sort.Slice(filtered, func(i, j int) bool {
-			if filtered[i].Priority != filtered[j].Priority {
-				return filtered[i].Priority < filtered[j].Priority
+		// Sort: --recent sorts by recency, otherwise by priority then creation
+		if lsRecent > 0 {
+			// Sort by most recent activity (closed-at for closed, created-at otherwise)
+			sort.Slice(filtered, func(i, j int) bool {
+				ti := filtered[i].CreatedAt
+				if filtered[i].ClosedAt != nil {
+					ti = *filtered[i].ClosedAt
+				}
+				tj := filtered[j].CreatedAt
+				if filtered[j].ClosedAt != nil {
+					tj = *filtered[j].ClosedAt
+				}
+				return ti.After(tj) // Most recent first
+			})
+			// Limit to N
+			if len(filtered) > lsRecent {
+				filtered = filtered[:lsRecent]
 			}
-			return filtered[i].CreatedAt.Before(filtered[j].CreatedAt)
-		})
+		} else {
+			// Default: sort by priority, then creation time
+			sort.Slice(filtered, func(i, j int) bool {
+				if filtered[i].Priority != filtered[j].Priority {
+					return filtered[i].Priority < filtered[j].Priority
+				}
+				return filtered[i].CreatedAt.Before(filtered[j].CreatedAt)
+			})
+		}
 
 		// Output
 		if jsonOutput {
+			// If --body flag not set, clear body field to exclude from JSON
+			if !lsBody {
+				for _, f := range filtered {
+					f.Body = ""
+				}
+			}
 			return outputJSON(filtered)
 		}
 
@@ -144,6 +172,8 @@ func init() {
 	lsCmd.Flags().StringVarP(&lsStatus, "status", "s", "", "Filter by status (open, active, closed, all)")
 	lsCmd.Flags().StringVarP(&lsKind, "kind", "k", "", "Filter by kind")
 	lsCmd.Flags().StringArrayVarP(&lsTags, "tag", "t", nil, "Filter by tag (repeatable, AND logic)")
+	lsCmd.Flags().IntVarP(&lsRecent, "recent", "r", 0, "Show N most recent (by closed-at or created-at)")
+	lsCmd.Flags().BoolVar(&lsBody, "body", false, "Include body field in JSON output")
 }
 
 // ready command - open felts with all deps closed
