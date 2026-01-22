@@ -8,15 +8,12 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var (
-	offReason  string
-	onReopen   bool
-)
+var offReason string
 
 var onCmd = &cobra.Command{
 	Use:   "on <id>",
 	Short: "Mark a felt as active",
-	Long:  `Marks a felt as currently being worked on. Use --reopen to reactivate a closed felt.`,
+	Long:  `Marks a fiber as active. Reopens if closed.`,
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		root, err := felt.FindProjectRoot()
@@ -31,13 +28,9 @@ var onCmd = &cobra.Command{
 		}
 
 		wasClosed := f.IsClosed()
-		if wasClosed && !onReopen {
-			return fmt.Errorf("cannot activate closed felt %s (use --reopen to force)", f.ID)
-		}
-
 		f.Status = felt.StatusActive
 		// Clear closure metadata when reopening
-		if onReopen && wasClosed {
+		if wasClosed {
 			f.ClosedAt = nil
 			f.CloseReason = ""
 		}
@@ -67,8 +60,16 @@ var offCmd = &cobra.Command{
 			return err
 		}
 
+		// If already closed, update reason if provided, otherwise no-op
 		if f.IsClosed() {
-			return fmt.Errorf("felt %s is already closed", f.ID)
+			if offReason != "" {
+				f.CloseReason = offReason
+				if err := storage.Write(f); err != nil {
+					return err
+				}
+			}
+			fmt.Printf("● %s  %s\n", f.ID, f.Title)
+			return nil
 		}
 
 		now := time.Now()
@@ -131,6 +132,5 @@ func init() {
 	rootCmd.AddCommand(offCmd)
 	rootCmd.AddCommand(rmCmd)
 
-	onCmd.Flags().BoolVar(&onReopen, "reopen", false, "Reopen a closed felt")
 	offCmd.Flags().StringVarP(&offReason, "reason", "r", "", "Reason for closing")
 }
