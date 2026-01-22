@@ -56,7 +56,7 @@ felt ls --status closed    # what's been done
 felt find "JWT"            # search all felts
 ```
 
-**Reopening.** If circumstances change: `felt on <id> --reopen`. This clears the close reason and timestamp.
+**Reopening.** If circumstances change: `felt on <id>`. This clears the close reason and timestamp.
 
 ### Tags
 
@@ -111,8 +111,7 @@ felt show ac6b                    # even shorter
 felt init                         # create .felt/
 felt add <title>                  # create felt
 felt <title>                      # shorthand for add (no flags)
-felt on <id>                      # mark active
-felt on <id> --reopen             # reopen closed felt
+felt on <id>                      # mark active (reopens if closed)
 felt off <id> -r "reason"         # close with documentation
 felt rm <id>                      # delete (fails if other felts depend on it)
 ```
