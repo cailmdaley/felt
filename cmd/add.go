@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"fmt"
+	"io"
+	"os"
 	"time"
 
 	"github.com/cailmdaley/felt/internal/felt"
@@ -44,9 +46,14 @@ var addCmd = &cobra.Command{
 			f.AddTag(tag)
 		}
 
-		// Apply flags
+		// Apply flags (body from -b flag or stdin)
 		if addBody != "" {
 			f.Body = addBody
+		} else if stat, _ := os.Stdin.Stat(); (stat.Mode() & os.ModeCharDevice) == 0 {
+			// stdin has data (piped or redirected)
+			if data, err := io.ReadAll(os.Stdin); err == nil && len(data) > 0 {
+				f.Body = string(data)
+			}
 		}
 		if addKind != "" {
 			f.Kind = addKind
