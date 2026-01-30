@@ -17,14 +17,14 @@ func TestMinimalOutput(t *testing.T) {
 		t.Error("missing header")
 	}
 
-	// Check context recovery hint
-	if !strings.Contains(output, "Context Recovery") {
-		t.Error("missing context recovery hint")
-	}
-
 	// Check no repository message
 	if !strings.Contains(output, "No felt repository") {
 		t.Error("missing no repository message")
+	}
+
+	// Check CLI reference
+	if !strings.Contains(output, "## CLI") {
+		t.Error("missing CLI reference")
 	}
 
 	// Check core rules
@@ -35,6 +35,7 @@ func TestMinimalOutput(t *testing.T) {
 
 func TestFormatSessionOutput(t *testing.T) {
 	now := time.Now()
+	closedTime := now.Add(-time.Hour)
 
 	// Create test felts
 	activeFelt := &felt.Felt{
@@ -56,12 +57,14 @@ func TestFormatSessionOutput(t *testing.T) {
 	}
 
 	closedFelt := &felt.Felt{
-		ID:        "closed-task-abcdef12",
-		Title:     "Closed task",
-		Status:    felt.StatusClosed,
-		Kind:      felt.DefaultKind,
-		Priority:  2,
-		CreatedAt: now,
+		ID:          "closed-task-abcdef12",
+		Title:       "Closed task",
+		Status:      felt.StatusClosed,
+		Kind:        felt.DefaultKind,
+		Priority:    2,
+		CreatedAt:   now.Add(-2 * time.Hour),
+		ClosedAt:    &closedTime,
+		CloseReason: "Done with good results",
 	}
 
 	felts := []*felt.Felt{activeFelt, readyFelt, closedFelt}
@@ -83,16 +86,22 @@ func TestFormatSessionOutput(t *testing.T) {
 	}
 
 	// Check ready section
-	if !strings.Contains(output, "## Ready Fibers (unblocked)") {
+	if !strings.Contains(output, "## Ready Fibers") {
 		t.Error("missing ready fibers section")
 	}
 	if !strings.Contains(output, "○ ready-task-87654321\n    Ready task") {
 		t.Error("missing ready task entry")
 	}
 
-	// Closed task should not appear
-	if strings.Contains(output, "closed-task-abcdef12") {
-		t.Error("closed task should not appear in output")
+	// Check recently closed section
+	if !strings.Contains(output, "## Recently Closed") {
+		t.Error("missing recently closed section")
+	}
+	if !strings.Contains(output, "● closed-task-abcdef12") {
+		t.Error("missing closed task in recently closed")
+	}
+	if !strings.Contains(output, "→ Done with good results") {
+		t.Error("missing close reason")
 	}
 
 	// Check core rules
@@ -188,8 +197,7 @@ func TestFormatSessionOutput_BlockedReady(t *testing.T) {
 	}
 
 	// Blocked task should NOT appear in ready (has open dep)
-	// Count occurrences - blocked should not be in ready section
-	readySection := strings.Split(output, "## Core Rules")[0]
+	readySection := strings.Split(output, "## CLI")[0]
 	if strings.Contains(readySection, "blocked-task-87654321") {
 		t.Error("blocked task should not appear in ready section")
 	}
@@ -197,6 +205,7 @@ func TestFormatSessionOutput_BlockedReady(t *testing.T) {
 
 func TestFormatSessionOutput_UnblockedByClosedDep(t *testing.T) {
 	now := time.Now()
+	closedTime := now.Add(-time.Hour)
 
 	// Create a closed dependency - fibers depending on it should be ready
 	closedDepFelt := &felt.Felt{
@@ -205,7 +214,8 @@ func TestFormatSessionOutput_UnblockedByClosedDep(t *testing.T) {
 		Status:    felt.StatusClosed,
 		Kind:      felt.DefaultKind,
 		Priority:  2,
-		CreatedAt: now,
+		CreatedAt: now.Add(-2 * time.Hour),
+		ClosedAt:  &closedTime,
 	}
 
 	// This fiber depends on the closed dep, so it should be ready
@@ -225,16 +235,19 @@ func TestFormatSessionOutput_UnblockedByClosedDep(t *testing.T) {
 	output := formatSessionOutput(felts, g)
 
 	// The unblocked task should appear in ready section
-	if !strings.Contains(output, "## Ready Fibers (unblocked)") {
+	if !strings.Contains(output, "## Ready Fibers") {
 		t.Error("missing ready fibers section")
 	}
 	if !strings.Contains(output, "unblocked-task-87654321") {
 		t.Error("fiber with closed dependency should appear in ready section")
 	}
 
-	// The closed dependency should NOT appear anywhere in the output
-	if strings.Contains(output, "closed-dep-12345678") {
-		t.Error("closed fiber should not appear in hook session output")
+	// The closed dependency should appear in recently closed
+	if !strings.Contains(output, "## Recently Closed") {
+		t.Error("missing recently closed section")
+	}
+	if !strings.Contains(output, "closed-dep-12345678") {
+		t.Error("closed fiber should appear in recently closed")
 	}
 }
 
@@ -255,7 +268,7 @@ func TestFormatSessionOutput_KindLabels(t *testing.T) {
 		ID:        "design-api-87654321",
 		Title:     "Design REST API",
 		Status:    felt.StatusOpen,
-		Kind:      "decision", // non-default - should show [decision]
+		Kind:      "decision", // non-default - should show (decision)
 		Priority:  2,
 		CreatedAt: now,
 	}
@@ -264,7 +277,7 @@ func TestFormatSessionOutput_KindLabels(t *testing.T) {
 		ID:        "research-lib-abcdef12",
 		Title:     "Which library?",
 		Status:    felt.StatusOpen,
-		Kind:      "question", // non-default - should show [question]
+		Kind:      "question", // non-default - should show (question)
 		Priority:  2,
 		CreatedAt: now,
 	}
@@ -275,7 +288,7 @@ func TestFormatSessionOutput_KindLabels(t *testing.T) {
 	output := formatSessionOutput(felts, g)
 
 	// Task (default kind) should NOT have a kind label
-	if strings.Contains(output, "[task]") {
+	if strings.Contains(output, "(task)") {
 		t.Error("default 'task' kind should not show label")
 	}
 
@@ -339,176 +352,7 @@ func TestFormatFiberEntry(t *testing.T) {
 	}
 }
 
-func TestFormatPrimeOutput(t *testing.T) {
-	now := time.Now()
-
-	activeFelt := &felt.Felt{
-		ID:        "active-task-12345678",
-		Title:     "Active task",
-		Status:    felt.StatusActive,
-		Kind:      felt.DefaultKind,
-		Priority:  2,
-		Body:      "This is the body of the active task.",
-		CreatedAt: now,
-	}
-
-	readyFelt := &felt.Felt{
-		ID:        "ready-task-87654321",
-		Title:     "Ready task",
-		Status:    felt.StatusOpen,
-		Kind:      "decision",
-		Priority:  2,
-		Body:      "Decision body here.",
-		CreatedAt: now,
-	}
-
-	felts := []*felt.Felt{activeFelt, readyFelt}
-	g := felt.BuildGraph(felts)
-
-	output := formatPrimeOutput(felts, g)
-
-	// Check header
-	if !strings.Contains(output, "# Felt Context Recovery") {
-		t.Error("missing header")
-	}
-
-	// Check active section with details
-	if !strings.Contains(output, "## Active Fibers") {
-		t.Error("missing active fibers section")
-	}
-	if !strings.Contains(output, "### ◐ Active task") {
-		t.Error("missing active task header")
-	}
-	if !strings.Contains(output, "ID: `active-task-12345678`") {
-		t.Error("missing active task ID")
-	}
-	if !strings.Contains(output, "This is the body") {
-		t.Error("missing active task body")
-	}
-
-	// Check ready section with details
-	if !strings.Contains(output, "## Ready Fibers") {
-		t.Error("missing ready fibers section")
-	}
-	if !strings.Contains(output, "### ○ Ready task [decision]") {
-		t.Error("missing ready task header with kind")
-	}
-	if !strings.Contains(output, "Decision body here") {
-		t.Error("missing ready task body")
-	}
-}
-
-func TestFormatPrimeOutput_Empty(t *testing.T) {
-	felts := []*felt.Felt{}
-	g := felt.BuildGraph(felts)
-
-	output := formatPrimeOutput(felts, g)
-
-	if !strings.Contains(output, "No active or ready fibers") {
-		t.Error("missing empty state message")
-	}
-}
-
-func TestFormatPrimeOutput_TruncatesLongBody(t *testing.T) {
-	now := time.Now()
-
-	// Create a fiber with a very long body
-	longBody := strings.Repeat("a", 600)
-	activeFelt := &felt.Felt{
-		ID:        "long-body-12345678",
-		Title:     "Long body task",
-		Status:    felt.StatusActive,
-		Kind:      felt.DefaultKind,
-		Priority:  2,
-		Body:      longBody,
-		CreatedAt: now,
-	}
-
-	felts := []*felt.Felt{activeFelt}
-	g := felt.BuildGraph(felts)
-
-	output := formatPrimeOutput(felts, g)
-
-	// Should be truncated with ...
-	if !strings.Contains(output, "...") {
-		t.Error("long body should be truncated with ...")
-	}
-	// Should not contain the full 600 chars
-	if strings.Contains(output, longBody) {
-		t.Error("should not contain full long body")
-	}
-}
-
-func TestFormatFiberDetail(t *testing.T) {
-	f := &felt.Felt{
-		ID:        "test-task-12345678",
-		Title:     "Test task",
-		Status:    felt.StatusActive,
-		Kind:      "spec",
-		DependsOn: []string{"dep-1", "dep-2"},
-		Body:      "Task body content",
-	}
-
-	result := formatFiberDetail(f)
-
-	// Check header with icon and kind
-	if !strings.Contains(result, "### ◐ Test task [spec]") {
-		t.Errorf("missing header with icon and kind, got: %s", result)
-	}
-
-	// Check ID
-	if !strings.Contains(result, "ID: `test-task-12345678`") {
-		t.Error("missing ID")
-	}
-
-	// Check dependencies
-	if !strings.Contains(result, "Depends on: dep-1, dep-2") {
-		t.Error("missing dependencies")
-	}
-
-	// Check body
-	if !strings.Contains(result, "Task body content") {
-		t.Error("missing body")
-	}
-}
-
-func TestFormatPrimeOutput_RecentlyClosed(t *testing.T) {
-	now := time.Now()
-	closedTime := now.Add(-time.Hour)
-
-	closedFelt := &felt.Felt{
-		ID:          "closed-task-12345678",
-		Title:       "Completed work",
-		Status:      felt.StatusClosed,
-		Kind:        felt.DefaultKind,
-		Priority:    2,
-		ClosedAt:    &closedTime,
-		CloseReason: "Task completed successfully with good results",
-		CreatedAt:   now.Add(-2 * time.Hour),
-	}
-
-	felts := []*felt.Felt{closedFelt}
-	g := felt.BuildGraph(felts)
-
-	output := formatPrimeOutput(felts, g)
-
-	// Check recently closed section exists
-	if !strings.Contains(output, "## Recently Closed") {
-		t.Error("missing recently closed section")
-	}
-
-	// Check closed fiber appears with closed icon
-	if !strings.Contains(output, "### ● Completed work") {
-		t.Errorf("missing closed task header, got: %s", output)
-	}
-
-	// Check close reason is shown
-	if !strings.Contains(output, "Closed: Task completed successfully") {
-		t.Error("missing close reason")
-	}
-}
-
-func TestFormatPrimeOutput_LimitsRecentlyClosed(t *testing.T) {
+func TestFormatSessionOutput_LimitsRecentlyClosed(t *testing.T) {
 	now := time.Now()
 
 	// Create 7 closed fibers
@@ -526,7 +370,7 @@ func TestFormatPrimeOutput_LimitsRecentlyClosed(t *testing.T) {
 	}
 
 	g := felt.BuildGraph(felts)
-	output := formatPrimeOutput(felts, g)
+	output := formatSessionOutput(felts, g)
 
 	// Should only show 5 most recent
 	if strings.Contains(output, "closed-5-12345678") {
@@ -545,14 +389,15 @@ func TestFormatPrimeOutput_LimitsRecentlyClosed(t *testing.T) {
 	}
 }
 
-func TestFormatClosedFiberSummary(t *testing.T) {
+func TestFormatClosedEntry(t *testing.T) {
 	now := time.Now()
 
 	tests := []struct {
-		name     string
-		felt     *felt.Felt
-		wantIcon string
-		wantKind bool
+		name       string
+		felt       *felt.Felt
+		wantIcon   string
+		wantKind   bool
+		wantReason bool
 	}{
 		{
 			name: "basic closed with reason",
@@ -560,11 +405,12 @@ func TestFormatClosedFiberSummary(t *testing.T) {
 				ID:          "done-task-12345678",
 				Title:       "Done task",
 				Kind:        felt.DefaultKind,
-				CloseReason: "Completed",
+				CloseReason: "Completed successfully",
 				ClosedAt:    &now,
 			},
-			wantIcon: "●",
-			wantKind: false,
+			wantIcon:   "●",
+			wantKind:   false,
+			wantReason: true,
 		},
 		{
 			name: "closed decision with kind label",
@@ -575,31 +421,71 @@ func TestFormatClosedFiberSummary(t *testing.T) {
 				CloseReason: "Chose option A because of performance",
 				ClosedAt:    &now,
 			},
-			wantIcon: "●",
-			wantKind: true,
+			wantIcon:   "●",
+			wantKind:   true,
+			wantReason: true,
+		},
+		{
+			name: "closed without reason",
+			felt: &felt.Felt{
+				ID:       "no-reason-12345678",
+				Title:    "No reason given",
+				Kind:     felt.DefaultKind,
+				ClosedAt: &now,
+			},
+			wantIcon:   "●",
+			wantKind:   false,
+			wantReason: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := formatClosedFiberSummary(tt.felt)
+			result := formatClosedEntry(tt.felt)
 
 			if !strings.Contains(result, tt.wantIcon) {
 				t.Errorf("missing closed icon, got: %s", result)
 			}
 
-			if tt.wantKind && !strings.Contains(result, "[decision]") {
+			if tt.wantKind && !strings.Contains(result, "(decision)") {
 				t.Errorf("missing kind label, got: %s", result)
 			}
 
-			if !tt.wantKind && strings.Contains(result, "[task]") {
+			if !tt.wantKind && strings.Contains(result, "(task)") {
 				t.Error("default kind should not show label")
 			}
 
-			if tt.felt.CloseReason != "" && !strings.Contains(result, "Closed:") {
-				t.Error("missing close reason prefix")
+			if tt.wantReason && !strings.Contains(result, "→") {
+				t.Error("missing close reason arrow")
+			}
+
+			if !tt.wantReason && strings.Contains(result, "→") {
+				t.Error("should not have close reason arrow when no reason")
 			}
 		})
 	}
 }
 
+func TestFormatClosedEntry_TruncatesLongReason(t *testing.T) {
+	now := time.Now()
+	longReason := strings.Repeat("a", 150)
+
+	f := &felt.Felt{
+		ID:          "long-reason-12345678",
+		Title:       "Long reason task",
+		Kind:        felt.DefaultKind,
+		CloseReason: longReason,
+		ClosedAt:    &now,
+	}
+
+	result := formatClosedEntry(f)
+
+	// Should be truncated with ...
+	if !strings.Contains(result, "...") {
+		t.Error("long reason should be truncated with ...")
+	}
+	// Should not contain the full 150 chars
+	if strings.Contains(result, longReason) {
+		t.Error("should not contain full long reason")
+	}
+}

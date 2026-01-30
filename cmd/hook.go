@@ -215,61 +215,25 @@ func formatClosedEntry(f *felt.Felt) string {
 
 // cliReference returns a concise CLI reference for the session hook.
 func cliReference() string {
-	return `## CLI Reference
-
-### Creating & Managing Fibers
-
-` + "```bash" + `
-felt "Research caching strategies"           # shorthand for felt add
-felt add "Implement cache" -k task -a <dep-id>   # with kind and dependency
-felt add "Choose framework" -k decision -t "[api]"  # with kind and tag
-felt add "Spike: test approach" -r "Didn't work"    # create pre-closed
+	return `## CLI
 ` + "```" + `
-
-### Working on Fibers
-
-` + "```bash" + `
-felt on <id>              # mark active (start working)
-felt comment <id> "tried X, promising"
-felt off <id> -r "Done: implemented Y because Z"  # close with reason
-felt on <id>              # reopen a closed fiber
+felt "title"                    # create fiber
+felt add "title" -k decision    # -k: kind (task|decision|question|spec)
+felt add "title" -a <dep-id>    # -a: depends on (after)
+felt on <id>                    # start working (reopens if closed)
+felt off <id> -r "outcome"      # close with reason
+felt comment <id> "note"        # add comment
+felt ls                         # open/active fibers
+felt ls -s all -k decision      # -s: status, -k: kind filter
+felt show <id>                  # full details
+felt ready                      # fibers with all deps closed
+felt find "query"               # search title/body/reason
+felt link <id> <dep-id>         # add dependency
+felt upstream/downstream <id>   # see connections
+felt edit <id> --title "new"    # replace metadata (title, kind, due, reason)
 ` + "```" + `
-
-### Viewing & Searching
-
-` + "```bash" + `
-felt ls                   # open and active fibers (default)
-felt ls -s all            # all fibers including closed
-felt ls -k decision       # filter by kind
-felt ls -t "[api]"        # filter by tag
-felt ready                # fibers with all dependencies closed
-felt show <id>            # full details with body
-felt find "auth"          # search by title/body/reason
-felt find "error" -s open # search with status filter
-` + "```" + `
-
-### Dependencies & Graph
-
-` + "```bash" + `
-felt link <id> <depends-on-id>     # add dependency
-felt unlink <id> <depends-on-id>   # remove dependency
-felt upstream <id>        # what does this depend on?
-felt downstream <id>      # what depends on this?
-felt tree                 # show full dependency tree
-felt path <from> <to>     # find path between fibers
-` + "```" + `
-
-### Editing & Organizing
-
-` + "```bash" + `
-felt edit <id> --priority 0 --kind spec   # modify properties
-felt edit <id> --depends-on <other-id>    # add dependency
-felt tag <id> "[urgent]"  # add tag
-felt untag <id> "[urgent]" # remove tag
-` + "```" + `
-
-**Kinds**: task (default), decision, question, spec — or any freeform string
-**Statuses**: open (○), active (◐), closed (●)
+Statuses: ○ open, ◐ active, ● closed
+To patch body text (not replace), edit .felt/<id>.md directly.
 
 `
 }
