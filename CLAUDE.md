@@ -19,9 +19,10 @@ docs/          Documentation
 
 Freeform, but conventional:
 - **task** — default, something to do
-- **spec** — design document, reference material
+- **spec** — design document, aspirational (can finalize)
 - **decision** — a choice to make, closes with reasoning
 - **question** — something to answer
+- **doc** — living reference, maintained over time (architecture, how-tos, accumulated understanding)
 
 ## Development
 

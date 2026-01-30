@@ -165,7 +165,7 @@ felt prime                        # full context for session recovery
 
 ```bash
 -b, --body "text"                 # body text
--k, --kind spec                   # kind (task, spec, decision, etc.)
+-k, --kind spec                   # kind (task, spec, decision, question, doc)
 -p, --priority 1                  # 0-4, lower = more urgent
 -a, --depends-on <id>             # dependency (repeatable)
 -D, --due 2024-03-15              # due date

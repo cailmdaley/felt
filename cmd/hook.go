@@ -151,6 +151,7 @@ func formatSessionOutput(felts []*felt.Felt, g *felt.Graph) string {
 	sb.WriteString("- Track **work** that spans sessions, has dependencies, or emerges during work\n")
 	sb.WriteString("- Track **decisions** — what was decided, why, and how decisions depend on each other\n")
 	sb.WriteString("- Closing reason (`-r`) is the documentation: capture the outcome, the reasoning, what was learned\n")
+	sb.WriteString("- **Leave breadcrumbs** — open a fiber when starting work; file bugs and questions for later; close with what happened\n")
 	sb.WriteString("- When in doubt, prefer felt—persistence you don't need is better than lost context\n")
 
 	return sb.String()
@@ -218,7 +219,7 @@ func cliReference() string {
 	return `## CLI
 ` + "```" + `
 felt "title"                    # create fiber
-felt add "title" -k decision    # -k: kind (task|decision|question|spec)
+felt add "title" -k decision    # -k: kind (task|decision|question|spec|doc)
 felt add "title" -a <dep-id>    # -a: depends on (after)
 felt on <id>                    # start working (reopens if closed)
 felt off <id> -r "outcome"      # close with reason
