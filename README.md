@@ -88,7 +88,7 @@ felt ls -t pure-eb                      # filter (AND logic)
 felt ready -t pure-eb                   # filter ready
 ```
 
-Bracketed tags at the start of titles (`[tag]`) are automatically extracted into the tags field. For existing felts, use `felt migrate-tags` to extract bracketed tags from titles (use `--dry-run` to preview).
+Bracketed tags at the start of titles (`[tag]`) are automatically extracted into the tags field.
 
 ### File Format
 
@@ -157,8 +157,6 @@ felt tag <id> <tag>               # add tag
 felt untag <id> <tag>             # remove tag
 felt link <id> <dep-id>           # add dependency
 felt unlink <id> <dep-id>         # remove dependency
-felt migrate-tags                 # extract [tags] from titles
-felt migrate-tags --dry-run       # preview without changes
 ```
 
 ### Graph
@@ -198,5 +196,5 @@ felt prime                        # full context for session recovery
 
 ## Further Reading
 
-- [Graph Operations](graph.md) — traversal, visualization, integrity
-- [Workflows](workflows.md) — patterns, Claude Code integration
+- [Graph Operations](docs/graph.md) — traversal, visualization, integrity
+- [Workflows](docs/workflows.md) — patterns, Claude Code integration
