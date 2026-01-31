@@ -15,3 +15,6 @@ dist/
 .vscode/
 *.swp
 .osgrep
+
+# Generated assets
+nanobanana-output/

@@ -1,3 +1,12 @@
+<p align="center">
+  <img src=".github/banner.png" alt="felt" width="600">
+</p>
+
+<p align="center">
+  <a href="https://github.com/cailmdaley/felt/actions/workflows/ci.yml"><img src="https://github.com/cailmdaley/felt/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
+</p>
+
 # felt
 
 DAG-native task tracker. Markdown files with dependencies.
@@ -10,9 +19,17 @@ Felts are markdown files. Human-readable, version-controllable, greppable. No da
 
 ## Install
 
+**Homebrew** (macOS/Linux):
+```bash
+brew install cailmdaley/tap/felt
+```
+
+**Go**:
 ```bash
 go install github.com/cailmdaley/felt@latest
 ```
+
+**Binaries**: Download from [Releases](https://github.com/cailmdaley/felt/releases).
 
 ## Quick Start
 
