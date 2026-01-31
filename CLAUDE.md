@@ -31,3 +31,12 @@ go build .        # build
 go test ./...     # test
 ./felt ls         # run locally
 ```
+
+## Releasing
+
+```bash
+git tag -a v0.x.0 -m "Release description"
+git push origin v0.x.0
+```
+
+Release workflow builds binaries for darwin/linux x amd64/arm64. Homebrew formula must be manually pushed to `cailmdaley/homebrew-tap` (goreleaser can't auto-push without PAT secret).
