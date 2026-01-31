@@ -10,6 +10,11 @@ import (
 
 var jsonOutput bool
 
+// SetVersionInfo sets version info from main (populated via ldflags)
+func SetVersionInfo(version, commit, date string) {
+	rootCmd.Version = version
+}
+
 var rootCmd = &cobra.Command{
 	Use:   "felt",
 	Short: "DAG-native markdown task tracker",

@@ -1,6 +1,10 @@
 # Binaries (root only, not internal/felt/)
 /felt
+/felt-linux
 *.exe
+
+# goreleaser
+dist/
 
 # Local state (these are user-specific)
 .felt/
