@@ -218,20 +218,16 @@ func formatClosedEntry(f *felt.Felt) string {
 func cliReference() string {
 	return `## CLI
 ` + "```" + `
-felt "title"                    # create fiber
-felt add "title" -k decision    # -k: kind (task|decision|question|spec|doc)
-felt add "title" -a <dep-id>    # -a: depends on (after)
+felt add "title" -k decision -a <dep-id> -t <tag>   # create fiber (-k: kind, -a: depends on, -t: tag)
 felt on <id>                    # start working (reopens if closed)
 felt off <id> -r "outcome"      # close with reason
 felt comment <id> "note"        # add comment
 felt ls                         # open/active fibers
 felt ls -s all -k decision      # -s: status, -k: kind filter
 felt show <id>                  # full details
-felt ready                      # fibers with all deps closed
 felt find "query"               # search title/body/reason
-felt link <id> <dep-id>         # add dependency
-felt upstream/downstream <id>   # see connections
 felt edit <id> --title "new"    # replace metadata (title, kind, due, reason)
+Also: link, unlink, tag, untag, upstream, downstream, tree, ready, rm
 ` + "```" + `
 Statuses: ○ open, ◐ active, ● closed
 To patch body text (not replace), edit .felt/<id>.md directly.
