@@ -213,21 +213,16 @@ func formatRecentEntry(f *felt.Felt) string {
 func cliReference() string {
 	return `## CLI
 ` + "```" + `
-felt "title"                    # create fiber (no status by default)
-felt add "title" -s open        # -s: opt into tracking (open, active, closed)
-felt add "title" -o "answer"    # -o: set outcome
-felt add "title" -a <dep-id>    # -a: depends on (after)
+felt "title"                    # create fiber
+felt add "title" -s open -t tag -a <dep-id> -o "outcome"
 felt edit <id> -s active        # enter tracking / mark active
 felt edit <id> -s closed -o "outcome"  # close with outcome
-felt edit <id> --title "new"    # replace metadata (title, due, status, outcome)
 felt comment <id> "note"        # add comment
+felt show <id>                  # full details (-d: title, compact, summary)
 felt ls                         # tracked fibers (open/active)
 felt ls --all                   # all fibers including untracked
-felt show <id>                  # full details (-d: title, compact, summary)
-felt ready                      # fibers with all deps closed
 felt find "query"               # search title/body/outcome
-felt link <id> <dep-id>         # add dependency
-felt upstream/downstream <id>   # see connections (-d: depth per item)
+Also: link, unlink, tag, untag, upstream, downstream, tree, ready, rm
 ` + "```" + `
 Statuses: · untracked, ○ open, ◐ active, ● closed
 To patch body text (not replace), edit .felt/<id>.md directly.
