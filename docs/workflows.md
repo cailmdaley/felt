@@ -18,16 +18,16 @@ felt add "Integration" -a backend-api -a frontend-ui  # waits for both
 
 **Spec-driven:**
 ```bash
-felt add "User auth spec" -k spec
+felt add "User auth spec" -t spec
 felt add "Implement auth" -a user-auth-spec
 ```
 
 ## Decision Records
 
-The close reason is the record:
+The outcome is the record:
 
 ```bash
-felt off auth-design -r "JWT with refresh tokens.
+felt edit auth-design -s closed -o "JWT with refresh tokens.
 Considered session cookies but need mobile support."
 ```
 
@@ -56,4 +56,4 @@ Add to `~/.claude/settings.json`:
 
 **`felt hook session`** — compact context for session start (active + ready fibers, core rules).
 
-**`felt prime`** — full context recovery after compaction/clear (active with bodies, ready with bodies, recently closed).
+**`felt prime`** — alias for `felt hook session`.

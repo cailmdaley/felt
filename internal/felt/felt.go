@@ -95,17 +95,18 @@ func (deps Dependencies) LabelFor(id string) string {
 
 // Felt represents a single fiber in the DAG.
 type Felt struct {
-	ID        string       `yaml:"-" json:"id"`
-	Title     string       `yaml:"title" json:"title"`
-	Status    string       `yaml:"status,omitempty" json:"status,omitempty"`
-	Tags      []string     `yaml:"tags,omitempty" json:"tags,omitempty"`
-	Priority  int          `yaml:"priority,omitempty" json:"priority,omitempty"`
-	DependsOn Dependencies `yaml:"depends-on,omitempty" json:"depends_on,omitempty"`
-	CreatedAt time.Time    `yaml:"created-at" json:"created_at"`
-	ClosedAt  *time.Time   `yaml:"closed-at,omitempty" json:"closed_at,omitempty"`
-	Outcome   string       `yaml:"outcome,omitempty" json:"outcome,omitempty"`
-	Due       *time.Time   `yaml:"due,omitempty" json:"due,omitempty"`
-	Body      string       `yaml:"-" json:"body,omitempty"`
+	ID         string       `yaml:"-" json:"id"`
+	Title      string       `yaml:"title" json:"title"`
+	Status     string       `yaml:"status,omitempty" json:"status,omitempty"`
+	Tags       []string     `yaml:"tags,omitempty" json:"tags,omitempty"`
+	Priority   int          `yaml:"priority,omitempty" json:"priority,omitempty"`
+	DependsOn  Dependencies `yaml:"depends-on,omitempty" json:"depends_on,omitempty"`
+	CreatedAt  time.Time    `yaml:"created-at" json:"created_at"`
+	ClosedAt   *time.Time   `yaml:"closed-at,omitempty" json:"closed_at,omitempty"`
+	Outcome    string       `yaml:"outcome,omitempty" json:"outcome,omitempty"`
+	Due        *time.Time   `yaml:"due,omitempty" json:"due,omitempty"`
+	Body       string       `yaml:"-" json:"body,omitempty"`
+	ModifiedAt time.Time    `yaml:"-" json:"modified_at,omitempty"` // populated from file stat
 }
 
 // HasStatus returns true if the fiber has opt-in status tracking.
@@ -304,9 +305,8 @@ func Parse(id string, content []byte) (*Felt, error) {
 	}
 
 	// Backward compat: close-reason → outcome
-	if pf.Outcome != "" {
-		f.Outcome = pf.Outcome
-	} else if pf.CloseReason != "" {
+	f.Outcome = pf.Outcome
+	if f.Outcome == "" {
 		f.Outcome = pf.CloseReason
 	}
 
@@ -409,8 +409,7 @@ func (f *Felt) Marshal() ([]byte, error) {
 // MatchesID returns true if the given query matches this felt's ID.
 // Supports prefix matching and hex suffix matching.
 func (f *Felt) MatchesID(query string) bool {
-	// Exact or prefix match
-	if f.ID == query || strings.HasPrefix(f.ID, query) {
+	if strings.HasPrefix(f.ID, query) {
 		return true
 	}
 

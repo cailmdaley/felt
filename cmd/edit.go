@@ -23,6 +23,7 @@ var (
 var (
 	editPriority int
 	editTitle    string
+	editStatus   string
 	editDue      string
 	editDeps     []string
 	editBody     string
@@ -39,7 +40,7 @@ var editCmd = &cobra.Command{
 
 Examples:
   felt edit abc123 --priority 1
-  felt edit abc123 --kind decision --title "New title"
+  felt edit abc123 --title "New title" -s active
   felt edit abc123 --depends-on other-fiber-id
   felt edit abc123                  # opens in $EDITOR`,
 	Args: cobra.ExactArgs(1),
@@ -58,6 +59,7 @@ Examples:
 		// Check if any modification flags were provided
 		hasFlags := cmd.Flags().Changed("priority") ||
 			cmd.Flags().Changed("title") ||
+			cmd.Flags().Changed("status") ||
 			cmd.Flags().Changed("due") ||
 			cmd.Flags().Changed("depends-on") ||
 			cmd.Flags().Changed("body") ||
@@ -85,6 +87,28 @@ Examples:
 		}
 		if cmd.Flags().Changed("title") {
 			f.Title = editTitle
+		}
+		if cmd.Flags().Changed("status") {
+			switch editStatus {
+			case felt.StatusOpen, felt.StatusActive:
+				// Reopen if closed
+				if f.IsClosed() {
+					f.ClosedAt = nil
+				}
+				f.Status = editStatus
+			case felt.StatusClosed:
+				if !f.IsClosed() {
+					now := time.Now()
+					f.Status = felt.StatusClosed
+					f.ClosedAt = &now
+				}
+			case "":
+				// Clear status (exit tracking)
+				f.Status = ""
+				f.ClosedAt = nil
+			default:
+				return fmt.Errorf("invalid status %q (valid: open, active, closed, or empty to clear)", editStatus)
+			}
 		}
 		if cmd.Flags().Changed("body") {
 			f.Body = editBody
@@ -281,7 +305,7 @@ var unlinkCmd = &cobra.Command{
 var findCmd = &cobra.Command{
 	Use:   "find <query>",
 	Short: "Search felts",
-	Long: `Searches felts by title, body, and close reason.
+	Long: `Searches felts by title, body, and outcome.
 
 Flags:
   --exact/-e    Only match felts where title equals query exactly
@@ -396,6 +420,7 @@ func init() {
 	// Edit command flags
 	editCmd.Flags().IntVarP(&editPriority, "priority", "p", 2, "Set priority (0-4, lower=more urgent)")
 	editCmd.Flags().StringVarP(&editTitle, "title", "t", "", "Set title")
+	editCmd.Flags().StringVarP(&editStatus, "status", "s", "", "Set status (open, active, closed)")
 	editCmd.Flags().StringVarP(&editBody, "body", "b", "", "Set body text")
 	editCmd.Flags().StringVarP(&editOutcome, "outcome", "o", "", "Set outcome")
 	editCmd.Flags().StringVarP(&editDue, "due", "D", "", "Set due date (YYYY-MM-DD, empty to clear)")

@@ -2,23 +2,39 @@ package cmd
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/cailmdaley/felt/internal/felt"
 	"github.com/spf13/cobra"
 )
 
-var showBodyOnly bool
+var (
+	showBodyOnly bool
+	showDepth    string
+)
 
 var showCmd = &cobra.Command{
 	Use:   "show <id>",
 	Short: "Show details of a felt",
-	Long:  `Displays the full details of a felt including its body.`,
-	Args:  cobra.ExactArgs(1),
+	Long: `Displays details of a felt at the requested depth level.
+
+Depth levels control progressive disclosure:
+  title    Title and tags only
+  compact  Structured overview: metadata, outcome, dependency IDs
+  summary  Compact + lede paragraph + dependency titles
+  full     Everything (default)`,
+	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		root, err := felt.FindProjectRoot()
 		if err != nil {
 			return fmt.Errorf("not in a felt repository")
+		}
+
+		depth := showDepth
+		if depth == "" {
+			depth = DepthFull
+		}
+		if err := validateDepth(depth); err != nil {
+			return err
 		}
 
 		storage := felt.NewStorage(root)
@@ -44,89 +60,13 @@ var showCmd = &cobra.Command{
 		}
 		graph := felt.BuildGraph(felts)
 
-		// Header
-		fmt.Printf("ID:       %s\n", f.ID)
-		fmt.Printf("Title:    %s\n", f.Title)
-		if f.HasStatus() {
-			fmt.Printf("Status:   %s\n", f.Status)
-		}
-		if len(f.Tags) > 0 {
-			fmt.Printf("Tags:     %s\n", strings.Join(f.Tags, ", "))
-		}
-		fmt.Printf("Priority: %d\n", f.Priority)
-
-		// Dependencies (upstream - what this depends on)
-		if len(f.DependsOn) > 0 {
-			fmt.Printf("Upstream: %s\n", formatDeps(graph, f.DependsOn))
-		}
-
-		// Dependents (downstream - what depends on this)
-		downstream := graph.Downstream[f.ID]
-		if len(downstream) > 0 {
-			fmt.Printf("Downstream: %s\n", formatDeps(graph, downstream))
-		}
-
-		if f.Due != nil {
-			fmt.Printf("Due:      %s\n", f.Due.Format("2006-01-02"))
-		}
-		fmt.Printf("Created:  %s\n", f.CreatedAt.Format("2006-01-02T15:04:05-07:00"))
-		if f.ClosedAt != nil {
-			fmt.Printf("Closed:   %s\n", f.ClosedAt.Format("2006-01-02T15:04:05-07:00"))
-		}
-		if f.Outcome != "" {
-			fmt.Printf("Outcome:  %s\n", f.Outcome)
-		}
-
-		// Body
-		if f.Body != "" {
-			fmt.Printf("\n%s\n", f.Body)
-		}
-
+		fmt.Print(renderFelt(f, graph, depth))
 		return nil
 	},
-}
-
-// formatDeps formats dependencies, showing labels and titles for context
-func formatDeps(g *felt.Graph, deps felt.Dependencies) string {
-	if len(deps) == 0 {
-		return ""
-	}
-	if len(deps) == 1 {
-		d := deps[0]
-		labelPart := ""
-		if d.Label != "" {
-			labelPart = fmt.Sprintf(" [%s]", d.Label)
-		}
-		if f, ok := g.Nodes[d.ID]; ok {
-			return fmt.Sprintf("%s%s (%s)", d.ID, labelPart, truncateTitle(f.Title, 30))
-		}
-		return d.ID + labelPart
-	}
-	// Multiple deps: list on separate lines
-	var lines []string
-	for _, d := range deps {
-		labelPart := ""
-		if d.Label != "" {
-			labelPart = fmt.Sprintf(" [%s]", d.Label)
-		}
-		if f, ok := g.Nodes[d.ID]; ok {
-			lines = append(lines, fmt.Sprintf("\n  - %s%s (%s)", d.ID, labelPart, truncateTitle(f.Title, 30)))
-		} else {
-			lines = append(lines, fmt.Sprintf("\n  - %s%s", d.ID, labelPart))
-		}
-	}
-	return strings.Join(lines, "")
-}
-
-// truncateTitle shortens a title to maxLen chars
-func truncateTitle(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen-1] + "…"
 }
 
 func init() {
 	rootCmd.AddCommand(showCmd)
 	showCmd.Flags().BoolVarP(&showBodyOnly, "body", "b", false, "Output only the body (for piping)")
+	showCmd.Flags().StringVarP(&showDepth, "depth", "d", "", "Detail level (title, compact, summary, full)")
 }

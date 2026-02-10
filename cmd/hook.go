@@ -76,14 +76,11 @@ func formatSessionOutput(felts []*felt.Felt, g *felt.Graph) string {
 
 	sb.WriteString("# Felt Workflow Context\n\n")
 
-	// Collect active and closed fibers
+	// Collect active fibers
 	var active []*felt.Felt
-	var closed []*felt.Felt
 	for _, f := range felts {
 		if f.IsActive() {
 			active = append(active, f)
-		} else if f.IsClosed() {
-			closed = append(closed, f)
 		}
 	}
 
@@ -94,22 +91,6 @@ func formatSessionOutput(felts []*felt.Felt, g *felt.Graph) string {
 		}
 		return active[i].CreatedAt.Before(active[j].CreatedAt)
 	})
-
-	// Sort closed by closed time (most recent first)
-	sort.Slice(closed, func(i, j int) bool {
-		if closed[i].ClosedAt == nil {
-			return false
-		}
-		if closed[j].ClosedAt == nil {
-			return true
-		}
-		return closed[i].ClosedAt.After(*closed[j].ClosedAt)
-	})
-
-	// Take only the 5 most recently closed
-	if len(closed) > 5 {
-		closed = closed[:5]
-	}
 
 	ready := g.Ready()
 
@@ -134,11 +115,32 @@ func formatSessionOutput(felts []*felt.Felt, g *felt.Graph) string {
 		sb.WriteString("*No active or ready fibers.*\n\n")
 	}
 
-	// Recently closed fibers for context
-	if len(closed) > 0 {
-		sb.WriteString("## Recently Closed\n\n")
-		for _, f := range closed {
-			sb.WriteString(formatClosedEntry(f))
+	// Recently touched: 5 most recently modified, excluding active/ready
+	shown := make(map[string]bool, len(active)+len(ready))
+	for _, f := range active {
+		shown[f.ID] = true
+	}
+	for _, f := range ready {
+		shown[f.ID] = true
+	}
+
+	var recent []*felt.Felt
+	for _, f := range felts {
+		if !shown[f.ID] {
+			recent = append(recent, f)
+		}
+	}
+	sort.Slice(recent, func(i, j int) bool {
+		return recent[i].ModifiedAt.After(recent[j].ModifiedAt)
+	})
+	if len(recent) > 5 {
+		recent = recent[:5]
+	}
+
+	if len(recent) > 0 {
+		sb.WriteString("## Recently Touched\n\n")
+		for _, f := range recent {
+			sb.WriteString(formatRecentEntry(f))
 		}
 		sb.WriteString("\n")
 	}
@@ -151,7 +153,7 @@ func formatSessionOutput(felts []*felt.Felt, g *felt.Graph) string {
 	sb.WriteString("- Track **work** that spans sessions, has dependencies, or emerges during work\n")
 	sb.WriteString("- Track **decisions** — what was decided, why, and how decisions depend on each other\n")
 	sb.WriteString("- Outcome (`-o`) is the documentation: capture the conclusion, the reasoning, what was learned\n")
-	sb.WriteString("- **Leave breadcrumbs** — file fibers for decisions, questions, observations; use `felt on` to track active work\n")
+	sb.WriteString("- **Leave breadcrumbs** — file fibers for decisions, questions, observations\n")
 	sb.WriteString("- When in doubt, prefer felt—persistence you don't need is better than lost context\n")
 
 	return sb.String()
@@ -182,26 +184,19 @@ func formatFiberEntry(icon string, f *felt.Felt) string {
 	return line1 + line2
 }
 
-// formatClosedEntry formats a closed fiber for the recently closed section.
-// Same two-line format as formatFiberEntry but includes outcome.
-func formatClosedEntry(f *felt.Felt) string {
-	// Line 1: status + ID
-	line1 := fmt.Sprintf("● %s\n", f.ID)
+// formatRecentEntry formats a recently-touched fiber for the hook.
+// Shows status icon, title with tags, and outcome if present.
+func formatRecentEntry(f *felt.Felt) string {
+	icon := statusIcon(f.Status)
 
-	// Line 2: indented title with tags
-	var meta []string
+	line1 := fmt.Sprintf("%s %s\n", icon, f.ID)
+
+	tagStr := ""
 	if len(f.Tags) > 0 {
-		meta = append(meta, strings.Join(f.Tags, ", "))
+		tagStr = fmt.Sprintf(" (%s)", strings.Join(f.Tags, ", "))
 	}
+	line2 := fmt.Sprintf("    %s%s\n", f.Title, tagStr)
 
-	metaStr := ""
-	if len(meta) > 0 {
-		metaStr = fmt.Sprintf(" (%s)", strings.Join(meta, ", "))
-	}
-
-	line2 := fmt.Sprintf("    %s%s\n", f.Title, metaStr)
-
-	// Line 3: outcome (indented, truncated)
 	line3 := ""
 	if f.Outcome != "" {
 		outcome := f.Outcome
@@ -222,17 +217,17 @@ felt "title"                    # create fiber (no status by default)
 felt add "title" -s open        # -s: opt into tracking (open, active, closed)
 felt add "title" -o "answer"    # -o: set outcome
 felt add "title" -a <dep-id>    # -a: depends on (after)
-felt on <id>                    # start working (enters tracking)
-felt off <id> -o "outcome"      # set outcome (closes if tracked)
+felt edit <id> -s active        # enter tracking / mark active
+felt edit <id> -s closed -o "outcome"  # close with outcome
+felt edit <id> --title "new"    # replace metadata (title, due, status, outcome)
 felt comment <id> "note"        # add comment
 felt ls                         # tracked fibers (open/active)
 felt ls --all                   # all fibers including untracked
-felt show <id>                  # full details
+felt show <id>                  # full details (-d: title, compact, summary)
 felt ready                      # fibers with all deps closed
 felt find "query"               # search title/body/outcome
 felt link <id> <dep-id>         # add dependency
-felt upstream/downstream <id>   # see connections
-felt edit <id> --title "new"    # replace metadata (title, due, outcome)
+felt upstream/downstream <id>   # see connections (-d: depth per item)
 ` + "```" + `
 Statuses: · untracked, ○ open, ◐ active, ● closed
 To patch body text (not replace), edit .felt/<id>.md directly.

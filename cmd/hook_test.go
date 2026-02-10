@@ -55,13 +55,14 @@ func TestFormatSessionOutput(t *testing.T) {
 	}
 
 	closedFelt := &felt.Felt{
-		ID:        "closed-task-abcdef12",
-		Title:     "Closed task",
-		Status:    felt.StatusClosed,
-		Priority:  2,
-		CreatedAt: now.Add(-2 * time.Hour),
-		ClosedAt:  &closedTime,
-		Outcome:   "Done with good results",
+		ID:         "closed-task-abcdef12",
+		Title:      "Closed task",
+		Status:     felt.StatusClosed,
+		Priority:   2,
+		CreatedAt:  now.Add(-2 * time.Hour),
+		ClosedAt:   &closedTime,
+		Outcome:    "Done with good results",
+		ModifiedAt: closedTime,
 	}
 
 	felts := []*felt.Felt{activeFelt, readyFelt, closedFelt}
@@ -90,12 +91,12 @@ func TestFormatSessionOutput(t *testing.T) {
 		t.Error("missing ready task entry")
 	}
 
-	// Check recently closed section
-	if !strings.Contains(output, "## Recently Closed") {
-		t.Error("missing recently closed section")
+	// Check recently touched section
+	if !strings.Contains(output, "## Recently Touched") {
+		t.Error("missing recently touched section")
 	}
 	if !strings.Contains(output, "● closed-task-abcdef12") {
-		t.Error("missing closed task in recently closed")
+		t.Error("missing closed task in recently touched")
 	}
 	if !strings.Contains(output, "→ Done with good results") {
 		t.Error("missing outcome")
@@ -190,9 +191,18 @@ func TestFormatSessionOutput_BlockedReady(t *testing.T) {
 	}
 
 	// Blocked task should NOT appear in ready (has open dep)
-	readySection := strings.Split(output, "## CLI")[0]
-	if strings.Contains(readySection, "blocked-task-87654321") {
-		t.Error("blocked task should not appear in ready section")
+	// Extract just the Ready section (between "## Ready" and the next "##")
+	readyStart := strings.Index(output, "## Ready Fibers")
+	if readyStart >= 0 {
+		rest := output[readyStart+len("## Ready Fibers"):]
+		nextSection := strings.Index(rest, "## ")
+		readySection := rest
+		if nextSection >= 0 {
+			readySection = rest[:nextSection]
+		}
+		if strings.Contains(readySection, "blocked-task-87654321") {
+			t.Error("blocked task should not appear in ready section")
+		}
 	}
 }
 
@@ -202,12 +212,13 @@ func TestFormatSessionOutput_UnblockedByClosedDep(t *testing.T) {
 
 	// Create a closed dependency - fibers depending on it should be ready
 	closedDepFelt := &felt.Felt{
-		ID:        "closed-dep-12345678",
-		Title:     "Completed prereq",
-		Status:    felt.StatusClosed,
-		Priority:  2,
-		CreatedAt: now.Add(-2 * time.Hour),
-		ClosedAt:  &closedTime,
+		ID:         "closed-dep-12345678",
+		Title:      "Completed prereq",
+		Status:     felt.StatusClosed,
+		Priority:   2,
+		CreatedAt:  now.Add(-2 * time.Hour),
+		ClosedAt:   &closedTime,
+		ModifiedAt: closedTime,
 	}
 
 	// This fiber depends on the closed dep, so it should be ready
@@ -233,12 +244,12 @@ func TestFormatSessionOutput_UnblockedByClosedDep(t *testing.T) {
 		t.Error("fiber with closed dependency should appear in ready section")
 	}
 
-	// The closed dependency should appear in recently closed
-	if !strings.Contains(output, "## Recently Closed") {
-		t.Error("missing recently closed section")
+	// The closed dependency should appear in recently touched
+	if !strings.Contains(output, "## Recently Touched") {
+		t.Error("missing recently touched section")
 	}
 	if !strings.Contains(output, "closed-dep-12345678") {
-		t.Error("closed fiber should appear in recently closed")
+		t.Error("closed fiber should appear in recently touched")
 	}
 }
 
@@ -341,19 +352,20 @@ func TestFormatFiberEntry(t *testing.T) {
 	}
 }
 
-func TestFormatSessionOutput_LimitsRecentlyClosed(t *testing.T) {
+func TestFormatSessionOutput_LimitsRecentlyTouched(t *testing.T) {
 	now := time.Now()
 
-	// Create 7 closed fibers
+	// Create 7 closed fibers with staggered mod times
 	var felts []*felt.Felt
 	for i := 0; i < 7; i++ {
 		closedTime := now.Add(-time.Duration(i) * time.Hour)
 		felts = append(felts, &felt.Felt{
-			ID:        fmt.Sprintf("closed-%d-12345678", i),
-			Title:     fmt.Sprintf("Closed task %d", i),
-			Status:    felt.StatusClosed,
-			ClosedAt:  &closedTime,
-			CreatedAt: now.Add(-10 * time.Hour),
+			ID:         fmt.Sprintf("closed-%d-12345678", i),
+			Title:      fmt.Sprintf("Closed task %d", i),
+			Status:     felt.StatusClosed,
+			ClosedAt:   &closedTime,
+			CreatedAt:  now.Add(-10 * time.Hour),
+			ModifiedAt: now.Add(-time.Duration(i) * time.Hour),
 		})
 	}
 
@@ -362,22 +374,22 @@ func TestFormatSessionOutput_LimitsRecentlyClosed(t *testing.T) {
 
 	// Should only show 5 most recent
 	if strings.Contains(output, "closed-5-12345678") {
-		t.Error("should not show 6th closed fiber")
+		t.Error("should not show 6th fiber")
 	}
 	if strings.Contains(output, "closed-6-12345678") {
-		t.Error("should not show 7th closed fiber")
+		t.Error("should not show 7th fiber")
 	}
 
 	// Should show the 5 most recent
 	if !strings.Contains(output, "closed-0-12345678") {
-		t.Error("should show most recent closed fiber")
+		t.Error("should show most recently modified fiber")
 	}
 	if !strings.Contains(output, "closed-4-12345678") {
-		t.Error("should show 5th most recent closed fiber")
+		t.Error("should show 5th most recently modified fiber")
 	}
 }
 
-func TestFormatClosedEntry(t *testing.T) {
+func TestFormatRecentEntry(t *testing.T) {
 	now := time.Now()
 
 	tests := []struct {
@@ -392,6 +404,7 @@ func TestFormatClosedEntry(t *testing.T) {
 			felt: &felt.Felt{
 				ID:       "done-task-12345678",
 				Title:    "Done task",
+				Status:   felt.StatusClosed,
 				Outcome:  "Completed successfully",
 				ClosedAt: &now,
 			},
@@ -404,6 +417,7 @@ func TestFormatClosedEntry(t *testing.T) {
 			felt: &felt.Felt{
 				ID:       "decided-12345678",
 				Title:    "Which approach",
+				Status:   felt.StatusClosed,
 				Tags:     []string{"decision"},
 				Outcome:  "Chose option A because of performance",
 				ClosedAt: &now,
@@ -417,6 +431,7 @@ func TestFormatClosedEntry(t *testing.T) {
 			felt: &felt.Felt{
 				ID:       "no-reason-12345678",
 				Title:    "No reason given",
+				Status:   felt.StatusClosed,
 				ClosedAt: &now,
 			},
 			wantIcon:    "●",
@@ -427,7 +442,7 @@ func TestFormatClosedEntry(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := formatClosedEntry(tt.felt)
+			result := formatRecentEntry(tt.felt)
 
 			if !strings.Contains(result, tt.wantIcon) {
 				t.Errorf("missing closed icon, got: %s", result)
@@ -452,7 +467,7 @@ func TestFormatClosedEntry(t *testing.T) {
 	}
 }
 
-func TestFormatClosedEntry_TruncatesLongOutcome(t *testing.T) {
+func TestFormatRecentEntry_TruncatesLongOutcome(t *testing.T) {
 	now := time.Now()
 	longOutcome := strings.Repeat("a", 150)
 
@@ -463,7 +478,7 @@ func TestFormatClosedEntry_TruncatesLongOutcome(t *testing.T) {
 		ClosedAt: &now,
 	}
 
-	result := formatClosedEntry(f)
+	result := formatRecentEntry(f)
 
 	// Should be truncated with ...
 	if !strings.Contains(result, "...") {

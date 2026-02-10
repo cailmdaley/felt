@@ -22,7 +22,9 @@ Fibers are minimal by default. All fields except title are optional.
 | tags | Freeform. Use for categorization (decision, spec, question, etc). |
 | depends-on | DAG edges. Supports labels: `{id, label}`. |
 
-**Status is opt-in.** `felt add "title"` creates a statusless fiber. `felt add "title" -s open` enters tracking. `felt on <id>` enters tracking. `felt ls` only shows tracked fibers.
+**Status is opt-in.** `felt add "title"` creates a statusless fiber. `felt add "title" -s open` enters tracking. `felt edit <id> -s active` enters tracking. `felt ls` only shows tracked fibers.
+
+**Progressive disclosure.** `felt show <id> -d compact` shows metadata + outcome without body. Levels: title, compact, summary, full (default). `felt upstream/downstream <id> -d compact` renders each connected fiber at that depth.
 
 **Backward compat:** `close-reason` reads as `outcome`, `kind` reads as a tag. Both migrate on next write.
 

@@ -103,6 +103,10 @@ func (s *Storage) List() ([]*Felt, error) {
 			fmt.Fprintf(os.Stderr, "warning: failed to parse %s: %v\n", name, err)
 			continue
 		}
+		// Populate ModifiedAt from file stat
+		if info, err := entry.Info(); err == nil {
+			f.ModifiedAt = info.ModTime()
+		}
 		felts = append(felts, f)
 	}
 

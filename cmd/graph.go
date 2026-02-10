@@ -7,7 +7,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var graphFormat string
+var (
+	graphFormat string
+	upDownDepth string
+)
 
 var graphCmd = &cobra.Command{
 	Use:   "graph",
@@ -51,113 +54,108 @@ var graphCmd = &cobra.Command{
 var upstreamCmd = &cobra.Command{
 	Use:   "upstream <id>",
 	Short: "Show what a felt depends on",
-	Long:  `Lists all transitive dependencies of a felt.`,
+	Long:  `Lists all transitive dependencies of a felt. Use --depth to control detail per item.`,
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		root, err := felt.FindProjectRoot()
-		if err != nil {
-			return fmt.Errorf("not in a felt repository")
-		}
-
-		storage := felt.NewStorage(root)
-		f, err := storage.Find(args[0])
-		if err != nil {
-			return err
-		}
-
-		felts, err := storage.List()
-		if err != nil {
-			return err
-		}
-
-		g := felt.BuildGraph(felts)
-		upstream := g.GetUpstream(f.ID)
-
-		if jsonOutput {
-			var deps []*felt.Felt
-			for _, id := range upstream {
-				if dep := g.Nodes[id]; dep != nil {
-					deps = append(deps, dep)
-				}
-			}
-			return outputJSON(deps)
-		}
-
-		if len(upstream) == 0 {
-			fmt.Println("No dependencies")
-			return nil
-		}
-
-		for _, id := range upstream {
-			dep := g.Nodes[id]
-			if dep != nil {
-				label := edgeLabelInGraph(g, id, f.ID)
-				if label != "" {
-					fmt.Printf("%s %s  %s [%s]\n", statusIcon(dep.Status), dep.ID, dep.Title, label)
-				} else {
-					fmt.Printf("%s %s  %s\n", statusIcon(dep.Status), dep.ID, dep.Title)
-				}
-			}
-		}
-
-		return nil
+		return runTraversal(args[0], traversalConfig{
+			getRelated:  func(g *felt.Graph, id string) []string { return g.GetUpstream(id) },
+			edgeLabel:   func(g *felt.Graph, fiberID, relatedID string) string { return edgeLabelInGraph(g, relatedID, fiberID) },
+			emptyMsg:    "No dependencies",
+		})
 	},
 }
 
 var downstreamCmd = &cobra.Command{
 	Use:   "downstream <id>",
 	Short: "Show what depends on a felt",
-	Long:  `Lists all felts that transitively depend on this one.`,
+	Long:  `Lists all felts that transitively depend on this one. Use --depth to control detail per item.`,
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		root, err := felt.FindProjectRoot()
-		if err != nil {
-			return fmt.Errorf("not in a felt repository")
-		}
+		return runTraversal(args[0], traversalConfig{
+			getRelated:  func(g *felt.Graph, id string) []string { return g.GetDownstream(id) },
+			edgeLabel:   func(g *felt.Graph, fiberID, relatedID string) string { return edgeLabelInGraph(g, fiberID, relatedID) },
+			emptyMsg:    "Nothing depends on this",
+		})
+	},
+}
 
-		storage := felt.NewStorage(root)
-		f, err := storage.Find(args[0])
-		if err != nil {
+// traversalConfig captures the differences between upstream and downstream traversal.
+type traversalConfig struct {
+	getRelated func(g *felt.Graph, id string) []string
+	edgeLabel  func(g *felt.Graph, fiberID, relatedID string) string
+	emptyMsg   string
+}
+
+// runTraversal implements the shared logic for upstream and downstream commands.
+func runTraversal(fiberArg string, cfg traversalConfig) error {
+	root, err := felt.FindProjectRoot()
+	if err != nil {
+		return fmt.Errorf("not in a felt repository")
+	}
+
+	if upDownDepth != "" {
+		if err := validateDepth(upDownDepth); err != nil {
 			return err
 		}
+	}
 
-		felts, err := storage.List()
-		if err != nil {
-			return err
-		}
+	storage := felt.NewStorage(root)
+	f, err := storage.Find(fiberArg)
+	if err != nil {
+		return err
+	}
 
-		g := felt.BuildGraph(felts)
-		downstream := g.GetDownstream(f.ID)
+	felts, err := storage.List()
+	if err != nil {
+		return err
+	}
 
-		if jsonOutput {
-			var deps []*felt.Felt
-			for _, id := range downstream {
-				if dep := g.Nodes[id]; dep != nil {
-					deps = append(deps, dep)
-				}
+	g := felt.BuildGraph(felts)
+	related := cfg.getRelated(g, f.ID)
+
+	if jsonOutput {
+		var deps []*felt.Felt
+		for _, id := range related {
+			if dep := g.Nodes[id]; dep != nil {
+				deps = append(deps, dep)
 			}
-			return outputJSON(deps)
 		}
+		return outputJSON(deps)
+	}
 
-		if len(downstream) == 0 {
-			fmt.Println("Nothing depends on this")
-			return nil
-		}
+	if len(related) == 0 {
+		fmt.Println(cfg.emptyMsg)
+		return nil
+	}
 
-		for _, id := range downstream {
+	// Depth-aware rendering
+	if upDownDepth != "" {
+		for i, id := range related {
 			dep := g.Nodes[id]
 			if dep != nil {
-				label := edgeLabelInGraph(g, f.ID, id)
-				if label != "" {
-					fmt.Printf("%s %s  %s [%s]\n", statusIcon(dep.Status), dep.ID, dep.Title, label)
-				} else {
-					fmt.Printf("%s %s  %s\n", statusIcon(dep.Status), dep.ID, dep.Title)
+				fmt.Print(renderFelt(dep, g, upDownDepth))
+				if upDownDepth != DepthTitle && i < len(related)-1 {
+					fmt.Println()
 				}
 			}
 		}
-
 		return nil
-	},
+	}
+
+	// Default: single-line format
+	for _, id := range related {
+		dep := g.Nodes[id]
+		if dep != nil {
+			label := cfg.edgeLabel(g, f.ID, id)
+			if label != "" {
+				fmt.Printf("%s %s  %s [%s]\n", statusIcon(dep.Status), dep.ID, dep.Title, label)
+			} else {
+				fmt.Printf("%s %s  %s\n", statusIcon(dep.Status), dep.ID, dep.Title)
+			}
+		}
+	}
+
+	return nil
 }
 
 // edgeLabelInGraph finds the label on the edge from depID to dependentID.
@@ -263,4 +261,6 @@ func init() {
 	rootCmd.AddCommand(checkCmd)
 
 	graphCmd.Flags().StringVarP(&graphFormat, "format", "f", "mermaid", "Output format (mermaid, dot, text)")
+	upstreamCmd.Flags().StringVarP(&upDownDepth, "depth", "d", "", "Detail level per item (title, compact, summary, full)")
+	downstreamCmd.Flags().StringVarP(&upDownDepth, "depth", "d", "", "Detail level per item (title, compact, summary, full)")
 }
