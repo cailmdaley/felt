@@ -91,7 +91,12 @@ var upstreamCmd = &cobra.Command{
 		for _, id := range upstream {
 			dep := g.Nodes[id]
 			if dep != nil {
-				fmt.Printf("%s %s  %s\n", statusIcon(dep.Status), dep.ID, dep.Title)
+				label := edgeLabelInGraph(g, id, f.ID)
+				if label != "" {
+					fmt.Printf("%s %s  %s [%s]\n", statusIcon(dep.Status), dep.ID, dep.Title, label)
+				} else {
+					fmt.Printf("%s %s  %s\n", statusIcon(dep.Status), dep.ID, dep.Title)
+				}
 			}
 		}
 
@@ -142,12 +147,28 @@ var downstreamCmd = &cobra.Command{
 		for _, id := range downstream {
 			dep := g.Nodes[id]
 			if dep != nil {
-				fmt.Printf("%s %s  %s\n", statusIcon(dep.Status), dep.ID, dep.Title)
+				label := edgeLabelInGraph(g, f.ID, id)
+				if label != "" {
+					fmt.Printf("%s %s  %s [%s]\n", statusIcon(dep.Status), dep.ID, dep.Title, label)
+				} else {
+					fmt.Printf("%s %s  %s\n", statusIcon(dep.Status), dep.ID, dep.Title)
+				}
 			}
 		}
 
 		return nil
 	},
+}
+
+// edgeLabelInGraph finds the label on the edge from depID to dependentID.
+// It looks for depID in dependentID's upstream deps.
+func edgeLabelInGraph(g *felt.Graph, depID, dependentID string) string {
+	for _, d := range g.Upstream[dependentID] {
+		if d.ID == depID {
+			return d.Label
+		}
+	}
+	return ""
 }
 
 var pathCmd = &cobra.Command{

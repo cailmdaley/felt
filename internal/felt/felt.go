@@ -25,20 +25,91 @@ const (
 // Default kind
 const DefaultKind = "task"
 
+// Dependency represents a dependency with an optional label explaining why.
+type Dependency struct {
+	ID    string `json:"id"`
+	Label string `json:"label,omitempty"`
+}
+
+// UnmarshalYAML handles both bare string and {id, label} object forms.
+func (d *Dependency) UnmarshalYAML(value *yaml.Node) error {
+	if value.Kind == yaml.ScalarNode {
+		d.ID = value.Value
+		return nil
+	}
+	if value.Kind == yaml.MappingNode {
+		type raw struct {
+			ID    string `yaml:"id"`
+			Label string `yaml:"label"`
+		}
+		var r raw
+		if err := value.Decode(&r); err != nil {
+			return err
+		}
+		d.ID = r.ID
+		d.Label = r.Label
+		return nil
+	}
+	return fmt.Errorf("dependency must be a string or {id, label} object")
+}
+
+// MarshalYAML emits bare string when no label, object when label is present.
+func (d Dependency) MarshalYAML() (interface{}, error) {
+	if d.Label == "" {
+		return d.ID, nil
+	}
+	return struct {
+		ID    string `yaml:"id"`
+		Label string `yaml:"label"`
+	}{d.ID, d.Label}, nil
+}
+
+// Dependencies is a slice of Dependency with helper methods.
+type Dependencies []Dependency
+
+// IDs returns just the dependency IDs.
+func (deps Dependencies) IDs() []string {
+	ids := make([]string, len(deps))
+	for i, d := range deps {
+		ids[i] = d.ID
+	}
+	return ids
+}
+
+// HasID returns true if the given ID is in the dependencies.
+func (deps Dependencies) HasID(id string) bool {
+	for _, d := range deps {
+		if d.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+// LabelFor returns the label for a given dependency ID, or empty string.
+func (deps Dependencies) LabelFor(id string) string {
+	for _, d := range deps {
+		if d.ID == id {
+			return d.Label
+		}
+	}
+	return ""
+}
+
 // Felt represents a single task/spec/thread in the DAG.
 type Felt struct {
-	ID          string     `yaml:"-" json:"id"`
-	Title       string     `yaml:"title" json:"title"`
-	Status      string     `yaml:"status" json:"status"`
-	Kind        string     `yaml:"kind,omitempty" json:"kind,omitempty"`
-	Tags        []string   `yaml:"tags,omitempty" json:"tags,omitempty"`
-	Priority    int        `yaml:"priority,omitempty" json:"priority,omitempty"`
-	DependsOn   []string   `yaml:"depends-on,omitempty" json:"depends_on,omitempty"`
-	CreatedAt   time.Time  `yaml:"created-at" json:"created_at"`
-	ClosedAt    *time.Time `yaml:"closed-at,omitempty" json:"closed_at,omitempty"`
-	CloseReason string     `yaml:"close-reason,omitempty" json:"close_reason,omitempty"`
-	Due         *time.Time `yaml:"due,omitempty" json:"due,omitempty"`
-	Body        string     `yaml:"-" json:"body,omitempty"`
+	ID          string       `yaml:"-" json:"id"`
+	Title       string       `yaml:"title" json:"title"`
+	Status      string       `yaml:"status" json:"status"`
+	Kind        string       `yaml:"kind,omitempty" json:"kind,omitempty"`
+	Tags        []string     `yaml:"tags,omitempty" json:"tags,omitempty"`
+	Priority    int          `yaml:"priority,omitempty" json:"priority,omitempty"`
+	DependsOn   Dependencies `yaml:"depends-on,omitempty" json:"depends_on,omitempty"`
+	CreatedAt   time.Time    `yaml:"created-at" json:"created_at"`
+	ClosedAt    *time.Time   `yaml:"closed-at,omitempty" json:"closed_at,omitempty"`
+	CloseReason string       `yaml:"close-reason,omitempty" json:"close_reason,omitempty"`
+	Due         *time.Time   `yaml:"due,omitempty" json:"due,omitempty"`
+	Body        string       `yaml:"-" json:"body,omitempty"`
 }
 
 // New creates a new Felt with default values.
@@ -60,7 +131,7 @@ func New(title string) (*Felt, error) {
 		Status:    StatusOpen,
 		Kind:      DefaultKind,
 		Priority:  2,
-		DependsOn: []string{},
+		DependsOn: Dependencies{},
 		CreatedAt: time.Now(),
 	}, nil
 }
@@ -261,16 +332,16 @@ func splitFrontmatter(content []byte) ([]byte, string, error) {
 func (f *Felt) Marshal() ([]byte, error) {
 	// Build frontmatter struct for controlled field ordering
 	fm := struct {
-		Title       string     `yaml:"title"`
-		Status      string     `yaml:"status"`
-		Kind        string     `yaml:"kind,omitempty"`
-		Tags        []string   `yaml:"tags,omitempty"`
-		Priority    int        `yaml:"priority,omitempty"`
-		DependsOn   []string   `yaml:"depends-on,omitempty"`
-		CreatedAt   time.Time  `yaml:"created-at"`
-		ClosedAt    *time.Time `yaml:"closed-at,omitempty"`
-		CloseReason string     `yaml:"close-reason,omitempty"`
-		Due         *time.Time `yaml:"due,omitempty"`
+		Title       string       `yaml:"title"`
+		Status      string       `yaml:"status"`
+		Kind        string       `yaml:"kind,omitempty"`
+		Tags        []string     `yaml:"tags,omitempty"`
+		Priority    int          `yaml:"priority,omitempty"`
+		DependsOn   Dependencies `yaml:"depends-on,omitempty"`
+		CreatedAt   time.Time    `yaml:"created-at"`
+		ClosedAt    *time.Time   `yaml:"closed-at,omitempty"`
+		CloseReason string       `yaml:"close-reason,omitempty"`
+		Due         *time.Time   `yaml:"due,omitempty"`
 	}{
 		Title:       f.Title,
 		Status:      f.Status,

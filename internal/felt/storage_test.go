@@ -49,7 +49,7 @@ func TestStorageWriteRead(t *testing.T) {
 		Status:    StatusOpen,
 		Kind:      DefaultKind,
 		Priority:  2,
-		DependsOn: []string{"dep-a-aaaaaaaa"},
+		DependsOn: Dependencies{{ID: "dep-a-aaaaaaaa"}},
 		CreatedAt: time.Now(),
 		Body:      "Test body content.",
 	}
@@ -84,8 +84,8 @@ func TestStorageWriteRead(t *testing.T) {
 	if read.Body != f.Body {
 		t.Errorf("Body = %q, want %q", read.Body, f.Body)
 	}
-	if len(read.DependsOn) != 1 || read.DependsOn[0] != "dep-a-aaaaaaaa" {
-		t.Errorf("DependsOn = %v, want [dep-a-aaaaaaaa]", read.DependsOn)
+	if len(read.DependsOn) != 1 || read.DependsOn[0].ID != "dep-a-aaaaaaaa" {
+		t.Errorf("DependsOn = %v, want [{dep-a-aaaaaaaa }]", read.DependsOn)
 	}
 }
 

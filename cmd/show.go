@@ -87,24 +87,33 @@ var showCmd = &cobra.Command{
 	},
 }
 
-// formatDeps formats dependency IDs, showing title for context
-func formatDeps(g *felt.Graph, ids []string) string {
-	if len(ids) == 0 {
+// formatDeps formats dependencies, showing labels and titles for context
+func formatDeps(g *felt.Graph, deps felt.Dependencies) string {
+	if len(deps) == 0 {
 		return ""
 	}
-	if len(ids) == 1 {
-		if f, ok := g.Nodes[ids[0]]; ok {
-			return fmt.Sprintf("%s (%s)", ids[0], truncateTitle(f.Title, 30))
+	if len(deps) == 1 {
+		d := deps[0]
+		labelPart := ""
+		if d.Label != "" {
+			labelPart = fmt.Sprintf(" [%s]", d.Label)
 		}
-		return ids[0]
+		if f, ok := g.Nodes[d.ID]; ok {
+			return fmt.Sprintf("%s%s (%s)", d.ID, labelPart, truncateTitle(f.Title, 30))
+		}
+		return d.ID + labelPart
 	}
 	// Multiple deps: list on separate lines
 	var lines []string
-	for _, id := range ids {
-		if f, ok := g.Nodes[id]; ok {
-			lines = append(lines, fmt.Sprintf("\n  - %s (%s)", id, truncateTitle(f.Title, 30)))
+	for _, d := range deps {
+		labelPart := ""
+		if d.Label != "" {
+			labelPart = fmt.Sprintf(" [%s]", d.Label)
+		}
+		if f, ok := g.Nodes[d.ID]; ok {
+			lines = append(lines, fmt.Sprintf("\n  - %s%s (%s)", d.ID, labelPart, truncateTitle(f.Title, 30)))
 		} else {
-			lines = append(lines, fmt.Sprintf("\n  - %s", id))
+			lines = append(lines, fmt.Sprintf("\n  - %s%s", d.ID, labelPart))
 		}
 	}
 	return strings.Join(lines, "")

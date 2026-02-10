@@ -182,7 +182,7 @@ func TestFormatSessionOutput_BlockedReady(t *testing.T) {
 		Status:    felt.StatusOpen,
 		Kind:      felt.DefaultKind,
 		Priority:  2,
-		DependsOn: []string{"blocker-task-12345678"},
+		DependsOn: felt.Dependencies{{ID: "blocker-task-12345678"}},
 		CreatedAt: now.Add(time.Minute),
 	}
 
@@ -225,7 +225,7 @@ func TestFormatSessionOutput_UnblockedByClosedDep(t *testing.T) {
 		Status:    felt.StatusOpen,
 		Kind:      felt.DefaultKind,
 		Priority:  2,
-		DependsOn: []string{"closed-dep-12345678"},
+		DependsOn: felt.Dependencies{{ID: "closed-dep-12345678"}},
 		CreatedAt: now.Add(time.Minute),
 	}
 

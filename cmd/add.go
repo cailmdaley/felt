@@ -73,7 +73,7 @@ var addCmd = &cobra.Command{
 				if err != nil {
 					return fmt.Errorf("dependency %q: %w", dep, err)
 				}
-				f.DependsOn = append(f.DependsOn, depFelt.ID)
+				f.DependsOn = append(f.DependsOn, felt.Dependency{ID: depFelt.ID})
 			}
 
 			// Check for cycles
@@ -84,9 +84,9 @@ var addCmd = &cobra.Command{
 			// Add the new felt temporarily for cycle check
 			felts = append(felts, f)
 			g := felt.BuildGraph(felts)
-			for _, depID := range f.DependsOn {
-				if g.DetectCycle(f.ID, depID) {
-					return fmt.Errorf("adding dependency on %s would create a cycle", depID)
+			for _, dep := range f.DependsOn {
+				if g.DetectCycle(f.ID, dep.ID) {
+					return fmt.Errorf("adding dependency on %s would create a cycle", dep.ID)
 				}
 			}
 		}

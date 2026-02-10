@@ -7,13 +7,17 @@ import (
 )
 
 func makeTestFelt(id, title, status string, deps []string) *Felt {
+	var d Dependencies
+	for _, id := range deps {
+		d = append(d, Dependency{ID: id})
+	}
 	return &Felt{
 		ID:        id,
 		Title:     title,
 		Status:    status,
 		Kind:      DefaultKind,
 		Priority:  2,
-		DependsOn: deps,
+		DependsOn: d,
 		CreatedAt: time.Now(),
 	}
 }
@@ -400,5 +404,112 @@ func TestToTextMultipleRoots(t *testing.T) {
 	}
 	if !strings.Contains(text, "X") || !strings.Contains(text, "Y") {
 		t.Error("ToText should contain X-Y tree")
+	}
+}
+
+func TestBuildGraphWithLabels(t *testing.T) {
+	felts := []*Felt{
+		{
+			ID: "a-11111111", Title: "A", Status: StatusOpen, Kind: DefaultKind,
+			Priority: 2, DependsOn: nil, CreatedAt: time.Now(),
+		},
+		{
+			ID: "b-22222222", Title: "B", Status: StatusOpen, Kind: DefaultKind,
+			Priority: 2,
+			DependsOn: Dependencies{
+				{ID: "a-11111111", Label: "needs data"},
+			},
+			CreatedAt: time.Now(),
+		},
+	}
+
+	g := BuildGraph(felts)
+
+	// Upstream of B should have label
+	if len(g.Upstream["b-22222222"]) != 1 {
+		t.Fatalf("B upstream count = %d, want 1", len(g.Upstream["b-22222222"]))
+	}
+	if g.Upstream["b-22222222"][0].Label != "needs data" {
+		t.Errorf("B upstream label = %q, want %q", g.Upstream["b-22222222"][0].Label, "needs data")
+	}
+
+	// Downstream of A should have label
+	if len(g.Downstream["a-11111111"]) != 1 {
+		t.Fatalf("A downstream count = %d, want 1", len(g.Downstream["a-11111111"]))
+	}
+	if g.Downstream["a-11111111"][0].Label != "needs data" {
+		t.Errorf("A downstream label = %q, want %q", g.Downstream["a-11111111"][0].Label, "needs data")
+	}
+}
+
+func TestToMermaidWithLabels(t *testing.T) {
+	felts := []*Felt{
+		{
+			ID: "a-11111111", Title: "A", Status: StatusOpen, Kind: DefaultKind,
+			Priority: 2, DependsOn: nil, CreatedAt: time.Now(),
+		},
+		{
+			ID: "b-22222222", Title: "B", Status: StatusOpen, Kind: DefaultKind,
+			Priority: 2,
+			DependsOn: Dependencies{
+				{ID: "a-11111111", Label: "blocks"},
+			},
+			CreatedAt: time.Now(),
+		},
+	}
+
+	g := BuildGraph(felts)
+	mermaid := g.ToMermaid()
+
+	if !strings.Contains(mermaid, "-->|blocks|") {
+		t.Errorf("Mermaid should contain labeled edge, got:\n%s", mermaid)
+	}
+}
+
+func TestToDotWithLabels(t *testing.T) {
+	felts := []*Felt{
+		{
+			ID: "a-11111111", Title: "A", Status: StatusOpen, Kind: DefaultKind,
+			Priority: 2, DependsOn: nil, CreatedAt: time.Now(),
+		},
+		{
+			ID: "b-22222222", Title: "B", Status: StatusOpen, Kind: DefaultKind,
+			Priority: 2,
+			DependsOn: Dependencies{
+				{ID: "a-11111111", Label: "provides input"},
+			},
+			CreatedAt: time.Now(),
+		},
+	}
+
+	g := BuildGraph(felts)
+	dot := g.ToDot()
+
+	if !strings.Contains(dot, `[label="provides input"]`) {
+		t.Errorf("DOT should contain labeled edge, got:\n%s", dot)
+	}
+}
+
+func TestToTextWithLabels(t *testing.T) {
+	felts := []*Felt{
+		{
+			ID: "a-11111111", Title: "A", Status: StatusOpen, Kind: DefaultKind,
+			Priority: 2, DependsOn: nil, CreatedAt: time.Now(),
+		},
+		{
+			ID: "b-22222222", Title: "B", Status: StatusOpen, Kind: DefaultKind,
+			Priority: 2,
+			DependsOn: Dependencies{
+				{ID: "a-11111111", Label: "reason"},
+			},
+			CreatedAt: time.Now(),
+		},
+	}
+
+	g := BuildGraph(felts)
+	text := g.ToText()
+
+	if !strings.Contains(text, "[reason]") {
+		t.Errorf("Text tree should contain label, got:\n%s", text)
 	}
 }

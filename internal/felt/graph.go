@@ -8,17 +8,17 @@ import (
 
 // Graph represents the DAG of felts with bidirectional edges.
 type Graph struct {
-	Nodes      map[string]*Felt   // ID -> Felt
-	Upstream   map[string][]string // ID -> what this depends on
-	Downstream map[string][]string // ID -> what depends on this (computed)
+	Nodes      map[string]*Felt         // ID -> Felt
+	Upstream   map[string]Dependencies  // ID -> what this depends on
+	Downstream map[string]Dependencies  // ID -> what depends on this (computed)
 }
 
 // BuildGraph constructs a graph from a list of felts.
 func BuildGraph(felts []*Felt) *Graph {
 	g := &Graph{
 		Nodes:      make(map[string]*Felt),
-		Upstream:   make(map[string][]string),
-		Downstream: make(map[string][]string),
+		Upstream:   make(map[string]Dependencies),
+		Downstream: make(map[string]Dependencies),
 	}
 
 	// First pass: index all nodes
@@ -29,8 +29,8 @@ func BuildGraph(felts []*Felt) *Graph {
 
 	// Second pass: compute downstream (reverse edges)
 	for id, deps := range g.Upstream {
-		for _, depID := range deps {
-			g.Downstream[depID] = append(g.Downstream[depID], id)
+		for _, dep := range deps {
+			g.Downstream[dep.ID] = append(g.Downstream[dep.ID], Dependency{ID: id, Label: dep.Label})
 		}
 	}
 
@@ -50,7 +50,7 @@ func (g *Graph) GetDownstream(id string) []string {
 }
 
 // bfs performs breadth-first traversal from start using the given adjacency map.
-func (g *Graph) bfs(start string, adj map[string][]string) []string {
+func (g *Graph) bfs(start string, adj map[string]Dependencies) []string {
 	visited := make(map[string]bool)
 	var result []string
 	queue := []string{start}
@@ -65,10 +65,10 @@ func (g *Graph) bfs(start string, adj map[string][]string) []string {
 			result = append(result, current)
 		}
 
-		for _, next := range adj[current] {
-			if !visited[next] {
-				visited[next] = true
-				queue = append(queue, next)
+		for _, dep := range adj[current] {
+			if !visited[dep.ID] {
+				visited[dep.ID] = true
+				queue = append(queue, dep.ID)
 			}
 		}
 	}
@@ -88,8 +88,8 @@ func (g *Graph) Ready() []*Felt {
 
 		// Check all dependencies
 		allDepsClosed := true
-		for _, depID := range f.DependsOn {
-			dep, ok := g.Nodes[depID]
+		for _, d := range f.DependsOn {
+			dep, ok := g.Nodes[d.ID]
 			if !ok {
 				// Missing dependency — treat as not ready
 				allDepsClosed = false
@@ -162,8 +162,8 @@ func (g *Graph) FindCycles() []string {
 		path = append(path, id)
 
 		for _, dep := range g.Upstream[id] {
-			if _, exists := g.Nodes[dep]; exists {
-				dfs(dep, path)
+			if _, exists := g.Nodes[dep.ID]; exists {
+				dfs(dep.ID, path)
 			}
 		}
 
@@ -185,9 +185,9 @@ func (g *Graph) ValidateDependencies() []string {
 	var errors []string
 
 	for id, deps := range g.Upstream {
-		for _, depID := range deps {
-			if _, ok := g.Nodes[depID]; !ok {
-				errors = append(errors, fmt.Sprintf("%s depends on non-existent %s", id, depID))
+		for _, dep := range deps {
+			if _, ok := g.Nodes[dep.ID]; !ok {
+				errors = append(errors, fmt.Sprintf("%s depends on non-existent %s", id, dep.ID))
 			}
 		}
 	}
@@ -212,14 +212,14 @@ func (g *Graph) FindPath(from, to string) []string {
 		current := queue[0]
 		queue = queue[1:]
 
-		for _, next := range g.Upstream[current] {
-			if visited[next] {
+		for _, dep := range g.Upstream[current] {
+			if visited[dep.ID] {
 				continue
 			}
-			visited[next] = true
-			parent[next] = current
+			visited[dep.ID] = true
+			parent[dep.ID] = current
 
-			if next == to {
+			if dep.ID == to {
 				// Reconstruct path
 				path := []string{to}
 				for p := parent[to]; p != ""; p = parent[p] {
@@ -228,7 +228,7 @@ func (g *Graph) FindPath(from, to string) []string {
 				return path
 			}
 
-			queue = append(queue, next)
+			queue = append(queue, dep.ID)
 		}
 	}
 
@@ -258,9 +258,13 @@ func (g *Graph) ToMermaid() string {
 
 	// Edges
 	for _, id := range ids {
-		for _, depID := range g.Upstream[id] {
+		for _, dep := range g.Upstream[id] {
 			// Arrow from dependency to dependent (dependency flows up)
-			sb.WriteString(fmt.Sprintf("    %s --> %s\n", sanitizeMermaidID(depID), sanitizeMermaidID(id)))
+			if dep.Label != "" {
+				sb.WriteString(fmt.Sprintf("    %s -->|%s| %s\n", sanitizeMermaidID(dep.ID), escapeMermaidText(dep.Label), sanitizeMermaidID(id)))
+			} else {
+				sb.WriteString(fmt.Sprintf("    %s --> %s\n", sanitizeMermaidID(dep.ID), sanitizeMermaidID(id)))
+			}
 		}
 	}
 
@@ -329,8 +333,13 @@ func (g *Graph) ToDot() string {
 
 	// Edges
 	for _, id := range ids {
-		for _, depID := range g.Upstream[id] {
-			sb.WriteString(fmt.Sprintf("    \"%s\" -> \"%s\";\n", depID, id))
+		for _, dep := range g.Upstream[id] {
+			if dep.Label != "" {
+				label := strings.ReplaceAll(dep.Label, "\"", "\\\"")
+				sb.WriteString(fmt.Sprintf("    \"%s\" -> \"%s\" [label=\"%s\"];\n", dep.ID, id, label))
+			} else {
+				sb.WriteString(fmt.Sprintf("    \"%s\" -> \"%s\";\n", dep.ID, id))
+			}
 		}
 	}
 
@@ -378,13 +387,13 @@ func (g *Graph) ToText() string {
 	// Print from each root
 	printed := make(map[string]bool)
 	for _, root := range roots {
-		g.printTextTree(&sb, root, "", true, printed)
+		g.printTextTree(&sb, root, "", "", true, printed)
 	}
 
 	// Print any orphaned nodes (in cycles or disconnected)
 	for _, id := range ids {
 		if !printed[id] {
-			g.printTextTree(&sb, id, "", true, printed)
+			g.printTextTree(&sb, id, "", "", true, printed)
 		}
 	}
 
@@ -392,7 +401,8 @@ func (g *Graph) ToText() string {
 }
 
 // printTextTree recursively prints a node and its downstream children.
-func (g *Graph) printTextTree(sb *strings.Builder, id string, prefix string, last bool, printed map[string]bool) {
+// edgeLabel is the label on the edge from parent to this node (empty for roots).
+func (g *Graph) printTextTree(sb *strings.Builder, id string, prefix string, edgeLabel string, last bool, printed map[string]bool) {
 	if printed[id] {
 		return
 	}
@@ -435,11 +445,18 @@ func (g *Graph) printTextTree(sb *strings.Builder, id string, prefix string, las
 		}
 	}
 
-	sb.WriteString(fmt.Sprintf("%s%s%s %s  %s\n", prefix, branch, statusChar, displayID, f.Title))
+	labelPart := ""
+	if edgeLabel != "" {
+		labelPart = fmt.Sprintf(" [%s]", edgeLabel)
+	}
 
-	// Get and sort children
+	sb.WriteString(fmt.Sprintf("%s%s%s %s%s  %s\n", prefix, branch, statusChar, displayID, labelPart, f.Title))
+
+	// Get and sort children by ID
 	children := g.Downstream[id]
-	sort.Strings(children)
+	sort.Slice(children, func(i, j int) bool {
+		return children[i].ID < children[j].ID
+	})
 
 	// Calculate child prefix
 	childPrefix := prefix
@@ -453,7 +470,7 @@ func (g *Graph) printTextTree(sb *strings.Builder, id string, prefix string, las
 		childPrefix = "    "
 	}
 
-	for i, childID := range children {
-		g.printTextTree(sb, childID, childPrefix, i == len(children)-1, printed)
+	for i, child := range children {
+		g.printTextTree(sb, child.ID, childPrefix, child.Label, i == len(children)-1, printed)
 	}
 }

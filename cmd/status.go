@@ -111,10 +111,8 @@ var rmCmd = &cobra.Command{
 			return err
 		}
 		for _, other := range felts {
-			for _, dep := range other.DependsOn {
-				if dep == f.ID {
-					return fmt.Errorf("cannot delete: %s depends on this felt", other.ID)
-				}
+			if other.DependsOn.HasID(f.ID) {
+				return fmt.Errorf("cannot delete: %s depends on this felt", other.ID)
 			}
 		}
 

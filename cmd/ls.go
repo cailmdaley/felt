@@ -332,11 +332,11 @@ func buildTreeNode(g *felt.Graph, id string, visited map[string]bool) *TreeNode 
 
 	node := &TreeNode{Felt: f}
 	children := g.Downstream[id]
-	sort.Strings(children)
+	sort.Slice(children, func(i, j int) bool { return children[i].ID < children[j].ID })
 
-	for _, childID := range children {
-		if child := buildTreeNode(g, childID, visited); child != nil {
-			node.Children = append(node.Children, child)
+	for _, child := range children {
+		if childNode := buildTreeNode(g, child.ID, visited); childNode != nil {
+			node.Children = append(node.Children, childNode)
 		}
 	}
 	return node
@@ -369,7 +369,7 @@ func printTreeWithVisited(g *felt.Graph, id string, prefix string, last bool, vi
 
 	// Get children (downstream)
 	children := g.Downstream[id]
-	sort.Strings(children)
+	sort.Slice(children, func(i, j int) bool { return children[i].ID < children[j].ID })
 
 	// Update prefix for children
 	var childPrefix string
@@ -382,8 +382,8 @@ func printTreeWithVisited(g *felt.Graph, id string, prefix string, last bool, vi
 		childPrefix = prefix + "│   "
 	}
 
-	for i, childID := range children {
-		printTreeWithVisited(g, childID, childPrefix, i == len(children)-1, visited)
+	for i, child := range children {
+		printTreeWithVisited(g, child.ID, childPrefix, i == len(children)-1, visited)
 	}
 }
 

@@ -31,6 +31,9 @@ var (
 	editReason   string
 )
 
+// Link command flags
+var linkLabel string
+
 var editCmd = &cobra.Command{
 	Use:   "edit <id>",
 	Short: "Modify a felt's properties or open in $EDITOR",
@@ -115,19 +118,12 @@ Examples:
 				}
 
 				// Check if already linked
-				alreadyLinked := false
-				for _, d := range f.DependsOn {
-					if d == depFelt.ID {
-						alreadyLinked = true
-						break
-					}
-				}
-				if alreadyLinked {
+				if f.DependsOn.HasID(depFelt.ID) {
 					continue
 				}
 
 				// Add dependency
-				f.DependsOn = append(f.DependsOn, depFelt.ID)
+				f.DependsOn = append(f.DependsOn, felt.Dependency{ID: depFelt.ID})
 			}
 
 			// Check for cycles
@@ -138,8 +134,8 @@ Examples:
 			g := felt.BuildGraph(felts)
 			g.Nodes[f.ID] = f
 			g.Upstream[f.ID] = f.DependsOn
-			for _, depID := range f.DependsOn {
-				if g.DetectCycle(f.ID, depID) {
+			for _, dep := range f.DependsOn {
+				if g.DetectCycle(f.ID, dep.ID) {
 					return fmt.Errorf("adding dependency would create a cycle")
 				}
 			}
@@ -206,10 +202,8 @@ var linkCmd = &cobra.Command{
 		}
 
 		// Check if already linked
-		for _, d := range f.DependsOn {
-			if d == dep.ID {
-				return fmt.Errorf("%s already depends on %s", f.ID, dep.ID)
-			}
+		if f.DependsOn.HasID(dep.ID) {
+			return fmt.Errorf("%s already depends on %s", f.ID, dep.ID)
 		}
 
 		// Check for cycles
@@ -219,7 +213,7 @@ var linkCmd = &cobra.Command{
 		}
 
 		// Temporarily add the link
-		f.DependsOn = append(f.DependsOn, dep.ID)
+		f.DependsOn = append(f.DependsOn, felt.Dependency{ID: dep.ID, Label: linkLabel})
 		g := felt.BuildGraph(felts)
 		// Update the node in the graph
 		g.Nodes[f.ID] = f
@@ -233,7 +227,11 @@ var linkCmd = &cobra.Command{
 			return err
 		}
 
-		fmt.Printf("Linked %s → %s\n", f.ID, dep.ID)
+		if linkLabel != "" {
+			fmt.Printf("Linked %s → %s [%s]\n", f.ID, dep.ID, linkLabel)
+		} else {
+			fmt.Printf("Linked %s → %s\n", f.ID, dep.ID)
+		}
 		return nil
 	},
 }
@@ -263,9 +261,9 @@ var unlinkCmd = &cobra.Command{
 
 		// Find and remove
 		found := false
-		var newDeps []string
+		var newDeps felt.Dependencies
 		for _, d := range f.DependsOn {
-			if d == dep.ID {
+			if d.ID == dep.ID {
 				found = true
 			} else {
 				newDeps = append(newDeps, d)
@@ -413,6 +411,9 @@ func init() {
 	editCmd.Flags().StringVarP(&editReason, "reason", "r", "", "Set close reason")
 	editCmd.Flags().StringVarP(&editDue, "due", "D", "", "Set due date (YYYY-MM-DD, empty to clear)")
 	editCmd.Flags().StringArrayVarP(&editDeps, "depends-on", "a", nil, "Add dependency (repeatable)")
+
+	// Link command flags
+	linkCmd.Flags().StringVarP(&linkLabel, "label", "l", "", "Label explaining the dependency")
 
 	// Find command flags
 	findCmd.Flags().StringVarP(&findKind, "kind", "k", "", "Filter by kind")
