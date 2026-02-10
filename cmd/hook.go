@@ -66,7 +66,7 @@ func minimalOutput() string {
 ` + cliReference() + `## Core Rules
 - Track **work** that spans sessions, has dependencies, or emerges during work
 - Track **decisions** — what was decided, why, and how decisions depend on each other
-- Closing reason (` + "`-r`" + `) is the documentation: capture the outcome, the reasoning, what was learned
+- Outcome (` + "`-o`" + `) is the documentation: capture the conclusion, the reasoning, what was learned
 - When in doubt, prefer felt—persistence you don't need is better than lost context
 `
 }
@@ -150,8 +150,8 @@ func formatSessionOutput(felts []*felt.Felt, g *felt.Graph) string {
 	sb.WriteString("## Core Rules\n")
 	sb.WriteString("- Track **work** that spans sessions, has dependencies, or emerges during work\n")
 	sb.WriteString("- Track **decisions** — what was decided, why, and how decisions depend on each other\n")
-	sb.WriteString("- Closing reason (`-r`) is the documentation: capture the outcome, the reasoning, what was learned\n")
-	sb.WriteString("- **Leave breadcrumbs** — open a fiber when starting work; file bugs and questions for later; close with what happened\n")
+	sb.WriteString("- Outcome (`-o`) is the documentation: capture the conclusion, the reasoning, what was learned\n")
+	sb.WriteString("- **Leave breadcrumbs** — file fibers for decisions, questions, observations; use `felt on` to track active work\n")
 	sb.WriteString("- When in doubt, prefer felt—persistence you don't need is better than lost context\n")
 
 	return sb.String()
@@ -163,10 +163,10 @@ func formatFiberEntry(icon string, f *felt.Felt) string {
 	// Line 1: status + ID
 	line1 := fmt.Sprintf("%s %s\n", icon, f.ID)
 
-	// Line 2: indented title with metadata (kind, deps)
+	// Line 2: indented title with metadata (tags, deps)
 	var meta []string
-	if f.Kind != felt.DefaultKind {
-		meta = append(meta, f.Kind)
+	if len(f.Tags) > 0 {
+		meta = append(meta, strings.Join(f.Tags, ", "))
 	}
 	if len(f.DependsOn) > 0 {
 		meta = append(meta, fmt.Sprintf("%d deps", len(f.DependsOn)))
@@ -183,15 +183,15 @@ func formatFiberEntry(icon string, f *felt.Felt) string {
 }
 
 // formatClosedEntry formats a closed fiber for the recently closed section.
-// Same two-line format as formatFiberEntry but includes close reason.
+// Same two-line format as formatFiberEntry but includes outcome.
 func formatClosedEntry(f *felt.Felt) string {
 	// Line 1: status + ID
 	line1 := fmt.Sprintf("● %s\n", f.ID)
 
-	// Line 2: indented title with kind
+	// Line 2: indented title with tags
 	var meta []string
-	if f.Kind != felt.DefaultKind {
-		meta = append(meta, f.Kind)
+	if len(f.Tags) > 0 {
+		meta = append(meta, strings.Join(f.Tags, ", "))
 	}
 
 	metaStr := ""
@@ -201,14 +201,14 @@ func formatClosedEntry(f *felt.Felt) string {
 
 	line2 := fmt.Sprintf("    %s%s\n", f.Title, metaStr)
 
-	// Line 3: close reason (indented, truncated)
+	// Line 3: outcome (indented, truncated)
 	line3 := ""
-	if f.CloseReason != "" {
-		reason := f.CloseReason
-		if len(reason) > 100 {
-			reason = reason[:100] + "..."
+	if f.Outcome != "" {
+		outcome := f.Outcome
+		if len(outcome) > 100 {
+			outcome = outcome[:100] + "..."
 		}
-		line3 = fmt.Sprintf("    → %s\n", reason)
+		line3 = fmt.Sprintf("    → %s\n", outcome)
 	}
 
 	return line1 + line2 + line3
@@ -218,18 +218,23 @@ func formatClosedEntry(f *felt.Felt) string {
 func cliReference() string {
 	return `## CLI
 ` + "```" + `
-felt add "title" -k decision -a <dep-id> -t <tag>   # create fiber (-k: kind, -a: depends on, -t: tag)
-felt on <id>                    # start working (reopens if closed)
-felt off <id> -r "outcome"      # close with reason
+felt "title"                    # create fiber (no status by default)
+felt add "title" -s open        # -s: opt into tracking (open, active, closed)
+felt add "title" -o "answer"    # -o: set outcome
+felt add "title" -a <dep-id>    # -a: depends on (after)
+felt on <id>                    # start working (enters tracking)
+felt off <id> -o "outcome"      # set outcome (closes if tracked)
 felt comment <id> "note"        # add comment
-felt ls                         # open/active fibers
-felt ls -s all -k decision      # -s: status, -k: kind filter
+felt ls                         # tracked fibers (open/active)
+felt ls --all                   # all fibers including untracked
 felt show <id>                  # full details
-felt find "query"               # search title/body/reason
-felt edit <id> --title "new"    # replace metadata (title, kind, due, reason)
-Also: link, unlink, tag, untag, upstream, downstream, tree, ready, rm
+felt ready                      # fibers with all deps closed
+felt find "query"               # search title/body/outcome
+felt link <id> <dep-id>         # add dependency
+felt upstream/downstream <id>   # see connections
+felt edit <id> --title "new"    # replace metadata (title, due, outcome)
 ` + "```" + `
-Statuses: ○ open, ◐ active, ● closed
+Statuses: · untracked, ○ open, ◐ active, ● closed
 To patch body text (not replace), edit .felt/<id>.md directly.
 
 `

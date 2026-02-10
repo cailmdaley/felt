@@ -47,7 +47,6 @@ func TestStorageWriteRead(t *testing.T) {
 		ID:        "test-task-12345678",
 		Title:     "Test Task",
 		Status:    StatusOpen,
-		Kind:      DefaultKind,
 		Priority:  2,
 		DependsOn: Dependencies{{ID: "dep-a-aaaaaaaa"}},
 		CreatedAt: time.Now(),
@@ -260,14 +259,12 @@ func TestStorageFindAmbiguous(t *testing.T) {
 		ID:        "task-12345678",
 		Title:     "Task 1",
 		Status:    StatusOpen,
-		Kind:      DefaultKind,
 		CreatedAt: time.Now(),
 	}
 	f2 := &Felt{
 		ID:        "task-87654321",
 		Title:     "Task 2",
 		Status:    StatusOpen,
-		Kind:      DefaultKind,
 		CreatedAt: time.Now(),
 	}
 	s.Write(f1)

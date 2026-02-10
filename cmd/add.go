@@ -12,12 +12,12 @@ import (
 
 var (
 	addBody     string
-	addKind     string
+	addStatus   string
 	addPriority int
 	addDeps     []string
 	addDue      string
 	addTags     []string
-	addReason   string
+	addOutcome  string
 )
 
 var addCmd = &cobra.Command{
@@ -55,8 +55,8 @@ var addCmd = &cobra.Command{
 				f.Body = string(data)
 			}
 		}
-		if addKind != "" {
-			f.Kind = addKind
+		if addStatus != "" {
+			f.Status = addStatus
 		}
 		if cmd.Flags().Changed("priority") {
 			f.Priority = addPriority
@@ -97,11 +97,8 @@ var addCmd = &cobra.Command{
 			}
 			f.Due = &due
 		}
-		if addReason != "" {
-			f.Status = felt.StatusClosed
-			now := time.Now()
-			f.ClosedAt = &now
-			f.CloseReason = addReason
+		if addOutcome != "" {
+			f.Outcome = addOutcome
 		}
 
 		if err := storage.Write(f); err != nil {
@@ -116,12 +113,12 @@ var addCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(addCmd)
 	addCmd.Flags().StringVarP(&addBody, "body", "b", "", "Body text")
-	addCmd.Flags().StringVarP(&addKind, "kind", "k", "", "Kind (task, spec, thread, etc)")
+	addCmd.Flags().StringVarP(&addStatus, "status", "s", "", "Status (open, active, closed)")
 	addCmd.Flags().IntVarP(&addPriority, "priority", "p", 2, "Priority (0-4, lower=more urgent)")
 	addCmd.Flags().StringArrayVarP(&addDeps, "depends-on", "a", nil, "Dependency ID (repeatable)")
 	addCmd.Flags().StringVarP(&addDue, "due", "D", "", "Due date (YYYY-MM-DD)")
 	addCmd.Flags().StringArrayVarP(&addTags, "tag", "t", nil, "Tag (repeatable)")
-	addCmd.Flags().StringVarP(&addReason, "reason", "r", "", "Close reason (creates fiber already closed)")
+	addCmd.Flags().StringVarP(&addOutcome, "outcome", "o", "", "Outcome (the conclusion)")
 }
 
 // Also allow bare "felt <title>" as shorthand for "felt add <title>"
@@ -130,12 +127,12 @@ func init() {
 
 	// Copy add command flags to root so "felt <title> -a dep" works
 	rootCmd.Flags().StringVarP(&addBody, "body", "b", "", "Body text")
-	rootCmd.Flags().StringVarP(&addKind, "kind", "k", "", "Kind (task, spec, thread, etc)")
+	rootCmd.Flags().StringVarP(&addStatus, "status", "s", "", "Status (open, active, closed)")
 	rootCmd.Flags().IntVarP(&addPriority, "priority", "p", 2, "Priority (0-4, lower=more urgent)")
 	rootCmd.Flags().StringArrayVarP(&addDeps, "depends-on", "a", nil, "Dependency ID (repeatable)")
 	rootCmd.Flags().StringVarP(&addDue, "due", "D", "", "Due date (YYYY-MM-DD)")
 	rootCmd.Flags().StringArrayVarP(&addTags, "tag", "t", nil, "Tag (repeatable)")
-	rootCmd.Flags().StringVarP(&addReason, "reason", "r", "", "Close reason (creates fiber already closed)")
+	rootCmd.Flags().StringVarP(&addOutcome, "outcome", "o", "", "Outcome (the conclusion)")
 
 	originalRun := rootCmd.RunE
 	rootCmd.RunE = func(cmd *cobra.Command, args []string) error {

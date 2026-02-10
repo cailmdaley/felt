@@ -271,7 +271,7 @@ func (g *Graph) ToMermaid() string {
 	sb.WriteString("\n")
 
 	// Style classes
-	var openNodes, activeNodes, closedNodes []string
+	var untrackedNodes, openNodes, activeNodes, closedNodes []string
 	for _, id := range ids {
 		f := g.Nodes[id]
 		switch f.Status {
@@ -281,9 +281,14 @@ func (g *Graph) ToMermaid() string {
 			activeNodes = append(activeNodes, sanitizeMermaidID(id))
 		case StatusClosed:
 			closedNodes = append(closedNodes, sanitizeMermaidID(id))
+		default:
+			untrackedNodes = append(untrackedNodes, sanitizeMermaidID(id))
 		}
 	}
 
+	if len(untrackedNodes) > 0 {
+		sb.WriteString(fmt.Sprintf("    class %s untracked\n", strings.Join(untrackedNodes, ",")))
+	}
 	if len(openNodes) > 0 {
 		sb.WriteString(fmt.Sprintf("    class %s open\n", strings.Join(openNodes, ",")))
 	}
@@ -294,7 +299,8 @@ func (g *Graph) ToMermaid() string {
 		sb.WriteString(fmt.Sprintf("    class %s closed\n", strings.Join(closedNodes, ",")))
 	}
 
-	sb.WriteString("\n    classDef open fill:#fff,stroke:#333\n")
+	sb.WriteString("\n    classDef untracked fill:#f5f5f5,stroke:#999\n")
+	sb.WriteString("    classDef open fill:#fff,stroke:#333\n")
 	sb.WriteString("    classDef active fill:#ffd,stroke:#333\n")
 	sb.WriteString("    classDef closed fill:#dfd,stroke:#333\n")
 
@@ -325,6 +331,8 @@ func (g *Graph) ToDot() string {
 			style = ",style=filled,fillcolor=lightyellow"
 		case StatusClosed:
 			style = ",style=filled,fillcolor=lightgreen"
+		case "":
+			style = ",style=filled,fillcolor=whitesmoke"
 		}
 		sb.WriteString(fmt.Sprintf("    \"%s\" [label=\"%s\"%s];\n", id, title, style))
 	}
@@ -414,8 +422,10 @@ func (g *Graph) printTextTree(sb *strings.Builder, id string, prefix string, edg
 	}
 
 	// Status indicator
-	statusChar := "○"
+	statusChar := "·"
 	switch f.Status {
+	case StatusOpen:
+		statusChar = "○"
 	case StatusActive:
 		statusChar = "◐"
 	case StatusClosed:

@@ -15,11 +15,8 @@ func TestNew(t *testing.T) {
 	if f.Title != "Test Task" {
 		t.Errorf("Title = %q, want %q", f.Title, "Test Task")
 	}
-	if f.Status != StatusOpen {
-		t.Errorf("Status = %q, want %q", f.Status, StatusOpen)
-	}
-	if f.Kind != DefaultKind {
-		t.Errorf("Kind = %q, want %q", f.Kind, DefaultKind)
+	if f.Status != "" {
+		t.Errorf("Status = %q, want empty (no default status)", f.Status)
 	}
 	if f.Priority != 2 {
 		t.Errorf("Priority = %d, want 2", f.Priority)
@@ -124,8 +121,8 @@ Some comment here.
 	if f.Status != StatusActive {
 		t.Errorf("Status = %q, want %q", f.Status, StatusActive)
 	}
-	if f.Kind != "spec" {
-		t.Errorf("Kind = %q, want %q", f.Kind, "spec")
+	if !f.HasTag("spec") {
+		t.Errorf("HasTag(spec) = false, want true (kind migrates to tags)")
 	}
 	if f.Priority != 1 {
 		t.Errorf("Priority = %d, want 1", f.Priority)
@@ -164,8 +161,6 @@ func TestMarshal(t *testing.T) {
 	f := &Felt{
 		ID:        "test-task-12345678",
 		Title:     "Test Task",
-		Status:    StatusOpen,
-		Kind:      "task",
 		Priority:  2,
 		DependsOn: Dependencies{{ID: "dep-1-aaaaaaaa"}},
 		CreatedAt: now,
@@ -196,8 +191,8 @@ func TestMarshal(t *testing.T) {
 	if parsed.Title != f.Title {
 		t.Errorf("Round-trip Title = %q, want %q", parsed.Title, f.Title)
 	}
-	if parsed.Status != f.Status {
-		t.Errorf("Round-trip Status = %q, want %q", parsed.Status, f.Status)
+	if parsed.Status != "" {
+		t.Errorf("Round-trip Status = %q, want empty", parsed.Status)
 	}
 }
 
@@ -417,7 +412,6 @@ func TestMarshalTags(t *testing.T) {
 		ID:        "test-tags-12345678",
 		Title:     "Test Tags",
 		Status:    StatusOpen,
-		Kind:      "task",
 		Tags:      []string{"alpha", "beta"},
 		Priority:  2,
 		CreatedAt: time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC),
@@ -492,7 +486,6 @@ func TestMarshalMixedDependencies(t *testing.T) {
 		ID:     "mixed-deps-aabbccdd",
 		Title:  "Mixed deps test",
 		Status: StatusOpen,
-		Kind:   "task",
 		DependsOn: Dependencies{
 			{ID: "bare-id-12345678"},
 			{ID: "labeled-id-87654321", Label: "needs data from"},

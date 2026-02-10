@@ -10,19 +10,20 @@ import (
 )
 
 var (
-	lsStatus   string
-	lsKind     string
-	lsTags     []string
-	lsRecent   int
-	lsBody     bool
-	readyTags  []string
+	lsStatus string
+	lsTags   []string
+	lsRecent int
+	lsBody   bool
+	lsAll    bool
+	readyTags []string
 )
 
 var lsCmd = &cobra.Command{
 	Use:   "ls",
 	Short: "List felts",
-	Long: `Lists felts, showing open and active by default.
+	Long: `Lists tracked felts (those with a status), showing open and active by default.
 
+Use --all to include fibers without status.
 Use -s to filter: open, active, closed, or all.`,
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -40,16 +41,18 @@ Use -s to filter: open, active, closed, or all.`,
 		// Filter
 		var filtered []*felt.Felt
 		for _, f := range felts {
+			// Unless --all, only show fibers with a status
+			if !lsAll && !f.HasStatus() {
+				continue
+			}
+
 			// Status filter: default to open+active, "all" shows everything
-			if lsStatus == "" {
+			if lsStatus == "" && !lsAll {
 				// Default: show open and active only
 				if f.Status != felt.StatusOpen && f.Status != felt.StatusActive {
 					continue
 				}
-			} else if lsStatus != "all" && f.Status != lsStatus {
-				continue
-			}
-			if lsKind != "" && f.Kind != lsKind {
+			} else if lsStatus != "" && lsStatus != "all" && f.Status != lsStatus {
 				continue
 			}
 			// Tag filter: must have ALL specified tags (AND logic)
@@ -128,6 +131,8 @@ func statusIcon(status string) string {
 		return "◐"
 	case felt.StatusClosed:
 		return "●"
+	case "":
+		return "·"
 	default:
 		return "?"
 	}
@@ -148,10 +153,10 @@ func formatFeltTwoLine(f *felt.Felt) string {
 	// Line 1: status + ID
 	line1 := fmt.Sprintf("%s %s\n", icon, f.ID)
 
-	// Line 2: indented title with metadata (kind, deps)
+	// Line 2: indented title with metadata (tags, deps)
 	var meta []string
-	if f.Kind != felt.DefaultKind {
-		meta = append(meta, f.Kind)
+	if len(f.Tags) > 0 {
+		meta = append(meta, strings.Join(f.Tags, ", "))
 	}
 	if len(f.DependsOn) > 0 {
 		meta = append(meta, fmt.Sprintf("%d deps", len(f.DependsOn)))
@@ -170,7 +175,7 @@ func formatFeltTwoLine(f *felt.Felt) string {
 func init() {
 	rootCmd.AddCommand(lsCmd)
 	lsCmd.Flags().StringVarP(&lsStatus, "status", "s", "", "Filter by status (open, active, closed, all)")
-	lsCmd.Flags().StringVarP(&lsKind, "kind", "k", "", "Filter by kind")
+	lsCmd.Flags().BoolVar(&lsAll, "all", false, "Include fibers without status")
 	lsCmd.Flags().StringArrayVarP(&lsTags, "tag", "t", nil, "Filter by tag (repeatable, AND logic)")
 	lsCmd.Flags().IntVarP(&lsRecent, "recent", "r", 0, "Show N most recent (by closed-at or created-at)")
 	lsCmd.Flags().BoolVar(&lsBody, "body", false, "Include body field in JSON output")

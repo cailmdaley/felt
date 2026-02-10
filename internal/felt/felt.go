@@ -22,9 +22,6 @@ const (
 	StatusClosed = "closed"
 )
 
-// Default kind
-const DefaultKind = "task"
-
 // Dependency represents a dependency with an optional label explaining why.
 type Dependency struct {
 	ID    string `json:"id"`
@@ -96,24 +93,29 @@ func (deps Dependencies) LabelFor(id string) string {
 	return ""
 }
 
-// Felt represents a single task/spec/thread in the DAG.
+// Felt represents a single fiber in the DAG.
 type Felt struct {
-	ID          string       `yaml:"-" json:"id"`
-	Title       string       `yaml:"title" json:"title"`
-	Status      string       `yaml:"status" json:"status"`
-	Kind        string       `yaml:"kind,omitempty" json:"kind,omitempty"`
-	Tags        []string     `yaml:"tags,omitempty" json:"tags,omitempty"`
-	Priority    int          `yaml:"priority,omitempty" json:"priority,omitempty"`
-	DependsOn   Dependencies `yaml:"depends-on,omitempty" json:"depends_on,omitempty"`
-	CreatedAt   time.Time    `yaml:"created-at" json:"created_at"`
-	ClosedAt    *time.Time   `yaml:"closed-at,omitempty" json:"closed_at,omitempty"`
-	CloseReason string       `yaml:"close-reason,omitempty" json:"close_reason,omitempty"`
-	Due         *time.Time   `yaml:"due,omitempty" json:"due,omitempty"`
-	Body        string       `yaml:"-" json:"body,omitempty"`
+	ID        string       `yaml:"-" json:"id"`
+	Title     string       `yaml:"title" json:"title"`
+	Status    string       `yaml:"status,omitempty" json:"status,omitempty"`
+	Tags      []string     `yaml:"tags,omitempty" json:"tags,omitempty"`
+	Priority  int          `yaml:"priority,omitempty" json:"priority,omitempty"`
+	DependsOn Dependencies `yaml:"depends-on,omitempty" json:"depends_on,omitempty"`
+	CreatedAt time.Time    `yaml:"created-at" json:"created_at"`
+	ClosedAt  *time.Time   `yaml:"closed-at,omitempty" json:"closed_at,omitempty"`
+	Outcome   string       `yaml:"outcome,omitempty" json:"outcome,omitempty"`
+	Due       *time.Time   `yaml:"due,omitempty" json:"due,omitempty"`
+	Body      string       `yaml:"-" json:"body,omitempty"`
+}
+
+// HasStatus returns true if the fiber has opt-in status tracking.
+func (f *Felt) HasStatus() bool {
+	return f.Status != ""
 }
 
 // New creates a new Felt with default values.
 // Returns an error if title is empty.
+// Fibers have no status by default — status is opt-in for tracked work.
 func New(title string) (*Felt, error) {
 	title = strings.TrimSpace(title)
 	if title == "" {
@@ -128,8 +130,6 @@ func New(title string) (*Felt, error) {
 	return &Felt{
 		ID:        id,
 		Title:     title,
-		Status:    StatusOpen,
-		Kind:      DefaultKind,
 		Priority:  2,
 		DependsOn: Dependencies{},
 		CreatedAt: time.Now(),
@@ -260,24 +260,59 @@ func (f *Felt) RemoveTag(tag string) {
 	}
 }
 
+// parseFrontmatter is an intermediate struct for backward-compatible parsing.
+// It reads both old field names (close-reason, kind) and new ones (outcome).
+type parseFrontmatter struct {
+	Title       string       `yaml:"title"`
+	Status      string       `yaml:"status,omitempty"`
+	Kind        string       `yaml:"kind,omitempty"`
+	Tags        []string     `yaml:"tags,omitempty"`
+	Priority    int          `yaml:"priority,omitempty"`
+	DependsOn   Dependencies `yaml:"depends-on,omitempty"`
+	CreatedAt   time.Time    `yaml:"created-at"`
+	ClosedAt    *time.Time   `yaml:"closed-at,omitempty"`
+	CloseReason string       `yaml:"close-reason,omitempty"`
+	Outcome     string       `yaml:"outcome,omitempty"`
+	Due         *time.Time   `yaml:"due,omitempty"`
+}
+
 // Parse parses a felt file content into a Felt struct.
 // The id parameter is the ID extracted from the filename.
+// Handles backward compatibility: reads close-reason as outcome, migrates kind to tags.
 func Parse(id string, content []byte) (*Felt, error) {
 	frontmatter, body, err := splitFrontmatter(content)
 	if err != nil {
 		return nil, err
 	}
 
-	f := &Felt{ID: id}
-	if err := yaml.Unmarshal(frontmatter, f); err != nil {
+	var pf parseFrontmatter
+	if err := yaml.Unmarshal(frontmatter, &pf); err != nil {
 		return nil, fmt.Errorf("parsing YAML frontmatter: %w", err)
 	}
 
-	f.Body = strings.TrimSpace(body)
+	f := &Felt{
+		ID:        id,
+		Title:     pf.Title,
+		Status:    pf.Status,
+		Tags:      pf.Tags,
+		Priority:  pf.Priority,
+		DependsOn: pf.DependsOn,
+		CreatedAt: pf.CreatedAt,
+		ClosedAt:  pf.ClosedAt,
+		Due:       pf.Due,
+		Body:      strings.TrimSpace(body),
+	}
 
-	// Set defaults
-	if f.Kind == "" {
-		f.Kind = DefaultKind
+	// Backward compat: close-reason → outcome
+	if pf.Outcome != "" {
+		f.Outcome = pf.Outcome
+	} else if pf.CloseReason != "" {
+		f.Outcome = pf.CloseReason
+	}
+
+	// Backward compat: kind → tag (skip "task" which was the old default)
+	if pf.Kind != "" && pf.Kind != "task" {
+		f.AddTag(pf.Kind)
 	}
 
 	return f, nil
@@ -332,27 +367,25 @@ func splitFrontmatter(content []byte) ([]byte, string, error) {
 func (f *Felt) Marshal() ([]byte, error) {
 	// Build frontmatter struct for controlled field ordering
 	fm := struct {
-		Title       string       `yaml:"title"`
-		Status      string       `yaml:"status"`
-		Kind        string       `yaml:"kind,omitempty"`
-		Tags        []string     `yaml:"tags,omitempty"`
-		Priority    int          `yaml:"priority,omitempty"`
-		DependsOn   Dependencies `yaml:"depends-on,omitempty"`
-		CreatedAt   time.Time    `yaml:"created-at"`
-		ClosedAt    *time.Time   `yaml:"closed-at,omitempty"`
-		CloseReason string       `yaml:"close-reason,omitempty"`
-		Due         *time.Time   `yaml:"due,omitempty"`
+		Title     string       `yaml:"title"`
+		Status    string       `yaml:"status,omitempty"`
+		Tags      []string     `yaml:"tags,omitempty"`
+		Priority  int          `yaml:"priority,omitempty"`
+		DependsOn Dependencies `yaml:"depends-on,omitempty"`
+		CreatedAt time.Time    `yaml:"created-at"`
+		ClosedAt  *time.Time   `yaml:"closed-at,omitempty"`
+		Outcome   string       `yaml:"outcome,omitempty"`
+		Due       *time.Time   `yaml:"due,omitempty"`
 	}{
-		Title:       f.Title,
-		Status:      f.Status,
-		Kind:        f.Kind,
-		Tags:        f.Tags,
-		Priority:    f.Priority,
-		DependsOn:   f.DependsOn,
-		CreatedAt:   f.CreatedAt,
-		ClosedAt:    f.ClosedAt,
-		CloseReason: f.CloseReason,
-		Due:         f.Due,
+		Title:     f.Title,
+		Status:    f.Status,
+		Tags:      f.Tags,
+		Priority:  f.Priority,
+		DependsOn: f.DependsOn,
+		CreatedAt: f.CreatedAt,
+		ClosedAt:  f.ClosedAt,
+		Outcome:   f.Outcome,
+		Due:       f.Due,
 	}
 
 	yamlBytes, err := yaml.Marshal(fm)

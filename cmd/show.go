@@ -47,9 +47,8 @@ var showCmd = &cobra.Command{
 		// Header
 		fmt.Printf("ID:       %s\n", f.ID)
 		fmt.Printf("Title:    %s\n", f.Title)
-		fmt.Printf("Status:   %s\n", f.Status)
-		if f.Kind != felt.DefaultKind {
-			fmt.Printf("Kind:     %s\n", f.Kind)
+		if f.HasStatus() {
+			fmt.Printf("Status:   %s\n", f.Status)
 		}
 		if len(f.Tags) > 0 {
 			fmt.Printf("Tags:     %s\n", strings.Join(f.Tags, ", "))
@@ -74,8 +73,8 @@ var showCmd = &cobra.Command{
 		if f.ClosedAt != nil {
 			fmt.Printf("Closed:   %s\n", f.ClosedAt.Format("2006-01-02T15:04:05-07:00"))
 		}
-		if f.CloseReason != "" {
-			fmt.Printf("Reason:   %s\n", f.CloseReason)
+		if f.Outcome != "" {
+			fmt.Printf("Outcome:  %s\n", f.Outcome)
 		}
 
 		// Body

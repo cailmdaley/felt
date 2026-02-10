@@ -13,7 +13,6 @@ import (
 )
 
 var (
-	findKind   string
 	findExact  bool
 	findRegex  bool
 	findStatus string
@@ -23,12 +22,11 @@ var (
 // Edit command flags
 var (
 	editPriority int
-	editKind     string
 	editTitle    string
 	editDue      string
 	editDeps     []string
 	editBody     string
-	editReason   string
+	editOutcome  string
 )
 
 // Link command flags
@@ -59,12 +57,11 @@ Examples:
 
 		// Check if any modification flags were provided
 		hasFlags := cmd.Flags().Changed("priority") ||
-			cmd.Flags().Changed("kind") ||
 			cmd.Flags().Changed("title") ||
 			cmd.Flags().Changed("due") ||
 			cmd.Flags().Changed("depends-on") ||
 			cmd.Flags().Changed("body") ||
-			cmd.Flags().Changed("reason")
+			cmd.Flags().Changed("outcome")
 
 		if !hasFlags {
 			// No flags: open in editor
@@ -86,17 +83,14 @@ Examples:
 		if cmd.Flags().Changed("priority") {
 			f.Priority = editPriority
 		}
-		if cmd.Flags().Changed("kind") {
-			f.Kind = editKind
-		}
 		if cmd.Flags().Changed("title") {
 			f.Title = editTitle
 		}
 		if cmd.Flags().Changed("body") {
 			f.Body = editBody
 		}
-		if cmd.Flags().Changed("reason") {
-			f.CloseReason = editReason
+		if cmd.Flags().Changed("outcome") {
+			f.Outcome = editOutcome
 		}
 		if cmd.Flags().Changed("due") {
 			if editDue == "" {
@@ -324,10 +318,6 @@ Results are sorted with exact title matches first.`,
 		var partialMatches []*felt.Felt
 
 		for _, f := range felts {
-			// Kind filter
-			if findKind != "" && f.Kind != findKind {
-				continue
-			}
 			// Status filter
 			if findStatus != "" && f.Status != findStatus {
 				continue
@@ -364,11 +354,11 @@ Results are sorted with exact title matches first.`,
 			if findRegex {
 				matches = re.MatchString(f.Title) ||
 					re.MatchString(f.Body) ||
-					re.MatchString(f.CloseReason)
+					re.MatchString(f.Outcome)
 			} else {
 				matches = strings.Contains(titleLower, queryLower) ||
 					strings.Contains(strings.ToLower(f.Body), queryLower) ||
-					strings.Contains(strings.ToLower(f.CloseReason), queryLower)
+					strings.Contains(strings.ToLower(f.Outcome), queryLower)
 			}
 
 			if matches {
@@ -405,10 +395,9 @@ func init() {
 
 	// Edit command flags
 	editCmd.Flags().IntVarP(&editPriority, "priority", "p", 2, "Set priority (0-4, lower=more urgent)")
-	editCmd.Flags().StringVarP(&editKind, "kind", "k", "", "Set kind (task, spec, thread, etc)")
 	editCmd.Flags().StringVarP(&editTitle, "title", "t", "", "Set title")
 	editCmd.Flags().StringVarP(&editBody, "body", "b", "", "Set body text")
-	editCmd.Flags().StringVarP(&editReason, "reason", "r", "", "Set close reason")
+	editCmd.Flags().StringVarP(&editOutcome, "outcome", "o", "", "Set outcome")
 	editCmd.Flags().StringVarP(&editDue, "due", "D", "", "Set due date (YYYY-MM-DD, empty to clear)")
 	editCmd.Flags().StringArrayVarP(&editDeps, "depends-on", "a", nil, "Add dependency (repeatable)")
 
@@ -416,7 +405,6 @@ func init() {
 	linkCmd.Flags().StringVarP(&linkLabel, "label", "l", "", "Label explaining the dependency")
 
 	// Find command flags
-	findCmd.Flags().StringVarP(&findKind, "kind", "k", "", "Filter by kind")
 	findCmd.Flags().BoolVarP(&findExact, "exact", "e", false, "Exact title match only")
 	findCmd.Flags().BoolVarP(&findRegex, "regex", "r", false, "Treat query as regular expression")
 	findCmd.Flags().StringVarP(&findStatus, "status", "s", "", "Filter by status (open, active, closed)")

@@ -8,12 +8,12 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var offReason string
+var offOutcome string
 
 var onCmd = &cobra.Command{
 	Use:   "on <id>",
 	Short: "Mark a felt as active",
-	Long:  `Marks a fiber as active. Reopens if closed.`,
+	Long:  `Marks a fiber as active (enters tracking if fiber had no status). Reopens if closed.`,
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		root, err := felt.FindProjectRoot()
@@ -32,7 +32,7 @@ var onCmd = &cobra.Command{
 		// Clear closure metadata when reopening
 		if wasClosed {
 			f.ClosedAt = nil
-			f.CloseReason = ""
+			f.Outcome = ""
 		}
 		if err := storage.Write(f); err != nil {
 			return err
@@ -45,9 +45,11 @@ var onCmd = &cobra.Command{
 
 var offCmd = &cobra.Command{
 	Use:   "off <id>",
-	Short: "Mark a felt as closed",
-	Long:  `Marks a felt as completed/closed with an optional reason.`,
-	Args:  cobra.ExactArgs(1),
+	Short: "Close a felt or set its outcome",
+	Long: `Sets the outcome and/or closes a fiber.
+If the fiber has a status, it is closed. If -r is provided, the outcome is set.
+A fiber without status and without -r has nothing to do.`,
+	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		root, err := felt.FindProjectRoot()
 		if err != nil {
@@ -60,30 +62,31 @@ var offCmd = &cobra.Command{
 			return err
 		}
 
-		// If already closed, update reason if provided, otherwise no-op
-		if f.IsClosed() {
-			if offReason != "" {
-				f.CloseReason = offReason
-				if err := storage.Write(f); err != nil {
-					return err
-				}
-			}
-			fmt.Printf("● %s  %s\n", f.ID, f.Title)
-			return nil
+		// Update outcome if provided
+		if offOutcome != "" {
+			f.Outcome = offOutcome
 		}
 
-		now := time.Now()
-		f.Status = felt.StatusClosed
-		f.ClosedAt = &now
-		if offReason != "" {
-			f.CloseReason = offReason
+		// Close if fiber has a status
+		if f.HasStatus() {
+			if !f.IsClosed() {
+				now := time.Now()
+				f.Status = felt.StatusClosed
+				f.ClosedAt = &now
+			}
+		} else if offOutcome == "" {
+			return fmt.Errorf("fiber has no status to close; use -r to set an outcome")
 		}
 
 		if err := storage.Write(f); err != nil {
 			return err
 		}
 
-		fmt.Printf("● %s  %s\n", f.ID, f.Title)
+		if f.HasStatus() {
+			fmt.Printf("● %s  %s\n", f.ID, f.Title)
+		} else {
+			fmt.Printf("  %s  %s\n", f.ID, f.Title)
+		}
 		return nil
 	},
 }
@@ -130,5 +133,5 @@ func init() {
 	rootCmd.AddCommand(offCmd)
 	rootCmd.AddCommand(rmCmd)
 
-	offCmd.Flags().StringVarP(&offReason, "reason", "r", "", "Reason for closing")
+	offCmd.Flags().StringVarP(&offOutcome, "outcome", "o", "", "Outcome (the conclusion)")
 }

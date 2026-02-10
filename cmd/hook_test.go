@@ -42,7 +42,6 @@ func TestFormatSessionOutput(t *testing.T) {
 		ID:        "active-task-12345678",
 		Title:     "Active task",
 		Status:    felt.StatusActive,
-		Kind:      felt.DefaultKind,
 		Priority:  2,
 		CreatedAt: now,
 	}
@@ -51,20 +50,18 @@ func TestFormatSessionOutput(t *testing.T) {
 		ID:        "ready-task-87654321",
 		Title:     "Ready task",
 		Status:    felt.StatusOpen,
-		Kind:      felt.DefaultKind,
 		Priority:  2,
 		CreatedAt: now,
 	}
 
 	closedFelt := &felt.Felt{
-		ID:          "closed-task-abcdef12",
-		Title:       "Closed task",
-		Status:      felt.StatusClosed,
-		Kind:        felt.DefaultKind,
-		Priority:    2,
-		CreatedAt:   now.Add(-2 * time.Hour),
-		ClosedAt:    &closedTime,
-		CloseReason: "Done with good results",
+		ID:        "closed-task-abcdef12",
+		Title:     "Closed task",
+		Status:    felt.StatusClosed,
+		Priority:  2,
+		CreatedAt: now.Add(-2 * time.Hour),
+		ClosedAt:  &closedTime,
+		Outcome:   "Done with good results",
 	}
 
 	felts := []*felt.Felt{activeFelt, readyFelt, closedFelt}
@@ -101,7 +98,7 @@ func TestFormatSessionOutput(t *testing.T) {
 		t.Error("missing closed task in recently closed")
 	}
 	if !strings.Contains(output, "→ Done with good results") {
-		t.Error("missing close reason")
+		t.Error("missing outcome")
 	}
 
 	// Check core rules
@@ -131,7 +128,6 @@ func TestFormatSessionOutput_PrioritySorting(t *testing.T) {
 		ID:        "low-priority-12345678",
 		Title:     "Low priority active",
 		Status:    felt.StatusActive,
-		Kind:      felt.DefaultKind,
 		Priority:  3,
 		CreatedAt: now,
 	}
@@ -140,7 +136,6 @@ func TestFormatSessionOutput_PrioritySorting(t *testing.T) {
 		ID:        "high-priority-87654321",
 		Title:     "High priority active",
 		Status:    felt.StatusActive,
-		Kind:      felt.DefaultKind,
 		Priority:  1,
 		CreatedAt: now.Add(time.Minute), // Created later but higher priority
 	}
@@ -171,7 +166,6 @@ func TestFormatSessionOutput_BlockedReady(t *testing.T) {
 		ID:        "blocker-task-12345678",
 		Title:     "Blocker",
 		Status:    felt.StatusOpen,
-		Kind:      felt.DefaultKind,
 		Priority:  2,
 		CreatedAt: now,
 	}
@@ -180,7 +174,6 @@ func TestFormatSessionOutput_BlockedReady(t *testing.T) {
 		ID:        "blocked-task-87654321",
 		Title:     "Blocked task",
 		Status:    felt.StatusOpen,
-		Kind:      felt.DefaultKind,
 		Priority:  2,
 		DependsOn: felt.Dependencies{{ID: "blocker-task-12345678"}},
 		CreatedAt: now.Add(time.Minute),
@@ -212,7 +205,6 @@ func TestFormatSessionOutput_UnblockedByClosedDep(t *testing.T) {
 		ID:        "closed-dep-12345678",
 		Title:     "Completed prereq",
 		Status:    felt.StatusClosed,
-		Kind:      felt.DefaultKind,
 		Priority:  2,
 		CreatedAt: now.Add(-2 * time.Hour),
 		ClosedAt:  &closedTime,
@@ -223,7 +215,6 @@ func TestFormatSessionOutput_UnblockedByClosedDep(t *testing.T) {
 		ID:        "unblocked-task-87654321",
 		Title:     "Task unblocked by closed dep",
 		Status:    felt.StatusOpen,
-		Kind:      felt.DefaultKind,
 		Priority:  2,
 		DependsOn: felt.Dependencies{{ID: "closed-dep-12345678"}},
 		CreatedAt: now.Add(time.Minute),
@@ -251,15 +242,14 @@ func TestFormatSessionOutput_UnblockedByClosedDep(t *testing.T) {
 	}
 }
 
-func TestFormatSessionOutput_KindLabels(t *testing.T) {
+func TestFormatSessionOutput_TagLabels(t *testing.T) {
 	now := time.Now()
 
-	// Create fibers with different kinds
+	// Create fibers with different tags
 	taskFelt := &felt.Felt{
 		ID:        "impl-auth-12345678",
 		Title:     "Implement auth",
 		Status:    felt.StatusActive,
-		Kind:      felt.DefaultKind, // "task" - should NOT show label
 		Priority:  2,
 		CreatedAt: now,
 	}
@@ -268,7 +258,7 @@ func TestFormatSessionOutput_KindLabels(t *testing.T) {
 		ID:        "design-api-87654321",
 		Title:     "Design REST API",
 		Status:    felt.StatusOpen,
-		Kind:      "decision", // non-default - should show (decision)
+		Tags:      []string{"decision"},
 		Priority:  2,
 		CreatedAt: now,
 	}
@@ -277,7 +267,7 @@ func TestFormatSessionOutput_KindLabels(t *testing.T) {
 		ID:        "research-lib-abcdef12",
 		Title:     "Which library?",
 		Status:    felt.StatusOpen,
-		Kind:      "question", // non-default - should show (question)
+		Tags:      []string{"question"},
 		Priority:  2,
 		CreatedAt: now,
 	}
@@ -287,9 +277,9 @@ func TestFormatSessionOutput_KindLabels(t *testing.T) {
 
 	output := formatSessionOutput(felts, g)
 
-	// Task (default kind) should NOT have a kind label
+	// Fiber with no tags should NOT have a tag label
 	if strings.Contains(output, "(task)") {
-		t.Error("default 'task' kind should not show label")
+		t.Error("fiber with no tags should not show label")
 	}
 
 	// Decision should have (decision) in metadata
@@ -311,32 +301,31 @@ func TestFormatFiberEntry(t *testing.T) {
 		expected string
 	}{
 		{
-			name: "default task kind - no label",
+			name: "no tags - no label",
 			icon: "◐",
 			felt: &felt.Felt{
 				ID:    "impl-auth-12345678",
 				Title: "Implement auth",
-				Kind:  felt.DefaultKind,
 			},
 			expected: "◐ impl-auth-12345678\n    Implement auth\n",
 		},
 		{
-			name: "decision kind - shows label",
+			name: "decision tag - shows label",
 			icon: "○",
 			felt: &felt.Felt{
 				ID:    "design-api-87654321",
 				Title: "Design REST API",
-				Kind:  "decision",
+				Tags:  []string{"decision"},
 			},
 			expected: "○ design-api-87654321\n    Design REST API (decision)\n",
 		},
 		{
-			name: "spec kind - shows label",
+			name: "spec tag - shows label",
 			icon: "○",
 			felt: &felt.Felt{
 				ID:    "api-spec-abcdef12",
 				Title: "API specification",
-				Kind:  "spec",
+				Tags:  []string{"spec"},
 			},
 			expected: "○ api-spec-abcdef12\n    API specification (spec)\n",
 		},
@@ -363,7 +352,6 @@ func TestFormatSessionOutput_LimitsRecentlyClosed(t *testing.T) {
 			ID:        fmt.Sprintf("closed-%d-12345678", i),
 			Title:     fmt.Sprintf("Closed task %d", i),
 			Status:    felt.StatusClosed,
-			Kind:      felt.DefaultKind,
 			ClosedAt:  &closedTime,
 			CreatedAt: now.Add(-10 * time.Hour),
 		})
@@ -393,49 +381,47 @@ func TestFormatClosedEntry(t *testing.T) {
 	now := time.Now()
 
 	tests := []struct {
-		name       string
-		felt       *felt.Felt
-		wantIcon   string
-		wantKind   bool
-		wantReason bool
+		name        string
+		felt        *felt.Felt
+		wantIcon    string
+		wantTag     bool
+		wantOutcome bool
 	}{
 		{
-			name: "basic closed with reason",
+			name: "basic closed with outcome",
 			felt: &felt.Felt{
-				ID:          "done-task-12345678",
-				Title:       "Done task",
-				Kind:        felt.DefaultKind,
-				CloseReason: "Completed successfully",
-				ClosedAt:    &now,
+				ID:       "done-task-12345678",
+				Title:    "Done task",
+				Outcome:  "Completed successfully",
+				ClosedAt: &now,
 			},
-			wantIcon:   "●",
-			wantKind:   false,
-			wantReason: true,
+			wantIcon:    "●",
+			wantTag:     false,
+			wantOutcome: true,
 		},
 		{
-			name: "closed decision with kind label",
+			name: "closed decision with tag label",
 			felt: &felt.Felt{
-				ID:          "decided-12345678",
-				Title:       "Which approach",
-				Kind:        "decision",
-				CloseReason: "Chose option A because of performance",
-				ClosedAt:    &now,
+				ID:       "decided-12345678",
+				Title:    "Which approach",
+				Tags:     []string{"decision"},
+				Outcome:  "Chose option A because of performance",
+				ClosedAt: &now,
 			},
-			wantIcon:   "●",
-			wantKind:   true,
-			wantReason: true,
+			wantIcon:    "●",
+			wantTag:     true,
+			wantOutcome: true,
 		},
 		{
-			name: "closed without reason",
+			name: "closed without outcome",
 			felt: &felt.Felt{
 				ID:       "no-reason-12345678",
 				Title:    "No reason given",
-				Kind:     felt.DefaultKind,
 				ClosedAt: &now,
 			},
-			wantIcon:   "●",
-			wantKind:   false,
-			wantReason: false,
+			wantIcon:    "●",
+			wantTag:     false,
+			wantOutcome: false,
 		},
 	}
 
@@ -447,45 +433,44 @@ func TestFormatClosedEntry(t *testing.T) {
 				t.Errorf("missing closed icon, got: %s", result)
 			}
 
-			if tt.wantKind && !strings.Contains(result, "(decision)") {
-				t.Errorf("missing kind label, got: %s", result)
+			if tt.wantTag && !strings.Contains(result, "(decision)") {
+				t.Errorf("missing tag label, got: %s", result)
 			}
 
-			if !tt.wantKind && strings.Contains(result, "(task)") {
-				t.Error("default kind should not show label")
+			if !tt.wantTag && strings.Contains(result, "(decision)") {
+				t.Error("should not show tag label when no tags")
 			}
 
-			if tt.wantReason && !strings.Contains(result, "→") {
-				t.Error("missing close reason arrow")
+			if tt.wantOutcome && !strings.Contains(result, "→") {
+				t.Error("missing outcome arrow")
 			}
 
-			if !tt.wantReason && strings.Contains(result, "→") {
-				t.Error("should not have close reason arrow when no reason")
+			if !tt.wantOutcome && strings.Contains(result, "→") {
+				t.Error("should not have outcome arrow when no outcome")
 			}
 		})
 	}
 }
 
-func TestFormatClosedEntry_TruncatesLongReason(t *testing.T) {
+func TestFormatClosedEntry_TruncatesLongOutcome(t *testing.T) {
 	now := time.Now()
-	longReason := strings.Repeat("a", 150)
+	longOutcome := strings.Repeat("a", 150)
 
 	f := &felt.Felt{
-		ID:          "long-reason-12345678",
-		Title:       "Long reason task",
-		Kind:        felt.DefaultKind,
-		CloseReason: longReason,
-		ClosedAt:    &now,
+		ID:       "long-reason-12345678",
+		Title:    "Long reason task",
+		Outcome:  longOutcome,
+		ClosedAt: &now,
 	}
 
 	result := formatClosedEntry(f)
 
 	// Should be truncated with ...
 	if !strings.Contains(result, "...") {
-		t.Error("long reason should be truncated with ...")
+		t.Error("long outcome should be truncated with ...")
 	}
 	// Should not contain the full 150 chars
-	if strings.Contains(result, longReason) {
-		t.Error("should not contain full long reason")
+	if strings.Contains(result, longOutcome) {
+		t.Error("should not contain full long outcome")
 	}
 }
