@@ -233,7 +233,17 @@ func ExtractTags(title string) ([]string, string) {
 }
 
 // HasTag returns true if the felt has the specified tag.
+// Supports prefix matching: if tag ends with ":", matches any tag with that prefix.
 func (f *Felt) HasTag(tag string) bool {
+	if strings.HasSuffix(tag, ":") {
+		// Prefix match: "rule:" matches "rule:cosebis_data_vector"
+		for _, t := range f.Tags {
+			if strings.HasPrefix(t, tag) {
+				return true
+			}
+		}
+		return false
+	}
 	for _, t := range f.Tags {
 		if t == tag {
 			return true

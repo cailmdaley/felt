@@ -4,19 +4,10 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"regexp"
-	"strings"
 	"time"
 
 	"github.com/cailmdaley/felt/internal/felt"
 	"github.com/spf13/cobra"
-)
-
-var (
-	findExact  bool
-	findRegex  bool
-	findStatus string
-	findTags   []string
 )
 
 // Edit command flags
@@ -296,111 +287,17 @@ var unlinkCmd = &cobra.Command{
 	},
 }
 
+// find is an alias for "ls -s all <query>" — searches all fibers by default.
 var findCmd = &cobra.Command{
-	Use:   "find <query>",
-	Short: "Search felts",
-	Long: `Searches felts by title, body, and outcome.
-
-Flags:
-  --exact/-e    Only match felts where title equals query exactly
-  --regex/-r    Treat query as a regular expression
-
-Results are sorted with exact title matches first.`,
-	Args: cobra.ExactArgs(1),
+	Use:        "find <query>",
+	Short:      "Search felts (alias for ls -s all <query>)",
+	Long:       `Alias for "felt ls -s all <query>". Searches all fibers regardless of status.`,
+	Args:       cobra.ExactArgs(1),
+	Deprecated: "use 'felt ls -s all <query>' instead",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		root, err := felt.FindProjectRoot()
-		if err != nil {
-			return fmt.Errorf("not in a felt repository")
-		}
-
-		storage := felt.NewStorage(root)
-		felts, err := storage.List()
-		if err != nil {
-			return err
-		}
-
-		query := args[0]
-		queryLower := strings.ToLower(query)
-
-		// Compile regex if needed
-		var re *regexp.Regexp
-		if findRegex {
-			var err error
-			re, err = regexp.Compile("(?i)" + query) // case-insensitive
-			if err != nil {
-				return fmt.Errorf("invalid regex: %w", err)
-			}
-		}
-
-		var exactMatches []*felt.Felt
-		var partialMatches []*felt.Felt
-
-		for _, f := range felts {
-			// Status filter
-			if findStatus != "" && f.Status != findStatus {
-				continue
-			}
-			// Tag filter (AND logic)
-			if len(findTags) > 0 {
-				hasAll := true
-				for _, tag := range findTags {
-					if !f.HasTag(tag) {
-						hasAll = false
-						break
-					}
-				}
-				if !hasAll {
-					continue
-				}
-			}
-
-			titleLower := strings.ToLower(f.Title)
-
-			// Check for exact title match (not applicable in regex mode)
-			if !findRegex && titleLower == queryLower {
-				exactMatches = append(exactMatches, f)
-				continue
-			}
-
-			// If --exact flag, skip partial matches
-			if findExact {
-				continue
-			}
-
-			// Check for matches (regex or substring)
-			var matches bool
-			if findRegex {
-				matches = re.MatchString(f.Title) ||
-					re.MatchString(f.Body) ||
-					re.MatchString(f.Outcome)
-			} else {
-				matches = strings.Contains(titleLower, queryLower) ||
-					strings.Contains(strings.ToLower(f.Body), queryLower) ||
-					strings.Contains(strings.ToLower(f.Outcome), queryLower)
-			}
-
-			if matches {
-				partialMatches = append(partialMatches, f)
-			}
-		}
-
-		// Combine: exact matches first, then partial
-		allMatches := append(exactMatches, partialMatches...)
-
-		if jsonOutput {
-			return outputJSON(allMatches)
-		}
-
-		if len(allMatches) == 0 {
-			fmt.Printf("No felts matching %q\n", query)
-			return nil
-		}
-
-		for _, f := range allMatches {
-			printFeltTwoLine(f)
-		}
-
-		return nil
+		// Set ls flags to match find's "search everything" behavior
+		lsStatus = "all"
+		return lsCmd.RunE(lsCmd, args)
 	},
 }
 
@@ -421,10 +318,4 @@ func init() {
 
 	// Link command flags
 	linkCmd.Flags().StringVarP(&linkLabel, "label", "l", "", "Label explaining the dependency")
-
-	// Find command flags
-	findCmd.Flags().BoolVarP(&findExact, "exact", "e", false, "Exact title match only")
-	findCmd.Flags().BoolVarP(&findRegex, "regex", "r", false, "Treat query as regular expression")
-	findCmd.Flags().StringVarP(&findStatus, "status", "s", "", "Filter by status (open, active, closed)")
-	findCmd.Flags().StringArrayVarP(&findTags, "tag", "t", nil, "Filter by tag (repeatable, AND logic)")
 }

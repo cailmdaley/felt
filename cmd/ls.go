@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -14,18 +15,28 @@ var (
 	lsTags   []string
 	lsRecent int
 	lsBody   bool
-	lsAll    bool
+	lsExact  bool
+	lsRegex  bool
 	readyTags []string
 )
 
 var lsCmd = &cobra.Command{
-	Use:   "ls",
-	Short: "List felts",
-	Long: `Lists tracked felts (those with a status), showing open and active by default.
+	Use:   "ls [query]",
+	Short: "List and search felts",
+	Long: `Lists felts, showing open and active by default.
 
-Use --all to include fibers without status.
-Use -s to filter: open, active, closed, or all.`,
-	Args:  cobra.NoArgs,
+Use -s to filter by status: open, active, closed, or all.
+  -s all includes fibers without status (everything).
+
+Use -t to filter by tag (AND logic, prefix matching with trailing colon):
+  -t rule:                    matches any rule:* tag
+  -t rule:cosebis_data_vector exact tag match
+
+Optional query searches title, body, and outcome:
+  felt ls cosebis             substring search
+  felt ls -r "rule:.*data"    regex search
+  felt ls -e "exact title"    exact title match`,
+	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		root, err := felt.FindProjectRoot()
 		if err != nil {
@@ -38,24 +49,45 @@ Use -s to filter: open, active, closed, or all.`,
 			return err
 		}
 
+		query := ""
+		if len(args) == 1 {
+			query = args[0]
+		}
+
+		// Compile regex if needed
+		var re *regexp.Regexp
+		if lsRegex && query != "" {
+			re, err = regexp.Compile("(?i)" + query)
+			if err != nil {
+				return fmt.Errorf("invalid regex: %w", err)
+			}
+		}
+
+		queryLower := strings.ToLower(query)
+
 		// Filter
+		var exactMatches []*felt.Felt
 		var filtered []*felt.Felt
 		for _, f := range felts {
-			// Unless --all, only show fibers with a status
-			if !lsAll && !f.HasStatus() {
-				continue
-			}
-
-			// Status filter: default to open+active, "all" shows everything
-			if lsStatus == "" && !lsAll {
-				// Default: show open and active only
+			// Status gate
+			if lsStatus == "all" {
+				// -s all: no filtering, include everything
+			} else if lsStatus != "" {
+				// Specific status: must match
+				if f.Status != lsStatus {
+					continue
+				}
+			} else {
+				// Default: open+active, must have status
+				if !f.HasStatus() {
+					continue
+				}
 				if f.Status != felt.StatusOpen && f.Status != felt.StatusActive {
 					continue
 				}
-			} else if lsStatus != "" && lsStatus != "all" && f.Status != lsStatus {
-				continue
 			}
-			// Tag filter: must have ALL specified tags (AND logic)
+
+			// Tag filter: must have ALL specified tags (AND logic, prefix supported)
 			if len(lsTags) > 0 {
 				hasAll := true
 				for _, tag := range lsTags {
@@ -68,8 +100,44 @@ Use -s to filter: open, active, closed, or all.`,
 					continue
 				}
 			}
+
+			// Text search (if query provided)
+			if query != "" {
+				titleLower := strings.ToLower(f.Title)
+
+				// Exact title match (sorted first)
+				if !lsRegex && titleLower == queryLower {
+					exactMatches = append(exactMatches, f)
+					continue
+				}
+
+				// If --exact, skip partial matches
+				if lsExact {
+					continue
+				}
+
+				// Regex or substring match
+				var matches bool
+				if lsRegex {
+					matches = re.MatchString(f.Title) ||
+						re.MatchString(f.Body) ||
+						re.MatchString(f.Outcome)
+				} else {
+					matches = strings.Contains(titleLower, queryLower) ||
+						strings.Contains(strings.ToLower(f.Body), queryLower) ||
+						strings.Contains(strings.ToLower(f.Outcome), queryLower)
+				}
+
+				if !matches {
+					continue
+				}
+			}
+
 			filtered = append(filtered, f)
 		}
+
+		// Exact title matches first, then the rest
+		filtered = append(exactMatches, filtered...)
 
 		// Sort: --recent sorts by recency, otherwise by priority then creation
 		if lsRecent > 0 {
@@ -89,8 +157,8 @@ Use -s to filter: open, active, closed, or all.`,
 			if len(filtered) > lsRecent {
 				filtered = filtered[:lsRecent]
 			}
-		} else {
-			// Default: sort by creation time
+		} else if query == "" {
+			// Default: sort by creation time (skip for search results to preserve relevance)
 			sort.Slice(filtered, func(i, j int) bool {
 				return filtered[i].CreatedAt.Before(filtered[j].CreatedAt)
 			})
@@ -108,7 +176,11 @@ Use -s to filter: open, active, closed, or all.`,
 		}
 
 		if len(filtered) == 0 {
-			fmt.Println("No felts found")
+			if query != "" {
+				fmt.Printf("No felts matching %q\n", query)
+			} else {
+				fmt.Println("No felts found")
+			}
 			return nil
 		}
 
@@ -172,10 +244,11 @@ func formatFeltTwoLine(f *felt.Felt) string {
 func init() {
 	rootCmd.AddCommand(lsCmd)
 	lsCmd.Flags().StringVarP(&lsStatus, "status", "s", "", "Filter by status (open, active, closed, all)")
-	lsCmd.Flags().BoolVar(&lsAll, "all", false, "Include fibers without status")
-	lsCmd.Flags().StringArrayVarP(&lsTags, "tag", "t", nil, "Filter by tag (repeatable, AND logic)")
-	lsCmd.Flags().IntVarP(&lsRecent, "recent", "r", 0, "Show N most recent (by closed-at or created-at)")
+	lsCmd.Flags().StringArrayVarP(&lsTags, "tag", "t", nil, "Filter by tag (repeatable, AND logic; trailing colon for prefix match)")
+	lsCmd.Flags().IntVarP(&lsRecent, "recent", "n", 0, "Show N most recent (by closed-at or created-at)")
 	lsCmd.Flags().BoolVar(&lsBody, "body", false, "Include body field in JSON output")
+	lsCmd.Flags().BoolVarP(&lsExact, "exact", "e", false, "Exact title match only (with query)")
+	lsCmd.Flags().BoolVarP(&lsRegex, "regex", "r", false, "Treat query as regular expression")
 }
 
 // ready command - open felts with all deps closed

@@ -31,7 +31,7 @@ felt edit auth-design -s closed -o "JWT with refresh tokens.
 Considered session cookies but need mobile support."
 ```
 
-Later: `felt find "JWT"` surfaces this.
+Later: `felt ls -s all "JWT"` surfaces this.
 
 ## JSON for Scripts
 

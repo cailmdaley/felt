@@ -39,7 +39,7 @@ Fibers are minimal by default. All fields except title are optional.
 go build .        # build
 go test ./...     # test
 ./felt ls         # run locally
-./felt ls --all   # include untracked fibers
+./felt ls -s all  # include untracked fibers
 ```
 
 ## Releasing

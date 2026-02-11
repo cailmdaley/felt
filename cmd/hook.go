@@ -215,9 +215,8 @@ felt edit <id> -s active        # enter tracking / mark active
 felt edit <id> -s closed -o "outcome"  # close with outcome
 felt comment <id> "note"        # add comment
 felt show <id>                  # full details (-d: title, compact, summary)
-felt ls                         # tracked fibers (open/active)
-felt ls --all                   # all fibers including untracked
-felt find "query"               # search title/body/outcome
+felt ls                         # open/active; -s all|closed, -t tag:, -n N
+felt ls -s all "query" -t tag:  # flags compose; -e exact, -r regex
 Also: link, unlink, tag, untag, upstream, downstream, tree, ready, rm
 ` + "```" + `
 Statuses: · untracked, ○ open, ◐ active, ● closed

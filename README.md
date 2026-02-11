@@ -56,7 +56,7 @@ The `-o` flag captures *what was learned, decided, or produced*. Closed fibers b
 
 ```bash
 felt ls -s closed             # what's been done
-felt find "JWT"               # search all fibers
+felt ls -s all "JWT"          # search all fibers
 felt show <id> -d compact     # see outcome without full body
 ```
 
@@ -136,14 +136,16 @@ felt rm <id>                      # delete (fails if dependents exist)
 
 ```bash
 felt ls                           # tracked fibers (open/active)
-felt ls --all                     # all fibers including untracked
+felt ls -s all                    # all fibers including untracked
 felt ls -s closed                 # by status
 felt ls -t backend -t urgent      # by tags (AND)
+felt ls -s all -t rule:           # tag prefix matching
+felt ls -s all "query"            # search title, body, outcome
+felt ls -s all -r "pattern"       # regex search
 felt ready                        # open with all deps closed
 felt show <id>                    # full details
 felt show <id> -d compact         # structured overview
 felt tree                         # dependency tree
-felt find <query>                 # search title, body, outcome
 ```
 
 ### Editing

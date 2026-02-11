@@ -319,7 +319,7 @@ func TestExtractTags(t *testing.T) {
 }
 
 func TestHasTag(t *testing.T) {
-	f := &Felt{Tags: []string{"alpha", "beta"}}
+	f := &Felt{Tags: []string{"alpha", "beta", "rule:cosebis_data_vector"}}
 
 	if !f.HasTag("alpha") {
 		t.Error("HasTag(alpha) should be true")
@@ -329,6 +329,20 @@ func TestHasTag(t *testing.T) {
 	}
 	if f.HasTag("gamma") {
 		t.Error("HasTag(gamma) should be false")
+	}
+
+	// Prefix matching: trailing colon
+	if !f.HasTag("rule:") {
+		t.Error("HasTag(rule:) should match rule:cosebis_data_vector")
+	}
+	if !f.HasTag("rule:cosebis_data_vector") {
+		t.Error("HasTag(rule:cosebis_data_vector) should be exact match")
+	}
+	if f.HasTag("rule:other") {
+		t.Error("HasTag(rule:other) should not match")
+	}
+	if f.HasTag("alpha:") {
+		t.Error("HasTag(alpha:) should not match — alpha has no colon")
 	}
 }
 
