@@ -90,11 +90,8 @@ Use -s to filter: open, active, closed, or all.`,
 				filtered = filtered[:lsRecent]
 			}
 		} else {
-			// Default: sort by priority, then creation time
+			// Default: sort by creation time
 			sort.Slice(filtered, func(i, j int) bool {
-				if filtered[i].Priority != filtered[j].Priority {
-					return filtered[i].Priority < filtered[j].Priority
-				}
 				return filtered[i].CreatedAt.Before(filtered[j].CreatedAt)
 			})
 		}

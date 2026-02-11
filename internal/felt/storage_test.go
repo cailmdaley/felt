@@ -47,7 +47,6 @@ func TestStorageWriteRead(t *testing.T) {
 		ID:        "test-task-12345678",
 		Title:     "Test Task",
 		Status:    StatusOpen,
-		Priority:  2,
 		DependsOn: Dependencies{{ID: "dep-a-aaaaaaaa"}},
 		CreatedAt: time.Now(),
 		Body:      "Test body content.",

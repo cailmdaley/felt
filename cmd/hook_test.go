@@ -42,7 +42,7 @@ func TestFormatSessionOutput(t *testing.T) {
 		ID:        "active-task-12345678",
 		Title:     "Active task",
 		Status:    felt.StatusActive,
-		Priority:  2,
+
 		CreatedAt: now,
 	}
 
@@ -50,7 +50,7 @@ func TestFormatSessionOutput(t *testing.T) {
 		ID:        "ready-task-87654321",
 		Title:     "Ready task",
 		Status:    felt.StatusOpen,
-		Priority:  2,
+
 		CreatedAt: now,
 	}
 
@@ -58,7 +58,6 @@ func TestFormatSessionOutput(t *testing.T) {
 		ID:         "closed-task-abcdef12",
 		Title:      "Closed task",
 		Status:     felt.StatusClosed,
-		Priority:   2,
 		CreatedAt:  now.Add(-2 * time.Hour),
 		ClosedAt:   &closedTime,
 		Outcome:    "Done with good results",
@@ -120,45 +119,6 @@ func TestFormatSessionOutput_Empty(t *testing.T) {
 	}
 }
 
-func TestFormatSessionOutput_PrioritySorting(t *testing.T) {
-	now := time.Now()
-
-	// Create active fibers with different priorities
-	// Lower priority number = higher priority
-	lowPriorityActive := &felt.Felt{
-		ID:        "low-priority-12345678",
-		Title:     "Low priority active",
-		Status:    felt.StatusActive,
-		Priority:  3,
-		CreatedAt: now,
-	}
-
-	highPriorityActive := &felt.Felt{
-		ID:        "high-priority-87654321",
-		Title:     "High priority active",
-		Status:    felt.StatusActive,
-		Priority:  1,
-		CreatedAt: now.Add(time.Minute), // Created later but higher priority
-	}
-
-	felts := []*felt.Felt{lowPriorityActive, highPriorityActive}
-	g := felt.BuildGraph(felts)
-
-	output := formatSessionOutput(felts, g)
-
-	// High priority should appear before low priority
-	highIdx := strings.Index(output, "high-priority-87654321")
-	lowIdx := strings.Index(output, "low-priority-12345678")
-
-	if highIdx < 0 || lowIdx < 0 {
-		t.Error("both active fibers should appear in output")
-	}
-
-	if highIdx > lowIdx {
-		t.Error("high priority fiber should appear before low priority fiber")
-	}
-}
-
 func TestFormatSessionOutput_BlockedReady(t *testing.T) {
 	now := time.Now()
 
@@ -167,7 +127,7 @@ func TestFormatSessionOutput_BlockedReady(t *testing.T) {
 		ID:        "blocker-task-12345678",
 		Title:     "Blocker",
 		Status:    felt.StatusOpen,
-		Priority:  2,
+
 		CreatedAt: now,
 	}
 
@@ -175,7 +135,7 @@ func TestFormatSessionOutput_BlockedReady(t *testing.T) {
 		ID:        "blocked-task-87654321",
 		Title:     "Blocked task",
 		Status:    felt.StatusOpen,
-		Priority:  2,
+
 		DependsOn: felt.Dependencies{{ID: "blocker-task-12345678"}},
 		CreatedAt: now.Add(time.Minute),
 	}
@@ -215,7 +175,6 @@ func TestFormatSessionOutput_UnblockedByClosedDep(t *testing.T) {
 		ID:         "closed-dep-12345678",
 		Title:      "Completed prereq",
 		Status:     felt.StatusClosed,
-		Priority:   2,
 		CreatedAt:  now.Add(-2 * time.Hour),
 		ClosedAt:   &closedTime,
 		ModifiedAt: closedTime,
@@ -226,7 +185,7 @@ func TestFormatSessionOutput_UnblockedByClosedDep(t *testing.T) {
 		ID:        "unblocked-task-87654321",
 		Title:     "Task unblocked by closed dep",
 		Status:    felt.StatusOpen,
-		Priority:  2,
+
 		DependsOn: felt.Dependencies{{ID: "closed-dep-12345678"}},
 		CreatedAt: now.Add(time.Minute),
 	}
@@ -261,7 +220,7 @@ func TestFormatSessionOutput_TagLabels(t *testing.T) {
 		ID:        "impl-auth-12345678",
 		Title:     "Implement auth",
 		Status:    felt.StatusActive,
-		Priority:  2,
+
 		CreatedAt: now,
 	}
 
@@ -270,7 +229,7 @@ func TestFormatSessionOutput_TagLabels(t *testing.T) {
 		Title:     "Design REST API",
 		Status:    felt.StatusOpen,
 		Tags:      []string{"decision"},
-		Priority:  2,
+
 		CreatedAt: now,
 	}
 
@@ -279,7 +238,7 @@ func TestFormatSessionOutput_TagLabels(t *testing.T) {
 		Title:     "Which library?",
 		Status:    felt.StatusOpen,
 		Tags:      []string{"question"},
-		Priority:  2,
+
 		CreatedAt: now,
 	}
 

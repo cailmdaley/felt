@@ -21,8 +21,7 @@ var (
 
 // Edit command flags
 var (
-	editPriority int
-	editTitle    string
+	editTitle  string
 	editStatus   string
 	editDue      string
 	editDeps     []string
@@ -39,7 +38,6 @@ var editCmd = &cobra.Command{
 	Long: `Modifies a felt's properties via flags, or opens in $EDITOR if no flags given.
 
 Examples:
-  felt edit abc123 --priority 1
   felt edit abc123 --title "New title" -s active
   felt edit abc123 --depends-on other-fiber-id
   felt edit abc123                  # opens in $EDITOR`,
@@ -57,8 +55,7 @@ Examples:
 		}
 
 		// Check if any modification flags were provided
-		hasFlags := cmd.Flags().Changed("priority") ||
-			cmd.Flags().Changed("title") ||
+		hasFlags := cmd.Flags().Changed("title") ||
 			cmd.Flags().Changed("status") ||
 			cmd.Flags().Changed("due") ||
 			cmd.Flags().Changed("depends-on") ||
@@ -82,9 +79,6 @@ Examples:
 		}
 
 		// Apply flag modifications
-		if cmd.Flags().Changed("priority") {
-			f.Priority = editPriority
-		}
 		if cmd.Flags().Changed("title") {
 			f.Title = editTitle
 		}
@@ -418,7 +412,6 @@ func init() {
 	rootCmd.AddCommand(findCmd)
 
 	// Edit command flags
-	editCmd.Flags().IntVarP(&editPriority, "priority", "p", 2, "Set priority (0-4, lower=more urgent)")
 	editCmd.Flags().StringVarP(&editTitle, "title", "t", "", "Set title")
 	editCmd.Flags().StringVarP(&editStatus, "status", "s", "", "Set status (open, active, closed)")
 	editCmd.Flags().StringVarP(&editBody, "body", "b", "", "Set body text")

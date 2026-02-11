@@ -113,7 +113,6 @@ func renderSummary(f *felt.Felt, g *felt.Graph) string {
 func renderFull(f *felt.Felt, g *felt.Graph) string {
 	var sb strings.Builder
 	writeHeader(&sb, f)
-	fmt.Fprintf(&sb, "Priority: %d\n", f.Priority)
 	writeDeps(&sb, f, g, true)
 	if f.Due != nil {
 		fmt.Fprintf(&sb, "Due:      %s\n", f.Due.Format("2006-01-02"))

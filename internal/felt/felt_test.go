@@ -18,9 +18,6 @@ func TestNew(t *testing.T) {
 	if f.Status != "" {
 		t.Errorf("Status = %q, want empty (no default status)", f.Status)
 	}
-	if f.Priority != 2 {
-		t.Errorf("Priority = %d, want 2", f.Priority)
-	}
 	if !strings.HasPrefix(f.ID, "test-task-") {
 		t.Errorf("ID = %q, want prefix %q", f.ID, "test-task-")
 	}
@@ -94,7 +91,6 @@ func TestParse(t *testing.T) {
 title: Test Task
 status: active
 kind: spec
-priority: 1
 depends-on:
   - dep-a-12345678
   - dep-b-87654321
@@ -123,9 +119,6 @@ Some comment here.
 	}
 	if !f.HasTag("spec") {
 		t.Errorf("HasTag(spec) = false, want true (kind migrates to tags)")
-	}
-	if f.Priority != 1 {
-		t.Errorf("Priority = %d, want 1", f.Priority)
 	}
 	if len(f.DependsOn) != 2 {
 		t.Errorf("DependsOn length = %d, want 2", len(f.DependsOn))
@@ -161,7 +154,6 @@ func TestMarshal(t *testing.T) {
 	f := &Felt{
 		ID:        "test-task-12345678",
 		Title:     "Test Task",
-		Priority:  2,
 		DependsOn: Dependencies{{ID: "dep-1-aaaaaaaa"}},
 		CreatedAt: now,
 		Body:      "Body text here.",
@@ -413,7 +405,6 @@ func TestMarshalTags(t *testing.T) {
 		Title:     "Test Tags",
 		Status:    StatusOpen,
 		Tags:      []string{"alpha", "beta"},
-		Priority:  2,
 		CreatedAt: time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC),
 	}
 
@@ -490,7 +481,6 @@ func TestMarshalMixedDependencies(t *testing.T) {
 			{ID: "bare-id-12345678"},
 			{ID: "labeled-id-87654321", Label: "needs data from"},
 		},
-		Priority:  2,
 		CreatedAt: time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC),
 	}
 

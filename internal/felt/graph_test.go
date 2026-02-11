@@ -15,7 +15,6 @@ func makeTestFelt(id, title, status string, deps []string) *Felt {
 		ID:        id,
 		Title:     title,
 		Status:    status,
-		Priority:  2,
 		DependsOn: d,
 		CreatedAt: time.Now(),
 	}
@@ -409,10 +408,10 @@ func TestToTextMultipleRoots(t *testing.T) {
 func TestBuildGraphWithLabels(t *testing.T) {
 	felts := []*Felt{
 		{
-			ID: "a-11111111", Title: "A", Status: StatusOpen,			Priority: 2, DependsOn: nil, CreatedAt: time.Now(),
+			ID: "a-11111111", Title: "A", Status: StatusOpen,			DependsOn: nil, CreatedAt: time.Now(),
 		},
 		{
-			ID: "b-22222222", Title: "B", Status: StatusOpen,			Priority: 2,
+			ID: "b-22222222", Title: "B", Status: StatusOpen,
 			DependsOn: Dependencies{
 				{ID: "a-11111111", Label: "needs data"},
 			},
@@ -442,10 +441,10 @@ func TestBuildGraphWithLabels(t *testing.T) {
 func TestToMermaidWithLabels(t *testing.T) {
 	felts := []*Felt{
 		{
-			ID: "a-11111111", Title: "A", Status: StatusOpen,			Priority: 2, DependsOn: nil, CreatedAt: time.Now(),
+			ID: "a-11111111", Title: "A", Status: StatusOpen,			DependsOn: nil, CreatedAt: time.Now(),
 		},
 		{
-			ID: "b-22222222", Title: "B", Status: StatusOpen,			Priority: 2,
+			ID: "b-22222222", Title: "B", Status: StatusOpen,
 			DependsOn: Dependencies{
 				{ID: "a-11111111", Label: "blocks"},
 			},
@@ -464,10 +463,10 @@ func TestToMermaidWithLabels(t *testing.T) {
 func TestToDotWithLabels(t *testing.T) {
 	felts := []*Felt{
 		{
-			ID: "a-11111111", Title: "A", Status: StatusOpen,			Priority: 2, DependsOn: nil, CreatedAt: time.Now(),
+			ID: "a-11111111", Title: "A", Status: StatusOpen,			DependsOn: nil, CreatedAt: time.Now(),
 		},
 		{
-			ID: "b-22222222", Title: "B", Status: StatusOpen,			Priority: 2,
+			ID: "b-22222222", Title: "B", Status: StatusOpen,
 			DependsOn: Dependencies{
 				{ID: "a-11111111", Label: "provides input"},
 			},
@@ -486,10 +485,10 @@ func TestToDotWithLabels(t *testing.T) {
 func TestToTextWithLabels(t *testing.T) {
 	felts := []*Felt{
 		{
-			ID: "a-11111111", Title: "A", Status: StatusOpen,			Priority: 2, DependsOn: nil, CreatedAt: time.Now(),
+			ID: "a-11111111", Title: "A", Status: StatusOpen,			DependsOn: nil, CreatedAt: time.Now(),
 		},
 		{
-			ID: "b-22222222", Title: "B", Status: StatusOpen,			Priority: 2,
+			ID: "b-22222222", Title: "B", Status: StatusOpen,
 			DependsOn: Dependencies{
 				{ID: "a-11111111", Label: "reason"},
 			},

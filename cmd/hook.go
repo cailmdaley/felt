@@ -67,7 +67,7 @@ func minimalOutput() string {
 - Track **work** that spans sessions, has dependencies, or emerges during work
 - Track **decisions** — what was decided, why, and how decisions depend on each other
 - Outcome (` + "`-o`" + `) is the documentation: capture the conclusion, the reasoning, what was learned
-- When in doubt, prefer felt—persistence you don't need is better than lost context
+- **Leave a wake** — file as you go; the DAG forms after your path
 `
 }
 
@@ -84,11 +84,8 @@ func formatSessionOutput(felts []*felt.Felt, g *felt.Graph) string {
 		}
 	}
 
-	// Sort active by priority, then creation time
+	// Sort active by creation time
 	sort.Slice(active, func(i, j int) bool {
-		if active[i].Priority != active[j].Priority {
-			return active[i].Priority < active[j].Priority
-		}
 		return active[i].CreatedAt.Before(active[j].CreatedAt)
 	})
 
@@ -153,8 +150,7 @@ func formatSessionOutput(felts []*felt.Felt, g *felt.Graph) string {
 	sb.WriteString("- Track **work** that spans sessions, has dependencies, or emerges during work\n")
 	sb.WriteString("- Track **decisions** — what was decided, why, and how decisions depend on each other\n")
 	sb.WriteString("- Outcome (`-o`) is the documentation: capture the conclusion, the reasoning, what was learned\n")
-	sb.WriteString("- **Leave breadcrumbs** — file fibers for decisions, questions, observations\n")
-	sb.WriteString("- When in doubt, prefer felt—persistence you don't need is better than lost context\n")
+	sb.WriteString("- **Leave a wake** — file as you go; the DAG forms after your path\n")
 
 	return sb.String()
 }

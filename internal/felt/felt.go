@@ -98,9 +98,8 @@ type Felt struct {
 	ID         string       `yaml:"-" json:"id"`
 	Title      string       `yaml:"title" json:"title"`
 	Status     string       `yaml:"status,omitempty" json:"status,omitempty"`
-	Tags       []string     `yaml:"tags,omitempty" json:"tags,omitempty"`
-	Priority   int          `yaml:"priority,omitempty" json:"priority,omitempty"`
-	DependsOn  Dependencies `yaml:"depends-on,omitempty" json:"depends_on,omitempty"`
+	Tags      []string     `yaml:"tags,omitempty" json:"tags,omitempty"`
+	DependsOn Dependencies `yaml:"depends-on,omitempty" json:"depends_on,omitempty"`
 	CreatedAt  time.Time    `yaml:"created-at" json:"created_at"`
 	ClosedAt   *time.Time   `yaml:"closed-at,omitempty" json:"closed_at,omitempty"`
 	Outcome    string       `yaml:"outcome,omitempty" json:"outcome,omitempty"`
@@ -131,7 +130,6 @@ func New(title string) (*Felt, error) {
 	return &Felt{
 		ID:        id,
 		Title:     title,
-		Priority:  2,
 		DependsOn: Dependencies{},
 		CreatedAt: time.Now(),
 	}, nil
@@ -267,9 +265,8 @@ type parseFrontmatter struct {
 	Title       string       `yaml:"title"`
 	Status      string       `yaml:"status,omitempty"`
 	Kind        string       `yaml:"kind,omitempty"`
-	Tags        []string     `yaml:"tags,omitempty"`
-	Priority    int          `yaml:"priority,omitempty"`
-	DependsOn   Dependencies `yaml:"depends-on,omitempty"`
+	Tags      []string     `yaml:"tags,omitempty"`
+	DependsOn Dependencies `yaml:"depends-on,omitempty"`
 	CreatedAt   time.Time    `yaml:"created-at"`
 	ClosedAt    *time.Time   `yaml:"closed-at,omitempty"`
 	CloseReason string       `yaml:"close-reason,omitempty"`
@@ -296,7 +293,6 @@ func Parse(id string, content []byte) (*Felt, error) {
 		Title:     pf.Title,
 		Status:    pf.Status,
 		Tags:      pf.Tags,
-		Priority:  pf.Priority,
 		DependsOn: pf.DependsOn,
 		CreatedAt: pf.CreatedAt,
 		ClosedAt:  pf.ClosedAt,
@@ -370,7 +366,6 @@ func (f *Felt) Marshal() ([]byte, error) {
 		Title     string       `yaml:"title"`
 		Status    string       `yaml:"status,omitempty"`
 		Tags      []string     `yaml:"tags,omitempty"`
-		Priority  int          `yaml:"priority,omitempty"`
 		DependsOn Dependencies `yaml:"depends-on,omitempty"`
 		CreatedAt time.Time    `yaml:"created-at"`
 		ClosedAt  *time.Time   `yaml:"closed-at,omitempty"`
@@ -380,7 +375,6 @@ func (f *Felt) Marshal() ([]byte, error) {
 		Title:     f.Title,
 		Status:    f.Status,
 		Tags:      f.Tags,
-		Priority:  f.Priority,
 		DependsOn: f.DependsOn,
 		CreatedAt: f.CreatedAt,
 		ClosedAt:  f.ClosedAt,

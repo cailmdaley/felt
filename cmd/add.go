@@ -11,10 +11,9 @@ import (
 )
 
 var (
-	addBody     string
-	addStatus   string
-	addPriority int
-	addDeps     []string
+	addBody   string
+	addStatus string
+	addDeps   []string
 	addDue      string
 	addTags     []string
 	addOutcome  string
@@ -57,9 +56,6 @@ var addCmd = &cobra.Command{
 		}
 		if addStatus != "" {
 			f.Status = addStatus
-		}
-		if cmd.Flags().Changed("priority") {
-			f.Priority = addPriority
 		}
 		if len(addTags) > 0 {
 			for _, tag := range addTags {
@@ -114,7 +110,6 @@ func init() {
 	rootCmd.AddCommand(addCmd)
 	addCmd.Flags().StringVarP(&addBody, "body", "b", "", "Body text")
 	addCmd.Flags().StringVarP(&addStatus, "status", "s", "", "Status (open, active, closed)")
-	addCmd.Flags().IntVarP(&addPriority, "priority", "p", 2, "Priority (0-4, lower=more urgent)")
 	addCmd.Flags().StringArrayVarP(&addDeps, "depends-on", "a", nil, "Dependency ID (repeatable)")
 	addCmd.Flags().StringVarP(&addDue, "due", "D", "", "Due date (YYYY-MM-DD)")
 	addCmd.Flags().StringArrayVarP(&addTags, "tag", "t", nil, "Tag (repeatable)")
@@ -128,7 +123,6 @@ func init() {
 	// Copy add command flags to root so "felt <title> -a dep" works
 	rootCmd.Flags().StringVarP(&addBody, "body", "b", "", "Body text")
 	rootCmd.Flags().StringVarP(&addStatus, "status", "s", "", "Status (open, active, closed)")
-	rootCmd.Flags().IntVarP(&addPriority, "priority", "p", 2, "Priority (0-4, lower=more urgent)")
 	rootCmd.Flags().StringArrayVarP(&addDeps, "depends-on", "a", nil, "Dependency ID (repeatable)")
 	rootCmd.Flags().StringVarP(&addDue, "due", "D", "", "Due date (YYYY-MM-DD)")
 	rootCmd.Flags().StringArrayVarP(&addTags, "tag", "t", nil, "Tag (repeatable)")

@@ -106,11 +106,8 @@ func (g *Graph) Ready() []*Felt {
 		}
 	}
 
-	// Sort by priority, then creation time
+	// Sort by creation time
 	sort.Slice(ready, func(i, j int) bool {
-		if ready[i].Priority != ready[j].Priority {
-			return ready[i].Priority < ready[j].Priority
-		}
 		return ready[i].CreatedAt.Before(ready[j].CreatedAt)
 	})
 
