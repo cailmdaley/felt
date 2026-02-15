@@ -58,8 +58,10 @@ var addCmd = &cobra.Command{
 			f.Status = addStatus
 		}
 		if len(addTags) > 0 {
-			for _, tag := range addTags {
-				f.AddTag(tag)
+			for _, raw := range addTags {
+				for _, tag := range splitTags(raw) {
+					f.AddTag(tag)
+				}
 			}
 		}
 		if len(addDeps) > 0 {

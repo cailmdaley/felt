@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/cailmdaley/felt/internal/felt"
 	"github.com/spf13/cobra"
@@ -24,17 +25,19 @@ var tagCmd = &cobra.Command{
 			return err
 		}
 
-		tag := args[1]
-		if f.HasTag(tag) {
-			return fmt.Errorf("felt %s already has tag %q", f.ID, tag)
+		// Split comma-separated tags: "claim, tapestry:foo" → ["claim", "tapestry:foo"]
+		tags := splitTags(args[1])
+		for _, tag := range tags {
+			if f.HasTag(tag) {
+				continue
+			}
+			f.AddTag(tag)
+			fmt.Printf("%s +[%s]\n", f.ID, tag)
 		}
 
-		f.AddTag(tag)
 		if err := storage.Write(f); err != nil {
 			return err
 		}
-
-		fmt.Printf("%s +[%s]\n", f.ID, tag)
 		return nil
 	},
 }
@@ -56,19 +59,34 @@ var untagCmd = &cobra.Command{
 			return err
 		}
 
-		tag := args[1]
-		if !f.HasTag(tag) {
-			return fmt.Errorf("felt %s does not have tag %q", f.ID, tag)
+		tags := splitTags(args[1])
+		for _, tag := range tags {
+			if !f.HasTag(tag) {
+				continue
+			}
+			f.RemoveTag(tag)
+			fmt.Printf("%s -[%s]\n", f.ID, tag)
 		}
 
-		f.RemoveTag(tag)
 		if err := storage.Write(f); err != nil {
 			return err
 		}
-
-		fmt.Printf("%s -[%s]\n", f.ID, tag)
 		return nil
 	},
+}
+
+// splitTags splits comma-separated tag input into individual tags.
+// "claim, tapestry:foo" → ["claim", "tapestry:foo"]
+func splitTags(input string) []string {
+	parts := strings.Split(input, ",")
+	var tags []string
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			tags = append(tags, p)
+		}
+	}
+	return tags
 }
 
 func init() {
