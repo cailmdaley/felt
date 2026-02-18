@@ -25,8 +25,8 @@ var lsCmd = &cobra.Command{
 	Short: "List and search felts",
 	Long: `Lists felts, showing open and active by default.
 
-Use -s to filter by status: open, active, closed, or all.
-  -s all includes fibers without status (everything).
+When any filter is active (-t, query, -n), all statuses are shown
+automatically. Use -s to override: open, active, closed, or all.
 
 Use -t to filter by tag (AND logic, prefix matching with trailing colon):
   -t rule:                    matches any rule:* tag
@@ -65,16 +65,25 @@ Optional query searches title, body, and outcome:
 
 		queryLower := strings.ToLower(query)
 
+		// If any filter is active (tags, query, recent) and -s wasn't explicitly set,
+		// widen to all statuses. Bare `felt ls` stays open+active (actionable view).
+		statusExplicit := cmd.Flags().Changed("status")
+		hasFilters := len(lsTags) > 0 || query != "" || lsRecent > 0
+		effectiveStatus := lsStatus
+		if !statusExplicit && hasFilters {
+			effectiveStatus = "all"
+		}
+
 		// Filter
 		var exactMatches []*felt.Felt
 		var filtered []*felt.Felt
 		for _, f := range felts {
 			// Status gate
-			if lsStatus == "all" {
-				// -s all: no filtering, include everything
-			} else if lsStatus != "" {
+			if effectiveStatus == "all" {
+				// No filtering, include everything
+			} else if effectiveStatus != "" {
 				// Specific status: must match
-				if f.Status != lsStatus {
+				if f.Status != effectiveStatus {
 					continue
 				}
 			} else {
