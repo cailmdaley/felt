@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"fmt"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/cailmdaley/felt/internal/felt"
@@ -89,6 +91,12 @@ var addCmd = &cobra.Command{
 		}
 		if addOutcome != "" {
 			f.Outcome = addOutcome
+		}
+
+		// Warn if title is long — titles render as DAG node labels (2-3 words ideal)
+		if len(strings.Fields(f.Title)) > 5 {
+			fmt.Fprintf(os.Stderr, "warning: title %q is long (%d words); titles render as DAG node labels — keep to 2-3 words, put detail in body/outcome\n",
+				f.Title, len(strings.Fields(f.Title)))
 		}
 
 		if err := storage.Write(f); err != nil {

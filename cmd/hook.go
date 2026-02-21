@@ -68,6 +68,7 @@ func minimalOutput() string {
 - Track **decisions** — what was decided, why, and how decisions depend on each other
 - Outcome (` + "`-o`" + `) is the documentation: capture the conclusion, the reasoning, what was learned
 - **Leave a wake** — file as you go; the DAG forms after your path
+- **Titles are DAG node labels: 2-3 words.** The body and outcome carry full content.
 `
 }
 
@@ -151,6 +152,7 @@ func formatSessionOutput(felts []*felt.Felt, g *felt.Graph) string {
 	sb.WriteString("- Track **decisions** — what was decided, why, and how decisions depend on each other\n")
 	sb.WriteString("- Outcome (`-o`) is the documentation: capture the conclusion, the reasoning, what was learned\n")
 	sb.WriteString("- **Leave a wake** — file as you go; the DAG forms after your path\n")
+	sb.WriteString("- **Titles are DAG node labels: 2-3 words.** The body and outcome carry full content.\n")
 
 	return sb.String()
 }
