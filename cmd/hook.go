@@ -218,6 +218,8 @@ felt edit <id> -s closed -o "outcome"  # close with outcome
 felt edit <id> --body "text"    # full body replacement (overwrite)
 felt comment <id> "note"        # add comment
 felt show <id>                  # full details
+felt show <id> -d summary       # metadata + lede paragraph
+felt show <id> -d compact       # metadata + outcome only
 felt ls                         # tracked fibers (open/active)
 felt ls -t tapestry:            # any filter widens to all statuses
 felt ls -s closed "query"       # explicit -s overrides; -e exact, -r regex
@@ -226,6 +228,7 @@ felt upstream/downstream <id>   # DAG traversal
 Also: link, unlink, tag, untag, tree, ready, rm
 ` + "```" + `
 Statuses: · untracked, ○ open, ◐ active, ● closed
+Depth: title < compact < summary < full (default). Summary shows the **lede** — the first paragraph of the body. Write it to stand alone.
 To patch body text (not replace), edit .felt/<id>.md directly.
 
 `
