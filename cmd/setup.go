@@ -109,65 +109,8 @@ func claudeMDSnippet() string {
 		"Follow the data: curious, not confirmatory.\n"
 }
 
-// skillsDir returns the path where felt extracts its bundled skills.
-func skillsDir() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(home, ".local", "share", "felt", "skills"), nil
-}
-
-// installSkills extracts bundled skills to ~/.local/share/felt/skills and
-// symlinks each skill directory into targetDir (e.g. ~/.claude/skills).
+// installSkills extracts bundled skills directly into targetDir (e.g. ~/.claude/skills).
 func installSkills(targetDir string) error {
-	src, err := skillsDir()
-	if err != nil {
-		return err
-	}
-
-	// Extract embedded skills
-	if err := extractEmbeddedSkills(src); err != nil {
-		return fmt.Errorf("extracting skills: %w", err)
-	}
-
-	// Ensure target directory exists
-	if err := os.MkdirAll(targetDir, 0755); err != nil {
-		return fmt.Errorf("creating skills directory: %w", err)
-	}
-
-	// Symlink each skill directory
-	entries, err := os.ReadDir(src)
-	if err != nil {
-		return err
-	}
-
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		linkPath := filepath.Join(targetDir, e.Name())
-		target := filepath.Join(src, e.Name())
-
-		if existing, err := os.Lstat(linkPath); err == nil {
-			if existing.Mode()&os.ModeSymlink != 0 {
-				fmt.Printf("· %s already linked\n", e.Name())
-				continue
-			}
-			fmt.Printf("· %s exists (not a symlink, skipping)\n", e.Name())
-			continue
-		}
-
-		if err := os.Symlink(target, linkPath); err != nil {
-			return fmt.Errorf("symlinking %s: %w", e.Name(), err)
-		}
-		fmt.Printf("✓ Linked skill: %s\n", e.Name())
-	}
-	return nil
-}
-
-// extractEmbeddedSkills writes the embedded skills/ tree to dest.
-func extractEmbeddedSkills(dest string) error {
 	return fs.WalkDir(embeddedSkills, "skills", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -177,10 +120,18 @@ func extractEmbeddedSkills(dest string) error {
 		if err != nil {
 			return err
 		}
-		target := filepath.Join(dest, rel)
+		if rel == "." {
+			return nil
+		}
+		target := filepath.Join(targetDir, rel)
 
 		if d.IsDir() {
 			return os.MkdirAll(target, 0755)
+		}
+
+		// Skip if already exists
+		if _, err := os.Stat(target); err == nil {
+			return nil
 		}
 
 		data, err := embeddedSkills.ReadFile(path)
@@ -192,13 +143,21 @@ func extractEmbeddedSkills(dest string) error {
 			return err
 		}
 
-		// Preserve executable bit for scripts
 		mode := fs.FileMode(0644)
 		if strings.Contains(path, "/scripts/") {
 			mode = 0755
 		}
 
-		return os.WriteFile(target, data, mode)
+		if err := os.WriteFile(target, data, mode); err != nil {
+			return err
+		}
+
+		// Print once per top-level skill directory
+		parts := strings.SplitN(rel, string(filepath.Separator), 2)
+		if len(parts) == 2 && parts[1] == "SKILL.md" {
+			fmt.Printf("✓ Installed skill: %s\n", parts[0])
+		}
+		return nil
 	})
 }
 
