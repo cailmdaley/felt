@@ -34,7 +34,7 @@ Use --uninstall to remove the hooks.`,
 			return err
 		}
 		fmt.Println()
-		fmt.Println("Add this to your CLAUDE.md:")
+		fmt.Println("You may want to put something like the following in your CLAUDE.md, adjusted to match your work style:")
 		fmt.Println()
 		fmt.Println(claudeMDSnippet())
 		return nil
@@ -59,7 +59,7 @@ Use --uninstall to remove it.`,
 			return err
 		}
 		fmt.Println()
-		fmt.Println("Add this to your AGENTS.md:")
+		fmt.Println("You may want to put something like the following in your AGENTS.md, adjusted to match your work style:")
 		fmt.Println()
 		fmt.Println(claudeMDSnippet())
 		return nil
@@ -78,9 +78,9 @@ func init() {
 func claudeMDSnippet() string {
 	fence := "```"
 	return "## felt\n\n" +
-		"felt is the textile of work. Fibers are concerns — tasks, decisions, questions, specs — strung together in a DAG.\n\n" +
-		"**Fibers are documentation.** Don't write notes or plans; use fibers. Body is the content; outcome is the conclusion. " +
-		"The DAG explains itself: `felt upstream` shows what a decision rests on, `felt downstream` shows what breaks if it changes. " +
+		"Fibers are concerns — tasks, decisions, questions — strung in a DAG. " +
+		"Body is the content; outcome is the conclusion. " +
+		"`felt upstream` shows what a decision rests on; `felt downstream` shows what breaks if it changes. " +
 		"A missing causal link costs an investigation; a fiber costs nothing.\n\n" +
 		"**Rhythm.** File before you start, comment as you go, close with an outcome.\n" +
 		fence + "bash\n" +

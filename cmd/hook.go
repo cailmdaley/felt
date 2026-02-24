@@ -64,11 +64,10 @@ func minimalOutput() string {
 *No felt repository in current directory.*
 
 ` + cliReference() + `## Core Rules
-- Track **work** that spans sessions, has dependencies, or emerges during work
-- Track **decisions** — what was decided, why, and how decisions depend on each other
-- Outcome (` + "`-o`" + `) is the documentation: capture the conclusion, the reasoning, what was learned
-- **Leave a wake** — file as you go; the DAG forms after your path
-- **Titles are DAG node labels: 2-3 words.** The body and outcome carry full content.
+- **Use felt for everything** — tasks, decisions, questions, detours, bugs you can't chase now. If it might matter, it's a fiber.
+- Outcome (` + "`-o`" + `) is the documentation: the conclusion, the reasoning, what was learned
+- **Leave a wake** — file as you go
+- **Titles are DAG node labels: 2-3 words.** Body and outcome carry full content.
 `
 }
 
@@ -148,11 +147,10 @@ func formatSessionOutput(felts []*felt.Felt, g *felt.Graph) string {
 
 	// Core rules
 	sb.WriteString("## Core Rules\n")
-	sb.WriteString("- Track **work** that spans sessions, has dependencies, or emerges during work\n")
-	sb.WriteString("- Track **decisions** — what was decided, why, and how decisions depend on each other\n")
-	sb.WriteString("- Outcome (`-o`) is the documentation: capture the conclusion, the reasoning, what was learned\n")
-	sb.WriteString("- **Leave a wake** — file as you go; the DAG forms after your path\n")
-	sb.WriteString("- **Titles are DAG node labels: 2-3 words.** The body and outcome carry full content.\n")
+	sb.WriteString("- **Use felt for everything** — tasks, decisions, questions, detours, bugs you can't chase now. If it might matter, it's a fiber.\n")
+	sb.WriteString("- Outcome (`-o`) is the documentation: the conclusion, the reasoning, what was learned\n")
+	sb.WriteString("- **Leave a wake** — file as you go\n")
+	sb.WriteString("- **Titles are DAG node labels: 2-3 words.** Body and outcome carry full content.\n")
 
 	return sb.String()
 }
@@ -216,11 +214,13 @@ felt add "title" -s open -t tag -a <dep-id> -o "outcome"
 felt edit <id> -s active        # enter tracking / mark active
 felt edit <id> -s closed -o "outcome"  # close with outcome
 felt comment <id> "note"        # add comment
-felt show <id>                  # full details (-d: title, compact, summary)
+felt show <id>                  # full details
 felt ls                         # tracked fibers (open/active)
 felt ls -t tapestry:            # any filter widens to all statuses
 felt ls -s closed "query"       # explicit -s overrides; -e exact, -r regex
-Also: link, unlink, tag, untag, upstream, downstream, tree, ready, rm
+felt upstream/downstream <id>   # DAG traversal
+-d title|compact|summary|full   # depth for show, ls, upstream, downstream
+Also: link, unlink, tag, untag, tree, ready, rm
 ` + "```" + `
 Statuses: · untracked, ○ open, ◐ active, ● closed
 To patch body text (not replace), edit .felt/<id>.md directly.
