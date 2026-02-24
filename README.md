@@ -11,6 +11,12 @@ Fibers are markdown files. Human-readable, version-controllable, greppable. No d
 ## Install
 
 ```bash
+brew install cailmdaley/tap/felt
+```
+
+Or with Go:
+
+```bash
 go install github.com/cailmdaley/felt@latest
 ```
 
@@ -98,7 +104,6 @@ Fibers live in `.felt/<id>.md`:
 title: "Design API"
 status: closed
 tags: [backend, auth]
-priority: 2
 depends-on:
   - id: research-auth-patterns-a1b2c3d4
     label: auth approach
@@ -177,7 +182,9 @@ felt check                        # validate integrity
 ### Integration
 
 ```bash
-felt hook session                 # context for session start hooks
+felt setup claude                 # install Claude Code session hook
+felt setup codex                  # install Codex shell wrapper
+felt hook session                 # output session context (used by hooks)
 felt prime                        # alias for hook session
 ```
 
@@ -186,7 +193,6 @@ felt prime                        # alias for hook session
 ```bash
 -b, --body "text"                 # body text
 -s, --status open                 # status (open, active, closed)
--p, --priority 1                  # 0-4, lower = more urgent
 -a, --depends-on <id>             # dependency (repeatable)
 -D, --due 2024-03-15              # due date
 -t, --tag <tag>                   # tag (repeatable)
