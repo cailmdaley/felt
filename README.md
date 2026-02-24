@@ -1,3 +1,12 @@
+<p align="center">
+  <img src=".github/banner.png" alt="felt" width="600">
+</p>
+
+<p align="center">
+  <a href="https://github.com/cailmdaley/felt/actions/workflows/ci.yml"><img src="https://github.com/cailmdaley/felt/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
+</p>
+
 # felt
 
 DAG-native fiber tracker. Markdown files with dependencies.
