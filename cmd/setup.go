@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -29,15 +30,180 @@ Use --uninstall to remove the hooks.`,
 		if uninstall {
 			return uninstallClaudeHooks()
 		}
-		return installClaudeHooks()
+		if err := installClaudeHooks(); err != nil {
+			return err
+		}
+		fmt.Println()
+		fmt.Println("Add this to your CLAUDE.md:")
+		fmt.Println()
+		fmt.Println(claudeMDSnippet())
+		return nil
+	},
+}
+
+var setupCodexCmd = &cobra.Command{
+	Use:   "codex",
+	Short: "Setup Codex integration",
+	Long: `Install a codex() shell wrapper in your RC file.
+
+The wrapper injects felt context into every Codex session via --config.
+Detects shell from $SHELL (zsh → ~/.zshrc, bash → ~/.bashrc).
+
+Use --uninstall to remove it.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		uninstall, _ := cmd.Flags().GetBool("uninstall")
+		if uninstall {
+			return uninstallCodexWrapper()
+		}
+		if err := installCodexWrapper(); err != nil {
+			return err
+		}
+		fmt.Println()
+		fmt.Println("Add this to your AGENTS.md:")
+		fmt.Println()
+		fmt.Println(claudeMDSnippet())
+		return nil
 	},
 }
 
 func init() {
 	setupClaudeCmd.Flags().Bool("uninstall", false, "Remove felt hooks from Claude Code")
+	setupCodexCmd.Flags().Bool("uninstall", false, "Remove codex wrapper from RC file")
 	setupCmd.AddCommand(setupClaudeCmd)
+	setupCmd.AddCommand(setupCodexCmd)
 	rootCmd.AddCommand(setupCmd)
 }
+
+// claudeMDSnippet returns the suggested CLAUDE.md / AGENTS.md snippet.
+func claudeMDSnippet() string {
+	fence := "```"
+	return "## felt\n\n" +
+		"felt is the textile of work. Fibers are concerns — tasks, decisions, questions, specs — strung together in a DAG.\n\n" +
+		"**Fibers are documentation.** Don't write notes or plans; use fibers. Body is the content; outcome is the conclusion. " +
+		"The DAG explains itself: `felt upstream` shows what a decision rests on, `felt downstream` shows what breaks if it changes. " +
+		"A missing causal link costs an investigation; a fiber costs nothing.\n\n" +
+		"**Rhythm.** File before you start, comment as you go, close with an outcome.\n" +
+		fence + "bash\n" +
+		"felt \"what I'm doing\"                              # before starting\n" +
+		"felt comment <id> \"tried X, hit Y\"                 # as you go\n" +
+		"felt edit <id> -s closed -o \"X works because...\"   # close with outcome\n" +
+		fence + "\n\n" +
+		"**Discipline.** Titles are 2–3 word DAG node labels — terse, like commit subjects. " +
+		"Outcomes say not just *what* but *why*, pointing back through the DAG. " +
+		"Decisions get their own fibers; methodology questions belong in decision fibers, not specs. " +
+		"Follow the data: curious, not confirmatory.\n"
+}
+
+// rcFilePath returns the shell RC file path based on $SHELL.
+func rcFilePath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("getting home directory: %w", err)
+	}
+	shell := os.Getenv("SHELL")
+	if strings.Contains(shell, "zsh") {
+		return filepath.Join(home, ".zshrc"), nil
+	}
+	return filepath.Join(home, ".bashrc"), nil
+}
+
+const codexSentinelStart = "# felt integration — added by felt setup codex"
+const codexSentinelEnd = "# end felt integration"
+
+const codexWrapper = `# felt integration — added by felt setup codex
+function codex() {
+    local felt_context
+    felt_context=$(felt hook session 2>/dev/null || true)
+    if [ -n "$felt_context" ]; then
+        command codex --config "developer_instructions=$felt_context" "$@"
+    else
+        command codex "$@"
+    fi
+}
+# end felt integration`
+
+func installCodexWrapper() error {
+	rcPath, err := rcFilePath()
+	if err != nil {
+		return err
+	}
+
+	// Read existing content
+	content := ""
+	if data, err := os.ReadFile(rcPath); err == nil {
+		content = string(data)
+	}
+
+	// Idempotent: already installed?
+	if strings.Contains(content, codexSentinelStart) {
+		fmt.Printf("· codex wrapper already installed in %s\n", rcPath)
+		return nil
+	}
+
+	// Append
+	sep := ""
+	if len(content) > 0 && !strings.HasSuffix(content, "\n") {
+		sep = "\n"
+	}
+	newContent := content + sep + "\n" + codexWrapper + "\n"
+
+	if err := os.WriteFile(rcPath, []byte(newContent), 0644); err != nil {
+		return fmt.Errorf("writing %s: %w", rcPath, err)
+	}
+
+	fmt.Printf("✓ Installed codex wrapper in %s\n", rcPath)
+	fmt.Printf("  Run: source %s\n", rcPath)
+	return nil
+}
+
+func uninstallCodexWrapper() error {
+	rcPath, err := rcFilePath()
+	if err != nil {
+		return err
+	}
+
+	data, err := os.ReadFile(rcPath)
+	if err != nil {
+		fmt.Println("No RC file found")
+		return nil
+	}
+
+	content := string(data)
+	if !strings.Contains(content, codexSentinelStart) {
+		fmt.Println("No felt codex wrapper found")
+		return nil
+	}
+
+	// Remove block between sentinels (inclusive)
+	var out []string
+	inside := false
+	for _, line := range strings.Split(content, "\n") {
+		if strings.TrimSpace(line) == codexSentinelStart {
+			inside = true
+			// Also remove the blank line before the sentinel if present
+			if len(out) > 0 && out[len(out)-1] == "" {
+				out = out[:len(out)-1]
+			}
+			continue
+		}
+		if inside {
+			if strings.TrimSpace(line) == codexSentinelEnd {
+				inside = false
+			}
+			continue
+		}
+		out = append(out, line)
+	}
+
+	newContent := strings.Join(out, "\n")
+	if err := os.WriteFile(rcPath, []byte(newContent), 0644); err != nil {
+		return fmt.Errorf("writing %s: %w", rcPath, err)
+	}
+
+	fmt.Printf("✓ Removed codex wrapper from %s\n", rcPath)
+	return nil
+}
+
 
 // claudeSettingsPath returns the path to Claude Code's settings.json
 func claudeSettingsPath() (string, error) {

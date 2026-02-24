@@ -22,3 +22,6 @@ jobs:
 
       - name: Test
         run: go test -v ./...
+
+      - name: Integration Test
+        run: go test -tags integration ./cmd/ -run TestIntegration -v
