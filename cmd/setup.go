@@ -1,14 +1,19 @@
 package cmd
 
 import (
+	"embed"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
 )
+
+//go:embed skills
+var embeddedSkills embed.FS
 
 var setupCmd = &cobra.Command{
 	Use:   "setup",
@@ -34,6 +39,11 @@ Use --uninstall to remove the hooks.`,
 			return err
 		}
 		fmt.Println()
+		skillsTarget := filepath.Join(os.Getenv("HOME"), ".claude", "skills")
+		if err := installSkills(skillsTarget); err != nil {
+			fmt.Printf("warning: could not install skills: %v\n", err)
+		}
+		fmt.Println()
 		fmt.Println("You may want to put something like the following in your CLAUDE.md, adjusted to match your work style:")
 		fmt.Println()
 		fmt.Println(claudeMDSnippet())
@@ -57,6 +67,11 @@ Use --uninstall to remove it.`,
 		}
 		if err := installCodexWrapper(); err != nil {
 			return err
+		}
+		fmt.Println()
+		skillsTarget := filepath.Join(os.Getenv("HOME"), ".agents", "skills")
+		if err := installSkills(skillsTarget); err != nil {
+			fmt.Printf("warning: could not install skills: %v\n", err)
 		}
 		fmt.Println()
 		fmt.Println("You may want to put something like the following in your AGENTS.md, adjusted to match your work style:")
@@ -92,6 +107,99 @@ func claudeMDSnippet() string {
 		"Outcomes say not just *what* but *why*, pointing back through the DAG. " +
 		"Decisions get their own fibers; methodology questions belong in decision fibers, not specs. " +
 		"Follow the data: curious, not confirmatory.\n"
+}
+
+// skillsDir returns the path where felt extracts its bundled skills.
+func skillsDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".local", "share", "felt", "skills"), nil
+}
+
+// installSkills extracts bundled skills to ~/.local/share/felt/skills and
+// symlinks each skill directory into targetDir (e.g. ~/.claude/skills).
+func installSkills(targetDir string) error {
+	src, err := skillsDir()
+	if err != nil {
+		return err
+	}
+
+	// Extract embedded skills
+	if err := extractEmbeddedSkills(src); err != nil {
+		return fmt.Errorf("extracting skills: %w", err)
+	}
+
+	// Ensure target directory exists
+	if err := os.MkdirAll(targetDir, 0755); err != nil {
+		return fmt.Errorf("creating skills directory: %w", err)
+	}
+
+	// Symlink each skill directory
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return err
+	}
+
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		linkPath := filepath.Join(targetDir, e.Name())
+		target := filepath.Join(src, e.Name())
+
+		if existing, err := os.Lstat(linkPath); err == nil {
+			if existing.Mode()&os.ModeSymlink != 0 {
+				fmt.Printf("· %s already linked\n", e.Name())
+				continue
+			}
+			fmt.Printf("· %s exists (not a symlink, skipping)\n", e.Name())
+			continue
+		}
+
+		if err := os.Symlink(target, linkPath); err != nil {
+			return fmt.Errorf("symlinking %s: %w", e.Name(), err)
+		}
+		fmt.Printf("✓ Linked skill: %s\n", e.Name())
+	}
+	return nil
+}
+
+// extractEmbeddedSkills writes the embedded skills/ tree to dest.
+func extractEmbeddedSkills(dest string) error {
+	return fs.WalkDir(embeddedSkills, "skills", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		// path is like "skills/felt/SKILL.md" — strip leading "skills/"
+		rel, err := filepath.Rel("skills", path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(dest, rel)
+
+		if d.IsDir() {
+			return os.MkdirAll(target, 0755)
+		}
+
+		data, err := embeddedSkills.ReadFile(path)
+		if err != nil {
+			return err
+		}
+
+		if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+			return err
+		}
+
+		// Preserve executable bit for scripts
+		mode := fs.FileMode(0644)
+		if strings.Contains(path, "/scripts/") {
+			mode = 0755
+		}
+
+		return os.WriteFile(target, data, mode)
+	})
 }
 
 // rcFilePath returns the shell RC file path based on $SHELL.
