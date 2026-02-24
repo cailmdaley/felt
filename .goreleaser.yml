@@ -40,6 +40,7 @@ brews:
   - repository:
       owner: cailmdaley
       name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
     directory: Formula
     homepage: https://github.com/cailmdaley/felt
     description: DAG-native task tracker. Markdown files with dependencies.
