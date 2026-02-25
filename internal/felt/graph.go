@@ -40,20 +40,39 @@ func BuildGraph(felts []*Felt) *Graph {
 // GetUpstream returns all transitive dependencies of the given ID.
 // Uses BFS for level-order traversal.
 func (g *Graph) GetUpstream(id string) []string {
-	return g.bfs(id, g.Upstream)
+	return g.bfs(id, g.Upstream, 0)
 }
 
 // GetDownstream returns all nodes that transitively depend on the given ID.
 // Uses BFS for level-order traversal.
 func (g *Graph) GetDownstream(id string) []string {
-	return g.bfs(id, g.Downstream)
+	return g.bfs(id, g.Downstream, 0)
+}
+
+// GetUpstreamN returns dependencies up to maxLevels deep.
+// maxLevels=1 returns direct dependencies only.
+// maxLevels=0 returns the full transitive closure (same as GetUpstream).
+func (g *Graph) GetUpstreamN(id string, maxLevels int) []string {
+	return g.bfs(id, g.Upstream, maxLevels)
+}
+
+// GetDownstreamN returns dependents up to maxLevels deep.
+// maxLevels=1 returns direct dependents only.
+// maxLevels=0 returns the full transitive closure (same as GetDownstream).
+func (g *Graph) GetDownstreamN(id string, maxLevels int) []string {
+	return g.bfs(id, g.Downstream, maxLevels)
 }
 
 // bfs performs breadth-first traversal from start using the given adjacency map.
-func (g *Graph) bfs(start string, adj map[string]Dependencies) []string {
+// maxLevels controls how many levels to traverse (0 = unlimited).
+func (g *Graph) bfs(start string, adj map[string]Dependencies, maxLevels int) []string {
+	type entry struct {
+		id    string
+		level int
+	}
 	visited := make(map[string]bool)
 	var result []string
-	queue := []string{start}
+	queue := []entry{{id: start, level: 0}}
 	visited[start] = true
 
 	for len(queue) > 0 {
@@ -61,14 +80,19 @@ func (g *Graph) bfs(start string, adj map[string]Dependencies) []string {
 		queue = queue[1:]
 
 		// Don't include start in result
-		if current != start {
-			result = append(result, current)
+		if current.id != start {
+			result = append(result, current.id)
 		}
 
-		for _, dep := range adj[current] {
+		// Stop expanding if we've reached the max depth
+		if maxLevels > 0 && current.level >= maxLevels {
+			continue
+		}
+
+		for _, dep := range adj[current.id] {
 			if !visited[dep.ID] {
 				visited[dep.ID] = true
-				queue = append(queue, dep.ID)
+				queue = append(queue, entry{id: dep.ID, level: current.level + 1})
 			}
 		}
 	}

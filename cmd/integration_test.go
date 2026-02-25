@@ -153,6 +153,31 @@ func TestIntegration(t *testing.T) {
 	if !strings.Contains(out, "second fiber") {
 		t.Fatalf("downstream: expected child fiber, got: %s", out)
 	}
+	fiber3ID := strings.TrimSpace(mustFelt(t, dir, "add", "third fiber", "-s", "open"))
+	if fiber3ID == "" {
+		t.Fatal("add: expected fiber3 ID")
+	}
+	mustFelt(t, dir, "link", fiber3ID, fiber2ID)
+
+	// Traversal defaults to direct neighbors only.
+	out = mustFelt(t, dir, "downstream", fiberID)
+	if strings.Contains(out, "third fiber") {
+		t.Fatalf("downstream default: expected direct dependents only, got: %s", out)
+	}
+	// --all includes transitive dependents.
+	out = mustFelt(t, dir, "downstream", fiberID, "--all")
+	if !strings.Contains(out, "second fiber") || !strings.Contains(out, "third fiber") {
+		t.Fatalf("downstream --all: expected transitive closure, got: %s", out)
+	}
+
+	out = mustFelt(t, dir, "upstream", fiber3ID)
+	if strings.Contains(out, "test fiber") || !strings.Contains(out, "second fiber") {
+		t.Fatalf("upstream default: expected direct dependencies only, got: %s", out)
+	}
+	out = mustFelt(t, dir, "upstream", fiber3ID, "--all")
+	if !strings.Contains(out, "second fiber") || !strings.Contains(out, "test fiber") {
+		t.Fatalf("upstream --all: expected transitive closure, got: %s", out)
+	}
 
 	// tag and untag
 	mustFelt(t, dir, "tag", fiber2ID, "testlabel")
@@ -166,6 +191,7 @@ func TestIntegration(t *testing.T) {
 	mustFelt(t, dir, "ready")
 
 	// rm --force
+	mustFelt(t, dir, "rm", "--force", fiber3ID)
 	mustFelt(t, dir, "rm", "--force", fiber2ID)
 	lsOut := mustFelt(t, dir, "ls", "-s", "all")
 	if strings.Contains(lsOut, "second fiber") {

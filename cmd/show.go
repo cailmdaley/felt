@@ -9,15 +9,15 @@ import (
 
 var (
 	showBodyOnly bool
-	showDepth    string
+	showDetail   string
 )
 
 var showCmd = &cobra.Command{
 	Use:   "show <id>",
 	Short: "Show details of a felt",
-	Long: `Displays details of a felt at the requested depth level.
+	Long: `Displays details of a felt at the requested detail level.
 
-Depth levels control progressive disclosure:
+Detail levels control progressive disclosure:
   title    Title and tags only
   compact  Structured overview: metadata, outcome, dependency IDs
   summary  Compact + lede paragraph + dependency titles
@@ -29,11 +29,11 @@ Depth levels control progressive disclosure:
 			return fmt.Errorf("not in a felt repository")
 		}
 
-		depth := showDepth
-		if depth == "" {
-			depth = DepthFull
+		detail := showDetail
+		if detail == "" {
+			detail = DepthFull
 		}
-		if err := validateDepth(depth); err != nil {
+		if err := validateDepth(detail); err != nil {
 			return err
 		}
 
@@ -60,7 +60,7 @@ Depth levels control progressive disclosure:
 		}
 		graph := felt.BuildGraph(felts)
 
-		fmt.Print(renderFelt(f, graph, depth))
+		fmt.Print(renderFelt(f, graph, detail))
 		return nil
 	},
 }
@@ -68,5 +68,5 @@ Depth levels control progressive disclosure:
 func init() {
 	rootCmd.AddCommand(showCmd)
 	showCmd.Flags().BoolVarP(&showBodyOnly, "body", "b", false, "Output only the body (for piping)")
-	showCmd.Flags().StringVarP(&showDepth, "depth", "d", "", "Detail level (title, compact, summary, full)")
+	showCmd.Flags().StringVarP(&showDetail, "detail", "d", "", "Detail level (title, compact, summary, full)")
 }

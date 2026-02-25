@@ -8,8 +8,9 @@ import (
 )
 
 var (
-	graphFormat string
-	upDownDepth string
+	graphFormat  string
+	upDownDetail string
+	traversalAll bool
 )
 
 var graphCmd = &cobra.Command{
@@ -54,13 +55,21 @@ var graphCmd = &cobra.Command{
 var upstreamCmd = &cobra.Command{
 	Use:   "upstream <id>",
 	Short: "Show what a felt depends on",
-	Long:  `Lists all transitive dependencies of a felt. Use --depth to control detail per item.`,
-	Args:  cobra.ExactArgs(1),
+	Long: `Lists dependencies of a felt.
+
+By default shows direct dependencies only (depth 1).
+Use --all for the full transitive closure (all ancestors).
+Use -d/--detail to control detail level per item.`,
+	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		depth := 1
+		if traversalAll {
+			depth = 0
+		}
 		return runTraversal(args[0], traversalConfig{
-			getRelated:  func(g *felt.Graph, id string) []string { return g.GetUpstream(id) },
-			edgeLabel:   func(g *felt.Graph, fiberID, relatedID string) string { return edgeLabelInGraph(g, relatedID, fiberID) },
-			emptyMsg:    "No dependencies",
+			getRelated: func(g *felt.Graph, id string) []string { return g.GetUpstreamN(id, depth) },
+			edgeLabel:  func(g *felt.Graph, fiberID, relatedID string) string { return edgeLabelInGraph(g, relatedID, fiberID) },
+			emptyMsg:   "No dependencies",
 		})
 	},
 }
@@ -68,13 +77,21 @@ var upstreamCmd = &cobra.Command{
 var downstreamCmd = &cobra.Command{
 	Use:   "downstream <id>",
 	Short: "Show what depends on a felt",
-	Long:  `Lists all felts that transitively depend on this one. Use --depth to control detail per item.`,
-	Args:  cobra.ExactArgs(1),
+	Long: `Lists felts that depend on this one.
+
+By default shows direct dependents only (depth 1).
+Use --all for the full transitive closure (all descendants).
+Use -d/--detail to control detail level per item.`,
+	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		depth := 1
+		if traversalAll {
+			depth = 0
+		}
 		return runTraversal(args[0], traversalConfig{
-			getRelated:  func(g *felt.Graph, id string) []string { return g.GetDownstream(id) },
-			edgeLabel:   func(g *felt.Graph, fiberID, relatedID string) string { return edgeLabelInGraph(g, fiberID, relatedID) },
-			emptyMsg:    "Nothing depends on this",
+			getRelated: func(g *felt.Graph, id string) []string { return g.GetDownstreamN(id, depth) },
+			edgeLabel:  func(g *felt.Graph, fiberID, relatedID string) string { return edgeLabelInGraph(g, fiberID, relatedID) },
+			emptyMsg:   "Nothing depends on this",
 		})
 	},
 }
@@ -93,8 +110,8 @@ func runTraversal(fiberArg string, cfg traversalConfig) error {
 		return fmt.Errorf("not in a felt repository")
 	}
 
-	if upDownDepth != "" {
-		if err := validateDepth(upDownDepth); err != nil {
+	if upDownDetail != "" {
+		if err := validateDepth(upDownDetail); err != nil {
 			return err
 		}
 	}
@@ -129,12 +146,12 @@ func runTraversal(fiberArg string, cfg traversalConfig) error {
 	}
 
 	// Depth-aware rendering
-	if upDownDepth != "" {
+	if upDownDetail != "" {
 		for i, id := range related {
 			dep := g.Nodes[id]
 			if dep != nil {
-				fmt.Print(renderFelt(dep, g, upDownDepth))
-				if upDownDepth != DepthTitle && i < len(related)-1 {
+				fmt.Print(renderFelt(dep, g, upDownDetail))
+				if upDownDetail != DepthTitle && i < len(related)-1 {
 					fmt.Println()
 				}
 			}
@@ -261,6 +278,8 @@ func init() {
 	rootCmd.AddCommand(checkCmd)
 
 	graphCmd.Flags().StringVarP(&graphFormat, "format", "f", "mermaid", "Output format (mermaid, dot, text)")
-	upstreamCmd.Flags().StringVarP(&upDownDepth, "depth", "d", "", "Detail level per item (title, compact, summary, full)")
-	downstreamCmd.Flags().StringVarP(&upDownDepth, "depth", "d", "", "Detail level per item (title, compact, summary, full)")
+	upstreamCmd.Flags().StringVarP(&upDownDetail, "detail", "d", "", "Detail level per item (title, compact, summary, full)")
+	downstreamCmd.Flags().StringVarP(&upDownDetail, "detail", "d", "", "Detail level per item (title, compact, summary, full)")
+	upstreamCmd.Flags().BoolVar(&traversalAll, "all", false, "Traverse full transitive closure (all ancestors)")
+	downstreamCmd.Flags().BoolVar(&traversalAll, "all", false, "Traverse full transitive closure (all descendants)")
 }

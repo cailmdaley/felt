@@ -112,6 +112,94 @@ func TestGetDownstream(t *testing.T) {
 	}
 }
 
+func TestGetUpstreamN(t *testing.T) {
+	// A <- B <- C <- D
+	felts := []*Felt{
+		makeTestFelt("a-11111111", "A", StatusOpen, nil),
+		makeTestFelt("b-22222222", "B", StatusOpen, []string{"a-11111111"}),
+		makeTestFelt("c-33333333", "C", StatusOpen, []string{"b-22222222"}),
+		makeTestFelt("d-44444444", "D", StatusOpen, []string{"c-33333333"}),
+	}
+
+	g := BuildGraph(felts)
+
+	// Depth 1: direct parents only
+	upstream := g.GetUpstreamN("d-44444444", 1)
+	if len(upstream) != 1 {
+		t.Errorf("D upstream depth=1 count = %d, want 1", len(upstream))
+	}
+	if len(upstream) > 0 && upstream[0] != "c-33333333" {
+		t.Errorf("D upstream depth=1 = %v, want [c-33333333]", upstream)
+	}
+
+	// Depth 2: parents and grandparents
+	upstream = g.GetUpstreamN("d-44444444", 2)
+	if len(upstream) != 2 {
+		t.Errorf("D upstream depth=2 count = %d, want 2", len(upstream))
+	}
+
+	// Depth 0: unlimited (full transitive closure)
+	upstream = g.GetUpstreamN("d-44444444", 0)
+	if len(upstream) != 3 {
+		t.Errorf("D upstream depth=0 count = %d, want 3", len(upstream))
+	}
+
+	// Depth 1 from B: just A
+	upstream = g.GetUpstreamN("b-22222222", 1)
+	if len(upstream) != 1 {
+		t.Errorf("B upstream depth=1 count = %d, want 1", len(upstream))
+	}
+
+	// Depth 1 from A: nothing
+	upstream = g.GetUpstreamN("a-11111111", 1)
+	if len(upstream) != 0 {
+		t.Errorf("A upstream depth=1 count = %d, want 0", len(upstream))
+	}
+}
+
+func TestGetDownstreamN(t *testing.T) {
+	// A <- B <- C
+	//  \_ D
+	felts := []*Felt{
+		makeTestFelt("a-11111111", "A", StatusOpen, nil),
+		makeTestFelt("b-22222222", "B", StatusOpen, []string{"a-11111111"}),
+		makeTestFelt("c-33333333", "C", StatusOpen, []string{"b-22222222"}),
+		makeTestFelt("d-44444444", "D", StatusOpen, []string{"a-11111111"}),
+	}
+
+	g := BuildGraph(felts)
+
+	// Depth 1 from A: direct children B and D
+	downstream := g.GetDownstreamN("a-11111111", 1)
+	if len(downstream) != 2 {
+		t.Errorf("A downstream depth=1 count = %d, want 2", len(downstream))
+	}
+
+	// Depth 2 from A: B, D, and C (grandchild via B)
+	downstream = g.GetDownstreamN("a-11111111", 2)
+	if len(downstream) != 3 {
+		t.Errorf("A downstream depth=2 count = %d, want 3", len(downstream))
+	}
+
+	// Depth 0 from A: full transitive closure
+	downstream = g.GetDownstreamN("a-11111111", 0)
+	if len(downstream) != 3 {
+		t.Errorf("A downstream depth=0 count = %d, want 3", len(downstream))
+	}
+
+	// Depth 1 from B: just C
+	downstream = g.GetDownstreamN("b-22222222", 1)
+	if len(downstream) != 1 {
+		t.Errorf("B downstream depth=1 count = %d, want 1", len(downstream))
+	}
+
+	// Depth 1 from C: nothing
+	downstream = g.GetDownstreamN("c-33333333", 1)
+	if len(downstream) != 0 {
+		t.Errorf("C downstream depth=1 count = %d, want 0", len(downstream))
+	}
+}
+
 func TestReady(t *testing.T) {
 	// A (closed) <- B (open) <- C (open)
 	felts := []*Felt{

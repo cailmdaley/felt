@@ -62,7 +62,7 @@ felt show <id> -d compact     # see outcome without full body
 
 ### Progressive Disclosure
 
-`felt show` supports depth levels via `--depth` / `-d`:
+`felt show` supports detail levels via `--detail` / `-d`:
 
 | Level | What you see |
 |---|---|

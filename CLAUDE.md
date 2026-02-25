@@ -24,7 +24,7 @@ Fibers are minimal by default. All fields except title are optional.
 
 **Status is opt-in.** `felt add "title"` creates a statusless fiber. `felt add "title" -s open` enters tracking. `felt edit <id> -s active` enters tracking. `felt ls` only shows tracked fibers.
 
-**Progressive disclosure.** `felt show <id> -d compact` shows metadata + outcome without body. Levels: title, compact, summary, full (default). `felt upstream/downstream <id> -d compact` renders each connected fiber at that depth.
+**Progressive disclosure.** `felt show <id> -d compact` shows metadata + outcome without body. Levels: title, compact, summary, full (default). `felt upstream/downstream <id> -d compact` renders each connected fiber at that detail level.
 
 **Backward compat:** `close-reason` reads as `outcome`, `kind` reads as a tag. Both migrate on next write.
 

@@ -223,12 +223,16 @@ felt show <id> -d compact       # metadata + outcome only
 felt ls                         # tracked fibers (open/active)
 felt ls -t tapestry:            # any filter widens to all statuses
 felt ls -s closed "query"       # explicit -s overrides; -e exact, -r regex
-felt upstream/downstream <id>   # DAG traversal
--d title|compact|summary|full   # depth for show, ls, upstream, downstream
-Also: link, unlink, tag, untag, tree, ready, rm
+felt upstream <id>               # direct dependencies
+felt upstream <id> -d summary    # with summaries
+felt upstream <id> --all         # full transitive closure
+felt downstream <id>             # direct dependents
+felt downstream <id> -d summary  # with summaries
+felt downstream <id> --all       # full transitive closure
+Also: link, unlink, tag, untag, path, tree, ready, rm
 ` + "```" + `
 Statuses: · untracked, ○ open, ◐ active, ● closed
-Depth: title < compact < summary < full (default). Summary shows the **lede** — the first paragraph of the body. Write it to stand alone.
+Detail: title < compact < summary < full (default). Summary shows the **lede** — the first paragraph of the body. Write it to stand alone.
 To patch body text (not replace), edit .felt/<id>.md directly.
 
 `
