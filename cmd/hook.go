@@ -66,6 +66,7 @@ func minimalOutput() string {
 ` + cliReference() + `## Core Rules
 - **Use felt for everything** — tasks, decisions, questions, detours, bugs you can't chase now. If it might matter, it's a fiber.
 - Outcome (` + "`-o`" + `) is the documentation: the conclusion, the reasoning, what was learned
+- ` + "`felt edit`" + ` is non-interactive (flags only); for patch edits, modify ` + "`.felt/<id>.md`" + ` directly
 - **Leave a wake** — file as you go
 - **Titles are DAG node labels: 2-3 words.** Body and outcome carry full content.
 `
@@ -149,6 +150,7 @@ func formatSessionOutput(felts []*felt.Felt, g *felt.Graph) string {
 	sb.WriteString("## Core Rules\n")
 	sb.WriteString("- **Use felt for everything** — tasks, decisions, questions, detours, bugs you can't chase now. If it might matter, it's a fiber.\n")
 	sb.WriteString("- Outcome (`-o`) is the documentation: the conclusion, the reasoning, what was learned\n")
+	sb.WriteString("- `felt edit` is non-interactive (flags only); for patch edits, modify `.felt/<id>.md` directly\n")
 	sb.WriteString("- **Leave a wake** — file as you go\n")
 	sb.WriteString("- **Titles are DAG node labels: 2-3 words.** Body and outcome carry full content.\n")
 
@@ -213,6 +215,7 @@ felt "title"                    # create fiber
 felt add "title" -s open -t tag -a <dep-id> -o "outcome"
 felt edit <id> -s active        # enter tracking / mark active
 felt edit <id> -s closed -o "outcome"  # close with outcome
+felt edit <id> --body "text"    # full body replacement (overwrite)
 felt comment <id> "note"        # add comment
 felt show <id>                  # full details
 felt ls                         # tracked fibers (open/active)
@@ -227,4 +230,3 @@ To patch body text (not replace), edit .felt/<id>.md directly.
 
 `
 }
-

@@ -98,6 +98,31 @@ func TestIntegration(t *testing.T) {
 		t.Fatalf("edit: expected active status, got: %s", out)
 	}
 
+	// edit with no flags should fail (agent-first, non-interactive)
+	out, err := felt(dir, "edit", fiberID)
+	if err == nil {
+		t.Fatal("edit without flags: expected error")
+	}
+	if !strings.Contains(out, "no changes requested") {
+		t.Fatalf("edit without flags: expected helpful error, got: %s", out)
+	}
+
+	// initial body set on empty body should be a normal update (not overwrite warning)
+	out = mustFelt(t, dir, "edit", fiberID, "--body", "initial body")
+	if strings.Contains(out, "body overwritten") {
+		t.Fatalf("edit --body first set: should not warn overwrite, got: %s", out)
+	}
+
+	// replacing non-empty body should be called out as overwrite
+	out = mustFelt(t, dir, "edit", fiberID, "--body", "replacement body")
+	if !strings.Contains(out, "body overwritten") {
+		t.Fatalf("edit --body replace: expected overwrite message, got: %s", out)
+	}
+	out = mustFelt(t, dir, "show", fiberID, "--body")
+	if !strings.Contains(out, "replacement body") {
+		t.Fatalf("edit --body: expected replacement content, got: %s", out)
+	}
+
 	// comment
 	mustFelt(t, dir, "comment", fiberID, "a test comment")
 

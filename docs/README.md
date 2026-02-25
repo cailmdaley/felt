@@ -151,7 +151,7 @@ felt tree                         # dependency tree
 ### Editing
 
 ```bash
-felt edit <id>                    # open in $EDITOR
+felt edit <id> --body "text"      # replace full body (destructive overwrite)
 felt edit <id> --title "new"      # set title
 felt edit <id> -s active          # set status
 felt edit <id> -o "outcome"       # set outcome

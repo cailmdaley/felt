@@ -2,8 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"os"
-	"os/exec"
 	"time"
 
 	"github.com/cailmdaley/felt/internal/felt"
@@ -25,13 +23,13 @@ var linkLabel string
 
 var editCmd = &cobra.Command{
 	Use:   "edit <id>",
-	Short: "Modify a felt's properties or open in $EDITOR",
-	Long: `Modifies a felt's properties via flags, or opens in $EDITOR if no flags given.
+	Short: "Modify a felt's properties via flags",
+	Long: `Modifies a felt's properties via flags.
 
 Examples:
   felt edit abc123 --title "New title" -s active
   felt edit abc123 --depends-on other-fiber-id
-  felt edit abc123                  # opens in $EDITOR`,
+  felt edit abc123 --body "Full replacement body text"  # overwrites body`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		root, err := felt.FindProjectRoot()
@@ -54,20 +52,11 @@ Examples:
 			cmd.Flags().Changed("outcome")
 
 		if !hasFlags {
-			// No flags: open in editor
-			editor := os.Getenv("EDITOR")
-			if editor == "" {
-				editor = "vim"
-			}
-
-			path := storage.Path(f.ID)
-			editorCmd := exec.Command(editor, path)
-			editorCmd.Stdin = os.Stdin
-			editorCmd.Stdout = os.Stdout
-			editorCmd.Stderr = os.Stderr
-
-			return editorCmd.Run()
+			return fmt.Errorf("no changes requested: use edit flags (use --body only when you intend to overwrite the full body)")
 		}
+
+		bodyOverwritten := false
+		bodyCleared := false
 
 		// Apply flag modifications
 		if cmd.Flags().Changed("title") {
@@ -96,6 +85,12 @@ Examples:
 			}
 		}
 		if cmd.Flags().Changed("body") {
+			if f.Body != "" && editBody != f.Body {
+				bodyOverwritten = true
+			}
+			if f.Body != "" && editBody == "" {
+				bodyCleared = true
+			}
 			f.Body = editBody
 		}
 		if cmd.Flags().Changed("outcome") {
@@ -148,7 +143,14 @@ Examples:
 			return err
 		}
 
-		fmt.Printf("Updated %s\n", f.ID)
+		switch {
+		case bodyCleared:
+			fmt.Printf("Updated %s (body cleared; previous content removed)\n", f.ID)
+		case bodyOverwritten:
+			fmt.Printf("Updated %s (body overwritten)\n", f.ID)
+		default:
+			fmt.Printf("Updated %s\n", f.ID)
+		}
 		return nil
 	},
 }
@@ -311,7 +313,7 @@ func init() {
 	// Edit command flags
 	editCmd.Flags().StringVarP(&editTitle, "title", "t", "", "Set title")
 	editCmd.Flags().StringVarP(&editStatus, "status", "s", "", "Set status (open, active, closed)")
-	editCmd.Flags().StringVarP(&editBody, "body", "b", "", "Set body text")
+	editCmd.Flags().StringVarP(&editBody, "body", "b", "", "Replace full body text (destructive overwrite)")
 	editCmd.Flags().StringVarP(&editOutcome, "outcome", "o", "", "Set outcome")
 	editCmd.Flags().StringVarP(&editDue, "due", "D", "", "Set due date (YYYY-MM-DD, empty to clear)")
 	editCmd.Flags().StringArrayVarP(&editDeps, "depends-on", "a", nil, "Add dependency (repeatable)")
