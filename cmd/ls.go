@@ -61,14 +61,7 @@ Use --body with query to include body search, and with --json to emit body text.
 		}
 
 		queryLower := strings.ToLower(query)
-		needsBodySearch := query != "" && !lsExact && lsBody
-
-		var felts []*felt.Felt
-		if needsBodySearch {
-			felts, err = storage.List()
-		} else {
-			felts, err = storage.ListMetadata()
-		}
+		felts, err := storage.ListMetadata()
 		if err != nil {
 			return err
 		}
@@ -85,6 +78,7 @@ Use --body with query to include body search, and with --json to emit body text.
 		// Filter
 		var exactMatches []*felt.Felt
 		var filtered []*felt.Felt
+		var bodyCandidates []*felt.Felt
 		for _, f := range felts {
 			// Status gate
 			if effectiveStatus == "all" {
@@ -138,15 +132,19 @@ Use --body with query to include body search, and with --json to emit body text.
 				if lsRegex {
 					matches = re.MatchString(f.Title) ||
 						re.MatchString(f.Outcome)
-					if !matches && lsBody {
-						matches = re.MatchString(f.Body)
-					}
 				} else {
 					matches = strings.Contains(titleLower, queryLower) ||
 						strings.Contains(strings.ToLower(f.Outcome), queryLower)
-					if !matches && lsBody {
-						matches = strings.Contains(strings.ToLower(f.Body), queryLower)
-					}
+				}
+
+				if matches {
+					filtered = append(filtered, f)
+					continue
+				}
+
+				if lsBody {
+					bodyCandidates = append(bodyCandidates, f)
+					continue
 				}
 
 				if !matches {
@@ -155,6 +153,13 @@ Use --body with query to include body search, and with --json to emit body text.
 			}
 
 			filtered = append(filtered, f)
+		}
+
+		if query != "" && !lsExact && lsBody && len(bodyCandidates) > 0 {
+			filtered, err = appendBodyMatches(storage, filtered, bodyCandidates, lsRegex, re, queryLower)
+			if err != nil {
+				return err
+			}
 		}
 
 		// Exact title matches first, then the rest
@@ -187,8 +192,12 @@ Use --body with query to include body search, and with --json to emit body text.
 
 		// Output
 		if jsonOutput {
-			// If --body flag not set, clear body field to exclude from JSON
-			if !lsBody {
+			if lsBody {
+				filtered, err = hydrateBodies(storage, filtered)
+				if err != nil {
+					return err
+				}
+			} else {
 				for _, f := range filtered {
 					f.Body = ""
 				}
@@ -282,6 +291,40 @@ var readyCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(readyCmd)
 	readyCmd.Flags().StringArrayVarP(&readyTags, "tag", "t", nil, "Filter by tag (repeatable, AND logic)")
+}
+
+func appendBodyMatches(storage *felt.Storage, filtered, candidates []*felt.Felt, useRegex bool, re *regexp.Regexp, queryLower string) ([]*felt.Felt, error) {
+	fullCandidates, err := hydrateBodies(storage, candidates)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, f := range fullCandidates {
+		var matches bool
+		if useRegex {
+			matches = re.MatchString(f.Body)
+		} else {
+			matches = strings.Contains(strings.ToLower(f.Body), queryLower)
+		}
+		if matches {
+			filtered = append(filtered, f)
+		}
+	}
+
+	return filtered, nil
+}
+
+func hydrateBodies(storage *felt.Storage, felts []*felt.Felt) ([]*felt.Felt, error) {
+	hydrated := make([]*felt.Felt, 0, len(felts))
+	for _, f := range felts {
+		full, err := storage.Read(f.ID)
+		if err != nil {
+			return nil, err
+		}
+		full.ModifiedAt = f.ModifiedAt
+		hydrated = append(hydrated, full)
+	}
+	return hydrated, nil
 }
 
 // TreeNode represents a felt with its children for JSON output.

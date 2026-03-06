@@ -3,6 +3,7 @@
 package cmd_test
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -129,6 +130,14 @@ func TestIntegration(t *testing.T) {
 	out = mustFelt(t, dir, "ls", "--body", "replacement")
 	if !strings.Contains(out, fiberID) {
 		t.Fatalf("ls query with --body should match body text, got: %s", out)
+	}
+	out = mustFelt(t, dir, "ls", "--json", "--body")
+	var listed []map[string]any
+	if err := json.Unmarshal([]byte(out), &listed); err != nil {
+		t.Fatalf("ls --json --body: invalid json: %v\n%s", err, out)
+	}
+	if len(listed) != 1 || listed[0]["body"] != "replacement body" {
+		t.Fatalf("ls --json --body: expected hydrated body, got: %#v", listed)
 	}
 
 	// comment
