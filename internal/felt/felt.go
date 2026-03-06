@@ -15,6 +15,14 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// ParseMode controls how much of a fiber file gets parsed.
+type ParseMode int
+
+const (
+	ParseMetadataOnly ParseMode = iota
+	ParseFull
+)
+
 // Status constants
 const (
 	StatusOpen   = "open"
@@ -98,8 +106,8 @@ type Felt struct {
 	ID         string       `yaml:"-" json:"id"`
 	Title      string       `yaml:"title" json:"title"`
 	Status     string       `yaml:"status,omitempty" json:"status,omitempty"`
-	Tags      []string     `yaml:"tags,omitempty" json:"tags,omitempty"`
-	DependsOn Dependencies `yaml:"depends-on,omitempty" json:"depends_on,omitempty"`
+	Tags       []string     `yaml:"tags,omitempty" json:"tags,omitempty"`
+	DependsOn  Dependencies `yaml:"depends-on,omitempty" json:"depends_on,omitempty"`
 	CreatedAt  time.Time    `yaml:"created-at" json:"created_at"`
 	ClosedAt   *time.Time   `yaml:"closed-at,omitempty" json:"closed_at,omitempty"`
 	Outcome    string       `yaml:"outcome,omitempty" json:"outcome,omitempty"`
@@ -272,7 +280,12 @@ func (f *Felt) RemoveTag(tag string) {
 // Parse parses a felt file content into a Felt struct.
 // The id parameter is the ID extracted from the filename.
 func Parse(id string, content []byte) (*Felt, error) {
-	frontmatter, body, err := splitFrontmatter(content)
+	return ParseWithMode(id, content, ParseFull)
+}
+
+// ParseWithMode parses a felt file, optionally skipping body extraction.
+func ParseWithMode(id string, content []byte, mode ParseMode) (*Felt, error) {
+	frontmatter, body, err := splitFrontmatter(content, mode == ParseFull)
 	if err != nil {
 		return nil, err
 	}
@@ -281,14 +294,16 @@ func Parse(id string, content []byte) (*Felt, error) {
 	if err := yaml.Unmarshal(frontmatter, f); err != nil {
 		return nil, fmt.Errorf("parsing YAML frontmatter: %w", err)
 	}
-	f.Body = strings.TrimSpace(body)
+	if mode == ParseFull {
+		f.Body = strings.TrimSpace(body)
+	}
 
 	return f, nil
 }
 
 // splitFrontmatter separates YAML frontmatter from markdown body.
 // Frontmatter must be delimited by --- lines.
-func splitFrontmatter(content []byte) ([]byte, string, error) {
+func splitFrontmatter(content []byte, includeBody bool) ([]byte, string, error) {
 	scanner := bufio.NewScanner(bytes.NewReader(content))
 
 	// First line must be ---
@@ -319,6 +334,10 @@ func splitFrontmatter(content []byte) ([]byte, string, error) {
 
 	if !foundClosing {
 		return nil, "", fmt.Errorf("unclosed frontmatter (missing closing ---)")
+	}
+
+	if !includeBody {
+		return frontmatter.Bytes(), "", nil
 	}
 
 	// Rest is body

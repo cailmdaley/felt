@@ -32,7 +32,7 @@ Prints active fibers (currently being worked on) and ready fibers
 		}
 
 		storage := felt.NewStorage(root)
-		felts, err := storage.List()
+		felts, err := storage.ListMetadata()
 		if err != nil {
 			return err
 		}
@@ -156,7 +156,6 @@ func formatSessionOutput(felts []*felt.Felt, g *felt.Graph) string {
 
 	return sb.String()
 }
-
 
 // formatRecentEntry formats a recently-touched fiber for the hook.
 // Shows status icon, title with tags, and outcome if present.

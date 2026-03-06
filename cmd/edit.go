@@ -10,12 +10,12 @@ import (
 
 // Edit command flags
 var (
-	editTitle  string
-	editStatus   string
-	editDue      string
-	editDeps     []string
-	editBody     string
-	editOutcome  string
+	editTitle   string
+	editStatus  string
+	editDue     string
+	editDeps    []string
+	editBody    string
+	editOutcome string
 )
 
 // Link command flags
@@ -125,7 +125,7 @@ Examples:
 			}
 
 			// Check for cycles
-			felts, err := storage.List()
+			felts, err := storage.ListMetadata()
 			if err != nil {
 				return err
 			}
@@ -195,12 +195,16 @@ var linkCmd = &cobra.Command{
 		}
 
 		storage := felt.NewStorage(root)
-		felts, err := storage.List()
+		felts, err := storage.ListMetadata()
 		if err != nil {
 			return err
 		}
 
 		f, err := felt.FindByPrefix(felts, args[0])
+		if err != nil {
+			return fmt.Errorf("source: %w", err)
+		}
+		f, err = storage.Read(f.ID)
 		if err != nil {
 			return fmt.Errorf("source: %w", err)
 		}

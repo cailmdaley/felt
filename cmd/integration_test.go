@@ -122,6 +122,14 @@ func TestIntegration(t *testing.T) {
 	if !strings.Contains(out, "replacement body") {
 		t.Fatalf("edit --body: expected replacement content, got: %s", out)
 	}
+	out = mustFelt(t, dir, "ls", "replacement")
+	if strings.Contains(out, fiberID) {
+		t.Fatalf("ls query without --body should not match body text, got: %s", out)
+	}
+	out = mustFelt(t, dir, "ls", "--body", "replacement")
+	if !strings.Contains(out, fiberID) {
+		t.Fatalf("ls query with --body should match body text, got: %s", out)
+	}
 
 	// comment
 	mustFelt(t, dir, "comment", fiberID, "a test comment")

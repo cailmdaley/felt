@@ -11,12 +11,12 @@ import (
 )
 
 var (
-	lsStatus string
-	lsTags   []string
-	lsRecent int
-	lsBody   bool
-	lsExact  bool
-	lsRegex  bool
+	lsStatus  string
+	lsTags    []string
+	lsRecent  int
+	lsBody    bool
+	lsExact   bool
+	lsRegex   bool
 	readyTags []string
 )
 
@@ -32,10 +32,12 @@ Use -t to filter by tag (AND logic, prefix matching with trailing colon):
   -t rule:                    matches any rule:* tag
   -t rule:cosebis_data_vector exact tag match
 
-Optional query searches title, body, and outcome:
+Optional query searches title and outcome:
   felt ls cosebis             substring search
   felt ls -r "rule:.*data"    regex search
-  felt ls -e "exact title"    exact title match`,
+  felt ls -e "exact title"    exact title match
+
+Use --body with query to include body search, and with --json to emit body text.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		root, err := felt.FindProjectRoot()
@@ -44,11 +46,6 @@ Optional query searches title, body, and outcome:
 		}
 
 		storage := felt.NewStorage(root)
-		felts, err := storage.List()
-		if err != nil {
-			return err
-		}
-
 		query := ""
 		if len(args) == 1 {
 			query = args[0]
@@ -64,6 +61,17 @@ Optional query searches title, body, and outcome:
 		}
 
 		queryLower := strings.ToLower(query)
+		needsBodySearch := query != "" && !lsExact && lsBody
+
+		var felts []*felt.Felt
+		if needsBodySearch {
+			felts, err = storage.List()
+		} else {
+			felts, err = storage.ListMetadata()
+		}
+		if err != nil {
+			return err
+		}
 
 		// If any filter is active (tags, query, recent) and -s wasn't explicitly set,
 		// widen to all statuses. Bare `felt ls` stays open+active (actionable view).
@@ -129,12 +137,16 @@ Optional query searches title, body, and outcome:
 				var matches bool
 				if lsRegex {
 					matches = re.MatchString(f.Title) ||
-						re.MatchString(f.Body) ||
 						re.MatchString(f.Outcome)
+					if !matches && lsBody {
+						matches = re.MatchString(f.Body)
+					}
 				} else {
 					matches = strings.Contains(titleLower, queryLower) ||
-						strings.Contains(strings.ToLower(f.Body), queryLower) ||
 						strings.Contains(strings.ToLower(f.Outcome), queryLower)
+					if !matches && lsBody {
+						matches = strings.Contains(strings.ToLower(f.Body), queryLower)
+					}
 				}
 
 				if !matches {
@@ -201,13 +213,12 @@ Optional query searches title, body, and outcome:
 	},
 }
 
-
 func init() {
 	rootCmd.AddCommand(lsCmd)
 	lsCmd.Flags().StringVarP(&lsStatus, "status", "s", "", "Filter by status (open, active, closed, all)")
 	lsCmd.Flags().StringArrayVarP(&lsTags, "tag", "t", nil, "Filter by tag (repeatable, AND logic; trailing colon for prefix match)")
 	lsCmd.Flags().IntVarP(&lsRecent, "recent", "n", 0, "Show N most recent (by closed-at or created-at)")
-	lsCmd.Flags().BoolVar(&lsBody, "body", false, "Include body field in JSON output")
+	lsCmd.Flags().BoolVar(&lsBody, "body", false, "Include body search for queries and body field in JSON output")
 	lsCmd.Flags().BoolVarP(&lsExact, "exact", "e", false, "Exact title match only (with query)")
 	lsCmd.Flags().BoolVarP(&lsRegex, "regex", "r", false, "Treat query as regular expression")
 }
@@ -225,7 +236,7 @@ var readyCmd = &cobra.Command{
 		}
 
 		storage := felt.NewStorage(root)
-		felts, err := storage.List()
+		felts, err := storage.ListMetadata()
 		if err != nil {
 			return err
 		}
@@ -292,7 +303,7 @@ var treeCmd = &cobra.Command{
 		}
 
 		storage := felt.NewStorage(root)
-		felts, err := storage.List()
+		felts, err := storage.ListMetadata()
 		if err != nil {
 			return err
 		}

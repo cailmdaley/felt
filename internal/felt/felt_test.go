@@ -132,6 +132,33 @@ Some comment here.
 	}
 }
 
+func TestParseWithModeMetadataOnly(t *testing.T) {
+	content := []byte(`---
+title: Test Task
+status: active
+created-at: 2026-01-01T10:00:00Z
+outcome: Metadata survives
+---
+
+This body should not be parsed.
+`)
+
+	f, err := ParseWithMode("test-task-abcd1234", content, ParseMetadataOnly)
+	if err != nil {
+		t.Fatalf("ParseWithMode() error: %v", err)
+	}
+
+	if f.Title != "Test Task" {
+		t.Errorf("Title = %q, want %q", f.Title, "Test Task")
+	}
+	if f.Outcome != "Metadata survives" {
+		t.Errorf("Outcome = %q, want %q", f.Outcome, "Metadata survives")
+	}
+	if f.Body != "" {
+		t.Errorf("Body = %q, want empty for metadata-only parse", f.Body)
+	}
+}
+
 func TestParseInvalid(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -196,7 +223,7 @@ func TestMatchesID(t *testing.T) {
 		query string
 		want  bool
 	}{
-		{"test-task-12345678", true},  // exact match
+		{"test-task-12345678", true},   // exact match
 		{"test-task-1234", true},       // prefix match
 		{"test-task", true},            // prefix match
 		{"test", true},                 // prefix match

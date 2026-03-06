@@ -19,7 +19,7 @@ var rmCmd = &cobra.Command{
 		}
 
 		storage := felt.NewStorage(root)
-		felts, err := storage.List()
+		felts, err := storage.ListMetadata()
 		if err != nil {
 			return err
 		}
@@ -35,15 +35,19 @@ var rmCmd = &cobra.Command{
 				if !force {
 					return fmt.Errorf("cannot delete: %s depends on this felt", other.ID)
 				}
+				fullOther, err := storage.Read(other.ID)
+				if err != nil {
+					return fmt.Errorf("reading %s: %w", other.ID, err)
+				}
 				// Auto-unlink
 				var newDeps felt.Dependencies
-				for _, d := range other.DependsOn {
+				for _, d := range fullOther.DependsOn {
 					if d.ID != f.ID {
 						newDeps = append(newDeps, d)
 					}
 				}
-				other.DependsOn = newDeps
-				if err := storage.Write(other); err != nil {
+				fullOther.DependsOn = newDeps
+				if err := storage.Write(fullOther); err != nil {
 					return fmt.Errorf("unlinking %s: %w", other.ID, err)
 				}
 				fmt.Printf("Unlinked %s → %s\n", other.ID, f.ID)

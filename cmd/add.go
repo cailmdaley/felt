@@ -11,12 +11,12 @@ import (
 )
 
 var (
-	addBody   string
-	addStatus string
-	addDeps   []string
-	addDue      string
-	addTags     []string
-	addOutcome  string
+	addBody    string
+	addStatus  string
+	addDeps    []string
+	addDue     string
+	addTags    []string
+	addOutcome string
 )
 
 var addCmd = &cobra.Command{
@@ -69,7 +69,7 @@ var addCmd = &cobra.Command{
 			}
 
 			// Check for cycles
-			felts, err := storage.List()
+			felts, err := storage.ListMetadata()
 			if err != nil {
 				return err
 			}

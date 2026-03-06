@@ -62,12 +62,21 @@ func (s *Storage) Write(f *Felt) error {
 
 // Read loads a felt from disk by ID.
 func (s *Storage) Read(id string) (*Felt, error) {
+	return s.readWithMode(id, ParseFull)
+}
+
+// ReadMetadata loads just the felt metadata, skipping body parsing.
+func (s *Storage) ReadMetadata(id string) (*Felt, error) {
+	return s.readWithMode(id, ParseMetadataOnly)
+}
+
+func (s *Storage) readWithMode(id string, mode ParseMode) (*Felt, error) {
 	path := s.Path(id)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("reading file %s: %w", path, err)
 	}
-	return Parse(id, data)
+	return ParseWithMode(id, data, mode)
 }
 
 // Delete removes a felt from disk.
@@ -81,6 +90,15 @@ func (s *Storage) Delete(id string) error {
 
 // List returns all felts in the storage.
 func (s *Storage) List() ([]*Felt, error) {
+	return s.listWithMode(ParseFull)
+}
+
+// ListMetadata returns all felts with frontmatter only.
+func (s *Storage) ListMetadata() ([]*Felt, error) {
+	return s.listWithMode(ParseMetadataOnly)
+}
+
+func (s *Storage) listWithMode(mode ParseMode) ([]*Felt, error) {
 	entries, err := os.ReadDir(s.root)
 	if err != nil {
 		return nil, fmt.Errorf("reading directory: %w", err)
@@ -97,7 +115,7 @@ func (s *Storage) List() ([]*Felt, error) {
 		}
 
 		id := strings.TrimSuffix(name, FileExt)
-		f, err := s.Read(id)
+		f, err := s.readWithMode(id, mode)
 		if err != nil {
 			// Log but continue on parse errors
 			fmt.Fprintf(os.Stderr, "warning: failed to parse %s: %v\n", name, err)

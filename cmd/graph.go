@@ -25,7 +25,7 @@ var graphCmd = &cobra.Command{
 		}
 
 		storage := felt.NewStorage(root)
-		felts, err := storage.List()
+		felts, err := storage.ListMetadata()
 		if err != nil {
 			return err
 		}
@@ -117,7 +117,7 @@ func runTraversal(fiberArg string, cfg traversalConfig) error {
 	}
 
 	storage := felt.NewStorage(root)
-	felts, err := storage.List()
+	felts, err := storage.ListMetadata()
 	if err != nil {
 		return err
 	}
@@ -198,7 +198,7 @@ var pathCmd = &cobra.Command{
 		}
 
 		storage := felt.NewStorage(root)
-		felts, err := storage.List()
+		felts, err := storage.ListMetadata()
 		if err != nil {
 			return err
 		}
@@ -246,7 +246,7 @@ var checkCmd = &cobra.Command{
 		}
 
 		storage := felt.NewStorage(root)
-		felts, err := storage.List()
+		felts, err := storage.ListMetadata()
 		if err != nil {
 			return err
 		}
