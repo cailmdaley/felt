@@ -195,13 +195,17 @@ var linkCmd = &cobra.Command{
 		}
 
 		storage := felt.NewStorage(root)
+		felts, err := storage.List()
+		if err != nil {
+			return err
+		}
 
-		f, err := storage.Find(args[0])
+		f, err := felt.FindByPrefix(felts, args[0])
 		if err != nil {
 			return fmt.Errorf("source: %w", err)
 		}
 
-		dep, err := storage.Find(args[1])
+		dep, err := felt.FindByPrefix(felts, args[1])
 		if err != nil {
 			return fmt.Errorf("dependency: %w", err)
 		}
@@ -209,12 +213,6 @@ var linkCmd = &cobra.Command{
 		// Check if already linked
 		if f.DependsOn.HasID(dep.ID) {
 			return fmt.Errorf("%s already depends on %s", f.ID, dep.ID)
-		}
-
-		// Check for cycles
-		felts, err := storage.List()
-		if err != nil {
-			return err
 		}
 
 		// Temporarily add the link

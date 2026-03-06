@@ -38,23 +38,26 @@ Detail levels control progressive disclosure:
 		}
 
 		storage := felt.NewStorage(root)
-		f, err := storage.Find(args[0])
-		if err != nil {
-			return err
-		}
 
-		// --body flag: output only the body (for piping)
-		if showBodyOnly {
-			fmt.Print(f.Body)
-			return nil
-		}
-
-		if jsonOutput {
+		// Early return paths: single-file read only
+		if showBodyOnly || jsonOutput {
+			f, err := storage.Find(args[0])
+			if err != nil {
+				return err
+			}
+			if showBodyOnly {
+				fmt.Print(f.Body)
+				return nil
+			}
 			return outputJSON(f)
 		}
 
-		// Build graph for downstream lookup
+		// Full render path: single List(), find target in list, build graph
 		felts, err := storage.List()
+		if err != nil {
+			return err
+		}
+		f, err := felt.FindByPrefix(felts, args[0])
 		if err != nil {
 			return err
 		}

@@ -19,18 +19,17 @@ var rmCmd = &cobra.Command{
 		}
 
 		storage := felt.NewStorage(root)
-		f, err := storage.Find(args[0])
+		felts, err := storage.List()
+		if err != nil {
+			return err
+		}
+
+		f, err := felt.FindByPrefix(felts, args[0])
 		if err != nil {
 			return err
 		}
 
 		force, _ := cmd.Flags().GetBool("force")
-
-		// Check if anything depends on this
-		felts, err := storage.List()
-		if err != nil {
-			return err
-		}
 		for _, other := range felts {
 			if other.DependsOn.HasID(f.ID) {
 				if !force {

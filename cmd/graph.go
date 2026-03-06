@@ -117,12 +117,12 @@ func runTraversal(fiberArg string, cfg traversalConfig) error {
 	}
 
 	storage := felt.NewStorage(root)
-	f, err := storage.Find(fiberArg)
+	felts, err := storage.List()
 	if err != nil {
 		return err
 	}
 
-	felts, err := storage.List()
+	f, err := felt.FindByPrefix(felts, fiberArg)
 	if err != nil {
 		return err
 	}
@@ -198,20 +198,19 @@ var pathCmd = &cobra.Command{
 		}
 
 		storage := felt.NewStorage(root)
+		felts, err := storage.List()
+		if err != nil {
+			return err
+		}
 
-		from, err := storage.Find(args[0])
+		from, err := felt.FindByPrefix(felts, args[0])
 		if err != nil {
 			return fmt.Errorf("from: %w", err)
 		}
 
-		to, err := storage.Find(args[1])
+		to, err := felt.FindByPrefix(felts, args[1])
 		if err != nil {
 			return fmt.Errorf("to: %w", err)
-		}
-
-		felts, err := storage.List()
-		if err != nil {
-			return err
 		}
 
 		g := felt.BuildGraph(felts)

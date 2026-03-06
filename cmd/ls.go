@@ -352,7 +352,7 @@ var treeCmd = &cobra.Command{
 			visited := make(map[string]bool)
 
 			if len(args) == 1 {
-				f, err := storage.Find(args[0])
+				f, err := felt.FindByPrefix(felts, args[0])
 				if err != nil {
 					return err
 				}
@@ -376,7 +376,7 @@ var treeCmd = &cobra.Command{
 
 		if len(args) == 1 {
 			// Show tree for specific felt
-			f, err := storage.Find(args[0])
+			f, err := felt.FindByPrefix(felts, args[0])
 			if err != nil {
 				return err
 			}

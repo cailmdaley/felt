@@ -410,16 +410,15 @@ func (f *Felt) Marshal() ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// MatchesID returns true if the given query matches this felt's ID.
+// MatchesIDQuery checks if an ID matches a query string.
 // Supports prefix matching and hex suffix matching.
-func (f *Felt) MatchesID(query string) bool {
-	if strings.HasPrefix(f.ID, query) {
+func MatchesIDQuery(id, query string) bool {
+	if strings.HasPrefix(id, query) {
 		return true
 	}
 
 	// Try matching just the hex suffix (e.g., "ac6b19c1" or "ac6b")
-	// This is useful when the slug is long but you know the hex part
-	parts := strings.Split(f.ID, "-")
+	parts := strings.Split(id, "-")
 	if len(parts) >= 2 {
 		hexPart := parts[len(parts)-1]
 		if strings.HasPrefix(hexPart, query) {
@@ -428,6 +427,11 @@ func (f *Felt) MatchesID(query string) bool {
 	}
 
 	return false
+}
+
+// MatchesID returns true if the given query matches this felt's ID.
+func (f *Felt) MatchesID(query string) bool {
+	return MatchesIDQuery(f.ID, query)
 }
 
 // IsOpen returns true if the felt is open.

@@ -113,13 +113,49 @@ func (s *Storage) List() ([]*Felt, error) {
 	return felts, nil
 }
 
-// Find returns the first felt matching the ID prefix.
+// Find returns the first felt matching the ID prefix or hex suffix.
+// Uses ReadDir + filename matching to avoid reading all files.
 func (s *Storage) Find(query string) (*Felt, error) {
-	felts, err := s.List()
+	entries, err := os.ReadDir(s.root)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("reading directory: %w", err)
 	}
 
+	var matchIDs []string
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if !strings.HasSuffix(name, FileExt) {
+			continue
+		}
+		id := strings.TrimSuffix(name, FileExt)
+		if MatchesIDQuery(id, query) {
+			matchIDs = append(matchIDs, id)
+		}
+	}
+
+	switch len(matchIDs) {
+	case 0:
+		return nil, fmt.Errorf("no felt found matching %q", query)
+	case 1:
+		f, err := s.Read(matchIDs[0])
+		if err != nil {
+			return nil, err
+		}
+		if info, err := os.Stat(s.Path(matchIDs[0])); err == nil {
+			f.ModifiedAt = info.ModTime()
+		}
+		return f, nil
+	default:
+		return nil, fmt.Errorf("ambiguous ID %q matches: %s", query, strings.Join(matchIDs, ", "))
+	}
+}
+
+// FindByPrefix finds a fiber matching a query in an existing slice.
+// Use this instead of Find when you already have the list from List().
+func FindByPrefix(felts []*Felt, query string) (*Felt, error) {
 	var matches []*Felt
 	for _, f := range felts {
 		if f.MatchesID(query) {
