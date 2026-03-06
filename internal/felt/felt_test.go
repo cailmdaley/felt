@@ -90,7 +90,8 @@ func TestParse(t *testing.T) {
 	content := []byte(`---
 title: Test Task
 status: active
-kind: spec
+tags:
+  - spec
 depends-on:
   - dep-a-12345678
   - dep-b-87654321
@@ -118,7 +119,7 @@ Some comment here.
 		t.Errorf("Status = %q, want %q", f.Status, StatusActive)
 	}
 	if !f.HasTag("spec") {
-		t.Errorf("HasTag(spec) = false, want true (kind migrates to tags)")
+		t.Errorf("HasTag(spec) = false, want true")
 	}
 	if len(f.DependsOn) != 2 {
 		t.Errorf("DependsOn length = %d, want 2", len(f.DependsOn))

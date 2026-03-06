@@ -269,57 +269,19 @@ func (f *Felt) RemoveTag(tag string) {
 	}
 }
 
-// parseFrontmatter is an intermediate struct for backward-compatible parsing.
-// It reads both old field names (close-reason, kind) and new ones (outcome).
-type parseFrontmatter struct {
-	Title       string       `yaml:"title"`
-	Status      string       `yaml:"status,omitempty"`
-	Kind        string       `yaml:"kind,omitempty"`
-	Tags      []string     `yaml:"tags,omitempty"`
-	DependsOn Dependencies `yaml:"depends-on,omitempty"`
-	CreatedAt   time.Time    `yaml:"created-at"`
-	ClosedAt    *time.Time   `yaml:"closed-at,omitempty"`
-	CloseReason string       `yaml:"close-reason,omitempty"`
-	Outcome     string       `yaml:"outcome,omitempty"`
-	Due         *time.Time   `yaml:"due,omitempty"`
-}
-
 // Parse parses a felt file content into a Felt struct.
 // The id parameter is the ID extracted from the filename.
-// Handles backward compatibility: reads close-reason as outcome, migrates kind to tags.
 func Parse(id string, content []byte) (*Felt, error) {
 	frontmatter, body, err := splitFrontmatter(content)
 	if err != nil {
 		return nil, err
 	}
 
-	var pf parseFrontmatter
-	if err := yaml.Unmarshal(frontmatter, &pf); err != nil {
+	f := &Felt{ID: id}
+	if err := yaml.Unmarshal(frontmatter, f); err != nil {
 		return nil, fmt.Errorf("parsing YAML frontmatter: %w", err)
 	}
-
-	f := &Felt{
-		ID:        id,
-		Title:     pf.Title,
-		Status:    pf.Status,
-		Tags:      pf.Tags,
-		DependsOn: pf.DependsOn,
-		CreatedAt: pf.CreatedAt,
-		ClosedAt:  pf.ClosedAt,
-		Due:       pf.Due,
-		Body:      strings.TrimSpace(body),
-	}
-
-	// Backward compat: close-reason → outcome
-	f.Outcome = pf.Outcome
-	if f.Outcome == "" {
-		f.Outcome = pf.CloseReason
-	}
-
-	// Backward compat: kind → tag (skip "task" which was the old default)
-	if pf.Kind != "" && pf.Kind != "task" {
-		f.AddTag(pf.Kind)
-	}
+	f.Body = strings.TrimSpace(body)
 
 	return f, nil
 }

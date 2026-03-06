@@ -26,8 +26,6 @@ Fibers are minimal by default. All fields except title are optional.
 
 **Progressive disclosure.** `felt show <id> -d compact` shows metadata + outcome without body. Levels: title, compact, summary, full (default). `felt upstream/downstream <id> -d compact` renders each connected fiber at that detail level.
 
-**Backward compat:** `close-reason` reads as `outcome`, `kind` reads as a tag. Both migrate on next write.
-
 ## Key integrations
 
 - **Reminders sync** — Apple Reminders <-> felt (dates, completion status)
