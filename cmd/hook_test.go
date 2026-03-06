@@ -263,39 +263,38 @@ func TestFormatSessionOutput_TagLabels(t *testing.T) {
 	}
 }
 
-func TestFormatFiberEntry(t *testing.T) {
+func TestFormatFeltTwoLine(t *testing.T) {
 	tests := []struct {
 		name     string
-		icon     string
 		felt     *felt.Felt
 		expected string
 	}{
 		{
-			name: "no tags - no label",
-			icon: "◐",
+			name: "active - no tags",
 			felt: &felt.Felt{
-				ID:    "impl-auth-12345678",
-				Title: "Implement auth",
+				ID:     "impl-auth-12345678",
+				Title:  "Implement auth",
+				Status: felt.StatusActive,
 			},
 			expected: "◐ impl-auth-12345678\n    Implement auth\n",
 		},
 		{
-			name: "decision tag - shows label",
-			icon: "○",
+			name: "open - decision tag",
 			felt: &felt.Felt{
-				ID:    "design-api-87654321",
-				Title: "Design REST API",
-				Tags:  []string{"decision"},
+				ID:     "design-api-87654321",
+				Title:  "Design REST API",
+				Status: felt.StatusOpen,
+				Tags:   []string{"decision"},
 			},
 			expected: "○ design-api-87654321\n    Design REST API (decision)\n",
 		},
 		{
-			name: "spec tag - shows label",
-			icon: "○",
+			name: "open - spec tag",
 			felt: &felt.Felt{
-				ID:    "api-spec-abcdef12",
-				Title: "API specification",
-				Tags:  []string{"spec"},
+				ID:     "api-spec-abcdef12",
+				Title:  "API specification",
+				Status: felt.StatusOpen,
+				Tags:   []string{"spec"},
 			},
 			expected: "○ api-spec-abcdef12\n    API specification (spec)\n",
 		},
@@ -303,9 +302,9 @@ func TestFormatFiberEntry(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := formatFiberEntry(tt.icon, tt.felt)
+			result := formatFeltTwoLine(tt.felt)
 			if result != tt.expected {
-				t.Errorf("formatFiberEntry() = %q, want %q", result, tt.expected)
+				t.Errorf("formatFeltTwoLine() = %q, want %q", result, tt.expected)
 			}
 		})
 	}

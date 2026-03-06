@@ -194,61 +194,13 @@ Optional query searches title, body, and outcome:
 		}
 
 		for _, f := range filtered {
-			printFeltTwoLine(f)
+			fmt.Print(formatFeltTwoLine(f))
 		}
 
 		return nil
 	},
 }
 
-func statusIcon(status string) string {
-	switch status {
-	case felt.StatusOpen:
-		return "○"
-	case felt.StatusActive:
-		return "◐"
-	case felt.StatusClosed:
-		return "●"
-	case "":
-		return "·"
-	default:
-		return "?"
-	}
-}
-
-// printFeltTwoLine prints a felt in two-line format for better scannability:
-// Line 1: status icon + ID
-// Line 2: indented title with metadata
-func printFeltTwoLine(f *felt.Felt) {
-	fmt.Print(formatFeltTwoLine(f))
-}
-
-// formatFeltTwoLine returns a felt in two-line format.
-// Used by ls, ready, find, and hook commands for consistent output.
-func formatFeltTwoLine(f *felt.Felt) string {
-	icon := statusIcon(f.Status)
-
-	// Line 1: status + ID
-	line1 := fmt.Sprintf("%s %s\n", icon, f.ID)
-
-	// Line 2: indented title with metadata (tags, deps)
-	var meta []string
-	if len(f.Tags) > 0 {
-		meta = append(meta, strings.Join(f.Tags, ", "))
-	}
-	if len(f.DependsOn) > 0 {
-		meta = append(meta, fmt.Sprintf("%d deps", len(f.DependsOn)))
-	}
-
-	metaStr := ""
-	if len(meta) > 0 {
-		metaStr = fmt.Sprintf(" (%s)", strings.Join(meta, ", "))
-	}
-
-	line2 := fmt.Sprintf("    %s%s\n", f.Title, metaStr)
-
-	return line1 + line2
-}
 
 func init() {
 	rootCmd.AddCommand(lsCmd)
@@ -309,7 +261,7 @@ var readyCmd = &cobra.Command{
 		}
 
 		for _, f := range ready {
-			printFeltTwoLine(f)
+			fmt.Print(formatFeltTwoLine(f))
 		}
 
 		return nil
@@ -444,12 +396,12 @@ func printTreeWithVisited(g *felt.Graph, id string, prefix string, last bool, vi
 
 	// Check if already printed
 	if visited[id] {
-		fmt.Printf("%s%s%s %s  %s (see above)\n", prefix, connector, statusIcon(f.Status), shortID(id), f.Title)
+		fmt.Printf("%s%s%s %s  %s (see above)\n", prefix, connector, felt.StatusIcon(f.Status), felt.ShortID(id), f.Title)
 		return
 	}
 	visited[id] = true
 
-	fmt.Printf("%s%s%s %s  %s\n", prefix, connector, statusIcon(f.Status), shortID(id), f.Title)
+	fmt.Printf("%s%s%s %s  %s\n", prefix, connector, felt.StatusIcon(f.Status), felt.ShortID(id), f.Title)
 
 	// Get children (downstream)
 	children := g.Downstream[id]
@@ -474,20 +426,6 @@ func printTreeWithVisited(g *felt.Graph, id string, prefix string, last bool, vi
 func printTree(g *felt.Graph, id string, prefix string, last bool) {
 	visited := make(map[string]bool)
 	printTreeWithVisited(g, id, prefix, last, visited)
-}
-
-func shortID(id string) string {
-	// Show last 8 chars (the hex part) plus a bit of slug
-	parts := strings.Split(id, "-")
-	if len(parts) < 2 {
-		return id
-	}
-	hex := parts[len(parts)-1]
-	slug := strings.Join(parts[:len(parts)-1], "-")
-	if len(slug) > 16 {
-		slug = slug[:16] + "..."
-	}
-	return slug + "-" + hex
 }
 
 func init() {

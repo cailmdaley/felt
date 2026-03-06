@@ -442,17 +442,6 @@ func (g *Graph) printTextTree(sb *strings.Builder, id string, prefix string, edg
 		return
 	}
 
-	// Status indicator
-	statusChar := "·"
-	switch f.Status {
-	case StatusOpen:
-		statusChar = "○"
-	case StatusActive:
-		statusChar = "◐"
-	case StatusClosed:
-		statusChar = "●"
-	}
-
 	// Branch character
 	branch := "├── "
 	if last {
@@ -462,26 +451,12 @@ func (g *Graph) printTextTree(sb *strings.Builder, id string, prefix string, edg
 		branch = ""
 	}
 
-	// Truncate ID for display
-	displayID := id
-	if len(displayID) > 20 {
-		parts := strings.Split(id, "-")
-		if len(parts) >= 2 {
-			hex := parts[len(parts)-1]
-			slug := strings.Join(parts[:len(parts)-1], "-")
-			if len(slug) > 12 {
-				slug = slug[:12] + "…"
-			}
-			displayID = slug + "-" + hex
-		}
-	}
-
 	labelPart := ""
 	if edgeLabel != "" {
 		labelPart = fmt.Sprintf(" [%s]", edgeLabel)
 	}
 
-	sb.WriteString(fmt.Sprintf("%s%s%s %s%s  %s\n", prefix, branch, statusChar, displayID, labelPart, f.Title))
+	sb.WriteString(fmt.Sprintf("%s%s%s %s%s  %s\n", prefix, branch, StatusIcon(f.Status), ShortID(id), labelPart, f.Title))
 
 	// Get and sort children by ID
 	children := g.Downstream[id]

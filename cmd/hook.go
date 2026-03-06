@@ -95,7 +95,7 @@ func formatSessionOutput(felts []*felt.Felt, g *felt.Graph) string {
 	if len(active) > 0 {
 		sb.WriteString("## Active Fibers\n\n")
 		for _, f := range active {
-			sb.WriteString(formatFiberEntry("◐", f))
+			sb.WriteString(formatFeltTwoLine(f))
 		}
 		sb.WriteString("\n")
 	}
@@ -103,7 +103,7 @@ func formatSessionOutput(felts []*felt.Felt, g *felt.Graph) string {
 	if len(ready) > 0 {
 		sb.WriteString("## Ready Fibers\n\n")
 		for _, f := range ready {
-			sb.WriteString(formatFiberEntry("○", f))
+			sb.WriteString(formatFeltTwoLine(f))
 		}
 		sb.WriteString("\n")
 	}
@@ -157,35 +157,11 @@ func formatSessionOutput(felts []*felt.Felt, g *felt.Graph) string {
 	return sb.String()
 }
 
-// formatFiberEntry formats a single fiber for hook output.
-// Two-line format: icon + ID, then indented title with metadata.
-func formatFiberEntry(icon string, f *felt.Felt) string {
-	// Line 1: status + ID
-	line1 := fmt.Sprintf("%s %s\n", icon, f.ID)
-
-	// Line 2: indented title with metadata (tags, deps)
-	var meta []string
-	if len(f.Tags) > 0 {
-		meta = append(meta, strings.Join(f.Tags, ", "))
-	}
-	if len(f.DependsOn) > 0 {
-		meta = append(meta, fmt.Sprintf("%d deps", len(f.DependsOn)))
-	}
-
-	metaStr := ""
-	if len(meta) > 0 {
-		metaStr = fmt.Sprintf(" (%s)", strings.Join(meta, ", "))
-	}
-
-	line2 := fmt.Sprintf("    %s%s\n", f.Title, metaStr)
-
-	return line1 + line2
-}
 
 // formatRecentEntry formats a recently-touched fiber for the hook.
 // Shows status icon, title with tags, and outcome if present.
 func formatRecentEntry(f *felt.Felt) string {
-	icon := statusIcon(f.Status)
+	icon := felt.StatusIcon(f.Status)
 
 	line1 := fmt.Sprintf("%s %s\n", icon, f.ID)
 

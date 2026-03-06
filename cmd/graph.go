@@ -165,9 +165,9 @@ func runTraversal(fiberArg string, cfg traversalConfig) error {
 		if dep != nil {
 			label := cfg.edgeLabel(g, f.ID, id)
 			if label != "" {
-				fmt.Printf("%s %s  %s [%s]\n", statusIcon(dep.Status), dep.ID, dep.Title, label)
+				fmt.Printf("%s %s  %s [%s]\n", felt.StatusIcon(dep.Status), dep.ID, dep.Title, label)
 			} else {
-				fmt.Printf("%s %s  %s\n", statusIcon(dep.Status), dep.ID, dep.Title)
+				fmt.Printf("%s %s  %s\n", felt.StatusIcon(dep.Status), dep.ID, dep.Title)
 			}
 		}
 	}
@@ -227,7 +227,7 @@ var pathCmd = &cobra.Command{
 			if i == 0 {
 				prefix = "→ "
 			}
-			fmt.Printf("%s%s %s  %s\n", prefix, statusIcon(f.Status), f.ID, f.Title)
+			fmt.Printf("%s%s %s  %s\n", prefix, felt.StatusIcon(f.Status), f.ID, f.Title)
 		}
 
 		return nil

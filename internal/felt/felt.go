@@ -434,6 +434,36 @@ func (f *Felt) MatchesID(query string) bool {
 	return MatchesIDQuery(f.ID, query)
 }
 
+// StatusIcon returns the display character for a status.
+func StatusIcon(status string) string {
+	switch status {
+	case StatusOpen:
+		return "○"
+	case StatusActive:
+		return "◐"
+	case StatusClosed:
+		return "●"
+	case "":
+		return "·"
+	default:
+		return "?"
+	}
+}
+
+// ShortID truncates a felt ID for display, keeping the hex suffix intact.
+func ShortID(id string) string {
+	parts := strings.Split(id, "-")
+	if len(parts) < 2 {
+		return id
+	}
+	hex := parts[len(parts)-1]
+	slug := strings.Join(parts[:len(parts)-1], "-")
+	if len(slug) > 16 {
+		slug = slug[:16] + "..."
+	}
+	return slug + "-" + hex
+}
+
 // IsOpen returns true if the felt is open.
 func (f *Felt) IsOpen() bool {
 	return f.Status == StatusOpen
