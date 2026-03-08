@@ -290,14 +290,22 @@ func ParseWithMode(id string, content []byte, mode ParseMode) (*Felt, error) {
 		return nil, err
 	}
 
-	f := &Felt{ID: id}
-	if err := yaml.Unmarshal(frontmatter, f); err != nil {
-		return nil, fmt.Errorf("parsing YAML frontmatter: %w", err)
+	f, err := parseFrontmatter(id, frontmatter)
+	if err != nil {
+		return nil, err
 	}
 	if mode == ParseFull {
 		f.Body = strings.TrimSpace(body)
 	}
 
+	return f, nil
+}
+
+func parseFrontmatter(id string, frontmatter []byte) (*Felt, error) {
+	f := &Felt{ID: id}
+	if err := yaml.Unmarshal(frontmatter, f); err != nil {
+		return nil, fmt.Errorf("parsing YAML frontmatter: %w", err)
+	}
 	return f, nil
 }
 

@@ -1,7 +1,9 @@
 package felt
 
 import (
+	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -72,6 +74,14 @@ func (s *Storage) ReadMetadata(id string) (*Felt, error) {
 
 func (s *Storage) readWithMode(id string, mode ParseMode) (*Felt, error) {
 	path := s.Path(id)
+	if mode == ParseMetadataOnly {
+		f, err := readMetadataFile(path, id)
+		if err != nil {
+			return nil, fmt.Errorf("reading file %s: %w", path, err)
+		}
+		return f, nil
+	}
+
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("reading file %s: %w", path, err)
@@ -215,4 +225,53 @@ func FindProjectRoot() (string, error) {
 		}
 		dir = parent
 	}
+}
+
+func readMetadataFile(path, id string) (*Felt, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	frontmatter, err := readFrontmatter(file)
+	if err != nil {
+		return nil, err
+	}
+	return parseFrontmatter(id, frontmatter)
+}
+
+func readFrontmatter(r io.Reader) ([]byte, error) {
+	scanner := bufio.NewScanner(r)
+
+	if !scanner.Scan() {
+		if err := scanner.Err(); err != nil {
+			return nil, fmt.Errorf("scanning file: %w", err)
+		}
+		return nil, fmt.Errorf("empty file")
+	}
+	if strings.TrimSpace(scanner.Text()) != "---" {
+		return nil, fmt.Errorf("file must start with ---")
+	}
+
+	var frontmatter strings.Builder
+	foundClosing := false
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.TrimSpace(line) == "---" {
+			foundClosing = true
+			break
+		}
+		frontmatter.WriteString(line)
+		frontmatter.WriteByte('\n')
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("scanning file: %w", err)
+	}
+	if !foundClosing {
+		return nil, fmt.Errorf("unclosed frontmatter (missing closing ---)")
+	}
+
+	return []byte(frontmatter.String()), nil
 }

@@ -3,6 +3,7 @@ package felt
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -220,6 +221,50 @@ func TestStorageListMetadataSkipsBody(t *testing.T) {
 	}
 	if felts[0].Body != "" {
 		t.Errorf("Body = %q, want empty", felts[0].Body)
+	}
+}
+
+func TestReadFrontmatter(t *testing.T) {
+	content := strings.NewReader(`---
+title: Test Task
+status: open
+created-at: 2026-01-01T10:00:00Z
+---
+
+Body should never be read.
+`)
+
+	frontmatter, err := readFrontmatter(content)
+	if err != nil {
+		t.Fatalf("readFrontmatter() error: %v", err)
+	}
+
+	got := string(frontmatter)
+	if !strings.Contains(got, "title: Test Task") {
+		t.Errorf("frontmatter = %q, want title", got)
+	}
+	if strings.Contains(got, "Body should never be read.") {
+		t.Errorf("frontmatter = %q, should not include body", got)
+	}
+}
+
+func TestReadFrontmatterErrors(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+	}{
+		{name: "empty", content: ""},
+		{name: "missing opener", content: "title: nope\n"},
+		{name: "missing closer", content: "---\ntitle: nope\n"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := readFrontmatter(strings.NewReader(tt.content))
+			if err == nil {
+				t.Fatalf("readFrontmatter() error = nil, want error")
+			}
+		})
 	}
 }
 
