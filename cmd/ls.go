@@ -61,7 +61,12 @@ Use --body with query to include body search, and with --json to emit body text.
 		}
 
 		queryLower := strings.ToLower(query)
-		felts, err := storage.ListMetadata()
+		var felts []*felt.Felt
+		if jsonOutput {
+			felts, err = storage.ListMetadataWithModTime()
+		} else {
+			felts, err = storage.ListMetadata()
+		}
 		if err != nil {
 			return err
 		}
@@ -245,7 +250,12 @@ var readyCmd = &cobra.Command{
 		}
 
 		storage := felt.NewStorage(root)
-		felts, err := storage.ListMetadata()
+		var felts []*felt.Felt
+		if jsonOutput {
+			felts, err = storage.ListMetadataWithModTime()
+		} else {
+			felts, err = storage.ListMetadata()
+		}
 		if err != nil {
 			return err
 		}
@@ -346,7 +356,12 @@ var treeCmd = &cobra.Command{
 		}
 
 		storage := felt.NewStorage(root)
-		felts, err := storage.ListMetadata()
+		var felts []*felt.Felt
+		if jsonOutput {
+			felts, err = storage.ListMetadataWithModTime()
+		} else {
+			felts, err = storage.ListMetadata()
+		}
 		if err != nil {
 			return err
 		}

@@ -100,15 +100,20 @@ func (s *Storage) Delete(id string) error {
 
 // List returns all felts in the storage.
 func (s *Storage) List() ([]*Felt, error) {
-	return s.listWithMode(ParseFull)
+	return s.listWithMode(ParseFull, false)
 }
 
 // ListMetadata returns all felts with frontmatter only.
 func (s *Storage) ListMetadata() ([]*Felt, error) {
-	return s.listWithMode(ParseMetadataOnly)
+	return s.listWithMode(ParseMetadataOnly, false)
 }
 
-func (s *Storage) listWithMode(mode ParseMode) ([]*Felt, error) {
+// ListMetadataWithModTime returns metadata plus file modification times.
+func (s *Storage) ListMetadataWithModTime() ([]*Felt, error) {
+	return s.listWithMode(ParseMetadataOnly, true)
+}
+
+func (s *Storage) listWithMode(mode ParseMode, includeModTime bool) ([]*Felt, error) {
 	entries, err := os.ReadDir(s.root)
 	if err != nil {
 		return nil, fmt.Errorf("reading directory: %w", err)
@@ -131,9 +136,10 @@ func (s *Storage) listWithMode(mode ParseMode) ([]*Felt, error) {
 			fmt.Fprintf(os.Stderr, "warning: failed to parse %s: %v\n", name, err)
 			continue
 		}
-		// Populate ModifiedAt from file stat
-		if info, err := entry.Info(); err == nil {
-			f.ModifiedAt = info.ModTime()
+		if includeModTime {
+			if info, err := entry.Info(); err == nil {
+				f.ModifiedAt = info.ModTime()
+			}
 		}
 		felts = append(felts, f)
 	}
@@ -150,6 +156,7 @@ func (s *Storage) Find(query string) (*Felt, error) {
 	}
 
 	var matchIDs []string
+	matchEntries := make(map[string]os.DirEntry)
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
@@ -161,6 +168,7 @@ func (s *Storage) Find(query string) (*Felt, error) {
 		id := strings.TrimSuffix(name, FileExt)
 		if MatchesIDQuery(id, query) {
 			matchIDs = append(matchIDs, id)
+			matchEntries[id] = entry
 		}
 	}
 
@@ -172,7 +180,7 @@ func (s *Storage) Find(query string) (*Felt, error) {
 		if err != nil {
 			return nil, err
 		}
-		if info, err := os.Stat(s.Path(matchIDs[0])); err == nil {
+		if info, err := matchEntries[matchIDs[0]].Info(); err == nil {
 			f.ModifiedAt = info.ModTime()
 		}
 		return f, nil

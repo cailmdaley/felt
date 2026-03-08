@@ -123,6 +123,14 @@ func TestIntegration(t *testing.T) {
 	if !strings.Contains(out, "replacement body") {
 		t.Fatalf("edit --body: expected replacement content, got: %s", out)
 	}
+	out = mustFelt(t, dir, "ls", "-e", "test fiber")
+	if !strings.Contains(out, fiberID) {
+		t.Fatalf("ls --exact should match exact title from metadata, got: %s", out)
+	}
+	out = mustFelt(t, dir, "ls", "completed successfully")
+	if strings.Contains(out, fiberID) {
+		t.Fatalf("ls query should not match outcome before it exists, got: %s", out)
+	}
 	out = mustFelt(t, dir, "ls", "replacement")
 	if strings.Contains(out, fiberID) {
 		t.Fatalf("ls query without --body should not match body text, got: %s", out)
@@ -148,6 +156,14 @@ func TestIntegration(t *testing.T) {
 	out = mustFelt(t, dir, "show", fiberID, "-d", "compact")
 	if !strings.Contains(out, "completed successfully") {
 		t.Fatalf("edit close: expected outcome, got: %s", out)
+	}
+	out = mustFelt(t, dir, "ls", "completed successfully")
+	if !strings.Contains(out, fiberID) {
+		t.Fatalf("ls query should match outcome text from metadata, got: %s", out)
+	}
+	out = mustFelt(t, dir, "ls", "-r", "completed\\s+successfully")
+	if !strings.Contains(out, fiberID) {
+		t.Fatalf("ls regex query should match outcome text from metadata, got: %s", out)
 	}
 
 	// add a second fiber and link them

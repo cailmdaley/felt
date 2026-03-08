@@ -222,6 +222,31 @@ func TestStorageListMetadataSkipsBody(t *testing.T) {
 	if felts[0].Body != "" {
 		t.Errorf("Body = %q, want empty", felts[0].Body)
 	}
+	if !felts[0].ModifiedAt.IsZero() {
+		t.Errorf("ModifiedAt = %v, want zero without modtime scan", felts[0].ModifiedAt)
+	}
+}
+
+func TestStorageListMetadataWithModTimePopulatesModifiedAt(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStorage(dir)
+	s.Init()
+
+	f, _ := New("Task One")
+	if err := s.Write(f); err != nil {
+		t.Fatalf("Write() error: %v", err)
+	}
+
+	felts, err := s.ListMetadataWithModTime()
+	if err != nil {
+		t.Fatalf("ListMetadataWithModTime() error: %v", err)
+	}
+	if len(felts) != 1 {
+		t.Fatalf("ListMetadataWithModTime() returned %d felts, want 1", len(felts))
+	}
+	if felts[0].ModifiedAt.IsZero() {
+		t.Fatal("ModifiedAt should be populated when explicitly requested")
+	}
 }
 
 func TestReadFrontmatter(t *testing.T) {

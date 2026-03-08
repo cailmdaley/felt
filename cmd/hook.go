@@ -32,7 +32,7 @@ Prints active fibers (currently being worked on) and ready fibers
 		}
 
 		storage := felt.NewStorage(root)
-		felts, err := storage.ListMetadata()
+		felts, err := storage.ListMetadataWithModTime()
 		if err != nil {
 			return err
 		}

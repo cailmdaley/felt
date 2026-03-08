@@ -117,7 +117,12 @@ func runTraversal(fiberArg string, cfg traversalConfig) error {
 	}
 
 	storage := felt.NewStorage(root)
-	felts, err := storage.ListMetadata()
+	var felts []*felt.Felt
+	if jsonOutput {
+		felts, err = storage.ListMetadataWithModTime()
+	} else {
+		felts, err = storage.ListMetadata()
+	}
 	if err != nil {
 		return err
 	}
