@@ -10,9 +10,13 @@ import (
 
 var jsonOutput bool
 
+// Version is the current version, set via ldflags.
+var Version = "dev"
+
 // SetVersionInfo sets version info from main (populated via ldflags)
-func SetVersionInfo(version, commit, date string) {
-	rootCmd.Version = version
+func SetVersionInfo(v, commit, date string) {
+	Version = v
+	rootCmd.Version = v
 }
 
 var rootCmd = &cobra.Command{
