@@ -38,7 +38,11 @@ Examples:
 		}
 
 		storage := felt.NewStorage(root)
-		f, err := storage.Find(args[0])
+		target, err := storage.FindMetadata(args[0])
+		if err != nil {
+			return err
+		}
+		f, err := storage.Read(target.ID)
 		if err != nil {
 			return err
 		}
@@ -108,9 +112,14 @@ Examples:
 			}
 		}
 		if cmd.Flags().Changed("depends-on") {
+			felts, err := storage.ListMetadata()
+			if err != nil {
+				return err
+			}
+
 			// Resolve and add dependencies
 			for _, dep := range editDeps {
-				depFelt, err := storage.Find(dep)
+				depFelt, err := felt.FindByPrefix(felts, dep)
 				if err != nil {
 					return fmt.Errorf("dependency %q: %w", dep, err)
 				}
@@ -125,10 +134,6 @@ Examples:
 			}
 
 			// Check for cycles
-			felts, err := storage.ListMetadata()
-			if err != nil {
-				return err
-			}
 			g := felt.BuildGraph(felts)
 			g.Nodes[f.ID] = f
 			g.Upstream[f.ID] = f.DependsOn
@@ -167,7 +172,11 @@ var commentCmd = &cobra.Command{
 		}
 
 		storage := felt.NewStorage(root)
-		f, err := storage.Find(args[0])
+		target, err := storage.FindMetadata(args[0])
+		if err != nil {
+			return err
+		}
+		f, err := storage.Read(target.ID)
 		if err != nil {
 			return err
 		}
@@ -256,12 +265,16 @@ var unlinkCmd = &cobra.Command{
 
 		storage := felt.NewStorage(root)
 
-		f, err := storage.Find(args[0])
+		source, err := storage.FindMetadata(args[0])
+		if err != nil {
+			return fmt.Errorf("source: %w", err)
+		}
+		f, err := storage.Read(source.ID)
 		if err != nil {
 			return fmt.Errorf("source: %w", err)
 		}
 
-		dep, err := storage.Find(args[1])
+		dep, err := storage.FindMetadata(args[1])
 		if err != nil {
 			return fmt.Errorf("dependency: %w", err)
 		}

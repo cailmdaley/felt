@@ -20,7 +20,11 @@ var tagCmd = &cobra.Command{
 		}
 
 		storage := felt.NewStorage(root)
-		f, err := storage.Find(args[0])
+		target, err := storage.FindMetadata(args[0])
+		if err != nil {
+			return err
+		}
+		f, err := storage.Read(target.ID)
 		if err != nil {
 			return err
 		}
@@ -54,7 +58,11 @@ var untagCmd = &cobra.Command{
 		}
 
 		storage := felt.NewStorage(root)
-		f, err := storage.Find(args[0])
+		target, err := storage.FindMetadata(args[0])
+		if err != nil {
+			return err
+		}
+		f, err := storage.Read(target.ID)
 		if err != nil {
 			return err
 		}

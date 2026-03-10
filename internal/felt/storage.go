@@ -72,6 +72,12 @@ func (s *Storage) ReadMetadata(id string) (*Felt, error) {
 	return s.readWithMode(id, ParseMetadataOnly)
 }
 
+// FindMetadata returns the first felt matching the ID prefix or hex suffix,
+// reading only metadata from the matching file.
+func (s *Storage) FindMetadata(query string) (*Felt, error) {
+	return s.findWithMode(query, ParseMetadataOnly)
+}
+
 func (s *Storage) readWithMode(id string, mode ParseMode) (*Felt, error) {
 	path := s.Path(id)
 	if mode == ParseMetadataOnly {
@@ -150,6 +156,10 @@ func (s *Storage) listWithMode(mode ParseMode, includeModTime bool) ([]*Felt, er
 // Find returns the first felt matching the ID prefix or hex suffix.
 // Uses ReadDir + filename matching to avoid reading all files.
 func (s *Storage) Find(query string) (*Felt, error) {
+	return s.findWithMode(query, ParseFull)
+}
+
+func (s *Storage) findWithMode(query string, mode ParseMode) (*Felt, error) {
 	entries, err := os.ReadDir(s.root)
 	if err != nil {
 		return nil, fmt.Errorf("reading directory: %w", err)
@@ -176,7 +186,7 @@ func (s *Storage) Find(query string) (*Felt, error) {
 	case 0:
 		return nil, fmt.Errorf("no felt found matching %q", query)
 	case 1:
-		f, err := s.Read(matchIDs[0])
+		f, err := s.readWithMode(matchIDs[0], mode)
 		if err != nil {
 			return nil, err
 		}

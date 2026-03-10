@@ -52,16 +52,24 @@ Detail levels control progressive disclosure:
 			return outputJSON(f)
 		}
 
-		// Full render path: single List(), find target in list, build graph
-		felts, err := storage.List()
+		felts, err := storage.ListMetadata()
 		if err != nil {
 			return err
 		}
-		f, err := felt.FindByPrefix(felts, args[0])
+		target, err := felt.FindByPrefix(felts, args[0])
 		if err != nil {
 			return err
 		}
 		graph := felt.BuildGraph(felts)
+
+		f := target
+		if detail == DepthSummary || detail == DepthFull {
+			f, err = storage.Read(target.ID)
+			if err != nil {
+				return err
+			}
+			graph.Nodes[f.ID] = f
+		}
 
 		fmt.Print(renderFelt(f, graph, detail))
 		return nil

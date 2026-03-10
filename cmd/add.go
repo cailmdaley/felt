@@ -59,9 +59,14 @@ var addCmd = &cobra.Command{
 			}
 		}
 		if len(addDeps) > 0 {
+			felts, err := storage.ListMetadata()
+			if err != nil {
+				return err
+			}
+
 			// Resolve dependency IDs
 			for _, dep := range addDeps {
-				depFelt, err := storage.Find(dep)
+				depFelt, err := felt.FindByPrefix(felts, dep)
 				if err != nil {
 					return fmt.Errorf("dependency %q: %w", dep, err)
 				}
@@ -69,10 +74,6 @@ var addCmd = &cobra.Command{
 			}
 
 			// Check for cycles
-			felts, err := storage.ListMetadata()
-			if err != nil {
-				return err
-			}
 			// Add the new felt temporarily for cycle check
 			felts = append(felts, f)
 			g := felt.BuildGraph(felts)

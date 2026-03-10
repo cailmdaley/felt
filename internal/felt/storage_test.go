@@ -249,6 +249,41 @@ func TestStorageListMetadataWithModTimePopulatesModifiedAt(t *testing.T) {
 	}
 }
 
+func TestStorageFindMetadataSkipsBody(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStorage(dir)
+	s.Init()
+
+	f := &Felt{
+		ID:        "test-task-12345678",
+		Title:     "Test Task",
+		Status:    StatusOpen,
+		CreatedAt: time.Now(),
+		Outcome:   "Metadata survives",
+		Body:      "Body should be skipped.",
+	}
+	if err := s.Write(f); err != nil {
+		t.Fatalf("Write() error: %v", err)
+	}
+
+	found, err := s.FindMetadata("1234")
+	if err != nil {
+		t.Fatalf("FindMetadata() error: %v", err)
+	}
+	if found.ID != f.ID {
+		t.Errorf("ID = %q, want %q", found.ID, f.ID)
+	}
+	if found.Outcome != f.Outcome {
+		t.Errorf("Outcome = %q, want %q", found.Outcome, f.Outcome)
+	}
+	if found.Body != "" {
+		t.Errorf("Body = %q, want empty", found.Body)
+	}
+	if found.ModifiedAt.IsZero() {
+		t.Fatal("ModifiedAt should be populated for FindMetadata")
+	}
+}
+
 func TestReadFrontmatter(t *testing.T) {
 	content := strings.NewReader(`---
 title: Test Task
