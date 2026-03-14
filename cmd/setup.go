@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"embed"
 	"encoding/json"
 	"fmt"
@@ -35,12 +36,13 @@ Use --uninstall to remove the hooks.`,
 		if uninstall {
 			return uninstallClaudeHooks()
 		}
+		updateSkills, _ := cmd.Flags().GetBool("update-skills")
 		if err := installClaudeHooks(); err != nil {
 			return err
 		}
 		fmt.Println()
 		skillsTarget := filepath.Join(os.Getenv("HOME"), ".claude", "skills")
-		if err := installSkills(skillsTarget); err != nil {
+		if err := installSkills(skillsTarget, updateSkills); err != nil {
 			fmt.Printf("warning: could not install skills: %v\n", err)
 		}
 		fmt.Println()
@@ -65,12 +67,13 @@ Use --uninstall to remove it.`,
 		if uninstall {
 			return uninstallCodexWrapper()
 		}
+		updateSkills, _ := cmd.Flags().GetBool("update-skills")
 		if err := installCodexWrapper(); err != nil {
 			return err
 		}
 		fmt.Println()
 		skillsTarget := filepath.Join(os.Getenv("HOME"), ".agents", "skills")
-		if err := installSkills(skillsTarget); err != nil {
+		if err := installSkills(skillsTarget, updateSkills); err != nil {
 			fmt.Printf("warning: could not install skills: %v\n", err)
 		}
 		fmt.Println()
@@ -81,12 +84,74 @@ Use --uninstall to remove it.`,
 	},
 }
 
+var setupSkillsCmd = &cobra.Command{
+	Use:   "skills",
+	Short: "Install felt skills to a target directory",
+	Long: `Install felt's bundled skills (felt, constitution, ralph, tapestry) to a target directory.
+
+By default, installs to ~/.claude/skills. Use --target to specify a different directory.
+Existing files are not overwritten unless --update is passed.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		target, _ := cmd.Flags().GetString("target")
+		update, _ := cmd.Flags().GetBool("update")
+		linkSrc, _ := cmd.Flags().GetString("link")
+		if target == "" {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return err
+			}
+			target = filepath.Join(home, ".claude", "skills")
+		}
+		if linkSrc != "" {
+			if err := setDevSource(linkSrc); err != nil {
+				fmt.Printf("warning: could not save dev source path: %v\n", err)
+			}
+			return linkSkills(target, linkSrc)
+		}
+		return installSkills(target, update)
+	},
+}
+
 func init() {
 	setupClaudeCmd.Flags().Bool("uninstall", false, "Remove felt hooks from Claude Code")
+	setupClaudeCmd.Flags().Bool("update-skills", false, "Update existing skills (overwrites local changes)")
 	setupCodexCmd.Flags().Bool("uninstall", false, "Remove codex wrapper from RC file")
+	setupCodexCmd.Flags().Bool("update-skills", false, "Update existing skills (overwrites local changes)")
+	setupSkillsCmd.Flags().String("target", "", "Target directory (default: ~/.claude/skills)")
+	setupSkillsCmd.Flags().Bool("update", false, "Update existing skills (overwrites local changes)")
+	setupSkillsCmd.Flags().String("link", "", "Symlink skills from a felt source checkout (dev mode)")
 	setupCmd.AddCommand(setupClaudeCmd)
 	setupCmd.AddCommand(setupCodexCmd)
+	setupCmd.AddCommand(setupSkillsCmd)
 	rootCmd.AddCommand(setupCmd)
+}
+
+// linkSkills creates symlinks from targetDir to a felt source checkout's cmd/skills/.
+// This gives instant feedback when editing skills during development.
+func linkSkills(targetDir, srcRoot string) error {
+	skillsDir := filepath.Join(srcRoot, "cmd", "skills")
+	entries, err := os.ReadDir(skillsDir)
+	if err != nil {
+		return fmt.Errorf("read skills from %s: %w", skillsDir, err)
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		target := filepath.Join(targetDir, name)
+		src := filepath.Join(skillsDir, name)
+
+		// Remove existing (file, dir, or symlink)
+		os.RemoveAll(target)
+
+		if err := os.Symlink(src, target); err != nil {
+			return fmt.Errorf("symlink %s: %w", name, err)
+		}
+		fmt.Printf("✓ Linked skill: %s → %s\n", name, src)
+	}
+	return nil
 }
 
 // claudeMDSnippet returns the suggested CLAUDE.md / AGENTS.md snippet.
@@ -110,8 +175,11 @@ func claudeMDSnippet() string {
 }
 
 // installSkills extracts bundled skills directly into targetDir (e.g. ~/.claude/skills).
-func installSkills(targetDir string) error {
-	return fs.WalkDir(embeddedSkills, "skills", func(path string, d fs.DirEntry, err error) error {
+// If update is false, existing files are not overwritten (preserves user customizations).
+// If update is true, all files are overwritten with the bundled versions.
+func installSkills(targetDir string, update bool) error {
+	var stale []string
+	err := fs.WalkDir(embeddedSkills, "skills", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -129,14 +197,24 @@ func installSkills(targetDir string) error {
 			return os.MkdirAll(target, 0755)
 		}
 
-		// Skip if already exists
-		if _, err := os.Stat(target); err == nil {
-			return nil
-		}
-
 		data, err := embeddedSkills.ReadFile(path)
 		if err != nil {
 			return err
+		}
+
+		// Check if file already exists
+		if existing, err := os.ReadFile(target); err == nil {
+			if bytes.Equal(existing, data) {
+				return nil // identical, nothing to do
+			}
+			if !update {
+				// Track which skills have updates available
+				parts := strings.SplitN(rel, string(filepath.Separator), 2)
+				if len(parts) == 2 && parts[1] == "SKILL.md" {
+					stale = append(stale, parts[0])
+				}
+				return nil // don't overwrite
+			}
 		}
 
 		if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
@@ -155,10 +233,22 @@ func installSkills(targetDir string) error {
 		// Print once per top-level skill directory
 		parts := strings.SplitN(rel, string(filepath.Separator), 2)
 		if len(parts) == 2 && parts[1] == "SKILL.md" {
-			fmt.Printf("✓ Installed skill: %s\n", parts[0])
+			if update {
+				fmt.Printf("✓ Updated skill: %s\n", parts[0])
+			} else {
+				fmt.Printf("✓ Installed skill: %s\n", parts[0])
+			}
 		}
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+	if len(stale) > 0 {
+		fmt.Printf("· Skills with updates available: %s\n", strings.Join(stale, ", "))
+		fmt.Println("  Run with --update-skills to update (overwrites local changes)")
+	}
+	return nil
 }
 
 // rcFilePath returns the shell RC file path based on $SHELL.

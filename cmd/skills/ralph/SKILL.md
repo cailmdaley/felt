@@ -47,9 +47,12 @@ Stay and shepherd computation through. Don't exit and hope the next iteration pi
 
 ## Exit
 
-If you **made substantial contributions**, `kill $PPID`. Do NOT close the constitution fiber.
+**NEVER close the constitution in an iteration where you made changes.** If you committed code, edited files, migrated data, or wrote anything — you MUST `kill $PPID` and let the next iteration verify with fresh eyes. This is non-negotiable. The whole point of the loop is that no iteration grades its own work.
 
-If you **cannot find any remaining work**, synthesize what was accomplished: `felt edit <fiber-id> -s closed -o "..."`.
+- **Made changes this iteration** → `kill $PPID`. Period.
+- **Survey found zero remaining work AND you made zero changes** → close: `felt edit <fiber-id> -s closed -o "..."`.
+
+The temptation is to survey, do all the work, re-check, and declare victory. Resist it. You don't get to verify your own output.
 
 ---
 
