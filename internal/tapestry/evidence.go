@@ -70,14 +70,41 @@ func ComputeStaleness(fiberID string, graph upstreamGraph, evidenceByID map[stri
 		return "no-evidence"
 	}
 
-	for _, upstreamID := range graph.GetUpstream(fiberID) {
-		upstream := evidenceByID[upstreamID]
-		if upstream != nil && upstream.MTime > current.MTime {
-			return "stale"
-		}
+	visited := map[string]bool{fiberID: true}
+	if hasNewerUpstreamEvidence(fiberID, current.MTime, graph, evidenceByID, visited) {
+		return "stale"
 	}
 
 	return "fresh"
+}
+
+func hasNewerUpstreamEvidence(
+	fiberID string,
+	currentMTime int64,
+	graph upstreamGraph,
+	evidenceByID map[string]*Evidence,
+	visited map[string]bool,
+) bool {
+	for _, upstreamID := range graph.GetUpstream(fiberID) {
+		if visited[upstreamID] {
+			continue
+		}
+		visited[upstreamID] = true
+
+		upstream := evidenceByID[upstreamID]
+		if upstream != nil {
+			if upstream.MTime > currentMTime {
+				return true
+			}
+			continue
+		}
+
+		if hasNewerUpstreamEvidence(upstreamID, currentMTime, graph, evidenceByID, visited) {
+			return true
+		}
+	}
+
+	return false
 }
 
 func isImageArtifact(name string) bool {

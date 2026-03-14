@@ -116,6 +116,9 @@ func Export(projectRoot, outDir string, options ExportOptions) error {
 	if err := copyArtifacts(outDir, specByID, evidenceByID, options.Force); err != nil {
 		return err
 	}
+	if err := copyLinkedFiles(projectRoot, outDir, payload.Nodes, payload.Fibers, options.Force); err != nil {
+		return err
+	}
 	if err := writeJSON(filepath.Join(outDir, "tapestry.json"), payload); err != nil {
 		return err
 	}
