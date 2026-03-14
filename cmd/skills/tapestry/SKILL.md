@@ -1,10 +1,11 @@
 ---
 name: tapestry
 description: >-
-  Use when recording scientific work in the tapestry — after computations produce
-  results, when filing claims with evidence, when citing paper sources, or when
-  told to "update the tapestry". Also use when setting up or reshaping a tapestry
-  DAG, or when working with the tapestry dashboard directly.
+  This skill should be used when the user asks to "update the tapestry", "file a
+  claim", "add evidence", "export the tapestry", "set up a tapestry", or when
+  computations produce results that should be recorded. Also triggers on tapestry
+  DAG reshaping, evidence.json creation, citing paper sources, or working with the
+  tapestry viewer.
 ---
 
 ## Why
@@ -78,7 +79,7 @@ For each tapestry node with evidence, `felt tapestry export` compares its eviden
 
 ### Sections (tier:1)
 
-Think of the main sections of a paper — Introduction, Data, Methods, Results, Discussion. Sections are waypoints, not buckets — they link to each other in the DAG, and interior fibers belong to a section if they're 1 hop from it.
+Sections correspond to the main parts of a paper (Introduction, Data, Methods, Results, Discussion). They are waypoints, not buckets — they link to each other in the DAG, and interior fibers belong to a section if they're 1 hop from it.
 
 The `tier:1` tag makes a fiber a section: visible on first load, slightly larger, column-anchored in layout.
 
@@ -91,7 +92,7 @@ felt add "Covariance estimation" -t tapestry:covariance
 felt link covariance-id methods-id
 ```
 
-Write section bodies as short summaries of their neighborhood (3 sentences: what's here, why it matters, what a reader finds).
+Section bodies should be short summaries of their neighborhood (3 sentences: what's here, why it matters, what a reader finds).
 
 ## Recording a Computation
 
@@ -111,7 +112,7 @@ felt link bmodes-id covariance-id
 
 ## Citing Sources
 
-Download paper source to `results/references/{arxiv-id}.tex`. In fiber outcomes, cite as inline code:
+Paper sources go in `results/references/{arxiv-id}.tex`. In fiber outcomes, cite as inline code:
 
 ```
 `results/references/2601.10038.tex:L79`
