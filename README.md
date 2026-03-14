@@ -9,13 +9,11 @@
 
 # felt
 
-DAG-native fiber tracker. Markdown files with dependencies.
+Linked markdown files in a directed graph. A lightweight CLI for accumulating context — decisions, claims, tasks, questions — and keeping it searchable, traversable, and connected.
 
-## Why
+Fibers are the unit. Each one is a markdown file with YAML frontmatter, stored in `.felt/`. They can depend on each other, forming a DAG that you can walk: upstream to trace the reasoning behind a decision, downstream to follow its consequences into finer detail. Closing a fiber with an outcome captures what was learned. Over time, the graph becomes a persistent, navigable record of how a project arrived where it is.
 
-Fibers have dependencies. Most trackers ignore this or bolt it on. Felt makes the DAG the center: `ready` shows what's actually unblocked, and the graph is always traversable.
-
-Fibers are markdown files. Human-readable, version-controllable, greppable. No database, no sync, no lock-in.
+There is no database or server — `.felt/` is a directory of markdown files that you can version-control, grep, and move between machines.
 
 ## Install
 
@@ -23,7 +21,7 @@ Fibers are markdown files. Human-readable, version-controllable, greppable. No d
 brew install cailmdaley/tap/felt
 ```
 
-Or with Go:
+Or build from source:
 
 ```bash
 go install github.com/cailmdaley/felt@latest
@@ -33,183 +31,196 @@ go install github.com/cailmdaley/felt@latest
 
 ```bash
 felt init                                        # creates .felt/
-felt "Design API"                                # create a fiber
-felt add "Implement endpoint" -a design-api      # depends on design
-felt ready                                       # shows "Design API" (unblocked)
-felt edit design-api -s active                   # mark active
-felt edit design-api -s closed -o "REST, uses JWT"   # close with outcome
-felt ready                                       # now shows "Implement endpoint"
+felt "Use DES Y3 weights"                        # file a decision
+felt add "Covariance estimation" -a des-y3       # depends on that decision
+felt comment covariance "tried analytic, too slow"  # leave a breadcrumb
+felt edit covariance -s closed -o "switched to jackknife — 10x faster, <2% bias"
 ```
 
-## Core Concepts
-
-### The DAG
-
-Every fiber can depend on others via `-a`/`--depends-on`. This forms a directed acyclic graph (cycles are rejected). The DAG answers:
-
-- `felt ready` — what's unblocked and open?
-- `felt upstream <id>` — what does this depend on (transitively)?
-- `felt downstream <id>` — what depends on this?
-- `felt path <from> <to>` — how are two fibers connected?
-
-### Status (opt-in)
-
-Status tracking is optional. `felt "title"` creates a statusless fiber. Add `-s open` to enter tracking.
-
-```
-· untracked — no status, just a fiber
-○ open      — tracked, not started
-◐ active    — currently being worked on
-● closed    — done, with outcome captured
-```
-
-Transition with `felt edit <id> -s active` and `felt edit <id> -s closed -o "outcome"`.
-
-### Outcome as Documentation
-
-The `-o` flag captures *what was learned, decided, or produced*. Closed fibers become searchable project memory:
+A fiber can be anything: a task, a decision, a research claim, a question, a spec. The body carries detail and the outcome captures the conclusion. Dependencies connect them.
 
 ```bash
-felt ls -s closed             # what's been done
-felt ls -s all "JWT"          # search all fibers
-felt show <id> -d compact     # see outcome without full body
+felt ready                       # what's unblocked?
+felt upstream covariance         # what does this rest on?
+felt downstream des-y3           # what follows from this?
+felt ls -s all "jackknife"       # search across everything
 ```
 
-### Progressive Disclosure
+## Fibers
 
-`felt show` supports detail levels via `--detail` / `-d`:
+A fiber is a `.felt/<id>.md` file:
 
-| Level | What you see |
-|---|---|
-| `title` | Title + tags |
-| `compact` | Metadata + outcome, upstream/downstream IDs |
-| `summary` | Compact + lede paragraph, upstream/downstream with titles |
-| `full` | Everything (default) |
+```yaml
+---
+title: Covariance estimation
+status: closed
+tags: [pure-eb, methods]
+depends-on:
+  - id: use-des-y3-weights-a1b2c3d4
+    label: weight choice
+created-at: 2026-01-15T10:30:00Z
+closed-at: 2026-01-16T14:20:00Z
+outcome: "Jackknife covariance, 10x faster than analytic, <2% bias at all scales"
+---
 
-```bash
-felt show <id> -d compact       # "what was decided?"
-felt upstream <id> -d compact   # outcomes of all upstream decisions
+Tried analytic first — too slow for the number of bins we need.
+Jackknife on 150 patches gives stable diagonal + off-diagonal.
+
+## Comments
+**2026-01-15 14:30** — tried analytic, too slow
+**2026-01-16 09:15** — jackknife on 150 patches converges
+```
+
+IDs are `<slug>-<8hex>`. Commands accept prefix or hex-suffix matching: `felt show covariance`, `felt show a1b2`.
+
+### Status
+
+Status is opt-in. Most fibers don't need it. Add `-s open` when something needs tracking.
+
+```
+· untracked    just a fiber
+○ open         tracked, not started
+◐ active       in progress
+● closed       done — outcome captured
 ```
 
 ### Tags
 
-Tags organize fibers across the graph:
-
 ```bash
-felt "[pure-eb] Fix covariance bug"     # extracted from title
-felt add "Fix bug" -t pure-eb -t urgent # via flag
-felt tag design-api backend             # add to existing
-felt untag design-api backend           # remove
-felt ls -t pure-eb                      # filter (AND logic)
-felt ready -t pure-eb                   # filter ready
+felt "[pure-eb] Covariance estimation"    # extracted from title
+felt add "Fix bug" -t pure-eb -t urgent   # via flag
+felt ls -t pure-eb                        # filter by tag
+felt ls -t tapestry:                      # prefix match
 ```
 
-### File Format
+### The DAG
 
-Fibers live in `.felt/<id>.md`:
-
-```yaml
----
-title: "Design API"
-status: closed
-tags: [backend, auth]
-depends-on:
-  - id: research-auth-patterns-a1b2c3d4
-    label: auth approach
-created-at: 2024-01-15T10:30:00Z
-closed-at: 2024-01-16T14:20:00Z
-outcome: "REST with JWT. See docs/api.md"
----
-
-Optional body with notes, context, etc.
-```
-
-IDs are `<slug>-<8-hex-chars>`. Commands accept fuzzy matching:
+Dependencies form a directed acyclic graph. Cycles are rejected.
 
 ```bash
-felt show design-api-ac6b19c1    # full ID
-felt show design-api              # prefix match
-felt show ac6b19c1                # hex suffix only
-felt show ac6b                    # even shorter
-```
-
-## Command Reference
-
-### Creating & Closing
-
-```bash
-felt init                         # create .felt/
-felt add <title>                  # create fiber
-felt <title>                      # shorthand for add
-felt edit <id> -s active          # enter tracking / mark active
-felt edit <id> -s closed -o "outcome"  # close with outcome
-felt rm <id>                      # delete (fails if dependents exist)
-```
-
-### Viewing
-
-```bash
-felt ls                           # tracked fibers (open/active)
-felt ls -s all                    # all fibers including untracked
-felt ls -s closed                 # by status
-felt ls -t backend -t urgent      # by tags (AND)
-felt ls -s all -t rule:           # tag prefix matching
-felt ls -s all "query"            # search title, body, outcome
-felt ls -s all -r "pattern"       # regex search
-felt ready                        # open with all deps closed
-felt show <id>                    # full details
-felt show <id> -d compact         # structured overview
-felt tree                         # dependency tree
-```
-
-### Editing
-
-```bash
-felt edit <id> --body "text"      # replace full body (destructive overwrite)
-felt edit <id> --title "new"      # set title
-felt edit <id> -s active          # set status
-felt edit <id> -o "outcome"       # set outcome
-felt comment <id> "note"          # add timestamped comment
-felt tag <id> <tag>               # add tag
-felt untag <id> <tag>             # remove tag
-felt link <id> <dep-id>           # add dependency
-felt link <id> <dep-id> -l "why"  # add labeled dependency
-felt unlink <id> <dep-id>         # remove dependency
-```
-
-### Graph
-
-```bash
+felt link <id> <dep-id>           # add edge
+felt link <id> <dep-id> -l "why"  # labeled edge
 felt upstream <id>                # transitive dependencies
-felt upstream <id> -d compact     # with depth per item
 felt downstream <id>              # what depends on this
-felt path <from> <to>             # path between fibers
-felt graph -f mermaid             # visualize (mermaid/dot/text)
+felt path <from> <to>             # how are two fibers connected?
+felt ready                        # open fibers with all deps closed
+felt tree                         # hierarchical view
+felt graph -f mermaid             # export (mermaid/dot/text)
 felt check                        # validate integrity
 ```
 
-### Integration
+### Progressive Disclosure
 
 ```bash
-felt setup claude                 # install Claude Code session hook
-felt setup codex                  # install Codex shell wrapper
-felt hook session                 # output session context (used by hooks)
-felt prime                        # alias for hook session
+felt show <id>                    # full body + metadata
+felt show <id> -d compact         # metadata + outcome, no body
+felt show <id> -d summary         # compact + lede paragraph
+felt upstream <id> -d compact     # outcome chain
 ```
 
-### Add Flags
+## Tapestry
+
+Fibers tagged with `tapestry:<specName>` become nodes in a visual DAG that can be exported as a static site. Attaching evidence (metrics, figures) lets the viewer show what's fresh, stale, or missing.
 
 ```bash
--b, --body "text"                 # body text
--s, --status open                 # status (open, active, closed)
--a, --depends-on <id>             # dependency (repeatable)
--D, --due 2024-03-15              # due date
--t, --tag <tag>                   # tag (repeatable)
--o, --outcome "text"              # outcome
+# Create tapestry nodes
+felt add "B-modes consistent with noise" -t tapestry:bmodes
+felt add "Covariance matrix" -t tapestry:covariance
+felt link bmodes covariance
+
+# Evidence: results/tapestry/{specName}/evidence.json
+# Written by your pipeline (e.g., Snakemake), not by hand
 ```
 
-### Global Flags
+Evidence format:
+
+```json
+{
+  "evidence": { "pte": 0.29, "chi2": 12.3, "dof": 10 },
+  "output": { "figure": "bmodes.png" },
+  "generated": "2026-01-15T00:09:04Z"
+}
+```
+
+Export the DAG as a static site:
 
 ```bash
--j, --json                        # JSON output
+felt tapestry export                  # → ~/.felt/tapestries/data/{project}/
+felt tapestry export --all-fibers     # include sidebar with all fibers
+felt tapestry export --force          # re-copy all artifacts
 ```
+
+Output goes to a clone of a [tapestry template repo](https://github.com/cailmdaley/tapestries) — a static viewer served via GitHub Pages. Each project writes its own `data/{name}/tapestry.json` + artifact images. The viewer is shared.
+
+Staleness is computed automatically: if an upstream dependency's evidence is newer than yours, the node is marked stale.
+
+## Agent Integration
+
+Felt ships with skills for [Claude Code](https://claude.ai/claude-code) and [Codex](https://openai.com/index/codex/):
+
+```bash
+felt setup claude                 # hooks + skills for Claude Code
+felt setup codex                  # shell wrapper + skills for Codex
+felt setup skills                 # install skills only
+felt setup skills --update        # update skills (overwrites local changes)
+felt setup skills --link <path>   # symlink to source checkout (dev mode)
+```
+
+The session hook (`felt hook session`) prints active and ready fibers at the start of each conversation, giving the agent context about ongoing work.
+
+### Bundled Skills
+
+| Skill | Purpose |
+|-------|---------|
+| **felt** | Filing fibers from conversation — session extraction, transcript processing, archiving |
+| **tapestry** | Recording scientific work — when to file claims, evidence format, tapestry conventions |
+| **constitution** | Drafting specs for autonomous iteration loops |
+| **ralph** | Executing those loops — survey, contribute, exit |
+
+## Commands
+
+```bash
+# Create & close
+felt init                         felt add <title>
+felt <title>                      felt edit <id> -s closed -o "..."
+felt rm <id>                      felt comment <id> "note"
+
+# View & search
+felt ls                           felt ls -s all "query"
+felt ls -t tag                    felt ls -r "regex"
+felt ready                        felt show <id> [-d level]
+felt tree                         felt graph -f mermaid
+
+# Edit
+felt edit <id> --title "..."      felt edit <id> --body "..."
+felt edit <id> -s active          felt edit <id> -o "..."
+felt tag <id> tag                 felt untag <id> tag
+felt link <id> <dep>              felt unlink <id> <dep>
+
+# Graph
+felt upstream <id>                felt downstream <id>
+felt path <from> <to>             felt check
+
+# Tapestry
+felt tapestry export [--all-fibers] [--force] [--name x] [--out dir]
+
+# Integration
+felt setup claude|codex|skills    felt hook session
+felt update                       felt prime
+```
+
+### Flags
+
+```bash
+# felt add
+-b, --body "text"                 -s, --status open|active|closed
+-a, --depends-on <id>             -t, --tag <tag>
+-D, --due 2024-03-15              -o, --outcome "text"
+
+# global
+-j, --json
+```
+
+## License
+
+[MIT](LICENSE)
