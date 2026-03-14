@@ -73,6 +73,38 @@ felt rm <fiber-id>
 
 ---
 
+## Tapestry Reshaping
+
+Reshaping is archiving applied to tapestry nodes. The trigger is branching: any tapestry node with 5+ children needs restructuring.
+
+### When to Reshape
+
+- A tapestry node has 5+ children (check with `felt downstream <id>`)
+- The DAG is wide and shallow — many siblings, little depth
+- A reader can't parse a neighborhood in one click
+
+### Steps
+
+1. **Audit** — walk spine nodes, count children. Flag any with 5+.
+2. **Partition** — identify natural groupings among the siblings. Name the partition.
+3. **Introduce grouping nodes** — create a tapestry-tagged fiber for each group. Write a 2-3 sentence summary body (what's here, why it matters). No evidence needed.
+4. **Re-parent** — `felt unlink` children from the overloaded parent, `felt link` them to the new grouping node, `felt link` the grouping node to the parent.
+5. **Verify** — `felt downstream <parent>` should show 2-4 children. Each grouping node should have 2-4 children.
+
+```bash
+# Example: Methods has 7 children, split into Estimators + Covariance + Simulations
+felt add "Estimators" -t tapestry:estimators -b "Pipeline independence, foreground bias, cross-checks."
+felt link estimators-id methods-id
+felt unlink child-a methods-id && felt link child-a estimators-id
+felt unlink child-b methods-id && felt link child-b estimators-id
+```
+
+### Target
+
+2-4 children per node. 3 is default. The graph should be 3-4 levels deep for a 60-node tapestry, not 2.
+
+---
+
 ## Anti-patterns
 
 - **Premature archiving** — don't archive recent work

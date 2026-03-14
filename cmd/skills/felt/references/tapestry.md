@@ -1,29 +1,34 @@
----
-name: tapestry
-description: >-
-  This skill should be used when the user asks to "update the tapestry", "file a
-  claim", "add evidence", "export the tapestry", "set up a tapestry", or when
-  computations produce results that should be recorded. Also triggers on tapestry
-  DAG reshaping, evidence.json creation, citing paper sources, or working with the
-  tapestry viewer.
----
+# Tapestry
 
-## Why
+The tapestry is a projection of felt for inspection: a navigable DAG of computations, claims, and decisions with evidence attached. Not every fiber belongs — only what's important to inspect.
 
-Science moves fast. Computations proliferate, claims multiply, and the connection between them blurs. The tapestry makes the process inspectable and steerable: every computation is a node with evidence, every claim has provenance, the whole DAG is navigable. An agent leaves a legible wake not by slowing down, but by filing as it goes.
-
-## When to Update the Tapestry
-
-Not every fiber belongs — only what's important to inspect: computations with results, claims that need grounding, decisions that shaped the analysis.
+## When to Update
 
 - **After a computation produces results** → ensure the fiber has a `tapestry:` tag, write or update evidence.json
 - **After finding a result** → update the fiber outcome with the finding, cite the exact source line
 - **After making a decision** → file a decision fiber with alternatives considered
 - **When told to "update the tapestry"** → check which computations ran, which fibers are missing tags or evidence, wire any new dependencies
 
+## Branching Discipline
+
+Tapestry nodes follow a strict branching budget for progressive disclosure:
+
+- **2–4 children** per node is healthy
+- **3** is the default target
+- **5+** triggers reshaping — introduce a grouping node
+
+**Grouping nodes** are not empty containers. They carry a summary of their neighborhood (3 sentences: what's here, why it matters, what a reader finds). They don't need evidence, but they must convey information. A reader should understand the group's scope without clicking into it.
+
+When filing a new tapestry fiber:
+1. Attach to the most specific existing node whose question this fiber resolves
+2. If that parent would exceed 4 children, look for an existing subgroup
+3. If none exists, create a grouping node named by the natural partition that just emerged
+
+**Reshaping** is a periodic pass (not every filing). See [archiving.md](archiving.md#tapestry-reshaping) for the full procedure.
+
 ## Format Conventions
 
-These are the structural conventions that `felt tapestry export` implements. They are the single source of truth.
+These are the structural conventions that `felt tapestry export` implements.
 
 ### Tapestry tags
 
@@ -77,6 +82,8 @@ For each tapestry node with evidence, `felt tapestry export` compares its eviden
 - No evidence.json → **no-evidence**
 - Otherwise → **fresh**
 
+Staleness propagates transitively through nodes without evidence (grouping nodes). A grouping node never blocks staleness — the check walks through it to find the nearest upstream evidence.
+
 ### Spine nodes (tier:1)
 
 The spine is the set of high-level nodes that give a tapestry its orientation. For a research paper these might be Data, Methods, Results; for a software project they might be Architecture, API, Deployment. The spine is whatever makes a newcomer say "I see what this is about" before clicking anything.
@@ -91,8 +98,6 @@ felt add "Methods" -t tapestry:methods -t tier:1
 felt add "Covariance estimation" -t tapestry:covariance
 felt link covariance-id methods-id
 ```
-
-Section bodies should be short summaries of their neighborhood (3 sentences: what's here, why it matters, what a reader finds).
 
 ## Recording a Computation
 
@@ -142,7 +147,3 @@ A tapestry grows through phases, and you can't skip them:
 3. **Living** — the tapestry continues to grow. New analyses add nodes; shaping keeps the narrative coherent.
 
 A constitution (see `/constitution`) can drive each phase.
-
-## References
-
-- [references/viewer-setup.md](references/viewer-setup.md) — cloning the template, serving locally, GitHub Pages, data layout
