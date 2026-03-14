@@ -77,14 +77,14 @@ For each tapestry node with evidence, `felt tapestry export` compares its eviden
 - No evidence.json → **no-evidence**
 - Otherwise → **fresh**
 
-### Sections (tier:1)
+### Spine nodes (tier:1)
 
-Sections correspond to the main parts of a paper (Introduction, Data, Methods, Results, Discussion). They are waypoints, not buckets — they link to each other in the DAG, and interior fibers belong to a section if they're 1 hop from it.
+The spine is the set of high-level nodes that give a tapestry its orientation. For a research paper these might be Data, Methods, Results; for a software project they might be Architecture, API, Deployment. The spine is whatever makes a newcomer say "I see what this is about" before clicking anything.
 
-The `tier:1` tag makes a fiber a section: visible on first load, slightly larger, column-anchored in layout.
+The `tier:1` tag marks a spine node: visible on first load, slightly larger, column-anchored in layout. Interior fibers belong to a spine node if they're 1 hop from it.
 
 ```bash
-# Section node (visible on first load)
+# Spine node (visible on first load)
 felt add "Methods" -t tapestry:methods -t tier:1
 
 # Interior node
