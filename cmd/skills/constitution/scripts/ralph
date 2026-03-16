@@ -52,7 +52,7 @@ if tmux has-session -t "$SESSION" 2>/dev/null; then
 fi
 
 # Write loop script to temp file (avoids heredoc quoting hell)
-LOOP_SCRIPT=$(mktemp /tmp/ralph-loop-XXXXXX.sh)
+LOOP_SCRIPT=$(mktemp "${TMPDIR:-/tmp}/ralph-loop.XXXXXX")
 cat > "$LOOP_SCRIPT" << 'LOOP'
 #!/bin/bash
 FIBER_ID="$1"
@@ -74,8 +74,8 @@ while (cd "$FELT_DIR" && $FELT show "$FIBER_ID" 2>/dev/null | grep -qiE 'status:
 
     FIBER_CONTENT=$(cd "$FELT_DIR" && $FELT show "$FIBER_ID")
 
-    SYSPROMPT_FILE=$(mktemp /tmp/ralph-sys-XXXXXX.txt)
-    PROMPT_FILE=$(mktemp /tmp/ralph-prompt-XXXXXX.txt)
+    SYSPROMPT_FILE=$(mktemp "${TMPDIR:-/tmp}/ralph-sys.XXXXXX")
+    PROMPT_FILE=$(mktemp "${TMPDIR:-/tmp}/ralph-prompt.XXXXXX")
 
     cat > "$SYSPROMPT_FILE" << SYSEOF
 Ralph iteration $iteration. Fiber ID: $FIBER_ID
@@ -83,9 +83,16 @@ Ralph iteration $iteration. Fiber ID: $FIBER_ID
 $FIBER_CONTENT
 SYSEOF
 
-    cat > "$PROMPT_FILE" << 'PROMPTEOF'
+    if [[ "$BACKEND" == "codex" ]]; then
+        cat > "$PROMPT_FILE" << 'PROMPTEOF'
+You are inside a ralph loop. Activate the ralph skill ($ralph) and follow its instructions for iterating on the constitution above.
+At the end of each substantial iteration, run `kill $PPID` to exit this child process so the parent ralph loop can start the next iteration.
+PROMPTEOF
+    else
+        cat > "$PROMPT_FILE" << 'PROMPTEOF'
 You are inside a ralph loop. Activate the ralph skill (/ralph) and follow its instructions for iterating on the constitution above.
 PROMPTEOF
+    fi
 
     PROMPT=$(cat "$PROMPT_FILE")
 
