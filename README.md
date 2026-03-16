@@ -18,14 +18,29 @@ There is no database or server — `.felt/` is a directory of markdown files tha
 ## Install
 
 ```bash
-brew install cailmdaley/tap/felt
+curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh | sh
 ```
 
-Or build from source:
+Installs to `~/.local/bin` by default (or `/usr/local/bin` if writable). Override with `FELT_INSTALL_DIR`.
+
+Also available via Homebrew (`brew install cailmdaley/tap/felt`) or from source (`go install github.com/cailmdaley/felt@latest`).
+
+Update to the latest release:
 
 ```bash
-go install github.com/cailmdaley/felt@latest
+felt update
 ```
+
+### Agent setup
+
+Felt ships with hooks and skills for [Claude Code](https://claude.ai/claude-code) and [Codex](https://openai.com/index/codex/):
+
+```bash
+felt setup claude                 # hooks + skills for Claude Code
+felt setup codex                  # shell wrapper + skills for Codex
+```
+
+The session hook prints active and ready fibers at the start of each conversation, giving the agent context about ongoing work. See [Agent Integration](#agent-integration) for details.
 
 ## Quick Start
 
@@ -156,17 +171,13 @@ Staleness is computed automatically: if an upstream dependency's evidence is new
 
 ## Agent Integration
 
-Felt ships with skills for [Claude Code](https://claude.ai/claude-code) and [Codex](https://openai.com/index/codex/):
+Skills can also be managed independently:
 
 ```bash
-felt setup claude                 # hooks + skills for Claude Code
-felt setup codex                  # shell wrapper + skills for Codex
 felt setup skills                 # install skills only
 felt setup skills --update        # update skills (overwrites local changes)
 felt setup skills --link <path>   # symlink to source checkout (dev mode)
 ```
-
-The session hook (`felt hook session`) prints active and ready fibers at the start of each conversation, giving the agent context about ongoing work.
 
 ### Bundled Skills
 
