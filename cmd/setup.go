@@ -208,10 +208,20 @@ func installSkills(targetDir string, update bool) error {
 				return nil // identical, nothing to do
 			}
 			if !update {
-				// Track which skills have updates available
+				// Track which skills have updates available (any file, not just SKILL.md)
 				parts := strings.SplitN(rel, string(filepath.Separator), 2)
-				if len(parts) == 2 && parts[1] == "SKILL.md" {
-					stale = append(stale, parts[0])
+				if len(parts) >= 1 {
+					skillName := parts[0]
+					found := false
+					for _, s := range stale {
+						if s == skillName {
+							found = true
+							break
+						}
+					}
+					if !found {
+						stale = append(stale, skillName)
+					}
 				}
 				return nil // don't overwrite
 			}
@@ -230,7 +240,7 @@ func installSkills(targetDir string, update bool) error {
 			return err
 		}
 
-		// Print once per top-level skill directory
+		// Report updates per top-level skill directory (deduplicated)
 		parts := strings.SplitN(rel, string(filepath.Separator), 2)
 		if len(parts) == 2 && parts[1] == "SKILL.md" {
 			if update {
