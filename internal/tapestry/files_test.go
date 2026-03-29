@@ -49,15 +49,15 @@ func TestRewriteFileLinks(t *testing.T) {
 		"See `src/main.go:L42` and `docs/report.pdf`.\n" +
 		"Open [report](docs/report.pdf:12) and [image](figures/output.png)."
 	rewriteMap := map[string]string{
-		"src/main.go":        "files/src_main.go",
-		"docs/report.pdf":    "files/docs_report.pdf",
-		"figures/output.png": "files/figures_output.png",
+		"src/main.go":        "src_main.go",
+		"docs/report.pdf":    "docs_report.pdf",
+		"figures/output.png": "figures_output.png",
 	}
 
 	got := rewriteFileLinks(text, rewriteMap)
 	want := "" +
-		"See `files/src_main.go:L42` and `files/docs_report.pdf`.\n" +
-		"Open [report](files/docs_report.pdf:12) and [image](files/figures_output.png)."
+		"See `src_main.go:L42` and `docs_report.pdf`.\n" +
+		"Open [report](docs_report.pdf:12) and [image](figures_output.png)."
 
 	if got != want {
 		t.Fatalf("rewriteFileLinks() = %q, want %q", got, want)

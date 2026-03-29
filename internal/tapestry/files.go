@@ -88,7 +88,7 @@ func copyLinkedFiles(projectRoot, outDir string, nodes []Node, fibers []Fiber, f
 					return fmt.Errorf("stat exported linked file %s: %w", path, err)
 				}
 			}
-			rewriteMap[path] = filepath.ToSlash(filepath.Join("files", name))
+			rewriteMap[path] = name
 		}
 		return nil
 	}
