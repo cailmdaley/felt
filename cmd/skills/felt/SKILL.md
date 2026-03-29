@@ -1,14 +1,11 @@
 ---
 name: felt
 description: >
-  Working with fibers. Five modes:
+  Working with fibers. Four modes:
   (1) Session — extract from conversation at session end.
   (2) Transcript — extract from external sources with review.
   (3) Archive — consolidate old fibers into documentation.
   (4) Sweep — coherence check across the assemblage.
-  (5) Tapestry — update, reshape, or export the tapestry DAG.
-  Also triggers on "update the tapestry", "file a claim", "add evidence",
-  "export the tapestry", tapestry reshaping, or evidence.json creation.
 ---
 
 # /felt — Working with Fibers
@@ -39,7 +36,6 @@ Retroactive extraction at session end. Consolidation over time. Coherence when n
 | **transcript** | External file (meeting, voice note) | Yes — present plan first |
 | **archive** | Consolidating old fibers | Yes — confirm before changes |
 | **sweep** | Coherence check across assemblage | Yes — present findings first |
-| **tapestry** | Update, reshape, or export the DAG | Depends on scope |
 
 **Felt target:**
 - Project-specific session → local `.felt/`
@@ -119,6 +115,5 @@ When this skill is activated, read at least one of the following depending on co
 |---------|-----------|
 | Mining a Claude session | [claude-sessions.md](references/claude-sessions.md) |
 | Processing external transcript | [transcripts.md](references/transcripts.md) |
-| Consolidating old fibers, tapestry reshaping | [archiving.md](references/archiving.md) |
-| Tapestry: evidence, export, reshaping | [tapestry.md](references/tapestry.md) |
-| Tapestry: viewer setup, GitHub Pages | [viewer-setup.md](references/viewer-setup.md) |
+| Consolidating old fibers | [archiving.md](references/archiving.md) |
+| Claude Desktop CLI patterns | [claude-desktop.md](references/claude-desktop.md) |

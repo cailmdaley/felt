@@ -87,7 +87,7 @@ Use --uninstall to remove it.`,
 var setupSkillsCmd = &cobra.Command{
 	Use:   "skills",
 	Short: "Install felt skills to a target directory",
-	Long: `Install felt's bundled skills (felt, constitution, ralph, tapestry) to a target directory.
+	Long: `Install felt's bundled skills (felt, constitution, ralph) to a target directory.
 
 By default, installs to ~/.claude/skills. Use --target to specify a different directory.
 Existing files are not overwritten unless --update is passed.`,
