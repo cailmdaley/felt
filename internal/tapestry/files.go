@@ -88,7 +88,7 @@ func copyLinkedFiles(projectRoot, outDir string, nodes []Node, fibers []Fiber, f
 					return fmt.Errorf("stat exported linked file %s: %w", path, err)
 				}
 			}
-			rewriteMap[path] = name
+			rewriteMap[path] = filepath.ToSlash(filepath.Join("files", name))
 		}
 		return nil
 	}
@@ -100,8 +100,9 @@ func copyLinkedFiles(projectRoot, outDir string, nodes []Node, fibers []Fiber, f
 		if err := collect(nodes[i].Outcome); err != nil {
 			return err
 		}
-		nodes[i].Body = rewriteFileLinks(nodes[i].Body, rewriteMap)
-		nodes[i].Outcome = rewriteFileLinks(nodes[i].Outcome, rewriteMap)
+		// Don't rewrite body text — the viewer's resolveFileUrl handles
+		// path-to-flatname conversion (replacing / with _). Rewriting here
+		// would strip the / that the viewer's regex needs to detect file links.
 	}
 	for i := range fibers {
 		if err := collect(fibers[i].Body); err != nil {
@@ -110,8 +111,6 @@ func copyLinkedFiles(projectRoot, outDir string, nodes []Node, fibers []Fiber, f
 		if err := collect(fibers[i].Outcome); err != nil {
 			return err
 		}
-		fibers[i].Body = rewriteFileLinks(fibers[i].Body, rewriteMap)
-		fibers[i].Outcome = rewriteFileLinks(fibers[i].Outcome, rewriteMap)
 	}
 
 	return nil
