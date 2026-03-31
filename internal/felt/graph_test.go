@@ -22,9 +22,9 @@ func makeTestFelt(id, title, status string, deps []string) *Felt {
 
 func TestBuildGraph(t *testing.T) {
 	felts := []*Felt{
-		makeTestFelt("a-11111111", "Task A", StatusOpen, nil),
-		makeTestFelt("b-22222222", "Task B", StatusOpen, []string{"a-11111111"}),
-		makeTestFelt("c-33333333", "Task C", StatusOpen, []string{"a-11111111", "b-22222222"}),
+		makeTestFelt("task-a", "Task A", StatusOpen, nil),
+		makeTestFelt("task-b", "Task B", StatusOpen, []string{"task-a"}),
+		makeTestFelt("task-c", "Task C", StatusOpen, []string{"task-a", "task-b"}),
 	}
 
 	g := BuildGraph(felts)
@@ -35,50 +35,50 @@ func TestBuildGraph(t *testing.T) {
 	}
 
 	// Check upstream
-	if len(g.Upstream["a-11111111"]) != 0 {
-		t.Errorf("A upstream = %v, want empty", g.Upstream["a-11111111"])
+	if len(g.Upstream["task-a"]) != 0 {
+		t.Errorf("A upstream = %v, want empty", g.Upstream["task-a"])
 	}
-	if len(g.Upstream["b-22222222"]) != 1 {
-		t.Errorf("B upstream = %v, want 1 dep", g.Upstream["b-22222222"])
+	if len(g.Upstream["task-b"]) != 1 {
+		t.Errorf("B upstream = %v, want 1 dep", g.Upstream["task-b"])
 	}
-	if len(g.Upstream["c-33333333"]) != 2 {
-		t.Errorf("C upstream = %v, want 2 deps", g.Upstream["c-33333333"])
+	if len(g.Upstream["task-c"]) != 2 {
+		t.Errorf("C upstream = %v, want 2 deps", g.Upstream["task-c"])
 	}
 
 	// Check downstream (computed inverse)
-	if len(g.Downstream["a-11111111"]) != 2 {
-		t.Errorf("A downstream = %v, want 2", g.Downstream["a-11111111"])
+	if len(g.Downstream["task-a"]) != 2 {
+		t.Errorf("A downstream = %v, want 2", g.Downstream["task-a"])
 	}
-	if len(g.Downstream["b-22222222"]) != 1 {
-		t.Errorf("B downstream = %v, want 1", g.Downstream["b-22222222"])
+	if len(g.Downstream["task-b"]) != 1 {
+		t.Errorf("B downstream = %v, want 1", g.Downstream["task-b"])
 	}
-	if len(g.Downstream["c-33333333"]) != 0 {
-		t.Errorf("C downstream = %v, want 0", g.Downstream["c-33333333"])
+	if len(g.Downstream["task-c"]) != 0 {
+		t.Errorf("C downstream = %v, want 0", g.Downstream["task-c"])
 	}
 }
 
 func TestGetUpstream(t *testing.T) {
 	// A <- B <- C <- D
 	felts := []*Felt{
-		makeTestFelt("a-11111111", "A", StatusOpen, nil),
-		makeTestFelt("b-22222222", "B", StatusOpen, []string{"a-11111111"}),
-		makeTestFelt("c-33333333", "C", StatusOpen, []string{"b-22222222"}),
-		makeTestFelt("d-44444444", "D", StatusOpen, []string{"c-33333333"}),
+		makeTestFelt("task-a", "A", StatusOpen, nil),
+		makeTestFelt("task-b", "B", StatusOpen, []string{"task-a"}),
+		makeTestFelt("task-c", "C", StatusOpen, []string{"task-b"}),
+		makeTestFelt("task-d", "D", StatusOpen, []string{"task-c"}),
 	}
 
 	g := BuildGraph(felts)
 
-	upstream := g.GetUpstream("d-44444444")
+	upstream := g.GetUpstream("task-d")
 	if len(upstream) != 3 {
 		t.Errorf("D upstream count = %d, want 3", len(upstream))
 	}
 
-	upstream = g.GetUpstream("b-22222222")
+	upstream = g.GetUpstream("task-b")
 	if len(upstream) != 1 {
 		t.Errorf("B upstream count = %d, want 1", len(upstream))
 	}
 
-	upstream = g.GetUpstream("a-11111111")
+	upstream = g.GetUpstream("task-a")
 	if len(upstream) != 0 {
 		t.Errorf("A upstream count = %d, want 0", len(upstream))
 	}
@@ -88,25 +88,25 @@ func TestGetDownstream(t *testing.T) {
 	// A <- B <- C
 	//  \_ D
 	felts := []*Felt{
-		makeTestFelt("a-11111111", "A", StatusOpen, nil),
-		makeTestFelt("b-22222222", "B", StatusOpen, []string{"a-11111111"}),
-		makeTestFelt("c-33333333", "C", StatusOpen, []string{"b-22222222"}),
-		makeTestFelt("d-44444444", "D", StatusOpen, []string{"a-11111111"}),
+		makeTestFelt("task-a", "A", StatusOpen, nil),
+		makeTestFelt("task-b", "B", StatusOpen, []string{"task-a"}),
+		makeTestFelt("task-c", "C", StatusOpen, []string{"task-b"}),
+		makeTestFelt("task-d", "D", StatusOpen, []string{"task-a"}),
 	}
 
 	g := BuildGraph(felts)
 
-	downstream := g.GetDownstream("a-11111111")
+	downstream := g.GetDownstream("task-a")
 	if len(downstream) != 3 {
 		t.Errorf("A downstream count = %d, want 3", len(downstream))
 	}
 
-	downstream = g.GetDownstream("b-22222222")
+	downstream = g.GetDownstream("task-b")
 	if len(downstream) != 1 {
 		t.Errorf("B downstream count = %d, want 1", len(downstream))
 	}
 
-	downstream = g.GetDownstream("c-33333333")
+	downstream = g.GetDownstream("task-c")
 	if len(downstream) != 0 {
 		t.Errorf("C downstream count = %d, want 0", len(downstream))
 	}
@@ -115,43 +115,43 @@ func TestGetDownstream(t *testing.T) {
 func TestGetUpstreamN(t *testing.T) {
 	// A <- B <- C <- D
 	felts := []*Felt{
-		makeTestFelt("a-11111111", "A", StatusOpen, nil),
-		makeTestFelt("b-22222222", "B", StatusOpen, []string{"a-11111111"}),
-		makeTestFelt("c-33333333", "C", StatusOpen, []string{"b-22222222"}),
-		makeTestFelt("d-44444444", "D", StatusOpen, []string{"c-33333333"}),
+		makeTestFelt("task-a", "A", StatusOpen, nil),
+		makeTestFelt("task-b", "B", StatusOpen, []string{"task-a"}),
+		makeTestFelt("task-c", "C", StatusOpen, []string{"task-b"}),
+		makeTestFelt("task-d", "D", StatusOpen, []string{"task-c"}),
 	}
 
 	g := BuildGraph(felts)
 
 	// Depth 1: direct parents only
-	upstream := g.GetUpstreamN("d-44444444", 1)
+	upstream := g.GetUpstreamN("task-d", 1)
 	if len(upstream) != 1 {
 		t.Errorf("D upstream depth=1 count = %d, want 1", len(upstream))
 	}
-	if len(upstream) > 0 && upstream[0] != "c-33333333" {
-		t.Errorf("D upstream depth=1 = %v, want [c-33333333]", upstream)
+	if len(upstream) > 0 && upstream[0] != "task-c" {
+		t.Errorf("D upstream depth=1 = %v, want [task-c]", upstream)
 	}
 
 	// Depth 2: parents and grandparents
-	upstream = g.GetUpstreamN("d-44444444", 2)
+	upstream = g.GetUpstreamN("task-d", 2)
 	if len(upstream) != 2 {
 		t.Errorf("D upstream depth=2 count = %d, want 2", len(upstream))
 	}
 
 	// Depth 0: unlimited (full transitive closure)
-	upstream = g.GetUpstreamN("d-44444444", 0)
+	upstream = g.GetUpstreamN("task-d", 0)
 	if len(upstream) != 3 {
 		t.Errorf("D upstream depth=0 count = %d, want 3", len(upstream))
 	}
 
 	// Depth 1 from B: just A
-	upstream = g.GetUpstreamN("b-22222222", 1)
+	upstream = g.GetUpstreamN("task-b", 1)
 	if len(upstream) != 1 {
 		t.Errorf("B upstream depth=1 count = %d, want 1", len(upstream))
 	}
 
 	// Depth 1 from A: nothing
-	upstream = g.GetUpstreamN("a-11111111", 1)
+	upstream = g.GetUpstreamN("task-a", 1)
 	if len(upstream) != 0 {
 		t.Errorf("A upstream depth=1 count = %d, want 0", len(upstream))
 	}
@@ -161,40 +161,40 @@ func TestGetDownstreamN(t *testing.T) {
 	// A <- B <- C
 	//  \_ D
 	felts := []*Felt{
-		makeTestFelt("a-11111111", "A", StatusOpen, nil),
-		makeTestFelt("b-22222222", "B", StatusOpen, []string{"a-11111111"}),
-		makeTestFelt("c-33333333", "C", StatusOpen, []string{"b-22222222"}),
-		makeTestFelt("d-44444444", "D", StatusOpen, []string{"a-11111111"}),
+		makeTestFelt("task-a", "A", StatusOpen, nil),
+		makeTestFelt("task-b", "B", StatusOpen, []string{"task-a"}),
+		makeTestFelt("task-c", "C", StatusOpen, []string{"task-b"}),
+		makeTestFelt("task-d", "D", StatusOpen, []string{"task-a"}),
 	}
 
 	g := BuildGraph(felts)
 
 	// Depth 1 from A: direct children B and D
-	downstream := g.GetDownstreamN("a-11111111", 1)
+	downstream := g.GetDownstreamN("task-a", 1)
 	if len(downstream) != 2 {
 		t.Errorf("A downstream depth=1 count = %d, want 2", len(downstream))
 	}
 
 	// Depth 2 from A: B, D, and C (grandchild via B)
-	downstream = g.GetDownstreamN("a-11111111", 2)
+	downstream = g.GetDownstreamN("task-a", 2)
 	if len(downstream) != 3 {
 		t.Errorf("A downstream depth=2 count = %d, want 3", len(downstream))
 	}
 
 	// Depth 0 from A: full transitive closure
-	downstream = g.GetDownstreamN("a-11111111", 0)
+	downstream = g.GetDownstreamN("task-a", 0)
 	if len(downstream) != 3 {
 		t.Errorf("A downstream depth=0 count = %d, want 3", len(downstream))
 	}
 
 	// Depth 1 from B: just C
-	downstream = g.GetDownstreamN("b-22222222", 1)
+	downstream = g.GetDownstreamN("task-b", 1)
 	if len(downstream) != 1 {
 		t.Errorf("B downstream depth=1 count = %d, want 1", len(downstream))
 	}
 
 	// Depth 1 from C: nothing
-	downstream = g.GetDownstreamN("c-33333333", 1)
+	downstream = g.GetDownstreamN("task-c", 1)
 	if len(downstream) != 0 {
 		t.Errorf("C downstream depth=1 count = %d, want 0", len(downstream))
 	}
@@ -203,9 +203,9 @@ func TestGetDownstreamN(t *testing.T) {
 func TestReady(t *testing.T) {
 	// A (closed) <- B (open) <- C (open)
 	felts := []*Felt{
-		makeTestFelt("a-11111111", "A", StatusClosed, nil),
-		makeTestFelt("b-22222222", "B", StatusOpen, []string{"a-11111111"}),
-		makeTestFelt("c-33333333", "C", StatusOpen, []string{"b-22222222"}),
+		makeTestFelt("task-a", "A", StatusClosed, nil),
+		makeTestFelt("task-b", "B", StatusOpen, []string{"task-a"}),
+		makeTestFelt("task-c", "C", StatusOpen, []string{"task-b"}),
 	}
 
 	g := BuildGraph(felts)
@@ -214,16 +214,16 @@ func TestReady(t *testing.T) {
 	if len(ready) != 1 {
 		t.Errorf("Ready count = %d, want 1", len(ready))
 	}
-	if ready[0].ID != "b-22222222" {
-		t.Errorf("Ready[0].ID = %s, want b-22222222", ready[0].ID)
+	if ready[0].ID != "task-b" {
+		t.Errorf("Ready[0].ID = %s, want task-b", ready[0].ID)
 	}
 }
 
 func TestReadyNoDeps(t *testing.T) {
 	// Both A and B are open with no deps - both ready
 	felts := []*Felt{
-		makeTestFelt("a-11111111", "A", StatusOpen, nil),
-		makeTestFelt("b-22222222", "B", StatusOpen, nil),
+		makeTestFelt("task-a", "A", StatusOpen, nil),
+		makeTestFelt("task-b", "B", StatusOpen, nil),
 	}
 
 	g := BuildGraph(felts)
@@ -238,8 +238,8 @@ func TestReadyExcludesActive(t *testing.T) {
 	// A (open, no deps) and B (active, no deps)
 	// Only A should be in ready - active felts are already being worked on
 	felts := []*Felt{
-		makeTestFelt("a-11111111", "A", StatusOpen, nil),
-		makeTestFelt("b-22222222", "B", StatusActive, nil),
+		makeTestFelt("task-a", "A", StatusOpen, nil),
+		makeTestFelt("task-b", "B", StatusActive, nil),
 	}
 
 	g := BuildGraph(felts)
@@ -248,40 +248,40 @@ func TestReadyExcludesActive(t *testing.T) {
 	if len(ready) != 1 {
 		t.Errorf("Ready count = %d, want 1 (active should be excluded)", len(ready))
 	}
-	if len(ready) > 0 && ready[0].ID != "a-11111111" {
-		t.Errorf("Ready[0].ID = %s, want a-11111111 (the open one)", ready[0].ID)
+	if len(ready) > 0 && ready[0].ID != "task-a" {
+		t.Errorf("Ready[0].ID = %s, want task-a (the open one)", ready[0].ID)
 	}
 }
 
 func TestDetectCycle(t *testing.T) {
 	// A <- B (existing)
 	felts := []*Felt{
-		makeTestFelt("a-11111111", "A", StatusOpen, nil),
-		makeTestFelt("b-22222222", "B", StatusOpen, []string{"a-11111111"}),
+		makeTestFelt("task-a", "A", StatusOpen, nil),
+		makeTestFelt("task-b", "B", StatusOpen, []string{"task-a"}),
 	}
 
 	g := BuildGraph(felts)
 
 	// Adding A -> B would create cycle
-	if !g.DetectCycle("a-11111111", "b-22222222") {
+	if !g.DetectCycle("task-a", "task-b") {
 		t.Error("DetectCycle should detect A->B cycle")
 	}
 
 	// Self-reference
-	if !g.DetectCycle("a-11111111", "a-11111111") {
+	if !g.DetectCycle("task-a", "task-a") {
 		t.Error("DetectCycle should detect self-reference")
 	}
 
 	// No cycle: B -> C (new)
-	if g.DetectCycle("b-22222222", "c-33333333") {
+	if g.DetectCycle("task-b", "task-c") {
 		t.Error("DetectCycle should not flag B->C")
 	}
 }
 
 func TestValidateDependencies(t *testing.T) {
 	felts := []*Felt{
-		makeTestFelt("a-11111111", "A", StatusOpen, []string{"nonexistent-12345678"}),
-		makeTestFelt("b-22222222", "B", StatusOpen, []string{"a-11111111"}),
+		makeTestFelt("task-a", "A", StatusOpen, []string{"nonexistent"}),
+		makeTestFelt("task-b", "B", StatusOpen, []string{"task-a"}),
 	}
 
 	g := BuildGraph(felts)
@@ -298,15 +298,15 @@ func TestValidateDependencies(t *testing.T) {
 func TestFindPath(t *testing.T) {
 	// A <- B <- C <- D
 	felts := []*Felt{
-		makeTestFelt("a-11111111", "A", StatusOpen, nil),
-		makeTestFelt("b-22222222", "B", StatusOpen, []string{"a-11111111"}),
-		makeTestFelt("c-33333333", "C", StatusOpen, []string{"b-22222222"}),
-		makeTestFelt("d-44444444", "D", StatusOpen, []string{"c-33333333"}),
+		makeTestFelt("task-a", "A", StatusOpen, nil),
+		makeTestFelt("task-b", "B", StatusOpen, []string{"task-a"}),
+		makeTestFelt("task-c", "C", StatusOpen, []string{"task-b"}),
+		makeTestFelt("task-d", "D", StatusOpen, []string{"task-c"}),
 	}
 
 	g := BuildGraph(felts)
 
-	path := g.FindPath("d-44444444", "a-11111111")
+	path := g.FindPath("task-d", "task-a")
 	if path == nil {
 		t.Fatal("FindPath should find path from D to A")
 	}
@@ -315,13 +315,13 @@ func TestFindPath(t *testing.T) {
 	}
 
 	// No path from A to D (wrong direction)
-	path = g.FindPath("a-11111111", "d-44444444")
+	path = g.FindPath("task-a", "task-d")
 	if path != nil {
 		t.Error("FindPath should not find path from A to D")
 	}
 
 	// Same node
-	path = g.FindPath("a-11111111", "a-11111111")
+	path = g.FindPath("task-a", "task-a")
 	if len(path) != 1 {
 		t.Errorf("Same node path length = %d, want 1", len(path))
 	}
@@ -329,9 +329,9 @@ func TestFindPath(t *testing.T) {
 
 func TestToMermaid(t *testing.T) {
 	felts := []*Felt{
-		makeTestFelt("a-11111111", "A", StatusOpen, nil),
-		makeTestFelt("b-22222222", "B", StatusActive, []string{"a-11111111"}),
-		makeTestFelt("c-33333333", "C", StatusClosed, []string{"b-22222222"}),
+		makeTestFelt("task-a", "A", StatusOpen, nil),
+		makeTestFelt("task-b", "B", StatusActive, []string{"task-a"}),
+		makeTestFelt("task-c", "C", StatusClosed, []string{"task-b"}),
 	}
 
 	g := BuildGraph(felts)
@@ -340,7 +340,7 @@ func TestToMermaid(t *testing.T) {
 	if !strings.HasPrefix(mermaid, "graph TD") {
 		t.Error("Mermaid should start with graph TD")
 	}
-	if !strings.Contains(mermaid, "a_11111111") {
+	if !strings.Contains(mermaid, "task_a") {
 		t.Error("Mermaid should contain node a")
 	}
 	if !strings.Contains(mermaid, "-->") {
@@ -353,7 +353,7 @@ func TestToMermaid(t *testing.T) {
 
 func TestToMermaidEscaping(t *testing.T) {
 	felts := []*Felt{
-		makeTestFelt("a-11111111", `Title with <brackets> & "quotes"`, StatusOpen, nil),
+		makeTestFelt("task-a", `Title with <brackets> & "quotes"`, StatusOpen, nil),
 	}
 
 	g := BuildGraph(felts)
@@ -381,8 +381,8 @@ func TestToMermaidEscaping(t *testing.T) {
 
 func TestToDot(t *testing.T) {
 	felts := []*Felt{
-		makeTestFelt("a-11111111", "A", StatusOpen, nil),
-		makeTestFelt("b-22222222", "B", StatusOpen, []string{"a-11111111"}),
+		makeTestFelt("task-a", "A", StatusOpen, nil),
+		makeTestFelt("task-b", "B", StatusOpen, []string{"task-a"}),
 	}
 
 	g := BuildGraph(felts)
@@ -399,8 +399,8 @@ func TestToDot(t *testing.T) {
 func TestFindCycles(t *testing.T) {
 	// No cycle
 	felts := []*Felt{
-		makeTestFelt("a-11111111", "A", StatusOpen, nil),
-		makeTestFelt("b-22222222", "B", StatusOpen, []string{"a-11111111"}),
+		makeTestFelt("task-a", "A", StatusOpen, nil),
+		makeTestFelt("task-b", "B", StatusOpen, []string{"task-a"}),
 	}
 	g := BuildGraph(felts)
 	cycles := g.FindCycles()
@@ -410,8 +410,8 @@ func TestFindCycles(t *testing.T) {
 
 	// Create a cycle: A -> B -> A (manually set deps to bypass validation)
 	felts = []*Felt{
-		makeTestFelt("a-11111111", "A", StatusOpen, []string{"b-22222222"}),
-		makeTestFelt("b-22222222", "B", StatusOpen, []string{"a-11111111"}),
+		makeTestFelt("task-a", "A", StatusOpen, []string{"task-b"}),
+		makeTestFelt("task-b", "B", StatusOpen, []string{"task-a"}),
 	}
 	g = BuildGraph(felts)
 	cycles = g.FindCycles()
@@ -421,7 +421,7 @@ func TestFindCycles(t *testing.T) {
 
 	// Self-cycle
 	felts = []*Felt{
-		makeTestFelt("a-11111111", "A", StatusOpen, []string{"a-11111111"}),
+		makeTestFelt("task-a", "A", StatusOpen, []string{"task-a"}),
 	}
 	g = BuildGraph(felts)
 	cycles = g.FindCycles()
@@ -433,9 +433,9 @@ func TestFindCycles(t *testing.T) {
 func TestToText(t *testing.T) {
 	// Simple chain: A <- B <- C
 	felts := []*Felt{
-		makeTestFelt("a-11111111", "A", StatusClosed, nil),
-		makeTestFelt("b-22222222", "B", StatusActive, []string{"a-11111111"}),
-		makeTestFelt("c-33333333", "C", StatusOpen, []string{"b-22222222"}),
+		makeTestFelt("task-a", "A", StatusClosed, nil),
+		makeTestFelt("task-b", "B", StatusActive, []string{"task-a"}),
+		makeTestFelt("task-c", "C", StatusOpen, []string{"task-b"}),
 	}
 
 	g := BuildGraph(felts)
@@ -475,10 +475,10 @@ func TestToText(t *testing.T) {
 func TestToTextMultipleRoots(t *testing.T) {
 	// Two separate trees
 	felts := []*Felt{
-		makeTestFelt("a-11111111", "A", StatusOpen, nil),
-		makeTestFelt("b-22222222", "B", StatusOpen, []string{"a-11111111"}),
-		makeTestFelt("x-88888888", "X", StatusOpen, nil),
-		makeTestFelt("y-99999999", "Y", StatusOpen, []string{"x-88888888"}),
+		makeTestFelt("task-a", "A", StatusOpen, nil),
+		makeTestFelt("task-b", "B", StatusOpen, []string{"task-a"}),
+		makeTestFelt("task-x", "X", StatusOpen, nil),
+		makeTestFelt("task-y", "Y", StatusOpen, []string{"task-x"}),
 	}
 
 	g := BuildGraph(felts)
@@ -496,12 +496,12 @@ func TestToTextMultipleRoots(t *testing.T) {
 func TestBuildGraphWithLabels(t *testing.T) {
 	felts := []*Felt{
 		{
-			ID: "a-11111111", Title: "A", Status: StatusOpen,			DependsOn: nil, CreatedAt: time.Now(),
+			ID: "task-a", Title: "A", Status: StatusOpen, DependsOn: nil, CreatedAt: time.Now(),
 		},
 		{
-			ID: "b-22222222", Title: "B", Status: StatusOpen,
+			ID: "task-b", Title: "B", Status: StatusOpen,
 			DependsOn: Dependencies{
-				{ID: "a-11111111", Label: "needs data"},
+				{ID: "task-a", Label: "needs data"},
 			},
 			CreatedAt: time.Now(),
 		},
@@ -510,31 +510,31 @@ func TestBuildGraphWithLabels(t *testing.T) {
 	g := BuildGraph(felts)
 
 	// Upstream of B should have label
-	if len(g.Upstream["b-22222222"]) != 1 {
-		t.Fatalf("B upstream count = %d, want 1", len(g.Upstream["b-22222222"]))
+	if len(g.Upstream["task-b"]) != 1 {
+		t.Fatalf("B upstream count = %d, want 1", len(g.Upstream["task-b"]))
 	}
-	if g.Upstream["b-22222222"][0].Label != "needs data" {
-		t.Errorf("B upstream label = %q, want %q", g.Upstream["b-22222222"][0].Label, "needs data")
+	if g.Upstream["task-b"][0].Label != "needs data" {
+		t.Errorf("B upstream label = %q, want %q", g.Upstream["task-b"][0].Label, "needs data")
 	}
 
 	// Downstream of A should have label
-	if len(g.Downstream["a-11111111"]) != 1 {
-		t.Fatalf("A downstream count = %d, want 1", len(g.Downstream["a-11111111"]))
+	if len(g.Downstream["task-a"]) != 1 {
+		t.Fatalf("A downstream count = %d, want 1", len(g.Downstream["task-a"]))
 	}
-	if g.Downstream["a-11111111"][0].Label != "needs data" {
-		t.Errorf("A downstream label = %q, want %q", g.Downstream["a-11111111"][0].Label, "needs data")
+	if g.Downstream["task-a"][0].Label != "needs data" {
+		t.Errorf("A downstream label = %q, want %q", g.Downstream["task-a"][0].Label, "needs data")
 	}
 }
 
 func TestToMermaidWithLabels(t *testing.T) {
 	felts := []*Felt{
 		{
-			ID: "a-11111111", Title: "A", Status: StatusOpen,			DependsOn: nil, CreatedAt: time.Now(),
+			ID: "task-a", Title: "A", Status: StatusOpen, DependsOn: nil, CreatedAt: time.Now(),
 		},
 		{
-			ID: "b-22222222", Title: "B", Status: StatusOpen,
+			ID: "task-b", Title: "B", Status: StatusOpen,
 			DependsOn: Dependencies{
-				{ID: "a-11111111", Label: "blocks"},
+				{ID: "task-a", Label: "blocks"},
 			},
 			CreatedAt: time.Now(),
 		},
@@ -551,12 +551,12 @@ func TestToMermaidWithLabels(t *testing.T) {
 func TestToDotWithLabels(t *testing.T) {
 	felts := []*Felt{
 		{
-			ID: "a-11111111", Title: "A", Status: StatusOpen,			DependsOn: nil, CreatedAt: time.Now(),
+			ID: "task-a", Title: "A", Status: StatusOpen, DependsOn: nil, CreatedAt: time.Now(),
 		},
 		{
-			ID: "b-22222222", Title: "B", Status: StatusOpen,
+			ID: "task-b", Title: "B", Status: StatusOpen,
 			DependsOn: Dependencies{
-				{ID: "a-11111111", Label: "provides input"},
+				{ID: "task-a", Label: "provides input"},
 			},
 			CreatedAt: time.Now(),
 		},
@@ -573,12 +573,12 @@ func TestToDotWithLabels(t *testing.T) {
 func TestToTextWithLabels(t *testing.T) {
 	felts := []*Felt{
 		{
-			ID: "a-11111111", Title: "A", Status: StatusOpen,			DependsOn: nil, CreatedAt: time.Now(),
+			ID: "task-a", Title: "A", Status: StatusOpen, DependsOn: nil, CreatedAt: time.Now(),
 		},
 		{
-			ID: "b-22222222", Title: "B", Status: StatusOpen,
+			ID: "task-b", Title: "B", Status: StatusOpen,
 			DependsOn: Dependencies{
-				{ID: "a-11111111", Label: "reason"},
+				{ID: "task-a", Label: "reason"},
 			},
 			CreatedAt: time.Now(),
 		},

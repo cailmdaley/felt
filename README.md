@@ -202,9 +202,6 @@ felt edit <id> [flags]            felt ls [query]
 felt rm <id>                      felt tree [id] [flags]
 felt export [flags]               felt hook session
 felt setup claude|codex|skills    felt update
-
-# Structure
-felt nest <child> <parent>        felt unnest <child>
 ```
 
 ### Flags

@@ -97,8 +97,8 @@ status: active
 tags:
   - spec
 depends-on:
-  - dep-a-12345678
-  - dep-b-87654321
+  - dep-a
+  - dep-b
 created-at: 2026-01-01T10:00:00Z
 ---
 
@@ -108,13 +108,13 @@ This is the body.
 Some comment here.
 `)
 
-	f, err := Parse("test-task-abcd1234", content)
+	f, err := Parse("test-task", content)
 	if err != nil {
 		t.Fatalf("Parse() error: %v", err)
 	}
 
-	if f.ID != "test-task-abcd1234" {
-		t.Errorf("ID = %q, want %q", f.ID, "test-task-abcd1234")
+	if f.ID != "test-task" {
+		t.Errorf("ID = %q, want %q", f.ID, "test-task")
 	}
 	if f.Title != "Test Task" {
 		t.Errorf("Title = %q, want %q", f.Title, "Test Task")
@@ -128,8 +128,8 @@ Some comment here.
 	if len(f.DependsOn) != 2 {
 		t.Errorf("DependsOn length = %d, want 2", len(f.DependsOn))
 	}
-	if f.DependsOn[0].ID != "dep-a-12345678" || f.DependsOn[1].ID != "dep-b-87654321" {
-		t.Errorf("DependsOn IDs = %v, want [dep-a-12345678, dep-b-87654321]", f.DependsOn.IDs())
+	if f.DependsOn[0].ID != "dep-a" || f.DependsOn[1].ID != "dep-b" {
+		t.Errorf("DependsOn IDs = %v, want [dep-a, dep-b]", f.DependsOn.IDs())
 	}
 	if !strings.Contains(f.Body, "This is the body") {
 		t.Errorf("Body = %q, want to contain %q", f.Body, "This is the body")
@@ -147,7 +147,7 @@ outcome: Metadata survives
 This body should not be parsed.
 `)
 
-	f, err := ParseWithMode("test-task-abcd1234", content, ParseMetadataOnly)
+	f, err := ParseWithMode("test-task", content, ParseMetadataOnly)
 	if err != nil {
 		t.Fatalf("ParseWithMode() error: %v", err)
 	}
@@ -184,9 +184,9 @@ func TestParseInvalid(t *testing.T) {
 func TestMarshal(t *testing.T) {
 	now := time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
 	f := &Felt{
-		ID:        "test-task-12345678",
+		ID:        "test-task",
 		Title:     "Test Task",
-		DependsOn: Dependencies{{ID: "dep-1-aaaaaaaa"}},
+		DependsOn: Dependencies{{ID: "dep-1"}},
 		CreatedAt: now,
 		Body:      "Body text here.",
 	}
@@ -585,7 +585,7 @@ tags:
 Body here.
 `)
 
-	f, err := Parse("test-with-tags-12345678", content)
+	f, err := Parse("test-with-tags", content)
 	if err != nil {
 		t.Fatalf("Parse() error: %v", err)
 	}
@@ -603,7 +603,7 @@ Body here.
 
 func TestMarshalTags(t *testing.T) {
 	f := &Felt{
-		ID:        "test-tags-12345678",
+		ID:        "test-tags",
 		Title:     "Test Tags",
 		Status:    StatusOpen,
 		Tags:      []string{"alpha", "beta"},
@@ -641,14 +641,14 @@ func TestParseMixedDependencies(t *testing.T) {
 title: Mixed deps test
 status: open
 depends-on:
-  - bare-id-12345678
-  - id: labeled-id-87654321
+  - bare-id
+  - id: labeled-id
     label: needs data from
 created-at: 2026-01-01T10:00:00Z
 ---
 `)
 
-	f, err := Parse("mixed-deps-aabbccdd", content)
+	f, err := Parse("mixed-deps", content)
 	if err != nil {
 		t.Fatalf("Parse() error: %v", err)
 	}
@@ -658,16 +658,16 @@ created-at: 2026-01-01T10:00:00Z
 	}
 
 	// First dep: bare string
-	if f.DependsOn[0].ID != "bare-id-12345678" {
-		t.Errorf("DependsOn[0].ID = %q, want %q", f.DependsOn[0].ID, "bare-id-12345678")
+	if f.DependsOn[0].ID != "bare-id" {
+		t.Errorf("DependsOn[0].ID = %q, want %q", f.DependsOn[0].ID, "bare-id")
 	}
 	if f.DependsOn[0].Label != "" {
 		t.Errorf("DependsOn[0].Label = %q, want empty", f.DependsOn[0].Label)
 	}
 
 	// Second dep: object with label
-	if f.DependsOn[1].ID != "labeled-id-87654321" {
-		t.Errorf("DependsOn[1].ID = %q, want %q", f.DependsOn[1].ID, "labeled-id-87654321")
+	if f.DependsOn[1].ID != "labeled-id" {
+		t.Errorf("DependsOn[1].ID = %q, want %q", f.DependsOn[1].ID, "labeled-id")
 	}
 	if f.DependsOn[1].Label != "needs data from" {
 		t.Errorf("DependsOn[1].Label = %q, want %q", f.DependsOn[1].Label, "needs data from")
@@ -676,12 +676,12 @@ created-at: 2026-01-01T10:00:00Z
 
 func TestMarshalMixedDependencies(t *testing.T) {
 	f := &Felt{
-		ID:     "mixed-deps-aabbccdd",
+		ID:     "mixed-deps",
 		Title:  "Mixed deps test",
 		Status: StatusOpen,
 		DependsOn: Dependencies{
-			{ID: "bare-id-12345678"},
-			{ID: "labeled-id-87654321", Label: "needs data from"},
+			{ID: "bare-id"},
+			{ID: "labeled-id", Label: "needs data from"},
 		},
 		CreatedAt: time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC),
 	}
@@ -694,12 +694,12 @@ func TestMarshalMixedDependencies(t *testing.T) {
 	content := string(data)
 
 	// Bare dep should be emitted as plain string
-	if !strings.Contains(content, "- bare-id-12345678") {
+	if !strings.Contains(content, "- bare-id") {
 		t.Error("Marshal() should emit bare dep as string")
 	}
 
 	// Labeled dep should be emitted as object
-	if !strings.Contains(content, "id: labeled-id-87654321") {
+	if !strings.Contains(content, "id: labeled-id") {
 		t.Error("Marshal() should emit labeled dep with id field")
 	}
 	if !strings.Contains(content, "label: needs data from") {
@@ -714,39 +714,39 @@ func TestMarshalMixedDependencies(t *testing.T) {
 	if len(parsed.DependsOn) != 2 {
 		t.Fatalf("Round-trip DependsOn length = %d, want 2", len(parsed.DependsOn))
 	}
-	if parsed.DependsOn[0].ID != "bare-id-12345678" || parsed.DependsOn[0].Label != "" {
-		t.Errorf("Round-trip DependsOn[0] = %+v, want {bare-id-12345678, \"\"}", parsed.DependsOn[0])
+	if parsed.DependsOn[0].ID != "bare-id" || parsed.DependsOn[0].Label != "" {
+		t.Errorf("Round-trip DependsOn[0] = %+v, want {bare-id, \"\"}", parsed.DependsOn[0])
 	}
-	if parsed.DependsOn[1].ID != "labeled-id-87654321" || parsed.DependsOn[1].Label != "needs data from" {
-		t.Errorf("Round-trip DependsOn[1] = %+v, want {labeled-id-87654321, needs data from}", parsed.DependsOn[1])
+	if parsed.DependsOn[1].ID != "labeled-id" || parsed.DependsOn[1].Label != "needs data from" {
+		t.Errorf("Round-trip DependsOn[1] = %+v, want {labeled-id, needs data from}", parsed.DependsOn[1])
 	}
 }
 
 func TestDependenciesHelpers(t *testing.T) {
 	deps := Dependencies{
-		{ID: "a-11111111"},
-		{ID: "b-22222222", Label: "reason"},
+		{ID: "task-a"},
+		{ID: "task-b", Label: "reason"},
 	}
 
 	// IDs
 	ids := deps.IDs()
-	if len(ids) != 2 || ids[0] != "a-11111111" || ids[1] != "b-22222222" {
-		t.Errorf("IDs() = %v, want [a-11111111, b-22222222]", ids)
+	if len(ids) != 2 || ids[0] != "task-a" || ids[1] != "task-b" {
+		t.Errorf("IDs() = %v, want [task-a, task-b]", ids)
 	}
 
 	// HasID
-	if !deps.HasID("a-11111111") {
-		t.Error("HasID(a-11111111) should be true")
+	if !deps.HasID("task-a") {
+		t.Error("HasID(task-a) should be true")
 	}
-	if deps.HasID("c-33333333") {
-		t.Error("HasID(c-33333333) should be false")
+	if deps.HasID("task-c") {
+		t.Error("HasID(task-c) should be false")
 	}
 
 	// LabelFor
-	if l := deps.LabelFor("b-22222222"); l != "reason" {
-		t.Errorf("LabelFor(b-22222222) = %q, want %q", l, "reason")
+	if l := deps.LabelFor("task-b"); l != "reason" {
+		t.Errorf("LabelFor(task-b) = %q, want %q", l, "reason")
 	}
-	if l := deps.LabelFor("a-11111111"); l != "" {
-		t.Errorf("LabelFor(a-11111111) = %q, want empty", l)
+	if l := deps.LabelFor("task-a"); l != "" {
+		t.Errorf("LabelFor(task-a) = %q, want empty", l)
 	}
 }

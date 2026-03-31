@@ -159,6 +159,7 @@ func claudeMDSnippet() string {
 	fence := "```"
 	return "## felt\n\n" +
 		"Fibers are concerns — tasks, decisions, questions — strung in a DAG. " +
+		"Each fiber lives at `.felt/<path>/<slug>.md` with YAML frontmatter and a MyST-flavored markdown body. " +
 		"Body is the content; outcome is the conclusion. " +
 		"`felt tree <id> --up` shows what a decision rests on; `felt tree <id> --down` shows what breaks if it changes. " +
 		"A missing causal link costs an investigation; a fiber costs nothing.\n\n" +
@@ -360,7 +361,6 @@ func uninstallCodexWrapper() error {
 	fmt.Printf("✓ Removed codex wrapper from %s\n", rcPath)
 	return nil
 }
-
 
 // claudeSettingsPath returns the path to Claude Code's settings.json
 func claudeSettingsPath() (string, error) {

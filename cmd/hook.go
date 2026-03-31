@@ -177,6 +177,7 @@ func formatRecentEntry(f *felt.Felt) string {
 func cliReference() string {
 	return `## CLI
 ` + "```" + `
+felt init                       # initialize .felt/ + myst.yml
 felt "title"                    # create fiber
 felt add "title" -s open -t tag -a <dep-id> -o "outcome"
 felt edit <id> -s active        # enter tracking / mark active
@@ -199,7 +200,7 @@ Also: hook session, rm
 ` + "```" + `
 Statuses: · untracked, ○ open, ◐ active, ● closed
 Detail: title < compact < summary < full (default). Summary shows the **lede** — the first paragraph of the body. Write it to stand alone.
-To patch body text (not replace), edit the fiber markdown file in .felt/<path>/<slug>.md directly.
+To patch body text (not replace), edit the fiber markdown file in .felt/<path>/<slug>.md directly. Nested fibers use path IDs like bao-analysis/damping-prior.
 
 `
 }

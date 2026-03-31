@@ -45,10 +45,10 @@ func TestStorageWriteRead(t *testing.T) {
 	s.Init()
 
 	f := &Felt{
-		ID:        "test-task-12345678",
+		ID:        "test-task",
 		Title:     "Test Task",
 		Status:    StatusOpen,
-		DependsOn: Dependencies{{ID: "dep-a-aaaaaaaa"}},
+		DependsOn: Dependencies{{ID: "dep-a"}},
 		CreatedAt: time.Now(),
 		Body:      "Test body content.",
 	}
@@ -83,8 +83,8 @@ func TestStorageWriteRead(t *testing.T) {
 	if read.Body != f.Body {
 		t.Errorf("Body = %q, want %q", read.Body, f.Body)
 	}
-	if len(read.DependsOn) != 1 || read.DependsOn[0].ID != "dep-a-aaaaaaaa" {
-		t.Errorf("DependsOn = %v, want [{dep-a-aaaaaaaa }]", read.DependsOn)
+	if len(read.DependsOn) != 1 || read.DependsOn[0].ID != "dep-a" {
+		t.Errorf("DependsOn = %v, want [{dep-a }]", read.DependsOn)
 	}
 }
 
@@ -93,7 +93,7 @@ func TestStorageReadNonExistent(t *testing.T) {
 	s := NewStorage(dir)
 	s.Init()
 
-	_, err := s.Read("nonexistent-12345678")
+	_, err := s.Read("nonexistent")
 	if err == nil {
 		t.Error("Read() should error for non-existent file")
 	}
@@ -128,7 +128,7 @@ func TestStorageDeleteNonExistent(t *testing.T) {
 	s := NewStorage(dir)
 	s.Init()
 
-	err := s.Delete("nonexistent-12345678")
+	err := s.Delete("nonexistent")
 	if err == nil {
 		t.Error("Delete() should error for non-existent file")
 	}
@@ -171,7 +171,7 @@ func TestStorageReadMetadataSkipsBody(t *testing.T) {
 	s.Init()
 
 	f := &Felt{
-		ID:        "test-task-12345678",
+		ID:        "test-task",
 		Title:     "Test Task",
 		Status:    StatusOpen,
 		CreatedAt: time.Now(),
@@ -255,7 +255,7 @@ func TestStorageFindMetadataSkipsBody(t *testing.T) {
 	s.Init()
 
 	f := &Felt{
-		ID:        "test-task-12345678",
+		ID:        "test-task",
 		Title:     "Test Task",
 		Status:    StatusOpen,
 		CreatedAt: time.Now(),
@@ -419,13 +419,13 @@ func TestStorageFindAmbiguous(t *testing.T) {
 
 	// Create two felts with similar IDs
 	f1 := &Felt{
-		ID:        "task-12345678",
+		ID:        "task-2",
 		Title:     "Task 1",
 		Status:    StatusOpen,
 		CreatedAt: time.Now(),
 	}
 	f2 := &Felt{
-		ID:        "task-87654321",
+		ID:        "task-3",
 		Title:     "Task 2",
 		Status:    StatusOpen,
 		CreatedAt: time.Now(),
