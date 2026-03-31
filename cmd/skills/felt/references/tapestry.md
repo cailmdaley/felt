@@ -96,7 +96,7 @@ felt add "Methods" -t tapestry:methods -t tier:1
 
 # Interior node
 felt add "Covariance estimation" -t tapestry:covariance
-felt link covariance-id methods-id
+felt edit covariance-id --link methods-id
 ```
 
 ## Recording a Computation
@@ -112,7 +112,7 @@ felt add "B-modes consistent with noise" -t tapestry:bmodes
 felt edit bmodes-id -o "PTE=0.29, chi2=12.3/10 dof — consistent with noise at all scales"
 
 # Wire to upstream (both endpoints must be tapestry-tagged)
-felt link bmodes-id covariance-id
+felt edit bmodes-id --link covariance-id
 ```
 
 ## Citing Sources

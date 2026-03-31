@@ -54,7 +54,6 @@ var primeCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(hookCmd)
-	rootCmd.AddCommand(primeCmd)
 	hookCmd.AddCommand(hookSessionCmd)
 }
 
@@ -191,20 +190,20 @@ felt add "title" -s open -t tag -a <dep-id> -o "outcome"
 felt edit <id> -s active        # enter tracking / mark active
 felt edit <id> -s closed -o "outcome"  # close with outcome
 felt edit <id> --body "text"    # full body replacement (overwrite)
-felt comment <id> "note"        # add comment
+felt edit <id> --comment "note" # append to comments section
 felt show <id>                  # full details
 felt show <id> -d summary       # metadata + lede paragraph
 felt show <id> -d compact       # metadata + outcome only
 felt ls                         # tracked fibers (open/active)
+felt ls --ready                 # open fibers whose deps are closed
 felt ls -t tapestry:            # any filter widens to all statuses
 felt ls -s closed "query"       # explicit -s overrides; -e exact, -r regex
-felt upstream <id>               # direct dependencies
-felt upstream <id> -d summary    # with summaries
-felt upstream <id> --all         # full transitive closure
-felt downstream <id>             # direct dependents
-felt downstream <id> -d summary  # with summaries
-felt downstream <id> --all       # full transitive closure
-Also: link, unlink, tag, untag, path, tree, ready, rm
+felt tree <id> --up             # direct dependencies
+felt tree <id> --up --all       # full transitive upstream
+felt tree <id> --down           # direct dependents
+felt tree <id> --format mermaid # graph export
+felt tree --check               # validate graph integrity
+Also: hook session, rm
 ` + "```" + `
 Statuses: · untracked, ○ open, ◐ active, ● closed
 Detail: title < compact < summary < full (default). Summary shows the **lede** — the first paragraph of the body. Write it to stand alone.

@@ -23,7 +23,7 @@ Consolidating old fibers into documentation. Old fibers become noise — archive
 felt ls -s closed --before 60d
 
 # Or by topic
-felt find "authentication" -s closed
+felt ls -s closed "authentication"
 ```
 
 Look for clusters around the same concept, decisions that informed later decisions, patterns that recurred.
@@ -49,7 +49,7 @@ Not everything needs preserving. Some fibers were useful in the moment but have 
 If a cluster represents recurring knowledge:
 
 ```bash
-felt find "topic"                   # Check for existing doc
+felt ls -s all "topic"              # Check for existing doc
 felt add "How X works"              # Create new doc fiber
 ```
 
@@ -79,7 +79,7 @@ Reshaping is archiving applied to tapestry nodes. The trigger is branching: any 
 
 ### When to Reshape
 
-- A tapestry node has 5+ children (check with `felt downstream <id>`)
+- A tapestry node has 5+ children (check with `felt tree <id> --down`)
 - The DAG is wide and shallow — many siblings, little depth
 - A reader can't parse a neighborhood in one click
 
@@ -88,15 +88,15 @@ Reshaping is archiving applied to tapestry nodes. The trigger is branching: any 
 1. **Audit** — walk spine nodes, count children. Flag any with 5+.
 2. **Partition** — identify natural groupings among the siblings. Name the partition.
 3. **Introduce grouping nodes** — create a tapestry-tagged fiber for each group. Write a 2-3 sentence summary body (what's here, why it matters). No evidence needed.
-4. **Re-parent** — `felt unlink` children from the overloaded parent, `felt link` them to the new grouping node, `felt link` the grouping node to the parent.
-5. **Verify** — `felt downstream <parent>` should show 2-4 children. Each grouping node should have 2-4 children.
+4. **Re-parent** — `felt edit <child> --unlink <parent>` to detach children, then `felt edit <child> --link <grouping-node>` and `felt edit <grouping-node> --link <parent>`.
+5. **Verify** — `felt tree <parent> --down` should show 2-4 children. Each grouping node should have 2-4 children.
 
 ```bash
 # Example: Methods has 7 children, split into Estimators + Covariance + Simulations
 felt add "Estimators" -t tapestry:estimators -b "Pipeline independence, foreground bias, cross-checks."
-felt link estimators-id methods-id
-felt unlink child-a methods-id && felt link child-a estimators-id
-felt unlink child-b methods-id && felt link child-b estimators-id
+felt edit estimators-id --link methods-id
+felt edit child-a --unlink methods-id --link estimators-id
+felt edit child-b --unlink methods-id --link estimators-id
 ```
 
 ### Target

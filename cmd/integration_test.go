@@ -149,7 +149,7 @@ func TestIntegration(t *testing.T) {
 	}
 
 	// comment
-	mustFelt(t, dir, "comment", fiberID, "a test comment")
+	mustFelt(t, dir, "edit", fiberID, "--comment", "a test comment")
 
 	// close with outcome
 	mustFelt(t, dir, "edit", fiberID, "-s", "closed", "-o", "completed successfully")
@@ -173,16 +173,16 @@ func TestIntegration(t *testing.T) {
 	}
 
 	// link and unlink
-	mustFelt(t, dir, "link", fiber2ID, fiberID)
-	out = mustFelt(t, dir, "upstream", fiber2ID)
+	mustFelt(t, dir, "edit", fiber2ID, "--link", fiberID)
+	out = mustFelt(t, dir, "tree", fiber2ID, "--up")
 	if !strings.Contains(out, "test fiber") {
 		t.Fatalf("upstream: expected dep fiber, got: %s", out)
 	}
-	mustFelt(t, dir, "unlink", fiber2ID, fiberID)
+	mustFelt(t, dir, "edit", fiber2ID, "--unlink", fiberID)
 
 	// downstream: fiber2 depends on fiberID → fiberID is upstream of fiber2
-	mustFelt(t, dir, "link", fiber2ID, fiberID)
-	out = mustFelt(t, dir, "downstream", fiberID)
+	mustFelt(t, dir, "edit", fiber2ID, "--link", fiberID)
+	out = mustFelt(t, dir, "tree", fiberID, "--down")
 	if !strings.Contains(out, "second fiber") {
 		t.Fatalf("downstream: expected child fiber, got: %s", out)
 	}
@@ -190,38 +190,38 @@ func TestIntegration(t *testing.T) {
 	if fiber3ID == "" {
 		t.Fatal("add: expected fiber3 ID")
 	}
-	mustFelt(t, dir, "link", fiber3ID, fiber2ID)
+	mustFelt(t, dir, "edit", fiber3ID, "--link", fiber2ID)
 
 	// Traversal defaults to direct neighbors only.
-	out = mustFelt(t, dir, "downstream", fiberID)
+	out = mustFelt(t, dir, "tree", fiberID, "--down")
 	if strings.Contains(out, "third fiber") {
 		t.Fatalf("downstream default: expected direct dependents only, got: %s", out)
 	}
 	// --all includes transitive dependents.
-	out = mustFelt(t, dir, "downstream", fiberID, "--all")
+	out = mustFelt(t, dir, "tree", fiberID, "--down", "--all")
 	if !strings.Contains(out, "second fiber") || !strings.Contains(out, "third fiber") {
 		t.Fatalf("downstream --all: expected transitive closure, got: %s", out)
 	}
 
-	out = mustFelt(t, dir, "upstream", fiber3ID)
+	out = mustFelt(t, dir, "tree", fiber3ID, "--up")
 	if strings.Contains(out, "test fiber") || !strings.Contains(out, "second fiber") {
 		t.Fatalf("upstream default: expected direct dependencies only, got: %s", out)
 	}
-	out = mustFelt(t, dir, "upstream", fiber3ID, "--all")
+	out = mustFelt(t, dir, "tree", fiber3ID, "--up", "--all")
 	if !strings.Contains(out, "second fiber") || !strings.Contains(out, "test fiber") {
 		t.Fatalf("upstream --all: expected transitive closure, got: %s", out)
 	}
 
 	// tag and untag
-	mustFelt(t, dir, "tag", fiber2ID, "testlabel")
+	mustFelt(t, dir, "edit", fiber2ID, "--tag", "testlabel")
 	out = mustFelt(t, dir, "show", fiber2ID, "-d", "compact")
 	if !strings.Contains(out, "testlabel") {
 		t.Fatalf("tag: expected tag in output, got: %s", out)
 	}
-	mustFelt(t, dir, "untag", fiber2ID, "testlabel")
+	mustFelt(t, dir, "edit", fiber2ID, "--untag", "testlabel")
 
 	// ready
-	mustFelt(t, dir, "ready")
+	mustFelt(t, dir, "ls", "--ready")
 
 	// rm --force
 	mustFelt(t, dir, "rm", "--force", fiber3ID)

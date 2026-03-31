@@ -17,7 +17,11 @@ var (
 	lsBody    bool
 	lsExact   bool
 	lsRegex   bool
+	lsReady   bool
 	readyTags []string
+	treeUp    bool
+	treeDown  bool
+	treeCheck bool
 )
 
 var lsCmd = &cobra.Command{
@@ -80,13 +84,27 @@ Use --body with query to include body search, and with --json to emit body text.
 			effectiveStatus = "all"
 		}
 
+		var readyIDs map[string]bool
+		if lsReady {
+			readyIDs = map[string]bool{}
+			for _, f := range felt.BuildGraph(felts).Ready() {
+				readyIDs[f.ID] = true
+			}
+		}
+
 		// Filter
 		var exactMatches []*felt.Felt
 		var filtered []*felt.Felt
 		var bodyCandidates []*felt.Felt
 		for _, f := range felts {
+			if lsReady && !readyIDs[f.ID] {
+				continue
+			}
+
 			// Status gate
-			if effectiveStatus == "all" {
+			if lsReady {
+				// Ready already constrains the result set.
+			} else if effectiveStatus == "all" {
 				// No filtering, include everything
 			} else if effectiveStatus != "" {
 				// Specific status: must match
@@ -235,6 +253,7 @@ func init() {
 	lsCmd.Flags().BoolVar(&lsBody, "body", false, "Include body search for queries and body field in JSON output")
 	lsCmd.Flags().BoolVarP(&lsExact, "exact", "e", false, "Exact title match only (with query)")
 	lsCmd.Flags().BoolVarP(&lsRegex, "regex", "r", false, "Treat query as regular expression")
+	lsCmd.Flags().BoolVar(&lsReady, "ready", false, "Filter to open felts whose dependencies are all closed")
 }
 
 // ready command - open felts with all deps closed
@@ -299,7 +318,6 @@ var readyCmd = &cobra.Command{
 }
 
 func init() {
-	rootCmd.AddCommand(readyCmd)
 	readyCmd.Flags().StringArrayVarP(&readyTags, "tag", "t", nil, "Filter by tag (repeatable, AND logic)")
 }
 
@@ -347,7 +365,7 @@ type TreeNode struct {
 var treeCmd = &cobra.Command{
 	Use:   "tree [id]",
 	Short: "Show dependency tree",
-	Long:  `Shows the dependency tree for a felt, or all felts if no ID given.`,
+	Long:  `Shows the dependency tree for a felt, or the whole graph if no ID is given.`,
 	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		root, err := felt.FindProjectRoot()
@@ -367,6 +385,57 @@ var treeCmd = &cobra.Command{
 		}
 
 		g := felt.BuildGraph(felts)
+
+		if treeCheck {
+			var errors []string
+			errors = append(errors, g.ValidateDependencies()...)
+			errors = append(errors, g.FindCycles()...)
+
+			if len(errors) == 0 {
+				fmt.Println("Graph OK")
+				return nil
+			}
+
+			for _, e := range errors {
+				fmt.Printf("ERROR: %s\n", e)
+			}
+			return fmt.Errorf("found %d issues", len(errors))
+		}
+
+		if treeUp || treeDown {
+			if len(args) != 1 {
+				return fmt.Errorf("tree traversal requires an id")
+			}
+			depth := 1
+			if traversalAll {
+				depth = 0
+			}
+			cfg := traversalConfig{
+				getRelated: func(g *felt.Graph, id string) []string { return g.GetUpstreamN(id, depth) },
+				edgeLabel:  func(g *felt.Graph, fiberID, relatedID string) string { return edgeLabelInGraph(g, relatedID, fiberID) },
+				emptyMsg:   "No dependencies",
+			}
+			if treeDown {
+				cfg = traversalConfig{
+					getRelated: func(g *felt.Graph, id string) []string { return g.GetDownstreamN(id, depth) },
+					edgeLabel:  func(g *felt.Graph, fiberID, relatedID string) string { return edgeLabelInGraph(g, fiberID, relatedID) },
+					emptyMsg:   "Nothing depends on this",
+				}
+			}
+			return runTraversal(args[0], cfg)
+		}
+
+		if graphFormat != "" && graphFormat != "text" {
+			switch graphFormat {
+			case "mermaid":
+				fmt.Print(g.ToMermaid())
+			case "dot":
+				fmt.Print(g.ToDot())
+			default:
+				return fmt.Errorf("unknown format: %s (use mermaid, dot, or text)", graphFormat)
+			}
+			return nil
+		}
 
 		if jsonOutput {
 			var trees []*TreeNode
@@ -499,4 +568,10 @@ func printTree(g *felt.Graph, id string, prefix string, last bool) {
 
 func init() {
 	rootCmd.AddCommand(treeCmd)
+	treeCmd.Flags().BoolVar(&treeUp, "up", false, "Show upstream dependencies for one felt")
+	treeCmd.Flags().BoolVar(&treeDown, "down", false, "Show downstream dependents for one felt")
+	treeCmd.Flags().BoolVar(&treeCheck, "check", false, "Validate graph integrity")
+	treeCmd.Flags().StringVarP(&graphFormat, "format", "f", "text", "Output format (text, mermaid, dot)")
+	treeCmd.Flags().StringVarP(&upDownDetail, "detail", "d", "", "Detail level per item (title, compact, summary, full)")
+	treeCmd.Flags().BoolVar(&traversalAll, "all", false, "Traverse full transitive closure for --up/--down")
 }

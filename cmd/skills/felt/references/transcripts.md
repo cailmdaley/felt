@@ -66,15 +66,15 @@ felt add "Decision: Use algorithm X" -o "Meeting 2025-01-21. Compared X vs Y. X 
 
 Update existing fibers if content is status on existing work:
 ```bash
-felt comment <id> "Update from meeting: progress on X"
+felt edit <id> --comment "Update from meeting: progress on X"
 felt edit <id> -s closed -o "Resolved in meeting: decided to Z"
 ```
 
 ### 5. Link
 
 ```bash
-felt find "related concept"
-felt link <new-fiber> <related-fiber>
+felt ls -s all "related concept"
+felt edit <new-fiber> --link <related-fiber>
 ```
 
 ---

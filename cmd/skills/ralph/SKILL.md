@@ -13,7 +13,7 @@ You are inside a loop. Your constitution (fiber spec) is in the system prompt ab
 
 ## Loop
 
-1. **Survey** — Fresh eyes. Explore agents, `felt downstream`, git log, tests. You decide what to check.
+1. **Survey** — Fresh eyes. Explore agents, `felt tree --down`, git log, tests. You decide what to check.
 2. **Contribute** — Work on 1–3 substantial pieces. Do NOT try to clear the whole queue in one iteration.
 3. **Felt** — Before exiting: `/felt`.
 4. **Exit** — `kill $PPID`

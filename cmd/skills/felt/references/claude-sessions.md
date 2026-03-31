@@ -42,8 +42,8 @@ For each new fiber:
 - What else touches these concepts?
 
 ```bash
-felt find "<concept>"
-felt link <new-fiber> <related-fiber>
+felt ls -s all "<concept>"
+felt edit <new-fiber> --link <related-fiber>
 ```
 
 Err toward linking. Isolated fibers are hard to find.

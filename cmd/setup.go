@@ -160,12 +160,12 @@ func claudeMDSnippet() string {
 	return "## felt\n\n" +
 		"Fibers are concerns — tasks, decisions, questions — strung in a DAG. " +
 		"Body is the content; outcome is the conclusion. " +
-		"`felt upstream` shows what a decision rests on; `felt downstream` shows what breaks if it changes. " +
+		"`felt tree <id> --up` shows what a decision rests on; `felt tree <id> --down` shows what breaks if it changes. " +
 		"A missing causal link costs an investigation; a fiber costs nothing.\n\n" +
 		"**Rhythm.** File before you start, comment as you go, close with an outcome.\n" +
 		fence + "bash\n" +
 		"felt \"what I'm doing\"                              # before starting\n" +
-		"felt comment <id> \"tried X, hit Y\"                 # as you go\n" +
+		"felt edit <id> --comment \"tried X, hit Y\"          # as you go\n" +
 		"felt edit <id> -s closed -o \"X works because...\"   # close with outcome\n" +
 		fence + "\n\n" +
 		"**Discipline.** Titles are 2–3 word DAG node labels — terse, like commit subjects. " +

@@ -275,15 +275,4 @@ var checkCmd = &cobra.Command{
 }
 
 func init() {
-	rootCmd.AddCommand(graphCmd)
-	rootCmd.AddCommand(upstreamCmd)
-	rootCmd.AddCommand(downstreamCmd)
-	rootCmd.AddCommand(pathCmd)
-	rootCmd.AddCommand(checkCmd)
-
-	graphCmd.Flags().StringVarP(&graphFormat, "format", "f", "mermaid", "Output format (mermaid, dot, text)")
-	upstreamCmd.Flags().StringVarP(&upDownDetail, "detail", "d", "", "Detail level per item (title, compact, summary, full)")
-	downstreamCmd.Flags().StringVarP(&upDownDetail, "detail", "d", "", "Detail level per item (title, compact, summary, full)")
-	upstreamCmd.Flags().BoolVar(&traversalAll, "all", false, "Traverse full transitive closure (all ancestors)")
-	downstreamCmd.Flags().BoolVar(&traversalAll, "all", false, "Traverse full transitive closure (all descendants)")
 }
