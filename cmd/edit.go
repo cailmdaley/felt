@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/cailmdaley/felt/internal/felt"
@@ -14,6 +15,11 @@ var (
 	editStatus  string
 	editDue     string
 	editDeps    []string
+	editTags    []string
+	editUntag   []string
+	editLink    []string
+	editUnlink  []string
+	editComment []string
 	editBody    string
 	editOutcome string
 )
@@ -28,7 +34,9 @@ var editCmd = &cobra.Command{
 
 Examples:
   felt edit abc123 --title "New title" -s active
-  felt edit abc123 --depends-on other-fiber-id
+  felt edit abc123 --tag decision --untag stale
+  felt edit abc123 --link other-fiber-id --label "why this depends on it"
+  felt edit abc123 --comment "latest finding"
   felt edit abc123 --body "Full replacement body text"  # overwrites body`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -52,6 +60,12 @@ Examples:
 			cmd.Flags().Changed("status") ||
 			cmd.Flags().Changed("due") ||
 			cmd.Flags().Changed("depends-on") ||
+			cmd.Flags().Changed("tag") ||
+			cmd.Flags().Changed("untag") ||
+			cmd.Flags().Changed("link") ||
+			cmd.Flags().Changed("unlink") ||
+			cmd.Flags().Changed("comment") ||
+			cmd.Flags().Changed("label") ||
 			cmd.Flags().Changed("body") ||
 			cmd.Flags().Changed("outcome")
 
@@ -111,7 +125,26 @@ Examples:
 				f.Due = &due
 			}
 		}
-		if cmd.Flags().Changed("depends-on") {
+		if cmd.Flags().Changed("tag") {
+			for _, raw := range editTags {
+				for _, tag := range splitTags(raw) {
+					f.AddTag(tag)
+				}
+			}
+		}
+		if cmd.Flags().Changed("untag") {
+			for _, raw := range editUntag {
+				for _, tag := range splitTags(raw) {
+					f.RemoveTag(tag)
+				}
+			}
+		}
+		if cmd.Flags().Changed("comment") {
+			for _, comment := range editComment {
+				f.AppendComment(comment)
+			}
+		}
+		if cmd.Flags().Changed("depends-on") || cmd.Flags().Changed("link") || cmd.Flags().Changed("unlink") || cmd.Flags().Changed("label") {
 			felts, err := storage.ListMetadata()
 			if err != nil {
 				return err
@@ -131,6 +164,40 @@ Examples:
 
 				// Add dependency
 				f.DependsOn = append(f.DependsOn, felt.Dependency{ID: depFelt.ID})
+			}
+
+			if linkLabel != "" && len(editLink) != 1 {
+				return fmt.Errorf("--label requires exactly one --link target")
+			}
+
+			for _, dep := range editLink {
+				depFelt, err := felt.FindByPrefix(felts, dep)
+				if err != nil {
+					return fmt.Errorf("dependency %q: %w", dep, err)
+				}
+				if f.DependsOn.HasID(depFelt.ID) {
+					continue
+				}
+				label := ""
+				if len(editLink) == 1 {
+					label = linkLabel
+				}
+				f.DependsOn = append(f.DependsOn, felt.Dependency{ID: depFelt.ID, Label: label})
+			}
+
+			for _, dep := range editUnlink {
+				depFelt, err := felt.FindByPrefix(felts, dep)
+				if err != nil {
+					return fmt.Errorf("dependency %q: %w", dep, err)
+				}
+
+				var newDeps felt.Dependencies
+				for _, d := range f.DependsOn {
+					if d.ID != depFelt.ID {
+						newDeps = append(newDeps, d)
+					}
+				}
+				f.DependsOn = newDeps
 			}
 
 			// Check for cycles
@@ -160,179 +227,34 @@ Examples:
 	},
 }
 
-var commentCmd = &cobra.Command{
-	Use:   "comment <id> <text>",
-	Short: "Add a timestamped comment",
-	Long:  `Appends a timestamped comment to the felt's body.`,
-	Args:  cobra.ExactArgs(2),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		root, err := felt.FindProjectRoot()
-		if err != nil {
-			return fmt.Errorf("not in a felt repository")
-		}
-
-		storage := felt.NewStorage(root)
-		target, err := storage.FindMetadata(args[0])
-		if err != nil {
-			return err
-		}
-		f, err := storage.Read(target.ID)
-		if err != nil {
-			return err
-		}
-
-		f.AppendComment(args[1])
-
-		if err := storage.Write(f); err != nil {
-			return err
-		}
-
-		fmt.Printf("Added comment to %s\n", f.ID)
-		return nil
-	},
-}
-
-var linkCmd = &cobra.Command{
-	Use:   "link <id> <depends-on-id>",
-	Short: "Add a dependency",
-	Long:  `Adds a depends-on relationship from the first felt to the second.`,
-	Args:  cobra.ExactArgs(2),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		root, err := felt.FindProjectRoot()
-		if err != nil {
-			return fmt.Errorf("not in a felt repository")
-		}
-
-		storage := felt.NewStorage(root)
-		felts, err := storage.ListMetadata()
-		if err != nil {
-			return err
-		}
-
-		f, err := felt.FindByPrefix(felts, args[0])
-		if err != nil {
-			return fmt.Errorf("source: %w", err)
-		}
-		f, err = storage.Read(f.ID)
-		if err != nil {
-			return fmt.Errorf("source: %w", err)
-		}
-
-		dep, err := felt.FindByPrefix(felts, args[1])
-		if err != nil {
-			return fmt.Errorf("dependency: %w", err)
-		}
-
-		// Check if already linked
-		if f.DependsOn.HasID(dep.ID) {
-			return fmt.Errorf("%s already depends on %s", f.ID, dep.ID)
-		}
-
-		// Temporarily add the link
-		f.DependsOn = append(f.DependsOn, felt.Dependency{ID: dep.ID, Label: linkLabel})
-		g := felt.BuildGraph(felts)
-		// Update the node in the graph
-		g.Nodes[f.ID] = f
-		g.Upstream[f.ID] = f.DependsOn
-
-		if g.DetectCycle(f.ID, dep.ID) {
-			return fmt.Errorf("adding dependency would create a cycle")
-		}
-
-		if err := storage.Write(f); err != nil {
-			return err
-		}
-
-		if linkLabel != "" {
-			fmt.Printf("Linked %s → %s [%s]\n", f.ID, dep.ID, linkLabel)
-		} else {
-			fmt.Printf("Linked %s → %s\n", f.ID, dep.ID)
-		}
-		return nil
-	},
-}
-
-var unlinkCmd = &cobra.Command{
-	Use:   "unlink <id> <depends-on-id>",
-	Short: "Remove a dependency",
-	Long:  `Removes a depends-on relationship.`,
-	Args:  cobra.ExactArgs(2),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		root, err := felt.FindProjectRoot()
-		if err != nil {
-			return fmt.Errorf("not in a felt repository")
-		}
-
-		storage := felt.NewStorage(root)
-
-		source, err := storage.FindMetadata(args[0])
-		if err != nil {
-			return fmt.Errorf("source: %w", err)
-		}
-		f, err := storage.Read(source.ID)
-		if err != nil {
-			return fmt.Errorf("source: %w", err)
-		}
-
-		dep, err := storage.FindMetadata(args[1])
-		if err != nil {
-			return fmt.Errorf("dependency: %w", err)
-		}
-
-		// Find and remove
-		found := false
-		var newDeps felt.Dependencies
-		for _, d := range f.DependsOn {
-			if d.ID == dep.ID {
-				found = true
-			} else {
-				newDeps = append(newDeps, d)
-			}
-		}
-
-		if !found {
-			return fmt.Errorf("%s does not depend on %s", f.ID, dep.ID)
-		}
-
-		f.DependsOn = newDeps
-		if err := storage.Write(f); err != nil {
-			return err
-		}
-
-		fmt.Printf("Unlinked %s → %s\n", f.ID, dep.ID)
-		return nil
-	},
-}
-
-// find is an alias for "ls -s all <query>" — searches all fibers by default.
-var findCmd = &cobra.Command{
-	Use:        "find <query>",
-	Short:      "Search felts (alias for ls -s all <query>)",
-	Long:       `Alias for "felt ls -s all <query>". Searches all fibers regardless of status.`,
-	Args:       cobra.ExactArgs(1),
-	Deprecated: "use 'felt ls -s all <query>' instead",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		// Set ls flags to match find's "search everything" behavior
-		lsStatus = "all"
-		return lsCmd.RunE(lsCmd, args)
-	},
-}
-
 func init() {
 	rootCmd.AddCommand(editCmd)
-	rootCmd.AddCommand(commentCmd)
-	rootCmd.AddCommand(linkCmd)
-	rootCmd.AddCommand(unlinkCmd)
-	rootCmd.AddCommand(findCmd)
 
 	// Edit command flags
 	editCmd.Flags().StringVarP(&editTitle, "title", "t", "", "Set title")
 	editCmd.Flags().StringVarP(&editStatus, "status", "s", "", "Set status (open, active, closed)")
+	editCmd.Flags().StringArrayVar(&editTags, "tag", nil, "Add tag(s) (repeatable; comma-separated accepted)")
+	editCmd.Flags().StringArrayVar(&editUntag, "untag", nil, "Remove tag(s) (repeatable; comma-separated accepted)")
+	editCmd.Flags().StringArrayVar(&editLink, "link", nil, "Add dependency (repeatable)")
+	editCmd.Flags().StringArrayVar(&editUnlink, "unlink", nil, "Remove dependency (repeatable)")
+	editCmd.Flags().StringArrayVar(&editComment, "comment", nil, "Append comment text to the body (repeatable)")
+	editCmd.Flags().StringVarP(&linkLabel, "label", "l", "", "Label for a single --link dependency")
 	editCmd.Flags().StringVarP(&editBody, "body", "b", "", "Replace full body text (destructive overwrite)")
 	editCmd.Flags().StringVarP(&editOutcome, "outcome", "o", "", "Set outcome")
 	editCmd.Flags().StringVarP(&editDue, "due", "D", "", "Set due date (YYYY-MM-DD, empty to clear)")
 	editCmd.Flags().StringArrayVarP(&editDeps, "depends-on", "a", nil, "Add dependency (repeatable)")
+}
 
-	// Link command flags
-	linkCmd.Flags().StringVarP(&linkLabel, "label", "l", "", "Label explaining the dependency")
+// splitTags splits comma-separated tag input into individual tags.
+// "claim, tapestry:foo" -> ["claim", "tapestry:foo"]
+func splitTags(input string) []string {
+	parts := strings.Split(input, ",")
+	var tags []string
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			tags = append(tags, p)
+		}
+	}
+	return tags
 }

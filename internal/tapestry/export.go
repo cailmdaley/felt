@@ -30,6 +30,7 @@ type exportPayload struct {
 	Downstream map[string][]Downstream `json:"downstream"`
 	Config     map[string]any          `json:"config"`
 	Fibers     []Fiber                 `json:"fibers"`
+	Decisions  []Decision              `json:"decisions"`
 }
 
 type Node struct {
@@ -59,6 +60,27 @@ type Fiber struct {
 	CreatedAt time.Time  `json:"createdAt"`
 	ClosedAt  *time.Time `json:"closedAt"`
 	DependsOn []string   `json:"dependsOn"`
+}
+
+type Decision struct {
+	ID          string           `json:"id"`
+	Label       string           `json:"label"`
+	Rationale   string           `json:"rationale"`
+	Tags        []string         `json:"tags"`
+	Default     string           `json:"default"`
+	AnalysisID  string           `json:"analysisId"`
+	Options     []DecisionOption `json:"options"`
+	EvidenceIDs []string         `json:"evidenceIds"`
+
+	tapestryNodes []string
+}
+
+type DecisionOption struct {
+	ID             string `json:"id"`
+	Label          string `json:"label"`
+	Description    string `json:"description"`
+	Excluded       bool   `json:"excluded"`
+	ExcludedReason string `json:"excludedReason"`
 }
 
 type Link struct {
@@ -109,6 +131,11 @@ func Export(projectRoot, outDir string, options ExportOptions) error {
 	if options.AllFibers {
 		payload.Fibers = buildFibers(felts)
 	}
+	payload.Decisions, err = ReadASTRA(projectRoot)
+	if err != nil {
+		return err
+	}
+	WireEvidence(payload.Decisions, payload.Nodes)
 
 	if err := os.MkdirAll(filepath.Join(outDir, "tapestry"), 0755); err != nil {
 		return fmt.Errorf("create output dir: %w", err)
