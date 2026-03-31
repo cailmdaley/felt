@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -313,6 +314,15 @@ container: python:3.11-slim
 	if !strings.Contains(out, "unknown command") {
 		t.Fatalf("tag should be unknown, got: %s", out)
 	}
+	for _, retired := range []string{"untag", "link", "unlink", "comment", "upstream", "downstream", "graph", "ready", "prime", "check", "path"} {
+		out, err = felt(dir, retired)
+		if err == nil {
+			t.Fatalf("%s should be removed from the public CLI, got: %s", retired, out)
+		}
+		if !strings.Contains(out, "unknown command") {
+			t.Fatalf("%s should be unknown, got: %s", retired, out)
+		}
+	}
 
 	// rm --force
 	mustFelt(t, dir, "rm", "--force", fiber3ID)
@@ -377,5 +387,11 @@ container: python:3.11-slim
 	}
 	if strings.Contains(out, "tapestry") {
 		t.Fatalf("help: legacy tapestry command should be hidden, got: %s", out)
+	}
+	for _, retired := range []string{"tag", "untag", "link", "unlink", "comment", "upstream", "downstream", "graph", "ready", "prime", "check", "path"} {
+		pattern := regexp.MustCompile(`(?m)^  ` + regexp.QuoteMeta(retired) + `\s`)
+		if pattern.MatchString(out) {
+			t.Fatalf("help: legacy command %q should be hidden, got: %s", retired, out)
+		}
 	}
 }

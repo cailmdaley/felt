@@ -27,7 +27,7 @@ This matters most in science and exploratory work, where each decision is inform
    ```bash
    felt add "Constitution title" -s open
    ```
-   Then edit the body in `.felt/<id>.md`. Fill in what you can — don't wait until it's perfect.
+   Then edit the fiber markdown file in `.felt/<path>/<slug>.md`. Fill in what you can — don't wait until it's perfect.
 
 3. **Refine** — Show the draft, get feedback, revise. Use AskUserQuestion for structured choices. Repeat until it feels solid.
 

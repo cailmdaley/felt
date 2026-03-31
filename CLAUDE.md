@@ -1,6 +1,6 @@
 # felt
 
-DAG-native fiber tracker. Markdown files with YAML frontmatter, dependencies form a directed acyclic graph.
+DAG-native fiber tracker. Directory-based markdown fibers with YAML frontmatter; dependencies form a directed acyclic graph.
 
 ## Structure
 
@@ -24,7 +24,7 @@ Fibers are minimal by default. All fields except title are optional.
 
 **Status is opt-in.** `felt add "title"` creates a statusless fiber. `felt add "title" -s open` enters tracking. `felt edit <id> -s active` enters tracking. `felt ls` only shows tracked fibers.
 
-**Progressive disclosure.** `felt show <id> -d compact` shows metadata + outcome without body. Levels: title, compact, summary, full (default). `felt upstream/downstream <id> -d compact` renders each connected fiber at that detail level.
+**Progressive disclosure.** `felt show <id> -d compact` shows metadata + outcome without body. Levels: title, compact, summary, full (default). `felt tree <id> --up|--down -d compact` renders each connected fiber at that detail level.
 
 ## Key integrations
 
@@ -38,6 +38,7 @@ go build .        # build
 go test ./...     # test
 ./felt ls         # run locally
 ./felt ls -s all  # include untracked fibers
+./felt tree --check
 ```
 
 ## Releasing

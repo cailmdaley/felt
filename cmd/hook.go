@@ -44,14 +44,6 @@ Prints active fibers (currently being worked on) and ready fibers
 	},
 }
 
-var primeCmd = &cobra.Command{
-	Use:   "prime",
-	Short: "Output workflow context (alias for hook session)",
-	Long:  `Outputs felt workflow context. Alias for 'felt hook session'.`,
-	Args:  cobra.NoArgs,
-	RunE:  hookSessionCmd.RunE,
-}
-
 func init() {
 	rootCmd.AddCommand(hookCmd)
 	hookCmd.AddCommand(hookSessionCmd)
@@ -65,7 +57,7 @@ func minimalOutput() string {
 ` + cliReference() + `## Core Rules
 - **Use felt for everything** — tasks, decisions, questions, detours, bugs you can't chase now. If it might matter, it's a fiber.
 - Outcome (` + "`-o`" + `) is the documentation: the conclusion, the reasoning, what was learned
-- ` + "`felt edit`" + ` is non-interactive (flags only); for patch edits, modify ` + "`.felt/<id>.md`" + ` directly
+- ` + "`felt edit`" + ` is non-interactive (flags only); for patch edits, modify the fiber markdown file in ` + "`.felt/<path>/<slug>.md`" + ` directly
 - **Leave a wake** — file as you go
 - **Titles are DAG node labels: 2-3 words.** Body and outcome carry full content.
 `
@@ -149,7 +141,7 @@ func formatSessionOutput(felts []*felt.Felt, g *felt.Graph) string {
 	sb.WriteString("## Core Rules\n")
 	sb.WriteString("- **Use felt for everything** — tasks, decisions, questions, detours, bugs you can't chase now. If it might matter, it's a fiber.\n")
 	sb.WriteString("- Outcome (`-o`) is the documentation: the conclusion, the reasoning, what was learned\n")
-	sb.WriteString("- `felt edit` is non-interactive (flags only); for patch edits, modify `.felt/<id>.md` directly\n")
+	sb.WriteString("- `felt edit` is non-interactive (flags only); for patch edits, modify the fiber markdown file in `.felt/<path>/<slug>.md` directly\n")
 	sb.WriteString("- **Leave a wake** — file as you go\n")
 	sb.WriteString("- **Titles are DAG node labels: 2-3 words.** Body and outcome carry full content.\n")
 
@@ -207,7 +199,7 @@ Also: hook session, rm
 ` + "```" + `
 Statuses: · untracked, ○ open, ◐ active, ● closed
 Detail: title < compact < summary < full (default). Summary shows the **lede** — the first paragraph of the body. Write it to stand alone.
-To patch body text (not replace), edit .felt/<id>.md directly.
+To patch body text (not replace), edit the fiber markdown file in .felt/<path>/<slug>.md directly.
 
 `
 }

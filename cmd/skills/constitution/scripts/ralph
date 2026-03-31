@@ -86,7 +86,10 @@ SYSEOF
     if [[ "$BACKEND" == "codex" ]]; then
         cat > "$PROMPT_FILE" << 'PROMPTEOF'
 You are inside a ralph loop. Activate the ralph skill ($ralph) and follow its instructions for iterating on the constitution above.
-At the end of each substantial iteration, run `kill $PPID` to exit this child process so the parent ralph loop can start the next iteration.
+
+SCOPE: The survey builds a vantage point; the work exploits it. Stay and work from that vantage point until it degrades (~50% context), not before. The next iteration pays the same cold-start cost — don't waste yours.
+
+When the view gets foggy: commit, felt, then `kill $PPID`. Not before.
 PROMPTEOF
     else
         cat > "$PROMPT_FILE" << 'PROMPTEOF'

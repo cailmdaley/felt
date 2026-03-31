@@ -1,10 +1,10 @@
 # felt
 
-DAG-native fiber tracker. Markdown files with dependencies.
+DAG-native fiber tracker. Directory-based markdown fibers with dependencies.
 
 ## Why
 
-Fibers have dependencies. Most trackers ignore this or bolt it on. Felt makes the DAG the center: `ready` shows what's actually unblocked, and the graph is always traversable.
+Fibers have dependencies. Most trackers ignore this or bolt it on. Felt makes the DAG the center: `felt ls --ready` shows what's actually unblocked, and the graph is always traversable.
 
 Fibers are markdown files. Human-readable, version-controllable, greppable. No database, no sync, no lock-in.
 
@@ -20,10 +20,10 @@ go install github.com/cailmdaley/felt@latest
 felt init                                        # creates .felt/
 felt "Design API"                                # create a fiber
 felt add "Implement endpoint" -a design-api      # depends on design
-felt ready                                       # shows "Design API" (unblocked)
+felt ls --ready                                  # shows "Design API" (unblocked)
 felt edit design-api -s active                   # mark active
-felt edit design-api -s closed -o "REST, uses JWT"   # close with outcome
-felt ready                                       # now shows "Implement endpoint"
+felt edit design-api -s closed -o "REST, uses JWT"
+felt ls --ready                                  # now shows "Implement endpoint"
 ```
 
 ## Core Concepts
@@ -32,10 +32,10 @@ felt ready                                       # now shows "Implement endpoint
 
 Every fiber can depend on others via `-a`/`--depends-on`. This forms a directed acyclic graph (cycles are rejected). The DAG answers:
 
-- `felt ready` — what's unblocked and open?
-- `felt upstream <id>` — what does this depend on (transitively)?
-- `felt downstream <id>` — what depends on this?
-- `felt path <from> <to>` — how are two fibers connected?
+- `felt ls --ready` — what's unblocked and open?
+- `felt tree <id> --up` — what does this depend on?
+- `felt tree <id> --down` — what depends on this?
+- `felt tree --check` — is the graph valid?
 
 ### Status (opt-in)
 
@@ -52,7 +52,7 @@ Transition with `felt edit <id> -s active` and `felt edit <id> -s closed -o "out
 
 ### Outcome as Documentation
 
-The `-o` flag captures *what was learned, decided, or produced*. Closed fibers become searchable project memory:
+The `-o` flag captures what was learned, decided, or produced. Closed fibers become searchable project memory:
 
 ```bash
 felt ls -s closed             # what's been done
@@ -72,8 +72,8 @@ felt show <id> -d compact     # see outcome without full body
 | `full` | Everything (default) |
 
 ```bash
-felt show <id> -d compact       # "what was decided?"
-felt upstream <id> -d compact   # outcomes of all upstream decisions
+felt show <id> -d compact      # "what was decided?"
+felt tree <id> --up -d compact # outcomes of upstream decisions
 ```
 
 ### Tags
@@ -83,40 +83,41 @@ Tags organize fibers across the graph:
 ```bash
 felt "[pure-eb] Fix covariance bug"     # extracted from title
 felt add "Fix bug" -t pure-eb -t urgent # via flag
-felt tag design-api backend             # add to existing
-felt untag design-api backend           # remove
+felt edit design-api --tag backend      # add to existing
+felt edit design-api --untag backend    # remove
 felt ls -t pure-eb                      # filter (AND logic)
-felt ready -t pure-eb                   # filter ready
+felt ls --ready -t pure-eb              # filter ready
 ```
 
 ### File Format
 
-Fibers live in `.felt/<id>.md`:
+Fibers live in `.felt/<path>/<slug>.md`:
 
 ```yaml
 ---
 title: "Design API"
 status: closed
 tags: [backend, auth]
-priority: 2
 depends-on:
-  - id: research-auth-patterns-a1b2c3d4
+  - id: research-auth-patterns
     label: auth approach
 created-at: 2024-01-15T10:30:00Z
 closed-at: 2024-01-16T14:20:00Z
 outcome: "REST with JWT. See docs/api.md"
 ---
 
+(design-api)=
+# Design API
+
 Optional body with notes, context, etc.
 ```
 
-IDs are `<slug>-<8-hex-chars>`. Commands accept fuzzy matching:
+IDs are slug paths. Commands accept unique slug or path matching:
 
 ```bash
-felt show design-api-ac6b19c1    # full ID
-felt show design-api              # prefix match
-felt show ac6b19c1                # hex suffix only
-felt show ac6b                    # even shorter
+felt show design-api       # unique slug
+felt show auth/design-api  # nested path
+felt show api              # unique prefix
 ```
 
 ## Command Reference
@@ -128,7 +129,7 @@ felt init                         # create .felt/
 felt add <title>                  # create fiber
 felt <title>                      # shorthand for add
 felt edit <id> -s active          # enter tracking / mark active
-felt edit <id> -s closed -o "outcome"  # close with outcome
+felt edit <id> -s closed -o "outcome"
 felt rm <id>                      # delete (fails if dependents exist)
 ```
 
@@ -140,12 +141,12 @@ felt ls -s all                    # all fibers including untracked
 felt ls -s closed                 # by status
 felt ls -t backend -t urgent      # by tags (AND)
 felt ls -s all -t rule:           # tag prefix matching
-felt ls -s all "query"            # search title, body, outcome
+felt ls -s all "query"            # search title, outcome, ASTRA fields
 felt ls -s all -r "pattern"       # regex search
-felt ready                        # open with all deps closed
+felt ls --ready                   # open with all deps closed
 felt show <id>                    # full details
 felt show <id> -d compact         # structured overview
-felt tree                         # dependency tree
+felt tree                         # dependency tree from roots
 ```
 
 ### Editing
@@ -155,30 +156,31 @@ felt edit <id> --body "text"      # replace full body (destructive overwrite)
 felt edit <id> --title "new"      # set title
 felt edit <id> -s active          # set status
 felt edit <id> -o "outcome"       # set outcome
-felt comment <id> "note"          # add timestamped comment
-felt tag <id> <tag>               # add tag
-felt untag <id> <tag>             # remove tag
-felt link <id> <dep-id>           # add dependency
-felt link <id> <dep-id> -l "why"  # add labeled dependency
-felt unlink <id> <dep-id>         # remove dependency
+felt edit <id> --comment "note"   # append timestamped comment section entry
+felt edit <id> --tag <tag>        # add tag
+felt edit <id> --untag <tag>      # remove tag
+felt edit <id> --link <dep-id>    # add dependency
+felt edit <id> --link <dep-id> -l "why"
+felt edit <id> --unlink <dep-id>  # remove dependency
 ```
 
-### Graph
+### Tree
 
 ```bash
-felt upstream <id>                # transitive dependencies
-felt upstream <id> -d compact     # with depth per item
-felt downstream <id>              # what depends on this
-felt path <from> <to>             # path between fibers
-felt graph -f mermaid             # visualize (mermaid/dot/text)
-felt check                        # validate integrity
+felt tree <id> --up              # direct dependencies
+felt tree <id> --up --all        # transitive dependencies
+felt tree <id> -d compact --up   # with detail per item
+felt tree <id> --down            # what depends on this
+felt tree -f mermaid             # visualize (mermaid/dot/text)
+felt tree --check                # validate integrity
 ```
 
 ### Integration
 
 ```bash
 felt hook session                 # context for session start hooks
-felt prime                        # alias for hook session
+felt export --format tapestry     # viewer payload
+felt export --format astra        # ASTRA YAML export surface
 ```
 
 ### Add Flags
@@ -186,7 +188,6 @@ felt prime                        # alias for hook session
 ```bash
 -b, --body "text"                 # body text
 -s, --status open                 # status (open, active, closed)
--p, --priority 1                  # 0-4, lower = more urgent
 -a, --depends-on <id>             # dependency (repeatable)
 -D, --due 2024-03-15              # due date
 -t, --tag <tag>                   # tag (repeatable)

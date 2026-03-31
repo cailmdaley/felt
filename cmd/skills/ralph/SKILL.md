@@ -13,12 +13,18 @@ You are inside a loop. Your constitution (fiber spec) is in the system prompt ab
 
 ## Loop
 
-1. **Survey** — Fresh eyes. Explore agents, `felt tree --down`, git log, tests. You decide what to check.
-2. **Contribute** — Work on 1–3 substantial pieces. Do NOT try to clear the whole queue in one iteration.
+1. **Survey** — Fresh eyes. Read the constitution, check git log, explore the current state.
+2. **Work** — Stay and work from the vantage point the survey built. Exit when it degrades, not before.
 3. **Felt** — Before exiting: `/felt`.
 4. **Exit** — `kill $PPID`
 
-**CRITICAL: Exit before compaction.** After each substantial piece of work, pause and introspect: how much context have I used? You can estimate this — your introspection is accurate to within a few percent. If you feel past 50%, wrap up and exit. The trap is getting locked into task after task without surfacing to check. Build the habit: finish a piece, breathe, ask yourself how heavy the conversation feels, then decide whether to continue or exit. Running to compaction means you lose the ability to do clean felt updates and hand off gracefully. The loop continues — you don't have to finish everything.
+### Earn the vantage point
+
+The survey builds understanding; the work exploits it. These are not equal phases. The survey is a fixed cost every iteration pays — reading the constitution, checking state, building a mental model. That cost only justifies itself through the work that follows.
+
+The failure mode is leaving while you still have a clear view. You've read the codebase, you understand how the pieces connect, you can see what needs to change. That understanding is perishable — it exists in this session and nowhere else. The next iteration starts cold and rebuilds it from scratch. So the question at every pause is not "have I done enough?" but "can I still see clearly?"
+
+**CRITICAL: Exit before compaction.** The vantage point degrades. After each piece of work, pause: how heavy does the conversation feel? Past 50%, wrap up and exit. The trap is not noticing the fog roll in — getting locked into task after task without checking whether you still have the clarity that made the early work good. Running to compaction means sloppy work and lost ability to hand off cleanly. The loop continues. Finish what you can see clearly; leave the rest for fresh eyes.
 
 ## Rules
 

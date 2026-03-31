@@ -18,7 +18,6 @@ var (
 	lsExact   bool
 	lsRegex   bool
 	lsReady   bool
-	readyTags []string
 	treeUp    bool
 	treeDown  bool
 	treeCheck bool
@@ -254,71 +253,6 @@ func init() {
 	lsCmd.Flags().BoolVarP(&lsExact, "exact", "e", false, "Exact title match only (with query)")
 	lsCmd.Flags().BoolVarP(&lsRegex, "regex", "r", false, "Treat query as regular expression")
 	lsCmd.Flags().BoolVar(&lsReady, "ready", false, "Filter to open felts whose dependencies are all closed")
-}
-
-// ready command - open felts with all deps closed
-var readyCmd = &cobra.Command{
-	Use:   "ready",
-	Short: "List felts ready to work on",
-	Long:  `Lists open felts whose dependencies are all closed.`,
-	Args:  cobra.NoArgs,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		root, err := felt.FindProjectRoot()
-		if err != nil {
-			return fmt.Errorf("not in a felt repository")
-		}
-
-		storage := felt.NewStorage(root)
-		var felts []*felt.Felt
-		if jsonOutput {
-			felts, err = storage.ListMetadataWithModTime()
-		} else {
-			felts, err = storage.ListMetadata()
-		}
-		if err != nil {
-			return err
-		}
-
-		g := felt.BuildGraph(felts)
-		ready := g.Ready()
-
-		// Apply tag filter if specified
-		if len(readyTags) > 0 {
-			var filtered []*felt.Felt
-			for _, f := range ready {
-				hasAll := true
-				for _, tag := range readyTags {
-					if !f.HasTag(tag) {
-						hasAll = false
-						break
-					}
-				}
-				if hasAll {
-					filtered = append(filtered, f)
-				}
-			}
-			ready = filtered
-		}
-
-		if jsonOutput {
-			return outputJSON(ready)
-		}
-
-		if len(ready) == 0 {
-			fmt.Println("No felts ready")
-			return nil
-		}
-
-		for _, f := range ready {
-			fmt.Print(formatFeltTwoLine(f))
-		}
-
-		return nil
-	},
-}
-
-func init() {
-	readyCmd.Flags().StringArrayVarP(&readyTags, "tag", "t", nil, "Filter by tag (repeatable, AND logic)")
 }
 
 func appendBodyMatches(storage *felt.Storage, filtered, candidates []*felt.Felt, useRegex bool, re *regexp.Regexp, queryLower string) ([]*felt.Felt, error) {
