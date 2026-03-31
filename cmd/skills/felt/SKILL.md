@@ -1,14 +1,14 @@
 ---
 name: felt
 description: >
-  Working with fibers. Five modes:
+  Working with fibers. Four modes:
   (1) Session — extract from conversation at session end.
   (2) Transcript — extract from external sources with review.
   (3) Archive — consolidate old fibers into documentation.
   (4) Sweep — coherence check across the assemblage.
-  (5) Tapestry — update, reshape, or export the tapestry DAG.
   Also triggers on "update the tapestry", "file a claim", "add evidence",
-  "export the tapestry", tapestry reshaping, or evidence.json creation.
+  export work (`felt export --format tapestry|astra`), tapestry reshaping,
+  or evidence.json creation.
 ---
 
 # /felt — Working with Fibers
@@ -39,7 +39,6 @@ Retroactive extraction at session end. Consolidation over time. Coherence when n
 | **transcript** | External file (meeting, voice note) | Yes — present plan first |
 | **archive** | Consolidating old fibers | Yes — confirm before changes |
 | **sweep** | Coherence check across assemblage | Yes — present findings first |
-| **tapestry** | Update, reshape, or export the DAG | Depends on scope |
 
 **Felt target:**
 - Project-specific session → local `.felt/`

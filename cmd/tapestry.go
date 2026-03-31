@@ -27,7 +27,8 @@ var exportCmd = &cobra.Command{
 	Long: `Exports felt data in a selected format.
 
 Currently supported formats:
-  tapestry   Export the tapestry viewer payload`,
+  tapestry   Export the tapestry viewer payload
+  astra      Export ASTRA-compatible analysis YAML`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		switch exportFormat {

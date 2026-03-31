@@ -26,7 +26,7 @@ You are inside a loop. Your constitution (fiber spec) is in the system prompt ab
 
 **Discoverable updates.** Commits, fibers, test results — not notes or progress files. The next iteration finds what changed by inspecting the system.
 
-**No fiber comments.** Never use `felt comment` within the loop. Update state through sub-fibers, git commits, documentation, code. Comments bloat the fiber and the system prompt.
+**No fiber comments.** Never use the comment-editing path within the loop. Update state through sub-fibers, git commits, documentation, code. Comments bloat the fiber and the system prompt.
 
 **Pointers, not snapshots.** If you learn something, update the constitution's *context* or *desired state* — don't leave comments.
 

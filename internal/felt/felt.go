@@ -4,6 +4,7 @@ package felt
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"path"
 	"regexp"
@@ -100,19 +101,85 @@ func (deps Dependencies) LabelFor(id string) string {
 	return ""
 }
 
+type ASTRAInput struct {
+	ID          string `yaml:"id" json:"id"`
+	Type        string `yaml:"type,omitempty" json:"type,omitempty"`
+	From        string `yaml:"from,omitempty" json:"from,omitempty"`
+	Source      string `yaml:"source,omitempty" json:"source,omitempty"`
+	Checksum    string `yaml:"checksum,omitempty" json:"checksum,omitempty"`
+	Description string `yaml:"description,omitempty" json:"description,omitempty"`
+}
+
+type ASTRARecipe struct {
+	Command   string         `yaml:"command,omitempty" json:"command,omitempty"`
+	Resources map[string]any `yaml:"resources,omitempty" json:"resources,omitempty"`
+}
+
+type ASTRAOutput struct {
+	ID          string       `yaml:"id" json:"id"`
+	Type        string       `yaml:"type,omitempty" json:"type,omitempty"`
+	Description string       `yaml:"description,omitempty" json:"description,omitempty"`
+	Recipe      *ASTRARecipe `yaml:"recipe,omitempty" json:"recipe,omitempty"`
+}
+
+type ASTRADecisionOption struct {
+	Label          string `yaml:"label,omitempty" json:"label,omitempty"`
+	Description    string `yaml:"description,omitempty" json:"description,omitempty"`
+	Excluded       bool   `yaml:"excluded,omitempty" json:"excluded,omitempty"`
+	ExcludedReason string `yaml:"excluded_reason,omitempty" json:"excluded_reason,omitempty"`
+}
+
+type ASTRADecision struct {
+	Label     string                         `yaml:"label,omitempty" json:"label,omitempty"`
+	Rationale string                         `yaml:"rationale,omitempty" json:"rationale,omitempty"`
+	Default   string                         `yaml:"default,omitempty" json:"default,omitempty"`
+	Options   map[string]ASTRADecisionOption `yaml:"options,omitempty" json:"options,omitempty"`
+}
+
+type ASTRAQuote struct {
+	Type  string `yaml:"type,omitempty" json:"type,omitempty"`
+	Exact string `yaml:"exact,omitempty" json:"exact,omitempty"`
+}
+
+type ASTRAEvidence struct {
+	ID       string      `yaml:"id,omitempty" json:"id,omitempty"`
+	DOI      string      `yaml:"doi,omitempty" json:"doi,omitempty"`
+	Artifact string      `yaml:"artifact,omitempty" json:"artifact,omitempty"`
+	Quote    *ASTRAQuote `yaml:"quote,omitempty" json:"quote,omitempty"`
+}
+
+type ASTRAInsight struct {
+	Claim     string          `yaml:"claim,omitempty" json:"claim,omitempty"`
+	CreatedAt *time.Time      `yaml:"created_at,omitempty" json:"created_at,omitempty"`
+	Evidence  []ASTRAEvidence `yaml:"evidence,omitempty" json:"evidence,omitempty"`
+}
+
+type ASTRASuccessCriterion struct {
+	Claim     string `yaml:"claim,omitempty" json:"claim,omitempty"`
+	Output    string `yaml:"output,omitempty" json:"output,omitempty"`
+	Condition string `yaml:"condition,omitempty" json:"condition,omitempty"`
+}
+
 // Felt represents a single fiber in the DAG.
 type Felt struct {
-	ID         string       `yaml:"-" json:"id"`
-	Title      string       `yaml:"title" json:"title"`
-	Status     string       `yaml:"status,omitempty" json:"status,omitempty"`
-	Tags       []string     `yaml:"tags,omitempty" json:"tags,omitempty"`
-	DependsOn  Dependencies `yaml:"depends-on,omitempty" json:"depends_on,omitempty"`
-	CreatedAt  time.Time    `yaml:"created-at" json:"created_at"`
-	ClosedAt   *time.Time   `yaml:"closed-at,omitempty" json:"closed_at,omitempty"`
-	Outcome    string       `yaml:"outcome,omitempty" json:"outcome,omitempty"`
-	Due        *time.Time   `yaml:"due,omitempty" json:"due,omitempty"`
-	Body       string       `yaml:"-" json:"body,omitempty"`
-	ModifiedAt time.Time    `yaml:"-" json:"modified_at,omitempty"` // populated from file stat
+	ID              string                   `yaml:"-" json:"id"`
+	Title           string                   `yaml:"title" json:"title"`
+	Status          string                   `yaml:"status,omitempty" json:"status,omitempty"`
+	Tags            []string                 `yaml:"tags,omitempty" json:"tags,omitempty"`
+	DependsOn       Dependencies             `yaml:"depends-on,omitempty" json:"depends_on,omitempty"`
+	CreatedAt       time.Time                `yaml:"created-at" json:"created_at"`
+	ClosedAt        *time.Time               `yaml:"closed-at,omitempty" json:"closed_at,omitempty"`
+	Outcome         string                   `yaml:"outcome,omitempty" json:"outcome,omitempty"`
+	Due             *time.Time               `yaml:"due,omitempty" json:"due,omitempty"`
+	Description     string                   `yaml:"description,omitempty" json:"description,omitempty"`
+	Inputs          []ASTRAInput             `yaml:"inputs,omitempty" json:"inputs,omitempty"`
+	Outputs         []ASTRAOutput            `yaml:"outputs,omitempty" json:"outputs,omitempty"`
+	Decisions       map[string]ASTRADecision `yaml:"decisions,omitempty" json:"decisions,omitempty"`
+	Insights        map[string]ASTRAInsight  `yaml:"insights,omitempty" json:"insights,omitempty"`
+	SuccessCriteria []ASTRASuccessCriterion  `yaml:"success_criteria,omitempty" json:"success_criteria,omitempty"`
+	Container       string                   `yaml:"container,omitempty" json:"container,omitempty"`
+	Body            string                   `yaml:"-" json:"body,omitempty"`
+	ModifiedAt      time.Time                `yaml:"-" json:"modified_at,omitempty"` // populated from file stat
 }
 
 // HasStatus returns true if the fiber has opt-in status tracking.
@@ -354,23 +421,37 @@ func splitFrontmatter(content []byte, includeBody bool) ([]byte, string, error) 
 func (f *Felt) Marshal() ([]byte, error) {
 	// Build frontmatter struct for controlled field ordering
 	fm := struct {
-		Title     string       `yaml:"title"`
-		Status    string       `yaml:"status,omitempty"`
-		Tags      []string     `yaml:"tags,omitempty"`
-		DependsOn Dependencies `yaml:"depends-on,omitempty"`
-		CreatedAt time.Time    `yaml:"created-at"`
-		ClosedAt  *time.Time   `yaml:"closed-at,omitempty"`
-		Outcome   string       `yaml:"outcome,omitempty"`
-		Due       *time.Time   `yaml:"due,omitempty"`
+		Title           string                   `yaml:"title"`
+		Status          string                   `yaml:"status,omitempty"`
+		Tags            []string                 `yaml:"tags,omitempty"`
+		DependsOn       Dependencies             `yaml:"depends-on,omitempty"`
+		CreatedAt       time.Time                `yaml:"created-at"`
+		ClosedAt        *time.Time               `yaml:"closed-at,omitempty"`
+		Outcome         string                   `yaml:"outcome,omitempty"`
+		Due             *time.Time               `yaml:"due,omitempty"`
+		Description     string                   `yaml:"description,omitempty"`
+		Inputs          []ASTRAInput             `yaml:"inputs,omitempty"`
+		Outputs         []ASTRAOutput            `yaml:"outputs,omitempty"`
+		Decisions       map[string]ASTRADecision `yaml:"decisions,omitempty"`
+		Insights        map[string]ASTRAInsight  `yaml:"insights,omitempty"`
+		SuccessCriteria []ASTRASuccessCriterion  `yaml:"success_criteria,omitempty"`
+		Container       string                   `yaml:"container,omitempty"`
 	}{
-		Title:     f.Title,
-		Status:    f.Status,
-		Tags:      f.Tags,
-		DependsOn: f.DependsOn,
-		CreatedAt: f.CreatedAt,
-		ClosedAt:  f.ClosedAt,
-		Outcome:   f.Outcome,
-		Due:       f.Due,
+		Title:           f.Title,
+		Status:          f.Status,
+		Tags:            f.Tags,
+		DependsOn:       f.DependsOn,
+		CreatedAt:       f.CreatedAt,
+		ClosedAt:        f.ClosedAt,
+		Outcome:         f.Outcome,
+		Due:             f.Due,
+		Description:     f.Description,
+		Inputs:          f.Inputs,
+		Outputs:         f.Outputs,
+		Decisions:       f.Decisions,
+		Insights:        f.Insights,
+		SuccessCriteria: f.SuccessCriteria,
+		Container:       f.Container,
 	}
 
 	yamlBytes, err := yaml.Marshal(fm)
@@ -411,6 +492,51 @@ func MatchesIDQuery(id, query string) bool {
 // MatchesID returns true if the given query matches this felt's ID.
 func (f *Felt) MatchesID(query string) bool {
 	return MatchesIDQuery(f.ID, query)
+}
+
+// SearchText returns searchable metadata content beyond the title.
+func (f *Felt) SearchText() string {
+	parts := []string{f.Outcome, f.Description, f.Container}
+	for _, input := range f.Inputs {
+		parts = append(parts, input.ID, input.Type, input.From, input.Source, input.Checksum, input.Description)
+	}
+	for _, output := range f.Outputs {
+		parts = append(parts, output.ID, output.Type, output.Description)
+		if output.Recipe != nil {
+			parts = append(parts, output.Recipe.Command)
+			parts = append(parts, flattenMapStrings(output.Recipe.Resources)...)
+		}
+	}
+	for _, decision := range f.Decisions {
+		parts = append(parts, decision.Label, decision.Rationale, decision.Default)
+		for _, option := range decision.Options {
+			parts = append(parts, option.Label, option.Description, option.ExcludedReason)
+		}
+	}
+	for _, insight := range f.Insights {
+		parts = append(parts, insight.Claim)
+		for _, evidence := range insight.Evidence {
+			parts = append(parts, evidence.ID, evidence.DOI, evidence.Artifact)
+			if evidence.Quote != nil {
+				parts = append(parts, evidence.Quote.Type, evidence.Quote.Exact)
+			}
+		}
+	}
+	for _, criterion := range f.SuccessCriteria {
+		parts = append(parts, criterion.Claim, criterion.Output, criterion.Condition)
+	}
+	return strings.Join(parts, "\n")
+}
+
+func flattenMapStrings(m map[string]any) []string {
+	if len(m) == 0 {
+		return nil
+	}
+	data, err := json.Marshal(m)
+	if err != nil {
+		return nil
+	}
+	return []string{string(data)}
 }
 
 // StatusIcon returns the display character for a status.

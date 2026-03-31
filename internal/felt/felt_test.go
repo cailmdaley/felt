@@ -1,6 +1,7 @@
 package felt
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -216,6 +217,166 @@ func TestMarshal(t *testing.T) {
 	}
 	if parsed.Status != "" {
 		t.Errorf("Round-trip Status = %q, want empty", parsed.Status)
+	}
+}
+
+func TestParseAndMarshalASTRAFields(t *testing.T) {
+	created := time.Date(2026, 3, 16, 9, 0, 0, 0, time.UTC)
+	content := []byte(`---
+title: BAO Damping Prior
+created-at: 2026-03-15T10:00:00Z
+description: Prior on BAO damping parameters
+inputs:
+  - id: clustering_data
+    type: data
+    from: parent.desi_dr1_vac
+    description: DESI clustering measurements
+outputs:
+  - id: damped_pk
+    type: data
+    description: Fit output
+    recipe:
+      command: python fit_damping.py
+      resources:
+        cpus: 4
+decisions:
+  damping_prior:
+    label: BAO Damping Prior
+    rationale: Without informative priors, broadband projection creates minima
+    default: gaussian
+    options:
+      gaussian:
+        label: Informative Gaussian
+      flat:
+        label: Flat uniform
+        excluded: true
+        excluded_reason: Shifts too far
+insights:
+  damping_physical:
+    claim: BAO damping caused by pairwise displacements of ~10 Mpc
+    created_at: 2026-03-16T09:00:00Z
+    evidence:
+      - id: ev1
+        doi: 10.48550/arXiv.astro-ph/0604361
+        quote:
+          type: TextQuoteSelector
+          exact: velocity flows move matter ~10 Mpc
+success_criteria:
+  - claim: BAO parameters shift <0.5 sigma from DESI 2024 III
+container: python:3.11-slim
+---
+
+(bao-damping-prior)=
+# BAO Damping Prior
+`)
+
+	f, err := Parse("bao-analysis/bao-damping-prior", content)
+	if err != nil {
+		t.Fatalf("Parse() error: %v", err)
+	}
+	if f.Description != "Prior on BAO damping parameters" {
+		t.Fatalf("Description = %q", f.Description)
+	}
+	if len(f.Inputs) != 1 || f.Inputs[0].Description != "DESI clustering measurements" {
+		t.Fatalf("Inputs = %#v", f.Inputs)
+	}
+	if len(f.Outputs) != 1 || f.Outputs[0].Recipe == nil || f.Outputs[0].Recipe.Command != "python fit_damping.py" {
+		t.Fatalf("Outputs = %#v", f.Outputs)
+	}
+	if got := f.Decisions["damping_prior"].Options["flat"].ExcludedReason; got != "Shifts too far" {
+		t.Fatalf("ExcludedReason = %q", got)
+	}
+	if got := f.Insights["damping_physical"].CreatedAt; got == nil || !got.Equal(created) {
+		t.Fatalf("Insight CreatedAt = %#v, want %v", got, created)
+	}
+	if len(f.SuccessCriteria) != 1 || f.Container != "python:3.11-slim" {
+		t.Fatalf("SuccessCriteria/Container = %#v %q", f.SuccessCriteria, f.Container)
+	}
+
+	data, err := f.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal() error: %v", err)
+	}
+	roundTrip, err := Parse(f.ID, data)
+	if err != nil {
+		t.Fatalf("round-trip Parse() error: %v", err)
+	}
+	if roundTrip.Decisions["damping_prior"].Label != "BAO Damping Prior" {
+		t.Fatalf("round-trip decisions = %#v", roundTrip.Decisions)
+	}
+	if roundTrip.Insights["damping_physical"].Evidence[0].Quote == nil {
+		t.Fatalf("round-trip insights = %#v", roundTrip.Insights)
+	}
+}
+
+func TestSearchTextIncludesASTRAFields(t *testing.T) {
+	f := &Felt{
+		Outcome:     "Outcome text",
+		Description: "Description text",
+		Inputs: []ASTRAInput{
+			{ID: "clustering_data", Description: "DESI DR1 clustering data"},
+		},
+		Outputs: []ASTRAOutput{
+			{ID: "damped_pk", Description: "Power spectrum figure", Recipe: &ASTRARecipe{Command: "python fit.py"}},
+		},
+		Decisions: map[string]ASTRADecision{
+			"damping_prior": {
+				Label:     "BAO Damping Prior",
+				Rationale: "Broadband projection creates spurious minima",
+			},
+		},
+		Insights: map[string]ASTRAInsight{
+			"damping_physical": {Claim: "Pairwise displacements are about 10 Mpc"},
+		},
+		SuccessCriteria: []ASTRASuccessCriterion{
+			{Claim: "Shift stays below 0.5 sigma"},
+		},
+		Container: "python:3.11-slim",
+	}
+
+	searchText := f.SearchText()
+	for _, needle := range []string{
+		"Outcome text",
+		"Description text",
+		"DESI DR1 clustering data",
+		"Power spectrum figure",
+		"python fit.py",
+		"BAO Damping Prior",
+		"Pairwise displacements are about 10 Mpc",
+		"Shift stays below 0.5 sigma",
+		"python:3.11-slim",
+	} {
+		if !strings.Contains(searchText, needle) {
+			t.Fatalf("SearchText() missing %q in %q", needle, searchText)
+		}
+	}
+}
+
+func TestJSONOmitsEmptyASTRAFields(t *testing.T) {
+	f := &Felt{
+		ID:        "quick-gotcha",
+		Title:     "Quick gotcha",
+		CreatedAt: time.Date(2026, 3, 15, 10, 0, 0, 0, time.UTC),
+		Outcome:   "Always single-quote remote commands.",
+	}
+
+	data, err := json.Marshal(f)
+	if err != nil {
+		t.Fatalf("json.Marshal() error: %v", err)
+	}
+	text := string(data)
+	for _, forbidden := range []string{
+		`"description"`,
+		`"inputs"`,
+		`"outputs"`,
+		`"decisions"`,
+		`"insights"`,
+		`"success_criteria"`,
+		`"container"`,
+	} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("json should omit %s: %s", forbidden, text)
+		}
 	}
 }
 

@@ -36,7 +36,7 @@ Use -t to filter by tag (AND logic, prefix matching with trailing colon):
   -t rule:                    matches any rule:* tag
   -t rule:cosebis_data_vector exact tag match
 
-Optional query searches title and outcome:
+Optional query searches title, outcome, and ASTRA frontmatter:
   felt ls cosebis             substring search
   felt ls -r "rule:.*data"    regex search
   felt ls -e "exact title"    exact title match
@@ -152,12 +152,12 @@ Use --body with query to include body search, and with --json to emit body text.
 
 				// Regex or substring match
 				var matches bool
+				searchText := f.SearchText()
 				if lsRegex {
-					matches = re.MatchString(f.Title) ||
-						re.MatchString(f.Outcome)
+					matches = re.MatchString(f.Title) || re.MatchString(searchText)
 				} else {
 					matches = strings.Contains(titleLower, queryLower) ||
-						strings.Contains(strings.ToLower(f.Outcome), queryLower)
+						strings.Contains(strings.ToLower(searchText), queryLower)
 				}
 
 				if matches {

@@ -226,6 +226,60 @@ func TestIntegration(t *testing.T) {
 	// ready
 	mustFelt(t, dir, "ls", "--ready")
 
+	astraDir := filepath.Join(dir, ".felt", "bao-analysis", "damping-prior")
+	if err := os.MkdirAll(astraDir, 0755); err != nil {
+		t.Fatalf("mkdir astra fixture: %v", err)
+	}
+	astraFiber := `---
+title: BAO Damping Prior
+status: closed
+created-at: 2026-03-15T10:00:00Z
+outcome: Informative Gaussian priors confirmed.
+description: Prior on BAO damping parameters
+inputs:
+  - id: clustering_data
+    type: data
+    description: DESI DR1 clustering sample
+outputs:
+  - id: damped_pk
+    type: figure
+    description: BAO comparison figure
+decisions:
+  damping_prior:
+    label: BAO Damping Prior
+    rationale: Broadband projection creates spurious minima
+    default: gaussian
+    options:
+      gaussian:
+        label: Informative Gaussian
+insights:
+  damping_physical:
+    claim: BAO damping caused by pairwise displacements of ~10 Mpc
+success_criteria:
+  - claim: BAO parameters shift <0.5 sigma from DESI 2024 III
+container: python:3.11-slim
+---
+
+(damping-prior)=
+# BAO Damping Prior
+`
+	if err := os.WriteFile(filepath.Join(astraDir, "damping-prior.md"), []byte(astraFiber), 0644); err != nil {
+		t.Fatalf("write astra fixture: %v", err)
+	}
+
+	out = mustFelt(t, dir, "ls", "BAO")
+	if !strings.Contains(out, "bao-analysis/damping-prior") {
+		t.Fatalf("ls should match ASTRA fields, got: %s", out)
+	}
+	out = mustFelt(t, dir, "show", "-j", "damping-prior")
+	var astraShown map[string]any
+	if err := json.Unmarshal([]byte(out), &astraShown); err != nil {
+		t.Fatalf("show -j astra: invalid json: %v\n%s", err, out)
+	}
+	if _, ok := astraShown["decisions"]; !ok {
+		t.Fatalf("show -j astra: missing decisions in %#v", astraShown)
+	}
+
 	// export help surface
 	outDir := filepath.Join(dir, "exported")
 	out = mustFelt(t, dir, "export", "--format", "tapestry", "--out", outDir)
