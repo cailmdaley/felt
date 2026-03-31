@@ -18,11 +18,8 @@ func TestNew(t *testing.T) {
 	if f.Status != "" {
 		t.Errorf("Status = %q, want empty (no default status)", f.Status)
 	}
-	if !strings.HasPrefix(f.ID, "test-task-") {
-		t.Errorf("ID = %q, want prefix %q", f.ID, "test-task-")
-	}
-	if len(f.ID) != len("test-task-")+8 {
-		t.Errorf("ID length = %d, want %d", len(f.ID), len("test-task-")+8)
+	if f.ID != "test-task" {
+		t.Errorf("ID = %q, want %q", f.ID, "test-task")
 	}
 }
 
@@ -40,16 +37,15 @@ func TestNewEmptyTitle(t *testing.T) {
 
 func TestGenerateID(t *testing.T) {
 	tests := []struct {
-		title    string
-		wantSlug string
+		title  string
+		wantID string
 	}{
-		{"Simple", "simple-"},
-		{"Multiple Words Here", "multiple-words-here-"},
-		{"With 123 Numbers", "with-123-numbers-"},
-		{"Special!@#Characters", "special-characters-"},
-		{"  Extra   Spaces  ", "extra-spaces-"},
-		{"", ""}, // empty title
-		{"This is a very long title that should be truncated at word boundary", "this-is-a-very-long-title-that-"},
+		{"Simple", "simple"},
+		{"Multiple Words Here", "multiple-words-here"},
+		{"With 123 Numbers", "with-123-numbers"},
+		{"Special!@#Characters", "special-characters"},
+		{"  Extra   Spaces  ", "extra-spaces"},
+		{"This is a very long title that should be truncated at word boundary", "this-is-a-very-long-title-that"},
 	}
 
 	for _, tt := range tests {
@@ -58,9 +54,16 @@ func TestGenerateID(t *testing.T) {
 			t.Errorf("GenerateID(%q) error: %v", tt.title, err)
 			continue
 		}
-		if !strings.HasPrefix(id, tt.wantSlug) {
-			t.Errorf("GenerateID(%q) = %q, want prefix %q", tt.title, id, tt.wantSlug)
+		if id != tt.wantID {
+			t.Errorf("GenerateID(%q) = %q, want %q", tt.title, id, tt.wantID)
 		}
+	}
+}
+
+func TestGenerateIDRejectsEmptySlug(t *testing.T) {
+	_, err := GenerateID("!!!")
+	if err == nil {
+		t.Fatal("GenerateID should reject titles with no alphanumeric characters")
 	}
 }
 
@@ -217,21 +220,19 @@ func TestMarshal(t *testing.T) {
 }
 
 func TestMatchesID(t *testing.T) {
-	f := &Felt{ID: "test-task-12345678"}
+	f := &Felt{ID: "bao-analysis/damping-prior"}
 
 	tests := []struct {
 		query string
 		want  bool
 	}{
-		{"test-task-12345678", true},   // exact match
-		{"test-task-1234", true},       // prefix match
-		{"test-task", true},            // prefix match
-		{"test", true},                 // prefix match
-		{"12345678", true},             // hex suffix match
-		{"1234", true},                 // hex suffix prefix match
-		{"other", false},               // no match
-		{"test-task-123456789", false}, // too long
-		{"5678", false},                // hex suffix, not prefix
+		{"bao-analysis/damping-prior", true},
+		{"bao-analysis/damp", true},
+		{"bao-analysis", true},
+		{"damping-prior", true},
+		{"damping", true},
+		{"prior", false},
+		{"other", false},
 	}
 
 	for _, tt := range tests {
@@ -286,15 +287,13 @@ func TestValidateID(t *testing.T) {
 		id   string
 		want bool
 	}{
-		{"test-task-12345678", true},
-		{"a-12345678", true},
-		{"test-12345678", true},
-		{"12345678", true},        // hex-only (from title with no alphanumeric chars)
-		{"test-1234567", false},   // hex too short
-		{"test-123456789", false}, // hex too long
-		{"TEST-12345678", false},  // uppercase
-		{"1234567", false},        // hex too short (no slug)
-		{"123456789", false},      // hex too long (no slug)
+		{"test-task", true},
+		{"a-2", true},
+		{"bao-analysis/damping-prior", true},
+		{"test-task/", false},
+		{"TEST-task", false},
+		{"test_task", false},
+		{"", false},
 	}
 
 	for _, tt := range tests {

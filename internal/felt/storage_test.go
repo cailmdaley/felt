@@ -266,7 +266,7 @@ func TestStorageFindMetadataSkipsBody(t *testing.T) {
 		t.Fatalf("Write() error: %v", err)
 	}
 
-	found, err := s.FindMetadata("1234")
+	found, err := s.FindMetadata("test")
 	if err != nil {
 		t.Fatalf("FindMetadata() error: %v", err)
 	}
@@ -442,10 +442,69 @@ func TestStorageFindAmbiguous(t *testing.T) {
 
 func TestStoragePath(t *testing.T) {
 	s := NewStorage("/project")
-	path := s.Path("test-12345678")
-	expected := "/project/.felt/test-12345678.md"
+	path := s.Path("test-path")
+	expected := "/project/.felt/test-path/test-path.md"
 	if path != expected {
 		t.Errorf("Path() = %q, want %q", path, expected)
+	}
+}
+
+func TestStoragePathNested(t *testing.T) {
+	s := NewStorage("/project")
+	path := s.Path("bao-analysis/damping-prior")
+	expected := "/project/.felt/bao-analysis/damping-prior/damping-prior.md"
+	if path != expected {
+		t.Errorf("Path() = %q, want %q", path, expected)
+	}
+}
+
+func TestStorageNextAvailableID(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStorage(dir)
+	if err := s.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	f := &Felt{
+		ID:        "quick-gotcha",
+		Title:     "Quick gotcha",
+		CreatedAt: time.Now(),
+	}
+	if err := s.Write(f); err != nil {
+		t.Fatalf("Write() error: %v", err)
+	}
+
+	id, err := s.NextAvailableID("quick-gotcha")
+	if err != nil {
+		t.Fatalf("NextAvailableID() error: %v", err)
+	}
+	if id != "quick-gotcha-2" {
+		t.Fatalf("NextAvailableID() = %q, want %q", id, "quick-gotcha-2")
+	}
+}
+
+func TestStorageFindNestedByBasename(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStorage(dir)
+	if err := s.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	f := &Felt{
+		ID:        "bao-analysis/damping-prior",
+		Title:     "Damping Prior",
+		CreatedAt: time.Now(),
+	}
+	if err := s.Write(f); err != nil {
+		t.Fatalf("Write() error: %v", err)
+	}
+
+	found, err := s.Find("damping")
+	if err != nil {
+		t.Fatalf("Find() error: %v", err)
+	}
+	if found.ID != f.ID {
+		t.Fatalf("Find() = %q, want %q", found.ID, f.ID)
 	}
 }
 

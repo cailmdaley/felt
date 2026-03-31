@@ -2,11 +2,15 @@ package felt
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
+	"syscall"
 )
 
 const (
@@ -14,11 +18,25 @@ const (
 	DirName = ".felt"
 	// FileExt is the extension for felt files.
 	FileExt = ".md"
+	// MystConfigName is the MyST project file generated at init time.
+	MystConfigName = "myst.yml"
 )
+
+const defaultMystConfig = `version: 1
+project:
+  title: Project Fibers
+site:
+  template: article-theme
+`
 
 // Storage handles reading and writing felt files.
 type Storage struct {
 	root string // Path to .felt directory
+}
+
+type fiberFile struct {
+	id   string
+	path string
 }
 
 // NewStorage creates a storage instance for the given directory.
@@ -34,6 +52,14 @@ func (s *Storage) Init() error {
 	if err := os.MkdirAll(s.root, 0755); err != nil {
 		return fmt.Errorf("creating .felt directory: %w", err)
 	}
+	mystPath := filepath.Join(s.root, MystConfigName)
+	if _, err := os.Stat(mystPath); os.IsNotExist(err) {
+		if err := os.WriteFile(mystPath, []byte(defaultMystConfig), 0644); err != nil {
+			return fmt.Errorf("writing %s: %w", MystConfigName, err)
+		}
+	} else if err != nil {
+		return fmt.Errorf("checking %s: %w", MystConfigName, err)
+	}
 	return nil
 }
 
@@ -45,7 +71,30 @@ func (s *Storage) Exists() bool {
 
 // Path returns the full path for a felt file.
 func (s *Storage) Path(id string) string {
-	return filepath.Join(s.root, id+FileExt)
+	slug := filepath.Base(filepath.Clean(id))
+	return filepath.Join(s.root, filepath.FromSlash(id), slug+FileExt)
+}
+
+// NextAvailableID returns the first unused ID based on a slug path.
+func (s *Storage) NextAvailableID(baseID string) (string, error) {
+	baseID = filepath.ToSlash(filepath.Clean(strings.TrimSpace(baseID)))
+	baseID = strings.TrimPrefix(baseID, "./")
+	if baseID == "." || baseID == "" {
+		return "", fmt.Errorf("invalid felt id")
+	}
+
+	for n := 1; ; n++ {
+		candidate := baseID
+		if n > 1 {
+			candidate = disambiguateID(baseID, n)
+		}
+		if _, err := os.Stat(s.Path(candidate)); err == nil {
+			continue
+		} else if !os.IsNotExist(err) {
+			return "", fmt.Errorf("checking id %s: %w", candidate, err)
+		}
+		return candidate, nil
+	}
 }
 
 // Write saves a felt to disk.
@@ -56,6 +105,9 @@ func (s *Storage) Write(f *Felt) error {
 	}
 
 	path := s.Path(f.ID)
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return fmt.Errorf("creating directory %s: %w", filepath.Dir(path), err)
+	}
 	if err := os.WriteFile(path, data, 0644); err != nil {
 		return fmt.Errorf("writing file %s: %w", path, err)
 	}
@@ -72,7 +124,7 @@ func (s *Storage) ReadMetadata(id string) (*Felt, error) {
 	return s.readWithMode(id, ParseMetadataOnly)
 }
 
-// FindMetadata returns the first felt matching the ID prefix or hex suffix,
+// FindMetadata returns the first felt matching the ID prefix or basename,
 // reading only metadata from the matching file.
 func (s *Storage) FindMetadata(query string) (*Felt, error) {
 	return s.findWithMode(query, ParseMetadataOnly)
@@ -101,6 +153,16 @@ func (s *Storage) Delete(id string) error {
 	if err := os.Remove(path); err != nil {
 		return fmt.Errorf("deleting file %s: %w", path, err)
 	}
+	for dir := filepath.Dir(path); dir != s.root; dir = filepath.Dir(dir) {
+		err := os.Remove(dir)
+		if err == nil {
+			continue
+		}
+		if errors.Is(err, syscall.ENOTEMPTY) {
+			break
+		}
+		return fmt.Errorf("cleaning directory %s: %w", dir, err)
+	}
 	return nil
 }
 
@@ -120,30 +182,20 @@ func (s *Storage) ListMetadataWithModTime() ([]*Felt, error) {
 }
 
 func (s *Storage) listWithMode(mode ParseMode, includeModTime bool) ([]*Felt, error) {
-	entries, err := os.ReadDir(s.root)
+	files, err := s.listFiberFiles()
 	if err != nil {
-		return nil, fmt.Errorf("reading directory: %w", err)
+		return nil, err
 	}
 
 	var felts []*Felt
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		name := entry.Name()
-		if !strings.HasSuffix(name, FileExt) {
-			continue
-		}
-
-		id := strings.TrimSuffix(name, FileExt)
-		f, err := s.readWithMode(id, mode)
+	for _, file := range files {
+		f, err := s.readWithMode(file.id, mode)
 		if err != nil {
-			// Log but continue on parse errors
-			fmt.Fprintf(os.Stderr, "warning: failed to parse %s: %v\n", name, err)
+			fmt.Fprintf(os.Stderr, "warning: failed to parse %s: %v\n", file.path, err)
 			continue
 		}
 		if includeModTime {
-			if info, err := entry.Info(); err == nil {
+			if info, err := os.Stat(file.path); err == nil {
 				f.ModifiedAt = info.ModTime()
 			}
 		}
@@ -153,32 +205,23 @@ func (s *Storage) listWithMode(mode ParseMode, includeModTime bool) ([]*Felt, er
 	return felts, nil
 }
 
-// Find returns the first felt matching the ID prefix or hex suffix.
-// Uses ReadDir + filename matching to avoid reading all files.
+// Find returns the first felt matching the ID prefix or basename.
 func (s *Storage) Find(query string) (*Felt, error) {
 	return s.findWithMode(query, ParseFull)
 }
 
 func (s *Storage) findWithMode(query string, mode ParseMode) (*Felt, error) {
-	entries, err := os.ReadDir(s.root)
+	files, err := s.listFiberFiles()
 	if err != nil {
-		return nil, fmt.Errorf("reading directory: %w", err)
+		return nil, err
 	}
 
 	var matchIDs []string
-	matchEntries := make(map[string]os.DirEntry)
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		name := entry.Name()
-		if !strings.HasSuffix(name, FileExt) {
-			continue
-		}
-		id := strings.TrimSuffix(name, FileExt)
-		if MatchesIDQuery(id, query) {
-			matchIDs = append(matchIDs, id)
-			matchEntries[id] = entry
+	matchPaths := make(map[string]string)
+	for _, file := range files {
+		if MatchesIDQuery(file.id, query) {
+			matchIDs = append(matchIDs, file.id)
+			matchPaths[file.id] = file.path
 		}
 	}
 
@@ -190,13 +233,63 @@ func (s *Storage) findWithMode(query string, mode ParseMode) (*Felt, error) {
 		if err != nil {
 			return nil, err
 		}
-		if info, err := matchEntries[matchIDs[0]].Info(); err == nil {
+		if info, err := os.Stat(matchPaths[matchIDs[0]]); err == nil {
 			f.ModifiedAt = info.ModTime()
 		}
 		return f, nil
 	default:
 		return nil, fmt.Errorf("ambiguous ID %q matches: %s", query, strings.Join(matchIDs, ", "))
 	}
+}
+
+func (s *Storage) listFiberFiles() ([]fiberFile, error) {
+	var files []fiberFile
+	err := filepath.WalkDir(s.root, func(fullPath string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() || !strings.HasSuffix(d.Name(), FileExt) {
+			return nil
+		}
+		rel, err := filepath.Rel(s.root, fullPath)
+		if err != nil {
+			return err
+		}
+		id, ok := fiberIDFromRelativePath(rel)
+		if !ok {
+			return nil
+		}
+		files = append(files, fiberFile{id: id, path: fullPath})
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("walking .felt directory: %w", err)
+	}
+	return files, nil
+}
+
+func fiberIDFromRelativePath(rel string) (string, bool) {
+	rel = filepath.Clean(rel)
+	dir := filepath.Dir(rel)
+	if dir == "." {
+		return "", false
+	}
+	base := strings.TrimSuffix(filepath.Base(rel), FileExt)
+	if filepath.Base(dir) != base {
+		return "", false
+	}
+	return filepath.ToSlash(dir), true
+}
+
+func disambiguateID(id string, n int) string {
+	id = filepath.ToSlash(id)
+	dir := path.Dir(id)
+	base := path.Base(id)
+	candidate := fmt.Sprintf("%s-%d", base, n)
+	if dir == "." {
+		return candidate
+	}
+	return path.Join(dir, candidate)
 }
 
 // FindByPrefix finds a fiber matching a query in an existing slice.

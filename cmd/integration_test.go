@@ -73,10 +73,13 @@ func TestIntegration(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, ".felt")); err != nil {
 		t.Fatal("init: .felt directory not created")
 	}
+	if _, err := os.Stat(filepath.Join(dir, ".felt", "myst.yml")); err != nil {
+		t.Fatal("init: myst.yml not created")
+	}
 
 	// add — returns the fiber ID
 	fiberID := strings.TrimSpace(mustFelt(t, dir, "add", "test fiber", "-s", "open"))
-	if fiberID == "" {
+	if fiberID != "test-fiber" {
 		t.Fatal("add: expected fiber ID in output")
 	}
 

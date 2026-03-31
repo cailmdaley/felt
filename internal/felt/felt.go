@@ -4,9 +4,8 @@ package felt
 import (
 	"bufio"
 	"bytes"
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
+	"path"
 	"regexp"
 	"strings"
 	"time"
@@ -143,7 +142,7 @@ func New(title string) (*Felt, error) {
 	}, nil
 }
 
-// GenerateID creates a slug-based ID with random hex suffix.
+// GenerateID creates a slug-based ID.
 func GenerateID(title string) (string, error) {
 	slug := slugify(title)
 	if len(slug) > 32 {
@@ -151,17 +150,10 @@ func GenerateID(title string) (string, error) {
 		slug = truncateAtWord(slug, 32)
 	}
 
-	// Generate 4 random bytes (8 hex chars)
-	randBytes := make([]byte, 4)
-	if _, err := rand.Read(randBytes); err != nil {
-		return "", fmt.Errorf("generating random bytes: %w", err)
-	}
-	hexSuffix := hex.EncodeToString(randBytes)
-
 	if slug == "" {
-		return hexSuffix, nil
+		return "", fmt.Errorf("title must contain at least one alphanumeric character")
 	}
-	return slug + "-" + hexSuffix, nil
+	return slug, nil
 }
 
 // slugify converts a title to a URL-safe slug.
@@ -400,21 +392,19 @@ func (f *Felt) Marshal() ([]byte, error) {
 }
 
 // MatchesIDQuery checks if an ID matches a query string.
-// Supports prefix matching and hex suffix matching.
+// Full paths match by prefix; bare slugs also match the final path segment.
 func MatchesIDQuery(id, query string) bool {
+	if query == "" {
+		return false
+	}
+	id = path.Clean(id)
+	query = path.Clean(query)
 	if strings.HasPrefix(id, query) {
 		return true
 	}
-
-	// Try matching just the hex suffix (e.g., "ac6b19c1" or "ac6b")
-	parts := strings.Split(id, "-")
-	if len(parts) >= 2 {
-		hexPart := parts[len(parts)-1]
-		if strings.HasPrefix(hexPart, query) {
-			return true
-		}
+	if !strings.Contains(query, "/") {
+		return strings.HasPrefix(path.Base(id), query)
 	}
-
 	return false
 }
 
@@ -439,18 +429,19 @@ func StatusIcon(status string) string {
 	}
 }
 
-// ShortID truncates a felt ID for display, keeping the hex suffix intact.
+// ShortID truncates long path-like IDs for display.
 func ShortID(id string) string {
-	parts := strings.Split(id, "-")
-	if len(parts) < 2 {
+	if len(id) <= 24 {
 		return id
 	}
-	hex := parts[len(parts)-1]
-	slug := strings.Join(parts[:len(parts)-1], "-")
-	if len(slug) > 16 {
-		slug = slug[:16] + "..."
+	parts := strings.Split(id, "/")
+	if len(parts) >= 2 {
+		tail := strings.Join(parts[len(parts)-2:], "/")
+		if len(tail)+4 <= 24 {
+			return ".../" + tail
+		}
 	}
-	return slug + "-" + hex
+	return id[:21] + "..."
 }
 
 // IsOpen returns true if the felt is open.
@@ -484,9 +475,8 @@ func (f *Felt) AppendComment(text string) {
 	f.Body += comment + "\n"
 }
 
-// idPattern matches the felt ID format: either slug-8hexchars or just 8hexchars
-// The hex-only case occurs when titles contain no alphanumeric characters
-var idPattern = regexp.MustCompile(`^([a-z0-9-]+-)?[a-f0-9]{8}$`)
+// idPattern matches slash-separated slug paths.
+var idPattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*(?:/[a-z0-9]+(?:-[a-z0-9]+)*)*$`)
 
 // ValidateID checks if an ID matches the expected format.
 func ValidateID(id string) bool {

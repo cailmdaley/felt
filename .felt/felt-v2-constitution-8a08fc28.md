@@ -256,6 +256,8 @@ Run on project `.felt/`. Global felt (`~/loom/.felt/`) migrated separately, late
 
 **Codebase:** `~/Documents/projects/felt/` — Go CLI, cobra commands, ~3k LOC.
 
+**Current branch state:** the repo's own `.felt/` is still flat-file and hex-suffixed. Once storage flips to directory-only reads, source-built `felt` in this repo will stop seeing local fibers until `felt migrate` lands or the repo is migrated. Treat that as an expected intermediate state, not a regression in the storage layer.
+
 | File | Role |
 |------|------|
 | `internal/felt/felt.go` | `Felt` struct, `GenerateID()`, `Parse()`, `Marshal()` |

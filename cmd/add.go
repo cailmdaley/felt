@@ -39,6 +39,10 @@ var addCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		f.ID, err = storage.NextAvailableID(f.ID)
+		if err != nil {
+			return err
+		}
 
 		// Add extracted tags
 		for _, tag := range extractedTags {
