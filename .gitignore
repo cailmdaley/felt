@@ -18,3 +18,5 @@ dist/
 
 # Generated assets
 nanobanana-output/
+cmd/skills/.DS_Store
+cmd/skills/felt/.DS_Store
