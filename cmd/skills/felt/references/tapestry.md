@@ -28,7 +28,7 @@ When filing a new tapestry fiber:
 
 ## Format Conventions
 
-These are the structural conventions that `felt tapestry export` implements.
+These are the structural conventions that `felt export --format tapestry` implements.
 
 ### Tapestry tags
 
@@ -77,7 +77,7 @@ The file's **mtime** is used for staleness computation (not the `generated` fiel
 
 ### Staleness
 
-For each tapestry node with evidence, `felt tapestry export` compares its evidence.json mtime against all upstream dependencies' evidence mtimes:
+For each tapestry node with evidence, `felt export --format tapestry` compares its evidence.json mtime against all upstream dependencies' evidence mtimes:
 - Any upstream newer → **stale**
 - No evidence.json → **no-evidence**
 - Otherwise → **fresh**
@@ -128,10 +128,10 @@ Accepts `:L42` (single line) and `:L42-55` (range). Any inline code matching `pa
 ## Exporting
 
 ```bash
-felt tapestry export              # writes to ~/.felt/tapestries/data/{project}/
-felt tapestry export --all-fibers # include all fibers (for sidebar)
-felt tapestry export --force      # re-copy all artifacts
-felt tapestry export --name foo   # override city name
+felt export --format tapestry              # writes to ~/.felt/tapestries/data/{project}/
+felt export --format tapestry --all-fibers # include all fibers (for sidebar)
+felt export --format tapestry --force      # re-copy all artifacts
+felt export --format tapestry --name foo   # override city name
 ```
 
 Output goes to `~/.felt/tapestries/`, which should be a clone of a tapestry template repo (GitHub Pages). The export writes `tapestry.json` + artifact images. Git commit/push is a separate step.

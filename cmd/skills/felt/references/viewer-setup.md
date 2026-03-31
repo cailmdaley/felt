@@ -1,11 +1,11 @@
 # Tapestry Viewer Setup
 
-The tapestry viewer is a static site that renders felt DAGs as navigable graphs. It lives in a standalone repo that you clone once; `felt tapestry export` writes data into it.
+The tapestry viewer is a static site that renders felt DAGs as navigable graphs. It lives in a standalone repo that you clone once; `felt export --format tapestry` writes data into it.
 
 ## First Time
 
 ```bash
-felt tapestry export    # auto-clones the template if ~/.felt/tapestries/ doesn't exist
+felt export --format tapestry    # auto-clones the template if ~/.felt/tapestries/ doesn't exist
 ```
 
 Or manually:
@@ -19,11 +19,11 @@ git clone --depth 1 https://github.com/cailmdaley/tapestries.git ~/.felt/tapestr
 From any project with `.felt/` fibers and `tapestry:` tags:
 
 ```bash
-felt tapestry export                  # writes to ~/.felt/tapestries/data/{project}/
-felt tapestry export --all-fibers     # include all fibers for sidebar
-felt tapestry export --force          # re-copy all artifacts
-felt tapestry export --name foo       # override project name
-felt tapestry export --out /path/     # override output directory
+felt export --format tapestry                  # writes to ~/.felt/tapestries/data/{project}/
+felt export --format tapestry --all-fibers     # include all fibers for sidebar
+felt export --format tapestry --force          # re-copy all artifacts
+felt export --format tapestry --name foo       # override project name
+felt export --format tapestry --out /path/     # override output directory
 ```
 
 ## Serving Locally
@@ -41,7 +41,7 @@ Open `http://localhost:3000`. The landing page lists available tapestries from `
 3. Export and push:
 
 ```bash
-felt tapestry export --out /path/to/your-repo/data/myproject
+felt export --format tapestry --out /path/to/your-repo/data/myproject
 cd /path/to/your-repo
 git add -A && git commit -m "update tapestry" && git push
 ```

@@ -10,6 +10,23 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var retiredCommandNames = map[string]struct{}{
+	"check":      {},
+	"comment":    {},
+	"downstream": {},
+	"find":       {},
+	"graph":      {},
+	"link":       {},
+	"path":       {},
+	"prime":      {},
+	"ready":      {},
+	"tag":        {},
+	"tapestry":   {},
+	"unlink":     {},
+	"untag":      {},
+	"upstream":   {},
+}
+
 var (
 	addBody    string
 	addStatus  string
@@ -138,6 +155,9 @@ func init() {
 	originalRun := rootCmd.RunE
 	rootCmd.RunE = func(cmd *cobra.Command, args []string) error {
 		if len(args) == 1 && !isSubcommand(args[0]) {
+			if isRetiredCommand(args[0]) {
+				return fmt.Errorf("unknown command %q for %q", args[0], cmd.CommandPath())
+			}
 			// Treat as "felt add <title>"
 			// Flags are already parsed into the add* variables since we share them
 			return addCmd.RunE(cmd, args)
@@ -147,6 +167,11 @@ func init() {
 		}
 		return cmd.Help()
 	}
+}
+
+func isRetiredCommand(name string) bool {
+	_, ok := retiredCommandNames[name]
+	return ok
 }
 
 func isSubcommand(name string) bool {

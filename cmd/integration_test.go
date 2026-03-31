@@ -226,6 +226,40 @@ func TestIntegration(t *testing.T) {
 	// ready
 	mustFelt(t, dir, "ls", "--ready")
 
+	// export help surface
+	outDir := filepath.Join(dir, "exported")
+	out = mustFelt(t, dir, "export", "--format", "tapestry", "--out", outDir)
+	if !strings.Contains(out, "Exported tapestry to") {
+		t.Fatalf("export tapestry: expected export confirmation, got: %s", out)
+	}
+	if _, err := os.Stat(filepath.Join(outDir, "tapestry.json")); err != nil {
+		t.Fatalf("export tapestry: expected tapestry.json, got: %v", err)
+	}
+
+	out, err = felt(dir, "export", "--format", "astra")
+	if err == nil {
+		t.Fatalf("export astra: expected explicit failure, got: %s", out)
+	}
+	if !strings.Contains(out, "not implemented yet") {
+		t.Fatalf("export astra: expected explicit not implemented message, got: %s", out)
+	}
+
+	out, err = felt(dir, "tapestry")
+	if err == nil {
+		t.Fatalf("tapestry should be removed from the public CLI, got: %s", out)
+	}
+	if !strings.Contains(out, "unknown command") {
+		t.Fatalf("tapestry should be unknown, got: %s", out)
+	}
+
+	out, err = felt(dir, "tag")
+	if err == nil {
+		t.Fatalf("tag should be removed from the public CLI, got: %s", out)
+	}
+	if !strings.Contains(out, "unknown command") {
+		t.Fatalf("tag should be unknown, got: %s", out)
+	}
+
 	// rm --force
 	mustFelt(t, dir, "rm", "--force", fiber3ID)
 	mustFelt(t, dir, "rm", "--force", fiber2ID)
@@ -281,5 +315,13 @@ func TestIntegration(t *testing.T) {
 	rcContent2, _ := os.ReadFile(rcPath)
 	if strings.Contains(string(rcContent2), "felt integration") {
 		t.Fatalf("setup codex uninstall: wrapper still in .zshrc")
+	}
+
+	out = mustFelt(t, dir, "--help")
+	if !strings.Contains(out, "export") {
+		t.Fatalf("help: expected export command, got: %s", out)
+	}
+	if strings.Contains(out, "tapestry") {
+		t.Fatalf("help: legacy tapestry command should be hidden, got: %s", out)
 	}
 }
