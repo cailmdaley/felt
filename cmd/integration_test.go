@@ -10,6 +10,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 var binaryPath string
@@ -291,12 +293,43 @@ container: python:3.11-slim
 		t.Fatalf("export tapestry: expected tapestry.json, got: %v", err)
 	}
 
-	out, err = felt(dir, "export", "--format", "astra")
-	if err == nil {
-		t.Fatalf("export astra: expected explicit failure, got: %s", out)
+	out = mustFelt(t, dir, "export", "--format", "astra")
+	if !strings.Contains(out, "Exported ASTRA to") {
+		t.Fatalf("export astra: expected export confirmation, got: %s", out)
 	}
-	if !strings.Contains(out, "not implemented yet") {
-		t.Fatalf("export astra: expected explicit not implemented message, got: %s", out)
+
+	astraData, err := os.ReadFile(filepath.Join(dir, "astra.yaml"))
+	if err != nil {
+		t.Fatalf("export astra: expected astra.yaml, got: %v", err)
+	}
+	var astraDoc map[string]any
+	if err := yaml.Unmarshal(astraData, &astraDoc); err != nil {
+		t.Fatalf("export astra: invalid yaml: %v\n%s", err, astraData)
+	}
+	analyses, ok := astraDoc["analyses"].(map[string]any)
+	if !ok {
+		t.Fatalf("export astra: missing analyses: %#v", astraDoc)
+	}
+	if _, ok := analyses["test-fiber"]; ok {
+		t.Fatalf("export astra: simple felt should be filtered out: %#v", analyses)
+	}
+	baoAnalysis, ok := analyses["bao-analysis"].(map[string]any)
+	if !ok {
+		t.Fatalf("export astra: missing bao-analysis: %#v", analyses)
+	}
+	children, ok := baoAnalysis["analyses"].(map[string]any)
+	if !ok {
+		t.Fatalf("export astra: missing nested analyses: %#v", baoAnalysis)
+	}
+	dampingPrior, ok := children["damping-prior"].(map[string]any)
+	if !ok {
+		t.Fatalf("export astra: missing damping-prior: %#v", children)
+	}
+	if got := dampingPrior["name"]; got != "BAO Damping Prior" {
+		t.Fatalf("export astra: name = %#v, want %q", got, "BAO Damping Prior")
+	}
+	if _, ok := dampingPrior["decisions"].(map[string]any); !ok {
+		t.Fatalf("export astra: missing decisions: %#v", dampingPrior)
 	}
 
 	out, err = felt(dir, "tapestry")

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/cailmdaley/felt/internal/felt"
+	"gopkg.in/yaml.v3"
 )
 
 func TestReadASTRA(t *testing.T) {
@@ -149,6 +150,100 @@ func TestExportIncludesDecisions(t *testing.T) {
 	}
 	if got, want := payload.Decisions[0].EvidenceIDs, []string{"shear-reference-11111111", "spin2-rotation-22222222"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("payload.Decisions[0].EvidenceIDs = %#v, want %#v", got, want)
+	}
+}
+
+func TestExportASTRA(t *testing.T) {
+	root := t.TempDir()
+	storage := felt.NewStorage(root)
+	if err := storage.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	now := time.Date(2026, 3, 30, 12, 0, 0, 0, time.UTC)
+	simple := &felt.Felt{
+		ID:        "quick-gotcha",
+		Title:     "Quick gotcha",
+		Status:    felt.StatusClosed,
+		CreatedAt: now,
+		Outcome:   "Not part of ASTRA export.",
+	}
+	analysis := &felt.Felt{
+		ID:          "bao-analysis/damping-prior",
+		Title:       "BAO Damping Prior",
+		Tags:        []string{"tier-1"},
+		Status:      felt.StatusClosed,
+		CreatedAt:   now.Add(time.Minute),
+		Description: "Prior on BAO damping parameters",
+		Inputs: []felt.ASTRAInput{
+			{ID: "clustering_data", Type: "data", From: "parent.desi_dr1_vac"},
+		},
+		Outputs: []felt.ASTRAOutput{
+			{ID: "damped_pk", Type: "data"},
+		},
+		Decisions: map[string]felt.ASTRADecision{
+			"damping_prior": {
+				Label:   "BAO Damping Prior",
+				Default: "gaussian",
+				Options: map[string]felt.ASTRADecisionOption{
+					"gaussian": {Label: "Informative Gaussian"},
+				},
+			},
+		},
+		SuccessCriteria: []felt.ASTRASuccessCriterion{
+			{Claim: "BAO parameters shift <0.5 sigma"},
+		},
+		Container: "python:3.11-slim",
+	}
+	for _, f := range []*felt.Felt{simple, analysis} {
+		if err := storage.Write(f); err != nil {
+			t.Fatalf("Write() error: %v", err)
+		}
+	}
+
+	outPath := filepath.Join(root, "astra.yaml")
+	if err := ExportASTRA(root, outPath); err != nil {
+		t.Fatalf("ExportASTRA() error: %v", err)
+	}
+
+	data, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatalf("ReadFile() error: %v", err)
+	}
+
+	var doc map[string]any
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("yaml.Unmarshal() error: %v", err)
+	}
+
+	analyses, ok := doc["analyses"].(map[string]any)
+	if !ok {
+		t.Fatalf("analyses missing from export: %#v", doc)
+	}
+	if _, ok := analyses["quick-gotcha"]; ok {
+		t.Fatalf("simple felt should be skipped from ASTRA export: %#v", analyses)
+	}
+
+	baoAnalysis, ok := analyses["bao-analysis"].(map[string]any)
+	if !ok {
+		t.Fatalf("bao-analysis missing from export: %#v", analyses)
+	}
+	children, ok := baoAnalysis["analyses"].(map[string]any)
+	if !ok {
+		t.Fatalf("nested analyses missing from export: %#v", baoAnalysis)
+	}
+	dampingPrior, ok := children["damping-prior"].(map[string]any)
+	if !ok {
+		t.Fatalf("damping-prior missing from export: %#v", children)
+	}
+	if got := dampingPrior["name"]; got != "BAO Damping Prior" {
+		t.Fatalf("name = %#v, want %q", got, "BAO Damping Prior")
+	}
+	if got := dampingPrior["container"]; got != "python:3.11-slim" {
+		t.Fatalf("container = %#v, want %q", got, "python:3.11-slim")
+	}
+	if _, ok := dampingPrior["decisions"].(map[string]any); !ok {
+		t.Fatalf("decisions missing from export: %#v", dampingPrior)
 	}
 }
 

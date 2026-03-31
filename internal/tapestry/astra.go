@@ -6,7 +6,9 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
+	"strings"
 
+	"github.com/cailmdaley/felt/internal/felt"
 	"gopkg.in/yaml.v3"
 )
 
@@ -145,4 +147,126 @@ func sortedKeys[T any](m map[string]T) []string {
 	}
 	sort.Strings(ids)
 	return ids
+}
+
+type exportASTRADocument struct {
+	Analyses map[string]exportASTRAAnalysis `yaml:"analyses,omitempty"`
+}
+
+type exportASTRAAnalysis struct {
+	Name            string                         `yaml:"name,omitempty"`
+	Tags            []string                       `yaml:"tags,omitempty"`
+	Description     string                         `yaml:"description,omitempty"`
+	Inputs          []felt.ASTRAInput              `yaml:"inputs,omitempty"`
+	Outputs         []felt.ASTRAOutput             `yaml:"outputs,omitempty"`
+	Decisions       map[string]felt.ASTRADecision  `yaml:"decisions,omitempty"`
+	Insights        map[string]felt.ASTRAInsight   `yaml:"insights,omitempty"`
+	SuccessCriteria []felt.ASTRASuccessCriterion   `yaml:"success_criteria,omitempty"`
+	Container       string                         `yaml:"container,omitempty"`
+	Analyses        map[string]exportASTRAAnalysis `yaml:"analyses,omitempty"`
+}
+
+type exportASTRANode struct {
+	felt     *felt.Felt
+	children map[string]*exportASTRANode
+}
+
+func ExportASTRA(projectRoot, outPath string) error {
+	storage := felt.NewStorage(projectRoot)
+	felts, err := storage.ListMetadata()
+	if err != nil {
+		return err
+	}
+
+	root := buildASTRATree(felts)
+	doc := exportASTRADocument{
+		Analyses: map[string]exportASTRAAnalysis{},
+	}
+	for _, id := range sortedKeys(root.children) {
+		analysis, ok := root.children[id].export()
+		if !ok {
+			continue
+		}
+		doc.Analyses[id] = analysis
+	}
+
+	data, err := yaml.Marshal(doc)
+	if err != nil {
+		return fmt.Errorf("marshal astra yaml: %w", err)
+	}
+	if err := os.WriteFile(outPath, data, 0644); err != nil {
+		return fmt.Errorf("write astra yaml: %w", err)
+	}
+	return nil
+}
+
+func buildASTRATree(felts []*felt.Felt) *exportASTRANode {
+	root := &exportASTRANode{children: map[string]*exportASTRANode{}}
+
+	for _, f := range felts {
+		node := root
+		for _, segment := range strings.Split(f.ID, "/") {
+			if node.children[segment] == nil {
+				node.children[segment] = &exportASTRANode{children: map[string]*exportASTRANode{}}
+			}
+			node = node.children[segment]
+		}
+		node.felt = f
+	}
+
+	return root
+}
+
+func (n *exportASTRANode) export() (exportASTRAAnalysis, bool) {
+	childAnalyses := map[string]exportASTRAAnalysis{}
+	for _, id := range sortedKeys(n.children) {
+		child, ok := n.children[id].export()
+		if !ok {
+			continue
+		}
+		childAnalyses[id] = child
+	}
+
+	includeSelf := n.felt != nil && hasASTRAExportContent(n.felt)
+	if !includeSelf && len(childAnalyses) == 0 {
+		return exportASTRAAnalysis{}, false
+	}
+
+	analysis := exportASTRAAnalysis{}
+	if includeSelf {
+		analysis.Name = n.felt.Title
+		analysis.Tags = slices.Clone(n.felt.Tags)
+		analysis.Description = n.felt.Description
+		analysis.Inputs = slices.Clone(n.felt.Inputs)
+		analysis.Outputs = slices.Clone(n.felt.Outputs)
+		if len(n.felt.Decisions) > 0 {
+			analysis.Decisions = mapsClone(n.felt.Decisions)
+		}
+		if len(n.felt.Insights) > 0 {
+			analysis.Insights = mapsClone(n.felt.Insights)
+		}
+		analysis.SuccessCriteria = slices.Clone(n.felt.SuccessCriteria)
+		analysis.Container = n.felt.Container
+	}
+	if len(childAnalyses) > 0 {
+		analysis.Analyses = childAnalyses
+	}
+
+	return analysis, true
+}
+
+func hasASTRAExportContent(f *felt.Felt) bool {
+	return len(f.Inputs) > 0 ||
+		len(f.Outputs) > 0 ||
+		len(f.Decisions) > 0 ||
+		len(f.Insights) > 0 ||
+		len(f.SuccessCriteria) > 0
+}
+
+func mapsClone[T any](in map[string]T) map[string]T {
+	out := make(map[string]T, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
 }

@@ -35,7 +35,7 @@ Currently supported formats:
 		case "tapestry":
 			return runTapestryExport()
 		case "astra":
-			return fmt.Errorf("export format %q is not implemented yet", exportFormat)
+			return runASTRAExport()
 		default:
 			return fmt.Errorf("unknown export format %q (use tapestry or astra)", exportFormat)
 		}
@@ -100,6 +100,25 @@ func runTapestryExport() error {
 	}
 
 	fmt.Printf("Exported tapestry to %s\n", outDir)
+	return nil
+}
+
+func runASTRAExport() error {
+	projectRoot, err := felt.FindProjectRoot()
+	if err != nil {
+		return fmt.Errorf("not in a felt repository")
+	}
+
+	outPath := tapestryOut
+	if outPath == "" {
+		outPath = filepath.Join(projectRoot, "astra.yaml")
+	}
+
+	if err := tapestry.ExportASTRA(projectRoot, outPath); err != nil {
+		return err
+	}
+
+	fmt.Printf("Exported ASTRA to %s\n", outPath)
 	return nil
 }
 
