@@ -10,18 +10,18 @@ import (
 var initCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Initialize a new felt repository",
-	Long:  `Creates a .felt/ directory in the current directory.`,
+	Long:  `Creates or repairs the local .felt/ directory and MyST project config.`,
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		storage := felt.NewStorage(".")
-		if storage.Exists() {
-			return fmt.Errorf(".felt directory already exists")
-		}
 		if err := storage.Init(); err != nil {
 			return err
 		}
-		fmt.Println("Initialized .felt/")
-		return nil
+		if storage.Exists() {
+			fmt.Println("Ensured .felt/ and myst.yml")
+			return nil
+		}
+		return fmt.Errorf("failed to initialize .felt/")
 	},
 }
 

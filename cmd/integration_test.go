@@ -79,6 +79,16 @@ func TestIntegration(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, ".felt", "myst.yml")); err != nil {
 		t.Fatal("init: myst.yml not created")
 	}
+	if err := os.Remove(filepath.Join(dir, ".felt", "myst.yml")); err != nil {
+		t.Fatalf("init: remove myst.yml: %v", err)
+	}
+	out := mustFelt(t, dir, "init")
+	if !strings.Contains(out, "Ensured .felt/ and myst.yml") {
+		t.Fatalf("init: expected repair confirmation, got: %s", out)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".felt", "myst.yml")); err != nil {
+		t.Fatal("init: myst.yml not recreated")
+	}
 
 	// add — returns the fiber ID
 	fiberID := strings.TrimSpace(mustFelt(t, dir, "add", "test fiber", "-s", "open"))
@@ -87,7 +97,7 @@ func TestIntegration(t *testing.T) {
 	}
 
 	// ls
-	out := mustFelt(t, dir, "ls")
+	out = mustFelt(t, dir, "ls")
 	if !strings.Contains(out, "test fiber") {
 		t.Fatalf("ls: expected fiber in output, got: %s", out)
 	}
@@ -96,6 +106,10 @@ func TestIntegration(t *testing.T) {
 	out = mustFelt(t, dir, "show", fiberID)
 	if !strings.Contains(out, "test fiber") {
 		t.Fatalf("show: expected fiber title, got: %s", out)
+	}
+	out = mustFelt(t, dir, "show", fiberID, "--body")
+	if !strings.Contains(out, "(test-fiber)=\n# test fiber") {
+		t.Fatalf("new fiber body should start with MyST scaffold, got: %s", out)
 	}
 
 	// edit — mark active
@@ -150,7 +164,11 @@ func TestIntegration(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &listed); err != nil {
 		t.Fatalf("ls --json --body: invalid json: %v\n%s", err, out)
 	}
-	if len(listed) != 1 || listed[0]["body"] != "replacement body" {
+	if len(listed) != 1 {
+		t.Fatalf("ls --json --body: expected one fiber, got: %#v", listed)
+	}
+	body, _ := listed[0]["body"].(string)
+	if !strings.Contains(body, "(test-fiber)=\nreplacement body") {
 		t.Fatalf("ls --json --body: expected hydrated body, got: %#v", listed)
 	}
 

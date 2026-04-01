@@ -419,6 +419,8 @@ func splitFrontmatter(content []byte, includeBody bool) ([]byte, string, error) 
 
 // Marshal serializes a Felt to markdown with YAML frontmatter.
 func (f *Felt) Marshal() ([]byte, error) {
+	f.ensureMySTBody()
+
 	// Build frontmatter struct for controlled field ordering
 	fm := struct {
 		Title           string                   `yaml:"title"`
@@ -470,6 +472,39 @@ func (f *Felt) Marshal() ([]byte, error) {
 	}
 
 	return buf.Bytes(), nil
+}
+
+func mystAnchor(id string) string {
+	return path.Base(path.Clean(id))
+}
+
+func defaultMySTBody(id, title string) string {
+	anchor := mystAnchor(id)
+	if anchor == "." || anchor == "" {
+		return "# " + title
+	}
+	return fmt.Sprintf("(%s)=\n# %s", anchor, title)
+}
+
+func (f *Felt) ensureMySTBody() {
+	body := strings.TrimSpace(f.Body)
+	if body == "" {
+		f.Body = defaultMySTBody(f.ID, f.Title)
+		return
+	}
+
+	anchorLine := fmt.Sprintf("(%s)=", mystAnchor(f.ID))
+	if strings.HasPrefix(body, anchorLine) {
+		f.Body = body
+		return
+	}
+
+	f.Body = anchorLine + "\n" + body
+}
+
+// HasScaffoldOnlyBody reports whether the body is just the generated MyST scaffold.
+func (f *Felt) HasScaffoldOnlyBody() bool {
+	return strings.TrimSpace(f.Body) == defaultMySTBody(f.ID, f.Title)
 }
 
 // MatchesIDQuery checks if an ID matches a query string.
@@ -587,6 +622,8 @@ func (f *Felt) IsClosed() bool {
 
 // AppendComment adds a timestamped comment to the body.
 func (f *Felt) AppendComment(text string) {
+	f.ensureMySTBody()
+
 	timestamp := time.Now().Format("2006-01-02 15:04")
 	comment := fmt.Sprintf("\n**%s** — %s", timestamp, text)
 

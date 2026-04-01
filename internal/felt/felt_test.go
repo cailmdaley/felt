@@ -22,6 +22,9 @@ func TestNew(t *testing.T) {
 	if f.ID != "test-task" {
 		t.Errorf("ID = %q, want %q", f.ID, "test-task")
 	}
+	if f.Body != "" {
+		t.Errorf("Body = %q, want empty before first save", f.Body)
+	}
 }
 
 func TestNewEmptyTitle(t *testing.T) {
@@ -203,7 +206,7 @@ func TestMarshal(t *testing.T) {
 	if !strings.Contains(content, "title: Test Task") {
 		t.Error("Marshal() should contain title")
 	}
-	if !strings.Contains(content, "Body text here") {
+	if !strings.Contains(content, "(test-task)=\nBody text here.") {
 		t.Error("Marshal() should contain body")
 	}
 
@@ -217,6 +220,25 @@ func TestMarshal(t *testing.T) {
 	}
 	if parsed.Status != "" {
 		t.Errorf("Round-trip Status = %q, want empty", parsed.Status)
+	}
+}
+
+func TestMarshalAddsDefaultMySTBody(t *testing.T) {
+	now := time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
+	f := &Felt{
+		ID:        "quick-gotcha",
+		Title:     "Quick gotcha",
+		CreatedAt: now,
+	}
+
+	data, err := f.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal() error: %v", err)
+	}
+
+	content := string(data)
+	if !strings.Contains(content, "(quick-gotcha)=\n# Quick gotcha") {
+		t.Fatalf("Marshal() should add MyST scaffold, got %q", content)
 	}
 }
 
@@ -422,9 +444,12 @@ func TestStatusMethods(t *testing.T) {
 }
 
 func TestAppendComment(t *testing.T) {
-	f := &Felt{Body: "Initial body."}
+	f := &Felt{ID: "test-task", Title: "Test Task", Body: "Initial body."}
 	f.AppendComment("First comment")
 
+	if !strings.HasPrefix(f.Body, "(test-task)=\nInitial body.") {
+		t.Error("AppendComment should prepend MyST anchor when missing")
+	}
 	if !strings.Contains(f.Body, "## Comments") {
 		t.Error("AppendComment should add Comments section")
 	}

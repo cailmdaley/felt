@@ -32,10 +32,34 @@ func TestStorageInit(t *testing.T) {
 	if !s.Exists() {
 		t.Error("Exists() should be true after Init()")
 	}
+	data, err := os.ReadFile(filepath.Join(s.root, MystConfigName))
+	if err != nil {
+		t.Fatalf("reading myst.yml: %v", err)
+	}
+	if string(data) != defaultMystConfig {
+		t.Fatalf("myst.yml = %q, want default config", string(data))
+	}
 
 	// Init again should work (idempotent)
 	if err := s.Init(); err != nil {
 		t.Fatalf("Init() second call error: %v", err)
+	}
+}
+
+func TestStorageInitCreatesMystConfigInExistingDirectory(t *testing.T) {
+	dir := t.TempDir()
+	feltDir := filepath.Join(dir, DirName)
+	if err := os.MkdirAll(feltDir, 0755); err != nil {
+		t.Fatalf("MkdirAll() error: %v", err)
+	}
+
+	s := NewStorage(dir)
+	if err := s.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(feltDir, MystConfigName)); err != nil {
+		t.Fatalf("myst.yml should be created in existing .felt/: %v", err)
 	}
 }
 

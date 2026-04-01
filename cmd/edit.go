@@ -102,10 +102,10 @@ Examples:
 			}
 		}
 		if cmd.Flags().Changed("body") {
-			if f.Body != "" && editBody != f.Body {
+			if f.Body != "" && editBody != f.Body && !f.HasScaffoldOnlyBody() {
 				bodyOverwritten = true
 			}
-			if f.Body != "" && editBody == "" {
+			if f.Body != "" && editBody == "" && !f.HasScaffoldOnlyBody() {
 				bodyCleared = true
 			}
 			f.Body = editBody
