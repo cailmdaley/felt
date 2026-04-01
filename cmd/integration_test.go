@@ -277,6 +277,7 @@ description: Prior on BAO damping parameters
 inputs:
   - id: clustering_data
     type: data
+    from: parent.desi_dr1_vac
     description: DESI DR1 clustering sample
 outputs:
   - id: damped_pk
@@ -341,6 +342,12 @@ container: python:3.11-slim
 	if err := yaml.Unmarshal(astraData, &astraDoc); err != nil {
 		t.Fatalf("export astra: invalid yaml: %v\n%s", err, astraData)
 	}
+	if got := astraDoc["version"]; got != "1.0" {
+		t.Fatalf("export astra: version = %#v, want %q", got, "1.0")
+	}
+	if got := astraDoc["name"]; got != "Project Fibers" {
+		t.Fatalf("export astra: name = %#v, want %q", got, "Project Fibers")
+	}
 	analyses, ok := astraDoc["analyses"].(map[string]any)
 	if !ok {
 		t.Fatalf("export astra: missing analyses: %#v", astraDoc)
@@ -360,8 +367,25 @@ container: python:3.11-slim
 	if !ok {
 		t.Fatalf("export astra: missing damping-prior: %#v", children)
 	}
+	if parentInputs, ok := baoAnalysis["inputs"].([]any); !ok || len(parentInputs) != 1 {
+		t.Fatalf("export astra: structural parent inputs = %#v, want synthesized input", baoAnalysis["inputs"])
+	}
+	if parentOutputs, ok := baoAnalysis["outputs"].([]any); !ok || len(parentOutputs) != 1 {
+		t.Fatalf("export astra: structural parent outputs = %#v, want synthesized output", baoAnalysis["outputs"])
+	}
 	if got := dampingPrior["name"]; got != "BAO Damping Prior" {
 		t.Fatalf("export astra: name = %#v, want %q", got, "BAO Damping Prior")
+	}
+	inputs, ok := dampingPrior["inputs"].([]any)
+	if !ok || len(inputs) != 1 {
+		t.Fatalf("export astra: inputs missing from %#v", dampingPrior)
+	}
+	input0, ok := inputs[0].(map[string]any)
+	if !ok {
+		t.Fatalf("export astra: input[0] = %#v, want mapping", inputs[0])
+	}
+	if got := input0["from"]; got != "../desi_dr1_vac" {
+		t.Fatalf("export astra: normalized from = %#v, want %q", got, "../desi_dr1_vac")
 	}
 	if _, ok := dampingPrior["decisions"].(map[string]any); !ok {
 		t.Fatalf("export astra: missing decisions: %#v", dampingPrior)

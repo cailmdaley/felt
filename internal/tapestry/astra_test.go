@@ -216,6 +216,19 @@ func TestExportASTRA(t *testing.T) {
 		t.Fatalf("yaml.Unmarshal() error: %v", err)
 	}
 
+	if got := doc["version"]; got != astraExportVersion {
+		t.Fatalf("version = %#v, want %q", got, astraExportVersion)
+	}
+	if got := doc["name"]; got != "Project Fibers" {
+		t.Fatalf("name = %#v, want %q", got, "Project Fibers")
+	}
+	if inputs, ok := doc["inputs"].([]any); !ok || len(inputs) == 0 {
+		t.Fatalf("root inputs missing from export: %#v", doc)
+	}
+	if outputs, ok := doc["outputs"].([]any); !ok || len(outputs) == 0 {
+		t.Fatalf("root outputs missing from export: %#v", doc)
+	}
+
 	analyses, ok := doc["analyses"].(map[string]any)
 	if !ok {
 		t.Fatalf("analyses missing from export: %#v", doc)
@@ -236,11 +249,28 @@ func TestExportASTRA(t *testing.T) {
 	if !ok {
 		t.Fatalf("damping-prior missing from export: %#v", children)
 	}
+	if parentInputs, ok := baoAnalysis["inputs"].([]any); !ok || len(parentInputs) != 1 {
+		t.Fatalf("structural parent inputs = %#v, want synthesized input", baoAnalysis["inputs"])
+	}
+	if parentOutputs, ok := baoAnalysis["outputs"].([]any); !ok || len(parentOutputs) != 1 {
+		t.Fatalf("structural parent outputs = %#v, want synthesized output", baoAnalysis["outputs"])
+	}
 	if got := dampingPrior["name"]; got != "BAO Damping Prior" {
 		t.Fatalf("name = %#v, want %q", got, "BAO Damping Prior")
 	}
 	if got := dampingPrior["container"]; got != "python:3.11-slim" {
 		t.Fatalf("container = %#v, want %q", got, "python:3.11-slim")
+	}
+	inputs, ok := dampingPrior["inputs"].([]any)
+	if !ok || len(inputs) != 1 {
+		t.Fatalf("inputs missing from export: %#v", dampingPrior)
+	}
+	input0, ok := inputs[0].(map[string]any)
+	if !ok {
+		t.Fatalf("input[0] = %#v, want mapping", inputs[0])
+	}
+	if got := input0["from"]; got != "../desi_dr1_vac" {
+		t.Fatalf("normalized from = %#v, want %q", got, "../desi_dr1_vac")
 	}
 	if _, ok := dampingPrior["decisions"].(map[string]any); !ok {
 		t.Fatalf("decisions missing from export: %#v", dampingPrior)

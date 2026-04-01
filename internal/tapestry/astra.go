@@ -12,6 +12,14 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+const (
+	astraSchemaURL      = "https://astra-spec.org/v1/analysis.schema.json"
+	astraExportVersion  = "1.0"
+	structuralInputID   = "felt_node_context"
+	structuralOutputID  = "felt_node_report"
+	defaultProjectTitle = "Project Fibers"
+)
+
 type rawASTRA struct {
 	Decisions map[string]rawDecision `yaml:"decisions"`
 	Analyses  map[string]rawAnalysis `yaml:"analyses"`
@@ -150,6 +158,11 @@ func sortedKeys[T any](m map[string]T) []string {
 }
 
 type exportASTRADocument struct {
+	Schema   string                         `yaml:"$schema,omitempty"`
+	Version  string                         `yaml:"version,omitempty"`
+	Name     string                         `yaml:"name,omitempty"`
+	Inputs   []felt.ASTRAInput              `yaml:"inputs,omitempty"`
+	Outputs  []felt.ASTRAOutput             `yaml:"outputs,omitempty"`
 	Analyses map[string]exportASTRAAnalysis `yaml:"analyses,omitempty"`
 }
 
@@ -179,7 +192,16 @@ func ExportASTRA(projectRoot, outPath string) error {
 	}
 
 	root := buildASTRATree(felts)
+	projectTitle, err := readMystProjectTitle(projectRoot)
+	if err != nil {
+		return err
+	}
 	doc := exportASTRADocument{
+		Schema:   astraSchemaURL,
+		Version:  astraExportVersion,
+		Name:     projectTitle,
+		Inputs:   buildStructuralInputs(root.requiredParentInputs()),
+		Outputs:  buildStructuralOutputs(nil),
 		Analyses: map[string]exportASTRAAnalysis{},
 	}
 	for _, id := range sortedKeys(root.children) {
@@ -237,7 +259,7 @@ func (n *exportASTRANode) export() (exportASTRAAnalysis, bool) {
 		analysis.Name = n.felt.Title
 		analysis.Tags = slices.Clone(n.felt.Tags)
 		analysis.Description = n.felt.Description
-		analysis.Inputs = slices.Clone(n.felt.Inputs)
+		analysis.Inputs = normalizeASTRAInputs(n.felt.Inputs)
 		analysis.Outputs = slices.Clone(n.felt.Outputs)
 		if len(n.felt.Decisions) > 0 {
 			analysis.Decisions = mapsClone(n.felt.Decisions)
@@ -248,11 +270,137 @@ func (n *exportASTRANode) export() (exportASTRAAnalysis, bool) {
 		analysis.SuccessCriteria = slices.Clone(n.felt.SuccessCriteria)
 		analysis.Container = n.felt.Container
 	}
+	if !includeSelf {
+		analysis.Inputs = buildStructuralInputs(n.requiredParentInputs())
+		analysis.Outputs = buildStructuralOutputs(analysis.Outputs)
+	}
 	if len(childAnalyses) > 0 {
 		analysis.Analyses = childAnalyses
 	}
 
 	return analysis, true
+}
+
+func (n *exportASTRANode) requiredParentInputs() []string {
+	required := map[string]struct{}{}
+	for _, child := range n.children {
+		var inputs []felt.ASTRAInput
+		if child.felt != nil {
+			inputs = child.felt.Inputs
+		}
+		for _, input := range inputs {
+			ref := normalizeParentRef(input.From)
+			if parentInput, ok := parentInputID(ref); ok {
+				required[parentInput] = struct{}{}
+			}
+		}
+	}
+
+	ids := make([]string, 0, len(required))
+	for id := range required {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+func normalizeASTRAInputs(inputs []felt.ASTRAInput) []felt.ASTRAInput {
+	if len(inputs) == 0 {
+		return nil
+	}
+	normalized := make([]felt.ASTRAInput, 0, len(inputs))
+	for _, input := range inputs {
+		cloned := input
+		cloned.From = normalizeParentRef(cloned.From)
+		normalized = append(normalized, cloned)
+	}
+	return normalized
+}
+
+func normalizeParentRef(ref string) string {
+	if !strings.HasPrefix(ref, "parent.") {
+		return ref
+	}
+	trimmed := strings.TrimPrefix(ref, "parent.")
+	if trimmed == "" {
+		return ref
+	}
+	return "../" + trimmed
+}
+
+func parentInputID(ref string) (string, bool) {
+	if ref == "" {
+		return "", false
+	}
+	if strings.HasPrefix(ref, "../") {
+		ref = strings.TrimPrefix(ref, "../")
+	}
+	if ref == "" || strings.Contains(ref, ".") {
+		return "", false
+	}
+	return ref, true
+}
+
+func buildStructuralInputs(required []string) []felt.ASTRAInput {
+	if len(required) == 0 {
+		return []felt.ASTRAInput{{
+			ID:          structuralInputID,
+			Type:        "data",
+			Description: "Synthetic context input for a structural felt analysis node.",
+		}}
+	}
+
+	inputs := make([]felt.ASTRAInput, 0, len(required))
+	for _, id := range required {
+		inputs = append(inputs, felt.ASTRAInput{
+			ID:          id,
+			Type:        "data",
+			Description: "Synthesized from child input references during felt ASTRA export.",
+		})
+	}
+	return inputs
+}
+
+func buildStructuralOutputs(existing []felt.ASTRAOutput) []felt.ASTRAOutput {
+	if len(existing) > 0 {
+		return existing
+	}
+	return []felt.ASTRAOutput{{
+		ID:          structuralOutputID,
+		Type:        "report",
+		Description: "Synthetic report output for a structural felt analysis node.",
+	}}
+}
+
+func readMystProjectTitle(projectRoot string) (string, error) {
+	data, err := os.ReadFile(filepath.Join(projectRoot, felt.DirName, felt.MystConfigName))
+	if err != nil {
+		if os.IsNotExist(err) {
+			base := filepath.Base(projectRoot)
+			if base == "" || base == "." || base == string(filepath.Separator) {
+				return defaultProjectTitle, nil
+			}
+			return base, nil
+		}
+		return "", fmt.Errorf("read myst.yml: %w", err)
+	}
+
+	var cfg struct {
+		Project struct {
+			Title string `yaml:"title"`
+		} `yaml:"project"`
+	}
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return "", fmt.Errorf("parse myst.yml: %w", err)
+	}
+	if title := strings.TrimSpace(cfg.Project.Title); title != "" {
+		return title, nil
+	}
+	base := filepath.Base(projectRoot)
+	if base == "" || base == "." || base == string(filepath.Separator) {
+		return defaultProjectTitle, nil
+	}
+	return base, nil
 }
 
 func hasASTRAExportContent(f *felt.Felt) bool {
