@@ -8,6 +8,7 @@ tags:
 created-at: 2026-04-01T00:41:11.77547+02:00
 ---
 
+(felt-v2-constitution)=
 # felt v2: Directory Fibers, MyST, ASTRA-Compatible
 
 felt shifts from flat files to directory-based fibers, from hex IDs to slugs, from 22 commands to ~10, from plain markdown to MyST-flavored, and from felt-only fields to ASTRA-compatible frontmatter. felt stays felt — one implementation of the ASTRA format.
@@ -256,7 +257,7 @@ Run on project `.felt/`. Global felt (`~/loom/.felt/`) migrated separately, late
 
 **Codebase:** `~/Documents/projects/felt/` — Go CLI, cobra commands, ~3k LOC.
 
-**Current branch state:** the repo's own `.felt/` is still flat-file and hex-suffixed. Once storage flips to directory-only reads, source-built `felt` in this repo will stop seeing local fibers until `felt migrate` lands or the repo is migrated. Treat that as an expected intermediate state, not a regression in the storage layer.
+**Current branch state:** the repo's own `.felt/` has been migrated to directory fibers and slug IDs. Source-built `felt` now sees local fibers through the directory-only storage path; keep it that way.
 
 | File | Role |
 |------|------|

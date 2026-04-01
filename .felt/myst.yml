@@ -1,0 +1,5 @@
+version: 1
+project:
+  title: Project Fibers
+site:
+  template: article-theme

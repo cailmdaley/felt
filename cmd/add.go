@@ -154,10 +154,10 @@ func init() {
 
 	originalRun := rootCmd.RunE
 	rootCmd.RunE = func(cmd *cobra.Command, args []string) error {
+		if len(args) > 0 && isRetiredCommand(args[0]) {
+			return fmt.Errorf("unknown command %q for %q", args[0], cmd.CommandPath())
+		}
 		if len(args) == 1 && !isSubcommand(args[0]) {
-			if isRetiredCommand(args[0]) {
-				return fmt.Errorf("unknown command %q for %q", args[0], cmd.CommandPath())
-			}
 			// Treat as "felt add <title>"
 			// Flags are already parsed into the add* variables since we share them
 			return addCmd.RunE(cmd, args)

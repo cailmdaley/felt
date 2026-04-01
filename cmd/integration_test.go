@@ -490,6 +490,13 @@ Parent body.
 	if !strings.Contains(out, "unknown command") {
 		t.Fatalf("tag should be unknown, got: %s", out)
 	}
+	out, err = felt(dir, "tag", "foo")
+	if err == nil {
+		t.Fatalf("tag with extra args should still be removed from the public CLI, got: %s", out)
+	}
+	if !strings.Contains(out, "unknown command") {
+		t.Fatalf("tag with extra args should be unknown, got: %s", out)
+	}
 	for _, retired := range []string{"untag", "link", "unlink", "comment", "upstream", "downstream", "graph", "ready", "find", "prime", "check", "path"} {
 		out, err = felt(dir, retired)
 		if err == nil {
@@ -497,6 +504,13 @@ Parent body.
 		}
 		if !strings.Contains(out, "unknown command") {
 			t.Fatalf("%s should be unknown, got: %s", retired, out)
+		}
+		out, err = felt(dir, retired, "foo")
+		if err == nil {
+			t.Fatalf("%s with extra args should still be removed from the public CLI, got: %s", retired, out)
+		}
+		if !strings.Contains(out, "unknown command") {
+			t.Fatalf("%s with extra args should be unknown, got: %s", retired, out)
 		}
 	}
 
