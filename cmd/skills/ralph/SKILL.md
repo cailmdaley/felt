@@ -32,7 +32,7 @@ The failure mode is leaving while you still have a clear view. You've read the c
 
 **Discoverable updates.** Commits, fibers, test results — not notes or progress files. The next iteration finds what changed by inspecting the system.
 
-**No fiber comments.** Never use the comment-editing path within the loop. Update state through sub-fibers, git commits, documentation, code. Comments bloat the fiber and the system prompt.
+**No fiber comments.** Never use `felt edit <id> --comment` within the loop. Update state through sub-fibers, git commits, documentation, code. Comments bloat the fiber and the system prompt.
 
 **Pointers, not snapshots.** If you learn something, update the constitution's *context* or *desired state* — don't leave comments.
 

@@ -143,6 +143,46 @@ func TestBundledSkillsAvoidRetiredCommands(t *testing.T) {
 	}
 }
 
+func TestBundledSkillsAvoidLegacyCommentBodyEdits(t *testing.T) {
+	root, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+
+	candidates := []string{
+		filepath.Join(root, "skills"),
+		filepath.Join(root, "cmd", "skills"),
+	}
+
+	skillsRoot := ""
+	for _, candidate := range candidates {
+		info, err := os.Stat(candidate)
+		if err == nil && info.IsDir() {
+			skillsRoot = candidate
+			break
+		}
+		if err != nil && !os.IsNotExist(err) {
+			t.Fatalf("stat %s: %v", candidate, err)
+		}
+	}
+	if skillsRoot == "" {
+		t.Fatalf("could not find bundled skills directory from %s", root)
+	}
+
+	data, err := os.ReadFile(filepath.Join(skillsRoot, "felt", "references", "transcripts.md"))
+	if err != nil {
+		t.Fatalf("read transcripts reference: %v", err)
+	}
+	text := string(data)
+
+	if strings.Contains(text, `felt edit <id> --body "$(felt show <id> --body)`) {
+		t.Fatal("transcripts reference still teaches legacy body-overwrite comment editing")
+	}
+	if !strings.Contains(text, `felt edit <id> --comment "2025-01-21 14:30 — Update from meeting: progress on X"`) {
+		t.Fatal("transcripts reference should teach consolidated edit --comment usage")
+	}
+}
+
 func TestSetupSkillsLongMentionsActualBundledSkills(t *testing.T) {
 	text := setupSkillsCmd.Long
 	for _, name := range bundledSkillNames() {
