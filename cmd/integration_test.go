@@ -490,7 +490,7 @@ Parent body.
 	if !strings.Contains(out, "unknown command") {
 		t.Fatalf("tag should be unknown, got: %s", out)
 	}
-	for _, retired := range []string{"untag", "link", "unlink", "comment", "upstream", "downstream", "graph", "ready", "prime", "check", "path"} {
+	for _, retired := range []string{"untag", "link", "unlink", "comment", "upstream", "downstream", "graph", "ready", "find", "prime", "check", "path"} {
 		out, err = felt(dir, retired)
 		if err == nil {
 			t.Fatalf("%s should be removed from the public CLI, got: %s", retired, out)

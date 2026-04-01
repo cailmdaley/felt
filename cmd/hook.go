@@ -181,11 +181,13 @@ func cliReference() string {
 ` + "```" + `
 felt init                       # initialize .felt/ + myst.yml
 felt "title"                    # create fiber
-felt add "title" -s open -t tag -a <dep-id> -o "outcome"
-felt edit <id> -s active        # enter tracking / mark active
-felt edit <id> -s closed -o "outcome"  # close with outcome
+felt add "title" [flags]        # create with status/tags/deps/outcome
+felt edit <id> --status active  # enter tracking / mark active
+felt edit <id> --status closed --outcome "outcome"
+felt edit <id> --tag foo --untag bar
+felt edit <id> --link other --unlink old
+felt edit <id> --comment "note" # append under ## Comments
 felt edit <id> --body "text"    # full body replacement (overwrite)
-felt edit <id> --comment "note" # append to comments section
 felt show <id>                  # full details
 felt show <id> -d summary       # metadata + lede paragraph
 felt show <id> -d compact       # metadata + outcome only
@@ -194,10 +196,13 @@ felt ls --ready                 # open fibers whose deps are closed
 felt ls -t tapestry:            # any filter widens to all statuses
 felt ls -s closed "query"       # explicit -s overrides; -e exact, -r regex
 felt tree <id> --up             # direct dependencies
-felt tree <id> --up --all       # full transitive upstream
 felt tree <id> --down           # direct dependents
+felt tree <id> --up --all       # full transitive upstream
 felt tree <id> --format mermaid # graph export
 felt tree --check               # validate graph integrity
+felt nest <child> <parent>      # move into parent subtree
+felt unnest <child>             # promote back to top level
+felt migrate [--dry-run]        # flat files -> directory fibers
 felt export --format astra      # write astra.yaml from ASTRA frontmatter
 Also: hook session, rm, setup, update
 ` + "```" + `

@@ -42,7 +42,27 @@ func TestBundledSkillsAvoidRetiredCommands(t *testing.T) {
 		t.Fatalf("getwd: %v", err)
 	}
 
-	err = filepath.Walk(filepath.Join(root, "skills"), func(path string, info os.FileInfo, err error) error {
+	candidates := []string{
+		filepath.Join(root, "skills"),
+		filepath.Join(root, "cmd", "skills"),
+	}
+
+	skillsRoot := ""
+	for _, candidate := range candidates {
+		info, err := os.Stat(candidate)
+		if err == nil && info.IsDir() {
+			skillsRoot = candidate
+			break
+		}
+		if err != nil && !os.IsNotExist(err) {
+			t.Fatalf("stat %s: %v", candidate, err)
+		}
+	}
+	if skillsRoot == "" {
+		t.Fatalf("could not find bundled skills directory from %s", root)
+	}
+
+	err = filepath.Walk(skillsRoot, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
@@ -62,6 +82,6 @@ func TestBundledSkillsAvoidRetiredCommands(t *testing.T) {
 		return nil
 	})
 	if err != nil {
-		t.Fatalf("walk skills: %v", err)
+		t.Fatalf("walk %s: %v", skillsRoot, err)
 	}
 }
