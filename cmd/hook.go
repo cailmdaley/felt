@@ -58,6 +58,7 @@ func minimalOutput() string {
 - **Use felt for everything** — tasks, decisions, questions, detours, bugs you can't chase now. If it might matter, it's a fiber.
 - Outcome (` + "`-o`" + `) is the documentation: the conclusion, the reasoning, what was learned
 - ` + "`felt edit`" + ` is non-interactive (flags only); for patch edits, modify the fiber markdown file in ` + "`.felt/<path>/<slug>.md`" + ` directly
+- ` + "`felt export --format astra`" + ` emits ASTRA-compatible ` + "`astra.yaml`" + ` from frontmatter-bearing fibers
 - **Leave a wake** — file as you go
 - **Titles are DAG node labels: 2-3 words.** Body and outcome carry full content.
 `
@@ -142,6 +143,7 @@ func formatSessionOutput(felts []*felt.Felt, g *felt.Graph) string {
 	sb.WriteString("- **Use felt for everything** — tasks, decisions, questions, detours, bugs you can't chase now. If it might matter, it's a fiber.\n")
 	sb.WriteString("- Outcome (`-o`) is the documentation: the conclusion, the reasoning, what was learned\n")
 	sb.WriteString("- `felt edit` is non-interactive (flags only); for patch edits, modify the fiber markdown file in `.felt/<path>/<slug>.md` directly\n")
+	sb.WriteString("- `felt export --format astra` emits ASTRA-compatible `astra.yaml` from frontmatter-bearing fibers\n")
 	sb.WriteString("- **Leave a wake** — file as you go\n")
 	sb.WriteString("- **Titles are DAG node labels: 2-3 words.** Body and outcome carry full content.\n")
 
@@ -196,7 +198,8 @@ felt tree <id> --up --all       # full transitive upstream
 felt tree <id> --down           # direct dependents
 felt tree <id> --format mermaid # graph export
 felt tree --check               # validate graph integrity
-Also: hook session, rm
+felt export --format astra      # write astra.yaml from ASTRA frontmatter
+Also: hook session, rm, setup, update
 ` + "```" + `
 Statuses: · untracked, ○ open, ◐ active, ● closed
 Detail: title < compact < summary < full (default). Summary shows the **lede** — the first paragraph of the body. Write it to stand alone.

@@ -50,6 +50,7 @@ felt "Use DES Y3 weights"                              # file a decision
 felt add "Covariance estimation" -a use-des-y3-weights # depends on that decision
 felt edit covariance-estimation --comment "tried analytic, too slow"
 felt edit covariance-estimation -s closed -o "switched to jackknife — 10x faster, <2% bias"
+felt export --format astra                             # emit astra.yaml from ASTRA frontmatter
 ```
 
 A fiber can be anything: a task, a decision, a research claim, a question, a spec. The body carries detail and the outcome captures the conclusion. Dependencies connect them.
@@ -126,6 +127,33 @@ felt tree <id> --up --all               # transitive upstream
 felt tree <id> --down                   # direct dependents
 felt tree --format mermaid              # export whole graph (mermaid/dot/text)
 felt tree --check                       # validate integrity
+```
+
+### ASTRA Frontmatter
+
+Fibers can carry optional ASTRA-compatible frontmatter alongside felt's native fields. Those fields are searchable through `felt ls` and exportable with `felt export --format astra`.
+
+```yaml
+---
+title: BAO Damping Prior
+outcome: Informative Gaussian priors confirmed.
+inputs:
+  - id: clustering_data
+    type: data
+    from: parent.desi_dr1_vac
+decisions:
+  damping_prior:
+    label: BAO Damping Prior
+    default: gaussian
+    options:
+      gaussian:
+        label: Informative Gaussian
+---
+```
+
+```bash
+felt ls "BAO"                 # title, outcome, and ASTRA fields
+felt export --format astra    # writes ./astra.yaml
 ```
 
 ### Progressive Disclosure
@@ -225,6 +253,9 @@ felt setup claude|codex|skills    felt update
 --up                              --down
 --all                             --check
 -f, --format text|mermaid|dot
+
+# felt export
+-f, --format tapestry|astra       --out <path>
 
 # global
 -j, --json

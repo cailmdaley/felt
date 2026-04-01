@@ -66,7 +66,10 @@ felt add "Decision: Use algorithm X" -o "Meeting 2025-01-21. Compared X vs Y. X 
 
 Update existing fibers if content is status on existing work:
 ```bash
-felt edit <id> --comment "Update from meeting: progress on X"
+felt edit <id> --body "$(felt show <id> --body)
+
+## Comments
+**2025-01-21 14:30** — Update from meeting: progress on X"
 felt edit <id> -s closed -o "Resolved in meeting: decided to Z"
 ```
 

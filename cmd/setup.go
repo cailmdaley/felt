@@ -162,6 +162,7 @@ func claudeMDSnippet() string {
 		"Each fiber lives at `.felt/<path>/<slug>.md` with YAML frontmatter and a MyST-flavored markdown body. " +
 		"Body is the content; outcome is the conclusion. " +
 		"`felt tree <id> --up` shows what a decision rests on; `felt tree <id> --down` shows what breaks if it changes. " +
+		"`felt export --format astra` turns ASTRA-bearing frontmatter into `astra.yaml`. " +
 		"A missing causal link costs an investigation; a fiber costs nothing.\n\n" +
 		"**Rhythm.** File before you start, comment as you go, close with an outcome.\n" +
 		fence + "bash\n" +
@@ -170,6 +171,7 @@ func claudeMDSnippet() string {
 		"felt edit <id> -s closed -o \"X works because...\"   # close with outcome\n" +
 		fence + "\n\n" +
 		"**Discipline.** Titles are 2–3 word DAG node labels — terse, like commit subjects. " +
+		"Path IDs like `bao-analysis/damping-prior` are first-class; bare slugs resolve only when unambiguous. " +
 		"Outcomes say not just *what* but *why*, pointing back through the DAG. " +
 		"Decisions get their own fibers; methodology questions belong in decision fibers, not specs. " +
 		"Follow the data: curious, not confirmatory.\n"
