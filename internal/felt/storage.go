@@ -345,6 +345,26 @@ func (s *Storage) MigrateFlatFiles(dryRun bool) (*MigrationResult, error) {
 		}
 	}
 
+	// Rewrite stale hex-suffixed depends-on in pre-existing directory fibers.
+	allFibers, err := s.List()
+	if err != nil {
+		return nil, fmt.Errorf("listing fibers for dep rewrite: %w", err)
+	}
+	for _, f := range allFibers {
+		changed := false
+		for i, dep := range f.DependsOn {
+			if newID, ok := idMap[dep.ID]; ok {
+				f.DependsOn[i].ID = newID
+				changed = true
+			}
+		}
+		if changed {
+			if err := s.Write(f); err != nil {
+				return nil, fmt.Errorf("rewriting deps in %s: %w", f.ID, err)
+			}
+		}
+	}
+
 	return result, nil
 }
 

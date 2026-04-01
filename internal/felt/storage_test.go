@@ -780,3 +780,52 @@ Body.
 		t.Fatalf("dry-run should not create migrated directory, err=%v", err)
 	}
 }
+
+func TestStorageMigrateRewritesPreExistingDirectoryDeps(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStorage(dir)
+	if err := s.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	// Flat file that will be migrated
+	legacy := `---
+title: BAO Analysis
+created-at: 2026-03-16T10:00:00Z
+---
+
+Analysis body.
+`
+	if err := os.WriteFile(filepath.Join(s.root, "bao-analysis-d34db33f.md"), []byte(legacy), 0644); err != nil {
+		t.Fatalf("write legacy: %v", err)
+	}
+
+	// Pre-existing directory fiber with a stale hex dep
+	preExisting := &Felt{
+		ID:        "session-hub",
+		Title:     "Session hub",
+		CreatedAt: time.Now(),
+		DependsOn: Dependencies{{ID: "bao-analysis-d34db33f"}},
+		Body:      "(session-hub)=\n# Session hub",
+	}
+	if err := s.Write(preExisting); err != nil {
+		t.Fatalf("write pre-existing: %v", err)
+	}
+
+	result, err := s.MigrateFlatFiles(false)
+	if err != nil {
+		t.Fatalf("MigrateFlatFiles() error: %v", err)
+	}
+	if len(result.Entries) != 1 {
+		t.Fatalf("expected 1 migration entry, got %d", len(result.Entries))
+	}
+
+	// The pre-existing directory fiber should have its dep rewritten
+	hub, err := s.Read("session-hub")
+	if err != nil {
+		t.Fatalf("Read session-hub: %v", err)
+	}
+	if got := hub.DependsOn[0].ID; got != "bao-analysis" {
+		t.Fatalf("pre-existing dep rewrite = %q, want %q", got, "bao-analysis")
+	}
+}

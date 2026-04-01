@@ -8,18 +8,20 @@ description: >
   (4) Sweep — coherence check across the assemblage.
   Also triggers on "update the tapestry", "file a claim", "add evidence",
   export work (`felt export --format tapestry|astra`), tapestry reshaping,
-  or evidence.json creation.
+  evidence.json creation, or formalization (adding ASTRA structure to fibers).
 ---
 
 # /felt — Working with Fibers
 
-Retroactive extraction at session end. Consolidation over time. Coherence when needed.
+Retroactive extraction at session end. Formalization during work. Consolidation over time. Coherence when needed.
 
 ---
 
 ## Philosophy
 
 **Mining is retroactive.** Extract what wasn't captured in the moment. Decisions made, questions answered, patterns discovered.
+
+**Formalization is proactive.** During analysis work, fibers can move from annotated to formalized to analysis-grade as the structure becomes real and, later, human-validated. The agent does not forget reasoning; formalize on the fly.
 
 **Consolidate over time.** Old fibers become noise. Archive mode composts quick fibers into richer documentation.
 
@@ -37,12 +39,23 @@ Retroactive extraction at session end. Consolidation over time. Coherence when n
 |------|------|---------|
 | **session** | End of coding session | No — autonomous |
 | **transcript** | External file (meeting, voice note) | Yes — present plan first |
+| **formalize** | During analysis work, accreting ASTRA structure | No — inline with work |
 | **archive** | Consolidating old fibers | Yes — confirm before changes |
 | **sweep** | Coherence check across assemblage | Yes — present findings first |
 
 **Felt target:**
 - Project-specific session → local `.felt/`
 - General/cross-project → `~/loom/.felt/`
+
+## Formalization Model
+
+| Kind | Annotated | Formalized | Analysis-grade |
+|------|-----------|------------|----------------|
+| **Decision** | Note or body text about a pending choice | `decisions:` block with real options, default, excluded reasoning | Same, plus `analysis-grade: true` after human validation and analytical reliance |
+| **Computation** | Breadcrumb or running note about work being done | `inputs:` + `outputs:` with optional `recipe` | Same, plus `analysis-grade: true` when the computation is part of the real argument |
+| **Finding** | Note that a claim may be true | `insights:` claim with evidence pointers | Same, plus `analysis-grade: true` after human validation and analytical reliance |
+
+Annotated is any valid fiber. Formalized means at least one ASTRA object is well formed enough to export. Analysis-grade is a workflow flag, not a richer schema.
 
 ---
 
@@ -119,5 +132,7 @@ When this skill is activated, read at least one of the following depending on co
 | Mining a Claude session | [claude-sessions.md](references/claude-sessions.md) |
 | Processing external transcript | [transcripts.md](references/transcripts.md) |
 | Consolidating old fibers, tapestry reshaping | [archiving.md](references/archiving.md) |
+| Formalizing fibers with ASTRA structure | [formalization.md](references/formalization.md) |
+| Migrating flat fibers to directory format | [migration.md](references/migration.md) |
 | Tapestry: evidence, export, reshaping | [tapestry.md](references/tapestry.md) |
 | Tapestry: viewer setup, GitHub Pages | [viewer-setup.md](references/viewer-setup.md) |
