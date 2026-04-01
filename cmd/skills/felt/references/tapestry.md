@@ -1,13 +1,17 @@
 # Tapestry
 
-The tapestry is a projection of felt for inspection: a navigable DAG of computations, claims, and decisions with evidence attached. Not every fiber belongs — only what's important to inspect.
+The tapestry is the human-facing surface of the work. It transforms the chaos of fibers — decisions, actions, bugs, emails, technical fixes — into something polished and navigable. Not every fiber belongs. Only what helps a human understand the state of things.
+
+For scientific analysis: computations with evidence, key claims, the shape of what's known and unknown.
+For projects: documents, research, landscape context, institutional facts, key open questions.
+
+**NOT:** decisions, actions, emails, formatting fixes, task tracking, technical migrations. These live in the DAG for the agent to trace. The tapestry is what the human reads. Aim for ~10–15 nodes — enough to orient, few enough to hold in your head.
 
 ## When to Update
 
 - **After a computation produces results** → ensure the fiber has a `tapestry:` tag, write or update evidence.json
 - **After finding a result** → update the fiber outcome with the finding, cite the exact source line
-- **After making a decision** → file a decision fiber with alternatives considered
-- **When told to "update the tapestry"** → check which computations ran, which fibers are missing tags or evidence, wire any new dependencies
+- **When told to "update the tapestry"** → check which fibers are missing tags or evidence, wire any new dependencies
 
 ## Branching Discipline
 
