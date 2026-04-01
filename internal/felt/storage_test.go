@@ -532,6 +532,31 @@ func TestStorageFindNestedByBasename(t *testing.T) {
 	}
 }
 
+func TestStorageFindPrefersExactIDOverPrefix(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStorage(dir)
+	if err := s.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	for _, f := range []*Felt{
+		{ID: "bao-analysis", Title: "BAO Analysis", CreatedAt: time.Now()},
+		{ID: "bao-analysis/damping-prior", Title: "Damping Prior", CreatedAt: time.Now()},
+	} {
+		if err := s.Write(f); err != nil {
+			t.Fatalf("Write(%s) error: %v", f.ID, err)
+		}
+	}
+
+	found, err := s.Find("bao-analysis")
+	if err != nil {
+		t.Fatalf("Find() error: %v", err)
+	}
+	if found.ID != "bao-analysis" {
+		t.Fatalf("Find() = %q, want exact top-level ID", found.ID)
+	}
+}
+
 func TestFindProjectRoot(t *testing.T) {
 	// Create a nested directory structure with .felt at the top
 	rootDir := t.TempDir()
@@ -570,5 +595,185 @@ func TestFindProjectRootNotFound(t *testing.T) {
 	_, err := FindProjectRoot()
 	if err == nil {
 		t.Error("FindProjectRoot() should error when no .felt found")
+	}
+}
+
+func TestStorageMoveSubtreeRewritesDependencies(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStorage(dir)
+	if err := s.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	parent := &Felt{
+		ID:        "bao-analysis",
+		Title:     "BAO Analysis",
+		CreatedAt: time.Now(),
+	}
+	child := &Felt{
+		ID:        "damping-prior",
+		Title:     "Damping Prior",
+		CreatedAt: time.Now(),
+		DependsOn: Dependencies{{ID: "bao-analysis"}},
+	}
+	grandchild := &Felt{
+		ID:        "damping-prior/contour-plot",
+		Title:     "Contour Plot",
+		CreatedAt: time.Now(),
+		DependsOn: Dependencies{{ID: "damping-prior"}},
+	}
+	consumer := &Felt{
+		ID:        "consumer",
+		Title:     "Consumer",
+		CreatedAt: time.Now(),
+		DependsOn: Dependencies{{ID: "damping-prior/contour-plot"}},
+	}
+
+	for _, f := range []*Felt{parent, child, grandchild, consumer} {
+		if err := s.Write(f); err != nil {
+			t.Fatalf("Write(%s) error: %v", f.ID, err)
+		}
+	}
+
+	if err := s.MoveSubtree("damping-prior", "bao-analysis/damping-prior"); err != nil {
+		t.Fatalf("MoveSubtree() error: %v", err)
+	}
+
+	if _, err := s.Read("damping-prior"); err == nil {
+		t.Fatal("old child ID should no longer exist")
+	}
+	moved, err := s.Read("bao-analysis/damping-prior")
+	if err != nil {
+		t.Fatalf("Read moved child: %v", err)
+	}
+	if got := moved.DependsOn[0].ID; got != "bao-analysis" {
+		t.Fatalf("moved child dependency = %q, want %q", got, "bao-analysis")
+	}
+
+	descendant, err := s.Read("bao-analysis/damping-prior/contour-plot")
+	if err != nil {
+		t.Fatalf("Read moved descendant: %v", err)
+	}
+	if got := descendant.DependsOn[0].ID; got != "bao-analysis/damping-prior" {
+		t.Fatalf("moved descendant dependency = %q, want %q", got, "bao-analysis/damping-prior")
+	}
+
+	updatedConsumer, err := s.Read("consumer")
+	if err != nil {
+		t.Fatalf("Read consumer: %v", err)
+	}
+	if got := updatedConsumer.DependsOn[0].ID; got != "bao-analysis/damping-prior/contour-plot" {
+		t.Fatalf("consumer dependency = %q, want rewritten descendant ID", got)
+	}
+}
+
+func TestStorageMoveSubtreeRejectsSelfNesting(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStorage(dir)
+	if err := s.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	f := &Felt{
+		ID:        "bao-analysis",
+		Title:     "BAO Analysis",
+		CreatedAt: time.Now(),
+	}
+	if err := s.Write(f); err != nil {
+		t.Fatalf("Write() error: %v", err)
+	}
+
+	if err := s.MoveSubtree("bao-analysis", "bao-analysis/damping-prior"); err == nil {
+		t.Fatal("MoveSubtree should reject moving into its own subtree")
+	}
+}
+
+func TestStorageMigrateFlatFiles(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStorage(dir)
+	if err := s.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	legacyA := `---
+title: Quick gotcha
+created-at: 2026-03-15T10:00:00Z
+depends-on:
+  - bao-analysis-d34db33f
+---
+
+Quick note.
+`
+	legacyB := `---
+title: BAO Analysis
+created-at: 2026-03-16T10:00:00Z
+---
+
+Analysis body.
+`
+	if err := os.WriteFile(filepath.Join(s.root, "quick-gotcha-deadbeef.md"), []byte(legacyA), 0644); err != nil {
+		t.Fatalf("write legacyA: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(s.root, "bao-analysis-d34db33f.md"), []byte(legacyB), 0644); err != nil {
+		t.Fatalf("write legacyB: %v", err)
+	}
+
+	result, err := s.MigrateFlatFiles(false)
+	if err != nil {
+		t.Fatalf("MigrateFlatFiles() error: %v", err)
+	}
+	if len(result.Entries) != 2 {
+		t.Fatalf("migration entries = %#v", result.Entries)
+	}
+
+	if _, err := os.Stat(filepath.Join(s.root, "quick-gotcha-deadbeef.md")); !os.IsNotExist(err) {
+		t.Fatalf("legacy flat file should be removed, err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(s.root, "quick-gotcha", "quick-gotcha.md")); err != nil {
+		t.Fatalf("migrated quick-gotcha missing: %v", err)
+	}
+
+	migrated, err := s.Read("quick-gotcha")
+	if err != nil {
+		t.Fatalf("Read migrated quick-gotcha: %v", err)
+	}
+	if got := migrated.DependsOn[0].ID; got != "bao-analysis" {
+		t.Fatalf("dependency rewrite = %q, want %q", got, "bao-analysis")
+	}
+	if !strings.HasPrefix(migrated.Body, "(quick-gotcha)=") {
+		t.Fatalf("migrated body should have MyST anchor, got %q", migrated.Body)
+	}
+}
+
+func TestStorageMigrateFlatFilesDryRun(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStorage(dir)
+	if err := s.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	legacy := `---
+title: Quick gotcha
+created-at: 2026-03-15T10:00:00Z
+---
+
+Body.
+`
+	if err := os.WriteFile(filepath.Join(s.root, "quick-gotcha-deadbeef.md"), []byte(legacy), 0644); err != nil {
+		t.Fatalf("write legacy: %v", err)
+	}
+
+	result, err := s.MigrateFlatFiles(true)
+	if err != nil {
+		t.Fatalf("MigrateFlatFiles(true) error: %v", err)
+	}
+	if len(result.Entries) != 1 || result.Entries[0].NewID != "quick-gotcha" {
+		t.Fatalf("dry-run entries = %#v", result.Entries)
+	}
+	if _, err := os.Stat(filepath.Join(s.root, "quick-gotcha-deadbeef.md")); err != nil {
+		t.Fatalf("dry-run should keep legacy file: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(s.root, "quick-gotcha", "quick-gotcha.md")); !os.IsNotExist(err) {
+		t.Fatalf("dry-run should not create migrated directory, err=%v", err)
 	}
 }

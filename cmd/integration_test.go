@@ -247,7 +247,24 @@ func TestIntegration(t *testing.T) {
 	// ready
 	mustFelt(t, dir, "ls", "--ready")
 
-	astraDir := filepath.Join(dir, ".felt", "bao-analysis", "damping-prior")
+	astraParentDir := filepath.Join(dir, ".felt", "bao-analysis")
+	if err := os.MkdirAll(astraParentDir, 0755); err != nil {
+		t.Fatalf("mkdir astra parent fixture: %v", err)
+	}
+	astraParent := `---
+title: BAO Analysis
+status: open
+created-at: 2026-03-14T10:00:00Z
+---
+
+(bao-analysis)=
+# BAO Analysis
+`
+	if err := os.WriteFile(filepath.Join(astraParentDir, "bao-analysis.md"), []byte(astraParent), 0644); err != nil {
+		t.Fatalf("write astra parent fixture: %v", err)
+	}
+
+	astraDir := filepath.Join(astraParentDir, "damping-prior")
 	if err := os.MkdirAll(astraDir, 0755); err != nil {
 		t.Fatalf("mkdir astra fixture: %v", err)
 	}
@@ -348,6 +365,90 @@ container: python:3.11-slim
 	}
 	if _, ok := dampingPrior["decisions"].(map[string]any); !ok {
 		t.Fatalf("export astra: missing decisions: %#v", dampingPrior)
+	}
+
+	out = mustFelt(t, dir, "nest", fiber2ID, "bao-analysis")
+	if !strings.Contains(out, "Nested second-fiber under bao-analysis as bao-analysis/second-fiber") {
+		t.Fatalf("nest: unexpected output: %s", out)
+	}
+	out = mustFelt(t, dir, "show", "bao-analysis/second-fiber", "-d", "compact")
+	if !strings.Contains(out, "bao-analysis/second-fiber") {
+		t.Fatalf("nest: expected nested fiber ID, got: %s", out)
+	}
+	out = mustFelt(t, dir, "tree", fiberID, "--down", "--all")
+	if !strings.Contains(out, "bao-analysis/second-fiber") {
+		t.Fatalf("nest: expected rewritten dependency targets, got: %s", out)
+	}
+
+	out = mustFelt(t, dir, "unnest", "bao-analysis/second-fiber")
+	if !strings.Contains(out, "Promoted bao-analysis/second-fiber to second-fiber") {
+		t.Fatalf("unnest: unexpected output: %s", out)
+	}
+	out = mustFelt(t, dir, "show", "second-fiber", "-d", "compact")
+	if !strings.Contains(out, "second-fiber") {
+		t.Fatalf("unnest: expected top-level fiber ID, got: %s", out)
+	}
+
+	migrateDir := filepath.Join(dir, "legacy-project")
+	if err := os.MkdirAll(filepath.Join(migrateDir, ".felt"), 0755); err != nil {
+		t.Fatalf("mkdir legacy project: %v", err)
+	}
+	legacyA := `---
+title: Legacy Child
+created-at: 2026-03-15T10:00:00Z
+depends-on:
+  - legacy-parent-1234abcd
+---
+
+Child body.
+`
+	legacyB := `---
+title: Legacy Parent
+created-at: 2026-03-15T09:00:00Z
+---
+
+Parent body.
+`
+	if err := os.WriteFile(filepath.Join(migrateDir, ".felt", "legacy-child-deadbeef.md"), []byte(legacyA), 0644); err != nil {
+		t.Fatalf("write legacy child: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(migrateDir, ".felt", "legacy-parent-1234abcd.md"), []byte(legacyB), 0644); err != nil {
+		t.Fatalf("write legacy parent: %v", err)
+	}
+
+	out = mustFelt(t, dir, "migrate", "--dir", migrateDir, "--dry-run")
+	if !strings.Contains(out, "Would migrate legacy-child-deadbeef -> legacy-child") {
+		t.Fatalf("migrate dry-run: expected mapping, got: %s", out)
+	}
+	if _, err := os.Stat(filepath.Join(migrateDir, ".felt", "legacy-child-deadbeef.md")); err != nil {
+		t.Fatalf("migrate dry-run should keep flat file: %v", err)
+	}
+
+	out = mustFelt(t, dir, "migrate", "--dir", migrateDir)
+	if !strings.Contains(out, "Migrated 2 flat fibers") {
+		t.Fatalf("migrate: expected summary, got: %s", out)
+	}
+	if _, err := os.Stat(filepath.Join(migrateDir, ".felt", "myst.yml")); err != nil {
+		t.Fatalf("migrate: expected myst.yml, got: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(migrateDir, ".felt", "legacy-child", "legacy-child.md")); err != nil {
+		t.Fatalf("migrate: expected migrated child, got: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(migrateDir, ".felt", "legacy-child-deadbeef.md")); !os.IsNotExist(err) {
+		t.Fatalf("migrate: expected flat file removed, err=%v", err)
+	}
+	out = mustFelt(t, migrateDir, "show", "-j", "legacy-child")
+	var migratedShown map[string]any
+	if err := json.Unmarshal([]byte(out), &migratedShown); err != nil {
+		t.Fatalf("migrate: invalid json from show -j: %v\n%s", err, out)
+	}
+	deps, ok := migratedShown["depends_on"].([]any)
+	if !ok || len(deps) != 1 {
+		t.Fatalf("migrate: unexpected dependencies %#v", migratedShown["depends_on"])
+	}
+	dep, ok := deps[0].(map[string]any)
+	if !ok || dep["id"] != "legacy-parent" {
+		t.Fatalf("migrate: expected rewritten dependency, got %#v", migratedShown["depends_on"])
 	}
 
 	out, err = felt(dir, "tapestry")

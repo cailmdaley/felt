@@ -9,6 +9,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 )
@@ -37,6 +38,15 @@ type Storage struct {
 type fiberFile struct {
 	id   string
 	path string
+}
+
+type MigrationEntry struct {
+	OldID string
+	NewID string
+}
+
+type MigrationResult struct {
+	Entries []MigrationEntry
 }
 
 // NewStorage creates a storage instance for the given directory.
@@ -166,6 +176,175 @@ func (s *Storage) Delete(id string) error {
 	return nil
 }
 
+// MoveSubtree moves a fiber and any nested descendants to a new path, rewriting
+// dependency references across the repository.
+func (s *Storage) MoveSubtree(oldID, newID string) error {
+	oldID = filepath.ToSlash(filepath.Clean(strings.TrimSpace(oldID)))
+	newID = filepath.ToSlash(filepath.Clean(strings.TrimSpace(newID)))
+	if oldID == "." || oldID == "" || newID == "." || newID == "" {
+		return fmt.Errorf("invalid felt id")
+	}
+	if oldID == newID {
+		return fmt.Errorf("source and destination are the same")
+	}
+	if strings.HasPrefix(newID, oldID+"/") {
+		return fmt.Errorf("cannot move %s into its own subtree %s", oldID, newID)
+	}
+	if _, err := os.Stat(s.Path(newID)); err == nil {
+		return fmt.Errorf("destination %s already exists", newID)
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("checking destination %s: %w", newID, err)
+	}
+
+	felts, err := s.List()
+	if err != nil {
+		return err
+	}
+
+	updated := make([]*Felt, 0, len(felts))
+	movedAny := false
+	for _, f := range felts {
+		clone := *f
+		if remappedID, ok := remapIDPrefix(clone.ID, oldID, newID); ok {
+			clone.ID = remappedID
+			movedAny = true
+		}
+		for i, dep := range clone.DependsOn {
+			if remappedDep, ok := remapIDPrefix(dep.ID, oldID, newID); ok {
+				clone.DependsOn[i].ID = remappedDep
+			}
+		}
+		updated = append(updated, &clone)
+	}
+
+	if !movedAny {
+		return fmt.Errorf("no felt found at %s", oldID)
+	}
+
+	for _, f := range updated {
+		if err := s.Write(f); err != nil {
+			return err
+		}
+	}
+
+	oldRoot := filepath.Join(s.root, filepath.FromSlash(oldID))
+	if err := os.RemoveAll(oldRoot); err != nil {
+		return fmt.Errorf("removing old subtree %s: %w", oldRoot, err)
+	}
+	for dir := filepath.Dir(oldRoot); dir != s.root; dir = filepath.Dir(dir) {
+		err := os.Remove(dir)
+		if err == nil {
+			continue
+		}
+		if errors.Is(err, syscall.ENOTEMPTY) {
+			break
+		}
+		return fmt.Errorf("cleaning directory %s: %w", dir, err)
+	}
+
+	return nil
+}
+
+// MigrateFlatFiles converts legacy top-level flat markdown fibers to
+// directory-based fibers with slug IDs, rewriting dependency references.
+func (s *Storage) MigrateFlatFiles(dryRun bool) (*MigrationResult, error) {
+	if err := s.Init(); err != nil {
+		return nil, err
+	}
+
+	entries, err := os.ReadDir(s.root)
+	if err != nil {
+		return nil, fmt.Errorf("reading .felt directory: %w", err)
+	}
+
+	type legacyFiber struct {
+		oldID string
+		path  string
+		felt  *Felt
+	}
+
+	var legacy []legacyFiber
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if name == MystConfigName || filepath.Ext(name) != FileExt {
+			continue
+		}
+		oldID := strings.TrimSuffix(name, FileExt)
+		data, err := os.ReadFile(filepath.Join(s.root, name))
+		if err != nil {
+			return nil, fmt.Errorf("reading legacy fiber %s: %w", name, err)
+		}
+		f, err := Parse(oldID, data)
+		if err != nil {
+			return nil, fmt.Errorf("parsing legacy fiber %s: %w", name, err)
+		}
+		legacy = append(legacy, legacyFiber{
+			oldID: oldID,
+			path:  filepath.Join(s.root, name),
+			felt:  f,
+		})
+	}
+
+	result := &MigrationResult{Entries: make([]MigrationEntry, 0, len(legacy))}
+	if len(legacy) == 0 {
+		return result, nil
+	}
+
+	used := map[string]struct{}{}
+	for _, f := range legacy {
+		baseID, err := GenerateID(f.felt.Title)
+		if err != nil {
+			return nil, fmt.Errorf("generate slug for %s: %w", f.oldID, err)
+		}
+		newID, err := s.nextAvailableMigrationID(baseID, used)
+		if err != nil {
+			return nil, err
+		}
+		used[newID] = struct{}{}
+		result.Entries = append(result.Entries, MigrationEntry{
+			OldID: f.oldID,
+			NewID: newID,
+		})
+	}
+
+	slices.SortFunc(result.Entries, func(a, b MigrationEntry) int {
+		return strings.Compare(a.OldID, b.OldID)
+	})
+
+	if dryRun {
+		return result, nil
+	}
+
+	idMap := map[string]string{}
+	for _, entry := range result.Entries {
+		idMap[entry.OldID] = entry.NewID
+	}
+
+	for _, item := range legacy {
+		f := item.felt
+		f.ID = idMap[item.oldID]
+		for i, dep := range f.DependsOn {
+			if newDepID, ok := idMap[dep.ID]; ok {
+				f.DependsOn[i].ID = newDepID
+			}
+		}
+		if err := s.Write(f); err != nil {
+			return nil, err
+		}
+	}
+
+	for _, item := range legacy {
+		if err := os.Remove(item.path); err != nil {
+			return nil, fmt.Errorf("removing legacy fiber %s: %w", item.path, err)
+		}
+	}
+
+	return result, nil
+}
+
 // List returns all felts in the storage.
 func (s *Storage) List() ([]*Felt, error) {
 	return s.listWithMode(ParseFull, false)
@@ -214,6 +393,21 @@ func (s *Storage) findWithMode(query string, mode ParseMode) (*Felt, error) {
 	files, err := s.listFiberFiles()
 	if err != nil {
 		return nil, err
+	}
+
+	query = path.Clean(query)
+	for _, file := range files {
+		if path.Clean(file.id) != query {
+			continue
+		}
+		f, err := s.readWithMode(file.id, mode)
+		if err != nil {
+			return nil, err
+		}
+		if info, err := os.Stat(file.path); err == nil {
+			f.ModifiedAt = info.ModTime()
+		}
+		return f, nil
 	}
 
 	var matchIDs []string
@@ -295,6 +489,13 @@ func disambiguateID(id string, n int) string {
 // FindByPrefix finds a fiber matching a query in an existing slice.
 // Use this instead of Find when you already have the list from List().
 func FindByPrefix(felts []*Felt, query string) (*Felt, error) {
+	query = path.Clean(query)
+	for _, f := range felts {
+		if path.Clean(f.ID) == query {
+			return f, nil
+		}
+	}
+
 	var matches []*Felt
 	for _, f := range felts {
 		if f.MatchesID(query) {
@@ -385,4 +586,35 @@ func readFrontmatter(r io.Reader) ([]byte, error) {
 	}
 
 	return []byte(frontmatter.String()), nil
+}
+
+func (s *Storage) nextAvailableMigrationID(baseID string, reserved map[string]struct{}) (string, error) {
+	for n := 1; ; n++ {
+		candidate := baseID
+		if n > 1 {
+			candidate = disambiguateID(baseID, n)
+		}
+		if _, ok := reserved[candidate]; ok {
+			continue
+		}
+		if _, err := os.Stat(s.Path(candidate)); err == nil {
+			continue
+		} else if !os.IsNotExist(err) {
+			return "", fmt.Errorf("checking id %s: %w", candidate, err)
+		}
+		return candidate, nil
+	}
+}
+
+func remapIDPrefix(id, oldPrefix, newPrefix string) (string, bool) {
+	id = path.Clean(id)
+	oldPrefix = path.Clean(oldPrefix)
+	newPrefix = path.Clean(newPrefix)
+	if id == oldPrefix {
+		return newPrefix, true
+	}
+	if strings.HasPrefix(id, oldPrefix+"/") {
+		return newPrefix + strings.TrimPrefix(id, oldPrefix), true
+	}
+	return id, false
 }
