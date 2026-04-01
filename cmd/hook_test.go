@@ -212,6 +212,62 @@ func TestFormatSessionOutput_UnblockedByClosedDep(t *testing.T) {
 	}
 }
 
+func TestFormatSessionOutput_DirectoryBasedStorageIDs(t *testing.T) {
+	dir := t.TempDir()
+	storage := felt.NewStorage(dir)
+	if err := storage.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	now := time.Now()
+	closedTime := now.Add(-time.Hour)
+
+	closedDep := &felt.Felt{
+		ID:         "foundation/closed-dep",
+		Title:      "Closed dep",
+		Status:     felt.StatusClosed,
+		CreatedAt:  now.Add(-2 * time.Hour),
+		ClosedAt:   &closedTime,
+		ModifiedAt: closedTime,
+	}
+	active := &felt.Felt{
+		ID:        "analysis/active-task",
+		Title:     "Active task",
+		Status:    felt.StatusActive,
+		CreatedAt: now,
+	}
+	ready := &felt.Felt{
+		ID:        "analysis/ready-task",
+		Title:     "Ready task",
+		Status:    felt.StatusOpen,
+		DependsOn: felt.Dependencies{{ID: closedDep.ID}},
+		CreatedAt: now.Add(time.Minute),
+	}
+
+	for _, f := range []*felt.Felt{closedDep, active, ready} {
+		if err := storage.Write(f); err != nil {
+			t.Fatalf("Write(%s) error: %v", f.ID, err)
+		}
+	}
+
+	felts, err := storage.ListMetadataWithModTime()
+	if err != nil {
+		t.Fatalf("ListMetadataWithModTime() error: %v", err)
+	}
+
+	output := formatSessionOutput(felts, felt.BuildGraph(felts))
+
+	if !strings.Contains(output, "◐ analysis/active-task\n    Active task") {
+		t.Fatalf("active nested fiber missing from session output:\n%s", output)
+	}
+	if !strings.Contains(output, "○ analysis/ready-task\n    Ready task") {
+		t.Fatalf("ready nested fiber missing from session output:\n%s", output)
+	}
+	if !strings.Contains(output, "● foundation/closed-dep\n    Closed dep") {
+		t.Fatalf("closed dependency missing from recent section:\n%s", output)
+	}
+}
+
 func TestFormatSessionOutput_TagLabels(t *testing.T) {
 	now := time.Now()
 
