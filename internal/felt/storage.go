@@ -26,6 +26,9 @@ const (
 const defaultMystConfig = `version: 1
 project:
   title: Project Fibers
+  error_rules:
+    - rule: valid-page-frontmatter
+      severity: ignore
 site:
   template: article-theme
 `

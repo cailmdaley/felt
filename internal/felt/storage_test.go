@@ -39,6 +39,9 @@ func TestStorageInit(t *testing.T) {
 	if string(data) != defaultMystConfig {
 		t.Fatalf("myst.yml = %q, want default config", string(data))
 	}
+	if !strings.Contains(string(data), "valid-page-frontmatter") {
+		t.Fatalf("myst.yml missing frontmatter suppression: %q", string(data))
+	}
 
 	// Init again should work (idempotent)
 	if err := s.Init(); err != nil {
