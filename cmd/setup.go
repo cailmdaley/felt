@@ -87,10 +87,7 @@ Use --uninstall to remove it.`,
 var setupSkillsCmd = &cobra.Command{
 	Use:   "skills",
 	Short: "Install felt skills to a target directory",
-	Long: `Install felt's bundled skills (felt, constitution, ralph, tapestry) to a target directory.
-
-By default, installs to ~/.claude/skills. Use --target to specify a different directory.
-Existing files are not overwritten unless --update is passed.`,
+	Long:  bundledSkillsLong(),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		target, _ := cmd.Flags().GetString("target")
 		update, _ := cmd.Flags().GetBool("update")
@@ -124,6 +121,29 @@ func init() {
 	setupCmd.AddCommand(setupCodexCmd)
 	setupCmd.AddCommand(setupSkillsCmd)
 	rootCmd.AddCommand(setupCmd)
+}
+
+func bundledSkillsLong() string {
+	return fmt.Sprintf(`Install felt's bundled skills (%s) to a target directory.
+
+By default, installs to ~/.claude/skills. Use --target to specify a different directory.
+For Codex, a typical target is ~/.agents/skills.
+Existing files are not overwritten unless --update is passed.`, strings.Join(bundledSkillNames(), ", "))
+}
+
+func bundledSkillNames() []string {
+	entries, err := fs.ReadDir(embeddedSkills, "skills")
+	if err != nil {
+		return []string{"constitution", "felt", "ralph"}
+	}
+
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() {
+			names = append(names, entry.Name())
+		}
+	}
+	return names
 }
 
 // linkSkills creates symlinks from targetDir to a felt source checkout's cmd/skills/.

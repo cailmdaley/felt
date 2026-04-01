@@ -206,9 +206,10 @@ Staleness is computed automatically: if an upstream dependency's evidence is new
 Skills can also be managed independently:
 
 ```bash
-felt setup skills                 # install skills only
-felt setup skills --update        # update skills (overwrites local changes)
-felt setup skills --link <path>   # symlink to source checkout (dev mode)
+felt setup skills                                # install skills to ~/.claude/skills
+felt setup skills --target ~/.agents/skills      # install skills for Codex
+felt setup skills --update                       # update skills (overwrites local changes)
+felt setup skills --link <path>                  # symlink to source checkout (dev mode)
 ```
 
 ### Bundled Skills
@@ -216,7 +217,6 @@ felt setup skills --link <path>   # symlink to source checkout (dev mode)
 | Skill | Purpose |
 |-------|---------|
 | **felt** | Filing fibers from conversation — session extraction, transcript processing, archiving |
-| **tapestry** | Recording scientific work — when to file claims, evidence format, tapestry conventions |
 | **constitution** | Drafting specs for autonomous iteration loops |
 | **ralph** | Executing those loops — survey, contribute, exit |
 
