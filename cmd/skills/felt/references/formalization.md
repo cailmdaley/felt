@@ -91,7 +91,7 @@ outputs:
 
 ### Finding fiber
 
-A concrete claim backed by evidence that reduces uncertainty, whether or not it directly triggers a decision.
+A concrete claim backed by evidence that reduces uncertainty, whether or not it directly triggers a decision. For literature audits, the claim should be the manuscript statement under review and the evidence should point into the cited source, not just into your audit notes.
 
 ```yaml
 insights:
@@ -104,6 +104,26 @@ insights:
 ```
 
 **Minimum:** `insights` with `claim` + evidence. A finding may later feed into a decision fiber upstream; that is fine. File it when you find it.
+
+### Literature-backed finding fiber
+
+Use this shape when the point of the fiber is to verify that a paper claim is actually supported by the cited literature.
+
+```yaml
+insights:
+  treecorr_citation_audit:
+    claim: The manuscript's TreeCorr sentence should cite the TreeCorr software record rather than the 2004 aperture-mass paper.
+    created_at: 2026-04-02T15:30:00Z
+    tags: [literature, citation_audit]
+    evidence:
+      - id: treecorr_record
+        doi: 10.48550/arXiv.1508.007
+        quote:
+          type: TextQuoteSelector
+          exact: TreeCorr: Two-point correlation functions
+```
+
+If you want to preserve the audit trail itself, record that as a second insight with `artifact` evidence pointing to the ledger or report you generated.
 
 ---
 

@@ -437,6 +437,13 @@ func installClaudeHooks() error {
 		fmt.Println("· SessionStart hook already installed")
 	}
 
+	// Add PreToolUse reminder hook
+	if addHook(hooks, "PreToolUse", "", "felt hook remind") {
+		fmt.Println("✓ Added PreToolUse hook: felt hook remind")
+	} else {
+		fmt.Println("· PreToolUse reminder hook already installed")
+	}
+
 	// Write settings back
 	data, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
@@ -481,6 +488,10 @@ func uninstallClaudeHooks() error {
 	removed := false
 	if removeHook(hooks, "SessionStart", "felt hook session") {
 		fmt.Println("✓ Removed SessionStart hook")
+		removed = true
+	}
+	if removeHook(hooks, "PreToolUse", "felt hook remind") {
+		fmt.Println("✓ Removed PreToolUse reminder hook")
 		removed = true
 	}
 

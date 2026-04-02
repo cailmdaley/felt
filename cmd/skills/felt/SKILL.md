@@ -14,6 +14,8 @@ description: >
 
 Fibers are concerns — tasks, decisions, questions, specs — connected in a directed graph. ASTRA is an open specification for computational science: decisions with excluded alternatives, inputs and outputs with recipes, insights backed by evidence. Felt fibers carry ASTRA fields in their frontmatter; the structure accretes as understanding crystallizes.
 
+For literature audits, model the audited paper statement as the `claim` and anchor the supporting `evidence` in the cited source itself with a traceable selector such as a quote, figure, or table. Use audit reports as artifact evidence for your own findings about the audit process, not as substitutes for literature evidence.
+
 Proactive formalization. Retroactive extraction. Consolidation over time. Coherence when needed.
 
 ---
