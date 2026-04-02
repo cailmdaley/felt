@@ -50,20 +50,8 @@ func init() {
 }
 
 func minimalOutput() string {
-	return `# Felt Workflow Context
-
-*No felt repository in current directory.*
-
-` + cliReference() + `## Core Rules
-- **Use felt for everything** — tasks, decisions, questions, detours, bugs you can't chase now. If it might matter, it's a fiber.
-- Outcome (` + "`-o`" + `) is the documentation: the conclusion, the reasoning, what was learned
-- ` + "`felt edit`" + ` is non-interactive (flags only); for patch edits, modify the fiber markdown file in ` + "`.felt/<path>/<slug>.md`" + ` directly
-- **CLI for metadata, file edit for content.** Use ` + "`felt edit`" + ` for status/tags/links/outcome. Edit ` + "`.felt/<path>/<slug>.md`" + ` directly for body text and content.
-- ` + "`felt export --format astra`" + ` emits ASTRA-compatible ` + "`astra.yaml`" + ` from frontmatter-bearing fibers
-- **Use ` + "`/felt`" + ` when formalizing, exporting, or reshaping fibers** — it loads ASTRA field guidance and templates
-- **Leave a wake** — file as you go
-- **Titles are DAG node labels: 2-3 words.** Body and outcome carry full content.
-`
+	return "# Felt Workflow Context\n\n*No felt repository in current directory.*\n\n" +
+		cliReference() + coreRules()
 }
 
 func formatSessionOutput(felts []*felt.Felt, g *felt.Graph) string {
@@ -137,19 +125,8 @@ func formatSessionOutput(felts []*felt.Felt, g *felt.Graph) string {
 		sb.WriteString("\n")
 	}
 
-	// CLI Reference
 	sb.WriteString(cliReference())
-
-	// Core rules
-	sb.WriteString("## Core Rules\n")
-	sb.WriteString("- **Use felt for everything** — tasks, decisions, questions, detours, bugs you can't chase now. If it might matter, it's a fiber.\n")
-	sb.WriteString("- Outcome (`-o`) is the documentation: the conclusion, the reasoning, what was learned\n")
-	sb.WriteString("- `felt edit` is non-interactive (flags only); for patch edits, modify the fiber markdown file in `.felt/<path>/<slug>.md` directly\n")
-	sb.WriteString("- **CLI for metadata, file edit for content.** Use `felt edit` for status/tags/links/outcome. Edit `.felt/<path>/<slug>.md` directly for body text and content.\n")
-	sb.WriteString("- `felt export --format astra` emits ASTRA-compatible `astra.yaml` from frontmatter-bearing fibers\n")
-	sb.WriteString("- **Use `/felt` when formalizing, exporting, or reshaping fibers** — it loads ASTRA field guidance and templates\n")
-	sb.WriteString("- **Leave a wake** — file as you go\n")
-	sb.WriteString("- **Titles are DAG node labels: 2-3 words.** Body and outcome carry full content.\n")
+	sb.WriteString(coreRules())
 
 	return sb.String()
 }
@@ -214,5 +191,21 @@ Statuses: · untracked, ○ open, ◐ active, ● closed
 Detail: title < compact < summary < full (default). Summary shows the **lede** — the first paragraph of the body. Write it to stand alone.
 To patch body text (not replace), edit the fiber markdown file in .felt/<path>/<slug>.md directly. Nested fibers use path IDs like bao-analysis/damping-prior.
 
+`
+}
+
+// coreRules returns the shared core rules and skill activation nudge.
+func coreRules() string {
+	return `## Core Rules
+- **Use felt for everything** — tasks, decisions, questions, detours, bugs you can't chase now. If it might matter, it's a fiber.
+- Outcome (` + "`-o`" + `) is the documentation: the conclusion, the reasoning, what was learned
+- ` + "`felt edit`" + ` is non-interactive (flags only); for patch edits, modify the fiber markdown file in ` + "`.felt/<path>/<slug>.md`" + ` directly
+- **CLI for metadata, file edit for content.** Use ` + "`felt edit`" + ` for status/tags/links/outcome. Edit ` + "`.felt/<path>/<slug>.md`" + ` directly for body text and content.
+- ` + "`felt export --format astra`" + ` emits ASTRA-compatible ` + "`astra.yaml`" + ` from frontmatter-bearing fibers
+- **Formalize while working** — accrete ASTRA structure (decisions, inputs, outputs, insights) as understanding crystallizes
+- **Leave a wake** — file as you go
+- **Titles are DAG node labels: 2-3 words.** Body and outcome carry full content.
+
+Activating the ` + "`/felt`" + ` skill is essential for working with fibers well. Do so before calling any other tools.
 `
 }
