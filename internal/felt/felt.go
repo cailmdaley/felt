@@ -161,12 +161,20 @@ type ASTRAFragment struct {
 	ConformsTo string `yaml:"conformsTo,omitempty" json:"conformsTo,omitempty"`
 	Value      string `yaml:"value,omitempty" json:"value,omitempty"`
 	Page       *int   `yaml:"page,omitempty" json:"page,omitempty"`
+	Start      *int   `yaml:"start,omitempty" json:"start,omitempty"`
+	End        *int   `yaml:"end,omitempty" json:"end,omitempty"`
+}
+
+type ASTRADocument struct {
+	Path   string `yaml:"path,omitempty" json:"path,omitempty"`
+	Commit string `yaml:"commit,omitempty" json:"commit,omitempty"`
 }
 
 type ASTRAEvidence struct {
 	ID           string         `yaml:"id,omitempty" json:"id,omitempty"`
 	DOI          string         `yaml:"doi,omitempty" json:"doi,omitempty"`
 	Artifact     string         `yaml:"artifact,omitempty" json:"artifact,omitempty"`
+	Document     *ASTRADocument `yaml:"document,omitempty" json:"document,omitempty"`
 	Version      *int           `yaml:"version,omitempty" json:"version,omitempty"`
 	Checksum     string         `yaml:"checksum,omitempty" json:"checksum,omitempty"`
 	Snapshot     string         `yaml:"snapshot,omitempty" json:"snapshot,omitempty"`
@@ -586,6 +594,9 @@ func (f *Felt) SearchText() string {
 		parts = append(parts, insight.Tags...)
 		for _, evidence := range insight.Evidence {
 			parts = append(parts, evidence.ID, evidence.DOI, evidence.Artifact, evidence.Checksum, evidence.Snapshot, evidence.SourceCommit)
+			if evidence.Document != nil {
+				parts = append(parts, evidence.Document.Path, evidence.Document.Commit)
+			}
 			if evidence.Version != nil {
 				parts = append(parts, fmt.Sprintf("%d", *evidence.Version))
 			}
@@ -602,6 +613,12 @@ func (f *Felt) SearchText() string {
 				parts = append(parts, evidence.Location.Type, evidence.Location.ConformsTo, evidence.Location.Value)
 				if evidence.Location.Page != nil {
 					parts = append(parts, fmt.Sprintf("%d", *evidence.Location.Page))
+				}
+				if evidence.Location.Start != nil {
+					parts = append(parts, fmt.Sprintf("%d", *evidence.Location.Start))
+				}
+				if evidence.Location.End != nil {
+					parts = append(parts, fmt.Sprintf("%d", *evidence.Location.End))
 				}
 			}
 		}

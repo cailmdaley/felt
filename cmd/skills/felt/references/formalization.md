@@ -125,6 +125,23 @@ insights:
 
 If you want to preserve the audit trail itself, record that as a second insight with `artifact` evidence pointing to the ledger or report you generated.
 
+For unpublished companion manuscripts, use the provisional local-document extension instead of forcing them into `artifact`:
+
+```yaml
+evidence:
+  - id: paper_i_psf_method
+    document:
+      path: docs/unions_release/unions_shear_catalog_paper/draft_corrected.tex
+      commit: abcdef1234567890
+    quote:
+      type: TextQuoteSelector
+      exact: "We build a 20 x 20 grid in (SNR, size) ..."
+    location:
+      type: LineSelector
+      start: 929
+      end: 944
+```
+
 ---
 
 ## Body vs Frontmatter

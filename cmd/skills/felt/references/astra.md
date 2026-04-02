@@ -201,13 +201,14 @@ insights:
 
 ### Evidence
 
-Exactly one of `doi` or `artifact`. At least one selector (`quote`, `figure`, `table`).
+Standard ASTRA supports `doi` or `artifact`. In local felt practice we also allow a provisional `document` source for unpublished in-repo manuscripts while upstream ASTRA support is being discussed. At least one selector (`quote`, `figure`, `table`) should still anchor the evidence.
 
 | Field | Required | Type | Notes |
 |-------|----------|------|-------|
 | `id` | yes | string | |
 | `doi` | one of | string | `10.XXXX/...` format. arXiv: `10.48550/arXiv.XXXX.XXXXX` |
 | `artifact` | one of | string | Output ID from this fiber's `outputs` |
+| `document` | local extension | `{path, commit}` | Immutable anchor for unpublished or local manuscripts |
 | `version` | no | integer | arXiv paper version |
 | `checksum` | no | `{algorithm, value}` | Artifact integrity |
 | `snapshot` | no | string | Path to immutable copy (artifact only) |
@@ -216,6 +217,25 @@ Exactly one of `doi` or `artifact`. At least one selector (`quote`, `figure`, `t
 | `figure` | no | FigureSelector | `{type, label, caption?}` |
 | `table` | no | TableSelector | `{type, label, caption?, region?}` |
 | `location` | no | FragmentSelector | `{type, page?}` — PDF location hint |
+
+For local unpublished manuscripts, use `document.path` + `document.commit` and a `LineSelector` location hint:
+
+```yaml
+evidence:
+  - id: paper_i_method
+    document:
+      path: docs/unions_release/unions_shear_catalog_paper/draft_corrected.tex
+      commit: abcdef1234567890
+    quote:
+      type: TextQuoteSelector
+      exact: "We build a 20 x 20 grid in (SNR, size) ..."
+    location:
+      type: LineSelector
+      start: 929
+      end: 944
+```
+
+This is a felt-side extension pending upstream ASTRA design; the immutable anchors are the quote plus commit, with line numbers used only for navigation.
 
 ### Literature audit pattern
 

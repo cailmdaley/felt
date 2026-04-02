@@ -284,6 +284,9 @@ insights:
       - id: ev1
         doi: 10.48550/arXiv.astro-ph/0604361
         version: 1
+        document:
+          path: docs/unions_release/unions_shear_catalog_paper/draft_corrected.tex
+          commit: abcdef1234567890
         quote:
           type: TextQuoteSelector
           exact: velocity flows move matter ~10 Mpc
@@ -298,10 +301,9 @@ insights:
           label: Table 2
           region: row 3
         location:
-          type: FragmentSelector
-          conformsTo: http://tools.ietf.org/rfc/rfc3778
-          value: page=4
-          page: 4
+          type: LineSelector
+          start: 300
+          end: 304
 success_criteria:
   - claim: BAO parameters shift <0.5 sigma from DESI 2024 III
 container: python:3.11-slim
@@ -340,13 +342,16 @@ container: python:3.11-slim
 	if evidence.Version == nil || *evidence.Version != 1 {
 		t.Fatalf("Evidence Version = %#v", evidence.Version)
 	}
+	if evidence.Document == nil || evidence.Document.Commit != "abcdef1234567890" {
+		t.Fatalf("Evidence Document = %#v", evidence.Document)
+	}
 	if evidence.Figure == nil || evidence.Figure.Label != "Figure 1" {
 		t.Fatalf("Evidence Figure = %#v", evidence.Figure)
 	}
 	if evidence.Table == nil || evidence.Table.Region != "row 3" {
 		t.Fatalf("Evidence Table = %#v", evidence.Table)
 	}
-	if evidence.Location == nil || evidence.Location.Page == nil || *evidence.Location.Page != 4 {
+	if evidence.Location == nil || evidence.Location.Start == nil || *evidence.Location.Start != 300 || evidence.Location.End == nil || *evidence.Location.End != 304 {
 		t.Fatalf("Evidence Location = %#v", evidence.Location)
 	}
 	if len(f.SuccessCriteria) != 1 || f.Container != "python:3.11-slim" {
@@ -397,11 +402,20 @@ func TestSearchTextIncludesASTRAFields(t *testing.T) {
 				Notes: "Anchor the prior to cited literature",
 				Evidence: []ASTRAEvidence{
 					{
-						ID:     "ev1",
-						DOI:    "10.48550/arXiv.astro-ph/0604361",
+						ID:  "ev1",
+						DOI: "10.48550/arXiv.astro-ph/0604361",
+						Document: &ASTRADocument{
+							Path:   "docs/unions_release/unions_shear_catalog_paper/draft_corrected.tex",
+							Commit: "abcdef1234567890",
+						},
 						Quote:  &ASTRAQuote{Type: "TextQuoteSelector", Exact: "velocity flows move matter ~10 Mpc", Prefix: "Large-scale", Suffix: "across the BAO peak"},
 						Figure: &ASTRAFigure{Type: "FigureSelector", Label: "Figure 1", Caption: "BAO damping from bulk flows"},
 						Table:  &ASTRATable{Type: "TableSelector", Label: "Table 2", Region: "row 3"},
+						Location: &ASTRAFragment{
+							Type:  "LineSelector",
+							Start: intPtr(300),
+							End:   intPtr(304),
+						},
 					},
 				},
 			},
@@ -425,6 +439,10 @@ func TestSearchTextIncludesASTRAFields(t *testing.T) {
 		"Anchor the prior to cited literature",
 		"Figure 1",
 		"row 3",
+		"docs/unions_release/unions_shear_catalog_paper/draft_corrected.tex",
+		"abcdef1234567890",
+		"300",
+		"304",
 		"Shift stays below 0.5 sigma",
 		"python:3.11-slim",
 	} {
@@ -432,6 +450,10 @@ func TestSearchTextIncludesASTRAFields(t *testing.T) {
 			t.Fatalf("SearchText() missing %q in %q", needle, searchText)
 		}
 	}
+}
+
+func intPtr(v int) *int {
+	return &v
 }
 
 func TestJSONOmitsEmptyASTRAFields(t *testing.T) {
