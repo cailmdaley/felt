@@ -1,7 +1,10 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -44,9 +47,27 @@ Prints active fibers (currently being worked on) and ready fibers
 	},
 }
 
+var hookRemindCmd = &cobra.Command{
+	Use:   "remind",
+	Short: "One-shot reminder to activate /felt skill",
+	Long: `PreToolUse hook that gates tool use until /felt skill is activated.
+
+Denies all non-Skill tool calls until the Skill tool has been called (which sets a
+per-session flag file in /tmp). After that, all tools are allowed. Only active in
+directories containing a .felt/ directory.
+
+Designed for use as a PreToolUse hook in Claude Code settings.`,
+	Args:    cobra.NoArgs,
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runRemindHook()
+	},
+}
+
 func init() {
 	rootCmd.AddCommand(hookCmd)
 	hookCmd.AddCommand(hookSessionCmd)
+	hookCmd.AddCommand(hookRemindCmd)
 }
 
 func minimalOutput() string {
@@ -194,7 +215,54 @@ To patch body text (not replace), edit the fiber markdown file in .felt/<path>/<
 `
 }
 
-// coreRules returns the shared core rules and skill activation nudge.
+// runRemindHook gates tool use until /felt is activated.
+// Denies all non-Skill tools until Skill has been called, then allows everything.
+func runRemindHook() error {
+	var input struct {
+		SessionID string `json:"session_id"`
+		ToolName  string `json:"tool_name"`
+		CWD       string `json:"cwd"`
+	}
+	if err := json.NewDecoder(os.Stdin).Decode(&input); err != nil {
+		return nil // can't parse — silent exit
+	}
+
+	// Only gate in felt-enabled projects
+	cwd := input.CWD
+	if cwd == "" {
+		return nil
+	}
+	if _, err := os.Stat(filepath.Join(cwd, ".felt")); os.IsNotExist(err) {
+		return nil
+	}
+
+	flagFile := filepath.Join(os.TempDir(), "felt-reminded-"+input.SessionID)
+
+	// Skill call: set the flag (gate opens) and allow
+	if input.ToolName == "Skill" {
+		os.WriteFile(flagFile, nil, 0644)
+		return nil
+	}
+
+	// Any other tool: check if Skill has already been called
+	if _, err := os.Stat(flagFile); err == nil {
+		return nil // gate is open
+	}
+
+	// Gate is closed — deny the tool call
+	output := map[string]interface{}{
+		"hookSpecificOutput": map[string]interface{}{
+			"hookEventName":          "PreToolUse",
+			"permissionDecision":       "deny",
+			"permissionDecisionReason": "Activate /felt skill first. You are in a felt-enabled project " +
+				"but haven't activated the felt skill yet. Call the Skill tool with " +
+				"skill: \"felt\" before proceeding with any other tools.",
+		},
+	}
+	return json.NewEncoder(os.Stdout).Encode(output)
+}
+
+// coreRules returns the shared core rules.
 func coreRules() string {
 	return `## Core Rules
 - **Use felt for everything** — tasks, decisions, questions, detours, bugs you can't chase now. If it might matter, it's a fiber.
@@ -206,6 +274,6 @@ func coreRules() string {
 - **Leave a wake** — file as you go
 - **Titles are DAG node labels: 2-3 words.** Body and outcome carry full content.
 
-Activating the ` + "`/felt`" + ` skill is essential for working with fibers well. Do so before calling any other tools.
+*Fibers form the fabric of collaboration. Touch the loom before you reach for the shuttle.*
 `
 }
