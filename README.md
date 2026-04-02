@@ -210,6 +210,7 @@ felt setup skills                                # install skills to ~/.claude/s
 felt setup skills --target ~/.agents/skills      # install skills for Codex
 felt setup skills --update                       # update skills (overwrites local changes)
 felt setup skills --link <path>                  # symlink to source checkout (dev mode)
+felt update                                      # update felt and refresh copied bundled skills
 ```
 
 ### Bundled Skills
