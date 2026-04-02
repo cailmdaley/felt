@@ -6,8 +6,7 @@
 # goreleaser
 dist/
 
-# Local state (these are user-specific)
-.felt/
+# Local state
 .dots/
 
 # IDE
