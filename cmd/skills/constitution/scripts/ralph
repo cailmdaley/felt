@@ -89,7 +89,7 @@ You are inside a ralph loop. Activate the ralph skill ($ralph) and follow its in
 
 SCOPE: The survey builds a vantage point; the work exploits it. Stay and work from that vantage point until it degrades (~50% context), not before. The next iteration pays the same cold-start cost — don't waste yours.
 
-When the view gets foggy: commit, felt, then `kill $PPID`. Not before.
+When the view gets foggy: commit, felt, then `kill $PPID`. This is a bash-loop handoff back to the parent ralph launcher so it can start the next iteration, not a destructive kill.
 PROMPTEOF
     else
         cat > "$PROMPT_FILE" << 'PROMPTEOF'

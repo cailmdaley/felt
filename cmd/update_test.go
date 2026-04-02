@@ -62,4 +62,7 @@ func TestRefreshInstalledSkillsUpdatesCopiedSkills(t *testing.T) {
 	if !strings.Contains(text, "Activate the ralph skill ($ralph)") {
 		t.Fatalf("expected updated codex-safe ralph prompt, got: %s", text)
 	}
+	if !strings.Contains(text, "bash-loop handoff back to the parent ralph launcher") {
+		t.Fatalf("expected explicit non-destructive handoff wording, got: %s", text)
+	}
 }
