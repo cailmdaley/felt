@@ -137,20 +137,61 @@ type ASTRADecision struct {
 }
 
 type ASTRAQuote struct {
-	Type  string `yaml:"type,omitempty" json:"type,omitempty"`
-	Exact string `yaml:"exact,omitempty" json:"exact,omitempty"`
+	Type   string `yaml:"type,omitempty" json:"type,omitempty"`
+	Exact  string `yaml:"exact,omitempty" json:"exact,omitempty"`
+	Prefix string `yaml:"prefix,omitempty" json:"prefix,omitempty"`
+	Suffix string `yaml:"suffix,omitempty" json:"suffix,omitempty"`
+}
+
+type ASTRAFigure struct {
+	Type    string `yaml:"type,omitempty" json:"type,omitempty"`
+	Label   string `yaml:"label,omitempty" json:"label,omitempty"`
+	Caption string `yaml:"caption,omitempty" json:"caption,omitempty"`
+}
+
+type ASTRATable struct {
+	Type    string `yaml:"type,omitempty" json:"type,omitempty"`
+	Label   string `yaml:"label,omitempty" json:"label,omitempty"`
+	Caption string `yaml:"caption,omitempty" json:"caption,omitempty"`
+	Region  string `yaml:"region,omitempty" json:"region,omitempty"`
+}
+
+type ASTRAFragment struct {
+	Type       string `yaml:"type,omitempty" json:"type,omitempty"`
+	ConformsTo string `yaml:"conformsTo,omitempty" json:"conformsTo,omitempty"`
+	Value      string `yaml:"value,omitempty" json:"value,omitempty"`
+	Page       *int   `yaml:"page,omitempty" json:"page,omitempty"`
+	Start      *int   `yaml:"start,omitempty" json:"start,omitempty"`
+	End        *int   `yaml:"end,omitempty" json:"end,omitempty"`
+}
+
+type ASTRADocument struct {
+	Path   string `yaml:"path,omitempty" json:"path,omitempty"`
+	Commit string `yaml:"commit,omitempty" json:"commit,omitempty"`
 }
 
 type ASTRAEvidence struct {
-	ID       string      `yaml:"id,omitempty" json:"id,omitempty"`
-	DOI      string      `yaml:"doi,omitempty" json:"doi,omitempty"`
-	Artifact string      `yaml:"artifact,omitempty" json:"artifact,omitempty"`
-	Quote    *ASTRAQuote `yaml:"quote,omitempty" json:"quote,omitempty"`
+	ID           string         `yaml:"id,omitempty" json:"id,omitempty"`
+	DOI          string         `yaml:"doi,omitempty" json:"doi,omitempty"`
+	Artifact     string         `yaml:"artifact,omitempty" json:"artifact,omitempty"`
+	Document     *ASTRADocument `yaml:"document,omitempty" json:"document,omitempty"`
+	Version      *int           `yaml:"version,omitempty" json:"version,omitempty"`
+	Checksum     string         `yaml:"checksum,omitempty" json:"checksum,omitempty"`
+	Snapshot     string         `yaml:"snapshot,omitempty" json:"snapshot,omitempty"`
+	SourceCommit string         `yaml:"source_commit,omitempty" json:"source_commit,omitempty"`
+	Quote        *ASTRAQuote    `yaml:"quote,omitempty" json:"quote,omitempty"`
+	Figure       *ASTRAFigure   `yaml:"figure,omitempty" json:"figure,omitempty"`
+	Table        *ASTRATable    `yaml:"table,omitempty" json:"table,omitempty"`
+	Location     *ASTRAFragment `yaml:"location,omitempty" json:"location,omitempty"`
 }
 
 type ASTRAInsight struct {
 	Claim     string          `yaml:"claim,omitempty" json:"claim,omitempty"`
 	CreatedAt *time.Time      `yaml:"created_at,omitempty" json:"created_at,omitempty"`
+	Derived   bool            `yaml:"derived,omitempty" json:"derived,omitempty"`
+	Scope     string          `yaml:"scope,omitempty" json:"scope,omitempty"`
+	Tags      []string        `yaml:"tags,omitempty" json:"tags,omitempty"`
+	Notes     string          `yaml:"notes,omitempty" json:"notes,omitempty"`
 	Evidence  []ASTRAEvidence `yaml:"evidence,omitempty" json:"evidence,omitempty"`
 }
 
@@ -549,11 +590,36 @@ func (f *Felt) SearchText() string {
 		}
 	}
 	for _, insight := range f.Insights {
-		parts = append(parts, insight.Claim)
+		parts = append(parts, insight.Claim, insight.Scope, insight.Notes)
+		parts = append(parts, insight.Tags...)
 		for _, evidence := range insight.Evidence {
-			parts = append(parts, evidence.ID, evidence.DOI, evidence.Artifact)
+			parts = append(parts, evidence.ID, evidence.DOI, evidence.Artifact, evidence.Checksum, evidence.Snapshot, evidence.SourceCommit)
+			if evidence.Document != nil {
+				parts = append(parts, evidence.Document.Path, evidence.Document.Commit)
+			}
+			if evidence.Version != nil {
+				parts = append(parts, fmt.Sprintf("%d", *evidence.Version))
+			}
 			if evidence.Quote != nil {
-				parts = append(parts, evidence.Quote.Type, evidence.Quote.Exact)
+				parts = append(parts, evidence.Quote.Type, evidence.Quote.Exact, evidence.Quote.Prefix, evidence.Quote.Suffix)
+			}
+			if evidence.Figure != nil {
+				parts = append(parts, evidence.Figure.Type, evidence.Figure.Label, evidence.Figure.Caption)
+			}
+			if evidence.Table != nil {
+				parts = append(parts, evidence.Table.Type, evidence.Table.Label, evidence.Table.Caption, evidence.Table.Region)
+			}
+			if evidence.Location != nil {
+				parts = append(parts, evidence.Location.Type, evidence.Location.ConformsTo, evidence.Location.Value)
+				if evidence.Location.Page != nil {
+					parts = append(parts, fmt.Sprintf("%d", *evidence.Location.Page))
+				}
+				if evidence.Location.Start != nil {
+					parts = append(parts, fmt.Sprintf("%d", *evidence.Location.Start))
+				}
+				if evidence.Location.End != nil {
+					parts = append(parts, fmt.Sprintf("%d", *evidence.Location.End))
+				}
 			}
 		}
 	}

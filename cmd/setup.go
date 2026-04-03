@@ -16,6 +16,9 @@ import (
 //go:embed skills
 var embeddedSkills embed.FS
 
+//go:embed hooks/astral-conscience.sh
+var astralConscienceScript string
+
 var setupCmd = &cobra.Command{
 	Use:   "setup",
 	Short: "Setup integrations",
@@ -29,6 +32,8 @@ var setupClaudeCmd = &cobra.Command{
 
 Adds:
   - SessionStart: felt hook session (shows active/ready fibers)
+  - PreToolUse: felt hook remind (gates tools until /felt activated)
+  - Stop: astral conscience (async nudge about unfiled fibers)
 
 Use --uninstall to remove the hooks.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -437,6 +442,23 @@ func installClaudeHooks() error {
 		fmt.Println("· SessionStart hook already installed")
 	}
 
+	// Add PreToolUse reminder hook
+	if addHook(hooks, "PreToolUse", "", "felt hook remind") {
+		fmt.Println("✓ Added PreToolUse hook: felt hook remind")
+	} else {
+		fmt.Println("· PreToolUse reminder hook already installed")
+	}
+
+	// Install astral conscience Stop hook
+	hookPath, err := installConscienceScript()
+	if err != nil {
+		fmt.Printf("warning: could not install conscience script: %v\n", err)
+	} else if addConscienceHook(hooks, hookPath) {
+		fmt.Println("✓ Added Stop hook: astral conscience")
+	} else {
+		fmt.Println("· Astral conscience hook already installed")
+	}
+
 	// Write settings back
 	data, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
@@ -481,6 +503,15 @@ func uninstallClaudeHooks() error {
 	removed := false
 	if removeHook(hooks, "SessionStart", "felt hook session") {
 		fmt.Println("✓ Removed SessionStart hook")
+		removed = true
+	}
+	if removeHook(hooks, "PreToolUse", "felt hook remind") {
+		fmt.Println("✓ Removed PreToolUse reminder hook")
+		removed = true
+	}
+	consciencePath := filepath.Join(filepath.Dir(settingsPath), "hooks", "felt-conscience.sh")
+	if removeHook(hooks, "Stop", consciencePath) {
+		fmt.Println("✓ Removed Stop conscience hook")
 		removed = true
 	}
 
@@ -558,6 +589,71 @@ func addHook(hooks map[string]interface{}, event, matcher, command string) bool 
 
 	eventHooks = append(eventHooks, newHook)
 	hooks[event] = eventHooks
+	return true
+}
+
+// installConscienceScript writes the astral conscience script to ~/.claude/hooks/
+func installConscienceScript() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	dir := filepath.Join(home, ".claude", "hooks")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return "", err
+	}
+	path := filepath.Join(dir, "felt-conscience.sh")
+
+	// Don't overwrite if it exists (user may have customized)
+	if _, err := os.Stat(path); err == nil {
+		return path, nil
+	}
+
+	if err := os.WriteFile(path, []byte(astralConscienceScript), 0755); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+// addConscienceHook adds the astral conscience Stop hook with asyncRewake and timeout.
+func addConscienceHook(hooks map[string]interface{}, scriptPath string) bool {
+	eventHooks, ok := hooks["Stop"].([]interface{})
+	if !ok {
+		eventHooks = []interface{}{}
+	}
+
+	// Check if already installed
+	for _, hook := range eventHooks {
+		hookMap, ok := hook.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		cmds, ok := hookMap["hooks"].([]interface{})
+		if !ok {
+			continue
+		}
+		for _, cmd := range cmds {
+			cmdMap, ok := cmd.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if cmdMap["command"] == scriptPath {
+				return false
+			}
+		}
+	}
+
+	newHook := map[string]interface{}{
+		"hooks": []interface{}{
+			map[string]interface{}{
+				"command":      scriptPath,
+				"asyncRewake":  true,
+				"timeout":      30,
+			},
+		},
+	}
+	eventHooks = append(eventHooks, newHook)
+	hooks["Stop"] = eventHooks
 	return true
 }
 

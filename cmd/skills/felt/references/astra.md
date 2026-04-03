@@ -154,7 +154,7 @@ decisions:
 
 ## Insight
 
-A scientific finding with evidence. The claim-and-evidence pattern.
+A scientific finding with evidence. The claim is the thing you want to stand behind; the evidence is the traceable anchor that justifies it.
 
 ```yaml
 insights:
@@ -201,13 +201,14 @@ insights:
 
 ### Evidence
 
-Exactly one of `doi` or `artifact`. At least one selector (`quote`, `figure`, `table`).
+Standard ASTRA supports `doi` or `artifact`. In local felt practice we also allow a provisional `document` source for unpublished in-repo manuscripts while upstream ASTRA support is being discussed. At least one selector (`quote`, `figure`, `table`) should still anchor the evidence.
 
 | Field | Required | Type | Notes |
 |-------|----------|------|-------|
 | `id` | yes | string | |
 | `doi` | one of | string | `10.XXXX/...` format. arXiv: `10.48550/arXiv.XXXX.XXXXX` |
 | `artifact` | one of | string | Output ID from this fiber's `outputs` |
+| `document` | local extension | `{path, commit}` | Immutable anchor for unpublished or local manuscripts |
 | `version` | no | integer | arXiv paper version |
 | `checksum` | no | `{algorithm, value}` | Artifact integrity |
 | `snapshot` | no | string | Path to immutable copy (artifact only) |
@@ -216,6 +217,57 @@ Exactly one of `doi` or `artifact`. At least one selector (`quote`, `figure`, `t
 | `figure` | no | FigureSelector | `{type, label, caption?}` |
 | `table` | no | TableSelector | `{type, label, caption?, region?}` |
 | `location` | no | FragmentSelector | `{type, page?}` — PDF location hint |
+
+For local unpublished manuscripts, use `document.path` + `document.commit` and a `LineSelector` location hint:
+
+```yaml
+evidence:
+  - id: paper_i_method
+    document:
+      path: docs/unions_release/unions_shear_catalog_paper/draft_corrected.tex
+      commit: abcdef1234567890
+    quote:
+      type: TextQuoteSelector
+      exact: "We build a 20 x 20 grid in (SNR, size) ..."
+    location:
+      type: LineSelector
+      start: 929
+      end: 944
+```
+
+This is a felt-side extension pending upstream ASTRA design; the immutable anchors are the quote plus commit, with line numbers used only for navigation.
+
+### Literature audit pattern
+
+When you are auditing a paper citation, keep the two layers distinct:
+
+- **Claim**: the statement in the manuscript being audited, or the narrower proposition that manuscript sentence relies on.
+- **Evidence**: the anchor in the cited source that actually supports that claim. Prefer `quote`; add `figure`, `table`, and `location` when they make the support easier to verify.
+
+Example:
+
+```yaml
+insights:
+  psf_leakage_method_audit:
+    claim: The manuscript's PSF-leakage sentence is justified for the concrete SNR-size regression method only when it cites Paper I.
+    created_at: 2026-04-02T15:30:00Z
+    tags: [literature, citation_audit]
+    notes: The broader PSF-leakage framework is still appropriately attributed elsewhere.
+    evidence:
+      - id: paper_i_method
+        doi: "10.48550/arXiv.2501.00001"
+        version: 1
+        quote:
+          type: TextQuoteSelector
+          exact: "We divide the sample into bins of signal-to-noise and galaxy-to-PSF size ratio..."
+          prefix: "To estimate the leakage correction, "
+          suffix: " and fit a linear trend in each cell."
+        location:
+          type: FragmentSelector
+          page: 12
+```
+
+If you also want to record what your audit concluded overall, that can be a separate insight with `artifact` evidence pointing to the audit ledger or worker report.
 
 ---
 
