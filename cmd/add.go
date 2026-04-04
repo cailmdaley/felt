@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"path"
 	"time"
 
 	"github.com/cailmdaley/felt/internal/felt"
@@ -33,6 +34,7 @@ var (
 	addTags    []string
 	addOutcome string
 	addTitle   string
+	addIn      string
 )
 
 var addCmd = &cobra.Command{
@@ -62,6 +64,17 @@ Examples:
 		f, err := felt.New(cleanSlug, addTitle)
 		if err != nil {
 			return err
+		}
+		if addIn != "" {
+			felts, err := storage.ListMetadata()
+			if err != nil {
+				return err
+			}
+			parent, err := felt.FindByPrefix(felts, addIn)
+			if err != nil {
+				return fmt.Errorf("--in %q: %w", addIn, err)
+			}
+			f.ID = path.Join(parent.ID, f.ID)
 		}
 		f.ID, err = storage.NextAvailableID(f.ID)
 		if err != nil {
@@ -98,7 +111,7 @@ Examples:
 				if err != nil {
 					return fmt.Errorf("dependency %q: %w", dep, err)
 				}
-				f.DependsOn = append(f.DependsOn, felt.Dependency{ID: depFelt.ID})
+				f.DependsOn = append(f.DependsOn, felt.NewDependency(depFelt.ID, ""))
 			}
 
 			// Check for cycles
@@ -140,6 +153,7 @@ func init() {
 	addCmd.Flags().StringVarP(&addDue, "due", "D", "", "Due date (YYYY-MM-DD)")
 	addCmd.Flags().StringArrayVarP(&addTags, "tag", "t", nil, "Tag (repeatable)")
 	addCmd.Flags().StringVarP(&addOutcome, "outcome", "o", "", "Outcome (the conclusion)")
+	addCmd.Flags().StringVarP(&addIn, "in", "i", "", "Parent fiber ID: new fiber ID is prefixed with parent's ID")
 }
 
 // Also allow bare "felt <title>" as shorthand for "felt add <title>"
@@ -154,6 +168,7 @@ func init() {
 	rootCmd.Flags().StringVarP(&addDue, "due", "D", "", "Due date (YYYY-MM-DD)")
 	rootCmd.Flags().StringArrayVarP(&addTags, "tag", "t", nil, "Tag (repeatable)")
 	rootCmd.Flags().StringVarP(&addOutcome, "outcome", "o", "", "Outcome (the conclusion)")
+	rootCmd.Flags().StringVarP(&addIn, "in", "i", "", "Parent fiber ID: new fiber ID is prefixed with parent's ID")
 
 	originalRun := rootCmd.RunE
 	rootCmd.RunE = func(cmd *cobra.Command, args []string) error {
