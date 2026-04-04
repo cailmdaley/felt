@@ -162,7 +162,7 @@ Examples:
 				}
 
 				// Add dependency
-				f.DependsOn = append(f.DependsOn, felt.Dependency{ID: depFelt.ID})
+				f.DependsOn = append(f.DependsOn, felt.NewDependency(depFelt.ID, ""))
 			}
 
 			if linkLabel != "" && len(editLink) != 1 {
@@ -177,11 +177,8 @@ Examples:
 				if f.DependsOn.HasID(depFelt.ID) {
 					continue
 				}
-				label := ""
-				if len(editLink) == 1 {
-					label = linkLabel
-				}
-				f.DependsOn = append(f.DependsOn, felt.Dependency{ID: depFelt.ID, Label: label})
+				label := linkLabel
+				f.DependsOn = append(f.DependsOn, felt.NewDependency(depFelt.ID, label))
 			}
 
 			for _, dep := range editUnlink {
