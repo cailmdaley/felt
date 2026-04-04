@@ -460,26 +460,57 @@ func (s *Storage) findWithMode(query string, mode ParseMode) (*Felt, error) {
 }
 
 func (s *Storage) listFiberFiles() ([]fiberFile, error) {
-	var files []fiberFile
-	err := filepath.WalkDir(s.root, func(fullPath string, d fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if d.IsDir() || !strings.HasSuffix(d.Name(), FileExt) {
-			return nil
-		}
-		rel, err := filepath.Rel(s.root, fullPath)
-		if err != nil {
-			return err
-		}
-		id, ok := fiberIDFromRelativePath(rel)
-		if !ok {
-			return nil
-		}
-		files = append(files, fiberFile{id: id, path: fullPath})
-		return nil
-	})
+	// Resolve symlinks on the root so WalkDir descends into symlinked .felt/ dirs
+	root, err := filepath.EvalSymlinks(s.root)
 	if err != nil {
+		return nil, fmt.Errorf("resolving .felt path: %w", err)
+	}
+	var files []fiberFile
+	var walkFn func(walkRoot string) error
+	walkFn = func(walkRoot string) error {
+		return filepath.WalkDir(walkRoot, func(fullPath string, d fs.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			// Follow symlinked directories (e.g. project .felt/ dirs inside loom)
+			if d.Type()&os.ModeSymlink != 0 {
+				target, err := filepath.EvalSymlinks(fullPath)
+				if err != nil {
+					return nil // skip broken symlinks
+				}
+				info, err := os.Stat(target)
+				if err != nil {
+					return nil
+				}
+				if info.IsDir() {
+					return walkFn(fullPath)
+				}
+			}
+			if d.IsDir() || !strings.HasSuffix(d.Name(), FileExt) {
+				return nil
+			}
+			// Resolve the full path through any symlinks for Rel computation
+			resolved, err := filepath.EvalSymlinks(fullPath)
+			if err != nil {
+				resolved = fullPath
+			}
+			// Compute rel from root, trying both resolved and unresolved paths
+			rel, err := filepath.Rel(root, resolved)
+			if err != nil {
+				rel, err = filepath.Rel(root, fullPath)
+				if err != nil {
+					return err
+				}
+			}
+			id, ok := fiberIDFromRelativePath(rel)
+			if !ok {
+				return nil
+			}
+			files = append(files, fiberFile{id: id, path: fullPath})
+			return nil
+		})
+	}
+	if err := walkFn(root); err != nil {
 		return nil, fmt.Errorf("walking .felt directory: %w", err)
 	}
 	return files, nil

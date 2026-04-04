@@ -233,11 +233,18 @@ Use --body with query to include body search, and with --json to emit body text.
 			} else {
 				fmt.Println("No felts found")
 			}
-			return nil
+		} else {
+			for _, f := range filtered {
+				fmt.Print(formatFeltTwoLine(f))
+			}
 		}
 
-		for _, f := range filtered {
-			fmt.Print(formatFeltTwoLine(f))
+		// Show count of hidden fibers when the default filter is active
+		if !statusExplicit && !hasFilters && !lsReady {
+			hidden := len(felts) - len(filtered)
+			if hidden > 0 {
+				fmt.Printf("\n(%d more — use -s all to see everything)\n", hidden)
+			}
 		}
 
 		return nil
