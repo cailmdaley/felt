@@ -100,6 +100,7 @@ func renderSummary(f *felt.Felt, g *felt.Graph) string {
 		fmt.Fprintf(&sb, "Outcome:  %s\n", f.Outcome)
 	}
 	writeDeps(&sb, f, g, true)
+	writeASTRASkeleton(&sb, f)
 	if f.Body != "" {
 		lede := extractLede(f.Body)
 		fmt.Fprintf(&sb, "\n%s\n", lede)
@@ -108,6 +109,72 @@ func renderSummary(f *felt.Felt, g *felt.Graph) string {
 		}
 	}
 	return sb.String()
+}
+
+// writeASTRASkeleton writes one-line summaries of ASTRA structure.
+func writeASTRASkeleton(sb *strings.Builder, f *felt.Felt) {
+	// Decisions: covariance_method → glass (1 excluded)
+	if len(f.Decisions) > 0 {
+		var parts []string
+		for id, d := range f.Decisions {
+			excluded := 0
+			for _, opt := range d.Options {
+				if opt.Excluded {
+					excluded++
+				}
+			}
+			s := id
+			if d.Default != "" {
+				s += " → " + d.Default
+			}
+			if excluded > 0 {
+				s += fmt.Sprintf(" (%d excluded)", excluded)
+			}
+			parts = append(parts, s)
+		}
+		fmt.Fprintf(sb, "Decisions: %s\n", strings.Join(parts, "; "))
+	}
+
+	// Inputs: shear_catalog (data), psf_model (← psf-modeling)
+	if len(f.Inputs) > 0 {
+		var parts []string
+		for _, inp := range f.Inputs {
+			s := inp.ID
+			if inp.From != "" {
+				s += " (← " + inp.From + ")"
+			} else if inp.Type != "" {
+				s += " (" + inp.Type + ")"
+			}
+			parts = append(parts, s)
+		}
+		fmt.Fprintf(sb, "Inputs:    %s\n", strings.Join(parts, ", "))
+	}
+
+	// Outputs: posterior (data), corner_plot (figure)
+	if len(f.Outputs) > 0 {
+		var parts []string
+		for _, out := range f.Outputs {
+			s := out.ID
+			if out.Type != "" {
+				s += " (" + out.Type + ")"
+			}
+			parts = append(parts, s)
+		}
+		fmt.Fprintf(sb, "Outputs:   %s\n", strings.Join(parts, ", "))
+	}
+
+	// Findings: leakage_negligible — "PSF leakage α < 0.01 for all bins"
+	if len(f.Insights) > 0 {
+		var parts []string
+		for id, ins := range f.Insights {
+			claim := ins.Claim
+			if len(claim) > 60 {
+				claim = claim[:57] + "..."
+			}
+			parts = append(parts, fmt.Sprintf("%s — \"%s\"", id, claim))
+		}
+		fmt.Fprintf(sb, "Findings:  %s\n", strings.Join(parts, "; "))
+	}
 }
 
 func renderFull(f *felt.Felt, g *felt.Graph) string {

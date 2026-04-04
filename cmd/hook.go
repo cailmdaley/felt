@@ -272,7 +272,7 @@ func runRemindHook() error {
 func coreRules() string {
 	return `## Core Rules
 - **File as you go.** Decisions, questions, detours, bugs you can't chase now — if it might matter, it's a fiber. A missing link in the causal chain costs an investigation; a fiber costs nothing.
-- **Outcomes teach.** The outcome is the documentation. What was learned, what was decided, why. Someone reading the outcome should learn the thing without opening the body.
+- **Outcomes teach.** The outcome is a one-sentence conclusion — what was learned, decided, or produced. It appears in ` + "`felt ls`" + ` and ` + "`-d compact`" + `, so write it to stand alone. The body carries the full argument.
 - **Formalize while working.** Accrete ASTRA structure as it becomes real: ` + "`decisions:`" + ` when alternatives are rejected, ` + "`inputs:`" + `/` + "`outputs:`" + ` while jobs run, ` + "`insights:`" + ` when claims have evidence.
 - **Compose upward.** When closing a fiber, ask: does this lesson belong in a doc fiber or the root fiber? Consolidate breadcrumbs into authoritative fibers. Update the root fiber when project context changes.
 - **CLI for metadata, file edit for content.** ` + "`felt edit`" + ` for status/tags/links/outcome. Edit ` + "`.felt/<slug>/<slug>.md`" + ` directly for body text and ASTRA frontmatter.
