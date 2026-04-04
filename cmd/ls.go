@@ -18,9 +18,8 @@ var (
 	lsExact   bool
 	lsRegex   bool
 	lsReady   bool
-	treeUp    bool
-	treeDown  bool
 	treeCheck bool
+	treeDepth int
 )
 
 var lsCmd = &cobra.Command{
@@ -296,18 +295,20 @@ func hydrateBodies(storage *felt.Storage, felts []*felt.Felt) ([]*felt.Felt, err
 	return hydrated, nil
 }
 
-// TreeNode represents a felt with its children for JSON output.
-type TreeNode struct {
+// ContainmentNode represents a fiber in the containment tree (from filesystem nesting).
+type ContainmentNode struct {
 	*felt.Felt
-	Children []*TreeNode `json:"children,omitempty"`
+	Children []*ContainmentNode `json:"children,omitempty"`
 }
 
-// tree command - hierarchical view
+// tree command - containment hierarchy
 var treeCmd = &cobra.Command{
 	Use:   "tree [id]",
-	Short: "Show dependency tree",
-	Long:  `Shows the dependency tree for a felt, or the whole graph if no ID is given.`,
-	Args:  cobra.MaximumNArgs(1),
+	Short: "Show containment tree",
+	Long: `Shows the containment tree (filesystem nesting) for fibers.
+
+Use 'felt links' to see dependency edges.`,
+	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		root, err := felt.FindProjectRoot()
 		if err != nil {
@@ -325,12 +326,12 @@ var treeCmd = &cobra.Command{
 			return err
 		}
 
-		g := felt.BuildGraph(felts)
-
 		if treeCheck {
+			g := felt.BuildGraph(felts)
 			var errors []string
 			errors = append(errors, g.ValidateDependencies()...)
 			errors = append(errors, g.FindCycles()...)
+			errors = append(errors, validateContainment(felts)...)
 
 			if len(errors) == 0 {
 				fmt.Println("Graph OK")
@@ -343,128 +344,92 @@ var treeCmd = &cobra.Command{
 			return fmt.Errorf("found %d issues", len(errors))
 		}
 
-		if treeUp || treeDown {
-			if len(args) != 1 {
-				return fmt.Errorf("tree traversal requires an id")
-			}
-			depth := 1
-			if traversalAll {
-				depth = 0
-			}
-			cfg := traversalConfig{
-				getRelated: func(g *felt.Graph, id string) []string { return g.GetUpstreamN(id, depth) },
-				edgeLabel:  func(g *felt.Graph, fiberID, relatedID string) string { return edgeLabelInGraph(g, relatedID, fiberID) },
-				emptyMsg:   "No dependencies",
-			}
-			if treeDown {
-				cfg = traversalConfig{
-					getRelated: func(g *felt.Graph, id string) []string { return g.GetDownstreamN(id, depth) },
-					edgeLabel:  func(g *felt.Graph, fiberID, relatedID string) string { return edgeLabelInGraph(g, fiberID, relatedID) },
-					emptyMsg:   "Nothing depends on this",
-				}
-			}
-			return runTraversal(args[0], cfg)
-		}
+		// Build containment tree from IDs
+		roots := buildContainmentTree(felts)
 
-		if graphFormat != "" && graphFormat != "text" {
-			switch graphFormat {
-			case "mermaid":
-				fmt.Print(g.ToMermaid())
-			case "dot":
-				fmt.Print(g.ToDot())
-			default:
-				return fmt.Errorf("unknown format: %s (use mermaid, dot, or text)", graphFormat)
-			}
-			return nil
-		}
-
-		if jsonOutput {
-			var trees []*TreeNode
-			visited := make(map[string]bool)
-
-			if len(args) == 1 {
-				f, err := felt.FindByPrefix(felts, args[0])
-				if err != nil {
-					return err
-				}
-				trees = append(trees, buildTreeNode(g, f.ID, visited))
-			} else {
-				var roots []*felt.Felt
-				for _, f := range felts {
-					if len(f.DependsOn) == 0 {
-						roots = append(roots, f)
-					}
-				}
-				sort.Slice(roots, func(i, j int) bool {
-					return roots[i].CreatedAt.Before(roots[j].CreatedAt)
-				})
-				for _, f := range roots {
-					trees = append(trees, buildTreeNode(g, f.ID, visited))
-				}
-			}
-			return outputJSON(trees)
-		}
-
+		// If a specific ID given, find its subtree
 		if len(args) == 1 {
-			// Show tree for specific felt
 			f, err := felt.FindByPrefix(felts, args[0])
 			if err != nil {
 				return err
 			}
-			printTree(g, f.ID, "", true)
-		} else {
-			// Show all root nodes (no upstream deps)
-			var roots []*felt.Felt
-			for _, f := range felts {
-				if len(f.DependsOn) == 0 {
-					roots = append(roots, f)
-				}
+			node := findContainmentNode(roots, f.ID)
+			if node == nil {
+				return fmt.Errorf("fiber %s not found in tree", f.ID)
 			}
-			sort.Slice(roots, func(i, j int) bool {
-				return roots[i].CreatedAt.Before(roots[j].CreatedAt)
-			})
-			// Share visited map across roots to handle nodes reachable from multiple roots
-			visited := make(map[string]bool)
-			for i, f := range roots {
-				printTreeWithVisited(g, f.ID, "", i == len(roots)-1, visited)
-			}
+			roots = []*ContainmentNode{node}
+		}
+
+		if jsonOutput {
+			return outputJSON(roots)
+		}
+
+		for i, root := range roots {
+			printContainmentNode(root, "", i == len(roots)-1, 0)
 		}
 
 		return nil
 	},
 }
 
-func buildTreeNode(g *felt.Graph, id string, visited map[string]bool) *TreeNode {
-	if visited[id] {
-		return nil
-	}
-	visited[id] = true
-
-	f := g.Nodes[id]
-	if f == nil {
-		return nil
+// buildContainmentTree constructs a tree from fiber IDs based on path nesting.
+// A fiber with ID "a/b" is a child of "a". Fibers without a parent in the set are roots.
+func buildContainmentTree(felts []*felt.Felt) []*ContainmentNode {
+	byID := make(map[string]*ContainmentNode, len(felts))
+	for _, f := range felts {
+		byID[f.ID] = &ContainmentNode{Felt: f}
 	}
 
-	node := &TreeNode{Felt: f}
-	children := g.Downstream[id]
-	sort.Slice(children, func(i, j int) bool { return children[i].ID < children[j].ID })
-
-	for _, child := range children {
-		if childNode := buildTreeNode(g, child.ID, visited); childNode != nil {
-			node.Children = append(node.Children, childNode)
+	var roots []*ContainmentNode
+	for _, f := range felts {
+		node := byID[f.ID]
+		parentID := parentPath(f.ID)
+		if parentID != "" {
+			if parent, ok := byID[parentID]; ok {
+				parent.Children = append(parent.Children, node)
+				continue
+			}
 		}
+		roots = append(roots, node)
 	}
-	return node
+
+	sortContainmentNodes(roots)
+	return roots
 }
 
-// printTreeWithVisited prints a node and its children, tracking visited nodes to avoid duplicates.
-func printTreeWithVisited(g *felt.Graph, id string, prefix string, last bool, visited map[string]bool) {
-	f, ok := g.Nodes[id]
-	if !ok {
+func sortContainmentNodes(nodes []*ContainmentNode) {
+	sort.Slice(nodes, func(i, j int) bool { return nodes[i].ID < nodes[j].ID })
+	for _, n := range nodes {
+		sortContainmentNodes(n.Children)
+	}
+}
+
+// parentPath returns the parent fiber ID, or "" for top-level fibers.
+func parentPath(id string) string {
+	idx := strings.LastIndex(id, "/")
+	if idx < 0 {
+		return ""
+	}
+	return id[:idx]
+}
+
+func findContainmentNode(roots []*ContainmentNode, id string) *ContainmentNode {
+	for _, r := range roots {
+		if r.ID == id {
+			return r
+		}
+		if found := findContainmentNode(r.Children, id); found != nil {
+			return found
+		}
+	}
+	return nil
+}
+
+func printContainmentNode(node *ContainmentNode, prefix string, last bool, depth int) {
+	if treeDepth > 0 && depth > treeDepth {
 		return
 	}
 
-	// Print this node
 	connector := "├── "
 	if last {
 		connector = "└── "
@@ -473,23 +438,10 @@ func printTreeWithVisited(g *felt.Graph, id string, prefix string, last bool, vi
 		connector = ""
 	}
 
-	// Check if already printed
-	if visited[id] {
-		fmt.Printf("%s%s%s %s  %s (see above)\n", prefix, connector, felt.StatusIcon(f.Status), felt.ShortID(id), f.Title)
-		return
-	}
-	visited[id] = true
+	fmt.Printf("%s%s%s %s  %s\n", prefix, connector, felt.StatusIcon(node.Status), felt.ShortID(node.ID), node.Title)
 
-	fmt.Printf("%s%s%s %s  %s\n", prefix, connector, felt.StatusIcon(f.Status), felt.ShortID(id), f.Title)
-
-	// Get children (downstream)
-	children := g.Downstream[id]
-	sort.Slice(children, func(i, j int) bool { return children[i].ID < children[j].ID })
-
-	// Update prefix for children
 	var childPrefix string
 	if prefix == "" {
-		// Starting from root node - children need indentation
 		childPrefix = "    "
 	} else if last {
 		childPrefix = prefix + "    "
@@ -497,22 +449,30 @@ func printTreeWithVisited(g *felt.Graph, id string, prefix string, last bool, vi
 		childPrefix = prefix + "│   "
 	}
 
-	for i, child := range children {
-		printTreeWithVisited(g, child.ID, childPrefix, i == len(children)-1, visited)
+	for i, child := range node.Children {
+		printContainmentNode(child, childPrefix, i == len(node.Children)-1, depth+1)
 	}
 }
 
-func printTree(g *felt.Graph, id string, prefix string, last bool) {
-	visited := make(map[string]bool)
-	printTreeWithVisited(g, id, prefix, last, visited)
+// validateContainment checks for orphaned nested fibers (parent doesn't exist).
+func validateContainment(felts []*felt.Felt) []string {
+	ids := make(map[string]bool, len(felts))
+	for _, f := range felts {
+		ids[f.ID] = true
+	}
+
+	var errors []string
+	for _, f := range felts {
+		parent := parentPath(f.ID)
+		if parent != "" && !ids[parent] {
+			errors = append(errors, fmt.Sprintf("%s nested under non-existent %s", f.ID, parent))
+		}
+	}
+	return errors
 }
 
 func init() {
 	rootCmd.AddCommand(treeCmd)
-	treeCmd.Flags().BoolVar(&treeUp, "up", false, "Show upstream dependencies for one felt")
-	treeCmd.Flags().BoolVar(&treeDown, "down", false, "Show downstream dependents for one felt")
-	treeCmd.Flags().BoolVar(&treeCheck, "check", false, "Validate graph integrity")
-	treeCmd.Flags().StringVarP(&graphFormat, "format", "f", "text", "Output format (text, mermaid, dot)")
-	treeCmd.Flags().StringVarP(&upDownDetail, "detail", "d", "", "Detail level per item (title, compact, summary, full)")
-	treeCmd.Flags().BoolVar(&traversalAll, "all", false, "Traverse full transitive closure for --up/--down")
+	treeCmd.Flags().BoolVar(&treeCheck, "check", false, "Validate graph and containment integrity")
+	treeCmd.Flags().IntVar(&treeDepth, "depth", 0, "Maximum nesting depth to display (0 = unlimited)")
 }
