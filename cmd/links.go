@@ -31,7 +31,7 @@ Graph export and validation:
   felt links --check            validate graph integrity`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		root, err := felt.FindProjectRoot()
+		root, err := resolveProjectRoot()
 		if err != nil {
 			return fmt.Errorf("not in a felt repository")
 		}

@@ -13,7 +13,7 @@ var rmCmd = &cobra.Command{
 	Long:  `Permanently removes a felt from the repository.`,
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		root, err := felt.FindProjectRoot()
+		root, err := resolveProjectRoot()
 		if err != nil {
 			return fmt.Errorf("not in a felt repository")
 		}

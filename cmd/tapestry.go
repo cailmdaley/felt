@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/cailmdaley/felt/internal/felt"
 	"github.com/cailmdaley/felt/internal/tapestry"
 	"github.com/spf13/cobra"
 )
@@ -72,7 +71,7 @@ func init() {
 }
 
 func runTapestryExport() error {
-	projectRoot, err := felt.FindProjectRoot()
+	projectRoot, err := resolveProjectRoot()
 	if err != nil {
 		return fmt.Errorf("not in a felt repository")
 	}
@@ -104,7 +103,7 @@ func runTapestryExport() error {
 }
 
 func runASTRAExport() error {
-	projectRoot, err := felt.FindProjectRoot()
+	projectRoot, err := resolveProjectRoot()
 	if err != nil {
 		return fmt.Errorf("not in a felt repository")
 	}

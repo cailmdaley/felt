@@ -4,11 +4,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 
+	"github.com/cailmdaley/felt/internal/felt"
 	"github.com/spf13/cobra"
 )
 
-var jsonOutput bool
+var (
+	jsonOutput bool
+	changeDir  string
+)
 
 // Version is the current version, set via ldflags.
 var Version = "dev"
@@ -38,6 +43,23 @@ func Execute() {
 
 func init() {
 	rootCmd.PersistentFlags().BoolVarP(&jsonOutput, "json", "j", false, "Output in JSON format")
+	rootCmd.PersistentFlags().StringVarP(&changeDir, "directory", "C", "", "Run as if felt was started in `dir`")
+}
+
+// resolveProjectRoot returns the project root, honoring -C if set.
+func resolveProjectRoot() (string, error) {
+	if changeDir != "" {
+		abs, err := filepath.Abs(changeDir)
+		if err != nil {
+			return "", fmt.Errorf("resolving -C path: %w", err)
+		}
+		feltDir := filepath.Join(abs, felt.DirName)
+		if info, err := os.Stat(feltDir); err != nil || !info.IsDir() {
+			return "", fmt.Errorf("no .felt directory in %s", abs)
+		}
+		return abs, nil
+	}
+	return felt.FindProjectRoot()
 }
 
 // outputJSON marshals data to JSON and prints it.

@@ -51,7 +51,7 @@ Examples:
   felt mocks-unbiased -t pure-eb           # shorthand + tag`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		root, err := felt.FindProjectRoot()
+		root, err := resolveProjectRoot()
 		if err != nil {
 			return fmt.Errorf("not in a felt repository (run 'felt init' first)")
 		}

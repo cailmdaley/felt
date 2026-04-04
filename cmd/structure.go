@@ -60,7 +60,7 @@ var nestCmd = &cobra.Command{
 	Long:  `Moves an existing fiber subtree under a parent fiber, rewriting IDs and dependencies.`,
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		root, err := felt.FindProjectRoot()
+		root, err := resolveProjectRoot()
 		if err != nil {
 			return fmt.Errorf("not in a felt repository")
 		}
@@ -110,7 +110,7 @@ var unnestCmd = &cobra.Command{
 	Long:  `Moves a nested fiber subtree to the top level, rewriting IDs and dependencies.`,
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		root, err := felt.FindProjectRoot()
+		root, err := resolveProjectRoot()
 		if err != nil {
 			return fmt.Errorf("not in a felt repository")
 		}
@@ -154,7 +154,7 @@ func init() {
 
 func resolveMigrationStorage(dir string) (*felt.Storage, error) {
 	if dir == "" {
-		root, err := felt.FindProjectRoot()
+		root, err := resolveProjectRoot()
 		if err != nil {
 			return nil, fmt.Errorf("not in a felt repository")
 		}

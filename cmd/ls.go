@@ -42,7 +42,7 @@ Optional query searches title, outcome, and ASTRA frontmatter:
 Use --body with query to include body search, and with --json to emit body text.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		root, err := felt.FindProjectRoot()
+		root, err := resolveProjectRoot()
 		if err != nil {
 			return fmt.Errorf("not in a felt repository")
 		}
@@ -310,7 +310,7 @@ var treeCmd = &cobra.Command{
 Use 'felt links' to see dependency edges.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		root, err := felt.FindProjectRoot()
+		root, err := resolveProjectRoot()
 		if err != nil {
 			return fmt.Errorf("not in a felt repository")
 		}

@@ -27,7 +27,7 @@ Prints active fibers (currently being worked on) and ready fibers
 (open with all dependencies closed) in a format suitable for AI context.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		root, err := felt.FindProjectRoot()
+		root, err := resolveProjectRoot()
 		if err != nil {
 			// Not in a felt repository - output minimal context
 			fmt.Print(minimalOutput())
