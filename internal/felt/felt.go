@@ -228,18 +228,27 @@ func (f *Felt) HasStatus() bool {
 	return f.Status != ""
 }
 
-// New creates a new Felt with default values.
-// Returns an error if title is empty.
+// New creates a new Felt from a slug (the positional argument).
+// If title is empty, it is derived from the slug.
+// The slug is slugified silently if it contains spaces or uppercase.
 // Fibers have no status by default — status is opt-in for tracked work.
-func New(title string) (*Felt, error) {
-	title = strings.TrimSpace(title)
-	if title == "" {
-		return nil, fmt.Errorf("title cannot be empty")
+func New(slug string, title string) (*Felt, error) {
+	slug = strings.TrimSpace(slug)
+	if slug == "" {
+		return nil, fmt.Errorf("slug cannot be empty")
 	}
 
-	id, err := GenerateID(title)
-	if err != nil {
-		return nil, err
+	id := Slugify(slug)
+	if id == "" {
+		return nil, fmt.Errorf("slug must contain at least one alphanumeric character")
+	}
+	if len(id) > 32 {
+		id = truncateAtWord(id, 32)
+	}
+
+	title = strings.TrimSpace(title)
+	if title == "" {
+		title = TitleFromSlug(id)
 	}
 
 	return &Felt{
@@ -250,9 +259,23 @@ func New(title string) (*Felt, error) {
 	}, nil
 }
 
-// GenerateID creates a slug-based ID.
+// TitleFromSlug derives a human-readable title from a slug.
+// "mocks-unbiased" → "Mocks unbiased"
+func TitleFromSlug(slug string) string {
+	s := strings.ReplaceAll(slug, "-", " ")
+	if len(s) == 0 {
+		return s
+	}
+	// Capitalize first letter only
+	runes := []rune(s)
+	runes[0] = unicode.ToUpper(runes[0])
+	return string(runes)
+}
+
+// GenerateID creates a slug-based ID from a title string.
+// Used by migration and legacy paths that derive slugs from titles.
 func GenerateID(title string) (string, error) {
-	slug := slugify(title)
+	slug := Slugify(title)
 	if len(slug) > 32 {
 		// Truncate at word boundary
 		slug = truncateAtWord(slug, 32)
@@ -264,8 +287,8 @@ func GenerateID(title string) (string, error) {
 	return slug, nil
 }
 
-// slugify converts a title to a URL-safe slug.
-func slugify(s string) string {
+// Slugify converts a string to a URL-safe slug.
+func Slugify(s string) string {
 	// Strip bracketed tags like [loom], [pure-eb], [thread:X]
 	s = stripBracketedTags(s)
 	s = strings.ToLower(s)

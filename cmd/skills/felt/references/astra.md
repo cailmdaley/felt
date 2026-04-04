@@ -21,7 +21,7 @@ These go directly in the fiber's YAML frontmatter alongside felt fields (`title`
 | `insights` | map of id → [Insight](#insight) | Claims with evidence |
 | `success_criteria` | array of [SuccessCriterion](#success-criterion) | Pass/fail conditions |
 | `container` | string or [ContainerBuildSpec](#container-build-spec) | Default container image for recipes |
-| `analysis-grade` | boolean | Workflow flag: human-validated and analytically relied upon |
+| `tempered` | boolean | Workflow flag: human-validated and analytically relied upon |
 
 ---
 

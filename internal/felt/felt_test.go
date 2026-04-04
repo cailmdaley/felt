@@ -8,7 +8,7 @@ import (
 )
 
 func TestNew(t *testing.T) {
-	f, err := New("Test Task")
+	f, err := New("test-task", "Test Task")
 	if err != nil {
 		t.Fatalf("New() error: %v", err)
 	}
@@ -27,15 +27,62 @@ func TestNew(t *testing.T) {
 	}
 }
 
-func TestNewEmptyTitle(t *testing.T) {
-	_, err := New("")
-	if err == nil {
-		t.Error("New(\"\") should return an error")
+func TestNewTitleFromSlug(t *testing.T) {
+	f, err := New("mocks-unbiased", "")
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
 	}
 
-	_, err = New("   ")
+	if f.ID != "mocks-unbiased" {
+		t.Errorf("ID = %q, want %q", f.ID, "mocks-unbiased")
+	}
+	if f.Title != "Mocks unbiased" {
+		t.Errorf("Title = %q, want %q", f.Title, "Mocks unbiased")
+	}
+}
+
+func TestNewSlugifiesInput(t *testing.T) {
+	f, err := New("Mocks Unbiased", "")
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+
+	if f.ID != "mocks-unbiased" {
+		t.Errorf("ID = %q, want %q", f.ID, "mocks-unbiased")
+	}
+	if f.Title != "Mocks unbiased" {
+		t.Errorf("Title = %q, want %q (derived from slugified ID)", f.Title, "Mocks unbiased")
+	}
+}
+
+func TestNewEmptySlug(t *testing.T) {
+	_, err := New("", "Some title")
 	if err == nil {
-		t.Error("New(\"   \") should return an error")
+		t.Error("New(\"\", ...) should return an error")
+	}
+
+	_, err = New("   ", "Some title")
+	if err == nil {
+		t.Error("New(\"   \", ...) should return an error")
+	}
+}
+
+func TestTitleFromSlug(t *testing.T) {
+	tests := []struct {
+		slug string
+		want string
+	}{
+		{"mocks-unbiased", "Mocks unbiased"},
+		{"test", "Test"},
+		{"multi-word-slug", "Multi word slug"},
+		{"already", "Already"},
+	}
+
+	for _, tt := range tests {
+		got := TitleFromSlug(tt.slug)
+		if got != tt.want {
+			t.Errorf("TitleFromSlug(%q) = %q, want %q", tt.slug, got, tt.want)
+		}
 	}
 }
 
@@ -86,9 +133,9 @@ func TestSlugify(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		got := slugify(tt.input)
+		got := Slugify(tt.input)
 		if got != tt.want {
-			t.Errorf("slugify(%q) = %q, want %q", tt.input, got, tt.want)
+			t.Errorf("Slugify(%q) = %q, want %q", tt.input, got, tt.want)
 		}
 	}
 }

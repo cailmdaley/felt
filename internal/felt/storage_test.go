@@ -131,7 +131,7 @@ func TestStorageDelete(t *testing.T) {
 	s := NewStorage(dir)
 	s.Init()
 
-	f, _ := New("Delete Me")
+	f, _ := New("delete-me", "")
 	s.Write(f)
 
 	// Verify exists
@@ -176,9 +176,9 @@ func TestStorageList(t *testing.T) {
 	}
 
 	// Add some felts
-	f1, _ := New("Task One")
-	f2, _ := New("Task Two")
-	f3, _ := New("Task Three")
+	f1, _ := New("task-one", "")
+	f2, _ := New("task-two", "")
+	f3, _ := New("task-three", "")
 	s.Write(f1)
 	s.Write(f2)
 	s.Write(f3)
@@ -229,7 +229,7 @@ func TestStorageListMetadataSkipsBody(t *testing.T) {
 	s := NewStorage(dir)
 	s.Init()
 
-	f, _ := New("Task One")
+	f, _ := New("task-one", "")
 	f.Body = "Body should be skipped."
 	f.Outcome = "Outcome should remain."
 	if err := s.Write(f); err != nil {
@@ -259,7 +259,7 @@ func TestStorageListMetadataWithModTimePopulatesModifiedAt(t *testing.T) {
 	s := NewStorage(dir)
 	s.Init()
 
-	f, _ := New("Task One")
+	f, _ := New("task-one", "")
 	if err := s.Write(f); err != nil {
 		t.Fatalf("Write() error: %v", err)
 	}
@@ -365,7 +365,7 @@ func TestStorageListIgnoresNonMdFiles(t *testing.T) {
 	os.WriteFile(nonMdPath, []byte("not a felt"), 0644)
 
 	// Also create a valid felt
-	f, _ := New("Valid Felt")
+	f, _ := New("valid-felt", "")
 	s.Write(f)
 
 	felts, err := s.List()
@@ -387,7 +387,7 @@ func TestStorageListIgnoresDirectories(t *testing.T) {
 	os.Mkdir(subdir, 0755)
 
 	// Create a valid felt
-	f, _ := New("Valid Felt")
+	f, _ := New("valid-felt", "")
 	s.Write(f)
 
 	felts, err := s.List()
@@ -404,8 +404,8 @@ func TestStorageFind(t *testing.T) {
 	s := NewStorage(dir)
 	s.Init()
 
-	f1, _ := New("Alpha Task")
-	f2, _ := New("Beta Task")
+	f1, _ := New("alpha-task", "")
+	f2, _ := New("beta-task", "")
 	s.Write(f1)
 	s.Write(f2)
 

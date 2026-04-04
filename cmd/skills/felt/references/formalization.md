@@ -10,7 +10,7 @@ How fibers move through the deterministic 3x3 model: three tiers, three kinds. F
 
 - **Annotated**: any valid felt fiber. Title, outcome, body, tags, and links in any combination. No ASTRA requirement. This covers everything from a bare title to a rich doc fiber.
 - **Formalized**: the fiber has at least one well-formed ASTRA object in frontmatter. Deterministic test: could `felt export --format astra` emit this?
-- **Analysis-grade**: `analysis-grade: true` in frontmatter. Human-validated and part of the real scientific argument. This is a workflow flag, not a richer schema.
+- **Tempered**: `tempered: true` in frontmatter. Human-validated and part of the real scientific argument. This is a workflow flag, not a richer schema.
 
 ### Three kinds
 
@@ -20,11 +20,11 @@ How fibers move through the deterministic 3x3 model: three tiers, three kinds. F
 
 ### 3x3 table
 
-| Kind | Annotated | Formalized | Analysis-grade |
+| Kind | Annotated | Formalized | Tempered |
 |------|-----------|------------|----------------|
-| **Decision** | `adopt-blind-a-as-fiducial-bb` exists as a note that blind A may become the fiducial BB choice | `adopt-blind-a-as-fiducial-bb` has a `decisions:` block with real options, default, and excluded reasoning | `adopt-blind-a-as-fiducial-bb` is also marked `analysis-grade: true` because the collaboration has validated and relied on it |
-| **Computation** | `96-bin-powspace-is-optimal` is a breadcrumb or running note about binning tests | `96-bin-powspace-is-optimal` records concrete `inputs:` and `outputs:` for the comparison, optionally with a recipe | `96-bin-powspace-is-optimal` is marked `analysis-grade: true` because the result is part of the real analysis argument |
-| **Finding** | `cosebis-blind-independent` is a note that blind independence may hold | `cosebis-blind-independent` has an `insights:` claim with evidence pointers | `cosebis-blind-independent` is marked `analysis-grade: true` after human validation and incorporation into the scientific case |
+| **Decision** | `adopt-blind-a-as-fiducial-bb` exists as a note that blind A may become the fiducial BB choice | `adopt-blind-a-as-fiducial-bb` has a `decisions:` block with real options, default, and excluded reasoning | `adopt-blind-a-as-fiducial-bb` is also marked `tempered: true` because the collaboration has validated and relied on it |
+| **Computation** | `96-bin-powspace-is-optimal` is a breadcrumb or running note about binning tests | `96-bin-powspace-is-optimal` records concrete `inputs:` and `outputs:` for the comparison, optionally with a recipe | `96-bin-powspace-is-optimal` is marked `tempered: true` because the result is part of the real analysis argument |
+| **Finding** | `cosebis-blind-independent` is a note that blind independence may hold | `cosebis-blind-independent` has an `insights:` claim with evidence pointers | `cosebis-blind-independent` is marked `tempered: true` after human validation and incorporation into the scientific case |
 
 ### Formalization threshold
 
@@ -165,8 +165,8 @@ The frontmatter is for branching, validation, querying, and export. The body is 
 - Inventing ASTRA structure before real options, inputs, or evidence exist
 - Duplicating frontmatter verbatim into the body
 - Formalizing ephemeral thoughts; leave them annotated unless they are a real decision, computation, or finding
-- Marking `analysis-grade: true` before human validation
-- Treating analysis-grade as a compliment rather than a workflow flag
+- Marking `tempered: true` before human validation
+- Treating tempered as a compliment rather than a workflow flag
 
 ---
 
@@ -277,7 +277,7 @@ decisions:
 
 Now the fiber is formalized because `felt export --format astra` could emit it.
 
-### Analysis-grade
+### Tempered
 
 Once the result has been checked by a human and relied on in the real analysis, mark that workflow state explicitly:
 
@@ -285,7 +285,7 @@ Once the result has been checked by a human and relied on in the real analysis, 
 ---
 title: PSF leakage check
 status: closed
-analysis-grade: true
+tempered: true
 tags:
   - systematics
   - tapestry:psf-leakage
@@ -344,6 +344,6 @@ The body now carries the interpretation, caveats, and why the threshold is the r
 felt export --format astra
 ```
 
-Formalized fibers are the exportable set. Analysis-grade fibers are a flagged subset of that set.
+Formalized fibers are the exportable set. Tempered fibers are a flagged subset of that set.
 
 For the full ASTRA schema: `~/Documents/projects/ASTRA/spec/0.1/analysis.schema.json`.

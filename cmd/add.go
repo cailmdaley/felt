@@ -2,8 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"os"
-	"strings"
 	"time"
 
 	"github.com/cailmdaley/felt/internal/felt"
@@ -34,13 +32,22 @@ var (
 	addDue     string
 	addTags    []string
 	addOutcome string
+	addTitle   string
 )
 
 var addCmd = &cobra.Command{
-	Use:   "add <title>",
+	Use:   "add <slug>",
 	Short: "Create a new felt",
-	Long:  `Creates a new felt with the given title and optional flags.`,
-	Args:  cobra.ExactArgs(1),
+	Long: `Creates a new felt with the given slug and optional title.
+
+The slug is the short DAG node label and the fiber's ID.
+If --title is not provided, the title is derived from the slug.
+
+Examples:
+  felt add mocks-unbiased --title "Are the mocks unbiased?"
+  felt add mocks-unbiased                  # title → "Mocks unbiased"
+  felt mocks-unbiased -t pure-eb           # shorthand + tag`,
+	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		root, err := felt.FindProjectRoot()
 		if err != nil {
@@ -49,10 +56,10 @@ var addCmd = &cobra.Command{
 
 		storage := felt.NewStorage(root)
 
-		// Extract [bracketed] tags from title
-		extractedTags, cleanTitle := felt.ExtractTags(args[0])
+		// Extract [bracketed] tags from slug input (for backward compat)
+		extractedTags, cleanSlug := felt.ExtractTags(args[0])
 
-		f, err := felt.New(cleanTitle)
+		f, err := felt.New(cleanSlug, addTitle)
 		if err != nil {
 			return err
 		}
@@ -115,12 +122,6 @@ var addCmd = &cobra.Command{
 			f.Outcome = addOutcome
 		}
 
-		// Warn if title is long — titles render as DAG node labels (2-3 words ideal)
-		if len(strings.Fields(f.Title)) > 5 {
-			fmt.Fprintf(os.Stderr, "warning: title %q is long (%d words); titles render as DAG node labels — keep to 2-3 words, put detail in body/outcome\n",
-				f.Title, len(strings.Fields(f.Title)))
-		}
-
 		if err := storage.Write(f); err != nil {
 			return err
 		}
@@ -132,6 +133,7 @@ var addCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(addCmd)
+	addCmd.Flags().StringVar(&addTitle, "title", "", "Title (if omitted, derived from slug)")
 	addCmd.Flags().StringVarP(&addBody, "body", "b", "", "Body text")
 	addCmd.Flags().StringVarP(&addStatus, "status", "s", "", "Status (open, active, closed)")
 	addCmd.Flags().StringArrayVarP(&addDeps, "depends-on", "a", nil, "Dependency ID (repeatable)")
@@ -144,7 +146,8 @@ func init() {
 func init() {
 	rootCmd.Args = cobra.ArbitraryArgs
 
-	// Copy add command flags to root so "felt <title> -a dep" works
+	// Copy add command flags to root so "felt <slug> --title ..." works
+	rootCmd.Flags().StringVar(&addTitle, "title", "", "Title (if omitted, derived from slug)")
 	rootCmd.Flags().StringVarP(&addBody, "body", "b", "", "Body text")
 	rootCmd.Flags().StringVarP(&addStatus, "status", "s", "", "Status (open, active, closed)")
 	rootCmd.Flags().StringArrayVarP(&addDeps, "depends-on", "a", nil, "Dependency ID (repeatable)")

@@ -90,8 +90,8 @@ func TestIntegration(t *testing.T) {
 		t.Fatal("init: myst.yml not recreated")
 	}
 
-	// add — returns the fiber ID
-	fiberID := strings.TrimSpace(mustFelt(t, dir, "add", "test fiber", "-s", "open"))
+	// add — returns the fiber ID (positional arg is now the slug)
+	fiberID := strings.TrimSpace(mustFelt(t, dir, "add", "test-fiber", "-s", "open", "--title", "test fiber"))
 	if fiberID != "test-fiber" {
 		t.Fatal("add: expected fiber ID in output")
 	}
@@ -143,7 +143,7 @@ func TestIntegration(t *testing.T) {
 	if !strings.Contains(out, "replacement body") {
 		t.Fatalf("edit --body: expected replacement content, got: %s", out)
 	}
-	out = mustFelt(t, dir, "ls", "-e", "test fiber")
+	out = mustFelt(t, dir, "ls", "-e", "test fiber") // exact title match
 	if !strings.Contains(out, fiberID) {
 		t.Fatalf("ls --exact should match exact title from metadata, got: %s", out)
 	}
@@ -191,7 +191,7 @@ func TestIntegration(t *testing.T) {
 	}
 
 	// add a second fiber and link them
-	fiber2ID := strings.TrimSpace(mustFelt(t, dir, "add", "second fiber", "-s", "open"))
+	fiber2ID := strings.TrimSpace(mustFelt(t, dir, "add", "second-fiber", "-s", "open", "--title", "second fiber"))
 	if fiber2ID == "" {
 		t.Fatal("add: expected fiber2 ID")
 	}
@@ -210,7 +210,7 @@ func TestIntegration(t *testing.T) {
 	if !strings.Contains(out, "second fiber") {
 		t.Fatalf("downstream: expected child fiber, got: %s", out)
 	}
-	fiber3ID := strings.TrimSpace(mustFelt(t, dir, "add", "third fiber", "-s", "open"))
+	fiber3ID := strings.TrimSpace(mustFelt(t, dir, "add", "third-fiber", "-s", "open", "--title", "third fiber"))
 	if fiber3ID == "" {
 		t.Fatal("add: expected fiber3 ID")
 	}
