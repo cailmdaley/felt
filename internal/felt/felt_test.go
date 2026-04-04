@@ -811,12 +811,12 @@ created-at: 2026-01-01T10:00:00Z
 		t.Fatalf("DependsOn length = %d, want 2", len(f.DependsOn))
 	}
 
-	// First dep: bare string
+	// First dep: bare string gets default label
 	if f.DependsOn[0].ID != "bare-id" {
 		t.Errorf("DependsOn[0].ID = %q, want %q", f.DependsOn[0].ID, "bare-id")
 	}
-	if f.DependsOn[0].Label != "" {
-		t.Errorf("DependsOn[0].Label = %q, want empty", f.DependsOn[0].Label)
+	if f.DependsOn[0].Label != DefaultDepLabel {
+		t.Errorf("DependsOn[0].Label = %q, want %q", f.DependsOn[0].Label, DefaultDepLabel)
 	}
 
 	// Second dep: object with label
@@ -847,9 +847,12 @@ func TestMarshalMixedDependencies(t *testing.T) {
 
 	content := string(data)
 
-	// Bare dep should be emitted as plain string
-	if !strings.Contains(content, "- bare-id") {
-		t.Error("Marshal() should emit bare dep as string")
+	// All deps emitted as objects (always object form now)
+	if !strings.Contains(content, "id: bare-id") {
+		t.Error("Marshal() should emit bare dep as object with id field")
+	}
+	if !strings.Contains(content, "label: depends on") {
+		t.Error("Marshal() should emit default label for bare dep")
 	}
 
 	// Labeled dep should be emitted as object
@@ -868,8 +871,8 @@ func TestMarshalMixedDependencies(t *testing.T) {
 	if len(parsed.DependsOn) != 2 {
 		t.Fatalf("Round-trip DependsOn length = %d, want 2", len(parsed.DependsOn))
 	}
-	if parsed.DependsOn[0].ID != "bare-id" || parsed.DependsOn[0].Label != "" {
-		t.Errorf("Round-trip DependsOn[0] = %+v, want {bare-id, \"\"}", parsed.DependsOn[0])
+	if parsed.DependsOn[0].ID != "bare-id" || parsed.DependsOn[0].Label != DefaultDepLabel {
+		t.Errorf("Round-trip DependsOn[0] = %+v, want {bare-id, %q}", parsed.DependsOn[0], DefaultDepLabel)
 	}
 	if parsed.DependsOn[1].ID != "labeled-id" || parsed.DependsOn[1].Label != "needs data from" {
 		t.Errorf("Round-trip DependsOn[1] = %+v, want {labeled-id, needs data from}", parsed.DependsOn[1])

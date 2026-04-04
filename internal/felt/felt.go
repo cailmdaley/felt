@@ -30,16 +30,21 @@ const (
 	StatusClosed = "closed"
 )
 
-// Dependency represents a dependency with an optional label explaining why.
+// DefaultDepLabel is the label applied to dependencies when no explicit label is given.
+const DefaultDepLabel = "depends on"
+
+// Dependency represents a dependency with a required label explaining why.
 type Dependency struct {
 	ID    string `json:"id"`
-	Label string `json:"label,omitempty"`
+	Label string `json:"label"`
 }
 
 // UnmarshalYAML handles both bare string and {id, label} object forms.
+// Bare strings get the default label "depends on".
 func (d *Dependency) UnmarshalYAML(value *yaml.Node) error {
 	if value.Kind == yaml.ScalarNode {
 		d.ID = value.Value
+		d.Label = DefaultDepLabel
 		return nil
 	}
 	if value.Kind == yaml.MappingNode {
@@ -53,20 +58,32 @@ func (d *Dependency) UnmarshalYAML(value *yaml.Node) error {
 		}
 		d.ID = r.ID
 		d.Label = r.Label
+		if d.Label == "" {
+			d.Label = DefaultDepLabel
+		}
 		return nil
 	}
 	return fmt.Errorf("dependency must be a string or {id, label} object")
 }
 
-// MarshalYAML emits bare string when no label, object when label is present.
+// MarshalYAML always emits {id, label} object form.
 func (d Dependency) MarshalYAML() (interface{}, error) {
-	if d.Label == "" {
-		return d.ID, nil
+	label := d.Label
+	if label == "" {
+		label = DefaultDepLabel
 	}
 	return struct {
 		ID    string `yaml:"id"`
 		Label string `yaml:"label"`
-	}{d.ID, d.Label}, nil
+	}{d.ID, label}, nil
+}
+
+// NewDependency creates a Dependency with the given label, defaulting to "depends on".
+func NewDependency(id, label string) Dependency {
+	if label == "" {
+		label = DefaultDepLabel
+	}
+	return Dependency{ID: id, Label: label}
 }
 
 // Dependencies is a slice of Dependency with helper methods.
