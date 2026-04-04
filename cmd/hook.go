@@ -70,8 +70,13 @@ func init() {
 	hookCmd.AddCommand(hookRemindCmd)
 }
 
+func feltDescription() string {
+	return "felt is a DAG-native fiber tracker. Fibers are concerns — tasks, decisions, findings — stored as markdown in `.felt/`, connected by dependencies, accreting ASTRA structure as understanding crystallizes.\n\n"
+}
+
 func minimalOutput() string {
-	return "# Felt Workflow Context\n\n*No felt repository in current directory.*\n\n" +
+	return "# Felt Workflow Context\n\n" + feltDescription() +
+		"*No felt repository in current directory.*\n\n" +
 		cliReference() + coreRules()
 }
 
@@ -79,6 +84,7 @@ func formatSessionOutput(felts []*felt.Felt, g *felt.Graph) string {
 	var sb strings.Builder
 
 	sb.WriteString("# Felt Workflow Context\n\n")
+	sb.WriteString(feltDescription())
 
 	// Collect active fibers
 	var active []*felt.Felt
@@ -265,15 +271,11 @@ func runRemindHook() error {
 // coreRules returns the shared core rules.
 func coreRules() string {
 	return `## Core Rules
-- **Use felt for everything** — tasks, decisions, questions, detours, bugs you can't chase now. If it might matter, it's a fiber.
-- Outcome (` + "`-o`" + `) is the documentation: the conclusion, the reasoning, what was learned
-- ` + "`felt edit`" + ` is non-interactive (flags only); for patch edits, modify the fiber markdown file in ` + "`.felt/<path>/<slug>.md`" + ` directly
-- **CLI for metadata, file edit for content.** Use ` + "`felt edit`" + ` for status/tags/links/outcome. Edit ` + "`.felt/<path>/<slug>.md`" + ` directly for body text and content.
-- ` + "`felt export --format astra`" + ` emits ASTRA-compatible ` + "`astra.yaml`" + ` from frontmatter-bearing fibers
-- **Formalize while working** — accrete ASTRA structure (decisions, inputs, outputs, insights) as understanding crystallizes
-- **Leave a wake** — file as you go
+- **File as you go.** Decisions, questions, detours, bugs you can't chase now — if it might matter, it's a fiber. A missing link in the causal chain costs an investigation; a fiber costs nothing.
+- **Outcomes teach.** The outcome is the documentation. What was learned, what was decided, why. Someone reading the outcome should learn the thing without opening the body.
+- **Formalize while working.** Accrete ASTRA structure as it becomes real: ` + "`decisions:`" + ` when alternatives are rejected, ` + "`inputs:`" + `/` + "`outputs:`" + ` while jobs run, ` + "`insights:`" + ` when claims have evidence.
+- **Compose upward.** When closing a fiber, ask: does this lesson belong in a doc fiber or the root fiber? Consolidate breadcrumbs into authoritative fibers. Update the root fiber when project context changes.
+- **CLI for metadata, file edit for content.** ` + "`felt edit`" + ` for status/tags/links/outcome. Edit ` + "`.felt/<slug>/<slug>.md`" + ` directly for body text and ASTRA frontmatter.
 - **Titles are DAG node labels: 2-3 words.** Body and outcome carry full content.
-
-*Fibers form the fabric of collaboration. Touch the loom before you reach for the shuttle.*
 `
 }
