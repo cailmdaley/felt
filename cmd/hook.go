@@ -190,6 +190,7 @@ func cliReference() string {
 felt init                       # initialize .felt/ + myst.yml
 felt "title"                    # create fiber
 felt add "title" [flags]        # create with status/tags/deps/outcome
+felt add "title" --in parent    # create nested under parent
 felt edit <id> --status active  # enter tracking / mark active
 felt edit <id> --status closed --outcome "outcome"
 felt edit <id> --tag foo --untag bar
@@ -203,11 +204,14 @@ felt ls                         # tracked fibers (open/active)
 felt ls --ready                 # open fibers whose deps are closed
 felt ls -t tapestry:            # any filter widens to all statuses
 felt ls -s closed "query"       # explicit -s overrides; -e exact, -r regex
-felt tree <id> --up             # direct dependencies
-felt tree <id> --down           # direct dependents
-felt tree <id> --up --all       # full transitive upstream
-felt tree <id> --format mermaid # graph export
-felt tree --check               # validate graph integrity
+felt tree                       # containment hierarchy
+felt tree <id>                  # subtree for one fiber
+felt tree --check               # validate graph + containment
+felt links <id>                 # dependency edges with labels
+felt links <id> --up            # upstream deps only
+felt links <id> --down          # downstream dependents
+felt links <id> --all           # transitive closure
+felt links --format mermaid     # graph export
 felt nest <child> <parent>      # move into parent subtree
 felt unnest <child>             # promote back to top level
 felt migrate [--dry-run]        # flat files -> directory fibers

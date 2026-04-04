@@ -49,6 +49,11 @@ type Node struct {
 	Evidence  *Evidence  `json:"evidence"`
 }
 
+type FiberDep struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+}
+
 type Fiber struct {
 	ID        string     `json:"id"`
 	Title     string     `json:"title"`
@@ -59,7 +64,7 @@ type Fiber struct {
 	Tags      []string   `json:"tags"`
 	CreatedAt time.Time  `json:"createdAt"`
 	ClosedAt  *time.Time `json:"closedAt"`
-	DependsOn []string   `json:"dependsOn"`
+	DependsOn []FiberDep `json:"dependsOn"`
 }
 
 type Decision struct {
@@ -86,6 +91,7 @@ type DecisionOption struct {
 type Link struct {
 	Source string `json:"source"`
 	Target string `json:"target"`
+	Label  string `json:"label,omitempty"`
 }
 
 type Downstream struct {
@@ -206,6 +212,10 @@ func buildFibers(felts []*felt.Felt) []Fiber {
 	sortFelts(felts)
 	fibers := make([]Fiber, 0, len(felts))
 	for _, f := range felts {
+		deps := make([]FiberDep, len(f.DependsOn))
+		for i, d := range f.DependsOn {
+			deps[i] = FiberDep{ID: d.ID, Label: d.Label}
+		}
 		fibers = append(fibers, Fiber{
 			ID:        f.ID,
 			Title:     f.Title,
@@ -216,7 +226,7 @@ func buildFibers(felts []*felt.Felt) []Fiber {
 			Tags:      slices.Clone(f.Tags),
 			CreatedAt: f.CreatedAt,
 			ClosedAt:  f.ClosedAt,
-			DependsOn: f.DependsOn.IDs(),
+			DependsOn: deps,
 		})
 	}
 	return fibers
@@ -225,8 +235,10 @@ func buildFibers(felts []*felt.Felt) []Fiber {
 func buildLinks(tapestryFelts []*felt.Felt, specByID map[string]string) []Link {
 	links := []Link{}
 	for _, f := range tapestryFelts {
-		for _, dep := range tapestryDependsOn(f, specByID) {
-			links = append(links, Link{Source: dep, Target: f.ID})
+		for _, dep := range f.DependsOn {
+			if _, ok := specByID[dep.ID]; ok {
+				links = append(links, Link{Source: dep.ID, Target: f.ID, Label: dep.Label})
+			}
 		}
 	}
 	sort.Slice(links, func(i, j int) bool {
