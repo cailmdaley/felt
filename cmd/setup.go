@@ -615,7 +615,7 @@ func installConscienceScript() (string, error) {
 	return path, nil
 }
 
-// addConscienceHook adds the astral conscience Stop hook with asyncRewake and timeout.
+// addConscienceHook adds the astral conscience Stop hook (async, with timeout).
 func addConscienceHook(hooks map[string]interface{}, scriptPath string) bool {
 	eventHooks, ok := hooks["Stop"].([]interface{})
 	if !ok {
@@ -646,9 +646,10 @@ func addConscienceHook(hooks map[string]interface{}, scriptPath string) bool {
 	newHook := map[string]interface{}{
 		"hooks": []interface{}{
 			map[string]interface{}{
-				"command":      scriptPath,
-				"asyncRewake":  true,
-				"timeout":      30,
+				"type":    "command",
+				"command": scriptPath,
+				"async":   true,
+				"timeout": 30,
 			},
 		},
 	}
