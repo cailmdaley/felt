@@ -14,17 +14,14 @@ var (
 	editStatus  string
 	editDue     string
 	editDeps    []string
+	editUndep   []string
 	editTags    []string
 	editUntag   []string
-	editLink    []string
-	editUnlink  []string
 	editComment []string
 	editBody    string
 	editOutcome string
+	editLabel   string
 )
-
-// Link command flags
-var linkLabel string
 
 var editCmd = &cobra.Command{
 	Use:   "edit <id>",
@@ -58,11 +55,10 @@ Examples:
 		hasFlags := cmd.Flags().Changed("title") ||
 			cmd.Flags().Changed("status") ||
 			cmd.Flags().Changed("due") ||
-			cmd.Flags().Changed("depends-on") ||
+			cmd.Flags().Changed("dep") ||
+			cmd.Flags().Changed("undep") ||
 			cmd.Flags().Changed("tag") ||
 			cmd.Flags().Changed("untag") ||
-			cmd.Flags().Changed("link") ||
-			cmd.Flags().Changed("unlink") ||
 			cmd.Flags().Changed("comment") ||
 			cmd.Flags().Changed("label") ||
 			cmd.Flags().Changed("body") ||
@@ -143,10 +139,14 @@ Examples:
 				f.AppendComment(comment)
 			}
 		}
-		if cmd.Flags().Changed("depends-on") || cmd.Flags().Changed("link") || cmd.Flags().Changed("unlink") || cmd.Flags().Changed("label") {
+		if cmd.Flags().Changed("dep") || cmd.Flags().Changed("undep") || cmd.Flags().Changed("label") {
 			felts, err := storage.ListMetadata()
 			if err != nil {
 				return err
+			}
+
+			if editLabel != "" && len(editDeps) != 1 {
+				return fmt.Errorf("--label requires exactly one --dep target")
 			}
 
 			// Resolve and add dependencies
@@ -155,38 +155,18 @@ Examples:
 				if err != nil {
 					return fmt.Errorf("dependency %q: %w", dep, err)
 				}
-
-				// Check if already linked
 				if f.DependsOn.HasID(depFelt.ID) {
 					continue
 				}
-
-				// Add dependency
-				f.DependsOn = append(f.DependsOn, felt.NewDependency(depFelt.ID, ""))
+				f.DependsOn = append(f.DependsOn, felt.NewDependency(depFelt.ID, editLabel))
 			}
 
-			if linkLabel != "" && len(editLink) != 1 {
-				return fmt.Errorf("--label requires exactly one --link target")
-			}
-
-			for _, dep := range editLink {
+			// Remove dependencies
+			for _, dep := range editUndep {
 				depFelt, err := felt.FindByPrefix(felts, dep)
 				if err != nil {
 					return fmt.Errorf("dependency %q: %w", dep, err)
 				}
-				if f.DependsOn.HasID(depFelt.ID) {
-					continue
-				}
-				label := linkLabel
-				f.DependsOn = append(f.DependsOn, felt.NewDependency(depFelt.ID, label))
-			}
-
-			for _, dep := range editUnlink {
-				depFelt, err := felt.FindByPrefix(felts, dep)
-				if err != nil {
-					return fmt.Errorf("dependency %q: %w", dep, err)
-				}
-
 				var newDeps felt.Dependencies
 				for _, d := range f.DependsOn {
 					if d.ID != depFelt.ID {
@@ -227,18 +207,17 @@ func init() {
 	rootCmd.AddCommand(editCmd)
 
 	// Edit command flags
-	editCmd.Flags().StringVarP(&editTitle, "title", "t", "", "Set title")
+	editCmd.Flags().StringVar(&editTitle, "title", "", "Set title")
 	editCmd.Flags().StringVarP(&editStatus, "status", "s", "", "Set status (open, active, closed)")
-	editCmd.Flags().StringArrayVar(&editTags, "tag", nil, "Add tag(s) (repeatable; comma-separated accepted)")
-	editCmd.Flags().StringArrayVar(&editUntag, "untag", nil, "Remove tag(s) (repeatable; comma-separated accepted)")
-	editCmd.Flags().StringArrayVar(&editLink, "link", nil, "Add dependency (repeatable)")
-	editCmd.Flags().StringArrayVar(&editUnlink, "unlink", nil, "Remove dependency (repeatable)")
-	editCmd.Flags().StringArrayVar(&editComment, "comment", nil, "Append comment text to the body (repeatable)")
-	editCmd.Flags().StringVarP(&linkLabel, "label", "l", "", "Label for a single --link dependency")
+	editCmd.Flags().StringArrayVarP(&editTags, "tag", "t", nil, "Add tag(s) (repeatable; comma-separated accepted)")
+	editCmd.Flags().StringArrayVar(&editUntag, "untag", nil, "Remove tag(s)")
+	editCmd.Flags().StringArrayVarP(&editDeps, "dep", "d", nil, "Add dependency (repeatable)")
+	editCmd.Flags().StringArrayVar(&editUndep, "undep", nil, "Remove dependency (repeatable)")
+	editCmd.Flags().StringArrayVarP(&editComment, "comment", "c", nil, "Append comment text to the body (repeatable)")
+	editCmd.Flags().StringVarP(&editLabel, "label", "l", "", "Label for a single --dep dependency")
 	editCmd.Flags().StringVarP(&editBody, "body", "b", "", "Replace full body text (destructive overwrite)")
 	editCmd.Flags().StringVarP(&editOutcome, "outcome", "o", "", "Set outcome")
 	editCmd.Flags().StringVarP(&editDue, "due", "D", "", "Set due date (YYYY-MM-DD, empty to clear)")
-	editCmd.Flags().StringArrayVarP(&editDeps, "depends-on", "a", nil, "Add dependency (repeatable)")
 }
 
 // splitTags splits comma-separated tag input into individual tags.

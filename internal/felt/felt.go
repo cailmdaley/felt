@@ -255,17 +255,20 @@ func New(slug string, title string) (*Felt, error) {
 		return nil, fmt.Errorf("slug cannot be empty")
 	}
 
-	id := Slugify(slug)
+	id := SlugifyPath(slug)
 	if id == "" {
 		return nil, fmt.Errorf("slug must contain at least one alphanumeric character")
 	}
-	if len(id) > 32 {
-		id = truncateAtWord(id, 32)
+	// Truncate only the final segment to preserve path structure
+	base := path.Base(id)
+	if len(base) > 32 {
+		base = truncateAtWord(base, 32)
+		id = path.Join(path.Dir(id), base)
 	}
 
 	title = strings.TrimSpace(title)
 	if title == "" {
-		title = TitleFromSlug(id)
+		title = TitleFromSlug(path.Base(id))
 	}
 
 	return &Felt{
@@ -302,6 +305,22 @@ func GenerateID(title string) (string, error) {
 		return "", fmt.Errorf("title must contain at least one alphanumeric character")
 	}
 	return slug, nil
+}
+
+// SlugifyPath handles slash-separated paths: prefix segments are directory names
+// kept as-is (must match existing directories), only the final segment is slugified.
+// This lets "felt add pure_eb/my-fiber" work without mangling "pure_eb".
+func SlugifyPath(s string) string {
+	idx := strings.LastIndex(s, "/")
+	if idx < 0 {
+		return Slugify(s)
+	}
+	prefix := s[:idx]
+	slug := Slugify(s[idx+1:])
+	if slug == "" {
+		return ""
+	}
+	return prefix + "/" + slug
 }
 
 // Slugify converts a string to a URL-safe slug.
@@ -745,9 +764,45 @@ func (f *Felt) AppendComment(text string) {
 }
 
 // idPattern matches slash-separated slug paths.
-var idPattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*(?:/[a-z0-9]+(?:-[a-z0-9]+)*)*$`)
+var idPattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*(?:/[a-z0-9_]+(?:[-_][a-z0-9_]+)*)*$`)
 
 // ValidateID checks if an ID matches the expected format.
 func ValidateID(id string) bool {
 	return idPattern.MatchString(id)
+}
+
+// bodyLinkRe matches markdown links: [text](target)
+var bodyLinkRe = regexp.MustCompile(`\[[^\]]*\]\(([^)]+)\)`)
+
+// mystRefRe matches MyST cross-references: {ref}`target` or {doc}`target`
+var mystRefRe = regexp.MustCompile(`\{(?:ref|doc)\}` + "`([^`]+)`")
+
+// ExtractBodyRefs finds fiber ID references in a body — markdown links and MyST
+// cross-refs whose targets look like fiber IDs (no scheme, no extension).
+func ExtractBodyRefs(body string) []string {
+	seen := map[string]bool{}
+	var refs []string
+
+	add := func(target string) {
+		// Exclude URLs and file paths with extensions
+		if strings.HasPrefix(target, "http") || strings.Contains(target, ".") {
+			return
+		}
+		target = strings.TrimPrefix(target, "./")
+		target = strings.TrimPrefix(target, "../")
+		target = strings.Trim(target, "/")
+		if target == "" || seen[target] {
+			return
+		}
+		seen[target] = true
+		refs = append(refs, target)
+	}
+
+	for _, m := range bodyLinkRe.FindAllStringSubmatch(body, -1) {
+		add(m[1])
+	}
+	for _, m := range mystRefRe.FindAllStringSubmatch(body, -1) {
+		add(m[1])
+	}
+	return refs
 }

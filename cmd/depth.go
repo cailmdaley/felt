@@ -100,6 +100,7 @@ func renderSummary(f *felt.Felt, g *felt.Graph) string {
 		fmt.Fprintf(&sb, "Outcome:  %s\n", f.Outcome)
 	}
 	writeDeps(&sb, f, g, true)
+	writeBodyRefs(&sb, f, g)
 	writeASTRASkeleton(&sb, f)
 	if f.Body != "" {
 		lede := extractLede(f.Body)
@@ -181,6 +182,7 @@ func renderFull(f *felt.Felt, g *felt.Graph) string {
 	var sb strings.Builder
 	writeHeader(&sb, f)
 	writeDeps(&sb, f, g, true)
+	writeBodyRefs(&sb, f, g)
 	if f.Due != nil {
 		fmt.Fprintf(&sb, "Due:      %s\n", f.Due.Format("2006-01-02"))
 	}
@@ -195,6 +197,29 @@ func renderFull(f *felt.Felt, g *felt.Graph) string {
 		fmt.Fprintf(&sb, "\n%s\n", f.Body)
 	}
 	return sb.String()
+}
+
+// writeBodyRefs extracts markdown/MyST links from the body and renders them
+// as a "Refs:" line, annotating which ones resolve to known fibers.
+func writeBodyRefs(sb *strings.Builder, f *felt.Felt, g *felt.Graph) {
+	if f.Body == "" {
+		return
+	}
+	refs := felt.ExtractBodyRefs(f.Body)
+	if len(refs) == 0 {
+		return
+	}
+	var parts []string
+	for _, ref := range refs {
+		if g != nil {
+			if node, ok := g.Nodes[ref]; ok {
+				parts = append(parts, fmt.Sprintf("%s (%s)", ref, truncateTitle(node.Title, 30)))
+				continue
+			}
+		}
+		parts = append(parts, ref)
+	}
+	fmt.Fprintf(sb, "Refs:     %s\n", strings.Join(parts, ", "))
 }
 
 // formatDeps formats dependencies with labels and optional titles.
