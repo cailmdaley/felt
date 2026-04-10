@@ -20,7 +20,6 @@ var retiredCommandPhrases = []string{
 	"felt ready ",
 	"felt find ",
 	"felt prime ",
-	"felt check ",
 	"felt tapestry export",
 }
 
@@ -59,7 +58,6 @@ func TestRootCommandSurfaceIsConsolidated(t *testing.T) {
 		"ready",
 		"find",
 		"prime",
-		"check",
 		"tapestry",
 	} {
 		if slices.Contains(visible, retired) {
@@ -69,6 +67,7 @@ func TestRootCommandSurfaceIsConsolidated(t *testing.T) {
 
 	for _, expected := range []string{
 		"add",
+		"check",
 		"edit",
 		"export",
 		"hook",

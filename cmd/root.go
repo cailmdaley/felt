@@ -31,6 +31,9 @@ var rootCmd = &cobra.Command{
 under .felt/, with each fiber in <slug>/<slug>.md using YAML frontmatter and
 plain markdown. Fibers can depend on each other, forming a directed acyclic
 graph that can be searched, traversed, and exported.`,
+	CompletionOptions: cobra.CompletionOptions{
+		HiddenDefaultCmd: true,
+	},
 }
 
 // Execute runs the root command.

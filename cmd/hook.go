@@ -206,12 +206,7 @@ felt ls -t tapestry:            # any filter widens to all statuses
 felt ls -s closed "query"       # explicit -s overrides; -e exact, -r regex
 felt tree                       # containment hierarchy
 felt tree <id>                  # subtree for one fiber
-felt tree --check               # validate graph + containment
-felt links <id>                 # dependency edges with labels
-felt links <id> --up            # upstream deps only
-felt links <id> --down          # downstream dependents
-felt links <id> --all           # transitive closure
-felt links --format mermaid     # graph export
+felt check                      # lint ASTRA/formalization issues
 felt nest <child> <parent>      # move into parent subtree
 felt unnest <child>             # promote back to top level
 felt migrate [--dry-run]        # flat files -> directory fibers

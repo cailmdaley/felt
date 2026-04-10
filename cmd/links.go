@@ -330,7 +330,6 @@ func buildLinksNode(g *felt.Graph, f *felt.Felt, upOnly, downOnly bool, depth in
 var linksCheck bool
 
 func init() {
-	rootCmd.AddCommand(linksCmd)
 	linksCmd.Flags().BoolVar(&linksUp, "up", false, "Show upstream dependencies only")
 	linksCmd.Flags().BoolVar(&linksDown, "down", false, "Show downstream dependents only")
 	linksCmd.Flags().BoolVar(&linksAll, "all", false, "Traverse full transitive closure (default is direct only)")

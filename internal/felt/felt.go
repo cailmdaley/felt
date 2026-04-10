@@ -191,6 +191,7 @@ type ASTRAEvidence struct {
 	ID           string         `yaml:"id,omitempty" json:"id,omitempty"`
 	DOI          string         `yaml:"doi,omitempty" json:"doi,omitempty"`
 	Artifact     string         `yaml:"artifact,omitempty" json:"artifact,omitempty"`
+	Description  string         `yaml:"description,omitempty" json:"description,omitempty"`
 	Document     *ASTRADocument `yaml:"document,omitempty" json:"document,omitempty"`
 	Version      *int           `yaml:"version,omitempty" json:"version,omitempty"`
 	Checksum     string         `yaml:"checksum,omitempty" json:"checksum,omitempty"`

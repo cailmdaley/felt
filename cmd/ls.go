@@ -18,7 +18,6 @@ var (
 	lsExact   bool
 	lsRegex   bool
 	lsReady   bool
-	treeCheck bool
 	treeDepth int
 )
 
@@ -305,9 +304,7 @@ type ContainmentNode struct {
 var treeCmd = &cobra.Command{
 	Use:   "tree [id]",
 	Short: "Show containment tree",
-	Long: `Shows the containment tree (filesystem nesting) for fibers.
-
-Use 'felt links' to see dependency edges.`,
+	Long: `Shows the containment tree (filesystem nesting) for fibers.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		root, err := resolveProjectRoot()
@@ -324,24 +321,6 @@ Use 'felt links' to see dependency edges.`,
 		}
 		if err != nil {
 			return err
-		}
-
-		if treeCheck {
-			g := felt.BuildGraph(felts)
-			var errors []string
-			errors = append(errors, g.ValidateDependencies()...)
-			errors = append(errors, g.FindCycles()...)
-			errors = append(errors, validateContainment(felts)...)
-
-			if len(errors) == 0 {
-				fmt.Println("Graph OK")
-				return nil
-			}
-
-			for _, e := range errors {
-				fmt.Printf("ERROR: %s\n", e)
-			}
-			return fmt.Errorf("found %d issues", len(errors))
 		}
 
 		// Build containment tree from IDs
@@ -473,6 +452,5 @@ func validateContainment(felts []*felt.Felt) []string {
 
 func init() {
 	rootCmd.AddCommand(treeCmd)
-	treeCmd.Flags().BoolVar(&treeCheck, "check", false, "Validate graph and containment integrity")
 	treeCmd.Flags().IntVar(&treeDepth, "depth", 0, "Maximum nesting depth to display (0 = unlimited)")
 }
