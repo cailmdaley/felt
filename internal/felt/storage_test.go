@@ -131,7 +131,7 @@ func TestStorageDelete(t *testing.T) {
 	s := NewStorage(dir)
 	s.Init()
 
-	f, _ := New("delete-me", "")
+	f, _ := New("delete-me", "Delete me")
 	s.Write(f)
 
 	// Verify exists
@@ -176,9 +176,9 @@ func TestStorageList(t *testing.T) {
 	}
 
 	// Add some felts
-	f1, _ := New("task-one", "")
-	f2, _ := New("task-two", "")
-	f3, _ := New("task-three", "")
+	f1, _ := New("task-one", "Task one")
+	f2, _ := New("task-two", "Task two")
+	f3, _ := New("task-three", "Task three")
 	s.Write(f1)
 	s.Write(f2)
 	s.Write(f3)
@@ -229,7 +229,7 @@ func TestStorageListMetadataSkipsBody(t *testing.T) {
 	s := NewStorage(dir)
 	s.Init()
 
-	f, _ := New("task-one", "")
+	f, _ := New("task-one", "Task one")
 	f.Body = "Body should be skipped."
 	f.Outcome = "Outcome should remain."
 	if err := s.Write(f); err != nil {
@@ -259,7 +259,7 @@ func TestStorageListMetadataWithModTimePopulatesModifiedAt(t *testing.T) {
 	s := NewStorage(dir)
 	s.Init()
 
-	f, _ := New("task-one", "")
+	f, _ := New("task-one", "Task one")
 	if err := s.Write(f); err != nil {
 		t.Fatalf("Write() error: %v", err)
 	}
@@ -365,7 +365,7 @@ func TestStorageListIgnoresNonMdFiles(t *testing.T) {
 	os.WriteFile(nonMdPath, []byte("not a felt"), 0644)
 
 	// Also create a valid felt
-	f, _ := New("valid-felt", "")
+	f, _ := New("valid-felt", "Valid felt")
 	s.Write(f)
 
 	felts, err := s.List()
@@ -387,7 +387,7 @@ func TestStorageListIgnoresDirectories(t *testing.T) {
 	os.Mkdir(subdir, 0755)
 
 	// Create a valid felt
-	f, _ := New("valid-felt", "")
+	f, _ := New("valid-felt", "Valid felt")
 	s.Write(f)
 
 	felts, err := s.List()
@@ -404,8 +404,8 @@ func TestStorageFind(t *testing.T) {
 	s := NewStorage(dir)
 	s.Init()
 
-	f1, _ := New("alpha-task", "")
-	f2, _ := New("beta-task", "")
+	f1, _ := New("alpha-task", "Alpha task")
+	f2, _ := New("beta-task", "Beta task")
 	s.Write(f1)
 	s.Write(f2)
 
@@ -743,8 +743,8 @@ Analysis body.
 	if got := migrated.DependsOn[0].ID; got != "bao-analysis" {
 		t.Fatalf("dependency rewrite = %q, want %q", got, "bao-analysis")
 	}
-	if !strings.HasPrefix(migrated.Body, "(quick-gotcha)=") {
-		t.Fatalf("migrated body should have MyST anchor, got %q", migrated.Body)
+	if migrated.Body != "Quick note." {
+		t.Fatalf("migrated body should preserve plain markdown body, got %q", migrated.Body)
 	}
 }
 

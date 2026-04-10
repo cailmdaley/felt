@@ -16,6 +16,9 @@ func TestNew(t *testing.T) {
 	if f.Title != "Test Task" {
 		t.Errorf("Title = %q, want %q", f.Title, "Test Task")
 	}
+	if f.Name != "Test Task" {
+		t.Errorf("Name = %q, want %q", f.Name, "Test Task")
+	}
 	if f.Status != "" {
 		t.Errorf("Status = %q, want empty (no default status)", f.Status)
 	}
@@ -27,22 +30,15 @@ func TestNew(t *testing.T) {
 	}
 }
 
-func TestNewTitleFromSlug(t *testing.T) {
-	f, err := New("mocks-unbiased", "")
-	if err != nil {
-		t.Fatalf("New() error: %v", err)
-	}
-
-	if f.ID != "mocks-unbiased" {
-		t.Errorf("ID = %q, want %q", f.ID, "mocks-unbiased")
-	}
-	if f.Title != "Mocks unbiased" {
-		t.Errorf("Title = %q, want %q", f.Title, "Mocks unbiased")
+func TestNewRequiresName(t *testing.T) {
+	_, err := New("mocks-unbiased", "")
+	if err == nil {
+		t.Fatal("New() should require a name")
 	}
 }
 
 func TestNewSlugifiesInput(t *testing.T) {
-	f, err := New("Mocks Unbiased", "")
+	f, err := New("Mocks Unbiased", "Mocks unbiased")
 	if err != nil {
 		t.Fatalf("New() error: %v", err)
 	}
@@ -50,8 +46,8 @@ func TestNewSlugifiesInput(t *testing.T) {
 	if f.ID != "mocks-unbiased" {
 		t.Errorf("ID = %q, want %q", f.ID, "mocks-unbiased")
 	}
-	if f.Title != "Mocks unbiased" {
-		t.Errorf("Title = %q, want %q (derived from slugified ID)", f.Title, "Mocks unbiased")
+	if f.Name != "Mocks unbiased" {
+		t.Errorf("Name = %q, want %q", f.Name, "Mocks unbiased")
 	}
 }
 
@@ -250,10 +246,10 @@ func TestMarshal(t *testing.T) {
 	if !strings.HasPrefix(content, "---\n") {
 		t.Error("Marshal() should start with ---")
 	}
-	if !strings.Contains(content, "title: Test Task") {
-		t.Error("Marshal() should contain title")
+	if !strings.Contains(content, "name: Test Task") {
+		t.Error("Marshal() should contain name")
 	}
-	if !strings.Contains(content, "(test-task)=\nBody text here.") {
+	if !strings.Contains(content, "\n\nBody text here.\n") {
 		t.Error("Marshal() should contain body")
 	}
 
@@ -270,7 +266,7 @@ func TestMarshal(t *testing.T) {
 	}
 }
 
-func TestMarshalAddsDefaultMySTBody(t *testing.T) {
+func TestMarshalLeavesEmptyBodyEmpty(t *testing.T) {
 	now := time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
 	f := &Felt{
 		ID:        "quick-gotcha",
@@ -284,8 +280,8 @@ func TestMarshalAddsDefaultMySTBody(t *testing.T) {
 	}
 
 	content := string(data)
-	if !strings.Contains(content, "(quick-gotcha)=\n# Quick gotcha") {
-		t.Fatalf("Marshal() should add MyST scaffold, got %q", content)
+	if strings.Contains(content, "# Quick gotcha") || strings.Contains(content, "(quick-gotcha)=") {
+		t.Fatalf("Marshal() should not add scaffold body, got %q", content)
 	}
 }
 
@@ -576,8 +572,8 @@ func TestAppendComment(t *testing.T) {
 	f := &Felt{ID: "test-task", Title: "Test Task", Body: "Initial body."}
 	f.AppendComment("First comment")
 
-	if !strings.HasPrefix(f.Body, "(test-task)=\nInitial body.") {
-		t.Error("AppendComment should prepend MyST anchor when missing")
+	if !strings.HasPrefix(f.Body, "Initial body.") {
+		t.Error("AppendComment should preserve existing body prefix")
 	}
 	if !strings.Contains(f.Body, "## Comments") {
 		t.Error("AppendComment should add Comments section")

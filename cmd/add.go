@@ -32,22 +32,21 @@ var (
 	addDue     string
 	addTags    []string
 	addOutcome string
-	addTitle   string
 )
 
 var addCmd = &cobra.Command{
-	Use:   "add <slug>",
+	Use:   "add <slug> <name>",
 	Short: "Create a new felt",
-	Long: `Creates a new felt with the given slug and optional title.
+	Long: `Creates a new felt with the given slug and name.
 
-The slug is the short DAG node label and the fiber's ID.
-If --title is not provided, the title is derived from the slug.
+The slug is the fiber's path/ID shorthand. The name is the first real content
+and is required explicitly.
 
 Examples:
-  felt add mocks-unbiased --title "Are the mocks unbiased?"
-  felt add mocks-unbiased                  # title → "Mocks unbiased"
-  felt mocks-unbiased -t pure-eb           # shorthand + tag`,
-	Args: cobra.ExactArgs(1),
+  felt add mocks-unbiased "Are the mocks unbiased?"
+  felt add pure_eb/covariance "Covariance method"
+  felt mocks-unbiased "Are the mocks unbiased?" -t pure-eb`,
+	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		root, err := resolveProjectRoot()
 		if err != nil {
@@ -59,7 +58,7 @@ Examples:
 		// Extract [bracketed] tags from slug input (for backward compat)
 		extractedTags, cleanSlug := felt.ExtractTags(args[0])
 
-		f, err := felt.New(cleanSlug, addTitle)
+		f, err := felt.New(cleanSlug, args[1])
 		if err != nil {
 			return err
 		}
@@ -133,7 +132,6 @@ Examples:
 
 func init() {
 	rootCmd.AddCommand(addCmd)
-	addCmd.Flags().StringVar(&addTitle, "title", "", "Title (if omitted, derived from slug)")
 	addCmd.Flags().StringVarP(&addBody, "body", "b", "", "Body text")
 	addCmd.Flags().StringVarP(&addStatus, "status", "s", "", "Status (open, active, closed)")
 	addCmd.Flags().StringArrayVarP(&addDeps, "dep", "d", nil, "Dependency ID (repeatable)")
@@ -146,8 +144,7 @@ func init() {
 func init() {
 	rootCmd.Args = cobra.ArbitraryArgs
 
-	// Copy add command flags to root so "felt <slug> --title ..." works
-	rootCmd.Flags().StringVar(&addTitle, "title", "", "Title (if omitted, derived from slug)")
+	// Copy add command flags to root so "felt <slug> <name> ..." works
 	rootCmd.Flags().StringVarP(&addBody, "body", "b", "", "Body text")
 	rootCmd.Flags().StringVarP(&addStatus, "status", "s", "", "Status (open, active, closed)")
 	rootCmd.Flags().StringArrayVarP(&addDeps, "dep", "d", nil, "Dependency ID (repeatable)")
@@ -160,9 +157,7 @@ func init() {
 		if len(args) > 0 && isRetiredCommand(args[0]) {
 			return fmt.Errorf("unknown command %q for %q", args[0], cmd.CommandPath())
 		}
-		if len(args) == 1 && !isSubcommand(args[0]) {
-			// Treat as "felt add <title>"
-			// Flags are already parsed into the add* variables since we share them
+		if len(args) == 2 && !isSubcommand(args[0]) {
 			return addCmd.RunE(cmd, args)
 		}
 		if originalRun != nil {

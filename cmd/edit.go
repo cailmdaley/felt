@@ -10,7 +10,7 @@ import (
 
 // Edit command flags
 var (
-	editTitle   string
+	editName    string
 	editStatus  string
 	editDue     string
 	editDeps    []string
@@ -29,9 +29,9 @@ var editCmd = &cobra.Command{
 	Long: `Modifies a felt's properties via flags.
 
 Examples:
-  felt edit abc123 --title "New title" -s active
+  felt edit abc123 --name "New name" -s active
   felt edit abc123 --tag decision --untag stale
-  felt edit abc123 --link other-fiber-id --label "why this depends on it"
+  felt edit abc123 --dep other-fiber-id --label "why this depends on it"
   felt edit abc123 --comment "latest finding"
   felt edit abc123 --body "Full replacement body text"  # overwrites body`,
 	Args: cobra.ExactArgs(1),
@@ -52,7 +52,7 @@ Examples:
 		}
 
 		// Check if any modification flags were provided
-		hasFlags := cmd.Flags().Changed("title") ||
+		hasFlags := cmd.Flags().Changed("name") ||
 			cmd.Flags().Changed("status") ||
 			cmd.Flags().Changed("due") ||
 			cmd.Flags().Changed("dep") ||
@@ -72,8 +72,8 @@ Examples:
 		bodyCleared := false
 
 		// Apply flag modifications
-		if cmd.Flags().Changed("title") {
-			f.Title = editTitle
+		if cmd.Flags().Changed("name") {
+			f.Name = editName
 		}
 		if cmd.Flags().Changed("status") {
 			switch editStatus {
@@ -207,7 +207,7 @@ func init() {
 	rootCmd.AddCommand(editCmd)
 
 	// Edit command flags
-	editCmd.Flags().StringVar(&editTitle, "title", "", "Set title")
+	editCmd.Flags().StringVar(&editName, "name", "", "Set name")
 	editCmd.Flags().StringVarP(&editStatus, "status", "s", "", "Set status (open, active, closed)")
 	editCmd.Flags().StringArrayVarP(&editTags, "tag", "t", nil, "Add tag(s) (repeatable; comma-separated accepted)")
 	editCmd.Flags().StringArrayVar(&editUntag, "untag", nil, "Remove tag(s)")

@@ -29,8 +29,8 @@ var rootCmd = &cobra.Command{
 	Short: "DAG-native markdown task tracker",
 	Long: `felt is a DAG-native fiber tracker that stores work as a directory tree
 under .felt/, with each fiber in <slug>/<slug>.md using YAML frontmatter and
-MyST-flavored markdown. Fibers can depend on each other, forming a directed
-acyclic graph that can be searched, traversed, and exported.`,
+plain markdown. Fibers can depend on each other, forming a directed acyclic
+graph that can be searched, traversed, and exported.`,
 }
 
 // Execute runs the root command.

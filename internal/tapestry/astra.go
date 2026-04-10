@@ -256,7 +256,7 @@ func (n *exportASTRANode) export() (exportASTRAAnalysis, bool) {
 
 	analysis := exportASTRAAnalysis{}
 	if includeSelf {
-		analysis.Name = n.felt.Title
+		analysis.Name = n.felt.Name
 		analysis.Tags = slices.Clone(n.felt.Tags)
 		analysis.Description = n.felt.Description
 		analysis.Inputs = normalizeASTRAInputs(n.felt.Inputs)

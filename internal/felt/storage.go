@@ -112,6 +112,9 @@ func (s *Storage) NextAvailableID(baseID string) (string, error) {
 
 // Write saves a felt to disk.
 func (s *Storage) Write(f *Felt) error {
+	if f == nil {
+		return fmt.Errorf("cannot write nil felt")
+	}
 	data, err := f.Marshal()
 	if err != nil {
 		return err
@@ -298,7 +301,7 @@ func (s *Storage) MigrateFlatFiles(dryRun bool) (*MigrationResult, error) {
 
 	used := map[string]struct{}{}
 	for _, f := range legacy {
-		baseID, err := GenerateID(f.felt.Title)
+		baseID, err := GenerateID(f.felt.DisplayName())
 		if err != nil {
 			return nil, fmt.Errorf("generate slug for %s: %w", f.oldID, err)
 		}

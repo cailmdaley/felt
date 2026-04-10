@@ -8,9 +8,9 @@ import (
 
 // Graph represents the DAG of felts with bidirectional edges.
 type Graph struct {
-	Nodes      map[string]*Felt         // ID -> Felt
-	Upstream   map[string]Dependencies  // ID -> what this depends on
-	Downstream map[string]Dependencies  // ID -> what depends on this (computed)
+	Nodes      map[string]*Felt        // ID -> Felt
+	Upstream   map[string]Dependencies // ID -> what this depends on
+	Downstream map[string]Dependencies // ID -> what depends on this (computed)
 }
 
 // BuildGraph constructs a graph from a list of felts.
@@ -271,7 +271,7 @@ func (g *Graph) ToMermaid() string {
 	// Node definitions with status styling
 	for _, id := range ids {
 		f := g.Nodes[id]
-		title := escapeMermaidText(f.Title)
+		title := escapeMermaidText(f.DisplayName())
 		sb.WriteString(fmt.Sprintf("    %s[\"%s\"]\n", sanitizeMermaidID(id), title))
 	}
 
@@ -345,7 +345,7 @@ func (g *Graph) ToDot() string {
 	// Node definitions
 	for _, id := range ids {
 		f := g.Nodes[id]
-		title := strings.ReplaceAll(f.Title, "\"", "\\\"")
+		title := strings.ReplaceAll(f.DisplayName(), "\"", "\\\"")
 		style := ""
 		switch f.Status {
 		case StatusActive:
@@ -456,7 +456,7 @@ func (g *Graph) printTextTree(sb *strings.Builder, id string, prefix string, edg
 		labelPart = fmt.Sprintf(" [%s]", edgeLabel)
 	}
 
-	sb.WriteString(fmt.Sprintf("%s%s%s %s%s  %s\n", prefix, branch, StatusIcon(f.Status), ShortID(id), labelPart, f.Title))
+	sb.WriteString(fmt.Sprintf("%s%s%s %s%s  %s\n", prefix, branch, StatusIcon(f.Status), ShortID(id), labelPart, f.DisplayName()))
 
 	// Get and sort children by ID
 	children := g.Downstream[id]

@@ -34,10 +34,10 @@ Use -t to filter by tag (AND logic, prefix matching with trailing colon):
   -t rule:                    matches any rule:* tag
   -t rule:cosebis_data_vector exact tag match
 
-Optional query searches title, outcome, and ASTRA frontmatter:
+Optional query searches name, outcome, and ASTRA frontmatter:
   felt ls cosebis             substring search
   felt ls -r "rule:.*data"    regex search
-  felt ls -e "exact title"    exact title match
+  felt ls -e "exact name"     exact name match
 
 Use --body with query to include body search, and with --json to emit body text.`,
 	Args: cobra.MaximumNArgs(1),
@@ -135,9 +135,9 @@ Use --body with query to include body search, and with --json to emit body text.
 
 			// Text search (if query provided)
 			if query != "" {
-				titleLower := strings.ToLower(f.Title)
+				titleLower := strings.ToLower(f.DisplayName())
 
-				// Exact title match (sorted first)
+				// Exact name match (sorted first)
 				if !lsRegex && titleLower == queryLower {
 					exactMatches = append(exactMatches, f)
 					continue
@@ -152,7 +152,7 @@ Use --body with query to include body search, and with --json to emit body text.
 				var matches bool
 				searchText := f.SearchText()
 				if lsRegex {
-					matches = re.MatchString(f.Title) || re.MatchString(searchText)
+					matches = re.MatchString(f.DisplayName()) || re.MatchString(searchText)
 				} else {
 					matches = strings.Contains(titleLower, queryLower) ||
 						strings.Contains(strings.ToLower(searchText), queryLower)
@@ -438,7 +438,7 @@ func printContainmentNode(node *ContainmentNode, prefix string, last bool, depth
 		connector = ""
 	}
 
-	fmt.Printf("%s%s%s %s  %s\n", prefix, connector, felt.StatusIcon(node.Status), felt.ShortID(node.ID), node.Title)
+	fmt.Printf("%s%s%s %s  %s\n", prefix, connector, felt.StatusIcon(node.Status), felt.ShortID(node.ID), node.Name)
 
 	var childPrefix string
 	if prefix == "" {

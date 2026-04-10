@@ -57,7 +57,7 @@ per-session flag file in /tmp). After that, all tools are allowed. Only active i
 directories containing a .felt/ directory.
 
 Designed for use as a PreToolUse hook in Claude Code settings.`,
-	Args:    cobra.NoArgs,
+	Args:         cobra.NoArgs,
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runRemindHook()
@@ -169,7 +169,7 @@ func formatRecentEntry(f *felt.Felt) string {
 	if len(f.Tags) > 0 {
 		tagStr = fmt.Sprintf(" (%s)", strings.Join(f.Tags, ", "))
 	}
-	line2 := fmt.Sprintf("    %s%s\n", f.Title, tagStr)
+	line2 := fmt.Sprintf("    %s%s\n", f.DisplayName(), tagStr)
 
 	line3 := ""
 	if f.Outcome != "" {
@@ -188,13 +188,13 @@ func cliReference() string {
 	return `## CLI
 ` + "```" + `
 felt init                       # initialize .felt/ + myst.yml
-felt "title"                    # create fiber
-felt add "title" [flags]        # create with status/tags/deps/outcome
-felt add "title" --in parent    # create nested under parent
+felt <slug> "name"              # create fiber
+felt add <slug> "name" [flags]  # create with status/tags/deps/outcome
 felt edit <id> --status active  # enter tracking / mark active
 felt edit <id> --status closed --outcome "outcome"
+felt edit <id> --name "new name"
 felt edit <id> --tag foo --untag bar
-felt edit <id> --link other --unlink old
+felt edit <id> --dep other --undep old
 felt edit <id> --comment "note" # append under ## Comments
 felt edit <id> --body "text"    # full body replacement (overwrite)
 felt show <id>                  # full details
@@ -220,7 +220,7 @@ Also: hook session, rm, setup, update
 ` + "```" + `
 Statuses: · untracked, ○ open, ◐ active, ● closed
 Detail: title < compact < summary < full (default). Summary shows the **lede** — the first paragraph of the body. Write it to stand alone.
-To patch body text (not replace), edit the fiber markdown file in .felt/<path>/<slug>.md directly. Nested fibers use path IDs like bao-analysis/damping-prior.
+To patch body text (not replace), Read then Edit the fiber markdown file in .felt/<path>/<slug>.md. Nested fibers use path IDs like bao-analysis/damping-prior.
 
 `
 }
@@ -262,8 +262,8 @@ func runRemindHook() error {
 	// Gate is closed — deny the tool call
 	output := map[string]interface{}{
 		"hookSpecificOutput": map[string]interface{}{
-			"hookEventName":          "PreToolUse",
-			"permissionDecision":       "deny",
+			"hookEventName":      "PreToolUse",
+			"permissionDecision": "deny",
 			"permissionDecisionReason": "Activate /felt skill first. You are in a felt-enabled project " +
 				"but haven't activated the felt skill yet. Call the Skill tool with " +
 				"skill: \"felt\" before proceeding with any other tools.",
@@ -279,7 +279,7 @@ func coreRules() string {
 - **Outcomes teach.** The outcome is a one-sentence conclusion — what was learned, decided, or produced. It appears in ` + "`felt ls`" + ` and ` + "`-d compact`" + `, so write it to stand alone. The body carries the full argument.
 - **Formalize while working.** Accrete ASTRA structure as it becomes real: ` + "`decisions:`" + ` when alternatives are rejected, ` + "`inputs:`" + `/` + "`outputs:`" + ` while jobs run, ` + "`insights:`" + ` when claims have evidence.
 - **Compose upward.** When closing a fiber, ask: does this lesson belong in a doc fiber or the root fiber? Consolidate breadcrumbs into authoritative fibers. Update the root fiber when project context changes.
-- **CLI for metadata, file edit for content.** ` + "`felt edit`" + ` for status/tags/links/outcome. Edit ` + "`.felt/<slug>/<slug>.md`" + ` directly for body text and ASTRA frontmatter.
-- **Titles are DAG node labels: 2-3 words.** Body and outcome carry full content.
+- **CLI for metadata, Read+Edit for content.** ` + "`felt edit`" + ` for status/tags/links/outcome. Read then Edit ` + "`.felt/<slug>/<slug>.md`" + ` for body text and ASTRA frontmatter.
+- **Names are concise labels.** Body and outcome carry full content.
 `
 }

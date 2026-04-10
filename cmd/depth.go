@@ -44,16 +44,16 @@ func renderFelt(f *felt.Felt, g *felt.Graph, depth string) string {
 
 func renderTitle(f *felt.Felt) string {
 	if len(f.Tags) > 0 {
-		return fmt.Sprintf("%s (%s)\n", f.Title, strings.Join(f.Tags, ", "))
+		return fmt.Sprintf("%s (%s)\n", f.DisplayName(), strings.Join(f.Tags, ", "))
 	}
-	return f.Title + "\n"
+	return f.DisplayName() + "\n"
 }
 
-// writeHeader writes the common ID/Title/Status/Tags block shared by
+// writeHeader writes the common ID/Name/Status/Tags block shared by
 // compact, summary, and full renderers.
 func writeHeader(sb *strings.Builder, f *felt.Felt) {
 	fmt.Fprintf(sb, "ID:       %s\n", f.ID)
-	fmt.Fprintf(sb, "Title:    %s\n", f.Title)
+	fmt.Fprintf(sb, "Name:     %s\n", f.DisplayName())
 	if f.HasStatus() {
 		fmt.Fprintf(sb, "Status:   %s\n", f.Status)
 	}
@@ -63,9 +63,8 @@ func writeHeader(sb *strings.Builder, f *felt.Felt) {
 }
 
 // writeDeps writes upstream and downstream dependency lines.
-// When showTitles is true, dependency titles are included for context.
+// When showNames is true, dependency names are included for context.
 func writeDeps(sb *strings.Builder, f *felt.Felt, g *felt.Graph, showTitles bool) {
-	// Use graph for title lookup only when requested
 	var titleGraph *felt.Graph
 	if showTitles {
 		titleGraph = g
@@ -199,7 +198,7 @@ func renderFull(f *felt.Felt, g *felt.Graph) string {
 	return sb.String()
 }
 
-// writeBodyRefs extracts markdown/MyST links from the body and renders them
+// writeBodyRefs extracts markdown and wikilinks from the body and renders them
 // as a "Refs:" line, annotating which ones resolve to known fibers.
 func writeBodyRefs(sb *strings.Builder, f *felt.Felt, g *felt.Graph) {
 	if f.Body == "" {
@@ -213,7 +212,7 @@ func writeBodyRefs(sb *strings.Builder, f *felt.Felt, g *felt.Graph) {
 	for _, ref := range refs {
 		if g != nil {
 			if node, ok := g.Nodes[ref]; ok {
-				parts = append(parts, fmt.Sprintf("%s (%s)", ref, truncateTitle(node.Title, 30)))
+				parts = append(parts, fmt.Sprintf("%s (%s)", ref, truncateTitle(node.DisplayName(), 30)))
 				continue
 			}
 		}
@@ -222,8 +221,8 @@ func writeBodyRefs(sb *strings.Builder, f *felt.Felt, g *felt.Graph) {
 	fmt.Fprintf(sb, "Refs:     %s\n", strings.Join(parts, ", "))
 }
 
-// formatDeps formats dependencies with labels and optional titles.
-// When g is non-nil, each dep includes its truncated title for context.
+// formatDeps formats dependencies with labels and optional names.
+// When g is non-nil, each dep includes its truncated name for context.
 // When g is nil, only IDs and labels are shown.
 func formatDeps(g *felt.Graph, deps felt.Dependencies) string {
 	if len(deps) == 0 {
@@ -237,7 +236,7 @@ func formatDeps(g *felt.Graph, deps felt.Dependencies) string {
 		}
 		if g != nil {
 			if f, ok := g.Nodes[d.ID]; ok {
-				return fmt.Sprintf("%s%s (%s)", d.ID, label, truncateTitle(f.Title, 30))
+				return fmt.Sprintf("%s%s (%s)", d.ID, label, truncateTitle(f.DisplayName(), 30))
 			}
 		}
 		return d.ID + label
@@ -254,7 +253,7 @@ func formatDeps(g *felt.Graph, deps felt.Dependencies) string {
 	return sb.String()
 }
 
-// truncateTitle shortens a title to maxLen chars.
+// truncateTitle shortens a display name to maxLen chars.
 func truncateTitle(s string, maxLen int) string {
 	if len(s) <= maxLen {
 		return s
@@ -263,7 +262,7 @@ func truncateTitle(s string, maxLen int) string {
 }
 
 // extractLede extracts the first substantive paragraph from a body.
-// Skips a title-level heading (# ...) since it repeats the fiber title,
+// Skips a title-level heading (# ...) since it repeats the fiber name,
 // then takes the first section heading (if any) plus its first paragraph.
 func extractLede(body string) string {
 	lines := strings.Split(body, "\n")

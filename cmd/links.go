@@ -251,17 +251,17 @@ func downstreamEdgeLabel(g *felt.Graph, fiberID, depID string) string {
 
 type linksEdge struct {
 	ID     string `json:"id"`
-	Title  string `json:"title"`
+	Name   string `json:"name"`
 	Status string `json:"status"`
 	Label  string `json:"label,omitempty"`
 }
 
 type linksNode struct {
-	ID         string       `json:"id"`
-	Title      string       `json:"title"`
-	Status     string       `json:"status"`
-	Upstream   []linksEdge  `json:"upstream,omitempty"`
-	Downstream []linksEdge  `json:"downstream,omitempty"`
+	ID         string      `json:"id"`
+	Name       string      `json:"name"`
+	Status     string      `json:"status"`
+	Upstream   []linksEdge `json:"upstream,omitempty"`
+	Downstream []linksEdge `json:"downstream,omitempty"`
 }
 
 func outputLinksJSON(g *felt.Graph, id string, upOnly, downOnly bool, depth int) error {
@@ -290,7 +290,7 @@ func buildLinksNode(g *felt.Graph, f *felt.Felt, upOnly, downOnly bool, depth in
 
 	node := linksNode{
 		ID:     f.ID,
-		Title:  f.Title,
+		Name:   f.DisplayName(),
 		Status: f.Status,
 	}
 
@@ -302,7 +302,7 @@ func buildLinksNode(g *felt.Graph, f *felt.Felt, upOnly, downOnly bool, depth in
 			}
 			node.Upstream = append(node.Upstream, linksEdge{
 				ID:     dep.ID,
-				Title:  dep.Title,
+				Name:   dep.DisplayName(),
 				Status: dep.Status,
 				Label:  g.Upstream[f.ID].LabelFor(depID),
 			})
@@ -317,7 +317,7 @@ func buildLinksNode(g *felt.Graph, f *felt.Felt, upOnly, downOnly bool, depth in
 			}
 			node.Downstream = append(node.Downstream, linksEdge{
 				ID:     dep.ID,
-				Title:  dep.Title,
+				Name:   dep.DisplayName(),
 				Status: dep.Status,
 				Label:  g.Upstream[depID].LabelFor(f.ID),
 			})

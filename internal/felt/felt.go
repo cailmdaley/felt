@@ -218,10 +218,11 @@ type ASTRASuccessCriterion struct {
 	Condition string `yaml:"condition,omitempty" json:"condition,omitempty"`
 }
 
-// Felt represents a single fiber in the DAG.
+// Felt represents a single fiber.
 type Felt struct {
 	ID              string                   `yaml:"-" json:"id"`
-	Title           string                   `yaml:"title" json:"title"`
+	Name            string                   `yaml:"name" json:"name"`
+	Title           string                   `yaml:"-" json:"-"`
 	Status          string                   `yaml:"status,omitempty" json:"status,omitempty"`
 	Tags            []string                 `yaml:"tags,omitempty" json:"tags,omitempty"`
 	DependsOn       Dependencies             `yaml:"depends-on,omitempty" json:"depends_on,omitempty"`
@@ -245,11 +246,10 @@ func (f *Felt) HasStatus() bool {
 	return f.Status != ""
 }
 
-// New creates a new Felt from a slug (the positional argument).
-// If title is empty, it is derived from the slug.
+// New creates a new Felt from a slug and name.
 // The slug is slugified silently if it contains spaces or uppercase.
 // Fibers have no status by default — status is opt-in for tracked work.
-func New(slug string, title string) (*Felt, error) {
+func New(slug string, name string) (*Felt, error) {
 	slug = strings.TrimSpace(slug)
 	if slug == "" {
 		return nil, fmt.Errorf("slug cannot be empty")
@@ -266,27 +266,26 @@ func New(slug string, title string) (*Felt, error) {
 		id = path.Join(path.Dir(id), base)
 	}
 
-	title = strings.TrimSpace(title)
-	if title == "" {
-		title = TitleFromSlug(path.Base(id))
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil, fmt.Errorf("name cannot be empty")
 	}
 
 	return &Felt{
 		ID:        id,
-		Title:     title,
+		Name:      name,
+		Title:     name,
 		DependsOn: Dependencies{},
 		CreatedAt: time.Now(),
 	}, nil
 }
 
-// TitleFromSlug derives a human-readable title from a slug.
-// "mocks-unbiased" → "Mocks unbiased"
+// TitleFromSlug is retained for internal compatibility during the name-field cutover.
 func TitleFromSlug(slug string) string {
 	s := strings.ReplaceAll(slug, "-", " ")
 	if len(s) == 0 {
 		return s
 	}
-	// Capitalize first letter only
 	runes := []rune(s)
 	runes[0] = unicode.ToUpper(runes[0])
 	return string(runes)
@@ -461,10 +460,53 @@ func ParseWithMode(id string, content []byte, mode ParseMode) (*Felt, error) {
 }
 
 func parseFrontmatter(id string, frontmatter []byte) (*Felt, error) {
-	f := &Felt{ID: id}
-	if err := yaml.Unmarshal(frontmatter, f); err != nil {
+	type feltFrontmatter struct {
+		Name            string                   `yaml:"name"`
+		LegacyTitle     string                   `yaml:"title"`
+		Status          string                   `yaml:"status,omitempty"`
+		Tags            []string                 `yaml:"tags,omitempty"`
+		DependsOn       Dependencies             `yaml:"depends-on,omitempty"`
+		CreatedAt       time.Time                `yaml:"created-at"`
+		ClosedAt        *time.Time               `yaml:"closed-at,omitempty"`
+		Outcome         string                   `yaml:"outcome,omitempty"`
+		Due             *time.Time               `yaml:"due,omitempty"`
+		Description     string                   `yaml:"description,omitempty"`
+		Inputs          []ASTRAInput             `yaml:"inputs,omitempty"`
+		Outputs         []ASTRAOutput            `yaml:"outputs,omitempty"`
+		Decisions       map[string]ASTRADecision `yaml:"decisions,omitempty"`
+		Insights        map[string]ASTRAInsight  `yaml:"insights,omitempty"`
+		SuccessCriteria []ASTRASuccessCriterion  `yaml:"success_criteria,omitempty"`
+		Container       string                   `yaml:"container,omitempty"`
+	}
+
+	var fm feltFrontmatter
+	if err := yaml.Unmarshal(frontmatter, &fm); err != nil {
 		return nil, fmt.Errorf("parsing YAML frontmatter: %w", err)
 	}
+	name := strings.TrimSpace(fm.Name)
+	if name == "" {
+		name = strings.TrimSpace(fm.LegacyTitle)
+	}
+	f := &Felt{
+		ID:              id,
+		Name:            name,
+		Title:           name,
+		Status:          fm.Status,
+		Tags:            fm.Tags,
+		DependsOn:       fm.DependsOn,
+		CreatedAt:       fm.CreatedAt,
+		ClosedAt:        fm.ClosedAt,
+		Outcome:         fm.Outcome,
+		Due:             fm.Due,
+		Description:     fm.Description,
+		Inputs:          fm.Inputs,
+		Outputs:         fm.Outputs,
+		Decisions:       fm.Decisions,
+		Insights:        fm.Insights,
+		SuccessCriteria: fm.SuccessCriteria,
+		Container:       fm.Container,
+	}
+	f.canonicalizeName()
 	return f, nil
 }
 
@@ -519,11 +561,11 @@ func splitFrontmatter(content []byte, includeBody bool) ([]byte, string, error) 
 
 // Marshal serializes a Felt to markdown with YAML frontmatter.
 func (f *Felt) Marshal() ([]byte, error) {
-	f.ensureMySTBody()
+	f.canonicalizeName()
 
 	// Build frontmatter struct for controlled field ordering
 	fm := struct {
-		Title           string                   `yaml:"title"`
+		Name            string                   `yaml:"name"`
 		Status          string                   `yaml:"status,omitempty"`
 		Tags            []string                 `yaml:"tags,omitempty"`
 		DependsOn       Dependencies             `yaml:"depends-on,omitempty"`
@@ -539,7 +581,7 @@ func (f *Felt) Marshal() ([]byte, error) {
 		SuccessCriteria []ASTRASuccessCriterion  `yaml:"success_criteria,omitempty"`
 		Container       string                   `yaml:"container,omitempty"`
 	}{
-		Title:           f.Title,
+		Name:            f.Name,
 		Status:          f.Status,
 		Tags:            f.Tags,
 		DependsOn:       f.DependsOn,
@@ -574,37 +616,26 @@ func (f *Felt) Marshal() ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func mystAnchor(id string) string {
-	return path.Base(path.Clean(id))
+func (f *Felt) canonicalizeName() {
+	if strings.TrimSpace(f.Name) == "" {
+		f.Name = strings.TrimSpace(f.Title)
+	}
+	if strings.TrimSpace(f.Title) == "" {
+		f.Title = strings.TrimSpace(f.Name)
+	}
 }
 
-func defaultMySTBody(id, title string) string {
-	anchor := mystAnchor(id)
-	if anchor == "." || anchor == "" {
-		return "# " + title
+// DisplayName returns the canonical user-facing label during the name-field cutover.
+func (f *Felt) DisplayName() string {
+	if strings.TrimSpace(f.Name) != "" {
+		return f.Name
 	}
-	return fmt.Sprintf("(%s)=\n# %s", anchor, title)
-}
-
-func (f *Felt) ensureMySTBody() {
-	body := strings.TrimSpace(f.Body)
-	if body == "" {
-		f.Body = defaultMySTBody(f.ID, f.Title)
-		return
-	}
-
-	anchorLine := fmt.Sprintf("(%s)=", mystAnchor(f.ID))
-	if strings.HasPrefix(body, anchorLine) {
-		f.Body = body
-		return
-	}
-
-	f.Body = anchorLine + "\n" + body
+	return f.Title
 }
 
 // HasScaffoldOnlyBody reports whether the body is just the generated MyST scaffold.
 func (f *Felt) HasScaffoldOnlyBody() bool {
-	return strings.TrimSpace(f.Body) == defaultMySTBody(f.ID, f.Title)
+	return strings.TrimSpace(f.Body) == ""
 }
 
 // MatchesIDQuery checks if an ID matches a query string.
@@ -747,8 +778,6 @@ func (f *Felt) IsClosed() bool {
 
 // AppendComment adds a timestamped comment to the body.
 func (f *Felt) AppendComment(text string) {
-	f.ensureMySTBody()
-
 	timestamp := time.Now().Format("2006-01-02 15:04")
 	comment := fmt.Sprintf("\n**%s** — %s", timestamp, text)
 
@@ -774,11 +803,10 @@ func ValidateID(id string) bool {
 // bodyLinkRe matches markdown links: [text](target)
 var bodyLinkRe = regexp.MustCompile(`\[[^\]]*\]\(([^)]+)\)`)
 
-// mystRefRe matches MyST cross-references: {ref}`target` or {doc}`target`
-var mystRefRe = regexp.MustCompile(`\{(?:ref|doc)\}` + "`([^`]+)`")
+// wikiLinkRe matches [[slug]] and [[slug#fragment|label]] wikilinks.
+var wikiLinkRe = regexp.MustCompile(`\[\[([^\]|#]+)(?:#[^\]|]+)?(?:\|[^\]]+)?\]\]`)
 
-// ExtractBodyRefs finds fiber ID references in a body — markdown links and MyST
-// cross-refs whose targets look like fiber IDs (no scheme, no extension).
+// ExtractBodyRefs finds fiber ID references in a body from markdown links and wikilinks.
 func ExtractBodyRefs(body string) []string {
 	seen := map[string]bool{}
 	var refs []string
@@ -801,7 +829,7 @@ func ExtractBodyRefs(body string) []string {
 	for _, m := range bodyLinkRe.FindAllStringSubmatch(body, -1) {
 		add(m[1])
 	}
-	for _, m := range mystRefRe.FindAllStringSubmatch(body, -1) {
+	for _, m := range wikiLinkRe.FindAllStringSubmatch(body, -1) {
 		add(m[1])
 	}
 	return refs

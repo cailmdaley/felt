@@ -9,7 +9,7 @@ import (
 
 // formatFeltTwoLine returns a felt in two-line format:
 // Line 1: status icon + ID
-// Line 2: indented title with metadata (tags, deps)
+// Line 2: indented name with metadata (tags, deps)
 func formatFeltTwoLine(f *felt.Felt) string {
 	icon := felt.StatusIcon(f.Status)
 
@@ -28,7 +28,7 @@ func formatFeltTwoLine(f *felt.Felt) string {
 		metaStr = fmt.Sprintf(" (%s)", strings.Join(meta, ", "))
 	}
 
-	line2 := fmt.Sprintf("    %s%s\n", f.Title, metaStr)
+	line2 := fmt.Sprintf("    %s%s\n", f.DisplayName(), metaStr)
 
 	return line1 + line2
 }

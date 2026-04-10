@@ -191,7 +191,7 @@ func buildNodes(tapestryFelts []*felt.Felt, graph *felt.Graph, specByID map[stri
 	for _, f := range tapestryFelts {
 		nodes = append(nodes, Node{
 			ID:        f.ID,
-			Title:     f.Title,
+			Title:     f.DisplayName(),
 			Kind:      kindFor(f),
 			Status:    f.Status,
 			Body:      f.Body,
@@ -218,7 +218,7 @@ func buildFibers(felts []*felt.Felt) []Fiber {
 		}
 		fibers = append(fibers, Fiber{
 			ID:        f.ID,
-			Title:     f.Title,
+			Title:     f.DisplayName(),
 			Kind:      kindFor(f),
 			Status:    f.Status,
 			Body:      f.Body,
@@ -262,7 +262,7 @@ func buildDownstream(tapestryFelts []*felt.Felt, graph *felt.Graph) map[string][
 			}
 			refs = append(refs, Downstream{
 				ID:     node.ID,
-				Title:  node.Title,
+				Title:  node.DisplayName(),
 				Status: node.Status,
 				Kind:   kindFor(node),
 			})
