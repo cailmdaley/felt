@@ -89,7 +89,7 @@ You are inside a ralph loop. Activate the ralph skill ($ralph) and follow it.
 
 Survey, then exploit the warm world-model. Check `ralph-context-usage` at natural stopping points; below `50%` continue, at or above `50%` look for a handoff.
 
-If you make changes, commit, /felt, then `kill $PPID`.
+If you make changes, commit, activate the felt skill ($felt), then `kill $PPID`.
 PROMPTEOF
     else
         cat > "$PROMPT_FILE" << 'PROMPTEOF'
@@ -97,7 +97,7 @@ You are inside a ralph loop. Activate the ralph skill (/ralph) and follow it.
 
 Survey, then exploit the warm world-model. Check `ralph-context-usage` at natural stopping points; below `50%` continue, at or above `50%` look for a handoff.
 
-If you make changes, commit, /felt, then `kill $PPID`.
+If you make changes, commit, activate the felt skill (/felt), then `kill $PPID`.
 PROMPTEOF
     fi
 
@@ -110,7 +110,7 @@ PROMPTEOF
         # immediately on SIGINT, letting us send SIGTERM to codex (which its TUI
         # framework cannot intercept). Codex runs as a normal subprocess of Python,
         # inheriting stdin/stdout, so output is visible and the TUI works normally.
-        _CODEX_PY=$(mktemp "${TMPDIR:-/tmp}/ralph-codex.XXXXXX.py")
+        _CODEX_PY=$(mktemp "${TMPDIR:-/tmp}/ralph-codex.XXXXXX")
         cat > "$_CODEX_PY" << 'PYEOF'
 import subprocess, signal, sys
 def main():

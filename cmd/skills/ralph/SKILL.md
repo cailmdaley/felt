@@ -15,7 +15,7 @@ You are inside a loop. Your constitution (fiber spec) is in the system prompt ab
 
 1. **Survey** — Fresh eyes. Read the constitution, check git log, explore the current state.
 2. **Work** — Stay and work from the vantage point the survey built. Exit only after most of that context has been spent, not when one convenient task ends.
-3. **Felt** — Before exiting: `/felt`.
+3. **Felt** — Before exiting: activate the felt skill.
 4. **Exit** — `kill $PPID`
 
 ### Earn the vantage point
