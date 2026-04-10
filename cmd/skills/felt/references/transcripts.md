@@ -129,8 +129,8 @@ felt add algorithm-x-choice "Decision: Use algorithm X" \
 
 Update existing fibers when the meeting produced status on tracked work:
 ```bash
-felt edit <id> --comment "2025-01-21 14:30 — Update from meeting: progress on X"
 felt edit <id> -s closed -o "Resolved in meeting: decided to use Z because..."
+# for narrative updates, edit .felt/<path>/<slug>.md directly and add wikilinks/body text there
 ```
 
 Link new fibers to related ones:

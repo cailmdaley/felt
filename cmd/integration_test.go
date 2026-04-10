@@ -172,9 +172,6 @@ func TestIntegration(t *testing.T) {
 		t.Fatalf("ls --json --body: expected hydrated body, got: %#v", listed)
 	}
 
-	// comment
-	mustFelt(t, dir, "edit", fiberID, "--comment", "a test comment")
-
 	// close with outcome
 	mustFelt(t, dir, "edit", fiberID, "-s", "closed", "-o", "completed successfully")
 	out = mustFelt(t, dir, "show", fiberID, "-d", "compact")
@@ -270,7 +267,7 @@ container: python:3.11-slim
 	if !strings.Contains(out, "bao-analysis/damping-prior") {
 		t.Fatalf("ls should match ASTRA fields, got: %s", out)
 	}
-	out = mustFelt(t, dir, "show", "-j", "damping-prior")
+	out = mustFelt(t, dir, "show", "-j", "bao-analysis/damping-prior")
 	var astraShown map[string]any
 	if err := json.Unmarshal([]byte(out), &astraShown); err != nil {
 		t.Fatalf("show -j astra: invalid json: %v\n%s", err, out)
@@ -364,6 +361,26 @@ container: python:3.11-slim
 		t.Fatalf("nest: expected nested child in containment tree, got: %s", out)
 	}
 
+	thirdID := strings.TrimSpace(mustFelt(t, dir, "add", "third-fiber", "third fiber"))
+	if thirdID != "third-fiber" {
+		t.Fatalf("add third fiber: expected ID, got %q", thirdID)
+	}
+	out = mustFelt(t, dir, "nest", thirdID, "bao-analysis")
+	if !strings.Contains(out, "Nested third-fiber under bao-analysis as bao-analysis/third-fiber") {
+		t.Fatalf("nest third fiber: unexpected output: %s", out)
+	}
+	replacementThirdID := strings.TrimSpace(mustFelt(t, dir, "add", "third-fiber", "replacement third fiber"))
+	if replacementThirdID != "third-fiber" {
+		t.Fatalf("add replacement third fiber: expected ID, got %q", replacementThirdID)
+	}
+	out, err = felt(dir, "nest", replacementThirdID, "bao-analysis")
+	if err == nil {
+		t.Fatalf("nest duplicate basename should fail, got: %s", out)
+	}
+	if !strings.Contains(out, `fiber "bao-analysis/third-fiber" already exists`) {
+		t.Fatalf("nest duplicate basename: expected existing-fiber error, got: %s", out)
+	}
+
 	out = mustFelt(t, dir, "unnest", "bao-analysis/second-fiber")
 	if !strings.Contains(out, "Promoted bao-analysis/second-fiber to second-fiber") {
 		t.Fatalf("unnest: unexpected output: %s", out)
@@ -371,6 +388,14 @@ container: python:3.11-slim
 	out = mustFelt(t, dir, "show", "second-fiber", "-d", "compact")
 	if !strings.Contains(out, "second-fiber") {
 		t.Fatalf("unnest: expected top-level fiber ID, got: %s", out)
+	}
+
+	out, err = felt(dir, "unnest", "bao-analysis/third-fiber")
+	if err == nil {
+		t.Fatalf("unnest to existing top-level basename should fail, got: %s", out)
+	}
+	if !strings.Contains(out, `fiber "third-fiber" already exists`) {
+		t.Fatalf("unnest duplicate basename: expected existing-fiber error, got: %s", out)
 	}
 
 	migrateDir := filepath.Join(dir, "legacy-project")

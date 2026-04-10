@@ -510,6 +510,30 @@ func TestStorageNextAvailableID(t *testing.T) {
 	}
 }
 
+func TestStorageCheckAvailableID(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStorage(dir)
+	if err := s.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	f := &Felt{
+		ID:        "quick-gotcha",
+		Name:      "Quick gotcha",
+		CreatedAt: time.Now(),
+	}
+	if err := s.Write(f); err != nil {
+		t.Fatalf("Write() error: %v", err)
+	}
+
+	if err := s.CheckAvailableID("fresh-fiber"); err != nil {
+		t.Fatalf("CheckAvailableID(fresh-fiber) error: %v", err)
+	}
+	if err := s.CheckAvailableID("quick-gotcha"); err == nil {
+		t.Fatal("CheckAvailableID should reject an existing ID")
+	}
+}
+
 func TestStorageFindNestedByBasename(t *testing.T) {
 	dir := t.TempDir()
 	s := NewStorage(dir)
@@ -734,6 +758,28 @@ func TestStorageMoveSubtreeRejectsSelfNesting(t *testing.T) {
 
 	if err := s.MoveSubtree("bao-analysis", "bao-analysis/damping-prior"); err == nil {
 		t.Fatal("MoveSubtree should reject moving into its own subtree")
+	}
+}
+
+func TestStorageMoveSubtreeRejectsExistingDestination(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStorage(dir)
+	if err := s.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	for _, f := range []*Felt{
+		{ID: "bao-analysis", Name: "BAO Analysis", CreatedAt: time.Now()},
+		{ID: "bao-analysis/damping-prior", Name: "Existing Child", CreatedAt: time.Now()},
+		{ID: "damping-prior", Name: "Top-level Child", CreatedAt: time.Now()},
+	} {
+		if err := s.Write(f); err != nil {
+			t.Fatalf("Write(%s) error: %v", f.ID, err)
+		}
+	}
+
+	if err := s.MoveSubtree("damping-prior", "bao-analysis/damping-prior"); err == nil {
+		t.Fatal("MoveSubtree should reject an existing destination")
 	}
 }
 

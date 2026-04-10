@@ -806,22 +806,6 @@ func (f *Felt) IsClosed() bool {
 	return f.Status == StatusClosed
 }
 
-// AppendComment adds a timestamped comment to the body.
-func (f *Felt) AppendComment(text string) {
-	timestamp := time.Now().Format("2006-01-02 15:04")
-	comment := fmt.Sprintf("\n**%s** — %s", timestamp, text)
-
-	// Ensure Comments section exists
-	if !strings.Contains(f.Body, "## Comments") {
-		if f.Body != "" {
-			f.Body += "\n"
-		}
-		f.Body += "\n## Comments"
-	}
-
-	f.Body += comment + "\n"
-}
-
 // idPattern matches slash-separated slug paths.
 var idPattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*(?:/[a-z0-9_]+(?:[-_][a-z0-9_]+)*)*$`)
 

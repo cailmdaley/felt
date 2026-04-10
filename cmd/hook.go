@@ -178,7 +178,6 @@ felt edit <id> --status active  # enter tracking / mark active
 felt edit <id> --status closed --outcome "outcome"
 felt edit <id> --name "new name"
 felt edit <id> --tag foo --untag bar
-felt edit <id> --comment "note" # append under ## Comments
 felt edit <id> --body "text"    # full body replacement (overwrite)
 felt show <id>                  # full details
 felt show <id> -d summary       # metadata + lede paragraph
@@ -256,7 +255,7 @@ func coreRules() string {
 - **Outcomes teach.** The outcome is a one-sentence conclusion — what was learned, decided, or produced. It appears in ` + "`felt ls`" + ` and ` + "`-d compact`" + `, so write it to stand alone. The body carries the full argument.
 - **Formalize while working.** Accrete ASTRA structure as it becomes real: ` + "`decisions:`" + ` when alternatives are rejected, ` + "`inputs:`" + `/` + "`outputs:`" + ` while jobs run, ` + "`insights:`" + ` when claims have evidence.
 - **Compose upward.** When closing a fiber, ask: does this lesson belong in a doc fiber or the root fiber? Consolidate breadcrumbs into authoritative fibers. Update the root fiber when project context changes.
-- **CLI for metadata, Read+Edit for content.** ` + "`felt edit`" + ` for status/tags/links/outcome. Read then Edit ` + "`.felt/<slug>/<slug>.md`" + ` for body text and ASTRA frontmatter.
+- **CLI for metadata, Read+Edit for content.** ` + "`felt edit`" + ` for status/tags/outcome. Read then Edit ` + "`.felt/<slug>/<slug>.md`" + ` for body text, wikilinks, and ASTRA frontmatter.
 - **Names are concise labels.** Body and outcome carry full content.
 `
 }

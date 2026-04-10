@@ -177,8 +177,11 @@ func TestBundledSkillsAvoidLegacyCommentBodyEdits(t *testing.T) {
 	if strings.Contains(text, `felt edit <id> --body "$(felt show <id> --body)`) {
 		t.Fatal("transcripts reference still teaches legacy body-overwrite comment editing")
 	}
-	if !strings.Contains(text, `felt edit <id> --comment "2025-01-21 14:30 — Update from meeting: progress on X"`) {
-		t.Fatal("transcripts reference should teach consolidated edit --comment usage")
+	if strings.Contains(text, `felt edit <id> --comment`) {
+		t.Fatal("transcripts reference should not teach legacy comment mutation")
+	}
+	if !strings.Contains(text, `edit .felt/<path>/<slug>.md directly`) {
+		t.Fatal("transcripts reference should teach direct file edits for narrative updates")
 	}
 }
 

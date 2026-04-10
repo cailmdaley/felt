@@ -15,7 +15,6 @@ var (
 	editDue     string
 	editTags    []string
 	editUntag   []string
-	editComment []string
 	editBody    string
 	editOutcome string
 )
@@ -28,7 +27,6 @@ var editCmd = &cobra.Command{
 Examples:
   felt edit abc123 --name "New name" -s active
   felt edit abc123 --tag decision --untag stale
-  felt edit abc123 --comment "latest finding"
   felt edit abc123 --body "Full replacement body text"  # overwrites body`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -54,7 +52,6 @@ Examples:
 			cmd.Flags().Changed("due") ||
 			cmd.Flags().Changed("tag") ||
 			cmd.Flags().Changed("untag") ||
-			cmd.Flags().Changed("comment") ||
 			cmd.Flags().Changed("body") ||
 			cmd.Flags().Changed("outcome")
 
@@ -128,12 +125,6 @@ Examples:
 				}
 			}
 		}
-		if cmd.Flags().Changed("comment") {
-			for _, comment := range editComment {
-				f.AppendComment(comment)
-			}
-		}
-
 		if err := storage.Write(f); err != nil {
 			return err
 		}
@@ -158,7 +149,6 @@ func init() {
 	editCmd.Flags().StringVarP(&editStatus, "status", "s", "", "Set status (open, active, closed)")
 	editCmd.Flags().StringArrayVarP(&editTags, "tag", "t", nil, "Add tag(s) (repeatable; comma-separated accepted)")
 	editCmd.Flags().StringArrayVar(&editUntag, "untag", nil, "Remove tag(s)")
-	editCmd.Flags().StringArrayVarP(&editComment, "comment", "c", nil, "Append comment text to the body (repeatable)")
 	editCmd.Flags().StringVarP(&editBody, "body", "b", "", "Replace full body text (destructive overwrite)")
 	editCmd.Flags().StringVarP(&editOutcome, "outcome", "o", "", "Set outcome")
 	editCmd.Flags().StringVarP(&editDue, "due", "D", "", "Set due date (YYYY-MM-DD, empty to clear)")

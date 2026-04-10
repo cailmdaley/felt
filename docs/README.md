@@ -65,7 +65,7 @@ felt show <id> -d compact     # see outcome without full body
 
 | Level | What you see |
 |---|---|
-| `title` | Title + tags |
+| `title` | Name + tags |
 | `compact` | Metadata + outcome + ASTRA counts |
 | `summary` | Compact + lede paragraph + concise ASTRA summary |
 | `full` | Everything (default) |
@@ -134,7 +134,7 @@ felt ls -s all                    # all fibers including untracked
 felt ls -s closed                 # by status
 felt ls -t backend -t urgent      # by tags (AND)
 felt ls -s all -t rule:           # tag prefix matching
-felt ls -s all "query"            # search title, outcome, ASTRA fields
+felt ls -s all "query"            # search name, outcome, ASTRA fields
 felt ls -s all -r "pattern"       # regex search
 felt show <id>                    # full details
 felt show <id> -d compact         # structured overview
@@ -148,7 +148,6 @@ felt edit <id> --body "text"      # replace full body (destructive overwrite)
 felt edit <id> --name "new"       # set name
 felt edit <id> -s active          # set status
 felt edit <id> -o "outcome"       # set outcome
-felt edit <id> --comment "note"   # append timestamped comment section entry
 felt edit <id> --tag <tag>        # add tag
 felt edit <id> --untag <tag>      # remove tag
 ```

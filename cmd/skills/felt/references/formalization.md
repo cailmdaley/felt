@@ -179,7 +179,6 @@ The frontmatter is for branching, validation, querying, and export. The body is 
 | Create fiber | `felt add <slug> <name> [flags]` |
 | Change status and tags | `felt edit <id> --status ... --tag ...` |
 | Set outcome | `felt edit <id> -o "..."` |
-| Append comment | `felt edit <id> --comment "..."` |
 | Write/edit body and ASTRA frontmatter | Read + Edit on `.felt/<path>/<slug>.md` |
 
 When adding ASTRA fields, read the file first, then edit the existing frontmatter block directly.

@@ -598,31 +598,6 @@ func TestStatusMethods(t *testing.T) {
 	}
 }
 
-func TestAppendComment(t *testing.T) {
-	f := &Felt{ID: "test-task", Name: "Test Task", Body: "Initial body."}
-	f.AppendComment("First comment")
-
-	if !strings.HasPrefix(f.Body, "Initial body.") {
-		t.Error("AppendComment should preserve existing body prefix")
-	}
-	if !strings.Contains(f.Body, "## Comments") {
-		t.Error("AppendComment should add Comments section")
-	}
-	if !strings.Contains(f.Body, "First comment") {
-		t.Error("AppendComment should add comment text")
-	}
-
-	// Add another comment
-	f.AppendComment("Second comment")
-	if !strings.Contains(f.Body, "Second comment") {
-		t.Error("AppendComment should add second comment")
-	}
-	// Should only have one Comments header
-	if strings.Count(f.Body, "## Comments") != 1 {
-		t.Error("AppendComment should not duplicate Comments section")
-	}
-}
-
 func TestValidateID(t *testing.T) {
 	tests := []struct {
 		id   string

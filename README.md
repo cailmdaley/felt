@@ -136,7 +136,7 @@ decisions:
 ```
 
 ```bash
-felt ls "BAO"                 # title, outcome, and ASTRA fields
+felt ls "BAO"                 # name, outcome, and ASTRA fields
 felt export --format astra    # writes ./astra.yaml
 ```
 
@@ -159,7 +159,8 @@ Fibers tagged with `tapestry:<specName>` become nodes in a visual DAG that can b
 # Create tapestry nodes
 felt add bmodes "B-modes consistent with noise" -t tapestry:bmodes
 felt add covariance "Covariance matrix" -t tapestry:covariance
-felt edit bmodes --comment "supported by [[covariance]]"
+felt show bmodes --body
+# then edit .felt/bmodes/bmodes.md to add [[covariance]] in the body
 
 # Evidence: results/tapestry/{specName}/evidence.json
 # Written by your pipeline (e.g., Snakemake), not by hand

@@ -110,6 +110,21 @@ func (s *Storage) NextAvailableID(baseID string) (string, error) {
 	}
 }
 
+// CheckAvailableID returns an error if the target fiber ID already exists.
+func (s *Storage) CheckAvailableID(id string) error {
+	id = filepath.ToSlash(filepath.Clean(strings.TrimSpace(id)))
+	id = strings.TrimPrefix(id, "./")
+	if id == "." || id == "" {
+		return fmt.Errorf("invalid felt id")
+	}
+	if _, err := os.Stat(s.Path(id)); err == nil {
+		return fmt.Errorf("fiber %q already exists", id)
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("checking existing fiber %q: %w", id, err)
+	}
+	return nil
+}
+
 // Write saves a felt to disk.
 func (s *Storage) Write(f *Felt) error {
 	if f == nil {

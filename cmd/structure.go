@@ -87,13 +87,11 @@ var nestCmd = &cobra.Command{
 			return fmt.Errorf("cannot nest %s under descendant %s", child.ID, parent.ID)
 		}
 
-		targetBase := path.Join(parent.ID, path.Base(child.ID))
-		if path.Dir(child.ID) == parent.ID && child.ID == targetBase {
+		targetID := path.Join(parent.ID, path.Base(child.ID))
+		if path.Dir(child.ID) == parent.ID && child.ID == targetID {
 			return fmt.Errorf("%s is already nested under %s", child.ID, parent.ID)
 		}
-
-		targetID, err := storage.NextAvailableID(targetBase)
-		if err != nil {
+		if err := storage.CheckAvailableID(targetID); err != nil {
 			return err
 		}
 		if err := storage.MoveSubtree(child.ID, targetID); err != nil {
@@ -131,9 +129,8 @@ var unnestCmd = &cobra.Command{
 			return fmt.Errorf("%s is already top-level", child.ID)
 		}
 
-		targetBase := path.Base(child.ID)
-		targetID, err := storage.NextAvailableID(targetBase)
-		if err != nil {
+		targetID := path.Base(child.ID)
+		if err := storage.CheckAvailableID(targetID); err != nil {
 			return err
 		}
 		if err := storage.MoveSubtree(child.ID, targetID); err != nil {

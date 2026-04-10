@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/cailmdaley/felt/internal/felt"
@@ -62,10 +61,8 @@ Examples:
 		if err != nil {
 			return err
 		}
-		if _, err := os.Stat(storage.Path(f.ID)); err == nil {
-			return fmt.Errorf("fiber %q already exists", f.ID)
-		} else if !os.IsNotExist(err) {
-			return fmt.Errorf("checking existing fiber %q: %w", f.ID, err)
+		if err := storage.CheckAvailableID(f.ID); err != nil {
+			return err
 		}
 
 		// Add extracted tags

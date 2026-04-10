@@ -302,12 +302,12 @@ felt fields and ASTRA fields coexist in the same frontmatter. felt handles the f
 
 | felt field | ASTRA equivalent | Notes |
 |------------|------------------|-------|
-| `title` | `name` | felt uses `title`; ASTRA export maps to `name` |
+| `name` | `name` | Shared field across felt and ASTRA |
 | `tags` | `tags` | Shared |
 | `depends-on` | `inputs` (type: analysis) | felt deps are structural; ASTRA inputs are data-flow |
 | `outcome` | — | felt-only. The conclusion/documentation |
 | `status` | — | felt-only lifecycle state |
-| — | `description` | ASTRA-only. More detailed than title |
+| — | `description` | ASTRA-only. More detailed than name |
 | — | `decisions` | ASTRA-only |
 | — | `insights` | ASTRA-only |
 | — | `inputs`/`outputs` | ASTRA-only data flow |
