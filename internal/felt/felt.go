@@ -213,12 +213,6 @@ func New(slug string, name string) (*Felt, error) {
 	if id == "" {
 		return nil, fmt.Errorf("slug must contain at least one alphanumeric character")
 	}
-	// Truncate only the final segment to preserve path structure
-	base := path.Base(id)
-	if len(base) > 32 {
-		base = truncateAtWord(base, 32)
-		id = path.Join(path.Dir(id), base)
-	}
 
 	name = strings.TrimSpace(name)
 	if name == "" {

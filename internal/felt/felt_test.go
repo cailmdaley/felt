@@ -60,6 +60,28 @@ func TestNewEmptySlug(t *testing.T) {
 	}
 }
 
+func TestNewPreservesLongExplicitSlug(t *testing.T) {
+	// Regression: felt add used to silently truncate basenames at 32 chars
+	// via truncateAtWord, which could collide with existing siblings and
+	// produce confusing "already exists" errors.
+	tests := []struct {
+		slug string
+	}{
+		{"exit-interview-2026-04-10-obsidian"},                       // 34 chars — the bug trigger
+		{"exit-interview-2026-04-10-relationship-model-completion"},  // 55 chars
+		{"felt/exit-interview-2026-04-10-hook-rewrite"},              // nested path with long basename
+	}
+	for _, tt := range tests {
+		f, err := New(tt.slug, "Any name")
+		if err != nil {
+			t.Fatalf("New(%q, ...) error: %v", tt.slug, err)
+		}
+		if f.ID != tt.slug {
+			t.Errorf("New(%q, ...).ID = %q, want %q", tt.slug, f.ID, tt.slug)
+		}
+	}
+}
+
 func TestBodyStartLine(t *testing.T) {
 	tests := []struct {
 		name    string
