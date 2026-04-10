@@ -51,6 +51,17 @@ func TestIndexSyncBuildsCitationsAndFTS(t *testing.T) {
 		t.Fatalf("citation source = %q, want %q", citations[0].SourceID, "project/analysis")
 	}
 
+	consumers, err := idx.Consumers("project/question")
+	if err != nil {
+		t.Fatalf("Consumers() error: %v", err)
+	}
+	if len(consumers) != 1 {
+		t.Fatalf("len(Consumers()) = %d, want 1", len(consumers))
+	}
+	if consumers[0].SourceID != "project/analysis" || consumers[0].OutputID != "output" || consumers[0].InputID != "catalog" {
+		t.Fatalf("Consumers(project/question) = %#v, want project/analysis catalog <- output", consumers)
+	}
+
 	ids, err := idx.SearchBodyIDs("See [[question]]")
 	if err != nil {
 		t.Fatalf("SearchBodyIDs() error: %v", err)
@@ -114,5 +125,119 @@ func TestIndexSyncUpdatesChangedFibers(t *testing.T) {
 	}
 	if len(newIDs) != 1 || newIDs[0] != "fiber-a" {
 		t.Fatalf("SearchBodyIDs(new) = %v, want [fiber-a]", newIDs)
+	}
+}
+
+func TestIndexSyncReindexesWhenNewTargetMakesRefResolvable(t *testing.T) {
+	dir := t.TempDir()
+	storage := NewStorage(dir)
+	if err := storage.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	baseTime := time.Date(2026, 4, 10, 9, 0, 0, 0, time.UTC)
+	if err := storage.Write(&Felt{
+		ID:        "project/analysis",
+		Name:      "Analysis",
+		CreatedAt: baseTime,
+		Body:      "See [[question]].",
+	}); err != nil {
+		t.Fatalf("Write(analysis) error: %v", err)
+	}
+
+	idx, err := storage.OpenIndex()
+	if err != nil {
+		t.Fatalf("OpenIndex() error: %v", err)
+	}
+	defer idx.Close()
+
+	if err := storage.Write(&Felt{
+		ID:        "project/question",
+		Name:      "Question",
+		CreatedAt: baseTime,
+	}); err != nil {
+		t.Fatalf("Write(question) error: %v", err)
+	}
+	if err := idx.Sync(storage); err != nil {
+		t.Fatalf("Sync() error: %v", err)
+	}
+
+	citations, err := idx.Citations("project/question")
+	if err != nil {
+		t.Fatalf("Citations() error: %v", err)
+	}
+	if len(citations) != 1 || citations[0].SourceID != "project/analysis" {
+		t.Fatalf("Citations(project/question) = %#v, want source project/analysis", citations)
+	}
+}
+
+func TestIndexSyncReindexesWhenTargetDeletionChangesScopedResolution(t *testing.T) {
+	dir := t.TempDir()
+	storage := NewStorage(dir)
+	if err := storage.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	baseTime := time.Date(2026, 4, 10, 9, 0, 0, 0, time.UTC)
+	for _, fiber := range []*Felt{
+		{
+			ID:        "project/question",
+			Name:      "Project Question",
+			CreatedAt: baseTime,
+		},
+		{
+			ID:        "project/analysis",
+			Name:      "Analysis",
+			CreatedAt: baseTime,
+			Body:      "See [[question]].",
+		},
+	} {
+		if err := storage.Write(fiber); err != nil {
+			t.Fatalf("Write(%s) error: %v", fiber.ID, err)
+		}
+	}
+
+	idx, err := storage.OpenIndex()
+	if err != nil {
+		t.Fatalf("OpenIndex() error: %v", err)
+	}
+	defer idx.Close()
+
+	before, err := idx.Citations("project/question")
+	if err != nil {
+		t.Fatalf("Citations(project/question) before delete: %v", err)
+	}
+	if len(before) != 1 || before[0].SourceID != "project/analysis" {
+		t.Fatalf("Citations(project/question) before delete = %#v, want source project/analysis", before)
+	}
+
+	if err := storage.Delete("project/question"); err != nil {
+		t.Fatalf("Delete(project/question) error: %v", err)
+	}
+	if err := storage.Write(&Felt{
+		ID:        "question",
+		Name:      "Root Question",
+		CreatedAt: baseTime,
+	}); err != nil {
+		t.Fatalf("Write(question) error: %v", err)
+	}
+	if err := idx.Sync(storage); err != nil {
+		t.Fatalf("Sync() after delete error: %v", err)
+	}
+
+	afterProject, err := idx.Citations("project/question")
+	if err != nil {
+		t.Fatalf("Citations(project/question) after delete: %v", err)
+	}
+	if len(afterProject) != 0 {
+		t.Fatalf("Citations(project/question) after delete = %#v, want none", afterProject)
+	}
+
+	afterRoot, err := idx.Citations("question")
+	if err != nil {
+		t.Fatalf("Citations(question) after delete: %v", err)
+	}
+	if len(afterRoot) != 1 || afterRoot[0].SourceID != "project/analysis" {
+		t.Fatalf("Citations(question) after delete = %#v, want source project/analysis", afterRoot)
 	}
 }

@@ -35,7 +35,7 @@ Felt uses three relationship mechanisms:
 - Containment via directory nesting
 - Narrative references via `[[wikilinks]]`
 - Data flow via ASTRA `inputs.from`
-- Indexed citations and FTS5 body search via `.felt/index.db`
+- Indexed citations, reverse data-flow consumers, and FTS5 body search via `.felt/index.db`
 
 ### Status (opt-in)
 
@@ -68,12 +68,14 @@ felt show <id> -d compact     # see outcome without full body
 |---|---|
 | `name` | Name + tags |
 | `compact` | Metadata + outcome + ASTRA counts |
-| `summary` | Compact + citations + lede paragraph + concise ASTRA summary |
+| `summary` | Compact + citations/consumers + lede paragraph + concise ASTRA summary |
 | `full` | Everything (default) |
 
 ```bash
 felt show <id> -d compact      # "what was decided?"
 felt show <id> --body          # body + start line for editing
+felt show <id> --citations     # indexed narrative back-references
+felt show <id> --consumers     # indexed reverse data-flow consumers
 felt show <id> --decisions     # ASTRA decisions only
 felt ls --body "jwt refresh"   # FTS5 body search
 ```
@@ -174,6 +176,7 @@ felt tree --depth 2              # limit displayed nesting depth
 
 ```bash
 felt hook session                 # context for session start hooks
+felt check                        # broken refs, ASTRA lint, depth consistency
 felt export --format tapestry     # viewer payload
 felt export --format astra        # ASTRA YAML export surface
 ```

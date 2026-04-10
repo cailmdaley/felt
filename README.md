@@ -110,11 +110,11 @@ felt add "[pure-eb] covariance-estimation" "Covariance estimation"
 
 ### Relationships
 
-Containment comes from the directory tree. Narrative connections live in `[[wikilinks]]` inside the body. ASTRA `inputs.from` references express data flow when a fiber becomes computationally formalized. Felt indexes both edge types in SQLite, so `felt show` can surface back-references and `felt ls --body` can use FTS instead of hydrating every body file.
+Containment comes from the directory tree. Narrative connections live in `[[wikilinks]]` inside the body. ASTRA `inputs.from` references express data flow when a fiber becomes computationally formalized. Felt indexes both edge types in SQLite, so `felt show` can surface narrative back-references and reverse data-flow consumers, while `felt ls --body` uses FTS instead of hydrating every body file.
 
 ```bash
 felt tree                               # containment hierarchy
-felt show covariance-estimation         # body refs + citations + ASTRA summary
+felt show covariance-estimation         # body refs + citations + reverse consumers + ASTRA summary
 felt ls "DES Y3"                        # search names, outcomes, ASTRA fields
 felt ls --body "jackknife patches"      # FTS5 body search
 ```
@@ -143,6 +143,7 @@ decisions:
 
 ```bash
 felt ls "BAO"                 # name, outcome, and ASTRA fields
+felt check                    # broken refs, ASTRA lint, formalization drift
 felt export --format astra    # writes ./astra.yaml
 ```
 
@@ -152,8 +153,10 @@ felt export --format astra    # writes ./astra.yaml
 felt show <id>                    # full body + metadata
 felt show <id> -d name            # name + tags only
 felt show <id> -d compact         # metadata + outcome + ASTRA counts
-felt show <id> -d summary         # compact + citations + lede + ASTRA summary
+felt show <id> -d summary         # compact + citations/consumers + lede + ASTRA summary
 felt show <id> --body             # body + body start line for editing
+felt show <id> --citations        # indexed narrative back-references only
+felt show <id> --consumers        # indexed reverse data-flow consumers only
 felt show <id> --decision cov     # one ASTRA decision as YAML/JSON
 felt show <id> --inputs           # ASTRA inputs only
 ```

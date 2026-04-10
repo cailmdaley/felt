@@ -27,10 +27,12 @@ func (i CheckIssue) String() string {
 	return fmt.Sprintf("%s: %s: %s", strings.ToUpper(i.Level), location, i.Message)
 }
 
-// Check inspects fibers for quality problems that the new relationship model
-// wants surfaced mechanically even before the SQLite index lands.
+// Check inspects fibers for quality problems in the current relationship model:
+// malformed ASTRA structure, broken narrative/data-flow references, and
+// suspicious formalization gaps.
 func Check(felts []*Felt) []CheckIssue {
 	var issues []CheckIssue
+	issues = append(issues, checkRelationshipIntegrity(felts)...)
 	for _, f := range felts {
 		issues = append(issues, checkDecisions(f)...)
 		issues = append(issues, checkInsights(f)...)
@@ -63,6 +65,23 @@ func checkDecisions(f *Felt) []CheckIssue {
 				Path:    path,
 				Message: "decision has no options",
 			})
+		}
+		if len(decision.Options) > 0 {
+			hasUnexcluded := false
+			for _, option := range decision.Options {
+				if !option.Excluded {
+					hasUnexcluded = true
+					break
+				}
+			}
+			if !hasUnexcluded {
+				issues = append(issues, CheckIssue{
+					Level:   CheckLevelWarn,
+					FiberID: f.ID,
+					Path:    path,
+					Message: "decision has no remaining unexcluded options",
+				})
+			}
 		}
 
 		if !f.IsClosed() {
@@ -103,6 +122,14 @@ func checkDecisions(f *Felt) []CheckIssue {
 func checkInsights(f *Felt) []CheckIssue {
 	var issues []CheckIssue
 	for id, insight := range f.Insights {
+		if len(insight.Evidence) == 0 {
+			issues = append(issues, CheckIssue{
+				Level:   CheckLevelWarn,
+				FiberID: f.ID,
+				Path:    "insights." + id,
+				Message: "insight has no evidence",
+			})
+		}
 		for idx, evidence := range insight.Evidence {
 			if evidenceLooksStubby(evidence) {
 				issues = append(issues, CheckIssue{
@@ -110,6 +137,47 @@ func checkInsights(f *Felt) []CheckIssue {
 					FiberID: f.ID,
 					Path:    fmt.Sprintf("insights.%s.evidence[%d]", id, idx),
 					Message: "evidence stub has no description or anchor details",
+				})
+			}
+		}
+	}
+	return issues
+}
+
+func checkRelationshipIntegrity(felts []*Felt) []CheckIssue {
+	ids := make([]string, 0, len(felts))
+	for _, f := range felts {
+		ids = append(ids, f.ID)
+	}
+	sort.Strings(ids)
+
+	var issues []CheckIssue
+	for _, f := range felts {
+		for _, ref := range ExtractBodyRefs(f.Body) {
+			if _, err := ResolveScopedID(ids, f.ID, ref.Target); err != nil {
+				issues = append(issues, CheckIssue{
+					Level:   CheckLevelError,
+					FiberID: f.ID,
+					Path:    "body",
+					Message: fmt.Sprintf("broken body reference %q", ref.String()),
+				})
+			}
+		}
+		for _, input := range f.Inputs {
+			targetFiber, fragment := splitDataFlowRef(input.From)
+			if targetFiber == "" {
+				continue
+			}
+			if _, err := ResolveScopedID(ids, f.ID, targetFiber); err != nil {
+				message := fmt.Sprintf("broken data-flow reference %q", input.From)
+				if strings.TrimSpace(fragment) == "" {
+					message = fmt.Sprintf("broken data-flow reference %q", targetFiber)
+				}
+				issues = append(issues, CheckIssue{
+					Level:   CheckLevelError,
+					FiberID: f.ID,
+					Path:    "inputs." + input.ID + ".from",
+					Message: message,
 				})
 			}
 		}

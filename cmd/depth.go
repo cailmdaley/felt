@@ -29,16 +29,16 @@ func validateDepth(d string) error {
 }
 
 // renderFelt renders a felt at the given depth level.
-func renderFelt(f *felt.Felt, g *felt.Graph, depth string, citations []felt.Citation) string {
+func renderFelt(f *felt.Felt, g *felt.Graph, depth string, citations []felt.Citation, consumers []felt.DataFlowConsumer) string {
 	switch depth {
 	case DepthName:
 		return renderName(f)
 	case DepthCompact:
 		return renderCompact(f, g)
 	case DepthSummary:
-		return renderSummary(f, g, citations)
+		return renderSummary(f, g, citations, consumers)
 	default:
-		return renderFull(f, g, citations)
+		return renderFull(f, g, citations, consumers)
 	}
 }
 
@@ -72,7 +72,7 @@ func renderCompact(f *felt.Felt, g *felt.Graph) string {
 	return sb.String()
 }
 
-func renderSummary(f *felt.Felt, g *felt.Graph, citations []felt.Citation) string {
+func renderSummary(f *felt.Felt, g *felt.Graph, citations []felt.Citation, consumers []felt.DataFlowConsumer) string {
 	var sb strings.Builder
 	writeHeader(&sb, f)
 	if f.Due != nil {
@@ -83,6 +83,7 @@ func renderSummary(f *felt.Felt, g *felt.Graph, citations []felt.Citation) strin
 	}
 	writeBodyRefs(&sb, f, g)
 	writeCitations(&sb, citations)
+	writeConsumers(&sb, consumers)
 	writeASTRASkeleton(&sb, f)
 	if f.Body != "" {
 		lede := extractLede(f.Body)
@@ -179,11 +180,12 @@ func writeASTRACounts(sb *strings.Builder, f *felt.Felt) {
 	}
 }
 
-func renderFull(f *felt.Felt, g *felt.Graph, citations []felt.Citation) string {
+func renderFull(f *felt.Felt, g *felt.Graph, citations []felt.Citation, consumers []felt.DataFlowConsumer) string {
 	var sb strings.Builder
 	writeHeader(&sb, f)
 	writeBodyRefs(&sb, f, g)
 	writeCitations(&sb, citations)
+	writeConsumers(&sb, consumers)
 	if f.Due != nil {
 		fmt.Fprintf(&sb, "Due:      %s\n", f.Due.Format("2006-01-02"))
 	}
@@ -216,6 +218,27 @@ func writeCitations(sb *strings.Builder, citations []felt.Citation) {
 		parts = append(parts, ref)
 	}
 	fmt.Fprintf(sb, "Cited by: %s\n", strings.Join(parts, ", "))
+}
+
+func writeConsumers(sb *strings.Builder, consumers []felt.DataFlowConsumer) {
+	if len(consumers) == 0 {
+		return
+	}
+	parts := make([]string, 0, len(consumers))
+	for _, consumer := range consumers {
+		ref := consumer.SourceID
+		if consumer.InputID != "" {
+			ref += "#" + consumer.InputID
+		}
+		if strings.TrimSpace(consumer.SourceName) != "" {
+			ref += " (" + truncateTitle(consumer.SourceName, 30) + ")"
+		}
+		if consumer.OutputID != "" {
+			ref = consumer.OutputID + " \u2192 " + ref
+		}
+		parts = append(parts, ref)
+	}
+	fmt.Fprintf(sb, "Consumed by: %s\n", strings.Join(parts, ", "))
 }
 
 // writeBodyRefs extracts markdown and wikilinks from the body and renders them

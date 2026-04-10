@@ -194,7 +194,7 @@ func TestRenderFullResolvesScopedBodyRefs(t *testing.T) {
 		CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z"),
 	}
 
-	out := renderFelt(current, felt.BuildGraph([]*felt.Felt{parent, current, sibling, child}), DepthFull, nil)
+	out := renderFelt(current, felt.BuildGraph([]*felt.Felt{parent, current, sibling, child}), DepthFull, nil, nil)
 	if !strings.Contains(out, "Refs:     project/question (Question), project/analysis/method#step-a (Method)") {
 		t.Fatalf("renderFelt() scoped refs mismatch:\n%s", out)
 	}
@@ -233,6 +233,121 @@ func TestShowIncludesIndexedCitations(t *testing.T) {
 	}
 	if !strings.Contains(out, "Cited by: project/analysis (Analysis)") {
 		t.Fatalf("show missing citations:\n%s", out)
+	}
+}
+
+func TestShowIncludesIndexedConsumers(t *testing.T) {
+	dir := t.TempDir()
+	storage := felt.NewStorage(dir)
+	if err := storage.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+	for _, fiber := range []*felt.Felt{
+		{
+			ID:        "project/question",
+			Name:      "Question",
+			CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z"),
+			Outputs: []felt.ASTRAOutput{
+				{ID: "posterior", Type: "data"},
+			},
+		},
+		{
+			ID:        "project/analysis",
+			Name:      "Analysis",
+			CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z"),
+			Inputs: []felt.ASTRAInput{
+				{ID: "catalog", From: "question.posterior"},
+			},
+		},
+	} {
+		if err := storage.Write(fiber); err != nil {
+			t.Fatalf("Write(%s) error: %v", fiber.ID, err)
+		}
+	}
+
+	reset := saveShowGlobals()
+	defer reset()
+
+	out, err := runCommand(t, dir, "show", "project/question")
+	if err != nil {
+		t.Fatalf("show with consumers: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "Consumed by: posterior → project/analysis#catalog (Analysis)") {
+		t.Fatalf("show missing consumers:\n%s", out)
+	}
+}
+
+func TestShowConsumersSelectorOutputsStructuredResults(t *testing.T) {
+	dir := t.TempDir()
+	storage := felt.NewStorage(dir)
+	if err := storage.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+	for _, fiber := range []*felt.Felt{
+		{
+			ID:        "project/question",
+			Name:      "Question",
+			CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z"),
+		},
+		{
+			ID:        "project/analysis",
+			Name:      "Analysis",
+			CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z"),
+			Inputs: []felt.ASTRAInput{
+				{ID: "catalog", From: "question.posterior"},
+			},
+		},
+	} {
+		if err := storage.Write(fiber); err != nil {
+			t.Fatalf("Write(%s) error: %v", fiber.ID, err)
+		}
+	}
+
+	reset := saveShowGlobals()
+	defer reset()
+
+	out, err := runCommand(t, dir, "show", "project/question", "--consumers")
+	if err != nil {
+		t.Fatalf("show --consumers: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "sourceid: project/analysis") || !strings.Contains(out, "inputid: catalog") || !strings.Contains(out, "outputid: posterior") {
+		t.Fatalf("show --consumers output mismatch:\n%s", out)
+	}
+}
+
+func TestShowCitationsSelectorOutputsStructuredResults(t *testing.T) {
+	dir := t.TempDir()
+	storage := felt.NewStorage(dir)
+	if err := storage.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+	for _, fiber := range []*felt.Felt{
+		{
+			ID:        "project/question",
+			Name:      "Question",
+			CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z"),
+		},
+		{
+			ID:        "project/analysis",
+			Name:      "Analysis",
+			CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z"),
+			Body:      "See [[question]].",
+		},
+	} {
+		if err := storage.Write(fiber); err != nil {
+			t.Fatalf("Write(%s) error: %v", fiber.ID, err)
+		}
+	}
+
+	reset := saveShowGlobals()
+	defer reset()
+
+	out, err := runCommand(t, dir, "show", "project/question", "--citations")
+	if err != nil {
+		t.Fatalf("show --citations: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "sourceid: project/analysis") || !strings.Contains(out, "sourcename: Analysis") {
+		t.Fatalf("show --citations output mismatch:\n%s", out)
 	}
 }
 
@@ -276,6 +391,8 @@ func saveShowGlobals() func() {
 	prevDetail := showDetail
 	prevInputs := showInputs
 	prevInsights := showInsights
+	prevCitations := showCitations
+	prevConsumers := showConsumers
 	prevDecision := showDecision
 	prevDecisions := showDecisions
 	prevJSON := jsonOutput
@@ -284,6 +401,8 @@ func saveShowGlobals() func() {
 	showDetail = ""
 	showInputs = false
 	showInsights = false
+	showCitations = false
+	showConsumers = false
 	showDecision = ""
 	showDecisions = false
 	jsonOutput = false
@@ -293,6 +412,8 @@ func saveShowGlobals() func() {
 		showDetail = prevDetail
 		showInputs = prevInputs
 		showInsights = prevInsights
+		showCitations = prevCitations
+		showConsumers = prevConsumers
 		showDecision = prevDecision
 		showDecisions = prevDecisions
 		jsonOutput = prevJSON

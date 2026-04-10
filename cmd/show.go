@@ -14,6 +14,8 @@ var (
 	showDetail    string
 	showInputs    bool
 	showInsights  bool
+	showCitations bool
+	showConsumers bool
 	showDecision  string
 	showDecisions bool
 )
@@ -31,6 +33,8 @@ Detail levels control progressive disclosure:
 
 Targeted views:
   --body            return the body plus its start line for editing
+  --citations       return indexed narrative back-references only
+  --consumers       return indexed reverse data-flow consumers only
   --decisions       return all decisions only
   --decision <id>   return one decision only
   --inputs          return inputs only
@@ -53,6 +57,8 @@ Targeted views:
 		selectorCount := 0
 		for _, active := range []bool{
 			showBodyOnly,
+			showCitations,
+			showConsumers,
 			showInputs,
 			showInsights,
 			showDecisions,
@@ -63,7 +69,7 @@ Targeted views:
 			}
 		}
 		if selectorCount > 1 {
-			return fmt.Errorf("show selectors are mutually exclusive: choose only one of --body, --decisions, --decision, --inputs, or --insights")
+			return fmt.Errorf("show selectors are mutually exclusive: choose only one of --body, --citations, --consumers, --decisions, --decision, --inputs, or --insights")
 		}
 
 		storage := felt.NewStorage(root)
@@ -83,6 +89,20 @@ Targeted views:
 
 			if showBodyOnly {
 				return outputShowBody(storage, f)
+			}
+			if showCitations {
+				citations, err := idx.Citations(f.ID)
+				if err != nil {
+					return err
+				}
+				return outputShowSelection(citations)
+			}
+			if showConsumers {
+				consumers, err := idx.Consumers(f.ID)
+				if err != nil {
+					return err
+				}
+				return outputShowSelection(consumers)
 			}
 			if showDecisions {
 				return outputShowSelection(f.Decisions)
@@ -128,8 +148,12 @@ Targeted views:
 		if err != nil {
 			return err
 		}
+		consumers, err := idx.Consumers(f.ID)
+		if err != nil {
+			return err
+		}
 
-		fmt.Print(renderFelt(f, graph, detail, citations))
+		fmt.Print(renderFelt(f, graph, detail, citations, consumers))
 		return nil
 	},
 }
@@ -138,6 +162,8 @@ func init() {
 	rootCmd.AddCommand(showCmd)
 	showCmd.Flags().BoolVarP(&showBodyOnly, "body", "b", false, "Output the body plus its start line")
 	showCmd.Flags().StringVarP(&showDetail, "detail", "d", "", "Detail level (name, compact, summary, full)")
+	showCmd.Flags().BoolVar(&showCitations, "citations", false, "Output indexed narrative back-references only")
+	showCmd.Flags().BoolVar(&showConsumers, "consumers", false, "Output indexed reverse data-flow consumers only")
 	showCmd.Flags().BoolVar(&showDecisions, "decisions", false, "Output decisions only")
 	showCmd.Flags().StringVar(&showDecision, "decision", "", "Output one decision by ID")
 	showCmd.Flags().BoolVar(&showInputs, "inputs", false, "Output inputs only")

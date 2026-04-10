@@ -25,6 +25,14 @@ type Citation struct {
 	SourceName string
 }
 
+type DataFlowConsumer struct {
+	SourceID   string
+	TargetID   string
+	OutputID   string
+	InputID    string
+	SourceName string
+}
+
 func OpenIndex(projectRoot string) (*Index, error) {
 	dbPath := filepath.Join(projectRoot, DirName, indexFileName)
 	db, err := sql.Open("sqlite", dbPath)
@@ -128,8 +136,8 @@ func (i *Index) Sync(s *Storage) error {
 	}
 
 	type fileState struct {
-		path        string
-		modifiedAt  time.Time
+		path          string
+		modifiedAt    time.Time
 		modifiedNanos int64
 	}
 	current := make(map[string]fileState, len(files))
@@ -150,6 +158,15 @@ func (i *Index) Sync(s *Storage) error {
 	indexed, err := i.indexedModTimes()
 	if err != nil {
 		return err
+	}
+	topologyChanged := len(indexed) != len(current)
+	if !topologyChanged {
+		for id := range indexed {
+			if _, ok := current[id]; !ok {
+				topologyChanged = true
+				break
+			}
+		}
 	}
 
 	tx, err := i.db.Begin()
@@ -174,7 +191,7 @@ func (i *Index) Sync(s *Storage) error {
 	sort.Strings(ids)
 	for _, id := range ids {
 		state := current[id]
-		if indexed[id] == state.modifiedNanos {
+		if !topologyChanged && indexed[id] == state.modifiedNanos {
 			continue
 		}
 		f, err := s.Read(id)
@@ -408,6 +425,31 @@ func (i *Index) Citations(targetID string) ([]Citation, error) {
 		citations = append(citations, c)
 	}
 	return citations, rows.Err()
+}
+
+func (i *Index) Consumers(targetID string) ([]DataFlowConsumer, error) {
+	rows, err := i.db.Query(
+		`SELECT l.source_id, l.target_id, COALESCE(l.fragment, ''), COALESCE(l.input_id, ''), f.name
+		 FROM links l
+		 JOIN fibers f ON f.id = l.source_id
+		 WHERE l.edge_type = 'data_flow' AND l.target_id = ?
+		 ORDER BY COALESCE(l.fragment, ''), l.source_id, COALESCE(l.input_id, '')`,
+		targetID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("query consumers for %s: %w", targetID, err)
+	}
+	defer rows.Close()
+
+	var consumers []DataFlowConsumer
+	for rows.Next() {
+		var c DataFlowConsumer
+		if err := rows.Scan(&c.SourceID, &c.TargetID, &c.OutputID, &c.InputID, &c.SourceName); err != nil {
+			return nil, fmt.Errorf("scan consumer: %w", err)
+		}
+		consumers = append(consumers, c)
+	}
+	return consumers, rows.Err()
 }
 
 func mergeIndexTags(f *Felt) []string {

@@ -13,7 +13,11 @@ var checkCmd = &cobra.Command{
 	Long: `Runs felt's repository checks.
 
 Current checks cover:
+  - broken narrative wikilinks / body references
+  - broken ASTRA inputs.from references
   - decisions without options
+  - decisions with no remaining unexcluded options
+  - insights without evidence
   - evidence stubs without description or anchors
   - closed fibers with unselected decisions
   - inconsistent ASTRA formalization depth across siblings`,
