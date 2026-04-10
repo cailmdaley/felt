@@ -187,6 +187,7 @@ func claudeMDSnippet() string {
 		"Each fiber lives at `.felt/<path>/<slug>.md` with YAML frontmatter and plain markdown body content. " +
 		"Containment comes from directories, narrative connections come from `[[wikilinks]]`, and ASTRA structure accretes in frontmatter when the work becomes computationally concrete. " +
 		"`felt export --format astra` turns ASTRA-bearing frontmatter into `astra.yaml`. " +
+		"`.felt/` also opens as a valid Obsidian vault, with Dataview queries over ASTRA fields. " +
 		"Filing costs nothing; forgetting costs an investigation or a hallucination.\n\n" +
 		"**Rhythm.** File as things come into focus, without asking. After you respond, while the user reads, accrete structure. Close with an outcome that stands alone.\n" +
 		fence + "bash\n" +

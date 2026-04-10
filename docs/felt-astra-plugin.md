@@ -10,7 +10,7 @@ description: For the Lightcone team. What we built, where it fits, and the open 
 
 A CLI for accumulating context as directory-contained markdown fibers. Each fiber is a concern — a decision, finding, question, task, or spec — stored as a markdown file with YAML frontmatter. Relationships come from containment by path, `[[wikilinks]]` in the body for narrative connection, and ASTRA `inputs.from` for computational provenance.
 
-No server. The markdown tree in `.felt/` stays the source of truth you version-control, grep, and move between machines; a rebuildable SQLite cache adds citations, typed links, and FTS body search without changing the authoring model.
+No server. The markdown tree in `.felt/` stays the source of truth you version-control, grep, and move between machines; a rebuildable SQLite cache adds citations, typed links, and FTS body search without changing the authoring model. Because the storage format is plain markdown with YAML frontmatter and `[[wikilinks]]`, any `.felt/` directory also opens as a valid Obsidian vault, with Dataview queries over ASTRA frontmatter fields.
 
 ```
 .felt/

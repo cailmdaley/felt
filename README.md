@@ -13,7 +13,7 @@ Directory-contained markdown fibers with YAML frontmatter, wikilinks, and option
 
 Fibers are the unit. Each one lives in its own directory under `.felt/`, with a `<slug>.md` file carrying YAML frontmatter plus plain markdown body content. Containment comes from the directory tree, narrative connections come from `[[wikilinks]]` in the body, and ASTRA inputs/outputs/decisions/insights can accrete in frontmatter as the work crystallizes. Closing a fiber with an outcome captures what was learned.
 
-The source of truth is still the markdown tree in `.felt/`. Felt now maintains a local SQLite cache at `.felt/index.db` for typed links, citations, tags, and FTS5 body search, but the cache is rebuildable from the files and carries no extra authoring burden.
+The source of truth is still the markdown tree in `.felt/`. Felt maintains a local SQLite cache at `.felt/index.db` for typed links, citations, tags, and FTS5 body search, but the cache is rebuildable from the files and carries no extra authoring burden. The format is plain markdown with YAML frontmatter and `[[wikilinks]]`, so a `.felt/` directory also opens as a valid Obsidian vault (see [Obsidian](#obsidian)).
 
 ## Install
 
@@ -160,6 +160,20 @@ felt show <id> --consumers        # indexed reverse data-flow consumers only
 felt show <id> --decision cov     # one ASTRA decision as YAML/JSON
 felt show <id> --inputs           # ASTRA inputs only
 ```
+
+## Obsidian
+
+A `.felt/` directory is a valid Obsidian vault. Open it in Obsidian for a GUI browser with backlinks, graph view, and full-text search; felt's `[[wikilinks]]` are the Obsidian format. ASTRA fields in YAML frontmatter (`decisions`, `inputs`, `outputs`, `insights`, `tempered`) are queryable with [Dataview](https://github.com/blacksmithgu/obsidian-dataview):
+
+```dataview
+TABLE status, outcome
+FROM "."
+WHERE tempered = true
+```
+
+Integration is rudimentary today and aspirational to improve. The basics work: the vault opens, wikilinks click through, frontmatter renders, and Dataview queries run over ASTRA fields. Known rough edges: fragment wikilinks to ASTRA elements (`[[slug#decision-name]]`) do not resolve because Obsidian expects headings, and the per-fiber directory nesting (`slug/slug.md`) means browsing is two clicks per fiber unless you install a Folder Note plugin.
+
+Obsidian is not a dependency. The CLI and the `.felt/` tree are the source of truth; use them separately or together.
 
 ## Tapestry
 

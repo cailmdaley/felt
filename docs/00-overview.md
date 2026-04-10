@@ -18,16 +18,17 @@ After the UX meeting on March 31 with François, Liam, and Alexandre, this week 
 
 - **MySTRA viewer** — Barycenter layout for the analysis DAG, status glyphs, fullscreen detail panel, and a cluster of gotcha fixes from real use. Detached mystra-theme as a standalone LightconeResearch repo.
 
-- **Formalization model** — A 3×3 matrix (annotated/formalized/analysis-grade × decision/computation/finding) that clarifies what "formalization" means at each level of rigor.
+- **Formalization model** — A three-tier ladder (annotated, formalized, tempered) that clarifies what "formalization" means at each level of rigor.
 
 ## The proposition
 
-Everything is the same schema at different levels of fill. A bare title is a fiber. Add a `decisions:` block and it's formalized. Mark it `analysis-grade: true` and it's part of the scientific record. The same data, rendered differently:
+Everything is the same schema at different levels of fill. A bare title is a fiber. Add a `decisions:` block and it's formalized. Mark it `tempered: true` and it's part of the scientific record. The same data, rendered differently:
 
 - **As a wiki** — annotated fibers rendered as linked markdown pages (what you're reading now)
 - **As an analysis graph** — formalized fibers with data-flow edges, rendered as a navigable DAG
-- **As a publishable record** — analysis-grade fibers forming the spine of a paper's methodology
+- **As a publishable record** — tempered fibers forming the spine of a paper's methodology
 - **As an execution DAG** — computation fibers with recipes, renderable as a Snakemake/Dagster pipeline
+- **As an Obsidian vault** — `.felt/` opens natively in Obsidian, with backlinks, graph view, and Dataview queries over ASTRA frontmatter
 
 The view is up to the user. The schema doesn't change. Plugins and themes determine how the same structure appears — MySTRA renders the analysis view, the document renders the narrative view, and felt's containment plus indexed citations keep the exploratory substrate navigable.
 
