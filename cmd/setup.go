@@ -183,16 +183,16 @@ func linkSkills(targetDir, srcRoot string) error {
 func claudeMDSnippet() string {
 	fence := "```"
 	return "## felt\n\n" +
-		"Fibers are concerns — tasks, decisions, questions, findings. " +
+		"Fibers are concerns (tasks, decisions, questions, findings). " +
 		"Each fiber lives at `.felt/<path>/<slug>.md` with YAML frontmatter and plain markdown body content. " +
 		"Containment comes from directories, narrative connections come from `[[wikilinks]]`, and ASTRA structure accretes in frontmatter when the work becomes computationally concrete. " +
 		"`felt export --format astra` turns ASTRA-bearing frontmatter into `astra.yaml`. " +
-		"A missing fiber costs context; a fiber costs almost nothing.\n\n" +
-		"**Rhythm.** File before you start, update the body as understanding sharpens, close with an outcome.\n" +
+		"Filing costs nothing; forgetting costs an investigation or a hallucination.\n\n" +
+		"**Rhythm.** File as things come into focus, without asking. After you respond, while the user reads, accrete structure. Close with an outcome that stands alone.\n" +
 		fence + "bash\n" +
-		"felt add covariance-method \"Covariance method\"          # before starting\n" +
-		"felt edit covariance-method -s active                    # opt into tracking\n" +
-		"felt edit covariance-method -o \"Jackknife is stable\"   # close with outcome\n" +
+		"felt add covariance-method \"Covariance method\"          # came into focus\n" +
+		"felt edit covariance-method -s active                    # entered tracking\n" +
+		"felt edit covariance-method -o \"Jackknife is stable\"   # closed with outcome\n" +
 		fence + "\n\n" +
 		"**Discipline.** Names are short, concrete handles for the concern. " +
 		"Path IDs like `bao-analysis/damping-prior` are first-class; bare slugs resolve only when unambiguous. " +

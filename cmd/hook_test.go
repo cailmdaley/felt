@@ -12,30 +12,16 @@ import (
 func TestMinimalOutput(t *testing.T) {
 	output := minimalOutput()
 
-	// Check header
-	if !strings.Contains(output, "# Felt Workflow Context") {
-		t.Error("missing header")
-	}
-
-	// Check no repository message
-	if !strings.Contains(output, "No felt repository") {
-		t.Error("missing no repository message")
-	}
-
-	// Check CLI reference
-	if !strings.Contains(output, "## CLI") {
-		t.Error("missing CLI reference")
-	}
-
-	// Check core rules
-	if !strings.Contains(output, "## Core Rules") {
-		t.Error("missing core rules section")
-	}
-	if !strings.Contains(output, "Relationships come from containment by path") {
-		t.Error("missing relationship model description")
-	}
-	if !strings.Contains(output, "ASTRA `inputs.from` data flow") {
-		t.Error("missing data-flow relationship description")
+	// Structural: header, no-repo indicator, and the three major sections.
+	for _, marker := range []string{
+		"# Felt Workflow Context",
+		"No felt repository",
+		"## CLI",
+		"## Core Rules",
+	} {
+		if !strings.Contains(output, marker) {
+			t.Errorf("missing structural marker %q", marker)
+		}
 	}
 }
 
@@ -100,12 +86,9 @@ func TestFormatSessionOutput(t *testing.T) {
 		t.Error("missing outcome")
 	}
 
-	// Check core rules
+	// Check core rules section exists
 	if !strings.Contains(output, "## Core Rules") {
 		t.Error("missing core rules section")
-	}
-	if !strings.Contains(output, "Use the right relationship surface") {
-		t.Error("missing relationship-surface rule")
 	}
 }
 

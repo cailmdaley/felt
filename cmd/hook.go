@@ -69,12 +69,18 @@ func init() {
 }
 
 func feltDescription() string {
-	return "felt is a markdown fiber tracker. Fibers are concerns — tasks, decisions, findings — stored in `.felt/` as directory-contained markdown with YAML frontmatter. Relationships come from containment by path, `[[wikilinks]]` in the body, and ASTRA `inputs.from` data flow.\n\n"
+	return "felt captures the thinking as you work, across sessions. " +
+		"A fiber is any concern (decision, finding, question, detour) worth naming because it might matter later; " +
+		"filing costs nothing, forgetting costs an investigation or a hallucination. " +
+		"Fibers start as a name and accrete: body, outcome, tags, and optional ASTRA structure (decisions, inputs, insights) as the work crystallizes. " +
+		"Do this incrementally: after you respond, while the user reads, file what just came into focus. " +
+		"Don't ask permission. " +
+		"Let the user's opinions and corrections guide the fibers; you are following the understanding as it evolves, reversals included.\n\n"
 }
 
 func minimalOutput() string {
 	return "# Felt Workflow Context\n\n" + feltDescription() +
-		"*No felt repository in current directory.*\n\n" +
+		"*No felt repository in current directory. Start one with `felt init`.*\n\n" +
 		cliReference() + coreRules()
 }
 
@@ -170,33 +176,39 @@ func formatRecentEntry(f *felt.Felt) string {
 // cliReference returns a concise CLI reference for the session hook.
 func cliReference() string {
 	return `## CLI
+
 ` + "```" + `
-felt init                       # initialize .felt/
-felt add <slug> "name" [flags]  # create with status/tags/outcome
-felt edit <id> --status active  # enter tracking / mark active
-felt edit <id> --status closed --outcome "outcome"
-felt edit <id> --name "new name"
-felt edit <id> --tag foo --untag bar
-felt edit <id> --body "text"    # full body replacement (overwrite)
-felt edit <id> --decision cov --label "Covariance" --option 'glass:GLASS mocks'
-felt edit <id> --input 'catalog:data:upstream.posterior'
-felt edit <id> --insight 'stable:Posterior is stable'
-felt show <id>                  # full details
-felt show <id> -d summary       # metadata + lede paragraph
-felt show <id> -d compact       # metadata + outcome + ASTRA counts
-felt show <id> --body           # body + start line for editing
-felt ls                         # tracked fibers (open/active)
-felt ls -t tapestry:            # any filter widens to all statuses
-felt ls -s closed "query"       # explicit -s overrides; -e exact, -r regex
-felt ls --body "query"          # FTS5 body search via .felt/index.db
-felt check                      # lint broken refs/fragments and ASTRA/formalization issues
-felt migrate [--dry-run]        # normalize legacy layout/name/anchors
-felt export --format astra      # legacy astra.yaml bridge from ASTRA frontmatter
+Something came into focus. Start:
+    felt add <slug> "name" -t tag -o "one-line outcome"
+
+Understanding crystallized. Accrete:
+    felt edit <id> --status active
+    felt edit <id> --tag X
+    felt edit <id> --decision cov --label "Covariance" --option 'glass:GLASS mocks'
+    felt edit <id> --input 'catalog:data:build-mocks.galaxy-catalog'    # id:type:source.output
+    felt edit <id> --insight 'stability:Posterior is stable under jackknife'
+    Read then Edit .felt/<path>/<slug>.md                               # body, wikilinks, deeper ASTRA
+
+Search and read:
+    felt ls                                              # tracked (open and active)
+    felt ls "query" [-t tag] [-s closed]                 # any filter widens to all statuses
+    felt ls --body "query"                               # FTS5 body search
+    felt show <id>                                       # full
+    felt show <id> -d summary | -d compact               # metadata + lede | + ASTRA counts
+    felt show <id> --body                                # body with start line
+    felt show <id> --decisions|--inputs|--insights       # targeted ASTRA slices
+
+A thread resolved. Close:
+    felt edit <id> --status closed --outcome "what was learned"
+
+Maintain:
+    felt check                                           # broken refs, ASTRA issues
+    felt migrate [--dry-run]                             # normalize legacy layout
+    felt export --format astra                           # legacy astra.yaml bridge
 ` + "```" + `
 Statuses: · untracked, ○ open, ◐ active, ● closed
-Detail: name < compact < summary < full (default). Summary shows the **lede** — the first paragraph of the body. Write it to stand alone. ` + "`felt show`" + ` also surfaces indexed wikilink citations and reverse data-flow consumers.
-Relationships: containment by path, narrative ` + "`[[wikilinks]]`" + `, and ASTRA ` + "`inputs.from`" + ` data flow.
-To patch body text (not replace), Read then Edit the fiber markdown file in .felt/<path>/<slug>.md. Nested fibers use path IDs like bao-analysis/damping-prior.
+Detail: name < compact < summary < full. Summary shows the lede (first paragraph of the body; write it to stand alone).
+Relationships: directory containment, ` + "`[[wikilinks]]`" + ` in bodies, ASTRA ` + "`inputs.from`" + ` for data flow. Nested IDs use paths (bao-analysis/damping-prior).
 
 `
 }
@@ -251,12 +263,10 @@ func runRemindHook() error {
 // coreRules returns the shared core rules.
 func coreRules() string {
 	return `## Core Rules
-- **File as you go.** Decisions, questions, detours, bugs you can't chase now — if it might matter, it's a fiber. A missing link in the causal chain costs an investigation; a fiber costs nothing.
-- **Outcomes teach.** The outcome is a one-sentence conclusion — what was learned, decided, or produced. It appears in ` + "`felt ls`" + ` and ` + "`-d compact`" + `, so write it to stand alone. The body carries the full argument.
-- **Formalize while working.** Accrete ASTRA structure as it becomes real: ` + "`decisions:`" + ` when alternatives are rejected, ` + "`inputs:`" + `/` + "`outputs:`" + ` while jobs run, ` + "`insights:`" + ` when claims have evidence.
-- **Use the right relationship surface.** Nest fibers for containment, cite related work with ` + "`[[wikilinks]]`" + `, and use ` + "`inputs.from`" + ` only for computational provenance.
-- **Compose upward.** When closing a fiber, ask: does this lesson belong in a doc fiber or the root fiber? Consolidate breadcrumbs into authoritative fibers. Update the root fiber when project context changes.
-- **CLI for metadata, Read+Edit for content.** ` + "`felt edit`" + ` for status/tags/outcome. Read then Edit ` + "`.felt/<slug>/<slug>.md`" + ` for body text, wikilinks, and ASTRA frontmatter.
-- **Names are concise labels.** Body and outcome carry full content.
+- **Outcomes teach.** One-sentence conclusions that stand alone: they appear in ` + "`felt ls`" + ` and ` + "`-d compact`" + `.
+- **Use the right relationship surface.** Nest for containment, ` + "`[[wikilinks]]`" + ` for narrative, ` + "`inputs.from`" + ` for computational provenance only.
+- **Compose upward.** When closing, ask whether the lesson belongs in a doc fiber or the root fiber; consolidate breadcrumbs.
+- **Names are concise labels.** Body and outcome carry the content.
+- **Activate ` + "`/felt`" + ` first.** Before any tool or action, regardless of what the user asked for.
 `
 }

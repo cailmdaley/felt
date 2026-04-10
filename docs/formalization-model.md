@@ -1,18 +1,21 @@
-name: "The 3×3 formalization model"
-description: "How fibers move from breadcrumbs to analysis-grade ASTRA structure: three tiers × three kinds."
+---
+name: "The formalization model"
+description: "How fibers climb three tiers of rigor: Annotated, Formalized, Tempered."
 ---
 
-# The 3×3 formalization model
+# The formalization model
 
-How fibers move through structured formalization. Three tiers of rigor, three kinds of content. Formalization is guided by real structure, not by closure state or importance.
+How fibers move through structured formalization. Three tiers of rigor. Formalization is guided by real structure, not by closure state or importance.
 
 ## The proposition
 
-The UX meeting on March 31 surfaced a core tension: when does freeform exploration become formal knowledge? François argued formalization should happen after, as a separate step. Liam argued for mandating ASTRA structure even during exploration. The 3×3 model is our answer: a deterministic ladder that fibers climb as understanding crystallizes, without forcing structure before it's real.
+Felt fibers climb three tiers: Annotated (any valid fiber), Formalized (at least one well-formed ASTRA object in frontmatter), and Tempered (`tempered: true`, human-validated). Each tier is a deterministic test. Formalization happens when structure is real enough to write without inventing; temper happens after human review.
 
-The key insight: *everything is the same schema at different levels of fill.* A bare name is valid. A fiber with a decisions block is formalized. The same fiber with `analysis-grade: true` is part of the scientific argument. No separate "astrify" step — the structure accretes in place.
+The key insight: *everything is the same schema at different levels of fill.* A bare name is valid. A fiber with a decisions block is formalized. The same fiber with `tempered: true` is part of the scientific argument. No separate "astrify" step; the structure accretes in place.
 
-This means the same system can render itself as a wiki (annotated fibers), as an analysis graph (formalized fibers with data flow), or as a publishable record (analysis-grade fibers). The view changes; the data doesn't.
+This means the same system can render itself as a wiki (annotated fibers), as an analysis graph (formalized fibers with data flow), or as a publishable record (tempered fibers). The view changes; the data doesn't.
+
+An earlier proposal crossed this ladder with a second axis of fiber *kinds* (decision / computation / finding), giving a 3×3 grid. The Lightcone meeting on 2026-04-04 dropped the kind axis: at the annotated tier it adds nothing, and at the formalized tier the ASTRA fields already tell you which kind of fiber it is. Kind is an observation, not a classification.
 
 ## Three tiers
 
@@ -20,23 +23,17 @@ This means the same system can render itself as a wiki (annotated fibers), as an
 |------|--------------|------|
 | **Annotated** | Any valid felt fiber. Name, outcome, body, tags, links in any combination. | Does the fiber exist? |
 | **Formalized** | At least one well-formed ASTRA object in frontmatter. | Could `felt export --format astra` emit this? |
-| **Analysis-grade** | `analysis-grade: true` in frontmatter. Human-validated, part of the real scientific argument. | Has a human staked their name on it? |
+| **Tempered** | `tempered: true` in frontmatter. Human-validated, part of the real scientific argument. | Has a human staked their name on it? |
 
-## Three kinds
+## Kind as observation
 
-| Kind | Core ASTRA fields | What it captures |
-|------|-------------------|-----------------|
-| **Decision** | `decisions` block with options, default, excluded reasoning | A choice between alternatives, with what was rejected and why |
-| **Computation** | `inputs` + `outputs`, optional `recipe` | A transformation that consumes data and produces results |
-| **Finding** | `insights` with claim + evidence pointers | A concrete claim backed by evidence that reduces uncertainty |
+A fiber's shape is whatever its populated ASTRA fields make it.
 
-## The 3×3 table
+- `decisions` populated: the fiber is acting as a **decision**, a choice between alternatives with what was rejected and why.
+- `inputs` and `outputs` populated: the fiber is acting as a **computation**, a transformation that consumes data and produces results.
+- `insights` populated: the fiber is acting as a **finding**, a concrete claim backed by evidence that reduces uncertainty.
 
-| Kind | Annotated | Formalized | Analysis-grade |
-|------|-----------|------------|----------------|
-| **Decision** | A note that blind A may become the fiducial choice | `decisions:` block with real options, default, and excluded reasoning | Collaboration-validated, relied upon in downstream analysis |
-| **Computation** | A breadcrumb about binning tests | Concrete `inputs:` and `outputs:` for the comparison, with recipe | Result is part of the real analysis argument |
-| **Finding** | A note that blind independence may hold | `insights:` claim with evidence pointers | Human-validated, incorporated into the scientific case |
+A single fiber can play any combination of those roles. There is no "type" to set.
 
 ## Formalization threshold
 
@@ -45,26 +42,17 @@ Formalize when structured content is real enough to write without inventing:
 - A computation has concrete inputs and outputs
 - A finding has a claim with evidence
 
-This can happen *before* the work is finished — outcome is not a prerequisite. Write inputs while scripts run. Keep it annotated if it's still just a note or question.
+This can happen *before* the work is finished; outcome is not a prerequisite. Write inputs while scripts run. Keep it annotated if it's still just a note or question.
 
 ## Why this matters for the stack
 
-The 3×3 model resolves several of the meeting's open questions:
+The tier ladder resolves several of the meeting's open questions:
 
-**The funnel problem.** You fan out into 30 experiments. Three matter. The funnel is the transition from annotated → formalized → analysis-grade. Most fibers stay annotated (breadcrumbs). Some get formalized (they have real structure). Few reach analysis-grade (they're part of the argument). The funnel is not a separate operation — it's the natural lifecycle of a fiber.
+**The funnel problem.** You fan out into 30 experiments. Three matter. The funnel is the transition from annotated → formalized → tempered. Most fibers stay annotated (breadcrumbs). Some get formalized (they have real structure). Few reach tempered (they're part of the argument). The funnel is not a separate operation; it's the natural lifecycle of a fiber.
 
-**The exploration–formalization debate.** You don't choose between exploring freely and maintaining structure. You explore (annotated fibers, filed as you go). Structure accretes when it's real (formalization). Human sign-off happens when it matters (analysis-grade). The three tiers coexist.
+**The exploration–formalization debate.** You don't choose between exploring freely and maintaining structure. You explore (annotated fibers, filed as you go). Structure accretes when it's real (formalization). Human sign-off happens when it matters (tempered). The three tiers coexist.
 
-**Progressive disclosure in the viewer.** The tier determines what the viewer shows. Analysis-grade fibers form the spine. Formalized fibers fill in methodology. Annotated fibers are available on demand but don't clutter the primary view.
+**Progressive disclosure in the viewer.** The tier determines what the viewer shows. Tempered fibers form the spine. Formalized fibers fill in methodology. Annotated fibers are available on demand but don't clutter the primary view.
 
-**Agent context injection.** The conscience hook can now ask a specific question: "You just made a decision — did you record the excluded alternative?" The 3×3 model gives the nudge a vocabulary. Not "did you file?" but "this looks like a decision at the annotated tier — does it have enough structure to formalize?"
+**Agent context injection.** The conscience hook can ask a specific question: "You just made a decision; did you record the excluded alternative?" The tier ladder gives the nudge a vocabulary. Not "did you file?" but "this looks like a decision at the annotated tier; does it have enough structure to formalize?"
 
-## Examples from the pure-eB analysis
-
-The pure-eB B-mode analysis has 1,130 fibers. Here's how the tiers distribute:
-
-- **~1,100 annotated**: breadcrumbs, process notes, reviewer comments, bug reports
-- **~20 formalized**: fibers with ASTRA decisions, inputs/outputs, or findings
-- **~5 analysis-grade**: the spine of the paper — estimator choice, covariance method, PSF model, scale cuts, main conclusion
-
-The viewer should let you navigate from the 5-node spine to the 20-node methodology graph to the full 1,130-fiber archive. Same data, different zoom levels.

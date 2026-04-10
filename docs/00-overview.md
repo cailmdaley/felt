@@ -31,11 +31,11 @@ Everything is the same schema at different levels of fill. A bare title is a fib
 
 The view is up to the user. The schema doesn't change. Plugins and themes determine how the same structure appears — MySTRA renders the analysis view, the document renders the narrative view, and felt's containment plus indexed citations keep the exploratory substrate navigable.
 
-This is the core bet: if you accumulate structured context as you work (not after), the same substrate supports exploration, formalization, and publication. The 3×3 model makes the ladder explicit.
+This is the core bet: if you accumulate structured context as you work (not after), the same substrate supports exploration, formalization, and publication. The tier ladder makes the progression explicit.
 
 ## Documents in this site
 
-- **The 3×3 formalization model** — How fibers move from breadcrumbs to analysis-grade structure: three tiers × three kinds.
+- **The formalization model** — How fibers climb three tiers of rigor: Annotated, Formalized, Tempered.
 - **Felt as ASTRA plugin** — The full write-up for the Lightcone team: what felt is, how it relates to ASTRA, and the context injection problem.
 - **Citation audit** — A working ASTRA analysis: the B-modes citation network with DOI-backed evidence, rendered with full MySTRA structure.
 - **Meeting interface** — The design and implementation of Portolan's meeting-to-ASTRA pipeline.

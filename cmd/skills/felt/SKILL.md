@@ -1,19 +1,18 @@
 ---
 name: felt
 description: >
-  Working with fibers. Four modes:
-  (1) Session — extract from conversation at session end.
-  (2) Transcript — extract from external sources with review.
-  (3) Archive — consolidate old fibers into documentation.
-  (4) Sweep — coherence check across the assemblage.
-  Session mode chains into an exit interview as a final step — agent feedback on felt itself, written as a fiber in ~/loom/.felt/felt/.
-  Also triggers on formalization (adding ASTRA structure to fibers),
-  tapestry export, evidence filing, or "update the tapestry".
+  This skill should be used whenever working in a project that contains a `.felt/` directory, and
+  when the user mentions fibers, asks to "file this", "record a decision", "formalize", "add ASTRA
+  structure", "close this fiber", or "extract from the session". Primary mode is formalize: accrete
+  structure on fibers as understanding crystallizes, in the reply window after each response. Other
+  modes are session (retroactive backstop at session end, chains into an exit interview written to
+  `~/loom/.felt/felt/`), transcript (extract from external sources with review), archive (consolidate
+  old fibers into documentation), and sweep (coherence check across the assemblage).
 ---
 
 # /felt — Working with Fibers
 
-Fibers are concerns — tasks, decisions, questions, specs — stored as directory-contained markdown. Their relationships come from three surfaces: containment by path, `[[wikilinks]]` in the body for narrative connection, and ASTRA `inputs.from` for computational provenance. ASTRA is an open specification for computational science: decisions with excluded alternatives, inputs and outputs with recipes, insights backed by evidence. Felt fibers carry ASTRA fields in their frontmatter; the structure accretes as understanding crystallizes.
+Fibers are concerns (tasks, decisions, questions, specs) stored as directory-contained markdown. Their relationships come from three surfaces: containment by path, `[[wikilinks]]` in the body for narrative connection, and ASTRA `inputs.from` for computational provenance. ASTRA is an open specification for computational science: decisions with excluded alternatives, inputs and outputs with recipes, insights backed by evidence. Felt fibers carry ASTRA fields in their frontmatter; the structure accretes as understanding crystallizes.
 
 For literature audits, model the audited paper statement as the `claim` and anchor the supporting `evidence` in the cited source itself with a traceable selector such as a quote, figure, or table. Use audit reports as artifact evidence for your own findings about the audit process, not as substitutes for literature evidence.
 
@@ -23,9 +22,11 @@ Proactive formalization. Retroactive extraction. Consolidation over time. Cohere
 
 ## Philosophy
 
-**Formalize while working.** During analysis, fibers accrete ASTRA structure as it becomes real. Write inputs while scripts run. Record excluded options the moment you reject them. Don't wait for a separate formalization pass; the structure belongs where the thinking happens.
+**Formalize while working.** The moment to accrete structure is right after you respond, while the user reads; that time is unbilled, and what crystallized during the exchange is still fresh. Write inputs while scripts run, record excluded options the moment you reject them, file what just came into focus. Formalization belongs in the flow of the work, not in a separate pass at the end.
 
-**Extract what was missed.** At session end, mine decisions, patterns, and findings that weren't captured in the moment. The retroactive pass catches what fell through.
+**Follow the understanding.** Don't ask permission to file. The user's corrections and opinions are the primary trigger; when the direction of the conversation shifts, your fibers shift with it, reversals included. You are tracking what has come to matter, not what was said first.
+
+**Extract what slipped through.** Continuous formalization catches most things. At session end, mine decisions, patterns, and findings that weren't captured in the moment; this is a backstop, not the primary mode.
 
 **Outcomes teach.** An outcome that says "done" or "investigated X" has failed. Put the conclusion in: what was learned, what was decided, why. Someone reading the outcome should learn the thing without opening the body.
 
@@ -33,7 +34,7 @@ Proactive formalization. Retroactive extraction. Consolidation over time. Cohere
 
 **CLAUDE.md stays lean.** Commands, paths, context pointers. Documentation fibers carry the depth.
 
-**Propagate decisions.** A decision rarely touches one place. Use Explore agents to find consequences — config, code, methodology, other fibers. Record the consequence in code or fibers, and add wikilinks where the narrative connection matters.
+**Propagate decisions.** A decision rarely touches one place. Use Explore agents to find consequences in config, code, methodology, and other fibers. Record the consequence in code or fibers, and add wikilinks where the narrative connection matters.
 
 ---
 
@@ -41,9 +42,9 @@ Proactive formalization. Retroactive extraction. Consolidation over time. Cohere
 
 | Mode | When | Review? |
 |------|------|---------|
-| **session** | End of coding session | No — autonomous |
+| **formalize** | After each response, while the user reads | No — inline with work |
+| **session** | End of coding session (backstop) | No — autonomous |
 | **transcript** | External file (meeting, voice note) | Yes — present plan first |
-| **formalize** | During analysis work, accreting ASTRA structure | No — inline with work |
 | **archive** | Consolidating old fibers | Yes — confirm before changes |
 | **sweep** | Coherence check across assemblage | Yes — present findings first |
 
@@ -121,7 +122,5 @@ Read the relevant reference when the mode or context matches:
 | Formalizing fibers with ASTRA structure | [formalization.md](references/formalization.md) |
 | ASTRA field reference (schema, types, constraints) | [astra.md](references/astra.md) |
 | Consolidating old fibers, reshaping | [archiving.md](references/archiving.md) |
-| Tapestry: evidence, export, reshaping | [tapestry.md](references/tapestry.md) |
-| Tapestry: viewer setup, GitHub Pages | [viewer-setup.md](references/viewer-setup.md) |
 | Migrating flat fibers to directory format | [migration.md](references/migration.md) |
 | Agent exit interview at session end | [exit-interview.md](references/exit-interview.md) |

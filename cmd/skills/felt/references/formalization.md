@@ -1,44 +1,46 @@
 # Formalization
 
-How fibers move through the deterministic 3x3 model: three tiers, three kinds. Formalization is guided by real structure, not by closure state or importance.
+How fibers move through three tiers of rigor: Annotated, Formalized, Tempered. Formalization is guided by real structure, not by closure state or importance.
 
 ---
 
-## The 3x3 Model
+## The Tier Ladder
 
-### Three tiers
+A fiber starts annotated and climbs as structure crystallizes. All three tiers share the same schema; what differs is how much of it is filled.
 
 - **Annotated**: any valid felt fiber. Name, outcome, body, tags, and wikilinks in any combination. No ASTRA requirement. This covers everything from a bare name to a rich doc fiber.
 - **Formalized**: the fiber has at least one well-formed ASTRA object in frontmatter. Deterministic test: could `felt export --format astra` emit this?
 - **Tempered**: `tempered: true` in frontmatter. Human-validated and part of the real scientific argument. This is a workflow flag, not a richer schema.
 
-### Three kinds
+### Tier progression
 
-- **Decision**: `decisions` block with options, default, excluded reasoning, plus optional `insights`
-- **Computation**: `inputs` + `outputs`, plus optional `recipe`
-- **Finding**: `insights` with a claim and evidence pointers
+A single fiber climbing the ladder:
 
-### 3x3 table
+| Tier | State |
+|------|-------|
+| **Annotated** | `adopt-blind-a-as-fiducial-bb` exists as a note that blind A may become the fiducial BB choice |
+| **Formalized** | It gains a `decisions:` block with real options, default, and excluded reasoning |
+| **Tempered** | It is marked `tempered: true` because the collaboration has validated and relied on it |
 
-| Kind | Annotated | Formalized | Tempered |
-|------|-----------|------------|----------------|
-| **Decision** | `adopt-blind-a-as-fiducial-bb` exists as a note that blind A may become the fiducial BB choice | `adopt-blind-a-as-fiducial-bb` has a `decisions:` block with real options, default, and excluded reasoning | `adopt-blind-a-as-fiducial-bb` is also marked `tempered: true` because the collaboration has validated and relied on it |
-| **Computation** | `96-bin-powspace-is-optimal` is a breadcrumb or running note about binning tests | `96-bin-powspace-is-optimal` records concrete `inputs:` and `outputs:` for the comparison, optionally with a recipe | `96-bin-powspace-is-optimal` is marked `tempered: true` because the result is part of the real analysis argument |
-| **Finding** | `cosebis-blind-independent` is a note that blind independence may hold | `cosebis-blind-independent` has an `insights:` claim with evidence pointers | `cosebis-blind-independent` is marked `tempered: true` after human validation and incorporation into the scientific case |
+### Kind is an observation, not a classification
+
+There is no formal typology of fiber kinds. A fiber's shape is whatever its populated ASTRA fields make it: `decisions:` populated means the fiber is acting as a decision, `inputs:` and `outputs:` populated means it is acting as a computation, `insights:` populated means it is acting as a finding. A single fiber can play any combination of those roles.
 
 ### Formalization threshold
 
-Formalize when structured content is real enough to write without inventing. A decision has actual options, a computation has concrete inputs and outputs, a finding has a claim with evidence. This can happen before the work is finished; outcome is not a prerequisite. Write inputs while scripts run. Keep it annotated if it is still just a note or question.
+Formalize when structured content is real enough to write without inventing. A decision has actual options, a computation has concrete inputs and outputs, a finding has a claim with evidence. Outcome is not a prerequisite; this can happen before the work is finished. Keep it annotated if it is still just a note or question.
+
+For async compute, launch the job and formalize inputs and expected outputs while it runs; add insights when results come in.
 
 ---
 
-## Per-Kind Templates
+## Common Shapes
 
-Different fibers need different ASTRA fields. Do not fill fields that do not apply.
+Different fibers need different ASTRA fields. The shapes below are common patterns, not a formal typology; a single fiber can mix any of them. Do not fill fields that do not apply.
 
 ### Decision fiber
 
-The core kind. A choice was made between alternatives.
+A choice was made between alternatives.
 
 ```yaml
 decisions:
@@ -52,7 +54,7 @@ decisions:
         label: Analytic (Knox + NKA)
         excluded: true
         excluded_reason: Off-diagonal noise bias >10% at ℓ<100
-insights:  # optional — findings that informed the decision
+insights:  # optional: findings that informed the decision
   glass_better:
     claim: Analytic covariance underestimates off-diagonal at our noise level
     evidence:
@@ -170,51 +172,24 @@ The frontmatter is for branching, validation, querying, and export. The body is 
 
 ---
 
-## The Direct-Edit Pattern
-
-**CLI for metadata, file edit for content.**
-
-| Operation | Tool |
-|-----------|------|
-| Create fiber | `felt add <slug> <name> [flags]` |
-| Change status and tags | `felt edit <id> --status ... --tag ...` |
-| Set outcome | `felt edit <id> -o "..."` |
-| Write/edit body and ASTRA frontmatter | Read + Edit on `.felt/<path>/<slug>.md` |
-
-When adding ASTRA fields, read the file first, then edit the existing frontmatter block directly.
-
----
-
-## Background Formalization Workflow
-
-Formalization is compatible with asynchronous work:
-
-1. Launch the computation.
-2. Formalize the fiber with inputs and expected outputs while it runs.
-3. Let the computation finish.
-4. Add insights and outcome when the result is known.
-
-Outcome is documentation, not the gate for structured frontmatter.
-
----
-
 ## Progressive Example
+
+A single fiber, `psf-leakage-check`, climbing the ladder.
 
 ### Annotated
 
 ```bash
 felt add psf-leakage-check "PSF leakage check"
-felt edit psf-leakage-check -o "Leakage test in progress; checking whether any tomographic bin needs correction."
+felt edit psf-leakage-check -s active -o "Leakage test in progress; checking whether any tomographic bin needs correction."
 ```
 
-Edit `.felt/psf-leakage-check/psf-leakage-check.md`:
+The file at `.felt/psf-leakage-check/psf-leakage-check.md`:
 
 ```markdown
 ---
 name: PSF leakage check
 status: active
-tags:
-  - systematics
+tags: [systematics]
 outcome: Leakage test in progress; checking whether any tomographic bin needs correction.
 ---
 
@@ -224,21 +199,13 @@ Measuring additive and multiplicative leakage while the validation jobs run.
 Cross-check against shape-PSF correlations if any bin looks marginal.
 ```
 
-This is already a valid annotated fiber: it has real content, but no ASTRA structure yet.
+Real content, no ASTRA structure yet.
 
 ### Formalized
 
-Same fiber, now with concrete frontmatter while the computation is still running:
+Still mid-computation. Append ASTRA fields to the existing frontmatter:
 
 ```yaml
----
-name: PSF leakage check
-status: active
-tags:
-  - systematics
-  - tapestry:psf-leakage
-outcome: Leakage test in progress; checking whether any tomographic bin needs correction.
-
 inputs:
   - id: shear_catalog
     type: data
@@ -246,7 +213,6 @@ inputs:
   - id: psf_model
     type: analysis
     from: psf-modeling
-
 outputs:
   - id: leakage_alpha
     type: metric
@@ -254,80 +220,41 @@ outputs:
   - id: leakage_figure
     type: figure
     recipe:
-      command: snakemake results/tapestry/psf-leakage/leakage.png
-
+      command: snakemake results/psf-leakage/leakage.png
 decisions:
   correction_needed:
     label: Whether to apply PSF leakage correction
     default: no_correction
     options:
-      no_correction:
-        label: No correction
+      no_correction: {label: No correction}
       subtract_template:
         label: Subtract leakage template
         excluded: true
         excluded_reason: Only if leakage exceeds the agreed threshold
----
 ```
 
-Now the fiber is formalized because `felt export --format astra` could emit it.
+`felt export --format astra` could now emit this fiber.
 
 ### Tempered
 
-Once the result has been checked by a human and relied on in the real analysis, mark that workflow state explicitly:
+The result is in, human-checked, and relied on downstream. Close the fiber, refine the outcome, add the insight, and set the workflow flag:
 
 ```yaml
----
-name: PSF leakage check
 status: closed
 tempered: true
-tags:
-  - systematics
-  - tapestry:psf-leakage
 outcome: >
   Leakage α < 0.01 for all bins. No correction needed.
   Checked both auto and cross-spectra.
-
-inputs:
-  - id: shear_catalog
-    type: data
-    source: KiDS-1000 shape catalog v2
-  - id: psf_model
-    type: analysis
-    from: psf-modeling
-
-outputs:
-  - id: leakage_alpha
-    type: metric
-    description: Additive PSF leakage parameter per bin
-  - id: leakage_figure
-    type: figure
-    recipe:
-      command: snakemake results/tapestry/psf-leakage/leakage.png
-
-decisions:
-  correction_needed:
-    label: Whether to apply PSF leakage correction
-    default: no_correction
-    options:
-      no_correction:
-        label: No correction
-      subtract_template:
-        label: Subtract leakage template
-        excluded: true
-        excluded_reason: α stayed below the agreed threshold in every bin
-
 insights:
   leakage_negligible:
     claim: PSF leakage α < 0.01 for all tomographic bins
     created_at: 2026-02-12
     evidence:
       - id: leakage_measurement
-        artifact: results/tapestry/psf-leakage/evidence.json
----
+        artifact: results/psf-leakage/evidence.json
 ```
 
-The body now carries the interpretation, caveats, and why the threshold is the right one. The frontmatter stays structural.
+The body now carries interpretation, caveats, and why the threshold is the right one. The frontmatter stays structural.
 
 ---
 

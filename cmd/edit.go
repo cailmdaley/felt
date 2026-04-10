@@ -38,7 +38,7 @@ Examples:
   felt edit abc123 --tag decision --untag stale
   felt edit abc123 --body "Full replacement body text"  # overwrites body
   felt edit abc123 --decision covariance --label "Covariance method" --option 'glass:GLASS mocks' --option 'analytic:Analytic:excluded:underestimates tails'
-  felt edit abc123 --input 'catalog:data:upstream.posterior:Posterior sample'
+  felt edit abc123 --input 'catalog:data:build-mocks.galaxy-catalog:Mock galaxy catalog'
   felt edit abc123 --insight 'stability:Posterior is stable to jackknife choice'`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
