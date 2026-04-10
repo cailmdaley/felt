@@ -104,10 +104,33 @@ PROMPTEOF
     PROMPT=$(cat "$PROMPT_FILE")
 
     if [[ "$BACKEND" == "codex" ]]; then
-        codex --dangerously-bypass-approvals-and-sandbox \
+        # Codex intercepts Ctrl+C in its TUI without exiting. Bash defers SIGINT
+        # while waiting for a foreground child — codex never exits — deadlock.
+        # Python doesn't have this deferral: proc.wait() raises KeyboardInterrupt
+        # immediately on SIGINT, letting us send SIGTERM to codex (which its TUI
+        # framework cannot intercept). Codex runs as a normal subprocess of Python,
+        # inheriting stdin/stdout, so output is visible and the TUI works normally.
+        _CODEX_PY=$(mktemp "${TMPDIR:-/tmp}/ralph-codex.XXXXXX.py")
+        cat > "$_CODEX_PY" << 'PYEOF'
+import subprocess, signal, sys
+def main():
+    proc = subprocess.Popen(sys.argv[1:])
+    def interrupt(sig, frame):
+        proc.send_signal(signal.SIGTERM)
+        try: proc.wait(timeout=3)
+        except subprocess.TimeoutExpired: proc.kill()
+        sys.exit(130)
+    signal.signal(signal.SIGINT, interrupt)
+    try: return proc.wait()
+    except KeyboardInterrupt: interrupt(signal.SIGINT, None)
+sys.exit(main())
+PYEOF
+        python3 "$_CODEX_PY" \
+            codex --dangerously-bypass-approvals-and-sandbox \
             --config "developer_instructions=$(cat "$SYSPROMPT_FILE")" \
             $EXTRA_FLAGS \
             "$PROMPT"
+        rm -f "$_CODEX_PY"
     else
         claude --dangerously-skip-permissions \
             $EXTRA_FLAGS \
@@ -126,6 +149,7 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo "Ralph complete — $iteration iterations"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
+# Keep the shell open as a bash-loop handoff back to the parent ralph launcher.
 echo "Session kept open for inspection. Type exit to close."
 exec bash -l
 LOOP
