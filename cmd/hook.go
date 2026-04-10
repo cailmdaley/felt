@@ -192,7 +192,7 @@ felt ls -s closed "query"       # explicit -s overrides; -e exact, -r regex
 felt ls --body "query"          # FTS5 body search via .felt/index.db
 felt tree                       # containment hierarchy
 felt tree <id>                  # subtree for one fiber
-felt check                      # lint broken refs and ASTRA/formalization issues
+felt check                      # lint broken refs/fragments and ASTRA/formalization issues
 felt nest <child> <parent>      # move into parent subtree
 felt unnest <child>             # promote back to top level
 felt migrate [--dry-run]        # normalize legacy layout/name/anchors

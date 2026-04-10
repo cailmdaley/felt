@@ -143,7 +143,7 @@ decisions:
 
 ```bash
 felt ls "BAO"                 # name, outcome, and ASTRA fields
-felt check                    # broken refs, ASTRA lint, formalization drift
+felt check                    # broken refs/fragments, ASTRA lint, formalization drift
 felt export --format astra    # writes ./astra.yaml
 ```
 

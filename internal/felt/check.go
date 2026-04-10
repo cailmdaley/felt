@@ -146,20 +146,32 @@ func checkInsights(f *Felt) []CheckIssue {
 
 func checkRelationshipIntegrity(felts []*Felt) []CheckIssue {
 	ids := make([]string, 0, len(felts))
+	byID := make(map[string]*Felt, len(felts))
 	for _, f := range felts {
 		ids = append(ids, f.ID)
+		byID[f.ID] = f
 	}
 	sort.Strings(ids)
 
 	var issues []CheckIssue
 	for _, f := range felts {
 		for _, ref := range ExtractBodyRefs(f.Body) {
-			if _, err := ResolveScopedID(ids, f.ID, ref.Target); err != nil {
+			targetID, err := ResolveScopedID(ids, f.ID, ref.Target)
+			if err != nil {
 				issues = append(issues, CheckIssue{
 					Level:   CheckLevelError,
 					FiberID: f.ID,
 					Path:    "body",
 					Message: fmt.Sprintf("broken body reference %q", ref.String()),
+				})
+				continue
+			}
+			if strings.TrimSpace(ref.Fragment) != "" && !hasASTRAElement(byID[targetID], ref.Fragment) {
+				issues = append(issues, CheckIssue{
+					Level:   CheckLevelError,
+					FiberID: f.ID,
+					Path:    "body",
+					Message: fmt.Sprintf("broken body reference %q: target has no element %q", ref.String(), ref.Fragment),
 				})
 			}
 		}
@@ -168,7 +180,8 @@ func checkRelationshipIntegrity(felts []*Felt) []CheckIssue {
 			if targetFiber == "" {
 				continue
 			}
-			if _, err := ResolveScopedID(ids, f.ID, targetFiber); err != nil {
+			targetID, err := ResolveScopedID(ids, f.ID, targetFiber)
+			if err != nil {
 				message := fmt.Sprintf("broken data-flow reference %q", input.From)
 				if strings.TrimSpace(fragment) == "" {
 					message = fmt.Sprintf("broken data-flow reference %q", targetFiber)
@@ -179,10 +192,56 @@ func checkRelationshipIntegrity(felts []*Felt) []CheckIssue {
 					Path:    "inputs." + input.ID + ".from",
 					Message: message,
 				})
+				continue
+			}
+			if strings.TrimSpace(fragment) != "" && !hasOutput(byID[targetID], fragment) {
+				issues = append(issues, CheckIssue{
+					Level:   CheckLevelError,
+					FiberID: f.ID,
+					Path:    "inputs." + input.ID + ".from",
+					Message: fmt.Sprintf("broken data-flow reference %q: target has no output %q", input.From, fragment),
+				})
 			}
 		}
 	}
 	return issues
+}
+
+func hasASTRAElement(f *Felt, id string) bool {
+	id = strings.TrimSpace(id)
+	if f == nil || id == "" {
+		return false
+	}
+	if _, ok := f.Decisions[id]; ok {
+		return true
+	}
+	if _, ok := f.Insights[id]; ok {
+		return true
+	}
+	for _, input := range f.Inputs {
+		if input.ID == id {
+			return true
+		}
+	}
+	for _, output := range f.Outputs {
+		if output.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func hasOutput(f *Felt, id string) bool {
+	id = strings.TrimSpace(id)
+	if f == nil || id == "" {
+		return false
+	}
+	for _, output := range f.Outputs {
+		if output.ID == id {
+			return true
+		}
+	}
+	return false
 }
 
 func evidenceLooksStubby(e ASTRAEvidence) bool {

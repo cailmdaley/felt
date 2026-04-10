@@ -102,6 +102,36 @@ func TestCheckBrokenBodyReference(t *testing.T) {
 	}
 }
 
+func TestCheckBrokenBodyReferenceFragment(t *testing.T) {
+	issues := Check([]*Felt{
+		{
+			ID:   "fiber-a",
+			Body: "See [[fiber-b#missing-element]].",
+		},
+		{
+			ID: "fiber-b",
+			Decisions: map[string]ASTRADecision{
+				"choice": {
+					Label: "Choice",
+					Options: map[string]ASTRADecisionOption{
+						"keep": {Label: "Keep"},
+					},
+				},
+			},
+		},
+	})
+
+	if len(issues) != 1 {
+		t.Fatalf("Check() produced %d issues, want 1", len(issues))
+	}
+	if issues[0].Path != "body" {
+		t.Fatalf("issue path = %q, want body", issues[0].Path)
+	}
+	if !strings.Contains(issues[0].Message, `has no element "missing-element"`) {
+		t.Fatalf("issue message = %q, want missing element failure", issues[0].Message)
+	}
+}
+
 func TestCheckBrokenDataFlowReference(t *testing.T) {
 	issues := Check([]*Felt{{
 		ID: "fiber-a",
@@ -118,6 +148,31 @@ func TestCheckBrokenDataFlowReference(t *testing.T) {
 	}
 	if !strings.Contains(issues[0].Message, "broken data-flow reference") {
 		t.Fatalf("issue message = %q, want broken data-flow reference", issues[0].Message)
+	}
+}
+
+func TestCheckBrokenDataFlowOutputReference(t *testing.T) {
+	issues := Check([]*Felt{
+		{
+			ID: "fiber-a",
+			Inputs: []ASTRAInput{
+				{ID: "catalog", From: "fiber-b.missing-output"},
+			},
+		},
+		{
+			ID:      "fiber-b",
+			Outputs: []ASTRAOutput{{ID: "present-output"}},
+		},
+	})
+
+	if len(issues) != 1 {
+		t.Fatalf("Check() produced %d issues, want 1", len(issues))
+	}
+	if issues[0].Path != "inputs.catalog.from" {
+		t.Fatalf("issue path = %q, want inputs.catalog.from", issues[0].Path)
+	}
+	if !strings.Contains(issues[0].Message, `has no output "missing-output"`) {
+		t.Fatalf("issue message = %q, want missing output failure", issues[0].Message)
 	}
 }
 

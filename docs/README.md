@@ -176,7 +176,7 @@ felt tree --depth 2              # limit displayed nesting depth
 
 ```bash
 felt hook session                 # context for session start hooks
-felt check                        # broken refs, ASTRA lint, depth consistency
+felt check                        # broken refs/fragments, ASTRA lint, depth consistency
 felt export --format tapestry     # viewer payload
 felt export --format astra        # ASTRA YAML export surface
 ```
