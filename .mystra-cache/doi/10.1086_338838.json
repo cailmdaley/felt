@@ -1,0 +1,308 @@
+{
+  "indexed": {
+    "date-parts": [
+      [
+        2026,
+        3,
+        24
+      ]
+    ],
+    "date-time": "2026-03-24T01:24:03Z",
+    "timestamp": 1774315443398,
+    "version": "3.50.1"
+  },
+  "reference-count": 29,
+  "publisher": "American Astronomical Society",
+  "issue": "1",
+  "content-domain": {
+    "domain": [],
+    "crossmark-restriction": false
+  },
+  "published-print": {
+    "date-parts": [
+      [
+        2002,
+        3,
+        20
+      ]
+    ]
+  },
+  "DOI": "10.1086/338838",
+  "type": "journal-article",
+  "created": {
+    "date-parts": [
+      [
+        2002,
+        7,
+        26
+      ]
+    ],
+    "date-time": "2002-07-26T19:49:34Z",
+    "timestamp": 1027712974000
+  },
+  "page": "20-27",
+  "source": "Crossref",
+  "is-referenced-by-count": 197,
+  "title": "Discriminating Weak Lensing from Intrinsic Spin Correlations Using the Curl‐Gradient Decomposition",
+  "prefix": "10.3847",
+  "volume": "568",
+  "author": [
+    {
+      "given": "Robert G.",
+      "family": "Crittenden",
+      "sequence": "first",
+      "affiliation": []
+    },
+    {
+      "given": "Priyamvada",
+      "family": "Natarajan",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "given": "Ue‐Li",
+      "family": "Pen",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "given": "Tom",
+      "family": "Theuns",
+      "sequence": "additional",
+      "affiliation": []
+    }
+  ],
+  "member": "2208",
+  "reference": [
+    {
+      "key": "rf1_123",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1046/j.1365-8711.2000.03851.x"
+    },
+    {
+      "key": "rf2_124",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1016/S0370-1573(00)00082-X"
+    },
+    {
+      "key": "rf3_125",
+      "unstructured": "Brown, M. L., Taylor, A. N., Hambly, N. C. & Dye, S. 2000, MNRAS, submitted (astro-ph/0009499)"
+    },
+    {
+      "key": "rf4_126",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1046/j.1365-8711.2001.04105.x"
+    },
+    {
+      "key": "rf5_127",
+      "doi-asserted-by": "crossref",
+      "first-page": "436",
+      "DOI": "10.1093/mnras/282.2.436",
+      "volume": "282",
+      "author": "Catelan P.",
+      "year": "1996",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "rf6_128",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1086/322370"
+    },
+    {
+      "key": "rf7_129",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1086/317856"
+    },
+    {
+      "key": "rf8_130",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1086/172076"
+    },
+    {
+      "key": "rf9_131",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1086/149378"
+    },
+    {
+      "key": "rf10_132",
+      "doi-asserted-by": "crossref",
+      "first-page": "649",
+      "DOI": "10.1111/j.1365-8711.2000.03907.x",
+      "volume": "314",
+      "author": "Heavens A. F.",
+      "year": "2000",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "rf11_133",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1086/321380"
+    },
+    {
+      "key": "rf12_134",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1086/171151"
+    },
+    {
+      "key": "rf13_135",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1086/187730"
+    },
+    {
+      "key": "rf14_136",
+      "doi-asserted-by": "crossref",
+      "unstructured": "Kaiser, N., Squires, G., Fahlman, G. & Woods, D. 1994, in Clusters of Galaxies, ed. F. Durrett, A. Maxure, & J. Tran Thanh Van (Gif-sur-Yvette: Editions Frontieres), 269",
+      "DOI": "10.1086/174974"
+    },
+    {
+      "key": "rf15_137",
+      "unstructured": "Kaiser, N., Wilson, G. & Luppino, G. A. 2000, ApJL, submitted (astro-ph/0003338)"
+    },
+    {
+      "key": "rf16_138",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1046/j.1365-8711.1998.02054.x"
+    },
+    {
+      "key": "rf17_139",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1103/PhysRevD.55.7368"
+    },
+    {
+      "key": "rf18_140",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1086/312556"
+    },
+    {
+      "key": "rf19_141",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1086/321472"
+    },
+    {
+      "key": "rf20_142",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1086/312652"
+    },
+    {
+      "key": "rf21_143",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1086/317273"
+    },
+    {
+      "key": "rf22_144",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1046/j.1365-8711.1998.01422.x"
+    },
+    {
+      "key": "rf23_145",
+      "unstructured": "Seljak, U. & Zaldarriaga, M. 1998, in Proc. 23d Rencontres de Moriond, Fundamental Parameters in Cosmology, ed. J. Tran Thanh Van, Y. Giraud-Heraud, F. Bouchet, T. Damour, & Y. Mellier (Paris: Editions Frontieres), in press"
+    },
+    {
+      "key": "rf24_146",
+      "unstructured": "Stebbins, A. 1996, preprint (astro-ph/9609149)"
+    },
+    {
+      "key": "rf25_147",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1103/PhysRevD.64.063001"
+    },
+    {
+      "key": "rf26_148",
+      "first-page": "1",
+      "volume": "334",
+      "author": "van Waerbeke L.",
+      "year": "1998",
+      "journal-title": "A&A"
+    },
+    {
+      "key": "rf27_149",
+      "first-page": "30",
+      "volume": "358",
+      "author": "van Waerbeke L.",
+      "year": "2000",
+      "journal-title": "A&A"
+    },
+    {
+      "key": "rf28_150",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1038/35012001"
+    },
+    {
+      "key": "rf29_151",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1103/PhysRevD.55.1830"
+    }
+  ],
+  "container-title": "The Astrophysical Journal",
+  "original-title": [],
+  "language": "en",
+  "link": [
+    {
+      "URL": "http://stacks.iop.org/0004-637X/568/i=1/a=20/pdf",
+      "content-type": "unspecified",
+      "content-version": "vor",
+      "intended-application": "similarity-checking"
+    }
+  ],
+  "deposited": {
+    "date-parts": [
+      [
+        2020,
+        11,
+        6
+      ]
+    ],
+    "date-time": "2020-11-06T21:45:02Z",
+    "timestamp": 1604699102000
+  },
+  "score": 1,
+  "resource": {
+    "primary": {
+      "URL": "https://iopscience.iop.org/article/10.1086/338838"
+    }
+  },
+  "subtitle": [],
+  "short-title": [],
+  "issued": {
+    "date-parts": [
+      [
+        2002,
+        3,
+        20
+      ]
+    ]
+  },
+  "references-count": 29,
+  "journal-issue": {
+    "issue": "1",
+    "published-print": {
+      "date-parts": [
+        [
+          2002,
+          3,
+          20
+        ]
+      ]
+    }
+  },
+  "alternative-id": [
+    "10.1086/338838"
+  ],
+  "URL": "http://dx.doi.org/10.1086/338838",
+  "relation": {},
+  "ISSN": [
+    "0004-637X",
+    "1538-4357"
+  ],
+  "subject": [],
+  "container-title-short": "ApJ",
+  "published": {
+    "date-parts": [
+      [
+        2002,
+        3,
+        20
+      ]
+    ]
+  }
+}

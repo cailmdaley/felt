@@ -1,0 +1,1023 @@
+{
+  "indexed": {
+    "date-parts": [
+      [
+        2026,
+        3,
+        17
+      ]
+    ],
+    "date-time": "2026-03-17T02:18:11Z",
+    "timestamp": 1773713891369,
+    "version": "3.50.1"
+  },
+  "reference-count": 77,
+  "publisher": "Oxford University Press (OUP)",
+  "issue": "1",
+  "content-domain": {
+    "domain": [],
+    "crossmark-restriction": false
+  },
+  "published-print": {
+    "date-parts": [
+      [
+        2012,
+        11,
+        21
+      ]
+    ]
+  },
+  "DOI": "10.1111/j.1365-2966.2012.21952.x",
+  "type": "journal-article",
+  "created": {
+    "date-parts": [
+      [
+        2012,
+        12,
+        14
+      ]
+    ],
+    "date-time": "2012-12-14T16:50:55Z",
+    "timestamp": 1355503855000
+  },
+  "page": "146-166",
+  "source": "Crossref",
+  "is-referenced-by-count": 649,
+  "title": "CFHTLenS: the Canada–France–Hawaii Telescope Lensing Survey",
+  "prefix": "10.1093",
+  "volume": "427",
+  "author": [
+    {
+      "given": "Catherine",
+      "family": "Heymans",
+      "sequence": "first",
+      "affiliation": [
+        {
+          "name": "Scottish Universities Physics Alliance, Institute for Astronomy; University of Edinburgh, Royal Observatory; Blackford Hill; Edinburgh; EH9 3HJ"
+        }
+      ]
+    },
+    {
+      "given": "Ludovic",
+      "family": "Van Waerbeke",
+      "sequence": "additional",
+      "affiliation": [
+        {
+          "name": "Department of Physics and Astronomy; University of British Columbia; 6224 Agricultural Road; Vancouver; BC; V6T 1Z1; Canada"
+        }
+      ]
+    },
+    {
+      "given": "Lance",
+      "family": "Miller",
+      "sequence": "additional",
+      "affiliation": [
+        {
+          "name": "Department of Physics; Oxford University; Keble Road; Oxford; OX1 3RH"
+        }
+      ]
+    },
+    {
+      "given": "Thomas",
+      "family": "Erben",
+      "sequence": "additional",
+      "affiliation": [
+        {
+          "name": "Argelander Institute for Astronomy; University of Bonn; Auf dem Hügel 71; 53121; Bonn; Germany"
+        }
+      ]
+    },
+    {
+      "given": "Hendrik",
+      "family": "Hildebrandt",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "given": "Henk",
+      "family": "Hoekstra",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "given": "Thomas D.",
+      "family": "Kitching",
+      "sequence": "additional",
+      "affiliation": [
+        {
+          "name": "Scottish Universities Physics Alliance, Institute for Astronomy; University of Edinburgh, Royal Observatory; Blackford Hill; Edinburgh; EH9 3HJ"
+        }
+      ]
+    },
+    {
+      "given": "Yannick",
+      "family": "Mellier",
+      "sequence": "additional",
+      "affiliation": [
+        {
+          "name": "Institut d’Astrophysique de Paris; Université Pierre et Marie Curie - Paris 6; 98 bis Boulevard Arago; F-75014; Paris; France"
+        }
+      ]
+    },
+    {
+      "given": "Patrick",
+      "family": "Simon",
+      "sequence": "additional",
+      "affiliation": [
+        {
+          "name": "Argelander Institute for Astronomy; University of Bonn; Auf dem Hügel 71; 53121; Bonn; Germany"
+        }
+      ]
+    },
+    {
+      "given": "Christopher",
+      "family": "Bonnett",
+      "sequence": "additional",
+      "affiliation": [
+        {
+          "name": "Institut de Ciencies de l’Espai; CSIC/IEEC; F. de Ciencies, Torre C5 par-2; Barcelona; 08193; Spain"
+        }
+      ]
+    },
+    {
+      "given": "Jean",
+      "family": "Coupon",
+      "sequence": "additional",
+      "affiliation": [
+        {
+          "name": "Institute of Astronomy and Astrophysics; Academia Sinica; PO Box 23-141; Taipei 10617; Taiwan"
+        }
+      ]
+    },
+    {
+      "given": "Liping",
+      "family": "Fu",
+      "sequence": "additional",
+      "affiliation": [
+        {
+          "name": "Key Lab for Astrophysics; Shanghai Normal University; 100 Guilin Road; 200234; Shanghai; China"
+        }
+      ]
+    },
+    {
+      "given": "Joachim",
+      "family": "Harnois-Déraps",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "given": "Michael J.",
+      "family": "Hudson",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "given": "Martin",
+      "family": "Kilbinger",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "given": "Koenraad",
+      "family": "Kuijken",
+      "sequence": "additional",
+      "affiliation": [
+        {
+          "name": "Leiden Observatory; Leiden University; Niels Bohrweg 2; 2333; CA Leiden; the Netherlands"
+        }
+      ]
+    },
+    {
+      "given": "Barnaby",
+      "family": "Rowe",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "given": "Tim",
+      "family": "Schrabback",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "given": "Elisabetta",
+      "family": "Semboloni",
+      "sequence": "additional",
+      "affiliation": [
+        {
+          "name": "Leiden Observatory; Leiden University; Niels Bohrweg 2; 2333; CA Leiden; the Netherlands"
+        }
+      ]
+    },
+    {
+      "given": "Edo",
+      "family": "van Uitert",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "given": "Sanaz",
+      "family": "Vafaei",
+      "sequence": "additional",
+      "affiliation": [
+        {
+          "name": "Department of Physics and Astronomy; University of British Columbia; 6224 Agricultural Road; Vancouver; BC; V6T 1Z1; Canada"
+        }
+      ]
+    },
+    {
+      "given": "Malin",
+      "family": "Velander",
+      "sequence": "additional",
+      "affiliation": []
+    }
+  ],
+  "member": "286",
+  "published-online": {
+    "date-parts": [
+      [
+        2012,
+        10,
+        29
+      ]
+    ]
+  },
+  "reference": [
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0001|mnr21952-cit-0001",
+      "doi-asserted-by": "crossref",
+      "first-page": "543",
+      "DOI": "10.1088/0067-0049/182/2/543",
+      "volume": "182",
+      "author": "Abazajian",
+      "year": "2009",
+      "journal-title": "ApJS"
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0002|mnr21952-cit-0002",
+      "doi-asserted-by": "crossref",
+      "first-page": "228",
+      "DOI": "10.1111/j.1365-2966.2008.13880.x",
+      "volume": "391",
+      "author": "Amara",
+      "year": "2008",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0003|mnr21952-cit-0003",
+      "doi-asserted-by": "crossref",
+      "first-page": "625",
+      "DOI": "10.1046/j.1365-8711.2000.03851.x",
+      "volume": "318",
+      "author": "Bacon",
+      "year": "2000",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0004|mnr21952-cit-0004",
+      "doi-asserted-by": "crossref",
+      "first-page": "673",
+      "DOI": "10.1046/j.1365-8711.2003.06877.x",
+      "volume": "344",
+      "author": "Bacon",
+      "year": "2003",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0005|mnr21952-cit-0005",
+      "doi-asserted-by": "crossref",
+      "first-page": "291",
+      "DOI": "10.1016/S0370-1573(00)00082-X",
+      "volume": "340",
+      "author": "Bartelmann",
+      "year": "2001",
+      "journal-title": "Phys. Rep."
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0006|mnr21952-cit-0006",
+      "doi-asserted-by": "crossref",
+      "first-page": "361",
+      "DOI": "10.1051/0004-6361:20011199",
+      "volume": "378",
+      "author": "Bartelmann",
+      "year": "2001",
+      "journal-title": "A&A"
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0007|mnr21952-cit-0007",
+      "doi-asserted-by": "crossref",
+      "first-page": "571",
+      "DOI": "10.1086/308947",
+      "volume": "536",
+      "author": "Benítez",
+      "year": "2000",
+      "journal-title": "ApJ"
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0008|mnr21952-cit-0008",
+      "doi-asserted-by": "crossref",
+      "first-page": "1168",
+      "DOI": "10.1111/j.1365-2966.2010.17191.x",
+      "volume": "408",
+      "author": "Benjamin",
+      "year": "2010",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0009|mnr21952-cit-0009",
+      "doi-asserted-by": "crossref",
+      "first-page": "583",
+      "DOI": "10.1086/338085",
+      "volume": "123",
+      "author": "Bernstein",
+      "year": "2002",
+      "journal-title": "AJ"
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0010|mnr21952-cit-0010",
+      "doi-asserted-by": "crossref",
+      "first-page": "353",
+      "DOI": "10.1007/10849171_44",
+      "volume-title": "Mining the Sky",
+      "author": "Bertin",
+      "year": "2001"
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0011|mnr21952-cit-0011",
+      "first-page": "112",
+      "volume-title": "Astronomical Data Analysis Software and Systems XV",
+      "author": "Bertin",
+      "year": "2006"
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0012|mnr21952-cit-0012",
+      "doi-asserted-by": "crossref",
+      "first-page": "393",
+      "DOI": "10.1051/aas:1996164",
+      "volume": "117",
+      "author": "Bertin",
+      "year": "1996",
+      "journal-title": "A&AS"
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0013|mnr21952-cit-0013",
+      "first-page": "228",
+      "volume-title": "Astronomical Data Analysis Software and Systems XI",
+      "author": "Bertin",
+      "year": "2002"
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0014|mnr21952-cit-0014",
+      "first-page": "2044",
+      "volume": "405",
+      "author": "Bridle",
+      "year": "2010",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0015|mnr21952-cit-0015",
+      "doi-asserted-by": "crossref",
+      "first-page": "981",
+      "DOI": "10.1051/0004-6361/200811413",
+      "volume": "500",
+      "author": "Coupon",
+      "year": "2009",
+      "journal-title": "A&A"
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0016|mnr21952-cit-0016",
+      "first-page": "494",
+      "volume": "405",
+      "author": "Cypriano",
+      "year": "2010",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0017|mnr21952-cit-0017",
+      "doi-asserted-by": "crossref",
+      "first-page": "306",
+      "DOI": "10.1088/0067-0049/180/2/306",
+      "volume": "180",
+      "author": "Dunkley",
+      "year": "2009",
+      "journal-title": "ApJS"
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0018|mnr21952-cit-0018",
+      "doi-asserted-by": "crossref",
+      "first-page": "717",
+      "DOI": "10.1051/0004-6361:20010013",
+      "volume": "366",
+      "author": "Erben",
+      "year": "2001",
+      "journal-title": "A&A"
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0019|mnr21952-cit-0019",
+      "doi-asserted-by": "crossref",
+      "first-page": "432",
+      "DOI": "10.1002/asna.200510396",
+      "volume": "326",
+      "author": "Erben",
+      "year": "2005",
+      "journal-title": "Astron. Nachr."
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0020|mnr21952-cit-0020",
+      "doi-asserted-by": "crossref",
+      "first-page": "1197",
+      "DOI": "10.1051/0004-6361:200810426",
+      "volume": "493",
+      "author": "Erben",
+      "year": "2009",
+      "journal-title": "A&A"
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0021|mnr21952-cit-0021",
+      "doi-asserted-by": "crossref",
+      "first-page": "4",
+      "DOI": "10.1088/0067-0049/200/1/4",
+      "volume": "200",
+      "author": "Ferrarese",
+      "year": "2012",
+      "journal-title": "ApJS"
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0022|mnr21952-cit-0022",
+      "doi-asserted-by": "crossref",
+      "first-page": "9",
+      "DOI": "10.1051/0004-6361:20078522",
+      "volume": "479",
+      "author": "Fu",
+      "year": "2008",
+      "journal-title": "A&A"
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0023|mnr21952-cit-0023",
+      "doi-asserted-by": "crossref",
+      "first-page": "A7",
+      "DOI": "10.1051/0004-6361/201014468",
+      "volume": "523",
+      "author": "Guy",
+      "year": "2010",
+      "journal-title": "A&A"
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0024|mnr21952-cit-0024",
+      "author": "Harnois-Déraps",
+      "year": "2012",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0025|mnr21952-cit-0025",
+      "doi-asserted-by": "crossref",
+      "first-page": "160",
+      "DOI": "10.1111/j.1365-2966.2005.09152.x",
+      "volume": "361",
+      "author": "Heymans",
+      "year": "2005",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0026|mnr21952-cit-0026",
+      "doi-asserted-by": "crossref",
+      "first-page": "1323",
+      "DOI": "10.1111/j.1365-2966.2006.10198.x",
+      "volume": "368",
+      "author": "Heymans",
+      "year": "2006a",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0027|mnr21952-cit-0027",
+      "doi-asserted-by": "crossref",
+      "first-page": "750",
+      "DOI": "10.1111/j.1365-2966.2006.10705.x",
+      "volume": "371",
+      "author": "Heymans",
+      "year": "2006b",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0028|mnr21952-cit-0028",
+      "doi-asserted-by": "crossref",
+      "first-page": "1431",
+      "DOI": "10.1111/j.1365-2966.2008.12919.x",
+      "volume": "385",
+      "author": "Heymans",
+      "year": "2008",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0029|mnr21952-cit-0029",
+      "first-page": "381",
+      "volume": "421",
+      "author": "Heymans",
+      "year": "2012",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0030|mnr21952-cit-0030",
+      "doi-asserted-by": "crossref",
+      "first-page": "A31",
+      "DOI": "10.1051/0004-6361/201014885",
+      "volume": "523",
+      "author": "Hildebrandt",
+      "year": "2010",
+      "journal-title": "A&A"
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0031|mnr21952-cit-0031",
+      "doi-asserted-by": "crossref",
+      "first-page": "2355",
+      "DOI": "10.1111/j.1365-2966.2012.20468.x",
+      "volume": "421",
+      "author": "Hildebrandt",
+      "year": "2012",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0032|mnr21952-cit-0032",
+      "doi-asserted-by": "crossref",
+      "first-page": "459",
+      "DOI": "10.1046/j.1365-8711.2003.06683.x",
+      "volume": "343",
+      "author": "Hirata",
+      "year": "2003",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0033|mnr21952-cit-0033",
+      "doi-asserted-by": "crossref",
+      "first-page": "1337",
+      "DOI": "10.1111/j.1365-2966.2004.07327.x",
+      "volume": "347",
+      "author": "Hoekstra",
+      "year": "2004",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0034|mnr21952-cit-0034",
+      "doi-asserted-by": "crossref",
+      "first-page": "116",
+      "DOI": "10.1086/503249",
+      "volume": "647",
+      "author": "Hoekstra",
+      "year": "2006",
+      "journal-title": "ApJ"
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0035|mnr21952-cit-0035",
+      "unstructured": "Huff E. M. Eifler T. Hirata C. M. Mandelbaum R. Schlegel D. Seljak U. 2011"
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0036|mnr21952-cit-0036",
+      "doi-asserted-by": "crossref",
+      "first-page": "1236",
+      "DOI": "10.1088/0004-637X/690/2/1236",
+      "volume": "690",
+      "author": "Ilbert",
+      "year": "2009",
+      "journal-title": "ApJ"
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0037|mnr21952-cit-0037",
+      "doi-asserted-by": "crossref",
+      "first-page": "A26",
+      "DOI": "10.1051/0004-6361/201015621",
+      "volume": "527",
+      "author": "Joachimi",
+      "year": "2011",
+      "journal-title": "A&A"
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0038|mnr21952-cit-0038",
+      "author": "Kacprzak",
+      "year": "2012",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0039|mnr21952-cit-0039",
+      "doi-asserted-by": "crossref",
+      "first-page": "555",
+      "DOI": "10.1086/309041",
+      "volume": "537",
+      "author": "Kaiser",
+      "year": "2000",
+      "journal-title": "ApJ"
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0040|mnr21952-cit-0040",
+      "doi-asserted-by": "crossref",
+      "first-page": "460",
+      "DOI": "10.1086/176071",
+      "volume": "449",
+      "author": "Kaiser",
+      "year": "1995",
+      "journal-title": "ApJ"
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0041|mnr21952-cit-0041",
+      "doi-asserted-by": "crossref",
+      "first-page": "15",
+      "DOI": "10.1051/0004-6361:20065495",
+      "volume": "457",
+      "author": "Kilbinger",
+      "year": "2006",
+      "journal-title": "A&A"
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0042|mnr21952-cit-0042",
+      "doi-asserted-by": "crossref",
+      "first-page": "677",
+      "DOI": "10.1051/0004-6361/200811247",
+      "volume": "497",
+      "author": "Kilbinger",
+      "year": "2009",
+      "journal-title": "A&A"
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0075|mnr21952-cit-0075",
+      "author": "Kilbinger",
+      "year": "2012",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0043|mnr21952-cit-0043",
+      "doi-asserted-by": "crossref",
+      "first-page": "149",
+      "DOI": "10.1111/j.1365-2966.2008.13628.x",
+      "volume": "390",
+      "author": "Kitching",
+      "year": "2008",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0044|mnr21952-cit-0044",
+      "doi-asserted-by": "crossref",
+      "first-page": "3163",
+      "DOI": "10.1111/j.1365-2966.2012.21095.x",
+      "volume": "423",
+      "author": "Kitching",
+      "year": "2012a",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0045|mnr21952-cit-0045",
+      "author": "Kitching",
+      "year": "2012b",
+      "journal-title": "New Astron. Rev."
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0046|mnr21952-cit-0046",
+      "doi-asserted-by": "crossref",
+      "first-page": "827",
+      "DOI": "10.1051/0004-6361:20054794",
+      "volume": "456",
+      "author": "Kuijken",
+      "year": "2006",
+      "journal-title": "A&A"
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0047|mnr21952-cit-0047",
+      "doi-asserted-by": "crossref",
+      "first-page": "845",
+      "DOI": "10.1051/0004-6361:20041960",
+      "volume": "439",
+      "author": "Le Fèvre",
+      "year": "2005",
+      "journal-title": "A&A"
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0048|mnr21952-cit-0048",
+      "doi-asserted-by": "crossref",
+      "first-page": "449",
+      "DOI": "10.1086/420756",
+      "volume": "116",
+      "author": "Magnier",
+      "year": "2004",
+      "journal-title": "PASP"
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0049|mnr21952-cit-0049",
+      "doi-asserted-by": "crossref",
+      "first-page": "1518",
+      "DOI": "10.1111/j.1365-2966.2011.20138.x",
+      "volume": "420",
+      "author": "Mandelbaum",
+      "year": "2012",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0050|mnr21952-cit-0050",
+      "doi-asserted-by": "crossref",
+      "first-page": "13",
+      "DOI": "10.1111/j.1365-2966.2006.11315.x",
+      "volume": "376",
+      "author": "Massey",
+      "year": "2007a",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0051|mnr21952-cit-0051",
+      "doi-asserted-by": "crossref",
+      "first-page": "286",
+      "DOI": "10.1038/nature05497",
+      "volume": "445",
+      "author": "Massey",
+      "year": "2007b",
+      "journal-title": "Nat"
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0052|mnr21952-cit-0052",
+      "doi-asserted-by": "crossref",
+      "first-page": "229",
+      "DOI": "10.1111/j.1365-2966.2007.12072.x",
+      "volume": "380",
+      "author": "Massey",
+      "year": "2007c",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0053|mnr21952-cit-0053",
+      "doi-asserted-by": "crossref",
+      "first-page": "2757",
+      "DOI": "10.1111/j.1365-2966.2012.21381.x",
+      "volume": "424",
+      "author": "Melchior",
+      "year": "2012",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0054|mnr21952-cit-0054",
+      "doi-asserted-by": "crossref",
+      "first-page": "315",
+      "DOI": "10.1111/j.1365-2966.2007.12363.x",
+      "volume": "382",
+      "author": "Miller",
+      "year": "2007",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0055|mnr21952-cit-0055",
+      "author": "Miller",
+      "year": "2012",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0056|mnr21952-cit-0056",
+      "first-page": "455",
+      "volume": "3",
+      "author": "Moffat",
+      "year": "1969",
+      "journal-title": "A&A"
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0057|mnr21952-cit-0057",
+      "author": "Newman",
+      "year": "2012",
+      "journal-title": "ApJS"
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0058|mnr21952-cit-0058",
+      "volume-title": "Numerical Recipes",
+      "author": "Press",
+      "year": "1986"
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0059|mnr21952-cit-0059",
+      "doi-asserted-by": "crossref",
+      "first-page": "1951",
+      "DOI": "10.1111/j.1365-2966.2012.21483.x",
+      "volume": "425",
+      "author": "Refregier",
+      "year": "2012",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0060|mnr21952-cit-0060",
+      "doi-asserted-by": "crossref",
+      "first-page": "256",
+      "DOI": "10.1038/nature08857",
+      "volume": "464",
+      "author": "Reyes",
+      "year": "2010",
+      "journal-title": "Nat"
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0061|mnr21952-cit-0061",
+      "doi-asserted-by": "crossref",
+      "first-page": "203",
+      "DOI": "10.1086/516592",
+      "volume": "172",
+      "author": "Rhodes",
+      "year": "2007",
+      "journal-title": "ApJS"
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0062|mnr21952-cit-0062",
+      "first-page": "350",
+      "volume": "404",
+      "author": "Rowe",
+      "year": "2010",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0063|mnr21952-cit-0063",
+      "doi-asserted-by": "crossref",
+      "first-page": "841",
+      "DOI": "10.1051/0004-6361:20065532",
+      "volume": "462",
+      "author": "Schneider",
+      "year": "2007",
+      "journal-title": "A&A"
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0064|mnr21952-cit-0064",
+      "doi-asserted-by": "crossref",
+      "first-page": "1",
+      "DOI": "10.1051/0004-6361:20021341",
+      "volume": "369",
+      "author": "Schneider",
+      "year": "2002",
+      "journal-title": "A&A"
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0065|mnr21952-cit-0065",
+      "doi-asserted-by": "crossref",
+      "first-page": "A116",
+      "DOI": "10.1051/0004-6361/201014235",
+      "volume": "520",
+      "author": "Schneider",
+      "year": "2010",
+      "journal-title": "A&A"
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0066|mnr21952-cit-0066",
+      "doi-asserted-by": "crossref",
+      "first-page": "A63",
+      "DOI": "10.1051/0004-6361/200913577",
+      "volume": "516",
+      "author": "Schrabback",
+      "year": "2010",
+      "journal-title": "A&A"
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0067|mnr21952-cit-0067",
+      "doi-asserted-by": "crossref",
+      "first-page": "1322",
+      "DOI": "10.1214/aos/1176350154",
+      "volume": "14",
+      "author": "Shao",
+      "year": "1986",
+      "journal-title": "Ann. Stat."
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0076|mnr21952-cit-0076",
+      "author": "Simpson",
+      "year": "2012",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0068|mnr21952-cit-0068",
+      "doi-asserted-by": "crossref",
+      "first-page": "A14",
+      "DOI": "10.1051/0004-6361/201117308",
+      "volume": "534",
+      "author": "van Uitert",
+      "year": "2011",
+      "journal-title": "A&A"
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0069|mnr21952-cit-0069",
+      "first-page": "30",
+      "volume": "358",
+      "author": "Van Waerbeke",
+      "year": "2000",
+      "journal-title": "A&A"
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0070|mnr21952-cit-0070",
+      "doi-asserted-by": "crossref",
+      "first-page": "75",
+      "DOI": "10.1051/0004-6361:20041513",
+      "volume": "429",
+      "author": "Van Waerbeke",
+      "year": "2005",
+      "journal-title": "A&A"
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0071|mnr21952-cit-0071",
+      "doi-asserted-by": "crossref",
+      "first-page": "2665",
+      "DOI": "10.1111/j.1365-2966.2010.18085.x",
+      "volume": "412",
+      "author": "Velander",
+      "year": "2011",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0077|mnr21952-cit-0077",
+      "author": "Velander",
+      "year": "2012",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0072|mnr21952-cit-0072",
+      "doi-asserted-by": "crossref",
+      "first-page": "1385",
+      "DOI": "10.1111/j.1365-2966.2011.20395.x",
+      "volume": "421",
+      "author": "Voigt",
+      "year": "2012",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0073|mnr21952-cit-0073",
+      "author": "Weinberg",
+      "year": "2012",
+      "journal-title": "Phys. Rep."
+    },
+    {
+      "key": "10.1111/j.1365-2966.2012.21952.x-BIB0074|mnr21952-cit-0074",
+      "doi-asserted-by": "crossref",
+      "first-page": "143",
+      "DOI": "10.1038/35012001",
+      "volume": "405",
+      "author": "Wittman",
+      "year": "2000",
+      "journal-title": "Nat"
+    }
+  ],
+  "container-title": "Monthly Notices of the Royal Astronomical Society",
+  "original-title": [],
+  "language": "en",
+  "link": [
+    {
+      "URL": "http://academic.oup.com/mnras/article-pdf/427/1/146/18231420/427-1-146.pdf",
+      "content-type": "unspecified",
+      "content-version": "vor",
+      "intended-application": "similarity-checking"
+    }
+  ],
+  "deposited": {
+    "date-parts": [
+      [
+        2017,
+        8,
+        23
+      ]
+    ],
+    "date-time": "2017-08-23T18:31:37Z",
+    "timestamp": 1503513097000
+  },
+  "score": 1,
+  "resource": {
+    "primary": {
+      "URL": "https://academic.oup.com/mnras/article-lookup/doi/10.1111/j.1365-2966.2012.21952.x"
+    }
+  },
+  "subtitle": [
+    "CFHTLenS"
+  ],
+  "short-title": [],
+  "issued": {
+    "date-parts": [
+      [
+        2012,
+        10,
+        29
+      ]
+    ]
+  },
+  "references-count": 77,
+  "journal-issue": {
+    "issue": "1",
+    "published-print": {
+      "date-parts": [
+        [
+          2012,
+          11,
+          21
+        ]
+      ]
+    }
+  },
+  "URL": "http://dx.doi.org/10.1111/j.1365-2966.2012.21952.x",
+  "relation": {},
+  "ISSN": [
+    "0035-8711",
+    "1365-2966"
+  ],
+  "subject": [],
+  "container-title-short": "Monthly Notices of the Royal Astronomical Society",
+  "published": {
+    "date-parts": [
+      [
+        2012,
+        10,
+        29
+      ]
+    ]
+  }
+}

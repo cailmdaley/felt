@@ -1,0 +1,856 @@
+{
+  "indexed": {
+    "date-parts": [
+      [
+        2026,
+        2,
+        19
+      ]
+    ],
+    "date-time": "2026-02-19T02:49:37Z",
+    "timestamp": 1771469377483,
+    "version": "3.50.1"
+  },
+  "reference-count": 76,
+  "publisher": "EDP Sciences",
+  "issue": "1",
+  "content-domain": {
+    "domain": [],
+    "crossmark-restriction": false
+  },
+  "published-print": {
+    "date-parts": [
+      [
+        2009,
+        5
+      ]
+    ]
+  },
+  "DOI": "10.1051/0004-6361/200811054",
+  "type": "journal-article",
+  "created": {
+    "date-parts": [
+      [
+        2009,
+        3,
+        25
+      ]
+    ],
+    "date-time": "2009-03-25T17:05:11Z",
+    "timestamp": 1238000711000
+  },
+  "page": "31-43",
+  "source": "Crossref",
+  "is-referenced-by-count": 277,
+  "title": "Ray-tracing through the Millennium Simulation: Born corrections and lens-lens coupling in cosmic shear and galaxy-galaxy lensing",
+  "prefix": "10.1051",
+  "volume": "499",
+  "author": [
+    {
+      "given": "S.",
+      "family": "Hilbert",
+      "sequence": "first",
+      "affiliation": []
+    },
+    {
+      "given": "J.",
+      "family": "Hartlap",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "given": "S. D. M.",
+      "family": "White",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "given": "P.",
+      "family": "Schneider",
+      "sequence": "additional",
+      "affiliation": []
+    }
+  ],
+  "member": "250",
+  "published-online": {
+    "date-parts": [
+      [
+        2009,
+        3,
+        25
+      ]
+    ]
+  },
+  "reference": [
+    {
+      "key": "R1",
+      "doi-asserted-by": "crossref",
+      "first-page": "13",
+      "DOI": "10.1088/1475-7516/2008/04/013",
+      "volume": "4",
+      "author": "Amendola",
+      "year": "2008",
+      "journal-title": "J. Cosmol. Astro-Part. Phys."
+    },
+    {
+      "key": "R2",
+      "unstructured": "Ashcroft, N. W., & Mermin, N. D. 1976, Solid State Physics (Philadelphia: Saunders College)"
+    },
+    {
+      "key": "R3",
+      "doi-asserted-by": "crossref",
+      "first-page": "113",
+      "DOI": "10.1111/j.1365-2966.2006.11296.x",
+      "volume": "376",
+      "author": "Aubert",
+      "year": "2007",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "R4",
+      "doi-asserted-by": "crossref",
+      "first-page": "723",
+      "DOI": "10.1111/j.1365-2966.2005.09420.x",
+      "volume": "363",
+      "author": "Bacon",
+      "year": "2005",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "R5",
+      "first-page": "1",
+      "volume": "287",
+      "author": "Bartelmann",
+      "year": "1994",
+      "journal-title": "A&A"
+    },
+    {
+      "key": "R6",
+      "doi-asserted-by": "crossref",
+      "first-page": "291",
+      "DOI": "10.1016/S0370-1573(00)00082-X",
+      "volume": "340",
+      "author": "Bartelmann",
+      "year": "2001",
+      "journal-title": "Phys. Rep."
+    },
+    {
+      "key": "R7",
+      "doi-asserted-by": "crossref",
+      "first-page": "702",
+      "DOI": "10.1111/j.1365-2966.2007.12202.x",
+      "volume": "381",
+      "author": "Benjamin",
+      "year": "2007",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "R8",
+      "doi-asserted-by": "crossref",
+      "first-page": "568",
+      "DOI": "10.1086/164709",
+      "volume": "310",
+      "author": "Blandford",
+      "year": "1986",
+      "journal-title": "ApJ"
+    },
+    {
+      "key": "R9",
+      "doi-asserted-by": "crossref",
+      "first-page": "645",
+      "DOI": "10.1111/j.1365-2966.2006.10519.x",
+      "volume": "370",
+      "author": "Bower",
+      "year": "2006",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "R10",
+      "doi-asserted-by": "crossref",
+      "first-page": "1618",
+      "DOI": "10.1111/j.1365-2966.2008.13544.x",
+      "volume": "388",
+      "author": "Carbone",
+      "year": "2008",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "R11",
+      "unstructured": "Colless M., Dalton G., Maddox S., et al. 2003, VizieR Online Data Catalog, 7226,"
+    },
+    {
+      "key": "R12",
+      "doi-asserted-by": "crossref",
+      "first-page": "297",
+      "DOI": "10.1090/S0025-5718-1965-0178586-1",
+      "volume": "19",
+      "author": "Cooley",
+      "year": "1965",
+      "journal-title": "Math. Comput."
+    },
+    {
+      "key": "R13",
+      "doi-asserted-by": "crossref",
+      "first-page": "19",
+      "DOI": "10.1086/340892",
+      "volume": "574",
+      "author": "Cooray",
+      "year": "2002",
+      "journal-title": "ApJ"
+    },
+    {
+      "key": "R14",
+      "doi-asserted-by": "crossref",
+      "first-page": "1",
+      "DOI": "10.1016/S0370-1573(02)00276-4",
+      "volume": "372",
+      "author": "Cooray",
+      "year": "2002",
+      "journal-title": "Phys. Rep."
+    },
+    {
+      "key": "R15",
+      "doi-asserted-by": "crossref",
+      "first-page": "180",
+      "DOI": "10.1046/j.1365-8711.1999.02714.x",
+      "volume": "308",
+      "author": "Couchman",
+      "year": "1999",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "R16",
+      "doi-asserted-by": "crossref",
+      "first-page": "20",
+      "DOI": "10.1086/338838",
+      "volume": "568",
+      "author": "Crittenden",
+      "year": "2002",
+      "journal-title": "ApJ"
+    },
+    {
+      "key": "R17",
+      "doi-asserted-by": "crossref",
+      "first-page": "11",
+      "DOI": "10.1111/j.1365-2966.2005.09675.x",
+      "volume": "365",
+      "author": "Croton",
+      "year": "2006",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "R18",
+      "doi-asserted-by": "crossref",
+      "first-page": "1",
+      "DOI": "10.1086/589638",
+      "volume": "682",
+      "author": "Das",
+      "year": "2008",
+      "journal-title": "ApJ"
+    },
+    {
+      "key": "R19",
+      "doi-asserted-by": "crossref",
+      "first-page": "2",
+      "DOI": "10.1111/j.1365-2966.2006.11287.x",
+      "volume": "375",
+      "author": "De Lucia",
+      "year": "2007",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "R20",
+      "doi-asserted-by": "crossref",
+      "first-page": "5",
+      "DOI": "10.1086/306640",
+      "volume": "511",
+      "author": "Eisenstein",
+      "year": "1999",
+      "journal-title": "ApJ"
+    },
+    {
+      "key": "R21",
+      "doi-asserted-by": "crossref",
+      "first-page": "1233",
+      "DOI": "10.1088/0004-637X/695/2/1233",
+      "volume": "695",
+      "author": "Faure",
+      "year": "2009",
+      "journal-title": "ApJ"
+    },
+    {
+      "key": "R22",
+      "doi-asserted-by": "crossref",
+      "first-page": "435",
+      "DOI": "10.1111/j.1365-2966.2008.13910.x",
+      "volume": "391",
+      "author": "Fosalba",
+      "year": "2008",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "R23",
+      "doi-asserted-by": "crossref",
+      "first-page": "216",
+      "DOI": "10.1109/JPROC.2004.840301",
+      "volume": "93",
+      "author": "Frigo",
+      "year": "2005",
+      "journal-title": "Proc. IEEE"
+    },
+    {
+      "key": "R24",
+      "doi-asserted-by": "crossref",
+      "first-page": "9",
+      "DOI": "10.1051/0004-6361:20078522",
+      "volume": "479",
+      "author": "Fu",
+      "year": "2008",
+      "journal-title": "A&A"
+    },
+    {
+      "key": "R25",
+      "doi-asserted-by": "crossref",
+      "first-page": "176",
+      "DOI": "10.1086/519237",
+      "volume": "667",
+      "author": "Gavazzi",
+      "year": "2007",
+      "journal-title": "ApJ"
+    },
+    {
+      "key": "R26",
+      "unstructured": "Gottschalk, S., Lin, M. C., & Manocha, D. 1996, in SIGGRAPH '96: proceedings of the 23rd annual conference on Computer graphics and interactive techniques (New York, NY, USA: ACM Press), 171"
+    },
+    {
+      "key": "R27",
+      "doi-asserted-by": "crossref",
+      "first-page": "169",
+      "DOI": "10.1046/j.1365-8711.2001.04685.x",
+      "volume": "327",
+      "author": "Hamana",
+      "year": "2001",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "R28",
+      "unstructured": "Hartlap, J. 2005, Studying Galaxy-Galaxy-Lensing Using Ray-Tracing Simulations, Diplomarbeit"
+    },
+    {
+      "key": "R29",
+      "doi-asserted-by": "crossref",
+      "first-page": "750",
+      "DOI": "10.1111/j.1365-2966.2006.10705.x",
+      "volume": "371",
+      "author": "Heymans",
+      "year": "2006",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "R30",
+      "doi-asserted-by": "crossref",
+      "first-page": "1494",
+      "DOI": "10.1111/j.1365-2966.2007.12615.x",
+      "volume": "382",
+      "author": "Hilbert",
+      "year": "2007",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "R31",
+      "doi-asserted-by": "crossref",
+      "first-page": "121",
+      "DOI": "10.1111/j.1365-2966.2007.12391.x",
+      "volume": "382",
+      "author": "Hilbert",
+      "year": "2007",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "R32",
+      "doi-asserted-by": "crossref",
+      "first-page": "1845",
+      "DOI": "10.1111/j.1365-2966.2008.13190.x",
+      "volume": "386",
+      "author": "Hilbert",
+      "year": "2008",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "R33",
+      "doi-asserted-by": "crossref",
+      "first-page": "083002",
+      "DOI": "10.1103/PhysRevD.68.083002",
+      "volume": "68",
+      "author": "Hirata",
+      "year": "2003",
+      "journal-title": "Phys. Rev. D"
+    },
+    {
+      "key": "R34",
+      "unstructured": "Hockney, R. W., & Eastwood, J. W. 1981, Computer Simulation Using Particles (New York: McGraw-Hill)"
+    },
+    {
+      "key": "R35",
+      "doi-asserted-by": "crossref",
+      "first-page": "116",
+      "DOI": "10.1086/503249",
+      "volume": "647",
+      "author": "Hoekstra",
+      "year": "2006",
+      "journal-title": "ApJ"
+    },
+    {
+      "key": "R36",
+      "doi-asserted-by": "crossref",
+      "first-page": "560",
+      "DOI": "10.1086/304372",
+      "volume": "484",
+      "author": "Jain",
+      "year": "1997",
+      "journal-title": "ApJ"
+    },
+    {
+      "key": "R37",
+      "doi-asserted-by": "crossref",
+      "first-page": "547",
+      "DOI": "10.1086/308384",
+      "volume": "530",
+      "author": "Jain",
+      "year": "2000",
+      "journal-title": "ApJ"
+    },
+    {
+      "key": "R38",
+      "doi-asserted-by": "crossref",
+      "first-page": "715",
+      "DOI": "10.1111/j.1365-2966.2006.10156.x",
+      "volume": "368",
+      "author": "Mandelbaum",
+      "year": "2006",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "R39",
+      "doi-asserted-by": "crossref",
+      "first-page": "13",
+      "DOI": "10.1111/j.1365-2966.2006.11315.x",
+      "volume": "376",
+      "author": "Massey",
+      "year": "2007",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "R40",
+      "doi-asserted-by": "crossref",
+      "first-page": "286",
+      "DOI": "10.1038/nature05497",
+      "volume": "445",
+      "author": "Massey",
+      "year": "2007",
+      "journal-title": "Nature"
+    },
+    {
+      "key": "R41",
+      "doi-asserted-by": "crossref",
+      "first-page": "239",
+      "DOI": "10.1086/516599",
+      "volume": "172",
+      "author": "Massey",
+      "year": "2007",
+      "journal-title": "ApJS"
+    },
+    {
+      "key": "R42",
+      "doi-asserted-by": "crossref",
+      "first-page": "25",
+      "DOI": "10.1051/0004-6361:20065722",
+      "volume": "461",
+      "author": "Meneghetti",
+      "year": "2007",
+      "journal-title": "A&A"
+    },
+    {
+      "key": "R43",
+      "doi-asserted-by": "crossref",
+      "first-page": "67",
+      "DOI": "10.1016/j.physrep.2008.02.003",
+      "volume": "462",
+      "author": "Munshi",
+      "year": "2008",
+      "journal-title": "Phys. Rep."
+    },
+    {
+      "key": "R44",
+      "doi-asserted-by": "crossref",
+      "first-page": "1450",
+      "DOI": "10.1111/j.1365-2966.2007.12381.x",
+      "volume": "381",
+      "author": "Neto",
+      "year": "2007",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "R45",
+      "doi-asserted-by": "crossref",
+      "first-page": "731",
+      "DOI": "10.1051/0004-6361:20077217",
+      "volume": "471",
+      "author": "Pace",
+      "year": "2007",
+      "journal-title": "A&A"
+    },
+    {
+      "key": "R46",
+      "doi-asserted-by": "crossref",
+      "first-page": "L19",
+      "DOI": "10.1093/mnras/280.3.L19",
+      "volume": "280",
+      "author": "Peacock",
+      "year": "1996",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "R47",
+      "doi-asserted-by": "crossref",
+      "first-page": "945",
+      "DOI": "10.1111/j.1365-2966.2008.13832.x",
+      "volume": "390",
+      "author": "Peirani",
+      "year": "2008",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "R48",
+      "doi-asserted-by": "crossref",
+      "unstructured": "Réfrégier, A., Boulade, O., Mellier, Y., et al. 2006, in Space Telescopes and Instrumentation I: Optical, Infrared, and Millimeter, ed. J. C. Mather, H. A. MacEwen, & M. W. M. de Graauw, Proc. SPIE, 6265, 62651Y",
+      "DOI": "10.1117/12.672261"
+    },
+    {
+      "key": "R49",
+      "doi-asserted-by": "crossref",
+      "first-page": "22",
+      "DOI": "10.1086/589955",
+      "volume": "687",
+      "author": "Rozo",
+      "year": "2008",
+      "journal-title": "ApJ"
+    },
+    {
+      "key": "R50",
+      "doi-asserted-by": "crossref",
+      "first-page": "405",
+      "DOI": "10.1051/0004-6361:20065154",
+      "volume": "463",
+      "author": "Schimd",
+      "year": "2007",
+      "journal-title": "A&A"
+    },
+    {
+      "key": "R51",
+      "doi-asserted-by": "crossref",
+      "unstructured": "Schneider, P. 2006, in Saas-Fee Advanced Course 33: Gravitational Lensing: Strong, Weak and Micro, ed. G. Meylan, P. Jetzer, P. North, et al. (Berlin: Springer), 269",
+      "DOI": "10.1007/978-3-540-30310-7_3"
+    },
+    {
+      "key": "R52",
+      "doi-asserted-by": "crossref",
+      "unstructured": "Schneider, P., Ehlers, J., & Falco, E. E. 1992, Gravitational Lenses (Berlin, Heidelberg, New York: Springer-Verlag)",
+      "DOI": "10.1007/978-3-662-03758-4"
+    },
+    {
+      "key": "R53",
+      "doi-asserted-by": "crossref",
+      "first-page": "873",
+      "DOI": "10.1046/j.1365-8711.1998.01422.x",
+      "volume": "296",
+      "author": "Schneider",
+      "year": "1998",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "R54",
+      "doi-asserted-by": "crossref",
+      "first-page": "729",
+      "DOI": "10.1051/0004-6361:20020626",
+      "volume": "389",
+      "author": "Schneider",
+      "year": "2002",
+      "journal-title": "A&A"
+    },
+    {
+      "key": "R55",
+      "first-page": "383",
+      "volume": "305",
+      "author": "Seitz",
+      "year": "1996",
+      "journal-title": "A&A"
+    },
+    {
+      "key": "R56",
+      "doi-asserted-by": "crossref",
+      "first-page": "2345",
+      "DOI": "10.1088/0264-9381/11/9/016",
+      "volume": "11",
+      "author": "Seitz",
+      "year": "1994",
+      "journal-title": "Classical and Quantum Gravity"
+    },
+    {
+      "key": "R57",
+      "doi-asserted-by": "crossref",
+      "first-page": "203",
+      "DOI": "10.1046/j.1365-8711.2000.03715.x",
+      "volume": "318",
+      "author": "Seljak",
+      "year": "2000",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "R58",
+      "doi-asserted-by": "crossref",
+      "first-page": "51",
+      "DOI": "10.1051/0004-6361:20054479",
+      "volume": "452",
+      "author": "Semboloni",
+      "year": "2006",
+      "journal-title": "A&A"
+    },
+    {
+      "key": "R59",
+      "doi-asserted-by": "crossref",
+      "first-page": "7",
+      "DOI": "10.1088/1475-7516/2006/03/007",
+      "volume": "3",
+      "author": "Shapiro",
+      "year": "2006",
+      "journal-title": "J. Cosmol. Astro-Part. Phys."
+    },
+    {
+      "key": "R60",
+      "doi-asserted-by": "crossref",
+      "first-page": "861",
+      "DOI": "10.1051/0004-6361:20065904",
+      "volume": "461",
+      "author": "Simon",
+      "year": "2007",
+      "journal-title": "A&A"
+    },
+    {
+      "key": "R61",
+      "doi-asserted-by": "crossref",
+      "first-page": "1311",
+      "DOI": "10.1046/j.1365-8711.2003.06503.x",
+      "volume": "341",
+      "author": "Smith",
+      "year": "2003",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "R62",
+      "doi-asserted-by": "crossref",
+      "first-page": "175",
+      "DOI": "10.1086/377226",
+      "volume": "148",
+      "author": "Spergel",
+      "year": "2003",
+      "journal-title": "ApJS"
+    },
+    {
+      "key": "R63",
+      "doi-asserted-by": "crossref",
+      "first-page": "1105",
+      "DOI": "10.1111/j.1365-2966.2005.09655.x",
+      "volume": "364",
+      "author": "Springel",
+      "year": "2005",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "R64",
+      "doi-asserted-by": "crossref",
+      "first-page": "629",
+      "DOI": "10.1038/nature03597",
+      "volume": "435",
+      "author": "Springel",
+      "year": "2005",
+      "journal-title": "Nature"
+    },
+    {
+      "key": "R65",
+      "doi-asserted-by": "crossref",
+      "first-page": "1377",
+      "DOI": "10.1111/j.1365-2966.2006.11257.x",
+      "volume": "374",
+      "author": "Taylor",
+      "year": "2007",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "R66",
+      "unstructured": "Teyssier, R., Pires, S., Prunet, S., et al. 2008, ArXiv e-prints"
+    },
+    {
+      "key": "R67",
+      "doi-asserted-by": "crossref",
+      "first-page": "41",
+      "DOI": "10.1086/432084",
+      "volume": "631",
+      "author": "Tinker",
+      "year": "2005",
+      "journal-title": "ApJ"
+    },
+    {
+      "key": "R68",
+      "doi-asserted-by": "crossref",
+      "first-page": "699",
+      "DOI": "10.1086/375867",
+      "volume": "592",
+      "author": "Vale",
+      "year": "2003",
+      "journal-title": "ApJ"
+    },
+    {
+      "key": "R69",
+      "doi-asserted-by": "crossref",
+      "first-page": "918",
+      "DOI": "10.1046/j.1365-8711.2001.04241.x",
+      "volume": "322",
+      "author": "Van Waerbeke",
+      "year": "2001",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "R70",
+      "doi-asserted-by": "crossref",
+      "first-page": "29",
+      "DOI": "10.1086/305174",
+      "volume": "494",
+      "author": "Wambsganss",
+      "year": "1998",
+      "journal-title": "ApJ"
+    },
+    {
+      "key": "R71",
+      "doi-asserted-by": "crossref",
+      "first-page": "L93",
+      "DOI": "10.1086/421459",
+      "volume": "606",
+      "author": "Wambsganss",
+      "year": "2004",
+      "journal-title": "ApJ"
+    },
+    {
+      "key": "R72",
+      "doi-asserted-by": "crossref",
+      "first-page": "753",
+      "DOI": "10.1086/527529",
+      "volume": "676",
+      "author": "Wambsganss",
+      "year": "2008",
+      "journal-title": "ApJ"
+    },
+    {
+      "key": "R73",
+      "doi-asserted-by": "crossref",
+      "first-page": "349",
+      "DOI": "10.1016/j.astropartphys.2005.01.008",
+      "volume": "23",
+      "author": "White",
+      "year": "2005",
+      "journal-title": "Astropart. Phys."
+    },
+    {
+      "key": "R74",
+      "doi-asserted-by": "crossref",
+      "first-page": "1",
+      "DOI": "10.1086/309009",
+      "volume": "537",
+      "author": "White",
+      "year": "2000",
+      "journal-title": "ApJ"
+    },
+    {
+      "key": "R75",
+      "doi-asserted-by": "crossref",
+      "first-page": "19",
+      "DOI": "10.1016/j.astropartphys.2004.05.002",
+      "volume": "22",
+      "author": "White",
+      "year": "2004",
+      "journal-title": "Astropart. Phys."
+    },
+    {
+      "key": "R76",
+      "doi-asserted-by": "crossref",
+      "first-page": "123517",
+      "DOI": "10.1103/PhysRevD.78.123517",
+      "volume": "78",
+      "author": "Ziour",
+      "year": "2008",
+      "journal-title": "Phys. Rev. D"
+    }
+  ],
+  "container-title": "Astronomy &amp; Astrophysics",
+  "original-title": [],
+  "link": [
+    {
+      "URL": "http://www.aanda.org/10.1051/0004-6361/200811054/pdf",
+      "content-type": "unspecified",
+      "content-version": "vor",
+      "intended-application": "similarity-checking"
+    }
+  ],
+  "deposited": {
+    "date-parts": [
+      [
+        2025,
+        2,
+        8
+      ]
+    ],
+    "date-time": "2025-02-08T17:36:39Z",
+    "timestamp": 1739036199000
+  },
+  "score": 1,
+  "resource": {
+    "primary": {
+      "URL": "http://www.aanda.org/10.1051/0004-6361/200811054"
+    }
+  },
+  "subtitle": [],
+  "short-title": [],
+  "issued": {
+    "date-parts": [
+      [
+        2009,
+        3,
+        25
+      ]
+    ]
+  },
+  "references-count": 76,
+  "journal-issue": {
+    "issue": "1"
+  },
+  "alternative-id": [
+    "aa11054-08"
+  ],
+  "URL": "http://dx.doi.org/10.1051/0004-6361/200811054",
+  "relation": {},
+  "ISSN": [
+    "0004-6361",
+    "1432-0746"
+  ],
+  "subject": [],
+  "container-title-short": "A&amp;A",
+  "published": {
+    "date-parts": [
+      [
+        2009,
+        3,
+        25
+      ]
+    ]
+  }
+}

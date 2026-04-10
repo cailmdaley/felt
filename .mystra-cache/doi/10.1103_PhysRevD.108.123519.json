@@ -1,0 +1,2548 @@
+{
+  "indexed": {
+    "date-parts": [
+      [
+        2026,
+        4,
+        2
+      ]
+    ],
+    "date-time": "2026-04-02T09:20:07Z",
+    "timestamp": 1775121607270,
+    "version": "3.50.1"
+  },
+  "reference-count": 168,
+  "publisher": "American Physical Society (APS)",
+  "issue": "12",
+  "license": [
+    {
+      "start": {
+        "date-parts": [
+          [
+            2023,
+            12,
+            11
+          ]
+        ],
+        "date-time": "2023-12-11T00:00:00Z",
+        "timestamp": 1702252800000
+      },
+      "content-version": "vor",
+      "delay-in-days": 0,
+      "URL": "https://link.aps.org/licenses/aps-default-license"
+    }
+  ],
+  "funder": [
+    {
+      "DOI": "10.13039/100000001",
+      "name": "National Science Foundation",
+      "doi-asserted-by": "publisher",
+      "award": [
+        "DGE-2039656"
+      ],
+      "award-info": [
+        {
+          "award-number": [
+            "DGE-2039656"
+          ]
+        }
+      ],
+      "id": [
+        {
+          "id": "10.13039/100000001",
+          "id-type": "DOI",
+          "asserted-by": "publisher"
+        }
+      ]
+    },
+    {
+      "DOI": "10.13039/100000001",
+      "name": "National Science Foundation",
+      "doi-asserted-by": "publisher",
+      "award": [
+        "AST-1814971"
+      ],
+      "award-info": [
+        {
+          "award-number": [
+            "AST-1814971"
+          ]
+        }
+      ],
+      "id": [
+        {
+          "id": "10.13039/100000001",
+          "id-type": "DOI",
+          "asserted-by": "publisher"
+        }
+      ]
+    },
+    {
+      "DOI": "10.13039/100000001",
+      "name": "National Science Foundation",
+      "doi-asserted-by": "publisher",
+      "award": [
+        "AST-2108126"
+      ],
+      "award-info": [
+        {
+          "award-number": [
+            "AST-2108126"
+          ]
+        }
+      ],
+      "id": [
+        {
+          "id": "10.13039/100000001",
+          "id-type": "DOI",
+          "asserted-by": "publisher"
+        }
+      ]
+    },
+    {
+      "DOI": "10.13039/100000001",
+      "name": "National Science Foundation",
+      "doi-asserted-by": "publisher",
+      "award": [
+        "1258333"
+      ],
+      "award-info": [
+        {
+          "award-number": [
+            "1258333"
+          ]
+        }
+      ],
+      "id": [
+        {
+          "id": "10.13039/100000001",
+          "id-type": "DOI",
+          "asserted-by": "publisher"
+        }
+      ]
+    },
+    {
+      "DOI": "10.13039/100000001",
+      "name": "National Science Foundation",
+      "doi-asserted-by": "publisher",
+      "award": [
+        "AST-1238877"
+      ],
+      "award-info": [
+        {
+          "award-number": [
+            "AST-1238877"
+          ]
+        }
+      ],
+      "id": [
+        {
+          "id": "10.13039/100000001",
+          "id-type": "DOI",
+          "asserted-by": "publisher"
+        }
+      ]
+    },
+    {
+      "DOI": "10.13039/100000015",
+      "name": "U.S. Department of Energy",
+      "doi-asserted-by": "publisher",
+      "award": [
+        "DE-SC0010118"
+      ],
+      "award-info": [
+        {
+          "award-number": [
+            "DE-SC0010118"
+          ]
+        }
+      ],
+      "id": [
+        {
+          "id": "10.13039/100000015",
+          "id-type": "DOI",
+          "asserted-by": "publisher"
+        }
+      ]
+    },
+    {
+      "DOI": "10.13039/100000015",
+      "name": "U.S. Department of Energy",
+      "doi-asserted-by": "publisher",
+      "award": [
+        "DE-AC02-76SF00515"
+      ],
+      "award-info": [
+        {
+          "award-number": [
+            "DE-AC02-76SF00515"
+          ]
+        }
+      ],
+      "id": [
+        {
+          "id": "10.13039/100000015",
+          "id-type": "DOI",
+          "asserted-by": "publisher"
+        }
+      ]
+    },
+    {
+      "DOI": "10.13039/100000893",
+      "name": "Simons Foundation",
+      "doi-asserted-by": "publisher",
+      "award": [
+        "620789"
+      ],
+      "award-info": [
+        {
+          "award-number": [
+            "620789"
+          ]
+        }
+      ],
+      "id": [
+        {
+          "id": "10.13039/100000893",
+          "id-type": "DOI",
+          "asserted-by": "publisher"
+        }
+      ]
+    },
+    {
+      "DOI": "10.13039/501100001700",
+      "name": "Ministry of Education, Culture, Sports, Science and Technology",
+      "doi-asserted-by": "publisher",
+      "id": [
+        {
+          "id": "10.13039/501100001700",
+          "id-type": "DOI",
+          "asserted-by": "publisher"
+        }
+      ]
+    },
+    {
+      "DOI": "10.13039/501100001691",
+      "name": "Japan Society for the Promotion of Science",
+      "doi-asserted-by": "publisher",
+      "award": [
+        "JP18H04350"
+      ],
+      "award-info": [
+        {
+          "award-number": [
+            "JP18H04350"
+          ]
+        }
+      ],
+      "id": [
+        {
+          "id": "10.13039/501100001691",
+          "id-type": "DOI",
+          "asserted-by": "publisher"
+        }
+      ]
+    },
+    {
+      "DOI": "10.13039/501100001691",
+      "name": "Japan Society for the Promotion of Science",
+      "doi-asserted-by": "publisher",
+      "award": [
+        "JP18H04358"
+      ],
+      "award-info": [
+        {
+          "award-number": [
+            "JP18H04358"
+          ]
+        }
+      ],
+      "id": [
+        {
+          "id": "10.13039/501100001691",
+          "id-type": "DOI",
+          "asserted-by": "publisher"
+        }
+      ]
+    },
+    {
+      "DOI": "10.13039/501100001691",
+      "name": "Japan Society for the Promotion of Science",
+      "doi-asserted-by": "publisher",
+      "award": [
+        "JP19H00677"
+      ],
+      "award-info": [
+        {
+          "award-number": [
+            "JP19H00677"
+          ]
+        }
+      ],
+      "id": [
+        {
+          "id": "10.13039/501100001691",
+          "id-type": "DOI",
+          "asserted-by": "publisher"
+        }
+      ]
+    },
+    {
+      "DOI": "10.13039/501100001691",
+      "name": "Japan Society for the Promotion of Science",
+      "doi-asserted-by": "publisher",
+      "award": [
+        "JP19K14767"
+      ],
+      "award-info": [
+        {
+          "award-number": [
+            "JP19K14767"
+          ]
+        }
+      ],
+      "id": [
+        {
+          "id": "10.13039/501100001691",
+          "id-type": "DOI",
+          "asserted-by": "publisher"
+        }
+      ]
+    },
+    {
+      "DOI": "10.13039/501100001691",
+      "name": "Japan Society for the Promotion of Science",
+      "doi-asserted-by": "publisher",
+      "award": [
+        "JP20H00181"
+      ],
+      "award-info": [
+        {
+          "award-number": [
+            "JP20H00181"
+          ]
+        }
+      ],
+      "id": [
+        {
+          "id": "10.13039/501100001691",
+          "id-type": "DOI",
+          "asserted-by": "publisher"
+        }
+      ]
+    },
+    {
+      "DOI": "10.13039/501100001691",
+      "name": "Japan Society for the Promotion of Science",
+      "doi-asserted-by": "publisher",
+      "award": [
+        "JP20J01600"
+      ],
+      "award-info": [
+        {
+          "award-number": [
+            "JP20J01600"
+          ]
+        }
+      ],
+      "id": [
+        {
+          "id": "10.13039/501100001691",
+          "id-type": "DOI",
+          "asserted-by": "publisher"
+        }
+      ]
+    },
+    {
+      "DOI": "10.13039/501100001691",
+      "name": "Japan Society for the Promotion of Science",
+      "doi-asserted-by": "publisher",
+      "award": [
+        "JP20H01932"
+      ],
+      "award-info": [
+        {
+          "award-number": [
+            "JP20H01932"
+          ]
+        }
+      ],
+      "id": [
+        {
+          "id": "10.13039/501100001691",
+          "id-type": "DOI",
+          "asserted-by": "publisher"
+        }
+      ]
+    },
+    {
+      "DOI": "10.13039/501100001691",
+      "name": "Japan Society for the Promotion of Science",
+      "doi-asserted-by": "publisher",
+      "award": [
+        "JP20H04723"
+      ],
+      "award-info": [
+        {
+          "award-number": [
+            "JP20H04723"
+          ]
+        }
+      ],
+      "id": [
+        {
+          "id": "10.13039/501100001691",
+          "id-type": "DOI",
+          "asserted-by": "publisher"
+        }
+      ]
+    },
+    {
+      "DOI": "10.13039/501100001691",
+      "name": "Japan Society for the Promotion of Science",
+      "doi-asserted-by": "publisher",
+      "award": [
+        "JP20H05850"
+      ],
+      "award-info": [
+        {
+          "award-number": [
+            "JP20H05850"
+          ]
+        }
+      ],
+      "id": [
+        {
+          "id": "10.13039/501100001691",
+          "id-type": "DOI",
+          "asserted-by": "publisher"
+        }
+      ]
+    },
+    {
+      "DOI": "10.13039/501100001691",
+      "name": "Japan Society for the Promotion of Science",
+      "doi-asserted-by": "publisher",
+      "award": [
+        "JP20H05855"
+      ],
+      "award-info": [
+        {
+          "award-number": [
+            "JP20H05855"
+          ]
+        }
+      ],
+      "id": [
+        {
+          "id": "10.13039/501100001691",
+          "id-type": "DOI",
+          "asserted-by": "publisher"
+        }
+      ]
+    },
+    {
+      "DOI": "10.13039/501100001691",
+      "name": "Japan Society for the Promotion of Science",
+      "doi-asserted-by": "publisher",
+      "award": [
+        "JP20H05856"
+      ],
+      "award-info": [
+        {
+          "award-number": [
+            "JP20H05856"
+          ]
+        }
+      ],
+      "id": [
+        {
+          "id": "10.13039/501100001691",
+          "id-type": "DOI",
+          "asserted-by": "publisher"
+        }
+      ]
+    },
+    {
+      "DOI": "10.13039/501100001691",
+      "name": "Japan Society for the Promotion of Science",
+      "doi-asserted-by": "publisher",
+      "award": [
+        "JP20H05861"
+      ],
+      "award-info": [
+        {
+          "award-number": [
+            "JP20H05861"
+          ]
+        }
+      ],
+      "id": [
+        {
+          "id": "10.13039/501100001691",
+          "id-type": "DOI",
+          "asserted-by": "publisher"
+        }
+      ]
+    },
+    {
+      "DOI": "10.13039/501100001691",
+      "name": "Japan Society for the Promotion of Science",
+      "doi-asserted-by": "publisher",
+      "award": [
+        "JP21J00011"
+      ],
+      "award-info": [
+        {
+          "award-number": [
+            "JP21J00011"
+          ]
+        }
+      ],
+      "id": [
+        {
+          "id": "10.13039/501100001691",
+          "id-type": "DOI",
+          "asserted-by": "publisher"
+        }
+      ]
+    },
+    {
+      "DOI": "10.13039/501100001691",
+      "name": "Japan Society for the Promotion of Science",
+      "doi-asserted-by": "publisher",
+      "award": [
+        "JP21H05456"
+      ],
+      "award-info": [
+        {
+          "award-number": [
+            "JP21H05456"
+          ]
+        }
+      ],
+      "id": [
+        {
+          "id": "10.13039/501100001691",
+          "id-type": "DOI",
+          "asserted-by": "publisher"
+        }
+      ]
+    },
+    {
+      "DOI": "10.13039/501100001691",
+      "name": "Japan Society for the Promotion of Science",
+      "doi-asserted-by": "publisher",
+      "award": [
+        "JP21J10314"
+      ],
+      "award-info": [
+        {
+          "award-number": [
+            "JP21J10314"
+          ]
+        }
+      ],
+      "id": [
+        {
+          "id": "10.13039/501100001691",
+          "id-type": "DOI",
+          "asserted-by": "publisher"
+        }
+      ]
+    },
+    {
+      "DOI": "10.13039/501100001691",
+      "name": "Japan Society for the Promotion of Science",
+      "doi-asserted-by": "publisher",
+      "award": [
+        "JP21H01081"
+      ],
+      "award-info": [
+        {
+          "award-number": [
+            "JP21H01081"
+          ]
+        }
+      ],
+      "id": [
+        {
+          "id": "10.13039/501100001691",
+          "id-type": "DOI",
+          "asserted-by": "publisher"
+        }
+      ]
+    },
+    {
+      "DOI": "10.13039/501100001691",
+      "name": "Japan Society for the Promotion of Science",
+      "doi-asserted-by": "publisher",
+      "award": [
+        "JP21H05456"
+      ],
+      "award-info": [
+        {
+          "award-number": [
+            "JP21H05456"
+          ]
+        }
+      ],
+      "id": [
+        {
+          "id": "10.13039/501100001691",
+          "id-type": "DOI",
+          "asserted-by": "publisher"
+        }
+      ]
+    },
+    {
+      "DOI": "10.13039/501100001691",
+      "name": "Japan Society for the Promotion of Science",
+      "doi-asserted-by": "publisher",
+      "award": [
+        "JP22H00130"
+      ],
+      "award-info": [
+        {
+          "award-number": [
+            "JP22H00130"
+          ]
+        }
+      ],
+      "id": [
+        {
+          "id": "10.13039/501100001691",
+          "id-type": "DOI",
+          "asserted-by": "publisher"
+        }
+      ]
+    },
+    {
+      "DOI": "10.13039/501100001691",
+      "name": "Japan Society for the Promotion of Science",
+      "doi-asserted-by": "publisher",
+      "award": [
+        "JP22K03634"
+      ],
+      "award-info": [
+        {
+          "award-number": [
+            "JP22K03634"
+          ]
+        }
+      ],
+      "id": [
+        {
+          "id": "10.13039/501100001691",
+          "id-type": "DOI",
+          "asserted-by": "publisher"
+        }
+      ]
+    },
+    {
+      "DOI": "10.13039/501100001691",
+      "name": "Japan Society for the Promotion of Science",
+      "doi-asserted-by": "publisher",
+      "award": [
+        "JP22J21612"
+      ],
+      "award-info": [
+        {
+          "award-number": [
+            "JP22J21612"
+          ]
+        }
+      ],
+      "id": [
+        {
+          "id": "10.13039/501100001691",
+          "id-type": "DOI",
+          "asserted-by": "publisher"
+        }
+      ]
+    },
+    {
+      "DOI": "10.13039/501100001691",
+      "name": "Japan Society for the Promotion of Science",
+      "doi-asserted-by": "publisher",
+      "award": [
+        "JP22K03655"
+      ],
+      "award-info": [
+        {
+          "award-number": [
+            "JP22K03655"
+          ]
+        }
+      ],
+      "id": [
+        {
+          "id": "10.13039/501100001691",
+          "id-type": "DOI",
+          "asserted-by": "publisher"
+        }
+      ]
+    },
+    {
+      "DOI": "10.13039/501100001691",
+      "name": "Japan Society for the Promotion of Science",
+      "doi-asserted-by": "publisher",
+      "award": [
+        "JP23H00108"
+      ],
+      "award-info": [
+        {
+          "award-number": [
+            "JP23H00108"
+          ]
+        }
+      ],
+      "id": [
+        {
+          "id": "10.13039/501100001691",
+          "id-type": "DOI",
+          "asserted-by": "publisher"
+        }
+      ]
+    },
+    {
+      "DOI": "10.13039/501100001691",
+      "name": "Japan Society for the Promotion of Science",
+      "doi-asserted-by": "publisher",
+      "award": [
+        "JP23H04005"
+      ],
+      "award-info": [
+        {
+          "award-number": [
+            "JP23H04005"
+          ]
+        }
+      ],
+      "id": [
+        {
+          "id": "10.13039/501100001691",
+          "id-type": "DOI",
+          "asserted-by": "publisher"
+        }
+      ]
+    },
+    {
+      "DOI": "10.13039/501100001691",
+      "name": "Japan Society for the Promotion of Science",
+      "doi-asserted-by": "publisher",
+      "award": [
+        "JP22K21349"
+      ],
+      "award-info": [
+        {
+          "award-number": [
+            "JP22K21349"
+          ]
+        }
+      ],
+      "id": [
+        {
+          "id": "10.13039/501100001691",
+          "id-type": "DOI",
+          "asserted-by": "publisher"
+        }
+      ]
+    },
+    {
+      "DOI": "10.13039/501100001691",
+      "name": "Japan Society for the Promotion of Science",
+      "doi-asserted-by": "publisher",
+      "award": [
+        "JPJSCCA20200002"
+      ],
+      "award-info": [
+        {
+          "award-number": [
+            "JPJSCCA20200002"
+          ]
+        }
+      ],
+      "id": [
+        {
+          "id": "10.13039/501100001691",
+          "id-type": "DOI",
+          "asserted-by": "publisher"
+        }
+      ]
+    },
+    {
+      "DOI": "10.13039/501100001691",
+      "name": "Japan Society for the Promotion of Science",
+      "doi-asserted-by": "publisher",
+      "award": [
+        "JPJSCCA20210003"
+      ],
+      "award-info": [
+        {
+          "award-number": [
+            "JPJSCCA20210003"
+          ]
+        }
+      ],
+      "id": [
+        {
+          "id": "10.13039/501100001691",
+          "id-type": "DOI",
+          "asserted-by": "publisher"
+        }
+      ]
+    },
+    {
+      "DOI": "10.13039/501100002241",
+      "name": "Japan Science and Technology Agency",
+      "doi-asserted-by": "publisher",
+      "award": [
+        "JPMHCR1414"
+      ],
+      "award-info": [
+        {
+          "award-number": [
+            "JPMHCR1414"
+          ]
+        }
+      ],
+      "id": [
+        {
+          "id": "10.13039/501100002241",
+          "id-type": "DOI",
+          "asserted-by": "publisher"
+        }
+      ]
+    },
+    {
+      "DOI": "10.13039/501100002241",
+      "name": "Japan Science and Technology Agency",
+      "doi-asserted-by": "publisher",
+      "award": [
+        "JP20317829"
+      ],
+      "award-info": [
+        {
+          "award-number": [
+            "JP20317829"
+          ]
+        }
+      ],
+      "id": [
+        {
+          "id": "10.13039/501100002241",
+          "id-type": "DOI",
+          "asserted-by": "publisher"
+        }
+      ]
+    },
+    {
+      "DOI": "10.13039/501100004721",
+      "name": "University of Tokyo",
+      "doi-asserted-by": "publisher",
+      "id": [
+        {
+          "id": "10.13039/501100004721",
+          "id-type": "DOI",
+          "asserted-by": "publisher"
+        }
+      ]
+    },
+    {
+      "DOI": "10.13039/501100000271",
+      "name": "Science and Technology Facilities Council",
+      "doi-asserted-by": "publisher",
+      "award": [
+        "STP004474"
+      ],
+      "award-info": [
+        {
+          "award-number": [
+            "STP004474"
+          ]
+        }
+      ],
+      "id": [
+        {
+          "id": "10.13039/501100000271",
+          "id-type": "DOI",
+          "asserted-by": "publisher"
+        }
+      ]
+    },
+    {
+      "DOI": "10.13039/501100012166",
+      "name": "National Key Research and Development Program of China",
+      "doi-asserted-by": "publisher",
+      "award": [
+        "2021YFC2203100"
+      ],
+      "award-info": [
+        {
+          "award-number": [
+            "2021YFC2203100"
+          ]
+        }
+      ],
+      "id": [
+        {
+          "id": "10.13039/501100012166",
+          "id-type": "DOI",
+          "asserted-by": "publisher"
+        }
+      ]
+    },
+    {
+      "DOI": "10.13039/501100013314",
+      "name": "Higher Education Discipline Innovation Project",
+      "doi-asserted-by": "publisher",
+      "award": [
+        "B23042"
+      ],
+      "award-info": [
+        {
+          "award-number": [
+            "B23042"
+          ]
+        }
+      ],
+      "id": [
+        {
+          "id": "10.13039/501100013314",
+          "id-type": "DOI",
+          "asserted-by": "publisher"
+        }
+      ]
+    },
+    {
+      "DOI": "10.13039/501100001809",
+      "name": "National Natural Science Foundation of China",
+      "doi-asserted-by": "publisher",
+      "award": [
+        "11833005"
+      ],
+      "award-info": [
+        {
+          "award-number": [
+            "11833005"
+          ]
+        }
+      ],
+      "id": [
+        {
+          "id": "10.13039/501100001809",
+          "id-type": "DOI",
+          "asserted-by": "publisher"
+        }
+      ]
+    },
+    {
+      "DOI": "10.13039/501100001809",
+      "name": "National Natural Science Foundation of China",
+      "doi-asserted-by": "publisher",
+      "award": [
+        "12192224"
+      ],
+      "award-info": [
+        {
+          "award-number": [
+            "12192224"
+          ]
+        }
+      ],
+      "id": [
+        {
+          "id": "10.13039/501100001809",
+          "id-type": "DOI",
+          "asserted-by": "publisher"
+        }
+      ]
+    },
+    {
+      "DOI": "10.13039/501100012226",
+      "name": "Fundamental Research Funds for the Central Universities",
+      "doi-asserted-by": "publisher",
+      "award": [
+        "WK3440000006"
+      ],
+      "award-info": [
+        {
+          "award-number": [
+            "WK3440000006"
+          ]
+        }
+      ],
+      "id": [
+        {
+          "id": "10.13039/501100012226",
+          "id-type": "DOI",
+          "asserted-by": "publisher"
+        }
+      ]
+    },
+    {
+      "DOI": "10.13039/501100002770",
+      "name": "Cabinet Office, Government of Japan",
+      "doi-asserted-by": "publisher",
+      "id": [
+        {
+          "id": "10.13039/501100002770",
+          "id-type": "DOI",
+          "asserted-by": "publisher"
+        }
+      ]
+    },
+    {
+      "DOI": "10.13039/501100022598",
+      "name": "Toray Science Foundation",
+      "doi-asserted-by": "publisher",
+      "id": [
+        {
+          "id": "10.13039/501100022598",
+          "id-type": "DOI",
+          "asserted-by": "publisher"
+        }
+      ]
+    },
+    {
+      "DOI": "10.13039/501100006326",
+      "name": "National Astronomical Observatory of Japan",
+      "doi-asserted-by": "publisher",
+      "id": [
+        {
+          "id": "10.13039/501100006326",
+          "id-type": "DOI",
+          "asserted-by": "publisher"
+        }
+      ]
+    },
+    {
+      "DOI": "10.13039/501100006699",
+      "name": "High Energy Accelerator Research Organization",
+      "doi-asserted-by": "publisher",
+      "id": [
+        {
+          "id": "10.13039/501100006699",
+          "id-type": "DOI",
+          "asserted-by": "publisher"
+        }
+      ]
+    },
+    {
+      "DOI": "10.13039/100006734",
+      "name": "Princeton University",
+      "doi-asserted-by": "publisher",
+      "id": [
+        {
+          "id": "10.13039/100006734",
+          "id-type": "DOI",
+          "asserted-by": "publisher"
+        }
+      ]
+    },
+    {
+      "DOI": "10.13039/100008782",
+      "name": "University of Hawai’i",
+      "doi-asserted-by": "publisher",
+      "id": [
+        {
+          "id": "10.13039/100008782",
+          "id-type": "DOI",
+          "asserted-by": "publisher"
+        }
+      ]
+    },
+    {
+      "DOI": "10.13039/501100004189",
+      "name": "Max-Planck-Gesellschaft",
+      "doi-asserted-by": "publisher",
+      "id": [
+        {
+          "id": "10.13039/501100004189",
+          "id-type": "DOI",
+          "asserted-by": "publisher"
+        }
+      ]
+    },
+    {
+      "DOI": "10.13039/501100022215",
+      "name": "Max-Planck-Institut für Astronomie",
+      "doi-asserted-by": "publisher",
+      "id": [
+        {
+          "id": "10.13039/501100022215",
+          "id-type": "DOI",
+          "asserted-by": "publisher"
+        }
+      ]
+    },
+    {
+      "DOI": "10.13039/100007880",
+      "name": "Johns Hopkins University",
+      "doi-asserted-by": "publisher",
+      "id": [
+        {
+          "id": "10.13039/100007880",
+          "id-type": "DOI",
+          "asserted-by": "publisher"
+        }
+      ]
+    },
+    {
+      "DOI": "10.13039/501100001314",
+      "name": "Durham University",
+      "doi-asserted-by": "publisher",
+      "id": [
+        {
+          "id": "10.13039/501100001314",
+          "id-type": "DOI",
+          "asserted-by": "publisher"
+        }
+      ]
+    },
+    {
+      "DOI": "10.13039/501100000848",
+      "name": "University of Edinburgh",
+      "doi-asserted-by": "publisher",
+      "id": [
+        {
+          "id": "10.13039/501100000848",
+          "id-type": "DOI",
+          "asserted-by": "publisher"
+        }
+      ]
+    },
+    {
+      "DOI": "10.13039/501100000873",
+      "name": "Queen’s University Belfast",
+      "doi-asserted-by": "publisher",
+      "id": [
+        {
+          "id": "10.13039/501100000873",
+          "id-type": "DOI",
+          "asserted-by": "publisher"
+        }
+      ]
+    },
+    {
+      "DOI": "10.13039/100009207",
+      "name": "Smithsonian Astrophysical Observatory",
+      "doi-asserted-by": "publisher",
+      "id": [
+        {
+          "id": "10.13039/100009207",
+          "id-type": "DOI",
+          "asserted-by": "publisher"
+        }
+      ]
+    },
+    {
+      "DOI": "10.13039/501100005319",
+      "name": "National Central University",
+      "doi-asserted-by": "publisher",
+      "id": [
+        {
+          "id": "10.13039/501100005319",
+          "id-type": "DOI",
+          "asserted-by": "publisher"
+        }
+      ]
+    },
+    {
+      "DOI": "10.13039/100013757",
+      "name": "Space Telescope Science Institute",
+      "doi-asserted-by": "publisher",
+      "id": [
+        {
+          "id": "10.13039/100013757",
+          "id-type": "DOI",
+          "asserted-by": "publisher"
+        }
+      ]
+    },
+    {
+      "DOI": "10.13039/100000104",
+      "name": "National Aeronautics and Space Administration",
+      "doi-asserted-by": "publisher",
+      "award": [
+        "NNX08AR22G"
+      ],
+      "award-info": [
+        {
+          "award-number": [
+            "NNX08AR22G"
+          ]
+        }
+      ],
+      "id": [
+        {
+          "id": "10.13039/100000104",
+          "id-type": "DOI",
+          "asserted-by": "publisher"
+        }
+      ]
+    },
+    {
+      "DOI": "10.13039/100016465",
+      "name": "Science Mission Directorate",
+      "doi-asserted-by": "publisher",
+      "id": [
+        {
+          "id": "10.13039/100016465",
+          "id-type": "DOI",
+          "asserted-by": "publisher"
+        }
+      ]
+    },
+    {
+      "DOI": "10.13039/100008510",
+      "name": "University of Maryland",
+      "doi-asserted-by": "publisher",
+      "id": [
+        {
+          "id": "10.13039/100008510",
+          "id-type": "DOI",
+          "asserted-by": "publisher"
+        }
+      ]
+    },
+    {
+      "DOI": "10.13039/501100009934",
+      "name": "Eötvös Loránd Tudományegyetem",
+      "doi-asserted-by": "publisher",
+      "id": [
+        {
+          "id": "10.13039/501100009934",
+          "id-type": "DOI",
+          "asserted-by": "publisher"
+        }
+      ]
+    },
+    {
+      "DOI": "10.13039/100008902",
+      "name": "Los Alamos National Laboratory",
+      "doi-asserted-by": "publisher",
+      "id": [
+        {
+          "id": "10.13039/100008902",
+          "id-type": "DOI",
+          "asserted-by": "publisher"
+        }
+      ]
+    },
+    {
+      "DOI": "10.13039/100000936",
+      "name": "Gordon and Betty Moore Foundation",
+      "doi-asserted-by": "publisher",
+      "id": [
+        {
+          "id": "10.13039/100000936",
+          "id-type": "DOI",
+          "asserted-by": "publisher"
+        }
+      ]
+    },
+    {
+      "name": "World Premier International Research Center Initiative"
+    },
+    {
+      "name": "International Graduate Program for Excellence in Earth-Space Science"
+    },
+    {
+      "name": "WINGS Program"
+    },
+    {
+      "name": "FoPM"
+    },
+    {
+      "name": "Association of Universities for Research in Astronomy"
+    },
+    {
+      "name": "LSSTC Institutional Members"
+    },
+    {
+      "name": "Beecroft Trust"
+    },
+    {
+      "name": "Kavli IPMU"
+    },
+    {
+      "name": "ASIAA"
+    },
+    {
+      "name": "Pan-STARRS Project Office"
+    },
+    {
+      "name": "Max Planck Institute for Extraterrestrial Physics"
+    },
+    {
+      "name": "Las Cumbres Observatory Global Telescope Network Incorporated"
+    }
+  ],
+  "content-domain": {
+    "domain": [
+      "journals.aps.org"
+    ],
+    "crossmark-restriction": true
+  },
+  "DOI": "10.1103/physrevd.108.123519",
+  "type": "journal-article",
+  "created": {
+    "date-parts": [
+      [
+        2023,
+        12,
+        11
+      ]
+    ],
+    "date-time": "2023-12-11T18:38:22Z",
+    "timestamp": 1702319902000
+  },
+  "update-policy": "https://doi.org/10.1103/crossmark-policy",
+  "source": "Crossref",
+  "is-referenced-by-count": 177,
+  "title": "Hyper Suprime-Cam Year 3 results: Cosmology from cosmic shear power spectra",
+  "prefix": "10.1103",
+  "volume": "108",
+  "author": [
+    {
+      "ORCID": "https://orcid.org/0000-0002-7998-9899",
+      "authenticated-orcid": true,
+      "given": "Roohi",
+      "family": "Dalal",
+      "sequence": "first",
+      "affiliation": []
+    },
+    {
+      "ORCID": "https://orcid.org/0000-0003-2880-5102",
+      "authenticated-orcid": true,
+      "given": "Xiangchong",
+      "family": "Li",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "ORCID": "https://orcid.org/0000-0003-2792-6252",
+      "authenticated-orcid": true,
+      "given": "Andrina",
+      "family": "Nicola",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "ORCID": "https://orcid.org/0000-0001-9789-9646",
+      "authenticated-orcid": true,
+      "given": "Joe",
+      "family": "Zuntz",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "ORCID": "https://orcid.org/0000-0002-0106-7755",
+      "authenticated-orcid": true,
+      "given": "Michael A.",
+      "family": "Strauss",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "ORCID": "https://orcid.org/0000-0003-1153-6735",
+      "authenticated-orcid": true,
+      "given": "Sunao",
+      "family": "Sugiyama",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "ORCID": "https://orcid.org/0000-0002-5596-198X",
+      "authenticated-orcid": true,
+      "given": "Tianqing",
+      "family": "Zhang",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "ORCID": "https://orcid.org/0000-0003-3709-1324",
+      "authenticated-orcid": true,
+      "given": "Markus M.",
+      "family": "Rau",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "ORCID": "https://orcid.org/0000-0003-2271-1527",
+      "authenticated-orcid": true,
+      "given": "Rachel",
+      "family": "Mandelbaum",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "ORCID": "https://orcid.org/0000-0002-5578-6472",
+      "authenticated-orcid": true,
+      "given": "Masahiro",
+      "family": "Takada",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "ORCID": "https://orcid.org/0000-0002-2986-2371",
+      "authenticated-orcid": true,
+      "given": "Surhud",
+      "family": "More",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "ORCID": "https://orcid.org/0000-0001-7964-9766",
+      "authenticated-orcid": true,
+      "given": "Hironao",
+      "family": "Miyatake",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "ORCID": "https://orcid.org/0000-0001-8783-6529",
+      "authenticated-orcid": true,
+      "given": "Arun",
+      "family": "Kannawadi",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "ORCID": "https://orcid.org/0000-0002-1706-5797",
+      "authenticated-orcid": true,
+      "given": "Masato",
+      "family": "Shirasaki",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "given": "Takanori",
+      "family": "Taniguchi",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "given": "Ryuichi",
+      "family": "Takahashi",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "ORCID": "https://orcid.org/0000-0002-7934-2569",
+      "authenticated-orcid": true,
+      "given": "Ken",
+      "family": "Osato",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "given": "Takashi",
+      "family": "Hamana",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "ORCID": "https://orcid.org/0000-0003-3484-399X",
+      "authenticated-orcid": true,
+      "given": "Masamune",
+      "family": "Oguri",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "ORCID": "https://orcid.org/0000-0002-6109-2397",
+      "authenticated-orcid": true,
+      "given": "Atsushi J.",
+      "family": "Nishizawa",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "ORCID": "https://orcid.org/0000-0002-2598-0514",
+      "authenticated-orcid": true,
+      "given": "Andrés A. Plazas",
+      "family": "Malagón",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "ORCID": "https://orcid.org/0009-0004-6387-5784",
+      "authenticated-orcid": true,
+      "given": "Tomomi",
+      "family": "Sunayama",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "ORCID": "https://orcid.org/0000-0002-4598-9719",
+      "authenticated-orcid": true,
+      "given": "David",
+      "family": "Alonso",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "ORCID": "https://orcid.org/0000-0002-8713-3695",
+      "authenticated-orcid": true,
+      "given": "Anže",
+      "family": "Slosar",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "ORCID": "https://orcid.org/0000-0003-1297-6142",
+      "authenticated-orcid": true,
+      "given": "Wentao",
+      "family": "Luo",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "given": "Robert",
+      "family": "Armstrong",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "ORCID": "https://orcid.org/0000-0003-2759-5764",
+      "authenticated-orcid": true,
+      "given": "James",
+      "family": "Bosch",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "ORCID": "https://orcid.org/0000-0001-5615-4904",
+      "authenticated-orcid": true,
+      "given": "Bau-Ching",
+      "family": "Hsieh",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "ORCID": "https://orcid.org/0000-0002-3852-6329",
+      "authenticated-orcid": true,
+      "given": "Yutaka",
+      "family": "Komiyama",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "ORCID": "https://orcid.org/0000-0003-1666-0962",
+      "authenticated-orcid": true,
+      "given": "Robert H.",
+      "family": "Lupton",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "ORCID": "https://orcid.org/0000-0002-4122-9384",
+      "authenticated-orcid": true,
+      "given": "Nate B.",
+      "family": "Lust",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "given": "Lauren A.",
+      "family": "MacArthur",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "ORCID": "https://orcid.org/0000-0002-1962-904X",
+      "authenticated-orcid": true,
+      "given": "Satoshi",
+      "family": "Miyazaki",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "ORCID": "https://orcid.org/0000-0001-5769-9471",
+      "authenticated-orcid": true,
+      "given": "Hitoshi",
+      "family": "Murayama",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "ORCID": "https://orcid.org/0000-0002-9664-0760",
+      "authenticated-orcid": true,
+      "given": "Takahiro",
+      "family": "Nishimichi",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "ORCID": "https://orcid.org/0000-0001-6623-4190",
+      "authenticated-orcid": true,
+      "given": "Yuki",
+      "family": "Okura",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "ORCID": "https://orcid.org/0000-0003-0511-0228",
+      "authenticated-orcid": true,
+      "given": "Paul A.",
+      "family": "Price",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "given": "Philip J.",
+      "family": "Tait",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "given": "Masayuki",
+      "family": "Tanaka",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "given": "Shiang-Yu",
+      "family": "Wang",
+      "sequence": "additional",
+      "affiliation": []
+    }
+  ],
+  "member": "16",
+  "published-online": {
+    "date-parts": [
+      [
+        2023,
+        12,
+        11
+      ]
+    ]
+  },
+  "reference": [
+    {
+      "key": "PhysRevD.108.123519Cc1R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1016/j.physrep.2013.05.001"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc2R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1051/0004-6361/201833910"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc3R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1088/0067-0049/208/2/19"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc4R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1088/1475-7516/2020/12/047"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc5R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1103/PhysRevD.108.023510"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc6R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1088/0004-637X/746/1/85"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc7R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1051/0004-6361/201423413"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc8R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.3847/1538-4357/aab9bb"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc9R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.3847/2041-8213/ab04fa"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc10R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1093/mnras/stu523"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc11R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1093/mnras/stx721"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc12R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1103/PhysRevD.103.083533"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc13R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1103/PhysRevD.105.023520"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc14R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1093/pasj/psz010"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc15R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1093/pasj/psz138"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc16R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1103/PhysRevD.105.023514"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc17R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1103/PhysRevD.105.023515"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc18R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1093/mnras/stab661"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc19R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1051/0004-6361/202039070"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc20R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1051/0004-6361/202142481"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc21R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1051/0004-6361/202039063"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc22R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1088/1361-6382/ac086d"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc23R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.3847/2041-8213/ac5c5b"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc24R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1088/1475-7516/2021/10/030"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc25R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1088/0034-4885/78/8/086901"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc26R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1146/annurev-astro-081817-051928"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc27R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1051/0004-6361/201014235"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc28R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1051/0004-6361:20021341"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc29R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1093/mnras/stv3018"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc30R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1093/mnras/sty551"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc32R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1046/j.1365-8711.2000.03851.x"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc33R1",
+      "first-page": "30",
+      "volume": "358",
+      "author": "L. Van Waerbeke",
+      "year": "2000",
+      "journal-title": "Astron. Astrophys.",
+      "ISSN": "https://id.crossref.org/issn/0004-6361",
+      "issn-type": "print"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc34R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1038/35012001"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc36R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1086/516599"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc37R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1088/0004-637X/761/1/15"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc38R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1111/j.1365-2966.2012.21952.x"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc39R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.3847/0004-637X/824/2/77"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc41R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1093/mnras/stv2140"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc42R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1103/PhysRevD.94.022001"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc43R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1103/PhysRevD.94.022002"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc44R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1093/pasj/psx081"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc45R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1093/pasj/psx066"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc46R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1093/mnras/stac1826"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc47R1",
+      "volume-title": "Ground-Based and Airborne Instrumentation for Astronomy IV",
+      "author": "S. Miyazaki",
+      "year": "2012"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc48R1"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc49R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1093/pasj/psx069"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc50R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1093/pasj/psx079"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc51R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1093/pasj/psy056"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc52R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.3847/1538-4357/ab042c"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc57R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1103/PhysRevD.105.123537"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc58R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1103/PhysRevD.106.083520"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc59R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1093/pasj/psac046"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc60R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1093/pasj/psx070"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc61R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1093/pasj/psab122"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc62R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1093/pasj/psac006"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc63R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1086/312210"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc64R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1111/j.1365-2966.2004.07410.x"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc68R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1093/pasj/psx080"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc69R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1086/305772"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc70R1",
+      "volume-title": "Astronomical Data Analysis Software and Systems XXV",
+      "author": "M. Jurić",
+      "year": "2017"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc71R1",
+      "volume-title": "Astronomical Data Analysis Software and Systems XXVII",
+      "author": "J. Bosch",
+      "year": "2019"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc73R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1093/pasj/psz103"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc74R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1093/mnras/stw2805"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc75R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1093/mnras/stad1801"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc76R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1046/j.1365-8711.2003.06683.x"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc77R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1086/176071"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc78R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1086/338085"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc79R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1093/mnras/sty2420"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc80R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1086/516598"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc81R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1093/mnras/stad1962"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc83R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1088/0004-637X/792/2/102"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc84R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1093/pasj/psx077"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc85R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1088/0004-637X/801/1/20"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc86R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.3847/0067-0049/224/2/24"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc88R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1093/mnras/stz791"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc89R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1088/0004-637X/786/1/43"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc90R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1093/mnras/stx1477"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc91R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.3847/1538-4357/aa943d"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc92R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1111/j.1365-2966.2010.17886.x"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc93R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1093/mnras/stz093"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc94R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1088/1475-7516/2021/03/067"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc96R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1088/1475-7516/2020/03/044"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc97R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1051/0004-6361:20021327"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc99R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1103/PhysRevD.65.023505"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc100R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1103/PhysRevD.67.023501"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc101R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1103/PhysRevD.74.083002"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc102R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1103/PhysRevD.82.023001"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc103R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1051/0004-6361/201014739"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc104R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1103/PhysRevD.83.083003"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc105R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1111/j.1365-2966.2006.10709.x"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc106R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.21105/astro.1811.11584"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc107R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1051/0004-6361:20066170"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc108R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1051/0004-6361/200913524"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc109R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1103/PhysRevD.100.103506"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc110R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1051/0004-6361:20020626"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc111R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1093/mnras/sty1412"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc112R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1093/mnras/stu1446"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc113R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1093/pasj/psx042"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc114R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1086/507675"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc115R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1086/589982"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc116R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1093/mnras/stt410"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc118R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1093/mnras/stx342"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc119R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1093/mnrasl/slv047"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc120R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1111/j.1365-2966.2009.14548.x"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc121R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1093/mnras/stac2786"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc122R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1016/j.ascom.2015.05.005"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc123R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1086/670067"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc124R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1093/mnras/stab2867"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc125R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1214/17-BA1075"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc126R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.21105/joss.00916"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc127R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1093/mnras/sty3090"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc128R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1103/PhysRevD.106.043520"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc129R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1103/PhysRevD.102.083520"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc130R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1086/145672"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc131R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1093/mnras/stx1039"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc132R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1093/mnras/stx2082"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc133R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1086/309179"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc134R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1088/1475-7516/2011/07/034"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc137R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1093/mnras/sty2093"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc138R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1093/mnras/stw681"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc139R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1051/0004-6361/202142197"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc140R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1086/317146"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc141R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1046/j.1365-8711.2000.03779.x"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc142R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1046/j.1365-8711.2000.03715.x"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc143R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1016/S0370-1573(02)00276-4"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc144R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1051/0004-6361/202038831"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc145R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1111/j.1365-2966.2009.16029.x"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc146R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1111/j.1365-2966.2011.18981.x"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc147R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.3847/0004-637X/820/2/108"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc148R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1093/mnras/stac3452"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc149R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1093/mnras/stab357"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc150R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1093/mnras/stz197"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc151R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1038/s41592-019-0686-2"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc152R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1093/comjnl/7.2.155"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc153R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1016/j.ascom.2015.09.003"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc154R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1093/mnras/stu2058"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc155R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1093/mnras/stv725"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc156R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1093/mnras/stu608"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc157R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1007/s11214-015-0203-6"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc158R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1007/s11214-015-0213-4"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc159R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1007/s11214-015-0177-4"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc160R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1103/PhysRevD.70.063526"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc161R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1093/mnras/stad2213"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc162R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1088/1367-2630/9/12/444"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc163R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1046/j.1365-8711.2002.05354.x"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc164R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1103/PhysRevD.98.043528"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc165R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1088/1475-7516/2016/09/015"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc166R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1093/mnras/stac3090"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc167R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1111/j.1365-2966.2010.16883.x"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc168R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1111/j.1365-2966.2012.21483.x"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc169R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1086/309041"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc170R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.3847/1538-4357/abb595"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc171R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.21105/joss.00045"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc172R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1007/s11222-021-10038-2"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc173R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1093/mnras/stab082"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc174R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1093/mnras/sty099"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc175R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1093/mnras/stz132"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc176R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1093/mnras/stv154"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc177R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1093/mnras/staa2800"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc178R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1093/mnras/staa3891"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc179R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1093/mnras/staa2780"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc180R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.3847/1538-4357/abb085"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc181R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1103/PhysRevD.95.123535"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc183R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1093/pasj/pst019"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc184R1",
+      "volume-title": "Ground-Based and Airborne Instrumentation for Astronomy IX",
+      "author": "N. Tamura",
+      "year": "2022"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc185R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1093/mnras/stw2849"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc186R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.3847/1538-4357/abcd9e"
+    },
+    {
+      "key": "PhysRevD.108.123519Cc188R1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1093/mnras/stac2429"
+    }
+  ],
+  "container-title": "Physical Review D",
+  "original-title": [],
+  "language": "en",
+  "link": [
+    {
+      "URL": "https://link.aps.org/article/10.1103/PhysRevD.108.123519",
+      "content-type": "unspecified",
+      "content-version": "vor",
+      "intended-application": "syndication"
+    },
+    {
+      "URL": "http://harvest.aps.org/v2/journals/articles/10.1103/PhysRevD.108.123519/fulltext",
+      "content-type": "unspecified",
+      "content-version": "vor",
+      "intended-application": "similarity-checking"
+    }
+  ],
+  "deposited": {
+    "date-parts": [
+      [
+        2023,
+        12,
+        11
+      ]
+    ],
+    "date-time": "2023-12-11T18:39:06Z",
+    "timestamp": 1702319946000
+  },
+  "score": 1,
+  "resource": {
+    "primary": {
+      "URL": "https://link.aps.org/doi/10.1103/PhysRevD.108.123519"
+    }
+  },
+  "subtitle": [],
+  "short-title": [],
+  "issued": {
+    "date-parts": [
+      [
+        2023,
+        12,
+        11
+      ]
+    ]
+  },
+  "references-count": 168,
+  "journal-issue": {
+    "issue": "12",
+    "published-print": {
+      "date-parts": [
+        [
+          2023,
+          12
+        ]
+      ]
+    }
+  },
+  "URL": "http://dx.doi.org/10.1103/PhysRevD.108.123519",
+  "relation": {},
+  "ISSN": [
+    "2470-0010",
+    "2470-0029"
+  ],
+  "subject": [],
+  "container-title-short": "Phys. Rev. D",
+  "published": {
+    "date-parts": [
+      [
+        2023,
+        12,
+        11
+      ]
+    ]
+  },
+  "article-number": "123519"
+}

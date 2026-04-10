@@ -22,9 +22,13 @@ You are inside a loop. Your constitution (fiber spec) is in the system prompt ab
 
 The survey builds understanding; the work exploits it. These are not equal phases. The survey is a fixed cost every iteration pays — reading the constitution, checking state, building a mental model. That cost only justifies itself through the work that follows.
 
-The failure mode is leaving while you still have a clear view. You've read the codebase, you understand how the pieces connect, you can see what needs to change. That understanding is perishable — it exists in this session and nowhere else. The next iteration starts cold and rebuilds it from scratch. So the question at every pause is not "have I done enough?" but "can I still see clearly?"
+The failure mode is leaving while you still have a clear view. You've read the codebase, you understand how the pieces connect, you can see what needs to change. That understanding is perishable — it exists in this session and nowhere else. The next iteration starts cold and rebuilds it from scratch. A short iteration that surveys, lands one small change, and exits usually wastes the investment that made the change easy.
 
-**CRITICAL: Exit before compaction.** The vantage point degrades. After each piece of work, pause: how heavy does the conversation feel? Past 50%, wrap up and exit. The trap is not noticing the fog roll in — getting locked into task after task without checking whether you still have the clarity that made the early work good. Running to compaction means sloppy work and lost ability to hand off cleanly. The loop continues. Finish what you can see clearly; leave the rest for fresh eyes.
+Default to staying. After the first meaningful piece of work, do not ask "is this enough for one iteration?" Ask "what else is now cheaper because I already understand this part of the system?" Keep exploiting that advantage while the next valuable moves live in the same world-model.
+
+Exit when the next worthwhile move would require building substantially different context: a different subsystem with different invariants, a separate debugging thread with little overlap, a different artifact or workflow, or a fresh verification pass better done by new eyes. Do not exit merely because one coherent task is complete. If adjacent moves are still cheap from the context already in memory, do them now. The point is to exhaust a world-model, not to sample it.
+
+Do not run until the session is confused or sloppy. But do not leave early out of caution either. The danger is not only overextending; it is also under-harvesting the context you already paid to build. Short orthogonal tasks are not automatic exit triggers. If they fit cleanly into the current context, do them. Exit when continuing would mean switching to a different mental workspace, not when there are simply multiple things left to do.
 
 ## Rules
 

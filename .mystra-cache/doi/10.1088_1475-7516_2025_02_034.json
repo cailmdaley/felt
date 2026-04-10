@@ -1,0 +1,1114 @@
+{
+  "indexed": {
+    "date-parts": [
+      [
+        2025,
+        12,
+        19
+      ]
+    ],
+    "date-time": "2025-12-19T15:53:51Z",
+    "timestamp": 1766159631680,
+    "version": "3.37.1"
+  },
+  "reference-count": 82,
+  "publisher": "IOP Publishing",
+  "issue": "02",
+  "license": [
+    {
+      "start": {
+        "date-parts": [
+          [
+            2025,
+            2,
+            14
+          ]
+        ],
+        "date-time": "2025-02-14T00:00:00Z",
+        "timestamp": 1739491200000
+      },
+      "content-version": "vor",
+      "delay-in-days": 13,
+      "URL": "http://creativecommons.org/licenses/by/4.0/"
+    },
+    {
+      "start": {
+        "date-parts": [
+          [
+            2025,
+            2,
+            14
+          ]
+        ],
+        "date-time": "2025-02-14T00:00:00Z",
+        "timestamp": 1739491200000
+      },
+      "content-version": "tdm",
+      "delay-in-days": 13,
+      "URL": "https://iopscience.iop.org/info/page/text-and-data-mining"
+    }
+  ],
+  "content-domain": {
+    "domain": [
+      "iopscience.iop.org"
+    ],
+    "crossmark-restriction": false
+  },
+  "published-print": {
+    "date-parts": [
+      [
+        2025,
+        2,
+        1
+      ]
+    ]
+  },
+  "abstract": "<jats:title>Abstract</jats:title>\n               <jats:p>Curl lensing, also known as lensing field-rotation or shear B-modes, is a distinct post-Born observable caused by two lensing deflections at different redshifts (lens-lens coupling). For the Cosmic Microwave Background (CMB), the field-rotation is approximately four orders of magnitude smaller than the CMB lensing convergence. Direct detection is therefore challenging for near-future CMB experiments such as the Simons Observatory (SO) or CMB `Stage-4' (CMB-S4). Instead, the curl can be probed in cross-correlation between a direct reconstruction and a template formed using pairs of large-scale structure (LSS) tracers to emulate the lens-lens coupling. In this paper, we derive a new estimator for the optimal curl template specifically adapted for curved-sky applications, and test it against non-Gaussian complications using N-body cosmology simulations. We find non-foreground biases to the curl cross-spectrum are purely Gaussian at the sensitivity of SO. However, higher-order curl contractions induce non-Gaussian bias at the order of 1<jats:italic>σ</jats:italic> for CMB-S4 using quadratic estimators (QE). Maximum a-Posteriori (MAP) lensing estimators significantly reduce biases for both SO and CMB-S4, in agreement with our analytic predictions. We also show that extragalactic foregrounds in the CMB can bias curl measurements at order of the signal, and evaluate a variety of mitigation strategies to control these biases for SO-like experiments. Near-future observations will be able to measure post-Born lensing curl B-modes.</jats:p>",
+  "DOI": "10.1088/1475-7516/2025/02/034",
+  "type": "journal-article",
+  "created": {
+    "date-parts": [
+      [
+        2025,
+        2,
+        14
+      ]
+    ],
+    "date-time": "2025-02-14T15:39:13Z",
+    "timestamp": 1739547553000
+  },
+  "page": "034",
+  "update-policy": "https://doi.org/10.1088/crossmark-policy",
+  "source": "Crossref",
+  "is-referenced-by-count": 4,
+  "title": "Detectable signals of post-Born lensing curl B-modes",
+  "prefix": "10.1088",
+  "volume": "2025",
+  "author": [
+    {
+      "ORCID": "https://orcid.org/0009-0003-7176-2475",
+      "authenticated-orcid": false,
+      "given": "Mathew",
+      "family": "Robertson",
+      "sequence": "first",
+      "affiliation": []
+    },
+    {
+      "ORCID": "https://orcid.org/0000-0002-3255-4695",
+      "authenticated-orcid": false,
+      "given": "Giulio",
+      "family": "Fabbian",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "ORCID": "https://orcid.org/0000-0002-5751-1392",
+      "authenticated-orcid": false,
+      "given": "Julien",
+      "family": "Carron",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "ORCID": "https://orcid.org/0000-0001-5927-6667",
+      "authenticated-orcid": false,
+      "given": "Antony",
+      "family": "Lewis",
+      "sequence": "additional",
+      "affiliation": []
+    }
+  ],
+  "member": "266",
+  "published-online": {
+    "date-parts": [
+      [
+        2025,
+        2,
+        14
+      ]
+    ]
+  },
+  "reference": [
+    {
+      "key": "be9a389983feb078a2161e37a2f709fb3",
+      "doi-asserted-by": "publisher",
+      "first-page": "1",
+      "DOI": "10.1016/j.physrep.2006.03.002",
+      "article-title": "Weak gravitational lensing of the CMB",
+      "volume": "429",
+      "author": "Lewis",
+      "year": "2006",
+      "journal-title": "Phys. Rept."
+    },
+    {
+      "key": "b315e1948fd5641e51ebafdcfea35fa29",
+      "doi-asserted-by": "publisher",
+      "first-page": "228",
+      "DOI": "10.3847/1538-4357/833/2/228",
+      "article-title": "BICEP2 / Keck Array VIII: Measurement of gravitational lensing from large-scale B-mode polarization",
+      "volume": "833",
+      "author": "BICEP2, Keck Array Collaboration",
+      "year": "2016",
+      "journal-title": "Astrophys. J."
+    },
+    {
+      "key": "b84104b4988b948d62d9e4077bd71bee6",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1103/PhysRevLett.124.131301",
+      "article-title": "Internal delensing of Cosmic Microwave Background polarization B-modes with the POLARBEAR experiment",
+      "volume": "124",
+      "author": "POLARBEAR Collaboration",
+      "year": "2020",
+      "journal-title": "Phys. Rev. Lett."
+    },
+    {
+      "key": "be87fd2cffd94623681599fdfef606d89",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1088/1475-7516/2022/09/039",
+      "article-title": "CMB lensing from Planck PR4 maps",
+      "volume": "09",
+      "author": "Carron",
+      "year": "2022",
+      "journal-title": "JCAP"
+    },
+    {
+      "key": "bbcfd654d8ccf43929f5be70fb516be67",
+      "doi-asserted-by": "publisher",
+      "first-page": "112",
+      "DOI": "10.3847/1538-4357/acfe06",
+      "article-title": "The Atacama Cosmology Telescope: A Measurement of the DR6 CMB Lensing Power Spectrum and Its Implications for Structure Growth",
+      "volume": "962",
+      "author": "ACT Collaboration",
+      "year": "2024",
+      "journal-title": "Astrophys. J."
+    },
+    {
+      "key": "bca5f985e02bf7434558bfe28aa1d683e",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1103/PhysRevD.108.122005",
+      "article-title": "Measurement of gravitational lensing of the cosmic microwave background using SPT-3G 2018 data",
+      "volume": "108",
+      "author": "SPT Collaboration",
+      "year": "2023",
+      "journal-title": "Phys. Rev. D"
+    },
+    {
+      "key": "bfd8f28fb6cf67f930181c470af649dd3",
+      "doi-asserted-by": "publisher",
+      "first-page": "A8",
+      "DOI": "10.1051/0004-6361/201833886",
+      "article-title": "Planck 2018 results. VIII. Gravitational lensing",
+      "volume": "641",
+      "author": "Planck Collaboration",
+      "year": "2020",
+      "journal-title": "Astron. Astrophys."
+    },
+    {
+      "key": "bd6d30fe36189a3bd368a7476a3662e5a",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1103/PhysRevLett.108.211301",
+      "article-title": "Lensing of 21-cm Fluctuations by Primordial Gravitational Waves",
+      "volume": "108",
+      "author": "Book",
+      "year": "2012",
+      "journal-title": "Phys. Rev. Lett."
+    },
+    {
+      "key": "b10e8e4cafeae51da813c17a97b0c6aca",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1088/1475-7516/2012/10/030",
+      "article-title": "Weak lensing generated by vector perturbations and detectability of cosmic strings",
+      "volume": "10",
+      "author": "Yamauchi",
+      "year": "2012",
+      "journal-title": "JCAP"
+    },
+    {
+      "key": "b5254af7ff3f7e8185b29d8153714462a",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1103/PhysRevLett.109.221301",
+      "article-title": "A New Window into Stochastic Gravitational Wave Background",
+      "volume": "109",
+      "author": "Rotti",
+      "year": "2012",
+      "journal-title": "Phys. Rev. Lett."
+    },
+    {
+      "key": "bcef72909a6a86ca2855133bdee67c284",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1103/PhysRevD.92.063533",
+      "article-title": "Weak lensing induced by second-order vector mode",
+      "volume": "92",
+      "author": "Saga",
+      "year": "2015",
+      "journal-title": "Phys. Rev. D"
+    },
+    {
+      "key": "bc728dea441e2cbfa9201e1735d28a008",
+      "doi-asserted-by": "publisher",
+      "first-page": "19",
+      "DOI": "10.1086/340892",
+      "article-title": "Second order corrections to weak lensing by large scale structure",
+      "volume": "574",
+      "author": "Cooray",
+      "year": "2002",
+      "journal-title": "Astrophys. J."
+    },
+    {
+      "key": "b1ccc2334ac22db988cda934cd81fe8f8",
+      "doi-asserted-by": "publisher",
+      "first-page": "A28",
+      "DOI": "10.1051/0004-6361/200913524",
+      "article-title": "Weak lensing power spectra for precision cosmology: Multiple-deflection, reduced shear and lensing bias corrections",
+      "volume": "523",
+      "author": "Krause",
+      "year": "2010",
+      "journal-title": "Astron. Astrophys."
+    },
+    {
+      "key": "bf8abf727eaa6963348713809a2278a71",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1088/1475-7516/2016/08/047",
+      "article-title": "Impact of post-Born lensing on the CMB",
+      "volume": "08",
+      "author": "Pratten",
+      "year": "2016",
+      "journal-title": "JCAP"
+    },
+    {
+      "key": "bae80664b486fdfa8e934dc59e26b913c",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1088/1475-7516/2023/08/048",
+      "article-title": "How to detect lensing rotation",
+      "volume": "08",
+      "author": "Robertson",
+      "year": "2023",
+      "journal-title": "JCAP"
+    },
+    {
+      "key": "bbd43b7f4b6135d24f4e3359c41dd2250",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1088/1475-7516/2019/02/056",
+      "article-title": "The Simons Observatory: Science goals and forecasts",
+      "volume": "02",
+      "author": "Simons Observatory Collaboration",
+      "year": "2019",
+      "journal-title": "JCAP"
+    },
+    {
+      "key": "b92d7e2b92fc8e780a6434847e2eb53ea",
+      "article-title": "CMB-S4 Science Case, Reference Design, and Project Plan",
+      "author": "Abazajian",
+      "year": "2019"
+    },
+    {
+      "key": "b26f10e6196fc2c803847f41a78557140",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1088/1475-7516/2016/07/034",
+      "article-title": "DEMNUni: ISW, Rees-Sciama, and weak-lensing in the presence of massive neutrinos",
+      "volume": "07",
+      "author": "Carbone",
+      "year": "2016",
+      "journal-title": "JCAP"
+    },
+    {
+      "key": "b574d17ce976d87343aac777eafe77d9b",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1088/1475-7516/2015/07/043",
+      "article-title": "DEMNUni: The clustering of large-scale structures in the presence of massive neutrinos",
+      "volume": "07",
+      "author": "Castorina",
+      "year": "2015",
+      "journal-title": "JCAP"
+    },
+    {
+      "key": "b85dd1e68ffd08d905b834549dc131132",
+      "article-title": "Agora: Multi-Component Simulation for Cross-Survey Science",
+      "author": "Omori",
+      "year": "2022"
+    },
+    {
+      "key": "bb89bfe3b801a409329b571028db0faf8",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1103/PhysRevD.88.083525",
+      "article-title": "Constraining cosmic string parameters with curl mode of CMB lensing",
+      "volume": "88",
+      "author": "Namikawa",
+      "year": "2013",
+      "journal-title": "Phys. Rev. D"
+    },
+    {
+      "key": "b82029b52d92e804aeb24b4bff70e8caa",
+      "doi-asserted-by": "publisher",
+      "first-page": "272",
+      "DOI": "10.1086/171151",
+      "article-title": "Weak gravitational lensing of distant galaxies",
+      "volume": "388",
+      "author": "Kaiser",
+      "year": "1992",
+      "journal-title": "Astrophys. J."
+    },
+    {
+      "key": "bee4f541d7baaf32fb570a6a2c284848f",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1088/1475-7516/2018/02/050",
+      "article-title": "CMB weak-lensing beyond the Born approximation: a numerical approach",
+      "volume": "02",
+      "author": "Fabbian",
+      "year": "2018",
+      "journal-title": "JCAP"
+    },
+    {
+      "key": "b462cf68e2353ac88e41a819530468aca",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1088/1475-7516/2019/10/057",
+      "article-title": "CMB lensing reconstruction biases in cross-correlation with large-scale structure probes",
+      "volume": "10",
+      "author": "Fabbian",
+      "year": "2019",
+      "journal-title": "JCAP"
+    },
+    {
+      "key": "bd837b01f1f9f34daeaddc26c41c93f8e",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1088/1475-7516/2015/03/049",
+      "article-title": "Multiple lensing of the cosmic microwave background anisotropies",
+      "volume": "03",
+      "author": "Calabrese",
+      "year": "2015",
+      "journal-title": "JCAP"
+    },
+    {
+      "key": "bd895c9e618ef7b1f27f87c1d886f978a",
+      "doi-asserted-by": "publisher",
+      "first-page": "31",
+      "DOI": "10.1051/0004-6361/200811054",
+      "article-title": "Ray-tracing through the Millennium Simulation: Born corrections and lens-lens coupling in cosmic shear and galaxy-galaxy lensing",
+      "volume": "499",
+      "author": "Hilbert",
+      "year": "2009",
+      "journal-title": "Astron. Astrophys."
+    },
+    {
+      "key": "bfb399300adb7bc6bcc07f07420a75195",
+      "doi-asserted-by": "publisher",
+      "first-page": "1",
+      "DOI": "10.1086/589638",
+      "article-title": "A Large Sky Simulation of the Gravitational Lensing of the Cosmic Microwave Background",
+      "volume": "682",
+      "author": "Das",
+      "year": "2008",
+      "journal-title": "Astrophys. J."
+    },
+    {
+      "key": "b5a149937509c2e990a62f106bc87d7f8",
+      "article-title": "CALCLENS: Weak Lensing Simulations for Large-area Sky Surveys and Second-order Effects in Cosmic Shear Power Spectra",
+      "author": "Becker",
+      "year": "2012"
+    },
+    {
+      "key": "b96db0f112945b1b651a447832d55ee6b",
+      "doi-asserted-by": "publisher",
+      "first-page": "A109",
+      "DOI": "10.1051/0004-6361/201321575",
+      "article-title": "High precision simulations of weak lensing effect on Cosmic Microwave Background polarization",
+      "volume": "556",
+      "author": "Fabbian",
+      "year": "2013",
+      "journal-title": "Astron. Astrophys."
+    },
+    {
+      "key": "b65522d6b075e2acace354d086ae54c6d",
+      "doi-asserted-by": "publisher",
+      "first-page": "L63",
+      "DOI": "10.1086/310921",
+      "article-title": "Fast spherical harmonic analysis: a quick algorithm for generating and/or inverting full sky, high resolution cmb anisotropy maps",
+      "volume": "488",
+      "author": "Muciaccia",
+      "year": "1997",
+      "journal-title": "Astrophys. J. Lett."
+    },
+    {
+      "key": "b13db00ea5eabbe72372a3129df928881",
+      "doi-asserted-by": "publisher",
+      "first-page": "1468",
+      "DOI": "10.1093/mnras/stw681",
+      "article-title": "Accurate halo-model matter power spectra with dark energy, massive neutrinos and modified gravitational forces",
+      "volume": "459",
+      "author": "Mead",
+      "year": "2016",
+      "journal-title": "Mon. Not. Roy. Astron. Soc."
+    },
+    {
+      "key": "bd3d254b91efe19ddbc9286b1d8bba0eb",
+      "doi-asserted-by": "publisher",
+      "first-page": "152",
+      "DOI": "10.1088/0004-637X/761/2/152",
+      "article-title": "Revising the Halofit Model for the Nonlinear Matter Power Spectrum",
+      "volume": "761",
+      "author": "Takahashi",
+      "year": "2012",
+      "journal-title": "Astrophys. J."
+    },
+    {
+      "key": "bca93730ccd3ad6e34874db7ed12667f4",
+      "doi-asserted-by": "publisher",
+      "first-page": "A165",
+      "DOI": "10.1051/0004-6361/202346717",
+      "article-title": "Improved cosmic microwave background (de-)lensing using general spherical harmonic transforms",
+      "volume": "678",
+      "author": "Reinecke",
+      "year": "2023",
+      "journal-title": "Astron. Astrophys."
+    },
+    {
+      "key": "bb518a034cdb166cbb4817b51980e89b6",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1103/PhysRevD.103.083524",
+      "article-title": "Quadratic estimators for CMB weak lensing",
+      "volume": "103",
+      "author": "Maniyar",
+      "year": "2021",
+      "journal-title": "Phys. Rev. D"
+    },
+    {
+      "key": "b8167ca6cad4da4870cbfdb97f5e73e87",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1103/PhysRevD.68.083002",
+      "article-title": "Reconstruction of lensing from the cosmic microwave background polarization",
+      "volume": "68",
+      "author": "Hirata",
+      "year": "2003",
+      "journal-title": "Phys. Rev. D"
+    },
+    {
+      "key": "b1c1c1361ed7a9cb2999f74d491b774fb",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1103/PhysRevD.96.063510",
+      "article-title": "Maximum a posteriori CMB lensing reconstruction",
+      "volume": "96",
+      "author": "Carron",
+      "year": "2017",
+      "journal-title": "Phys. Rev. D"
+    },
+    {
+      "key": "b321d6b3f1e20e223170170a63ad8dc61",
+      "doi-asserted-by": "publisher",
+      "first-page": "148",
+      "DOI": "10.3847/1538-4357/ad2351",
+      "article-title": "CMB-S4: Iterative Internal Delensing and r Constraints",
+      "volume": "964",
+      "author": "CMB-S4 Collaboration",
+      "year": "2024",
+      "journal-title": "Astrophys. J."
+    },
+    {
+      "key": "bcdcf055f83f39c01c367b754cebc0926",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1103/PhysRevD.108.103516",
+      "article-title": "Robust and efficient CMB lensing power spectrum from polarization surveys",
+      "volume": "108",
+      "author": "Legrand",
+      "year": "2023",
+      "journal-title": "Phys. Rev. D"
+    },
+    {
+      "key": "b6c70f784646d1886a901e614918aac2f",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1103/PhysRevD.105.123519",
+      "article-title": "Lensing power spectrum of the cosmic microwave background with deep polarization experiments",
+      "volume": "105",
+      "author": "Legrand",
+      "year": "2022",
+      "journal-title": "Phys. Rev. D"
+    },
+    {
+      "key": "b275757b4e22a9066037b74de93948bc0",
+      "article-title": "LSST Science Book, Version 2.0",
+      "author": "LSST Science, LSST Project Collaboration",
+      "year": "2009"
+    },
+    {
+      "key": "bc3c2b0e3c29069299dc09b9c741d09f2",
+      "doi-asserted-by": "publisher",
+      "first-page": "A109",
+      "DOI": "10.1051/0004-6361/201629022",
+      "article-title": "Planck intermediate results. XLVIII. Disentangling Galactic dust emission and cosmic infrared background anisotropies",
+      "volume": "596",
+      "author": "Planck Collaboration",
+      "year": "2016",
+      "journal-title": "Astron. Astrophys."
+    },
+    {
+      "key": "bd35596869668c0bf28da42db1f76fee0",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1088/1475-7516/2020/03/045",
+      "article-title": "Lensing corrections on galaxy-lensing cross correlations and galaxy-galaxy auto correlations",
+      "volume": "03",
+      "author": "Böhm",
+      "year": "2020",
+      "journal-title": "JCAP"
+    },
+    {
+      "key": "b696610ca0e15d91d9b523517cce0b58f",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1103/PhysRevD.78.123506",
+      "article-title": "Extended Limber Approximation",
+      "volume": "78",
+      "author": "LoVerde",
+      "year": "2008",
+      "journal-title": "Phys. Rev. D"
+    },
+    {
+      "key": "b8c9323c492c53bb53b0efae3d9341723",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1088/1475-7516/2011/03/018",
+      "article-title": "The shape of the CMB lensing bispectrum",
+      "volume": "03",
+      "author": "Lewis",
+      "year": "2011",
+      "journal-title": "JCAP"
+    },
+    {
+      "key": "b903510668c458f1b6607a3df56be758b",
+      "doi-asserted-by": "publisher",
+      "first-page": "633",
+      "DOI": "10.1086/422807",
+      "article-title": "Foreground removal by an internal linear combination method: Limitations and implications",
+      "volume": "612",
+      "author": "Eriksen",
+      "year": "2004",
+      "journal-title": "Astrophys. J."
+    },
+    {
+      "key": "b50a885f0c9eb9710312100f158237bcd",
+      "doi-asserted-by": "publisher",
+      "first-page": "2481",
+      "DOI": "10.1111/j.1365-2966.2010.17624.x",
+      "article-title": "CMB and SZ effect separation with Constrained Internal Linear Combinations",
+      "volume": "410",
+      "author": "Remazeilles",
+      "year": "2011",
+      "journal-title": "Mon. Not. Roy. Astron. Soc."
+    },
+    {
+      "key": "b801c19497de4f63360d21b2e90ac4a92",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1103/PhysRevD.102.063517",
+      "article-title": "Lower bias, lower noise CMB lensing with foreground-hardened estimators",
+      "volume": "102",
+      "author": "Sailer",
+      "year": "2020",
+      "journal-title": "Phys. Rev. D"
+    },
+    {
+      "key": "bf570b8e48f00b5b0dd3236ce5ba54eff",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1103/PhysRevLett.122.181301",
+      "article-title": "Foreground-Immune Cosmic Microwave Background Lensing with Shear-Only Reconstruction",
+      "volume": "122",
+      "author": "Schaan",
+      "year": "2019",
+      "journal-title": "Phys. Rev. Lett."
+    },
+    {
+      "key": "bcd7169ba79366aec634bcf661c76ccc5",
+      "doi-asserted-by": "publisher",
+      "first-page": "A133",
+      "DOI": "10.1051/0004-6361/201425034",
+      "article-title": "Planck intermediate results. XXX. The angular power spectrum of polarized dust emission at intermediate and high Galactic latitudes",
+      "volume": "586",
+      "author": "Planck Collaboration",
+      "year": "2016",
+      "journal-title": "Astron. Astrophys."
+    },
+    {
+      "key": "b341d2195477db6926639dc2f8b79d848",
+      "doi-asserted-by": "publisher",
+      "first-page": "A10",
+      "DOI": "10.1051/0004-6361/201525967",
+      "article-title": "Planck 2015 results. X. Diffuse component separation: Foreground maps",
+      "volume": "594",
+      "author": "Planck Collaboration",
+      "year": "2016",
+      "journal-title": "Astron. Astrophys."
+    },
+    {
+      "key": "b41cfdd77452a593e0dfaa3c3b9ed99be",
+      "doi-asserted-by": "publisher",
+      "first-page": "530",
+      "DOI": "10.1093/mnras/sty1115",
+      "article-title": "Statistical properties of galactic CMB foregrounds: dust and synchrotron",
+      "volume": "478",
+      "author": "Kandel",
+      "year": "2018",
+      "journal-title": "Mon. Not. Roy. Astron. Soc."
+    },
+    {
+      "key": "b8a225ca22ca7a2eb6820234f3e2de67c",
+      "doi-asserted-by": "publisher",
+      "first-page": "5751",
+      "DOI": "10.1093/mnras/stad3529",
+      "article-title": "Impact of Galactic dust non-Gaussianity on searches for B-modes from inflation",
+      "volume": "527",
+      "author": "Abril-Cabezas",
+      "year": "2023",
+      "journal-title": "Mon. Not. Roy. Astron. Soc."
+    },
+    {
+      "key": "b6a1a1b67e4f82bc57f7b64d6386c20ad",
+      "doi-asserted-by": "publisher",
+      "first-page": "157",
+      "DOI": "10.3847/1538-4357/ad31a5",
+      "article-title": "The Atacama Cosmology Telescope: Cosmology from Cross-correlations of unWISE Galaxies and ACT DR6 CMB Lensing",
+      "volume": "966",
+      "author": "ACT Collaboration",
+      "year": "2024",
+      "journal-title": "Astrophys. J."
+    },
+    {
+      "key": "bb0050941ffa35f89307a8a7e5c1c6724",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1088/1475-7516/2014/03/024",
+      "article-title": "Extragalactic Foreground Contamination in Temperature-based CMB Lens Reconstruction",
+      "volume": "03",
+      "author": "Osborne",
+      "year": "2014",
+      "journal-title": "JCAP"
+    },
+    {
+      "key": "b403e88fbc6c852c44b1b18eefcf54248",
+      "doi-asserted-by": "publisher",
+      "first-page": "13",
+      "DOI": "10.1088/0004-637X/786/1/13",
+      "article-title": "CMB Lensing Power Spectrum Biases from Galaxies and Clusters using High-angular Resolution Temperature Maps",
+      "volume": "786",
+      "author": "van Engelen",
+      "year": "2014",
+      "journal-title": "Astrophys. J."
+    },
+    {
+      "key": "b42fcd57ed44249504d747ad62ca262e0",
+      "doi-asserted-by": "publisher",
+      "first-page": "A9",
+      "DOI": "10.1051/0004-6361/201321531",
+      "article-title": "Planck 2013 results. IX. HFI spectral response",
+      "volume": "571",
+      "author": "Planck Collaboration",
+      "year": "2014",
+      "journal-title": "Astron. Astrophys."
+    },
+    {
+      "key": "bfd233197ae2d999c1a80a2c7307e5c73",
+      "doi-asserted-by": "publisher",
+      "first-page": "916",
+      "DOI": "10.1088/0004-637X/707/2/916",
+      "article-title": "The Temperature of the Cosmic Microwave Background",
+      "volume": "707",
+      "author": "Fixsen",
+      "year": "2009",
+      "journal-title": "Astrophys. J."
+    },
+    {
+      "key": "bf66684f9d87f3d1a4324068f78628e80",
+      "doi-asserted-by": "publisher",
+      "first-page": "199",
+      "DOI": "10.3847/1538-4357/abd407",
+      "article-title": "An Improved Measurement of the Secondary Cosmic Microwave Background Anisotropies from the SPT-SZ + SPTpol Surveys",
+      "volume": "908",
+      "author": "SPT Collaboration",
+      "year": "2021",
+      "journal-title": "Astrophys. J."
+    },
+    {
+      "key": "b5260087c1b44115cd7cb707c85440c52",
+      "doi-asserted-by": "publisher",
+      "first-page": "A232",
+      "DOI": "10.1051/0004-6361/201937147",
+      "article-title": "Impact of polarised extragalactic sources on the measurement of CMB B-mode anisotropies",
+      "volume": "642",
+      "author": "Lagache",
+      "year": "2020",
+      "journal-title": "Astron. Astrophys."
+    },
+    {
+      "key": "bc994fbd2173e71f56dca3f77a62f9e01",
+      "doi-asserted-by": "publisher",
+      "first-page": "1",
+      "DOI": "10.1086/377253",
+      "article-title": "First year Wilkinson Microwave Anisotropy Probe (WMAP) observations: Preliminary maps and basic results",
+      "volume": "148",
+      "author": "WMAP Collaboration",
+      "year": "2003",
+      "journal-title": "Astrophys. J. Suppl."
+    },
+    {
+      "key": "bf702e4e214482a9f59b53b3f8383fadc",
+      "doi-asserted-by": "publisher",
+      "first-page": "A23",
+      "DOI": "10.1051/0004-6361/201527418",
+      "article-title": "Planck 2015 results. XXIII. The thermal Sunyaev-Zeldovich effect–cosmic infrared background correlation",
+      "volume": "594",
+      "author": "Planck Collaboration",
+      "year": "2016",
+      "journal-title": "Astron. Astrophys."
+    },
+    {
+      "key": "b3defef4c065041d747139629a6c8708a",
+      "doi-asserted-by": "publisher",
+      "first-page": "1057",
+      "DOI": "10.1046/j.1365-8711.2002.05704.x",
+      "article-title": "Filtering techniques for the detection of sunyaev-zel'dovich clusters in multifrequency cmb maps",
+      "volume": "336",
+      "author": "Herranz",
+      "year": "2002",
+      "journal-title": "Mon. Not. Roy. Astron. Soc."
+    },
+    {
+      "key": "b88ed73e617fc66eaf8b523b4f4b23307",
+      "doi-asserted-by": "publisher",
+      "first-page": "341",
+      "DOI": "10.1051/0004-6361:20065034",
+      "article-title": "Catalog extraction in sz cluster surveys: a matched filter approach",
+      "volume": "459",
+      "author": "Melin",
+      "year": "2006",
+      "journal-title": "Astron. Astrophys."
+    },
+    {
+      "key": "b93b464c78034cfa12e7b41f32e20e431",
+      "doi-asserted-by": "publisher",
+      "first-page": "1694",
+      "DOI": "10.1111/j.1365-2966.2012.21138.x",
+      "article-title": "Filling in CMB map missing data using constrained Gaussian realizations",
+      "volume": "424",
+      "author": "Astrophysics Group, Oxford University Collaboration",
+      "year": "2012",
+      "journal-title": "Mon. Not. Roy. Astron. Soc."
+    },
+    {
+      "key": "b57e9e229e5b9728b4231d09be14aa670",
+      "doi-asserted-by": "publisher",
+      "first-page": "138",
+      "DOI": "10.3847/1538-4357/ad2610",
+      "article-title": "The Atacama Cosmology Telescope: Mitigating the Impact of Extragalactic Foregrounds for the DR6 Cosmic Microwave Background Lensing Analysis",
+      "volume": "966",
+      "author": "ACT Collaboration",
+      "year": "2024",
+      "journal-title": "Astrophys. J."
+    },
+    {
+      "key": "b28d6dbfb6f9b530752fb6d6fef0224a7",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1088/1475-7516/2020/10/012",
+      "article-title": "The Websky Extragalactic CMB Simulations",
+      "volume": "10",
+      "author": "Stein",
+      "year": "2020",
+      "journal-title": "JCAP"
+    },
+    {
+      "key": "bfa1ed86f3aca6c970df1473a16513b66",
+      "doi-asserted-by": "publisher",
+      "first-page": "920",
+      "DOI": "10.1088/0004-637X/709/2/920",
+      "article-title": "Simulations of the Microwave Sky",
+      "volume": "709",
+      "author": "Sehgal",
+      "year": "2010",
+      "journal-title": "Astrophys. J."
+    },
+    {
+      "key": "bde141cb25745b3f47de3ffd0dabf8f63",
+      "doi-asserted-by": "publisher",
+      "first-page": "34",
+      "DOI": "10.1093/pasj/psv034",
+      "article-title": "Cosmological constraints from Subaru weak lensing cluster counts",
+      "volume": "67",
+      "author": "Hamana",
+      "year": "2015",
+      "journal-title": "Publ. Astron. Soc. Jap."
+    },
+    {
+      "key": "b6e826bbd8bfa8238716903180737d7f9",
+      "doi-asserted-by": "publisher",
+      "first-page": "3043",
+      "DOI": "10.1093/mnras/stv1854",
+      "article-title": "Probing cosmology with weak lensing selected clusters – I. Halo approach and all-sky simulations",
+      "volume": "453",
+      "author": "Shirasaki",
+      "year": "2015",
+      "journal-title": "Mon. Not. Roy. Astron. Soc."
+    },
+    {
+      "key": "b43e9f8c0c358d6f11859d6f842538c1c",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1088/1475-7516/2021/05/028",
+      "article-title": "CMB lensing power spectrum estimation without instrument noise bias",
+      "author": "Madhavacheril",
+      "year": "2020"
+    },
+    {
+      "key": "b074a60c5f27e859e2c9a82db64d7d77a",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1103/PhysRevD.106.023525",
+      "article-title": "CMB lensing reconstruction biases from masking extragalactic sources",
+      "volume": "106",
+      "author": "Lembo",
+      "year": "2022",
+      "journal-title": "Phys. Rev. D"
+    },
+    {
+      "key": "b1cc125b122b50fccbe8662020f2e1d69",
+      "doi-asserted-by": "publisher",
+      "first-page": "291",
+      "DOI": "10.1016/S0370-1573(00)00082-X",
+      "article-title": "Weak gravitational lensing",
+      "volume": "340",
+      "author": "Bartelmann",
+      "year": "2001",
+      "journal-title": "Phys. Rept."
+    },
+    {
+      "key": "b498c7dbdf71d9aa5e6c405e5387dc139",
+      "article-title": "Weak gravitational lensing",
+      "author": "Bartelmann",
+      "year": "2016"
+    },
+    {
+      "key": "b0ef7aecdc02c79958947dc5d9e376c7f",
+      "article-title": "Clustering of faint galaxies: omega (Theta), induced by weak gravitational lensing",
+      "author": "Villumsen",
+      "year": "1995"
+    },
+    {
+      "key": "bce74adf202df4291c6871122da0efc6b",
+      "doi-asserted-by": "publisher",
+      "first-page": "291",
+      "DOI": "10.1046/j.1365-8711.1998.01225.x",
+      "article-title": "The effect of weak lensing on the angular correlation function of faint galaxies",
+      "volume": "294",
+      "author": "Moessner",
+      "year": "1998",
+      "journal-title": "Mon. Not. Roy. Astron. Soc."
+    },
+    {
+      "key": "b6d3501f3565518f3676c65a0142728b5",
+      "doi-asserted-by": "publisher",
+      "first-page": "1",
+      "DOI": "10.1093/mnras/227.1.1",
+      "article-title": "Clustering in real space and in redshift space",
+      "volume": "227",
+      "author": "Kaiser",
+      "year": "1987",
+      "journal-title": "Mon. Not. Roy. Astron. Soc."
+    },
+    {
+      "key": "bbd3949db5f3fb5639982a5d2797dab10",
+      "doi-asserted-by": "publisher",
+      "first-page": "3385",
+      "DOI": "10.1093/mnras/stz2366",
+      "article-title": "Developing a unified pipeline for large-scale structure data analysis with angular power spectra – I. The importance of redshift-space distortions for galaxy number counts",
+      "volume": "489",
+      "author": "Tanidis",
+      "year": "2019",
+      "journal-title": "Mon. Not. Roy. Astron. Soc."
+    },
+    {
+      "key": "bff93e71e3ef7359a1ecfd80912c83574",
+      "doi-asserted-by": "publisher",
+      "first-page": "A17",
+      "DOI": "10.1051/0004-6361/202347870",
+      "article-title": "Euclid preparation - XXXIV. The effect of linear redshift-space distortions in photometric galaxy clustering and its cross-correlation with cosmic shear",
+      "volume": "683",
+      "author": "Euclid Collaboration",
+      "year": "2024",
+      "journal-title": "Astron. Astrophys."
+    },
+    {
+      "key": "bef92b4422d70d979cf8c29d05f526233",
+      "doi-asserted-by": "publisher",
+      "first-page": "A6",
+      "DOI": "10.1051/0004-6361/201833910",
+      "article-title": "Planck 2018 results. VI. Cosmological parameters",
+      "volume": "641",
+      "author": "Planck Collaboration",
+      "year": "2020",
+      "journal-title": "Astron. Astrophys."
+    },
+    {
+      "key": "bad0f43766fad87b058fbd3115b45361b",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1103/PhysRevD.98.043512",
+      "article-title": "Lensing Reconstruction in Post-Born Cosmic Microwave Background Weak Lensing",
+      "volume": "98",
+      "author": "Beck",
+      "year": "2018",
+      "journal-title": "Phys. Rev. D"
+    },
+    {
+      "key": "b25840b6317f7d3862657d910158ae24b",
+      "doi-asserted-by": "publisher",
+      "first-page": "3806",
+      "DOI": "10.1103/PhysRevLett.79.3806",
+      "article-title": "Measuring cosmological parameters with galaxy surveys",
+      "volume": "79",
+      "author": "Tegmark",
+      "year": "1997",
+      "journal-title": "Phys. Rev. Lett."
+    },
+    {
+      "key": "b5d7ac125b62929919fb4eeb56a697757",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1088/1475-7516/2006/06/025",
+      "article-title": "Measuring neutrino masses and dark energy with weak lensing tomography",
+      "volume": "06",
+      "author": "Hannestad",
+      "year": "2006",
+      "journal-title": "JCAP"
+    }
+  ],
+  "container-title": "Journal of Cosmology and Astroparticle Physics",
+  "original-title": [],
+  "link": [
+    {
+      "URL": "https://iopscience.iop.org/article/10.1088/1475-7516/2025/02/034",
+      "content-type": "text/html",
+      "content-version": "vor",
+      "intended-application": "text-mining"
+    },
+    {
+      "URL": "https://iopscience.iop.org/article/10.1088/1475-7516/2025/02/034/pdf",
+      "content-type": "application/pdf",
+      "content-version": "vor",
+      "intended-application": "text-mining"
+    },
+    {
+      "URL": "https://iopscience.iop.org/article/10.1088/1475-7516/2025/02/034/pdf",
+      "content-type": "application/pdf",
+      "content-version": "vor",
+      "intended-application": "syndication"
+    },
+    {
+      "URL": "https://iopscience.iop.org/article/10.1088/1475-7516/2025/02/034/pdf",
+      "content-type": "application/pdf",
+      "content-version": "vor",
+      "intended-application": "similarity-checking"
+    }
+  ],
+  "deposited": {
+    "date-parts": [
+      [
+        2025,
+        2,
+        14
+      ]
+    ],
+    "date-time": "2025-02-14T15:39:16Z",
+    "timestamp": 1739547556000
+  },
+  "score": 1,
+  "resource": {
+    "primary": {
+      "URL": "https://iopscience.iop.org/article/10.1088/1475-7516/2025/02/034"
+    }
+  },
+  "subtitle": [],
+  "short-title": [],
+  "issued": {
+    "date-parts": [
+      [
+        2025,
+        2,
+        1
+      ]
+    ]
+  },
+  "references-count": 82,
+  "journal-issue": {
+    "issue": "02",
+    "published-online": {
+      "date-parts": [
+        [
+          2025,
+          2,
+          14
+        ]
+      ]
+    },
+    "published-print": {
+      "date-parts": [
+        [
+          2025,
+          2,
+          1
+        ]
+      ]
+    }
+  },
+  "URL": "http://dx.doi.org/10.1088/1475-7516/2025/02/034",
+  "relation": {},
+  "ISSN": [
+    "1475-7516"
+  ],
+  "subject": [],
+  "container-title-short": "J. Cosmol. Astropart. Phys.",
+  "published": {
+    "date-parts": [
+      [
+        2025,
+        2,
+        1
+      ]
+    ]
+  },
+  "assertion": [
+    {
+      "value": "Detectable signals of post-Born lensing curl B-modes",
+      "name": "article_title",
+      "label": "Article Title"
+    },
+    {
+      "value": "Journal of Cosmology and Astroparticle Physics",
+      "name": "journal_title",
+      "label": "Journal Title"
+    },
+    {
+      "value": "paper",
+      "name": "article_type",
+      "label": "Article Type"
+    },
+    {
+      "value": "© 2025 The Author(s)",
+      "name": "copyright_information",
+      "label": "Copyright Information"
+    },
+    {
+      "value": "2024-07-03",
+      "name": "date_received",
+      "label": "Date Received",
+      "group": {
+        "name": "publication_dates",
+        "label": "Publication dates"
+      }
+    },
+    {
+      "value": "2025-01-22",
+      "name": "date_accepted",
+      "label": "Date Accepted",
+      "group": {
+        "name": "publication_dates",
+        "label": "Publication dates"
+      }
+    },
+    {
+      "value": "2025-02-14",
+      "name": "date_epub",
+      "label": "Online publication date",
+      "group": {
+        "name": "publication_dates",
+        "label": "Publication dates"
+      }
+    }
+  ]
+}

@@ -6,6 +6,7 @@ description: >
   (2) Transcript — extract from external sources with review.
   (3) Archive — consolidate old fibers into documentation.
   (4) Sweep — coherence check across the assemblage.
+  Session mode chains into an exit interview as a final step — agent feedback on felt itself, written as a fiber in ~/loom/.felt/felt/.
   Also triggers on formalization (adding ASTRA structure to fibers),
   tapestry export, evidence filing, or "update the tapestry".
 ---
@@ -123,3 +124,4 @@ Read the relevant reference when the mode or context matches:
 | Tapestry: evidence, export, reshaping | [tapestry.md](references/tapestry.md) |
 | Tapestry: viewer setup, GitHub Pages | [viewer-setup.md](references/viewer-setup.md) |
 | Migrating flat fibers to directory format | [migration.md](references/migration.md) |
+| Agent exit interview at session end | [exit-interview.md](references/exit-interview.md) |

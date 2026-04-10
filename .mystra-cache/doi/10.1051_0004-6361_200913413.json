@@ -1,0 +1,1206 @@
+{
+  "indexed": {
+    "date-parts": [
+      [
+        2026,
+        3,
+        19
+      ]
+    ],
+    "date-time": "2026-03-19T21:29:24Z",
+    "timestamp": 1773955764490,
+    "version": "3.50.1"
+  },
+  "reference-count": 106,
+  "publisher": "EDP Sciences",
+  "content-domain": {
+    "domain": [],
+    "crossmark-restriction": false
+  },
+  "published-print": {
+    "date-parts": [
+      [
+        2010,
+        11
+      ]
+    ]
+  },
+  "DOI": "10.1051/0004-6361/200913413",
+  "type": "journal-article",
+  "created": {
+    "date-parts": [
+      [
+        2010,
+        7,
+        19
+      ]
+    ],
+    "date-time": "2010-07-19T17:15:09Z",
+    "timestamp": 1279559709000
+  },
+  "page": "A17",
+  "source": "Crossref",
+  "is-referenced-by-count": 186,
+  "title": "A high-resolution VLT/FLAMES study of individual stars in the centre of the Fornax dwarf spheroidal galaxy",
+  "prefix": "10.1051",
+  "volume": "523",
+  "author": [
+    {
+      "given": "B.",
+      "family": "Letarte",
+      "sequence": "first",
+      "affiliation": []
+    },
+    {
+      "given": "V.",
+      "family": "Hill",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "given": "E.",
+      "family": "Tolstoy",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "given": "P.",
+      "family": "Jablonka",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "given": "M.",
+      "family": "Shetrone",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "given": "K. A.",
+      "family": "Venn",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "given": "M.",
+      "family": "Spite",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "given": "M. J.",
+      "family": "Irwin",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "given": "G.",
+      "family": "Battaglia",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "given": "A.",
+      "family": "Helmi",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "given": "F.",
+      "family": "Primas",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "given": "P.",
+      "family": "François",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "given": "A.",
+      "family": "Kaufer",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "given": "T.",
+      "family": "Szeifert",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "given": "N.",
+      "family": "Arimoto",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "given": "K.",
+      "family": "Sadakane",
+      "sequence": "additional",
+      "affiliation": []
+    }
+  ],
+  "member": "250",
+  "published-online": {
+    "date-parts": [
+      [
+        2010,
+        11,
+        11
+      ]
+    ]
+  },
+  "reference": [
+    {
+      "key": "R1",
+      "doi-asserted-by": "crossref",
+      "first-page": "804",
+      "DOI": "10.1086/158293",
+      "volume": "240",
+      "author": "Aaronson",
+      "year": "1980",
+      "journal-title": "ApJ"
+    },
+    {
+      "key": "R2",
+      "doi-asserted-by": "crossref",
+      "first-page": "335",
+      "DOI": "10.1051/aas:1999506",
+      "volume": "139",
+      "author": "Alonso",
+      "year": "1999",
+      "journal-title": "A&AS"
+    },
+    {
+      "key": "R3",
+      "doi-asserted-by": "crossref",
+      "first-page": "197",
+      "DOI": "10.1016/0016-7037(89)90286-X",
+      "volume": "53",
+      "author": "Anders",
+      "year": "1989",
+      "journal-title": "Geochim. Cosmochim. Acta"
+    },
+    {
+      "key": "R4",
+      "doi-asserted-by": "crossref",
+      "first-page": "1083",
+      "DOI": "10.1051/0004-6361:200810894",
+      "volume": "494",
+      "author": "Andrievsky",
+      "year": "2009",
+      "journal-title": "A&A"
+    },
+    {
+      "key": "R5",
+      "doi-asserted-by": "crossref",
+      "first-page": "L67",
+      "DOI": "10.1086/377681",
+      "volume": "592",
+      "author": "Aoki",
+      "year": "2003",
+      "journal-title": "ApJ"
+    },
+    {
+      "key": "R6",
+      "doi-asserted-by": "crossref",
+      "unstructured": "Azzopardi, M., Muratorio, G., Breysacher, J., & Westerlund, B. E. 1999, in The Stellar Content of Local Group Galaxies, ed. P. Whitelock, & R. Cannon, IAU Symp., 192, 144",
+      "DOI": "10.1017/S0074180900204051"
+    },
+    {
+      "key": "R7",
+      "doi-asserted-by": "crossref",
+      "first-page": "129",
+      "DOI": "10.1051/0004-6361:20052967",
+      "volume": "439",
+      "author": "Barklem",
+      "year": "2005",
+      "journal-title": "A&A"
+    },
+    {
+      "key": "R8",
+      "doi-asserted-by": "crossref",
+      "first-page": "423",
+      "DOI": "10.1051/0004-6361:20065720",
+      "volume": "459",
+      "author": "Battaglia",
+      "year": "2006",
+      "journal-title": "A&A"
+    },
+    {
+      "key": "R9",
+      "doi-asserted-by": "crossref",
+      "first-page": "L13",
+      "DOI": "10.1086/590179",
+      "volume": "681",
+      "author": "Battaglia",
+      "year": "2008",
+      "journal-title": "ApJ"
+    },
+    {
+      "key": "R10",
+      "doi-asserted-by": "crossref",
+      "first-page": "183",
+      "DOI": "10.1111/j.1365-2966.2007.12532.x",
+      "volume": "383",
+      "author": "Battaglia",
+      "year": "2008",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "R11",
+      "doi-asserted-by": "crossref",
+      "first-page": "L23",
+      "DOI": "10.1086/318170",
+      "volume": "543",
+      "author": "Bersier",
+      "year": "2000",
+      "journal-title": "ApJ"
+    },
+    {
+      "key": "R12",
+      "doi-asserted-by": "crossref",
+      "first-page": "840",
+      "DOI": "10.1086/338315",
+      "volume": "123",
+      "author": "Bersier",
+      "year": "2002",
+      "journal-title": "AJ"
+    },
+    {
+      "key": "R13",
+      "doi-asserted-by": "crossref",
+      "first-page": "503",
+      "DOI": "10.1051/0004-6361:20031692",
+      "volume": "414",
+      "author": "Bonifacio",
+      "year": "2004",
+      "journal-title": "A&A"
+    },
+    {
+      "key": "R14",
+      "doi-asserted-by": "crossref",
+      "first-page": "L33",
+      "DOI": "10.1086/311436",
+      "volume": "501",
+      "author": "Buonanno",
+      "year": "1998",
+      "journal-title": "ApJ"
+    },
+    {
+      "key": "R15",
+      "doi-asserted-by": "crossref",
+      "first-page": "302",
+      "DOI": "10.1086/317172",
+      "volume": "544",
+      "author": "Burris",
+      "year": "2000",
+      "journal-title": "ApJ"
+    },
+    {
+      "key": "R16",
+      "doi-asserted-by": "crossref",
+      "first-page": "1117",
+      "DOI": "10.1051/0004-6361:20034074",
+      "volume": "416",
+      "author": "Cayrel",
+      "year": "2004",
+      "journal-title": "A&A"
+    },
+    {
+      "key": "R17",
+      "doi-asserted-by": "crossref",
+      "first-page": "557",
+      "DOI": "10.1051/0004-6361:20053622",
+      "volume": "448",
+      "author": "Cescutti",
+      "year": "2006",
+      "journal-title": "A&A"
+    },
+    {
+      "key": "R18",
+      "unstructured": "Clayton, D. D. 1983, Principles of stellar evolution and nucleosynthesis (Chicago: University of Chicago Press)"
+    },
+    {
+      "key": "R19",
+      "doi-asserted-by": "crossref",
+      "first-page": "331",
+      "DOI": "10.1016/0003-4916(61)90067-7",
+      "volume": "12",
+      "author": "Clayton",
+      "year": "1961",
+      "journal-title": "Annals of Physics"
+    },
+    {
+      "key": "R20",
+      "doi-asserted-by": "crossref",
+      "first-page": "1107",
+      "DOI": "10.1086/422576",
+      "volume": "612",
+      "author": "Cohen",
+      "year": "2004",
+      "journal-title": "ApJ"
+    },
+    {
+      "key": "R21",
+      "doi-asserted-by": "crossref",
+      "first-page": "1053",
+      "DOI": "10.1088/0004-637X/701/2/1053",
+      "volume": "701",
+      "author": "Cohen",
+      "year": "2009",
+      "journal-title": "ApJ"
+    },
+    {
+      "key": "R22",
+      "doi-asserted-by": "crossref",
+      "first-page": "162",
+      "DOI": "10.1071/AS04067",
+      "volume": "22",
+      "author": "Coleman",
+      "year": "2005",
+      "journal-title": "Publ. Astron. Soc. Austr."
+    },
+    {
+      "key": "R23",
+      "doi-asserted-by": "crossref",
+      "first-page": "933",
+      "DOI": "10.1086/589992",
+      "volume": "685",
+      "author": "Coleman",
+      "year": "2008",
+      "journal-title": "ApJ"
+    },
+    {
+      "key": "R24",
+      "doi-asserted-by": "crossref",
+      "first-page": "832",
+      "DOI": "10.1086/381298",
+      "volume": "127",
+      "author": "Coleman",
+      "year": "2004",
+      "journal-title": "AJ"
+    },
+    {
+      "key": "R25",
+      "doi-asserted-by": "crossref",
+      "first-page": "797",
+      "DOI": "10.1088/0004-637X/696/1/797",
+      "volume": "696",
+      "author": "Cristallo",
+      "year": "2009",
+      "journal-title": "ApJ"
+    },
+    {
+      "key": "R26",
+      "doi-asserted-by": "crossref",
+      "first-page": "L49",
+      "DOI": "10.1088/0004-637X/694/1/L49",
+      "volume": "694",
+      "author": "Farouqi",
+      "year": "2009",
+      "journal-title": "ApJ"
+    },
+    {
+      "key": "R27",
+      "doi-asserted-by": "crossref",
+      "first-page": "935",
+      "DOI": "10.1051/0004-6361:20077706",
+      "volume": "476",
+      "author": "François",
+      "year": "2007",
+      "journal-title": "A&A"
+    },
+    {
+      "key": "R28",
+      "doi-asserted-by": "crossref",
+      "first-page": "404",
+      "DOI": "10.1086/324630",
+      "volume": "123",
+      "author": "Fulbright",
+      "year": "2002",
+      "journal-title": "AJ"
+    },
+    {
+      "key": "R29",
+      "doi-asserted-by": "crossref",
+      "first-page": "1152",
+      "DOI": "10.1086/513710",
+      "volume": "661",
+      "author": "Fulbright",
+      "year": "2007",
+      "journal-title": "ApJ"
+    },
+    {
+      "key": "R30",
+      "unstructured": "Gallart, C., Aparicio, A., Zinn, R., et al. 2005, in Near-fields cosmology with dwarf elliptical galaxies, ed. H. Jerjen, & B. Binggeli, IAU Colloq., 198, 25"
+    },
+    {
+      "key": "R31",
+      "doi-asserted-by": "crossref",
+      "first-page": "L55",
+      "DOI": "10.1086/185930",
+      "volume": "367",
+      "author": "Gilmore",
+      "year": "1991",
+      "journal-title": "ApJ"
+    },
+    {
+      "key": "R32",
+      "doi-asserted-by": "crossref",
+      "first-page": "195",
+      "DOI": "10.1051/0004-6361:20020612",
+      "volume": "391",
+      "author": "Girardi",
+      "year": "2002",
+      "journal-title": "A&A"
+    },
+    {
+      "key": "R33",
+      "doi-asserted-by": "crossref",
+      "first-page": "187",
+      "DOI": "10.1051/0004-6361:20030439",
+      "volume": "404",
+      "author": "Gratton",
+      "year": "2003",
+      "journal-title": "A&A"
+    },
+    {
+      "key": "R34",
+      "doi-asserted-by": "crossref",
+      "first-page": "161",
+      "DOI": "10.1023/A:1005161325181",
+      "volume": "85",
+      "author": "Grevesse",
+      "year": "1998",
+      "journal-title": "Space Sci. Rev."
+    },
+    {
+      "key": "R35",
+      "doi-asserted-by": "crossref",
+      "first-page": "1025",
+      "DOI": "10.1051/0004-6361:20066788",
+      "volume": "467",
+      "author": "Gullieuszik",
+      "year": "2007",
+      "journal-title": "A&A"
+    },
+    {
+      "key": "R36",
+      "first-page": "407",
+      "volume": "42",
+      "author": "Gustafsson",
+      "year": "1975",
+      "journal-title": "A&A"
+    },
+    {
+      "key": "R37",
+      "unstructured": "Gustafsson, B., Edvardsson, B., Eriksson, K., et al. 2003, in Stellar Atmosphere Modeling, ed. I. Hubeny, D. Mihalas, & K. Werner, ASP Conf. Ser. 288, 331"
+    },
+    {
+      "key": "R38",
+      "doi-asserted-by": "crossref",
+      "first-page": "951",
+      "DOI": "10.1051/0004-6361:200809724",
+      "volume": "486",
+      "author": "Gustafsson",
+      "year": "2008",
+      "journal-title": "A&A"
+    },
+    {
+      "key": "R39",
+      "doi-asserted-by": "crossref",
+      "first-page": "1039",
+      "DOI": "10.1051/0004-6361:20064925",
+      "volume": "452",
+      "author": "Heiter",
+      "year": "2006",
+      "journal-title": "A&A"
+    },
+    {
+      "key": "R40",
+      "first-page": "L19",
+      "volume": "364",
+      "author": "Hill",
+      "year": "2000",
+      "journal-title": "A&A"
+    },
+    {
+      "key": "R41",
+      "doi-asserted-by": "crossref",
+      "first-page": "83",
+      "DOI": "10.1086/108378",
+      "volume": "66",
+      "author": "Hodge",
+      "year": "1961",
+      "journal-title": "AJ"
+    },
+    {
+      "key": "R42",
+      "doi-asserted-by": "crossref",
+      "first-page": "1840",
+      "DOI": "10.1086/300326",
+      "volume": "115",
+      "author": "Hurley-Keller",
+      "year": "1998",
+      "journal-title": "AJ"
+    },
+    {
+      "key": "R43",
+      "doi-asserted-by": "crossref",
+      "first-page": "439",
+      "DOI": "10.1086/313278",
+      "volume": "125",
+      "author": "Iwamoto",
+      "year": "1999",
+      "journal-title": "ApJS"
+    },
+    {
+      "key": "R44",
+      "doi-asserted-by": "crossref",
+      "first-page": "219",
+      "DOI": "10.1086/338117",
+      "volume": "139",
+      "author": "Johnson",
+      "year": "2002",
+      "journal-title": "ApJS"
+    },
+    {
+      "key": "R45",
+      "doi-asserted-by": "crossref",
+      "first-page": "945",
+      "DOI": "10.1088/0034-4885/52/8/002",
+      "volume": "52",
+      "author": "Kappeler",
+      "year": "1989",
+      "journal-title": "Rep. Prog. Phys."
+    },
+    {
+      "key": "R46",
+      "doi-asserted-by": "crossref",
+      "first-page": "499",
+      "DOI": "10.1086/343041",
+      "volume": "143",
+      "author": "Kim",
+      "year": "2002",
+      "journal-title": "ApJS"
+    },
+    {
+      "key": "R47",
+      "doi-asserted-by": "crossref",
+      "first-page": "L43",
+      "DOI": "10.1086/592432",
+      "volume": "685",
+      "author": "Kirby",
+      "year": "2008",
+      "journal-title": "ApJ"
+    },
+    {
+      "key": "R48",
+      "doi-asserted-by": "crossref",
+      "first-page": "1580",
+      "DOI": "10.1088/0004-6256/135/4/1580",
+      "volume": "135",
+      "author": "Koch",
+      "year": "2008",
+      "journal-title": "AJ"
+    },
+    {
+      "key": "R49",
+      "doi-asserted-by": "crossref",
+      "first-page": "1338",
+      "DOI": "10.1111/j.1365-2966.2004.07877.x",
+      "volume": "351",
+      "author": "Lanfranchi",
+      "year": "2004",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "R50",
+      "doi-asserted-by": "crossref",
+      "first-page": "547",
+      "DOI": "10.1051/0004-6361:20054439",
+      "volume": "453",
+      "author": "Letarte",
+      "year": "2006",
+      "journal-title": "A&A"
+    },
+    {
+      "key": "R51",
+      "doi-asserted-by": "crossref",
+      "first-page": "435",
+      "DOI": "10.1146/annurev.astro.36.1.435",
+      "volume": "36",
+      "author": "Mateo",
+      "year": "1998",
+      "journal-title": "ARA&A"
+    },
+    {
+      "key": "R52",
+      "doi-asserted-by": "crossref",
+      "first-page": "719",
+      "DOI": "10.1086/171383",
+      "volume": "391",
+      "author": "Mathews",
+      "year": "1992",
+      "journal-title": "ApJ"
+    },
+    {
+      "key": "R53",
+      "doi-asserted-by": "crossref",
+      "first-page": "539",
+      "DOI": "10.1086/169508",
+      "volume": "365",
+      "author": "Matteucci",
+      "year": "1990",
+      "journal-title": "ApJ"
+    },
+    {
+      "key": "R54",
+      "doi-asserted-by": "crossref",
+      "first-page": "2757",
+      "DOI": "10.1086/117486",
+      "volume": "109",
+      "author": "McWilliam",
+      "year": "1995",
+      "journal-title": "AJ"
+    },
+    {
+      "key": "R55",
+      "unstructured": "McWilliam, A., & Smecker-Hane, T. A. 2005, in Cosmic Abundances as Records of Stellar Evolution and Nucleosynthesis, ed. T. G. Barnes, III, & F. N. Bash, Astron. Soc. Pac. Conf. Ser., 336, 221"
+    },
+    {
+      "key": "R56",
+      "doi-asserted-by": "crossref",
+      "first-page": "141",
+      "DOI": "10.1051/0004-6361:20053333",
+      "volume": "441",
+      "author": "Monaco",
+      "year": "2005",
+      "journal-title": "A&A"
+    },
+    {
+      "key": "R57",
+      "first-page": "751",
+      "volume": "326",
+      "author": "Nissen",
+      "year": "1997",
+      "journal-title": "A&A"
+    },
+    {
+      "key": "R58",
+      "unstructured": "Nissen, P. E., & Schuster, W. J. 2009, in IAU Symposium, ed. J. Andersen, J. Bland-Hawthorn, & B. Nordström, IAU Symp., 254, 103"
+    },
+    {
+      "key": "R59",
+      "doi-asserted-by": "crossref",
+      "first-page": "912",
+      "DOI": "10.1086/498895",
+      "volume": "131",
+      "author": "Olszewski",
+      "year": "2006",
+      "journal-title": "AJ"
+    },
+    {
+      "key": "R60",
+      "first-page": "1",
+      "volume": "110",
+      "author": "Pasquini",
+      "year": "2002",
+      "journal-title": "The Messenger"
+    },
+    {
+      "key": "R61",
+      "first-page": "527",
+      "volume": "94",
+      "author": "Plez",
+      "year": "1992",
+      "journal-title": "A&AS"
+    },
+    {
+      "key": "R62",
+      "first-page": "551",
+      "volume": "256",
+      "author": "Plez",
+      "year": "1992",
+      "journal-title": "A&A"
+    },
+    {
+      "key": "R63",
+      "doi-asserted-by": "crossref",
+      "first-page": "379",
+      "DOI": "10.1051/0004-6361:20064854",
+      "volume": "480",
+      "author": "Pompéia",
+      "year": "2008",
+      "journal-title": "A&A"
+    },
+    {
+      "key": "R64",
+      "doi-asserted-by": "crossref",
+      "first-page": "840",
+      "DOI": "10.1086/380608",
+      "volume": "127",
+      "author": "Pont",
+      "year": "2004",
+      "journal-title": "AJ"
+    },
+    {
+      "key": "R65",
+      "doi-asserted-by": "crossref",
+      "first-page": "947",
+      "DOI": "10.1086/591241",
+      "volume": "685",
+      "author": "Poretti",
+      "year": "2008",
+      "journal-title": "ApJ"
+    },
+    {
+      "key": "R66",
+      "doi-asserted-by": "crossref",
+      "first-page": "237",
+      "DOI": "10.1016/j.physrep.2007.02.006",
+      "volume": "442",
+      "author": "Qian",
+      "year": "2007",
+      "journal-title": "Phys. Rep."
+    },
+    {
+      "key": "R67",
+      "doi-asserted-by": "crossref",
+      "first-page": "465",
+      "DOI": "10.1086/430102",
+      "volume": "626",
+      "author": "Ramírez",
+      "year": "2005",
+      "journal-title": "ApJ"
+    },
+    {
+      "key": "R68",
+      "doi-asserted-by": "crossref",
+      "first-page": "304",
+      "DOI": "10.1046/j.1365-8711.2003.06305.x",
+      "volume": "340",
+      "author": "Reddy",
+      "year": "2003",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "R69",
+      "doi-asserted-by": "crossref",
+      "first-page": "1329",
+      "DOI": "10.1111/j.1365-2966.2006.10148.x",
+      "volume": "367",
+      "author": "Reddy",
+      "year": "2006",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "R70",
+      "doi-asserted-by": "crossref",
+      "first-page": "189",
+      "DOI": "10.1051/0004-6361/200911734",
+      "volume": "501",
+      "author": "Revaz",
+      "year": "2009",
+      "journal-title": "A&A"
+    },
+    {
+      "key": "R71",
+      "doi-asserted-by": "crossref",
+      "first-page": "1255",
+      "DOI": "10.1111/j.1365-2966.2007.12196.x",
+      "volume": "380",
+      "author": "Rizzi",
+      "year": "2007",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "R72",
+      "doi-asserted-by": "crossref",
+      "first-page": "203",
+      "DOI": "10.1051/0004-6361:20053430",
+      "volume": "453",
+      "author": "Röpke",
+      "year": "2006",
+      "journal-title": "A&A"
+    },
+    {
+      "key": "R73",
+      "first-page": "56",
+      "volume": "355",
+      "author": "Saviane",
+      "year": "2000",
+      "journal-title": "A&A"
+    },
+    {
+      "key": "R74",
+      "doi-asserted-by": "crossref",
+      "first-page": "815",
+      "DOI": "10.1051/0004-6361:20066385",
+      "volume": "465",
+      "author": "Sbordone",
+      "year": "2007",
+      "journal-title": "A&A"
+    },
+    {
+      "key": "R75",
+      "doi-asserted-by": "crossref",
+      "first-page": "121",
+      "DOI": "10.1086/190111",
+      "volume": "11",
+      "author": "Seeger",
+      "year": "1965",
+      "journal-title": "ApJS"
+    },
+    {
+      "key": "R76",
+      "doi-asserted-by": "crossref",
+      "first-page": "684",
+      "DOI": "10.1086/345966",
+      "volume": "125",
+      "author": "Shetrone",
+      "year": "2003",
+      "journal-title": "AJ"
+    },
+    {
+      "key": "R77",
+      "unstructured": "Shetrone, M. D. 2004, in Origin and Evolution of the Elements, ed. A. McWilliam, & M. Rauch, 218"
+    },
+    {
+      "key": "R78",
+      "doi-asserted-by": "crossref",
+      "first-page": "62",
+      "DOI": "10.1088/0004-6256/137/1/62",
+      "volume": "137",
+      "author": "Shetrone",
+      "year": "2009",
+      "journal-title": "AJ"
+    },
+    {
+      "key": "R79",
+      "doi-asserted-by": "crossref",
+      "first-page": "1091",
+      "DOI": "10.1086/424504",
+      "volume": "617",
+      "author": "Simmerer",
+      "year": "2004",
+      "journal-title": "ApJ"
+    },
+    {
+      "key": "R80",
+      "unstructured": "Smecker-Hane, T. A., Stetson, P. B., Hesser, J. E., & Vandenberg, D. A. 1996, in From Stars to Galaxies: the Impact of Stellar Physics on Galaxy Evolution, ed. C. Leitherer, U. Fritze-von-Alvensleben, & J. Huchra, Astron. Soc. Pac. Conf. Ser., 98, 328"
+    },
+    {
+      "key": "R81",
+      "doi-asserted-by": "crossref",
+      "unstructured": "Sneden C., Cowan J. J., & Gallino R. 2008, ARA&A, 46, 241",
+      "DOI": "10.1146/annurev.astro.46.060407.145207"
+    },
+    {
+      "key": "R82",
+      "first-page": "211",
+      "volume": "30",
+      "author": "Spite",
+      "year": "1967",
+      "journal-title": "Annales d’Astrophysique"
+    },
+    {
+      "key": "R83",
+      "doi-asserted-by": "crossref",
+      "first-page": "1332",
+      "DOI": "10.1086/596126",
+      "volume": "120",
+      "author": "Stetson",
+      "year": "2008",
+      "journal-title": "PASP"
+    },
+    {
+      "key": "R84",
+      "doi-asserted-by": "crossref",
+      "first-page": "533",
+      "DOI": "10.1086/316164",
+      "volume": "110",
+      "author": "Stetson",
+      "year": "1998",
+      "journal-title": "PASP"
+    },
+    {
+      "key": "R85",
+      "doi-asserted-by": "crossref",
+      "first-page": "1291",
+      "DOI": "10.1086/367599",
+      "volume": "125",
+      "author": "Strader",
+      "year": "2003",
+      "journal-title": "AJ"
+    },
+    {
+      "key": "R86",
+      "doi-asserted-by": "crossref",
+      "first-page": "222",
+      "DOI": "10.1086/168308",
+      "volume": "349",
+      "author": "Thielemann",
+      "year": "1990",
+      "journal-title": "ApJ"
+    },
+    {
+      "key": "R87",
+      "doi-asserted-by": "crossref",
+      "first-page": "617",
+      "DOI": "10.1086/192172",
+      "volume": "98",
+      "author": "Timmes",
+      "year": "1995",
+      "journal-title": "ApJS"
+    },
+    {
+      "key": "R88",
+      "doi-asserted-by": "crossref",
+      "first-page": "L83",
+      "DOI": "10.1086/376721",
+      "volume": "590",
+      "author": "Timmes",
+      "year": "2003",
+      "journal-title": "ApJ"
+    },
+    {
+      "key": "R89",
+      "doi-asserted-by": "crossref",
+      "first-page": "1046",
+      "DOI": "10.1086/157039",
+      "volume": "229",
+      "author": "Tinsley",
+      "year": "1979",
+      "journal-title": "ApJ"
+    },
+    {
+      "key": "R90",
+      "doi-asserted-by": "crossref",
+      "first-page": "918",
+      "DOI": "10.1046/j.1365-8711.2001.04785.x",
+      "volume": "327",
+      "author": "Tolstoy",
+      "year": "2001",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "R91",
+      "doi-asserted-by": "crossref",
+      "first-page": "707",
+      "DOI": "10.1086/345967",
+      "volume": "125",
+      "author": "Tolstoy",
+      "year": "2003",
+      "journal-title": "AJ"
+    },
+    {
+      "key": "R92",
+      "doi-asserted-by": "crossref",
+      "first-page": "L119",
+      "DOI": "10.1086/427388",
+      "volume": "617",
+      "author": "Tolstoy",
+      "year": "2004",
+      "journal-title": "ApJ"
+    },
+    {
+      "key": "R93",
+      "first-page": "33",
+      "volume": "123",
+      "author": "Tolstoy",
+      "year": "2006",
+      "journal-title": "The Messenger"
+    },
+    {
+      "key": "R94",
+      "doi-asserted-by": "crossref",
+      "first-page": "371",
+      "DOI": "10.1146/annurev-astro-082708-101650",
+      "volume": "47",
+      "author": "Tolstoy",
+      "year": "2009",
+      "journal-title": "ARA&A"
+    },
+    {
+      "key": "R95",
+      "doi-asserted-by": "crossref",
+      "first-page": "691",
+      "DOI": "10.1086/307571",
+      "volume": "521",
+      "author": "Travaglio",
+      "year": "1999",
+      "journal-title": "ApJ"
+    },
+    {
+      "key": "R96",
+      "doi-asserted-by": "crossref",
+      "first-page": "864",
+      "DOI": "10.1086/380507",
+      "volume": "601",
+      "author": "Travaglio",
+      "year": "2004",
+      "journal-title": "ApJ"
+    },
+    {
+      "key": "R97",
+      "doi-asserted-by": "crossref",
+      "first-page": "1007",
+      "DOI": "10.1051/0004-6361:20052883",
+      "volume": "443",
+      "author": "Travaglio",
+      "year": "2005",
+      "journal-title": "A&A"
+    },
+    {
+      "key": "R98",
+      "doi-asserted-by": "crossref",
+      "first-page": "945",
+      "DOI": "10.1093/mnras/277.3.945",
+      "volume": "277",
+      "author": "Tsujimoto",
+      "year": "1995",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "R99",
+      "doi-asserted-by": "crossref",
+      "first-page": "1177",
+      "DOI": "10.1086/422734",
+      "volume": "128",
+      "author": "Venn",
+      "year": "2004",
+      "journal-title": "AJ"
+    },
+    {
+      "key": "R100",
+      "doi-asserted-by": "crossref",
+      "first-page": "L53",
+      "DOI": "10.1086/521998",
+      "volume": "667",
+      "author": "Walker",
+      "year": "2007",
+      "journal-title": "ApJ"
+    },
+    {
+      "key": "R101",
+      "doi-asserted-by": "crossref",
+      "first-page": "3100",
+      "DOI": "10.1088/0004-6256/137/2/3100",
+      "volume": "137",
+      "author": "Walker",
+      "year": "2009",
+      "journal-title": "AJ"
+    },
+    {
+      "key": "R102",
+      "doi-asserted-by": "crossref",
+      "first-page": "968",
+      "DOI": "10.1086/376617",
+      "volume": "593",
+      "author": "Wanajo",
+      "year": "2003",
+      "journal-title": "ApJ"
+    },
+    {
+      "key": "R103",
+      "doi-asserted-by": "crossref",
+      "first-page": "229",
+      "DOI": "10.1086/174638",
+      "volume": "433",
+      "author": "Woosley",
+      "year": "1994",
+      "journal-title": "ApJ"
+    },
+    {
+      "key": "R104",
+      "doi-asserted-by": "crossref",
+      "first-page": "417",
+      "DOI": "10.1086/321795",
+      "volume": "136",
+      "author": "Yi",
+      "year": "2001",
+      "journal-title": "ApJS"
+    },
+    {
+      "key": "R105",
+      "doi-asserted-by": "crossref",
+      "first-page": "1758",
+      "DOI": "10.1086/300820",
+      "volume": "117",
+      "author": "Young",
+      "year": "1999",
+      "journal-title": "AJ"
+    },
+    {
+      "key": "R106",
+      "doi-asserted-by": "crossref",
+      "first-page": "507",
+      "DOI": "10.1051/0004-6361:20041014",
+      "volume": "423",
+      "author": "Zoccali",
+      "year": "2004",
+      "journal-title": "A&A"
+    }
+  ],
+  "container-title": "Astronomy &amp; Astrophysics",
+  "original-title": [],
+  "link": [
+    {
+      "URL": "http://www.aanda.org/10.1051/0004-6361/200913413/pdf",
+      "content-type": "unspecified",
+      "content-version": "vor",
+      "intended-application": "similarity-checking"
+    }
+  ],
+  "deposited": {
+    "date-parts": [
+      [
+        2019,
+        5,
+        31
+      ]
+    ],
+    "date-time": "2019-05-31T08:43:54Z",
+    "timestamp": 1559292234000
+  },
+  "score": 1,
+  "resource": {
+    "primary": {
+      "URL": "http://www.aanda.org/10.1051/0004-6361/200913413"
+    }
+  },
+  "subtitle": [],
+  "short-title": [],
+  "issued": {
+    "date-parts": [
+      [
+        2010,
+        11
+      ]
+    ]
+  },
+  "references-count": 106,
+  "alternative-id": [
+    "aa13413-09"
+  ],
+  "URL": "http://dx.doi.org/10.1051/0004-6361/200913413",
+  "relation": {},
+  "ISSN": [
+    "0004-6361",
+    "1432-0746"
+  ],
+  "subject": [],
+  "container-title-short": "A&amp;A",
+  "published": {
+    "date-parts": [
+      [
+        2010,
+        11
+      ]
+    ]
+  }
+}

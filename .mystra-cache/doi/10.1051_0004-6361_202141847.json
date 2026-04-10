@@ -1,0 +1,810 @@
+{
+  "indexed": {
+    "date-parts": [
+      [
+        2026,
+        4,
+        3
+      ]
+    ],
+    "date-time": "2026-04-03T01:54:04Z",
+    "timestamp": 1775181244495,
+    "version": "3.50.1"
+  },
+  "reference-count": 60,
+  "publisher": "EDP Sciences",
+  "license": [
+    {
+      "start": {
+        "date-parts": [
+          [
+            2022,
+            10,
+            24
+          ]
+        ],
+        "date-time": "2022-10-24T00:00:00Z",
+        "timestamp": 1666569600000
+      },
+      "content-version": "vor",
+      "delay-in-days": 23,
+      "URL": "https://creativecommons.org/licenses/by/4.0"
+    }
+  ],
+  "content-domain": {
+    "domain": [],
+    "crossmark-restriction": false
+  },
+  "accepted": {
+    "date-parts": [
+      [
+        2022,
+        5,
+        5
+      ]
+    ]
+  },
+  "published-print": {
+    "date-parts": [
+      [
+        2022,
+        10
+      ]
+    ]
+  },
+  "abstract": "<jats:p><jats:italic>Context.</jats:italic>The Ultraviolet Near-Infrared Optical Northern Survey (UNIONS) is an ongoing collaboration that will provide the largest deep photometric survey of the northern sky in four optical bands to date. As part of this collaboration, the Canada-France Imaging Survey (CFIS) is observing<jats:italic>r</jats:italic>-band data with an average seeing of 0.65 arcsec, which is complete to magnitude 24.5 and thus ideal for weak-lensing studies.</jats:p><jats:p><jats:italic>Aims.</jats:italic>We perform the first weak-lensing analysis of CFIS<jats:italic>r</jats:italic>-band data over an area spanning 1700 deg<jats:sup>2</jats:sup>of the sky. We create a catalogue with measured shapes for 40 million galaxies, corresponding to an effective density of 6.8 galaxies per square arcminute, and demonstrate a low level of systematic biases. This work serves as the basis for further cosmological studies that will use the full UNIONS survey of 4800 deg<jats:sup>2</jats:sup>when completed.</jats:p><jats:p><jats:italic>Methods.</jats:italic>Here we present S<jats:sc>HAPE</jats:sc>P<jats:sc>IPE</jats:sc>, a newly developed weak-lensing pipeline. This pipeline makes use of state-of-the-art methods such as N<jats:sc>GMIX</jats:sc>for accurate galaxy shape measurement. Shear calibration is performed with metacalibration. We carry out extensive validation tests on the point spread function (PSF) and on the galaxy shapes. In addition, we create realistic image simulations to validate the estimated shear.</jats:p><jats:p><jats:italic>Results.</jats:italic>We quantify the PSF model accuracy and show that the level of systematics is low as measured by the PSF residuals. Their effect on the shear two-point correlation function is sub-dominant compared to the cosmological contribution on angular scales &lt; 100′. The additive shear bias is below 5 × 10<jats:sup>−4</jats:sup>, and the residual multiplicative shear bias is at most 10<jats:sup>−3</jats:sup>as measured on image simulations. Using complete orthogonal sets of<jats:italic>E</jats:italic>-/<jats:italic>B</jats:italic>-mode integrals (COSEBIs), we show that there are no significant<jats:italic>B</jats:italic>-modes present in second-order shear statistics. We present convergence maps and see clear correlations of the<jats:italic>E</jats:italic>-mode with known cluster positions. We measure the stacked tangential shear profile around<jats:italic>Planck</jats:italic>clusters at a significance higher than 4<jats:italic>σ</jats:italic>.</jats:p>",
+  "DOI": "10.1051/0004-6361/202141847",
+  "type": "journal-article",
+  "created": {
+    "date-parts": [
+      [
+        2022,
+        7,
+        15
+      ]
+    ],
+    "date-time": "2022-07-15T07:21:57Z",
+    "timestamp": 1657869717000
+  },
+  "page": "A162",
+  "source": "Crossref",
+  "is-referenced-by-count": 25,
+  "title": "ShapePipe: A new shape measurement pipeline and weak-lensing application to UNIONS/CFIS data",
+  "prefix": "10.1051",
+  "volume": "666",
+  "author": [
+    {
+      "given": "Axel",
+      "family": "Guinot",
+      "sequence": "first",
+      "affiliation": []
+    },
+    {
+      "given": "Martin",
+      "family": "Kilbinger",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "given": "Samuel",
+      "family": "Farrens",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "given": "Austin",
+      "family": "Peel",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "given": "Arnau",
+      "family": "Pujol",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "given": "Morgan",
+      "family": "Schmitz",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "given": "Jean-Luc",
+      "family": "Starck",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "given": "Thomas",
+      "family": "Erben",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "given": "Raphael",
+      "family": "Gavazzi",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "given": "Stephen",
+      "family": "Gwyn",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "given": "Michael J.",
+      "family": "Hudson",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "given": "Hendrik",
+      "family": "Hildebrandt",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "given": "Liaudat",
+      "family": "Tobias",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "given": "Lance",
+      "family": "Miller",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "given": "Isaac",
+      "family": "Spitzer",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "given": "Ludovic",
+      "family": "Van Waerbeke",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "given": "Jean-Charles",
+      "family": "Cuillandre",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "given": "Sébastien",
+      "family": "Fabbro",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "given": "Alan",
+      "family": "McConnachie",
+      "sequence": "additional",
+      "affiliation": []
+    },
+    {
+      "given": "Yannick",
+      "family": "Mellier",
+      "sequence": "additional",
+      "affiliation": []
+    }
+  ],
+  "member": "250",
+  "published-online": {
+    "date-parts": [
+      [
+        2022,
+        10,
+        24
+      ]
+    ]
+  },
+  "reference": [
+    {
+      "key": "R1",
+      "unstructured": "Albrecht A., Bernstein G., Cahn R., et al. 2006, ArXiv e-prints [arXiv:astro-ph/0609591]"
+    },
+    {
+      "key": "R2",
+      "doi-asserted-by": "crossref",
+      "first-page": "A33",
+      "DOI": "10.1051/0004-6361/201322068",
+      "volume": "558",
+      "author": "Robitaille",
+      "year": "2013",
+      "journal-title": "A&A"
+    },
+    {
+      "key": "R3",
+      "doi-asserted-by": "crossref",
+      "first-page": "123",
+      "DOI": "10.3847/1538-3881/aac387",
+      "volume": "156",
+      "author": "Price-Whelan",
+      "year": "2018",
+      "journal-title": "AJ"
+    },
+    {
+      "key": "R4",
+      "doi-asserted-by": "crossref",
+      "first-page": "673",
+      "DOI": "10.1046/j.1365-8711.2003.06877.x",
+      "volume": "344",
+      "author": "Bacon",
+      "year": "2003",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "R5",
+      "doi-asserted-by": "crossref",
+      "first-page": "1880",
+      "DOI": "10.1093/mnras/stt2326",
+      "volume": "438",
+      "author": "Bernstein",
+      "year": "2014",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "R6",
+      "unstructured": "Bertin E. 2011, in Astronomical Data Analysis Software and Systems XX, eds. Evans I. N., Accomazzi A., Mink D. J., & Rots A. H., ASP Conf. Ser., 442, 435"
+    },
+    {
+      "key": "R7",
+      "doi-asserted-by": "crossref",
+      "first-page": "393",
+      "DOI": "10.1051/aas:1996164",
+      "volume": "117",
+      "author": "Bertin",
+      "year": "1996",
+      "journal-title": "A&AS"
+    },
+    {
+      "key": "R8",
+      "doi-asserted-by": "crossref",
+      "first-page": "A1",
+      "DOI": "10.1051/0004-6361/201833051",
+      "volume": "616",
+      "author": "Brown",
+      "year": "2018",
+      "journal-title": "A&A"
+    },
+    {
+      "key": "R9",
+      "doi-asserted-by": "crossref",
+      "first-page": "1081",
+      "DOI": "10.1364/AO.34.001081",
+      "volume": "34",
+      "author": "Buscher",
+      "year": "1995",
+      "journal-title": "Appl. Opt."
+    },
+    {
+      "key": "R10",
+      "unstructured": "Chambers K. C., Magnier E. A., Metcalfe N., et al. 2016, The Pan-STARRS1 Surveys"
+    },
+    {
+      "key": "R11",
+      "doi-asserted-by": "crossref",
+      "first-page": "2",
+      "DOI": "10.3847/1538-4365/ab1658",
+      "volume": "242",
+      "author": "Chisari",
+      "year": "2019",
+      "journal-title": "ApJS"
+    },
+    {
+      "key": "R12",
+      "unstructured": "Cuillandre J., Mahoney B., & Withington K. 2014, in Astronomical Data Analysis Software and Systems XXIII, eds. Manset N., & Forshay P., ASP Conf. Ser., 485, 81"
+    },
+    {
+      "key": "R13",
+      "doi-asserted-by": "crossref",
+      "first-page": "1108",
+      "DOI": "10.1016/j.jpdc.2005.03.010",
+      "volume": "65",
+      "author": "Dalcin",
+      "year": "2005",
+      "journal-title": "J. Parallel Distrib. Comput."
+    },
+    {
+      "key": "R14",
+      "doi-asserted-by": "crossref",
+      "first-page": "655",
+      "DOI": "10.1016/j.jpdc.2007.09.005",
+      "volume": "68",
+      "author": "Dalcin",
+      "year": "2008",
+      "journal-title": "J. Parallel Distrib. Comput."
+    },
+    {
+      "key": "R15",
+      "doi-asserted-by": "crossref",
+      "first-page": "1124",
+      "DOI": "10.1016/j.advwatres.2011.04.013",
+      "volume": "34",
+      "author": "Dalcin",
+      "year": "2011",
+      "journal-title": "Adv. Water Resources"
+    },
+    {
+      "key": "R16",
+      "doi-asserted-by": "crossref",
+      "first-page": "44",
+      "DOI": "10.3847/0004-6256/151/2/44",
+      "volume": "151",
+      "author": "Dawson",
+      "year": "2016",
+      "journal-title": "AJ"
+    },
+    {
+      "key": "R17",
+      "doi-asserted-by": "crossref",
+      "first-page": "83",
+      "DOI": "10.1088/0004-637X/757/1/83",
+      "volume": "757",
+      "author": "Desai",
+      "year": "2012",
+      "journal-title": "ApJ"
+    },
+    {
+      "key": "R18",
+      "unstructured": "DESI Collaboration (Aghamousa A., et al.) 2016, ArXiv e-prints [arXiv:1611.00036]"
+    },
+    {
+      "key": "R19",
+      "doi-asserted-by": "crossref",
+      "first-page": "72",
+      "DOI": "10.1088/0004-6256/142/3/72",
+      "volume": "142",
+      "author": "Eisenstein",
+      "year": "2011",
+      "journal-title": "AJ"
+    },
+    {
+      "key": "R20",
+      "doi-asserted-by": "crossref",
+      "first-page": "2545",
+      "DOI": "10.1093/mnras/stt928",
+      "volume": "433",
+      "author": "Erben",
+      "year": "2013",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "R21",
+      "doi-asserted-by": "crossref",
+      "first-page": "2699",
+      "DOI": "10.1093/mnras/staa1726",
+      "volume": "497",
+      "author": "Fang",
+      "year": "2020",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "R22",
+      "doi-asserted-by": "crossref",
+      "first-page": "010",
+      "DOI": "10.1088/1475-7516/2020/05/010",
+      "volume": "2020",
+      "author": "Fang",
+      "year": "2020",
+      "journal-title": "JCAP"
+    },
+    {
+      "key": "R23",
+      "doi-asserted-by": "crossref",
+      "first-page": "100402",
+      "DOI": "10.1016/j.ascom.2020.100402",
+      "volume": "32",
+      "author": "Farrens",
+      "year": "2020",
+      "journal-title": "Astron. Comput."
+    },
+    {
+      "key": "R24",
+      "doi-asserted-by": "crossref",
+      "first-page": "4312",
+      "DOI": "10.1093/mnras/stab918",
+      "volume": "504",
+      "author": "Gatti",
+      "year": "2021",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "R25",
+      "doi-asserted-by": "crossref",
+      "first-page": "212",
+      "DOI": "10.1086/526794",
+      "volume": "120",
+      "author": "Gwyn",
+      "year": "2008",
+      "journal-title": "PASP"
+    },
+    {
+      "key": "R26",
+      "doi-asserted-by": "crossref",
+      "first-page": "357",
+      "DOI": "10.1038/s41586-020-2649-2",
+      "volume": "585",
+      "author": "Harris",
+      "year": "2020",
+      "journal-title": "Nature"
+    },
+    {
+      "key": "R27",
+      "doi-asserted-by": "crossref",
+      "first-page": "146",
+      "DOI": "10.1111/j.1365-2966.2012.21952.x",
+      "volume": "427",
+      "author": "Heymans",
+      "year": "2012",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "R28",
+      "doi-asserted-by": "crossref",
+      "first-page": "2355",
+      "DOI": "10.1111/j.1365-2966.2012.20468.x",
+      "volume": "421",
+      "author": "Hildebrandt",
+      "year": "2012",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "R29",
+      "doi-asserted-by": "crossref",
+      "first-page": "635",
+      "DOI": "10.1093/mnras/stw2013",
+      "volume": "463",
+      "author": "Hildebrandt",
+      "year": "2016",
+      "journal-title": "MMNRS"
+    },
+    {
+      "key": "R30",
+      "doi-asserted-by": "crossref",
+      "first-page": "459",
+      "DOI": "10.1046/j.1365-8711.2003.06683.x",
+      "volume": "343",
+      "author": "Hirata",
+      "year": "2003",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "R31",
+      "unstructured": "Huff E., & Mandelbaum R. 2017, ArXiv e-prints [arXiv:1702.02600]"
+    },
+    {
+      "key": "R32",
+      "unstructured": "Jarvis M. 2015, TreeCorr: Two-point Correlation Functions"
+    },
+    {
+      "key": "R33",
+      "doi-asserted-by": "crossref",
+      "first-page": "2245",
+      "DOI": "10.1093/mnras/stw990",
+      "volume": "460",
+      "author": "Jarvis",
+      "year": "2016",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "R34",
+      "unstructured": "Joblib Development Team 2020, Joblib: running Python functions as pipeline jobs"
+    },
+    {
+      "key": "R35",
+      "doi-asserted-by": "crossref",
+      "first-page": "2528",
+      "DOI": "10.1093/mnras/stu588",
+      "volume": "441",
+      "author": "Kacprzak",
+      "year": "2014",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "R36",
+      "doi-asserted-by": "crossref",
+      "first-page": "441",
+      "DOI": "10.1086/172297",
+      "volume": "404",
+      "author": "Kaiser",
+      "year": "1993",
+      "journal-title": "ApJ"
+    },
+    {
+      "key": "R37",
+      "doi-asserted-by": "crossref",
+      "first-page": "086901",
+      "DOI": "10.1088/0034-4885/78/8/086901",
+      "volume": "78",
+      "author": "Kilbinger",
+      "year": "2015",
+      "journal-title": "Rep. Prog. Phys."
+    },
+    {
+      "key": "R38",
+      "doi-asserted-by": "crossref",
+      "first-page": "677",
+      "DOI": "10.1051/0004-6361/200811247",
+      "volume": "497",
+      "author": "Kilbinger",
+      "year": "2009",
+      "journal-title": "A&A"
+    },
+    {
+      "key": "R39",
+      "doi-asserted-by": "crossref",
+      "first-page": "2100",
+      "DOI": "10.1093/mnras/stx1261",
+      "volume": "470",
+      "author": "Krause",
+      "year": "2017",
+      "journal-title": "MMNRAS"
+    },
+    {
+      "key": "R40",
+      "doi-asserted-by": "crossref",
+      "first-page": "A2",
+      "DOI": "10.1051/0004-6361/201834918",
+      "volume": "625",
+      "author": "Kuijken",
+      "year": "2019",
+      "journal-title": "A&A"
+    },
+    {
+      "key": "R41",
+      "doi-asserted-by": "crossref",
+      "first-page": "A27",
+      "DOI": "10.1051/0004-6361/202039584",
+      "volume": "646",
+      "author": "Liaudat",
+      "year": "2021",
+      "journal-title": "A&A"
+    },
+    {
+      "key": "R42",
+      "doi-asserted-by": "crossref",
+      "first-page": "393",
+      "DOI": "10.1146/annurev-astro-081817-051928",
+      "volume": "56",
+      "author": "Mandelbaum",
+      "year": "2018",
+      "journal-title": "ARA&A"
+    },
+    {
+      "key": "R43",
+      "doi-asserted-by": "crossref",
+      "first-page": "S25",
+      "DOI": "10.1093/pasj/psx130",
+      "volume": "70",
+      "author": "Mandelbaum",
+      "year": "2017",
+      "journal-title": "PASJ"
+    },
+    {
+      "key": "R44",
+      "doi-asserted-by": "crossref",
+      "first-page": "S25",
+      "DOI": "10.1093/pasj/psx130",
+      "volume": "70",
+      "author": "Mandelbaum",
+      "year": "2018",
+      "journal-title": "PASJ"
+    },
+    {
+      "key": "R45",
+      "unstructured": "Mohr J. J., Armstrong R., Bertin E., et al. 2012, Software and Cyberinfrastructure for Astronomy II, Proceedings of SPIE, 8451"
+    },
+    {
+      "key": "R46",
+      "doi-asserted-by": "crossref",
+      "first-page": "A27",
+      "DOI": "10.1051/0004-6361/201525823",
+      "volume": "594",
+      "author": "Planck Collaboration XIII.",
+      "year": "2016",
+      "journal-title": "A&A"
+    },
+    {
+      "key": "R47",
+      "doi-asserted-by": "crossref",
+      "first-page": "A6",
+      "DOI": "10.1051/0004-6361/201833910",
+      "volume": "641",
+      "author": "Planck Collaboration VI.",
+      "year": "2020",
+      "journal-title": "A&A"
+    },
+    {
+      "key": "R48",
+      "first-page": "350",
+      "volume": "404",
+      "author": "Rowe",
+      "year": "2010",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "R49",
+      "doi-asserted-by": "crossref",
+      "first-page": "121",
+      "DOI": "10.1016/j.ascom.2015.02.002",
+      "volume": "10",
+      "author": "Rowe",
+      "year": "2015",
+      "journal-title": "Astron. Comput."
+    },
+    {
+      "key": "R50",
+      "doi-asserted-by": "crossref",
+      "first-page": "104",
+      "DOI": "10.1088/0004-637X/785/2/104",
+      "volume": "785",
+      "author": "Rykoff",
+      "year": "2014",
+      "journal-title": "ApJ"
+    },
+    {
+      "key": "R51",
+      "doi-asserted-by": "crossref",
+      "first-page": "1",
+      "DOI": "10.1051/0004-6361:20021341",
+      "volume": "396",
+      "author": "Schneider",
+      "year": "2002",
+      "journal-title": "A&A"
+    },
+    {
+      "key": "R52",
+      "doi-asserted-by": "crossref",
+      "first-page": "A116",
+      "DOI": "10.1051/0004-6361/201014235",
+      "volume": "520",
+      "author": "Schneider",
+      "year": "2010",
+      "journal-title": "A&A"
+    },
+    {
+      "key": "R53",
+      "doi-asserted-by": "crossref",
+      "first-page": "24",
+      "DOI": "10.3847/1538-4357/aa704b",
+      "volume": "841",
+      "author": "Sheldon",
+      "year": "2017",
+      "journal-title": "ApJ"
+    },
+    {
+      "key": "R54",
+      "doi-asserted-by": "crossref",
+      "first-page": "138",
+      "DOI": "10.3847/1538-4357/abb595",
+      "volume": "902",
+      "author": "Sheldon",
+      "year": "2020",
+      "journal-title": "ApJ"
+    },
+    {
+      "key": "R55",
+      "doi-asserted-by": "crossref",
+      "first-page": "3103",
+      "DOI": "10.1093/mnras/stw3250",
+      "volume": "466",
+      "author": "Simet",
+      "year": "2017",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "R56",
+      "doi-asserted-by": "crossref",
+      "first-page": "3",
+      "DOI": "10.1007/BF00653471",
+      "volume": "7",
+      "author": "Sunyaev",
+      "year": "1970",
+      "journal-title": "Ap&SS"
+    },
+    {
+      "key": "R57",
+      "doi-asserted-by": "crossref",
+      "first-page": "537",
+      "DOI": "10.1146/annurev.aa.18.090180.002541",
+      "volume": "18",
+      "author": "Sunyaev",
+      "year": "1980",
+      "journal-title": "ARA&A"
+    },
+    {
+      "key": "R58",
+      "doi-asserted-by": "crossref",
+      "first-page": "977",
+      "DOI": "10.1046/j.1365-8711.2001.04937.x",
+      "volume": "328",
+      "author": "Trujillo",
+      "year": "2001",
+      "journal-title": "MNRAS"
+    },
+    {
+      "key": "R59",
+      "doi-asserted-by": "crossref",
+      "first-page": "91",
+      "DOI": "10.1016/j.astropartphys.2006.05.008",
+      "volume": "26",
+      "author": "Van Waerbeke",
+      "year": "2006",
+      "journal-title": "Astropart. Phys."
+    },
+    {
+      "key": "R60",
+      "doi-asserted-by": "crossref",
+      "first-page": "1149",
+      "DOI": "10.1093/mnras/sty2219",
+      "volume": "481",
+      "author": "Zuntz",
+      "year": "2018",
+      "journal-title": "MNRAS"
+    }
+  ],
+  "container-title": "Astronomy &amp; Astrophysics",
+  "original-title": [],
+  "link": [
+    {
+      "URL": "https://www.aanda.org/10.1051/0004-6361/202141847/pdf",
+      "content-type": "unspecified",
+      "content-version": "vor",
+      "intended-application": "similarity-checking"
+    }
+  ],
+  "deposited": {
+    "date-parts": [
+      [
+        2024,
+        9,
+        29
+      ]
+    ],
+    "date-time": "2024-09-29T05:31:08Z",
+    "timestamp": 1727587868000
+  },
+  "score": 1,
+  "resource": {
+    "primary": {
+      "URL": "https://www.aanda.org/10.1051/0004-6361/202141847"
+    }
+  },
+  "subtitle": [],
+  "short-title": [],
+  "issued": {
+    "date-parts": [
+      [
+        2022,
+        10
+      ]
+    ]
+  },
+  "references-count": 60,
+  "alternative-id": [
+    "aa41847-21"
+  ],
+  "URL": "http://dx.doi.org/10.1051/0004-6361/202141847",
+  "relation": {},
+  "ISSN": [
+    "0004-6361",
+    "1432-0746"
+  ],
+  "subject": [],
+  "container-title-short": "A&amp;A",
+  "published": {
+    "date-parts": [
+      [
+        2022,
+        10
+      ]
+    ]
+  }
+}
