@@ -138,7 +138,7 @@ func CheckLegacyFormat(s *Storage) ([]CheckIssue, error) {
 		if err != nil {
 			continue
 		}
-		_, renamedTitle, err := rewriteFrontmatterName(frontmatter)
+		_, renamedTitle, removedDependsOn, err := normalizeLegacyFrontmatter(frontmatter)
 		if err != nil {
 			continue
 		}
@@ -148,6 +148,14 @@ func CheckLegacyFormat(s *Storage) ([]CheckIssue, error) {
 				FiberID: file.id,
 				Path:    "frontmatter",
 				Message: `legacy frontmatter key "title" should be renamed to "name"`,
+			})
+		}
+		if removedDependsOn {
+			issues = append(issues, CheckIssue{
+				Level:   CheckLevelError,
+				FiberID: file.id,
+				Path:    "frontmatter",
+				Message: `legacy frontmatter key "depends-on" should be removed`,
 			})
 		}
 		if _, strippedAnchor := stripLegacyMystAnchor(file.id, body); strippedAnchor {

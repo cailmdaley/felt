@@ -49,6 +49,8 @@ func TestCheckCommandReportsLegacyFormatIssues(t *testing.T) {
 	}
 	content := `---
 title: Legacy Fiber
+depends-on:
+  - upstream
 created-at: 2026-04-10T10:00:00Z
 ---
 
@@ -66,6 +68,9 @@ Body.
 	}
 	if !strings.Contains(output, `legacy frontmatter key "title" should be renamed to "name"`) {
 		t.Fatalf("missing legacy title lint output:\n%s", output)
+	}
+	if !strings.Contains(output, `legacy frontmatter key "depends-on" should be removed`) {
+		t.Fatalf("missing legacy depends-on lint output:\n%s", output)
 	}
 	if !strings.Contains(output, "legacy MyST anchor should be removed") {
 		t.Fatalf("missing legacy anchor lint output:\n%s", output)

@@ -52,6 +52,7 @@ type MigrationEntry struct {
 type MigrationResult struct {
 	Entries               []MigrationEntry
 	TitleToNameIDs        []string
+	RemovedDependsOnIDs   []string
 	StrippedMystAnchorIDs []string
 }
 
@@ -284,11 +285,12 @@ func (s *Storage) Migrate(dryRun bool) (*MigrationResult, error) {
 		return nil, err
 	}
 
-	titleIDs, anchorIDs, err := s.NormalizeFiberFiles(dryRun)
+	titleIDs, dependsOnIDs, anchorIDs, err := s.NormalizeFiberFiles(dryRun)
 	if err != nil {
 		return nil, err
 	}
 	result.TitleToNameIDs = titleIDs
+	result.RemovedDependsOnIDs = dependsOnIDs
 	result.StrippedMystAnchorIDs = anchorIDs
 	return result, nil
 }
@@ -429,29 +431,33 @@ func (s *Storage) MigrateFlatFiles(dryRun bool) (*MigrationResult, error) {
 
 // NormalizeFiberFiles rewrites legacy per-file format details in-place:
 // frontmatter `title` -> `name`, and leading MyST anchor lines in bodies.
-func (s *Storage) NormalizeFiberFiles(dryRun bool) ([]string, []string, error) {
+func (s *Storage) NormalizeFiberFiles(dryRun bool) ([]string, []string, []string, error) {
 	files, err := s.listFiberFiles()
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	var titleIDs []string
+	var dependsOnIDs []string
 	var anchorIDs []string
 	for _, file := range files {
 		data, err := os.ReadFile(file.path)
 		if err != nil {
-			return nil, nil, fmt.Errorf("reading fiber %s: %w", file.path, err)
+			return nil, nil, nil, fmt.Errorf("reading fiber %s: %w", file.path, err)
 		}
 
-		rewritten, renamedTitle, strippedAnchor, changed, err := normalizeFiberFile(file.id, data)
+		rewritten, renamedTitle, removedDependsOn, strippedAnchor, changed, err := normalizeFiberFile(file.id, data)
 		if err != nil {
-			return nil, nil, fmt.Errorf("normalize fiber %s: %w", file.path, err)
+			return nil, nil, nil, fmt.Errorf("normalize fiber %s: %w", file.path, err)
 		}
 		if !changed {
 			continue
 		}
 		if renamedTitle {
 			titleIDs = append(titleIDs, file.id)
+		}
+		if removedDependsOn {
+			dependsOnIDs = append(dependsOnIDs, file.id)
 		}
 		if strippedAnchor {
 			anchorIDs = append(anchorIDs, file.id)
@@ -460,29 +466,30 @@ func (s *Storage) NormalizeFiberFiles(dryRun bool) ([]string, []string, error) {
 			continue
 		}
 		if err := os.WriteFile(file.path, rewritten, 0644); err != nil {
-			return nil, nil, fmt.Errorf("writing normalized fiber %s: %w", file.path, err)
+			return nil, nil, nil, fmt.Errorf("writing normalized fiber %s: %w", file.path, err)
 		}
 	}
 
 	slices.Sort(titleIDs)
+	slices.Sort(dependsOnIDs)
 	slices.Sort(anchorIDs)
-	return titleIDs, anchorIDs, nil
+	return titleIDs, dependsOnIDs, anchorIDs, nil
 }
 
-func normalizeFiberFile(id string, content []byte) ([]byte, bool, bool, bool, error) {
+func normalizeFiberFile(id string, content []byte) ([]byte, bool, bool, bool, bool, error) {
 	frontmatter, body, err := splitFrontmatter(content, true)
 	if err != nil {
-		return nil, false, false, false, err
+		return nil, false, false, false, false, err
 	}
 
-	rewrittenFrontmatter, renamedTitle, err := rewriteFrontmatterName(frontmatter)
+	rewrittenFrontmatter, renamedTitle, removedDependsOn, err := normalizeLegacyFrontmatter(frontmatter)
 	if err != nil {
-		return nil, false, false, false, err
+		return nil, false, false, false, false, err
 	}
 	rewrittenBody, strippedAnchor := stripLegacyMystAnchor(id, body)
-	changed := renamedTitle || strippedAnchor
+	changed := renamedTitle || removedDependsOn || strippedAnchor
 	if !changed {
-		return content, false, false, false, nil
+		return content, false, false, false, false, nil
 	}
 
 	var out bytes.Buffer
@@ -496,7 +503,7 @@ func normalizeFiberFile(id string, content []byte) ([]byte, bool, bool, bool, er
 			out.WriteString("\n")
 		}
 	}
-	return out.Bytes(), renamedTitle, strippedAnchor, true, nil
+	return out.Bytes(), renamedTitle, removedDependsOn, strippedAnchor, true, nil
 }
 
 // List returns all felts in the storage.

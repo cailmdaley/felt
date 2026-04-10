@@ -465,6 +465,8 @@ Parent body.
 	}
 	legacyC := `---
 title: Session Hub
+depends-on:
+  - legacy-parent
 created-at: 2026-03-15T11:00:00Z
 ---
 
@@ -483,6 +485,9 @@ Session body.
 	if !strings.Contains(out, "Would rename title -> name in session-hub") {
 		t.Fatalf("migrate dry-run: expected title rename, got: %s", out)
 	}
+	if !strings.Contains(out, "Would remove legacy depends-on from session-hub") {
+		t.Fatalf("migrate dry-run: expected depends-on removal, got: %s", out)
+	}
 	if !strings.Contains(out, "Would strip legacy MyST anchor from session-hub") {
 		t.Fatalf("migrate dry-run: expected anchor strip, got: %s", out)
 	}
@@ -491,7 +496,7 @@ Session body.
 	}
 
 	out = mustFelt(t, dir, "migrate", "--dir", migrateDir)
-	if !strings.Contains(out, "Migrated 2 flat fibers, 1 legacy title fields, 1 legacy MyST anchors") {
+	if !strings.Contains(out, "Migrated 2 flat fibers, 1 legacy title fields, 1 legacy depends-on keys, 1 legacy MyST anchors") {
 		t.Fatalf("migrate: expected summary, got: %s", out)
 	}
 	if _, err := os.Stat(filepath.Join(migrateDir, ".felt", "myst.yml")); err != nil {
@@ -521,7 +526,7 @@ Session body.
 		t.Fatalf("read migrated session hub: %v", err)
 	}
 	sessionHubText := string(sessionHubData)
-	if strings.Contains(sessionHubText, "title: Session Hub") || strings.Contains(sessionHubText, "(session-hub)=") {
+	if strings.Contains(sessionHubText, "title: Session Hub") || strings.Contains(sessionHubText, "depends-on:") || strings.Contains(sessionHubText, "(session-hub)=") {
 		t.Fatalf("migrate should normalize session hub, got:\n%s", sessionHubText)
 	}
 	if !strings.Contains(sessionHubText, "name: Session Hub") {

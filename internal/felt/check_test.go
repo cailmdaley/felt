@@ -234,7 +234,7 @@ func TestCheckSiblingDepthConsistencyWarning(t *testing.T) {
 	}
 }
 
-func TestCheckLegacyFormatReportsTitleAndMystAnchor(t *testing.T) {
+func TestCheckLegacyFormatReportsTitleDependsOnAndMystAnchor(t *testing.T) {
 	dir := t.TempDir()
 	s := NewStorage(dir)
 	if err := s.Init(); err != nil {
@@ -243,6 +243,8 @@ func TestCheckLegacyFormatReportsTitleAndMystAnchor(t *testing.T) {
 
 	content := `---
 title: Legacy Fiber
+depends-on:
+  - upstream
 created-at: 2026-04-10T10:00:00Z
 ---
 
@@ -262,14 +264,28 @@ Body.
 	if err != nil {
 		t.Fatalf("CheckLegacyFormat() error: %v", err)
 	}
-	if len(issues) != 2 {
-		t.Fatalf("CheckLegacyFormat() produced %d issues, want 2", len(issues))
+	if len(issues) != 3 {
+		t.Fatalf("CheckLegacyFormat() produced %d issues, want 3", len(issues))
 	}
-	if issues[0].Path != "body" && issues[1].Path != "body" {
+	bodyIssue := false
+	titleIssue := false
+	dependsOnIssue := false
+	for _, issue := range issues {
+		if issue.Path == "body" && strings.Contains(issue.Message, "legacy MyST anchor") {
+			bodyIssue = true
+		}
+		if issue.Path == "frontmatter" && strings.Contains(issue.Message, `"title"`) {
+			titleIssue = true
+		}
+		if issue.Path == "frontmatter" && strings.Contains(issue.Message, `"depends-on"`) {
+			dependsOnIssue = true
+		}
+	}
+	if !bodyIssue {
 		t.Fatalf("issues = %#v, want body issue", issues)
 	}
-	if issues[0].Path != "frontmatter" && issues[1].Path != "frontmatter" {
-		t.Fatalf("issues = %#v, want frontmatter issue", issues)
+	if !titleIssue || !dependsOnIssue {
+		t.Fatalf("issues = %#v, want title and depends-on frontmatter issues", issues)
 	}
 }
 

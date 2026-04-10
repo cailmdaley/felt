@@ -35,6 +35,7 @@ type GraphEdge struct {
 	ID    string `json:"id"`
 	Label string `json:"label"`
 }
+
 // GraphEdges is a slice of graph edges with helper methods.
 type GraphEdges []GraphEdge
 
@@ -471,45 +472,63 @@ func parseFrontmatter(id string, frontmatter []byte) (*Felt, error) {
 	return f, nil
 }
 
-func rewriteFrontmatterName(frontmatter []byte) ([]byte, bool, error) {
+func normalizeLegacyFrontmatter(frontmatter []byte) ([]byte, bool, bool, error) {
 	var node yaml.Node
 	if err := yaml.Unmarshal(frontmatter, &node); err != nil {
-		return nil, false, fmt.Errorf("parsing YAML frontmatter: %w", err)
+		return nil, false, false, fmt.Errorf("parsing YAML frontmatter: %w", err)
 	}
 	if len(node.Content) == 0 {
-		return frontmatter, false, nil
+		return frontmatter, false, false, nil
 	}
 
 	mapping := node.Content[0]
 	if mapping.Kind != yaml.MappingNode {
-		return nil, false, fmt.Errorf("frontmatter must be a YAML mapping")
+		return nil, false, false, fmt.Errorf("frontmatter must be a YAML mapping")
 	}
 
 	nameIndex := -1
 	titleIndex := -1
+	dependsOnIndex := -1
 	for i := 0; i+1 < len(mapping.Content); i += 2 {
 		switch mapping.Content[i].Value {
 		case "name":
 			nameIndex = i
 		case "title":
 			titleIndex = i
+		case "depends-on":
+			dependsOnIndex = i
 		}
 	}
-	if titleIndex == -1 {
-		return frontmatter, false, nil
-	}
 
+	renamedTitle := false
+	removedTitleEntry := false
 	if nameIndex == -1 {
-		mapping.Content[titleIndex].Value = "name"
-	} else {
+		if titleIndex != -1 {
+			mapping.Content[titleIndex].Value = "name"
+			renamedTitle = true
+		}
+	} else if titleIndex != -1 {
 		mapping.Content = append(mapping.Content[:titleIndex], mapping.Content[titleIndex+2:]...)
+		renamedTitle = true
+		removedTitleEntry = true
+	}
+	removedDependsOn := false
+	if dependsOnIndex != -1 {
+		if removedTitleEntry && titleIndex != -1 && titleIndex < dependsOnIndex {
+			dependsOnIndex -= 2
+		}
+		mapping.Content = append(mapping.Content[:dependsOnIndex], mapping.Content[dependsOnIndex+2:]...)
+		removedDependsOn = true
+	}
+	if !renamedTitle && !removedDependsOn {
+		return frontmatter, false, false, nil
 	}
 
 	rewritten, err := yaml.Marshal(mapping)
 	if err != nil {
-		return nil, false, fmt.Errorf("marshaling YAML frontmatter: %w", err)
+		return nil, false, false, fmt.Errorf("marshaling YAML frontmatter: %w", err)
 	}
-	return rewritten, true, nil
+	return rewritten, renamedTitle, removedDependsOn, nil
 }
 
 func stripLegacyMystAnchor(id, body string) (string, bool) {

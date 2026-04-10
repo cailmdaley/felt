@@ -16,6 +16,7 @@ Current checks cover:
   - broken narrative wikilinks / body references
   - broken ASTRA inputs.from references
   - legacy title frontmatter keys
+  - legacy depends-on frontmatter keys
   - legacy MyST body anchors
   - decisions without options
   - decisions with no remaining unexcluded options
