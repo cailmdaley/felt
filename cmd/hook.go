@@ -192,7 +192,7 @@ felt tree <id>                  # subtree for one fiber
 felt check                      # lint ASTRA/formalization issues
 felt nest <child> <parent>      # move into parent subtree
 felt unnest <child>             # promote back to top level
-felt migrate [--dry-run]        # flat files -> directory fibers
+felt migrate [--dry-run]        # normalize legacy layout/title/anchors
 felt export --format astra      # write astra.yaml from ASTRA frontmatter
 Also: hook session, rm, setup, update
 ` + "```" + `

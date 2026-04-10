@@ -2,6 +2,7 @@ package felt
 
 import (
 	"bufio"
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -49,7 +50,9 @@ type MigrationEntry struct {
 }
 
 type MigrationResult struct {
-	Entries []MigrationEntry
+	Entries               []MigrationEntry
+	TitleToNameIDs        []string
+	StrippedMystAnchorIDs []string
 }
 
 // NewStorage creates a storage instance for the given directory.
@@ -272,6 +275,24 @@ func (s *Storage) MoveSubtree(oldID, newID string) error {
 	return nil
 }
 
+// Migrate performs the storage-model normalization pass:
+// flat-file fibers become directory fibers, legacy frontmatter `title` fields
+// become `name`, and leading MyST anchor lines are stripped from bodies.
+func (s *Storage) Migrate(dryRun bool) (*MigrationResult, error) {
+	result, err := s.MigrateFlatFiles(dryRun)
+	if err != nil {
+		return nil, err
+	}
+
+	titleIDs, anchorIDs, err := s.NormalizeFiberFiles(dryRun)
+	if err != nil {
+		return nil, err
+	}
+	result.TitleToNameIDs = titleIDs
+	result.StrippedMystAnchorIDs = anchorIDs
+	return result, nil
+}
+
 // MigrateFlatFiles converts legacy top-level flat markdown fibers to
 // directory-based fibers with slug IDs, rewriting dependency references.
 func (s *Storage) MigrateFlatFiles(dryRun bool) (*MigrationResult, error) {
@@ -390,6 +411,78 @@ func (s *Storage) MigrateFlatFiles(dryRun bool) (*MigrationResult, error) {
 	}
 
 	return result, nil
+}
+
+// NormalizeFiberFiles rewrites legacy per-file format details in-place:
+// frontmatter `title` -> `name`, and leading MyST anchor lines in bodies.
+func (s *Storage) NormalizeFiberFiles(dryRun bool) ([]string, []string, error) {
+	files, err := s.listFiberFiles()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var titleIDs []string
+	var anchorIDs []string
+	for _, file := range files {
+		data, err := os.ReadFile(file.path)
+		if err != nil {
+			return nil, nil, fmt.Errorf("reading fiber %s: %w", file.path, err)
+		}
+
+		rewritten, renamedTitle, strippedAnchor, changed, err := normalizeFiberFile(file.id, data)
+		if err != nil {
+			return nil, nil, fmt.Errorf("normalize fiber %s: %w", file.path, err)
+		}
+		if !changed {
+			continue
+		}
+		if renamedTitle {
+			titleIDs = append(titleIDs, file.id)
+		}
+		if strippedAnchor {
+			anchorIDs = append(anchorIDs, file.id)
+		}
+		if dryRun {
+			continue
+		}
+		if err := os.WriteFile(file.path, rewritten, 0644); err != nil {
+			return nil, nil, fmt.Errorf("writing normalized fiber %s: %w", file.path, err)
+		}
+	}
+
+	slices.Sort(titleIDs)
+	slices.Sort(anchorIDs)
+	return titleIDs, anchorIDs, nil
+}
+
+func normalizeFiberFile(id string, content []byte) ([]byte, bool, bool, bool, error) {
+	frontmatter, body, err := splitFrontmatter(content, true)
+	if err != nil {
+		return nil, false, false, false, err
+	}
+
+	rewrittenFrontmatter, renamedTitle, err := rewriteFrontmatterName(frontmatter)
+	if err != nil {
+		return nil, false, false, false, err
+	}
+	rewrittenBody, strippedAnchor := stripLegacyMystAnchor(id, body)
+	changed := renamedTitle || strippedAnchor
+	if !changed {
+		return content, false, false, false, nil
+	}
+
+	var out bytes.Buffer
+	out.WriteString("---\n")
+	out.Write(rewrittenFrontmatter)
+	out.WriteString("---\n")
+	if rewrittenBody != "" {
+		out.WriteString("\n")
+		out.WriteString(rewrittenBody)
+		if !strings.HasSuffix(rewrittenBody, "\n") {
+			out.WriteString("\n")
+		}
+	}
+	return out.Bytes(), renamedTitle, strippedAnchor, true, nil
 }
 
 // List returns all felts in the storage.

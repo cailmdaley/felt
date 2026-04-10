@@ -9,11 +9,11 @@ Migrating a project from flat fibers (`slug-hex.md`) to directory fibers (`slug/
 ### 1. Run migration
 
 ```bash
-felt migrate --dry-run    # preview — check for collisions, slug renames
+felt migrate --dry-run    # preview — check flat-file moves, title renames, anchor stripping
 felt migrate              # big bang — no backwards compatibility
 ```
 
-The tool strips hex suffixes, creates `slug/slug.md` directories, and rewrites legacy `depends-on` references in migrated files.
+The tool strips hex suffixes, creates `slug/slug.md` directories, rewrites legacy `depends-on` references in migrated files, renames frontmatter `title:` to `name:`, and strips leading MyST anchor lines like `(slug)=` from fiber bodies.
 
 ### 2. Validate
 

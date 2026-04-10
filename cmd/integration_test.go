@@ -424,17 +424,38 @@ Parent body.
 	if err := os.WriteFile(filepath.Join(migrateDir, ".felt", "legacy-parent-1234abcd.md"), []byte(legacyB), 0644); err != nil {
 		t.Fatalf("write legacy parent: %v", err)
 	}
+	if err := os.MkdirAll(filepath.Join(migrateDir, ".felt", "session-hub"), 0755); err != nil {
+		t.Fatalf("mkdir legacy session hub: %v", err)
+	}
+	legacyC := `---
+title: Session Hub
+created-at: 2026-03-15T11:00:00Z
+---
+
+(session-hub)=
+
+Session body.
+`
+	if err := os.WriteFile(filepath.Join(migrateDir, ".felt", "session-hub", "session-hub.md"), []byte(legacyC), 0644); err != nil {
+		t.Fatalf("write legacy session hub: %v", err)
+	}
 
 	out = mustFelt(t, dir, "migrate", "--dir", migrateDir, "--dry-run")
 	if !strings.Contains(out, "Would migrate legacy-child-deadbeef -> legacy-child") {
 		t.Fatalf("migrate dry-run: expected mapping, got: %s", out)
+	}
+	if !strings.Contains(out, "Would rename title -> name in session-hub") {
+		t.Fatalf("migrate dry-run: expected title rename, got: %s", out)
+	}
+	if !strings.Contains(out, "Would strip legacy MyST anchor from session-hub") {
+		t.Fatalf("migrate dry-run: expected anchor strip, got: %s", out)
 	}
 	if _, err := os.Stat(filepath.Join(migrateDir, ".felt", "legacy-child-deadbeef.md")); err != nil {
 		t.Fatalf("migrate dry-run should keep flat file: %v", err)
 	}
 
 	out = mustFelt(t, dir, "migrate", "--dir", migrateDir)
-	if !strings.Contains(out, "Migrated 2 flat fibers") {
+	if !strings.Contains(out, "Migrated 2 flat fibers, 1 legacy title fields, 1 legacy MyST anchors") {
 		t.Fatalf("migrate: expected summary, got: %s", out)
 	}
 	if _, err := os.Stat(filepath.Join(migrateDir, ".felt", "myst.yml")); err != nil {
@@ -458,6 +479,17 @@ Parent body.
 	dep, ok := deps[0].(map[string]any)
 	if !ok || dep["id"] != "legacy-parent" {
 		t.Fatalf("migrate: expected rewritten dependency, got %#v", migratedShown["depends_on"])
+	}
+	sessionHubData, err := os.ReadFile(filepath.Join(migrateDir, ".felt", "session-hub", "session-hub.md"))
+	if err != nil {
+		t.Fatalf("read migrated session hub: %v", err)
+	}
+	sessionHubText := string(sessionHubData)
+	if strings.Contains(sessionHubText, "title: Session Hub") || strings.Contains(sessionHubText, "(session-hub)=") {
+		t.Fatalf("migrate should normalize session hub, got:\n%s", sessionHubText)
+	}
+	if !strings.Contains(sessionHubText, "name: Session Hub") {
+		t.Fatalf("migrate should write name field, got:\n%s", sessionHubText)
 	}
 
 	out, err = felt(dir, "tapestry")

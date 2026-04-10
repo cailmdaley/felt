@@ -17,10 +17,15 @@ var (
 
 var migrateCmd = &cobra.Command{
 	Use:   "migrate",
-	Short: "Migrate flat felt files to directory fibers",
-	Long: `Converts legacy top-level .felt/*.md files into directory-based fibers.
+	Short: "Normalize fibers into the current storage model",
+	Long: `Normalizes legacy felt storage details into the current model.
 
-Each migrated fiber lands at <slug>/<slug>.md, dependency IDs are rewritten,
+This migration pass:
+- converts legacy top-level .felt/*.md files into directory-based fibers
+- rewrites frontmatter key title -> name
+- strips leading MyST anchor lines like (slug)= from fiber bodies
+
+Each migrated flat fiber lands at <slug>/<slug>.md, dependency IDs are rewritten,
 and myst.yml is ensured.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -29,12 +34,12 @@ and myst.yml is ensured.`,
 			return err
 		}
 
-		result, err := storage.MigrateFlatFiles(migrateDryRun)
+		result, err := storage.Migrate(migrateDryRun)
 		if err != nil {
 			return err
 		}
-		if len(result.Entries) == 0 {
-			fmt.Println("No flat fibers to migrate")
+		if len(result.Entries) == 0 && len(result.TitleToNameIDs) == 0 && len(result.StrippedMystAnchorIDs) == 0 {
+			fmt.Println("No migrations needed")
 			return nil
 		}
 
@@ -42,14 +47,32 @@ and myst.yml is ensured.`,
 			for _, entry := range result.Entries {
 				fmt.Printf("Would migrate %s -> %s\n", entry.OldID, entry.NewID)
 			}
-			fmt.Printf("Dry run: %d flat fibers would migrate\n", len(result.Entries))
+			for _, id := range result.TitleToNameIDs {
+				fmt.Printf("Would rename title -> name in %s\n", id)
+			}
+			for _, id := range result.StrippedMystAnchorIDs {
+				fmt.Printf("Would strip legacy MyST anchor from %s\n", id)
+			}
+			fmt.Printf(
+				"Dry run: %d flat fibers, %d legacy title fields, %d legacy MyST anchors would migrate\n",
+				len(result.Entries), len(result.TitleToNameIDs), len(result.StrippedMystAnchorIDs),
+			)
 			return nil
 		}
 
 		for _, entry := range result.Entries {
 			fmt.Printf("Migrated %s -> %s\n", entry.OldID, entry.NewID)
 		}
-		fmt.Printf("Migrated %d flat fibers\n", len(result.Entries))
+		for _, id := range result.TitleToNameIDs {
+			fmt.Printf("Renamed title -> name in %s\n", id)
+		}
+		for _, id := range result.StrippedMystAnchorIDs {
+			fmt.Printf("Stripped legacy MyST anchor from %s\n", id)
+		}
+		fmt.Printf(
+			"Migrated %d flat fibers, %d legacy title fields, %d legacy MyST anchors\n",
+			len(result.Entries), len(result.TitleToNameIDs), len(result.StrippedMystAnchorIDs),
+		)
 		return nil
 	},
 }

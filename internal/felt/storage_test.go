@@ -3,6 +3,7 @@ package felt
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -919,5 +920,100 @@ Analysis body.
 	}
 	if got := hub.DependsOn[0].ID; got != "bao-analysis" {
 		t.Fatalf("pre-existing dep rewrite = %q, want %q", got, "bao-analysis")
+	}
+}
+
+func TestStorageMigrateRenamesTitleAndStripsMystAnchor(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStorage(dir)
+	if err := s.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	legacy := `---
+title: Session hub
+created-at: 2026-03-16T10:00:00Z
+---
+
+(session-hub)=
+
+# Session hub
+`
+	if err := os.MkdirAll(filepath.Join(s.root, "session-hub"), 0755); err != nil {
+		t.Fatalf("mkdir session-hub: %v", err)
+	}
+	targetPath := filepath.Join(s.root, "session-hub", "session-hub.md")
+	if err := os.WriteFile(targetPath, []byte(legacy), 0644); err != nil {
+		t.Fatalf("write legacy directory fiber: %v", err)
+	}
+
+	result, err := s.Migrate(false)
+	if err != nil {
+		t.Fatalf("Migrate() error: %v", err)
+	}
+	if got, want := result.TitleToNameIDs, []string{"session-hub"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("TitleToNameIDs = %#v, want %#v", got, want)
+	}
+	if got, want := result.StrippedMystAnchorIDs, []string{"session-hub"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("StrippedMystAnchorIDs = %#v, want %#v", got, want)
+	}
+
+	data, err := os.ReadFile(targetPath)
+	if err != nil {
+		t.Fatalf("read migrated directory fiber: %v", err)
+	}
+	text := string(data)
+	if strings.Contains(text, "title: Session hub") {
+		t.Fatalf("migrate should remove legacy title field:\n%s", text)
+	}
+	if !strings.Contains(text, "name: Session hub") {
+		t.Fatalf("migrate should write name field:\n%s", text)
+	}
+	if strings.Contains(text, "(session-hub)=") {
+		t.Fatalf("migrate should strip legacy MyST anchor:\n%s", text)
+	}
+}
+
+func TestStorageMigrateDryRunReportsTitleAndAnchorWithoutWriting(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStorage(dir)
+	if err := s.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	legacy := `---
+title: Session hub
+created-at: 2026-03-16T10:00:00Z
+---
+
+(session-hub)=
+
+# Session hub
+`
+	if err := os.MkdirAll(filepath.Join(s.root, "session-hub"), 0755); err != nil {
+		t.Fatalf("mkdir session-hub: %v", err)
+	}
+	targetPath := filepath.Join(s.root, "session-hub", "session-hub.md")
+	if err := os.WriteFile(targetPath, []byte(legacy), 0644); err != nil {
+		t.Fatalf("write legacy directory fiber: %v", err)
+	}
+
+	result, err := s.Migrate(true)
+	if err != nil {
+		t.Fatalf("Migrate(true) error: %v", err)
+	}
+	if got, want := result.TitleToNameIDs, []string{"session-hub"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("TitleToNameIDs = %#v, want %#v", got, want)
+	}
+	if got, want := result.StrippedMystAnchorIDs, []string{"session-hub"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("StrippedMystAnchorIDs = %#v, want %#v", got, want)
+	}
+
+	data, err := os.ReadFile(targetPath)
+	if err != nil {
+		t.Fatalf("read dry-run directory fiber: %v", err)
+	}
+	if string(data) != legacy {
+		t.Fatalf("dry-run should not rewrite file:\n%s", string(data))
 	}
 }

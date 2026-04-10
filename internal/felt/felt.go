@@ -525,6 +525,73 @@ func parseFrontmatter(id string, frontmatter []byte) (*Felt, error) {
 	return f, nil
 }
 
+func rewriteFrontmatterName(frontmatter []byte) ([]byte, bool, error) {
+	var node yaml.Node
+	if err := yaml.Unmarshal(frontmatter, &node); err != nil {
+		return nil, false, fmt.Errorf("parsing YAML frontmatter: %w", err)
+	}
+	if len(node.Content) == 0 {
+		return frontmatter, false, nil
+	}
+
+	mapping := node.Content[0]
+	if mapping.Kind != yaml.MappingNode {
+		return nil, false, fmt.Errorf("frontmatter must be a YAML mapping")
+	}
+
+	nameIndex := -1
+	titleIndex := -1
+	for i := 0; i+1 < len(mapping.Content); i += 2 {
+		switch mapping.Content[i].Value {
+		case "name":
+			nameIndex = i
+		case "title":
+			titleIndex = i
+		}
+	}
+	if titleIndex == -1 {
+		return frontmatter, false, nil
+	}
+
+	if nameIndex == -1 {
+		mapping.Content[titleIndex].Value = "name"
+	} else {
+		mapping.Content = append(mapping.Content[:titleIndex], mapping.Content[titleIndex+2:]...)
+	}
+
+	rewritten, err := yaml.Marshal(mapping)
+	if err != nil {
+		return nil, false, fmt.Errorf("marshaling YAML frontmatter: %w", err)
+	}
+	return rewritten, true, nil
+}
+
+func stripLegacyMystAnchor(id, body string) (string, bool) {
+	lines := strings.Split(body, "\n")
+	if len(lines) == 0 {
+		return body, false
+	}
+
+	anchor := fmt.Sprintf("(%s)=", path.Base(id))
+	firstContent := -1
+	for i, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		firstContent = i
+		break
+	}
+	if firstContent == -1 || strings.TrimSpace(lines[firstContent]) != anchor {
+		return body, false
+	}
+
+	lines = append(lines[:firstContent], lines[firstContent+1:]...)
+	if firstContent < len(lines) && strings.TrimSpace(lines[firstContent]) == "" {
+		lines = append(lines[:firstContent], lines[firstContent+1:]...)
+	}
+	return strings.Join(lines, "\n"), true
+}
+
 // splitFrontmatter separates YAML frontmatter from markdown body.
 // Frontmatter must be delimited by --- lines.
 func splitFrontmatter(content []byte, includeBody bool) ([]byte, string, error) {
