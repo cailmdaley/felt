@@ -70,6 +70,15 @@ from uncertainty to conclusion, not who said what to whom.]
 
 **Record what was decided, not who said what.** Attribution only for: action item owners, presenters, and formal proposals. "Concerns were raised about X" not "Alice said she was worried about X." Reducing attribution encourages candor and keeps notes lean.
 
+**Distinguish decisions from proposals.** Silence is not consent. Ask: did the group explicitly converge, or did one person float something and the conversation drift? Common failure: promoting "X suggested Y, nobody objected" to "decided Y" when Y was never endorsed. Frame these as proposals, on the table, or tabled, not decided. When in doubt, demote. Overclaiming creates phantom commitments that return later as "but we decided this."
+
+**Use structure to carry uncertainty.** When a meeting is dense, it can help to separate what landed from what did not. A useful default is:
+- **Decisions & next steps** — what the group landed on, plus who does what
+- **Not yet landed** — unresolved, proposed, or shelved items
+- **New evidence / findings** — facts reported, whether or not they drove a decision
+
+Do not force this structure onto every meeting. Use it when it clarifies the artifact; otherwise keep the simpler topic-based shape above.
+
 **Preserve reasoning, not debate.** For non-obvious decisions, capture the key factors that tipped the conclusion — not the back-and-forth. "Chose X over Y because Z" is sufficient.
 
 **Decisions get their own line.** Always labeled `**Decision:**` so they're scannable. Include rationale briefly. If there was meaningful dissent on a consequential matter, note the position (not the person).
@@ -81,6 +90,7 @@ from uncertainty to conclusion, not who said what to whom.]
 **Compress aggressively.** A 60-minute transcript is ~10,000 words. Good notes are 500-1,000. Cut: filler, false starts, repetition, procedural back-and-forth, small talk, information already in pre-reads. Keep: specific numbers, dates, commitments, the emotional temperature of important moments.
 
 **Tone shifts signal importance.** When the conversation's energy changes — someone gets animated, the room goes quiet, a joke lands that's actually about a real tension — note the substance, not the drama.
+
 
 ### 3. Review Notes with User
 
