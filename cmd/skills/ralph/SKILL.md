@@ -14,7 +14,7 @@ You are inside a loop. Your constitution (fiber spec) is in the system prompt ab
 ## Loop
 
 1. **Survey** — Fresh eyes. Read the constitution, check git log, explore the current state.
-2. **Work** — Stay and work from the vantage point the survey built. Exit when it degrades, not before.
+2. **Work** — Stay and work from the vantage point the survey built. Exit only after most of that context has been spent, not when one convenient task ends.
 3. **Felt** — Before exiting: `/felt`.
 4. **Exit** — `kill $PPID`
 
@@ -28,7 +28,14 @@ Default to staying. After the first meaningful piece of work, do not ask "is thi
 
 Exit when the next worthwhile move would require building substantially different context: a different subsystem with different invariants, a separate debugging thread with little overlap, a different artifact or workflow, or a fresh verification pass better done by new eyes. Do not exit merely because one coherent task is complete. If adjacent moves are still cheap from the context already in memory, do them now. The point is to exhaust a world-model, not to sample it.
 
-Do not run until the session is confused or sloppy. But do not leave early out of caution either. The danger is not only overextending; it is also under-harvesting the context you already paid to build. Short orthogonal tasks are not automatic exit triggers. If they fit cleanly into the current context, do them. Exit when continuing would mean switching to a different mental workspace, not when there are simply multiple things left to do.
+Use a simple threshold rule:
+
+- **Codex**: do not stop while more than ~50% of the useful working context for the current seam is still live.
+- **Claude**: do not stop while more than ~90% of the useful working context for the current seam is still live.
+
+These are not token counters. They are practical judgments about how much of the current world-model remains warm and exploitable. If you still remember the relevant files, invariants, recent commits, and adjacent cheap moves, context remains. Stay and use it.
+
+Do not run until the session is confused or sloppy. But do not leave early out of caution either. The danger is not only overextending; it is also under-harvesting the context you already paid to build. Short orthogonal tasks are not automatic exit triggers. If they fit cleanly into the current context, do them. Exit when continuing would mean switching to a different mental workspace, not when there are simply multiple things left to do. The default bias should be toward longer iterations, because context is expensive to earn and cheap to waste.
 
 ## Rules
 
