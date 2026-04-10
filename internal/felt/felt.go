@@ -219,6 +219,11 @@ type ASTRASuccessCriterion struct {
 	Condition string `yaml:"condition,omitempty" json:"condition,omitempty"`
 }
 
+type BodyRef struct {
+	Target   string `json:"target"`
+	Fragment string `json:"fragment,omitempty"`
+}
+
 // Felt represents a single fiber.
 type Felt struct {
 	ID              string                   `yaml:"-" json:"id"`
@@ -828,34 +833,65 @@ func ValidateID(id string) bool {
 // bodyLinkRe matches markdown links: [text](target)
 var bodyLinkRe = regexp.MustCompile(`\[[^\]]*\]\(([^)]+)\)`)
 
-// wikiLinkRe matches [[slug]] and [[slug#fragment|label]] wikilinks.
-var wikiLinkRe = regexp.MustCompile(`\[\[([^\]|#]+)(?:#[^\]|]+)?(?:\|[^\]]+)?\]\]`)
+// wikiLinkRe matches [[slug]], [[slug#fragment]], and [[slug#fragment|label]] wikilinks.
+var wikiLinkRe = regexp.MustCompile(`\[\[([^\]|#]+)(?:#([^\]|]+))?(?:\|[^\]]+)?\]\]`)
 
-// ExtractBodyRefs finds fiber ID references in a body from markdown links and wikilinks.
-func ExtractBodyRefs(body string) []string {
+// ExtractBodyRefs finds fiber references in a body from markdown links and wikilinks.
+func ExtractBodyRefs(body string) []BodyRef {
 	seen := map[string]bool{}
-	var refs []string
+	var refs []BodyRef
 
-	add := func(target string) {
-		// Exclude URLs and file paths with extensions
-		if strings.HasPrefix(target, "http") || strings.Contains(target, ".") {
+	add := func(target, fragment string) {
+		ref, ok := parseBodyRefTarget(target, fragment)
+		if !ok {
 			return
 		}
-		target = strings.TrimPrefix(target, "./")
-		target = strings.TrimPrefix(target, "../")
-		target = strings.Trim(target, "/")
-		if target == "" || seen[target] {
+		key := ref.Target + "#" + ref.Fragment
+		if seen[key] {
 			return
 		}
-		seen[target] = true
-		refs = append(refs, target)
+		seen[key] = true
+		refs = append(refs, ref)
 	}
 
 	for _, m := range bodyLinkRe.FindAllStringSubmatch(body, -1) {
-		add(m[1])
+		add(m[1], "")
 	}
 	for _, m := range wikiLinkRe.FindAllStringSubmatch(body, -1) {
-		add(m[1])
+		add(m[1], m[2])
 	}
 	return refs
+}
+
+func (r BodyRef) String() string {
+	if r.Fragment == "" {
+		return r.Target
+	}
+	return r.Target + "#" + r.Fragment
+}
+
+func parseBodyRefTarget(target, fragment string) (BodyRef, bool) {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return BodyRef{}, false
+	}
+	if strings.HasPrefix(target, "http://") || strings.HasPrefix(target, "https://") {
+		return BodyRef{}, false
+	}
+	if fragment == "" {
+		if idx := strings.Index(target, "#"); idx >= 0 {
+			fragment = target[idx+1:]
+			target = target[:idx]
+		}
+	}
+	target = strings.TrimPrefix(target, "./")
+	target = strings.TrimPrefix(target, "../")
+	target = strings.Trim(target, "/")
+	if target == "" || strings.Contains(path.Base(target), ".") {
+		return BodyRef{}, false
+	}
+	return BodyRef{
+		Target:   target,
+		Fragment: strings.TrimSpace(fragment),
+	}, true
 }

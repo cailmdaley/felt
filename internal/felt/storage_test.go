@@ -526,12 +526,33 @@ func TestStorageFindNestedByBasename(t *testing.T) {
 		t.Fatalf("Write() error: %v", err)
 	}
 
-	found, err := s.Find("damping")
+	found, err := s.FindInScope("bao-analysis", "damping")
 	if err != nil {
-		t.Fatalf("Find() error: %v", err)
+		t.Fatalf("FindInScope() error: %v", err)
 	}
 	if found.ID != f.ID {
-		t.Fatalf("Find() = %q, want %q", found.ID, f.ID)
+		t.Fatalf("FindInScope() = %q, want %q", found.ID, f.ID)
+	}
+}
+
+func TestStorageFindNestedByBasenameRequiresScope(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStorage(dir)
+	if err := s.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	f := &Felt{
+		ID:        "bao-analysis/damping-prior",
+		Name:      "Damping Prior",
+		CreatedAt: time.Now(),
+	}
+	if err := s.Write(f); err != nil {
+		t.Fatalf("Write() error: %v", err)
+	}
+
+	if _, err := s.Find("damping"); err == nil {
+		t.Fatal("Find() without scope should not resolve nested basename")
 	}
 }
 
@@ -557,6 +578,31 @@ func TestStorageFindPrefersExactIDOverPrefix(t *testing.T) {
 	}
 	if found.ID != "bao-analysis" {
 		t.Fatalf("Find() = %q, want exact top-level ID", found.ID)
+	}
+}
+
+func TestResolveScopedIDWalksUpLexicalScopes(t *testing.T) {
+	ids := []string{
+		"project",
+		"project/analysis",
+		"project/question",
+		"project/analysis/method",
+	}
+
+	got, err := ResolveScopedID(ids, "project/analysis", "question")
+	if err != nil {
+		t.Fatalf("ResolveScopedID() error: %v", err)
+	}
+	if got != "project/question" {
+		t.Fatalf("ResolveScopedID() = %q, want %q", got, "project/question")
+	}
+
+	got, err = ResolveScopedID(ids, "project/analysis", "method")
+	if err != nil {
+		t.Fatalf("ResolveScopedID() nested error: %v", err)
+	}
+	if got != "project/analysis/method" {
+		t.Fatalf("ResolveScopedID() = %q, want %q", got, "project/analysis/method")
 	}
 }
 

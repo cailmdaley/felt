@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
+	"strings"
 
 	"github.com/cailmdaley/felt/internal/felt"
 	"github.com/spf13/cobra"
@@ -64,6 +66,49 @@ func resolveProjectRoot() (string, error) {
 		return abs, nil
 	}
 	return felt.FindProjectRoot()
+}
+
+// resolveCommandScope derives the nearest containing fiber ID from the current
+// working directory when the command is run inside `.felt/`.
+func resolveCommandScope(root string) string {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	if changeDir != "" {
+		if abs, err := filepath.Abs(changeDir); err == nil {
+			cwd = abs
+		}
+	}
+
+	feltRoot := filepath.Join(root, felt.DirName)
+	if resolved, err := filepath.EvalSymlinks(feltRoot); err == nil {
+		feltRoot = resolved
+	}
+	if resolved, err := filepath.EvalSymlinks(cwd); err == nil {
+		cwd = resolved
+	}
+	rel, err := filepath.Rel(feltRoot, cwd)
+	if err != nil {
+		return ""
+	}
+	rel = filepath.ToSlash(rel)
+	if rel == "." || strings.HasPrefix(rel, "../") {
+		return ""
+	}
+
+	parts := strings.Split(rel, "/")
+	for i := len(parts); i > 0; i-- {
+		candidate := path.Join(parts[:i]...)
+		if candidate == "." || candidate == "" {
+			continue
+		}
+		fiberPath := filepath.Join(feltRoot, filepath.FromSlash(candidate), path.Base(candidate)+felt.FileExt)
+		if info, err := os.Stat(fiberPath); err == nil && !info.IsDir() {
+			return candidate
+		}
+	}
+	return ""
 }
 
 // outputJSON marshals data to JSON and prints it.

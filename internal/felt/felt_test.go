@@ -905,6 +905,28 @@ func TestMarshalMixedDependencies(t *testing.T) {
 	}
 }
 
+func TestExtractBodyRefsParsesFragments(t *testing.T) {
+	body := `
+See [[analysis]] and [[analysis#decision-a|decision]].
+Cross-check [method](project/method#step-1) and ignore [site](https://example.com).
+`
+
+	refs := ExtractBodyRefs(body)
+	if len(refs) != 3 {
+		t.Fatalf("ExtractBodyRefs() len = %d, want 3", len(refs))
+	}
+
+	got := map[string]bool{}
+	for _, ref := range refs {
+		got[ref.String()] = true
+	}
+	for _, want := range []string{"analysis", "analysis#decision-a", "project/method#step-1"} {
+		if !got[want] {
+			t.Fatalf("missing ref %q in %#v", want, refs)
+		}
+	}
+}
+
 func TestDependenciesHelpers(t *testing.T) {
 	deps := Dependencies{
 		{ID: "task-a"},

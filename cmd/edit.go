@@ -38,7 +38,8 @@ Examples:
 		}
 
 		storage := felt.NewStorage(root)
-		target, err := storage.FindMetadata(args[0])
+		scopeID := resolveCommandScope(root)
+		target, err := storage.FindMetadataInScope(scopeID, args[0])
 		if err != nil {
 			return err
 		}

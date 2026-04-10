@@ -143,7 +143,13 @@ func (s *Storage) ReadMetadata(id string) (*Felt, error) {
 // FindMetadata returns the first felt matching the ID prefix or basename,
 // reading only metadata from the matching file.
 func (s *Storage) FindMetadata(query string) (*Felt, error) {
-	return s.findWithMode(query, ParseMetadataOnly)
+	return s.FindMetadataInScope("", query)
+}
+
+// FindMetadataInScope returns the first felt matching the query using lexical
+// scoped resolution rooted at scopeID.
+func (s *Storage) FindMetadataInScope(scopeID, query string) (*Felt, error) {
+	return s.findWithModeAndScope(scopeID, query, ParseMetadataOnly)
 }
 
 func (s *Storage) readWithMode(id string, mode ParseMode) (*Felt, error) {
@@ -412,54 +418,47 @@ func (s *Storage) listWithMode(mode ParseMode, includeModTime bool) ([]*Felt, er
 
 // Find returns the first felt matching the ID prefix or basename.
 func (s *Storage) Find(query string) (*Felt, error) {
-	return s.findWithMode(query, ParseFull)
+	return s.FindInScope("", query)
+}
+
+// FindInScope returns the first felt matching the query using lexical scoped
+// resolution rooted at scopeID.
+func (s *Storage) FindInScope(scopeID, query string) (*Felt, error) {
+	return s.findWithModeAndScope(scopeID, query, ParseFull)
 }
 
 func (s *Storage) findWithMode(query string, mode ParseMode) (*Felt, error) {
+	return s.findWithModeAndScope("", query, mode)
+}
+
+func (s *Storage) findWithModeAndScope(scopeID, query string, mode ParseMode) (*Felt, error) {
 	files, err := s.listFiberFiles()
 	if err != nil {
 		return nil, err
 	}
 
-	query = path.Clean(query)
+	query = cleanLookupQuery(query)
+	scopeID = cleanLookupScope(scopeID)
+
+	pathByID := make(map[string]string, len(files))
+	ids := make([]string, 0, len(files))
 	for _, file := range files {
-		if path.Clean(file.id) != query {
-			continue
-		}
-		f, err := s.readWithMode(file.id, mode)
-		if err != nil {
-			return nil, err
-		}
-		if info, err := os.Stat(file.path); err == nil {
-			f.ModifiedAt = info.ModTime()
-		}
-		return f, nil
+		pathByID[file.id] = file.path
+		ids = append(ids, file.id)
 	}
 
-	var matchIDs []string
-	matchPaths := make(map[string]string)
-	for _, file := range files {
-		if MatchesIDQuery(file.id, query) {
-			matchIDs = append(matchIDs, file.id)
-			matchPaths[file.id] = file.path
-		}
+	matchID, err := ResolveScopedID(ids, scopeID, query)
+	if err != nil {
+		return nil, err
 	}
-
-	switch len(matchIDs) {
-	case 0:
-		return nil, fmt.Errorf("no felt found matching %q", query)
-	case 1:
-		f, err := s.readWithMode(matchIDs[0], mode)
-		if err != nil {
-			return nil, err
-		}
-		if info, err := os.Stat(matchPaths[matchIDs[0]]); err == nil {
-			f.ModifiedAt = info.ModTime()
-		}
-		return f, nil
-	default:
-		return nil, fmt.Errorf("ambiguous ID %q matches: %s", query, strings.Join(matchIDs, ", "))
+	f, err := s.readWithMode(matchID, mode)
+	if err != nil {
+		return nil, err
 	}
+	if info, err := os.Stat(pathByID[matchID]); err == nil {
+		f.ModifiedAt = info.ModTime()
+	}
+	return f, nil
 }
 
 func (s *Storage) listFiberFiles() ([]fiberFile, error) {
@@ -546,32 +545,151 @@ func disambiguateID(id string, n int) string {
 // FindByPrefix finds a fiber matching a query in an existing slice.
 // Use this instead of Find when you already have the list from List().
 func FindByPrefix(felts []*Felt, query string) (*Felt, error) {
+	return FindByScope(felts, "", query)
+}
+
+// FindByScope finds a fiber matching a query inside a lexical scope from an
+// existing slice.
+func FindByScope(felts []*Felt, scopeID, query string) (*Felt, error) {
+	byID := make(map[string]*Felt, len(felts))
+	ids := make([]string, 0, len(felts))
+	for _, f := range felts {
+		byID[f.ID] = f
+		ids = append(ids, f.ID)
+	}
+
+	id, err := ResolveScopedID(ids, scopeID, query)
+	if err != nil {
+		return nil, err
+	}
+	return byID[id], nil
+}
+
+// ResolveScopedID resolves query by walking up from scopeID like lexical scope.
+func ResolveScopedID(ids []string, scopeID, query string) (string, error) {
+	query = cleanLookupQuery(query)
+	scopeID = cleanLookupScope(scopeID)
+	if query == "" {
+		return "", fmt.Errorf("no felt found matching %q", query)
+	}
+
+	exact := map[string]struct{}{}
+	for _, id := range ids {
+		exact[path.Clean(id)] = struct{}{}
+	}
+	if _, ok := exact[query]; ok {
+		return query, nil
+	}
+
+	if strings.Contains(query, "/") {
+		for _, scope := range scopeChain(scopeID) {
+			candidate := scopedQuery(scope, query)
+			matches := collectPrefixMatches(ids, candidate)
+			switch len(matches) {
+			case 0:
+				continue
+			case 1:
+				return matches[0], nil
+			default:
+				return "", fmt.Errorf("ambiguous ID %q in scope %q matches: %s", query, displayScope(scope), strings.Join(matches, ", "))
+			}
+		}
+		return "", fmt.Errorf("no felt found matching %q", query)
+	}
+
+	for _, scope := range scopeChain(scopeID) {
+		matches := collectScopedBasenameMatches(ids, scope, query)
+		switch len(matches) {
+		case 0:
+			continue
+		case 1:
+			return matches[0], nil
+		default:
+			return "", fmt.Errorf("ambiguous ID %q in scope %q matches: %s", query, displayScope(scope), strings.Join(matches, ", "))
+		}
+	}
+
+	return "", fmt.Errorf("no felt found matching %q", query)
+}
+
+func cleanLookupQuery(query string) string {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return ""
+	}
 	query = path.Clean(query)
-	for _, f := range felts {
-		if path.Clean(f.ID) == query {
-			return f, nil
-		}
+	if query == "." {
+		return ""
 	}
+	return strings.TrimPrefix(query, "./")
+}
 
-	var matches []*Felt
-	for _, f := range felts {
-		if f.MatchesID(query) {
-			matches = append(matches, f)
-		}
+func cleanLookupScope(scopeID string) string {
+	scopeID = strings.TrimSpace(scopeID)
+	if scopeID == "" {
+		return ""
 	}
+	scopeID = path.Clean(scopeID)
+	if scopeID == "." {
+		return ""
+	}
+	return scopeID
+}
 
-	switch len(matches) {
-	case 0:
-		return nil, fmt.Errorf("no felt found matching %q", query)
-	case 1:
-		return matches[0], nil
-	default:
-		var ids []string
-		for _, m := range matches {
-			ids = append(ids, m.ID)
-		}
-		return nil, fmt.Errorf("ambiguous ID %q matches: %s", query, strings.Join(ids, ", "))
+func scopeChain(scopeID string) []string {
+	scopeID = cleanLookupScope(scopeID)
+	if scopeID == "" {
+		return []string{""}
 	}
+	var scopes []string
+	for {
+		scopes = append(scopes, scopeID)
+		parent := parentPath(scopeID)
+		if parent == "" {
+			break
+		}
+		scopeID = parent
+	}
+	return append(scopes, "")
+}
+
+func scopedQuery(scopeID, query string) string {
+	if scopeID == "" {
+		return query
+	}
+	return path.Join(scopeID, query)
+}
+
+func collectPrefixMatches(ids []string, candidate string) []string {
+	var matches []string
+	for _, id := range ids {
+		cleanID := path.Clean(id)
+		if cleanID == candidate || strings.HasPrefix(cleanID, candidate) {
+			matches = append(matches, cleanID)
+		}
+	}
+	return matches
+}
+
+func collectScopedBasenameMatches(ids []string, scopeID, query string) []string {
+	var matches []string
+	for _, id := range ids {
+		cleanID := path.Clean(id)
+		if parentPath(cleanID) != scopeID {
+			continue
+		}
+		if strings.HasPrefix(path.Base(cleanID), query) {
+			matches = append(matches, cleanID)
+		}
+	}
+	return matches
+}
+
+func displayScope(scopeID string) string {
+	if scopeID == "" {
+		return "."
+	}
+	return scopeID
 }
 
 // FindProjectRoot walks up from the current directory to find a .felt directory.

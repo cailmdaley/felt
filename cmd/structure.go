@@ -66,16 +66,17 @@ var nestCmd = &cobra.Command{
 		}
 
 		storage := felt.NewStorage(root)
+		scopeID := resolveCommandScope(root)
 		felts, err := storage.ListMetadata()
 		if err != nil {
 			return err
 		}
 
-		child, err := felt.FindByPrefix(felts, args[0])
+		child, err := felt.FindByScope(felts, scopeID, args[0])
 		if err != nil {
 			return err
 		}
-		parent, err := felt.FindByPrefix(felts, args[1])
+		parent, err := felt.FindByScope(felts, scopeID, args[1])
 		if err != nil {
 			return err
 		}
@@ -116,12 +117,13 @@ var unnestCmd = &cobra.Command{
 		}
 
 		storage := felt.NewStorage(root)
+		scopeID := resolveCommandScope(root)
 		felts, err := storage.ListMetadata()
 		if err != nil {
 			return err
 		}
 
-		child, err := felt.FindByPrefix(felts, args[0])
+		child, err := felt.FindByScope(felts, scopeID, args[0])
 		if err != nil {
 			return err
 		}

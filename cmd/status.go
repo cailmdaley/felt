@@ -19,12 +19,13 @@ var rmCmd = &cobra.Command{
 		}
 
 		storage := felt.NewStorage(root)
+		scopeID := resolveCommandScope(root)
 		felts, err := storage.ListMetadata()
 		if err != nil {
 			return err
 		}
 
-		f, err := felt.FindByPrefix(felts, args[0])
+		f, err := felt.FindByScope(felts, scopeID, args[0])
 		if err != nil {
 			return err
 		}

@@ -209,14 +209,37 @@ func writeBodyRefs(sb *strings.Builder, f *felt.Felt, g *felt.Graph) {
 		return
 	}
 	var parts []string
+	var ids []string
+	if g != nil {
+		ids = make([]string, 0, len(g.Nodes))
+		for id := range g.Nodes {
+			ids = append(ids, id)
+		}
+	}
 	for _, ref := range refs {
 		if g != nil {
-			if node, ok := g.Nodes[ref]; ok {
-				parts = append(parts, fmt.Sprintf("%s (%s)", ref, truncateTitle(node.DisplayName(), 30)))
+			if resolved, err := felt.ResolveScopedID(ids, f.ID, ref.Target); err == nil {
+				if node, ok := g.Nodes[resolved]; ok {
+					label := resolved
+					if ref.Fragment != "" {
+						label += "#" + ref.Fragment
+					}
+					parts = append(parts, fmt.Sprintf("%s (%s)", label, truncateTitle(node.DisplayName(), 30)))
+					continue
+				}
+			}
+		}
+		if ref.Fragment != "" {
+			parts = append(parts, ref.String())
+			continue
+		}
+		parts = append(parts, ref.Target)
+		if g != nil {
+			if node, ok := g.Nodes[ref.Target]; ok {
+				parts[len(parts)-1] = fmt.Sprintf("%s (%s)", ref.Target, truncateTitle(node.DisplayName(), 30))
 				continue
 			}
 		}
-		parts = append(parts, ref)
 	}
 	fmt.Fprintf(sb, "Refs:     %s\n", strings.Join(parts, ", "))
 }

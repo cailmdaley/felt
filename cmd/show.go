@@ -67,10 +67,11 @@ Targeted views:
 		}
 
 		storage := felt.NewStorage(root)
+		scopeID := resolveCommandScope(root)
 
 		// Targeted views: full single-file read, optionally structured output.
 		if selectorCount > 0 || jsonOutput {
-			f, err := storage.Find(args[0])
+			f, err := storage.FindInScope(scopeID, args[0])
 			if err != nil {
 				return err
 			}
@@ -103,7 +104,7 @@ Targeted views:
 		if err != nil {
 			return err
 		}
-		target, err := felt.FindByPrefix(felts, args[0])
+		target, err := felt.FindByScope(felts, scopeID, args[0])
 		if err != nil {
 			return err
 		}
