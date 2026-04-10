@@ -36,6 +36,42 @@ func TestCheckCommandReportsIssues(t *testing.T) {
 	}
 }
 
+func TestCheckCommandReportsLegacyFormatIssues(t *testing.T) {
+	dir := t.TempDir()
+	storage := felt.NewStorage(dir)
+	if err := storage.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	path := filepath.Join(dir, ".felt", "legacy-fiber", "legacy-fiber.md")
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatalf("mkdir legacy fiber: %v", err)
+	}
+	content := `---
+title: Legacy Fiber
+created-at: 2026-04-10T10:00:00Z
+---
+
+(legacy-fiber)=
+
+Body.
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatalf("write legacy fiber: %v", err)
+	}
+
+	output, err := runCommand(t, dir, "check")
+	if err == nil {
+		t.Fatal("felt check succeeded unexpectedly")
+	}
+	if !strings.Contains(output, `legacy frontmatter key "title" should be renamed to "name"`) {
+		t.Fatalf("missing legacy title lint output:\n%s", output)
+	}
+	if !strings.Contains(output, "legacy MyST anchor should be removed") {
+		t.Fatalf("missing legacy anchor lint output:\n%s", output)
+	}
+}
+
 func runCommand(t *testing.T, dir string, args ...string) (string, error) {
 	t.Helper()
 

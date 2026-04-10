@@ -2,6 +2,7 @@ package felt
 
 import (
 	"fmt"
+	"os"
 	"path"
 	"sort"
 	"strings"
@@ -117,6 +118,58 @@ func checkDecisions(f *Felt) []CheckIssue {
 		}
 	}
 	return issues
+}
+
+// CheckLegacyFormat inspects raw fiber files for storage-model residue that
+// should be eliminated by the relationship-model migration.
+func CheckLegacyFormat(s *Storage) ([]CheckIssue, error) {
+	files, err := s.listFiberFiles()
+	if err != nil {
+		return nil, err
+	}
+
+	var issues []CheckIssue
+	for _, file := range files {
+		data, err := os.ReadFile(file.path)
+		if err != nil {
+			return nil, fmt.Errorf("reading fiber %s: %w", file.path, err)
+		}
+		frontmatter, body, err := splitFrontmatter(data, true)
+		if err != nil {
+			continue
+		}
+		_, renamedTitle, err := rewriteFrontmatterName(frontmatter)
+		if err != nil {
+			continue
+		}
+		if renamedTitle {
+			issues = append(issues, CheckIssue{
+				Level:   CheckLevelError,
+				FiberID: file.id,
+				Path:    "frontmatter",
+				Message: `legacy frontmatter key "title" should be renamed to "name"`,
+			})
+		}
+		if _, strippedAnchor := stripLegacyMystAnchor(file.id, body); strippedAnchor {
+			issues = append(issues, CheckIssue{
+				Level:   CheckLevelError,
+				FiberID: file.id,
+				Path:    "body",
+				Message: "legacy MyST anchor should be removed",
+			})
+		}
+	}
+
+	sort.Slice(issues, func(i, j int) bool {
+		if issues[i].FiberID != issues[j].FiberID {
+			return issues[i].FiberID < issues[j].FiberID
+		}
+		if issues[i].Path != issues[j].Path {
+			return issues[i].Path < issues[j].Path
+		}
+		return issues[i].Message < issues[j].Message
+	})
+	return issues, nil
 }
 
 func checkInsights(f *Felt) []CheckIssue {

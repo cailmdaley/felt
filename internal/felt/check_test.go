@@ -1,6 +1,8 @@
 package felt
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -229,5 +231,69 @@ func TestCheckSiblingDepthConsistencyWarning(t *testing.T) {
 	}
 	if issues[0].FiberID != "parent" {
 		t.Fatalf("issue fiber = %q, want parent", issues[0].FiberID)
+	}
+}
+
+func TestCheckLegacyFormatReportsTitleAndMystAnchor(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStorage(dir)
+	if err := s.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	content := `---
+title: Legacy Fiber
+created-at: 2026-04-10T10:00:00Z
+---
+
+(legacy-fiber)=
+
+Body.
+`
+	path := filepath.Join(dir, DirName, "legacy-fiber", "legacy-fiber.md")
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatalf("mkdir legacy fiber: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatalf("write legacy fiber: %v", err)
+	}
+
+	issues, err := CheckLegacyFormat(s)
+	if err != nil {
+		t.Fatalf("CheckLegacyFormat() error: %v", err)
+	}
+	if len(issues) != 2 {
+		t.Fatalf("CheckLegacyFormat() produced %d issues, want 2", len(issues))
+	}
+	if issues[0].Path != "body" && issues[1].Path != "body" {
+		t.Fatalf("issues = %#v, want body issue", issues)
+	}
+	if issues[0].Path != "frontmatter" && issues[1].Path != "frontmatter" {
+		t.Fatalf("issues = %#v, want frontmatter issue", issues)
+	}
+}
+
+func TestCheckLegacyFormatSkipsMalformedFrontmatter(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStorage(dir)
+	if err := s.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	path := filepath.Join(dir, DirName, "broken-fiber", "broken-fiber.md")
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatalf("mkdir broken fiber: %v", err)
+	}
+	content := "---\nname: Broken Fiber\ncreated-at: 2026-04-10T10:00:00Z\noutcome: Backticks: `value`\n---\n"
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatalf("write broken fiber: %v", err)
+	}
+
+	issues, err := CheckLegacyFormat(s)
+	if err != nil {
+		t.Fatalf("CheckLegacyFormat() error: %v", err)
+	}
+	if len(issues) != 0 {
+		t.Fatalf("CheckLegacyFormat() issues = %#v, want none", issues)
 	}
 }
