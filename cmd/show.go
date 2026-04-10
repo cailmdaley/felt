@@ -19,8 +19,8 @@ var showCmd = &cobra.Command{
 
 Detail levels control progressive disclosure:
   title    Title and tags only
-  compact  Structured overview: metadata, outcome, dependency IDs
-  summary  Compact + lede paragraph + dependency titles
+  compact  Metadata, outcome, and ASTRA counts
+  summary  Compact + lede paragraph + concise ASTRA summary
   full     Everything (default)`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {

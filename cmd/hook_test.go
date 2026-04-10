@@ -39,19 +39,19 @@ func TestFormatSessionOutput(t *testing.T) {
 
 	// Create test felts
 	activeFelt := &felt.Felt{
-		ID:        "active-task-12345678",
-		Title:     "Active task",
-		Status:    felt.StatusActive,
+		ID:     "active-task-12345678",
+		Title:  "Active task",
+		Status: felt.StatusActive,
 
 		CreatedAt: now,
 	}
 
-	readyFelt := &felt.Felt{
-		ID:        "ready-task-87654321",
-		Title:     "Ready task",
-		Status:    felt.StatusOpen,
-
-		CreatedAt: now,
+	openFelt := &felt.Felt{
+		ID:         "open-task-87654321",
+		Title:      "Open task",
+		Status:     felt.StatusOpen,
+		CreatedAt:  now,
+		ModifiedAt: now.Add(-30 * time.Minute),
 	}
 
 	closedFelt := &felt.Felt{
@@ -64,10 +64,8 @@ func TestFormatSessionOutput(t *testing.T) {
 		ModifiedAt: closedTime,
 	}
 
-	felts := []*felt.Felt{activeFelt, readyFelt, closedFelt}
-	g := felt.BuildGraph(felts)
-
-	output := formatSessionOutput(felts, g)
+	felts := []*felt.Felt{activeFelt, openFelt, closedFelt}
+	output := formatSessionOutput(felts)
 
 	// Check header
 	if !strings.Contains(output, "# Felt Workflow Context") {
@@ -82,17 +80,12 @@ func TestFormatSessionOutput(t *testing.T) {
 		t.Error("missing active task entry")
 	}
 
-	// Check ready section
-	if !strings.Contains(output, "## Ready Fibers") {
-		t.Error("missing ready fibers section")
-	}
-	if !strings.Contains(output, "○ ready-task-87654321\n    Ready task") {
-		t.Error("missing ready task entry")
-	}
-
 	// Check recently touched section
 	if !strings.Contains(output, "## Recently Touched") {
 		t.Error("missing recently touched section")
+	}
+	if !strings.Contains(output, "○ open-task-87654321\n    Open task") {
+		t.Error("missing open task in recently touched")
 	}
 	if !strings.Contains(output, "● closed-task-abcdef12") {
 		t.Error("missing closed task in recently touched")
@@ -109,68 +102,42 @@ func TestFormatSessionOutput(t *testing.T) {
 
 func TestFormatSessionOutput_Empty(t *testing.T) {
 	felts := []*felt.Felt{}
-	g := felt.BuildGraph(felts)
-
-	output := formatSessionOutput(felts, g)
+	output := formatSessionOutput(felts)
 
 	// Should show empty message
-	if !strings.Contains(output, "No active or ready fibers") {
+	if !strings.Contains(output, "No active fibers") {
 		t.Error("missing empty state message")
 	}
 }
 
-func TestFormatSessionOutput_BlockedReady(t *testing.T) {
+func TestFormatSessionOutput_RecentlyTouchedOmitsActive(t *testing.T) {
 	now := time.Now()
 
-	// Create a fiber that's blocked by an open dependency
-	blockerFelt := &felt.Felt{
-		ID:        "blocker-task-12345678",
-		Title:     "Blocker",
-		Status:    felt.StatusOpen,
-
-		CreatedAt: now,
+	active := &felt.Felt{
+		ID:         "active-task-12345678",
+		Title:      "Active task",
+		Status:     felt.StatusActive,
+		CreatedAt:  now,
+		ModifiedAt: now,
+	}
+	closed := &felt.Felt{
+		ID:         "closed-task-87654321",
+		Title:      "Closed task",
+		Status:     felt.StatusClosed,
+		CreatedAt:  now.Add(-time.Hour),
+		ModifiedAt: now.Add(-time.Minute),
 	}
 
-	blockedFelt := &felt.Felt{
-		ID:        "blocked-task-87654321",
-		Title:     "Blocked task",
-		Status:    felt.StatusOpen,
-
-		DependsOn: felt.Dependencies{{ID: "blocker-task-12345678"}},
-		CreatedAt: now.Add(time.Minute),
-	}
-
-	felts := []*felt.Felt{blockerFelt, blockedFelt}
-	g := felt.BuildGraph(felts)
-
-	output := formatSessionOutput(felts, g)
-
-	// Blocker should be ready (no deps)
-	if !strings.Contains(output, "blocker-task-12345678") {
-		t.Error("blocker task should appear in ready")
-	}
-
-	// Blocked task should NOT appear in ready (has open dep)
-	// Extract just the Ready section (between "## Ready" and the next "##")
-	readyStart := strings.Index(output, "## Ready Fibers")
-	if readyStart >= 0 {
-		rest := output[readyStart+len("## Ready Fibers"):]
-		nextSection := strings.Index(rest, "## ")
-		readySection := rest
-		if nextSection >= 0 {
-			readySection = rest[:nextSection]
-		}
-		if strings.Contains(readySection, "blocked-task-87654321") {
-			t.Error("blocked task should not appear in ready section")
-		}
+	output := formatSessionOutput([]*felt.Felt{active, closed})
+	if strings.Count(output, "active-task-12345678") != 1 {
+		t.Fatalf("active fiber should appear once, got output:\n%s", output)
 	}
 }
 
-func TestFormatSessionOutput_UnblockedByClosedDep(t *testing.T) {
+func TestFormatSessionOutput_IncludesClosedRecentFibers(t *testing.T) {
 	now := time.Now()
 	closedTime := now.Add(-time.Hour)
 
-	// Create a closed dependency - fibers depending on it should be ready
 	closedDepFelt := &felt.Felt{
 		ID:         "closed-dep-12345678",
 		Title:      "Completed prereq",
@@ -180,28 +147,16 @@ func TestFormatSessionOutput_UnblockedByClosedDep(t *testing.T) {
 		ModifiedAt: closedTime,
 	}
 
-	// This fiber depends on the closed dep, so it should be ready
-	unblockedFelt := &felt.Felt{
-		ID:        "unblocked-task-87654321",
-		Title:     "Task unblocked by closed dep",
-		Status:    felt.StatusOpen,
-
-		DependsOn: felt.Dependencies{{ID: "closed-dep-12345678"}},
-		CreatedAt: now.Add(time.Minute),
+	openFelt := &felt.Felt{
+		ID:         "open-task-87654321",
+		Title:      "Fresh open task",
+		Status:     felt.StatusOpen,
+		CreatedAt:  now.Add(time.Minute),
+		ModifiedAt: now.Add(-2 * time.Minute),
 	}
 
-	felts := []*felt.Felt{closedDepFelt, unblockedFelt}
-	g := felt.BuildGraph(felts)
-
-	output := formatSessionOutput(felts, g)
-
-	// The unblocked task should appear in ready section
-	if !strings.Contains(output, "## Ready Fibers") {
-		t.Error("missing ready fibers section")
-	}
-	if !strings.Contains(output, "unblocked-task-87654321") {
-		t.Error("fiber with closed dependency should appear in ready section")
-	}
+	felts := []*felt.Felt{closedDepFelt, openFelt}
+	output := formatSessionOutput(felts)
 
 	// The closed dependency should appear in recently touched
 	if !strings.Contains(output, "## Recently Touched") {
@@ -236,15 +191,15 @@ func TestFormatSessionOutput_DirectoryBasedStorageIDs(t *testing.T) {
 		Status:    felt.StatusActive,
 		CreatedAt: now,
 	}
-	ready := &felt.Felt{
-		ID:        "analysis/ready-task",
-		Title:     "Ready task",
-		Status:    felt.StatusOpen,
-		DependsOn: felt.Dependencies{{ID: closedDep.ID}},
-		CreatedAt: now.Add(time.Minute),
+	open := &felt.Felt{
+		ID:         "analysis/open-task",
+		Title:      "Open task",
+		Status:     felt.StatusOpen,
+		CreatedAt:  now.Add(time.Minute),
+		ModifiedAt: now.Add(-time.Minute),
 	}
 
-	for _, f := range []*felt.Felt{closedDep, active, ready} {
+	for _, f := range []*felt.Felt{closedDep, active, open} {
 		if err := storage.Write(f); err != nil {
 			t.Fatalf("Write(%s) error: %v", f.ID, err)
 		}
@@ -255,13 +210,13 @@ func TestFormatSessionOutput_DirectoryBasedStorageIDs(t *testing.T) {
 		t.Fatalf("ListMetadataWithModTime() error: %v", err)
 	}
 
-	output := formatSessionOutput(felts, felt.BuildGraph(felts))
+	output := formatSessionOutput(felts)
 
 	if !strings.Contains(output, "◐ analysis/active-task\n    Active task") {
 		t.Fatalf("active nested fiber missing from session output:\n%s", output)
 	}
-	if !strings.Contains(output, "○ analysis/ready-task\n    Ready task") {
-		t.Fatalf("ready nested fiber missing from session output:\n%s", output)
+	if !strings.Contains(output, "○ analysis/open-task\n    Open task") {
+		t.Fatalf("open nested fiber missing from recent section:\n%s", output)
 	}
 	if !strings.Contains(output, "● foundation/closed-dep\n    Closed dep") {
 		t.Fatalf("closed dependency missing from recent section:\n%s", output)
@@ -273,35 +228,33 @@ func TestFormatSessionOutput_TagLabels(t *testing.T) {
 
 	// Create fibers with different tags
 	taskFelt := &felt.Felt{
-		ID:        "impl-auth-12345678",
-		Title:     "Implement auth",
-		Status:    felt.StatusActive,
+		ID:     "impl-auth-12345678",
+		Title:  "Implement auth",
+		Status: felt.StatusActive,
 
 		CreatedAt: now,
 	}
 
 	decisionFelt := &felt.Felt{
-		ID:        "design-api-87654321",
-		Title:     "Design REST API",
-		Status:    felt.StatusOpen,
-		Tags:      []string{"decision"},
+		ID:     "design-api-87654321",
+		Title:  "Design REST API",
+		Status: felt.StatusOpen,
+		Tags:   []string{"decision"},
 
 		CreatedAt: now,
 	}
 
 	questionFelt := &felt.Felt{
-		ID:        "research-lib-abcdef12",
-		Title:     "Which library?",
-		Status:    felt.StatusOpen,
-		Tags:      []string{"question"},
+		ID:     "research-lib-abcdef12",
+		Title:  "Which library?",
+		Status: felt.StatusOpen,
+		Tags:   []string{"question"},
 
 		CreatedAt: now,
 	}
 
 	felts := []*felt.Felt{taskFelt, decisionFelt, questionFelt}
-	g := felt.BuildGraph(felts)
-
-	output := formatSessionOutput(felts, g)
+	output := formatSessionOutput(felts)
 
 	// Fiber with no tags should NOT have a tag label
 	if strings.Contains(output, "(task)") {
@@ -383,8 +336,7 @@ func TestFormatSessionOutput_LimitsRecentlyTouched(t *testing.T) {
 		})
 	}
 
-	g := felt.BuildGraph(felts)
-	output := formatSessionOutput(felts, g)
+	output := formatSessionOutput(felts)
 
 	// Should only show 5 most recent
 	if strings.Contains(output, "closed-5-12345678") {

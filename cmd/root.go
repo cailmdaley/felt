@@ -26,11 +26,12 @@ func SetVersionInfo(v, commit, date string) {
 
 var rootCmd = &cobra.Command{
 	Use:   "felt",
-	Short: "DAG-native markdown task tracker",
-	Long: `felt is a DAG-native fiber tracker that stores work as a directory tree
+	Short: "Markdown fiber tracker with containment and ASTRA frontmatter",
+	Long: `felt stores work as a directory tree
 under .felt/, with each fiber in <slug>/<slug>.md using YAML frontmatter and
-plain markdown. Fibers can depend on each other, forming a directed acyclic
-graph that can be searched, traversed, and exported.`,
+plain markdown. Containment comes from directories, narrative connections come
+from wikilinks in bodies, and ASTRA frontmatter accretes as computation
+crystallizes.`,
 	CompletionOptions: cobra.CompletionOptions{
 		HiddenDefaultCmd: true,
 	},

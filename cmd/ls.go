@@ -17,7 +17,6 @@ var (
 	lsBody    bool
 	lsExact   bool
 	lsRegex   bool
-	lsReady   bool
 	treeDepth int
 )
 
@@ -81,27 +80,13 @@ Use --body with query to include body search, and with --json to emit body text.
 			effectiveStatus = "all"
 		}
 
-		var readyIDs map[string]bool
-		if lsReady {
-			readyIDs = map[string]bool{}
-			for _, f := range felt.BuildGraph(felts).Ready() {
-				readyIDs[f.ID] = true
-			}
-		}
-
 		// Filter
 		var exactMatches []*felt.Felt
 		var filtered []*felt.Felt
 		var bodyCandidates []*felt.Felt
 		for _, f := range felts {
-			if lsReady && !readyIDs[f.ID] {
-				continue
-			}
-
 			// Status gate
-			if lsReady {
-				// Ready already constrains the result set.
-			} else if effectiveStatus == "all" {
+			if effectiveStatus == "all" {
 				// No filtering, include everything
 			} else if effectiveStatus != "" {
 				// Specific status: must match
@@ -238,7 +223,7 @@ Use --body with query to include body search, and with --json to emit body text.
 		}
 
 		// Show count of hidden fibers when the default filter is active
-		if !statusExplicit && !hasFilters && !lsReady {
+		if !statusExplicit && !hasFilters {
 			hidden := len(felts) - len(filtered)
 			if hidden > 0 {
 				fmt.Printf("\n(%d more — use -s all to see everything)\n", hidden)
@@ -257,7 +242,6 @@ func init() {
 	lsCmd.Flags().BoolVar(&lsBody, "body", false, "Include body search for queries and body field in JSON output")
 	lsCmd.Flags().BoolVarP(&lsExact, "exact", "e", false, "Exact title match only (with query)")
 	lsCmd.Flags().BoolVarP(&lsRegex, "regex", "r", false, "Treat query as regular expression")
-	lsCmd.Flags().BoolVar(&lsReady, "ready", false, "Filter to open felts whose dependencies are all closed")
 }
 
 func appendBodyMatches(storage *felt.Storage, filtered, candidates []*felt.Felt, useRegex bool, re *regexp.Regexp, queryLower string) ([]*felt.Felt, error) {
@@ -304,8 +288,8 @@ type ContainmentNode struct {
 var treeCmd = &cobra.Command{
 	Use:   "tree [id]",
 	Short: "Show containment tree",
-	Long: `Shows the containment tree (filesystem nesting) for fibers.`,
-	Args: cobra.MaximumNArgs(1),
+	Long:  `Shows the containment tree (filesystem nesting) for fibers.`,
+	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		root, err := resolveProjectRoot()
 		if err != nil {

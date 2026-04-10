@@ -62,30 +62,13 @@ func writeHeader(sb *strings.Builder, f *felt.Felt) {
 	}
 }
 
-// writeDeps writes upstream and downstream dependency lines.
-// When showNames is true, dependency names are included for context.
-func writeDeps(sb *strings.Builder, f *felt.Felt, g *felt.Graph, showTitles bool) {
-	var titleGraph *felt.Graph
-	if showTitles {
-		titleGraph = g
-	}
-	if len(f.DependsOn) > 0 {
-		fmt.Fprintf(sb, "Upstream: %s\n", formatDeps(titleGraph, f.DependsOn))
-	}
-	if g != nil {
-		if downstream := g.Downstream[f.ID]; len(downstream) > 0 {
-			fmt.Fprintf(sb, "Downstream: %s\n", formatDeps(titleGraph, downstream))
-		}
-	}
-}
-
 func renderCompact(f *felt.Felt, g *felt.Graph) string {
 	var sb strings.Builder
 	writeHeader(&sb, f)
 	if f.Outcome != "" {
 		fmt.Fprintf(&sb, "Outcome:  %s\n", f.Outcome)
 	}
-	writeDeps(&sb, f, g, false)
+	writeASTRACounts(&sb, f)
 	return sb.String()
 }
 
@@ -98,7 +81,6 @@ func renderSummary(f *felt.Felt, g *felt.Graph) string {
 	if f.Outcome != "" {
 		fmt.Fprintf(&sb, "Outcome:  %s\n", f.Outcome)
 	}
-	writeDeps(&sb, f, g, true)
 	writeBodyRefs(&sb, f, g)
 	writeASTRASkeleton(&sb, f)
 	if f.Body != "" {
@@ -177,10 +159,28 @@ func writeASTRASkeleton(sb *strings.Builder, f *felt.Felt) {
 	}
 }
 
+func writeASTRACounts(sb *strings.Builder, f *felt.Felt) {
+	var parts []string
+	if len(f.Decisions) > 0 {
+		parts = append(parts, fmt.Sprintf("%d decisions", len(f.Decisions)))
+	}
+	if len(f.Inputs) > 0 {
+		parts = append(parts, fmt.Sprintf("%d inputs", len(f.Inputs)))
+	}
+	if len(f.Outputs) > 0 {
+		parts = append(parts, fmt.Sprintf("%d outputs", len(f.Outputs)))
+	}
+	if len(f.Insights) > 0 {
+		parts = append(parts, fmt.Sprintf("%d insights", len(f.Insights)))
+	}
+	if len(parts) > 0 {
+		fmt.Fprintf(sb, "ASTRA:    %s\n", strings.Join(parts, ", "))
+	}
+}
+
 func renderFull(f *felt.Felt, g *felt.Graph) string {
 	var sb strings.Builder
 	writeHeader(&sb, f)
-	writeDeps(&sb, f, g, true)
 	writeBodyRefs(&sb, f, g)
 	if f.Due != nil {
 		fmt.Fprintf(&sb, "Due:      %s\n", f.Due.Format("2006-01-02"))
@@ -221,39 +221,6 @@ func writeBodyRefs(sb *strings.Builder, f *felt.Felt, g *felt.Graph) {
 	fmt.Fprintf(sb, "Refs:     %s\n", strings.Join(parts, ", "))
 }
 
-// formatDeps formats dependencies with labels and optional names.
-// When g is non-nil, each dep includes its truncated name for context.
-// When g is nil, only IDs and labels are shown.
-func formatDeps(g *felt.Graph, deps felt.Dependencies) string {
-	if len(deps) == 0 {
-		return ""
-	}
-
-	formatOne := func(d felt.Dependency) string {
-		label := ""
-		if d.Label != "" {
-			label = fmt.Sprintf(" [%s]", d.Label)
-		}
-		if g != nil {
-			if f, ok := g.Nodes[d.ID]; ok {
-				return fmt.Sprintf("%s%s (%s)", d.ID, label, truncateTitle(f.DisplayName(), 30))
-			}
-		}
-		return d.ID + label
-	}
-
-	if len(deps) == 1 {
-		return formatOne(deps[0])
-	}
-
-	var sb strings.Builder
-	for _, d := range deps {
-		fmt.Fprintf(&sb, "\n  - %s", formatOne(d))
-	}
-	return sb.String()
-}
-
-// truncateTitle shortens a display name to maxLen chars.
 func truncateTitle(s string, maxLen int) string {
 	if len(s) <= maxLen {
 		return s

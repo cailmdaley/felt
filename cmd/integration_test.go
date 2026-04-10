@@ -91,7 +91,7 @@ func TestIntegration(t *testing.T) {
 	}
 
 	// add — returns the fiber ID (positional arg is now the slug)
-	fiberID := strings.TrimSpace(mustFelt(t, dir, "add", "test-fiber", "-s", "open", "--title", "test fiber"))
+	fiberID := strings.TrimSpace(mustFelt(t, dir, "add", "test-fiber", "test fiber", "-s", "open"))
 	if fiberID != "test-fiber" {
 		t.Fatal("add: expected fiber ID in output")
 	}
@@ -190,50 +190,10 @@ func TestIntegration(t *testing.T) {
 		t.Fatalf("ls regex query should match outcome text from metadata, got: %s", out)
 	}
 
-	// add a second fiber and link them
-	fiber2ID := strings.TrimSpace(mustFelt(t, dir, "add", "second-fiber", "-s", "open", "--title", "second fiber"))
+	// add a second fiber
+	fiber2ID := strings.TrimSpace(mustFelt(t, dir, "add", "second-fiber", "second fiber", "-s", "open"))
 	if fiber2ID == "" {
 		t.Fatal("add: expected fiber2 ID")
-	}
-
-	// link and unlink
-	mustFelt(t, dir, "edit", fiber2ID, "--link", fiberID)
-	out = mustFelt(t, dir, "tree", fiber2ID, "--up")
-	if !strings.Contains(out, "test fiber") {
-		t.Fatalf("upstream: expected dep fiber, got: %s", out)
-	}
-	mustFelt(t, dir, "edit", fiber2ID, "--unlink", fiberID)
-
-	// downstream: fiber2 depends on fiberID → fiberID is upstream of fiber2
-	mustFelt(t, dir, "edit", fiber2ID, "--link", fiberID)
-	out = mustFelt(t, dir, "tree", fiberID, "--down")
-	if !strings.Contains(out, "second fiber") {
-		t.Fatalf("downstream: expected child fiber, got: %s", out)
-	}
-	fiber3ID := strings.TrimSpace(mustFelt(t, dir, "add", "third-fiber", "-s", "open", "--title", "third fiber"))
-	if fiber3ID == "" {
-		t.Fatal("add: expected fiber3 ID")
-	}
-	mustFelt(t, dir, "edit", fiber3ID, "--link", fiber2ID)
-
-	// Traversal defaults to direct neighbors only.
-	out = mustFelt(t, dir, "tree", fiberID, "--down")
-	if strings.Contains(out, "third fiber") {
-		t.Fatalf("downstream default: expected direct dependents only, got: %s", out)
-	}
-	// --all includes transitive dependents.
-	out = mustFelt(t, dir, "tree", fiberID, "--down", "--all")
-	if !strings.Contains(out, "second fiber") || !strings.Contains(out, "third fiber") {
-		t.Fatalf("downstream --all: expected transitive closure, got: %s", out)
-	}
-
-	out = mustFelt(t, dir, "tree", fiber3ID, "--up")
-	if strings.Contains(out, "test fiber") || !strings.Contains(out, "second fiber") {
-		t.Fatalf("upstream default: expected direct dependencies only, got: %s", out)
-	}
-	out = mustFelt(t, dir, "tree", fiber3ID, "--up", "--all")
-	if !strings.Contains(out, "second fiber") || !strings.Contains(out, "test fiber") {
-		t.Fatalf("upstream --all: expected transitive closure, got: %s", out)
 	}
 
 	// tag and untag
@@ -244,8 +204,14 @@ func TestIntegration(t *testing.T) {
 	}
 	mustFelt(t, dir, "edit", fiber2ID, "--untag", "testlabel")
 
-	// ready
-	mustFelt(t, dir, "ls", "--ready")
+	// duplicate slug should fail instead of auto-disambiguating
+	out, err = felt(dir, "add", "second-fiber", "duplicate fiber")
+	if err == nil {
+		t.Fatal("add duplicate: expected error")
+	}
+	if !strings.Contains(out, `fiber "second-fiber" already exists`) {
+		t.Fatalf("add duplicate: expected duplicate error, got: %s", out)
+	}
 
 	astraParentDir := filepath.Join(dir, ".felt", "bao-analysis")
 	if err := os.MkdirAll(astraParentDir, 0755); err != nil {

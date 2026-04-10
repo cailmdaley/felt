@@ -13,14 +13,11 @@ var (
 	editName    string
 	editStatus  string
 	editDue     string
-	editDeps    []string
-	editUndep   []string
 	editTags    []string
 	editUntag   []string
 	editComment []string
 	editBody    string
 	editOutcome string
-	editLabel   string
 )
 
 var editCmd = &cobra.Command{
@@ -31,7 +28,6 @@ var editCmd = &cobra.Command{
 Examples:
   felt edit abc123 --name "New name" -s active
   felt edit abc123 --tag decision --untag stale
-  felt edit abc123 --dep other-fiber-id --label "why this depends on it"
   felt edit abc123 --comment "latest finding"
   felt edit abc123 --body "Full replacement body text"  # overwrites body`,
 	Args: cobra.ExactArgs(1),
@@ -55,12 +51,9 @@ Examples:
 		hasFlags := cmd.Flags().Changed("name") ||
 			cmd.Flags().Changed("status") ||
 			cmd.Flags().Changed("due") ||
-			cmd.Flags().Changed("dep") ||
-			cmd.Flags().Changed("undep") ||
 			cmd.Flags().Changed("tag") ||
 			cmd.Flags().Changed("untag") ||
 			cmd.Flags().Changed("comment") ||
-			cmd.Flags().Changed("label") ||
 			cmd.Flags().Changed("body") ||
 			cmd.Flags().Changed("outcome")
 
@@ -139,53 +132,6 @@ Examples:
 				f.AppendComment(comment)
 			}
 		}
-		if cmd.Flags().Changed("dep") || cmd.Flags().Changed("undep") || cmd.Flags().Changed("label") {
-			felts, err := storage.ListMetadata()
-			if err != nil {
-				return err
-			}
-
-			if editLabel != "" && len(editDeps) != 1 {
-				return fmt.Errorf("--label requires exactly one --dep target")
-			}
-
-			// Resolve and add dependencies
-			for _, dep := range editDeps {
-				depFelt, err := felt.FindByPrefix(felts, dep)
-				if err != nil {
-					return fmt.Errorf("dependency %q: %w", dep, err)
-				}
-				if f.DependsOn.HasID(depFelt.ID) {
-					continue
-				}
-				f.DependsOn = append(f.DependsOn, felt.NewDependency(depFelt.ID, editLabel))
-			}
-
-			// Remove dependencies
-			for _, dep := range editUndep {
-				depFelt, err := felt.FindByPrefix(felts, dep)
-				if err != nil {
-					return fmt.Errorf("dependency %q: %w", dep, err)
-				}
-				var newDeps felt.Dependencies
-				for _, d := range f.DependsOn {
-					if d.ID != depFelt.ID {
-						newDeps = append(newDeps, d)
-					}
-				}
-				f.DependsOn = newDeps
-			}
-
-			// Check for cycles
-			g := felt.BuildGraph(felts)
-			g.Nodes[f.ID] = f
-			g.Upstream[f.ID] = f.DependsOn
-			for _, dep := range f.DependsOn {
-				if g.DetectCycle(f.ID, dep.ID) {
-					return fmt.Errorf("adding dependency would create a cycle")
-				}
-			}
-		}
 
 		if err := storage.Write(f); err != nil {
 			return err
@@ -211,10 +157,7 @@ func init() {
 	editCmd.Flags().StringVarP(&editStatus, "status", "s", "", "Set status (open, active, closed)")
 	editCmd.Flags().StringArrayVarP(&editTags, "tag", "t", nil, "Add tag(s) (repeatable; comma-separated accepted)")
 	editCmd.Flags().StringArrayVar(&editUntag, "untag", nil, "Remove tag(s)")
-	editCmd.Flags().StringArrayVarP(&editDeps, "dep", "d", nil, "Add dependency (repeatable)")
-	editCmd.Flags().StringArrayVar(&editUndep, "undep", nil, "Remove dependency (repeatable)")
 	editCmd.Flags().StringArrayVarP(&editComment, "comment", "c", nil, "Append comment text to the body (repeatable)")
-	editCmd.Flags().StringVarP(&editLabel, "label", "l", "", "Label for a single --dep dependency")
 	editCmd.Flags().StringVarP(&editBody, "body", "b", "", "Replace full body text (destructive overwrite)")
 	editCmd.Flags().StringVarP(&editOutcome, "outcome", "o", "", "Set outcome")
 	editCmd.Flags().StringVarP(&editDue, "due", "D", "", "Set due date (YYYY-MM-DD, empty to clear)")

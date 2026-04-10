@@ -9,7 +9,7 @@ import (
 
 // formatFeltTwoLine returns a felt in two-line format:
 // Line 1: status icon + ID
-// Line 2: indented name with metadata (tags, deps)
+// Line 2: indented name with metadata (tags)
 func formatFeltTwoLine(f *felt.Felt) string {
 	icon := felt.StatusIcon(f.Status)
 
@@ -18,9 +18,6 @@ func formatFeltTwoLine(f *felt.Felt) string {
 	var meta []string
 	if len(f.Tags) > 0 {
 		meta = append(meta, strings.Join(f.Tags, ", "))
-	}
-	if len(f.DependsOn) > 0 {
-		meta = append(meta, fmt.Sprintf("%d deps", len(f.DependsOn)))
 	}
 
 	metaStr := ""

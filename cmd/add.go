@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/cailmdaley/felt/internal/felt"
@@ -28,7 +29,6 @@ var retiredCommandNames = map[string]struct{}{
 var (
 	addBody    string
 	addStatus  string
-	addDeps    []string
 	addDue     string
 	addTags    []string
 	addOutcome string
@@ -62,9 +62,10 @@ Examples:
 		if err != nil {
 			return err
 		}
-		f.ID, err = storage.NextAvailableID(f.ID)
-		if err != nil {
-			return err
+		if _, err := os.Stat(storage.Path(f.ID)); err == nil {
+			return fmt.Errorf("fiber %q already exists", f.ID)
+		} else if !os.IsNotExist(err) {
+			return fmt.Errorf("checking existing fiber %q: %w", f.ID, err)
 		}
 
 		// Add extracted tags
@@ -82,31 +83,6 @@ Examples:
 			for _, raw := range addTags {
 				for _, tag := range splitTags(raw) {
 					f.AddTag(tag)
-				}
-			}
-		}
-		if len(addDeps) > 0 {
-			felts, err := storage.ListMetadata()
-			if err != nil {
-				return err
-			}
-
-			// Resolve dependency IDs
-			for _, dep := range addDeps {
-				depFelt, err := felt.FindByPrefix(felts, dep)
-				if err != nil {
-					return fmt.Errorf("dependency %q: %w", dep, err)
-				}
-				f.DependsOn = append(f.DependsOn, felt.NewDependency(depFelt.ID, ""))
-			}
-
-			// Check for cycles
-			// Add the new felt temporarily for cycle check
-			felts = append(felts, f)
-			g := felt.BuildGraph(felts)
-			for _, dep := range f.DependsOn {
-				if g.DetectCycle(f.ID, dep.ID) {
-					return fmt.Errorf("adding dependency on %s would create a cycle", dep.ID)
 				}
 			}
 		}
@@ -134,7 +110,6 @@ func init() {
 	rootCmd.AddCommand(addCmd)
 	addCmd.Flags().StringVarP(&addBody, "body", "b", "", "Body text")
 	addCmd.Flags().StringVarP(&addStatus, "status", "s", "", "Status (open, active, closed)")
-	addCmd.Flags().StringArrayVarP(&addDeps, "dep", "d", nil, "Dependency ID (repeatable)")
 	addCmd.Flags().StringVarP(&addDue, "due", "D", "", "Due date (YYYY-MM-DD)")
 	addCmd.Flags().StringArrayVarP(&addTags, "tag", "t", nil, "Tag (repeatable)")
 	addCmd.Flags().StringVarP(&addOutcome, "outcome", "o", "", "Outcome (the conclusion)")
@@ -147,7 +122,6 @@ func init() {
 	// Copy add command flags to root so "felt <slug> <name> ..." works
 	rootCmd.Flags().StringVarP(&addBody, "body", "b", "", "Body text")
 	rootCmd.Flags().StringVarP(&addStatus, "status", "s", "", "Status (open, active, closed)")
-	rootCmd.Flags().StringArrayVarP(&addDeps, "dep", "d", nil, "Dependency ID (repeatable)")
 	rootCmd.Flags().StringVarP(&addDue, "due", "D", "", "Due date (YYYY-MM-DD)")
 	rootCmd.Flags().StringArrayVarP(&addTags, "tag", "t", nil, "Tag (repeatable)")
 	rootCmd.Flags().StringVarP(&addOutcome, "outcome", "o", "", "Outcome (the conclusion)")

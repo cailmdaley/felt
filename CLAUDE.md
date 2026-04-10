@@ -1,6 +1,6 @@
 # felt
 
-DAG-native fiber tracker. Directory-based markdown fibers with YAML frontmatter; dependencies form a directed acyclic graph.
+Markdown fiber tracker. Directory-based markdown fibers with YAML frontmatter, plain markdown bodies, containment by path, and wikilinks for narrative references.
 
 ## Structure
 
@@ -11,20 +11,20 @@ internal/felt/ Core logic (storage, parsing, graph)
 
 ## Data model
 
-Fibers are minimal by default. All fields except title are optional.
+Fibers are minimal by default. All fields except `name` are optional.
 
 | Field | Notes |
 |-------|-------|
-| title | Required. The fiber. |
+| name | Required. The fiber. |
 | body | Markdown content. |
 | outcome | The conclusion — decisions, answers, results. `-o` flag. |
 | status | Opt-in tracking: open/active/closed. Most fibers don't have one. |
 | tags | Freeform. Use for categorization (decision, spec, question, etc). |
-| depends-on | DAG edges. Supports labels: `{id, label}`. |
+| inputs / outputs / decisions / insights | Optional ASTRA structure when the work becomes computationally explicit. |
 
-**Status is opt-in.** `felt add "title"` creates a statusless fiber. `felt add "title" -s open` enters tracking. `felt edit <id> -s active` enters tracking. `felt ls` only shows tracked fibers.
+**Status is opt-in.** `felt add <slug> "name"` creates a statusless fiber. `felt add <slug> "name" -s open` enters tracking. `felt edit <id> -s active` enters tracking. `felt ls` only shows tracked fibers.
 
-**Progressive disclosure.** `felt show <id> -d compact` shows metadata + outcome without body. Levels: title, compact, summary, full (default). `felt tree <id> --up|--down -d compact` renders each connected fiber at that detail level.
+**Progressive disclosure.** `felt show <id> -d compact` shows metadata + outcome + ASTRA counts. Levels: title, compact, summary, full (default). `felt tree` is the containment hierarchy.
 
 ## Key integrations
 
@@ -38,7 +38,7 @@ go build .        # build
 go test ./...     # test
 ./felt ls         # run locally
 ./felt ls -s all  # include untracked fibers
-./felt tree --check
+./felt tree
 ```
 
 ## Releasing

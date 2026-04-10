@@ -9,9 +9,9 @@
 
 # felt
 
-Linked markdown fibers in a directed graph. A lightweight CLI for accumulating context — decisions, claims, tasks, questions, specs — and keeping it searchable, traversable, and connected.
+Directory-contained markdown fibers with YAML frontmatter, wikilinks, and optional ASTRA structure. A lightweight CLI for accumulating context — decisions, claims, tasks, questions, specs — and keeping it searchable and connected.
 
-Fibers are the unit. Each one lives in its own directory under `.felt/`, with a `<slug>.md` file carrying YAML frontmatter plus MyST-flavored markdown body content. Fibers can depend on each other, forming a DAG that you can walk: upstream to trace the reasoning behind a decision, downstream to follow its consequences into finer detail. Closing a fiber with an outcome captures what was learned. Over time, the graph becomes a persistent, navigable record of how a project arrived where it is.
+Fibers are the unit. Each one lives in its own directory under `.felt/`, with a `<slug>.md` file carrying YAML frontmatter plus plain markdown body content. Containment comes from the directory tree, narrative connections come from `[[wikilinks]]` in the body, and ASTRA inputs/outputs/decisions/insights can accrete in frontmatter as the work crystallizes. Closing a fiber with an outcome captures what was learned.
 
 There is no database or server — `.felt/` is a directory tree of markdown fibers that you can version-control, grep, and move between machines.
 
@@ -40,25 +40,24 @@ felt setup claude                 # hooks + skills for Claude Code
 felt setup codex                  # shell wrapper + skills for Codex
 ```
 
-The session hook prints active and ready fibers at the start of each conversation, giving the agent context about ongoing work. See [Agent Integration](#agent-integration) for details.
+The session hook prints active and recently touched fibers at the start of each conversation, giving the agent context about ongoing work. See [Agent Integration](#agent-integration) for details.
 
 ## Quick Start
 
 ```bash
 felt init                                              # creates .felt/ + myst.yml
-felt "Use DES Y3 weights"                              # file a decision
-felt add "Covariance estimation" -a use-des-y3-weights # depends on that decision
+felt use-des-y3-weights "Use DES Y3 weights"           # file a decision
+felt add covariance-estimation "Covariance estimation"
 felt edit covariance-estimation --comment "tried analytic, too slow"
 felt edit covariance-estimation -s closed -o "switched to jackknife — 10x faster, <2% bias"
 felt export --format astra                             # emit astra.yaml from ASTRA frontmatter
 ```
 
-A fiber can be anything: a task, a decision, a research claim, a question, a spec. The body carries detail and the outcome captures the conclusion. Dependencies connect them.
+A fiber can be anything: a task, a decision, a research claim, a question, a spec. The body carries detail, wikilinks cite related fibers, and the outcome captures the conclusion.
 
 ```bash
-felt ls --ready                        # what's unblocked?
-felt tree covariance-estimation --up   # what does this rest on?
-felt tree use-des-y3-weights --down    # what follows from this?
+felt show covariance-estimation        # inspect one fiber
+felt tree                              # containment hierarchy
 felt ls -s all "jackknife"             # search across everything
 ```
 
@@ -68,22 +67,18 @@ A fiber is stored as `.felt/<path>/<slug>.md`. For example:
 
 ```yaml
 ---
-title: Covariance estimation
+name: Covariance estimation
 status: closed
 tags: [pure-eb, methods]
-depends-on:
-  - id: use-des-y3-weights
-    label: weight choice
 created-at: 2026-01-15T10:30:00Z
 closed-at: 2026-01-16T14:20:00Z
 outcome: "Jackknife covariance, 10x faster than analytic, <2% bias at all scales"
 ---
 
-(covariance-estimation)=
-# Covariance estimation
-
 Tried analytic first — too slow for the number of bins we need.
 Jackknife on 150 patches gives stable diagonal + off-diagonal.
+
+See also [[use-des-y3-weights]].
 
 ## Comments
 **2026-01-15 14:30** — tried analytic, too slow
@@ -107,26 +102,20 @@ Status is opt-in. Most fibers don't need it. Add `-s open` when something needs 
 
 ```bash
 felt "[pure-eb] Covariance estimation"    # extracted from title
-felt add "Fix bug" -t pure-eb -t urgent   # via flag
+felt add fix-bug "Fix bug" -t pure-eb -t urgent
 felt edit covariance-estimation --tag note
 felt ls -t pure-eb                        # filter by tag
 felt ls -t tapestry:                      # prefix match
 ```
 
-### The DAG
+### Relationships
 
-Dependencies form a directed acyclic graph. Cycles are rejected. Traversal, visualization, and integrity checks live under `felt tree`.
+Containment comes from the directory tree. Narrative connections live in `[[wikilinks]]` inside the body. ASTRA `inputs.from` references express data flow when a fiber becomes computationally formalized.
 
 ```bash
-felt edit <id> --link <dep-id>          # add edge
-felt edit <id> --link <dep-id> -l "why" # labeled edge
-felt edit <id> --unlink <dep-id>        # remove edge
-felt ls --ready                         # open fibers with all deps closed
-felt tree <id> --up                     # direct dependencies
-felt tree <id> --up --all               # transitive upstream
-felt tree <id> --down                   # direct dependents
-felt tree --format mermaid              # export whole graph (mermaid/dot/text)
-felt tree --check                       # validate integrity
+felt tree                               # containment hierarchy
+felt show covariance-estimation         # body refs + ASTRA summary
+felt ls "DES Y3"                        # search names, outcomes, ASTRA fields
 ```
 
 ### ASTRA Frontmatter
@@ -135,7 +124,7 @@ Fibers can carry optional ASTRA-compatible frontmatter alongside felt's native f
 
 ```yaml
 ---
-title: BAO Damping Prior
+name: BAO Damping Prior
 outcome: Informative Gaussian priors confirmed.
 inputs:
   - id: clustering_data
@@ -160,9 +149,9 @@ felt export --format astra    # writes ./astra.yaml
 
 ```bash
 felt show <id>                    # full body + metadata
-felt show <id> -d compact         # metadata + outcome, no body
-felt show <id> -d summary         # compact + lede paragraph
-felt tree <id> --up -d compact    # outcome chain
+felt show <id> -d compact         # metadata + outcome + ASTRA counts
+felt show <id> -d summary         # compact + lede paragraph + ASTRA summary
+felt show <id> --body             # body only
 ```
 
 ## Tapestry
@@ -171,9 +160,9 @@ Fibers tagged with `tapestry:<specName>` become nodes in a visual DAG that can b
 
 ```bash
 # Create tapestry nodes
-felt add "B-modes consistent with noise" -t tapestry:bmodes
-felt add "Covariance matrix" -t tapestry:covariance
-felt edit bmodes --link covariance
+felt add bmodes "B-modes consistent with noise" -t tapestry:bmodes
+felt add covariance "Covariance matrix" -t tapestry:covariance
+felt edit bmodes --comment "supported by [[covariance]]"
 
 # Evidence: results/tapestry/{specName}/evidence.json
 # Written by your pipeline (e.g., Snakemake), not by hand
@@ -225,8 +214,8 @@ felt update                                      # update felt and refresh copie
 
 ```bash
 # Core
-felt init                         felt add <title> [flags]
-felt <title>                      felt show <id> [-d level]
+felt init                         felt add <slug> <name> [flags]
+felt <slug> <name>                felt show <id> [-d level]
 felt edit <id> [flags]            felt ls [query]
 felt rm <id>                      felt tree [id] [flags]
 felt export [flags]               felt hook session
@@ -238,16 +227,15 @@ felt setup claude|codex|skills    felt update
 ```bash
 # felt add
 -b, --body "text"                 -s, --status open|active|closed
--a, --depends-on <id>             -t, --tag <tag>
--D, --due 2024-03-15              -o, --outcome "text"
+-t, --tag <tag>                   -D, --due 2024-03-15
+-o, --outcome "text"
 
 # felt edit
 --tag <tag>                       --untag <tag>
---link <id>                       --unlink <id>
---comment "text"                  -l, --label "why"
+--comment "text"                  --body "text"
 
 # felt ls
---ready                           --body
+--body
 -e, --exact                       -r, --regex
 
 # felt tree

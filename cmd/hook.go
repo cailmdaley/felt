@@ -23,8 +23,7 @@ var hookSessionCmd = &cobra.Command{
 	Short: "Output workflow context for session start",
 	Long: `Outputs felt workflow context for use in Claude Code SessionStart hooks.
 
-Prints active fibers (currently being worked on) and ready fibers
-(open with all dependencies closed) in a format suitable for AI context.`,
+Prints active and recently touched fibers in a format suitable for AI context.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		root, err := resolveProjectRoot()
@@ -40,8 +39,7 @@ Prints active fibers (currently being worked on) and ready fibers
 			return err
 		}
 
-		g := felt.BuildGraph(felts)
-		output := formatSessionOutput(felts, g)
+		output := formatSessionOutput(felts)
 		fmt.Print(output)
 		return nil
 	},
@@ -71,7 +69,7 @@ func init() {
 }
 
 func feltDescription() string {
-	return "felt is a DAG-native fiber tracker. Fibers are concerns — tasks, decisions, findings — stored as markdown in `.felt/`, connected by dependencies, accreting ASTRA structure as understanding crystallizes.\n\n"
+	return "felt is a markdown fiber tracker. Fibers are concerns — tasks, decisions, findings — stored in `.felt/` as directory-contained markdown with YAML frontmatter, wikilinks in the body, and optional ASTRA structure.\n\n"
 }
 
 func minimalOutput() string {
@@ -80,7 +78,7 @@ func minimalOutput() string {
 		cliReference() + coreRules()
 }
 
-func formatSessionOutput(felts []*felt.Felt, g *felt.Graph) string {
+func formatSessionOutput(felts []*felt.Felt) string {
 	var sb strings.Builder
 
 	sb.WriteString("# Felt Workflow Context\n\n")
@@ -99,8 +97,6 @@ func formatSessionOutput(felts []*felt.Felt, g *felt.Graph) string {
 		return active[i].CreatedAt.Before(active[j].CreatedAt)
 	})
 
-	ready := g.Ready()
-
 	if len(active) > 0 {
 		sb.WriteString("## Active Fibers\n\n")
 		for _, f := range active {
@@ -109,25 +105,13 @@ func formatSessionOutput(felts []*felt.Felt, g *felt.Graph) string {
 		sb.WriteString("\n")
 	}
 
-	if len(ready) > 0 {
-		sb.WriteString("## Ready Fibers\n\n")
-		for _, f := range ready {
-			sb.WriteString(formatFeltTwoLine(f))
-		}
-		sb.WriteString("\n")
+	if len(active) == 0 {
+		sb.WriteString("*No active fibers.*\n\n")
 	}
 
-	// If nothing active or ready, note that
-	if len(active) == 0 && len(ready) == 0 {
-		sb.WriteString("*No active or ready fibers.*\n\n")
-	}
-
-	// Recently touched: 5 most recently modified, excluding active/ready
-	shown := make(map[string]bool, len(active)+len(ready))
+	// Recently touched: 5 most recently modified, excluding active.
+	shown := make(map[string]bool, len(active))
 	for _, f := range active {
-		shown[f.ID] = true
-	}
-	for _, f := range ready {
 		shown[f.ID] = true
 	}
 
@@ -189,19 +173,17 @@ func cliReference() string {
 ` + "```" + `
 felt init                       # initialize .felt/ + myst.yml
 felt <slug> "name"              # create fiber
-felt add <slug> "name" [flags]  # create with status/tags/deps/outcome
+felt add <slug> "name" [flags]  # create with status/tags/outcome
 felt edit <id> --status active  # enter tracking / mark active
 felt edit <id> --status closed --outcome "outcome"
 felt edit <id> --name "new name"
 felt edit <id> --tag foo --untag bar
-felt edit <id> --dep other --undep old
 felt edit <id> --comment "note" # append under ## Comments
 felt edit <id> --body "text"    # full body replacement (overwrite)
 felt show <id>                  # full details
 felt show <id> -d summary       # metadata + lede paragraph
-felt show <id> -d compact       # metadata + outcome only
+felt show <id> -d compact       # metadata + outcome + ASTRA counts
 felt ls                         # tracked fibers (open/active)
-felt ls --ready                 # open fibers whose deps are closed
 felt ls -t tapestry:            # any filter widens to all statuses
 felt ls -s closed "query"       # explicit -s overrides; -e exact, -r regex
 felt tree                       # containment hierarchy
