@@ -200,7 +200,7 @@ felt export --format astra      # legacy astra.yaml bridge from ASTRA frontmatte
 Also: hook session, rm, setup, update
 ` + "```" + `
 Statuses: · untracked, ○ open, ◐ active, ● closed
-Detail: title < compact < summary < full (default). Summary shows the **lede** — the first paragraph of the body. Write it to stand alone. ` + "`felt show`" + ` also surfaces indexed citations from wikilinks.
+Detail: name < compact < summary < full (default). Summary shows the **lede** — the first paragraph of the body. Write it to stand alone. ` + "`felt show`" + ` also surfaces indexed citations from wikilinks.
 Relationships: containment by path, narrative ` + "`[[wikilinks]]`" + `, and ASTRA ` + "`inputs.from`" + ` data flow.
 To patch body text (not replace), Read then Edit the fiber markdown file in .felt/<path>/<slug>.md. Nested fibers use path IDs like bao-analysis/damping-prior.
 

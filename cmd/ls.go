@@ -134,10 +134,10 @@ Use --body with query to include body search, and with --json to emit body text.
 
 			// Text search (if query provided)
 			if query != "" {
-				titleLower := strings.ToLower(f.DisplayName())
+				nameLower := strings.ToLower(f.DisplayName())
 
 				// Exact name match (sorted first)
-				if !lsRegex && titleLower == queryLower {
+				if !lsRegex && nameLower == queryLower {
 					exactMatches = append(exactMatches, f)
 					continue
 				}
@@ -153,7 +153,7 @@ Use --body with query to include body search, and with --json to emit body text.
 				if lsRegex {
 					matches = re.MatchString(f.DisplayName()) || re.MatchString(searchText)
 				} else {
-					matches = strings.Contains(titleLower, queryLower) ||
+					matches = strings.Contains(nameLower, queryLower) ||
 						strings.Contains(strings.ToLower(searchText), queryLower)
 				}
 
@@ -187,7 +187,7 @@ Use --body with query to include body search, and with --json to emit body text.
 			}
 		}
 
-		// Exact title matches first, then the rest
+		// Exact name matches first, then the rest
 		filtered = append(exactMatches, filtered...)
 
 		// Sort: --recent sorts by recency, otherwise by priority then creation
@@ -260,7 +260,7 @@ func init() {
 	lsCmd.Flags().StringArrayVarP(&lsTags, "tag", "t", nil, "Filter by tag (repeatable, AND logic; trailing colon for prefix match)")
 	lsCmd.Flags().IntVarP(&lsRecent, "recent", "n", 0, "Show N most recent (by closed-at or created-at)")
 	lsCmd.Flags().BoolVar(&lsBody, "body", false, "Include body search for queries and body field in JSON output")
-	lsCmd.Flags().BoolVarP(&lsExact, "exact", "e", false, "Exact title match only (with query)")
+	lsCmd.Flags().BoolVarP(&lsExact, "exact", "e", false, "Exact name match only (with query)")
 	lsCmd.Flags().BoolVarP(&lsRegex, "regex", "r", false, "Treat query as regular expression")
 }
 

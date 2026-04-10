@@ -9,14 +9,14 @@ import (
 
 // Depth levels for progressive disclosure.
 const (
-	DepthTitle   = "title"
+	DepthName    = "name"
 	DepthCompact = "compact"
 	DepthSummary = "summary"
 	DepthFull    = "full"
 )
 
 // ValidDepths lists all valid depth values.
-var ValidDepths = []string{DepthTitle, DepthCompact, DepthSummary, DepthFull}
+var ValidDepths = []string{DepthName, DepthCompact, DepthSummary, DepthFull}
 
 // validateDepth checks if a depth value is valid.
 func validateDepth(d string) error {
@@ -31,8 +31,8 @@ func validateDepth(d string) error {
 // renderFelt renders a felt at the given depth level.
 func renderFelt(f *felt.Felt, g *felt.Graph, depth string, citations []felt.Citation) string {
 	switch depth {
-	case DepthTitle:
-		return renderTitle(f)
+	case DepthName:
+		return renderName(f)
 	case DepthCompact:
 		return renderCompact(f, g)
 	case DepthSummary:
@@ -42,7 +42,7 @@ func renderFelt(f *felt.Felt, g *felt.Graph, depth string, citations []felt.Cita
 	}
 }
 
-func renderTitle(f *felt.Felt) string {
+func renderName(f *felt.Felt) string {
 	if len(f.Tags) > 0 {
 		return fmt.Sprintf("%s (%s)\n", f.DisplayName(), strings.Join(f.Tags, ", "))
 	}

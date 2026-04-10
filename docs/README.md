@@ -66,7 +66,7 @@ felt show <id> -d compact     # see outcome without full body
 
 | Level | What you see |
 |---|---|
-| `title` | Name + tags |
+| `name` | Name + tags |
 | `compact` | Metadata + outcome + ASTRA counts |
 | `summary` | Compact + citations + lede paragraph + concise ASTRA summary |
 | `full` | Everything (default) |

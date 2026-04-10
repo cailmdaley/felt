@@ -28,7 +28,7 @@ Fibers are minimal by default. All fields except `name` are optional.
 
 **ASTRA shorthand edits.** `felt edit` still owns metadata, but now also covers one-level ASTRA structure: `--decision` with `--label`/`--rationale`/`--default`/`--option`, plus `--input` and `--insight` for simple frontmatter accretion. For deeper nested ASTRA edits, read then edit the markdown file directly.
 
-**Progressive disclosure.** `felt show <id> -d compact` shows metadata + outcome + ASTRA counts. Levels: title, compact, summary, full (default). Targeted views: `felt show <id> --body` prints the body plus its start line; `--decisions`, `--decision`, `--inputs`, and `--insights` expose ASTRA slices directly. `felt tree` is the containment hierarchy.
+**Progressive disclosure.** `felt show <id> -d compact` shows metadata + outcome + ASTRA counts. Levels: name, compact, summary, full (default). Targeted views: `felt show <id> --body` prints the body plus its start line; `--decisions`, `--decision`, `--inputs`, and `--insights` expose ASTRA slices directly. `felt tree` is the containment hierarchy.
 
 ## Key integrations
 

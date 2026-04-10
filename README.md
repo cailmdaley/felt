@@ -150,6 +150,7 @@ felt export --format astra    # writes ./astra.yaml
 
 ```bash
 felt show <id>                    # full body + metadata
+felt show <id> -d name            # name + tags only
 felt show <id> -d compact         # metadata + outcome + ASTRA counts
 felt show <id> -d summary         # compact + citations + lede + ASTRA summary
 felt show <id> --body             # body + body start line for editing

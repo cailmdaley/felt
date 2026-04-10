@@ -24,7 +24,7 @@ var showCmd = &cobra.Command{
 	Long: `Displays details of a felt at the requested detail level.
 
 Detail levels control progressive disclosure:
-  title    Title and tags only
+  name     Name and tags only
   compact  Metadata, outcome, and ASTRA counts
   summary  Compact + lede paragraph + concise ASTRA summary
   full     Everything (default)
@@ -137,7 +137,7 @@ Targeted views:
 func init() {
 	rootCmd.AddCommand(showCmd)
 	showCmd.Flags().BoolVarP(&showBodyOnly, "body", "b", false, "Output the body plus its start line")
-	showCmd.Flags().StringVarP(&showDetail, "detail", "d", "", "Detail level (title, compact, summary, full)")
+	showCmd.Flags().StringVarP(&showDetail, "detail", "d", "", "Detail level (name, compact, summary, full)")
 	showCmd.Flags().BoolVar(&showDecisions, "decisions", false, "Output decisions only")
 	showCmd.Flags().StringVar(&showDecision, "decision", "", "Output one decision by ID")
 	showCmd.Flags().BoolVar(&showInputs, "inputs", false, "Output inputs only")

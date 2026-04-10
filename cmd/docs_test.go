@@ -258,6 +258,21 @@ func TestDocsAvoidLegacyTagExtractionExample(t *testing.T) {
 	}
 }
 
+func TestGeneratedGuidanceAvoidsLegacyTitleDetailLevel(t *testing.T) {
+	for name, text := range map[string]string{
+		"cliReference":    cliReference(),
+		"claudeMDSnippet": claudeMDSnippet(),
+		"minimalOutput":   minimalOutput(),
+	} {
+		if strings.Contains(text, "title < compact") {
+			t.Fatalf("%s still mentions legacy title detail level", name)
+		}
+		if strings.Contains(text, "Detail level (title, compact, summary, full)") {
+			t.Fatalf("%s still mentions legacy title detail flag help", name)
+		}
+	}
+}
+
 func TestEmbeddedBundledSkillsAreSortedAndKnown(t *testing.T) {
 	entries, err := fs.ReadDir(embeddedSkills, "skills")
 	if err != nil {

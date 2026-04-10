@@ -112,7 +112,7 @@ func init() {
 	addCmd.Flags().StringVarP(&addOutcome, "outcome", "o", "", "Outcome (the conclusion)")
 }
 
-// Also allow bare "felt <title>" as shorthand for "felt add <title>"
+// Also allow bare "felt <slug> <name>" as shorthand for "felt add <slug> <name>".
 func init() {
 	rootCmd.Args = cobra.ArbitraryArgs
 
