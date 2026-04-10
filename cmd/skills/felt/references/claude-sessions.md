@@ -43,7 +43,7 @@ For each new fiber:
 
 ```bash
 felt ls -s all "<concept>"
-felt tree
+felt show <id>
 ```
 
 Err toward useful connection. Isolated fibers are hard to find.

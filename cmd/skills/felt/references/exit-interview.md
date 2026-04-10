@@ -34,7 +34,7 @@ Did ASTRA formalization feel warranted for every fiber you formalized? Were ther
 
 ### 5. CLI
 
-The `felt` command-line tool specifically: flags, output, search (`felt ls`, `felt show`), nesting, containment (`felt tree`), `felt edit`, and ASTRA-targeted views. Anything that didn't work as expected, was hard to discover, or produced confusing output. Also: did you end up writing fiber files directly (Edit/Write) more than using the CLI, and if so, why?
+The `felt` command-line tool specifically: flags, output, search (`felt ls`, `felt show`), containment and path IDs, `felt edit`, and ASTRA-targeted views. Anything that didn't work as expected, was hard to discover, or produced confusing output. Also: did you end up writing fiber files directly (Edit/Write) more than using the CLI, and if so, why?
 
 ### 6. What did you NOT capture?
 

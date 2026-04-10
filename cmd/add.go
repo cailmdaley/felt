@@ -8,23 +8,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var retiredCommandNames = map[string]struct{}{
-	"check":      {},
-	"comment":    {},
-	"downstream": {},
-	"find":       {},
-	"graph":      {},
-	"link":       {},
-	"path":       {},
-	"prime":      {},
-	"ready":      {},
-	"tag":        {},
-	"tapestry":   {},
-	"unlink":     {},
-	"untag":      {},
-	"upstream":   {},
-}
-
 var (
 	addBody    string
 	addStatus  string
@@ -43,8 +26,7 @@ and is required explicitly.
 
 Examples:
   felt add mocks-unbiased "Are the mocks unbiased?"
-  felt add pure_eb/covariance "Covariance method"
-  felt mocks-unbiased "Are the mocks unbiased?" -t pure-eb`,
+  felt add pure_eb/covariance "Covariance method"`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		root, err := resolveProjectRoot()
@@ -110,49 +92,4 @@ func init() {
 	addCmd.Flags().StringVarP(&addDue, "due", "D", "", "Due date (YYYY-MM-DD)")
 	addCmd.Flags().StringArrayVarP(&addTags, "tag", "t", nil, "Tag (repeatable)")
 	addCmd.Flags().StringVarP(&addOutcome, "outcome", "o", "", "Outcome (the conclusion)")
-}
-
-// Also allow bare "felt <slug> <name>" as shorthand for "felt add <slug> <name>".
-func init() {
-	rootCmd.Args = cobra.ArbitraryArgs
-
-	// Copy add command flags to root so "felt <slug> <name> ..." works
-	rootCmd.Flags().StringVarP(&addBody, "body", "b", "", "Body text")
-	rootCmd.Flags().StringVarP(&addStatus, "status", "s", "", "Status (open, active, closed)")
-	rootCmd.Flags().StringVarP(&addDue, "due", "D", "", "Due date (YYYY-MM-DD)")
-	rootCmd.Flags().StringArrayVarP(&addTags, "tag", "t", nil, "Tag (repeatable)")
-	rootCmd.Flags().StringVarP(&addOutcome, "outcome", "o", "", "Outcome (the conclusion)")
-
-	originalRun := rootCmd.RunE
-	rootCmd.RunE = func(cmd *cobra.Command, args []string) error {
-		if len(args) > 0 && isRetiredCommand(args[0]) {
-			return fmt.Errorf("unknown command %q for %q", args[0], cmd.CommandPath())
-		}
-		if len(args) == 2 && !isSubcommand(args[0]) {
-			return addCmd.RunE(cmd, args)
-		}
-		if originalRun != nil {
-			return originalRun(cmd, args)
-		}
-		return cmd.Help()
-	}
-}
-
-func isRetiredCommand(name string) bool {
-	_, ok := retiredCommandNames[name]
-	return ok
-}
-
-func isSubcommand(name string) bool {
-	for _, cmd := range rootCmd.Commands() {
-		if cmd.Name() == name {
-			return true
-		}
-		for _, alias := range cmd.Aliases {
-			if alias == name {
-				return true
-			}
-		}
-	}
-	return false
 }

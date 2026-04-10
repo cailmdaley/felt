@@ -92,6 +92,18 @@ func TestRootCommandSurfaceIsConsolidated(t *testing.T) {
 	}
 }
 
+func TestRootUsageAvoidsAddFlagLeakageAndBareAddShorthand(t *testing.T) {
+	usage := rootCmd.UsageString()
+	for _, leaked := range []string{"Body text", "Outcome (the conclusion)", "Status (open, active, closed)"} {
+		if strings.Contains(usage, leaked) {
+			t.Fatalf("root usage still leaks add-only flag %q:\n%s", leaked, usage)
+		}
+	}
+	if strings.Contains(usage, "felt <slug> <name>") {
+		t.Fatalf("root usage still advertises bare add shorthand:\n%s", usage)
+	}
+}
+
 func TestBundledSkillsAvoidRetiredCommands(t *testing.T) {
 	root, err := os.Getwd()
 	if err != nil {

@@ -129,7 +129,6 @@ felt show api              # unique prefix
 ```bash
 felt init                         # create .felt/
 felt add <slug> <name>            # create fiber
-felt <slug> <name>                # shorthand for add
 felt edit <id> -s active          # enter tracking / mark active
 felt edit <id> -s closed -o "outcome"
 felt rm <id>                      # delete
@@ -147,7 +146,7 @@ felt ls -s all "query"            # search name, outcome, ASTRA fields
 felt ls -s all -r "pattern"       # regex search
 felt show <id>                    # full details
 felt show <id> -d compact         # structured overview
-felt tree                         # containment tree from roots
+felt check                        # repository-wide integrity lint
 ```
 
 ### Editing
@@ -164,21 +163,13 @@ felt edit <id> --input 'catalog:data:upstream.posterior'
 felt edit <id> --insight 'stable:Posterior is stable'
 ```
 
-### Tree
+### Maintenance
 
 ```bash
-felt tree                        # whole containment tree
-felt tree bao-analysis           # subtree rooted at one fiber
-felt tree --depth 2              # limit displayed nesting depth
-```
-
-### Integration
-
-```bash
-felt hook session                 # context for session start hooks
 felt check                        # broken refs/fragments, legacy format residue, ASTRA lint, depth consistency
 felt export --format tapestry     # viewer payload
 felt export --format astra        # ASTRA YAML export surface
+felt migrate --dry-run            # preview legacy storage migration
 ```
 
 ### Global Flags

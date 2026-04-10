@@ -223,11 +223,10 @@ felt update                                      # update felt and refresh copie
 ```bash
 # Core
 felt init                         felt add <slug> <name> [flags]
-felt <slug> <name>                felt show <id> [-d level]
-felt edit <id> [flags]            felt ls [query]
-felt rm <id>                      felt tree [id] [flags]
-felt export [flags]               felt hook session
-felt setup claude|codex|skills    felt update
+felt edit <id> [flags]            felt show <id> [-d level]
+felt ls [query]                   felt check
+felt migrate [--dry-run]          felt export [flags]
+felt rm <id>
 ```
 
 ### Flags
@@ -250,9 +249,6 @@ felt setup claude|codex|skills    felt update
 # felt ls
 --body
 -e, --exact                       -r, --regex
-
-# felt tree
---depth <n>
 
 # felt export
 -f, --format tapestry|astra       --out <path>

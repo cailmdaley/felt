@@ -136,7 +136,7 @@ felt edit <id> -s closed -o "Resolved in meeting: decided to use Z because..."
 Link new fibers to related ones:
 ```bash
 felt ls -s all "related concept"
-felt tree
+felt show <id>
 ```
 
 Big decisions may also warrant updating CLAUDE.md or documentation fibers.

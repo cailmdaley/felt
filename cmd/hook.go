@@ -172,7 +172,6 @@ func cliReference() string {
 	return `## CLI
 ` + "```" + `
 felt init                       # initialize .felt/
-felt <slug> "name"              # create fiber
 felt add <slug> "name" [flags]  # create with status/tags/outcome
 felt edit <id> --status active  # enter tracking / mark active
 felt edit <id> --status closed --outcome "outcome"
@@ -190,14 +189,9 @@ felt ls                         # tracked fibers (open/active)
 felt ls -t tapestry:            # any filter widens to all statuses
 felt ls -s closed "query"       # explicit -s overrides; -e exact, -r regex
 felt ls --body "query"          # FTS5 body search via .felt/index.db
-felt tree                       # containment hierarchy
-felt tree <id>                  # subtree for one fiber
 felt check                      # lint broken refs/fragments and ASTRA/formalization issues
-felt nest <child> <parent>      # move into parent subtree
-felt unnest <child>             # promote back to top level
 felt migrate [--dry-run]        # normalize legacy layout/name/anchors
 felt export --format astra      # legacy astra.yaml bridge from ASTRA frontmatter
-Also: hook session, rm, setup, update
 ` + "```" + `
 Statuses: · untracked, ○ open, ◐ active, ● closed
 Detail: name < compact < summary < full (default). Summary shows the **lede** — the first paragraph of the body. Write it to stand alone. ` + "`felt show`" + ` also surfaces indexed wikilink citations and reverse data-flow consumers.
