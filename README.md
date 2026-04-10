@@ -228,9 +228,8 @@ felt update                                      # update felt and refresh copie
 
 | Skill | Purpose |
 |-------|---------|
-| **felt** | Filing fibers from conversation — session extraction, transcript processing, archiving |
-| **constitution** | Drafting specs for autonomous iteration loops |
-| **ralph** | Executing those loops — survey, contribute, exit |
+| **felt** | Filing fibers — formalizing as you work, crafting decisions and ralph specs, mining at session end, maintenance passes, transcript processing |
+| **ralph** | Executing autonomous iteration loops — survey, contribute, exit |
 
 ## Commands
 
@@ -270,6 +269,16 @@ felt rm <id>
 # global
 -j, --json
 ```
+
+## Inspirations
+
+Felt borrows from several projects exploring how to give AI coding agents structured, persistent context:
+
+- **[Zettelkasten](https://en.wikipedia.org/wiki/Zettelkasten)** — Niklas Luhmann's slip-box method, the ancestor of modern linked-note knowledge management. Emergent structure from connections rather than prescribed hierarchy. Felt's combination of directory containment, `[[wikilinks]]`, and ASTRA data-flow comes from this lineage, with Obsidian as the practical modern embodiment the vault format mirrors.
+- **[Beads](https://github.com/steveyegge/beads)** — Steve Yegge's graph-based, git-backed issue tracker designed as agent memory. The core conviction — that coding agents need structured persistent memory they can query, not just scratch files — is load-bearing for felt. Beads leans on Go, SQLite, and JSONL; felt leans on plain markdown with a rebuildable cache.
+- **[Dots](https://github.com/joelreymont/dots)** — Joel Reymont's minimalist counterpart to Beads (200 KB of Zig, plain markdown in `.dots/`, no database). The "the directory tree is already the source of truth" stance runs through felt too — the SQLite cache at `.felt/index.db` is strictly a rebuildable index, not storage.
+- **[Ralph Wiggum](https://github.com/ghuntley/how-to-ralph-wiggum)** — Geoffrey Huntley's autonomous iteration technique: feed the agent the same spec on a loop until the work is done. Felt's `ralph` skill, the `constitute` activity, and the `constitute.md` reference (pointers not snapshots, desired state, living document) all come from this idea.
+- **[Ouroboros](https://github.com/Q00/ouroboros)** — Q00's specification-first AI coding workflow. The Double Diamond rhythm (Wonder → Ontology, Design → Delivery), the stance personas, and the qualitative ambiguity self-check in the `crafting.md` reference are adapted from Ouroboros's interview phase — with the numerical ambiguity scoring, immutable seed specs, and ontology-convergence stopping criterion explicitly rejected as the wrong shape for scientific work.
 
 ## License
 

@@ -28,7 +28,7 @@ When filing a new tapestry fiber:
 2. If that parent would exceed 4 children, look for an existing subgroup
 3. If none exists, create a grouping node named by the natural partition that just emerged
 
-**Reshaping** is a periodic pass (not every filing). See [archiving.md](archiving.md#tapestry-reshaping) for the full procedure.
+**Reshaping** is a periodic pass (not every filing). See [maintenance.md](maintenance.md#tapestry-reshaping) for the full procedure.
 
 ## Format Conventions
 

@@ -1,0 +1,139 @@
+# Constitute
+
+Drafting a ralph constitution — a fiber spec describing a desired state for autonomous iteration. This is the crafting process (see SKILL.md and `crafting.md`) applied to a specific artifact type: a living document that iterations re-read with fresh context until the work is done.
+
+---
+
+## What a constitution is
+
+A constitution is a design document with trust built in. Like a governmental constitution, it lays out principles and aspirations — not specific laws, not the current state of affairs. It is designed to outlast any single iteration and remain valid as the world changes around it.
+
+**A good constitution never says "50 files remain"** — that is a snapshot that goes stale. It says `check "grep -r 'old_pattern'"` — that is a principle that stays true until the work is done.
+
+Constitutions do not prescribe steps. They describe what the system looks like when it is right — the desired state, in both senses of the word. Nothing in the constitution should become confusing or unnecessary as the desired state is reached. Whoever works from it surveys reality, reasons about the gap, and decides what is highest value. In a ralph loop, each iteration does this with fresh context.
+
+**Constitution, not plan.** Plans assume you know the path; constitutions trust the agent to find it — with taste, judgment, and fresh eyes each time. This matters most in science and exploratory work, where each decision is informed by the result just before it.
+
+**Separation of context: if you craft, you never do the work yourself.** The constitution is designed by one role; iterations are run by another.
+
+---
+
+## When to constitute
+
+- Work where adaptation matters more than a fixed plan: scientific investigation, exploratory refactoring, creative writing
+- The desired state is clear (or can be made clear) but the path is not
+- Iterations need to re-read with fresh context and make judgment calls
+- A checklist would either be wrong after one step or race through without judgment
+
+Do not constitute for: clearly-scoped atomic tasks, work that could be a snakemake rule, anything where a plan actually is the right shape.
+
+---
+
+## Workflow
+
+### 1. Study
+
+Read relevant files, understand existing patterns. This informs the **constitution**, not implementation — the goal is pointers that iterations will follow, not a head start on the work.
+
+### 2. Draft
+
+Create the fiber with status `open`:
+
+```bash
+felt add <slug> "Constitution title" -s open
+```
+
+Then Read and Edit the fiber markdown at `.felt/<path>/<slug>.md`. Fill in what you can; do not wait until it is perfect.
+
+Use the crafting process from `crafting.md`:
+- **Wonder → Ontology:** what IS the desired state? Name it precisely.
+- **Design → Delivery:** what sections does this constitution need? Which are pointers vs snapshots?
+
+Stances that help most during constitution drafting:
+- **Ontologist** for naming the desired state ("what IS 'done' here?")
+- **Simplifier** for fencing scope ("what are we explicitly leaving alone?")
+- **Contrarian** for pressure-testing whether the whole framing is right
+- **Architect** when the constitution is about refactoring structure
+
+### 3. Refine
+
+Show the draft, get feedback, revise. Use AskUserQuestion for structured choices. Apply the qualitative ambiguity self-check from `crafting.md` — goal, constraints, success — before launching.
+
+Repeat until it feels solid. It does not have to be complete; open questions belong in the Open Questions section.
+
+### 4. Launch
+
+When approved:
+
+```bash
+~/.claude/skills/felt/scripts/ralph <fiber-id> [--backend claude|codex] [-- extra-flags...]
+```
+
+Add `-- --chrome` for visual/frontend work. Session: `ralph-<fiber-id>`. Attach: `tmux attach -t ralph-<fiber-id>`.
+
+The constitution fiber stays editable while the loop runs. Iterations re-read it each cycle, so refinements between loops are normal.
+
+---
+
+## Constitutional sections
+
+A constitution needs enough structure that an iteration landing cold can orient itself, and enough freedom that it can adapt. Common sections — use what fits, skip what does not, add what is missing:
+
+```markdown
+## Desired State
+What the system looks like when it is done. Invariants, quality bar,
+done-conditions. Fence the scope — what to aim for AND what to leave alone.
+
+## Context
+File paths, existing patterns, architectural constraints. Things iterations
+need to *find* but not *achieve*.
+
+## Skills
+Which skills to activate before working (e.g., /snakemake, /felt).
+
+## Evidence
+How to check progress — commands, test suites, grep patterns. Pointers to
+ground truth that iterations measure themselves against.
+
+## Open Questions
+Uncertainties the user should weigh in on. Iterations add to this; the user
+resolves between loops.
+```
+
+---
+
+## Principles
+
+**Pointers, not snapshots.** `check "grep -r 'old_pattern'"` not "50 files remain." Snapshots go stale; pointers stay valid across iterations. This is the constitutional principle: write what remains true until the work is done.
+
+**Prefer existing systems.** Before designing anything new: can what is there handle this?
+
+**Constraints need reasons.** Bare constraints get creatively circumvented. Include enough *why* that an iteration knows when it applies.
+
+**Scope is a gift.** A clear fence — "only rename, don't refactor" — saves iterations from well-intentioned drift. Explicit scope frees the agent to work confidently within it.
+
+---
+
+## Constitutions that shape artifacts
+
+Some constitutions do not build code — they shape artifacts like tapestries, documentation, or research narratives. These have different rhythms:
+
+- **The desired state is comprehension, not correctness.** "A reviewer can follow the narrative cold" is harder to test than "all tests pass" — but it is the right bar. Evidence for progress: fewer redundant plots, clearer prose, more natural flow.
+- **The artifact continues to grow.** Unlike a refactoring (which finishes), a research tapestry keeps acquiring nodes. The constitution shapes how growth presents itself, not when growth stops.
+
+---
+
+## Anti-patterns
+
+- **Checklists.** "1. Add X, 2. Add Y" — iterations race through without judgment.
+- **Vague done.** "Make it better" — when does iteration stop? What would a reader see?
+- **Over-specification.** Prescribing *how* instead of *what*. Trust the agent's taste.
+- **Snapshot language.** "Currently 50 files" — will be wrong after one iteration.
+- **Immutable seed.** Not our shape. The constitution is meant to be edited between loops; do not treat it as frozen.
+- **Numerical convergence.** "Loop stops when similarity ≥ 0.95" — wrong shape for science. Stop when the Evidence section says the desired state has been reached.
+
+---
+
+## When crafting lands here
+
+The crafting rhythm in SKILL.md applies to all careful interactive thinking; this reference kicks in when the target artifact is specifically a ralph constitution. The diamonds do most of the work — the funnel mechanic used for open-ended exploration is not the primary move here, because there is already one specific artifact being produced. See the Workflow section above for which stances help most at each drafting phase.

@@ -18,7 +18,7 @@ Answer each question in a few sentences. Be concrete — name the fiber, the CLI
 
 ### 1. What did you use?
 
-Which mode(s) of /felt did you run? How many fibers did you create, close, or update? Did you formalize any with ASTRA structure — and if so, which kinds (decision, computation, finding)?
+Which activities did /felt cover during this session — formalizing as you worked, crafting a decision, mining at session end, drafting a constitution, maintenance, transcript processing? How many fibers did you create, close, or update? Did you formalize any with ASTRA structure — and if so, which kinds (decision, computation, finding)?
 
 ### 2. Real-time vs. retrospective
 
@@ -26,7 +26,7 @@ How much of the felt work happened during the session (fibers created in the mom
 
 ### 3. Felt workflow
 
-Friction or confusion about felt *as a workflow*: the mode system, when to file, what to file, the fiber-as-concern model, the "file as you go" vs. "extract at session end" tension, the consolidation conventions, the CLAUDE.md update step, anything about the overall approach.
+Friction or confusion about felt *as a workflow*: when to file, what to file, the fiber-as-concern model, the "file as you go" vs. "extract at session end" tension, the crafting rhythm (diamonds, stances, funnel), the consolidation conventions, the CLAUDE.md update step, anything about the overall approach or the references you had to consult.
 
 ### 4. ASTRA formalization
 
@@ -69,7 +69,7 @@ outcome: >-
 
 interview:
   model: <model name if known>
-  modes_used: [<session, transcript, formalize, etc.>]
+  activities: [<crafting, mining, constitution-drafting, maintenance, transcript-processing, formalizing-inline>]
   fibers_created: <int>
   fibers_closed: <int>
   fibers_updated: <int>
@@ -78,7 +78,7 @@ interview:
   realtime_vs_retrospective: >-
     <Q2: balance of in-the-moment vs. session-end filing, which produced better fibers>
   felt_friction: >-
-    <Q3: workflow, modes, when/what to file, consolidation>
+    <Q3: workflow, when/what to file, crafting rhythm, consolidation>
   astra_friction: >-
     <Q4: formalization warranted? fields awkward? kinds fit?>
   cli_friction: >-

@@ -3,11 +3,12 @@ name: felt
 description: >
   This skill should be used whenever working in a project that contains a `.felt/` directory, and
   when the user mentions fibers, asks to "file this", "record a decision", "formalize", "add ASTRA
-  structure", "close this fiber", or "extract from the session". Primary mode is formalize: accrete
-  structure on fibers as understanding crystallizes, in the reply window after each response. Other
-  modes are session (retroactive backstop at session end, chains into an exit interview written to
-  `~/loom/.felt/felt/`), transcript (extract from external sources with review), archive (consolidate
-  old fibers into documentation), and sweep (coherence check across the assemblage).
+  structure", "close this fiber", "sketch a fiber", "think through", "draft a constitution", "set
+  up a ralph", "ralph spec", "ralph", "clean up fibers", "consolidate", "archive", "sweep",
+  "maintenance pass", or "extract from the session". Fibers are directory-contained markdown with
+  optional ASTRA frontmatter; structure accretes as understanding crystallizes. The philosophy
+  and the crafting rhythm below apply whenever the skill is active; the References table points at
+  deeper material for specific activities.
 ---
 
 # /felt — Working with Fibers
@@ -26,31 +27,17 @@ Proactive formalization. Retroactive extraction. Consolidation over time. Cohere
 
 **Follow the understanding.** Don't ask permission to file. The user's corrections and opinions are the primary trigger; when the direction of the conversation shifts, your fibers shift with it, reversals included. You are tracking what has come to matter, not what was said first.
 
+**Help the user think.** When the conversation has careful-thinking character — deciding something non-trivial, scoping a sub-analysis, drafting a spec, talking through an open question — lean on the crafting rhythm from `crafting.md` (two diamonds, six stances, funnel ledger, qualitative self-check) to help the user converge. Err toward using it; the failure mode is letting important decisions slide by without structure, not pressing too hard.
+
 **Extract what slipped through.** Continuous formalization catches most things. At session end, mine decisions, patterns, and findings that weren't captured in the moment; this is a backstop, not the primary mode.
 
 **Outcomes teach.** An outcome that says "done" or "investigated X" has failed. Put the conclusion in: what was learned, what was decided, why. Someone reading the outcome should learn the thing without opening the body.
 
-**Consolidate over time.** Quick fibers become noise. Archive mode composts them into richer documentation fibers.
+**Consolidate over time.** Quick fibers become noise. Read the assemblage periodically and compost stale fibers into doc fibers, fix coherence across siblings, reshape branching. See `maintenance.md`.
 
 **CLAUDE.md stays lean.** Commands, paths, context pointers. Documentation fibers carry the depth.
 
 **Propagate decisions.** A decision rarely touches one place. Use Explore agents to find consequences in config, code, methodology, and other fibers. Record the consequence in code or fibers, and add wikilinks where the narrative connection matters.
-
----
-
-## Modes
-
-| Mode | When | Review? |
-|------|------|---------|
-| **formalize** | After each response, while the user reads | No — inline with work |
-| **session** | End of coding session (backstop) | No — autonomous |
-| **transcript** | External file (meeting, voice note) | Yes — present plan first |
-| **archive** | Consolidating old fibers | Yes — confirm before changes |
-| **sweep** | Coherence check across assemblage | Yes — present findings first |
-
-**Target:**
-- Project work → local `.felt/`
-- Cross-project / life → `~/loom/.felt/`
 
 ---
 
@@ -97,30 +84,17 @@ Proactive formalization. Retroactive extraction. Consolidation over time. Cohere
 
 ---
 
-## Sweep Mode
+## References
 
-Coherence check across the assemblage. Not scheduled — when it feels right:
+Read the relevant reference when the situation matches. Everything above applies always; references go deeper for specific activities.
 
-- After a burst of exploration
-- Before a deadline
-- When something feels off
-
-Launch Explore agents across open fibers. Each reads a fiber, checks whether the concern is still coherent with the code and the fibers around it. Findings come back to the main session for decision.
-
-The cycle: explore, tangle, order, clarity, explore again.
-
----
-
-## Reference Files
-
-Read the relevant reference when the mode or context matches:
-
-| Context | Reference |
-|---------|-----------|
-| Mining a Claude session | [claude-sessions.md](references/claude-sessions.md) |
-| Processing external transcript | [transcripts.md](references/transcripts.md) |
-| Formalizing fibers with ASTRA structure | [formalization.md](references/formalization.md) |
-| ASTRA field reference (schema, types, constraints) | [astra.md](references/astra.md) |
-| Consolidating old fibers, reshaping | [archiving.md](references/archiving.md) |
-| Migrating flat fibers to directory format | [migration.md](references/migration.md) |
-| Agent exit interview at session end | [exit-interview.md](references/exit-interview.md) |
+| When | Reference |
+|------|-----------|
+| Accreting ASTRA structure on a fiber — tier ladder, common shapes, body vs frontmatter | [formalization.md](references/formalization.md) |
+| Helping the user think carefully — two diamonds, six stances, funnel, qualitative self-check, ASTRA output | [crafting.md](references/crafting.md) |
+| Editing ASTRA frontmatter directly — full schema, types, constraints | [astra.md](references/astra.md) |
+| Drafting a ralph constitution — pointers not snapshots, desired state, launch | [constitute.md](references/constitute.md) |
+| At the end of a session — extracting what slipped through | [mining.md](references/mining.md) |
+| Processing an external transcript — meeting notes, voice note, dictation file | [transcripts.md](references/transcripts.md) |
+| Reading across the assemblage for mess — composting, coherence, reshaping | [maintenance.md](references/maintenance.md) |
+| Migrating legacy flat fibers to directory format | [migration.md](references/migration.md) |
