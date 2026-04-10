@@ -955,7 +955,7 @@ func parseBodyRefTarget(target, fragment string) (BodyRef, bool) {
 	if target == "" {
 		return BodyRef{}, false
 	}
-	if strings.HasPrefix(target, "http://") || strings.HasPrefix(target, "https://") {
+	if strings.HasPrefix(target, "http://") || strings.HasPrefix(target, "https://") || strings.HasPrefix(target, "/") {
 		return BodyRef{}, false
 	}
 	if fragment == "" {
