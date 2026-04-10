@@ -168,7 +168,7 @@ func TestSlugify(t *testing.T) {
 
 func TestParse(t *testing.T) {
 	content := []byte(`---
-title: Test Task
+name: Test Task
 status: active
 tags:
   - spec
@@ -216,7 +216,7 @@ Some comment here.
 
 func TestParseWithModeMetadataOnly(t *testing.T) {
 	content := []byte(`---
-title: Test Task
+name: Test Task
 status: active
 created-at: 2026-01-01T10:00:00Z
 outcome: Metadata survives
@@ -320,7 +320,7 @@ func TestMarshalLeavesEmptyBodyEmpty(t *testing.T) {
 func TestParseAndMarshalASTRAFields(t *testing.T) {
 	created := time.Date(2026, 3, 16, 9, 0, 0, 0, time.UTC)
 	content := []byte(`---
-title: BAO Damping Prior
+name: BAO Damping Prior
 created-at: 2026-03-15T10:00:00Z
 description: Prior on BAO damping parameters
 inputs:
@@ -732,7 +732,7 @@ func TestRemoveTag(t *testing.T) {
 
 func TestParseTags(t *testing.T) {
 	content := []byte(`---
-title: Test with Tags
+name: Test with Tags
 status: open
 tags:
   - pure-eb
@@ -795,7 +795,7 @@ func TestMarshalTags(t *testing.T) {
 
 func TestParseInputRefs(t *testing.T) {
 	content := []byte(`---
-title: Mixed input refs test
+name: Mixed input refs test
 status: open
 inputs:
   - id: data_input

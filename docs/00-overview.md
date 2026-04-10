@@ -1,5 +1,4 @@
----
-title: "Felt × ASTRA: Week of March 31"
+name: "Felt × ASTRA: Week of March 31"
 description: Overview of the felt v2 work for the Lightcone team — what we built, what we learned, what's next.
 ---
 
@@ -30,7 +29,7 @@ Everything is the same schema at different levels of fill. A bare title is a fib
 - **As a publishable record** — analysis-grade fibers forming the spine of a paper's methodology
 - **As an execution DAG** — computation fibers with recipes, renderable as a Snakemake/Dagster pipeline
 
-The view is up to the user. The schema doesn't change. Plugins and themes determine how the same structure appears — MySTRA renders the analysis view, the tapestry renders the exploration view, the document renders the narrative view.
+The view is up to the user. The schema doesn't change. Plugins and themes determine how the same structure appears — MySTRA renders the analysis view, the document renders the narrative view, and felt's containment plus indexed citations keep the exploratory substrate navigable.
 
 This is the core bet: if you accumulate structured context as you work (not after), the same substrate supports exploration, formalization, and publication. The 3×3 model makes the ladder explicit.
 
@@ -38,6 +37,6 @@ This is the core bet: if you accumulate structured context as you work (not afte
 
 - **The 3×3 formalization model** — How fibers move from breadcrumbs to analysis-grade structure: three tiers × three kinds.
 - **Felt as ASTRA plugin** — The full write-up for the Lightcone team: what felt is, how it relates to ASTRA, and the context injection problem.
-- **Citation audit** — A working ASTRA analysis: the B-modes citation graph with DOI-backed evidence, rendered with full MySTRA structure.
+- **Citation audit** — A working ASTRA analysis: the B-modes citation network with DOI-backed evidence, rendered with full MySTRA structure.
 - **Meeting interface** — The design and implementation of Portolan's meeting-to-ASTRA pipeline.
 - **Ralph constitution example** — A working constitution spec, showing how autonomous iteration loops are directed.

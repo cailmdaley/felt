@@ -314,7 +314,7 @@ func TestStorageFindMetadataSkipsBody(t *testing.T) {
 
 func TestReadFrontmatter(t *testing.T) {
 	content := strings.NewReader(`---
-title: Test Task
+name: Test Task
 status: open
 created-at: 2026-01-01T10:00:00Z
 ---
@@ -328,8 +328,8 @@ Body should never be read.
 	}
 
 	got := string(frontmatter)
-	if !strings.Contains(got, "title: Test Task") {
-		t.Errorf("frontmatter = %q, want title", got)
+	if !strings.Contains(got, "name: Test Task") {
+		t.Errorf("frontmatter = %q, want name", got)
 	}
 	if strings.Contains(got, "Body should never be read.") {
 		t.Errorf("frontmatter = %q, should not include body", got)

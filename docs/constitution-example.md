@@ -1,5 +1,4 @@
----
-title: "Example: Ralph Constitution"
+name: "Example: Ralph Constitution"
 description: "A working example of a ralph constitution — the spec that drives autonomous iteration loops. This one built the ASTRA document viewer."
 ---
 

@@ -1,5 +1,4 @@
----
-title: "The 3×3 formalization model"
+name: "The 3×3 formalization model"
 description: "How fibers move from breadcrumbs to analysis-grade ASTRA structure: three tiers × three kinds."
 ---
 
@@ -11,7 +10,7 @@ How fibers move through structured formalization. Three tiers of rigor, three ki
 
 The UX meeting on March 31 surfaced a core tension: when does freeform exploration become formal knowledge? François argued formalization should happen after, as a separate step. Liam argued for mandating ASTRA structure even during exploration. The 3×3 model is our answer: a deterministic ladder that fibers climb as understanding crystallizes, without forcing structure before it's real.
 
-The key insight: *everything is the same schema at different levels of fill.* A bare title is valid. A title with a decisions block is formalized. The same fiber with `analysis-grade: true` is part of the scientific argument. No separate "astrify" step — the structure accretes in place.
+The key insight: *everything is the same schema at different levels of fill.* A bare name is valid. A fiber with a decisions block is formalized. The same fiber with `analysis-grade: true` is part of the scientific argument. No separate "astrify" step — the structure accretes in place.
 
 This means the same system can render itself as a wiki (annotated fibers), as an analysis graph (formalized fibers with data flow), or as a publishable record (analysis-grade fibers). The view changes; the data doesn't.
 
@@ -19,7 +18,7 @@ This means the same system can render itself as a wiki (annotated fibers), as an
 
 | Tier | What it means | Test |
 |------|--------------|------|
-| **Annotated** | Any valid felt fiber. Title, outcome, body, tags, links in any combination. | Does the fiber exist? |
+| **Annotated** | Any valid felt fiber. Name, outcome, body, tags, links in any combination. | Does the fiber exist? |
 | **Formalized** | At least one well-formed ASTRA object in frontmatter. | Could `felt export --format astra` emit this? |
 | **Analysis-grade** | `analysis-grade: true` in frontmatter. Human-validated, part of the real scientific argument. | Has a human staked their name on it? |
 

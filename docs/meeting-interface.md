@@ -1,5 +1,4 @@
----
-title: "Meeting-to-ASTRA interface"
+name: "Meeting-to-ASTRA interface"
 description: Design and implementation of Portolan's live meeting pipeline — from transcript to ASTRA-structured research record.
 ---
 

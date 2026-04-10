@@ -1,5 +1,4 @@
----
-title: "Felt: an ASTRA-aware fiber system"
+name: "Felt: an ASTRA-aware fiber system"
 description: For the Lightcone team. What we built, where it fits, and the open problem of getting agents to actually use it.
 ---
 
@@ -9,9 +8,9 @@ description: For the Lightcone team. What we built, where it fits, and the open 
 
 ## What felt is
 
-A CLI for accumulating context as linked markdown fibers in a directed graph. Each fiber is a concern — a decision, finding, question, task, or spec — stored as a markdown file with YAML frontmatter. Fibers depend on each other, forming a DAG: upstream to trace reasoning, downstream to follow consequences.
+A CLI for accumulating context as directory-contained markdown fibers. Each fiber is a concern — a decision, finding, question, task, or spec — stored as a markdown file with YAML frontmatter. Relationships come from containment by path, `[[wikilinks]]` in the body for narrative connection, and ASTRA `inputs.from` for computational provenance.
 
-No database, no server. `.felt/` is a directory tree of markdown files you version-control, grep, and move between machines.
+No server. The markdown tree in `.felt/` stays the source of truth you version-control, grep, and move between machines; a rebuildable SQLite cache adds citations, typed links, and FTS body search without changing the authoring model.
 
 ```
 .felt/
@@ -25,7 +24,7 @@ No database, no server. `.felt/` is a directory tree of markdown files you versi
     └── covariance-estimation.md
 ```
 
-The filesystem mirrors the analysis tree. A sub-analysis is a subdirectory. IDs are slugs (`bao-analysis/damping-prior`), not UUIDs. `felt show`, `felt ls`, `felt tree` navigate the graph.
+The filesystem mirrors the analysis tree. A sub-analysis is a subdirectory. IDs are slugs (`bao-analysis/damping-prior`), not UUIDs. `felt show`, `felt ls`, and `felt tree` navigate containment, citations, and data flow without explicit dependency maintenance.
 
 Designed for AI coding agents (Claude Code, Codex) but works fine without them. **File as you go.** Decisions, detours, bugs you can't chase now — everything becomes a fiber. The relationship structure forms behind you as wake.
 
@@ -70,15 +69,17 @@ insights:
 
 All ASTRA fields are optional; a fiber with just `name` is valid. You don't design the analysis tree upfront. You file fibers as you work and the ASTRA structure fills in as it becomes real.
 
-`felt export --format astra` walks the fiber tree and emits a valid `astra.yaml` that `astra validate` and Prism can consume. Directory nesting maps to ASTRA nesting. Fibers without ASTRA content are silently skipped.
+`felt export --format astra` walks the fiber tree and emits a valid `astra.yaml` that `astra validate` and Prism can consume. Directory nesting maps to ASTRA nesting for legacy consumers. Fibers without ASTRA content are silently skipped.
 
 ## What we built (v2)
 
 The recent work reorganized felt around three changes:
 
-### 1. Directory-based fibers
+### 1. Directory-based fibers and relationship surfaces
 
 Every fiber is now a directory containing `<slug>.md` plus optional artifacts (figures, data). This replaced flat files with hex-suffix IDs (`covariance-estimation-a8b3c4d2.md` → `covariance-estimation/covariance-estimation.md`). The directory structure mirrors the analysis hierarchy — nesting a fiber under a parent creates a sub-analysis.
+
+Containment comes from the path itself. Narrative references are `[[wikilinks]]` resolved lexically from the referencing fiber. Computational provenance is expressed separately through ASTRA `inputs.from`.
 
 `felt migrate` converts old flat-file assemblages in one pass, rewriting `inputs.from` references from hex IDs to slug IDs.
 
