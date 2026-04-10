@@ -179,6 +179,9 @@ felt edit <id> --status closed --outcome "outcome"
 felt edit <id> --name "new name"
 felt edit <id> --tag foo --untag bar
 felt edit <id> --body "text"    # full body replacement (overwrite)
+felt edit <id> --decision cov --label "Covariance" --option 'glass:GLASS mocks'
+felt edit <id> --input 'catalog:data:upstream.posterior'
+felt edit <id> --insight 'stable:Posterior is stable'
 felt show <id>                  # full details
 felt show <id> -d summary       # metadata + lede paragraph
 felt show <id> -d compact       # metadata + outcome + ASTRA counts

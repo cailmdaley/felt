@@ -201,6 +201,41 @@ func TestIntegration(t *testing.T) {
 	}
 	mustFelt(t, dir, "edit", fiber2ID, "--untag", "testlabel")
 
+	// structured ASTRA edit shorthand
+	mustFelt(
+		t, dir, "edit", fiber2ID,
+		"--decision", "covariance",
+		"--label", "Covariance method",
+		"--rationale", "Tail behavior matters for downstream robustness",
+		"--default", "glass",
+		"--option", "glass:GLASS mocks",
+		"--option", "analytic:Analytic covariance:excluded:underestimates tails",
+		"--input", "catalog:data:upstream.posterior:Posterior sample",
+		"--insight", "stability:Posterior is stable to jackknife choice",
+	)
+	out = mustFelt(t, dir, "show", fiber2ID, "--decision", "covariance")
+	if !strings.Contains(out, "label: Covariance method") || !strings.Contains(out, "default: glass") {
+		t.Fatalf("structured decision edit: unexpected decision output:\n%s", out)
+	}
+	if !strings.Contains(out, "analytic:") || !strings.Contains(out, "excluded_reason: underestimates tails") {
+		t.Fatalf("structured decision edit: missing option details:\n%s", out)
+	}
+	out = mustFelt(t, dir, "show", fiber2ID, "--inputs")
+	if !strings.Contains(out, "id: catalog") || !strings.Contains(out, "from: upstream.posterior") {
+		t.Fatalf("structured input edit: unexpected inputs output:\n%s", out)
+	}
+	out = mustFelt(t, dir, "show", fiber2ID, "--insights")
+	if !strings.Contains(out, "stability:") || !strings.Contains(out, "claim: Posterior is stable to jackknife choice") {
+		t.Fatalf("structured insight edit: unexpected insights output:\n%s", out)
+	}
+	out, err = felt(dir, "edit", fiber2ID, "--label", "Decision without target")
+	if err == nil {
+		t.Fatal("structured edit without --decision: expected error")
+	}
+	if !strings.Contains(out, "require --decision") {
+		t.Fatalf("structured edit without --decision: expected helpful error, got: %s", out)
+	}
+
 	// duplicate slug should fail instead of auto-disambiguating
 	out, err = felt(dir, "add", "second-fiber", "duplicate fiber")
 	if err == nil {
@@ -473,7 +508,7 @@ Session body.
 	if err := json.Unmarshal([]byte(out), &migratedShown); err != nil {
 		t.Fatalf("migrate: invalid json from show -j: %v\n%s", err, out)
 	}
-	inputs, ok := migratedShown["inputs"].([]any)
+	inputs, ok = migratedShown["inputs"].([]any)
 	if !ok || len(inputs) != 1 {
 		t.Fatalf("migrate: unexpected inputs %#v", migratedShown["inputs"])
 	}

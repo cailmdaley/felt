@@ -238,6 +238,10 @@ felt setup claude|codex|skills    felt update
 --name "text"                     --tag <tag>
 --untag <tag>                     --body "text"
 --outcome "text"
+--decision <id> --label "text"    --rationale "text"
+--default <option-id>             --option 'id:label[:excluded[:reason]]'
+--input 'id[:type[:from[:description]]]'
+--insight 'id:claim'
 
 # felt ls
 --body

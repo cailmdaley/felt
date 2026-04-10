@@ -157,6 +157,9 @@ felt edit <id> -s active          # set status
 felt edit <id> -o "outcome"       # set outcome
 felt edit <id> --tag <tag>        # add tag
 felt edit <id> --untag <tag>      # remove tag
+felt edit <id> --decision cov --label "Covariance" --option 'glass:GLASS mocks'
+felt edit <id> --input 'catalog:data:upstream.posterior'
+felt edit <id> --insight 'stable:Posterior is stable'
 ```
 
 ### Tree

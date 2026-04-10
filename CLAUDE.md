@@ -26,6 +26,8 @@ Fibers are minimal by default. All fields except `name` are optional.
 
 **Relationships and index.** Containment is the directory tree. `[[wikilinks]]` are narrative references. ASTRA `inputs.from` is data flow. The SQLite cache indexes links, tags, ASTRA summaries, and FTS5 body text; `felt show` uses it for citations and `felt ls --body` uses it for fast body search.
 
+**ASTRA shorthand edits.** `felt edit` still owns metadata, but now also covers one-level ASTRA structure: `--decision` with `--label`/`--rationale`/`--default`/`--option`, plus `--input` and `--insight` for simple frontmatter accretion. For deeper nested ASTRA edits, read then edit the markdown file directly.
+
 **Progressive disclosure.** `felt show <id> -d compact` shows metadata + outcome + ASTRA counts. Levels: title, compact, summary, full (default). Targeted views: `felt show <id> --body` prints the body plus its start line; `--decisions`, `--decision`, `--inputs`, and `--insights` expose ASTRA slices directly. `felt tree` is the containment hierarchy.
 
 ## Key integrations
