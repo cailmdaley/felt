@@ -85,15 +85,19 @@ SYSEOF
 
     if [[ "$BACKEND" == "codex" ]]; then
         cat > "$PROMPT_FILE" << 'PROMPTEOF'
-You are inside a ralph loop. Activate the ralph skill ($ralph) and follow its instructions for iterating on the constitution above.
+You are inside a ralph loop. Activate the ralph skill ($ralph) and follow it.
 
-SCOPE: The survey builds a vantage point; the work exploits it. Stay and work from that vantage point until it degrades (~50% context), not before. The next iteration pays the same cold-start cost — don't waste yours.
+Survey, then exploit the warm world-model. Check `ralph-context-usage` at natural stopping points; below `50%` continue, at or above `50%` look for a handoff.
 
-When the view gets foggy: commit, felt, then `kill $PPID`. This is a bash-loop handoff back to the parent ralph launcher so it can start the next iteration, not a destructive kill.
+If you make changes, commit, /felt, then `kill $PPID`.
 PROMPTEOF
     else
         cat > "$PROMPT_FILE" << 'PROMPTEOF'
-You are inside a ralph loop. Activate the ralph skill (/ralph) and follow its instructions for iterating on the constitution above.
+You are inside a ralph loop. Activate the ralph skill (/ralph) and follow it.
+
+Survey, then exploit the warm world-model. Check `ralph-context-usage` at natural stopping points; below `50%` continue, at or above `50%` look for a handoff.
+
+If you make changes, commit, /felt, then `kill $PPID`.
 PROMPTEOF
     fi
 
