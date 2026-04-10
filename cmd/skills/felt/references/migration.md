@@ -13,22 +13,22 @@ felt migrate --dry-run    # preview — check for collisions, slug renames
 felt migrate              # big bang — no backwards compatibility
 ```
 
-The tool strips hex suffixes, creates `slug/slug.md` directories, rewrites `depends-on` references in migrated files, and inserts `(<slug>)=` MyST anchors.
+The tool strips hex suffixes, creates `slug/slug.md` directories, and rewrites legacy `depends-on` references in migrated files.
 
 ### 2. Validate
 
 ```bash
-felt tree --check         # DAG integrity — broken deps surface here
 felt ls -s all | wc -l    # sanity check: fiber count should match pre-migration
+felt check                # lint the migrated tree
 ```
 
 ### 3. Fix stale references
 
-**Pre-existing directory fibers are not rewritten.** If any fibers were created with the v2 binary before migration, their `depends-on` may still reference old hex IDs. `felt tree --check` will flag these. Fix manually:
+**Pre-existing directory fibers are not rewritten.** If any fibers were created with the v2 binary before migration, their `depends-on` may still reference old hex IDs. Search for them and fix manually:
 
 ```bash
-# tree --check reports: ERROR: fiber-a depends on non-existent some-fiber-8a08fc28
 felt show fiber-a -d compact   # confirm it exists
+rg -n "some-fiber-8a08fc28|depends-on:" .felt
 # Edit .felt/fiber-a/fiber-a.md — change depends-on from some-fiber-8a08fc28 to some-fiber
 ```
 
@@ -61,7 +61,7 @@ felt hook session | head -20  # verify session context works
 
 ## Pitfalls
 
-**Pre-v2 directory fibers have stale deps.** The migration tool only rewrites `depends-on` in files it migrates (flat files). Directory fibers that already existed are untouched. Always run `felt tree --check` after migration.
+**Pre-v2 directory fibers have stale deps.** The migration tool only rewrites `depends-on` in files it migrates (flat files). Directory fibers that already existed are untouched. Audit them with `rg` after migration.
 
 **Project renames create slug mismatches.** If the project was once called "hexarchy" and fibers were filed under that name, the slugs stay `hexarchy-*` after migration. CLAUDE.md references that assumed the current project name won't match. Use `felt ls -s all <keyword>` to find actual slugs.
 
@@ -77,7 +77,7 @@ felt hook session | head -20  # verify session context works
 
 - [ ] `felt migrate --dry-run` — no unexpected collisions
 - [ ] `felt migrate` — completes without error
-- [ ] `felt tree --check` — graph OK
+- [ ] `felt check` passes
 - [ ] Pre-existing directory fibers' `depends-on` fixed
 - [ ] CLAUDE.md hex suffixes stripped
 - [ ] CLAUDE.md file paths updated to fiber IDs

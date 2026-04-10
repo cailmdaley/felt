@@ -26,27 +26,27 @@ For each undocumented finding:
 
 ```bash
 # Simple fiber (title + outcome)
-felt add "Chose X over Y for Z reason" -o "X was better because... Y failed due to..."
+felt add chose-x-over-y "Chose X over Y for Z reason" -o "X was better because... Y failed due to..."
 
 # Complex fiber (with body for detailed context)
-felt add "Architecture decision: event sourcing" -b "Background: needed audit trail..." -o "Chose event sourcing over CRUD because..."
+felt add architecture-decision-event-sourcing "Architecture decision: event sourcing" -b "Background: needed audit trail..." -o "Chose event sourcing over CRUD because..."
 ```
 
 The `-o` flag creates the fiber already closed. Use `-b` for the body when there's enough background or complexity that the title and outcome aren't sufficient.
 
-### 2. Link the DAG
+### 2. Connect it
 
 For each new fiber:
-- What does this depend on?
-- What does this enable?
-- What else touches these concepts?
+- What should it cite with `[[wikilinks]]`?
+- Should it live under an existing parent fiber?
+- Does it need ASTRA `inputs.from` because the relation is computational?
 
 ```bash
 felt ls -s all "<concept>"
-felt edit <new-fiber> --link <related-fiber>
+felt tree
 ```
 
-Err toward linking. Isolated fibers are hard to find.
+Err toward useful connection. Isolated fibers are hard to find.
 
 ### 3. Update CLAUDE.md
 
@@ -68,6 +68,12 @@ Keep it lean. Depth goes in documentation fibers.
 ```bash
 git add -A && git commit -m "session: <what happened>"
 ```
+
+### 5. Exit Interview
+
+After extraction is complete, run the exit interview. Read [exit-interview.md](exit-interview.md) for the instrument and output template. Write the interview fiber to `~/loom/.felt/felt/`.
+
+Skip if the session made no use of felt.
 
 ---
 

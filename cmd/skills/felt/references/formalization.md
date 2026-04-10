@@ -8,7 +8,7 @@ How fibers move through the deterministic 3x3 model: three tiers, three kinds. F
 
 ### Three tiers
 
-- **Annotated**: any valid felt fiber. Title, outcome, body, tags, and links in any combination. No ASTRA requirement. This covers everything from a bare title to a rich doc fiber.
+- **Annotated**: any valid felt fiber. Name, outcome, body, tags, and wikilinks in any combination. No ASTRA requirement. This covers everything from a bare name to a rich doc fiber.
 - **Formalized**: the fiber has at least one well-formed ASTRA object in frontmatter. Deterministic test: could `felt export --format astra` emit this?
 - **Tempered**: `tempered: true` in frontmatter. Human-validated and part of the real scientific argument. This is a workflow flag, not a richer schema.
 
@@ -176,8 +176,8 @@ The frontmatter is for branching, validation, querying, and export. The body is 
 
 | Operation | Tool |
 |-----------|------|
-| Create fiber | `felt "title"` or `felt add "title" [flags]` |
-| Change status, tags, links | `felt edit <id> --status ... --tag ... --link ...` |
+| Create fiber | `felt add <slug> <name> [flags]` |
+| Change status and tags | `felt edit <id> --status ... --tag ...` |
 | Set outcome | `felt edit <id> -o "..."` |
 | Append comment | `felt edit <id> --comment "..."` |
 | Write/edit body and ASTRA frontmatter | Read + Edit on `.felt/<path>/<slug>.md` |
@@ -204,7 +204,7 @@ Outcome is documentation, not the gate for structured frontmatter.
 ### Annotated
 
 ```bash
-felt "PSF leakage check"
+felt add psf-leakage-check "PSF leakage check"
 felt edit psf-leakage-check -o "Leakage test in progress; checking whether any tomographic bin needs correction."
 ```
 
@@ -212,12 +212,10 @@ Edit `.felt/psf-leakage-check/psf-leakage-check.md`:
 
 ```markdown
 ---
-title: PSF leakage check
+name: PSF leakage check
 status: active
 tags:
   - systematics
-depends-on:
-  - psf-modeling
 outcome: Leakage test in progress; checking whether any tomographic bin needs correction.
 ---
 
@@ -235,13 +233,11 @@ Same fiber, now with concrete frontmatter while the computation is still running
 
 ```yaml
 ---
-title: PSF leakage check
+name: PSF leakage check
 status: active
 tags:
   - systematics
   - tapestry:psf-leakage
-depends-on:
-  - psf-modeling
 outcome: Leakage test in progress; checking whether any tomographic bin needs correction.
 
 inputs:
@@ -283,14 +279,12 @@ Once the result has been checked by a human and relied on in the real analysis, 
 
 ```yaml
 ---
-title: PSF leakage check
+name: PSF leakage check
 status: closed
 tempered: true
 tags:
   - systematics
   - tapestry:psf-leakage
-depends-on:
-  - psf-modeling
 outcome: >
   Leakage α < 0.01 for all bins. No correction needed.
   Checked both auto and cross-spectra.

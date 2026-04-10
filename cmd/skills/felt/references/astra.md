@@ -2,7 +2,7 @@
 
 ASTRA (Analysis Specification for Transparent Research Automation) is an open specification for computational science. It gives structure to the things scientists actually decide and discover: which method was chosen and why the alternatives were rejected, what data went in and what came out, what was found and what evidence supports it.
 
-Felt fibers carry ASTRA fields in their YAML frontmatter alongside felt's own fields (`title`, `status`, `tags`, `depends-on`, `outcome`). All ASTRA fields are optional — a fiber with just `title` is valid. Fields accrete as understanding crystallizes: write inputs while scripts run, record excluded options the moment you reject them. `felt export --format astra` emits the formalized subset as a standalone ASTRA spec. Downstream tools consume it directly: Prism executes the analysis across decision universes, MySTRA renders it as a live interactive document, Prism-UI visualizes decisions and evidence in VS Code.
+Felt fibers carry ASTRA fields in their YAML frontmatter alongside felt's own fields (`name`, `status`, `tags`, `outcome`, `tempered`). All ASTRA fields are optional — a fiber with just `name` is valid. Fields accrete as understanding crystallizes: write inputs while scripts run, record excluded options the moment you reject them. `felt export --format astra` emits the formalized subset as a standalone ASTRA spec. Downstream tools consume it directly: Prism executes the analysis across decision universes, MySTRA renders it as a live interactive document, Prism-UI visualizes decisions and evidence in VS Code.
 
 Schema source: `~/Documents/projects/ASTRA/spec/0.1/analysis.schema.json`
 
@@ -10,7 +10,7 @@ Schema source: `~/Documents/projects/ASTRA/spec/0.1/analysis.schema.json`
 
 ## Top-Level Fields
 
-These go directly in the fiber's YAML frontmatter alongside felt fields (`title`, `status`, `tags`, `depends-on`, `outcome`).
+These go directly in the fiber's YAML frontmatter alongside felt fields (`name`, `status`, `tags`, `outcome`, `tempered`).
 
 | Field | Type | Purpose |
 |-------|------|---------|
@@ -133,7 +133,7 @@ decisions:
 |-------|----------|------|-------|
 | `label` | yes | string | Human-readable name |
 | `options` | yes | map of id → Option | At least one option |
-| `rationale` | no | string | Why this decision exists |
+| `rationale` | no | string | The problematic — the tension or constraint that forces this decision. Not why the default won (that's implicit in `excluded_reason`s), but why the fork exists at all. |
 | `default` | no | string | Option ID for baseline universes |
 | `tags` | no | string[] | For grouping |
 | `when` | no | string | Conditional: `decision_id.option_id` pattern |

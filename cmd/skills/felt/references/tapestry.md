@@ -96,11 +96,11 @@ The `tier:1` tag marks a spine node: visible on first load, slightly larger, col
 
 ```bash
 # Spine node (visible on first load)
-felt add "Methods" -t tapestry:methods -t tier:1
+felt add methods "Methods" -t tapestry:methods -t tier:1
 
 # Interior node
-felt add "Covariance estimation" -t tapestry:covariance
-felt edit covariance-id --link methods-id
+felt add covariance-estimation "Covariance estimation" -t tapestry:covariance
+felt nest covariance-estimation methods
 ```
 
 ## Recording a Computation
@@ -112,11 +112,11 @@ Every computation that matters should have two things:
 
 ```bash
 # Create the fiber
-felt add "B-modes consistent with noise" -t tapestry:bmodes
-felt edit bmodes-id -o "PTE=0.29, chi2=12.3/10 dof — consistent with noise at all scales"
+felt add b-modes-consistent-with-noise "B-modes consistent with noise" -t tapestry:bmodes
+felt edit b-modes-consistent-with-noise -o "PTE=0.29, chi2=12.3/10 dof — consistent with noise at all scales"
 
-# Wire to upstream (both endpoints must be tapestry-tagged)
-felt edit bmodes-id --link covariance-id
+# Place it under the relevant spine node
+felt nest b-modes-consistent-with-noise covariance-estimation
 ```
 
 ## Citing Sources

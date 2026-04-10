@@ -123,7 +123,7 @@ Probably skip:
 **Wait for approval.** Then file:
 
 ```bash
-felt add "algorithm-x-choice" --title "Decision: Use algorithm X" \
+felt add algorithm-x-choice "Decision: Use algorithm X" \
   -o "Meeting YYYY-MM-DD. Compared X vs Y. X chosen because faster convergence; Y failed benchmarks."
 ```
 
@@ -136,7 +136,7 @@ felt edit <id> -s closed -o "Resolved in meeting: decided to use Z because..."
 Link new fibers to related ones:
 ```bash
 felt ls -s all "related concept"
-felt edit <new-fiber> --link <related-fiber>
+felt tree
 ```
 
 Big decisions may also warrant updating CLAUDE.md or documentation fibers.
@@ -151,4 +151,4 @@ Big decisions may also warrant updating CLAUDE.md or documentation fibers.
 - [ ] Fiber candidates identified (from notes + implicit content re-scan)
 - [ ] Extraction plan approved before filing
 - [ ] Outcomes stand alone without the body
-- [ ] New fibers linked to related fibers
+- [ ] New fibers connected through containment, wikilinks, or ASTRA data flow

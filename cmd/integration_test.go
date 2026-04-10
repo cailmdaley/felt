@@ -83,7 +83,7 @@ func TestIntegration(t *testing.T) {
 		t.Fatalf("init: remove myst.yml: %v", err)
 	}
 	out := mustFelt(t, dir, "init")
-	if !strings.Contains(out, "Ensured .felt/ and myst.yml") {
+	if !strings.Contains(out, "Ensured .felt/ support files") {
 		t.Fatalf("init: expected repair confirmation, got: %s", out)
 	}
 	if _, err := os.Stat(filepath.Join(dir, ".felt", "myst.yml")); err != nil {
@@ -108,8 +108,8 @@ func TestIntegration(t *testing.T) {
 		t.Fatalf("show: expected fiber title, got: %s", out)
 	}
 	out = mustFelt(t, dir, "show", fiberID, "--body")
-	if !strings.Contains(out, "(test-fiber)=\n# test fiber") {
-		t.Fatalf("new fiber body should start with MyST scaffold, got: %s", out)
+	if !strings.Contains(out, "Body start line: 6") {
+		t.Fatalf("new fiber body should report the editable insertion point, got: %s", out)
 	}
 
 	// edit — mark active
@@ -168,7 +168,7 @@ func TestIntegration(t *testing.T) {
 		t.Fatalf("ls --json --body: expected one fiber, got: %#v", listed)
 	}
 	body, _ := listed[0]["body"].(string)
-	if !strings.Contains(body, "(test-fiber)=\nreplacement body") {
+	if body != "replacement body" {
 		t.Fatalf("ls --json --body: expected hydrated body, got: %#v", listed)
 	}
 
@@ -218,13 +218,10 @@ func TestIntegration(t *testing.T) {
 		t.Fatalf("mkdir astra parent fixture: %v", err)
 	}
 	astraParent := `---
-title: BAO Analysis
+name: BAO Analysis
 status: open
 created-at: 2026-03-14T10:00:00Z
 ---
-
-(bao-analysis)=
-# BAO Analysis
 `
 	if err := os.WriteFile(filepath.Join(astraParentDir, "bao-analysis.md"), []byte(astraParent), 0644); err != nil {
 		t.Fatalf("write astra parent fixture: %v", err)
@@ -235,7 +232,7 @@ created-at: 2026-03-14T10:00:00Z
 		t.Fatalf("mkdir astra fixture: %v", err)
 	}
 	astraFiber := `---
-title: BAO Damping Prior
+name: BAO Damping Prior
 status: closed
 created-at: 2026-03-15T10:00:00Z
 outcome: Informative Gaussian priors confirmed.
@@ -264,9 +261,6 @@ success_criteria:
   - claim: BAO parameters shift <0.5 sigma from DESI 2024 III
 container: python:3.11-slim
 ---
-
-(damping-prior)=
-# BAO Damping Prior
 `
 	if err := os.WriteFile(filepath.Join(astraDir, "damping-prior.md"), []byte(astraFiber), 0644); err != nil {
 		t.Fatalf("write astra fixture: %v", err)
@@ -365,9 +359,9 @@ container: python:3.11-slim
 	if !strings.Contains(out, "bao-analysis/second-fiber") {
 		t.Fatalf("nest: expected nested fiber ID, got: %s", out)
 	}
-	out = mustFelt(t, dir, "tree", fiberID, "--down", "--all")
-	if !strings.Contains(out, "bao-analysis/second-fiber") {
-		t.Fatalf("nest: expected rewritten dependency targets, got: %s", out)
+	out = mustFelt(t, dir, "tree", "bao-analysis")
+	if !strings.Contains(out, "second fiber") {
+		t.Fatalf("nest: expected nested child in containment tree, got: %s", out)
 	}
 
 	out = mustFelt(t, dir, "unnest", "bao-analysis/second-fiber")
@@ -384,7 +378,7 @@ container: python:3.11-slim
 		t.Fatalf("mkdir legacy project: %v", err)
 	}
 	legacyA := `---
-title: Legacy Child
+name: Legacy Child
 created-at: 2026-03-15T10:00:00Z
 depends-on:
   - legacy-parent-1234abcd
@@ -393,7 +387,7 @@ depends-on:
 Child body.
 `
 	legacyB := `---
-title: Legacy Parent
+name: Legacy Parent
 created-at: 2026-03-15T09:00:00Z
 ---
 
@@ -463,7 +457,7 @@ Parent body.
 	if !strings.Contains(out, "unknown command") {
 		t.Fatalf("tag with extra args should be unknown, got: %s", out)
 	}
-	for _, retired := range []string{"untag", "link", "unlink", "comment", "upstream", "downstream", "graph", "ready", "find", "prime", "check", "path"} {
+	for _, retired := range []string{"untag", "link", "unlink", "comment", "upstream", "downstream", "graph", "ready", "find", "prime", "path"} {
 		out, err = felt(dir, retired)
 		if err == nil {
 			t.Fatalf("%s should be removed from the public CLI, got: %s", retired, out)
@@ -481,7 +475,6 @@ Parent body.
 	}
 
 	// rm --force
-	mustFelt(t, dir, "rm", "--force", fiber3ID)
 	mustFelt(t, dir, "rm", "--force", fiber2ID)
 	lsOut := mustFelt(t, dir, "ls", "-s", "all")
 	if strings.Contains(lsOut, "second fiber") {
@@ -544,7 +537,7 @@ Parent body.
 	if strings.Contains(out, "tapestry") {
 		t.Fatalf("help: legacy tapestry command should be hidden, got: %s", out)
 	}
-	for _, retired := range []string{"tag", "untag", "link", "unlink", "comment", "upstream", "downstream", "graph", "ready", "prime", "check", "path"} {
+	for _, retired := range []string{"tag", "untag", "link", "unlink", "comment", "upstream", "downstream", "graph", "ready", "prime", "path"} {
 		pattern := regexp.MustCompile(`(?m)^  ` + regexp.QuoteMeta(retired) + `\s`)
 		if pattern.MatchString(out) {
 			t.Fatalf("help: legacy command %q should be hidden, got: %s", retired, out)

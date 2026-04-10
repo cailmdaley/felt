@@ -79,8 +79,8 @@ Reshaping is archiving applied to tapestry nodes. The trigger is branching: any 
 
 ### When to Reshape
 
-- A tapestry node has 5+ children (check with `felt tree <id> --down`)
-- The DAG is wide and shallow — many siblings, little depth
+- A tapestry node has 5+ children (check with `felt tree <id>`)
+- The containment tree is wide and shallow — many siblings, little depth
 - A reader can't parse a neighborhood in one click
 
 ### Steps
@@ -88,15 +88,15 @@ Reshaping is archiving applied to tapestry nodes. The trigger is branching: any 
 1. **Audit** — walk spine nodes, count children. Flag any with 5+.
 2. **Partition** — identify natural groupings among the siblings. Name the partition.
 3. **Introduce grouping nodes** — create a tapestry-tagged fiber for each group. Write a 2-3 sentence summary body (what's here, why it matters). No evidence needed.
-4. **Re-parent** — `felt edit <child> --unlink <parent>` to detach children, then `felt edit <child> --link <grouping-node>` and `felt edit <grouping-node> --link <parent>`.
-5. **Verify** — `felt tree <parent> --down` should show 2-4 children. Each grouping node should have 2-4 children.
+4. **Re-parent** — move children under the grouping node with `felt nest <child> <grouping-node>`.
+5. **Verify** — `felt tree <parent>` should show 2-4 children. Each grouping node should have 2-4 children.
 
 ```bash
 # Example: Methods has 7 children, split into Estimators + Covariance + Simulations
-felt add "Estimators" -t tapestry:estimators -b "Pipeline independence, foreground bias, cross-checks."
-felt edit estimators-id --link methods-id
-felt edit child-a --unlink methods-id --link estimators-id
-felt edit child-b --unlink methods-id --link estimators-id
+felt add estimators "Estimators" -t tapestry:estimators -b "Pipeline independence, foreground bias, cross-checks."
+felt nest estimators methods
+felt nest child-a estimators
+felt nest child-b estimators
 ```
 
 ### Target
@@ -109,5 +109,5 @@ felt edit child-b --unlink methods-id --link estimators-id
 
 - **Premature archiving** — don't archive recent work
 - **Over-consolidation** — don't merge unrelated fibers just because they're old
-- **Orphaned docs** — documentation fibers need to be findable (link them, reference in CLAUDE.md)
+- **Orphaned docs** — documentation fibers need to be findable (nest or cite them, reference in CLAUDE.md)
 - **Stale docs** — if you create a doc, commit to maintaining it

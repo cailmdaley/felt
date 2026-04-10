@@ -1,12 +1,12 @@
 # felt
 
-DAG-native fiber tracker. Directory-based markdown fibers with dependencies.
+Directory-contained markdown fibers with YAML frontmatter, wikilinks, and optional ASTRA structure.
 
 ## Why
 
-Fibers have dependencies. Most trackers ignore this or bolt it on. Felt makes the DAG the center: `felt ls --ready` shows what's actually unblocked, and the graph is always traversable.
-
 Fibers are markdown files. Human-readable, version-controllable, greppable. No database, no sync, no lock-in.
+
+Containment comes from the directory tree, narrative connections come from `[[wikilinks]]` in the body, and ASTRA `inputs.from` carries computational provenance when needed.
 
 ## Install
 
@@ -17,29 +17,28 @@ go install github.com/cailmdaley/felt@latest
 ## Quick Start
 
 ```bash
-felt init                                        # creates .felt/
-felt "Design API"                                # create a fiber
-felt add "Implement endpoint" -a design-api      # depends on design
-felt ls --ready                                  # shows "Design API" (unblocked)
-felt edit design-api -s active                   # mark active
-felt edit design-api -s closed -o "REST, uses JWT"
-felt ls --ready                                  # now shows "Implement endpoint"
+felt init
+felt add design-api "Design API"
+felt add auth/research-patterns "Research auth patterns"
+felt edit design-api -s active
+felt edit design-api -s closed -o "REST with JWT; see [[auth/research-patterns]]"
+felt tree
+felt ls "JWT"
 ```
 
 ## Core Concepts
 
-### The DAG
+### Relationships
 
-Every fiber can depend on others via `-a`/`--depends-on`. This forms a directed acyclic graph (cycles are rejected). The DAG answers:
+Felt uses three relationship mechanisms:
 
-- `felt ls --ready` — what's unblocked and open?
-- `felt tree <id> --up` — what does this depend on?
-- `felt tree <id> --down` — what depends on this?
-- `felt tree --check` — is the graph valid?
+- Containment via directory nesting
+- Narrative references via `[[wikilinks]]`
+- Data flow via ASTRA `inputs.from`
 
 ### Status (opt-in)
 
-Status tracking is optional. `felt "title"` creates a statusless fiber. Add `-s open` to enter tracking.
+Status tracking is optional. `felt add <slug> <name>` creates a statusless fiber. Add `-s open` to enter tracking.
 
 ```
 · untracked — no status, just a fiber
@@ -79,15 +78,14 @@ felt show <id> --decisions     # ASTRA decisions only
 
 ### Tags
 
-Tags organize fibers across the graph:
+Tags organize fibers across the tree:
 
 ```bash
-felt "[pure-eb] Fix covariance bug"     # extracted from title
-felt add "Fix bug" -t pure-eb -t urgent # via flag
+felt add fix-covariance-bug "[pure-eb] Fix covariance bug"  # extracted from title
+felt add fix-bug "Fix bug" -t pure-eb -t urgent
 felt edit design-api --tag backend      # add to existing
 felt edit design-api --untag backend    # remove
 felt ls -t pure-eb                      # filter (AND logic)
-felt ls --ready -t pure-eb              # filter ready
 ```
 
 ### File Format
@@ -96,19 +94,13 @@ Fibers live in `.felt/<path>/<slug>.md`:
 
 ```yaml
 ---
-title: "Design API"
+name: "Design API"
 status: closed
 tags: [backend, auth]
-depends-on:
-  - id: research-auth-patterns
-    label: auth approach
 created-at: 2024-01-15T10:30:00Z
 closed-at: 2024-01-16T14:20:00Z
 outcome: "REST with JWT. See docs/api.md"
 ---
-
-(design-api)=
-# Design API
 
 Optional body with notes, context, etc.
 ```
@@ -127,11 +119,11 @@ felt show api              # unique prefix
 
 ```bash
 felt init                         # create .felt/
-felt add <title>                  # create fiber
-felt <title>                      # shorthand for add
+felt add <slug> <name>            # create fiber
+felt <slug> <name>                # shorthand for add
 felt edit <id> -s active          # enter tracking / mark active
 felt edit <id> -s closed -o "outcome"
-felt rm <id>                      # delete (fails if dependents exist)
+felt rm <id>                      # delete
 ```
 
 ### Viewing
@@ -144,36 +136,29 @@ felt ls -t backend -t urgent      # by tags (AND)
 felt ls -s all -t rule:           # tag prefix matching
 felt ls -s all "query"            # search title, outcome, ASTRA fields
 felt ls -s all -r "pattern"       # regex search
-felt ls --ready                   # open with all deps closed
 felt show <id>                    # full details
 felt show <id> -d compact         # structured overview
-felt tree                         # dependency tree from roots
+felt tree                         # containment tree from roots
 ```
 
 ### Editing
 
 ```bash
 felt edit <id> --body "text"      # replace full body (destructive overwrite)
-felt edit <id> --title "new"      # set title
+felt edit <id> --name "new"       # set name
 felt edit <id> -s active          # set status
 felt edit <id> -o "outcome"       # set outcome
 felt edit <id> --comment "note"   # append timestamped comment section entry
 felt edit <id> --tag <tag>        # add tag
 felt edit <id> --untag <tag>      # remove tag
-felt edit <id> --link <dep-id>    # add dependency
-felt edit <id> --link <dep-id> -l "why"
-felt edit <id> --unlink <dep-id>  # remove dependency
 ```
 
 ### Tree
 
 ```bash
-felt tree <id> --up              # direct dependencies
-felt tree <id> --up --all        # transitive dependencies
-felt tree <id> -d compact --up   # with detail per item
-felt tree <id> --down            # what depends on this
-felt tree -f mermaid             # visualize (mermaid/dot/text)
-felt tree --check                # validate integrity
+felt tree                        # whole containment tree
+felt tree bao-analysis           # subtree rooted at one fiber
+felt tree --depth 2              # limit displayed nesting depth
 ```
 
 ### Integration
@@ -182,17 +167,6 @@ felt tree --check                # validate integrity
 felt hook session                 # context for session start hooks
 felt export --format tapestry     # viewer payload
 felt export --format astra        # ASTRA YAML export surface
-```
-
-### Add Flags
-
-```bash
--b, --body "text"                 # body text
--s, --status open                 # status (open, active, closed)
--a, --depends-on <id>             # dependency (repeatable)
--D, --due 2024-03-15              # due date
--t, --tag <tag>                   # tag (repeatable)
--o, --outcome "text"              # outcome
 ```
 
 ### Global Flags

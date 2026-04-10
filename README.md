@@ -45,10 +45,9 @@ The session hook prints active and recently touched fibers at the start of each 
 ## Quick Start
 
 ```bash
-felt init                                              # creates .felt/ + myst.yml
+felt init                                              # creates .felt/ support files
 felt use-des-y3-weights "Use DES Y3 weights"           # file a decision
 felt add covariance-estimation "Covariance estimation"
-felt edit covariance-estimation --comment "tried analytic, too slow"
 felt edit covariance-estimation -s closed -o "switched to jackknife — 10x faster, <2% bias"
 felt export --format astra                             # emit astra.yaml from ASTRA frontmatter
 ```
@@ -79,10 +78,6 @@ Tried analytic first — too slow for the number of bins we need.
 Jackknife on 150 patches gives stable diagonal + off-diagonal.
 
 See also [[use-des-y3-weights]].
-
-## Comments
-**2026-01-15 14:30** — tried analytic, too slow
-**2026-01-16 09:15** — jackknife on 150 patches converges
 ```
 
 IDs are slug paths such as `covariance-estimation` or `bao-analysis/damping-prior`. Bare slugs resolve when globally unique, so `felt show damping-prior` and `felt show bao-analysis/damping-prior` both work when unambiguous.
@@ -101,7 +96,7 @@ Status is opt-in. Most fibers don't need it. Add `-s open` when something needs 
 ### Tags
 
 ```bash
-felt "[pure-eb] Covariance estimation"    # extracted from title
+felt add covariance-estimation "[pure-eb] Covariance estimation"    # extracted from title
 felt add fix-bug "Fix bug" -t pure-eb -t urgent
 felt edit covariance-estimation --tag note
 felt ls -t pure-eb                        # filter by tag
@@ -233,17 +228,16 @@ felt setup claude|codex|skills    felt update
 -o, --outcome "text"
 
 # felt edit
---tag <tag>                       --untag <tag>
---comment "text"                  --body "text"
+--name "text"                     --tag <tag>
+--untag <tag>                     --body "text"
+--outcome "text"
 
 # felt ls
 --body
 -e, --exact                       -r, --regex
 
 # felt tree
---up                              --down
---all                             --check
--f, --format text|mermaid|dot
+--depth <n>
 
 # felt export
 -f, --format tapestry|astra       --out <path>

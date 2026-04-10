@@ -276,20 +276,8 @@ func New(slug string, name string) (*Felt, error) {
 		ID:        id,
 		Name:      name,
 		Title:     name,
-		DependsOn: Dependencies{},
 		CreatedAt: time.Now(),
 	}, nil
-}
-
-// TitleFromSlug is retained for internal compatibility during the name-field cutover.
-func TitleFromSlug(slug string) string {
-	s := strings.ReplaceAll(slug, "-", " ")
-	if len(s) == 0 {
-		return s
-	}
-	runes := []rune(s)
-	runes[0] = unicode.ToUpper(runes[0])
-	return string(runes)
 }
 
 // GenerateID creates a slug-based ID from a title string.

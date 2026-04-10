@@ -183,21 +183,20 @@ func linkSkills(targetDir, srcRoot string) error {
 func claudeMDSnippet() string {
 	fence := "```"
 	return "## felt\n\n" +
-		"Fibers are concerns — tasks, decisions, questions — strung in a DAG. " +
-		"Each fiber lives at `.felt/<path>/<slug>.md` with YAML frontmatter and a MyST-flavored markdown body. " +
-		"Body is the content; outcome is the conclusion. " +
-		"`felt tree <id> --up` shows what a decision rests on; `felt tree <id> --down` shows what breaks if it changes. " +
+		"Fibers are concerns — tasks, decisions, questions, findings. " +
+		"Each fiber lives at `.felt/<path>/<slug>.md` with YAML frontmatter and plain markdown body content. " +
+		"Containment comes from directories, narrative connections come from `[[wikilinks]]`, and ASTRA structure accretes in frontmatter when the work becomes computationally concrete. " +
 		"`felt export --format astra` turns ASTRA-bearing frontmatter into `astra.yaml`. " +
-		"A missing causal link costs an investigation; a fiber costs nothing.\n\n" +
-		"**Rhythm.** File before you start, comment as you go, close with an outcome.\n" +
+		"A missing fiber costs context; a fiber costs almost nothing.\n\n" +
+		"**Rhythm.** File before you start, update the body as understanding sharpens, close with an outcome.\n" +
 		fence + "bash\n" +
-		"felt \"what I'm doing\"                              # before starting\n" +
-		"felt edit <id> --comment \"tried X, hit Y\"          # as you go\n" +
-		"felt edit <id> -s closed -o \"X works because...\"   # close with outcome\n" +
+		"felt add covariance-method \"Covariance method\"          # before starting\n" +
+		"felt edit covariance-method -s active                    # opt into tracking\n" +
+		"felt edit covariance-method -o \"Jackknife is stable\"   # close with outcome\n" +
 		fence + "\n\n" +
-		"**Discipline.** Titles are 2–3 word DAG node labels — terse, like commit subjects. " +
+		"**Discipline.** Names are short, concrete handles for the concern. " +
 		"Path IDs like `bao-analysis/damping-prior` are first-class; bare slugs resolve only when unambiguous. " +
-		"Outcomes say not just *what* but *why*, pointing back through the DAG. " +
+		"Outcomes say not just *what* but *why*. " +
 		"Decisions get their own fibers; methodology questions belong in decision fibers, not specs. " +
 		"Follow the data: curious, not confirmatory.\n"
 }

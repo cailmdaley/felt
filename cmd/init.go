@@ -10,7 +10,7 @@ import (
 var initCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Initialize a new felt repository",
-	Long:  `Creates or repairs the local .felt/ directory and MyST project config.`,
+	Long:  `Creates or repairs the local .felt/ directory and felt support files.`,
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		storage := felt.NewStorage(".")
@@ -18,7 +18,7 @@ var initCmd = &cobra.Command{
 			return err
 		}
 		if storage.Exists() {
-			fmt.Println("Ensured .felt/ and myst.yml")
+			fmt.Println("Ensured .felt/ support files")
 			return nil
 		}
 		return fmt.Errorf("failed to initialize .felt/")

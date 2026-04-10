@@ -63,25 +63,6 @@ func TestNewEmptySlug(t *testing.T) {
 	}
 }
 
-func TestTitleFromSlug(t *testing.T) {
-	tests := []struct {
-		slug string
-		want string
-	}{
-		{"mocks-unbiased", "Mocks unbiased"},
-		{"test", "Test"},
-		{"multi-word-slug", "Multi word slug"},
-		{"already", "Already"},
-	}
-
-	for _, tt := range tests {
-		got := TitleFromSlug(tt.slug)
-		if got != tt.want {
-			t.Errorf("TitleFromSlug(%q) = %q, want %q", tt.slug, got, tt.want)
-		}
-	}
-}
-
 func TestBodyStartLine(t *testing.T) {
 	tests := []struct {
 		name    string
