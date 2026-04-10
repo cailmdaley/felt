@@ -207,7 +207,7 @@ func (s *Storage) Delete(id string) error {
 }
 
 // MoveSubtree moves a fiber and any nested descendants to a new path, rewriting
-// dependency references across the repository.
+// ASTRA data-flow references across the repository.
 func (s *Storage) MoveSubtree(oldID, newID string) error {
 	oldID = filepath.ToSlash(filepath.Clean(strings.TrimSpace(oldID)))
 	newID = filepath.ToSlash(filepath.Clean(strings.TrimSpace(newID)))
@@ -239,9 +239,9 @@ func (s *Storage) MoveSubtree(oldID, newID string) error {
 			clone.ID = remappedID
 			movedAny = true
 		}
-		for i, dep := range clone.DependsOn {
-			if remappedDep, ok := remapIDPrefix(dep.ID, oldID, newID); ok {
-				clone.DependsOn[i].ID = remappedDep
+		for i, input := range clone.Inputs {
+			if remappedFrom, ok := remapDataFlowRef(input.From, oldID, newID); ok {
+				clone.Inputs[i].From = remappedFrom
 			}
 		}
 		updated = append(updated, &clone)
@@ -294,7 +294,7 @@ func (s *Storage) Migrate(dryRun bool) (*MigrationResult, error) {
 }
 
 // MigrateFlatFiles converts legacy top-level flat markdown fibers to
-// directory-based fibers with slug IDs, rewriting dependency references.
+// directory-based fibers with slug IDs, rewriting ASTRA data-flow references.
 func (s *Storage) MigrateFlatFiles(dryRun bool) (*MigrationResult, error) {
 	if err := s.Init(); err != nil {
 		return nil, err
@@ -374,9 +374,18 @@ func (s *Storage) MigrateFlatFiles(dryRun bool) (*MigrationResult, error) {
 	for _, item := range legacy {
 		f := item.felt
 		f.ID = idMap[item.oldID]
-		for i, dep := range f.DependsOn {
-			if newDepID, ok := idMap[dep.ID]; ok {
-				f.DependsOn[i].ID = newDepID
+		for i, input := range f.Inputs {
+			if remappedFrom, ok := remapDataFlowRef(input.From, item.oldID, f.ID); ok {
+				f.Inputs[i].From = remappedFrom
+				continue
+			}
+			targetFiber, fragment := splitDataFlowRef(input.From)
+			if newTargetID, ok := idMap[targetFiber]; ok {
+				if fragment == "" {
+					f.Inputs[i].From = newTargetID
+				} else {
+					f.Inputs[i].From = newTargetID + "." + fragment
+				}
 			}
 		}
 		if err := s.Write(f); err != nil {
@@ -390,22 +399,27 @@ func (s *Storage) MigrateFlatFiles(dryRun bool) (*MigrationResult, error) {
 		}
 	}
 
-	// Rewrite stale hex-suffixed depends-on in pre-existing directory fibers.
+	// Rewrite stale hex-suffixed data-flow refs in pre-existing directory fibers.
 	allFibers, err := s.List()
 	if err != nil {
-		return nil, fmt.Errorf("listing fibers for dep rewrite: %w", err)
+		return nil, fmt.Errorf("listing fibers for input rewrite: %w", err)
 	}
 	for _, f := range allFibers {
 		changed := false
-		for i, dep := range f.DependsOn {
-			if newID, ok := idMap[dep.ID]; ok {
-				f.DependsOn[i].ID = newID
+		for i, input := range f.Inputs {
+			targetFiber, fragment := splitDataFlowRef(input.From)
+			if newID, ok := idMap[targetFiber]; ok {
+				if fragment == "" {
+					f.Inputs[i].From = newID
+				} else {
+					f.Inputs[i].From = newID + "." + fragment
+				}
 				changed = true
 			}
 		}
 		if changed {
 			if err := s.Write(f); err != nil {
-				return nil, fmt.Errorf("rewriting deps in %s: %w", f.ID, err)
+				return nil, fmt.Errorf("rewriting inputs in %s: %w", f.ID, err)
 			}
 		}
 	}

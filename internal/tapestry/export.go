@@ -199,7 +199,7 @@ func buildNodes(tapestryFelts []*felt.Felt, graph *felt.Graph, specByID map[stri
 			Tags:      slices.Clone(f.Tags),
 			CreatedAt: f.CreatedAt,
 			ClosedAt:  f.ClosedAt,
-			DependsOn: tapestryDependsOn(f, specByID),
+			DependsOn: tapestryDependsOn(graph, f.ID, specByID),
 			SpecName:  specByID[f.ID],
 			Staleness: ComputeStaleness(f.ID, graph, evidenceByID),
 			Evidence:  evidenceByID[f.ID],
@@ -212,9 +212,13 @@ func buildFibers(felts []*felt.Felt) []Fiber {
 	sortFelts(felts)
 	fibers := make([]Fiber, 0, len(felts))
 	for _, f := range felts {
-		deps := make([]FiberDep, len(f.DependsOn))
-		for i, d := range f.DependsOn {
-			deps[i] = FiberDep{ID: d.ID, Label: d.Label}
+		deps := make([]FiberDep, 0, len(f.Inputs))
+		for _, input := range f.Inputs {
+			targetFiber, _ := feltInputTarget(input.From)
+			if targetFiber == "" {
+				continue
+			}
+			deps = append(deps, FiberDep{ID: targetFiber, Label: input.ID})
 		}
 		fibers = append(fibers, Fiber{
 			ID:        f.ID,
@@ -235,9 +239,14 @@ func buildFibers(felts []*felt.Felt) []Fiber {
 func buildLinks(tapestryFelts []*felt.Felt, specByID map[string]string) []Link {
 	links := []Link{}
 	for _, f := range tapestryFelts {
-		for _, dep := range f.DependsOn {
-			if _, ok := specByID[dep.ID]; ok {
-				links = append(links, Link{Source: dep.ID, Target: f.ID, Label: dep.Label})
+		for _, input := range f.Inputs {
+			targetFiber, fragment := feltInputTarget(input.From)
+			if _, ok := specByID[targetFiber]; ok {
+				label := input.ID
+				if fragment != "" {
+					label = fragment
+				}
+				links = append(links, Link{Source: targetFiber, Target: f.ID, Label: label})
 			}
 		}
 	}
@@ -273,14 +282,25 @@ func buildDownstream(tapestryFelts []*felt.Felt, graph *felt.Graph) map[string][
 	return downstream
 }
 
-func tapestryDependsOn(f *felt.Felt, specByID map[string]string) []string {
+func tapestryDependsOn(graph *felt.Graph, fiberID string, specByID map[string]string) []string {
 	deps := []string{}
-	for _, dep := range f.DependsOn {
+	for _, dep := range graph.Upstream[fiberID] {
 		if _, ok := specByID[dep.ID]; ok {
 			deps = append(deps, dep.ID)
 		}
 	}
 	return deps
+}
+
+func feltInputTarget(ref string) (fiberID, fragment string) {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return "", ""
+	}
+	if idx := strings.Index(ref, "."); idx >= 0 {
+		return strings.TrimSpace(ref[:idx]), strings.TrimSpace(ref[idx+1:])
+	}
+	return ref, ""
 }
 
 func kindFor(_ *felt.Felt) string {

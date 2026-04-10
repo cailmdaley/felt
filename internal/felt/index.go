@@ -430,17 +430,6 @@ func mergeIndexTags(f *Felt) []string {
 	return tags
 }
 
-func splitDataFlowRef(ref string) (fiberID, fragment string) {
-	ref = strings.TrimSpace(ref)
-	if ref == "" {
-		return "", ""
-	}
-	if idx := strings.Index(ref, "."); idx >= 0 {
-		return ref[:idx], ref[idx+1:]
-	}
-	return ref, ""
-}
-
 func nullIfEmpty(s string) any {
 	if strings.TrimSpace(s) == "" {
 		return nil

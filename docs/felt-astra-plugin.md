@@ -68,7 +68,7 @@ insights:
 ---
 ```
 
-All ASTRA fields are optional; a fiber with just `title` is valid. You don't design the analysis tree upfront. You file fibers as you work and the ASTRA structure fills in as it becomes real.
+All ASTRA fields are optional; a fiber with just `name` is valid. You don't design the analysis tree upfront. You file fibers as you work and the ASTRA structure fills in as it becomes real.
 
 `felt export --format astra` walks the fiber tree and emits a valid `astra.yaml` that `astra validate` and Prism can consume. Directory nesting maps to ASTRA nesting. Fibers without ASTRA content are silently skipped.
 
@@ -80,7 +80,7 @@ The recent work reorganized felt around three changes:
 
 Every fiber is now a directory containing `<slug>.md` plus optional artifacts (figures, data). This replaced flat files with hex-suffix IDs (`covariance-estimation-a8b3c4d2.md` → `covariance-estimation/covariance-estimation.md`). The directory structure mirrors the analysis hierarchy — nesting a fiber under a parent creates a sub-analysis.
 
-`felt migrate` converts old flat-file assemblages in one pass, rewriting all dependency references from hex IDs to slugs.
+`felt migrate` converts old flat-file assemblages in one pass, rewriting `inputs.from` references from hex IDs to slug IDs.
 
 ### 2. ASTRA-compatible frontmatter
 

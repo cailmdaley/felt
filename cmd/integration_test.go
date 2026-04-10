@@ -405,8 +405,9 @@ container: python:3.11-slim
 	legacyA := `---
 name: Legacy Child
 created-at: 2026-03-15T10:00:00Z
-depends-on:
-  - legacy-parent-1234abcd
+inputs:
+  - id: parent_input
+    from: legacy-parent-1234abcd.posterior
 ---
 
 Child body.
@@ -472,13 +473,13 @@ Session body.
 	if err := json.Unmarshal([]byte(out), &migratedShown); err != nil {
 		t.Fatalf("migrate: invalid json from show -j: %v\n%s", err, out)
 	}
-	deps, ok := migratedShown["depends_on"].([]any)
-	if !ok || len(deps) != 1 {
-		t.Fatalf("migrate: unexpected dependencies %#v", migratedShown["depends_on"])
+	inputs, ok := migratedShown["inputs"].([]any)
+	if !ok || len(inputs) != 1 {
+		t.Fatalf("migrate: unexpected inputs %#v", migratedShown["inputs"])
 	}
-	dep, ok := deps[0].(map[string]any)
-	if !ok || dep["id"] != "legacy-parent" {
-		t.Fatalf("migrate: expected rewritten dependency, got %#v", migratedShown["depends_on"])
+	input, ok := inputs[0].(map[string]any)
+	if !ok || input["from"] != "legacy-parent.posterior" {
+		t.Fatalf("migrate: expected rewritten input ref, got %#v", migratedShown["inputs"])
 	}
 	sessionHubData, err := os.ReadFile(filepath.Join(migrateDir, ".felt", "session-hub", "session-hub.md"))
 	if err != nil {

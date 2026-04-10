@@ -30,67 +30,16 @@ const (
 	StatusClosed = "closed"
 )
 
-// DefaultDepLabel is the label applied to dependencies when no explicit label is given.
-const DefaultDepLabel = "depends on"
-
-// Dependency represents a dependency with a required label explaining why.
-type Dependency struct {
+// GraphEdge represents a directed edge in the in-memory relationship graph.
+type GraphEdge struct {
 	ID    string `json:"id"`
 	Label string `json:"label"`
 }
+// GraphEdges is a slice of graph edges with helper methods.
+type GraphEdges []GraphEdge
 
-// UnmarshalYAML handles both bare string and {id, label} object forms.
-// Bare strings get the default label "depends on".
-func (d *Dependency) UnmarshalYAML(value *yaml.Node) error {
-	if value.Kind == yaml.ScalarNode {
-		d.ID = value.Value
-		d.Label = DefaultDepLabel
-		return nil
-	}
-	if value.Kind == yaml.MappingNode {
-		type raw struct {
-			ID    string `yaml:"id"`
-			Label string `yaml:"label"`
-		}
-		var r raw
-		if err := value.Decode(&r); err != nil {
-			return err
-		}
-		d.ID = r.ID
-		d.Label = r.Label
-		if d.Label == "" {
-			d.Label = DefaultDepLabel
-		}
-		return nil
-	}
-	return fmt.Errorf("dependency must be a string or {id, label} object")
-}
-
-// MarshalYAML always emits {id, label} object form.
-func (d Dependency) MarshalYAML() (interface{}, error) {
-	label := d.Label
-	if label == "" {
-		label = DefaultDepLabel
-	}
-	return struct {
-		ID    string `yaml:"id"`
-		Label string `yaml:"label"`
-	}{d.ID, label}, nil
-}
-
-// NewDependency creates a Dependency with the given label, defaulting to "depends on".
-func NewDependency(id, label string) Dependency {
-	if label == "" {
-		label = DefaultDepLabel
-	}
-	return Dependency{ID: id, Label: label}
-}
-
-// Dependencies is a slice of Dependency with helper methods.
-type Dependencies []Dependency
-
-// IDs returns just the dependency IDs.
-func (deps Dependencies) IDs() []string {
+// IDs returns just the edge target IDs.
+func (deps GraphEdges) IDs() []string {
 	ids := make([]string, len(deps))
 	for i, d := range deps {
 		ids[i] = d.ID
@@ -98,8 +47,8 @@ func (deps Dependencies) IDs() []string {
 	return ids
 }
 
-// HasID returns true if the given ID is in the dependencies.
-func (deps Dependencies) HasID(id string) bool {
+// HasID returns true if the given ID is in the edge set.
+func (deps GraphEdges) HasID(id string) bool {
 	for _, d := range deps {
 		if d.ID == id {
 			return true
@@ -108,8 +57,8 @@ func (deps Dependencies) HasID(id string) bool {
 	return false
 }
 
-// LabelFor returns the label for a given dependency ID, or empty string.
-func (deps Dependencies) LabelFor(id string) string {
+// LabelFor returns the label for a given target ID, or empty string.
+func (deps GraphEdges) LabelFor(id string) string {
 	for _, d := range deps {
 		if d.ID == id {
 			return d.Label
@@ -230,7 +179,6 @@ type Felt struct {
 	Name            string                   `yaml:"name" json:"name"`
 	Status          string                   `yaml:"status,omitempty" json:"status,omitempty"`
 	Tags            []string                 `yaml:"tags,omitempty" json:"tags,omitempty"`
-	DependsOn       Dependencies             `yaml:"depends-on,omitempty" json:"depends_on,omitempty"`
 	CreatedAt       time.Time                `yaml:"created-at" json:"created_at"`
 	ClosedAt        *time.Time               `yaml:"closed-at,omitempty" json:"closed_at,omitempty"`
 	Outcome         string                   `yaml:"outcome,omitempty" json:"outcome,omitempty"`
@@ -481,7 +429,6 @@ func parseFrontmatter(id string, frontmatter []byte) (*Felt, error) {
 		LegacyTitle     string                   `yaml:"title"`
 		Status          string                   `yaml:"status,omitempty"`
 		Tags            []string                 `yaml:"tags,omitempty"`
-		DependsOn       Dependencies             `yaml:"depends-on,omitempty"`
 		CreatedAt       time.Time                `yaml:"created-at"`
 		ClosedAt        *time.Time               `yaml:"closed-at,omitempty"`
 		Outcome         string                   `yaml:"outcome,omitempty"`
@@ -508,7 +455,6 @@ func parseFrontmatter(id string, frontmatter []byte) (*Felt, error) {
 		Name:            name,
 		Status:          fm.Status,
 		Tags:            fm.Tags,
-		DependsOn:       fm.DependsOn,
 		CreatedAt:       fm.CreatedAt,
 		ClosedAt:        fm.ClosedAt,
 		Outcome:         fm.Outcome,
@@ -697,7 +643,6 @@ func (f *Felt) Marshal() ([]byte, error) {
 		Name            string                   `yaml:"name"`
 		Status          string                   `yaml:"status,omitempty"`
 		Tags            []string                 `yaml:"tags,omitempty"`
-		DependsOn       Dependencies             `yaml:"depends-on,omitempty"`
 		CreatedAt       time.Time                `yaml:"created-at"`
 		ClosedAt        *time.Time               `yaml:"closed-at,omitempty"`
 		Outcome         string                   `yaml:"outcome,omitempty"`
@@ -713,7 +658,6 @@ func (f *Felt) Marshal() ([]byte, error) {
 		Name:            f.Name,
 		Status:          f.Status,
 		Tags:            f.Tags,
-		DependsOn:       f.DependsOn,
 		CreatedAt:       f.CreatedAt,
 		ClosedAt:        f.ClosedAt,
 		Outcome:         f.Outcome,
@@ -757,6 +701,32 @@ func (f *Felt) DisplayName() string {
 // HasScaffoldOnlyBody reports whether the body is just the generated MyST scaffold.
 func (f *Felt) HasScaffoldOnlyBody() bool {
 	return strings.TrimSpace(f.Body) == ""
+}
+
+func splitDataFlowRef(ref string) (fiberID, fragment string) {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return "", ""
+	}
+	if idx := strings.Index(ref, "."); idx >= 0 {
+		return strings.TrimSpace(ref[:idx]), strings.TrimSpace(ref[idx+1:])
+	}
+	return ref, ""
+}
+
+func remapDataFlowRef(ref, oldID, newID string) (string, bool) {
+	targetFiber, fragment := splitDataFlowRef(ref)
+	if targetFiber == "" {
+		return ref, false
+	}
+	remappedFiber, ok := remapIDPrefix(targetFiber, oldID, newID)
+	if !ok {
+		return ref, false
+	}
+	if fragment == "" {
+		return remappedFiber, true
+	}
+	return remappedFiber + "." + fragment, true
 }
 
 // MatchesIDQuery checks if an ID matches a query string.

@@ -6,31 +6,44 @@ import (
 	"strings"
 )
 
-// Graph represents the DAG of felts with bidirectional edges.
+// Graph represents the ASTRA data-flow graph between fibers.
 type Graph struct {
-	Nodes      map[string]*Felt        // ID -> Felt
-	Upstream   map[string]Dependencies // ID -> what this depends on
-	Downstream map[string]Dependencies // ID -> what depends on this (computed)
+	Nodes      map[string]*Felt      // ID -> Felt
+	Upstream   map[string]GraphEdges // ID -> upstream producers this fiber consumes
+	Downstream map[string]GraphEdges // ID -> downstream consumers (computed)
 }
 
-// BuildGraph constructs a graph from a list of felts.
+// BuildGraph constructs a graph from ASTRA inputs.from edges.
 func BuildGraph(felts []*Felt) *Graph {
 	g := &Graph{
 		Nodes:      make(map[string]*Felt),
-		Upstream:   make(map[string]Dependencies),
-		Downstream: make(map[string]Dependencies),
+		Upstream:   make(map[string]GraphEdges),
+		Downstream: make(map[string]GraphEdges),
 	}
 
-	// First pass: index all nodes
+	allIDs := make([]string, 0, len(felts))
 	for _, f := range felts {
 		g.Nodes[f.ID] = f
-		g.Upstream[f.ID] = f.DependsOn
+		allIDs = append(allIDs, f.ID)
 	}
 
-	// Second pass: compute downstream (reverse edges)
-	for id, deps := range g.Upstream {
-		for _, dep := range deps {
-			g.Downstream[dep.ID] = append(g.Downstream[dep.ID], Dependency{ID: id, Label: dep.Label})
+	sort.Strings(allIDs)
+	for _, f := range felts {
+		for _, input := range f.Inputs {
+			targetFiber, fragment := splitDataFlowRef(input.From)
+			if targetFiber == "" {
+				continue
+			}
+			targetID, err := ResolveScopedID(allIDs, f.ID, targetFiber)
+			if err != nil {
+				targetID = targetFiber
+			}
+			label := input.ID
+			if strings.TrimSpace(fragment) != "" {
+				label = fragment
+			}
+			g.Upstream[f.ID] = append(g.Upstream[f.ID], GraphEdge{ID: targetID, Label: label})
+			g.Downstream[targetID] = append(g.Downstream[targetID], GraphEdge{ID: f.ID, Label: label})
 		}
 	}
 
@@ -65,7 +78,7 @@ func (g *Graph) GetDownstreamN(id string, maxLevels int) []string {
 
 // bfs performs breadth-first traversal from start using the given adjacency map.
 // maxLevels controls how many levels to traverse (0 = unlimited).
-func (g *Graph) bfs(start string, adj map[string]Dependencies, maxLevels int) []string {
+func (g *Graph) bfs(start string, adj map[string]GraphEdges, maxLevels int) []string {
 	type entry struct {
 		id    string
 		level int
@@ -100,7 +113,7 @@ func (g *Graph) bfs(start string, adj map[string]Dependencies, maxLevels int) []
 	return result
 }
 
-// Ready returns all open felts whose dependencies are all closed.
+// Ready returns all open felts whose upstream producers are all closed.
 // Active felts are excluded — they're already being worked on.
 func (g *Graph) Ready() []*Felt {
 	var ready []*Felt
@@ -110,12 +123,12 @@ func (g *Graph) Ready() []*Felt {
 			continue
 		}
 
-		// Check all dependencies
+		// Check all upstream producers
 		allDepsClosed := true
-		for _, d := range f.DependsOn {
+		for _, d := range g.Upstream[f.ID] {
 			dep, ok := g.Nodes[d.ID]
 			if !ok {
-				// Missing dependency — treat as not ready
+				// Missing producer — treat as not ready
 				allDepsClosed = false
 				break
 			}
@@ -201,14 +214,14 @@ func (g *Graph) FindCycles() []string {
 	return cycles
 }
 
-// ValidateDependencies checks for dangling references.
+// ValidateDependencies checks for dangling upstream references.
 func (g *Graph) ValidateDependencies() []string {
 	var errors []string
 
 	for id, deps := range g.Upstream {
 		for _, dep := range deps {
 			if _, ok := g.Nodes[dep.ID]; !ok {
-				errors = append(errors, fmt.Sprintf("%s depends on non-existent %s", id, dep.ID))
+				errors = append(errors, fmt.Sprintf("%s consumes non-existent %s", id, dep.ID))
 			}
 		}
 	}

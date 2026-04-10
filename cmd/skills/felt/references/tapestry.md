@@ -42,7 +42,7 @@ These are the structural conventions that `felt export --format tapestry` implem
 felt add "B-modes consistent with noise" -t tapestry:bmodes
 ```
 
-Only edges where **both endpoints** have `tapestry:` tags render in the DAG. Dependencies to non-tagged fibers exist in felt but don't appear as graph edges.
+Only edges where **both endpoints** have `tapestry:` tags render in the DAG. Data-flow edges to non-tagged fibers can still exist via `inputs.from`, but they do not appear as graph edges.
 
 ### Evidence directory
 

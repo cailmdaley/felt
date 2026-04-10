@@ -25,7 +25,8 @@ This migration pass:
 - rewrites frontmatter key title -> name
 - strips leading MyST anchor lines like (slug)= from fiber bodies
 
-Each migrated flat fiber lands at <slug>/<slug>.md, dependency IDs are rewritten,
+Each migrated flat fiber lands at <slug>/<slug>.md, and any inputs.from
+references to migrated hex IDs are rewritten,
 and myst.yml is ensured.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {

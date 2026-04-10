@@ -89,13 +89,13 @@ func TestComputeStaleness(t *testing.T) {
 			ID:        "b-22222222",
 			Name:      "B",
 			CreatedAt: now,
-			DependsOn: felt.Dependencies{{ID: "a-11111111"}},
+			Inputs:    []felt.ASTRAInput{{ID: "input_b", From: "a-11111111.output"}},
 		},
 		{
 			ID:        "c-33333333",
 			Name:      "C",
 			CreatedAt: now,
-			DependsOn: felt.Dependencies{{ID: "b-22222222"}},
+			Inputs:    []felt.ASTRAInput{{ID: "input_c", From: "b-22222222.output"}},
 		},
 	}
 	graph := felt.BuildGraph(felts)
@@ -127,13 +127,13 @@ func TestComputeStalenessThroughGroupingNodes(t *testing.T) {
 				ID:        "group-22222222",
 				Name:      "Group",
 				CreatedAt: now,
-				DependsOn: felt.Dependencies{{ID: "source-11111111"}},
+				Inputs:    []felt.ASTRAInput{{ID: "group_input", From: "source-11111111.output"}},
 			},
 			{
 				ID:        "leaf-33333333",
 				Name:      "Leaf",
 				CreatedAt: now,
-				DependsOn: felt.Dependencies{{ID: "group-22222222"}},
+				Inputs:    []felt.ASTRAInput{{ID: "leaf_input", From: "group-22222222.output"}},
 			},
 		}
 		graph := felt.BuildGraph(felts)
@@ -154,13 +154,13 @@ func TestComputeStalenessThroughGroupingNodes(t *testing.T) {
 				ID:        "group-55555555",
 				Name:      "Group",
 				CreatedAt: now,
-				DependsOn: felt.Dependencies{{ID: "source-44444444"}},
+				Inputs:    []felt.ASTRAInput{{ID: "group_input", From: "source-44444444.output"}},
 			},
 			{
 				ID:        "leaf-66666666",
 				Name:      "Leaf",
 				CreatedAt: now,
-				DependsOn: felt.Dependencies{{ID: "group-55555555"}},
+				Inputs:    []felt.ASTRAInput{{ID: "leaf_input", From: "group-55555555.output"}},
 			},
 		}
 		graph := felt.BuildGraph(felts)
@@ -181,19 +181,19 @@ func TestComputeStalenessThroughGroupingNodes(t *testing.T) {
 				ID:        "group-88888888",
 				Name:      "Group A",
 				CreatedAt: now,
-				DependsOn: felt.Dependencies{{ID: "source-77777777"}},
+				Inputs:    []felt.ASTRAInput{{ID: "group_a_input", From: "source-77777777.output"}},
 			},
 			{
 				ID:        "group-99999999",
 				Name:      "Group B",
 				CreatedAt: now,
-				DependsOn: felt.Dependencies{{ID: "group-88888888"}},
+				Inputs:    []felt.ASTRAInput{{ID: "group_b_input", From: "group-88888888.output"}},
 			},
 			{
 				ID:        "leaf-00000000",
 				Name:      "Leaf",
 				CreatedAt: now,
-				DependsOn: felt.Dependencies{{ID: "group-99999999"}},
+				Inputs:    []felt.ASTRAInput{{ID: "leaf_input", From: "group-99999999.output"}},
 			},
 		}
 		graph := felt.BuildGraph(felts)

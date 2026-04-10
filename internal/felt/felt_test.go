@@ -172,9 +172,11 @@ title: Test Task
 status: active
 tags:
   - spec
-depends-on:
-  - dep-a
-  - dep-b
+inputs:
+  - id: dep_a
+    from: dep-a.output
+  - id: dep_b
+    from: dep-b
 created-at: 2026-01-01T10:00:00Z
 ---
 
@@ -201,11 +203,11 @@ Some comment here.
 	if !f.HasTag("spec") {
 		t.Errorf("HasTag(spec) = false, want true")
 	}
-	if len(f.DependsOn) != 2 {
-		t.Errorf("DependsOn length = %d, want 2", len(f.DependsOn))
+	if len(f.Inputs) != 2 {
+		t.Errorf("Inputs length = %d, want 2", len(f.Inputs))
 	}
-	if f.DependsOn[0].ID != "dep-a" || f.DependsOn[1].ID != "dep-b" {
-		t.Errorf("DependsOn IDs = %v, want [dep-a, dep-b]", f.DependsOn.IDs())
+	if f.Inputs[0].From != "dep-a.output" || f.Inputs[1].From != "dep-b" {
+		t.Errorf("Input refs = [%q %q], want [dep-a.output dep-b]", f.Inputs[0].From, f.Inputs[1].From)
 	}
 	if !strings.Contains(f.Body, "This is the body") {
 		t.Errorf("Body = %q, want to contain %q", f.Body, "This is the body")
@@ -262,7 +264,7 @@ func TestMarshal(t *testing.T) {
 	f := &Felt{
 		ID:        "test-task",
 		Name:      "Test Task",
-		DependsOn: Dependencies{{ID: "dep-1"}},
+		Inputs:    []ASTRAInput{{ID: "dep_1", From: "dep-1.output"}},
 		CreatedAt: now,
 		Body:      "Body text here.",
 	}
@@ -791,52 +793,43 @@ func TestMarshalTags(t *testing.T) {
 	}
 }
 
-func TestParseMixedDependencies(t *testing.T) {
+func TestParseInputRefs(t *testing.T) {
 	content := []byte(`---
-title: Mixed deps test
+title: Mixed input refs test
 status: open
-depends-on:
-  - bare-id
-  - id: labeled-id
-    label: needs data from
+inputs:
+  - id: data_input
+    from: bare-id
+  - id: labeled_input
+    from: labeled-id.output
 created-at: 2026-01-01T10:00:00Z
 ---
 `)
 
-	f, err := Parse("mixed-deps", content)
+	f, err := Parse("mixed-inputs", content)
 	if err != nil {
 		t.Fatalf("Parse() error: %v", err)
 	}
 
-	if len(f.DependsOn) != 2 {
-		t.Fatalf("DependsOn length = %d, want 2", len(f.DependsOn))
+	if len(f.Inputs) != 2 {
+		t.Fatalf("Inputs length = %d, want 2", len(f.Inputs))
 	}
-
-	// First dep: bare string gets default label
-	if f.DependsOn[0].ID != "bare-id" {
-		t.Errorf("DependsOn[0].ID = %q, want %q", f.DependsOn[0].ID, "bare-id")
+	if f.Inputs[0].ID != "data_input" || f.Inputs[0].From != "bare-id" {
+		t.Errorf("Inputs[0] = %+v, want {ID:data_input From:bare-id}", f.Inputs[0])
 	}
-	if f.DependsOn[0].Label != DefaultDepLabel {
-		t.Errorf("DependsOn[0].Label = %q, want %q", f.DependsOn[0].Label, DefaultDepLabel)
-	}
-
-	// Second dep: object with label
-	if f.DependsOn[1].ID != "labeled-id" {
-		t.Errorf("DependsOn[1].ID = %q, want %q", f.DependsOn[1].ID, "labeled-id")
-	}
-	if f.DependsOn[1].Label != "needs data from" {
-		t.Errorf("DependsOn[1].Label = %q, want %q", f.DependsOn[1].Label, "needs data from")
+	if f.Inputs[1].ID != "labeled_input" || f.Inputs[1].From != "labeled-id.output" {
+		t.Errorf("Inputs[1] = %+v, want {ID:labeled_input From:labeled-id.output}", f.Inputs[1])
 	}
 }
 
-func TestMarshalMixedDependencies(t *testing.T) {
+func TestMarshalInputRefs(t *testing.T) {
 	f := &Felt{
-		ID:     "mixed-deps",
-		Name:   "Mixed deps test",
+		ID:     "mixed-inputs",
+		Name:   "Mixed input refs test",
 		Status: StatusOpen,
-		DependsOn: Dependencies{
-			{ID: "bare-id"},
-			{ID: "labeled-id", Label: "needs data from"},
+		Inputs: []ASTRAInput{
+			{ID: "data_input", From: "bare-id"},
+			{ID: "labeled_input", From: "labeled-id.output"},
 		},
 		CreatedAt: time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC),
 	}
@@ -848,20 +841,14 @@ func TestMarshalMixedDependencies(t *testing.T) {
 
 	content := string(data)
 
-	// All deps emitted as objects (always object form now)
-	if !strings.Contains(content, "id: bare-id") {
-		t.Error("Marshal() should emit bare dep as object with id field")
+	if !strings.Contains(content, "id: data_input") {
+		t.Error("Marshal() should emit first input id")
 	}
-	if !strings.Contains(content, "label: depends on") {
-		t.Error("Marshal() should emit default label for bare dep")
+	if !strings.Contains(content, "from: bare-id") {
+		t.Error("Marshal() should emit first input ref")
 	}
-
-	// Labeled dep should be emitted as object
-	if !strings.Contains(content, "id: labeled-id") {
-		t.Error("Marshal() should emit labeled dep with id field")
-	}
-	if !strings.Contains(content, "label: needs data from") {
-		t.Error("Marshal() should emit labeled dep with label field")
+	if !strings.Contains(content, "id: labeled_input") || !strings.Contains(content, "from: labeled-id.output") {
+		t.Error("Marshal() should emit second input ref")
 	}
 
 	// Round-trip
@@ -869,14 +856,14 @@ func TestMarshalMixedDependencies(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Round-trip Parse() error: %v", err)
 	}
-	if len(parsed.DependsOn) != 2 {
-		t.Fatalf("Round-trip DependsOn length = %d, want 2", len(parsed.DependsOn))
+	if len(parsed.Inputs) != 2 {
+		t.Fatalf("Round-trip Inputs length = %d, want 2", len(parsed.Inputs))
 	}
-	if parsed.DependsOn[0].ID != "bare-id" || parsed.DependsOn[0].Label != DefaultDepLabel {
-		t.Errorf("Round-trip DependsOn[0] = %+v, want {bare-id, %q}", parsed.DependsOn[0], DefaultDepLabel)
+	if parsed.Inputs[0].ID != "data_input" || parsed.Inputs[0].From != "bare-id" {
+		t.Errorf("Round-trip Inputs[0] = %+v, want {ID:data_input From:bare-id}", parsed.Inputs[0])
 	}
-	if parsed.DependsOn[1].ID != "labeled-id" || parsed.DependsOn[1].Label != "needs data from" {
-		t.Errorf("Round-trip DependsOn[1] = %+v, want {labeled-id, needs data from}", parsed.DependsOn[1])
+	if parsed.Inputs[1].ID != "labeled_input" || parsed.Inputs[1].From != "labeled-id.output" {
+		t.Errorf("Round-trip Inputs[1] = %+v, want {ID:labeled_input From:labeled-id.output}", parsed.Inputs[1])
 	}
 }
 
@@ -902,8 +889,8 @@ Cross-check [method](project/method#step-1) and ignore [site](https://example.co
 	}
 }
 
-func TestDependenciesHelpers(t *testing.T) {
-	deps := Dependencies{
+func TestGraphEdgesHelpers(t *testing.T) {
+	deps := GraphEdges{
 		{ID: "task-a"},
 		{ID: "task-b", Label: "reason"},
 	}

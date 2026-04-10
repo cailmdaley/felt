@@ -13,7 +13,7 @@ felt migrate --dry-run    # preview — check flat-file moves, title renames, an
 felt migrate              # big bang — no backwards compatibility
 ```
 
-The tool strips hex suffixes, creates `slug/slug.md` directories, rewrites legacy `depends-on` references in migrated files, renames frontmatter `title:` to `name:`, and strips leading MyST anchor lines like `(slug)=` from fiber bodies.
+The tool strips hex suffixes, creates `slug/slug.md` directories, rewrites `inputs.from` references that still point at migrated hex IDs, renames frontmatter `title:` to `name:`, and strips leading MyST anchor lines like `(slug)=` from fiber bodies.
 
 ### 2. Validate
 
@@ -24,12 +24,12 @@ felt check                # lint the migrated tree
 
 ### 3. Fix stale references
 
-**Pre-existing directory fibers are not rewritten.** If any fibers were created with the v2 binary before migration, their `depends-on` may still reference old hex IDs. Search for them and fix manually:
+**Pre-existing directory fibers are rewritten too.** If any fibers still carry old hex IDs in `inputs.from`, audit them after migration:
 
 ```bash
-felt show fiber-a -d compact   # confirm it exists
-rg -n "some-fiber-8a08fc28|depends-on:" .felt
-# Edit .felt/fiber-a/fiber-a.md — change depends-on from some-fiber-8a08fc28 to some-fiber
+felt show fiber-a --inputs      # confirm current data-flow refs
+rg -n "some-fiber-8a08fc28" .felt
+# Edit .felt/fiber-a/fiber-a.md — change inputs.from from some-fiber-8a08fc28.output to some-fiber.output
 ```
 
 ### 4. Update CLAUDE.md
@@ -61,7 +61,7 @@ felt hook session | head -20  # verify session context works
 
 ## Pitfalls
 
-**Pre-v2 directory fibers have stale deps.** The migration tool only rewrites `depends-on` in files it migrates (flat files). Directory fibers that already existed are untouched. Audit them with `rg` after migration.
+**Audit old hex refs after migration.** The migration rewrites flat fibers and existing directory fibers it can map cleanly, but `rg` is still the fastest final check for stale hex IDs in bodies or external tooling.
 
 **Project renames create slug mismatches.** If the project was once called "hexarchy" and fibers were filed under that name, the slugs stay `hexarchy-*` after migration. CLAUDE.md references that assumed the current project name won't match. Use `felt ls -s all <keyword>` to find actual slugs.
 
@@ -78,7 +78,7 @@ felt hook session | head -20  # verify session context works
 - [ ] `felt migrate --dry-run` — no unexpected collisions
 - [ ] `felt migrate` — completes without error
 - [ ] `felt check` passes
-- [ ] Pre-existing directory fibers' `depends-on` fixed
+- [ ] Old hex IDs removed from `inputs.from`
 - [ ] CLAUDE.md hex suffixes stripped
 - [ ] CLAUDE.md file paths updated to fiber IDs
 - [ ] CLAUDE.md stale/deleted references removed

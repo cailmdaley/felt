@@ -76,7 +76,7 @@ func TestStorageWriteRead(t *testing.T) {
 		ID:        "test-task",
 		Name:      "Test Task",
 		Status:    StatusOpen,
-		DependsOn: Dependencies{{ID: "dep-a"}},
+		Inputs:    []ASTRAInput{{ID: "dep_a", From: "dep-a.output"}},
 		CreatedAt: time.Now(),
 		Body:      "Test body content.",
 	}
@@ -111,8 +111,8 @@ func TestStorageWriteRead(t *testing.T) {
 	if read.Body != f.Body {
 		t.Errorf("Body = %q, want %q", read.Body, f.Body)
 	}
-	if len(read.DependsOn) != 1 || read.DependsOn[0].ID != "dep-a" {
-		t.Errorf("DependsOn = %v, want [{dep-a }]", read.DependsOn)
+	if len(read.Inputs) != 1 || read.Inputs[0].From != "dep-a.output" {
+		t.Errorf("Inputs = %v, want [{dep_a dep-a.output}]", read.Inputs)
 	}
 }
 
@@ -672,7 +672,7 @@ func TestFindProjectRootNotFound(t *testing.T) {
 	}
 }
 
-func TestStorageMoveSubtreeRewritesDependencies(t *testing.T) {
+func TestStorageMoveSubtreeRewritesInputRefs(t *testing.T) {
 	dir := t.TempDir()
 	s := NewStorage(dir)
 	if err := s.Init(); err != nil {
@@ -688,19 +688,19 @@ func TestStorageMoveSubtreeRewritesDependencies(t *testing.T) {
 		ID:        "damping-prior",
 		Name:      "Damping Prior",
 		CreatedAt: time.Now(),
-		DependsOn: Dependencies{{ID: "bao-analysis"}},
+		Inputs:    []ASTRAInput{{ID: "analysis_input", From: "bao-analysis.posterior"}},
 	}
 	grandchild := &Felt{
 		ID:        "damping-prior/contour-plot",
 		Name:      "Contour Plot",
 		CreatedAt: time.Now(),
-		DependsOn: Dependencies{{ID: "damping-prior"}},
+		Inputs:    []ASTRAInput{{ID: "plot_input", From: "damping-prior.fit"}},
 	}
 	consumer := &Felt{
 		ID:        "consumer",
 		Name:      "Consumer",
 		CreatedAt: time.Now(),
-		DependsOn: Dependencies{{ID: "damping-prior/contour-plot"}},
+		Inputs:    []ASTRAInput{{ID: "consumer_input", From: "damping-prior/contour-plot.figure"}},
 	}
 
 	for _, f := range []*Felt{parent, child, grandchild, consumer} {
@@ -720,24 +720,24 @@ func TestStorageMoveSubtreeRewritesDependencies(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Read moved child: %v", err)
 	}
-	if got := moved.DependsOn[0].ID; got != "bao-analysis" {
-		t.Fatalf("moved child dependency = %q, want %q", got, "bao-analysis")
+	if got := moved.Inputs[0].From; got != "bao-analysis.posterior" {
+		t.Fatalf("moved child input = %q, want %q", got, "bao-analysis.posterior")
 	}
 
 	descendant, err := s.Read("bao-analysis/damping-prior/contour-plot")
 	if err != nil {
 		t.Fatalf("Read moved descendant: %v", err)
 	}
-	if got := descendant.DependsOn[0].ID; got != "bao-analysis/damping-prior" {
-		t.Fatalf("moved descendant dependency = %q, want %q", got, "bao-analysis/damping-prior")
+	if got := descendant.Inputs[0].From; got != "bao-analysis/damping-prior.fit" {
+		t.Fatalf("moved descendant input = %q, want %q", got, "bao-analysis/damping-prior.fit")
 	}
 
 	updatedConsumer, err := s.Read("consumer")
 	if err != nil {
 		t.Fatalf("Read consumer: %v", err)
 	}
-	if got := updatedConsumer.DependsOn[0].ID; got != "bao-analysis/damping-prior/contour-plot" {
-		t.Fatalf("consumer dependency = %q, want rewritten descendant ID", got)
+	if got := updatedConsumer.Inputs[0].From; got != "bao-analysis/damping-prior/contour-plot.figure" {
+		t.Fatalf("consumer input = %q, want rewritten descendant ref", got)
 	}
 }
 
@@ -794,8 +794,9 @@ func TestStorageMigrateFlatFiles(t *testing.T) {
 	legacyA := `---
 title: Quick gotcha
 created-at: 2026-03-15T10:00:00Z
-depends-on:
-  - bao-analysis-d34db33f
+inputs:
+  - id: parent_input
+    from: bao-analysis-d34db33f.posterior
 ---
 
 Quick note.
@@ -833,8 +834,8 @@ Analysis body.
 	if err != nil {
 		t.Fatalf("Read migrated quick-gotcha: %v", err)
 	}
-	if got := migrated.DependsOn[0].ID; got != "bao-analysis" {
-		t.Fatalf("dependency rewrite = %q, want %q", got, "bao-analysis")
+	if got := migrated.Inputs[0].From; got != "bao-analysis.posterior" {
+		t.Fatalf("input rewrite = %q, want %q", got, "bao-analysis.posterior")
 	}
 	if migrated.Body != "Quick note." {
 		t.Fatalf("migrated body should preserve plain markdown body, got %q", migrated.Body)
@@ -874,7 +875,7 @@ Body.
 	}
 }
 
-func TestStorageMigrateRewritesPreExistingDirectoryDeps(t *testing.T) {
+func TestStorageMigrateRewritesPreExistingDirectoryInputs(t *testing.T) {
 	dir := t.TempDir()
 	s := NewStorage(dir)
 	if err := s.Init(); err != nil {
@@ -893,12 +894,12 @@ Analysis body.
 		t.Fatalf("write legacy: %v", err)
 	}
 
-	// Pre-existing directory fiber with a stale hex dep
+	// Pre-existing directory fiber with a stale hex input ref
 	preExisting := &Felt{
 		ID:        "session-hub",
 		Name:      "Session hub",
 		CreatedAt: time.Now(),
-		DependsOn: Dependencies{{ID: "bao-analysis-d34db33f"}},
+		Inputs:    []ASTRAInput{{ID: "analysis_input", From: "bao-analysis-d34db33f.posterior"}},
 		Body:      "(session-hub)=\n# Session hub",
 	}
 	if err := s.Write(preExisting); err != nil {
@@ -913,13 +914,13 @@ Analysis body.
 		t.Fatalf("expected 1 migration entry, got %d", len(result.Entries))
 	}
 
-	// The pre-existing directory fiber should have its dep rewritten
+	// The pre-existing directory fiber should have its input ref rewritten
 	hub, err := s.Read("session-hub")
 	if err != nil {
 		t.Fatalf("Read session-hub: %v", err)
 	}
-	if got := hub.DependsOn[0].ID; got != "bao-analysis" {
-		t.Fatalf("pre-existing dep rewrite = %q, want %q", got, "bao-analysis")
+	if got := hub.Inputs[0].From; got != "bao-analysis.posterior" {
+		t.Fatalf("pre-existing input rewrite = %q, want %q", got, "bao-analysis.posterior")
 	}
 }
 

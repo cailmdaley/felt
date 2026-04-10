@@ -7,15 +7,18 @@ import (
 )
 
 func makeTestFelt(id, name, status string, deps []string) *Felt {
-	var d Dependencies
-	for _, id := range deps {
-		d = append(d, Dependency{ID: id})
+	inputs := make([]ASTRAInput, 0, len(deps))
+	for i, depID := range deps {
+		inputs = append(inputs, ASTRAInput{
+			ID:   "input_" + string(rune('a'+i)),
+			From: depID,
+		})
 	}
 	return &Felt{
 		ID:        id,
 		Name:      name,
 		Status:    status,
-		DependsOn: d,
+		Inputs:    inputs,
 		CreatedAt: time.Now(),
 	}
 }
@@ -496,13 +499,11 @@ func TestToTextMultipleRoots(t *testing.T) {
 func TestBuildGraphWithLabels(t *testing.T) {
 	felts := []*Felt{
 		{
-			ID: "task-a", Name: "A", Status: StatusOpen, DependsOn: nil, CreatedAt: time.Now(),
+			ID: "task-a", Name: "A", Status: StatusOpen, CreatedAt: time.Now(),
 		},
 		{
 			ID: "task-b", Name: "B", Status: StatusOpen,
-			DependsOn: Dependencies{
-				{ID: "task-a", Label: "needs data"},
-			},
+			Inputs: []ASTRAInput{{ID: "needs_data", From: "task-a"}},
 			CreatedAt: time.Now(),
 		},
 	}
@@ -513,29 +514,27 @@ func TestBuildGraphWithLabels(t *testing.T) {
 	if len(g.Upstream["task-b"]) != 1 {
 		t.Fatalf("B upstream count = %d, want 1", len(g.Upstream["task-b"]))
 	}
-	if g.Upstream["task-b"][0].Label != "needs data" {
-		t.Errorf("B upstream label = %q, want %q", g.Upstream["task-b"][0].Label, "needs data")
+	if g.Upstream["task-b"][0].Label != "needs_data" {
+		t.Errorf("B upstream label = %q, want %q", g.Upstream["task-b"][0].Label, "needs_data")
 	}
 
 	// Downstream of A should have label
 	if len(g.Downstream["task-a"]) != 1 {
 		t.Fatalf("A downstream count = %d, want 1", len(g.Downstream["task-a"]))
 	}
-	if g.Downstream["task-a"][0].Label != "needs data" {
-		t.Errorf("A downstream label = %q, want %q", g.Downstream["task-a"][0].Label, "needs data")
+	if g.Downstream["task-a"][0].Label != "needs_data" {
+		t.Errorf("A downstream label = %q, want %q", g.Downstream["task-a"][0].Label, "needs_data")
 	}
 }
 
 func TestToMermaidWithLabels(t *testing.T) {
 	felts := []*Felt{
 		{
-			ID: "task-a", Name: "A", Status: StatusOpen, DependsOn: nil, CreatedAt: time.Now(),
+			ID: "task-a", Name: "A", Status: StatusOpen, CreatedAt: time.Now(),
 		},
 		{
 			ID: "task-b", Name: "B", Status: StatusOpen,
-			DependsOn: Dependencies{
-				{ID: "task-a", Label: "blocks"},
-			},
+			Inputs: []ASTRAInput{{ID: "input_b", From: "task-a.blocks"}},
 			CreatedAt: time.Now(),
 		},
 	}
@@ -551,13 +550,11 @@ func TestToMermaidWithLabels(t *testing.T) {
 func TestToDotWithLabels(t *testing.T) {
 	felts := []*Felt{
 		{
-			ID: "task-a", Name: "A", Status: StatusOpen, DependsOn: nil, CreatedAt: time.Now(),
+			ID: "task-a", Name: "A", Status: StatusOpen, CreatedAt: time.Now(),
 		},
 		{
 			ID: "task-b", Name: "B", Status: StatusOpen,
-			DependsOn: Dependencies{
-				{ID: "task-a", Label: "provides input"},
-			},
+			Inputs: []ASTRAInput{{ID: "input_b", From: "task-a.provides input"}},
 			CreatedAt: time.Now(),
 		},
 	}
@@ -573,13 +570,11 @@ func TestToDotWithLabels(t *testing.T) {
 func TestToTextWithLabels(t *testing.T) {
 	felts := []*Felt{
 		{
-			ID: "task-a", Name: "A", Status: StatusOpen, DependsOn: nil, CreatedAt: time.Now(),
+			ID: "task-a", Name: "A", Status: StatusOpen, CreatedAt: time.Now(),
 		},
 		{
 			ID: "task-b", Name: "B", Status: StatusOpen,
-			DependsOn: Dependencies{
-				{ID: "task-a", Label: "reason"},
-			},
+			Inputs: []ASTRAInput{{ID: "input_b", From: "task-a.reason"}},
 			CreatedAt: time.Now(),
 		},
 	}
