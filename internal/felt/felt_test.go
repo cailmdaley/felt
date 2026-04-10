@@ -889,6 +889,35 @@ Cross-check [method](project/method#step-1) and ignore [site](https://example.co
 	}
 }
 
+func TestExtractBodyRefsIgnoresCodeSpans(t *testing.T) {
+	body := `
+Real link: [[real-fiber]].
+Code span: ` + "`[[illustrative]]`" + `.
+Code block:
+` + "```" + `
+[[in-code-block]]
+` + "```" + `
+Back to real: [[another-real]].
+`
+	refs := ExtractBodyRefs(body)
+	got := map[string]bool{}
+	for _, ref := range refs {
+		got[ref.String()] = true
+	}
+	if !got["real-fiber"] {
+		t.Error("should include real-fiber")
+	}
+	if !got["another-real"] {
+		t.Error("should include another-real")
+	}
+	if got["illustrative"] {
+		t.Error("should not include illustrative (in code span)")
+	}
+	if got["in-code-block"] {
+		t.Error("should not include in-code-block (in code block)")
+	}
+}
+
 func TestGraphEdgesHelpers(t *testing.T) {
 	deps := GraphEdges{
 		{ID: "task-a"},

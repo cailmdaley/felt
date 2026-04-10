@@ -900,7 +900,22 @@ var bodyLinkRe = regexp.MustCompile(`\[[^\]]*\]\(([^)]+)\)`)
 // wikiLinkRe matches [[slug]], [[slug#fragment]], and [[slug#fragment|label]] wikilinks.
 var wikiLinkRe = regexp.MustCompile(`\[\[([^\]|#]+)(?:#([^\]|]+))?(?:\|[^\]]+)?\]\]`)
 
+// codeBlockRe matches fenced code blocks (``` or ~~~).
+var codeBlockRe = regexp.MustCompile("(?s)```[^`]*```|~~~[^~]*~~~")
+
+// codeSpanRe matches inline code spans (`...`).
+var codeSpanRe = regexp.MustCompile("`[^`]+`")
+
+// stripCodeContent removes fenced code blocks and inline code spans from body
+// so that wikilink extraction doesn't match illustrative examples in documentation.
+func stripCodeContent(body string) string {
+	body = codeBlockRe.ReplaceAllString(body, "")
+	body = codeSpanRe.ReplaceAllString(body, "")
+	return body
+}
+
 // ExtractBodyRefs finds fiber references in a body from markdown links and wikilinks.
+// References inside code spans or fenced code blocks are ignored.
 func ExtractBodyRefs(body string) []BodyRef {
 	seen := map[string]bool{}
 	var refs []BodyRef
@@ -918,10 +933,11 @@ func ExtractBodyRefs(body string) []BodyRef {
 		refs = append(refs, ref)
 	}
 
-	for _, m := range bodyLinkRe.FindAllStringSubmatch(body, -1) {
+	stripped := stripCodeContent(body)
+	for _, m := range bodyLinkRe.FindAllStringSubmatch(stripped, -1) {
 		add(m[1], "")
 	}
-	for _, m := range wikiLinkRe.FindAllStringSubmatch(body, -1) {
+	for _, m := range wikiLinkRe.FindAllStringSubmatch(stripped, -1) {
 		add(m[1], m[2])
 	}
 	return refs
