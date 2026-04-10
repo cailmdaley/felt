@@ -13,7 +13,7 @@ Directory-contained markdown fibers with YAML frontmatter, wikilinks, and option
 
 Fibers are the unit. Each one lives in its own directory under `.felt/`, with a `<slug>.md` file carrying YAML frontmatter plus plain markdown body content. Containment comes from the directory tree, narrative connections come from `[[wikilinks]]` in the body, and ASTRA inputs/outputs/decisions/insights can accrete in frontmatter as the work crystallizes. Closing a fiber with an outcome captures what was learned.
 
-There is no database or server — `.felt/` is a directory tree of markdown fibers that you can version-control, grep, and move between machines.
+The source of truth is still the markdown tree in `.felt/`. Felt now maintains a local SQLite cache at `.felt/index.db` for typed links, citations, tags, and FTS5 body search, but the cache is rebuildable from the files and carries no extra authoring burden.
 
 ## Install
 
@@ -105,12 +105,13 @@ felt ls -t tapestry:                      # prefix match
 
 ### Relationships
 
-Containment comes from the directory tree. Narrative connections live in `[[wikilinks]]` inside the body. ASTRA `inputs.from` references express data flow when a fiber becomes computationally formalized.
+Containment comes from the directory tree. Narrative connections live in `[[wikilinks]]` inside the body. ASTRA `inputs.from` references express data flow when a fiber becomes computationally formalized. Felt indexes both edge types in SQLite, so `felt show` can surface back-references and `felt ls --body` can use FTS instead of hydrating every body file.
 
 ```bash
 felt tree                               # containment hierarchy
-felt show covariance-estimation         # body refs + ASTRA summary
+felt show covariance-estimation         # body refs + citations + ASTRA summary
 felt ls "DES Y3"                        # search names, outcomes, ASTRA fields
+felt ls --body "jackknife patches"      # FTS5 body search
 ```
 
 ### ASTRA Frontmatter
@@ -145,7 +146,7 @@ felt export --format astra    # writes ./astra.yaml
 ```bash
 felt show <id>                    # full body + metadata
 felt show <id> -d compact         # metadata + outcome + ASTRA counts
-felt show <id> -d summary         # compact + lede paragraph + ASTRA summary
+felt show <id> -d summary         # compact + citations + lede + ASTRA summary
 felt show <id> --body             # body + body start line for editing
 felt show <id> --decision cov     # one ASTRA decision as YAML/JSON
 felt show <id> --inputs           # ASTRA inputs only

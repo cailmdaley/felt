@@ -61,6 +61,21 @@ Use --body with query to include body search, and with --json to emit body text.
 		}
 
 		queryLower := strings.ToLower(query)
+		bodyMatchIDs := map[string]struct{}{}
+		if query != "" && lsBody && !lsRegex {
+			idx, err := storage.OpenIndex()
+			if err != nil {
+				return err
+			}
+			defer idx.Close()
+			ids, err := idx.SearchBodyIDs(query)
+			if err != nil {
+				return err
+			}
+			for _, id := range ids {
+				bodyMatchIDs[id] = struct{}{}
+			}
+		}
 		var felts []*felt.Felt
 		if jsonOutput {
 			felts, err = storage.ListMetadataWithModTime()
@@ -143,6 +158,11 @@ Use --body with query to include body search, and with --json to emit body text.
 				}
 
 				if matches {
+					filtered = append(filtered, f)
+					continue
+				}
+
+				if _, ok := bodyMatchIDs[f.ID]; ok {
 					filtered = append(filtered, f)
 					continue
 				}

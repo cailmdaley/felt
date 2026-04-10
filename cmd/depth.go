@@ -29,16 +29,16 @@ func validateDepth(d string) error {
 }
 
 // renderFelt renders a felt at the given depth level.
-func renderFelt(f *felt.Felt, g *felt.Graph, depth string) string {
+func renderFelt(f *felt.Felt, g *felt.Graph, depth string, citations []felt.Citation) string {
 	switch depth {
 	case DepthTitle:
 		return renderTitle(f)
 	case DepthCompact:
 		return renderCompact(f, g)
 	case DepthSummary:
-		return renderSummary(f, g)
+		return renderSummary(f, g, citations)
 	default:
-		return renderFull(f, g)
+		return renderFull(f, g, citations)
 	}
 }
 
@@ -72,7 +72,7 @@ func renderCompact(f *felt.Felt, g *felt.Graph) string {
 	return sb.String()
 }
 
-func renderSummary(f *felt.Felt, g *felt.Graph) string {
+func renderSummary(f *felt.Felt, g *felt.Graph, citations []felt.Citation) string {
 	var sb strings.Builder
 	writeHeader(&sb, f)
 	if f.Due != nil {
@@ -82,6 +82,7 @@ func renderSummary(f *felt.Felt, g *felt.Graph) string {
 		fmt.Fprintf(&sb, "Outcome:  %s\n", f.Outcome)
 	}
 	writeBodyRefs(&sb, f, g)
+	writeCitations(&sb, citations)
 	writeASTRASkeleton(&sb, f)
 	if f.Body != "" {
 		lede := extractLede(f.Body)
@@ -178,10 +179,11 @@ func writeASTRACounts(sb *strings.Builder, f *felt.Felt) {
 	}
 }
 
-func renderFull(f *felt.Felt, g *felt.Graph) string {
+func renderFull(f *felt.Felt, g *felt.Graph, citations []felt.Citation) string {
 	var sb strings.Builder
 	writeHeader(&sb, f)
 	writeBodyRefs(&sb, f, g)
+	writeCitations(&sb, citations)
 	if f.Due != nil {
 		fmt.Fprintf(&sb, "Due:      %s\n", f.Due.Format("2006-01-02"))
 	}
@@ -196,6 +198,24 @@ func renderFull(f *felt.Felt, g *felt.Graph) string {
 		fmt.Fprintf(&sb, "\n%s\n", f.Body)
 	}
 	return sb.String()
+}
+
+func writeCitations(sb *strings.Builder, citations []felt.Citation) {
+	if len(citations) == 0 {
+		return
+	}
+	parts := make([]string, 0, len(citations))
+	for _, citation := range citations {
+		ref := citation.SourceID
+		if citation.Fragment != "" {
+			ref += "#" + citation.Fragment
+		}
+		if strings.TrimSpace(citation.SourceName) != "" {
+			ref += " (" + truncateTitle(citation.SourceName, 30) + ")"
+		}
+		parts = append(parts, ref)
+	}
+	fmt.Fprintf(sb, "Cited by: %s\n", strings.Join(parts, ", "))
 }
 
 // writeBodyRefs extracts markdown and wikilinks from the body and renders them

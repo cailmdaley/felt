@@ -1,6 +1,6 @@
 # felt
 
-Markdown fiber tracker. Directory-based markdown fibers with YAML frontmatter, plain markdown bodies, containment by path, and wikilinks for narrative references.
+Markdown fiber tracker. Directory-based markdown fibers with YAML frontmatter, plain markdown bodies, containment by path, wikilinks for narrative references, and a rebuildable SQLite cache at `.felt/index.db`.
 
 ## Structure
 
@@ -23,6 +23,8 @@ Fibers are minimal by default. All fields except `name` are optional.
 | inputs / outputs / decisions / insights | Optional ASTRA structure when the work becomes computationally explicit. |
 
 **Status is opt-in.** `felt add <slug> "name"` creates a statusless fiber. `felt add <slug> "name" -s open` enters tracking. `felt edit <id> -s active` enters tracking. `felt ls` only shows tracked fibers.
+
+**Relationships and index.** Containment is the directory tree. `[[wikilinks]]` are narrative references. ASTRA `inputs.from` is data flow. The SQLite cache indexes links, tags, ASTRA summaries, and FTS5 body text; `felt show` uses it for citations and `felt ls --body` uses it for fast body search.
 
 **Progressive disclosure.** `felt show <id> -d compact` shows metadata + outcome + ASTRA counts. Levels: title, compact, summary, full (default). Targeted views: `felt show <id> --body` prints the body plus its start line; `--decisions`, `--decision`, `--inputs`, and `--insights` expose ASTRA slices directly. `felt tree` is the containment hierarchy.
 

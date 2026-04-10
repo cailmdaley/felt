@@ -4,7 +4,7 @@ Directory-contained markdown fibers with YAML frontmatter, wikilinks, and option
 
 ## Why
 
-Fibers are markdown files. Human-readable, version-controllable, greppable. No database, no sync, no lock-in.
+Fibers are markdown files. Human-readable, version-controllable, greppable. The markdown tree is the source of truth; felt also keeps a rebuildable SQLite cache at `.felt/index.db` for typed links, citations, and FTS5 body search.
 
 Containment comes from the directory tree, narrative connections come from `[[wikilinks]]` in the body, and ASTRA `inputs.from` carries computational provenance when needed.
 
@@ -35,6 +35,7 @@ Felt uses three relationship mechanisms:
 - Containment via directory nesting
 - Narrative references via `[[wikilinks]]`
 - Data flow via ASTRA `inputs.from`
+- Indexed citations and FTS5 body search via `.felt/index.db`
 
 ### Status (opt-in)
 
@@ -67,13 +68,14 @@ felt show <id> -d compact     # see outcome without full body
 |---|---|
 | `title` | Name + tags |
 | `compact` | Metadata + outcome + ASTRA counts |
-| `summary` | Compact + lede paragraph + concise ASTRA summary |
+| `summary` | Compact + citations + lede paragraph + concise ASTRA summary |
 | `full` | Everything (default) |
 
 ```bash
 felt show <id> -d compact      # "what was decided?"
 felt show <id> --body          # body + start line for editing
 felt show <id> --decisions     # ASTRA decisions only
+felt ls --body "jwt refresh"   # FTS5 body search
 ```
 
 ### Tags

@@ -68,6 +68,11 @@ Targeted views:
 
 		storage := felt.NewStorage(root)
 		scopeID := resolveCommandScope(root)
+		idx, err := storage.OpenIndex()
+		if err != nil {
+			return err
+		}
+		defer idx.Close()
 
 		// Targeted views: full single-file read, optionally structured output.
 		if selectorCount > 0 || jsonOutput {
@@ -119,7 +124,12 @@ Targeted views:
 			graph.Nodes[f.ID] = f
 		}
 
-		fmt.Print(renderFelt(f, graph, detail))
+		citations, err := idx.Citations(f.ID)
+		if err != nil {
+			return err
+		}
+
+		fmt.Print(renderFelt(f, graph, detail, citations))
 		return nil
 	},
 }

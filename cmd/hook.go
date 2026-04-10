@@ -182,9 +182,11 @@ felt edit <id> --body "text"    # full body replacement (overwrite)
 felt show <id>                  # full details
 felt show <id> -d summary       # metadata + lede paragraph
 felt show <id> -d compact       # metadata + outcome + ASTRA counts
+felt show <id> --body           # body + start line for editing
 felt ls                         # tracked fibers (open/active)
 felt ls -t tapestry:            # any filter widens to all statuses
 felt ls -s closed "query"       # explicit -s overrides; -e exact, -r regex
+felt ls --body "query"          # FTS5 body search via .felt/index.db
 felt tree                       # containment hierarchy
 felt tree <id>                  # subtree for one fiber
 felt check                      # lint ASTRA/formalization issues
@@ -195,7 +197,7 @@ felt export --format astra      # write astra.yaml from ASTRA frontmatter
 Also: hook session, rm, setup, update
 ` + "```" + `
 Statuses: · untracked, ○ open, ◐ active, ● closed
-Detail: title < compact < summary < full (default). Summary shows the **lede** — the first paragraph of the body. Write it to stand alone.
+Detail: title < compact < summary < full (default). Summary shows the **lede** — the first paragraph of the body. Write it to stand alone. ` + "`felt show`" + ` also surfaces indexed citations from wikilinks.
 To patch body text (not replace), Read then Edit the fiber markdown file in .felt/<path>/<slug>.md. Nested fibers use path IDs like bao-analysis/damping-prior.
 
 `

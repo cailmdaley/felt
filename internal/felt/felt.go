@@ -370,6 +370,7 @@ func truncateAtWord(s string, maxLen int) string {
 
 // bracketPattern matches [tag] at the start of titles.
 var bracketPattern = regexp.MustCompile(`^\[([^\]]+)\]\s*`)
+var inlineTagPattern = regexp.MustCompile(`(^|[\s(])#([A-Za-z0-9:_/-]+)\b`)
 
 // ExtractTags extracts [bracketed] tags from a title.
 // Returns the extracted tags and the remaining title with brackets removed.
@@ -388,6 +389,29 @@ func ExtractTags(title string) ([]string, string) {
 	}
 
 	return tags, strings.TrimSpace(remaining)
+}
+
+// ExtractInlineTags finds hashtag-style body tags such as #question or
+// #tapestry:cosebis_data_vector.
+func ExtractInlineTags(body string) []string {
+	matches := inlineTagPattern.FindAllStringSubmatch(body, -1)
+	if len(matches) == 0 {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	var tags []string
+	for _, match := range matches {
+		tag := strings.TrimSpace(match[2])
+		if tag == "" {
+			continue
+		}
+		if _, ok := seen[tag]; ok {
+			continue
+		}
+		seen[tag] = struct{}{}
+		tags = append(tags, tag)
+	}
+	return tags
 }
 
 // HasTag returns true if the felt has the specified tag.

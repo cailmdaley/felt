@@ -194,9 +194,45 @@ func TestRenderFullResolvesScopedBodyRefs(t *testing.T) {
 		CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z"),
 	}
 
-	out := renderFelt(current, felt.BuildGraph([]*felt.Felt{parent, current, sibling, child}), DepthFull)
+	out := renderFelt(current, felt.BuildGraph([]*felt.Felt{parent, current, sibling, child}), DepthFull, nil)
 	if !strings.Contains(out, "Refs:     project/question (Question), project/analysis/method#step-a (Method)") {
 		t.Fatalf("renderFelt() scoped refs mismatch:\n%s", out)
+	}
+}
+
+func TestShowIncludesIndexedCitations(t *testing.T) {
+	dir := t.TempDir()
+	storage := felt.NewStorage(dir)
+	if err := storage.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+	for _, fiber := range []*felt.Felt{
+		{
+			ID:        "project/question",
+			Name:      "Question",
+			CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z"),
+		},
+		{
+			ID:        "project/analysis",
+			Name:      "Analysis",
+			CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z"),
+			Body:      "See [[question]].",
+		},
+	} {
+		if err := storage.Write(fiber); err != nil {
+			t.Fatalf("Write(%s) error: %v", fiber.ID, err)
+		}
+	}
+
+	reset := saveShowGlobals()
+	defer reset()
+
+	out, err := runCommand(t, dir, "show", "project/question")
+	if err != nil {
+		t.Fatalf("show with citations: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "Cited by: project/analysis (Analysis)") {
+		t.Fatalf("show missing citations:\n%s", out)
 	}
 }
 
