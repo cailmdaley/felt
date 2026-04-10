@@ -474,8 +474,8 @@ Parent body.
 		}
 	}
 
-	// rm --force
-	mustFelt(t, dir, "rm", "--force", fiber2ID)
+	// rm
+	mustFelt(t, dir, "rm", fiber2ID)
 	lsOut := mustFelt(t, dir, "ls", "-s", "all")
 	if strings.Contains(lsOut, "second fiber") {
 		t.Fatalf("rm: fiber should be gone, got: %s", lsOut)

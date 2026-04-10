@@ -29,31 +29,6 @@ var rmCmd = &cobra.Command{
 			return err
 		}
 
-		force, _ := cmd.Flags().GetBool("force")
-		for _, other := range felts {
-			if other.DependsOn.HasID(f.ID) {
-				if !force {
-					return fmt.Errorf("cannot delete: %s depends on this felt", other.ID)
-				}
-				fullOther, err := storage.Read(other.ID)
-				if err != nil {
-					return fmt.Errorf("reading %s: %w", other.ID, err)
-				}
-				// Auto-unlink
-				var newDeps felt.Dependencies
-				for _, d := range fullOther.DependsOn {
-					if d.ID != f.ID {
-						newDeps = append(newDeps, d)
-					}
-				}
-				fullOther.DependsOn = newDeps
-				if err := storage.Write(fullOther); err != nil {
-					return fmt.Errorf("unlinking %s: %w", other.ID, err)
-				}
-				fmt.Printf("Unlinked %s → %s\n", other.ID, f.ID)
-			}
-		}
-
 		if err := storage.Delete(f.ID); err != nil {
 			return err
 		}
@@ -65,5 +40,4 @@ var rmCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(rmCmd)
-	rmCmd.Flags().BoolP("force", "f", false, "Auto-unlink dependents before deleting")
 }

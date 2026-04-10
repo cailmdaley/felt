@@ -109,7 +109,7 @@ func TestExportIncludesDecisions(t *testing.T) {
 	now := time.Date(2026, 3, 30, 12, 0, 0, 0, time.UTC)
 	nodeA := &felt.Felt{
 		ID:        "shear-reference-11111111",
-		Title:     "Shear reference frame",
+		Name:      "Shear reference frame",
 		Status:    felt.StatusClosed,
 		Tags:      []string{"tapestry:shear_reference_frame"},
 		CreatedAt: now,
@@ -117,7 +117,7 @@ func TestExportIncludesDecisions(t *testing.T) {
 	}
 	nodeB := &felt.Felt{
 		ID:        "spin2-rotation-22222222",
-		Title:     "Spin-2 rotation",
+		Name:      "Spin-2 rotation",
 		Status:    felt.StatusClosed,
 		Tags:      []string{"tapestry:spin2_rotation"},
 		CreatedAt: now.Add(time.Minute),
@@ -163,14 +163,14 @@ func TestExportASTRA(t *testing.T) {
 	now := time.Date(2026, 3, 30, 12, 0, 0, 0, time.UTC)
 	simple := &felt.Felt{
 		ID:        "quick-gotcha",
-		Title:     "Quick gotcha",
+		Name:      "Quick gotcha",
 		Status:    felt.StatusClosed,
 		CreatedAt: now,
 		Outcome:   "Not part of ASTRA export.",
 	}
 	analysis := &felt.Felt{
 		ID:          "bao-analysis/damping-prior",
-		Title:       "BAO Damping Prior",
+		Name:        "BAO Damping Prior",
 		Tags:        []string{"tier-1"},
 		Status:      felt.StatusClosed,
 		CreatedAt:   now.Add(time.Minute),

@@ -6,14 +6,14 @@ import (
 	"time"
 )
 
-func makeTestFelt(id, title, status string, deps []string) *Felt {
+func makeTestFelt(id, name, status string, deps []string) *Felt {
 	var d Dependencies
 	for _, id := range deps {
 		d = append(d, Dependency{ID: id})
 	}
 	return &Felt{
 		ID:        id,
-		Title:     title,
+		Name:      name,
 		Status:    status,
 		DependsOn: d,
 		CreatedAt: time.Now(),
@@ -496,10 +496,10 @@ func TestToTextMultipleRoots(t *testing.T) {
 func TestBuildGraphWithLabels(t *testing.T) {
 	felts := []*Felt{
 		{
-			ID: "task-a", Title: "A", Status: StatusOpen, DependsOn: nil, CreatedAt: time.Now(),
+			ID: "task-a", Name: "A", Status: StatusOpen, DependsOn: nil, CreatedAt: time.Now(),
 		},
 		{
-			ID: "task-b", Title: "B", Status: StatusOpen,
+			ID: "task-b", Name: "B", Status: StatusOpen,
 			DependsOn: Dependencies{
 				{ID: "task-a", Label: "needs data"},
 			},
@@ -529,10 +529,10 @@ func TestBuildGraphWithLabels(t *testing.T) {
 func TestToMermaidWithLabels(t *testing.T) {
 	felts := []*Felt{
 		{
-			ID: "task-a", Title: "A", Status: StatusOpen, DependsOn: nil, CreatedAt: time.Now(),
+			ID: "task-a", Name: "A", Status: StatusOpen, DependsOn: nil, CreatedAt: time.Now(),
 		},
 		{
-			ID: "task-b", Title: "B", Status: StatusOpen,
+			ID: "task-b", Name: "B", Status: StatusOpen,
 			DependsOn: Dependencies{
 				{ID: "task-a", Label: "blocks"},
 			},
@@ -551,10 +551,10 @@ func TestToMermaidWithLabels(t *testing.T) {
 func TestToDotWithLabels(t *testing.T) {
 	felts := []*Felt{
 		{
-			ID: "task-a", Title: "A", Status: StatusOpen, DependsOn: nil, CreatedAt: time.Now(),
+			ID: "task-a", Name: "A", Status: StatusOpen, DependsOn: nil, CreatedAt: time.Now(),
 		},
 		{
-			ID: "task-b", Title: "B", Status: StatusOpen,
+			ID: "task-b", Name: "B", Status: StatusOpen,
 			DependsOn: Dependencies{
 				{ID: "task-a", Label: "provides input"},
 			},
@@ -573,10 +573,10 @@ func TestToDotWithLabels(t *testing.T) {
 func TestToTextWithLabels(t *testing.T) {
 	felts := []*Felt{
 		{
-			ID: "task-a", Title: "A", Status: StatusOpen, DependsOn: nil, CreatedAt: time.Now(),
+			ID: "task-a", Name: "A", Status: StatusOpen, DependsOn: nil, CreatedAt: time.Now(),
 		},
 		{
-			ID: "task-b", Title: "B", Status: StatusOpen,
+			ID: "task-b", Name: "B", Status: StatusOpen,
 			DependsOn: Dependencies{
 				{ID: "task-a", Label: "reason"},
 			},

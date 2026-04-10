@@ -40,7 +40,7 @@ func TestFormatSessionOutput(t *testing.T) {
 	// Create test felts
 	activeFelt := &felt.Felt{
 		ID:     "active-task-12345678",
-		Title:  "Active task",
+		Name:   "Active task",
 		Status: felt.StatusActive,
 
 		CreatedAt: now,
@@ -48,7 +48,7 @@ func TestFormatSessionOutput(t *testing.T) {
 
 	openFelt := &felt.Felt{
 		ID:         "open-task-87654321",
-		Title:      "Open task",
+		Name:       "Open task",
 		Status:     felt.StatusOpen,
 		CreatedAt:  now,
 		ModifiedAt: now.Add(-30 * time.Minute),
@@ -56,7 +56,7 @@ func TestFormatSessionOutput(t *testing.T) {
 
 	closedFelt := &felt.Felt{
 		ID:         "closed-task-abcdef12",
-		Title:      "Closed task",
+		Name:       "Closed task",
 		Status:     felt.StatusClosed,
 		CreatedAt:  now.Add(-2 * time.Hour),
 		ClosedAt:   &closedTime,
@@ -115,14 +115,14 @@ func TestFormatSessionOutput_RecentlyTouchedOmitsActive(t *testing.T) {
 
 	active := &felt.Felt{
 		ID:         "active-task-12345678",
-		Title:      "Active task",
+		Name:       "Active task",
 		Status:     felt.StatusActive,
 		CreatedAt:  now,
 		ModifiedAt: now,
 	}
 	closed := &felt.Felt{
 		ID:         "closed-task-87654321",
-		Title:      "Closed task",
+		Name:       "Closed task",
 		Status:     felt.StatusClosed,
 		CreatedAt:  now.Add(-time.Hour),
 		ModifiedAt: now.Add(-time.Minute),
@@ -140,7 +140,7 @@ func TestFormatSessionOutput_IncludesClosedRecentFibers(t *testing.T) {
 
 	closedDepFelt := &felt.Felt{
 		ID:         "closed-dep-12345678",
-		Title:      "Completed prereq",
+		Name:       "Completed prereq",
 		Status:     felt.StatusClosed,
 		CreatedAt:  now.Add(-2 * time.Hour),
 		ClosedAt:   &closedTime,
@@ -149,7 +149,7 @@ func TestFormatSessionOutput_IncludesClosedRecentFibers(t *testing.T) {
 
 	openFelt := &felt.Felt{
 		ID:         "open-task-87654321",
-		Title:      "Fresh open task",
+		Name:       "Fresh open task",
 		Status:     felt.StatusOpen,
 		CreatedAt:  now.Add(time.Minute),
 		ModifiedAt: now.Add(-2 * time.Minute),
@@ -179,7 +179,7 @@ func TestFormatSessionOutput_DirectoryBasedStorageIDs(t *testing.T) {
 
 	closedDep := &felt.Felt{
 		ID:         "foundation/closed-dep",
-		Title:      "Closed dep",
+		Name:       "Closed dep",
 		Status:     felt.StatusClosed,
 		CreatedAt:  now.Add(-2 * time.Hour),
 		ClosedAt:   &closedTime,
@@ -187,13 +187,13 @@ func TestFormatSessionOutput_DirectoryBasedStorageIDs(t *testing.T) {
 	}
 	active := &felt.Felt{
 		ID:        "analysis/active-task",
-		Title:     "Active task",
+		Name:      "Active task",
 		Status:    felt.StatusActive,
 		CreatedAt: now,
 	}
 	open := &felt.Felt{
 		ID:         "analysis/open-task",
-		Title:      "Open task",
+		Name:       "Open task",
 		Status:     felt.StatusOpen,
 		CreatedAt:  now.Add(time.Minute),
 		ModifiedAt: now.Add(-time.Minute),
@@ -229,7 +229,7 @@ func TestFormatSessionOutput_TagLabels(t *testing.T) {
 	// Create fibers with different tags
 	taskFelt := &felt.Felt{
 		ID:     "impl-auth-12345678",
-		Title:  "Implement auth",
+		Name:   "Implement auth",
 		Status: felt.StatusActive,
 
 		CreatedAt: now,
@@ -237,7 +237,7 @@ func TestFormatSessionOutput_TagLabels(t *testing.T) {
 
 	decisionFelt := &felt.Felt{
 		ID:     "design-api-87654321",
-		Title:  "Design REST API",
+		Name:   "Design REST API",
 		Status: felt.StatusOpen,
 		Tags:   []string{"decision"},
 
@@ -246,7 +246,7 @@ func TestFormatSessionOutput_TagLabels(t *testing.T) {
 
 	questionFelt := &felt.Felt{
 		ID:     "research-lib-abcdef12",
-		Title:  "Which library?",
+		Name:   "Which library?",
 		Status: felt.StatusOpen,
 		Tags:   []string{"question"},
 
@@ -282,7 +282,7 @@ func TestFormatFeltTwoLine(t *testing.T) {
 			name: "active - no tags",
 			felt: &felt.Felt{
 				ID:     "impl-auth-12345678",
-				Title:  "Implement auth",
+				Name:   "Implement auth",
 				Status: felt.StatusActive,
 			},
 			expected: "◐ impl-auth-12345678\n    Implement auth\n",
@@ -291,7 +291,7 @@ func TestFormatFeltTwoLine(t *testing.T) {
 			name: "open - decision tag",
 			felt: &felt.Felt{
 				ID:     "design-api-87654321",
-				Title:  "Design REST API",
+				Name:   "Design REST API",
 				Status: felt.StatusOpen,
 				Tags:   []string{"decision"},
 			},
@@ -301,7 +301,7 @@ func TestFormatFeltTwoLine(t *testing.T) {
 			name: "open - spec tag",
 			felt: &felt.Felt{
 				ID:     "api-spec-abcdef12",
-				Title:  "API specification",
+				Name:   "API specification",
 				Status: felt.StatusOpen,
 				Tags:   []string{"spec"},
 			},
@@ -328,7 +328,7 @@ func TestFormatSessionOutput_LimitsRecentlyTouched(t *testing.T) {
 		closedTime := now.Add(-time.Duration(i) * time.Hour)
 		felts = append(felts, &felt.Felt{
 			ID:         fmt.Sprintf("closed-%d-12345678", i),
-			Title:      fmt.Sprintf("Closed task %d", i),
+			Name:       fmt.Sprintf("Closed task %d", i),
 			Status:     felt.StatusClosed,
 			ClosedAt:   &closedTime,
 			CreatedAt:  now.Add(-10 * time.Hour),
@@ -369,7 +369,7 @@ func TestFormatRecentEntry(t *testing.T) {
 			name: "basic closed with outcome",
 			felt: &felt.Felt{
 				ID:       "done-task-12345678",
-				Title:    "Done task",
+				Name:     "Done task",
 				Status:   felt.StatusClosed,
 				Outcome:  "Completed successfully",
 				ClosedAt: &now,
@@ -382,7 +382,7 @@ func TestFormatRecentEntry(t *testing.T) {
 			name: "closed decision with tag label",
 			felt: &felt.Felt{
 				ID:       "decided-12345678",
-				Title:    "Which approach",
+				Name:     "Which approach",
 				Status:   felt.StatusClosed,
 				Tags:     []string{"decision"},
 				Outcome:  "Chose option A because of performance",
@@ -396,7 +396,7 @@ func TestFormatRecentEntry(t *testing.T) {
 			name: "closed without outcome",
 			felt: &felt.Felt{
 				ID:       "no-reason-12345678",
-				Title:    "No reason given",
+				Name:     "No reason given",
 				Status:   felt.StatusClosed,
 				ClosedAt: &now,
 			},
@@ -439,7 +439,7 @@ func TestFormatRecentEntry_TruncatesLongOutcome(t *testing.T) {
 
 	f := &felt.Felt{
 		ID:       "long-reason-12345678",
-		Title:    "Long reason task",
+		Name:     "Long reason task",
 		Outcome:  longOutcome,
 		ClosedAt: &now,
 	}

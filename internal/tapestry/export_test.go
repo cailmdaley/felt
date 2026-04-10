@@ -82,18 +82,18 @@ func TestComputeStaleness(t *testing.T) {
 	felts := []*felt.Felt{
 		{
 			ID:        "a-11111111",
-			Title:     "A",
+			Name:      "A",
 			CreatedAt: now,
 		},
 		{
 			ID:        "b-22222222",
-			Title:     "B",
+			Name:      "B",
 			CreatedAt: now,
 			DependsOn: felt.Dependencies{{ID: "a-11111111"}},
 		},
 		{
 			ID:        "c-33333333",
-			Title:     "C",
+			Name:      "C",
 			CreatedAt: now,
 			DependsOn: felt.Dependencies{{ID: "b-22222222"}},
 		},
@@ -122,16 +122,16 @@ func TestComputeStalenessThroughGroupingNodes(t *testing.T) {
 
 	t.Run("stale through no-evidence grouping node", func(t *testing.T) {
 		felts := []*felt.Felt{
-			{ID: "source-11111111", Title: "Source", CreatedAt: now},
+			{ID: "source-11111111", Name: "Source", CreatedAt: now},
 			{
 				ID:        "group-22222222",
-				Title:     "Group",
+				Name:      "Group",
 				CreatedAt: now,
 				DependsOn: felt.Dependencies{{ID: "source-11111111"}},
 			},
 			{
 				ID:        "leaf-33333333",
-				Title:     "Leaf",
+				Name:      "Leaf",
 				CreatedAt: now,
 				DependsOn: felt.Dependencies{{ID: "group-22222222"}},
 			},
@@ -149,16 +149,16 @@ func TestComputeStalenessThroughGroupingNodes(t *testing.T) {
 
 	t.Run("fresh when transitive upstream evidence is older", func(t *testing.T) {
 		felts := []*felt.Felt{
-			{ID: "source-44444444", Title: "Source", CreatedAt: now},
+			{ID: "source-44444444", Name: "Source", CreatedAt: now},
 			{
 				ID:        "group-55555555",
-				Title:     "Group",
+				Name:      "Group",
 				CreatedAt: now,
 				DependsOn: felt.Dependencies{{ID: "source-44444444"}},
 			},
 			{
 				ID:        "leaf-66666666",
-				Title:     "Leaf",
+				Name:      "Leaf",
 				CreatedAt: now,
 				DependsOn: felt.Dependencies{{ID: "group-55555555"}},
 			},
@@ -176,22 +176,22 @@ func TestComputeStalenessThroughGroupingNodes(t *testing.T) {
 
 	t.Run("stale through multiple no-evidence nodes", func(t *testing.T) {
 		felts := []*felt.Felt{
-			{ID: "source-77777777", Title: "Source", CreatedAt: now},
+			{ID: "source-77777777", Name: "Source", CreatedAt: now},
 			{
 				ID:        "group-88888888",
-				Title:     "Group A",
+				Name:      "Group A",
 				CreatedAt: now,
 				DependsOn: felt.Dependencies{{ID: "source-77777777"}},
 			},
 			{
 				ID:        "group-99999999",
-				Title:     "Group B",
+				Name:      "Group B",
 				CreatedAt: now,
 				DependsOn: felt.Dependencies{{ID: "group-88888888"}},
 			},
 			{
 				ID:        "leaf-00000000",
-				Title:     "Leaf",
+				Name:      "Leaf",
 				CreatedAt: now,
 				DependsOn: felt.Dependencies{{ID: "group-99999999"}},
 			},

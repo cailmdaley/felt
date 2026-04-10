@@ -73,7 +73,7 @@ func TestStorageWriteRead(t *testing.T) {
 
 	f := &Felt{
 		ID:        "test-task",
-		Title:     "Test Task",
+		Name:      "Test Task",
 		Status:    StatusOpen,
 		DependsOn: Dependencies{{ID: "dep-a"}},
 		CreatedAt: time.Now(),
@@ -101,8 +101,8 @@ func TestStorageWriteRead(t *testing.T) {
 	if read.ID != f.ID {
 		t.Errorf("ID = %q, want %q", read.ID, f.ID)
 	}
-	if read.Title != f.Title {
-		t.Errorf("Title = %q, want %q", read.Title, f.Title)
+	if read.Name != f.Name {
+		t.Errorf("Name = %q, want %q", read.Name, f.Name)
 	}
 	if read.Status != f.Status {
 		t.Errorf("Status = %q, want %q", read.Status, f.Status)
@@ -199,7 +199,7 @@ func TestStorageReadMetadataSkipsBody(t *testing.T) {
 
 	f := &Felt{
 		ID:        "test-task",
-		Title:     "Test Task",
+		Name:      "Test Task",
 		Status:    StatusOpen,
 		CreatedAt: time.Now(),
 		Outcome:   "Metadata survives",
@@ -213,8 +213,8 @@ func TestStorageReadMetadataSkipsBody(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadMetadata() error: %v", err)
 	}
-	if read.Title != f.Title {
-		t.Errorf("Title = %q, want %q", read.Title, f.Title)
+	if read.Name != f.Name {
+		t.Errorf("Name = %q, want %q", read.Name, f.Name)
 	}
 	if read.Outcome != f.Outcome {
 		t.Errorf("Outcome = %q, want %q", read.Outcome, f.Outcome)
@@ -283,7 +283,7 @@ func TestStorageFindMetadataSkipsBody(t *testing.T) {
 
 	f := &Felt{
 		ID:        "test-task",
-		Title:     "Test Task",
+		Name:      "Test Task",
 		Status:    StatusOpen,
 		CreatedAt: time.Now(),
 		Outcome:   "Metadata survives",
@@ -447,13 +447,13 @@ func TestStorageFindAmbiguous(t *testing.T) {
 	// Create two felts with similar IDs
 	f1 := &Felt{
 		ID:        "task-2",
-		Title:     "Task 1",
+		Name:      "Task 1",
 		Status:    StatusOpen,
 		CreatedAt: time.Now(),
 	}
 	f2 := &Felt{
 		ID:        "task-3",
-		Title:     "Task 2",
+		Name:      "Task 2",
 		Status:    StatusOpen,
 		CreatedAt: time.Now(),
 	}
@@ -494,7 +494,7 @@ func TestStorageNextAvailableID(t *testing.T) {
 
 	f := &Felt{
 		ID:        "quick-gotcha",
-		Title:     "Quick gotcha",
+		Name:      "Quick gotcha",
 		CreatedAt: time.Now(),
 	}
 	if err := s.Write(f); err != nil {
@@ -519,7 +519,7 @@ func TestStorageFindNestedByBasename(t *testing.T) {
 
 	f := &Felt{
 		ID:        "bao-analysis/damping-prior",
-		Title:     "Damping Prior",
+		Name:      "Damping Prior",
 		CreatedAt: time.Now(),
 	}
 	if err := s.Write(f); err != nil {
@@ -543,8 +543,8 @@ func TestStorageFindPrefersExactIDOverPrefix(t *testing.T) {
 	}
 
 	for _, f := range []*Felt{
-		{ID: "bao-analysis", Title: "BAO Analysis", CreatedAt: time.Now()},
-		{ID: "bao-analysis/damping-prior", Title: "Damping Prior", CreatedAt: time.Now()},
+		{ID: "bao-analysis", Name: "BAO Analysis", CreatedAt: time.Now()},
+		{ID: "bao-analysis/damping-prior", Name: "Damping Prior", CreatedAt: time.Now()},
 	} {
 		if err := s.Write(f); err != nil {
 			t.Fatalf("Write(%s) error: %v", f.ID, err)
@@ -610,24 +610,24 @@ func TestStorageMoveSubtreeRewritesDependencies(t *testing.T) {
 
 	parent := &Felt{
 		ID:        "bao-analysis",
-		Title:     "BAO Analysis",
+		Name:      "BAO Analysis",
 		CreatedAt: time.Now(),
 	}
 	child := &Felt{
 		ID:        "damping-prior",
-		Title:     "Damping Prior",
+		Name:      "Damping Prior",
 		CreatedAt: time.Now(),
 		DependsOn: Dependencies{{ID: "bao-analysis"}},
 	}
 	grandchild := &Felt{
 		ID:        "damping-prior/contour-plot",
-		Title:     "Contour Plot",
+		Name:      "Contour Plot",
 		CreatedAt: time.Now(),
 		DependsOn: Dependencies{{ID: "damping-prior"}},
 	}
 	consumer := &Felt{
 		ID:        "consumer",
-		Title:     "Consumer",
+		Name:      "Consumer",
 		CreatedAt: time.Now(),
 		DependsOn: Dependencies{{ID: "damping-prior/contour-plot"}},
 	}
@@ -679,7 +679,7 @@ func TestStorageMoveSubtreeRejectsSelfNesting(t *testing.T) {
 
 	f := &Felt{
 		ID:        "bao-analysis",
-		Title:     "BAO Analysis",
+		Name:      "BAO Analysis",
 		CreatedAt: time.Now(),
 	}
 	if err := s.Write(f); err != nil {
@@ -803,7 +803,7 @@ Analysis body.
 	// Pre-existing directory fiber with a stale hex dep
 	preExisting := &Felt{
 		ID:        "session-hub",
-		Title:     "Session hub",
+		Name:      "Session hub",
 		CreatedAt: time.Now(),
 		DependsOn: Dependencies{{ID: "bao-analysis-d34db33f"}},
 		Body:      "(session-hub)=\n# Session hub",

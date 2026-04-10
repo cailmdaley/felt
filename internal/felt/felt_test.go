@@ -13,9 +13,6 @@ func TestNew(t *testing.T) {
 		t.Fatalf("New() error: %v", err)
 	}
 
-	if f.Title != "Test Task" {
-		t.Errorf("Title = %q, want %q", f.Title, "Test Task")
-	}
 	if f.Name != "Test Task" {
 		t.Errorf("Name = %q, want %q", f.Name, "Test Task")
 	}
@@ -195,8 +192,8 @@ Some comment here.
 	if f.ID != "test-task" {
 		t.Errorf("ID = %q, want %q", f.ID, "test-task")
 	}
-	if f.Title != "Test Task" {
-		t.Errorf("Title = %q, want %q", f.Title, "Test Task")
+	if f.Name != "Test Task" {
+		t.Errorf("Name = %q, want %q", f.Name, "Test Task")
 	}
 	if f.Status != StatusActive {
 		t.Errorf("Status = %q, want %q", f.Status, StatusActive)
@@ -231,8 +228,8 @@ This body should not be parsed.
 		t.Fatalf("ParseWithMode() error: %v", err)
 	}
 
-	if f.Title != "Test Task" {
-		t.Errorf("Title = %q, want %q", f.Title, "Test Task")
+	if f.Name != "Test Task" {
+		t.Errorf("Name = %q, want %q", f.Name, "Test Task")
 	}
 	if f.Outcome != "Metadata survives" {
 		t.Errorf("Outcome = %q, want %q", f.Outcome, "Metadata survives")
@@ -264,7 +261,7 @@ func TestMarshal(t *testing.T) {
 	now := time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
 	f := &Felt{
 		ID:        "test-task",
-		Title:     "Test Task",
+		Name:      "Test Task",
 		DependsOn: Dependencies{{ID: "dep-1"}},
 		CreatedAt: now,
 		Body:      "Body text here.",
@@ -291,8 +288,8 @@ func TestMarshal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Round-trip Parse() error: %v", err)
 	}
-	if parsed.Title != f.Title {
-		t.Errorf("Round-trip Title = %q, want %q", parsed.Title, f.Title)
+	if parsed.Name != f.Name {
+		t.Errorf("Round-trip Name = %q, want %q", parsed.Name, f.Name)
 	}
 	if parsed.Status != "" {
 		t.Errorf("Round-trip Status = %q, want empty", parsed.Status)
@@ -303,7 +300,7 @@ func TestMarshalLeavesEmptyBodyEmpty(t *testing.T) {
 	now := time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
 	f := &Felt{
 		ID:        "quick-gotcha",
-		Title:     "Quick gotcha",
+		Name:      "Quick gotcha",
 		CreatedAt: now,
 	}
 
@@ -535,7 +532,7 @@ func intPtr(v int) *int {
 func TestJSONOmitsEmptyASTRAFields(t *testing.T) {
 	f := &Felt{
 		ID:        "quick-gotcha",
-		Title:     "Quick gotcha",
+		Name:      "Quick gotcha",
 		CreatedAt: time.Date(2026, 3, 15, 10, 0, 0, 0, time.UTC),
 		Outcome:   "Always single-quote remote commands.",
 	}
@@ -602,7 +599,7 @@ func TestStatusMethods(t *testing.T) {
 }
 
 func TestAppendComment(t *testing.T) {
-	f := &Felt{ID: "test-task", Title: "Test Task", Body: "Initial body."}
+	f := &Felt{ID: "test-task", Name: "Test Task", Body: "Initial body."}
 	f.AppendComment("First comment")
 
 	if !strings.HasPrefix(f.Body, "Initial body.") {
@@ -787,7 +784,7 @@ Body here.
 func TestMarshalTags(t *testing.T) {
 	f := &Felt{
 		ID:        "test-tags",
-		Title:     "Test Tags",
+		Name:      "Test Tags",
 		Status:    StatusOpen,
 		Tags:      []string{"alpha", "beta"},
 		CreatedAt: time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC),
@@ -860,7 +857,7 @@ created-at: 2026-01-01T10:00:00Z
 func TestMarshalMixedDependencies(t *testing.T) {
 	f := &Felt{
 		ID:     "mixed-deps",
-		Title:  "Mixed deps test",
+		Name:   "Mixed deps test",
 		Status: StatusOpen,
 		DependsOn: Dependencies{
 			{ID: "bare-id"},

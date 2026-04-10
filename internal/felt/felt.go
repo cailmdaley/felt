@@ -223,7 +223,6 @@ type ASTRASuccessCriterion struct {
 type Felt struct {
 	ID              string                   `yaml:"-" json:"id"`
 	Name            string                   `yaml:"name" json:"name"`
-	Title           string                   `yaml:"-" json:"-"`
 	Status          string                   `yaml:"status,omitempty" json:"status,omitempty"`
 	Tags            []string                 `yaml:"tags,omitempty" json:"tags,omitempty"`
 	DependsOn       Dependencies             `yaml:"depends-on,omitempty" json:"depends_on,omitempty"`
@@ -275,7 +274,6 @@ func New(slug string, name string) (*Felt, error) {
 	return &Felt{
 		ID:        id,
 		Name:      name,
-		Title:     name,
 		CreatedAt: time.Now(),
 	}, nil
 }
@@ -479,7 +477,6 @@ func parseFrontmatter(id string, frontmatter []byte) (*Felt, error) {
 	f := &Felt{
 		ID:              id,
 		Name:            name,
-		Title:           name,
 		Status:          fm.Status,
 		Tags:            fm.Tags,
 		DependsOn:       fm.DependsOn,
@@ -653,20 +650,12 @@ func (f *Felt) Marshal() ([]byte, error) {
 }
 
 func (f *Felt) canonicalizeName() {
-	if strings.TrimSpace(f.Name) == "" {
-		f.Name = strings.TrimSpace(f.Title)
-	}
-	if strings.TrimSpace(f.Title) == "" {
-		f.Title = strings.TrimSpace(f.Name)
-	}
+	f.Name = strings.TrimSpace(f.Name)
 }
 
-// DisplayName returns the canonical user-facing label during the name-field cutover.
+// DisplayName returns the canonical user-facing label.
 func (f *Felt) DisplayName() string {
-	if strings.TrimSpace(f.Name) != "" {
-		return f.Name
-	}
-	return f.Title
+	return strings.TrimSpace(f.Name)
 }
 
 // HasScaffoldOnlyBody reports whether the body is just the generated MyST scaffold.
