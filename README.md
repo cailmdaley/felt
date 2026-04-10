@@ -151,7 +151,9 @@ felt export --format astra    # writes ./astra.yaml
 felt show <id>                    # full body + metadata
 felt show <id> -d compact         # metadata + outcome + ASTRA counts
 felt show <id> -d summary         # compact + lede paragraph + ASTRA summary
-felt show <id> --body             # body only
+felt show <id> --body             # body + body start line for editing
+felt show <id> --decision cov     # one ASTRA decision as YAML/JSON
+felt show <id> --inputs           # ASTRA inputs only
 ```
 
 ## Tapestry

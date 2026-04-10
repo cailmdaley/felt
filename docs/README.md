@@ -67,13 +67,14 @@ felt show <id> -d compact     # see outcome without full body
 | Level | What you see |
 |---|---|
 | `title` | Title + tags |
-| `compact` | Metadata + outcome, upstream/downstream IDs |
-| `summary` | Compact + lede paragraph, upstream/downstream with titles |
+| `compact` | Metadata + outcome + ASTRA counts |
+| `summary` | Compact + lede paragraph + concise ASTRA summary |
 | `full` | Everything (default) |
 
 ```bash
 felt show <id> -d compact      # "what was decided?"
-felt tree <id> --up -d compact # outcomes of upstream decisions
+felt show <id> --body          # body + start line for editing
+felt show <id> --decisions     # ASTRA decisions only
 ```
 
 ### Tags

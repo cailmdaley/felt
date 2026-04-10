@@ -560,6 +560,53 @@ func splitFrontmatter(content []byte, includeBody bool) ([]byte, string, error) 
 	return frontmatter.Bytes(), body.String(), nil
 }
 
+// BodyStartLine returns the 1-based line number where body editing should
+// begin: the line after frontmatter, skipping a single blank separator line
+// when present.
+func BodyStartLine(content []byte) (int, error) {
+	scanner := bufio.NewScanner(bytes.NewReader(content))
+
+	line := 0
+	if !scanner.Scan() {
+		if err := scanner.Err(); err != nil {
+			return 0, fmt.Errorf("scanning file: %w", err)
+		}
+		return 0, fmt.Errorf("empty file")
+	}
+	line++
+	if strings.TrimSpace(scanner.Text()) != "---" {
+		return 0, fmt.Errorf("file must start with ---")
+	}
+
+	foundClosing := false
+	for scanner.Scan() {
+		line++
+		if strings.TrimSpace(scanner.Text()) == "---" {
+			foundClosing = true
+			break
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return 0, fmt.Errorf("scanning file: %w", err)
+	}
+	if !foundClosing {
+		return 0, fmt.Errorf("unclosed frontmatter (missing closing ---)")
+	}
+
+	bodyStart := line + 1
+	if scanner.Scan() {
+		line++
+		if strings.TrimSpace(scanner.Text()) == "" {
+			bodyStart = line + 1
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return 0, fmt.Errorf("scanning file: %w", err)
+	}
+
+	return bodyStart, nil
+}
+
 // Marshal serializes a Felt to markdown with YAML frontmatter.
 func (f *Felt) Marshal() ([]byte, error) {
 	f.canonicalizeName()

@@ -24,7 +24,7 @@ Fibers are minimal by default. All fields except `name` are optional.
 
 **Status is opt-in.** `felt add <slug> "name"` creates a statusless fiber. `felt add <slug> "name" -s open` enters tracking. `felt edit <id> -s active` enters tracking. `felt ls` only shows tracked fibers.
 
-**Progressive disclosure.** `felt show <id> -d compact` shows metadata + outcome + ASTRA counts. Levels: title, compact, summary, full (default). `felt tree` is the containment hierarchy.
+**Progressive disclosure.** `felt show <id> -d compact` shows metadata + outcome + ASTRA counts. Levels: title, compact, summary, full (default). Targeted views: `felt show <id> --body` prints the body plus its start line; `--decisions`, `--decision`, `--inputs`, and `--insights` expose ASTRA slices directly. `felt tree` is the containment hierarchy.
 
 ## Key integrations
 

@@ -82,6 +82,58 @@ func TestTitleFromSlug(t *testing.T) {
 	}
 }
 
+func TestBodyStartLine(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    int
+	}{
+		{
+			name: "body after blank separator",
+			content: `---
+name: Test
+created-at: 2026-04-10T09:00:00Z
+---
+
+first line
+second line
+`,
+			want: 6,
+		},
+		{
+			name: "body starts immediately after frontmatter",
+			content: `---
+name: Test
+created-at: 2026-04-10T09:00:00Z
+---
+first line
+`,
+			want: 5,
+		},
+		{
+			name: "empty body insertion point",
+			content: `---
+name: Test
+created-at: 2026-04-10T09:00:00Z
+---
+`,
+			want: 5,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := BodyStartLine([]byte(tt.content))
+			if err != nil {
+				t.Fatalf("BodyStartLine() error: %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("BodyStartLine() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestGenerateID(t *testing.T) {
 	tests := []struct {
 		title  string
