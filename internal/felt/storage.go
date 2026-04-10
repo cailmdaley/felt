@@ -727,6 +727,10 @@ func ResolveScopedID(ids []string, scopeID, query string) (string, error) {
 	}
 
 	for _, scope := range scopeChain(scopeID) {
+		// Exact basename match takes priority over prefix matches.
+		if exact, ok := collectScopedExactBasenameMatch(ids, scope, query); ok {
+			return exact, nil
+		}
 		matches := collectScopedBasenameMatches(ids, scope, query)
 		switch len(matches) {
 		case 0:
@@ -798,6 +802,16 @@ func collectPrefixMatches(ids []string, candidate string) []string {
 		}
 	}
 	return matches
+}
+
+func collectScopedExactBasenameMatch(ids []string, scopeID, query string) (string, bool) {
+	for _, id := range ids {
+		cleanID := path.Clean(id)
+		if parentPath(cleanID) == scopeID && path.Base(cleanID) == query {
+			return cleanID, true
+		}
+	}
+	return "", false
 }
 
 func collectScopedBasenameMatches(ids []string, scopeID, query string) []string {

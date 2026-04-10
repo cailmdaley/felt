@@ -631,6 +631,23 @@ func TestResolveScopedIDWalksUpLexicalScopes(t *testing.T) {
 	}
 }
 
+func TestResolveScopedIDPrefersExactBasenameOverPrefix(t *testing.T) {
+	// When a query matches one fiber exactly and others by prefix, the exact match wins.
+	ids := []string{
+		"project/status",
+		"project/status-encoding-color-fog",
+		"project/status-model-tasks-vs-knowledge",
+	}
+
+	got, err := ResolveScopedID(ids, "project/analysis/strip-dead", "status")
+	if err != nil {
+		t.Fatalf("ResolveScopedID() error: %v (should prefer exact match)", err)
+	}
+	if got != "project/status" {
+		t.Fatalf("ResolveScopedID() = %q, want %q", got, "project/status")
+	}
+}
+
 func TestFindProjectRoot(t *testing.T) {
 	// Create a nested directory structure with .felt at the top
 	rootDir := t.TempDir()
