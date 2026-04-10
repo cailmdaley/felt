@@ -66,8 +66,10 @@ Repeat until it feels solid. It does not have to be complete; open questions bel
 When approved:
 
 ```bash
-~/.claude/skills/felt/scripts/ralph <fiber-id> [--backend claude|codex] [-- extra-flags...]
+<skill-dir>/scripts/ralph <fiber-id> [--backend claude|codex] [-- extra-flags...]
 ```
+
+`<skill-dir>` is the installed `felt` skill directory. Resolve it relative to this reference file rather than hard-coding a Claude-only path.
 
 Add `-- --chrome` for visual/frontend work. Session: `ralph-<fiber-id>`. Attach: `tmux attach -t ralph-<fiber-id>`.
 

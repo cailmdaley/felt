@@ -139,7 +139,7 @@ Existing files are not overwritten unless --update is passed.`, strings.Join(bun
 func bundledSkillNames() []string {
 	entries, err := fs.ReadDir(embeddedSkills, "skills")
 	if err != nil {
-		return []string{"constitution", "felt", "ralph"}
+		return []string{"felt", "ralph"}
 	}
 
 	names := make([]string, 0, len(entries))

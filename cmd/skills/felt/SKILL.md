@@ -2,13 +2,12 @@
 name: felt
 description: >
   This skill should be used whenever working in a project that contains a `.felt/` directory, and
-  when the user mentions fibers, asks to "file this", "record a decision", "formalize", "add ASTRA
-  structure", "close this fiber", "sketch a fiber", "think through", "draft a constitution", "set
-  up a ralph", "ralph spec", "ralph", "clean up fibers", "consolidate", "archive", "sweep",
-  "maintenance pass", or "extract from the session". Fibers are directory-contained markdown with
-  optional ASTRA frontmatter; structure accretes as understanding crystallizes. The philosophy
-  and the crafting rhythm below apply whenever the skill is active; the References table points at
-  deeper material for specific activities.
+  when the user mentions fibers or asks to "file this", "record a decision", "formalize", "add
+  ASTRA structure", "close this fiber", "sketch a fiber", "think through", "draft a constitution",
+  "set up a ralph", "ralph spec", "ralph", "clean up fibers", "consolidate", "archive", "sweep",
+  "maintenance pass", or "extract from the session". It covers filing and ASTRA accretion on
+  fibers, session mining, maintenance passes, transcript processing, and drafting ralph
+  constitutions.
 ---
 
 # /felt — Working with Fibers
@@ -86,7 +85,7 @@ Proactive formalization. Retroactive extraction. Consolidation over time. Cohere
 
 ## References
 
-Read the relevant reference when the situation matches. Everything above applies always; references go deeper for specific activities.
+Read the reference that matches the situation. Everything above applies always; references go deeper for specific activities.
 
 | When | Reference |
 |------|-----------|

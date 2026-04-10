@@ -18,9 +18,9 @@ func TestDetectBundledSkillInstall(t *testing.T) {
 		t.Fatalf("empty target should not look installed, got present=%v linked=%v", present, linked)
 	}
 
-	skillDir := filepath.Join(tmp, "constitution")
+	skillDir := filepath.Join(tmp, "felt")
 	if err := os.MkdirAll(skillDir, 0755); err != nil {
-		t.Fatalf("mkdir constitution: %v", err)
+		t.Fatalf("mkdir felt: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("old"), 0644); err != nil {
 		t.Fatalf("write SKILL.md: %v", err)
@@ -40,8 +40,8 @@ func TestRefreshInstalledSkillsUpdatesCopiedSkills(t *testing.T) {
 	t.Setenv("HOME", home)
 
 	target := filepath.Join(home, ".agents", "skills")
-	skillRoot := filepath.Join(target, "constitution")
-	stalePath := filepath.Join(target, "constitution", "scripts", "ralph")
+	skillRoot := filepath.Join(target, "felt")
+	stalePath := filepath.Join(target, "felt", "scripts", "ralph")
 	if err := os.MkdirAll(filepath.Dir(stalePath), 0755); err != nil {
 		t.Fatalf("mkdir stale path: %v", err)
 	}

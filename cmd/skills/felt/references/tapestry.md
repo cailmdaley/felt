@@ -150,4 +150,4 @@ A tapestry grows through phases, and you can't skip them:
 
 3. **Living** — the tapestry continues to grow. New analyses add nodes; shaping keeps the narrative coherent.
 
-A constitution (see `/constitution`) can drive each phase.
+A constitution (see [constitute.md](constitute.md)) can drive each phase.
