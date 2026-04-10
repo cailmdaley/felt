@@ -69,7 +69,7 @@ func init() {
 }
 
 func feltDescription() string {
-	return "felt is a markdown fiber tracker. Fibers are concerns — tasks, decisions, findings — stored in `.felt/` as directory-contained markdown with YAML frontmatter, wikilinks in the body, and optional ASTRA structure.\n\n"
+	return "felt is a markdown fiber tracker. Fibers are concerns — tasks, decisions, findings — stored in `.felt/` as directory-contained markdown with YAML frontmatter. Relationships come from containment by path, `[[wikilinks]]` in the body, and ASTRA `inputs.from` data flow.\n\n"
 }
 
 func minimalOutput() string {
@@ -143,7 +143,7 @@ func formatSessionOutput(felts []*felt.Felt) string {
 }
 
 // formatRecentEntry formats a recently-touched fiber for the hook.
-// Shows status icon, title with tags, and outcome if present.
+// Shows status icon, name with tags, and outcome if present.
 func formatRecentEntry(f *felt.Felt) string {
 	icon := felt.StatusIcon(f.Status)
 
@@ -171,7 +171,7 @@ func formatRecentEntry(f *felt.Felt) string {
 func cliReference() string {
 	return `## CLI
 ` + "```" + `
-felt init                       # initialize .felt/ + myst.yml
+felt init                       # initialize .felt/
 felt <slug> "name"              # create fiber
 felt add <slug> "name" [flags]  # create with status/tags/outcome
 felt edit <id> --status active  # enter tracking / mark active
@@ -192,12 +192,13 @@ felt tree <id>                  # subtree for one fiber
 felt check                      # lint ASTRA/formalization issues
 felt nest <child> <parent>      # move into parent subtree
 felt unnest <child>             # promote back to top level
-felt migrate [--dry-run]        # normalize legacy layout/title/anchors
-felt export --format astra      # write astra.yaml from ASTRA frontmatter
+felt migrate [--dry-run]        # normalize legacy layout/name/anchors
+felt export --format astra      # legacy astra.yaml bridge from ASTRA frontmatter
 Also: hook session, rm, setup, update
 ` + "```" + `
 Statuses: · untracked, ○ open, ◐ active, ● closed
 Detail: title < compact < summary < full (default). Summary shows the **lede** — the first paragraph of the body. Write it to stand alone. ` + "`felt show`" + ` also surfaces indexed citations from wikilinks.
+Relationships: containment by path, narrative ` + "`[[wikilinks]]`" + `, and ASTRA ` + "`inputs.from`" + ` data flow.
 To patch body text (not replace), Read then Edit the fiber markdown file in .felt/<path>/<slug>.md. Nested fibers use path IDs like bao-analysis/damping-prior.
 
 `
@@ -256,6 +257,7 @@ func coreRules() string {
 - **File as you go.** Decisions, questions, detours, bugs you can't chase now — if it might matter, it's a fiber. A missing link in the causal chain costs an investigation; a fiber costs nothing.
 - **Outcomes teach.** The outcome is a one-sentence conclusion — what was learned, decided, or produced. It appears in ` + "`felt ls`" + ` and ` + "`-d compact`" + `, so write it to stand alone. The body carries the full argument.
 - **Formalize while working.** Accrete ASTRA structure as it becomes real: ` + "`decisions:`" + ` when alternatives are rejected, ` + "`inputs:`" + `/` + "`outputs:`" + ` while jobs run, ` + "`insights:`" + ` when claims have evidence.
+- **Use the right relationship surface.** Nest fibers for containment, cite related work with ` + "`[[wikilinks]]`" + `, and use ` + "`inputs.from`" + ` only for computational provenance.
 - **Compose upward.** When closing a fiber, ask: does this lesson belong in a doc fiber or the root fiber? Consolidate breadcrumbs into authoritative fibers. Update the root fiber when project context changes.
 - **CLI for metadata, Read+Edit for content.** ` + "`felt edit`" + ` for status/tags/outcome. Read then Edit ` + "`.felt/<slug>/<slug>.md`" + ` for body text, wikilinks, and ASTRA frontmatter.
 - **Names are concise labels.** Body and outcome carry full content.

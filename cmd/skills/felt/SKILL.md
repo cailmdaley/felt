@@ -13,7 +13,7 @@ description: >
 
 # /felt — Working with Fibers
 
-Fibers are concerns — tasks, decisions, questions, specs — connected in a directed graph. ASTRA is an open specification for computational science: decisions with excluded alternatives, inputs and outputs with recipes, insights backed by evidence. Felt fibers carry ASTRA fields in their frontmatter; the structure accretes as understanding crystallizes.
+Fibers are concerns — tasks, decisions, questions, specs — stored as directory-contained markdown. Their relationships come from three surfaces: containment by path, `[[wikilinks]]` in the body for narrative connection, and ASTRA `inputs.from` for computational provenance. ASTRA is an open specification for computational science: decisions with excluded alternatives, inputs and outputs with recipes, insights backed by evidence. Felt fibers carry ASTRA fields in their frontmatter; the structure accretes as understanding crystallizes.
 
 For literature audits, model the audited paper statement as the `claim` and anchor the supporting `evidence` in the cited source itself with a traceable selector such as a quote, figure, or table. Use audit reports as artifact evidence for your own findings about the audit process, not as substitutes for literature evidence.
 
@@ -33,7 +33,7 @@ Proactive formalization. Retroactive extraction. Consolidation over time. Cohere
 
 **CLAUDE.md stays lean.** Commands, paths, context pointers. Documentation fibers carry the depth.
 
-**Propagate decisions.** A decision rarely touches one place. Use Explore agents to find consequences — config, code, methodology, other fibers. Link every downstream change so impact is traceable.
+**Propagate decisions.** A decision rarely touches one place. Use Explore agents to find consequences — config, code, methodology, other fibers. Record the consequence in code or fibers, and add wikilinks where the narrative connection matters.
 
 ---
 
@@ -85,13 +85,13 @@ Proactive formalization. Retroactive extraction. Consolidation over time. Cohere
 - Generic summaries instead of specific findings
 - "We discussed X" without capturing what was concluded
 - Closing fibers without substantive outcomes
-- Orphan fibers (not linked to anything)
+- Orphan fibers with no containment context, no `[[wikilinks]]`, and no data-flow connection
 - Stale documentation fibers
 
 **Good extraction:**
-- Specific, searchable titles (2-3 words)
+- Specific, searchable names (2-3 words)
 - Full context in outcome
-- DAG links to related fibers
+- Narrative/data-flow links where they carry meaning
 - Documentation fibers created when patterns recur
 
 ---

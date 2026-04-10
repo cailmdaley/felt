@@ -96,11 +96,16 @@ Status is opt-in. Most fibers don't need it. Add `-s open` when something needs 
 ### Tags
 
 ```bash
-felt add covariance-estimation "[pure-eb] Covariance estimation"    # extracted from title
 felt add fix-bug "Fix bug" -t pure-eb -t urgent
 felt edit covariance-estimation --tag note
 felt ls -t pure-eb                        # filter by tag
 felt ls -t tapestry:                      # prefix match
+```
+
+For backward compatibility, felt also extracts `[tag]` prefixes from the slug argument:
+
+```bash
+felt add "[pure-eb] covariance-estimation" "Covariance estimation"
 ```
 
 ### Relationships

@@ -2,7 +2,7 @@
 
 ASTRA (Analysis Specification for Transparent Research Automation) is an open specification for computational science. It gives structure to the things scientists actually decide and discover: which method was chosen and why the alternatives were rejected, what data went in and what came out, what was found and what evidence supports it.
 
-Felt fibers carry ASTRA fields in their YAML frontmatter alongside felt's own fields (`name`, `status`, `tags`, `outcome`, `tempered`). All ASTRA fields are optional — a fiber with just `name` is valid. Fields accrete as understanding crystallizes: write inputs while scripts run, record excluded options the moment you reject them. `felt export --format astra` emits the formalized subset as a standalone ASTRA spec. Downstream tools consume it directly: Prism executes the analysis across decision universes, MySTRA renders it as a live interactive document, Prism-UI visualizes decisions and evidence in VS Code.
+Felt fibers carry ASTRA fields in their YAML frontmatter alongside felt's own fields (`name`, `status`, `tags`, `outcome`, `tempered`). All ASTRA fields are optional — a fiber with just `name` is valid. Fields accrete as understanding crystallizes: write inputs while scripts run, record excluded options the moment you reject them. `felt export --format astra` is a legacy bridge that emits the formalized subset as a standalone ASTRA spec for current consumers such as Prism.
 
 Schema source: `~/Documents/projects/ASTRA/spec/0.1/analysis.schema.json`
 
@@ -312,7 +312,7 @@ felt fields and ASTRA fields coexist in the same frontmatter. felt handles the f
 | — | `insights` | ASTRA-only |
 | — | `inputs`/`outputs` | ASTRA-only data flow |
 
-`felt export --format astra` emits only fibers with at least one ASTRA field. Directory nesting maps to ASTRA `analyses` nesting.
+`felt export --format astra` emits only fibers with at least one ASTRA field. This export is a compatibility bridge for monolithic ASTRA consumers, so felt flattens directory-contained fibers back into the older nested `analyses` structure at export time; the directory tree remains the source of truth.
 
 ---
 

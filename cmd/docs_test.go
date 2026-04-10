@@ -227,6 +227,35 @@ func TestReadmeBundledSkillsMatchEmbeddedSkills(t *testing.T) {
 	if strings.Contains(text, "**tapestry**") {
 		t.Fatal("README lists non-bundled tapestry skill")
 	}
+	if strings.Contains(text, "extracted from title") {
+		t.Fatal("README still documents legacy tag extraction on the name/title argument")
+	}
+}
+
+func TestDocsAvoidLegacyTagExtractionExample(t *testing.T) {
+	root, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(root, "docs", "README.md")); err == nil {
+			break
+		}
+		parent := filepath.Dir(root)
+		if parent == root {
+			t.Fatal("could not find repository docs/README.md")
+		}
+		root = parent
+	}
+
+	data, err := os.ReadFile(filepath.Join(root, "docs", "README.md"))
+	if err != nil {
+		t.Fatalf("read docs/README.md: %v", err)
+	}
+	text := string(data)
+	if strings.Contains(text, "extracted from title") {
+		t.Fatal("docs/README.md still documents legacy tag extraction on the name/title argument")
+	}
 }
 
 func TestEmbeddedBundledSkillsAreSortedAndKnown(t *testing.T) {

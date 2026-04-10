@@ -31,6 +31,12 @@ func TestMinimalOutput(t *testing.T) {
 	if !strings.Contains(output, "## Core Rules") {
 		t.Error("missing core rules section")
 	}
+	if !strings.Contains(output, "Relationships come from containment by path") {
+		t.Error("missing relationship model description")
+	}
+	if !strings.Contains(output, "ASTRA `inputs.from` data flow") {
+		t.Error("missing data-flow relationship description")
+	}
 }
 
 func TestFormatSessionOutput(t *testing.T) {
@@ -97,6 +103,9 @@ func TestFormatSessionOutput(t *testing.T) {
 	// Check core rules
 	if !strings.Contains(output, "## Core Rules") {
 		t.Error("missing core rules section")
+	}
+	if !strings.Contains(output, "Use the right relationship surface") {
+		t.Error("missing relationship-surface rule")
 	}
 }
 

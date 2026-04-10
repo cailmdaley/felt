@@ -83,11 +83,16 @@ felt ls --body "jwt refresh"   # FTS5 body search
 Tags organize fibers across the tree:
 
 ```bash
-felt add fix-covariance-bug "[pure-eb] Fix covariance bug"  # extracted from title
 felt add fix-bug "Fix bug" -t pure-eb -t urgent
 felt edit design-api --tag backend      # add to existing
 felt edit design-api --untag backend    # remove
 felt ls -t pure-eb                      # filter (AND logic)
+```
+
+For backward compatibility, felt also extracts `[tag]` prefixes from the slug argument:
+
+```bash
+felt add "[pure-eb] fix-covariance-bug" "Fix covariance bug"
 ```
 
 ### File Format
