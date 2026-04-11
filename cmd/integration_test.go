@@ -600,10 +600,11 @@ Session body.
 		t.Fatalf("setup codex: expected AGENTS.md snippet, got: %s", cmdOut)
 	}
 
-	rcPath := filepath.Join(codexHome, ".zshrc")
-	rcContent, _ := os.ReadFile(rcPath)
-	if !strings.Contains(string(rcContent), "felt integration") {
-		t.Fatalf("setup codex: wrapper not written to .zshrc")
+	hooksPath := filepath.Join(codexHome, ".codex", "hooks.json")
+	hooksContent, _ := os.ReadFile(hooksPath)
+	text := string(hooksContent)
+	if !strings.Contains(text, "felt hook session") || !strings.Contains(text, "felt hook remind") {
+		t.Fatalf("setup codex: hooks.json missing felt hooks, got: %s", hooksContent)
 	}
 
 	// idempotent
@@ -623,9 +624,9 @@ Session body.
 	if err != nil {
 		t.Fatalf("setup codex uninstall: %v\n%s", err, cmd3Out)
 	}
-	rcContent2, _ := os.ReadFile(rcPath)
-	if strings.Contains(string(rcContent2), "felt integration") {
-		t.Fatalf("setup codex uninstall: wrapper still in .zshrc")
+	hooksContent2, _ := os.ReadFile(hooksPath)
+	if strings.Contains(string(hooksContent2), "felt hook session") || strings.Contains(string(hooksContent2), "felt hook remind") {
+		t.Fatalf("setup codex uninstall: hooks still present in hooks.json")
 	}
 
 	out = mustFelt(t, dir, "--help")

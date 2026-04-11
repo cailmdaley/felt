@@ -52,7 +52,9 @@ var hookRemindCmd = &cobra.Command{
 
 Denies all non-Skill tool calls until the Skill tool has been called (which sets a
 per-session flag file in /tmp). After that, all tools are allowed. Only active in
-directories containing a .felt/ directory.
+directories containing a .felt/ directory. Codex native-hook sessions are exempt:
+they already receive felt context at SessionStart, and the extra deny has proven
+to be needless friction there.
 
 Designed for use as a PreToolUse hook in Claude Code settings.`,
 	Args:         cobra.NoArgs,
@@ -214,12 +216,15 @@ Relationships: directory containment, ` + "`[[wikilinks]]`" + ` in bodies, ASTRA
 }
 
 // runRemindHook gates tool use until /felt is activated.
-// Denies all non-Skill tools until Skill has been called, then allows everything.
+// Claude-style sessions deny all non-Skill tools until Skill has been called, then
+// allow everything. Codex native-hook sessions are allowed through: SessionStart
+// context is already present, and the extra first-tool deny is unnecessary.
 func runRemindHook() error {
 	var input struct {
-		SessionID string `json:"session_id"`
-		ToolName  string `json:"tool_name"`
-		CWD       string `json:"cwd"`
+		SessionID      string `json:"session_id"`
+		ToolName       string `json:"tool_name"`
+		CWD            string `json:"cwd"`
+		TranscriptPath string `json:"transcript_path"`
 	}
 	if err := json.NewDecoder(os.Stdin).Decode(&input); err != nil {
 		return nil // can't parse — silent exit
@@ -239,6 +244,14 @@ func runRemindHook() error {
 	// Skill call: set the flag (gate opens) and allow
 	if input.ToolName == "Skill" {
 		os.WriteFile(flagFile, nil, 0644)
+		return nil
+	}
+
+	// Codex native hooks provide transcript_path. Those sessions already received
+	// felt context at SessionStart, and the extra first-tool deny has proven to be
+	// too strong. Let them proceed without gating.
+	if input.TranscriptPath != "" {
+		_ = os.WriteFile(flagFile, nil, 0644)
 		return nil
 	}
 

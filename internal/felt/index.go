@@ -13,6 +13,7 @@ import (
 )
 
 const indexFileName = "index.db"
+const sqliteBusyTimeout = 5000
 
 type Index struct {
 	db *sql.DB
@@ -39,12 +40,32 @@ func OpenIndex(projectRoot string) (*Index, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite index: %w", err)
 	}
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+	if err := configureIndexDB(db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	idx := &Index{db: db}
 	if err := idx.init(); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
 	return idx, nil
+}
+
+func configureIndexDB(db *sql.DB) error {
+	pragmas := []string{
+		fmt.Sprintf(`PRAGMA busy_timeout = %d`, sqliteBusyTimeout),
+		`PRAGMA journal_mode = WAL`,
+		`PRAGMA synchronous = NORMAL`,
+	}
+	for _, stmt := range pragmas {
+		if _, err := db.Exec(stmt); err != nil {
+			return fmt.Errorf("configure sqlite index: %w", err)
+		}
+	}
+	return nil
 }
 
 func (i *Index) Close() error {

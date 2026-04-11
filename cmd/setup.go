@@ -61,19 +61,22 @@ Use --uninstall to remove the hooks.`,
 var setupCodexCmd = &cobra.Command{
 	Use:   "codex",
 	Short: "Setup Codex integration",
-	Long: `Install a codex() shell wrapper in your RC file.
+	Long: `Install felt hooks into Codex native hooks.json.
 
-The wrapper injects felt context into every Codex session via --config.
-Detects shell from $SHELL (zsh → ~/.zshrc, bash → ~/.bashrc).
+Adds:
+  - SessionStart: felt hook session (shows active/recent fibers)
+  - PreToolUse: felt hook remind (strict on Claude-style payloads, no deny on Codex native hooks)
 
-Use --uninstall to remove it.`,
+Also attempts to remove the legacy codex() shell wrapper if present.
+
+Use --uninstall to remove the hooks.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		uninstall, _ := cmd.Flags().GetBool("uninstall")
 		if uninstall {
-			return uninstallCodexWrapper()
+			return uninstallCodexHooks()
 		}
 		updateSkills, _ := cmd.Flags().GetBool("update-skills")
-		if err := installCodexWrapper(); err != nil {
+		if err := installCodexHooks(); err != nil {
 			return err
 		}
 		fmt.Println()
@@ -117,7 +120,7 @@ var setupSkillsCmd = &cobra.Command{
 func init() {
 	setupClaudeCmd.Flags().Bool("uninstall", false, "Remove felt hooks from Claude Code")
 	setupClaudeCmd.Flags().Bool("update-skills", false, "Update existing skills (overwrites local changes)")
-	setupCodexCmd.Flags().Bool("uninstall", false, "Remove codex wrapper from RC file")
+	setupCodexCmd.Flags().Bool("uninstall", false, "Remove felt hooks from Codex")
 	setupCodexCmd.Flags().Bool("update-skills", false, "Update existing skills (overwrites local changes)")
 	setupSkillsCmd.Flags().String("target", "", "Target directory (default: ~/.claude/skills)")
 	setupSkillsCmd.Flags().Bool("update", false, "Update existing skills (overwrites local changes)")
@@ -396,6 +399,115 @@ func uninstallCodexWrapper() error {
 	}
 
 	fmt.Printf("✓ Removed codex wrapper from %s\n", rcPath)
+	return nil
+}
+
+func codexHooksPath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("getting home directory: %w", err)
+	}
+	return filepath.Join(home, ".codex", "hooks.json"), nil
+}
+
+func installCodexHooks() error {
+	hooksPath, err := codexHooksPath()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(hooksPath), 0755); err != nil {
+		return fmt.Errorf("creating .codex directory: %w", err)
+	}
+
+	settings := make(map[string]interface{})
+	if data, err := os.ReadFile(hooksPath); err == nil {
+		if err := json.Unmarshal(data, &settings); err != nil {
+			return fmt.Errorf("parsing hooks.json: %w", err)
+		}
+	}
+
+	hooks, ok := settings["hooks"].(map[string]interface{})
+	if !ok {
+		hooks = make(map[string]interface{})
+		settings["hooks"] = hooks
+	}
+
+	if addHook(hooks, "SessionStart", "", "felt hook session") {
+		fmt.Println("✓ Added SessionStart hook: felt hook session")
+	} else {
+		fmt.Println("· SessionStart hook already installed")
+	}
+
+	if addHook(hooks, "PreToolUse", "", "felt hook remind") {
+		fmt.Println("✓ Added PreToolUse hook: felt hook remind")
+	} else {
+		fmt.Println("· PreToolUse hook already installed")
+	}
+
+	data, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshaling hooks.json: %w", err)
+	}
+	if err := os.WriteFile(hooksPath, data, 0644); err != nil {
+		return fmt.Errorf("writing hooks.json: %w", err)
+	}
+
+	_ = uninstallCodexWrapper()
+	fmt.Println()
+	fmt.Printf("Hooks: %s\n", hooksPath)
+	fmt.Println("If native hooks are still disabled, run: codex features enable codex_hooks")
+	return nil
+}
+
+func uninstallCodexHooks() error {
+	hooksPath, err := codexHooksPath()
+	if err != nil {
+		return err
+	}
+
+	data, err := os.ReadFile(hooksPath)
+	if err != nil {
+		fmt.Println("No Codex hooks.json found")
+		_ = uninstallCodexWrapper()
+		return nil
+	}
+
+	var settings map[string]interface{}
+	if err := json.Unmarshal(data, &settings); err != nil {
+		return fmt.Errorf("parsing hooks.json: %w", err)
+	}
+
+	hooks, ok := settings["hooks"].(map[string]interface{})
+	if !ok {
+		fmt.Println("No hooks found")
+		_ = uninstallCodexWrapper()
+		return nil
+	}
+
+	removed := false
+	if removeHook(hooks, "SessionStart", "felt hook session") {
+		fmt.Println("✓ Removed SessionStart hook")
+		removed = true
+	}
+	if removeHook(hooks, "PreToolUse", "felt hook remind") {
+		fmt.Println("✓ Removed PreToolUse hook")
+		removed = true
+	}
+
+	if removed {
+		data, err = json.MarshalIndent(settings, "", "  ")
+		if err != nil {
+			return fmt.Errorf("marshaling hooks.json: %w", err)
+		}
+		if err := os.WriteFile(hooksPath, data, 0644); err != nil {
+			return fmt.Errorf("writing hooks.json: %w", err)
+		}
+		fmt.Printf("Hooks: %s\n", hooksPath)
+	} else {
+		fmt.Println("No felt Codex hooks found")
+	}
+
+	_ = uninstallCodexWrapper()
 	return nil
 }
 

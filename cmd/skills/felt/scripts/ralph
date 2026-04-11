@@ -85,19 +85,19 @@ SYSEOF
 
     if [[ "$BACKEND" == "codex" ]]; then
         cat > "$PROMPT_FILE" << 'PROMPTEOF'
-You are inside a ralph loop. Activate the ralph skill ($ralph) and follow it.
+You are inside a ralph loop. Activate the ralph skill ($ralph) and the felt skill ($felt) before anything else, then follow them.
 
 Survey, then exploit the warm world-model. Check `ralph-context-usage` at natural stopping points; below `50%` continue, at or above `50%` look for a handoff.
 
-If you make changes, commit, activate the felt skill ($felt), then `kill $PPID`.
+If you make changes, commit, keep filing into felt as you go, then `kill $PPID`.
 PROMPTEOF
     else
         cat > "$PROMPT_FILE" << 'PROMPTEOF'
-You are inside a ralph loop. Activate the ralph skill (/ralph) and follow it.
+You are inside a ralph loop. Activate the ralph skill (/ralph) and the felt skill (/felt) before anything else, then follow them.
 
 Survey, then exploit the warm world-model. Check `ralph-context-usage` at natural stopping points; below `50%` continue, at or above `50%` look for a handoff.
 
-If you make changes, commit, activate the felt skill (/felt), then `kill $PPID`.
+If you make changes, commit, keep filing into felt as you go, then `kill $PPID`.
 PROMPTEOF
     fi
 

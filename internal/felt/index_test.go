@@ -1,8 +1,8 @@
 package felt
 
 import (
-	"testing"
 	"time"
+	"testing"
 )
 
 func TestIndexSyncBuildsCitationsAndFTS(t *testing.T) {
@@ -239,5 +239,66 @@ func TestIndexSyncReindexesWhenTargetDeletionChangesScopedResolution(t *testing.
 	}
 	if len(afterRoot) != 1 || afterRoot[0].SourceID != "project/analysis" {
 		t.Fatalf("Citations(question) after delete = %#v, want source project/analysis", afterRoot)
+	}
+}
+
+func TestOpenIndexWaitsForConcurrentWriter(t *testing.T) {
+	dir := t.TempDir()
+	storage := NewStorage(dir)
+	if err := storage.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	baseTime := time.Date(2026, 4, 10, 9, 0, 0, 0, time.UTC)
+	if err := storage.Write(&Felt{
+		ID:        "fiber-a",
+		Name:      "Fiber A",
+		CreatedAt: baseTime,
+	}); err != nil {
+		t.Fatalf("Write(fiber-a) error: %v", err)
+	}
+
+	idx, err := storage.OpenIndex()
+	if err != nil {
+		t.Fatalf("OpenIndex() error: %v", err)
+	}
+	defer idx.Close()
+
+	if _, err := idx.db.Exec(`BEGIN IMMEDIATE`); err != nil {
+		t.Fatalf("BEGIN IMMEDIATE error: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = idx.db.Exec(`ROLLBACK`)
+	})
+
+	if err := storage.Write(&Felt{
+		ID:        "fiber-b",
+		Name:      "Fiber B",
+		CreatedAt: baseTime.Add(time.Minute),
+	}); err != nil {
+		t.Fatalf("Write(fiber-b) error: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		second, err := storage.OpenIndex()
+		if err == nil {
+			err = second.Close()
+		}
+		done <- err
+	}()
+
+	time.Sleep(150 * time.Millisecond)
+	if _, err := idx.db.Exec(`COMMIT`); err != nil {
+		t.Fatalf("COMMIT error: %v", err)
+	}
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("concurrent OpenIndex() error: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("concurrent OpenIndex() did not complete after writer released lock")
 	}
 }

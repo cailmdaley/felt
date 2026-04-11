@@ -1,13 +1,62 @@
 package cmd
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/cailmdaley/felt/internal/felt"
 )
+
+func runRemindHookWithInput(t *testing.T, input map[string]string) string {
+	t.Helper()
+
+	data, err := json.Marshal(input)
+	if err != nil {
+		t.Fatalf("marshal input: %v", err)
+	}
+
+	oldStdin := os.Stdin
+	oldStdout := os.Stdout
+	defer func() {
+		os.Stdin = oldStdin
+		os.Stdout = oldStdout
+	}()
+
+	stdinR, stdinW, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("stdin pipe: %v", err)
+	}
+	stdoutR, stdoutW, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("stdout pipe: %v", err)
+	}
+
+	if _, err := stdinW.Write(data); err != nil {
+		t.Fatalf("write stdin payload: %v", err)
+	}
+	_ = stdinW.Close()
+
+	os.Stdin = stdinR
+	os.Stdout = stdoutW
+
+	if err := runRemindHook(); err != nil {
+		t.Fatalf("runRemindHook() error: %v", err)
+	}
+
+	_ = stdoutW.Close()
+	out, err := io.ReadAll(stdoutR)
+	if err != nil {
+		t.Fatalf("read stdout: %v", err)
+	}
+	return string(bytes.TrimSpace(out))
+}
 
 func TestMinimalOutput(t *testing.T) {
 	output := minimalOutput()
@@ -308,6 +357,72 @@ func TestFormatFeltTwoLine(t *testing.T) {
 				t.Errorf("formatFeltTwoLine() = %q, want %q", result, tt.expected)
 			}
 		})
+	}
+}
+
+func TestRunRemindHook_DeniesClaudeUntilSkillActivated(t *testing.T) {
+	dir := t.TempDir()
+	storage := felt.NewStorage(dir)
+	if err := storage.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	sessionID := "claude-session"
+	flagFile := filepath.Join(os.TempDir(), "felt-reminded-"+sessionID)
+	_ = os.Remove(flagFile)
+	t.Cleanup(func() { _ = os.Remove(flagFile) })
+
+	out := runRemindHookWithInput(t, map[string]string{
+		"session_id": sessionID,
+		"tool_name":  "Bash",
+		"cwd":        dir,
+	})
+	if !strings.Contains(out, `"permissionDecision":"deny"`) {
+		t.Fatalf("expected deny output, got %q", out)
+	}
+
+	out = runRemindHookWithInput(t, map[string]string{
+		"session_id": sessionID,
+		"tool_name":  "Skill",
+		"cwd":        dir,
+	})
+	if out != "" {
+		t.Fatalf("Skill tool should pass silently, got %q", out)
+	}
+
+	out = runRemindHookWithInput(t, map[string]string{
+		"session_id": sessionID,
+		"tool_name":  "Bash",
+		"cwd":        dir,
+	})
+	if out != "" {
+		t.Fatalf("expected gate open after Skill, got %q", out)
+	}
+}
+
+func TestRunRemindHook_AllowsCodexSessionsWithoutDeny(t *testing.T) {
+	dir := t.TempDir()
+	storage := felt.NewStorage(dir)
+	if err := storage.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	sessionID := "codex-session"
+	flagFile := filepath.Join(os.TempDir(), "felt-reminded-"+sessionID)
+	_ = os.Remove(flagFile)
+	t.Cleanup(func() { _ = os.Remove(flagFile) })
+
+	out := runRemindHookWithInput(t, map[string]string{
+		"session_id":      sessionID,
+		"tool_name":       "exec_command",
+		"cwd":             dir,
+		"transcript_path": "/tmp/codex-transcript.jsonl",
+	})
+	if out != "" {
+		t.Fatalf("codex session should not be denied, got %q", out)
+	}
+	if _, err := os.Stat(flagFile); err != nil {
+		t.Fatalf("expected codex session to mark reminder flag, stat error: %v", err)
 	}
 }
 
