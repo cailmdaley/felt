@@ -74,11 +74,6 @@ Targeted views:
 
 		storage := felt.NewStorage(root)
 		scopeID := resolveCommandScope(root)
-		idx, err := storage.OpenIndex()
-		if err != nil {
-			return err
-		}
-		defer idx.Close()
 
 		// Targeted views: full single-file read, optionally structured output.
 		if selectorCount > 0 || jsonOutput {
@@ -91,6 +86,11 @@ Targeted views:
 				return outputShowBody(storage, f)
 			}
 			if showCitations {
+				idx, err := storage.OpenIndex()
+				if err != nil {
+					return err
+				}
+				defer idx.Close()
 				citations, err := idx.Citations(f.ID)
 				if err != nil {
 					return err
@@ -98,6 +98,11 @@ Targeted views:
 				return outputShowSelection(citations)
 			}
 			if showConsumers {
+				idx, err := storage.OpenIndex()
+				if err != nil {
+					return err
+				}
+				defer idx.Close()
 				consumers, err := idx.Consumers(f.ID)
 				if err != nil {
 					return err
@@ -144,13 +149,23 @@ Targeted views:
 			graph.Nodes[f.ID] = f
 		}
 
-		citations, err := idx.Citations(f.ID)
-		if err != nil {
-			return err
-		}
-		consumers, err := idx.Consumers(f.ID)
-		if err != nil {
-			return err
+		var citations []felt.Citation
+		var consumers []felt.DataFlowConsumer
+		if detail == DepthSummary || detail == DepthFull {
+			idx, err := storage.OpenIndex()
+			if err != nil {
+				return err
+			}
+			defer idx.Close()
+
+			citations, err = idx.Citations(f.ID)
+			if err != nil {
+				return err
+			}
+			consumers, err = idx.Consumers(f.ID)
+			if err != nil {
+				return err
+			}
 		}
 
 		fmt.Print(renderFelt(f, graph, detail, citations, consumers))

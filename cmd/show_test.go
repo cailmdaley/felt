@@ -38,6 +38,9 @@ func TestShowBodyIncludesStartLine(t *testing.T) {
 	if !strings.Contains(out, "first line\nsecond line") {
 		t.Fatalf("show --body missing body:\n%s", out)
 	}
+	if _, err := os.Stat(dir + "/.felt/index.db"); !os.IsNotExist(err) {
+		t.Fatalf("show --body should not create index.db, stat err = %v", err)
+	}
 }
 
 func TestShowBodyJSONIncludesStartLine(t *testing.T) {
@@ -71,6 +74,39 @@ func TestShowBodyJSONIncludesStartLine(t *testing.T) {
 	}
 	if got := payload["body"]; got != "body text" {
 		t.Fatalf("body = %#v, want %q", got, "body text")
+	}
+	if _, err := os.Stat(dir + "/.felt/index.db"); !os.IsNotExist(err) {
+		t.Fatalf("show --body --json should not create index.db, stat err = %v", err)
+	}
+}
+
+func TestShowCompactDoesNotCreateIndexWhenNotNeeded(t *testing.T) {
+	dir := t.TempDir()
+	storage := felt.NewStorage(dir)
+	if err := storage.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+	if err := storage.Write(&felt.Felt{
+		ID:        "fiber-a",
+		Name:      "Fiber A",
+		CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z"),
+		Outcome:   "Compact view should stay file-backed.",
+	}); err != nil {
+		t.Fatalf("Write() error: %v", err)
+	}
+
+	reset := saveShowGlobals()
+	defer reset()
+
+	out, err := runCommand(t, dir, "show", "fiber-a", "-d", "compact")
+	if err != nil {
+		t.Fatalf("show -d compact: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "Outcome:  Compact view should stay file-backed.") {
+		t.Fatalf("show -d compact output mismatch:\n%s", out)
+	}
+	if _, err := os.Stat(dir + "/.felt/index.db"); !os.IsNotExist(err) {
+		t.Fatalf("show -d compact should not create index.db, stat err = %v", err)
 	}
 }
 
