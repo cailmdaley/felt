@@ -36,6 +36,10 @@ changelog:
       - "^docs:"
       - "^test:"
 
+# Homebrew tap publishing is only for releases cut from the public
+# cailmdaley/felt repo. Releases cut from LightconeResearch/felt must not
+# publish to the public tap; skip the brews stage entirely when the release
+# isn't originating from the public repo.
 brews:
   - repository:
       owner: cailmdaley
@@ -49,3 +53,4 @@ brews:
       system "#{bin}/felt", "--help"
     install: |
       bin.install "felt"
+    skip_upload: '{{ if ne .Env.GITHUB_REPOSITORY "cailmdaley/felt" }}true{{ else }}false{{ end }}'

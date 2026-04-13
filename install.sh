@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-REPO="cailmdaley/felt"
+REPO="${FELT_REPO:-cailmdaley/felt}"
 
 # Default: ~/.local/bin (no sudo needed). Override with FELT_INSTALL_DIR.
 if [ -n "${FELT_INSTALL_DIR:-}" ]; then
