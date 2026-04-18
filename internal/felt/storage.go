@@ -597,9 +597,18 @@ func (s *Storage) listFiberFiles() ([]fiberFile, error) {
 		return nil, fmt.Errorf("resolving .felt path: %w", err)
 	}
 	var files []fiberFile
+	visited := map[string]struct{}{}
 	var walkFn func(walkRoot string) error
 	walkFn = func(walkRoot string) error {
-		return filepath.WalkDir(walkRoot, func(fullPath string, d fs.DirEntry, walkErr error) error {
+		walkRootResolved, err := filepath.EvalSymlinks(walkRoot)
+		if err != nil {
+			return nil // skip unresolvable roots
+		}
+		if _, seen := visited[walkRootResolved]; seen {
+			return nil
+		}
+		visited[walkRootResolved] = struct{}{}
+		return filepath.WalkDir(walkRootResolved, func(fullPath string, d fs.DirEntry, walkErr error) error {
 			if walkErr != nil {
 				return walkErr
 			}
@@ -614,7 +623,7 @@ func (s *Storage) listFiberFiles() ([]fiberFile, error) {
 					return nil
 				}
 				if info.IsDir() {
-					return walkFn(fullPath)
+					return walkFn(target)
 				}
 			}
 			if d.IsDir() || !strings.HasSuffix(d.Name(), FileExt) {
