@@ -19,13 +19,17 @@ var (
 	editBody    string
 	editOutcome string
 
-	editDecision  string
-	editLabel     string
-	editRationale string
-	editDefault   string
-	editOptions   []string
-	editInputs    []string
-	editInsights  []string
+	editDecision        string
+	editLabel           string
+	editRationale       string
+	editDefault         string
+	editOptions         []string
+	editOptionIDs       []string
+	editOptionLabels    []string
+	editOptionExcluded  []string
+	editOptionReasons   []string
+	editInputs          []string
+	editInsights        []string
 )
 
 var editCmd = &cobra.Command{
@@ -71,6 +75,10 @@ Examples:
 			cmd.Flags().Changed("rationale") ||
 			cmd.Flags().Changed("default") ||
 			cmd.Flags().Changed("option") ||
+			cmd.Flags().Changed("option-id") ||
+			cmd.Flags().Changed("option-label") ||
+			cmd.Flags().Changed("option-excluded") ||
+			cmd.Flags().Changed("option-reason") ||
 			cmd.Flags().Changed("input") ||
 			cmd.Flags().Changed("insight")
 
@@ -165,8 +173,12 @@ Examples:
 
 func init() {
 	rootCmd.AddCommand(editCmd)
+	initEditFlags()
+}
 
-	// Edit command flags
+// initEditFlags registers (or re-registers) edit's flag set. Exposed so tests
+// can ResetFlags() between invocations to clear Changed state.
+func initEditFlags() {
 	editCmd.Flags().StringVar(&editName, "name", "", "Set name")
 	editCmd.Flags().StringVarP(&editStatus, "status", "s", "", "Set status (open, active, closed)")
 	editCmd.Flags().StringArrayVarP(&editTags, "tag", "t", nil, "Add tag(s) (repeatable; comma-separated accepted)")
@@ -178,7 +190,11 @@ func init() {
 	editCmd.Flags().StringVar(&editLabel, "label", "", "Set the label for --decision")
 	editCmd.Flags().StringVar(&editRationale, "rationale", "", "Set the rationale for --decision")
 	editCmd.Flags().StringVar(&editDefault, "default", "", "Set the selected option ID for --decision")
-	editCmd.Flags().StringArrayVar(&editOptions, "option", nil, "Add/update a decision option: id:label[:excluded[:reason]] (repeatable, requires --decision)")
+	editCmd.Flags().StringArrayVar(&editOptions, "option", nil, "Add/update a decision option: id:label[:excluded[:reason]] (repeatable, requires --decision). Use \\: for a literal colon and \\\\ for a literal backslash inside any field. For labels with many special characters, prefer --option-id/--option-label/--option-excluded/--option-reason.")
+	editCmd.Flags().StringArrayVar(&editOptionIDs, "option-id", nil, "Structured form: decision option ID (repeatable; position-correlated with --option-label/--option-excluded/--option-reason, requires --decision)")
+	editCmd.Flags().StringArrayVar(&editOptionLabels, "option-label", nil, "Structured form: decision option label (repeatable; must match --option-id count)")
+	editCmd.Flags().StringArrayVar(&editOptionExcluded, "option-excluded", nil, "Structured form: excluded flag per option (true/false/yes/no/included/excluded; repeatable, optional)")
+	editCmd.Flags().StringArrayVar(&editOptionReasons, "option-reason", nil, "Structured form: excluded reason per option (repeatable, optional)")
 	editCmd.Flags().StringArrayVar(&editInputs, "input", nil, "Add/update an input: id[:type[:from[:description]]] (repeatable)")
 	editCmd.Flags().StringArrayVar(&editInsights, "insight", nil, "Add/update an insight: id:claim (repeatable)")
 }
@@ -186,10 +202,18 @@ func init() {
 // splitTags splits comma-separated tag input into individual tags.
 // "claim, tapestry:foo" -> ["claim", "tapestry:foo"]
 func applyStructuredEditFlags(cmd *cobra.Command, f *felt.Felt) error {
-	if cmd.Flags().Changed("label") || cmd.Flags().Changed("rationale") || cmd.Flags().Changed("default") || cmd.Flags().Changed("option") {
+	structuredOptionChanged := cmd.Flags().Changed("option-id") ||
+		cmd.Flags().Changed("option-label") ||
+		cmd.Flags().Changed("option-excluded") ||
+		cmd.Flags().Changed("option-reason")
+	if cmd.Flags().Changed("label") || cmd.Flags().Changed("rationale") || cmd.Flags().Changed("default") || cmd.Flags().Changed("option") || structuredOptionChanged {
 		if !cmd.Flags().Changed("decision") {
-			return fmt.Errorf("--label, --rationale, --default, and --option require --decision")
+			return fmt.Errorf("--label, --rationale, --default, --option, and --option-* require --decision")
 		}
+	}
+
+	if cmd.Flags().Changed("option") && structuredOptionChanged {
+		return fmt.Errorf("mix of --option and --option-id/--option-label/--option-excluded/--option-reason: pick one form (compact --option with \\: escapes, or the structured --option-* flags)")
 	}
 
 	if cmd.Flags().Changed("decision") {
@@ -222,6 +246,18 @@ func applyStructuredEditFlags(cmd *cobra.Command, f *felt.Felt) error {
 				decision.Options[id] = option
 			}
 		}
+		if structuredOptionChanged {
+			if decision.Options == nil {
+				decision.Options = map[string]felt.ASTRADecisionOption{}
+			}
+			ids, options, err := parseStructuredDecisionOptions(editOptionIDs, editOptionLabels, editOptionExcluded, editOptionReasons)
+			if err != nil {
+				return err
+			}
+			for i, id := range ids {
+				decision.Options[id] = options[i]
+			}
+		}
 		f.Decisions[decisionID] = decision
 	}
 
@@ -252,9 +288,12 @@ func applyStructuredEditFlags(cmd *cobra.Command, f *felt.Felt) error {
 }
 
 func parseDecisionOption(raw string) (string, felt.ASTRADecisionOption, error) {
-	parts := strings.SplitN(raw, ":", 4)
+	parts, err := splitEscapedColon(raw, 4)
+	if err != nil {
+		return "", felt.ASTRADecisionOption{}, fmt.Errorf("invalid --option %q: %w", raw, err)
+	}
 	if len(parts) < 2 {
-		return "", felt.ASTRADecisionOption{}, fmt.Errorf("invalid --option %q: want id:label[:excluded[:reason]]", raw)
+		return "", felt.ASTRADecisionOption{}, fmt.Errorf("invalid --option %q: want id:label[:excluded[:reason]] (use \\: for a literal colon)", raw)
 	}
 
 	id := strings.TrimSpace(parts[0])
@@ -265,14 +304,11 @@ func parseDecisionOption(raw string) (string, felt.ASTRADecisionOption, error) {
 
 	option := felt.ASTRADecisionOption{Label: label}
 	if len(parts) >= 3 && strings.TrimSpace(parts[2]) != "" {
-		switch strings.ToLower(strings.TrimSpace(parts[2])) {
-		case "excluded", "true", "yes":
-			option.Excluded = true
-		case "included", "false", "no":
-			option.Excluded = false
-		default:
-			return "", felt.ASTRADecisionOption{}, fmt.Errorf("invalid --option %q: third field must be excluded/true/yes or included/false/no", raw)
+		excluded, err := parseExcludedFlag(parts[2])
+		if err != nil {
+			return "", felt.ASTRADecisionOption{}, fmt.Errorf("invalid --option %q: %w", raw, err)
 		}
+		option.Excluded = excluded
 	}
 	if len(parts) == 4 {
 		option.ExcludedReason = strings.TrimSpace(parts[3])
@@ -281,6 +317,99 @@ func parseDecisionOption(raw string) (string, felt.ASTRADecisionOption, error) {
 		option.Excluded = true
 	}
 	return id, option, nil
+}
+
+// splitEscapedColon splits s on unescaped ':' up to `max` parts (matching
+// strings.SplitN semantics), then unescapes `\:` → `:` and `\\` → `\` in each
+// resulting field. A trailing lone `\` is rejected.
+func splitEscapedColon(s string, max int) ([]string, error) {
+	var parts []string
+	var cur strings.Builder
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c == '\\' {
+			if i+1 >= len(s) {
+				return nil, fmt.Errorf("trailing backslash has no escaped character")
+			}
+			next := s[i+1]
+			switch next {
+			case ':', '\\':
+				cur.WriteByte(next)
+				i++
+			default:
+				// Preserve unknown escape sequences literally (forward-compatible).
+				cur.WriteByte(c)
+				cur.WriteByte(next)
+				i++
+			}
+			continue
+		}
+		if c == ':' && (max <= 0 || len(parts)+1 < max) {
+			parts = append(parts, cur.String())
+			cur.Reset()
+			continue
+		}
+		cur.WriteByte(c)
+	}
+	parts = append(parts, cur.String())
+	return parts, nil
+}
+
+// parseExcludedFlag interprets the user-facing excluded indicator.
+func parseExcludedFlag(raw string) (bool, error) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", "included", "false", "no":
+		return false, nil
+	case "excluded", "true", "yes":
+		return true, nil
+	default:
+		return false, fmt.Errorf("excluded field must be excluded/true/yes or included/false/no, got %q", raw)
+	}
+}
+
+// parseStructuredDecisionOptions correlates the parallel --option-* flag
+// arrays by position. ids and labels are required and must match in length;
+// excluded and reasons, when provided, must not exceed len(ids).
+func parseStructuredDecisionOptions(ids, labels, excluded, reasons []string) ([]string, []felt.ASTRADecisionOption, error) {
+	if len(ids) == 0 {
+		return nil, nil, fmt.Errorf("--option-id is required when using the structured option form")
+	}
+	if len(labels) != len(ids) {
+		return nil, nil, fmt.Errorf("--option-label count (%d) must match --option-id count (%d)", len(labels), len(ids))
+	}
+	if len(excluded) > len(ids) {
+		return nil, nil, fmt.Errorf("--option-excluded count (%d) exceeds --option-id count (%d)", len(excluded), len(ids))
+	}
+	if len(reasons) > len(ids) {
+		return nil, nil, fmt.Errorf("--option-reason count (%d) exceeds --option-id count (%d)", len(reasons), len(ids))
+	}
+
+	outIDs := make([]string, len(ids))
+	opts := make([]felt.ASTRADecisionOption, len(ids))
+	for i := range ids {
+		id := strings.TrimSpace(ids[i])
+		label := strings.TrimSpace(labels[i])
+		if id == "" || label == "" {
+			return nil, nil, fmt.Errorf("--option-id and --option-label must be non-empty (position %d)", i)
+		}
+		opt := felt.ASTRADecisionOption{Label: label}
+		if i < len(excluded) {
+			flag, err := parseExcludedFlag(excluded[i])
+			if err != nil {
+				return nil, nil, fmt.Errorf("--option-excluded[%d]: %w", i, err)
+			}
+			opt.Excluded = flag
+		}
+		if i < len(reasons) {
+			opt.ExcludedReason = strings.TrimSpace(reasons[i])
+		}
+		if opt.ExcludedReason != "" {
+			opt.Excluded = true
+		}
+		outIDs[i] = id
+		opts[i] = opt
+	}
+	return outIDs, opts, nil
 }
 
 func parseInputSpec(raw string) (felt.ASTRAInput, error) {
