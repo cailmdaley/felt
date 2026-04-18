@@ -387,6 +387,136 @@ func TestShowCitationsSelectorOutputsStructuredResults(t *testing.T) {
 	}
 }
 
+func TestShowFullIncludesAllASTRASections(t *testing.T) {
+	dir := t.TempDir()
+	storage := felt.NewStorage(dir)
+	if err := storage.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+	if err := storage.Write(&felt.Felt{
+		ID:        "fiber-a",
+		Name:      "Fiber A",
+		CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z"),
+		Outcome:   "Shipped.",
+		Body:      "Body paragraph.",
+		Inputs: []felt.ASTRAInput{
+			{ID: "catalog", Type: "data", From: "upstream.posterior", Description: "Posterior sample"},
+		},
+		Outputs: []felt.ASTRAOutput{
+			{ID: "posterior", Type: "data", Description: "MCMC posterior"},
+		},
+		Decisions: map[string]felt.ASTRADecision{
+			"covariance": {
+				Label:   "Covariance method",
+				Default: "glass",
+				Options: map[string]felt.ASTRADecisionOption{
+					"glass": {Label: "GLASS mocks"},
+					"analytic": {
+						Label:          "Analytic covariance",
+						Excluded:       true,
+						ExcludedReason: "underestimates tails",
+					},
+				},
+			},
+		},
+		Insights: map[string]felt.ASTRAInsight{
+			"stability": {Claim: "Posterior is stable to jackknife choice."},
+		},
+	}); err != nil {
+		t.Fatalf("Write() error: %v", err)
+	}
+
+	reset := saveShowGlobals()
+	defer reset()
+
+	out, err := runCommand(t, dir, "show", "fiber-a", "-d", "full")
+	if err != nil {
+		t.Fatalf("show -d full: %v\n%s", err, out)
+	}
+
+	// Metadata + outcome must still be present.
+	for _, want := range []string{
+		"ID:       fiber-a",
+		"Outcome:  Shipped.",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("show -d full missing %q:\n%s", want, out)
+		}
+	}
+
+	// Decisions section with option + excluded flag.
+	for _, want := range []string{
+		"Decisions:",
+		"covariance",
+		"Covariance method",
+		"default: glass",
+		"analytic",
+		"excluded_reason: underestimates tails",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("show -d full missing decision detail %q:\n%s", want, out)
+		}
+	}
+
+	// Inputs / Outputs / Insights sections.
+	for _, want := range []string{
+		"Inputs:",
+		"catalog",
+		"from: upstream.posterior",
+		"Outputs:",
+		"posterior",
+		"Insights:",
+		"stability",
+		"claim: Posterior is stable to jackknife choice.",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("show -d full missing ASTRA section %q:\n%s", want, out)
+		}
+	}
+
+	// Body still included.
+	if !strings.Contains(out, "Body paragraph.") {
+		t.Errorf("show -d full missing body:\n%s", out)
+	}
+}
+
+func TestShowCompactDoesNotIncludeDecisionDetails(t *testing.T) {
+	dir := t.TempDir()
+	storage := felt.NewStorage(dir)
+	if err := storage.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+	if err := storage.Write(&felt.Felt{
+		ID:        "fiber-a",
+		Name:      "Fiber A",
+		CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z"),
+		Decisions: map[string]felt.ASTRADecision{
+			"covariance": {
+				Label: "Covariance method",
+				Options: map[string]felt.ASTRADecisionOption{
+					"glass": {Label: "GLASS mocks"},
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("Write() error: %v", err)
+	}
+
+	reset := saveShowGlobals()
+	defer reset()
+
+	out, err := runCommand(t, dir, "show", "fiber-a", "-d", "compact")
+	if err != nil {
+		t.Fatalf("show -d compact: %v\n%s", err, out)
+	}
+	if strings.Contains(out, "Decisions:\n") {
+		t.Fatalf("show -d compact should not render full Decisions: section:\n%s", out)
+	}
+	if !strings.Contains(out, "ASTRA:") {
+		t.Fatalf("show -d compact should render ASTRA count line:\n%s", out)
+	}
+}
+
 func TestResolveCommandScopeFindsNearestFiberDirectory(t *testing.T) {
 	dir := t.TempDir()
 	storage := felt.NewStorage(dir)

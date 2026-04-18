@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/cailmdaley/felt/internal/felt"
@@ -196,10 +197,146 @@ func renderFull(f *felt.Felt, g *felt.Graph, citations []felt.Citation, consumer
 	if f.Outcome != "" {
 		fmt.Fprintf(&sb, "Outcome:  %s\n", f.Outcome)
 	}
+	writeASTRADetails(&sb, f)
 	if f.Body != "" {
 		fmt.Fprintf(&sb, "\n%s\n", f.Body)
 	}
 	return sb.String()
+}
+
+// writeASTRADetails writes the full ASTRA tiers (decisions, inputs, outputs,
+// insights) for the `full` detail level. Unlike writeASTRASkeleton, this
+// preserves every field so `-d full` is truly "everything".
+func writeASTRADetails(sb *strings.Builder, f *felt.Felt) {
+	if len(f.Decisions) > 0 {
+		sb.WriteString("\nDecisions:\n")
+		// Sort decision IDs for deterministic output.
+		ids := make([]string, 0, len(f.Decisions))
+		for id := range f.Decisions {
+			ids = append(ids, id)
+		}
+		sort.Strings(ids)
+		for _, id := range ids {
+			d := f.Decisions[id]
+			fmt.Fprintf(sb, "  %s", id)
+			if d.Label != "" {
+				fmt.Fprintf(sb, " — %s", d.Label)
+			}
+			sb.WriteString("\n")
+			if d.Default != "" {
+				fmt.Fprintf(sb, "    default: %s\n", d.Default)
+			}
+			if d.Rationale != "" {
+				fmt.Fprintf(sb, "    rationale: %s\n", d.Rationale)
+			}
+			if len(d.Options) > 0 {
+				optIDs := make([]string, 0, len(d.Options))
+				for oid := range d.Options {
+					optIDs = append(optIDs, oid)
+				}
+				sort.Strings(optIDs)
+				sb.WriteString("    options:\n")
+				for _, oid := range optIDs {
+					opt := d.Options[oid]
+					marker := "  "
+					if opt.Excluded {
+						marker = "✗ "
+					} else if oid == d.Default {
+						marker = "→ "
+					}
+					fmt.Fprintf(sb, "      %s%s", marker, oid)
+					if opt.Label != "" {
+						fmt.Fprintf(sb, ": %s", opt.Label)
+					}
+					sb.WriteString("\n")
+					if opt.Description != "" {
+						fmt.Fprintf(sb, "          description: %s\n", opt.Description)
+					}
+					if opt.ExcludedReason != "" {
+						fmt.Fprintf(sb, "          excluded_reason: %s\n", opt.ExcludedReason)
+					} else if opt.Excluded {
+						fmt.Fprintf(sb, "          excluded: true\n")
+					}
+				}
+			}
+		}
+	}
+
+	if len(f.Inputs) > 0 {
+		sb.WriteString("\nInputs:\n")
+		for _, inp := range f.Inputs {
+			fmt.Fprintf(sb, "  %s", inp.ID)
+			if inp.Type != "" {
+				fmt.Fprintf(sb, " (%s)", inp.Type)
+			}
+			sb.WriteString("\n")
+			if inp.From != "" {
+				fmt.Fprintf(sb, "    from: %s\n", inp.From)
+			}
+			if inp.Source != "" {
+				fmt.Fprintf(sb, "    source: %s\n", inp.Source)
+			}
+			if inp.Checksum != "" {
+				fmt.Fprintf(sb, "    checksum: %s\n", inp.Checksum)
+			}
+			if inp.Description != "" {
+				fmt.Fprintf(sb, "    description: %s\n", inp.Description)
+			}
+		}
+	}
+
+	if len(f.Outputs) > 0 {
+		sb.WriteString("\nOutputs:\n")
+		for _, out := range f.Outputs {
+			fmt.Fprintf(sb, "  %s", out.ID)
+			if out.Type != "" {
+				fmt.Fprintf(sb, " (%s)", out.Type)
+			}
+			sb.WriteString("\n")
+			if out.Description != "" {
+				fmt.Fprintf(sb, "    description: %s\n", out.Description)
+			}
+			if out.Recipe != nil && out.Recipe.Command != "" {
+				fmt.Fprintf(sb, "    command: %s\n", out.Recipe.Command)
+			}
+		}
+	}
+
+	if len(f.Insights) > 0 {
+		sb.WriteString("\nInsights:\n")
+		ids := make([]string, 0, len(f.Insights))
+		for id := range f.Insights {
+			ids = append(ids, id)
+		}
+		sort.Strings(ids)
+		for _, id := range ids {
+			ins := f.Insights[id]
+			fmt.Fprintf(sb, "  %s", id)
+			sb.WriteString("\n")
+			if ins.Claim != "" {
+				fmt.Fprintf(sb, "    claim: %s\n", ins.Claim)
+			}
+			if ins.Scope != "" {
+				fmt.Fprintf(sb, "    scope: %s\n", ins.Scope)
+			}
+			if len(ins.Tags) > 0 {
+				fmt.Fprintf(sb, "    tags: %s\n", strings.Join(ins.Tags, ", "))
+			}
+			if ins.Notes != "" {
+				fmt.Fprintf(sb, "    notes: %s\n", ins.Notes)
+			}
+			if len(ins.Evidence) > 0 {
+				fmt.Fprintf(sb, "    evidence: %d entr%s\n", len(ins.Evidence), pluralY(len(ins.Evidence)))
+			}
+		}
+	}
+}
+
+func pluralY(n int) string {
+	if n == 1 {
+		return "y"
+	}
+	return "ies"
 }
 
 func writeCitations(sb *strings.Builder, citations []felt.Citation) {
