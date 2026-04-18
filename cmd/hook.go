@@ -215,6 +215,21 @@ Relationships: directory containment, ` + "`[[wikilinks]]`" + ` in bodies, ASTRA
 `
 }
 
+// isClaudeCodeTranscript reports whether the given transcript path belongs to a
+// Claude Code session (under ~/.claude/projects/). Used to separate Claude Code
+// from Codex native hooks, since both provide transcript_path.
+func isClaudeCodeTranscript(path string) bool {
+	if path == "" {
+		return false
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return false
+	}
+	prefix := filepath.Join(home, ".claude", "projects") + string(filepath.Separator)
+	return strings.HasPrefix(path, prefix)
+}
+
 // runRemindHook gates tool use until /felt is activated.
 // Claude-style sessions deny all non-Skill tools until Skill has been called, then
 // allow everything. Codex native-hook sessions are allowed through: SessionStart
@@ -247,10 +262,12 @@ func runRemindHook() error {
 		return nil
 	}
 
-	// Codex native hooks provide transcript_path. Those sessions already received
-	// felt context at SessionStart, and the extra first-tool deny has proven to be
-	// too strong. Let them proceed without gating.
-	if input.TranscriptPath != "" {
+	// Codex native-hook sessions don't need the first-tool deny — they already
+	// receive felt context at SessionStart, and the extra friction proved too strong.
+	// Detect Codex by transcript_path NOT living under ~/.claude/projects/ (which
+	// is Claude Code's transcript dir). An empty transcript_path also counts as
+	// non-Claude.
+	if !isClaudeCodeTranscript(input.TranscriptPath) {
 		_ = os.WriteFile(flagFile, nil, 0644)
 		return nil
 	}
