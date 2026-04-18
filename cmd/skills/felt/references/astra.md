@@ -6,6 +6,16 @@ Felt fibers carry ASTRA fields in their YAML frontmatter alongside felt's own fi
 
 Schema source: `~/Documents/projects/ASTRA/spec/0.1/analysis.schema.json`
 
+### A note on YAML quoting
+
+When hand-editing ASTRA frontmatter (decisions, insights, rationales, claims), wrap any string value that contains a colon-space (`: `), a leading `- `, `#`, `[`, `{`, `!`, `&`, `*`, or a line break in double quotes. YAML's flow syntax treats unquoted colons as map separators, so a claim like `Channels open design space: mailboxes, webhooks, cron` silently reparses as a broken nested mapping. Prefer:
+
+```yaml
+claim: "Channels open design space: mailboxes, webhooks, cron"
+```
+
+The ASCII em-dash (`—`) is safe; the bullet dash (`-`) at the start of a value is not. When in doubt, quote. `felt check` will surface the YAML parse error but not always on the exact offending line.
+
 ---
 
 ## Top-Level Fields

@@ -129,12 +129,14 @@ Stay and shepherd computation through. Don't exit and hope the next iteration pi
 
 ## Exit
 
-**NEVER close the constitution in an iteration where you made changes.** If you committed code, edited files, migrated data, or wrote anything — you MUST `kill $PPID` and let the next iteration verify with fresh eyes. This is non-negotiable. The whole point of the loop is that no iteration grades its own work.
+Closing the constitution fiber (`felt edit <fiber-id> -s closed`) stops the loop — no further iterations will run. So the closing decision is reserved for a cold survey that finds nothing left to do.
 
-- **Made changes this iteration** → `kill $PPID`. Period.
+**If you made any changes this iteration, you may not close the constitution fiber.** Commit, file fibers, `kill $PPID` — let the next iteration survey with fresh eyes and decide whether to close. This is the only hard rule on exit.
+
+Making changes does NOT mean you should exit early. Keep working while the context is warm — make as many changes as belong in this iteration. The rule only constrains *closing the fiber*, not the length of the iteration. See "Earn the vantage point" above for when to actually exit.
+
+- **Made changes this iteration** → `kill $PPID` when the warm context is spent. Do not close the fiber.
 - **Survey found zero remaining work AND you made zero changes** → close: `felt edit <fiber-id> -s closed -o "..."`.
-
-The temptation is to survey, do all the work, re-check, and declare victory. Resist it. You don't get to verify your own output.
 
 ---
 
