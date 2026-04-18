@@ -125,23 +125,17 @@ The session hook's advisory failed, so we made it enforcing. The PreToolUse hook
 
 This works. The agent hits the wall, activates the skill, then has the full felt context for the rest of the session. Progressive disclosure achieved: session hook provides fiber state, skill provides methodology. The cost is bluntness — it blocks the first tool call, which feels jarring.
 
-### Level 4: Stop hook conscience (small model as nudge)
+### Level 4: Channel-based idle nudge (previously: Stop hook conscience)
 
-The newest experiment, and the most instructive. A small model (Haiku 4.5) reviews each turn and nudges toward filing when decisions or insights slip by unrecorded.
+The goal at this level is a small-model or rule-based watcher that recognizes when decisions or insights are slipping by unrecorded and nudges toward filing.
 
-We tested three implementations, each revealing different constraints in Claude Code's hook system:
+Our first iteration was an async Stop-hook conscience running haiku against the transcript. The design claimed "exit 2 + stderr wakes the model asynchronously" — but empirical testing on Claude Code v2.1.109 showed that **async Stop hooks do NOT actually wake the model**. Only synchronous Stop hooks honor exit 2, and those block the user while the hook runs. The conscience appeared to work because it mostly exits QUIET (exit 0); the broken wake path was rarely exercised.
 
-**4a. Prompt hook** (`type: "prompt"`). Built-in, fast (~1s), no external process. But by *talking to haiku through the hook* — iteratively updating the prompt to ask it about its own experience — we discovered it receives only 7 JSON fields, and `last_assistant_message` contains **only the final prose text**, not tool calls, file edits, or commands. Haiku reported 47 characters of prose from a turn with multiple tool calls and file writes. Without visibility into what actually happened, the conscience can't judge.
+The working mechanism is **Channels** (v2.1.80+, research preview): a local MCP server declares the `claude/channel` capability, watches the session's transcript, and pushes `notifications/claude/channel` events into the running session as `<channel source="...">` tags. Non-blocking, in-session, no exit-code gymnastics.
 
-**4b. Agent hook** (`type: "agent"`). Has tool access — can Read the transcript file directly. But it blocks the session, ~10+ seconds of frozen UI. Unacceptable.
+The current reference implementation is a watcher-internal channel that fires a `/felt` directive after 4 minutes of transcript inactivity — hitting the prompt-cache window (5-min TTL) so formalization runs cheaply even on abandoned sessions. Each claude process spawns its own MCP subprocess; addressing is by parent PID, which the SessionStart hook writes to a registry file so the MCP server can find its own session's transcript.
 
-**4c. Async command hook** (`type: "command"` with `"async": true`). The current winner. A shell script reads the JSONL transcript, extracts recent tool calls, and pipes context to `claude -p --model haiku`. If haiku has a nudge: exit 2 + stderr wakes the main model asynchronously. If nothing to say: exit 0, silence.
-
-The `async` flag is the key discovery — a hook that runs in the background but can still wake the model when it has something to say. The ~5s haiku call is invisible to the user; the nudge arrives naturally.
-
-More moving parts than a prompt hook (shell script, transcript parsing, external CLI call). But it sees everything — tool calls, file paths, commands — and the async delivery means zero UX cost.
-
-**Talking to a stateless model.** We ran a diagnostic loop, iteratively updating the prompt hook to ask haiku what it sees, what fields it receives, whether it remembers previous firings. Each response taught us something; we updated the prompt for the next firing. The state accumulated in the prompt text, not in the model. This pattern — conversation via prompt iteration — may be useful beyond this specific application.
+See the `hook-architecture-exploration/idle-formalize-channel` fiber for the design tree and the [Channels docs](https://code.claude.com/docs/en/channels) for the underlying primitive.
 
 ### The landscape
 
@@ -149,14 +143,9 @@ These levels stack. Our current setup:
 - CLAUDE.md provides baseline instructions
 - Session hook injects fiber state
 - PreToolUse gate enforces skill activation
-- Async Stop conscience nudges toward ASTRA formalization
+- Channel-based idle nudge pushes /felt into idle sessions before the cache expires
 
-The gate (level 3) solved the activation problem definitively. The conscience (level 4) is still being calibrated — we're not sure which implementation is best, and the prompt engineering for the small model matters a lot. This is active research.
-
-Open questions:
-- Can the main model cooperate by leaving structured summaries in its prose for a lightweight prompt hook to read? (Avoids the transcript-parsing complexity.)
-- Should the conscience have memory across firings? (Currently stateless — each firing is fresh.)
-- Is there a middle ground between "prompt hook sees nothing useful" and "command hook reads the whole transcript"?
+The gate (level 3) solved the activation problem definitively. The channel-based nudge (level 4) delivers reliable wake-ups without blocking; what's still being tuned is *what* triggers the nudge (pure idle timer today; could become transcript-content-aware).
 
 ## For the Lightcone team
 
@@ -166,10 +155,10 @@ Felt is one implementation. The ASTRA spec is the shared language. The pieces th
 
 2. **Frontmatter is the source of truth.** No separate spec file to maintain. Structure accretes in the fibers as work happens.
 
-3. **The context injection ladder is transferable.** Session context, tool gating, LLM conscience — these patterns work with any tool that speaks Claude Code hooks.
+3. **The context injection ladder is transferable.** Session context, tool gating, idle nudges — these patterns work with any tool that speaks Claude Code hooks or Channels.
 
-4. **The conscience prompt is the interesting part.** Teaching a small fast model to recognize ASTRA-worthy moments is a prompt engineering problem independent of felt. The `async` flag makes it practical.
+4. **Channels, not async Stop hooks, for out-of-band session messages.** Async Stop hook exit codes don't actually steer the model; Channels (v2.1.80+) are the supported mechanism for pushing events into a running session.
 
-5. **Hook types have sharp constraints.** Prompt hooks: fast, blind to tool calls. Agent hooks: full visibility, blocks the session. Async command hooks: full visibility, non-blocking, more moving parts. Worth understanding for anyone building agent-integrated tooling on Claude Code.
+5. **Hook types have sharp constraints.** Prompt hooks: fast, blind to tool calls. Agent hooks: full visibility, blocks the session. Sync command hooks: can steer the model via exit 2 but block the user. Async command hooks: non-blocking but their output is advisory-only. For anything that needs to reach a waiting session without blocking, use Channels.
 
-Status: experimental. The gate works. The conscience is promising. Working prototype of the full stack deployed and tested.
+Status: experimental. The gate works. The channel-based idle nudge works. Working prototype of the full stack deployed and tested.

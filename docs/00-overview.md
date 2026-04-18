@@ -10,7 +10,7 @@ After the UX meeting on March 31 with François, Liam, and Alexandre, this week 
 
 - **felt v2** — Directory-based fibers with ASTRA-compatible frontmatter. Consolidated CLI (~22 → ~10 commands). `felt export --format astra` produces valid specs from the fiber tree. Deployed across three projects: pure-eb (1,130 fibers), portolan, and felt itself.
 
-- **Context injection ladder** — Four levels for getting AI agents to actually use felt during sessions: static instructions (CLAUDE.md), session hooks (fiber state injection), PreToolUse gate (deny tools until skill activated), and an async Stop conscience (small model nudges toward filing). The gate works definitively; the conscience is experimental.
+- **Context injection ladder** — Four levels for getting AI agents to actually use felt during sessions: static instructions (CLAUDE.md), session hooks (fiber state injection), PreToolUse gate (deny tools until skill activated), and a channel-based idle nudge (MCP-delivered /felt directive before the prompt cache expires). The gate works definitively; the idle nudge is the current generalization of an earlier async Stop-hook conscience that turned out not to actually wake the model.
 
 - **Citation graph** — Built a working ASTRA-style citation graph for the UNIONS B-modes paper. 51 citations audited against source papers, converted into claim/evidence structures. Surfaced a gap in the ASTRA spec: unpublished local manuscripts need first-class evidence support (ASTRA issue #53).
 

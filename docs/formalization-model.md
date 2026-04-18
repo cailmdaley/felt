@@ -54,5 +54,5 @@ The tier ladder resolves several of the meeting's open questions:
 
 **Progressive disclosure in the viewer.** The tier determines what the viewer shows. Tempered fibers form the spine. Formalized fibers fill in methodology. Annotated fibers are available on demand but don't clutter the primary view.
 
-**Agent context injection.** The conscience hook can ask a specific question: "You just made a decision; did you record the excluded alternative?" The tier ladder gives the nudge a vocabulary. Not "did you file?" but "this looks like a decision at the annotated tier; does it have enough structure to formalize?"
+**Agent context injection.** An idle-nudge channel can ask a specific question: "You just made a decision; did you record the excluded alternative?" The tier ladder gives the nudge a vocabulary. Not "did you file?" but "this looks like a decision at the annotated tier; does it have enough structure to formalize?"
 
