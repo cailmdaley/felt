@@ -86,9 +86,20 @@ func (s *Storage) Exists() bool {
 	return err == nil && info.IsDir()
 }
 
-// Path returns the full path for a felt file.
+// Path returns the full path for a felt file. Top-level fibers may live in
+// "bare" form at .felt/<slug>.md — the shape that appears through loom symlinks
+// where ~/loom/.felt/<project>/<project>.md is viewed from inside the project
+// as .felt/<project>.md. Path prefers the bare form when it exists; otherwise
+// it returns the directory form .felt/<slug>/<slug>.md.
 func (s *Storage) Path(id string) string {
-	slug := filepath.Base(filepath.Clean(id))
+	id = filepath.ToSlash(filepath.Clean(id))
+	slug := path.Base(id)
+	if !strings.Contains(id, "/") {
+		bare := filepath.Join(s.root, slug+FileExt)
+		if _, err := os.Stat(bare); err == nil {
+			return bare
+		}
+	}
 	return filepath.Join(s.root, filepath.FromSlash(id), slug+FileExt)
 }
 
@@ -336,6 +347,13 @@ func (s *Storage) MigrateFlatFiles(dryRun bool) (*MigrationResult, error) {
 			path:  filepath.Join(s.root, name),
 			felt:  f,
 		})
+	}
+
+	// A single bare .md at .felt/ root is the entry-point fiber, not legacy —
+	// preserve it. Multiple bare files are orphaned flat-format fibers needing
+	// a home, so migrate them to <slug>/<slug>.md form.
+	if len(legacy) == 1 {
+		return &MigrationResult{}, nil
 	}
 
 	result := &MigrationResult{Entries: make([]MigrationEntry, 0, len(legacy))}
@@ -659,10 +677,13 @@ func (s *Storage) listFiberFiles() ([]fiberFile, error) {
 func fiberIDFromRelativePath(rel string) (string, bool) {
 	rel = filepath.Clean(rel)
 	dir := filepath.Dir(rel)
-	if dir == "." {
-		return "", false
-	}
 	base := strings.TrimSuffix(filepath.Base(rel), FileExt)
+	// Bare top-level fiber: <slug>.md at the .felt/ root. This appears through
+	// loom symlinks — the same file is ~/loom/.felt/<slug>/<slug>.md from the
+	// monorepo view. Slug is the filename stem.
+	if dir == "." {
+		return base, true
+	}
 	if filepath.Base(dir) != base {
 		return "", false
 	}

@@ -313,3 +313,72 @@ func TestCheckLegacyFormatSkipsMalformedFrontmatter(t *testing.T) {
 		t.Fatalf("CheckLegacyFormat() issues = %#v, want none", issues)
 	}
 }
+
+func TestCheckStructureMultipleBareFibers(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStorage(dir)
+	s.Init()
+
+	os.WriteFile(filepath.Join(s.root, "alpha.md"), []byte("---\nname: alpha\n---\n"), 0644)
+	os.WriteFile(filepath.Join(s.root, "beta.md"), []byte("---\nname: beta\n---\n"), 0644)
+
+	issues, err := CheckStructure(s)
+	if err != nil {
+		t.Fatalf("CheckStructure: %v", err)
+	}
+	if len(issues) != 1 || issues[0].Level != CheckLevelError {
+		t.Fatalf("issues = %+v, want 1 error", issues)
+	}
+	if !strings.Contains(issues[0].Message, "multiple bare fiber files") {
+		t.Fatalf("message = %q, want multiple-bare error", issues[0].Message)
+	}
+}
+
+func TestCheckStructureSlugCollision(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStorage(dir)
+	s.Init()
+
+	// Bare + nested with same slug.
+	os.WriteFile(filepath.Join(s.root, "cmbx.md"), []byte("---\nname: bare\n---\n"), 0644)
+	nestedDir := filepath.Join(s.root, "cmbx")
+	os.MkdirAll(nestedDir, 0755)
+	os.WriteFile(filepath.Join(nestedDir, "cmbx.md"), []byte("---\nname: nested\n---\n"), 0644)
+
+	issues, err := CheckStructure(s)
+	if err != nil {
+		t.Fatalf("CheckStructure: %v", err)
+	}
+	found := false
+	for _, i := range issues {
+		if strings.Contains(i.Message, "slug collision") {
+			found = true
+			if i.Level != CheckLevelError {
+				t.Errorf("collision level = %q, want error", i.Level)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("no slug-collision issue reported, got: %+v", issues)
+	}
+}
+
+func TestCheckStructureCleanRepo(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStorage(dir)
+	s.Init()
+
+	// Single bare root + a nested non-colliding child — clean.
+	os.WriteFile(filepath.Join(s.root, "cmbx.md"), []byte("---\nname: root\n---\n"), 0644)
+	childDir := filepath.Join(s.root, "background")
+	os.MkdirAll(childDir, 0755)
+	os.WriteFile(filepath.Join(childDir, "background.md"), []byte("---\nname: bg\n---\n"), 0644)
+
+	issues, err := CheckStructure(s)
+	if err != nil {
+		t.Fatalf("CheckStructure: %v", err)
+	}
+	if len(issues) != 0 {
+		t.Fatalf("issues = %+v, want none", issues)
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"path/filepath"
 	"sort"
 	"strings"
 )
@@ -118,6 +119,68 @@ func checkDecisions(f *Felt) []CheckIssue {
 		}
 	}
 	return issues
+}
+
+// CheckStructure inspects the .felt/ layout for structural problems:
+// slug collisions between bare (<slug>.md) and nested (<slug>/<slug>.md)
+// fiber forms, and multiple bare .md files at .felt/ root (which would mean
+// .felt/ itself does not have a single entry-point fiber).
+func CheckStructure(s *Storage) ([]CheckIssue, error) {
+	root, err := filepath.EvalSymlinks(s.root)
+	if err != nil {
+		return nil, fmt.Errorf("resolving .felt path: %w", err)
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return nil, fmt.Errorf("reading .felt directory: %w", err)
+	}
+
+	var bareSlugs []string
+	bareSet := map[string]struct{}{}
+	nestedSet := map[string]struct{}{}
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() {
+			nestedPath := filepath.Join(root, name, name+FileExt)
+			if info, err := os.Stat(nestedPath); err == nil && !info.IsDir() {
+				nestedSet[name] = struct{}{}
+			}
+			continue
+		}
+		if name == MystConfigName || !strings.HasSuffix(name, FileExt) {
+			continue
+		}
+		slug := strings.TrimSuffix(name, FileExt)
+		bareSlugs = append(bareSlugs, slug)
+		bareSet[slug] = struct{}{}
+	}
+
+	var issues []CheckIssue
+	if len(bareSlugs) > 1 {
+		sort.Strings(bareSlugs)
+		issues = append(issues, CheckIssue{
+			Level:   CheckLevelError,
+			FiberID: ".",
+			Message: fmt.Sprintf("multiple bare fiber files at .felt/ root: %s — at most one (the entry-point fiber) is allowed", strings.Join(bareSlugs, ", ")),
+		})
+	}
+	for slug := range bareSet {
+		if _, nested := nestedSet[slug]; nested {
+			issues = append(issues, CheckIssue{
+				Level:   CheckLevelError,
+				FiberID: slug,
+				Message: fmt.Sprintf("slug collision: both bare .felt/%s.md and nested .felt/%s/%s.md exist", slug, slug, slug),
+			})
+		}
+	}
+
+	sort.Slice(issues, func(i, j int) bool {
+		if issues[i].FiberID != issues[j].FiberID {
+			return issues[i].FiberID < issues[j].FiberID
+		}
+		return issues[i].Message < issues[j].Message
+	})
+	return issues, nil
 }
 
 // CheckLegacyFormat inspects raw fiber files for storage-model residue that

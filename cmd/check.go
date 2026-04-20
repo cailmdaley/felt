@@ -23,7 +23,9 @@ Current checks cover:
   - insights without evidence
   - evidence stubs without description or anchors
   - closed fibers with unselected decisions
-  - inconsistent ASTRA formalization depth across siblings`,
+  - inconsistent ASTRA formalization depth across siblings
+  - slug collisions between bare and nested fiber forms
+  - multiple bare .md files at .felt/ root`,
 	Args:         cobra.NoArgs,
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -39,6 +41,11 @@ Current checks cover:
 		}
 
 		issues := felt.Check(felts)
+		structureIssues, err := felt.CheckStructure(storage)
+		if err != nil {
+			return err
+		}
+		issues = append(issues, structureIssues...)
 		legacyIssues, err := felt.CheckLegacyFormat(storage)
 		if err != nil {
 			return err

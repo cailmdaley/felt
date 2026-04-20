@@ -873,22 +873,60 @@ created-at: 2026-03-15T10:00:00Z
 
 Body.
 `
+	// Two bare files are legacy; migrate moves both.
 	if err := os.WriteFile(filepath.Join(s.root, "quick-gotcha-deadbeef.md"), []byte(legacy), 0644); err != nil {
 		t.Fatalf("write legacy: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(s.root, "other-note-cafe0001.md"), []byte(legacy), 0644); err != nil {
+		t.Fatalf("write legacy 2: %v", err)
 	}
 
 	result, err := s.MigrateFlatFiles(true)
 	if err != nil {
 		t.Fatalf("MigrateFlatFiles(true) error: %v", err)
 	}
-	if len(result.Entries) != 1 || result.Entries[0].NewID != "quick-gotcha" {
-		t.Fatalf("dry-run entries = %#v", result.Entries)
+	if len(result.Entries) != 2 {
+		t.Fatalf("dry-run entries = %#v, want 2", result.Entries)
 	}
 	if _, err := os.Stat(filepath.Join(s.root, "quick-gotcha-deadbeef.md")); err != nil {
 		t.Fatalf("dry-run should keep legacy file: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(s.root, "quick-gotcha", "quick-gotcha.md")); !os.IsNotExist(err) {
 		t.Fatalf("dry-run should not create migrated directory, err=%v", err)
+	}
+}
+
+func TestStorageMigrateSingleBareFilePreservedAsEntryPoint(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStorage(dir)
+	if err := s.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	// A single bare .md at .felt/ root is the entry-point fiber (loom-view
+	// shape of ~/loom/.felt/<project>/<project>.md). Do not migrate it.
+	entry := `---
+name: Project root
+---
+
+Root narrative.
+`
+	if err := os.WriteFile(filepath.Join(s.root, "cmbx.md"), []byte(entry), 0644); err != nil {
+		t.Fatalf("write entry: %v", err)
+	}
+
+	result, err := s.MigrateFlatFiles(false)
+	if err != nil {
+		t.Fatalf("MigrateFlatFiles: %v", err)
+	}
+	if len(result.Entries) != 0 {
+		t.Fatalf("entries = %+v, want none (single bare root preserved)", result.Entries)
+	}
+	if _, err := os.Stat(filepath.Join(s.root, "cmbx.md")); err != nil {
+		t.Fatalf("bare root should be preserved: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(s.root, "cmbx", "cmbx.md")); !os.IsNotExist(err) {
+		t.Fatalf("should not have migrated bare root to dir form, err=%v", err)
 	}
 }
 
@@ -899,7 +937,8 @@ func TestStorageMigrateRewritesPreExistingDirectoryInputs(t *testing.T) {
 		t.Fatalf("Init() error: %v", err)
 	}
 
-	// Flat file that will be migrated
+	// Flat files that will be migrated (two so migration runs — a single bare
+	// file would be preserved as the entry-point fiber).
 	legacy := `---
 title: BAO Analysis
 created-at: 2026-03-16T10:00:00Z
@@ -909,6 +948,9 @@ Analysis body.
 `
 	if err := os.WriteFile(filepath.Join(s.root, "bao-analysis-d34db33f.md"), []byte(legacy), 0644); err != nil {
 		t.Fatalf("write legacy: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(s.root, "other-note-cafe0002.md"), []byte(legacy), 0644); err != nil {
+		t.Fatalf("write legacy 2: %v", err)
 	}
 
 	// Pre-existing directory fiber with a stale hex input ref
@@ -927,8 +969,8 @@ Analysis body.
 	if err != nil {
 		t.Fatalf("MigrateFlatFiles() error: %v", err)
 	}
-	if len(result.Entries) != 1 {
-		t.Fatalf("expected 1 migration entry, got %d", len(result.Entries))
+	if len(result.Entries) != 2 {
+		t.Fatalf("expected 2 migration entries, got %d", len(result.Entries))
 	}
 
 	// The pre-existing directory fiber should have its input ref rewritten
@@ -1046,5 +1088,80 @@ created-at: 2026-03-16T10:00:00Z
 	}
 	if string(data) != legacy {
 		t.Fatalf("dry-run should not rewrite file:\n%s", string(data))
+	}
+}
+
+func TestStorageBareRootFiber(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStorage(dir)
+	s.Init()
+
+	// Write a bare top-level fiber at .felt/cmbx.md, as would appear through
+	// a loom symlink where ~/loom/.felt/cmbx/cmbx.md looks like .felt/cmbx.md.
+	bare := filepath.Join(s.root, "cmbx.md")
+	body := "---\nname: cmbx\nstatus: active\n---\n\nRoot narrative.\n"
+	if err := os.WriteFile(bare, []byte(body), 0644); err != nil {
+		t.Fatalf("write bare root: %v", err)
+	}
+
+	// Path should resolve to the bare form when the bare file exists.
+	if got := s.Path("cmbx"); got != bare {
+		t.Errorf("Path(cmbx) = %q, want %q", got, bare)
+	}
+
+	// List should include the bare fiber.
+	felts, err := s.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(felts) != 1 || felts[0].ID != "cmbx" {
+		t.Fatalf("List = %+v, want single fiber cmbx", felts)
+	}
+
+	// Find by id should resolve.
+	f, err := s.Find("cmbx")
+	if err != nil {
+		t.Fatalf("Find: %v", err)
+	}
+	if f.Name != "cmbx" {
+		t.Errorf("Find(cmbx).Name = %q, want cmbx", f.Name)
+	}
+}
+
+func TestStoragePathFallsBackToDirectoryForm(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStorage(dir)
+	s.Init()
+
+	// No file exists yet — Path returns the directory form for a top-level id.
+	got := s.Path("cmbx")
+	want := filepath.Join(s.root, "cmbx", "cmbx.md")
+	if got != want {
+		t.Errorf("Path(cmbx) with no file = %q, want %q", got, want)
+	}
+}
+
+func TestStoragePathBareWithNestedChild(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStorage(dir)
+	s.Init()
+
+	// Bare root + a nested child. List should return both, each with the right id.
+	bare := filepath.Join(s.root, "cmbx.md")
+	os.WriteFile(bare, []byte("---\nname: cmbx\n---\n"), 0644)
+	childDir := filepath.Join(s.root, "cmbx-meeting", "cmbx-meeting")
+	os.MkdirAll(filepath.Dir(childDir), 0755)
+	os.WriteFile(childDir+".md", []byte("---\nname: child\n---\n"), 0644)
+
+	felts, err := s.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	ids := map[string]bool{}
+	for _, f := range felts {
+		ids[f.ID] = true
+	}
+	if !ids["cmbx"] || !ids["cmbx-meeting"] {
+		t.Errorf("List ids = %v, want both cmbx and cmbx-meeting", ids)
 	}
 }
