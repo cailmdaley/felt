@@ -40,8 +40,9 @@ type Storage struct {
 }
 
 type fiberFile struct {
-	id   string
-	path string
+	id         string
+	path       string
+	entryPoint bool // bare `.felt/<slug>.md` at the .felt/ root
 }
 
 type MigrationEntry struct {
@@ -557,6 +558,7 @@ func (s *Storage) listWithMode(mode ParseMode, includeModTime bool) ([]*Felt, er
 				f.ModifiedAt = info.ModTime()
 			}
 		}
+		f.EntryPoint = file.entryPoint
 		felts = append(felts, f)
 	}
 
@@ -660,11 +662,11 @@ func (s *Storage) listFiberFiles() ([]fiberFile, error) {
 					return err
 				}
 			}
-			id, ok := fiberIDFromRelativePath(rel)
+			id, entryPoint, ok := fiberIDFromRelativePath(rel)
 			if !ok {
 				return nil
 			}
-			files = append(files, fiberFile{id: id, path: fullPath})
+			files = append(files, fiberFile{id: id, path: fullPath, entryPoint: entryPoint})
 			return nil
 		})
 	}
@@ -674,20 +676,20 @@ func (s *Storage) listFiberFiles() ([]fiberFile, error) {
 	return files, nil
 }
 
-func fiberIDFromRelativePath(rel string) (string, bool) {
+// fiberIDFromRelativePath returns (id, entryPoint, ok). entryPoint is true
+// when the file is a bare `<slug>.md` at the .felt/ root — the shape the
+// project-level root fiber takes when viewed through a loom symlink.
+func fiberIDFromRelativePath(rel string) (string, bool, bool) {
 	rel = filepath.Clean(rel)
 	dir := filepath.Dir(rel)
 	base := strings.TrimSuffix(filepath.Base(rel), FileExt)
-	// Bare top-level fiber: <slug>.md at the .felt/ root. This appears through
-	// loom symlinks — the same file is ~/loom/.felt/<slug>/<slug>.md from the
-	// monorepo view. Slug is the filename stem.
 	if dir == "." {
-		return base, true
+		return base, true, true
 	}
 	if filepath.Base(dir) != base {
-		return "", false
+		return "", false, false
 	}
-	return filepath.ToSlash(dir), true
+	return filepath.ToSlash(dir), false, true
 }
 
 func disambiguateID(id string, n int) string {

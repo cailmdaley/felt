@@ -193,6 +193,11 @@ type Felt struct {
 	Container       string                   `yaml:"container,omitempty" json:"container,omitempty"`
 	Body            string                   `yaml:"-" json:"body,omitempty"`
 	ModifiedAt      time.Time                `yaml:"-" json:"modified_at,omitempty"` // populated from file stat
+	// EntryPoint is true when the fiber lives as a bare `.felt/<slug>.md`
+	// at the .felt/ root (the project's entry-point / root fiber, as it
+	// appears through loom symlinks). Distinguishes the root from top-level
+	// folder fibers — both have unslashed IDs, only EntryPoint tells them apart.
+	EntryPoint bool `yaml:"-" json:"entry_point,omitempty"`
 }
 
 // HasStatus returns true if the fiber has opt-in status tracking.
