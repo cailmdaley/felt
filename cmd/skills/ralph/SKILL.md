@@ -85,22 +85,7 @@ If a session with that name already exists, the launcher refuses to start a seco
 
 ### Earn the vantage point
 
-The survey builds understanding; the work exploits it. These are not equal phases. The survey is a fixed cost every iteration pays — reading the constitution, checking state, building a mental model. That cost only justifies itself through the work that follows.
-
-The failure mode is leaving while you still have a clear view. You've read the codebase, you understand how the pieces connect, you can see what needs to change. That understanding is perishable — it exists in this session and nowhere else. The next iteration starts cold and rebuilds it from scratch. A short iteration that surveys, lands one small change, and exits usually wastes the investment that made the change easy.
-
-Default to staying. After the first meaningful piece of work, do not ask "is this enough for one iteration?" Ask "what else is now cheaper because I already understand this part of the system?" Keep exploiting that advantage while the next valuable moves live in the same world-model.
-
-Exit when the next worthwhile move would require building substantially different context: a different subsystem with different invariants, a separate debugging thread with little overlap, a different artifact or workflow, or a fresh verification pass better done by new eyes. Do not exit merely because one coherent task is complete. If adjacent moves are still cheap from the context already in memory, do them now. The point is to exhaust a world-model, not to sample it.
-
-Use a simple threshold rule:
-
-- **Codex**: do not stop while more than ~50% of the useful working context for the current seam is still live.
-- **Claude**: do not stop while more than ~90% of the useful working context for the current seam is still live.
-
-These are not token counters. They are practical judgments about how much of the current world-model remains warm and exploitable. If you still remember the relevant files, invariants, recent commits, and adjacent cheap moves, context remains. Stay and use it.
-
-Do not run until the session is confused or sloppy. But do not leave early out of caution either. The danger is not only overextending; it is also under-harvesting the context you already paid to build. Short orthogonal tasks are not automatic exit triggers. If they fit cleanly into the current context, do them. Exit when continuing would mean switching to a different mental workspace, not when there are simply multiple things left to do. The default bias should be toward longer iterations, because context is expensive to earn and cheap to waste.
+The survey is a fixed cost; exploit the warm world-model rather than rebuilding it next iteration. Exit when the next valuable move needs a different mental workspace — not when one task finishes. If changes so far have been small and runway is plentiful, expand the workspace rather than exit.
 
 ## Rules
 
