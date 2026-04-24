@@ -150,6 +150,38 @@ func bundledSkillNames() []string {
 	return names
 }
 
+// removeBrokenSkillSymlinks removes top-level entries in targetDir whose name
+// matches a bundled skill and which are symlinks to a path that no longer
+// resolves. Intact symlinks (e.g. a live `felt setup skills --link` dev
+// install) and regular directories/files are left alone.
+func removeBrokenSkillSymlinks(targetDir string) error {
+	entries, err := fs.ReadDir(embeddedSkills, "skills")
+	if err != nil {
+		return nil // no bundled skills; nothing to heal
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		path := filepath.Join(targetDir, entry.Name())
+		info, err := os.Lstat(path)
+		if err != nil {
+			continue // doesn't exist — nothing to heal
+		}
+		if info.Mode()&os.ModeSymlink == 0 {
+			continue // regular dir/file — leave alone
+		}
+		if _, err := os.Stat(path); err == nil {
+			continue // symlink resolves — leave alone (user may have --link'd)
+		}
+		if err := os.Remove(path); err != nil {
+			return fmt.Errorf("removing broken skill symlink %s: %w", path, err)
+		}
+		fmt.Printf("· Removed broken skill symlink: %s\n", entry.Name())
+	}
+	return nil
+}
+
 // linkSkills creates symlinks from targetDir to a felt source checkout's cmd/skills/.
 // This gives instant feedback when editing skills during development.
 func linkSkills(targetDir, srcRoot string) error {
@@ -205,6 +237,14 @@ func claudeMDSnippet() string {
 // If update is false, existing files are not overwritten (preserves user customizations).
 // If update is true, all files are overwritten with the bundled versions.
 func installSkills(targetDir string, update bool) error {
+	// Heal broken top-level skill symlinks left over from older `--link` installs
+	// whose source has since moved or been deleted. os.MkdirAll through such a
+	// symlink fails deep in the walk with a cryptic "file exists", so clean
+	// felt's own dangling dev symlinks up front. Live --link symlinks (target
+	// resolves) and regular dirs/files are left alone.
+	if err := removeBrokenSkillSymlinks(targetDir); err != nil {
+		return err
+	}
 	var stale []string
 	err := fs.WalkDir(embeddedSkills, "skills", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
