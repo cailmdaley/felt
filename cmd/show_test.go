@@ -561,6 +561,7 @@ func saveShowGlobals() func() {
 	prevConsumers := showConsumers
 	prevDecision := showDecision
 	prevDecisions := showDecisions
+	prevField := showField
 	prevJSON := jsonOutput
 
 	showBodyOnly = false
@@ -571,6 +572,7 @@ func saveShowGlobals() func() {
 	showConsumers = false
 	showDecision = ""
 	showDecisions = false
+	showField = ""
 	jsonOutput = false
 
 	return func() {
@@ -582,6 +584,7 @@ func saveShowGlobals() func() {
 		showConsumers = prevConsumers
 		showDecision = prevDecision
 		showDecisions = prevDecisions
+		showField = prevField
 		jsonOutput = prevJSON
 	}
 }
@@ -593,4 +596,128 @@ func mustParseTime(t *testing.T, value string) time.Time {
 		t.Fatalf("parse time %q: %v", value, err)
 	}
 	return ts
+}
+
+// TestShowField covers the shell-friendly --field accessor:
+//   - scalars (string, bool) emit a single trailing-newline'd line
+//   - sequences of scalars emit one per line
+//   - block-scalar `outcome:` emits its multi-line content unwrapped
+//   - missing keys produce empty stdout, exit 0 (defensive shell gates rely
+//     on this — `[[ "$(felt show id --field tempered)" == true ]]`)
+//
+// Frontmatter keys felt itself doesn't model (e.g. `tempered`, `depends-on`)
+// are addressable too — the flag reads raw frontmatter, not parsed Felt
+// fields.
+func TestShowField(t *testing.T) {
+	dir := t.TempDir()
+	storage := felt.NewStorage(dir)
+	if err := storage.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	// Constitution-shaped fiber: status, tags, multi-line outcome, plus a
+	// portolan-side `tempered:` field hand-written into the file (felt
+	// doesn't model it; the flag should still surface it).
+	manualPath := dir + "/.felt/fiber-a/fiber-a.md"
+	if err := os.MkdirAll(dir+"/.felt/fiber-a", 0755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	body := `---
+name: Fiber A
+status: active
+tags:
+  - constitution
+  - vellum
+created-at: 2026-04-10T09:00:00Z
+tempered: false
+outcome: |-
+  First paragraph spanning
+  two soft-wrapped lines.
+
+  Second paragraph.
+---
+Body here.
+`
+	if err := os.WriteFile(manualPath, []byte(body), 0644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	cases := []struct {
+		name  string
+		field string
+		want  string
+	}{
+		{"scalar string", "status", "active\n"},
+		{"scalar bool", "tempered", "false\n"},
+		{"sequence of scalars", "tags", "constitution\nvellum\n"},
+		{"block scalar with multiple paragraphs", "outcome",
+			"First paragraph spanning\ntwo soft-wrapped lines.\n\nSecond paragraph.\n"},
+		{"missing key emits empty stdout", "bogus-key", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			reset := saveShowGlobals()
+			defer reset()
+			out, err := runCommand(t, dir, "show", "fiber-a", "--field", tc.field)
+			if err != nil {
+				t.Fatalf("show --field %s: %v\n%s", tc.field, err, out)
+			}
+			if out != tc.want {
+				t.Fatalf("show --field %s output mismatch:\n got: %q\nwant: %q", tc.field, out, tc.want)
+			}
+		})
+	}
+}
+
+func TestShowFieldRefusesJSON(t *testing.T) {
+	dir := t.TempDir()
+	storage := felt.NewStorage(dir)
+	if err := storage.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+	if err := storage.Write(&felt.Felt{
+		ID:        "fiber-a",
+		Name:      "Fiber A",
+		Status:    "active",
+		CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z"),
+	}); err != nil {
+		t.Fatalf("Write() error: %v", err)
+	}
+
+	reset := saveShowGlobals()
+	defer reset()
+
+	out, err := runCommand(t, dir, "show", "fiber-a", "--field", "status", "--json")
+	if err == nil {
+		t.Fatalf("expected error combining --field and --json, got output:\n%s", out)
+	}
+	if !strings.Contains(err.Error(), "--field cannot combine with --json") {
+		t.Fatalf("unexpected error message: %v\n%s", err, out)
+	}
+}
+
+func TestShowFieldMutuallyExclusiveWithOtherSelectors(t *testing.T) {
+	dir := t.TempDir()
+	storage := felt.NewStorage(dir)
+	if err := storage.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+	if err := storage.Write(&felt.Felt{
+		ID:        "fiber-a",
+		Name:      "Fiber A",
+		CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z"),
+	}); err != nil {
+		t.Fatalf("Write() error: %v", err)
+	}
+
+	reset := saveShowGlobals()
+	defer reset()
+
+	out, err := runCommand(t, dir, "show", "fiber-a", "--field", "status", "--body")
+	if err == nil {
+		t.Fatalf("expected selector-conflict error, got output:\n%s", out)
+	}
+	if !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Fatalf("missing selector-conflict message: %v\n%s", err, out)
+	}
 }

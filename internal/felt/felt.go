@@ -557,6 +557,16 @@ func stripLegacyMystAnchor(id, body string) (string, bool) {
 }
 
 // splitFrontmatter separates YAML frontmatter from markdown body.
+// SplitFrontmatter is the exported entry-point for callers outside the
+// felt package that need raw YAML frontmatter bytes (e.g. `felt show
+// --field <name>` reads the unparsed frontmatter, walks it as a yaml.Node,
+// and emits one field). Mirrors `splitFrontmatter` semantics: returns
+// (frontmatterBytes, body, error). Pass `includeBody=false` to skip body
+// allocation when only frontmatter is needed.
+func SplitFrontmatter(content []byte, includeBody bool) ([]byte, string, error) {
+	return splitFrontmatter(content, includeBody)
+}
+
 // Frontmatter must be delimited by --- lines.
 func splitFrontmatter(content []byte, includeBody bool) ([]byte, string, error) {
 	scanner := bufio.NewScanner(bytes.NewReader(content))

@@ -19,6 +19,7 @@ var (
 	showConsumers bool
 	showDecision  string
 	showDecisions bool
+	showField     string
 )
 
 var showCmd = &cobra.Command{
@@ -38,6 +39,9 @@ Targeted views:
   --consumers       return indexed reverse data-flow consumers only
   --decisions       return all decisions only
   --decision <id>   return one decision only
+  --field <name>    return one frontmatter field by raw YAML key, formatted
+                    for shell consumers (scalars on one line, sequences of
+                    scalars one-per-line, structured values as YAML)
   --inputs          return inputs only
   --insights        return insights only`,
 	Args: cobra.ExactArgs(1),
@@ -64,13 +68,14 @@ Targeted views:
 			showInsights,
 			showDecisions,
 			showDecision != "",
+			showField != "",
 		} {
 			if active {
 				selectorCount++
 			}
 		}
 		if selectorCount > 1 {
-			return fmt.Errorf("show selectors are mutually exclusive: choose only one of --body, --citations, --consumers, --decisions, --decision, --inputs, or --insights")
+			return fmt.Errorf("show selectors are mutually exclusive: choose only one of --body, --citations, --consumers, --decisions, --decision, --field, --inputs, or --insights")
 		}
 
 		storage := felt.NewStorage(root)
@@ -125,6 +130,9 @@ Targeted views:
 			}
 			if showInsights {
 				return outputShowSelection(f.Insights)
+			}
+			if showField != "" {
+				return outputShowField(storage, f, showField)
 			}
 			if jsonOutput {
 				return outputJSON(f)
@@ -283,6 +291,7 @@ func init() {
 	showCmd.Flags().StringVar(&showDecision, "decision", "", "Output one decision by ID")
 	showCmd.Flags().BoolVar(&showInputs, "inputs", false, "Output inputs only")
 	showCmd.Flags().BoolVar(&showInsights, "insights", false, "Output insights only")
+	showCmd.Flags().StringVar(&showField, "field", "", "Output one frontmatter field by raw YAML key (shell-friendly formatting)")
 }
 
 type showBodyOutput struct {
@@ -328,4 +337,107 @@ func outputShowSelection(v interface{}) error {
 	}
 	fmt.Print(string(data))
 	return nil
+}
+
+// outputShowField emits a single frontmatter field, identified by its
+// raw YAML key, in a shape shell consumers can rely on:
+//
+//   - missing key       → empty stdout, exit 0 (let `[[ -z "$(...)" ]]` work)
+//   - scalar (string,
+//     int, bool, ts)    → value + "\n", with the original YAML scalar text
+//                         preserved (no Go-side reformatting / requoting)
+//   - sequence of
+//     scalars           → one scalar per line
+//   - mapping or
+//     sequence of maps  → YAML-serialized (matches --decisions / --inputs
+//                         shape so structured fields stay machine-readable)
+//
+// Reads raw frontmatter rather than parsed Felt fields, so portolan-side
+// keys felt doesn't model — `tempered`, `depends-on`, anything custom —
+// are addressable by the same flag. Designed for shell defence-in-depth
+// gates that previously had to grep pretty `felt show` output (and
+// false-positived on prose echoing the keyword they were checking; see
+// the kanban worker's status-grep gotcha).
+//
+// `--field name` returns the raw frontmatter `name`, not the canonical
+// post-legacy name; for fibers migrated from `title:` the raw key may
+// differ. v0 trade-off: simpler, predictable, easy to verify.
+func outputShowField(storage *felt.Storage, f *felt.Felt, key string) error {
+	if jsonOutput {
+		// JSON mode bails out — the unstructured shape this flag emits is the
+		// whole point. If you need the parsed field as JSON, drop the flag and
+		// pipe `--json` instead.
+		return fmt.Errorf("--field cannot combine with --json; use --json without --field for the structured view")
+	}
+	data, err := os.ReadFile(storage.Path(f.ID))
+	if err != nil {
+		return fmt.Errorf("reading file %s: %w", storage.Path(f.ID), err)
+	}
+	fmBytes, _, err := felt.SplitFrontmatter(data, false)
+	if err != nil {
+		return fmt.Errorf("splitting frontmatter for %s: %w", f.ID, err)
+	}
+	var node yaml.Node
+	if err := yaml.Unmarshal(fmBytes, &node); err != nil {
+		return fmt.Errorf("parsing frontmatter for %s: %w", f.ID, err)
+	}
+	if len(node.Content) == 0 {
+		return nil // empty frontmatter; treat as missing key
+	}
+	mapping := node.Content[0]
+	if mapping.Kind != yaml.MappingNode {
+		return fmt.Errorf("frontmatter for %s is not a YAML mapping", f.ID)
+	}
+	for i := 0; i+1 < len(mapping.Content); i += 2 {
+		if mapping.Content[i].Value != key {
+			continue
+		}
+		valueNode := mapping.Content[i+1]
+		return emitFieldNode(valueNode)
+	}
+	return nil // key not present; empty output, exit 0
+}
+
+// emitFieldNode writes a yaml.Node to stdout in --field's contract:
+// scalars unquoted on one line, sequences-of-scalars line-per-element,
+// everything else as YAML. The fall-through path uses yaml.Marshal so
+// any structure (mapping, sequence-of-mappings, mixed sequences) round-
+// trips through a regular YAML serializer rather than something we
+// invent inline.
+func emitFieldNode(n *yaml.Node) error {
+	switch n.Kind {
+	case yaml.ScalarNode:
+		// `Value` preserves the source text for plain/quoted scalars *and*
+		// the unwrapped content for block-scalar (`|`/`>`) outcomes —
+		// exactly what shell consumers want for both `status` and
+		// `outcome`. Single trailing newline; `printf %s` would too.
+		fmt.Println(n.Value)
+		return nil
+	case yaml.SequenceNode:
+		if allScalar(n.Content) {
+			for _, child := range n.Content {
+				fmt.Println(child.Value)
+			}
+			return nil
+		}
+		fallthrough
+	case yaml.MappingNode, yaml.AliasNode, yaml.DocumentNode:
+		out, err := yaml.Marshal(n)
+		if err != nil {
+			return fmt.Errorf("marshal field value: %w", err)
+		}
+		fmt.Print(string(out))
+		return nil
+	default:
+		return nil
+	}
+}
+
+func allScalar(nodes []*yaml.Node) bool {
+	for _, n := range nodes {
+		if n.Kind != yaml.ScalarNode {
+			return false
+		}
+	}
+	return true
 }
