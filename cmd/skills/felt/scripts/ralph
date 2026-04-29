@@ -22,7 +22,7 @@ if [[ "$1" == "--" ]]; then
     EXTRA_FLAGS="$*"
 fi
 
-FELT="$HOME/go/bin/felt"
+FELT="felt"
 SESSION="ralph-$FIBER_ID"
 WORK_DIR="$(pwd)"
 
@@ -37,8 +37,12 @@ else
     exit 1
 fi
 
-# Check fiber has open/active status
-if ! (cd "$FELT_DIR" && $FELT show "$FIBER_ID" 2>/dev/null | grep -qiE 'status:.*(open|active)'); then
+# Check fiber has open/active status.
+# Anchor the grep to the metadata line so body prose mentioning
+# "status:open|active" (e.g. constitutions describing this very check)
+# can't self-match. See:
+# .felt/ai-futures/portolan/shuttle/finding-launcher-grep-self-match
+if ! (cd "$FELT_DIR" && $FELT show "$FIBER_ID" 2>/dev/null | grep -qE '^Status:[[:space:]]+(open|active)\b'); then
     echo "Fiber $FIBER_ID must have status open or active to loop."
     echo "  Fix: felt edit $FIBER_ID -s open"
     exit 1
@@ -60,11 +64,11 @@ FELT_DIR="$2"
 WORK_DIR="$3"
 BACKEND="$4"
 EXTRA_FLAGS="$5"
-FELT="$HOME/go/bin/felt"
+FELT="felt"
 
 iteration=0
 
-while (cd "$FELT_DIR" && $FELT show "$FIBER_ID" 2>/dev/null | grep -qiE 'status:.*(open|active)'); do
+while (cd "$FELT_DIR" && $FELT show "$FIBER_ID" 2>/dev/null | grep -qE '^Status:[[:space:]]+(open|active)\b'); do
     cd "$WORK_DIR"
     iteration=$((iteration + 1))
     echo ""

@@ -30,7 +30,7 @@ Proactive formalization. Retroactive extraction. Consolidation over time. Cohere
 
 **Extract what slipped through.** Continuous formalization catches most things. At session end, mine decisions, patterns, and findings that weren't captured in the moment; this is a backstop, not the primary mode.
 
-**Outcomes teach.** An outcome that says "done" or "investigated X" has failed. Put the conclusion in: what was learned, what was decided, why. Someone reading the outcome should learn the thing without opening the body.
+**Outcomes teach.** An outcome that says "done" or "investigated X" has failed. Put the conclusion in: what was learned, what was decided, why. Someone reading the outcome should learn the thing without opening the body. For outcomes longer than a sentence, use `|-` block scalar form via direct file edit (not `felt edit -o "..."`).
 
 **Consolidate over time.** Quick fibers become noise. Read the assemblage periodically and compost stale fibers into doc fibers, fix coherence across siblings, reshape branching. See `maintenance.md`.
 

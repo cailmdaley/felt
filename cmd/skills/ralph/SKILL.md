@@ -103,14 +103,7 @@ The survey is a fixed cost; exploit the warm world-model rather than rebuilding 
 
 ### Long-Running Jobs
 
-Some iterations require waiting on computation (snakemake, cluster jobs). When jobs are running:
-
-1. **Check state** — `snakemake-peek <session>`, tail logs, check SLURM output
-2. **Sleep** — interval proportional to expected runtime (30s for minute-scale, 5m for hour-scale)
-3. **Check again** — look for errors or completion
-4. **Repeat** until jobs finish or fail
-
-Stay and shepherd computation through. Don't exit and hope the next iteration picks it up.
+If an iteration kicks off computation (snakemake, cluster jobs, dev servers), use the `Monitor` tool to stream events from the background process — each stdout line surfaces as a notification, so you'll get pinged when something happens without polling-with-sleep. For one-shot "wait until done," use Bash with `run_in_background` and you'll be notified on completion. Either way, shepherd computation to completion. Don't exit and hope the next iteration picks it up.
 
 ## Exit
 
