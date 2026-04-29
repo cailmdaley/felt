@@ -203,6 +203,12 @@ Search and read:
 A thread resolved. Close:
     felt edit <id> --status closed --outcome "what was learned"
 
+History (per-fiber append-only event log):
+    felt history <id>                                    # editorial chain (newest first)
+    felt history <id> --last 1                           # what the previous session left
+    felt history <id> --mechanical                       # + add/edit/rm/external_edit
+    felt history append <id> --summary "..."             # log session continuity
+
 Maintain:
     felt check                                           # broken refs, ASTRA issues
     felt migrate [--dry-run]                             # normalize legacy layout
@@ -211,6 +217,8 @@ Maintain:
 Statuses: · untracked, ○ open, ◐ active, ● closed
 Detail: name < compact < summary < full. Summary shows the lede (first paragraph of the body; write it to stand alone).
 Relationships: directory containment, ` + "`[[wikilinks]]`" + ` in bodies, ASTRA ` + "`inputs.from`" + ` for data flow. Nested IDs use paths (bao-analysis/damping-prior).
+
+**Outcomes longer than a sentence:** edit ` + "`.felt/<path>/<slug>.md`" + ` directly using a ` + "`|-`" + ` block scalar (` + "`outcome: |-`" + `). ` + "`felt edit -o \"…\"`" + ` shell-escapes quotes and mangles multiline content; block scalar takes content literally so paragraphs, lists, and image embeds round-trip cleanly.
 
 `
 }

@@ -128,6 +128,17 @@ func (i *Index) init() error {
 			body,
 			search_text
 		)`,
+		`CREATE TABLE IF NOT EXISTS history_events (
+			rowid        INTEGER PRIMARY KEY AUTOINCREMENT,
+			fiber_id     TEXT NOT NULL,
+			occurred_at  TEXT NOT NULL,
+			event_type   TEXT NOT NULL,
+			actor        TEXT NOT NULL,
+			content_hash TEXT,
+			payload      TEXT
+		)`,
+		`CREATE INDEX IF NOT EXISTS history_events_fiber_time
+			ON history_events(fiber_id, occurred_at DESC, rowid DESC)`,
 	}
 	for _, stmt := range schema {
 		if _, err := i.db.Exec(stmt); err != nil {
@@ -148,6 +159,17 @@ func (s *Storage) OpenIndex() (*Index, error) {
 		return nil, err
 	}
 	return idx, nil
+}
+
+// OpenIndexNoSync opens the index without running Sync. Used by CLI
+// commands that need to append a mechanical event for an action they
+// just performed: Sync's external_edit detection would otherwise
+// mistake the change for an unattributed edit. After AppendEvent is
+// called with the post-edit hash, subsequent OpenIndex/Sync calls see
+// the hashes match and stay quiet.
+func (s *Storage) OpenIndexNoSync() (*Index, error) {
+	root := filepath.Dir(s.root)
+	return OpenIndex(root)
 }
 
 func (i *Index) Sync(s *Storage) error {
@@ -221,6 +243,59 @@ func (i *Index) Sync(s *Storage) error {
 		}
 		f.ModifiedAt = state.modifiedAt
 		if err := indexFiber(tx, f, ids); err != nil {
+			return err
+		}
+	}
+
+	// Hash-on-read: catch direct file edits (vi/IDE) that didn't go
+	// through the felt CLI. For each fiber, compare the file's current
+	// hash against the latest mechanical event's hash. Mismatch =>
+	// append an external_edit event. New fibers without events get a
+	// synthetic add event (the bootstrap baseline).
+	for _, id := range ids {
+		state := current[id]
+		hash, err := HashFile(state.path)
+		if err != nil {
+			return err
+		}
+		if hash == "" {
+			continue
+		}
+		latest, err := latestMechanicalHashTx(tx, id)
+		if err != nil {
+			return err
+		}
+		if latest == hash {
+			continue
+		}
+
+		count, err := eventCountTx(tx, id)
+		if err != nil {
+			return err
+		}
+		eventType := EventExternalEdit
+		actor := "external"
+		payload := map[string]interface{}{}
+		if count == 0 {
+			// First time we've seen this fiber. Anchor the chain with
+			// a synthetic add — not labelled external, since we don't
+			// know whether the original create went through the CLI.
+			eventType = EventAdd
+			actor = "index-bootstrap"
+			payload["bootstrap"] = true
+		}
+		lines, chars := FiberSize(state.path)
+		payload["size_lines"] = lines
+		payload["size_chars"] = chars
+		payload["mtime"] = state.modifiedAt.UTC().Format(time.RFC3339Nano)
+		if err := i.appendEventTx(tx, Event{
+			FiberID:     id,
+			OccurredAt:  state.modifiedAt,
+			Type:        eventType,
+			Actor:       actor,
+			ContentHash: hash,
+			Payload:     payload,
+		}); err != nil {
 			return err
 		}
 	}

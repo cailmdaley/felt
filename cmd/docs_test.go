@@ -70,6 +70,7 @@ func TestRootCommandSurfaceIsConsolidated(t *testing.T) {
 		"check",
 		"edit",
 		"export",
+		"history",
 		"hook",
 		"init",
 		"ls",
@@ -87,7 +88,7 @@ func TestRootCommandSurfaceIsConsolidated(t *testing.T) {
 		}
 	}
 
-	if len(visible) > 16 {
+	if len(visible) > 17 {
 		t.Fatalf("root command surface too large: got %d commands (%v)", len(visible), visible)
 	}
 }

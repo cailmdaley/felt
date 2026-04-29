@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/cailmdaley/felt/internal/felt"
@@ -78,6 +79,12 @@ Examples:
 
 		if err := storage.Write(f); err != nil {
 			return err
+		}
+
+		// Record the mechanical event before any subsequent index sync
+		// would mistake the new file for an external edit.
+		if data, err := os.ReadFile(storage.Path(f.ID)); err == nil {
+			recordMechanical(storage, f.ID, felt.EventAdd, []string{"all"}, data)
 		}
 
 		fmt.Println(f.ID)

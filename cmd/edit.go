@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -159,6 +160,13 @@ Examples:
 			return err
 		}
 
+		// Collect the list of fields the user actually changed, for the
+		// mechanical event payload.
+		fieldsChanged := collectChangedEditFields(cmd)
+		if data, err := os.ReadFile(storage.Path(f.ID)); err == nil {
+			recordMechanical(storage, f.ID, felt.EventEdit, fieldsChanged, data)
+		}
+
 		switch {
 		case bodyCleared:
 			fmt.Printf("Updated %s (body cleared; previous content removed)\n", f.ID)
@@ -169,6 +177,24 @@ Examples:
 		}
 		return nil
 	},
+}
+
+// collectChangedEditFields lists which top-level edit flags the user
+// actually flipped, so the mechanical event payload reflects intent.
+func collectChangedEditFields(cmd *cobra.Command) []string {
+	candidates := []string{
+		"name", "status", "due", "tag", "untag", "body", "outcome",
+		"decision", "label", "rationale", "default", "option",
+		"option-id", "option-label", "option-excluded", "option-reason",
+		"input", "insight",
+	}
+	var out []string
+	for _, name := range candidates {
+		if cmd.Flags().Changed(name) {
+			out = append(out, name)
+		}
+	}
+	return out
 }
 
 func init() {

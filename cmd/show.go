@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/cailmdaley/felt/internal/felt"
 	"github.com/spf13/cobra"
@@ -151,6 +152,8 @@ Targeted views:
 
 		var citations []felt.Citation
 		var consumers []felt.DataFlowConsumer
+		var recentEditorial string
+		var recentMechanical []felt.Event
 		if detail == DepthSummary || detail == DepthFull {
 			idx, err := storage.OpenIndex()
 			if err != nil {
@@ -166,11 +169,108 @@ Targeted views:
 			if err != nil {
 				return err
 			}
+
+			// Most recent editorial event surfaces inside the metadata
+			// block; mechanical activity at -d full goes after the body.
+			editorialEvents, err := idx.QueryEvents(felt.EventFilter{
+				FiberID:    f.ID,
+				Types:      []string{felt.EventEditorial},
+				Limit:      1,
+				Descending: true,
+			})
+			if err != nil {
+				return err
+			}
+			recentEditorial = renderRecentEditorial(editorialEvents)
+
+			if detail == DepthFull {
+				mech, err := idx.QueryEvents(felt.EventFilter{
+					FiberID: f.ID,
+					Types: []string{
+						felt.EventAdd,
+						felt.EventEdit,
+						felt.EventRm,
+						felt.EventExternalEdit,
+					},
+					Limit:      5,
+					Descending: true,
+				})
+				if err != nil {
+					return err
+				}
+				recentMechanical = mech
+			}
 		}
 
-		fmt.Print(renderFelt(f, graph, detail, citations, consumers))
+		fmt.Print(renderFeltWithHistory(
+			f, graph, detail, citations, consumers,
+			recentEditorial, recentMechanical,
+		))
 		return nil
 	},
+}
+
+// renderFeltWithHistory wraps renderFelt and splices in the Recent
+// editorial line (between the metadata block and the body) plus an
+// optional mechanical-events trailer at -d full.
+func renderFeltWithHistory(
+	f *felt.Felt,
+	g *felt.Graph,
+	detail string,
+	citations []felt.Citation,
+	consumers []felt.DataFlowConsumer,
+	recentEditorial string,
+	recentMechanical []felt.Event,
+) string {
+	out := renderFelt(f, g, detail, citations, consumers)
+	if recentEditorial != "" {
+		out = spliceRecentEditorial(out, recentEditorial)
+	}
+	if len(recentMechanical) > 0 {
+		out += "\nRecent mechanical events:\n"
+		for _, e := range recentMechanical {
+			out += "  " + formatMechanicalLine(e) + "\n"
+		}
+	}
+	return out
+}
+
+// spliceRecentEditorial inserts the Recent block right after the
+// metadata header (before the blank line that precedes the body), so
+// the most recent session summary is visible in the same eye-pass as
+// status / outcome.
+func spliceRecentEditorial(rendered, recent string) string {
+	// Split on the first blank line that separates header from body.
+	idx := indexOfBlankLine(rendered)
+	if idx < 0 {
+		return rendered + recent
+	}
+	return rendered[:idx] + recent + rendered[idx:]
+}
+
+func indexOfBlankLine(s string) int {
+	for i := 0; i < len(s)-1; i++ {
+		if s[i] == '\n' && s[i+1] == '\n' {
+			return i + 1
+		}
+	}
+	return -1
+}
+
+func formatMechanicalLine(e felt.Event) string {
+	line := e.OccurredAt.Local().Format("2006-01-02 15:04:05") +
+		" [" + e.Type + " " + e.Actor + "] hash=" + shortHash(e.ContentHash)
+	if lines := intField(e.Payload, "size_lines"); lines > 0 {
+		line += " (" + intToShortStr(lines) + " lines)"
+	}
+	if fields := stringSliceField(e.Payload, "fields_changed"); len(fields) > 0 {
+		line += " — " + strings.Join(fields, ",")
+	}
+	return line
+}
+
+func intToShortStr(n int) string {
+	return fmt.Sprintf("%d", n)
 }
 
 func init() {

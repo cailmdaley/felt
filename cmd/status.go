@@ -34,6 +34,10 @@ var rmCmd = &cobra.Command{
 			return err
 		}
 
+		// Append a mechanical rm event. The fiber file is gone so we
+		// don't carry a content_hash forward.
+		recordMechanical(storage, f.ID, felt.EventRm, nil, nil)
+
 		fmt.Printf("Deleted %s\n", f.ID)
 		return nil
 	},
