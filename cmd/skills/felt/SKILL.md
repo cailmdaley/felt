@@ -58,6 +58,46 @@ Proactive formalization. Retroactive extraction. Consolidation over time. Cohere
 | **Reference doc** | Accumulated understanding. Architecture, philosophy, decision trees. |
 | **How-to** | Procedures that get reused. More depth than CLAUDE.md. |
 
+### Tool-owned frontmatter
+
+Fibers may carry tool-owned frontmatter namespaces such as `shuttle:`. Felt
+stores and displays those bytes as part of the fiber substrate, but generic felt
+commands do not need to understand every namespace. When a tool namespace is
+part of the work, edit it carefully in the fiber file and keep the ordinary felt
+surfaces current: `outcome` for latest state, `felt history` for chronological
+handoff, and sub-fibers for durable findings.
+
+For a Shuttle standing role, keep one durable role fiber rather than creating
+one fiber per run. The launchable shape is:
+
+```yaml
+status: active
+tags:
+  - constitution
+  - standing
+  - agent:codex
+shuttle:
+  mode: standing
+  schedule:
+    kind: cron
+    expr: "0 9 * * 1-5"
+    timezone: Europe/Paris
+  review:
+    state: scheduled
+    run_id: null
+    accepted_run_id: null
+  next_due_at: "2026-05-04T09:00:00+02:00"
+  last_run_at: null
+```
+
+`status: active` means installed, not immediately dispatchable; Shuttle gates on
+`next_due_at` and `shuttle.review.state`. A completed run should leave the
+latest work in `outcome`, append a normal `felt history` event, and edit
+`shuttle.review` to an awaiting-review shape. Acceptance is a manual metadata
+transition for v0: edit the pending run to accepted/scheduled, set the next
+`next_due_at`, and append history. Do not use top-level `tempered: true` for
+cyclic run acceptance; it remains human acceptance of durable completion.
+
 ### CLAUDE.md updates
 
 - Commands and invocations
