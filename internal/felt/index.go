@@ -3,6 +3,7 @@ package felt
 import (
 	"database/sql"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -13,7 +14,11 @@ import (
 )
 
 const indexFileName = "index.db"
-const sqliteBusyTimeout = 5000
+
+// ErrIndexBusy is returned when the SQLite index is locked by a concurrent
+// process and cannot be synced after retries. Commands may catch this error
+// to degrade gracefully (skip index-backed data) rather than failing.
+var ErrIndexBusy = fmt.Errorf("index busy")
 
 type Index struct {
 	db *sql.DB
@@ -34,18 +39,30 @@ type DataFlowConsumer struct {
 	SourceName string
 }
 
+// OpenIndex opens the SQLite index at the given project root.
+//
+// Pragmas are applied via DSN parameters so the modernc.org/sqlite driver
+// guarantees busy_timeout is installed before journal_mode is changed.
+// _txlock=immediate makes db.Begin() use BEGIN IMMEDIATE, which acquires
+// the write lock up-front rather than deferring it — this way SQLITE_BUSY
+// surfaces at Begin() time and busy_timeout retries before returning an
+// error, rather than surfacing deep inside the Sync transaction.
 func OpenIndex(projectRoot string) (*Index, error) {
 	dbPath := filepath.Join(projectRoot, DirName, indexFileName)
-	db, err := sql.Open("sqlite", dbPath)
+	// Use a file: URI so the driver processes _pragma and _txlock params.
+	// busy_timeout is sorted first by the driver (see modernc.org/sqlite#198).
+	q := url.Values{}
+	q.Set("_pragma", "busy_timeout(5000)")
+	q.Add("_pragma", "journal_mode(WAL)")
+	q.Add("_pragma", "synchronous(NORMAL)")
+	q.Set("_txlock", "immediate")
+	dsn := "file:" + dbPath + "?" + q.Encode()
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite index: %w", err)
 	}
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
-	if err := configureIndexDB(db); err != nil {
-		_ = db.Close()
-		return nil, err
-	}
 	idx := &Index{db: db}
 	if err := idx.init(); err != nil {
 		_ = db.Close()
@@ -54,18 +71,17 @@ func OpenIndex(projectRoot string) (*Index, error) {
 	return idx, nil
 }
 
-func configureIndexDB(db *sql.DB) error {
-	pragmas := []string{
-		fmt.Sprintf(`PRAGMA busy_timeout = %d`, sqliteBusyTimeout),
-		`PRAGMA journal_mode = WAL`,
-		`PRAGMA synchronous = NORMAL`,
+// isSQLiteBusyErr reports whether err (or any error in its chain) is a
+// SQLite busy/locked error. The modernc.org/sqlite driver annotates the
+// error message with "(SQLITE_BUSY)" for error code 5.
+func isSQLiteBusyErr(err error) bool {
+	if err == nil {
+		return false
 	}
-	for _, stmt := range pragmas {
-		if _, err := db.Exec(stmt); err != nil {
-			return fmt.Errorf("configure sqlite index: %w", err)
-		}
-	}
-	return nil
+	msg := err.Error()
+	return strings.Contains(msg, "SQLITE_BUSY") ||
+		strings.Contains(msg, "database is locked") ||
+		strings.Contains(msg, "database table is locked")
 }
 
 func (i *Index) Close() error {
@@ -148,17 +164,42 @@ func (i *Index) init() error {
 	return nil
 }
 
+// indexSyncRetries controls application-level retries when Sync reports
+// SQLITE_BUSY after the driver's built-in busy_timeout (5 s) is exhausted.
+// Each retry sleeps for an increasing interval before re-opening the DB.
+var indexSyncRetryDelays = []time.Duration{
+	200 * time.Millisecond,
+	500 * time.Millisecond,
+	1000 * time.Millisecond,
+}
+
+// OpenIndex opens the index and syncs it against the current fiber tree.
+// If Sync returns SQLITE_BUSY (after the driver's built-in 5 s busy_timeout),
+// it retries up to len(indexSyncRetryDelays) more times with backoff.
+// After all retries are exhausted it returns ErrIndexBusy so callers can
+// degrade gracefully rather than propagating a raw SQLite error.
 func (s *Storage) OpenIndex() (*Index, error) {
 	root := filepath.Dir(s.root)
-	idx, err := OpenIndex(root)
-	if err != nil {
-		return nil, err
+	var lastBusy error
+	for attempt := 0; attempt <= len(indexSyncRetryDelays); attempt++ {
+		if attempt > 0 {
+			time.Sleep(indexSyncRetryDelays[attempt-1])
+		}
+		idx, err := OpenIndex(root)
+		if err != nil {
+			return nil, err
+		}
+		if err := idx.Sync(s); err != nil {
+			_ = idx.Close()
+			if isSQLiteBusyErr(err) {
+				lastBusy = err
+				continue
+			}
+			return nil, err
+		}
+		return idx, nil
 	}
-	if err := idx.Sync(s); err != nil {
-		_ = idx.Close()
-		return nil, err
-	}
-	return idx, nil
+	return nil, fmt.Errorf("%w: %v", ErrIndexBusy, lastBusy)
 }
 
 // OpenIndexNoSync opens the index without running Sync. Used by CLI

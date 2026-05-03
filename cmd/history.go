@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -63,6 +64,13 @@ The append subcommand records a new editorial event:
 
 		idx, err := storage.OpenIndex()
 		if err != nil {
+			if errors.Is(err, felt.ErrIndexBusy) {
+				fmt.Fprintf(os.Stderr, "warning: index busy — history unavailable\n")
+				if jsonOutput {
+					return outputJSON([]felt.Event{})
+				}
+				return nil
+			}
 			return err
 		}
 		defer idx.Close()

@@ -1,7 +1,9 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
+	"os"
 	"regexp"
 	"sort"
 	"strings"
@@ -65,15 +67,20 @@ Use --body with query to include body search, and with --json to emit body text.
 		if query != "" && lsBody && !lsRegex {
 			idx, err := storage.OpenIndex()
 			if err != nil {
-				return err
-			}
-			defer idx.Close()
-			ids, err := idx.SearchBodyIDs(query)
-			if err != nil {
-				return err
-			}
-			for _, id := range ids {
-				bodyMatchIDs[id] = struct{}{}
+				if errors.Is(err, felt.ErrIndexBusy) {
+					fmt.Fprintf(os.Stderr, "warning: index busy — full-text body search unavailable\n")
+				} else {
+					return err
+				}
+			} else {
+				defer idx.Close()
+				ids, err := idx.SearchBodyIDs(query)
+				if err != nil {
+					return err
+				}
+				for _, id := range ids {
+					bodyMatchIDs[id] = struct{}{}
+				}
 			}
 		}
 		var felts []*felt.Felt

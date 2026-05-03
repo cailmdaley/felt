@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -94,6 +95,10 @@ Targeted views:
 			if showCitations {
 				idx, err := storage.OpenIndex()
 				if err != nil {
+					if errors.Is(err, felt.ErrIndexBusy) {
+						fmt.Fprintf(os.Stderr, "warning: index busy, citations unavailable\n")
+						return outputShowSelection([]felt.Citation{})
+					}
 					return err
 				}
 				defer idx.Close()
@@ -106,6 +111,10 @@ Targeted views:
 			if showConsumers {
 				idx, err := storage.OpenIndex()
 				if err != nil {
+					if errors.Is(err, felt.ErrIndexBusy) {
+						fmt.Fprintf(os.Stderr, "warning: index busy, consumers unavailable\n")
+						return outputShowSelection([]felt.DataFlowConsumer{})
+					}
 					return err
 				}
 				defer idx.Close()
@@ -163,50 +172,54 @@ Targeted views:
 		var recentEditorial string
 		var recentMechanical []felt.Event
 		if detail == DepthSummary || detail == DepthFull {
-			idx, err := storage.OpenIndex()
-			if err != nil {
-				return err
+			idx, idxErr := storage.OpenIndex()
+			if idxErr != nil && !errors.Is(idxErr, felt.ErrIndexBusy) {
+				return idxErr
 			}
-			defer idx.Close()
+			if errors.Is(idxErr, felt.ErrIndexBusy) {
+				fmt.Fprintf(os.Stderr, "warning: index busy — citations, consumers, and history unavailable\n")
+			} else {
+				defer idx.Close()
 
-			citations, err = idx.Citations(f.ID)
-			if err != nil {
-				return err
-			}
-			consumers, err = idx.Consumers(f.ID)
-			if err != nil {
-				return err
-			}
+				citations, err = idx.Citations(f.ID)
+				if err != nil {
+					return err
+				}
+				consumers, err = idx.Consumers(f.ID)
+				if err != nil {
+					return err
+				}
 
-			// Most recent editorial event surfaces inside the metadata
-			// block; mechanical activity at -d full goes after the body.
-			editorialEvents, err := idx.QueryEvents(felt.EventFilter{
-				FiberID:    f.ID,
-				Types:      []string{felt.EventEditorial},
-				Limit:      1,
-				Descending: true,
-			})
-			if err != nil {
-				return err
-			}
-			recentEditorial = renderRecentEditorial(editorialEvents)
-
-			if detail == DepthFull {
-				mech, err := idx.QueryEvents(felt.EventFilter{
-					FiberID: f.ID,
-					Types: []string{
-						felt.EventAdd,
-						felt.EventEdit,
-						felt.EventRm,
-						felt.EventExternalEdit,
-					},
-					Limit:      5,
+				// Most recent editorial event surfaces inside the metadata
+				// block; mechanical activity at -d full goes after the body.
+				editorialEvents, err := idx.QueryEvents(felt.EventFilter{
+					FiberID:    f.ID,
+					Types:      []string{felt.EventEditorial},
+					Limit:      1,
 					Descending: true,
 				})
 				if err != nil {
 					return err
 				}
-				recentMechanical = mech
+				recentEditorial = renderRecentEditorial(editorialEvents)
+
+				if detail == DepthFull {
+					mech, err := idx.QueryEvents(felt.EventFilter{
+						FiberID: f.ID,
+						Types: []string{
+							felt.EventAdd,
+							felt.EventEdit,
+							felt.EventRm,
+							felt.EventExternalEdit,
+						},
+						Limit:      5,
+						Descending: true,
+					})
+					if err != nil {
+						return err
+					}
+					recentMechanical = mech
+				}
 			}
 		}
 
