@@ -9,13 +9,13 @@
 
 # felt
 
-Directory-contained markdown fibers with YAML frontmatter and wikilinks. A lightweight substrate for accumulating context — decisions, claims, tasks, questions, specs — and keeping it searchable, connected, and round-trippable through whatever tooling layers on top.
+A CLI for the structured trail that builds up around work — decisions made, alternatives rejected, claims under test, tasks open, fragments waiting to consolidate. Each entry is a *fiber*: a directory under `.felt/` with a `<slug>.md` file inside, carrying YAML frontmatter and a plain-markdown body.
 
-Fibers are the unit. Each one lives in its own directory under `.felt/`, with a `<slug>.md` file carrying YAML frontmatter plus plain markdown body content. Containment comes from the directory tree, narrative connections come from `[[wikilinks]]` in the body, and structured frontmatter (decisions, inputs, insights) accretes as the work crystallizes. Closing a fiber with an outcome captures what was learned.
+The directory tree gives hierarchy. `[[wikilinks]]` in bodies give narrative cross-references. YAML frontmatter holds structure (status, tags, decisions with excluded alternatives, inputs, insights), accreting as a fiber crystallizes. A rebuildable SQLite index at `.felt/index.db` makes the lot queryable — FTS5 over bodies, narrative back-references, reverse data-flow consumers — but plain markdown is the source of truth and the cache carries no extra authoring burden.
 
-Felt round-trips arbitrary YAML frontmatter — including tool-owned namespaces like `shuttle:` or anything else a downstream tool wants to attach. Felt doesn't parse or enforce them; it just preserves them across edits.
+Felt round-trips arbitrary YAML, so tool-owned namespaces (`shuttle:`, or anything else a downstream tool wants to attach) survive edits unchanged. A `.felt/` directory opens as a valid Obsidian vault out of the box (see [Obsidian](#obsidian)). The binary is a single static Go executable; no daemon, no required configuration.
 
-The source of truth is the markdown tree in `.felt/`. Felt maintains a local SQLite cache at `.felt/index.db` for typed links, citations, tags, and FTS5 body search, but the cache is rebuildable from the files and carries no extra authoring burden. The format is plain markdown with YAML frontmatter and `[[wikilinks]]`, so a `.felt/` directory also opens as a valid Obsidian vault (see [Obsidian](#obsidian)).
+Felt is designed to be persistent memory for AI coding agents as much as for you. The bundled [Claude Code plugin](#agent-integration) and Codex hooks make `.felt/` the substrate agents reach for between sessions.
 
 ## Install
 
@@ -38,9 +38,11 @@ felt update
 Felt ships as a [Claude Code plugin](https://docs.claude.com/en/docs/claude-code/plugins) and a Codex skill bundle:
 
 ```bash
-felt setup claude                 # registers cailmdaley-felt marketplace, installs the plugin
+felt setup claude                 # registers cailmdaley/felt marketplace, installs the plugin
 felt setup codex                  # symlinks skills into ~/.agents/skills, configures Codex hooks
 ```
+
+`setup claude` registers the felt marketplace from GitHub directly — Claude Code clones it, no local checkout required. Tagged felt binaries pin the plugin to the matching tag so the binary and the plugin stay aligned. `setup codex` reuses that clone for its own hook setup, so just running the two commands above is enough.
 
 The plugin bundles two skills (`felt`, `ralph`), a SessionStart hook that lists active and recently touched fibers, and a PreToolUse hook that gates the first non-Skill tool call until the felt skill has been activated. See [Agent Integration](#agent-integration) for details.
 
@@ -189,16 +191,18 @@ Obsidian is not a dependency. The CLI and the `.felt/` tree are the source of tr
 
 ## Agent Integration
 
-`felt setup claude` registers a local plugin marketplace from your felt checkout and installs the `felt` plugin via Claude Code's CLI:
+`felt setup claude` registers the felt plugin marketplace from GitHub and installs the `felt` plugin via Claude Code's CLI:
 
 ```
-claude plugin marketplace add <felt-repo>
+claude plugin marketplace add cailmdaley/felt#v<version>
 claude plugin install felt@cailmdaley-felt
 ```
 
-The plugin lives at `claude-plugin/` in the felt repo and bundles two skills (`felt`, `ralph`), SessionStart/PreToolUse hooks, and a launcher script for ralph loops.
+Tagged felt binaries pin to their matching git tag; `dev` builds track the default branch. Claude Code clones the marketplace to `~/.claude/plugins/marketplaces/cailmdaley-felt/`, so no local checkout of felt is required. Pass `--source <path>` for development against an unreleased checkout.
 
-For Codex (no plugin manifest support), `felt setup codex` symlinks the same skills into `~/.agents/skills/` and configures Codex's `hooks.json` to invoke the same hook scripts the plugin uses.
+The plugin bundles two skills (`felt`, `ralph`), SessionStart/PreToolUse hooks, and a launcher script for ralph loops.
+
+For Codex (no plugin manifest support), `felt setup codex` symlinks the same skills into `~/.agents/skills/` and configures Codex's `hooks.json` to invoke the same hook scripts the plugin uses. It reuses Claude Code's marketplace clone, so running `felt setup claude` first means `setup codex` works without `--source`.
 
 Skills can also be linked into other locations independently:
 

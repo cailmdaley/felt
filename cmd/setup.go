@@ -15,6 +15,34 @@ import (
 // `claude plugin install felt@<marketplaceName>`.
 const marketplaceName = "cailmdaley-felt"
 
+// marketplaceRepo is the GitHub `owner/repo` shorthand that Claude Code
+// accepts in `claude plugin marketplace add`. When no --source is given,
+// `felt setup claude` registers this directly so users without a local
+// checkout (brew, curl install) don't have to clone anything.
+const marketplaceRepo = "cailmdaley/felt"
+
+// defaultMarketplaceRef is the GitHub ref to register when no --source is
+// given. For tagged binaries we pin to the matching tag so the installed
+// plugin matches the binary; `dev` builds track the default branch.
+func defaultMarketplaceRef() string {
+	if Version == "" || Version == "dev" {
+		return marketplaceRepo
+	}
+	return marketplaceRepo + "#v" + Version
+}
+
+// claudeMarketplaceClonePath is the directory Claude Code clones a
+// GitHub-sourced marketplace into. `felt setup codex` reads from here as
+// a fallback when no --source / $FELT_PLUGIN_DIR is given, so a fresh
+// install can wire up Codex hooks without a local felt checkout.
+func claudeMarketplaceClonePath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".claude", "plugins", "marketplaces", marketplaceName)
+}
+
 var setupCmd = &cobra.Command{
 	Use:   "setup",
 	Short: "Setup integrations",
@@ -26,22 +54,26 @@ var setupClaudeCmd = &cobra.Command{
 	Short: "Install the felt plugin for Claude Code via the plugin marketplace",
 	Long: `Install the felt plugin for Claude Code.
 
-Registers the felt repository as a Claude Code plugin marketplace and
-installs the felt plugin from it. The plugin bundles the felt and ralph
-skills plus SessionStart and PreToolUse hooks. Idempotent — re-running
-is safe.
+Registers the felt plugin marketplace and installs the felt plugin from
+it. The plugin bundles the felt and ralph skills plus SessionStart and
+PreToolUse hooks. Idempotent — re-running is safe.
+
+By default, registers ` + marketplaceRepo + ` directly from GitHub —
+Claude Code clones the marketplace itself, so no local checkout is
+required (brew or curl installs work). Tagged felt binaries pin the
+plugin to the matching tag (e.g. ` + marketplaceRepo + `#v1.0.0); ` + "`dev`" + `
+builds track the default branch.
 
 Wraps the official Claude Code CLI:
 
-    claude plugin marketplace add <repo>
+    claude plugin marketplace add ` + marketplaceRepo + `[#v<tag>]
     claude plugin install felt@` + marketplaceName + `
 
-Resolution order for --source (which repo to register):
+Resolution order for --source (override the default GitHub registration):
   1. --source <path>      path to a felt repo checkout containing
                           .claude-plugin/marketplace.json
   2. $FELT_PLUGIN_DIR     env var pointing directly at the plugin directory
                           (the parent of which becomes the marketplace root)
-  3. ~/.claude/plugins/felt@` + marketplaceName + `  already-installed (idempotent re-install)
 
 Use --uninstall to remove.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -52,11 +84,16 @@ Use --uninstall to remove.`,
 			return uninstallPlugin()
 		}
 
+		// No --source / $FELT_PLUGIN_DIR: register from GitHub. Claude Code
+		// clones the marketplace itself.
+		if source == "" && os.Getenv("FELT_PLUGIN_DIR") == "" {
+			return installPluginViaCLI(defaultMarketplaceRef())
+		}
+
 		repoRoot, err := findMarketplaceRoot(source)
 		if err != nil {
 			return err
 		}
-
 		return installPluginViaCLI(repoRoot)
 	},
 }
@@ -75,7 +112,7 @@ of its own, so we shell out to the same scripts the plugin uses.
 Resolution order for --source:
   1. --source <path>      path to a felt repo checkout or plugin directory
   2. $FELT_PLUGIN_DIR     env var pointing at the plugin directory
-  3. ~/.claude/plugins/felt  if the plugin is installed for Claude Code
+  3. ~/.claude/plugins/marketplaces/` + marketplaceName + `  if `+"`felt setup claude`"+` has run
 
 Use --uninstall to remove.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -89,7 +126,7 @@ Use --uninstall to remove.`,
 		}
 
 		if pluginErr != nil {
-			return fmt.Errorf("plugin directory required to install Codex hooks: %w\n  Install the plugin first with: felt setup claude --source <path>", pluginErr)
+			return pluginErr
 		}
 
 		if err := installCodexHooks(pluginDir); err != nil {
@@ -120,7 +157,7 @@ Existing entries are replaced.
 Resolution order for --source:
   1. --source <path>      path to a felt repo checkout or plugin directory
   2. $FELT_PLUGIN_DIR     env var pointing at the plugin directory
-  3. ~/.claude/plugins/felt  if the plugin is installed`,
+  3. ~/.claude/plugins/marketplaces/` + marketplaceName + `  if `+"`felt setup claude`"+` has run`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		target, _ := cmd.Flags().GetString("target")
 		source, _ := cmd.Flags().GetString("source")
@@ -185,8 +222,10 @@ func findPluginDir(source string) (string, error) {
 // plugin marketplace. The directory must contain
 // .claude-plugin/marketplace.json (the felt repo root, by convention).
 //
-// Resolution order: explicit source arg, $FELT_PLUGIN_DIR, then derive from
-// the installed plugin's symlinked path.
+// Resolution order: explicit --source arg, $FELT_PLUGIN_DIR, then the
+// already-installed Claude Code marketplace clone at
+// ~/.claude/plugins/marketplaces/<marketplaceName>/ (so `felt setup codex`
+// works after `felt setup claude` without a separate local checkout).
 func findMarketplaceRoot(source string) (string, error) {
 	if source != "" {
 		if hasMarketplaceManifest(source) {
@@ -222,8 +261,19 @@ func findMarketplaceRoot(source string) (string, error) {
 		return "", fmt.Errorf("$FELT_PLUGIN_DIR=%q: parent has no .claude-plugin/marketplace.json", env)
 	}
 
-	return "", fmt.Errorf("could not find felt repo root\n" +
-		"  Pass --source <checkout> (e.g. felt setup claude --source ~/src/felt)\n" +
+	// Fallback: Claude Code clones GitHub-sourced marketplaces to a known
+	// path. If the user has run `felt setup claude` (or otherwise installed
+	// the marketplace), the plugin files live there.
+	if cloned := claudeMarketplaceClonePath(); cloned != "" && hasMarketplaceManifest(cloned) {
+		abs, err := filepath.Abs(cloned)
+		if err == nil {
+			return abs, nil
+		}
+	}
+
+	return "", fmt.Errorf("could not find felt plugin source\n" +
+		"  Run `felt setup claude` first (clones the marketplace from GitHub),\n" +
+		"  or pass --source <checkout> for local development,\n" +
 		"  or set $FELT_PLUGIN_DIR pointing at <repo>/claude-plugin/")
 }
 
