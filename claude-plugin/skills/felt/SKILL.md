@@ -19,6 +19,51 @@ Proactive formalization. Retroactive extraction. Consolidation over time. Cohere
 
 ---
 
+## CLI
+
+```
+Something came into focus. Start:
+    felt add <slug> "name" -t tag -o "one-line outcome"
+
+Understanding crystallized. Accrete:
+    felt edit <id> --status active
+    felt edit <id> --tag X
+    felt edit <id> --decision cov --label "Covariance" --option 'glass:GLASS mocks'
+    felt edit <id> --input 'catalog:data:build-mocks.galaxy-catalog'    # id:type:source.output
+    felt edit <id> --insight 'stability:Posterior is stable under jackknife'
+    Read then Edit .felt/<path>/<slug>.md                               # body, wikilinks, deeper frontmatter
+
+Search and read:
+    felt ls                                              # tracked (open and active)
+    felt ls "query" [-t tag] [-s closed]                 # any filter widens to all statuses
+    felt ls --body "query"                               # FTS5 body search
+    felt show <id>                                       # full
+    felt show <id> -d summary | -d compact               # metadata + lede | + frontmatter counts
+    felt show <id> --body                                # body with start line
+    felt show <id> --decisions|--inputs|--insights       # targeted frontmatter slices
+
+A thread resolved. Close:
+    felt edit <id> --status closed --outcome "what was learned"
+
+History (per-fiber append-only event log):
+    felt history <id>                                    # editorial chain (newest first)
+    felt history <id> --last 1                           # what the previous session left
+    felt history <id> --mechanical                       # + add/edit/rm/external_edit
+    felt history append <id> --summary "..."             # log session continuity
+
+Maintain:
+    felt check                                           # broken refs, frontmatter issues
+    felt migrate [--dry-run]                             # normalize legacy layout
+```
+
+Statuses: · untracked, ○ open, ◐ active, ● closed
+Detail: name < compact < summary < full. Summary shows the lede (first paragraph of the body; write it to stand alone).
+Relationships: directory containment, `[[wikilinks]]` in bodies, `inputs.from` for data flow. Nested IDs use paths (bao-analysis/damping-prior).
+
+**Outcomes longer than a sentence:** edit `.felt/<path>/<slug>.md` directly using a `|-` block scalar (`outcome: |-`). `felt edit -o "…"` shell-escapes quotes and mangles multiline content; block scalar takes content literally so paragraphs, lists, and image embeds round-trip cleanly.
+
+---
+
 ## Philosophy
 
 **Formalize while working.** The moment to accrete structure is right after you respond, while the user reads; that time is unbilled, and what crystallized during the exchange is still fresh. Write inputs while scripts run, record excluded options the moment you reject them, file what just came into focus. Formalization belongs in the flow of the work, not in a separate pass at the end.
@@ -89,6 +134,15 @@ felt only round-trips the bytes.
 - Full context in outcome
 - Narrative/data-flow links where they carry meaning
 - Documentation fibers created when patterns recur
+
+---
+
+## Core Rules
+
+- **Outcomes teach.** One-sentence conclusions that stand alone: they appear in `felt ls` and `-d compact`.
+- **Use the right relationship surface.** Nest for containment, `[[wikilinks]]` for narrative, `inputs.from` for computational provenance only.
+- **Compose upward.** When closing, ask whether the lesson belongs in a doc fiber or the root fiber; consolidate breadcrumbs.
+- **Names are concise labels.** Body and outcome carry the content.
 
 ---
 

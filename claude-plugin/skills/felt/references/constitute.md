@@ -128,6 +128,7 @@ Some constitutions do not build code — they shape artifacts like documentation
 - **Snapshot language.** "Currently 50 files" — will be wrong after one iteration.
 - **Immutable seed.** Not our shape. The constitution is meant to be edited between iterations; do not treat it as frozen.
 - **Numerical convergence.** "Iteration stops when similarity ≥ 0.95" — wrong shape for science. Stop when the Evidence section says the desired state has been reached.
+- **Decision logs in the body.** "Resolved choices" / "Decisions made" / "Process notes" sections turn the constitution into a process journal. When a question gets answered (in conversation, via `AskUserQuestion`, in a review), fold the answer into the narrative where it is contextually relevant — into Invariants, Desired State, Context — and let `felt history` carry the chronology. The constitution describes *what is*, not *how we got here*; an "Open Questions" section that has been fully resolved should be deleted, not left as a victory log.
 
 ---
 

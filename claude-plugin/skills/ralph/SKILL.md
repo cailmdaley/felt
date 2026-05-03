@@ -11,6 +11,8 @@ description: >
 
 # Ralph
 
+**Activate the `felt` skill too if it isn't already active.** Ralph operates *on* fibers — the constitution you're realizing is a fiber, and every productive iteration files crystallizations as fibers, updates outcomes, appends `felt history` events. Without felt's body loaded, you'll miss the formalization rhythm, the ASTRA semantics, the references that shape *how* to do that work, not just *what* commands to run. Felt is the substrate; ralph is one consumer of it.
+
 Ralph is an autonomous loop iterator for long-running work against a fiber-defined constitution. The skill has two entry points, and only one applies at a time:
 
 - **Launching a loop** — outside any active loop, invoke the bundled launcher script to start an iteration sequence on a fiber. See **Launching** below.
