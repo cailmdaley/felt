@@ -35,43 +35,59 @@ func TestFindPluginDir_FromRepoCheckout(t *testing.T) {
 	}
 }
 
-// TestFindPluginDir_DirectPlugin verifies the resolver accepts a path that IS
-// the plugin directory (has .claude-plugin/plugin.json).
-func TestFindPluginDir_DirectPlugin(t *testing.T) {
+// scaffoldRepoLayout creates a tmp directory shaped like a felt repo:
+//
+//	<tmp>/
+//	├── .claude-plugin/marketplace.json
+//	└── claude-plugin/
+//	    └── .claude-plugin/plugin.json
+//
+// Returns (repoRoot, pluginDir).
+func scaffoldRepoLayout(t *testing.T) (string, string) {
+	t.Helper()
 	tmp := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(tmp, ".claude-plugin"), 0755); err != nil {
-		t.Fatalf("mkdir .claude-plugin: %v", err)
+		t.Fatalf("mkdir marketplace .claude-plugin: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(tmp, ".claude-plugin", "plugin.json"), []byte(`{}`), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(tmp, ".claude-plugin", "marketplace.json"), []byte(`{"name":"test","plugins":[]}`), 0644); err != nil {
+		t.Fatalf("write marketplace.json: %v", err)
+	}
+	pluginDir := filepath.Join(tmp, "claude-plugin")
+	if err := os.MkdirAll(filepath.Join(pluginDir, ".claude-plugin"), 0755); err != nil {
+		t.Fatalf("mkdir plugin .claude-plugin: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(pluginDir, ".claude-plugin", "plugin.json"), []byte(`{"name":"felt"}`), 0644); err != nil {
 		t.Fatalf("write plugin.json: %v", err)
 	}
+	return tmp, pluginDir
+}
 
-	pluginDir, err := findPluginDir(tmp)
+// TestFindPluginDir_FromRepoRoot verifies the resolver returns the
+// claude-plugin/ subdir when given the repo root (which has marketplace.json).
+func TestFindPluginDir_FromRepoRoot(t *testing.T) {
+	repoRoot, expectedPluginDir := scaffoldRepoLayout(t)
+
+	pluginDir, err := findPluginDir(repoRoot)
 	if err != nil {
-		t.Fatalf("findPluginDir(%s): %v", tmp, err)
+		t.Fatalf("findPluginDir(%s): %v", repoRoot, err)
 	}
-	if pluginDir != tmp {
-		t.Fatalf("expected %s, got %s", tmp, pluginDir)
+	if pluginDir != expectedPluginDir {
+		t.Fatalf("expected %s, got %s", expectedPluginDir, pluginDir)
 	}
 }
 
-// TestFindPluginDir_EnvVar verifies $FELT_PLUGIN_DIR is honoured when no source is given.
+// TestFindPluginDir_EnvVar verifies $FELT_PLUGIN_DIR pointing at the plugin
+// directory derives the marketplace root from its parent.
 func TestFindPluginDir_EnvVar(t *testing.T) {
-	tmp := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(tmp, ".claude-plugin"), 0755); err != nil {
-		t.Fatalf("mkdir .claude-plugin: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(tmp, ".claude-plugin", "plugin.json"), []byte(`{}`), 0644); err != nil {
-		t.Fatalf("write plugin.json: %v", err)
-	}
+	_, pluginDir := scaffoldRepoLayout(t)
 
-	t.Setenv("FELT_PLUGIN_DIR", tmp)
+	t.Setenv("FELT_PLUGIN_DIR", pluginDir)
 
-	pluginDir, err := findPluginDir("")
+	resolved, err := findPluginDir("")
 	if err != nil {
 		t.Fatalf("findPluginDir (env): %v", err)
 	}
-	if pluginDir != tmp {
-		t.Fatalf("expected %s, got %s", tmp, pluginDir)
+	if resolved != pluginDir {
+		t.Fatalf("expected %s, got %s", pluginDir, resolved)
 	}
 }

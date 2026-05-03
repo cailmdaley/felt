@@ -4,11 +4,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
-	"strings"
 
 	"github.com/spf13/cobra"
 )
+
+// marketplaceName is the marketplace name declared in
+// <repo>/.claude-plugin/marketplace.json. Used as the suffix in
+// `claude plugin install felt@<marketplaceName>`.
+const marketplaceName = "cailmdaley-felt"
 
 var setupCmd = &cobra.Command{
 	Use:   "setup",
@@ -18,18 +23,25 @@ var setupCmd = &cobra.Command{
 
 var setupClaudeCmd = &cobra.Command{
 	Use:   "claude",
-	Short: "Install felt Claude Code plugin",
+	Short: "Install the felt plugin for Claude Code via the plugin marketplace",
 	Long: `Install the felt plugin for Claude Code.
 
-Installs the felt plugin to ~/.claude/plugins/felt/ as a symlink to the
-source plugin directory. The plugin declares SessionStart and PreToolUse hooks
-and bundles the felt and ralph skills.
+Registers the felt repository as a Claude Code plugin marketplace and
+installs the felt plugin from it. The plugin bundles the felt and ralph
+skills plus SessionStart and PreToolUse hooks. Idempotent — re-running
+is safe.
 
-Resolution order for --source:
-  1. --source <path>      path to a felt repo checkout (uses <path>/claude-plugin/)
-                          or directly to the plugin directory (must contain plugin.json)
+Wraps the official Claude Code CLI:
+
+    claude plugin marketplace add <repo>
+    claude plugin install felt@` + marketplaceName + `
+
+Resolution order for --source (which repo to register):
+  1. --source <path>      path to a felt repo checkout containing
+                          .claude-plugin/marketplace.json
   2. $FELT_PLUGIN_DIR     env var pointing directly at the plugin directory
-  3. ~/.claude/plugins/felt  already-installed plugin (idempotent re-install)
+                          (the parent of which becomes the marketplace root)
+  3. ~/.claude/plugins/felt@` + marketplaceName + `  already-installed (idempotent re-install)
 
 Use --uninstall to remove.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -40,23 +52,12 @@ Use --uninstall to remove.`,
 			return uninstallPlugin()
 		}
 
-		pluginDir, err := findPluginDir(source)
+		repoRoot, err := findMarketplaceRoot(source)
 		if err != nil {
 			return err
 		}
 
-		if err := installPlugin(pluginDir); err != nil {
-			return err
-		}
-
-		// Clean up legacy hooks-in-settings from previous installations.
-		if err := uninstallClaudeHooks(); err != nil {
-			fmt.Printf("· Could not remove legacy settings.json hooks (may not be present): %v\n", err)
-		}
-
-		fmt.Println()
-		fmt.Println("Restart Claude Code for changes to take effect.")
-		return nil
+		return installPluginViaCLI(repoRoot)
 	},
 }
 
@@ -65,8 +66,11 @@ var setupCodexCmd = &cobra.Command{
 	Short: "Setup Codex integration",
 	Long: `Install felt hooks and skills for Codex.
 
-Installs felt hooks into Codex's hooks.json and symlinks the felt and ralph
-skills from the plugin directory into ~/.agents/skills/.
+Symlinks the felt and ralph skills from the plugin directory into
+~/.agents/skills/, and configures Codex's hooks.json to point at the
+plugin's hook scripts (session.sh, remind.sh) via the symlink at
+~/.agents/skills/felt/../hooks/. Codex doesn't have a plugin manifest
+of its own, so we shell out to the same scripts the plugin uses.
 
 Resolution order for --source:
   1. --source <path>      path to a felt repo checkout or plugin directory
@@ -78,24 +82,23 @@ Use --uninstall to remove.`,
 		source, _ := cmd.Flags().GetString("source")
 		uninstall, _ := cmd.Flags().GetBool("uninstall")
 
+		pluginDir, pluginErr := findPluginDir(source)
+
 		if uninstall {
-			return uninstallCodexHooks()
+			return uninstallCodexHooks(pluginDir)
 		}
 
-		if err := installCodexHooks(); err != nil {
+		if pluginErr != nil {
+			return fmt.Errorf("plugin directory required to install Codex hooks: %w\n  Install the plugin first with: felt setup claude --source <path>", pluginErr)
+		}
+
+		if err := installCodexHooks(pluginDir); err != nil {
 			return err
 		}
 
-		pluginDir, err := findPluginDir(source)
-		if err != nil {
-			fmt.Printf("· Could not find plugin directory for skills: %v\n", err)
-			fmt.Println("  Install the plugin first with: felt setup claude --source <path>")
-			fmt.Println()
-		} else {
-			skillsTarget := filepath.Join(os.Getenv("HOME"), ".agents", "skills")
-			if err := linkSkillsFromPlugin(skillsTarget, pluginDir); err != nil {
-				fmt.Printf("warning: could not link skills: %v\n", err)
-			}
+		skillsTarget := filepath.Join(os.Getenv("HOME"), ".agents", "skills")
+		if err := linkSkillsFromPlugin(skillsTarget, pluginDir); err != nil {
+			fmt.Printf("warning: could not link skills: %v\n", err)
 		}
 
 		fmt.Println()
@@ -159,97 +162,117 @@ func hasPluginManifest(dir string) bool {
 	return err == nil
 }
 
-// findPluginDir resolves the felt claude-plugin directory.
-// Resolution order: explicit source arg, $FELT_PLUGIN_DIR, ~/.claude/plugins/felt.
+// hasMarketplaceManifest returns true if dir contains a marketplace manifest at
+// .claude-plugin/marketplace.json (the standard marketplace layout).
+func hasMarketplaceManifest(dir string) bool {
+	_, err := os.Stat(filepath.Join(dir, ".claude-plugin", "marketplace.json"))
+	return err == nil
+}
+
+// findPluginDir returns the plugin directory derived from the marketplace
+// root: <repo-root>/claude-plugin/. Used by `setup codex` and `setup skills`,
+// which need to read skill directories or pass absolute paths to Codex hook
+// configuration.
 func findPluginDir(source string) (string, error) {
+	root, err := findMarketplaceRoot(source)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(root, "claude-plugin"), nil
+}
+
+// findMarketplaceRoot resolves the directory to register as a Claude Code
+// plugin marketplace. The directory must contain
+// .claude-plugin/marketplace.json (the felt repo root, by convention).
+//
+// Resolution order: explicit source arg, $FELT_PLUGIN_DIR, then derive from
+// the installed plugin's symlinked path.
+func findMarketplaceRoot(source string) (string, error) {
 	if source != "" {
-		// Could be a felt repo checkout (has claude-plugin/ subdir) or the plugin dir itself.
-		repoPlugin := filepath.Join(source, "claude-plugin")
-		if hasPluginManifest(repoPlugin) {
-			return repoPlugin, nil
+		if hasMarketplaceManifest(source) {
+			abs, err := filepath.Abs(source)
+			if err != nil {
+				return "", err
+			}
+			return abs, nil
 		}
-		if hasPluginManifest(source) {
-			return source, nil
+		// Allow pointing at the plugin subdir; walk one level up to find
+		// the marketplace root.
+		parent := filepath.Dir(source)
+		if hasMarketplaceManifest(parent) {
+			abs, err := filepath.Abs(parent)
+			if err != nil {
+				return "", err
+			}
+			return abs, nil
 		}
-		return "", fmt.Errorf("no plugin directory found at %q\n  Expected claude-plugin/.claude-plugin/plugin.json", source)
+		return "", fmt.Errorf("no marketplace manifest found at %q\n  Expected .claude-plugin/marketplace.json (felt repo root)", source)
 	}
 
 	if env := os.Getenv("FELT_PLUGIN_DIR"); env != "" {
-		if hasPluginManifest(env) {
-			return env, nil
+		// $FELT_PLUGIN_DIR points at the plugin dir; the repo root is its parent.
+		root := filepath.Dir(env)
+		if hasMarketplaceManifest(root) {
+			abs, err := filepath.Abs(root)
+			if err != nil {
+				return "", err
+			}
+			return abs, nil
 		}
-		return "", fmt.Errorf("$FELT_PLUGIN_DIR=%q: no .claude-plugin/plugin.json found there", env)
+		return "", fmt.Errorf("$FELT_PLUGIN_DIR=%q: parent has no .claude-plugin/marketplace.json", env)
 	}
 
-	home, _ := os.UserHomeDir()
-	installed := filepath.Join(home, ".claude", "plugins", "felt")
-	if hasPluginManifest(installed) {
-		return installed, nil
-	}
-
-	return "", fmt.Errorf("could not find felt plugin directory\n" +
+	return "", fmt.Errorf("could not find felt repo root\n" +
 		"  Pass --source <checkout> (e.g. felt setup claude --source ~/src/felt)\n" +
-		"  or set $FELT_PLUGIN_DIR, or install first via the Claude Code plugin marketplace")
+		"  or set $FELT_PLUGIN_DIR pointing at <repo>/claude-plugin/")
 }
 
-// installPlugin symlinks the felt plugin from src to ~/.claude/plugins/felt/.
-func installPlugin(src string) error {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return err
-	}
-	pluginsDir := filepath.Join(home, ".claude", "plugins")
-	if err := os.MkdirAll(pluginsDir, 0755); err != nil {
-		return fmt.Errorf("creating plugins directory: %w", err)
+// installPluginViaCLI registers the marketplace and installs the plugin via
+// the Claude Code CLI (`claude plugin marketplace add` and `claude plugin
+// install`). Both commands are idempotent — re-running is safe.
+func installPluginViaCLI(repoRoot string) error {
+	if _, err := exec.LookPath("claude"); err != nil {
+		return fmt.Errorf("claude CLI not found in PATH; install Claude Code first: %w", err)
 	}
 
-	dest := filepath.Join(pluginsDir, "felt")
-
-	// If dest already resolves to the same source, it's a no-op.
-	if existing, err := os.Readlink(dest); err == nil && existing == src {
-		fmt.Printf("· Plugin already linked: %s → %s\n", dest, src)
-		return nil
+	if err := runClaudeCLI("plugin", "marketplace", "add", repoRoot); err != nil {
+		return fmt.Errorf("registering marketplace: %w", err)
 	}
 
-	if err := os.RemoveAll(dest); err != nil {
-		return fmt.Errorf("removing existing plugin at %s: %w", dest, err)
-	}
-
-	abs, err := filepath.Abs(src)
-	if err != nil {
-		return err
-	}
-	if err := os.Symlink(abs, dest); err != nil {
-		return fmt.Errorf("symlinking plugin: %w", err)
-	}
-	fmt.Printf("✓ Installed plugin: %s → %s\n", dest, abs)
-	return nil
-}
-
-// uninstallPlugin removes the felt plugin from ~/.claude/plugins/felt/.
-func uninstallPlugin() error {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return err
-	}
-	dest := filepath.Join(home, ".claude", "plugins", "felt")
-	if _, err := os.Lstat(dest); os.IsNotExist(err) {
-		fmt.Println("No felt plugin found at ~/.claude/plugins/felt")
-	} else {
-		if err := os.RemoveAll(dest); err != nil {
-			return fmt.Errorf("removing plugin: %w", err)
-		}
-		fmt.Println("✓ Removed plugin from ~/.claude/plugins/felt")
-	}
-
-	// Also clean up legacy settings.json hooks.
-	if err := uninstallClaudeHooks(); err == nil {
-		fmt.Println("✓ Removed legacy settings.json hooks")
+	pluginRef := "felt@" + marketplaceName
+	if err := runClaudeCLI("plugin", "install", pluginRef); err != nil {
+		return fmt.Errorf("installing %s: %w", pluginRef, err)
 	}
 
 	fmt.Println()
 	fmt.Println("Restart Claude Code for changes to take effect.")
 	return nil
+}
+
+// uninstallPlugin removes the felt plugin via the Claude Code CLI. Leaves
+// the marketplace registered (cheap to keep; harmless if never used again).
+func uninstallPlugin() error {
+	if _, err := exec.LookPath("claude"); err != nil {
+		return fmt.Errorf("claude CLI not found in PATH: %w", err)
+	}
+
+	pluginRef := "felt@" + marketplaceName
+	if err := runClaudeCLI("plugin", "uninstall", pluginRef); err != nil {
+		return fmt.Errorf("uninstalling %s: %w", pluginRef, err)
+	}
+
+	fmt.Println()
+	fmt.Println("Restart Claude Code for changes to take effect.")
+	return nil
+}
+
+// runClaudeCLI invokes the claude CLI, piping stdout/stderr through to the
+// caller so the user sees the same status output Claude Code prints natively.
+func runClaudeCLI(args ...string) error {
+	cmd := exec.Command("claude", args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
 }
 
 // linkSkillsFromPlugin symlinks each skill in <pluginDir>/skills/ into targetDir.
@@ -319,7 +342,18 @@ func codexHooksPath() (string, error) {
 	return filepath.Join(home, ".codex", "hooks.json"), nil
 }
 
-func installCodexHooks() error {
+// codexHookCommands returns the (sessionCmd, remindCmd) bash invocations Codex
+// should use, pointed at the plugin's hook scripts via absolute paths. The
+// scripts are part of the plugin install (claude-plugin/hooks/*.sh) and stay
+// in lockstep with the plugin's hooks.json bindings.
+func codexHookCommands(pluginDir string) (string, string) {
+	abs, _ := filepath.Abs(pluginDir)
+	session := fmt.Sprintf("%q", filepath.Join(abs, "hooks", "session.sh"))
+	remind := fmt.Sprintf("%q", filepath.Join(abs, "hooks", "remind.sh"))
+	return session, remind
+}
+
+func installCodexHooks(pluginDir string) error {
 	hooksPath, err := codexHooksPath()
 	if err != nil {
 		return err
@@ -341,14 +375,16 @@ func installCodexHooks() error {
 		settings["hooks"] = hooks
 	}
 
-	if addHook(hooks, "SessionStart", "", "felt hook session") {
-		fmt.Println("✓ Added SessionStart hook: felt hook session")
+	sessionCmd, remindCmd := codexHookCommands(pluginDir)
+
+	if addHook(hooks, "SessionStart", "", sessionCmd) {
+		fmt.Printf("✓ Added SessionStart hook: %s\n", sessionCmd)
 	} else {
 		fmt.Println("· SessionStart hook already installed")
 	}
 
-	if addHook(hooks, "PreToolUse", "", "felt hook remind") {
-		fmt.Println("✓ Added PreToolUse hook: felt hook remind")
+	if addHook(hooks, "PreToolUse", "", remindCmd) {
+		fmt.Printf("✓ Added PreToolUse hook: %s\n", remindCmd)
 	} else {
 		fmt.Println("· PreToolUse hook already installed")
 	}
@@ -361,14 +397,13 @@ func installCodexHooks() error {
 		return fmt.Errorf("writing hooks.json: %w", err)
 	}
 
-	_ = uninstallCodexWrapper()
 	fmt.Println()
 	fmt.Printf("Hooks: %s\n", hooksPath)
 	fmt.Println("If native hooks are still disabled, run: codex features enable codex_hooks")
 	return nil
 }
 
-func uninstallCodexHooks() error {
+func uninstallCodexHooks(pluginDir string) error {
 	hooksPath, err := codexHooksPath()
 	if err != nil {
 		return err
@@ -377,7 +412,6 @@ func uninstallCodexHooks() error {
 	data, err := os.ReadFile(hooksPath)
 	if err != nil {
 		fmt.Println("No Codex hooks.json found")
-		_ = uninstallCodexWrapper()
 		return nil
 	}
 
@@ -389,16 +423,20 @@ func uninstallCodexHooks() error {
 	hooks, ok := settings["hooks"].(map[string]interface{})
 	if !ok {
 		fmt.Println("No hooks found")
-		_ = uninstallCodexWrapper()
 		return nil
 	}
 
+	if pluginDir == "" {
+		return fmt.Errorf("uninstall requires the plugin directory to know which scripts to remove\n  Pass --source <checkout> or set $FELT_PLUGIN_DIR")
+	}
+
+	sessionCmd, remindCmd := codexHookCommands(pluginDir)
 	removed := false
-	if removeHook(hooks, "SessionStart", "felt hook session") {
+	if removeHook(hooks, "SessionStart", sessionCmd) {
 		fmt.Println("✓ Removed SessionStart hook")
 		removed = true
 	}
-	if removeHook(hooks, "PreToolUse", "felt hook remind") {
+	if removeHook(hooks, "PreToolUse", remindCmd) {
 		fmt.Println("✓ Removed PreToolUse hook")
 		removed = true
 	}
@@ -416,63 +454,7 @@ func uninstallCodexHooks() error {
 		fmt.Println("No felt Codex hooks found")
 	}
 
-	_ = uninstallCodexWrapper()
 	return nil
-}
-
-// claudeSettingsPath returns the path to Claude Code's settings.json
-func claudeSettingsPath() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("getting home directory: %w", err)
-	}
-	return filepath.Join(home, ".claude", "settings.json"), nil
-}
-
-// uninstallClaudeHooks removes felt hooks from Claude Code settings.json.
-// Used for backward-compat cleanup when migrating from the old embed-based install.
-func uninstallClaudeHooks() error {
-	settingsPath, err := claudeSettingsPath()
-	if err != nil {
-		return err
-	}
-
-	data, err := os.ReadFile(settingsPath)
-	if err != nil {
-		return nil // no settings file; nothing to clean
-	}
-
-	var settings map[string]interface{}
-	if err := json.Unmarshal(data, &settings); err != nil {
-		return fmt.Errorf("parsing settings.json: %w", err)
-	}
-
-	hooks, ok := settings["hooks"].(map[string]interface{})
-	if !ok {
-		return nil
-	}
-
-	removed := false
-	if removeHook(hooks, "SessionStart", "felt hook session") {
-		removed = true
-	}
-	if removeHook(hooks, "PreToolUse", "felt hook remind") {
-		removed = true
-	}
-	consciencePath := filepath.Join(filepath.Dir(settingsPath), "hooks", "felt-conscience.sh")
-	if removeHook(hooks, "Stop", consciencePath) {
-		removed = true
-	}
-
-	if !removed {
-		return nil
-	}
-
-	data, err = json.MarshalIndent(settings, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshaling settings: %w", err)
-	}
-	return os.WriteFile(settingsPath, data, 0644)
 }
 
 // addHook adds a hook command to an event if not already present.
@@ -586,110 +568,3 @@ func removeHook(hooks map[string]interface{}, event, command string) bool {
 	return removed
 }
 
-// rcFilePath returns the shell RC file path based on $SHELL.
-func rcFilePath() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("getting home directory: %w", err)
-	}
-	shell := os.Getenv("SHELL")
-	if strings.Contains(shell, "zsh") {
-		return filepath.Join(home, ".zshrc"), nil
-	}
-	return filepath.Join(home, ".bashrc"), nil
-}
-
-const codexSentinelStart = "# felt integration — added by felt setup codex"
-const codexSentinelEnd = "# end felt integration"
-
-const codexWrapper = `# felt integration — added by felt setup codex
-function codex() {
-    local felt_context
-    felt_context=$(felt hook session 2>/dev/null || true)
-    if [ -n "$felt_context" ]; then
-        command codex --config "developer_instructions=$felt_context" "$@"
-    else
-        command codex "$@"
-    fi
-}
-# end felt integration`
-
-func installCodexWrapper() error {
-	rcPath, err := rcFilePath()
-	if err != nil {
-		return err
-	}
-
-	// Read existing content
-	content := ""
-	if data, err := os.ReadFile(rcPath); err == nil {
-		content = string(data)
-	}
-
-	// Idempotent: already installed?
-	if strings.Contains(content, codexSentinelStart) {
-		fmt.Printf("· codex wrapper already installed in %s\n", rcPath)
-		return nil
-	}
-
-	// Append
-	sep := ""
-	if len(content) > 0 && !strings.HasSuffix(content, "\n") {
-		sep = "\n"
-	}
-	newContent := content + sep + "\n" + codexWrapper + "\n"
-
-	if err := os.WriteFile(rcPath, []byte(newContent), 0644); err != nil {
-		return fmt.Errorf("writing %s: %w", rcPath, err)
-	}
-
-	fmt.Printf("✓ Installed codex wrapper in %s\n", rcPath)
-	fmt.Printf("  Run: source %s\n", rcPath)
-	return nil
-}
-
-func uninstallCodexWrapper() error {
-	rcPath, err := rcFilePath()
-	if err != nil {
-		return err
-	}
-
-	data, err := os.ReadFile(rcPath)
-	if err != nil {
-		return nil // No RC file; nothing to do.
-	}
-
-	content := string(data)
-	if !strings.Contains(content, codexSentinelStart) {
-		return nil
-	}
-
-	// Remove block between sentinels (inclusive)
-	var out []string
-	inside := false
-	for _, line := range strings.Split(content, "\n") {
-		if strings.TrimSpace(line) == codexSentinelStart {
-			inside = true
-			// Also remove the blank line before the sentinel if present
-			if len(out) > 0 && out[len(out)-1] == "" {
-				out = out[:len(out)-1]
-			}
-			continue
-		}
-		if inside {
-			if strings.TrimSpace(line) == codexSentinelEnd {
-				inside = false
-			}
-			continue
-		}
-		out = append(out, line)
-	}
-
-	newContent := strings.Join(out, "\n")
-	if err := os.WriteFile(rcPath, []byte(newContent), 0644); err != nil {
-		return fmt.Errorf("writing %s: %w", rcPath, err)
-	}
-
-	fmt.Printf("✓ Removed codex wrapper from %s\n", rcPath)
-	return nil
-}

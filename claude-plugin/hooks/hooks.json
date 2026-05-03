@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "felt hook session"
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/session.sh\""
           }
         ]
       }
@@ -15,7 +15,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "felt hook remind"
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/remind.sh\""
           }
         ]
       }

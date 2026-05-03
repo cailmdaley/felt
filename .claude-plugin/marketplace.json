@@ -1,0 +1,15 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "cailmdaley-felt",
+  "description": "felt — fiber-based thinking substrate for Claude Code. Active fibers and recently touched land in SessionStart context; the felt skill body carries the practice (philosophy, CLI, references). Sibling ralph skill for autonomous loop iteration over a constitution.",
+  "owner": {
+    "name": "Cail Daley"
+  },
+  "plugins": [
+    {
+      "name": "felt",
+      "description": "felt — fiber-based thinking substrate. Bundles the felt skill (substrate practice), the ralph skill (autonomous loops over a constitution), and SessionStart + PreToolUse hooks that deliver active fibers and gate non-felt tool use until the felt skill is activated.",
+      "source": "./claude-plugin"
+    }
+  ]
+}

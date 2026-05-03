@@ -23,10 +23,10 @@ var retiredCommandPhrases = []string{
 }
 
 func TestGeneratedGuidanceAvoidsRetiredCommands(t *testing.T) {
+	// Only scan the in-binary string fixtures; the plugin tree (skills,
+	// hooks, manifest) is scanned by TestPluginSkillsAvoidRetiredCommands.
 	for name, text := range map[string]string{
-		"cliReference":    cliReference(),
 		"claudeMDSnippet": claudeMDSnippet(),
-		"minimalOutput":   minimalOutput(),
 	} {
 		for _, phrase := range retiredCommandPhrases {
 			if strings.Contains(text, phrase) {
@@ -70,7 +70,6 @@ func TestRootCommandSurfaceIsConsolidated(t *testing.T) {
 		"check",
 		"edit",
 		"history",
-		"hook",
 		"init",
 		"ls",
 		"migrate",
@@ -87,7 +86,13 @@ func TestRootCommandSurfaceIsConsolidated(t *testing.T) {
 		}
 	}
 
-	if len(visible) > 16 {
+	// `hook` is no longer a felt subcommand; the plugin's hook scripts
+	// (claude-plugin/hooks/*.sh) carry that integration directly.
+	if slices.Contains(visible, "hook") {
+		t.Fatalf("root command surface still exposes retired `hook` subcommand: %v", visible)
+	}
+
+	if len(visible) > 15 {
 		t.Fatalf("root command surface too large: got %d commands (%v)", len(visible), visible)
 	}
 }
@@ -267,9 +272,7 @@ func TestDocsAvoidLegacyTagExtractionExample(t *testing.T) {
 
 func TestGeneratedGuidanceAvoidsLegacyTitleDetailLevel(t *testing.T) {
 	for name, text := range map[string]string{
-		"cliReference":    cliReference(),
 		"claudeMDSnippet": claudeMDSnippet(),
-		"minimalOutput":   minimalOutput(),
 	} {
 		if strings.Contains(text, "title < compact") {
 			t.Fatalf("%s still mentions legacy title detail level", name)
@@ -277,5 +280,35 @@ func TestGeneratedGuidanceAvoidsLegacyTitleDetailLevel(t *testing.T) {
 		if strings.Contains(text, "Detail level (title, compact, summary, full)") {
 			t.Fatalf("%s still mentions legacy title detail flag help", name)
 		}
+	}
+}
+
+// TestPluginAssetsAvoidLegacyTitleDetailLevel walks the plugin tree (skills,
+// hooks, manifest) for legacy detail-level phrasing.
+func TestPluginAssetsAvoidLegacyTitleDetailLevel(t *testing.T) {
+	root := repoRoot(t)
+	pluginRoot := filepath.Join(root, "claude-plugin")
+	if _, err := os.Stat(pluginRoot); err != nil {
+		t.Skipf("no claude-plugin at %s: %v", pluginRoot, err)
+	}
+	err := filepath.Walk(pluginRoot, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return err
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		text := string(data)
+		if strings.Contains(text, "title < compact") {
+			t.Fatalf("%s still mentions legacy title detail level", path)
+		}
+		if strings.Contains(text, "Detail level (title, compact, summary, full)") {
+			t.Fatalf("%s still mentions legacy title detail flag help", path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk %s: %v", pluginRoot, err)
 	}
 }
