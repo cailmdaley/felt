@@ -120,16 +120,16 @@ func TestShowDecisionsAndInputsSelectors(t *testing.T) {
 		ID:        "fiber-a",
 		Name:      "Fiber A",
 		CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z"),
-		Inputs: []felt.ASTRAInput{
+		Inputs: []felt.FiberInput{
 			{ID: "catalog", Type: "data", From: "source.catalog"},
 		},
-		Decisions: map[string]felt.ASTRADecision{
+		Decisions: map[string]felt.Decision{
 			"covariance": {
 				Label:   "Covariance method",
 				Default: "glass",
 			},
 		},
-		Insights: map[string]felt.ASTRAInsight{
+		Insights: map[string]felt.Insight{
 			"claim-a": {Claim: "The result is stable."},
 		},
 	}); err != nil {
@@ -283,7 +283,7 @@ func TestShowIncludesIndexedConsumers(t *testing.T) {
 			ID:        "project/question",
 			Name:      "Question",
 			CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z"),
-			Outputs: []felt.ASTRAOutput{
+			Outputs: []felt.FiberOutput{
 				{ID: "posterior", Type: "data"},
 			},
 		},
@@ -291,7 +291,7 @@ func TestShowIncludesIndexedConsumers(t *testing.T) {
 			ID:        "project/analysis",
 			Name:      "Analysis",
 			CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z"),
-			Inputs: []felt.ASTRAInput{
+			Inputs: []felt.FiberInput{
 				{ID: "catalog", From: "question.posterior"},
 			},
 		},
@@ -329,7 +329,7 @@ func TestShowConsumersSelectorOutputsStructuredResults(t *testing.T) {
 			ID:        "project/analysis",
 			Name:      "Analysis",
 			CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z"),
-			Inputs: []felt.ASTRAInput{
+			Inputs: []felt.FiberInput{
 				{ID: "catalog", From: "question.posterior"},
 			},
 		},
@@ -387,7 +387,7 @@ func TestShowCitationsSelectorOutputsStructuredResults(t *testing.T) {
 	}
 }
 
-func TestShowFullIncludesAllASTRASections(t *testing.T) {
+func TestShowFullIncludesAllFrontmatterSections(t *testing.T) {
 	dir := t.TempDir()
 	storage := felt.NewStorage(dir)
 	if err := storage.Init(); err != nil {
@@ -399,17 +399,17 @@ func TestShowFullIncludesAllASTRASections(t *testing.T) {
 		CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z"),
 		Outcome:   "Shipped.",
 		Body:      "Body paragraph.",
-		Inputs: []felt.ASTRAInput{
+		Inputs: []felt.FiberInput{
 			{ID: "catalog", Type: "data", From: "upstream.posterior", Description: "Posterior sample"},
 		},
-		Outputs: []felt.ASTRAOutput{
+		Outputs: []felt.FiberOutput{
 			{ID: "posterior", Type: "data", Description: "MCMC posterior"},
 		},
-		Decisions: map[string]felt.ASTRADecision{
+		Decisions: map[string]felt.Decision{
 			"covariance": {
 				Label:   "Covariance method",
 				Default: "glass",
-				Options: map[string]felt.ASTRADecisionOption{
+				Options: map[string]felt.DecisionOption{
 					"glass": {Label: "GLASS mocks"},
 					"analytic": {
 						Label:          "Analytic covariance",
@@ -419,7 +419,7 @@ func TestShowFullIncludesAllASTRASections(t *testing.T) {
 				},
 			},
 		},
-		Insights: map[string]felt.ASTRAInsight{
+		Insights: map[string]felt.Insight{
 			"stability": {Claim: "Posterior is stable to jackknife choice."},
 		},
 	}); err != nil {
@@ -470,7 +470,7 @@ func TestShowFullIncludesAllASTRASections(t *testing.T) {
 		"claim: Posterior is stable to jackknife choice.",
 	} {
 		if !strings.Contains(out, want) {
-			t.Errorf("show -d full missing ASTRA section %q:\n%s", want, out)
+			t.Errorf("show -d full missing section %q:\n%s", want, out)
 		}
 	}
 
@@ -490,10 +490,10 @@ func TestShowCompactDoesNotIncludeDecisionDetails(t *testing.T) {
 		ID:        "fiber-a",
 		Name:      "Fiber A",
 		CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z"),
-		Decisions: map[string]felt.ASTRADecision{
+		Decisions: map[string]felt.Decision{
 			"covariance": {
 				Label: "Covariance method",
-				Options: map[string]felt.ASTRADecisionOption{
+				Options: map[string]felt.DecisionOption{
 					"glass": {Label: "GLASS mocks"},
 				},
 			},
@@ -512,8 +512,8 @@ func TestShowCompactDoesNotIncludeDecisionDetails(t *testing.T) {
 	if strings.Contains(out, "Decisions:\n") {
 		t.Fatalf("show -d compact should not render full Decisions: section:\n%s", out)
 	}
-	if !strings.Contains(out, "ASTRA:") {
-		t.Fatalf("show -d compact should render ASTRA count line:\n%s", out)
+	if !strings.Contains(out, "Fields:") {
+		t.Fatalf("show -d compact should render frontmatter count line:\n%s", out)
 	}
 }
 

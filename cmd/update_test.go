@@ -40,12 +40,17 @@ func TestRefreshInstalledSkillsUpdatesCopiedSkills(t *testing.T) {
 	t.Setenv("HOME", home)
 
 	target := filepath.Join(home, ".agents", "skills")
-	skillRoot := filepath.Join(target, "felt")
-	stalePath := filepath.Join(target, "felt", "scripts", "ralph")
+	feltRoot := filepath.Join(target, "felt")
+	// The ralph launcher now lives in the ralph skill, not the felt skill.
+	stalePath := filepath.Join(target, "ralph", "scripts", "ralph")
 	if err := os.MkdirAll(filepath.Dir(stalePath), 0755); err != nil {
 		t.Fatalf("mkdir stale path: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(skillRoot, "SKILL.md"), []byte("stale skill"), 0644); err != nil {
+	// felt/SKILL.md must exist so detectBundledSkillInstall considers this a copied install.
+	if err := os.MkdirAll(feltRoot, 0755); err != nil {
+		t.Fatalf("mkdir felt root: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(feltRoot, "SKILL.md"), []byte("stale skill"), 0644); err != nil {
 		t.Fatalf("write stale SKILL.md: %v", err)
 	}
 	if err := os.WriteFile(stalePath, []byte("stale ralph"), 0755); err != nil {

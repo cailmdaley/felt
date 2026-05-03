@@ -10,7 +10,7 @@ import (
 func TestCheckDecisionWithoutOptions(t *testing.T) {
 	issues := Check([]*Felt{{
 		ID: "fiber-a",
-		Decisions: map[string]ASTRADecision{
+		Decisions: map[string]Decision{
 			"choice": {Label: "Choice"},
 		},
 	}})
@@ -30,10 +30,10 @@ func TestCheckClosedFiberRequiresSelectedDecision(t *testing.T) {
 	issues := Check([]*Felt{{
 		ID:     "fiber-a",
 		Status: StatusClosed,
-		Decisions: map[string]ASTRADecision{
+		Decisions: map[string]Decision{
 			"choice": {
 				Label: "Choice",
-				Options: map[string]ASTRADecisionOption{
+				Options: map[string]DecisionOption{
 					"a": {Label: "Option A"},
 				},
 			},
@@ -51,9 +51,9 @@ func TestCheckClosedFiberRequiresSelectedDecision(t *testing.T) {
 func TestCheckEvidenceStub(t *testing.T) {
 	issues := Check([]*Felt{{
 		ID: "fiber-a",
-		Insights: map[string]ASTRAInsight{
+		Insights: map[string]Insight{
 			"claim": {
-				Evidence: []ASTRAEvidence{
+				Evidence: []Evidence{
 					{ID: "stub"},
 				},
 			},
@@ -71,7 +71,7 @@ func TestCheckEvidenceStub(t *testing.T) {
 func TestCheckInsightWithoutEvidenceWarns(t *testing.T) {
 	issues := Check([]*Felt{{
 		ID: "fiber-a",
-		Insights: map[string]ASTRAInsight{
+		Insights: map[string]Insight{
 			"claim": {Claim: "Something happened"},
 		},
 	}})
@@ -112,10 +112,10 @@ func TestCheckBrokenBodyReferenceFragment(t *testing.T) {
 		},
 		{
 			ID: "fiber-b",
-			Decisions: map[string]ASTRADecision{
+			Decisions: map[string]Decision{
 				"choice": {
 					Label: "Choice",
-					Options: map[string]ASTRADecisionOption{
+					Options: map[string]DecisionOption{
 						"keep": {Label: "Keep"},
 					},
 				},
@@ -137,7 +137,7 @@ func TestCheckBrokenBodyReferenceFragment(t *testing.T) {
 func TestCheckBrokenDataFlowReference(t *testing.T) {
 	issues := Check([]*Felt{{
 		ID: "fiber-a",
-		Inputs: []ASTRAInput{
+		Inputs: []FiberInput{
 			{ID: "catalog", From: "missing.output"},
 		},
 	}})
@@ -157,13 +157,13 @@ func TestCheckBrokenDataFlowOutputReference(t *testing.T) {
 	issues := Check([]*Felt{
 		{
 			ID: "fiber-a",
-			Inputs: []ASTRAInput{
+			Inputs: []FiberInput{
 				{ID: "catalog", From: "fiber-b.missing-output"},
 			},
 		},
 		{
 			ID:      "fiber-b",
-			Outputs: []ASTRAOutput{{ID: "present-output"}},
+			Outputs: []FiberOutput{{ID: "present-output"}},
 		},
 	})
 
@@ -181,9 +181,9 @@ func TestCheckBrokenDataFlowOutputReference(t *testing.T) {
 func TestCheckDecisionWithAllOptionsExcludedWarns(t *testing.T) {
 	issues := Check([]*Felt{{
 		ID: "fiber-a",
-		Decisions: map[string]ASTRADecision{
+		Decisions: map[string]Decision{
 			"choice": {
-				Options: map[string]ASTRADecisionOption{
+				Options: map[string]DecisionOption{
 					"a": {Label: "Option A", Excluded: true, ExcludedReason: "bad"},
 				},
 			},
@@ -205,9 +205,9 @@ func TestCheckSiblingDepthConsistencyWarning(t *testing.T) {
 	issues := Check([]*Felt{
 		{
 			ID: "parent/fully-formed",
-			Decisions: map[string]ASTRADecision{
+			Decisions: map[string]Decision{
 				"choice": {
-					Options: map[string]ASTRADecisionOption{
+					Options: map[string]DecisionOption{
 						"a": {Label: "Option A"},
 						"b": {Label: "Option B", Excluded: true, ExcludedReason: "too costly"},
 					},
@@ -217,7 +217,7 @@ func TestCheckSiblingDepthConsistencyWarning(t *testing.T) {
 		},
 		{
 			ID: "parent/lightweight",
-			Inputs: []ASTRAInput{
+			Inputs: []FiberInput{
 				{ID: "catalog"},
 			},
 		},

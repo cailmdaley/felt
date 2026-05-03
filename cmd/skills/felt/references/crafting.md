@@ -135,7 +135,7 @@ On flush, present the ledger grouped by destination, then file with the user's a
 
 ## Qualitative ambiguity self-check
 
-Before committing to a path — filing a decision, launching a ralph, sealing an outcome — check three things qualitatively. **No scoring, no thresholds.** If any feels fuzzy, resolve it with AskUserQuestion.
+Before committing to a path — filing a decision, launching an iteration loop, sealing an outcome — check three things qualitatively. **No scoring, no thresholds.** If any feels fuzzy, resolve it with AskUserQuestion.
 
 1. **Goal.** Is what the user wants specific enough that two competent people would build the same thing from it? If not, what would pin it down?
 2. **Constraints.** Are the limits named? What cannot change, what must be preserved, what would break everything? Missing constraints tend to show up as "oh wait, we also need…" after the commit.
@@ -153,7 +153,7 @@ This is a mirror, not a gate. If the user wants to file anyway with one dimensio
 
 - A design choice where two plausible paths both look right and the user is stuck
 - Validating that an insight claim actually follows from its evidence
-- Pressure-testing a constitution's desired state before launching the ralph
+- Pressure-testing a constitution's desired state before launching iteration
 
 Bad fits: routine decisions, the user has already committed, the dispute is stylistic, or the answer only needs three more seconds of thought. `/confer` is not a substitute for the user's taste — it is a second opinion when the first opinion is honestly unsure.
 

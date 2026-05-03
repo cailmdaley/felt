@@ -286,7 +286,7 @@ func TestMarshal(t *testing.T) {
 	f := &Felt{
 		ID:        "test-task",
 		Name:      "Test Task",
-		Inputs:    []ASTRAInput{{ID: "dep_1", From: "dep-1.output"}},
+		Inputs:    []FiberInput{{ID: "dep_1", From: "dep-1.output"}},
 		CreatedAt: now,
 		Body:      "Body text here.",
 	}
@@ -479,36 +479,36 @@ func TestSearchTextIncludesASTRAFields(t *testing.T) {
 	f := &Felt{
 		Outcome:     "Outcome text",
 		Description: "Description text",
-		Inputs: []ASTRAInput{
+		Inputs: []FiberInput{
 			{ID: "clustering_data", Description: "DESI DR1 clustering data"},
 		},
-		Outputs: []ASTRAOutput{
-			{ID: "damped_pk", Description: "Power spectrum figure", Recipe: &ASTRARecipe{Command: "python fit.py"}},
+		Outputs: []FiberOutput{
+			{ID: "damped_pk", Description: "Power spectrum figure", Recipe: &FiberRecipe{Command: "python fit.py"}},
 		},
-		Decisions: map[string]ASTRADecision{
+		Decisions: map[string]Decision{
 			"damping_prior": {
 				Label:     "BAO Damping Prior",
 				Rationale: "Broadband projection creates spurious minima",
 			},
 		},
-		Insights: map[string]ASTRAInsight{
+		Insights: map[string]Insight{
 			"damping_physical": {
 				Claim: "Pairwise displacements are about 10 Mpc",
 				Scope: "Linear BAO regime",
 				Tags:  []string{"bao", "literature"},
 				Notes: "Anchor the prior to cited literature",
-				Evidence: []ASTRAEvidence{
+				Evidence: []Evidence{
 					{
 						ID:  "ev1",
 						DOI: "10.48550/arXiv.astro-ph/0604361",
-						Document: &ASTRADocument{
+						Document: &EvidenceDocument{
 							Path:   "docs/unions_release/unions_shear_catalog_paper/draft_corrected.tex",
 							Commit: "abcdef1234567890",
 						},
-						Quote:  &ASTRAQuote{Type: "TextQuoteSelector", Exact: "velocity flows move matter ~10 Mpc", Prefix: "Large-scale", Suffix: "across the BAO peak"},
-						Figure: &ASTRAFigure{Type: "FigureSelector", Label: "Figure 1", Caption: "BAO damping from bulk flows"},
-						Table:  &ASTRATable{Type: "TableSelector", Label: "Table 2", Region: "row 3"},
-						Location: &ASTRAFragment{
+						Quote:  &EvidenceQuote{Type: "TextQuoteSelector", Exact: "velocity flows move matter ~10 Mpc", Prefix: "Large-scale", Suffix: "across the BAO peak"},
+						Figure: &EvidenceFigure{Type: "FigureSelector", Label: "Figure 1", Caption: "BAO damping from bulk flows"},
+						Table:  &EvidenceTable{Type: "TableSelector", Label: "Table 2", Region: "row 3"},
+						Location: &EvidenceFragment{
 							Type:  "LineSelector",
 							Start: intPtr(300),
 							End:   intPtr(304),
@@ -517,7 +517,7 @@ func TestSearchTextIncludesASTRAFields(t *testing.T) {
 				},
 			},
 		},
-		SuccessCriteria: []ASTRASuccessCriterion{
+		SuccessCriteria: []SuccessCriterion{
 			{Claim: "Shift stays below 0.5 sigma"},
 		},
 		Container: "python:3.11-slim",
@@ -849,7 +849,7 @@ func TestMarshalInputRefs(t *testing.T) {
 		ID:     "mixed-inputs",
 		Name:   "Mixed input refs test",
 		Status: StatusOpen,
-		Inputs: []ASTRAInput{
+		Inputs: []FiberInput{
 			{ID: "data_input", From: "bare-id"},
 			{ID: "labeled_input", From: "labeled-id.output"},
 		},

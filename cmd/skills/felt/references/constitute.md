@@ -1,6 +1,6 @@
 # Constitute
 
-Drafting a ralph constitution — a fiber spec describing a desired state for autonomous iteration. This is the crafting process (see SKILL.md and `crafting.md`) applied to a specific artifact type: a living document that iterations re-read with fresh context until the work is done.
+Drafting a constitution — a fiber spec describing a desired state for autonomous iteration. This is the crafting process (see SKILL.md and `crafting.md`) applied to a specific artifact type: a living document that an iteration runner re-reads with fresh context until the work is done. Felt is agnostic about the runner — popular ones are sibling skills (`ralph`, `shuttle`, etc.); the constitution itself is just a tagged fiber.
 
 ---
 
@@ -10,7 +10,7 @@ A constitution is a design document with trust built in. Like a governmental con
 
 **A good constitution never says "50 files remain"** — that is a snapshot that goes stale. It says `check "grep -r 'old_pattern'"` — that is a principle that stays true until the work is done.
 
-Constitutions do not prescribe steps. They describe what the system looks like when it is right — the desired state, in both senses of the word. Nothing in the constitution should become confusing or unnecessary as the desired state is reached. Whoever works from it surveys reality, reasons about the gap, and decides what is highest value. In a ralph loop, each iteration does this with fresh context.
+Constitutions do not prescribe steps. They describe what the system looks like when it is right — the desired state, in both senses of the word. Nothing in the constitution should become confusing or unnecessary as the desired state is reached. Whoever works from it surveys reality, reasons about the gap, and decides what is highest value. Each iteration of the work does this with fresh context.
 
 **Constitution, not plan.** Plans assume you know the path; constitutions trust the agent to find it — with taste, judgment, and fresh eyes each time. This matters most in science and exploratory work, where each decision is informed by the result just before it.
 
@@ -63,17 +63,12 @@ Repeat until it feels solid. It does not have to be complete; open questions bel
 
 ### 4. Launch
 
-When approved:
+When approved, hand the fiber to whichever iteration runner is appropriate — felt is agnostic. Common options:
 
-```bash
-<skill-dir>/scripts/ralph <fiber-id> [--backend claude|codex] [-- extra-flags...]
-```
+- **ralph** (`/ralph` skill) — a manual loop runner that respawns iterations against the constitution until the fiber's status flips off `open`/`active`.
+- **shuttle** (`/shuttle` skill) — a supervised dispatcher that watches `constitution`-tagged fibers and spawns single-shot workers when their `shuttle:` block is enabled.
 
-`<skill-dir>` is the installed `felt` skill directory. Resolve it relative to this reference file rather than hard-coding a Claude-only path.
-
-Add `-- --chrome` for visual/frontend work. Session: `ralph-<fiber-id>`. Attach: `tmux attach -t ralph-<fiber-id>`.
-
-The constitution fiber stays editable while the loop runs. Iterations re-read it each cycle, so refinements between loops are normal.
+The constitution fiber stays editable while iteration runs. Successive iterations re-read it each cycle, so refinements between iterations are normal.
 
 ---
 
@@ -131,11 +126,11 @@ Some constitutions do not build code — they shape artifacts like tapestries, d
 - **Vague done.** "Make it better" — when does iteration stop? What would a reader see?
 - **Over-specification.** Prescribing *how* instead of *what*. Trust the agent's taste.
 - **Snapshot language.** "Currently 50 files" — will be wrong after one iteration.
-- **Immutable seed.** Not our shape. The constitution is meant to be edited between loops; do not treat it as frozen.
-- **Numerical convergence.** "Loop stops when similarity ≥ 0.95" — wrong shape for science. Stop when the Evidence section says the desired state has been reached.
+- **Immutable seed.** Not our shape. The constitution is meant to be edited between iterations; do not treat it as frozen.
+- **Numerical convergence.** "Iteration stops when similarity ≥ 0.95" — wrong shape for science. Stop when the Evidence section says the desired state has been reached.
 
 ---
 
 ## When crafting lands here
 
-The crafting rhythm in SKILL.md applies to all careful interactive thinking; this reference kicks in when the target artifact is specifically a ralph constitution. The diamonds do most of the work — the funnel mechanic used for open-ended exploration is not the primary move here, because there is already one specific artifact being produced. See the Workflow section above for which stances help most at each drafting phase.
+The crafting rhythm in SKILL.md applies to all careful interactive thinking; this reference kicks in when the target artifact is specifically a constitution. The diamonds do most of the work — the funnel mechanic used for open-ended exploration is not the primary move here, because there is already one specific artifact being produced. See the Workflow section above for which stances help most at each drafting phase.

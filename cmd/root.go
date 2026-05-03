@@ -28,11 +28,11 @@ func SetVersionInfo(v, commit, date string) {
 
 var rootCmd = &cobra.Command{
 	Use:   "felt",
-	Short: "Markdown fiber tracker with containment and ASTRA frontmatter",
+	Short: "Markdown fiber tracker with containment and structured frontmatter",
 	Long: `felt stores work as a directory tree
 under .felt/, with each fiber in <slug>/<slug>.md using YAML frontmatter and
 plain markdown. Containment comes from directories, narrative connections come
-from wikilinks in bodies, and ASTRA frontmatter accretes as computation
+from wikilinks in bodies, and structured frontmatter accretes as computation
 crystallizes.`,
 	CompletionOptions: cobra.CompletionOptions{
 		HiddenDefaultCmd: true,

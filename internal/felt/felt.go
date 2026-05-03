@@ -68,7 +68,7 @@ func (deps GraphEdges) LabelFor(id string) string {
 	return ""
 }
 
-type ASTRAInput struct {
+type FiberInput struct {
 	ID          string `yaml:"id" json:"id"`
 	Type        string `yaml:"type,omitempty" json:"type,omitempty"`
 	From        string `yaml:"from,omitempty" json:"from,omitempty"`
@@ -77,53 +77,53 @@ type ASTRAInput struct {
 	Description string `yaml:"description,omitempty" json:"description,omitempty"`
 }
 
-type ASTRARecipe struct {
+type FiberRecipe struct {
 	Command   string         `yaml:"command,omitempty" json:"command,omitempty"`
 	Resources map[string]any `yaml:"resources,omitempty" json:"resources,omitempty"`
 }
 
-type ASTRAOutput struct {
+type FiberOutput struct {
 	ID          string       `yaml:"id" json:"id"`
 	Type        string       `yaml:"type,omitempty" json:"type,omitempty"`
 	Description string       `yaml:"description,omitempty" json:"description,omitempty"`
-	Recipe      *ASTRARecipe `yaml:"recipe,omitempty" json:"recipe,omitempty"`
+	Recipe      *FiberRecipe `yaml:"recipe,omitempty" json:"recipe,omitempty"`
 }
 
-type ASTRADecisionOption struct {
+type DecisionOption struct {
 	Label          string `yaml:"label,omitempty" json:"label,omitempty"`
 	Description    string `yaml:"description,omitempty" json:"description,omitempty"`
 	Excluded       bool   `yaml:"excluded,omitempty" json:"excluded,omitempty"`
 	ExcludedReason string `yaml:"excluded_reason,omitempty" json:"excluded_reason,omitempty"`
 }
 
-type ASTRADecision struct {
+type Decision struct {
 	Label     string                         `yaml:"label,omitempty" json:"label,omitempty"`
 	Rationale string                         `yaml:"rationale,omitempty" json:"rationale,omitempty"`
 	Default   string                         `yaml:"default,omitempty" json:"default,omitempty"`
-	Options   map[string]ASTRADecisionOption `yaml:"options,omitempty" json:"options,omitempty"`
+	Options   map[string]DecisionOption `yaml:"options,omitempty" json:"options,omitempty"`
 }
 
-type ASTRAQuote struct {
+type EvidenceQuote struct {
 	Type   string `yaml:"type,omitempty" json:"type,omitempty"`
 	Exact  string `yaml:"exact,omitempty" json:"exact,omitempty"`
 	Prefix string `yaml:"prefix,omitempty" json:"prefix,omitempty"`
 	Suffix string `yaml:"suffix,omitempty" json:"suffix,omitempty"`
 }
 
-type ASTRAFigure struct {
+type EvidenceFigure struct {
 	Type    string `yaml:"type,omitempty" json:"type,omitempty"`
 	Label   string `yaml:"label,omitempty" json:"label,omitempty"`
 	Caption string `yaml:"caption,omitempty" json:"caption,omitempty"`
 }
 
-type ASTRATable struct {
+type EvidenceTable struct {
 	Type    string `yaml:"type,omitempty" json:"type,omitempty"`
 	Label   string `yaml:"label,omitempty" json:"label,omitempty"`
 	Caption string `yaml:"caption,omitempty" json:"caption,omitempty"`
 	Region  string `yaml:"region,omitempty" json:"region,omitempty"`
 }
 
-type ASTRAFragment struct {
+type EvidenceFragment struct {
 	Type       string `yaml:"type,omitempty" json:"type,omitempty"`
 	ConformsTo string `yaml:"conformsTo,omitempty" json:"conformsTo,omitempty"`
 	Value      string `yaml:"value,omitempty" json:"value,omitempty"`
@@ -132,38 +132,38 @@ type ASTRAFragment struct {
 	End        *int   `yaml:"end,omitempty" json:"end,omitempty"`
 }
 
-type ASTRADocument struct {
+type EvidenceDocument struct {
 	Path   string `yaml:"path,omitempty" json:"path,omitempty"`
 	Commit string `yaml:"commit,omitempty" json:"commit,omitempty"`
 }
 
-type ASTRAEvidence struct {
+type Evidence struct {
 	ID           string         `yaml:"id,omitempty" json:"id,omitempty"`
 	DOI          string         `yaml:"doi,omitempty" json:"doi,omitempty"`
 	Artifact     string         `yaml:"artifact,omitempty" json:"artifact,omitempty"`
 	Description  string         `yaml:"description,omitempty" json:"description,omitempty"`
-	Document     *ASTRADocument `yaml:"document,omitempty" json:"document,omitempty"`
+	Document     *EvidenceDocument `yaml:"document,omitempty" json:"document,omitempty"`
 	Version      *int           `yaml:"version,omitempty" json:"version,omitempty"`
 	Checksum     string         `yaml:"checksum,omitempty" json:"checksum,omitempty"`
 	Snapshot     string         `yaml:"snapshot,omitempty" json:"snapshot,omitempty"`
 	SourceCommit string         `yaml:"source_commit,omitempty" json:"source_commit,omitempty"`
-	Quote        *ASTRAQuote    `yaml:"quote,omitempty" json:"quote,omitempty"`
-	Figure       *ASTRAFigure   `yaml:"figure,omitempty" json:"figure,omitempty"`
-	Table        *ASTRATable    `yaml:"table,omitempty" json:"table,omitempty"`
-	Location     *ASTRAFragment `yaml:"location,omitempty" json:"location,omitempty"`
+	Quote        *EvidenceQuote    `yaml:"quote,omitempty" json:"quote,omitempty"`
+	Figure       *EvidenceFigure   `yaml:"figure,omitempty" json:"figure,omitempty"`
+	Table        *EvidenceTable    `yaml:"table,omitempty" json:"table,omitempty"`
+	Location     *EvidenceFragment `yaml:"location,omitempty" json:"location,omitempty"`
 }
 
-type ASTRAInsight struct {
+type Insight struct {
 	Claim     string          `yaml:"claim,omitempty" json:"claim,omitempty"`
 	CreatedAt *time.Time      `yaml:"created_at,omitempty" json:"created_at,omitempty"`
 	Derived   bool            `yaml:"derived,omitempty" json:"derived,omitempty"`
 	Scope     string          `yaml:"scope,omitempty" json:"scope,omitempty"`
 	Tags      []string        `yaml:"tags,omitempty" json:"tags,omitempty"`
 	Notes     string          `yaml:"notes,omitempty" json:"notes,omitempty"`
-	Evidence  []ASTRAEvidence `yaml:"evidence,omitempty" json:"evidence,omitempty"`
+	Evidence  []Evidence `yaml:"evidence,omitempty" json:"evidence,omitempty"`
 }
 
-type ASTRASuccessCriterion struct {
+type SuccessCriterion struct {
 	Claim     string `yaml:"claim,omitempty" json:"claim,omitempty"`
 	Output    string `yaml:"output,omitempty" json:"output,omitempty"`
 	Condition string `yaml:"condition,omitempty" json:"condition,omitempty"`
@@ -185,11 +185,11 @@ type Felt struct {
 	Outcome         string                   `yaml:"outcome,omitempty" json:"outcome,omitempty"`
 	Due             *time.Time               `yaml:"due,omitempty" json:"due,omitempty"`
 	Description     string                   `yaml:"description,omitempty" json:"description,omitempty"`
-	Inputs          []ASTRAInput             `yaml:"inputs,omitempty" json:"inputs,omitempty"`
-	Outputs         []ASTRAOutput            `yaml:"outputs,omitempty" json:"outputs,omitempty"`
-	Decisions       map[string]ASTRADecision `yaml:"decisions,omitempty" json:"decisions,omitempty"`
-	Insights        map[string]ASTRAInsight  `yaml:"insights,omitempty" json:"insights,omitempty"`
-	SuccessCriteria []ASTRASuccessCriterion  `yaml:"success_criteria,omitempty" json:"success_criteria,omitempty"`
+	Inputs          []FiberInput             `yaml:"inputs,omitempty" json:"inputs,omitempty"`
+	Outputs         []FiberOutput            `yaml:"outputs,omitempty" json:"outputs,omitempty"`
+	Decisions       map[string]Decision `yaml:"decisions,omitempty" json:"decisions,omitempty"`
+	Insights        map[string]Insight  `yaml:"insights,omitempty" json:"insights,omitempty"`
+	SuccessCriteria []SuccessCriterion  `yaml:"success_criteria,omitempty" json:"success_criteria,omitempty"`
 	Container       string                   `yaml:"container,omitempty" json:"container,omitempty"`
 	Body            string                   `yaml:"-" json:"body,omitempty"`
 	ModifiedAt      time.Time                `yaml:"-" json:"modified_at,omitempty"` // populated from file stat
@@ -434,11 +434,11 @@ func parseFrontmatter(id string, frontmatter []byte) (*Felt, error) {
 		Outcome         string                   `yaml:"outcome,omitempty"`
 		Due             *time.Time               `yaml:"due,omitempty"`
 		Description     string                   `yaml:"description,omitempty"`
-		Inputs          []ASTRAInput             `yaml:"inputs,omitempty"`
-		Outputs         []ASTRAOutput            `yaml:"outputs,omitempty"`
-		Decisions       map[string]ASTRADecision `yaml:"decisions,omitempty"`
-		Insights        map[string]ASTRAInsight  `yaml:"insights,omitempty"`
-		SuccessCriteria []ASTRASuccessCriterion  `yaml:"success_criteria,omitempty"`
+		Inputs          []FiberInput             `yaml:"inputs,omitempty"`
+		Outputs         []FiberOutput            `yaml:"outputs,omitempty"`
+		Decisions       map[string]Decision `yaml:"decisions,omitempty"`
+		Insights        map[string]Insight  `yaml:"insights,omitempty"`
+		SuccessCriteria []SuccessCriterion  `yaml:"success_criteria,omitempty"`
 		Container       string                   `yaml:"container,omitempty"`
 	}
 
@@ -676,11 +676,11 @@ func (f *Felt) Marshal() ([]byte, error) {
 		Outcome         string                   `yaml:"outcome,omitempty"`
 		Due             *time.Time               `yaml:"due,omitempty"`
 		Description     string                   `yaml:"description,omitempty"`
-		Inputs          []ASTRAInput             `yaml:"inputs,omitempty"`
-		Outputs         []ASTRAOutput            `yaml:"outputs,omitempty"`
-		Decisions       map[string]ASTRADecision `yaml:"decisions,omitempty"`
-		Insights        map[string]ASTRAInsight  `yaml:"insights,omitempty"`
-		SuccessCriteria []ASTRASuccessCriterion  `yaml:"success_criteria,omitempty"`
+		Inputs          []FiberInput             `yaml:"inputs,omitempty"`
+		Outputs         []FiberOutput            `yaml:"outputs,omitempty"`
+		Decisions       map[string]Decision `yaml:"decisions,omitempty"`
+		Insights        map[string]Insight  `yaml:"insights,omitempty"`
+		SuccessCriteria []SuccessCriterion  `yaml:"success_criteria,omitempty"`
 		Container       string                   `yaml:"container,omitempty"`
 	}{
 		Name:            f.Name,

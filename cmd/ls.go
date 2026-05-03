@@ -34,7 +34,7 @@ Use -t to filter by tag (AND logic, prefix matching with trailing colon):
   -t rule:                    matches any rule:* tag
   -t rule:cosebis_data_vector exact tag match
 
-Optional query searches name, outcome, and ASTRA frontmatter:
+Optional query searches name, outcome, and structured frontmatter:
   felt ls cosebis             substring search
   felt ls -r "rule:.*data"    regex search
   felt ls -e "exact name"     exact name match

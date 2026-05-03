@@ -18,10 +18,10 @@ Ralph is an autonomous loop iterator for long-running work against a fiber-defin
 
 ## Launching
 
-The launcher is a shell script bundled with the sibling `felt` skill, not the `ralph` skill. Its runtime path is:
+The launcher is a shell script bundled with this skill. Its runtime path is:
 
 ```
-~/.claude/skills/felt/scripts/ralph
+~/.claude/skills/ralph/scripts/ralph
 ```
 
 It is not placed on `PATH`. Invoke it by absolute path, or add a user-level shell alias.
@@ -29,7 +29,7 @@ It is not placed on `PATH`. Invoke it by absolute path, or add a user-level shel
 ### Usage
 
 ```
-~/.claude/skills/felt/scripts/ralph <fiber-id> [--backend claude|codex] [-- extra-flags...]
+~/.claude/skills/ralph/scripts/ralph <fiber-id> [--backend claude|codex] [-- extra-flags...]
 ```
 
 - `<fiber-id>` must resolve via `felt show <fiber-id>` from the current working directory or from `~/loom`. Nested IDs (e.g. `vellum-reader/workspace`) are fine.
@@ -64,16 +64,16 @@ If a session with that name already exists, the launcher refuses to start a seco
 
 ```bash
 # Plain launch on a top-level fiber, claude backend, no browser
-~/.claude/skills/felt/scripts/ralph vellum-simplify
+~/.claude/skills/ralph/scripts/ralph vellum-simplify
 
 # Nested fiber ID, Chrome integration enabled
-~/.claude/skills/felt/scripts/ralph vellum-reader/workspace -- --chrome
+~/.claude/skills/ralph/scripts/ralph vellum-reader/workspace -- --chrome
 
 # Codex backend
-~/.claude/skills/felt/scripts/ralph some-fiber --backend codex
+~/.claude/skills/ralph/scripts/ralph some-fiber --backend codex
 
 # Claude backend, Chrome integration, model override
-~/.claude/skills/felt/scripts/ralph some-fiber -- --chrome --model claude-opus-4-6
+~/.claude/skills/ralph/scripts/ralph some-fiber -- --chrome --model claude-opus-4-6
 ```
 
 ## Loop

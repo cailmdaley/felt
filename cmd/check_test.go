@@ -20,7 +20,7 @@ func TestCheckCommandReportsIssues(t *testing.T) {
 
 	if err := storage.Write(&felt.Felt{
 		ID: "fiber-a",
-		Decisions: map[string]felt.ASTRADecision{
+		Decisions: map[string]felt.Decision{
 			"choice": {Label: "Choice"},
 		},
 	}); err != nil {

@@ -59,6 +59,7 @@ func TestRootCommandSurfaceIsConsolidated(t *testing.T) {
 		"find",
 		"prime",
 		"tapestry",
+		"export",
 	} {
 		if slices.Contains(visible, retired) {
 			t.Fatalf("root command surface still exposes retired command %q in %v", retired, visible)
@@ -69,7 +70,6 @@ func TestRootCommandSurfaceIsConsolidated(t *testing.T) {
 		"add",
 		"check",
 		"edit",
-		"export",
 		"history",
 		"hook",
 		"init",
@@ -88,7 +88,7 @@ func TestRootCommandSurfaceIsConsolidated(t *testing.T) {
 		}
 	}
 
-	if len(visible) > 17 {
+	if len(visible) > 16 {
 		t.Fatalf("root command surface too large: got %d commands (%v)", len(visible), visible)
 	}
 }

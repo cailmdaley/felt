@@ -47,16 +47,15 @@ Prints active and recently touched fibers in a format suitable for AI context.`,
 
 var hookRemindCmd = &cobra.Command{
 	Use:   "remind",
-	Short: "One-shot reminder to activate /felt skill",
-	Long: `PreToolUse hook that gates tool use until /felt skill is activated.
+	Short: "Per-tool felt-session marker (currently a no-op pass-through)",
+	Long: `PreToolUse hook for felt-enabled projects. Reads the tool-call payload, marks
+a per-session flag file under TMPDIR, and exits silently — no permission decisions
+are emitted. SessionStart already delivers the felt context the agent needs, so
+the historical first-tool deny gate is off; the flag-write is preserved so a
+gate can be re-introduced as a one-line addition without revisiting the hook
+shape.
 
-Denies all non-Skill tool calls until the Skill tool has been called (which sets a
-per-session flag file in /tmp). After that, all tools are allowed. Only active in
-directories containing a .felt/ directory. Codex native-hook sessions are exempt:
-they already receive felt context at SessionStart, and the extra deny has proven
-to be needless friction there.
-
-Designed for use as a PreToolUse hook in Claude Code settings.`,
+Designed to register as a PreToolUse hook in both Claude Code and Codex.`,
 	Args:         cobra.NoArgs,
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -74,7 +73,7 @@ func feltDescription() string {
 	return "felt captures the thinking as you work, across sessions. " +
 		"A fiber is any concern (decision, finding, question, detour) worth naming because it might matter later; " +
 		"filing costs nothing, forgetting costs an investigation or a hallucination. " +
-		"Fibers start as a name and accrete: body, outcome, tags, and optional ASTRA structure (decisions, inputs, insights) as the work crystallizes. " +
+		"Fibers start as a name and accrete: body, outcome, tags, and optional structured frontmatter (decisions, inputs, insights) as the work crystallizes. " +
 		"Do this incrementally: after you respond, while the user reads, file what just came into focus. " +
 		"Don't ask permission. " +
 		"Let the user's opinions and corrections guide the fibers; you are following the understanding as it evolves, reversals included.\n\n"
@@ -189,16 +188,16 @@ Understanding crystallized. Accrete:
     felt edit <id> --decision cov --label "Covariance" --option 'glass:GLASS mocks'
     felt edit <id> --input 'catalog:data:build-mocks.galaxy-catalog'    # id:type:source.output
     felt edit <id> --insight 'stability:Posterior is stable under jackknife'
-    Read then Edit .felt/<path>/<slug>.md                               # body, wikilinks, deeper ASTRA
+    Read then Edit .felt/<path>/<slug>.md                               # body, wikilinks, deeper frontmatter
 
 Search and read:
     felt ls                                              # tracked (open and active)
     felt ls "query" [-t tag] [-s closed]                 # any filter widens to all statuses
     felt ls --body "query"                               # FTS5 body search
     felt show <id>                                       # full
-    felt show <id> -d summary | -d compact               # metadata + lede | + ASTRA counts
+    felt show <id> -d summary | -d compact               # metadata + lede | + frontmatter counts
     felt show <id> --body                                # body with start line
-    felt show <id> --decisions|--inputs|--insights       # targeted ASTRA slices
+    felt show <id> --decisions|--inputs|--insights       # targeted frontmatter slices
 
 A thread resolved. Close:
     felt edit <id> --status closed --outcome "what was learned"
@@ -210,50 +209,33 @@ History (per-fiber append-only event log):
     felt history append <id> --summary "..."             # log session continuity
 
 Maintain:
-    felt check                                           # broken refs, ASTRA issues
+    felt check                                           # broken refs, frontmatter issues
     felt migrate [--dry-run]                             # normalize legacy layout
-    felt export --format astra                           # legacy astra.yaml bridge
 ` + "```" + `
 Statuses: · untracked, ○ open, ◐ active, ● closed
 Detail: name < compact < summary < full. Summary shows the lede (first paragraph of the body; write it to stand alone).
-Relationships: directory containment, ` + "`[[wikilinks]]`" + ` in bodies, ASTRA ` + "`inputs.from`" + ` for data flow. Nested IDs use paths (bao-analysis/damping-prior).
+Relationships: directory containment, ` + "`[[wikilinks]]`" + ` in bodies, ` + "`inputs.from`" + ` for data flow. Nested IDs use paths (bao-analysis/damping-prior).
 
 **Outcomes longer than a sentence:** edit ` + "`.felt/<path>/<slug>.md`" + ` directly using a ` + "`|-`" + ` block scalar (` + "`outcome: |-`" + `). ` + "`felt edit -o \"…\"`" + ` shell-escapes quotes and mangles multiline content; block scalar takes content literally so paragraphs, lists, and image embeds round-trip cleanly.
 
 `
 }
 
-// isClaudeCodeTranscript reports whether the given transcript path belongs to a
-// Claude Code session (under ~/.claude/projects/). Used to separate Claude Code
-// from Codex native hooks, since both provide transcript_path.
-func isClaudeCodeTranscript(path string) bool {
-	if path == "" {
-		return false
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return false
-	}
-	prefix := filepath.Join(home, ".claude", "projects") + string(filepath.Separator)
-	return strings.HasPrefix(path, prefix)
-}
-
-// runRemindHook gates tool use until /felt is activated.
-// Claude-style sessions deny all non-Skill tools until Skill has been called, then
-// allow everything. Codex native-hook sessions are allowed through: SessionStart
-// context is already present, and the extra first-tool deny is unnecessary.
+// runRemindHook is the PreToolUse handler. Currently a pass-through: it reads
+// the payload, marks a per-session flag file (so a deny gate can be reintroduced
+// later without reshaping the hook), and exits silently. SessionStart delivers
+// felt context, which proved sufficient on its own; the first-tool deny was
+// retired as needless friction.
 func runRemindHook() error {
 	var input struct {
-		SessionID      string `json:"session_id"`
-		ToolName       string `json:"tool_name"`
-		CWD            string `json:"cwd"`
-		TranscriptPath string `json:"transcript_path"`
+		SessionID string `json:"session_id"`
+		CWD       string `json:"cwd"`
 	}
 	if err := json.NewDecoder(os.Stdin).Decode(&input); err != nil {
 		return nil // can't parse — silent exit
 	}
 
-	// Only gate in felt-enabled projects
+	// Only mark in felt-enabled projects
 	cwd := input.CWD
 	if cwd == "" {
 		return nil
@@ -263,39 +245,8 @@ func runRemindHook() error {
 	}
 
 	flagFile := filepath.Join(os.TempDir(), "felt-reminded-"+input.SessionID)
-
-	// Skill call: set the flag (gate opens) and allow
-	if input.ToolName == "Skill" {
-		os.WriteFile(flagFile, nil, 0644)
-		return nil
-	}
-
-	// Codex native-hook sessions don't need the first-tool deny — they already
-	// receive felt context at SessionStart, and the extra friction proved too strong.
-	// Detect Codex by transcript_path NOT living under ~/.claude/projects/ (which
-	// is Claude Code's transcript dir). An empty transcript_path also counts as
-	// non-Claude.
-	if !isClaudeCodeTranscript(input.TranscriptPath) {
-		_ = os.WriteFile(flagFile, nil, 0644)
-		return nil
-	}
-
-	// Any other tool: check if Skill has already been called
-	if _, err := os.Stat(flagFile); err == nil {
-		return nil // gate is open
-	}
-
-	// Gate is closed — deny the tool call
-	output := map[string]interface{}{
-		"hookSpecificOutput": map[string]interface{}{
-			"hookEventName":      "PreToolUse",
-			"permissionDecision": "deny",
-			"permissionDecisionReason": "Activate /felt skill first. You are in a felt-enabled project " +
-				"but haven't activated the felt skill yet. Call the Skill tool with " +
-				"skill: \"felt\" before proceeding with any other tools.",
-		},
-	}
-	return json.NewEncoder(os.Stdout).Encode(output)
+	_ = os.WriteFile(flagFile, nil, 0644)
+	return nil
 }
 
 // coreRules returns the shared core rules.

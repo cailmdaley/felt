@@ -24,7 +24,7 @@ func TestIndexSyncBuildsCitationsAndFTS(t *testing.T) {
 			Name:      "Analysis",
 			CreatedAt: baseTime,
 			Body:      "See [[question]] and #question.",
-			Inputs: []ASTRAInput{
+			Inputs: []FiberInput{
 				{ID: "catalog", From: "question.output"},
 			},
 		},

@@ -7,9 +7,9 @@ import (
 )
 
 func makeTestFelt(id, name, status string, deps []string) *Felt {
-	inputs := make([]ASTRAInput, 0, len(deps))
+	inputs := make([]FiberInput, 0, len(deps))
 	for i, depID := range deps {
-		inputs = append(inputs, ASTRAInput{
+		inputs = append(inputs, FiberInput{
 			ID:   "input_" + string(rune('a'+i)),
 			From: depID,
 		})
@@ -503,7 +503,7 @@ func TestBuildGraphWithLabels(t *testing.T) {
 		},
 		{
 			ID: "task-b", Name: "B", Status: StatusOpen,
-			Inputs: []ASTRAInput{{ID: "needs_data", From: "task-a"}},
+			Inputs: []FiberInput{{ID: "needs_data", From: "task-a"}},
 			CreatedAt: time.Now(),
 		},
 	}
@@ -534,7 +534,7 @@ func TestToMermaidWithLabels(t *testing.T) {
 		},
 		{
 			ID: "task-b", Name: "B", Status: StatusOpen,
-			Inputs: []ASTRAInput{{ID: "input_b", From: "task-a.blocks"}},
+			Inputs: []FiberInput{{ID: "input_b", From: "task-a.blocks"}},
 			CreatedAt: time.Now(),
 		},
 	}
@@ -554,7 +554,7 @@ func TestToDotWithLabels(t *testing.T) {
 		},
 		{
 			ID: "task-b", Name: "B", Status: StatusOpen,
-			Inputs: []ASTRAInput{{ID: "input_b", From: "task-a.provides input"}},
+			Inputs: []FiberInput{{ID: "input_b", From: "task-a.provides input"}},
 			CreatedAt: time.Now(),
 		},
 	}
@@ -574,7 +574,7 @@ func TestToTextWithLabels(t *testing.T) {
 		},
 		{
 			ID: "task-b", Name: "B", Status: StatusOpen,
-			Inputs: []ASTRAInput{{ID: "input_b", From: "task-a.reason"}},
+			Inputs: []FiberInput{{ID: "input_b", From: "task-a.reason"}},
 			CreatedAt: time.Now(),
 		},
 	}

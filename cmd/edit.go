@@ -248,7 +248,7 @@ func applyStructuredEditFlags(cmd *cobra.Command, f *felt.Felt) error {
 			return fmt.Errorf("--decision requires a non-empty decision ID")
 		}
 		if f.Decisions == nil {
-			f.Decisions = map[string]felt.ASTRADecision{}
+			f.Decisions = map[string]felt.Decision{}
 		}
 		decision := f.Decisions[decisionID]
 		if cmd.Flags().Changed("label") {
@@ -262,7 +262,7 @@ func applyStructuredEditFlags(cmd *cobra.Command, f *felt.Felt) error {
 		}
 		if cmd.Flags().Changed("option") {
 			if decision.Options == nil {
-				decision.Options = map[string]felt.ASTRADecisionOption{}
+				decision.Options = map[string]felt.DecisionOption{}
 			}
 			for _, raw := range editOptions {
 				id, option, err := parseDecisionOption(raw)
@@ -274,7 +274,7 @@ func applyStructuredEditFlags(cmd *cobra.Command, f *felt.Felt) error {
 		}
 		if structuredOptionChanged {
 			if decision.Options == nil {
-				decision.Options = map[string]felt.ASTRADecisionOption{}
+				decision.Options = map[string]felt.DecisionOption{}
 			}
 			ids, options, err := parseStructuredDecisionOptions(editOptionIDs, editOptionLabels, editOptionExcluded, editOptionReasons)
 			if err != nil {
@@ -299,7 +299,7 @@ func applyStructuredEditFlags(cmd *cobra.Command, f *felt.Felt) error {
 
 	if cmd.Flags().Changed("insight") {
 		if f.Insights == nil {
-			f.Insights = map[string]felt.ASTRAInsight{}
+			f.Insights = map[string]felt.Insight{}
 		}
 		for _, raw := range editInsights {
 			id, insight, err := parseInsightSpec(raw)
@@ -313,26 +313,26 @@ func applyStructuredEditFlags(cmd *cobra.Command, f *felt.Felt) error {
 	return nil
 }
 
-func parseDecisionOption(raw string) (string, felt.ASTRADecisionOption, error) {
+func parseDecisionOption(raw string) (string, felt.DecisionOption, error) {
 	parts, err := splitEscapedColon(raw, 4)
 	if err != nil {
-		return "", felt.ASTRADecisionOption{}, fmt.Errorf("invalid --option %q: %w", raw, err)
+		return "", felt.DecisionOption{}, fmt.Errorf("invalid --option %q: %w", raw, err)
 	}
 	if len(parts) < 2 {
-		return "", felt.ASTRADecisionOption{}, fmt.Errorf("invalid --option %q: want id:label[:excluded[:reason]] (use \\: for a literal colon)", raw)
+		return "", felt.DecisionOption{}, fmt.Errorf("invalid --option %q: want id:label[:excluded[:reason]] (use \\: for a literal colon)", raw)
 	}
 
 	id := strings.TrimSpace(parts[0])
 	label := strings.TrimSpace(parts[1])
 	if id == "" || label == "" {
-		return "", felt.ASTRADecisionOption{}, fmt.Errorf("invalid --option %q: id and label are required", raw)
+		return "", felt.DecisionOption{}, fmt.Errorf("invalid --option %q: id and label are required", raw)
 	}
 
-	option := felt.ASTRADecisionOption{Label: label}
+	option := felt.DecisionOption{Label: label}
 	if len(parts) >= 3 && strings.TrimSpace(parts[2]) != "" {
 		excluded, err := parseExcludedFlag(parts[2])
 		if err != nil {
-			return "", felt.ASTRADecisionOption{}, fmt.Errorf("invalid --option %q: %w", raw, err)
+			return "", felt.DecisionOption{}, fmt.Errorf("invalid --option %q: %w", raw, err)
 		}
 		option.Excluded = excluded
 	}
@@ -396,7 +396,7 @@ func parseExcludedFlag(raw string) (bool, error) {
 // parseStructuredDecisionOptions correlates the parallel --option-* flag
 // arrays by position. ids and labels are required and must match in length;
 // excluded and reasons, when provided, must not exceed len(ids).
-func parseStructuredDecisionOptions(ids, labels, excluded, reasons []string) ([]string, []felt.ASTRADecisionOption, error) {
+func parseStructuredDecisionOptions(ids, labels, excluded, reasons []string) ([]string, []felt.DecisionOption, error) {
 	if len(ids) == 0 {
 		return nil, nil, fmt.Errorf("--option-id is required when using the structured option form")
 	}
@@ -411,14 +411,14 @@ func parseStructuredDecisionOptions(ids, labels, excluded, reasons []string) ([]
 	}
 
 	outIDs := make([]string, len(ids))
-	opts := make([]felt.ASTRADecisionOption, len(ids))
+	opts := make([]felt.DecisionOption, len(ids))
 	for i := range ids {
 		id := strings.TrimSpace(ids[i])
 		label := strings.TrimSpace(labels[i])
 		if id == "" || label == "" {
 			return nil, nil, fmt.Errorf("--option-id and --option-label must be non-empty (position %d)", i)
 		}
-		opt := felt.ASTRADecisionOption{Label: label}
+		opt := felt.DecisionOption{Label: label}
 		if i < len(excluded) {
 			flag, err := parseExcludedFlag(excluded[i])
 			if err != nil {
@@ -438,14 +438,14 @@ func parseStructuredDecisionOptions(ids, labels, excluded, reasons []string) ([]
 	return outIDs, opts, nil
 }
 
-func parseInputSpec(raw string) (felt.ASTRAInput, error) {
+func parseInputSpec(raw string) (felt.FiberInput, error) {
 	parts := strings.SplitN(raw, ":", 4)
 	id := strings.TrimSpace(parts[0])
 	if id == "" {
-		return felt.ASTRAInput{}, fmt.Errorf("invalid --input %q: id is required", raw)
+		return felt.FiberInput{}, fmt.Errorf("invalid --input %q: id is required", raw)
 	}
 
-	input := felt.ASTRAInput{ID: id}
+	input := felt.FiberInput{ID: id}
 	if len(parts) >= 2 {
 		input.Type = strings.TrimSpace(parts[1])
 	}
@@ -458,21 +458,21 @@ func parseInputSpec(raw string) (felt.ASTRAInput, error) {
 	return input, nil
 }
 
-func parseInsightSpec(raw string) (string, felt.ASTRAInsight, error) {
+func parseInsightSpec(raw string) (string, felt.Insight, error) {
 	parts := strings.SplitN(raw, ":", 2)
 	if len(parts) != 2 {
-		return "", felt.ASTRAInsight{}, fmt.Errorf("invalid --insight %q: want id:claim", raw)
+		return "", felt.Insight{}, fmt.Errorf("invalid --insight %q: want id:claim", raw)
 	}
 
 	id := strings.TrimSpace(parts[0])
 	claim := strings.TrimSpace(parts[1])
 	if id == "" || claim == "" {
-		return "", felt.ASTRAInsight{}, fmt.Errorf("invalid --insight %q: id and claim are required", raw)
+		return "", felt.Insight{}, fmt.Errorf("invalid --insight %q: id and claim are required", raw)
 	}
-	return id, felt.ASTRAInsight{Claim: claim}, nil
+	return id, felt.Insight{Claim: claim}, nil
 }
 
-func upsertInput(inputs []felt.ASTRAInput, input felt.ASTRAInput) []felt.ASTRAInput {
+func upsertInput(inputs []felt.FiberInput, input felt.FiberInput) []felt.FiberInput {
 	for i := range inputs {
 		if inputs[i].ID == input.ID {
 			inputs[i] = input

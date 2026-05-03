@@ -360,14 +360,14 @@ func TestFormatFeltTwoLine(t *testing.T) {
 	}
 }
 
-func TestRunRemindHook_DeniesClaudeUntilSkillActivated(t *testing.T) {
+func TestRunRemindHook_PassesThroughAndMarksFlag(t *testing.T) {
 	dir := t.TempDir()
 	storage := felt.NewStorage(dir)
 	if err := storage.Init(); err != nil {
 		t.Fatalf("Init() error: %v", err)
 	}
 
-	sessionID := "claude-session"
+	sessionID := "felt-session"
 	flagFile := filepath.Join(os.TempDir(), "felt-reminded-"+sessionID)
 	_ = os.Remove(flagFile)
 	t.Cleanup(func() { _ = os.Remove(flagFile) })
@@ -377,52 +377,32 @@ func TestRunRemindHook_DeniesClaudeUntilSkillActivated(t *testing.T) {
 		"tool_name":  "Bash",
 		"cwd":        dir,
 	})
-	if !strings.Contains(out, `"permissionDecision":"deny"`) {
-		t.Fatalf("expected deny output, got %q", out)
-	}
-
-	out = runRemindHookWithInput(t, map[string]string{
-		"session_id": sessionID,
-		"tool_name":  "Skill",
-		"cwd":        dir,
-	})
 	if out != "" {
-		t.Fatalf("Skill tool should pass silently, got %q", out)
+		t.Fatalf("hook should pass silently, got %q", out)
 	}
-
-	out = runRemindHookWithInput(t, map[string]string{
-		"session_id": sessionID,
-		"tool_name":  "Bash",
-		"cwd":        dir,
-	})
-	if out != "" {
-		t.Fatalf("expected gate open after Skill, got %q", out)
+	if _, err := os.Stat(flagFile); err != nil {
+		t.Fatalf("expected reminder flag to be marked, stat error: %v", err)
 	}
 }
 
-func TestRunRemindHook_AllowsCodexSessionsWithoutDeny(t *testing.T) {
-	dir := t.TempDir()
-	storage := felt.NewStorage(dir)
-	if err := storage.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+func TestRunRemindHook_NoFlagOutsideFeltProject(t *testing.T) {
+	dir := t.TempDir() // no .felt/ inside
 
-	sessionID := "codex-session"
+	sessionID := "non-felt-session"
 	flagFile := filepath.Join(os.TempDir(), "felt-reminded-"+sessionID)
 	_ = os.Remove(flagFile)
 	t.Cleanup(func() { _ = os.Remove(flagFile) })
 
 	out := runRemindHookWithInput(t, map[string]string{
-		"session_id":      sessionID,
-		"tool_name":       "exec_command",
-		"cwd":             dir,
-		"transcript_path": "/tmp/codex-transcript.jsonl",
+		"session_id": sessionID,
+		"tool_name":  "Bash",
+		"cwd":        dir,
 	})
 	if out != "" {
-		t.Fatalf("codex session should not be denied, got %q", out)
+		t.Fatalf("hook should pass silently outside felt projects, got %q", out)
 	}
-	if _, err := os.Stat(flagFile); err != nil {
-		t.Fatalf("expected codex session to mark reminder flag, stat error: %v", err)
+	if _, err := os.Stat(flagFile); !os.IsNotExist(err) {
+		t.Fatalf("expected no flag file outside felt project, stat err: %v", err)
 	}
 }
 

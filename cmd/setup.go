@@ -29,7 +29,7 @@ var setupClaudeCmd = &cobra.Command{
 
 Adds:
   - SessionStart: felt hook session (shows active/ready fibers)
-  - PreToolUse: felt hook remind (gates tools until /felt activated)
+  - PreToolUse: felt hook remind (per-session marker; pass-through)
 
 Use --uninstall to remove the hooks.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -61,7 +61,7 @@ var setupCodexCmd = &cobra.Command{
 
 Adds:
   - SessionStart: felt hook session (shows active/recent fibers)
-  - PreToolUse: felt hook remind (strict on Claude-style payloads, no deny on Codex native hooks)
+  - PreToolUse: felt hook remind (per-session marker; pass-through)
 
 Also attempts to remove the legacy codex() shell wrapper if present.
 
@@ -216,9 +216,8 @@ func claudeMDSnippet() string {
 	return "## felt\n\n" +
 		"Fibers are concerns (tasks, decisions, questions, findings). " +
 		"Each fiber lives at `.felt/<path>/<slug>.md` with YAML frontmatter and plain markdown body content. " +
-		"Containment comes from directories, narrative connections come from `[[wikilinks]]`, and ASTRA structure accretes in frontmatter when the work becomes computationally concrete. " +
-		"`felt export --format astra` turns ASTRA-bearing frontmatter into `astra.yaml`. " +
-		"`.felt/` also opens as a valid Obsidian vault, with Dataview queries over ASTRA fields. " +
+		"Containment comes from directories, narrative connections come from `[[wikilinks]]`, and structured frontmatter (decisions, inputs, outputs, insights) accretes as the work becomes computationally concrete. " +
+		"`.felt/` also opens as a valid Obsidian vault, with Dataview queries over frontmatter fields. " +
 		"Filing costs nothing; forgetting costs an investigation or a hallucination.\n\n" +
 		"**Rhythm.** File as things come into focus, without asking. After you respond, while the user reads, accrete structure. Close with an outcome that stands alone.\n" +
 		fence + "bash\n" +

@@ -30,8 +30,8 @@ var showCmd = &cobra.Command{
 
 Detail levels control progressive disclosure:
   name     Name and tags only
-  compact  Metadata, outcome, and ASTRA counts
-  summary  Compact + lede paragraph + concise ASTRA summary
+  compact  Metadata, outcome, and frontmatter counts
+  summary  Compact + lede paragraph + concise frontmatter summary
   full     Everything (default)
 
 Targeted views:
@@ -132,7 +132,7 @@ Targeted views:
 				if !ok {
 					return fmt.Errorf("decision %q not found in %s", showDecision, f.ID)
 				}
-				return outputShowSelection(map[string]felt.ASTRADecision{showDecision: decision})
+				return outputShowSelection(map[string]felt.Decision{showDecision: decision})
 			}
 			if showInputs {
 				return outputShowSelection(f.Inputs)

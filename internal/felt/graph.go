@@ -6,14 +6,14 @@ import (
 	"strings"
 )
 
-// Graph represents the ASTRA data-flow graph between fibers.
+// Graph represents the data-flow graph between fibers.
 type Graph struct {
 	Nodes      map[string]*Felt      // ID -> Felt
 	Upstream   map[string]GraphEdges // ID -> upstream producers this fiber consumes
 	Downstream map[string]GraphEdges // ID -> downstream consumers (computed)
 }
 
-// BuildGraph constructs a graph from ASTRA inputs.from edges.
+// BuildGraph constructs a graph from inputs.from edges.
 func BuildGraph(felts []*Felt) *Graph {
 	g := &Graph{
 		Nodes:      make(map[string]*Felt),

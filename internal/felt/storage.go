@@ -220,7 +220,7 @@ func (s *Storage) Delete(id string) error {
 }
 
 // MoveSubtree moves a fiber and any nested descendants to a new path, rewriting
-// ASTRA data-flow references across the repository.
+// data-flow references across the repository.
 func (s *Storage) MoveSubtree(oldID, newID string) error {
 	oldID = filepath.ToSlash(filepath.Clean(strings.TrimSpace(oldID)))
 	newID = filepath.ToSlash(filepath.Clean(strings.TrimSpace(newID)))
@@ -308,7 +308,7 @@ func (s *Storage) Migrate(dryRun bool) (*MigrationResult, error) {
 }
 
 // MigrateFlatFiles converts legacy top-level flat markdown fibers to
-// directory-based fibers with slug IDs, rewriting ASTRA data-flow references.
+// directory-based fibers with slug IDs, rewriting data-flow references.
 func (s *Storage) MigrateFlatFiles(dryRun bool) (*MigrationResult, error) {
 	if err := s.Init(); err != nil {
 		return nil, err

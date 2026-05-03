@@ -69,7 +69,7 @@ func renderCompact(f *felt.Felt, g *felt.Graph) string {
 	if f.Outcome != "" {
 		fmt.Fprintf(&sb, "Outcome:  %s\n", f.Outcome)
 	}
-	writeASTRACounts(&sb, f)
+	writeFrontmatterCounts(&sb, f)
 	return sb.String()
 }
 
@@ -85,7 +85,7 @@ func renderSummary(f *felt.Felt, g *felt.Graph, citations []felt.Citation, consu
 	writeBodyRefs(&sb, f, g)
 	writeCitations(&sb, citations)
 	writeConsumers(&sb, consumers)
-	writeASTRASkeleton(&sb, f)
+	writeFrontmatterSkeleton(&sb, f)
 	if f.Body != "" {
 		lede := extractLede(f.Body)
 		fmt.Fprintf(&sb, "\n%s\n", lede)
@@ -96,8 +96,8 @@ func renderSummary(f *felt.Felt, g *felt.Graph, citations []felt.Citation, consu
 	return sb.String()
 }
 
-// writeASTRASkeleton writes one-line summaries of ASTRA structure.
-func writeASTRASkeleton(sb *strings.Builder, f *felt.Felt) {
+// writeFrontmatterSkeleton writes one-line summaries of structured frontmatter.
+func writeFrontmatterSkeleton(sb *strings.Builder, f *felt.Felt) {
 	// Decisions: covariance_method → glass (1 excluded)
 	if len(f.Decisions) > 0 {
 		var parts []string
@@ -162,7 +162,7 @@ func writeASTRASkeleton(sb *strings.Builder, f *felt.Felt) {
 	}
 }
 
-func writeASTRACounts(sb *strings.Builder, f *felt.Felt) {
+func writeFrontmatterCounts(sb *strings.Builder, f *felt.Felt) {
 	var parts []string
 	if len(f.Decisions) > 0 {
 		parts = append(parts, fmt.Sprintf("%d decisions", len(f.Decisions)))
@@ -177,7 +177,7 @@ func writeASTRACounts(sb *strings.Builder, f *felt.Felt) {
 		parts = append(parts, fmt.Sprintf("%d insights", len(f.Insights)))
 	}
 	if len(parts) > 0 {
-		fmt.Fprintf(sb, "ASTRA:    %s\n", strings.Join(parts, ", "))
+		fmt.Fprintf(sb, "Fields:   %s\n", strings.Join(parts, ", "))
 	}
 }
 
@@ -197,17 +197,17 @@ func renderFull(f *felt.Felt, g *felt.Graph, citations []felt.Citation, consumer
 	if f.Outcome != "" {
 		fmt.Fprintf(&sb, "Outcome:  %s\n", f.Outcome)
 	}
-	writeASTRADetails(&sb, f)
+	writeFrontmatterDetails(&sb, f)
 	if f.Body != "" {
 		fmt.Fprintf(&sb, "\n%s\n", f.Body)
 	}
 	return sb.String()
 }
 
-// writeASTRADetails writes the full ASTRA tiers (decisions, inputs, outputs,
-// insights) for the `full` detail level. Unlike writeASTRASkeleton, this
+// writeFrontmatterDetails writes the full structured frontmatter (decisions, inputs, outputs,
+// insights) for the `full` detail level. Unlike writeFrontmatterSkeleton, this
 // preserves every field so `-d full` is truly "everything".
-func writeASTRADetails(sb *strings.Builder, f *felt.Felt) {
+func writeFrontmatterDetails(sb *strings.Builder, f *felt.Felt) {
 	if len(f.Decisions) > 0 {
 		sb.WriteString("\nDecisions:\n")
 		// Sort decision IDs for deterministic output.

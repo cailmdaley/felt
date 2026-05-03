@@ -9,25 +9,25 @@ How fibers move through structured formalization. Three tiers of rigor. Formaliz
 
 ## The proposition
 
-Felt fibers climb three tiers: Annotated (any valid fiber), Formalized (at least one well-formed ASTRA object in frontmatter), and Tempered (`tempered: true`, human-validated). Each tier is a deterministic test. Formalization happens when structure is real enough to write without inventing; temper happens after human review.
+Felt fibers climb three tiers: Annotated (any valid fiber), Formalized (at least one well-formed structured frontmatter object), and Tempered (`tempered: true`, human-validated). Each tier is a deterministic test. Formalization happens when structure is real enough to write without inventing; temper happens after human review.
 
-The key insight: *everything is the same schema at different levels of fill.* A bare name is valid. A fiber with a decisions block is formalized. The same fiber with `tempered: true` is part of the scientific argument. No separate "astrify" step; the structure accretes in place.
+The key insight: *everything is the same schema at different levels of fill.* A bare name is valid. A fiber with a decisions block is formalized. The same fiber with `tempered: true` is part of the scientific argument. No separate formalization step; the structure accretes in place.
 
 This means the same system can render itself as a wiki (annotated fibers), as an analysis graph (formalized fibers with data flow), or as a publishable record (tempered fibers). The view changes; the data doesn't.
 
-An earlier proposal crossed this ladder with a second axis of fiber *kinds* (decision / computation / finding), giving a 3×3 grid. The Lightcone meeting on 2026-04-04 dropped the kind axis: at the annotated tier it adds nothing, and at the formalized tier the ASTRA fields already tell you which kind of fiber it is. Kind is an observation, not a classification.
+An earlier proposal crossed this ladder with a second axis of fiber *kinds* (decision / computation / finding), giving a 3×3 grid. The kind axis was dropped: at the annotated tier it adds nothing, and at the formalized tier the structured frontmatter fields already tell you which kind of fiber it is. Kind is an observation, not a classification.
 
 ## Three tiers
 
 | Tier | What it means | Test |
 |------|--------------|------|
 | **Annotated** | Any valid felt fiber. Name, outcome, body, tags, links in any combination. | Does the fiber exist? |
-| **Formalized** | At least one well-formed ASTRA object in frontmatter. | Could `felt export --format astra` emit this? |
+| **Formalized** | At least one well-formed structured frontmatter object (decisions, inputs, outputs, insights). | Does the fiber carry real computed structure? |
 | **Tempered** | `tempered: true` in frontmatter. Human-validated, part of the real scientific argument. | Has a human staked their name on it? |
 
 ## Kind as observation
 
-A fiber's shape is whatever its populated ASTRA fields make it.
+A fiber's shape is whatever its populated frontmatter fields make it.
 
 - `decisions` populated: the fiber is acting as a **decision**, a choice between alternatives with what was rejected and why.
 - `inputs` and `outputs` populated: the fiber is acting as a **computation**, a transformation that consumes data and produces results.
@@ -46,7 +46,7 @@ This can happen *before* the work is finished; outcome is not a prerequisite. Wr
 
 ## Why this matters for the stack
 
-The tier ladder resolves several of the meeting's open questions:
+The tier ladder resolves several open questions:
 
 **The funnel problem.** You fan out into 30 experiments. Three matter. The funnel is the transition from annotated → formalized → tempered. Most fibers stay annotated (breadcrumbs). Some get formalized (they have real structure). Few reach tempered (they're part of the argument). The funnel is not a separate operation; it's the natural lifecycle of a fiber.
 
@@ -55,4 +55,3 @@ The tier ladder resolves several of the meeting's open questions:
 **Progressive disclosure in the viewer.** The tier determines what the viewer shows. Tempered fibers form the spine. Formalized fibers fill in methodology. Annotated fibers are available on demand but don't clutter the primary view.
 
 **Agent context injection.** An idle-nudge channel can ask a specific question: "You just made a decision; did you record the excluded alternative?" The tier ladder gives the nudge a vocabulary. Not "did you file?" but "this looks like a decision at the annotated tier; does it have enough structure to formalize?"
-

@@ -9,12 +9,12 @@ import (
 
 var checkCmd = &cobra.Command{
 	Use:   "check",
-	Short: "Lint fibers for structural and ASTRA quality issues",
+	Short: "Lint fibers for structural quality issues",
 	Long: `Runs felt's repository checks.
 
 Current checks cover:
   - broken narrative wikilinks / body references
-  - broken ASTRA inputs.from references
+  - broken inputs.from data-flow references
   - legacy title frontmatter keys
   - legacy depends-on frontmatter keys
   - legacy MyST body anchors
@@ -23,7 +23,7 @@ Current checks cover:
   - insights without evidence
   - evidence stubs without description or anchors
   - closed fibers with unselected decisions
-  - inconsistent ASTRA formalization depth across siblings
+  - inconsistent formalization depth across siblings
   - slug collisions between bare and nested fiber forms
   - multiple bare .md files at .felt/ root`,
 	Args:         cobra.NoArgs,

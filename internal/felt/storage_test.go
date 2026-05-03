@@ -76,7 +76,7 @@ func TestStorageWriteRead(t *testing.T) {
 		ID:        "test-task",
 		Name:      "Test Task",
 		Status:    StatusOpen,
-		Inputs:    []ASTRAInput{{ID: "dep_a", From: "dep-a.output"}},
+		Inputs:    []FiberInput{{ID: "dep_a", From: "dep-a.output"}},
 		CreatedAt: time.Now(),
 		Body:      "Test body content.",
 	}
@@ -705,19 +705,19 @@ func TestStorageMoveSubtreeRewritesInputRefs(t *testing.T) {
 		ID:        "damping-prior",
 		Name:      "Damping Prior",
 		CreatedAt: time.Now(),
-		Inputs:    []ASTRAInput{{ID: "analysis_input", From: "bao-analysis.posterior"}},
+		Inputs:    []FiberInput{{ID: "analysis_input", From: "bao-analysis.posterior"}},
 	}
 	grandchild := &Felt{
 		ID:        "damping-prior/contour-plot",
 		Name:      "Contour Plot",
 		CreatedAt: time.Now(),
-		Inputs:    []ASTRAInput{{ID: "plot_input", From: "damping-prior.fit"}},
+		Inputs:    []FiberInput{{ID: "plot_input", From: "damping-prior.fit"}},
 	}
 	consumer := &Felt{
 		ID:        "consumer",
 		Name:      "Consumer",
 		CreatedAt: time.Now(),
-		Inputs:    []ASTRAInput{{ID: "consumer_input", From: "damping-prior/contour-plot.figure"}},
+		Inputs:    []FiberInput{{ID: "consumer_input", From: "damping-prior/contour-plot.figure"}},
 	}
 
 	for _, f := range []*Felt{parent, child, grandchild, consumer} {
@@ -958,7 +958,7 @@ Analysis body.
 		ID:        "session-hub",
 		Name:      "Session hub",
 		CreatedAt: time.Now(),
-		Inputs:    []ASTRAInput{{ID: "analysis_input", From: "bao-analysis-d34db33f.posterior"}},
+		Inputs:    []FiberInput{{ID: "analysis_input", From: "bao-analysis-d34db33f.posterior"}},
 		Body:      "(session-hub)=\n# Session hub",
 	}
 	if err := s.Write(preExisting); err != nil {

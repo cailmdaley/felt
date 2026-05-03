@@ -30,7 +30,7 @@ func (i CheckIssue) String() string {
 }
 
 // Check inspects fibers for quality problems in the current relationship model:
-// malformed ASTRA structure, broken narrative/data-flow references, and
+// malformed fiber structure, broken narrative/data-flow references, and
 // suspicious formalization gaps.
 func Check(felts []*Felt) []CheckIssue {
 	var issues []CheckIssue
@@ -290,7 +290,7 @@ func checkRelationshipIntegrity(felts []*Felt) []CheckIssue {
 				})
 				continue
 			}
-			if strings.TrimSpace(ref.Fragment) != "" && !hasASTRAElement(byID[targetID], ref.Fragment) {
+			if strings.TrimSpace(ref.Fragment) != "" && !hasFrontmatterElement(byID[targetID], ref.Fragment) {
 				issues = append(issues, CheckIssue{
 					Level:   CheckLevelError,
 					FiberID: f.ID,
@@ -331,7 +331,7 @@ func checkRelationshipIntegrity(felts []*Felt) []CheckIssue {
 	return issues
 }
 
-func hasASTRAElement(f *Felt, id string) bool {
+func hasFrontmatterElement(f *Felt, id string) bool {
 	id = strings.TrimSpace(id)
 	if f == nil || id == "" {
 		return false
@@ -368,7 +368,7 @@ func hasOutput(f *Felt, id string) bool {
 	return false
 }
 
-func evidenceLooksStubby(e ASTRAEvidence) bool {
+func evidenceLooksStubby(e Evidence) bool {
 	if strings.TrimSpace(e.Description) != "" {
 		return false
 	}
@@ -436,7 +436,7 @@ func checkSiblingDepthConsistency(felts []*Felt) []CheckIssue {
 		issues = append(issues, CheckIssue{
 			Level:   CheckLevelWarn,
 			FiberID: scope,
-			Message: "siblings have inconsistent ASTRA formalization depth: " + strings.Join(summaries, "; "),
+			Message: "siblings have inconsistent formalization depth: " + strings.Join(summaries, "; "),
 		})
 	}
 
