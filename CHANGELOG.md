@@ -4,6 +4,25 @@ All notable changes to felt are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.2] — 2026-05-03
+
+### Fixed
+
+- `felt setup codex` now dedupes felt hooks by path-suffix instead of
+  exact-string match, so re-running setup with a different `--source`
+  no longer leaves stale entries alongside the new ones in `hooks.json`.
+  Reports clearly which case applies: "already installed" when nothing
+  changed, "Updated" when the path moved (with the previous path
+  shown), or "Removed N duplicate(s)" when stale entries were pruned.
+- `felt setup codex --uninstall` no longer requires `--source` — felt
+  hooks are identified by path suffix, so stale entries can be cleaned
+  up even after the original checkout is gone.
+- The SessionStart hook (`session.sh`) bails gracefully when `jq` is
+  not installed, emitting the activate-felt directive plus a hint about
+  installing `jq` for the fiber listing. Previously it would fail
+  mid-pipeline with a noisy error. The PreToolUse hook already handled
+  this case.
+
 ## [1.0.1] — 2026-05-03
 
 ### Changed
@@ -156,3 +175,4 @@ the source of truth — `.felt/index.db` is a rebuildable cache.
 
 [1.0.0]: https://github.com/cailmdaley/felt/releases/tag/v1.0.0
 [1.0.1]: https://github.com/cailmdaley/felt/releases/tag/v1.0.1
+[1.0.2]: https://github.com/cailmdaley/felt/releases/tag/v1.0.2

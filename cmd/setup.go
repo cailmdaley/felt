@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -119,12 +120,14 @@ Use --uninstall to remove.`,
 		source, _ := cmd.Flags().GetString("source")
 		uninstall, _ := cmd.Flags().GetBool("uninstall")
 
-		pluginDir, pluginErr := findPluginDir(source)
-
+		// Uninstall doesn't need the plugin directory — we identify felt
+		// hooks by their `/hooks/<basename>` path suffix in hooks.json, so
+		// stale entries get pruned even if the original source is gone.
 		if uninstall {
-			return uninstallCodexHooks(pluginDir)
+			return uninstallCodexHooks()
 		}
 
+		pluginDir, pluginErr := findPluginDir(source)
 		if pluginErr != nil {
 			return pluginErr
 		}
@@ -427,17 +430,18 @@ func installCodexHooks(pluginDir string) error {
 
 	sessionCmd, remindCmd := codexHookCommands(pluginDir)
 
-	if addHook(hooks, "SessionStart", "", sessionCmd) {
-		fmt.Printf("✓ Added SessionStart hook: %s\n", sessionCmd)
-	} else {
-		fmt.Println("· SessionStart hook already installed")
-	}
+	// Prune any existing felt hooks first. The plugin source path can change
+	// between runs (different --source, different felt versions, GitHub clone
+	// vs local checkout), and addHook only dedupes by exact string match.
+	// Path-suffix pruning makes setup truly idempotent regardless of source.
+	prevSession := pruneFeltHooks(hooks, "SessionStart", "session.sh")
+	prevRemind := pruneFeltHooks(hooks, "PreToolUse", "remind.sh")
 
-	if addHook(hooks, "PreToolUse", "", remindCmd) {
-		fmt.Printf("✓ Added PreToolUse hook: %s\n", remindCmd)
-	} else {
-		fmt.Println("· PreToolUse hook already installed")
-	}
+	addHook(hooks, "SessionStart", "", sessionCmd)
+	addHook(hooks, "PreToolUse", "", remindCmd)
+
+	reportHookChange("SessionStart", prevSession, sessionCmd)
+	reportHookChange("PreToolUse", prevRemind, remindCmd)
 
 	data, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
@@ -453,7 +457,7 @@ func installCodexHooks(pluginDir string) error {
 	return nil
 }
 
-func uninstallCodexHooks(pluginDir string) error {
+func uninstallCodexHooks() error {
 	hooksPath, err := codexHooksPath()
 	if err != nil {
 		return err
@@ -476,35 +480,125 @@ func uninstallCodexHooks(pluginDir string) error {
 		return nil
 	}
 
-	if pluginDir == "" {
-		return fmt.Errorf("uninstall requires the plugin directory to know which scripts to remove\n  Pass --source <checkout> or set $FELT_PLUGIN_DIR")
+	// Match by path suffix (./hooks/<basename>) so uninstall works even when
+	// the original install pointed at a different path — including when the
+	// felt checkout that installed it has been deleted, which is exactly the
+	// scenario where pluginDir-based exact-match uninstall used to fail.
+	prunedSession := pruneFeltHooks(hooks, "SessionStart", "session.sh")
+	prunedRemind := pruneFeltHooks(hooks, "PreToolUse", "remind.sh")
+	if len(prunedSession) > 0 {
+		fmt.Printf("✓ Removed %d SessionStart hook(s)\n", len(prunedSession))
 	}
-
-	sessionCmd, remindCmd := codexHookCommands(pluginDir)
-	removed := false
-	if removeHook(hooks, "SessionStart", sessionCmd) {
-		fmt.Println("✓ Removed SessionStart hook")
-		removed = true
+	if len(prunedRemind) > 0 {
+		fmt.Printf("✓ Removed %d PreToolUse hook(s)\n", len(prunedRemind))
 	}
-	if removeHook(hooks, "PreToolUse", remindCmd) {
-		fmt.Println("✓ Removed PreToolUse hook")
-		removed = true
-	}
-
-	if removed {
-		data, err = json.MarshalIndent(settings, "", "  ")
-		if err != nil {
-			return fmt.Errorf("marshaling hooks.json: %w", err)
-		}
-		if err := os.WriteFile(hooksPath, data, 0644); err != nil {
-			return fmt.Errorf("writing hooks.json: %w", err)
-		}
-		fmt.Printf("Hooks: %s\n", hooksPath)
-	} else {
+	if len(prunedSession)+len(prunedRemind) == 0 {
 		fmt.Println("No felt Codex hooks found")
+		return nil
 	}
 
+	data, err = json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshaling hooks.json: %w", err)
+	}
+	if err := os.WriteFile(hooksPath, data, 0644); err != nil {
+		return fmt.Errorf("writing hooks.json: %w", err)
+	}
+	fmt.Printf("Hooks: %s\n", hooksPath)
 	return nil
+}
+
+// reportHookChange prints a one-line summary of a hook install based on what
+// was there before (`prev`) vs the desired command (`current`):
+//
+//   - prev empty                                → "✓ Added"
+//   - prev = [current]                          → "· already installed"
+//   - prev contains current + extras            → "✓ Removed N duplicate(s)"
+//   - prev exists, current not in it (path moved) → "✓ Updated"
+//   - prev exists, multiple distinct stale paths → "✓ Updated (was: ...)"
+func reportHookChange(event string, prev []string, current string) {
+	hadCurrent := false
+	var stale []string
+	for _, c := range prev {
+		if c == current {
+			hadCurrent = true
+		} else {
+			stale = append(stale, c)
+		}
+	}
+
+	switch {
+	case len(prev) == 0:
+		fmt.Printf("✓ Added %s hook: %s\n", event, current)
+	case hadCurrent && len(stale) == 0 && len(prev) == 1:
+		fmt.Printf("· %s hook already installed\n", event)
+	case hadCurrent && len(stale) == 0:
+		fmt.Printf("✓ Removed %d duplicate %s hook(s)\n", len(prev)-1, event)
+	case hadCurrent:
+		fmt.Printf("✓ Updated %s hook: removed %d stale, kept %s\n", event, len(stale), current)
+	default:
+		fmt.Printf("✓ Updated %s hook: %s (was: %s)\n", event, current, strings.Join(stale, ", "))
+	}
+}
+
+// pruneFeltHooks removes any hook entries under `event` whose inner command
+// references the felt plugin's hook script for the given basename (e.g.
+// "session.sh"). Matches on the path suffix `<plugin>/hooks/<basename>` so
+// stale hooks from prior installs at different paths are caught regardless of
+// where the plugin lived. Returns the command strings that were removed, so
+// callers can tell "already installed" from "updated" when the same path is
+// being re-added.
+func pruneFeltHooks(hooks map[string]interface{}, event, basename string) []string {
+	eventHooks, ok := hooks[event].([]interface{})
+	if !ok {
+		return nil
+	}
+
+	suffix := "/hooks/" + basename
+	var removed []string
+	filtered := make([]interface{}, 0, len(eventHooks))
+
+	for _, hook := range eventHooks {
+		hookMap, ok := hook.(map[string]interface{})
+		if !ok {
+			filtered = append(filtered, hook)
+			continue
+		}
+		cmds, ok := hookMap["hooks"].([]interface{})
+		if !ok {
+			filtered = append(filtered, hook)
+			continue
+		}
+		// Drop the entire hook entry if any of its inner commands looks like
+		// a felt hook. Codex hook entries always carry exactly one command in
+		// our installs; this is conservative for hand-edited configs too —
+		// if you've co-located another script under the same entry we'll
+		// take it with the felt one, which is unlikely in practice.
+		var feltCmd string
+		for _, cmd := range cmds {
+			cmdMap, ok := cmd.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			cmdStr, _ := cmdMap["command"].(string)
+			if strings.Contains(cmdStr, suffix) {
+				feltCmd = cmdStr
+				break
+			}
+		}
+		if feltCmd != "" {
+			removed = append(removed, feltCmd)
+			continue
+		}
+		filtered = append(filtered, hook)
+	}
+
+	if len(filtered) == 0 {
+		delete(hooks, event)
+	} else {
+		hooks[event] = filtered
+	}
+	return removed
 }
 
 // addHook adds a hook command to an event if not already present.

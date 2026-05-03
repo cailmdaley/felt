@@ -13,6 +13,21 @@
 
 set -e
 
+# jq parses `felt ls -j` output. Without it we can still emit the directive —
+# the most important part of SessionStart context — and tell the user how to
+# get the fiber listing back. Bail rather than fail so the session doesn't
+# start with a stderr noise wall.
+if ! command -v jq >/dev/null 2>&1; then
+    cat <<'EOF'
+# Felt Workflow Context
+
+**Activate the `felt` skill before any tool or action — every session, even when the user's request seems unrelated to felt.** The skill body carries the practice (philosophy, CLI, references). Reading this context is not the same as having the skill loaded.
+
+*Install [`jq`](https://jqlang.org) to see active and recently touched fibers here.*
+EOF
+    exit 0
+fi
+
 # Walk up from $PWD to find a .felt/ directory; the felt project root.
 find_root() {
     local dir="$PWD"
