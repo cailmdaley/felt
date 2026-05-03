@@ -25,6 +25,7 @@ var (
 	histAppendActor    string
 	histAppendEditFrom string
 	histAppendEditTo   string
+	histAppendKind     string
 )
 
 var historyCmd = &cobra.Command{
@@ -107,9 +108,16 @@ They're the continuity surface read by 'felt history --last 1'.
 Multiple appends per session are fine when they mark sub-session
 boundaries (after a major decision, before continuing).
 
+Use --kind to file a typed editorial event (e.g. 'review-comment') for
+inter-agent or human→agent directives. Typed events are filterable on
+the read side via 'felt history <id> --kind <type>' so dispatchers
+(shuttle) can surface the latest directive of a given kind separately
+from the regular editorial handoff chain.
+
 Examples:
   felt history append pure_eb --summary "Refit covariance with hartlap; χ² shifts +0.7."
-  felt history append <fiber> --summary "$(cat hand-off.md)"`,
+  felt history append <fiber> --summary "$(cat hand-off.md)"
+  felt history append <fiber> --kind review-comment --summary "Use DES weights, not Planck."`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		summary := strings.TrimSpace(histAppendSummary)
@@ -166,9 +174,27 @@ Examples:
 			payload["edit_window_end"] = strings.TrimSpace(histAppendEditTo)
 		}
 
+		// --kind selects the event_type. Default is the canonical
+		// "editorial" event; agents and integrations may file typed events
+		// (e.g. "review-comment") that the read side can filter via the
+		// existing --kind flag on `felt history`. Mechanical kinds
+		// (add/edit/rm/external_edit) are reserved for storage-layer use
+		// and rejected here so the editorial namespace stays separate.
+		kind := strings.TrimSpace(histAppendKind)
+		if kind == "" {
+			kind = felt.EventEditorial
+		} else {
+			switch kind {
+			case felt.EventAdd, felt.EventEdit, felt.EventRm, felt.EventExternalEdit:
+				return fmt.Errorf(
+					"--kind %q is reserved for mechanical events written by felt itself",
+					kind)
+			}
+		}
+
 		event := felt.Event{
 			FiberID: target.ID,
-			Type:    felt.EventEditorial,
+			Type:    kind,
 			Actor:   actor,
 			Payload: payload,
 		}
@@ -176,7 +202,11 @@ Examples:
 			return err
 		}
 
-		fmt.Printf("Appended editorial event on %s\n", target.ID)
+		if kind == felt.EventEditorial {
+			fmt.Printf("Appended editorial event on %s\n", target.ID)
+		} else {
+			fmt.Printf("Appended %s event on %s\n", kind, target.ID)
+		}
 		return nil
 	},
 }
@@ -206,6 +236,9 @@ func init() {
 		"Optional: lower bound of the mechanical edit window this event summarizes (RFC3339)")
 	historyAppendCmd.Flags().StringVar(&histAppendEditTo, "edit-window-end", "",
 		"Optional: upper bound of the mechanical edit window this event summarizes (RFC3339)")
+	historyAppendCmd.Flags().StringVar(&histAppendKind, "kind", "",
+		"Event type to record (default: editorial; e.g. 'review-comment'). "+
+			"Mechanical kinds (add/edit/rm/external_edit) are reserved.")
 }
 
 func buildHistoryFilter(cmd *cobra.Command, fiberID string) (felt.EventFilter, error) {

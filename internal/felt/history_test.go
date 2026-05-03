@@ -228,6 +228,85 @@ func TestEditorialEventRoundTrip(t *testing.T) {
 	}
 }
 
+// TestTypedEditorialEventRoundTrip exercises filing + reading typed
+// editorial events (e.g. "review-comment"). The append uses the same
+// AppendEvent path as the CLI's `--kind` flag wires up, and the read
+// uses the existing EventFilter.Types selector.
+func TestTypedEditorialEventRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	storage := NewStorage(dir)
+	if err := storage.Init(); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	if err := storage.Write(&Felt{
+		ID:        "epsilon",
+		Name:      "Epsilon",
+		CreatedAt: time.Date(2026, 4, 12, 9, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	idx, err := storage.OpenIndex()
+	if err != nil {
+		t.Fatalf("OpenIndex: %v", err)
+	}
+	defer idx.Close()
+
+	// One regular editorial event + one typed review-comment event.
+	if err := idx.AppendEvent(Event{
+		FiberID:    "epsilon",
+		OccurredAt: time.Date(2026, 4, 12, 10, 0, 0, 0, time.UTC),
+		Type:       EventEditorial,
+		Actor:      "test-worker",
+		Payload:    map[string]interface{}{"summary": "regular handoff"},
+	}); err != nil {
+		t.Fatalf("AppendEvent editorial: %v", err)
+	}
+	if err := idx.AppendEvent(Event{
+		FiberID:    "epsilon",
+		OccurredAt: time.Date(2026, 4, 12, 11, 0, 0, 0, time.UTC),
+		Type:       "review-comment",
+		Actor:      "test-cail",
+		Payload:    map[string]interface{}{"summary": "use DES weights"},
+	}); err != nil {
+		t.Fatalf("AppendEvent review-comment: %v", err)
+	}
+
+	// Default editorial filter only returns the editorial event.
+	editorial, err := idx.QueryEvents(EventFilter{
+		FiberID: "epsilon",
+		Types:   []string{EventEditorial},
+	})
+	if err != nil {
+		t.Fatalf("QueryEvents editorial: %v", err)
+	}
+	if len(editorial) != 1 {
+		t.Fatalf("expected 1 editorial-only event, got %d", len(editorial))
+	}
+	if got := editorial[0].Payload["summary"]; got != "regular handoff" {
+		t.Fatalf("editorial summary mismatch: %v", got)
+	}
+
+	// --kind=review-comment selects only the typed event.
+	directives, err := idx.QueryEvents(EventFilter{
+		FiberID:    "epsilon",
+		Types:      []string{"review-comment"},
+		Descending: true,
+		Limit:      1,
+	})
+	if err != nil {
+		t.Fatalf("QueryEvents review-comment: %v", err)
+	}
+	if len(directives) != 1 {
+		t.Fatalf("expected 1 review-comment event, got %d", len(directives))
+	}
+	if directives[0].Actor != "test-cail" {
+		t.Fatalf("expected actor=test-cail, got %q", directives[0].Actor)
+	}
+	if got := directives[0].Payload["summary"]; got != "use DES weights" {
+		t.Fatalf("directive summary mismatch: %v", got)
+	}
+}
+
 // TestHashFileMatchesHashBytes ensures the two helpers agree.
 func TestHashFileMatchesHashBytes(t *testing.T) {
 	dir := t.TempDir()
