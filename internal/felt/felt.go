@@ -187,10 +187,15 @@ type Felt struct {
 	Description     string                   `yaml:"description,omitempty" json:"description,omitempty"`
 	Inputs          []FiberInput             `yaml:"inputs,omitempty" json:"inputs,omitempty"`
 	Outputs         []FiberOutput            `yaml:"outputs,omitempty" json:"outputs,omitempty"`
-	Decisions       map[string]Decision `yaml:"decisions,omitempty" json:"decisions,omitempty"`
-	Insights        map[string]Insight  `yaml:"insights,omitempty" json:"insights,omitempty"`
-	SuccessCriteria []SuccessCriterion  `yaml:"success_criteria,omitempty" json:"success_criteria,omitempty"`
+	Decisions       map[string]Decision      `yaml:"decisions,omitempty" json:"decisions,omitempty"`
+	Insights        map[string]Insight       `yaml:"insights,omitempty" json:"insights,omitempty"`
+	SuccessCriteria []SuccessCriterion       `yaml:"success_criteria,omitempty" json:"success_criteria,omitempty"`
 	Container       string                   `yaml:"container,omitempty" json:"container,omitempty"`
+	// ExtraFields holds tool-owned frontmatter namespaces (any top-level key
+	// not in knownFrontmatterKeys) that felt does not parse. They are
+	// preserved verbatim on round-trip so that felt edit never silently drops
+	// them.
+	ExtraFields     map[string]*yaml.Node    `yaml:"-" json:"-"`
 	Body            string                   `yaml:"-" json:"body,omitempty"`
 	ModifiedAt      time.Time                `yaml:"-" json:"modified_at,omitempty"` // populated from file stat
 	// EntryPoint is true when the fiber lives as a bare `.felt/<slug>.md`
@@ -423,23 +428,36 @@ func ParseWithMode(id string, content []byte, mode ParseMode) (*Felt, error) {
 	return f, nil
 }
 
+// knownFrontmatterKeys is the set of top-level YAML keys that felt parses
+// into struct fields. All other top-level keys are preserved as ExtraFields.
+var knownFrontmatterKeys = map[string]struct{}{
+	"name": {}, "title": {}, "status": {}, "tags": {},
+	"created-at": {}, "closed-at": {}, "outcome": {}, "due": {},
+	"description": {}, "inputs": {}, "outputs": {}, "decisions": {},
+	"insights": {}, "success_criteria": {}, "container": {},
+	// legacy / migration key we absorb and discard (renamed to "name"; see normalizeLegacyFrontmatter)
+	"depends-on": {},
+	// NOTE: "tempered" is NOT here — it's a tool-owned field that must
+	// round-trip unchanged via ExtraFields.
+}
+
 func parseFrontmatter(id string, frontmatter []byte) (*Felt, error) {
 	type feltFrontmatter struct {
-		Name            string                   `yaml:"name"`
-		LegacyTitle     string                   `yaml:"title"`
-		Status          string                   `yaml:"status,omitempty"`
-		Tags            []string                 `yaml:"tags,omitempty"`
-		CreatedAt       time.Time                `yaml:"created-at"`
-		ClosedAt        *time.Time               `yaml:"closed-at,omitempty"`
-		Outcome         string                   `yaml:"outcome,omitempty"`
-		Due             *time.Time               `yaml:"due,omitempty"`
-		Description     string                   `yaml:"description,omitempty"`
-		Inputs          []FiberInput             `yaml:"inputs,omitempty"`
-		Outputs         []FiberOutput            `yaml:"outputs,omitempty"`
+		Name            string              `yaml:"name"`
+		LegacyTitle     string              `yaml:"title"`
+		Status          string              `yaml:"status,omitempty"`
+		Tags            []string            `yaml:"tags,omitempty"`
+		CreatedAt       time.Time           `yaml:"created-at"`
+		ClosedAt        *time.Time          `yaml:"closed-at,omitempty"`
+		Outcome         string              `yaml:"outcome,omitempty"`
+		Due             *time.Time          `yaml:"due,omitempty"`
+		Description     string              `yaml:"description,omitempty"`
+		Inputs          []FiberInput        `yaml:"inputs,omitempty"`
+		Outputs         []FiberOutput       `yaml:"outputs,omitempty"`
 		Decisions       map[string]Decision `yaml:"decisions,omitempty"`
 		Insights        map[string]Insight  `yaml:"insights,omitempty"`
 		SuccessCriteria []SuccessCriterion  `yaml:"success_criteria,omitempty"`
-		Container       string                   `yaml:"container,omitempty"`
+		Container       string              `yaml:"container,omitempty"`
 	}
 
 	var fm feltFrontmatter
@@ -467,6 +485,25 @@ func parseFrontmatter(id string, frontmatter []byte) (*Felt, error) {
 		SuccessCriteria: fm.SuccessCriteria,
 		Container:       fm.Container,
 	}
+
+	// Capture unknown top-level keys so Marshal can round-trip them.
+	var node yaml.Node
+	if err := yaml.Unmarshal(frontmatter, &node); err == nil && len(node.Content) > 0 {
+		mapping := node.Content[0]
+		if mapping.Kind == yaml.MappingNode {
+			extra := make(map[string]*yaml.Node)
+			for i := 0; i+1 < len(mapping.Content); i += 2 {
+				key := mapping.Content[i].Value
+				if _, known := knownFrontmatterKeys[key]; !known {
+					extra[key] = mapping.Content[i+1]
+				}
+			}
+			if len(extra) > 0 {
+				f.ExtraFields = extra
+			}
+		}
+	}
+
 	f.canonicalizeName()
 	return f, nil
 }
@@ -702,6 +739,24 @@ func (f *Felt) Marshal() ([]byte, error) {
 	yamlBytes, err := yaml.Marshal(fm)
 	if err != nil {
 		return nil, fmt.Errorf("marshaling YAML: %w", err)
+	}
+
+	// Append extra (tool-owned) fields after the known fields so they survive
+	// round-trips through felt edit without loss.
+	if len(f.ExtraFields) > 0 {
+		// Build a mapping node containing only the extra fields, then marshal it.
+		// This avoids document markers and preserves the exact YAML structure
+		// of each field's value node.
+		mappingNode := &yaml.Node{Kind: yaml.MappingNode}
+		for key, valueNode := range f.ExtraFields {
+			keyNode := &yaml.Node{Kind: yaml.ScalarNode, Value: key, Tag: "!!str"}
+			mappingNode.Content = append(mappingNode.Content, keyNode, valueNode)
+		}
+		extraBytes, err := yaml.Marshal(mappingNode)
+		if err != nil {
+			return nil, fmt.Errorf("marshaling extra frontmatter fields: %w", err)
+		}
+		yamlBytes = append(yamlBytes, extraBytes...)
 	}
 
 	var buf bytes.Buffer

@@ -339,7 +339,7 @@ func TestMarshalLeavesEmptyBodyEmpty(t *testing.T) {
 	}
 }
 
-func TestParseAndMarshalASTRAFields(t *testing.T) {
+func TestParseAndMarshalStructuredFields(t *testing.T) {
 	created := time.Date(2026, 3, 16, 9, 0, 0, 0, time.UTC)
 	content := []byte(`---
 name: BAO Damping Prior
@@ -475,7 +475,7 @@ container: python:3.11-slim
 	}
 }
 
-func TestSearchTextIncludesASTRAFields(t *testing.T) {
+func TestSearchTextIncludesStructuredFields(t *testing.T) {
 	f := &Felt{
 		Outcome:     "Outcome text",
 		Description: "Description text",
@@ -553,7 +553,7 @@ func intPtr(v int) *int {
 	return &v
 }
 
-func TestJSONOmitsEmptyASTRAFields(t *testing.T) {
+func TestJSONOmitsEmptyStructuredFields(t *testing.T) {
 	f := &Felt{
 		ID:        "quick-gotcha",
 		Name:      "Quick gotcha",
@@ -966,5 +966,87 @@ func TestGraphEdgesHelpers(t *testing.T) {
 	}
 	if l := deps.LabelFor("task-a"); l != "" {
 		t.Errorf("LabelFor(task-a) = %q, want empty", l)
+	}
+}
+
+// TestExtraFieldsRoundTrip verifies that tool-owned frontmatter blocks
+// (unknown top-level keys like tempered:, or arbitrary nested namespaces)
+// survive a Parse → Marshal round-trip unchanged. This guards against
+// felt edit silently dropping them.
+func TestExtraFieldsRoundTrip(t *testing.T) {
+	input := `---
+name: My constitution
+status: active
+tags:
+    - constitution
+created-at: 2026-05-01T10:00:00Z
+outcome: >-
+    Working on it.
+tempered: false
+mytool:
+    enabled: true
+    kind: oneshot
+    agent: claude-sonnet
+---
+
+Body here.
+`
+	f, err := Parse("ai-futures/my-constitution", []byte(input))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	// Felt-owned fields should parse correctly.
+	if f.Name != "My constitution" {
+		t.Errorf("Name = %q, want %q", f.Name, "My constitution")
+	}
+	if f.Status != "active" {
+		t.Errorf("Status = %q, want %q", f.Status, "active")
+	}
+
+	// Tool-owned fields must land in ExtraFields, not be dropped.
+	if f.ExtraFields == nil {
+		t.Fatal("ExtraFields is nil; expected mytool: and tempered: to be captured")
+	}
+	if _, ok := f.ExtraFields["mytool"]; !ok {
+		t.Error("ExtraFields missing 'mytool' key")
+	}
+	if _, ok := f.ExtraFields["tempered"]; !ok {
+		t.Error("ExtraFields missing 'tempered' key")
+	}
+
+	// Round-trip: marshal and re-parse; tool-owned fields must still be present.
+	out, err := f.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	outStr := string(out)
+
+	f2, err := Parse("ai-futures/my-constitution", out)
+	if err != nil {
+		t.Fatalf("Round-trip Parse: %v", err)
+	}
+	if f2.Name != f.Name {
+		t.Errorf("Round-trip Name = %q, want %q", f2.Name, f.Name)
+	}
+	if f2.ExtraFields == nil {
+		t.Fatalf("Round-trip ExtraFields is nil; marshaled output was:\n%s", outStr)
+	}
+	if _, ok := f2.ExtraFields["mytool"]; !ok {
+		t.Errorf("Round-trip ExtraFields missing 'mytool'; marshaled output was:\n%s", outStr)
+	}
+	if _, ok := f2.ExtraFields["tempered"]; !ok {
+		t.Errorf("Round-trip ExtraFields missing 'tempered'; marshaled output was:\n%s", outStr)
+	}
+
+	// mytool block structure must be intact.
+	if !strings.Contains(outStr, "enabled: true") {
+		t.Errorf("Round-trip output missing 'enabled: true'; got:\n%s", outStr)
+	}
+	if !strings.Contains(outStr, "claude-sonnet") {
+		t.Errorf("Round-trip output missing agent value 'claude-sonnet'; got:\n%s", outStr)
+	}
+	if !strings.Contains(outStr, "tempered: false") {
+		t.Errorf("Round-trip output missing 'tempered: false'; got:\n%s", outStr)
 	}
 }
