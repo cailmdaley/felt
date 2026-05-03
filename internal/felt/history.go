@@ -28,6 +28,15 @@ const (
 	// EventEditorial is an agent-written prose summary appended via
 	// `felt history append`.
 	EventEditorial = "editorial"
+	// EventReviewComment is a user-authored directive attached to a Shuttle
+	// fiber while it is in review. Operational steering for the next
+	// dispatch: the next worker reads pending (unconsumed) review-comment
+	// events and incorporates them before continuing. Payload shape:
+	//   summary       — the directive text (required)
+	//   resume_mode   — "fresh" | "previous" (optional; default: fresh)
+	//   consumed_at   — RFC3339 timestamp set by the worker on incorporation
+	//                   (null/absent = pending); use MarkConsumed to flip.
+	EventReviewComment = "review-comment"
 )
 
 // EditorialSoftSizeLimit is the soft upper bound (in bytes) for an
@@ -54,6 +63,12 @@ type EventFilter struct {
 	Until      time.Time // if non-zero, occurred_at <= Until
 	Limit      int       // if > 0, cap the number of rows
 	Descending bool      // newest-first when true
+	// Unconsumed, when true, restricts results to events whose payload does
+	// not contain a non-null "consumed_at" field. Applies only when the
+	// query targets event types that carry consumed_at (review-comment).
+	// Uses SQLite's json_extract so it requires SQLite ≥ 3.38 (JSON5 era)
+	// which is always satisfied on macOS / modern Linux.
+	Unconsumed bool
 }
 
 // HashFile returns the lowercase SHA-256 hex digest of the file's bytes.
@@ -181,6 +196,14 @@ func (i *Index) QueryEvents(filter EventFilter) ([]Event, error) {
 	if !filter.Until.IsZero() {
 		conds = append(conds, "occurred_at <= ?")
 		args = append(args, filter.Until.UTC().Format(time.RFC3339Nano))
+	}
+	if filter.Unconsumed {
+		// Keep only events whose payload has no consumed_at field (or whose
+		// payload is null). json_extract returns NULL when the key is absent,
+		// which is indistinguishable from a null value — both pass the
+		// IS NULL check, matching the "not yet consumed" state.
+		conds = append(conds,
+			"(payload IS NULL OR json_extract(payload, '$.consumed_at') IS NULL)")
 	}
 	q := `SELECT rowid, fiber_id, occurred_at, event_type, actor,
 		COALESCE(content_hash, ''), COALESCE(payload, '')
@@ -321,6 +344,51 @@ func FiberSize(path string) (lines, chars int) {
 		lines++
 	}
 	return lines, chars
+}
+
+// MarkConsumed stamps the current UTC timestamp into the consumed_at field of
+// an event's JSON payload. The event must belong to fiberID and must exist in
+// the store (matched by rowID). Returns ErrEventNotFound when the rowID does
+// not resolve to a known event on the given fiber.
+//
+// This is a targeted in-place mutation of an existing payload, not a new
+// event. The event remains in the append-only stream; only the consumed_at
+// field within its JSON payload changes. Callers should use this only for
+// review-comment events where "marking consumed" is the intended protocol.
+func (i *Index) MarkConsumed(fiberID string, rowID int64) error {
+	row := i.db.QueryRow(
+		`SELECT COALESCE(payload, '') FROM history_events
+		 WHERE fiber_id = ? AND rowid = ?`,
+		fiberID, rowID,
+	)
+	var payloadStr string
+	if err := row.Scan(&payloadStr); err != nil {
+		if err == sql.ErrNoRows {
+			return fmt.Errorf("event not found: fiber=%s rowid=%d", fiberID, rowID)
+		}
+		return fmt.Errorf("read event payload: %w", err)
+	}
+
+	payload := map[string]interface{}{}
+	if payloadStr != "" {
+		if err := json.Unmarshal([]byte(payloadStr), &payload); err != nil {
+			return fmt.Errorf("unmarshal event payload: %w", err)
+		}
+	}
+	payload["consumed_at"] = time.Now().UTC().Format(time.RFC3339)
+
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal updated payload: %w", err)
+	}
+	_, err = i.db.Exec(
+		`UPDATE history_events SET payload = ? WHERE fiber_id = ? AND rowid = ?`,
+		string(raw), fiberID, rowID,
+	)
+	if err != nil {
+		return fmt.Errorf("mark consumed: %w", err)
+	}
+	return nil
 }
 
 // SortEventsAsc sorts events by occurred_at ASC, rowid ASC.

@@ -16,14 +16,20 @@ import (
 var (
 	histShowEditorial  bool
 	histShowMechanical bool
+	histShowUnconsumed bool
+	histKindFilter     string
 	histLast           int
 	histSince          string
 	histUntil          string
 
-	histAppendSummary  string
-	histAppendActor    string
-	histAppendEditFrom string
-	histAppendEditTo   string
+	histAppendSummary    string
+	histAppendActor      string
+	histAppendEditFrom   string
+	histAppendEditTo     string
+	histAppendKind       string
+	histAppendResumeMode string
+
+	histMarkConsumedRowID int64
 )
 
 var historyCmd = &cobra.Command{
@@ -48,7 +54,16 @@ Examples:
 
 The append subcommand records a new editorial event:
 
-  felt history append pure_eb --summary "Refit covariance, χ² stable to ±2."`,
+  felt history append pure_eb --summary "Refit covariance, χ² stable to ±2."
+  felt history append <fiber> --kind review-comment --summary "Rewrite the outcome."
+
+Use --unconsumed to filter to review-comment events not yet consumed by a worker:
+
+  felt history <fiber> --kind review-comment --unconsumed
+
+The mark-consumed subcommand stamps consumed_at on a review-comment event:
+
+  felt history mark-consumed <fiber> --rowid 42`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		root, err := resolveProjectRoot()
@@ -163,10 +178,29 @@ Examples:
 		if strings.TrimSpace(histAppendEditTo) != "" {
 			payload["edit_window_end"] = strings.TrimSpace(histAppendEditTo)
 		}
+		if rm := strings.TrimSpace(histAppendResumeMode); rm != "" {
+			if rm != "fresh" && rm != "previous" {
+				return fmt.Errorf("--resume-mode must be 'fresh' or 'previous', got %q", rm)
+			}
+			payload["resume_mode"] = rm
+		}
+
+		// Determine event type: --kind overrides the default "editorial".
+		// Only well-known kinds are accepted to prevent typos silently
+		// creating unrecognized event streams.
+		eventType := felt.EventEditorial
+		if k := strings.TrimSpace(histAppendKind); k != "" {
+			switch k {
+			case felt.EventEditorial, felt.EventReviewComment:
+				eventType = k
+			default:
+				return fmt.Errorf("unknown --kind %q; allowed: editorial, review-comment", k)
+			}
+		}
 
 		event := felt.Event{
 			FiberID: target.ID,
-			Type:    felt.EventEditorial,
+			Type:    eventType,
 			Actor:   actor,
 			Payload: payload,
 		}
@@ -174,7 +208,50 @@ Examples:
 			return err
 		}
 
-		fmt.Printf("Appended editorial event on %s\n", target.ID)
+		fmt.Printf("Appended %s event on %s\n", eventType, target.ID)
+		return nil
+	},
+}
+
+var historyMarkConsumedCmd = &cobra.Command{
+	Use:   "mark-consumed <id>",
+	Short: "Mark a review-comment event as consumed by a worker",
+	Long: `Stamps consumed_at on an existing review-comment history event.
+
+The event stays in the append-only history; only the consumed_at field
+within its JSON payload is set. This is how a Shuttle worker signals that
+it has incorporated a pending review directive.
+
+Requires --rowid (visible in 'felt history --kind review-comment --json').
+
+Examples:
+  felt history mark-consumed ai-futures/shuttle/my-fiber --rowid 42`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if histMarkConsumedRowID <= 0 {
+			return fmt.Errorf("--rowid is required and must be positive")
+		}
+		root, err := resolveProjectRoot()
+		if err != nil {
+			return fmt.Errorf("not in a felt repository")
+		}
+		storage := felt.NewStorage(root)
+		scopeID := resolveCommandScope(root)
+		target, err := storage.FindMetadataInScope(scopeID, args[0])
+		if err != nil {
+			return err
+		}
+
+		idx, err := storage.OpenIndexNoSync()
+		if err != nil {
+			return err
+		}
+		defer idx.Close()
+
+		if err := idx.MarkConsumed(target.ID, histMarkConsumedRowID); err != nil {
+			return err
+		}
+		fmt.Printf("Marked event rowid=%d on %s as consumed\n", histMarkConsumedRowID, target.ID)
 		return nil
 	},
 }
@@ -182,11 +259,16 @@ Examples:
 func init() {
 	rootCmd.AddCommand(historyCmd)
 	historyCmd.AddCommand(historyAppendCmd)
+	historyCmd.AddCommand(historyMarkConsumedCmd)
 
 	historyCmd.Flags().BoolVar(&histShowEditorial, "editorial", true,
 		"Include editorial (prose) events (default true)")
 	historyCmd.Flags().BoolVar(&histShowMechanical, "mechanical", false,
 		"Include mechanical (add/edit/rm/external_edit) events")
+	historyCmd.Flags().StringVar(&histKindFilter, "kind", "",
+		"Filter to a specific event type (e.g. review-comment); overrides --editorial/--mechanical")
+	historyCmd.Flags().BoolVar(&histShowUnconsumed, "unconsumed", false,
+		"Only events whose payload lacks a consumed_at field (pending review-comment events)")
 	historyCmd.Flags().IntVarP(&histLast, "last", "n", 0,
 		"Limit to the most recent N events (0 = no cap)")
 	historyCmd.Flags().StringVar(&histSince, "since", "",
@@ -202,12 +284,32 @@ func init() {
 		"Optional: lower bound of the mechanical edit window this event summarizes (RFC3339)")
 	historyAppendCmd.Flags().StringVar(&histAppendEditTo, "edit-window-end", "",
 		"Optional: upper bound of the mechanical edit window this event summarizes (RFC3339)")
+	historyAppendCmd.Flags().StringVar(&histAppendKind, "kind", "",
+		"Event type to record (default: editorial; use review-comment for Shuttle review directives)")
+	historyAppendCmd.Flags().StringVar(&histAppendResumeMode, "resume-mode", "",
+		"Resume mode for Shuttle requeue: 'fresh' (default) or 'previous'")
+
+	historyMarkConsumedCmd.Flags().Int64Var(&histMarkConsumedRowID, "rowid", 0,
+		"Row ID of the event to mark consumed (required; visible in --json output)")
 }
 
 func buildHistoryFilter(cmd *cobra.Command, fiberID string) (felt.EventFilter, error) {
 	filter := felt.EventFilter{
 		FiberID:    fiberID,
 		Descending: true,
+	}
+
+	// --kind overrides the editorial/mechanical split: it selects a specific
+	// event_type directly (e.g. "review-comment"). The --editorial and
+	// --mechanical flags are ignored when --kind is set.
+	if kind := strings.TrimSpace(histKindFilter); kind != "" {
+		filter.Types = []string{kind}
+		filter.Unconsumed = histShowUnconsumed
+		// Apply time + limit filters and return early.
+		if err := applyTimeFilters(cmd, &filter); err != nil {
+			return filter, err
+		}
+		return filter, nil
 	}
 
 	editorial := histShowEditorial
@@ -234,24 +336,35 @@ func buildHistoryFilter(cmd *cobra.Command, fiberID string) (felt.EventFilter, e
 		// both — leave Types nil to fetch everything
 	}
 
+	if err := applyTimeFilters(nil, &filter); err != nil {
+		return filter, err
+	}
+	return filter, nil
+}
+
+// applyTimeFilters populates Since, Until, and Limit on a filter from the
+// global flag vars. cmd is accepted for interface consistency but not used —
+// we read global flag vars directly since Cobra flag bindings go to package
+// vars. Caller may pass nil.
+func applyTimeFilters(_ interface{}, filter *felt.EventFilter) error {
 	if v := strings.TrimSpace(histSince); v != "" {
 		t, err := parseHistoryTime(v)
 		if err != nil {
-			return filter, fmt.Errorf("--since: %w", err)
+			return fmt.Errorf("--since: %w", err)
 		}
 		filter.Since = t
 	}
 	if v := strings.TrimSpace(histUntil); v != "" {
 		t, err := parseHistoryTime(v)
 		if err != nil {
-			return filter, fmt.Errorf("--until: %w", err)
+			return fmt.Errorf("--until: %w", err)
 		}
 		filter.Until = t
 	}
 	if histLast > 0 {
 		filter.Limit = histLast
 	}
-	return filter, nil
+	return nil
 }
 
 func parseHistoryTime(s string) (time.Time, error) {
@@ -295,6 +408,25 @@ func renderHistory(id, name string, events []felt.Event) string {
 			fmt.Fprintf(&sb, "## %s — %s\n\n",
 				e.OccurredAt.Local().Format("2006-01-02 15:04 MST"),
 				e.Actor)
+			summary := stringField(e.Payload, "summary")
+			sb.WriteString(strings.TrimSpace(summary))
+			sb.WriteString("\n\n")
+		case felt.EventReviewComment:
+			// Review-comment events get block treatment like editorial events,
+			// but with a "review directive" header and consumed_at annotation.
+			consumedAt := stringField(e.Payload, "consumed_at")
+			resumeMode := stringField(e.Payload, "resume_mode")
+			statusPart := "pending"
+			if consumedAt != "" {
+				statusPart = fmt.Sprintf("consumed %s", consumedAt)
+			}
+			header := fmt.Sprintf("## [review-comment] %s — %s (rowid=%d, %s)",
+				e.OccurredAt.Local().Format("2006-01-02 15:04 MST"),
+				e.Actor, e.RowID, statusPart)
+			if resumeMode != "" {
+				header += fmt.Sprintf(", resume=%s", resumeMode)
+			}
+			fmt.Fprintf(&sb, "%s\n\n", header)
 			summary := stringField(e.Payload, "summary")
 			sb.WriteString(strings.TrimSpace(summary))
 			sb.WriteString("\n\n")
