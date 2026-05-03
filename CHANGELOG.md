@@ -4,6 +4,29 @@ All notable changes to felt are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] — 2026-05-03
+
+### Changed
+
+- `felt setup claude` no longer requires a local checkout. With no
+  `--source`, it registers `cailmdaley/felt` directly from GitHub —
+  Claude Code clones the marketplace itself. Tagged felt binaries pin
+  the plugin to the matching tag (e.g. `cailmdaley/felt#v1.0.1`); `dev`
+  builds track the default branch. Brew and curl users can run `felt
+  setup claude` and have it just work.
+- `felt setup codex` falls back to Claude Code's marketplace clone at
+  `~/.claude/plugins/marketplaces/cailmdaley-felt/` when no `--source`
+  is given, so a fresh `setup claude` followed by `setup codex` wires up
+  both integrations without a manual checkout.
+
+### Documentation
+
+- README rewrite: opens by naming what felt is and defining "fiber" on
+  first concrete use, drops the empty "lightweight" claim in favour of
+  the concrete things that are true (single static binary, no daemon,
+  rebuildable cache, plain-markdown source of truth), and names the
+  audience early.
+
 ## [1.0.0] — 2026-05-03
 
 The 1.0 release consolidates the directory-fiber pivot, an FTS5/SQLite
@@ -132,3 +155,4 @@ the source of truth — `.felt/index.db` is a rebuildable cache.
   than relying on environment presence.
 
 [1.0.0]: https://github.com/cailmdaley/felt/releases/tag/v1.0.0
+[1.0.1]: https://github.com/cailmdaley/felt/releases/tag/v1.0.1
