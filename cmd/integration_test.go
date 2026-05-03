@@ -14,6 +14,7 @@ import (
 )
 
 var binaryPath string
+var repoRoot string
 
 func TestMain(m *testing.M) {
 	tmp, err := os.MkdirTemp("", "felt-integration-*")
@@ -30,6 +31,7 @@ func TestMain(m *testing.M) {
 	for {
 		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
 			buildCmd.Dir = dir
+			repoRoot = dir
 			break
 		}
 		parent := filepath.Dir(dir)
@@ -446,7 +448,7 @@ Session body.
 	if err := json.Unmarshal([]byte(out), &migratedShown); err != nil {
 		t.Fatalf("migrate: invalid json from show -j: %v\n%s", err, out)
 	}
-	inputs, ok = migratedShown["inputs"].([]any)
+	inputs, ok := migratedShown["inputs"].([]any)
 	if !ok || len(inputs) != 1 {
 		t.Fatalf("migrate: unexpected inputs %#v", migratedShown["inputs"])
 	}
@@ -512,17 +514,20 @@ Session body.
 		t.Fatalf("rm: fiber should be gone, got: %s", lsOut)
 	}
 
-	// setup claude — should print snippet
-	out = mustFelt(t, dir, "setup", "claude")
-	if !strings.Contains(out, "## felt") {
-		t.Fatalf("setup claude: expected CLAUDE.md snippet, got: %s", out)
+	// setup claude — registers the marketplace + installs the plugin via the
+	// Claude Code CLI. Skip when `claude` isn't available (e.g., on CI runners
+	// without Claude Code installed).
+	if _, err := exec.LookPath("claude"); err == nil {
+		if _, err := felt(dir, "setup", "claude", "--source", repoRoot); err != nil {
+			t.Fatalf("setup claude: %v", err)
+		}
 	}
 
 	// setup codex — install, idempotent, uninstall
 	codexHome := t.TempDir()
 	codexEnv := append(os.Environ(), "HOME="+codexHome, "SHELL=/bin/zsh")
 
-	cmd := exec.Command(binaryPath, "setup", "codex")
+	cmd := exec.Command(binaryPath, "setup", "codex", "--source", repoRoot)
 	cmd.Dir = dir
 	cmd.Env = codexEnv
 	cmdOut, err := cmd.CombinedOutput()
@@ -536,12 +541,12 @@ Session body.
 	hooksPath := filepath.Join(codexHome, ".codex", "hooks.json")
 	hooksContent, _ := os.ReadFile(hooksPath)
 	text := string(hooksContent)
-	if !strings.Contains(text, "felt hook session") || !strings.Contains(text, "felt hook remind") {
-		t.Fatalf("setup codex: hooks.json missing felt hooks, got: %s", hooksContent)
+	if !strings.Contains(text, "session.sh") || !strings.Contains(text, "remind.sh") {
+		t.Fatalf("setup codex: hooks.json missing felt hook scripts, got: %s", hooksContent)
 	}
 
 	// idempotent
-	cmd2 := exec.Command(binaryPath, "setup", "codex")
+	cmd2 := exec.Command(binaryPath, "setup", "codex", "--source", repoRoot)
 	cmd2.Dir = dir
 	cmd2.Env = codexEnv
 	cmdOut2, _ := cmd2.CombinedOutput()
@@ -550,7 +555,7 @@ Session body.
 	}
 
 	// uninstall
-	cmd3 := exec.Command(binaryPath, "setup", "codex", "--uninstall")
+	cmd3 := exec.Command(binaryPath, "setup", "codex", "--uninstall", "--source", repoRoot)
 	cmd3.Dir = dir
 	cmd3.Env = codexEnv
 	cmd3Out, err := cmd3.CombinedOutput()
@@ -558,13 +563,13 @@ Session body.
 		t.Fatalf("setup codex uninstall: %v\n%s", err, cmd3Out)
 	}
 	hooksContent2, _ := os.ReadFile(hooksPath)
-	if strings.Contains(string(hooksContent2), "felt hook session") || strings.Contains(string(hooksContent2), "felt hook remind") {
+	if strings.Contains(string(hooksContent2), "session.sh") || strings.Contains(string(hooksContent2), "remind.sh") {
 		t.Fatalf("setup codex uninstall: hooks still present in hooks.json")
 	}
 
 	out = mustFelt(t, dir, "--help")
-	if !strings.Contains(out, "export") {
-		t.Fatalf("help: expected export command, got: %s", out)
+	if !strings.Contains(out, "add") || !strings.Contains(out, "ls") {
+		t.Fatalf("help: expected core commands, got: %s", out)
 	}
 	if strings.Contains(out, "tapestry") {
 		t.Fatalf("help: legacy tapestry command should be hidden, got: %s", out)
