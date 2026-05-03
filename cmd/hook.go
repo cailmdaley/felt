@@ -79,9 +79,26 @@ func feltDescription() string {
 		"Let the user's opinions and corrections guide the fibers; you are following the understanding as it evolves, reversals included.\n\n"
 }
 
+// activateDirective returns the front-of-context instruction to activate the
+// felt skill before doing anything else. Reading SessionStart context is not
+// the same as having the skill loaded — the skill body carries the philosophy,
+// the formalization rhythm, and the references that shape *how* to work, not
+// just what to do.
+func activateDirective() string {
+	return "## Begin Here\n\n" +
+		"**Activate the `felt` skill before any tool or action — every session, " +
+		"even when the user's request seems unrelated to felt.** The cheatsheet " +
+		"and fiber list below are the floor, not the ceiling. The skill body " +
+		"loads the philosophy, the formalization rhythm, and the references " +
+		"that shape *how* to think and work, not just *what* commands to run. " +
+		"Reading this context is not the same as having the skill loaded; the " +
+		"skill makes you a felt practitioner, not a felt observer.\n\n"
+}
+
 func minimalOutput() string {
-	return "# Felt Workflow Context\n\n" + feltDescription() +
-		"*No felt repository in current directory. Start one with `felt init`.*\n\n" +
+	return "# Felt Workflow Context\n\n" + activateDirective() + feltDescription() +
+		"*No felt repository in current directory. Start one with `felt init` " +
+		"when this conversation produces thinking worth keeping.*\n\n" +
 		cliReference() + coreRules()
 }
 
@@ -89,6 +106,7 @@ func formatSessionOutput(felts []*felt.Felt) string {
 	var sb strings.Builder
 
 	sb.WriteString("# Felt Workflow Context\n\n")
+	sb.WriteString(activateDirective())
 	sb.WriteString(feltDescription())
 
 	// Collect active fibers
@@ -256,6 +274,6 @@ func coreRules() string {
 - **Use the right relationship surface.** Nest for containment, ` + "`[[wikilinks]]`" + ` for narrative, ` + "`inputs.from`" + ` for computational provenance only.
 - **Compose upward.** When closing, ask whether the lesson belongs in a doc fiber or the root fiber; consolidate breadcrumbs.
 - **Names are concise labels.** Body and outcome carry the content.
-- **Activate ` + "`/felt`" + ` first.** Before any tool or action, regardless of what the user asked for.
+- **Activate ` + "`felt`" + ` first.** Before any tool or action, regardless of what the user asked for.
 `
 }

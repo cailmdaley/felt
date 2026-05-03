@@ -3,15 +3,15 @@ name: felt
 description: >
   This skill should be used whenever working in a project that contains a `.felt/` directory, and
   when the user mentions fibers or asks to "file this", "record a decision", "formalize", "add
-  ASTRA structure", "close this fiber", "sketch a fiber", "think through", "draft a constitution",
+  structure", "close this fiber", "sketch a fiber", "think through", "draft a constitution",
   "clean up fibers", "consolidate", "archive", "sweep", "maintenance pass", or "extract from the
-  session". It covers filing and ASTRA accretion on fibers, session mining, maintenance passes,
-  and transcript processing.
+  session". It covers filing and structured frontmatter accretion on fibers, session mining,
+  maintenance passes, and transcript processing.
 ---
 
-# /felt — Working with Fibers
+# felt — Working with Fibers
 
-Fibers are concerns (tasks, decisions, questions, specs) stored as directory-contained markdown. Their relationships come from three surfaces: containment by path, `[[wikilinks]]` in the body for narrative connection, and ASTRA `inputs.from` for computational provenance. ASTRA is an open specification for computational science: decisions with excluded alternatives, inputs and outputs with recipes, insights backed by evidence. Felt fibers carry ASTRA fields in their frontmatter; the structure accretes as understanding crystallizes.
+Fibers are concerns (tasks, decisions, questions, specs) stored as directory-contained markdown. Their relationships come from three surfaces: containment by path, `[[wikilinks]]` in the body for narrative connection, and structured frontmatter (`inputs.from`) for computational provenance. Structured frontmatter — decisions with excluded alternatives, inputs and outputs with recipes, insights backed by evidence — accretes as the work becomes computationally concrete. felt carries these fields as part of the fiber substrate; the structure is yours to shape.
 
 For literature audits, model the audited paper statement as the `claim` and anchor the supporting `evidence` in the cited source itself with a traceable selector such as a quote, figure, or table. Use audit reports as artifact evidence for your own findings about the audit process, not as substitutes for literature evidence.
 
@@ -98,9 +98,8 @@ Read the reference that matches the situation. Everything above applies always; 
 
 | When | Reference |
 |------|-----------|
-| Accreting ASTRA structure on a fiber — tier ladder, common shapes, body vs frontmatter | [formalization.md](references/formalization.md) |
-| Helping the user think carefully — two diamonds, six stances, funnel, qualitative self-check, ASTRA output | [crafting.md](references/crafting.md) |
-| Editing ASTRA frontmatter directly — full schema, types, constraints | [astra.md](references/astra.md) |
+| Accreting structure on a fiber — tier ladder, common shapes, body vs frontmatter | [formalization.md](references/formalization.md) |
+| Helping the user think carefully — two diamonds, six stances, funnel, qualitative self-check | [crafting.md](references/crafting.md) |
 | Drafting a constitution — pointers not snapshots, desired state, launch | [constitute.md](references/constitute.md) |
 | At the end of a session — extracting what slipped through | [mining.md](references/mining.md) |
 | Processing an external transcript — meeting notes, voice note, dictation file | [transcripts.md](references/transcripts.md) |

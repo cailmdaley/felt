@@ -11,7 +11,6 @@ import (
 	"strings"
 	"testing"
 
-	"gopkg.in/yaml.v3"
 )
 
 var binaryPath string
@@ -201,7 +200,7 @@ func TestIntegration(t *testing.T) {
 	}
 	mustFelt(t, dir, "edit", fiber2ID, "--untag", "testlabel")
 
-	// structured ASTRA edit shorthand
+	// structured frontmatter edit shorthand
 	mustFelt(
 		t, dir, "edit", fiber2ID,
 		"--decision", "covariance",
@@ -245,25 +244,25 @@ func TestIntegration(t *testing.T) {
 		t.Fatalf("add duplicate: expected duplicate error, got: %s", out)
 	}
 
-	astraParentDir := filepath.Join(dir, ".felt", "bao-analysis")
-	if err := os.MkdirAll(astraParentDir, 0755); err != nil {
-		t.Fatalf("mkdir astra parent fixture: %v", err)
+	structuredParentDir := filepath.Join(dir, ".felt", "bao-analysis")
+	if err := os.MkdirAll(structuredParentDir, 0755); err != nil {
+		t.Fatalf("mkdir structured parent fixture: %v", err)
 	}
-	astraParent := `---
+	structuredParent := `---
 name: BAO Analysis
 status: open
 created-at: 2026-03-14T10:00:00Z
 ---
 `
-	if err := os.WriteFile(filepath.Join(astraParentDir, "bao-analysis.md"), []byte(astraParent), 0644); err != nil {
-		t.Fatalf("write astra parent fixture: %v", err)
+	if err := os.WriteFile(filepath.Join(structuredParentDir, "bao-analysis.md"), []byte(structuredParent), 0644); err != nil {
+		t.Fatalf("write structured parent fixture: %v", err)
 	}
 
-	astraDir := filepath.Join(astraParentDir, "damping-prior")
-	if err := os.MkdirAll(astraDir, 0755); err != nil {
-		t.Fatalf("mkdir astra fixture: %v", err)
+	structuredDir := filepath.Join(structuredParentDir, "damping-prior")
+	if err := os.MkdirAll(structuredDir, 0755); err != nil {
+		t.Fatalf("mkdir structured fixture: %v", err)
 	}
-	astraFiber := `---
+	structuredFiber := `---
 name: BAO Damping Prior
 status: closed
 created-at: 2026-03-15T10:00:00Z
@@ -294,93 +293,27 @@ success_criteria:
 container: python:3.11-slim
 ---
 `
-	if err := os.WriteFile(filepath.Join(astraDir, "damping-prior.md"), []byte(astraFiber), 0644); err != nil {
-		t.Fatalf("write astra fixture: %v", err)
+	if err := os.WriteFile(filepath.Join(structuredDir, "damping-prior.md"), []byte(structuredFiber), 0644); err != nil {
+		t.Fatalf("write structured fixture: %v", err)
 	}
 
 	out = mustFelt(t, dir, "ls", "BAO")
 	if !strings.Contains(out, "bao-analysis/damping-prior") {
-		t.Fatalf("ls should match ASTRA fields, got: %s", out)
+		t.Fatalf("ls should match structured frontmatter fields, got: %s", out)
 	}
 	out = mustFelt(t, dir, "show", "-j", "bao-analysis/damping-prior")
-	var astraShown map[string]any
-	if err := json.Unmarshal([]byte(out), &astraShown); err != nil {
-		t.Fatalf("show -j astra: invalid json: %v\n%s", err, out)
+	var structuredShown map[string]any
+	if err := json.Unmarshal([]byte(out), &structuredShown); err != nil {
+		t.Fatalf("show -j structured fiber: invalid json: %v\n%s", err, out)
 	}
-	if _, ok := astraShown["decisions"]; !ok {
-		t.Fatalf("show -j astra: missing decisions in %#v", astraShown)
-	}
-
-	// export help surface
-	outDir := filepath.Join(dir, "exported")
-	out = mustFelt(t, dir, "export", "--format", "tapestry", "--out", outDir)
-	if !strings.Contains(out, "Exported tapestry to") {
-		t.Fatalf("export tapestry: expected export confirmation, got: %s", out)
-	}
-	if _, err := os.Stat(filepath.Join(outDir, "tapestry.json")); err != nil {
-		t.Fatalf("export tapestry: expected tapestry.json, got: %v", err)
+	if _, ok := structuredShown["decisions"]; !ok {
+		t.Fatalf("show -j structured fiber: missing decisions in %#v", structuredShown)
 	}
 
-	out = mustFelt(t, dir, "export", "--format", "astra")
-	if !strings.Contains(out, "Exported ASTRA to") {
-		t.Fatalf("export astra: expected export confirmation, got: %s", out)
-	}
-
-	astraData, err := os.ReadFile(filepath.Join(dir, "astra.yaml"))
-	if err != nil {
-		t.Fatalf("export astra: expected astra.yaml, got: %v", err)
-	}
-	var astraDoc map[string]any
-	if err := yaml.Unmarshal(astraData, &astraDoc); err != nil {
-		t.Fatalf("export astra: invalid yaml: %v\n%s", err, astraData)
-	}
-	if got := astraDoc["version"]; got != "1.0" {
-		t.Fatalf("export astra: version = %#v, want %q", got, "1.0")
-	}
-	if got := astraDoc["name"]; got != "Project Fibers" {
-		t.Fatalf("export astra: name = %#v, want %q", got, "Project Fibers")
-	}
-	analyses, ok := astraDoc["analyses"].(map[string]any)
-	if !ok {
-		t.Fatalf("export astra: missing analyses: %#v", astraDoc)
-	}
-	if _, ok := analyses["test-fiber"]; ok {
-		t.Fatalf("export astra: simple felt should be filtered out: %#v", analyses)
-	}
-	baoAnalysis, ok := analyses["bao-analysis"].(map[string]any)
-	if !ok {
-		t.Fatalf("export astra: missing bao-analysis: %#v", analyses)
-	}
-	children, ok := baoAnalysis["analyses"].(map[string]any)
-	if !ok {
-		t.Fatalf("export astra: missing nested analyses: %#v", baoAnalysis)
-	}
-	dampingPrior, ok := children["damping-prior"].(map[string]any)
-	if !ok {
-		t.Fatalf("export astra: missing damping-prior: %#v", children)
-	}
-	if parentInputs, ok := baoAnalysis["inputs"].([]any); !ok || len(parentInputs) != 1 {
-		t.Fatalf("export astra: structural parent inputs = %#v, want synthesized input", baoAnalysis["inputs"])
-	}
-	if parentOutputs, ok := baoAnalysis["outputs"].([]any); !ok || len(parentOutputs) != 1 {
-		t.Fatalf("export astra: structural parent outputs = %#v, want synthesized output", baoAnalysis["outputs"])
-	}
-	if got := dampingPrior["name"]; got != "BAO Damping Prior" {
-		t.Fatalf("export astra: name = %#v, want %q", got, "BAO Damping Prior")
-	}
-	inputs, ok := dampingPrior["inputs"].([]any)
-	if !ok || len(inputs) != 1 {
-		t.Fatalf("export astra: inputs missing from %#v", dampingPrior)
-	}
-	input0, ok := inputs[0].(map[string]any)
-	if !ok {
-		t.Fatalf("export astra: input[0] = %#v, want mapping", inputs[0])
-	}
-	if got := input0["from"]; got != "../desi_dr1_vac" {
-		t.Fatalf("export astra: normalized from = %#v, want %q", got, "../desi_dr1_vac")
-	}
-	if _, ok := dampingPrior["decisions"].(map[string]any); !ok {
-		t.Fatalf("export astra: missing decisions: %#v", dampingPrior)
+	// verify export command is retired
+	_, exportErr := felt(dir, "export", "--format", "tapestry")
+	if exportErr == nil {
+		t.Fatal("export command should be retired, got no error")
 	}
 
 	out = mustFelt(t, dir, "nest", fiber2ID, "bao-analysis")

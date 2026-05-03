@@ -3,71 +3,33 @@ package cmd
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
-func TestDetectBundledSkillInstall(t *testing.T) {
-	tmp := t.TempDir()
-
-	present, linked, err := detectBundledSkillInstall(tmp)
-	if err != nil {
-		t.Fatalf("detectBundledSkillInstall(empty): %v", err)
-	}
-	if present || linked {
-		t.Fatalf("empty target should not look installed, got present=%v linked=%v", present, linked)
-	}
-
-	skillDir := filepath.Join(tmp, "felt")
-	if err := os.MkdirAll(skillDir, 0755); err != nil {
-		t.Fatalf("mkdir felt: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("old"), 0644); err != nil {
-		t.Fatalf("write SKILL.md: %v", err)
-	}
-
-	present, linked, err = detectBundledSkillInstall(tmp)
-	if err != nil {
-		t.Fatalf("detectBundledSkillInstall(copied): %v", err)
-	}
-	if !present || linked {
-		t.Fatalf("copied install should be present and not linked, got present=%v linked=%v", present, linked)
-	}
-}
-
-func TestRefreshInstalledSkillsUpdatesCopiedSkills(t *testing.T) {
+func TestDevSourcePathRoundtrip(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	target := filepath.Join(home, ".agents", "skills")
-	feltRoot := filepath.Join(target, "felt")
-	// The ralph launcher now lives in the ralph skill, not the felt skill.
-	stalePath := filepath.Join(target, "ralph", "scripts", "ralph")
-	if err := os.MkdirAll(filepath.Dir(stalePath), 0755); err != nil {
-		t.Fatalf("mkdir stale path: %v", err)
-	}
-	// felt/SKILL.md must exist so detectBundledSkillInstall considers this a copied install.
-	if err := os.MkdirAll(feltRoot, 0755); err != nil {
-		t.Fatalf("mkdir felt root: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(feltRoot, "SKILL.md"), []byte("stale skill"), 0644); err != nil {
-		t.Fatalf("write stale SKILL.md: %v", err)
-	}
-	if err := os.WriteFile(stalePath, []byte("stale ralph"), 0755); err != nil {
-		t.Fatalf("write stale script: %v", err)
+	// Without a marker, devSourcePath should fail.
+	if _, err := devSourcePath(); err == nil {
+		t.Fatal("expected error without dev-source marker, got nil")
 	}
 
-	refreshInstalledSkills()
+	// Write a go.mod so devSourcePath accepts the path.
+	srcDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(srcDir, "go.mod"), []byte("module test"), 0644); err != nil {
+		t.Fatalf("write go.mod: %v", err)
+	}
 
-	updated, err := os.ReadFile(stalePath)
+	if err := setDevSource(srcDir); err != nil {
+		t.Fatalf("setDevSource: %v", err)
+	}
+
+	got, err := devSourcePath()
 	if err != nil {
-		t.Fatalf("read updated script: %v", err)
+		t.Fatalf("devSourcePath: %v", err)
 	}
-	text := string(updated)
-	if !strings.Contains(text, "Activate the ralph skill ($ralph)") {
-		t.Fatalf("expected updated codex-safe ralph prompt, got: %s", text)
-	}
-	if !strings.Contains(text, "bash-loop handoff back to the parent ralph launcher") {
-		t.Fatalf("expected explicit non-destructive handoff wording, got: %s", text)
+	if got != srcDir {
+		t.Fatalf("expected %s, got %s", srcDir, got)
 	}
 }

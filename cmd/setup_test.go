@@ -6,64 +6,72 @@ import (
 	"testing"
 )
 
-// TestInstallSkills_HealsBrokenSymlink verifies that a top-level skill entry
-// which is a symlink to a missing path (left over from an older
-// `felt setup skills --link <path>` whose source moved) gets removed so
-// installation can proceed. Without this, MkdirAll through the broken
-// symlink fails with "file exists" and the bundled skill never gets written.
-func TestInstallSkills_HealsBrokenSymlink(t *testing.T) {
-	target := t.TempDir()
-
-	// Plant a broken symlink at the spot where the "felt" skill would install.
-	broken := filepath.Join(target, "felt")
-	if err := os.Symlink(filepath.Join(target, "does-not-exist"), broken); err != nil {
-		t.Fatalf("setup: symlink: %v", err)
-	}
-
-	if err := installSkills(target, false); err != nil {
-		t.Fatalf("installSkills: %v", err)
-	}
-
-	// After install, the "felt" entry should resolve and contain SKILL.md.
-	info, err := os.Stat(filepath.Join(target, "felt", "SKILL.md"))
+// TestFindPluginDir verifies the resolver returns a valid plugin directory
+// from a --source path pointing at a felt repo checkout.
+func TestFindPluginDir_FromRepoCheckout(t *testing.T) {
+	// Find repo root by walking up from cwd.
+	root, err := os.Getwd()
 	if err != nil {
-		t.Fatalf("expected bundled felt/SKILL.md after heal, got: %v", err)
+		t.Fatalf("getwd: %v", err)
 	}
-	if info.IsDir() {
-		t.Fatalf("expected SKILL.md to be a file, got directory")
+	for {
+		if _, err := os.Stat(filepath.Join(root, "go.mod")); err == nil {
+			break
+		}
+		parent := filepath.Dir(root)
+		if parent == root {
+			t.Fatal("could not find repo root with go.mod")
+		}
+		root = parent
+	}
+
+	// The repo should have a claude-plugin/plugin.json.
+	pluginDir, err := findPluginDir(root)
+	if err != nil {
+		t.Fatalf("findPluginDir(%s): %v", root, err)
+	}
+	if _, err := os.Stat(filepath.Join(pluginDir, ".claude-plugin", "plugin.json")); err != nil {
+		t.Fatalf("expected .claude-plugin/plugin.json in resolved dir %s: %v", pluginDir, err)
 	}
 }
 
-// TestInstallSkills_PreservesIntactSymlink verifies that a top-level skill
-// symlink whose target *does* resolve — the `felt setup skills --link`
-// dev-mode workflow — is left untouched, so edits to the linked source
-// keep flowing through.
-func TestInstallSkills_PreservesIntactSymlink(t *testing.T) {
-	target := t.TempDir()
-	linkSrc := t.TempDir()
-
-	// Live symlink: felt -> linkSrc (which exists).
-	if err := os.Symlink(linkSrc, filepath.Join(target, "felt")); err != nil {
-		t.Fatalf("setup: symlink: %v", err)
+// TestFindPluginDir_DirectPlugin verifies the resolver accepts a path that IS
+// the plugin directory (has .claude-plugin/plugin.json).
+func TestFindPluginDir_DirectPlugin(t *testing.T) {
+	tmp := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(tmp, ".claude-plugin"), 0755); err != nil {
+		t.Fatalf("mkdir .claude-plugin: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmp, ".claude-plugin", "plugin.json"), []byte(`{}`), 0644); err != nil {
+		t.Fatalf("write plugin.json: %v", err)
 	}
 
-	if err := installSkills(target, false); err != nil {
-		t.Fatalf("installSkills: %v", err)
-	}
-
-	// The symlink should still be a symlink pointing at linkSrc.
-	info, err := os.Lstat(filepath.Join(target, "felt"))
+	pluginDir, err := findPluginDir(tmp)
 	if err != nil {
-		t.Fatalf("lstat: %v", err)
+		t.Fatalf("findPluginDir(%s): %v", tmp, err)
 	}
-	if info.Mode()&os.ModeSymlink == 0 {
-		t.Fatalf("expected felt to still be a symlink, got mode %v", info.Mode())
+	if pluginDir != tmp {
+		t.Fatalf("expected %s, got %s", tmp, pluginDir)
 	}
-	resolved, err := os.Readlink(filepath.Join(target, "felt"))
+}
+
+// TestFindPluginDir_EnvVar verifies $FELT_PLUGIN_DIR is honoured when no source is given.
+func TestFindPluginDir_EnvVar(t *testing.T) {
+	tmp := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(tmp, ".claude-plugin"), 0755); err != nil {
+		t.Fatalf("mkdir .claude-plugin: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmp, ".claude-plugin", "plugin.json"), []byte(`{}`), 0644); err != nil {
+		t.Fatalf("write plugin.json: %v", err)
+	}
+
+	t.Setenv("FELT_PLUGIN_DIR", tmp)
+
+	pluginDir, err := findPluginDir("")
 	if err != nil {
-		t.Fatalf("readlink: %v", err)
+		t.Fatalf("findPluginDir (env): %v", err)
 	}
-	if resolved != linkSrc {
-		t.Fatalf("expected symlink target %s, got %s", linkSrc, resolved)
+	if pluginDir != tmp {
+		t.Fatalf("expected %s, got %s", tmp, pluginDir)
 	}
 }

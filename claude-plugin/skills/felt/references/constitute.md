@@ -1,6 +1,6 @@
 # Constitute
 
-Drafting a constitution — a fiber spec describing a desired state for autonomous iteration. This is the crafting process (see SKILL.md and `crafting.md`) applied to a specific artifact type: a living document that an iteration runner re-reads with fresh context until the work is done. Felt is agnostic about the runner — popular ones are sibling skills (`ralph`, `shuttle`, etc.); the constitution itself is just a tagged fiber.
+Drafting a constitution — a fiber spec describing a desired state for autonomous iteration. This is the crafting process (see SKILL.md and `crafting.md`) applied to a specific artifact type: a living document that an iteration runner re-reads with fresh context until the work is done. Felt is agnostic about the runner — popular options include sibling skills (`ralph`, and others); the constitution itself is just a tagged fiber.
 
 ---
 
@@ -65,8 +65,8 @@ Repeat until it feels solid. It does not have to be complete; open questions bel
 
 When approved, hand the fiber to whichever iteration runner is appropriate — felt is agnostic. Common options:
 
-- **ralph** (`/ralph` skill) — a manual loop runner that respawns iterations against the constitution until the fiber's status flips off `open`/`active`.
-- **shuttle** (`/shuttle` skill) — a supervised dispatcher that watches `constitution`-tagged fibers and spawns single-shot workers when their `shuttle:` block is enabled.
+- **ralph** (`ralph` skill) — a manual loop runner that respawns iterations against the constitution until the fiber's status flips off `open`/`active`.
+- **External dispatchers** — tools that watch fibers for dispatch-eligible blocks and spawn single-shot workers; their configuration is owned outside felt.
 
 The constitution fiber stays editable while iteration runs. Successive iterations re-read it each cycle, so refinements between iterations are normal.
 
@@ -86,7 +86,7 @@ File paths, existing patterns, architectural constraints. Things iterations
 need to *find* but not *achieve*.
 
 ## Skills
-Which skills to activate before working (e.g., /snakemake, /felt).
+Which skills to activate before working (e.g., snakemake, felt).
 
 ## Evidence
 How to check progress — commands, test suites, grep patterns. Pointers to
@@ -113,10 +113,10 @@ resolves between loops.
 
 ## Constitutions that shape artifacts
 
-Some constitutions do not build code — they shape artifacts like tapestries, documentation, or research narratives. These have different rhythms:
+Some constitutions do not build code — they shape artifacts like documentation or research narratives. These have different rhythms:
 
 - **The desired state is comprehension, not correctness.** "A reviewer can follow the narrative cold" is harder to test than "all tests pass" — but it is the right bar. Evidence for progress: fewer redundant plots, clearer prose, more natural flow.
-- **The artifact continues to grow.** Unlike a refactoring (which finishes), a research tapestry keeps acquiring nodes. The constitution shapes how growth presents itself, not when growth stops.
+- **The artifact continues to grow.** Unlike a refactoring (which finishes), a research narrative keeps acquiring nodes. The constitution shapes how growth presents itself, not when growth stops.
 
 ---
 

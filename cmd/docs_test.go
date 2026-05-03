@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -105,33 +104,63 @@ func TestRootUsageAvoidsAddFlagLeakageAndBareAddShorthand(t *testing.T) {
 	}
 }
 
-func TestBundledSkillsAvoidRetiredCommands(t *testing.T) {
-	root, err := os.Getwd()
+// repoRoot walks up from the test's working directory until it finds go.mod.
+func repoRoot(t *testing.T) string {
+	t.Helper()
+	dir, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("getwd: %v", err)
 	}
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			t.Fatal("could not find repo root (no go.mod)")
+		}
+		dir = parent
+	}
+}
+
+// pluginSkillsRoot returns the claude-plugin/skills directory.
+func pluginSkillsRoot(t *testing.T) string {
+	t.Helper()
+	root := repoRoot(t)
 
 	candidates := []string{
+		filepath.Join(root, "claude-plugin", "skills"),
 		filepath.Join(root, "skills"),
-		filepath.Join(root, "cmd", "skills"),
 	}
-
-	skillsRoot := ""
-	for _, candidate := range candidates {
-		info, err := os.Stat(candidate)
-		if err == nil && info.IsDir() {
-			skillsRoot = candidate
-			break
-		}
-		if err != nil && !os.IsNotExist(err) {
-			t.Fatalf("stat %s: %v", candidate, err)
+	for _, c := range candidates {
+		if info, err := os.Stat(c); err == nil && info.IsDir() {
+			return c
 		}
 	}
-	if skillsRoot == "" {
-		t.Fatalf("could not find bundled skills directory from %s", root)
-	}
+	t.Fatalf("could not find plugin skills directory from %s", root)
+	return ""
+}
 
-	err = filepath.Walk(skillsRoot, func(path string, info os.FileInfo, err error) error {
+// pluginSkillNames enumerates skill names from claude-plugin/skills/.
+func pluginSkillNames(t *testing.T) []string {
+	t.Helper()
+	entries, err := os.ReadDir(pluginSkillsRoot(t))
+	if err != nil {
+		t.Fatalf("ReadDir plugin skills: %v", err)
+	}
+	var names []string
+	for _, e := range entries {
+		if e.IsDir() {
+			names = append(names, e.Name())
+		}
+	}
+	return names
+}
+
+func TestPluginSkillsAvoidRetiredCommands(t *testing.T) {
+	skillsRoot := pluginSkillsRoot(t)
+
+	err := filepath.Walk(skillsRoot, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
@@ -155,31 +184,8 @@ func TestBundledSkillsAvoidRetiredCommands(t *testing.T) {
 	}
 }
 
-func TestBundledSkillsAvoidLegacyCommentBodyEdits(t *testing.T) {
-	root, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("getwd: %v", err)
-	}
-
-	candidates := []string{
-		filepath.Join(root, "skills"),
-		filepath.Join(root, "cmd", "skills"),
-	}
-
-	skillsRoot := ""
-	for _, candidate := range candidates {
-		info, err := os.Stat(candidate)
-		if err == nil && info.IsDir() {
-			skillsRoot = candidate
-			break
-		}
-		if err != nil && !os.IsNotExist(err) {
-			t.Fatalf("stat %s: %v", candidate, err)
-		}
-	}
-	if skillsRoot == "" {
-		t.Fatalf("could not find bundled skills directory from %s", root)
-	}
+func TestPluginSkillsAvoidLegacyCommentBodyEdits(t *testing.T) {
+	skillsRoot := pluginSkillsRoot(t)
 
 	data, err := os.ReadFile(filepath.Join(skillsRoot, "felt", "references", "transcripts.md"))
 	if err != nil {
@@ -198,47 +204,38 @@ func TestBundledSkillsAvoidLegacyCommentBodyEdits(t *testing.T) {
 	}
 }
 
-func TestSetupSkillsLongMentionsActualBundledSkills(t *testing.T) {
-	text := setupSkillsCmd.Long
-	for _, name := range bundledSkillNames() {
-		if !strings.Contains(text, name) {
-			t.Fatalf("setup skills help missing bundled skill %q in %q", name, text)
-		}
+func TestPluginSkillsAreSortedAndKnown(t *testing.T) {
+	names := pluginSkillNames(t)
+	sorted := make([]string, len(names))
+	copy(sorted, names)
+	slices.Sort(sorted)
+	if !slices.Equal(names, sorted) {
+		t.Fatalf("plugin skill order = %v, want sorted %v", names, sorted)
 	}
-	if strings.Contains(text, "tapestry") {
-		t.Fatalf("setup skills help mentions non-bundled skill %q", "tapestry")
+
+	// felt and ralph must be present.
+	for _, required := range []string{"felt", "ralph"} {
+		if !slices.Contains(names, required) {
+			t.Fatalf("plugin skills missing required skill %q (got %v)", required, names)
+		}
 	}
 }
 
-func TestReadmeBundledSkillsMatchEmbeddedSkills(t *testing.T) {
-	root, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("getwd: %v", err)
-	}
-	for {
-		if _, err := os.Stat(filepath.Join(root, "README.md")); err == nil {
-			break
-		}
-		parent := filepath.Dir(root)
-		if parent == root {
-			t.Fatal("could not find repository README.md")
-		}
-		root = parent
-	}
-
+func TestReadmeListsPluginSkills(t *testing.T) {
+	root := repoRoot(t)
 	data, err := os.ReadFile(filepath.Join(root, "README.md"))
 	if err != nil {
 		t.Fatalf("read README: %v", err)
 	}
 	text := string(data)
 
-	for _, name := range bundledSkillNames() {
+	for _, name := range pluginSkillNames(t) {
 		if !strings.Contains(text, "**"+name+"**") {
-			t.Fatalf("README missing bundled skill %q", name)
+			t.Fatalf("README missing plugin skill %q", name)
 		}
 	}
 	if strings.Contains(text, "**tapestry**") {
-		t.Fatal("README lists non-bundled tapestry skill")
+		t.Fatal("README lists retired tapestry skill")
 	}
 	if strings.Contains(text, "extracted from title") {
 		t.Fatal("README still documents legacy tag extraction on the name/title argument")
@@ -246,10 +243,7 @@ func TestReadmeBundledSkillsMatchEmbeddedSkills(t *testing.T) {
 }
 
 func TestDocsAvoidLegacyTagExtractionExample(t *testing.T) {
-	root, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("getwd: %v", err)
-	}
+	root := repoRoot(t)
 	for {
 		if _, err := os.Stat(filepath.Join(root, "docs", "README.md")); err == nil {
 			break
@@ -283,26 +277,5 @@ func TestGeneratedGuidanceAvoidsLegacyTitleDetailLevel(t *testing.T) {
 		if strings.Contains(text, "Detail level (title, compact, summary, full)") {
 			t.Fatalf("%s still mentions legacy title detail flag help", name)
 		}
-	}
-}
-
-func TestEmbeddedBundledSkillsAreSortedAndKnown(t *testing.T) {
-	entries, err := fs.ReadDir(embeddedSkills, "skills")
-	if err != nil {
-		t.Fatalf("ReadDir embedded skills: %v", err)
-	}
-
-	var got []string
-	for _, entry := range entries {
-		if entry.IsDir() {
-			got = append(got, entry.Name())
-		}
-	}
-
-	want := slices.Clone(got)
-	slices.Sort(want)
-
-	if !slices.Equal(got, want) {
-		t.Fatalf("embedded skill order = %v, want sorted %v", got, want)
 	}
 }

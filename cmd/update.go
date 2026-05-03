@@ -29,12 +29,11 @@ var updateCmd = &cobra.Command{
 	Short: "Update felt to the latest version",
 Long: `Update felt to the latest version.
 
-If installed from source (via felt setup skills --link), pulls and rebuilds
+If installed from source (via a dev source marker), pulls and rebuilds
 from the source checkout. Otherwise downloads the latest GitHub release.
 
-Also refreshes copied bundled skills in ~/.claude/skills and ~/.agents/skills
-when those standard installations are present. Linked skill installs are left
-alone.`,
+After updating, run "felt setup claude --source <checkout>" to refresh the
+installed plugin if skills have changed.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Check for dev source install
 		if srcPath, err := devSourcePath(); err == nil {
@@ -107,7 +106,7 @@ alone.`,
 
 		os.Remove(old)
 		fmt.Printf("Updated to %s\n", latestClean)
-		refreshInstalledSkills()
+		fmt.Println("To refresh the plugin, run: felt setup claude --source <checkout>")
 		return nil
 	},
 }
@@ -212,66 +211,8 @@ func updateFromSource(srcPath string) error {
 	}
 
 	fmt.Println("Updated from source.")
-	refreshInstalledSkills()
+	fmt.Printf("To refresh the plugin, run: felt setup claude --source %s\n", srcPath)
 	return nil
-}
-
-func refreshInstalledSkills() {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		fmt.Printf("warning: could not determine home directory to refresh skills: %v\n", err)
-		return
-	}
-	for _, target := range standardSkillsTargets(home) {
-		present, linked, err := detectBundledSkillInstall(target)
-		if err != nil {
-			fmt.Printf("warning: could not inspect installed skills in %s: %v\n", target, err)
-			continue
-		}
-		if !present {
-			continue
-		}
-		if linked {
-			fmt.Printf("· Bundled skills linked in %s; skipping copied-skill refresh\n", target)
-			continue
-		}
-		fmt.Printf("Refreshing bundled skills in %s\n", target)
-		if err := installSkills(target, true); err != nil {
-			fmt.Printf("warning: could not refresh bundled skills in %s: %v\n", target, err)
-		}
-	}
-}
-
-func standardSkillsTargets(home string) []string {
-	return []string{
-		filepath.Join(home, ".claude", "skills"),
-		filepath.Join(home, ".agents", "skills"),
-	}
-}
-
-func detectBundledSkillInstall(targetDir string) (present bool, linked bool, err error) {
-	for _, skillName := range bundledSkillNames() {
-		skillDir := filepath.Join(targetDir, skillName)
-		info, statErr := os.Lstat(skillDir)
-		if statErr != nil {
-			if os.IsNotExist(statErr) {
-				continue
-			}
-			return false, false, statErr
-		}
-		if !info.IsDir() && info.Mode()&os.ModeSymlink == 0 {
-			continue
-		}
-		if info.Mode()&os.ModeSymlink != 0 {
-			return true, true, nil
-		}
-		if _, fileErr := os.Stat(filepath.Join(skillDir, "SKILL.md")); fileErr == nil {
-			return true, false, nil
-		} else if !os.IsNotExist(fileErr) {
-			return false, false, fileErr
-		}
-	}
-	return false, false, nil
 }
 
 func extractBinary(r io.Reader) ([]byte, error) {

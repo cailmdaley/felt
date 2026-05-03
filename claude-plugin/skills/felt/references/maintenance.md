@@ -13,7 +13,7 @@ Maintenance combines two moves that used to feel separate: composting stale fibe
 - **After a burst of exploration.** A lot was filed; little was composted.
 - **Before a deadline.** The assemblage needs to be presentable to your future self.
 - **When something feels off.** Two fibers seem to contradict, or the same question keeps recurring.
-- **When `felt check` warns.** Inconsistent ASTRA formalization depth, broken refs, evidence stubs without anchors.
+- **When `felt check` warns.** Inconsistent fiber structure,, broken refs, evidence stubs without anchors.
 - **Periodic.** Every few weeks, especially for long-running projects.
 
 Do not maintain work that is still in motion. An active fiber is not a compost candidate.
@@ -61,7 +61,7 @@ Also run `felt check` for mechanical findings:
 ```bash
 felt ls                                  # open/active set
 felt ls -s closed --before 60d           # old closed fibers
-felt check                               # broken refs, ASTRA issues
+felt check                               # broken refs, structural issues
 felt tree <parent>                       # branching check
 ```
 

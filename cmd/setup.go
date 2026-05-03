@@ -1,20 +1,14 @@
 package cmd
 
 import (
-	"bytes"
-	"embed"
 	"encoding/json"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
 )
-
-//go:embed skills
-var embeddedSkills embed.FS
 
 var setupCmd = &cobra.Command{
 	Use:   "setup",
@@ -24,32 +18,44 @@ var setupCmd = &cobra.Command{
 
 var setupClaudeCmd = &cobra.Command{
 	Use:   "claude",
-	Short: "Setup Claude Code integration",
-	Long: `Install felt hooks into Claude Code settings.
+	Short: "Install felt Claude Code plugin",
+	Long: `Install the felt plugin for Claude Code.
 
-Adds:
-  - SessionStart: felt hook session (shows active/ready fibers)
-  - PreToolUse: felt hook remind (per-session marker; pass-through)
+Installs the felt plugin to ~/.claude/plugins/felt/ as a symlink to the
+source plugin directory. The plugin declares SessionStart and PreToolUse hooks
+and bundles the felt and ralph skills.
 
-Use --uninstall to remove the hooks.`,
+Resolution order for --source:
+  1. --source <path>      path to a felt repo checkout (uses <path>/claude-plugin/)
+                          or directly to the plugin directory (must contain plugin.json)
+  2. $FELT_PLUGIN_DIR     env var pointing directly at the plugin directory
+  3. ~/.claude/plugins/felt  already-installed plugin (idempotent re-install)
+
+Use --uninstall to remove.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		source, _ := cmd.Flags().GetString("source")
 		uninstall, _ := cmd.Flags().GetBool("uninstall")
+
 		if uninstall {
-			return uninstallClaudeHooks()
+			return uninstallPlugin()
 		}
-		updateSkills, _ := cmd.Flags().GetBool("update-skills")
-		if err := installClaudeHooks(); err != nil {
+
+		pluginDir, err := findPluginDir(source)
+		if err != nil {
 			return err
 		}
-		fmt.Println()
-		skillsTarget := filepath.Join(os.Getenv("HOME"), ".claude", "skills")
-		if err := installSkills(skillsTarget, updateSkills); err != nil {
-			fmt.Printf("warning: could not install skills: %v\n", err)
+
+		if err := installPlugin(pluginDir); err != nil {
+			return err
 		}
+
+		// Clean up legacy hooks-in-settings from previous installations.
+		if err := uninstallClaudeHooks(); err != nil {
+			fmt.Printf("· Could not remove legacy settings.json hooks (may not be present): %v\n", err)
+		}
+
 		fmt.Println()
-		fmt.Println("You may want to put something like the following in your CLAUDE.md, adjusted to match your work style:")
-		fmt.Println()
-		fmt.Println(claudeMDSnippet())
+		fmt.Println("Restart Claude Code for changes to take effect.")
 		return nil
 	},
 }
@@ -57,29 +63,41 @@ Use --uninstall to remove the hooks.`,
 var setupCodexCmd = &cobra.Command{
 	Use:   "codex",
 	Short: "Setup Codex integration",
-	Long: `Install felt hooks into Codex native hooks.json.
+	Long: `Install felt hooks and skills for Codex.
 
-Adds:
-  - SessionStart: felt hook session (shows active/recent fibers)
-  - PreToolUse: felt hook remind (per-session marker; pass-through)
+Installs felt hooks into Codex's hooks.json and symlinks the felt and ralph
+skills from the plugin directory into ~/.agents/skills/.
 
-Also attempts to remove the legacy codex() shell wrapper if present.
+Resolution order for --source:
+  1. --source <path>      path to a felt repo checkout or plugin directory
+  2. $FELT_PLUGIN_DIR     env var pointing at the plugin directory
+  3. ~/.claude/plugins/felt  if the plugin is installed for Claude Code
 
-Use --uninstall to remove the hooks.`,
+Use --uninstall to remove.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		source, _ := cmd.Flags().GetString("source")
 		uninstall, _ := cmd.Flags().GetBool("uninstall")
+
 		if uninstall {
 			return uninstallCodexHooks()
 		}
-		updateSkills, _ := cmd.Flags().GetBool("update-skills")
+
 		if err := installCodexHooks(); err != nil {
 			return err
 		}
-		fmt.Println()
-		skillsTarget := filepath.Join(os.Getenv("HOME"), ".agents", "skills")
-		if err := installSkills(skillsTarget, updateSkills); err != nil {
-			fmt.Printf("warning: could not install skills: %v\n", err)
+
+		pluginDir, err := findPluginDir(source)
+		if err != nil {
+			fmt.Printf("· Could not find plugin directory for skills: %v\n", err)
+			fmt.Println("  Install the plugin first with: felt setup claude --source <path>")
+			fmt.Println()
+		} else {
+			skillsTarget := filepath.Join(os.Getenv("HOME"), ".agents", "skills")
+			if err := linkSkillsFromPlugin(skillsTarget, pluginDir); err != nil {
+				fmt.Printf("warning: could not link skills: %v\n", err)
+			}
 		}
+
 		fmt.Println()
 		fmt.Println("You may want to put something like the following in your AGENTS.md, adjusted to match your work style:")
 		fmt.Println()
@@ -90,12 +108,20 @@ Use --uninstall to remove the hooks.`,
 
 var setupSkillsCmd = &cobra.Command{
 	Use:   "skills",
-	Short: "Install felt skills to a target directory",
-	Long:  bundledSkillsLong(),
+	Short: "Link felt skills to a target directory",
+	Long: `Link felt skills (felt, ralph) from the plugin directory into a target directory.
+
+By default, links to ~/.claude/skills. Use --target to specify a different directory.
+Existing entries are replaced.
+
+Resolution order for --source:
+  1. --source <path>      path to a felt repo checkout or plugin directory
+  2. $FELT_PLUGIN_DIR     env var pointing at the plugin directory
+  3. ~/.claude/plugins/felt  if the plugin is installed`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		target, _ := cmd.Flags().GetString("target")
-		update, _ := cmd.Flags().GetBool("update")
-		linkSrc, _ := cmd.Flags().GetString("link")
+		source, _ := cmd.Flags().GetString("source")
+
 		if target == "" {
 			home, err := os.UserHomeDir()
 			if err != nil {
@@ -103,92 +129,139 @@ var setupSkillsCmd = &cobra.Command{
 			}
 			target = filepath.Join(home, ".claude", "skills")
 		}
-		if linkSrc != "" {
-			if err := setDevSource(linkSrc); err != nil {
-				fmt.Printf("warning: could not save dev source path: %v\n", err)
-			}
-			return linkSkills(target, linkSrc)
+
+		pluginDir, err := findPluginDir(source)
+		if err != nil {
+			return err
 		}
-		return installSkills(target, update)
+
+		return linkSkillsFromPlugin(target, pluginDir)
 	},
 }
 
 func init() {
-	setupClaudeCmd.Flags().Bool("uninstall", false, "Remove felt hooks from Claude Code")
-	setupClaudeCmd.Flags().Bool("update-skills", false, "Update existing skills (overwrites local changes)")
+	setupClaudeCmd.Flags().Bool("uninstall", false, "Remove felt plugin from Claude Code")
+	setupClaudeCmd.Flags().String("source", "", "Path to felt repo checkout or plugin directory")
 	setupCodexCmd.Flags().Bool("uninstall", false, "Remove felt hooks from Codex")
-	setupCodexCmd.Flags().Bool("update-skills", false, "Update existing skills (overwrites local changes)")
+	setupCodexCmd.Flags().String("source", "", "Path to felt repo checkout or plugin directory")
 	setupSkillsCmd.Flags().String("target", "", "Target directory (default: ~/.claude/skills)")
-	setupSkillsCmd.Flags().Bool("update", false, "Update existing skills (overwrites local changes)")
-	setupSkillsCmd.Flags().String("link", "", "Symlink skills from a felt source checkout (dev mode)")
+	setupSkillsCmd.Flags().String("source", "", "Path to felt repo checkout or plugin directory")
 	setupCmd.AddCommand(setupClaudeCmd)
 	setupCmd.AddCommand(setupCodexCmd)
 	setupCmd.AddCommand(setupSkillsCmd)
 	rootCmd.AddCommand(setupCmd)
 }
 
-func bundledSkillsLong() string {
-	return fmt.Sprintf(`Install felt's bundled skills (%s) to a target directory.
-
-By default, installs to ~/.claude/skills. Use --target to specify a different directory.
-For Codex, a typical target is ~/.agents/skills.
-Existing files are not overwritten unless --update is passed.`, strings.Join(bundledSkillNames(), ", "))
+// hasPluginManifest returns true if dir contains a plugin manifest at
+// .claude-plugin/plugin.json (the standard plugin layout).
+func hasPluginManifest(dir string) bool {
+	_, err := os.Stat(filepath.Join(dir, ".claude-plugin", "plugin.json"))
+	return err == nil
 }
 
-func bundledSkillNames() []string {
-	entries, err := fs.ReadDir(embeddedSkills, "skills")
-	if err != nil {
-		return []string{"felt", "ralph"}
+// findPluginDir resolves the felt claude-plugin directory.
+// Resolution order: explicit source arg, $FELT_PLUGIN_DIR, ~/.claude/plugins/felt.
+func findPluginDir(source string) (string, error) {
+	if source != "" {
+		// Could be a felt repo checkout (has claude-plugin/ subdir) or the plugin dir itself.
+		repoPlugin := filepath.Join(source, "claude-plugin")
+		if hasPluginManifest(repoPlugin) {
+			return repoPlugin, nil
+		}
+		if hasPluginManifest(source) {
+			return source, nil
+		}
+		return "", fmt.Errorf("no plugin directory found at %q\n  Expected claude-plugin/.claude-plugin/plugin.json", source)
 	}
 
-	names := make([]string, 0, len(entries))
-	for _, entry := range entries {
-		if entry.IsDir() {
-			names = append(names, entry.Name())
+	if env := os.Getenv("FELT_PLUGIN_DIR"); env != "" {
+		if hasPluginManifest(env) {
+			return env, nil
 		}
+		return "", fmt.Errorf("$FELT_PLUGIN_DIR=%q: no .claude-plugin/plugin.json found there", env)
 	}
-	return names
+
+	home, _ := os.UserHomeDir()
+	installed := filepath.Join(home, ".claude", "plugins", "felt")
+	if hasPluginManifest(installed) {
+		return installed, nil
+	}
+
+	return "", fmt.Errorf("could not find felt plugin directory\n" +
+		"  Pass --source <checkout> (e.g. felt setup claude --source ~/src/felt)\n" +
+		"  or set $FELT_PLUGIN_DIR, or install first via the Claude Code plugin marketplace")
 }
 
-// removeBrokenSkillSymlinks removes top-level entries in targetDir whose name
-// matches a bundled skill and which are symlinks to a path that no longer
-// resolves. Intact symlinks (e.g. a live `felt setup skills --link` dev
-// install) and regular directories/files are left alone.
-func removeBrokenSkillSymlinks(targetDir string) error {
-	entries, err := fs.ReadDir(embeddedSkills, "skills")
+// installPlugin symlinks the felt plugin from src to ~/.claude/plugins/felt/.
+func installPlugin(src string) error {
+	home, err := os.UserHomeDir()
 	if err != nil {
-		return nil // no bundled skills; nothing to heal
+		return err
 	}
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		path := filepath.Join(targetDir, entry.Name())
-		info, err := os.Lstat(path)
-		if err != nil {
-			continue // doesn't exist — nothing to heal
-		}
-		if info.Mode()&os.ModeSymlink == 0 {
-			continue // regular dir/file — leave alone
-		}
-		if _, err := os.Stat(path); err == nil {
-			continue // symlink resolves — leave alone (user may have --link'd)
-		}
-		if err := os.Remove(path); err != nil {
-			return fmt.Errorf("removing broken skill symlink %s: %w", path, err)
-		}
-		fmt.Printf("· Removed broken skill symlink: %s\n", entry.Name())
+	pluginsDir := filepath.Join(home, ".claude", "plugins")
+	if err := os.MkdirAll(pluginsDir, 0755); err != nil {
+		return fmt.Errorf("creating plugins directory: %w", err)
 	}
+
+	dest := filepath.Join(pluginsDir, "felt")
+
+	// If dest already resolves to the same source, it's a no-op.
+	if existing, err := os.Readlink(dest); err == nil && existing == src {
+		fmt.Printf("· Plugin already linked: %s → %s\n", dest, src)
+		return nil
+	}
+
+	if err := os.RemoveAll(dest); err != nil {
+		return fmt.Errorf("removing existing plugin at %s: %w", dest, err)
+	}
+
+	abs, err := filepath.Abs(src)
+	if err != nil {
+		return err
+	}
+	if err := os.Symlink(abs, dest); err != nil {
+		return fmt.Errorf("symlinking plugin: %w", err)
+	}
+	fmt.Printf("✓ Installed plugin: %s → %s\n", dest, abs)
 	return nil
 }
 
-// linkSkills creates symlinks from targetDir to a felt source checkout's cmd/skills/.
-// This gives instant feedback when editing skills during development.
-func linkSkills(targetDir, srcRoot string) error {
-	skillsDir := filepath.Join(srcRoot, "cmd", "skills")
+// uninstallPlugin removes the felt plugin from ~/.claude/plugins/felt/.
+func uninstallPlugin() error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+	dest := filepath.Join(home, ".claude", "plugins", "felt")
+	if _, err := os.Lstat(dest); os.IsNotExist(err) {
+		fmt.Println("No felt plugin found at ~/.claude/plugins/felt")
+	} else {
+		if err := os.RemoveAll(dest); err != nil {
+			return fmt.Errorf("removing plugin: %w", err)
+		}
+		fmt.Println("✓ Removed plugin from ~/.claude/plugins/felt")
+	}
+
+	// Also clean up legacy settings.json hooks.
+	if err := uninstallClaudeHooks(); err == nil {
+		fmt.Println("✓ Removed legacy settings.json hooks")
+	}
+
+	fmt.Println()
+	fmt.Println("Restart Claude Code for changes to take effect.")
+	return nil
+}
+
+// linkSkillsFromPlugin symlinks each skill in <pluginDir>/skills/ into targetDir.
+func linkSkillsFromPlugin(targetDir, pluginDir string) error {
+	skillsDir := filepath.Join(pluginDir, "skills")
 	entries, err := os.ReadDir(skillsDir)
 	if err != nil {
-		return fmt.Errorf("read skills from %s: %w", skillsDir, err)
+		return fmt.Errorf("reading plugin skills from %s: %w", skillsDir, err)
+	}
+
+	if err := os.MkdirAll(targetDir, 0755); err != nil {
+		return fmt.Errorf("creating target directory %s: %w", targetDir, err)
 	}
 
 	for _, entry := range entries {
@@ -196,14 +269,20 @@ func linkSkills(targetDir, srcRoot string) error {
 			continue
 		}
 		name := entry.Name()
-		target := filepath.Join(targetDir, name)
-		src := filepath.Join(skillsDir, name)
+		src, err := filepath.Abs(filepath.Join(skillsDir, name))
+		if err != nil {
+			return err
+		}
+		dest := filepath.Join(targetDir, name)
 
-		// Remove existing (file, dir, or symlink)
-		os.RemoveAll(target)
+		if existing, err := os.Readlink(dest); err == nil && existing == src {
+			fmt.Printf("· Skill already linked: %s\n", name)
+			continue
+		}
 
-		if err := os.Symlink(src, target); err != nil {
-			return fmt.Errorf("symlink %s: %w", name, err)
+		os.RemoveAll(dest)
+		if err := os.Symlink(src, dest); err != nil {
+			return fmt.Errorf("linking skill %s: %w", name, err)
 		}
 		fmt.Printf("✓ Linked skill: %s → %s\n", name, src)
 	}
@@ -230,211 +309,6 @@ func claudeMDSnippet() string {
 		"Outcomes say not just *what* but *why*. " +
 		"Decisions get their own fibers; methodology questions belong in decision fibers, not specs. " +
 		"Follow the data: curious, not confirmatory.\n"
-}
-
-// installSkills extracts bundled skills directly into targetDir (e.g. ~/.claude/skills).
-// If update is false, existing files are not overwritten (preserves user customizations).
-// If update is true, all files are overwritten with the bundled versions.
-func installSkills(targetDir string, update bool) error {
-	// Heal broken top-level skill symlinks left over from older `--link` installs
-	// whose source has since moved or been deleted. os.MkdirAll through such a
-	// symlink fails deep in the walk with a cryptic "file exists", so clean
-	// felt's own dangling dev symlinks up front. Live --link symlinks (target
-	// resolves) and regular dirs/files are left alone.
-	if err := removeBrokenSkillSymlinks(targetDir); err != nil {
-		return err
-	}
-	var stale []string
-	err := fs.WalkDir(embeddedSkills, "skills", func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		// path is like "skills/felt/SKILL.md" — strip leading "skills/"
-		rel, err := filepath.Rel("skills", path)
-		if err != nil {
-			return err
-		}
-		if rel == "." {
-			return nil
-		}
-		target := filepath.Join(targetDir, rel)
-
-		if d.IsDir() {
-			return os.MkdirAll(target, 0755)
-		}
-
-		data, err := embeddedSkills.ReadFile(path)
-		if err != nil {
-			return err
-		}
-
-		// Check if file already exists
-		if existing, err := os.ReadFile(target); err == nil {
-			if bytes.Equal(existing, data) {
-				return nil // identical, nothing to do
-			}
-			if !update {
-				// Track which skills have updates available (any file, not just SKILL.md)
-				parts := strings.SplitN(rel, string(filepath.Separator), 2)
-				if len(parts) >= 1 {
-					skillName := parts[0]
-					found := false
-					for _, s := range stale {
-						if s == skillName {
-							found = true
-							break
-						}
-					}
-					if !found {
-						stale = append(stale, skillName)
-					}
-				}
-				return nil // don't overwrite
-			}
-		}
-
-		if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
-			return err
-		}
-
-		mode := fs.FileMode(0644)
-		if strings.Contains(path, "/scripts/") {
-			mode = 0755
-		}
-
-		if err := os.WriteFile(target, data, mode); err != nil {
-			return err
-		}
-
-		// Report updates per top-level skill directory (deduplicated)
-		parts := strings.SplitN(rel, string(filepath.Separator), 2)
-		if len(parts) == 2 && parts[1] == "SKILL.md" {
-			if update {
-				fmt.Printf("✓ Updated skill: %s\n", parts[0])
-			} else {
-				fmt.Printf("✓ Installed skill: %s\n", parts[0])
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		return err
-	}
-	if len(stale) > 0 {
-		fmt.Printf("· Skills with updates available: %s\n", strings.Join(stale, ", "))
-		fmt.Println("  Run with --update-skills to update (overwrites local changes)")
-	}
-	return nil
-}
-
-// rcFilePath returns the shell RC file path based on $SHELL.
-func rcFilePath() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("getting home directory: %w", err)
-	}
-	shell := os.Getenv("SHELL")
-	if strings.Contains(shell, "zsh") {
-		return filepath.Join(home, ".zshrc"), nil
-	}
-	return filepath.Join(home, ".bashrc"), nil
-}
-
-const codexSentinelStart = "# felt integration — added by felt setup codex"
-const codexSentinelEnd = "# end felt integration"
-
-const codexWrapper = `# felt integration — added by felt setup codex
-function codex() {
-    local felt_context
-    felt_context=$(felt hook session 2>/dev/null || true)
-    if [ -n "$felt_context" ]; then
-        command codex --config "developer_instructions=$felt_context" "$@"
-    else
-        command codex "$@"
-    fi
-}
-# end felt integration`
-
-func installCodexWrapper() error {
-	rcPath, err := rcFilePath()
-	if err != nil {
-		return err
-	}
-
-	// Read existing content
-	content := ""
-	if data, err := os.ReadFile(rcPath); err == nil {
-		content = string(data)
-	}
-
-	// Idempotent: already installed?
-	if strings.Contains(content, codexSentinelStart) {
-		fmt.Printf("· codex wrapper already installed in %s\n", rcPath)
-		return nil
-	}
-
-	// Append
-	sep := ""
-	if len(content) > 0 && !strings.HasSuffix(content, "\n") {
-		sep = "\n"
-	}
-	newContent := content + sep + "\n" + codexWrapper + "\n"
-
-	if err := os.WriteFile(rcPath, []byte(newContent), 0644); err != nil {
-		return fmt.Errorf("writing %s: %w", rcPath, err)
-	}
-
-	fmt.Printf("✓ Installed codex wrapper in %s\n", rcPath)
-	fmt.Printf("  Run: source %s\n", rcPath)
-	return nil
-}
-
-func uninstallCodexWrapper() error {
-	rcPath, err := rcFilePath()
-	if err != nil {
-		return err
-	}
-
-	data, err := os.ReadFile(rcPath)
-	if err != nil {
-		fmt.Println("No RC file found")
-		return nil
-	}
-
-	content := string(data)
-	if !strings.Contains(content, codexSentinelStart) {
-		fmt.Println("No felt codex wrapper found")
-		return nil
-	}
-
-	// Remove block between sentinels (inclusive)
-	var out []string
-	inside := false
-	for _, line := range strings.Split(content, "\n") {
-		if strings.TrimSpace(line) == codexSentinelStart {
-			inside = true
-			// Also remove the blank line before the sentinel if present
-			if len(out) > 0 && out[len(out)-1] == "" {
-				out = out[:len(out)-1]
-			}
-			continue
-		}
-		if inside {
-			if strings.TrimSpace(line) == codexSentinelEnd {
-				inside = false
-			}
-			continue
-		}
-		out = append(out, line)
-	}
-
-	newContent := strings.Join(out, "\n")
-	if err := os.WriteFile(rcPath, []byte(newContent), 0644); err != nil {
-		return fmt.Errorf("writing %s: %w", rcPath, err)
-	}
-
-	fmt.Printf("✓ Removed codex wrapper from %s\n", rcPath)
-	return nil
 }
 
 func codexHooksPath() (string, error) {
@@ -555,64 +429,8 @@ func claudeSettingsPath() (string, error) {
 	return filepath.Join(home, ".claude", "settings.json"), nil
 }
 
-// installClaudeHooks adds felt hooks to Claude Code settings
-func installClaudeHooks() error {
-	settingsPath, err := claudeSettingsPath()
-	if err != nil {
-		return err
-	}
-
-	// Ensure .claude directory exists
-	if err := os.MkdirAll(filepath.Dir(settingsPath), 0755); err != nil {
-		return fmt.Errorf("creating .claude directory: %w", err)
-	}
-
-	// Load existing settings or create new
-	settings := make(map[string]interface{})
-	if data, err := os.ReadFile(settingsPath); err == nil {
-		if err := json.Unmarshal(data, &settings); err != nil {
-			return fmt.Errorf("parsing settings.json: %w", err)
-		}
-	}
-
-	// Get or create hooks section
-	hooks, ok := settings["hooks"].(map[string]interface{})
-	if !ok {
-		hooks = make(map[string]interface{})
-		settings["hooks"] = hooks
-	}
-
-	// Add SessionStart hook
-	if addHook(hooks, "SessionStart", "", "felt hook session") {
-		fmt.Println("✓ Added SessionStart hook: felt hook session")
-	} else {
-		fmt.Println("· SessionStart hook already installed")
-	}
-
-	// Add PreToolUse reminder hook
-	if addHook(hooks, "PreToolUse", "", "felt hook remind") {
-		fmt.Println("✓ Added PreToolUse hook: felt hook remind")
-	} else {
-		fmt.Println("· PreToolUse reminder hook already installed")
-	}
-
-	// Write settings back
-	data, err := json.MarshalIndent(settings, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshaling settings: %w", err)
-	}
-
-	if err := os.WriteFile(settingsPath, data, 0644); err != nil {
-		return fmt.Errorf("writing settings.json: %w", err)
-	}
-
-	fmt.Println()
-	fmt.Printf("Settings: %s\n", settingsPath)
-	fmt.Println("Restart Claude Code for changes to take effect.")
-	return nil
-}
-
-// uninstallClaudeHooks removes felt hooks from Claude Code settings
+// uninstallClaudeHooks removes felt hooks from Claude Code settings.json.
+// Used for backward-compat cleanup when migrating from the old embed-based install.
 func uninstallClaudeHooks() error {
 	settingsPath, err := claudeSettingsPath()
 	if err != nil {
@@ -621,8 +439,7 @@ func uninstallClaudeHooks() error {
 
 	data, err := os.ReadFile(settingsPath)
 	if err != nil {
-		fmt.Println("No settings file found")
-		return nil
+		return nil // no settings file; nothing to clean
 	}
 
 	var settings map[string]interface{}
@@ -632,44 +449,30 @@ func uninstallClaudeHooks() error {
 
 	hooks, ok := settings["hooks"].(map[string]interface{})
 	if !ok {
-		fmt.Println("No hooks found")
 		return nil
 	}
 
-	// Remove felt hooks
 	removed := false
 	if removeHook(hooks, "SessionStart", "felt hook session") {
-		fmt.Println("✓ Removed SessionStart hook")
 		removed = true
 	}
 	if removeHook(hooks, "PreToolUse", "felt hook remind") {
-		fmt.Println("✓ Removed PreToolUse reminder hook")
 		removed = true
 	}
 	consciencePath := filepath.Join(filepath.Dir(settingsPath), "hooks", "felt-conscience.sh")
 	if removeHook(hooks, "Stop", consciencePath) {
-		fmt.Println("✓ Removed legacy Stop conscience hook")
 		removed = true
 	}
 
 	if !removed {
-		fmt.Println("No felt hooks found to remove")
 		return nil
 	}
 
-	// Write settings back
 	data, err = json.MarshalIndent(settings, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshaling settings: %w", err)
 	}
-
-	if err := os.WriteFile(settingsPath, data, 0644); err != nil {
-		return fmt.Errorf("writing settings.json: %w", err)
-	}
-
-	fmt.Println()
-	fmt.Println("Restart Claude Code for changes to take effect.")
-	return nil
+	return os.WriteFile(settingsPath, data, 0644)
 }
 
 // addHook adds a hook command to an event if not already present.
@@ -781,4 +584,112 @@ func removeHook(hooks map[string]interface{}, event, command string) bool {
 	}
 
 	return removed
+}
+
+// rcFilePath returns the shell RC file path based on $SHELL.
+func rcFilePath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("getting home directory: %w", err)
+	}
+	shell := os.Getenv("SHELL")
+	if strings.Contains(shell, "zsh") {
+		return filepath.Join(home, ".zshrc"), nil
+	}
+	return filepath.Join(home, ".bashrc"), nil
+}
+
+const codexSentinelStart = "# felt integration — added by felt setup codex"
+const codexSentinelEnd = "# end felt integration"
+
+const codexWrapper = `# felt integration — added by felt setup codex
+function codex() {
+    local felt_context
+    felt_context=$(felt hook session 2>/dev/null || true)
+    if [ -n "$felt_context" ]; then
+        command codex --config "developer_instructions=$felt_context" "$@"
+    else
+        command codex "$@"
+    fi
+}
+# end felt integration`
+
+func installCodexWrapper() error {
+	rcPath, err := rcFilePath()
+	if err != nil {
+		return err
+	}
+
+	// Read existing content
+	content := ""
+	if data, err := os.ReadFile(rcPath); err == nil {
+		content = string(data)
+	}
+
+	// Idempotent: already installed?
+	if strings.Contains(content, codexSentinelStart) {
+		fmt.Printf("· codex wrapper already installed in %s\n", rcPath)
+		return nil
+	}
+
+	// Append
+	sep := ""
+	if len(content) > 0 && !strings.HasSuffix(content, "\n") {
+		sep = "\n"
+	}
+	newContent := content + sep + "\n" + codexWrapper + "\n"
+
+	if err := os.WriteFile(rcPath, []byte(newContent), 0644); err != nil {
+		return fmt.Errorf("writing %s: %w", rcPath, err)
+	}
+
+	fmt.Printf("✓ Installed codex wrapper in %s\n", rcPath)
+	fmt.Printf("  Run: source %s\n", rcPath)
+	return nil
+}
+
+func uninstallCodexWrapper() error {
+	rcPath, err := rcFilePath()
+	if err != nil {
+		return err
+	}
+
+	data, err := os.ReadFile(rcPath)
+	if err != nil {
+		return nil // No RC file; nothing to do.
+	}
+
+	content := string(data)
+	if !strings.Contains(content, codexSentinelStart) {
+		return nil
+	}
+
+	// Remove block between sentinels (inclusive)
+	var out []string
+	inside := false
+	for _, line := range strings.Split(content, "\n") {
+		if strings.TrimSpace(line) == codexSentinelStart {
+			inside = true
+			// Also remove the blank line before the sentinel if present
+			if len(out) > 0 && out[len(out)-1] == "" {
+				out = out[:len(out)-1]
+			}
+			continue
+		}
+		if inside {
+			if strings.TrimSpace(line) == codexSentinelEnd {
+				inside = false
+			}
+			continue
+		}
+		out = append(out, line)
+	}
+
+	newContent := strings.Join(out, "\n")
+	if err := os.WriteFile(rcPath, []byte(newContent), 0644); err != nil {
+		return fmt.Errorf("writing %s: %w", rcPath, err)
+	}
+
+	fmt.Printf("✓ Removed codex wrapper from %s\n", rcPath)
+	return nil
 }

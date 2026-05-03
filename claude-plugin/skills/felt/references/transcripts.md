@@ -161,4 +161,4 @@ Big decisions may also warrant updating CLAUDE.md or documentation fibers.
 - [ ] Fiber candidates identified (from notes + implicit content re-scan)
 - [ ] Extraction plan approved before filing
 - [ ] Outcomes stand alone without the body
-- [ ] New fibers connected through containment, wikilinks, or ASTRA data flow
+- [ ] New fibers connected through containment, wikilinks, or data flow (`inputs.from`)

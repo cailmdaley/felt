@@ -39,7 +39,7 @@ The `-o` flag creates the fiber already closed. Use `-b` for the body when there
 For each new fiber:
 - What should it cite with `[[wikilinks]]`?
 - Should it live under an existing parent fiber?
-- Does it need ASTRA `inputs.from` because the relation is computational?
+- Does it need `inputs.from` because the relation is computational?
 
 ```bash
 felt ls -s all "<concept>"
@@ -71,7 +71,7 @@ git add -A && git commit -m "session: <what happened>"
 
 ### 5. Exit Interview
 
-After extraction is complete, run the exit interview. Read [exit-interview.md](exit-interview.md) for the instrument and output template. Write the interview fiber to `~/loom/.felt/felt/`.
+After extraction is complete, run the exit interview. This is part of mining, not an optional extra pass. Read [exit-interview.md](exit-interview.md) for the instrument and output template, then write the interview fiber to `~/loom/.felt/felt/`.
 
 Skip if the session made no use of felt.
 

@@ -8,8 +8,8 @@ How fibers move through three tiers of rigor: Annotated, Formalized, Tempered. F
 
 A fiber starts annotated and climbs as structure crystallizes. All three tiers share the same schema; what differs is how much of it is filled.
 
-- **Annotated**: any valid felt fiber. Name, outcome, body, tags, and wikilinks in any combination. No ASTRA requirement. This covers everything from a bare name to a rich doc fiber.
-- **Formalized**: the fiber has at least one well-formed ASTRA object in frontmatter. Deterministic test: could `felt export --format astra` emit this?
+- **Annotated**: any valid felt fiber. Name, outcome, body, tags, and wikilinks in any combination. No structured frontmatter required. This covers everything from a bare name to a rich doc fiber.
+- **Formalized**: the fiber has at least one well-formed structured object in frontmatter — a `decisions:` block, `inputs:`/`outputs:`, or `insights:`. Structure is real enough to be useful, not just a placeholder.
 - **Tempered**: `tempered: true` in frontmatter. Human-validated and part of the real scientific argument. This is a workflow flag, not a richer schema.
 
 ### Tier progression
@@ -24,7 +24,7 @@ A single fiber climbing the ladder:
 
 ### Kind is an observation, not a classification
 
-There is no formal typology of fiber kinds. A fiber's shape is whatever its populated ASTRA fields make it: `decisions:` populated means the fiber is acting as a decision, `inputs:` and `outputs:` populated means it is acting as a computation, `insights:` populated means it is acting as a finding. A single fiber can play any combination of those roles.
+There is no formal typology of fiber kinds. A fiber's shape is whatever its populated frontmatter makes it: `decisions:` populated means the fiber is acting as a decision, `inputs:` and `outputs:` populated means it is acting as a computation, `insights:` populated means it is acting as a finding. A single fiber can play any combination of those roles.
 
 ### Formalization threshold
 
@@ -36,7 +36,7 @@ For async compute, launch the job and formalize inputs and expected outputs whil
 
 ## Common Shapes
 
-Different fibers need different ASTRA fields. The shapes below are common patterns, not a formal typology; a single fiber can mix any of them. Do not fill fields that do not apply.
+Different fibers need different frontmatter fields. The shapes below are common patterns, not a formal typology; a single fiber can mix any of them. Do not fill fields that do not apply.
 
 ### Decision fiber
 
@@ -148,7 +148,7 @@ evidence:
 
 ## Body vs Frontmatter
 
-- **Frontmatter**: structured layer for code and export
+- **Frontmatter**: structured layer for code and tooling
 - **Body**: explanation, caveats, and narrative for humans and agents
 - **Do not duplicate**: the frontmatter should not be copied verbatim into the body
 
@@ -158,13 +158,13 @@ Optional body conventions by kind:
 - **Computation**: `## Notes`, `## Caveats`
 - **Finding**: `## Interpretation`, `## Limits`
 
-The frontmatter is for branching, validation, querying, and export. The body is where the argument, caveats, and context live.
+The frontmatter is for branching, querying, and downstream tooling. The body is where the argument, caveats, and context live.
 
 ---
 
 ## Anti-Patterns
 
-- Inventing ASTRA structure before real options, inputs, or evidence exist
+- Inventing structure before real options, inputs, or evidence exist
 - Duplicating frontmatter verbatim into the body
 - Formalizing ephemeral thoughts; leave them annotated unless they are a real decision, computation, or finding
 - Marking `tempered: true` before human validation
@@ -199,11 +199,11 @@ Measuring additive and multiplicative leakage while the validation jobs run.
 Cross-check against shape-PSF correlations if any bin looks marginal.
 ```
 
-Real content, no ASTRA structure yet.
+Real content, no structured frontmatter yet.
 
 ### Formalized
 
-Still mid-computation. Append ASTRA fields to the existing frontmatter:
+Still mid-computation. Append structured fields to the existing frontmatter:
 
 ```yaml
 inputs:
@@ -233,7 +233,7 @@ decisions:
         excluded_reason: Only if leakage exceeds the agreed threshold
 ```
 
-`felt export --format astra` could now emit this fiber.
+The fiber now carries real structure grounded in actual computation.
 
 ### Tempered
 
@@ -255,15 +255,3 @@ insights:
 ```
 
 The body now carries interpretation, caveats, and why the threshold is the right one. The frontmatter stays structural.
-
----
-
-## ASTRA Export
-
-```bash
-felt export --format astra
-```
-
-Formalized fibers are the exportable set. Tempered fibers are a flagged subset of that set.
-
-For the full ASTRA schema: `~/Documents/projects/ASTRA/spec/0.1/analysis.schema.json`.

@@ -41,7 +41,6 @@ fi
 # Anchor the grep to the metadata line so body prose mentioning
 # "status:open|active" (e.g. constitutions describing this very check)
 # can't self-match. See:
-# .felt/ai-futures/portolan/shuttle/finding-launcher-grep-self-match
 if ! (cd "$FELT_DIR" && $FELT show "$FIBER_ID" 2>/dev/null | grep -qE '^Status:[[:space:]]+(open|active)\b'); then
     echo "Fiber $FIBER_ID must have status open or active to loop."
     echo "  Fix: felt edit $FIBER_ID -s open"
@@ -97,7 +96,7 @@ If you make changes, commit, keep filing into felt as you go, then `kill $PPID`.
 PROMPTEOF
     else
         cat > "$PROMPT_FILE" << 'PROMPTEOF'
-You are inside a ralph loop. Activate the ralph skill (/ralph) and the felt skill (/felt) before anything else, then follow them.
+You are inside a ralph loop. Activate the ralph skill and the felt skill before anything else, then follow them.
 
 Survey, then exploit the warm world-model. Exit when the next valuable move needs a different mental workspace — not on a context-usage threshold.
 
