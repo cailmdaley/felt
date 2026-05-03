@@ -37,10 +37,13 @@ Search and read:
     felt ls                                              # tracked (open and active)
     felt ls "query" [-t tag] [-s closed]                 # any filter widens to all statuses
     felt ls --body "query"                               # FTS5 body search
+    felt tree [<id>]                                     # containment hierarchy
     felt show <id>                                       # full
     felt show <id> -d summary | -d compact               # metadata + lede | + frontmatter counts
     felt show <id> --body                                # body with start line
     felt show <id> --decisions|--inputs|--insights       # targeted frontmatter slices
+    felt show <id> --citations|--consumers               # narrative back-refs | data-flow consumers
+    felt show <id> --field <key>                         # one frontmatter key, shell-friendly
 
 A thread resolved. Close:
     felt edit <id> --status closed --outcome "what was learned"
@@ -49,7 +52,13 @@ History (per-fiber append-only event log):
     felt history <id>                                    # editorial chain (newest first)
     felt history <id> --last 1                           # what the previous session left
     felt history <id> --mechanical                       # + add/edit/rm/external_edit
+    felt history <id> --kind <type>                      # filter to typed editorial events (e.g. review-comment)
     felt history append <id> --summary "..."             # log session continuity
+    felt history append <id> --kind review-comment --summary "..."   # typed event for downstream tools
+
+Reshape:
+    felt nest <child> <parent>                           # move a fiber subtree under another
+    felt unnest <id>                                     # promote a nested fiber to the top level
 
 Maintain:
     felt check                                           # broken refs, frontmatter issues
