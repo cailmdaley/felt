@@ -148,6 +148,39 @@ func TestIntegration(t *testing.T) {
 	if !strings.Contains(out, fiberID) {
 		t.Fatalf("ls --exact should match exact title from metadata, got: %s", out)
 	}
+
+	// Slug search: id = "test-fiber", name = "test fiber" (space, not hyphen)
+	// Substring match on id — "test-fiber" is in the id but not in the name
+	out = mustFelt(t, dir, "ls", "test-fiber")
+	if !strings.Contains(out, fiberID) {
+		t.Fatalf("ls slug substring: should match fiber whose id contains query, got: %s", out)
+	}
+	// Partial-id substring: "test-fib" is a substring of "test-fiber" (id) but not "test fiber" (name)
+	out = mustFelt(t, dir, "ls", "test-fib")
+	if !strings.Contains(out, fiberID) {
+		t.Fatalf("ls slug partial substring: should match fiber whose id contains query, got: %s", out)
+	}
+	// Exact id match (id "test-fiber" != name "test fiber"; should now succeed)
+	out = mustFelt(t, dir, "ls", "-e", "test-fiber")
+	if !strings.Contains(out, fiberID) {
+		t.Fatalf("ls --exact should match exact id, got: %s", out)
+	}
+	// Exact match on wrong slug should return nothing
+	out = mustFelt(t, dir, "ls", "-e", "test-fiber-nope")
+	if !strings.Contains(out, "No felts") {
+		t.Fatalf("ls --exact should not match wrong slug, got: %s", out)
+	}
+	// Regex match on id
+	out = mustFelt(t, dir, "ls", "-r", "test-.*")
+	if !strings.Contains(out, fiberID) {
+		t.Fatalf("ls regex: should match fiber whose id matches regex, got: %s", out)
+	}
+	// Slug match should not produce false positives for unrelated queries
+	out = mustFelt(t, dir, "ls", "zzz-no-such-slug")
+	if strings.Contains(out, fiberID) {
+		t.Fatalf("ls slug: should not match fiber with unrelated query, got: %s", out)
+	}
+
 	out = mustFelt(t, dir, "ls", "completed successfully")
 	if strings.Contains(out, fiberID) {
 		t.Fatalf("ls query should not match outcome before it exists, got: %s", out)
@@ -329,6 +362,11 @@ container: python:3.11-slim
 	out = mustFelt(t, dir, "tree", "bao-analysis")
 	if !strings.Contains(out, "second fiber") {
 		t.Fatalf("nest: expected nested child in containment tree, got: %s", out)
+	}
+	// Exact basename match for nested fiber: id is "bao-analysis/second-fiber", basename is "second-fiber"
+	out = mustFelt(t, dir, "ls", "-e", "second-fiber")
+	if !strings.Contains(out, "bao-analysis/second-fiber") {
+		t.Fatalf("ls --exact basename: should match nested fiber by basename, got: %s", out)
 	}
 
 	thirdID := strings.TrimSpace(mustFelt(t, dir, "add", "third-fiber", "third fiber"))

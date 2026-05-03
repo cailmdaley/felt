@@ -4,6 +4,19 @@ All notable changes to felt are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.3] — 2026-05-03
+
+### Changed
+
+- `felt ls <query>` now matches against the fiber's id (slug) in addition
+  to its name, outcome, and structured frontmatter. Substring queries match
+  any part of the full id, so `felt ls "dj-rico"` returns `dj-rico-contract`
+  even when the fiber's name is "dj rico contract". Regex queries (`-r`) are
+  also applied to the id. Exact queries (`-e`) accept either the full id or
+  the id's basename (last path segment), enabling `felt ls -e "my-fiber"` to
+  resolve `project/my-fiber` by basename.
+- Help text for `felt ls --help` updated to document id/slug matching.
+
 ## [1.0.2] — 2026-05-03
 
 ### Fixed

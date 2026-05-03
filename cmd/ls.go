@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path"
 	"regexp"
 	"sort"
 	"strings"
@@ -34,10 +35,11 @@ Use -t to filter by tag (AND logic, prefix matching with trailing colon):
   -t rule:                    matches any rule:* tag
   -t rule:cosebis_data_vector exact tag match
 
-Optional query searches name, outcome, and structured frontmatter:
-  felt ls cosebis             substring search
-  felt ls -r "rule:.*data"    regex search
-  felt ls -e "exact name"     exact name match
+Optional query searches name, outcome, structured frontmatter, and fiber id (slug):
+  felt ls cosebis             substring search (name, outcome, frontmatter, and id)
+  felt ls dj-rico             matches fibers whose id contains "dj-rico"
+  felt ls -r "rule:.*data"    regex search (also applied to fiber id)
+  felt ls -e "exact-slug"     exact name or exact id match
 
 Use --body with query to include body search, and with --json to emit body text.`,
 	Args: cobra.MaximumNArgs(1),
@@ -142,9 +144,11 @@ Use --body with query to include body search, and with --json to emit body text.
 			// Text search (if query provided)
 			if query != "" {
 				nameLower := strings.ToLower(f.DisplayName())
+				idLower := strings.ToLower(f.ID)
 
-				// Exact name match (sorted first)
-				if !lsRegex && nameLower == queryLower {
+				// Exact match: name, full id, or id basename (sorted first; regex excluded)
+				basenameLower := strings.ToLower(path.Base(f.ID))
+				if !lsRegex && (nameLower == queryLower || idLower == queryLower || basenameLower == queryLower) {
 					exactMatches = append(exactMatches, f)
 					continue
 				}
@@ -154,17 +158,8 @@ Use --body with query to include body search, and with --json to emit body text.
 					continue
 				}
 
-				// Regex or substring match
-				var matches bool
-				searchText := f.SearchText()
-				if lsRegex {
-					matches = re.MatchString(f.DisplayName()) || re.MatchString(searchText)
-				} else {
-					matches = strings.Contains(nameLower, queryLower) ||
-						strings.Contains(strings.ToLower(searchText), queryLower)
-				}
-
-				if matches {
+				// Substring or regex match against name, SearchText, and id
+				if matchesQuery(f, queryLower, re, lsRegex) {
 					filtered = append(filtered, f)
 					continue
 				}
@@ -179,9 +174,7 @@ Use --body with query to include body search, and with --json to emit body text.
 					continue
 				}
 
-				if !matches {
-					continue
-				}
+				continue // no match
 			}
 
 			filtered = append(filtered, f)
@@ -269,6 +262,18 @@ func init() {
 	lsCmd.Flags().BoolVar(&lsBody, "body", false, "Include body search for queries and body field in JSON output")
 	lsCmd.Flags().BoolVarP(&lsExact, "exact", "e", false, "Exact name match only (with query)")
 	lsCmd.Flags().BoolVarP(&lsRegex, "regex", "r", false, "Treat query as regular expression")
+}
+
+// matchesQuery reports whether f matches the query by substring or regex.
+// It checks the fiber's display name, SearchText, and full id (slug).
+// queryLower must be strings.ToLower(query); re is the compiled regexp (non-nil iff useRegex).
+func matchesQuery(f *felt.Felt, queryLower string, re *regexp.Regexp, useRegex bool) bool {
+	if useRegex {
+		return re.MatchString(f.DisplayName()) || re.MatchString(f.SearchText()) || re.MatchString(f.ID)
+	}
+	return strings.Contains(strings.ToLower(f.DisplayName()), queryLower) ||
+		strings.Contains(strings.ToLower(f.SearchText()), queryLower) ||
+		strings.Contains(strings.ToLower(f.ID), queryLower)
 }
 
 func appendBodyMatches(storage *felt.Storage, filtered, candidates []*felt.Felt, useRegex bool, re *regexp.Regexp, queryLower string) ([]*felt.Felt, error) {

@@ -119,7 +119,8 @@ Containment comes from the directory tree. Narrative connections live in `[[wiki
 ```bash
 felt tree                               # containment hierarchy
 felt show covariance-estimation         # body refs + citations + reverse consumers + frontmatter summary
-felt ls "DES Y3"                        # search names, outcomes, structured fields
+felt ls "DES Y3"                        # search names, outcomes, structured fields, and ids
+felt ls "dj-rico"                       # matches any fiber whose id contains "dj-rico"
 felt ls --body "jackknife patches"      # FTS5 body search
 ```
 
@@ -146,7 +147,7 @@ decisions:
 ```
 
 ```bash
-felt ls "BAO"                 # name, outcome, and structured fields
+felt ls "BAO"                 # name, outcome, structured fields, and id
 felt check                    # broken refs/fragments, legacy format residue, formalization drift
 ```
 
