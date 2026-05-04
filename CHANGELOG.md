@@ -4,6 +4,22 @@ All notable changes to felt are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.4] — 2026-05-04
+
+### Changed
+
+- `felt show --json` now includes tool-owned frontmatter namespaces (any
+  top-level YAML keys felt does not parse — `shuttle`, `tempered`,
+  `depends_on`, project-defined namespaces, etc.) as flat top-level JSON
+  keys. Previously these were silently omitted, forcing programmatic
+  consumers to fall back on `--field <key>` per-key reads. The lossy JSON
+  output had concretely bitten the shuttle daemon's dispatcher: every
+  fiber declaring `shuttle.agent: claude-opus` (or any non-default agent)
+  silently downgraded to claude-sonnet because `fetch_fiber` got an
+  empty `shuttle` map back. JSON now mirrors the round-trip-the-bytes
+  contract felt already promises elsewhere. Backward-compatible: existing
+  consumers that ignore unknown keys are unaffected.
+
 ## [1.0.3] — 2026-05-03
 
 ### Changed

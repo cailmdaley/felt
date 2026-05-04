@@ -1050,3 +1050,128 @@ Body here.
 		t.Errorf("Round-trip output missing 'tempered: false'; got:\n%s", outStr)
 	}
 }
+
+// TestMarshalJSONIncludesExtraFields verifies that `felt show --json` (and
+// any other JSON consumer of Felt) sees tool-owned frontmatter as flat
+// top-level keys, with values rendered as native JSON. Regression test for
+// the dispatcher silently downgrading non-default agents because the JSON
+// output was lossy: see ai-futures/shuttle/finding-dispatcher-felt-show-
+// json-misses-shuttle-block in the loom.
+func TestMarshalJSONIncludesExtraFields(t *testing.T) {
+	input := `---
+name: Modal fiber
+status: active
+tags:
+    - constitution
+created-at: 2026-05-04T00:00:00Z
+tempered: false
+shuttle:
+    enabled: true
+    kind: oneshot
+    agent: claude-opus
+    session:
+        id: 68b394d0-927b-4130-aba2-be4b87c33017
+        agent: claude-sonnet
+depends_on:
+    - some-other-fiber
+---
+
+Body.
+`
+	f, err := Parse("tests/modal", []byte(input))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	out, err := json.Marshal(f)
+	if err != nil {
+		t.Fatalf("MarshalJSON: %v", err)
+	}
+
+	var decoded map[string]interface{}
+	if err := json.Unmarshal(out, &decoded); err != nil {
+		t.Fatalf("Unmarshal output: %v\noutput was: %s", err, string(out))
+	}
+
+	// Known fields still surface (the alias path).
+	if decoded["name"] != "Modal fiber" {
+		t.Errorf("name = %v, want \"Modal fiber\"", decoded["name"])
+	}
+	if decoded["status"] != "active" {
+		t.Errorf("status = %v, want \"active\"", decoded["status"])
+	}
+
+	// Tool-owned namespaces appear at top level as native JSON.
+	shuttle, ok := decoded["shuttle"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("decoded[\"shuttle\"] is not a map; got %T: %v\nfull JSON:\n%s",
+			decoded["shuttle"], decoded["shuttle"], string(out))
+	}
+	if shuttle["enabled"] != true {
+		t.Errorf("shuttle.enabled = %v, want true", shuttle["enabled"])
+	}
+	if shuttle["agent"] != "claude-opus" {
+		t.Errorf("shuttle.agent = %v, want \"claude-opus\"", shuttle["agent"])
+	}
+	if shuttle["kind"] != "oneshot" {
+		t.Errorf("shuttle.kind = %v, want \"oneshot\"", shuttle["kind"])
+	}
+
+	// Nested structure round-trips too.
+	session, ok := shuttle["session"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("shuttle.session is not a map; got %T", shuttle["session"])
+	}
+	if session["id"] != "68b394d0-927b-4130-aba2-be4b87c33017" {
+		t.Errorf("shuttle.session.id = %v", session["id"])
+	}
+
+	// Scalar tool-owned fields surface as native JSON scalars.
+	if decoded["tempered"] != false {
+		t.Errorf("tempered = %v (type %T), want false", decoded["tempered"], decoded["tempered"])
+	}
+
+	// List-shaped tool-owned fields too.
+	deps, ok := decoded["depends_on"].([]interface{})
+	if !ok || len(deps) != 1 || deps[0] != "some-other-fiber" {
+		t.Errorf("depends_on = %v, want [\"some-other-fiber\"]", decoded["depends_on"])
+	}
+}
+
+// TestMarshalJSONNoExtraFields exercises the fast path: a fiber with no
+// tool-owned frontmatter must round-trip through MarshalJSON without
+// regression.
+func TestMarshalJSONNoExtraFields(t *testing.T) {
+	input := `---
+name: Plain fiber
+status: open
+tags:
+    - simple
+created-at: 2026-05-04T00:00:00Z
+---
+
+Body.
+`
+	f, err := Parse("tests/plain", []byte(input))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	out, err := json.Marshal(f)
+	if err != nil {
+		t.Fatalf("MarshalJSON: %v", err)
+	}
+
+	var decoded map[string]interface{}
+	if err := json.Unmarshal(out, &decoded); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+
+	if decoded["name"] != "Plain fiber" {
+		t.Errorf("name = %v", decoded["name"])
+	}
+	// No tool-owned keys should appear.
+	if _, ok := decoded["shuttle"]; ok {
+		t.Error("unexpected shuttle key in plain fiber JSON")
+	}
+}

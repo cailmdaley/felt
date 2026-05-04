@@ -205,6 +205,63 @@ type Felt struct {
 	EntryPoint bool `yaml:"-" json:"entry_point,omitempty"`
 }
 
+// MarshalJSON implements custom JSON marshaling for Felt. The default behavior
+// (omitting ExtraFields entirely via json:"-") would lose tool-owned
+// frontmatter namespaces such as `shuttle:`, `tempered:`, `depends_on:`, etc.
+// — the exact data the round-trip-the-bytes contract promises to preserve.
+// Without these, every JSON consumer is forced into compensating reads via
+// `--field <key>`, which has bitten downstream tools (notably the shuttle
+// daemon's dispatcher: see ai-futures/shuttle/finding-dispatcher-felt-show-
+// json-misses-shuttle-block in the loom).
+//
+// We expand ExtraFields as flat top-level JSON keys, mirroring how they
+// appear in the YAML frontmatter. Each yaml.Node is decoded into a generic
+// interface{} so json.Marshal can render it as native JSON (maps as objects,
+// sequences as arrays, scalars as their natural types). felt does not
+// validate or interpret these values — it only round-trips them — so the
+// JSON output is a faithful structured copy of what the file declared.
+func (f *Felt) MarshalJSON() ([]byte, error) {
+	// Marshal the parsed/known fields via the default path. The alias type
+	// breaks the recursion (alias has no MarshalJSON method).
+	type alias Felt
+	knownBytes, err := json.Marshal((*alias)(f))
+	if err != nil {
+		return nil, fmt.Errorf("marshal known fields: %w", err)
+	}
+
+	// Fast path: no extras → emit the alias-encoded bytes directly.
+	if len(f.ExtraFields) == 0 {
+		return knownBytes, nil
+	}
+
+	// Decode the alias output into a generic map so we can merge extras in.
+	var merged map[string]interface{}
+	if err := json.Unmarshal(knownBytes, &merged); err != nil {
+		return nil, fmt.Errorf("decode known fields for merge: %w", err)
+	}
+	if merged == nil {
+		merged = map[string]interface{}{}
+	}
+
+	for key, node := range f.ExtraFields {
+		if node == nil {
+			continue
+		}
+		var value interface{}
+		if err := node.Decode(&value); err != nil {
+			return nil, fmt.Errorf("decode extra field %q: %w", key, err)
+		}
+		// Known keys win. ExtraFields by construction never overlaps with
+		// knownFrontmatterKeys, but defending against stray collisions keeps
+		// the contract simple: parsed fields are authoritative.
+		if _, exists := merged[key]; !exists {
+			merged[key] = value
+		}
+	}
+
+	return json.Marshal(merged)
+}
+
 // HasStatus returns true if the fiber has opt-in status tracking.
 func (f *Felt) HasStatus() bool {
 	return f.Status != ""
