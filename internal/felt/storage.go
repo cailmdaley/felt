@@ -87,21 +87,52 @@ func (s *Storage) Exists() bool {
 	return err == nil && info.IsDir()
 }
 
-// Path returns the full path for a felt file. Top-level fibers may live in
-// "bare" form at .felt/<slug>.md — the shape that appears through loom symlinks
-// where ~/loom/.felt/<project>/<project>.md is viewed from inside the project
-// as .felt/<project>.md. Path prefers the bare form when it exists; otherwise
-// it returns the directory form .felt/<slug>/<slug>.md.
+// Path returns the full path for a felt file. Fibers can take one of two
+// on-disk shapes:
+//
+//   - directory form  `<.felt>/<id>/<slug>.md`   (the standard layout)
+//   - bare form       `<.felt>/<dir>/<slug>.md`  (no `<slug>/` nesting)
+//
+// The bare form occurs at namespace-root boundaries: the file sits directly
+// inside a `.felt/` rather than in a `<slug>/` subdirectory. At depth zero
+// it is the project-root fiber. At depth greater than zero it appears when
+// another felt store is mounted via a symlinked subdirectory — its
+// inner-root fiber surfaces in the outer namespace one tier deeper than the
+// outer root.
+//
+// Path prefers the directory form for nested ids. Bare-form `.md` files at
+// depth > 0 are usually sidecars (transcripts, notes adjacent to a real
+// fiber) and don't carry frontmatter; preferring them would resolve to the
+// wrong file. The bare fallback fires only when the directory form is
+// missing, which is exactly the symlinked-substore case.
 func (s *Storage) Path(id string) string {
 	id = filepath.ToSlash(filepath.Clean(id))
 	slug := path.Base(id)
-	if !strings.Contains(id, "/") {
+	dir := path.Dir(id)
+	dirForm := filepath.Join(s.root, filepath.FromSlash(id), slug+FileExt)
+	if dir == "." {
+		// Top-level: prefer the bare shape `.felt/<slug>.md` when it exists —
+		// that's the project-root fiber's canonical layout when this store
+		// is mounted into an outer one via a symlink at the parent level.
+		// Falls back to the directory form for the standard nested layout.
 		bare := filepath.Join(s.root, slug+FileExt)
 		if _, err := os.Stat(bare); err == nil {
 			return bare
 		}
+		return dirForm
 	}
-	return filepath.Join(s.root, filepath.FromSlash(id), slug+FileExt)
+	// Nested ids: directory form first. The bare-at-parent shape only
+	// appears at a symlink boundary into another store; fall through to it
+	// when (and only when) the directory form doesn't resolve, so a
+	// sidecar `.md` next to a directory-form fiber can't shadow the fiber.
+	if _, err := os.Stat(dirForm); err == nil {
+		return dirForm
+	}
+	bare := filepath.Join(s.root, filepath.FromSlash(dir), slug+FileExt)
+	if _, err := os.Stat(bare); err == nil {
+		return bare
+	}
+	return dirForm
 }
 
 // NextAvailableID returns the first unused ID based on a slug path.
@@ -184,7 +215,15 @@ func (s *Storage) FindMetadataInScope(scopeID, query string) (*Felt, error) {
 }
 
 func (s *Storage) readWithMode(id string, mode ParseMode) (*Felt, error) {
-	path := s.Path(id)
+	return s.readPathWithMode(s.Path(id), id, mode)
+}
+
+// readPathWithMode reads a fiber from a known on-disk path. Used by list-time
+// callers that already discovered the file via the walk and shouldn't re-derive
+// the path from the id (which loses information when ids cross symlink
+// boundaries — e.g. an entry-point bare-form fiber inside a symlinked
+// sub-store has no recoverable shape from the prefixed id alone).
+func (s *Storage) readPathWithMode(path, id string, mode ParseMode) (*Felt, error) {
 	if mode == ParseMetadataOnly {
 		f, err := readMetadataFile(path, id)
 		if err != nil {
@@ -548,7 +587,7 @@ func (s *Storage) listWithMode(mode ParseMode, includeModTime bool) ([]*Felt, er
 
 	var felts []*Felt
 	for _, file := range files {
-		f, err := s.readWithMode(file.id, mode)
+		f, err := s.readPathWithMode(file.path, file.id, mode)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "warning: failed to parse %s: %v\n", file.path, err)
 			continue
@@ -600,7 +639,7 @@ func (s *Storage) findWithModeAndScope(scopeID, query string, mode ParseMode) (*
 	if err != nil {
 		return nil, err
 	}
-	f, err := s.readWithMode(matchID, mode)
+	f, err := s.readPathWithMode(pathByID[matchID], matchID, mode)
 	if err != nil {
 		return nil, err
 	}
@@ -611,28 +650,45 @@ func (s *Storage) findWithModeAndScope(scopeID, query string, mode ParseMode) (*
 }
 
 func (s *Storage) listFiberFiles() ([]fiberFile, error) {
-	// Resolve symlinks on the root so WalkDir descends into symlinked .felt/ dirs
-	root, err := filepath.EvalSymlinks(s.root)
+	// Resolve symlinks on the root so WalkDir descends into symlinked .felt/ dirs.
+	rootResolved, err := filepath.EvalSymlinks(s.root)
 	if err != nil {
 		return nil, fmt.Errorf("resolving .felt path: %w", err)
 	}
 	var files []fiberFile
 	visited := map[string]struct{}{}
-	var walkFn func(walkRoot string) error
-	walkFn = func(walkRoot string) error {
-		walkRootResolved, err := filepath.EvalSymlinks(walkRoot)
+
+	// walkFn walks one tier of the felt tree, recursing through any symlinked
+	// subdirectory. `walkBase` is the absolute, symlinks-resolved root of this
+	// tier; ids are computed relative to it so they stay clean even when the
+	// symlink target lives outside `rootResolved` — the case where a
+	// subdirectory of this store is a symlink into a foreign `.felt/`
+	// elsewhere on disk (a "mounted" sub-store).
+	//
+	// `idPrefix` carries the symlink's logical position in the outer tree
+	// (e.g. `projects/foo/`), and is prepended to inner-relative ids so
+	// they surface in the outer namespace as `projects/foo/<inner>` instead
+	// of leaking the resolved absolute path through filepath.Rel as
+	// `../../<somewhere>/...`. The convention matches how regular
+	// directories work: the path you place a symlink at *is* its name in
+	// the outer namespace.
+	var walkFn func(walkBase, idPrefix string) error
+	walkFn = func(walkBase, idPrefix string) error {
+		walkBaseResolved, err := filepath.EvalSymlinks(walkBase)
 		if err != nil {
 			return nil // skip unresolvable roots
 		}
-		if _, seen := visited[walkRootResolved]; seen {
+		if _, seen := visited[walkBaseResolved]; seen {
 			return nil
 		}
-		visited[walkRootResolved] = struct{}{}
-		return filepath.WalkDir(walkRootResolved, func(fullPath string, d fs.DirEntry, walkErr error) error {
+		visited[walkBaseResolved] = struct{}{}
+		return filepath.WalkDir(walkBaseResolved, func(fullPath string, d fs.DirEntry, walkErr error) error {
 			if walkErr != nil {
 				return walkErr
 			}
-			// Follow symlinked directories (e.g. project .felt/ dirs inside loom)
+			// Symlinked subdirectory: capture its logical position relative to
+			// walkBaseResolved before resolving, so the recursive walk lifts
+			// every inner id back into the outer namespace.
 			if d.Type()&os.ModeSymlink != 0 {
 				target, err := filepath.EvalSymlinks(fullPath)
 				if err != nil {
@@ -643,21 +699,28 @@ func (s *Storage) listFiberFiles() ([]fiberFile, error) {
 					return nil
 				}
 				if info.IsDir() {
-					return walkFn(target)
+					inner, err := filepath.Rel(walkBaseResolved, fullPath)
+					if err != nil {
+						return nil
+					}
+					nextPrefix := path.Join(idPrefix, filepath.ToSlash(inner))
+					return walkFn(target, nextPrefix)
 				}
 			}
 			if d.IsDir() || !strings.HasSuffix(d.Name(), FileExt) {
 				return nil
 			}
-			// Resolve the full path through any symlinks for Rel computation
+			// Compute rel within this tier (clean inner namespace), then prepend
+			// the accumulated outer prefix to lift the id back into the parent
+			// tree. Resolved-then-fullPath fallback preserves the prior
+			// best-effort behaviour for pathological symlinks.
 			resolved, err := filepath.EvalSymlinks(fullPath)
 			if err != nil {
 				resolved = fullPath
 			}
-			// Compute rel from root, trying both resolved and unresolved paths
-			rel, err := filepath.Rel(root, resolved)
+			rel, err := filepath.Rel(walkBaseResolved, resolved)
 			if err != nil {
-				rel, err = filepath.Rel(root, fullPath)
+				rel, err = filepath.Rel(walkBaseResolved, fullPath)
 				if err != nil {
 					return err
 				}
@@ -666,19 +729,26 @@ func (s *Storage) listFiberFiles() ([]fiberFile, error) {
 			if !ok {
 				return nil
 			}
+			if idPrefix != "" {
+				id = path.Join(idPrefix, id)
+				// Crossing a symlink into a sub-store means this file is never
+				// the *outer* entry-point fiber — the entry-point shape only
+				// applies at the root the user is asking about.
+				entryPoint = false
+			}
 			files = append(files, fiberFile{id: id, path: fullPath, entryPoint: entryPoint})
 			return nil
 		})
 	}
-	if err := walkFn(root); err != nil {
+	if err := walkFn(rootResolved, ""); err != nil {
 		return nil, fmt.Errorf("walking .felt directory: %w", err)
 	}
 	return files, nil
 }
 
 // fiberIDFromRelativePath returns (id, entryPoint, ok). entryPoint is true
-// when the file is a bare `<slug>.md` at the .felt/ root — the shape the
-// project-level root fiber takes when viewed through a loom symlink.
+// when the file is a bare `<slug>.md` at the `.felt/` root — the shape the
+// project-level root fiber takes.
 func fiberIDFromRelativePath(rel string) (string, bool, bool) {
 	rel = filepath.Clean(rel)
 	dir := filepath.Dir(rel)

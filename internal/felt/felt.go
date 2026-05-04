@@ -199,9 +199,9 @@ type Felt struct {
 	Body            string                   `yaml:"-" json:"body,omitempty"`
 	ModifiedAt      time.Time                `yaml:"-" json:"modified_at,omitempty"` // populated from file stat
 	// EntryPoint is true when the fiber lives as a bare `.felt/<slug>.md`
-	// at the .felt/ root (the project's entry-point / root fiber, as it
-	// appears through loom symlinks). Distinguishes the root from top-level
-	// folder fibers — both have unslashed IDs, only EntryPoint tells them apart.
+	// at the .felt/ root — the project's entry-point / root fiber.
+	// Distinguishes the root from top-level folder fibers; both have
+	// unslashed IDs, only EntryPoint tells them apart.
 	EntryPoint bool `yaml:"-" json:"entry_point,omitempty"`
 }
 
@@ -209,10 +209,8 @@ type Felt struct {
 // (omitting ExtraFields entirely via json:"-") would lose tool-owned
 // frontmatter namespaces such as `shuttle:`, `tempered:`, `depends_on:`, etc.
 // — the exact data the round-trip-the-bytes contract promises to preserve.
-// Without these, every JSON consumer is forced into compensating reads via
-// `--field <key>`, which has bitten downstream tools (notably the shuttle
-// daemon's dispatcher: see ai-futures/shuttle/finding-dispatcher-felt-show-
-// json-misses-shuttle-block in the loom).
+// Without these, every JSON consumer would be forced into compensating
+// reads via `--field <key>`, which has bitten downstream tools in the past.
 //
 // We expand ExtraFields as flat top-level JSON keys, mirroring how they
 // appear in the YAML frontmatter. Each yaml.Node is decoded into a generic
@@ -326,7 +324,7 @@ func SlugifyPath(s string) string {
 
 // Slugify converts a string to a URL-safe slug.
 func Slugify(s string) string {
-	// Strip bracketed tags like [loom], [pure-eb], [thread:X]
+	// Strip bracketed tags like [thread:X], [project], etc.
 	s = stripBracketedTags(s)
 	s = strings.ToLower(s)
 

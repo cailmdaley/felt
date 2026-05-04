@@ -903,8 +903,9 @@ func TestStorageMigrateSingleBareFilePreservedAsEntryPoint(t *testing.T) {
 		t.Fatalf("Init() error: %v", err)
 	}
 
-	// A single bare .md at .felt/ root is the entry-point fiber (loom-view
-	// shape of ~/loom/.felt/<project>/<project>.md). Do not migrate it.
+	// A single bare .md at .felt/ root is the entry-point fiber (the shape
+	// a project's root fiber takes when its `.felt/` is mounted into an
+	// outer monorepo via symlink). Do not migrate it.
 	entry := `---
 name: Project root
 ---
@@ -1096,8 +1097,9 @@ func TestStorageBareRootFiber(t *testing.T) {
 	s := NewStorage(dir)
 	s.Init()
 
-	// Write a bare top-level fiber at .felt/cmbx.md, as would appear through
-	// a loom symlink where ~/loom/.felt/cmbx/cmbx.md looks like .felt/cmbx.md.
+	// Write a bare top-level fiber at .felt/cmbx.md — the entry-point shape,
+	// equivalent to <project>/<project>.md when the project's `.felt/` is
+	// mounted into an outer monorepo via symlink.
 	bare := filepath.Join(s.root, "cmbx.md")
 	body := "---\nname: cmbx\nstatus: active\n---\n\nRoot narrative.\n"
 	if err := os.WriteFile(bare, []byte(body), 0644); err != nil {
@@ -1163,5 +1165,172 @@ func TestStoragePathBareWithNestedChild(t *testing.T) {
 	}
 	if !ids["cmbx"] || !ids["cmbx-meeting"] {
 		t.Errorf("List ids = %v, want both cmbx and cmbx-meeting", ids)
+	}
+}
+
+// TestStorageListSymlinkedSubstoreLiftsIds models a felt store that mounts
+// another store via a symlinked subdirectory whose target lives outside the
+// outer tree. Fibers under the mount must surface with ids rooted in the
+// outer namespace (`<symlink-name>/<inner-id>`), not the leaked `../../...`
+// traversal that `filepath.Rel(outerRoot, resolvedAbsPath)` would yield.
+func TestStorageListSymlinkedSubstoreLiftsIds(t *testing.T) {
+	tmp := t.TempDir()
+
+	// Outer store: has its own root fiber so we can confirm the rest of
+	// the walk still works after the symlink is in place.
+	outerProj := filepath.Join(tmp, "outer")
+	outerS := NewStorage(outerProj)
+	if err := outerS.Init(); err != nil {
+		t.Fatalf("outer init: %v", err)
+	}
+	rootMd := filepath.Join(outerS.root, "outer.md")
+	if err := os.WriteFile(rootMd, []byte("---\nname: outer\n---\n"), 0644); err != nil {
+		t.Fatalf("write outer root: %v", err)
+	}
+
+	// Inner store: lives entirely outside outer's tree. One fiber inside,
+	// in a deeply-nested directory shape — the layout that broke before
+	// the fix.
+	innerProj := filepath.Join(tmp, "inner-elsewhere")
+	innerS := NewStorage(innerProj)
+	if err := innerS.Init(); err != nil {
+		t.Fatalf("inner init: %v", err)
+	}
+	deepDir := filepath.Join(innerS.root, "section", "subsection", "leaf")
+	if err := os.MkdirAll(deepDir, 0755); err != nil {
+		t.Fatalf("mkdir deep: %v", err)
+	}
+	deepMd := filepath.Join(deepDir, "leaf.md")
+	if err := os.WriteFile(deepMd, []byte("---\nname: leaf\n---\n"), 0644); err != nil {
+		t.Fatalf("write deep: %v", err)
+	}
+
+	// Mount inner under outer via a symlinked subdirectory.
+	mountAt := filepath.Join(outerS.root, "mounts", "guest")
+	if err := os.MkdirAll(filepath.Dir(mountAt), 0755); err != nil {
+		t.Fatalf("mkdir mount parent: %v", err)
+	}
+	if err := os.Symlink(innerS.root, mountAt); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	felts, err := outerS.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	got := map[string]bool{}
+	for _, f := range felts {
+		got[f.ID] = true
+	}
+
+	wantInnerID := "mounts/guest/section/subsection/leaf"
+	if !got[wantInnerID] {
+		t.Errorf("expected inner id %q under outer namespace; got ids = %v", wantInnerID, got)
+	}
+	for id := range got {
+		if strings.Contains(id, "..") {
+			t.Errorf("id %q contains traversal ('..') — symlink target leaked", id)
+		}
+		if strings.Contains(id, ".felt") {
+			t.Errorf("id %q contains '.felt' segment — internal path leaked", id)
+		}
+	}
+	if !got["outer"] {
+		t.Errorf("outer root fiber missing from list; got %v", got)
+	}
+}
+
+// TestStorageListSymlinkedFeltDirIntoOuter models a monorepo arrangement
+// where a project's `.felt/` is itself a symlink into a subdirectory of an
+// outer store's `.felt/`. The project view should see project-relative ids
+// (root fiber surfaces as the bare entry-point); the outer view should see
+// the same fibers under directory-form ids one tier higher. Both directions
+// must produce clean, `..`-free ids and agree on identity (the same files
+// surface in both, just under different namespaces).
+func TestStorageListSymlinkedFeltDirIntoOuter(t *testing.T) {
+	tmp := t.TempDir()
+
+	// Outer monorepo store with a project's content nested inside it.
+	outerS := NewStorage(filepath.Join(tmp, "monorepo"))
+	if err := outerS.Init(); err != nil {
+		t.Fatalf("outer init: %v", err)
+	}
+	projectDir := filepath.Join(outerS.root, "projects", "alpha")
+	if err := os.MkdirAll(projectDir, 0755); err != nil {
+		t.Fatalf("mkdir project: %v", err)
+	}
+	// Project root fiber. From inside the project (via the symlink set up
+	// below), `.felt/alpha.md` is the bare entry-point shape. From the
+	// outer view, the same file at `<.felt>/projects/alpha/alpha.md`
+	// reads as the directory-form fiber `projects/alpha` — its parent
+	// dir name matches the slug, so the existing fiberIDFromRelativePath
+	// shape rule treats it as a directory-form fiber, not a bare-at-depth.
+	if err := os.WriteFile(filepath.Join(projectDir, "alpha.md"), []byte("---\nname: alpha\n---\n"), 0644); err != nil {
+		t.Fatalf("write project root: %v", err)
+	}
+	// One nested fiber inside the project subtree.
+	nestedDir := filepath.Join(projectDir, "feature")
+	if err := os.MkdirAll(nestedDir, 0755); err != nil {
+		t.Fatalf("mkdir nested: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(nestedDir, "feature.md"), []byte("---\nname: feature\n---\n"), 0644); err != nil {
+		t.Fatalf("write nested: %v", err)
+	}
+
+	// Project view: the project's `.felt/` is a symlink into the outer
+	// store's project subtree. felt walks should treat the symlink target
+	// as the project's logical `.felt/` root, surfacing only project
+	// fibers with project-relative ids.
+	projectProj := filepath.Join(tmp, "alpha-checkout")
+	if err := os.MkdirAll(projectProj, 0755); err != nil {
+		t.Fatalf("mkdir project checkout: %v", err)
+	}
+	projectFelt := filepath.Join(projectProj, ".felt")
+	if err := os.Symlink(projectDir, projectFelt); err != nil {
+		t.Fatalf("project felt symlink: %v", err)
+	}
+	projectS := NewStorage(projectProj)
+
+	projectFelts, err := projectS.List()
+	if err != nil {
+		t.Fatalf("project List: %v", err)
+	}
+	projectIDs := map[string]bool{}
+	for _, f := range projectFelts {
+		projectIDs[f.ID] = true
+	}
+	if !projectIDs["alpha"] {
+		t.Errorf("project view: expected entry-point id %q; got %v", "alpha", projectIDs)
+	}
+	if !projectIDs["feature"] {
+		t.Errorf("project view: expected nested id %q; got %v", "feature", projectIDs)
+	}
+	for id := range projectIDs {
+		if strings.Contains(id, "..") || strings.Contains(id, ".felt") {
+			t.Errorf("project view id %q contains traversal/internal-path leak", id)
+		}
+	}
+
+	// Outer view: the same files surface as directory-form fibers one tier
+	// up. `<.felt>/projects/alpha/alpha.md` reads as id `projects/alpha`;
+	// `<.felt>/projects/alpha/feature/feature.md` reads as `projects/alpha/feature`.
+	outerFelts, err := outerS.List()
+	if err != nil {
+		t.Fatalf("outer List: %v", err)
+	}
+	outerIDs := map[string]bool{}
+	for _, f := range outerFelts {
+		outerIDs[f.ID] = true
+	}
+	if !outerIDs["projects/alpha"] {
+		t.Errorf("outer view: expected %q; got %v", "projects/alpha", outerIDs)
+	}
+	if !outerIDs["projects/alpha/feature"] {
+		t.Errorf("outer view: expected %q; got %v", "projects/alpha/feature", outerIDs)
+	}
+	for id := range outerIDs {
+		if strings.Contains(id, "..") || strings.Contains(id, ".felt") {
+			t.Errorf("outer view id %q contains traversal/internal-path leak", id)
+		}
 	}
 }

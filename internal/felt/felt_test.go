@@ -1053,10 +1053,9 @@ Body here.
 
 // TestMarshalJSONIncludesExtraFields verifies that `felt show --json` (and
 // any other JSON consumer of Felt) sees tool-owned frontmatter as flat
-// top-level keys, with values rendered as native JSON. Regression test for
-// the dispatcher silently downgrading non-default agents because the JSON
-// output was lossy: see ai-futures/shuttle/finding-dispatcher-felt-show-
-// json-misses-shuttle-block in the loom.
+// top-level keys, with values rendered as native JSON. Regression guard:
+// without this, downstream tools were forced into per-key `--field` reads
+// because the JSON output silently dropped namespaces it didn't model.
 func TestMarshalJSONIncludesExtraFields(t *testing.T) {
 	input := `---
 name: Modal fiber
