@@ -26,6 +26,7 @@ var (
 	histAppendEditFrom string
 	histAppendEditTo   string
 	histAppendKind     string
+	histAppendFields   []string
 )
 
 var historyCmd = &cobra.Command{
@@ -174,6 +175,29 @@ Examples:
 			payload["edit_window_end"] = strings.TrimSpace(histAppendEditTo)
 		}
 
+		// --field key=value (repeatable) merges arbitrary string fields into
+		// the event payload. Lets typed events (e.g. review-comment) carry
+		// integration-specific metadata that downstream readers (shuttle
+		// dispatcher, portolan kanban, etc.) can pick up. Reserved keys
+		// (summary, edit_window_start, edit_window_end) cannot be overridden;
+		// other keys with the same name are last-write-wins across the slice.
+		for _, kv := range histAppendFields {
+			eq := strings.IndexByte(kv, '=')
+			if eq <= 0 {
+				return fmt.Errorf("--field %q: expected key=value", kv)
+			}
+			key := strings.TrimSpace(kv[:eq])
+			val := kv[eq+1:]
+			if key == "" {
+				return fmt.Errorf("--field %q: empty key", kv)
+			}
+			switch key {
+			case "summary", "edit_window_start", "edit_window_end":
+				return fmt.Errorf("--field %q: reserved key, use the dedicated flag", key)
+			}
+			payload[key] = val
+		}
+
 		// --kind selects the event_type. Default is the canonical
 		// "editorial" event; agents and integrations may file typed events
 		// (e.g. "review-comment") that the read side can filter via the
@@ -239,6 +263,10 @@ func init() {
 	historyAppendCmd.Flags().StringVar(&histAppendKind, "kind", "",
 		"Event type to record (default: editorial; e.g. 'review-comment'). "+
 			"Mechanical kinds (add/edit/rm/external_edit) are reserved.")
+	historyAppendCmd.Flags().StringArrayVar(&histAppendFields, "field", nil,
+		"Repeatable: add a key=value field to the event payload "+
+			"(e.g. --field resume_mode=previous). Reserved keys: summary, "+
+			"edit_window_start, edit_window_end.")
 }
 
 func buildHistoryFilter(cmd *cobra.Command, fiberID string) (felt.EventFilter, error) {
