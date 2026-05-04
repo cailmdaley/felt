@@ -492,10 +492,17 @@ var knownFrontmatterKeys = map[string]struct{}{
 	"created-at": {}, "closed-at": {}, "outcome": {}, "due": {},
 	"description": {}, "inputs": {}, "outputs": {}, "decisions": {},
 	"insights": {}, "success_criteria": {}, "container": {},
-	// legacy / migration key we absorb and discard (renamed to "name"; see normalizeLegacyFrontmatter)
-	"depends-on": {},
 	// NOTE: "tempered" is NOT here — it's a tool-owned field that must
 	// round-trip unchanged via ExtraFields.
+	//
+	// NOTE: "depends-on" was previously listed here and silently absorbed
+	// at parse time (without a corresponding struct field — net effect: a
+	// field shaped like a dependency, dropped on read). That bit downstream
+	// JSON consumers that needed to see depends-on edges. It now lives in
+	// ExtraFields like any other unknown key and round-trips through
+	// MarshalJSON. The migrate command's depends-on stripping (in
+	// normalizeLegacyFrontmatter) is unaffected — it operates directly on
+	// the raw YAML node, not on the parsed Felt.
 }
 
 func parseFrontmatter(id string, frontmatter []byte) (*Felt, error) {

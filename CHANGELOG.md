@@ -4,6 +4,20 @@ All notable changes to felt are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.5] — 2026-05-04
+
+### Fixed
+
+- `depends-on:` (the legacy hyphen form) was previously listed in
+  `knownFrontmatterKeys` without a corresponding struct field, so it was
+  silently absorbed at parse time and never surfaced anywhere — including
+  in JSON output. Lands in `ExtraFields` now like any other unknown key,
+  so `felt show --json` and `felt ls --json` round-trip the dependency
+  edges. The migrate command's destructive normalization
+  (`normalizeLegacyFrontmatter` strips `depends-on` from disk on `felt
+  migrate`) is unaffected — it operates on the raw YAML node, not the
+  parsed Felt.
+
 ## [1.0.4] — 2026-05-04
 
 ### Changed
