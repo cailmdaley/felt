@@ -51,7 +51,7 @@ A thread resolved. Close:
 History (per-fiber append-only event log):
     felt history <id>                                    # editorial chain (newest first)
     felt history <id> --last 1                           # what the previous session left
-    felt history <id> --mechanical                       # + add/edit/rm/external_edit
+    felt history <id> --mechanical                       # + add/edit/external_edit
     felt history <id> --kind <type>                      # filter to typed editorial events (e.g. review-comment)
     felt history append <id> --summary "..."             # log session continuity
     felt history append <id> --kind review-comment --summary "..."   # typed event for downstream tools
@@ -163,7 +163,7 @@ Read the reference that matches the situation. Everything above applies always; 
 |------|-----------|
 | Accreting structure on a fiber — tier ladder, common shapes, body vs frontmatter | [formalization.md](references/formalization.md) |
 | Helping the user think carefully — two diamonds, six stances, funnel, qualitative self-check | [crafting.md](references/crafting.md) |
-| Drafting a constitution — pointers not snapshots, desired state, launch | [constitute.md](references/constitute.md) |
+| Drafting a constitution — pointers not snapshots, desired state, launch | [constitution.md](references/constitution.md) |
 | At the end of a session — extracting what slipped through | [mining.md](references/mining.md) |
 | Processing an external transcript — meeting notes, voice note, dictation file | [transcripts.md](references/transcripts.md) |
 | Reading across the assemblage for mess — composting, coherence, reshaping | [maintenance.md](references/maintenance.md) |
