@@ -34,9 +34,9 @@ var historyCmd = &cobra.Command{
 	Short: "Show the append-only event log for a fiber",
 	Long: `Renders the history of a fiber.
 
-By default returns editorial events (agent-written prose summaries) in
+By default returns editorial events (agent-written prose notes) in
 reverse-chronological order, in markdown form. Mechanical events
-(add/edit/rm/external_edit) can be included with --mechanical or shown
+(add/edit/external_edit) can be included with --mechanical or shown
 exclusively with --no-editorial.
 
 The log is append-only; each event is one row. Editorial events carry
@@ -122,16 +122,19 @@ Examples:
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		summary := strings.TrimSpace(histAppendSummary)
-		if summary == "" {
-			// Allow piping the summary on stdin if no flag set.
+		if !cmd.Flags().Changed("summary") {
+			// --summary not provided — try reading from stdin.
+			// When the flag is explicitly set (even to ""), skip stdin so that
+			// callers like the kanban can write payload-only events (e.g. a
+			// review-comment carrying only resume_mode) without hanging.
 			data, err := io.ReadAll(os.Stdin)
 			if err != nil {
 				return fmt.Errorf("read summary from stdin: %w", err)
 			}
 			summary = strings.TrimSpace(string(data))
-		}
-		if summary == "" {
-			return fmt.Errorf("--summary is required (or pipe the summary on stdin)")
+			if summary == "" {
+				return fmt.Errorf("--summary is required (or pipe the summary on stdin)")
+			}
 		}
 		root, err := resolveProjectRoot()
 		if err != nil {
@@ -165,8 +168,13 @@ Examples:
 			actor = felt.DefaultActor()
 		}
 
+		// CLI flag stays --summary (natural for the writer: "summarize
+		// what just happened"); the payload key is "text" — the
+		// editorial event IS the summary, so naming its body field
+		// "summary" was recursive. Old events use "summary"; readers
+		// fall back when the canonical key is absent.
 		payload := map[string]interface{}{
-			"summary": summary,
+			felt.EditorialTextKey: summary,
 		}
 		if strings.TrimSpace(histAppendEditFrom) != "" {
 			payload["edit_window_start"] = strings.TrimSpace(histAppendEditFrom)
@@ -179,8 +187,8 @@ Examples:
 		// the event payload. Lets typed events (e.g. review-comment) carry
 		// integration-specific metadata that downstream readers (shuttle
 		// dispatcher, portolan kanban, etc.) can pick up. Reserved keys
-		// (summary, edit_window_start, edit_window_end) cannot be overridden;
-		// other keys with the same name are last-write-wins across the slice.
+		// cannot be overridden; other keys with the same name are
+		// last-write-wins across the slice.
 		for _, kv := range histAppendFields {
 			eq := strings.IndexByte(kv, '=')
 			if eq <= 0 {
@@ -192,7 +200,8 @@ Examples:
 				return fmt.Errorf("--field %q: empty key", kv)
 			}
 			switch key {
-			case "summary", "edit_window_start", "edit_window_end":
+			case felt.EditorialTextKey, felt.EditorialTextKeyLegacy,
+				"edit_window_start", "edit_window_end":
 				return fmt.Errorf("--field %q: reserved key, use the dedicated flag", key)
 			}
 			payload[key] = val
@@ -209,7 +218,7 @@ Examples:
 			kind = felt.EventEditorial
 		} else {
 			switch kind {
-			case felt.EventAdd, felt.EventEdit, felt.EventRm, felt.EventExternalEdit:
+			case felt.EventAdd, felt.EventEdit, felt.EventExternalEdit:
 				return fmt.Errorf(
 					"--kind %q is reserved for mechanical events written by felt itself",
 					kind)
@@ -255,7 +264,7 @@ func init() {
 	historyAppendCmd.Flags().StringVarP(&histAppendSummary, "summary", "m", "",
 		"Editorial summary text (or pipe on stdin)")
 	historyAppendCmd.Flags().StringVar(&histAppendActor, "actor", "",
-		"Override actor identity (default: $FELT_AGENT or user@host)")
+		"Override actor identity (default: $FELT_AGENT@<host> or <host>)")
 	historyAppendCmd.Flags().StringVar(&histAppendEditFrom, "edit-window-start", "",
 		"Optional: lower bound of the mechanical edit window this event summarizes (RFC3339)")
 	historyAppendCmd.Flags().StringVar(&histAppendEditTo, "edit-window-end", "",
@@ -265,8 +274,8 @@ func init() {
 			"Mechanical kinds (add/edit/rm/external_edit) are reserved.")
 	historyAppendCmd.Flags().StringArrayVar(&histAppendFields, "field", nil,
 		"Repeatable: add a key=value field to the event payload "+
-			"(e.g. --field resume_mode=previous). Reserved keys: summary, "+
-			"edit_window_start, edit_window_end.")
+			"(e.g. --field resume_mode=previous). Reserved keys: text, "+
+			"summary, edit_window_start, edit_window_end.")
 }
 
 func buildHistoryFilter(cmd *cobra.Command, fiberID string) (felt.EventFilter, error) {
@@ -304,7 +313,6 @@ func buildHistoryFilter(cmd *cobra.Command, fiberID string) (felt.EventFilter, e
 		filter.Types = []string{
 			felt.EventAdd,
 			felt.EventEdit,
-			felt.EventRm,
 			felt.EventExternalEdit,
 		}
 	default:
@@ -383,8 +391,7 @@ func renderHistory(id, name string, events []felt.Event) string {
 			fmt.Fprintf(&sb, "## %s — %s\n\n",
 				e.OccurredAt.Local().Format("2006-01-02 15:04 MST"),
 				e.Actor)
-			summary := stringField(e.Payload, "summary")
-			sb.WriteString(strings.TrimSpace(summary))
+			sb.WriteString(strings.TrimSpace(editorialText(e.Payload)))
 			sb.WriteString("\n\n")
 		default:
 			fmt.Fprintf(&sb, "%s [%-13s %s] hash=%s",
@@ -419,18 +426,28 @@ func renderHistory(id, name string, events []felt.Event) string {
 func renderRecentEditorial(events []felt.Event) string {
 	for _, e := range events {
 		if e.Type == felt.EventEditorial {
-			summary := stringField(e.Payload, "summary")
+			text := editorialText(e.Payload)
 			var sb strings.Builder
 			fmt.Fprintf(&sb, "Recent:   %s — %s\n",
 				e.OccurredAt.Local().Format("2006-01-02 15:04"),
 				e.Actor)
-			for _, line := range strings.Split(strings.TrimSpace(summary), "\n") {
+			for _, line := range strings.Split(strings.TrimSpace(text), "\n") {
 				fmt.Fprintf(&sb, "          %s\n", line)
 			}
 			return sb.String()
 		}
 	}
 	return ""
+}
+
+// editorialText returns the prose body of an editorial event. Reads the
+// canonical "text" key first, falls back to "summary" for events written
+// before the rename. Returns empty string when neither is present.
+func editorialText(payload map[string]interface{}) string {
+	if v := stringField(payload, felt.EditorialTextKey); v != "" {
+		return v
+	}
+	return stringField(payload, felt.EditorialTextKeyLegacy)
 }
 
 func shortHash(h string) string {
