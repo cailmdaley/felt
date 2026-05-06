@@ -253,6 +253,35 @@ func (i *Index) Sync(s *Storage) error {
 		}
 	}
 
+	// Fast path — nothing to do. Sync runs on every felt invocation, so the
+	// no-change case is by far the most common (a read-heavy workload like
+	// `felt history` against a quiet repo). Without this short-circuit,
+	// `_txlock=immediate` would have us acquire the SQLite write lock for
+	// a no-op transaction every call, serializing concurrent felt processes
+	// behind busy_timeout retries until one of them surrenders with
+	// "index busy."
+	//
+	// We can skip the write tx iff:
+	// (a) topology is unchanged (no fibers added/removed), AND
+	// (b) every indexed mtime matches the on-disk mtime.
+	//
+	// The hash-on-read pass below catches direct file edits that didn't
+	// bump mtime — but in practice editors always bump mtime on save, so
+	// the hash check only fires when the mtime check already did. Skipping
+	// the write tx when both topology and mtime are clean is safe.
+	if !topologyChanged {
+		mtimesClean := true
+		for id, state := range current {
+			if indexed[id] != state.modifiedNanos {
+				mtimesClean = false
+				break
+			}
+		}
+		if mtimesClean {
+			return nil
+		}
+	}
+
 	tx, err := i.db.Begin()
 	if err != nil {
 		return fmt.Errorf("begin index sync: %w", err)
