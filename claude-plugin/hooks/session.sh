@@ -107,7 +107,7 @@ main() {
 
     # Active fibers.
     local active_json
-    active_json=$(felt ls -j -s active 2>/dev/null || echo "[]")
+    active_json=$(felt ls -j -s active 2>/dev/null | jq '. // []' || echo "[]")
     if [ "$active_json" != "[]" ] && [ -n "$active_json" ]; then
         echo "## Active Fibers"
         echo
@@ -121,7 +121,7 @@ main() {
     # Recently touched: 5 most recent (by mtime) excluding active.
     # `felt ls -j -s all -n 20` gives the 20 most recent across all statuses.
     local all_json
-    all_json=$(felt ls -j -s all -n 20 2>/dev/null || echo "[]")
+    all_json=$(felt ls -j -s all -n 20 2>/dev/null | jq '. // []' || echo "[]")
     if [ "$all_json" != "[]" ] && [ -n "$all_json" ]; then
         # jq merge: drop entries whose id is in the active set, take first 5.
         local recent
