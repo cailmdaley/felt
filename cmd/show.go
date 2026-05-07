@@ -209,7 +209,6 @@ Targeted views:
 						Types: []string{
 							felt.EventAdd,
 							felt.EventEdit,
-							felt.EventRm,
 							felt.EventExternalEdit,
 						},
 						Limit:      5,

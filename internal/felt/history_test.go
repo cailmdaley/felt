@@ -191,7 +191,7 @@ func TestEditorialEventRoundTrip(t *testing.T) {
 		Type:       EventEditorial,
 		Actor:      "test-agent",
 		Payload: map[string]interface{}{
-			"summary": "First editorial summary.",
+			EditorialTextKey: "First editorial note.",
 		},
 	}); err != nil {
 		t.Fatalf("AppendEvent: %v", err)
@@ -214,8 +214,8 @@ func TestEditorialEventRoundTrip(t *testing.T) {
 		t.Fatalf("occurred_at mismatch: got %v want %v",
 			editorial[0].OccurredAt, occurred)
 	}
-	if got := editorial[0].Payload["summary"]; got != "First editorial summary." {
-		t.Fatalf("summary mismatch: %v", got)
+	if got := editorial[0].Payload[EditorialTextKey]; got != "First editorial note." {
+		t.Fatalf("text payload mismatch: %v", got)
 	}
 
 	// Editorial events do not change the latest mechanical hash.
@@ -251,13 +251,15 @@ func TestTypedEditorialEventRoundTrip(t *testing.T) {
 	}
 	defer idx.Close()
 
-	// One regular editorial event + one typed review-comment event.
+	// One regular editorial event (canonical "text" key) + one typed
+	// review-comment event written with the legacy "summary" key, to
+	// confirm the storage layer round-trips both shapes.
 	if err := idx.AppendEvent(Event{
 		FiberID:    "epsilon",
 		OccurredAt: time.Date(2026, 4, 12, 10, 0, 0, 0, time.UTC),
 		Type:       EventEditorial,
 		Actor:      "test-worker",
-		Payload:    map[string]interface{}{"summary": "regular handoff"},
+		Payload:    map[string]interface{}{EditorialTextKey: "regular handoff"},
 	}); err != nil {
 		t.Fatalf("AppendEvent editorial: %v", err)
 	}
@@ -266,7 +268,7 @@ func TestTypedEditorialEventRoundTrip(t *testing.T) {
 		OccurredAt: time.Date(2026, 4, 12, 11, 0, 0, 0, time.UTC),
 		Type:       "review-comment",
 		Actor:      "test-cail",
-		Payload:    map[string]interface{}{"summary": "use DES weights"},
+		Payload:    map[string]interface{}{EditorialTextKeyLegacy: "use DES weights"},
 	}); err != nil {
 		t.Fatalf("AppendEvent review-comment: %v", err)
 	}
@@ -282,8 +284,8 @@ func TestTypedEditorialEventRoundTrip(t *testing.T) {
 	if len(editorial) != 1 {
 		t.Fatalf("expected 1 editorial-only event, got %d", len(editorial))
 	}
-	if got := editorial[0].Payload["summary"]; got != "regular handoff" {
-		t.Fatalf("editorial summary mismatch: %v", got)
+	if got := editorial[0].Payload[EditorialTextKey]; got != "regular handoff" {
+		t.Fatalf("editorial text mismatch: %v", got)
 	}
 
 	// --kind=review-comment selects only the typed event.
@@ -302,8 +304,8 @@ func TestTypedEditorialEventRoundTrip(t *testing.T) {
 	if directives[0].Actor != "test-cail" {
 		t.Fatalf("expected actor=test-cail, got %q", directives[0].Actor)
 	}
-	if got := directives[0].Payload["summary"]; got != "use DES weights" {
-		t.Fatalf("directive summary mismatch: %v", got)
+	if got := directives[0].Payload[EditorialTextKeyLegacy]; got != "use DES weights" {
+		t.Fatalf("legacy summary key mismatch: %v", got)
 	}
 }
 
@@ -356,6 +358,32 @@ func TestLatestMechanicalHashIgnoresTypedEditorialEvents(t *testing.T) {
 	}
 	if hash != editHash {
 		t.Fatalf("LatestMechanicalHash = %q, want %q", hash, editHash)
+	}
+}
+
+// TestDefaultActorShape confirms the actor format: $FELT_AGENT@<host>
+// when set, plain <host> when not.
+func TestDefaultActorShape(t *testing.T) {
+	host, err := os.Hostname()
+	if err != nil || host == "" {
+		host = "unknown"
+	}
+
+	t.Setenv("FELT_AGENT", "")
+	if got := DefaultActor(); got != host {
+		t.Fatalf("expected hostname %q, got %q", host, got)
+	}
+
+	t.Setenv("FELT_AGENT", "claude-sonnet")
+	want := "claude-sonnet@" + host
+	if got := DefaultActor(); got != want {
+		t.Fatalf("expected %q, got %q", want, got)
+	}
+
+	// Whitespace-only FELT_AGENT falls through to host alone.
+	t.Setenv("FELT_AGENT", "   ")
+	if got := DefaultActor(); got != host {
+		t.Fatalf("expected %q (whitespace agent ignored), got %q", host, got)
 	}
 }
 

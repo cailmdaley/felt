@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/user"
 	"sort"
 	"strings"
 	"time"
@@ -20,14 +19,20 @@ const (
 	EventAdd = "add"
 	// EventEdit is recorded when a fiber is mutated via the felt CLI/API.
 	EventEdit = "edit"
-	// EventRm is recorded when a fiber is deleted via the felt CLI/API.
-	EventRm = "rm"
 	// EventExternalEdit is recorded when hash-on-read detects a file
 	// modified outside felt (direct vi/IDE edits, git pulls).
 	EventExternalEdit = "external_edit"
-	// EventEditorial is an agent-written prose summary appended via
+	// EventEditorial is an agent-written prose note appended via
 	// `felt history append`.
 	EventEditorial = "editorial"
+)
+
+// EditorialTextKey is the canonical payload key holding an editorial
+// event's prose body. Older events used "summary"; readers fall back to
+// that key when the canonical one is absent.
+const (
+	EditorialTextKey       = "text"
+	EditorialTextKeyLegacy = "summary"
 )
 
 // EditorialSoftSizeLimit is the soft upper bound (in bytes) for an
@@ -85,21 +90,19 @@ func HashBytes(data []byte) string {
 }
 
 // DefaultActor returns a best-effort identifier for the current process.
-// Honors $FELT_AGENT (set by iteration runner environments), then falls back
-// to user@host.
+// Shape: "$FELT_AGENT@<host>" when the agent env var is set, else "<host>"
+// alone. Felt is single-user, so the OS username is dropped — the
+// meaningful axes are which agent (claude-sonnet, ralph, codex…) and
+// which machine (loom is git-synced across local/candide/cineca).
 func DefaultActor() string {
-	if v := strings.TrimSpace(os.Getenv("FELT_AGENT")); v != "" {
-		return v
-	}
-	uname := "unknown"
-	if u, err := user.Current(); err == nil && u.Username != "" {
-		uname = u.Username
-	}
 	host, err := os.Hostname()
 	if err != nil || host == "" {
 		host = "unknown"
 	}
-	return fmt.Sprintf("%s@%s", uname, host)
+	if agent := strings.TrimSpace(os.Getenv("FELT_AGENT")); agent != "" {
+		return fmt.Sprintf("%s@%s", agent, host)
+	}
+	return host
 }
 
 // AppendEvent inserts one row into history_events. The caller is
