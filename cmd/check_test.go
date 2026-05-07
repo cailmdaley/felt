@@ -36,6 +36,34 @@ func TestCheckCommandReportsIssues(t *testing.T) {
 	}
 }
 
+func TestCheckCommandSucceedsWithWarningsOnly(t *testing.T) {
+	dir := t.TempDir()
+	storage := felt.NewStorage(dir)
+	if err := storage.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	if err := storage.Write(&felt.Felt{
+		ID: "fiber-a",
+		Insights: map[string]felt.Insight{
+			"claim": {Claim: "Something happened"},
+		},
+	}); err != nil {
+		t.Fatalf("Write() error: %v", err)
+	}
+
+	output, err := runCommand(t, dir, "check")
+	if err != nil {
+		t.Fatalf("felt check returned error for warnings-only diagnostics: %v\n%s", err, output)
+	}
+	if !strings.Contains(output, "insight has no evidence") {
+		t.Fatalf("missing warning output:\n%s", output)
+	}
+	if !strings.Contains(output, "Check OK with 1 warning(s)") {
+		t.Fatalf("missing warning summary:\n%s", output)
+	}
+}
+
 func TestCheckCommandReportsLegacyFormatIssues(t *testing.T) {
 	dir := t.TempDir()
 	storage := felt.NewStorage(dir)

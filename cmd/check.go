@@ -70,7 +70,11 @@ Current checks cover:
 				warnings++
 			}
 		}
-		return fmt.Errorf("check failed: %d error(s), %d warning(s)", errors, warnings)
+		if errors > 0 {
+			return fmt.Errorf("check failed: %d error(s), %d warning(s)", errors, warnings)
+		}
+		fmt.Printf("Check OK with %d warning(s)\n", warnings)
+		return nil
 	},
 }
 
