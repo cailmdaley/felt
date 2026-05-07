@@ -15,7 +15,12 @@ dist/
 *.swp
 .osgrep
 
+# macOS
+.DS_Store
+
+# Build / cache artifacts
+_build/
+.mystra-cache/
+
 # Generated assets
 nanobanana-output/
-cmd/skills/.DS_Store
-cmd/skills/felt/.DS_Store
