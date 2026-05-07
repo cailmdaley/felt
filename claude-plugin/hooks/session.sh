@@ -92,7 +92,7 @@ def icon:
 | "\($i) \($f.id)\n    \($display)\($tagstr)\($ostr)"
 '
 
-main() {
+render_context() {
     echo "# Felt Workflow Context"
     echo
     print_directive
@@ -138,6 +138,18 @@ main() {
             echo
         fi
     fi
+}
+
+main() {
+    local context
+    context=$(render_context)
+
+    jq -n --arg context "$context" '{
+      hookSpecificOutput: {
+        hookEventName: "SessionStart",
+        additionalContext: $context
+      }
+    }'
 }
 
 main
