@@ -68,105 +68,9 @@ func (deps GraphEdges) LabelFor(id string) string {
 	return ""
 }
 
-type FiberInput struct {
-	ID          string `yaml:"id" json:"id"`
-	Type        string `yaml:"type,omitempty" json:"type,omitempty"`
-	From        string `yaml:"from,omitempty" json:"from,omitempty"`
-	Source      string `yaml:"source,omitempty" json:"source,omitempty"`
-	Checksum    string `yaml:"checksum,omitempty" json:"checksum,omitempty"`
-	Description string `yaml:"description,omitempty" json:"description,omitempty"`
-}
-
-type FiberRecipe struct {
-	Command   string         `yaml:"command,omitempty" json:"command,omitempty"`
-	Resources map[string]any `yaml:"resources,omitempty" json:"resources,omitempty"`
-}
-
-type FiberOutput struct {
-	ID          string       `yaml:"id" json:"id"`
-	Type        string       `yaml:"type,omitempty" json:"type,omitempty"`
-	Description string       `yaml:"description,omitempty" json:"description,omitempty"`
-	Recipe      *FiberRecipe `yaml:"recipe,omitempty" json:"recipe,omitempty"`
-}
-
-type DecisionOption struct {
-	Label          string `yaml:"label,omitempty" json:"label,omitempty"`
-	Description    string `yaml:"description,omitempty" json:"description,omitempty"`
-	Excluded       bool   `yaml:"excluded,omitempty" json:"excluded,omitempty"`
-	ExcludedReason string `yaml:"excluded_reason,omitempty" json:"excluded_reason,omitempty"`
-}
-
-type Decision struct {
-	Label     string                         `yaml:"label,omitempty" json:"label,omitempty"`
-	Rationale string                         `yaml:"rationale,omitempty" json:"rationale,omitempty"`
-	Default   string                         `yaml:"default,omitempty" json:"default,omitempty"`
-	Options   map[string]DecisionOption `yaml:"options,omitempty" json:"options,omitempty"`
-}
-
-type EvidenceQuote struct {
-	Type   string `yaml:"type,omitempty" json:"type,omitempty"`
-	Exact  string `yaml:"exact,omitempty" json:"exact,omitempty"`
-	Prefix string `yaml:"prefix,omitempty" json:"prefix,omitempty"`
-	Suffix string `yaml:"suffix,omitempty" json:"suffix,omitempty"`
-}
-
-type EvidenceFigure struct {
-	Type    string `yaml:"type,omitempty" json:"type,omitempty"`
-	Label   string `yaml:"label,omitempty" json:"label,omitempty"`
-	Caption string `yaml:"caption,omitempty" json:"caption,omitempty"`
-}
-
-type EvidenceTable struct {
-	Type    string `yaml:"type,omitempty" json:"type,omitempty"`
-	Label   string `yaml:"label,omitempty" json:"label,omitempty"`
-	Caption string `yaml:"caption,omitempty" json:"caption,omitempty"`
-	Region  string `yaml:"region,omitempty" json:"region,omitempty"`
-}
-
-type EvidenceFragment struct {
-	Type       string `yaml:"type,omitempty" json:"type,omitempty"`
-	ConformsTo string `yaml:"conformsTo,omitempty" json:"conformsTo,omitempty"`
-	Value      string `yaml:"value,omitempty" json:"value,omitempty"`
-	Page       *int   `yaml:"page,omitempty" json:"page,omitempty"`
-	Start      *int   `yaml:"start,omitempty" json:"start,omitempty"`
-	End        *int   `yaml:"end,omitempty" json:"end,omitempty"`
-}
-
-type EvidenceDocument struct {
-	Path   string `yaml:"path,omitempty" json:"path,omitempty"`
-	Commit string `yaml:"commit,omitempty" json:"commit,omitempty"`
-}
-
-type Evidence struct {
-	ID           string         `yaml:"id,omitempty" json:"id,omitempty"`
-	DOI          string         `yaml:"doi,omitempty" json:"doi,omitempty"`
-	Artifact     string         `yaml:"artifact,omitempty" json:"artifact,omitempty"`
-	Description  string         `yaml:"description,omitempty" json:"description,omitempty"`
-	Document     *EvidenceDocument `yaml:"document,omitempty" json:"document,omitempty"`
-	Version      *int           `yaml:"version,omitempty" json:"version,omitempty"`
-	Checksum     string         `yaml:"checksum,omitempty" json:"checksum,omitempty"`
-	Snapshot     string         `yaml:"snapshot,omitempty" json:"snapshot,omitempty"`
-	SourceCommit string         `yaml:"source_commit,omitempty" json:"source_commit,omitempty"`
-	Quote        *EvidenceQuote    `yaml:"quote,omitempty" json:"quote,omitempty"`
-	Figure       *EvidenceFigure   `yaml:"figure,omitempty" json:"figure,omitempty"`
-	Table        *EvidenceTable    `yaml:"table,omitempty" json:"table,omitempty"`
-	Location     *EvidenceFragment `yaml:"location,omitempty" json:"location,omitempty"`
-}
-
-type Insight struct {
-	Claim     string          `yaml:"claim,omitempty" json:"claim,omitempty"`
-	CreatedAt *time.Time      `yaml:"created_at,omitempty" json:"created_at,omitempty"`
-	Derived   bool            `yaml:"derived,omitempty" json:"derived,omitempty"`
-	Scope     string          `yaml:"scope,omitempty" json:"scope,omitempty"`
-	Tags      []string        `yaml:"tags,omitempty" json:"tags,omitempty"`
-	Notes     string          `yaml:"notes,omitempty" json:"notes,omitempty"`
-	Evidence  []Evidence `yaml:"evidence,omitempty" json:"evidence,omitempty"`
-}
-
-type SuccessCriterion struct {
-	Claim     string `yaml:"claim,omitempty" json:"claim,omitempty"`
-	Output    string `yaml:"output,omitempty" json:"output,omitempty"`
-	Condition string `yaml:"condition,omitempty" json:"condition,omitempty"`
+type DataFlowInputRef struct {
+	InputID string
+	From    string
 }
 
 type BodyRef struct {
@@ -176,28 +80,21 @@ type BodyRef struct {
 
 // Felt represents a single fiber.
 type Felt struct {
-	ID              string                   `yaml:"-" json:"id"`
-	Name            string                   `yaml:"name" json:"name"`
-	Status          string                   `yaml:"status,omitempty" json:"status,omitempty"`
-	Tags            []string                 `yaml:"tags,omitempty" json:"tags,omitempty"`
-	CreatedAt       time.Time                `yaml:"created-at" json:"created_at"`
-	ClosedAt        *time.Time               `yaml:"closed-at,omitempty" json:"closed_at,omitempty"`
-	Outcome         string                   `yaml:"outcome,omitempty" json:"outcome,omitempty"`
-	Due             *time.Time               `yaml:"due,omitempty" json:"due,omitempty"`
-	Description     string                   `yaml:"description,omitempty" json:"description,omitempty"`
-	Inputs          []FiberInput             `yaml:"inputs,omitempty" json:"inputs,omitempty"`
-	Outputs         []FiberOutput            `yaml:"outputs,omitempty" json:"outputs,omitempty"`
-	Decisions       map[string]Decision      `yaml:"decisions,omitempty" json:"decisions,omitempty"`
-	Insights        map[string]Insight       `yaml:"insights,omitempty" json:"insights,omitempty"`
-	SuccessCriteria []SuccessCriterion       `yaml:"success_criteria,omitempty" json:"success_criteria,omitempty"`
-	Container       string                   `yaml:"container,omitempty" json:"container,omitempty"`
-	// ExtraFields holds tool-owned frontmatter namespaces (any top-level key
-	// not in knownFrontmatterKeys) that felt does not parse. They are
-	// preserved verbatim on round-trip so that felt edit never silently drops
-	// them.
-	ExtraFields     map[string]*yaml.Node    `yaml:"-" json:"-"`
-	Body            string                   `yaml:"-" json:"body,omitempty"`
-	ModifiedAt      time.Time                `yaml:"-" json:"modified_at,omitempty"` // populated from file stat
+	ID          string     `yaml:"-" json:"id"`
+	Name        string     `yaml:"name" json:"name"`
+	Status      string     `yaml:"status,omitempty" json:"status,omitempty"`
+	Tags        []string   `yaml:"tags,omitempty" json:"tags,omitempty"`
+	CreatedAt   time.Time  `yaml:"created-at" json:"created_at"`
+	ClosedAt    *time.Time `yaml:"closed-at,omitempty" json:"closed_at,omitempty"`
+	Outcome     string     `yaml:"outcome,omitempty" json:"outcome,omitempty"`
+	Due         *time.Time `yaml:"due,omitempty" json:"due,omitempty"`
+	Description string     `yaml:"description,omitempty" json:"description,omitempty"`
+	// ExtraFields holds all non-native top-level frontmatter keys. felt does
+	// not parse or validate their semantics; it preserves them on round-trip
+	// and surfaces them in JSON so downstream tools can own their contracts.
+	ExtraFields map[string]*yaml.Node `yaml:"-" json:"-"`
+	Body        string                `yaml:"-" json:"body,omitempty"`
+	ModifiedAt  time.Time             `yaml:"-" json:"modified_at,omitempty"` // populated from file stat
 	// EntryPoint is true when the fiber lives as a bare `.felt/<slug>.md`
 	// at the .felt/ root — the project's entry-point / root fiber.
 	// Distinguishes the root from top-level folder fibers; both have
@@ -488,15 +385,14 @@ func ParseWithMode(id string, content []byte, mode ParseMode) (*Felt, error) {
 var knownFrontmatterKeys = map[string]struct{}{
 	"name": {}, "title": {}, "status": {}, "tags": {},
 	"created-at": {}, "closed-at": {}, "outcome": {}, "due": {},
-	"description": {}, "inputs": {}, "outputs": {}, "decisions": {},
-	"insights": {}, "success_criteria": {}, "container": {},
-	// NOTE: "tempered" is NOT here — it's a tool-owned field that must
-	// round-trip unchanged via ExtraFields.
+	"description": {},
+	// NOTE: all other top-level keys — including tool-owned namespaces like
+	// `shuttle:` and domain schemas like `inputs:` / `decisions:` /
+	// `insights:` / `tempered:` — round-trip unchanged via ExtraFields.
 	//
 	// NOTE: "depends-on" was previously listed here and silently absorbed
 	// at parse time (without a corresponding struct field — net effect: a
-	// field shaped like a dependency, dropped on read). That bit downstream
-	// JSON consumers that needed to see depends-on edges. It now lives in
+	// field shaped like a dependency, dropped on read). It now lives in
 	// ExtraFields like any other unknown key and round-trips through
 	// MarshalJSON. The migrate command's depends-on stripping (in
 	// normalizeLegacyFrontmatter) is unaffected — it operates directly on
@@ -505,21 +401,15 @@ var knownFrontmatterKeys = map[string]struct{}{
 
 func parseFrontmatter(id string, frontmatter []byte) (*Felt, error) {
 	type feltFrontmatter struct {
-		Name            string              `yaml:"name"`
-		LegacyTitle     string              `yaml:"title"`
-		Status          string              `yaml:"status,omitempty"`
-		Tags            []string            `yaml:"tags,omitempty"`
-		CreatedAt       time.Time           `yaml:"created-at"`
-		ClosedAt        *time.Time          `yaml:"closed-at,omitempty"`
-		Outcome         string              `yaml:"outcome,omitempty"`
-		Due             *time.Time          `yaml:"due,omitempty"`
-		Description     string              `yaml:"description,omitempty"`
-		Inputs          []FiberInput        `yaml:"inputs,omitempty"`
-		Outputs         []FiberOutput       `yaml:"outputs,omitempty"`
-		Decisions       map[string]Decision `yaml:"decisions,omitempty"`
-		Insights        map[string]Insight  `yaml:"insights,omitempty"`
-		SuccessCriteria []SuccessCriterion  `yaml:"success_criteria,omitempty"`
-		Container       string              `yaml:"container,omitempty"`
+		Name        string     `yaml:"name"`
+		LegacyTitle string     `yaml:"title"`
+		Status      string     `yaml:"status,omitempty"`
+		Tags        []string   `yaml:"tags,omitempty"`
+		CreatedAt   time.Time  `yaml:"created-at"`
+		ClosedAt    *time.Time `yaml:"closed-at,omitempty"`
+		Outcome     string     `yaml:"outcome,omitempty"`
+		Due         *time.Time `yaml:"due,omitempty"`
+		Description string     `yaml:"description,omitempty"`
 	}
 
 	var fm feltFrontmatter
@@ -531,21 +421,15 @@ func parseFrontmatter(id string, frontmatter []byte) (*Felt, error) {
 		name = strings.TrimSpace(fm.LegacyTitle)
 	}
 	f := &Felt{
-		ID:              id,
-		Name:            name,
-		Status:          fm.Status,
-		Tags:            fm.Tags,
-		CreatedAt:       fm.CreatedAt,
-		ClosedAt:        fm.ClosedAt,
-		Outcome:         fm.Outcome,
-		Due:             fm.Due,
-		Description:     fm.Description,
-		Inputs:          fm.Inputs,
-		Outputs:         fm.Outputs,
-		Decisions:       fm.Decisions,
-		Insights:        fm.Insights,
-		SuccessCriteria: fm.SuccessCriteria,
-		Container:       fm.Container,
+		ID:          id,
+		Name:        name,
+		Status:      fm.Status,
+		Tags:        fm.Tags,
+		CreatedAt:   fm.CreatedAt,
+		ClosedAt:    fm.ClosedAt,
+		Outcome:     fm.Outcome,
+		Due:         fm.Due,
+		Description: fm.Description,
 	}
 
 	// Capture unknown top-level keys so Marshal can round-trip them.
@@ -767,35 +651,23 @@ func (f *Felt) Marshal() ([]byte, error) {
 
 	// Build frontmatter struct for controlled field ordering
 	fm := struct {
-		Name            string                   `yaml:"name"`
-		Status          string                   `yaml:"status,omitempty"`
-		Tags            []string                 `yaml:"tags,omitempty"`
-		CreatedAt       time.Time                `yaml:"created-at"`
-		ClosedAt        *time.Time               `yaml:"closed-at,omitempty"`
-		Outcome         string                   `yaml:"outcome,omitempty"`
-		Due             *time.Time               `yaml:"due,omitempty"`
-		Description     string                   `yaml:"description,omitempty"`
-		Inputs          []FiberInput             `yaml:"inputs,omitempty"`
-		Outputs         []FiberOutput            `yaml:"outputs,omitempty"`
-		Decisions       map[string]Decision `yaml:"decisions,omitempty"`
-		Insights        map[string]Insight  `yaml:"insights,omitempty"`
-		SuccessCriteria []SuccessCriterion  `yaml:"success_criteria,omitempty"`
-		Container       string                   `yaml:"container,omitempty"`
+		Name        string     `yaml:"name"`
+		Status      string     `yaml:"status,omitempty"`
+		Tags        []string   `yaml:"tags,omitempty"`
+		CreatedAt   time.Time  `yaml:"created-at"`
+		ClosedAt    *time.Time `yaml:"closed-at,omitempty"`
+		Outcome     string     `yaml:"outcome,omitempty"`
+		Due         *time.Time `yaml:"due,omitempty"`
+		Description string     `yaml:"description,omitempty"`
 	}{
-		Name:            f.Name,
-		Status:          f.Status,
-		Tags:            f.Tags,
-		CreatedAt:       f.CreatedAt,
-		ClosedAt:        f.ClosedAt,
-		Outcome:         f.Outcome,
-		Due:             f.Due,
-		Description:     f.Description,
-		Inputs:          f.Inputs,
-		Outputs:         f.Outputs,
-		Decisions:       f.Decisions,
-		Insights:        f.Insights,
-		SuccessCriteria: f.SuccessCriteria,
-		Container:       f.Container,
+		Name:        f.Name,
+		Status:      f.Status,
+		Tags:        f.Tags,
+		CreatedAt:   f.CreatedAt,
+		ClosedAt:    f.ClosedAt,
+		Outcome:     f.Outcome,
+		Due:         f.Due,
+		Description: f.Description,
 	}
 
 	yamlBytes, err := yaml.Marshal(fm)
@@ -898,60 +770,7 @@ func (f *Felt) MatchesID(query string) bool {
 
 // SearchText returns searchable metadata content beyond the title.
 func (f *Felt) SearchText() string {
-	parts := []string{f.Outcome, f.Description, f.Container}
-	for _, input := range f.Inputs {
-		parts = append(parts, input.ID, input.Type, input.From, input.Source, input.Checksum, input.Description)
-	}
-	for _, output := range f.Outputs {
-		parts = append(parts, output.ID, output.Type, output.Description)
-		if output.Recipe != nil {
-			parts = append(parts, output.Recipe.Command)
-			parts = append(parts, flattenMapStrings(output.Recipe.Resources)...)
-		}
-	}
-	for _, decision := range f.Decisions {
-		parts = append(parts, decision.Label, decision.Rationale, decision.Default)
-		for _, option := range decision.Options {
-			parts = append(parts, option.Label, option.Description, option.ExcludedReason)
-		}
-	}
-	for _, insight := range f.Insights {
-		parts = append(parts, insight.Claim, insight.Scope, insight.Notes)
-		parts = append(parts, insight.Tags...)
-		for _, evidence := range insight.Evidence {
-			parts = append(parts, evidence.ID, evidence.DOI, evidence.Artifact, evidence.Checksum, evidence.Snapshot, evidence.SourceCommit)
-			if evidence.Document != nil {
-				parts = append(parts, evidence.Document.Path, evidence.Document.Commit)
-			}
-			if evidence.Version != nil {
-				parts = append(parts, fmt.Sprintf("%d", *evidence.Version))
-			}
-			if evidence.Quote != nil {
-				parts = append(parts, evidence.Quote.Type, evidence.Quote.Exact, evidence.Quote.Prefix, evidence.Quote.Suffix)
-			}
-			if evidence.Figure != nil {
-				parts = append(parts, evidence.Figure.Type, evidence.Figure.Label, evidence.Figure.Caption)
-			}
-			if evidence.Table != nil {
-				parts = append(parts, evidence.Table.Type, evidence.Table.Label, evidence.Table.Caption, evidence.Table.Region)
-			}
-			if evidence.Location != nil {
-				parts = append(parts, evidence.Location.Type, evidence.Location.ConformsTo, evidence.Location.Value)
-				if evidence.Location.Page != nil {
-					parts = append(parts, fmt.Sprintf("%d", *evidence.Location.Page))
-				}
-				if evidence.Location.Start != nil {
-					parts = append(parts, fmt.Sprintf("%d", *evidence.Location.Start))
-				}
-				if evidence.Location.End != nil {
-					parts = append(parts, fmt.Sprintf("%d", *evidence.Location.End))
-				}
-			}
-		}
-	}
-	for _, criterion := range f.SuccessCriteria {
-		parts = append(parts, criterion.Claim, criterion.Output, criterion.Condition)
-	}
+	parts := []string{f.Outcome, f.Description, f.ExtraFieldsSearchText()}
 	return strings.Join(parts, "\n")
 }
 

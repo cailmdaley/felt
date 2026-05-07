@@ -7,20 +7,25 @@ import (
 )
 
 func makeTestFelt(id, name, status string, deps []string) *Felt {
-	inputs := make([]FiberInput, 0, len(deps))
-	for i, depID := range deps {
-		inputs = append(inputs, FiberInput{
-			ID:   "input_" + string(rune('a'+i)),
-			From: depID,
-		})
-	}
-	return &Felt{
+	f := &Felt{
 		ID:        id,
 		Name:      name,
 		Status:    status,
-		Inputs:    inputs,
 		CreatedAt: time.Now(),
 	}
+	if len(deps) > 0 {
+		inputs := make([]map[string]any, 0, len(deps))
+		for i, depID := range deps {
+			inputs = append(inputs, map[string]any{
+				"id":   "input_" + string(rune('a'+i)),
+				"from": depID,
+			})
+		}
+		if err := f.SetExtraField("inputs", inputs); err != nil {
+			panic(err)
+		}
+	}
+	return f
 }
 
 func TestBuildGraph(t *testing.T) {
@@ -501,11 +506,13 @@ func TestBuildGraphWithLabels(t *testing.T) {
 		{
 			ID: "task-a", Name: "A", Status: StatusOpen, CreatedAt: time.Now(),
 		},
-		{
-			ID: "task-b", Name: "B", Status: StatusOpen,
-			Inputs: []FiberInput{{ID: "needs_data", From: "task-a"}},
-			CreatedAt: time.Now(),
-		},
+		func() *Felt {
+			f := &Felt{ID: "task-b", Name: "B", Status: StatusOpen, CreatedAt: time.Now()}
+			if err := f.SetExtraField("inputs", []map[string]any{{"id": "needs_data", "from": "task-a"}}); err != nil {
+				panic(err)
+			}
+			return f
+		}(),
 	}
 
 	g := BuildGraph(felts)
@@ -532,11 +539,13 @@ func TestToMermaidWithLabels(t *testing.T) {
 		{
 			ID: "task-a", Name: "A", Status: StatusOpen, CreatedAt: time.Now(),
 		},
-		{
-			ID: "task-b", Name: "B", Status: StatusOpen,
-			Inputs: []FiberInput{{ID: "input_b", From: "task-a.blocks"}},
-			CreatedAt: time.Now(),
-		},
+		func() *Felt {
+			f := &Felt{ID: "task-b", Name: "B", Status: StatusOpen, CreatedAt: time.Now()}
+			if err := f.SetExtraField("inputs", []map[string]any{{"id": "input_b", "from": "task-a.blocks"}}); err != nil {
+				panic(err)
+			}
+			return f
+		}(),
 	}
 
 	g := BuildGraph(felts)
@@ -552,11 +561,13 @@ func TestToDotWithLabels(t *testing.T) {
 		{
 			ID: "task-a", Name: "A", Status: StatusOpen, CreatedAt: time.Now(),
 		},
-		{
-			ID: "task-b", Name: "B", Status: StatusOpen,
-			Inputs: []FiberInput{{ID: "input_b", From: "task-a.provides input"}},
-			CreatedAt: time.Now(),
-		},
+		func() *Felt {
+			f := &Felt{ID: "task-b", Name: "B", Status: StatusOpen, CreatedAt: time.Now()}
+			if err := f.SetExtraField("inputs", []map[string]any{{"id": "input_b", "from": "task-a.provides input"}}); err != nil {
+				panic(err)
+			}
+			return f
+		}(),
 	}
 
 	g := BuildGraph(felts)
@@ -572,11 +583,13 @@ func TestToTextWithLabels(t *testing.T) {
 		{
 			ID: "task-a", Name: "A", Status: StatusOpen, CreatedAt: time.Now(),
 		},
-		{
-			ID: "task-b", Name: "B", Status: StatusOpen,
-			Inputs: []FiberInput{{ID: "input_b", From: "task-a.reason"}},
-			CreatedAt: time.Now(),
-		},
+		func() *Felt {
+			f := &Felt{ID: "task-b", Name: "B", Status: StatusOpen, CreatedAt: time.Now()}
+			if err := f.SetExtraField("inputs", []map[string]any{{"id": "input_b", "from": "task-a.reason"}}); err != nil {
+				panic(err)
+			}
+			return f
+		}(),
 	}
 
 	g := BuildGraph(felts)

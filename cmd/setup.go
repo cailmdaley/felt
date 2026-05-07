@@ -113,7 +113,7 @@ of its own, so we shell out to the same scripts the plugin uses.
 Resolution order for --source:
   1. --source <path>      path to a felt repo checkout or plugin directory
   2. $FELT_PLUGIN_DIR     env var pointing at the plugin directory
-  3. ~/.claude/plugins/marketplaces/` + marketplaceName + `  if `+"`felt setup claude`"+` has run
+  3. ~/.claude/plugins/marketplaces/` + marketplaceName + `  if ` + "`felt setup claude`" + ` has run
 
 Use --uninstall to remove.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -160,7 +160,7 @@ Existing entries are replaced.
 Resolution order for --source:
   1. --source <path>      path to a felt repo checkout or plugin directory
   2. $FELT_PLUGIN_DIR     env var pointing at the plugin directory
-  3. ~/.claude/plugins/marketplaces/` + marketplaceName + `  if `+"`felt setup claude`"+` has run`,
+  3. ~/.claude/plugins/marketplaces/` + marketplaceName + `  if ` + "`felt setup claude`" + ` has run`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		target, _ := cmd.Flags().GetString("target")
 		source, _ := cmd.Flags().GetString("source")
@@ -371,10 +371,10 @@ func claudeMDSnippet() string {
 	return "## felt\n\n" +
 		"Fibers are concerns (tasks, decisions, questions, findings). " +
 		"Each fiber lives at `.felt/<path>/<slug>.md` with YAML frontmatter and plain markdown body content. " +
-		"Containment comes from directories, narrative connections come from `[[wikilinks]]`, and structured frontmatter (decisions, inputs, outputs, insights) accretes as the work becomes computationally concrete. " +
+		"Containment comes from directories, narrative connections come from `[[wikilinks]]`, and non-native frontmatter is preserved opaquely for downstream tools. " +
 		"`.felt/` also opens as a valid Obsidian vault, with Dataview queries over frontmatter fields. " +
 		"Filing costs nothing; forgetting costs an investigation or a hallucination.\n\n" +
-		"**Rhythm.** File as things come into focus, without asking. After you respond, while the user reads, accrete structure. Close with an outcome that stands alone.\n" +
+		"**Rhythm.** File as things come into focus, without asking. After you respond, while the user reads, update the fiber or its frontmatter directly. Close with an outcome that stands alone.\n" +
 		fence + "bash\n" +
 		"felt add covariance-method \"Covariance method\"          # came into focus\n" +
 		"felt edit covariance-method -s active                    # entered tracking\n" +
@@ -383,7 +383,7 @@ func claudeMDSnippet() string {
 		"**Discipline.** Names are short, concrete handles for the concern. " +
 		"Path IDs like `bao-analysis/damping-prior` are first-class; bare slugs resolve only when unambiguous. " +
 		"Outcomes say not just *what* but *why*. " +
-		"Decisions get their own fibers; methodology questions belong in decision fibers, not specs. " +
+		"If a project uses extra frontmatter conventions, edit the file directly and let that project own the schema. " +
 		"Follow the data: curious, not confirmatory.\n"
 }
 
@@ -711,4 +711,3 @@ func removeHook(hooks map[string]interface{}, event, command string) bool {
 
 	return removed
 }
-

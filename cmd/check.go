@@ -18,12 +18,6 @@ Current checks cover:
   - legacy title frontmatter keys
   - legacy depends-on frontmatter keys
   - legacy MyST body anchors
-  - decisions without options
-  - decisions with no remaining unexcluded options
-  - insights without evidence
-  - evidence stubs without description or anchors
-  - closed fibers with unselected decisions
-  - inconsistent formalization depth across siblings
   - slug collisions between bare and nested fiber forms
   - multiple bare .md files at .felt/ root`,
 	Args:         cobra.NoArgs,

@@ -10,7 +10,6 @@ import (
 	"regexp"
 	"strings"
 	"testing"
-
 )
 
 var binaryPath string
@@ -235,39 +234,58 @@ func TestIntegration(t *testing.T) {
 	}
 	mustFelt(t, dir, "edit", fiber2ID, "--untag", "testlabel")
 
-	// structured frontmatter edit shorthand
-	mustFelt(
-		t, dir, "edit", fiber2ID,
-		"--decision", "covariance",
-		"--label", "Covariance method",
-		"--rationale", "Tail behavior matters for downstream robustness",
-		"--default", "glass",
-		"--option", "glass:GLASS mocks",
-		"--option", "analytic:Analytic covariance:excluded:underestimates tails",
-		"--input", "catalog:data:upstream.posterior:Posterior sample",
-		"--insight", "stability:Posterior is stable to jackknife choice",
-	)
-	out = mustFelt(t, dir, "show", fiber2ID, "--decision", "covariance")
+	// Hand-written additional YAML fields should survive and remain queryable.
+	fiber2Path := filepath.Join(dir, ".felt", fiber2ID, fiber2ID+".md")
+	fiber2Structured := `---
+name: second fiber
+status: open
+created-at: 2026-03-15T10:00:00Z
+decisions:
+  covariance:
+    label: Covariance method
+    rationale: Tail behavior matters for downstream robustness
+    default: glass
+    options:
+      glass:
+        label: GLASS mocks
+      analytic:
+        label: Analytic covariance
+        excluded: true
+        excluded_reason: underestimates tails
+inputs:
+  - id: catalog
+    type: data
+    from: upstream.posterior
+    description: Posterior sample
+insights:
+  stability:
+    claim: Posterior is stable to jackknife choice
+---
+`
+	if err := os.WriteFile(fiber2Path, []byte(fiber2Structured), 0644); err != nil {
+		t.Fatalf("write structured fiber2: %v", err)
+	}
+	out = mustFelt(t, dir, "show", fiber2ID, "--field", "decisions")
 	if !strings.Contains(out, "label: Covariance method") || !strings.Contains(out, "default: glass") {
-		t.Fatalf("structured decision edit: unexpected decision output:\n%s", out)
+		t.Fatalf("opaque decision field: unexpected output:\n%s", out)
 	}
 	if !strings.Contains(out, "analytic:") || !strings.Contains(out, "excluded_reason: underestimates tails") {
-		t.Fatalf("structured decision edit: missing option details:\n%s", out)
+		t.Fatalf("opaque decision field: missing option details:\n%s", out)
 	}
-	out = mustFelt(t, dir, "show", fiber2ID, "--inputs")
+	out = mustFelt(t, dir, "show", fiber2ID, "--field", "inputs")
 	if !strings.Contains(out, "id: catalog") || !strings.Contains(out, "from: upstream.posterior") {
-		t.Fatalf("structured input edit: unexpected inputs output:\n%s", out)
+		t.Fatalf("opaque inputs field: unexpected output:\n%s", out)
 	}
-	out = mustFelt(t, dir, "show", fiber2ID, "--insights")
+	out = mustFelt(t, dir, "show", fiber2ID, "--field", "insights")
 	if !strings.Contains(out, "stability:") || !strings.Contains(out, "claim: Posterior is stable to jackknife choice") {
-		t.Fatalf("structured insight edit: unexpected insights output:\n%s", out)
+		t.Fatalf("opaque insights field: unexpected output:\n%s", out)
 	}
-	out, err = felt(dir, "edit", fiber2ID, "--label", "Decision without target")
+	out, err = felt(dir, "edit", fiber2ID)
 	if err == nil {
-		t.Fatal("structured edit without --decision: expected error")
+		t.Fatal("edit without requested changes: expected error")
 	}
-	if !strings.Contains(out, "require --decision") {
-		t.Fatalf("structured edit without --decision: expected helpful error, got: %s", out)
+	if !strings.Contains(out, "no changes requested") {
+		t.Fatalf("edit without requested changes: expected helpful error, got: %s", out)
 	}
 
 	// duplicate slug should fail instead of auto-disambiguating

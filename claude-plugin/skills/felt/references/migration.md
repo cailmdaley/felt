@@ -27,7 +27,7 @@ felt check                # lint the migrated tree
 **Pre-existing directory fibers are rewritten too.** If any fibers still carry old hex IDs in `inputs.from`, audit them after migration:
 
 ```bash
-felt show fiber-a --inputs      # confirm current data-flow refs
+felt show fiber-a --field inputs   # confirm current data-flow refs
 rg -n "some-fiber-8a08fc28" .felt
 # Edit .felt/fiber-a/fiber-a.md — change inputs.from from some-fiber-8a08fc28.output to some-fiber.output
 ```

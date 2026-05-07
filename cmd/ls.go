@@ -35,7 +35,7 @@ Use -t to filter by tag (AND logic, prefix matching with trailing colon):
   -t rule:                    matches any rule:* tag
   -t rule:cosebis_data_vector exact tag match
 
-Optional query searches name, outcome, structured frontmatter, and fiber id (slug):
+Optional query searches name, outcome, additional YAML field text, and fiber id (slug):
   felt ls cosebis             substring search (name, outcome, frontmatter, and id)
   felt ls dj-rico             matches fibers whose id contains "dj-rico"
   felt ls -r "rule:.*data"    regex search (also applied to fiber id)

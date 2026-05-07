@@ -18,12 +18,11 @@ func TestCheckCommandReportsIssues(t *testing.T) {
 		t.Fatalf("Init() error: %v", err)
 	}
 
-	if err := storage.Write(&felt.Felt{
-		ID: "fiber-a",
-		Decisions: map[string]felt.Decision{
-			"choice": {Label: "Choice"},
-		},
-	}); err != nil {
+	fiber := &felt.Felt{ID: "fiber-a"}
+	if err := fiber.SetExtraField("inputs", []map[string]any{{"id": "catalog", "from": "missing.output"}}); err != nil {
+		t.Fatalf("SetExtraField: %v", err)
+	}
+	if err := storage.Write(fiber); err != nil {
 		t.Fatalf("Write() error: %v", err)
 	}
 
@@ -31,36 +30,34 @@ func TestCheckCommandReportsIssues(t *testing.T) {
 	if err == nil {
 		t.Fatal("felt check succeeded unexpectedly")
 	}
-	if !strings.Contains(output, "decision has no options") {
+	if !strings.Contains(output, "broken data-flow reference") {
 		t.Fatalf("missing lint output:\n%s", output)
 	}
 }
 
-func TestCheckCommandSucceedsWithWarningsOnly(t *testing.T) {
+func TestCheckCommandSucceedsWhenOnlySubstrateChecksPass(t *testing.T) {
 	dir := t.TempDir()
 	storage := felt.NewStorage(dir)
 	if err := storage.Init(); err != nil {
 		t.Fatalf("Init() error: %v", err)
 	}
 
-	if err := storage.Write(&felt.Felt{
-		ID: "fiber-a",
-		Insights: map[string]felt.Insight{
-			"claim": {Claim: "Something happened"},
-		},
+	fiber := &felt.Felt{ID: "fiber-a", Name: "Fiber A", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")}
+	if err := fiber.SetExtraField("decisions", map[string]any{
+		"choice": map[string]any{"label": "Choice"},
 	}); err != nil {
+		t.Fatalf("SetExtraField: %v", err)
+	}
+	if err := storage.Write(fiber); err != nil {
 		t.Fatalf("Write() error: %v", err)
 	}
 
 	output, err := runCommand(t, dir, "check")
 	if err != nil {
-		t.Fatalf("felt check returned error for warnings-only diagnostics: %v\n%s", err, output)
+		t.Fatalf("felt check returned error unexpectedly: %v\n%s", err, output)
 	}
-	if !strings.Contains(output, "insight has no evidence") {
-		t.Fatalf("missing warning output:\n%s", output)
-	}
-	if !strings.Contains(output, "Check OK with 1 warning(s)") {
-		t.Fatalf("missing warning summary:\n%s", output)
+	if !strings.Contains(output, "Check OK") {
+		t.Fatalf("missing success summary:\n%s", output)
 	}
 }
 
@@ -139,7 +136,6 @@ func runCommand(t *testing.T, dir string, args ...string) (string, error) {
 		t.Fatalf("close read pipe: %v", err)
 	}
 
-	// Cobra state can leak across invocations when tests reuse the singleton.
 	rootCmd.SetArgs(nil)
 	rootCmd.SetOut(io.Discard)
 	rootCmd.SetErr(io.Discard)

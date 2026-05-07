@@ -7,83 +7,10 @@ import (
 	"testing"
 )
 
-func TestCheckDecisionWithoutOptions(t *testing.T) {
-	issues := Check([]*Felt{{
-		ID: "fiber-a",
-		Decisions: map[string]Decision{
-			"choice": {Label: "Choice"},
-		},
-	}})
-
-	if len(issues) != 1 {
-		t.Fatalf("Check() produced %d issues, want 1", len(issues))
-	}
-	if issues[0].Level != CheckLevelError {
-		t.Fatalf("issue level = %q, want %q", issues[0].Level, CheckLevelError)
-	}
-	if issues[0].Path != "decisions.choice" {
-		t.Fatalf("issue path = %q, want decisions.choice", issues[0].Path)
-	}
-}
-
-func TestCheckClosedFiberRequiresSelectedDecision(t *testing.T) {
-	issues := Check([]*Felt{{
-		ID:     "fiber-a",
-		Status: StatusClosed,
-		Decisions: map[string]Decision{
-			"choice": {
-				Label: "Choice",
-				Options: map[string]DecisionOption{
-					"a": {Label: "Option A"},
-				},
-			},
-		},
-	}})
-
-	if len(issues) != 1 {
-		t.Fatalf("Check() produced %d issues, want 1", len(issues))
-	}
-	if !strings.Contains(issues[0].Message, "no selected option") {
-		t.Fatalf("issue message = %q, want selected-option failure", issues[0].Message)
-	}
-}
-
-func TestCheckEvidenceStub(t *testing.T) {
-	issues := Check([]*Felt{{
-		ID: "fiber-a",
-		Insights: map[string]Insight{
-			"claim": {
-				Evidence: []Evidence{
-					{ID: "stub"},
-				},
-			},
-		},
-	}})
-
-	if len(issues) != 1 {
-		t.Fatalf("Check() produced %d issues, want 1", len(issues))
-	}
-	if issues[0].Path != "insights.claim.evidence[0]" {
-		t.Fatalf("issue path = %q, want insights.claim.evidence[0]", issues[0].Path)
-	}
-}
-
-func TestCheckInsightWithoutEvidenceWarns(t *testing.T) {
-	issues := Check([]*Felt{{
-		ID: "fiber-a",
-		Insights: map[string]Insight{
-			"claim": {Claim: "Something happened"},
-		},
-	}})
-
-	if len(issues) != 1 {
-		t.Fatalf("Check() produced %d issues, want 1", len(issues))
-	}
-	if issues[0].Level != CheckLevelWarn {
-		t.Fatalf("issue level = %q, want %q", issues[0].Level, CheckLevelWarn)
-	}
-	if issues[0].Path != "insights.claim" {
-		t.Fatalf("issue path = %q, want insights.claim", issues[0].Path)
+func mustExtra(t *testing.T, f *Felt, key string, value any) {
+	t.Helper()
+	if err := f.SetExtraField(key, value); err != nil {
+		t.Fatalf("SetExtraField(%s): %v", key, err)
 	}
 }
 
@@ -104,23 +31,15 @@ func TestCheckBrokenBodyReference(t *testing.T) {
 	}
 }
 
-func TestCheckBrokenBodyReferenceFragment(t *testing.T) {
+func TestCheckBrokenBodyReferenceFragmentAgainstOpaqueFrontmatter(t *testing.T) {
+	target := &Felt{ID: "fiber-b"}
+	mustExtra(t, target, "decisions", map[string]any{
+		"choice": map[string]any{"label": "Choice"},
+	})
+
 	issues := Check([]*Felt{
-		{
-			ID:   "fiber-a",
-			Body: "See [[fiber-b#missing-element]].",
-		},
-		{
-			ID: "fiber-b",
-			Decisions: map[string]Decision{
-				"choice": {
-					Label: "Choice",
-					Options: map[string]DecisionOption{
-						"keep": {Label: "Keep"},
-					},
-				},
-			},
-		},
+		{ID: "fiber-a", Body: "See [[fiber-b#missing-element]]."},
+		target,
 	})
 
 	if len(issues) != 1 {
@@ -135,13 +54,13 @@ func TestCheckBrokenBodyReferenceFragment(t *testing.T) {
 }
 
 func TestCheckBrokenDataFlowReference(t *testing.T) {
-	issues := Check([]*Felt{{
-		ID: "fiber-a",
-		Inputs: []FiberInput{
-			{ID: "catalog", From: "missing.output"},
-		},
+	fiber := &Felt{ID: "fiber-a"}
+	mustExtra(t, fiber, "inputs", []map[string]any{{
+		"id":   "catalog",
+		"from": "missing.output",
 	}})
 
+	issues := Check([]*Felt{fiber})
 	if len(issues) != 1 {
 		t.Fatalf("Check() produced %d issues, want 1", len(issues))
 	}
@@ -154,19 +73,15 @@ func TestCheckBrokenDataFlowReference(t *testing.T) {
 }
 
 func TestCheckBrokenDataFlowOutputReference(t *testing.T) {
-	issues := Check([]*Felt{
-		{
-			ID: "fiber-a",
-			Inputs: []FiberInput{
-				{ID: "catalog", From: "fiber-b.missing-output"},
-			},
-		},
-		{
-			ID:      "fiber-b",
-			Outputs: []FiberOutput{{ID: "present-output"}},
-		},
-	})
+	consumer := &Felt{ID: "fiber-a"}
+	mustExtra(t, consumer, "inputs", []map[string]any{{
+		"id":   "catalog",
+		"from": "fiber-b.missing-output",
+	}})
+	producer := &Felt{ID: "fiber-b"}
+	mustExtra(t, producer, "outputs", []map[string]any{{"id": "present-output"}})
 
+	issues := Check([]*Felt{consumer, producer})
 	if len(issues) != 1 {
 		t.Fatalf("Check() produced %d issues, want 1", len(issues))
 	}
@@ -175,62 +90,6 @@ func TestCheckBrokenDataFlowOutputReference(t *testing.T) {
 	}
 	if !strings.Contains(issues[0].Message, `has no output "missing-output"`) {
 		t.Fatalf("issue message = %q, want missing output failure", issues[0].Message)
-	}
-}
-
-func TestCheckDecisionWithAllOptionsExcludedWarns(t *testing.T) {
-	issues := Check([]*Felt{{
-		ID: "fiber-a",
-		Decisions: map[string]Decision{
-			"choice": {
-				Options: map[string]DecisionOption{
-					"a": {Label: "Option A", Excluded: true, ExcludedReason: "bad"},
-				},
-			},
-		},
-	}})
-
-	if len(issues) != 1 {
-		t.Fatalf("Check() produced %d issues, want 1", len(issues))
-	}
-	if issues[0].Level != CheckLevelWarn {
-		t.Fatalf("issue level = %q, want %q", issues[0].Level, CheckLevelWarn)
-	}
-	if !strings.Contains(issues[0].Message, "no remaining unexcluded options") {
-		t.Fatalf("issue message = %q, want dead-end decision warning", issues[0].Message)
-	}
-}
-
-func TestCheckSiblingDepthConsistencyWarning(t *testing.T) {
-	issues := Check([]*Felt{
-		{
-			ID: "parent/fully-formed",
-			Decisions: map[string]Decision{
-				"choice": {
-					Options: map[string]DecisionOption{
-						"a": {Label: "Option A"},
-						"b": {Label: "Option B", Excluded: true, ExcludedReason: "too costly"},
-					},
-					Default: "a",
-				},
-			},
-		},
-		{
-			ID: "parent/lightweight",
-			Inputs: []FiberInput{
-				{ID: "catalog"},
-			},
-		},
-	})
-
-	if len(issues) != 1 {
-		t.Fatalf("Check() produced %d issues, want 1", len(issues))
-	}
-	if issues[0].Level != CheckLevelWarn {
-		t.Fatalf("issue level = %q, want %q", issues[0].Level, CheckLevelWarn)
-	}
-	if issues[0].FiberID != "parent" {
-		t.Fatalf("issue fiber = %q, want parent", issues[0].FiberID)
 	}
 }
 
@@ -339,7 +198,6 @@ func TestCheckStructureSlugCollision(t *testing.T) {
 	s := NewStorage(dir)
 	s.Init()
 
-	// Bare + nested with same slug.
 	os.WriteFile(filepath.Join(s.root, "cmbx.md"), []byte("---\nname: bare\n---\n"), 0644)
 	nestedDir := filepath.Join(s.root, "cmbx")
 	os.MkdirAll(nestedDir, 0755)
@@ -368,7 +226,6 @@ func TestCheckStructureCleanRepo(t *testing.T) {
 	s := NewStorage(dir)
 	s.Init()
 
-	// Single bare root + a nested non-colliding child — clean.
 	os.WriteFile(filepath.Join(s.root, "cmbx.md"), []byte("---\nname: root\n---\n"), 0644)
 	childDir := filepath.Join(s.root, "background")
 	os.MkdirAll(childDir, 0755)

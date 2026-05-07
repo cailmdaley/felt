@@ -29,7 +29,7 @@ func BuildGraph(felts []*Felt) *Graph {
 
 	sort.Strings(allIDs)
 	for _, f := range felts {
-		for _, input := range f.Inputs {
+		for _, input := range f.DataFlowInputs() {
 			targetFiber, fragment := splitDataFlowRef(input.From)
 			if targetFiber == "" {
 				continue
@@ -38,7 +38,7 @@ func BuildGraph(felts []*Felt) *Graph {
 			if err != nil {
 				targetID = targetFiber
 			}
-			label := input.ID
+			label := input.InputID
 			if strings.TrimSpace(fragment) != "" {
 				label = fragment
 			}

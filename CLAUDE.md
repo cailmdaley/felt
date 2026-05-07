@@ -20,15 +20,15 @@ Fibers are minimal by default. All fields except `name` are optional.
 | outcome | The conclusion — decisions, answers, results. `-o` flag. |
 | status | Opt-in tracking: open/active/closed. Most fibers don't have one. |
 | tags | Freeform. Use for categorization (decision, spec, question, etc). |
-| inputs / outputs / decisions / insights | Optional ASTRA structure when the work becomes computationally explicit. |
+| extra frontmatter | Any other top-level YAML keys. felt preserves them opaquely and surfaces them in JSON. |
 
 **Status is opt-in.** `felt add <slug> "name"` creates a statusless fiber. `felt add <slug> "name" -s open` enters tracking. `felt edit <id> -s active` enters tracking. `felt ls` only shows tracked fibers.
 
-**Relationships and index.** Containment is the directory tree. `[[wikilinks]]` are narrative references. ASTRA `inputs.from` is data flow. The SQLite cache indexes links, tags, ASTRA summaries, and FTS5 body text; `felt show` uses it for citations and `felt ls --body` uses it for fast body search.
+**Relationships and index.** Containment is the directory tree. `[[wikilinks]]` are narrative references. If a project uses `inputs.from` as a data-flow convention, felt indexes reverse consumers without claiming the rest of that schema. The SQLite cache indexes links, tags, additional YAML field text, and FTS5 body text; `felt show` uses it for citations/consumers and `felt ls --body` uses it for fast body search.
 
-**ASTRA shorthand edits.** `felt edit` still owns metadata, but now also covers one-level ASTRA structure: `--decision` with `--label`/`--rationale`/`--default`/`--option`, plus `--input` and `--insight` for simple frontmatter accretion. For deeper nested ASTRA edits, read then edit the markdown file directly.
+**Editing.** `felt edit` owns native metadata only: name, status, tags, due, body, outcome. For non-native frontmatter, read then edit the markdown file directly.
 
-**Progressive disclosure.** `felt show <id> -d compact` shows metadata + outcome + ASTRA counts. Levels: name, compact, summary, full (default). Targeted views: `felt show <id> --body` prints the body plus its start line; `--decisions`, `--decision`, `--inputs`, and `--insights` expose ASTRA slices directly.
+**Progressive disclosure.** `felt show <id> -d compact` shows metadata + outcome + additional YAML field keys. Levels: name, compact, summary, full (default). Targeted views: `felt show <id> --body` prints the body plus its start line; `--citations`, `--consumers`, and `--field <key>` expose index-backed or raw-frontmatter slices directly.
 
 ## Key integrations
 

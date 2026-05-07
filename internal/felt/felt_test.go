@@ -7,6 +7,13 @@ import (
 	"time"
 )
 
+func mustExtraField(t *testing.T, f *Felt, key string, value any) {
+	t.Helper()
+	if err := f.SetExtraField(key, value); err != nil {
+		t.Fatalf("SetExtraField(%s): %v", key, err)
+	}
+}
+
 func TestNew(t *testing.T) {
 	f, err := New("test-task", "Test Task")
 	if err != nil {
@@ -67,9 +74,9 @@ func TestNewPreservesLongExplicitSlug(t *testing.T) {
 	tests := []struct {
 		slug string
 	}{
-		{"exit-interview-2026-04-10-obsidian"},                       // 34 chars — the bug trigger
-		{"exit-interview-2026-04-10-relationship-model-completion"},  // 55 chars
-		{"felt/exit-interview-2026-04-10-hook-rewrite"},              // nested path with long basename
+		{"exit-interview-2026-04-10-obsidian"},                      // 34 chars — the bug trigger
+		{"exit-interview-2026-04-10-relationship-model-completion"}, // 55 chars
+		{"felt/exit-interview-2026-04-10-hook-rewrite"},             // nested path with long basename
 	}
 	for _, tt := range tests {
 		f, err := New(tt.slug, "Any name")
@@ -225,11 +232,12 @@ Some comment here.
 	if !f.HasTag("spec") {
 		t.Errorf("HasTag(spec) = false, want true")
 	}
-	if len(f.Inputs) != 2 {
-		t.Errorf("Inputs length = %d, want 2", len(f.Inputs))
+	inputs := f.DataFlowInputs()
+	if len(inputs) != 2 {
+		t.Errorf("DataFlowInputs length = %d, want 2", len(inputs))
 	}
-	if f.Inputs[0].From != "dep-a.output" || f.Inputs[1].From != "dep-b" {
-		t.Errorf("Input refs = [%q %q], want [dep-a.output dep-b]", f.Inputs[0].From, f.Inputs[1].From)
+	if inputs[0].From != "dep-a.output" || inputs[1].From != "dep-b" {
+		t.Errorf("Input refs = [%q %q], want [dep-a.output dep-b]", inputs[0].From, inputs[1].From)
 	}
 	if !strings.Contains(f.Body, "This is the body") {
 		t.Errorf("Body = %q, want to contain %q", f.Body, "This is the body")
@@ -286,10 +294,10 @@ func TestMarshal(t *testing.T) {
 	f := &Felt{
 		ID:        "test-task",
 		Name:      "Test Task",
-		Inputs:    []FiberInput{{ID: "dep_1", From: "dep-1.output"}},
 		CreatedAt: now,
 		Body:      "Body text here.",
 	}
+	mustExtraField(t, f, "inputs", []map[string]any{{"id": "dep_1", "from": "dep-1.output"}})
 
 	data, err := f.Marshal()
 	if err != nil {
@@ -340,7 +348,6 @@ func TestMarshalLeavesEmptyBodyEmpty(t *testing.T) {
 }
 
 func TestParseAndMarshalStructuredFields(t *testing.T) {
-	created := time.Date(2026, 3, 16, 9, 0, 0, 0, time.UTC)
 	content := []byte(`---
 name: BAO Damping Prior
 created-at: 2026-03-15T10:00:00Z
@@ -417,42 +424,23 @@ container: python:3.11-slim
 	if f.Description != "Prior on BAO damping parameters" {
 		t.Fatalf("Description = %q", f.Description)
 	}
-	if len(f.Inputs) != 1 || f.Inputs[0].Description != "DESI clustering measurements" {
-		t.Fatalf("Inputs = %#v", f.Inputs)
+	inputs := f.DataFlowInputs()
+	if len(inputs) != 1 || inputs[0].InputID != "clustering_data" || inputs[0].From != "parent.desi_dr1_vac" {
+		t.Fatalf("DataFlowInputs = %#v", inputs)
 	}
-	if len(f.Outputs) != 1 || f.Outputs[0].Recipe == nil || f.Outputs[0].Recipe.Command != "python fit_damping.py" {
-		t.Fatalf("Outputs = %#v", f.Outputs)
+	if !f.HasDataFlowOutput("damped_pk") {
+		t.Fatalf("HasDataFlowOutput(damped_pk) = false")
 	}
-	if got := f.Decisions["damping_prior"].Options["flat"].ExcludedReason; got != "Shifts too far" {
-		t.Fatalf("ExcludedReason = %q", got)
+	for _, key := range []string{"inputs", "outputs", "decisions", "insights", "success_criteria", "container"} {
+		if _, ok := f.ExtraFields[key]; !ok {
+			t.Fatalf("ExtraFields missing %q", key)
+		}
 	}
-	if got := f.Insights["damping_physical"].CreatedAt; got == nil || !got.Equal(created) {
-		t.Fatalf("Insight CreatedAt = %#v, want %v", got, created)
-	}
-	if got := f.Insights["damping_physical"].Scope; got != "Linear BAO regime" {
-		t.Fatalf("Insight Scope = %q", got)
-	}
-	if got := f.Insights["damping_physical"].Notes; got != "Literature-backed prior, not a measurement from this analysis" {
-		t.Fatalf("Insight Notes = %q", got)
-	}
-	evidence := f.Insights["damping_physical"].Evidence[0]
-	if evidence.Version == nil || *evidence.Version != 1 {
-		t.Fatalf("Evidence Version = %#v", evidence.Version)
-	}
-	if evidence.Document == nil || evidence.Document.Commit != "abcdef1234567890" {
-		t.Fatalf("Evidence Document = %#v", evidence.Document)
-	}
-	if evidence.Figure == nil || evidence.Figure.Label != "Figure 1" {
-		t.Fatalf("Evidence Figure = %#v", evidence.Figure)
-	}
-	if evidence.Table == nil || evidence.Table.Region != "row 3" {
-		t.Fatalf("Evidence Table = %#v", evidence.Table)
-	}
-	if evidence.Location == nil || evidence.Location.Start == nil || *evidence.Location.Start != 300 || evidence.Location.End == nil || *evidence.Location.End != 304 {
-		t.Fatalf("Evidence Location = %#v", evidence.Location)
-	}
-	if len(f.SuccessCriteria) != 1 || f.Container != "python:3.11-slim" {
-		t.Fatalf("SuccessCriteria/Container = %#v %q", f.SuccessCriteria, f.Container)
+	raw := f.ExtraFieldsYAML()
+	for _, needle := range []string{"excluded_reason: Shifts too far", "commit: abcdef1234567890", "caption: BAO damping from bulk flows", "container: python:3.11-slim"} {
+		if !strings.Contains(raw, needle) {
+			t.Fatalf("ExtraFieldsYAML missing %q in:\n%s", needle, raw)
+		}
 	}
 
 	data, err := f.Marshal()
@@ -463,64 +451,67 @@ container: python:3.11-slim
 	if err != nil {
 		t.Fatalf("round-trip Parse() error: %v", err)
 	}
-	if roundTrip.Decisions["damping_prior"].Label != "BAO Damping Prior" {
-		t.Fatalf("round-trip decisions = %#v", roundTrip.Decisions)
+	if got := roundTrip.ExtraFieldsYAML(); !strings.Contains(got, "Large-scale") || !strings.Contains(got, "row 3") {
+		t.Fatalf("round-trip opaque frontmatter lost detail:\n%s", got)
 	}
-	roundTripEvidence := roundTrip.Insights["damping_physical"].Evidence[0]
-	if roundTripEvidence.Quote == nil || roundTripEvidence.Quote.Prefix != "Large-scale" {
-		t.Fatalf("round-trip insights = %#v", roundTrip.Insights)
+	inputs = roundTrip.DataFlowInputs()
+	if len(inputs) != 1 || inputs[0].From != "parent.desi_dr1_vac" {
+		t.Fatalf("round-trip DataFlowInputs = %#v", inputs)
 	}
-	if roundTripEvidence.Figure == nil || roundTripEvidence.Table == nil || roundTripEvidence.Location == nil {
-		t.Fatalf("round-trip insights = %#v", roundTrip.Insights)
+	if !roundTrip.HasDataFlowOutput("damped_pk") {
+		t.Fatalf("round-trip HasDataFlowOutput(damped_pk) = false")
 	}
 }
 
 func TestSearchTextIncludesStructuredFields(t *testing.T) {
-	f := &Felt{
-		Outcome:     "Outcome text",
-		Description: "Description text",
-		Inputs: []FiberInput{
-			{ID: "clustering_data", Description: "DESI DR1 clustering data"},
-		},
-		Outputs: []FiberOutput{
-			{ID: "damped_pk", Description: "Power spectrum figure", Recipe: &FiberRecipe{Command: "python fit.py"}},
-		},
-		Decisions: map[string]Decision{
-			"damping_prior": {
-				Label:     "BAO Damping Prior",
-				Rationale: "Broadband projection creates spurious minima",
-			},
-		},
-		Insights: map[string]Insight{
-			"damping_physical": {
-				Claim: "Pairwise displacements are about 10 Mpc",
-				Scope: "Linear BAO regime",
-				Tags:  []string{"bao", "literature"},
-				Notes: "Anchor the prior to cited literature",
-				Evidence: []Evidence{
-					{
-						ID:  "ev1",
-						DOI: "10.48550/arXiv.astro-ph/0604361",
-						Document: &EvidenceDocument{
-							Path:   "docs/unions_release/unions_shear_catalog_paper/draft_corrected.tex",
-							Commit: "abcdef1234567890",
-						},
-						Quote:  &EvidenceQuote{Type: "TextQuoteSelector", Exact: "velocity flows move matter ~10 Mpc", Prefix: "Large-scale", Suffix: "across the BAO peak"},
-						Figure: &EvidenceFigure{Type: "FigureSelector", Label: "Figure 1", Caption: "BAO damping from bulk flows"},
-						Table:  &EvidenceTable{Type: "TableSelector", Label: "Table 2", Region: "row 3"},
-						Location: &EvidenceFragment{
-							Type:  "LineSelector",
-							Start: intPtr(300),
-							End:   intPtr(304),
-						},
-					},
-				},
-			},
-		},
-		SuccessCriteria: []SuccessCriterion{
-			{Claim: "Shift stays below 0.5 sigma"},
-		},
-		Container: "python:3.11-slim",
+	content := []byte(`---
+name: Searchable structured fields
+created-at: 2026-03-15T10:00:00Z
+description: Description text
+outcome: Outcome text
+inputs:
+  - id: clustering_data
+    description: DESI DR1 clustering data
+outputs:
+  - id: damped_pk
+    description: Power spectrum figure
+    recipe:
+      command: python fit.py
+decisions:
+  damping_prior:
+    label: BAO Damping Prior
+    rationale: Broadband projection creates spurious minima
+insights:
+  damping_physical:
+    claim: Pairwise displacements are about 10 Mpc
+    scope: Linear BAO regime
+    tags: [bao, literature]
+    notes: Anchor the prior to cited literature
+    evidence:
+      - id: ev1
+        doi: 10.48550/arXiv.astro-ph/0604361
+        document:
+          path: docs/unions_release/unions_shear_catalog_paper/draft_corrected.tex
+          commit: abcdef1234567890
+        figure:
+          type: FigureSelector
+          label: Figure 1
+        table:
+          type: TableSelector
+          region: row 3
+        location:
+          type: LineSelector
+          start: 300
+          end: 304
+success_criteria:
+  - claim: Shift stays below 0.5 sigma
+container: python:3.11-slim
+---
+`)
+
+	f, err := Parse("searchable-structured-fields", content)
+	if err != nil {
+		t.Fatalf("Parse() error: %v", err)
 	}
 
 	searchText := f.SearchText()
@@ -833,28 +824,29 @@ created-at: 2026-01-01T10:00:00Z
 		t.Fatalf("Parse() error: %v", err)
 	}
 
-	if len(f.Inputs) != 2 {
-		t.Fatalf("Inputs length = %d, want 2", len(f.Inputs))
+	inputs := f.DataFlowInputs()
+	if len(inputs) != 2 {
+		t.Fatalf("DataFlowInputs length = %d, want 2", len(inputs))
 	}
-	if f.Inputs[0].ID != "data_input" || f.Inputs[0].From != "bare-id" {
-		t.Errorf("Inputs[0] = %+v, want {ID:data_input From:bare-id}", f.Inputs[0])
+	if inputs[0].InputID != "data_input" || inputs[0].From != "bare-id" {
+		t.Errorf("Inputs[0] = %+v, want {InputID:data_input From:bare-id}", inputs[0])
 	}
-	if f.Inputs[1].ID != "labeled_input" || f.Inputs[1].From != "labeled-id.output" {
-		t.Errorf("Inputs[1] = %+v, want {ID:labeled_input From:labeled-id.output}", f.Inputs[1])
+	if inputs[1].InputID != "labeled_input" || inputs[1].From != "labeled-id.output" {
+		t.Errorf("Inputs[1] = %+v, want {InputID:labeled_input From:labeled-id.output}", inputs[1])
 	}
 }
 
 func TestMarshalInputRefs(t *testing.T) {
 	f := &Felt{
-		ID:     "mixed-inputs",
-		Name:   "Mixed input refs test",
-		Status: StatusOpen,
-		Inputs: []FiberInput{
-			{ID: "data_input", From: "bare-id"},
-			{ID: "labeled_input", From: "labeled-id.output"},
-		},
+		ID:        "mixed-inputs",
+		Name:      "Mixed input refs test",
+		Status:    StatusOpen,
 		CreatedAt: time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC),
 	}
+	mustExtraField(t, f, "inputs", []map[string]any{
+		{"id": "data_input", "from": "bare-id"},
+		{"id": "labeled_input", "from": "labeled-id.output"},
+	})
 
 	data, err := f.Marshal()
 	if err != nil {
@@ -862,7 +854,6 @@ func TestMarshalInputRefs(t *testing.T) {
 	}
 
 	content := string(data)
-
 	if !strings.Contains(content, "id: data_input") {
 		t.Error("Marshal() should emit first input id")
 	}
@@ -873,19 +864,19 @@ func TestMarshalInputRefs(t *testing.T) {
 		t.Error("Marshal() should emit second input ref")
 	}
 
-	// Round-trip
 	parsed, err := Parse(f.ID, data)
 	if err != nil {
 		t.Fatalf("Round-trip Parse() error: %v", err)
 	}
-	if len(parsed.Inputs) != 2 {
-		t.Fatalf("Round-trip Inputs length = %d, want 2", len(parsed.Inputs))
+	inputs := parsed.DataFlowInputs()
+	if len(inputs) != 2 {
+		t.Fatalf("Round-trip Inputs length = %d, want 2", len(inputs))
 	}
-	if parsed.Inputs[0].ID != "data_input" || parsed.Inputs[0].From != "bare-id" {
-		t.Errorf("Round-trip Inputs[0] = %+v, want {ID:data_input From:bare-id}", parsed.Inputs[0])
+	if inputs[0].InputID != "data_input" || inputs[0].From != "bare-id" {
+		t.Errorf("Round-trip Inputs[0] = %+v, want {InputID:data_input From:bare-id}", inputs[0])
 	}
-	if parsed.Inputs[1].ID != "labeled_input" || parsed.Inputs[1].From != "labeled-id.output" {
-		t.Errorf("Round-trip Inputs[1] = %+v, want {ID:labeled_input From:labeled-id.output}", parsed.Inputs[1])
+	if inputs[1].InputID != "labeled_input" || inputs[1].From != "labeled-id.output" {
+		t.Errorf("Round-trip Inputs[1] = %+v, want {InputID:labeled_input From:labeled-id.output}", inputs[1])
 	}
 }
 

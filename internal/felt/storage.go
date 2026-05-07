@@ -291,11 +291,9 @@ func (s *Storage) MoveSubtree(oldID, newID string) error {
 			clone.ID = remappedID
 			movedAny = true
 		}
-		for i, input := range clone.Inputs {
-			if remappedFrom, ok := remapDataFlowRef(input.From, oldID, newID); ok {
-				clone.Inputs[i].From = remappedFrom
-			}
-		}
+		clone.RewriteDataFlowRefs(func(ref string) (string, bool) {
+			return remapDataFlowRef(ref, oldID, newID)
+		})
 		updated = append(updated, &clone)
 	}
 
@@ -434,20 +432,20 @@ func (s *Storage) MigrateFlatFiles(dryRun bool) (*MigrationResult, error) {
 	for _, item := range legacy {
 		f := item.felt
 		f.ID = idMap[item.oldID]
-		for i, input := range f.Inputs {
-			if remappedFrom, ok := remapDataFlowRef(input.From, item.oldID, f.ID); ok {
-				f.Inputs[i].From = remappedFrom
-				continue
+		f.RewriteDataFlowRefs(func(ref string) (string, bool) {
+			if remappedFrom, ok := remapDataFlowRef(ref, item.oldID, f.ID); ok {
+				return remappedFrom, true
 			}
-			targetFiber, fragment := splitDataFlowRef(input.From)
-			if newTargetID, ok := idMap[targetFiber]; ok {
-				if fragment == "" {
-					f.Inputs[i].From = newTargetID
-				} else {
-					f.Inputs[i].From = newTargetID + "." + fragment
-				}
+			targetFiber, fragment := splitDataFlowRef(ref)
+			newTargetID, ok := idMap[targetFiber]
+			if !ok {
+				return "", false
 			}
-		}
+			if fragment == "" {
+				return newTargetID, true
+			}
+			return newTargetID + "." + fragment, true
+		})
 		if err := s.Write(f); err != nil {
 			return nil, err
 		}
@@ -465,18 +463,17 @@ func (s *Storage) MigrateFlatFiles(dryRun bool) (*MigrationResult, error) {
 		return nil, fmt.Errorf("listing fibers for input rewrite: %w", err)
 	}
 	for _, f := range allFibers {
-		changed := false
-		for i, input := range f.Inputs {
-			targetFiber, fragment := splitDataFlowRef(input.From)
-			if newID, ok := idMap[targetFiber]; ok {
-				if fragment == "" {
-					f.Inputs[i].From = newID
-				} else {
-					f.Inputs[i].From = newID + "." + fragment
-				}
-				changed = true
+		changed := f.RewriteDataFlowRefs(func(ref string) (string, bool) {
+			targetFiber, fragment := splitDataFlowRef(ref)
+			newID, ok := idMap[targetFiber]
+			if !ok {
+				return "", false
 			}
-		}
+			if fragment == "" {
+				return newID, true
+			}
+			return newID + "." + fragment, true
+		})
 		if changed {
 			if err := s.Write(f); err != nil {
 				return nil, fmt.Errorf("rewriting inputs in %s: %w", f.ID, err)

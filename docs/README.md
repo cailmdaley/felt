@@ -1,12 +1,12 @@
 # felt
 
-Directory-contained markdown fibers with YAML frontmatter, wikilinks, and optional structured frontmatter.
+Directory-contained markdown fibers with YAML frontmatter, wikilinks, and opaque extra frontmatter.
 
 ## Why
 
-Fibers are markdown files. Human-readable, version-controllable, greppable. The markdown tree is the source of truth; felt also keeps a rebuildable SQLite cache at `.felt/index.db` for typed links, citations, and FTS5 body search.
+Fibers are markdown files. Human-readable, version-controllable, greppable. The markdown tree is the source of truth; felt also keeps a rebuildable SQLite cache at `.felt/index.db` for typed links, citations, reverse data-flow consumers, and FTS5 body search.
 
-Containment comes from the directory tree, narrative connections come from `[[wikilinks]]` in the body, and `inputs.from` carries computational provenance when needed.
+Containment comes from the directory tree, narrative connections come from `[[wikilinks]]` in the body, and projects may use conventions like `inputs.from` when they want data-flow edges. felt preserves non-native frontmatter opaquely instead of owning its schema.
 
 ## Install
 
@@ -34,8 +34,8 @@ Felt uses three relationship mechanisms:
 
 - Containment via directory nesting
 - Narrative references via `[[wikilinks]]`
-- Data flow via `inputs.from`
-- Indexed citations, reverse data-flow consumers, and FTS5 body search via `.felt/index.db`
+- Optional data flow via conventions like `inputs.from`
+- Indexed citations, reverse consumers, and FTS5 body search via `.felt/index.db`
 
 ### Status (opt-in)
 
@@ -67,16 +67,16 @@ felt show <id> -d compact     # see outcome without full body
 | Level | What you see |
 |---|---|
 | `name` | Name + tags |
-| `compact` | Metadata + outcome + frontmatter counts |
-| `summary` | Compact + citations/consumers + lede paragraph + concise frontmatter summary |
-| `full` | Everything (default) |
+| `compact` | Metadata + outcome + additional YAML field keys |
+| `summary` | Compact + citations/consumers + lede paragraph |
+| `full` | Everything (default), including raw additional YAML fields |
 
 ```bash
-felt show <id> -d compact      # "what was decided?"
+felt show <id> -d compact      # quick skim
 felt show <id> --body          # body + start line for editing
 felt show <id> --citations     # indexed narrative back-references
 felt show <id> --consumers     # indexed reverse data-flow consumers
-felt show <id> --decisions     # decisions slice
+felt show <id> --field inputs  # one raw frontmatter field as YAML/text
 felt ls --body "jwt refresh"   # FTS5 body search
 ```
 
@@ -114,13 +114,7 @@ outcome: "REST with JWT. See docs/api.md"
 Optional body with notes, context, etc.
 ```
 
-IDs are slug paths. Commands accept unique slug or path matching:
-
-```bash
-felt show design-api       # unique slug
-felt show auth/design-api  # nested path
-felt show api              # unique prefix
-```
+Any other top-level YAML keys are preserved exactly enough for downstream tools to own their schema.
 
 ## Command Reference
 
@@ -142,11 +136,12 @@ felt ls -s all                    # all fibers including untracked
 felt ls -s closed                 # by status
 felt ls -t backend -t urgent      # by tags (AND)
 felt ls -s all -t rule:           # tag prefix matching
-felt ls -s all "query"            # search name, outcome, frontmatter fields
+felt ls -s all "query"            # search name, outcome, frontmatter text
 felt ls -s all -r "pattern"       # regex search
 felt show <id>                    # full details
-felt show <id> -d compact         # structured overview
-felt check                        # repository-wide integrity lint
+felt show <id> -d compact         # quick overview
+felt show <id> --field shuttle    # one raw frontmatter field
+felt check                        # repository-wide substrate lint
 ```
 
 ### Editing
@@ -158,15 +153,13 @@ felt edit <id> -s active          # set status
 felt edit <id> -o "outcome"       # set outcome
 felt edit <id> --tag <tag>        # add tag
 felt edit <id> --untag <tag>      # remove tag
-felt edit <id> --decision cov --label "Covariance" --option 'glass:GLASS mocks'
-felt edit <id> --input 'catalog:data:upstream.posterior'
-felt edit <id> --insight 'stable:Posterior is stable'
+# for non-native frontmatter: edit the markdown file directly
 ```
 
 ### Maintenance
 
 ```bash
-felt check                        # broken refs/fragments, legacy format residue, frontmatter lint, depth consistency
+felt check                        # broken refs/fragments, legacy format residue, layout issues
 felt migrate --dry-run            # preview legacy storage migration
 ```
 

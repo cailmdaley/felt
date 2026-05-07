@@ -116,29 +116,6 @@ func (i *Index) init() error {
 			tag TEXT NOT NULL,
 			PRIMARY KEY (fiber_id, tag)
 		)`,
-		`CREATE TABLE IF NOT EXISTS decisions (
-			fiber_id TEXT NOT NULL,
-			decision_id TEXT NOT NULL,
-			selected_option TEXT,
-			option_count INTEGER NOT NULL,
-			excluded_option_count INTEGER NOT NULL,
-			has_unexcluded_options INTEGER NOT NULL,
-			PRIMARY KEY (fiber_id, decision_id)
-		)`,
-		`CREATE TABLE IF NOT EXISTS inputs (
-			fiber_id TEXT NOT NULL,
-			input_id TEXT NOT NULL,
-			from_ref TEXT,
-			PRIMARY KEY (fiber_id, input_id)
-		)`,
-		`CREATE TABLE IF NOT EXISTS insights (
-			fiber_id TEXT NOT NULL,
-			insight_id TEXT NOT NULL,
-			claim TEXT,
-			evidence_count INTEGER NOT NULL,
-			has_evidence INTEGER NOT NULL,
-			PRIMARY KEY (fiber_id, insight_id)
-		)`,
 		`CREATE VIRTUAL TABLE IF NOT EXISTS fiber_fts USING fts5(
 			id UNINDEXED,
 			body,
@@ -420,9 +397,6 @@ func deleteFiberCompletely(tx *sql.Tx, id string) error {
 		`DELETE FROM fibers WHERE id = ?`,
 		`DELETE FROM links WHERE source_id = ? OR target_id = ?`,
 		`DELETE FROM tags WHERE fiber_id = ?`,
-		`DELETE FROM decisions WHERE fiber_id = ?`,
-		`DELETE FROM inputs WHERE fiber_id = ?`,
-		`DELETE FROM insights WHERE fiber_id = ?`,
 		`DELETE FROM fiber_fts WHERE id = ?`,
 	}
 	for _, stmt := range statements {
@@ -482,13 +456,7 @@ func indexFiber(tx *sql.Tx, f *Felt, allIDs []string) error {
 		}
 	}
 
-	for _, input := range f.Inputs {
-		if _, err := tx.Exec(
-			`INSERT INTO inputs (fiber_id, input_id, from_ref) VALUES (?, ?, ?)`,
-			f.ID, input.ID, nullIfEmpty(input.From),
-		); err != nil {
-			return fmt.Errorf("insert input %s/%s: %w", f.ID, input.ID, err)
-		}
+	for _, input := range f.DataFlowInputs() {
 		if strings.TrimSpace(input.From) == "" {
 			continue
 		}
@@ -502,39 +470,9 @@ func indexFiber(tx *sql.Tx, f *Felt, allIDs []string) error {
 		}
 		if _, err := tx.Exec(
 			`INSERT INTO links (source_id, target_id, fragment, edge_type, input_id) VALUES (?, ?, ?, 'data_flow', ?)`,
-			f.ID, targetID, nullIfEmpty(fragment), input.ID,
+			f.ID, targetID, nullIfEmpty(fragment), input.InputID,
 		); err != nil {
 			return fmt.Errorf("insert data flow link %s -> %s: %w", f.ID, targetID, err)
-		}
-	}
-
-	for id, decision := range f.Decisions {
-		optionCount := len(decision.Options)
-		excludedCount := 0
-		hasUnexcluded := false
-		for _, option := range decision.Options {
-			if option.Excluded {
-				excludedCount++
-				continue
-			}
-			hasUnexcluded = true
-		}
-		if _, err := tx.Exec(
-			`INSERT INTO decisions (fiber_id, decision_id, selected_option, option_count, excluded_option_count, has_unexcluded_options)
-			 VALUES (?, ?, ?, ?, ?, ?)`,
-			f.ID, id, nullIfEmpty(decision.Default), optionCount, excludedCount, boolToInt(hasUnexcluded),
-		); err != nil {
-			return fmt.Errorf("insert decision %s/%s: %w", f.ID, id, err)
-		}
-	}
-
-	for id, insight := range f.Insights {
-		evidenceCount := len(insight.Evidence)
-		if _, err := tx.Exec(
-			`INSERT INTO insights (fiber_id, insight_id, claim, evidence_count, has_evidence) VALUES (?, ?, ?, ?, ?)`,
-			f.ID, id, nullIfEmpty(insight.Claim), evidenceCount, boolToInt(evidenceCount > 0),
-		); err != nil {
-			return fmt.Errorf("insert insight %s/%s: %w", f.ID, id, err)
 		}
 	}
 
@@ -553,9 +491,6 @@ func clearFiberSourceIndex(tx *sql.Tx, id string) error {
 		`DELETE FROM fibers WHERE id = ?`,
 		`DELETE FROM links WHERE source_id = ?`,
 		`DELETE FROM tags WHERE fiber_id = ?`,
-		`DELETE FROM decisions WHERE fiber_id = ?`,
-		`DELETE FROM inputs WHERE fiber_id = ?`,
-		`DELETE FROM insights WHERE fiber_id = ?`,
 		`DELETE FROM fiber_fts WHERE id = ?`,
 	}
 	for _, stmt := range statements {

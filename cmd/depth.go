@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/cailmdaley/felt/internal/felt"
@@ -35,7 +34,7 @@ func renderFelt(f *felt.Felt, g *felt.Graph, depth string, citations []felt.Cita
 	case DepthName:
 		return renderName(f)
 	case DepthCompact:
-		return renderCompact(f, g)
+		return renderCompact(f)
 	case DepthSummary:
 		return renderSummary(f, g, citations, consumers)
 	default:
@@ -63,13 +62,13 @@ func writeHeader(sb *strings.Builder, f *felt.Felt) {
 	}
 }
 
-func renderCompact(f *felt.Felt, g *felt.Graph) string {
+func renderCompact(f *felt.Felt) string {
 	var sb strings.Builder
 	writeHeader(&sb, f)
 	if f.Outcome != "" {
 		fmt.Fprintf(&sb, "Outcome:  %s\n", f.Outcome)
 	}
-	writeFrontmatterCounts(&sb, f)
+	writeExtraFieldKeys(&sb, f)
 	return sb.String()
 }
 
@@ -85,7 +84,7 @@ func renderSummary(f *felt.Felt, g *felt.Graph, citations []felt.Citation, consu
 	writeBodyRefs(&sb, f, g)
 	writeCitations(&sb, citations)
 	writeConsumers(&sb, consumers)
-	writeFrontmatterSkeleton(&sb, f)
+	writeExtraFieldKeys(&sb, f)
 	if f.Body != "" {
 		lede := extractLede(f.Body)
 		fmt.Fprintf(&sb, "\n%s\n", lede)
@@ -94,91 +93,6 @@ func renderSummary(f *felt.Felt, g *felt.Graph, citations []felt.Citation, consu
 		}
 	}
 	return sb.String()
-}
-
-// writeFrontmatterSkeleton writes one-line summaries of structured frontmatter.
-func writeFrontmatterSkeleton(sb *strings.Builder, f *felt.Felt) {
-	// Decisions: covariance_method → glass (1 excluded)
-	if len(f.Decisions) > 0 {
-		var parts []string
-		for id, d := range f.Decisions {
-			excluded := 0
-			for _, opt := range d.Options {
-				if opt.Excluded {
-					excluded++
-				}
-			}
-			s := id
-			if d.Default != "" {
-				s += " → " + d.Default
-			}
-			if excluded > 0 {
-				s += fmt.Sprintf(" (%d excluded)", excluded)
-			}
-			parts = append(parts, s)
-		}
-		fmt.Fprintf(sb, "Decisions: %s\n", strings.Join(parts, "; "))
-	}
-
-	// Inputs: shear_catalog (data), psf_model (← psf-modeling)
-	if len(f.Inputs) > 0 {
-		var parts []string
-		for _, inp := range f.Inputs {
-			s := inp.ID
-			if inp.From != "" {
-				s += " (← " + inp.From + ")"
-			} else if inp.Type != "" {
-				s += " (" + inp.Type + ")"
-			}
-			parts = append(parts, s)
-		}
-		fmt.Fprintf(sb, "Inputs:    %s\n", strings.Join(parts, ", "))
-	}
-
-	// Outputs: posterior (data), corner_plot (figure)
-	if len(f.Outputs) > 0 {
-		var parts []string
-		for _, out := range f.Outputs {
-			s := out.ID
-			if out.Type != "" {
-				s += " (" + out.Type + ")"
-			}
-			parts = append(parts, s)
-		}
-		fmt.Fprintf(sb, "Outputs:   %s\n", strings.Join(parts, ", "))
-	}
-
-	// Findings: leakage_negligible — "PSF leakage α < 0.01 for all bins"
-	if len(f.Insights) > 0 {
-		var parts []string
-		for id, ins := range f.Insights {
-			claim := ins.Claim
-			if len(claim) > 60 {
-				claim = claim[:57] + "..."
-			}
-			parts = append(parts, fmt.Sprintf("%s — \"%s\"", id, claim))
-		}
-		fmt.Fprintf(sb, "Findings:  %s\n", strings.Join(parts, "; "))
-	}
-}
-
-func writeFrontmatterCounts(sb *strings.Builder, f *felt.Felt) {
-	var parts []string
-	if len(f.Decisions) > 0 {
-		parts = append(parts, fmt.Sprintf("%d decisions", len(f.Decisions)))
-	}
-	if len(f.Inputs) > 0 {
-		parts = append(parts, fmt.Sprintf("%d inputs", len(f.Inputs)))
-	}
-	if len(f.Outputs) > 0 {
-		parts = append(parts, fmt.Sprintf("%d outputs", len(f.Outputs)))
-	}
-	if len(f.Insights) > 0 {
-		parts = append(parts, fmt.Sprintf("%d insights", len(f.Insights)))
-	}
-	if len(parts) > 0 {
-		fmt.Fprintf(sb, "Fields:   %s\n", strings.Join(parts, ", "))
-	}
 }
 
 func renderFull(f *felt.Felt, g *felt.Graph, citations []felt.Citation, consumers []felt.DataFlowConsumer) string {
@@ -197,146 +111,34 @@ func renderFull(f *felt.Felt, g *felt.Graph, citations []felt.Citation, consumer
 	if f.Outcome != "" {
 		fmt.Fprintf(&sb, "Outcome:  %s\n", f.Outcome)
 	}
-	writeFrontmatterDetails(&sb, f)
+	writeExtraFrontmatter(&sb, f)
 	if f.Body != "" {
 		fmt.Fprintf(&sb, "\n%s\n", f.Body)
 	}
 	return sb.String()
 }
 
-// writeFrontmatterDetails writes the full structured frontmatter (decisions, inputs, outputs,
-// insights) for the `full` detail level. Unlike writeFrontmatterSkeleton, this
-// preserves every field so `-d full` is truly "everything".
-func writeFrontmatterDetails(sb *strings.Builder, f *felt.Felt) {
-	if len(f.Decisions) > 0 {
-		sb.WriteString("\nDecisions:\n")
-		// Sort decision IDs for deterministic output.
-		ids := make([]string, 0, len(f.Decisions))
-		for id := range f.Decisions {
-			ids = append(ids, id)
-		}
-		sort.Strings(ids)
-		for _, id := range ids {
-			d := f.Decisions[id]
-			fmt.Fprintf(sb, "  %s", id)
-			if d.Label != "" {
-				fmt.Fprintf(sb, " — %s", d.Label)
-			}
-			sb.WriteString("\n")
-			if d.Default != "" {
-				fmt.Fprintf(sb, "    default: %s\n", d.Default)
-			}
-			if d.Rationale != "" {
-				fmt.Fprintf(sb, "    rationale: %s\n", d.Rationale)
-			}
-			if len(d.Options) > 0 {
-				optIDs := make([]string, 0, len(d.Options))
-				for oid := range d.Options {
-					optIDs = append(optIDs, oid)
-				}
-				sort.Strings(optIDs)
-				sb.WriteString("    options:\n")
-				for _, oid := range optIDs {
-					opt := d.Options[oid]
-					marker := "  "
-					if opt.Excluded {
-						marker = "✗ "
-					} else if oid == d.Default {
-						marker = "→ "
-					}
-					fmt.Fprintf(sb, "      %s%s", marker, oid)
-					if opt.Label != "" {
-						fmt.Fprintf(sb, ": %s", opt.Label)
-					}
-					sb.WriteString("\n")
-					if opt.Description != "" {
-						fmt.Fprintf(sb, "          description: %s\n", opt.Description)
-					}
-					if opt.ExcludedReason != "" {
-						fmt.Fprintf(sb, "          excluded_reason: %s\n", opt.ExcludedReason)
-					} else if opt.Excluded {
-						fmt.Fprintf(sb, "          excluded: true\n")
-					}
-				}
-			}
-		}
+func writeExtraFieldKeys(sb *strings.Builder, f *felt.Felt) {
+	keys := f.ExtraFieldKeys()
+	if len(keys) == 0 {
+		return
 	}
-
-	if len(f.Inputs) > 0 {
-		sb.WriteString("\nInputs:\n")
-		for _, inp := range f.Inputs {
-			fmt.Fprintf(sb, "  %s", inp.ID)
-			if inp.Type != "" {
-				fmt.Fprintf(sb, " (%s)", inp.Type)
-			}
-			sb.WriteString("\n")
-			if inp.From != "" {
-				fmt.Fprintf(sb, "    from: %s\n", inp.From)
-			}
-			if inp.Source != "" {
-				fmt.Fprintf(sb, "    source: %s\n", inp.Source)
-			}
-			if inp.Checksum != "" {
-				fmt.Fprintf(sb, "    checksum: %s\n", inp.Checksum)
-			}
-			if inp.Description != "" {
-				fmt.Fprintf(sb, "    description: %s\n", inp.Description)
-			}
-		}
-	}
-
-	if len(f.Outputs) > 0 {
-		sb.WriteString("\nOutputs:\n")
-		for _, out := range f.Outputs {
-			fmt.Fprintf(sb, "  %s", out.ID)
-			if out.Type != "" {
-				fmt.Fprintf(sb, " (%s)", out.Type)
-			}
-			sb.WriteString("\n")
-			if out.Description != "" {
-				fmt.Fprintf(sb, "    description: %s\n", out.Description)
-			}
-			if out.Recipe != nil && out.Recipe.Command != "" {
-				fmt.Fprintf(sb, "    command: %s\n", out.Recipe.Command)
-			}
-		}
-	}
-
-	if len(f.Insights) > 0 {
-		sb.WriteString("\nInsights:\n")
-		ids := make([]string, 0, len(f.Insights))
-		for id := range f.Insights {
-			ids = append(ids, id)
-		}
-		sort.Strings(ids)
-		for _, id := range ids {
-			ins := f.Insights[id]
-			fmt.Fprintf(sb, "  %s", id)
-			sb.WriteString("\n")
-			if ins.Claim != "" {
-				fmt.Fprintf(sb, "    claim: %s\n", ins.Claim)
-			}
-			if ins.Scope != "" {
-				fmt.Fprintf(sb, "    scope: %s\n", ins.Scope)
-			}
-			if len(ins.Tags) > 0 {
-				fmt.Fprintf(sb, "    tags: %s\n", strings.Join(ins.Tags, ", "))
-			}
-			if ins.Notes != "" {
-				fmt.Fprintf(sb, "    notes: %s\n", ins.Notes)
-			}
-			if len(ins.Evidence) > 0 {
-				fmt.Fprintf(sb, "    evidence: %d entr%s\n", len(ins.Evidence), pluralY(len(ins.Evidence)))
-			}
-		}
-	}
+	fmt.Fprintf(sb, "Frontmatter: %s\n", strings.Join(keys, ", "))
 }
 
-func pluralY(n int) string {
-	if n == 1 {
-		return "y"
+func writeExtraFrontmatter(sb *strings.Builder, f *felt.Felt) {
+	raw := strings.TrimSpace(f.ExtraFieldsYAML())
+	if raw == "" {
+		return
 	}
-	return "ies"
+	sb.WriteString("\nFrontmatter:\n")
+	for _, line := range strings.Split(raw, "\n") {
+		if line == "" {
+			sb.WriteString("\n")
+			continue
+		}
+		sb.WriteString("  " + line + "\n")
+	}
 }
 
 func writeCitations(sb *strings.Builder, citations []felt.Citation) {

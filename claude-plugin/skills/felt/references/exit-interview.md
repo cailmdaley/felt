@@ -14,11 +14,11 @@ After session mining is complete (fibers extracted, related fibers cited or nest
 
 ## The instrument
 
-Answer each question in a few sentences. Be concrete — name the fiber, the CLI command, the convention, or the reference that prompted the observation. Generic feedback ("felt was useful") is noise; specific friction ("the insights schema requires evidence but I only had an oral correction from the user, so I had to skip formalization for that fiber") is signal.
+Answer each question in a few sentences. Be concrete — name the fiber, the CLI command, the convention, or the reference that prompted the observation. Generic feedback ("felt was useful") is noise; specific friction ("I needed extra YAML fields, so I had to edit the file directly because the CLI correctly doesn't own that schema") is signal.
 
 ### 1. What did you use?
 
-Which activities did the felt skill cover during this session — formalizing as you worked, crafting a decision, mining at session end, drafting a constitution, maintenance, transcript processing? How many fibers did you create, close, or update? Did you formalize any with structured frontmatter — and if so, which kinds (decision, computation, finding)?
+Which activities did the felt skill cover during this session — filing as you worked, crafting a decision, mining at session end, drafting a constitution, maintenance, transcript processing? How many fibers did you create, close, or update? Did you add any extra YAML fields beyond felt's native metadata — and if so, which ones?
 
 ### 2. Real-time vs. retrospective
 
@@ -28,13 +28,13 @@ How much of the felt work happened during the session (fibers created in the mom
 
 Friction or confusion about felt *as a workflow*: when to file, what to file, the fiber-as-concern model, the "file as you go" vs. "extract at session end" tension, the crafting rhythm (diamonds, stances, funnel), the consolidation conventions, the CLAUDE.md update step, anything about the overall approach or the references you had to consult.
 
-### 4. Structured frontmatter
+### 4. Additional YAML fields
 
-Did structured frontmatter feel warranted for every fiber you formalized? Were there fibers where you forced structure that would have been better left annotated-only? Were frontmatter fields unclear or awkward — which ones? Did the three-kind model (decision, computation, finding) fit what you were trying to express, or did the work need a shape that doesn't exist yet?
+Did extra YAML fields feel warranted for every fiber where you used them? Were there fibers where you added fields that would have been better left in body/outcome text? Were any project-owned fields unclear or awkward — which ones? Did direct file editing feel like the right boundary, or did it create friction?
 
 ### 5. CLI
 
-The `felt` command-line tool specifically: flags, output, search (`felt ls`, `felt show`), containment and path IDs, `felt edit`, and structured frontmatter views. Anything that didn't work as expected, was hard to discover, or produced confusing output. Also: did you end up writing fiber files directly (Edit/Write) more than using the CLI, and if so, why?
+The `felt` command-line tool specifically: flags, output, search (`felt ls`, `felt show`), containment and path IDs, `felt edit`, and `--field` / `--json` for extra YAML fields. Anything that didn't work as expected, was hard to discover, or produced confusing output. Also: did you end up writing fiber files directly more than using the CLI, and if so, why?
 
 ### 6. What did you NOT capture?
 
@@ -69,18 +69,17 @@ outcome: >-
 
 interview:
   model: <model name if known>
-  activities: [<crafting, mining, constitution-drafting, maintenance, transcript-processing, formalizing-inline>]
+  activities: [<crafting, mining, constitution-drafting, maintenance, transcript-processing, filing-inline>]
   fibers_created: <int>
   fibers_closed: <int>
   fibers_updated: <int>
-  structured_formalized: <int>
-  structured_kinds: [<decision, computation, finding>]
+  extra_yaml_fields: [<shuttle, inputs, decisions, custom-namespace>]
   realtime_vs_retrospective: >-
     <Q2: balance of in-the-moment vs. session-end filing, which produced better fibers>
   felt_friction: >-
     <Q3: workflow, when/what to file, crafting rhythm, consolidation>
-  structured_friction: >-
-    <Q4: formalization warranted? fields awkward? kinds fit?>
+  extra_yaml_friction: >-
+    <Q4: were extra YAML fields warranted? awkward? direct-file-edit boundary fit?>
   cli_friction: >-
     <Q5: felt CLI tool, flags, search, containment, direct file edit vs. CLI>
   missed: >-

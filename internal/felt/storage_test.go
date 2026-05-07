@@ -76,10 +76,10 @@ func TestStorageWriteRead(t *testing.T) {
 		ID:        "test-task",
 		Name:      "Test Task",
 		Status:    StatusOpen,
-		Inputs:    []FiberInput{{ID: "dep_a", From: "dep-a.output"}},
 		CreatedAt: time.Now(),
 		Body:      "Test body content.",
 	}
+	mustExtraField(t, f, "inputs", []map[string]any{{"id": "dep_a", "from": "dep-a.output"}})
 
 	// Write
 	if err := s.Write(f); err != nil {
@@ -111,8 +111,9 @@ func TestStorageWriteRead(t *testing.T) {
 	if read.Body != f.Body {
 		t.Errorf("Body = %q, want %q", read.Body, f.Body)
 	}
-	if len(read.Inputs) != 1 || read.Inputs[0].From != "dep-a.output" {
-		t.Errorf("Inputs = %v, want [{dep_a dep-a.output}]", read.Inputs)
+	inputs := read.DataFlowInputs()
+	if len(inputs) != 1 || inputs[0].From != "dep-a.output" {
+		t.Errorf("Inputs = %v, want [{dep_a dep-a.output}]", inputs)
 	}
 }
 
@@ -701,24 +702,12 @@ func TestStorageMoveSubtreeRewritesInputRefs(t *testing.T) {
 		Name:      "BAO Analysis",
 		CreatedAt: time.Now(),
 	}
-	child := &Felt{
-		ID:        "damping-prior",
-		Name:      "Damping Prior",
-		CreatedAt: time.Now(),
-		Inputs:    []FiberInput{{ID: "analysis_input", From: "bao-analysis.posterior"}},
-	}
-	grandchild := &Felt{
-		ID:        "damping-prior/contour-plot",
-		Name:      "Contour Plot",
-		CreatedAt: time.Now(),
-		Inputs:    []FiberInput{{ID: "plot_input", From: "damping-prior.fit"}},
-	}
-	consumer := &Felt{
-		ID:        "consumer",
-		Name:      "Consumer",
-		CreatedAt: time.Now(),
-		Inputs:    []FiberInput{{ID: "consumer_input", From: "damping-prior/contour-plot.figure"}},
-	}
+	child := &Felt{ID: "damping-prior", Name: "Damping Prior", CreatedAt: time.Now()}
+	mustExtraField(t, child, "inputs", []map[string]any{{"id": "analysis_input", "from": "bao-analysis.posterior"}})
+	grandchild := &Felt{ID: "damping-prior/contour-plot", Name: "Contour Plot", CreatedAt: time.Now()}
+	mustExtraField(t, grandchild, "inputs", []map[string]any{{"id": "plot_input", "from": "damping-prior.fit"}})
+	consumer := &Felt{ID: "consumer", Name: "Consumer", CreatedAt: time.Now()}
+	mustExtraField(t, consumer, "inputs", []map[string]any{{"id": "consumer_input", "from": "damping-prior/contour-plot.figure"}})
 
 	for _, f := range []*Felt{parent, child, grandchild, consumer} {
 		if err := s.Write(f); err != nil {
@@ -737,7 +726,7 @@ func TestStorageMoveSubtreeRewritesInputRefs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Read moved child: %v", err)
 	}
-	if got := moved.Inputs[0].From; got != "bao-analysis.posterior" {
+	if got := moved.DataFlowInputs()[0].From; got != "bao-analysis.posterior" {
 		t.Fatalf("moved child input = %q, want %q", got, "bao-analysis.posterior")
 	}
 
@@ -745,7 +734,7 @@ func TestStorageMoveSubtreeRewritesInputRefs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Read moved descendant: %v", err)
 	}
-	if got := descendant.Inputs[0].From; got != "bao-analysis/damping-prior.fit" {
+	if got := descendant.DataFlowInputs()[0].From; got != "bao-analysis/damping-prior.fit" {
 		t.Fatalf("moved descendant input = %q, want %q", got, "bao-analysis/damping-prior.fit")
 	}
 
@@ -753,7 +742,7 @@ func TestStorageMoveSubtreeRewritesInputRefs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Read consumer: %v", err)
 	}
-	if got := updatedConsumer.Inputs[0].From; got != "bao-analysis/damping-prior/contour-plot.figure" {
+	if got := updatedConsumer.DataFlowInputs()[0].From; got != "bao-analysis/damping-prior/contour-plot.figure" {
 		t.Fatalf("consumer input = %q, want rewritten descendant ref", got)
 	}
 }
@@ -851,7 +840,7 @@ Analysis body.
 	if err != nil {
 		t.Fatalf("Read migrated quick-gotcha: %v", err)
 	}
-	if got := migrated.Inputs[0].From; got != "bao-analysis.posterior" {
+	if got := migrated.DataFlowInputs()[0].From; got != "bao-analysis.posterior" {
 		t.Fatalf("input rewrite = %q, want %q", got, "bao-analysis.posterior")
 	}
 	if migrated.Body != "Quick note." {
@@ -959,9 +948,9 @@ Analysis body.
 		ID:        "session-hub",
 		Name:      "Session hub",
 		CreatedAt: time.Now(),
-		Inputs:    []FiberInput{{ID: "analysis_input", From: "bao-analysis-d34db33f.posterior"}},
 		Body:      "(session-hub)=\n# Session hub",
 	}
+	mustExtraField(t, preExisting, "inputs", []map[string]any{{"id": "analysis_input", "from": "bao-analysis-d34db33f.posterior"}})
 	if err := s.Write(preExisting); err != nil {
 		t.Fatalf("write pre-existing: %v", err)
 	}
@@ -979,7 +968,7 @@ Analysis body.
 	if err != nil {
 		t.Fatalf("Read session-hub: %v", err)
 	}
-	if got := hub.Inputs[0].From; got != "bao-analysis.posterior" {
+	if got := hub.DataFlowInputs()[0].From; got != "bao-analysis.posterior" {
 		t.Fatalf("pre-existing input rewrite = %q, want %q", got, "bao-analysis.posterior")
 	}
 }

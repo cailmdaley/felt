@@ -16,21 +16,20 @@ func TestIndexSyncBuildsCitationsAndFTS(t *testing.T) {
 	}
 
 	baseTime := time.Date(2026, 4, 10, 9, 0, 0, 0, time.UTC)
+	analysis := &Felt{
+		ID:        "project/analysis",
+		Name:      "Analysis",
+		CreatedAt: baseTime,
+		Body:      "See [[question]] and #question.",
+	}
+	mustExtraField(t, analysis, "inputs", []map[string]any{{"id": "catalog", "from": "question.output"}})
 	for _, fiber := range []*Felt{
 		{
 			ID:        "project/question",
 			Name:      "Question",
 			CreatedAt: baseTime,
 		},
-		{
-			ID:        "project/analysis",
-			Name:      "Analysis",
-			CreatedAt: baseTime,
-			Body:      "See [[question]] and #question.",
-			Inputs: []FiberInput{
-				{ID: "catalog", From: "question.output"},
-			},
-		},
+		analysis,
 	} {
 		if err := storage.Write(fiber); err != nil {
 			t.Fatalf("Write(%s) error: %v", fiber.ID, err)

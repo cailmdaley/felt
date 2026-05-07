@@ -1,6 +1,6 @@
 # Crafting
 
-How to help the user think through something that hasn't crystallized, and turn the result into structured fiber frontmatter. Use it when the user is deciding something non-trivial, scoping a sub-analysis, drafting a living spec, or talking through an open question — any time careful interactive thinking is happening and the output can land in fiber fields.
+How to help the user think through something that hasn't crystallized, and turn the result into a clear fiber. Use it when the user is deciding something non-trivial, scoping a sub-analysis, drafting a living spec, or talking through an open question — any time careful interactive thinking is happening and the output should land in a fiber body, outcome, or project-owned YAML fields.
 
 The rhythm is two diamonds: first understand what the thing IS, then decide what to DO about it. Each diamond diverges to explore and converges to commit. The ontological question — *what IS this, really?* — is the convergence point of the first diamond, and it is the most practical question you can ask.
 
@@ -29,15 +29,15 @@ Diamond 1 diverges into questions and converges on a name (*"this IS a decision 
 
 **Ontology (converge).** What IS this, really? Crystallize into a claim, decision, or question specific enough to act on. The convergence is complete when you can **name** the thing precisely — "this is a decision about covariance estimation" or "this is a question about whether leakage matters below ℓ=100." A good name is often the entire output of Diamond 1.
 
-**Output of Diamond 1:** a fiber stub with a real name and at least one frontmatter placeholder — a decision label, an insight claim, or input/output IDs. Not a full block — just the hook that identifies what kind of thing this is.
+**Output of Diamond 1:** a fiber stub with a real name and a clear shape — enough to know whether this wants to become a decision note, a finding, a sub-analysis, or just a question worth tracking.
 
 ### Diamond 2: Design → Delivery
 
 **Design (diverge).** What are the real alternatives? For each, what would make it right or wrong? Trade-offs, excluded options, edge cases. This is where the Contrarian and Simplifier stances are most useful.
 
-**Delivery (converge).** Commit to a default, write the `excluded_reason` for each rejected option, identify inputs and outputs, stage the evidence. The fiber is now formalizable.
+**Delivery (converge).** Commit to a default, name what was rejected and why, identify inputs/outputs if they matter, and stage the evidence. Land the result in the fiber's outcome/body and, if the project uses additional YAML fields, add them there.
 
-**Output of Diamond 2:** frontmatter fields populated — `decisions` with options and default, `inputs`/`outputs` with IDs and types, `insights` with claim and evidence.
+**Output of Diamond 2:** a fiber that carries the conclusion clearly — in prose, and optionally in whatever project-owned YAML fields are actually useful.
 
 The two diamonds are sequential but the boundary is soft. If you find yourself naming alternatives before the thing is clear, back up to the ontology convergence point. If you converge too early on "this is a decision" when it is actually a question, the Design phase will feel forced — that is the cue to re-enter Wonder.
 
@@ -116,10 +116,10 @@ When the conversation is exploratory — no single topic, things are accumulatin
 
 | Item kind | What it looks like | Destination |
 |-----------|--------------------|-------------|
-| **Decision** | A choice between real alternatives | `decisions` block on a new or existing fiber |
-| **Finding** | A claim with at least the start of evidence | `insights` block |
-| **Sub-analysis** | "Compute X from Y" with identifiable inputs/outputs | New fiber with `inputs`/`outputs` stubs |
-| **Question** | An open thread worth tracking, not yet answered | Annotated fiber, `status: open` |
+| **Decision** | A choice between real alternatives | Decision fiber; body/outcome first, plus project-owned YAML if useful |
+| **Finding** | A claim with at least the start of evidence | Finding fiber; capture claim + evidence clearly |
+| **Sub-analysis** | "Compute X from Y" with identifiable inputs/outputs | New fiber; add YAML only if the project uses it |
+| **Question** | An open thread worth tracking, not yet answered | New fiber, `status: open` |
 | **Root-fiber change** | A pattern or gotcha that belongs in CLAUDE.md | Edit the root fiber |
 
 The ledger is your own working memory. **Do not surface it mid-conversation** unless the user asks or a flush cue fires.
@@ -159,21 +159,19 @@ Bad fits: routine decisions, the user has already committed, the dispute is styl
 
 ---
 
-## Mapping outputs to fiber frontmatter
+## Mapping outputs to fibers
 
-What comes out of the diamonds maps onto fiber frontmatter:
+What comes out of the diamonds maps onto fibers like this:
 
 | Diamond output | Fiber destination |
 |----------------|-------------------|
-| Wonder questions left open | New fiber, `status: open`, no structured frontmatter required |
-| Ontology convergence — "this IS a decision about X" | `decisions.<key>.label` on a new fiber |
-| Design alternatives with trade-offs | `decisions.<key>.options`; rejected options get `excluded: true` + `excluded_reason` |
-| Delivery — the commit | `decisions.<key>.default` |
-| Finding at end of Delivery | `insights.<key>` with `claim` + `evidence` |
-| Sub-analysis scope | `inputs` + `outputs` with IDs, types, optional `recipe` |
+| Wonder questions left open | New fiber, `status: open` |
+| Ontology convergence — "this IS a decision about X" | New or updated decision fiber |
+| Design alternatives with trade-offs | Body/outcome text, or project-owned YAML when that project uses it |
+| Delivery — the commit | Outcome + body that make the choice legible |
+| Finding at end of Delivery | Finding fiber with claim + evidence |
+| Sub-analysis scope | New fiber describing inputs, outputs, and method |
 | Process-level lesson that generalizes | Edit to root fiber / CLAUDE.md |
-
-See `formalization.md` for the tier ladder (Annotated → Formalized → Tempered) and the common frontmatter shapes.
 
 ---
 
@@ -187,4 +185,5 @@ See `formalization.md` for the tier ladder (Annotated → Formalized → Tempere
 - **Immutable outputs.** Nothing filed here is locked. Everything is editable; reversals are normal.
 - **Nine-minds overload.** Six stances is already generous. Add more only when a specific gap shows up, never preemptively.
 - **Interrogation without a ceiling.** Three questions is usually enough. If the user is getting irritated, stop asking and file what you have.
+- **Inventing YAML because a field exists.** Extra structure should earn its keep; otherwise let the body and outcome carry the meaning.
 - **Converging before the name is clear.** If Diamond 2 feels forced, Diamond 1 has not finished. Back up.
