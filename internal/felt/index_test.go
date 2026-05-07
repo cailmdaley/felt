@@ -1,8 +1,9 @@
 package felt
 
 import (
-	"time"
+	"os"
 	"testing"
+	"time"
 )
 
 func TestIndexSyncBuildsCitationsAndFTS(t *testing.T) {
@@ -300,5 +301,148 @@ func TestOpenIndexWaitsForConcurrentWriter(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("concurrent OpenIndex() did not complete after writer released lock")
+	}
+}
+
+func TestOpenIndexRetriesAfterBusyTimeout(t *testing.T) {
+	oldBusyTimeout := indexBusyTimeout
+	oldRetryDelays := indexSyncRetryDelays
+	indexBusyTimeout = 25 * time.Millisecond
+	indexSyncRetryDelays = []time.Duration{
+		25 * time.Millisecond,
+		50 * time.Millisecond,
+		100 * time.Millisecond,
+	}
+	t.Cleanup(func() {
+		indexBusyTimeout = oldBusyTimeout
+		indexSyncRetryDelays = oldRetryDelays
+	})
+
+	dir := t.TempDir()
+	storage := NewStorage(dir)
+	if err := storage.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	baseTime := time.Date(2026, 4, 10, 9, 0, 0, 0, time.UTC)
+	if err := storage.Write(&Felt{
+		ID:        "fiber-a",
+		Name:      "Fiber A",
+		CreatedAt: baseTime,
+	}); err != nil {
+		t.Fatalf("Write(fiber-a) error: %v", err)
+	}
+
+	idx, err := storage.OpenIndex()
+	if err != nil {
+		t.Fatalf("OpenIndex() error: %v", err)
+	}
+	defer idx.Close()
+
+	if _, err := idx.db.Exec(`BEGIN IMMEDIATE`); err != nil {
+		t.Fatalf("BEGIN IMMEDIATE error: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = idx.db.Exec(`ROLLBACK`)
+	})
+
+	if err := storage.Write(&Felt{
+		ID:        "fiber-b",
+		Name:      "Fiber B",
+		CreatedAt: baseTime.Add(time.Minute),
+	}); err != nil {
+		t.Fatalf("Write(fiber-b) error: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		second, err := storage.OpenIndex()
+		if err == nil {
+			err = second.Close()
+		}
+		done <- err
+	}()
+
+	time.Sleep(75 * time.Millisecond)
+	if _, err := idx.db.Exec(`COMMIT`); err != nil {
+		t.Fatalf("COMMIT error: %v", err)
+	}
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("concurrent OpenIndex() error after retry: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("concurrent OpenIndex() did not complete after writer released lock")
+	}
+}
+
+func TestIndexSyncDoesNotInventExternalEditAfterTypedEditorial(t *testing.T) {
+	dir := t.TempDir()
+	storage := NewStorage(dir)
+	if err := storage.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	baseTime := time.Date(2026, 4, 10, 9, 0, 0, 0, time.UTC)
+	fiber := &Felt{
+		ID:        "fiber-a",
+		Name:      "Fiber A",
+		CreatedAt: baseTime,
+		Body:      "before",
+	}
+	if err := storage.Write(fiber); err != nil {
+		t.Fatalf("Write(fiber-a) error: %v", err)
+	}
+
+	idx, err := storage.OpenIndex()
+	if err != nil {
+		t.Fatalf("OpenIndex() error: %v", err)
+	}
+	defer idx.Close()
+
+	time.Sleep(10 * time.Millisecond)
+	fiber.Body = "after"
+	if err := storage.Write(fiber); err != nil {
+		t.Fatalf("Write(updated fiber-a) error: %v", err)
+	}
+	data, err := os.ReadFile(storage.Path("fiber-a"))
+	if err != nil {
+		t.Fatalf("ReadFile(updated fiber-a) error: %v", err)
+	}
+	hash := HashBytes(data)
+	eventTime := time.Now().UTC().Add(time.Minute)
+	if err := idx.AppendEvent(Event{
+		FiberID:     "fiber-a",
+		OccurredAt:  eventTime,
+		Type:        EventEdit,
+		Actor:       "test-agent",
+		ContentHash: hash,
+	}); err != nil {
+		t.Fatalf("AppendEvent edit: %v", err)
+	}
+	if err := idx.AppendEvent(Event{
+		FiberID:    "fiber-a",
+		OccurredAt: eventTime.Add(time.Minute),
+		Type:       "review-comment",
+		Actor:      "test-reviewer",
+		Payload:    map[string]interface{}{"text": "looks good"},
+	}); err != nil {
+		t.Fatalf("AppendEvent typed editorial: %v", err)
+	}
+
+	if err := idx.Sync(storage); err != nil {
+		t.Fatalf("Sync() error: %v", err)
+	}
+	external, err := idx.QueryEvents(EventFilter{
+		FiberID: "fiber-a",
+		Types:   []string{EventExternalEdit},
+	})
+	if err != nil {
+		t.Fatalf("QueryEvents external_edit: %v", err)
+	}
+	if len(external) != 0 {
+		t.Fatalf("Sync recorded external_edit after typed editorial: %#v", external)
 	}
 }

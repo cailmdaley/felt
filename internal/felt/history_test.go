@@ -307,6 +307,58 @@ func TestTypedEditorialEventRoundTrip(t *testing.T) {
 	}
 }
 
+func TestLatestMechanicalHashIgnoresTypedEditorialEvents(t *testing.T) {
+	dir := t.TempDir()
+	storage := NewStorage(dir)
+	if err := storage.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	if err := storage.Write(&Felt{
+		ID:        "zeta",
+		Name:      "Zeta",
+		CreatedAt: time.Date(2026, 4, 12, 9, 0, 0, 0, time.UTC),
+		Body:      "first body",
+	}); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	idx, err := storage.OpenIndex()
+	if err != nil {
+		t.Fatalf("OpenIndex: %v", err)
+	}
+	defer idx.Close()
+
+	const editHash = "abc123"
+	eventTime := time.Now().UTC().Add(time.Minute)
+	if err := idx.AppendEvent(Event{
+		FiberID:     "zeta",
+		OccurredAt:  eventTime,
+		Type:        EventEdit,
+		Actor:       "test-agent",
+		ContentHash: editHash,
+	}); err != nil {
+		t.Fatalf("AppendEvent edit: %v", err)
+	}
+	if err := idx.AppendEvent(Event{
+		FiberID:    "zeta",
+		OccurredAt: eventTime.Add(time.Minute),
+		Type:       "review-comment",
+		Actor:      "test-reviewer",
+		Payload:    map[string]interface{}{"text": "please tighten this"},
+	}); err != nil {
+		t.Fatalf("AppendEvent typed editorial: %v", err)
+	}
+
+	hash, err := idx.LatestMechanicalHash("zeta")
+	if err != nil {
+		t.Fatalf("LatestMechanicalHash: %v", err)
+	}
+	if hash != editHash {
+		t.Fatalf("LatestMechanicalHash = %q, want %q", hash, editHash)
+	}
+}
+
 // TestHashFileMatchesHashBytes ensures the two helpers agree.
 func TestHashFileMatchesHashBytes(t *testing.T) {
 	dir := t.TempDir()

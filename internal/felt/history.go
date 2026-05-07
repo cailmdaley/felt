@@ -252,14 +252,18 @@ func (i *Index) QueryEvents(filter EventFilter) ([]Event, error) {
 }
 
 // LatestMechanicalHash returns the content_hash of the most recent
-// non-editorial event for a fiber, or empty string if there are none.
-// Used to detect external edits.
+// storage-owned mechanical event for a fiber, or empty string if there are
+// none. Typed editorial events are deliberately excluded even when their
+// event_type is not "editorial".
 func (i *Index) LatestMechanicalHash(fiberID string) (string, error) {
 	row := i.db.QueryRow(
 		`SELECT COALESCE(content_hash, '') FROM history_events
-		 WHERE fiber_id = ? AND event_type != ?
+		 WHERE fiber_id = ? AND event_type IN (?, ?, ?)
 		 ORDER BY occurred_at DESC, rowid DESC LIMIT 1`,
-		fiberID, EventEditorial,
+		fiberID,
+		EventAdd,
+		EventEdit,
+		EventExternalEdit,
 	)
 	var hash string
 	err := row.Scan(&hash)
@@ -276,9 +280,12 @@ func (i *Index) LatestMechanicalHash(fiberID string) (string, error) {
 func latestMechanicalHashTx(tx *sql.Tx, fiberID string) (string, error) {
 	row := tx.QueryRow(
 		`SELECT COALESCE(content_hash, '') FROM history_events
-		 WHERE fiber_id = ? AND event_type != ?
+		 WHERE fiber_id = ? AND event_type IN (?, ?, ?)
 		 ORDER BY occurred_at DESC, rowid DESC LIMIT 1`,
-		fiberID, EventEditorial,
+		fiberID,
+		EventAdd,
+		EventEdit,
+		EventExternalEdit,
 	)
 	var hash string
 	err := row.Scan(&hash)

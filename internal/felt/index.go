@@ -52,7 +52,7 @@ func OpenIndex(projectRoot string) (*Index, error) {
 	// Use a file: URI so the driver processes _pragma and _txlock params.
 	// busy_timeout is sorted first by the driver (see modernc.org/sqlite#198).
 	q := url.Values{}
-	q.Set("_pragma", "busy_timeout(5000)")
+	q.Set("_pragma", fmt.Sprintf("busy_timeout(%d)", indexBusyTimeout.Milliseconds()))
 	q.Add("_pragma", "journal_mode(WAL)")
 	q.Add("_pragma", "synchronous(NORMAL)")
 	q.Set("_txlock", "immediate")
@@ -164,9 +164,14 @@ func (i *Index) init() error {
 	return nil
 }
 
-// indexSyncRetries controls application-level retries when Sync reports
-// SQLITE_BUSY after the driver's built-in busy_timeout (5 s) is exhausted.
-// Each retry sleeps for an increasing interval before re-opening the DB.
+// indexBusyTimeout controls SQLite's built-in busy wait. Tests shrink it to
+// exercise the application-level retry loop without spending real seconds.
+var indexBusyTimeout = 5 * time.Second
+
+// indexSyncRetryDelays controls application-level retries when opening or
+// syncing the index reports SQLITE_BUSY after the driver's built-in
+// busy_timeout is exhausted. Each retry sleeps for an increasing interval
+// before re-opening the DB.
 var indexSyncRetryDelays = []time.Duration{
 	200 * time.Millisecond,
 	500 * time.Millisecond,
@@ -174,12 +179,19 @@ var indexSyncRetryDelays = []time.Duration{
 }
 
 // OpenIndex opens the index and syncs it against the current fiber tree.
-// If Sync returns SQLITE_BUSY (after the driver's built-in 5 s busy_timeout),
-// it retries up to len(indexSyncRetryDelays) more times with backoff.
+// If opening or syncing returns SQLITE_BUSY (after the driver's built-in
+// busy_timeout), it retries up to len(indexSyncRetryDelays) more times with
+// backoff.
 // After all retries are exhausted it returns ErrIndexBusy so callers can
 // degrade gracefully rather than propagating a raw SQLite error.
 func (s *Storage) OpenIndex() (*Index, error) {
 	root := filepath.Dir(s.root)
+	return openIndexWithBusyRetries(root, func(idx *Index) error {
+		return idx.Sync(s)
+	})
+}
+
+func openIndexWithBusyRetries(root string, sync func(*Index) error) (*Index, error) {
 	var lastBusy error
 	for attempt := 0; attempt <= len(indexSyncRetryDelays); attempt++ {
 		if attempt > 0 {
@@ -187,9 +199,16 @@ func (s *Storage) OpenIndex() (*Index, error) {
 		}
 		idx, err := OpenIndex(root)
 		if err != nil {
+			if isSQLiteBusyErr(err) {
+				lastBusy = err
+				continue
+			}
 			return nil, err
 		}
-		if err := idx.Sync(s); err != nil {
+		if sync == nil {
+			return idx, nil
+		}
+		if err := sync(idx); err != nil {
 			_ = idx.Close()
 			if isSQLiteBusyErr(err) {
 				lastBusy = err
@@ -210,7 +229,7 @@ func (s *Storage) OpenIndex() (*Index, error) {
 // the hashes match and stay quiet.
 func (s *Storage) OpenIndexNoSync() (*Index, error) {
 	root := filepath.Dir(s.root)
-	return OpenIndex(root)
+	return openIndexWithBusyRetries(root, nil)
 }
 
 func (i *Index) Sync(s *Storage) error {
