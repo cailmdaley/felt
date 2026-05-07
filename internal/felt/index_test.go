@@ -1,7 +1,9 @@
 package felt
 
 import (
+	"errors"
 	"os"
+	"sync"
 	"testing"
 	"time"
 )
@@ -305,17 +307,10 @@ func TestOpenIndexWaitsForConcurrentWriter(t *testing.T) {
 }
 
 func TestOpenIndexRetriesAfterBusyTimeout(t *testing.T) {
-	oldBusyTimeout := indexBusyTimeout
-	oldRetryDelays := indexSyncRetryDelays
-	indexBusyTimeout = 25 * time.Millisecond
-	indexSyncRetryDelays = []time.Duration{
+	setIndexBusyTimings(t, 25*time.Millisecond, []time.Duration{
 		25 * time.Millisecond,
 		50 * time.Millisecond,
 		100 * time.Millisecond,
-	}
-	t.Cleanup(func() {
-		indexBusyTimeout = oldBusyTimeout
-		indexSyncRetryDelays = oldRetryDelays
 	})
 
 	dir := t.TempDir()
@@ -375,6 +370,163 @@ func TestOpenIndexRetriesAfterBusyTimeout(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("concurrent OpenIndex() did not complete after writer released lock")
+	}
+}
+
+func TestOpenIndexReturnsErrIndexBusyAfterRetriesExhausted(t *testing.T) {
+	setIndexBusyTimings(t, 10*time.Millisecond, []time.Duration{
+		5 * time.Millisecond,
+		10 * time.Millisecond,
+	})
+
+	dir := t.TempDir()
+	storage := NewStorage(dir)
+	if err := storage.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	if err := storage.Write(&Felt{
+		ID:        "fiber-a",
+		Name:      "Fiber A",
+		CreatedAt: time.Date(2026, 4, 10, 9, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("Write(fiber-a) error: %v", err)
+	}
+
+	idx, err := storage.OpenIndex()
+	if err != nil {
+		t.Fatalf("OpenIndex() error: %v", err)
+	}
+	defer idx.Close()
+
+	if _, err := idx.db.Exec(`BEGIN IMMEDIATE`); err != nil {
+		t.Fatalf("BEGIN IMMEDIATE error: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = idx.db.Exec(`ROLLBACK`)
+	})
+
+	if err := storage.Write(&Felt{
+		ID:        "fiber-b",
+		Name:      "Fiber B",
+		CreatedAt: time.Date(2026, 4, 10, 10, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("Write(fiber-b) error: %v", err)
+	}
+
+	second, err := storage.OpenIndex()
+	if second != nil {
+		_ = second.Close()
+	}
+	if !errors.Is(err, ErrIndexBusy) {
+		t.Fatalf("OpenIndex() error = %v, want ErrIndexBusy", err)
+	}
+}
+
+func TestOpenIndexNoSyncRetriesAfterBusyTimeout(t *testing.T) {
+	setIndexBusyTimings(t, 25*time.Millisecond, []time.Duration{
+		25 * time.Millisecond,
+		50 * time.Millisecond,
+		100 * time.Millisecond,
+	})
+
+	dir := t.TempDir()
+	storage := NewStorage(dir)
+	if err := storage.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	if err := storage.Write(&Felt{
+		ID:        "fiber-a",
+		Name:      "Fiber A",
+		CreatedAt: time.Date(2026, 4, 10, 9, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("Write(fiber-a) error: %v", err)
+	}
+
+	idx, err := storage.OpenIndex()
+	if err != nil {
+		t.Fatalf("OpenIndex() error: %v", err)
+	}
+	defer idx.Close()
+
+	if _, err := idx.db.Exec(`BEGIN IMMEDIATE`); err != nil {
+		t.Fatalf("BEGIN IMMEDIATE error: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = idx.db.Exec(`ROLLBACK`)
+	})
+
+	done := make(chan error, 1)
+	go func() {
+		second, err := storage.OpenIndexNoSync()
+		if err == nil {
+			err = second.Close()
+		}
+		done <- err
+	}()
+
+	time.Sleep(75 * time.Millisecond)
+	if _, err := idx.db.Exec(`COMMIT`); err != nil {
+		t.Fatalf("COMMIT error: %v", err)
+	}
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("concurrent OpenIndexNoSync() error after retry: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("concurrent OpenIndexNoSync() did not complete after writer released lock")
+	}
+}
+
+func TestConcurrentOpenIndexCleanFastPath(t *testing.T) {
+	dir := t.TempDir()
+	storage := NewStorage(dir)
+	if err := storage.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	baseTime := time.Date(2026, 4, 10, 9, 0, 0, 0, time.UTC)
+	for _, fiber := range []*Felt{
+		{ID: "fiber-a", Name: "Fiber A", CreatedAt: baseTime},
+		{ID: "fiber-b", Name: "Fiber B", CreatedAt: baseTime.Add(time.Minute)},
+	} {
+		if err := storage.Write(fiber); err != nil {
+			t.Fatalf("Write(%s) error: %v", fiber.ID, err)
+		}
+	}
+
+	idx, err := storage.OpenIndex()
+	if err != nil {
+		t.Fatalf("OpenIndex() error: %v", err)
+	}
+	if err := idx.Close(); err != nil {
+		t.Fatalf("Close() error: %v", err)
+	}
+
+	var wg sync.WaitGroup
+	errs := make(chan error, 16)
+	for range 16 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			idx, err := storage.OpenIndex()
+			if err != nil {
+				errs <- err
+				return
+			}
+			if err := idx.Close(); err != nil {
+				errs <- err
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		t.Fatalf("concurrent clean OpenIndex() error: %v", err)
 	}
 }
 
@@ -445,4 +597,16 @@ func TestIndexSyncDoesNotInventExternalEditAfterTypedEditorial(t *testing.T) {
 	if len(external) != 0 {
 		t.Fatalf("Sync recorded external_edit after typed editorial: %#v", external)
 	}
+}
+
+func setIndexBusyTimings(t *testing.T, timeout time.Duration, delays []time.Duration) {
+	t.Helper()
+	oldBusyTimeout := indexBusyTimeout
+	oldRetryDelays := indexSyncRetryDelays
+	indexBusyTimeout = timeout
+	indexSyncRetryDelays = delays
+	t.Cleanup(func() {
+		indexBusyTimeout = oldBusyTimeout
+		indexSyncRetryDelays = oldRetryDelays
+	})
 }
