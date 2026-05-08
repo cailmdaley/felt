@@ -2,7 +2,6 @@
 package felt
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -550,99 +549,78 @@ func SplitFrontmatter(content []byte, includeBody bool) ([]byte, string, error) 
 	return splitFrontmatter(content, includeBody)
 }
 
-// Frontmatter must be delimited by --- lines.
+// Frontmatter must be delimited by exact column-0 --- lines.
 func splitFrontmatter(content []byte, includeBody bool) ([]byte, string, error) {
-	scanner := bufio.NewScanner(bytes.NewReader(content))
-
-	// First line must be ---
-	if !scanner.Scan() {
-		return nil, "", fmt.Errorf("empty file")
-	}
-	if strings.TrimSpace(scanner.Text()) != "---" {
-		return nil, "", fmt.Errorf("file must start with ---")
+	frontmatterStart, closingStart, bodyStart, err := frontmatterBounds(content)
+	if err != nil {
+		return nil, "", err
 	}
 
-	// Collect frontmatter until closing ---
-	var frontmatter bytes.Buffer
-	foundClosing := false
-	for scanner.Scan() {
-		line := scanner.Text()
-		if strings.TrimSpace(line) == "---" {
-			// Found closing delimiter
-			foundClosing = true
-			break
-		}
-		frontmatter.WriteString(line)
-		frontmatter.WriteString("\n")
-	}
-
-	if err := scanner.Err(); err != nil {
-		return nil, "", fmt.Errorf("scanning file: %w", err)
-	}
-
-	if !foundClosing {
-		return nil, "", fmt.Errorf("unclosed frontmatter (missing closing ---)")
-	}
-
+	frontmatter := content[frontmatterStart:closingStart]
 	if !includeBody {
-		return frontmatter.Bytes(), "", nil
+		return frontmatter, "", nil
 	}
 
-	// Rest is body
-	var body strings.Builder
-	for scanner.Scan() {
-		body.WriteString(scanner.Text())
-		body.WriteString("\n")
-	}
-
-	return frontmatter.Bytes(), body.String(), nil
+	return frontmatter, string(content[bodyStart:]), nil
 }
 
 // BodyStartLine returns the 1-based line number where body editing should
 // begin: the line after frontmatter, skipping a single blank separator line
 // when present.
 func BodyStartLine(content []byte) (int, error) {
-	scanner := bufio.NewScanner(bytes.NewReader(content))
+	_, _, bodyOffset, err := frontmatterBounds(content)
+	if err != nil {
+		return 0, err
+	}
+	bodyStartLine := 1 + bytes.Count(content[:bodyOffset], []byte("\n"))
+	line, next := readLine(content, bodyOffset)
+	if isBlankLine(line) && next > bodyOffset {
+		bodyStartLine++
+	}
+	return bodyStartLine, nil
+}
 
-	line := 0
-	if !scanner.Scan() {
-		if err := scanner.Err(); err != nil {
-			return 0, fmt.Errorf("scanning file: %w", err)
+func frontmatterBounds(content []byte) (frontmatterStart, closingStart, bodyStart int, err error) {
+	line, next := readLine(content, 0)
+	if next == 0 {
+		return 0, 0, 0, fmt.Errorf("empty file")
+	}
+	if !isDocumentDelimiterLine(line) {
+		return 0, 0, 0, fmt.Errorf("file must start with ---")
+	}
+
+	for pos := next; pos < len(content); {
+		lineStart := pos
+		line, lineNext := readLine(content, pos)
+		if isDocumentDelimiterLine(line) {
+			return next, lineStart, lineNext, nil
 		}
-		return 0, fmt.Errorf("empty file")
-	}
-	line++
-	if strings.TrimSpace(scanner.Text()) != "---" {
-		return 0, fmt.Errorf("file must start with ---")
+		pos = lineNext
 	}
 
-	foundClosing := false
-	for scanner.Scan() {
-		line++
-		if strings.TrimSpace(scanner.Text()) == "---" {
-			foundClosing = true
-			break
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		return 0, fmt.Errorf("scanning file: %w", err)
-	}
-	if !foundClosing {
-		return 0, fmt.Errorf("unclosed frontmatter (missing closing ---)")
-	}
+	return 0, 0, 0, fmt.Errorf("unclosed frontmatter (missing closing ---)")
+}
 
-	bodyStart := line + 1
-	if scanner.Scan() {
-		line++
-		if strings.TrimSpace(scanner.Text()) == "" {
-			bodyStart = line + 1
-		}
+func readLine(content []byte, start int) ([]byte, int) {
+	if start >= len(content) {
+		return nil, start
 	}
-	if err := scanner.Err(); err != nil {
-		return 0, fmt.Errorf("scanning file: %w", err)
+	end := bytes.IndexByte(content[start:], '\n')
+	if end == -1 {
+		return content[start:], len(content)
 	}
+	lineEnd := start + end
+	return content[start:lineEnd], lineEnd + 1
+}
 
-	return bodyStart, nil
+func isDocumentDelimiterLine(line []byte) bool {
+	line = bytes.TrimSuffix(line, []byte("\r"))
+	return bytes.Equal(line, []byte("---"))
+}
+
+func isBlankLine(line []byte) bool {
+	line = bytes.TrimSuffix(line, []byte("\r"))
+	return len(bytes.TrimSpace(line)) == 0
 }
 
 // Marshal serializes a Felt to markdown with YAML frontmatter.

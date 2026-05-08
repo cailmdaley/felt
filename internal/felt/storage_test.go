@@ -394,6 +394,37 @@ Body should never be read.
 	}
 }
 
+func TestReadFrontmatterRespectsBlockScalarMarkers(t *testing.T) {
+	content := strings.NewReader(`---
+name: Standing Inbox
+outcome: |-
+  first run
+  ---
+  second run
+shuttle:
+  enabled: true
+tempered: true
+---
+
+Body should never be read.
+`)
+
+	frontmatter, err := readFrontmatter(content)
+	if err != nil {
+		t.Fatalf("readFrontmatter() error: %v", err)
+	}
+
+	got := string(frontmatter)
+	for _, want := range []string{"  ---", "shuttle:", "tempered: true"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("frontmatter = %q, want %q", got, want)
+		}
+	}
+	if strings.Contains(got, "Body should never be read.") {
+		t.Errorf("frontmatter = %q, should not include body", got)
+	}
+}
+
 func TestFrontmatterHasTopLevelFields(t *testing.T) {
 	frontmatter := []byte(`name: Test
 status: active
@@ -409,6 +440,24 @@ shuttle:
 	}
 	if frontmatterHasTopLevelFields(frontmatter, []string{"missing"}) {
 		t.Fatal("missing field should not match")
+	}
+}
+
+func TestFrontmatterHasTopLevelFieldsAfterBlockScalarMarker(t *testing.T) {
+	frontmatter := []byte(`name: Standing Inbox
+outcome: |-
+  first run
+  ---
+  second run
+shuttle:
+  enabled: true
+tempered: true
+`)
+	if !frontmatterHasTopLevelFields(frontmatter, []string{"name", "outcome", "shuttle", "tempered"}) {
+		t.Fatal("expected top-level fields after block scalar marker to match")
+	}
+	if frontmatterHasTopLevelFields(frontmatter, []string{"enabled"}) {
+		t.Fatal("nested field should not match as top-level")
 	}
 }
 

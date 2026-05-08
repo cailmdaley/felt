@@ -271,6 +271,92 @@ This body should not be parsed.
 	}
 }
 
+func TestParseFrontmatterBlockScalarDocumentMarkers(t *testing.T) {
+	tests := []struct {
+		name      string
+		indicator string
+	}{
+		{name: "literal strip", indicator: "|-"},
+		{name: "literal clip", indicator: "|"},
+		{name: "folded strip", indicator: ">-"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			content := []byte(`---
+name: Standing Inbox
+status: active
+created-at: 2026-05-08T10:00:00Z
+outcome: ` + tt.indicator + `
+  2026-05-07 | reviewed
+
+  ---
+
+  2026-05-08 | reviewed
+shuttle:
+  enabled: true
+  kind: standing
+tempered: true
+---
+
+Body with a thematic break below.
+
+---
+`)
+
+			f, err := Parse("loom/email/standing-inbox-triage", content)
+			if err != nil {
+				t.Fatalf("Parse() error: %v", err)
+			}
+			if !strings.Contains(f.Outcome, "---") {
+				t.Fatalf("Outcome = %q, want embedded document marker text", f.Outcome)
+			}
+			if mappingValueNode(f.ExtraFields["shuttle"], "enabled") == nil {
+				t.Fatalf("shuttle extra field missing enabled: %#v", f.ExtraFields["shuttle"])
+			}
+			if f.ExtraFields["tempered"] == nil {
+				t.Fatal("tempered extra field missing")
+			}
+			if !strings.Contains(f.Body, "Body with a thematic break below.") || !strings.Contains(f.Body, "---") {
+				t.Fatalf("Body = %q, want body after closing frontmatter", f.Body)
+			}
+		})
+	}
+}
+
+func TestParseWithModeMetadataOnlyPreservesFieldsAfterBlockScalarMarker(t *testing.T) {
+	content := []byte(`---
+name: Standing Inbox
+status: active
+created-at: 2026-05-08T10:00:00Z
+outcome: |-
+  first run
+  ---
+  second run
+shuttle:
+  enabled: true
+  kind: standing
+tempered: true
+---
+
+This body should not be parsed.
+`)
+
+	f, err := ParseWithMode("loom/email/standing-inbox-triage", content, ParseMetadataOnly)
+	if err != nil {
+		t.Fatalf("ParseWithMode() error: %v", err)
+	}
+	if f.Body != "" {
+		t.Fatalf("Body = %q, want empty for metadata-only parse", f.Body)
+	}
+	if mappingValueNode(f.ExtraFields["shuttle"], "kind") == nil {
+		t.Fatalf("shuttle extra field missing kind: %#v", f.ExtraFields["shuttle"])
+	}
+	if f.ExtraFields["tempered"] == nil {
+		t.Fatal("tempered extra field missing")
+	}
+}
+
 func TestParseInvalid(t *testing.T) {
 	tests := []struct {
 		name    string

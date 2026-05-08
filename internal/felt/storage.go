@@ -1,7 +1,6 @@
 package felt
 
 import (
-	"bufio"
 	"bytes"
 	"errors"
 	"fmt"
@@ -13,6 +12,8 @@ import (
 	"slices"
 	"strings"
 	"syscall"
+
+	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -1023,95 +1024,54 @@ func fileFrontmatterHasTopLevelFields(path string, fields []string) (bool, error
 }
 
 func frontmatterHasTopLevelFields(frontmatter []byte, fields []string) bool {
-	wrapped := make([]byte, 0, len(frontmatter)+8)
-	wrapped = append(wrapped, "---\n"...)
-	wrapped = append(wrapped, frontmatter...)
-	wrapped = append(wrapped, "---\n"...)
-	matched, _ := scanFrontmatterTopLevelFields(bytes.NewReader(wrapped), fields)
-	return matched
+	if len(fields) == 0 {
+		return true
+	}
+
+	remaining := make(map[string]struct{}, len(fields))
+	for _, field := range fields {
+		remaining[field] = struct{}{}
+	}
+
+	var node yaml.Node
+	if err := yaml.Unmarshal(frontmatter, &node); err != nil || len(node.Content) == 0 {
+		return false
+	}
+	mapping := node.Content[0]
+	if mapping.Kind != yaml.MappingNode {
+		return false
+	}
+	for i := 0; i+1 < len(mapping.Content); i += 2 {
+		delete(remaining, mapping.Content[i].Value)
+		if len(remaining) == 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func scanFrontmatterTopLevelFields(r io.Reader, fields []string) (bool, error) {
 	if len(fields) == 0 {
 		return true, nil
 	}
-	remaining := make(map[string]struct{}, len(fields))
-	for _, field := range fields {
-		remaining[field] = struct{}{}
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return false, fmt.Errorf("reading file: %w", err)
 	}
-
-	scanner := bufio.NewScanner(r)
-	if !scanner.Scan() {
-		if err := scanner.Err(); err != nil {
-			return false, fmt.Errorf("scanning file: %w", err)
-		}
-		return false, fmt.Errorf("empty file")
+	frontmatter, _, err := splitFrontmatter(data, false)
+	if err != nil {
+		return false, err
 	}
-	if strings.TrimSpace(scanner.Text()) != "---" {
-		return false, fmt.Errorf("file must start with ---")
-	}
-
-	for scanner.Scan() {
-		line := scanner.Text()
-		if strings.TrimSpace(line) == "---" {
-			return len(remaining) == 0, nil
-		}
-		if line == "" || strings.HasPrefix(line, " ") || strings.HasPrefix(line, "\t") {
-			continue
-		}
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
-			continue
-		}
-		colon := strings.Index(trimmed, ":")
-		if colon < 0 {
-			continue
-		}
-		key := strings.Trim(strings.TrimSpace(trimmed[:colon]), `"'`)
-		delete(remaining, key)
-		if len(remaining) == 0 {
-			return true, nil
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		return false, fmt.Errorf("scanning file: %w", err)
-	}
-	return false, fmt.Errorf("unclosed frontmatter (missing closing ---)")
+	return frontmatterHasTopLevelFields(frontmatter, fields), nil
 }
 
 func readFrontmatter(r io.Reader) ([]byte, error) {
-	scanner := bufio.NewScanner(r)
-
-	if !scanner.Scan() {
-		if err := scanner.Err(); err != nil {
-			return nil, fmt.Errorf("scanning file: %w", err)
-		}
-		return nil, fmt.Errorf("empty file")
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return nil, fmt.Errorf("reading file: %w", err)
 	}
-	if strings.TrimSpace(scanner.Text()) != "---" {
-		return nil, fmt.Errorf("file must start with ---")
-	}
-
-	var frontmatter strings.Builder
-	foundClosing := false
-	for scanner.Scan() {
-		line := scanner.Text()
-		if strings.TrimSpace(line) == "---" {
-			foundClosing = true
-			break
-		}
-		frontmatter.WriteString(line)
-		frontmatter.WriteByte('\n')
-	}
-
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("scanning file: %w", err)
-	}
-	if !foundClosing {
-		return nil, fmt.Errorf("unclosed frontmatter (missing closing ---)")
-	}
-
-	return []byte(frontmatter.String()), nil
+	frontmatter, _, err := splitFrontmatter(data, false)
+	return frontmatter, err
 }
 
 func (s *Storage) nextAvailableMigrationID(baseID string, reserved map[string]struct{}) (string, error) {
