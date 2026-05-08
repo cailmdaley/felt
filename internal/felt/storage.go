@@ -571,12 +571,32 @@ func (s *Storage) ListMetadata() ([]*Felt, error) {
 	return s.listWithMode(ParseMetadataOnly, false)
 }
 
+// ListMetadataHavingFrontmatterFields returns metadata for fibers whose raw
+// frontmatter contains all requested top-level keys. It is a narrow listing
+// path for machine consumers that need only one tool-owned namespace (for
+// example, every fiber with a `shuttle:` block) and should not pay a full YAML
+// parse for unrelated fibers.
+func (s *Storage) ListMetadataHavingFrontmatterFields(fields []string) ([]*Felt, error) {
+	return s.listWithModeHavingFrontmatterFields(ParseMetadataOnly, false, fields)
+}
+
 // ListMetadataWithModTime returns metadata plus file modification times.
 func (s *Storage) ListMetadataWithModTime() ([]*Felt, error) {
 	return s.listWithMode(ParseMetadataOnly, true)
 }
 
+// ListMetadataWithModTimeHavingFrontmatterFields returns metadata plus file
+// modification times for fibers whose raw frontmatter contains all requested
+// top-level keys.
+func (s *Storage) ListMetadataWithModTimeHavingFrontmatterFields(fields []string) ([]*Felt, error) {
+	return s.listWithModeHavingFrontmatterFields(ParseMetadataOnly, true, fields)
+}
+
 func (s *Storage) listWithMode(mode ParseMode, includeModTime bool) ([]*Felt, error) {
+	return s.listWithModeHavingFrontmatterFields(mode, includeModTime, nil)
+}
+
+func (s *Storage) listWithModeHavingFrontmatterFields(mode ParseMode, includeModTime bool, fields []string) ([]*Felt, error) {
 	files, err := s.listFiberFiles()
 	if err != nil {
 		return nil, err
@@ -584,10 +604,28 @@ func (s *Storage) listWithMode(mode ParseMode, includeModTime bool) ([]*Felt, er
 
 	var felts []*Felt
 	for _, file := range files {
-		f, err := s.readPathWithMode(file.path, file.id, mode)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "warning: failed to parse %s: %v\n", file.path, err)
-			continue
+		var f *Felt
+		if len(fields) > 0 && mode == ParseMetadataOnly {
+			matched, err := fileFrontmatterHasTopLevelFields(file.path, fields)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "warning: failed to parse %s: %v\n", file.path, err)
+				continue
+			}
+			if !matched {
+				continue
+			}
+			f, err = s.readPathWithMode(file.path, file.id, mode)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "warning: failed to parse %s: %v\n", file.path, err)
+				continue
+			}
+		} else {
+			var err error
+			f, err = s.readPathWithMode(file.path, file.id, mode)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "warning: failed to parse %s: %v\n", file.path, err)
+				continue
+			}
 		}
 		if includeModTime {
 			if info, err := os.Stat(file.path); err == nil {
@@ -957,17 +995,88 @@ func FindProjectRoot() (string, error) {
 }
 
 func readMetadataFile(path, id string) (*Felt, error) {
+	frontmatter, err := readFrontmatterFile(path)
+	if err != nil {
+		return nil, err
+	}
+	return parseFrontmatter(id, frontmatter)
+}
+
+func readFrontmatterFile(path string) ([]byte, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
 	defer file.Close()
 
-	frontmatter, err := readFrontmatter(file)
+	return readFrontmatter(file)
+}
+
+func fileFrontmatterHasTopLevelFields(path string, fields []string) (bool, error) {
+	file, err := os.Open(path)
 	if err != nil {
-		return nil, err
+		return false, err
 	}
-	return parseFrontmatter(id, frontmatter)
+	defer file.Close()
+
+	return scanFrontmatterTopLevelFields(file, fields)
+}
+
+func frontmatterHasTopLevelFields(frontmatter []byte, fields []string) bool {
+	wrapped := make([]byte, 0, len(frontmatter)+8)
+	wrapped = append(wrapped, "---\n"...)
+	wrapped = append(wrapped, frontmatter...)
+	wrapped = append(wrapped, "---\n"...)
+	matched, _ := scanFrontmatterTopLevelFields(bytes.NewReader(wrapped), fields)
+	return matched
+}
+
+func scanFrontmatterTopLevelFields(r io.Reader, fields []string) (bool, error) {
+	if len(fields) == 0 {
+		return true, nil
+	}
+	remaining := make(map[string]struct{}, len(fields))
+	for _, field := range fields {
+		remaining[field] = struct{}{}
+	}
+
+	scanner := bufio.NewScanner(r)
+	if !scanner.Scan() {
+		if err := scanner.Err(); err != nil {
+			return false, fmt.Errorf("scanning file: %w", err)
+		}
+		return false, fmt.Errorf("empty file")
+	}
+	if strings.TrimSpace(scanner.Text()) != "---" {
+		return false, fmt.Errorf("file must start with ---")
+	}
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.TrimSpace(line) == "---" {
+			return len(remaining) == 0, nil
+		}
+		if line == "" || strings.HasPrefix(line, " ") || strings.HasPrefix(line, "\t") {
+			continue
+		}
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		colon := strings.Index(trimmed, ":")
+		if colon < 0 {
+			continue
+		}
+		key := strings.Trim(strings.TrimSpace(trimmed[:colon]), `"'`)
+		delete(remaining, key)
+		if len(remaining) == 0 {
+			return true, nil
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return false, fmt.Errorf("scanning file: %w", err)
+	}
+	return false, fmt.Errorf("unclosed frontmatter (missing closing ---)")
 }
 
 func readFrontmatter(r io.Reader) ([]byte, error) {

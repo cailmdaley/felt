@@ -260,6 +260,13 @@ inputs:
 insights:
   stability:
     claim: Posterior is stable to jackknife choice
+depends_on:
+  - upstream-fiber
+tempered: false
+shuttle:
+  enabled: true
+  kind: oneshot
+  agent: codex
 ---
 `
 	if err := os.WriteFile(fiber2Path, []byte(fiber2Structured), 0644); err != nil {
@@ -279,6 +286,38 @@ insights:
 	out = mustFelt(t, dir, "show", fiber2ID, "--field", "insights")
 	if !strings.Contains(out, "stability:") || !strings.Contains(out, "claim: Posterior is stable to jackknife choice") {
 		t.Fatalf("opaque insights field: unexpected output:\n%s", out)
+	}
+	out = mustFelt(t, dir, "ls", "--json", "--has-field", "shuttle", "--json-field", "id,shuttle,depends_on,tempered")
+	var projected []map[string]any
+	if err := json.Unmarshal([]byte(out), &projected); err != nil {
+		t.Fatalf("ls --json projected fields: invalid json: %v\n%s", err, out)
+	}
+	if len(projected) != 1 {
+		t.Fatalf("ls --json --has-field shuttle: expected one projected fiber, got %#v", projected)
+	}
+	if projected[0]["id"] != fiber2ID {
+		t.Fatalf("projected id = %#v, want %q", projected[0]["id"], fiber2ID)
+	}
+	if _, ok := projected[0]["name"]; ok {
+		t.Fatalf("projected JSON should omit unrequested name field: %#v", projected[0])
+	}
+	shuttle, ok := projected[0]["shuttle"].(map[string]any)
+	if !ok || shuttle["agent"] != "codex" {
+		t.Fatalf("projected shuttle field = %#v, want agent codex", projected[0]["shuttle"])
+	}
+	deps, ok := projected[0]["depends_on"].([]any)
+	if !ok || len(deps) != 1 || deps[0] != "upstream-fiber" {
+		t.Fatalf("projected depends_on = %#v, want [upstream-fiber]", projected[0]["depends_on"])
+	}
+	if projected[0]["tempered"] != false {
+		t.Fatalf("projected tempered = %#v, want false", projected[0]["tempered"])
+	}
+	out, err = felt(dir, "ls", "--json-field", "id")
+	if err == nil {
+		t.Fatalf("ls --json-field without --json: expected error, got %s", out)
+	}
+	if !strings.Contains(out, "--json-field requires --json") {
+		t.Fatalf("ls --json-field without --json: unexpected error output %s", out)
 	}
 	out, err = felt(dir, "edit", fiber2ID)
 	if err == nil {

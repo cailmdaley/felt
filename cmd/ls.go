@@ -14,13 +14,15 @@ import (
 )
 
 var (
-	lsStatus  string
-	lsTags    []string
-	lsRecent  int
-	lsBody    bool
-	lsExact   bool
-	lsRegex   bool
-	treeDepth int
+	lsStatus     string
+	lsTags       []string
+	lsRecent     int
+	lsBody       bool
+	lsExact      bool
+	lsRegex      bool
+	lsHasFields  []string
+	lsJSONFields []string
+	treeDepth    int
 )
 
 var lsCmd = &cobra.Command{
@@ -54,6 +56,11 @@ Use --body with query to include body search, and with --json to emit body text.
 		if len(args) == 1 {
 			query = args[0]
 		}
+		hasFields := splitListFlag(lsHasFields)
+		jsonFields := splitListFlag(lsJSONFields)
+		if len(jsonFields) > 0 && !jsonOutput {
+			return fmt.Errorf("--json-field requires --json")
+		}
 
 		// Compile regex if needed
 		var re *regexp.Regexp
@@ -86,10 +93,19 @@ Use --body with query to include body search, and with --json to emit body text.
 			}
 		}
 		var felts []*felt.Felt
+		frontmatterFields, canPrefilterFrontmatter := frontmatterPrefilterFields(hasFields)
 		if jsonOutput {
-			felts, err = storage.ListMetadataWithModTime()
+			if canPrefilterFrontmatter && len(frontmatterFields) > 0 {
+				felts, err = storage.ListMetadataWithModTimeHavingFrontmatterFields(frontmatterFields)
+			} else {
+				felts, err = storage.ListMetadataWithModTime()
+			}
 		} else {
-			felts, err = storage.ListMetadata()
+			if canPrefilterFrontmatter && len(frontmatterFields) > 0 {
+				felts, err = storage.ListMetadataHavingFrontmatterFields(frontmatterFields)
+			} else {
+				felts, err = storage.ListMetadata()
+			}
 		}
 		if err != nil {
 			return err
@@ -98,7 +114,7 @@ Use --body with query to include body search, and with --json to emit body text.
 		// If any filter is active (tags, query, recent) and -s wasn't explicitly set,
 		// widen to all statuses. Bare `felt ls` stays open+active (actionable view).
 		statusExplicit := cmd.Flags().Changed("status")
-		hasFilters := len(lsTags) > 0 || query != "" || lsRecent > 0
+		hasFilters := len(lsTags) > 0 || len(hasFields) > 0 || query != "" || lsRecent > 0
 		effectiveStatus := lsStatus
 		if !statusExplicit && hasFilters {
 			effectiveStatus = "all"
@@ -132,6 +148,19 @@ Use --body with query to include body search, and with --json to emit body text.
 				hasAll := true
 				for _, tag := range lsTags {
 					if !f.HasTag(tag) {
+						hasAll = false
+						break
+					}
+				}
+				if !hasAll {
+					continue
+				}
+			}
+
+			if len(hasFields) > 0 {
+				hasAll := true
+				for _, field := range hasFields {
+					if !feltHasField(f, field) {
 						hasAll = false
 						break
 					}
@@ -227,6 +256,13 @@ Use --body with query to include body search, and with --json to emit body text.
 					f.Body = ""
 				}
 			}
+			if len(jsonFields) > 0 {
+				projected, err := projectFeltsJSON(filtered, jsonFields)
+				if err != nil {
+					return err
+				}
+				return outputJSON(projected)
+			}
 			return outputJSON(filtered)
 		}
 
@@ -262,6 +298,129 @@ func init() {
 	lsCmd.Flags().BoolVar(&lsBody, "body", false, "Include body search for queries and body field in JSON output")
 	lsCmd.Flags().BoolVarP(&lsExact, "exact", "e", false, "Exact name match only (with query)")
 	lsCmd.Flags().BoolVarP(&lsRegex, "regex", "r", false, "Treat query as regular expression")
+	lsCmd.Flags().StringArrayVar(&lsHasFields, "has-field", nil, "Filter to fibers with this top-level frontmatter/JSON field (repeatable or comma-separated)")
+	lsCmd.Flags().StringArrayVar(&lsJSONFields, "json-field", nil, "With --json, emit only this top-level field (repeatable or comma-separated)")
+}
+
+func splitListFlag(values []string) []string {
+	var out []string
+	for _, value := range values {
+		for _, part := range strings.Split(value, ",") {
+			part = strings.TrimSpace(part)
+			if part != "" {
+				out = append(out, part)
+			}
+		}
+	}
+	return out
+}
+
+func feltHasField(f *felt.Felt, field string) bool {
+	switch field {
+	case "id":
+		return f.ID != ""
+	case "name":
+		return f.Name != ""
+	case "status":
+		return f.Status != ""
+	case "tags":
+		return len(f.Tags) > 0
+	case "created_at", "created-at":
+		return !f.CreatedAt.IsZero()
+	case "closed_at", "closed-at":
+		return f.ClosedAt != nil
+	case "outcome":
+		return f.Outcome != ""
+	case "due":
+		return f.Due != nil
+	case "description":
+		return f.Description != ""
+	case "body":
+		return f.Body != ""
+	case "modified_at", "modified-at":
+		return !f.ModifiedAt.IsZero()
+	case "entry_point", "entry-point":
+		return f.EntryPoint
+	default:
+		_, ok := f.ExtraFields[field]
+		return ok
+	}
+}
+
+func frontmatterPrefilterFields(fields []string) ([]string, bool) {
+	var frontmatterFields []string
+	for _, field := range fields {
+		switch field {
+		case "id":
+			// Every discovered fiber has an id; it does not need a frontmatter gate.
+		case "created_at":
+			frontmatterFields = append(frontmatterFields, "created-at")
+		case "closed_at":
+			frontmatterFields = append(frontmatterFields, "closed-at")
+		case "modified_at", "modified-at", "body", "entry_point", "entry-point":
+			return nil, false
+		default:
+			frontmatterFields = append(frontmatterFields, field)
+		}
+	}
+	return frontmatterFields, true
+}
+
+func projectFeltsJSON(felts []*felt.Felt, fields []string) ([]map[string]interface{}, error) {
+	projected := make([]map[string]interface{}, 0, len(felts))
+	for _, f := range felts {
+		item := make(map[string]interface{}, len(fields))
+		for _, field := range fields {
+			value, ok, err := feltJSONField(f, field)
+			if err != nil {
+				return nil, err
+			}
+			if ok {
+				item[field] = value
+			}
+		}
+		projected = append(projected, item)
+	}
+	return projected, nil
+}
+
+func feltJSONField(f *felt.Felt, field string) (interface{}, bool, error) {
+	switch field {
+	case "id":
+		return f.ID, true, nil
+	case "name":
+		return f.Name, f.Name != "", nil
+	case "status":
+		return f.Status, f.Status != "", nil
+	case "tags":
+		return f.Tags, len(f.Tags) > 0, nil
+	case "created_at", "created-at":
+		return f.CreatedAt, !f.CreatedAt.IsZero(), nil
+	case "closed_at", "closed-at":
+		return f.ClosedAt, f.ClosedAt != nil, nil
+	case "outcome":
+		return f.Outcome, f.Outcome != "", nil
+	case "due":
+		return f.Due, f.Due != nil, nil
+	case "description":
+		return f.Description, f.Description != "", nil
+	case "body":
+		return f.Body, f.Body != "", nil
+	case "modified_at", "modified-at":
+		return f.ModifiedAt, !f.ModifiedAt.IsZero(), nil
+	case "entry_point", "entry-point":
+		return f.EntryPoint, f.EntryPoint, nil
+	default:
+		node, ok := f.ExtraFields[field]
+		if !ok || node == nil {
+			return nil, false, nil
+		}
+		var value interface{}
+		if err := node.Decode(&value); err != nil {
+			return nil, false, fmt.Errorf("decode extra field %q: %w", field, err)
+		}
+		return value, true, nil
+	}
 }
 
 // matchesQuery reports whether f matches the query by substring or regex.

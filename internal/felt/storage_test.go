@@ -278,6 +278,63 @@ func TestStorageListMetadataWithModTimePopulatesModifiedAt(t *testing.T) {
 	}
 }
 
+func TestStorageListMetadataHavingFrontmatterFields(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStorage(dir)
+	s.Init()
+
+	shuttleDir := filepath.Join(dir, DirName, "with-shuttle")
+	if err := os.MkdirAll(shuttleDir, 0755); err != nil {
+		t.Fatalf("mkdir shuttle fixture: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(shuttleDir, "with-shuttle.md"), []byte(`---
+name: With Shuttle
+status: active
+created-at: 2026-05-08T00:00:00Z
+shuttle:
+  enabled: true
+  agent: codex
+---
+
+Body should not be hydrated.
+`), 0644); err != nil {
+		t.Fatalf("write shuttle fixture: %v", err)
+	}
+
+	plainDir := filepath.Join(dir, DirName, "plain")
+	if err := os.MkdirAll(plainDir, 0755); err != nil {
+		t.Fatalf("mkdir plain fixture: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(plainDir, "plain.md"), []byte(`---
+name: Plain
+status: active
+created-at: 2026-05-08T00:00:00Z
+---
+`), 0644); err != nil {
+		t.Fatalf("write plain fixture: %v", err)
+	}
+
+	felts, err := s.ListMetadataWithModTimeHavingFrontmatterFields([]string{"shuttle"})
+	if err != nil {
+		t.Fatalf("ListMetadataWithModTimeHavingFrontmatterFields() error: %v", err)
+	}
+	if len(felts) != 1 {
+		t.Fatalf("filtered list returned %d felts, want 1: %#v", len(felts), felts)
+	}
+	if felts[0].ID != "with-shuttle" {
+		t.Fatalf("filtered list ID = %q, want with-shuttle", felts[0].ID)
+	}
+	if felts[0].Body != "" {
+		t.Fatalf("filtered metadata list hydrated body: %q", felts[0].Body)
+	}
+	if felts[0].ModifiedAt.IsZero() {
+		t.Fatal("ModifiedAt should be populated when explicitly requested")
+	}
+	if _, ok := felts[0].ExtraFields["shuttle"]; !ok {
+		t.Fatal("filtered list should preserve matching extra frontmatter")
+	}
+}
+
 func TestStorageFindMetadataSkipsBody(t *testing.T) {
 	dir := t.TempDir()
 	s := NewStorage(dir)
@@ -334,6 +391,24 @@ Body should never be read.
 	}
 	if strings.Contains(got, "Body should never be read.") {
 		t.Errorf("frontmatter = %q, should not include body", got)
+	}
+}
+
+func TestFrontmatterHasTopLevelFields(t *testing.T) {
+	frontmatter := []byte(`name: Test
+status: active
+shuttle:
+  enabled: true
+"quoted-key": value
+`)
+	if !frontmatterHasTopLevelFields(frontmatter, []string{"name", "shuttle", "quoted-key"}) {
+		t.Fatal("expected top-level fields to match")
+	}
+	if frontmatterHasTopLevelFields(frontmatter, []string{"enabled"}) {
+		t.Fatal("nested field should not match as top-level")
+	}
+	if frontmatterHasTopLevelFields(frontmatter, []string{"missing"}) {
+		t.Fatal("missing field should not match")
 	}
 }
 
