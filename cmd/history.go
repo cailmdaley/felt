@@ -66,7 +66,9 @@ The append subcommand records a new editorial event:
 			return err
 		}
 
-		idx, err := storage.OpenIndex()
+		// History rows live in the append-only history_events table; reading
+		// them must not force a full fiber/FTS index sync.
+		idx, err := storage.OpenIndexNoSync()
 		if err != nil {
 			if errors.Is(err, felt.ErrIndexBusy) {
 				fmt.Fprintf(os.Stderr, "warning: index busy — history unavailable\n")

@@ -231,6 +231,7 @@ func TestShowIncludesIndexedCitations(t *testing.T) {
 			t.Fatalf("Write(%s) error: %v", fiber.ID, err)
 		}
 	}
+	syncShowIndex(t, storage)
 
 	reset := saveShowGlobals()
 	defer reset()
@@ -259,6 +260,7 @@ func TestShowIncludesIndexedConsumers(t *testing.T) {
 			t.Fatalf("Write(%s) error: %v", fiber.ID, err)
 		}
 	}
+	syncShowIndex(t, storage)
 
 	reset := saveShowGlobals()
 	defer reset()
@@ -400,6 +402,17 @@ func mustParseTime(t *testing.T, value string) time.Time {
 		t.Fatalf("parse time %q: %v", value, err)
 	}
 	return ts
+}
+
+func syncShowIndex(t *testing.T, storage *felt.Storage) {
+	t.Helper()
+	idx, err := storage.OpenIndex()
+	if err != nil {
+		t.Fatalf("OpenIndex() error: %v", err)
+	}
+	if err := idx.Close(); err != nil {
+		t.Fatalf("Close index: %v", err)
+	}
 }
 
 func TestShowFieldRefusesJSON(t *testing.T) {

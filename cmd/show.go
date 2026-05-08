@@ -144,7 +144,11 @@ Targeted views:
 		var recentEditorial string
 		var recentMechanical []felt.Event
 		if detail == DepthSummary || detail == DepthFull {
-			idx, idxErr := storage.OpenIndex()
+			// Ordinary show is a continuity/read path, so keep it responsive
+			// even when the search/link index is stale. Explicit
+			// --citations/--consumers remain the synchronized index-backed
+			// views for callers that require fresh relationship data.
+			idx, idxErr := storage.OpenIndexNoSync()
 			if idxErr != nil && !errors.Is(idxErr, felt.ErrIndexBusy) {
 				return idxErr
 			}
