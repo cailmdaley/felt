@@ -579,6 +579,20 @@ func findContainmentNode(roots []*ContainmentNode, id string) *ContainmentNode {
 	return nil
 }
 
+// treeDisplayID renders long nested IDs by their leaf segment. In tree output,
+// the parent path is already carried by the branch structure; the leaf is the
+// part that distinguishes siblings during a scan.
+func treeDisplayID(id string) string {
+	if len(id) <= 24 {
+		return id
+	}
+	idx := strings.LastIndex(id, "/")
+	if idx < 0 {
+		return id
+	}
+	return ".../" + id[idx+1:]
+}
+
 func printContainmentNode(node *ContainmentNode, prefix string, last bool, depth int) {
 	if treeDepth > 0 && depth > treeDepth {
 		return
@@ -592,7 +606,7 @@ func printContainmentNode(node *ContainmentNode, prefix string, last bool, depth
 		connector = ""
 	}
 
-	fmt.Printf("%s%s%s %s  %s\n", prefix, connector, felt.StatusIcon(node.Status), felt.ShortID(node.ID), node.Name)
+	fmt.Printf("%s%s%s %s  %s\n", prefix, connector, felt.StatusIcon(node.Status), treeDisplayID(node.ID), node.Name)
 
 	var childPrefix string
 	if prefix == "" {
