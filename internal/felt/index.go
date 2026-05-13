@@ -271,6 +271,7 @@ func (i *Index) Sync(s *Storage) error {
 		modifiedNanos int64
 	}
 	current := make(map[string]fileState, len(files))
+	dirtyIDs := []string{}
 	ids := make([]string, 0, len(files))
 	for _, file := range files {
 		info, err := os.Stat(file.path)
@@ -298,6 +299,11 @@ func (i *Index) Sync(s *Storage) error {
 			}
 		}
 	}
+	for id, state := range current {
+		if indexed[id] != state.modifiedNanos {
+			dirtyIDs = append(dirtyIDs, id)
+		}
+	}
 
 	// Fast path — nothing to do. Sync runs on every felt invocation, so the
 	// no-change case is by far the most common (a read-heavy workload like
@@ -315,17 +321,8 @@ func (i *Index) Sync(s *Storage) error {
 	// bump mtime — but in practice editors always bump mtime on save, so
 	// the hash check only fires when the mtime check already did. Skipping
 	// the write tx when both topology and mtime are clean is safe.
-	if !topologyChanged {
-		mtimesClean := true
-		for id, state := range current {
-			if indexed[id] != state.modifiedNanos {
-				mtimesClean = false
-				break
-			}
-		}
-		if mtimesClean {
-			return nil
-		}
+	if !topologyChanged && len(dirtyIDs) == 0 {
+		return nil
 	}
 
 	tx, err := i.db.Begin()
@@ -348,11 +345,13 @@ func (i *Index) Sync(s *Storage) error {
 	}
 
 	sort.Strings(ids)
-	for _, id := range ids {
+	sort.Strings(dirtyIDs)
+	reindexIDs := ids
+	if !topologyChanged {
+		reindexIDs = dirtyIDs
+	}
+	for _, id := range reindexIDs {
 		state := current[id]
-		if !topologyChanged && indexed[id] == state.modifiedNanos {
-			continue
-		}
 		f, err := s.Read(id)
 		if err != nil {
 			return err
@@ -364,11 +363,13 @@ func (i *Index) Sync(s *Storage) error {
 	}
 
 	// Hash-on-read: catch direct file edits (vi/IDE) that didn't go
-	// through the felt CLI. For each fiber, compare the file's current
-	// hash against the latest mechanical event's hash. Mismatch =>
-	// append an external_edit event. New fibers without events get a
-	// synthetic add event (the bootstrap baseline).
-	for _, id := range ids {
+	// through the felt CLI. We audit only files whose mtime differs from
+	// the index snapshot. The clean fast path above already treats stable
+	// mtimes as enough to avoid hashing; keeping the same invariant here
+	// prevents a one-file edit from forcing full-store hash/history work.
+	// New fibers without events get a synthetic add event (the bootstrap
+	// baseline).
+	for _, id := range dirtyIDs {
 		state := current[id]
 		hash, err := HashFile(state.path)
 		if err != nil {

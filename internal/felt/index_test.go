@@ -691,6 +691,75 @@ func TestIndexSyncDoesNotInventExternalEditAfterTypedEditorial(t *testing.T) {
 	}
 }
 
+func TestIndexSyncAuditsOnlyDirtyMtimes(t *testing.T) {
+	dir := t.TempDir()
+	storage := NewStorage(dir)
+	if err := storage.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	baseTime := time.Date(2026, 4, 10, 9, 0, 0, 0, time.UTC)
+	for _, fiber := range []*Felt{
+		{ID: "dirty", Name: "Dirty", CreatedAt: baseTime, Body: "before"},
+		{ID: "untouched", Name: "Untouched", CreatedAt: baseTime, Body: "stable"},
+	} {
+		if err := storage.Write(fiber); err != nil {
+			t.Fatalf("Write(%s) error: %v", fiber.ID, err)
+		}
+	}
+
+	idx, err := storage.OpenIndex()
+	if err != nil {
+		t.Fatalf("OpenIndex() error: %v", err)
+	}
+	defer idx.Close()
+
+	if err := idx.AppendEvent(Event{
+		FiberID:     "untouched",
+		OccurredAt:  time.Now().UTC().Add(time.Minute),
+		Type:        EventEdit,
+		Actor:       "test-agent",
+		ContentHash: "stale-hash-that-does-not-match-disk",
+	}); err != nil {
+		t.Fatalf("AppendEvent stale untouched hash: %v", err)
+	}
+
+	dirty := &Felt{ID: "dirty", Name: "Dirty", CreatedAt: baseTime, Body: "after"}
+	if err := storage.Write(dirty); err != nil {
+		t.Fatalf("Write(dirty update) error: %v", err)
+	}
+	future := time.Now().Add(time.Second)
+	if err := os.Chtimes(storage.Path("dirty"), future, future); err != nil {
+		t.Fatalf("chtimes dirty: %v", err)
+	}
+
+	if err := idx.Sync(storage); err != nil {
+		t.Fatalf("Sync() error: %v", err)
+	}
+
+	untouchedExternal, err := idx.QueryEvents(EventFilter{
+		FiberID: "untouched",
+		Types:   []string{EventExternalEdit},
+	})
+	if err != nil {
+		t.Fatalf("QueryEvents untouched external_edit: %v", err)
+	}
+	if len(untouchedExternal) != 0 {
+		t.Fatalf("Sync audited unchanged fiber and invented external_edit: %#v", untouchedExternal)
+	}
+
+	dirtyExternal, err := idx.QueryEvents(EventFilter{
+		FiberID: "dirty",
+		Types:   []string{EventExternalEdit},
+	})
+	if err != nil {
+		t.Fatalf("QueryEvents dirty external_edit: %v", err)
+	}
+	if len(dirtyExternal) != 1 {
+		t.Fatalf("Sync should still audit dirty fiber, got %#v", dirtyExternal)
+	}
+}
+
 func setIndexBusyTimings(t *testing.T, timeout time.Duration, delays []time.Duration) {
 	t.Helper()
 	oldBusyTimeout := indexBusyTimeout
