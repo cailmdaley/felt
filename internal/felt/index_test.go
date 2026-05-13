@@ -2,7 +2,9 @@ package felt
 
 import (
 	"errors"
+	"fmt"
 	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -477,6 +479,97 @@ func TestOpenIndexNoSyncRetriesAfterBusyTimeout(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("concurrent OpenIndexNoSync() did not complete after writer released lock")
+	}
+}
+
+func TestOpenIndexReadOnlyDoesNotCreateIndex(t *testing.T) {
+	dir := t.TempDir()
+	storage := NewStorage(dir)
+	if err := storage.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	idx, err := storage.OpenIndexReadOnly()
+	if idx != nil {
+		_ = idx.Close()
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("OpenIndexReadOnly() error = %v, want os.ErrNotExist", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, DirName, indexFileName)); !os.IsNotExist(statErr) {
+		t.Fatalf("OpenIndexReadOnly should not create index.db, stat err = %v", statErr)
+	}
+}
+
+func TestOpenIndexReadOnlyReadsDuringConcurrentWriter(t *testing.T) {
+	setIndexBusyTimings(t, 25*time.Millisecond, []time.Duration{
+		25 * time.Millisecond,
+		50 * time.Millisecond,
+	})
+
+	dir := t.TempDir()
+	storage := NewStorage(dir)
+	if err := storage.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	baseTime := time.Date(2026, 4, 10, 9, 0, 0, 0, time.UTC)
+	for _, fiber := range []*Felt{
+		{ID: "project/question", Name: "Question", CreatedAt: baseTime},
+		{ID: "project/analysis", Name: "Analysis", CreatedAt: baseTime, Body: "See [[question]]."},
+	} {
+		if err := storage.Write(fiber); err != nil {
+			t.Fatalf("Write(%s) error: %v", fiber.ID, err)
+		}
+	}
+
+	idx, err := storage.OpenIndex()
+	if err != nil {
+		t.Fatalf("OpenIndex() error: %v", err)
+	}
+	if err := idx.Close(); err != nil {
+		t.Fatalf("Close() error: %v", err)
+	}
+
+	writer, err := storage.OpenIndexNoSync()
+	if err != nil {
+		t.Fatalf("OpenIndexNoSync() error: %v", err)
+	}
+	defer writer.Close()
+	if _, err := writer.db.Exec(`BEGIN IMMEDIATE`); err != nil {
+		t.Fatalf("BEGIN IMMEDIATE error: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = writer.db.Exec(`ROLLBACK`)
+	})
+
+	done := make(chan error, 1)
+	go func() {
+		reader, err := storage.OpenIndexReadOnly()
+		if err != nil {
+			done <- err
+			return
+		}
+		defer reader.Close()
+		citations, err := reader.Citations("project/question")
+		if err != nil {
+			done <- err
+			return
+		}
+		if len(citations) != 1 || citations[0].SourceID != "project/analysis" {
+			done <- fmt.Errorf("Citations(project/question) = %#v, want project/analysis", citations)
+			return
+		}
+		done <- nil
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("OpenIndexReadOnly during writer error: %v", err)
+		}
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("OpenIndexReadOnly blocked behind concurrent writer")
 	}
 }
 

@@ -71,18 +71,18 @@ The append subcommand records a new editorial event:
 			return err
 		}
 
-		if !storage.IndexExists() {
-			if jsonOutput {
-				return outputJSON([]felt.Event{})
-			}
-			fmt.Print(renderHistory(target.ID, target.DisplayName(), nil))
-			return nil
-		}
-
 		// History rows live in the append-only history_events table; reading
-		// them must not force a full fiber/FTS index sync.
-		idx, err := storage.OpenIndexNoSync()
+		// them must not force a full fiber/FTS index sync or take the
+		// writer-oriented schema path.
+		idx, err := storage.OpenIndexReadOnly()
 		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				if jsonOutput {
+					return outputJSON([]felt.Event{})
+				}
+				fmt.Print(renderHistory(target.ID, target.DisplayName(), nil))
+				return nil
+			}
 			if errors.Is(err, felt.ErrIndexBusy) {
 				fmt.Fprintf(os.Stderr, "warning: index busy — history unavailable\n")
 				if jsonOutput {

@@ -39,6 +39,13 @@ type DataFlowConsumer struct {
 	SourceName string
 }
 
+type indexOpenMode int
+
+const (
+	indexOpenWrite indexOpenMode = iota
+	indexOpenReadOnly
+)
+
 // OpenIndex opens the SQLite index at the given project root.
 //
 // Pragmas are applied via DSN parameters so the modernc.org/sqlite driver
@@ -48,14 +55,22 @@ type DataFlowConsumer struct {
 // surfaces at Begin() time and busy_timeout retries before returning an
 // error, rather than surfacing deep inside the Sync transaction.
 func OpenIndex(projectRoot string) (*Index, error) {
+	return openIndex(projectRoot, indexOpenWrite)
+}
+
+func openIndex(projectRoot string, mode indexOpenMode) (*Index, error) {
 	dbPath := filepath.Join(projectRoot, DirName, indexFileName)
 	// Use a file: URI so the driver processes _pragma and _txlock params.
 	// busy_timeout is sorted first by the driver (see modernc.org/sqlite#198).
 	q := url.Values{}
 	q.Set("_pragma", fmt.Sprintf("busy_timeout(%d)", indexBusyTimeout.Milliseconds()))
-	q.Add("_pragma", "journal_mode(WAL)")
-	q.Add("_pragma", "synchronous(NORMAL)")
-	q.Set("_txlock", "immediate")
+	if mode == indexOpenReadOnly {
+		q.Set("mode", "ro")
+	} else {
+		q.Add("_pragma", "journal_mode(WAL)")
+		q.Add("_pragma", "synchronous(NORMAL)")
+		q.Set("_txlock", "immediate")
+	}
 	dsn := "file:" + dbPath + "?" + q.Encode()
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
@@ -64,9 +79,14 @@ func OpenIndex(projectRoot string) (*Index, error) {
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
 	idx := &Index{db: db}
-	if err := idx.init(); err != nil {
+	if mode == indexOpenWrite {
+		if err := idx.init(); err != nil {
+			_ = db.Close()
+			return nil, err
+		}
+	} else if err := db.Ping(); err != nil {
 		_ = db.Close()
-		return nil, err
+		return nil, fmt.Errorf("open sqlite index read-only: %w", err)
 	}
 	return idx, nil
 }
@@ -163,18 +183,20 @@ var indexSyncRetryDelays = []time.Duration{
 // degrade gracefully rather than propagating a raw SQLite error.
 func (s *Storage) OpenIndex() (*Index, error) {
 	root := filepath.Dir(s.root)
-	return openIndexWithBusyRetries(root, func(idx *Index) error {
+	return openIndexWithBusyRetries(root, func(root string) (*Index, error) {
+		return openIndex(root, indexOpenWrite)
+	}, func(idx *Index) error {
 		return idx.Sync(s)
 	})
 }
 
-func openIndexWithBusyRetries(root string, sync func(*Index) error) (*Index, error) {
+func openIndexWithBusyRetries(root string, opener func(string) (*Index, error), sync func(*Index) error) (*Index, error) {
 	var lastBusy error
 	for attempt := 0; attempt <= len(indexSyncRetryDelays); attempt++ {
 		if attempt > 0 {
 			time.Sleep(indexSyncRetryDelays[attempt-1])
 		}
-		idx, err := OpenIndex(root)
+		idx, err := opener(root)
 		if err != nil {
 			if isSQLiteBusyErr(err) {
 				lastBusy = err
@@ -206,7 +228,22 @@ func openIndexWithBusyRetries(root string, sync func(*Index) error) (*Index, err
 // the hashes match and stay quiet.
 func (s *Storage) OpenIndexNoSync() (*Index, error) {
 	root := filepath.Dir(s.root)
-	return openIndexWithBusyRetries(root, nil)
+	return openIndexWithBusyRetries(root, func(root string) (*Index, error) {
+		return openIndex(root, indexOpenWrite)
+	}, nil)
+}
+
+// OpenIndexReadOnly opens an existing index for stale-ok cache reads. It does
+// not create index.db, initialize schema, or run Sync, so CLI reads can query a
+// committed WAL snapshot without taking the writer-oriented schema path.
+func (s *Storage) OpenIndexReadOnly() (*Index, error) {
+	if !s.IndexExists() {
+		return nil, os.ErrNotExist
+	}
+	root := filepath.Dir(s.root)
+	return openIndexWithBusyRetries(root, func(root string) (*Index, error) {
+		return openIndex(root, indexOpenReadOnly)
+	}, nil)
 }
 
 // IndexExists reports whether the SQLite index already exists. Callers that

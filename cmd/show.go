@@ -134,18 +134,17 @@ Targeted views:
 		var consumers []felt.DataFlowConsumer
 		var recentEditorial string
 		var recentMechanical []felt.Event
-		if (detail == DepthSummary || detail == DepthFull) && storage.IndexExists() {
+		if detail == DepthSummary || detail == DepthFull {
 			// Ordinary show is a continuity/read path, so keep it responsive
-			// even when the search/link index is stale. Explicit
-			// --citations/--consumers remain the synchronized index-backed
-			// views for callers that require fresh relationship data.
-			idx, idxErr := storage.OpenIndexNoSync()
-			if idxErr != nil && !errors.Is(idxErr, felt.ErrIndexBusy) {
+			// even when the search/link index is stale. Relationship and
+			// history context are best-effort read-only cache lookups here.
+			idx, idxErr := storage.OpenIndexReadOnly()
+			if idxErr != nil && !errors.Is(idxErr, felt.ErrIndexBusy) && !errors.Is(idxErr, os.ErrNotExist) {
 				return idxErr
 			}
 			if errors.Is(idxErr, felt.ErrIndexBusy) {
 				fmt.Fprintf(os.Stderr, "warning: index busy — citations, consumers, and history unavailable\n")
-			} else {
+			} else if idxErr == nil {
 				defer idx.Close()
 
 				citations, err = idx.Citations(f.ID)
@@ -196,11 +195,11 @@ Targeted views:
 }
 
 func showCitationsFor(storage *felt.Storage, targetID string) ([]felt.Citation, error) {
-	if !storage.IndexExists() {
-		return storage.ScanCitations(targetID)
-	}
-	idx, err := storage.OpenIndexNoSync()
+	idx, err := storage.OpenIndexReadOnly()
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return storage.ScanCitations(targetID)
+		}
 		if errors.Is(err, felt.ErrIndexBusy) {
 			fmt.Fprintf(os.Stderr, "warning: index busy — scanning markdown for citations\n")
 			return storage.ScanCitations(targetID)
@@ -212,11 +211,11 @@ func showCitationsFor(storage *felt.Storage, targetID string) ([]felt.Citation, 
 }
 
 func showConsumersFor(storage *felt.Storage, targetID string) ([]felt.DataFlowConsumer, error) {
-	if !storage.IndexExists() {
-		return storage.ScanConsumers(targetID)
-	}
-	idx, err := storage.OpenIndexNoSync()
+	idx, err := storage.OpenIndexReadOnly()
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return storage.ScanConsumers(targetID)
+		}
 		if errors.Is(err, felt.ErrIndexBusy) {
 			fmt.Fprintf(os.Stderr, "warning: index busy — scanning markdown for consumers\n")
 			return storage.ScanConsumers(targetID)
