@@ -1,9 +1,7 @@
 package cmd
 
 import (
-	"errors"
 	"fmt"
-	"os"
 	"path"
 	"regexp"
 	"sort"
@@ -72,26 +70,6 @@ Use --body with query to include body search, and with --json to emit body text.
 		}
 
 		queryLower := strings.ToLower(query)
-		bodyMatchIDs := map[string]struct{}{}
-		if query != "" && lsBody && !lsRegex {
-			idx, err := storage.OpenIndex()
-			if err != nil {
-				if errors.Is(err, felt.ErrIndexBusy) {
-					fmt.Fprintf(os.Stderr, "warning: index busy — full-text body search unavailable\n")
-				} else {
-					return err
-				}
-			} else {
-				defer idx.Close()
-				ids, err := idx.SearchBodyIDs(query)
-				if err != nil {
-					return err
-				}
-				for _, id := range ids {
-					bodyMatchIDs[id] = struct{}{}
-				}
-			}
-		}
 		var felts []*felt.Felt
 		frontmatterFields, canPrefilterFrontmatter := frontmatterPrefilterFields(hasFields)
 		if jsonOutput {
@@ -189,11 +167,6 @@ Use --body with query to include body search, and with --json to emit body text.
 
 				// Substring or regex match against name, SearchText, and id
 				if matchesQuery(f, queryLower, re, lsRegex) {
-					filtered = append(filtered, f)
-					continue
-				}
-
-				if _, ok := bodyMatchIDs[f.ID]; ok {
 					filtered = append(filtered, f)
 					continue
 				}
