@@ -145,6 +145,18 @@ func writeMalformedFiber(t *testing.T, dir string) {
 	}
 }
 
+func writeInvalidYAMLFiber(t *testing.T, dir string) {
+	t.Helper()
+	badDir := filepath.Join(dir, ".felt", "broken-yaml", "broken-yaml")
+	if err := os.MkdirAll(badDir, 0755); err != nil {
+		t.Fatalf("MkdirAll invalid YAML fiber dir: %v", err)
+	}
+	content := []byte("---\nname: [\n---\nThis should only fail if the command walks every fiber.\n")
+	if err := os.WriteFile(filepath.Join(badDir, "broken-yaml.md"), content, 0644); err != nil {
+		t.Fatalf("WriteFile invalid YAML fiber: %v", err)
+	}
+}
+
 func saveHistoryGlobals() func() {
 	prevShowEditorial := histShowEditorial
 	prevShowMechanical := histShowMechanical

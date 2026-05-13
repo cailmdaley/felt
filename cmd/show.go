@@ -111,24 +111,12 @@ Targeted views:
 			}
 		}
 
-		felts, err := storage.ListMetadata()
+		f, err := storage.FindInScope(scopeID, args[0])
 		if err != nil {
 			return err
 		}
-		target, err := felt.FindByScope(felts, scopeID, args[0])
-		if err != nil {
-			return err
-		}
-		graph := felt.BuildGraph(felts)
 
-		f := target
-		if detail == DepthSummary || detail == DepthFull {
-			f, err = storage.Read(target.ID)
-			if err != nil {
-				return err
-			}
-			graph.Nodes[f.ID] = f
-		}
+		graph := graphForBodyRefs(storage, f)
 
 		var citations []felt.Citation
 		var consumers []felt.DataFlowConsumer
@@ -192,6 +180,23 @@ Targeted views:
 		))
 		return nil
 	},
+}
+
+func graphForBodyRefs(storage *felt.Storage, f *felt.Felt) *felt.Graph {
+	refs := felt.ExtractBodyRefs(f.Body)
+	if len(refs) == 0 {
+		return nil
+	}
+
+	g := &felt.Graph{Nodes: map[string]*felt.Felt{f.ID: f}}
+	for _, ref := range refs {
+		target, ok, err := storage.FindExistingMetadataInScope(f.ID, ref.Target)
+		if err != nil || !ok {
+			continue
+		}
+		g.Nodes[target.ID] = target
+	}
+	return g
 }
 
 func showCitationsFor(storage *felt.Storage, targetID string) ([]felt.Citation, error) {

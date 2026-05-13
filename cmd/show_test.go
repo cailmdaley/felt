@@ -466,6 +466,48 @@ func TestShowFullIncludesOpaqueFrontmatter(t *testing.T) {
 	}
 }
 
+func TestShowFullAnnotatesBodyRefsWithoutStoreWalk(t *testing.T) {
+	dir := t.TempDir()
+	storage := felt.NewStorage(dir)
+	if err := storage.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+	for _, fiber := range []*felt.Felt{
+		{
+			ID:        "project/question",
+			Name:      "Question",
+			CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z"),
+		},
+		{
+			ID:        "project/analysis/sub/method",
+			Name:      "Method",
+			CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z"),
+		},
+		{
+			ID:        "project/analysis",
+			Name:      "Analysis",
+			CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z"),
+			Body:      "See [[question]], [[sub/method]], and [[missing]].",
+		},
+	} {
+		if err := storage.Write(fiber); err != nil {
+			t.Fatalf("Write(%s) error: %v", fiber.ID, err)
+		}
+	}
+	writeInvalidYAMLFiber(t, dir)
+
+	reset := saveShowGlobals()
+	defer reset()
+
+	out, err := runCommand(t, dir, "show", "project/analysis")
+	if err != nil {
+		t.Fatalf("show should not walk unrelated malformed fibers: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "Refs:     project/question (Question), project/analysis/sub/method (Method), missing") {
+		t.Fatalf("show refs mismatch:\n%s", out)
+	}
+}
+
 func saveShowGlobals() func() {
 	prevBodyOnly := showBodyOnly
 	prevDetail := showDetail

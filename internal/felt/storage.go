@@ -215,6 +215,13 @@ func (s *Storage) FindMetadataInScope(scopeID, query string) (*Felt, error) {
 	return s.findWithModeAndScope(scopeID, query, ParseMetadataOnly)
 }
 
+// FindExistingMetadataInScope resolves only direct on-disk candidates in the
+// lexical scope chain. It intentionally does not fall back to walking the whole
+// store, so narrow read paths can annotate exact refs without surprise work.
+func (s *Storage) FindExistingMetadataInScope(scopeID, query string) (*Felt, bool, error) {
+	return s.findExistingPathWithModeAndScope(scopeID, query, ParseMetadataOnly)
+}
+
 func (s *Storage) readWithMode(id string, mode ParseMode) (*Felt, error) {
 	return s.readPathWithMode(s.Path(id), id, mode)
 }
@@ -702,10 +709,9 @@ func (s *Storage) findExistingPathWithModeAndScope(scopeID, query string, mode P
 	var candidates []string
 	if strings.Contains(query, "/") {
 		candidates = []string{query}
-	} else {
-		for _, scope := range scopeChain(scopeID) {
-			candidates = append(candidates, scopedQuery(scope, query))
-		}
+	}
+	for _, scope := range scopeChain(scopeID) {
+		candidates = append(candidates, scopedQuery(scope, query))
 	}
 
 	seen := make(map[string]struct{}, len(candidates))
