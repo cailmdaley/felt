@@ -676,3 +676,93 @@ Session body.
 		}
 	}
 }
+
+// TestAddDisambiguateLeadingSegment pins the disambiguation behavior of
+// `felt add` against an existing tree: leading-segment matches nest the new
+// fiber under the existing parent, ambiguous matches refuse, fully-qualified
+// paths are untouched, and --top-level bypasses resolution.
+func TestAddDisambiguateLeadingSegment(t *testing.T) {
+	dir := t.TempDir()
+	mustFelt(t, dir, "init")
+
+	// Build a tree with a nested `launch-cluster` so `felt add launch-cluster/X`
+	// has a non-trivial parent to resolve under.
+	mustFelt(t, dir, "add", "lightcone", "Lightcone root")
+	mustFelt(t, dir, "add", "lightcone/paper", "Paper")
+	mustFelt(t, dir, "add", "lightcone/paper/launch-cluster", "Launch cluster")
+
+	// Relative add: leading segment matches one nested fiber → resolve under
+	// that fiber's parent, emit a "Resolved ..." info line, and land the
+	// child as a nested fiber.
+	out := mustFelt(t, dir, "add", "launch-cluster/dogfood", "dogfood log")
+	if !strings.Contains(out, "Resolved launch-cluster/dogfood under lightcone/paper/launch-cluster/dogfood") {
+		t.Fatalf("add relative: expected resolution info line, got: %s", out)
+	}
+	if !strings.Contains(out, "lightcone/paper/launch-cluster/dogfood") {
+		t.Fatalf("add relative: expected resolved fiber ID, got: %s", out)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".felt", "lightcone", "paper", "launch-cluster", "dogfood", "dogfood.md")); err != nil {
+		t.Fatalf("add relative: expected nested fiber file, got: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".felt", "launch-cluster")); !os.IsNotExist(err) {
+		t.Fatalf("add relative: should not create top-level launch-cluster, err=%v", err)
+	}
+
+	// Fully-qualified path under the existing root is left alone — no info
+	// line, no rewrite.
+	out = mustFelt(t, dir, "add", "lightcone/paper/launch-cluster/notes", "notes")
+	if strings.Contains(out, "Resolved") {
+		t.Fatalf("add fully-qualified: unexpected resolution info line: %s", out)
+	}
+	if !strings.Contains(out, "lightcone/paper/launch-cluster/notes") {
+		t.Fatalf("add fully-qualified: expected ID, got: %s", out)
+	}
+
+	// --top-level skips resolution entirely: a leading segment that would
+	// otherwise resolve gets a fresh top-level fiber instead.
+	out = mustFelt(t, dir, "add", "launch-cluster/standalone", "standalone", "--top-level")
+	if strings.Contains(out, "Resolved") {
+		t.Fatalf("add --top-level: unexpected resolution info line: %s", out)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".felt", "launch-cluster", "standalone", "standalone.md")); err != nil {
+		t.Fatalf("add --top-level: expected top-level nested fiber, got: %v", err)
+	}
+
+	// Slug whose leading segment isn't in the tree creates a fresh top-level
+	// path — current behavior, preserved.
+	out = mustFelt(t, dir, "add", "novel-root/child", "novel child")
+	if strings.Contains(out, "Resolved") {
+		t.Fatalf("add fresh root: unexpected resolution info line: %s", out)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".felt", "novel-root", "child", "child.md")); err != nil {
+		t.Fatalf("add fresh root: expected top-level fiber, got: %v", err)
+	}
+
+	// Add a second `launch-cluster` in another subtree to create ambiguity.
+	mustFelt(t, dir, "add", "other-project", "Other project")
+	mustFelt(t, dir, "add", "other-project/launch-cluster", "Other launch cluster")
+
+	// Ambiguous: refuses, lists both candidate placements, suggests escape.
+	out, err := felt(dir, "add", "launch-cluster/scratch", "scratch")
+	if err == nil {
+		t.Fatalf("add ambiguous: expected error, got: %s", out)
+	}
+	for _, want := range []string{
+		"lightcone/paper/launch-cluster/scratch",
+		"other-project/launch-cluster/scratch",
+		"--top-level",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("add ambiguous: missing %q in error: %s", want, out)
+		}
+	}
+
+	// --top-level still works under ambiguity (escape hatch).
+	out = mustFelt(t, dir, "add", "launch-cluster/scratch", "scratch", "--top-level")
+	if strings.Contains(out, "Resolved") {
+		t.Fatalf("add --top-level under ambiguity: unexpected resolution info line: %s", out)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".felt", "launch-cluster", "scratch", "scratch.md")); err != nil {
+		t.Fatalf("add --top-level under ambiguity: expected top-level fiber, got: %v", err)
+	}
+}

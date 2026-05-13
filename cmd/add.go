@@ -10,11 +10,12 @@ import (
 )
 
 var (
-	addBody    string
-	addStatus  string
-	addDue     string
-	addTags    []string
-	addOutcome string
+	addBody     string
+	addStatus   string
+	addDue      string
+	addTags     []string
+	addOutcome  string
+	addTopLevel bool
 )
 
 var addCmd = &cobra.Command{
@@ -24,6 +25,13 @@ var addCmd = &cobra.Command{
 
 The slug is the fiber's path/ID shorthand. The name is the first real content
 and is required explicitly.
+
+When the leading segment of <slug> matches an existing fiber's basename, the
+new fiber is created under that fiber's parent — so 'felt add launch/log' lands
+under an existing 'project/launch' as 'project/launch/log'. Use --top-level to
+skip resolution and create at the root even when nested matches exist;
+ambiguous matches (the leading segment appears in multiple subtrees) abort
+with the candidates listed.
 
 Examples:
   felt add mocks-unbiased "Are the mocks unbiased?"
@@ -43,6 +51,24 @@ Examples:
 		f, err := felt.New(cleanSlug, args[1])
 		if err != nil {
 			return err
+		}
+		if !addTopLevel {
+			felts, err := storage.ListMetadata()
+			if err != nil {
+				return err
+			}
+			ids := make([]string, len(felts))
+			for i, existing := range felts {
+				ids[i] = existing.ID
+			}
+			resolved, rewritten, err := felt.ResolveAddPath(f.ID, ids)
+			if err != nil {
+				return err
+			}
+			if rewritten {
+				fmt.Fprintf(os.Stderr, "Resolved %s under %s\n", f.ID, resolved)
+				f.ID = resolved
+			}
 		}
 		if err := storage.CheckAvailableID(f.ID); err != nil {
 			return err
@@ -99,4 +125,5 @@ func init() {
 	addCmd.Flags().StringVarP(&addDue, "due", "D", "", "Due date (YYYY-MM-DD)")
 	addCmd.Flags().StringArrayVarP(&addTags, "tag", "t", nil, "Tag (repeatable)")
 	addCmd.Flags().StringVarP(&addOutcome, "outcome", "o", "", "Outcome (the conclusion)")
+	addCmd.Flags().BoolVar(&addTopLevel, "top-level", false, "Create at the top level; don't resolve <slug> against existing fibers")
 }
