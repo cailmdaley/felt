@@ -300,6 +300,9 @@ func TestShowConsumersSelectorOutputsStructuredResults(t *testing.T) {
 	if !strings.Contains(out, "sourceid: project/analysis") || !strings.Contains(out, "inputid: catalog") || !strings.Contains(out, "outputid: posterior") {
 		t.Fatalf("show --consumers output mismatch:\n%s", out)
 	}
+	if _, err := os.Stat(dir + "/.felt/index.db"); !os.IsNotExist(err) {
+		t.Fatalf("show --consumers should not create index.db, stat err = %v", err)
+	}
 }
 
 func TestShowCitationsSelectorOutputsStructuredResults(t *testing.T) {
@@ -326,6 +329,69 @@ func TestShowCitationsSelectorOutputsStructuredResults(t *testing.T) {
 	}
 	if !strings.Contains(out, "sourceid: project/analysis") || !strings.Contains(out, "sourcename: Analysis") {
 		t.Fatalf("show --citations output mismatch:\n%s", out)
+	}
+	if _, err := os.Stat(dir + "/.felt/index.db"); !os.IsNotExist(err) {
+		t.Fatalf("show --citations should not create index.db, stat err = %v", err)
+	}
+}
+
+func TestShowCitationsSelectorDoesNotSyncFiberIndex(t *testing.T) {
+	dir := t.TempDir()
+	storage := felt.NewStorage(dir)
+	if err := storage.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+	for _, fiber := range []*felt.Felt{
+		{ID: "project/question", Name: "Question", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")},
+		{ID: "project/analysis", Name: "Analysis", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z"), Body: "See [[question]]."},
+	} {
+		if err := storage.Write(fiber); err != nil {
+			t.Fatalf("Write(%s) error: %v", fiber.ID, err)
+		}
+	}
+	writeMalformedFiber(t, dir)
+
+	reset := saveShowGlobals()
+	defer reset()
+
+	out, err := runCommand(t, dir, "show", "project/question", "--citations")
+	if err != nil {
+		t.Fatalf("show --citations should not sync unrelated malformed fibers: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "sourceid: project/analysis") {
+		t.Fatalf("show --citations missing source:\n%s", out)
+	}
+	if _, err := os.Stat(dir + "/.felt/index.db"); !os.IsNotExist(err) {
+		t.Fatalf("show --citations should not create index.db, stat err = %v", err)
+	}
+}
+
+func TestShowCitationsSelectorUsesExistingIndexWithoutSync(t *testing.T) {
+	dir := t.TempDir()
+	storage := felt.NewStorage(dir)
+	if err := storage.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+	for _, fiber := range []*felt.Felt{
+		{ID: "project/question", Name: "Question", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")},
+		{ID: "project/analysis", Name: "Analysis", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z"), Body: "See [[question]]."},
+	} {
+		if err := storage.Write(fiber); err != nil {
+			t.Fatalf("Write(%s) error: %v", fiber.ID, err)
+		}
+	}
+	syncShowIndex(t, storage)
+	writeMalformedFiber(t, dir)
+
+	reset := saveShowGlobals()
+	defer reset()
+
+	out, err := runCommand(t, dir, "show", "project/question", "--citations")
+	if err != nil {
+		t.Fatalf("show --citations should not sync existing index: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "sourceid: project/analysis") {
+		t.Fatalf("show --citations missing indexed source:\n%s", out)
 	}
 }
 

@@ -209,6 +209,15 @@ func (s *Storage) OpenIndexNoSync() (*Index, error) {
 	return openIndexWithBusyRetries(root, nil)
 }
 
+// IndexExists reports whether the SQLite index already exists. Callers that
+// want an optional read-only cache can use this to avoid creating index.db as a
+// side effect of a narrow file-backed command.
+func (s *Storage) IndexExists() bool {
+	root := filepath.Dir(s.root)
+	_, err := os.Stat(filepath.Join(root, DirName, indexFileName))
+	return err == nil
+}
+
 func (i *Index) Sync(s *Storage) error {
 	files, err := s.listFiberFiles()
 	if err != nil {

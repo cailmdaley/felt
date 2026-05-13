@@ -81,32 +81,14 @@ Targeted views:
 				return outputShowBody(storage, f)
 			}
 			if showCitations {
-				idx, err := storage.OpenIndex()
-				if err != nil {
-					if errors.Is(err, felt.ErrIndexBusy) {
-						fmt.Fprintf(os.Stderr, "warning: index busy, citations unavailable\n")
-						return outputShowSelection([]felt.Citation{})
-					}
-					return err
-				}
-				defer idx.Close()
-				citations, err := idx.Citations(f.ID)
+				citations, err := showCitationsFor(storage, f.ID)
 				if err != nil {
 					return err
 				}
 				return outputShowSelection(citations)
 			}
 			if showConsumers {
-				idx, err := storage.OpenIndex()
-				if err != nil {
-					if errors.Is(err, felt.ErrIndexBusy) {
-						fmt.Fprintf(os.Stderr, "warning: index busy, consumers unavailable\n")
-						return outputShowSelection([]felt.DataFlowConsumer{})
-					}
-					return err
-				}
-				defer idx.Close()
-				consumers, err := idx.Consumers(f.ID)
+				consumers, err := showConsumersFor(storage, f.ID)
 				if err != nil {
 					return err
 				}
@@ -202,6 +184,38 @@ Targeted views:
 		))
 		return nil
 	},
+}
+
+func showCitationsFor(storage *felt.Storage, targetID string) ([]felt.Citation, error) {
+	if !storage.IndexExists() {
+		return storage.ScanCitations(targetID)
+	}
+	idx, err := storage.OpenIndexNoSync()
+	if err != nil {
+		if errors.Is(err, felt.ErrIndexBusy) {
+			fmt.Fprintf(os.Stderr, "warning: index busy — scanning markdown for citations\n")
+			return storage.ScanCitations(targetID)
+		}
+		return nil, err
+	}
+	defer idx.Close()
+	return idx.Citations(targetID)
+}
+
+func showConsumersFor(storage *felt.Storage, targetID string) ([]felt.DataFlowConsumer, error) {
+	if !storage.IndexExists() {
+		return storage.ScanConsumers(targetID)
+	}
+	idx, err := storage.OpenIndexNoSync()
+	if err != nil {
+		if errors.Is(err, felt.ErrIndexBusy) {
+			fmt.Fprintf(os.Stderr, "warning: index busy — scanning markdown for consumers\n")
+			return storage.ScanConsumers(targetID)
+		}
+		return nil, err
+	}
+	defer idx.Close()
+	return idx.Consumers(targetID)
 }
 
 // renderFeltWithHistory wraps renderFelt and splices in the Recent
