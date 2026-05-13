@@ -70,6 +70,15 @@ Targeted views:
 		storage := felt.NewStorage(root)
 		scopeID := resolveCommandScope(root)
 
+		if selectorCount == 0 && !jsonOutput && (detail == DepthName || detail == DepthCompact) {
+			f, err := storage.FindMetadataInScope(scopeID, args[0])
+			if err != nil {
+				return err
+			}
+			fmt.Print(renderFelt(f, nil, detail, nil, nil))
+			return nil
+		}
+
 		// Targeted views: full single-file read, optionally structured output.
 		if selectorCount > 0 || jsonOutput {
 			f, err := storage.FindInScope(scopeID, args[0])

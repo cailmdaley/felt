@@ -656,6 +656,10 @@ func (s *Storage) findWithMode(query string, mode ParseMode) (*Felt, error) {
 }
 
 func (s *Storage) findWithModeAndScope(scopeID, query string, mode ParseMode) (*Felt, error) {
+	if f, ok, err := s.findExistingPathWithModeAndScope(scopeID, query, mode); ok || err != nil {
+		return f, err
+	}
+
 	files, err := s.listFiberFiles()
 	if err != nil {
 		return nil, err
@@ -683,6 +687,76 @@ func (s *Storage) findWithModeAndScope(scopeID, query string, mode ParseMode) (*
 		f.ModifiedAt = info.ModTime()
 	}
 	return f, nil
+}
+
+func (s *Storage) findExistingPathWithModeAndScope(scopeID, query string, mode ParseMode) (*Felt, bool, error) {
+	query = cleanLookupQuery(query)
+	if query == "" || !validLookupID(query) {
+		return nil, false, nil
+	}
+	scopeID = cleanLookupScope(scopeID)
+	if scopeID != "" && !validLookupID(scopeID) {
+		return nil, false, nil
+	}
+
+	var candidates []string
+	if strings.Contains(query, "/") {
+		candidates = []string{query}
+	} else {
+		for _, scope := range scopeChain(scopeID) {
+			candidates = append(candidates, scopedQuery(scope, query))
+		}
+	}
+
+	seen := make(map[string]struct{}, len(candidates))
+	for _, candidate := range candidates {
+		candidate = path.Clean(candidate)
+		if _, ok := seen[candidate]; ok {
+			continue
+		}
+		seen[candidate] = struct{}{}
+
+		f, ok, err := s.readExistingPathWithMode(candidate, mode)
+		if ok || err != nil {
+			return f, ok, err
+		}
+	}
+	return nil, false, nil
+}
+
+func validLookupID(id string) bool {
+	return id != ".." && !strings.HasPrefix(id, "../") && !path.IsAbs(id)
+}
+
+func (s *Storage) readExistingPathWithMode(id string, mode ParseMode) (*Felt, bool, error) {
+	filePath := s.Path(id)
+	if !s.pathInStore(filePath) {
+		return nil, false, nil
+	}
+	info, err := os.Stat(filePath)
+	if os.IsNotExist(err) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("checking file %s: %w", filePath, err)
+	}
+	if info.IsDir() {
+		return nil, false, nil
+	}
+
+	f, err := s.readPathWithMode(filePath, id, mode)
+	if err != nil {
+		return nil, true, err
+	}
+	f.ModifiedAt = info.ModTime()
+	return f, true, nil
+}
+
+func (s *Storage) pathInStore(filePath string) bool {
+	root := filepath.Clean(s.root)
+	filePath = filepath.Clean(filePath)
+	rel, err := filepath.Rel(root, filePath)
+	return err == nil && rel != "." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && rel != ".."
 }
 
 func (s *Storage) listFiberFiles() ([]fiberFile, error) {

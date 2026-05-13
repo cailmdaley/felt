@@ -370,6 +370,88 @@ func TestStorageFindMetadataSkipsBody(t *testing.T) {
 	}
 }
 
+func TestStorageFindMetadataExactIDAvoidsStoreWalk(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStorage(dir)
+	if err := s.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	f := &Felt{
+		ID:        "project/task",
+		Name:      "Task",
+		Status:    StatusOpen,
+		CreatedAt: time.Now(),
+		Outcome:   "Direct lookup survives blocked siblings.",
+		Body:      "Body should be skipped.",
+	}
+	if err := s.Write(f); err != nil {
+		t.Fatalf("Write() error: %v", err)
+	}
+
+	found, ok, err := s.findExistingPathWithModeAndScope("", "project/task", ParseMetadataOnly)
+	if err != nil || !ok {
+		t.Fatalf("findExistingPathWithModeAndScope() = ok %v, err %v; want direct hit", ok, err)
+	}
+	if found.ID != f.ID {
+		t.Fatalf("ID = %q, want %q", found.ID, f.ID)
+	}
+	if found.Body != "" {
+		t.Fatalf("Body = %q, want empty", found.Body)
+	}
+}
+
+func TestStorageFindMetadataFastPathPreservesScopedBasenameOrder(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStorage(dir)
+	if err := s.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	now := time.Now()
+	for _, f := range []*Felt{
+		{ID: "task", Name: "Root Task", CreatedAt: now},
+		{ID: "project/task", Name: "Project Task", CreatedAt: now},
+		{ID: "project/sub/task", Name: "Scoped Task", CreatedAt: now},
+	} {
+		if err := s.Write(f); err != nil {
+			t.Fatalf("Write(%s) error: %v", f.ID, err)
+		}
+	}
+
+	found, ok, err := s.findExistingPathWithModeAndScope("project/sub/note", "task", ParseMetadataOnly)
+	if err != nil || !ok {
+		t.Fatalf("findExistingPathWithModeAndScope() = ok %v, err %v; want scoped hit", ok, err)
+	}
+	if found.ID != "project/sub/task" {
+		t.Fatalf("ID = %q, want project/sub/task", found.ID)
+	}
+}
+
+func TestStorageFindMetadataFastPathRejectsParentTraversal(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStorage(filepath.Join(dir, "project"))
+	if err := s.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	outside := NewStorage(dir)
+	if err := outside.Init(); err != nil {
+		t.Fatalf("outside Init() error: %v", err)
+	}
+	if err := outside.Write(&Felt{
+		ID:        "secret",
+		Name:      "Secret",
+		CreatedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("outside Write() error: %v", err)
+	}
+
+	if found, ok, err := s.findExistingPathWithModeAndScope("", "../secret", ParseMetadataOnly); err != nil || ok || found != nil {
+		t.Fatalf("parent traversal fast path = found %#v, ok %v, err %v; want miss", found, ok, err)
+	}
+}
+
 func TestReadFrontmatter(t *testing.T) {
 	content := strings.NewReader(`---
 name: Test Task
