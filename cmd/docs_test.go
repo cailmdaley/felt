@@ -70,6 +70,7 @@ func TestRootCommandSurfaceIsConsolidated(t *testing.T) {
 		"check",
 		"edit",
 		"history",
+		"index",
 		"init",
 		"ls",
 		"migrate",
@@ -92,8 +93,27 @@ func TestRootCommandSurfaceIsConsolidated(t *testing.T) {
 		t.Fatalf("root command surface still exposes retired `hook` subcommand: %v", visible)
 	}
 
-	if len(visible) > 15 {
-		t.Fatalf("root command surface too large: got %d commands (%v)", len(visible), visible)
+	expectedVisible := []string{
+		"add",
+		"check",
+		"edit",
+		"history",
+		"index",
+		"init",
+		"ls",
+		"migrate",
+		"nest",
+		"rm",
+		"setup",
+		"show",
+		"tree",
+		"unnest",
+		"update",
+	}
+	slices.Sort(visible)
+	visible = slices.DeleteFunc(visible, func(name string) bool { return name == "help" })
+	if !slices.Equal(visible, expectedVisible) {
+		t.Fatalf("root command surface mismatch:\n got %v\nwant %v", visible, expectedVisible)
 	}
 }
 

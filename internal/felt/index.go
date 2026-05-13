@@ -250,9 +250,13 @@ func (s *Storage) OpenIndexReadOnly() (*Index, error) {
 // want an optional read-only cache can use this to avoid creating index.db as a
 // side effect of a narrow file-backed command.
 func (s *Storage) IndexExists() bool {
-	root := filepath.Dir(s.root)
-	_, err := os.Stat(filepath.Join(root, DirName, indexFileName))
+	_, err := os.Stat(s.IndexPath())
 	return err == nil
+}
+
+func (s *Storage) IndexPath() string {
+	root := filepath.Dir(s.root)
+	return filepath.Join(root, DirName, indexFileName)
 }
 
 func (i *Index) Sync(s *Storage) error {

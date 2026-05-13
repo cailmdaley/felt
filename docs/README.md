@@ -4,7 +4,7 @@ Directory-contained markdown fibers with YAML frontmatter, wikilinks, and opaque
 
 ## Why
 
-Fibers are markdown files. Human-readable, version-controllable, greppable. The markdown tree is the source of truth; felt also keeps a rebuildable SQLite cache at `.felt/index.db` for typed links, citations, reverse data-flow consumers, and FTS5 body search.
+Fibers are markdown files. Human-readable, version-controllable, greppable. The markdown tree is the source of truth; felt also keeps a rebuildable SQLite cache at `.felt/index.db` for typed links, citations, reverse data-flow consumers, history lookups, and rebuildable search rows.
 
 Containment comes from the directory tree, narrative connections come from `[[wikilinks]]` in the body, and projects may use conventions like `inputs.from` when they want data-flow edges. felt preserves non-native frontmatter opaquely instead of owning its schema.
 
@@ -35,7 +35,7 @@ Felt uses three relationship mechanisms:
 - Containment via directory nesting
 - Narrative references via `[[wikilinks]]`
 - Optional data flow via conventions like `inputs.from`
-- Indexed citations, reverse consumers, and FTS5 body search via `.felt/index.db`
+- Citations, reverse consumers, and body search derived from markdown, with `.felt/index.db` used as a rebuildable cache where appropriate
 
 ### Status (opt-in)
 
@@ -74,10 +74,10 @@ felt show <id> -d compact     # see outcome without full body
 ```bash
 felt show <id> -d compact      # quick skim
 felt show <id> --body          # body + start line for editing
-felt show <id> --citations     # indexed narrative back-references
-felt show <id> --consumers     # indexed reverse data-flow consumers
+felt show <id> --citations     # narrative back-references
+felt show <id> --consumers     # reverse data-flow consumers
 felt show <id> --field inputs  # one raw frontmatter field as YAML/text
-felt ls --body "jwt refresh"   # FTS5 body search
+felt ls --body "jwt refresh"   # body search
 ```
 
 ### Tags
@@ -160,6 +160,7 @@ felt edit <id> --untag <tag>      # remove tag
 
 ```bash
 felt check                        # broken refs/fragments, legacy format residue, layout issues
+felt index sync                   # refresh the rebuildable SQLite cache
 felt migrate --dry-run            # preview legacy storage migration
 ```
 

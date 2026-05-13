@@ -13,7 +13,7 @@ A CLI for the durable trail that builds up around work. Each entry is a *fiber*:
 
 The directory tree gives hierarchy. `[[wikilinks]]` in bodies give narrative cross-references. Native metadata stays small (`name`, `status`, tags, timestamps, `outcome`, `due`, `description`). Any other top-level YAML keys are preserved opaquely so downstream tools can own their own schema without felt claiming it.
 
-A rebuildable SQLite index at `.felt/index.db` makes the tree queryable — FTS5 over bodies, narrative back-references, reverse data-flow consumers, and history lookups — but plain markdown is the source of truth and the cache carries no extra authoring burden.
+A rebuildable SQLite index at `.felt/index.db` caches narrative back-references, reverse data-flow consumers, history lookups, and search rows, but plain markdown is the source of truth and the cache carries no extra authoring burden.
 
 Felt is designed to be persistent memory for AI coding agents as much as for you. The bundled [Claude Code plugin](#agent-integration) and Codex hooks make `.felt/` the substrate agents reach for between sessions.
 
@@ -103,7 +103,7 @@ Containment comes from the directory tree. Narrative connections live in `[[wiki
 felt tree                               # containment hierarchy
 felt show covariance-estimation         # body refs + citations + reverse consumers
 felt ls "DES Y3"                        # search names, outcomes, frontmatter text, and ids
-felt ls --body "jackknife patches"      # FTS5 body search
+felt ls --body "jackknife patches"      # body search
 ```
 
 ### Additional YAML fields
@@ -145,6 +145,7 @@ felt history <id>                              # editorial chain (newest first)
 felt history <id> --last 1                     # what the previous session left
 felt history <id> --mechanical                 # + add/edit/external_edit
 felt history append <id> --summary "..."       # log session continuity
+felt index sync                                 # refresh the rebuildable SQLite cache
 ```
 
 ### Progressive disclosure
@@ -155,9 +156,10 @@ felt show <id> -d name            # name + tags only
 felt show <id> -d compact         # metadata + outcome + additional YAML field keys
 felt show <id> -d summary         # compact + citations/consumers + lede
 felt show <id> --body             # body + body start line for editing
-felt show <id> --citations        # indexed narrative back-references only
-felt show <id> --consumers        # indexed reverse data-flow consumers only
+felt show <id> --citations        # narrative back-references only
+felt show <id> --consumers        # reverse data-flow consumers only
 felt show <id> --field shuttle    # one raw frontmatter field
+felt index sync                   # explicit SQLite cache refresh
 ```
 
 ## Obsidian
@@ -202,6 +204,7 @@ felt ls [query]                   felt check
 felt history <id>                 felt history append <id> --summary "..."
 felt tree                         felt nest|unnest <id>
 felt migrate [--dry-run]          felt rm <id>
+felt index sync
 felt setup claude|codex|skills    felt update
 ```
 
