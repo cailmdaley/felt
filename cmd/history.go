@@ -66,6 +66,19 @@ The append subcommand records a new editorial event:
 			return err
 		}
 
+		filter, err := buildHistoryFilter(cmd, target.ID)
+		if err != nil {
+			return err
+		}
+
+		if !storage.IndexExists() {
+			if jsonOutput {
+				return outputJSON([]felt.Event{})
+			}
+			fmt.Print(renderHistory(target.ID, target.DisplayName(), nil))
+			return nil
+		}
+
 		// History rows live in the append-only history_events table; reading
 		// them must not force a full fiber/FTS index sync.
 		idx, err := storage.OpenIndexNoSync()
@@ -81,10 +94,6 @@ The append subcommand records a new editorial event:
 		}
 		defer idx.Close()
 
-		filter, err := buildHistoryFilter(cmd, target.ID)
-		if err != nil {
-			return err
-		}
 		events, err := idx.QueryEvents(filter)
 		if err != nil {
 			return err

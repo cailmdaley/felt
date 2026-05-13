@@ -122,6 +122,36 @@ func TestShowCompactDoesNotCreateIndexWhenNotNeeded(t *testing.T) {
 	}
 }
 
+func TestShowDefaultDoesNotCreateIndexWhenMissing(t *testing.T) {
+	dir := t.TempDir()
+	storage := felt.NewStorage(dir)
+	if err := storage.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+	if err := storage.Write(&felt.Felt{
+		ID:        "fiber-a",
+		Name:      "Fiber A",
+		CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z"),
+		Body:      "Default show remains file-backed.",
+	}); err != nil {
+		t.Fatalf("Write() error: %v", err)
+	}
+
+	reset := saveShowGlobals()
+	defer reset()
+
+	out, err := runCommand(t, dir, "show", "fiber-a")
+	if err != nil {
+		t.Fatalf("show: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "Default show remains file-backed.") {
+		t.Fatalf("show output mismatch:\n%s", out)
+	}
+	if _, err := os.Stat(dir + "/.felt/index.db"); !os.IsNotExist(err) {
+		t.Fatalf("show should not create index.db, stat err = %v", err)
+	}
+}
+
 func TestShowFieldReadsOpaqueFrontmatter(t *testing.T) {
 	dir := t.TempDir()
 	storage := felt.NewStorage(dir)

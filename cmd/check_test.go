@@ -102,6 +102,79 @@ Body.
 	}
 }
 
+func TestCheckDoesNotCreateIndexDB(t *testing.T) {
+	dir := t.TempDir()
+	storage := felt.NewStorage(dir)
+	if err := storage.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+	if err := storage.Write(&felt.Felt{
+		ID:        "fiber-a",
+		Name:      "Fiber A",
+		CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z"),
+		Body:      "File-backed check.",
+	}); err != nil {
+		t.Fatalf("Write() error: %v", err)
+	}
+
+	output, err := runCommand(t, dir, "check")
+	if err != nil {
+		t.Fatalf("felt check returned error unexpectedly: %v\n%s", err, output)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".felt", "index.db")); !os.IsNotExist(err) {
+		t.Fatalf("felt check should not create index.db, stat err = %v", err)
+	}
+}
+
+func TestCheckDoesNotSyncExistingIndex(t *testing.T) {
+	dir := t.TempDir()
+	storage := felt.NewStorage(dir)
+	if err := storage.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+	if err := storage.Write(&felt.Felt{
+		ID:        "indexed",
+		Name:      "Indexed",
+		CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z"),
+		Body:      "Initial indexed body.",
+	}); err != nil {
+		t.Fatalf("Write(indexed) error: %v", err)
+	}
+	idx, err := storage.OpenIndex()
+	if err != nil {
+		t.Fatalf("OpenIndex() error: %v", err)
+	}
+	if err := idx.Close(); err != nil {
+		t.Fatalf("Close index: %v", err)
+	}
+	if err := storage.Write(&felt.Felt{
+		ID:        "new-fiber",
+		Name:      "New Fiber",
+		CreatedAt: mustParseTime(t, "2026-04-11T09:00:00Z"),
+		Body:      "This body should not enter FTS during check.",
+	}); err != nil {
+		t.Fatalf("Write(new-fiber) error: %v", err)
+	}
+
+	output, err := runCommand(t, dir, "check")
+	if err != nil {
+		t.Fatalf("felt check returned error unexpectedly: %v\n%s", err, output)
+	}
+
+	idx, err = storage.OpenIndexNoSync()
+	if err != nil {
+		t.Fatalf("OpenIndexNoSync() error: %v", err)
+	}
+	defer idx.Close()
+	ids, err := idx.SearchBodyIDs("should not enter FTS")
+	if err != nil {
+		t.Fatalf("SearchBodyIDs() error: %v", err)
+	}
+	if len(ids) != 0 {
+		t.Fatalf("felt check should not sync new fibers into index, got FTS ids %v", ids)
+	}
+}
+
 func runCommand(t *testing.T, dir string, args ...string) (string, error) {
 	t.Helper()
 

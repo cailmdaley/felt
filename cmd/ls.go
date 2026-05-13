@@ -401,11 +401,13 @@ func feltJSONField(f *felt.Felt, field string) (interface{}, bool, error) {
 // queryLower must be strings.ToLower(query); re is the compiled regexp (non-nil iff useRegex).
 func matchesQuery(f *felt.Felt, queryLower string, re *regexp.Regexp, useRegex bool) bool {
 	if useRegex {
-		return re.MatchString(f.DisplayName()) || re.MatchString(f.SearchText()) || re.MatchString(f.ID)
+		return re.MatchString(f.DisplayName()) ||
+			re.MatchString(f.ID) ||
+			re.MatchString(f.SearchText())
 	}
 	return strings.Contains(strings.ToLower(f.DisplayName()), queryLower) ||
-		strings.Contains(strings.ToLower(f.SearchText()), queryLower) ||
-		strings.Contains(strings.ToLower(f.ID), queryLower)
+		strings.Contains(strings.ToLower(f.ID), queryLower) ||
+		strings.Contains(strings.ToLower(f.SearchText()), queryLower)
 }
 
 func appendBodyMatches(storage *felt.Storage, filtered, candidates []*felt.Felt, useRegex bool, re *regexp.Regexp, queryLower string) ([]*felt.Felt, error) {

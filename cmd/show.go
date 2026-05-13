@@ -125,7 +125,7 @@ Targeted views:
 		var consumers []felt.DataFlowConsumer
 		var recentEditorial string
 		var recentMechanical []felt.Event
-		if detail == DepthSummary || detail == DepthFull {
+		if (detail == DepthSummary || detail == DepthFull) && storage.IndexExists() {
 			// Ordinary show is a continuity/read path, so keep it responsive
 			// even when the search/link index is stale. Explicit
 			// --citations/--consumers remain the synchronized index-backed

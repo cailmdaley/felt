@@ -40,6 +40,64 @@ func TestHistoryReadDoesNotSyncFiberIndex(t *testing.T) {
 	}
 }
 
+func TestHistoryReadDoesNotCreateIndexWhenMissing(t *testing.T) {
+	dir := t.TempDir()
+	storage := felt.NewStorage(dir)
+	if err := storage.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+	if err := storage.Write(&felt.Felt{
+		ID:        "fiber-a",
+		Name:      "Fiber A",
+		CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z"),
+	}); err != nil {
+		t.Fatalf("Write() error: %v", err)
+	}
+
+	reset := saveHistoryGlobals()
+	defer reset()
+
+	out, err := runCommand(t, dir, "history", "fiber-a", "--last", "1")
+	if err != nil {
+		t.Fatalf("history read: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "(no history events recorded)") {
+		t.Fatalf("history read output mismatch:\n%s", out)
+	}
+	if _, err := os.Stat(dir + "/.felt/index.db"); !os.IsNotExist(err) {
+		t.Fatalf("history read should not create index.db, stat err = %v", err)
+	}
+}
+
+func TestHistoryReadValidatesFiltersWhenIndexMissing(t *testing.T) {
+	dir := t.TempDir()
+	storage := felt.NewStorage(dir)
+	if err := storage.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+	if err := storage.Write(&felt.Felt{
+		ID:        "fiber-a",
+		Name:      "Fiber A",
+		CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z"),
+	}); err != nil {
+		t.Fatalf("Write() error: %v", err)
+	}
+
+	reset := saveHistoryGlobals()
+	defer reset()
+
+	out, err := runCommand(t, dir, "history", "fiber-a", "--since", "not-a-time")
+	if err == nil {
+		t.Fatalf("expected invalid --since to fail without index, got output:\n%s", out)
+	}
+	if !strings.Contains(err.Error(), "--since") {
+		t.Fatalf("unexpected error: %v\n%s", err, out)
+	}
+	if _, err := os.Stat(dir + "/.felt/index.db"); !os.IsNotExist(err) {
+		t.Fatalf("history read should not create index.db, stat err = %v", err)
+	}
+}
+
 func TestShowDefaultDoesNotSyncFiberIndex(t *testing.T) {
 	dir := t.TempDir()
 	storage := felt.NewStorage(dir)
