@@ -890,6 +890,97 @@ func disambiguateID(id string, n int) string {
 	return path.Join(dir, candidate)
 }
 
+// ResolveAddPath disambiguates a new fiber's slug-path against the existing
+// tree. When the leading segment of slug matches the basename of an existing
+// fiber, the slug is rewritten so the new fiber lands under that fiber's
+// parent — preventing silent top-level creation when the user meant to nest
+// below a fiber that already lives deep in the tree.
+//
+// Resolution rules:
+//   - Single-segment slugs (no `/`) are never resolved; top-level creation is
+//     unambiguous in intent.
+//   - If no existing fiber has a basename equal to the leading segment, the
+//     slug is returned unchanged.
+//   - If exactly one existing fiber matches, the new path is `<parent>/<slug>`,
+//     and rewritten is true so the caller can inform the user.
+//   - If the slug already corresponds to one of the candidate placements
+//     (typically because the user passed a fully-qualified path), it's
+//     returned as-is with rewritten=false — fully-qualified callers get no
+//     surprise rewrite and no info chatter.
+//   - If multiple candidates resolve to distinct paths, the function returns
+//     an ambiguity error listing each candidate path; the caller must
+//     fully-qualify the slug or opt into top-level placement.
+func ResolveAddPath(slug string, existingIDs []string) (resolved string, rewritten bool, err error) {
+	slug = path.Clean(strings.TrimSpace(slug))
+	if slug == "" || slug == "." {
+		return slug, false, nil
+	}
+	if !strings.Contains(slug, "/") {
+		return slug, false, nil
+	}
+	leading := slug[:strings.Index(slug, "/")]
+
+	// Candidate parents: each existing fiber whose basename matches the
+	// leading segment contributes its parent directory. Parents are
+	// deduplicated because two fibers can't share the same id, but two
+	// fibers can share a basename in different subtrees.
+	type candidate struct {
+		parent   string
+		resolved string
+	}
+	var candidates []candidate
+	seenParents := map[string]struct{}{}
+	for _, id := range existingIDs {
+		if path.Base(id) != leading {
+			continue
+		}
+		parent := path.Dir(id)
+		if parent == "." {
+			parent = ""
+		}
+		if _, ok := seenParents[parent]; ok {
+			continue
+		}
+		seenParents[parent] = struct{}{}
+		var resolvedPath string
+		if parent == "" {
+			resolvedPath = slug
+		} else {
+			resolvedPath = parent + "/" + slug
+		}
+		candidates = append(candidates, candidate{parent: parent, resolved: resolvedPath})
+	}
+
+	if len(candidates) == 0 {
+		return slug, false, nil
+	}
+
+	// If the user's input already matches one of the candidate placements
+	// (e.g. they passed a fully-qualified path or top-level was the right
+	// answer), use it as-is — no rewrite, no info chatter.
+	for _, c := range candidates {
+		if c.resolved == slug {
+			return slug, false, nil
+		}
+	}
+
+	if len(candidates) == 1 {
+		return candidates[0].resolved, true, nil
+	}
+
+	// Ambiguous: stable-sorted candidate list for a deterministic error.
+	paths := make([]string, len(candidates))
+	for i, c := range candidates {
+		paths[i] = c.resolved
+	}
+	sort.Strings(paths)
+	return "", false, fmt.Errorf(
+		"%q could resolve to multiple existing locations:\n  %s\npass a fully-qualified path or --top-level to disambiguate",
+		slug,
+		strings.Join(paths, "\n  "),
+	)
+}
+
 // FindByPrefix finds a fiber matching a query in an existing slice.
 // Use this instead of Find when you already have the list from List().
 func FindByPrefix(felts []*Felt, query string) (*Felt, error) {

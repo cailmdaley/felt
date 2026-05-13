@@ -813,6 +813,124 @@ func TestStorageFindPrefersExactIDOverPrefix(t *testing.T) {
 	}
 }
 
+func TestResolveAddPath(t *testing.T) {
+	tests := []struct {
+		name          string
+		slug          string
+		existing      []string
+		wantResolved  string
+		wantRewritten bool
+		wantErrSubstr string
+	}{
+		{
+			name:          "no slash leaves slug at top level",
+			slug:          "fresh-fiber",
+			existing:      []string{"project/launch-cluster"},
+			wantResolved:  "fresh-fiber",
+			wantRewritten: false,
+		},
+		{
+			name:          "leading segment missing from tree leaves slug as-is",
+			slug:          "novel-root/child",
+			existing:      []string{"project/launch-cluster", "other/thing"},
+			wantResolved:  "novel-root/child",
+			wantRewritten: false,
+		},
+		{
+			name:          "single nested match resolves under that parent",
+			slug:          "launch-cluster/dogfood",
+			existing:      []string{"lightcone/paper2astra-as-skill/launch-cluster"},
+			wantResolved:  "lightcone/paper2astra-as-skill/launch-cluster/dogfood",
+			wantRewritten: true,
+		},
+		{
+			name:          "top-level only match leaves slug unchanged",
+			slug:          "launch-cluster/dogfood",
+			existing:      []string{"launch-cluster"},
+			wantResolved:  "launch-cluster/dogfood",
+			wantRewritten: false,
+		},
+		{
+			name:          "fully-qualified slug under existing root is left alone",
+			slug:          "lightcone/paper/launch-cluster/dogfood",
+			existing:      []string{"lightcone", "lightcone/paper/launch-cluster"},
+			wantResolved:  "lightcone/paper/launch-cluster/dogfood",
+			wantRewritten: false,
+		},
+		{
+			name: "ambiguous nested matches return an error listing candidates",
+			slug: "launch-cluster/dogfood",
+			existing: []string{
+				"lightcone/paper2astra-as-skill/launch-cluster",
+				"other-project/launch-cluster",
+			},
+			wantErrSubstr: "could resolve to multiple existing locations",
+		},
+		{
+			name: "top-level coexisting with nested resolves to top-level (input matches)",
+			slug: "launch-cluster/dogfood",
+			existing: []string{
+				"launch-cluster",
+				"other-project/launch-cluster",
+			},
+			wantResolved:  "launch-cluster/dogfood",
+			wantRewritten: false,
+		},
+		{
+			name:          "deep slug under single match keeps the tail",
+			slug:          "launch-cluster/notes/quick",
+			existing:      []string{"lightcone/paper/launch-cluster"},
+			wantResolved:  "lightcone/paper/launch-cluster/notes/quick",
+			wantRewritten: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resolved, rewritten, err := ResolveAddPath(tt.slug, tt.existing)
+			if tt.wantErrSubstr != "" {
+				if err == nil {
+					t.Fatalf("ResolveAddPath(%q) = (%q, %v, nil), want error containing %q", tt.slug, resolved, rewritten, tt.wantErrSubstr)
+				}
+				if !strings.Contains(err.Error(), tt.wantErrSubstr) {
+					t.Fatalf("ResolveAddPath(%q) error = %q, want substring %q", tt.slug, err.Error(), tt.wantErrSubstr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ResolveAddPath(%q) error: %v", tt.slug, err)
+			}
+			if resolved != tt.wantResolved {
+				t.Fatalf("ResolveAddPath(%q) resolved = %q, want %q", tt.slug, resolved, tt.wantResolved)
+			}
+			if rewritten != tt.wantRewritten {
+				t.Fatalf("ResolveAddPath(%q) rewritten = %v, want %v", tt.slug, rewritten, tt.wantRewritten)
+			}
+		})
+	}
+}
+
+// TestResolveAddPathAmbiguityListsAllCandidates pins the exact candidate
+// strings in the ambiguity message so users can pick the fully-qualified
+// path they meant without re-running felt ls.
+func TestResolveAddPathAmbiguityListsAllCandidates(t *testing.T) {
+	_, _, err := ResolveAddPath("launch-cluster/dogfood", []string{
+		"other-project/launch-cluster",
+		"lightcone/paper2astra-as-skill/launch-cluster",
+	})
+	if err == nil {
+		t.Fatal("expected ambiguity error")
+	}
+	for _, want := range []string{
+		"lightcone/paper2astra-as-skill/launch-cluster/dogfood",
+		"other-project/launch-cluster/dogfood",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("ambiguity error missing candidate %q: %s", want, err.Error())
+		}
+	}
+}
+
 func TestResolveScopedIDWalksUpLexicalScopes(t *testing.T) {
 	ids := []string{
 		"project",
