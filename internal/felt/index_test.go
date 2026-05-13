@@ -369,6 +369,62 @@ func TestIndexSyncTopologyChangeReindexesDataFlowRawRefs(t *testing.T) {
 	}
 }
 
+func TestIndexSyncTopologyMoveReindexesAffectedRawRefs(t *testing.T) {
+	dir := t.TempDir()
+	storage := NewStorage(dir)
+	if err := storage.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	baseTime := time.Date(2026, 4, 10, 9, 0, 0, 0, time.UTC)
+	for _, fiber := range []*Felt{
+		{
+			ID:        "project/question",
+			Name:      "Project Question",
+			CreatedAt: baseTime,
+		},
+		{
+			ID:        "project/analysis",
+			Name:      "Analysis",
+			CreatedAt: baseTime,
+			Body:      "See [[question]].",
+		},
+	} {
+		if err := storage.Write(fiber); err != nil {
+			t.Fatalf("Write(%s) error: %v", fiber.ID, err)
+		}
+	}
+
+	idx, err := storage.OpenIndex()
+	if err != nil {
+		t.Fatalf("OpenIndex() error: %v", err)
+	}
+	defer idx.Close()
+
+	if err := storage.MoveSubtree("project/question", "question"); err != nil {
+		t.Fatalf("MoveSubtree(project/question, question) error: %v", err)
+	}
+	if err := idx.Sync(storage); err != nil {
+		t.Fatalf("Sync() after topology move error: %v", err)
+	}
+
+	oldCitations, err := idx.Citations("project/question")
+	if err != nil {
+		t.Fatalf("Citations(project/question) error: %v", err)
+	}
+	if len(oldCitations) != 0 {
+		t.Fatalf("Citations(project/question) after move = %#v, want none", oldCitations)
+	}
+
+	newCitations, err := idx.Citations("question")
+	if err != nil {
+		t.Fatalf("Citations(question) error: %v", err)
+	}
+	if len(newCitations) != 1 || newCitations[0].SourceID != "project/analysis" {
+		t.Fatalf("Citations(question) after move = %#v, want source project/analysis", newCitations)
+	}
+}
+
 func TestIndexSyncBootstrapsRawRefsForExistingIndexes(t *testing.T) {
 	dir := t.TempDir()
 	storage := NewStorage(dir)
@@ -956,6 +1012,54 @@ func TestIndexSyncAuditsOnlyDirtyMtimes(t *testing.T) {
 	}
 	if len(dirtyExternal) != 1 {
 		t.Fatalf("Sync should still audit dirty fiber, got %#v", dirtyExternal)
+	}
+}
+
+func BenchmarkIndexSyncTopologyChangeOneAffectedRawRef(b *testing.B) {
+	const rawRefCount = 1000
+	baseTime := time.Date(2026, 4, 10, 9, 0, 0, 0, time.UTC)
+
+	b.ReportAllocs()
+	for range b.N {
+		b.StopTimer()
+		dir := b.TempDir()
+		storage := NewStorage(dir)
+		if err := storage.Init(); err != nil {
+			b.Fatalf("Init() error: %v", err)
+		}
+		for i := range rawRefCount {
+			id := fmt.Sprintf("source-%04d", i)
+			target := fmt.Sprintf("future-target-%04d", i)
+			if err := storage.Write(&Felt{
+				ID:        id,
+				Name:      id,
+				CreatedAt: baseTime,
+				Body:      fmt.Sprintf("See [[%s]].", target),
+			}); err != nil {
+				b.Fatalf("Write(%s) error: %v", id, err)
+			}
+		}
+		idx, err := storage.OpenIndex()
+		if err != nil {
+			b.Fatalf("OpenIndex() error: %v", err)
+		}
+		if err := storage.Write(&Felt{
+			ID:        "future-target-0000",
+			Name:      "Future Target 0000",
+			CreatedAt: baseTime,
+		}); err != nil {
+			b.Fatalf("Write(future-target-0000) error: %v", err)
+		}
+		b.StartTimer()
+
+		if err := idx.Sync(storage); err != nil {
+			b.Fatalf("Sync() after topology add error: %v", err)
+		}
+
+		b.StopTimer()
+		if err := idx.Close(); err != nil {
+			b.Fatalf("Close() error: %v", err)
+		}
 	}
 }
 
