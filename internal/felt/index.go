@@ -131,6 +131,16 @@ func (i *Index) init() error {
 			input_id TEXT,
 			PRIMARY KEY (source_id, target_id, fragment, edge_type, input_id)
 		)`,
+		`CREATE TABLE IF NOT EXISTS raw_refs (
+			source_id TEXT NOT NULL,
+			edge_type TEXT NOT NULL,
+			target TEXT NOT NULL,
+			fragment TEXT NOT NULL,
+			input_id TEXT NOT NULL,
+			PRIMARY KEY (source_id, edge_type, target, fragment, input_id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS raw_refs_source
+			ON raw_refs(source_id)`,
 		`CREATE TABLE IF NOT EXISTS tags (
 			fiber_id TEXT NOT NULL,
 			tag TEXT NOT NULL,
@@ -152,6 +162,10 @@ func (i *Index) init() error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS history_events_fiber_time
 			ON history_events(fiber_id, occurred_at DESC, rowid DESC)`,
+		`CREATE TABLE IF NOT EXISTS index_meta (
+			key TEXT PRIMARY KEY,
+			value TEXT NOT NULL
+		)`,
 	}
 	for _, stmt := range schema {
 		if _, err := i.db.Exec(stmt); err != nil {
@@ -290,6 +304,10 @@ func (i *Index) Sync(s *Storage) error {
 	if err != nil {
 		return err
 	}
+	rawRefsReady, err := i.rawRefsInitialized()
+	if err != nil {
+		return err
+	}
 	topologyChanged := len(indexed) != len(current)
 	if !topologyChanged {
 		for id := range indexed {
@@ -304,6 +322,8 @@ func (i *Index) Sync(s *Storage) error {
 			dirtyIDs = append(dirtyIDs, id)
 		}
 	}
+	sort.Strings(ids)
+	sort.Strings(dirtyIDs)
 
 	// Fast path — nothing to do. Sync runs on every felt invocation, so the
 	// no-change case is by far the most common (a read-heavy workload like
@@ -321,8 +341,18 @@ func (i *Index) Sync(s *Storage) error {
 	// bump mtime — but in practice editors always bump mtime on save, so
 	// the hash check only fires when the mtime check already did. Skipping
 	// the write tx when both topology and mtime are clean is safe.
-	if !topologyChanged && len(dirtyIDs) == 0 {
+	if rawRefsReady && !topologyChanged && len(dirtyIDs) == 0 {
 		return nil
+	}
+
+	reindexIDs := ids
+	if rawRefsReady && topologyChanged {
+		reindexIDs, err = i.changedTopologyReindexIDs(indexedIDs(indexed), ids, dirtyIDs)
+		if err != nil {
+			return err
+		}
+	} else if rawRefsReady && !topologyChanged {
+		reindexIDs = dirtyIDs
 	}
 
 	tx, err := i.db.Begin()
@@ -344,12 +374,6 @@ func (i *Index) Sync(s *Storage) error {
 		}
 	}
 
-	sort.Strings(ids)
-	sort.Strings(dirtyIDs)
-	reindexIDs := ids
-	if !topologyChanged {
-		reindexIDs = dirtyIDs
-	}
 	for _, id := range reindexIDs {
 		state := current[id]
 		f, err := s.Read(id)
@@ -416,12 +440,102 @@ func (i *Index) Sync(s *Storage) error {
 			return err
 		}
 	}
+	if !rawRefsReady {
+		if err := setIndexMetaTx(tx, "raw_refs_v1", "true"); err != nil {
+			return err
+		}
+	}
 
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit index sync: %w", err)
 	}
 	tx = nil
 	return nil
+}
+
+func (i *Index) rawRefsInitialized() (bool, error) {
+	var value string
+	err := i.db.QueryRow(`SELECT value FROM index_meta WHERE key = 'raw_refs_v1'`).Scan(&value)
+	if err == nil {
+		return value == "true", nil
+	}
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	return false, fmt.Errorf("read index metadata: %w", err)
+}
+
+func setIndexMetaTx(tx *sql.Tx, key, value string) error {
+	if _, err := tx.Exec(
+		`INSERT INTO index_meta (key, value) VALUES (?, ?)
+		 ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+		key,
+		value,
+	); err != nil {
+		return fmt.Errorf("set index metadata %s: %w", key, err)
+	}
+	return nil
+}
+
+func indexedIDs(indexed map[string]int64) []string {
+	ids := make([]string, 0, len(indexed))
+	for id := range indexed {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+func (i *Index) changedTopologyReindexIDs(oldIDs, currentIDs, dirtyIDs []string) ([]string, error) {
+	oldResolver := newScopedIDResolver(oldIDs)
+	currentResolver := newScopedIDResolver(currentIDs)
+	current := make(map[string]struct{}, len(currentIDs))
+	for _, id := range currentIDs {
+		current[id] = struct{}{}
+	}
+	reindex := map[string]struct{}{}
+	for _, id := range dirtyIDs {
+		if _, ok := current[id]; ok {
+			reindex[id] = struct{}{}
+		}
+	}
+
+	rows, err := i.db.Query(`SELECT DISTINCT source_id, target FROM raw_refs`)
+	if err != nil {
+		return nil, fmt.Errorf("read raw refs for topology sync: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var sourceID string
+		var target string
+		if err := rows.Scan(&sourceID, &target); err != nil {
+			return nil, fmt.Errorf("scan raw ref for topology sync: %w", err)
+		}
+		if _, ok := current[sourceID]; !ok {
+			continue
+		}
+		if resolveScopedIDOrEmpty(oldResolver, sourceID, target) != resolveScopedIDOrEmpty(currentResolver, sourceID, target) {
+			reindex[sourceID] = struct{}{}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	out := make([]string, 0, len(reindex))
+	for id := range reindex {
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+func resolveScopedIDOrEmpty(resolver *scopedIDResolver, scopeID, target string) string {
+	id, ok := resolver.ResolveOK(scopeID, target)
+	if !ok {
+		return ""
+	}
+	return id
 }
 
 func (i *Index) indexedModTimes() (map[string]int64, error) {
@@ -447,6 +561,7 @@ func deleteFiberCompletely(tx *sql.Tx, id string) error {
 	statements := []string{
 		`DELETE FROM fibers WHERE id = ?`,
 		`DELETE FROM links WHERE source_id = ? OR target_id = ?`,
+		`DELETE FROM raw_refs WHERE source_id = ?`,
 		`DELETE FROM tags WHERE fiber_id = ?`,
 		`DELETE FROM fiber_fts WHERE id = ?`,
 	}
@@ -495,6 +610,9 @@ func indexFiber(tx *sql.Tx, f *Felt, allIDs []string) error {
 
 	bodyRefs := ExtractBodyRefs(f.Body)
 	for _, ref := range bodyRefs {
+		if err := insertRawRef(tx, f.ID, "reference", ref.Target, ref.Fragment, ""); err != nil {
+			return err
+		}
 		targetID, err := ResolveScopedID(allIDs, f.ID, ref.Target)
 		if err != nil {
 			continue
@@ -514,6 +632,9 @@ func indexFiber(tx *sql.Tx, f *Felt, allIDs []string) error {
 		targetFiber, fragment := splitDataFlowRef(input.From)
 		if targetFiber == "" {
 			continue
+		}
+		if err := insertRawRef(tx, f.ID, "data_flow", targetFiber, fragment, input.InputID); err != nil {
+			return err
 		}
 		targetID, err := ResolveScopedID(allIDs, f.ID, targetFiber)
 		if err != nil {
@@ -541,6 +662,7 @@ func clearFiberSourceIndex(tx *sql.Tx, id string) error {
 	statements := []string{
 		`DELETE FROM fibers WHERE id = ?`,
 		`DELETE FROM links WHERE source_id = ?`,
+		`DELETE FROM raw_refs WHERE source_id = ?`,
 		`DELETE FROM tags WHERE fiber_id = ?`,
 		`DELETE FROM fiber_fts WHERE id = ?`,
 	}
@@ -548,6 +670,24 @@ func clearFiberSourceIndex(tx *sql.Tx, id string) error {
 		if _, err := tx.Exec(stmt, id); err != nil {
 			return fmt.Errorf("clear indexed fiber %s: %w", id, err)
 		}
+	}
+	return nil
+}
+
+func insertRawRef(tx *sql.Tx, sourceID, edgeType, target, fragment, inputID string) error {
+	if strings.TrimSpace(target) == "" {
+		return nil
+	}
+	if _, err := tx.Exec(
+		`INSERT OR IGNORE INTO raw_refs (source_id, edge_type, target, fragment, input_id)
+		 VALUES (?, ?, ?, ?, ?)`,
+		sourceID,
+		edgeType,
+		target,
+		strings.TrimSpace(fragment),
+		strings.TrimSpace(inputID),
+	); err != nil {
+		return fmt.Errorf("insert raw ref %s -> %s: %w", sourceID, target, err)
 	}
 	return nil
 }

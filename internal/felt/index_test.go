@@ -246,6 +246,205 @@ func TestIndexSyncReindexesWhenTargetDeletionChangesScopedResolution(t *testing.
 	}
 }
 
+func TestIndexSyncTopologyChangeReindexesOnlyAffectedRawRefs(t *testing.T) {
+	dir := t.TempDir()
+	storage := NewStorage(dir)
+	if err := storage.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	baseTime := time.Date(2026, 4, 10, 9, 0, 0, 0, time.UTC)
+	for _, fiber := range []*Felt{
+		{
+			ID:        "unrelated-source",
+			Name:      "Unrelated Source",
+			CreatedAt: baseTime,
+			Body:      "See [[stable-target]].",
+		},
+		{
+			ID:        "stable-target",
+			Name:      "Stable Target",
+			CreatedAt: baseTime,
+		},
+		{
+			ID:        "affected-source",
+			Name:      "Affected Source",
+			CreatedAt: baseTime,
+			Body:      "See [[future-target]].",
+		},
+	} {
+		if err := storage.Write(fiber); err != nil {
+			t.Fatalf("Write(%s) error: %v", fiber.ID, err)
+		}
+	}
+
+	idx, err := storage.OpenIndex()
+	if err != nil {
+		t.Fatalf("OpenIndex() error: %v", err)
+	}
+	defer idx.Close()
+
+	if err := idx.AppendEvent(Event{
+		FiberID:     "unrelated-source",
+		OccurredAt:  time.Now().UTC().Add(time.Minute),
+		Type:        EventEdit,
+		Actor:       "test-agent",
+		ContentHash: "stale-hash-that-does-not-match-disk",
+	}); err != nil {
+		t.Fatalf("AppendEvent stale unrelated hash: %v", err)
+	}
+
+	if err := storage.Write(&Felt{
+		ID:        "future-target",
+		Name:      "Future Target",
+		CreatedAt: baseTime,
+	}); err != nil {
+		t.Fatalf("Write(future-target) error: %v", err)
+	}
+	if err := idx.Sync(storage); err != nil {
+		t.Fatalf("Sync() after topology add error: %v", err)
+	}
+
+	citations, err := idx.Citations("future-target")
+	if err != nil {
+		t.Fatalf("Citations(future-target) error: %v", err)
+	}
+	if len(citations) != 1 || citations[0].SourceID != "affected-source" {
+		t.Fatalf("Citations(future-target) = %#v, want affected-source only", citations)
+	}
+
+	unrelatedExternal, err := idx.QueryEvents(EventFilter{
+		FiberID: "unrelated-source",
+		Types:   []string{EventExternalEdit},
+	})
+	if err != nil {
+		t.Fatalf("QueryEvents unrelated external_edit: %v", err)
+	}
+	if len(unrelatedExternal) != 0 {
+		t.Fatalf("topology sync audited unaffected source and invented external_edit: %#v", unrelatedExternal)
+	}
+}
+
+func TestIndexSyncTopologyChangeReindexesDataFlowRawRefs(t *testing.T) {
+	dir := t.TempDir()
+	storage := NewStorage(dir)
+	if err := storage.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	baseTime := time.Date(2026, 4, 10, 9, 0, 0, 0, time.UTC)
+	analysis := &Felt{
+		ID:        "project/analysis",
+		Name:      "Analysis",
+		CreatedAt: baseTime,
+	}
+	mustExtraField(t, analysis, "inputs", []map[string]any{{"id": "catalog", "from": "question.output"}})
+	if err := storage.Write(analysis); err != nil {
+		t.Fatalf("Write(project/analysis) error: %v", err)
+	}
+
+	idx, err := storage.OpenIndex()
+	if err != nil {
+		t.Fatalf("OpenIndex() error: %v", err)
+	}
+	defer idx.Close()
+
+	if err := storage.Write(&Felt{
+		ID:        "project/question",
+		Name:      "Question",
+		CreatedAt: baseTime,
+	}); err != nil {
+		t.Fatalf("Write(project/question) error: %v", err)
+	}
+	if err := idx.Sync(storage); err != nil {
+		t.Fatalf("Sync() after topology add error: %v", err)
+	}
+
+	consumers, err := idx.Consumers("project/question")
+	if err != nil {
+		t.Fatalf("Consumers(project/question) error: %v", err)
+	}
+	if len(consumers) != 1 || consumers[0].SourceID != "project/analysis" || consumers[0].OutputID != "output" || consumers[0].InputID != "catalog" {
+		t.Fatalf("Consumers(project/question) = %#v, want project/analysis catalog <- output", consumers)
+	}
+}
+
+func TestIndexSyncBootstrapsRawRefsForExistingIndexes(t *testing.T) {
+	dir := t.TempDir()
+	storage := NewStorage(dir)
+	if err := storage.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	baseTime := time.Date(2026, 4, 10, 9, 0, 0, 0, time.UTC)
+	for _, fiber := range []*Felt{
+		{ID: "source", Name: "Source", CreatedAt: baseTime, Body: "See [[future-target]]."},
+		{ID: "stable-target", Name: "Stable Target", CreatedAt: baseTime},
+	} {
+		if err := storage.Write(fiber); err != nil {
+			t.Fatalf("Write(%s) error: %v", fiber.ID, err)
+		}
+	}
+
+	idx, err := storage.OpenIndex()
+	if err != nil {
+		t.Fatalf("OpenIndex() error: %v", err)
+	}
+	defer idx.Close()
+	var initialRawRefs int
+	if err := idx.db.QueryRow(`SELECT COUNT(*) FROM raw_refs`).Scan(&initialRawRefs); err != nil {
+		t.Fatalf("count initial raw refs: %v", err)
+	}
+	if initialRawRefs == 0 {
+		t.Fatal("initial sync did not index raw refs")
+	}
+
+	for _, stmt := range []string{
+		`DELETE FROM raw_refs`,
+		`DELETE FROM index_meta WHERE key = 'raw_refs_v1'`,
+	} {
+		if _, err := idx.db.Exec(stmt); err != nil {
+			t.Fatalf("simulate pre-raw-refs index: %v", err)
+		}
+	}
+	if err := idx.Sync(storage); err != nil {
+		t.Fatalf("Sync() bootstrap raw refs error: %v", err)
+	}
+
+	var rawRefCount int
+	if err := idx.db.QueryRow(`SELECT COUNT(*) FROM raw_refs WHERE source_id = 'source' AND target = 'future-target'`).Scan(&rawRefCount); err != nil {
+		t.Fatalf("count raw refs: %v", err)
+	}
+	if rawRefCount != 1 {
+		t.Fatalf("raw_refs bootstrap count = %d, want 1", rawRefCount)
+	}
+	ready, err := idx.rawRefsInitialized()
+	if err != nil {
+		t.Fatalf("rawRefsInitialized: %v", err)
+	}
+	if !ready {
+		t.Fatal("raw refs bootstrap did not mark index metadata ready")
+	}
+
+	if err := storage.Write(&Felt{
+		ID:        "future-target",
+		Name:      "Future Target",
+		CreatedAt: baseTime,
+	}); err != nil {
+		t.Fatalf("Write(future-target) error: %v", err)
+	}
+	if err := idx.Sync(storage); err != nil {
+		t.Fatalf("Sync() after topology add error: %v", err)
+	}
+	citations, err := idx.Citations("future-target")
+	if err != nil {
+		t.Fatalf("Citations(future-target) error: %v", err)
+	}
+	if len(citations) != 1 || citations[0].SourceID != "source" {
+		t.Fatalf("Citations(future-target) = %#v, want source", citations)
+	}
+}
+
 func TestOpenIndexWaitsForConcurrentWriter(t *testing.T) {
 	dir := t.TempDir()
 	storage := NewStorage(dir)

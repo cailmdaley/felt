@@ -10,6 +10,7 @@ import (
 	"path"
 	"path/filepath"
 	"slices"
+	"sort"
 	"strings"
 	"syscall"
 
@@ -914,53 +915,147 @@ func FindByScope(felts []*Felt, scopeID, query string) (*Felt, error) {
 
 // ResolveScopedID resolves query by walking up from scopeID like lexical scope.
 func ResolveScopedID(ids []string, scopeID, query string) (string, error) {
+	return newScopedIDResolver(ids).Resolve(scopeID, query)
+}
+
+type scopedIDResolver struct {
+	ids          []string
+	exact        map[string]struct{}
+	parentBases  map[string]map[string]string
+	parentSorted map[string][]scopedIDEntry
+}
+
+type scopedIDEntry struct {
+	base string
+	id   string
+}
+
+func newScopedIDResolver(ids []string) *scopedIDResolver {
+	resolver := &scopedIDResolver{
+		ids:          make([]string, 0, len(ids)),
+		exact:        make(map[string]struct{}, len(ids)),
+		parentBases:  map[string]map[string]string{},
+		parentSorted: map[string][]scopedIDEntry{},
+	}
+	for _, id := range ids {
+		cleanID := path.Clean(id)
+		resolver.ids = append(resolver.ids, cleanID)
+		resolver.exact[cleanID] = struct{}{}
+
+		parent := parentPath(cleanID)
+		base := path.Base(cleanID)
+		if resolver.parentBases[parent] == nil {
+			resolver.parentBases[parent] = map[string]string{}
+		}
+		resolver.parentBases[parent][base] = cleanID
+		resolver.parentSorted[parent] = append(resolver.parentSorted[parent], scopedIDEntry{base: base, id: cleanID})
+	}
+	sort.Strings(resolver.ids)
+	for parent, entries := range resolver.parentSorted {
+		sort.Slice(entries, func(i, j int) bool {
+			if entries[i].base != entries[j].base {
+				return entries[i].base < entries[j].base
+			}
+			return entries[i].id < entries[j].id
+		})
+		resolver.parentSorted[parent] = entries
+	}
+	return resolver
+}
+
+func (r *scopedIDResolver) Resolve(scopeID, query string) (string, error) {
+	id, ok, resolutionErr := r.resolve(scopeID, query)
+	if ok {
+		return id, nil
+	}
+	return "", resolutionErr
+}
+
+func (r *scopedIDResolver) ResolveOK(scopeID, query string) (string, bool) {
+	id, ok, _ := r.resolve(scopeID, query)
+	return id, ok
+}
+
+func (r *scopedIDResolver) resolve(scopeID, query string) (string, bool, error) {
 	query = cleanLookupQuery(query)
 	scopeID = cleanLookupScope(scopeID)
 	if query == "" {
-		return "", fmt.Errorf("no felt found matching %q", query)
+		return "", false, fmt.Errorf("no felt found matching %q", query)
 	}
 
-	exact := map[string]struct{}{}
-	for _, id := range ids {
-		exact[path.Clean(id)] = struct{}{}
-	}
-	if _, ok := exact[query]; ok {
-		return query, nil
+	if _, ok := r.exact[query]; ok {
+		return query, true, nil
 	}
 
 	if strings.Contains(query, "/") {
 		for _, scope := range scopeChain(scopeID) {
 			candidate := scopedQuery(scope, query)
-			matches := collectPrefixMatches(ids, candidate)
+			matches := r.prefixMatches(candidate)
 			switch len(matches) {
 			case 0:
 				continue
 			case 1:
-				return matches[0], nil
+				return matches[0], true, nil
 			default:
-				return "", fmt.Errorf("ambiguous ID %q in scope %q matches: %s", query, displayScope(scope), strings.Join(matches, ", "))
+				return "", false, fmt.Errorf("ambiguous ID %q in scope %q matches: %s", query, displayScope(scope), strings.Join(matches, ", "))
 			}
 		}
-		return "", fmt.Errorf("no felt found matching %q", query)
+		return "", false, fmt.Errorf("no felt found matching %q", query)
 	}
 
 	for _, scope := range scopeChain(scopeID) {
 		// Exact basename match takes priority over prefix matches.
-		if exact, ok := collectScopedExactBasenameMatch(ids, scope, query); ok {
-			return exact, nil
+		if exact, ok := r.exactBasenameMatch(scope, query); ok {
+			return exact, true, nil
 		}
-		matches := collectScopedBasenameMatches(ids, scope, query)
+		matches := r.basenamePrefixMatches(scope, query)
 		switch len(matches) {
 		case 0:
 			continue
 		case 1:
-			return matches[0], nil
+			return matches[0], true, nil
 		default:
-			return "", fmt.Errorf("ambiguous ID %q in scope %q matches: %s", query, displayScope(scope), strings.Join(matches, ", "))
+			return "", false, fmt.Errorf("ambiguous ID %q in scope %q matches: %s", query, displayScope(scope), strings.Join(matches, ", "))
 		}
 	}
 
-	return "", fmt.Errorf("no felt found matching %q", query)
+	return "", false, fmt.Errorf("no felt found matching %q", query)
+}
+
+func (r *scopedIDResolver) prefixMatches(candidate string) []string {
+	start := sort.SearchStrings(r.ids, candidate)
+	var matches []string
+	for _, id := range r.ids[start:] {
+		if id != candidate && !strings.HasPrefix(id, candidate) {
+			break
+		}
+		matches = append(matches, id)
+	}
+	return matches
+}
+
+func (r *scopedIDResolver) exactBasenameMatch(scopeID, query string) (string, bool) {
+	byBase := r.parentBases[scopeID]
+	if byBase == nil {
+		return "", false
+	}
+	id, ok := byBase[query]
+	return id, ok
+}
+
+func (r *scopedIDResolver) basenamePrefixMatches(scopeID, query string) []string {
+	entries := r.parentSorted[scopeID]
+	start := sort.Search(len(entries), func(i int) bool {
+		return entries[i].base >= query
+	})
+	var matches []string
+	for _, entry := range entries[start:] {
+		if !strings.HasPrefix(entry.base, query) {
+			break
+		}
+		matches = append(matches, entry.id)
+	}
+	return matches
 }
 
 func cleanLookupQuery(query string) string {
@@ -1009,41 +1104,6 @@ func scopedQuery(scopeID, query string) string {
 		return query
 	}
 	return path.Join(scopeID, query)
-}
-
-func collectPrefixMatches(ids []string, candidate string) []string {
-	var matches []string
-	for _, id := range ids {
-		cleanID := path.Clean(id)
-		if cleanID == candidate || strings.HasPrefix(cleanID, candidate) {
-			matches = append(matches, cleanID)
-		}
-	}
-	return matches
-}
-
-func collectScopedExactBasenameMatch(ids []string, scopeID, query string) (string, bool) {
-	for _, id := range ids {
-		cleanID := path.Clean(id)
-		if parentPath(cleanID) == scopeID && path.Base(cleanID) == query {
-			return cleanID, true
-		}
-	}
-	return "", false
-}
-
-func collectScopedBasenameMatches(ids []string, scopeID, query string) []string {
-	var matches []string
-	for _, id := range ids {
-		cleanID := path.Clean(id)
-		if parentPath(cleanID) != scopeID {
-			continue
-		}
-		if strings.HasPrefix(path.Base(cleanID), query) {
-			matches = append(matches, cleanID)
-		}
-	}
-	return matches
 }
 
 func displayScope(scopeID string) string {
