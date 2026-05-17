@@ -112,24 +112,25 @@ Plugin refresh is skipped silently if the claude CLI isn't on PATH.`,
 	},
 }
 
-// refreshPluginAfterUpdate runs the equivalent of `felt setup claude` so the
-// Claude Code plugin (hooks, skills) stays in lockstep with the binary that
-// just landed. Failures are surfaced as a one-line warning rather than
-// errored — the binary update has already succeeded and shouldn't be undone
-// because a downstream plugin step couldn't run (e.g. claude CLI missing,
-// network blip on marketplace fetch). The user can rerun `felt setup claude`
-// manually if needed.
+// refreshPluginAfterUpdate keeps both agent integrations in lockstep with the
+// binary that just landed: the Claude Code plugin (hooks, skills) via the
+// marketplace, and Codex's ~/.codex/hooks.json wiring if it was previously
+// installed via `felt setup codex`. Failures are surfaced as one-line
+// warnings rather than errored — the binary update has already succeeded
+// and shouldn't be undone because a downstream integration step couldn't
+// run (e.g. claude CLI missing, network blip on marketplace fetch).
 func refreshPluginAfterUpdate(marketplaceRef string) {
 	if _, err := exec.LookPath("claude"); err != nil {
 		fmt.Println("Plugin refresh skipped: claude CLI not on PATH (run `felt setup claude` once it is).")
-		return
+	} else {
+		fmt.Println()
+		fmt.Println("Refreshing Claude Code plugin...")
+		if err := installPluginViaCLI(marketplaceRef); err != nil {
+			fmt.Printf("Plugin refresh failed: %v\n", err)
+			fmt.Println("Rerun `felt setup claude` to retry.")
+		}
 	}
-	fmt.Println()
-	fmt.Println("Refreshing Claude Code plugin...")
-	if err := installPluginViaCLI(marketplaceRef); err != nil {
-		fmt.Printf("Plugin refresh failed: %v\n", err)
-		fmt.Println("Rerun `felt setup claude` to retry.")
-	}
+	refreshCodexSetupIfInstalled()
 }
 
 func latestVersion() (string, error) {

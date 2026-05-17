@@ -264,9 +264,22 @@ func findMarketplaceRoot(source string) (string, error) {
 		return "", fmt.Errorf("$FELT_PLUGIN_DIR=%q: parent has no .claude-plugin/marketplace.json", env)
 	}
 
-	// Fallback: Claude Code clones GitHub-sourced marketplaces to a known
+	// Fallback 1: a registered directory-source marketplace points straight
+	// at a local repo (dev installs). Reading it out of `claude plugin
+	// marketplace list --json` keeps us in sync with whatever path the user
+	// registered, even if it differs from where the binary is running from.
+	if entry, ok := marketplaceEntry(marketplaceName); ok && entry.Source == "directory" && entry.Path != "" {
+		if hasMarketplaceManifest(entry.Path) {
+			abs, err := filepath.Abs(entry.Path)
+			if err == nil {
+				return abs, nil
+			}
+		}
+	}
+
+	// Fallback 2: Claude Code clones GitHub-sourced marketplaces to a known
 	// path. If the user has run `felt setup claude` (or otherwise installed
-	// the marketplace), the plugin files live there.
+	// the marketplace from GitHub), the plugin files live there.
 	if cloned := claudeMarketplaceClonePath(); cloned != "" && hasMarketplaceManifest(cloned) {
 		abs, err := filepath.Abs(cloned)
 		if err == nil {
@@ -322,15 +335,36 @@ func installPluginViaCLI(repoRoot string) error {
 // in `claude plugin marketplace list` output. Used to choose between the
 // add+install and update+update paths in installPluginViaCLI.
 func isMarketplaceRegistered(name string) bool {
-	out, err := exec.Command("claude", "plugin", "marketplace", "list").Output()
+	_, ok := marketplaceEntry(name)
+	return ok
+}
+
+// claudeMarketplaceEntry mirrors the structured `claude plugin marketplace
+// list --json` output. Only the fields we read are decoded.
+type claudeMarketplaceEntry struct {
+	Name   string `json:"name"`
+	Source string `json:"source"` // "directory" or "git"
+	Path   string `json:"path"`   // local path for directory sources
+}
+
+// marketplaceEntry looks up an entry by name in the claude CLI's registered
+// marketplaces. Returns the entry and true on success; false if the CLI is
+// missing, the call fails, or the name isn't found.
+func marketplaceEntry(name string) (claudeMarketplaceEntry, bool) {
+	out, err := exec.Command("claude", "plugin", "marketplace", "list", "--json").Output()
 	if err != nil {
-		return false
+		return claudeMarketplaceEntry{}, false
 	}
-	// `claude plugin marketplace list` formats each entry as a leading `❯ <name>`
-	// line. A bare substring match risks matching unrelated text (a description
-	// containing the name); anchoring to the marker is robust enough without
-	// parsing the full output structure.
-	return strings.Contains(string(out), "❯ "+name+"\n")
+	var entries []claudeMarketplaceEntry
+	if err := json.Unmarshal(out, &entries); err != nil {
+		return claudeMarketplaceEntry{}, false
+	}
+	for _, e := range entries {
+		if e.Name == name {
+			return e, true
+		}
+	}
+	return claudeMarketplaceEntry{}, false
 }
 
 // uninstallPlugin removes the felt plugin via the Claude Code CLI. Leaves
@@ -416,6 +450,98 @@ func claudeMDSnippet() string {
 		"Outcomes say not just *what* but *why*. " +
 		"If a project uses extra frontmatter conventions, edit the file directly and let that project own the schema. " +
 		"Follow the data: curious, not confirmatory.\n"
+}
+
+// feltCodexHooksInstalled returns true when ~/.codex/hooks.json contains any
+// felt-flagged hooks (i.e. a hook command whose path ends in
+// /hooks/session.sh or /hooks/remind.sh). Used by `felt update` and the
+// brew post-install to decide whether to refresh Codex setup alongside the
+// Claude plugin — re-running `felt setup codex` re-canonicalizes the
+// absolute paths so a felt checkout that moved on disk doesn't leave Codex
+// pointing at the old location.
+func feltCodexHooksInstalled() bool {
+	hooksPath, err := codexHooksPath()
+	if err != nil {
+		return false
+	}
+	data, err := os.ReadFile(hooksPath)
+	if err != nil {
+		return false
+	}
+	var settings map[string]interface{}
+	if err := json.Unmarshal(data, &settings); err != nil {
+		return false
+	}
+	hooks, ok := settings["hooks"].(map[string]interface{})
+	if !ok {
+		return false
+	}
+	for _, event := range []string{"SessionStart", "PreToolUse"} {
+		for _, basename := range []string{"session.sh", "remind.sh"} {
+			if hooksReferenceFelt(hooks, event, basename) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// hooksReferenceFelt walks the hook entries for an event and returns true if
+// any inner command path references /hooks/<basename> (the suffix shared by
+// every felt-installed Codex hook regardless of where the plugin lives).
+func hooksReferenceFelt(hooks map[string]interface{}, event, basename string) bool {
+	eventHooks, ok := hooks[event].([]interface{})
+	if !ok {
+		return false
+	}
+	suffix := "/hooks/" + basename
+	for _, hook := range eventHooks {
+		hookMap, ok := hook.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		cmds, ok := hookMap["hooks"].([]interface{})
+		if !ok {
+			continue
+		}
+		for _, cmd := range cmds {
+			cmdMap, ok := cmd.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			cmdStr, _ := cmdMap["command"].(string)
+			if strings.Contains(cmdStr, suffix) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// refreshCodexSetupIfInstalled re-runs the Codex hook wiring when felt's
+// Codex setup is detected in ~/.codex/hooks.json. Used by `felt update` so
+// a binary that just landed also refreshes Codex's view of the plugin
+// directory. Silent no-op when Codex setup isn't installed.
+func refreshCodexSetupIfInstalled() {
+	if !feltCodexHooksInstalled() {
+		return
+	}
+	pluginDir, err := findPluginDir("")
+	if err != nil {
+		fmt.Printf("Codex refresh skipped: %v\n", err)
+		return
+	}
+	fmt.Println()
+	fmt.Println("Refreshing Codex setup...")
+	if err := installCodexHooks(pluginDir); err != nil {
+		fmt.Printf("Codex refresh failed: %v\n", err)
+		fmt.Println("Rerun `felt setup codex` to retry.")
+		return
+	}
+	skillsTarget := filepath.Join(os.Getenv("HOME"), ".agents", "skills")
+	if err := linkSkillsFromPlugin(skillsTarget, pluginDir); err != nil {
+		fmt.Printf("warning: could not link skills: %v\n", err)
+	}
 }
 
 func codexHooksPath() (string, error) {

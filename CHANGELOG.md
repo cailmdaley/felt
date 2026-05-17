@@ -26,17 +26,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   needs refreshing when skill content changes. jq is no longer required
   by the hooks.
 
-- Binary and plugin now update in lockstep so they can't drift. Two
-  changes:
+- Binary and integrations now update in lockstep so they can't drift:
   - `felt update` refreshes the Claude Code plugin (`marketplace update`
-    + `plugin update`) after swapping the binary. One command, both
-    layers current.
+    + `plugin update`) after swapping the binary, and also re-runs
+    `felt setup codex` if Codex hooks are currently installed. One
+    command, every layer current.
   - The homebrew formula has a `post_install` step that runs `felt setup
-    claude`, so `brew upgrade felt` keeps the plugin in sync too.
-    Skipped silently if the claude CLI isn't installed.
+    claude` (and `felt setup codex` if `~/.codex/hooks.json` has felt
+    entries), so `brew upgrade felt` keeps every integration in sync
+    too. Skipped silently if the respective CLI isn't installed.
   - `felt setup claude` is now fully idempotent — if the marketplace is
     already registered, it takes the update path instead of erroring on
     duplicate add.
+  - `felt setup codex` can resolve the plugin directory from a
+    directory-source marketplace (read out of `claude plugin marketplace
+    list --json`), so dev installs no longer need `--source` or
+    `$FELT_PLUGIN_DIR` to refresh.
 
 ## [1.0.5] — 2026-05-04
 

@@ -53,11 +53,25 @@ brews:
       system "#{bin}/felt", "--help"
     install: |
       bin.install "felt"
-    # Refresh the Claude Code plugin in lockstep with the binary so users who
+    # Refresh integrations in lockstep with the binary so users who
     # `brew upgrade felt` pick up new hooks and skills without a separate
-    # plugin step. Skipped silently if the claude CLI isn't on PATH yet.
+    # step. The Claude plugin refresh is skipped silently if the claude CLI
+    # isn't on PATH; the Codex refresh is gated by `felt update`'s own
+    # detection of an installed Codex setup, so a no-Codex machine is a
+    # no-op.
     post_install: |
       if which("claude")
         system "#{bin}/felt", "setup", "claude"
+      end
+      # `felt setup codex` is idempotent and a no-op if no prior Codex setup
+      # exists; running it unconditionally would also install Codex hooks
+      # for users who have never asked for them. Delegate the detection to
+      # the binary instead — `felt update`'s refresh path checks
+      # ~/.codex/hooks.json for felt entries and only re-runs setup codex
+      # when they exist. We invoke that path here by re-running setup codex
+      # only when ~/.codex/hooks.json contains a "session.sh" reference.
+      codex_hooks = "#{ENV["HOME"]}/.codex/hooks.json"
+      if File.exist?(codex_hooks) && File.read(codex_hooks).include?("/hooks/session.sh")
+        system "#{bin}/felt", "setup", "codex"
       end
     skip_upload: '{{ if ne .Env.GITHUB_REPOSITORY "cailmdaley/felt" }}true{{ else }}false{{ end }}'
