@@ -4,6 +4,30 @@ All notable changes to felt are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.8] — 2026-05-17
+
+### Fixed
+
+- `felt ls -j` (and `felt check -j`, `felt tree -j`'s roots, projected
+  listings) previously returned literal `null` instead of `[]` when no
+  fibers matched. The SessionStart hook tripped over this for users with
+  no active fibers: the pre-13d5d35 hook checked only for `[]`, so
+  brew-upgrading the binary against an unrefreshed plugin started failing
+  every session. `outputJSON` now normalizes nil slices to empty slices
+  via reflection — every listing endpoint emits `[]` for empty results,
+  and consumers never have to handle two shapes.
+
+### Changed
+
+- Plugin hooks (`claude-plugin/hooks/{session,remind}.sh`) are now thin
+  shims that `exec felt hook <event>`. Hook behavior — find-root, fiber
+  listing, SessionStart envelope, PreToolUse deny gate — lives in the
+  binary as `felt hook session` and `felt hook pretool`. `brew upgrade
+  felt` now refreshes hook behavior; users no longer have to also refresh
+  the plugin via the marketplace to pick up hook fixes. The plugin only
+  needs refreshing when skill content changes. jq is no longer required
+  by the hooks.
+
 ## [1.0.5] — 2026-05-04
 
 ### Fixed

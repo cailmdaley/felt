@@ -70,6 +70,7 @@ func TestRootCommandSurfaceIsConsolidated(t *testing.T) {
 		"check",
 		"edit",
 		"history",
+		"hook",
 		"index",
 		"init",
 		"ls",
@@ -87,10 +88,11 @@ func TestRootCommandSurfaceIsConsolidated(t *testing.T) {
 		}
 	}
 
-	// `hook` is no longer a felt subcommand; the plugin's hook scripts
-	// (claude-plugin/hooks/*.sh) carry that integration directly.
-	if slices.Contains(visible, "hook") {
-		t.Fatalf("root command surface still exposes retired `hook` subcommand: %v", visible)
+	// `hook` is back as a binary subcommand: the plugin's hook scripts are
+	// thin shims that exec into it, so brew-upgrading the binary refreshes
+	// hook behavior without requiring users to also refresh the plugin.
+	if !slices.Contains(visible, "hook") {
+		t.Fatalf("root command surface missing `hook` subcommand: %v", visible)
 	}
 
 	expectedVisible := []string{
@@ -98,6 +100,7 @@ func TestRootCommandSurfaceIsConsolidated(t *testing.T) {
 		"check",
 		"edit",
 		"history",
+		"hook",
 		"index",
 		"init",
 		"ls",
