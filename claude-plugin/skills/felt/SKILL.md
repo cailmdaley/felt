@@ -84,6 +84,8 @@ Relationships: directory containment, `[[wikilinks]]` in bodies, and optional pr
 
 **CLAUDE.md stays lean.** Commands, paths, context pointers. Documentation fibers carry the depth.
 
+**Cross-project stores are useful.** A `.felt/` store can be linked into a broader cross-project store via filesystem symlink — same bytes, two paths — letting `felt -C <cross-project-store> ls` search across every linked project. Threads that span projects get a home; cross-pollination becomes possible. There are two valid symlink directions (cross-project store as canonical, or per-project as canonical, depending on whether the project has its own sync constraint); see [cross-project.md](references/cross-project.md) for setup mechanics, choosing a direction, and how to avoid clobbering existing fibers.
+
 ---
 
 ## What to Extract
@@ -132,3 +134,4 @@ Read the reference that matches the situation. Everything above applies always; 
 | Processing an external transcript — meeting notes, voice note, dictation file | [transcripts.md](references/transcripts.md) |
 | Reading across the assemblage for mess — composting, coherence, reshaping | [maintenance.md](references/maintenance.md) |
 | Migrating legacy flat fibers to directory format | [migration.md](references/migration.md) |
+| Setting up a cross-project felt store, or linking a per-project store into one | [cross-project.md](references/cross-project.md) |
