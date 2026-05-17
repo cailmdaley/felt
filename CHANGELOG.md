@@ -4,6 +4,20 @@ All notable changes to felt are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.9] — 2026-05-18
+
+### Fixed
+
+- `felt setup claude` and `felt setup codex` on an existing install
+  used `marketplace update`, which only re-fetches the marketplace's
+  current pinned ref — so a `brew upgrade felt` from v1.0.7 → v1.0.8
+  left the marketplace ref pinned at v1.0.7, plugin update saw no
+  version diff, and the installed plugin stayed at the old content.
+  Both setup paths now `marketplace add` with the current binary's ref
+  (idempotent re-register for directory sources; ref-advance for git
+  sources), then `plugin install`/`update` to apply. This is the path
+  that actually moves users forward.
+
 ## [1.0.8] — 2026-05-17
 
 ### Fixed

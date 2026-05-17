@@ -310,37 +310,36 @@ func findMarketplaceRoot(source string) (string, error) {
 		"  or set $FELT_PLUGIN_DIR pointing at <repo>/claude-plugin/")
 }
 
-// installPluginViaCLI installs or refreshes the felt plugin. If the
-// marketplace is already registered, runs `marketplace update` + `plugin
-// update` to pull the latest content and apply it; otherwise registers the
-// marketplace fresh and installs the plugin. This is the path that keeps the
-// installed plugin in lockstep with the running binary — invoked from
-// `felt setup claude`, from `felt update` after the binary swap, and from the
-// homebrew formula's post-install. Idempotent.
+// installPluginViaCLI installs or refreshes the felt plugin. Always
+// `marketplace add`s with the caller's `repoRoot` — for git sources that
+// advances the pinned ref to whatever the current binary's
+// defaultMarketplaceRef() emits, and for directory sources it's a no-op
+// re-register. Then plugin install (fresh) or plugin update (existing) to
+// apply. Idempotent.
+//
+// The marketplace-ref-advance is the critical bit: `marketplace update` on
+// a pinned git source just re-fetches the SAME ref, so on a brew-upgrade
+// from v1.0.7 → v1.0.8, an installed plugin pinned at v1.0.7 would never
+// see new content. `marketplace add` with the new ref is what actually
+// moves the user forward.
 func installPluginViaCLI(repoRoot string) error {
 	if _, err := exec.LookPath("claude"); err != nil {
 		return fmt.Errorf("claude CLI not found in PATH; install Claude Code first: %w", err)
 	}
 
 	pluginRef := "felt@" + marketplaceName
-
-	if isMarketplaceRegistered(marketplaceName) {
-		if err := runClaudeCLI("plugin", "marketplace", "update", marketplaceName); err != nil {
-			return fmt.Errorf("refreshing marketplace: %w", err)
-		}
-		if err := runClaudeCLI("plugin", "update", pluginRef); err != nil {
-			return fmt.Errorf("updating %s: %w", pluginRef, err)
-		}
-		fmt.Println()
-		fmt.Println("Restart Claude Code for changes to take effect.")
-		return nil
-	}
+	wasRegistered := isMarketplaceRegistered(marketplaceName)
 
 	if err := runClaudeCLI("plugin", "marketplace", "add", repoRoot); err != nil {
 		return fmt.Errorf("registering marketplace: %w", err)
 	}
-	if err := runClaudeCLI("plugin", "install", pluginRef); err != nil {
-		return fmt.Errorf("installing %s: %w", pluginRef, err)
+
+	op := "install"
+	if wasRegistered {
+		op = "update"
+	}
+	if err := runClaudeCLI("plugin", op, pluginRef); err != nil {
+		return fmt.Errorf("%sing %s: %w", op, pluginRef, err)
 	}
 
 	fmt.Println()
@@ -609,17 +608,14 @@ func installCodexPluginViaCLI(marketplaceSource string) error {
 		return fmt.Errorf("codex CLI not found in PATH; install Codex first: %w", err)
 	}
 
-	if isCodexMarketplaceRegistered(marketplaceName) {
-		// `codex plugin marketplace upgrade` only refreshes git-source
-		// marketplaces; local directory sources are read live, so the only
-		// state to reconcile is config.toml. Skip the redundant add call.
-		fmt.Printf("· Codex marketplace already registered: %s\n", marketplaceName)
-	} else {
-		codexSource := codexMarketplaceSource(marketplaceSource)
-		fmt.Printf("Adding Codex marketplace: %s\n", codexSource)
-		if err := runCodexCLI("plugin", "marketplace", "add", codexSource); err != nil {
-			return fmt.Errorf("registering codex marketplace: %w", err)
-		}
+	// Always re-add. For pinned git sources this advances the ref to the
+	// current binary's version; for directory sources it's a no-op
+	// re-register. (See installPluginViaCLI for the rationale — `marketplace
+	// upgrade` on a pinned source just re-fetches the same ref.)
+	codexSource := codexMarketplaceSource(marketplaceSource)
+	fmt.Printf("Adding Codex marketplace: %s\n", codexSource)
+	if err := runCodexCLI("plugin", "marketplace", "add", codexSource); err != nil {
+		return fmt.Errorf("registering codex marketplace: %w", err)
 	}
 
 	enabled, err := enableCodexPlugin()
