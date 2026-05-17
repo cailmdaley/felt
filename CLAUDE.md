@@ -5,8 +5,16 @@ Markdown fiber tracker. Directory-based markdown fibers with YAML frontmatter, p
 ## Structure
 
 ```
-cmd/           CLI commands (cobra)
-internal/felt/ Core logic (storage, parsing, graph)
+cmd/                              CLI commands (cobra)
+internal/felt/                    Core logic (storage, parsing, graph)
+claude-plugin/                    Plugin payload for Claude Code + Codex
+  .claude-plugin/plugin.json        Claude Code manifest
+  .codex-plugin/plugin.json         Codex manifest
+  hooks/{hooks.json,session.sh,
+        remind.sh}                  hook shims; exec felt hook <event>
+  skills/{felt,ralph}/              skill content
+.claude-plugin/marketplace.json   Repo-level marketplace; both agents read it
+scripts/release.sh                Bumps plugin manifests + commits + tags
 ```
 
 ## Data model
@@ -30,10 +38,38 @@ Fibers are minimal by default. All fields except `name` are optional.
 
 **Progressive disclosure.** `felt show <id> -d compact` shows metadata + outcome + additional YAML field keys. Levels: name, compact, summary, full (default). Targeted views: `felt show <id> --body` prints the body plus its start line; `--citations`, `--consumers`, and `--field <key>` expose index-backed or raw-frontmatter slices directly.
 
-## Key integrations
+## Agent integrations
 
-- **Reminders sync** — Apple Reminders <-> felt (dates, completion status)
-- **Claude Code hooks** — session-start context via `felt hook session`
+felt ships a single plugin (`claude-plugin/`) that serves both **Claude Code**
+and **Codex**. The same hook scripts and skills directory work for either
+agent; only the manifest at the plugin root differs (`.claude-plugin/` and
+`.codex-plugin/` siblings, same content). A single marketplace manifest at
+`.claude-plugin/marketplace.json` registers the plugin for both — Codex reads
+it under its legacy-compat path.
+
+**Hook logic lives in the binary.** `claude-plugin/hooks/{session,remind}.sh`
+are three-line shims that `exec felt hook session` / `exec felt hook pretool`.
+The binary owns find-root, fiber listing, the SessionStart envelope, and the
+PreToolUse deny gate (see `cmd/hook.go`). Updating the binary updates hook
+behavior — the plugin only needs refreshing when skill content changes.
+
+**Binary and plugin update in lockstep.** `felt update` swaps the binary, then
+calls `felt setup claude` / `felt setup codex` to refresh each integration.
+The homebrew formula's `post_install` does the same on `brew upgrade felt`.
+This is what makes "just run `brew upgrade felt`" actually work end-to-end
+— without it, the plugin would lag the binary and hooks would break (see
+the `felt-ls-j-empty-emits-array-not-null` fiber for the failure mode that
+forced this).
+
+**Codex specifics.** Codex's plugin hooks are off by default;
+`felt setup codex` auto-flips `features.plugin_hooks = true` in
+`~/.codex/config.toml` along with enabling the plugin. Pre-1.0.8 felt installs
+wired Codex via direct `~/.codex/hooks.json` entries; `felt setup codex` now
+prunes those (and any stale `~/.agents/skills/{felt,ralph}` symlinks) when
+migrating users to the plugin model.
+
+**Apple Reminders sync.** A separate integration: Apple Reminders ↔ felt
+(dates, completion status). Unrelated to the agent plugin.
 
 ## Development
 
