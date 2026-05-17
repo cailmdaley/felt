@@ -4,6 +4,13 @@ before:
   hooks:
     - go mod tidy
     - go generate ./...
+    # Guard: refuse to release if the plugin manifests haven't been
+    # bumped to the tag's version. Claude Code and Codex both compare
+    # plugin.json version when running `plugin update`; shipping a
+    # release whose manifests still show the previous version means no
+    # client actually picks up the new content. Use scripts/release.sh
+    # to keep these in sync automatically.
+    - bash -c 'claude_v=$(jq -r .version claude-plugin/.claude-plugin/plugin.json); codex_v=$(jq -r .version claude-plugin/.codex-plugin/plugin.json); if [ "$claude_v" != "{{ .Version }}" ] || [ "$codex_v" != "{{ .Version }}" ]; then echo "plugin manifests at $claude_v / $codex_v, tag at {{ .Version }} — bump via scripts/release.sh" >&2; exit 1; fi'
 
 builds:
   - env:

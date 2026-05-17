@@ -48,8 +48,19 @@ go test ./...     # test
 ## Releasing
 
 ```bash
-git tag -a v0.x.0 -m "Release description"
-git push origin v0.x.0
+scripts/release.sh 1.0.9                # bumps plugin manifests, commits, tags
+git push lightcone main v1.0.9
+git push origin main v1.0.9             # triggers goreleaser workflow
 ```
 
-Release workflow builds binaries for darwin/linux x amd64/arm64 and auto-pushes the Homebrew formula to `cailmdaley/homebrew-tap` via the `HOMEBREW_TAP_TOKEN` secret.
+`scripts/release.sh` keeps `claude-plugin/.claude-plugin/plugin.json` and
+`claude-plugin/.codex-plugin/plugin.json` versions in sync with the binary tag.
+Both Claude Code and Codex compare plugin.json versions when running
+`plugin update`; without a bump, `claude plugin update felt@cailmdaley-felt`
+reports "already up to date" even after the binary has shipped new content.
+The goreleaser workflow has a `before`-hook guard that refuses to build a
+release whose manifests don't match the tag, so a forgotten bump can't ship.
+
+Release workflow builds binaries for darwin/linux × amd64/arm64 and auto-pushes
+the Homebrew formula to `cailmdaley/homebrew-tap` via the `HOMEBREW_TAP_TOKEN`
+secret.
