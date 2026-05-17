@@ -83,6 +83,7 @@ only multiple bare files are treated as orphaned legacy and migrated.`,
 			"Migrated %d flat fibers, %d legacy title fields, %d legacy depends-on keys, %d legacy MyST anchors\n",
 			len(result.Entries), len(result.TitleToNameIDs), len(result.RemovedDependsOnIDs), len(result.StrippedMystAnchorIDs),
 		)
+		requestAsyncIndexSync(storage)
 		return nil
 	},
 }
@@ -130,6 +131,7 @@ var nestCmd = &cobra.Command{
 		if err := storage.MoveSubtree(child.ID, targetID); err != nil {
 			return err
 		}
+		requestAsyncIndexSync(storage)
 
 		fmt.Printf("Nested %s under %s as %s\n", child.ID, parent.ID, targetID)
 		return nil
@@ -169,6 +171,7 @@ var unnestCmd = &cobra.Command{
 		if err := storage.MoveSubtree(child.ID, targetID); err != nil {
 			return err
 		}
+		requestAsyncIndexSync(storage)
 
 		fmt.Printf("Promoted %s to %s\n", child.ID, targetID)
 		return nil

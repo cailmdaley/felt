@@ -132,6 +132,7 @@ For non-native frontmatter, read then edit the markdown file directly.`,
 		if data, err := os.ReadFile(storage.Path(f.ID)); err == nil {
 			recordMechanical(storage, f.ID, felt.EventEdit, fieldsChanged, data)
 		}
+		requestAsyncIndexSync(storage)
 
 		switch {
 		case bodyCleared:

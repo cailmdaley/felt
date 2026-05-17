@@ -180,10 +180,12 @@ func runCommand(t *testing.T, dir string, args ...string) (string, error) {
 
 	oldArgs := os.Args
 	oldChangeDir := changeDir
+	oldIndexSyncBackground := indexSyncBackground
 	oldStdout := os.Stdout
 	defer func() {
 		os.Args = oldArgs
 		changeDir = oldChangeDir
+		indexSyncBackground = oldIndexSyncBackground
 		os.Stdout = oldStdout
 	}()
 

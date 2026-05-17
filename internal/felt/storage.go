@@ -67,6 +67,11 @@ func NewStorage(projectRoot string) *Storage {
 	}
 }
 
+// ProjectRoot returns the project directory that owns this .felt store.
+func (s *Storage) ProjectRoot() string {
+	return filepath.Dir(s.root)
+}
+
 // Init creates the .felt directory if it doesn't exist.
 func (s *Storage) Init() error {
 	if err := os.MkdirAll(s.root, 0755); err != nil {

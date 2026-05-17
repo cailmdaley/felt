@@ -1,8 +1,10 @@
 package cmd
 
 import (
+	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/cailmdaley/felt/internal/felt"
 )
@@ -83,6 +85,64 @@ func TestIndexSyncRefreshesStaleRelationshipCache(t *testing.T) {
 	citations = readOnlyCitations(t, storage, "target")
 	if strings.Join(sourceIDs(citations), ",") != "later,source" {
 		t.Fatalf("explicit index sync should refresh citation cache: %#v", citations)
+	}
+}
+
+func TestIndexSyncRequestMarkerRecordsLatestWrite(t *testing.T) {
+	dir := t.TempDir()
+	storage := felt.NewStorage(dir)
+	if err := storage.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	if err := touchIndexSyncRequest(storage); err != nil {
+		t.Fatalf("touchIndexSyncRequest() error: %v", err)
+	}
+	first, err := indexSyncRequestedAt(storage)
+	if err != nil {
+		t.Fatalf("indexSyncRequestedAt() error: %v", err)
+	}
+
+	time.Sleep(10 * time.Millisecond)
+	if err := touchIndexSyncRequest(storage); err != nil {
+		t.Fatalf("second touchIndexSyncRequest() error: %v", err)
+	}
+	second, err := indexSyncRequestedAt(storage)
+	if err != nil {
+		t.Fatalf("second indexSyncRequestedAt() error: %v", err)
+	}
+	if !second.After(first) {
+		t.Fatalf("request marker mtime did not advance: first=%s second=%s", first, second)
+	}
+}
+
+func TestIndexSyncLockCoalescesBackgroundWorkers(t *testing.T) {
+	dir := t.TempDir()
+	storage := felt.NewStorage(dir)
+	if err := storage.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	lock, locked, err := acquireIndexSyncLock(storage)
+	if err != nil {
+		t.Fatalf("acquireIndexSyncLock() error: %v", err)
+	}
+	if !locked {
+		t.Fatal("first lock acquisition should succeed")
+	}
+	defer lock.Close()
+
+	second, locked, err := acquireIndexSyncLock(storage)
+	if err != nil {
+		t.Fatalf("second acquireIndexSyncLock() error: %v", err)
+	}
+	if locked {
+		second.Close()
+		t.Fatal("second lock acquisition should be coalesced")
+	}
+
+	if _, err := os.Stat(indexSyncLockPath(storage)); err != nil {
+		t.Fatalf("lock file should exist: %v", err)
 	}
 }
 

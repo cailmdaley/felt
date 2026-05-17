@@ -2,6 +2,10 @@ package cmd
 
 import (
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/cailmdaley/felt/internal/felt"
@@ -24,6 +28,8 @@ cache only when it is already available; run 'felt index sync' when you want to
 refresh the derived cache explicitly.`,
 }
 
+var indexSyncBackground bool
+
 var indexSyncCmd = &cobra.Command{
 	Use:   "sync",
 	Short: "Synchronize .felt/index.db from markdown",
@@ -41,14 +47,15 @@ effect.`,
 		}
 
 		storage := felt.NewStorage(root)
-		start := time.Now()
-		idx, err := storage.OpenIndex()
+		if indexSyncBackground {
+			return runBackgroundIndexSync(storage)
+		}
+
+		elapsed, err := syncIndex(storage)
 		if err != nil {
 			return err
 		}
-		defer idx.Close()
 
-		elapsed := time.Since(start)
 		result := indexSyncResult{
 			Path:       storage.IndexPath(),
 			DurationMS: elapsed.Milliseconds(),
@@ -61,7 +68,37 @@ effect.`,
 	},
 }
 
+func syncIndex(storage *felt.Storage) (time.Duration, error) {
+	start := time.Now()
+	idx, err := storage.OpenIndex()
+	if err != nil {
+		return 0, err
+	}
+	defer idx.Close()
+	return time.Since(start), nil
+}
+
+func requestAsyncIndexSync(storage *felt.Storage) {
+	if err := touchIndexSyncRequest(storage); err != nil {
+		return
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return
+	}
+	if strings.HasSuffix(filepath.Base(exe), ".test") {
+		return
+	}
+	cmd := exec.Command(exe, "-C", storage.ProjectRoot(), "index", "sync", "--background")
+	if err := cmd.Start(); err != nil {
+		return
+	}
+	_ = cmd.Process.Release()
+}
+
 func init() {
 	rootCmd.AddCommand(indexCmd)
 	indexCmd.AddCommand(indexSyncCmd)
+	indexSyncCmd.Flags().BoolVar(&indexSyncBackground, "background", false, "run as a coalesced background sync worker")
+	_ = indexSyncCmd.Flags().MarkHidden("background")
 }

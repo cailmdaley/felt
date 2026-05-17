@@ -112,6 +112,7 @@ Examples:
 		if data, err := os.ReadFile(storage.Path(f.ID)); err == nil {
 			recordMechanical(storage, f.ID, felt.EventAdd, []string{"all"}, data)
 		}
+		requestAsyncIndexSync(storage)
 
 		fmt.Println(f.ID)
 		return nil
