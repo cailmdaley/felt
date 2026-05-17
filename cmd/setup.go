@@ -280,19 +280,35 @@ func findMarketplaceRoot(source string) (string, error) {
 		"  or set $FELT_PLUGIN_DIR pointing at <repo>/claude-plugin/")
 }
 
-// installPluginViaCLI registers the marketplace and installs the plugin via
-// the Claude Code CLI (`claude plugin marketplace add` and `claude plugin
-// install`). Both commands are idempotent — re-running is safe.
+// installPluginViaCLI installs or refreshes the felt plugin. If the
+// marketplace is already registered, runs `marketplace update` + `plugin
+// update` to pull the latest content and apply it; otherwise registers the
+// marketplace fresh and installs the plugin. This is the path that keeps the
+// installed plugin in lockstep with the running binary — invoked from
+// `felt setup claude`, from `felt update` after the binary swap, and from the
+// homebrew formula's post-install. Idempotent.
 func installPluginViaCLI(repoRoot string) error {
 	if _, err := exec.LookPath("claude"); err != nil {
 		return fmt.Errorf("claude CLI not found in PATH; install Claude Code first: %w", err)
 	}
 
+	pluginRef := "felt@" + marketplaceName
+
+	if isMarketplaceRegistered(marketplaceName) {
+		if err := runClaudeCLI("plugin", "marketplace", "update", marketplaceName); err != nil {
+			return fmt.Errorf("refreshing marketplace: %w", err)
+		}
+		if err := runClaudeCLI("plugin", "update", pluginRef); err != nil {
+			return fmt.Errorf("updating %s: %w", pluginRef, err)
+		}
+		fmt.Println()
+		fmt.Println("Restart Claude Code for changes to take effect.")
+		return nil
+	}
+
 	if err := runClaudeCLI("plugin", "marketplace", "add", repoRoot); err != nil {
 		return fmt.Errorf("registering marketplace: %w", err)
 	}
-
-	pluginRef := "felt@" + marketplaceName
 	if err := runClaudeCLI("plugin", "install", pluginRef); err != nil {
 		return fmt.Errorf("installing %s: %w", pluginRef, err)
 	}
@@ -300,6 +316,21 @@ func installPluginViaCLI(repoRoot string) error {
 	fmt.Println()
 	fmt.Println("Restart Claude Code for changes to take effect.")
 	return nil
+}
+
+// isMarketplaceRegistered returns true if the given marketplace name appears
+// in `claude plugin marketplace list` output. Used to choose between the
+// add+install and update+update paths in installPluginViaCLI.
+func isMarketplaceRegistered(name string) bool {
+	out, err := exec.Command("claude", "plugin", "marketplace", "list").Output()
+	if err != nil {
+		return false
+	}
+	// `claude plugin marketplace list` formats each entry as a leading `❯ <name>`
+	// line. A bare substring match risks matching unrelated text (a description
+	// containing the name); anchoring to the marker is robust enough without
+	// parsing the full output structure.
+	return strings.Contains(string(out), "❯ "+name+"\n")
 }
 
 // uninstallPlugin removes the felt plugin via the Claude Code CLI. Leaves

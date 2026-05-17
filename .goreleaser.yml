@@ -53,4 +53,11 @@ brews:
       system "#{bin}/felt", "--help"
     install: |
       bin.install "felt"
+    # Refresh the Claude Code plugin in lockstep with the binary so users who
+    # `brew upgrade felt` pick up new hooks and skills without a separate
+    # plugin step. Skipped silently if the claude CLI isn't on PATH yet.
+    post_install: |
+      if which("claude")
+        system "#{bin}/felt", "setup", "claude"
+      end
     skip_upload: '{{ if ne .Env.GITHUB_REPOSITORY "cailmdaley/felt" }}true{{ else }}false{{ end }}'

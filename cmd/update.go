@@ -32,8 +32,9 @@ Long: `Update felt to the latest version.
 If installed from source (via a dev source marker), pulls and rebuilds
 from the source checkout. Otherwise downloads the latest GitHub release.
 
-After updating, run "felt setup claude --source <checkout>" to refresh the
-installed plugin if skills have changed.`,
+After the binary is updated, the Claude Code plugin is refreshed in the
+same step so that hooks and skills stay in lockstep with the binary.
+Plugin refresh is skipped silently if the claude CLI isn't on PATH.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Check for dev source install
 		if srcPath, err := devSourcePath(); err == nil {
@@ -106,9 +107,29 @@ installed plugin if skills have changed.`,
 
 		os.Remove(old)
 		fmt.Printf("Updated to %s\n", latestClean)
-		fmt.Println("To refresh the plugin, run: felt setup claude --source <checkout>")
+		refreshPluginAfterUpdate(defaultMarketplaceRef())
 		return nil
 	},
+}
+
+// refreshPluginAfterUpdate runs the equivalent of `felt setup claude` so the
+// Claude Code plugin (hooks, skills) stays in lockstep with the binary that
+// just landed. Failures are surfaced as a one-line warning rather than
+// errored — the binary update has already succeeded and shouldn't be undone
+// because a downstream plugin step couldn't run (e.g. claude CLI missing,
+// network blip on marketplace fetch). The user can rerun `felt setup claude`
+// manually if needed.
+func refreshPluginAfterUpdate(marketplaceRef string) {
+	if _, err := exec.LookPath("claude"); err != nil {
+		fmt.Println("Plugin refresh skipped: claude CLI not on PATH (run `felt setup claude` once it is).")
+		return
+	}
+	fmt.Println()
+	fmt.Println("Refreshing Claude Code plugin...")
+	if err := installPluginViaCLI(marketplaceRef); err != nil {
+		fmt.Printf("Plugin refresh failed: %v\n", err)
+		fmt.Println("Rerun `felt setup claude` to retry.")
+	}
 }
 
 func latestVersion() (string, error) {
@@ -211,7 +232,7 @@ func updateFromSource(srcPath string) error {
 	}
 
 	fmt.Println("Updated from source.")
-	fmt.Printf("To refresh the plugin, run: felt setup claude --source %s\n", srcPath)
+	refreshPluginAfterUpdate(srcPath)
 	return nil
 }
 
