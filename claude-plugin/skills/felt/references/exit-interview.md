@@ -52,7 +52,7 @@ One thing felt does well that you'd want preserved. One thing you'd change about
 
 ## Output
 
-Write the interview as a fiber in `~/loom/.felt/felt/`. This is felt's own project directory within the loom — the tool reflecting on itself. Interview fibers live here alongside any other meta-fibers about felt's design, conventions, or evolution, distinguished by the `exit-interview` tag.
+Write the interview as a fiber in felt's own development project — wherever the tool reflects on itself. Don't file it inside the working project you just used; the interview is about the tool, not the work. Interview fibers live alongside other meta-fibers about felt's design, conventions, and evolution, distinguished by the `exit-interview` tag.
 
 Use this template:
 
@@ -101,7 +101,7 @@ Slug: `exit-interview-YYYY-MM-DD-<session-slug>` where `<session-slug>` is 2-4 w
 
 ### Aggregation
 
-The structured `interview:` block in frontmatter is designed for machine aggregation. A future sweep can `felt -C ~/loom ls -t exit-interview`, pull the YAML, and surface patterns (common frictions, missed-capture themes, graph-quality trends) without reading the bodies.
+The structured `interview:` block in frontmatter is designed for machine aggregation. A future sweep can `felt ls -t exit-interview`, pull the YAML, and surface patterns (common frictions, missed-capture themes, graph-quality trends) without reading the bodies.
 
 ---
 

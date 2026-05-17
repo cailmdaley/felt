@@ -67,7 +67,7 @@ felt hook session | head -20  # verify session context works
 
 **`myst.yml` stays in `.felt/` root.** It's not a fiber — the migration doesn't touch it, and the reader should skip it (it's a file, not a directory).
 
-**Global felt (`~/loom/.felt/`) is separate.** Migrate each project independently. Global felt has its own namespace and may have different collision patterns.
+**Each felt store migrates independently.** If you have multiple stores (e.g., one per project plus a cross-project store), run `felt migrate` in each. Stores have separate namespaces and may have different collision patterns.
 
 **Consumers see all directories.** After migration, `.felt/` contains only directories (plus `myst.yml`). Code that filtered for `*.md` files now needs to filter for directories containing `slug/slug.md`. Empty directories or directories without matching `.md` files should be silently skipped.
 

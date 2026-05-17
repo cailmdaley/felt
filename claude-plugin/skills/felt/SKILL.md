@@ -74,7 +74,7 @@ Relationships: directory containment, `[[wikilinks]]` in bodies, and optional pr
 
 **Follow the understanding.** Don't ask permission to file. The user's corrections and opinions are the primary trigger; when the direction shifts, the fiber should shift too.
 
-**Use the substrate cleanly.** Keep names short, outcomes specific, bodies narrative, and non-native frontmatter clearly owned by the project that introduced it.
+**Use the substrate cleanly.** Keep names short, outcomes specific, bodies narrative, and non-native frontmatter clearly owned by the project that introduced it. Wikilinks belong inline in the prose, woven into sentences that are doing work — not piled at the bottom of a fiber as a related-things list.
 
 **Extract what slipped through.** Continuous filing catches most things. At session end, mine decisions, patterns, and findings that were left implicit.
 
@@ -114,6 +114,7 @@ Fibers may carry project-owned top-level YAML fields beyond what felt parses nat
 
 - **Outcomes teach.** One-sentence conclusions that stand alone: they appear in `felt ls` and `-d compact`.
 - **Use the right relationship surface.** Nest for containment, `[[wikilinks]]` for narrative, project-owned conventions for anything more specific.
+- **Links in prose, not in piles.** A `[[wikilink]]` earns its place by doing work in a sentence — naming what the other fiber is, why it's relevant here, where to head next. Related-things lists at the bottom of a fiber are a smell that the relationships haven't been thought through; either fold them into the body where they belong, or drop the ones that aren't earning the link.
 - **Compose upward.** When closing, ask whether the lesson belongs in a doc fiber or the root fiber; consolidate breadcrumbs.
 - **Names are concise labels.** Body and outcome carry the content.
 
