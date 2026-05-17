@@ -112,9 +112,9 @@ runs the bundled hooks. Idempotent — re-running is safe.
 By default, registers ` + marketplaceRepo + ` directly from GitHub.
 Tagged felt binaries pin the plugin to the matching tag.
 
-Wraps the official Codex CLI:
+Wraps the official Codex CLI (Codex's @ref syntax — Claude uses #ref):
 
-    codex plugin marketplace add ` + marketplaceRepo + `
+    codex plugin marketplace add ` + marketplaceRepo + `[@v<tag>]
 
 then writes config.toml entries:
 
@@ -567,6 +567,21 @@ func codexHooksPath() (string, error) {
 // repo's marketplace.json so `claude` and `codex` see the same plugin.
 const codexPluginRef = "felt@" + marketplaceName
 
+// codexMarketplaceSource adapts a Claude-flavored marketplace ref
+// (`owner/repo#tag`) into Codex's accepted form (`owner/repo@tag`). Local
+// filesystem paths are passed through unchanged. The two CLIs diverged on
+// ref syntax; defaultMarketplaceRef() produces Claude's form for ergonomic
+// reuse, so we translate at the boundary instead of carrying two refs.
+func codexMarketplaceSource(source string) string {
+	if strings.HasPrefix(source, "/") || strings.HasPrefix(source, ".") || strings.HasPrefix(source, "~") {
+		return source
+	}
+	if i := strings.LastIndex(source, "#"); i >= 0 {
+		return source[:i] + "@" + source[i+1:]
+	}
+	return source
+}
+
 // installCodexPluginViaCLI is the plugin-marketplace install path: register
 // the marketplace via `codex plugin marketplace add`, enable the plugin and
 // plugin-hooks feature in ~/.codex/config.toml, and prune any leftover
@@ -582,8 +597,9 @@ func installCodexPluginViaCLI(marketplaceSource string) error {
 		// state to reconcile is config.toml. Skip the redundant add call.
 		fmt.Printf("· Codex marketplace already registered: %s\n", marketplaceName)
 	} else {
-		fmt.Printf("Adding Codex marketplace: %s\n", marketplaceSource)
-		if err := runCodexCLI("plugin", "marketplace", "add", marketplaceSource); err != nil {
+		codexSource := codexMarketplaceSource(marketplaceSource)
+		fmt.Printf("Adding Codex marketplace: %s\n", codexSource)
+		if err := runCodexCLI("plugin", "marketplace", "add", codexSource); err != nil {
 			return fmt.Errorf("registering codex marketplace: %w", err)
 		}
 	}

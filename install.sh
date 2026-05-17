@@ -58,3 +58,21 @@ case ":${PATH}:" in
   *":${INSTALL_DIR}:"*) ;;
   *) echo "Add ${INSTALL_DIR} to your PATH:  export PATH=\"${INSTALL_DIR}:\$PATH\"" ;;
 esac
+
+# Wire up agent plugins for any detected agent CLI. felt setup claude/codex
+# is idempotent — re-runs of this installer (or `felt update` going forward)
+# safely refresh the marketplace registration. If the user doesn't want
+# the plugin, `felt setup claude --uninstall` / `felt setup codex --uninstall`
+# removes it cleanly.
+if command -v claude >/dev/null 2>&1; then
+  echo
+  echo "Setting up Claude Code plugin..."
+  "${INSTALL_DIR}/felt" setup claude || \
+    echo "  (Claude setup failed; run 'felt setup claude' manually)"
+fi
+if command -v codex >/dev/null 2>&1; then
+  echo
+  echo "Setting up Codex plugin..."
+  "${INSTALL_DIR}/felt" setup codex || \
+    echo "  (Codex setup failed; run 'felt setup codex' manually)"
+fi
