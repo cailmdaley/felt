@@ -63,15 +63,19 @@ brews:
       if which("claude")
         system "#{bin}/felt", "setup", "claude"
       end
-      # `felt setup codex` is idempotent and a no-op if no prior Codex setup
-      # exists; running it unconditionally would also install Codex hooks
-      # for users who have never asked for them. Delegate the detection to
-      # the binary instead — `felt update`'s refresh path checks
-      # ~/.codex/hooks.json for felt entries and only re-runs setup codex
-      # when they exist. We invoke that path here by re-running setup codex
-      # only when ~/.codex/hooks.json contains a "session.sh" reference.
+      # Only re-run `felt setup codex` for users who already have Codex
+      # integration installed — never silently install Codex hooks for
+      # users who didn't ask for them. The detection mirrors the binary's
+      # own feltCodexInstalled(): plugin entry in config.toml (1.0.8+) or
+      # legacy session.sh reference in hooks.json (pre-1.0.8).
+      codex_config = "#{ENV["HOME"]}/.codex/config.toml"
       codex_hooks = "#{ENV["HOME"]}/.codex/hooks.json"
-      if File.exist?(codex_hooks) && File.read(codex_hooks).include?("/hooks/session.sh")
+      # TOML quotes keys with single or double quotes depending on the
+      # writer; substring-match the plugin ref instead of the full header
+      # so either form is detected.
+      codex_installed = (File.exist?(codex_config) && File.read(codex_config).include?("felt@cailmdaley-felt")) ||
+                       (File.exist?(codex_hooks) && File.read(codex_hooks).include?("/hooks/session.sh"))
+      if codex_installed && which("codex")
         system "#{bin}/felt", "setup", "codex"
       end
     skip_upload: '{{ if ne .Env.GITHUB_REPOSITORY "cailmdaley/felt" }}true{{ else }}false{{ end }}'

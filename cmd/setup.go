@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/pelletier/go-toml/v2"
 	"github.com/spf13/cobra"
 )
 
@@ -101,51 +102,56 @@ Use --uninstall to remove.`,
 
 var setupCodexCmd = &cobra.Command{
 	Use:   "codex",
-	Short: "Setup Codex integration",
-	Long: `Install felt hooks and skills for Codex.
+	Short: "Install the felt plugin for Codex via the plugin marketplace",
+	Long: `Install the felt plugin for Codex.
 
-Symlinks the felt and ralph skills from the plugin directory into
-~/.agents/skills/, and configures Codex's hooks.json to point at the
-plugin's hook scripts (session.sh, remind.sh) via the symlink at
-~/.agents/skills/felt/../hooks/. Codex doesn't have a plugin manifest
-of its own, so we shell out to the same scripts the plugin uses.
+Registers the felt plugin marketplace, enables the felt plugin in
+~/.codex/config.toml, and flips features.plugin_hooks = true so Codex
+runs the bundled hooks. Idempotent — re-running is safe.
 
-Resolution order for --source:
-  1. --source <path>      path to a felt repo checkout or plugin directory
-  2. $FELT_PLUGIN_DIR     env var pointing at the plugin directory
-  3. ~/.claude/plugins/marketplaces/` + marketplaceName + `  if ` + "`felt setup claude`" + ` has run
+By default, registers ` + marketplaceRepo + ` directly from GitHub.
+Tagged felt binaries pin the plugin to the matching tag.
+
+Wraps the official Codex CLI:
+
+    codex plugin marketplace add ` + marketplaceRepo + `
+
+then writes config.toml entries:
+
+    [features]
+    plugin_hooks = true
+
+    [plugins."felt@` + marketplaceName + `"]
+    enabled = true
+
+Resolution order for --source (override the default GitHub registration):
+  1. --source <path>      path to a felt repo checkout containing
+                          .claude-plugin/marketplace.json
+  2. $FELT_PLUGIN_DIR     env var pointing directly at the plugin directory
+                          (the parent of which becomes the marketplace root)
+
+Pre-1.0.8 felt installs used direct ~/.codex/hooks.json wiring; setup
+prunes those entries on its way in.
 
 Use --uninstall to remove.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		source, _ := cmd.Flags().GetString("source")
 		uninstall, _ := cmd.Flags().GetBool("uninstall")
 
-		// Uninstall doesn't need the plugin directory — we identify felt
-		// hooks by their `/hooks/<basename>` path suffix in hooks.json, so
-		// stale entries get pruned even if the original source is gone.
 		if uninstall {
-			return uninstallCodexHooks()
+			return uninstallCodexPlugin()
 		}
 
-		pluginDir, pluginErr := findPluginDir(source)
-		if pluginErr != nil {
-			return pluginErr
+		marketplaceSource := defaultMarketplaceRef()
+		if source != "" || os.Getenv("FELT_PLUGIN_DIR") != "" {
+			repoRoot, err := findMarketplaceRoot(source)
+			if err != nil {
+				return err
+			}
+			marketplaceSource = repoRoot
 		}
 
-		if err := installCodexHooks(pluginDir); err != nil {
-			return err
-		}
-
-		skillsTarget := filepath.Join(os.Getenv("HOME"), ".agents", "skills")
-		if err := linkSkillsFromPlugin(skillsTarget, pluginDir); err != nil {
-			fmt.Printf("warning: could not link skills: %v\n", err)
-		}
-
-		fmt.Println()
-		fmt.Println("You may want to put something like the following in your AGENTS.md, adjusted to match your work style:")
-		fmt.Println()
-		fmt.Println(claudeMDSnippet())
-		return nil
+		return installCodexPluginViaCLI(marketplaceSource)
 	},
 }
 
@@ -452,14 +458,28 @@ func claudeMDSnippet() string {
 		"Follow the data: curious, not confirmatory.\n"
 }
 
-// feltCodexHooksInstalled returns true when ~/.codex/hooks.json contains any
-// felt-flagged hooks (i.e. a hook command whose path ends in
-// /hooks/session.sh or /hooks/remind.sh). Used by `felt update` and the
-// brew post-install to decide whether to refresh Codex setup alongside the
-// Claude plugin — re-running `felt setup codex` re-canonicalizes the
-// absolute paths so a felt checkout that moved on disk doesn't leave Codex
-// pointing at the old location.
-func feltCodexHooksInstalled() bool {
+// feltCodexInstalled returns true when this machine has either the plugin
+// enabled in ~/.codex/config.toml or legacy direct entries in
+// ~/.codex/hooks.json from pre-1.0.8 installs. Used by `felt update` and
+// the brew post-install to decide whether to refresh Codex setup alongside
+// the Claude plugin — `felt setup codex` is idempotent and re-canonicalizes
+// state in either case.
+func feltCodexInstalled() bool {
+	cfg, err := readCodexConfig()
+	if err == nil {
+		if plugins, ok := cfg["plugins"].(map[string]interface{}); ok {
+			if _, has := plugins[codexPluginRef]; has {
+				return true
+			}
+		}
+	}
+	return feltCodexLegacyHooksInstalled()
+}
+
+// feltCodexLegacyHooksInstalled returns true when ~/.codex/hooks.json has any
+// felt-flagged direct entries (the pre-1.0.8 wiring). Kept around so the
+// lockstep refresh path can clean those up on the next `felt update`.
+func feltCodexLegacyHooksInstalled() bool {
 	hooksPath, err := codexHooksPath()
 	if err != nil {
 		return false
@@ -523,24 +543,14 @@ func hooksReferenceFelt(hooks map[string]interface{}, event, basename string) bo
 // a binary that just landed also refreshes Codex's view of the plugin
 // directory. Silent no-op when Codex setup isn't installed.
 func refreshCodexSetupIfInstalled() {
-	if !feltCodexHooksInstalled() {
-		return
-	}
-	pluginDir, err := findPluginDir("")
-	if err != nil {
-		fmt.Printf("Codex refresh skipped: %v\n", err)
+	if !feltCodexInstalled() {
 		return
 	}
 	fmt.Println()
-	fmt.Println("Refreshing Codex setup...")
-	if err := installCodexHooks(pluginDir); err != nil {
+	fmt.Println("Refreshing Codex plugin...")
+	if err := installCodexPluginViaCLI(defaultMarketplaceRef()); err != nil {
 		fmt.Printf("Codex refresh failed: %v\n", err)
 		fmt.Println("Rerun `felt setup codex` to retry.")
-		return
-	}
-	skillsTarget := filepath.Join(os.Getenv("HOME"), ".agents", "skills")
-	if err := linkSkillsFromPlugin(skillsTarget, pluginDir); err != nil {
-		fmt.Printf("warning: could not link skills: %v\n", err)
 	}
 }
 
@@ -552,116 +562,294 @@ func codexHooksPath() (string, error) {
 	return filepath.Join(home, ".codex", "hooks.json"), nil
 }
 
-// codexHookCommands returns the (sessionCmd, remindCmd) bash invocations Codex
-// should use, pointed at the plugin's hook scripts via absolute paths. The
-// scripts are part of the plugin install (claude-plugin/hooks/*.sh) and stay
-// in lockstep with the plugin's hooks.json bindings.
-func codexHookCommands(pluginDir string) (string, string) {
-	abs, _ := filepath.Abs(pluginDir)
-	session := fmt.Sprintf("%q", filepath.Join(abs, "hooks", "session.sh"))
-	remind := fmt.Sprintf("%q", filepath.Join(abs, "hooks", "remind.sh"))
-	return session, remind
-}
+// codexPluginRef is the plugin identifier used in `~/.codex/config.toml`'s
+// `[plugins."<ref>"]` block. Matches the marketplace name declared in the
+// repo's marketplace.json so `claude` and `codex` see the same plugin.
+const codexPluginRef = "felt@" + marketplaceName
 
-func installCodexHooks(pluginDir string) error {
-	hooksPath, err := codexHooksPath()
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(hooksPath), 0755); err != nil {
-		return fmt.Errorf("creating .codex directory: %w", err)
+// installCodexPluginViaCLI is the plugin-marketplace install path: register
+// the marketplace via `codex plugin marketplace add`, enable the plugin and
+// plugin-hooks feature in ~/.codex/config.toml, and prune any leftover
+// direct-hooks.json wiring from pre-1.0.8 installs. Idempotent.
+func installCodexPluginViaCLI(marketplaceSource string) error {
+	if _, err := exec.LookPath("codex"); err != nil {
+		return fmt.Errorf("codex CLI not found in PATH; install Codex first: %w", err)
 	}
 
-	settings := make(map[string]interface{})
-	if data, err := os.ReadFile(hooksPath); err == nil {
-		if err := json.Unmarshal(data, &settings); err != nil {
-			return fmt.Errorf("parsing hooks.json: %w", err)
+	if isCodexMarketplaceRegistered(marketplaceName) {
+		// `codex plugin marketplace upgrade` only refreshes git-source
+		// marketplaces; local directory sources are read live, so the only
+		// state to reconcile is config.toml. Skip the redundant add call.
+		fmt.Printf("· Codex marketplace already registered: %s\n", marketplaceName)
+	} else {
+		fmt.Printf("Adding Codex marketplace: %s\n", marketplaceSource)
+		if err := runCodexCLI("plugin", "marketplace", "add", marketplaceSource); err != nil {
+			return fmt.Errorf("registering codex marketplace: %w", err)
 		}
 	}
 
-	hooks, ok := settings["hooks"].(map[string]interface{})
-	if !ok {
-		hooks = make(map[string]interface{})
-		settings["hooks"] = hooks
-	}
-
-	sessionCmd, remindCmd := codexHookCommands(pluginDir)
-
-	// Prune any existing felt hooks first. The plugin source path can change
-	// between runs (different --source, different felt versions, GitHub clone
-	// vs local checkout), and addHook only dedupes by exact string match.
-	// Path-suffix pruning makes setup truly idempotent regardless of source.
-	prevSession := pruneFeltHooks(hooks, "SessionStart", "session.sh")
-	prevRemind := pruneFeltHooks(hooks, "PreToolUse", "remind.sh")
-
-	addHook(hooks, "SessionStart", "", sessionCmd)
-	addHook(hooks, "PreToolUse", "", remindCmd)
-
-	reportHookChange("SessionStart", prevSession, sessionCmd)
-	reportHookChange("PreToolUse", prevRemind, remindCmd)
-
-	data, err := json.MarshalIndent(settings, "", "  ")
+	enabled, err := enableCodexPlugin()
 	if err != nil {
-		return fmt.Errorf("marshaling hooks.json: %w", err)
+		return err
 	}
-	if err := os.WriteFile(hooksPath, data, 0644); err != nil {
-		return fmt.Errorf("writing hooks.json: %w", err)
+	if enabled {
+		fmt.Printf("✓ Enabled plugin: %s\n", codexPluginRef)
+	} else {
+		fmt.Printf("· Plugin already enabled: %s\n", codexPluginRef)
+	}
+
+	hooksEnabled, err := enableCodexPluginHooks()
+	if err != nil {
+		return err
+	}
+	if hooksEnabled {
+		fmt.Println("✓ Enabled features.plugin_hooks in ~/.codex/config.toml")
+	}
+
+	// Pre-1.0.8 installs wrote direct entries into ~/.codex/hooks.json that
+	// pointed at the plugin's session.sh / remind.sh. With plugin_hooks
+	// enabled, Codex now invokes them itself; keeping the legacy entries
+	// would fire the same hooks twice per session.
+	if removed := pruneLegacyCodexHooks(); removed > 0 {
+		fmt.Printf("✓ Removed %d legacy hooks.json entries (now served via plugin)\n", removed)
+	}
+
+	// `~/.agents/skills/{felt,ralph}` symlinks predate Codex's plugin
+	// skill discovery. The plugin's `skills:` pointer in plugin.json
+	// supersedes them, and leaving stale symlinks risks Codex loading
+	// the same skill twice from two paths.
+	if removed := pruneLegacyCodexSkills(); removed > 0 {
+		fmt.Printf("✓ Removed %d legacy ~/.agents/skills symlinks (now served via plugin)\n", removed)
 	}
 
 	fmt.Println()
-	fmt.Printf("Hooks: %s\n", hooksPath)
-	fmt.Println("If native hooks are still disabled, run: codex features enable codex_hooks")
+	fmt.Println("Restart Codex for changes to take effect.")
 	return nil
 }
 
-func uninstallCodexHooks() error {
+// runCodexCLI invokes the codex CLI, piping stdio through to the caller.
+func runCodexCLI(args ...string) error {
+	cmd := exec.Command("codex", args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+// isCodexMarketplaceRegistered checks ~/.codex/config.toml for a
+// `[marketplaces.<name>]` block. Codex stores registered marketplaces in
+// the user config, not in a queryable CLI command, so we parse directly.
+func isCodexMarketplaceRegistered(name string) bool {
+	cfg, err := readCodexConfig()
+	if err != nil {
+		return false
+	}
+	markets, _ := cfg["marketplaces"].(map[string]interface{})
+	_, ok := markets[name]
+	return ok
+}
+
+// enableCodexPlugin writes `[plugins."felt@<marketplace>"]\nenabled = true`
+// to ~/.codex/config.toml. Returns true if the value actually changed (so
+// the caller can print "enabled" vs "already enabled").
+func enableCodexPlugin() (bool, error) {
+	return setCodexConfigBool([]string{"plugins", codexPluginRef, "enabled"}, true)
+}
+
+// enableCodexPluginHooks flips `[features].plugin_hooks = true`. Returns
+// true if the value actually changed.
+func enableCodexPluginHooks() (bool, error) {
+	return setCodexConfigBool([]string{"features", "plugin_hooks"}, true)
+}
+
+// codexConfigPath returns ~/.codex/config.toml.
+func codexConfigPath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("getting home directory: %w", err)
+	}
+	return filepath.Join(home, ".codex", "config.toml"), nil
+}
+
+// readCodexConfig loads ~/.codex/config.toml as a generic map. Returns an
+// empty map if the file doesn't exist.
+func readCodexConfig() (map[string]interface{}, error) {
+	path, err := codexConfigPath()
+	if err != nil {
+		return nil, err
+	}
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return map[string]interface{}{}, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("reading %s: %w", path, err)
+	}
+	var cfg map[string]interface{}
+	if err := toml.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("parsing %s: %w", path, err)
+	}
+	if cfg == nil {
+		cfg = map[string]interface{}{}
+	}
+	return cfg, nil
+}
+
+// writeCodexConfig serializes cfg back to ~/.codex/config.toml, creating
+// parent directories as needed.
+func writeCodexConfig(cfg map[string]interface{}) error {
+	path, err := codexConfigPath()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return fmt.Errorf("creating .codex directory: %w", err)
+	}
+	data, err := toml.Marshal(cfg)
+	if err != nil {
+		return fmt.Errorf("marshaling %s: %w", path, err)
+	}
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		return fmt.Errorf("writing %s: %w", path, err)
+	}
+	return nil
+}
+
+// setCodexConfigBool sets a nested boolean value via a dotted path
+// (e.g. ["features", "plugin_hooks"]). Creates intermediate tables as
+// needed. Returns true if the value actually changed.
+func setCodexConfigBool(path []string, value bool) (bool, error) {
+	cfg, err := readCodexConfig()
+	if err != nil {
+		return false, err
+	}
+	cursor := cfg
+	for _, key := range path[:len(path)-1] {
+		next, ok := cursor[key].(map[string]interface{})
+		if !ok {
+			next = map[string]interface{}{}
+			cursor[key] = next
+		}
+		cursor = next
+	}
+	last := path[len(path)-1]
+	if existing, ok := cursor[last].(bool); ok && existing == value {
+		return false, nil
+	}
+	cursor[last] = value
+	return true, writeCodexConfig(cfg)
+}
+
+// pruneLegacyCodexHooks removes felt-flagged entries from ~/.codex/hooks.json.
+// Returns the count of pruned entries.
+func pruneLegacyCodexHooks() int {
 	hooksPath, err := codexHooksPath()
+	if err != nil {
+		return 0
+	}
+	data, err := os.ReadFile(hooksPath)
+	if err != nil {
+		return 0
+	}
+	var settings map[string]interface{}
+	if err := json.Unmarshal(data, &settings); err != nil {
+		return 0
+	}
+	hooks, ok := settings["hooks"].(map[string]interface{})
+	if !ok {
+		return 0
+	}
+	removed := 0
+	for _, event := range []string{"SessionStart", "PreToolUse"} {
+		for _, basename := range []string{"session.sh", "remind.sh"} {
+			pruned := pruneFeltHooks(hooks, event, basename)
+			removed += len(pruned)
+		}
+	}
+	if removed == 0 {
+		return 0
+	}
+	out, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return 0
+	}
+	if err := os.WriteFile(hooksPath, out, 0644); err != nil {
+		return 0
+	}
+	return removed
+}
+
+// pruneLegacyCodexSkills removes felt-related symlinks from
+// ~/.agents/skills/. Only removes symlinks (not directories) to avoid
+// touching anything the user installed manually.
+func pruneLegacyCodexSkills() int {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return 0
+	}
+	dir := filepath.Join(home, ".agents", "skills")
+	removed := 0
+	for _, skill := range []string{"felt", "ralph"} {
+		target := filepath.Join(dir, skill)
+		info, err := os.Lstat(target)
+		if err != nil {
+			continue
+		}
+		if info.Mode()&os.ModeSymlink == 0 {
+			continue
+		}
+		if err := os.Remove(target); err == nil {
+			removed++
+		}
+	}
+	return removed
+}
+
+// uninstallCodexPlugin disables the plugin in config.toml, removes the
+// marketplace, and prunes any leftover legacy hooks.json / agents-skills
+// entries. Leaves `features.plugin_hooks` alone — other Codex plugins may
+// rely on it.
+func uninstallCodexPlugin() error {
+	cfg, err := readCodexConfig()
 	if err != nil {
 		return err
 	}
 
-	data, err := os.ReadFile(hooksPath)
-	if err != nil {
-		fmt.Println("No Codex hooks.json found")
-		return nil
+	changed := false
+	if plugins, ok := cfg["plugins"].(map[string]interface{}); ok {
+		if _, has := plugins[codexPluginRef]; has {
+			delete(plugins, codexPluginRef)
+			if len(plugins) == 0 {
+				delete(cfg, "plugins")
+			}
+			changed = true
+		}
+	}
+	if changed {
+		if err := writeCodexConfig(cfg); err != nil {
+			return err
+		}
+		fmt.Printf("✓ Disabled plugin: %s\n", codexPluginRef)
+	} else {
+		fmt.Printf("· Plugin not enabled: %s\n", codexPluginRef)
 	}
 
-	var settings map[string]interface{}
-	if err := json.Unmarshal(data, &settings); err != nil {
-		return fmt.Errorf("parsing hooks.json: %w", err)
+	if _, err := exec.LookPath("codex"); err == nil && isCodexMarketplaceRegistered(marketplaceName) {
+		if err := runCodexCLI("plugin", "marketplace", "remove", marketplaceName); err != nil {
+			fmt.Printf("warning: could not remove marketplace %s: %v\n", marketplaceName, err)
+		} else {
+			fmt.Printf("✓ Removed marketplace: %s\n", marketplaceName)
+		}
 	}
 
-	hooks, ok := settings["hooks"].(map[string]interface{})
-	if !ok {
-		fmt.Println("No hooks found")
-		return nil
+	if removed := pruneLegacyCodexHooks(); removed > 0 {
+		fmt.Printf("✓ Removed %d legacy hooks.json entries\n", removed)
+	}
+	if removed := pruneLegacyCodexSkills(); removed > 0 {
+		fmt.Printf("✓ Removed %d legacy ~/.agents/skills symlinks\n", removed)
 	}
 
-	// Match by path suffix (./hooks/<basename>) so uninstall works even when
-	// the original install pointed at a different path — including when the
-	// felt checkout that installed it has been deleted, which is exactly the
-	// scenario where pluginDir-based exact-match uninstall used to fail.
-	prunedSession := pruneFeltHooks(hooks, "SessionStart", "session.sh")
-	prunedRemind := pruneFeltHooks(hooks, "PreToolUse", "remind.sh")
-	if len(prunedSession) > 0 {
-		fmt.Printf("✓ Removed %d SessionStart hook(s)\n", len(prunedSession))
-	}
-	if len(prunedRemind) > 0 {
-		fmt.Printf("✓ Removed %d PreToolUse hook(s)\n", len(prunedRemind))
-	}
-	if len(prunedSession)+len(prunedRemind) == 0 {
-		fmt.Println("No felt Codex hooks found")
-		return nil
-	}
-
-	data, err = json.MarshalIndent(settings, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshaling hooks.json: %w", err)
-	}
-	if err := os.WriteFile(hooksPath, data, 0644); err != nil {
-		return fmt.Errorf("writing hooks.json: %w", err)
-	}
-	fmt.Printf("Hooks: %s\n", hooksPath)
+	fmt.Println()
+	fmt.Println("Restart Codex for changes to take effect.")
 	return nil
 }
 

@@ -29,19 +29,36 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Binary and integrations now update in lockstep so they can't drift:
   - `felt update` refreshes the Claude Code plugin (`marketplace update`
     + `plugin update`) after swapping the binary, and also re-runs
-    `felt setup codex` if Codex hooks are currently installed. One
+    `felt setup codex` if Codex integration is currently installed. One
     command, every layer current.
   - The homebrew formula has a `post_install` step that runs `felt setup
-    claude` (and `felt setup codex` if `~/.codex/hooks.json` has felt
-    entries), so `brew upgrade felt` keeps every integration in sync
-    too. Skipped silently if the respective CLI isn't installed.
+    claude` (and `felt setup codex` if Codex integration is detected),
+    so `brew upgrade felt` keeps every integration in sync too. Skipped
+    silently if the respective CLI isn't installed.
   - `felt setup claude` is now fully idempotent — if the marketplace is
     already registered, it takes the update path instead of erroring on
     duplicate add.
-  - `felt setup codex` can resolve the plugin directory from a
-    directory-source marketplace (read out of `claude plugin marketplace
-    list --json`), so dev installs no longer need `--source` or
-    `$FELT_PLUGIN_DIR` to refresh.
+
+- Codex integration is now a real plugin via Codex's plugin marketplace
+  rather than direct `~/.codex/hooks.json` wiring. Same plugin layout
+  serves both agents: a new `.codex-plugin/plugin.json` sits next to the
+  existing `.claude-plugin/plugin.json` inside `claude-plugin/`, both
+  pointing at the same `hooks/` and `skills/` directories. Codex's
+  marketplace install picks up the plugin from the felt repo's existing
+  Claude-style `.claude-plugin/marketplace.json` (Codex reads it as a
+  legacy-compat format). `felt setup codex` now:
+  - Runs `codex plugin marketplace add <source>` to register the felt
+    marketplace,
+  - Auto-flips `features.plugin_hooks = true` in `~/.codex/config.toml`
+    so Codex actually runs the bundled hooks (off by default in Codex),
+  - Enables `[plugins."felt@cailmdaley-felt"]`,
+  - Prunes any direct hook entries from `~/.codex/hooks.json` and any
+    `~/.agents/skills/{felt,ralph}` symlinks left over from the pre-1.0.8
+    direct-wiring model — Codex now sources both hooks and skills via the
+    plugin.
+
+  Existing Codex users will see the cleanup happen automatically on the
+  next `felt setup codex` (or `felt update`, which calls it).
 
 ## [1.0.5] — 2026-05-04
 
