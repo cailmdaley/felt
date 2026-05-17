@@ -90,7 +90,6 @@ echo "✓ Created annotated tag $TAG"
 cat <<EOF
 
 Local release ready. To publish:
-  git push lightcone main "$TAG"
   git push origin main "$TAG"
 
 Pushing $TAG to origin (cailmdaley/felt) triggers the goreleaser

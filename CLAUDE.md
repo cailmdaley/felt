@@ -85,7 +85,6 @@ go test ./...     # test
 
 ```bash
 scripts/release.sh 1.0.9                # bumps plugin manifests, commits, tags
-git push lightcone main v1.0.9
 git push origin main v1.0.9             # triggers goreleaser workflow
 ```
 
