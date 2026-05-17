@@ -80,6 +80,7 @@ func TestRootCommandSurfaceIsConsolidated(t *testing.T) {
 		"setup",
 		"show",
 		"tree",
+		"uninstall",
 		"unnest",
 		"update",
 	} {
@@ -110,6 +111,7 @@ func TestRootCommandSurfaceIsConsolidated(t *testing.T) {
 		"setup",
 		"show",
 		"tree",
+		"uninstall",
 		"unnest",
 		"update",
 	}

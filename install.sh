@@ -59,13 +59,22 @@ case ":${PATH}:" in
   *) echo "Add ${INSTALL_DIR} to your PATH:  export PATH=\"${INSTALL_DIR}:\$PATH\"" ;;
 esac
 
-# Wire up agent plugins for any detected agent CLI. felt setup claude/codex
-# is idempotent — re-runs of this installer (or `felt update` going forward)
-# safely refresh the marketplace registration. If the user doesn't want
-# the plugin, `felt setup claude --uninstall` / `felt setup codex --uninstall`
-# removes it cleanly.
-if command -v claude >/dev/null 2>&1; then
+# Wire up agent plugins for any detected agent CLI. The plugins are core
+# to how felt feels — SessionStart and PreToolUse hooks surface active
+# fibers at session start and gate non-felt tool use until the felt skill
+# activates. They're how fibers stay visible across sessions without you
+# needing to mention them. Setup commands are idempotent (re-running them
+# refreshes registration) and the install can be cleanly reversed via
+# `felt uninstall`.
+if command -v claude >/dev/null 2>&1 || command -v codex >/dev/null 2>&1; then
   echo
+  echo "Wiring up felt's agent plugins:"
+  echo "  • Claude Code: marketplace + plugin + SessionStart/PreToolUse hooks"
+  echo "  • Codex:       marketplace + plugin + features.plugin_hooks=true"
+  echo "To remove later: felt uninstall"
+  echo
+fi
+if command -v claude >/dev/null 2>&1; then
   echo "Setting up Claude Code plugin..."
   "${INSTALL_DIR}/felt" setup claude || \
     echo "  (Claude setup failed; run 'felt setup claude' manually)"
