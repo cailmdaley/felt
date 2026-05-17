@@ -3,6 +3,7 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -225,6 +226,16 @@ func findPluginDir(source string) (string, error) {
 		return "", err
 	}
 	return filepath.Join(root, "claude-plugin"), nil
+}
+
+// findPluginDirIfAvailable is the best-effort variant used by Codex setup:
+// Codex's marketplace registration is still authoritative, but current local
+// marketplaces do not materialize plugin cache contents by themselves. When a
+// checkout or Claude marketplace clone is available, we mirror it into Codex's
+// installed-plugin cache layout.
+func findPluginDirIfAvailable(source string) (string, bool) {
+	pluginDir, err := findPluginDir(source)
+	return pluginDir, err == nil
 }
 
 // findMarketplaceRoot resolves the directory to register as a Claude Code
@@ -582,6 +593,13 @@ func codexMarketplaceSource(source string) string {
 	return source
 }
 
+func localMarketplaceSource(source string) string {
+	if strings.HasPrefix(source, "/") || strings.HasPrefix(source, ".") || strings.HasPrefix(source, "~") {
+		return source
+	}
+	return ""
+}
+
 // installCodexPluginViaCLI is the plugin-marketplace install path: register
 // the marketplace via `codex plugin marketplace add`, enable the plugin and
 // plugin-hooks feature in ~/.codex/config.toml, and prune any leftover
@@ -622,6 +640,15 @@ func installCodexPluginViaCLI(marketplaceSource string) error {
 		fmt.Println("✓ Enabled features.plugin_hooks in ~/.codex/config.toml")
 	}
 
+	if pluginDir, ok := findPluginDirIfAvailable(localMarketplaceSource(marketplaceSource)); ok {
+		if err := installCodexPluginCache(pluginDir); err != nil {
+			return err
+		}
+	} else if !codexPluginCacheInstalled() {
+		fmt.Println("warning: could not find a local felt plugin source to populate Codex's plugin cache")
+		fmt.Println("         Run `felt setup codex --source <felt-checkout>` if the next Codex session does not list felt.")
+	}
+
 	// Pre-1.0.8 installs wrote direct entries into ~/.codex/hooks.json that
 	// pointed at the plugin's session.sh / remind.sh. With plugin_hooks
 	// enabled, Codex now invokes them itself; keeping the legacy entries
@@ -649,6 +676,141 @@ func runCodexCLI(args ...string) error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
+}
+
+func codexPluginCacheDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("getting home directory: %w", err)
+	}
+	return filepath.Join(home, ".codex", "plugins", "cache", marketplaceName, "felt"), nil
+}
+
+func codexPluginCacheVersion() string {
+	version := strings.TrimPrefix(Version, "v")
+	if version == "" || version == "dev" {
+		return "dev"
+	}
+	return "v" + version
+}
+
+func codexPluginCacheInstalled() bool {
+	cacheDir, err := codexPluginCacheDir()
+	if err != nil {
+		return false
+	}
+	entries, err := os.ReadDir(cacheDir)
+	if err != nil {
+		return false
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(cacheDir, entry.Name(), ".codex-plugin", "plugin.json")); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// installCodexPluginCache mirrors <repo>/claude-plugin into Codex's installed
+// plugin cache. Codex loads enabled plugins from
+// ~/.codex/plugins/cache/<marketplace>/<plugin>/<version>/.codex-plugin/plugin.json;
+// placing files directly under <plugin>/ makes Codex scan skills/ as a plugin
+// version and fail with "missing or invalid plugin.json".
+func installCodexPluginCache(pluginDir string) error {
+	if _, err := os.Stat(filepath.Join(pluginDir, ".codex-plugin", "plugin.json")); err != nil {
+		return fmt.Errorf("codex plugin manifest missing in %s: %w", pluginDir, err)
+	}
+
+	cacheRoot, err := codexPluginCacheDir()
+	if err != nil {
+		return err
+	}
+	versionDir := filepath.Join(cacheRoot, codexPluginCacheVersion())
+	tmpRoot := cacheRoot + ".tmp"
+	tmpVersionDir := filepath.Join(tmpRoot, codexPluginCacheVersion())
+
+	if err := os.RemoveAll(tmpRoot); err != nil {
+		return fmt.Errorf("clearing temporary codex plugin cache: %w", err)
+	}
+	if err := copyDir(pluginDir, tmpVersionDir); err != nil {
+		return fmt.Errorf("populating codex plugin cache: %w", err)
+	}
+	if err := os.RemoveAll(cacheRoot); err != nil {
+		return fmt.Errorf("clearing old codex plugin cache: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(cacheRoot), 0755); err != nil {
+		return fmt.Errorf("creating codex plugin cache root: %w", err)
+	}
+	if err := os.Rename(tmpRoot, cacheRoot); err != nil {
+		return fmt.Errorf("installing codex plugin cache: %w", err)
+	}
+
+	fmt.Printf("✓ Installed Codex plugin cache: %s\n", versionDir)
+	return nil
+}
+
+func copyDir(src, dst string) error {
+	info, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("%s is not a directory", src)
+	}
+	if err := os.MkdirAll(dst, info.Mode().Perm()); err != nil {
+		return err
+	}
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		srcPath := filepath.Join(src, entry.Name())
+		dstPath := filepath.Join(dst, entry.Name())
+		entryInfo, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		switch {
+		case entryInfo.Mode()&os.ModeSymlink != 0:
+			target, err := os.Readlink(srcPath)
+			if err != nil {
+				return err
+			}
+			if err := os.Symlink(target, dstPath); err != nil {
+				return err
+			}
+		case entryInfo.IsDir():
+			if err := copyDir(srcPath, dstPath); err != nil {
+				return err
+			}
+		default:
+			if err := copyFile(srcPath, dstPath, entryInfo.Mode().Perm()); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func copyFile(src, dst string, mode os.FileMode) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		return err
+	}
+	return out.Close()
 }
 
 // isCodexMarketplaceRegistered checks ~/.codex/config.toml for a
@@ -856,6 +1018,11 @@ func uninstallCodexPlugin() error {
 			fmt.Printf("✓ Removed marketplace: %s\n", marketplaceName)
 		}
 	}
+	if err := removeCodexPluginCache(); err != nil {
+		fmt.Printf("warning: could not remove Codex plugin cache: %v\n", err)
+	} else {
+		fmt.Printf("✓ Removed Codex plugin cache: %s\n", codexPluginRef)
+	}
 
 	if removed := pruneLegacyCodexHooks(); removed > 0 {
 		fmt.Printf("✓ Removed %d legacy hooks.json entries\n", removed)
@@ -867,6 +1034,14 @@ func uninstallCodexPlugin() error {
 	fmt.Println()
 	fmt.Println("Restart Codex for changes to take effect.")
 	return nil
+}
+
+func removeCodexPluginCache() error {
+	cacheRoot, err := codexPluginCacheDir()
+	if err != nil {
+		return err
+	}
+	return os.RemoveAll(cacheRoot)
 }
 
 // reportHookChange prints a one-line summary of a hook install based on what

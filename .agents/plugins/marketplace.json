@@ -1,0 +1,21 @@
+{
+  "name": "cailmdaley-felt",
+  "interface": {
+    "displayName": "felt"
+  },
+  "plugins": [
+    {
+      "name": "felt",
+      "description": "felt — fiber-based thinking substrate. Bundles the felt and ralph skills plus SessionStart and PreToolUse hooks.",
+      "source": {
+        "source": "local",
+        "path": "./claude-plugin"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

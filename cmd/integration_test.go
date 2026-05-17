@@ -633,11 +633,14 @@ Session body.
 		t.Fatalf("setup codex: expected AGENTS.md snippet, got: %s", cmdOut)
 	}
 
-	hooksPath := filepath.Join(codexHome, ".codex", "hooks.json")
-	hooksContent, _ := os.ReadFile(hooksPath)
-	text := string(hooksContent)
-	if !strings.Contains(text, "session.sh") || !strings.Contains(text, "remind.sh") {
-		t.Fatalf("setup codex: hooks.json missing felt hook scripts, got: %s", hooksContent)
+	cacheManifest := filepath.Join(codexHome, ".codex", "plugins", "cache", marketplaceName, "felt", codexPluginCacheVersion(), ".codex-plugin", "plugin.json")
+	cacheContent, err := os.ReadFile(cacheManifest)
+	if err != nil {
+		t.Fatalf("setup codex: plugin cache manifest missing: %v", err)
+	}
+	text := string(cacheContent)
+	if !strings.Contains(text, `"skills"`) || !strings.Contains(text, `"hooks"`) {
+		t.Fatalf("setup codex: cache manifest missing skills/hooks pointers, got: %s", cacheContent)
 	}
 
 	// idempotent
@@ -645,8 +648,8 @@ Session body.
 	cmd2.Dir = dir
 	cmd2.Env = codexEnv
 	cmdOut2, _ := cmd2.CombinedOutput()
-	if !strings.Contains(string(cmdOut2), "already installed") {
-		t.Fatalf("setup codex idempotency: expected 'already installed', got: %s", cmdOut2)
+	if !strings.Contains(string(cmdOut2), "Plugin already enabled") {
+		t.Fatalf("setup codex idempotency: expected already-enabled plugin, got: %s", cmdOut2)
 	}
 
 	// uninstall
@@ -657,9 +660,8 @@ Session body.
 	if err != nil {
 		t.Fatalf("setup codex uninstall: %v\n%s", err, cmd3Out)
 	}
-	hooksContent2, _ := os.ReadFile(hooksPath)
-	if strings.Contains(string(hooksContent2), "session.sh") || strings.Contains(string(hooksContent2), "remind.sh") {
-		t.Fatalf("setup codex uninstall: hooks still present in hooks.json")
+	if _, err := os.Stat(cacheManifest); !os.IsNotExist(err) {
+		t.Fatalf("setup codex uninstall: plugin cache still present: %v", err)
 	}
 
 	out = mustFelt(t, dir, "--help")
