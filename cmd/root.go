@@ -6,6 +6,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"reflect"
 	"strings"
 
 	"github.com/cailmdaley/felt/internal/felt"
@@ -111,9 +112,14 @@ func resolveCommandScope(root string) string {
 	return ""
 }
 
-// outputJSON marshals data to JSON and prints it.
+// outputJSON marshals data to JSON and prints it. A nil slice is normalized
+// to an empty slice so listing endpoints always emit `[]` (not `null`) when
+// they have no results — consumers shouldn't have to handle both.
 func outputJSON(data interface{}) error {
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
+	if v := reflect.ValueOf(data); v.Kind() == reflect.Slice && v.IsNil() {
+		data = reflect.MakeSlice(v.Type(), 0, 0).Interface()
+	}
 	return enc.Encode(data)
 }

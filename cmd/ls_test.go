@@ -45,6 +45,36 @@ func TestTreeDisplayID(t *testing.T) {
 	}
 }
 
+// Listing endpoints must always emit `[]` (not `null`) when no fibers match.
+// Consumers like the SessionStart hook pipe the JSON straight into `jq '.[]'`,
+// which errors out on null — a single user with no active fibers shouldn't
+// have to handle two distinct empty shapes.
+func TestLsJSONEmptyEmitsArrayNotNull(t *testing.T) {
+	dir := t.TempDir()
+	storage := felt.NewStorage(dir)
+	if err := storage.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	reset := saveLsGlobals()
+	defer reset()
+
+	for _, args := range [][]string{
+		{"ls", "-j"},
+		{"ls", "-j", "-s", "active"},
+		{"ls", "-j", "-s", "all"},
+	} {
+		out, err := runCommand(t, dir, args...)
+		if err != nil {
+			t.Fatalf("%v: %v\n%s", args, err, out)
+		}
+		got := strings.TrimSpace(out)
+		if got != "[]" {
+			t.Fatalf("%v: got %q, want %q", args, got, "[]")
+		}
+	}
+}
+
 func TestLsBodySearchScansMarkdownWithoutCreatingIndex(t *testing.T) {
 	dir := t.TempDir()
 	storage := felt.NewStorage(dir)
@@ -98,6 +128,16 @@ func saveLsGlobals() func() {
 	lsHasFields = nil
 	lsJSONFields = nil
 	jsonOutput = false
+
+	// Reset cobra's per-flag Changed bookkeeping. Without this, a prior test
+	// that passed e.g. `-s active` leaves Changed("status") == true, and
+	// subsequent tests inspecting `cmd.Flags().Changed("status")` see stale
+	// state even though the underlying string variable was reset above.
+	for _, name := range []string{"status", "tag", "recent", "body", "exact", "regex", "has-field", "json-field", "json"} {
+		if f := lsCmd.Flags().Lookup(name); f != nil {
+			f.Changed = false
+		}
+	}
 
 	return func() {
 		lsStatus = prevStatus
