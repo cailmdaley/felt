@@ -633,7 +633,12 @@ Session body.
 		t.Fatalf("setup codex: expected AGENTS.md snippet, got: %s", cmdOut)
 	}
 
-	cacheManifest := filepath.Join(codexHome, ".codex", "plugins", "cache", marketplaceName, "felt", codexPluginCacheVersion(), ".codex-plugin", "plugin.json")
+	// The marketplace name comes from marketplace.json's `name` field; the
+	// version subdirectory follows codexPluginCacheVersion(), which returns
+	// "dev" when Version is unset or "dev" — and `go build` above produces
+	// exactly that. Inlining avoids reaching into cmd-internal symbols from
+	// this external test package.
+	cacheManifest := filepath.Join(codexHome, ".codex", "plugins", "cache", "cailmdaley-felt", "felt", "dev", ".codex-plugin", "plugin.json")
 	cacheContent, err := os.ReadFile(cacheManifest)
 	if err != nil {
 		t.Fatalf("setup codex: plugin cache manifest missing: %v", err)

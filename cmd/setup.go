@@ -152,7 +152,18 @@ Use --uninstall to remove.`,
 			marketplaceSource = repoRoot
 		}
 
-		return installCodexPluginViaCLI(marketplaceSource)
+		if err := installCodexPluginViaCLI(marketplaceSource); err != nil {
+			return err
+		}
+
+		// Codex doesn't have CLAUDE.md's "skill discovery via plugin" convention
+		// turned on for every user yet, and the AGENTS.md snippet is a nice
+		// nudge toward the practice on top of having the skill loadable.
+		fmt.Println()
+		fmt.Println("You may want to put something like the following in your AGENTS.md, adjusted to match your work style:")
+		fmt.Println()
+		fmt.Println(claudeMDSnippet())
+		return nil
 	},
 }
 
