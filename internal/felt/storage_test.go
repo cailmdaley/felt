@@ -43,6 +43,16 @@ func TestStorageInit(t *testing.T) {
 	if !strings.Contains(string(data), "valid-page-frontmatter") {
 		t.Fatalf("myst.yml missing frontmatter suppression: %q", string(data))
 	}
+	gitignoreData, err := os.ReadFile(filepath.Join(s.root, GitignoreName))
+	if err != nil {
+		t.Fatalf("reading .gitignore: %v", err)
+	}
+	if string(gitignoreData) != defaultGitignore {
+		t.Fatalf(".gitignore = %q, want default ignore", string(gitignoreData))
+	}
+	if !strings.Contains(string(gitignoreData), "index-sync.request") {
+		t.Fatalf(".gitignore missing sync request ignore: %q", string(gitignoreData))
+	}
 
 	// Init again should work (idempotent)
 	if err := s.Init(); err != nil {
@@ -64,6 +74,33 @@ func TestStorageInitCreatesMystConfigInExistingDirectory(t *testing.T) {
 
 	if _, err := os.Stat(filepath.Join(feltDir, MystConfigName)); err != nil {
 		t.Fatalf("myst.yml should be created in existing .felt/: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(feltDir, GitignoreName)); err != nil {
+		t.Fatalf(".gitignore should be created in existing .felt/: %v", err)
+	}
+}
+
+func TestStorageInitDoesNotOverwriteExistingGitignore(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStorage(dir)
+	if err := os.MkdirAll(s.root, 0755); err != nil {
+		t.Fatalf("MkdirAll() error: %v", err)
+	}
+	customGitignore := "# user-owned ignore\ncustom-pattern\n"
+	if err := os.WriteFile(filepath.Join(s.root, GitignoreName), []byte(customGitignore), 0644); err != nil {
+		t.Fatalf("writing custom .gitignore: %v", err)
+	}
+
+	if err := s.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(s.root, GitignoreName))
+	if err != nil {
+		t.Fatalf("reading .gitignore: %v", err)
+	}
+	if string(data) != customGitignore {
+		t.Fatalf(".gitignore = %q, want custom content", string(data))
 	}
 }
 

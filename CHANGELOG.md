@@ -6,6 +6,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [1.0.9] — 2026-05-18
 
+### Added
+
+- `felt init` now writes a store-owned `.felt/.gitignore` for felt's
+  generated index and sync coordination files, without overwriting an
+  existing user-edited ignore file.
+
 ### Fixed
 
 - `felt setup claude` and `felt setup codex` on an existing install
