@@ -618,7 +618,12 @@ Session body.
 		}
 	}
 
-	// setup codex — install, idempotent, uninstall
+	// setup codex — install, idempotent, uninstall. Skipped when the codex
+	// CLI isn't available (e.g. CI runners without Codex installed); the
+	// post-block --help checks still run.
+	if _, err := exec.LookPath("codex"); err != nil {
+		t.Log("codex CLI not on PATH; skipping setup codex portion")
+	} else {
 	codexHome := t.TempDir()
 	codexEnv := append(os.Environ(), "HOME="+codexHome, "SHELL=/bin/zsh")
 
@@ -667,6 +672,7 @@ Session body.
 	}
 	if _, err := os.Stat(cacheManifest); !os.IsNotExist(err) {
 		t.Fatalf("setup codex uninstall: plugin cache still present: %v", err)
+	}
 	}
 
 	out = mustFelt(t, dir, "--help")
