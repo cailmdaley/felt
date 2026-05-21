@@ -76,6 +76,8 @@ Relationships: directory containment, `[[wikilinks]]` in bodies, and optional pr
 
 **Use the substrate cleanly.** Keep names short, outcomes specific, bodies narrative, and non-native frontmatter clearly owned by the project that introduced it. Wikilinks belong inline in the prose, woven into sentences that are doing work — not piled at the bottom of a fiber as a related-things list.
 
+**Bodies describe the now.** A fiber's body says what's true currently — not how it got that way. `felt history` is the append-only chronological surface; the body doesn't have to do double duty. Edit the body by correction; append chronology to history. Version markers ("v1", "v2"), dated update notes ("✓ Updated 2026-05-18"), and repurposing framings ("originally added for X, now Y") are signs that history-shaped content belongs elsewhere. The exception is fibers whose subject *is* chronology (postmortems, decision logs, change histories) — those genuinely belong in the body.
+
 **Extract what slipped through.** Continuous filing catches most things. At session end, mine decisions, patterns, and findings that were left implicit.
 
 **Outcomes teach.** An outcome that says "done" has failed. Put the conclusion in: what was learned, what was decided, why.
@@ -110,11 +112,16 @@ Relationships: directory containment, `[[wikilinks]]` in bodies, and optional pr
 
 Fibers may carry project-owned top-level YAML fields beyond what felt parses natively. When such fields matter, edit them carefully in the fiber file and keep the ordinary felt surfaces current alongside them: `outcome` for latest state, `felt history` for chronological handoff, sub-fibers for durable findings.
 
+### Companion files (`report.html`, plots, recordings)
+
+Fibers can carry arbitrary companion files in their directory alongside `<slug>.md` — plots, recordings, HTML artifacts. Vellum-reader (the rendering consumer) treats one filename specially: **if `report.html` exists in a fiber directory, vellum auto-prepends it to the rendered narrative view above the markdown body.** The convention lets the markdown body narrow to spec (Desired State, Context) and the rich human-facing surface live in HTML where the visual treatment can be designed per-fiber. felt itself stays format-agnostic; it just sees a directory with files. See the shuttle skill for worker-side conventions about when and how to maintain a `report.html`.
+
 ---
 
 ## Core Rules
 
 - **Outcomes teach.** One-sentence conclusions that stand alone: they appear in `felt ls` and `-d compact`.
+- **Body = current state; chronology = `felt history`.** Strip version markers and dated update notes from the body — that's editorial content, append it to `felt history`. The body should read as a coherent snapshot. Exception: fibers explicitly about chronology.
 - **Use the right relationship surface.** Nest for containment, `[[wikilinks]]` for narrative, project-owned conventions for anything more specific.
 - **Links in prose, not in piles.** A `[[wikilink]]` earns its place by doing work in a sentence — naming what the other fiber is, why it's relevant here, where to head next. Related-things lists at the bottom of a fiber are a smell that the relationships haven't been thought through; either fold them into the body where they belong, or drop the ones that aren't earning the link.
 - **Compose upward.** When closing, ask whether the lesson belongs in a doc fiber or the root fiber; consolidate breadcrumbs.
