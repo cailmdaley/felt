@@ -40,7 +40,7 @@ Read relevant files, understand existing patterns. This informs the **constituti
 Create the fiber with status `open`:
 
 ```bash
-felt add <slug> "Constitution title" -s open
+felt add <slug> "name" -s open
 ```
 
 Then Read and Edit the fiber markdown at `.felt/<path>/<slug>.md`. Fill in what you can; do not wait until it is perfect.
