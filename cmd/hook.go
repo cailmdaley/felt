@@ -12,17 +12,31 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// The bundled Claude Code plugin's hook scripts exec into these subcommands.
-// Keeping the logic in the binary means `brew upgrade felt` refreshes hook
-// behavior — users no longer need to also refresh the plugin to pick up hook
-// fixes. The plugin only needs refreshing when skill content changes.
+var sessionCmd = &cobra.Command{
+	Use:   "session",
+	Short: "Print the session context text",
+	Long: `Print the plain text context that felt contributes at agent session
+start: the activation directive plus active and recently touched fibers.
+
+Hook adapters wrap this text in whatever envelope their harness expects. For
+Claude/Codex's current SessionStart wire format, see ` + "`felt hook session`" + `.`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		fmt.Print(buildSessionContext())
+		return nil
+	},
+}
+
+// The bundled Claude Code plugin's hook scripts call these subcommands only at
+// the harness boundary. Keep the human-facing session context available as
+// plain text via `felt session`; `felt hook ...` is integration glue and may
+// emit machine envelopes.
 var hookCmd = &cobra.Command{
 	Use:   "hook",
 	Short: "Integration hooks (plugin glue; see claude-plugin/hooks/)",
-	Long: `Hook subcommands emit the JSON envelopes Claude Code expects from plugin
-hooks. The bundled plugin's hook shell scripts are thin shims that exec into
-these subcommands so that hook behavior travels with the binary, not the
-plugin install.`,
+	Long: `Hook subcommands emit the machine envelopes expected by agent harnesses.
+They are adapter commands, not the primary human-facing felt surface. Use
+` + "`felt session`" + ` to inspect the SessionStart context as readable text.`,
 }
 
 type sessionEnvelope struct {
@@ -73,6 +87,7 @@ non-Claude sessions like Codex, this is a pass-through.`,
 }
 
 func init() {
+	rootCmd.AddCommand(sessionCmd)
 	rootCmd.AddCommand(hookCmd)
 	hookCmd.AddCommand(hookSessionCmd)
 	hookCmd.AddCommand(hookPreToolCmd)

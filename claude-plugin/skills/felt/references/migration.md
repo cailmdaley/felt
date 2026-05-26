@@ -54,7 +54,7 @@ Any code that reads `.felt/` directly needs updating for the directory layout:
 
 ```bash
 ls .felt/*.md 2>/dev/null    # should return nothing (only directories remain)
-felt hook session | head -20  # verify session context works
+felt session | head -20       # verify session context works
 ```
 
 ---
@@ -84,4 +84,4 @@ felt hook session | head -20  # verify session context works
 - [ ] CLAUDE.md stale/deleted references removed
 - [ ] Code consumers updated (FiberReader, test fixtures)
 - [ ] `ls .felt/*.md` returns nothing
-- [ ] `felt hook session` produces clean output
+- [ ] `felt session` produces clean output

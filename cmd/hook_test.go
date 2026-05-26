@@ -70,6 +70,36 @@ func TestHookSessionEnvelope(t *testing.T) {
 	}
 }
 
+func TestSessionCommandPrintsPlainContext(t *testing.T) {
+	dir := t.TempDir()
+	storage := felt.NewStorage(dir)
+	if err := storage.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	active := &felt.Felt{
+		ID:        "alpha",
+		Name:      "Alpha task",
+		Status:    "active",
+		Tags:      []string{"work"},
+		CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z"),
+	}
+	if err := storage.Write(active); err != nil {
+		t.Fatalf("Write(%s): %v", active.ID, err)
+	}
+
+	text := runHookCommand(t, dir, "session")
+	if !strings.HasPrefix(text, "# Felt Workflow Context\n") {
+		t.Fatalf("session should print plain context text, got:\n%s", text)
+	}
+	if strings.Contains(text, "hookSpecificOutput") || strings.Contains(text, "additionalContext") {
+		t.Fatalf("session should not print hook JSON envelope:\n%s", text)
+	}
+	if !strings.Contains(text, "◐ alpha\n    Alpha task (work)") {
+		t.Fatalf("session context missing active fiber:\n%s", text)
+	}
+}
+
 // TestHookSessionNoRepoEnvelope: outside a felt repo, we still emit the
 // directive plus a hint to felt init. No "Active Fibers" header.
 func TestHookSessionNoRepoEnvelope(t *testing.T) {
@@ -153,7 +183,9 @@ func TestHookPreToolGate(t *testing.T) {
 				ToolName:       "Skill",
 				CWD:            feltDir,
 				TranscriptPath: claudeTranscript,
-				ToolInput:      struct{ Skill string `json:"skill"` }{Skill: "felt"},
+				ToolInput: struct {
+					Skill string `json:"skill"`
+				}{Skill: "felt"},
 			},
 			expectOut: false,
 			flagFor:   "s2",
@@ -165,7 +197,9 @@ func TestHookPreToolGate(t *testing.T) {
 				ToolName:       "Skill",
 				CWD:            feltDir,
 				TranscriptPath: claudeTranscript,
-				ToolInput:      struct{ Skill string `json:"skill"` }{Skill: "felt:felt"},
+				ToolInput: struct {
+					Skill string `json:"skill"`
+				}{Skill: "felt:felt"},
 			},
 			expectOut: false,
 			flagFor:   "s2ns",
@@ -177,7 +211,9 @@ func TestHookPreToolGate(t *testing.T) {
 				ToolName:       "Skill",
 				CWD:            feltDir,
 				TranscriptPath: claudeTranscript,
-				ToolInput:      struct{ Skill string `json:"skill"` }{Skill: "ralph"},
+				ToolInput: struct {
+					Skill string `json:"skill"`
+				}{Skill: "ralph"},
 			},
 			expectOut: false,
 			noFlagFor: "s3",
@@ -260,7 +296,9 @@ func TestHookPreToolFlagPersists(t *testing.T) {
 		ToolName:       "Skill",
 		CWD:            feltDir,
 		TranscriptPath: claudeTranscript,
-		ToolInput:      struct{ Skill string `json:"skill"` }{Skill: "felt"},
+		ToolInput: struct {
+			Skill string `json:"skill"`
+		}{Skill: "felt"},
 	})
 	if strings.TrimSpace(out) != "" {
 		t.Fatalf("Skill:felt should pass silently, got: %s", out)

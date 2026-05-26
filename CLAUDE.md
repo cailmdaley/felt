@@ -47,10 +47,11 @@ agent; only the manifest at the plugin root differs (`.claude-plugin/` and
 `.claude-plugin/marketplace.json` registers the plugin for both — Codex reads
 it under its legacy-compat path.
 
-**Hook logic lives in the binary.** `claude-plugin/hooks/{session,remind}.sh`
-are three-line shims that `exec felt hook session` / `exec felt hook pretool`.
-The binary owns find-root, fiber listing, the SessionStart envelope, and the
-PreToolUse deny gate (see `cmd/hook.go`). Updating the binary updates hook
+**Session text is separate from hook envelopes.** `felt session` prints the
+human-readable SessionStart context. `claude-plugin/hooks/session.sh` wraps
+that text in the Claude/Codex JSON envelope with `jq` when available, falling
+back to `felt hook session` for compatibility. `felt hook pretool` still owns
+the PreToolUse deny gate (see `cmd/hook.go`). Updating the binary updates hook
 behavior — the plugin only needs refreshing when skill content changes.
 
 **Binary and plugin update in lockstep.** `felt update` swaps the binary, then

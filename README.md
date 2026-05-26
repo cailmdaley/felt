@@ -204,7 +204,7 @@ felt ls [query]                   felt check
 felt history <id>                 felt history append <id> --summary "..."
 felt tree                         felt nest|unnest <id>
 felt migrate [--dry-run]          felt rm <id>
-felt index sync
+felt index sync                   felt session
 felt setup claude|codex|skills    felt update
 ```
 

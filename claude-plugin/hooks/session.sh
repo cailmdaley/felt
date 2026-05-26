@@ -1,14 +1,23 @@
 #!/bin/bash
 # SessionStart hook for the felt plugin.
 #
-# Thin shim: the binary owns the logic. `felt hook session` walks for the
-# project root, lists active and recently-touched fibers, and emits the
-# SessionStart additionalContext envelope.
+# `felt session` owns the human-readable context text. This script is the
+# Claude/Codex adapter: wrap that text in the SessionStart additionalContext
+# envelope the harness expects.
 #
-# `felt update` and brew's post-install refresh both binary and plugin
-# together, so a session that runs this script also has the matching
-# binary on PATH. Wired into both Claude Code (via hooks.json) and Codex
-# (via ~/.codex/hooks.json, pointing at the symlinked copy).
+# If jq is missing, fall back to `felt hook session`, the compatibility adapter
+# kept in the binary for older installs and dependency-light environments.
 
 set -e
-exec felt hook session
+set -o pipefail
+
+if command -v jq >/dev/null 2>&1; then
+  felt session | jq -Rs '{
+    hookSpecificOutput: {
+      hookEventName: "SessionStart",
+      additionalContext: .
+    }
+  }'
+else
+  exec felt hook session
+fi

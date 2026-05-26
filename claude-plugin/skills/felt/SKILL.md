@@ -35,6 +35,7 @@ Search and read:
     felt ls                                        # tracked (open and active)
     felt ls "query" [-t tag] [-s closed]          # any filter widens to all statuses
     felt ls --body "query"                         # FTS5 body search
+    felt session                                   # SessionStart context as plain text
     felt tree [<id>]                               # containment hierarchy
     felt show <id>                                 # full
     felt show <id> -d summary | -d compact         # metadata + lede | + extra-key summary

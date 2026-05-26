@@ -78,6 +78,7 @@ felt show <id> --citations     # narrative back-references
 felt show <id> --consumers     # reverse data-flow consumers
 felt show <id> --field inputs  # one raw frontmatter field as YAML/text
 felt ls --body "jwt refresh"   # body search
+felt session                   # agent session context as readable text
 ```
 
 ### Tags
