@@ -1,6 +1,6 @@
 # Constitution
 
-Drafting a constitution — a fiber spec describing a desired state for autonomous iteration. This is the crafting process (see SKILL.md and `crafting.md`) applied to a specific artifact type: a living document that an iteration runner re-reads with fresh context until the work is done. Felt is agnostic about the runner — popular options include sibling skills (`ralph`, and others); the constitution itself is just a tagged fiber.
+Drafting a constitution — a fiber spec describing a desired state for autonomous iteration. This is the ideating process (see SKILL.md and `ideating.md`) applied to a specific artifact type: a living document that an iteration runner re-reads with fresh context until the work is done. Felt is agnostic about the runner — popular options include sibling skills (`ralph`, and others); the constitution itself is just a tagged fiber.
 
 ---
 
@@ -14,7 +14,7 @@ Constitutions do not prescribe steps. They describe what the system looks like w
 
 **Constitution, not plan.** Plans assume you know the path; constitutions trust the agent to find it — with taste, judgment, and fresh eyes each time. This matters most in science and exploratory work, where each decision is informed by the result just before it.
 
-**Separation of context: if you craft, you never do the work yourself.** The constitution is designed by one role; iterations are run by another.
+**Separation of context: if you ideate, you never do the work yourself.** The constitution is designed by one role; iterations are run by another.
 
 ---
 
@@ -45,7 +45,7 @@ felt add <slug> "name" -s open
 
 Then Read and Edit the fiber markdown at `.felt/<path>/<slug>.md`. Fill in what you can; do not wait until it is perfect.
 
-Use the crafting process from `crafting.md`:
+Use the ideating process from `ideating.md`:
 - **Wonder → Ontology:** what IS the desired state? Name it precisely.
 - **Design → Delivery:** what sections does this constitution need? Which are pointers vs snapshots?
 
@@ -57,7 +57,7 @@ Stances that help most during constitution drafting:
 
 ### 3. Refine
 
-Show the draft, get feedback, revise. Use AskUserQuestion for structured choices. Apply the qualitative ambiguity self-check from `crafting.md` — goal, constraints, success — before launching.
+Show the draft, get feedback, revise. Use structured choices when ambiguity needs user judgment. Apply the qualitative ambiguity self-check from `ideating.md` — goal, constraints, success — before launching.
 
 Repeat until it feels solid. It does not have to be complete; open questions belong in the Open Questions section.
 
@@ -135,6 +135,6 @@ Some constitutions do not build code — they shape artifacts like documentation
 
 ---
 
-## When crafting lands here
+## When ideating lands here
 
-The crafting rhythm in SKILL.md applies to all careful interactive thinking; this reference kicks in when the target artifact is specifically a constitution. The diamonds do most of the work — the funnel mechanic used for open-ended exploration is not the primary move here, because there is already one specific artifact being produced. See the Workflow section above for which stances help most at each drafting phase.
+The ideating rhythm applies to careful interactive thinking; this reference kicks in when the target artifact is specifically a constitution. The diamonds do most of the work — the funnel mechanic used for open-ended exploration is not the primary move here, because there is already one specific artifact being produced. See the Workflow section above for which stances help most at each drafting phase.

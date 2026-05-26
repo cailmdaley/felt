@@ -137,7 +137,7 @@ Read the reference that matches the situation. Everything above applies always; 
 
 | When | Reference |
 |------|-----------|
-| Helping the user think carefully — two diamonds, six stances, funnel, qualitative self-check | [crafting.md](references/crafting.md) |
+| Helping fuzzy thought crystallize into a fiber — two diamonds, stances, funnel, ambiguity check | [ideating.md](references/ideating.md) |
 | Drafting a constitution — pointers not snapshots, desired state, launch | [constitution.md](references/constitution.md) |
 | At the end of a session — extracting what slipped through | [mining.md](references/mining.md) |
 | Processing an external transcript — meeting notes, voice note, dictation file | [transcripts.md](references/transcripts.md) |
