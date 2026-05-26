@@ -69,14 +69,6 @@ Keep it lean. Depth goes in documentation fibers.
 git add -A && git commit -m "session: <what happened>"
 ```
 
-### 5. Exit Interview
-
-After extraction is complete, run the exit interview. This is part of mining, not an optional extra pass. Read [exit-interview.md](exit-interview.md) for the instrument, output template, and where the interview fiber belongs.
-
-Skip if the session made no use of felt.
-
----
-
 ## Quality Checklist
 
 - [ ] Decisions captured with reasoning

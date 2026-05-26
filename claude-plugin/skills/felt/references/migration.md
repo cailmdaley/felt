@@ -40,7 +40,6 @@ All fiber references in CLAUDE.md need updating:
 - **File paths:** `.felt/slug-hex.md` becomes just the fiber ID `slug`. Deep dive tables should reference fiber IDs, not file paths — fibers are accessed via `felt show`, not by navigating to files.
 - **Renamed projects:** if the project was renamed (e.g., hexarchy to portolan), old fibers keep their original slug. The CLAUDE.md reference needs the actual slug, not the wished-for name.
 - **Deleted fibers:** some fibers may have been removed before migration. Drop references to fibers that no longer exist.
-- **Command changes:** old export subcommands become `felt export --format tapestry`.
 
 ### 5. Update consumers
 

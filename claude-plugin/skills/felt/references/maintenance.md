@@ -139,7 +139,7 @@ felt nest <leaf> <root-bucket>
 
 Create a new bucket only when it names a real category that future fibers will reuse. A bucket should have a short body explaining what belongs there and why.
 
-Good bucket names are broad but not vague: `relationship-model`, `history`, `performance`, `setup`, `viewer`, `exit-interviews`. Bad bucket names are temporary: `misc`, `cleanup`, `stuff`.
+Good bucket names are broad but not vague: `relationship-model`, `history`, `performance`, `setup`, `viewer`. Bad bucket names are temporary: `misc`, `cleanup`, `stuff`.
 
 ### 3. Compost Clusters
 
