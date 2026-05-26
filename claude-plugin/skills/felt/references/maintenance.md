@@ -1,162 +1,217 @@
 # Maintenance
 
-Keeping the assemblage coherent as it grows. Fibers accumulate; over time they go stale, contradict each other, orphan themselves, and pile up without consolidation. Maintenance is where you step back from the work, read across the assemblage, and fix what you find.
+Maintenance is how felt stays useful as an assemblage grows. Fibers are cheap to create, so the substrate naturally accumulates stale todos, duplicated findings, orphaned leaves, and top-level sprawl. Do not wait for the user to manage that entropy. When the cleanup is obvious, do it.
 
-Present a plan before making changes when the action set is non-trivial (composting, retirements, re-parenting). Small fixes in place are usually safe.
-
-Maintenance combines two moves that used to feel separate: composting stale fibers upward into doc fibers (archive), and checking coherence across siblings (sweep). **To do good composting you first have to sweep**: you cannot promote a cluster of quick fibers into a doc fiber without reading the surrounding fibers to know what the doc should contain. Sweeping and archiving are the same move at different phases of a single pass.
+The goal is not a tidy archive. The goal is an environment that orients the next session quickly: current work is visible, old work has outcomes, knowledge has been composted upward, and the tree has enough shape that a reader can walk it.
 
 ---
 
-## When to maintain
+## Principles
 
-- **After a burst of exploration.** A lot was filed; little was composted.
-- **Before a deadline.** The assemblage needs to be presentable to your future self.
-- **When something feels off.** Two fibers seem to contradict, or the same question keeps recurring.
-- **When `felt check` warns.** Broken refs, broken data-flow refs, legacy format residue, or layout issues.
-- **Periodic.** Every few weeks, especially for long-running projects.
+### The User Should Not Manage The Substrate
 
-Do not maintain work that is still in motion. An active fiber is not a compost candidate.
+Agents have standing authority to perform routine gardening:
+
+- nest obvious top-level leaves under existing root buckets;
+- create broader buckets when top-level entries exceed about 20;
+- demote open/active documentation or container fibers;
+- close stale todos when the outcome is clear;
+- consolidate small historical fibers into a doc/reference fiber;
+- add missing wikilinks when the relationship is plain;
+- run `felt check` after structural cleanup.
+
+Surface a "by the way" note only when cleanup needs judgment, has real blast radius, or would distract from the user's immediate goal.
+
+### Open And Active Mean Todo
+
+`open` and `active` are action states. They do not mean "important", "reference", "canonical", or "worth remembering".
+
+- Use `active` for current attention.
+- Use `open` for a real unresolved todo/question.
+- Use statusless for ordinary documentation and super-fibers.
+- Use `closed` with a strong outcome when the thread resolved.
+
+If a container fiber has children and is open/active, ask whether the container itself is really a todo. Usually the fix is to demote the container and keep actionable child fibers tracked.
+
+### The Tree Should Stay Walkable
+
+Top level is for roots and large buckets. It should normally stay under about 20 entries. If root-level fibers exceed that, create or use broader categories and proactively nest leaves.
+
+Within a subtree, a parent with more than about 5-7 direct children probably needs grouping nodes. A walkable tree is usually deeper and less wide.
+
+### Compose Upward
+
+Quick fibers should not remain the final form of understanding. As topics settle:
+
+```text
+quick fiber -> doc/reference fiber -> root fiber / CLAUDE.md pointer
+```
+
+Do not copy every detail upward. Extract the lesson, decision, or durable pattern. Leave chronology in `felt history`.
+
+### Fix Shape While It Is Fresh
+
+Maintenance is not only a periodic chore. The best moment to garden is often right after a session surface tells you what drifted: a stale active fiber, an obvious orphan, a cluster of test fibers, or a parent with too many children.
 
 ---
 
-## The two axes of mess
+## Triggers
 
-### Horizontal — coherence across siblings
+Act on these without waiting for a separate instruction:
 
-Fibers existing next to each other that should be aware of each other. Look for:
+- `felt session` shows `## Attention`;
+- top-level sprawl is over 20 root-level fibers;
+- open/active fibers are old or clearly stale;
+- a documentation/super-fiber is open or active without being a current todo;
+- a cluster of 3+ fibers circles the same idea;
+- a parent has 5+ direct children with natural subgroups;
+- a quick finding or gotcha has recurred and belongs in a doc/root fiber;
+- `felt check` reports mechanical issues.
 
-- **Contradictions** — sibling fibers that disagree on a fact, decision, or claim
-- **Orphans** — fibers with no containment parent, no `[[wikilinks]]`, and no `inputs.from`
-- **Staleness vs code** — a fiber's claim no longer matches what the code does
-- **Duplicates** — two fibers covering the same thing from different angles
-- **Branching** — a parent with 5+ direct children, no grouping structure
-
-### Vertical — composting upward
-
-Knowledge that has grown beyond its current container. Look for:
-
-- **Stale quick fibers** — closed, older than ~2 months, the lesson is not in any doc fiber
-- **Topic clusters** — 3+ fibers circling the same concept without a doc fiber to anchor them
-- **Doc fibers not in the root** — a doc fiber exists but the root fiber / CLAUDE.md does not link to it
-- **Root-fiber gaps** — a gotcha or pattern that has recurred but never made it into the root fiber
-
-**The two axes interact.** When you spot horizontal mess (contradictions, duplicates), the fix is usually vertical (promote into a single source of truth). When you spot vertical mess (no doc fiber for a topic cluster), the fix requires horizontal reading (what do all these siblings actually say?). This is why sweeping and archiving are one activity.
+Do not let maintenance block urgent user work. Take the obvious small fix now; leave a concise by-the-way note or fiber for larger judgment calls.
 
 ---
 
-## Workflow
+## Authority Boundaries
 
-### 1. Survey
+Safe to do proactively:
 
-Launch Explore agents across the assemblage. Each reads a subset of fibers and reports:
-- Contradictions between siblings
-- Orphans with no containment / wikilinks / data flow
-- Stale claims relative to current code
-- Topic clusters that could compost
-- Branching points exceeding 5 direct children
+- `felt nest <child> <parent>` when the parent is an obvious existing bucket;
+- create a grouping/root bucket when several leaves plainly share a category;
+- demote a container from open/active by editing status away when no current todo remains;
+- close test/scratch/stale todo fibers when their outcome is obvious;
+- add or repair wikilinks that are clearly intended;
+- update a doc fiber with a settled lesson from sibling fibers;
+- append `felt history` explaining maintenance.
 
-Also run `felt check` for mechanical findings:
+Pause or ask before:
+
+- deleting fibers with possible historical value;
+- merging fibers where the synthesis requires taste or domain judgment;
+- moving sensitive/private fibers across roots;
+- changing project-owned YAML semantics;
+- rewriting a root fiber's argument substantially;
+- cleaning a large area when the user asked for unrelated urgent work.
+
+When in doubt, prefer reversible moves: nest rather than delete, close with an outcome rather than remove, append history before large reshapes.
+
+---
+
+## Maintenance Moves
+
+### 1. Triage Status
+
+Start with the tracked set:
 
 ```bash
-felt ls                                  # open/active set
-felt ls -s closed --before 60d           # old closed fibers
-felt check                               # broken refs, structural issues
-felt tree <parent>                       # branching check
+felt ls
+felt ls -s open
+felt ls -s active
 ```
 
-For large assemblages, parallelize: each Explore agent takes a top-level directory or a specific axis (e.g., "check for contradictions in cmbx/", "audit the felt/ subtree for orphans").
+For each open/active fiber:
 
-### 2. Present findings
+- Is this a current todo or unresolved question?
+- If it has children, is the parent itself actionable?
+- If it is old, can the outcome be stated now?
+- If it is documentation, should it become statusless or closed?
 
-Group by required move:
-
-- **Fix in place** — update a body, add a wikilink, re-nest an orphan
-- **Compost** — promote a cluster into a new or existing doc fiber
-- **Reshape** — introduce grouping nodes to reduce branching
-- **Retire** — delete fibers with no lasting value
-
-Present the full plan before making changes. Confirm with the user. Different categories can be approved independently — fixes in place are usually safe, retirement needs more care.
-
-### 3. Act
-
-After approval:
+Use strong outcomes when closing:
 
 ```bash
-# Compost a cluster into a doc fiber
-felt add how-x-works "How X works" -b "Synthesized understanding, key decisions, date of last update."
-felt edit <old-fiber> -o "Consolidated into how-x-works"
-
-# Re-nest an orphan (edit the markdown directly, or move the file)
-
-# Reshape a branching parent — see Tapestry reshaping below
-
-# Retire truly useless fibers
-felt rm <fiber-id>
-
-# Update the root fiber / CLAUDE.md if the lesson belongs there
+felt edit <id> --status closed --outcome "Decision/finding in one sentence."
+felt history append <id> --summary "Closed during maintenance; no current todo remains."
 ```
 
-### 4. Verify
+### 2. Reduce Top-Level Sprawl
 
-- `felt check` returns clean or with only expected warnings
-- `felt tree <parent>` shows 2-4 children per node for reshaped subtrees
-- No orphans remain in the open/active set
-- The root fiber reflects any gotchas that came up
-
----
-
-## Tapestry reshaping
-
-Reshaping is maintenance applied to tapestry nodes. The trigger is branching: any tapestry node with 5+ direct children needs restructuring.
-
-**Target: 2-4 children per node. 3 is default.** A 60-node tapestry should be 3-4 levels deep, not 2. The graph should be walkable — a reader should be able to parse a neighborhood in one click.
-
-Steps:
-
-1. **Audit** — walk spine nodes, count children with `felt tree <id>`. Flag any with 5+.
-2. **Partition** — identify natural groupings among the siblings. Name the partition.
-3. **Introduce grouping nodes** — create a tapestry-tagged fiber per group with a 2-3 sentence body (what's here, why it matters). No evidence needed.
-4. **Re-parent** — move children under the grouping node with `felt nest <child> <grouping-node>`.
-5. **Verify** — `felt tree <parent>` should show 2-4 children. Each grouping node should have 2-4 children.
+Inspect roots:
 
 ```bash
-# Methods has 7 children → split into Estimators + Covariance + Simulations
-felt add estimators "Estimators" -t tapestry:estimators -b "Pipeline independence, foreground bias, cross-checks."
-felt nest estimators methods
-felt nest child-a estimators
-felt nest child-b estimators
+felt tree --depth 1
 ```
+
+If top level has more than about 20 entries, find obvious leaves and nest them:
+
+```bash
+felt nest <leaf> <root-bucket>
+```
+
+Create a new bucket only when it names a real category that future fibers will reuse. A bucket should have a short body explaining what belongs there and why.
+
+Good bucket names are broad but not vague: `relationship-model`, `history`, `performance`, `setup`, `viewer`, `exit-interviews`. Bad bucket names are temporary: `misc`, `cleanup`, `stuff`.
+
+### 3. Compost Clusters
+
+A cluster wants composting when 3+ fibers answer parts of the same question, repeat a gotcha, or record small steps of one settled arc.
+
+Read horizontally first. Then create or update the doc/reference fiber:
+
+```bash
+felt add <topic> "Topic reference" -b "Current understanding..."
+felt edit <old-id> --status closed --outcome "Consolidated into [[<topic>]]."
+felt history append <old-id> --summary "Composted into <topic> during maintenance."
+```
+
+The doc fiber should say what is true now. The old fibers keep chronology and evidence.
+
+### 4. Repair Relationships
+
+Use the right relationship surface:
+
+- nest for containment;
+- wikilinks for narrative connection;
+- project-owned frontmatter only when the project owns that schema.
+
+Links should appear in prose. Do not add a "related" pile unless the file is explicitly an index.
+
+### 5. Reshape Wide Subtrees
+
+When a parent has too many direct children:
+
+1. Read the children.
+2. Name 2-4 natural groups.
+3. Create grouping nodes.
+4. Nest children under the groups.
+5. Verify with `felt tree <parent>`.
+
+Target 2-4 children per grouping node when possible. Prefer a deeper walkable tree over one huge flat list.
+
+### 6. Update The Root Surface
+
+When maintenance produces a general lesson, update the root fiber or `CLAUDE.md` pointer. Keep root surfaces lean: commands, durable constraints, and links to deeper doc fibers.
 
 ---
 
-## Compose upward
+## Verification
 
-The hierarchy:
+Run:
 
+```bash
+felt check
+felt session
+felt tree --depth 2
 ```
-quick fiber → doc fiber → root fiber / CLAUDE.md
-```
 
-A quick fiber composts into a doc fiber when 3+ fibers share a theme. A doc fiber informs the root fiber when its lesson is foundational enough that every session should read it. CLAUDE.md stays lean — it carries commands, paths, and pointers to doc fibers for the depth.
+A good maintenance pass leaves:
 
-**The root fiber is a node in the DAG.** Treat it like any other fiber: if its content has drifted, update it. If a doc fiber belongs in it, link it in. The root fiber is where the lessons of mature doc fibers eventually land.
+- fewer root-level leaves;
+- no stale active fibers unless they are genuinely current;
+- open fibers that are real todos/questions;
+- doc/container fibers demoted from open/active unless actionable;
+- clear outcomes on closed fibers;
+- `felt check` clean or with understood residual warnings;
+- `felt history` entries for non-trivial reshapes.
 
 ---
 
-## Anti-patterns
+## Anti-Patterns
 
-- **Premature maintenance.** Do not sweep work that is still in motion. Active fibers are not compost candidates.
-- **Over-consolidation.** Do not merge unrelated fibers just because they are old. Different topics stay different.
-- **Orphaned doc fibers.** A new doc fiber that nobody links to defeats the purpose. Nest it, cite it, reference it from the root fiber.
-- **Stale doc fibers.** If you create a doc fiber, commit to maintaining it. A stale doc is worse than no doc.
-- **Silent deletion.** Do not retire fibers without user confirmation. The blast radius is real.
-- **Sweep without act.** A coherence check that produces findings but no changes is noise. Either present a plan or do not sweep.
-- **Act without sweep.** Composting a cluster into a doc fiber without first reading the surrounding fibers produces a doc that misses context. This is why sweeping and archiving are one activity.
-- **Maintenance as a gate.** Do not refuse new work until the backlog is clean. Maintenance is a rhythm, not a blocker.
-
----
-
-## Where maintenance fits
-
-Formalizing while you work is the primary defense against mess — every decision or finding caught in the reply window is one less thing for maintenance to compost later. Session mining at the end of a coding session is end-of-session maintenance in miniature, a backstop for what slipped through the reply window. Full maintenance is the longer, cross-session version: it runs when the assemblage has genuinely drifted, when `felt check` starts warning, or when the user notices something off.
+- **User-managed entropy.** Do not make the user ask for obvious gardening.
+- **Status as importance.** Open/active is not a bookmark.
+- **Flat root.** Top-level sprawl makes every session start worse.
+- **Silent deletion.** Deleting is rarely the first maintenance move.
+- **Compost without reading siblings.** A doc fiber made from one leaf usually misses the actual shape.
+- **Links in piles.** Wikilinks should carry meaning in sentences.
+- **Maintenance theater.** A sweep that produces no edits, history, or concrete plan is usually noise.
+- **Blocking the work.** Maintenance should support the current task, not become a ritual gate.

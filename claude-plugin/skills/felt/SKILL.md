@@ -141,6 +141,6 @@ Read the reference that matches the situation. Everything above applies always; 
 | Drafting a constitution — pointers not snapshots, desired state, launch | [constitution.md](references/constitution.md) |
 | At the end of a session — extracting what slipped through | [mining.md](references/mining.md) |
 | Processing an external transcript — meeting notes, voice note, dictation file | [transcripts.md](references/transcripts.md) |
-| Reading across the assemblage for mess — composting, coherence, reshaping | [maintenance.md](references/maintenance.md) |
+| Acting on `felt session` Attention or reading across the assemblage for mess — gardening, composting, coherence, reshaping | [maintenance.md](references/maintenance.md) |
 | Migrating legacy flat fibers to directory format | [migration.md](references/migration.md) |
 | Setting up a cross-project felt store, or linking a per-project store into one | [cross-project.md](references/cross-project.md) |
