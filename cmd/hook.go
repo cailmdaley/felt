@@ -266,25 +266,25 @@ func buildSessionAttention(felts []*felt.Felt, now time.Time) string {
 	var notes []string
 	if len(topLevel) > sessionTopLevelLimit {
 		notes = append(notes, fmt.Sprintf(
-			"Tree is flat: %d top-level fibers (%d without children). Agents may proactively nest leaves under root buckets or create broader categories. Start with: %s.",
+			"Top-level sprawl: %d root-level fibers (%d without children). Proactively nest leaf fibers under root buckets or create broader categories; do not leave obvious cleanup for the user. Start with: %s.",
 			len(topLevel), len(topLevelLeaves), formatSessionExamples(topLevelLeaves),
 		))
 	}
 	if len(trackedContainers) > 0 {
 		notes = append(notes, fmt.Sprintf(
-			"Status on container fibers: %d open/active %s %s children. Open/active should mean todo, not documentation or importance. Review: %s.",
+			"Fix tracked containers: %d open/active %s %s children. Open/active should mean todo, not documentation or importance; demote container fibers unless they represent current work. Review: %s.",
 			len(trackedContainers), pluralize(len(trackedContainers), "fiber", "fibers"), pluralize(len(trackedContainers), "has", "have"), formatSessionExamples(trackedContainers),
 		))
 	}
 	if len(active) > sessionActiveLimit {
 		notes = append(notes, fmt.Sprintf(
-			"Active set is broad: %d active fibers. Keep active for current attention; close or demote anything stale. Start with: %s.",
+			"Active set is broad: %d active fibers. Keep active for current attention; close or demote stale work without waiting for user prompting. Start with: %s.",
 			len(active), formatSessionExamples(active),
 		))
 	}
 	if len(open) > sessionOpenLimit {
 		notes = append(notes, fmt.Sprintf(
-			"Open queue is large: %d open fibers. Open/active are todo states; close, demote, or consolidate stale intent. Start with: %s.",
+			"Open queue is large: %d open fibers. Open/active are todo states; close, demote, or consolidate stale intent proactively. Start with: %s.",
 			len(open), formatSessionExamples(open),
 		))
 	}

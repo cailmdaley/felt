@@ -117,8 +117,9 @@ func TestSessionAttentionWarnsOnFlatTreeAndOpenQueue(t *testing.T) {
 	attention := buildSessionAttention(felts, now)
 	for _, want := range []string{
 		"## Attention",
-		"Tree is flat: 21 top-level fibers (21 without children)",
-		"Agents may proactively nest leaves under root buckets",
+		"Top-level sprawl: 21 root-level fibers (21 without children)",
+		"Proactively nest leaf fibers under root buckets",
+		"do not leave obvious cleanup for the user",
 		"Open queue is large: 21 open fibers",
 		"Open/active are todo states",
 		"Start with: item-00, item-01, item-02",
@@ -148,8 +149,9 @@ func TestSessionAttentionWarnsOnTrackedContainers(t *testing.T) {
 
 	attention := buildSessionAttention(felts, now)
 	for _, want := range []string{
-		"Status on container fibers: 1 open/active fiber has children",
+		"Fix tracked containers: 1 open/active fiber has children",
 		"Open/active should mean todo, not documentation or importance",
+		"demote container fibers unless they represent current work",
 		"Review: root",
 	} {
 		if !strings.Contains(attention, want) {
