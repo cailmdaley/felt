@@ -124,6 +124,7 @@ Fibers can carry arbitrary companion files in their directory alongside `<slug>.
 - **Outcomes teach.** One-sentence conclusions that stand alone: they appear in `felt ls` and `-d compact`.
 - **Body = current state; chronology = `felt history`.** Strip version markers and dated update notes from the body — that's editorial content, append it to `felt history`. The body should read as a coherent snapshot. Exception: fibers explicitly about chronology.
 - **Use the right relationship surface.** Nest for containment, `[[wikilinks]]` for narrative, project-owned conventions for anything more specific.
+- **Act on Session Attention.** When `felt session` shows `## Attention`, treat it as standing authority to do obvious gardening without asking: nest top-level leaves under root buckets, demote open/active container fibers, close stale todos, and consolidate clutter. Surface it to the user only when cleanup needs judgment or would distract from the current task.
 - **Links in prose, not in piles.** A `[[wikilink]]` earns its place by doing work in a sentence — naming what the other fiber is, why it's relevant here, where to head next. Related-things lists at the bottom of a fiber are a smell that the relationships haven't been thought through; either fold them into the body where they belong, or drop the ones that aren't earning the link.
 - **Compose upward.** When closing, ask whether the lesson belongs in a doc fiber or the root fiber; consolidate breadcrumbs.
 - **Names are concise labels.** Body and outcome carry the content.
