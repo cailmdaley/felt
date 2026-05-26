@@ -3,10 +3,12 @@ package cmd
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/cailmdaley/felt/internal/felt"
 )
@@ -97,6 +99,62 @@ func TestSessionCommandPrintsPlainContext(t *testing.T) {
 	}
 	if !strings.Contains(text, "◐ alpha\n    Alpha task (work)") {
 		t.Fatalf("session context missing active fiber:\n%s", text)
+	}
+}
+
+func TestSessionAttentionWarnsOnFlatTreeAndOpenQueue(t *testing.T) {
+	now := mustParseTime(t, "2026-05-26T12:00:00Z")
+	var felts []*felt.Felt
+	for i := 0; i < sessionTopLevelLimit+1; i++ {
+		felts = append(felts, &felt.Felt{
+			ID:        fmt.Sprintf("item-%02d", i),
+			Name:      fmt.Sprintf("Item %02d", i),
+			Status:    felt.StatusOpen,
+			CreatedAt: now.Add(-24 * time.Hour),
+		})
+	}
+
+	attention := buildSessionAttention(felts, now)
+	for _, want := range []string{
+		"## Attention",
+		"Tree is flat: 21 top-level fibers (21 without children)",
+		"Agents may proactively nest leaves under root buckets",
+		"Open queue is large: 21 open fibers",
+		"Open/active are todo states",
+		"Start with: item-00, item-01, item-02",
+	} {
+		if !strings.Contains(attention, want) {
+			t.Fatalf("attention missing %q:\n%s", want, attention)
+		}
+	}
+}
+
+func TestSessionAttentionWarnsOnTrackedContainers(t *testing.T) {
+	now := mustParseTime(t, "2026-05-26T12:00:00Z")
+	felts := []*felt.Felt{
+		{
+			ID:        "root",
+			Name:      "Root container",
+			Status:    felt.StatusOpen,
+			CreatedAt: now.Add(-24 * time.Hour),
+		},
+		{
+			ID:        "root/child",
+			Name:      "Child",
+			Status:    felt.StatusClosed,
+			CreatedAt: now.Add(-24 * time.Hour),
+		},
+	}
+
+	attention := buildSessionAttention(felts, now)
+	for _, want := range []string{
+		"Status on container fibers: 1 open/active fiber has children",
+		"Open/active should mean todo, not documentation or importance",
+		"Review: root",
+	} {
+		if !strings.Contains(attention, want) {
+			t.Fatalf("attention missing %q:\n%s", want, attention)
+		}
 	}
 }
 

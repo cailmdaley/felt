@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/cailmdaley/felt/internal/felt"
 	"github.com/spf13/cobra"
@@ -103,6 +104,13 @@ const sessionNoRepoNote = "*No felt repository in current directory. Start one w
 
 const sessionNoActiveNote = "*No active fibers.*"
 
+const (
+	sessionActiveLimit   = 3
+	sessionOpenLimit     = 20
+	sessionTopLevelLimit = 20
+	sessionStaleAge      = 30 * 24 * time.Hour
+)
+
 // buildSessionContext renders the markdown additionalContext text. Mirrors the
 // shape the previous bash hook emitted; tests in cmd/hook_test.go pin the
 // output so a wording or layout change is a deliberate diff.
@@ -175,6 +183,11 @@ func buildSessionContext() string {
 		sb.WriteString("\n")
 	}
 
+	if attention := buildSessionAttention(felts, time.Now()); attention != "" {
+		sb.WriteString(attention)
+		sb.WriteString("\n")
+	}
+
 	return sb.String()
 }
 
@@ -204,6 +217,130 @@ func formatHookEntry(f *felt.Felt, withOutcome bool) string {
 	}
 	line3 := fmt.Sprintf("    → %s\n", outcome)
 	return line1 + line2 + line3
+}
+
+func buildSessionAttention(felts []*felt.Felt, now time.Time) string {
+	childrenByParent := make(map[string]int)
+	for _, f := range felts {
+		parts := strings.Split(f.ID, "/")
+		for i := 1; i < len(parts); i++ {
+			childrenByParent[strings.Join(parts[:i], "/")]++
+		}
+	}
+
+	var active, open, staleTracked, trackedContainers, topLevel, topLevelLeaves []*felt.Felt
+	for _, f := range felts {
+		switch f.Status {
+		case felt.StatusActive:
+			active = append(active, f)
+			if isStaleSessionFiber(f, now) {
+				staleTracked = append(staleTracked, f)
+			}
+			if childrenByParent[f.ID] > 0 {
+				trackedContainers = append(trackedContainers, f)
+			}
+		case felt.StatusOpen:
+			open = append(open, f)
+			if isStaleSessionFiber(f, now) {
+				staleTracked = append(staleTracked, f)
+			}
+			if childrenByParent[f.ID] > 0 {
+				trackedContainers = append(trackedContainers, f)
+			}
+		}
+
+		if !strings.Contains(f.ID, "/") {
+			topLevel = append(topLevel, f)
+			if childrenByParent[f.ID] == 0 {
+				topLevelLeaves = append(topLevelLeaves, f)
+			}
+		}
+	}
+
+	sortFibersByCreatedAt(active)
+	sortFibersByCreatedAt(open)
+	sortFibersByCreatedAt(staleTracked)
+	sortFibersByCreatedAt(trackedContainers)
+	sortFibersByCreatedAt(topLevelLeaves)
+
+	var notes []string
+	if len(topLevel) > sessionTopLevelLimit {
+		notes = append(notes, fmt.Sprintf(
+			"Tree is flat: %d top-level fibers (%d without children). Agents may proactively nest leaves under root buckets or create broader categories. Start with: %s.",
+			len(topLevel), len(topLevelLeaves), formatSessionExamples(topLevelLeaves),
+		))
+	}
+	if len(trackedContainers) > 0 {
+		notes = append(notes, fmt.Sprintf(
+			"Status on container fibers: %d open/active %s %s children. Open/active should mean todo, not documentation or importance. Review: %s.",
+			len(trackedContainers), pluralize(len(trackedContainers), "fiber", "fibers"), pluralize(len(trackedContainers), "has", "have"), formatSessionExamples(trackedContainers),
+		))
+	}
+	if len(active) > sessionActiveLimit {
+		notes = append(notes, fmt.Sprintf(
+			"Active set is broad: %d active fibers. Keep active for current attention; close or demote anything stale. Start with: %s.",
+			len(active), formatSessionExamples(active),
+		))
+	}
+	if len(open) > sessionOpenLimit {
+		notes = append(notes, fmt.Sprintf(
+			"Open queue is large: %d open fibers. Open/active are todo states; close, demote, or consolidate stale intent. Start with: %s.",
+			len(open), formatSessionExamples(open),
+		))
+	}
+	if len(staleTracked) > 0 {
+		notes = append(notes, fmt.Sprintf(
+			"Tracked fibers are old: %d open/active fibers are older than 30 days. Review status before trusting the queue. Start with: %s.",
+			len(staleTracked), formatSessionExamples(staleTracked),
+		))
+	}
+
+	if len(notes) == 0 {
+		return ""
+	}
+	if len(notes) > 3 {
+		notes = notes[:3]
+	}
+
+	var sb strings.Builder
+	sb.WriteString("## Attention\n\n")
+	for _, note := range notes {
+		sb.WriteString(note)
+		sb.WriteString("\n\n")
+	}
+	return sb.String()
+}
+
+func isStaleSessionFiber(f *felt.Felt, now time.Time) bool {
+	return !f.CreatedAt.IsZero() && now.Sub(f.CreatedAt) > sessionStaleAge
+}
+
+func sortFibersByCreatedAt(felts []*felt.Felt) {
+	sort.Slice(felts, func(i, j int) bool {
+		return felts[i].CreatedAt.Before(felts[j].CreatedAt)
+	})
+}
+
+func formatSessionExamples(felts []*felt.Felt) string {
+	if len(felts) == 0 {
+		return "none"
+	}
+	limit := len(felts)
+	if limit > 3 {
+		limit = 3
+	}
+	ids := make([]string, 0, limit)
+	for _, f := range felts[:limit] {
+		ids = append(ids, f.ID)
+	}
+	return strings.Join(ids, ", ")
+}
+
+func pluralize(count int, singular, plural string) string {
+	if count == 1 {
+		return singular
+	}
+	return plural
 }
 
 // ----------------------------------------------------------------------------
