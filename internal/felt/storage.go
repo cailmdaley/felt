@@ -1037,6 +1037,7 @@ type scopedIDResolver struct {
 	exact        map[string]struct{}
 	parentBases  map[string]map[string]string
 	parentSorted map[string][]scopedIDEntry
+	byBase       map[string][]string
 }
 
 type scopedIDEntry struct {
@@ -1050,6 +1051,7 @@ func newScopedIDResolver(ids []string) *scopedIDResolver {
 		exact:        make(map[string]struct{}, len(ids)),
 		parentBases:  map[string]map[string]string{},
 		parentSorted: map[string][]scopedIDEntry{},
+		byBase:       map[string][]string{},
 	}
 	for _, id := range ids {
 		cleanID := path.Clean(id)
@@ -1063,6 +1065,7 @@ func newScopedIDResolver(ids []string) *scopedIDResolver {
 		}
 		resolver.parentBases[parent][base] = cleanID
 		resolver.parentSorted[parent] = append(resolver.parentSorted[parent], scopedIDEntry{base: base, id: cleanID})
+		resolver.byBase[base] = append(resolver.byBase[base], cleanID)
 	}
 	sort.Strings(resolver.ids)
 	for parent, entries := range resolver.parentSorted {
@@ -1104,6 +1107,11 @@ func (r *scopedIDResolver) resolve(scopeID, query string) (string, bool, error) 
 	if strings.Contains(query, "/") {
 		for _, scope := range scopeChain(scopeID) {
 			candidate := scopedQuery(scope, query)
+			// An exact id match wins over descendant prefix matches: resolving
+			// [[a/parent]] must not be defeated into ambiguity by a/parent/child.
+			if _, ok := r.exact[candidate]; ok {
+				return candidate, true, nil
+			}
 			matches := r.prefixMatches(candidate)
 			switch len(matches) {
 			case 0:
@@ -1114,23 +1122,31 @@ func (r *scopedIDResolver) resolve(scopeID, query string) (string, bool, error) 
 				return "", false, fmt.Errorf("ambiguous ID %q in scope %q matches: %s", query, displayScope(scope), strings.Join(matches, ", "))
 			}
 		}
-		return "", false, fmt.Errorf("no felt found matching %q", query)
+	} else {
+		for _, scope := range scopeChain(scopeID) {
+			// Exact basename match takes priority over prefix matches.
+			if exact, ok := r.exactBasenameMatch(scope, query); ok {
+				return exact, true, nil
+			}
+			matches := r.basenamePrefixMatches(scope, query)
+			switch len(matches) {
+			case 0:
+				continue
+			case 1:
+				return matches[0], true, nil
+			default:
+				return "", false, fmt.Errorf("ambiguous ID %q in scope %q matches: %s", query, displayScope(scope), strings.Join(matches, ", "))
+			}
+		}
 	}
 
-	for _, scope := range scopeChain(scopeID) {
-		// Exact basename match takes priority over prefix matches.
-		if exact, ok := r.exactBasenameMatch(scope, query); ok {
-			return exact, true, nil
-		}
-		matches := r.basenamePrefixMatches(scope, query)
-		switch len(matches) {
-		case 0:
-			continue
-		case 1:
-			return matches[0], true, nil
-		default:
-			return "", false, fmt.Errorf("ambiguous ID %q in scope %q matches: %s", query, displayScope(scope), strings.Join(matches, ", "))
-		}
+	// Global fallback: when scope-relative resolution finds nothing, a query
+	// whose trailing basename names exactly one fiber anywhere in the store
+	// resolves to it. This lets a globally-unique slug be referenced from any
+	// scope (including across projects) without a full path, and is scope-
+	// independent so the same link resolves from the monorepo and a substore.
+	if ids := r.byBase[path.Base(query)]; len(ids) == 1 {
+		return ids[0], true, nil
 	}
 
 	return "", false, fmt.Errorf("no felt found matching %q", query)

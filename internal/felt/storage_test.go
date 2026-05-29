@@ -1010,6 +1010,48 @@ func TestResolveScopedIDPrefersExactBasenameOverPrefix(t *testing.T) {
 	}
 }
 
+func TestResolveScopedIDPrefersExactPathOverDescendants(t *testing.T) {
+	// A slash-path to a parent fiber must resolve even though that parent has
+	// children whose ids share its prefix (the children must not defeat it
+	// into a spurious ambiguity error).
+	ids := []string{
+		"project/design/kanban",
+		"project/design/kanban/drift-test",
+		"project/design/kanban/property-test",
+	}
+
+	got, err := ResolveScopedID(ids, "project/design/kanban/drift-test", "design/kanban")
+	if err != nil {
+		t.Fatalf("ResolveScopedID() error: %v (parent with children should resolve)", err)
+	}
+	if got != "project/design/kanban" {
+		t.Fatalf("ResolveScopedID() = %q, want %q", got, "project/design/kanban")
+	}
+}
+
+func TestResolveScopedIDGlobalUniqueBasenameFallback(t *testing.T) {
+	// A globally-unique slug resolves from a scope that cannot reach it by
+	// walking up — e.g. a cross-project link in the aggregated monorepo.
+	ids := []string{
+		"alpha/notes/setup",
+		"beta/deploy/runbook",
+	}
+
+	got, err := ResolveScopedID(ids, "alpha/notes/setup", "runbook")
+	if err != nil {
+		t.Fatalf("ResolveScopedID() error: %v (unique slug should resolve globally)", err)
+	}
+	if got != "beta/deploy/runbook" {
+		t.Fatalf("ResolveScopedID() = %q, want %q", got, "beta/deploy/runbook")
+	}
+
+	// A non-unique slug must NOT resolve via the fallback.
+	ids = append(ids, "gamma/deploy/runbook")
+	if got, err := ResolveScopedID(ids, "alpha/notes/setup", "runbook"); err == nil {
+		t.Fatalf("expected no resolution for non-unique slug, got %q", got)
+	}
+}
+
 func TestFindProjectRoot(t *testing.T) {
 	// Create a nested directory structure with .felt at the top
 	rootDir := t.TempDir()
