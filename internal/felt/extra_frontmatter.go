@@ -20,6 +20,7 @@ func (f *Felt) SetExtraField(key string, value any) error {
 		if f.ExtraFields != nil {
 			delete(f.ExtraFields, key)
 		}
+		f.removeExtraFieldOrder(key)
 		return nil
 	}
 
@@ -34,11 +35,29 @@ func (f *Felt) SetExtraField(key string, value any) error {
 	if len(node.Content) == 0 || node.Content[0].Kind != yaml.MappingNode || len(node.Content[0].Content) < 2 {
 		return fmt.Errorf("extra field %q did not decode to a mapping", key)
 	}
+	_, existed := f.ExtraFields[key]
 	if f.ExtraFields == nil {
 		f.ExtraFields = map[string]*yaml.Node{}
 	}
 	f.ExtraFields[key] = node.Content[0].Content[1]
+	if !existed {
+		f.ExtraFieldOrder = append(f.ExtraFieldOrder, key)
+	}
 	return nil
+}
+
+// removeExtraFieldOrder drops key from the recorded extra-field order.
+func (f *Felt) removeExtraFieldOrder(key string) {
+	if len(f.ExtraFieldOrder) == 0 {
+		return
+	}
+	out := f.ExtraFieldOrder[:0]
+	for _, k := range f.ExtraFieldOrder {
+		if k != key {
+			out = append(out, k)
+		}
+	}
+	f.ExtraFieldOrder = out
 }
 
 // ExtraFieldKeys returns sorted non-native top-level frontmatter keys.

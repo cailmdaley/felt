@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"path"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 	"unicode"
@@ -92,6 +93,12 @@ type Felt struct {
 	// not parse or validate their semantics; it preserves them on round-trip
 	// and surfaces them in JSON so downstream tools can own their contracts.
 	ExtraFields map[string]*yaml.Node `yaml:"-" json:"-"`
+	// ExtraFieldOrder records the document order of ExtraFields keys so Marshal
+	// can replay it. A map alone has no stable iteration order, so without this
+	// every write would re-emit extra fields in a random order (churn). New keys
+	// from SetExtraField append here; deletes remove. Keys present in the map but
+	// absent here are emitted last, sorted, as a defensive fallback.
+	ExtraFieldOrder []string `yaml:"-" json:"-"`
 	Body        string                `yaml:"-" json:"body,omitempty"`
 	ModifiedAt  time.Time             `yaml:"-" json:"modified_at,omitempty"` // populated from file stat
 	// EntryPoint is true when the fiber lives as a bare `.felt/<slug>.md`
@@ -437,14 +444,19 @@ func parseFrontmatter(id string, frontmatter []byte) (*Felt, error) {
 		mapping := node.Content[0]
 		if mapping.Kind == yaml.MappingNode {
 			extra := make(map[string]*yaml.Node)
+			var order []string
 			for i := 0; i+1 < len(mapping.Content); i += 2 {
 				key := mapping.Content[i].Value
 				if _, known := knownFrontmatterKeys[key]; !known {
+					if _, seen := extra[key]; !seen {
+						order = append(order, key)
+					}
 					extra[key] = mapping.Content[i+1]
 				}
 			}
 			if len(extra) > 0 {
 				f.ExtraFields = extra
+				f.ExtraFieldOrder = order
 			}
 		}
 	}
@@ -660,7 +672,11 @@ func (f *Felt) Marshal() ([]byte, error) {
 		// This avoids document markers and preserves the exact YAML structure
 		// of each field's value node.
 		mappingNode := &yaml.Node{Kind: yaml.MappingNode}
-		for key, valueNode := range f.ExtraFields {
+		for _, key := range f.orderedExtraKeys() {
+			valueNode := f.ExtraFields[key]
+			if valueNode == nil {
+				continue
+			}
 			keyNode := &yaml.Node{Kind: yaml.ScalarNode, Value: key, Tag: "!!str"}
 			mappingNode.Content = append(mappingNode.Content, keyNode, valueNode)
 		}
@@ -682,6 +698,36 @@ func (f *Felt) Marshal() ([]byte, error) {
 	}
 
 	return buf.Bytes(), nil
+}
+
+// orderedExtraKeys returns ExtraFields keys in a stable, document-preserving
+// order: keys captured at parse time (ExtraFieldOrder) first, in that order,
+// then any keys present in the map but missing from the order slice (e.g. added
+// by a path that did not maintain order), sorted for determinism.
+func (f *Felt) orderedExtraKeys() []string {
+	if len(f.ExtraFields) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(f.ExtraFields))
+	seen := make(map[string]struct{}, len(f.ExtraFields))
+	for _, key := range f.ExtraFieldOrder {
+		if _, ok := f.ExtraFields[key]; !ok {
+			continue
+		}
+		if _, dup := seen[key]; dup {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, key)
+	}
+	var rest []string
+	for key := range f.ExtraFields {
+		if _, ok := seen[key]; !ok {
+			rest = append(rest, key)
+		}
+	}
+	sort.Strings(rest)
+	return append(out, rest...)
 }
 
 func (f *Felt) canonicalizeName() {

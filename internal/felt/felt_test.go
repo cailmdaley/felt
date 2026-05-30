@@ -1,7 +1,9 @@
 package felt
 
 import (
+	"bytes"
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -546,6 +548,80 @@ container: python:3.11-slim
 	}
 	if !roundTrip.HasDataFlowOutput("damped_pk") {
 		t.Fatalf("round-trip HasDataFlowOutput(damped_pk) = false")
+	}
+}
+
+// TestMarshalPreservesExtraFieldOrder guards against the churn bug where
+// Marshal ranged the ExtraFields map directly: Go randomizes map iteration, so
+// every write re-emitted extra fields in a random order and produced spurious
+// diffs across machines/builds. Order must round-trip exactly, deterministically
+// — including a non-alphabetical input order, repeated across marshals.
+func TestMarshalPreservesExtraFieldOrder(t *testing.T) {
+	// tempered before shuttle is intentionally non-alphabetical: an alpha sort
+	// would reorder these, so a stable result proves order is *preserved*, not
+	// merely deterministic.
+	content := []byte(`---
+name: Order Fixture
+status: active
+created-at: 2026-05-31T00:00:00Z
+tempered: true
+shuttle:
+  enabled: true
+  kind: oneshot
+insights:
+  finding:
+    claim: order is preserved
+---
+
+# Order Fixture
+`)
+	f, err := Parse("order-fixture", content)
+	if err != nil {
+		t.Fatalf("Parse() error: %v", err)
+	}
+	want := []string{"tempered", "shuttle", "insights"}
+	if got := f.orderedExtraKeys(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("orderedExtraKeys() = %v, want %v", got, want)
+	}
+
+	// Many successive marshals must be byte-identical (the bug surfaced as
+	// run-to-run variation, so a single marshal would not catch it).
+	first, err := f.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal() error: %v", err)
+	}
+	for i := 0; i < 50; i++ {
+		again, err := f.Marshal()
+		if err != nil {
+			t.Fatalf("Marshal() error on iter %d: %v", i, err)
+		}
+		if !bytes.Equal(first, again) {
+			t.Fatalf("Marshal() not deterministic on iter %d:\nfirst:\n%s\nagain:\n%s", i, first, again)
+		}
+	}
+
+	// And the order must survive a parse → marshal → parse round-trip.
+	rt, err := Parse(f.ID, first)
+	if err != nil {
+		t.Fatalf("round-trip Parse() error: %v", err)
+	}
+	if got := rt.orderedExtraKeys(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("round-trip orderedExtraKeys() = %v, want %v", got, want)
+	}
+
+	// A newly set extra field appends at the end; deleting one removes it
+	// without disturbing the rest.
+	if err := rt.SetExtraField("zebra", map[string]any{"k": "v"}); err != nil {
+		t.Fatalf("SetExtraField() error: %v", err)
+	}
+	if got, want := rt.orderedExtraKeys(), []string{"tempered", "shuttle", "insights", "zebra"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("after add orderedExtraKeys() = %v, want %v", got, want)
+	}
+	if err := rt.SetExtraField("shuttle", nil); err != nil {
+		t.Fatalf("SetExtraField(delete) error: %v", err)
+	}
+	if got, want := rt.orderedExtraKeys(), []string{"tempered", "insights", "zebra"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("after delete orderedExtraKeys() = %v, want %v", got, want)
 	}
 }
 
