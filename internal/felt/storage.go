@@ -333,15 +333,24 @@ func (s *Storage) MoveSubtree(oldID, newID string) error {
 		return fmt.Errorf("no felt found at %s", oldID)
 	}
 
+	oldRoot := filepath.Join(s.root, filepath.FromSlash(oldID))
+	newRoot := filepath.Join(s.root, filepath.FromSlash(newID))
+	if _, err := os.Stat(newRoot); err == nil {
+		return fmt.Errorf("destination %s already exists", newID)
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("checking destination directory %s: %w", newID, err)
+	}
+	if err := os.MkdirAll(filepath.Dir(newRoot), 0755); err != nil {
+		return fmt.Errorf("creating destination parent %s: %w", filepath.Dir(newRoot), err)
+	}
+	if err := os.Rename(oldRoot, newRoot); err != nil {
+		return fmt.Errorf("moving subtree %s -> %s: %w", oldRoot, newRoot, err)
+	}
+
 	for _, f := range updated {
 		if err := s.Write(f); err != nil {
 			return err
 		}
-	}
-
-	oldRoot := filepath.Join(s.root, filepath.FromSlash(oldID))
-	if err := os.RemoveAll(oldRoot); err != nil {
-		return fmt.Errorf("removing old subtree %s: %w", oldRoot, err)
 	}
 	for dir := filepath.Dir(oldRoot); dir != s.root; dir = filepath.Dir(dir) {
 		err := os.Remove(dir)

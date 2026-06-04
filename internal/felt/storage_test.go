@@ -1150,6 +1150,56 @@ func TestStorageMoveSubtreeRewritesInputRefs(t *testing.T) {
 	}
 }
 
+func TestStorageMoveSubtreePreservesLooseArtifacts(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStorage(dir)
+	if err := s.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	for _, f := range []*Felt{
+		{ID: "bao-analysis", Name: "BAO Analysis", CreatedAt: time.Now()},
+		{ID: "damping-prior", Name: "Damping Prior", CreatedAt: time.Now()},
+		{ID: "damping-prior/contour-plot", Name: "Contour Plot", CreatedAt: time.Now()},
+	} {
+		if err := s.Write(f); err != nil {
+			t.Fatalf("Write(%s) error: %v", f.ID, err)
+		}
+	}
+
+	artifacts := map[string]string{
+		filepath.Join("damping-prior", "plot.png"):                   "png bytes",
+		filepath.Join("damping-prior", "report.html"):                "<html>report</html>",
+		filepath.Join("damping-prior", "contour-plot", "stats.json"): `{"ok":true}`,
+	}
+	for rel, contents := range artifacts {
+		artifactPath := filepath.Join(s.root, rel)
+		if err := os.WriteFile(artifactPath, []byte(contents), 0644); err != nil {
+			t.Fatalf("WriteFile(%s) error: %v", artifactPath, err)
+		}
+	}
+
+	if err := s.MoveSubtree("damping-prior", "bao-analysis/damping-prior"); err != nil {
+		t.Fatalf("MoveSubtree() error: %v", err)
+	}
+
+	for rel, contents := range artifacts {
+		oldPath := filepath.Join(s.root, rel)
+		if _, err := os.Stat(oldPath); !os.IsNotExist(err) {
+			t.Fatalf("old artifact %s still exists or stat failed: %v", oldPath, err)
+		}
+
+		newPath := filepath.Join(s.root, "bao-analysis", rel)
+		data, err := os.ReadFile(newPath)
+		if err != nil {
+			t.Fatalf("ReadFile(%s) error: %v", newPath, err)
+		}
+		if string(data) != contents {
+			t.Fatalf("artifact %s = %q, want %q", newPath, string(data), contents)
+		}
+	}
+}
+
 func TestStorageMoveSubtreeRejectsSelfNesting(t *testing.T) {
 	dir := t.TempDir()
 	s := NewStorage(dir)
