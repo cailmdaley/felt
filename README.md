@@ -57,6 +57,7 @@ A fiber is stored as `.felt/<path>/<slug>.md`. For example:
 
 ```yaml
 ---
+id: 01KTC9C1G1CBJ84H6WB92J8A13
 name: Covariance estimation
 status: closed
 tags: [pure-eb, methods]
@@ -71,7 +72,9 @@ Jackknife on 150 patches gives stable diagonal + off-diagonal.
 See also [[use-des-y3-weights]].
 ```
 
-IDs are slug paths such as `covariance-estimation` or `bao-analysis/damping-prior`. Bare slugs resolve when globally unique, so `felt show damping-prior` and `felt show bao-analysis/damping-prior` both work when unambiguous.
+The CLI address is a slug path such as `covariance-estimation` or `bao-analysis/damping-prior`. Bare slugs resolve when globally unique, so `felt show damping-prior` and `felt show bao-analysis/damping-prior` both work when unambiguous.
+
+The frontmatter `id` is a ULID minted once at `felt add` and preserved across moves. JSON keeps the slug address at `id` for compatibility and exposes the intrinsic frontmatter value as `uid`.
 
 ### Status
 

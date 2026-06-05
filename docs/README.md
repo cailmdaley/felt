@@ -104,6 +104,7 @@ Fibers live in `.felt/<path>/<slug>.md`:
 
 ```yaml
 ---
+id: 01KTC9C1G1CBJ84H6WB92J8A13
 name: "Design API"
 status: closed
 tags: [backend, auth]
@@ -114,6 +115,8 @@ outcome: "REST with JWT. See docs/api.md"
 
 Optional body with notes, context, etc.
 ```
+
+The filesystem slug path is the CLI address. The frontmatter `id` is an intrinsic ULID minted at creation and surfaced as `uid` in JSON so existing slug-based `id` consumers keep working.
 
 Any other top-level YAML keys are preserved exactly enough for downstream tools to own their schema.
 

@@ -23,12 +23,15 @@ Fibers are minimal by default. All fields except `name` are optional.
 
 | Field | Notes |
 |-------|-------|
+| id | Intrinsic ULID minted once at `felt add`. Preserved in frontmatter; surfaced as `uid` in JSON because JSON `id` remains the slug address. |
 | name | Required. The fiber. |
 | body | Markdown content. |
 | outcome | The conclusion — decisions, answers, results. `-o` flag. |
 | status | Opt-in tracking: open/active/closed. Most fibers don't have one. |
 | tags | Freeform. Use for categorization (decision, spec, question, etc). |
 | extra frontmatter | Any other top-level YAML keys. felt preserves them opaquely and surfaces them in JSON. |
+
+**Identity.** The CLI still addresses fibers by slug path (`felt show project/fiber`). New fibers also carry a frontmatter ULID (`id:`) minted once at creation for federation tools. JSON keeps slug at `id` for compatibility and exposes the intrinsic value as `uid`.
 
 **Status is opt-in.** `felt add <slug> "name"` creates a statusless fiber. `felt add <slug> "name" -s open` enters tracking. `felt edit <id> -s active` enters tracking. `felt ls` only shows tracked fibers.
 

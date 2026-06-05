@@ -31,6 +31,9 @@ func TestNew(t *testing.T) {
 	if f.ID != "test-task" {
 		t.Errorf("ID = %q, want %q", f.ID, "test-task")
 	}
+	if !looksLikeULID(f.UID) {
+		t.Errorf("UID = %q, want 26-character ULID", f.UID)
+	}
 	if f.Body != "" {
 		t.Errorf("Body = %q, want empty before first save", f.Body)
 	}
@@ -627,6 +630,7 @@ insights:
 
 func TestSearchTextIncludesStructuredFields(t *testing.T) {
 	content := []byte(`---
+id: 01JZ0000000000000000000002
 name: Searchable structured fields
 created-at: 2026-03-15T10:00:00Z
 description: Description text
@@ -678,6 +682,7 @@ container: python:3.11-slim
 
 	searchText := f.SearchText()
 	for _, needle := range []string{
+		"01JZ0000000000000000000002",
 		"Outcome text",
 		"Description text",
 		"DESI DR1 clustering data",
@@ -1204,6 +1209,58 @@ Body here.
 	}
 }
 
+func TestFrontmatterIDRoundTripAsNativeUID(t *testing.T) {
+	const intrinsicID = "01JZ0000000000000000000000"
+	input := `---
+id: 01JZ0000000000000000000000
+name: Federated fiber
+status: active
+created-at: 2026-05-04T00:00:00Z
+shuttle:
+    enabled: true
+---
+
+Body.
+`
+	f, err := Parse("project/federated-fiber", []byte(input))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if f.ID != "project/federated-fiber" {
+		t.Fatalf("slug ID = %q, want project/federated-fiber", f.ID)
+	}
+	if f.UID != intrinsicID {
+		t.Fatalf("UID = %q, want %q", f.UID, intrinsicID)
+	}
+	if _, ok := f.ExtraFields["id"]; ok {
+		t.Fatal("frontmatter id should be native, not an opaque extra field")
+	}
+
+	out, err := f.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	outStr := string(out)
+	if !strings.Contains(outStr, "id: "+intrinsicID) {
+		t.Fatalf("Marshal output missing intrinsic id:\n%s", outStr)
+	}
+
+	jsonBytes, err := json.Marshal(f)
+	if err != nil {
+		t.Fatalf("MarshalJSON: %v", err)
+	}
+	var decoded map[string]interface{}
+	if err := json.Unmarshal(jsonBytes, &decoded); err != nil {
+		t.Fatalf("Unmarshal JSON: %v\n%s", err, string(jsonBytes))
+	}
+	if decoded["id"] != "project/federated-fiber" {
+		t.Fatalf("JSON id = %v, want slug", decoded["id"])
+	}
+	if decoded["uid"] != intrinsicID {
+		t.Fatalf("JSON uid = %v, want %s", decoded["uid"], intrinsicID)
+	}
+}
+
 // TestMarshalJSONIncludesExtraFields verifies that `felt show --json` (and
 // any other JSON consumer of Felt) sees tool-owned frontmatter as flat
 // top-level keys, with values rendered as native JSON. Regression guard:
@@ -1372,4 +1429,16 @@ Body.
 	if _, ok := decoded["shuttle"]; ok {
 		t.Error("unexpected shuttle key in plain fiber JSON")
 	}
+}
+
+func looksLikeULID(value string) bool {
+	if len(value) != 26 {
+		return false
+	}
+	for _, r := range value {
+		if !strings.ContainsRune("0123456789ABCDEFGHJKMNPQRSTVWXYZ", r) {
+			return false
+		}
+	}
+	return true
 }

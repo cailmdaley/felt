@@ -292,6 +292,8 @@ func feltHasField(f *felt.Felt, field string) bool {
 	switch field {
 	case "id":
 		return f.ID != ""
+	case "uid", "ulid", "frontmatter_id", "frontmatter-id":
+		return f.UID != ""
 	case "name":
 		return f.Name != ""
 	case "status":
@@ -326,6 +328,8 @@ func frontmatterPrefilterFields(fields []string) ([]string, bool) {
 		switch field {
 		case "id":
 			// Every discovered fiber has an id; it does not need a frontmatter gate.
+		case "uid", "ulid", "frontmatter_id", "frontmatter-id":
+			frontmatterFields = append(frontmatterFields, "id")
 		case "created_at":
 			frontmatterFields = append(frontmatterFields, "created-at")
 		case "closed_at":
@@ -361,6 +365,8 @@ func feltJSONField(f *felt.Felt, field string) (interface{}, bool, error) {
 	switch field {
 	case "id":
 		return f.ID, true, nil
+	case "uid", "ulid", "frontmatter_id", "frontmatter-id":
+		return f.UID, f.UID != "", nil
 	case "name":
 		return f.Name, f.Name != "", nil
 	case "status":

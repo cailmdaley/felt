@@ -3,6 +3,7 @@ package felt
 
 import (
 	"bytes"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"path"
@@ -12,6 +13,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/oklog/ulid/v2"
 	"gopkg.in/yaml.v3"
 )
 
@@ -80,7 +82,10 @@ type BodyRef struct {
 
 // Felt represents a single fiber.
 type Felt struct {
+	// ID is the slug/path address felt commands use. UID is the intrinsic
+	// frontmatter `id` minted once for federation/dispatch consumers.
 	ID          string     `yaml:"-" json:"id"`
+	UID         string     `yaml:"id,omitempty" json:"uid,omitempty"`
 	Name        string     `yaml:"name" json:"name"`
 	Status      string     `yaml:"status,omitempty" json:"status,omitempty"`
 	Tags        []string   `yaml:"tags,omitempty" json:"tags,omitempty"`
@@ -98,9 +103,9 @@ type Felt struct {
 	// every write would re-emit extra fields in a random order (churn). New keys
 	// from SetExtraField append here; deletes remove. Keys present in the map but
 	// absent here are emitted last, sorted, as a defensive fallback.
-	ExtraFieldOrder []string `yaml:"-" json:"-"`
-	Body        string                `yaml:"-" json:"body,omitempty"`
-	ModifiedAt  time.Time             `yaml:"-" json:"modified_at,omitempty"` // populated from file stat
+	ExtraFieldOrder []string  `yaml:"-" json:"-"`
+	Body            string    `yaml:"-" json:"body,omitempty"`
+	ModifiedAt      time.Time `yaml:"-" json:"modified_at,omitempty"` // populated from file stat
 	// EntryPoint is true when the fiber lives as a bare `.felt/<slug>.md`
 	// at the .felt/ root — the project's entry-point / root fiber.
 	// Distinguishes the root from top-level folder fibers; both have
@@ -189,9 +194,15 @@ func New(slug string, name string) (*Felt, error) {
 
 	return &Felt{
 		ID:        id,
+		UID:       NewULID(),
 		Name:      name,
 		CreatedAt: time.Now(),
 	}, nil
+}
+
+// NewULID returns a Crockford-base32 ULID for new intrinsic fiber identities.
+func NewULID() string {
+	return ulid.MustNew(ulid.Now(), rand.Reader).String()
 }
 
 // GenerateID creates a slug-based ID from a title string.
@@ -389,7 +400,7 @@ func ParseWithMode(id string, content []byte, mode ParseMode) (*Felt, error) {
 // knownFrontmatterKeys is the set of top-level YAML keys that felt parses
 // into struct fields. All other top-level keys are preserved as ExtraFields.
 var knownFrontmatterKeys = map[string]struct{}{
-	"name": {}, "title": {}, "status": {}, "tags": {},
+	"id": {}, "name": {}, "title": {}, "status": {}, "tags": {},
 	"created-at": {}, "closed-at": {}, "outcome": {}, "due": {},
 	"description": {},
 	// NOTE: all other top-level keys — including tool-owned namespaces like
@@ -407,6 +418,7 @@ var knownFrontmatterKeys = map[string]struct{}{
 
 func parseFrontmatter(id string, frontmatter []byte) (*Felt, error) {
 	type feltFrontmatter struct {
+		UID         string     `yaml:"id,omitempty"`
 		Name        string     `yaml:"name"`
 		LegacyTitle string     `yaml:"title"`
 		Status      string     `yaml:"status,omitempty"`
@@ -428,6 +440,7 @@ func parseFrontmatter(id string, frontmatter []byte) (*Felt, error) {
 	}
 	f := &Felt{
 		ID:          id,
+		UID:         fm.UID,
 		Name:        name,
 		Status:      fm.Status,
 		Tags:        fm.Tags,
@@ -641,6 +654,7 @@ func (f *Felt) Marshal() ([]byte, error) {
 
 	// Build frontmatter struct for controlled field ordering
 	fm := struct {
+		UID         string     `yaml:"id,omitempty"`
 		Name        string     `yaml:"name"`
 		Status      string     `yaml:"status,omitempty"`
 		Tags        []string   `yaml:"tags,omitempty"`
@@ -650,6 +664,7 @@ func (f *Felt) Marshal() ([]byte, error) {
 		Due         *time.Time `yaml:"due,omitempty"`
 		Description string     `yaml:"description,omitempty"`
 	}{
+		UID:         f.UID,
 		Name:        f.Name,
 		Status:      f.Status,
 		Tags:        f.Tags,
@@ -794,7 +809,7 @@ func (f *Felt) MatchesID(query string) bool {
 
 // SearchText returns searchable metadata content beyond the title.
 func (f *Felt) SearchText() string {
-	parts := []string{f.Outcome, f.Description, f.ExtraFieldsSearchText()}
+	parts := []string{f.UID, f.Outcome, f.Description, f.ExtraFieldsSearchText()}
 	return strings.Join(parts, "\n")
 }
 
