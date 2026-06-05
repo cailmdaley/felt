@@ -69,6 +69,10 @@ type MigrationResult struct {
 	StrippedMystAnchorIDs []string
 }
 
+type IdentityBackfillResult struct {
+	AssignedIDs []string
+}
+
 // NewStorage creates a storage instance for the given directory.
 // The directory should be the project root (containing .felt/).
 func NewStorage(projectRoot string) *Storage {
@@ -572,6 +576,42 @@ func (s *Storage) NormalizeFiberFiles(dryRun bool) ([]string, []string, []string
 	return titleIDs, dependsOnIDs, anchorIDs, nil
 }
 
+// BackfillIntrinsicIDs assigns an intrinsic ULID to every fiber missing one.
+// This is intentionally separate from Migrate: replicas must not run it
+// casually, or the same git-synced fiber can split into multiple identities.
+func (s *Storage) BackfillIntrinsicIDs(dryRun bool) (*IdentityBackfillResult, error) {
+	files, err := s.listFiberFiles()
+	if err != nil {
+		return nil, err
+	}
+
+	result := &IdentityBackfillResult{}
+	for _, file := range files {
+		data, err := os.ReadFile(file.path)
+		if err != nil {
+			return nil, fmt.Errorf("reading fiber %s: %w", file.path, err)
+		}
+		rewritten, changed, err := backfillIntrinsicID(data)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to backfill %s: %v\n", file.path, err)
+			continue
+		}
+		if !changed {
+			continue
+		}
+		result.AssignedIDs = append(result.AssignedIDs, file.id)
+		if dryRun {
+			continue
+		}
+		if err := os.WriteFile(file.path, rewritten, 0644); err != nil {
+			return nil, fmt.Errorf("writing identity-backfilled fiber %s: %w", file.path, err)
+		}
+	}
+
+	slices.Sort(result.AssignedIDs)
+	return result, nil
+}
+
 func normalizeFiberFile(id string, content []byte) ([]byte, bool, bool, bool, bool, error) {
 	frontmatter, body, err := splitFrontmatter(content, true)
 	if err != nil {
@@ -600,6 +640,61 @@ func normalizeFiberFile(id string, content []byte) ([]byte, bool, bool, bool, bo
 		}
 	}
 	return out.Bytes(), renamedTitle, removedDependsOn, strippedAnchor, true, nil
+}
+
+func backfillIntrinsicID(content []byte) ([]byte, bool, error) {
+	frontmatter, body, err := splitFrontmatter(content, true)
+	if err != nil {
+		return nil, false, err
+	}
+
+	rewrittenFrontmatter, changed, err := backfillIntrinsicIDFrontmatter(frontmatter)
+	if err != nil {
+		return nil, false, err
+	}
+	if !changed {
+		return content, false, nil
+	}
+
+	var out bytes.Buffer
+	out.WriteString("---\n")
+	out.Write(rewrittenFrontmatter)
+	out.WriteString("---\n")
+	if body != "" {
+		out.WriteString(body)
+	}
+	return out.Bytes(), true, nil
+}
+
+func backfillIntrinsicIDFrontmatter(frontmatter []byte) ([]byte, bool, error) {
+	var node yaml.Node
+	if err := yaml.Unmarshal(frontmatter, &node); err != nil {
+		return nil, false, fmt.Errorf("parsing YAML frontmatter: %w", err)
+	}
+	if len(node.Content) == 0 {
+		return frontmatter, false, nil
+	}
+
+	mapping := node.Content[0]
+	if mapping.Kind != yaml.MappingNode {
+		return nil, false, fmt.Errorf("frontmatter must be a YAML mapping")
+	}
+
+	for i := 0; i+1 < len(mapping.Content); i += 2 {
+		if mapping.Content[i].Value == "id" && strings.TrimSpace(mapping.Content[i+1].Value) != "" {
+			return frontmatter, false, nil
+		}
+	}
+
+	idKey := &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "id"}
+	idValue := &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: NewULID()}
+	mapping.Content = append([]*yaml.Node{idKey, idValue}, mapping.Content...)
+
+	rewritten, err := yaml.Marshal(mapping)
+	if err != nil {
+		return nil, false, fmt.Errorf("marshaling YAML frontmatter: %w", err)
+	}
+	return rewritten, true, nil
 }
 
 // List returns all felts in the storage.

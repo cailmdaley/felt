@@ -208,6 +208,7 @@ felt history <id>                 felt history append <id> --summary "..."
 felt tree                         felt nest|unnest <id>
 felt migrate [--dry-run]          felt rm <id>
 felt index sync                   felt session
+felt backfill-ids [--dry-run]     # owner-only intrinsic id migration
 felt setup claude|codex|skills    felt update
 ```
 

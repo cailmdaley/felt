@@ -11,8 +11,10 @@ import (
 )
 
 var (
-	migrateDir    string
-	migrateDryRun bool
+	migrateDir        string
+	migrateDryRun     bool
+	backfillIDsDir    string
+	backfillIDsDryRun bool
 )
 
 var migrateCmd = &cobra.Command{
@@ -83,6 +85,46 @@ only multiple bare files are treated as orphaned legacy and migrated.`,
 			"Migrated %d flat fibers, %d legacy title fields, %d legacy depends-on keys, %d legacy MyST anchors\n",
 			len(result.Entries), len(result.TitleToNameIDs), len(result.RemovedDependsOnIDs), len(result.StrippedMystAnchorIDs),
 		)
+		requestAsyncIndexSync(storage)
+		return nil
+	},
+}
+
+var backfillIDsCmd = &cobra.Command{
+	Use:   "backfill-ids",
+	Short: "Assign intrinsic ULID ids to existing fibers",
+	Long: `Assigns a frontmatter id ULID to every fiber missing one.
+
+Run this only on the canonical owner of a store, then sync the resulting files.
+Replicas should inherit the committed ids rather than minting their own.`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		storage, err := resolveMigrationStorage(backfillIDsDir)
+		if err != nil {
+			return err
+		}
+
+		result, err := storage.BackfillIntrinsicIDs(backfillIDsDryRun)
+		if err != nil {
+			return err
+		}
+		if len(result.AssignedIDs) == 0 {
+			fmt.Println("No intrinsic ids needed")
+			return nil
+		}
+
+		if backfillIDsDryRun {
+			for _, id := range result.AssignedIDs {
+				fmt.Printf("Would assign intrinsic id to %s\n", id)
+			}
+			fmt.Printf("Dry run: %d intrinsic ids would be assigned\n", len(result.AssignedIDs))
+			return nil
+		}
+
+		for _, id := range result.AssignedIDs {
+			fmt.Printf("Assigned intrinsic id to %s\n", id)
+		}
+		fmt.Printf("Assigned %d intrinsic ids\n", len(result.AssignedIDs))
 		requestAsyncIndexSync(storage)
 		return nil
 	},
@@ -180,11 +222,14 @@ var unnestCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(migrateCmd)
+	rootCmd.AddCommand(backfillIDsCmd)
 	rootCmd.AddCommand(nestCmd)
 	rootCmd.AddCommand(unnestCmd)
 
 	migrateCmd.Flags().StringVar(&migrateDir, "dir", "", "Project root or .felt directory to migrate")
 	migrateCmd.Flags().BoolVar(&migrateDryRun, "dry-run", false, "Print planned migrations without writing files")
+	backfillIDsCmd.Flags().StringVar(&backfillIDsDir, "dir", "", "Project root or .felt directory to backfill")
+	backfillIDsCmd.Flags().BoolVar(&backfillIDsDryRun, "dry-run", false, "Print planned identity assignments without writing files")
 }
 
 func resolveMigrationStorage(dir string) (*felt.Storage, error) {

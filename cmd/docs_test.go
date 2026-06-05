@@ -99,6 +99,7 @@ func TestRootCommandSurfaceIsConsolidated(t *testing.T) {
 
 	expectedVisible := []string{
 		"add",
+		"backfill-ids",
 		"check",
 		"edit",
 		"history",

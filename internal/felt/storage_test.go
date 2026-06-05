@@ -1301,6 +1301,113 @@ Analysis body.
 	}
 }
 
+func TestStorageBackfillIntrinsicIDs(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStorage(dir)
+	if err := s.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	missing := `---
+name: Missing ID
+created-at: 2026-03-15T10:00:00Z
+shuttle:
+  enabled: true
+---
+
+Body.
+`
+	existingID := "01JZ0000000000000000000000"
+	existing := `---
+id: 01JZ0000000000000000000000
+name: Existing ID
+created-at: 2026-03-16T10:00:00Z
+---
+
+Already identified.
+`
+	if err := os.MkdirAll(filepath.Join(s.root, "missing-id"), 0755); err != nil {
+		t.Fatalf("mkdir missing-id: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(s.root, "missing-id", "missing-id.md"), []byte(missing), 0644); err != nil {
+		t.Fatalf("write missing: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(s.root, "existing-id"), 0755); err != nil {
+		t.Fatalf("mkdir existing-id: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(s.root, "existing-id", "existing-id.md"), []byte(existing), 0644); err != nil {
+		t.Fatalf("write existing: %v", err)
+	}
+
+	dryRun, err := s.BackfillIntrinsicIDs(true)
+	if err != nil {
+		t.Fatalf("BackfillIntrinsicIDs(dryRun) error: %v", err)
+	}
+	if !reflect.DeepEqual(dryRun.AssignedIDs, []string{"missing-id"}) {
+		t.Fatalf("dry-run assigned ids = %#v", dryRun.AssignedIDs)
+	}
+	data, err := os.ReadFile(filepath.Join(s.root, "missing-id", "missing-id.md"))
+	if err != nil {
+		t.Fatalf("read missing after dry-run: %v", err)
+	}
+	if strings.Contains(string(data), "\nid: ") {
+		t.Fatalf("dry-run wrote id:\n%s", string(data))
+	}
+
+	applied, err := s.BackfillIntrinsicIDs(false)
+	if err != nil {
+		t.Fatalf("BackfillIntrinsicIDs() error: %v", err)
+	}
+	if !reflect.DeepEqual(applied.AssignedIDs, []string{"missing-id"}) {
+		t.Fatalf("applied assigned ids = %#v", applied.AssignedIDs)
+	}
+	backfilled, err := s.Read("missing-id")
+	if err != nil {
+		t.Fatalf("Read missing-id: %v", err)
+	}
+	if !looksLikeULID(backfilled.UID) {
+		t.Fatalf("backfilled UID = %q, want ULID", backfilled.UID)
+	}
+	if backfilled.Body != "Body." {
+		t.Fatalf("backfilled body = %q, want Body.", backfilled.Body)
+	}
+	kept, err := s.Read("existing-id")
+	if err != nil {
+		t.Fatalf("Read existing-id: %v", err)
+	}
+	if kept.UID != existingID {
+		t.Fatalf("existing UID = %q, want %q", kept.UID, existingID)
+	}
+
+	again, err := s.BackfillIntrinsicIDs(false)
+	if err != nil {
+		t.Fatalf("BackfillIntrinsicIDs() again error: %v", err)
+	}
+	if len(again.AssignedIDs) != 0 {
+		t.Fatalf("second backfill should be idempotent, got %#v", again.AssignedIDs)
+	}
+}
+
+func TestStorageBackfillIntrinsicIDsSkipsNonFiberMarkdown(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStorage(dir)
+	if err := s.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(s.root, "README.md"), []byte("not frontmatter\n"), 0644); err != nil {
+		t.Fatalf("write sidecar: %v", err)
+	}
+
+	result, err := s.BackfillIntrinsicIDs(true)
+	if err != nil {
+		t.Fatalf("BackfillIntrinsicIDs() should skip non-fiber markdown, got: %v", err)
+	}
+	if len(result.AssignedIDs) != 0 {
+		t.Fatalf("assigned ids = %#v, want none", result.AssignedIDs)
+	}
+}
+
 func TestStorageMigrateFlatFilesDryRun(t *testing.T) {
 	dir := t.TempDir()
 	s := NewStorage(dir)

@@ -130,6 +130,7 @@ felt add <slug> <name>            # create fiber
 felt edit <id> -s active          # enter tracking / mark active
 felt edit <id> -s closed -o "outcome"
 felt rm <id>                      # delete
+felt backfill-ids --dry-run       # preview owner-only intrinsic id migration
 ```
 
 ### Viewing

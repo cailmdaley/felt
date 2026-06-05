@@ -68,6 +68,18 @@ func mustFelt(t *testing.T, dir string, args ...string) string {
 	return out
 }
 
+func looksLikeULID(value string) bool {
+	if len(value) != 26 {
+		return false
+	}
+	for _, r := range value {
+		if !strings.ContainsRune("0123456789ABCDEFGHJKMNPQRSTVWXYZ", r) {
+			return false
+		}
+	}
+	return true
+}
+
 func TestIntegration(t *testing.T) {
 	dir := t.TempDir()
 
@@ -108,7 +120,7 @@ func TestIntegration(t *testing.T) {
 		t.Fatalf("show: expected fiber title, got: %s", out)
 	}
 	out = mustFelt(t, dir, "show", fiberID, "--body")
-	if !strings.Contains(out, "Body start line: 6") {
+	if !strings.Contains(out, "Body start line: 7") {
 		t.Fatalf("new fiber body should report the editable insertion point, got: %s", out)
 	}
 
@@ -563,6 +575,52 @@ Session body.
 		t.Fatalf("migrate should write name field, got:\n%s", sessionHubText)
 	}
 
+	identityDir := filepath.Join(dir, "identity-project")
+	if err := os.MkdirAll(filepath.Join(identityDir, ".felt", "needs-id"), 0755); err != nil {
+		t.Fatalf("mkdir identity project: %v", err)
+	}
+	needsID := `---
+name: Needs ID
+created-at: 2026-03-15T10:00:00Z
+---
+
+Needs body.
+`
+	if err := os.WriteFile(filepath.Join(identityDir, ".felt", "needs-id", "needs-id.md"), []byte(needsID), 0644); err != nil {
+		t.Fatalf("write needs-id: %v", err)
+	}
+	out = mustFelt(t, dir, "backfill-ids", "--dir", identityDir, "--dry-run")
+	if !strings.Contains(out, "Would assign intrinsic id to needs-id") {
+		t.Fatalf("backfill-ids dry-run: expected planned assignment, got: %s", out)
+	}
+	data, err := os.ReadFile(filepath.Join(identityDir, ".felt", "needs-id", "needs-id.md"))
+	if err != nil {
+		t.Fatalf("read needs-id after dry-run: %v", err)
+	}
+	if strings.Contains(string(data), "\nid: ") {
+		t.Fatalf("backfill-ids dry-run should not write id:\n%s", string(data))
+	}
+	out = mustFelt(t, dir, "backfill-ids", "--dir", identityDir)
+	if !strings.Contains(out, "Assigned intrinsic id to needs-id") {
+		t.Fatalf("backfill-ids: expected assignment, got: %s", out)
+	}
+	out = mustFelt(t, identityDir, "show", "-j", "needs-id")
+	var shownWithUID map[string]any
+	if err := json.Unmarshal([]byte(out), &shownWithUID); err != nil {
+		t.Fatalf("backfill-ids: invalid json from show -j: %v\n%s", err, out)
+	}
+	if shownWithUID["id"] != "needs-id" {
+		t.Fatalf("backfill-ids: JSON id = %v, want needs-id", shownWithUID["id"])
+	}
+	uid, ok := shownWithUID["uid"].(string)
+	if !ok || !looksLikeULID(uid) {
+		t.Fatalf("backfill-ids: JSON uid = %#v, want ULID", shownWithUID["uid"])
+	}
+	out = mustFelt(t, dir, "backfill-ids", "--dir", identityDir)
+	if !strings.Contains(out, "No intrinsic ids needed") {
+		t.Fatalf("backfill-ids should be idempotent, got: %s", out)
+	}
+
 	out, err = felt(dir, "tapestry")
 	if err == nil {
 		t.Fatalf("tapestry should be removed from the public CLI, got: %s", out)
@@ -624,55 +682,55 @@ Session body.
 	if _, err := exec.LookPath("codex"); err != nil {
 		t.Log("codex CLI not on PATH; skipping setup codex portion")
 	} else {
-	codexHome := t.TempDir()
-	codexEnv := append(os.Environ(), "HOME="+codexHome, "SHELL=/bin/zsh")
+		codexHome := t.TempDir()
+		codexEnv := append(os.Environ(), "HOME="+codexHome, "SHELL=/bin/zsh")
 
-	cmd := exec.Command(binaryPath, "setup", "codex", "--source", repoRoot)
-	cmd.Dir = dir
-	cmd.Env = codexEnv
-	cmdOut, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("setup codex install: %v\n%s", err, cmdOut)
-	}
-	if !strings.Contains(string(cmdOut), "## felt") {
-		t.Fatalf("setup codex: expected AGENTS.md snippet, got: %s", cmdOut)
-	}
+		cmd := exec.Command(binaryPath, "setup", "codex", "--source", repoRoot)
+		cmd.Dir = dir
+		cmd.Env = codexEnv
+		cmdOut, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("setup codex install: %v\n%s", err, cmdOut)
+		}
+		if !strings.Contains(string(cmdOut), "## felt") {
+			t.Fatalf("setup codex: expected AGENTS.md snippet, got: %s", cmdOut)
+		}
 
-	// The marketplace name comes from marketplace.json's `name` field; the
-	// version subdirectory follows codexPluginCacheVersion(), which returns
-	// "dev" when Version is unset or "dev" — and `go build` above produces
-	// exactly that. Inlining avoids reaching into cmd-internal symbols from
-	// this external test package.
-	cacheManifest := filepath.Join(codexHome, ".codex", "plugins", "cache", "cailmdaley-felt", "felt", "dev", ".codex-plugin", "plugin.json")
-	cacheContent, err := os.ReadFile(cacheManifest)
-	if err != nil {
-		t.Fatalf("setup codex: plugin cache manifest missing: %v", err)
-	}
-	text := string(cacheContent)
-	if !strings.Contains(text, `"skills"`) || !strings.Contains(text, `"hooks"`) {
-		t.Fatalf("setup codex: cache manifest missing skills/hooks pointers, got: %s", cacheContent)
-	}
+		// The marketplace name comes from marketplace.json's `name` field; the
+		// version subdirectory follows codexPluginCacheVersion(), which returns
+		// "dev" when Version is unset or "dev" — and `go build` above produces
+		// exactly that. Inlining avoids reaching into cmd-internal symbols from
+		// this external test package.
+		cacheManifest := filepath.Join(codexHome, ".codex", "plugins", "cache", "cailmdaley-felt", "felt", "dev", ".codex-plugin", "plugin.json")
+		cacheContent, err := os.ReadFile(cacheManifest)
+		if err != nil {
+			t.Fatalf("setup codex: plugin cache manifest missing: %v", err)
+		}
+		text := string(cacheContent)
+		if !strings.Contains(text, `"skills"`) || !strings.Contains(text, `"hooks"`) {
+			t.Fatalf("setup codex: cache manifest missing skills/hooks pointers, got: %s", cacheContent)
+		}
 
-	// idempotent
-	cmd2 := exec.Command(binaryPath, "setup", "codex", "--source", repoRoot)
-	cmd2.Dir = dir
-	cmd2.Env = codexEnv
-	cmdOut2, _ := cmd2.CombinedOutput()
-	if !strings.Contains(string(cmdOut2), "Plugin already enabled") {
-		t.Fatalf("setup codex idempotency: expected already-enabled plugin, got: %s", cmdOut2)
-	}
+		// idempotent
+		cmd2 := exec.Command(binaryPath, "setup", "codex", "--source", repoRoot)
+		cmd2.Dir = dir
+		cmd2.Env = codexEnv
+		cmdOut2, _ := cmd2.CombinedOutput()
+		if !strings.Contains(string(cmdOut2), "Plugin already enabled") {
+			t.Fatalf("setup codex idempotency: expected already-enabled plugin, got: %s", cmdOut2)
+		}
 
-	// uninstall
-	cmd3 := exec.Command(binaryPath, "setup", "codex", "--uninstall", "--source", repoRoot)
-	cmd3.Dir = dir
-	cmd3.Env = codexEnv
-	cmd3Out, err := cmd3.CombinedOutput()
-	if err != nil {
-		t.Fatalf("setup codex uninstall: %v\n%s", err, cmd3Out)
-	}
-	if _, err := os.Stat(cacheManifest); !os.IsNotExist(err) {
-		t.Fatalf("setup codex uninstall: plugin cache still present: %v", err)
-	}
+		// uninstall
+		cmd3 := exec.Command(binaryPath, "setup", "codex", "--uninstall", "--source", repoRoot)
+		cmd3.Dir = dir
+		cmd3.Env = codexEnv
+		cmd3Out, err := cmd3.CombinedOutput()
+		if err != nil {
+			t.Fatalf("setup codex uninstall: %v\n%s", err, cmd3Out)
+		}
+		if _, err := os.Stat(cacheManifest); !os.IsNotExist(err) {
+			t.Fatalf("setup codex uninstall: plugin cache still present: %v", err)
+		}
 	}
 
 	out = mustFelt(t, dir, "--help")
