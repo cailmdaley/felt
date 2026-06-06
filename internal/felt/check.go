@@ -32,7 +32,8 @@ func (i CheckIssue) String() string {
 // Check inspects fibers for substrate problems in the relationship model:
 // broken narrative/data-flow references plus repository layout/legacy issues.
 func Check(felts []*Felt) []CheckIssue {
-	issues := checkRelationshipIntegrity(felts)
+	issues := checkNativeMetadata(felts)
+	issues = append(issues, checkRelationshipIntegrity(felts)...)
 
 	sort.Slice(issues, func(i, j int) bool {
 		if issues[i].FiberID != issues[j].FiberID {
@@ -46,6 +47,21 @@ func Check(felts []*Felt) []CheckIssue {
 		}
 		return issues[i].Message < issues[j].Message
 	})
+	return issues
+}
+
+func checkNativeMetadata(felts []*Felt) []CheckIssue {
+	var issues []CheckIssue
+	for _, f := range felts {
+		if strings.TrimSpace(f.Name) == "" {
+			issues = append(issues, CheckIssue{
+				Level:   CheckLevelError,
+				FiberID: f.ID,
+				Path:    "frontmatter.name",
+				Message: "name cannot be empty",
+			})
+		}
+	}
 	return issues
 }
 

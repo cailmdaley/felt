@@ -17,6 +17,7 @@ func mustExtra(t *testing.T, f *Felt, key string, value any) {
 func TestCheckBrokenBodyReference(t *testing.T) {
 	issues := Check([]*Felt{{
 		ID:   "fiber-a",
+		Name: "Fiber A",
 		Body: "See [[missing]].",
 	}})
 
@@ -31,14 +32,28 @@ func TestCheckBrokenBodyReference(t *testing.T) {
 	}
 }
 
+func TestCheckEmptyName(t *testing.T) {
+	issues := Check([]*Felt{{ID: "blank-name", Name: "  "}})
+
+	if len(issues) != 1 {
+		t.Fatalf("Check() produced %d issues, want 1", len(issues))
+	}
+	if issues[0].Path != "frontmatter.name" {
+		t.Fatalf("issue path = %q, want frontmatter.name", issues[0].Path)
+	}
+	if !strings.Contains(issues[0].Message, "name cannot be empty") {
+		t.Fatalf("issue message = %q, want empty-name failure", issues[0].Message)
+	}
+}
+
 func TestCheckBrokenBodyReferenceFragmentAgainstOpaqueFrontmatter(t *testing.T) {
-	target := &Felt{ID: "fiber-b"}
+	target := &Felt{ID: "fiber-b", Name: "Fiber B"}
 	mustExtra(t, target, "decisions", map[string]any{
 		"choice": map[string]any{"label": "Choice"},
 	})
 
 	issues := Check([]*Felt{
-		{ID: "fiber-a", Body: "See [[fiber-b#missing-element]]."},
+		{ID: "fiber-a", Name: "Fiber A", Body: "See [[fiber-b#missing-element]]."},
 		target,
 	})
 
@@ -54,7 +69,7 @@ func TestCheckBrokenBodyReferenceFragmentAgainstOpaqueFrontmatter(t *testing.T) 
 }
 
 func TestCheckBrokenDataFlowReference(t *testing.T) {
-	fiber := &Felt{ID: "fiber-a"}
+	fiber := &Felt{ID: "fiber-a", Name: "Fiber A"}
 	mustExtra(t, fiber, "inputs", []map[string]any{{
 		"id":   "catalog",
 		"from": "missing.output",
@@ -73,12 +88,12 @@ func TestCheckBrokenDataFlowReference(t *testing.T) {
 }
 
 func TestCheckBrokenDataFlowOutputReference(t *testing.T) {
-	consumer := &Felt{ID: "fiber-a"}
+	consumer := &Felt{ID: "fiber-a", Name: "Fiber A"}
 	mustExtra(t, consumer, "inputs", []map[string]any{{
 		"id":   "catalog",
 		"from": "fiber-b.missing-output",
 	}})
-	producer := &Felt{ID: "fiber-b"}
+	producer := &Felt{ID: "fiber-b", Name: "Fiber B"}
 	mustExtra(t, producer, "outputs", []map[string]any{{"id": "present-output"}})
 
 	issues := Check([]*Felt{consumer, producer})
