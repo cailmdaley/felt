@@ -299,7 +299,7 @@ shuttle:
 	if !strings.Contains(out, "stability:") || !strings.Contains(out, "claim: Posterior is stable to jackknife choice") {
 		t.Fatalf("opaque insights field: unexpected output:\n%s", out)
 	}
-	out = mustFelt(t, dir, "ls", "--json", "--has-field", "shuttle", "--json-field", "id,shuttle,depends_on,tempered")
+	out = mustFelt(t, dir, "ls", "--json", "--has-field", "shuttle", "--json-field", "id,shuttle,depends_on,tempered,path,modified_at")
 	var projected []map[string]any
 	if err := json.Unmarshal([]byte(out), &projected); err != nil {
 		t.Fatalf("ls --json projected fields: invalid json: %v\n%s", err, out)
@@ -309,6 +309,12 @@ shuttle:
 	}
 	if projected[0]["id"] != fiber2ID {
 		t.Fatalf("projected id = %#v, want %q", projected[0]["id"], fiber2ID)
+	}
+	if path, ok := projected[0]["path"].(string); !ok || path == "" {
+		t.Fatalf("projected path = %#v, want non-empty string", projected[0]["path"])
+	}
+	if modified, ok := projected[0]["modified_at"].(string); !ok || modified == "" {
+		t.Fatalf("projected modified_at = %#v, want non-empty string", projected[0]["modified_at"])
 	}
 	if _, ok := projected[0]["name"]; ok {
 		t.Fatalf("projected JSON should omit unrequested name field: %#v", projected[0])

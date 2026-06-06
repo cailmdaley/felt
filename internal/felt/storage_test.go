@@ -367,6 +367,9 @@ created-at: 2026-05-08T00:00:00Z
 	if felts[0].ModifiedAt.IsZero() {
 		t.Fatal("ModifiedAt should be populated when explicitly requested")
 	}
+	if felts[0].Path == "" {
+		t.Fatal("Path should be populated for filtered metadata listings")
+	}
 	if _, ok := felts[0].ExtraFields["shuttle"]; !ok {
 		t.Fatal("filtered list should preserve matching extra frontmatter")
 	}

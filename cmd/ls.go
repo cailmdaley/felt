@@ -314,6 +314,8 @@ func feltHasField(f *felt.Felt, field string) bool {
 		return f.Body != ""
 	case "modified_at", "modified-at":
 		return !f.ModifiedAt.IsZero()
+	case "path":
+		return f.Path != ""
 	case "entry_point", "entry-point":
 		return f.EntryPoint
 	default:
@@ -334,7 +336,7 @@ func frontmatterPrefilterFields(fields []string) ([]string, bool) {
 			frontmatterFields = append(frontmatterFields, "created-at")
 		case "closed_at":
 			frontmatterFields = append(frontmatterFields, "closed-at")
-		case "modified_at", "modified-at", "body", "entry_point", "entry-point":
+		case "modified_at", "modified-at", "path", "body", "entry_point", "entry-point":
 			return nil, false
 		default:
 			frontmatterFields = append(frontmatterFields, field)
@@ -387,6 +389,8 @@ func feltJSONField(f *felt.Felt, field string) (interface{}, bool, error) {
 		return f.Body, f.Body != "", nil
 	case "modified_at", "modified-at":
 		return f.ModifiedAt, !f.ModifiedAt.IsZero(), nil
+	case "path":
+		return f.Path, f.Path != "", nil
 	case "entry_point", "entry-point":
 		return f.EntryPoint, f.EntryPoint, nil
 	default:
