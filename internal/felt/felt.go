@@ -106,6 +106,13 @@ type Felt struct {
 	ExtraFieldOrder []string  `yaml:"-" json:"-"`
 	Body            string    `yaml:"-" json:"body,omitempty"`
 	ModifiedAt      time.Time `yaml:"-" json:"modified_at,omitempty"` // populated from file stat
+	// Path is the absolute, symlink-resolved on-disk location of the fiber's
+	// markdown file — the canonical "where the bytes are". Populated at the
+	// read chokepoint from the discovered/known file path, never reconstructed
+	// from the id. Surfaced in JSON so federation/dispatch consumers carry the
+	// path instead of reverse-deriving it from the slug across filesystem
+	// layouts. Not part of frontmatter (yaml:"-").
+	Path string `yaml:"-" json:"path,omitempty"`
 	// EntryPoint is true when the fiber lives as a bare `.felt/<slug>.md`
 	// at the .felt/ root — the project's entry-point / root fiber.
 	// Distinguishes the root from top-level folder fibers; both have

@@ -260,11 +260,28 @@ func (s *Storage) readWithMode(id string, mode ParseMode) (*Felt, error) {
 // boundaries — e.g. an entry-point bare-form fiber inside a symlinked
 // sub-store has no recoverable shape from the prefixed id alone).
 func (s *Storage) readPathWithMode(path, id string, mode ParseMode) (*Felt, error) {
+	// Canonicalize the on-disk path once so every surface (walk-time list and
+	// direct single-read) carries the same absolute, symlink-resolved location
+	// — the real "where the bytes are". Walk-time paths are already resolved,
+	// so EvalSymlinks is a no-op there; the single-read path is computed via
+	// s.Path(id) against the (possibly symlinked) store root, so resolving here
+	// keeps it from leaking a symlink-traversing path. Reads still use the
+	// original `path` (resolved is only what we carry on f.Path); fall back to
+	// the original if resolution fails so a transient stat error can't drop the
+	// path entirely.
+	carriedPath := path
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		carriedPath = resolved
+	}
+
 	if mode == ParseMetadataOnly {
 		f, err := readMetadataFile(path, id)
 		if err != nil {
 			return nil, fmt.Errorf("reading file %s: %w", path, err)
 		}
+		// Carry the on-disk path so consumers read it instead of
+		// reconstructing it from the id.
+		f.Path = carriedPath
 		return f, nil
 	}
 
@@ -272,7 +289,14 @@ func (s *Storage) readPathWithMode(path, id string, mode ParseMode) (*Felt, erro
 	if err != nil {
 		return nil, fmt.Errorf("reading file %s: %w", path, err)
 	}
-	return ParseWithMode(id, data, mode)
+	f, err := ParseWithMode(id, data, mode)
+	if err != nil {
+		return nil, err
+	}
+	// Carry the on-disk path so consumers read it instead of
+	// reconstructing it from the id.
+	f.Path = carriedPath
+	return f, nil
 }
 
 // Delete removes a felt from disk.
