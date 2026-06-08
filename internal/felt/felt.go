@@ -423,6 +423,16 @@ var knownFrontmatterKeys = map[string]struct{}{
 	// the raw YAML node, not on the parsed Felt.
 }
 
+// IsNativeFrontmatterKey reports whether a top-level frontmatter key is parsed
+// into a struct field (and thus owned by a dedicated edit flag). Callers that
+// write opaque ExtraFields (e.g. `felt edit --set/--unset`) use this to refuse
+// native keys, which have their own flags and would otherwise be written twice
+// and desynced.
+func IsNativeFrontmatterKey(key string) bool {
+	_, native := knownFrontmatterKeys[strings.TrimSpace(key)]
+	return native
+}
+
 func parseFrontmatter(id string, frontmatter []byte) (*Felt, error) {
 	type feltFrontmatter struct {
 		UID         string     `yaml:"id,omitempty"`
