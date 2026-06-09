@@ -1,6 +1,6 @@
 # Constitution
 
-Drafting a constitution — a fiber spec describing a desired state for autonomous iteration. This is the ideating process (see SKILL.md and `ideating.md`) applied to a specific artifact type: a living document that an iteration runner re-reads with fresh context until the work is done. Felt is agnostic about the runner — popular options include sibling skills (`ralph`, and others); the constitution itself is just a tagged fiber.
+Drafting a constitution — a fiber spec describing a desired state for autonomous iteration. This is the ideating process (see SKILL.md and `ideating.md`) applied to a specific artifact type: a living document that an iteration runner re-reads with fresh context until the work is done. Felt is agnostic about the runner — external dispatchers (e.g. Shuttle) watch fibers and spawn workers against them; the constitution itself is just a tagged fiber.
 
 ---
 
@@ -65,8 +65,7 @@ Repeat until it feels solid. It does not have to be complete; open questions bel
 
 When approved, hand the fiber to whichever iteration runner is appropriate — felt is agnostic. Common options:
 
-- **ralph** (`ralph` skill) — a manual loop runner that respawns iterations against the constitution until the fiber's status flips off `open`/`active`.
-- **External dispatchers** — tools that watch fibers for dispatch-eligible blocks and spawn single-shot workers; their configuration is owned outside felt.
+- **External dispatchers** (e.g. Shuttle) — tools that watch fibers for dispatch-eligible blocks and spawn single-shot workers; their configuration is owned outside felt. (The old `ralph` manual loop runner is retired; in-session subagents/workflows cover within-session iteration.)
 
 The constitution fiber stays editable while iteration runs. Successive iterations re-read it each cycle, so refinements between iterations are normal.
 

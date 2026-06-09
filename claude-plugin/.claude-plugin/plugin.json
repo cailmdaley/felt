@@ -1,7 +1,7 @@
 {
   "name": "felt",
-  "version": "1.0.10",
-  "description": "felt — fiber-based thinking substrate for Claude Code. Sessions start with active fibers; the fiber library stays visible throughout.",
+  "version": "1.0.11",
+  "description": "felt \u2014 fiber-based thinking substrate for Claude Code. Sessions start with active fibers; the fiber library stays visible throughout.",
   "author": {
     "name": "Cail Daley"
   }

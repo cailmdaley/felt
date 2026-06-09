@@ -1,7 +1,7 @@
 {
   "name": "felt",
   "version": "1.0.10",
-  "description": "felt — fiber-based thinking substrate. Sessions start with active fibers; the fiber library stays visible throughout. Bundles the felt and ralph skills plus SessionStart and PreToolUse hooks.",
+  "description": "felt \u2014 fiber-based thinking substrate. Sessions start with active fibers; the fiber library stays visible throughout. Bundles the felt skill plus SessionStart and PreToolUse hooks.",
   "author": {
     "name": "Cail Daley"
   },
