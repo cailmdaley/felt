@@ -73,7 +73,11 @@ The constitution fiber stays editable while iteration runs. Successive iteration
 
 ## Constitutional sections
 
-A constitution needs enough structure that an iteration landing cold can orient itself, and enough freedom that it can adapt. Common sections — use what fits, skip what does not, add what is missing:
+A constitution needs enough structure that an iteration landing cold can orient itself, and enough freedom that it can adapt.
+
+**The lede comes first, and it has no heading.** The body's opening paragraph orients both readers — the human skimming a card and the worker landing cold: what this is, why it matters now, where it sits in the web of fibers and code. Write it to stand alone (felt surfaces it in `-d summary`), and weave `[[wikilinks]]` into it so situating is one click deep. The test: someone who knows nothing reads the lede, then Desired State, and never wonders "what *is* this thing?" If a term in Desired State needs defining, define it in the lede — or link to where it already lives.
+
+Common sections after the lede — use what fits, skip what does not, add what is missing:
 
 ```markdown
 ## Desired State
@@ -81,15 +85,18 @@ What the system looks like when it is done. Invariants, quality bar,
 done-conditions. Fence the scope — what to aim for AND what to leave alone.
 
 ## Context
-File paths, existing patterns, architectural constraints. Things iterations
-need to *find* but not *achieve*.
+Pointers, not retellings: file paths, `[[wikilinks]]` to sibling findings
+and doc fibers, architectural constraints. Things iterations need to
+*find* but not *achieve*. If another fiber or doc already says it, link
+it — don't repeat it.
 
 ## Skills
-Which skills to activate before working.
+Which skills to activate before working (beyond what the dispatcher loads).
 
 ## Evidence
 How to check progress — commands, test suites, grep patterns. Pointers to
-ground truth that iterations measure themselves against.
+ground truth that iterations (and their verifier subagents) measure the
+work against.
 
 ## Open Questions
 Uncertainties the user should weigh in on. Iterations add to this; the user
@@ -101,6 +108,10 @@ resolves between loops.
 ## Principles
 
 **Pointers, not snapshots.** `check "grep -r 'old_pattern'"` not "50 files remain." Snapshots go stale; pointers stay valid across iterations. This is the constitutional principle: write what remains true until the work is done.
+
+**Small body, rich network.** A constitution that repeats what a linked fiber already says will drift from it. Push depth outward — findings into sub-fibers, domain background into doc fibers, prior art into links woven into the prose where they do work. The constitution is the hub of a network of understanding, not an archive; both readers follow links on demand.
+
+**The runner's mechanics live in the runner's skill.** Verification cadence, subagent fan-out, exit discipline, handoff surfaces — workers load these from their dispatch skill (e.g. shuttle) every session. Writing them into a constitution duplicates the skill and dates the fiber as models change. The constitution carries only what is specific to *this* work.
 
 **Reshape, don't accrete.** When the desired state evolves — testing surfaces a gap, a meeting changes the priority, a sibling decision lands — rewrite the affected sections so the body still reads as today's desired state. Don't tack on a "Round 2" section; don't add an "Amendments" appendix; don't keep the old framing alongside the new one as a sediment. A green-field constitution will change a lot as it matures, and a mature one will keep changing as reality does. The chronology lives in `felt history`; the kanban-visible summary lives in the outcome; the body lives in *now*.
 
@@ -125,7 +136,7 @@ Some constitutions do not build code — they shape artifacts like documentation
 
 - **Checklists.** "1. Add X, 2. Add Y" — iterations race through without judgment.
 - **Vague done.** "Make it better" — when does iteration stop? What would a reader see?
-- **Over-specification.** Prescribing *how* instead of *what*. Trust the agent's taste.
+- **Over-specification.** Prescribing *how* instead of *what*. Trust the agent's taste — instructions written for older, weaker models tend to be too prescriptive for current ones, and stale prescription degrades output that defaults would have gotten right. When in doubt, delete the instruction and see.
 - **Snapshot language.** "Currently 50 files" — will be wrong after one iteration.
 - **Immutable seed.** Not our shape. The constitution is meant to be edited between iterations; do not treat it as frozen.
 - **Numerical convergence.** "Iteration stops when similarity ≥ 0.95" — wrong shape for science. Stop when the Evidence section says the desired state has been reached.
