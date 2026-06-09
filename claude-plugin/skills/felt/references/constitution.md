@@ -59,7 +59,7 @@ Stances that help most during constitution drafting:
 
 Show the draft, get feedback, revise. Use structured choices when ambiguity needs user judgment. Apply the qualitative ambiguity self-check from `ideating.md` — goal, constraints, success — before launching.
 
-Repeat until it feels solid. It does not have to be complete; open questions belong in the Open Questions section.
+Repeat until it feels solid. It does not have to be complete; live uncertainties can hold their own earned section ("Open questions") until resolved — then it gets deleted, not left as a victory log.
 
 ### 4. Launch
 
@@ -73,35 +73,13 @@ The constitution fiber stays editable while iteration runs. Successive iteration
 
 ## Constitutional sections
 
-A constitution needs enough structure that an iteration landing cold can orient itself, and enough freedom that it can adapt.
+Only two things in a constitution are universal — orientation and contract. Prescribing more is over-specification of *documents*, the same disease as over-specification of behavior: a fixed "Context" heading tells authors "you must have background prose," so they write some, and a section named for nothing in particular fills like a junk drawer.
 
 **The lede comes first, and it has no heading.** The body's opening paragraph orients both readers — the human skimming a card and the worker landing cold: what this is, why it matters now, where it sits in the web of fibers and code. Write it to stand alone (felt surfaces it in `-d summary`), and weave `[[wikilinks]]` into it so situating is one click deep. The test: someone who knows nothing reads the lede, then Desired State, and never wonders "what *is* this thing?" If a term in Desired State needs defining, define it in the lede — or link to where it already lives.
 
-Common sections after the lede — use what fits, skip what does not, add what is missing:
+**`## Desired State` is the one fixed heading.** What the system looks like when it is done — invariants, quality bar, scope fence (what to aim for AND what to leave alone). Write done-conditions in *checkable* terms wherever the work allows — grep patterns, test commands, "a reviewer can follow the narrative cold" — because a desired state phrased checkably *is its own evidence*: the declarative and operational faces of one contract, and what iterations (and their verifier subagents) measure the work against. The stable name earns its fixedness: it is what a worker landing cold finds without reading the whole document, across every fiber. A separate `## Evidence` section is earned only when the verification protocol is substantial enough to need its own room (a test harness, a measurement procedure).
 
-```markdown
-## Desired State
-What the system looks like when it is done. Invariants, quality bar,
-done-conditions. Fence the scope — what to aim for AND what to leave alone.
-
-## Context
-Pointers, not retellings: file paths, `[[wikilinks]]` to sibling findings
-and doc fibers, architectural constraints. Things iterations need to
-*find* but not *achieve*. If another fiber or doc already says it, link
-it — don't repeat it.
-
-## Skills
-Which skills to activate before working (beyond what the dispatcher loads).
-
-## Evidence
-How to check progress — commands, test suites, grep patterns. Pointers to
-ground truth that iterations (and their verifier subagents) measure the
-work against.
-
-## Open Questions
-Uncertainties the user should weigh in on. Iterations add to this; the user
-resolves between loops.
-```
+**Everything after that is earned, and named for what it contains.** "Why directives over modes", "Touch points", "Open questions", "Considered alternatives" — sections crystallize when content does, never from a template. A heading that means something is skimmable by the human, findable by the worker, and linkable — one more node in the network. If a section's honest name would be "Context" or "Notes", its contents belong somewhere else: background that matters gets linked where it is used, wayfinding sits beside the work it serves, chronology goes to `felt history`.
 
 ---
 
@@ -139,8 +117,8 @@ Some constitutions do not build code — they shape artifacts like documentation
 - **Over-specification.** Prescribing *how* instead of *what*. Trust the agent's taste — instructions written for older, weaker models tend to be too prescriptive for current ones, and stale prescription degrades output that defaults would have gotten right. When in doubt, delete the instruction and see.
 - **Snapshot language.** "Currently 50 files" — will be wrong after one iteration.
 - **Immutable seed.** Not our shape. The constitution is meant to be edited between iterations; do not treat it as frozen.
-- **Numerical convergence.** "Iteration stops when similarity ≥ 0.95" — wrong shape for science. Stop when the Evidence section says the desired state has been reached.
-- **Decision logs in the body.** "Resolved choices" / "Decisions made" / "Process notes" sections turn the constitution into a process journal. When a question gets answered (in conversation, via `AskUserQuestion`, in a review), fold the answer into the narrative where it is contextually relevant — into Invariants, Desired State, Context — and let `felt history` carry the chronology. The constitution describes *what is*, not *how we got here*; an "Open Questions" section that has been fully resolved should be deleted, not left as a victory log.
+- **Numerical convergence.** "Iteration stops when similarity ≥ 0.95" — wrong shape for science. Stop when the desired state's checkable conditions say it has been reached.
+- **Decision logs in the body.** "Resolved choices" / "Decisions made" / "Process notes" sections turn the constitution into a process journal. When a question gets answered (in conversation, via `AskUserQuestion`, in a review), fold the answer into the narrative where it is contextually relevant — into the lede, Desired State, or the earned section where it belongs — and let `felt history` carry the chronology. The constitution describes *what is*, not *how we got here*; an "Open Questions" section that has been fully resolved should be deleted, not left as a victory log.
 - **Amendment scaffolding.** "Round 2", "v2 deltas", "Updates 2026-05-04 →", "Second round amendments". The same failure as a decision log, played out across edits: the body becomes a sediment of layered framings instead of the current desired state. When the desired state shifts, *reshape* the affected sections — rewrite headings, update prose, drop what no longer applies — so the document still reads as one coherent description of now. The story of how it got here is what `felt history append` and the outcome blurb are for.
 
 ---
