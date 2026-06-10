@@ -117,6 +117,8 @@ Fibers may carry project-owned top-level YAML fields beyond what felt parses nat
 
 Fibers can carry arbitrary companion files in their directory alongside `<slug>.md` — plots, recordings, HTML artifacts. Vellum-reader (the rendering consumer) treats one filename specially: **if `report.html` exists in a fiber directory, vellum auto-prepends it to the rendered narrative view above the markdown body.** The convention lets the markdown body narrow to spec (Desired State, Context) and the rich human-facing surface live in HTML where the visual treatment can be designed per-fiber. felt itself stays format-agnostic; it just sees a directory with files. See the shuttle skill for worker-side conventions about when and how to maintain a `report.html`.
 
+More generally, a body can inline *any* artifact at any position with the `:::{embed} <path>` directive (path relative to the fiber directory or absolute; optional `:height:` / `:title:` options). Vellum picks the renderer by extension — PDF in a fixed-height scrollable viewer, HTML iframe, images, audio. The `report.html` auto-prepend is the same mechanism, auto-injected. Syntax details live in the shuttle skill.
+
 ---
 
 ## Core Rules
