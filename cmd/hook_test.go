@@ -610,3 +610,146 @@ func runPreToolWithInput(t *testing.T, input preToolInput) string {
 	<-done
 	return buf.String()
 }
+
+// runPostToolWithInput invokes runPostToolHook directly with a constructed
+// PostToolUse payload.
+func runPostToolWithInput(t *testing.T, input postToolInput) {
+	t.Helper()
+	payload, err := json.Marshal(input)
+	if err != nil {
+		t.Fatalf("marshal input: %v", err)
+	}
+	stdinR, stdinW, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("stdin pipe: %v", err)
+	}
+	if _, err := stdinW.Write(payload); err != nil {
+		t.Fatalf("write stdin: %v", err)
+	}
+	stdinW.Close()
+	if err := runPostToolHook(stdinR); err != nil {
+		t.Fatalf("runPostToolHook: %v", err)
+	}
+}
+
+func postEditInput(tool, filePath string) postToolInput {
+	in := postToolInput{ToolName: tool}
+	in.ToolInput.FilePath = filePath
+	return in
+}
+
+func TestPostToolHookStampsDirectFiberEdit(t *testing.T) {
+	dir := t.TempDir()
+	storage := felt.NewStorage(dir)
+	if err := storage.Init(); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	created := mustParseTime(t, "2026-04-10T09:00:00Z")
+	if err := storage.Write(&felt.Felt{ID: "alpha", Name: "Alpha", CreatedAt: created}); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	// An agent edits the fiber's markdown directly (not via `felt edit`).
+	runPostToolWithInput(t, postEditInput("Edit", storage.Path("alpha")))
+
+	f, err := storage.Read("alpha")
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if f.UpdatedAt == nil || !f.UpdatedAt.After(created) {
+		t.Fatalf("direct edit did not stamp updated-at: %v", f.UpdatedAt)
+	}
+}
+
+func TestPostToolHookStampsCompanionEdit(t *testing.T) {
+	dir := t.TempDir()
+	storage := felt.NewStorage(dir)
+	if err := storage.Init(); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	created := mustParseTime(t, "2026-04-10T09:00:00Z")
+	if err := storage.Write(&felt.Felt{ID: "beta", Name: "Beta", CreatedAt: created}); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	// Editing a companion file (report.html) inside the fiber dir is work on
+	// the fiber, so it advances recency too.
+	companion := filepath.Join(filepath.Dir(storage.Path("beta")), "report.html")
+	runPostToolWithInput(t, postEditInput("Write", companion))
+
+	f, err := storage.Read("beta")
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if f.UpdatedAt == nil || !f.UpdatedAt.After(created) {
+		t.Fatalf("companion edit did not stamp updated-at: %v", f.UpdatedAt)
+	}
+}
+
+func TestPostToolHookIgnoresNonEditAndNonFelt(t *testing.T) {
+	dir := t.TempDir()
+	storage := felt.NewStorage(dir)
+	if err := storage.Init(); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	created := mustParseTime(t, "2026-04-10T09:00:00Z")
+	if err := storage.Write(&felt.Felt{ID: "gamma", Name: "Gamma", CreatedAt: created}); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	// A non-edit tool on the fiber file: no stamp.
+	runPostToolWithInput(t, postEditInput("Read", storage.Path("gamma")))
+	// An edit on a file outside any felt store: no stamp, no error.
+	runPostToolWithInput(t, postEditInput("Edit", filepath.Join(dir, "code.go")))
+
+	f, err := storage.Read("gamma")
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if f.UpdatedAt != nil {
+		t.Fatalf("expected no stamp from non-edit/non-felt tool calls, got %v", f.UpdatedAt)
+	}
+}
+
+func TestFiberFromEditedPath(t *testing.T) {
+	dir := t.TempDir()
+	storage := felt.NewStorage(dir)
+	if err := storage.Init(); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	if err := storage.Write(&felt.Felt{ID: "root-fiber", Name: "Root"}); err != nil {
+		t.Fatalf("Write root: %v", err)
+	}
+	if err := storage.Write(&felt.Felt{ID: "a/b/nested", Name: "Nested"}); err != nil {
+		t.Fatalf("Write nested: %v", err)
+	}
+
+	cases := []struct {
+		name   string
+		path   string
+		wantID string
+		wantOK bool
+	}{
+		{"nested fiber md", storage.Path("a/b/nested"), "a/b/nested", true},
+		{"companion in nested dir", filepath.Join(filepath.Dir(storage.Path("a/b/nested")), "plot.png"), "a/b/nested", true},
+		{"non-fiber dir under .felt", filepath.Join(dir, ".felt", "a", "b", "loose.md"), "", false},
+		{"outside any store", filepath.Join(dir, "src", "main.go"), "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			gotRoot, gotID, ok := fiberFromEditedPath(tc.path)
+			if ok != tc.wantOK {
+				t.Fatalf("ok = %v, want %v (id=%q)", ok, tc.wantOK, gotID)
+			}
+			if !ok {
+				return
+			}
+			if gotID != tc.wantID {
+				t.Fatalf("id = %q, want %q", gotID, tc.wantID)
+			}
+			if gotRoot != dir {
+				t.Fatalf("root = %q, want %q", gotRoot, dir)
+			}
+		})
+	}
+}

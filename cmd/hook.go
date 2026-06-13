@@ -87,11 +87,31 @@ non-Claude sessions like Codex, this is a pass-through.`,
 	},
 }
 
+var hookPostToolCmd = &cobra.Command{
+	Use:   "posttool",
+	Short: "PostToolUse: stamp updated-at when an agent edits a fiber file directly",
+	Long: `Reads the PostToolUse payload from stdin. When the tool was an Edit/Write/
+MultiEdit on a markdown file inside a felt store, stamps the owning fiber's
+git-durable recency anchor (frontmatter updated-at).
+
+This is what makes direct Edit-tool body edits count toward recency without
+felt's own read commands ever writing files: the harness fires this hook at the
+moment of the edit, so the stamping happens in the agent layer, not in felt's
+Sync. Edits felt makes itself (felt add/edit) already stamp inline. Silent
+pass-through for non-edit tools, non-felt files, and any error.`,
+	Args:         cobra.NoArgs,
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runPostToolHook(os.Stdin)
+	},
+}
+
 func init() {
 	rootCmd.AddCommand(sessionCmd)
 	rootCmd.AddCommand(hookCmd)
 	hookCmd.AddCommand(hookSessionCmd)
 	hookCmd.AddCommand(hookPreToolCmd)
+	hookCmd.AddCommand(hookPostToolCmd)
 }
 
 // ----------------------------------------------------------------------------
@@ -464,4 +484,101 @@ func runPreToolHook(stdin *os.File, stdout *os.File) error {
 		PermissionDecisionReason: preToolDenyReason,
 	}}
 	return encodeHookJSON(stdout, envelope)
+}
+
+// ----------------------------------------------------------------------------
+// PostToolUse: recency stamping for direct edits
+// ----------------------------------------------------------------------------
+
+type postToolInput struct {
+	ToolName  string `json:"tool_name"`
+	CWD       string `json:"cwd"`
+	ToolInput struct {
+		FilePath string `json:"file_path"`
+	} `json:"tool_input"`
+}
+
+// postToolEditTools are the file-mutating tools whose edits should advance a
+// fiber's recency. The plugin's hooks.json matcher already narrows to these,
+// but we re-check so the binary is correct even under a harness (e.g. Codex)
+// that fires PostToolUse without honoring the matcher.
+var postToolEditTools = map[string]struct{}{
+	"Edit": {}, "Write": {}, "MultiEdit": {},
+}
+
+// runPostToolHook stamps the durable recency anchor (updated-at) on the fiber
+// whose file an agent just edited directly. Every path is a silent pass: a
+// PostToolUse hook must never fail the tool call, and losing one stamp is
+// cheaper than blocking. felt's own Sync still catches the edit warm in the
+// index; this only adds the cold-clone-durable frontmatter stamp.
+func runPostToolHook(stdin *os.File) error {
+	var input postToolInput
+	if err := json.NewDecoder(stdin).Decode(&input); err != nil {
+		return nil
+	}
+	if _, ok := postToolEditTools[input.ToolName]; !ok {
+		return nil
+	}
+	fp := strings.TrimSpace(input.ToolInput.FilePath)
+	if fp == "" {
+		return nil
+	}
+	if !filepath.IsAbs(fp) && input.CWD != "" {
+		fp = filepath.Join(input.CWD, fp)
+	}
+	root, id, ok := fiberFromEditedPath(fp)
+	if !ok {
+		return nil
+	}
+
+	storage := felt.NewStorage(root)
+	f, err := storage.Read(id)
+	if err != nil {
+		// Path looked fiber-shaped but isn't a real fiber (companion file in a
+		// non-fiber dir, half-written file, etc.) — leave it alone.
+		return nil
+	}
+	f.Touch(time.Now())
+	if err := storage.Write(f); err != nil {
+		return nil
+	}
+	// Record the edit with the post-stamp bytes so the hash matches on disk:
+	// felt's next Sync sees no further change and won't log a duplicate
+	// external_edit. Best-effort, like every other recordMechanical call.
+	if data, err := os.ReadFile(storage.Path(f.ID)); err == nil {
+		recordMechanical(storage, f.ID, felt.EventEdit, nil, data)
+	}
+	return nil
+}
+
+// fiberFromEditedPath maps an edited file path to the felt store root and the
+// fiber id that owns it, or ok=false when the path is not inside a fiber.
+// Accepts both the fiber's own `<slug>.md` and any companion file in a fiber
+// directory (report.html, plots) — editing either is work on the fiber. The
+// store boundary is the nearest enclosing `.felt/`; the owning fiber is
+// confirmed by the presence of its `<slug>.md`.
+func fiberFromEditedPath(absPath string) (root, id string, ok bool) {
+	marker := string(filepath.Separator) + ".felt" + string(filepath.Separator)
+	idx := strings.LastIndex(absPath, marker)
+	if idx < 0 {
+		return "", "", false
+	}
+	root = absPath[:idx]
+	rel := absPath[idx+len(marker):]
+	dir := filepath.Dir(rel)
+	if dir == "." {
+		// A bare `.felt/<slug>.md` — the project's entry-point fiber.
+		base := filepath.Base(rel)
+		if !strings.HasSuffix(base, ".md") {
+			return "", "", false
+		}
+		return root, strings.TrimSuffix(base, ".md"), true
+	}
+	// Directory-contained fiber: id is the directory path, valid only if the
+	// directory carries its `<slug>.md`.
+	slug := filepath.Base(dir)
+	if _, err := os.Stat(filepath.Join(root, ".felt", dir, slug+".md")); err != nil {
+		return "", "", false
+	}
+	return root, dir, true
 }
