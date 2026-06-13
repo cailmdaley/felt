@@ -200,7 +200,7 @@ func buildSessionContext() string {
 	if len(active) > 0 {
 		sb.WriteString("## Active Fibers\n\n")
 		for _, f := range active {
-			sb.WriteString(formatHookEntry(f, false))
+			sb.WriteString(formatHookEntry(f, recency(f), false))
 		}
 		sb.WriteString("\n")
 	} else {
@@ -223,7 +223,7 @@ func buildSessionContext() string {
 	if len(recent) > 0 {
 		sb.WriteString("## Recently Touched\n\n")
 		for _, f := range recent {
-			sb.WriteString(formatHookEntry(f, true))
+			sb.WriteString(formatHookEntry(f, recency(f), true))
 		}
 		sb.WriteString("\n")
 	}
@@ -253,12 +253,14 @@ func loadLatestEventTimes(storage *felt.Storage) map[string]time.Time {
 	return latest
 }
 
-// formatHookEntry renders one fiber for the SessionStart context. Active
-// entries get the two-line form (icon + id, then indented name + tags).
-// Recently-touched entries add a third line with a truncated outcome.
-func formatHookEntry(f *felt.Felt, withOutcome bool) string {
+// formatHookEntry renders one fiber for the SessionStart context. The head line
+// is icon + recency timestamp + id, so the visible label carries the same
+// last-touched time the sections are ranked by. Active entries get the two-line
+// form (head, then indented name + tags); recently-touched entries add a third
+// line with a truncated outcome.
+func formatHookEntry(f *felt.Felt, recency time.Time, withOutcome bool) string {
 	icon := felt.StatusIcon(f.Status)
-	line1 := fmt.Sprintf("%s %s\n", icon, f.ID)
+	line1 := fmt.Sprintf("%s %s\n", icon, hookEntryHead(f, recency))
 
 	tagStr := ""
 	if len(f.Tags) > 0 {
@@ -279,6 +281,18 @@ func formatHookEntry(f *felt.Felt, withOutcome bool) string {
 	}
 	line3 := fmt.Sprintf("    → %s\n", outcome)
 	return line1 + line2 + line3
+}
+
+// hookEntryHead renders the "<timestamp> — <id>" label for a session entry,
+// using the same local "2006-01-02 15:04" rendering as `felt history` and the
+// `felt show` Recent line so the timestamp reads consistently across surfaces.
+// Falls back to a bare id when the fiber has no recency anchor at all (both
+// updated-at and created-at unset).
+func hookEntryHead(f *felt.Felt, recency time.Time) string {
+	if recency.IsZero() {
+		return f.ID
+	}
+	return recency.Local().Format("2006-01-02 15:04") + " — " + f.ID
 }
 
 func buildSessionAttention(felts []*felt.Felt, now time.Time) string {

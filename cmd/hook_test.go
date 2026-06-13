@@ -56,13 +56,17 @@ func TestHookSessionEnvelope(t *testing.T) {
 	}
 
 	ctx := env.HookSpecificOutput.AdditionalContext
+	// Head line carries the recency timestamp (no events here, so recency falls
+	// back to created-at), rendered with the same local format as the hook.
+	alphaHead := active.CreatedAt.Local().Format("2006-01-02 15:04") + " — alpha"
+	betaHead := closedRecent.CreatedAt.Local().Format("2006-01-02 15:04") + " — beta"
 	for _, want := range []string{
 		"# Felt Workflow Context",
 		"Activate the `felt` skill",
 		"## Active Fibers",
-		"◐ alpha\n    Alpha task (work)",
+		"◐ " + alphaHead + "\n    Alpha task (work)",
 		"## Recently Touched",
-		"● beta\n    Beta finding (finding)",
+		"● " + betaHead + "\n    Beta finding (finding)",
 		// Outcome truncated to 100 chars + ellipsis.
 		"    → " + strings.Repeat("x", 100) + "...",
 	} {
@@ -148,6 +152,36 @@ func TestSessionRecencyOrdering(t *testing.T) {
 	assertOrder(t, recentSec, "old", "mid", "noev")
 }
 
+// TestSessionHeadShowsRecencyTimestamp: the head line carries the recency
+// timestamp (MAX(occurred_at)) rendered in local time, so the visible label
+// matches the sort key — and shows the event time, not the fiber's created-at.
+func TestSessionHeadShowsRecencyTimestamp(t *testing.T) {
+	dir := t.TempDir()
+	storage := felt.NewStorage(dir)
+	if err := storage.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	created := mustParseTime(t, "2026-04-01T00:00:00Z")
+	if err := storage.Write(&felt.Felt{
+		ID: "gamma", Name: "Gamma", Status: felt.StatusActive, CreatedAt: created,
+	}); err != nil {
+		t.Fatalf("Write(gamma): %v", err)
+	}
+	// An event a month after creation: the head must show the event time, not
+	// the created-at fallback.
+	touched := mustParseTime(t, "2026-05-15T14:30:00Z")
+	seedEvent(t, storage, "gamma", touched)
+
+	ctx := sessionContextFor(t, dir)
+	if want := "◐ " + touched.Local().Format("2006-01-02 15:04") + " — gamma"; !strings.Contains(ctx, want) {
+		t.Fatalf("head missing recency timestamp %q:\n%s", want, ctx)
+	}
+	if bad := created.Local().Format("2006-01-02 15:04") + " — gamma"; strings.Contains(ctx, bad) {
+		t.Fatalf("head used created-at instead of event recency:\n%s", ctx)
+	}
+}
+
 // TestSessionSectionCaps: each section renders at most 10 fibers even when
 // more qualify.
 func TestSessionSectionCaps(t *testing.T) {
@@ -179,10 +213,12 @@ func TestSessionSectionCaps(t *testing.T) {
 	}
 
 	ctx := sessionContextFor(t, dir)
-	if got := strings.Count(ctx, "◐ active-"); got != sessionActiveDisplayLimit {
+	// The slug now follows the recency timestamp + " — " separator on the head
+	// line, so count by that separator rather than the bare icon.
+	if got := strings.Count(ctx, " — active-"); got != sessionActiveDisplayLimit {
 		t.Fatalf("active entries shown = %d, want %d:\n%s", got, sessionActiveDisplayLimit, ctx)
 	}
-	if got := strings.Count(ctx, "● closed-"); got != sessionRecentLimit {
+	if got := strings.Count(ctx, " — closed-"); got != sessionRecentLimit {
 		t.Fatalf("recently-touched entries shown = %d, want %d:\n%s", got, sessionRecentLimit, ctx)
 	}
 }
@@ -212,7 +248,8 @@ func TestSessionCommandPrintsPlainContext(t *testing.T) {
 	if strings.Contains(text, "hookSpecificOutput") || strings.Contains(text, "additionalContext") {
 		t.Fatalf("session should not print hook JSON envelope:\n%s", text)
 	}
-	if !strings.Contains(text, "◐ alpha\n    Alpha task (work)") {
+	wantHead := "◐ " + active.CreatedAt.Local().Format("2006-01-02 15:04") + " — alpha"
+	if !strings.Contains(text, wantHead+"\n    Alpha task (work)") {
 		t.Fatalf("session context missing active fiber:\n%s", text)
 	}
 }
