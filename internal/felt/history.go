@@ -301,6 +301,36 @@ func latestMechanicalHashTx(tx *sql.Tx, fiberID string) (string, error) {
 	return hash, nil
 }
 
+// LatestEventTimes returns, per fiber, the timestamp of its most recent
+// history event (MAX(occurred_at)). This is the git-durable recency signal:
+// occurred_at is content-hash anchored, so unlike file mtime it survives the
+// clone/checkout/reorg rewrites that felt's cross-machine git sync inflicts.
+// Fibers with no events are absent from the map; callers fall back to a
+// fiber-intrinsic time (created-at) for those.
+func (i *Index) LatestEventTimes() (map[string]time.Time, error) {
+	rows, err := i.db.Query(
+		`SELECT fiber_id, MAX(occurred_at) FROM history_events GROUP BY fiber_id`,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("query latest event times: %w", err)
+	}
+	defer rows.Close()
+	out := make(map[string]time.Time)
+	for rows.Next() {
+		var fiberID, occurredStr string
+		if err := rows.Scan(&fiberID, &occurredStr); err != nil {
+			return nil, fmt.Errorf("scan latest event time: %w", err)
+		}
+		t, err := time.Parse(time.RFC3339Nano, occurredStr)
+		if err != nil {
+			return nil, fmt.Errorf("parse latest occurred_at %q: %w",
+				occurredStr, err)
+		}
+		out[fiberID] = t
+	}
+	return out, rows.Err()
+}
+
 // EventCount returns the number of events for a fiber. Cheap existence
 // check used during bootstrap.
 func (i *Index) EventCount(fiberID string) (int, error) {

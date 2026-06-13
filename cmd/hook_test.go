@@ -72,6 +72,121 @@ func TestHookSessionEnvelope(t *testing.T) {
 	}
 }
 
+// TestSessionSectionPlacement: active fibers land in Active Fibers; everything
+// else (open, closed, untracked) lands in Recently Touched. A fiber appears in
+// at most one section.
+func TestSessionSectionPlacement(t *testing.T) {
+	dir := t.TempDir()
+	storage := felt.NewStorage(dir)
+	if err := storage.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	base := mustParseTime(t, "2026-04-10T09:00:00Z")
+	fibers := []*felt.Felt{
+		{ID: "act", Name: "Active one", Status: felt.StatusActive, CreatedAt: base},
+		{ID: "opn", Name: "Open one", Status: felt.StatusOpen, CreatedAt: base.Add(time.Hour)},
+		{ID: "cls", Name: "Closed one", Status: felt.StatusClosed, CreatedAt: base.Add(2 * time.Hour)},
+		{ID: "unt", Name: "Untracked one", CreatedAt: base.Add(3 * time.Hour)},
+	}
+	for _, f := range fibers {
+		if err := storage.Write(f); err != nil {
+			t.Fatalf("Write(%s): %v", f.ID, err)
+		}
+	}
+
+	ctx := sessionContextFor(t, dir)
+	activeSec, recentSec := splitSections(ctx)
+
+	if !strings.Contains(activeSec, "act") {
+		t.Fatalf("active fiber not in Active Fibers:\n%s", activeSec)
+	}
+	for _, id := range []string{"opn", "cls", "unt"} {
+		if strings.Contains(activeSec, " "+id+"\n") {
+			t.Fatalf("non-active %s leaked into Active Fibers:\n%s", id, activeSec)
+		}
+		if !strings.Contains(recentSec, id) {
+			t.Fatalf("%s missing from Recently Touched:\n%s", id, recentSec)
+		}
+	}
+	if strings.Contains(recentSec, "act") {
+		t.Fatalf("active fiber leaked into Recently Touched:\n%s", recentSec)
+	}
+}
+
+// TestSessionRecencyOrdering: sections sort by MAX(occurred_at) DESC, and a
+// fiber with no events falls back to its created-at.
+func TestSessionRecencyOrdering(t *testing.T) {
+	dir := t.TempDir()
+	storage := felt.NewStorage(dir)
+	if err := storage.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	// Three closed fibers, created oldest→newest as old/mid/new. We'll give
+	// `old` the newest event so history overrides created-at ordering; `noev`
+	// has no event and must fall back to its created-at.
+	base := mustParseTime(t, "2026-04-01T00:00:00Z")
+	fibers := []*felt.Felt{
+		{ID: "old", Name: "Old", Status: felt.StatusClosed, CreatedAt: base},
+		{ID: "mid", Name: "Mid", Status: felt.StatusClosed, CreatedAt: base.Add(24 * time.Hour)},
+		{ID: "noev", Name: "No event", Status: felt.StatusClosed, CreatedAt: base.Add(48 * time.Hour)},
+	}
+	for _, f := range fibers {
+		if err := storage.Write(f); err != nil {
+			t.Fatalf("Write(%s): %v", f.ID, err)
+		}
+	}
+
+	// History: `mid` touched 05-01, `old` touched 06-01 (most recent of all).
+	// `noev` gets nothing; its recency is created-at = 04-03.
+	seedEvent(t, storage, "mid", mustParseTime(t, "2026-05-01T00:00:00Z"))
+	seedEvent(t, storage, "old", mustParseTime(t, "2026-06-01T00:00:00Z"))
+
+	recentSec := mustSection(t, sessionContextFor(t, dir), "## Recently Touched")
+	// Expected order: old (06-01) > mid (05-01) > noev (created 04-03).
+	assertOrder(t, recentSec, "old", "mid", "noev")
+}
+
+// TestSessionSectionCaps: each section renders at most 10 fibers even when
+// more qualify.
+func TestSessionSectionCaps(t *testing.T) {
+	dir := t.TempDir()
+	storage := felt.NewStorage(dir)
+	if err := storage.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	base := mustParseTime(t, "2026-04-01T00:00:00Z")
+	for i := 0; i < 15; i++ {
+		at := base.Add(time.Duration(i) * time.Hour)
+		if err := storage.Write(&felt.Felt{
+			ID:        fmt.Sprintf("active-%02d", i),
+			Name:      fmt.Sprintf("Active %02d", i),
+			Status:    felt.StatusActive,
+			CreatedAt: at,
+		}); err != nil {
+			t.Fatalf("Write active-%02d: %v", i, err)
+		}
+		if err := storage.Write(&felt.Felt{
+			ID:        fmt.Sprintf("closed-%02d", i),
+			Name:      fmt.Sprintf("Closed %02d", i),
+			Status:    felt.StatusClosed,
+			CreatedAt: at,
+		}); err != nil {
+			t.Fatalf("Write closed-%02d: %v", i, err)
+		}
+	}
+
+	ctx := sessionContextFor(t, dir)
+	if got := strings.Count(ctx, "◐ active-"); got != sessionActiveDisplayLimit {
+		t.Fatalf("active entries shown = %d, want %d:\n%s", got, sessionActiveDisplayLimit, ctx)
+	}
+	if got := strings.Count(ctx, "● closed-"); got != sessionRecentLimit {
+		t.Fatalf("recently-touched entries shown = %d, want %d:\n%s", got, sessionRecentLimit, ctx)
+	}
+}
+
 func TestSessionCommandPrintsPlainContext(t *testing.T) {
 	dir := t.TempDir()
 	storage := felt.NewStorage(dir)
@@ -377,6 +492,75 @@ func TestHookPreToolFlagPersists(t *testing.T) {
 }
 
 // --- helpers ---
+
+// sessionContextFor runs `felt session` and returns the plain context text.
+func sessionContextFor(t *testing.T, dir string) string {
+	t.Helper()
+	return runHookCommand(t, dir, "session")
+}
+
+// seedEvent appends one synthetic edit event to a fiber at a chosen time,
+// giving the test direct control over the history recency signal.
+func seedEvent(t *testing.T, storage *felt.Storage, fiberID string, at time.Time) {
+	t.Helper()
+	idx, err := storage.OpenIndexNoSync()
+	if err != nil {
+		t.Fatalf("OpenIndexNoSync: %v", err)
+	}
+	defer idx.Close()
+	if err := idx.AppendEvent(felt.Event{
+		FiberID:    fiberID,
+		OccurredAt: at,
+		Type:       felt.EventEdit,
+		Actor:      "test",
+	}); err != nil {
+		t.Fatalf("AppendEvent(%s): %v", fiberID, err)
+	}
+}
+
+// splitSections returns the Active Fibers and Recently Touched slices of a
+// session context, each bounded by the next "## " header.
+func splitSections(ctx string) (active, recent string) {
+	return sectionBody(ctx, "## Active Fibers"), sectionBody(ctx, "## Recently Touched")
+}
+
+func mustSection(t *testing.T, ctx, header string) string {
+	t.Helper()
+	body := sectionBody(ctx, header)
+	if body == "" {
+		t.Fatalf("section %q missing:\n%s", header, ctx)
+	}
+	return body
+}
+
+func sectionBody(ctx, header string) string {
+	start := strings.Index(ctx, header)
+	if start < 0 {
+		return ""
+	}
+	rest := ctx[start+len(header):]
+	if next := strings.Index(rest, "\n## "); next >= 0 {
+		return rest[:next]
+	}
+	return rest
+}
+
+// assertOrder checks that the given ids appear in the section in the listed
+// order (by first occurrence).
+func assertOrder(t *testing.T, section string, ids ...string) {
+	t.Helper()
+	prev := -1
+	for _, id := range ids {
+		at := strings.Index(section, id)
+		if at < 0 {
+			t.Fatalf("id %q absent from section:\n%s", id, section)
+		}
+		if at < prev {
+			t.Fatalf("id %q out of order (want order %v):\n%s", id, ids, section)
+		}
+		prev = at
+	}
+}
 
 func runHookCommand(t *testing.T, dir string, args ...string) string {
 	t.Helper()

@@ -105,7 +105,15 @@ const sessionNoRepoNote = "*No felt repository in current directory. Start one w
 const sessionNoActiveNote = "*No active fibers.*"
 
 const (
-	sessionActiveLimit   = 3
+	// sessionActiveLimit is the Attention threshold for "active set is broad"
+	// — it gates the advisory note, not the display. Distinct from the display
+	// cap below.
+	sessionActiveLimit = 3
+	// sessionActiveDisplayLimit caps how many active fibers the Active Fibers
+	// section renders.
+	sessionActiveDisplayLimit = 10
+	// sessionRecentLimit caps the Recently Touched section.
+	sessionRecentLimit   = 10
 	sessionOpenLimit     = 20
 	sessionTopLevelLimit = 20
 	sessionStaleAge      = 30 * 24 * time.Hour
@@ -128,24 +136,43 @@ func buildSessionContext() string {
 	}
 
 	storage := felt.NewStorage(root)
-	felts, err := storage.ListMetadataWithModTime()
+	felts, err := storage.ListMetadata()
 	if err != nil {
 		// Storage error: surface it in-band rather than crashing the hook.
 		fmt.Fprintf(&sb, "*felt listing failed: %s*\n", err)
 		return sb.String()
 	}
 
-	// Active fibers: sorted by creation time (oldest first; matches the
-	// previous hook's stable order for the active set).
+	// Recency signal comes from the content-hash-anchored history log
+	// (MAX(occurred_at) per fiber), not file mtime — felt is git-synced
+	// across machines, so any clone/checkout/reorg rewrites every file and
+	// flattens all mtimes to one instant. The history log survives that.
+	// Reading is a best-effort read-only cache lookup: a missing or busy
+	// index just leaves the map empty, and recency falls back to created-at.
+	latest := loadLatestEventTimes(storage)
+	recency := func(f *felt.Felt) time.Time {
+		if t, ok := latest[f.ID]; ok {
+			return t
+		}
+		return f.CreatedAt
+	}
+	byRecencyDesc := func(fs []*felt.Felt) {
+		sort.SliceStable(fs, func(i, j int) bool {
+			return recency(fs[i]).After(recency(fs[j]))
+		})
+	}
+
+	// Active fibers: status == active, newest history first, capped.
 	var active []*felt.Felt
 	for _, f := range felts {
 		if f.IsActive() {
 			active = append(active, f)
 		}
 	}
-	sort.Slice(active, func(i, j int) bool {
-		return active[i].CreatedAt.Before(active[j].CreatedAt)
-	})
+	byRecencyDesc(active)
+	if len(active) > sessionActiveDisplayLimit {
+		active = active[:sessionActiveDisplayLimit]
+	}
 
 	if len(active) > 0 {
 		sb.WriteString("## Active Fibers\n\n")
@@ -158,22 +185,17 @@ func buildSessionContext() string {
 		sb.WriteString("\n\n")
 	}
 
-	// Recently touched: 5 most recent by mod time, excluding active.
-	activeIDs := make(map[string]bool, len(active))
-	for _, f := range active {
-		activeIDs[f.ID] = true
-	}
+	// Recently touched: everything not active (open/closed/untracked), newest
+	// history first, capped. A fiber is in at most one section.
 	var recent []*felt.Felt
 	for _, f := range felts {
-		if !activeIDs[f.ID] {
+		if !f.IsActive() {
 			recent = append(recent, f)
 		}
 	}
-	sort.Slice(recent, func(i, j int) bool {
-		return recent[i].ModifiedAt.After(recent[j].ModifiedAt)
-	})
-	if len(recent) > 5 {
-		recent = recent[:5]
+	byRecencyDesc(recent)
+	if len(recent) > sessionRecentLimit {
+		recent = recent[:sessionRecentLimit]
 	}
 	if len(recent) > 0 {
 		sb.WriteString("## Recently Touched\n\n")
@@ -189,6 +211,23 @@ func buildSessionContext() string {
 	}
 
 	return sb.String()
+}
+
+// loadLatestEventTimes returns MAX(occurred_at) per fiber from the history
+// log, or an empty map when the index is missing/busy. The SessionStart hook
+// is a read path: a stale or absent cache must degrade to created-at ordering,
+// never error or force a full index sync.
+func loadLatestEventTimes(storage *felt.Storage) map[string]time.Time {
+	idx, err := storage.OpenIndexReadOnly()
+	if err != nil {
+		return map[string]time.Time{}
+	}
+	defer idx.Close()
+	latest, err := idx.LatestEventTimes()
+	if err != nil {
+		return map[string]time.Time{}
+	}
+	return latest
 }
 
 // formatHookEntry renders one fiber for the SessionStart context. Active

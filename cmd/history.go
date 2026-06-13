@@ -27,6 +27,8 @@ var (
 	histAppendEditTo   string
 	histAppendKind     string
 	histAppendFields   []string
+
+	histBackfillDryRun bool
 )
 
 var historyCmd = &cobra.Command{
@@ -255,9 +257,97 @@ Examples:
 	},
 }
 
+var historyBackfillCmd = &cobra.Command{
+	Use:   "backfill",
+	Short: "Anchor event-less fibers in the history log at their created-at",
+	Long: `Gives every fiber with no history events a synthetic 'add' event.
+
+felt's recency signal (SessionStart ordering, kanban) reads the history log,
+not file mtime — mtime is destroyed by the clone/checkout/reorg rewrites that
+cross-machine git sync inflicts. Fibers created before the history log existed
+have no events and would sort by their created-at fallback only; this gives
+them a durable anchor.
+
+The synthetic event is stamped at the fiber's created-at — NOT its file mtime,
+which post-reorg collapses to a single instant and would re-pollute the very
+signal this exists to protect. Fibers that already have at least one event are
+left untouched, so running this twice is a no-op.`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		root, err := resolveProjectRoot()
+		if err != nil {
+			return fmt.Errorf("not in a felt repository")
+		}
+		storage := felt.NewStorage(root)
+		felts, err := storage.ListMetadata()
+		if err != nil {
+			return err
+		}
+
+		// OpenIndexNoSync: skip Sync so its mtime-stamped bootstrap can't fire
+		// for these fibers before we anchor them at created-at ourselves.
+		idx, err := storage.OpenIndexNoSync()
+		if err != nil {
+			return err
+		}
+		defer idx.Close()
+
+		var anchored []string
+		for _, f := range felts {
+			count, err := idx.EventCount(f.ID)
+			if err != nil {
+				return err
+			}
+			if count > 0 {
+				continue
+			}
+			if histBackfillDryRun {
+				anchored = append(anchored, f.ID)
+				continue
+			}
+			hash, err := felt.HashFile(storage.Path(f.ID))
+			if err != nil {
+				return err
+			}
+			if err := idx.AppendEvent(felt.Event{
+				FiberID:     f.ID,
+				OccurredAt:  f.CreatedAt,
+				Type:        felt.EventAdd,
+				Actor:       "backfill",
+				ContentHash: hash,
+				Payload: map[string]interface{}{
+					"bootstrap": true,
+					"backfill":  true,
+				},
+			}); err != nil {
+				return err
+			}
+			anchored = append(anchored, f.ID)
+		}
+
+		if len(anchored) == 0 {
+			fmt.Println("No history backfill needed")
+			return nil
+		}
+		if histBackfillDryRun {
+			for _, id := range anchored {
+				fmt.Printf("Would anchor %s\n", id)
+			}
+			fmt.Printf("Dry run: %d fibers would be anchored\n", len(anchored))
+			return nil
+		}
+		for _, id := range anchored {
+			fmt.Printf("Anchored %s\n", id)
+		}
+		fmt.Printf("Anchored %d fibers in the history log\n", len(anchored))
+		return nil
+	},
+}
+
 func init() {
 	rootCmd.AddCommand(historyCmd)
 	historyCmd.AddCommand(historyAppendCmd)
+	historyCmd.AddCommand(historyBackfillCmd)
 
 	historyCmd.Flags().BoolVar(&histShowEditorial, "editorial", true,
 		"Include editorial (prose) events (default true)")
@@ -287,6 +377,9 @@ func init() {
 		"Repeatable: add a key=value field to the event payload "+
 			"(e.g. --field resume_mode=previous). Reserved keys: text, "+
 			"summary, edit_window_start, edit_window_end.")
+
+	historyBackfillCmd.Flags().BoolVar(&histBackfillDryRun, "dry-run", false,
+		"Print which fibers would be anchored without writing events")
 }
 
 func buildHistoryFilter(cmd *cobra.Command, fiberID string) (felt.EventFilter, error) {

@@ -134,6 +134,147 @@ func TestShowDefaultDoesNotSyncFiberIndex(t *testing.T) {
 	}
 }
 
+func TestHistoryBackfillAnchorsEventlessFibers(t *testing.T) {
+	dir := t.TempDir()
+	storage := felt.NewStorage(dir)
+	if err := storage.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	createdAt := mustParseTime(t, "2026-02-01T08:00:00Z")
+	// `fresh` has no events and must gain one. `prior` already has an event and
+	// must be left untouched.
+	if err := storage.Write(&felt.Felt{
+		ID:        "fresh",
+		Name:      "Fresh fiber",
+		CreatedAt: createdAt,
+	}); err != nil {
+		t.Fatalf("Write(fresh): %v", err)
+	}
+	if err := storage.Write(&felt.Felt{
+		ID:        "prior",
+		Name:      "Prior fiber",
+		CreatedAt: createdAt,
+	}); err != nil {
+		t.Fatalf("Write(prior): %v", err)
+	}
+
+	priorEventAt := mustParseTime(t, "2026-05-05T12:00:00Z")
+	func() {
+		idx, err := storage.OpenIndexNoSync()
+		if err != nil {
+			t.Fatalf("OpenIndexNoSync: %v", err)
+		}
+		defer idx.Close()
+		if err := idx.AppendEvent(felt.Event{
+			FiberID:    "prior",
+			OccurredAt: priorEventAt,
+			Type:       felt.EventEditorial,
+			Actor:      "test",
+			Payload:    map[string]interface{}{felt.EditorialTextKey: "existing note"},
+		}); err != nil {
+			t.Fatalf("seed prior event: %v", err)
+		}
+	}()
+
+	reset := saveHistoryGlobals()
+	defer reset()
+
+	out, err := runCommand(t, dir, "history", "backfill")
+	if err != nil {
+		t.Fatalf("history backfill: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "Anchored fresh") || !strings.Contains(out, "Anchored 1 fibers") {
+		t.Fatalf("backfill output unexpected:\n%s", out)
+	}
+	if strings.Contains(out, "Anchored prior") {
+		t.Fatalf("backfill touched a fiber that already had events:\n%s", out)
+	}
+
+	freshEvents := readEvents(t, storage, "fresh")
+	if len(freshEvents) != 1 {
+		t.Fatalf("fresh should have exactly 1 event, got %d", len(freshEvents))
+	}
+	ev := freshEvents[0]
+	if ev.Type != felt.EventAdd {
+		t.Fatalf("backfill event type = %q, want %q", ev.Type, felt.EventAdd)
+	}
+	if ev.Actor != "backfill" {
+		t.Fatalf("backfill event actor = %q, want backfill", ev.Actor)
+	}
+	if !ev.OccurredAt.Equal(createdAt) {
+		t.Fatalf("backfill event at %v, want created-at %v", ev.OccurredAt, createdAt)
+	}
+	if ev.Payload["backfill"] != true || ev.Payload["bootstrap"] != true {
+		t.Fatalf("backfill payload missing markers: %v", ev.Payload)
+	}
+	if ev.ContentHash == "" {
+		t.Fatalf("backfill event missing content hash")
+	}
+
+	// `prior` must still have exactly its one pre-existing event.
+	priorEvents := readEvents(t, storage, "prior")
+	if len(priorEvents) != 1 || priorEvents[0].Type != felt.EventEditorial {
+		t.Fatalf("prior fiber altered by backfill: %+v", priorEvents)
+	}
+
+	// Idempotent: a second run anchors nothing.
+	out, err = runCommand(t, dir, "history", "backfill")
+	if err != nil {
+		t.Fatalf("second backfill: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "No history backfill needed") {
+		t.Fatalf("second backfill should be a no-op:\n%s", out)
+	}
+	if got := len(readEvents(t, storage, "fresh")); got != 1 {
+		t.Fatalf("fresh gained events on second run: %d", got)
+	}
+}
+
+func TestHistoryBackfillDryRunWritesNothing(t *testing.T) {
+	dir := t.TempDir()
+	storage := felt.NewStorage(dir)
+	if err := storage.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+	if err := storage.Write(&felt.Felt{
+		ID:        "fresh",
+		Name:      "Fresh fiber",
+		CreatedAt: mustParseTime(t, "2026-02-01T08:00:00Z"),
+	}); err != nil {
+		t.Fatalf("Write(fresh): %v", err)
+	}
+
+	reset := saveHistoryGlobals()
+	defer reset()
+
+	out, err := runCommand(t, dir, "history", "backfill", "--dry-run")
+	if err != nil {
+		t.Fatalf("history backfill --dry-run: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "Would anchor fresh") || !strings.Contains(out, "Dry run: 1 fibers") {
+		t.Fatalf("dry-run output unexpected:\n%s", out)
+	}
+	if got := len(readEvents(t, storage, "fresh")); got != 0 {
+		t.Fatalf("dry-run wrote %d events, want 0", got)
+	}
+}
+
+// readEvents returns all history events for a fiber, oldest first.
+func readEvents(t *testing.T, storage *felt.Storage, fiberID string) []felt.Event {
+	t.Helper()
+	idx, err := storage.OpenIndexReadOnly()
+	if err != nil {
+		t.Fatalf("OpenIndexReadOnly: %v", err)
+	}
+	defer idx.Close()
+	events, err := idx.QueryEvents(felt.EventFilter{FiberID: fiberID})
+	if err != nil {
+		t.Fatalf("QueryEvents(%s): %v", fiberID, err)
+	}
+	return events
+}
+
 func writeMalformedFiber(t *testing.T, dir string) {
 	t.Helper()
 	badDir := filepath.Join(dir, ".felt", "broken", "broken")
@@ -170,6 +311,7 @@ func saveHistoryGlobals() func() {
 	prevAppendEditTo := histAppendEditTo
 	prevAppendKind := histAppendKind
 	prevAppendFields := histAppendFields
+	prevBackfillDryRun := histBackfillDryRun
 	prevJSON := jsonOutput
 
 	histShowEditorial = true
@@ -184,6 +326,7 @@ func saveHistoryGlobals() func() {
 	histAppendEditTo = ""
 	histAppendKind = ""
 	histAppendFields = nil
+	histBackfillDryRun = false
 	jsonOutput = false
 
 	return func() {
@@ -199,6 +342,7 @@ func saveHistoryGlobals() func() {
 		histAppendEditTo = prevAppendEditTo
 		histAppendKind = prevAppendKind
 		histAppendFields = prevAppendFields
+		histBackfillDryRun = prevBackfillDryRun
 		jsonOutput = prevJSON
 	}
 }
