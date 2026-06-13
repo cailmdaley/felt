@@ -268,10 +268,11 @@ cross-machine git sync inflicts. Fibers created before the history log existed
 have no events and would sort by their created-at fallback only; this gives
 them a durable anchor.
 
-The synthetic event is stamped at the fiber's created-at — NOT its file mtime,
-which post-reorg collapses to a single instant and would re-pollute the very
-signal this exists to protect. Fibers that already have at least one event are
-left untouched, so running this twice is a no-op.`,
+The synthetic event is stamped at the fiber's recency anchor — frontmatter
+updated-at when present, else created-at — NOT its file mtime, which post-reorg
+collapses to a single instant and would re-pollute the very signal this exists
+to protect. Fibers that already have at least one event are left untouched, so
+running this twice is a no-op.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		root, err := resolveProjectRoot()
@@ -311,7 +312,7 @@ left untouched, so running this twice is a no-op.`,
 			}
 			if err := idx.AppendEvent(felt.Event{
 				FiberID:     f.ID,
-				OccurredAt:  f.CreatedAt,
+				OccurredAt:  f.RecencyAnchor(),
 				Type:        felt.EventAdd,
 				Actor:       "backfill",
 				ContentHash: hash,

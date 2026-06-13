@@ -103,6 +103,10 @@ Examples:
 			f.Outcome = addOutcome
 		}
 
+		// Seed the durable recency anchor at creation time, so a fresh clone
+		// orders a never-edited fiber by when it was born, not file mtime.
+		f.Touch(f.CreatedAt)
+
 		if err := storage.Write(f); err != nil {
 			return err
 		}

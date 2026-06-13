@@ -419,6 +419,69 @@ func TestMarshal(t *testing.T) {
 	}
 }
 
+func TestUpdatedAtRoundTrips(t *testing.T) {
+	created := time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
+	updated := time.Date(2026, 3, 4, 12, 30, 0, 0, time.UTC)
+	f := &Felt{
+		ID:        "touched",
+		Name:      "Touched",
+		CreatedAt: created,
+		UpdatedAt: &updated,
+	}
+
+	data, err := f.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal() error: %v", err)
+	}
+	if !strings.Contains(string(data), "updated-at:") {
+		t.Fatalf("Marshal() should emit updated-at, got %q", string(data))
+	}
+
+	parsed, err := Parse(f.ID, data)
+	if err != nil {
+		t.Fatalf("Round-trip Parse() error: %v", err)
+	}
+	if parsed.UpdatedAt == nil || !parsed.UpdatedAt.Equal(updated) {
+		t.Fatalf("Round-trip UpdatedAt = %v, want %v", parsed.UpdatedAt, updated)
+	}
+}
+
+func TestMarshalOmitsUpdatedAtWhenUnset(t *testing.T) {
+	f := &Felt{
+		ID:        "untouched",
+		Name:      "Untouched",
+		CreatedAt: time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC),
+	}
+	data, err := f.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal() error: %v", err)
+	}
+	// Fibers never touched since the field shipped must not gain an empty
+	// updated-at line — that would mass-rewrite the store and churn git.
+	if strings.Contains(string(data), "updated-at") {
+		t.Fatalf("Marshal() should omit updated-at when unset, got %q", string(data))
+	}
+}
+
+func TestRecencyAnchor(t *testing.T) {
+	created := time.Date(2025, 11, 2, 14, 30, 0, 0, time.UTC)
+	updated := time.Date(2026, 5, 20, 8, 15, 0, 0, time.UTC)
+
+	// updated-at newer than created-at → updated-at wins.
+	if got := (&Felt{CreatedAt: created, UpdatedAt: &updated}).RecencyAnchor(); !got.Equal(updated) {
+		t.Fatalf("RecencyAnchor with newer updated-at = %v, want %v", got, updated)
+	}
+	// updated-at absent → created-at.
+	if got := (&Felt{CreatedAt: created}).RecencyAnchor(); !got.Equal(created) {
+		t.Fatalf("RecencyAnchor without updated-at = %v, want %v", got, created)
+	}
+	// updated-at older than created-at (hand-edited/corrupt) → created-at wins.
+	older := created.Add(-time.Hour)
+	if got := (&Felt{CreatedAt: created, UpdatedAt: &older}).RecencyAnchor(); !got.Equal(created) {
+		t.Fatalf("RecencyAnchor with older updated-at = %v, want created-at %v", got, created)
+	}
+}
+
 func TestMarshalLeavesEmptyBodyEmpty(t *testing.T) {
 	now := time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
 	f := &Felt{

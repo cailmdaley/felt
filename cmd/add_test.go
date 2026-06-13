@@ -59,6 +59,36 @@ func TestAddMintsNativeUID(t *testing.T) {
 	}
 }
 
+func TestAddStampsUpdatedAtAtCreatedAt(t *testing.T) {
+	dir := t.TempDir()
+	storage := felt.NewStorage(dir)
+	if err := storage.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	resetAdd := saveAddGlobals()
+	defer resetAdd()
+
+	out, err := runCommand(t, dir, "add", "born", "Born")
+	if err != nil {
+		t.Fatalf("add: %v\n%s", err, out)
+	}
+
+	f, err := storage.Read("born")
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	// A brand-new fiber's durable recency anchor is its birth: updated-at is
+	// present and equal to created-at, so a fresh clone orders it sensibly
+	// before it is ever edited.
+	if f.UpdatedAt == nil {
+		t.Fatalf("add did not stamp updated-at")
+	}
+	if !f.UpdatedAt.Equal(f.CreatedAt) {
+		t.Fatalf("updated-at = %v, want created-at %v", f.UpdatedAt, f.CreatedAt)
+	}
+}
+
 func saveAddGlobals() func() {
 	prevBody := addBody
 	prevStatus := addStatus

@@ -53,6 +53,44 @@ func TestEditMetadataFlags(t *testing.T) {
 	}
 }
 
+func TestEditStampsUpdatedAt(t *testing.T) {
+	dir := t.TempDir()
+	storage := felt.NewStorage(dir)
+	if err := storage.Init(); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	created := mustParseTime(t, "2026-04-10T09:00:00Z")
+	if err := storage.Write(&felt.Felt{
+		ID:        "fiber-a",
+		Name:      "Fiber A",
+		CreatedAt: created,
+	}); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	reset := saveEditGlobals()
+	defer reset()
+
+	out, err := runCommand(t, dir, "edit", "fiber-a", "--outcome", "Landed.")
+	if err != nil {
+		t.Fatalf("edit: %v\n%s", err, out)
+	}
+
+	f, err := storage.Read("fiber-a")
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	// A felt edit is a content write felt records, so it advances the durable
+	// recency anchor past creation — that's what a fresh clone reads to know
+	// the fiber was worked recently.
+	if f.UpdatedAt == nil {
+		t.Fatalf("edit did not stamp updated-at")
+	}
+	if !f.UpdatedAt.After(created) {
+		t.Fatalf("updated-at = %v, want strictly after created-at %v", f.UpdatedAt, created)
+	}
+}
+
 func TestEditBodyOverwriteDetection(t *testing.T) {
 	dir := t.TempDir()
 	storage := felt.NewStorage(dir)

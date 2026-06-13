@@ -84,12 +84,20 @@ type BodyRef struct {
 type Felt struct {
 	// ID is the slug/path address felt commands use. UID is the intrinsic
 	// frontmatter `id` minted once for federation/dispatch consumers.
-	ID          string     `yaml:"-" json:"id"`
-	UID         string     `yaml:"id,omitempty" json:"uid,omitempty"`
-	Name        string     `yaml:"name" json:"name"`
-	Status      string     `yaml:"status,omitempty" json:"status,omitempty"`
-	Tags        []string   `yaml:"tags,omitempty" json:"tags,omitempty"`
-	CreatedAt   time.Time  `yaml:"created-at" json:"created_at"`
+	ID        string    `yaml:"-" json:"id"`
+	UID       string    `yaml:"id,omitempty" json:"uid,omitempty"`
+	Name      string    `yaml:"name" json:"name"`
+	Status    string    `yaml:"status,omitempty" json:"status,omitempty"`
+	Tags      []string  `yaml:"tags,omitempty" json:"tags,omitempty"`
+	CreatedAt time.Time `yaml:"created-at" json:"created_at"`
+	// UpdatedAt is the git-durable recency anchor — the last time felt itself
+	// recorded a content write (add/edit). Unlike file mtime it survives the
+	// clone/checkout/reorg rewrites that cross-machine git sync inflicts, so a
+	// fresh clone (where the index.db event log is rebuilt from scratch) can
+	// still seed recency from a real last-touched time. Pointer + omitempty:
+	// absent on fibers never touched since the field shipped, where recency
+	// falls back to created-at.
+	UpdatedAt   *time.Time `yaml:"updated-at,omitempty" json:"updated_at,omitempty"`
 	ClosedAt    *time.Time `yaml:"closed-at,omitempty" json:"closed_at,omitempty"`
 	Outcome     string     `yaml:"outcome,omitempty" json:"outcome,omitempty"`
 	Due         *time.Time `yaml:"due,omitempty" json:"due,omitempty"`
@@ -178,6 +186,30 @@ func (f *Felt) MarshalJSON() ([]byte, error) {
 // HasStatus returns true if the fiber has opt-in status tracking.
 func (f *Felt) HasStatus() bool {
 	return f.Status != ""
+}
+
+// Touch stamps the git-durable recency anchor (frontmatter `updated-at`) at t.
+// Called by felt's own content writes (`felt add`, `felt edit`) right before
+// the file is serialized, so the new timestamp travels in git. Moves/renames
+// and reorgs deliberately do NOT call this — they preserve the existing
+// updated-at on round-trip, which is what keeps recency reorg-immune.
+func (f *Felt) Touch(t time.Time) {
+	tt := t
+	f.UpdatedAt = &tt
+}
+
+// RecencyAnchor returns the git-durable timestamp to anchor a fiber's recency:
+// frontmatter `updated-at` when it's the freshest, else `created-at`. The
+// index bootstrap and `felt history backfill` use it to seed a rebuilt event
+// log from a real last-touched time rather than file mtime, which the
+// clone/checkout/reorg rewrites of cross-machine git sync flatten to a single
+// instant. Returns the zero time only when both anchors are unset.
+func (f *Felt) RecencyAnchor() time.Time {
+	anchor := f.CreatedAt
+	if f.UpdatedAt != nil && f.UpdatedAt.After(anchor) {
+		anchor = *f.UpdatedAt
+	}
+	return anchor
 }
 
 // New creates a new Felt from a slug and name.
@@ -408,7 +440,7 @@ func ParseWithMode(id string, content []byte, mode ParseMode) (*Felt, error) {
 // into struct fields. All other top-level keys are preserved as ExtraFields.
 var knownFrontmatterKeys = map[string]struct{}{
 	"id": {}, "name": {}, "title": {}, "status": {}, "tags": {},
-	"created-at": {}, "closed-at": {}, "outcome": {}, "due": {},
+	"created-at": {}, "updated-at": {}, "closed-at": {}, "outcome": {}, "due": {},
 	"description": {},
 	// NOTE: all other top-level keys — including tool-owned namespaces like
 	// `shuttle:` and domain schemas like `inputs:` / `decisions:` /
@@ -441,6 +473,7 @@ func parseFrontmatter(id string, frontmatter []byte) (*Felt, error) {
 		Status      string     `yaml:"status,omitempty"`
 		Tags        []string   `yaml:"tags,omitempty"`
 		CreatedAt   time.Time  `yaml:"created-at"`
+		UpdatedAt   *time.Time `yaml:"updated-at,omitempty"`
 		ClosedAt    *time.Time `yaml:"closed-at,omitempty"`
 		Outcome     string     `yaml:"outcome,omitempty"`
 		Due         *time.Time `yaml:"due,omitempty"`
@@ -462,6 +495,7 @@ func parseFrontmatter(id string, frontmatter []byte) (*Felt, error) {
 		Status:      fm.Status,
 		Tags:        fm.Tags,
 		CreatedAt:   fm.CreatedAt,
+		UpdatedAt:   fm.UpdatedAt,
 		ClosedAt:    fm.ClosedAt,
 		Outcome:     fm.Outcome,
 		Due:         fm.Due,
@@ -676,6 +710,7 @@ func (f *Felt) Marshal() ([]byte, error) {
 		Status      string     `yaml:"status,omitempty"`
 		Tags        []string   `yaml:"tags,omitempty"`
 		CreatedAt   time.Time  `yaml:"created-at"`
+		UpdatedAt   *time.Time `yaml:"updated-at,omitempty"`
 		ClosedAt    *time.Time `yaml:"closed-at,omitempty"`
 		Outcome     string     `yaml:"outcome,omitempty"`
 		Due         *time.Time `yaml:"due,omitempty"`
@@ -686,6 +721,7 @@ func (f *Felt) Marshal() ([]byte, error) {
 		Status:      f.Status,
 		Tags:        f.Tags,
 		CreatedAt:   f.CreatedAt,
+		UpdatedAt:   f.UpdatedAt,
 		ClosedAt:    f.ClosedAt,
 		Outcome:     f.Outcome,
 		Due:         f.Due,

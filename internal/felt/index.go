@@ -429,12 +429,14 @@ func (i *Index) Sync(s *Storage) error {
 			eventType = EventAdd
 			actor = "index-bootstrap"
 			payload["bootstrap"] = true
-			// Anchor at the git-durable created-at (matches
-			// `felt history backfill`), reading metadata only in this
-			// rare bootstrap case. mtime is the fallback if created-at
-			// is unset.
-			if f, err := s.ReadMetadata(id); err == nil && !f.CreatedAt.IsZero() {
-				occurredAt = f.CreatedAt
+			// Anchor at the git-durable recency time (frontmatter
+			// updated-at, else created-at — matches `felt history
+			// backfill`), reading metadata only in this rare bootstrap
+			// case. mtime stays the fallback only when both are unset.
+			if f, err := s.ReadMetadata(id); err == nil {
+				if a := f.RecencyAnchor(); !a.IsZero() {
+					occurredAt = a
+				}
 			}
 		}
 		lines, chars := FiberSize(state.path)

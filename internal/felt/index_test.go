@@ -1067,6 +1067,56 @@ func TestIndexSyncBootstrapsAddAtCreatedAtNotMtime(t *testing.T) {
 	}
 }
 
+func TestIndexSyncBootstrapsAddAtUpdatedAtWhenNewer(t *testing.T) {
+	dir := t.TempDir()
+	storage := NewStorage(dir)
+	if err := storage.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	// A fiber edited after creation: created-at is when it was born,
+	// updated-at is the last content write felt recorded. On a fresh clone
+	// (mtime collapsed to checkout time, no events) the bootstrap add must
+	// anchor at updated-at — the real last-touched time — so recency reflects
+	// recent work, not stale creation order.
+	createdAt := time.Date(2025, 11, 2, 14, 30, 0, 0, time.UTC)
+	updatedAt := time.Date(2026, 5, 20, 8, 15, 0, 0, time.UTC)
+	if err := storage.Write(&Felt{
+		ID:        "worked",
+		Name:      "Worked",
+		CreatedAt: createdAt,
+		UpdatedAt: &updatedAt,
+		Body:      "edited since creation",
+	}); err != nil {
+		t.Fatalf("Write(worked) error: %v", err)
+	}
+	mtime := time.Date(2026, 6, 1, 9, 0, 0, 0, time.UTC)
+	if err := os.Chtimes(storage.Path("worked"), mtime, mtime); err != nil {
+		t.Fatalf("chtimes worked: %v", err)
+	}
+
+	idx, err := storage.OpenIndex()
+	if err != nil {
+		t.Fatalf("OpenIndex() error: %v", err)
+	}
+	defer idx.Close()
+
+	adds, err := idx.QueryEvents(EventFilter{
+		FiberID: "worked",
+		Types:   []string{EventAdd},
+	})
+	if err != nil {
+		t.Fatalf("QueryEvents add: %v", err)
+	}
+	if len(adds) != 1 {
+		t.Fatalf("expected one bootstrap add event, got %#v", adds)
+	}
+	if !adds[0].OccurredAt.Equal(updatedAt) {
+		t.Fatalf("bootstrap add occurred_at = %v, want updated-at %v (not created-at %v, not mtime %v)",
+			adds[0].OccurredAt, updatedAt, createdAt, mtime)
+	}
+}
+
 func BenchmarkIndexSyncTopologyChangeOneAffectedRawRef(b *testing.B) {
 	const rawRefCount = 1000
 	baseTime := time.Date(2026, 4, 10, 9, 0, 0, 0, time.UTC)

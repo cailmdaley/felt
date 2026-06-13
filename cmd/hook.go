@@ -154,7 +154,10 @@ func buildSessionContext() string {
 		if t, ok := latest[f.ID]; ok {
 			return t
 		}
-		return f.CreatedAt
+		// Degraded path (index missing/busy, e.g. first command on a fresh
+		// clone): fall back to the durable frontmatter anchor — updated-at
+		// when present, else created-at — not mtime.
+		return f.RecencyAnchor()
 	}
 	byRecencyDesc := func(fs []*felt.Felt) {
 		sort.SliceStable(fs, func(i, j int) bool {

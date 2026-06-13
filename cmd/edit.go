@@ -148,6 +148,12 @@ keys have dedicated flags; use those.`,
 				}
 			}
 		}
+		// Bump the durable recency anchor: a felt edit is a content write felt
+		// itself records, so updated-at travels in git and seeds a fresh
+		// clone's recency at this moment rather than mtime. Stamped before
+		// Write so it lands in the file the mechanical event then hashes.
+		f.Touch(time.Now())
+
 		if err := storage.Write(f); err != nil {
 			return err
 		}
