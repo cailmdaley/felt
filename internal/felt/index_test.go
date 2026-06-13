@@ -1015,6 +1015,58 @@ func TestIndexSyncAuditsOnlyDirtyMtimes(t *testing.T) {
 	}
 }
 
+func TestIndexSyncBootstrapsAddAtCreatedAtNotMtime(t *testing.T) {
+	dir := t.TempDir()
+	storage := NewStorage(dir)
+	if err := storage.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	// A fiber whose file mtime is deliberately unrelated to its created-at:
+	// this is the fresh-clone shape, where checkout collapses every mtime to
+	// one instant while created-at stays git-durable. The bootstrap add must
+	// anchor at created-at so recency survives the clone.
+	createdAt := time.Date(2025, 11, 2, 14, 30, 0, 0, time.UTC)
+	if err := storage.Write(&Felt{
+		ID:        "fresh",
+		Name:      "Fresh",
+		CreatedAt: createdAt,
+		Body:      "first sighting",
+	}); err != nil {
+		t.Fatalf("Write(fresh) error: %v", err)
+	}
+	mtime := time.Date(2026, 6, 1, 9, 0, 0, 0, time.UTC)
+	if err := os.Chtimes(storage.Path("fresh"), mtime, mtime); err != nil {
+		t.Fatalf("chtimes fresh: %v", err)
+	}
+
+	// OpenIndex syncs; the file is new (no prior events) so the hash-on-read
+	// pass mints the synthetic bootstrap add.
+	idx, err := storage.OpenIndex()
+	if err != nil {
+		t.Fatalf("OpenIndex() error: %v", err)
+	}
+	defer idx.Close()
+
+	adds, err := idx.QueryEvents(EventFilter{
+		FiberID: "fresh",
+		Types:   []string{EventAdd},
+	})
+	if err != nil {
+		t.Fatalf("QueryEvents add: %v", err)
+	}
+	if len(adds) != 1 {
+		t.Fatalf("expected one bootstrap add event, got %#v", adds)
+	}
+	add := adds[0]
+	if add.Payload["bootstrap"] != true {
+		t.Fatalf("bootstrap add missing marker: %#v", add.Payload)
+	}
+	if !add.OccurredAt.Equal(createdAt) {
+		t.Fatalf("bootstrap add occurred_at = %v, want created-at %v (not mtime %v)", add.OccurredAt, createdAt, mtime)
+	}
+}
+
 func BenchmarkIndexSyncTopologyChangeOneAffectedRawRef(b *testing.B) {
 	const rawRefCount = 1000
 	baseTime := time.Date(2026, 4, 10, 9, 0, 0, 0, time.UTC)

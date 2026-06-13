@@ -417,6 +417,11 @@ func (i *Index) Sync(s *Storage) error {
 		eventType := EventExternalEdit
 		actor := "external"
 		payload := map[string]interface{}{}
+		// External edits are stamped at the file mtime, but the bootstrap
+		// add is anchored at created-at below — mtime is git-volatile (a
+		// fresh clone collapses every file to checkout time), and recency
+		// ordering must be git-durable.
+		occurredAt := state.modifiedAt
 		if count == 0 {
 			// First time we've seen this fiber. Anchor the chain with
 			// a synthetic add — not labelled external, since we don't
@@ -424,6 +429,13 @@ func (i *Index) Sync(s *Storage) error {
 			eventType = EventAdd
 			actor = "index-bootstrap"
 			payload["bootstrap"] = true
+			// Anchor at the git-durable created-at (matches
+			// `felt history backfill`), reading metadata only in this
+			// rare bootstrap case. mtime is the fallback if created-at
+			// is unset.
+			if f, err := s.ReadMetadata(id); err == nil && !f.CreatedAt.IsZero() {
+				occurredAt = f.CreatedAt
+			}
 		}
 		lines, chars := FiberSize(state.path)
 		payload["size_lines"] = lines
@@ -431,7 +443,7 @@ func (i *Index) Sync(s *Storage) error {
 		payload["mtime"] = state.modifiedAt.UTC().Format(time.RFC3339Nano)
 		if err := i.appendEventTx(tx, Event{
 			FiberID:     id,
-			OccurredAt:  state.modifiedAt,
+			OccurredAt:  occurredAt,
 			Type:        eventType,
 			Actor:       actor,
 			ContentHash: hash,
