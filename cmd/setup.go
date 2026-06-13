@@ -610,6 +610,21 @@ func localMarketplaceSource(source string) string {
 	return ""
 }
 
+// codexRegistrationSource returns the marketplace ref to register with Codex's
+// `plugin marketplace add`. Codex (≤0.133) only accepts git/GitHub refs and
+// errors on a local directory path — unlike Claude Code, which registers a
+// directory marketplace happily. So when felt is pointed at a local checkout
+// (`--source` / $FELT_PLUGIN_DIR), we register the GitHub ref for Codex's
+// marketplace metadata while the local plugin *content* is still delivered via
+// installCodexPluginCache (which reads the local dir directly). For an already
+// git/GitHub ref this is just codexMarketplaceSource.
+func codexRegistrationSource(marketplaceSource string) string {
+	if localMarketplaceSource(marketplaceSource) != "" {
+		return codexMarketplaceSource(defaultMarketplaceRef())
+	}
+	return codexMarketplaceSource(marketplaceSource)
+}
+
 // installCodexPluginViaCLI is the plugin-marketplace install path: register
 // the marketplace via `codex plugin marketplace add`, enable the plugin and
 // plugin-hooks feature in ~/.codex/config.toml, and prune any leftover
@@ -620,10 +635,12 @@ func installCodexPluginViaCLI(marketplaceSource string) error {
 	}
 
 	// Always re-add. For pinned git sources this advances the ref to the
-	// current binary's version; for directory sources it's a no-op
-	// re-register. (See installPluginViaCLI for the rationale — `marketplace
-	// upgrade` on a pinned source just re-fetches the same ref.)
-	codexSource := codexMarketplaceSource(marketplaceSource)
+	// current binary's version. A local --source registers the GitHub ref
+	// (codex rejects a directory marketplace; the local content is delivered
+	// via the plugin cache below instead). (See installPluginViaCLI for the
+	// git-source rationale — `marketplace upgrade` on a pinned source just
+	// re-fetches the same ref.)
+	codexSource := codexRegistrationSource(marketplaceSource)
 	fmt.Printf("Adding Codex marketplace: %s\n", codexSource)
 	if err := runCodexCLI("plugin", "marketplace", "add", codexSource); err != nil {
 		return fmt.Errorf("registering codex marketplace: %w", err)
