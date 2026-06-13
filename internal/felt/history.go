@@ -92,7 +92,7 @@ func HashBytes(data []byte) string {
 // DefaultActor returns a best-effort identifier for the current process.
 // Shape: "$FELT_AGENT@<host>" when the agent env var is set, else "<host>"
 // alone. Felt is single-user, so the OS username is dropped — the
-// meaningful axes are which agent (claude-sonnet, ralph, codex…) and
+// meaningful axes are which agent (claude-sonnet, codex…) and
 // which machine (loom is git-synced across local/candide/cineca).
 func DefaultActor() string {
 	host, err := os.Hostname()

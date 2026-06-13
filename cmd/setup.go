@@ -58,7 +58,7 @@ var setupClaudeCmd = &cobra.Command{
 	Long: `Install the felt plugin for Claude Code.
 
 Registers the felt plugin marketplace and installs the felt plugin from
-it. The plugin bundles the felt and ralph skills plus SessionStart and
+it. The plugin bundles the felt skill plus SessionStart and
 PreToolUse hooks. Idempotent — re-running is safe.
 
 By default, registers ` + marketplaceRepo + ` directly from GitHub —
@@ -170,7 +170,7 @@ Use --uninstall to remove.`,
 var setupSkillsCmd = &cobra.Command{
 	Use:   "skills",
 	Short: "Link felt skills to a target directory",
-	Long: `Link felt skills (felt, ralph) from the plugin directory into a target directory.
+	Long: `Link felt skills from the plugin directory into a target directory.
 
 By default, links to ~/.claude/skills. Use --target to specify a different directory.
 Existing entries are replaced.

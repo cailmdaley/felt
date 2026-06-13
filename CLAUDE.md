@@ -12,7 +12,7 @@ claude-plugin/                    Plugin payload for Claude Code + Codex
   .codex-plugin/plugin.json         Codex manifest
   hooks/{hooks.json,session.sh,
         remind.sh}                  hook shims; exec felt hook <event>
-  skills/{felt,ralph}/              skill content
+  skills/felt/                      skill content
 .claude-plugin/marketplace.json   Repo-level marketplace; both agents read it
 scripts/release.sh                Bumps plugin manifests + commits + tags
 ```

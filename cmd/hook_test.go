@@ -204,7 +204,7 @@ func TestHookSessionEmptyEnvelope(t *testing.T) {
 // TestHookPreToolGate covers the deny/pass matrix that previously lived in
 // remind.sh: deny on first non-Skill tool in a felt project, pass on Skill:felt
 // (and mark the flag), pass on subsequent tools, pass for Codex sessions, pass
-// outside felt repos. Sibling-skill activations (ralph, etc) must not satisfy
+// outside felt repos. Sibling-skill activations (shuttle, etc) must not satisfy
 // the gate.
 func TestHookPreToolGate(t *testing.T) {
 	feltDir := t.TempDir()
@@ -265,7 +265,7 @@ func TestHookPreToolGate(t *testing.T) {
 			flagFor:   "s2ns",
 		},
 		{
-			name: "Skill:ralph passes WITHOUT marking",
+			name: "Skill:shuttle passes WITHOUT marking",
 			input: preToolInput{
 				SessionID:      "s3",
 				ToolName:       "Skill",
@@ -273,7 +273,7 @@ func TestHookPreToolGate(t *testing.T) {
 				TranscriptPath: claudeTranscript,
 				ToolInput: struct {
 					Skill string `json:"skill"`
-				}{Skill: "ralph"},
+				}{Skill: "shuttle"},
 			},
 			expectOut: false,
 			noFlagFor: "s3",

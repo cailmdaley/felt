@@ -386,7 +386,7 @@ func runPreToolHook(stdin *os.File, stdout *os.File) error {
 
 	// Skill tool: open the gate only on felt activation specifically. Without
 	// this asymmetry an agent could bypass felt by activating a sibling skill
-	// (ralph, shuttle) as its first move.
+	// (e.g. shuttle) as its first move.
 	if input.ToolName == "Skill" {
 		s := input.ToolInput.Skill
 		if s == "felt" || s == "felt:felt" || strings.HasPrefix(s, "felt@") {

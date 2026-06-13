@@ -246,8 +246,8 @@ func TestPluginSkillsAreSortedAndKnown(t *testing.T) {
 		t.Fatalf("plugin skill order = %v, want sorted %v", names, sorted)
 	}
 
-	// felt and ralph must be present.
-	for _, required := range []string{"felt", "ralph"} {
+	// felt must be present. (ralph was retired in abb0857.)
+	for _, required := range []string{"felt"} {
 		if !slices.Contains(names, required) {
 			t.Fatalf("plugin skills missing required skill %q (got %v)", required, names)
 		}

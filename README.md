@@ -188,14 +188,13 @@ felt setup claude                 # registers cailmdaley/felt marketplace, insta
 felt setup codex                  # symlinks skills into ~/.agents/skills, configures Codex hooks
 ```
 
-The plugin bundles two skills (`felt`, `ralph`), a SessionStart hook that lists active and recently touched fibers, and a PreToolUse hook that gates the first non-Skill tool call until the felt skill has been activated.
+The plugin bundles the `felt` skill, a SessionStart hook that lists active and recently touched fibers, and a PreToolUse hook that gates the first non-Skill tool call until the felt skill has been activated.
 
 ### Bundled skills
 
 | Skill | Purpose |
 |-------|---------|
 | **felt** | Filing fibers, drafting constitutions, mining sessions, maintenance passes, transcript processing |
-| **ralph** | Executing autonomous iteration loops over a constitution |
 
 ## Commands
 
@@ -241,7 +240,7 @@ Felt borrows from several projects exploring how to give AI coding agents struct
 - **[Zettelkasten](https://en.wikipedia.org/wiki/Zettelkasten)** — Niklas Luhmann's slip-box method, the ancestor of modern linked-note knowledge management. Emergent structure from connections rather than prescribed hierarchy.
 - **[Beads](https://github.com/steveyegge/beads)** — Steve Yegge's graph-based, git-backed issue tracker designed as agent memory. The core conviction — that coding agents need structured persistent memory they can query, not just scratch files — is load-bearing for felt.
 - **[Dots](https://github.com/joelreymont/dots)** — Joel Reymont's minimalist counterpart to Beads. The directory tree as source-of-truth stance runs through felt too — the SQLite cache at `.felt/index.db` is strictly a rebuildable index, not storage.
-- **[Ralph Wiggum](https://github.com/ghuntley/how-to-ralph-wiggum)** — Geoffrey Huntley's autonomous iteration technique: feed the agent the same spec on a loop until the work is done.
+- **[Ralph Wiggum](https://github.com/ghuntley/how-to-ralph-wiggum)** — Geoffrey Huntley's autonomous iteration technique: feed the agent the same spec on a loop until the work is done. It shaped how a `shuttle` constitution gets driven — a fresh worker redispatched against the fiber until its desired state holds — rather than any skill felt itself bundles.
 - **[Ouroboros](https://github.com/Q00/ouroboros)** — Q00's specification-first AI coding workflow. The Double Diamond rhythm (Wonder → Ontology, Design → Delivery) in the bundled writing references is adapted from this lineage.
 
 ## License

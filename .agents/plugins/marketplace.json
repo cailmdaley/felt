@@ -6,7 +6,7 @@
   "plugins": [
     {
       "name": "felt",
-      "description": "felt — fiber-based thinking substrate. Bundles the felt and ralph skills plus SessionStart and PreToolUse hooks.",
+      "description": "felt — fiber-based thinking substrate. Bundles the felt skill plus SessionStart and PreToolUse hooks.",
       "source": {
         "source": "local",
         "path": "./claude-plugin"
