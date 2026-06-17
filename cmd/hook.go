@@ -122,18 +122,16 @@ const sessionDirective = "**Activate the `felt` skill before any tool or action 
 
 const sessionNoRepoNote = "*No felt repository in current directory. Start one with `felt init` when this conversation produces thinking worth keeping.*"
 
-const sessionNoActiveNote = "*No active fibers.*"
+const sessionNoTrackedNote = "*No active or open fibers.*"
 
 const (
 	// sessionActiveLimit is the Attention threshold for "active set is broad"
 	// — it gates the advisory note, not the display. Distinct from the display
 	// cap below.
 	sessionActiveLimit = 3
-	// sessionActiveDisplayLimit caps how many active fibers the Active Fibers
-	// section renders.
-	sessionActiveDisplayLimit = 10
-	// sessionRecentLimit caps the Recently Touched section.
-	sessionRecentLimit   = 10
+	// sessionSectionLimit caps both recency sections: five in-flight fibers
+	// (active or open), then five fibers in every remaining status.
+	sessionSectionLimit  = 5
 	sessionOpenLimit     = 20
 	sessionTopLevelLimit = 20
 	sessionStaleAge      = 30 * 24 * time.Hour
@@ -185,41 +183,37 @@ func buildSessionContext() string {
 		})
 	}
 
-	// Active fibers: status == active, newest history first, capped.
-	var active []*felt.Felt
+	// Partition once so every fiber appears in exactly one section. Active and
+	// open fibers are the in-flight working set; closed and untracked fibers
+	// form the recent context tail.
+	var inFlight, recent []*felt.Felt
 	for _, f := range felts {
-		if f.IsActive() {
-			active = append(active, f)
+		if f.IsActive() || f.IsOpen() {
+			inFlight = append(inFlight, f)
+		} else {
+			recent = append(recent, f)
 		}
 	}
-	byRecencyDesc(active)
-	if len(active) > sessionActiveDisplayLimit {
-		active = active[:sessionActiveDisplayLimit]
+	byRecencyDesc(inFlight)
+	byRecencyDesc(recent)
+	if len(inFlight) > sessionSectionLimit {
+		inFlight = inFlight[:sessionSectionLimit]
+	}
+	if len(recent) > sessionSectionLimit {
+		recent = recent[:sessionSectionLimit]
 	}
 
-	if len(active) > 0 {
-		sb.WriteString("## Active Fibers\n\n")
-		for _, f := range active {
+	if len(inFlight) > 0 {
+		sb.WriteString("## Active / Open\n\n")
+		for _, f := range inFlight {
 			sb.WriteString(formatHookEntry(f, recency(f), false))
 		}
 		sb.WriteString("\n")
 	} else {
-		sb.WriteString(sessionNoActiveNote)
+		sb.WriteString(sessionNoTrackedNote)
 		sb.WriteString("\n\n")
 	}
 
-	// Recently touched: everything not active (open/closed/untracked), newest
-	// history first, capped. A fiber is in at most one section.
-	var recent []*felt.Felt
-	for _, f := range felts {
-		if !f.IsActive() {
-			recent = append(recent, f)
-		}
-	}
-	byRecencyDesc(recent)
-	if len(recent) > sessionRecentLimit {
-		recent = recent[:sessionRecentLimit]
-	}
 	if len(recent) > 0 {
 		sb.WriteString("## Recently Touched\n\n")
 		for _, f := range recent {

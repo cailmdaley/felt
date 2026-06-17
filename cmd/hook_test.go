@@ -15,7 +15,7 @@ import (
 
 // TestHookSessionEnvelope verifies the SessionStart envelope shape and that
 // the additionalContext text matches the format the bash hook emitted: the
-// directive line, then either Active Fibers + entries (or "No active fibers"),
+// directive line, then either Active / Open + entries (or the empty marker),
 // then Recently Touched with truncated outcomes.
 func TestHookSessionEnvelope(t *testing.T) {
 	dir := t.TempDir()
@@ -63,7 +63,7 @@ func TestHookSessionEnvelope(t *testing.T) {
 	for _, want := range []string{
 		"# Felt Workflow Context",
 		"Activate the `felt` skill",
-		"## Active Fibers",
+		"## Active / Open",
 		"◐ " + alphaHead + "\n    Alpha task (work)",
 		"## Recently Touched",
 		"● " + betaHead + "\n    Beta finding (finding)",
@@ -76,9 +76,9 @@ func TestHookSessionEnvelope(t *testing.T) {
 	}
 }
 
-// TestSessionSectionPlacement: active fibers land in Active Fibers; everything
-// else (open, closed, untracked) lands in Recently Touched. A fiber appears in
-// at most one section.
+// TestSessionSectionPlacement: active and open fibers land in Active / Open;
+// closed and untracked fibers land in Recently Touched. A fiber appears in at
+// most one section.
 func TestSessionSectionPlacement(t *testing.T) {
 	dir := t.TempDir()
 	storage := felt.NewStorage(dir)
@@ -100,21 +100,23 @@ func TestSessionSectionPlacement(t *testing.T) {
 	}
 
 	ctx := sessionContextFor(t, dir)
-	activeSec, recentSec := splitSections(ctx)
+	inFlightSec, recentSec := splitSections(ctx)
 
-	if !strings.Contains(activeSec, "act") {
-		t.Fatalf("active fiber not in Active Fibers:\n%s", activeSec)
+	for _, id := range []string{"act", "opn"} {
+		if !strings.Contains(inFlightSec, id) {
+			t.Fatalf("%s missing from Active / Open:\n%s", id, inFlightSec)
+		}
+		if strings.Contains(recentSec, " "+id+"\n") {
+			t.Fatalf("in-flight fiber %s leaked into Recently Touched:\n%s", id, recentSec)
+		}
 	}
-	for _, id := range []string{"opn", "cls", "unt"} {
-		if strings.Contains(activeSec, " "+id+"\n") {
-			t.Fatalf("non-active %s leaked into Active Fibers:\n%s", id, activeSec)
+	for _, id := range []string{"cls", "unt"} {
+		if strings.Contains(inFlightSec, " "+id+"\n") {
+			t.Fatalf("remaining fiber %s leaked into Active / Open:\n%s", id, inFlightSec)
 		}
 		if !strings.Contains(recentSec, id) {
 			t.Fatalf("%s missing from Recently Touched:\n%s", id, recentSec)
 		}
-	}
-	if strings.Contains(recentSec, "act") {
-		t.Fatalf("active fiber leaked into Recently Touched:\n%s", recentSec)
 	}
 }
 
@@ -127,14 +129,17 @@ func TestSessionRecencyOrdering(t *testing.T) {
 		t.Fatalf("Init() error: %v", err)
 	}
 
-	// Three closed fibers, created oldest→newest as old/mid/new. We'll give
+	// Three closed fibers, created oldest→newest as old/mid/noev. We'll give
 	// `old` the newest event so history overrides created-at ordering; `noev`
-	// has no event and must fall back to its created-at.
+	// has no event and must fall back to its created-at. Active/open fibers use
+	// the same ordering signal across status boundaries.
 	base := mustParseTime(t, "2026-04-01T00:00:00Z")
 	fibers := []*felt.Felt{
 		{ID: "old", Name: "Old", Status: felt.StatusClosed, CreatedAt: base},
 		{ID: "mid", Name: "Mid", Status: felt.StatusClosed, CreatedAt: base.Add(24 * time.Hour)},
 		{ID: "noev", Name: "No event", Status: felt.StatusClosed, CreatedAt: base.Add(48 * time.Hour)},
+		{ID: "active", Name: "Active", Status: felt.StatusActive, CreatedAt: base},
+		{ID: "open", Name: "Open", Status: felt.StatusOpen, CreatedAt: base.Add(24 * time.Hour)},
 	}
 	for _, f := range fibers {
 		if err := storage.Write(f); err != nil {
@@ -146,8 +151,13 @@ func TestSessionRecencyOrdering(t *testing.T) {
 	// `noev` gets nothing; its recency is created-at = 04-03.
 	seedEvent(t, storage, "mid", mustParseTime(t, "2026-05-01T00:00:00Z"))
 	seedEvent(t, storage, "old", mustParseTime(t, "2026-06-01T00:00:00Z"))
+	seedEvent(t, storage, "active", mustParseTime(t, "2026-05-01T00:00:00Z"))
+	seedEvent(t, storage, "open", mustParseTime(t, "2026-06-01T00:00:00Z"))
 
-	recentSec := mustSection(t, sessionContextFor(t, dir), "## Recently Touched")
+	ctx := sessionContextFor(t, dir)
+	inFlightSec := mustSection(t, ctx, "## Active / Open")
+	recentSec := mustSection(t, ctx, "## Recently Touched")
+	assertOrder(t, inFlightSec, "open", "active")
 	// Expected order: old (06-01) > mid (05-01) > noev (created 04-03).
 	assertOrder(t, recentSec, "old", "mid", "noev")
 }
@@ -182,7 +192,7 @@ func TestSessionHeadShowsRecencyTimestamp(t *testing.T) {
 	}
 }
 
-// TestSessionSectionCaps: each section renders at most 10 fibers even when
+// TestSessionSectionCaps: each section renders at most five fibers even when
 // more qualify.
 func TestSessionSectionCaps(t *testing.T) {
 	dir := t.TempDir()
@@ -195,12 +205,12 @@ func TestSessionSectionCaps(t *testing.T) {
 	for i := 0; i < 15; i++ {
 		at := base.Add(time.Duration(i) * time.Hour)
 		if err := storage.Write(&felt.Felt{
-			ID:        fmt.Sprintf("active-%02d", i),
-			Name:      fmt.Sprintf("Active %02d", i),
-			Status:    felt.StatusActive,
+			ID:        fmt.Sprintf("tracked-%02d", i),
+			Name:      fmt.Sprintf("Tracked %02d", i),
+			Status:    []string{felt.StatusActive, felt.StatusOpen}[i%2],
 			CreatedAt: at,
 		}); err != nil {
-			t.Fatalf("Write active-%02d: %v", i, err)
+			t.Fatalf("Write tracked-%02d: %v", i, err)
 		}
 		if err := storage.Write(&felt.Felt{
 			ID:        fmt.Sprintf("closed-%02d", i),
@@ -215,11 +225,11 @@ func TestSessionSectionCaps(t *testing.T) {
 	ctx := sessionContextFor(t, dir)
 	// The slug now follows the recency timestamp + " — " separator on the head
 	// line, so count by that separator rather than the bare icon.
-	if got := strings.Count(ctx, " — active-"); got != sessionActiveDisplayLimit {
-		t.Fatalf("active entries shown = %d, want %d:\n%s", got, sessionActiveDisplayLimit, ctx)
+	if got := strings.Count(ctx, " — tracked-"); got != sessionSectionLimit {
+		t.Fatalf("active/open entries shown = %d, want %d:\n%s", got, sessionSectionLimit, ctx)
 	}
-	if got := strings.Count(ctx, " — closed-"); got != sessionRecentLimit {
-		t.Fatalf("recently-touched entries shown = %d, want %d:\n%s", got, sessionRecentLimit, ctx)
+	if got := strings.Count(ctx, " — closed-"); got != sessionSectionLimit {
+		t.Fatalf("recently-touched entries shown = %d, want %d:\n%s", got, sessionSectionLimit, ctx)
 	}
 }
 
@@ -313,7 +323,7 @@ func TestSessionAttentionWarnsOnTrackedContainers(t *testing.T) {
 }
 
 // TestHookSessionNoRepoEnvelope: outside a felt repo, we still emit the
-// directive plus a hint to felt init. No "Active Fibers" header.
+// directive plus a hint to felt init. No "Active / Open" header.
 func TestHookSessionNoRepoEnvelope(t *testing.T) {
 	dir := t.TempDir() // no .felt inside
 
@@ -327,13 +337,13 @@ func TestHookSessionNoRepoEnvelope(t *testing.T) {
 	if !strings.Contains(ctx, "No felt repository") {
 		t.Fatalf("expected no-repo hint:\n%s", ctx)
 	}
-	if strings.Contains(ctx, "## Active Fibers") {
-		t.Fatalf("did not expect Active Fibers section:\n%s", ctx)
+	if strings.Contains(ctx, "## Active / Open") {
+		t.Fatalf("did not expect Active / Open section:\n%s", ctx)
 	}
 }
 
-// TestHookSessionEmptyEnvelope: felt repo exists but no active fibers — we
-// emit the no-active marker, not the Active Fibers header.
+// TestHookSessionEmptyEnvelope: felt repo exists but no active or open fibers
+// — we emit the empty marker, not the Active / Open header.
 func TestHookSessionEmptyEnvelope(t *testing.T) {
 	dir := t.TempDir()
 	storage := felt.NewStorage(dir)
@@ -348,8 +358,8 @@ func TestHookSessionEmptyEnvelope(t *testing.T) {
 		t.Fatalf("envelope unmarshal: %v\n%s", err, out)
 	}
 	ctx := env.HookSpecificOutput.AdditionalContext
-	if !strings.Contains(ctx, "No active fibers") {
-		t.Fatalf("expected no-active marker:\n%s", ctx)
+	if !strings.Contains(ctx, "No active or open fibers") {
+		t.Fatalf("expected no-active-or-open marker:\n%s", ctx)
 	}
 }
 
@@ -555,10 +565,10 @@ func seedEvent(t *testing.T, storage *felt.Storage, fiberID string, at time.Time
 	}
 }
 
-// splitSections returns the Active Fibers and Recently Touched slices of a
+// splitSections returns the Active / Open and Recently Touched slices of a
 // session context, each bounded by the next "## " header.
-func splitSections(ctx string) (active, recent string) {
-	return sectionBody(ctx, "## Active Fibers"), sectionBody(ctx, "## Recently Touched")
+func splitSections(ctx string) (inFlight, recent string) {
+	return sectionBody(ctx, "## Active / Open"), sectionBody(ctx, "## Recently Touched")
 }
 
 func mustSection(t *testing.T, ctx, header string) string {
