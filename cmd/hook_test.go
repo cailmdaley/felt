@@ -120,8 +120,8 @@ func TestSessionSectionPlacement(t *testing.T) {
 	}
 }
 
-// TestSessionRecencyOrdering: sections sort by MAX(occurred_at) DESC, and a
-// fiber with no events falls back to its created-at.
+// TestSessionRecencyOrdering: sections sort by the git-durable RecencyAnchor
+// (updated-at when present, else created-at) DESC — never the history index.
 func TestSessionRecencyOrdering(t *testing.T) {
 	dir := t.TempDir()
 	storage := felt.NewStorage(dir)
@@ -129,17 +129,18 @@ func TestSessionRecencyOrdering(t *testing.T) {
 		t.Fatalf("Init() error: %v", err)
 	}
 
-	// Three closed fibers, created oldest→newest as old/mid/noev. We'll give
-	// `old` the newest event so history overrides created-at ordering; `noev`
-	// has no event and must fall back to its created-at. Active/open fibers use
-	// the same ordering signal across status boundaries.
+	// Three closed fibers, created oldest→newest as old/mid/noev. We give `old`
+	// the newest updated-at so the durable anchor overrides created-at ordering;
+	// `noev` has no updated-at and must fall back to its created-at. Active/open
+	// fibers use the same ordering signal across status boundaries.
 	base := mustParseTime(t, "2026-04-01T00:00:00Z")
+	stamp := func(f *felt.Felt, at time.Time) *felt.Felt { f.Touch(at); return f }
 	fibers := []*felt.Felt{
-		{ID: "old", Name: "Old", Status: felt.StatusClosed, CreatedAt: base},
-		{ID: "mid", Name: "Mid", Status: felt.StatusClosed, CreatedAt: base.Add(24 * time.Hour)},
-		{ID: "noev", Name: "No event", Status: felt.StatusClosed, CreatedAt: base.Add(48 * time.Hour)},
-		{ID: "active", Name: "Active", Status: felt.StatusActive, CreatedAt: base},
-		{ID: "open", Name: "Open", Status: felt.StatusOpen, CreatedAt: base.Add(24 * time.Hour)},
+		stamp(&felt.Felt{ID: "old", Name: "Old", Status: felt.StatusClosed, CreatedAt: base}, mustParseTime(t, "2026-06-01T00:00:00Z")),
+		stamp(&felt.Felt{ID: "mid", Name: "Mid", Status: felt.StatusClosed, CreatedAt: base.Add(24 * time.Hour)}, mustParseTime(t, "2026-05-01T00:00:00Z")),
+		{ID: "noev", Name: "No update", Status: felt.StatusClosed, CreatedAt: base.Add(48 * time.Hour)},
+		stamp(&felt.Felt{ID: "active", Name: "Active", Status: felt.StatusActive, CreatedAt: base}, mustParseTime(t, "2026-05-01T00:00:00Z")),
+		stamp(&felt.Felt{ID: "open", Name: "Open", Status: felt.StatusOpen, CreatedAt: base.Add(24 * time.Hour)}, mustParseTime(t, "2026-06-01T00:00:00Z")),
 	}
 	for _, f := range fibers {
 		if err := storage.Write(f); err != nil {
@@ -147,24 +148,17 @@ func TestSessionRecencyOrdering(t *testing.T) {
 		}
 	}
 
-	// History: `mid` touched 05-01, `old` touched 06-01 (most recent of all).
-	// `noev` gets nothing; its recency is created-at = 04-03.
-	seedEvent(t, storage, "mid", mustParseTime(t, "2026-05-01T00:00:00Z"))
-	seedEvent(t, storage, "old", mustParseTime(t, "2026-06-01T00:00:00Z"))
-	seedEvent(t, storage, "active", mustParseTime(t, "2026-05-01T00:00:00Z"))
-	seedEvent(t, storage, "open", mustParseTime(t, "2026-06-01T00:00:00Z"))
-
 	ctx := sessionContextFor(t, dir)
 	inFlightSec := mustSection(t, ctx, "## Active / Open")
 	recentSec := mustSection(t, ctx, "## Recently Touched")
 	assertOrder(t, inFlightSec, "open", "active")
-	// Expected order: old (06-01) > mid (05-01) > noev (created 04-03).
+	// Expected order: old (updated 06-01) > mid (updated 05-01) > noev (created 04-03).
 	assertOrder(t, recentSec, "old", "mid", "noev")
 }
 
 // TestSessionHeadShowsRecencyTimestamp: the head line carries the recency
-// timestamp (MAX(occurred_at)) rendered in local time, so the visible label
-// matches the sort key — and shows the event time, not the fiber's created-at.
+// timestamp (updated-at) rendered in local time, so the visible label matches
+// the sort key — and shows the update time, not the fiber's created-at.
 func TestSessionHeadShowsRecencyTimestamp(t *testing.T) {
 	dir := t.TempDir()
 	storage := felt.NewStorage(dir)
@@ -173,15 +167,14 @@ func TestSessionHeadShowsRecencyTimestamp(t *testing.T) {
 	}
 
 	created := mustParseTime(t, "2026-04-01T00:00:00Z")
-	if err := storage.Write(&felt.Felt{
-		ID: "gamma", Name: "Gamma", Status: felt.StatusActive, CreatedAt: created,
-	}); err != nil {
-		t.Fatalf("Write(gamma): %v", err)
-	}
-	// An event a month after creation: the head must show the event time, not
+	gamma := &felt.Felt{ID: "gamma", Name: "Gamma", Status: felt.StatusActive, CreatedAt: created}
+	// An update a month after creation: the head must show the update time, not
 	// the created-at fallback.
 	touched := mustParseTime(t, "2026-05-15T14:30:00Z")
-	seedEvent(t, storage, "gamma", touched)
+	gamma.Touch(touched)
+	if err := storage.Write(gamma); err != nil {
+		t.Fatalf("Write(gamma): %v", err)
+	}
 
 	ctx := sessionContextFor(t, dir)
 	if want := "◐ " + touched.Local().Format("2006-01-02 15:04") + " — gamma"; !strings.Contains(ctx, want) {
@@ -544,25 +537,6 @@ func TestHookPreToolFlagPersists(t *testing.T) {
 func sessionContextFor(t *testing.T, dir string) string {
 	t.Helper()
 	return runHookCommand(t, dir, "session")
-}
-
-// seedEvent appends one synthetic edit event to a fiber at a chosen time,
-// giving the test direct control over the history recency signal.
-func seedEvent(t *testing.T, storage *felt.Storage, fiberID string, at time.Time) {
-	t.Helper()
-	idx, err := storage.OpenIndexNoSync()
-	if err != nil {
-		t.Fatalf("OpenIndexNoSync: %v", err)
-	}
-	defer idx.Close()
-	if err := idx.AppendEvent(felt.Event{
-		FiberID:    fiberID,
-		OccurredAt: at,
-		Type:       felt.EventEdit,
-		Actor:      "test",
-	}); err != nil {
-		t.Fatalf("AppendEvent(%s): %v", fiberID, err)
-	}
 }
 
 // splitSections returns the Active / Open and Recently Touched slices of a

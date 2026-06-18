@@ -161,22 +161,16 @@ func buildSessionContext() string {
 		return sb.String()
 	}
 
-	// Recency signal comes from the content-hash-anchored history log
-	// (MAX(occurred_at) per fiber), not file mtime — felt is git-synced
-	// across machines, so any clone/checkout/reorg rewrites every file and
-	// flattens all mtimes to one instant. The history log survives that.
-	// Reading is a best-effort read-only cache lookup: a missing or busy
-	// index just leaves the map empty, and recency falls back to created-at.
-	latest := loadLatestEventTimes(storage)
-	recency := func(f *felt.Felt) time.Time {
-		if t, ok := latest[f.ID]; ok {
-			return t
-		}
-		// Degraded path (index missing/busy, e.g. first command on a fresh
-		// clone): fall back to the durable frontmatter anchor — updated-at
-		// when present, else created-at — not mtime.
-		return f.RecencyAnchor()
-	}
+	// Recency signal is the git-durable frontmatter anchor — updated-at when
+	// present, else created-at (RecencyAnchor) — never file mtime and never the
+	// history index. felt is git-synced across machines: mtime is flattened by
+	// every clone/checkout/reorg, and the history event log lives in a per-store
+	// index.db that is NOT git-synced, so two machines disagree on it. updated-at
+	// rides in the frontmatter, so every machine reads the same recency. It is
+	// stamped on every real content write — felt add/edit and the PostToolUse
+	// hook on direct Edit-tool edits — and deliberately preserved (not bumped)
+	// across moves/renames, which is what keeps it reorg-immune.
+	recency := func(f *felt.Felt) time.Time { return f.RecencyAnchor() }
 	byRecencyDesc := func(fs []*felt.Felt) {
 		sort.SliceStable(fs, func(i, j int) bool {
 			return recency(fs[i]).After(recency(fs[j]))
@@ -228,23 +222,6 @@ func buildSessionContext() string {
 	}
 
 	return sb.String()
-}
-
-// loadLatestEventTimes returns MAX(occurred_at) per fiber from the history
-// log, or an empty map when the index is missing/busy. The SessionStart hook
-// is a read path: a stale or absent cache must degrade to created-at ordering,
-// never error or force a full index sync.
-func loadLatestEventTimes(storage *felt.Storage) map[string]time.Time {
-	idx, err := storage.OpenIndexReadOnly()
-	if err != nil {
-		return map[string]time.Time{}
-	}
-	defer idx.Close()
-	latest, err := idx.LatestEventTimes()
-	if err != nil {
-		return map[string]time.Time{}
-	}
-	return latest
 }
 
 // formatHookEntry renders one fiber for the SessionStart context. The head line
