@@ -846,17 +846,6 @@ func (f *Felt) SearchText() string {
 	return strings.Join(parts, "\n")
 }
 
-func flattenMapStrings(m map[string]any) []string {
-	if len(m) == 0 {
-		return nil
-	}
-	data, err := json.Marshal(m)
-	if err != nil {
-		return nil
-	}
-	return []string{string(data)}
-}
-
 // StatusIcon returns the display character for a status.
 func StatusIcon(status string) string {
 	switch status {

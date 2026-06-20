@@ -46,7 +46,7 @@ const (
 	indexOpenReadOnly
 )
 
-// OpenIndex opens the SQLite index at the given project root.
+// openIndex opens the SQLite index at the given project root.
 //
 // Pragmas are applied via DSN parameters so the modernc.org/sqlite driver
 // guarantees busy_timeout is installed before journal_mode is changed.
@@ -54,10 +54,6 @@ const (
 // the write lock up-front rather than deferring it — this way SQLITE_BUSY
 // surfaces at Begin() time and busy_timeout retries before returning an
 // error, rather than surfacing deep inside the Sync transaction.
-func OpenIndex(projectRoot string) (*Index, error) {
-	return openIndex(projectRoot, indexOpenWrite)
-}
-
 func openIndex(projectRoot string, mode indexOpenMode) (*Index, error) {
 	dbPath := filepath.Join(projectRoot, DirName, indexFileName)
 	// Use a file: URI so the driver processes _pragma and _txlock params.
@@ -802,13 +798,6 @@ func nullIfEmpty(s string) any {
 		return nil
 	}
 	return s
-}
-
-func boolToInt(v bool) int {
-	if v {
-		return 1
-	}
-	return 0
 }
 
 func ftsQuery(query string) string {

@@ -213,13 +213,6 @@ func init() {
 	rootCmd.AddCommand(setupCmd)
 }
 
-// hasPluginManifest returns true if dir contains a plugin manifest at
-// .claude-plugin/plugin.json (the standard plugin layout).
-func hasPluginManifest(dir string) bool {
-	_, err := os.Stat(filepath.Join(dir, ".claude-plugin", "plugin.json"))
-	return err == nil
-}
-
 // hasMarketplaceManifest returns true if dir contains a marketplace manifest at
 // .claude-plugin/marketplace.json (the standard marketplace layout).
 func hasMarketplaceManifest(dir string) bool {
@@ -1068,39 +1061,6 @@ func removeCodexPluginCache() error {
 	return os.RemoveAll(cacheRoot)
 }
 
-// reportHookChange prints a one-line summary of a hook install based on what
-// was there before (`prev`) vs the desired command (`current`):
-//
-//   - prev empty                                → "✓ Added"
-//   - prev = [current]                          → "· already installed"
-//   - prev contains current + extras            → "✓ Removed N duplicate(s)"
-//   - prev exists, current not in it (path moved) → "✓ Updated"
-//   - prev exists, multiple distinct stale paths → "✓ Updated (was: ...)"
-func reportHookChange(event string, prev []string, current string) {
-	hadCurrent := false
-	var stale []string
-	for _, c := range prev {
-		if c == current {
-			hadCurrent = true
-		} else {
-			stale = append(stale, c)
-		}
-	}
-
-	switch {
-	case len(prev) == 0:
-		fmt.Printf("✓ Added %s hook: %s\n", event, current)
-	case hadCurrent && len(stale) == 0 && len(prev) == 1:
-		fmt.Printf("· %s hook already installed\n", event)
-	case hadCurrent && len(stale) == 0:
-		fmt.Printf("✓ Removed %d duplicate %s hook(s)\n", len(prev)-1, event)
-	case hadCurrent:
-		fmt.Printf("✓ Updated %s hook: removed %d stale, kept %s\n", event, len(stale), current)
-	default:
-		fmt.Printf("✓ Updated %s hook: %s (was: %s)\n", event, current, strings.Join(stale, ", "))
-	}
-}
-
 // pruneFeltHooks removes any hook entries under `event` whose inner command
 // references the felt plugin's hook script for the given basename (e.g.
 // "session.sh"). Matches on the path suffix `<plugin>/hooks/<basename>` so
@@ -1158,116 +1118,5 @@ func pruneFeltHooks(hooks map[string]interface{}, event, basename string) []stri
 	} else {
 		hooks[event] = filtered
 	}
-	return removed
-}
-
-// addHook adds a hook command to an event if not already present.
-// matcher is optional (empty string for no matcher).
-// Returns true if hook was added.
-func addHook(hooks map[string]interface{}, event, matcher, command string) bool {
-	eventHooks, ok := hooks[event].([]interface{})
-	if !ok {
-		eventHooks = []interface{}{}
-	}
-
-	// Check if hook already exists
-	for _, hook := range eventHooks {
-		hookMap, ok := hook.(map[string]interface{})
-		if !ok {
-			continue
-		}
-
-		// Check matcher
-		hookMatcher, _ := hookMap["matcher"].(string)
-		if hookMatcher != matcher {
-			continue
-		}
-
-		// Check commands
-		cmds, ok := hookMap["hooks"].([]interface{})
-		if !ok {
-			continue
-		}
-
-		for _, cmd := range cmds {
-			cmdMap, ok := cmd.(map[string]interface{})
-			if !ok {
-				continue
-			}
-			if cmdMap["command"] == command {
-				return false // Already exists
-			}
-		}
-	}
-
-	// Add new hook
-	newHook := map[string]interface{}{
-		"hooks": []interface{}{
-			map[string]interface{}{
-				"type":    "command",
-				"command": command,
-			},
-		},
-	}
-	if matcher != "" {
-		newHook["matcher"] = matcher
-	}
-
-	eventHooks = append(eventHooks, newHook)
-	hooks[event] = eventHooks
-	return true
-}
-
-// removeHook removes a hook command from an event.
-// Returns true if hook was removed.
-func removeHook(hooks map[string]interface{}, event, command string) bool {
-	eventHooks, ok := hooks[event].([]interface{})
-	if !ok {
-		return false
-	}
-
-	filtered := make([]interface{}, 0, len(eventHooks))
-	removed := false
-
-	for _, hook := range eventHooks {
-		hookMap, ok := hook.(map[string]interface{})
-		if !ok {
-			filtered = append(filtered, hook)
-			continue
-		}
-
-		cmds, ok := hookMap["hooks"].([]interface{})
-		if !ok {
-			filtered = append(filtered, hook)
-			continue
-		}
-
-		// Check if this hook has the command we want to remove
-		hasCommand := false
-		for _, cmd := range cmds {
-			cmdMap, ok := cmd.(map[string]interface{})
-			if !ok {
-				continue
-			}
-			if cmdMap["command"] == command {
-				hasCommand = true
-				break
-			}
-		}
-
-		if hasCommand {
-			removed = true
-			// Don't add to filtered
-		} else {
-			filtered = append(filtered, hook)
-		}
-	}
-
-	if len(filtered) == 0 {
-		delete(hooks, event)
-	} else {
-		hooks[event] = filtered
-	}
-
 	return removed
 }

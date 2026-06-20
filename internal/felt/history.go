@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"sort"
 	"strings"
 	"time"
 )
@@ -59,10 +58,6 @@ type EventFilter struct {
 	Until      time.Time // if non-zero, occurred_at <= Until
 	Limit      int       // if > 0, cap the number of rows
 	Descending bool      // newest-first when true
-	// Unconsumed, when true, restricts results to events whose payload does
-	// not contain a non-null "consumed_at" field. Uses SQLite's json_extract,
-	// which requires SQLite ≥ 3.38 (always satisfied on macOS / modern Linux).
-	Unconsumed bool
 }
 
 // HashFile returns the lowercase SHA-256 hex digest of the file's bytes.
@@ -188,14 +183,6 @@ func (i *Index) QueryEvents(filter EventFilter) ([]Event, error) {
 	if !filter.Until.IsZero() {
 		conds = append(conds, "occurred_at <= ?")
 		args = append(args, filter.Until.UTC().Format(time.RFC3339Nano))
-	}
-	if filter.Unconsumed {
-		// Keep only events whose payload has no consumed_at field (or whose
-		// payload is null). json_extract returns NULL when the key is absent,
-		// which is indistinguishable from a null value — both pass the
-		// IS NULL check, matching the "not yet consumed" state.
-		conds = append(conds,
-			"(payload IS NULL OR json_extract(payload, '$.consumed_at') IS NULL)")
 	}
 	q := `SELECT rowid, fiber_id, occurred_at, event_type, actor,
 		COALESCE(content_hash, ''), COALESCE(payload, '')
@@ -343,14 +330,4 @@ func FiberSize(path string) (lines, chars int) {
 		lines++
 	}
 	return lines, chars
-}
-
-// SortEventsAsc sorts events by occurred_at ASC, rowid ASC.
-func SortEventsAsc(events []Event) {
-	sort.SliceStable(events, func(i, j int) bool {
-		if events[i].OccurredAt.Equal(events[j].OccurredAt) {
-			return events[i].RowID < events[j].RowID
-		}
-		return events[i].OccurredAt.Before(events[j].OccurredAt)
-	})
 }

@@ -287,16 +287,12 @@ func formatMechanicalLine(e felt.Event) string {
 	line := e.OccurredAt.Local().Format("2006-01-02 15:04:05") +
 		" [" + e.Type + " " + e.Actor + "] hash=" + shortHash(e.ContentHash)
 	if lines := intField(e.Payload, "size_lines"); lines > 0 {
-		line += " (" + intToShortStr(lines) + " lines)"
+		line += fmt.Sprintf(" (%d lines)", lines)
 	}
 	if fields := stringSliceField(e.Payload, "fields_changed"); len(fields) > 0 {
 		line += " — " + strings.Join(fields, ",")
 	}
 	return line
-}
-
-func intToShortStr(n int) string {
-	return fmt.Sprintf("%d", n)
 }
 
 func init() {
