@@ -321,22 +321,12 @@ func (i *Index) Sync(s *Storage) error {
 	sort.Strings(ids)
 	sort.Strings(dirtyIDs)
 
-	// Fast path — nothing to do. Sync runs on every felt invocation, so the
-	// no-change case is by far the most common (a read-heavy workload like
-	// `felt history` against a quiet repo). Without this short-circuit,
-	// `_txlock=immediate` would have us acquire the SQLite write lock for
-	// a no-op transaction every call, serializing concurrent felt processes
-	// behind busy_timeout retries until one of them surrenders with
-	// "index busy."
-	//
-	// We can skip the write tx iff:
-	// (a) topology is unchanged (no fibers added/removed), AND
-	// (b) every indexed mtime matches the on-disk mtime.
-	//
-	// The hash-on-read pass below catches direct file edits that didn't
-	// bump mtime — but in practice editors always bump mtime on save, so
-	// the hash check only fires when the mtime check already did. Skipping
-	// the write tx when both topology and mtime are clean is safe.
+	// Fast path — skip the write tx when topology is unchanged and every
+	// indexed mtime matches on disk. Sync runs on every felt invocation, so
+	// this no-op case is the common one; without the short-circuit
+	// `_txlock=immediate` would take the SQLite write lock for a no-op tx and
+	// serialize concurrent felt processes behind busy_timeout. (Editors bump
+	// mtime on save, so the hash-on-read pass below adds nothing here.)
 	if rawRefsReady && !topologyChanged && len(dirtyIDs) == 0 {
 		return nil
 	}
@@ -370,6 +360,10 @@ func (i *Index) Sync(s *Storage) error {
 		}
 	}
 
+	// Build the scope resolver once for the whole reindex pass: indexFiber
+	// resolves every outbound ref against the full id set, and rebuilding the
+	// resolver per fiber re-sorts + re-maps all ids on each call.
+	resolver := newScopedIDResolver(ids)
 	for _, id := range reindexIDs {
 		state := current[id]
 		f, err := s.Read(id)
@@ -377,7 +371,7 @@ func (i *Index) Sync(s *Storage) error {
 			return err
 		}
 		f.ModifiedAt = state.modifiedAt
-		if err := indexFiber(tx, f, ids); err != nil {
+		if err := indexFiber(tx, f, resolver); err != nil {
 			return err
 		}
 	}
@@ -593,7 +587,7 @@ func clearFiberRows(tx *sql.Tx, id string, includeInbound bool) error {
 	return nil
 }
 
-func indexFiber(tx *sql.Tx, f *Felt, allIDs []string) error {
+func indexFiber(tx *sql.Tx, f *Felt, resolver *scopedIDResolver) error {
 	if err := clearFiberRows(tx, f.ID, false); err != nil {
 		return err
 	}
@@ -626,7 +620,7 @@ func indexFiber(tx *sql.Tx, f *Felt, allIDs []string) error {
 
 	// Index this fiber's outbound refs. insertRawRef runs unconditionally
 	// (resolved or not); a links row is added only when resolution succeeds.
-	if err := iterRefs([]*Felt{f}, allIDs, func(r resolvedRef) error {
+	if err := iterRefsResolved([]*Felt{f}, resolver, func(r resolvedRef) error {
 		if err := insertRawRef(tx, f.ID, r.Kind, r.RawTarget, r.Fragment, r.InputID); err != nil {
 			return err
 		}

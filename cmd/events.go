@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"fmt"
 	"strings"
 
@@ -84,12 +85,7 @@ func recordMechanical(
 	}
 	if post != nil {
 		event.ContentHash = felt.HashBytes(post)
-		lines := 0
-		for _, b := range post {
-			if b == '\n' {
-				lines++
-			}
-		}
+		lines := bytes.Count(post, []byte{'\n'})
 		if len(post) > 0 && post[len(post)-1] != '\n' {
 			lines++
 		}

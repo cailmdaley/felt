@@ -57,14 +57,23 @@ type resolvedRef struct {
 // iterRefs walks every outbound reference (body references then data-flow
 // inputs) of each felt in document order, resolving each against ids and
 // invoking yield once per ref. Empty/blank data-flow targets are skipped
-// before yielding — matching every existing call site. Resolution uses the
-// per-ref ResolveScopedID free function, preserving prior semantics exactly.
-// A non-nil yield error halts iteration and propagates (the index path needs
-// this; the read-only consumers/check paths always return nil).
+// before yielding — matching every existing call site. A non-nil yield error
+// halts iteration and propagates (the index path needs this; the read-only
+// consumers/check paths always return nil).
+//
+// The resolver is built once for the whole walk rather than per-ref, since
+// newScopedIDResolver rebuilds maps + sorts over every id.
 func iterRefs(felts []*Felt, ids []string, yield func(resolvedRef) error) error {
+	return iterRefsResolved(felts, newScopedIDResolver(ids), yield)
+}
+
+// iterRefsResolved is iterRefs against a prebuilt resolver, so a caller that
+// reindexes many fibers against the same id set (Sync) builds the resolver
+// once instead of once per fiber.
+func iterRefsResolved(felts []*Felt, resolver *scopedIDResolver, yield func(resolvedRef) error) error {
 	for _, f := range felts {
 		for _, ref := range ExtractBodyRefs(f.Body) {
-			resolved, err := ResolveScopedID(ids, f.ID, ref.Target)
+			resolved, err := resolver.Resolve(f.ID, ref.Target)
 			if err := yield(resolvedRef{
 				Source:     f,
 				Kind:       refKindReference,
@@ -86,7 +95,7 @@ func iterRefs(felts []*Felt, ids []string, yield func(resolvedRef) error) error 
 			if strings.TrimSpace(fragment) != "" {
 				label = input.From
 			}
-			resolved, err := ResolveScopedID(ids, f.ID, targetFiber)
+			resolved, err := resolver.Resolve(f.ID, targetFiber)
 			if err := yield(resolvedRef{
 				Source:     f,
 				Kind:       refKindDataFlow,

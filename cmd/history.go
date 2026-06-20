@@ -66,7 +66,7 @@ The append subcommand records a new editorial event:
 			return err
 		}
 
-		filter, err := buildHistoryFilter(cmd, target.ID)
+		filter, err := buildHistoryFilter(target.ID)
 		if err != nil {
 			return err
 		}
@@ -369,7 +369,7 @@ func init() {
 		"Print which fibers would be anchored without writing events")
 }
 
-func buildHistoryFilter(cmd *cobra.Command, fiberID string) (felt.EventFilter, error) {
+func buildHistoryFilter(fiberID string) (felt.EventFilter, error) {
 	filter := felt.EventFilter{
 		FiberID:    fiberID,
 		Descending: true,
@@ -381,7 +381,7 @@ func buildHistoryFilter(cmd *cobra.Command, fiberID string) (felt.EventFilter, e
 	if kind := strings.TrimSpace(histKindFilter); kind != "" {
 		filter.Types = []string{kind}
 		// Apply time + limit filters and return early.
-		if err := applyTimeFilters(cmd, &filter); err != nil {
+		if err := applyTimeFilters(&filter); err != nil {
 			return filter, err
 		}
 		return filter, nil
@@ -410,17 +410,16 @@ func buildHistoryFilter(cmd *cobra.Command, fiberID string) (felt.EventFilter, e
 		// both — leave Types nil to fetch everything
 	}
 
-	if err := applyTimeFilters(nil, &filter); err != nil {
+	if err := applyTimeFilters(&filter); err != nil {
 		return filter, err
 	}
 	return filter, nil
 }
 
 // applyTimeFilters populates Since, Until, and Limit on a filter from the
-// global flag vars. cmd is accepted for interface consistency but not used —
-// we read global flag vars directly since Cobra flag bindings go to package
-// vars. Caller may pass nil.
-func applyTimeFilters(_ interface{}, filter *felt.EventFilter) error {
+// global flag vars (Cobra flag bindings go to package vars, so there is no
+// per-command state to thread).
+func applyTimeFilters(filter *felt.EventFilter) error {
 	if v := strings.TrimSpace(histSince); v != "" {
 		t, err := parseHistoryTime(v)
 		if err != nil {

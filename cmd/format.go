@@ -15,14 +15,9 @@ func formatFeltTwoLine(f *felt.Felt) string {
 
 	line1 := fmt.Sprintf("%s %s\n", icon, f.ID)
 
-	var meta []string
-	if len(f.Tags) > 0 {
-		meta = append(meta, strings.Join(f.Tags, ", "))
-	}
-
 	metaStr := ""
-	if len(meta) > 0 {
-		metaStr = fmt.Sprintf(" (%s)", strings.Join(meta, ", "))
+	if len(f.Tags) > 0 {
+		metaStr = fmt.Sprintf(" (%s)", strings.Join(f.Tags, ", "))
 	}
 
 	line2 := fmt.Sprintf("    %s%s\n", f.DisplayName(), metaStr)

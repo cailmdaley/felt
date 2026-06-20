@@ -17,11 +17,9 @@ var initCmd = &cobra.Command{
 		if err := storage.Init(); err != nil {
 			return err
 		}
-		if storage.Exists() {
-			fmt.Println("Ensured .felt/ support files")
-			return nil
-		}
-		return fmt.Errorf("failed to initialize .felt/")
+		// Init() does os.MkdirAll first, so a nil return means the dir exists.
+		fmt.Println("Ensured .felt/ support files")
+		return nil
 	},
 }
 

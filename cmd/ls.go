@@ -558,11 +558,15 @@ func findContainmentNode(roots []*ContainmentNode, id string) *ContainmentNode {
 	return nil
 }
 
+// treeIDMaxLen is the length past which treeDisplayID collapses a nested ID to
+// its leaf segment.
+const treeIDMaxLen = 24
+
 // treeDisplayID renders long nested IDs by their leaf segment. In tree output,
 // the parent path is already carried by the branch structure; the leaf is the
 // part that distinguishes siblings during a scan.
 func treeDisplayID(id string) string {
-	if len(id) <= 24 {
+	if len(id) <= treeIDMaxLen {
 		return id
 	}
 	idx := strings.LastIndex(id, "/")

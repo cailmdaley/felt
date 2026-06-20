@@ -18,6 +18,10 @@ const (
 // ValidDepths lists all valid depth values.
 var ValidDepths = []string{DepthName, DepthCompact, DepthSummary, DepthFull}
 
+// refTitleMaxLen caps how many chars of a referenced fiber's title are shown
+// in the Refs/Cited-by/Consumed-by parentheticals before truncation.
+const refTitleMaxLen = 30
+
 // validateDepth checks if a depth value is valid.
 func validateDepth(d string) error {
 	for _, v := range ValidDepths {
@@ -152,7 +156,7 @@ func writeCitations(sb *strings.Builder, citations []felt.Citation) {
 			ref += "#" + citation.Fragment
 		}
 		if strings.TrimSpace(citation.SourceName) != "" {
-			ref += " (" + truncateTitle(citation.SourceName, 30) + ")"
+			ref += " (" + truncateTitle(citation.SourceName, refTitleMaxLen) + ")"
 		}
 		parts = append(parts, ref)
 	}
@@ -170,7 +174,7 @@ func writeConsumers(sb *strings.Builder, consumers []felt.DataFlowConsumer) {
 			ref += "#" + consumer.InputID
 		}
 		if strings.TrimSpace(consumer.SourceName) != "" {
-			ref += " (" + truncateTitle(consumer.SourceName, 30) + ")"
+			ref += " (" + truncateTitle(consumer.SourceName, refTitleMaxLen) + ")"
 		}
 		if consumer.OutputID != "" {
 			ref = consumer.OutputID + " \u2192 " + ref
@@ -206,7 +210,7 @@ func writeBodyRefs(sb *strings.Builder, f *felt.Felt, g *Graph) {
 					if ref.Fragment != "" {
 						label += "#" + ref.Fragment
 					}
-					parts = append(parts, fmt.Sprintf("%s (%s)", label, truncateTitle(node.DisplayName(), 30)))
+					parts = append(parts, fmt.Sprintf("%s (%s)", label, truncateTitle(node.DisplayName(), refTitleMaxLen)))
 					continue
 				}
 			}
@@ -218,7 +222,7 @@ func writeBodyRefs(sb *strings.Builder, f *felt.Felt, g *Graph) {
 		parts = append(parts, ref.Target)
 		if g != nil {
 			if node, ok := g.Nodes[ref.Target]; ok {
-				parts[len(parts)-1] = fmt.Sprintf("%s (%s)", ref.Target, truncateTitle(node.DisplayName(), 30))
+				parts[len(parts)-1] = fmt.Sprintf("%s (%s)", ref.Target, truncateTitle(node.DisplayName(), refTitleMaxLen))
 				continue
 			}
 		}
