@@ -288,59 +288,80 @@ func splitListFlag(values []string) []string {
 	return out
 }
 
+// nativeFieldSpec describes one native top-level field as addressed by the
+// --has-field / --json-field selectors. accessor returns the JSON value and
+// whether the field is present; the same predicate drives feltHasField.
+//
+// prefilterable=false means the field cannot be answered from the lightweight
+// frontmatter prefilter (it needs a full read or is derived), so any --has-field
+// query touching it disables the prefilter. prefilterKey is the frontmatter key
+// to gate on when prefilterable=true and the key differs from the canonical
+// field name (empty prefilterKey with prefilterable=true means "no gate needed",
+// e.g. id, which every discovered fiber has).
+type nativeFieldSpec struct {
+	accessor      func(f *felt.Felt) (any, bool)
+	prefilterKey  string
+	prefilterable bool
+}
+
+// nativeFields is the single source of truth for the --has-field / --json-field
+// field-name aliases. feltHasField, feltJSONField, and frontmatterPrefilterFields
+// are thin adapters over it.
+var nativeFields = map[string]nativeFieldSpec{
+	"id":             {accessor: func(f *felt.Felt) (any, bool) { return f.ID, f.ID != "" }, prefilterable: true},
+	"uid":            {accessor: feltUIDValue, prefilterKey: "id", prefilterable: true},
+	"ulid":           {accessor: feltUIDValue, prefilterKey: "id", prefilterable: true},
+	"frontmatter_id": {accessor: feltUIDValue, prefilterKey: "id", prefilterable: true},
+	"frontmatter-id": {accessor: feltUIDValue, prefilterKey: "id", prefilterable: true},
+	"name":           {accessor: func(f *felt.Felt) (any, bool) { return f.Name, f.Name != "" }, prefilterKey: "name", prefilterable: true},
+	"status":         {accessor: func(f *felt.Felt) (any, bool) { return f.Status, f.Status != "" }, prefilterKey: "status", prefilterable: true},
+	"tags":           {accessor: func(f *felt.Felt) (any, bool) { return f.Tags, len(f.Tags) > 0 }, prefilterKey: "tags", prefilterable: true},
+	"created_at":     {accessor: feltCreatedAtValue, prefilterKey: "created-at", prefilterable: true},
+	"created-at":     {accessor: feltCreatedAtValue, prefilterKey: "created-at", prefilterable: true},
+	"closed_at":      {accessor: feltClosedAtValue, prefilterKey: "closed-at", prefilterable: true},
+	"closed-at":      {accessor: feltClosedAtValue, prefilterKey: "closed-at", prefilterable: true},
+	"outcome":        {accessor: func(f *felt.Felt) (any, bool) { return f.Outcome, f.Outcome != "" }, prefilterKey: "outcome", prefilterable: true},
+	"due":            {accessor: func(f *felt.Felt) (any, bool) { return f.Due, f.Due != nil }, prefilterKey: "due", prefilterable: true},
+	"description":    {accessor: func(f *felt.Felt) (any, bool) { return f.Description, f.Description != "" }, prefilterKey: "description", prefilterable: true},
+	"body":           {accessor: func(f *felt.Felt) (any, bool) { return f.Body, f.Body != "" }, prefilterable: false},
+	"modified_at":    {accessor: feltModifiedAtValue, prefilterable: false},
+	"modified-at":    {accessor: feltModifiedAtValue, prefilterable: false},
+	"path":           {accessor: func(f *felt.Felt) (any, bool) { return f.Path, f.Path != "" }, prefilterable: false},
+	"entry_point":    {accessor: func(f *felt.Felt) (any, bool) { return f.EntryPoint, f.EntryPoint }, prefilterable: false},
+	"entry-point":    {accessor: func(f *felt.Felt) (any, bool) { return f.EntryPoint, f.EntryPoint }, prefilterable: false},
+}
+
+func feltUIDValue(f *felt.Felt) (any, bool)        { return f.UID, f.UID != "" }
+func feltCreatedAtValue(f *felt.Felt) (any, bool)  { return f.CreatedAt, !f.CreatedAt.IsZero() }
+func feltClosedAtValue(f *felt.Felt) (any, bool)   { return f.ClosedAt, f.ClosedAt != nil }
+func feltModifiedAtValue(f *felt.Felt) (any, bool) { return f.ModifiedAt, !f.ModifiedAt.IsZero() }
+
 func feltHasField(f *felt.Felt, field string) bool {
-	switch field {
-	case "id":
-		return f.ID != ""
-	case "uid", "ulid", "frontmatter_id", "frontmatter-id":
-		return f.UID != ""
-	case "name":
-		return f.Name != ""
-	case "status":
-		return f.Status != ""
-	case "tags":
-		return len(f.Tags) > 0
-	case "created_at", "created-at":
-		return !f.CreatedAt.IsZero()
-	case "closed_at", "closed-at":
-		return f.ClosedAt != nil
-	case "outcome":
-		return f.Outcome != ""
-	case "due":
-		return f.Due != nil
-	case "description":
-		return f.Description != ""
-	case "body":
-		return f.Body != ""
-	case "modified_at", "modified-at":
-		return !f.ModifiedAt.IsZero()
-	case "path":
-		return f.Path != ""
-	case "entry_point", "entry-point":
-		return f.EntryPoint
-	default:
-		_, ok := f.ExtraFields[field]
-		return ok
+	if spec, ok := nativeFields[field]; ok {
+		_, present := spec.accessor(f)
+		return present
 	}
+	_, ok := f.ExtraFields[field]
+	return ok
 }
 
 func frontmatterPrefilterFields(fields []string) ([]string, bool) {
 	var frontmatterFields []string
 	for _, field := range fields {
-		switch field {
-		case "id":
-			// Every discovered fiber has an id; it does not need a frontmatter gate.
-		case "uid", "ulid", "frontmatter_id", "frontmatter-id":
-			frontmatterFields = append(frontmatterFields, "id")
-		case "created_at":
-			frontmatterFields = append(frontmatterFields, "created-at")
-		case "closed_at":
-			frontmatterFields = append(frontmatterFields, "closed-at")
-		case "modified_at", "modified-at", "path", "body", "entry_point", "entry-point":
-			return nil, false
-		default:
+		spec, ok := nativeFields[field]
+		if !ok {
+			// Non-native field: gate on the key as given.
 			frontmatterFields = append(frontmatterFields, field)
+			continue
 		}
+		if !spec.prefilterable {
+			return nil, false
+		}
+		if spec.prefilterKey != "" {
+			frontmatterFields = append(frontmatterFields, spec.prefilterKey)
+		}
+		// prefilterable with empty prefilterKey (id): every discovered fiber
+		// has it; no frontmatter gate needed.
 	}
 	return frontmatterFields, true
 }
@@ -364,46 +385,19 @@ func projectFeltsJSON(felts []*felt.Felt, fields []string) ([]map[string]interfa
 }
 
 func feltJSONField(f *felt.Felt, field string) (interface{}, bool, error) {
-	switch field {
-	case "id":
-		return f.ID, true, nil
-	case "uid", "ulid", "frontmatter_id", "frontmatter-id":
-		return f.UID, f.UID != "", nil
-	case "name":
-		return f.Name, f.Name != "", nil
-	case "status":
-		return f.Status, f.Status != "", nil
-	case "tags":
-		return f.Tags, len(f.Tags) > 0, nil
-	case "created_at", "created-at":
-		return f.CreatedAt, !f.CreatedAt.IsZero(), nil
-	case "closed_at", "closed-at":
-		return f.ClosedAt, f.ClosedAt != nil, nil
-	case "outcome":
-		return f.Outcome, f.Outcome != "", nil
-	case "due":
-		return f.Due, f.Due != nil, nil
-	case "description":
-		return f.Description, f.Description != "", nil
-	case "body":
-		return f.Body, f.Body != "", nil
-	case "modified_at", "modified-at":
-		return f.ModifiedAt, !f.ModifiedAt.IsZero(), nil
-	case "path":
-		return f.Path, f.Path != "", nil
-	case "entry_point", "entry-point":
-		return f.EntryPoint, f.EntryPoint, nil
-	default:
-		node, ok := f.ExtraFields[field]
-		if !ok || node == nil {
-			return nil, false, nil
-		}
-		var value interface{}
-		if err := node.Decode(&value); err != nil {
-			return nil, false, fmt.Errorf("decode extra field %q: %w", field, err)
-		}
-		return value, true, nil
+	if spec, ok := nativeFields[field]; ok {
+		value, present := spec.accessor(f)
+		return value, present, nil
 	}
+	node, ok := f.ExtraFields[field]
+	if !ok || node == nil {
+		return nil, false, nil
+	}
+	var value interface{}
+	if err := node.Decode(&value); err != nil {
+		return nil, false, fmt.Errorf("decode extra field %q: %w", field, err)
+	}
+	return value, true, nil
 }
 
 // matchesQuery reports whether f matches the query by substring or regex.

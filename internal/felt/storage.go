@@ -277,7 +277,14 @@ func (s *Storage) Delete(id string) error {
 	if err := os.Remove(path); err != nil {
 		return fmt.Errorf("deleting file %s: %w", path, err)
 	}
-	for dir := filepath.Dir(path); dir != s.root; dir = filepath.Dir(dir) {
+	return s.pruneEmptyDirs(filepath.Dir(path))
+}
+
+// pruneEmptyDirs removes now-empty ancestor directories, walking from startDir
+// up toward (but never including) the store root. It stops at the first
+// non-empty directory; any other removal error is reported.
+func (s *Storage) pruneEmptyDirs(startDir string) error {
+	for dir := startDir; dir != s.root; dir = filepath.Dir(dir) {
 		err := os.Remove(dir)
 		if err == nil {
 			continue
@@ -352,18 +359,7 @@ func (s *Storage) MoveSubtree(oldID, newID string) error {
 			return err
 		}
 	}
-	for dir := filepath.Dir(oldRoot); dir != s.root; dir = filepath.Dir(dir) {
-		err := os.Remove(dir)
-		if err == nil {
-			continue
-		}
-		if errors.Is(err, syscall.ENOTEMPTY) {
-			break
-		}
-		return fmt.Errorf("cleaning directory %s: %w", dir, err)
-	}
-
-	return nil
+	return s.pruneEmptyDirs(filepath.Dir(oldRoot))
 }
 
 // Migrate performs the storage-model normalization pass:

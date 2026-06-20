@@ -587,7 +587,7 @@ const codexPluginRef = "felt@" + marketplaceName
 // ref syntax; defaultMarketplaceRef() produces Claude's form for ergonomic
 // reuse, so we translate at the boundary instead of carrying two refs.
 func codexMarketplaceSource(source string) string {
-	if strings.HasPrefix(source, "/") || strings.HasPrefix(source, ".") || strings.HasPrefix(source, "~") {
+	if isLocalPath(source) {
 		return source
 	}
 	if i := strings.LastIndex(source, "#"); i >= 0 {
@@ -597,10 +597,18 @@ func codexMarketplaceSource(source string) string {
 }
 
 func localMarketplaceSource(source string) string {
-	if strings.HasPrefix(source, "/") || strings.HasPrefix(source, ".") || strings.HasPrefix(source, "~") {
+	if isLocalPath(source) {
 		return source
 	}
 	return ""
+}
+
+// isLocalPath reports whether source names a local filesystem path
+// (absolute, relative, or home-anchored) rather than a git/GitHub ref.
+func isLocalPath(source string) bool {
+	return strings.HasPrefix(source, "/") ||
+		strings.HasPrefix(source, ".") ||
+		strings.HasPrefix(source, "~")
 }
 
 // codexRegistrationSource returns the marketplace ref to register with Codex's

@@ -49,42 +49,39 @@ only multiple bare files are treated as orphaned legacy and migrated.`,
 			return nil
 		}
 
+		// One verb-parameterized pass over the four result slices. The only
+		// behavioral differences (early return vs. index sync) stay outside the
+		// printing below.
+		var migrateVerb, renameVerb, removeVerb, stripVerb string
+		var summary string
 		if migrateDryRun {
-			for _, entry := range result.Entries {
-				fmt.Printf("Would migrate %s -> %s\n", entry.OldID, entry.NewID)
-			}
-			for _, id := range result.TitleToNameIDs {
-				fmt.Printf("Would rename title -> name in %s\n", id)
-			}
-			for _, id := range result.RemovedDependsOnIDs {
-				fmt.Printf("Would remove legacy depends-on from %s\n", id)
-			}
-			for _, id := range result.StrippedMystAnchorIDs {
-				fmt.Printf("Would strip legacy MyST anchor from %s\n", id)
-			}
-			fmt.Printf(
-				"Dry run: %d flat fibers, %d legacy title fields, %d legacy depends-on keys, %d legacy MyST anchors would migrate\n",
-				len(result.Entries), len(result.TitleToNameIDs), len(result.RemovedDependsOnIDs), len(result.StrippedMystAnchorIDs),
-			)
-			return nil
+			migrateVerb, renameVerb, removeVerb, stripVerb = "Would migrate", "Would rename", "Would remove", "Would strip"
+			summary = "Dry run: %d flat fibers, %d legacy title fields, %d legacy depends-on keys, %d legacy MyST anchors would migrate\n"
+		} else {
+			migrateVerb, renameVerb, removeVerb, stripVerb = "Migrated", "Renamed", "Removed", "Stripped"
+			summary = "Migrated %d flat fibers, %d legacy title fields, %d legacy depends-on keys, %d legacy MyST anchors\n"
 		}
 
 		for _, entry := range result.Entries {
-			fmt.Printf("Migrated %s -> %s\n", entry.OldID, entry.NewID)
+			fmt.Printf("%s %s -> %s\n", migrateVerb, entry.OldID, entry.NewID)
 		}
 		for _, id := range result.TitleToNameIDs {
-			fmt.Printf("Renamed title -> name in %s\n", id)
+			fmt.Printf("%s title -> name in %s\n", renameVerb, id)
 		}
 		for _, id := range result.RemovedDependsOnIDs {
-			fmt.Printf("Removed legacy depends-on from %s\n", id)
+			fmt.Printf("%s legacy depends-on from %s\n", removeVerb, id)
 		}
 		for _, id := range result.StrippedMystAnchorIDs {
-			fmt.Printf("Stripped legacy MyST anchor from %s\n", id)
+			fmt.Printf("%s legacy MyST anchor from %s\n", stripVerb, id)
 		}
 		fmt.Printf(
-			"Migrated %d flat fibers, %d legacy title fields, %d legacy depends-on keys, %d legacy MyST anchors\n",
+			summary,
 			len(result.Entries), len(result.TitleToNameIDs), len(result.RemovedDependsOnIDs), len(result.StrippedMystAnchorIDs),
 		)
+
+		if migrateDryRun {
+			return nil
+		}
 		requestAsyncIndexSync(storage)
 		return nil
 	},

@@ -485,22 +485,7 @@ func renderHistory(id, name string, events []felt.Event) string {
 			sb.WriteString(strings.TrimSpace(editorialText(e.Payload)))
 			sb.WriteString("\n\n")
 		default:
-			fmt.Fprintf(&sb, "%s [%-13s %s] hash=%s",
-				e.OccurredAt.Local().Format("2006-01-02 15:04:05"),
-				e.Type,
-				e.Actor,
-				shortHash(e.ContentHash),
-			)
-			if lines := intField(e.Payload, "size_lines"); lines > 0 {
-				fmt.Fprintf(&sb, " (%d lines", lines)
-				if chars := intField(e.Payload, "size_chars"); chars > 0 {
-					fmt.Fprintf(&sb, ", %d chars", chars)
-				}
-				sb.WriteString(")")
-			}
-			if fields := stringSliceField(e.Payload, "fields_changed"); len(fields) > 0 {
-				fmt.Fprintf(&sb, " — %s", strings.Join(fields, ","))
-			}
+			sb.WriteString(formatMechanicalEvent(e, mechRenderOpts{padType: true, withChars: true}))
 			sb.WriteString("\n")
 		}
 		if i < len(events)-1 && e.Type == felt.EventEditorial {

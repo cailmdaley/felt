@@ -58,15 +58,7 @@ keys have dedicated flags; use those.`,
 			return err
 		}
 
-		hasFlags := cmd.Flags().Changed("name") ||
-			cmd.Flags().Changed("status") ||
-			cmd.Flags().Changed("due") ||
-			cmd.Flags().Changed("tag") ||
-			cmd.Flags().Changed("untag") ||
-			cmd.Flags().Changed("body") ||
-			cmd.Flags().Changed("outcome") ||
-			cmd.Flags().Changed("set") ||
-			cmd.Flags().Changed("unset")
+		hasFlags := len(collectChangedEditFields(cmd)) > 0
 		if !hasFlags {
 			return fmt.Errorf("no changes requested: use edit flags (use --body only when you intend to overwrite the full body)")
 		}
@@ -176,12 +168,16 @@ keys have dedicated flags; use those.`,
 	},
 }
 
+// editFlagNames is the canonical list of edit's top-level metadata flags, in
+// the order they are reported. Drives both the "any change requested?" gate and
+// the mechanical event's fields_changed payload.
+var editFlagNames = []string{"name", "status", "due", "tag", "untag", "body", "outcome", "set", "unset"}
+
 // collectChangedEditFields lists which top-level edit flags the user actually
 // flipped, so the mechanical event payload reflects intent.
 func collectChangedEditFields(cmd *cobra.Command) []string {
-	candidates := []string{"name", "status", "due", "tag", "untag", "body", "outcome", "set", "unset"}
 	var out []string
-	for _, name := range candidates {
+	for _, name := range editFlagNames {
 		if cmd.Flags().Changed(name) {
 			out = append(out, name)
 		}

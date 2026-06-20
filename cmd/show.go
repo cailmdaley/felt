@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/cailmdaley/felt/internal/felt"
 	"github.com/spf13/cobra"
@@ -256,7 +255,7 @@ func renderFeltWithHistory(
 	if len(recentMechanical) > 0 {
 		out += "\nRecent mechanical events:\n"
 		for _, e := range recentMechanical {
-			out += "  " + formatMechanicalLine(e) + "\n"
+			out += "  " + formatMechanicalEvent(e, mechRenderOpts{}) + "\n"
 		}
 	}
 	return out
@@ -281,18 +280,6 @@ func indexOfBlankLine(s string) int {
 		}
 	}
 	return -1
-}
-
-func formatMechanicalLine(e felt.Event) string {
-	line := e.OccurredAt.Local().Format("2006-01-02 15:04:05") +
-		" [" + e.Type + " " + e.Actor + "] hash=" + shortHash(e.ContentHash)
-	if lines := intField(e.Payload, "size_lines"); lines > 0 {
-		line += fmt.Sprintf(" (%d lines)", lines)
-	}
-	if fields := stringSliceField(e.Payload, "fields_changed"); len(fields) > 0 {
-		line += " — " + strings.Join(fields, ",")
-	}
-	return line
 }
 
 func init() {
