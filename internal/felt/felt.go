@@ -32,44 +32,6 @@ const (
 	StatusClosed = "closed"
 )
 
-// GraphEdge represents a directed edge in the in-memory relationship graph.
-type GraphEdge struct {
-	ID    string `json:"id"`
-	Label string `json:"label"`
-}
-
-// GraphEdges is a slice of graph edges with helper methods.
-type GraphEdges []GraphEdge
-
-// IDs returns just the edge target IDs.
-func (deps GraphEdges) IDs() []string {
-	ids := make([]string, len(deps))
-	for i, d := range deps {
-		ids[i] = d.ID
-	}
-	return ids
-}
-
-// HasID returns true if the given ID is in the edge set.
-func (deps GraphEdges) HasID(id string) bool {
-	for _, d := range deps {
-		if d.ID == id {
-			return true
-		}
-	}
-	return false
-}
-
-// LabelFor returns the label for a given target ID, or empty string.
-func (deps GraphEdges) LabelFor(id string) string {
-	for _, d := range deps {
-		if d.ID == id {
-			return d.Label
-		}
-	}
-	return ""
-}
-
 type DataFlowInputRef struct {
 	InputID string
 	From    string
@@ -909,21 +871,6 @@ func StatusIcon(status string) string {
 	default:
 		return "?"
 	}
-}
-
-// ShortID truncates long path-like IDs for display.
-func ShortID(id string) string {
-	if len(id) <= 24 {
-		return id
-	}
-	parts := strings.Split(id, "/")
-	if len(parts) >= 2 {
-		tail := strings.Join(parts[len(parts)-2:], "/")
-		if len(tail)+4 <= 24 {
-			return ".../" + tail
-		}
-	}
-	return id[:21] + "..."
 }
 
 // IsOpen returns true if the felt is open.

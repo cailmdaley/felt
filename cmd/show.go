@@ -182,13 +182,19 @@ Targeted views:
 	},
 }
 
-func graphForBodyRefs(storage *felt.Storage, f *felt.Felt) *felt.Graph {
+// Graph is a resolved set of felts keyed by ID, used to render body references
+// with their display names.
+type Graph struct {
+	Nodes map[string]*felt.Felt
+}
+
+func graphForBodyRefs(storage *felt.Storage, f *felt.Felt) *Graph {
 	refs := felt.ExtractBodyRefs(f.Body)
 	if len(refs) == 0 {
 		return nil
 	}
 
-	g := &felt.Graph{Nodes: map[string]*felt.Felt{f.ID: f}}
+	g := &Graph{Nodes: map[string]*felt.Felt{f.ID: f}}
 	for _, ref := range refs {
 		target, ok, err := storage.FindExistingMetadataInScope(f.ID, ref.Target)
 		if err != nil || !ok {
@@ -236,7 +242,7 @@ func showConsumersFor(storage *felt.Storage, targetID string) ([]felt.DataFlowCo
 // optional mechanical-events trailer at -d full.
 func renderFeltWithHistory(
 	f *felt.Felt,
-	g *felt.Graph,
+	g *Graph,
 	detail string,
 	citations []felt.Citation,
 	consumers []felt.DataFlowConsumer,

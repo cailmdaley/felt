@@ -1161,35 +1161,6 @@ Back to real: [[another-real]].
 	}
 }
 
-func TestGraphEdgesHelpers(t *testing.T) {
-	deps := GraphEdges{
-		{ID: "task-a"},
-		{ID: "task-b", Label: "reason"},
-	}
-
-	// IDs
-	ids := deps.IDs()
-	if len(ids) != 2 || ids[0] != "task-a" || ids[1] != "task-b" {
-		t.Errorf("IDs() = %v, want [task-a, task-b]", ids)
-	}
-
-	// HasID
-	if !deps.HasID("task-a") {
-		t.Error("HasID(task-a) should be true")
-	}
-	if deps.HasID("task-c") {
-		t.Error("HasID(task-c) should be false")
-	}
-
-	// LabelFor
-	if l := deps.LabelFor("task-b"); l != "reason" {
-		t.Errorf("LabelFor(task-b) = %q, want %q", l, "reason")
-	}
-	if l := deps.LabelFor("task-a"); l != "" {
-		t.Errorf("LabelFor(task-a) = %q, want empty", l)
-	}
-}
-
 // TestExtraFieldsRoundTrip verifies that tool-owned frontmatter blocks
 // (unknown top-level keys like tempered:, or arbitrary nested namespaces)
 // survive a Parse → Marshal round-trip unchanged. This guards against

@@ -29,7 +29,7 @@ func validateDepth(d string) error {
 }
 
 // renderFelt renders a felt at the given depth level.
-func renderFelt(f *felt.Felt, g *felt.Graph, depth string, citations []felt.Citation, consumers []felt.DataFlowConsumer) string {
+func renderFelt(f *felt.Felt, g *Graph, depth string, citations []felt.Citation, consumers []felt.DataFlowConsumer) string {
 	switch depth {
 	case DepthName:
 		return renderName(f)
@@ -72,7 +72,7 @@ func renderCompact(f *felt.Felt) string {
 	return sb.String()
 }
 
-func renderSummary(f *felt.Felt, g *felt.Graph, citations []felt.Citation, consumers []felt.DataFlowConsumer) string {
+func renderSummary(f *felt.Felt, g *Graph, citations []felt.Citation, consumers []felt.DataFlowConsumer) string {
 	var sb strings.Builder
 	writeHeader(&sb, f)
 	if f.Due != nil {
@@ -95,7 +95,7 @@ func renderSummary(f *felt.Felt, g *felt.Graph, citations []felt.Citation, consu
 	return sb.String()
 }
 
-func renderFull(f *felt.Felt, g *felt.Graph, citations []felt.Citation, consumers []felt.DataFlowConsumer) string {
+func renderFull(f *felt.Felt, g *Graph, citations []felt.Citation, consumers []felt.DataFlowConsumer) string {
 	var sb strings.Builder
 	writeHeader(&sb, f)
 	writeBodyRefs(&sb, f, g)
@@ -182,7 +182,7 @@ func writeConsumers(sb *strings.Builder, consumers []felt.DataFlowConsumer) {
 
 // writeBodyRefs extracts markdown and wikilinks from the body and renders them
 // as a "Refs:" line, annotating which ones resolve to known fibers.
-func writeBodyRefs(sb *strings.Builder, f *felt.Felt, g *felt.Graph) {
+func writeBodyRefs(sb *strings.Builder, f *felt.Felt, g *Graph) {
 	if f.Body == "" {
 		return
 	}

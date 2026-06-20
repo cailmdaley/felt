@@ -241,7 +241,13 @@ func TestRenderFullResolvesScopedBodyRefs(t *testing.T) {
 	sibling := &felt.Felt{ID: "project/question", Name: "Question", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")}
 	child := &felt.Felt{ID: "project/analysis/method", Name: "Method", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")}
 
-	out := renderFelt(current, felt.BuildGraph([]*felt.Felt{parent, current, sibling, child}), DepthFull, nil, nil)
+	graph := &Graph{Nodes: map[string]*felt.Felt{
+		parent.ID:  parent,
+		current.ID: current,
+		sibling.ID: sibling,
+		child.ID:   child,
+	}}
+	out := renderFelt(current, graph, DepthFull, nil, nil)
 	if !strings.Contains(out, "Refs:     project/question (Question), project/analysis/method#step-a (Method)") {
 		t.Fatalf("renderFelt() scoped refs mismatch:\n%s", out)
 	}
