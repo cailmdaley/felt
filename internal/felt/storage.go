@@ -836,6 +836,15 @@ func (s *Storage) findWithModeAndScope(scopeID, query string, mode ParseMode) (*
 
 	matchID, err := ResolveScopedID(ids, scopeID, query)
 	if err != nil {
+		// Slug resolution missed. If the query is UID-shaped, fall back to an
+		// exact-UID walk: the UID lives in frontmatter (not the path-derived
+		// id), so it isn't in `ids`. ULIDs never collide with slugs, so this is
+		// purely additive — it only runs when slug resolution already failed.
+		if LooksLikeUID(query) {
+			if f, ok, uidErr := s.findByUIDWithMode(files, query, mode); ok || uidErr != nil {
+				return f, uidErr
+			}
+		}
 		return nil, err
 	}
 	f, err := s.readPathWithMode(pathByID[matchID], matchID, mode)
@@ -846,6 +855,31 @@ func (s *Storage) findWithModeAndScope(scopeID, query string, mode ParseMode) (*
 		f.ModifiedAt = info.ModTime()
 	}
 	return f, nil
+}
+
+// findByUIDWithMode resolves a fiber by an exact (case-insensitive) UID match.
+// The UID is frontmatter-only, so this walks the file list parsing metadata to
+// read each UID; the caller gates it on LooksLikeUID so the scan only runs for
+// UID-shaped queries that slug resolution already failed to resolve.
+func (s *Storage) findByUIDWithMode(files []fiberFile, query string, mode ParseMode) (*Felt, bool, error) {
+	for _, file := range files {
+		meta, err := s.readPathWithMode(file.path, file.id, ParseMetadataOnly)
+		if err != nil {
+			continue
+		}
+		if !meta.MatchesUID(query) {
+			continue
+		}
+		f, err := s.readPathWithMode(file.path, file.id, mode)
+		if err != nil {
+			return nil, true, err
+		}
+		if info, statErr := os.Stat(file.path); statErr == nil {
+			f.ModifiedAt = info.ModTime()
+		}
+		return f, true, nil
+	}
+	return nil, false, nil
 }
 
 func (s *Storage) findExistingPathWithModeAndScope(scopeID, query string, mode ParseMode) (*Felt, bool, error) {

@@ -860,6 +860,24 @@ func (f *Felt) MatchesID(query string) bool {
 	return MatchesIDQuery(f.ID, query)
 }
 
+// LooksLikeUID reports whether query has the shape of a fiber UID (a ULID:
+// 26-char Crockford base32, stamped at creation and immutable). ULIDs are
+// unambiguous against path-derived slugs, so a query that parses as a ULID can
+// be resolved by exact UID match without colliding with slug resolution.
+func LooksLikeUID(query string) bool {
+	if len(query) != 26 {
+		return false
+	}
+	_, err := ulid.ParseStrict(strings.ToUpper(query))
+	return err == nil
+}
+
+// MatchesUID returns true if the query is an exact (case-insensitive) match for
+// this felt's UID.
+func (f *Felt) MatchesUID(query string) bool {
+	return f.UID != "" && strings.EqualFold(f.UID, query)
+}
+
 // SearchText returns searchable metadata content beyond the title.
 func (f *Felt) SearchText() string {
 	parts := []string{f.UID, f.Outcome, f.Description, f.ExtraFieldsSearchText()}

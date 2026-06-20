@@ -676,6 +676,60 @@ func TestStorageFind(t *testing.T) {
 	}
 }
 
+func TestStorageFindByUID(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStorage(dir)
+	s.Init()
+
+	f1, _ := New("alpha-task", "Alpha task")
+	f2, _ := New("nested/beta-task", "Beta task")
+	s.Write(f1)
+	s.Write(f2)
+
+	// Resolve a top-level fiber by its exact UID.
+	found, err := s.Find(f1.UID)
+	if err != nil {
+		t.Fatalf("Find(uid) error: %v", err)
+	}
+	if found.ID != f1.ID || found.UID != f1.UID {
+		t.Errorf("Find(uid) = %q/%q, want %q/%q", found.ID, found.UID, f1.ID, f1.UID)
+	}
+
+	// Resolve a nested fiber by UID without needing its scope/path.
+	found, err = s.Find(f2.UID)
+	if err != nil {
+		t.Fatalf("Find(nested uid) error: %v", err)
+	}
+	if found.ID != f2.ID {
+		t.Errorf("Find(nested uid) = %q, want %q", found.ID, f2.ID)
+	}
+
+	// UID resolution is case-insensitive.
+	found, err = s.Find(strings.ToLower(f1.UID))
+	if err != nil {
+		t.Fatalf("Find(lowercase uid) error: %v", err)
+	}
+	if found.ID != f1.ID {
+		t.Errorf("Find(lowercase uid) = %q, want %q", found.ID, f1.ID)
+	}
+
+	// A UID-shaped query that matches nothing still errors cleanly.
+	if _, err := s.Find(NewULID()); err == nil {
+		t.Error("Find(unknown uid) should error")
+	}
+}
+
+func TestLooksLikeUID(t *testing.T) {
+	if !LooksLikeUID(NewULID()) {
+		t.Error("LooksLikeUID(NewULID()) = false, want true")
+	}
+	for _, q := range []string{"", "alpha-task", "ai-futures/shuttle", "01KVH4SJCD3C9XAGDDXJ9F6SR"} {
+		if LooksLikeUID(q) {
+			t.Errorf("LooksLikeUID(%q) = true, want false", q)
+		}
+	}
+}
+
 func TestStorageFindNotFound(t *testing.T) {
 	dir := t.TempDir()
 	s := NewStorage(dir)
