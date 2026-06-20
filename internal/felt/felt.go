@@ -789,8 +789,8 @@ func (f *Felt) DisplayName() string {
 	return strings.TrimSpace(f.Name)
 }
 
-// HasScaffoldOnlyBody reports whether the body is just the generated MyST scaffold.
-func (f *Felt) HasScaffoldOnlyBody() bool {
+// HasEmptyBody reports whether the body is empty (only whitespace).
+func (f *Felt) HasEmptyBody() bool {
 	return strings.TrimSpace(f.Body) == ""
 }
 

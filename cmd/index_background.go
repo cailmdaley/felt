@@ -26,7 +26,7 @@ func runBackgroundIndexSync(storage *felt.Storage) error {
 	for {
 		time.Sleep(indexSyncDebounce)
 		start := time.Now()
-		if _, err := syncIndex(storage); err != nil {
+		if _, err := openAndSyncIndex(storage); err != nil {
 			return err
 		}
 		requestedAt, err := indexSyncRequestedAt(storage)

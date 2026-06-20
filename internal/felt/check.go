@@ -49,6 +49,8 @@ func Check(felts []*Felt) []CheckIssue {
 	return issues
 }
 
+// checkNativeMetadata validates felt-owned frontmatter fields; currently only
+// that name is non-empty.
 func checkNativeMetadata(felts []*Felt) []CheckIssue {
 	var issues []CheckIssue
 	for _, f := range felts {

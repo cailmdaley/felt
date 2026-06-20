@@ -45,7 +45,7 @@ Examples:
 
 		storage := felt.NewStorage(root)
 
-		// Extract [bracketed] tags from slug input (for backward compat)
+		// Pull [bracketed] tags out of the slug so `felt add "[tag]name"` works
 		extractedTags, cleanSlug := felt.ExtractTags(args[0])
 
 		f, err := felt.New(cleanSlug, args[1])

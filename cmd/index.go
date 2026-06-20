@@ -51,7 +51,7 @@ effect.`,
 			return runBackgroundIndexSync(storage)
 		}
 
-		elapsed, err := syncIndex(storage)
+		elapsed, err := openAndSyncIndex(storage)
 		if err != nil {
 			return err
 		}
@@ -68,8 +68,10 @@ effect.`,
 	},
 }
 
-func syncIndex(storage *felt.Storage) (time.Duration, error) {
+func openAndSyncIndex(storage *felt.Storage) (time.Duration, error) {
 	start := time.Now()
+	// OpenIndex runs idx.Sync as a side effect of opening; that IS the sync
+	// we're timing.
 	idx, err := storage.OpenIndex()
 	if err != nil {
 		return 0, err

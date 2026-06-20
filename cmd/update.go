@@ -32,9 +32,10 @@ var updateCmd = &cobra.Command{
 If installed from source (via a dev source marker), pulls and rebuilds
 from the source checkout. Otherwise downloads the latest GitHub release.
 
-After the binary is updated, the Claude Code plugin is refreshed in the
-same step so that hooks and skills stay in lockstep with the binary.
-Plugin refresh is skipped silently if the claude CLI isn't on PATH.`,
+After the binary is updated, where the relevant CLI is present, the
+Claude Code plugin (and Codex wiring, if previously installed) is
+refreshed in the same step so that hooks and skills stay in lockstep
+with the binary.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Check for dev source install
 		if srcPath, err := devSourcePath(); err == nil {

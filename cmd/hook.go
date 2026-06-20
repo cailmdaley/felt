@@ -61,11 +61,10 @@ var hookSessionCmd = &cobra.Command{
 	},
 }
 
-// encodeHookJSON writes indented JSON without HTML-escaping `<>&`. The bash
-// hooks shelled out to jq, which doesn't escape by default; Go's encoder does.
-// The wire is semantically equivalent either way but the unescaped form reads
-// more cleanly in logs and matches the historical output byte-for-byte where
-// fiber bodies contain angle brackets.
+// encodeHookJSON writes indented JSON without HTML-escaping `<>&` (Go's encoder
+// escapes them by default). The wire is semantically equivalent either way, but
+// the unescaped form reads more cleanly in logs where fiber bodies contain
+// angle brackets. Output is pinned by cmd/hook_test.go — change it deliberately.
 func encodeHookJSON(w *os.File, v interface{}) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
@@ -137,9 +136,9 @@ const (
 	sessionStaleAge      = 30 * 24 * time.Hour
 )
 
-// buildSessionContext renders the markdown additionalContext text. Mirrors the
-// shape the previous bash hook emitted; tests in cmd/hook_test.go pin the
-// output so a wording or layout change is a deliberate diff.
+// buildSessionContext renders the markdown additionalContext text. Output is
+// pinned by cmd/hook_test.go — change it deliberately; a wording or layout
+// change shows up as a test diff.
 func buildSessionContext() string {
 	var sb strings.Builder
 	sb.WriteString("# Felt Workflow Context\n\n")

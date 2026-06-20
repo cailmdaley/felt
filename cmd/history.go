@@ -37,7 +37,7 @@ var historyCmd = &cobra.Command{
 By default returns editorial events (agent-written prose notes) in
 reverse-chronological order, in markdown form. Mechanical events
 (add/edit/external_edit) can be included with --mechanical or shown
-exclusively with --no-editorial.
+exclusively with --editorial=false.
 
 The log is append-only; each event is one row. Editorial events carry
 prose; mechanical events carry size deltas and a content hash.
@@ -46,7 +46,7 @@ Examples:
   felt history pure_eb/aa-submission                      # editorial chain
   felt history pure_eb --last 3                            # last 3 editorial events
   felt history pure_eb --mechanical                        # editorial + mechanical
-  felt history pure_eb --mechanical --no-editorial         # mechanical only
+  felt history pure_eb --mechanical --editorial=false      # mechanical only
   felt history pure_eb --since 2026-04-01
 
 The append subcommand records a new editorial event:
@@ -342,7 +342,7 @@ func init() {
 	historyCmd.AddCommand(historyBackfillCmd)
 
 	historyCmd.Flags().BoolVar(&histShowEditorial, "editorial", true,
-		"Include editorial (prose) events (default true)")
+		"Include editorial (prose) events")
 	historyCmd.Flags().BoolVar(&histShowMechanical, "mechanical", false,
 		"Include mechanical (add/edit/rm/external_edit) events")
 	historyCmd.Flags().StringVar(&histKindFilter, "kind", "",
@@ -389,9 +389,9 @@ func buildHistoryFilter(cmd *cobra.Command, fiberID string) (felt.EventFilter, e
 
 	editorial := histShowEditorial
 	mechanical := histShowMechanical
-	// If the user passed --no-editorial we want mechanical-only — make
+	// If the user passed --editorial=false we want mechanical-only — make
 	// sure that combination is honored even when --mechanical wasn't
-	// explicitly set (a user typing --no-editorial almost certainly wants
+	// explicitly set (a user suppressing editorial almost certainly wants
 	// the mechanical view).
 	if !editorial && !mechanical {
 		mechanical = true

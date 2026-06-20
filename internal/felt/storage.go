@@ -424,9 +424,9 @@ func (s *Storage) MigrateFlatFiles(dryRun bool) (*MigrationResult, error) {
 		})
 	}
 
-	// A single bare .md at .felt/ root is the entry-point fiber, not legacy —
-	// preserve it. Multiple bare files are orphaned flat-format fibers needing
-	// a home, so migrate them to <slug>/<slug>.md form.
+	// Exactly one bare root .md is assumed the entry-point fiber and left
+	// untouched; with two or more we can't tell entry-point from stray, so all
+	// are migrated (to <slug>/<slug>.md form).
 	if len(legacy) == 1 {
 		return &MigrationResult{}, nil
 	}
@@ -732,7 +732,6 @@ func (s *Storage) listWithModeHavingFrontmatterFields(mode ParseMode, includeMod
 
 	var felts []*Felt
 	for _, file := range files {
-		var f *Felt
 		if len(fields) > 0 && mode == ParseMetadataOnly {
 			matched, err := fileFrontmatterHasTopLevelFields(file.path, fields)
 			if err != nil {
@@ -742,18 +741,11 @@ func (s *Storage) listWithModeHavingFrontmatterFields(mode ParseMode, includeMod
 			if !matched {
 				continue
 			}
-			f, err = s.readPathWithMode(file.path, file.id, mode)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "warning: failed to parse %s: %v\n", file.path, err)
-				continue
-			}
-		} else {
-			var err error
-			f, err = s.readPathWithMode(file.path, file.id, mode)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "warning: failed to parse %s: %v\n", file.path, err)
-				continue
-			}
+		}
+		f, err := s.readPathWithMode(file.path, file.id, mode)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to parse %s: %v\n", file.path, err)
+			continue
 		}
 		if includeModTime {
 			if info, err := os.Stat(file.path); err == nil {

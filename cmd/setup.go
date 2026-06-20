@@ -552,10 +552,11 @@ func hooksReferenceFelt(hooks map[string]interface{}, event, basename string) bo
 	return false
 }
 
-// refreshCodexSetupIfInstalled re-runs the Codex hook wiring when felt's
-// Codex setup is detected in ~/.codex/hooks.json. Used by `felt update` so
-// a binary that just landed also refreshes Codex's view of the plugin
-// directory. Silent no-op when Codex setup isn't installed.
+// refreshCodexSetupIfInstalled re-runs the Codex plugin wiring when felt's
+// Codex setup is detected — the plugin enabled in ~/.codex/config.toml, or a
+// legacy hooks.json from a pre-1.0.8 install. Used by `felt update` so a binary
+// that just landed also refreshes Codex's view of the plugin directory. Silent
+// no-op when Codex setup isn't installed.
 func refreshCodexSetupIfInstalled() {
 	if !feltCodexInstalled() {
 		return

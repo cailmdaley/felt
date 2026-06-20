@@ -90,10 +90,10 @@ keys have dedicated flags; use those.`,
 			}
 		}
 		if cmd.Flags().Changed("body") {
-			if f.Body != "" && editBody != f.Body && !f.HasScaffoldOnlyBody() {
+			if f.Body != "" && editBody != f.Body && !f.HasEmptyBody() {
 				bodyOverwritten = true
 			}
-			if f.Body != "" && editBody == "" && !f.HasScaffoldOnlyBody() {
+			if f.Body != "" && editBody == "" && !f.HasEmptyBody() {
 				bodyCleared = true
 			}
 			f.Body = editBody
