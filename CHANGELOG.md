@@ -4,6 +4,30 @@ All notable changes to felt are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Removed
+
+- `felt history append --edit-window-start` / `--edit-window-end`. The
+  flags only ever wrote `edit_window_start` / `edit_window_end` into the
+  event payload; nothing read them back (the edit-window pointer is
+  auto-derived). The append surface is now `summary` / `actor` / `kind` /
+  `field`.
+- Large internal cleanup (behavior-preserving, ~1,440 LOC net): the
+  retired in-memory dependency-graph subsystem (`BuildGraph`, cycle
+  detection, topological `ready`, mermaid/dot/text export — orphaned when
+  the depends-on commands were dropped in 1.0.0), plus a batch of
+  zero-caller helpers left by the Shuttle/ASTRA and pre-1.0.8 hook-wiring
+  retirements. Several duplicated code paths (history tx/non-tx query
+  twins, the ID scan-resolve scaffold, the `ls` field-alias tables, the
+  native-frontmatter field list) were collapsed to single sources of truth.
+
+### Changed
+
+- `felt check`'s failure line dropped the always-zero warning count:
+  `check failed: N error(s), 0 warning(s)` → `check failed: N error(s)`.
+  No check ever emitted a warning.
+
 ## [1.0.9] — 2026-05-18
 
 ### Added

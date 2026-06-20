@@ -308,7 +308,8 @@ type nativeFieldSpec struct {
 // field-name aliases. feltHasField, feltJSONField, and frontmatterPrefilterFields
 // are thin adapters over it.
 var nativeFields = map[string]nativeFieldSpec{
-	"id":             {accessor: func(f *felt.Felt) (any, bool) { return f.ID, f.ID != "" }, prefilterable: true},
+	"id": {accessor: func(f *felt.Felt) (any, bool) { return f.ID, true }, prefilterable: true}, // slug, always present for a discovered fiber
+
 	"uid":            {accessor: feltUIDValue, prefilterKey: "id", prefilterable: true},
 	"ulid":           {accessor: feltUIDValue, prefilterKey: "id", prefilterable: true},
 	"frontmatter_id": {accessor: feltUIDValue, prefilterKey: "id", prefilterable: true},
