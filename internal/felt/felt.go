@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path"
+	"reflect"
 	"regexp"
 	"sort"
 	"strings"
@@ -398,23 +399,59 @@ func ParseWithMode(id string, content []byte, mode ParseMode) (*Felt, error) {
 	return f, nil
 }
 
-// knownFrontmatterKeys is the set of top-level YAML keys that felt parses
-// into struct fields. All other top-level keys are preserved as ExtraFields.
-var knownFrontmatterKeys = map[string]struct{}{
-	"id": {}, "name": {}, "title": {}, "status": {}, "tags": {},
-	"created-at": {}, "updated-at": {}, "closed-at": {}, "outcome": {}, "due": {},
-	"description": {},
-	// NOTE: all other top-level keys — including tool-owned namespaces like
-	// `shuttle:` and domain schemas like `inputs:` / `decisions:` /
-	// `insights:` / `tempered:` — round-trip unchanged via ExtraFields.
-	//
-	// NOTE: "depends-on" was previously listed here and silently absorbed
-	// at parse time (without a corresponding struct field — net effect: a
-	// field shaped like a dependency, dropped on read). It now lives in
-	// ExtraFields like any other unknown key and round-trips through
-	// MarshalJSON. The migrate command's depends-on stripping (in
-	// normalizeLegacyFrontmatter) is unaffected — it operates directly on
-	// the raw YAML node, not on the parsed Felt.
+// nativeFrontmatter is the single source of truth for felt's native top-level
+// frontmatter fields and their YAML order. parseFrontmatter and Marshal both
+// use it, so the parse and write field lists cannot drift apart. The `title`
+// legacy alias is deliberately NOT a field here: it is a read-only inbound
+// alias (see legacyFrontmatterTitleKey and parseFrontmatter) that maps onto
+// Name when name is absent, and is never written back.
+type nativeFrontmatter struct {
+	UID         string     `yaml:"id,omitempty"`
+	Name        string     `yaml:"name"`
+	Status      string     `yaml:"status,omitempty"`
+	Tags        []string   `yaml:"tags,omitempty"`
+	CreatedAt   time.Time  `yaml:"created-at"`
+	UpdatedAt   *time.Time `yaml:"updated-at,omitempty"`
+	ClosedAt    *time.Time `yaml:"closed-at,omitempty"`
+	Outcome     string     `yaml:"outcome,omitempty"`
+	Due         *time.Time `yaml:"due,omitempty"`
+	Description string     `yaml:"description,omitempty"`
+}
+
+// legacyFrontmatterTitleKey is a read-only INBOUND alias for `name`: parse
+// accepts it (and it counts as a known key so it is not captured into
+// ExtraFields), but Marshal never emits it. Modelled separately from the
+// native struct so a fiber that still carries `title:` does not start
+// round-tripping a phantom `title:` on every write.
+const legacyFrontmatterTitleKey = "title"
+
+// knownFrontmatterKeys is the set of top-level YAML keys that felt parses into
+// struct fields. All other top-level keys are preserved as ExtraFields. It is
+// derived from nativeFrontmatter's yaml tags plus the read-only `title` alias,
+// so it stays in lockstep with the parse/write field list.
+//
+// NOTE: all other top-level keys — including tool-owned namespaces like
+// `shuttle:` and domain schemas like `inputs:` / `decisions:` / `insights:` /
+// `tempered:` — round-trip unchanged via ExtraFields.
+//
+// NOTE: "depends-on" was previously listed here and silently absorbed at parse
+// time (without a corresponding struct field — net effect: a field shaped like
+// a dependency, dropped on read). It now lives in ExtraFields like any other
+// unknown key and round-trips through MarshalJSON. The migrate command's
+// depends-on stripping (in normalizeLegacyFrontmatter) is unaffected — it
+// operates directly on the raw YAML node, not on the parsed Felt.
+var knownFrontmatterKeys = buildKnownFrontmatterKeys()
+
+func buildKnownFrontmatterKeys() map[string]struct{} {
+	keys := map[string]struct{}{legacyFrontmatterTitleKey: {}}
+	t := reflect.TypeOf(nativeFrontmatter{})
+	for i := 0; i < t.NumField(); i++ {
+		tag := t.Field(i).Tag.Get("yaml")
+		if name, _, _ := strings.Cut(tag, ","); name != "" && name != "-" {
+			keys[name] = struct{}{}
+		}
+	}
+	return keys
 }
 
 // IsNativeFrontmatterKey reports whether a top-level frontmatter key is parsed
@@ -428,21 +465,12 @@ func IsNativeFrontmatterKey(key string) bool {
 }
 
 func parseFrontmatter(id string, frontmatter []byte) (*Felt, error) {
-	type feltFrontmatter struct {
-		UID         string     `yaml:"id,omitempty"`
-		Name        string     `yaml:"name"`
-		LegacyTitle string     `yaml:"title"`
-		Status      string     `yaml:"status,omitempty"`
-		Tags        []string   `yaml:"tags,omitempty"`
-		CreatedAt   time.Time  `yaml:"created-at"`
-		UpdatedAt   *time.Time `yaml:"updated-at,omitempty"`
-		ClosedAt    *time.Time `yaml:"closed-at,omitempty"`
-		Outcome     string     `yaml:"outcome,omitempty"`
-		Due         *time.Time `yaml:"due,omitempty"`
-		Description string     `yaml:"description,omitempty"`
+	// nativeFrontmatter carries the written fields; LegacyTitle is the
+	// read-only `title` inbound alias, parsed here but never marshalled.
+	var fm struct {
+		nativeFrontmatter `yaml:",inline"`
+		LegacyTitle       string `yaml:"title"`
 	}
-
-	var fm feltFrontmatter
 	if err := yaml.Unmarshal(frontmatter, &fm); err != nil {
 		return nil, fmt.Errorf("parsing YAML frontmatter: %w", err)
 	}
@@ -665,19 +693,11 @@ func isBlankLine(line []byte) bool {
 func (f *Felt) Marshal() ([]byte, error) {
 	f.canonicalizeName()
 
-	// Build frontmatter struct for controlled field ordering
-	fm := struct {
-		UID         string     `yaml:"id,omitempty"`
-		Name        string     `yaml:"name"`
-		Status      string     `yaml:"status,omitempty"`
-		Tags        []string   `yaml:"tags,omitempty"`
-		CreatedAt   time.Time  `yaml:"created-at"`
-		UpdatedAt   *time.Time `yaml:"updated-at,omitempty"`
-		ClosedAt    *time.Time `yaml:"closed-at,omitempty"`
-		Outcome     string     `yaml:"outcome,omitempty"`
-		Due         *time.Time `yaml:"due,omitempty"`
-		Description string     `yaml:"description,omitempty"`
-	}{
+	// Build frontmatter struct for controlled field ordering. The shared
+	// nativeFrontmatter type guarantees Marshal writes exactly the fields
+	// parse reads — minus the read-only `title` alias, which has no field
+	// here and is therefore never emitted.
+	fm := nativeFrontmatter{
 		UID:         f.UID,
 		Name:        f.Name,
 		Status:      f.Status,

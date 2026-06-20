@@ -241,12 +241,19 @@ func (i *Index) QueryEvents(filter EventFilter) ([]Event, error) {
 	return out, rows.Err()
 }
 
-// LatestMechanicalHash returns the content_hash of the most recent
+// rowQuerier is the single-row query surface shared by *sql.DB and *sql.Tx,
+// so the mechanical-hash and event-count reads have one implementation each
+// regardless of whether they run on a connection or inside a Sync tx.
+type rowQuerier interface {
+	QueryRow(query string, args ...any) *sql.Row
+}
+
+// latestMechanicalHash returns the content_hash of the most recent
 // storage-owned mechanical event for a fiber, or empty string if there are
 // none. Typed editorial events are deliberately excluded even when their
 // event_type is not "editorial".
-func (i *Index) LatestMechanicalHash(fiberID string) (string, error) {
-	row := i.db.QueryRow(
+func latestMechanicalHash(q rowQuerier, fiberID string) (string, error) {
+	row := q.QueryRow(
 		`SELECT COALESCE(content_hash, '') FROM history_events
 		 WHERE fiber_id = ? AND event_type IN (?, ?, ?)
 		 ORDER BY occurred_at DESC, rowid DESC LIMIT 1`,
@@ -266,32 +273,15 @@ func (i *Index) LatestMechanicalHash(fiberID string) (string, error) {
 	return hash, nil
 }
 
-// latestMechanicalHashTx is the tx-aware variant used during Sync.
-func latestMechanicalHashTx(tx *sql.Tx, fiberID string) (string, error) {
-	row := tx.QueryRow(
-		`SELECT COALESCE(content_hash, '') FROM history_events
-		 WHERE fiber_id = ? AND event_type IN (?, ?, ?)
-		 ORDER BY occurred_at DESC, rowid DESC LIMIT 1`,
-		fiberID,
-		EventAdd,
-		EventEdit,
-		EventExternalEdit,
-	)
-	var hash string
-	err := row.Scan(&hash)
-	if err == sql.ErrNoRows {
-		return "", nil
-	}
-	if err != nil {
-		return "", fmt.Errorf("read latest mechanical hash (tx): %w", err)
-	}
-	return hash, nil
+// LatestMechanicalHash is the connection-level entry point (used outside Sync).
+func (i *Index) LatestMechanicalHash(fiberID string) (string, error) {
+	return latestMechanicalHash(i.db, fiberID)
 }
 
-// EventCount returns the number of events for a fiber. Cheap existence
+// eventCount returns the number of events for a fiber. Cheap existence
 // check used during bootstrap.
-func (i *Index) EventCount(fiberID string) (int, error) {
-	row := i.db.QueryRow(
+func eventCount(q rowQuerier, fiberID string) (int, error) {
+	row := q.QueryRow(
 		`SELECT COUNT(*) FROM history_events WHERE fiber_id = ?`,
 		fiberID,
 	)
@@ -302,16 +292,9 @@ func (i *Index) EventCount(fiberID string) (int, error) {
 	return n, nil
 }
 
-func eventCountTx(tx *sql.Tx, fiberID string) (int, error) {
-	row := tx.QueryRow(
-		`SELECT COUNT(*) FROM history_events WHERE fiber_id = ?`,
-		fiberID,
-	)
-	var n int
-	if err := row.Scan(&n); err != nil {
-		return 0, fmt.Errorf("count history events (tx): %w", err)
-	}
-	return n, nil
+// EventCount is the connection-level entry point (used outside Sync).
+func (i *Index) EventCount(fiberID string) (int, error) {
+	return eventCount(i.db, fiberID)
 }
 
 // FiberSize returns line and char counts for the file backing a fiber.

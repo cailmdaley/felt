@@ -365,7 +365,7 @@ func (i *Index) Sync(s *Storage) error {
 		if _, ok := current[id]; ok {
 			continue
 		}
-		if err := deleteFiberCompletely(tx, id); err != nil {
+		if err := clearFiberRows(tx, id, true); err != nil {
 			return err
 		}
 	}
@@ -398,7 +398,7 @@ func (i *Index) Sync(s *Storage) error {
 		if hash == "" {
 			continue
 		}
-		latest, err := latestMechanicalHashTx(tx, id)
+		latest, err := latestMechanicalHash(tx, id)
 		if err != nil {
 			return err
 		}
@@ -406,7 +406,7 @@ func (i *Index) Sync(s *Storage) error {
 			continue
 		}
 
-		count, err := eventCountTx(tx, id)
+		count, err := eventCount(tx, id)
 		if err != nil {
 			return err
 		}
@@ -567,28 +567,34 @@ func (i *Index) indexedModTimes() (map[string]int64, error) {
 	return out, rows.Err()
 }
 
-func deleteFiberCompletely(tx *sql.Tx, id string) error {
+// clearFiberRows deletes a fiber's indexed rows. The source-owned rows (the
+// fiber itself, its raw_refs/tags/fiber_fts, and the links it originates) are
+// always removed — this is the reindex reset before indexFiber rewrites them.
+// includeInbound additionally drops links that *target* this fiber, used when
+// a fiber is removed from the tree entirely (the Sync delete loop) so no
+// dangling inbound edges survive. Splitting the inbound delete out of an
+// `OR target_id` clause is row-set equivalent.
+func clearFiberRows(tx *sql.Tx, id string, includeInbound bool) error {
 	statements := []string{
 		`DELETE FROM fibers WHERE id = ?`,
-		`DELETE FROM links WHERE source_id = ? OR target_id = ?`,
+		`DELETE FROM links WHERE source_id = ?`,
 		`DELETE FROM raw_refs WHERE source_id = ?`,
 		`DELETE FROM tags WHERE fiber_id = ?`,
 		`DELETE FROM fiber_fts WHERE id = ?`,
 	}
+	if includeInbound {
+		statements = append(statements, `DELETE FROM links WHERE target_id = ?`)
+	}
 	for _, stmt := range statements {
-		args := []any{id}
-		if strings.Contains(stmt, "target_id") {
-			args = []any{id, id}
-		}
-		if _, err := tx.Exec(stmt, args...); err != nil {
-			return fmt.Errorf("delete indexed fiber %s: %w", id, err)
+		if _, err := tx.Exec(stmt, id); err != nil {
+			return fmt.Errorf("clear indexed fiber %s: %w", id, err)
 		}
 	}
 	return nil
 }
 
 func indexFiber(tx *sql.Tx, f *Felt, allIDs []string) error {
-	if err := clearFiberSourceIndex(tx, f.ID); err != nil {
+	if err := clearFiberRows(tx, f.ID, false); err != nil {
 		return err
 	}
 
@@ -618,44 +624,33 @@ func indexFiber(tx *sql.Tx, f *Felt, allIDs []string) error {
 		}
 	}
 
-	bodyRefs := ExtractBodyRefs(f.Body)
-	for _, ref := range bodyRefs {
-		if err := insertRawRef(tx, f.ID, "reference", ref.Target, ref.Fragment, ""); err != nil {
+	// Index this fiber's outbound refs. insertRawRef runs unconditionally
+	// (resolved or not); a links row is added only when resolution succeeds.
+	if err := iterRefs([]*Felt{f}, allIDs, func(r resolvedRef) error {
+		if err := insertRawRef(tx, f.ID, r.Kind, r.RawTarget, r.Fragment, r.InputID); err != nil {
 			return err
 		}
-		targetID, err := ResolveScopedID(allIDs, f.ID, ref.Target)
-		if err != nil {
-			continue
+		if r.ResolveErr != nil {
+			return nil
 		}
-		if _, err := tx.Exec(
-			`INSERT INTO links (source_id, target_id, fragment, edge_type, input_id) VALUES (?, ?, ?, 'reference', NULL)`,
-			f.ID, targetID, nullIfEmpty(ref.Fragment),
-		); err != nil {
-			return fmt.Errorf("insert reference link %s -> %s: %w", f.ID, targetID, err)
-		}
-	}
-
-	for _, input := range f.DataFlowInputs() {
-		if strings.TrimSpace(input.From) == "" {
-			continue
-		}
-		targetFiber, fragment := splitDataFlowRef(input.From)
-		if targetFiber == "" {
-			continue
-		}
-		if err := insertRawRef(tx, f.ID, "data_flow", targetFiber, fragment, input.InputID); err != nil {
-			return err
-		}
-		targetID, err := ResolveScopedID(allIDs, f.ID, targetFiber)
-		if err != nil {
-			continue
+		if r.Kind == refKindReference {
+			if _, err := tx.Exec(
+				`INSERT INTO links (source_id, target_id, fragment, edge_type, input_id) VALUES (?, ?, ?, 'reference', NULL)`,
+				f.ID, r.ResolvedID, nullIfEmpty(r.Fragment),
+			); err != nil {
+				return fmt.Errorf("insert reference link %s -> %s: %w", f.ID, r.ResolvedID, err)
+			}
+			return nil
 		}
 		if _, err := tx.Exec(
 			`INSERT INTO links (source_id, target_id, fragment, edge_type, input_id) VALUES (?, ?, ?, 'data_flow', ?)`,
-			f.ID, targetID, nullIfEmpty(fragment), input.InputID,
+			f.ID, r.ResolvedID, nullIfEmpty(r.Fragment), r.InputID,
 		); err != nil {
-			return fmt.Errorf("insert data flow link %s -> %s: %w", f.ID, targetID, err)
+			return fmt.Errorf("insert data flow link %s -> %s: %w", f.ID, r.ResolvedID, err)
 		}
+		return nil
+	}); err != nil {
+		return err
 	}
 
 	if _, err := tx.Exec(
@@ -665,22 +660,6 @@ func indexFiber(tx *sql.Tx, f *Felt, allIDs []string) error {
 		return fmt.Errorf("insert fiber fts %s: %w", f.ID, err)
 	}
 
-	return nil
-}
-
-func clearFiberSourceIndex(tx *sql.Tx, id string) error {
-	statements := []string{
-		`DELETE FROM fibers WHERE id = ?`,
-		`DELETE FROM links WHERE source_id = ?`,
-		`DELETE FROM raw_refs WHERE source_id = ?`,
-		`DELETE FROM tags WHERE fiber_id = ?`,
-		`DELETE FROM fiber_fts WHERE id = ?`,
-	}
-	for _, stmt := range statements {
-		if _, err := tx.Exec(stmt, id); err != nil {
-			return fmt.Errorf("clear indexed fiber %s: %w", id, err)
-		}
-	}
 	return nil
 }
 

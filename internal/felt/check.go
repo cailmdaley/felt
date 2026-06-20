@@ -196,56 +196,49 @@ func checkRelationshipIntegrity(felts []*Felt) []CheckIssue {
 	sort.Strings(ids)
 
 	var issues []CheckIssue
-	for _, f := range felts {
-		for _, ref := range ExtractBodyRefs(f.Body) {
-			targetID, err := ResolveScopedID(ids, f.ID, ref.Target)
-			if err != nil {
+	_ = iterRefs(felts, ids, func(r resolvedRef) error {
+		if r.Kind == refKindReference {
+			path := "body"
+			if r.ResolveErr != nil {
 				issues = append(issues, CheckIssue{
 					Level:   CheckLevelError,
-					FiberID: f.ID,
-					Path:    "body",
-					Message: fmt.Sprintf("broken body reference %q", ref.String()),
+					FiberID: r.Source.ID,
+					Path:    path,
+					Message: fmt.Sprintf("broken body reference %q", r.Label),
 				})
-				continue
+				return nil
 			}
-			if strings.TrimSpace(ref.Fragment) != "" && !hasFrontmatterElement(byID[targetID], ref.Fragment) {
+			if strings.TrimSpace(r.Fragment) != "" && !hasFrontmatterElement(byID[r.ResolvedID], r.Fragment) {
 				issues = append(issues, CheckIssue{
 					Level:   CheckLevelError,
-					FiberID: f.ID,
-					Path:    "body",
-					Message: fmt.Sprintf("broken body reference %q: target has no element %q", ref.String(), ref.Fragment),
+					FiberID: r.Source.ID,
+					Path:    path,
+					Message: fmt.Sprintf("broken body reference %q: target has no element %q", r.Label, r.Fragment),
 				})
 			}
+			return nil
 		}
-		for _, input := range f.DataFlowInputs() {
-			targetFiber, fragment := splitDataFlowRef(input.From)
-			if targetFiber == "" {
-				continue
-			}
-			targetID, err := ResolveScopedID(ids, f.ID, targetFiber)
-			if err != nil {
-				message := fmt.Sprintf("broken data-flow reference %q", input.From)
-				if strings.TrimSpace(fragment) == "" {
-					message = fmt.Sprintf("broken data-flow reference %q", targetFiber)
-				}
-				issues = append(issues, CheckIssue{
-					Level:   CheckLevelError,
-					FiberID: f.ID,
-					Path:    "inputs." + input.InputID + ".from",
-					Message: message,
-				})
-				continue
-			}
-			if strings.TrimSpace(fragment) != "" && !hasOutput(byID[targetID], fragment) {
-				issues = append(issues, CheckIssue{
-					Level:   CheckLevelError,
-					FiberID: f.ID,
-					Path:    "inputs." + input.InputID + ".from",
-					Message: fmt.Sprintf("broken data-flow reference %q: target has no output %q", input.From, fragment),
-				})
-			}
+		// data-flow reference
+		path := "inputs." + r.InputID + ".from"
+		if r.ResolveErr != nil {
+			issues = append(issues, CheckIssue{
+				Level:   CheckLevelError,
+				FiberID: r.Source.ID,
+				Path:    path,
+				Message: fmt.Sprintf("broken data-flow reference %q", r.Label),
+			})
+			return nil
 		}
-	}
+		if strings.TrimSpace(r.Fragment) != "" && !hasOutput(byID[r.ResolvedID], r.Fragment) {
+			issues = append(issues, CheckIssue{
+				Level:   CheckLevelError,
+				FiberID: r.Source.ID,
+				Path:    path,
+				Message: fmt.Sprintf("broken data-flow reference %q: target has no output %q", r.Label, r.Fragment),
+			})
+		}
+		return nil
+	})
 	return issues
 }
 
