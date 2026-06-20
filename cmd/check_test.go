@@ -161,9 +161,9 @@ func TestCheckDoesNotSyncExistingIndex(t *testing.T) {
 		t.Fatalf("felt check returned error unexpectedly: %v\n%s", err, output)
 	}
 
-	idx, err = storage.OpenIndexNoSync()
+	idx, err = storage.OpenIndexReadOnly()
 	if err != nil {
-		t.Fatalf("OpenIndexNoSync() error: %v", err)
+		t.Fatalf("OpenIndexReadOnly() error: %v", err)
 	}
 	defer idx.Close()
 	ids, err := idx.SearchBodyIDs("should not enter FTS")

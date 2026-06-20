@@ -121,7 +121,7 @@ func TestSessionSectionPlacement(t *testing.T) {
 }
 
 // TestSessionRecencyOrdering: sections sort by the git-durable RecencyAnchor
-// (updated-at when present, else created-at) DESC — never the history index.
+// (updated-at when present, else created-at) DESC — never file mtime.
 func TestSessionRecencyOrdering(t *testing.T) {
 	dir := t.TempDir()
 	storage := felt.NewStorage(dir)

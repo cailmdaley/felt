@@ -163,10 +163,10 @@ func (f *Felt) Touch(t time.Time) {
 
 // RecencyAnchor returns the git-durable timestamp to anchor a fiber's recency:
 // frontmatter `updated-at` when it's the freshest, else `created-at`. The
-// index bootstrap and `felt history backfill` use it to seed a rebuilt event
-// log from a real last-touched time rather than file mtime, which the
-// clone/checkout/reorg rewrites of cross-machine git sync flatten to a single
-// instant. Returns the zero time only when both anchors are unset.
+// hook's SessionStart recency ordering uses it to rank fibers by a real
+// last-touched time rather than file mtime, which the clone/checkout/reorg
+// rewrites of cross-machine git sync flatten to a single instant. Returns the
+// zero time only when both anchors are unset.
 func (f *Felt) RecencyAnchor() time.Time {
 	anchor := f.CreatedAt
 	if f.UpdatedAt != nil && f.UpdatedAt.After(anchor) {

@@ -254,8 +254,7 @@ func formatHookEntry(f *felt.Felt, recency time.Time, withOutcome bool) string {
 }
 
 // hookEntryHead renders the "<timestamp> — <id>" label for a session entry,
-// using the same local "2006-01-02 15:04" rendering as `felt history` and the
-// `felt show` Recent line so the timestamp reads consistently across surfaces.
+// using a local "2006-01-02 15:04" rendering of the fiber's recency anchor.
 // Falls back to a bare id when the fiber has no recency anchor at all (both
 // updated-at and created-at unset).
 func hookEntryHead(f *felt.Felt, recency time.Time) string {
@@ -525,12 +524,6 @@ func runPostToolHook(stdin *os.File) error {
 	f.Touch(time.Now())
 	if err := storage.Write(f); err != nil {
 		return nil
-	}
-	// Record the edit with the post-stamp bytes so the hash matches on disk:
-	// felt's next Sync sees no further change and won't log a duplicate
-	// external_edit. Best-effort, like every other recordMechanical call.
-	if data, err := os.ReadFile(storage.Path(f.ID)); err == nil {
-		recordMechanical(storage, f.ID, felt.EventEdit, nil, data)
 	}
 	return nil
 }

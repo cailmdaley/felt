@@ -3,12 +3,41 @@ package cmd
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/cailmdaley/felt/internal/felt"
 )
+
+// writeMalformedFiber drops a fiber dir whose `<slug>.md` has truncated
+// frontmatter — used to confirm commands tolerate a single broken fiber
+// without failing the whole walk.
+func writeMalformedFiber(t *testing.T, dir string) {
+	t.Helper()
+	badDir := filepath.Join(dir, ".felt", "broken", "broken")
+	if err := os.MkdirAll(badDir, 0755); err != nil {
+		t.Fatalf("MkdirAll malformed fiber dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(badDir, "broken.md"), []byte("---\nname: Broken\n"), 0644); err != nil {
+		t.Fatalf("WriteFile malformed fiber: %v", err)
+	}
+}
+
+// writeInvalidYAMLFiber drops a fiber whose frontmatter is syntactically
+// invalid YAML — only a command that walks every fiber should trip on it.
+func writeInvalidYAMLFiber(t *testing.T, dir string) {
+	t.Helper()
+	badDir := filepath.Join(dir, ".felt", "broken-yaml", "broken-yaml")
+	if err := os.MkdirAll(badDir, 0755); err != nil {
+		t.Fatalf("MkdirAll invalid YAML fiber dir: %v", err)
+	}
+	content := []byte("---\nname: [\n---\nThis should only fail if the command walks every fiber.\n")
+	if err := os.WriteFile(filepath.Join(badDir, "broken-yaml.md"), content, 0644); err != nil {
+		t.Fatalf("WriteFile invalid YAML fiber: %v", err)
+	}
+}
 
 func mustShowExtra(t *testing.T, f *felt.Felt, key string, value any) {
 	t.Helper()

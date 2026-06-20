@@ -284,16 +284,6 @@ func TestIndexSyncTopologyChangeReindexesOnlyAffectedRawRefs(t *testing.T) {
 	}
 	defer idx.Close()
 
-	if err := idx.AppendEvent(Event{
-		FiberID:     "unrelated-source",
-		OccurredAt:  time.Now().UTC().Add(time.Minute),
-		Type:        EventEdit,
-		Actor:       "test-agent",
-		ContentHash: "stale-hash-that-does-not-match-disk",
-	}); err != nil {
-		t.Fatalf("AppendEvent stale unrelated hash: %v", err)
-	}
-
 	if err := storage.Write(&Felt{
 		ID:        "future-target",
 		Name:      "Future Target",
@@ -311,17 +301,6 @@ func TestIndexSyncTopologyChangeReindexesOnlyAffectedRawRefs(t *testing.T) {
 	}
 	if len(citations) != 1 || citations[0].SourceID != "affected-source" {
 		t.Fatalf("Citations(future-target) = %#v, want affected-source only", citations)
-	}
-
-	unrelatedExternal, err := idx.QueryEvents(EventFilter{
-		FiberID: "unrelated-source",
-		Types:   []string{EventExternalEdit},
-	})
-	if err != nil {
-		t.Fatalf("QueryEvents unrelated external_edit: %v", err)
-	}
-	if len(unrelatedExternal) != 0 {
-		t.Fatalf("topology sync audited unaffected source and invented external_edit: %#v", unrelatedExternal)
 	}
 }
 
@@ -679,64 +658,6 @@ func TestOpenIndexReturnsErrIndexBusyAfterRetriesExhausted(t *testing.T) {
 	}
 }
 
-func TestOpenIndexNoSyncRetriesAfterBusyTimeout(t *testing.T) {
-	setIndexBusyTimings(t, 25*time.Millisecond, []time.Duration{
-		25 * time.Millisecond,
-		50 * time.Millisecond,
-		100 * time.Millisecond,
-	})
-
-	dir := t.TempDir()
-	storage := NewStorage(dir)
-	if err := storage.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
-
-	if err := storage.Write(&Felt{
-		ID:        "fiber-a",
-		Name:      "Fiber A",
-		CreatedAt: time.Date(2026, 4, 10, 9, 0, 0, 0, time.UTC),
-	}); err != nil {
-		t.Fatalf("Write(fiber-a) error: %v", err)
-	}
-
-	idx, err := storage.OpenIndex()
-	if err != nil {
-		t.Fatalf("OpenIndex() error: %v", err)
-	}
-	defer idx.Close()
-
-	if _, err := idx.db.Exec(`BEGIN IMMEDIATE`); err != nil {
-		t.Fatalf("BEGIN IMMEDIATE error: %v", err)
-	}
-	t.Cleanup(func() {
-		_, _ = idx.db.Exec(`ROLLBACK`)
-	})
-
-	done := make(chan error, 1)
-	go func() {
-		second, err := storage.OpenIndexNoSync()
-		if err == nil {
-			err = second.Close()
-		}
-		done <- err
-	}()
-
-	time.Sleep(75 * time.Millisecond)
-	if _, err := idx.db.Exec(`COMMIT`); err != nil {
-		t.Fatalf("COMMIT error: %v", err)
-	}
-
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatalf("concurrent OpenIndexNoSync() error after retry: %v", err)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("concurrent OpenIndexNoSync() did not complete after writer released lock")
-	}
-}
-
 func TestOpenIndexReadOnlyDoesNotCreateIndex(t *testing.T) {
 	dir := t.TempDir()
 	storage := NewStorage(dir)
@@ -786,9 +707,9 @@ func TestOpenIndexReadOnlyReadsDuringConcurrentWriter(t *testing.T) {
 		t.Fatalf("Close() error: %v", err)
 	}
 
-	writer, err := storage.OpenIndexNoSync()
+	writer, err := storage.OpenIndex()
 	if err != nil {
-		t.Fatalf("OpenIndexNoSync() error: %v", err)
+		t.Fatalf("OpenIndex() error: %v", err)
 	}
 	defer writer.Close()
 	if _, err := writer.db.Exec(`BEGIN IMMEDIATE`); err != nil {
@@ -874,246 +795,6 @@ func TestConcurrentOpenIndexCleanFastPath(t *testing.T) {
 
 	for err := range errs {
 		t.Fatalf("concurrent clean OpenIndex() error: %v", err)
-	}
-}
-
-func TestIndexSyncDoesNotInventExternalEditAfterTypedEditorial(t *testing.T) {
-	dir := t.TempDir()
-	storage := NewStorage(dir)
-	if err := storage.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
-
-	baseTime := time.Date(2026, 4, 10, 9, 0, 0, 0, time.UTC)
-	fiber := &Felt{
-		ID:        "fiber-a",
-		Name:      "Fiber A",
-		CreatedAt: baseTime,
-		Body:      "before",
-	}
-	if err := storage.Write(fiber); err != nil {
-		t.Fatalf("Write(fiber-a) error: %v", err)
-	}
-
-	idx, err := storage.OpenIndex()
-	if err != nil {
-		t.Fatalf("OpenIndex() error: %v", err)
-	}
-	defer idx.Close()
-
-	time.Sleep(10 * time.Millisecond)
-	fiber.Body = "after"
-	if err := storage.Write(fiber); err != nil {
-		t.Fatalf("Write(updated fiber-a) error: %v", err)
-	}
-	data, err := os.ReadFile(storage.Path("fiber-a"))
-	if err != nil {
-		t.Fatalf("ReadFile(updated fiber-a) error: %v", err)
-	}
-	hash := HashBytes(data)
-	eventTime := time.Now().UTC().Add(time.Minute)
-	if err := idx.AppendEvent(Event{
-		FiberID:     "fiber-a",
-		OccurredAt:  eventTime,
-		Type:        EventEdit,
-		Actor:       "test-agent",
-		ContentHash: hash,
-	}); err != nil {
-		t.Fatalf("AppendEvent edit: %v", err)
-	}
-	if err := idx.AppendEvent(Event{
-		FiberID:    "fiber-a",
-		OccurredAt: eventTime.Add(time.Minute),
-		Type:       "review-comment",
-		Actor:      "test-reviewer",
-		Payload:    map[string]interface{}{"text": "looks good"},
-	}); err != nil {
-		t.Fatalf("AppendEvent typed editorial: %v", err)
-	}
-
-	if err := idx.Sync(storage); err != nil {
-		t.Fatalf("Sync() error: %v", err)
-	}
-	external, err := idx.QueryEvents(EventFilter{
-		FiberID: "fiber-a",
-		Types:   []string{EventExternalEdit},
-	})
-	if err != nil {
-		t.Fatalf("QueryEvents external_edit: %v", err)
-	}
-	if len(external) != 0 {
-		t.Fatalf("Sync recorded external_edit after typed editorial: %#v", external)
-	}
-}
-
-func TestIndexSyncAuditsOnlyDirtyMtimes(t *testing.T) {
-	dir := t.TempDir()
-	storage := NewStorage(dir)
-	if err := storage.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
-
-	baseTime := time.Date(2026, 4, 10, 9, 0, 0, 0, time.UTC)
-	for _, fiber := range []*Felt{
-		{ID: "dirty", Name: "Dirty", CreatedAt: baseTime, Body: "before"},
-		{ID: "untouched", Name: "Untouched", CreatedAt: baseTime, Body: "stable"},
-	} {
-		if err := storage.Write(fiber); err != nil {
-			t.Fatalf("Write(%s) error: %v", fiber.ID, err)
-		}
-	}
-
-	idx, err := storage.OpenIndex()
-	if err != nil {
-		t.Fatalf("OpenIndex() error: %v", err)
-	}
-	defer idx.Close()
-
-	if err := idx.AppendEvent(Event{
-		FiberID:     "untouched",
-		OccurredAt:  time.Now().UTC().Add(time.Minute),
-		Type:        EventEdit,
-		Actor:       "test-agent",
-		ContentHash: "stale-hash-that-does-not-match-disk",
-	}); err != nil {
-		t.Fatalf("AppendEvent stale untouched hash: %v", err)
-	}
-
-	dirty := &Felt{ID: "dirty", Name: "Dirty", CreatedAt: baseTime, Body: "after"}
-	if err := storage.Write(dirty); err != nil {
-		t.Fatalf("Write(dirty update) error: %v", err)
-	}
-	future := time.Now().Add(time.Second)
-	if err := os.Chtimes(storage.Path("dirty"), future, future); err != nil {
-		t.Fatalf("chtimes dirty: %v", err)
-	}
-
-	if err := idx.Sync(storage); err != nil {
-		t.Fatalf("Sync() error: %v", err)
-	}
-
-	untouchedExternal, err := idx.QueryEvents(EventFilter{
-		FiberID: "untouched",
-		Types:   []string{EventExternalEdit},
-	})
-	if err != nil {
-		t.Fatalf("QueryEvents untouched external_edit: %v", err)
-	}
-	if len(untouchedExternal) != 0 {
-		t.Fatalf("Sync audited unchanged fiber and invented external_edit: %#v", untouchedExternal)
-	}
-
-	dirtyExternal, err := idx.QueryEvents(EventFilter{
-		FiberID: "dirty",
-		Types:   []string{EventExternalEdit},
-	})
-	if err != nil {
-		t.Fatalf("QueryEvents dirty external_edit: %v", err)
-	}
-	if len(dirtyExternal) != 1 {
-		t.Fatalf("Sync should still audit dirty fiber, got %#v", dirtyExternal)
-	}
-}
-
-func TestIndexSyncBootstrapsAddAtCreatedAtNotMtime(t *testing.T) {
-	dir := t.TempDir()
-	storage := NewStorage(dir)
-	if err := storage.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
-
-	// A fiber whose file mtime is deliberately unrelated to its created-at:
-	// this is the fresh-clone shape, where checkout collapses every mtime to
-	// one instant while created-at stays git-durable. The bootstrap add must
-	// anchor at created-at so recency survives the clone.
-	createdAt := time.Date(2025, 11, 2, 14, 30, 0, 0, time.UTC)
-	if err := storage.Write(&Felt{
-		ID:        "fresh",
-		Name:      "Fresh",
-		CreatedAt: createdAt,
-		Body:      "first sighting",
-	}); err != nil {
-		t.Fatalf("Write(fresh) error: %v", err)
-	}
-	mtime := time.Date(2026, 6, 1, 9, 0, 0, 0, time.UTC)
-	if err := os.Chtimes(storage.Path("fresh"), mtime, mtime); err != nil {
-		t.Fatalf("chtimes fresh: %v", err)
-	}
-
-	// OpenIndex syncs; the file is new (no prior events) so the hash-on-read
-	// pass mints the synthetic bootstrap add.
-	idx, err := storage.OpenIndex()
-	if err != nil {
-		t.Fatalf("OpenIndex() error: %v", err)
-	}
-	defer idx.Close()
-
-	adds, err := idx.QueryEvents(EventFilter{
-		FiberID: "fresh",
-		Types:   []string{EventAdd},
-	})
-	if err != nil {
-		t.Fatalf("QueryEvents add: %v", err)
-	}
-	if len(adds) != 1 {
-		t.Fatalf("expected one bootstrap add event, got %#v", adds)
-	}
-	add := adds[0]
-	if add.Payload["bootstrap"] != true {
-		t.Fatalf("bootstrap add missing marker: %#v", add.Payload)
-	}
-	if !add.OccurredAt.Equal(createdAt) {
-		t.Fatalf("bootstrap add occurred_at = %v, want created-at %v (not mtime %v)", add.OccurredAt, createdAt, mtime)
-	}
-}
-
-func TestIndexSyncBootstrapsAddAtUpdatedAtWhenNewer(t *testing.T) {
-	dir := t.TempDir()
-	storage := NewStorage(dir)
-	if err := storage.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
-
-	// A fiber edited after creation: created-at is when it was born,
-	// updated-at is the last content write felt recorded. On a fresh clone
-	// (mtime collapsed to checkout time, no events) the bootstrap add must
-	// anchor at updated-at — the real last-touched time — so recency reflects
-	// recent work, not stale creation order.
-	createdAt := time.Date(2025, 11, 2, 14, 30, 0, 0, time.UTC)
-	updatedAt := time.Date(2026, 5, 20, 8, 15, 0, 0, time.UTC)
-	if err := storage.Write(&Felt{
-		ID:        "worked",
-		Name:      "Worked",
-		CreatedAt: createdAt,
-		UpdatedAt: &updatedAt,
-		Body:      "edited since creation",
-	}); err != nil {
-		t.Fatalf("Write(worked) error: %v", err)
-	}
-	mtime := time.Date(2026, 6, 1, 9, 0, 0, 0, time.UTC)
-	if err := os.Chtimes(storage.Path("worked"), mtime, mtime); err != nil {
-		t.Fatalf("chtimes worked: %v", err)
-	}
-
-	idx, err := storage.OpenIndex()
-	if err != nil {
-		t.Fatalf("OpenIndex() error: %v", err)
-	}
-	defer idx.Close()
-
-	adds, err := idx.QueryEvents(EventFilter{
-		FiberID: "worked",
-		Types:   []string{EventAdd},
-	})
-	if err != nil {
-		t.Fatalf("QueryEvents add: %v", err)
-	}
-	if len(adds) != 1 {
-		t.Fatalf("expected one bootstrap add event, got %#v", adds)
-	}
-	if !adds[0].OccurredAt.Equal(updatedAt) {
-		t.Fatalf("bootstrap add occurred_at = %v, want updated-at %v (not created-at %v, not mtime %v)",
-			adds[0].OccurredAt, updatedAt, createdAt, mtime)
 	}
 }
 

@@ -111,11 +111,6 @@ Examples:
 			return err
 		}
 
-		// Record the mechanical event before any subsequent index sync
-		// would mistake the new file for an external edit.
-		if data, err := os.ReadFile(storage.Path(f.ID)); err == nil {
-			recordMechanical(storage, f.ID, felt.EventAdd, []string{"all"}, data)
-		}
 		requestAsyncIndexSync(storage)
 
 		fmt.Println(f.ID)

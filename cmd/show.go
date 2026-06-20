@@ -119,21 +119,16 @@ Targeted views:
 
 		var citations []felt.Citation
 		var consumers []felt.DataFlowConsumer
-		var recentEditorial string
-		var recentMechanical []felt.Event
 		if detail == DepthSummary || detail == DepthFull {
 			// Ordinary show is a continuity/read path, so keep it responsive
-			// even when the search/link index is stale. Relationship and
-			// history context are best-effort read-only cache lookups here.
+			// even when the link index is stale, throwaway, or absent.
+			// Relationship context is a best-effort read-only cache lookup;
+			// on a missing or busy index we scan the markdown directly so the
+			// reverse-edge block never silently shows empty.
 			idx, idxErr := storage.OpenIndexReadOnly()
-			if idxErr != nil && !errors.Is(idxErr, felt.ErrIndexBusy) && !errors.Is(idxErr, os.ErrNotExist) {
-				return idxErr
-			}
-			if errors.Is(idxErr, felt.ErrIndexBusy) {
-				fmt.Fprintf(os.Stderr, "warning: index busy — citations, consumers, and history unavailable\n")
-			} else if idxErr == nil {
+			switch {
+			case idxErr == nil:
 				defer idx.Close()
-
 				citations, err = idx.Citations(f.ID)
 				if err != nil {
 					return err
@@ -142,41 +137,27 @@ Targeted views:
 				if err != nil {
 					return err
 				}
-
-				editorialEvents, err := idx.QueryEvents(felt.EventFilter{
-					FiberID:    f.ID,
-					Types:      []string{felt.EventEditorial},
-					Limit:      1,
-					Descending: true,
-				})
-				if err != nil {
+			case errors.Is(idxErr, os.ErrNotExist):
+				if citations, err = storage.ScanCitations(f.ID); err != nil {
 					return err
 				}
-				recentEditorial = renderRecentEditorial(editorialEvents)
-
-				if detail == DepthFull {
-					mech, err := idx.QueryEvents(felt.EventFilter{
-						FiberID: f.ID,
-						Types: []string{
-							felt.EventAdd,
-							felt.EventEdit,
-							felt.EventExternalEdit,
-						},
-						Limit:      5,
-						Descending: true,
-					})
-					if err != nil {
-						return err
-					}
-					recentMechanical = mech
+				if consumers, err = storage.ScanConsumers(f.ID); err != nil {
+					return err
 				}
+			case errors.Is(idxErr, felt.ErrIndexBusy):
+				fmt.Fprintf(os.Stderr, "warning: index busy — scanning markdown for citations and consumers\n")
+				if citations, err = storage.ScanCitations(f.ID); err != nil {
+					return err
+				}
+				if consumers, err = storage.ScanConsumers(f.ID); err != nil {
+					return err
+				}
+			default:
+				return idxErr
 			}
 		}
 
-		fmt.Print(renderFeltWithHistory(
-			f, graph, detail, citations, consumers,
-			recentEditorial, recentMechanical,
-		))
+		fmt.Print(renderFelt(f, graph, detail, citations, consumers))
 		return nil
 	},
 }
@@ -234,52 +215,6 @@ func showConsumersFor(storage *felt.Storage, targetID string) ([]felt.DataFlowCo
 	}
 	defer idx.Close()
 	return idx.Consumers(targetID)
-}
-
-// renderFeltWithHistory wraps renderFelt and splices in the Recent
-// editorial line (between the metadata block and the body) plus an
-// optional mechanical-events trailer at -d full.
-func renderFeltWithHistory(
-	f *felt.Felt,
-	g *Graph,
-	detail string,
-	citations []felt.Citation,
-	consumers []felt.DataFlowConsumer,
-	recentEditorial string,
-	recentMechanical []felt.Event,
-) string {
-	out := renderFelt(f, g, detail, citations, consumers)
-	if recentEditorial != "" {
-		out = spliceRecentEditorial(out, recentEditorial)
-	}
-	if len(recentMechanical) > 0 {
-		out += "\nRecent mechanical events:\n"
-		for _, e := range recentMechanical {
-			out += "  " + formatMechanicalEvent(e, mechRenderOpts{}) + "\n"
-		}
-	}
-	return out
-}
-
-// spliceRecentEditorial inserts the Recent block right after the
-// metadata header (before the blank line that precedes the body), so
-// the most recent session summary is visible in the same eye-pass as
-// status / outcome.
-func spliceRecentEditorial(rendered, recent string) string {
-	idx := indexOfBlankLine(rendered)
-	if idx < 0 {
-		return rendered + recent
-	}
-	return rendered[:idx] + recent + rendered[idx:]
-}
-
-func indexOfBlankLine(s string) int {
-	for i := 0; i < len(s)-1; i++ {
-		if s[i] == '\n' && s[i+1] == '\n' {
-			return i + 1
-		}
-	}
-	return -1
 }
 
 func init() {

@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -150,10 +149,6 @@ keys have dedicated flags; use those.`,
 			return err
 		}
 
-		fieldsChanged := collectChangedEditFields(cmd)
-		if data, err := os.ReadFile(storage.Path(f.ID)); err == nil {
-			recordMechanical(storage, f.ID, felt.EventEdit, fieldsChanged, data)
-		}
 		requestAsyncIndexSync(storage)
 
 		switch {

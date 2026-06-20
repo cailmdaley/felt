@@ -147,17 +147,6 @@ func (i *Index) init() error {
 			body,
 			search_text
 		)`,
-		`CREATE TABLE IF NOT EXISTS history_events (
-			rowid        INTEGER PRIMARY KEY AUTOINCREMENT,
-			fiber_id     TEXT NOT NULL,
-			occurred_at  TEXT NOT NULL,
-			event_type   TEXT NOT NULL,
-			actor        TEXT NOT NULL,
-			content_hash TEXT,
-			payload      TEXT
-		)`,
-		`CREATE INDEX IF NOT EXISTS history_events_fiber_time
-			ON history_events(fiber_id, occurred_at DESC, rowid DESC)`,
 		`CREATE TABLE IF NOT EXISTS index_meta (
 			key TEXT PRIMARY KEY,
 			value TEXT NOT NULL
@@ -228,19 +217,6 @@ func openIndexWithBusyRetries(root string, opener func(string) (*Index, error), 
 		return idx, nil
 	}
 	return nil, fmt.Errorf("%w: %v", ErrIndexBusy, lastBusy)
-}
-
-// OpenIndexNoSync opens the index without running Sync. Used by CLI
-// commands that need to append a mechanical event for an action they
-// just performed: Sync's external_edit detection would otherwise
-// mistake the change for an unattributed edit. After AppendEvent is
-// called with the post-edit hash, subsequent OpenIndex/Sync calls see
-// the hashes match and stay quiet.
-func (s *Storage) OpenIndexNoSync() (*Index, error) {
-	root := filepath.Dir(s.root)
-	return openIndexWithBusyRetries(root, func(root string) (*Index, error) {
-		return openIndex(root, indexOpenWrite)
-	}, nil)
 }
 
 // OpenIndexReadOnly opens an existing index for stale-ok cache reads. It does
@@ -376,74 +352,6 @@ func (i *Index) Sync(s *Storage) error {
 		}
 	}
 
-	// Hash-on-read: catch direct file edits (vi/IDE) that didn't go
-	// through the felt CLI. We audit only files whose mtime differs from
-	// the index snapshot. The clean fast path above already treats stable
-	// mtimes as enough to avoid hashing; keeping the same invariant here
-	// prevents a one-file edit from forcing full-store hash/history work.
-	// New fibers without events get a synthetic add event (the bootstrap
-	// baseline).
-	for _, id := range dirtyIDs {
-		state := current[id]
-		hash, err := HashFile(state.path)
-		if err != nil {
-			return err
-		}
-		if hash == "" {
-			continue
-		}
-		latest, err := latestMechanicalHash(tx, id)
-		if err != nil {
-			return err
-		}
-		if latest == hash {
-			continue
-		}
-
-		count, err := eventCount(tx, id)
-		if err != nil {
-			return err
-		}
-		eventType := EventExternalEdit
-		actor := "external"
-		payload := map[string]interface{}{}
-		// External edits are stamped at the file mtime, but the bootstrap
-		// add is anchored at created-at below — mtime is git-volatile (a
-		// fresh clone collapses every file to checkout time), and recency
-		// ordering must be git-durable.
-		occurredAt := state.modifiedAt
-		if count == 0 {
-			// First time we've seen this fiber. Anchor the chain with
-			// a synthetic add — not labelled external, since we don't
-			// know whether the original create went through the CLI.
-			eventType = EventAdd
-			actor = "index-bootstrap"
-			payload["bootstrap"] = true
-			// Anchor at the git-durable recency time (frontmatter
-			// updated-at, else created-at — matches `felt history
-			// backfill`), reading metadata only in this rare bootstrap
-			// case. mtime stays the fallback only when both are unset.
-			if f, err := s.ReadMetadata(id); err == nil {
-				if a := f.RecencyAnchor(); !a.IsZero() {
-					occurredAt = a
-				}
-			}
-		}
-		lines, chars := FiberSize(state.path)
-		payload["size_lines"] = lines
-		payload["size_chars"] = chars
-		payload["mtime"] = state.modifiedAt.UTC().Format(time.RFC3339Nano)
-		if err := i.appendEventTx(tx, Event{
-			FiberID:     id,
-			OccurredAt:  occurredAt,
-			Type:        eventType,
-			Actor:       actor,
-			ContentHash: hash,
-			Payload:     payload,
-		}); err != nil {
-			return err
-		}
-	}
 	if !rawRefsReady {
 		if err := setIndexMetaTx(tx, "raw_refs_v1", "true"); err != nil {
 			return err
