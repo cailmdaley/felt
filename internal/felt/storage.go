@@ -164,28 +164,6 @@ func (s *Storage) Path(id string) string {
 	return dirForm
 }
 
-// NextAvailableID returns the first unused ID based on a slug path.
-func (s *Storage) NextAvailableID(baseID string) (string, error) {
-	baseID = filepath.ToSlash(filepath.Clean(strings.TrimSpace(baseID)))
-	baseID = strings.TrimPrefix(baseID, "./")
-	if baseID == "." || baseID == "" {
-		return "", fmt.Errorf("invalid felt id")
-	}
-
-	for n := 1; ; n++ {
-		candidate := baseID
-		if n > 1 {
-			candidate = disambiguateID(baseID, n)
-		}
-		if _, err := os.Stat(s.Path(candidate)); err == nil {
-			continue
-		} else if !os.IsNotExist(err) {
-			return "", fmt.Errorf("checking id %s: %w", candidate, err)
-		}
-		return candidate, nil
-	}
-}
-
 // CheckAvailableID returns an error if the target fiber ID already exists.
 func (s *Storage) CheckAvailableID(id string) error {
 	id = filepath.ToSlash(filepath.Clean(strings.TrimSpace(id)))
@@ -229,12 +207,6 @@ func (s *Storage) Read(id string) (*Felt, error) {
 // ReadMetadata loads just the felt metadata, skipping body parsing.
 func (s *Storage) ReadMetadata(id string) (*Felt, error) {
 	return s.readWithMode(id, ParseMetadataOnly)
-}
-
-// FindMetadata returns the first felt matching the ID prefix or basename,
-// reading only metadata from the matching file.
-func (s *Storage) FindMetadata(query string) (*Felt, error) {
-	return s.FindMetadataInScope("", query)
 }
 
 // FindMetadataInScope returns the first felt matching the query using lexical
@@ -799,21 +771,16 @@ func (s *Storage) listWithModeHavingFrontmatterFields(mode ParseMode, includeMod
 	return felts, nil
 }
 
-// Find returns the first felt matching the ID prefix or basename.
-func (s *Storage) Find(query string) (*Felt, error) {
-	return s.FindInScope("", query)
-}
-
 // FindInScope returns the first felt matching the query using lexical scoped
 // resolution rooted at scopeID.
 func (s *Storage) FindInScope(scopeID, query string) (*Felt, error) {
 	return s.findWithModeAndScope(scopeID, query, ParseFull)
 }
 
-func (s *Storage) findWithMode(query string, mode ParseMode) (*Felt, error) {
-	return s.findWithModeAndScope("", query, mode)
-}
-
+// findWithModeAndScope is the single fiber-resolution implementation behind
+// FindInScope / FindMetadataInScope / FindExistingMetadataInScope: it tries
+// direct on-disk scope-chain candidates first, then falls back to a full-store
+// scan with slug and (UID-shaped) exact-UID matching.
 func (s *Storage) findWithModeAndScope(scopeID, query string, mode ParseMode) (*Felt, error) {
 	if f, ok, err := s.findExistingPathWithModeAndScope(scopeID, query, mode); ok || err != nil {
 		return f, err

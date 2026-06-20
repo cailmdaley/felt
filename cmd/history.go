@@ -21,12 +21,10 @@ var (
 	histSince          string
 	histUntil          string
 
-	histAppendSummary  string
-	histAppendActor    string
-	histAppendEditFrom string
-	histAppendEditTo   string
-	histAppendKind     string
-	histAppendFields   []string
+	histAppendSummary string
+	histAppendActor   string
+	histAppendKind    string
+	histAppendFields  []string
 
 	histBackfillDryRun bool
 )
@@ -189,12 +187,6 @@ Examples:
 		payload := map[string]interface{}{
 			felt.EditorialTextKey: summary,
 		}
-		if strings.TrimSpace(histAppendEditFrom) != "" {
-			payload["edit_window_start"] = strings.TrimSpace(histAppendEditFrom)
-		}
-		if strings.TrimSpace(histAppendEditTo) != "" {
-			payload["edit_window_end"] = strings.TrimSpace(histAppendEditTo)
-		}
 
 		// --field key=value (repeatable) merges arbitrary string fields into
 		// the event payload. Lets typed events (e.g. review-comment) carry
@@ -213,8 +205,7 @@ Examples:
 				return fmt.Errorf("--field %q: empty key", kv)
 			}
 			switch key {
-			case felt.EditorialTextKey, felt.EditorialTextKeyLegacy,
-				"edit_window_start", "edit_window_end":
+			case felt.EditorialTextKey, felt.EditorialTextKeyLegacy:
 				return fmt.Errorf("--field %q: reserved key, use the dedicated flag", key)
 			}
 			payload[key] = val
@@ -367,17 +358,12 @@ func init() {
 		"Editorial summary text (or pipe on stdin)")
 	historyAppendCmd.Flags().StringVar(&histAppendActor, "actor", "",
 		"Override actor identity (default: $FELT_AGENT@<host> or <host>)")
-	historyAppendCmd.Flags().StringVar(&histAppendEditFrom, "edit-window-start", "",
-		"Optional: lower bound of the mechanical edit window this event summarizes (RFC3339)")
-	historyAppendCmd.Flags().StringVar(&histAppendEditTo, "edit-window-end", "",
-		"Optional: upper bound of the mechanical edit window this event summarizes (RFC3339)")
 	historyAppendCmd.Flags().StringVar(&histAppendKind, "kind", "",
 		"Event type to record (default: editorial; e.g. 'review-comment'). "+
 			"Mechanical kinds (add/edit/rm/external_edit) are reserved.")
 	historyAppendCmd.Flags().StringArrayVar(&histAppendFields, "field", nil,
 		"Repeatable: add a key=value field to the event payload "+
-			"(e.g. --field resume_mode=previous). Reserved keys: text, "+
-			"summary, edit_window_start, edit_window_end.")
+			"(e.g. --field resume_mode=previous). Reserved keys: text, summary.")
 
 	historyBackfillCmd.Flags().BoolVar(&histBackfillDryRun, "dry-run", false,
 		"Print which fibers would be anchored without writing events")

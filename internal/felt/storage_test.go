@@ -392,7 +392,7 @@ func TestStorageFindMetadataSkipsBody(t *testing.T) {
 		t.Fatalf("Write() error: %v", err)
 	}
 
-	found, err := s.FindMetadata("test")
+	found, err := s.FindMetadataInScope("", "test")
 	if err != nil {
 		t.Fatalf("FindMetadata() error: %v", err)
 	}
@@ -658,7 +658,7 @@ func TestStorageFind(t *testing.T) {
 	s.Write(f2)
 
 	// Find by full ID
-	found, err := s.Find(f1.ID)
+	found, err := s.FindInScope("", f1.ID)
 	if err != nil {
 		t.Fatalf("Find() error: %v", err)
 	}
@@ -667,7 +667,7 @@ func TestStorageFind(t *testing.T) {
 	}
 
 	// Find by prefix
-	found, err = s.Find("alpha-task")
+	found, err = s.FindInScope("", "alpha-task")
 	if err != nil {
 		t.Fatalf("Find() by prefix error: %v", err)
 	}
@@ -687,7 +687,7 @@ func TestStorageFindByUID(t *testing.T) {
 	s.Write(f2)
 
 	// Resolve a top-level fiber by its exact UID.
-	found, err := s.Find(f1.UID)
+	found, err := s.FindInScope("", f1.UID)
 	if err != nil {
 		t.Fatalf("Find(uid) error: %v", err)
 	}
@@ -696,7 +696,7 @@ func TestStorageFindByUID(t *testing.T) {
 	}
 
 	// Resolve a nested fiber by UID without needing its scope/path.
-	found, err = s.Find(f2.UID)
+	found, err = s.FindInScope("", f2.UID)
 	if err != nil {
 		t.Fatalf("Find(nested uid) error: %v", err)
 	}
@@ -705,7 +705,7 @@ func TestStorageFindByUID(t *testing.T) {
 	}
 
 	// UID resolution is case-insensitive.
-	found, err = s.Find(strings.ToLower(f1.UID))
+	found, err = s.FindInScope("", strings.ToLower(f1.UID))
 	if err != nil {
 		t.Fatalf("Find(lowercase uid) error: %v", err)
 	}
@@ -714,7 +714,7 @@ func TestStorageFindByUID(t *testing.T) {
 	}
 
 	// A UID-shaped query that matches nothing still errors cleanly.
-	if _, err := s.Find(NewULID()); err == nil {
+	if _, err := s.FindInScope("", NewULID()); err == nil {
 		t.Error("Find(unknown uid) should error")
 	}
 }
@@ -735,7 +735,7 @@ func TestStorageFindNotFound(t *testing.T) {
 	s := NewStorage(dir)
 	s.Init()
 
-	_, err := s.Find("nonexistent")
+	_, err := s.FindInScope("", "nonexistent")
 	if err == nil {
 		t.Error("Find() should error when no match")
 	}
@@ -763,7 +763,7 @@ func TestStorageFindAmbiguous(t *testing.T) {
 	s.Write(f2)
 
 	// "task" prefix matches both
-	_, err := s.Find("task")
+	_, err := s.FindInScope("", "task")
 	if err == nil {
 		t.Error("Find() should error when ambiguous")
 	}
@@ -784,31 +784,6 @@ func TestStoragePathNested(t *testing.T) {
 	expected := "/project/.felt/bao-analysis/damping-prior/damping-prior.md"
 	if path != expected {
 		t.Errorf("Path() = %q, want %q", path, expected)
-	}
-}
-
-func TestStorageNextAvailableID(t *testing.T) {
-	dir := t.TempDir()
-	s := NewStorage(dir)
-	if err := s.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
-
-	f := &Felt{
-		ID:        "quick-gotcha",
-		Name:      "Quick gotcha",
-		CreatedAt: time.Now(),
-	}
-	if err := s.Write(f); err != nil {
-		t.Fatalf("Write() error: %v", err)
-	}
-
-	id, err := s.NextAvailableID("quick-gotcha")
-	if err != nil {
-		t.Fatalf("NextAvailableID() error: %v", err)
-	}
-	if id != "quick-gotcha-2" {
-		t.Fatalf("NextAvailableID() = %q, want %q", id, "quick-gotcha-2")
 	}
 }
 
@@ -877,7 +852,7 @@ func TestStorageFindNestedByBasenameRequiresScope(t *testing.T) {
 		t.Fatalf("Write() error: %v", err)
 	}
 
-	if _, err := s.Find("damping"); err == nil {
+	if _, err := s.FindInScope("", "damping"); err == nil {
 		t.Fatal("Find() without scope should not resolve nested basename")
 	}
 }
@@ -898,7 +873,7 @@ func TestStorageFindPrefersExactIDOverPrefix(t *testing.T) {
 		}
 	}
 
-	found, err := s.Find("bao-analysis")
+	found, err := s.FindInScope("", "bao-analysis")
 	if err != nil {
 		t.Fatalf("Find() error: %v", err)
 	}
@@ -1727,7 +1702,7 @@ func TestStorageBareRootFiber(t *testing.T) {
 	}
 
 	// Find by id should resolve.
-	f, err := s.Find("cmbx")
+	f, err := s.FindInScope("", "cmbx")
 	if err != nil {
 		t.Fatalf("Find: %v", err)
 	}

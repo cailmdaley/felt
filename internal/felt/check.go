@@ -11,7 +11,6 @@ import (
 
 const (
 	CheckLevelError = "error"
-	CheckLevelWarn  = "warn"
 )
 
 type CheckIssue struct {

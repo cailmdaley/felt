@@ -54,20 +54,15 @@ Current checks cover:
 		}
 
 		errors := 0
-		warnings := 0
 		for _, issue := range issues {
 			fmt.Println(issue.String())
-			switch issue.Level {
-			case felt.CheckLevelError:
+			if issue.Level == felt.CheckLevelError {
 				errors++
-			case felt.CheckLevelWarn:
-				warnings++
 			}
 		}
 		if errors > 0 {
-			return fmt.Errorf("check failed: %d error(s), %d warning(s)", errors, warnings)
+			return fmt.Errorf("check failed: %d error(s)", errors)
 		}
-		fmt.Printf("Check OK with %d warning(s)\n", warnings)
 		return nil
 	},
 }

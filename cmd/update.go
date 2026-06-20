@@ -27,7 +27,7 @@ func init() {
 var updateCmd = &cobra.Command{
 	Use:   "update",
 	Short: "Update felt to the latest version",
-Long: `Update felt to the latest version.
+	Long: `Update felt to the latest version.
 
 If installed from source (via a dev source marker), pulls and rebuilds
 from the source checkout. Otherwise downloads the latest GitHub release.
@@ -191,19 +191,6 @@ func devSourcePath() (string, error) {
 		return "", fmt.Errorf("source path %s has no go.mod", path)
 	}
 	return path, nil
-}
-
-// setDevSource writes the dev source marker.
-func setDevSource(srcPath string) error {
-	abs, err := filepath.Abs(srcPath)
-	if err != nil {
-		return err
-	}
-	marker := devSourceMarker()
-	if err := os.MkdirAll(filepath.Dir(marker), 0755); err != nil {
-		return err
-	}
-	return os.WriteFile(marker, []byte(abs+"\n"), 0644)
 }
 
 // updateFromSource pulls and rebuilds felt from a source checkout.

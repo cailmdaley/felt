@@ -877,14 +877,6 @@ func (f *Felt) IsClosed() bool {
 	return f.Status == StatusClosed
 }
 
-// idPattern matches slash-separated slug paths.
-var idPattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*(?:/[a-z0-9_]+(?:[-_][a-z0-9_]+)*)*$`)
-
-// ValidateID checks if an ID matches the expected format.
-func ValidateID(id string) bool {
-	return idPattern.MatchString(id)
-}
-
 // bodyLinkRe matches markdown links: [text](target)
 var bodyLinkRe = regexp.MustCompile(`\[[^\]]*\]\(([^)]+)\)`)
 

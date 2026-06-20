@@ -21,8 +21,13 @@ func TestDevSourcePathRoundtrip(t *testing.T) {
 		t.Fatalf("write go.mod: %v", err)
 	}
 
-	if err := setDevSource(srcDir); err != nil {
-		t.Fatalf("setDevSource: %v", err)
+	// Write the dev-source marker directly (the former setDevSource writer).
+	marker := devSourceMarker()
+	if err := os.MkdirAll(filepath.Dir(marker), 0755); err != nil {
+		t.Fatalf("mkdir marker dir: %v", err)
+	}
+	if err := os.WriteFile(marker, []byte(srcDir+"\n"), 0644); err != nil {
+		t.Fatalf("write dev-source marker: %v", err)
 	}
 
 	got, err := devSourcePath()

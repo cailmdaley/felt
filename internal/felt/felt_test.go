@@ -843,28 +843,6 @@ func TestStatusMethods(t *testing.T) {
 	}
 }
 
-func TestValidateID(t *testing.T) {
-	tests := []struct {
-		id   string
-		want bool
-	}{
-		{"test-task", true},
-		{"a-2", true},
-		{"bao-analysis/damping-prior", true},
-		{"test-task/", false},
-		{"TEST-task", false},
-		{"test_task", false},
-		{"", false},
-	}
-
-	for _, tt := range tests {
-		got := ValidateID(tt.id)
-		if got != tt.want {
-			t.Errorf("ValidateID(%q) = %v, want %v", tt.id, got, tt.want)
-		}
-	}
-}
-
 func TestExtractTags(t *testing.T) {
 	tests := []struct {
 		title     string

@@ -307,8 +307,6 @@ func saveHistoryGlobals() func() {
 	prevUntil := histUntil
 	prevAppendSummary := histAppendSummary
 	prevAppendActor := histAppendActor
-	prevAppendEditFrom := histAppendEditFrom
-	prevAppendEditTo := histAppendEditTo
 	prevAppendKind := histAppendKind
 	prevAppendFields := histAppendFields
 	prevBackfillDryRun := histBackfillDryRun
@@ -322,8 +320,6 @@ func saveHistoryGlobals() func() {
 	histUntil = ""
 	histAppendSummary = ""
 	histAppendActor = ""
-	histAppendEditFrom = ""
-	histAppendEditTo = ""
 	histAppendKind = ""
 	histAppendFields = nil
 	histBackfillDryRun = false
@@ -338,8 +334,6 @@ func saveHistoryGlobals() func() {
 		histUntil = prevUntil
 		histAppendSummary = prevAppendSummary
 		histAppendActor = prevAppendActor
-		histAppendEditFrom = prevAppendEditFrom
-		histAppendEditTo = prevAppendEditTo
 		histAppendKind = prevAppendKind
 		histAppendFields = prevAppendFields
 		histBackfillDryRun = prevBackfillDryRun
