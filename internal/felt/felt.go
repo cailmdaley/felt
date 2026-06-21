@@ -89,6 +89,13 @@ type Felt struct {
 	// Distinguishes the root from top-level folder fibers; both have
 	// unslashed IDs, only EntryPoint tells them apart.
 	EntryPoint bool `yaml:"-" json:"entry_point,omitempty"`
+	// resolvedShuttle holds the resolved view of the shuttle: facet — the flat
+	// block plus a `resolved` sub-key — attached by AttachShuttleResolution on
+	// the JSON read paths (felt show -j / ls --json). Unexported: never marshaled
+	// directly, never persisted to disk. MarshalJSON and the ls --json-field
+	// projector substitute it for the raw shuttle ExtraField so resolution rides
+	// the JSON contract while the flat fields the daemon reads stay unchanged.
+	resolvedShuttle map[string]interface{}
 }
 
 // MarshalJSON implements custom JSON marshaling for Felt. The default behavior
@@ -141,6 +148,13 @@ func (f *Felt) MarshalJSON() ([]byte, error) {
 		if _, exists := merged[key]; !exists {
 			merged[key] = value
 		}
+	}
+
+	// When a resolved shuttle facet has been attached (felt show -j / ls --json),
+	// substitute it for the raw passthrough: it carries the same flat block plus
+	// an additive `resolved` sub-key, so the daemon's flat-field contract holds.
+	if f.resolvedShuttle != nil {
+		merged[ShuttleFacetKey] = f.resolvedShuttle
 	}
 
 	return json.Marshal(merged)

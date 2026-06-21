@@ -106,6 +106,9 @@ Targeted views:
 				return outputShowField(storage, f, showField)
 			}
 			if jsonOutput {
+				if err := attachShuttleResolution(f); err != nil {
+					return err
+				}
 				return outputJSON(f)
 			}
 		}

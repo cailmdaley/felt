@@ -229,6 +229,12 @@ Use --body with query to include body search, and with --json to emit body text.
 					f.Body = ""
 				}
 			}
+			// Resolve the shuttle: facet on any fiber that carries one, so the
+			// daemon's poll (felt ls --json --json-field shuttle) gets the
+			// resolved agent record + next_due alongside the flat block.
+			if err := attachShuttleResolution(filtered...); err != nil {
+				return err
+			}
 			if len(jsonFields) > 0 {
 				projected, err := projectFeltsJSON(filtered, jsonFields)
 				if err != nil {
@@ -393,6 +399,13 @@ func feltJSONField(f *felt.Felt, field string) (interface{}, bool, error) {
 	node, ok := f.ExtraFields[field]
 	if !ok || node == nil {
 		return nil, false, nil
+	}
+	// The shuttle: facet emits its resolved view (flat block + a `resolved`
+	// sub-key) when resolution has been attached; raw decode otherwise.
+	if field == felt.ShuttleFacetKey {
+		if resolved, ok := f.ResolvedShuttle(); ok {
+			return resolved, true, nil
+		}
 	}
 	var value interface{}
 	if err := node.Decode(&value); err != nil {

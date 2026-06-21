@@ -1,8 +1,12 @@
 package felt
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/cailmdaley/felt/internal/shuttle"
 )
 
 func shuttleFiber(t *testing.T, block map[string]any) *Felt {
@@ -98,5 +102,86 @@ func TestShuttleFacet_ToleratesRuntimeFields(t *testing.T) {
 	}
 	if b.Kind != "oneshot" || b.Agent != "claude-opus" {
 		t.Fatalf("typed view should decode only config fields, got: %+v", b)
+	}
+}
+
+func marshalShuttle(t *testing.T, f *Felt) map[string]any {
+	t.Helper()
+	reg, err := shuttle.LoadAgentRegistry()
+	if err != nil {
+		t.Fatalf("LoadAgentRegistry: %v", err)
+	}
+	if err := f.AttachShuttleResolution(reg, time.Now()); err != nil {
+		t.Fatalf("AttachShuttleResolution: %v", err)
+	}
+	raw, err := json.Marshal(f)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	return out
+}
+
+func TestAttachShuttleResolution_AdditiveAndFlatPreserved(t *testing.T) {
+	// The daemon reads the flat config+runtime fields directly off `shuttle`.
+	// Resolution must leave every one of them in place and add ONLY `resolved`.
+	f := shuttleFiber(t, map[string]any{
+		"kind": "oneshot", "agent": "claude-opus", "host": "h", "project_dir": "/tmp/x",
+		"session_uuid": "abc-123", "dispatched_at": "2026-06-21T00:00:00Z",
+	})
+	out := marshalShuttle(t, f)
+	sh, ok := out["shuttle"].(map[string]any)
+	if !ok {
+		t.Fatalf("shuttle key missing/!object: %v", out["shuttle"])
+	}
+	for _, k := range []string{"kind", "agent", "host", "project_dir", "session_uuid", "dispatched_at"} {
+		if _, ok := sh[k]; !ok {
+			t.Fatalf("flat field %q was dropped by resolution (daemon contract!)", k)
+		}
+	}
+	resolved, ok := sh["resolved"].(map[string]any)
+	if !ok {
+		t.Fatalf("resolved sub-key missing/!object: %v", sh["resolved"])
+	}
+	agent, ok := resolved["agent"].(map[string]any)
+	if !ok {
+		t.Fatalf("resolved.agent missing: %v", resolved)
+	}
+	if agent["cli"] != "claude" || agent["model"] != "opus" {
+		t.Fatalf("resolved.agent = %v, want claude/opus", agent)
+	}
+}
+
+func TestAttachShuttleResolution_StandingNextDue(t *testing.T) {
+	f := shuttleFiber(t, map[string]any{
+		"kind": "standing", "agent": "claude-sonnet",
+		"schedule": map[string]any{"expr": "0 9 * * 1-5", "tz": "Europe/Paris"},
+	})
+	out := marshalShuttle(t, f)
+	sh := out["shuttle"].(map[string]any)
+	resolved, ok := sh["resolved"].(map[string]any)
+	if !ok {
+		t.Fatalf("resolved missing for standing role: %v", sh)
+	}
+	if _, ok := resolved["next_due"]; !ok {
+		t.Fatalf("standing role must carry resolved.next_due, got: %v", resolved)
+	}
+}
+
+func TestAttachShuttleResolution_PureNoteIsNoOp(t *testing.T) {
+	f := shuttleFiber(t, nil)
+	reg, _ := shuttle.LoadAgentRegistry()
+	if err := f.AttachShuttleResolution(reg, time.Now()); err != nil {
+		t.Fatalf("AttachShuttleResolution on a note: %v", err)
+	}
+	if _, ok := f.ResolvedShuttle(); ok {
+		t.Fatal("a pure note must attach no resolution")
+	}
+	out := marshalShuttle(t, f)
+	if _, ok := out["shuttle"]; ok {
+		t.Fatal("a pure note must emit no shuttle key")
 	}
 }
