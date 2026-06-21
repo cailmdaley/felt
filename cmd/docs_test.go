@@ -96,6 +96,9 @@ func TestRootCommandSurfaceIsConsolidated(t *testing.T) {
 		t.Fatalf("root command surface missing `hook` subcommand: %v", visible)
 	}
 
+	// `shuttle` is the dispatch command group — felt's active/weaving mode,
+	// absorbed from the standalone shuttle-ctl. It groups all `felt shuttle
+	// <verb>` dispatch verbs so the top-level surface stays about notes.
 	expectedVisible := []string{
 		"add",
 		"backfill-ids",
@@ -111,6 +114,7 @@ func TestRootCommandSurfaceIsConsolidated(t *testing.T) {
 		"session",
 		"setup",
 		"show",
+		"shuttle",
 		"tree",
 		"uninstall",
 		"unnest",
