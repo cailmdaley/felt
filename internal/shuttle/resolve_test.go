@@ -5,6 +5,33 @@ import (
 	"time"
 )
 
+// TestNewResolvedAgent_MatchesResolveBlock locks the contract the
+// `felt shuttle agents resolve` verb relies on: resolving a name+axes directly
+// (reg.Resolve → NewResolvedAgent — the verb's path, used by the daemon's
+// capture flow) yields the byte-identical record ResolveBlock emits under
+// shuttle.resolved.agent (the poll/dispatch path). One projection, two callers.
+func TestNewResolvedAgent_MatchesResolveBlock(t *testing.T) {
+	reg, err := LoadAgentRegistry()
+	if err != nil {
+		t.Fatalf("LoadAgentRegistry: %v", err)
+	}
+	for _, name := range []string{"claude-opus", "claude-opus-chrome", "codex", "pi-sonnet"} {
+		block := &Block{Kind: "oneshot", Agent: name, Effort: "", Chrome: false}
+		viaBlock, err := ResolveBlock(block, reg, time.Now())
+		if err != nil {
+			t.Fatalf("ResolveBlock(%s): %v", name, err)
+		}
+		rec, axes, err := reg.Resolve(name, "", false)
+		if err != nil {
+			t.Fatalf("Resolve(%s): %v", name, err)
+		}
+		viaVerb := NewResolvedAgent(rec, axes)
+		if *viaVerb != *viaBlock.Agent {
+			t.Fatalf("%s: verb path %+v != block path %+v", name, viaVerb, viaBlock.Agent)
+		}
+	}
+}
+
 func TestResolveBlock_Oneshot(t *testing.T) {
 	reg, err := LoadAgentRegistry()
 	if err != nil {

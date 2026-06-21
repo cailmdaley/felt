@@ -37,6 +37,26 @@ func (r *Resolved) IsEmpty() bool {
 	return r == nil || (r.Agent == nil && r.NextDue == nil)
 }
 
+// NewResolvedAgent folds a base agent record and the effective axes into the
+// daemon-facing ResolvedAgent. It is the single place this projection is made,
+// so `felt show -j`'s shuttle.resolved.agent (via ResolveBlock) and
+// `felt shuttle agents resolve` (ad-hoc, for the daemon's capture path) emit a
+// byte-identical shape.
+func NewResolvedAgent(rec AgentRecord, axes Axes) *ResolvedAgent {
+	return &ResolvedAgent{
+		ID:            rec.ID,
+		CLI:           rec.CLI,
+		Wrapper:       rec.Wrapper,
+		Provider:      rec.Provider,
+		Model:         rec.Model,
+		ExtraFlags:    rec.ExtraFlags,
+		RequiresModel: rec.RequiresModel,
+		Effort:        axes.Effort,
+		Chrome:        axes.Chrome,
+		Headless:      axes.Headless,
+	}
+}
+
 // ResolveBlock computes the resolved view of a block: the agent name (or the
 // registry default when unnamed) → base record + effective axes, and — for a
 // standing role — the next scheduled occurrence strictly after `now`. Returns an
@@ -57,18 +77,7 @@ func ResolveBlock(b *Block, reg *AgentRegistry, now time.Time) (*Resolved, error
 		if err != nil {
 			return nil, err
 		}
-		res.Agent = &ResolvedAgent{
-			ID:            rec.ID,
-			CLI:           rec.CLI,
-			Wrapper:       rec.Wrapper,
-			Provider:      rec.Provider,
-			Model:         rec.Model,
-			ExtraFlags:    rec.ExtraFlags,
-			RequiresModel: rec.RequiresModel,
-			Effort:        axes.Effort,
-			Chrome:        axes.Chrome,
-			Headless:      axes.Headless,
-		}
+		res.Agent = NewResolvedAgent(rec, axes)
 	}
 
 	if b.Kind == "standing" && b.Schedule != nil {
