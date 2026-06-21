@@ -247,6 +247,61 @@ func TestSetShuttleField_NoBlockErrors(t *testing.T) {
 	}
 }
 
+// TestSetShuttleNodeField_TypedAndDelete proves the typed counterpart writes a
+// real !!bool (so the daemon/validation decode chrome correctly), drops a key on
+// a nil value (omitempty), and — like SetShuttleField — preserves the runtime
+// siblings across a Marshal -> Parse round-trip. This is the set-agent primitive.
+func TestSetShuttleNodeField_TypedAndDelete(t *testing.T) {
+	f := shuttleFiber(t, map[string]any{
+		"kind": "oneshot", "agent": "claude-opus", "effort": "high",
+		"session_uuid": "abc-123", "dispatched_at": "2026-06-21T00:00:00Z",
+	})
+
+	// chrome as a real bool; effort cleared (deleted); agent replaced.
+	if err := f.SetShuttleNodeField("chrome", true); err != nil {
+		t.Fatalf("SetShuttleNodeField(chrome): %v", err)
+	}
+	if err := f.SetShuttleNodeField("effort", nil); err != nil {
+		t.Fatalf("SetShuttleNodeField(effort, nil): %v", err)
+	}
+	if err := f.SetShuttleNodeField("agent", "claude-sonnet"); err != nil {
+		t.Fatalf("SetShuttleNodeField(agent): %v", err)
+	}
+
+	raw, err := f.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	f2, err := Parse(f.ID, raw)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	// chrome must decode to a typed bool through the typed Block (not a string).
+	b, ok, err := f2.ShuttleBlock()
+	if err != nil || !ok {
+		t.Fatalf("ShuttleBlock: ok=%v err=%v", ok, err)
+	}
+	if !b.Chrome {
+		t.Fatalf("chrome must decode to bool true, got block %+v", b)
+	}
+	if b.Effort != "" {
+		t.Fatalf("effort must be dropped (omitempty), got %q", b.Effort)
+	}
+	if b.Agent != "claude-sonnet" {
+		t.Fatalf("agent must be replaced, got %q", b.Agent)
+	}
+
+	// Runtime siblings survive untouched.
+	sh := marshalShuttle(t, f2)["shuttle"].(map[string]any)
+	if sh["session_uuid"] != "abc-123" || sh["dispatched_at"] != "2026-06-21T00:00:00Z" {
+		t.Fatalf("runtime keys clobbered: %v", sh)
+	}
+	if _, present := sh["effort"]; present {
+		t.Fatalf("effort key must be absent after delete, got: %v", sh)
+	}
+}
+
 func marshalShuttle(t *testing.T, f *Felt) map[string]any {
 	t.Helper()
 	reg, err := shuttle.LoadAgentRegistry()

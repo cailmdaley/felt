@@ -83,6 +83,21 @@ func (f *Felt) SetShuttleField(key, value string) error {
 	return nil
 }
 
+// SetShuttleNodeField surgically sets a single key inside the shuttle: mapping to
+// a typed value (bool/int/string), or removes it when value is nil — the typed,
+// omitempty-aware counterpart to SetShuttleField (which is string-only). The axis
+// verbs use it where the type matters: set-agent writes chrome as a real !!bool
+// and drops a cleared effort/agent (nil) rather than persisting an empty scalar,
+// all while preserving the daemon-owned runtime siblings the typed Block omits.
+// Returns an error if the fiber carries no well-formed shuttle: block.
+func (f *Felt) SetShuttleNodeField(key string, value any) error {
+	node, ok := f.shuttleMappingNode()
+	if !ok {
+		return fmt.Errorf("shuttle: no shuttle block present to set %q on", key)
+	}
+	return setMappingNode(node, key, value)
+}
+
 // ValidateShuttleFacet validates the fiber's shuttle: facet (kind enum, agent
 // resolution against the registry, pinned-forbids-schedule, standing-requires a
 // valid cron + timezone). It is a no-op for a pure note (or a degenerate
