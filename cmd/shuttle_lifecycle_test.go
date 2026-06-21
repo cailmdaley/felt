@@ -14,32 +14,40 @@ import (
 // between runs (cobra persists both across Execute), restoring on cleanup.
 func saveShuttleGlobals() func() {
 	prev := struct {
-		pauseNoKill       bool
-		closeTempered     string
-		reopenAsDraft     bool
-		setOutcomeValue   string
-		acceptKeepOutcome bool
-		setAgentEffort    string
-		setAgentChrome    bool
-		installModel      string
-		installProjectDir string
-		installHost       string
-		installDisabled   bool
-		repeatSchedule    string
-		repeatTZ          string
-		repeatModel       string
-		repeatProjectDir  string
-		repeatHost        string
-		pinModel          string
-		pinProjectDir     string
-		pinHost           string
+		jsonOutput           bool
+		statusIncludeOrphans bool
+		pauseNoKill          bool
+		closeTempered        string
+		reopenAsDraft        bool
+		setOutcomeValue      string
+		acceptKeepOutcome    bool
+		setAgentEffort       string
+		setAgentChrome       bool
+		installModel         string
+		installProjectDir    string
+		installHost          string
+		installDisabled      bool
+		repeatSchedule       string
+		repeatTZ             string
+		repeatModel          string
+		repeatProjectDir     string
+		repeatHost           string
+		pinModel             string
+		pinProjectDir        string
+		pinHost              string
 	}{
+		jsonOutput, statusIncludeOrphans,
 		pauseNoKill, closeTempered, reopenAsDraft, setOutcomeValue, acceptKeepOutcome, setAgentEffort, setAgentChrome,
 		installModel, installProjectDir, installHost, installDisabled,
 		repeatSchedule, repeatTZ, repeatModel, repeatProjectDir, repeatHost,
 		pinModel, pinProjectDir, pinHost,
 	}
 
+	// --json is a root persistent flag bound to jsonOutput; cobra only sets it on
+	// parse, so a prior `--json` run leaves it true. Reset to the default so a test
+	// that omits the flag gets text output.
+	jsonOutput = false
+	statusIncludeOrphans = false
 	pauseNoKill = false
 	closeTempered = ""
 	reopenAsDraft = false
@@ -62,8 +70,12 @@ func saveShuttleGlobals() func() {
 	repeatCmd.ResetFlags()
 	pinCmd.ResetFlags()
 	registerShuttleCreateFlags()
+	statusCmd.ResetFlags()
+	registerShuttleStatusFlags()
 
 	return func() {
+		jsonOutput = prev.jsonOutput
+		statusIncludeOrphans = prev.statusIncludeOrphans
 		pauseNoKill = prev.pauseNoKill
 		closeTempered = prev.closeTempered
 		reopenAsDraft = prev.reopenAsDraft

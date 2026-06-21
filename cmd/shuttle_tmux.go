@@ -63,3 +63,28 @@ var tmuxSessionExists = func(sessionName string) bool {
 var killTmuxSession = func(session string) error {
 	return exec.Command("tmux", "kill-session", "-t", session).Run()
 }
+
+// isShuttleTmuxSessionName reports whether a tmux session name belongs to a
+// Shuttle worker. Both name forms (uid-keyed and legacy leaf-only) end in
+// "-shuttle", so the suffix test recognizes either.
+func isShuttleTmuxSessionName(sessionName string) bool {
+	return strings.HasSuffix(sessionName, "-shuttle")
+}
+
+// liveTmuxSessions returns the set of live Shuttle worker session names — the
+// running side of status/ps. A func var so tests stub the tmux server; an absent
+// or empty server yields the empty set (status still renders, every row idle).
+var liveTmuxSessions = func() map[string]bool {
+	out, err := exec.Command("tmux", "ls", "-F", "#{session_name}").Output()
+	if err != nil {
+		return map[string]bool{}
+	}
+	result := map[string]bool{}
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		line = strings.TrimSpace(line)
+		if isShuttleTmuxSessionName(line) {
+			result[line] = true
+		}
+	}
+	return result
+}

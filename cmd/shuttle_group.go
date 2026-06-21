@@ -52,7 +52,12 @@ func init() {
 // shuttleResolveFiber resolves a fiber id/query to its fiber within the active
 // store (honoring --felt-store / -C and the cwd scope). full controls whether the
 // body is parsed: write verbs that re-serialize the whole fiber need it (so the
-// body survives the write); metadata-only callers (path lookups, status) skip it.
+// body survives the write); metadata-only callers (path lookups) skip it.
+//
+// This is the cwd-sensitive resolver the write verbs use: it requires a store
+// context (-C or a cwd felt repo), matching the daemon's invocation (it always
+// passes --felt-store). The from-anywhere address verbs (session-name, attach)
+// use shuttleAddressFiber instead, which defaults to the configured loom stores.
 func shuttleResolveFiber(query string, full bool) (*felt.Felt, *felt.Storage, error) {
 	root, err := resolveProjectRoot()
 	if err != nil {
