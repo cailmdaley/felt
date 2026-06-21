@@ -58,6 +58,31 @@ func (f *Felt) ShuttleBlock() (*shuttle.Block, bool, error) {
 	return &b, true, nil
 }
 
+// SetShuttleField surgically sets a single key inside the fiber's existing
+// shuttle: mapping, mutating the node in place so every sibling — crucially the
+// daemon-owned runtime/continuation keys (session_uuid, dispatched_at,
+// handed_off_at, run_id) that the typed Block deliberately does not model —
+// rides through untouched. It is the write-side counterpart to ShuttleBlock:
+// where decoding to the typed Block and re-encoding (or a whole-block
+// SetExtraField replace) would DROP any key the struct omits, this preserves
+// them, so a config edit can never clobber runtime state. felt's Write
+// re-marshals the ExtraFields nodes, so the in-place mutation persists with no
+// SetExtraField round-trip.
+//
+// Returns an error if the fiber carries no well-formed shuttle: block — the
+// caller is expected to operate on an installed role (a worker stamping
+// handed_off_at, set-model changing the agent, …). To CREATE a block, build a
+// shuttle.Block and SetExtraField("shuttle", block); there are no runtime keys
+// to preserve at creation.
+func (f *Felt) SetShuttleField(key, value string) error {
+	node, ok := f.shuttleMappingNode()
+	if !ok {
+		return fmt.Errorf("shuttle: no shuttle block present to set %q on", key)
+	}
+	setMappingScalar(node, key, value)
+	return nil
+}
+
 // ValidateShuttleFacet validates the fiber's shuttle: facet (kind enum, agent
 // resolution against the registry, pinned-forbids-schedule, standing-requires a
 // valid cron + timezone). It is a no-op for a pure note (or a degenerate

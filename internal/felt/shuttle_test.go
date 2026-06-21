@@ -193,6 +193,60 @@ func TestShuttleFacet_ToleratesRuntimeFields(t *testing.T) {
 	}
 }
 
+// TestSetShuttleField_PreservesRuntimeKeys is the load-bearing test for the
+// Stage-3 write primitive: stamping a single config/runtime field (as a worker's
+// `handoff` does, or `set-model`) must leave every sibling key — especially the
+// daemon-owned continuation fields — exactly in place, and survive a full
+// Marshal -> Parse round-trip through the on-disk frontmatter format.
+func TestSetShuttleField_PreservesRuntimeKeys(t *testing.T) {
+	f := shuttleFiber(t, map[string]any{
+		"kind": "oneshot", "agent": "claude-opus", "host": "h", "project_dir": "/tmp/x",
+		"session_uuid": "abc-123", "dispatched_at": "2026-06-21T00:00:00Z",
+	})
+
+	// A worker's clean-exit stamp.
+	if err := f.SetShuttleField("handed_off_at", "2026-06-21T01:00:00Z"); err != nil {
+		t.Fatalf("SetShuttleField(handed_off_at): %v", err)
+	}
+	// A config edit (set-model) on the same block.
+	if err := f.SetShuttleField("agent", "claude-sonnet"); err != nil {
+		t.Fatalf("SetShuttleField(agent): %v", err)
+	}
+
+	// Round-trip through the on-disk format to prove durability, not just memory.
+	raw, err := f.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	f2, err := Parse(f.ID, raw)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	sh := marshalShuttle(t, f2)["shuttle"].(map[string]any)
+	want := map[string]string{
+		"kind": "oneshot", "host": "h", "project_dir": "/tmp/x",
+		"session_uuid": "abc-123", "dispatched_at": "2026-06-21T00:00:00Z",
+		"handed_off_at": "2026-06-21T01:00:00Z", // stamped
+		"agent":         "claude-sonnet",        // replaced in place
+	}
+	for k, v := range want {
+		if got := sh[k]; got != v {
+			t.Fatalf("shuttle.%s = %v after round-trip, want %q (a sibling was clobbered or the set failed)", k, got, v)
+		}
+	}
+}
+
+// TestSetShuttleField_NoBlockErrors proves the primitive refuses to invent a
+// block: a pure note (or a fiber whose block was uninstalled) has no mapping to
+// set a field on, and the caller must build one via SetExtraField instead.
+func TestSetShuttleField_NoBlockErrors(t *testing.T) {
+	f := shuttleFiber(t, nil)
+	if err := f.SetShuttleField("handed_off_at", "2026-06-21T01:00:00Z"); err == nil {
+		t.Fatal("SetShuttleField on a pure note must error, got nil")
+	}
+}
+
 func marshalShuttle(t *testing.T, f *Felt) map[string]any {
 	t.Helper()
 	reg, err := shuttle.LoadAgentRegistry()

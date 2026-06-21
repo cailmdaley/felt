@@ -241,6 +241,32 @@ func mappingScalar(mapping *yaml.Node, key string) string {
 	return node.Value
 }
 
+// setMappingScalar sets key=value as a plain string scalar inside a mapping node
+// IN PLACE — replacing the existing value node (whatever its prior kind) or
+// appending a new key/value pair at the end. It mutates only the one key; every
+// sibling key and its node identity is preserved, which is what lets a config
+// edit ride past the daemon-owned runtime keys without touching them. The
+// caller must pass a real mapping node.
+func setMappingScalar(mapping *yaml.Node, key, value string) {
+	if mapping == nil || mapping.Kind != yaml.MappingNode {
+		return
+	}
+	if existing := mappingValueNode(mapping, key); existing != nil {
+		existing.Kind = yaml.ScalarNode
+		existing.Tag = "!!str"
+		existing.Value = value
+		existing.Style = 0
+		existing.Content = nil
+		existing.Anchor = ""
+		existing.Alias = nil
+		return
+	}
+	mapping.Content = append(mapping.Content,
+		&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: key},
+		&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: value},
+	)
+}
+
 func fragmentIDsFromNode(node *yaml.Node) []string {
 	if node == nil {
 		return nil
