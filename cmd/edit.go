@@ -145,6 +145,13 @@ keys have dedicated flags; use those.`,
 		// Write so it lands in the file the mechanical event then hashes.
 		f.Touch(time.Now())
 
+		// felt owns the shuttle: facet's schema — validate it before the block
+		// reaches disk, so an invalid edit (or a round-tripped invalid block)
+		// fails loudly rather than persisting. A no-op for a pure note.
+		if err := f.ValidateShuttleFacet(); err != nil {
+			return err
+		}
+
 		if err := storage.Write(f); err != nil {
 			return err
 		}
