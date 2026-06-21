@@ -27,6 +27,14 @@ import (
 // full read (body preserved for the re-serialize), a required shuttle: block, and
 // the ownership guard. Returns the fiber, its storage, and the typed block.
 func resolveOwnedShuttleFiber(query string) (*felt.Felt, *felt.Storage, *shuttle.Block, error) {
+	return resolveOwnedShuttleFiberAs(query, "")
+}
+
+// resolveOwnedShuttleFiberAs is resolveOwnedShuttleFiber with an explicit
+// own-host for the ownership guard (see ensureOwnedHereAs). The daemon-facing
+// mark-runtime passes its own_host_id so the guard never round-trips to the
+// daemon it is being shelled from. An empty override keeps the default behavior.
+func resolveOwnedShuttleFiberAs(query, ownHostOverride string) (*felt.Felt, *felt.Storage, *shuttle.Block, error) {
 	f, st, err := shuttleResolveFiber(query, true)
 	if err != nil {
 		return nil, nil, nil, err
@@ -38,7 +46,7 @@ func resolveOwnedShuttleFiber(query string) (*felt.Felt, *felt.Storage, *shuttle
 	if !ok {
 		return nil, nil, nil, fmt.Errorf("fiber %s has no shuttle: block", query)
 	}
-	if err := ensureOwnedHere(f, query); err != nil {
+	if err := ensureOwnedHereAs(f, query, ownHostOverride); err != nil {
 		return nil, nil, nil, err
 	}
 	return f, st, block, nil

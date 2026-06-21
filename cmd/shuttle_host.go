@@ -72,6 +72,19 @@ func (e ownerMismatchError) Error() string {
 // through to a normal local write rather than hard-blocking. The guard closes the
 // known mirror-write footgun; it is not a gate on every edit.
 func ensureOwnedHere(f *felt.Felt, fiber string) error {
+	return ensureOwnedHereAs(f, fiber, "")
+}
+
+// ensureOwnedHereAs is ensureOwnedHere with an explicit own-host. When
+// ownHostOverride is non-empty it is used directly and resolveOwnHost is NOT
+// consulted — the daemon passes its authoritative own_host_id via
+// `mark-runtime --host` so the ownership check needs no round-trip back to
+// GET /api/v1/state. That callback is re-entrant for a daemon-shelled write
+// (the Poller is blocked on the felt subprocess, so /api/v1/state times out and
+// resolveOwnHost falls back to os.Hostname() — wrong on a host whose owner id is
+// an alias, e.g. candide vs c03 — silently failing the write). An empty override
+// preserves the original resolveOwnHost precedence for human-facing verbs.
+func ensureOwnedHereAs(f *felt.Felt, fiber, ownHostOverride string) error {
 	block, ok, err := f.ShuttleBlock()
 	if err != nil || !ok || block == nil {
 		return nil
@@ -80,11 +93,15 @@ func ensureOwnedHere(f *felt.Felt, fiber string) error {
 	if owner == "" {
 		return nil
 	}
-	own, err := resolveOwnHost("")
-	if err != nil {
-		return nil
+	own := strings.TrimSpace(ownHostOverride)
+	if own == "" {
+		resolved, err := resolveOwnHost("")
+		if err != nil {
+			return nil
+		}
+		own = strings.TrimSpace(resolved)
 	}
-	if own = strings.TrimSpace(own); own == "" || owner == own {
+	if own == "" || owner == own {
 		return nil
 	}
 	return ownerMismatchError{fiber: fiber, owner: owner, own: own}
