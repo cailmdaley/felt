@@ -21,7 +21,24 @@ func saveShuttleGlobals() func() {
 		acceptKeepOutcome bool
 		setAgentEffort    string
 		setAgentChrome    bool
-	}{pauseNoKill, closeTempered, reopenAsDraft, setOutcomeValue, acceptKeepOutcome, setAgentEffort, setAgentChrome}
+		installModel      string
+		installProjectDir string
+		installHost       string
+		installDisabled   bool
+		repeatSchedule    string
+		repeatTZ          string
+		repeatModel       string
+		repeatProjectDir  string
+		repeatHost        string
+		pinModel          string
+		pinProjectDir     string
+		pinHost           string
+	}{
+		pauseNoKill, closeTempered, reopenAsDraft, setOutcomeValue, acceptKeepOutcome, setAgentEffort, setAgentChrome,
+		installModel, installProjectDir, installHost, installDisabled,
+		repeatSchedule, repeatTZ, repeatModel, repeatProjectDir, repeatHost,
+		pinModel, pinProjectDir, pinHost,
+	}
 
 	pauseNoKill = false
 	closeTempered = ""
@@ -30,6 +47,9 @@ func saveShuttleGlobals() func() {
 	acceptKeepOutcome = false
 	setAgentEffort = ""
 	setAgentChrome = false
+	installModel, installProjectDir, installHost, installDisabled = "", "", "", false
+	repeatSchedule, repeatTZ, repeatModel, repeatProjectDir, repeatHost = "", "", "", "", ""
+	pinModel, pinProjectDir, pinHost = "", "", ""
 
 	pauseCmd.ResetFlags()
 	closeCmd.ResetFlags()
@@ -38,6 +58,10 @@ func saveShuttleGlobals() func() {
 	acceptCmd.ResetFlags()
 	setAgentCmd.ResetFlags()
 	registerShuttleLifecycleFlags()
+	installCmd.ResetFlags()
+	repeatCmd.ResetFlags()
+	pinCmd.ResetFlags()
+	registerShuttleCreateFlags()
 
 	return func() {
 		pauseNoKill = prev.pauseNoKill
@@ -47,6 +71,9 @@ func saveShuttleGlobals() func() {
 		acceptKeepOutcome = prev.acceptKeepOutcome
 		setAgentEffort = prev.setAgentEffort
 		setAgentChrome = prev.setAgentChrome
+		installModel, installProjectDir, installHost, installDisabled = prev.installModel, prev.installProjectDir, prev.installHost, prev.installDisabled
+		repeatSchedule, repeatTZ, repeatModel, repeatProjectDir, repeatHost = prev.repeatSchedule, prev.repeatTZ, prev.repeatModel, prev.repeatProjectDir, prev.repeatHost
+		pinModel, pinProjectDir, pinHost = prev.pinModel, prev.pinProjectDir, prev.pinHost
 	}
 }
 
