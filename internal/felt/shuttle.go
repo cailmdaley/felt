@@ -151,16 +151,57 @@ func (f *Felt) SetShuttleRuntimeField(key, value string) error {
 		return fmt.Errorf("shuttle: no shuttle block present to set runtime.%q on", key)
 	}
 	if value == "" {
-		for i := 0; i+1 < len(runtime.Content); i += 2 {
-			if strings.TrimSpace(runtime.Content[i].Value) == key {
-				runtime.Content = append(runtime.Content[:i], runtime.Content[i+2:]...)
-				break
-			}
-		}
+		removeMappingKey(runtime, key)
 		return nil
 	}
 	setMappingScalar(runtime, key, value)
 	return nil
+}
+
+// ShuttleRuntimeKeys are the four machine-managed continuation fields that, in
+// the legacy flat layout, sit as direct children of shuttle:. The runtime-nesting
+// migration lifts them into the nested shuttle.runtime sub-mapping. They are the
+// ONLY keys migrate-runtime touches: the other historically-flat keys
+// (enabled/review/next_due_at/last_run_at/session) are evicted by the daemon's
+// lifecycle writes, not nested.
+var ShuttleRuntimeKeys = []string{"session_uuid", "dispatched_at", "handed_off_at", "run_id"}
+
+// MigrateRuntimeNesting lifts any flat runtime keys (ShuttleRuntimeKeys) sitting
+// directly under shuttle: into the nested shuttle.runtime sub-mapping, then drops
+// the flat key. A nested value already present WINS — the flat one is just
+// dropped, since it is the older write (the daemon writes nested now, so a flat
+// sibling lingering beside a nested value is stale). Returns the keys it lifted
+// (for reporting) and whether anything changed. A no-op (`nil, false`) for a
+// fiber with no shuttle block or no flat runtime keys, so it is safe to run
+// repeatedly (idempotent).
+func (f *Felt) MigrateRuntimeNesting() ([]string, bool) {
+	shuttleNode, ok := f.shuttleMappingNode()
+	if !ok {
+		return nil, false
+	}
+
+	var lifted []string
+	for _, key := range ShuttleRuntimeKeys {
+		flat := mappingValueNode(shuttleNode, key)
+		if flat == nil {
+			continue
+		}
+		flatVal := ""
+		if flat.Kind == yaml.ScalarNode {
+			flatVal = strings.TrimSpace(flat.Value)
+		}
+
+		// Nested wins: only carry the flat value over when the nested key is
+		// absent. Either way the flat key is dropped.
+		runtime := f.shuttleRuntimeNode()
+		if flatVal != "" && mappingValueNode(runtime, key) == nil {
+			setMappingScalar(runtime, key, flatVal)
+		}
+		removeMappingKey(shuttleNode, key)
+		lifted = append(lifted, key)
+	}
+
+	return lifted, len(lifted) > 0
 }
 
 // shuttleConfigKeys are the keys felt's typed shuttle.Block models — the

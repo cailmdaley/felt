@@ -324,6 +324,84 @@ func roundTrip(t *testing.T, f *Felt) *Felt {
 	return f2
 }
 
+// TestMigrateRuntimeNesting proves the runtime-nesting migration: flat runtime
+// keys lift into shuttle.runtime, config is preserved, and a second pass is a
+// no-op (idempotent), all surviving the on-disk round-trip.
+func TestMigrateRuntimeNesting(t *testing.T) {
+	f := shuttleFiber(t, map[string]any{
+		"kind": "oneshot", "agent": "claude-opus", "host": "h",
+		// Legacy flat layout: runtime keys as direct children of shuttle:.
+		"dispatched_at": "2026-06-01T00:00:00Z",
+		"session_uuid":  "flat-sess",
+		"run_id":        "RUN-OLD",
+	})
+
+	lifted, changed := f.MigrateRuntimeNesting()
+	if !changed {
+		t.Fatal("expected a migration")
+	}
+	if len(lifted) != 3 {
+		t.Fatalf("expected 3 keys lifted, got %v", lifted)
+	}
+
+	sh := marshalShuttle(t, roundTrip(t, f))["shuttle"].(map[string]any)
+	for _, k := range []string{"dispatched_at", "session_uuid", "run_id"} {
+		if _, flat := sh[k]; flat {
+			t.Fatalf("flat shuttle.%s should have lifted into shuttle.runtime", k)
+		}
+	}
+	rt, ok := sh["runtime"].(map[string]any)
+	if !ok {
+		t.Fatalf("shuttle.runtime missing: %#v", sh["runtime"])
+	}
+	if rt["dispatched_at"] != "2026-06-01T00:00:00Z" || rt["session_uuid"] != "flat-sess" ||
+		rt["run_id"] != "RUN-OLD" {
+		t.Fatalf("runtime not populated from flat keys: %#v", rt)
+	}
+	if sh["kind"] != "oneshot" || sh["agent"] != "claude-opus" || sh["host"] != "h" {
+		t.Fatalf("config clobbered by migration: %#v", sh)
+	}
+
+	if _, changed2 := roundTrip(t, f).MigrateRuntimeNesting(); changed2 {
+		t.Fatal("second migration must be a no-op (idempotent)")
+	}
+}
+
+// TestMigrateRuntimeNesting_NestedWins proves that when both a flat key and its
+// nested counterpart exist, the nested (newer) value wins and the flat is dropped.
+func TestMigrateRuntimeNesting_NestedWins(t *testing.T) {
+	f := shuttleFiber(t, map[string]any{"kind": "oneshot", "agent": "claude-opus", "host": "h"})
+	if err := f.SetShuttleField("session_uuid", "stale-flat"); err != nil {
+		t.Fatalf("SetShuttleField: %v", err)
+	}
+	if err := f.SetShuttleRuntimeField("session_uuid", "fresh-nested"); err != nil {
+		t.Fatalf("SetShuttleRuntimeField: %v", err)
+	}
+
+	if _, changed := f.MigrateRuntimeNesting(); !changed {
+		t.Fatal("expected the flat key to be migrated (dropped)")
+	}
+
+	sh := marshalShuttle(t, roundTrip(t, f))["shuttle"].(map[string]any)
+	if _, flat := sh["session_uuid"]; flat {
+		t.Fatal("flat session_uuid should be dropped")
+	}
+	if got := sh["runtime"].(map[string]any)["session_uuid"]; got != "fresh-nested" {
+		t.Fatalf("nested value should win, got %q", got)
+	}
+}
+
+// TestMigrateRuntimeNesting_NoBlock is a no-op for a fiber with no shuttle block.
+func TestMigrateRuntimeNesting_NoBlock(t *testing.T) {
+	f, err := New("note", "Pure note")
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if lifted, changed := f.MigrateRuntimeNesting(); changed || lifted != nil {
+		t.Fatalf("a pure note must not migrate: lifted=%v changed=%v", lifted, changed)
+	}
+}
+
 // TestSetShuttleField_NoBlockErrors proves the primitive refuses to invent a
 // block: a pure note (or a fiber whose block was uninstalled) has no mapping to
 // set a field on, and the caller must build one via SetExtraField instead.
