@@ -302,6 +302,65 @@ func TestSetShuttleNodeField_TypedAndDelete(t *testing.T) {
 	}
 }
 
+// TestSetShuttleConfig_PreservesRuntimeKeys is the regression for the repeat
+// runtime-key clobber: re-installing a block's config (a recurrence redefinition)
+// must keep the daemon-owned continuation siblings, drop a cleared config key, and
+// apply the new config — the felt analogue of shuttle's mergeUnknownShuttleFields.
+func TestSetShuttleConfig_PreservesRuntimeKeys(t *testing.T) {
+	f := shuttleFiber(t, map[string]any{
+		"kind": "oneshot", "agent": "claude-opus", "effort": "high",
+		"session_uuid": "keep-uuid", "dispatched_at": "2026-06-21T00:00:00Z",
+	})
+
+	// Redefine as a standing role with a new agent and no effort.
+	newBlock := &shuttle.Block{
+		Kind: "standing", Host: "h", ProjectDir: "/tmp/x", Agent: "claude-sonnet",
+		Schedule: &shuttle.Schedule{Expr: "0 9 * * 1-5", TZ: "Europe/Paris"},
+	}
+	if err := f.SetShuttleConfig(newBlock); err != nil {
+		t.Fatalf("SetShuttleConfig: %v", err)
+	}
+
+	raw, err := f.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	f2, err := Parse(f.ID, raw)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	b, ok, err := f2.ShuttleBlock()
+	if err != nil || !ok {
+		t.Fatalf("ShuttleBlock: ok=%v err=%v", ok, err)
+	}
+	if b.Kind != "standing" || b.Agent != "claude-sonnet" || b.Schedule == nil || b.Schedule.Expr != "0 9 * * 1-5" {
+		t.Fatalf("new config not applied: %+v", b)
+	}
+	if b.Effort != "" {
+		t.Fatalf("a cleared config key must be dropped, got effort=%q", b.Effort)
+	}
+	sh := marshalShuttle(t, f2)["shuttle"].(map[string]any)
+	if sh["session_uuid"] != "keep-uuid" || sh["dispatched_at"] != "2026-06-21T00:00:00Z" {
+		t.Fatalf("runtime keys clobbered by config rewrite: %v", sh)
+	}
+}
+
+// TestSetShuttleConfig_FreshInstall installs wholesale on a fiber with no block.
+func TestSetShuttleConfig_FreshInstall(t *testing.T) {
+	f := shuttleFiber(t, nil)
+	if err := f.SetShuttleConfig(&shuttle.Block{Kind: "oneshot", Host: "h", Agent: "claude-opus"}); err != nil {
+		t.Fatalf("SetShuttleConfig (fresh): %v", err)
+	}
+	if !f.HasShuttleFacet() {
+		t.Fatal("fresh SetShuttleConfig must install a facet")
+	}
+	b, ok, err := f.ShuttleBlock()
+	if err != nil || !ok || b.Kind != "oneshot" || b.Agent != "claude-opus" {
+		t.Fatalf("fresh block: ok=%v err=%v b=%+v", ok, err, b)
+	}
+}
+
 func marshalShuttle(t *testing.T, f *Felt) map[string]any {
 	t.Helper()
 	reg, err := shuttle.LoadAgentRegistry()

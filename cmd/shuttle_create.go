@@ -81,8 +81,13 @@ flag points at the right mutation verb (pause / resume / set-model / uninstall).
 		}
 
 		// If a block already exists, treat install as idempotent state reporting +
-		// conflict detection (read-only, no write).
-		if existing, ok, _ := f.ShuttleBlock(); ok {
+		// conflict detection (read-only, no write). A malformed-but-mapping block
+		// surfaces its decode error cleanly rather than nil-dereferencing.
+		existing, ok, err := f.ShuttleBlock()
+		if err != nil {
+			return err
+		}
+		if ok {
 			return reportExistingBlock(cmd, args[0], f, existing, installModel, installDisabled, installProjectDir, installHost)
 		}
 
@@ -128,7 +133,7 @@ flag points at the right mutation verb (pause / resume / set-model / uninstall).
 			}
 		}
 
-		if err := f.SetExtraField(felt.ShuttleFacetKey, block); err != nil {
+		if err := f.SetShuttleConfig(block); err != nil {
 			return fmt.Errorf("attaching shuttle block: %w", err)
 		}
 		if err := st.Write(f); err != nil {
@@ -291,6 +296,18 @@ The running daemon picks it up on its next poll.`,
 		if err != nil {
 			return err
 		}
+		// Capture any existing block up front (a malformed-but-mapping block
+		// surfaces its decode error cleanly rather than nil-dereferencing).
+		existing, hasBlock, err := f.ShuttleBlock()
+		if err != nil {
+			return err
+		}
+		// repeat is the one create verb that rewrites an EXISTING block, so it must
+		// pass the ownership guard — refusing to mirror-write a fiber another daemon
+		// owns (fail-open on a fresh / host-less fiber).
+		if err := ensureOwnedHere(f, args[0]); err != nil {
+			return err
+		}
 		projectDir, err := resolveProjectDirFlag(repeatProjectDir)
 		if err != nil {
 			return err
@@ -308,7 +325,7 @@ The running daemon picks it up on its next poll.`,
 		}
 		if repeatModel != "" {
 			block.Agent = repeatModel
-		} else if existing, ok, _ := f.ShuttleBlock(); ok && existing.Agent != "" {
+		} else if hasBlock && existing.Agent != "" {
 			// Inherit the agent from the block being replaced when --model is omitted.
 			block.Agent = existing.Agent
 		}
@@ -336,7 +353,7 @@ The running daemon picks it up on its next poll.`,
 			statusChanged = true
 		}
 
-		if err := f.SetExtraField(felt.ShuttleFacetKey, block); err != nil {
+		if err := f.SetShuttleConfig(block); err != nil {
 			return fmt.Errorf("attaching shuttle block: %w", err)
 		}
 		if err := st.Write(f); err != nil {
@@ -387,7 +404,11 @@ it, you don't delete it.`,
 			return err
 		}
 
-		if existing, ok, _ := f.ShuttleBlock(); ok {
+		existing, ok, err := f.ShuttleBlock()
+		if err != nil {
+			return err
+		}
+		if ok {
 			return fmt.Errorf("fiber %s already has a shuttle: block (kind=%s); uninstall it first to re-pin", args[0], existing.Kind)
 		}
 
@@ -422,7 +443,7 @@ it, you don't delete it.`,
 			statusChanged = true
 		}
 
-		if err := f.SetExtraField(felt.ShuttleFacetKey, block); err != nil {
+		if err := f.SetShuttleConfig(block); err != nil {
 			return fmt.Errorf("attaching shuttle block: %w", err)
 		}
 		if err := st.Write(f); err != nil {

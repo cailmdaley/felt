@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"os"
 	"strings"
 	"testing"
 
@@ -171,5 +172,93 @@ func TestShuttlePin_RefusesExistingBlock(t *testing.T) {
 
 	if _, err := runCommand(t, dir, "shuttle", "pin", "hub", "--host", "testhost", "--project-dir", pdir); err == nil {
 		t.Fatal("pin on a fiber that already has a block must refuse")
+	}
+}
+
+// ---- regressions from adversarial verification ----------------------------
+
+// TestShuttleRepeat_PreservesRuntimeKeys is the regression for the
+// repeat-over-existing clobber: re-defining a live standing role's schedule must
+// keep the daemon-owned continuation keys (shuttle preserves them via
+// mergeUnknownShuttleFields; the felt port now does via SetShuttleConfig).
+func TestShuttleRepeat_PreservesRuntimeKeys(t *testing.T) {
+	defer saveShuttleGlobals()()
+	dir, storage := newShuttleStore(t)
+	pdir := t.TempDir()
+	// A live standing role carrying continuation state, host-less (guard fail-open).
+	seedShuttleRole(t, storage, "role", felt.StatusActive, map[string]any{
+		"kind": "standing", "agent": "claude-opus",
+		"schedule":     map[string]any{"expr": "0 8 * * *", "tz": "UTC"},
+		"session_uuid": "keep-uuid", "dispatched_at": "2026-06-21T00:00:00Z",
+	}, nil)
+
+	// Redefine the recurrence; --model omitted so the agent is inherited.
+	if out, err := runCommand(t, dir, "shuttle", "repeat", "role",
+		"--host", "testhost", "--schedule", "0 9 * * 1-5", "--tz", "Europe/Paris", "--project-dir", pdir); err != nil {
+		t.Fatalf("repeat: %v\n%s", err, out)
+	}
+	f := mustRead(t, storage, "role")
+	b, ok, err := f.ShuttleBlock()
+	if err != nil || !ok {
+		t.Fatalf("ShuttleBlock: ok=%v err=%v", ok, err)
+	}
+	if b.Schedule == nil || b.Schedule.Expr != "0 9 * * 1-5" || b.Agent != "claude-opus" {
+		t.Fatalf("new config / inherited agent not applied: %+v", b)
+	}
+	raw, _ := os.ReadFile(storage.Path("role"))
+	for _, want := range []string{"session_uuid: keep-uuid", "dispatched_at:", "2026-06-21T00:00:00Z"} {
+		if !strings.Contains(string(raw), want) {
+			t.Fatalf("repeat clobbered a runtime key: missing %q in\n%s", want, raw)
+		}
+	}
+}
+
+// TestShuttleCreate_MalformedBlockErrors proves install/repeat/pin surface a
+// clean error (not a nil-deref panic) on a shuttle: value that is a mapping but
+// fails the typed decode — e.g. a hand-edited schedule written as a scalar.
+func TestShuttleCreate_MalformedBlockErrors(t *testing.T) {
+	defer saveShuttleGlobals()()
+	dir, storage := newShuttleStore(t)
+	pdir := t.TempDir()
+	seedShuttleRole(t, storage, "bad", felt.StatusActive, map[string]any{
+		"kind": "standing", "schedule": "not-a-mapping",
+	}, nil)
+
+	cases := [][]string{
+		{"shuttle", "install", "bad"},
+		{"shuttle", "repeat", "bad", "--host", "testhost", "--schedule", "0 9 * * 1-5", "--project-dir", pdir},
+		{"shuttle", "pin", "bad", "--host", "testhost", "--project-dir", pdir},
+	}
+	for _, args := range cases {
+		if _, err := runCommand(t, dir, args...); err == nil {
+			t.Fatalf("%v on a malformed block must error cleanly (got nil — a panic would have crashed the test)", args)
+		}
+	}
+}
+
+// TestShuttleRepeat_RefusesRemoteOwned proves repeat (the one create verb that
+// overwrites) passes the ownership guard: re-defining a cineca-owned role from
+// macbook must refuse and leave the mirror byte-identical.
+func TestShuttleRepeat_RefusesRemoteOwned(t *testing.T) {
+	defer saveShuttleGlobals()()
+	withOwnHost(t, "macbook")
+	dir, storage := newShuttleStore(t)
+	pdir := t.TempDir()
+	seedShuttleRole(t, storage, "remote", felt.StatusActive, map[string]any{
+		"kind": "standing", "agent": "claude-opus", "host": "cineca",
+		"schedule": map[string]any{"expr": "0 8 * * *", "tz": "UTC"},
+	}, nil)
+	before, _ := os.ReadFile(storage.Path("remote"))
+
+	_, err := runCommand(t, dir, "shuttle", "repeat", "remote", "--schedule", "0 9 * * 1-5", "--project-dir", pdir)
+	if err == nil {
+		t.Fatal("repeat on a cineca-owned role from macbook must be refused")
+	}
+	if _, ok := err.(ownerMismatchError); !ok {
+		t.Fatalf("expected ownerMismatchError, got %T: %v", err, err)
+	}
+	after, _ := os.ReadFile(storage.Path("remote"))
+	if string(before) != string(after) {
+		t.Fatal("refused repeat must leave the mirror byte-identical")
 	}
 }

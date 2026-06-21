@@ -2,6 +2,7 @@ package felt
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/cailmdaley/felt/internal/shuttle"
@@ -96,6 +97,56 @@ func (f *Felt) SetShuttleNodeField(key string, value any) error {
 		return fmt.Errorf("shuttle: no shuttle block present to set %q on", key)
 	}
 	return setMappingNode(node, key, value)
+}
+
+// shuttleConfigKeys are the keys felt's typed shuttle.Block models — the
+// human-authored config a create verb (install/repeat) rewrites. Every OTHER
+// sibling in the block is preserved across a rewrite, which is how the
+// daemon-owned runtime/continuation keys (session_uuid, dispatched_at,
+// handed_off_at, run_id) and any forward-compatible unknown survive a re-install.
+// Must track shuttle.Block's yaml field set.
+var shuttleConfigKeys = map[string]bool{
+	"kind": true, "host": true, "project_dir": true, "agent": true,
+	"effort": true, "chrome": true, "schedule": true,
+}
+
+// SetShuttleConfig installs the config block, replacing the typed config keys
+// while PRESERVING every non-config sibling already on the fiber — the daemon's
+// runtime/continuation keys and any forward-compat unknown. It is the felt
+// analogue of shuttle-ctl's mergeUnknownShuttleFields: a re-install (repeat
+// redefining a recurrence, set-* under the hood) that rewrites the config a human
+// authored without ever clobbering continuation state the daemon owns.
+//
+// On a fiber with no existing block it installs `block` wholesale (nothing to
+// preserve). Config keys absent from `block` (e.g. an effort cleared by switching
+// roles) are dropped — matching the typed Block's omitempty — while runtime
+// siblings ride through untouched.
+func (f *Felt) SetShuttleConfig(block *shuttle.Block) error {
+	node, ok := f.shuttleMappingNode()
+	if !ok {
+		// No existing well-formed block: nothing to preserve.
+		return f.SetExtraField(ShuttleFacetKey, block)
+	}
+	var encoded yaml.Node
+	if err := encoded.Encode(block); err != nil {
+		return err
+	}
+	if encoded.Kind != yaml.MappingNode {
+		return fmt.Errorf("shuttle: encoded config block is not a mapping")
+	}
+	// Graft every non-config sibling (runtime + unknown) from the old node onto
+	// the freshly-encoded config node, in their original order.
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		if shuttleConfigKeys[strings.TrimSpace(node.Content[i].Value)] {
+			continue
+		}
+		encoded.Content = append(encoded.Content, node.Content[i], node.Content[i+1])
+	}
+	if f.ExtraFields == nil {
+		f.ExtraFields = map[string]*yaml.Node{}
+	}
+	f.ExtraFields[ShuttleFacetKey] = &encoded
+	return nil
 }
 
 // ValidateShuttleFacet validates the fiber's shuttle: facet (kind enum, agent
