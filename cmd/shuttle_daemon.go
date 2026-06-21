@@ -33,14 +33,6 @@ func daemonURL() string {
 	return defaultDaemonURL
 }
 
-// shuttleSnapshot is the subset of GET /api/v1/state the felt CLI consumes today.
-// Only Host is needed (resolveOwnHost); the daemon emits far more (eligible
-// workers, standing roles) that the local-read verbs will decode in a later
-// slice.
-type shuttleSnapshot struct {
-	Host string `json:"host,omitempty"`
-}
-
 // fetchLocalHost queries the local daemon for its own_host_id — the authoritative
 // identity the poller compares a block's host: against. install/repeat/pin stamp
 // it so a block is born owned. Returns an error when the daemon is unreachable;
@@ -62,7 +54,7 @@ func fetchLocalHost() (string, error) {
 		return "", fmt.Errorf("daemon returned %d: %s", resp.StatusCode, string(body))
 	}
 
-	var s shuttleSnapshot
+	var s Snapshot
 	if err := json.Unmarshal(body, &s); err != nil {
 		return "", err
 	}

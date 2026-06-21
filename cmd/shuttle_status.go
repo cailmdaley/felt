@@ -22,7 +22,11 @@ import (
 // /api/v1/state/composite) is the daemon-HTTP slice (Stage 3.3), not here; this is
 // the local view only.
 
-var statusIncludeOrphans bool
+var (
+	statusIncludeOrphans bool
+	statusAll            bool
+	statusRemote         string
+)
 
 // FiberStatus is one row of the status output. Origin is reserved for the
 // cross-host rows the 3.3 daemon-HTTP arm adds; it is empty for every local row.
@@ -58,12 +62,26 @@ the configured stores: LOOM_HOMES, the ~/.shuttle/felt_stores.json registry, the
 
 Columns: fiber_id  kind  state  next_due_at  agent
 
-Flags:
+Cross-host (queries the local daemon's /api/v1/state/composite):
+  --all           local plus every configured remote (composite snapshot).
+  --remote NAME   only the named remote.
+
+The daemon's RemoteRegistry polls each remote over its SSH-tunnel-mapped port;
+the CLI just renders that response. Rows from a remote carry an "origin" column;
+stale remotes (the registry hasn't heard back recently) are flagged "[stale]".
+
+Other flags:
   --include-orphans  also list live Shuttle tmux sessions that no longer map to a
                      shuttle: facet (rare; useful after manual cleanup).
   --json             emit an array of objects instead.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// Cross-host paths route through the local daemon; --remote and --all are
+		// mutually exclusive (--remote NAME implies "filter to one").
+		if statusAll || statusRemote != "" {
+			return runStatusCrossHost()
+		}
+
 		stores, err := shuttleStores()
 		if err != nil {
 			return err
@@ -337,6 +355,11 @@ func shuttleTruncateID(s string, n int) string {
 func registerShuttleStatusFlags() {
 	statusCmd.Flags().BoolVar(&statusIncludeOrphans, "include-orphans", false,
 		"Also list live Shuttle tmux sessions with no matching shuttle: facet")
+	statusCmd.Flags().BoolVar(&statusAll, "all", false,
+		"Show local plus all configured remotes (queries daemon /api/v1/state/composite)")
+	statusCmd.Flags().StringVar(&statusRemote, "remote", "",
+		"Show only the named remote (queries daemon /api/v1/state/composite)")
+	statusCmd.MarkFlagsMutuallyExclusive("all", "remote")
 }
 
 func init() {
