@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>{{ .Label }}</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>{{ .AutoSSHPath }}</string>
+    {{- if not .HoldCommand }}
+    <string>-N</string>
+    {{- end }}
+    <string>-M</string>
+    <string>0</string>
+    <string>-S</string>
+    <string>none</string>
+    <string>-o</string>
+    <string>ServerAliveInterval=30</string>
+    <string>-o</string>
+    <string>ServerAliveCountMax=3</string>
+    <string>-o</string>
+    <string>ControlMaster=no</string>
+    <string>-o</string>
+    <string>ExitOnForwardFailure=yes</string>
+    {{- if .SSHAuthSock }}
+    <string>-o</string>
+    <string>IdentityAgent={{ .SSHAuthSock }}</string>
+    {{- end }}
+    <string>-L</string>
+    <string>{{ .LocalPort }}:localhost:4000</string>
+    <string>{{ .SSHHost }}</string>
+    {{- if .HoldCommand }}
+    <string>{{ .HoldCommand }}</string>
+    {{- end }}
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>AUTOSSH_GATETIME</key>
+    <string>0</string>
+    {{- if .SSHAuthSock }}
+    <key>SSH_AUTH_SOCK</key>
+    <string>{{ .SSHAuthSock }}</string>
+    {{- end }}
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>KeepAlive</key>
+  <dict>
+    <key>NetworkState</key>
+    <true/>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+
+  <key>StandardOutPath</key>
+  <string>{{ .LogPath }}</string>
+  <key>StandardErrorPath</key>
+  <string>{{ .LogPath }}</string>
+  <key>WorkingDirectory</key>
+  <string>{{ .Home }}</string>
+</dict>
+</plist>
