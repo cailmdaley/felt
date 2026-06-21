@@ -137,6 +137,72 @@ func TestNextOccurrence(t *testing.T) {
 	}
 }
 
+func TestPrevOccurrence(t *testing.T) {
+	s := &Schedule{Expr: "0 9 * * 1-5", TZ: "Europe/Paris"}
+	paris, _ := time.LoadLocation("Europe/Paris")
+
+	// After Monday's 09:00 tick → prev is that same Monday tick.
+	// 2026-05-04 is a Monday; 2026-05-01 is the previous Friday.
+	after := time.Date(2026, 5, 4, 10, 0, 0, 0, paris) // Mon 10:00 Paris
+	prev, err := PrevOccurrence(s, after)
+	if err != nil {
+		t.Fatalf("PrevOccurrence error: %v", err)
+	}
+	if h := prev.In(paris).Hour(); h != 9 {
+		t.Fatalf("prev hour = %d, want 9", h)
+	}
+	if d := prev.In(paris).Day(); d != 4 {
+		t.Fatalf("prev day = %d, want 4 (same Monday)", d)
+	}
+	if prev.After(after) {
+		t.Fatalf("prev %v must be <= before %v", prev, after)
+	}
+
+	// Before Monday's 09:00 tick → prev skips the weekend to the previous Friday.
+	before := time.Date(2026, 5, 4, 8, 0, 0, 0, paris) // Mon 08:00 Paris
+	prev2, err := PrevOccurrence(s, before)
+	if err != nil {
+		t.Fatalf("PrevOccurrence error: %v", err)
+	}
+	if wd := prev2.In(paris).Weekday(); wd != time.Friday {
+		t.Fatalf("prev weekday = %v, want Friday (cron is Mon-Fri, no weekend tick)", wd)
+	}
+	if d := prev2.In(paris).Day(); d != 1 {
+		t.Fatalf("prev day = %d, want 1 (previous Friday)", d)
+	}
+}
+
+// TestPrevNextBracketNow is the invariant the daemon's catch-up decision rests
+// on: for any now, prev ≤ now < next, and the tick immediately after prev is
+// exactly next — i.e. (prev, next) contains no occurrence, so "a tick fired
+// since last_serviced" reduces to "prev > last_serviced".
+func TestPrevNextBracketNow(t *testing.T) {
+	s := &Schedule{Expr: "30 14 10 * *", TZ: "Europe/Paris"} // 14:30 on the 10th, monthly
+	now := time.Date(2026, 6, 21, 9, 3, 17, 0, time.UTC)     // arbitrary mid-month instant
+	prev, err := PrevOccurrence(s, now)
+	if err != nil {
+		t.Fatalf("PrevOccurrence error: %v", err)
+	}
+	next, err := NextOccurrence(s, now)
+	if err != nil {
+		t.Fatalf("NextOccurrence error: %v", err)
+	}
+	if prev.After(now) {
+		t.Fatalf("prev %v must be <= now %v", prev, now)
+	}
+	if !next.After(now) {
+		t.Fatalf("next %v must be > now %v", next, now)
+	}
+	// The first tick strictly after prev is next — nothing fires between them.
+	bridge, err := NextOccurrence(s, prev)
+	if err != nil {
+		t.Fatalf("NextOccurrence(prev) error: %v", err)
+	}
+	if !bridge.Equal(next) {
+		t.Fatalf("NextOccurrence(prev)=%v != next=%v — a tick exists in (prev,next)", bridge, next)
+	}
+}
+
 // ---- Agent registry ---------------------------------------------------------
 
 func TestAgentRegistry_FindByID(t *testing.T) {

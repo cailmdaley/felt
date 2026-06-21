@@ -277,6 +277,45 @@ func NextOccurrence(s *Schedule, after time.Time) (time.Time, error) {
 	return next, nil
 }
 
+// PrevOccurrence returns the most recent scheduled time at or before `before`,
+// using the cron expression and IANA timezone from the schedule. It is the
+// backward complement to NextOccurrence — robfig/cron exposes only forward
+// Next — and exists for the daemon's catch-up dispatch decision: "did a tick
+// fire since the role was last serviced?" reduces to "is PrevOccurrence(now)
+// strictly after last_serviced?", a pure timestamp comparison the daemon makes
+// from felt's resolved JSON without re-parsing cron.
+//
+// Scans minute-by-minute backward (cron's resolution), bounded to ~366 days. A
+// minute m is an occurrence iff the first activation strictly after (m - 1s) is
+// m itself. Returns an error if no occurrence is found within the window (an
+// effectively-impossible schedule, e.g. one whose next real fire is years out);
+// callers emitting prev_due treat that as "omit prev_due", not a hard failure.
+func PrevOccurrence(s *Schedule, before time.Time) (time.Time, error) {
+	loc, err := time.LoadLocation(s.TZ)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("loading timezone %q: %w", s.TZ, err)
+	}
+
+	sched, err := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow).Parse(s.Expr)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("parsing cron %q: %w", s.Expr, err)
+	}
+
+	// Truncate to the minute so the candidate sits on an occurrence boundary,
+	// then walk backward. Truncate operates on the absolute instant; every IANA
+	// offset is a whole number of minutes, so the result lands on local wall
+	// :00 seconds in every zone. Work in loc to mirror NextOccurrence.
+	candidate := before.In(loc).Truncate(time.Minute)
+	for i := 0; i <= 366*24*60; i++ {
+		if sched.Next(candidate.Add(-time.Second)).Equal(candidate) {
+			return candidate, nil
+		}
+		candidate = candidate.Add(-time.Minute)
+	}
+
+	return time.Time{}, fmt.Errorf("no occurrence of %q within one year before %v", s.Expr, before)
+}
+
 // ---- Helpers ---------------------------------------------------------------
 
 func contains(slice []string, s string) bool {

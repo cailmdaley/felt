@@ -27,14 +27,21 @@ type ResolvedAgent struct {
 // flat config/runtime fields beside it stay the source of truth and are
 // unchanged, so a daemon that ignores `resolved` (Stage 2) keeps working.
 type Resolved struct {
-	Agent   *ResolvedAgent `json:"agent,omitempty"`
-	NextDue *time.Time     `json:"next_due,omitempty"`
+	Agent *ResolvedAgent `json:"agent,omitempty"`
+	// NextDue is the next occurrence strictly after now; PrevDue is the most
+	// recent occurrence at or before now. The daemon reads both for standing
+	// roles: NextDue for the display "upcoming tick" and the parseable-schedule
+	// signal, PrevDue for the catch-up dispatch decision (due iff PrevDue is
+	// after the role's last-serviced instant). Both are absent for non-standing
+	// blocks and when the schedule won't parse.
+	NextDue *time.Time `json:"next_due,omitempty"`
+	PrevDue *time.Time `json:"prev_due,omitempty"`
 }
 
 // IsEmpty reports whether nothing resolved (no agent, no schedule) — callers
 // skip attaching an empty resolved object.
 func (r *Resolved) IsEmpty() bool {
-	return r == nil || (r.Agent == nil && r.NextDue == nil)
+	return r == nil || (r.Agent == nil && r.NextDue == nil && r.PrevDue == nil)
 }
 
 // NewResolvedAgent folds a base agent record and the effective axes into the
@@ -85,7 +92,22 @@ func ResolveBlock(b *Block, reg *AgentRegistry, now time.Time) (*Resolved, error
 		if err != nil {
 			return nil, err
 		}
-		res.NextDue = &next
+		// robfig's Next returns the zero time (not an error) for a grammatical
+		// but unsatisfiable schedule (e.g. Feb 30: "0 0 30 2 *"). Treat that as
+		// "no occurrence" — emit neither boundary — so the daemon sees an
+		// unschedulable standing role (invalid) rather than a year-0001 next_due.
+		if !next.IsZero() {
+			res.NextDue = &next
+
+			// PrevDue is the daemon's catch-up signal (most recent tick ≤ now)
+			// within a ~1-year horizon. Best-effort: a schedule whose last fire is
+			// >1y back (e.g. a leap-Feb-29 role between leap years) emits next_due
+			// but no prev_due — correctly "valid, sleeping until the next fire,"
+			// never "due now". The daemon reads an absent prev_due as not-due.
+			if prev, err := PrevOccurrence(b.Schedule, now); err == nil && !prev.IsZero() {
+				res.PrevDue = &prev
+			}
+		}
 	}
 
 	return res, nil
