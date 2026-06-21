@@ -15,7 +15,7 @@ import (
 var shuttleHandoffCmd = &cobra.Command{
 	Use:   "handoff <fiber>",
 	Short: "Stamp the clean-exit handoff signal for a worker",
-	Long: `Stamps shuttle.handed_off_at = now into the fiber's frontmatter — the
+	Long: `Stamps shuttle.runtime.handed_off_at = now into the fiber's frontmatter — the
 signal that tells the daemon this worker exited CLEANLY, so the next dispatch
 starts fresh (and reads the rewritten '## Status' block) instead of resuming a
 dead transcript.
@@ -64,9 +64,10 @@ func resolveHandoffPath(fiber string) (string, error) {
 	return f.Path, nil
 }
 
-// stampHandedOff sets shuttle.handed_off_at = <now RFC3339 UTC> in the fiber's
-// frontmatter, surgically (SetShuttleField preserves the daemon-written
-// session_uuid / dispatched_at), and writes atomically. This is the clean-exit
+// stampHandedOff sets shuttle.runtime.handed_off_at = <now RFC3339 UTC> in the
+// fiber's frontmatter, surgically (SetShuttleRuntimeField touches only that one
+// nested key, so the daemon-written session_uuid / dispatched_at ride through),
+// and writes atomically. This is the clean-exit
 // signal: the daemon compares handed_off_at against dispatched_at to decide
 // fresh-vs-resume at the next dispatch. RFC3339Nano with a trailing Z (UTC) — the
 // Elixir reader parses it via DateTime.from_iso8601, and the comparison is on the
@@ -85,7 +86,7 @@ func stampHandedOff(path string) (string, error) {
 		return "", err
 	}
 	at := time.Now().UTC().Format(time.RFC3339Nano)
-	if err := f.SetShuttleField("handed_off_at", at); err != nil {
+	if err := f.SetShuttleRuntimeField("handed_off_at", at); err != nil {
 		return "", err
 	}
 	data, err := f.Marshal()

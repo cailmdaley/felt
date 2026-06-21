@@ -237,6 +237,93 @@ func TestSetShuttleField_PreservesRuntimeKeys(t *testing.T) {
 	}
 }
 
+// TestSetShuttleRuntimeField_NestsAndPreserves proves the Stage-5 nested writer:
+// runtime fields land under shuttle.runtime (not as flat siblings), a config edit
+// rides past them untouched, an empty value removes a nested key, and it all
+// survives the on-disk round-trip.
+func TestSetShuttleRuntimeField_NestsAndPreserves(t *testing.T) {
+	f := shuttleFiber(t, map[string]any{
+		"kind": "standing", "agent": "claude-opus", "host": "h", "project_dir": "/tmp/x",
+	})
+
+	// Daemon dispatch stamp (three runtime fields) + a config edit on the same block.
+	for k, v := range map[string]string{
+		"dispatched_at": "2026-06-21T00:00:00Z",
+		"session_uuid":  "abc-123",
+		"run_id":        "20260621T000000Z",
+	} {
+		if err := f.SetShuttleRuntimeField(k, v); err != nil {
+			t.Fatalf("SetShuttleRuntimeField(%s): %v", k, err)
+		}
+	}
+	if err := f.SetShuttleField("agent", "claude-sonnet"); err != nil {
+		t.Fatalf("SetShuttleField(agent): %v", err)
+	}
+
+	// Round-trip through the on-disk format to prove durability, not just memory.
+	raw, err := f.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	f2, err := Parse(f.ID, raw)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	sh := marshalShuttle(t, f2)["shuttle"].(map[string]any)
+
+	// Config keys stay flat at the top level.
+	for k, v := range map[string]string{"kind": "standing", "agent": "claude-sonnet", "host": "h"} {
+		if got := sh[k]; got != v {
+			t.Fatalf("shuttle.%s = %v, want %q (config clobbered)", k, got, v)
+		}
+	}
+	// Runtime keys are NESTED under shuttle.runtime, not flat siblings.
+	for _, k := range []string{"dispatched_at", "session_uuid", "run_id"} {
+		if _, flat := sh[k]; flat {
+			t.Fatalf("shuttle.%s leaked to the top level; runtime must nest under shuttle.runtime", k)
+		}
+	}
+	rt, ok := sh["runtime"].(map[string]any)
+	if !ok {
+		t.Fatalf("shuttle.runtime missing or not a mapping: %#v", sh["runtime"])
+	}
+	for k, v := range map[string]string{
+		"dispatched_at": "2026-06-21T00:00:00Z", "session_uuid": "abc-123", "run_id": "20260621T000000Z",
+	} {
+		if got := rt[k]; got != v {
+			t.Fatalf("shuttle.runtime.%s = %v, want %q", k, got, v)
+		}
+	}
+
+	// Empty value removes a nested key (omitempty), leaving the others.
+	if err := f2.SetShuttleRuntimeField("session_uuid", ""); err != nil {
+		t.Fatalf("SetShuttleRuntimeField(clear): %v", err)
+	}
+	sh2 := marshalShuttle(t, roundTrip(t, f2))["shuttle"].(map[string]any)
+	rt2 := sh2["runtime"].(map[string]any)
+	if _, present := rt2["session_uuid"]; present {
+		t.Fatal("empty value should remove shuttle.runtime.session_uuid")
+	}
+	if rt2["dispatched_at"] != "2026-06-21T00:00:00Z" {
+		t.Fatalf("clearing one runtime key dropped a sibling: %#v", rt2)
+	}
+}
+
+// roundTrip marshals f to bytes and re-parses it — proves a mutation persists on
+// disk, not just in the in-memory node.
+func roundTrip(t *testing.T, f *Felt) *Felt {
+	t.Helper()
+	raw, err := f.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	f2, err := Parse(f.ID, raw)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	return f2
+}
+
 // TestSetShuttleField_NoBlockErrors proves the primitive refuses to invent a
 // block: a pure note (or a fiber whose block was uninstalled) has no mapping to
 // set a field on, and the caller must build one via SetExtraField instead.

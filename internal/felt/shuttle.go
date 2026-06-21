@@ -99,6 +99,70 @@ func (f *Felt) SetShuttleNodeField(key string, value any) error {
 	return setMappingNode(node, key, value)
 }
 
+// ShuttleRuntimeKey is the nested sub-mapping under shuttle: that holds the
+// machine-managed continuation fields (session_uuid / dispatched_at /
+// handed_off_at / run_id). felt round-trips it opaquely like any non-config
+// sibling — it never validates runtime — but owns its WRITES so the nesting
+// lives in one engine (this yaml.Node code), not in the daemon's text surgery.
+const ShuttleRuntimeKey = "runtime"
+
+// shuttleRuntimeNode returns the shuttle.runtime mapping node, creating an empty
+// one (appended to the shuttle block) when absent or degenerate. Returns nil
+// only when the fiber carries no shuttle: mapping at all. The created node is a
+// child of the ExtraFields shuttle node, so felt's Write re-marshals it with no
+// SetExtraField round-trip — the same persistence path as SetShuttleField.
+func (f *Felt) shuttleRuntimeNode() *yaml.Node {
+	shuttleNode, ok := f.shuttleMappingNode()
+	if !ok {
+		return nil
+	}
+	if existing := mappingValueNode(shuttleNode, ShuttleRuntimeKey); existing != nil {
+		if existing.Kind == yaml.MappingNode {
+			return existing
+		}
+		// Degenerate (a scalar/null runtime:): reset it to an empty mapping in
+		// place, preserving the key's position.
+		existing.Kind = yaml.MappingNode
+		existing.Tag = "!!map"
+		existing.Value = ""
+		existing.Style = 0
+		existing.Content = nil
+		return existing
+	}
+	runtime := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+	shuttleNode.Content = append(shuttleNode.Content,
+		&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: ShuttleRuntimeKey},
+		runtime,
+	)
+	return runtime
+}
+
+// SetShuttleRuntimeField surgically sets a single machine-managed runtime key
+// (session_uuid / dispatched_at / handed_off_at / run_id) inside the fiber's
+// shuttle.runtime sub-mapping, creating runtime: if absent. It is the nested
+// counterpart to SetShuttleField — one level deeper — and mutates only the one
+// runtime key, so every config sibling AND every other runtime key rides through
+// untouched. An empty value removes the key (omitempty), so a re-stamp that
+// clears a field leaves no stale blank. Returns an error if the fiber carries no
+// well-formed shuttle: block.
+func (f *Felt) SetShuttleRuntimeField(key, value string) error {
+	runtime := f.shuttleRuntimeNode()
+	if runtime == nil {
+		return fmt.Errorf("shuttle: no shuttle block present to set runtime.%q on", key)
+	}
+	if value == "" {
+		for i := 0; i+1 < len(runtime.Content); i += 2 {
+			if strings.TrimSpace(runtime.Content[i].Value) == key {
+				runtime.Content = append(runtime.Content[:i], runtime.Content[i+2:]...)
+				break
+			}
+		}
+		return nil
+	}
+	setMappingScalar(runtime, key, value)
+	return nil
+}
+
 // shuttleConfigKeys are the keys felt's typed shuttle.Block models — the
 // human-authored config a create verb (install/repeat) rewrites. Every OTHER
 // sibling in the block is preserved across a rewrite, which is how the
