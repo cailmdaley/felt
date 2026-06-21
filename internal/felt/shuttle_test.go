@@ -7,7 +7,95 @@ import (
 	"time"
 
 	"github.com/cailmdaley/felt/internal/shuttle"
+	"gopkg.in/yaml.v3"
 )
+
+// fiberWithShuttleNode plants a raw yaml.Node as the shuttle: ExtraField,
+// bypassing SetExtraField's mapping wrapper — so a degenerate (scalar/null/
+// sequence) shuttle value can be exercised.
+func fiberWithShuttleNode(t *testing.T, node *yaml.Node) *Felt {
+	t.Helper()
+	f, err := New("test-fiber", "Test Fiber")
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	f.ExtraFields = map[string]*yaml.Node{ShuttleFacetKey: node}
+	f.ExtraFieldOrder = []string{ShuttleFacetKey}
+	return f
+}
+
+// TestShuttleFacet_NonMappingIsNotAFacet proves a degenerate shuttle: value (a
+// scalar, null, or sequence — not a YAML mapping) is treated as a pure
+// ExtraField: felt does not interpret it, never validates or resolves it, and —
+// critically — never crashes or fails a read on it (the daemon polls felt ls
+// --json over the whole loom; one malformed block must not take it down).
+func TestShuttleFacet_NonMappingIsNotAFacet(t *testing.T) {
+	cases := map[string]*yaml.Node{
+		"scalar":   {Kind: yaml.ScalarNode, Tag: "!!str", Value: "just-a-string"},
+		"null":     {Kind: yaml.ScalarNode, Tag: "!!null", Value: "null"},
+		"sequence": {Kind: yaml.SequenceNode, Tag: "!!seq", Content: []*yaml.Node{{Kind: yaml.ScalarNode, Value: "a"}}},
+	}
+	reg, err := shuttle.LoadAgentRegistry()
+	if err != nil {
+		t.Fatalf("LoadAgentRegistry: %v", err)
+	}
+	for name, node := range cases {
+		t.Run(name, func(t *testing.T) {
+			f := fiberWithShuttleNode(t, node)
+			if f.HasShuttleFacet() {
+				t.Fatal("a non-mapping shuttle value must not count as a facet")
+			}
+			if _, ok, err := f.ShuttleBlock(); ok || err != nil {
+				t.Fatalf("ShuttleBlock: ok=%v err=%v, want false/nil", ok, err)
+			}
+			if err := f.ValidateShuttleFacet(); err != nil {
+				t.Fatalf("validation must be a no-op on a non-facet, got: %v", err)
+			}
+			// The read path must not panic or error, and must attach nothing.
+			if err := f.AttachShuttleResolution(reg, time.Now()); err != nil {
+				t.Fatalf("AttachShuttleResolution must not fail on a non-facet, got: %v", err)
+			}
+			if _, ok := f.ResolvedShuttle(); ok {
+				t.Fatal("a non-facet must attach no resolution")
+			}
+			// And the raw value still round-trips through MarshalJSON unchanged.
+			out := marshalShuttle(t, f)
+			if _, ok := out[ShuttleFacetKey]; !ok {
+				t.Fatal("the raw shuttle value must still emit (opaque round-trip)")
+			}
+		})
+	}
+}
+
+// TestShuttleFacet_LegacyModeAlias proves felt's YAML decode path honors the
+// legacy `mode:` -> `kind:` alias (a block carrying mode: standing must validate
+// and resolve a next_due, not be rejected for an empty kind).
+func TestShuttleFacet_LegacyModeAlias(t *testing.T) {
+	f := shuttleFiber(t, map[string]any{
+		"mode":     "standing",
+		"agent":    "claude-sonnet",
+		"schedule": map[string]any{"expr": "0 9 * * 1-5", "tz": "Europe/Paris"},
+	})
+	b, ok, err := f.ShuttleBlock()
+	if err != nil || !ok {
+		t.Fatalf("ShuttleBlock: ok=%v err=%v", ok, err)
+	}
+	if b.Kind != "standing" {
+		t.Fatalf("mode: standing should decode to Kind=standing, got %q", b.Kind)
+	}
+	if err := f.ValidateShuttleFacet(); err != nil {
+		t.Fatalf("a valid mode: standing block must validate, got: %v", err)
+	}
+	out := marshalShuttle(t, f)
+	sh := out["shuttle"].(map[string]any)
+	resolved, ok := sh["resolved"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected resolved for a mode: standing role, got: %v", sh)
+	}
+	if _, ok := resolved["next_due"]; !ok {
+		t.Fatalf("mode: standing must resolve a next_due, got: %v", resolved)
+	}
+}
 
 func shuttleFiber(t *testing.T, block map[string]any) *Felt {
 	t.Helper()

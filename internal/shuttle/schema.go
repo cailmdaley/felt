@@ -87,6 +87,41 @@ func (s *Schedule) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// UnmarshalYAML accepts the canonical `kind` field as well as the legacy `mode`
+// alias, mirroring UnmarshalJSON. felt decodes the block from a yaml.Node (not
+// from JSON), so without this the `mode` alias would be unreachable and a
+// `mode:`-only legacy block would decode to an empty Kind — failing validation
+// and skipping next_due resolution. The daemon tolerates `mode` (it reads
+// kind || mode); as felt becomes the schema authority it must tolerate it too.
+// The aux struct (not Block) breaks the decode recursion; the nested *Schedule
+// still resolves through its own UnmarshalYAML (the legacy `timezone` alias).
+func (b *Block) UnmarshalYAML(value *yaml.Node) error {
+	var aux struct {
+		Kind       string    `yaml:"kind"`
+		Mode       string    `yaml:"mode"`
+		Host       string    `yaml:"host"`
+		ProjectDir string    `yaml:"project_dir"`
+		Agent      string    `yaml:"agent"`
+		Effort     string    `yaml:"effort"`
+		Chrome     bool      `yaml:"chrome"`
+		Schedule   *Schedule `yaml:"schedule"`
+	}
+	if err := value.Decode(&aux); err != nil {
+		return err
+	}
+	b.Kind = aux.Kind
+	if b.Kind == "" {
+		b.Kind = aux.Mode
+	}
+	b.Host = aux.Host
+	b.ProjectDir = aux.ProjectDir
+	b.Agent = aux.Agent
+	b.Effort = aux.Effort
+	b.Chrome = aux.Chrome
+	b.Schedule = aux.Schedule
+	return nil
+}
+
 // UnmarshalJSON accepts the canonical `kind` field as well as the legacy `mode`
 // alias used by pre-CLI shuttle blocks serialized through felt's JSON view.
 // Output always normalizes to `Kind`. Only the typed dispatch fields are

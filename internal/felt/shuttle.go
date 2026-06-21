@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/cailmdaley/felt/internal/shuttle"
+	"gopkg.in/yaml.v3"
 )
 
 // ShuttleFacetKey is the top-level frontmatter key felt interprets as the
@@ -15,23 +16,39 @@ import (
 // storage form.
 const ShuttleFacetKey = "shuttle"
 
-// HasShuttleFacet reports whether the fiber carries a shuttle: block. A fiber
-// without one is a pure note: felt validates nothing extra and the note-taking
-// experience is byte-for-byte unchanged (the optional-facet invariant).
-func (f *Felt) HasShuttleFacet() bool {
+// shuttleMappingNode returns the shuttle: facet node iff its value is a YAML
+// mapping — the only shape felt interprets as a dispatch facet, matching the
+// daemon's own is_map(shuttle) predicate. A shuttle: key whose value is null, a
+// scalar, or a sequence is degenerate, not a facet: felt round-trips it opaquely
+// like any other ExtraField and neither validates nor resolves it. This keeps a
+// malformed block from ever failing a read (felt show -j / ls --json) or
+// blocking an unrelated write.
+func (f *Felt) shuttleMappingNode() (*yaml.Node, bool) {
 	node, ok := f.ExtraFields[ShuttleFacetKey]
-	return ok && node != nil
+	if !ok || node == nil || node.Kind != yaml.MappingNode {
+		return nil, false
+	}
+	return node, true
+}
+
+// HasShuttleFacet reports whether the fiber carries a well-formed shuttle: block
+// (a YAML mapping). A fiber without one is a pure note: felt validates nothing
+// extra and the note-taking experience is byte-for-byte unchanged (the
+// optional-facet invariant).
+func (f *Felt) HasShuttleFacet() bool {
+	_, ok := f.shuttleMappingNode()
+	return ok
 }
 
 // ShuttleBlock decodes the fiber's shuttle: facet into a typed Block. Returns
-// (nil, false, nil) when the fiber carries no shuttle: block. The runtime /
-// continuation fields (session_uuid, dispatched_at, handed_off_at, run_id) are
-// deliberately not modeled by Block — they remain in the ExtraFields node and
+// (nil, false, nil) when the fiber carries no well-formed shuttle: block. The
+// runtime / continuation fields (session_uuid, dispatched_at, handed_off_at,
+// run_id) are deliberately not modeled by Block — they remain in the node and
 // ride through untouched; yaml decoding ignores keys the struct does not name,
 // so a block carrying them decodes cleanly.
 func (f *Felt) ShuttleBlock() (*shuttle.Block, bool, error) {
-	node, ok := f.ExtraFields[ShuttleFacetKey]
-	if !ok || node == nil {
+	node, ok := f.shuttleMappingNode()
+	if !ok {
 		return nil, false, nil
 	}
 	var b shuttle.Block
@@ -43,10 +60,11 @@ func (f *Felt) ShuttleBlock() (*shuttle.Block, bool, error) {
 
 // ValidateShuttleFacet validates the fiber's shuttle: facet (kind enum, agent
 // resolution against the registry, pinned-forbids-schedule, standing-requires a
-// valid cron + timezone). It is a no-op for a pure note — and only loads the
-// agent registry when a facet is actually present, so notes pay nothing. felt's
-// write verbs call this before persisting, making felt the schema authority: an
-// invalid shuttle: block fails the write loudly rather than reaching disk.
+// valid cron + timezone). It is a no-op for a pure note (or a degenerate
+// non-mapping shuttle value) — and only loads the agent registry when a facet is
+// actually present, so notes pay nothing. felt's write verbs call this before
+// persisting, making felt the schema authority: an invalid shuttle: block fails
+// the write loudly rather than reaching disk.
 func (f *Felt) ValidateShuttleFacet() error {
 	b, ok, err := f.ShuttleBlock()
 	if err != nil {
@@ -70,27 +88,36 @@ func (f *Felt) ValidateShuttleFacet() error {
 // is additive and read-only: the resolved object carries the flat block exactly
 // as felt emits it today PLUS a `resolved` sub-key (agent base record + effective
 // axes, and next_due for standing roles), so the daemon's contract on the flat
-// fields is untouched. A no-op for a pure note. A resolution error (e.g. an
-// unknown agent on a legacy block) is non-fatal: the flat block still emits, just
-// without the resolved sub-key — a read must never fail on a stale block.
+// fields is untouched. A no-op for a pure note or a degenerate non-mapping block.
 //
+// A read must never fail on a stale or malformed block: a block that does not
+// decode into the typed config still emits its flat form (just without the
+// resolved sub-key), and any other anomaly leaves the raw passthrough in place.
 // The resolved view lives in a dedicated field, never in ExtraFields, so it is
 // emitted on read but can never be persisted back to disk by a later write.
 func (f *Felt) AttachShuttleResolution(reg *shuttle.AgentRegistry, now time.Time) error {
-	node, ok := f.ExtraFields[ShuttleFacetKey]
-	if !ok || node == nil {
+	node, ok := f.shuttleMappingNode()
+	if !ok {
 		return nil
 	}
-	// Decode the flat block faithfully — the same shape felt emits today.
+	// The flat block: a faithful YAML round-trip of the raw bytes (not a pass
+	// through the typed struct), so no field can be dropped or reshaped. A
+	// mapping node always decodes to a non-nil map; guard anyway and fall back
+	// to the opaque passthrough rather than ever failing the read.
 	var flat map[string]interface{}
-	if err := node.Decode(&flat); err != nil {
-		return fmt.Errorf("decode shuttle: block: %w", err)
+	if err := node.Decode(&flat); err != nil || flat == nil {
+		return nil
 	}
 	// Resolve the typed config; on any error leave the flat block un-augmented.
 	var b shuttle.Block
 	if err := node.Decode(&b); err == nil {
 		if res, err := shuttle.ResolveBlock(&b, reg, now); err == nil && !res.IsEmpty() {
-			flat["resolved"] = res
+			// Never clobber a real `resolved` key the block already declared
+			// (none does today — felt owns the facet — but stay symmetric with
+			// MarshalJSON's known-keys-win merge).
+			if _, exists := flat["resolved"]; !exists {
+				flat["resolved"] = res
+			}
 		}
 	}
 	f.resolvedShuttle = flat
