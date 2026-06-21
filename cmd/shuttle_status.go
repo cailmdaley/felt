@@ -242,8 +242,16 @@ func listShuttleFibers(store string) ([]shuttleEntry, error) {
 		if err != nil || !ok || block == nil {
 			continue
 		}
+		// Report the dispatch-canonical (nearest-.felt) id, not felt's
+		// outer-aggregate id, so a status fiber_id matches the daemon's identity
+		// and round-trips into a daemon-routed write verb. Falls back to felt's
+		// native id if the path is not under a resolvable .felt store.
+		id := f.ID
+		if canonical, err := canonicalFiberID(f.Path); err == nil && canonical != "" {
+			id = canonical
+		}
 		entries = append(entries, shuttleEntry{
-			FiberID: f.ID,
+			FiberID: id,
 			UID:     f.UID,
 			Status:  f.Status,
 			Path:    f.Path,

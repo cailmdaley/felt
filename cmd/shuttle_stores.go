@@ -152,6 +152,85 @@ func normalizeFeltStores(stores []string) []string {
 	return out
 }
 
+// canonicalFiberID re-derives a fiber's dispatch-canonical id from its on-disk
+// markdown path: the id relative to the NEAREST enclosing .felt store, not the
+// outer ~/loom-aggregate namespace. This matters for fibers in symlinked
+// substores (e.g. ~/loom/.felt/<x>/lightcone -> a project's own .felt): felt's
+// aggregate walk names such a fiber by its full outer path (…/lightcone/foo),
+// but the daemon polls the project store DIRECTLY (it expands ~/loom's symlinks
+// into the real store roots) and so identifies — and dispatches, and routes
+// write verbs by — the SUBSTORE id (lightcone/foo). shuttle-ctl re-canonicalized
+// the same way (schema.FiberRefFromPath); status/ps must too, or a status
+// fiber_id won't round-trip into a daemon-routed verb (and the Stage 3.4 shim
+// would change shuttle-ctl's output). Ported from shuttle's pkg/schema/fiber.go.
+//
+// Returns "" with an error when the path is not under a .felt store (caller falls
+// back to felt's native id). felt already carries f.Path symlink-resolved, but
+// EvalSymlinks again here is idempotent and keeps the function correct for any
+// caller.
+func canonicalFiberID(mdPath string) (string, error) {
+	if mdPath == "" {
+		return "", fmt.Errorf("empty fiber path")
+	}
+	abs, err := filepath.Abs(mdPath)
+	if err != nil {
+		return "", err
+	}
+	if real, err := filepath.EvalSymlinks(abs); err == nil {
+		abs = real
+	}
+	rel, err := feltStoreRelativePath(abs)
+	if err != nil {
+		return "", err
+	}
+	return fiberIDFromStorePath(rel)
+}
+
+// feltStoreRelativePath walks up from a markdown path to the nearest enclosing
+// .felt directory and returns the path relative to it (slash-separated).
+func feltStoreRelativePath(path string) (string, error) {
+	current := filepath.Dir(path)
+	for {
+		if filepath.Base(current) == ".felt" {
+			rel, err := filepath.Rel(current, path)
+			if err != nil {
+				return "", fmt.Errorf("computing store-relative path: %w", err)
+			}
+			return filepath.ToSlash(rel), nil
+		}
+		next := filepath.Dir(current)
+		if next == current {
+			break
+		}
+		current = next
+	}
+	return "", fmt.Errorf("path %q is not under a .felt store", path)
+}
+
+// fiberIDFromStorePath derives the fiber id from a store-relative markdown path,
+// honoring felt's directory-per-fiber layout (<id>/<leaf>.md) and the flat
+// single-file form (<leaf>.md at the store root).
+func fiberIDFromStorePath(rel string) (string, error) {
+	rel = strings.TrimPrefix(filepath.ToSlash(rel), "./")
+	parts := strings.Split(rel, "/")
+	if len(parts) == 0 {
+		return "", fmt.Errorf("empty store-relative path")
+	}
+	file := parts[len(parts)-1]
+	if !strings.HasSuffix(file, ".md") {
+		return "", fmt.Errorf("path %q does not point at a markdown fiber", rel)
+	}
+	basename := strings.TrimSuffix(file, ".md")
+	if len(parts) == 1 {
+		return basename, nil
+	}
+	parent := parts[len(parts)-2]
+	if parent != basename {
+		return "", fmt.Errorf("unexpected fiber layout under .felt: %q", rel)
+	}
+	return strings.Join(parts[:len(parts)-1], "/"), nil
+}
+
 // expandUserPath expands a leading ~ and returns a cleaned absolute path.
 func expandUserPath(path string) (string, error) {
 	if path == "" {

@@ -57,7 +57,13 @@ intrinsic uid).`,
 		}
 		session := shuttleTmuxSessionName(f.ID, f.UID)
 		if jsonOutput {
-			return outputJSON(map[string]string{"fiber_id": f.ID, "session": session})
+			// Emit the dispatch-canonical id (matches the daemon + shuttle-ctl);
+			// the session name itself is leaf+uid keyed, so prefix-independent.
+			id := f.ID
+			if canonical, err := canonicalFiberID(f.Path); err == nil && canonical != "" {
+				id = canonical
+			}
+			return outputJSON(map[string]string{"fiber_id": id, "session": session})
 		}
 		fmt.Println(session)
 		return nil

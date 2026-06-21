@@ -334,6 +334,50 @@ func TestShuttleAddressFiber_FromAnywhere(t *testing.T) {
 	}
 }
 
+// TestCanonicalFiberID_SubstoreSymlink locks in the verification fix: a fiber in
+// a symlinked substore must report its NEAREST-.felt (dispatch-canonical) id, not
+// the outer-aggregate id felt's walk assigns — so a status fiber_id matches the
+// daemon (which polls the project store directly) and round-trips into a write
+// verb. Mirrors the live ~/loom/.felt/<x>/lightcone -> project-store topology.
+func TestCanonicalFiberID_SubstoreSymlink(t *testing.T) {
+	root := t.TempDir()
+	// Outer aggregate store.
+	outer := felt.NewStorage(root)
+	if err := outer.Init(); err != nil {
+		t.Fatalf("init outer: %v", err)
+	}
+	// A separate project store with its own .felt and a shuttle role inside.
+	projParent := t.TempDir()
+	proj := felt.NewStorage(projParent)
+	if err := proj.Init(); err != nil {
+		t.Fatalf("init proj: %v", err)
+	}
+	seedShuttleRoleUID(t, proj, "tooling/the-task", "01SUBSTOREUID00000000000001", felt.StatusActive, oneshot())
+
+	// Mount the project's .felt as a symlinked substore under the aggregate, the
+	// way ~/loom mounts a project store.
+	linkParent := root + "/.felt/projx"
+	if err := os.MkdirAll(linkParent, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.Symlink(projParent+"/.felt", linkParent+"/sub"); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	entries, err := listShuttleFibers(root)
+	if err != nil {
+		t.Fatalf("listShuttleFibers: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("want 1 entry through the symlinked substore, got %d: %+v", len(entries), entries)
+	}
+	// The canonical id is relative to the project store's .felt (tooling/the-task),
+	// NOT the outer-aggregate path (projx/sub/tooling/the-task).
+	if entries[0].FiberID != "tooling/the-task" {
+		t.Fatalf("FiberID = %q, want dispatch-canonical %q", entries[0].FiberID, "tooling/the-task")
+	}
+}
+
 func TestListShuttleFibers_SkipsNotesAndMalformed(t *testing.T) {
 	dir, storage := newShuttleStore(t)
 	seedShuttleRole(t, storage, "good", felt.StatusActive, oneshot(), nil)
