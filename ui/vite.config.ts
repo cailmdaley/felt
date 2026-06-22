@@ -3,6 +3,7 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { resolve } from 'node:path'
 import { existsSync } from 'node:fs'
+import { homedir } from 'node:os'
 
 /**
  * The Shuttle UI build.
@@ -31,16 +32,25 @@ import { existsSync } from 'node:fs'
  *
  * `@lightcone/renderer` is consumed as TS *source* (it ships no dist; the
  * constitution's "file:-link now, publish later" decision): resolve.alias the
- * three packages to a lightcone-ui checkout. LIGHTCONE_UI_DIR overrides the
- * default sibling layout (~/Documents/projects/LightconeResearch/lightcone-ui).
+ * three packages to a lightcone-ui checkout. LIGHTCONE_UI_DIR overrides; else
+ * we take the first existing of two known layouts: the sibling layout
+ * (`../../LightconeResearch/lightcone-ui` — the clusters'
+ * `~/Documents/projects/{shuttle,LightconeResearch}`) and the macOS-hub
+ * canonical (`~/Documents/projects/LightconeResearch/lightcone-ui`, with felt
+ * at `~/dev/felt` — the relative path no longer reaches it post-merge).
  * Building the paper bundle requires that checkout present — the board bundle
  * does not, so a host without lightcone-ui still builds + serves the board.
  */
 const apiTarget = process.env.VITE_SHUTTLE_API ?? 'http://localhost:4000'
 
+const lightconeUiSibling = resolve(__dirname, '../../LightconeResearch/lightcone-ui')
 const lightconeUiDir =
   process.env.LIGHTCONE_UI_DIR ??
-  resolve(__dirname, '../../LightconeResearch/lightcone-ui')
+  [
+    lightconeUiSibling,
+    resolve(homedir(), 'Documents/projects/LightconeResearch/lightcone-ui'),
+  ].find(existsSync) ??
+  lightconeUiSibling
 const rendererSrc = resolve(lightconeUiDir, 'packages/renderer/src')
 
 /**
