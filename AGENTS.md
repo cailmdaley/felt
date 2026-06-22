@@ -205,13 +205,12 @@ edits — a restart without `make daemon` is a no-op for picking up edits.
 
 ### Canonical checkout — `~/dev/felt` (outside Documents is load-bearing)
 
-The canonical checkout is **`~/dev/felt`** (the old `~/dev/shuttle` is retired).
-It must live **outside `~/Documents`** — see the launchd/TCC rationale below.
-
-> **Remote-host caveat (B3 cutover pending):** candide and cineca still run from
-> **`~/Documents/projects/shuttle`** until a later cutover (Stage B3). Keep the
-> remote-deploy paths below as `~/Documents/projects/shuttle`; do not point them
-> at `~/dev/felt` yet.
+The canonical checkout is **`~/dev/felt`** on **every** host — the macOS hub and
+both clusters (candide, cineca) — after the Stage-B3 cutover. The old
+`~/dev/shuttle` (hub) and `~/Documents/projects/shuttle` (clusters) are retired.
+It must live **outside `~/Documents`** — see the launchd/TCC rationale below
+(load-bearing on macOS; the clusters are Linux so unconstrained, but `~/dev/felt`
+is used there too for one uniform path).
 
 ### Durable launch (macOS) — `make install-agent`
 
@@ -276,9 +275,10 @@ appends one JSON line per hook event to `$SHUTTLE_EVENTS_FILE` (default
 path.
 
 **The hook lives in loom, registered by `loom/setup.sh`.** It can't live in this
-repo: `~/loom` is the same absolute path on every machine, but the checkout is
-not (`~/dev/felt` here, `~/Documents/projects/shuttle` on the clusters), and
-`~/.claude/settings.json` needs a stable absolute `command` path.
+repo: `~/loom` is the git-synced, same-absolute-path anchor on every machine, so
+a hook placed there is distributed and stable for free, and
+`~/.claude/settings.json` needs a stable absolute `command` path. (The checkout
+is now `~/dev/felt` on every host too, but loom remains the natural home.)
 `loom/setup.sh`'s Python block registers `~/loom/hooks/shuttle-hook.sh` into
 `~/.claude/settings.json` across the tracked events (UserPromptSubmit, PreToolUse,
 Stop, Notification, SessionStart, SessionEnd). To install on a machine: sync loom
@@ -342,12 +342,13 @@ rather than treating the deploy *mechanics* as the gate.
 
 **Deploying to remote hosts (candide, cineca):** push to GitHub first, then build
 on the host — don't copy the macOS escript, as BEAM bytecode format varies across
-OTP versions and the binary will crash on startup on a different host. (Remote
-paths stay `~/Documents/projects/shuttle` until the B3 cutover.)
+OTP versions and the binary will crash on startup on a different host. Both
+clusters run the merged felt repo from **`~/dev/felt`** (post-B3); the respawn
+loop is driven by `~/.local/bin/shuttle-launch` (`SHUTTLE_DIR=$HOME/dev/felt`).
 
 ```bash
-ssh candide "cd ~/Documents/projects/shuttle && git pull && make all"
-ssh cineca  "cd ~/Documents/projects/shuttle && git pull && make all"
+ssh candide "cd ~/dev/felt && git pull && make daemon"
+ssh cineca  "cd ~/dev/felt && git pull && make daemon"
 ```
 
 After a remote deploy, verify both `/api/v1/version` and one behavior-shaped
@@ -390,8 +391,8 @@ path is **build `ui/dist` locally (where the deps resolve) and `rsync` it**:
 
 ```bash
 cd ui && npm run build              # locally; lightcone-ui present → paper entry included
-rsync -az --delete ui/dist/ candide:~/Documents/projects/shuttle/ui/dist/
-rsync -az --delete ui/dist/ cineca:~/Documents/projects/shuttle/ui/dist/
+rsync -az --delete ui/dist/ candide:~/dev/felt/ui/dist/
+rsync -az --delete ui/dist/ cineca:~/dev/felt/ui/dist/
 ```
 
 (The renderer is compiled *into* the bundle, so a remote serving the shipped
