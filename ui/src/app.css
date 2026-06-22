@@ -1,0 +1,30 @@
+/* The Shuttle UI shell.
+ *
+ * The board (`.kbn-modal`) positions itself `absolute; inset: 0` inside its
+ * host, so the host (`#app`) must be a positioned, full-viewport box. The
+ * font / layout CSS vars the board reads all have inline fallbacks; we set
+ * them here at the root so the standalone app matches Portolan's intent, and
+ * we zero the two vars that reserved space for surfaces this UI cuts
+ * (`--canvas-width` / `--thumb-index-bottom` were the thumb-index band's
+ * offsets). */
+:root {
+  --font-main: 'EB Garamond', Garamond, Georgia, serif;
+  --font-serif: 'EB Garamond', Garamond, Georgia, serif;
+  --font-mono: 'IBM Plex Mono', 'JetBrains Mono', ui-monospace, monospace;
+  --canvas-width: 0px;
+  --thumb-index-bottom: 0px;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+#app {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+}

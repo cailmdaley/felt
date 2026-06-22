@@ -1,0 +1,33 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "useDefineForClassFields": true,
+    "module": "ESNext",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["vite/client"],
+
+    /* React islands (the Stash/Capture forms) render through the automatic
+       JSX runtime; the kanban board stays vanilla TS/DOM. */
+    "jsx": "react-jsx",
+
+    "skipLibCheck": true,
+
+    /* Bundler mode — mirrors Portolan, the source of the ported board.
+       `.js` import specifiers resolve to their `.ts` siblings under Vite
+       and bundler module resolution. */
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+
+    /* Linting — same strictness the board was authored under. */
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "erasableSyntaxOnly": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedSideEffectImports": true
+  },
+  "include": ["src"]
+}

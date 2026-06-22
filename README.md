@@ -40,7 +40,6 @@ felt init                                              # creates .felt/ support 
 felt add use-des-y3-weights "Use DES Y3 weights"       # file a decision / task / note
 felt add covariance-estimation "Covariance estimation"
 felt edit covariance-estimation -s closed -o "switched to jackknife — 10x faster, <2% bias"
-felt history covariance-estimation                     # append-only event log per fiber
 ```
 
 A fiber can be anything: a task, a decision, a research claim, a question, a spec. The body carries detail, wikilinks cite related fibers, and the outcome captures the conclusion.
@@ -141,13 +140,9 @@ felt show bao/damping-prior --json    # extra top-level keys included in JSON
 
 ### History
 
-Each fiber carries an append-only event log — editorial notes, reviews, mechanical add/edit, and external_edit detection — for chronological handoff across sessions and tools.
+Fibers are plain markdown in git, so a fiber's chronology is its file's `git log` — there is no separate event log to maintain. The current handoff state lives in the body itself (the `outcome`, and a `## Status` section where a fiber keeps one), travelling with the file across machines and tools.
 
 ```bash
-felt history <id>                              # editorial chain (newest first)
-felt history <id> --last 1                     # what the previous session left
-felt history <id> --mechanical                 # + add/edit/external_edit
-felt history append <id> --summary "..."       # log session continuity
 felt index sync                                 # refresh the rebuildable SQLite cache
 ```
 
@@ -203,7 +198,7 @@ The plugin bundles the `felt` skill, a SessionStart hook that lists active and r
 felt init                         felt add <slug> <name> [flags]
 felt edit <id> [flags]            felt show <id> [-d level]
 felt ls [query]                   felt check
-felt history <id>                 felt history append <id> --summary "..."
+felt shuttle <verb>               # agent dispatch (status, ps, install, …)
 felt tree                         felt nest|unnest <id>
 felt migrate [--dry-run]          felt rm <id>
 felt index sync                   felt session
@@ -243,6 +238,23 @@ Felt borrows from several projects exploring how to give AI coding agents struct
 - **[Ralph Wiggum](https://github.com/ghuntley/how-to-ralph-wiggum)** — Geoffrey Huntley's autonomous iteration technique: feed the agent the same spec on a loop until the work is done. It shaped how a `shuttle` constitution gets driven — a fresh worker redispatched against the fiber until its desired state holds — rather than any skill felt itself bundles.
 - **[Ouroboros](https://github.com/Q00/ouroboros)** — Q00's specification-first AI coding workflow. The Double Diamond rhythm (Wonder → Ontology, Design → Delivery) in the bundled writing references is adapted from this lineage.
 
+## Shuttle
+
+The same repo ships **Shuttle**: an OTP dispatcher that polls the felt tree and
+launches one tmux worker per eligible fiber — a fiber carrying a `shuttle:`
+frontmatter block whose status is `open` or `active`. It serves a kanban board at
+`http://127.0.0.1:4000/` for watching and steering those autonomous workers.
+Workers stay attachable (`tmux attach -t shuttle-<fiber-id>`); the daemon
+supervises the watcher, not the worker.
+
+Stand it up from source with the bootstrap (`./bootstrap.sh` or `make install`),
+which builds+installs the felt CLI, builds the daemon, places the board bundle,
+and installs the keep-alive. See **[AGENTS.md](AGENTS.md)** for the full
+operator and contributor guide.
+
 ## License
 
-[MIT](LICENSE)
+The felt CLI and the board UI are licensed under the [MIT License](LICENSE).
+The Shuttle daemon (`lib/`) contains code derived from OpenAI's Symphony under
+the [Apache License 2.0](LICENSE-APACHE), preserved in `NOTICE` and
+`LICENSE-APACHE`.

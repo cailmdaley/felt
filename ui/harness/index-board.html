@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Board chrome verification harness</title>
+<!-- EB Garamond body face from Google Fonts so the manuscript typography reads
+     faithfully offline; the dropcap initials (F1/F2) load from the local
+     ./fonts/ copy via the re-declared @font-face below (the bundled CSS points
+     at root-absolute /fonts/ which file:// can't resolve). -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./shuttle-ui.css">
+<style>
+  /* Re-declare the dropcap initials against the local relative font copy so
+     file:// resolves them (the bundled rule uses an absolute /fonts/ path). */
+  @font-face { font-family: 'EBGI F1'; src: url('./fonts/EBGaramond-InitialsF1.otf') format('opentype'); font-display: swap; }
+  @font-face { font-family: 'EBGI F2'; src: url('./fonts/EBGaramond-InitialsF2.otf') format('opentype'); font-display: swap; }
+  :root {
+    --font-main: 'EB Garamond', Georgia, serif;
+    --font-serif: 'EB Garamond', Georgia, serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+  }
+  html, body { margin: 0; height: 100%; background: #d9cdb8; }
+  /* The board mounts into a fixed full-viewport host (see harness-board.ts);
+     the workspace ✕ / new-window corner buttons are simulated here so the
+     ~32px top inset can be judged against them. */
+  .sim-corner {
+    position: fixed; top: 4px; z-index: 9999;
+    width: 24px; height: 24px; border-radius: 4px;
+    background: rgba(27, 22, 17, 0.10);
+    border: 1px solid rgba(27, 22, 17, 0.18);
+    color: #7A6F5C; font: 14px/24px var(--font-mono); text-align: center;
+    pointer-events: none;
+  }
+  .sim-corner-close { left: 6px; }
+  .sim-corner-new { left: 34px; }
+</style>
+</head>
+<body>
+<div class="sim-corner sim-corner-close" aria-hidden="true">✕</div>
+<div class="sim-corner sim-corner-new" aria-hidden="true">◳</div>
+<script src="./harness-board.js"></script>
+</body>
+</html>

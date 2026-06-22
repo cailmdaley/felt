@@ -1,0 +1,1657 @@
+/* EB Garamond Initials F1 / F2 — the two-layer dropcap fonts. F2 is
+   the character body; F1 is the flourish overlay (vine + cartouche)
+   drawn on top at low opacity. Pattern adapted from
+   cailmdaley.github.io's science-ai.astro and vellum's .illuminated
+   class. Served from portolan's public/fonts/. */
+@font-face {
+  font-family: 'EBGI F1';
+  src: url('/fonts/EBGaramond-InitialsF1.otf') format('opentype');
+  font-display: swap;
+}
+@font-face {
+  font-family: 'EBGI F2';
+  src: url('/fonts/EBGaramond-InitialsF2.otf') format('opentype');
+  font-display: swap;
+}
+
+/* Kanban dropcap — wraps a single capital letter with the layered
+   F2/F1 treatment. KanbanModal.ts injects:
+     <span class="kbn-cap" data-letter="D">D</span>...
+   The visible letter is the F2 body in cinnabar; the ::before
+   pseudo-element duplicates the letter in F1 (the flourish overlay)
+   at reduced opacity. Inline sizing reads as a manuscript second-
+   color drop initial, not a UI rubrication. */
+.kbn-cap {
+  font-family: 'EBGI F2', 'EB Garamond', Georgia, serif;
+  color: #BC4538;
+  text-transform: uppercase;
+  position: relative;
+  display: inline-block;
+  font-size: 1.55em;
+  line-height: 0.78;
+  letter-spacing: 0;
+  /* Sits the cap on the body baseline rather than floating slightly
+     above it. Each typographic context overrides with its own tuned
+     value below (col title / masthead / section strip). */
+  vertical-align: -0.10em;
+  margin-right: 0.04em;
+  font-style: normal;
+  font-variant: normal;
+  font-weight: 500;
+}
+.kbn-cap::before {
+  content: attr(data-letter);
+  font-family: 'EBGI F1', 'EB Garamond', Georgia, serif;
+  /* EBGI F1 is pure frill/framing — the F1 glyph alone isn't a
+     readable letter, just the decorative flourishes that surround
+     the position a letter would occupy. So this layer sits ON TOP
+     of the F2 letterform: the colored letter shows through, with
+     the iron-gall calligraphic ornament layered over it as the
+     "detail strokes" pass that traditionally finishes an
+     illumination. */
+  color: #1B1611;
+  opacity: 0.45;
+  text-transform: uppercase;
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+}
+/* Per-column F2 body tinting. The three live columns each get a
+   distinct hue against the parchment, with cinnabar pulled OUT of
+   the column row (it already carries the masthead K, the cinnabar
+   fleuron, and the section-strip dropcaps — the page had too much
+   red when In Flight also wore it):
+
+     Drafts          dark warm slate  not-yet-illuminated, neutral
+                                       but strong against parchment
+     In Flight       cobalt            the active rubric, now in blue
+     Awaiting        teal              verdigris, ripening
+
+   F1 flourish (.kbn-cap::before, ochre) stays consistent across all
+   columns — the gilt language ties the row together.
+
+   Tempered + Composted are kept here for safety: the buckets still
+   exist in classifyFiber (server/src/HttpApiKanban.ts) even though the
+   current three-surfaces layout doesn't render them as columns. */
+.kbn-col-drafts .kbn-cap { color: #C49333; }                   /* ochre */
+.kbn-col-inFlight .kbn-cap { color: #3D5BA0; }                 /* cobalt */
+.kbn-col-awaiting .kbn-cap,
+.kbn-col-awaitingReview .kbn-cap { color: #3F8278; }           /* teal */
+.kbn-col-tempered .kbn-cap { color: #C49333; }                 /* ochre (off-surface) */
+.kbn-col-composted .kbn-cap { color: #7A6F5C; }                /* muted (off-surface) */
+
+/* Fills the host element supplied by vellum's workspace slot
+   (KanbanHost in src/vellum/mount.tsx). The host gives us a fixed-
+   viewport positioning context; the kanban stretches to inset:0
+   inside it. No border or shadow — vellum's outer modal already
+   provides the chrome boundary, and a nested border reads as
+   tile-in-tile.
+
+   Header padding-left clears 44px for vellum's modal close button
+   (24px wide at left:8px — see vellum/mount.tsx:openVellumWorkspaceModal). */
+.kbn-modal {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  /* The masthead dissolved, so the Now board would otherwise start flush at
+     the modal's top edge — straight under the fixed workspace ✕ / new-window
+     corner buttons (top:4px, 24px tall, hugging the top-left). This top inset
+     lifts the first column head clear of them (~32px to the head once the
+     body's own 12px padding is added). box-sizing keeps the inset:0 +
+     100%/100% sizing honest with the added padding. */
+  box-sizing: border-box;
+  padding-top: 20px;
+  /* Pigment & Parchment warm-cool wash — the page is *lit*, not glowing.
+     A warm ochre/cinnabar breath at the upper-left, a cool cobalt
+     breath at the lower-right, and a faint parchment-tooth grain on
+     top so the substrate has texture rather than reading as a flat
+     fill. Pigments hold their saturation against the warmth rather
+     than dissolving into it. */
+  background-color: #EDE2CE;
+  background-image:
+    radial-gradient(ellipse 85% 55% at 10% -10%, rgba(196, 147, 51, 0.18), transparent 60%),
+    radial-gradient(ellipse 100% 60% at 92% 110%, rgba(61, 91, 160, 0.09), transparent 62%),
+    url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='kbn'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='matrix' values='0.55 0 0 0 0.08  0.48 0 0 0 0.05  0.32 0 0 0 0.02  0 0 0 1 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23kbn)' opacity='0.05'/%3E%3C/svg%3E");
+  background-attachment: fixed, fixed, fixed;
+  background-size: auto, auto, 256px;
+  display: flex; flex-direction: column;
+  font-family: var(--font-main, 'EB Garamond', serif);
+  color: #1B1611;
+  overflow: hidden;
+}
+/* The masthead band (.kbn-header, .kbn-title*, .kbn-subtitle, .kbn-status)
+   and its floated round buttons (.kbn-stash-btn / .kbn-newidea-btn /
+   .kbn-refresh-btn) dissolved in board-chrome-redesign. The three actions
+   they carried now live in the column heads as one tinted round-button
+   family — see .kbn-col-action near .kbn-col-head below. ~80px of vertical
+   room reclaimed; the Now board starts at the top of the modal. */
+/* aria-live region — invisible but observable in the a11y tree. */
+.kbn-live {
+  position: absolute;
+  width: 1px; height: 1px;
+  margin: -1px; padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
+}
+.kbn-banner {
+  margin: 0 20px;
+  padding: 8px 12px;
+  background: rgba(196, 147, 51, 0.12);
+  border: 1px solid rgba(196, 147, 51, 0.4);
+  color: #8C6A24;
+  font-size: 13px;
+  border-radius: 2px;
+  margin-top: 8px;
+}
+.kbn-banner-error {
+  background: rgba(188, 69, 56, 0.12);
+  border-color: rgba(188, 69, 56, 0.5);
+  color: #A2362A;
+}
+/* Horizon rows: Now expanded by default, future rows as thin foldable
+   headers. The board scrolls vertically; each lifecycle cell handles
+   its own dense card stack. */
+.kbn-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  min-height: 0;
+}
+/* ── Three-surface layout: Now → Timeline → Stash ──────────────────── */
+/* Section heads retired (the layout reads on its own). Each section keeps
+   a tiny top-right collapse toggle + a `.kbn-section-strip` that takes
+   over the section's footprint when collapsed. The toggle is faded by
+   default; section-hover brightens it so the affordance is present
+   without competing for attention. */
+.kbn-section {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  border-radius: 3px;
+  transition: background 140ms ease;
+  /* Spacing between sections lives on `.kbn-body { gap }` — no margin
+     here so the Now grid sits flush against the timeline strip. */
+}
+.kbn-section-drop {
+  background: rgba(196, 147, 51, 0.08);
+  outline: 1px dashed rgba(196, 147, 51, 0.45);
+  outline-offset: -2px;
+}
+.kbn-section-toggle {
+  position: absolute;
+  top: 2px;
+  right: 4px;
+  z-index: 4;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 2px;
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 12px;
+  line-height: 1;
+  color: rgba(122, 111, 92, 0.4);
+  cursor: pointer;
+  transition: color 120ms ease, background 120ms ease, opacity 120ms ease;
+  /* Faintly visible at rest so the affordance is discoverable; brightens
+     on section-hover or focus. Always full opacity when the section is
+     collapsed (the chevron is the only visible-text cue that something
+     is hidden). */
+  opacity: 0.25;
+}
+.kbn-section:hover > .kbn-section-toggle,
+.kbn-section-toggle:focus-visible,
+.kbn-section-collapsed > .kbn-section-toggle {
+  opacity: 1;
+}
+.kbn-section-toggle:hover {
+  color: #7A6F5C;
+  background: rgba(122, 111, 92, 0.08);
+}
+.kbn-section-toggle:focus-visible {
+  outline: 1px dashed #7A6F5C;
+  outline-offset: 2px;
+}
+/* The collapsed-state strip — hidden when section is expanded, shown as
+   a thin small-caps row with label + count when collapsed. Click anywhere
+   on the strip re-expands; the section still accepts drops via its
+   ambient drag handlers, so a drag-from-Now to a collapsed Stash lands
+   on the strip and writes horizon=stashed without the user thinking
+   about it. */
+.kbn-section-strip {
+  display: none;
+  align-items: baseline;
+  gap: 10px;
+  padding: 6px 14px;
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  cursor: pointer;
+  user-select: none;
+}
+/* Section strip — visible only when the section is collapsed.
+   Treated like a manuscript catch-line: italic small caps with a
+   layered F1/F2 dropcap on the leading letter. Reads like a
+   marginal tab. */
+.kbn-section-strip-label {
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-size: 26px;
+  font-style: italic;
+  font-variant-caps: small-caps;
+  font-feature-settings: "smcp";
+  letter-spacing: 0.05em;
+  color: #2A231A;
+}
+.kbn-section-strip-label .kbn-cap {
+  /* Body grew 1.5× (17 → 26px); keep the F2+F1 dropcap at its tuned
+     absolute size (~24.7px). 24.7/26 ≈ 0.95em. Vertical-align dropped
+     to -0.08em so the cap sits on the baseline. */
+  font-size: 0.95em;
+  font-style: normal;
+  font-variant: normal;
+  margin-right: 0.05em;
+  vertical-align: -0.08em;
+  line-height: 0.82;
+}
+.kbn-section-strip-count {
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 11px;
+  color: #7A6F5C;
+  letter-spacing: 0.04em;
+}
+/* A small fleuron at the end of the strip — the printer's ornament
+   that closes a catch-line. Set in ochre at the same height as the
+   small-caps body so it reads as type, not graphic. */
+.kbn-section-strip::after {
+  content: '❦';
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-size: 12px;
+  color: #C49333;
+  opacity: 0.55;
+  margin-left: 6px;
+}
+.kbn-section-collapsed {
+  flex: 0 0 auto !important;
+  min-height: 0 !important;
+  margin-bottom: 6px;
+  background: rgba(237, 226, 206, 0.7);
+  border: 1px solid rgba(27, 22, 17, 0.10);
+}
+.kbn-section-collapsed > .kbn-section-strip {
+  display: flex;
+}
+/* Everything except the strip + toggle disappears when collapsed. */
+.kbn-section-collapsed > *:not(.kbn-section-strip):not(.kbn-section-toggle) {
+  display: none !important;
+}
+.kbn-section-now {
+  /* Now claims most of the modal's height by default. Timeline + Stash
+     sit below the fold by design — visible as a "peek" at the bottom
+     of the initial viewport, fully reachable by scrolling the body.
+     Falls back to `flex: 1` when the modal is short enough that
+     Timeline + Stash fit naturally above the fold. */
+  flex: 1 1 auto;
+  min-height: min(78vh, calc(100% - 240px));
+}
+.kbn-now-board {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* Pinned strip — schedule-less umbrella roles, dispatchable on demand. Sits
+   between Now and the Timeline as a compact single row. Gold-leaf accent marks
+   it as a standing/always-around surface, distinct from the dated timeline. */
+.kbn-section-pinned {
+  flex: 0 0 auto;
+  border: 1px solid rgba(154, 123, 53, 0.28);
+  border-left: 3px solid #9A7B35;
+  background: rgba(154, 123, 53, 0.07);
+  border-radius: 3px;
+  padding: 8px 10px 10px;
+  gap: 6px;
+}
+.kbn-pinned-title {
+  margin: 0;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #7A5E1E;
+}
+/* Single row that scrolls horizontally as the roles accumulate — same
+   scroll-the-overflow model as the timeline below, rather than wrapping into
+   ever-taller rows. Dispatch is drag-to-In-flight; no per-card button. */
+.kbn-pinned-row {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  gap: 10px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 4px;
+}
+/* Pinned cards keep a fixed compact width and don't shrink, so the row scrolls
+   instead of cramming. */
+.kbn-pinned-row .kbn-card {
+  flex: 0 0 280px;
+}
+/* Empty strip: a slim, dashed "drop a role here" target. The strip ALWAYS
+   renders (it's the park/drop target), so when nothing is parked it shrinks to
+   this hint rather than vanishing. */
+.kbn-section-pinned-empty {
+  background: rgba(154, 123, 53, 0.04);
+  border-style: dashed;
+}
+.kbn-pinned-empty-hint {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  color: rgba(122, 94, 30, 0.6);
+  padding: 4px 2px;
+  font-style: italic;
+}
+
+/* Timeline */
+.kbn-section-timeline {
+  border: 1px solid rgba(27, 22, 17, 0.10);
+  background: rgba(237, 226, 206, 0.45);
+}
+/* The scrollable day-strip and the fixed "Later" rail sit side by side:
+   the strip scrolls the 14-day window, the rail stays pinned to its right. */
+.kbn-timeline-row {
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+}
+.kbn-timeline-wrap {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  padding: 2px 0 6px;
+}
+/* "Later" rail — armed standing roles whose next firing lies beyond the
+   14-day strip (timeline.anytimeSoon). They have no place on the day axis,
+   but a far-future cron must still *show* somewhere rather than silently
+   vanish; this fixed, always-visible column is that somewhere. Read-only:
+   a cron's date comes from its schedule, not from a drop on a day. */
+.kbn-timeline-later {
+  flex: 0 0 auto;
+  width: 150px;
+  display: flex;
+  flex-direction: column;
+  border-left: 0.5px solid rgba(122, 111, 92, 0.30);
+  padding: 2px 6px 6px 10px;
+  margin-left: 2px;
+}
+.kbn-timeline-later-head {
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-size: 11px;
+  font-variant-caps: all-small-caps;
+  font-feature-settings: "smcp", "c2sc";
+  letter-spacing: 0.08em;
+  color: #A89B83;
+  padding: 1px 2px 4px;
+  border-bottom: 0.5px solid rgba(122, 111, 92, 0.18);
+  margin-bottom: 3px;
+}
+.kbn-timeline-later-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+  max-height: 220px;
+}
+.kbn-tl-later-card {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  background: rgba(255, 251, 237, 0.95);
+  border: 0.5px solid rgba(122, 111, 92, 0.30);
+  border-left: 2px solid #3D5BA0;
+  border-radius: 2px;
+  padding: 2px 7px 3px;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.kbn-tl-later-when {
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 10px;
+  letter-spacing: 0.03em;
+  color: #7A6F5C;
+}
+.kbn-tl-later-title {
+  font-family: var(--font-serif, 'EB Garamond', serif);
+  font-size: 13px;
+  line-height: 1.15;
+  color: #1B1611;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kbn-timeline-axis {
+  display: grid;
+  border-bottom: 0.5px solid rgba(122, 111, 92, 0.30);
+  margin: 0 14px 2px;
+}
+.kbn-timeline-day {
+  display: flex;
+  flex-direction: row;
+  align-items: baseline;
+  justify-content: center;
+  gap: 5px;
+  padding: 1px 1px 2px;
+  border-right: 0.5px solid rgba(122, 111, 92, 0.18);
+  position: relative;
+  line-height: 1;
+}
+.kbn-timeline-day-past { background: rgba(0, 0, 0, 0.015); }
+.kbn-timeline-day-weekend { background: rgba(0, 0, 0, 0.04); }
+.kbn-timeline-day-today {
+  background: rgba(188, 69, 56, 0.10);
+  border-left: 1.5px solid #BC4538;
+  border-right: 1.5px solid #BC4538;
+}
+.kbn-timeline-day-week-boundary {
+  border-right: 1px solid rgba(122, 111, 92, 0.45);
+}
+/* Drop-target highlight extends from the strip up through the axis cell
+   when a drag hovers — feels like one column reaching from the date
+   label down through the card stack. Drop-target outline lives on the
+   strip portion only; the axis just gets the matching warm-gold tint. */
+.kbn-timeline-day-drop-active {
+  background: rgba(196, 147, 51, 0.18);
+}
+/* Day-of-week label — set as small caps in the serif rather than the
+   technical mono, so the strip reads as a manuscript almanac. */
+.kbn-timeline-day-dow {
+  font-size: 10px;
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-variant-caps: all-small-caps;
+  font-feature-settings: "smcp", "c2sc";
+  color: #A89B83;
+  letter-spacing: 0.06em;
+}
+.kbn-timeline-day-num {
+  font-size: 12px;
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-weight: 500;
+  color: #2A231A;
+  font-feature-settings: "onum";
+}
+.kbn-timeline-day-today .kbn-timeline-day-num,
+.kbn-timeline-day-today .kbn-timeline-day-dow {
+  color: #BC4538;
+  font-weight: 500;
+}
+.kbn-timeline-strip {
+  display: grid;
+  grid-auto-rows: min-content;
+  position: relative;
+  min-height: 28px;
+  padding: 0 14px;
+  align-content: start;
+  /* `width: max-content` keeps the strip's horizontal footprint tied
+     to all day columns, while `overflow-y: auto` clips extra rows once
+     the 10-row cap kicks in. Without explicit max-content width, the
+     parent wrap can collapse the strip to viewport width and distort
+     day-column alignment during horizontal scroll. The adaptive height
+     is set imperatively by `installAdaptiveStripHeight()`. */
+  width: max-content;
+  overflow-x: hidden;
+  overflow-y: auto;
+  transition: height 160ms ease-out;
+}
+.kbn-timeline-dropcol {
+  /* Span the full strip height; `1 / -1` is a no-op without
+     grid-template-rows, so use a large explicit span. */
+  grid-row: 1 / span 999;
+  z-index: 0;
+  pointer-events: auto;
+}
+.kbn-timeline-dropcol-active {
+  background: rgba(196, 147, 51, 0.10);
+  outline: 1px dashed rgba(196, 147, 51, 0.45);
+  outline-offset: -2px;
+}
+/* Overlay-card pointer capture during a timeline-strip drop was the
+   original Chromium-only fix (pointer-events: none on every .kbn-tl-card
+   during drag, so dragover would fall through to the dropcol underneath).
+   Two reasons it's gone now: (1) WKWebView doesn't honor pointer-events
+   for platform-level HTML5 DnD hit-testing anyway, and the strip-level
+   `elementsFromPoint` fallback in `installTimelineStripDragFallback`
+   handles the case in every engine; (2) the rule swept up the *source*
+   card too, which killed drags that originated from the timeline itself
+   (timeline-card → Now) — the source going pointer-events:none mid-drag
+   aborts the operation. The `.kbn-dragging` body class is still toggled
+   by the dragSourceId setter in case future fixes need it as a hook. */
+.kbn-tl-card {
+  position: relative;
+  z-index: 1;
+  background: rgba(255, 251, 237, 0.95);
+  border: 0.5px solid rgba(122, 111, 92, 0.30);
+  border-left: 2px solid #3D5BA0;
+  border-radius: 2px;
+  padding: 2px 8px 3px;
+  margin: 1px 2px;
+  font-size: 13px;
+  line-height: 1.2;
+  cursor: pointer;
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  /* Timeline cards are meant to be grabbed, not text-selected. Without
+     this, a mousedown-and-drag selects the title text instead of starting
+     an HTML5 drag — the browser's "selectable text" heuristic wins over
+     `draggable=true` when the cursor lands on a text node. */
+  user-select: none;
+  -webkit-user-select: none;
+}
+.kbn-tl-card-human { border-left-color: #3F8278; }
+.kbn-tl-card-agent { border-left-color: #3D5BA0; }
+.kbn-tl-card-past {
+  background: rgba(237, 226, 206, 0.6);
+  border-color: rgba(122, 111, 92, 0.20);
+  border-left-color: #3F8278;
+  opacity: 0.78;
+}
+.kbn-tl-card-past .kbn-tl-card-title {
+  color: #2A231A;
+  font-style: italic;
+}
+.kbn-tl-card-composted {
+  border-left-color: #A89B83;
+  opacity: 0.55;
+}
+.kbn-tl-card-composted .kbn-tl-card-title {
+  text-decoration: line-through;
+  text-decoration-thickness: 0.5px;
+}
+/* Ghost variant: closed-but-not-tempered ("awaiting review") cards
+   projected onto their closedAt day. Dashed outline + paper-white
+   background mark them as in-flux — they live in the Now → Awaiting
+   Review lane and will solidify into a past card when tempered. */
+.kbn-tl-card-awaiting {
+  background: rgba(255, 252, 246, 0.55);
+  border: 0.5px dashed rgba(154, 123, 53, 0.55);
+  border-left: 2px dashed #9A7B35;
+  opacity: 0.85;
+}
+.kbn-tl-card-awaiting .kbn-tl-card-title {
+  color: #2A231A;
+}
+.kbn-tl-card-awaiting .kbn-tl-card-glyph {
+  color: #9A7B35;
+}
+/* Now-section projections onto the today column. Inflight uses the
+   "working" teal accent from the Porch Morning palette to read as live;
+   drafts use a muted graphite to read as in-progress-but-not-running.
+   Both keep the default parchment background so they stand apart from
+   the dimmer past/awaiting ghosts. */
+.kbn-tl-card-inflight {
+  border-left: 2px solid #5A7B7B;
+}
+.kbn-tl-card-inflight .kbn-tl-card-glyph {
+  color: #5A7B7B;
+}
+.kbn-tl-card-draft {
+  border-left: 2px solid #7A6F5C;
+  background: rgba(255, 251, 237, 0.75);
+}
+.kbn-tl-card-draft .kbn-tl-card-glyph {
+  color: #7A6F5C;
+}
+.kbn-tl-card-glyph {
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 11px;
+  flex-shrink: 0;
+  color: #3D5BA0;
+}
+.kbn-tl-card-human .kbn-tl-card-glyph { color: #3F8278; }
+.kbn-tl-card-past .kbn-tl-card-glyph { color: #3F8278; }
+.kbn-tl-card-composted .kbn-tl-card-glyph { color: #7A6F5C; }
+.kbn-tl-card-title {
+  color: #1B1611;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--font-serif, 'EB Garamond', serif);
+}
+/* Stash */
+.kbn-cluster-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+}
+.kbn-cluster {
+  background: rgba(255, 251, 237, 0.78);
+  border: 0.5px solid rgba(122, 111, 92, 0.30);
+  border-radius: 3px;
+  padding: 7px 9px 8px;
+}
+.kbn-cluster-cold {
+  background: rgba(232, 220, 193, 0.40);
+  border-color: rgba(122, 111, 92, 0.20);
+}
+.kbn-cluster-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-bottom: 4px;
+  padding-bottom: 3px;
+  border-bottom: 0.5px solid rgba(122, 111, 92, 0.20);
+}
+.kbn-cluster-name {
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-size: 13px;
+  font-weight: 500;
+  color: #1B1611;
+}
+.kbn-cluster-cold .kbn-cluster-name { color: #7A6F5C; }
+.kbn-cluster-count {
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 9px;
+  color: #A89B83;
+}
+.kbn-cluster-tag {
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 8px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #BC4538;
+  opacity: 0.7;
+  margin-left: auto;
+}
+.kbn-cluster-cold .kbn-cluster-tag { color: #A89B83; }
+.kbn-cluster-divider {
+  grid-column: 1 / -1;
+  text-align: center;
+  font-family: var(--font-serif, 'EB Garamond', serif);
+  font-style: italic;
+  font-size: 11px;
+  color: #A89B83;
+  padding: 6px 0;
+}
+.kbn-cluster-empty {
+  grid-column: 1 / -1;
+  text-align: center;
+  font-family: var(--font-serif, 'EB Garamond', serif);
+  font-style: italic;
+  font-size: 12px;
+  color: #A89B83;
+  padding: 14px 0;
+}
+.kbn-cluster-item {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 3px 2px;
+  font-family: var(--font-serif, 'EB Garamond', serif);
+  font-size: 12.5px;
+  color: #2A231A;
+  cursor: pointer;
+  line-height: 1.28;
+}
+.kbn-cluster-item:hover {
+  color: #1B1611;
+  background: rgba(232, 220, 193, 0.5);
+  border-radius: 2px;
+}
+.kbn-cluster-cold .kbn-cluster-item {
+  color: #7A6F5C;
+  font-style: italic;
+}
+.kbn-cluster-item-glyph {
+  color: #3D5BA0;
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 9px;
+  width: 10px;
+  flex-shrink: 0;
+  text-align: center;
+}
+.kbn-cluster-item-human .kbn-cluster-item-glyph { color: #3F8278; }
+.kbn-cluster-cold .kbn-cluster-item-glyph { opacity: 0.6; }
+.kbn-cluster-item-title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kbn-col {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  /* Cap kept as a ceiling for the case where Now is the only expanded row
+     and there's plenty of vertical room; without it a single tall column
+     can stretch unboundedly. The horizon-row's flex:1 still ensures the
+     row fills the board height. */
+  max-height: min(72vh, 760px);
+  /* Each column reads as a sheet of rag laid on the parchment desk — a
+     touch warmer-bright than the page beneath, with a hairline ochre
+     rule rather than the previous near-invisible ink border. */
+  background: #F2E8D2;
+  border: 1px solid rgba(196, 147, 51, 0.22);
+  border-radius: 3px;
+  overflow: hidden;
+  transition: background 150ms ease, border-color 150ms ease;
+  /* A whisper-of-shadow so the column lifts off the parchment without
+     reading as a UI panel. Inset highlight + minimal drop. */
+  box-shadow:
+    0 1px 0 rgba(255, 251, 237, 0.55) inset,
+    0 1px 3px rgba(27, 22, 17, 0.04);
+}
+.kbn-col-awaitingReview {
+  border-color: rgba(196, 147, 51, 0.55);
+  box-shadow: inset 0 0 0 1px rgba(196, 147, 51, 0.18);
+}
+.kbn-col-drafts {
+  background: #E8DCC1;
+  border-style: dashed;
+  opacity: 0.92;
+}
+/* Drafts body stays in default iron-gall — only the D dropcap is
+   illuminated. (Earlier passes painted the whole title cobalt; reading
+   the body of "DRAFTS" in pigment felt over-illuminated.) */
+/* Composted column: desaturated Earth tone, visually sits at the
+   boundary between Tempered and "the unbuilt" (Drafts on wrap). */
+.kbn-col-composted {
+  background: #E0D4B8;
+  border-color: rgba(122, 111, 92, 0.35);
+  box-shadow: inset 0 0 0 1px rgba(122, 111, 92, 0.12);
+}
+/* Composted column doesn't render in three-surfaces — rule left
+   neutral if a future surface brings it back. */
+.kbn-col-composted .kbn-col-title { color: #7A6F5C; }
+.kbn-col-tempered {
+  background: #E8DCC1;
+}
+/* Active drop target while a drag is in progress. */
+.kbn-col-drop {
+  background: rgba(196, 147, 51, 0.10);
+  border-color: rgba(196, 147, 51, 0.55);
+  box-shadow: inset 0 0 0 2px rgba(196, 147, 51, 0.45);
+}
+.kbn-col-head {
+  /* The label cluster (title + count, baseline-aligned within
+     .kbn-col-head-label) sits left; the per-lane round action centers at the
+     right edge. align-items:center so the 28px button centers against the
+     illuminated title rather than hanging from its baseline. */
+  display: flex; align-items: center; justify-content: space-between;
+  width: 100%;
+  /* border-box so the side padding sits INSIDE the 100% width. Without it the
+     content-box head measures 100% + 28px (its own h-padding) — wider than the
+     column — so the right-aligned round action hangs ~28px past the column edge
+     and `.kbn-col`'s `overflow:hidden` slices it into a half-moon. With
+     border-box the action seats against the right padding, fully inside the
+     clip box. */
+  box-sizing: border-box;
+  /* Padding hugs the illuminated character — top/bottom just enough to
+     keep the F1 flourish overlay from clipping the hairline rule or the
+     column edge above. The right pad is widened to 12px so the 28px circle
+     clears its 2-4px drop shadow + the 1.06 hover scale without touching the
+     column's clip edge; left stays generous so the rule reads as ruled. */
+  padding: 4px 12px 3px 14px;
+  border: none;
+  /* Single hairline rule under the head — a touch warmer than the
+     previous near-invisible setting so it reads as a deliberate stroke,
+     not a soft fade. */
+  border-bottom: 1px solid rgba(196, 147, 51, 0.32);
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  cursor: pointer;
+  outline: none;
+}
+/* Title + count cluster — keeps the dropcap and the count on a shared
+   baseline regardless of the head's center alignment for the round action. */
+.kbn-col-head-label {
+  display: flex; align-items: baseline; gap: 0;
+  min-width: 0;
+}
+.kbn-col-head:focus { outline: none; }
+.kbn-col-head:focus-visible {
+  /* Manuscript focus — cinnabar dashed inset so it reads as a ruled
+     mark rather than a browser-default selection ring. */
+  outline: 1px dashed rgba(188, 69, 56, 0.55);
+  outline-offset: -2px;
+}
+/* Column title — small caps in EB Garamond rather than uppercase, so
+   the head reads as a section in a manuscript header rather than a
+   database column. The leading capital is wrapped in <span class="kbn-cap"
+   data-letter="…"> by KanbanModal.ts; the .kbn-cap rule above paints
+   the layered F2 body + F1 flourish dropcap. */
+.kbn-col-title {
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  /* Body font-size is sized so the small-caps glyph height matches
+     the dropcap's visible height (~24px). EB Garamond's small-cap
+     ratio runs ~0.73, so 33px body → ~24px small-cap glyphs →
+     uniform "D-R-A-F-T-S" visual rhythm with the dropcap rather than
+     the previous dropcap-above-small-trailer feel. */
+  font-size: 33px;
+  /* Tight line-height keeps the head box hugging the illuminated
+     character; the cap's F1 flourish extends a touch above the cap
+     line so even 1.0 leaves a hair of breathing room. */
+  line-height: 1.0;
+  font-weight: 500;
+  font-variant-caps: all-small-caps;
+  font-feature-settings: "smcp", "c2sc";
+  letter-spacing: 0.06em;
+  text-transform: none;
+  color: #1B1611;
+  margin: 0;
+}
+.kbn-col-title .kbn-cap {
+  /* Cap and small-caps body sit at matching visual height — the
+     dropcap and the small-caps trailing it read as a single uniform
+     line, with the illumination (color + F1 flourish) doing all the
+     differentiation rather than size. Deliberately breaks the
+     historical "versal initial slightly larger" convention in favor
+     of a flatter, more contemporary manuscript-line rhythm. Body
+     33px × EB Garamond's ~0.74 small-cap ratio → ~24px small-caps;
+     cap at 0.73em × 33px → ~24px. */
+  font-size: 0.73em;
+  vertical-align: -0.08em;
+  margin-right: 0.04em;
+  line-height: 0.82;
+}
+/* Awaiting + Tempered title bodies stay default iron-gall too — only
+   the dropcap carries the column pigment, like a rubricated initial
+   on otherwise plain manuscript text. The pigment is the dropcap's
+   job; the body is the body's job. */
+/* (no .kbn-col-awaiting .kbn-col-title color override) */
+/* (no .kbn-col-tempered .kbn-col-title color override) */
+.kbn-col-count {
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 12px;
+  color: #7A6F5C;
+  margin-left: 8px;
+}
+
+/* ── Per-lane head action ─────────────────────────────────────────────────
+   One tinted round button at each column head's right edge — the masthead's
+   three actions, folded into the lanes they feed (color = lane identity):
+     Drafts → Stash `+` (ochre) · In flight → New idea `✶` (cobalt) ·
+     Awaiting review → Refresh `↻` (teal).
+   One unified geometry; the only per-lane difference is the fill + border
+   shade, set by the -drafts / -inFlight / -awaitingReview modifiers. */
+.kbn-col-action {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 50%;
+  color: #FFFFFF;
+  box-shadow: 0 2px 4px rgba(27, 22, 17, 0.18);
+  font-size: 18px;
+  line-height: 1;
+  font-family: var(--font-main, 'EB Garamond', serif);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 120ms ease-out, transform 120ms ease-out, box-shadow 120ms ease-out;
+}
+.kbn-col-action:hover {
+  transform: scale(1.06);
+  box-shadow: 0 3px 7px rgba(27, 22, 17, 0.22);
+  outline: none;
+}
+.kbn-col-action:focus { outline: none; }
+.kbn-col-action:focus-visible {
+  /* Manuscript focus ring — a soft tinted halo in the lane's own accent. */
+  transform: scale(1.06);
+  outline: none;
+}
+/* Drafts → Stash `+`, ochre. */
+.kbn-col-action-drafts {
+  background: #C49333;
+  border: 1px solid #8C6A24;
+}
+.kbn-col-action-drafts:hover { background: #D2A648; }
+.kbn-col-action-drafts:focus-visible { box-shadow: 0 0 0 3px rgba(196, 147, 51, 0.40); }
+/* In flight → New idea `✶`, cobalt. The glyph runs a hair smaller so the
+   six-point star optically matches the heavier `+` / `↻`. */
+.kbn-col-action-inFlight {
+  background: #3D5BA0;
+  border: 1px solid #2C4378;
+  font-size: 15px;
+}
+.kbn-col-action-inFlight:hover { background: #4D6CB5; }
+.kbn-col-action-inFlight:focus-visible { box-shadow: 0 0 0 3px rgba(61, 91, 160, 0.40); }
+/* Awaiting review → Refresh `↻`, teal (the green of the A dropcap), promoted
+   from the old faded transparent treatment to a full button. */
+.kbn-col-action-awaitingReview {
+  background: #3F8278;
+  border: 1px solid #2E6862;
+  font-size: 16px;
+}
+.kbn-col-action-awaitingReview:hover { background: #4C9588; }
+.kbn-col-action-awaitingReview:focus-visible { box-shadow: 0 0 0 3px rgba(63, 130, 120, 0.40); }
+/* Refresh feedback rides the button — a brief single spin of the ↻ glyph
+   carries in-flight state (no .kbn-status text). The class is added on click
+   and removed when the spin completes. */
+.kbn-col-action-spinning {
+  animation: kbn-col-action-spin 0.65s ease-in-out;
+}
+@keyframes kbn-col-action-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+.kbn-col-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+  display: flex; flex-direction: column;
+  gap: 8px;
+}
+/* Empty column — a quiet marginal line, set in italic with a small
+   fleuron to make absence feel intentional rather than missing. */
+.kbn-empty {
+  text-align: center;
+  color: #A89B83;
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-style: italic;
+  font-size: 13px;
+  padding: 24px 8px;
+  flex-grow: 0;
+  letter-spacing: 0.01em;
+}
+.kbn-empty::before {
+  content: '✶  ';
+  color: #C49333;
+  opacity: 0.55;
+  font-style: normal;
+}
+.kbn-empty::after {
+  content: '  ✶';
+  color: #C49333;
+  opacity: 0.55;
+  font-style: normal;
+}
+/* Card — a slip of rag laid on the sheet. Kind differentiation rides
+   the background tint and border-style on the existing .kbn-card-*
+   modifiers; no painted left-edge ribbon. The column container
+   already signals lifecycle, the kbn-pill stamp carries the status
+   mark, and the worker / dispatch chips do the rest. */
+.kbn-card {
+  background: #FBF6E9;
+  border: 1px solid rgba(27, 22, 17, 0.12);
+  border-radius: 3px;
+  padding: 10px 12px;
+  text-align: left;
+  cursor: grab;
+  font-family: inherit;
+  color: inherit;
+  display: flex; flex-direction: column;
+  gap: 6px;
+  /* Kanban cards are draggable and meant to be grabbed, not text-selected.
+     Without this, mousedown-and-drag selects the card's title/outcome
+     text instead of starting an HTML5 drag — WKWebView's selectable-text
+     heuristic wins over `draggable=true` when the cursor lands on a
+     text node. Chromium has the same theoretical risk; we just hadn't
+     hit it because Chromium's HTML5 DnD detection fires more eagerly.
+     `kbn-card-name-input` keeps text-selection enabled for the inline
+     rename input (handled below). */
+  user-select: none;
+  -webkit-user-select: none;
+  /* Cards are sized to their natural content. Short outcomes leave the
+     card compact; long outcomes are line-clamped to N lines on the
+     outcome itself, so the card never exceeds the natural height of
+     "header + name + slug + N-line outcome + meta." flex-grow is off
+     intentionally — empty space at the bottom of a partial column is
+     less ugly than a single short-outcome card stretched to full
+     viewport height. */
+  flex-grow: 0;
+  transition: background 120ms ease, border-color 120ms ease, transform 120ms ease, opacity 120ms ease;
+}
+.kbn-card:hover {
+  background: #FFFBED;
+  border-color: rgba(27, 22, 17, 0.22);
+  transform: translateY(-1px);
+}
+.kbn-card:active { cursor: grabbing; }
+.kbn-card-dragging {
+  opacity: 0.45;
+  transform: scale(0.98);
+  cursor: grabbing;
+}
+.kbn-card-awaitingReview {
+  border-color: rgba(196, 147, 51, 0.45);
+}
+.kbn-card-composted {
+  padding: 6px 10px;
+  gap: 4px;
+  background: #E0D4B8;
+  border-style: dashed;
+}
+.kbn-card-composted .kbn-card-name {
+  font-size: 13px;
+  font-weight: 500;
+}
+.kbn-card-composted .kbn-card-outcome {
+  font-size: 11.5px;
+  color: #5A4F3A;
+}
+/* Tempered cards are smaller — they're for the record, not the focus. */
+.kbn-card-tempered {
+  padding: 6px 10px;
+  gap: 4px;
+  background: #E8DCC1;
+}
+.kbn-card-header {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+}
+.kbn-card-glyph {
+  width: 15px;
+  flex-shrink: 0;
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 12px;
+  line-height: 1;
+  text-align: center;
+  color: #C49333;
+}
+.kbn-card-glyph-human {
+  color: #3F8278;
+}
+/* Plain text since the title-click → vellum shortcut retired (the whole
+   card opens the fiber-detail panel); the card's own cursor applies. */
+.kbn-card-name {
+  flex: 1;
+  font-size: 14.5px;
+  font-weight: 600;
+  line-height: 1.25;
+  text-align: left;
+  color: inherit;
+}
+.kbn-card-tempered .kbn-card-name {
+  font-size: 13px;
+  font-weight: 500;
+}
+.kbn-pill {
+  display: inline-block;
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 9.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+.kbn-pill-open {
+  background: rgba(196, 147, 51, 0.12);
+  color: #C49333;
+  border: 1px solid rgba(196, 147, 51, 0.3);
+}
+.kbn-pill-active {
+  background: rgba(196, 147, 51, 0.25);
+  color: #8C6A24;
+  border: 1px solid rgba(196, 147, 51, 0.45);
+}
+.kbn-pill-closed {
+  background: rgba(122, 111, 92, 0.15);
+  color: #7A6F5C;
+  border: 1px solid rgba(122, 111, 92, 0.35);
+}
+.kbn-pill-tempered {
+  background: rgba(63, 130, 120, 0.18);
+  color: #2E6862;
+  border: 1px solid rgba(63, 130, 120, 0.4);
+}
+.kbn-pill-composted {
+  background: rgba(122, 111, 92, 0.12);
+  color: #7A6F5C;
+  border: 1px solid rgba(122, 111, 92, 0.3);
+}
+.kbn-card-id {
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 10.5px;
+  color: #B8AC9A;
+  letter-spacing: 0.01em;
+  word-break: break-all;
+  /* Tuck the slug under the title so the breadcrumb reads as part of
+     the title block, not a row of its own. The card-level gap (6px)
+     would otherwise leave it floating. */
+  margin-top: -6px;
+  line-height: 1.2;
+}
+.kbn-card-outcome {
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: #3A332A;
+  /* Truncate at N lines with an ellipsis. Aligns the cutoff to a line
+     boundary (no half-cropped letters) and signals truncation explicitly.
+     N defaults to 4 but JS expands it post-render when a column has
+     spare vertical space — see `expandOutcomesToFillSpace` for the
+     calculation. CSS variable + var() cascades cleanly through the
+     -webkit-line-clamp property in modern browsers. */
+  display: -webkit-box;
+  -webkit-line-clamp: var(--card-line-clamp, 4);
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.kbn-card-outcome > :first-child { margin-top: 0; }
+.kbn-card-outcome > :last-child { margin-bottom: 0; }
+.kbn-card-outcome p {
+  margin: 0.35em 0;
+}
+.kbn-card-outcome h1,
+.kbn-card-outcome h2,
+.kbn-card-outcome h3,
+.kbn-card-outcome h4 {
+  margin: 0.45em 0 0.18em;
+  font-size: 1em;
+  line-height: 1.25;
+  font-weight: 600;
+}
+.kbn-card-outcome ul,
+.kbn-card-outcome ol {
+  margin: 0.25em 0;
+  padding-left: 1.35em;
+}
+.kbn-card-outcome li {
+  margin: 0.1em 0;
+}
+.kbn-card-outcome code {
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 0.9em;
+  padding: 0 3px;
+  background: rgba(0, 0, 0, 0.05);
+  border-radius: 2px;
+}
+.kbn-card-outcome pre {
+  margin: 0.35em 0;
+  padding: 5px 6px;
+  background: rgba(0, 0, 0, 0.04);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.kbn-card-outcome pre code {
+  background: transparent;
+  padding: 0;
+}
+.kbn-card-outcome a {
+  color: #8C6A24;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+}
+.kbn-card-tempered .kbn-card-outcome {
+  font-size: 11.5px;
+  color: #5A4F3A;
+}
+.kbn-card-meta {
+  display: flex; align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+  flex-wrap: wrap;
+}
+.kbn-card-actions {
+  display: flex; gap: 6px; flex-wrap: wrap;
+  padding-top: 6px;
+  margin-top: 2px;
+  border-top: 1px dashed rgba(27, 22, 17, 0.10);
+}
+.kbn-card-tempered .kbn-card-actions {
+  padding-top: 4px;
+  gap: 4px;
+}
+.kbn-action {
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: rgba(27, 22, 17, 0.04);
+  border: 1px solid rgba(27, 22, 17, 0.18);
+  color: #3A332A;
+  padding: 3px 8px;
+  border-radius: 2px;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+.kbn-action:hover {
+  background: rgba(27, 22, 17, 0.10);
+  color: #1B1611;
+  border-color: rgba(27, 22, 17, 0.30);
+}
+.kbn-action:focus { outline: none; }
+.kbn-action:focus-visible {
+  outline: 1px dashed #7A6F5C;
+  outline-offset: 1px;
+}
+.kbn-action-tempered {
+  background: rgba(63, 130, 120, 0.10);
+  color: #2E6862;
+  border-color: rgba(63, 130, 120, 0.40);
+}
+.kbn-action-tempered:hover {
+  background: rgba(63, 130, 120, 0.20);
+  color: #1E5852;
+}
+.kbn-action-awaitingReview {
+  background: rgba(196, 147, 51, 0.10);
+  color: #8C6A24;
+  border-color: rgba(196, 147, 51, 0.45);
+}
+.kbn-action-awaitingReview:hover {
+  background: rgba(196, 147, 51, 0.20);
+  color: #5C4810;
+}
+.kbn-action-inFlight {
+  background: rgba(63, 130, 120, 0.08);
+  color: #2E6862;
+  border-color: rgba(63, 130, 120, 0.35);
+}
+.kbn-action-inFlight:hover {
+  background: rgba(63, 130, 120, 0.18);
+}
+.kbn-action-drafts {
+  background: rgba(122, 111, 92, 0.08);
+  color: #7A6F5C;
+  border-color: rgba(122, 111, 92, 0.30);
+  font-style: italic;
+}
+.kbn-action-drafts:hover {
+  background: rgba(122, 111, 92, 0.18);
+  color: #1B1611;
+}
+/* Subtler card style inside the drafts column. */
+.kbn-card-drafts {
+  background: #E8DCC1;
+  border-style: dashed;
+}
+.kbn-card-tags {
+  display: flex; flex-wrap: wrap; gap: 4px;
+}
+.kbn-tag {
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 9.5px;
+  color: #7A6F5C;
+  background: rgba(27, 22, 17, 0.05);
+  padding: 1px 5px;
+  border-radius: 2px;
+}
+/* Feature 4: tag edit affordance — ✎ button next to tags */
+.kbn-tag-edit-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  margin: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  font-size: 11px;
+  line-height: 1;
+  color: #C5B89E;
+  cursor: pointer;
+  transition: color 120ms ease, background 120ms ease, border-color 120ms ease;
+  flex-shrink: 0;
+}
+.kbn-tag-edit-btn:hover,
+.kbn-tag-edit-btn:focus-visible {
+  color: #7A6F5C;
+  background: rgba(27, 22, 17, 0.08);
+  border-color: rgba(122, 111, 92, 0.3);
+  outline: none;
+}
+.kbn-tag-edit-btn:focus-visible {
+  outline: 1px dashed #7A6F5C;
+  outline-offset: 1px;
+}
+/* Tag editor: inline card-level editor for adding/removing tags */
+.kbn-tag-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+.kbn-tag-editor-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+.kbn-tag-editable {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  background: rgba(27, 22, 17, 0.07);
+  padding: 1px 2px 1px 5px;
+}
+.kbn-tag-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  margin: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 2px;
+  font-size: 11px;
+  line-height: 1;
+  color: #BC4538;
+  cursor: pointer;
+  transition: color 120ms ease, background 120ms ease;
+}
+.kbn-tag-remove:hover,
+.kbn-tag-remove:focus-visible {
+  color: #BC4538;
+  background: rgba(188, 69, 56, 0.10);
+  outline: none;
+}
+.kbn-tag-add-input {
+  flex: 0 1 80px;
+  min-width: 60px;
+  max-width: 120px;
+  height: 18px;
+  padding: 0 5px;
+  border: 1px solid rgba(122, 111, 92, 0.22);
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.6);
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 10px;
+  color: #1B1611;
+  outline: none;
+}
+.kbn-tag-add-input:focus {
+  border-color: rgba(122, 111, 92, 0.5);
+  background: #FFFFFF;
+}
+.kbn-tag-add-input::placeholder {
+  color: #C5B89E;
+}
+.kbn-tag-editor-actions {
+  display: flex;
+  gap: 6px;
+}
+.kbn-card-date {
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 10.5px;
+  color: #B8AC9A;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+.kbn-card-actor,
+.kbn-card-due,
+.kbn-card-drift {
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  flex-shrink: 0;
+}
+.kbn-card-actor {
+  color: #2E6862;
+}
+.kbn-card-actor-agent {
+  color: #8C6A24;
+}
+.kbn-card-actor-human {
+  color: #2E6862;
+}
+.kbn-card-due {
+  color: #7A6F5C;
+  background: rgba(27, 22, 17, 0.045);
+  border: 1px solid rgba(27, 22, 17, 0.10);
+  border-radius: 2px;
+  padding: 1px 5px;
+}
+.kbn-card-drift {
+  color: #C49333;
+  background: rgba(196, 147, 51, 0.12);
+  border: 1px solid rgba(196, 147, 51, 0.28);
+  border-radius: 50%;
+  width: 17px;
+  height: 17px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+.kbn-card-blocked {
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 10.5px;
+  color: #C49333;
+  background: rgba(196, 147, 51, 0.10);
+  padding: 4px 6px;
+  border-radius: 2px;
+  margin-top: 2px;
+}
+/* Running-worker pill — sits inline in the meta row, right-justified
+   before the date stamp. Mirrors the proportions of .kbn-review-meta-btn
+   (Temper / Compost in awaiting-review cards) so the meta row reads
+   uniformly across columns. Single line, never wraps. */
+.kbn-card-worker {
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 9.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #2E6862;
+  background: rgba(63, 130, 120, 0.10);
+  padding: 2px 7px;
+  border-radius: 2px;
+  margin-left: auto;
+  animation: kbn-pulse 2s ease-in-out infinite;
+  /* Button reset */
+  border: 1px solid transparent;
+  text-align: left;
+  font-weight: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: border-color 120ms ease, color 120ms ease, background 120ms ease;
+}
+.kbn-card-worker:hover {
+  color: #1E5852;
+  border-color: rgba(63, 130, 120, 0.55);
+}
+.kbn-card-worker:focus { outline: none; }
+.kbn-card-worker:focus-visible {
+  outline: 1px dashed #2E6862;
+  outline-offset: 2px;
+}
+/* When .kbn-card-worker is followed by .kbn-card-date, zero the date's
+   own auto-margin so the pill (margin-left:auto) doesn't compete with
+   it for slack — same trick used for review-meta-actions. */
+.kbn-card-worker + .kbn-card-date {
+  margin-left: 0;
+}
+
+/* Worker-less runtime phase badge (retrying / due / dispatched). Gold rather
+   than the teal "aloft" pill: the daemon considers it active, but nothing is
+   running right now. No pulse — it's a state, not a heartbeat. */
+.kbn-card-phase {
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 9.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #7A5E1E;
+  background: rgba(154, 123, 53, 0.12);
+  padding: 2px 7px;
+  border-radius: 2px;
+  margin-left: auto;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.kbn-card-phase + .kbn-card-date {
+  margin-left: 0;
+}
+/* retrying is a soft-error state — warmer, and a slow pulse to read as "still
+   churning" rather than settled. */
+.kbn-card-phase-retrying {
+  color: #8A4B2A;
+  background: rgba(176, 86, 47, 0.13);
+  animation: kbn-pulse 2.8s ease-in-out infinite;
+}
+@keyframes kbn-pulse {
+  0%, 100% { background: rgba(63, 130, 120, 0.10); }
+  50% { background: rgba(63, 130, 120, 0.22); }
+}
+/* waiting-for-human is a loud in-flight signal — these cards sort near the
+   top of the column and the chip should pull the eye there. Warm amber, bolder
+   ink; not an error (that's retrying's warmer red). On a live worker (idle ≥60s)
+   this takes over the worker pill itself (.kbn-card-worker-waiting); this span
+   form is the worker-less fallback. Static — the warm wash carries it, no blink. */
+.kbn-card-phase-waiting {
+  color: #8A5A12;
+  background: rgba(200, 138, 30, 0.20);
+  font-weight: 600;
+}
+/* attention is the loudest in-flight signal — the worker raised its hand
+   (Notification) and sorts above even `waiting`. Deep red ink + wash + the
+   manicule (☞, U+261E + U+FE0E text VS; serif + font-variant-emoji:text render
+   it as a text mark, not a color emoji). On a live worker this rarely shows as
+   a chip — it takes over the worker pill itself (.kbn-card-worker-attention);
+   this span form is the worker-less fallback. Static — a deep-red call-to-action,
+   never blinking. */
+.kbn-card-phase-attention {
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-variant-emoji: text;
+  color: #9A2A1E;
+  background: rgba(168, 38, 28, 0.18);
+  font-weight: 700;
+}
+/* needs-you-now on a live worker takes over the "▸ aloft" pill: the red
+   manicule chip IS the clickable button that opens the worker. Inherits
+   .kbn-card-worker's pill padding / margin / button-reset / focus; overrides to
+   the serif manicule in deep red, normal case (not the mono pill's uppercase).
+   Static — present, never blinking. */
+.kbn-card-worker-attention {
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-variant-emoji: text;
+  text-transform: none;
+  letter-spacing: 0.01em;
+  font-size: 11px;
+  font-weight: 700;
+  color: #9A2A1E;
+  background: rgba(168, 38, 28, 0.18);
+  animation: none; /* override .kbn-card-worker's base kbn-pulse — static, no blink */
+}
+.kbn-card-worker-attention:hover {
+  color: #7A1E14;
+  background: rgba(168, 38, 28, 0.28);
+  border-color: rgba(168, 38, 28, 0.55);
+}
+/* waiting-for-you on a live worker (idle ≥60s) takes over the "▸ aloft" pill,
+   exactly like attention but in warm amber: the ⏸ chip IS the clickable button
+   that opens the worker. Same serif/sizing as the attention takeover; static —
+   present, never blinking. */
+.kbn-card-worker-waiting {
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-variant-emoji: text;
+  text-transform: none;
+  letter-spacing: 0.01em;
+  font-size: 11px;
+  font-weight: 700;
+  color: #8A5A12;
+  background: rgba(200, 138, 30, 0.20);
+  animation: none; /* override .kbn-card-worker's base kbn-pulse — static, no blink */
+}
+.kbn-card-worker-waiting:hover {
+  color: #6E4710;
+  background: rgba(200, 138, 30, 0.30);
+  border-color: rgba(200, 138, 30, 0.55);
+}
+/* Stale-origin card: the originating agent is disconnected. The
+   snapshot is preserved (last-known-good) so the card still reads
+   and clicks through to vellum, but drag is disabled because
+   mutation has nowhere to land until reconnect. Visual signal
+   is a desaturated dim plus a not-allowed cursor on the drag
+   handle. */
+.kbn-card--stale {
+  opacity: 0.62;
+  background: #EDE2CE;
+  border-style: dashed;
+  cursor: default;
+}
+.kbn-card--stale:hover {
+  background: #EDE2CE;
+  border-color: rgba(27, 22, 17, 0.18);
+  transform: none;
+}
+.kbn-card--stale:active { cursor: default; }
+.kbn-card--stale .kbn-card-name { color: #5A4F3A; }
+/* The waiting badge sits in the same band as kbn-card-blocked /
+   kbn-card-worker — runtime-state info that depends on connection,
+   not on fiber content. Cool grey-blue distinguishes "stale" from
+   the warm gold of "blocked on dep" and the teal of "worker
+   running." */
+.kbn-card-waiting {
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 10.5px;
+  color: #3D5BA0;
+  background: rgba(61, 91, 160, 0.10);
+  border: 1px dashed rgba(61, 91, 160, 0.35);
+  padding: 4px 6px;
+  border-radius: 2px;
+  margin-top: 2px;
+  letter-spacing: 0.02em;
+}
+.kbn-error {
+  margin: 24px;
+  padding: 16px;
+  border: 1px solid rgba(196, 147, 51, 0.4);
+  background: rgba(196, 147, 51, 0.08);
+  color: #8C6A24;
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 13px;
+}
+
+/* Temper / Compost inline in the meta row (awaiting-review cards only).
+   Sit directly left of the date stamp; inherit .kbn-action base chrome.
+   margin-left:auto pushes the whole group right; the adjacent-sibling rule
+   zeroes out the date's own auto-margin so space isn't split between them. */
+.kbn-card-review-meta-actions {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+.kbn-card-review-meta-actions + .kbn-card-date {
+  margin-left: 0;
+}
+.kbn-review-meta-btn {
+  font-size: 9.5px;
+  padding: 2px 7px;
+  opacity: 0.75;
+}
+.kbn-review-meta-btn:hover {
+  opacity: 1;
+}
+
+@media (max-width: 1100px) {
+  .kbn-horizon-body {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .kbn-horizon-body {
+    grid-template-columns: 1fr;
+  }
+}
+

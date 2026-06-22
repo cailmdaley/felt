@@ -24,3 +24,20 @@ _build/
 
 # Generated assets
 nanobanana-output/
+
+# ── Shuttle daemon (Elixir/Mix) ──────────────────────────────────────────
+# `_build/` and `dist/` above already cover Mix's build dir and ui/dist.
+/deps/
+/cover/
+/doc/
+/tmp/
+erl_crash.dump
+*.ez
+shuttle-*.tar
+# Built daemon escript + its generated version module
+/bin/shuttle
+/lib/shuttle/build_info.ex
+
+# ── Shuttle UI (offline verification harness build output) ───────────────
+ui/harness-dist/
+ui/harness-board-dist/

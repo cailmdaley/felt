@@ -1,0 +1,7 @@
+node_modules
+dist/
+*.log
+.vite/
+
+# Dev-only baked ASTRA fixtures (regenerate: LC_MYSTRA_DIR=... node ../priv/mystra/bake.mjs <projectDir>)
+public/fixtures/

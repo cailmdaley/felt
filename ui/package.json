@@ -1,0 +1,37 @@
+{
+  "name": "shuttle-ui",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "The Shuttle UI — a lean web client for the Shuttle daemon (:4000): kanban board, Stash/Capture, and a fiber/file viewer. Served by the daemon as a static bundle.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@myst-theme/common": "1.2.2",
+    "@myst-theme/providers": "1.2.2",
+    "@radix-ui/react-dialog": "1.1.15",
+    "cron-parser": "^5.5.0",
+    "katex": "^0.16.27",
+    "marked": "^17.0.1",
+    "marked-katex-extension": "^5.1.6",
+    "myst-common": "1.9.5",
+    "myst-spec-ext": "1.9.5",
+    "myst-to-react": "1.2.2",
+    "pdfjs-dist": "4.10.38",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "4.3.0",
+    "@types/react": "18.3.28",
+    "@types/react-dom": "18.3.7",
+    "@vitejs/plugin-react": "4.7.0",
+    "tailwindcss": "4.3.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.2"
+  }
+}

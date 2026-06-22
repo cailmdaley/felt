@@ -7,7 +7,8 @@ on:
     branches: [main]
 
 jobs:
-  test:
+  go:
+    name: Go (felt CLI — build + test)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -25,3 +26,76 @@ jobs:
 
       - name: Integration Test
         run: go test -tags integration ./cmd/ -run TestIntegration -v
+
+  elixir:
+    name: Elixir (daemon — mix compile + mix test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Elixir
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: "27"
+          elixir-version: "1.19"
+
+      # The daemon shells out to `felt` for store walks; build it from THIS
+      # checkout (source of truth in the merged repo) rather than downloading a
+      # possibly-older release.
+      - name: Set up Go (to build felt CLI)
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build + install felt CLI
+        run: |
+          GOBIN=/usr/local/bin go install .
+          felt --version
+
+      - name: Cache deps
+        uses: actions/cache@v4
+        with:
+          path: deps
+          key: ${{ runner.os }}-mix-${{ hashFiles('**/mix.lock') }}
+          restore-keys: ${{ runner.os }}-mix-
+
+      - name: Cache _build
+        uses: actions/cache@v4
+        with:
+          path: _build
+          key: ${{ runner.os }}-build-${{ hashFiles('**/mix.lock') }}
+          restore-keys: ${{ runner.os }}-build-
+
+      - name: Install dependencies
+        run: mix deps.get
+
+      - name: Compile (warnings as errors)
+        run: mix compile --warnings-as-errors
+
+      - name: Run tests
+        run: mix test
+
+  ui:
+    name: UI (board bundle — vite build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ui
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install dependencies
+        run: npm ci
+
+      # The board entry builds without the lightcone-ui renderer checkout — the
+      # paper entry is dropped by vite.config's existsSync guard when absent
+      # (CI has no lightcone-ui). We run `vite build` directly rather than
+      # `npm run build`, whose `tsc` step would need lightcone-ui to typecheck
+      # src/paper. This proves the served board bundle compiles + bundles.
+      - name: Build board bundle
+        run: npx vite build

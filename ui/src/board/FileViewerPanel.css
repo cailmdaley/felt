@@ -1,0 +1,109 @@
+/* ── Sent-file viewer bodies — by-extension rendering cells ──────────────
+   The floating sibling panel is retired (the two-column file viewer absorbed
+   it into FiberDetailModal's right-column accordion). What remains is the
+   by-extension viewer the accordion mounts per open file: an <img>, an
+   <audio controls>, or an iframe-with-loading-veil. These classes style those
+   bodies so they fill their accordion cell. Loaded from FileViewerPanel.ts
+   (buildFileViewer). */
+
+.kbn-fileview-frame-wrap {
+  position: relative;
+  flex: 1 1 auto;
+  display: flex;
+  min-height: 0;
+  min-width: 0;
+}
+
+.kbn-fileview-frame {
+  flex: 1 1 auto;
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: var(--porch-rag, #FFFDF6);
+}
+
+/* Loading veil over the iframe while a (possibly large, possibly remote)
+   document is fetched. Lifts on iframe `load`. */
+.kbn-fileview-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--porch-rag, #FFFDF6);
+  color: #7A7368;
+  font-family: var(--font-main, 'EB Garamond', Georgia, serif);
+  font-style: italic;
+  font-size: 1.05rem;
+  letter-spacing: 0.01em;
+  animation: kbn-fileview-pulse 1.6s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .kbn-fileview-loading { animation: none; opacity: 0.8; }
+}
+
+.kbn-fileview-loading-error {
+  color: #9A4A35;
+  font-style: normal;
+  animation: none;
+}
+
+@keyframes kbn-fileview-pulse {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+
+/* An image deliverable sits on a softly mottled vellum mat, centered with a
+   little breathing room and a fine border + shadow so a plot reads as a mounted
+   plate rather than a raw bitmap bleeding to the cell edge. */
+.kbn-fileview-image-wrap {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+  padding: 16px;
+  background:
+    radial-gradient(ellipse 80% 70% at 50% 35%, rgba(255, 251, 237, 0.6), transparent 75%),
+    var(--porch-panel, #EDE8E0);
+}
+.kbn-fileview-image {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 3px;
+  background: #FFFFFF;
+  border: 1px solid rgba(27, 22, 17, 0.1);
+  box-shadow: 0 4px 14px -6px rgba(27, 22, 17, 0.28);
+}
+
+.kbn-fileview-audio {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.kbn-fileview-audio audio {
+  width: 100%;
+  max-width: 480px;
+}
+
+/* ── Programmatic geometry glide — used by the detail panel's two-column
+   reveal/hide (animatePanelGeometry, FloatingPanelChrome). Applied
+   transiently to the panel being resized; shed after the move so live drag
+   stays 1:1 with the pointer. */
+.panel-geom-anim {
+  /* Duration kept at 0.3s to match GEOM_ANIM_MS (FloatingPanelChrome), which
+     sheds this class at 320ms; a softer ease-out curve makes the two-column
+     reveal/glide-back settle gracefully rather than braking hard. */
+  transition:
+    left 0.3s cubic-bezier(0.33, 0.9, 0.32, 1),
+    top 0.3s cubic-bezier(0.33, 0.9, 0.32, 1),
+    width 0.3s cubic-bezier(0.33, 0.9, 0.32, 1),
+    height 0.3s cubic-bezier(0.33, 0.9, 0.32, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .panel-geom-anim { transition: none; }
+}

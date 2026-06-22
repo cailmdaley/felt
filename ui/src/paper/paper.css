@@ -1,0 +1,28 @@
+/**
+ * The ASTRA paper entry stylesheet — imported once from `main.tsx`.
+ *
+ * Pulls in @lightcone/styles/tokens.css (which itself `@import`s tailwindcss,
+ * registers the @theme palette utilities, and sets the html/body parchment
+ * base). This file is loaded ONLY by the paper entry, which the fiber panel
+ * mounts in an <iframe> — so Tailwind's preflight reset and the html/body base
+ * never touch the kanban board's own document.
+ *
+ * The @source marker below is rewritten by the `lightcone-tailwind-source`
+ * Vite plugin into `@source "<lightcone-ui>/packages/renderer/src"` so Tailwind
+ * scans the aliased external renderer source for utility classes. See
+ * vite.config.ts.
+ */
+
+@import "@lightcone/styles/tokens.css";
+
+/* @inject-lightcone-source */
+
+/* Make the paper fill its iframe viewport cleanly. */
+html,
+body {
+  min-height: 100%;
+}
+
+#paper {
+  min-height: 100vh;
+}

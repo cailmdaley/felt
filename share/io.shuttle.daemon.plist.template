@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Shuttle daemon LaunchAgent. Generated from this template by
+  `make install-agent` (placeholders __SHUTTLE_DIR__ / __LOG__ / __LOOM_HOMES__
+  are filled in). Do not load this template directly — it isn't a valid plist
+  until installed.
+
+  PATH: launchd starts with a near-empty environment, but the daemon needs the
+  full user PATH at two moments — at boot the `#!/usr/bin/env escript` shebang
+  must find escript/erl (Homebrew), and at runtime it shells out to `felt` (in
+  ~/.local/bin) for every store walk. A PATH missing felt yields `:enoent` → 500
+  on /api/v1/fibers/composite. A login shell (`bash -lc`) does NOT fix this:
+  under launchd's bare env the user profile doesn't add Homebrew (its PATH setup
+  isn't self-sufficient from `env -i`), so escript stays unfound → exit 127. So
+  instead `make install-agent` CAPTURES the real login PATH at install time
+  (`bash -lc 'echo $PATH'`, run from the user's environment) and bakes it into
+  __PATH__ below — deterministic at runtime, and the user's actual PATH rather
+  than a hand-maintained list. `exec` replaces the shell with the daemon so
+  launchd's KeepAlive supervises it directly; `start --force` skips the
+  already-running guard so a restart never refuses.
+
+  Run from OUTSIDE ~/Documents (canonical checkout: ~/dev/shuttle). macOS TCC
+  blocks launchd-spawned processes from ~/Documents / ~/Desktop / ~/Downloads,
+  and Full Disk Access does NOT inherit across launchd's process tree the way it
+  does under a terminal app — so a daemon rooted in a protected folder would
+  crash-loop (or silently fail store walks) unless you grant FDA to every binary
+  in the tree (beam.smp, felt, …). Living outside Documents sidesteps TCC
+  entirely: zero grants, survives erlang upgrades. `make install-agent` warns if
+  $PWD is protected. (Earlier this template used `-c` + no-exec + an FDA grant on
+  /bin/bash to keep bash as the responsible process; that umbrella does not
+  actually inherit under launchd — relocating out of Documents is the fix.)
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>io.shuttle.daemon</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>-c</string>
+        <string>exec '__SHUTTLE_DIR__/bin/shuttle' start --force</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <!-- The user's real login PATH, captured at install time (see header). -->
+        <key>PATH</key>
+        <string>__PATH__</string>
+        <!--
+          LOOM_HOMES scopes the daemon's felt polling to the loom store (~/loom,
+          outside ~/Documents), which aggregates every project's fibers under
+          prefixed ids and re-discovers each project's substores by following the
+          symlinks under ~/loom/.felt/. Keeps the daemon off TCC-protected paths.
+          (Set in launchd env, not the login profile, since it's our scoping —
+          the login shell inherits it across the `-l`.) Filled in by
+          `make install-agent` (placeholder __LOOM_HOMES__).
+        -->
+        <key>LOOM_HOMES</key>
+        <string>__LOOM_HOMES__</string>
+        <!--
+          SSH_AUTH_SOCK points at the user's PERSISTENT login ssh-agent (default
+          ~/.ssh/agent.sock), NOT launchd's per-session Keychain agent. This is
+          load-bearing for remote work: launchd hands the daemon a bare agent
+          that only ever holds the default key, so credentials added to the real
+          agent — notably cineca's step-ca short-lived SSH cert (`step ssh
+          login …`, see AGENTS.md) — are invisible to it. Without this, every
+          fresh ssh the daemon makes to cineca fails auth: the daemon's own
+          remote feed/tunnel can't connect, and a kanban Attach tab (which
+          inherits this very SSH_AUTH_SOCK) opens and instantly dies. Filled in
+          by `make install-agent` (placeholder __SSH_AUTH_SOCK__).
+        -->
+        <key>SSH_AUTH_SOCK</key>
+        <string>__SSH_AUTH_SOCK__</string>
+    </dict>
+
+    <key>WorkingDirectory</key>
+    <string>__SHUTTLE_DIR__</string>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <key>StandardOutPath</key>
+    <string>__LOG__</string>
+
+    <key>StandardErrorPath</key>
+    <string>__LOG__</string>
+</dict>
+</plist>

@@ -1,0 +1,14 @@
+Shuttle
+Copyright 2026 Cail Daley
+
+This product includes software derived from Symphony
+(https://github.com/openai/symphony), originally published by OpenAI under the
+Apache License, Version 2.0.
+
+The coordination layer — poll/retry/reconcile state machine, OTP supervisor
+tree, Phoenix Channels broadcast idioms, and failure-mode taxonomy — is lifted
+from Symphony's orchestrator.ex and adapted for Shuttle's integration layer.
+
+The integration layer (Linear adapter → felt CLI; codex-app-server → tmux +
+agent CLI wrappers; WORKFLOW.md → fiber-frontmatter shuttle: block) is original
+work by Cail Daley.

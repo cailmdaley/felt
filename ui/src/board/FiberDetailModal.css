@@ -1,0 +1,1159 @@
+/* ── Fiber detail panel — a kanban card opened as a vellum page ──────────
+   One click on a card opens the fiber itself: a floating, draggable,
+   edge-and-corner-resizable panel whose body is a single-column vellum
+   rendering (outcome lede → report.html embed → markdown body). Non-modal
+   by design — no scrim, the board behind stays interactive, so the reader
+   can drag the page aside and keep an eye on one fiber while working the
+   board.
+
+   Chrome is title + one controls dropdown, nothing else. The panel frame
+   wears the kanban's warm parchment; the page inside sits on vellum's
+   panel paper, so the fiber reads as a page held in a frame.
+
+   Loaded from FiberDetailModal.ts. The legacy two-column dialog styles in
+   KanbanModal.css were retired with the vellum-page rework. */
+
+.kbn-detail-overlay {
+  position: fixed;
+  /* ≥ 10000 — .vellum-modal-scrim is 9999 and the panel must float above
+     the vellum workspace modal hosting the kanban tab. */
+  z-index: 10000;
+  display: flex;
+  flex-direction: column;
+  min-width: 380px;
+  min-height: 320px;
+  background: #EDE2CE;
+  border: 1px solid rgba(27, 22, 17, 0.16);
+  border-radius: 2px;
+  box-shadow:
+    0 1px 0 rgba(255, 251, 237, 0.6) inset,
+    0 14px 38px rgba(27, 22, 17, 0.22),
+    0 3px 10px rgba(27, 22, 17, 0.10);
+  /* container-type: size so the controls dropdown can cap its height in
+     cqh units — the panel mounts at user-chosen sizes, which is exactly
+     the case viewport media queries get wrong. Explicit width/height are
+     always set inline by the drag/resize machinery, so `size` containment
+     never collapses the layout. */
+  container-name: kbn-detail;
+  container-type: size;
+  font-family: var(--font-main, 'EB Garamond', serif);
+  color: #1B1611;
+  overflow: hidden;
+  /* Soft tonal mottling — aged-paper warmth without a moiré. */
+  background-image:
+    radial-gradient(ellipse 800px 500px at 18% 12%, rgba(255, 251, 237, 0.55), transparent 65%),
+    radial-gradient(ellipse 700px 500px at 88% 88%, rgba(27, 22, 17, 0.035), transparent 60%);
+}
+.kbn-detail-overlay.kbn-detail-dragging,
+.kbn-detail-overlay.kbn-detail-resizing {
+  user-select: none;
+  -webkit-user-select: none;
+}
+.kbn-detail-overlay.kbn-detail-dragging iframe,
+.kbn-detail-overlay.kbn-detail-resizing iframe {
+  /* Pointer events over an iframe would swallow the drag mid-gesture. */
+  pointer-events: none;
+}
+
+/* ── Header: the drag handle ─────────────────────────────────────────── */
+.kbn-detail-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 20px 5px;
+  flex-shrink: 0;
+  cursor: grab;
+  touch-action: none;
+}
+.kbn-detail-overlay.kbn-detail-dragging .kbn-detail-header {
+  cursor: grabbing;
+}
+.kbn-detail-title-stack {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+/* The title is plain identification text and part of the header drag surface
+   (the standalone UI has no "open elsewhere" target — the panel is the view),
+   so no pointer cursor or hover affordance. */
+.kbn-detail-title {
+  font-family: var(--font-main, 'EB Garamond', serif);
+  font-size: 19px;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: -0.005em;
+  color: #1B1611;
+  max-width: 100%;
+}
+/* ID slug under the title — plain identification text. */
+.kbn-detail-id {
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
+  color: #7A7368;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Status as an ink-stamped mark. */
+.kbn-detail-header .kbn-pill {
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  padding: 3px 8px 2px;
+  border-radius: 1px;
+  flex-shrink: 0;
+  margin-top: 6px;
+  transform: rotate(-1.5deg);
+  box-shadow: 0 0 0 0.5px rgba(196, 147, 51, 0.18) inset;
+}
+/* The header borrows the grid card's ▸ aloft pill (.kbn-card-worker in
+   KanbanModal.css — teal, pulsing, click → kitty). Locally it joins the
+   status stamp's ink-stamp idiom: same size, same slight hand-applied
+   rotation, so the two read as a pair of stamps on the page head. */
+.kbn-detail-aloft {
+  margin-left: 0;
+  margin-top: 6px;
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  padding: 3px 8px 2px;
+  border-radius: 1px;
+  transform: rotate(-1.5deg);
+}
+.kbn-detail-close {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  margin-top: 2px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: #7A7368;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 2px;
+}
+.kbn-detail-close:hover {
+  color: #1B1611;
+  background: rgba(27, 22, 17, 0.06);
+}
+
+/* ── Controls dropdown ───────────────────────────────────────────────── */
+.kbn-detail-controls {
+  flex-shrink: 0;
+  border-bottom: 1px solid rgba(27, 22, 17, 0.12);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.kbn-detail-controls-toggle {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 20px 6px;
+  border: none;
+  background: transparent;
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #7A7368;
+  cursor: pointer;
+  text-align: left;
+}
+.kbn-detail-controls-toggle:hover {
+  color: #1B1611;
+  background: rgba(27, 22, 17, 0.04);
+}
+.kbn-detail-controls-chevron {
+  font-size: 9px;
+  width: 10px;
+  flex-shrink: 0;
+}
+.kbn-detail-controls-label {
+  font-weight: 600;
+}
+.kbn-detail-controls-summary {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-transform: none;
+  letter-spacing: 0.03em;
+  color: #9A8F80;
+}
+.kbn-detail-controls-body {
+  /* Cap the expanded cluster so the page below keeps breathing room even
+     on a short panel; scrolls internally past the cap. cqh works because
+     the panel root is a size container. */
+  max-height: 62cqh;
+  overflow-y: auto;
+  padding: 2px 20px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background:
+    linear-gradient(rgba(27, 22, 17, 0.025), transparent 14px);
+}
+/* The author display above would silently defeat the `hidden` attribute
+   (UA display:none loses to any author display) — this is what made the
+   dropdown "stuck open" on first ship. Keep this rule adjacent so the
+   pairing survives refactors. */
+.kbn-detail-controls-body[hidden] {
+  display: none;
+}
+.kbn-detail-controls-open .kbn-detail-controls-toggle {
+  color: #1B1611;
+}
+
+/* Sections inside the dropdown */
+.kbn-detail-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+/* Worker config / tags / parent sit as a two-column cluster when the
+   panel is wide enough — the dropdown stays shallow instead of a long
+   single stack. Collapses to one column on narrow panels. */
+.kbn-detail-controls-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+  column-gap: 26px;
+  row-gap: 10px;
+  align-items: start;
+}
+@container kbn-detail (max-width: 640px) {
+  .kbn-detail-controls-grid {
+    grid-template-columns: 1fr;
+  }
+}
+.kbn-detail-section-heading {
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 9.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #9A8F80;
+}
+.kbn-detail-rule {
+  height: 1px;
+  background: rgba(27, 22, 17, 0.10);
+  margin: 2px 0;
+}
+
+/* Directive + actions */
+.kbn-detail-directive {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  min-height: 44px;
+  padding: 6px 9px;
+  border: 1px solid rgba(27, 22, 17, 0.18);
+  border-radius: 2px;
+  background: rgba(255, 251, 237, 0.7);
+  font-family: var(--font-main, 'EB Garamond', serif);
+  font-size: 14px;
+  line-height: 1.45;
+  color: #1B1611;
+}
+.kbn-detail-directive:focus {
+  outline: none;
+  border-color: rgba(154, 123, 53, 0.55);
+  box-shadow: 0 0 0 2px rgba(154, 123, 53, 0.12);
+}
+.kbn-detail-wait-btn {
+  border: 1px solid rgba(27, 22, 17, 0.16);
+  background: rgba(255, 251, 237, 0.5);
+  border-radius: 2px;
+  padding: 4px 9px 3px;
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 10.5px;
+  color: #4A443C;
+  cursor: pointer;
+}
+.kbn-detail-wait-btn:hover {
+  border-color: rgba(154, 123, 53, 0.45);
+  color: #1B1611;
+}
+.kbn-detail-actions-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+/* Review verdicts (Temper · Compost) are a different family from the
+   dispatch verbs — push them to the right edge so the one row reads as
+   two clusters. Wrapping (narrow panels) keeps them adjacent instead. */
+.kbn-detail-actions-row .kbn-detail-action-tempered {
+  margin-left: auto;
+}
+.kbn-detail-action-btn {
+  border: 1px solid rgba(27, 22, 17, 0.18);
+  background: rgba(255, 251, 237, 0.6);
+  border-radius: 2px;
+  padding: 3px 10px;
+  font-family: var(--font-main, 'EB Garamond', serif);
+  font-size: 13px;
+  font-weight: 600;
+  color: #2E2A26;
+  cursor: pointer;
+}
+.kbn-detail-action-btn:hover:not(:disabled) {
+  background: rgba(255, 251, 237, 0.95);
+}
+.kbn-detail-action-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.kbn-detail-action-primary {
+  border-color: rgba(154, 123, 53, 0.55);
+  color: #6B5526;
+  background: rgba(196, 147, 51, 0.10);
+}
+.kbn-detail-action-primary:hover:not(:disabled) {
+  background: rgba(196, 147, 51, 0.18);
+}
+.kbn-detail-action-tempered {
+  border-color: rgba(90, 123, 123, 0.5);
+  color: #3E5757;
+}
+.kbn-detail-action-composted {
+  color: #7A7368;
+}
+
+/* Field rows (agent / kind / schedule) */
+.kbn-detail-field-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px 10px;
+}
+.kbn-detail-label {
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #7A7368;
+  width: 44px;
+  flex-shrink: 0;
+}
+.kbn-detail-select,
+.kbn-detail-input {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 8px;
+  border: 1px solid rgba(27, 22, 17, 0.18);
+  border-radius: 2px;
+  background: rgba(255, 251, 237, 0.7);
+  font-family: var(--font-main, 'EB Garamond', serif);
+  font-size: 13.5px;
+  color: #1B1611;
+}
+.kbn-detail-select-effort {
+  flex: 0 1 150px;
+  font-size: 12.5px;
+}
+.kbn-detail-chrome-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: #5A544B;
+  cursor: pointer;
+  user-select: none;
+}
+.kbn-detail-chrome-toggle input:disabled {
+  cursor: not-allowed;
+}
+.kbn-detail-chrome-toggle:has(input:disabled) {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.kbn-detail-input-mono {
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 12px;
+}
+.kbn-detail-input-tz {
+  flex: 0 1 130px;
+  font-size: 12.5px;
+}
+.kbn-detail-segmented {
+  display: inline-flex;
+  border: 1px solid rgba(27, 22, 17, 0.18);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.kbn-detail-segment {
+  border: none;
+  background: transparent;
+  padding: 4px 12px;
+  font-family: var(--font-main, 'EB Garamond', serif);
+  font-size: 13px;
+  color: #7A7368;
+  cursor: pointer;
+}
+.kbn-detail-segment + .kbn-detail-segment {
+  border-left: 1px solid rgba(27, 22, 17, 0.14);
+}
+.kbn-detail-segment-active {
+  background: rgba(196, 147, 51, 0.16);
+  color: #1B1611;
+}
+
+/* Tags */
+.kbn-detail-tags-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.kbn-detail-tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px 2px 8px;
+  border: 1px solid rgba(27, 22, 17, 0.14);
+  border-radius: 10px;
+  background: rgba(255, 251, 237, 0.6);
+  font-size: 12.5px;
+  color: #4A443C;
+}
+.kbn-detail-tag-remove {
+  border: none;
+  background: transparent;
+  color: #9A8F80;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 3px;
+}
+.kbn-detail-tag-remove:hover {
+  color: #1B1611;
+}
+.kbn-detail-tag-input {
+  border: none;
+  background: transparent;
+  font-family: var(--font-main, 'EB Garamond', serif);
+  font-size: 13px;
+  color: #1B1611;
+  min-width: 80px;
+  padding: 3px 2px;
+}
+.kbn-detail-tag-input:focus {
+  outline: none;
+}
+
+/* Parent fiber autocomplete */
+.kbn-detail-current-parent {
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 11px;
+  color: #7A7368;
+}
+.kbn-detail-parent-wrap {
+  position: relative;
+}
+.kbn-detail-parent-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 5px 9px;
+  border: 1px solid rgba(27, 22, 17, 0.18);
+  border-radius: 2px;
+  background: rgba(255, 251, 237, 0.7);
+  font-family: var(--font-main, 'EB Garamond', serif);
+  font-size: 13.5px;
+  color: #1B1611;
+}
+.kbn-detail-parent-dropdown {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  right: 0;
+  max-height: 200px;
+  overflow-y: auto;
+  background: #F4EBD9;
+  border: 1px solid rgba(27, 22, 17, 0.2);
+  border-radius: 2px;
+  box-shadow: 0 8px 22px rgba(27, 22, 17, 0.18);
+  z-index: 20;
+}
+.kbn-detail-parent-option {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+.kbn-detail-parent-option:hover,
+.kbn-detail-parent-option:focus {
+  background: rgba(196, 147, 51, 0.12);
+  outline: none;
+}
+.kbn-detail-parent-option-name {
+  font-size: 13px;
+  color: #1B1611;
+}
+.kbn-detail-parent-option-id {
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 10px;
+  color: #9A8F80;
+}
+.kbn-detail-parent-empty {
+  cursor: default;
+  color: #9A8F80;
+  font-size: 12.5px;
+}
+
+/* Footer: live-save status */
+.kbn-detail-footer {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.kbn-detail-save-status {
+  margin-left: auto;
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: #9A8F80;
+}
+.kbn-detail-save-status-saving {
+  color: #9A7B35;
+  font-style: italic;
+}
+.kbn-detail-save-status-saved {
+  color: #5A7B7B;
+}
+.kbn-detail-error {
+  font-size: 12.5px;
+  color: #8C3B2E;
+}
+
+/* ── Resize handles ──────────────────────────────────────────────────── */
+.kbn-detail-rh {
+  position: absolute;
+  z-index: 30;
+  touch-action: none;
+}
+.kbn-detail-rh-n  { top: -3px; left: 12px; right: 12px; height: 7px; cursor: ns-resize; }
+.kbn-detail-rh-s  { bottom: -3px; left: 12px; right: 12px; height: 7px; cursor: ns-resize; }
+.kbn-detail-rh-e  { right: -3px; top: 12px; bottom: 12px; width: 7px; cursor: ew-resize; }
+.kbn-detail-rh-w  { left: -3px; top: 12px; bottom: 12px; width: 7px; cursor: ew-resize; }
+.kbn-detail-rh-ne { top: -3px; right: -3px; width: 15px; height: 15px; cursor: nesw-resize; }
+.kbn-detail-rh-nw { top: -3px; left: -3px; width: 15px; height: 15px; cursor: nwse-resize; }
+.kbn-detail-rh-se { bottom: -3px; right: -3px; width: 15px; height: 15px; cursor: nwse-resize; }
+.kbn-detail-rh-sw { bottom: -3px; left: -3px; width: 15px; height: 15px; cursor: nesw-resize; }
+
+/* ── The file-viewer window: a sibling window to the card ─────────────────
+   The file viewer is no longer a right column inside the card panel — it's a
+   SEPARATE floating window (its own document.body overlay), independently
+   draggable + resizable, free to overlap the card and be raised above it.
+   It reuses the card's vellum frame (.kbn-detail-overlay gives it the fixed
+   position, container-type, parchment, border, shadow, radius) and adds this
+   modifier to lay itself out as a flex column: a slim manuscript drag bar,
+   the tab strip, then the full-bleed views. The window's vellum is a touch
+   warmer/darker than the card's so the two read as a matched pair of leaves
+   from the same manuscript rather than one surface. */
+.kbn-detail-overlay.kbn-fileview-window {
+  display: flex;
+  flex-direction: column;
+  background: var(--porch-panel, #E8E0D2);
+  background-image:
+    radial-gradient(ellipse 620px 420px at 82% 6%, rgba(255, 251, 237, 0.6), transparent 62%),
+    radial-gradient(ellipse 540px 460px at 8% 96%, rgba(27, 22, 17, 0.04), transparent 64%);
+}
+
+/* ── The chrome bar = the tab strip itself ─────────────────────────────────
+   The viewer window has NO separate title bar: the tabs ARE the titles, and
+   this bar is the window's drag handle (empty areas drag; the tab/✕ buttons
+   opt out). It holds the horizontally-scrolling tabs (flex:1) and, pinned to
+   the right, a ✕ that closes the whole viewer. One bar, not two. */
+.kbn-fileview-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  padding: 0 4px 0 0;
+  cursor: grab;
+  touch-action: none;
+  border-bottom: 1px solid rgba(27, 22, 17, 0.13);
+}
+.kbn-detail-overlay.kbn-detail-dragging .kbn-fileview-bar {
+  cursor: grabbing;
+}
+.kbn-fileview-win-close {
+  flex: 0 0 auto;
+  align-self: center;
+  width: 20px;
+  height: 20px;
+  margin-bottom: 3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: #7A7368;
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 2px;
+}
+.kbn-fileview-win-close:hover {
+  color: #8C3B2E;
+  background: rgba(140, 59, 46, 0.1);
+}
+
+/* ── Tab strip ────────────────────────────────────────────────────────────
+   The row of manuscript index-tabs inside the chrome bar — one per open file,
+   stable order. The active tab is lit + raised and seams into the full view
+   below; inactive tabs sit back. Scrolls horizontally (thin rule scrollbar)
+   when a card has many deliverables; the ✕ stays pinned outside this scroll. */
+.kbn-detail-tabstrip {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  padding: 7px 0 0 9px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(154, 123, 53, 0.3) transparent;
+}
+.kbn-detail-tabstrip::-webkit-scrollbar { height: 6px; }
+.kbn-detail-tabstrip::-webkit-scrollbar-thumb {
+  background: rgba(154, 123, 53, 0.3);
+  border-radius: 6px;
+}
+/* Flat manuscript tabs — no rounded tops, no gradients, no raised browser-tab
+   shadow. Just ink on parchment: a muted label, and the active one marked by
+   darker ink + a gilt underline sitting on the bar's hairline. Matches the
+   card's charcoal-rule + gilt-accent vocabulary. */
+.kbn-detail-tab {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 240px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px 7px;
+  cursor: pointer;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: #8A8073;
+  user-select: none;
+  transition: color 0.14s ease, border-color 0.14s ease, background 0.14s ease;
+}
+.kbn-detail-tab:hover {
+  color: #4A443C;
+  background: rgba(27, 22, 17, 0.03);
+}
+.kbn-detail-tab:focus-visible {
+  outline: 2px solid rgba(154, 123, 53, 0.45);
+  outline-offset: -2px;
+}
+.kbn-detail-tab-active {
+  color: #2E2418;
+  border-bottom-color: var(--porch-ochre, #C2963B);
+}
+.kbn-detail-tab-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 12px;
+  letter-spacing: 0.01em;
+}
+.kbn-detail-tab-active .kbn-detail-tab-name { font-weight: 600; }
+.kbn-detail-tab-close {
+  flex: 0 0 auto;
+  border: none;
+  background: transparent;
+  color: #9A8F80;
+  font-size: 11px;
+  line-height: 1;
+  padding: 3px 4px;
+  border-radius: 3px;
+  cursor: pointer;
+  opacity: 0;
+  transition: color 0.14s ease, background 0.14s ease, opacity 0.14s ease;
+}
+.kbn-detail-tab:hover .kbn-detail-tab-close,
+.kbn-detail-tab-active .kbn-detail-tab-close { opacity: 0.7; }
+.kbn-detail-tab-close:hover {
+  color: #8C3B2E;
+  background: rgba(140, 59, 46, 0.1);
+  opacity: 1;
+}
+
+/* ── The full-view area ───────────────────────────────────────────────────
+   One file fills the column. Only the active tab's cell is shown; the rest
+   stay built-but-hidden so switching tabs keeps each file's scroll + zoom.
+   The cell is the pan surface: Cmd-scroll sets `zoom` on the viewer, which
+   grows its layout box, and the cell (overflow:auto) scrolls to pan. */
+.kbn-detail-views {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--porch-rag, #FFFDF6);
+}
+.kbn-detail-view-cell {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  position: relative;
+  background: var(--porch-rag, #FFFDF6);
+  scrollbar-width: thin;
+  scrollbar-color: rgba(154, 123, 53, 0.35) transparent;
+}
+.kbn-detail-view-cell[hidden] { display: none; }
+.kbn-detail-view-cell::-webkit-scrollbar { width: 9px; height: 9px; }
+.kbn-detail-view-cell::-webkit-scrollbar-thumb {
+  background: rgba(154, 123, 53, 0.3);
+  border-radius: 6px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+/* The viewer fills the cell at zoom 1; `zoom` > 1 grows it and the cell pans.
+   `zoom` (not transform) so the scaled box affects layout → real scrollbars. */
+.kbn-detail-view-cell > .kbn-fileview-frame-wrap { width: 100%; height: 100%; }
+/* Image fills the cell as a full-view plate on a vellum mat (centered); the
+   whole figure is visible at zoom 1, Cmd-scroll magnifies from there. */
+/* Image as a full-width plate, top-aligned (block, not flex-centered): the
+   whole figure fills the column width at zoom 1, and Cmd-scroll `zoom` grows it
+   PAST that — explicit `width:100%` (not object-fit/max-width) gives the image a
+   concrete layout size that `zoom` actually multiplies, so the cell overflows
+   and pans in both axes. (max-width/contain absorbed the zoom → the fit-width
+   "cap" Cail hit.) */
+.kbn-detail-view-cell > .kbn-fileview-image-wrap {
+  display: block;
+  width: 100%;
+  min-height: 100%;
+  box-sizing: border-box;
+  padding: 0;
+}
+.kbn-detail-view-cell > .kbn-fileview-image-wrap > .kbn-fileview-image {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-width: none;
+  max-height: none;
+  object-fit: initial;
+  border-radius: 0;
+}
+.kbn-detail-view-cell > .kbn-fileview-audio { padding: 28px; }
+
+/* ── The vellum page pane ────────────────────────────────────────────── */
+.kbn-detail-page {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: var(--porch-panel, #EDE8E0);
+  border-top: 1px solid rgba(255, 251, 237, 0.5);
+}
+
+/* ── The fiber body, vellum-styled ───────────────────────────────────────
+   The standalone UI emulates the vellum reading look in plain CSS rather than
+   mounting vellum's NarrativeView/PretextProse. `.kbn-detail-prose` wraps the
+   `marked`-rendered body (utils.renderMarkdown); the lede is the outcome.
+   Single reading column, EB Garamond, the panel's parchment/ink palette. */
+.kbn-detail-prose {
+  display: block;
+  /* Fill the panel: no narrow reading column, only a slim gutter — the page
+     IS the panel, so the prose tracks the panel width and grows as it's
+     resized (per Cail's parity note: text should be ~full width, tiny
+     margins, and follow the pop-up's size). */
+  max-width: none;
+  margin: 0;
+  padding: 1.5rem 1.6rem 3rem;
+  font-family: var(--font-main, 'EB Garamond', Georgia, serif);
+  font-size: 17px;
+  line-height: 1.62;
+  color: #2E2A26;
+}
+@container kbn-detail (max-width: 600px) {
+  .kbn-detail-prose {
+    padding: 1.2rem 1.1rem 2.5rem;
+    font-size: 16px;
+  }
+}
+
+.kbn-detail-prose-loading,
+.kbn-detail-prose-empty {
+  padding: 2rem 2.2rem;
+  font-style: italic;
+  color: #7A7368;
+}
+.kbn-detail-prose-note {
+  font-size: 14px;
+  font-style: italic;
+  color: #9A8F80;
+}
+.kbn-detail-body-status {
+  font-style: italic;
+  color: #9A8F80;
+  font-size: 14px;
+}
+.kbn-detail-body-retry {
+  border: none;
+  background: none;
+  padding: 0;
+  margin-left: 0.3em;
+  font: inherit;
+  font-style: normal;
+  color: var(--porch-verdigris, #2f7d6f);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+/* The lede = the fiber's outcome, set above the body as a quoted callout —
+   a left ochre rule + warm tint, matching how vellum presents a fiber's
+   lede/blockquote. Upright (not italic): outcomes are often long and
+   information-dense, so the rule + offset carry the "quote" read without the
+   readability cost of a full italic paragraph. */
+.kbn-detail-lede {
+  margin: 0 0 1.7rem;
+  padding: 0.5rem 0.9rem 0.55rem 1.1rem;
+  border-left: 3px solid var(--porch-ochre, #C2963B);
+  border-radius: 0 3px 3px 0;
+  background: rgba(194, 150, 59, 0.07);
+  font-size: 1.04em;
+  color: #3a352e;
+}
+.kbn-detail-lede > :first-child { margin-top: 0; }
+.kbn-detail-lede > :last-child { margin-bottom: 0; }
+
+/* Block rhythm */
+.kbn-detail-prose > :first-child { margin-top: 0; }
+.kbn-detail-prose p { margin: 0 0 0.95em; }
+.kbn-detail-prose h1,
+.kbn-detail-prose h2,
+.kbn-detail-prose h3,
+.kbn-detail-prose h4 {
+  font-family: var(--font-main, 'EB Garamond', Georgia, serif);
+  font-weight: 600;
+  line-height: 1.2;
+  color: #1f1b16;
+  margin: 1.7em 0 0.5em;
+}
+.kbn-detail-prose h1 { font-size: 1.6em; font-weight: 500; font-style: italic; }
+.kbn-detail-prose h2 { font-size: 1.34em; }
+.kbn-detail-prose h3 { font-size: 1.13em; }
+.kbn-detail-prose h4 { font-size: 1em; letter-spacing: 0.01em; }
+.kbn-detail-prose h2 {
+  padding-bottom: 0.18em;
+  border-bottom: 1px solid rgba(27, 22, 17, 0.10);
+}
+
+.kbn-detail-prose ul,
+.kbn-detail-prose ol { margin: 0 0 0.95em; padding-left: 1.4em; }
+.kbn-detail-prose li { margin-bottom: 0.35em; }
+.kbn-detail-prose li > ul,
+.kbn-detail-prose li > ol { margin: 0.35em 0 0; }
+
+.kbn-detail-prose blockquote {
+  margin: 0 0 0.95em;
+  padding-left: 1em;
+  border-left: 2px solid var(--porch-ochre, #C2963B);
+  font-style: italic;
+  color: #5e564b;
+}
+
+.kbn-detail-prose hr {
+  border: none;
+  border-top: 1px solid rgba(27, 22, 17, 0.14);
+  margin: 1.8em 0;
+}
+
+.kbn-detail-prose a,
+.kbn-detail-prose a.md-link {
+  color: var(--porch-verdigris, #2f7d6f);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-thickness: 1px;
+}
+.kbn-detail-prose a:hover { color: var(--porch-cinnabar, #B5453A); }
+
+.kbn-detail-prose code.md-inline-code {
+  font-family: var(--font-mono, 'IBM Plex Mono', monospace);
+  font-size: 0.86em;
+  background: rgba(46, 42, 38, 0.07);
+  padding: 0.08em 0.34em;
+  border-radius: 3px;
+}
+.kbn-detail-prose pre.md-code-block {
+  margin: 0 0 0.95em;
+  padding: 0.9em 1.05em;
+  background: #2E2A26;
+  color: #E4DCCB;
+  border-radius: 6px;
+  overflow-x: auto;
+  font-size: 0.82em;
+  line-height: 1.5;
+}
+.kbn-detail-prose pre.md-code-block code {
+  font-family: var(--font-mono, 'IBM Plex Mono', monospace);
+  background: none;
+  padding: 0;
+  color: inherit;
+}
+
+.kbn-detail-prose table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0 0 1.1em;
+  font-size: 0.9em;
+}
+.kbn-detail-prose th,
+.kbn-detail-prose td {
+  text-align: left;
+  padding: 0.4em 0.6em;
+  border-bottom: 1px solid rgba(27, 22, 17, 0.14);
+  vertical-align: top;
+}
+.kbn-detail-prose th {
+  font-family: var(--font-mono, 'IBM Plex Mono', monospace);
+  font-size: 0.82em;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #7A7368;
+  font-weight: 500;
+}
+
+.kbn-detail-prose img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 4px;
+  margin: 0.4em 0;
+}
+
+/* `:::{embed} <path>` rendered through the `/file` route: images and audio as
+   a captioned figure, everything else (PDF, HTML, text) in a fixed-height
+   scrolling iframe. An unresolvable path degrades to `.kbn-detail-embed-missing`
+   — the labelled placeholder, so report.html-style fibers still read cleanly. */
+.kbn-detail-embed-figure {
+  margin: 1.2em 0;
+}
+.kbn-detail-embed-img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: 5px;
+  border: 1px solid rgba(27, 22, 17, 0.12);
+}
+.kbn-detail-embed-audio { display: block; width: 100%; }
+.kbn-detail-embed-figure figcaption {
+  margin-top: 0.45em;
+  font-size: 0.82em;
+  font-style: italic;
+  color: #9A8F80;
+}
+.kbn-detail-embed-frame {
+  margin: 1.2em 0;
+  border: 1px solid rgba(27, 22, 17, 0.16);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--porch-rag, #FBF6E9);
+}
+.kbn-detail-embed-frame iframe {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+/* A full-length HTML embed (report.html with no pinned `:height:`): the frame
+   carries no fixed height — autosizeEmbeds (FiberDetailModal.ts) measures the
+   same-origin doc on load and sets an explicit px height so it reads as part of
+   the page with no nested scrollbar. `min-height` is the pre-load / cross-origin
+   fallback; `overflow: visible` keeps the grown iframe from being clipped. */
+.kbn-detail-embed-autosize {
+  overflow: visible;
+  min-height: 240px;
+}
+.kbn-detail-embed-autosize iframe {
+  height: auto;
+  min-height: 240px;
+}
+
+/* Placeholder for an embed whose path couldn't be resolved (relative path on a
+   fiber whose dir didn't reach the client, or a bad path). */
+.kbn-detail-embed {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.55em;
+  margin: 1.1em 0;
+  padding: 0.8em 1em;
+  background: rgba(46, 42, 38, 0.04);
+  border: 1px dashed rgba(27, 22, 17, 0.22);
+  border-radius: 6px;
+}
+.kbn-detail-embed-glyph { color: var(--porch-verdigris, #2f7d6f); font-size: 1.05em; }
+.kbn-detail-embed code {
+  font-family: var(--font-mono, 'IBM Plex Mono', monospace);
+  font-size: 0.86em;
+  color: #2E2A26;
+}
+.kbn-detail-embed-note {
+  font-size: 0.8em;
+  font-style: italic;
+  color: #9A8F80;
+}
+
+/* ── Sent files strip ─────────────────────────────────────────────────── */
+/* The deliverable trail between the controls cluster and the page pane.
+   Hidden until /sent-files returns entries (see buildSentFiles). */
+.kbn-detail-sent {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 10px 16px 12px;
+  border-top: 1px solid rgba(27, 22, 17, 0.08);
+  /* A faint warm shelf of vellum the deliverables rest on, lit from above by a
+     hairline highlight so the strip reads as its own band of the page. */
+  background:
+    linear-gradient(rgba(255, 251, 237, 0.5), transparent 12px),
+    rgba(154, 123, 53, 0.055);
+  box-shadow: inset 0 1px 0 rgba(255, 251, 237, 0.55);
+  /* The launcher can hold many entries on a long-running card; cap its height
+     and let it scroll so it never pushes the body off-screen. */
+  max-height: 30cqh;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(154, 123, 53, 0.3) transparent;
+}
+.kbn-detail-sent-empty {
+  display: none;
+}
+.kbn-detail-sent-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 9.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #9A7B35;
+}
+/* A short gilt rule after the label — the manuscript section mark. */
+.kbn-detail-sent-heading::after {
+  content: "";
+  flex: 1 1 auto;
+  height: 1px;
+  background: linear-gradient(90deg, rgba(154, 123, 53, 0.28), transparent 70%);
+}
+.kbn-detail-sent-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 7px;
+}
+/* A deliverable ticket: a small tactile chip that lifts on hover and fills with
+   ochre when its file is open in the accordion. */
+.kbn-detail-sent-file {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 7px;
+  max-width: 100%;
+  padding: 3px 9px 4px;
+  border: 1px solid rgba(154, 123, 53, 0.32);
+  border-radius: 4px;
+  background:
+    linear-gradient(rgba(255, 251, 237, 0.85), rgba(255, 251, 237, 0.55));
+  box-shadow:
+    0 1px 0 rgba(255, 251, 237, 0.7) inset,
+    0 1px 2px rgba(27, 22, 17, 0.05);
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 11px;
+  color: #4A443C;
+  cursor: pointer;
+  transition: border-color 0.14s ease, background 0.14s ease, box-shadow 0.14s ease, transform 0.12s ease, color 0.14s ease;
+}
+.kbn-detail-sent-file:hover {
+  border-color: rgba(154, 123, 53, 0.62);
+  background: linear-gradient(#FFFDF6, rgba(255, 251, 237, 0.85));
+  box-shadow:
+    0 1px 0 rgba(255, 251, 237, 0.85) inset,
+    0 3px 7px -2px rgba(27, 22, 17, 0.18);
+  transform: translateY(-1px);
+  color: #2E2A26;
+}
+.kbn-detail-sent-file:active {
+  transform: translateY(0);
+  box-shadow:
+    0 1px 0 rgba(255, 251, 237, 0.6) inset,
+    0 1px 2px rgba(27, 22, 17, 0.06);
+}
+.kbn-detail-sent-file:focus-visible {
+  outline: 2px solid rgba(154, 123, 53, 0.5);
+  outline-offset: 1px;
+}
+/* An entry whose file is open in the right-column accordion: a filled ochre
+   ticket with a leading gilt bead, so the launcher mirrors what's on screen at
+   a glance. */
+.kbn-detail-sent-file-open {
+  border-color: var(--porch-ochre, #C2963B);
+  background: linear-gradient(rgba(196, 147, 51, 0.22), rgba(196, 147, 51, 0.14));
+  color: #5e4a1f;
+  box-shadow:
+    0 1px 0 rgba(255, 251, 237, 0.5) inset,
+    0 1px 2px rgba(27, 22, 17, 0.05);
+}
+.kbn-detail-sent-file-open:hover {
+  border-color: var(--porch-ochre, #C2963B);
+  background: linear-gradient(rgba(196, 147, 51, 0.3), rgba(196, 147, 51, 0.18));
+  color: #4a3a16;
+}
+.kbn-detail-sent-name {
+  position: relative;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The open ticket grows a gilt bead before its name. */
+.kbn-detail-sent-file-open .kbn-detail-sent-name {
+  padding-left: 12px;
+}
+.kbn-detail-sent-file-open .kbn-detail-sent-name::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--porch-ochre, #C2963B);
+  box-shadow: 0 0 0 1px rgba(110, 85, 38, 0.25);
+}
+.kbn-detail-sent-when {
+  flex-shrink: 0;
+  font-size: 9.5px;
+  letter-spacing: 0.02em;
+  color: #9A8F80;
+}
+.kbn-detail-sent-file-open .kbn-detail-sent-when {
+  color: #8a7a4a;
+}
