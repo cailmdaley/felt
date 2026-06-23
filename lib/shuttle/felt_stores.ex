@@ -1,20 +1,22 @@
 defmodule Shuttle.FeltStores do
   @moduledoc """
-  Reads and persists Shuttle's configured felt-store list.
+  Reads and persists felt's configured store list.
 
   Resolution order:
 
-    1. `LOOM_HOMES` (comma-separated)
-    2. persisted `~/.shuttle/felt_stores.json`
-    3. `LOOM_HOME`
-    4. `~/loom`
+    1. `FELT_STORES` env (comma-separated)
+    2. persisted registry `~/.config/felt/stores.json`
 
-  The persisted file stores only explicitly-registered hosts. Saving an empty
-  list deletes the file so the default single-host fallback remains `~/loom`.
+  The registry is the source of truth — there is no implicit default store. An
+  empty env *and* an empty/absent registry resolve to `[]`; register a store
+  explicitly. Saving an empty list deletes the registry file. A one-time read
+  shim still falls back to the legacy `~/.shuttle/felt_stores.json` on a host not
+  yet migrated off the old location; writes always target the new path.
   """
 
-  @config_env "SHUTTLE_FELT_STORES_FILE"
-  @default_config_path "~/.shuttle/felt_stores.json"
+  @config_env "FELT_STORES_FILE"
+  @default_config_path "~/.config/felt/stores.json"
+  @legacy_config_path "~/.shuttle/felt_stores.json"
 
   @type host_list :: [String.t()]
 
@@ -46,14 +48,8 @@ defmodule Shuttle.FeltStores do
 
   defp base_hosts do
     case env_hosts() do
-      [_ | _] = hosts ->
-        hosts
-
-      [] ->
-        case registered_hosts() do
-          [_ | _] = hosts -> hosts
-          [] -> [default_host()]
-        end
+      [_ | _] = hosts -> hosts
+      [] -> registered_hosts()
     end
   end
 
@@ -342,7 +338,7 @@ defmodule Shuttle.FeltStores do
 
   @spec registered_hosts() :: host_list()
   def registered_hosts do
-    path = config_path()
+    path = read_config_path()
 
     with true <- File.exists?(path),
          {:ok, content} <- File.read(path),
@@ -384,14 +380,6 @@ defmodule Shuttle.FeltStores do
     end
   end
 
-  @spec default_host() :: String.t()
-  def default_host do
-    case System.get_env("LOOM_HOME") do
-      v when is_binary(v) and v != "" -> Path.expand(v)
-      _ -> Path.join(System.user_home(), "loom")
-    end
-  end
-
   @spec config_path() :: String.t()
   def config_path do
     case System.get_env(@config_env) do
@@ -400,9 +388,31 @@ defmodule Shuttle.FeltStores do
     end
   end
 
+  # The registry path to READ from: the configured/new path when it exists, else
+  # the legacy `~/.shuttle/felt_stores.json` as a one-time shim for a host not yet
+  # migrated off the old shuttle-named location. Writes always target config_path/0,
+  # so the next `save/1` migrates the host onto the new path.
+  defp read_config_path do
+    primary = config_path()
+    legacy = Path.expand(@legacy_config_path)
+
+    cond do
+      File.exists?(primary) ->
+        primary
+
+      # Legacy fallback only when the path isn't explicitly overridden — an
+      # explicit FELT_STORES_FILE is honored verbatim (parity with the Go reader).
+      System.get_env(@config_env) in [nil, ""] and File.exists?(legacy) ->
+        legacy
+
+      true ->
+        primary
+    end
+  end
+
   @spec env_hosts() :: host_list()
   def env_hosts do
-    case System.get_env("LOOM_HOMES") do
+    case System.get_env("FELT_STORES") do
       v when is_binary(v) and v != "" ->
         v
         |> String.split(",")

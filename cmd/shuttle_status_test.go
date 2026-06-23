@@ -240,7 +240,7 @@ func TestListShuttleFibersAcrossStores_DedupsByUID(t *testing.T) {
 	dirA, storageA := newShuttleStore(t)
 	dirB, storageB := newShuttleStore(t)
 	// Same fiber reachable from two stores (same intrinsic uid, different slug) —
-	// the ~/loom-aggregate-plus-project-canonical case. Must collapse to one.
+	// the aggregate-plus-project-canonical case. Must collapse to one.
 	seedShuttleRoleUID(t, storageA, "ai-futures/shared", "01SHAREDUID0000000000000001", felt.StatusActive, oneshot())
 	seedShuttleRoleUID(t, storageB, "shared", "01SHAREDUID0000000000000001", felt.StatusActive, oneshot())
 	// A distinct fiber only in store B.
@@ -275,25 +275,25 @@ func TestShuttleStores_Precedence(t *testing.T) {
 		t.Fatalf("with -C, shuttleStores = %v (%v), want [%s]", got, err, dir)
 	}
 
-	// No -C: LOOM_HOMES wins over the registry file.
+	// No -C: FELT_STORES wins over the registry file.
 	changeDir = ""
-	t.Setenv("LOOM_HOMES", "/store/a,/store/b,/store/a")
-	t.Setenv("SHUTTLE_FELT_STORES_FILE", "/nonexistent/should/be/ignored.json")
+	t.Setenv("FELT_STORES", "/store/a,/store/b,/store/a")
+	t.Setenv("FELT_STORES_FILE", "/nonexistent/should/be/ignored.json")
 	got, err = shuttleStores()
 	if err != nil {
 		t.Fatalf("shuttleStores: %v", err)
 	}
 	if len(got) != 2 || got[0] != "/store/a" || got[1] != "/store/b" {
-		t.Fatalf("LOOM_HOMES should win, deduped+ordered: got %v", got)
+		t.Fatalf("FELT_STORES should win, deduped+ordered: got %v", got)
 	}
 
-	// No LOOM_HOMES: the registry file is consulted.
-	t.Setenv("LOOM_HOMES", "")
+	// No FELT_STORES: the registry file is consulted.
+	t.Setenv("FELT_STORES", "")
 	regPath := dir + "/felt_stores.json"
 	if err := os.WriteFile(regPath, []byte(`{"version":1,"felt_stores":["/reg/x","/reg/y"]}`), 0o644); err != nil {
 		t.Fatalf("write registry: %v", err)
 	}
-	t.Setenv("SHUTTLE_FELT_STORES_FILE", regPath)
+	t.Setenv("FELT_STORES_FILE", regPath)
 	got, err = shuttleStores()
 	if err != nil {
 		t.Fatalf("shuttleStores: %v", err)
@@ -305,7 +305,7 @@ func TestShuttleStores_Precedence(t *testing.T) {
 
 // TestShuttleAddressFiber_FromAnywhere locks in the cwd-insensitive resolution
 // the address verbs need: with no -C, they resolve against the configured stores
-// (here LOOM_HOMES), by leaf and by full id, regardless of cwd — the parity
+// (here FELT_STORES), by leaf and by full id, regardless of cwd — the parity
 // behavior shuttle-ctl had and a naive resolveProjectRoot port lost.
 func TestShuttleAddressFiber_FromAnywhere(t *testing.T) {
 	dir, storage := newShuttleStore(t)
@@ -314,7 +314,7 @@ func TestShuttleAddressFiber_FromAnywhere(t *testing.T) {
 	prevCD := changeDir
 	t.Cleanup(func() { changeDir = prevCD })
 	changeDir = "" // no -C: must fall through to the configured stores
-	t.Setenv("LOOM_HOMES", dir)
+	t.Setenv("FELT_STORES", dir)
 
 	for _, q := range []string{"task", "proj/deep/task"} {
 		f, err := shuttleAddressFiber(q)
@@ -338,7 +338,7 @@ func TestShuttleAddressFiber_FromAnywhere(t *testing.T) {
 // a symlinked substore must report its NEAREST-.felt (dispatch-canonical) id, not
 // the outer-aggregate id felt's walk assigns — so a status fiber_id matches the
 // daemon (which polls the project store directly) and round-trips into a write
-// verb. Mirrors the live ~/loom/.felt/<x>/lightcone -> project-store topology.
+// verb. Mirrors the live aggregate .felt/<x>/lightcone -> project-store topology.
 func TestCanonicalFiberID_SubstoreSymlink(t *testing.T) {
 	root := t.TempDir()
 	// Outer aggregate store.
@@ -355,7 +355,7 @@ func TestCanonicalFiberID_SubstoreSymlink(t *testing.T) {
 	seedShuttleRoleUID(t, proj, "tooling/the-task", "01SUBSTOREUID00000000000001", felt.StatusActive, oneshot())
 
 	// Mount the project's .felt as a symlinked substore under the aggregate, the
-	// way ~/loom mounts a project store.
+	// way the aggregate store mounts a project store.
 	linkParent := root + "/.felt/projx"
 	if err := os.MkdirAll(linkParent, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)

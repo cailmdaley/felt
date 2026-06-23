@@ -40,7 +40,7 @@
 #   FELT=<path>          override the felt binary (default: `felt` on PATH)
 #   SHUTTLE_E2E_PORT=<n> override the daemon port (default: 4071)
 #
-# SAFETY: an isolated SHUTTLE_DATA_DIR + a temp LOOM_HOMES + a private port keep
+# SAFETY: an isolated SHUTTLE_DATA_DIR + a temp FELT_STORES + a private port keep
 # this fully separate from any production daemon on :4000. All tmux sessions,
 # the daemon, and temp dirs are torn down on EXIT.
 set -uo pipefail
@@ -198,7 +198,7 @@ make_fiber probe-dirty dirty
 
 # ── 5. Start the daemon (isolated port / store / data dir / host) ────────────
 info "starting daemon on :$PORT (store=$STORE host=$HOST)"
-SHUTTLE_PORT="$PORT" LOOM_HOMES="$STORE" SHUTTLE_HOST="$HOST" SHUTTLE_DATA_DIR="$DATA" \
+SHUTTLE_PORT="$PORT" FELT_STORES="$STORE" SHUTTLE_HOST="$HOST" SHUTTLE_DATA_DIR="$DATA" \
   nohup "$DAEMON" start --force >"$DAEMON_LOG" 2>&1 &
 DAEMON_PID=$!
 

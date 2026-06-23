@@ -17,9 +17,9 @@ import (
 
 // shuttleAddressFiber resolves a single fiber for the from-anywhere address verbs.
 // It searches the configured stores cwd-insensitively — the -C / --felt-store
-// store when set, otherwise every configured store (LOOM_HOMES → registry →
-// ~/loom) until one resolves the query — matching shuttle-ctl's ~/loom default so
-// these verbs work from any directory. The scope is the whole store ("") rather
+// store when set, otherwise every configured store (FELT_STORES env → registry)
+// until one resolves the query, so these verbs work from any directory whenever a
+// store is configured. The scope is the whole store ("") rather
 // than the cwd subtree: an operator addressing a worker by id should not have
 // resolution depend on where they happen to stand.
 func shuttleAddressFiber(query string) (*felt.Felt, error) {

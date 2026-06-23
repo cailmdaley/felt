@@ -307,13 +307,13 @@ defmodule ShuttleWeb.APIControllerTest do
   end
 
   defp with_actions_host do
-    previous = System.get_env("LOOM_HOMES")
-    System.put_env("LOOM_HOMES", "/tmp")
+    previous = System.get_env("FELT_STORES")
+    System.put_env("FELT_STORES", "/tmp")
 
     on_exit(fn ->
       case previous do
-        nil -> System.delete_env("LOOM_HOMES")
-        value -> System.put_env("LOOM_HOMES", value)
+        nil -> System.delete_env("FELT_STORES")
+        value -> System.put_env("FELT_STORES", value)
       end
     end)
   end

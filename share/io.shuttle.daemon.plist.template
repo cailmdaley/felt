@@ -2,7 +2,7 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
   Shuttle daemon LaunchAgent. Generated from this template by
-  `make install-agent` (placeholders __SHUTTLE_DIR__ / __LOG__ / __LOOM_HOMES__
+  `make install-agent` (placeholders __SHUTTLE_DIR__ / __LOG__ / __FELT_STORES__
   are filled in). Do not load this template directly — it isn't a valid plist
   until installed.
 
@@ -49,16 +49,16 @@
         <key>PATH</key>
         <string>__PATH__</string>
         <!--
-          LOOM_HOMES scopes the daemon's felt polling to the loom store (~/loom,
-          outside ~/Documents), which aggregates every project's fibers under
-          prefixed ids and re-discovers each project's substores by following the
-          symlinks under ~/loom/.felt/. Keeps the daemon off TCC-protected paths.
+          FELT_STORES scopes the daemon's felt polling to the aggregate store
+          (~/loom, outside ~/Documents), which aggregates every project's fibers
+          under prefixed ids and re-discovers each project's substores by following
+          the symlinks under its .felt/. Keeps the daemon off TCC-protected paths.
           (Set in launchd env, not the login profile, since it's our scoping —
           the login shell inherits it across the `-l`.) Filled in by
-          `make install-agent` (placeholder __LOOM_HOMES__).
+          `make install-agent` (placeholder __FELT_STORES__).
         -->
-        <key>LOOM_HOMES</key>
-        <string>__LOOM_HOMES__</string>
+        <key>FELT_STORES</key>
+        <string>__FELT_STORES__</string>
         <!--
           SSH_AUTH_SOCK points at the user's PERSISTENT login ssh-agent (default
           ~/.ssh/agent.sock), NOT launchd's per-session Keychain agent. This is

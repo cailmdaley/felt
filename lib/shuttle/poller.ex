@@ -10,14 +10,14 @@ defmodule Shuttle.Poller do
 
   The Poller manages one or more felt stores on the same machine. Configure via:
 
-      config :shuttle, felt_stores: ["~/loom", "~/other-project"]
+      config :shuttle, felt_stores: ["~/some-store", "~/other-project"]
       # or env var (comma-separated, takes precedence over the persisted file):
-      LOOM_HOMES=~/loom,~/other-project
+      FELT_STORES=~/some-store,~/other-project
       # or persisted registration written through the HTTP API:
-      ~/.shuttle/felt_stores.json
+      ~/.config/felt/stores.json
 
-  Single-host setups (the common case) are unchanged: when no explicit hosts
-  are configured, Shuttle falls back to `[LOOM_HOME || ~/loom]`.
+  The registry is the source of truth: when no env or config hosts are set, the
+  configured list comes straight from the registry (empty if none registered).
 
   Each fiber resolves to exactly one host: the first configured host whose
   `.felt/` directory contains the fiber file. The resolution is cached in
@@ -611,16 +611,21 @@ defmodule Shuttle.Poller do
   end
 
   def handle_call({:capture, yap, opts}, _from, state) do
-    felt_store = Keyword.get(opts, :felt_store) || hd(state.felt_stores)
+    felt_store = Keyword.get(opts, :felt_store) || List.first(state.felt_stores)
 
-    # Guard rather than fetch!: a malformed call must fail the request, not
-    # crash the Poller (and its in-memory running map) with it.
+    # Guard rather than fetch!: a malformed call (or no configured store) must
+    # fail the request, not crash the Poller (and its in-memory running map).
     work_dir = Keyword.get(opts, :work_dir)
 
-    if not (is_binary(work_dir) and work_dir != "") do
-      {:reply, {:error, :work_dir_required}, state}
-    else
-      do_capture(state, yap, work_dir, felt_store, opts)
+    cond do
+      not (is_binary(work_dir) and work_dir != "") ->
+        {:reply, {:error, :work_dir_required}, state}
+
+      not is_binary(felt_store) ->
+        {:reply, {:error, :no_felt_stores}, state}
+
+      true ->
+        do_capture(state, yap, work_dir, felt_store, opts)
     end
   end
 
@@ -1712,7 +1717,7 @@ defmodule Shuttle.Poller do
     fallback_host =
       case host_for_fiber(fiber_id, state) do
         {:ok, h} -> h
-        {:error, _} -> hd(state.felt_stores)
+        {:error, _} -> List.first(state.felt_stores)
       end
 
     with {:ok, shuttle} <- fetch_shuttle_block(fiber_id, state),
@@ -1823,7 +1828,7 @@ defmodule Shuttle.Poller do
     felt_store =
       case host_for_fiber(fiber_id, state) do
         {:ok, h} -> h
-        {:error, _} -> hd(state.felt_stores)
+        {:error, _} -> List.first(state.felt_stores)
       end
 
     prompt_context = dispatch_prompt_context(fiber, state, opts)
@@ -2050,7 +2055,7 @@ defmodule Shuttle.Poller do
     felt_store =
       case host_for_fiber(fiber_id, state) do
         {:ok, h} -> h
-        {:error, _} -> hd(state.felt_stores)
+        {:error, _} -> List.first(state.felt_stores)
       end
 
     Shuttle.Continuation.write_dispatch(state.runner, felt_store, fiber_id, %{
@@ -2497,7 +2502,7 @@ defmodule Shuttle.Poller do
     felt_store =
       case host_for_fiber(fiber_id, state) do
         {:ok, h} -> h
-        {:error, _} -> hd(state.felt_stores)
+        {:error, _} -> List.first(state.felt_stores)
       end
 
     # 1. Clean-exit marker — daemon-side, no worker spawned, no transcript
@@ -2576,7 +2581,7 @@ defmodule Shuttle.Poller do
     host =
       case host_for_fiber(fiber_id, state) do
         {:ok, h} -> h
-        {:error, _} -> hd(state.felt_stores)
+        {:error, _} -> List.first(state.felt_stores)
       end
 
     case run_felt(host, state.runner, ["show", fiber_id, "--json"]) do
@@ -2668,6 +2673,10 @@ defmodule Shuttle.Poller do
   # path names the actual fault — typically a felt-store path that doesn't
   # exist on this machine (a foreign absolute path registered by another
   # host's portolan).
+  # No configured store to route through (empty registry) — fail soft rather than
+  # crash the `is_binary(host)` clause with a FunctionClauseError.
+  defp run_felt(nil, _runner, _args), do: {:error, :no_felt_store}
+
   defp run_felt(host, runner, args) when is_binary(host) do
     opts = [cd: host, stderr_to_stdout: true]
 
@@ -2732,8 +2741,8 @@ defmodule Shuttle.Poller do
 
   # Returns the configured felt stores list.
   #
-  # Resolution order lives in `Shuttle.FeltStores`: `LOOM_HOMES` → persisted
-  # `~/.shuttle/felt_stores.json` → `LOOM_HOME` → `~/loom`.
+  # Resolution order lives in `Shuttle.FeltStores`: `FELT_STORES` env → persisted
+  # registry `~/.config/felt/stores.json` (else `[]`).
   #
   # This is the default-fallback only; explicit :felt_stores opts in start_link
   # take precedence via init/1 (and disable the per-poll refresh in that case).

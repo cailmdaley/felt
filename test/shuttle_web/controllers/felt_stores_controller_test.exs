@@ -6,7 +6,7 @@ defmodule ShuttleWeb.FeltStoresControllerTest do
   @endpoint ShuttleWeb.Endpoint
 
   setup do
-    original = System.get_env("SHUTTLE_FELT_STORES_FILE")
+    original = System.get_env("FELT_STORES_FILE")
 
     path =
       Path.join(
@@ -14,14 +14,14 @@ defmodule ShuttleWeb.FeltStoresControllerTest do
         "shuttle-felt-stores-controller-#{System.unique_integer([:positive])}.json"
       )
 
-    System.put_env("SHUTTLE_FELT_STORES_FILE", path)
+    System.put_env("FELT_STORES_FILE", path)
 
     on_exit(fn ->
       File.rm(path)
 
       case original do
-        nil -> System.delete_env("SHUTTLE_FELT_STORES_FILE")
-        value -> System.put_env("SHUTTLE_FELT_STORES_FILE", value)
+        nil -> System.delete_env("FELT_STORES_FILE")
+        value -> System.put_env("FELT_STORES_FILE", value)
       end
     end)
 
@@ -47,14 +47,14 @@ defmodule ShuttleWeb.FeltStoresControllerTest do
     assert body["ok"] == true
     assert body["felt_stores"] == [Path.expand("~/loom"), "/tmp/project"]
 
-    {:ok, persisted} = File.read(Path.expand(System.get_env("SHUTTLE_FELT_STORES_FILE")))
+    {:ok, persisted} = File.read(Path.expand(System.get_env("FELT_STORES_FILE")))
     decoded = Jason.decode!(persisted)
     assert decoded["felt_stores"] == [Path.expand("~/loom"), "/tmp/project"]
     assert decoded["version"] == 1
   end
 
   test "empty list clears the persisted file" do
-    path = Path.expand(System.get_env("SHUTTLE_FELT_STORES_FILE"))
+    path = Path.expand(System.get_env("FELT_STORES_FILE"))
     File.mkdir_p!(Path.dirname(path))
     File.write!(path, Jason.encode!(%{"version" => 1, "felt_stores" => ["/tmp/stale"]}))
 

@@ -57,8 +57,8 @@ var statusCmd = &cobra.Command{
 	Short: "One-line-per-fiber status overview",
 	Long: `Prints one line per fiber that carries a shuttle: facet, across the felt
 stores this machine dispatches (the -C / --felt-store store when set, otherwise
-the configured stores: LOOM_HOMES, the ~/.shuttle/felt_stores.json registry, then
-~/loom). Liveness is read from tmux.
+the configured stores: FELT_STORES env, then the ~/.config/felt/stores.json
+registry). Liveness is read from tmux.
 
 Columns: fiber_id  kind  state  next_due_at  agent
 
@@ -203,7 +203,7 @@ var psCmd = &cobra.Command{
 // listShuttleFibersAcrossStores walks each store in-process and merges the
 // shuttle-bearing fibers, deduplicating by intrinsic identity (UID, falling back
 // to the symlink-resolved path) — the same fiber is reachable from both the
-// ~/loom aggregate and its project-canonical store, so a cross-store walk would
+// aggregate store and its project-canonical store, so a cross-store walk would
 // otherwise double-count it. A per-store failure is non-fatal: log to stderr and
 // continue, matching the daemon's best-effort per-store scan; only an all-stores
 // failure surfaces an error.

@@ -82,11 +82,11 @@ defmodule ShuttleWeb.LifecycleControllerTest do
     File.write!(Path.join(fiber_dir, "outcome-edit.md"), "---\nname: Outcome edit\n---\n\n")
 
     args_file = install_fake_felt!()
-    old_loom_homes = System.get_env("LOOM_HOMES")
-    System.put_env("LOOM_HOMES", store)
+    old_loom_homes = System.get_env("FELT_STORES")
+    System.put_env("FELT_STORES", store)
 
     on_exit(fn ->
-      restore_env("LOOM_HOMES", old_loom_homes)
+      restore_env("FELT_STORES", old_loom_homes)
       File.rm_rf(root)
     end)
 
@@ -124,11 +124,11 @@ defmodule ShuttleWeb.LifecycleControllerTest do
     File.write!(Path.join(fiber_dir, "axes-edit.md"), "---\nname: Axes edit\n---\n\n")
 
     args_file = install_fake_felt!()
-    old_loom_homes = System.get_env("LOOM_HOMES")
-    System.put_env("LOOM_HOMES", store)
+    old_loom_homes = System.get_env("FELT_STORES")
+    System.put_env("FELT_STORES", store)
 
     on_exit(fn ->
-      restore_env("LOOM_HOMES", old_loom_homes)
+      restore_env("FELT_STORES", old_loom_homes)
       File.rm_rf(root)
     end)
 
@@ -183,7 +183,7 @@ defmodule ShuttleWeb.LifecycleControllerTest do
     Body.
     """)
 
-    with_env(%{"LOOM_HOMES" => store}, fn ->
+    with_env(%{"FELT_STORES" => store}, fn ->
       conn =
         post(
           api_conn(),
@@ -246,7 +246,7 @@ defmodule ShuttleWeb.LifecycleControllerTest do
     Body.
     """)
 
-    with_env(%{"LOOM_HOMES" => store}, fn ->
+    with_env(%{"FELT_STORES" => store}, fn ->
       conn =
         post(
           api_conn(),
@@ -298,7 +298,7 @@ defmodule ShuttleWeb.LifecycleControllerTest do
     Body.
     """)
 
-    with_env(%{"LOOM_HOMES" => store}, fn ->
+    with_env(%{"FELT_STORES" => store}, fn ->
       conn =
         post(
           api_conn(),
@@ -355,7 +355,7 @@ defmodule ShuttleWeb.LifecycleControllerTest do
     Body.
     """)
 
-    with_env(%{"LOOM_HOMES" => store}, fn ->
+    with_env(%{"FELT_STORES" => store}, fn ->
       conn =
         post(
           api_conn(),
@@ -404,7 +404,7 @@ defmodule ShuttleWeb.LifecycleControllerTest do
     Body.
     """)
 
-    with_env(%{"LOOM_HOMES" => store}, fn ->
+    with_env(%{"FELT_STORES" => store}, fn ->
       conn =
         post(
           api_conn(),

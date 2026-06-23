@@ -49,14 +49,14 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
     store = Path.join(root, "loom")
     File.mkdir_p!(store)
 
-    old_loom_homes = System.get_env("LOOM_HOMES")
+    old_loom_homes = System.get_env("FELT_STORES")
     old_shuttle_host = System.get_env("SHUTTLE_HOST")
 
-    System.put_env("LOOM_HOMES", store)
+    System.put_env("FELT_STORES", store)
     System.put_env("SHUTTLE_HOST", "test-host")
 
     on_exit(fn ->
-      restore_env("LOOM_HOMES", old_loom_homes)
+      restore_env("FELT_STORES", old_loom_homes)
       restore_env("SHUTTLE_HOST", old_shuttle_host)
       File.rm_rf(root)
     end)

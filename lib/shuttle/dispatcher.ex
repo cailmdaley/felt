@@ -228,11 +228,9 @@ defmodule Shuttle.Dispatcher do
   Mirrors `Shuttle.FeltStores.configured_hosts/0` and keeps `Dispatcher`
   working standalone (e.g. via the CLI) without a running Poller.
   """
-  @spec default_felt_store() :: String.t()
+  @spec default_felt_store() :: String.t() | nil
   def default_felt_store do
-    Shuttle.FeltStores.configured_hosts()
-    |> List.first()
-    |> Kernel.||(System.user_home() <> "/loom")
+    Shuttle.FeltStores.configured_hosts() |> List.first()
   end
 
   @doc """
@@ -809,11 +807,16 @@ defmodule Shuttle.Dispatcher do
       {:ok, output} ->
         decode_fiber(output)
 
-      {:error, _} ->
+      # Retry inside the resolved store — but only when there IS one. With an
+      # empty registry `felt_store` is nil, and `System.cmd(cd: nil)` would raise.
+      {:error, _} when is_binary(felt_store) ->
         case run_felt(runner, ["show", fiber_id, "--json"], cd: felt_store) do
           {:ok, output} -> decode_fiber(output)
           {:error, _} -> {:error, :not_found}
         end
+
+      {:error, _} ->
+        {:error, :not_found}
     end
   end
 
@@ -853,6 +856,11 @@ defmodule Shuttle.Dispatcher do
   # spawn; we just log the sticky-column risk loudly so it doesn't go silent
   # the way the prior "frontend orchestrates transition" path did.
   defp maybe_reopen_on_force(_fiber_id, _fiber, false, _runner, _felt_store), do: :ok
+
+  defp maybe_reopen_on_force(fiber_id, _fiber, true, _runner, nil) do
+    Logger.warning("Force-dispatch reopen skipped for #{fiber_id}: no felt store configured")
+    :ok
+  end
 
   defp maybe_reopen_on_force(fiber_id, fiber, true, runner, felt_store) do
     if already_clean?(fiber) do

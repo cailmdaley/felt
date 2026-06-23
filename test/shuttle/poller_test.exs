@@ -1269,16 +1269,16 @@ defmodule Shuttle.PollerTest do
     # it active-but-dead; reverting filter_eligible's guard re-arms the loop.
     #
     # The exit handler routes through felt (LifecycleStore → FeltStores.resolve_
-    # fiber), so the mock fiber must be felt-resolvable: point LOOM_HOMES at the
+    # fiber), so the mock fiber must be felt-resolvable: point FELT_STORES at the
     # mock store the factory wrote to (/private/tmp/.felt). Without this a
     # park regression would silently no-op — masking whether the gate even fired.
-    prev_loom = System.get_env("LOOM_HOMES")
-    System.put_env("LOOM_HOMES", "/private/tmp")
+    prev_loom = System.get_env("FELT_STORES")
+    System.put_env("FELT_STORES", "/private/tmp")
 
     on_exit(fn ->
       if prev_loom,
-        do: System.put_env("LOOM_HOMES", prev_loom),
-        else: System.delete_env("LOOM_HOMES")
+        do: System.put_env("FELT_STORES", prev_loom),
+        else: System.delete_env("FELT_STORES")
     end)
 
     fiber_id = "tests/pinned-exit-parks"
@@ -1330,13 +1330,13 @@ defmodule Shuttle.PollerTest do
     # The complement of the pinned carve-out: a STANDING (cron) worker's exit
     # still marks the role awaiting, so the cron does not re-fire it this cycle.
     # This is what guards the gate against being broadened to skip standing too.
-    prev_loom = System.get_env("LOOM_HOMES")
-    System.put_env("LOOM_HOMES", "/private/tmp")
+    prev_loom = System.get_env("FELT_STORES")
+    System.put_env("FELT_STORES", "/private/tmp")
 
     on_exit(fn ->
       if prev_loom,
-        do: System.put_env("LOOM_HOMES", prev_loom),
-        else: System.delete_env("LOOM_HOMES")
+        do: System.put_env("FELT_STORES", prev_loom),
+        else: System.delete_env("FELT_STORES")
     end)
 
     fiber_id = "tests/standing-exit-closes"
@@ -1705,11 +1705,11 @@ defmodule Shuttle.PollerTest do
   test "accept through the Poller re-arms the document and survives the next poll" do
     fiber_id = "tests/standing-accept-sticks"
 
-    previous_loom_homes = System.get_env("LOOM_HOMES")
-    System.put_env("LOOM_HOMES", "/tmp")
+    previous_loom_homes = System.get_env("FELT_STORES")
+    System.put_env("FELT_STORES", "/tmp")
 
     on_exit(fn ->
-      restore_env("LOOM_HOMES", previous_loom_homes)
+      restore_env("FELT_STORES", previous_loom_homes)
     end)
 
     # Awaiting is a document fact (status:closed + untempered). accept re-arms it
@@ -1757,11 +1757,11 @@ defmodule Shuttle.PollerTest do
     # the document is the single source of truth (slice 6), so the accept stands.
     fiber_id = "tests/standing-accept-during-poll"
 
-    previous_loom_homes = System.get_env("LOOM_HOMES")
-    System.put_env("LOOM_HOMES", "/tmp")
+    previous_loom_homes = System.get_env("FELT_STORES")
+    System.put_env("FELT_STORES", "/tmp")
 
     on_exit(fn ->
-      restore_env("LOOM_HOMES", previous_loom_homes)
+      restore_env("FELT_STORES", previous_loom_homes)
     end)
 
     # Awaiting is a document fact (status:closed + untempered).
@@ -2973,9 +2973,9 @@ defmodule Shuttle.PollerTest do
     # re-fired off the schedule mid-cycle.
     fiber_id = "tests/standing-dead-orphan"
 
-    previous_loom_homes = System.get_env("LOOM_HOMES")
-    System.put_env("LOOM_HOMES", "/tmp")
-    on_exit(fn -> restore_env("LOOM_HOMES", previous_loom_homes) end)
+    previous_loom_homes = System.get_env("FELT_STORES")
+    System.put_env("FELT_STORES", "/tmp")
+    on_exit(fn -> restore_env("FELT_STORES", previous_loom_homes) end)
 
     # A far-future schedule so the role is NOT cron-due — the only thing that
     # could touch it is the dead-orphan marker, not a scheduled dispatch.
@@ -3708,11 +3708,11 @@ defmodule Shuttle.PollerTest do
         "shuttle-felt-stores-poller-#{System.unique_integer([:positive])}.json"
       )
 
-    original_file = System.get_env("SHUTTLE_FELT_STORES_FILE")
-    original_homes = System.get_env("LOOM_HOMES")
+    original_file = System.get_env("FELT_STORES_FILE")
+    original_homes = System.get_env("FELT_STORES")
 
-    System.put_env("SHUTTLE_FELT_STORES_FILE", config_path)
-    System.delete_env("LOOM_HOMES")
+    System.put_env("FELT_STORES_FILE", config_path)
+    System.delete_env("FELT_STORES")
     File.mkdir_p!(Path.dirname(config_path))
 
     File.write!(
@@ -3724,13 +3724,13 @@ defmodule Shuttle.PollerTest do
       File.rm(config_path)
 
       case original_file do
-        nil -> System.delete_env("SHUTTLE_FELT_STORES_FILE")
-        value -> System.put_env("SHUTTLE_FELT_STORES_FILE", value)
+        nil -> System.delete_env("FELT_STORES_FILE")
+        value -> System.put_env("FELT_STORES_FILE", value)
       end
 
       case original_homes do
-        nil -> System.delete_env("LOOM_HOMES")
-        value -> System.put_env("LOOM_HOMES", value)
+        nil -> System.delete_env("FELT_STORES")
+        value -> System.put_env("FELT_STORES", value)
       end
     end)
 
@@ -3751,11 +3751,11 @@ defmodule Shuttle.PollerTest do
         "shuttle-felt-stores-refresh-#{System.unique_integer([:positive])}.json"
       )
 
-    original_file = System.get_env("SHUTTLE_FELT_STORES_FILE")
-    original_homes = System.get_env("LOOM_HOMES")
+    original_file = System.get_env("FELT_STORES_FILE")
+    original_homes = System.get_env("FELT_STORES")
 
-    System.put_env("SHUTTLE_FELT_STORES_FILE", config_path)
-    System.delete_env("LOOM_HOMES")
+    System.put_env("FELT_STORES_FILE", config_path)
+    System.delete_env("FELT_STORES")
     File.mkdir_p!(Path.dirname(config_path))
     File.write!(config_path, Jason.encode!(%{"version" => 1, "felt_stores" => ["/tmp/host-a"]}))
 
@@ -3763,13 +3763,13 @@ defmodule Shuttle.PollerTest do
       File.rm(config_path)
 
       case original_file do
-        nil -> System.delete_env("SHUTTLE_FELT_STORES_FILE")
-        value -> System.put_env("SHUTTLE_FELT_STORES_FILE", value)
+        nil -> System.delete_env("FELT_STORES_FILE")
+        value -> System.put_env("FELT_STORES_FILE", value)
       end
 
       case original_homes do
-        nil -> System.delete_env("LOOM_HOMES")
-        value -> System.put_env("LOOM_HOMES", value)
+        nil -> System.delete_env("FELT_STORES")
+        value -> System.put_env("FELT_STORES", value)
       end
     end)
 

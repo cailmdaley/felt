@@ -12,16 +12,16 @@ import (
 // single-fiber address verbs (session-name, attach). felt's note verbs always
 // operate on one store resolved from -C/cwd; the shuttle read surface needs more:
 // it must see every fiber the daemon would dispatch, from anywhere (e.g. `make
-// status` runs from the shuttle checkout, not a felt repo). So it mirrors
-// shuttle-ctl's FeltStores precedence — LOOM_HOMES → ~/.shuttle/felt_stores.json
-// registry → LOOM_HOME → ~/loom — ported here as the same surface the Elixir
-// poller reads. This is operational config (which stores exist on this machine),
-// not the felt data model; it stays isolated in the shuttle cmd layer.
+// status` runs from the felt checkout, not a felt repo). So it mirrors
+// Shuttle.FeltStores' precedence — FELT_STORES env → ~/.config/felt/stores.json
+// registry — ported here as the same surface the Elixir poller reads. This is
+// operational config (which stores exist on this machine), not the felt data
+// model; it stays isolated in the shuttle cmd layer.
 //
-// In production LOOM_HOMES is set (=~/loom on this Mac), so configuredFeltStores
-// resolves to the single loom aggregate, whose .felt/ symlinks felt's storage
-// follows into every project substore — one in-process walk covers everything.
-// The registry path is the fallback for a machine that does not set LOOM_HOMES.
+// The registry is the source of truth: when FELT_STORES is unset, configuredFeltStores
+// resolves to whatever the registry lists (empty when none registered). A registered
+// aggregate store whose .felt/ symlinks fan out into project substores is covered by
+// one in-process walk.
 
 // shuttleStores returns the felt stores the aggregate read verbs walk. With -C /
 // --felt-store set (changeDir, mapped by the group's PersistentPreRun), it is that
@@ -40,57 +40,36 @@ func shuttleStores() ([]string, error) {
 }
 
 // configuredFeltStores returns every felt store the dispatcher considers, mirroring
-// shuttle-ctl's schema.FeltStores (which mirrors Shuttle.FeltStores in the Elixir
-// daemon) so the felt CLI sees the same surface the poller does:
+// Shuttle.FeltStores in the Elixir daemon so the felt CLI sees the same surface the
+// poller does:
 //
-//  1. LOOM_HOMES env var (comma-separated; non-empty wins)
-//  2. ~/.shuttle/felt_stores.json (or $SHUTTLE_FELT_STORES_FILE) when present
-//  3. Single store from shuttleLoomHome (LOOM_HOME, then ~/loom)
+//  1. FELT_STORES env var (comma-separated; non-empty wins)
+//  2. the persisted registry ~/.config/felt/stores.json (or $FELT_STORES_FILE)
+//
+// The registry is the source of truth; an empty env and an empty/absent registry
+// resolve to no stores (callers handle the empty case).
 func configuredFeltStores() ([]string, error) {
-	if envStores := loomHomesEnv(); len(envStores) > 0 {
+	if envStores := feltStoresEnv(); len(envStores) > 0 {
 		return envStores, nil
 	}
-	if registered, err := registeredFeltStores(); err == nil && len(registered) > 0 {
-		return registered, nil
-	}
-	store, err := shuttleLoomHome()
-	if err != nil {
-		return nil, err
-	}
-	return []string{store}, nil
+	return registeredFeltStores()
 }
 
-// shuttleLoomHome returns the single default loom store: LOOM_HOME, then ~/loom.
-// It is the from-anywhere fallback for the shuttle verbs — where felt's note
-// verbs error outside a felt repo, the shuttle surface defaults to the loom
-// aggregate (shuttle-ctl's FeltStore behavior).
-func shuttleLoomHome() (string, error) {
-	if loom := os.Getenv("LOOM_HOME"); loom != "" {
-		return expandUserPath(loom)
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("resolving home directory: %w", err)
-	}
-	return filepath.Join(home, "loom"), nil
-}
-
-// loomHomesEnv parses LOOM_HOMES into a normalized store list, matching the
+// feltStoresEnv parses FELT_STORES into a normalized store list, matching the
 // Elixir reader's split-and-trim.
-func loomHomesEnv() []string {
-	raw := os.Getenv("LOOM_HOMES")
+func feltStoresEnv() []string {
+	raw := os.Getenv("FELT_STORES")
 	if raw == "" {
 		return nil
 	}
 	return normalizeFeltStores(strings.Split(raw, ","))
 }
 
-// registeredFeltStores reads the persisted ~/.shuttle/felt_stores.json (or
-// $SHUTTLE_FELT_STORES_FILE override) and returns its normalized store list. A
-// missing file or empty list returns an empty slice with no error — callers fall
-// back to the single loom default.
+// registeredFeltStores reads the persisted registry (~/.config/felt/stores.json,
+// or $FELT_STORES_FILE) and returns its normalized store list. A missing file or
+// empty list returns an empty slice with no error.
 func registeredFeltStores() ([]string, error) {
-	path, err := feltStoresRegistryPath()
+	path, err := feltStoresRegistryReadPath()
 	if err != nil {
 		return nil, err
 	}
@@ -118,15 +97,40 @@ func registeredFeltStores() ([]string, error) {
 	return nil, fmt.Errorf("parsing %s: unexpected shape", path)
 }
 
+// feltStoresRegistryPath is the canonical registry location for WRITES:
+// $FELT_STORES_FILE, else ~/.config/felt/stores.json.
 func feltStoresRegistryPath() (string, error) {
-	if env := os.Getenv("SHUTTLE_FELT_STORES_FILE"); env != "" {
+	if env := os.Getenv("FELT_STORES_FILE"); env != "" {
 		return expandUserPath(env)
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("resolving home directory: %w", err)
 	}
-	return filepath.Join(home, ".shuttle", "felt_stores.json"), nil
+	return filepath.Join(home, ".config", "felt", "stores.json"), nil
+}
+
+// feltStoresRegistryReadPath is the path to READ from: the canonical path when it
+// exists, else the legacy ~/.shuttle/felt_stores.json as a one-time shim for a host
+// not yet migrated off the old location. An explicit $FELT_STORES_FILE is honored
+// verbatim (no legacy fallback). Mirrors Shuttle.FeltStores.read_config_path/0.
+func feltStoresRegistryReadPath() (string, error) {
+	primary, err := feltStoresRegistryPath()
+	if err != nil {
+		return "", err
+	}
+	if _, err := os.Stat(primary); err == nil {
+		return primary, nil
+	}
+	if os.Getenv("FELT_STORES_FILE") == "" {
+		if home, herr := os.UserHomeDir(); herr == nil {
+			legacy := filepath.Join(home, ".shuttle", "felt_stores.json")
+			if _, serr := os.Stat(legacy); serr == nil {
+				return legacy, nil
+			}
+		}
+	}
+	return primary, nil
 }
 
 // normalizeFeltStores trims, drops empty, expands `~`, and deduplicates while
@@ -154,11 +158,11 @@ func normalizeFeltStores(stores []string) []string {
 
 // canonicalFiberID re-derives a fiber's dispatch-canonical id from its on-disk
 // markdown path: the id relative to the NEAREST enclosing .felt store, not the
-// outer ~/loom-aggregate namespace. This matters for fibers in symlinked
-// substores (e.g. ~/loom/.felt/<x>/lightcone -> a project's own .felt): felt's
-// aggregate walk names such a fiber by its full outer path (…/lightcone/foo),
-// but the daemon polls the project store DIRECTLY (it expands ~/loom's symlinks
-// into the real store roots) and so identifies — and dispatches, and routes
+// outer aggregate-store namespace. This matters for fibers in symlinked
+// substores (e.g. an aggregate's .felt/<x>/lightcone -> a project's own .felt):
+// felt's aggregate walk names such a fiber by its full outer path (…/lightcone/foo),
+// but the daemon polls the project store DIRECTLY (it expands the aggregate's
+// symlinks into the real store roots) and so identifies — and dispatches, and routes
 // write verbs by — the SUBSTORE id (lightcone/foo). shuttle-ctl re-canonicalized
 // the same way (schema.FiberRefFromPath); status/ps must too, or a status
 // fiber_id won't round-trip into a daemon-routed verb (and the Stage 3.4 shim

@@ -950,10 +950,10 @@ defmodule Shuttle.DispatchIntegrationTest do
 
     write_handoff_marker(host, "tests/standing-armed")
 
-    # mark_awaiting resolves the fiber through FeltStores (LOOM_HOMES), not the
+    # mark_awaiting resolves the fiber through FeltStores (FELT_STORES), not the
     # injected runner — point it at the temp store for the duration.
-    prev_loom = System.get_env("LOOM_HOMES")
-    System.put_env("LOOM_HOMES", host)
+    prev_loom = System.get_env("FELT_STORES")
+    System.put_env("FELT_STORES", host)
 
     try do
       {:ok, _poller} =
@@ -980,8 +980,8 @@ defmodule Shuttle.DispatchIntegrationTest do
       assert read_frontmatter(host, "tests/standing-armed")["status"] == "active"
     after
       if prev_loom,
-        do: System.put_env("LOOM_HOMES", prev_loom),
-        else: System.delete_env("LOOM_HOMES")
+        do: System.put_env("FELT_STORES", prev_loom),
+        else: System.delete_env("FELT_STORES")
     end
   end
 
@@ -1034,8 +1034,8 @@ defmodule Shuttle.DispatchIntegrationTest do
       if accept?, do: write_handoff_marker(host, "tests/#{slug}")
     end
 
-    prev_loom = System.get_env("LOOM_HOMES")
-    System.put_env("LOOM_HOMES", host)
+    prev_loom = System.get_env("FELT_STORES")
+    System.put_env("FELT_STORES", host)
 
     try do
       {:ok, _poller} =
@@ -1063,8 +1063,8 @@ defmodule Shuttle.DispatchIntegrationTest do
       refute Map.has_key?(fm, "closed-at")
     after
       if prev_loom,
-        do: System.put_env("LOOM_HOMES", prev_loom),
-        else: System.delete_env("LOOM_HOMES")
+        do: System.put_env("FELT_STORES", prev_loom),
+        else: System.delete_env("FELT_STORES")
     end
   end
 
@@ -1093,8 +1093,8 @@ defmodule Shuttle.DispatchIntegrationTest do
     A standing role awaiting review; the human clicks New session.
     """)
 
-    prev_loom = System.get_env("LOOM_HOMES")
-    System.put_env("LOOM_HOMES", host)
+    prev_loom = System.get_env("FELT_STORES")
+    System.put_env("FELT_STORES", host)
 
     try do
       {:ok, poller} =
@@ -1150,8 +1150,8 @@ defmodule Shuttle.DispatchIntegrationTest do
       refute Map.has_key?(entry.fiber, "tempered")
     after
       if prev_loom,
-        do: System.put_env("LOOM_HOMES", prev_loom),
-        else: System.delete_env("LOOM_HOMES")
+        do: System.put_env("FELT_STORES", prev_loom),
+        else: System.delete_env("FELT_STORES")
     end
   end
 
@@ -1185,8 +1185,8 @@ defmodule Shuttle.DispatchIntegrationTest do
     A standing role awaiting review; the human drags it to tempered (accept).
     """)
 
-    prev_loom = System.get_env("LOOM_HOMES")
-    System.put_env("LOOM_HOMES", host)
+    prev_loom = System.get_env("FELT_STORES")
+    System.put_env("FELT_STORES", host)
 
     try do
       {:ok, poller} =
@@ -1238,8 +1238,8 @@ defmodule Shuttle.DispatchIntegrationTest do
       assert read_frontmatter(host, "tests/standing-temper-rest")["status"] == "active"
     after
       if prev_loom,
-        do: System.put_env("LOOM_HOMES", prev_loom),
-        else: System.delete_env("LOOM_HOMES")
+        do: System.put_env("FELT_STORES", prev_loom),
+        else: System.delete_env("FELT_STORES")
     end
   end
 

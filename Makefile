@@ -26,10 +26,10 @@ LOG := $(HOME)/Library/Logs/shuttle.log
 PIDPATTERN := [b]in/shuttle -B .* -extra \.?/?bin/shuttle start
 AGENT_LABEL := io.shuttle.daemon
 AGENT_PLIST := $(HOME)/Library/LaunchAgents/$(AGENT_LABEL).plist
-# Felt stores the launchd daemon polls. Defaults to the loom aggregate (~/loom,
+# Felt stores the launchd daemon polls. Defaults to the aggregate store (~/loom,
 # outside ~/Documents) so the agent touches no TCC-protected path and needs no
-# Full Disk Access. Override to add stores: make install-agent AGENT_LOOM_HOMES=~/loom,/some/other
-AGENT_LOOM_HOMES ?= $(HOME)/loom
+# Full Disk Access. Override to add stores: make install-agent AGENT_FELT_STORES=~/loom,/some/other
+AGENT_FELT_STORES ?= $(HOME)/loom
 # The daemon's PATH, captured from a login shell at install time so it carries
 # Homebrew (escript/erl) and ~/.local/bin (felt), etc. — launchd's own env is
 # too bare, and sourcing the profile at runtime under launchd doesn't
@@ -145,7 +145,7 @@ install-agent: daemon stop
 	esac
 	@mkdir -p $(HOME)/Library/LaunchAgents
 	@sed -e 's#__SHUTTLE_DIR__#$(CURDIR)#g' -e 's#__LOG__#$(LOG)#g' \
-	  -e 's#__LOOM_HOMES__#$(AGENT_LOOM_HOMES)#g' -e 's#__PATH__#$(AGENT_PATH)#g' \
+	  -e 's#__FELT_STORES__#$(AGENT_FELT_STORES)#g' -e 's#__PATH__#$(AGENT_PATH)#g' \
 	  -e 's#__SSH_AUTH_SOCK__#$(AGENT_SSH_AUTH_SOCK)#g' \
 	  share/io.shuttle.daemon.plist.template > $(AGENT_PLIST)
 	@launchctl unload $(AGENT_PLIST) 2>/dev/null || true

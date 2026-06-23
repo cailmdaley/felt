@@ -20,11 +20,11 @@ defmodule ShuttleWeb.FeltEditControllerTest do
     )
 
     args_file = install_fake_felt!(root)
-    old_loom_homes = System.get_env("LOOM_HOMES")
-    System.put_env("LOOM_HOMES", store)
+    old_loom_homes = System.get_env("FELT_STORES")
+    System.put_env("FELT_STORES", store)
 
     on_exit(fn ->
-      restore_env("LOOM_HOMES", old_loom_homes)
+      restore_env("FELT_STORES", old_loom_homes)
       File.rm_rf(root)
     end)
 
@@ -62,11 +62,11 @@ defmodule ShuttleWeb.FeltEditControllerTest do
     )
 
     args_file = install_fake_felt!(root)
-    old_loom_homes = System.get_env("LOOM_HOMES")
-    System.put_env("LOOM_HOMES", store)
+    old_loom_homes = System.get_env("FELT_STORES")
+    System.put_env("FELT_STORES", store)
 
     on_exit(fn ->
-      restore_env("LOOM_HOMES", old_loom_homes)
+      restore_env("FELT_STORES", old_loom_homes)
       File.rm_rf(root)
     end)
 
@@ -108,11 +108,11 @@ defmodule ShuttleWeb.FeltEditControllerTest do
     )
 
     args_file = install_fake_felt!(root)
-    old_loom_homes = System.get_env("LOOM_HOMES")
-    System.put_env("LOOM_HOMES", store)
+    old_loom_homes = System.get_env("FELT_STORES")
+    System.put_env("FELT_STORES", store)
 
     on_exit(fn ->
-      restore_env("LOOM_HOMES", old_loom_homes)
+      restore_env("FELT_STORES", old_loom_homes)
       File.rm_rf(root)
     end)
 
