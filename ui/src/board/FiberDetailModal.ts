@@ -10,7 +10,7 @@ import {
   type PanelGeometry,
 } from './FloatingPanelChrome.js'
 import { buildFileViewer, basenameOf, isScrollableFile } from './FileViewerPanel.js'
-import { fileBytesUrl } from './utils.js'
+import { fileBytesUrl, showToast } from './utils.js'
 import './FiberDetailModal.css'
 
 /**
@@ -771,6 +771,20 @@ export class FiberDetailModal {
     tabs.setAttribute('role', 'tablist')
     this.tabStrip = tabs
 
+    // Download the active file to ~/Downloads — restores the save affordance the
+    // retired Portolan `:4004` route carried (⤓). Pinned right of the tabs, left
+    // of the close-all ✕; acts on whichever tab is active.
+    const winDownload = document.createElement('button')
+    winDownload.type = 'button'
+    winDownload.className = 'kbn-fileview-win-download'
+    winDownload.setAttribute('aria-label', 'Download file')
+    winDownload.title = 'Download to ~/Downloads'
+    winDownload.textContent = '⤓'
+    winDownload.addEventListener('click', (e) => {
+      e.stopPropagation()
+      void this.downloadActiveFile()
+    })
+
     const winClose = document.createElement('button')
     winClose.type = 'button'
     winClose.className = 'kbn-fileview-win-close'
@@ -783,7 +797,7 @@ export class FiberDetailModal {
       this.writePersist()
     })
 
-    bar.append(tabs, winClose)
+    bar.append(tabs, winDownload, winClose)
 
     const views = document.createElement('div')
     views.className = 'kbn-detail-views'
@@ -851,6 +865,41 @@ export class FiberDetailModal {
     this.openFiles = []
     this.activePath = null
     this.syncLauncherActiveState()
+  }
+
+  /** Download the active tab's file to the browser's download folder
+   *  (`~/Downloads` by default). The daemon's `/api/v1/file` route serves bytes
+   *  inline (no `Content-Disposition`), so we fetch them as a blob and trigger a
+   *  same-origin object-URL download — that way the chosen filename is always
+   *  honoured whether the bundle is daemon-served (same-origin) or dev-served
+   *  (cross-origin against `:4000`). Owner-routed by the card's `originId`, so a
+   *  remote-owned deliverable downloads through the same proxy the viewer uses. */
+  private async downloadActiveFile(): Promise<void> {
+    const entry = this.openFiles.find((e) => e.file.fullPath === this.activePath)
+    if (!entry || !this.card) return
+    const fullPath = entry.file.fullPath
+    const filename = basenameOf(fullPath)
+    const url = fileBytesUrl(this.shuttleBase, fullPath, this.card.originId)
+    try {
+      const res = await fetch(url)
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const blob = await res.blob()
+      const objUrl = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = objUrl
+      a.download = filename
+      document.body.append(a)
+      a.click()
+      a.remove()
+      // Defer the revoke past this tick: `a.click()` only *initiates* the
+      // download — the browser reads the blob from the object URL after the
+      // handler returns, so revoking synchronously races (and can zero-byte) a
+      // large download. Same "let the browser finish first" setTimeout(0)
+      // deferral used elsewhere on the board.
+      window.setTimeout(() => URL.revokeObjectURL(objUrl), 0)
+    } catch {
+      showToast(`Couldn't download ${filename}`, 'error')
+    }
   }
 
   /** Header-strip drag. Plain pointer drag — the header is dedicated chrome,

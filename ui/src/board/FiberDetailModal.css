@@ -617,6 +617,27 @@
   color: #8C3B2E;
   background: rgba(140, 59, 46, 0.1);
 }
+.kbn-fileview-win-download {
+  flex: 0 0 auto;
+  align-self: center;
+  width: 20px;
+  height: 20px;
+  margin-bottom: 3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: #7A7368;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 2px;
+}
+.kbn-fileview-win-download:hover {
+  color: #9A7B35;
+  background: rgba(154, 123, 53, 0.12);
+}
 
 /* ── Tab strip ────────────────────────────────────────────────────────────
    The row of manuscript index-tabs inside the chrome bar — one per open file,
