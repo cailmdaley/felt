@@ -174,6 +174,23 @@ The escript loads its BEAMs at boot, so editing Elixir source has zero effect on
 a running daemon until you restart. **`make restart` always** for daemon source
 edits — a restart without `make daemon` is a no-op for picking up edits.
 
+**Restarting the daemon does NOT end your session — common misconception, closed
+out.** A worker (including the Shuttle session reading this) runs in its own tmux
+session; the daemon only *watches* it (tmux owns the worker process — see
+"Deploying is ALWAYS safe" below). Bouncing the daemon cycles the watcher and
+rebinds `:4000`; every `shuttle-<id>` tmux session keeps running untouched and is
+re-adopted on boot. So an in-session worker can deploy its own fix and restart the
+daemon freely — never hold a restart because "there's a live session."
+
+**Restarting a launchd-managed daemon needs `launchctl`, not `make restart`.**
+After `make install-agent`, the daemon runs under launchd (`io.shuttle.daemon`)
+with an *absolute* `bin/shuttle` path. `make stop`'s `PIDPATTERN` only matches a
+relative-path shell launch, so against the launchd daemon `make restart` rebuilds
+the escript but its stop/start no-ops (start then hits "already running"). Bounce
+it with **`launchctl kickstart -k gui/$(id -u)/io.shuttle.daemon`** — KeepAlive
+respawns the rebuilt escript. (`make restart` is right only when the daemon was
+shell-started via `make start`.)
+
 ### Two install paths
 
 - **(a) Public end-user CLI install** — downloads a release binary:
