@@ -106,7 +106,7 @@ defmodule ShuttleWeb.LifecycleControllerTest do
     # The multi-line outcome rides as a single argv element (one `--outcome`
     # value), so the block scalar survives without stdin piping.
     assert File.read!(args_file) ==
-             "set-outcome\ntests/outcome-edit\n--outcome\nBlocked: waiting on ADS token\nsecond line\n"
+             "--felt-store\n#{store}\nset-outcome\ntests/outcome-edit\n--outcome\nBlocked: waiting on ADS token\nsecond line\n"
   end
 
   # set-agent composes base agent × effort × chrome in one validated write.
@@ -148,7 +148,80 @@ defmodule ShuttleWeb.LifecycleControllerTest do
     assert conn.status == 200
 
     assert File.read!(args_file) ==
-             "set-agent\ntests/axes-edit\nclaude-opus\n--effort\nxhigh\n--chrome=true\n"
+             "--felt-store\n#{store}\nset-agent\ntests/axes-edit\nclaude-opus\n--effort\nxhigh\n--chrome=true\n"
+  end
+
+  test "set-model shells felt shuttle in the resolved owning store" do
+    root =
+      System.tmp_dir!()
+      |> Path.join("shuttle-lifecycle-set-model-store-#{System.unique_integer([:positive])}")
+
+    store = Path.join(root, "loom")
+    fiber_dir = Path.join([store, ".felt", "science", "cmbx", "explorations", "spt-talk-push"])
+    File.mkdir_p!(fiber_dir)
+    File.write!(
+      Path.join(fiber_dir, "spt-talk-push.md"),
+      "---\nname: Road to the SPT Summer-2026 talk\nstatus: active\nshuttle:\n  kind: oneshot\n  host: cineca\n  agent: claude-opus\n---\n\n"
+    )
+
+    args_file = install_fake_felt!()
+
+    with_env(%{"FELT_STORES" => store}, fn ->
+      conn =
+        post(
+          api_conn(),
+          "/api/v1/lifecycle",
+          Jason.encode!(%{
+            "action" => "set-model",
+            "fiber" => "science/cmbx/explorations/spt-talk-push",
+            "agent" => "codex"
+          })
+        )
+
+      assert conn.status == 200
+
+      assert File.read!(args_file) ==
+               "--felt-store\n#{store}\nset-model\nscience/cmbx/explorations/spt-talk-push\ncodex\n"
+    end)
+
+    File.rm_rf(root)
+  end
+
+  test "command errors collapse duplicated cobra error lines" do
+    root =
+      System.tmp_dir!()
+      |> Path.join("shuttle-lifecycle-command-error-#{System.unique_integer([:positive])}")
+
+    store = Path.join(root, "loom")
+    fiber_dir = Path.join([store, ".felt", "science", "cmbx", "explorations", "spt-talk-push"])
+    File.mkdir_p!(fiber_dir)
+    File.write!(
+      Path.join(fiber_dir, "spt-talk-push.md"),
+      "---\nname: Road to the SPT Summer-2026 talk\nstatus: active\nshuttle:\n  kind: oneshot\n  host: cineca\n  agent: claude-opus\n---\n\n"
+    )
+
+    install_fake_felt!("""
+    printf 'Error: no felt found matching "science/cmbx/explorations/spt-talk-push"\\nno felt found matching "science/cmbx/explorations/spt-talk-push"\\n'
+    exit 1
+    """)
+
+    with_env(%{"FELT_STORES" => store}, fn ->
+      conn =
+        post(
+          api_conn(),
+          "/api/v1/lifecycle",
+          Jason.encode!(%{
+            "action" => "set-model",
+            "fiber" => "science/cmbx/explorations/spt-talk-push",
+            "agent" => "codex"
+          })
+        )
+
+      assert conn.status == 422
+      assert conn.resp_body == ~s(shuttle exited 1: no felt found matching "science/cmbx/explorations/spt-talk-push")
+    end)
+
+    File.rm_rf(root)
   end
 
   test "accept for standing roles re-arms from the doc and evicts runtime frontmatter" do
@@ -455,7 +528,7 @@ defmodule ShuttleWeb.LifecycleControllerTest do
   # `shuttle` subcommand (dropping it and logging the verb + flags the per-verb
   # assertions check) and delegates every other felt call to the real binary —
   # exactly the separation the old `shuttle-ctl`-named stub got for free.
-  defp install_fake_felt! do
+  defp install_fake_felt!(shuttle_body \\ nil) do
     dir =
       System.tmp_dir!()
       |> Path.join("shuttle-lifecycle-controller-#{System.unique_integer([:positive])}")
@@ -466,12 +539,18 @@ defmodule ShuttleWeb.LifecycleControllerTest do
     args_file = Path.join(dir, "args")
     real_felt = System.find_executable("felt") || "felt"
 
+    shuttle_body =
+      shuttle_body ||
+        """
+        shift  # drop the `shuttle` subcommand; log the verb + flags
+        printf '%s\\n' "$@" > "$FELT_SHUTTLE_ARGS_FILE"
+        printf 'ok\\n'
+        """
+
     File.write!(bin, """
     #!/bin/sh
     if [ "$1" = shuttle ]; then
-      shift  # drop the `shuttle` subcommand; log the verb + flags
-      printf '%s\\n' "$@" > "$FELT_SHUTTLE_ARGS_FILE"
-      printf 'ok\\n'
+      #{shuttle_body}
     else
       exec "#{real_felt}" "$@"   # store resolution etc. → the real felt
     fi

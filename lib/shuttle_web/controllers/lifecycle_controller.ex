@@ -79,10 +79,10 @@ defmodule ShuttleWeb.LifecycleController do
 
   defp execute(action, %{"fiber" => fiber} = params)
        when action in ~w(pause set-model set-agent set-outcome uninstall) do
-    with {:ok, fiber_id} <- fiber_address(fiber) do
+    with {:ok, %{host: host, fiber_id: fiber_id}} <- resolve_fiber(fiber) do
       action
       |> args_for(%{params | "fiber" => fiber_id})
-      |> run_elem()
+      |> run_elem(host)
     end
   end
 
@@ -93,8 +93,8 @@ defmodule ShuttleWeb.LifecycleController do
   end
 
   defp refresh_card(%{"fiber" => fiber}) do
-    case fiber_address(fiber) do
-      {:ok, fiber_id} -> Shuttle.Poller.refresh_document(fiber_id)
+    case resolve_fiber(fiber) do
+      {:ok, %{fiber_id: fiber_id}} -> Shuttle.Poller.refresh_document(fiber_id)
       _ -> :ok
     end
   end
@@ -102,14 +102,19 @@ defmodule ShuttleWeb.LifecycleController do
   defp refresh_card(_), do: :ok
 
   defp fiber_address(identifier) do
+    with {:ok, %{fiber_id: fiber_id}} <- resolve_fiber(identifier), do: {:ok, fiber_id}
+  end
+
+  defp resolve_fiber(identifier) do
     case FeltStores.resolve_fiber(identifier) do
-      {:ok, %{fiber_id: fiber_id}} -> {:ok, fiber_id}
+      {:ok, resolved} -> {:ok, resolved}
       {:error, :not_found} -> {:error, "fiber not found: #{identifier}"}
     end
   end
 
-  defp run_elem({:ok, args}), do: run(args)
-  defp run_elem(error), do: error
+  defp run_elem(args, host \\ nil)
+  defp run_elem({:ok, args}, host), do: run(args, host)
+  defp run_elem(error, _host), do: error
 
   defp args_for("install", %{"fiber" => fiber} = params) do
     args = ["install", fiber]
@@ -193,14 +198,28 @@ defmodule ShuttleWeb.LifecycleController do
   defp truthy?(true), do: true
   defp truthy?(_), do: false
 
-  defp run(args) do
+  defp run(args, host) do
     env = [{"SHUTTLE_LIFECYCLE_OFFLINE", "1"}]
+    args = if is_binary(host) and host != "", do: ["--felt-store", host | args], else: args
 
     case System.cmd("felt", ["shuttle" | args], stderr_to_stdout: true, env: env) do
       {output, 0} -> {:ok, output}
-      {output, status} -> {:command_error, status, output}
+      {output, status} -> {:command_error, status, clean_command_output(output)}
     end
   rescue
     e in ErlangError -> {:error, Exception.message(e)}
+  end
+
+  defp clean_command_output(output) when is_binary(output) do
+    output
+    |> String.split("\n", trim: true)
+    |> Enum.map(&String.trim/1)
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.map(fn
+      "Error: " <> message -> message
+      line -> line
+    end)
+    |> Enum.dedup()
+    |> Enum.join("\n")
   end
 end
