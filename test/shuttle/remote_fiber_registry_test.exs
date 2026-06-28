@@ -45,8 +45,12 @@ defmodule Shuttle.RemoteFiberRegistryTest do
     entry = Map.get(RemoteFiberRegistry.feeds(pid), name, %{fibers: []})
 
     cond do
-      entry[:fibers] not in [nil, []] -> entry
-      attempts <= 0 -> flunk("feed for #{name} never populated")
+      entry[:fibers] not in [nil, []] ->
+        entry
+
+      attempts <= 0 ->
+        flunk("feed for #{name} never populated")
+
       true ->
         Process.sleep(5)
         wait_for_feed(pid, name, attempts - 1)
@@ -95,8 +99,32 @@ defmodule Shuttle.RemoteFiberRegistryTest do
       assert %{"candide" => entry} = feeds
       assert entry.stale == false
       assert entry.last_error == nil
+
       assert [%{"fiber" => %{"id" => "foo"}, "runtime" => %{"tmux_session" => "shuttle-foo"}}] =
                entry.fibers
+    end
+
+    test "refresh updates a single remote feed immediately" do
+      url = Remote.fibers_url(candide())
+      MockClient.set(url, {:ok, feed_body([sample_fiber("before")])})
+
+      pid =
+        start_supervised!(
+          {RemoteFiberRegistry,
+           name: :reg_single_refresh, remotes: [candide()], client: MockClient, auto_poll: false}
+        )
+
+      :ok = RemoteFiberRegistry.refresh_now(pid)
+
+      assert %{"candide" => %{fibers: [%{"fiber" => %{"id" => "before"}}]}} =
+               RemoteFiberRegistry.feeds(pid)
+
+      MockClient.set(url, {:ok, feed_body([sample_fiber("after")])})
+
+      assert :ok = RemoteFiberRegistry.refresh(pid, "candide")
+
+      assert %{"candide" => %{stale: false, fibers: [%{"fiber" => %{"id" => "after"}}]}} =
+               RemoteFiberRegistry.feeds(pid)
     end
 
     test "a non-200 / transport error keeps the last good feed but marks it stale" do

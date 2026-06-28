@@ -223,8 +223,18 @@ defmodule ShuttleWeb.APIControllerTest do
     # resolves names itself, so the mock synthesizes it from the block's `agent`
     # name (default claude-sonnet). Only the rendering keys matter here.
     @resolved_agents %{
-      "claude-sonnet" => %{"id" => "claude-sonnet", "cli" => "claude", "wrapper" => "claude", "model" => "sonnet"},
-      "claude-opus" => %{"id" => "claude-opus", "cli" => "claude", "wrapper" => "claude", "model" => "opus"}
+      "claude-sonnet" => %{
+        "id" => "claude-sonnet",
+        "cli" => "claude",
+        "wrapper" => "claude",
+        "model" => "sonnet"
+      },
+      "claude-opus" => %{
+        "id" => "claude-opus",
+        "cli" => "claude",
+        "wrapper" => "claude",
+        "model" => "opus"
+      }
     }
 
     defp with_resolved_agent(%{"shuttle" => shuttle} = fiber) when is_map(shuttle) do
@@ -252,10 +262,24 @@ defmodule ShuttleWeb.APIControllerTest do
     use Agent
 
     def start_link(_ \\ []),
-      do: Agent.start_link(fn -> %{response: nil, last: nil} end, name: __MODULE__)
+      do:
+        Agent.start_link(
+          fn -> %{response: nil, get_response: {:error, :not_set}, last: nil, last_get: nil} end,
+          name: __MODULE__
+        )
 
     def set_response(response), do: Agent.update(__MODULE__, &Map.put(&1, :response, response))
+
+    def set_get_response(response),
+      do: Agent.update(__MODULE__, &Map.put(&1, :get_response, response))
+
     def last, do: Agent.get(__MODULE__, & &1.last)
+    def last_get, do: Agent.get(__MODULE__, & &1.last_get)
+
+    def get(url, _timeout_ms) do
+      Agent.update(__MODULE__, &Map.put(&1, :last_get, %{url: url}))
+      Agent.get(__MODULE__, & &1.get_response)
+    end
 
     def post(url, body, _content_type, _timeout_ms) do
       Agent.update(__MODULE__, &Map.put(&1, :last, %{url: url, body: body}))
@@ -698,6 +722,73 @@ defmodule ShuttleWeb.APIControllerTest do
     assert forwarded == %{"fiber_id" => "tests/remote-work", "target" => "drafts"}
   end
 
+  test "successful remote transition refreshes the cached remote fiber feed" do
+    start_supervised!(StubPostClient)
+
+    StubPostClient.set_response(
+      {:ok, 200,
+       Jason.encode!(%{
+         "fiber_id" => "tests/remote-work",
+         "target" => "tempered",
+         "origin" => "local",
+         "action" => "close-tempered",
+         "invoked" => true
+       })}
+    )
+
+    StubPostClient.set_get_response(
+      {:ok,
+       Jason.encode!(%{
+         "host" => "cineca",
+         "fibers" => [
+           %{
+             "path" => "tests/remote-work/remote-work.md",
+             "fiber" => %{
+               "id" => "tests/remote-work",
+               "name" => "Remote work",
+               "status" => "closed",
+               "tempered" => true
+             }
+           }
+         ]
+       })}
+    )
+
+    previous_remotes = Application.get_env(:shuttle, :remotes)
+    previous_client = Application.get_env(:shuttle, :write_forward_client)
+    Application.put_env(:shuttle, :remotes, [%{name: "cineca", url: "http://localhost:4002"}])
+    Application.put_env(:shuttle, :write_forward_client, StubPostClient)
+
+    start_supervised!(
+      {Shuttle.RemoteFiberRegistry,
+       remotes: [%Shuttle.Remote{name: "cineca", url: "http://localhost:4002"}],
+       client: StubPostClient,
+       auto_poll: false}
+    )
+
+    on_exit(fn ->
+      restore_app_env(:remotes, previous_remotes)
+      restore_app_env(:write_forward_client, previous_client)
+    end)
+
+    conn =
+      post(
+        api_conn(),
+        "/api/v1/transition",
+        Jason.encode!(%{
+          fiber_id: "tests/remote-work",
+          target: "tempered",
+          origin: "cineca"
+        })
+      )
+
+    assert conn.status == 200
+    assert StubPostClient.last_get().url == "http://localhost:4002/api/v1/fibers?shuttle=true"
+
+    assert %{"cineca" => %{stale: false, fibers: [%{"fiber" => %{"tempered" => true}}]}} =
+             Shuttle.RemoteFiberRegistry.feeds()
+  end
+
   test "transition relays a remote owner's error status" do
     start_supervised!(StubPostClient)
 
@@ -1137,5 +1228,4 @@ defmodule ShuttleWeb.APIControllerTest do
       assert String.starts_with?(body["git_sha"], body["git_short_sha"])
     end
   end
-
 end

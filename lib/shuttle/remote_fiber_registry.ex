@@ -126,6 +126,25 @@ defmodule Shuttle.RemoteFiberRegistry do
   def refresh_now(server),
     do: GenServer.call(server, :refresh_now, RegistryCommon.read_timeout_ms())
 
+  @doc """
+  Synchronously refreshes one remote's owner feed.
+
+  Write endpoints use this after a forwarded remote mutation so the local
+  composite board's trailing refetch sees owner truth immediately instead of the
+  previous scheduled-poll snapshot.
+  """
+  @spec refresh(String.t()) :: :ok | {:error, term()}
+  def refresh(name), do: refresh(__MODULE__, name)
+
+  @spec refresh(GenServer.server(), String.t()) :: :ok | {:error, term()}
+  def refresh(server, name) when is_binary(name) do
+    if RegistryCommon.registry_alive?(server) do
+      GenServer.call(server, {:refresh, name}, RegistryCommon.read_timeout_ms())
+    else
+      {:error, :not_running}
+    end
+  end
+
   # ── Server ──
 
   @impl true
@@ -177,6 +196,20 @@ defmodule Shuttle.RemoteFiberRegistry do
       end)
 
     {:reply, :ok, %{state | feeds: feeds}}
+  end
+
+  def handle_call({:refresh, name}, _from, state) do
+    case Enum.find(state.remotes, &(&1.name == name)) do
+      %Remote{} = remote ->
+        now = DateTime.utc_now()
+        result = fetch_fibers(remote, state.client, state.request_timeout_ms)
+        entry = Map.get(state.feeds, remote.name, initial_entry(remote))
+        feeds = Map.put(state.feeds, remote.name, apply_result(entry, result, now))
+        {:reply, :ok, %{state | feeds: feeds}}
+
+      nil ->
+        {:reply, {:error, :not_configured}, state}
+    end
   end
 
   @impl true
@@ -304,7 +337,14 @@ defmodule Shuttle.RemoteFiberRegistry do
   end
 
   defp apply_result(entry, {:ok, fibers}, now) do
-    %{entry | fibers: fibers, last_polled_at: now, last_attempt_at: now, stale: false, last_error: nil}
+    %{
+      entry
+      | fibers: fibers,
+        last_polled_at: now,
+        last_attempt_at: now,
+        stale: false,
+        last_error: nil
+    }
   end
 
   defp apply_result(entry, {:error, reason}, now) do
@@ -316,8 +356,11 @@ defmodule Shuttle.RemoteFiberRegistry do
 
   defp mark_stale(feeds, name, reason, now) do
     case Map.get(feeds, name) do
-      nil -> feeds
-      entry -> Map.put(feeds, name, %{entry | last_attempt_at: now, stale: true, last_error: reason})
+      nil ->
+        feeds
+
+      entry ->
+        Map.put(feeds, name, %{entry | last_attempt_at: now, stale: true, last_error: reason})
     end
   end
 
@@ -345,5 +388,4 @@ defmodule Shuttle.RemoteFiberRegistry do
   end
 
   defp stale?(%{stale: flag}, _now), do: flag
-
 end
