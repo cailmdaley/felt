@@ -156,6 +156,31 @@ export function fileUrl(rawPath: string, opts?: RenderMarkdownOptions): string |
 }
 
 /**
+ * HTML artifacts render inside same-origin `/api/v1/file` iframes. Treat
+ * absolute web links as departures from the artifact, not in-frame navigation:
+ * a report that omits `target="_blank"` should not strand the reader on arXiv
+ * inside the fiber panel. Relative links and hash links stay under the
+ * artifact's control.
+ */
+export function prepareIframeExternalLinks(iframe: HTMLIFrameElement): void {
+  try {
+    const doc = iframe.contentDocument
+    if (!doc) return
+    doc.querySelectorAll<HTMLAnchorElement>('a[href]').forEach((anchor) => {
+      const href = anchor.getAttribute('href')?.trim() ?? ''
+      if (!/^https?:\/\//i.test(href)) return
+      if (!anchor.hasAttribute('target')) anchor.target = '_blank'
+
+      const rel = new Set((anchor.getAttribute('rel') ?? '').split(/\s+/).filter(Boolean))
+      rel.add('noopener')
+      anchor.setAttribute('rel', Array.from(rel).join(' '))
+    })
+  } catch {
+    // Cross-origin/PDF frames are unreadable; leave their native behavior alone.
+  }
+}
+
+/**
  * Resolve a relative or absolute artifact path to the absolute path the daemon
  * routes require. Absolute (`/…`) passes through; relative needs `opts.basePath`
  * (the fiber's dir); otherwise `null`.

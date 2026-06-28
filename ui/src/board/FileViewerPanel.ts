@@ -19,7 +19,7 @@
  */
 
 import './FileViewerPanel.css'
-import { fileBytesUrl, paperUrl } from './utils.js'
+import { fileBytesUrl, paperUrl, prepareIframeExternalLinks } from './utils.js'
 
 export const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'avif'])
 export const AUDIO_EXTS = new Set(['wav', 'mp3', 'm4a', 'ogg', 'flac', 'aac'])
@@ -94,6 +94,7 @@ export function buildFileViewer(
   iframe.title = basenameOf(fullPath)
   iframe.addEventListener('load', () => {
     veil.remove()
+    prepareIframeExternalLinks(iframe)
     onFrameLoad?.(iframe)
   })
   iframe.addEventListener('error', () => {

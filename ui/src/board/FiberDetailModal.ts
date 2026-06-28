@@ -1,4 +1,4 @@
-import { renderMarkdown, renderEmbeds } from './utils.js'
+import { prepareIframeExternalLinks, renderEmbeds, renderMarkdown } from './utils.js'
 import type { ColumnKind, KanbanCard } from './KanbanTypes.js'
 import { dispatchIneligibleReason, errorMessageFromResponse, isAgentCard } from './KanbanModalShared.js'
 import { fetchFiberIndex, filterParentCandidates, type FiberSearchResult } from './fiberSearch.js'
@@ -677,6 +677,7 @@ export class FiberDetailModal {
       }
       const fit = () => {
         try {
+          prepareIframeExternalLinks(iframe)
           if (!fitReveal()) fitContent()
         } catch {
           /* cross-origin / unreadable — leave the CSS min-height in place */
