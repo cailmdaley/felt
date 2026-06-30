@@ -79,7 +79,10 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
     Body.
     """)
 
-    File.write!(Path.join([store, ".felt", "tests", "document", "report.html"]), "<p>report</p>\n")
+    File.write!(
+      Path.join([store, ".felt", "tests", "document", "report.html"]),
+      "<p>report</p>\n"
+    )
 
     # report_path is `dirname(felt.path)/report.html` — felt's carried path is
     # symlink-canonicalized (on macOS the tmp store's /var → /private/var), and
@@ -145,6 +148,20 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
     Body.
     """)
 
+    # Closed pinned constitutions still belong on the Shuttle board: their
+    # lifecycle state is awaiting/reviewable, not "invisible".
+    write_fiber!(store, "tests/closed-pinned", """
+    ---
+    name: Closed pinned
+    status: closed
+    shuttle:
+      kind: pinned
+      host: test-host
+    ---
+
+    Body.
+    """)
+
     # Owned by ANOTHER host: physically rooted here (so it lands in the local
     # walk / document cache) but pinned to a peer. Slice 7: the owner-only feed
     # never serves a peer's fiber — it belongs to that host's feed, and a viewer
@@ -193,12 +210,26 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
       |> Enum.map(& &1["fiber"]["name"])
       |> Enum.sort()
 
-    assert all_names == ["Managed", "Owned elsewhere", "Plain todo", "Unowned draft"]
+    assert all_names == [
+             "Closed pinned",
+             "Managed",
+             "Owned elsewhere",
+             "Plain todo",
+             "Unowned draft"
+           ]
 
-    # shuttle=true: ONLY the row this daemon owns (shuttle block + host == own).
+    # shuttle=true: ONLY the rows this daemon owns (shuttle block + host == own).
     only = get(api_conn(), "/api/v1/fibers?shuttle=true")
     assert only.status == 200
-    assert [%{"fiber" => %{"name" => "Managed"}}] = Jason.decode!(only.resp_body)["fibers"]
+
+    owner_names =
+      only.resp_body
+      |> Jason.decode!()
+      |> Map.fetch!("fibers")
+      |> Enum.map(& &1["fiber"]["name"])
+      |> Enum.sort()
+
+    assert owner_names == ["Closed pinned", "Managed"]
   end
 
   test "GET /api/v1/fibers canonicalizes ids through symlinked stores", %{store: store} do
@@ -689,7 +720,10 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
     # The owner feed itself stays strictly owner-only — the human todo never
     # leaks into `?shuttle=true`.
     only = get(api_conn(), "/api/v1/fibers?shuttle=true")
-    owner_names = Jason.decode!(only.resp_body)["fibers"] |> Enum.map(& &1["fiber"]["name"]) |> Enum.sort()
+
+    owner_names =
+      Jason.decode!(only.resp_body)["fibers"] |> Enum.map(& &1["fiber"]["name"]) |> Enum.sort()
+
     assert owner_names == ["Managed", "Owner with due"]
   end
 

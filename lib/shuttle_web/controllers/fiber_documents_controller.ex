@@ -69,7 +69,9 @@ defmodule ShuttleWeb.FiberDocumentsController do
       {:remote, remote} ->
         relay_show(
           conn,
-          OriginRouter.forward_get(remote, fibers_show_path(id), %{"body" => to_string(with_body?)})
+          OriginRouter.forward_get(remote, fibers_show_path(id), %{
+            "body" => to_string(with_body?)
+          })
         )
 
       :local ->
@@ -119,11 +121,11 @@ defmodule ShuttleWeb.FiberDocumentsController do
   @doc """
   `GET /api/v1/fibers/composite` — the unified cross-host kanban board.
 
-  Concatenates this daemon's local owner feed (from the poller's document cache,
-  which stamps local tmux liveness) with each remote daemon's cached owner feed
-  (`Shuttle.RemoteFiberRegistry`, which stamps the remote's own liveness at the
-  remote's serve time). The result is a flat per-fiber list where every fiber's
-  liveness was resolved by its OWNING host — one observer per fiber, no
+  Concatenates this daemon's local owner feed (read directly from felt, with any
+  poller-known runtime liveness overlaid) with each remote daemon's cached owner
+  feed (`Shuttle.RemoteFiberRegistry`, which stamps the remote's own liveness at
+  the remote's serve time). The result is a flat per-fiber list where every
+  fiber's liveness was resolved by its OWNING host — one observer per fiber, no
   cross-observer disagreement, so the kanban can classify directly without a
   second tmux read.
 
@@ -137,12 +139,11 @@ defmodule ShuttleWeb.FiberDocumentsController do
   """
   def composite(conn, _params) do
     {local_origin, local_owner_entries, local_stale} = local_feed()
-    # The local board is owner shuttle work (runtime-stamped, from the poller
-    # cache) PLUS the human-tracked due-date drafts the owner feed omits. They
-    # are disjoint by construction — owner rows carry a `shuttle:` block, human-
-    # due rows never do — so concatenation can't double-count. Remotes carry no
-    # human-due analog (those cards name no host and never cross the tunnel), so
-    # this only widens the LOCAL portion.
+    # The local board is owner shuttle work PLUS the human-tracked due-date
+    # drafts the owner feed omits. They are disjoint by construction — owner rows
+    # carry a `shuttle:` block, human-due rows never do — so concatenation can't
+    # double-count. Remotes carry no human-due analog (those cards name no host
+    # and never cross the tunnel), so this only widens the LOCAL portion.
     local_entries = local_owner_entries ++ local_human_due_entries()
     remote_feeds = Shuttle.RemoteFiberRegistry.feeds()
 
@@ -178,10 +179,11 @@ defmodule ShuttleWeb.FiberDocumentsController do
     })
   end
 
-  # The local owner feed: same body as `GET /api/v1/fibers?shuttle=true`, served
-  # from the poller's runtime-stamped document cache (falling back to a direct
-  # felt list while the cache is cold). On any failure the local origin reports
-  # stale with zero fibers rather than 500ing the whole board.
+  # The local owner feed: same body as `GET /api/v1/fibers?shuttle=true`. Felt is
+  # the authority for which local constitutions exist; the poller cache is only a
+  # runtime overlay. That keeps board visibility independent from the poller's
+  # narrower dispatch/cache lifecycle while preserving local tmux liveness when
+  # the poller has it.
   defp local_feed do
     case list_fibers(false, true) do
       {:ok, %{host: host, fibers: entries}} -> {host, entries, false}
@@ -220,19 +222,53 @@ defmodule ShuttleWeb.FiberDocumentsController do
   defp render_error(reason), do: inspect(reason)
 
   defp list_fibers(false, true) do
-    case Process.whereis(Shuttle.Poller) do
-      nil ->
-        Shuttle.FiberDocuments.list(with_body: false, shuttle_only: true)
+    case Shuttle.FiberDocuments.list(with_body: false, shuttle_only: true) do
+      {:ok, %{fibers: entries} = body} ->
+        {:ok, %{body | fibers: overlay_cached_runtime(entries)}}
 
-      _pid ->
-        case Shuttle.Poller.cached_fiber_documents() do
-          {:ok, body} -> {:ok, body}
-          {:error, _reason} -> Shuttle.FiberDocuments.list(with_body: false, shuttle_only: true)
-        end
+      other ->
+        other
     end
   end
 
   defp list_fibers(with_body?, shuttle_only?) do
     Shuttle.FiberDocuments.list(with_body: with_body?, shuttle_only: shuttle_only?)
+  end
+
+  defp overlay_cached_runtime(entries) do
+    with pid when is_pid(pid) <- Process.whereis(Shuttle.Poller),
+         {:ok, %{fibers: cached_entries}} <- Shuttle.Poller.cached_fiber_documents() do
+      runtime_index = runtime_index(cached_entries)
+      Enum.map(entries, &put_cached_runtime(&1, runtime_index))
+    else
+      _ -> entries
+    end
+  end
+
+  defp runtime_index(entries) do
+    Enum.reduce(entries, %{}, fn entry, acc ->
+      case Map.get(entry, :runtime) || Map.get(entry, "runtime") do
+        nil ->
+          acc
+
+        runtime ->
+          entry_keys(entry)
+          |> Enum.reduce(acc, fn key, indexed -> Map.put_new(indexed, key, runtime) end)
+      end
+    end)
+  end
+
+  defp put_cached_runtime(entry, index) do
+    case Enum.find_value(entry_keys(entry), &Map.get(index, &1)) do
+      nil -> entry
+      runtime -> Map.put(entry, :runtime, runtime)
+    end
+  end
+
+  defp entry_keys(entry) do
+    fiber = Map.get(entry, :fiber) || Map.get(entry, "fiber") || %{}
+
+    [Map.get(fiber, "uid"), Map.get(fiber, "slug"), Map.get(fiber, "id")]
+    |> Enum.filter(&(is_binary(&1) and &1 != ""))
   end
 end
