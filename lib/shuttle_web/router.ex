@@ -53,6 +53,7 @@ defmodule ShuttleWeb.Router do
     # backend. Shells out to priv/mystra/bake.mjs on the owning host. JSON-native,
     # so it lives in the :api pipeline (unlike /file, which serves raw bytes).
     get("/astra", AstraController, :show)
+    get("/felt-stores", FeltStoresController, :show)
     post("/felt-stores", FeltStoresController, :create)
     post("/cache/bust", CacheBustController, :create)
     # The sent-files trail for a fiber (owner-routed): the artifacts a worker

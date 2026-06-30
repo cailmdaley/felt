@@ -1,11 +1,12 @@
-// The standalone UI's "project" set — derived from the composite feed, not
-// from Portolan's pinned-on-a-map cities.
+// The standalone UI's "project" set — derived from Shuttle's registered
+// felt-store list, not from historical cards.
 //
-// A Shuttle fiber's `shuttle.project_dir` is the worker's cwd AND (because
-// Shuttle's `POST /api/v1/fiber/create` derives its felt root from
-// `project_dir`) the felt store the fiber is created in. Each distinct
-// `(origin, project_dir)` the feed already carries is therefore a place a new
-// constitution can land. We surface exactly that set — no pinning, no map.
+// `GET /api/v1/felt-stores` is the canonical city registry. The composite feed
+// is still useful metadata — it tells us recency and, when a registered project
+// already has cards, enough slugs to infer a loom substore prefix. It is NOT an
+// authority for the picker: closed historical fibers carry old `project_dir`
+// values forever, so deriving cities from cards resurrects retired checkouts
+// like Portolan/Shuttle.
 //
 // The one inferred quantity is `loomPrefix`: the loom-relative path the
 // project's `.felt` symlinks to (e.g. `…/projects/portolan/.felt` →
@@ -78,6 +79,19 @@ export interface ProjectModel {
   activityById: Record<string, number>
 }
 
+export interface StoreRegistryOrigin {
+  kind?: 'local' | 'remote' | string
+  stale?: boolean
+  felt_stores?: string[]
+  feltStores?: string[]
+  last_error?: string
+}
+
+export interface StoreRegistry {
+  host?: string
+  origins?: Record<string, StoreRegistryOrigin>
+}
+
 /** Last path segment of an absolute dir (`/a/b/c` → `c`), tolerating a
  *  trailing slash. Empty string falls back to the whole path. */
 function basename(path: string): string {
@@ -118,7 +132,7 @@ function substorePrefix(slugs: string[], projectBasename: string): string {
  * /api/v1/fibers/composite`). Groups every fiber by `(origin, project_dir)`,
  * infers each group's `loomPrefix`, and ranks by recency.
  */
-export function deriveProjects(feedBody: unknown): ProjectModel {
+export function deriveProjects(feedBody: unknown, registryBody?: unknown): ProjectModel {
   const feed = parseCompositeFeed(feedBody)
 
   interface Acc {
@@ -141,6 +155,14 @@ export function deriveProjects(feedBody: unknown): ProjectModel {
     const mtime = entry.fiber.modifiedAt ? Date.parse(entry.fiber.modifiedAt) : NaN
     if (!Number.isNaN(mtime)) acc.lastActivity = Math.max(acc.lastActivity, mtime)
     groups.set(key, acc)
+  }
+
+  const registry = parseStoreRegistry(registryBody)
+  const registryProjects = projectsFromRegistry(registry, groups, feed.host, feed.origins)
+  if (registryProjects.length > 0) {
+    const activityById: Record<string, number> = {}
+    for (const p of registryProjects) activityById[p.id] = p.lastActivity
+    return { host: registry.host || feed.host, projects: registryProjects, activityById }
   }
 
   const norm = (p: string): string => p.replace(/\/+$/, '')
@@ -174,4 +196,77 @@ export function deriveProjects(feedBody: unknown): ProjectModel {
   for (const p of projects) activityById[p.id] = p.lastActivity
 
   return { host: feed.host, projects, activityById }
+}
+
+function parseStoreRegistry(body: unknown): StoreRegistry {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return {}
+  const root = body as Record<string, unknown>
+  const host = typeof root.host === 'string' ? root.host : undefined
+  const origins: Record<string, StoreRegistryOrigin> = {}
+
+  if (root.origins && typeof root.origins === 'object' && !Array.isArray(root.origins)) {
+    for (const [originId, raw] of Object.entries(root.origins as Record<string, unknown>)) {
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue
+      const rec = raw as Record<string, unknown>
+      const feltStores = stringArray(rec.felt_stores) ?? stringArray(rec.feltStores) ?? []
+      origins[originId] = {
+        kind: typeof rec.kind === 'string' ? rec.kind : undefined,
+        stale: rec.stale === true,
+        felt_stores: feltStores,
+        last_error: typeof rec.last_error === 'string' ? rec.last_error : undefined,
+      }
+    }
+  } else {
+    const feltStores = stringArray(root.felt_stores) ?? stringArray(root.feltStores) ?? []
+    if (feltStores.length > 0) origins[host || 'local'] = { kind: 'local', felt_stores: feltStores }
+  }
+
+  return { host, origins }
+}
+
+function projectsFromRegistry(
+  registry: StoreRegistry,
+  groups: Map<string, { originId: string; path: string; feltStore: string; slugs: string[]; lastActivity: number }>,
+  feedHost: string,
+  feedOrigins: Record<string, { kind: 'local' | 'remote' }>,
+): ProjectEntry[] {
+  const origins = registry.origins ?? {}
+  const projects: ProjectEntry[] = []
+  const seen = new Set<string>()
+
+  for (const [originId, origin] of Object.entries(origins)) {
+    const stores = origin.felt_stores ?? origin.feltStores ?? []
+    for (const rawPath of stores) {
+      const path = rawPath.trim().replace(/\/+$/, '')
+      if (!path) continue
+      const key = `${originId}:${path}`
+      if (seen.has(key)) continue
+      seen.add(key)
+
+      const acc = groups.get(key)
+      const name = basename(path)
+      const kind = origin.kind === 'remote' || feedOrigins[originId]?.kind === 'remote' ? 'remote' : 'local'
+      projects.push({
+        id: key,
+        name,
+        path,
+        originId,
+        isLocal: kind === 'local' || originId === feedHost || originId === registry.host,
+        loomPrefix: acc ? substorePrefix(acc.slugs, name) : '',
+        feltStore: acc?.feltStore ?? path,
+        lastActivity: acc?.lastActivity ?? 0,
+      })
+    }
+  }
+
+  projects.sort((a, b) =>
+    b.lastActivity - a.lastActivity ||
+    a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }),
+  )
+  return projects
+}
+
+function stringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  return value.filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
 }

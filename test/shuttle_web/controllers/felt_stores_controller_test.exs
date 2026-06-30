@@ -7,6 +7,7 @@ defmodule ShuttleWeb.FeltStoresControllerTest do
 
   setup do
     original = System.get_env("FELT_STORES_FILE")
+    original_remotes = Application.get_env(:shuttle, :remotes)
 
     path =
       Path.join(
@@ -15,6 +16,7 @@ defmodule ShuttleWeb.FeltStoresControllerTest do
       )
 
     System.put_env("FELT_STORES_FILE", path)
+    Application.put_env(:shuttle, :remotes, [])
 
     on_exit(fn ->
       File.rm(path)
@@ -22,6 +24,11 @@ defmodule ShuttleWeb.FeltStoresControllerTest do
       case original do
         nil -> System.delete_env("FELT_STORES_FILE")
         value -> System.put_env("FELT_STORES_FILE", value)
+      end
+
+      case original_remotes do
+        nil -> Application.delete_env(:shuttle, :remotes)
+        value -> Application.put_env(:shuttle, :remotes, value)
       end
     end)
 
@@ -32,6 +39,30 @@ defmodule ShuttleWeb.FeltStoresControllerTest do
     build_conn()
     |> put_req_header("accept", "application/json")
     |> put_req_header("content-type", "application/json")
+  end
+
+  test "shows the configured base stores as the local origin" do
+    path = Path.expand(System.get_env("FELT_STORES_FILE"))
+    File.mkdir_p!(Path.dirname(path))
+
+    File.write!(
+      path,
+      Jason.encode!(%{"version" => 1, "felt_stores" => ["~/loom", "/tmp/project"]})
+    )
+
+    conn = get(api_conn(), "/api/v1/felt-stores")
+
+    assert conn.status == 200
+    body = Jason.decode!(conn.resp_body)
+    host = body["host"]
+    assert is_binary(host)
+
+    assert get_in(body, ["origins", host, "kind"]) == "local"
+
+    assert get_in(body, ["origins", host, "felt_stores"]) == [
+             Path.expand("~/loom"),
+             "/tmp/project"
+           ]
   end
 
   test "persists normalized felt stores" do

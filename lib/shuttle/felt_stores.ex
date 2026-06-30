@@ -25,7 +25,7 @@ defmodule Shuttle.FeltStores do
 
   @spec configured_hosts() :: host_list()
   def configured_hosts do
-    base = base_hosts()
+    base = configured_base_hosts()
     now = System.monotonic_time(:millisecond)
 
     # Cache the symlink-following expansion by base config with a short TTL: the
@@ -46,7 +46,16 @@ defmodule Shuttle.FeltStores do
     end
   end
 
-  defp base_hosts do
+  @doc """
+  The configured store list before symlink-substore expansion.
+
+  This is the human-curated registry: `FELT_STORES` when explicitly set,
+  otherwise the persisted `~/.config/felt/stores.json` list. Use this for picker
+  surfaces that should reflect the canonical city list. Use `configured_hosts/0`
+  for daemon polling/resolution, where symlinked substores must be expanded.
+  """
+  @spec configured_base_hosts() :: host_list()
+  def configured_base_hosts do
     case env_hosts() do
       [_ | _] = hosts -> hosts
       [] -> registered_hosts()

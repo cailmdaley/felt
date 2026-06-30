@@ -9,10 +9,11 @@
  * single shared root suffices; closing renders `null`.
  *
  * Both forms need the "project" set — the map-less replacement for Portolan's
- * pinned cities, derived from the composite feed (see projectModel). Both
- * create endpoints are owner-routed now, so both forms get every project: a
- * local origin writes/spawns here, a remote origin forwards to its owning
- * daemon.
+ * pinned cities. The authoritative list comes from `/api/v1/felt-stores`; the
+ * composite feed supplies activity/ranking metadata only (see projectModel).
+ * Both create endpoints are owner-routed now, so both forms get every
+ * registered project: a local origin writes/spawns here, a remote origin
+ * forwards to its owning daemon.
  */
 
 import { createRoot, type Root } from 'react-dom/client'
@@ -51,10 +52,14 @@ interface LoadedFeed {
 }
 
 async function loadFeed(shuttleBase: string): Promise<LoadedFeed> {
-  const res = await fetch(`${shuttleBase}/api/v1/fibers/composite`)
+  const [res, storesRes] = await Promise.all([
+    fetch(`${shuttleBase}/api/v1/fibers/composite`),
+    fetch(`${shuttleBase}/api/v1/felt-stores`).catch(() => null),
+  ])
   if (!res.ok) throw new Error(`composite ${res.status}`)
   const json: unknown = await res.json()
-  const model = deriveProjects(json)
+  const storesJson: unknown = storesRes?.ok ? await storesRes.json().catch(() => undefined) : undefined
+  const model = deriveProjects(json, storesJson)
   const feed = parseCompositeFeed(json)
   const tagSet = new Set<string>()
   for (const e of feed.entries) for (const t of e.fiber.tags ?? []) tagSet.add(t)

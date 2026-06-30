@@ -116,6 +116,16 @@ defmodule Shuttle.Remote do
   end
 
   @doc """
+  The full `GET /api/v1/felt-stores` URL for this remote.
+  """
+  @spec felt_stores_url(t()) :: String.t()
+  def felt_stores_url(%__MODULE__{url: url}) do
+    url
+    |> String.trim_trailing("/")
+    |> Kernel.<>("/api/v1/felt-stores")
+  end
+
+  @doc """
   Returns `true` when `last_polled_at` is older than
   `stale_multiplier × poll_interval_ms` from `now`. A `nil`
   `last_polled_at` is always stale.
@@ -123,7 +133,11 @@ defmodule Shuttle.Remote do
   @spec stale?(t(), DateTime.t() | nil, DateTime.t()) :: boolean()
   def stale?(%__MODULE__{} = _remote, nil, _now), do: true
 
-  def stale?(%__MODULE__{poll_interval_ms: pi, stale_multiplier: m}, %DateTime{} = last, %DateTime{} = now) do
+  def stale?(
+        %__MODULE__{poll_interval_ms: pi, stale_multiplier: m},
+        %DateTime{} = last,
+        %DateTime{} = now
+      ) do
     threshold_ms = pi * m
     DateTime.diff(now, last, :millisecond) > threshold_ms
   end
