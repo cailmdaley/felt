@@ -19,7 +19,7 @@ defmodule ShuttleWeb.FeltStoresController do
 
   alias Shuttle.{FeltStores, Poller, Remote}
 
-  @remote_timeout_ms 2_000
+  @remote_timeout_ms 8_000
 
   def show(conn, _params) do
     own = Poller.own_host_id()
@@ -72,7 +72,7 @@ defmodule ShuttleWeb.FeltStoresController do
 
   defp remote_origin(%Remote{} = remote) do
     url = Remote.felt_stores_url(remote)
-    timeout = min(remote.request_timeout_ms || @remote_timeout_ms, @remote_timeout_ms)
+    timeout = remote.request_timeout_ms || @remote_timeout_ms
 
     with {:ok, body} <- fetch_remote_registry(url, timeout),
          {:ok, decoded} <- Jason.decode(body),
