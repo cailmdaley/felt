@@ -32,19 +32,6 @@ defmodule Shuttle.FiberDocuments do
     collect(opts, Keyword.get(opts, :with_body, false), mode)
   end
 
-  @doc """
-  Local human due-date cards: open/active fibers carrying a `due:` but NO
-  `shuttle:` block. These are the Portolan-local todo drafts the owner feed
-  (`?shuttle=true`) deliberately omits — they name no host and never cross the
-  tunnel — so the composite BOARD endpoint re-includes them from the local
-  store, preserving the due-date cards the kanban showed back when Portolan
-  walked felt itself. Local only by nature; there is no remote human-due analog.
-  """
-  @spec list_human_due(keyword()) :: {:ok, map()} | {:error, term()}
-  def list_human_due(opts \\ []) do
-    collect(opts, false, :human_due)
-  end
-
   defp collect(opts, with_body?, mode) do
     stores = Keyword.get_lazy(opts, :felt_stores, &FeltStores.configured_hosts/0)
 
