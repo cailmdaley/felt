@@ -254,14 +254,17 @@ The clean setup, and the current production layout:
 - **The repo lives outside Documents** — the canonical checkout is
   **`~/dev/felt`**. The escript and `ui/dist` are then readable by launchd with
   no grant.
-- **`AGENT_LOOM_HOMES` scopes felt polling to `~/loom`** (the Makefile default,
-  baked into the plist as `LOOM_HOMES`). `~/loom` is outside Documents and the
-  felt aggregate — it re-discovers each project's substores by following the
-  symlinks under `~/loom/.felt/` (`FeltStores.expand_with_symlinked_substores`),
-  so configuring just `~/loom` is enough. **Caveat:** substores whose real root
-  is itself under a protected folder (e.g. an iCloud `wedding`, a Documents
-  `lightcone`) are discovered but can't be walked by the launchd daemon — those
-  fibers won't enumerate until their project roots also move out of Documents.
+- **`AGENT_FELT_STORES` scopes felt polling** (the Makefile default is
+  `~/loom`, baked into the plist as `FELT_STORES`). `~/loom` is outside Documents
+  and is the felt aggregate — it re-discovers each project's substores by
+  following symlinks under `~/loom/.felt/`
+  (`FeltStores.expand_with_symlinked_substores`), so configuring just `~/loom`
+  is enough when those symlinks point to readable project roots. **Caveat:**
+  substores whose real root is itself under a protected folder (for example a
+  Documents `lightcone`) are discovered but may be unreadable to the launchd
+  daemon until the project root also moves out of Documents. The iCloud wedding
+  store is intentionally not linked into `~/loom/.felt/` and is not an active
+  felt city.
 - **`PATH` is captured from a login shell at install time** (`AGENT_PATH` in the
   Makefile, baked into the plist). launchd's own env is too bare to find
   `escript` (Homebrew) at boot or `felt` (`~/.local/bin`) at runtime — and a
@@ -533,9 +536,10 @@ felt shuttle validate-identity                # UID migration/cross-city validat
   per-fiber detail via `felt show -j`, and considers a fiber eligible iff
   `shuttle.enabled: true` AND `status in ["open", "active"]` AND not
   already running AND deps satisfied.
-- **Configured stores** come from `LOOM_HOMES` (comma-separated env var) →
-  persisted `~/.shuttle/felt_stores.json` → `LOOM_HOME` → `~/loom`.
-  `POST /api/v1/felt-stores` rewrites the persisted file.
+- **Configured stores** come from `FELT_STORES` (comma-separated env var) →
+  persisted `~/.config/felt/stores.json`. There is no implicit `~/loom`
+  fallback and no legacy Shuttle-named registry authority. `POST
+  /api/v1/felt-stores` rewrites the persisted file.
 - **Dispatcher** (`lib/shuttle/dispatcher.ex`) resolves the agent, spawns
   the `shuttle-<fiber-id>` tmux session.
 - **Standing roles** — `shuttle.kind: standing` with a cron `schedule:`.
@@ -596,18 +600,13 @@ Dispatch sanity ladder:
 right after a fresh daemon start.** The poller serves its *last* snapshot, but on
 a cold boot there is none yet, so the snapshot call starves behind the first full
 walk until it completes — and the **first tick on a fresh machine is cold**: empty
-OS file cache, dataless iCloud sidecars (`com~apple~CloudDocs` stores ship `.felt`
-index files as `dataless` placeholders that block on a network download the first
-time `felt` reads them), and every configured store walked back-to-back. Observed
-once at **~106s** (`Sent 200 in 106275ms` in `shuttle.log`). It is a one-time tax:
-once warm, all stores poll in well under a second and the board loads. So **wait
-out the first walk** rather than trimming `~/.shuttle/felt_stores.json` — the
-persisted list is fine, and most project stores are slices of `~/loom` (the
-aggregate store; its ids are already prefixed `ai-futures/…`) so trimming gains
-little. Two real follow-ups: (1) a store path with **no `.felt/` dir** ("not in a
-felt repository") errors every tick — drop it from the list; (2) the remotes
-timing out independently (`ssh_check_failed`, `:4001 econnrefused`) is separate
-noise, not this.
+OS file cache and every configured store walked back-to-back. Observed once at
+**~106s** (`Sent 200 in 106275ms` in `shuttle.log`). It is a one-time tax: once
+warm, all stores poll in well under a second and the board loads. If this
+becomes recurring, inspect the canonical registry at
+`~/.config/felt/stores.json`: a store path with **no `.felt/` dir** ("not in a
+felt repository") errors every tick and should be dropped. Remote timeouts
+(`ssh_check_failed`, `:4001 econnrefused`) are separate noise.
 
 ## Codebase layout
 

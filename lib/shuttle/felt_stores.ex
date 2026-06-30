@@ -9,14 +9,11 @@ defmodule Shuttle.FeltStores do
 
   The registry is the source of truth — there is no implicit default store. An
   empty env *and* an empty/absent registry resolve to `[]`; register a store
-  explicitly. Saving an empty list deletes the registry file. A one-time read
-  shim still falls back to the legacy `~/.shuttle/felt_stores.json` on a host not
-  yet migrated off the old location; writes always target the new path.
+  explicitly. Saving an empty list deletes the registry file.
   """
 
   @config_env "FELT_STORES_FILE"
   @default_config_path "~/.config/felt/stores.json"
-  @legacy_config_path "~/.shuttle/felt_stores.json"
 
   @type host_list :: [String.t()]
 
@@ -347,7 +344,7 @@ defmodule Shuttle.FeltStores do
 
   @spec registered_hosts() :: host_list()
   def registered_hosts do
-    path = read_config_path()
+    path = config_path()
 
     with true <- File.exists?(path),
          {:ok, content} <- File.read(path),
@@ -394,28 +391,6 @@ defmodule Shuttle.FeltStores do
     case System.get_env(@config_env) do
       v when is_binary(v) and v != "" -> Path.expand(v)
       _ -> Path.expand(@default_config_path)
-    end
-  end
-
-  # The registry path to READ from: the configured/new path when it exists, else
-  # the legacy `~/.shuttle/felt_stores.json` as a one-time shim for a host not yet
-  # migrated off the old shuttle-named location. Writes always target config_path/0,
-  # so the next `save/1` migrates the host onto the new path.
-  defp read_config_path do
-    primary = config_path()
-    legacy = Path.expand(@legacy_config_path)
-
-    cond do
-      File.exists?(primary) ->
-        primary
-
-      # Legacy fallback only when the path isn't explicitly overridden — an
-      # explicit FELT_STORES_FILE is honored verbatim (parity with the Go reader).
-      System.get_env(@config_env) in [nil, ""] and File.exists?(legacy) ->
-        legacy
-
-      true ->
-        primary
     end
   end
 

@@ -32,9 +32,8 @@ defmodule Shuttle.FeltStoresTest do
 
     test "configured_hosts/0 is [] when nothing is configured — no implicit ~/loom default" do
       System.delete_env("FELT_STORES")
-      # An explicit override at an absent path also suppresses the legacy
-      # ~/.shuttle fallback, so resolution is genuinely empty (not the user's
-      # real ~/.config/felt/stores.json).
+      # An explicit override at an absent path keeps resolution genuinely empty
+      # instead of reading the user's real ~/.config/felt/stores.json.
       System.put_env("FELT_STORES_FILE", Path.join(tmp_dir(), "absent.json"))
 
       assert FeltStores.configured_hosts() == []

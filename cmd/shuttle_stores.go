@@ -69,7 +69,7 @@ func feltStoresEnv() []string {
 // or $FELT_STORES_FILE) and returns its normalized store list. A missing file or
 // empty list returns an empty slice with no error.
 func registeredFeltStores() ([]string, error) {
-	path, err := feltStoresRegistryReadPath()
+	path, err := feltStoresRegistryPath()
 	if err != nil {
 		return nil, err
 	}
@@ -108,29 +108,6 @@ func feltStoresRegistryPath() (string, error) {
 		return "", fmt.Errorf("resolving home directory: %w", err)
 	}
 	return filepath.Join(home, ".config", "felt", "stores.json"), nil
-}
-
-// feltStoresRegistryReadPath is the path to READ from: the canonical path when it
-// exists, else the legacy ~/.shuttle/felt_stores.json as a one-time shim for a host
-// not yet migrated off the old location. An explicit $FELT_STORES_FILE is honored
-// verbatim (no legacy fallback). Mirrors Shuttle.FeltStores.read_config_path/0.
-func feltStoresRegistryReadPath() (string, error) {
-	primary, err := feltStoresRegistryPath()
-	if err != nil {
-		return "", err
-	}
-	if _, err := os.Stat(primary); err == nil {
-		return primary, nil
-	}
-	if os.Getenv("FELT_STORES_FILE") == "" {
-		if home, herr := os.UserHomeDir(); herr == nil {
-			legacy := filepath.Join(home, ".shuttle", "felt_stores.json")
-			if _, serr := os.Stat(legacy); serr == nil {
-				return legacy, nil
-			}
-		}
-	}
-	return primary, nil
 }
 
 // normalizeFeltStores trims, drops empty, expands `~`, and deduplicates while
