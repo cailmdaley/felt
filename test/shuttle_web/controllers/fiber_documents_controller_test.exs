@@ -232,6 +232,82 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
     assert owner_names == ["Closed pinned", "Managed"]
   end
 
+  test "GET /api/v1/fibers?shuttle=true stamps live runtime from the poller",
+       %{store: store} do
+    uid = "01KVRTNM000000000000000000"
+    session = "live-#{uid}-shuttle"
+
+    write_fiber!(store, "tests/live", """
+    ---
+    id: #{uid}
+    name: Live worker
+    status: active
+    shuttle:
+      kind: pinned
+      host: test-host
+    ---
+
+    Body.
+    """)
+
+    {poller, original_state} =
+      case Process.whereis(Shuttle.Poller) do
+        nil ->
+          {:ok, pid} =
+            Shuttle.Poller.start_link(
+              name: Shuttle.Poller,
+              poll_interval_ms: 600_000,
+              max_concurrent_workers: 0,
+              felt_stores: [store]
+            )
+
+          {pid, nil}
+
+        pid ->
+          {pid, :sys.get_state(pid)}
+      end
+
+    now = DateTime.utc_now()
+
+    :sys.replace_state(poller, fn state ->
+      %{
+        state
+        | own_host_id: "test-host",
+          running:
+            Map.put(state.running, uid, %{
+              fiber_id: "tests/live",
+              uid: uid,
+              session: session,
+              agent_id: "codex",
+              started_at: now,
+              last_activity_at: now
+            })
+      }
+    end)
+
+    on_exit(fn ->
+      if Process.alive?(poller) do
+        if original_state do
+          :sys.replace_state(poller, fn _ -> original_state end)
+        else
+          GenServer.stop(poller)
+        end
+      end
+    end)
+
+    conn = get(api_conn(), "/api/v1/fibers?shuttle=true")
+    assert conn.status == 200
+
+    entry =
+      conn.resp_body
+      |> Jason.decode!()
+      |> Map.fetch!("fibers")
+      |> Enum.find(&(&1["fiber"]["slug"] == "tests/live"))
+
+    assert entry["runtime"]["tmux_session"] == session
+    assert entry["runtime"]["agent"] == "codex"
+  end
+
   test "GET /api/v1/fibers canonicalizes ids through symlinked stores", %{store: store} do
     # Build the shapepipe shape: loom's `.felt/shapepipe` is a symlink into a
     # separate project store. `felt ls` walks loom and reports the traversal id

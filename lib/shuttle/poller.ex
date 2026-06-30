@@ -193,6 +193,21 @@ defmodule Shuttle.Poller do
   end
 
   @doc """
+  Returns the serve-time runtime overlay for live workers.
+
+  This is the document-feed liveness projection without the document feed: a
+  controller that has just read fresh felt rows can stamp the same `runtime`
+  payloads the poller-owned cache would have carried, even when that cache is
+  cold or intentionally bypassed.
+  """
+  @spec runtime_index(GenServer.server()) :: map()
+  def runtime_index(server \\ __MODULE__) do
+    GenServer.call(server, :runtime_index, @orchestrator_state_call_timeout_ms)
+  catch
+    :exit, _ -> %{}
+  end
+
+  @doc """
   Re-read one fiber from disk and replace (or evict) its entry in the document
   cache — the single post-mutation seam.
 
@@ -544,6 +559,10 @@ defmodule Shuttle.Poller do
   @impl true
   def handle_call(:snapshot, _from, state) do
     {:reply, Snapshot.build_snapshot(state), state}
+  end
+
+  def handle_call(:runtime_index, _from, state) do
+    {:reply, Snapshot.runtime_index(state.running, session_activity()), state}
   end
 
   def handle_call({:cached_fiber_documents, opts}, _from, state) do
@@ -2678,7 +2697,10 @@ defmodule Shuttle.Poller do
   defp run_felt(nil, _runner, _args), do: {:error, :no_felt_store}
 
   defp run_felt(host, runner, args) when is_binary(host) do
-    opts = [cd: host, stderr_to_stdout: true]
+    # These poller calls consume felt's stdout as JSON. Keep stderr separate:
+    # felt can exit 0 while warning about unrelated unreadable fibers, and
+    # folding those warnings into stdout makes the JSON undecodable.
+    opts = [cd: host, stderr_to_stdout: false]
 
     case runner.cmd("felt", args, opts) do
       {output, 0} ->

@@ -20,6 +20,7 @@ defmodule Shuttle.PollerTest do
             fibers: %{},
             shuttle: %{},
             felt_ls: [],
+            felt_ls_stderr_warning: false,
             felt_ls_delay_ms: 0,
             new_session_delay_ms: 0
           }
@@ -39,6 +40,7 @@ defmodule Shuttle.PollerTest do
           fibers: %{},
           shuttle: %{},
           felt_ls: [],
+          felt_ls_stderr_warning: false,
           felt_ls_delay_ms: 0,
           new_session_delay_ms: 0
         }
@@ -152,6 +154,9 @@ defmodule Shuttle.PollerTest do
     # mock's felt ls handler which other code paths may call.
     def set_felt_ls(fibers), do: Agent.update(__MODULE__, &%{&1 | felt_ls: fibers})
 
+    def set_felt_ls_stderr_warning(enabled),
+      do: Agent.update(__MODULE__, &Map.put(&1, :felt_ls_stderr_warning, enabled))
+
     def set_felt_ls_delay(ms),
       do: Agent.update(__MODULE__, &Map.put(&1, :felt_ls_delay_ms, ms))
 
@@ -202,7 +207,7 @@ defmodule Shuttle.PollerTest do
     }
 
     @impl true
-    def cmd(command, args, _opts) do
+    def cmd(command, args, opts) do
       Agent.update(__MODULE__, fn state ->
         %{state | commands: state.commands ++ [{command, args}]}
       end)
@@ -245,7 +250,14 @@ defmodule Shuttle.PollerTest do
               end
             end)
 
-          {Jason.encode!(Enum.map(fibers, &with_resolved_agent/1)), 0}
+          json = Jason.encode!(Enum.map(fibers, &with_resolved_agent/1))
+          warning? = Agent.get(__MODULE__, & &1.felt_ls_stderr_warning)
+
+          if warning? and Keyword.get(opts, :stderr_to_stdout) do
+            {"warning: failed to parse unrelated fiber\n" <> json, 0}
+          else
+            {json, 0}
+          end
 
         command == "felt" and String.contains?(full_args, "show") and
             String.contains?(full_args, "--field shuttle") ->
@@ -1013,7 +1025,12 @@ defmodule Shuttle.PollerTest do
     uid = "01JZ00000000000000000000CT"
 
     MockRunner.set_fiber(fiber_id, make_fiber(fiber_id, %{"uid" => uid, "status" => "active"}))
-    MockRunner.set_shuttle(fiber_id, "kind: oneshot\nagent: claude-sonnet\nhost: test-host\n", "active")
+
+    MockRunner.set_shuttle(
+      fiber_id,
+      "kind: oneshot\nagent: claude-sonnet\nhost: test-host\n",
+      "active"
+    )
 
     # max_concurrent_workers: 0 silences the autonomous tick; explicit
     # dispatch_fiber/3 is not slot-gated, so the cut path is fully exercised
@@ -1029,7 +1046,9 @@ defmodule Shuttle.PollerTest do
       )
 
     # First dispatch makes the fiber live (a fresh worker, a real tmux session).
-    assert {:ok, first_session} = Poller.dispatch_fiber(poller, fiber_id, force: true, ad_hoc: true)
+    assert {:ok, first_session} =
+             Poller.dispatch_fiber(poller, fiber_id, force: true, ad_hoc: true)
+
     assert Shuttle.Tmux.present?(MockRunner, first_session)
 
     before_cut = length(MockRunner.commands())
@@ -1037,7 +1056,11 @@ defmodule Shuttle.PollerTest do
     # "New session" — a forced fresh dispatch against the now-live session. The
     # cut fires INSTEAD of bouncing off :already_running: marker + kill, fresh.
     assert {:ok, second_session} =
-             Poller.dispatch_fiber(poller, fiber_id, force: true, ad_hoc: true, resume_mode: "fresh")
+             Poller.dispatch_fiber(poller, fiber_id,
+               force: true,
+               ad_hoc: true,
+               resume_mode: "fresh"
+             )
 
     cut_commands = MockRunner.commands() |> Enum.drop(before_cut)
 
@@ -1079,7 +1102,12 @@ defmodule Shuttle.PollerTest do
     uid = "01JZ00000000000000000000RC"
 
     MockRunner.set_fiber(fiber_id, make_fiber(fiber_id, %{"uid" => uid, "status" => "active"}))
-    MockRunner.set_shuttle(fiber_id, "kind: oneshot\nagent: claude-sonnet\nhost: test-host\n", "active")
+
+    MockRunner.set_shuttle(
+      fiber_id,
+      "kind: oneshot\nagent: claude-sonnet\nhost: test-host\n",
+      "active"
+    )
 
     {:ok, poller} =
       start_poller!(
@@ -1097,7 +1125,11 @@ defmodule Shuttle.PollerTest do
     # Resume against a live session is refused — you don't resume what's already
     # running; only "fresh" cuts. The live transcript is the one Resume preserves.
     assert {:error, :already_running} =
-             Poller.dispatch_fiber(poller, fiber_id, force: true, ad_hoc: true, resume_mode: "previous")
+             Poller.dispatch_fiber(poller, fiber_id,
+               force: true,
+               ad_hoc: true,
+               resume_mode: "previous"
+             )
 
     resume_commands = MockRunner.commands() |> Enum.drop(before)
 
@@ -2742,6 +2774,29 @@ defmodule Shuttle.PollerTest do
 
     assert_eventually(fn ->
       snap = Poller.snapshot(poller)
+      assert Enum.any?(snap.eligible, &(&1.fiber_id == fiber_id and &1.state == "running"))
+    end)
+  end
+
+  test "poller adopts uid workers when felt ls writes warnings to stderr" do
+    fiber_id = "life/french/daily-practice"
+    uid = "01KTHDNZS287ZSSG8X8V59XKWB"
+    MockRunner.set_fiber(fiber_id, make_fiber(fiber_id, %{"uid" => uid, "status" => "active"}))
+    MockRunner.set_shuttle(fiber_id, "kind: pinned\nagent: claude-opus\n", "active")
+    MockRunner.set_felt_ls_stderr_warning(true)
+    MockRunner.add_tmux_session(Dispatcher.session_name(fiber_id, uid))
+
+    {:ok, poller} =
+      start_poller!(
+        name: :test_poller_orphan_stderr_warning,
+        runner: MockRunner,
+        poll_interval_ms: 60_000,
+        felt_stores: ["/tmp"]
+      )
+
+    assert_eventually(fn ->
+      snap = Poller.snapshot(poller)
+
       assert Enum.any?(snap.eligible, &(&1.fiber_id == fiber_id and &1.state == "running"))
     end)
   end

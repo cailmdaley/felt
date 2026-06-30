@@ -28,6 +28,7 @@ defmodule ShuttleWeb.FiberDocumentsController do
   use Phoenix.Controller, formats: [:json]
 
   alias Shuttle.OriginRouter
+  alias Shuttle.Poller.Snapshot
 
   def index(conn, params) do
     with_body? = Map.get(params, "body") in ["1", "true", true]
@@ -204,7 +205,7 @@ defmodule ShuttleWeb.FiberDocumentsController do
   defp list_fibers(false, true) do
     case Shuttle.FiberDocuments.list(with_body: false, shuttle_only: true) do
       {:ok, %{fibers: entries} = body} ->
-        {:ok, %{body | fibers: overlay_cached_runtime(entries)}}
+        {:ok, %{body | fibers: overlay_runtime(entries)}}
 
       other ->
         other
@@ -215,40 +216,8 @@ defmodule ShuttleWeb.FiberDocumentsController do
     Shuttle.FiberDocuments.list(with_body: with_body?, shuttle_only: shuttle_only?)
   end
 
-  defp overlay_cached_runtime(entries) do
-    with pid when is_pid(pid) <- Process.whereis(Shuttle.Poller),
-         {:ok, %{fibers: cached_entries}} <- Shuttle.Poller.cached_fiber_documents() do
-      runtime_index = runtime_index(cached_entries)
-      Enum.map(entries, &put_cached_runtime(&1, runtime_index))
-    else
-      _ -> entries
-    end
-  end
-
-  defp runtime_index(entries) do
-    Enum.reduce(entries, %{}, fn entry, acc ->
-      case Map.get(entry, :runtime) || Map.get(entry, "runtime") do
-        nil ->
-          acc
-
-        runtime ->
-          entry_keys(entry)
-          |> Enum.reduce(acc, fn key, indexed -> Map.put_new(indexed, key, runtime) end)
-      end
-    end)
-  end
-
-  defp put_cached_runtime(entry, index) do
-    case Enum.find_value(entry_keys(entry), &Map.get(index, &1)) do
-      nil -> entry
-      runtime -> Map.put(entry, :runtime, runtime)
-    end
-  end
-
-  defp entry_keys(entry) do
-    fiber = Map.get(entry, :fiber) || Map.get(entry, "fiber") || %{}
-
-    [Map.get(fiber, "uid"), Map.get(fiber, "slug"), Map.get(fiber, "id")]
-    |> Enum.filter(&(is_binary(&1) and &1 != ""))
+  defp overlay_runtime(entries) do
+    index = Shuttle.Poller.runtime_index()
+    Enum.map(entries, &Snapshot.put_runtime(&1, index))
   end
 end

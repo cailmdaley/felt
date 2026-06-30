@@ -28,7 +28,11 @@ defmodule ShuttleWeb.DispatchController do
   def create(conn, params) do
     case OriginRouter.route(Map.get(params, "origin")) do
       {:remote, remote} ->
-        relay_json(conn, OriginRouter.forward(remote, "/api/v1/dispatch", conn.body_params), &dispatch_failed/2)
+        relay_json(
+          conn,
+          OriginRouter.forward(remote, "/api/v1/dispatch", conn.body_params),
+          &dispatch_failed/2
+        )
 
       :local ->
         create_local(conn, params)
@@ -71,7 +75,7 @@ defmodule ShuttleWeb.DispatchController do
         {:error, :already_running} ->
           conn
           |> put_status(409)
-          |> json(%{dispatched: false, reason: "already_running", fiber_id: fiber_id})
+          |> json(already_running_body(fiber_id))
 
         {:error, :not_eligible} ->
           conn
@@ -111,6 +115,26 @@ defmodule ShuttleWeb.DispatchController do
 
   defp dispatch_failed(name, reason),
     do: %{dispatched: false, reason: "forward_failed", origin: name, error: inspect(reason)}
+
+  defp already_running_body(fiber_id) do
+    base = %{dispatched: false, reason: "already_running", fiber_id: fiber_id}
+
+    case Shuttle.Poller.worker_status(fiber_id) do
+      %{session: session} = worker when is_binary(session) and session != "" ->
+        Map.merge(base, %{
+          tmux_session: session,
+          agent: Map.get(worker, :agent_id),
+          started_at: maybe_unix_ms(Map.get(worker, :started_at)),
+          last_activity_at: maybe_unix_ms(Map.get(worker, :last_activity_at))
+        })
+
+      _ ->
+        base
+    end
+  end
+
+  defp maybe_unix_ms(%DateTime{} = dt), do: DateTime.to_unix(dt, :millisecond)
+  defp maybe_unix_ms(_), do: nil
 
   defp truthy?(value) when value in [true, "true", "1", 1], do: true
   defp truthy?(_), do: false

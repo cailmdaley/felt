@@ -459,6 +459,30 @@ defmodule ShuttleWeb.APIControllerTest do
     assert body["reason"] == "already_running"
   end
 
+  test "dispatch 409 includes the live tmux session when the poller tracks it" do
+    fiber_id = "tests/api-dispatch-live"
+    fiber = make_fiber(fiber_id)
+    MockRunner.set_fiber(fiber_id, fiber)
+    MockRunner.set_shuttle(fiber_id, @oneshot_shuttle)
+
+    assert {:ok, session} = Poller.dispatch_fiber(fiber_id, [])
+
+    conn =
+      post(
+        api_conn(),
+        "/api/v1/dispatch",
+        Jason.encode!(%{
+          "fiber_id" => fiber_id
+        })
+      )
+
+    assert conn.status == 409
+    body = Jason.decode!(conn.resp_body)
+    assert body["dispatched"] == false
+    assert body["reason"] == "already_running"
+    assert body["tmux_session"] == session
+  end
+
   test "dispatch clears stale in-memory running state when tmux session is gone" do
     fiber_id = "tests/api-stale-running"
     fiber = make_fiber(fiber_id)

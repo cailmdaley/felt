@@ -2188,6 +2188,13 @@ export class FiberDetailModal {
     }
 
     if (res.status === 409) {
+      if (body.tmux_session) {
+        this.close()
+        this.onSaved()
+        this.openWorkerForCard(card, body.tmux_session)
+        return
+      }
+
       btn.textContent = 'Already running'
       btn.disabled = true
       errorEl.textContent = 'A worker is already running for this fiber.'
@@ -2208,8 +2215,17 @@ export class FiberDetailModal {
     this.close()
     this.onSaved()
     if (body.tmux_session) {
-      this.onAttachFreshTmux?.(body.tmux_session)
+      this.openWorkerForCard(card, body.tmux_session)
     }
+  }
+
+  private openWorkerForCard(card: KanbanCard, tmuxSessionName: string): void {
+    if (this.onOpenWorker) {
+      this.onOpenWorker(tmuxSessionName, card.originId ?? card.shuttleHost)
+      return
+    }
+
+    this.onAttachFreshTmux?.(tmuxSessionName)
   }
 
   /**
