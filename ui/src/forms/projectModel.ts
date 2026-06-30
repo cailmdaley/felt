@@ -1,12 +1,15 @@
 // The standalone UI's "project" set — derived from Shuttle's registered
-// felt-store list, not from historical cards.
+// felt-store list plus current card working dirs, not from historical cards.
 //
-// `GET /api/v1/felt-stores` is the canonical city registry. The composite feed
-// is still useful metadata — it tells us recency and, when a registered project
-// already has cards, enough slugs to infer a loom substore prefix. It is NOT an
-// authority for the picker: closed historical fibers carry old `project_dir`
-// values forever, so deriving cities from cards resurrects retired checkouts
-// like Portolan/Shuttle.
+// `GET /api/v1/felt-stores` is the canonical store registry. The composite feed
+// is still useful for recency, substore-prefix inference, and current working
+// directories: a remote may intentionally register only `~/loom` as its felt
+// store while active/open Shuttle fibers run from project dirs such as `cmbx`.
+// Local project dirs stay registry-curated because local historical cards still
+// include retired checkouts.
+// Closed historical fibers are not authority: they carry old `project_dir`
+// values forever, so closed-only dirs would resurrect retired checkouts like
+// Portolan/Shuttle.
 //
 // The one inferred quantity is `loomPrefix`: the loom-relative path the
 // project's `.felt` symlinks to (e.g. `…/projects/portolan/.felt` →
@@ -141,6 +144,7 @@ export function deriveProjects(feedBody: unknown, registryBody?: unknown): Proje
     feltStore: string
     slugs: string[]
     lastActivity: number
+    current: boolean
   }
   const groups = new Map<string, Acc>()
 
@@ -150,10 +154,18 @@ export function deriveProjects(feedBody: unknown, registryBody?: unknown): Proje
     const key = `${entry.origin}:${projectDir}`
     const acc =
       groups.get(key) ??
-      { originId: entry.origin, path: projectDir, feltStore: entry.feltStore, slugs: [], lastActivity: 0 }
+      {
+        originId: entry.origin,
+        path: projectDir,
+        feltStore: entry.feltStore,
+        slugs: [],
+        lastActivity: 0,
+        current: false,
+      }
     if (entry.fiber.id) acc.slugs.push(entry.fiber.id)
     const mtime = entry.fiber.modifiedAt ? Date.parse(entry.fiber.modifiedAt) : NaN
     if (!Number.isNaN(mtime)) acc.lastActivity = Math.max(acc.lastActivity, mtime)
+    if (entry.fiber.status === 'open' || entry.fiber.status === 'active') acc.current = true
     groups.set(key, acc)
   }
 
@@ -226,9 +238,12 @@ function parseStoreRegistry(body: unknown): StoreRegistry {
 
 function projectsFromRegistry(
   registry: StoreRegistry,
-  groups: Map<string, { originId: string; path: string; feltStore: string; slugs: string[]; lastActivity: number }>,
+  groups: Map<
+    string,
+    { originId: string; path: string; feltStore: string; slugs: string[]; lastActivity: number; current: boolean }
+  >,
   feedHost: string,
-  feedOrigins: Record<string, { kind: 'local' | 'remote' }>,
+  feedOrigins: Record<string, { kind: 'local' | 'remote'; stale?: boolean }>,
 ): ProjectEntry[] {
   const origins = registry.origins ?? {}
   const projects: ProjectEntry[] = []
@@ -257,6 +272,38 @@ function projectsFromRegistry(
         lastActivity: acc?.lastActivity ?? 0,
       })
     }
+  }
+
+  // A remote's configured felt store can be its aggregate (`~/loom`) while the
+  // worker cwd lives in a separate project directory. Current remote cards are
+  // the authoritative signal for those working dirs; closed-only dirs are
+  // historical and local dirs stay registry-curated.
+  for (const acc of groups.values()) {
+    const origin = origins[acc.originId]
+    const feedOrigin = feedOrigins[acc.originId]
+    if (!acc.current || origin?.stale === true || feedOrigin?.stale === true) continue
+    const kind = origin?.kind === 'remote' || feedOrigin?.kind === 'remote' ? 'remote' : 'local'
+    if (kind !== 'remote') continue
+
+    const path = acc.path.trim().replace(/\/+$/, '')
+    if (!path) continue
+    const key = `${acc.originId}:${path}`
+    if (seen.has(key)) continue
+    seen.add(key)
+
+    const name = basename(path)
+    const norm = (p: string): string => p.replace(/\/+$/, '')
+    const isStoreRoot = norm(path) === norm(acc.feltStore)
+    projects.push({
+      id: key,
+      name,
+      path,
+      originId: acc.originId,
+      isLocal: false,
+      loomPrefix: isStoreRoot ? '' : substorePrefix(acc.slugs, name),
+      feltStore: acc.feltStore,
+      lastActivity: acc.lastActivity,
+    })
   }
 
   projects.sort((a, b) =>
