@@ -183,13 +183,14 @@ felt setup claude                 # registers cailmdaley/felt marketplace, insta
 felt setup codex                  # symlinks skills into ~/.agents/skills, configures Codex hooks
 ```
 
-The plugin bundles the `felt` skill, a SessionStart hook that lists active and recently touched fibers, and a PreToolUse hook that gates the first non-Skill tool call until the felt skill has been activated.
+The plugin bundles the `felt` and `shuttle` skills, a SessionStart hook that lists active and recently touched fibers, and a PreToolUse hook that gates the first non-Skill tool call until the felt skill has been activated.
 
 ### Bundled skills
 
 | Skill | Purpose |
 |-------|---------|
 | **felt** | Filing fibers, drafting constitutions, mining sessions, maintenance passes, transcript processing |
+| **shuttle** | Realizing constitutions as a dispatched worker; authoring and installing the `shuttle:` dispatch contract; operating the daemon, kanban, and standing roles |
 
 ## Commands
 

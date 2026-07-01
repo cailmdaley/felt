@@ -1,6 +1,6 @@
 # Constitution
 
-Drafting a constitution — a fiber spec describing a desired state for autonomous iteration. This is the ideating process (see SKILL.md and `ideating.md`) applied to a specific artifact type: a living document that an iteration runner re-reads with fresh context until the work is done. Felt is agnostic about the runner — external dispatchers (e.g. Shuttle) watch fibers and spawn workers against them; the constitution itself is just a tagged fiber.
+Drafting a constitution — a fiber spec describing a desired state for autonomous iteration. This is the ideating process (see SKILL.md and `ideating.md`) applied to a specific artifact type: a living document that an iteration runner re-reads with fresh context until the work is done. The usual runner is Shuttle, felt's own dispatch layer (the shuttle skill carries that practice); the constitution itself is just a tagged fiber, and any runner can work from it.
 
 ---
 
@@ -63,9 +63,7 @@ Repeat until it feels solid. It does not have to be complete; live uncertainties
 
 ### 4. Launch
 
-When approved, hand the fiber to whichever iteration runner is appropriate — felt is agnostic. Common options:
-
-- **External dispatchers** (e.g. Shuttle) — tools that watch fibers for dispatch-eligible blocks and spawn single-shot workers; their configuration is owned outside felt. (The old `ralph` manual loop runner is retired; in-session subagents/workflows cover within-session iteration.)
+When approved, hand the fiber to its runner. The usual one is **Shuttle**: `felt shuttle install <fiber> --project-dir "$PWD"` writes the `shuttle:` block and the daemon dispatches workers against it (see the shuttle skill's authoring reference for drafts-vs-dispatch and agent selection). In-session subagents/workflows cover within-session iteration.
 
 The constitution fiber stays editable while iteration runs. Successive iterations re-read it each cycle, so refinements between iterations are normal.
 
@@ -79,7 +77,7 @@ Only two things in a constitution are universal — orientation and contract. Pr
 
 **`## Desired State` is the one fixed heading.** What the system looks like when it is done — invariants, quality bar, scope fence (what to aim for AND what to leave alone). Write done-conditions in *checkable* terms wherever the work allows — grep patterns, test commands, "a reviewer can follow the narrative cold" — because a desired state phrased checkably *is its own evidence*: the declarative and operational faces of one contract, and what iterations (and their verifier subagents) measure the work against. The stable name earns its fixedness: it is what a worker landing cold finds without reading the whole document, across every fiber. A separate `## Evidence` section is earned only when the verification protocol is substantial enough to need its own room (a test harness, a measurement procedure).
 
-**Everything after that is earned, and named for what it contains.** "Why directives over modes", "Touch points", "Open questions", "Considered alternatives" — sections crystallize when content does, never from a template. A heading that means something is skimmable by the human, findable by the worker, and linkable — one more node in the network. If a section's honest name would be "Context" or "Notes", its contents belong somewhere else: background that matters gets linked where it is used, wayfinding sits beside the work it serves, chronology goes to `felt history`.
+**Everything after that is earned, and named for what it contains.** "Why directives over modes", "Touch points", "Open questions", "Considered alternatives" — sections crystallize when content does, never from a template. A heading that means something is skimmable by the human, findable by the worker, and linkable — one more node in the network. If a section's honest name would be "Context" or "Notes", its contents belong somewhere else: background that matters gets linked where it is used, wayfinding sits beside the work it serves, and chronology stays out of the body (the git log carries it).
 
 ---
 
@@ -91,7 +89,7 @@ Only two things in a constitution are universal — orientation and contract. Pr
 
 **The runner's mechanics live in the runner's skill.** Verification cadence, subagent fan-out, exit discipline, handoff surfaces — workers load these from their dispatch skill (e.g. shuttle) every session. Writing them into a constitution duplicates the skill and dates the fiber as models change. The constitution carries only what is specific to *this* work.
 
-**Reshape, don't accrete.** When the desired state evolves — testing surfaces a gap, a meeting changes the priority, a sibling decision lands — rewrite the affected sections so the body still reads as today's desired state. Don't tack on a "Round 2" section; don't add an "Amendments" appendix; don't keep the old framing alongside the new one as a sediment. A green-field constitution will change a lot as it matures, and a mature one will keep changing as reality does. The chronology lives in `felt history`; the kanban-visible summary lives in the outcome; the body lives in *now*.
+**Reshape, don't accrete.** When the desired state evolves — testing surfaces a gap, a meeting changes the priority, a sibling decision lands — rewrite the affected sections so the body still reads as today's desired state. Don't tack on a "Round 2" section; don't add an "Amendments" appendix; don't keep the old framing alongside the new one as a sediment. A green-field constitution will change a lot as it matures, and a mature one will keep changing as reality does. The chronology lives in the git log; the kanban-visible summary lives in the outcome; the body lives in *now*.
 
 **Prefer existing systems.** Before designing anything new: can what is there handle this?
 
@@ -118,8 +116,8 @@ Some constitutions do not build code — they shape artifacts like documentation
 - **Snapshot language.** "Currently 50 files" — will be wrong after one iteration.
 - **Immutable seed.** Not our shape. The constitution is meant to be edited between iterations; do not treat it as frozen.
 - **Numerical convergence.** "Iteration stops when similarity ≥ 0.95" — wrong shape for science. Stop when the desired state's checkable conditions say it has been reached.
-- **Decision logs in the body.** "Resolved choices" / "Decisions made" / "Process notes" sections turn the constitution into a process journal. When a question gets answered (in conversation, via `AskUserQuestion`, in a review), fold the answer into the narrative where it is contextually relevant — into the lede, Desired State, or the earned section where it belongs — and let `felt history` carry the chronology. The constitution describes *what is*, not *how we got here*; an "Open Questions" section that has been fully resolved should be deleted, not left as a victory log.
-- **Amendment scaffolding.** "Round 2", "v2 deltas", "Updates 2026-05-04 →", "Second round amendments". The same failure as a decision log, played out across edits: the body becomes a sediment of layered framings instead of the current desired state. When the desired state shifts, *reshape* the affected sections — rewrite headings, update prose, drop what no longer applies — so the document still reads as one coherent description of now. The story of how it got here is what `felt history append` and the outcome blurb are for.
+- **Decision logs in the body.** "Resolved choices" / "Decisions made" / "Process notes" sections turn the constitution into a process journal. When a question gets answered (in conversation, via `AskUserQuestion`, in a review), fold the answer into the narrative where it is contextually relevant — into the lede, Desired State, or the earned section where it belongs — and let the git log carry the chronology. The constitution describes *what is*, not *how we got here*; an "Open Questions" section that has been fully resolved should be deleted, not left as a victory log.
+- **Amendment scaffolding.** "Round 2", "v2 deltas", "Updates 2026-05-04 →", "Second round amendments". The same failure as a decision log, played out across edits: the body becomes a sediment of layered framings instead of the current desired state. When the desired state shifts, *reshape* the affected sections — rewrite headings, update prose, drop what no longer applies — so the document still reads as one coherent description of now. The story of how it got here belongs to the git log and the outcome blurb.
 
 ---
 

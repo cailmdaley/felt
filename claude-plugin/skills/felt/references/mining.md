@@ -32,7 +32,7 @@ felt add chose-x-over-y "Chose X over Y for Z reason" -o "X was better because..
 felt add architecture-decision-event-sourcing "Architecture decision: event sourcing" -b "Background: needed audit trail..." -o "Chose event sourcing over CRUD because..."
 ```
 
-The `-o` flag creates the fiber already closed. Use `-b` for the body when there's enough background or complexity that the title and outcome aren't sufficient.
+A mined fiber is a record, not a todo — leave it statusless (the default; `-s closed` only if it was a tracked thread that resolved). Use `-b` for the body when there's enough background or complexity that the name and outcome aren't sufficient.
 
 ### 2. Connect it
 

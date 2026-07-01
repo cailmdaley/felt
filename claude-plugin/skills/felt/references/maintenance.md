@@ -47,7 +47,7 @@ Quick fibers should not remain the final form of understanding. As topics settle
 quick fiber -> doc/reference fiber -> root fiber / CLAUDE.md pointer
 ```
 
-Do not copy every detail upward. Extract the lesson, decision, or durable pattern. Leave chronology in `felt history`.
+Do not copy every detail upward. Extract the lesson, decision, or durable pattern. Leave chronology to the git log.
 
 ### Fix Shape While It Is Fresh
 
@@ -82,7 +82,7 @@ Safe to do proactively:
 - close test/scratch/stale todo fibers when their outcome is obvious;
 - add or repair wikilinks that are clearly intended;
 - update a doc fiber with a settled lesson from sibling fibers;
-- append `felt history` explaining maintenance.
+- commit the reshape with a message explaining the maintenance.
 
 Pause or ask before:
 
@@ -93,7 +93,7 @@ Pause or ask before:
 - rewriting a root fiber's argument substantially;
 - cleaning a large area when the user asked for unrelated urgent work.
 
-When in doubt, prefer reversible moves: nest rather than delete, close with an outcome rather than remove, append history before large reshapes.
+When in doubt, prefer reversible moves: nest rather than delete, close with an outcome rather than remove, commit before large reshapes.
 
 ---
 
@@ -120,7 +120,6 @@ Use strong outcomes when closing:
 
 ```bash
 felt edit <id> --status closed --outcome "Decision/finding in one sentence."
-felt history append <id> --summary "Closed during maintenance; no current todo remains."
 ```
 
 ### 2. Reduce Top-Level Sprawl
@@ -150,7 +149,6 @@ Read horizontally first. Then create or update the doc/reference fiber:
 ```bash
 felt add <topic> "Topic reference" -b "Current understanding..."
 felt edit <old-id> --status closed --outcome "Consolidated into [[<topic>]]."
-felt history append <old-id> --summary "Composted into <topic> during maintenance."
 ```
 
 The doc fiber should say what is true now. The old fibers keep chronology and evidence.
@@ -201,7 +199,7 @@ A good maintenance pass leaves:
 - doc/container fibers demoted from open/active unless actionable;
 - clear outcomes on closed fibers;
 - `felt check` clean or with understood residual warnings;
-- `felt history` entries for non-trivial reshapes.
+- non-trivial reshapes committed with messages that explain them.
 
 ---
 
@@ -213,5 +211,5 @@ A good maintenance pass leaves:
 - **Silent deletion.** Deleting is rarely the first maintenance move.
 - **Compost without reading siblings.** A doc fiber made from one leaf usually misses the actual shape.
 - **Links in piles.** Wikilinks should carry meaning in sentences.
-- **Maintenance theater.** A sweep that produces no edits, history, or concrete plan is usually noise.
+- **Maintenance theater.** A sweep that produces no edits, commits, or concrete plan is usually noise.
 - **Blocking the work.** Maintenance should support the current task, not become a ritual gate.

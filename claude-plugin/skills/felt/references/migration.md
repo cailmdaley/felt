@@ -38,14 +38,14 @@ All fiber references in CLAUDE.md need updating:
 
 - **Inline IDs:** strip hex suffixes. `gotcha-ssh-double-quote-810f6df9` becomes `gotcha-ssh-double-quote`.
 - **File paths:** `.felt/slug-hex.md` becomes just the fiber ID `slug`. Deep dive tables should reference fiber IDs, not file paths — fibers are accessed via `felt show`, not by navigating to files.
-- **Renamed projects:** if the project was renamed (e.g., hexarchy to portolan), old fibers keep their original slug. The CLAUDE.md reference needs the actual slug, not the wished-for name.
+- **Renamed projects:** if the project was renamed, old fibers keep their original slug. The CLAUDE.md reference needs the actual slug, not the wished-for name.
 - **Deleted fibers:** some fibers may have been removed before migration. Drop references to fibers that no longer exist.
 
 ### 5. Update consumers
 
 Any code that reads `.felt/` directly needs updating for the directory layout:
 
-- **FiberReader (portolan):** scan for directories, read `slug/slug.md` within each. The fiber ID is the directory name.
+- **Direct readers:** scan for directories, read `slug/slug.md` within each. The fiber ID is the directory name.
 - **Test fixtures:** `writeFiber()` helpers must create `slug/slug.md` inside a directory, not flat `slug.md` files.
 - **Hook scripts:** if any shell scripts glob `.felt/*.md`, update to `.felt/*/`.
 
@@ -62,7 +62,7 @@ felt session | head -20       # verify session context works
 
 **Audit old hex refs after migration.** The migration rewrites flat fibers and existing directory fibers it can map cleanly, but `rg` is still the fastest final check for stale hex IDs in bodies or external tooling.
 
-**Project renames create slug mismatches.** If the project was once called "hexarchy" and fibers were filed under that name, the slugs stay `hexarchy-*` after migration. CLAUDE.md references that assumed the current project name won't match. Use `felt ls -s all <keyword>` to find actual slugs.
+**Project renames create slug mismatches.** If fibers were filed under a project's old name, the slugs keep that prefix after migration. CLAUDE.md references that assumed the current project name won't match. Use `felt ls -s all <keyword>` to find actual slugs.
 
 **`myst.yml` stays in `.felt/` root.** It's not a fiber — the migration doesn't touch it, and the reader should skip it (it's a file, not a directory).
 
@@ -81,6 +81,6 @@ felt session | head -20       # verify session context works
 - [ ] CLAUDE.md hex suffixes stripped
 - [ ] CLAUDE.md file paths updated to fiber IDs
 - [ ] CLAUDE.md stale/deleted references removed
-- [ ] Code consumers updated (FiberReader, test fixtures)
+- [ ] Code consumers updated (direct readers, test fixtures)
 - [ ] `ls .felt/*.md` returns nothing
 - [ ] `felt session` produces clean output

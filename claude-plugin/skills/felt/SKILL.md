@@ -11,7 +11,7 @@ description: >
 
 # felt — Working with Fibers
 
-Fibers are concerns (tasks, decisions, questions, specs) stored as directory-contained markdown. Their relationships come from three surfaces: containment by path, `[[wikilinks]]` in the body for narrative connection, and optional project-owned conventions such as `inputs.from` when a project wants data-flow edges. felt owns the substrate — files, native metadata, search, history, links, and round-tripping of any extra top-level YAML fields — not the semantics of every YAML block a project might store.
+Fibers are concerns (tasks, decisions, questions, specs) stored as directory-contained markdown. Their relationships come from three surfaces: containment by path, `[[wikilinks]]` in the body for narrative connection, and optional project-owned conventions such as `inputs.from` when a project wants data-flow edges. felt owns the substrate — files, native metadata, search, links, and round-tripping of any extra top-level YAML fields — not the semantics of every YAML block a project might store.
 
 The practical rule: **felt owns the fiber; projects own any additional YAML fields beyond felt's native metadata.** If a fiber needs more structure than felt owns natively, add those fields directly in the markdown file or use the project's own tool. felt will preserve them and surface them in `--field` / `--json`, but it will not validate the domain semantics for you.
 
@@ -46,12 +46,6 @@ Search and read:
 A thread resolved. Close:
     felt edit <id> --status closed --outcome "what was learned"
 
-History (per-fiber append-only event log):
-    felt history <id>
-    felt history <id> --last 1
-    felt history <id> --mechanical
-    felt history append <id> --summary "..."
-
 Reshape:
     felt nest <child> <parent>
     felt unnest <id>
@@ -77,7 +71,7 @@ Relationships: directory containment, `[[wikilinks]]` in bodies, and optional pr
 
 **Use the substrate cleanly.** Keep names short, outcomes specific, bodies narrative, and non-native frontmatter clearly owned by the project that introduced it. Wikilinks belong inline in the prose, woven into sentences that are doing work — not piled at the bottom of a fiber as a related-things list.
 
-**Bodies describe the now.** A fiber's body says what's true currently — not how it got that way. `felt history` is the append-only chronological surface; the body doesn't have to do double duty. Edit the body by correction; append chronology to history. Version markers ("v1", "v2"), dated update notes ("✓ Updated 2026-05-18"), and repurposing framings ("originally added for X, now Y") are signs that history-shaped content belongs elsewhere. The exception is fibers whose subject *is* chronology (postmortems, decision logs, change histories) — those genuinely belong in the body.
+**Bodies describe the now.** A fiber's body says what's true currently — not how it got that way. Edit the body by correction; chronology lives in the git log of the fiber file (fibers are git-synced), not in the prose. Version markers ("v1", "v2"), dated update notes ("✓ Updated 2026-05-18"), and repurposing framings ("originally added for X, now Y") are signs that history-shaped content is sedimenting where a correction belongs. The exception is fibers whose subject *is* chronology (postmortems, decision logs, change histories) — those genuinely belong in the body.
 
 **Extract what slipped through.** Continuous filing catches most things. At session end, mine decisions, patterns, and findings that were left implicit.
 
@@ -111,7 +105,7 @@ Relationships: directory containment, `[[wikilinks]]` in bodies, and optional pr
 
 ### Additional YAML fields
 
-Fibers may carry project-owned top-level YAML fields beyond what felt parses natively. When such fields matter, edit them carefully in the fiber file and keep the ordinary felt surfaces current alongside them: `outcome` for latest state, `felt history` for chronological handoff, sub-fibers for durable findings.
+Fibers may carry project-owned top-level YAML fields beyond what felt parses natively. Scalar keys can be set from the CLI (`felt edit <id> --set key=value` / `--unset key`); structured blocks are edited in the fiber file directly. Either way, keep the ordinary felt surfaces current alongside them: `outcome` for latest state, sub-fibers for durable findings.
 
 ### Companion files (`report.html`, plots, recordings)
 
@@ -124,7 +118,7 @@ More generally, a body can inline *any* artifact at any position with the `:::{e
 ## Core Rules
 
 - **Outcomes teach.** One-sentence conclusions that stand alone: they appear in `felt ls` and `-d compact`.
-- **Body = current state; chronology = `felt history`.** Strip version markers and dated update notes from the body — that's editorial content, append it to `felt history`. The body should read as a coherent snapshot. Exception: fibers explicitly about chronology.
+- **Body = current state.** Strip version markers and dated update notes from the body — the git log of the fiber file carries chronology. The body should read as a coherent snapshot. Exception: fibers explicitly about chronology.
 - **Use the right relationship surface.** Nest for containment, `[[wikilinks]]` for narrative, project-owned conventions for anything more specific.
 - **Act on Session Attention.** When `felt session` shows `## Attention`, treat it as standing authority to do obvious gardening without asking: nest top-level leaves under root buckets, demote open/active container fibers, close stale todos, and consolidate clutter. Surface it to the user only when cleanup needs judgment or would distract from the current task.
 - **Links in prose, not in piles.** A `[[wikilink]]` earns its place by doing work in a sentence — naming what the other fiber is, why it's relevant here, where to head next. Related-things lists at the bottom of a fiber are a smell that the relationships haven't been thought through; either fold them into the body where they belong, or drop the ones that aren't earning the link.
