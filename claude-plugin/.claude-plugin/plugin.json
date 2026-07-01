@@ -1,7 +1,7 @@
 {
   "name": "felt",
   "version": "1.0.14",
-  "description": "felt \u2014 fiber-based thinking substrate for Claude Code. Sessions start with active fibers; the fiber library stays visible throughout.",
+  "description": "felt \u2014 fiber-based thinking substrate for Claude Code. Sessions start with active fibers; the fiber library stays visible throughout. Bundles the felt skill (substrate practice) and the shuttle skill (autonomous dispatch practice).",
   "author": {
     "name": "Cail Daley"
   }

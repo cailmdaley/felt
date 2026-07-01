@@ -521,21 +521,24 @@ felt shuttle validate-identity                # UID migration/cross-city validat
   daemon. `felt shuttle install`/`repeat` stamp `host` by default so blocks
   are born owned. The same predicate gates the orphan-resurrection path, so
   a remote restart can't re-grab another host's fiber.
-- **`shuttle.project_dir` is required for enabled installs.** `felt shuttle
+- **`shuttle.project_dir` is required for armed installs.** `felt shuttle
   install` and `repeat` require `--project-dir`; workers start there instead
   of falling back to the felt store.
 - **felt shuttle is the agent-facing CLI.** Local write verbs validate before
   write and work offline. `bin/shuttle` handles daemon lifecycle and dispatch.
-- **No tag predicate for dispatch.** The `shuttle:` block's `enabled: true`
-  field is the dispatch signal. Tags are free-form qualitative noticings.
+- **No tag predicate for dispatch.** A fiber is shuttle-managed iff it carries
+  a `shuttle:` block; it dispatches iff its felt `status` is `active` — the
+  sole dispatch gate (there is no `enabled` flag). Tags are free-form
+  qualitative noticings.
 
 ## How dispatch works
 
 - **Poller** (`lib/shuttle/poller.ex`) owns the tick. It walks each
   configured felt store, pulls candidate metadata via `felt ls --json` and
   per-fiber detail via `felt show -j`, and considers a fiber eligible iff
-  `shuttle.enabled: true` AND `status in ["open", "active"]` AND not
-  already running AND deps satisfied.
+  it carries a `shuttle:` block owned by this host (`shuttle.host` matches),
+  its `project_dir` exists here, felt `status` is `active`, and it isn't
+  already running/claimed (see `eligible?/2` in poller.ex).
 - **Configured stores** come from `FELT_STORES` (comma-separated env var) →
   persisted `~/.config/felt/stores.json`. There is no implicit `~/loom`
   fallback and no legacy Shuttle-named registry authority. `POST
@@ -587,8 +590,8 @@ felt shuttle validate-identity                # checks :4000/:4001/:4002 by defa
 
 Dispatch sanity ladder:
 
-1. `felt shuttle status` shows `enabled: true, idle, oneshot`? → fiber is
-   well-formed and the offline walker sees it.
+1. `felt shuttle status` shows the fiber with `KIND oneshot` and an
+   active/idle state? → fiber is well-formed and the offline walker sees it.
 2. `bin/shuttle snapshot` lists it under `eligible[]`? → daemon dispatched.
 3. `felt shuttle` sees it but daemon doesn't → daemon binary is stale.
    `make restart`.

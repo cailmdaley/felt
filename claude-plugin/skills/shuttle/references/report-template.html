@@ -1,0 +1,133 @@
+<!doctype html>
+<!--
+  Starter template for a fiber's report.html companion. Vellum
+  auto-prepends report.html when rendering the fiber's narrative view,
+  so this becomes the rich head of the document; the fiber's markdown
+  body holds spec (Desired State, Context) below.
+
+  The injected Layer-1 protocol runtime handles iframe sizing and
+  scrollbar suppression — you don't need to add a height handshake.
+  The injected Layer-2 tokens stylesheet provides palette CSS variables
+  (--parchment, --cinnabar, --ink, --teal, --cobalt, --ochre, --rule,
+  --tooth, --serif, --mono), EB Garamond + IBM Plex Mono, and a base
+  body style (parchment background, ink text, 19px / 1.55 line-height).
+  Build on those; override anything (`--parchment` to swap palette,
+  `body { font-family: ... }` to swap typeface, etc.).
+
+  The three sections below are the convention for constitution reports
+  — Current State / Findings / Open Questions. Other fibers (idea
+  fibers, doc fibers, vision sketches) can structure their report
+  however the content wants. The standalone <link rel="stylesheet"> and
+  :root block let the file render correctly when opened directly in a
+  browser (file://, dev server, etc.); inside vellum the injected
+  tokens overlay these identical values harmlessly.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Report — fiber-slug</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --parchment: #EDE2CE;
+    --rag: #FBF6E9;
+    --ink: #1B1611;
+    --ink-muted: #7A6F5C;
+    --cinnabar: #BC4538;
+    --cinnabar-faint: rgba(188, 69, 56, 0.10);
+    --teal: #3F8278;
+    --cobalt: #3D5BA0;
+    --ochre: #C49333;
+    --rule: #C5B89E;
+    --tooth: rgba(197, 184, 158, 0.45);
+    --serif: 'EB Garamond', Georgia, serif;
+    --mono: 'IBM Plex Mono', 'JetBrains Mono', ui-monospace, monospace;
+  }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--parchment);
+    color: var(--ink);
+    font-family: var(--serif);
+    font-size: 19px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  /* Fluid width: the report flows to fill its container (the fiber-panel
+     iframe sizes it full-width; a standalone tab fills the window) rather
+     than capping at a fixed reading column. Generous side padding keeps a
+     gutter when wide. */
+  .page { max-width: none; margin: 0; padding: 48px clamp(28px, 4vw, 72px) 64px; }
+  .stamp { font-family: var(--mono); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-muted); margin-bottom: 20px; display: flex; gap: 14px; align-items: center; }
+  .stamp .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--cinnabar); }
+  .stamp .sep { color: var(--rule); }
+  h1 { font-family: var(--serif); font-style: italic; font-weight: 500; font-size: 44px; line-height: 1.1; margin: 0 0 16px; }
+  section { margin-top: 48px; }
+  .section-mark { font-family: var(--mono); font-size: 11px; letter-spacing: 0.15em; text-transform: uppercase; color: var(--cinnabar); margin-bottom: 8px; }
+  h2 { font-family: var(--serif); font-style: italic; font-weight: 500; font-size: 30px; line-height: 1.2; margin: 0 0 20px; }
+  p { margin: 0 0 16px; }
+  ul, ol { margin: 0 0 16px; padding-left: 22px; }
+  li { margin-bottom: 8px; }
+  code { font-family: var(--mono); font-size: 0.92em; background: rgba(196, 147, 51, 0.12); padding: 1px 5px; border-radius: 2px; }
+  hr { border: none; border-top: 1px solid var(--rule); margin: 40px 0; }
+  hr.short { width: 80px; margin: 32px 0; border-top-width: 2px; border-top-color: var(--cinnabar); }
+  blockquote { margin: 16px 0; padding-left: 20px; border-left: 2px solid var(--ochre); font-style: italic; }
+</style>
+</head>
+<body>
+<main class="page">
+
+  <div class="stamp">
+    <span class="dot"></span>
+    <span>YYYY · MM · DD</span>
+    <span class="sep">·</span>
+    <span>fiber-slug</span>
+  </div>
+
+  <h1>Headline — what this report is.</h1>
+
+  <hr>
+
+  <section>
+    <div class="section-mark">§ Current state</div>
+    <h2>Where the work stands now.</h2>
+
+    <!-- Rewrite each dispatch. What's running, what landed, what the
+         artifact looks like right now. Embed images via standard <img>
+         tags (save them alongside report.html in the fiber directory).
+         Lead with the action the human should take if any. -->
+
+    <p>...</p>
+  </section>
+
+  <hr class="short">
+
+  <section>
+    <div class="section-mark">§ Findings</div>
+    <h2>What's worth naming.</h2>
+
+    <!-- Accretes. Insights, decisions, evidence, links to sub-fibers
+         and external references. Free-form prose; structure earns its
+         place when the content actually wants structure. -->
+
+    <p>...</p>
+  </section>
+
+  <hr class="short">
+
+  <section>
+    <div class="section-mark">§ Open questions</div>
+    <h2>What's not yet settled.</h2>
+
+    <!-- What the human needs to decide, or what awaits more evidence.
+         If empty, say so explicitly so the human knows nothing is
+         pending. -->
+
+    <p>...</p>
+  </section>
+
+</main>
+</body>
+</html>

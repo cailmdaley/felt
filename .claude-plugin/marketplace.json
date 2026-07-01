@@ -8,7 +8,7 @@
   "plugins": [
     {
       "name": "felt",
-      "description": "felt — fiber-based thinking substrate. Bundles the felt skill (substrate practice) and SessionStart + PreToolUse hooks that deliver active fibers and gate non-felt tool use until the felt skill is activated.",
+      "description": "felt — fiber-based thinking substrate. Bundles the felt skill (substrate practice), the shuttle skill (autonomous dispatch practice), and SessionStart + PreToolUse hooks that deliver active fibers and gate non-felt tool use until the felt skill is activated.",
       "source": "./claude-plugin"
     }
   ]
