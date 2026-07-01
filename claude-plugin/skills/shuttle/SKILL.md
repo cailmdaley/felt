@@ -21,11 +21,13 @@ description: >
 
 **Activate the `felt` skill too if it isn't already active.** Shuttle operates *on* fibers — every action you take (read the constitution, update outcome, file crystallizations) goes through felt. Felt is the substrate; shuttle is one consumer of it.
 
-Your job is to **realize the constitution** — drive until the fiber's desired state and current state are broadly aligned. The constitution can evolve: amended as the world changes, as the scale of what's possible shifts. Realization is asymptotic and ongoing, not a binary checkpoint.
+Shuttle turns fibers into autonomous work. A fiber carrying a `shuttle:` block is a **constitution** — a spec whose body describes a desired state, not a plan. Around it:
 
-Shuttle is the poll-driven dispatcher: a daemon that ships with felt (canonical checkout `~/dev/felt` — AGENTS.md there is the operator guide) watches the fiber tree and dispatches one tmux worker per eligible fiber per tick. Eligibility is a single signal — **the fiber carries a `shuttle:` block and its felt-native `status` is `active`** (the sole dispatch gate; there is no `enabled` flag). The kanban board the daemon serves at `:4000` is a pure view over the same blocks and tmux sessions. You are that worker for this session. The work may take one session or many. Ordinary autonomous sessions end with `felt shuttle handoff` (the clean-exit marker that also ends the session); Shuttle redispatches a fresh worker on its next poll if the fiber is still eligible. A resumed Shuttle prompt has the same exit contract as a fresh dispatch: "resumed" means "same transcript," not a license to idle.
+- **Daemon + workers.** The daemon polls the fiber tree and keeps one tmux **worker** — an agent session — per eligible fiber (eligible: carries the block, felt `status: active`). A worker drives toward the desired state, exits at a clean checkpoint with a handoff, and the daemon dispatches fresh workers while the gap remains — work commonly spans sessions. Realization is asymptotic, not a checklist emptied; the constitution itself is amended as the world changes.
+- **Kanban board** — served by the daemon at `:4000`; a pure view over the same fibers and tmux sessions, where the human stashes ideas, launches dispatches, steers running workers, and reviews what they hand back.
+- **Agent registry** — `felt shuttle agents`; maps a fiber's `shuttle.agent` to the CLI + model each dispatch runs.
 
-Looping work splits by layer: in-session subagents/workflows are the inner loop where the harness carries them (workers without those tools do the same arc across redispatches); Shuttle redispatch is the outer loop — a fresh worker per poll against the fiber; `/loop` covers the zero-infra, self-paced case. Don't hand-roll loop tmux sessions for constitution work.
+(The daemon ships with felt; `~/dev/felt`'s AGENTS.md is the operator guide.)
 
 ## Reading by role
 
@@ -36,21 +38,10 @@ Looping work splits by layer: in-session subagents/workflows are the inner loop 
 | Operating / debugging the system | [references/operating.md](references/operating.md) — lifecycle verbs, kanban columns, card-missing triage, remote hosts, uninstall. |
 | Touching a standing role | [references/standing-roles.md](references/standing-roles.md) — cron lifecycle, run ids, exit handoff, accept semantics. |
 
-## Finding your fiber
-
-Your dispatch prompt opens with the fiber ID and the felt store, not the fiber content — read fresh from disk so mid-session edits to the constitution are picked up rather than stale-snapshot. The ID may be rendered in your *project-local* felt view; the `Felt store:` line is the absolute anchor:
-
-```bash
-felt show <fiber-id>                      # from the project dir — try this first
-felt -C <felt-store> show <fiber-id>      # fallback when cwd's .felt view misses
-```
-
-If `felt show` can't find the fiber, don't grope — go straight to `-C <felt-store>`. The store path in the prompt is the store the daemon dispatched you from.
-
 ## The fiber's surfaces
 
 - **Spec (markdown body)** — a standalone, heading-less **lede** (what this is, why it matters, where it sits — the first paragraph both human and worker read, `[[wikilinks]]` woven in), then `## Desired State` (the contract and the one fixed heading — done-conditions in checkable terms where the work allows; that's what you and your verifier subagents measure against), then any sections the fiber has *earned*, named for what they contain. Accretes by *correction*: if a constraint turns out wrong, edit it; if the goal sharpens, rewrite it. No drive-by notes, no chronology. Depth lives in linked sub-fibers, not inlined — the spec is the hub of a network, not an archive.
-- **`report.html`** (companion file in the fiber directory) — the *human-facing* report: Current State / Findings / Open Questions. Render it with an explicit `:::{embed} report.html` line in the body, placed where the reader should meet it (usually the top). Start from [references/report-template.html](references/report-template.html) on first dispatch; edit in place thereafter; add the embed line when you create the file. Small fibers without one are fine.
+- **`report.html`** (companion file in the fiber directory) — the *human-facing* report: Current State / Findings / Open Questions. **Not every constitution wants one.** Create it when the constitution asks for one, or when the work's product is something a human *reads* — findings, figures, comparisons, analysis prose — that outgrows the outcome line. Code-shaped work whose story is commits + outcome needs no report. When one exists: start from [references/report-template.html](references/report-template.html), edit in place across sessions, and render it with an explicit `:::{embed} report.html` line in the body, placed where the reader should meet it (usually the top).
 - **Artifact embeds** — the body can inline any artifact where it helps the reader:
 
   ```markdown
@@ -66,6 +57,17 @@ If `felt show` can't find the fiber, don't grope — go straight to `-C <felt-st
 
 None of these is a status flag. All are always-current. Outcome and the `## Status` block stay plain text (agents read them when chaining sessions); the report is where humans read, with full visual freedom.
 
+## Finding your fiber
+
+Your dispatch prompt opens with the fiber ID and the felt store, not the fiber content — read fresh from disk so mid-session edits to the constitution are picked up rather than stale-snapshot. The ID may be rendered in your *project-local* felt view; the `Felt store:` line is the absolute anchor:
+
+```bash
+felt show <fiber-id>                      # from the project dir — try this first
+felt -C <felt-store> show <fiber-id>      # fallback when cwd's .felt view misses
+```
+
+If `felt show` can't find the fiber, don't grope — go straight to `-C <felt-store>`. The store path in the prompt is the store the daemon dispatched you from.
+
 ## Loop
 
 1. **Survey.** The survey is where you internalize **why** before the **what**. Not a checklist — a world-model. Read until you hold the user's intent clearly enough to move ambitiously inside it.
@@ -80,7 +82,7 @@ None of these is a status flag. All are always-current. Outcome and the `## Stat
 
    Many decisions that look like they need the human are inferable from system purpose + codebase. "What is this software for?" answered seriously usually settles whether a capability is structurally important. Genuine taste questions are narrower than they feel.
 
-   **Scale with subagents when you have them.** If your harness carries an Agent/Workflow tool, fan out what used to span dispatches — parallel readers for a big survey, pipelined migrations, adversarial verification of your own findings — and converge in this session. On long building runs, set a verification cadence: every few substantial changes, have a fresh-context subagent check the work against the spec's Desired State / Evidence — fresh verifiers outperform self-critique. Delegating bulk reading and mechanical edits to subagents is also how you protect your own context (see "When to stop"). Workers without subagent tools (codex, pi harnesses) do the same arc across redispatches instead; both paths are first-class.
+   **Give sub-goals their own context.** Subagent and workflow tools (Claude and Codex harnesses both carry them) are context architecture first, parallelism second: break the work into pieces that each get a clean window — bulk reading, mechanical sweeps, independent verification — while your own context keeps the high-level management view. That separation is what lets one session carry an arc that used to span dispatches. On long building runs, set a verification cadence: every few substantial changes, a fresh-context subagent checks the work against the spec's Desired State — fresh verifiers outperform self-critique. The same walls exist without subagent tools: each Shuttle redispatch is a fresh window and the daemon holds the loop, so do the arc across sessions rather than hand-rolling loop tmux sessions (`/loop` covers the zero-infra, self-paced case).
 
 3. **Felt.** Before exiting: update `report.html` (rewrite Current State, append earned Findings, refresh Open Questions); **rewrite** `outcome:`; correct the spec if the session sharpened it; file crystallizations as sub-fibers (decisions, findings, gotchas — not iteration-numbered debris); commit with clear messages.
 
@@ -111,7 +113,7 @@ The `## Status` block plus the constitution recovers most of a warm world-model 
 
 ## Exit semantics
 
-The status you set before you hand off determines what happens next. Do not substitute a normal chat final response for worker exit.
+The status you set before you hand off determines what happens next. Do not substitute a normal chat final response for worker exit — and a resumed prompt carries the same contract as a fresh dispatch: "resumed" means "same transcript," not a license to idle.
 
 **Human-gate exception.** If the From User directive or the constitution explicitly says a human will attach to this session — a "wait for me" / talk-first signal, or a structural gate like 2FA or a send-in-his-voice step — finish the initial task, leave a checkpoint, keep the fiber `active` and the agent **alive**. The usual close + `felt shuttle handoff` waits until the human signals done. A resume prompt alone is not this exception. (There is no longer an "interactive" dispatch mode; the signal rides the directive or the spec.)
 
