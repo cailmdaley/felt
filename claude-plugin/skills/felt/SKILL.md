@@ -38,7 +38,7 @@ Search and read:
     felt session                                   # SessionStart context as plain text
     felt tree [<id>]                               # containment hierarchy
     felt show <id>                                 # full
-    felt show <id> -d summary | -d compact         # metadata + lede | + extra-key summary
+    felt show <id> -d compact | -d summary         # metadata/outcome/extra keys | + lede + back-refs
     felt show <id> --body                          # body with start line
     felt show <id> --citations|--consumers         # narrative back-refs | data-flow consumers
     felt show <id> --field <key>                   # one raw frontmatter key, shell-friendly
@@ -56,7 +56,7 @@ Maintain:
 ```
 
 Statuses: · untracked, ○ open, ◐ active, ● closed
-Detail: name < compact < summary < full. Summary shows the lede (first paragraph of the body; write it to stand alone).
+Detail: name < compact < summary < full. Summary adds the lede (first paragraph of the body; write it to stand alone).
 Relationships: directory containment, `[[wikilinks]]` in bodies, and optional project-owned data-flow conventions. Nested IDs use paths (bao-analysis/damping-prior).
 
 **Outcomes longer than a sentence:** edit `.felt/<path>/<slug>.md` directly using a `|-` block scalar (`outcome: |-`). `felt edit -o "…"` shell-escapes quotes and mangles multiline content; block scalar takes content literally so paragraphs, lists, and image embeds round-trip cleanly.
@@ -69,15 +69,19 @@ Relationships: directory containment, `[[wikilinks]]` in bodies, and optional pr
 
 **Follow the understanding.** Don't ask permission to file. The user's corrections and opinions are the primary trigger; when the direction shifts, the fiber should shift too.
 
-**Use the substrate cleanly.** Keep names short, outcomes specific, bodies narrative, and non-native frontmatter clearly owned by the project that introduced it. Wikilinks belong inline in the prose, woven into sentences that are doing work — not piled at the bottom of a fiber as a related-things list.
+**Use the substrate cleanly.** Names are concise labels — body and outcome carry the content. Nest for containment, `[[wikilinks]]` for narrative, project-owned conventions for anything more specific.
+
+**Links in prose, not in piles.** A `[[wikilink]]` earns its place by doing work in a sentence — naming what the other fiber is, why it's relevant here, where to head next. Related-things lists at the bottom of a fiber are a smell that the relationships haven't been thought through; fold them into the body where they belong, or drop the ones that aren't earning the link.
 
 **Bodies describe the now.** A fiber's body says what's true currently — not how it got that way. Edit the body by correction; chronology lives in the git log of the fiber file (fibers are git-synced), not in the prose. Version markers ("v1", "v2"), dated update notes ("✓ Updated 2026-05-18"), and repurposing framings ("originally added for X, now Y") are signs that history-shaped content is sedimenting where a correction belongs. The exception is fibers whose subject *is* chronology (postmortems, decision logs, change histories) — those genuinely belong in the body.
 
 **Extract what slipped through.** Continuous filing catches most things. At session end, mine decisions, patterns, and findings that were left implicit.
 
-**Outcomes teach.** An outcome that says "done" has failed. Put the conclusion in: what was learned, what was decided, why.
+**Outcomes teach.** An outcome that says "done" has failed. Put the conclusion in — what was learned, what was decided, why — in a sentence that stands alone: it's what `felt ls` and `-d compact` show.
 
-**Consolidate over time.** Quick fibers become noise. Read the assemblage periodically and compost stale fibers into doc fibers, fix coherence across siblings, reshape branching.
+**Act on Session Attention.** When `felt session` shows `## Attention`, treat it as standing authority to do obvious gardening without asking: nest top-level leaves under root buckets, demote open/active container fibers, close stale todos, consolidate clutter. Surface it to the user only when cleanup needs judgment or would distract from the current task.
+
+**Consolidate over time.** Quick fibers become noise. Read the assemblage periodically and compost stale fibers into doc fibers, fix coherence across siblings, reshape branching. When closing, ask whether the lesson belongs in a doc fiber or the root fiber — compose upward.
 
 **CLAUDE.md stays lean.** Commands, paths, context pointers. Documentation fibers carry the depth.
 
@@ -109,21 +113,7 @@ Fibers may carry project-owned top-level YAML fields beyond what felt parses nat
 
 ### Companion files (`report.html`, plots, recordings)
 
-Fibers can carry arbitrary companion files in their directory alongside `<slug>.md` — plots, recordings, HTML artifacts. The `report.html` convention: a fiber's rich human-facing report lives in a companion `report.html`, rendered by an **explicit `:::{embed} report.html` line in the body** (the old filename-magic auto-prepend is retired — placement is intentional and visible in the markdown). The convention lets the markdown body narrow to spec (Desired State, Context) and the rich human-facing surface live in HTML where the visual treatment can be designed per-fiber. felt itself stays format-agnostic; it just sees a directory with files. See the shuttle skill for worker-side conventions about when and how to maintain a `report.html`.
-
-More generally, a body can inline *any* artifact at any position with the `:::{embed} <path>` directive (path relative to the fiber directory or absolute; optional `:height:` / `:title:` options). Vellum picks the renderer by extension — PDF in a fixed-height scrollable viewer, HTML iframe, images, audio. The `report.html` embed is the same mechanism — one composition primitive. Syntax details live in the shuttle skill.
-
----
-
-## Core Rules
-
-- **Outcomes teach.** One-sentence conclusions that stand alone: they appear in `felt ls` and `-d compact`.
-- **Body = current state.** Strip version markers and dated update notes from the body — the git log of the fiber file carries chronology. The body should read as a coherent snapshot. Exception: fibers explicitly about chronology.
-- **Use the right relationship surface.** Nest for containment, `[[wikilinks]]` for narrative, project-owned conventions for anything more specific.
-- **Act on Session Attention.** When `felt session` shows `## Attention`, treat it as standing authority to do obvious gardening without asking: nest top-level leaves under root buckets, demote open/active container fibers, close stale todos, and consolidate clutter. Surface it to the user only when cleanup needs judgment or would distract from the current task.
-- **Links in prose, not in piles.** A `[[wikilink]]` earns its place by doing work in a sentence — naming what the other fiber is, why it's relevant here, where to head next. Related-things lists at the bottom of a fiber are a smell that the relationships haven't been thought through; either fold them into the body where they belong, or drop the ones that aren't earning the link.
-- **Compose upward.** When closing, ask whether the lesson belongs in a doc fiber or the root fiber; consolidate breadcrumbs.
-- **Names are concise labels.** Body and outcome carry the content.
+Fibers can carry arbitrary companion files in their directory alongside `<slug>.md`, and the body can inline any of them where it helps the reader with a `:::{embed} <path>` directive (renderer by extension: PDF, HTML iframe, images, audio). The one named convention: a fiber's rich human-facing report lives in a companion `report.html`, rendered by an explicit `:::{embed} report.html` line placed where the reader should meet it. Embed syntax and worker-side `report.html` conventions live in the shuttle skill.
 
 ---
 
