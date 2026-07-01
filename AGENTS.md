@@ -129,7 +129,7 @@ The standing design stance: felt owns the data model; Shuttle owns the network
 and the surface; the two are one package, not two that shell to each other.
 
 **felt history is gone.** The daemon detects clean worker exits via the
-`shuttle.handed_off_at` frontmatter field — not a felt-history event. The
+`shuttle.runtime.handed_off_at` frontmatter field — not a felt-history event. The
 editorial chain felt-history used to carry now lives in the constitution body's
 `## Status` block plus the git log of the fiber. (The synced-SQLite index slice —
 treating the index purely as a throwaway cache — is deferred to a follow-on.)
@@ -477,7 +477,7 @@ felt shuttle resume / accept / reopen <fiber>
 felt shuttle set-agent <fiber> <agent-id> [--effort E] [--chrome]
 felt shuttle dispatch <fiber>
 felt shuttle handoff <fiber>                     # worker's clean-exit ritual: stamp
-                                                #   shuttle.handed_off_at (→ next dispatch
+                                                #   shuttle.runtime.handed_off_at (→ next
                                                 #   is fresh) + end own tmux session. The
                                                 #   single final action; folds in kill $PPID.
 felt shuttle snapshot

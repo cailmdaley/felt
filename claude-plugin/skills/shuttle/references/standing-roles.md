@@ -84,7 +84,7 @@ Same card, same starting state, different button → different verb. The split m
 
 | Card state | Interaction | Verb fired | Effect |
 |---|---|---|---|
-| standing, **awaiting** (status:closed + untempered) | drag → tempered or inFlight | `felt shuttle accept` | Re-arms (`status: active`, next_due recomputed from cron). Outcome cleared. session cleared. |
+| standing, **awaiting** (status:closed + untempered) | drag → tempered or inFlight | `felt shuttle accept` | Re-arms (`status: active`; next occurrence computed `cron.next(now)`). Outcome cleared. |
 | standing, **awaiting** | modal **Resume** button | `felt shuttle resume` + dispatch (resume_mode=previous) | Re-arms and continues the prior session with the user's directive (session id from `shuttle.runtime.session_uuid`). Outcome preserved. |
 | standing, **awaiting** | modal **New session** button | `felt shuttle resume` + dispatch (resume_mode=fresh) | Re-arms and starts a brand-new session on the same fiber. Outcome preserved. |
 | standing, **armed (status:active)** | drag → inFlight | `felt shuttle dispatch --ad-hoc` | Manual ad-hoc run. Synthetic `adhoc-*` id. Schedule untouched. |
@@ -226,7 +226,7 @@ The daemon stamps `session_uuid` / `dispatched_at` / `run_id` into `shuttle.runt
 felt shuttle repeat  <fiber> --schedule "0 9 * * 1-5" --tz Europe/Paris
 felt shuttle pause   <fiber>                # status: open + kill worker
 felt shuttle resume  <fiber>                # status: active (re-arm; awaiting runs re-arm for immediate dispatch)
-felt shuttle accept  <fiber>                # accept awaiting run; re-arm with next_due recomputed from cron
+felt shuttle accept  <fiber>                # accept awaiting run; re-arm (next occurrence = cron.next(now))
 felt shuttle dispatch <fiber> --ad-hoc      # manual ad-hoc run; synthetic adhoc-* id; schedule untouched
 felt shuttle close   <fiber>                # retire the responsibility (reopen brings it back)
 felt shuttle status                         # one line per shuttle-managed fiber

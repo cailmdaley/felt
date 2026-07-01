@@ -397,8 +397,9 @@ defmodule Shuttle.Dispatcher do
     """
 
     # A standing run is definitionally standing — declare it here so the exit
-    # contract is right regardless of how the caller threaded opts (the handoff
-    # marker is a oneshot-loop mechanism; standing rides its run-id editorial).
+    # contract is right regardless of how the caller threaded opts. The handoff
+    # marker is inert for standing (runs always dispatch fresh); the daemon
+    # owns the awaiting transition on worker exit.
     compose_prompt(header, fiber_id, Keyword.put(opts, :kind, "standing"))
   end
 
