@@ -13,15 +13,16 @@ The daemon dispatches a fiber when all of these hold:
 
 Agent comes from `shuttle.agent`, resolved against felt's registry (`internal/shuttle/agents.json`, embedded into the CLI; the daemon consumes the resolved record off `felt show -j`). The bare fallback when a fiber carries no `shuttle.agent` is `claude-sonnet`; the recommended default for real work is `claude-opus` (see authoring.md, Agent selection).
 
-**Tags never gate dispatch.** Three layers feed the system: the `shuttle:` block (`kind`, `schedule`, `agent`, `host`, `project_dir`) declares shuttle-management; universal lifecycle scalars (`status`, `tempered`, `depends_on`) drive dispatch *and* view; tags are free-form noticings affecting view only — exactly one (`idea`) is load-bearing for view, routing the card to the speculative ideas column. No tag, including `constitution` or `draft`, is read by the daemon.
+**Tags never gate dispatch — or the view.** Three layers feed the system: the `shuttle:` block (`kind`, `schedule`, `agent`, `host`, `project_dir`) declares shuttle-management; universal lifecycle scalars (`status`, `tempered`, `depends_on`) drive dispatch and view; tags are free-form noticings read by neither the daemon nor the kanban classifier.
 
 ## Kanban columns
 
-Column membership is derived from felt `status` + `tempered` + `shuttle.kind` + tmux liveness, plus the one tag-driven case:
+Column membership derives from felt `status` + `tempered` + `shuttle.kind` + tmux liveness (`classifyFiber` in `ui/src/board/KanbanRules.ts` — the single source of truth):
 
-- **Ideas**: tagged `idea`. Speculative, pre-formal. UI-only signal.
-- **Drafts**: `status: open`, no `idea` tag (a fresh stash awaiting refinement; `felt shuttle pause` lands a card here).
-- **In flight**: `status: active`, not a standing role awaiting review. Eligible for Shuttle.
+- **Drafts**: `status: open`, or no `shuttle:` block at all (a stash awaiting refinement; `felt shuttle pause` lands a card here).
+- **Scheduled**: an armed standing role between firings (`status: active`, no live worker) — it fires on its own cron, so it sits on the timeline at its next launch rather than in the Now lane.
+- **Pinned**: a resting `kind: pinned` role — the strip of perennial interfaces; enters a session only by explicit human dispatch.
+- **In flight**: a live tmux worker (any kind), or an armed oneshot (`status: active` — even when blocked by deps; it flies when the dep clears).
 - **Awaiting review**: `status: closed`, `tempered` absent. Worker exited; Shuttle ignores it pending human verdict.
 - **Tempered**: `status: closed`, `tempered: true`. Human-accepted (oneshot terminus).
 - **Composted**: `status: closed`, `tempered: false`. Human-rejected (mooted, superseded). The block is preserved as historical record.

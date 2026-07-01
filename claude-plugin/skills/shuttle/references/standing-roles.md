@@ -96,14 +96,13 @@ Same card, same starting state, different button → different verb. The split m
 
 **Outcome-clearing rule.** Only `felt shuttle accept` clears the outcome — that's the cycle-advance verb, and a fresh outcome is the right precondition for the next run. Resume and New session preserve outcome because the run is *not* finalized; the user is iterating on it.
 
-The kanban classifier (`classifyFiber`) reads only `status`, `tempered`, `kind`, the `idea` tag, tmux liveness, and deps:
+The kanban classifier (`classifyFiber`) reads only `status`, `tempered`, `kind`, and tmux liveness — no tags:
 
-- standing + awaiting (`status: closed`, untempered) → awaitingReview
-- standing or oneshot, `status: active`, not closed, not (standing awaiting) → inFlight
-- `status: open`, not closed, no `idea` tag → drafts
-- running worker → inFlight (tmux liveness overrides)
-- `status: closed` + `tempered: true` → tempered
-- `status: closed` + `tempered: false` → composted
+- `status: closed` → awaitingReview / tempered / composted by the `tempered` verdict
+- running worker → inFlight (tmux liveness overrides, any kind)
+- resting `kind: pinned` → pinned (the strip)
+- `status: active` standing → scheduled (timeline, placed at next launch); `status: active` oneshot → inFlight
+- `status: open` or no `shuttle:` block → drafts
 
 The "live worker overrides" rule matters: the kanban shows ground truth (the running tmux session), read live, not stored file state.
 
@@ -215,7 +214,6 @@ The daemon stamps `session_uuid` / `dispatched_at` / `run_id` into `shuttle.runt
 - **`felt shuttle close` retires the responsibility; `accept` closes a run.** Closing a standing role is a verdict *on the constitution*, not on any single run — use it when the responsibility itself no longer matters. Per-run acceptance is `felt shuttle accept`, a separate verb. (`felt shuttle reopen` brings a retired role back if it turns out to matter after all.)
 - **`status` is the dispatch gate.** The poller dispatches iff `status == "active"`. A standing role at `status: open` (draft/paused) or `status: closed` (awaiting/terminus) won't dispatch until armed. `felt shuttle resume` (open → active) or `felt shuttle accept` (closed-awaiting → active) is the way back.
 - **`tempered` is the verdict axis.** Absent = awaiting (on a closed fiber); `true` = accepted (oneshot terminus); `false` = composted. For a standing role, accept re-arms (`status: active`) rather than writing `tempered: true`.
-- **The `idea` tag is the one tag that affects column placement.** It routes a fiber to the `ideas` column. Useful for speculative drafts; don't apply to live standing roles.
 - **Ghost workers.** If `state.running` shows a fiber that has no live tmux session, the daemon's eligibility check blocks it from re-dispatching. `felt shuttle dispatch <fiber>` triggers a `reconcile_running_fiber` pass that clears stale entries.
 - **Daemon restart does NOT end worker sessions — common misconception, closed out.** A worker runs in its own tmux session; the daemon only *watches* it (**tmux owns the worker process, Shuttle owns the watcher**). Bouncing the daemon cycles the watcher and rebinds `:4000`; every `shuttle-<id>` tmux session keeps running untouched and is re-adopted on boot. So an in-session worker can deploy its own daemon fix and restart freely — never hold a restart because "there's a live session." (Commit your diff first regardless — good hygiene, not because a restart would take it.) **Restart mechanics:** a shell-started daemon bounces with `make restart`; a launchd-managed one (after `make install-agent`) needs `launchctl kickstart -k gui/$(id -u)/io.shuttle.daemon` — `make restart`'s `PIDPATTERN` only matches a relative-path shell launch, so against launchd its stop/start no-ops. (felt AGENTS.md → "Restarting the daemon does NOT end your session".)
 - **Resume of an awaiting standing role re-runs the worker against the digest.** `felt shuttle resume` re-arms it (`status: active`) for immediate dispatch. Useful for "actually, please rerun this with this directive" — pair with a review-comment carrying the directive.
