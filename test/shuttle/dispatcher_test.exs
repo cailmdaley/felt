@@ -264,7 +264,7 @@ defmodule Shuttle.DispatcherTest do
     # work like ordinary chat completion.
     assert prompt =~ "Exit Contract"
     assert prompt =~ "kill $PPID"
-    assert prompt =~ "Do not substitute a normal chat final response"
+    assert prompt =~ "A normal chat final response is not a worker exit"
     refute prompt =~ "Exit before context is half-full"
 
     # A oneshot must be told to write the clean-handoff marker before exit — it's
@@ -283,7 +283,7 @@ defmodule Shuttle.DispatcherTest do
     pinned = Dispatcher.render_prompt("tests/haiku", kind: "pinned")
     assert pinned =~ "Exit Contract"
     assert pinned =~ "pinned interactive role"
-    assert pinned =~ "DO NOT `kill $PPID`"
+    assert pinned =~ "DO NOT exit"
     assert pinned =~ "stay alive and wait"
     # The autonomous kill-on-exit instruction must be absent for pinned.
     refute pinned =~ "your final action must be `kill $PPID`"
@@ -881,7 +881,7 @@ defmodule Shuttle.DispatcherTest do
     # Standing-role-specific framing
     assert prompt =~ "scheduled run of this standing role"
     assert prompt =~ "one due occurrence, not a new fiber"
-    assert prompt =~ "awaiting-review handoff at run completion"
+    assert prompt =~ "standing-roles reference covers the run lifecycle"
 
     # Identity lines
     assert prompt =~ "Fiber: tests/haiku"
@@ -1034,7 +1034,7 @@ defmodule Shuttle.DispatcherTest do
     assert prompt =~ "already loaded in your transcript"
     assert prompt =~ "Exit Contract"
     assert prompt =~ "kill $PPID"
-    assert prompt =~ "Do not substitute a normal chat final response"
+    assert prompt =~ "A normal chat final response is not a worker exit"
 
     # Resume prompt deliberately omits the fresh-dispatch orientation —
     # skills, conventions, and the constitution are already in scope.

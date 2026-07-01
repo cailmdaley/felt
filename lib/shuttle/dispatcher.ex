@@ -261,12 +261,8 @@ defmodule Shuttle.Dispatcher do
   The exit contract appears directly in the prompt, even though the full
   practice lives in the `shuttle` skill. Resumed sessions otherwise arrive
   with a lighter prompt and can mistake Shuttle work for ordinary chat
-  completion; keeping `kill $PPID` in the causal foreground preserves the
-  dispatcher contract across fresh and resumed runs.
-
-  On felt failure (binary missing, no history yet) the From User block
-  falls back to empty — dispatch continues rather than failing, and
-  the worker just gets the orientation header.
+  completion; keeping the handoff ritual in the causal foreground preserves
+  the dispatcher contract across fresh and resumed runs.
 
   ## Options
 
@@ -389,9 +385,9 @@ defmodule Shuttle.Dispatcher do
 
     orientation =
       if ad_hoc? do
-        "The orchestration system Shuttle dispatched you for an ad-hoc run of this standing role. Standing roles are recurring responsibilities; this dispatch is right-now work and does not consume or advance the scheduled occurrence. Exit like any standing run: write the work product into outcome, rewrite the constitution's `## Status` section in prose, then kill $PPID — the daemon owns the awaiting transition. The `shuttle` and `felt` skills carry the practice — activate them next."
+        "The orchestration system Shuttle dispatched you for an ad-hoc run of this standing role — right-now work that does not consume or advance the scheduled occurrence. Standing roles are recurring responsibilities; write the run's work product into `outcome` and exit per the contract below (the daemon owns the awaiting transition). The `shuttle` and `felt` skills carry the practice — activate them next."
       else
-        "The orchestration system Shuttle dispatched you for a scheduled run of this standing role. Standing roles are recurring responsibilities — this dispatch is one due occurrence, not a new fiber. The `shuttle` and `felt` skills carry the practice — activate them next; the skill's \"Standing Roles\" section covers the awaiting-review handoff at run completion."
+        "The orchestration system Shuttle dispatched you for a scheduled run of this standing role. Standing roles are recurring responsibilities — this dispatch is one due occurrence, not a new fiber. Write the run's work product into `outcome` and exit per the contract below. The `shuttle` and `felt` skills carry the practice — activate them next; the skill's standing-roles reference covers the run lifecycle."
       end
 
     header = """
@@ -441,7 +437,7 @@ defmodule Shuttle.Dispatcher do
 
   # Shared composition for all top-level prompts: a per-prompt orientation
   # header, the mandatory exit contract, and optional context blocks. The
-  # shape is documented in CLAUDE.md under "Dispatch prompt structure".
+  # shape is documented in AGENTS.md under "Dispatch prompt structure".
   # Outcome and last-session are deliberately not inlined — the shuttle
   # skill prescribes that the worker reads them via `felt show` (outcome +
   # the body's `## Status` block) on arrival, and duplicating either here risks
@@ -491,7 +487,7 @@ defmodule Shuttle.Dispatcher do
     render_block(
       "Headless",
       nil,
-      "Headless print-mode run: no human can attach to this session — work to completion and exit. The human-gate exception never applies here; if you hit something you would normally pause to ask about, record it in the outcome/history and keep driving to a clean checkpoint, then exit."
+      "Headless print-mode run: no human can attach to this session — work to completion and exit. The human-gate exception never applies here; if you hit something you would normally pause to ask about, record it in the outcome and `## Status`, keep driving to a clean checkpoint, then exit."
     )
   end
 
@@ -509,27 +505,21 @@ defmodule Shuttle.Dispatcher do
     render_block(
       "Exit Contract",
       nil,
-      "This is a pinned interactive role — a standing interface a human drives, not a one-shot task. Keep the fiber current as you work (outcome, history, findings, commits at clean checkpoints), but when you run out of immediate work DO NOT `kill $PPID`: stay alive and wait for the next message. The session is the interface; it ends only when the human parks the role (`active → open`), not when you finish the task at hand. The poll loop will not re-spawn this role, so exiting goes dark on the human until they manually resume — don't. Reply normally and wait when there's nothing left to drive."
+      "This is a pinned interactive role — a standing interface a human drives, not a one-shot task. Keep the fiber current as you work (outcome, findings, commits at clean checkpoints), but when you run out of immediate work DO NOT exit: stay alive and wait for the next message. The session is the interface; it ends only when the human parks the role (`active → open`), not when you finish the task at hand. The poll loop will not re-spawn this role, so exiting goes dark on the human until they manually resume — don't. Reply normally and wait when there's nothing left to drive."
     )
   end
 
-  # Standing (scheduled cron) roles dispatch discrete occurrences and never use
-  # the oneshot handoff-resume mechanism (decide_continuation returns :fresh for
-  # them), so they keep the plain exit contract — the run handoff rides their
-  # run-id editorial event, per the skill's Standing Roles section.
-  defp render_exit_contract("standing") do
-    render_block(
-      "Exit Contract",
-      nil,
-      "This is an autonomous Shuttle worker. After you update outcome/history, file findings, and commit at a clean checkpoint, your final action must be `kill $PPID` — unless the dispatch directive or the constitution explicitly asks you to wait for a human (a 2FA gate, a send-in-his-voice step, a \"talk to me first\" signal); then drive to that checkpoint and stay alive there instead. Do not substitute a normal chat final response for worker exit; the handoff belongs in the fiber."
-    )
-  end
-
+  # Oneshots and standing roles share one exit ritual: rewrite `## Status`,
+  # then `felt shuttle handoff` (stamps the clean-exit marker and ends the
+  # session). For standing roles the marker is inert — scheduled runs always
+  # dispatch fresh (decide_continuation is scoped to oneshots) and the daemon
+  # marks the run awaiting on exit — but one uniform contract beats a variant
+  # whose only difference is which kill command ends the session.
   defp render_exit_contract(_kind) do
     render_block(
       "Exit Contract",
       nil,
-      "This is an autonomous Shuttle worker. After you update outcome, file findings, and commit at a clean checkpoint, rewrite the constitution's `## Status` section in prose — where the work stands, what's blocked, where the next session picks up (rewritten, never a session log) — then your FINAL action is `felt shuttle handoff <fiber-id>`, which writes the clean-exit marker and ends your session (no separate `kill $PPID` needed). The handoff marker is load-bearing: it tells the daemon you closed cleanly, so the next dispatch starts fresh and reads your `## Status` note. WITHOUT it, a session that simply died (the process was killed mid-thought — common on remote machines) is indistinguishable from a clean exit, so the daemon RESUMES your transcript instead of looping a fresh, context-less worker. Exception: if the dispatch directive or constitution explicitly asks you to wait for a human (a 2FA gate, a send-in-his-voice step, a \"talk to me first\" signal), drive to that checkpoint and stay alive there instead — do not hand off. Do not substitute a normal chat final response for worker exit; the handoff belongs in the fiber."
+      "This is an autonomous Shuttle worker. After you update outcome, file findings, and commit at a clean checkpoint, rewrite the constitution's `## Status` section in prose — where the work stands, what's blocked, where the next session picks up (rewritten, never a session log) — then your FINAL action is `felt shuttle handoff <fiber-id>`, which stamps the clean-exit marker and ends your session (no separate `kill $PPID`). The marker is load-bearing: it tells the daemon you closed cleanly, so the next dispatch starts fresh and reads your `## Status`. Without it a session that died mid-thought is indistinguishable from a clean exit, and the daemon resumes your transcript instead of looping a fresh worker. Exception: if the dispatch directive or constitution explicitly asks you to wait for a human (a 2FA gate, a send-in-his-voice step, a \"talk to me first\" signal), drive to that checkpoint and stay alive there — do not hand off. A normal chat final response is not a worker exit; the handoff belongs in the fiber."
     )
   end
 
@@ -709,7 +699,7 @@ defmodule Shuttle.Dispatcher do
 
        A successful claim renames this tmux session to the fiber's canonical worker name — that is expected. The claim is idempotent: if the response is lost, retry with the same body.
     4. **Activate.** Now set felt `status: active`. (Doing this before the claim would make the fiber dispatch-eligible while the daemon cannot yet see this session — a duplicate worker would spawn.)
-    5. **Realize.** From here you are an ordinary Shuttle worker on that fiber: drive toward the Desired State, keep outcome/history current, and exit per the contract below.
+    5. **Realize.** From here you are an ordinary Shuttle worker on that fiber: drive toward the Desired State, keep the outcome current, and exit per the contract below.
     """
 
     [

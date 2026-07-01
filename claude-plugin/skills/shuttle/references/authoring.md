@@ -29,7 +29,7 @@ The mechanical alternative — write the `shuttle:` block directly into the fron
 
 ## Human in the loop — directives and gates, not a mode
 
-Every dispatch is autonomous: the worker drives to a clean checkpoint and exits with `kill $PPID`; the handoff lives in `outcome` / `felt history` / commits, and the human reads the result later off the kanban. There is **no separate "interactive" dispatch mode** (it was retired — it conflated *when* the human joins with *how much* the worker does first). When work needs a human in the loop, that expectation rides one of two channels the worker already reads.
+Every dispatch is autonomous: the worker drives to a clean checkpoint and exits via `felt shuttle handoff`; the handoff lives in `outcome` / the `## Status` block / commits, and the human reads the result later off the kanban. There is **no separate "interactive" dispatch mode**. When work needs a human in the loop, that expectation rides one of two channels the worker already reads.
 
 **Per-dispatch "talk to me first."** When *this* run should pause for Cail before doing anything heavy — he wants to steer, or the autonomous scope is unclear — put it in the **From User directive**. The kanban requeue/resume modal has a one-click **"wait for me"** affordance that prepends a canned talk-first line to the directive box; or write your own. The worker reads the From User block at the top of context: talk-first signal → light survey (constitution + last handoff), greet, wait; no signal → ordinary autonomous run. This is a property of the *moment*, not the fiber — the next dispatch starts clean unless its directive says otherwise.
 
@@ -60,4 +60,4 @@ Three CLI harnesses cover the working space. Cail's setup runs **subscription-fi
 
 Other entries (`pi-kimi`, `pi-deepseek-pro`, `pi-deepseek-flash`, `claude-haiku`) exist but aren't defaults; reach for them only when the user names them. All claude agents dispatch with `--permission-mode auto`.
 
-Set with `felt shuttle set-model <fiber> <agent-id>`. Registry changes live in `~/Documents/projects/shuttle/share/agents.json`; update the JSON, then `make all` regenerates the Go embedded copy and rebuilds daemon + CLI. Rebuild on each remote host too (see the portolan CLAUDE.md note on the resolve/invoke daemon split).
+Set with `felt shuttle set-agent <fiber> <agent-id> [--effort E] [--chrome]` (`set-model` is the agent-only shorthand). The registry is felt's single source of truth — `internal/shuttle/agents.json` in the felt repo (`~/dev/felt`), embedded into the CLI at build; `felt shuttle agents` lists it. Registry changes need `make cli-install` and a rebuild on each remote host.

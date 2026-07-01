@@ -2,31 +2,30 @@
 name: shuttle
 description: >
   Use this skill in any of these situations.
-  **Worker dispatch:** the first user message opens with "Shuttle dispatch.
-  Fiber ID: <id>" — you're the worker realizing that constitution.
+  **Worker dispatch:** the first user message says Shuttle dispatched,
+  resumed, or spawned you ("The orchestration system Shuttle dispatched
+  you on this fiber", "Shuttle capture session", …) — you're the worker
+  realizing that fiber.
   **Authoring:** the user mentions a **constitution** (writing, drafting,
   "stash this as a constitution", "shuttle this", "let's shuttle <X>"), or
-  names a **Shuttle agent** by registry id — `claude-fable`, `claude-opus`,
-  `claude-sonnet`, `codex`, `codex-spark`, `pi-sonnet`, `pi-gpt-5.4`,
-  `pi-gpt-5.4-mini`, `pi-gpt-5-mini` —
-  in a context that implies dispatch. The phrase **"shuttle [with]
-  <model-name>"** is the canonical author trigger.
-  **Operator questions:** the user asks about Shuttle itself, the kanban,
-  why a card is or isn't appearing, agent selection / Copilot budget, or
-  how to prepare work for autonomous follow-through. Covers realizing a
-  constitution (worker mode) and the authoring-and-installing flow that
-  produces those constitutions (author mode).
+  names a **Shuttle agent** by registry id (`claude-opus`, `claude-fable`,
+  `codex`, `pi-sonnet`, … — `felt shuttle agents` lists them) in a context
+  that implies dispatch. The phrase **"shuttle [with] <model-name>"** is
+  the canonical author trigger.
+  **Operator questions:** the user asks about Shuttle itself, the kanban
+  board, why a card is or isn't appearing, agent selection / Copilot
+  budget, or how to prepare work for autonomous follow-through.
 ---
 
 # Shuttle
 
-**Activate the `felt` skill too if it isn't already active.** Shuttle operates *on* fibers — every action you take (read the constitution, update outcome, append history, file crystallizations) goes through felt. Felt is the substrate; shuttle is one consumer of it.
+**Activate the `felt` skill too if it isn't already active.** Shuttle operates *on* fibers — every action you take (read the constitution, update outcome, file crystallizations) goes through felt. Felt is the substrate; shuttle is one consumer of it.
 
 Your job is to **realize the constitution** — drive until the fiber's desired state and current state are broadly aligned. The constitution can evolve: amended as the world changes, as the scale of what's possible shifts. Realization is asymptotic and ongoing, not a binary checkpoint.
 
-Shuttle is the poll-driven dispatcher: the Elixir daemon at `~/Documents/projects/shuttle/` watches the fiber tree and dispatches one tmux worker per eligible fiber per tick. Eligibility is a single signal — **the fiber carries a `shuttle:` block and its felt-native `status` is `active`** (the sole dispatch gate; there is no `enabled` flag). Portolan's kanban is a pure view over the same blocks and tmux sessions. You are that worker for this session. The work may take one session or many. Ordinary autonomous sessions end with `felt shuttle handoff` (the clean-exit marker that also ends the session); Shuttle redispatches a fresh worker on its next poll if the fiber is still eligible. A resumed Shuttle prompt has the same exit contract as a fresh dispatch: "resumed" means "same transcript," not a license to idle.
+Shuttle is the poll-driven dispatcher: a daemon that ships with felt (canonical checkout `~/dev/felt` — AGENTS.md there is the operator guide) watches the fiber tree and dispatches one tmux worker per eligible fiber per tick. Eligibility is a single signal — **the fiber carries a `shuttle:` block and its felt-native `status` is `active`** (the sole dispatch gate; there is no `enabled` flag). The kanban board the daemon serves at `:4000` is a pure view over the same blocks and tmux sessions. You are that worker for this session. The work may take one session or many. Ordinary autonomous sessions end with `felt shuttle handoff` (the clean-exit marker that also ends the session); Shuttle redispatches a fresh worker on its next poll if the fiber is still eligible. A resumed Shuttle prompt has the same exit contract as a fresh dispatch: "resumed" means "same transcript," not a license to idle.
 
-Manual loop runners (ralph) are retired. The loop work splits three ways: Shuttle redispatch is the outer loop (a fresh worker per poll against the fiber); in-session subagents/workflows are the inner loop where the harness carries them, else more redispatches do the same arc; and `/loop` covers the zero-infra, self-paced case. Do not launch manual loop tmux sessions for constitution work.
+Looping work splits by layer: in-session subagents/workflows are the inner loop where the harness carries them (workers without those tools do the same arc across redispatches); Shuttle redispatch is the outer loop — a fresh worker per poll against the fiber; `/loop` covers the zero-infra, self-paced case. Don't hand-roll loop tmux sessions for constitution work.
 
 ## Reading by role
 
@@ -93,7 +92,7 @@ The `## Status` block plus the constitution recovers most of a warm world-model 
 
 - **The desired state is realized** (see Exit semantics for the review requirement).
 - **You're genuinely blocked** on something only the human can supply.
-- **Context is half-full.** Exit at the next sub-task boundary after you cross half; write the editorial event from full attention. (Subagent-capable workers hit this later — delegation keeps the orchestrating context lean — but the line doesn't move: when *your* context crosses half, hand off.)
+- **Context is half-full.** Exit at the next sub-task boundary after you cross half; write the handoff from full attention. (Subagent-capable workers hit this later — delegation keeps the orchestrating context lean — but the line doesn't move: when *your* context crosses half, hand off.)
 - **Clean break.** If the next step is both heavy AND disjoint — fresh problem space, doesn't need the world-model you just built — exit and let the next session start uncluttered.
 
 ## Rules
@@ -106,7 +105,7 @@ The `## Status` block plus the constitution recovers most of a warm world-model 
 
 **Prefer doing the work.** You have authority. Trust the constitution. Don't ask permission. Don't avoid ambitious moves just because they span sessions — Shuttle redispatches. When the work involves a load-bearing model choice or a capability-removing pivot, **surface alternatives in the artifact, don't withhold the work to ask** — a "considered alternatives" note in the body or outcome beats filing a question fiber and exiting. The failure mode to guard against: using "the human knows things I don't" as cover for not thinking hard enough.
 
-**Questions go where they'll be seen.** In `outcome:` (kanban card) or an editorial event (drill-down) — open `-t question` fibers sediment unanswered.
+**Questions go where they'll be seen.** In `outcome:` (kanban card) or the `## Status` block (the next reader's landing) — open `-t question` fibers sediment unanswered.
 
 **Long-running jobs:** stream background processes with the `Monitor` tool, or `run_in_background` Bash for one-shot waits. Shepherd to completion before exiting; don't fire-and-forget.
 
@@ -116,7 +115,7 @@ The status you set before you hand off determines what happens next. Do not subs
 
 **Human-gate exception.** If the From User directive or the constitution explicitly says a human will attach to this session — a "wait for me" / talk-first signal, or a structural gate like 2FA or a send-in-his-voice step — finish the initial task, leave a checkpoint, keep the fiber `active` and the agent **alive**. The usual close + `felt shuttle handoff` waits until the human signals done. A resume prompt alone is not this exception. (There is no longer an "interactive" dispatch mode; the signal rides the directive or the spec.)
 
-**Pinned roles are interactive interfaces — never `kill $PPID` on idle.** A `kind: pinned` fiber (a status hub, a debug intake) is a standing interface a human drives, not a one-shot task. The poll loop never auto-dispatches it — it enters a session only by explicit human action (drag-to-in-flight / New session / Resume, all force-dispatch) — so a worker that exits goes **dark** until the human manually resumes it. Therefore: keep the fiber current as you work (outcome, history, commits at clean checkpoints), but when you run out of immediate work, **stay alive and wait for the next message** — reply normally, don't exit. The session ends only when the human parks the role (`active → open`), never autonomously. The dispatch prompt's Exit Contract states this directly for pinned dispatches; this is the practice behind it. (Supersedes the old "active pinned = looping, park before `kill $PPID`" model, which both burned tokens re-dispatching idle interfaces and left the human staring at a dead chat.)
+**Pinned roles are interactive interfaces — never exit on idle.** A `kind: pinned` fiber (a status hub, a debug intake) is a standing interface a human drives, not a one-shot task. The poll loop never auto-dispatches it — it enters a session only by explicit human action (drag-to-in-flight / New session / Resume, all force-dispatch) — so a worker that exits goes **dark** until the human manually resumes it. Therefore: keep the fiber current as you work (outcome, findings, commits at clean checkpoints), but when you run out of immediate work, **stay alive and wait for the next message** — reply normally, don't exit. The session ends only when the human parks the role (`active → open`), never autonomously. The dispatch prompt's Exit Contract states this directly for pinned dispatches; this is the practice behind it.
 
 Three cases, asked in order:
 

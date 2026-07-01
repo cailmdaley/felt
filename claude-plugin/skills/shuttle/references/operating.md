@@ -6,16 +6,14 @@ Lifecycle verbs, kanban semantics, and the triage paths for "why isn't my card d
 
 The daemon dispatches a fiber when all of these hold:
 
-1. The fiber lives in a felt host visible to the Shuttle poller. `~/loom` is the global default; project-local `.felt/` directories only count when that project is pinned as a local city.
+1. The fiber lives in a felt store the daemon polls. Configured stores come from `FELT_STORES` → the persisted registry at `~/.config/felt/stores.json` (no implicit default); a store like `~/loom` also exposes the project substores symlinked under its `.felt/`.
 2. **The fiber carries a `shuttle:` block.** A fiber is shuttle-managed iff it has this block — installed via `felt shuttle install` (oneshot) or `felt shuttle repeat` (standing). The daemon reads the block directly; no tag predicate, no CLI spawn during the poll.
 3. **Felt-native `status:` is `active`** — the sole dispatch gate (`eligible?/2` in `lib/shuttle/poller.ex`). `active` is armed, `open` is a draft, `closed` is a terminus / awaiting review.
 4. Dependencies are satisfied: each `depends_on` target exists and has `tempered: true`.
 
-Agent comes from `shuttle.agent`, resolved against the registry (`share/agents.json`, embedded into both the Elixir daemon and Go CLI). The registry's bare fallback when a fiber carries no `shuttle.agent` is `claude-sonnet`; the recommended default for real work is `claude-opus` (see authoring.md, Agent selection).
+Agent comes from `shuttle.agent`, resolved against felt's registry (`internal/shuttle/agents.json`, embedded into the CLI; the daemon consumes the resolved record off `felt show -j`). The bare fallback when a fiber carries no `shuttle.agent` is `claude-sonnet`; the recommended default for real work is `claude-opus` (see authoring.md, Agent selection).
 
 **Tags never gate dispatch.** Three layers feed the system: the `shuttle:` block (`kind`, `schedule`, `agent`, `host`, `project_dir`) declares shuttle-management; universal lifecycle scalars (`status`, `tempered`, `depends_on`) drive dispatch *and* view; tags are free-form noticings affecting view only — exactly one (`idea`) is load-bearing for view, routing the card to the speculative ideas column. No tag, including `constitution` or `draft`, is read by the daemon.
-
-**Legacy `interactive` key.** The retired `interactive` axis (see authoring.md, "Human in the loop") is inert: a fiber still carrying `shuttle.interactive: true` dispatches as an ordinary autonomous worker, the daemon ignores the key, and the next Go lifecycle write (`set-model`, a reshape, etc.) wipes it. No migration needed — leave it or let it age out. `felt shuttle set-interactive` and `install --interactive` are retired and error with a pointer at the directive/resume channels.
 
 ## Kanban columns
 
@@ -38,20 +36,22 @@ The daemon picks up any of these on its next poll:
 felt shuttle install <fiber>                # fresh oneshot, armed (status: active)
 felt shuttle install <fiber> --disabled     # land in drafts (status: open)
 felt shuttle repeat  <fiber> --schedule "0 9 * * 1-5" --tz Europe/Paris
+felt shuttle pin     <fiber>                # pinned, schedule-less perennial role
 felt shuttle pause   <fiber>                # status: open; kills live worker unless --no-kill
 felt shuttle resume  <fiber>                # status: active
 felt shuttle accept  <fiber>                # standing roles only: accept pending run, re-arm
-felt shuttle set-model <fiber> <agent-id>   # change shuttle.agent
+felt shuttle close   <fiber> [--tempered=…] # status: closed; verdict via --tempered
+felt shuttle reopen  <fiber>                # requeue a closed/reviewed fiber into active work
+felt shuttle set-agent <fiber> <agent-id>   # change shuttle.agent (axes: --effort, --chrome)
 felt shuttle uninstall <fiber>              # archive from kanban — see below
 ```
 
 Read-side checks:
 
 ```bash
-tmux ls | grep '^shuttle-'
 felt shuttle status                         # one line per fiber with a block
-felt shuttle ps                             # live workers only
-~/Documents/projects/shuttle/bin/shuttle snapshot   # daemon's view
+felt shuttle ps                             # live tmux workers only
+felt shuttle snapshot                       # daemon's view (:4000)
 curl -s http://127.0.0.1:4000/api/v1/agents | jq    # agent registry over HTTP
 ```
 
@@ -59,7 +59,7 @@ curl -s http://127.0.0.1:4000/api/v1/agents | jq    # agent registry over HTTP
 
 First check where the fiber was filed (a local repo `.felt/` that's not a pinned city is invisible to the global kanban), then confirm `felt shuttle status` shows the block. Most "card missing" symptoms reduce to "no block installed yet."
 
-**Remote-host fibers reach the kanban over an SSH tunnel, NOT via loom git-sync.** This confusion recurs: a constitution authored on a remote host (e.g. cineca, where `~/loom` is a *different* checkout than the Mac's) does **not** need `git commit` + `git push` of loom to show up. The Portolan daemon reads each remote city's *live* loom over the tunnel, so a fresh `shuttle:` block on the remote surfaces directly. **Do not push loom just to make a remote card appear** — loom git-sync moves fiber content across machines; the SSH tunnel is the kanban's live view. If a remote card is missing, debug the tunnel / city pin, not the git state.
+**Remote-host fibers reach the kanban over an SSH tunnel, NOT via loom git-sync.** This confusion recurs: a constitution authored on a remote host (e.g. cineca, where `~/loom` is a *different* checkout than the Mac's) does **not** need `git commit` + `git push` of loom to show up. The local daemon reads each remote host's *live* view over the tunnel (candide→:4001, cineca→:4002; owner-routed reads), so a fresh `shuttle:` block on the remote surfaces directly. **Do not push loom just to make a remote card appear** — loom git-sync moves fiber content across machines; the SSH tunnel is the kanban's live view. If a remote card is missing, debug the tunnel / store registration, not the git state.
 
 ## When to uninstall — and when not to
 

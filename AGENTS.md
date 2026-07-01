@@ -471,9 +471,10 @@ felt shuttle status --remote <name>            # single remote
 felt shuttle ps                                # live tmux workers only
 felt shuttle install <fiber> --project-dir "$PWD" [-m <agent-id>] [--disabled]
 felt shuttle repeat <fiber> --schedule "0 9 * * 1-5" --tz Europe/Paris --project-dir "$PWD"
-felt shuttle pause <fiber>                       # disable + kill live worker; --no-kill preserves it
-felt shuttle resume / accept <fiber>
-felt shuttle set-model <fiber> <agent-id>
+felt shuttle pin <fiber> --project-dir "$PWD"    # pinned, schedule-less perennial role
+felt shuttle pause <fiber>                       # park in drafts + kill live worker; --no-kill preserves it
+felt shuttle resume / accept / reopen <fiber>
+felt shuttle set-agent <fiber> <agent-id> [--effort E] [--chrome]
 felt shuttle dispatch <fiber>
 felt shuttle handoff <fiber>                     # worker's clean-exit ritual: stamp
                                                 #   shuttle.handed_off_at (→ next dispatch
@@ -564,7 +565,11 @@ All prompt variants share this shape (`compose_prompt/3` in dispatcher.ex):
    `prompt_fiber_id`'s work_dir-local translation safe-fails, the id above
    is global and doesn't resolve from cwd; the store line makes the
    fallback mechanical (`felt -C <felt-store> show <id>`).
-4. **`From User`** — the user's directive, when one rides this dispatch. It
+4. **`Exit Contract`** block — always present; one uniform contract for
+   oneshot + standing (rewrite `## Status`, then `felt shuttle handoff`),
+   inverted for pinned roles (stay alive; the session is the interface).
+   A `Headless` block follows for print-mode agents (no human can attach).
+5. **`From User`** — the user's directive, when one rides this dispatch. It
    is the `user_message` dispatch *parameter* (inlined into the prompt at
    launch and discarded), not a persisted felt event. The directive arrives
    *with* the dispatch.
