@@ -193,6 +193,21 @@ defmodule Shuttle.Dispatcher do
     end
   end
 
+  @doc """
+  The autonomous fresh-vs-resume decision for a fiber, pre-flight: `:fresh`
+  when an autonomous dispatch would LAUNCH NEW WORK, `{:previous, session_id}`
+  when it would resume a dirty death's transcript.
+
+  This is exactly the rule `check_resume_intent/3` applies when no human
+  directive is carried (see `decide_continuation/2` below), exposed so the
+  Poller's boot quarantine can ask the question without dispatching: resuming
+  a dead worker is unambiguous recovery and stays automatic; a fresh launch is
+  a decision a just-restarted daemon must not make in bulk.
+  """
+  @spec autonomous_continuation(map()) :: :fresh | {:previous, String.t()}
+  def autonomous_continuation(fiber),
+    do: decide_continuation(fiber, Shuttle.Continuation.resumable_session_id(fiber))
+
   # The autonomous fresh-vs-resume decision when there is no human resume
   # directive. A long-running oneshot loops across sessions: a worker exits, the
   # next poll re-dispatches and continues. The question is whether the previous
@@ -520,7 +535,7 @@ defmodule Shuttle.Dispatcher do
     render_block(
       "Exit Contract",
       nil,
-      "This is an autonomous Shuttle worker. After you update outcome, file findings, and commit at a clean checkpoint, rewrite the constitution's `## Status` section in prose — where the work stands, what's blocked, where the next session picks up (rewritten, never a session log) — then your FINAL action is `felt shuttle handoff <fiber-id>`, which stamps the clean-exit marker and ends your session (no separate `kill $PPID`). The marker is load-bearing: it tells the daemon you closed cleanly, so the next dispatch starts fresh and reads your `## Status`. Without it a session that died mid-thought is indistinguishable from a clean exit, and the daemon resumes your transcript instead of looping a fresh worker. Exception: if the dispatch directive or constitution explicitly asks you to wait for a human (a 2FA gate, a send-in-his-voice step, a \"talk to me first\" signal), drive to that checkpoint and stay alive there — do not hand off. A normal chat final response is not a worker exit; the handoff belongs in the fiber."
+      "This is an autonomous Shuttle worker. After you update outcome, file findings, and commit at a clean checkpoint, rewrite the constitution's `## Status` section in prose — where the work stands, what's blocked, where the next session picks up (rewritten, never a session log) — then your FINAL action is `felt shuttle handoff <fiber-id>`, which stamps the clean-exit marker and ends your session (no separate `kill $PPID`). The marker is load-bearing: it tells the daemon you closed cleanly, so the next dispatch starts fresh and reads your `## Status`. Without it a session that died mid-thought is indistinguishable from a clean exit, and the daemon resumes your transcript instead of looping a fresh worker. Exception: if the dispatch directive or constitution explicitly asks you to wait for a human (a 2FA gate, a send-in-his-voice step, a \"talk to me first\" signal), or the state of the work makes human input the clear next move (taste calls open, feedback mid-loop), drive to that checkpoint and stay alive there — do not hand off. A normal chat final response is not a worker exit; the handoff belongs in the fiber."
     )
   end
 
