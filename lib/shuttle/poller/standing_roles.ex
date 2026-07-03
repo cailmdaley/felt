@@ -40,15 +40,29 @@ defmodule Shuttle.Poller.StandingRoles do
   # the *live* analog: a tmux session exists, we just aren't watching it. This
   # pass is the *dead* analog for the kind that must NOT re-fire on its own.
   def reconcile_dead_standing_roles(%State{} = state, candidates) do
-    # list_shuttle_sessions returns {:ok, []} on tmux-server-absent today (never
-    # errors), so this match is total; if it ever grows an error tuple, the
-    # compiler will surface the missing clause.
-    {:ok, sessions} = Poller.list_shuttle_sessions(state)
-    live = MapSet.new(sessions)
+    # This pass WRITES to fibers (status:closed/open) on the strength of "no
+    # live session", so it may only act on POSITIVE evidence: {:ok, sessions}
+    # — including a genuine tmux-server-absent {:ok, []}. On {:error, :unknown}
+    # (a wedged `tmux ls`, a timeout) the scan is skipped wholesale —
+    # uncertainty counts as present (see Shuttle.Tmux), and a wedged tmux must
+    # never mass-mark live standing/pinned roles dead. A truly dead orphan is
+    # simply caught by the next healthy scan.
+    case Poller.list_shuttle_sessions(state) do
+      {:ok, sessions} ->
+        live = MapSet.new(sessions)
 
-    Enum.reduce(candidates, state, fn fiber, acc ->
-      maybe_mark_dead_standing_role(acc, fiber, live)
-    end)
+        Enum.reduce(candidates, state, fn fiber, acc ->
+          maybe_mark_dead_standing_role(acc, fiber, live)
+        end)
+
+      {:error, :unknown} ->
+        Logger.warning(
+          "tmux session scan unavailable (unknown state); skipping dead " <>
+            "standing-role reconciliation this tick"
+        )
+
+        state
+    end
   end
 
   def maybe_mark_dead_standing_role(%State{} = state, fiber, live_sessions) do

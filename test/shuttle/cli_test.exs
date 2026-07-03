@@ -38,6 +38,20 @@ defmodule Shuttle.CLITest do
     assert {:error, _} = result
   end
 
+  # ── release_quarantine/1 — daemon down path ──
+
+  test "release_quarantine returns error when nothing is listening" do
+    result = CLI.release_quarantine(19999)
+    assert {:error, _reason} = result
+  end
+
+  # ── reset_breaker/2 — daemon down path ──
+
+  test "reset_breaker returns error when nothing is listening" do
+    result = CLI.reset_breaker("candide", 19999)
+    assert {:error, _reason} = result
+  end
+
   # ── query_daemon/1 — daemon up integration test ──
   #
   # This test verifies the IPC path against a real HTTP server.
@@ -77,6 +91,10 @@ defmodule Shuttle.CLITest do
     Process.sleep(100)
 
     result = CLI.query_daemon(test_port)
+    release_result = CLI.release_quarantine(test_port)
+    # No RemoteRegistry runs in this test env, so the reset endpoint's
+    # registry-unavailable contract (503) is what the CLI should see.
+    reset_result = CLI.reset_breaker("candide", test_port)
 
     # Cleanup
     Process.exit(poller_pid, :normal)
@@ -87,5 +105,11 @@ defmodule Shuttle.CLITest do
     assert is_integer(state.poll_at)
     assert is_list(state.eligible)
     assert is_list(state.retrying)
+
+    assert {:ok, resp} = release_result
+    assert resp.ok == true
+    assert resp.boot_quarantine == false
+
+    assert {:error, {:http_status, 503}} = reset_result
   end
 end

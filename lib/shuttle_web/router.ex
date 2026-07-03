@@ -56,6 +56,15 @@ defmodule ShuttleWeb.Router do
     get("/felt-stores", FeltStoresController, :show)
     post("/felt-stores", FeltStoresController, :create)
     post("/cache/bust", CacheBustController, :create)
+    # Pure-manual release of the boot quarantine: a restarted daemon parks
+    # fresh autonomous launches (restart is not dispatch authority) until a
+    # human posts here; dirty-death resumes were never withheld.
+    post("/quarantine/release", QuarantineController, :create)
+    # Pure-manual reset of a remote's tripped circuit breaker: after
+    # trip_threshold failed revive cascades the RemoteRegistry stops taking
+    # recovery actions until a probe succeeds or a human posts here
+    # (`shuttle reset <remote>`). One reset buys exactly one cascade.
+    post("/remotes/:name/reset", RemoteController, :reset)
     # The sent-files trail for a fiber (owner-routed): the artifacts a worker
     # pushed with SendUserFile on the card, read from the owning host's
     # events.jsonl hook stream. JSON-native, so it lives in the :api pipeline

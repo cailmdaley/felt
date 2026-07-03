@@ -277,9 +277,10 @@ The clean setup, and the current production layout:
 
 Result: `make install-agent` from `~/dev/felt` → daemon binds `:4000`,
 KeepAlive + RunAtLoad, **zero Full Disk Access grants**, survives erlang
-upgrades. On the clusters the durable surface is still the `while true;
-bin/shuttle start` tmux respawn loop in session `shuttle-daemon` (no launchd);
-the LaunchAgent is macOS-only.
+upgrades. On the clusters the durable surface is `bin/shuttle-launch` — a
+tracked respawn script that `bootstrap.sh` installs to `~/.local/bin` and runs
+in tmux session `shuttle-daemon`, backing off exponentially on fast daemon
+exits (2s→300s); no launchd, the LaunchAgent is macOS-only.
 
 `make install-agent` warns if `$PWD` is under a protected folder. There *is* an
 escape hatch — granting FDA to each I/O binary in the tree (`…/erlang/<v>/…/beam.smp`,
@@ -342,9 +343,15 @@ worker process, Shuttle only owns the watcher** (the load-bearing invariant
 below). A restart cycles the watcher and rebinds the API; the `shuttle-<id>`
 tmux sessions keep running untouched and the daemon re-adopts them on boot. So
 deploy freely whenever there's a fix to ship — never hold back, gate it behind
-"there are workers running," or frame a deploy as risky. The only cost is the
+"there are workers running," or frame a deploy as risky. The costs are the
 brief API/board blip during the ~1s (local) to ~2min (candide cold-walk)
-restart; in-flight work is unaffected.
+restart, and one deliberate follow-up: **every restart arms the boot
+quarantine** — the rule is BROAD: while quarantined, NO autonomous dispatch of
+any kind proceeds, fresh launches and dirty-death resumes alike, all parked in
+`pending_launch` until a human runs `bin/shuttle release` (POST
+`/api/v1/quarantine/release`). In-flight workers (already running) are
+unaffected; force-dispatch bypasses. So the deploy ritual is: restart, verify,
+`bin/shuttle release`.
 
 **An autonomous worker that has built and verified a change SHOULD deploy it —
 that is the default, not a step to stop before.** Because the deploy itself is
@@ -354,7 +361,9 @@ verified work on a branch is mostly latency and friction, not safety. The
 verification that *does* matter happens in-session: build → run the tripwire
 (`make test`, `cd ui && npm run build`) → get the skill's independent fresh-eyes
 review (a subagent over the diff-against-constitution, an adversarial pass for
-complex work) → **then deploy, in the same session.** Reserve "stop for the
+complex work) → **then deploy, in the same session** (and release the boot
+quarantine the restart armed — `bin/shuttle release` — so fresh dispatch
+resumes). Reserve "stop for the
 human" for the genuinely different case — a change whose *design* he should weigh
 in on before it ships (a capability removed, a contract redrawn, a load-bearing
 model choice); even then, surface the alternatives in the fiber and keep moving
@@ -364,7 +373,10 @@ rather than treating the deploy *mechanics* as the gate.
 on the host — don't copy the macOS escript, as BEAM bytecode format varies across
 OTP versions and the binary will crash on startup on a different host. Both
 clusters run the merged felt repo from **`~/dev/felt`** (post-B3); the respawn
-loop is driven by `~/.local/bin/shuttle-launch` (`SHUTTLE_DIR=$HOME/dev/felt`).
+loop is driven by `~/.local/bin/shuttle-launch` — a copy of the tracked
+`bin/shuttle-launch` that `bootstrap.sh` installs (repo resolved via
+`SHUTTLE_DIR` or the script's own location; the loop backs off exponentially
+on fast daemon exits, 2s→300s).
 
 ```bash
 ssh candide "cd ~/dev/felt && git pull && make daemon"
@@ -377,7 +389,7 @@ payload still has old semantics, run `make clean && make daemon`, then let the
 respawn loop restart the daemon from the clean escript.
 
 **The respawn loop owns the remote daemon — `make stop`/`make all` may not
-cycle it.** On candide/cineca a `while true; ./bin/shuttle start` loop in tmux
+cycle it.** On candide/cineca the `shuttle-launch --loop` respawn loop in tmux
 session `shuttle-daemon` owns the live daemon. `make stop`/`make all` target the
 pidfile that `make start` writes, which is *not* the respawn-spawned daemon, so
 they can build a fresh `bin/shuttle` yet leave the old binary serving `:4000`. To
@@ -387,6 +399,17 @@ the rebuilt escript. Confirm `git_short_sha` flipped; if not, the old process is
 still bound. **candide startup is slow (~2 min)** — it scans large shapepipe felt
 stores and adopts orphan sessions before binding `:4000`; wait it out, don't
 assume a crash.
+
+**`RemoteRegistry`'s circuit breaker — a remote gets 3 failed revive cascades,
+then a human.** Each configured remote is driven by a recovery state machine;
+after `trip_threshold` (default 3) consecutive failed revive cascades it trips
+and stops taking recovery action — the RemoteRegistry keeps passively polling
+the remote's health at a decimated cadence (an unhealthy remote is polled far
+less often than a healthy one) but will not itself re-attempt revival. The
+breaker auto-heals on a successful probe (no human step needed when the remote
+just comes back). To force one more cascade before that: `bin/shuttle reset
+<remote>` or `POST /api/v1/remotes/:name/reset` — one reset buys exactly one
+cascade, and it 409s if the breaker isn't currently tripped.
 
 Candide: OTP 27.3.4.12 pinned in `~/.tool-versions`. Daemon log:
 `~/.shuttle/shuttle.log`. cineca runs OTP 28.0.2 and **compiles fine** (the old
@@ -463,6 +486,8 @@ should never be committed.
 ```bash
 bin/shuttle snapshot                          # JSON snapshot of daemon state
 bin/shuttle dispatch <fiber-id>               # one-shot dispatch
+bin/shuttle release                           # release the boot quarantine (parked launches dispatch next tick)
+bin/shuttle reset <remote>                    # reset a tripped remote circuit breaker (revive cascade resumes)
 
 # felt shuttle — agent-facing CLI; offline; schema-validating
 felt shuttle status                            # all fibers with shuttle: blocks
@@ -527,10 +552,14 @@ felt shuttle validate-identity                # UID migration/cross-city validat
   of falling back to the felt store.
 - **felt shuttle is the agent-facing CLI.** Local write verbs validate before
   write and work offline. `bin/shuttle` handles daemon lifecycle and dispatch.
-- **No tag predicate for dispatch.** A fiber is shuttle-managed iff it carries
-  a `shuttle:` block; it dispatches iff its felt `status` is `active` — the
-  sole dispatch gate (there is no `enabled` flag). Tags are free-form
-  qualitative noticings.
+- **No tag predicate for dispatch — two gates, both explicit.** A fiber is
+  shuttle-managed iff it carries a `shuttle:` block. It dispatches iff (1) its
+  felt `status` is `active` AND (2) the boot quarantine is released: every
+  daemon (re)start parks EVERY dispatchable candidate — fresh launches and
+  dirty-death resumes alike — in `pending_launch` until `bin/shuttle release`.
+  There is no `enabled` flag; steady-state resume of a worker that dies while
+  the daemon is healthy and unquarantined is unaffected, and force-dispatch
+  bypasses the quarantine. Tags are free-form qualitative noticings.
 
 ## How dispatch works
 
@@ -598,9 +627,12 @@ Dispatch sanity ladder:
 1. `felt shuttle status` shows the fiber with `KIND oneshot` and an
    active/idle state? → fiber is well-formed and the offline walker sees it.
 2. `bin/shuttle snapshot` lists it under `eligible[]`? → daemon dispatched.
-3. `felt shuttle` sees it but daemon doesn't → daemon binary is stale.
-   `make restart`.
-4. Daemon sees it but agent never appears → check the resolved agent's `cli`
+3. Fiber is `active` but sitting in `pending_launch`? → the daemon restarted
+   and the boot quarantine is armed. `bin/shuttle release`. Check this before
+   reaching for `make restart` — a restart *re-arms* the quarantine.
+4. `felt shuttle` sees it but daemon doesn't → daemon binary is stale.
+   `make restart` (then `bin/shuttle release`).
+5. Daemon sees it but agent never appears → check the resolved agent's `cli`
    (`felt shuttle agents`) and that the wrapper is on `PATH`.
 
 **Kanban stuck on "Loading…" / `/api/v1/state` returns

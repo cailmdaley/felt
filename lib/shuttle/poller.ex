@@ -44,6 +44,13 @@ defmodule Shuttle.Poller do
   @default_poll_interval_ms 30_000
   @default_max_concurrent_workers 10
   @default_heartbeat_interval_ms 5_000
+  # THE boot-quarantine default: a freshly (re)started daemon parks every
+  # autonomous dispatch until a human releases it (POST
+  # /api/v1/quarantine/release / `bin/shuttle release`) — no timeout, no
+  # self-clearing. Single source of truth; config (`:boot_quarantine`) and the
+  # start_link opt override it (config/test.exs sets false so dispatch tests
+  # exercise the tick directly; quarantine tests opt back in per-poller).
+  @default_boot_quarantine true
   @dispatch_call_timeout_ms 30_000
   @orchestrator_state_call_timeout_ms 30_000
 
@@ -154,7 +161,47 @@ defmodule Shuttle.Poller do
       # @resume_loop_cooldown_ms. Cleared by a healthy run, a force-dispatch, or
       # the fiber leaving the active candidate set. NOT persisted — a restart is a
       # clean slate (and re-adopts live workers rather than re-dispatching).
-      resume_loop: %{}
+      resume_loop: %{},
+      # Boot quarantine: a daemon restart is NOT dispatch authority. An
+      # overloaded login node once crashed the daemon repeatedly, and each
+      # restart's first poll dispatched every active, host-owned, workerless
+      # fiber — ~8 token-burning fresh launches in 4 minutes, several
+      # redundant. The rule is BROAD: a daemon that just restarted grants no
+      # autonomous dispatches of ANY kind — fresh launches and resumes alike.
+      # (Steady-state resume of a worker that dies while the daemon is healthy
+      # is untouched; this gate covers only the just-restarted window.) While
+      # true, the autonomous tick parks every dispatchable candidate
+      # (`parked_launches`) and dispatches nothing; release is PURE MANUAL —
+      # `release_boot_quarantine/0` / POST /api/v1/quarantine/release — with
+      # no stabilization timer. Human force-dispatch bypasses (and does not
+      # clear) the quarantine. Set at init from the `:boot_quarantine` opt /
+      # app config (default true; config/test.exs disables it).
+      # See [[ai-futures/shuttle/restart-not-dispatch-authority]].
+      boot_quarantine: false,
+      # %{runtime_key => %{fiber_id: slug, uid: String.t() | nil, parked_at:
+      # DateTime.t}} — every autonomous dispatch the boot quarantine is
+      # withholding, surfaced in the snapshot as `pending_launch` rows
+      # (first-class, not `blocked`: nothing failed — the daemon is
+      # withholding launch authority until a human releases it). Rebuilt each
+      # poll cycle from the current dispatchable set (a fiber that closes or
+      # pauses simply drops out); `parked_at` is preserved across cycles.
+      # Emptied on release. No classification is applied — an earlier design
+      # exempted dirty-death resumes, but the split ran on possibly-stale
+      # cached rows, so a stale row could slip the gate and dispatch fresh;
+      # `park_autonomous_launches/2` parks the whole set instead.
+      parked_launches: %{},
+      # %{host => rows} — the last SUCCESSFUL `felt ls` shuttle listing per
+      # host, retained VERBATIM (no reshape: `created_at`, `tempered`, `slug`,
+      # … survive exactly as felt emitted them). Refreshed on every successful
+      # listing; served by `discover_candidates/1` when a host's listing fails
+      # (timeout, transient exec error), so an outage degrades to yesterday's
+      # truth instead of blanking the store or serving a lossy six-key shadow.
+      # The retention is OUTAGE-LONG, not one-tick: rows persist until the
+      # host's next successful listing replaces them (only a successful
+      # listing that omits a fiber is deletion evidence). Safe because these
+      # rows only nominate candidates — `Dispatcher.dispatch` re-fetches the
+      # fiber and re-verifies status before any launch.
+      last_known_listings: %{}
     ]
   end
 
@@ -413,11 +460,11 @@ defmodule Shuttle.Poller do
   Used by `GET /api/v1/fiber/:id/host` so external callers can route their
   felt operations to the right index without re-implementing host resolution.
   """
-  @spec resolve_fiber_host(String.t()) :: {:ok, String.t()} | {:error, :not_found}
+  @spec resolve_fiber_host(String.t()) :: {:ok, String.t()} | {:error, :not_found | :timeout}
   def resolve_fiber_host(fiber_id), do: resolve_fiber_host(__MODULE__, fiber_id)
 
   @spec resolve_fiber_host(GenServer.server(), String.t()) ::
-          {:ok, String.t()} | {:error, :not_found}
+          {:ok, String.t()} | {:error, :not_found | :timeout}
   def resolve_fiber_host(server, fiber_id) do
     GenServer.call(server, {:resolve_fiber_host, fiber_id})
   end
@@ -432,6 +479,25 @@ defmodule Shuttle.Poller do
   @spec bust_fiber_host_cache(GenServer.server(), String.t()) :: :ok
   def bust_fiber_host_cache(server, fiber_id) do
     GenServer.call(server, {:bust_fiber_host_cache, fiber_id})
+  end
+
+  @doc """
+  Releases the boot quarantine — the human "go" that restores autonomous
+  dispatch authority to a restarted daemon. While quarantined, the daemon
+  grants no autonomous dispatches of any kind (only explicit force-dispatch
+  bypasses); steady-state resume of workers that die while the daemon is
+  healthy is unaffected.
+
+  Idempotent. On release the parked set is dropped and a poll tick is
+  scheduled immediately, so parked fibers dispatch without waiting out the
+  poll interval. Served over HTTP as `POST /api/v1/quarantine/release`.
+  """
+  @spec release_boot_quarantine() :: :ok
+  def release_boot_quarantine, do: release_boot_quarantine(__MODULE__)
+
+  @spec release_boot_quarantine(GenServer.server()) :: :ok
+  def release_boot_quarantine(server) do
+    GenServer.call(server, :release_boot_quarantine)
   end
 
   # ── Server ──
@@ -470,7 +536,17 @@ defmodule Shuttle.Poller do
       felt_stores: felt_stores,
       own_host_id: to_string(own_host_id),
       auto_discover_felt_stores: auto_discover,
-      runner: runner
+      runner: runner,
+      # Restart is not dispatch authority: quarantine every autonomous
+      # dispatch until a human releases the hold (see the State field
+      # comment). Opt wins over app config so tests can exercise the
+      # quarantine per-poller; the default lives in @default_boot_quarantine.
+      boot_quarantine:
+        Keyword.get(
+          opts,
+          :boot_quarantine,
+          Application.get_env(:shuttle, :boot_quarantine, @default_boot_quarantine)
+        )
     }
 
     Logger.info("configured felt stores: #{inspect(felt_stores)}")
@@ -776,11 +852,25 @@ defmodule Shuttle.Poller do
 
       {:error, :not_found} ->
         {:reply, {:error, :not_found}, state}
+
+      {:error, :timeout} ->
+        {:reply, {:error, :timeout}, state}
     end
   end
 
   def handle_call({:bust_fiber_host_cache, fiber_id}, _from, state) do
     {:reply, :ok, %{state | fiber_host_cache: Map.delete(state.fiber_host_cache, fiber_id)}}
+  end
+
+  def handle_call(:release_boot_quarantine, _from, %{boot_quarantine: false} = state) do
+    {:reply, :ok, state}
+  end
+
+  def handle_call(:release_boot_quarantine, _from, state) do
+    Logger.info("boot quarantine released; fresh dispatch resumes on the next tick")
+    state = %{state | boot_quarantine: false, parked_launches: %{}}
+    # Tick now so parked fibers dispatch immediately, not a poll interval later.
+    {:reply, :ok, schedule_tick(state, 0)}
   end
 
   defp do_capture(%State{} = state, yap, work_dir, felt_store, opts) do
@@ -936,7 +1026,7 @@ defmodule Shuttle.Poller do
   # down with the Task.
   defp poll_reads(%State{} = state) do
     state = refresh_felt_stores(state)
-    {:ok, candidates, host_map} = discover_candidates(state)
+    {:ok, candidates, host_map, host_listings} = discover_candidates(state)
     {document_cache, document_cache_stats} = refresh_document_cache(state, candidates, host_map)
 
     {:ok,
@@ -944,6 +1034,7 @@ defmodule Shuttle.Poller do
        felt_stores: state.felt_stores,
        candidates: candidates,
        host_map: host_map,
+       host_listings: host_listings,
        document_cache: document_cache,
        document_cache_stats: document_cache_stats
      }}
@@ -966,6 +1057,7 @@ defmodule Shuttle.Poller do
          felt_stores: felt_stores,
          candidates: candidates,
          host_map: new_host_map,
+         host_listings: host_listings,
          document_cache: document_cache,
          document_cache_stats: document_cache_stats
        }) do
@@ -987,7 +1079,11 @@ defmodule Shuttle.Poller do
         document_cache_ready: true,
         standing_roles: standing_roles,
         dispatch_failures: evict_stale_dispatch_failures(state.dispatch_failures, candidates),
-        resume_loop: evict_stale_resume_loop(state.resume_loop, candidates)
+        resume_loop: evict_stale_resume_loop(state.resume_loop, candidates),
+        # Fold this poll's SUCCESSFUL listings over the retained map (a failed
+        # host keeps its previous rows), pruned to the current store set.
+        last_known_listings:
+          state.last_known_listings |> Map.merge(host_listings) |> Map.take(felt_stores)
     }
 
     # Downtime recovery: a standing role whose tmux session is gone but whose
@@ -999,20 +1095,40 @@ defmodule Shuttle.Poller do
     # the poll loop.
     state = StandingRoles.reconcile_dead_standing_roles(state, candidates)
 
-    if available_slots(state) > 0 do
-      dispatchable = candidates |> filter_eligible(state) |> sort_candidates()
+    # Parking is dispatch-authority bookkeeping, not capacity accounting: while
+    # quarantined, the parked map is rebuilt from the current dispatchable set
+    # on EVERY cycle (a closed fiber drops out, a newly-active one appears)
+    # even when the slots are full — only actual dispatching is slot-gated.
+    # The eligibility sweep shells felt per candidate, so it runs exactly when
+    # its result is consumed: to park (quarantine) or to dispatch (free slots).
+    {dispatchable, state} =
+      cond do
+        state.boot_quarantine ->
+          # Parks the WHOLE dispatchable set and returns [], so the reduce
+          # below is a no-op: a just-restarted daemon dispatches nothing
+          # autonomously until a human releases the hold.
+          candidates
+          |> filter_eligible(state)
+          |> sort_candidates()
+          |> park_autonomous_launches(state)
 
-      Enum.reduce(dispatchable, state, fn fiber, state_acc ->
-        if available_slots(state_acc) > 0 do
-          {new_state, _result} = do_dispatch_fiber(state_acc, fiber)
-          new_state
-        else
-          state_acc
-        end
-      end)
-    else
-      state
-    end
+        available_slots(state) > 0 ->
+          {candidates |> filter_eligible(state) |> sort_candidates(),
+           %{state | parked_launches: %{}}}
+
+        true ->
+          # Slots full, no quarantine: nothing to park, nothing to dispatch.
+          {[], %{state | parked_launches: %{}}}
+      end
+
+    Enum.reduce(dispatchable, state, fn fiber, state_acc ->
+      if available_slots(state_acc) > 0 do
+        {new_state, _result} = do_dispatch_fiber(state_acc, fiber)
+        new_state
+      else
+        state_acc
+      end
+    end)
   end
 
   # ── Orphan Resurrection ──
@@ -1042,9 +1158,13 @@ defmodule Shuttle.Poller do
   # No tag predicate — the shuttle: block is the source of truth, matching the
   # same contract every other surface reads.
   #
-  # Returns {:ok, fibers, host_map} where:
-  #   fibers   — [%{"id" => id, "uid" => uid, "status" => status, "path" => …}] across all hosts
-  #   host_map — %{fiber_id => felt_store} for host resolution
+  # Returns {:ok, fibers, host_map, host_listings} where:
+  #   fibers        — [%{"id" => id, "uid" => uid, "status" => status, "path" => …}] across all hosts
+  #   host_map      — %{fiber_id => felt_store} for host resolution
+  #   host_listings — %{host => rows} for the hosts whose listing SUCCEEDED
+  #                   this poll (verbatim rows; `apply_poll_cycle/2` folds them
+  #                   into `state.last_known_listings`). A failed host is
+  #                   absent, so its retained rows survive untouched.
   #
   # Each fiber row carries its own "uid", so callers that need the intrinsic
   # identity read it off the candidate directly — no separate uid map.
@@ -1076,25 +1196,48 @@ defmodule Shuttle.Poller do
   # enumerates it. Ownership is read from felt's path, never reverse-derived.
   @doc false
   def discover_candidates(state) do
-    {all_fibers, host_map} =
-      Enum.reduce(state.felt_stores, {[], %{}}, fn host, {acc_fibers, acc_map} ->
-        case list_shuttle_fibers(host, state) do
-          {:ok, fibers} ->
-            new_map =
-              Enum.reduce(fibers, %{}, fn fiber, hm ->
-                id = Map.get(fiber, "id", "")
-                Map.put(hm, id, host)
-              end)
+    {all_fibers, host_map, host_listings} =
+      Enum.reduce(state.felt_stores, {[], %{}, %{}}, fn host,
+                                                        {acc_fibers, acc_map, acc_listings} ->
+        {fibers, acc_listings} =
+          case list_shuttle_fibers(host, state) do
+            {:ok, fibers} ->
+              {fibers, Map.put(acc_listings, host, fibers)}
 
-            merged_map = Map.merge(new_map, acc_map)
-            {acc_fibers ++ fibers, merged_map}
+            {:error, reason} ->
+              # A failed listing — felt timing out on an overloaded login
+              # node, a transient exec failure — means the world is UNKNOWN
+              # for this host, not that its fibers are gone. Dropping them
+              # here used to blank the ENTIRE store for the tick: every
+              # document-cache entry evicted, every card vanishing and
+              # reappearing as felt recovered. Only a SUCCESSFUL listing that
+              # omits a fiber is evidence of deletion, so on error we serve
+              # the host's last successful listing VERBATIM (see
+              # `State.last_known_listings`) — same rows, same fields, no
+              # reshape — and the mtime-keyed document cache serves the
+              # entries without re-shelling felt. The listing map is not
+              # updated, so the retained rows survive until felt recovers.
+              retained = Map.get(state.last_known_listings, host, [])
 
-          {:error, _} ->
-            {acc_fibers, acc_map}
-        end
+              Logger.warning(
+                "fiber discovery failed for #{host} (#{inspect(reason)}); " <>
+                  "carrying #{length(retained)} last-known fiber(s) for this tick"
+              )
+
+              {retained, acc_listings}
+          end
+
+        new_map =
+          Enum.reduce(fibers, %{}, fn fiber, hm ->
+            id = Map.get(fiber, "id", "")
+            Map.put(hm, id, host)
+          end)
+
+        merged_map = Map.merge(new_map, acc_map)
+        {acc_fibers ++ fibers, merged_map, acc_listings}
       end)
 
-    {:ok, all_fibers, host_map}
+    {:ok, all_fibers, host_map, host_listings}
   end
 
   # Owner-only feed gate for a cached document entry: keep it iff its
@@ -1225,9 +1368,15 @@ defmodule Shuttle.Poller do
         with {:ok, fibers} when is_list(fibers) <- Jason.decode(output) do
           owned_prefix = store_felt_realpath(host) <> "/"
 
+          # Per-row isolation: felt itself skips-and-warns unparseable fibers
+          # (warning on stderr, valid JSON of the rest on stdout, exit 0), so a
+          # single malformed fiber never poisons the blob. The `is_map/1` guard
+          # is the same posture on our side of the wire — one non-map row is
+          # dropped, never the whole host's listing.
           kept =
             Enum.filter(fibers, fn fiber ->
-              is_map(Map.get(fiber, "shuttle")) and owned_by_store?(fiber, owned_prefix)
+              is_map(fiber) and is_map(Map.get(fiber, "shuttle")) and
+                owned_by_store?(fiber, owned_prefix)
             end)
 
           {:ok, kept}
@@ -1266,6 +1415,14 @@ defmodule Shuttle.Poller do
       {:ok, output} ->
         {:ok, output}
 
+      # A timeout means felt itself is wedged (overloaded node, dead SSH), not
+      # that the flags were unsupported — the strictly-more-expensive broad
+      # listing would just burn a second 60s wall-clock stall per host per
+      # tick. Propagate immediately; discover_candidates degrades to the
+      # host's last-known rows.
+      {:error, :timeout} = error ->
+        error
+
       {:error, reason} ->
         Logger.warning(
           "shuttle felt ls failed for #{host}; falling back to broad listing: #{inspect(reason)}"
@@ -1303,6 +1460,38 @@ defmodule Shuttle.Poller do
     Enum.filter(candidates, fn fiber ->
       eligible?(fiber, state) and not pinned_role?(fiber)
     end)
+  end
+
+  # Boot quarantine gate on the autonomous tick (see the State field comment):
+  # a daemon that just restarted grants NO autonomous dispatches of any kind.
+  # While `boot_quarantine` is set, EVERY dispatchable candidate is parked into
+  # `parked_launches` for the snapshot's `pending_launch` rows — no
+  # classification, no resume exemption. An earlier design let dirty-death
+  # resumes through, but the split ran on possibly-stale cached rows while
+  # `Dispatcher.dispatch` re-fetches and re-decides, so a stale dirty-death row
+  # could slip the pre-flight gate and dispatch FRESH; the broad rule closes
+  # that escape by withholding launch authority wholesale. Steady-state resume
+  # of a worker that dies while the daemon is HEALTHY is untouched — this gate
+  # is scoped to the just-restarted window, released by a human. The map is
+  # rebuilt from the current set each cycle, so a fiber that
+  # closes/pauses/starts running drops out on its own; `parked_at` is preserved
+  # for fibers that stay parked. Only this tick path is gated: the explicit
+  # `{:dispatch, …}` call (kanban force-dispatch, claim) never routes here.
+  # Called only while quarantined (`apply_poll_cycle`'s cond clears the parked
+  # map itself on the other branches).
+  defp park_autonomous_launches(dispatchable, %State{} = state) do
+    now = DateTime.utc_now()
+
+    parked =
+      Map.new(dispatchable, fn fiber ->
+        key = runtime_key_for_fiber(fiber)
+
+        {key,
+         Map.get(state.parked_launches, key) ||
+           %{fiber_id: fiber_address(fiber), uid: metadata_uid(fiber), parked_at: now}}
+      end)
+
+    {[], %{state | parked_launches: parked}}
   end
 
   defp pinned_role?(fiber) do
@@ -1694,6 +1883,7 @@ defmodule Shuttle.Poller do
         case Shuttle.FeltStores.resolve_fiber(fiber_id, state.felt_stores) do
           {:ok, %{host: host}} -> {:ok, host}
           {:error, :not_found} -> {:error, :not_found}
+          {:error, :timeout} -> {:error, :timeout}
         end
     end
   end
@@ -2706,6 +2896,15 @@ defmodule Shuttle.Poller do
       {output, 0} ->
         {:ok, output}
 
+      {_output, :timeout} ->
+        # The runner's wall-clock bound fired (felt wedged on an overloaded
+        # node). Surfaced as its own atom — not folded into the exit-status
+        # string — because a timeout says NOTHING about the store's fibers:
+        # callers must treat it as "world unknown", never as "fiber gone"
+        # (see discover_candidates/1), and the poll cycle degrades for one
+        # tick instead of stalling forever.
+        {:error, :timeout}
+
       {output, status} ->
         trimmed = String.trim(to_string(output))
         detail = if trimmed == "", do: "(no output)", else: trimmed
@@ -2713,6 +2912,18 @@ defmodule Shuttle.Poller do
     end
   end
 
+  # Lists live shuttle tmux sessions, classifying failure the same three ways
+  # as `Shuttle.Tmux.session_status/2` (see that moduledoc): "no sessions" is
+  # a POSITIVE claim, and only two outcomes may make it — exit 0, or a
+  # non-zero exit whose output is tmux's own absence message ("no server
+  # running", …). Anything else — the runner's wall-clock `:timeout` (a wedged
+  # tmux), an exec failure, an unrecognized error — returns
+  # `{:error, :unknown}`: the world is UNCERTAIN, not empty. Conflating the
+  # two is how a single wedged `tmux ls` mass-marked every live standing role
+  # dead (reconcile_dead_standing_roles writes status flips to their fibers!)
+  # and made boot adoption adopt nothing. Callers whose action on an empty
+  # list is destructive or reconciling MUST skip the pass on `:unknown` —
+  # uncertainty counts as present; the next healthy scan catches up.
   @doc false
   def list_shuttle_sessions(state) do
     case state.runner.cmd("tmux", ["ls", "-F", "\#{session_name}"], stderr_to_stdout: true) do
@@ -2725,9 +2936,17 @@ defmodule Shuttle.Poller do
 
         {:ok, sessions}
 
-      {_, _} ->
-        # No tmux server running
-        {:ok, []}
+      {_output, :timeout} ->
+        {:error, :unknown}
+
+      {output, _status} ->
+        # Genuine no-server exits non-zero WITH tmux's own absence message —
+        # positive evidence of emptiness. Any other failure is uncertainty.
+        if Shuttle.Tmux.absence_message?(output) do
+          {:ok, []}
+        else
+          {:error, :unknown}
+        end
     end
   end
 

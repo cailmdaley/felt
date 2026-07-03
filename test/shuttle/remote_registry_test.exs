@@ -399,9 +399,17 @@ defmodule Shuttle.RemoteRegistryTest do
                  Enum.any?(args, &String.contains?(&1, "curl -sf --max-time 3"))
              end)
 
+      # The restart script is now just the shuttle-launch invocation —
+      # shuttle-launch itself owns all session teardown (default-socket
+      # kill + the legacy alt-socket sweep), so restart_remote no longer
+      # ships any tmux kill-session of its own.
       assert Enum.any?(calls, fn {command, args} ->
                command == "ssh" and
-                 Enum.any?(args, &String.contains?(&1, "$HOME/.local/bin/shuttle-launch"))
+                 Enum.any?(args, fn arg ->
+                   String.contains?(arg, "$HOME/.local/bin/shuttle-launch") and
+                     not String.contains?(arg, "tmux ") and
+                     not String.contains?(arg, "kill-session")
+                 end)
              end)
 
       Process.sleep(3)
@@ -411,6 +419,168 @@ defmodule Shuttle.RemoteRegistryTest do
       assert restarted.recovery.state == :degraded
       assert restarted.recovery.attempt == 2
       assert restarted.recovery.last_action == "backoff probe failed; restarting recovery cascade"
+    end
+  end
+
+  # ── Circuit breaker ──
+
+  describe "circuit breaker" do
+    # Drives the registry through one full cascade attempt ending in a
+    # failed backoff probe: bounce → probe → ssh check → restart →
+    # probe → unreachable → backoff probe. MockRunner's default
+    # response ({"", 0}) makes launchctl succeed and the SSH check
+    # report an absent session, so every step runs and the HTTP probes
+    # (scripted to fail) sink each attempt.
+    defp run_failed_cascade(reg) do
+      :ok = RemoteRegistry.poll_now(reg)
+      Process.sleep(2)
+      # probe after bounce fails
+      :ok = RemoteRegistry.poll_now(reg)
+      # ssh check (session absent -> restart)
+      :ok = RemoteRegistry.poll_now(reg)
+      # restart remote
+      :ok = RemoteRegistry.poll_now(reg)
+      Process.sleep(2)
+      # probe after restart fails -> unreachable
+      :ok = RemoteRegistry.poll_now(reg)
+      Process.sleep(3)
+      # backoff probe fails -> next attempt or trip
+      :ok = RemoteRegistry.poll_now(reg)
+    end
+
+    defp start_breaker_registry(name, opts \\ []) do
+      MockClient.set(
+        "http://localhost:4001/api/v1/state",
+        {:error, :econnrefused}
+      )
+
+      {:ok, _pid} =
+        RemoteRegistry.start_link(
+          name: name,
+          remotes: [candide_remote(poll_interval_ms: 1)],
+          client: MockClient,
+          runner: MockRunner,
+          auto_poll: false,
+          tick_interval_ms: 60_000,
+          failure_threshold: 3,
+          trip_threshold: 2,
+          bounce_wait_ms: 1,
+          restart_wait_ms: 1,
+          backoff_schedule_ms: [2],
+          # Most breaker tests keep driving the tripped remote with rapid
+          # poll_now calls; the production floor (60s) would freeze them.
+          tripped_poll_floor_ms: Keyword.get(opts, :tripped_poll_floor_ms, 1),
+          user_uid: "501"
+        )
+    end
+
+    defp trip_breaker(reg) do
+      # Three consecutive failures start the cascade (attempt 1).
+      Enum.each(1..3, fn _ ->
+        :ok = RemoteRegistry.poll_now(reg)
+        Process.sleep(2)
+      end)
+
+      # Attempt 1 fails (-> attempt 2), attempt 2 fails (-> tripped).
+      run_failed_cascade(reg)
+      run_failed_cascade(reg)
+    end
+
+    test "trips after trip_threshold full cascade attempts" do
+      start_breaker_registry(:reg_trip)
+      trip_breaker(:reg_trip)
+
+      tripped = RemoteRegistry.snapshot(:reg_trip, "candide")
+      assert tripped.recovery.state == :tripped
+      assert tripped.recovery.attempt == 2
+      assert tripped.recovery.next_retry_at == nil
+
+      assert tripped.recovery.last_error ==
+               "circuit tripped after 2 revive attempts; passive polling only"
+    end
+
+    test "takes no recovery actions while tripped but keeps passive polling" do
+      start_breaker_registry(:reg_trip_passive)
+      trip_breaker(:reg_trip_passive)
+
+      calls_at_trip = length(MockRunner.calls())
+
+      Enum.each(1..5, fn _ ->
+        Process.sleep(2)
+        :ok = RemoteRegistry.poll_now(:reg_trip_passive)
+      end)
+
+      candide = RemoteRegistry.snapshot(:reg_trip_passive, "candide")
+      # Still tripped, still observing the remote (passive probe ran and
+      # recorded its failure) — but no launchctl / ssh actions fired.
+      assert candide.recovery.state == :tripped
+      assert candide.last_error == :econnrefused
+      assert length(MockRunner.calls()) == calls_at_trip
+    end
+
+    test "auto-heals when a passive probe succeeds" do
+      start_breaker_registry(:reg_trip_heal)
+      trip_breaker(:reg_trip_heal)
+
+      MockClient.set(
+        "http://localhost:4001/api/v1/state",
+        {:ok, snapshot_with_running(["work/back"])}
+      )
+
+      Process.sleep(2)
+      :ok = RemoteRegistry.poll_now(:reg_trip_heal)
+
+      healed = RemoteRegistry.snapshot(:reg_trip_heal, "candide")
+      refute healed.stale
+      assert healed.recovery.state == :healthy
+      assert healed.recovery.attempt == 0
+      assert healed.recovery.last_error == nil
+    end
+
+    test "tripped polling is decimated to the tripped_poll_floor_ms" do
+      start_breaker_registry(:reg_trip_decimate, tripped_poll_floor_ms: 60_000)
+      trip_breaker(:reg_trip_decimate)
+
+      # The remote comes back up — but the last (failed) passive attempt was
+      # moments ago, so the decimated cadence skips the probe entirely: the
+      # remote stays tripped and stale instead of healing on the next tick.
+      MockClient.set(
+        "http://localhost:4001/api/v1/state",
+        {:ok, snapshot_with_running(["work/back"])}
+      )
+
+      Process.sleep(2)
+      :ok = RemoteRegistry.poll_now(:reg_trip_decimate)
+
+      still_tripped = RemoteRegistry.snapshot(:reg_trip_decimate, "candide")
+      assert still_tripped.recovery.state == :tripped
+      assert still_tripped.stale
+    end
+
+    test "reset_breaker/2 re-runs the cascade once, then re-trips" do
+      start_breaker_registry(:reg_trip_reset)
+
+      assert RemoteRegistry.reset_breaker(:reg_trip_reset, "nope") == {:error, :unknown_remote}
+      assert RemoteRegistry.reset_breaker(:reg_trip_reset, "candide") == {:error, :not_tripped}
+
+      trip_breaker(:reg_trip_reset)
+      calls_at_trip = length(MockRunner.calls())
+
+      assert RemoteRegistry.reset_breaker(:reg_trip_reset, "candide") == :ok
+
+      reset = RemoteRegistry.snapshot(:reg_trip_reset, "candide")
+      assert reset.recovery.state == :degraded
+
+      assert reset.recovery.last_action ==
+               "circuit breaker manually reset; re-running recovery cascade"
+
+      # The re-run cascade fires real actions again, and — attempt count
+      # preserved — a single failed cascade trips the breaker anew.
+      run_failed_cascade(:reg_trip_reset)
+
+      retripped = RemoteRegistry.snapshot(:reg_trip_reset, "candide")
+      assert retripped.recovery.state == :tripped
+      assert length(MockRunner.calls()) > calls_at_trip
     end
   end
 

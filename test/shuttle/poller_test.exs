@@ -157,8 +157,21 @@ defmodule Shuttle.PollerTest do
     def set_felt_ls_stderr_warning(enabled),
       do: Agent.update(__MODULE__, &Map.put(&1, :felt_ls_stderr_warning, enabled))
 
+    # Simulate a wedged felt on an overloaded node: every `felt ls` variant
+    # returns the bounded runner's timeout shape ({message, :timeout}) while
+    # `felt show` keeps answering — the exact incident profile the poller's
+    # last-known-candidate retention degrades through.
+    def set_felt_ls_timeout(enabled),
+      do: Agent.update(__MODULE__, &Map.put(&1, :felt_ls_timeout, enabled))
+
     def set_felt_ls_delay(ms),
       do: Agent.update(__MODULE__, &Map.put(&1, :felt_ls_delay_ms, ms))
+
+    # Simulate a wedged tmux: `tmux ls` returns the bounded runner's timeout
+    # shape. The session list is then UNKNOWN — the poller must skip its
+    # destructive/reconciling scans, never read it as "no sessions".
+    def set_tmux_ls_timeout(enabled),
+      do: Agent.update(__MODULE__, &Map.put(&1, :tmux_ls_timeout, enabled))
 
     def add_tmux_session(session),
       do: Agent.update(__MODULE__, &%{&1 | tmux_sessions: MapSet.put(&1.tmux_sessions, session)})
@@ -226,6 +239,10 @@ defmodule Shuttle.PollerTest do
 
         command == "felt" and match?(["shuttle", "agents" | _], args) ->
           {Jason.encode!(Map.values(@resolved_agents)), 0}
+
+        command == "felt" and String.contains?(full_args, "ls") and
+            Agent.get(__MODULE__, &Map.get(&1, :felt_ls_timeout, false)) ->
+          {"felt #{full_args} timed out after 60000ms", :timeout}
 
         command == "felt" and String.contains?(full_args, "ls") ->
           delay_ms = Agent.get(__MODULE__, &Map.get(&1, :felt_ls_delay_ms, 0))
@@ -313,6 +330,10 @@ defmodule Shuttle.PollerTest do
           end)
 
           {"", 0}
+
+        command == "tmux" and hd(args) == "ls" and
+            Agent.get(__MODULE__, &Map.get(&1, :tmux_ls_timeout, false)) ->
+          {"tmux ls timed out after 10000ms", :timeout}
 
         command == "tmux" and hd(args) == "ls" ->
           sessions = Agent.get(__MODULE__, & &1.tmux_sessions)
@@ -774,6 +795,64 @@ defmodule Shuttle.PollerTest do
     assert felt_show_count() == first_show_count + 1
     assert {:ok, body} = Poller.cached_fiber_documents(poller)
     assert [%{fiber: %{"id" => ^uid, "name" => "changed document"}}] = body.fibers
+  end
+
+  # The incident this guards: on an overloaded login node one bad `felt ls`
+  # (timeout, transient failure) used to blank EVERY fiber on the host for the
+  # tick — mass document-cache eviction, cards flapping in and out. A failed
+  # listing is "world unknown", not "fibers gone": the poller must carry the
+  # last-known candidates and serve them from cache without re-shelling felt.
+  test "a failed felt listing carries last-known candidates instead of blanking the store" do
+    uid = "01JZ00000000000000000000CB"
+
+    fiber =
+      make_fiber("tests/retained-document", %{
+        "uid" => uid,
+        "modified_at" => "2026-06-06T02:00:00Z"
+      })
+
+    MockRunner.set_fiber("tests/retained-document", fiber)
+    MockRunner.set_shuttle("tests/retained-document", @oneshot_shuttle)
+
+    {:ok, poller} =
+      start_poller!(
+        name: :test_poller_retained_document,
+        runner: MockRunner,
+        poll_interval_ms: 60_000,
+        max_concurrent_workers: 0,
+        felt_stores: ["/tmp"]
+      )
+
+    assert wait_until(fn ->
+             get_in(Poller.snapshot(poller), [:document_cache, "entries"]) == 1
+           end)
+
+    show_count = felt_show_count()
+
+    # felt wedges: every listing (narrow projection AND the broad fallback)
+    # now times out. The tick degrades by retaining the last-known candidate:
+    # the card stays served, and the mtime-keyed cache reuses the entry
+    # without re-shelling a felt that just timed out.
+    MockRunner.set_felt_ls_timeout(true)
+    send(poller, :run_poll_cycle)
+
+    assert wait_until(fn ->
+             stats = Poller.snapshot(poller)[:document_cache]
+             stats["hits"] == 1 and stats["misses"] == 0 and stats["entries"] == 1
+           end)
+
+    assert felt_show_count() == show_count
+    assert {:ok, body} = Poller.cached_fiber_documents(poller)
+    assert [%{fiber: %{"id" => ^uid, "slug" => "tests/retained-document"}}] = body.fibers
+
+    # felt recovers: the live listing resumes and the same entry is served.
+    MockRunner.set_felt_ls_timeout(false)
+    send(poller, :run_poll_cycle)
+
+    assert_eventually(fn ->
+      assert {:ok, body} = Poller.cached_fiber_documents(poller)
+      assert [%{fiber: %{"id" => ^uid, "slug" => "tests/retained-document"}}] = body.fibers
+    end)
   end
 
   test "owner feed stamps serve-time runtime onto an owned fiber with a live worker" do
@@ -1506,6 +1585,220 @@ defmodule Shuttle.PollerTest do
     # 4 more rapid exits still don't trip (the reset means it would take 5 fresh).
     for _ <- 1..4, do: simulate_exit(poller, fiber_id, 0)
     refute loop_blocked?(poller, fiber_id)
+  end
+
+  # ── Boot quarantine ──
+  #
+  # Restart is not dispatch authority: a just-(re)started daemon grants NO
+  # autonomous dispatches of any kind (the crash-loop incident: each restart's
+  # first poll dispatched every active, host-owned, workerless fiber). While
+  # quarantined, the autonomous tick parks EVERY dispatchable candidate —
+  # resumes included, since classifying on cached rows let stale rows escape;
+  # release is pure manual. config/test.exs disables the quarantine globally,
+  # so these tests opt back in via `boot_quarantine: true`.
+
+  test "boot quarantine parks fresh launches and surfaces them as pending_launch" do
+    fiber_id = "tests/quarantine-fresh"
+    MockRunner.set_fiber(fiber_id, make_fiber(fiber_id))
+    MockRunner.set_shuttle(fiber_id, @oneshot_shuttle)
+
+    {:ok, poller} =
+      start_poller!(
+        name: :test_poller_quarantine_fresh,
+        runner: MockRunner,
+        poll_interval_ms: 60_000,
+        felt_stores: ["/tmp"],
+        boot_quarantine: true
+      )
+
+    send(poller, :run_poll_cycle)
+
+    # Parked, not dispatched: the row lands in pending_launch with the
+    # quarantine reason, and no tmux session is spawned.
+    assert_eventually(fn ->
+      assert [%{fiber_id: ^fiber_id, reason: "boot quarantine — awaiting release"}] =
+               Poller.snapshot(poller).pending_launch
+    end)
+
+    snap = Poller.snapshot(poller)
+    assert snap.boot_quarantine == true
+    assert snap.eligible == []
+    refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
+             cmd == "tmux" and hd(args) == "new-session"
+           end)
+  end
+
+  test "boot quarantine parks a dirty-death resume too (broad rule, no exemption)" do
+    # A dispatched_at with no newer handed_off_at means the prior worker died
+    # mid-thought. An earlier design exempted such resumes from the
+    # quarantine, but the classification ran on possibly-stale cached rows —
+    # a stale dirty-death row could slip the gate and dispatch FRESH. The
+    # broad rule parks everything: a just-restarted daemon grants no
+    # autonomous dispatches of any kind until a human releases the hold.
+    fiber_id = "tests/quarantine-dirty-resume"
+    MockRunner.set_fiber(fiber_id, make_fiber(fiber_id))
+    MockRunner.set_shuttle(fiber_id, @oneshot_shuttle)
+    write_dispatch_marker(fiber_id, "b1e0a3c2-0000-4000-8000-000000000001")
+
+    {:ok, poller} =
+      start_poller!(
+        name: :test_poller_quarantine_resume,
+        runner: MockRunner,
+        poll_interval_ms: 60_000,
+        felt_stores: ["/tmp"],
+        boot_quarantine: true
+      )
+
+    send(poller, :run_poll_cycle)
+
+    # Parked like any other candidate — no session spawned, quarantine intact.
+    assert_eventually(fn ->
+      assert [%{fiber_id: ^fiber_id, reason: "boot quarantine — awaiting release"}] =
+               Poller.snapshot(poller).pending_launch
+    end)
+
+    snap = Poller.snapshot(poller)
+    assert snap.boot_quarantine == true
+    assert snap.eligible == []
+
+    refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
+             cmd == "tmux" and hd(args) == "new-session"
+           end)
+  end
+
+  test "boot quarantine parks a due standing role (occurrences are fresh launches)" do
+    fiber_id = "tests/quarantine-standing"
+    MockRunner.set_fiber(fiber_id, make_fiber(fiber_id, %{"tags" => ["constitution", "standing"]}))
+
+    MockRunner.set_shuttle(
+      fiber_id,
+      """
+      enabled: true
+      kind: standing
+      agent: claude-sonnet
+      schedule:
+        expr: "* * * * *"
+        tz: Europe/Paris
+      review:
+        state: scheduled
+      """
+    )
+
+    now = DateTime.utc_now()
+    set_resolved_occurrences(fiber_id, now, DateTime.add(now, 60, :second))
+
+    {:ok, poller} =
+      start_poller!(
+        name: :test_poller_quarantine_standing,
+        runner: MockRunner,
+        poll_interval_ms: 60_000,
+        felt_stores: ["/tmp"],
+        boot_quarantine: true
+      )
+
+    send(poller, :run_poll_cycle)
+
+    assert_eventually(fn ->
+      assert [%{fiber_id: ^fiber_id}] = Poller.snapshot(poller).pending_launch
+    end)
+
+    assert Poller.snapshot(poller).eligible == []
+  end
+
+  test "quarantine parking is rebuilt every cycle even when all slots are full" do
+    # Parking is dispatch-authority bookkeeping, not capacity accounting: the
+    # parked map used to be rebuilt only inside the `available_slots > 0`
+    # gate, so with slots full a closed fiber kept its stale pending_launch
+    # row and newly-eligible work never surfaced. Rebuild must run every
+    # cycle; only actual dispatching is slot-gated.
+    fiber_id = "tests/quarantine-slots-full"
+    MockRunner.set_fiber(fiber_id, make_fiber(fiber_id))
+    MockRunner.set_shuttle(fiber_id, @oneshot_shuttle)
+
+    {:ok, poller} =
+      start_poller!(
+        name: :test_poller_quarantine_slots_full,
+        runner: MockRunner,
+        poll_interval_ms: 60_000,
+        max_concurrent_workers: 0,
+        felt_stores: ["/tmp"],
+        boot_quarantine: true
+      )
+
+    send(poller, :run_poll_cycle)
+
+    # Parked despite zero slots — the bookkeeping runs regardless of capacity.
+    assert_eventually(fn ->
+      assert [%{fiber_id: ^fiber_id}] = Poller.snapshot(poller).pending_launch
+    end)
+
+    # The fiber closes; the next cycle (slots still full) rebuilds the parked
+    # map and the stale row drops out.
+    MockRunner.set_fiber(fiber_id, make_fiber(fiber_id, %{"status" => "closed"}))
+    MockRunner.set_shuttle(fiber_id, @oneshot_shuttle, "closed")
+    send(poller, :run_poll_cycle)
+
+    assert_eventually(fn ->
+      assert Poller.snapshot(poller).pending_launch == []
+    end)
+  end
+
+  test "releasing the boot quarantine dispatches the parked launches" do
+    fiber_id = "tests/quarantine-release"
+    MockRunner.set_fiber(fiber_id, make_fiber(fiber_id))
+    MockRunner.set_shuttle(fiber_id, @oneshot_shuttle)
+
+    {:ok, poller} =
+      start_poller!(
+        name: :test_poller_quarantine_release,
+        runner: MockRunner,
+        poll_interval_ms: 60_000,
+        felt_stores: ["/tmp"],
+        boot_quarantine: true
+      )
+
+    send(poller, :run_poll_cycle)
+
+    assert_eventually(fn ->
+      assert [%{fiber_id: ^fiber_id}] = Poller.snapshot(poller).pending_launch
+    end)
+
+    # The human "go": clears the flag + parked set and ticks immediately, so
+    # the fiber dispatches without waiting out the poll interval. Idempotent.
+    assert :ok = Poller.release_boot_quarantine(poller)
+    assert :ok = Poller.release_boot_quarantine(poller)
+
+    assert_eventually(fn ->
+      assert [%{fiber_id: ^fiber_id}] = Poller.snapshot(poller).eligible
+    end)
+
+    snap = Poller.snapshot(poller)
+    assert snap.boot_quarantine == false
+    assert snap.pending_launch == []
+  end
+
+  test "force-dispatch bypasses the boot quarantine and does not clear it" do
+    fiber_id = "tests/quarantine-force"
+    MockRunner.set_fiber(fiber_id, make_fiber(fiber_id))
+    MockRunner.set_shuttle(fiber_id, @oneshot_shuttle)
+
+    # max_concurrent_workers: 0 disables the autonomous tick's dispatch;
+    # explicit Poller.dispatch_fiber/3 is not slot-gated, so only the manual
+    # path is exercised here.
+    {:ok, poller} =
+      start_poller!(
+        name: :test_poller_quarantine_force,
+        runner: MockRunner,
+        poll_interval_ms: 60_000,
+        max_concurrent_workers: 0,
+        felt_stores: ["/tmp"],
+        boot_quarantine: true
+      )
+
+    # The human clicked dispatch: honor the intent — but one manual "go" on one
+    # fiber is not a bulk release; the quarantine stays up for everything else.
+    assert {:ok, _session} = Poller.dispatch_fiber(poller, fiber_id, force: true)
+    assert Poller.snapshot(poller).boot_quarantine == true
   end
 
   test "poller does not dispatch a scheduled standing role before it is due" do
@@ -3064,6 +3357,51 @@ defmodule Shuttle.PollerTest do
     refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
              cmd == "tmux" and hd(args) == "new-session"
            end)
+  end
+
+  test "a wedged tmux ls does not mark live standing roles dead" do
+    # `tmux ls` timing out means the session list is UNKNOWN, not empty.
+    # Reading it as "no sessions" mass-marked every armed standing role
+    # awaiting (status:closed — a fiber WRITE) off a single wedged scan.
+    # Uncertainty counts as present (Shuttle.Tmux): the dead-orphan pass must
+    # skip the tick and let the next healthy scan decide.
+    fiber_id = "tests/standing-tmux-wedged"
+
+    previous_loom_homes = System.get_env("FELT_STORES")
+    System.put_env("FELT_STORES", "/tmp")
+    on_exit(fn -> restore_env("FELT_STORES", previous_loom_homes) end)
+
+    # Same shape as the dead-orphan case — armed, dispatched, un-exited, not
+    # cron-due — except tmux cannot answer.
+    MockRunner.set_shuttle(fiber_id, """
+    kind: standing
+    agent: claude-sonnet
+    schedule:
+      expr: "0 9 1 1 *"
+      tz: Europe/Paris
+    """)
+
+    write_dispatch_marker(fiber_id, "wedged-session-uuid")
+
+    doc_path = "/tmp/.felt/#{fiber_id}/standing-tmux-wedged.md"
+
+    # MockRunner is reset per test, so the wedge does not bleed across tests.
+    MockRunner.set_tmux_ls_timeout(true)
+
+    {:ok, poller} =
+      start_poller!(
+        name: :test_poller_standing_tmux_wedged,
+        runner: MockRunner,
+        poll_interval_ms: 60_000,
+        felt_stores: ["/tmp"]
+      )
+
+    send(poller, :run_poll_cycle)
+    Process.sleep(200)
+
+    # The role's document is untouched: still armed, never flipped to closed.
+    assert File.read!(doc_path) =~ "status: active"
+    refute File.read!(doc_path) =~ "status: closed"
   end
 
   test "poller does not re-dispatch a closed oneshot whose worker is dead" do

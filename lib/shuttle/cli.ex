@@ -8,6 +8,8 @@ defmodule Shuttle.CLI do
     start --force         — start even if a daemon is detected
     status                — human-readable status dump (queries running daemon; filesystem fallback)
     snapshot              — JSON snapshot for consumers (queries running daemon; filesystem fallback)
+    release               — release the boot quarantine (parked launches dispatch on the next tick)
+    reset <remote>        — reset a remote's tripped circuit breaker (recovery cascade re-runs once)
     version               — print version
 
   ## IPC model
@@ -102,6 +104,42 @@ defmodule Shuttle.CLI do
             System.halt(2)
         end
 
+      ["release"] ->
+        case release_quarantine() do
+          {:ok, _} ->
+            IO.puts("quarantine released — parked launches will dispatch on the next tick")
+
+          {:error, {:http_status, 503}} ->
+            IO.puts(:stderr, "release failed: daemon is up but the poller isn't running")
+            System.halt(1)
+
+          {:error, reason} ->
+            IO.puts(:stderr, "release failed: daemon unreachable (#{inspect(reason)})")
+            System.halt(1)
+        end
+
+      ["reset", remote] ->
+        case reset_breaker(remote) do
+          {:ok, _} ->
+            IO.puts("circuit breaker reset for #{remote} — recovery cascade re-running")
+
+          {:error, {:http_status, 404}} ->
+            IO.puts(:stderr, "reset failed: unknown remote #{remote}")
+            System.halt(1)
+
+          {:error, {:http_status, 409}} ->
+            IO.puts(:stderr, "reset failed: #{remote}'s circuit breaker is not tripped")
+            System.halt(1)
+
+          {:error, {:http_status, 503}} ->
+            IO.puts(:stderr, "reset failed: daemon is up but the remote registry isn't running")
+            System.halt(1)
+
+          {:error, reason} ->
+            IO.puts(:stderr, "reset failed: daemon unreachable (#{inspect(reason)})")
+            System.halt(1)
+        end
+
       ["version"] ->
         IO.puts(Shuttle.version())
 
@@ -113,6 +151,8 @@ defmodule Shuttle.CLI do
         IO.puts("  start                Start the daemon (refuses if already running)")
         IO.puts("  start --force        Start even if another daemon is detected")
         IO.puts("  snapshot             Print JSON snapshot of current state")
+        IO.puts("  release              Release the boot quarantine so parked launches dispatch")
+        IO.puts("  reset <remote>       Reset a remote's tripped circuit breaker")
         IO.puts("  status               Human-readable status dump")
         IO.puts("  version              Print version")
         System.halt(1)
@@ -235,28 +275,49 @@ defmodule Shuttle.CLI do
   end
 
   # ── Daemon IPC ──
+  #
+  # All daemon commands ride `daemon_request/3`: an HTTP round-trip to the
+  # running daemon on localhost, decoding the 200 body with atom keys.
+  # Non-200 responses come back as {:error, {:http_status, status}} so each
+  # verb can render its own guidance; an unreachable daemon is {:error, reason}.
+  # Each public wrapper accepts an optional port for testability; nil means
+  # the configured port.
 
-  # Query the running daemon's state over HTTP.
-  #
-  # Returns {:ok, state_map} on success (state_map has atom keys throughout).
-  # Returns {:error, reason} when the daemon is unreachable or returns a
-  # non-200 response.
-  #
-  # Accepts an optional port for testability; defaults to the compiled config.
+  # GET the running daemon's state (`status` / `snapshot` / `start` probe).
   @doc false
-  def query_daemon(port \\ nil) do
+  def query_daemon(port \\ nil), do: daemon_request(:get, "/api/v1/state", port)
+
+  # POST the quarantine-release endpoint (`release`). A 503 means the daemon
+  # is up but the poller isn't running.
+  @doc false
+  def release_quarantine(port \\ nil), do: daemon_request(:post, "/api/v1/quarantine/release", port)
+
+  # POST the circuit-breaker reset endpoint (`reset <remote>`). 404 = unknown
+  # remote, 409 = breaker not tripped, 503 = remote registry not running.
+  @doc false
+  def reset_breaker(remote, port \\ nil) do
+    daemon_request(:post, "/api/v1/remotes/#{remote}/reset", port)
+  end
+
+  defp daemon_request(method, path, port) do
     port = port || daemon_port()
-    url = String.to_charlist("http://localhost:#{port}/api/v1/state")
+    url = String.to_charlist("http://localhost:#{port}#{path}")
 
     {:ok, _} = Application.ensure_all_started(:inets)
     {:ok, _} = Application.ensure_all_started(:ssl)
 
-    case :httpc.request(:get, {url, []}, [{:timeout, 2000}, {:connect_timeout, 1000}], []) do
+    request =
+      case method do
+        :get -> {url, []}
+        :post -> {url, [], ~c"application/json", ""}
+      end
+
+    case :httpc.request(method, request, [{:timeout, 2000}, {:connect_timeout, 1000}], []) do
       {:ok, {{_, 200, _}, _headers, body}} ->
         body_str = if is_list(body), do: List.to_string(body), else: body
 
         case Jason.decode(body_str, keys: :atoms) do
-          {:ok, state} -> {:ok, state}
+          {:ok, resp} -> {:ok, resp}
           {:error, _} -> {:error, :invalid_response}
         end
 

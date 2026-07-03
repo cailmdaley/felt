@@ -62,6 +62,16 @@ defmodule Shuttle.Tmux do
   @spec present?(module(), String.t()) :: boolean()
   def present?(runner, session), do: session_status(runner, session) != :gone
 
+  @doc """
+  True when `output` is one of tmux's own absence messages ("no server
+  running", "can't find session", …) — POSITIVE evidence that the server or
+  session is not there, as opposed to a command that merely failed. Shared by
+  every surface that must distinguish absence-evidence from uncertainty (e.g.
+  the poller's `list_shuttle_sessions/1`).
+  """
+  @spec absence_message?(term()) :: boolean()
+  def absence_message?(output), do: absent?(output)
+
   defp absent?(output) do
     down = String.downcase(to_string(output))
     Enum.any?(@absence_markers, &String.contains?(down, &1))

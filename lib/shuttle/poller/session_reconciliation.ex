@@ -30,19 +30,36 @@ defmodule Shuttle.Poller.SessionReconciliation do
   # restarting; the workers kept running. Each live session is mapped back to its
   # fiber and re-watched (or killed if the fiber has since closed).
   def adopt_orphans(%State{} = state) do
-    {:ok, sessions} = Poller.list_shuttle_sessions(state)
-    lookup = candidate_session_lookup(state)
+    # An {:error, :unknown} scan (wedged tmux, timeout) means the session list
+    # is UNCERTAIN, not empty — adopting off an empty read would boot the
+    # daemon believing no workers exist. Skip; the per-poll
+    # reconcile_orphaned_sessions adopts them as soon as tmux answers.
+    case Poller.list_shuttle_sessions(state) do
+      {:ok, sessions} ->
+        lookup = candidate_session_lookup(state)
 
-    Enum.reduce(sessions, state, fn session, state_acc ->
-      adopt_known_orphan_session(state_acc, lookup, session)
-    end)
+        Enum.reduce(sessions, state, fn session, state_acc ->
+          adopt_known_orphan_session(state_acc, lookup, session)
+        end)
+
+      {:error, :unknown} ->
+        Logger.warning("tmux session scan unavailable (unknown state); skipping boot adoption")
+        state
+    end
   end
 
   # Per-poll reconcile: find live tmux sessions that have no watcher and adopt
   # them. Sessions already covered by a running entry are left alone.
   def reconcile_orphaned_sessions(%State{} = state) do
-    # Find tmux sessions that exist but have no watcher.
-    {:ok, sessions} = Poller.list_shuttle_sessions(state)
+    # Find tmux sessions that exist but have no watcher. On an :unknown scan
+    # there is nothing safe to reconcile — retry next poll.
+    case Poller.list_shuttle_sessions(state) do
+      {:ok, sessions} -> reconcile_orphaned_sessions(state, sessions)
+      {:error, :unknown} -> state
+    end
+  end
+
+  defp reconcile_orphaned_sessions(%State{} = state, sessions) do
     running_sessions = Enum.map(state.running, fn {_, meta} -> meta.session end) |> MapSet.new()
 
     orphan_sessions = Enum.reject(sessions, &MapSet.member?(running_sessions, &1))
@@ -124,7 +141,7 @@ defmodule Shuttle.Poller.SessionReconciliation do
   # entries keep the existing ambiguity guard (two fibers sharing a leaf resolve
   # to `:ambiguous` and are skipped rather than mis-adopted).
   def candidate_session_lookup(%State{} = state) do
-    {:ok, candidates, _host_map} = Poller.discover_candidates(state)
+    {:ok, candidates, _host_map, _host_listings} = Poller.discover_candidates(state)
 
     candidates
     |> Enum.reduce(%{}, fn fiber, acc ->

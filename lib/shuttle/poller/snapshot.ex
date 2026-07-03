@@ -74,6 +74,22 @@ defmodule Shuttle.Poller.Snapshot do
 
     blocked = dispatch_blocked ++ loop_blocked
 
+    # Autonomous dispatches the boot quarantine is withholding — all of them,
+    # resumes included. First-class rows, not `blocked`: nothing failed — the
+    # daemon is deliberately withholding autonomous dispatch authority until a
+    # human posts /api/v1/quarantine/release. The
+    # kanban reads `boot_quarantine` for its banner/release button and these
+    # rows for the per-fiber "parked" badge.
+    pending_launch =
+      Enum.map(state.parked_launches, fn {_runtime_key, entry} ->
+        %{
+          fiber_id: entry.fiber_id,
+          uid: entry.uid,
+          reason: "boot quarantine — awaiting release",
+          parked_at: DateTime.to_unix(entry.parked_at, :millisecond)
+        }
+      end)
+
     snap = %{
       poll_at: now_ms,
       # Reflect the dispatch-filter identity, not just :inet.gethostname().
@@ -83,6 +99,8 @@ defmodule Shuttle.Poller.Snapshot do
       felt_stores: state.felt_stores,
       eligible: eligible,
       blocked: blocked,
+      boot_quarantine: state.boot_quarantine,
+      pending_launch: pending_launch,
       orphans: state.orphans,
       # Retries collapsed into the poll loop: a status:active fiber with
       # no live tmux session is simply eligible again on the next tick. The key

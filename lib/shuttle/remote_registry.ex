@@ -46,10 +46,23 @@ defmodule Shuttle.RemoteRegistry do
 
   @pubsub_topic "shuttle:remotes"
   @default_failure_threshold 3
+  @default_trip_threshold 3
   @default_bounce_wait_ms 5_000
   @default_restart_wait_ms 10_000
   @default_backoff_schedule_ms [30_000, 120_000, 600_000, 1_800_000]
   @ssh_connect_timeout_s 8
+
+  # States where the recovery cascade is not actively driving the remote:
+  # passive HTTP polling is the only activity. Everything else (:degraded,
+  # :reviving, :unreachable) is mid-cascade — the state machine owns the
+  # probes, so the passive poll stays out of the way.
+  @cascade_inactive [:healthy, :tripped]
+
+  # A tripped remote is known-dead; probing it at the healthy cadence
+  # (default 5s, each up to a blocking request-timeout) wastes most of the
+  # registry's duty cycle. Decimate to at most once a minute — plenty for
+  # the auto-heal path (one successful probe resets the breaker).
+  @default_tripped_poll_floor_ms 60_000
 
   defmodule Recovery do
     @moduledoc false
@@ -73,9 +86,11 @@ defmodule Shuttle.RemoteRegistry do
       :tick_timer_ref,
       :tick_interval_ms,
       :failure_threshold,
+      :trip_threshold,
       :bounce_wait_ms,
       :restart_wait_ms,
       :backoff_schedule_ms,
+      :tripped_poll_floor_ms,
       :user_uid,
       snapshots: %{}
     ]
@@ -99,12 +114,20 @@ defmodule Shuttle.RemoteRegistry do
       state machine. Defaults to 1_000.
     * `:failure_threshold` — consecutive snapshot failures before the
       recovery cascade starts. Defaults to 3.
+    * `:trip_threshold` — full cascade attempts that may fail before
+      the circuit breaker trips. Once tripped the registry keeps the
+      cheap passive HTTP polling but takes no recovery actions until a
+      probe succeeds or `reset_breaker/2` is called. Defaults to 3.
     * `:bounce_wait_ms` — wait after `launchctl kickstart` before the
       post-bounce probe. Defaults to 5_000.
     * `:restart_wait_ms` — wait after restarting the remote daemon
       before the probe. Defaults to 10_000.
     * `:backoff_schedule_ms` — retry schedule used in `:unreachable`.
       Defaults to `[30_000, 120_000, 600_000, 1_800_000]`.
+    * `:tripped_poll_floor_ms` — minimum passive-poll interval once the
+      breaker has tripped (the remote's own `poll_interval_ms` still
+      wins when larger). Defaults to 60_000; tests set it low to keep
+      driving tripped remotes deterministically.
     * `:user_uid` — override the local GUI UID used for `launchctl`
       labels (tests). Defaults to `$UID` / `id -u`.
     * `:auto_poll` — whether to schedule the registry's background
@@ -172,6 +195,29 @@ defmodule Shuttle.RemoteRegistry do
     GenServer.call(server, :poll_now)
   end
 
+  @doc """
+  Manually resets a tripped circuit breaker, flipping the remote back
+  to `:degraded` so the recovery cascade runs once more. Because the
+  attempt counter is preserved, another full-cascade failure re-trips
+  immediately — one manual reset buys exactly one cascade.
+
+  Operators reach this through `shuttle reset <remote>` (see
+  `Shuttle.CLI`), which POSTs `/api/v1/remotes/:name/reset`
+  (`ShuttleWeb.RemoteController`) on the running daemon — the daemon is
+  an escript, so there is no console to call this from directly.
+
+  Returns `{:error, :not_tripped}` when the remote isn't tripped and
+  `{:error, :unknown_remote}` when the name isn't configured.
+  """
+  @spec reset_breaker(String.t()) :: :ok | {:error, :not_tripped | :unknown_remote}
+  def reset_breaker(name), do: reset_breaker(__MODULE__, name)
+
+  @spec reset_breaker(GenServer.server(), String.t()) ::
+          :ok | {:error, :not_tripped | :unknown_remote}
+  def reset_breaker(server, name) do
+    GenServer.call(server, {:reset_breaker, name})
+  end
+
   # ── Server ──
 
   @impl true
@@ -185,8 +231,12 @@ defmodule Shuttle.RemoteRegistry do
     runner = Keyword.get(opts, :runner, Runner.Default)
     tick_interval_ms = Keyword.get(opts, :tick_interval_ms, 1_000)
     failure_threshold = Keyword.get(opts, :failure_threshold, @default_failure_threshold)
+    trip_threshold = Keyword.get(opts, :trip_threshold, @default_trip_threshold)
     bounce_wait_ms = Keyword.get(opts, :bounce_wait_ms, @default_bounce_wait_ms)
     restart_wait_ms = Keyword.get(opts, :restart_wait_ms, @default_restart_wait_ms)
+
+    tripped_poll_floor_ms =
+      Keyword.get(opts, :tripped_poll_floor_ms, @default_tripped_poll_floor_ms)
 
     backoff_schedule_ms =
       Keyword.get(opts, :backoff_schedule_ms, @default_backoff_schedule_ms)
@@ -210,9 +260,11 @@ defmodule Shuttle.RemoteRegistry do
       runner: runner,
       tick_interval_ms: tick_interval_ms,
       failure_threshold: failure_threshold,
+      trip_threshold: trip_threshold,
       bounce_wait_ms: bounce_wait_ms,
       restart_wait_ms: restart_wait_ms,
       backoff_schedule_ms: backoff_schedule_ms,
+      tripped_poll_floor_ms: tripped_poll_floor_ms,
       user_uid: user_uid,
       snapshots: snapshots
     }
@@ -234,6 +286,31 @@ defmodule Shuttle.RemoteRegistry do
 
   def handle_call({:snapshot, name}, _from, state) do
     {:reply, build_one_view(state, name), state}
+  end
+
+  def handle_call({:reset_breaker, name}, _from, state) do
+    case Map.get(state.snapshots, name) do
+      nil ->
+        {:reply, {:error, :unknown_remote}, state}
+
+      %{recovery: %Recovery{state: :tripped} = recovery} = entry ->
+        Logger.info("RemoteRegistry: #{name} circuit breaker manually reset; re-running cascade")
+
+        entry =
+          with_recovery(entry, %{
+            recovery
+            | state: :degraded,
+              step: :bounce_tunnel,
+              action_due_at: DateTime.utc_now(),
+              next_retry_at: nil,
+              last_action: "circuit breaker manually reset; re-running recovery cascade"
+          })
+
+        {:reply, :ok, %{state | snapshots: Map.put(state.snapshots, name, entry)}}
+
+      _entry ->
+        {:reply, {:error, :not_tripped}, state}
+    end
   end
 
   def handle_call(:poll_now, _from, state) do
@@ -272,7 +349,7 @@ defmodule Shuttle.RemoteRegistry do
       recovery_action_due?(recovery, now) ->
         run_recovery_step(entry, state, now)
 
-      should_poll?(entry, entry.remote, now_ms) ->
+      should_poll?(entry, state, now_ms) ->
         normal_probe(entry, state.client, state, now)
 
       true ->
@@ -284,16 +361,32 @@ defmodule Shuttle.RemoteRegistry do
   # recently — back off) rather than `last_polled_at` (last *success*).
   # That way a permanently-down remote is retried at the configured
   # cadence without burning every tick.
-  defp should_poll?(%{recovery: %Recovery{state: state}}, _remote, _now_ms)
-       when state != :healthy,
+  # `:tripped` keeps the cheap passive polling — decimated to the
+  # tripped-poll floor — so the registry still observes the remote and
+  # auto-heals on a successful probe; only recovery *actions* stop.
+  defp should_poll?(%{recovery: %Recovery{state: recovery_state}}, _state, _now_ms)
+       when recovery_state not in @cascade_inactive,
        do: false
 
-  defp should_poll?(%{last_attempt_at: %DateTime{} = last}, remote, now_ms) do
-    last_ms = DateTime.to_unix(last, :millisecond)
-    now_ms - last_ms >= remote.poll_interval_ms
+  defp should_poll?(
+         %{
+           recovery: %Recovery{state: recovery_state},
+           remote: %Remote{} = remote,
+           last_attempt_at: %DateTime{} = last
+         },
+         %State{} = state,
+         now_ms
+       ) do
+    interval_ms =
+      case recovery_state do
+        :tripped -> max(remote.poll_interval_ms, state.tripped_poll_floor_ms)
+        _ -> remote.poll_interval_ms
+      end
+
+    now_ms - DateTime.to_unix(last, :millisecond) >= interval_ms
   end
 
-  defp should_poll?(_, _remote, _now_ms), do: true
+  defp should_poll?(_, _state, _now_ms), do: true
 
   defp normal_probe(%{remote: %Remote{} = remote} = entry, client, state, now) do
     case fetch_snapshot(remote, client) do
@@ -482,6 +575,30 @@ defmodule Shuttle.RemoteRegistry do
             Logger.info("RemoteRegistry: #{remote.name} recovered during backoff probe")
             success_entry(entry, snapshot, now)
 
+          {:error, reason} when recovery.attempt >= state.trip_threshold ->
+            # N full cascade attempts have failed: trip the breaker.
+            # Reviving a chronically-unhealthy remote (tmux kill +
+            # shuttle-launch over SSH) only adds load — fall back to
+            # passive polling until a probe succeeds or an operator
+            # calls `reset_breaker/2`.
+            Logger.warning(
+              "RemoteRegistry: #{remote.name} circuit tripped after #{recovery.attempt} revive attempts; passive polling only"
+            )
+
+            with_recovery(
+              failure_entry(entry, reason, now),
+              %{
+                recovery
+                | state: :tripped,
+                  step: nil,
+                  action_due_at: nil,
+                  next_retry_at: nil,
+                  last_error:
+                    "circuit tripped after #{recovery.attempt} revive attempts; passive polling only",
+                  last_action: "circuit breaker tripped"
+              }
+            )
+
           {:error, reason} ->
             Logger.warning(
               "RemoteRegistry: #{remote.name} backoff probe failed; restarting recovery cascade"
@@ -508,7 +625,8 @@ defmodule Shuttle.RemoteRegistry do
     end
   end
 
-  defp recovery_action_due?(%Recovery{state: :healthy}, _now), do: false
+  defp recovery_action_due?(%Recovery{state: state}, _now) when state in @cascade_inactive,
+    do: false
 
   defp recovery_action_due?(
          %Recovery{step: :backoff_probe, next_retry_at: %DateTime{} = next},
@@ -556,6 +674,18 @@ defmodule Shuttle.RemoteRegistry do
       remote: remote,
       recovery: %Recovery{}
     }
+  end
+
+  # While tripped, passive probe failures just refresh the entry — the
+  # breaker's message stays put and no cascade restarts. (A successful
+  # probe goes through `success_entry/3`, which resets the breaker.)
+  defp normal_failure_entry(
+         %{recovery: %Recovery{state: :tripped}} = entry,
+         reason,
+         _threshold,
+         now
+       ) do
+    failure_entry(entry, reason, now)
   end
 
   defp normal_failure_entry(%{recovery: %Recovery{} = recovery} = entry, reason, threshold, now) do
@@ -663,13 +793,21 @@ defmodule Shuttle.RemoteRegistry do
     end
   end
 
+  # shuttle-launch itself kills and recreates the default-socket
+  # shuttle-daemon session (single source of truth for session teardown),
+  # including the legacy alt-socket sweep (~/.shuttle/tmux.sock — see
+  # "Legacy socket sweep" in bin/shuttle-launch), and resolves the repo
+  # from the state file bootstrap.sh wrote (~/.shuttle/repo), so revival
+  # needs no SHUTTLE_DIR here. This SSH script is just the invocation.
+  #
+  # Each revive here resets the respawn loop's own backoff (kill + recreate
+  # starts a fresh `--loop` process, so its in-shell `backoff` var restarts
+  # at 2s) — that's fine because `trip_threshold` bounds how many times this
+  # cascade may fire before the breaker trips, so the two rate-limiters
+  # compose: the loop absorbs fast local crashes, the breaker caps how many
+  # cascades an unreachable remote gets before we stop hammering it.
   defp restart_remote(%Remote{name: name}, runner) do
-    script =
-      [
-        ~s(tmux kill-session -t shuttle-daemon 2>/dev/null || tmux -S "$HOME/.shuttle/tmux.sock" kill-session -t shuttle-daemon 2>/dev/null || true),
-        ~s("$HOME/.local/bin/shuttle-launch")
-      ]
-      |> Enum.join("; ")
+    script = ~s("$HOME/.local/bin/shuttle-launch")
 
     case runner.cmd("ssh", ssh_args(name, script), stderr_to_stdout: true) do
       {_out, 0} -> :ok

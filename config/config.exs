@@ -13,6 +13,10 @@ config :shuttle,
   # "local". The historical literal "local" default was a no-op filter that
   # let remote and local daemons fight over the same fibers.
   start_poller: true,
+  # `:boot_quarantine` is intentionally left unset here: the default (true —
+  # restart is not dispatch authority) lives in one place,
+  # Shuttle.Poller's @default_boot_quarantine. Set the key only to override
+  # (config/test.exs sets false so dispatch tests exercise the tick directly).
   start_remote_registry: true,
   # Sibling of the remote registry: polls each remote's owner-only `/fibers`
   # feed and caches it for the local daemon's composite cross-host board. Kept

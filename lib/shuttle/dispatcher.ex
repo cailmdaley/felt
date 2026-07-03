@@ -193,21 +193,6 @@ defmodule Shuttle.Dispatcher do
     end
   end
 
-  @doc """
-  The autonomous fresh-vs-resume decision for a fiber, pre-flight: `:fresh`
-  when an autonomous dispatch would LAUNCH NEW WORK, `{:previous, session_id}`
-  when it would resume a dirty death's transcript.
-
-  This is exactly the rule `check_resume_intent/3` applies when no human
-  directive is carried (see `decide_continuation/2` below), exposed so the
-  Poller's boot quarantine can ask the question without dispatching: resuming
-  a dead worker is unambiguous recovery and stays automatic; a fresh launch is
-  a decision a just-restarted daemon must not make in bulk.
-  """
-  @spec autonomous_continuation(map()) :: :fresh | {:previous, String.t()}
-  def autonomous_continuation(fiber),
-    do: decide_continuation(fiber, Shuttle.Continuation.resumable_session_id(fiber))
-
   # The autonomous fresh-vs-resume decision when there is no human resume
   # directive. A long-running oneshot loops across sessions: a worker exits, the
   # next poll re-dispatches and continues. The question is whether the previous
@@ -419,7 +404,7 @@ defmodule Shuttle.Dispatcher do
   end
 
   @doc false
-  @spec prompt_fiber_id(String.t(), String.t(), String.t()) :: String.t()
+  @spec prompt_fiber_id(String.t(), String.t(), String.t(), module()) :: String.t()
   # The worker runs `felt show <id>` from inside `work_dir`, whose `.felt`
   # symlinks into a sub-store view of the loom — so the id it sees is
   # project-local (e.g. global `ai-futures/shuttle/X` → local `constitution/X`).
@@ -429,15 +414,19 @@ defmodule Shuttle.Dispatcher do
   # globbed path. On any felt miss/error fall back to the global `fiber_id`,
   # preserving the previous safe-fail. `_felt_store` is retained for signature
   # stability; the worker's view is `work_dir`, not the configured store root.
-  def prompt_fiber_id(fiber_id, work_dir, _felt_store) do
-    case felt_show_id(work_dir, fiber_id) do
+  # Runs through the injected `runner` — this sits on the Poller's dispatch
+  # path (via `create_tmux_session/7`), so a bare System.cmd here was the one
+  # unbounded felt call left in it: a wedged felt would block the Poller
+  # GenServer. Bounded, a timeout degrades to the global-id fallback.
+  def prompt_fiber_id(fiber_id, work_dir, _felt_store, runner \\ Shuttle.Runner.Default) do
+    case felt_show_id(work_dir, fiber_id, runner) do
       {:ok, local_id} -> local_id
       :error -> fiber_id
     end
   end
 
-  defp felt_show_id(work_dir, fiber_id) do
-    case System.cmd("felt", ["-C", work_dir, "show", fiber_id, "-j"], stderr_to_stdout: false) do
+  defp felt_show_id(work_dir, fiber_id, runner) do
+    case runner.cmd("felt", ["-C", work_dir, "show", fiber_id, "-j"], stderr_to_stdout: false) do
       {output, 0} ->
         case Jason.decode(output) do
           {:ok, %{"id" => id}} when is_binary(id) and id != "" -> {:ok, id}
@@ -656,8 +645,16 @@ defmodule Shuttle.Dispatcher do
     # stdout is empty and stderr carries felt's descriptive diagnostic, so
     # `output` is the constraint message. Folding gives the right bytes either way.
     case runner.cmd("felt", args, stderr_to_stdout: true) do
-      {output, 0} -> {:ok, Agents.from_resolved(Jason.decode!(output))}
-      {output, _status} -> {:error, {:invalid_axes, String.trim(output)}}
+      {output, 0} ->
+        {:ok, Agents.from_resolved(Jason.decode!(output))}
+
+      # A runner timeout is a wedged node, not a bad request — it must stay
+      # 500-shaped (see moduledoc: only axes-validation failures answer 422).
+      {output, :timeout} ->
+        {:error, "felt shuttle agents resolve timed out: #{String.trim(output)}"}
+
+      {output, _status} ->
+        {:error, {:invalid_axes, String.trim(output)}}
     end
   rescue
     # ErlangError: the spawn itself failed — most pointedly `felt` not on PATH
@@ -966,7 +963,7 @@ defmodule Shuttle.Dispatcher do
   defp create_tmux_session(fiber_id, agent, work_dir, runner, prompt_context, resume_intent, opts) do
     session = session_name(fiber_id, Keyword.get(opts, :uid))
     felt_store = Keyword.get(opts, :felt_store, default_felt_store())
-    worker_fiber_id = prompt_fiber_id(fiber_id, work_dir, felt_store)
+    worker_fiber_id = prompt_fiber_id(fiber_id, work_dir, felt_store, runner)
 
     prompt_opts =
       opts

@@ -1223,6 +1223,27 @@ defmodule Shuttle.DispatcherTest do
     assert script =~ "`chrome: true`"
   end
 
+  # A wedged felt (runner :timeout) is a server-side failure, never a client
+  # error: it must NOT surface as {:invalid_axes, _} (the HTTP layer maps that
+  # to 422) but as a binary reason (500-shaped).
+  defmodule TimeoutRunner do
+    @behaviour Shuttle.Runner
+    def cmd("felt", _args, _opts), do: {"felt … timed out after 60000ms", :timeout}
+  end
+
+  test "capture axes-resolve timeout stays 500-shaped, not invalid_axes" do
+    assert {:error, reason} =
+             Dispatcher.capture("an idea",
+               runner: TimeoutRunner,
+               work_dir: "/tmp",
+               felt_store: "/tmp",
+               agent: "claude-sonnet"
+             )
+
+    refute match?({:invalid_axes, _}, reason)
+    assert reason =~ "timed out"
+  end
+
   test "capture rejects axes outside the agent's constraints" do
     assert {:error, {:invalid_axes, reason}} =
              Dispatcher.capture("an idea",

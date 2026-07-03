@@ -3,6 +3,10 @@ import Config
 config :shuttle,
   env: :test,
   start_poller: false,
+  # Tests boot pollers constantly; quarantining every one would park the very
+  # dispatches the suite asserts on. Quarantine tests pass `boot_quarantine:
+  # true` to Poller.start_link explicitly.
+  boot_quarantine: false,
   start_waiting_tracker: false,
   start_remote_registry: false,
   start_remote_fiber_registry: false,
