@@ -176,6 +176,16 @@ step "Build the daemon escript"
 make -C "$REPO" daemon || die "escript build failed."
 ok "bin/shuttle built."
 
+# Record the bootstrapped checkout in ~/.shuttle (alongside the daemon's other
+# state: events.jsonl, tmux.sock). bin/shuttle-launch resolves its repo as
+# SHUTTLE_DIR > ~/.shuttle/repo > script location > ~/dev/felt, so remote
+# revival (remote_registry.ex invoking ~/.local/bin/shuttle-launch over SSH,
+# no env) always lands on this checkout instead of the heuristic fallback.
+mkdir -p "$HOME/.shuttle" \
+  && printf '%s\n' "$REPO" > "$HOME/.shuttle/repo" \
+  || die "failed to record checkout path in ~/.shuttle/repo."
+ok "checkout recorded → ~/.shuttle/repo ($REPO)."
+
 # ── 4. ui/dist ─────────────────────────────────────────────────────────────
 step "UI bundle (ui/dist)"
 if [ "$UI_MODE" = build ]; then
@@ -224,20 +234,23 @@ if [ "$OS" = Darwin ]; then
   make -C "$REPO" install-agent || die "make install-agent failed."
   ok "launchd agent loaded (KeepAlive + RunAtLoad)."
 else
-  # Clusters have no launchd; the durable surface is a respawn loop in a named
-  # tmux session that re-execs the foreground daemon whenever it exits.
-  # `start --force` matches the launchd path (plist) and is load-bearing here:
-  # bare `start` HTTP-probes :4000 and halt(1)s if a daemon answers, so during
-  # the documented "kill the :4000 listener to cycle" procedure it would
-  # busy-respawn every 2s until the old listener dies. --force skips that guard
-  # so a restart never refuses.
+  # Clusters have no launchd; the durable surface is bin/shuttle-launch — a
+  # respawn loop (exponential backoff on fast exits) in a named tmux session.
+  # Install it to ~/.local/bin so remote revival (remote_registry.ex invokes
+  # ~/.local/bin/shuttle-launch over SSH) always finds a current copy. The
+  # loop keeps `start --force` (see comments in bin/shuttle-launch).
+  mkdir -p "$HOME/.local/bin"
+  cp "$REPO/bin/shuttle-launch" "$HOME/.local/bin/shuttle-launch" \
+    && chmod +x "$HOME/.local/bin/shuttle-launch" \
+    || die "failed to install shuttle-launch to ~/.local/bin."
+  ok "shuttle-launch installed to ~/.local/bin."
   if tmux has-session -t shuttle-daemon 2>/dev/null; then
     ok "respawn loop already running (tmux session 'shuttle-daemon')."
     note "to cycle to the freshly-built escript, kill the :4000 listener — the loop respawns it:"
     note "  lsof -ti:4000 -sTCP:LISTEN | xargs kill"
+    note "to also pick up a new shuttle-launch: SHUTTLE_DIR='$REPO' ~/.local/bin/shuttle-launch"
   else
-    tmux new-session -d -s shuttle-daemon \
-      "cd '$REPO' && while true; do ./bin/shuttle start --force; echo '[respawn] daemon exited; restarting in 2s'; sleep 2; done" \
+    SHUTTLE_DIR="$REPO" "$HOME/.local/bin/shuttle-launch" \
       && ok "respawn loop started (tmux session 'shuttle-daemon')." \
       || die "failed to start respawn loop."
   fi

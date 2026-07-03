@@ -1,0 +1,101 @@
+#!/bin/sh
+# shuttle-launch — (re)start the shuttle daemon respawn loop in tmux.
+#
+# Tracked source of truth for the loop that keeps the daemon alive on hosts
+# without launchd (clusters). bootstrap.sh installs this to
+# ~/.local/bin/shuttle-launch; lib/shuttle/remote_registry.ex invokes that
+# installed copy over SSH to revive a dead remote daemon.
+#
+# Modes:
+#   shuttle-launch          (re)create tmux session "shuttle-daemon" running
+#                           `shuttle-launch --loop`
+#   shuttle-launch --loop   the respawn loop itself (runs in the foreground)
+#
+# Repo resolution precedence: $SHUTTLE_DIR; else ~/.shuttle/repo (the state
+# file bootstrap.sh writes at install time, so remote revival over SSH needs
+# no env to find the bootstrapped checkout); else the script's own directory
+# if it looks like <repo>/bin; else ~/dev/felt (the canonical cluster
+# checkout).
+#
+# The loop respawns `./bin/shuttle start --force` with exponential backoff:
+# a daemon that exits in < 60s doubles the sleep (2s .. 300s cap); one that
+# lived >= 60s resets it to 2s. This is what prevents the crash-storm failure
+# mode (a wedged login node once drove the old fixed-2s loop to ~35k restarts).
+#
+# `--force` is load-bearing: bare `start` probes :4000 and halt(1)s if a
+# daemon answers, which would busy-respawn during the documented
+# "kill the :4000 listener to cycle" procedure. See bootstrap.sh.
+
+set -u
+
+SESSION=shuttle-daemon
+
+resolve_repo() {
+  if [ -n "${SHUTTLE_DIR:-}" ]; then
+    printf '%s\n' "$SHUTTLE_DIR"
+    return
+  fi
+  if [ -r "$HOME/.shuttle/repo" ]; then
+    state_repo=$(head -n 1 "$HOME/.shuttle/repo")
+    if [ -n "$state_repo" ] && [ -x "$state_repo/bin/shuttle" ]; then
+      printf '%s\n' "$state_repo"
+      return
+    fi
+  fi
+  script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+  candidate=$(dirname -- "$script_dir")
+  if [ -x "$candidate/bin/shuttle" ]; then
+    printf '%s\n' "$candidate"
+  else
+    printf '%s\n' "$HOME/dev/felt"
+  fi
+}
+
+REPO=$(resolve_repo)
+[ -x "$REPO/bin/shuttle" ] || {
+  echo "shuttle-launch: no executable bin/shuttle under '$REPO' (set SHUTTLE_DIR?)" >&2
+  exit 1
+}
+
+if [ "${1:-}" = "--loop" ]; then
+  cd "$REPO" || exit 1
+  backoff=2
+  while :; do
+    started=$(date +%s)
+    ./bin/shuttle start --force
+    status=$?
+    lived=$(( $(date +%s) - started ))
+    [ "$lived" -ge 60 ] && backoff=2
+    echo "[respawn] $(date '+%Y-%m-%dT%H:%M:%S%z') daemon exited (status=$status, lived=${lived}s); restarting in ${backoff}s" >&2
+    sleep "$backoff"
+    if [ "$lived" -lt 60 ]; then
+      backoff=$(( backoff * 2 ))
+      [ "$backoff" -gt 300 ] && backoff=300
+    fi
+  done
+fi
+
+# (Re)create the tmux session running this script's own loop mode.
+SELF=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/$(basename -- "$0")
+
+# Both paths are embedded single-quoted in the tmux command string below; a
+# single quote inside either would silently truncate the command while tmux
+# still reports success. Refuse loudly instead of failing invisibly.
+case "$REPO$SELF" in
+  *"'"*)
+    echo "shuttle-launch: repo or script path contains a single quote ($REPO, $SELF); refusing to embed it in the tmux command" >&2
+    exit 1
+    ;;
+esac
+
+# Legacy socket sweep: an old respawn loop could have been started against
+# the alt tmux socket ($HOME/.shuttle/tmux.sock) before this script existed.
+# Kill it here too so a stale session on that socket never fights the
+# default-socket session this script owns for :4000. Sequential, not
+# ||-chained, so a miss on one socket doesn't short-circuit the other.
+tmux -S "$HOME/.shuttle/tmux.sock" kill-session -t "$SESSION" 2>/dev/null
+tmux kill-session -t "$SESSION" 2>/dev/null
+tmux new-session -d -s "$SESSION" \
+  "SHUTTLE_DIR='$REPO' '$SELF' --loop" \
+  || { echo "shuttle-launch: failed to start tmux session '$SESSION'" >&2; exit 1; }
+echo "shuttle-launch: respawn loop running in tmux session '$SESSION' (repo: $REPO)"
