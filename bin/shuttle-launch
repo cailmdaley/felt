@@ -59,14 +59,26 @@ REPO=$(resolve_repo)
 
 if [ "${1:-}" = "--loop" ]; then
   cd "$REPO" || exit 1
+  # Durable daemon logging. Redirect the daemon's stdout+stderr to a file so
+  # dispatch history survives tmux scrollback — a host without launchd (the
+  # clusters) otherwise logs only to its pane, and a failed force-reopen warning
+  # (or any crash reason) is lost the moment the pane rotates. Size-rotate at
+  # 50MB keeping one previous generation, so the log never becomes the 238MB
+  # monster that once outran diagnosis. Override the path with $SHUTTLE_LOG.
+  LOG="${SHUTTLE_LOG:-$HOME/.shuttle/shuttle.log}"
+  mkdir -p "$(dirname "$LOG")"
   backoff=2
   while :; do
+    if [ -f "$LOG" ] && [ "$(wc -c < "$LOG" 2>/dev/null || echo 0)" -gt 52428800 ]; then
+      mv -f "$LOG" "$LOG.1" 2>/dev/null || true
+    fi
     started=$(date +%s)
-    ./bin/shuttle start --force
+    echo "=== shuttle start $(date '+%Y-%m-%dT%H:%M:%S%z') ===" >> "$LOG"
+    ./bin/shuttle start --force >> "$LOG" 2>&1
     status=$?
     lived=$(( $(date +%s) - started ))
     [ "$lived" -ge 60 ] && backoff=2
-    echo "[respawn] $(date '+%Y-%m-%dT%H:%M:%S%z') daemon exited (status=$status, lived=${lived}s); restarting in ${backoff}s" >&2
+    echo "[respawn] $(date '+%Y-%m-%dT%H:%M:%S%z') daemon exited (status=$status, lived=${lived}s); restarting in ${backoff}s" | tee -a "$LOG" >&2
     sleep "$backoff"
     if [ "$lived" -lt 60 ]; then
       backoff=$(( backoff * 2 ))
