@@ -69,7 +69,7 @@ Relationships: directory containment, `[[wikilinks]]` in bodies, and optional pr
 
 **Follow the understanding.** Don't ask permission to file. The user's corrections and opinions are the primary trigger; when the direction shifts, the fiber should shift too.
 
-**Use the substrate cleanly.** Names are concise labels — body and outcome carry the content. Nest for containment, `[[wikilinks]]` for narrative, project-owned conventions for anything more specific.
+**Use the substrate cleanly.** Names are concise labels — body and outcome carry the content. Nest for containment, `[[wikilinks]]` for narrative, project-owned conventions for anything more specific. Never hand-edit `created-at` / `updated-at`: felt stamps them on every write (a manual value is silently overwritten); edit only content fields.
 
 **Links in prose, not in piles.** A `[[wikilink]]` earns its place by doing work in a sentence — naming what the other fiber is, why it's relevant here, where to head next. Related-things lists at the bottom of a fiber are a smell that the relationships haven't been thought through; fold them into the body where they belong, or drop the ones that aren't earning the link.
 
