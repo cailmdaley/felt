@@ -113,6 +113,44 @@ defmodule Shuttle.Poller.StandingRoles do
       not standing_role_dispatched_unexited?(fiber) ->
         state
 
+      # SELF-HEAL, don't close, on inverted/implausible markers. A run whose
+      # `handed_off_at` is EARLIER than its `dispatched_at` is physically
+      # impossible — you can't hand off before you're dispatched — so the markers
+      # are corrupt, not a genuine in-flight run. `dispatched_unexited?` reads the
+      # inversion as "dispatched, never handed off" → orphan → close, and with no
+      # live session every gate below passes and it re-closes a healthy
+      # `status: active` role every poll. A corrupt-marker inference must never
+      # override the file's `status: active` (commit 3d51276, "restart is not
+      # dispatch authority"): conclude the phantom run (stamp `handed_off_at = now`,
+      # exactly what `conclude_run` does on a human accept), so the marker
+      # self-corrects and the role stays armed. Never mark awaiting/park.
+      standing_role_markers_inverted?(fiber) ->
+        Logger.info(
+          "Standing role #{fiber_id} has inverted runtime markers (handed_off_at earlier than " <>
+            "dispatched_at) — corrupt, not genuinely in-flight; self-healing (stamping " <>
+            "handed_off_at=now) and leaving armed instead of closing"
+        )
+
+        self_heal_inverted_markers(fiber_id, state)
+        state
+
+      # A dead ADHOC extra-run must not close the SCHEDULED standing role. An
+      # ad-hoc (force-dispatched) run carries an `adhoc-<ms>` run_id; its dirty
+      # death (daemon down across the exit) is caught here, but concluding the
+      # standing role to awaiting-review on the strength of a crashed EXTRA run
+      # would disrupt the cron cadence and demand a human temper. A completed
+      # ad-hoc run reaches awaiting-review through `handle_worker_exit` instead
+      # (worker exit → mark_standing_awaiting), so this reconciler only ever fires
+      # on genuinely dead runs — leaving a crashed ad-hoc run's role simply armed
+      # for its next scheduled tick is safe.
+      kind == "standing" and dead_run_is_adhoc?(fiber) ->
+        Logger.info(
+          "Standing role #{fiber_id} has a dead ADHOC extra-run (daemon down across its exit) — " <>
+            "leaving the scheduled role armed instead of marking awaiting"
+        )
+
+        state
+
       # Daemon-down analog of handle_worker_exit, split by kind:
       #  • standing → awaiting (status:closed) so the cron doesn't re-fire;
       #  • pinned   → parked (status:open) back to the strip, so a dead interface
@@ -168,6 +206,39 @@ defmodule Shuttle.Poller.StandingRoles do
   # True iff `dt` is non-nil and at or after `reference`.
   defp at_or_after?(nil, _reference), do: false
   defp at_or_after?(%DateTime{} = dt, reference), do: DateTime.compare(dt, reference) != :lt
+
+  # True iff the fiber's markers are TIME-INVERTED: BOTH `dispatched_at` and
+  # `handed_off_at` are present and `handed_off_at` is strictly EARLIER than
+  # `dispatched_at`. This is the corrupt-marker subset of
+  # `standing_role_dispatched_unexited?` (which also fires on the legitimate
+  # "dispatched, no handoff at all" orphan, where `handed_off_at` is nil). Only
+  # the inverted subset is impossible in a real run, so only it self-heals; a
+  # genuine handoff-less orphan still closes.
+  def standing_role_markers_inverted?(fiber) do
+    with %DateTime{} = dispatched <- Shuttle.Continuation.dispatched_at(fiber),
+         %DateTime{} = handed_off <- Shuttle.Continuation.handed_off_at(fiber) do
+      DateTime.compare(handed_off, dispatched) == :lt
+    else
+      _ -> false
+    end
+  rescue
+    _ -> false
+  end
+
+  # True iff the dead run's `run_id` marks it an ad-hoc (force-dispatched extra)
+  # run — `StandingRole.ad_hoc_run_id/1`'s `adhoc-<ms>` form.
+  def dead_run_is_adhoc?(fiber) do
+    StandingRole.ad_hoc_run_id?(Shuttle.Continuation.run_id(fiber))
+  end
+
+  # Self-heal a run with inverted/implausible markers by concluding it — the same
+  # `handed_off_at = now` stamp `LifecycleStore.conclude_run` folds into a human
+  # accept. Best-effort (conclude_run is itself best-effort): a stamp miss just
+  # means the next poll self-heals again, still without closing. Threads the
+  # poller's runner + felt stores so the `felt shuttle mark-runtime` write resolves.
+  def self_heal_inverted_markers(fiber_id, %State{} = state) do
+    LifecycleStore.conclude_run(fiber_id, runner: state.runner, felt_stores: state.felt_stores)
+  end
 
   # Mark a standing role awaiting (`status: closed`, untempered) by writing its
   # felt document on worker exit. Best-effort: a failed felt write must not crash

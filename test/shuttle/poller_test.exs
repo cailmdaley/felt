@@ -340,6 +340,28 @@ defmodule Shuttle.PollerTest do
           output = sessions |> MapSet.to_list() |> Enum.join("\n")
           {output, 0}
 
+        # `felt shuttle mark-runtime <id> [--handed-off-at ts] [--dispatched-at ts]
+        # [--session s] [--run-id r] [--host h]` — felt's daemon-facing runtime
+        # writer. Mirror the real CLI by folding the stamped flags into the
+        # fiber's `shuttle:` map (the same surface put_shuttle_fields updates), so
+        # a self-heal / conclude write is observable on the next poll.
+        command == "felt" and match?(["shuttle", "mark-runtime", _id | _], args) ->
+          [_shuttle, _mark, id | flags] = args
+
+          fields =
+            flags
+            |> Enum.chunk_every(2)
+            |> Enum.reduce(%{}, fn
+              ["--handed-off-at", ts], acc -> Map.put(acc, "handed_off_at", ts)
+              ["--dispatched-at", ts], acc -> Map.put(acc, "dispatched_at", ts)
+              ["--session", s], acc -> Map.put(acc, "session_uuid", s)
+              ["--run-id", r], acc -> Map.put(acc, "run_id", r)
+              _, acc -> acc
+            end)
+
+          if fields != %{}, do: put_shuttle_fields(id, fields)
+          {"", 0}
+
         true ->
           {"", 0}
       end
@@ -3354,6 +3376,114 @@ defmodule Shuttle.PollerTest do
     assert wait_until(fn -> File.read!(doc_path) =~ "status: closed" end, 80)
 
     # No worker was spawned — the role was marked awaiting, not dispatched.
+    refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
+             cmd == "tmux" and hd(args) == "new-session"
+           end)
+  end
+
+  test "poller self-heals (does not close) a standing role whose markers are time-inverted" do
+    # Regression: a run whose `handed_off_at` is EARLIER than its `dispatched_at`
+    # is physically impossible (you can't hand off before you're dispatched), so
+    # the markers are corrupt — NOT a genuine "dispatched, never handed off"
+    # orphan. The dead-orphan predicate misreads the inversion as an orphan and,
+    # with no live tmux session, force-closes a healthy `status: active` role on
+    # every poll. The reconciler must instead SELF-HEAL: stamp handed_off_at=now
+    # (concluding the phantom run) and leave the role armed.
+    fiber_id = "tests/standing-inverted-markers"
+
+    previous_loom_homes = System.get_env("FELT_STORES")
+    System.put_env("FELT_STORES", "/tmp")
+    on_exit(fn -> restore_env("FELT_STORES", previous_loom_homes) end)
+
+    MockRunner.set_shuttle(fiber_id, """
+    kind: standing
+    agent: claude-sonnet
+    schedule:
+      expr: "0 9 1 1 *"
+      tz: Europe/Paris
+    """)
+
+    # Dispatch at T, handoff 94ms BEFORE T — the observed inversion.
+    dispatched = DateTime.utc_now()
+    write_dispatch_marker(fiber_id, "inverted-session-uuid", dispatched)
+    write_handoff_marker(fiber_id, DateTime.add(dispatched, -94, :millisecond))
+
+    doc_path = "/tmp/.felt/#{fiber_id}/standing-inverted-markers.md"
+
+    {:ok, poller} =
+      start_poller!(
+        name: :test_poller_standing_inverted,
+        runner: MockRunner,
+        poll_interval_ms: 60_000,
+        felt_stores: ["/tmp"]
+      )
+
+    send(poller, :run_poll_cycle)
+
+    # Self-heal fired: a `felt shuttle mark-runtime --handed-off-at` write was
+    # issued to conclude the phantom run.
+    assert wait_until(
+             fn ->
+               Enum.any?(MockRunner.commands(), fn {cmd, args} ->
+                 cmd == "felt" and match?(["shuttle", "mark-runtime" | _], args) and
+                   "--handed-off-at" in args
+               end)
+             end,
+             80
+           )
+
+    # The document was NEVER closed — the role stays armed.
+    assert File.read!(doc_path) =~ "status: active"
+    refute File.read!(doc_path) =~ "status: closed"
+
+    # No worker was spawned.
+    refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
+             cmd == "tmux" and hd(args) == "new-session"
+           end)
+  end
+
+  test "poller leaves a scheduled standing role armed when a dead ADHOC extra-run is its last run" do
+    # Fix #2: a force-dispatched ad-hoc extra-run that dies dirty (daemon down
+    # across its exit) must NOT close the SCHEDULED standing role to awaiting —
+    # that would disrupt the cron cadence and force a human temper. A COMPLETED
+    # ad-hoc run reaches awaiting-review through handle_worker_exit, not this
+    # reconciler, so leaving a crashed ad-hoc run's role armed is safe.
+    fiber_id = "tests/standing-dead-adhoc"
+
+    previous_loom_homes = System.get_env("FELT_STORES")
+    System.put_env("FELT_STORES", "/tmp")
+    on_exit(fn -> restore_env("FELT_STORES", previous_loom_homes) end)
+
+    MockRunner.set_shuttle(fiber_id, """
+    kind: standing
+    agent: claude-sonnet
+    schedule:
+      expr: "0 9 1 1 *"
+      tz: Europe/Paris
+    """)
+
+    # Plausible-but-orphaned markers (dispatched, NO handoff — a genuine dirty
+    # death, not an inversion) carrying an ad-hoc run_id.
+    write_dispatch_marker(fiber_id, "dead-adhoc-uuid")
+    MockRunner.put_shuttle_fields(fiber_id, %{"run_id" => "adhoc-1751558400000"})
+
+    doc_path = "/tmp/.felt/#{fiber_id}/standing-dead-adhoc.md"
+
+    {:ok, poller} =
+      start_poller!(
+        name: :test_poller_standing_dead_adhoc,
+        runner: MockRunner,
+        poll_interval_ms: 60_000,
+        felt_stores: ["/tmp"]
+      )
+
+    send(poller, :run_poll_cycle)
+    Process.sleep(150)
+
+    # The scheduled role's document is untouched: still armed, never closed.
+    assert File.read!(doc_path) =~ "status: active"
+    refute File.read!(doc_path) =~ "status: closed"
+
     refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
              cmd == "tmux" and hd(args) == "new-session"
            end)

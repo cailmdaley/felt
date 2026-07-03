@@ -87,6 +87,20 @@ defmodule Shuttle.Continuation do
     do: fiber |> shuttle_block() |> runtime_field("handed_off_at") |> parse_iso()
 
   @doc """
+  `shuttle.runtime.run_id` (or legacy flat) as a string, or `nil` when
+  absent/empty. Stamped by the daemon at dispatch; an ad-hoc (force-dispatched
+  extra) run carries an `adhoc-<ms>` id (`StandingRole.ad_hoc_run_id/1`), a
+  scheduled run a cron timestamp label.
+  """
+  @spec run_id(map()) :: String.t() | nil
+  def run_id(fiber) do
+    case fiber |> shuttle_block() |> runtime_field("run_id") do
+      id when is_binary(id) and id != "" -> id
+      _ -> nil
+    end
+  end
+
+  @doc """
   The resumable session UUID — `shuttle.runtime.session_uuid` (or legacy flat),
   or `nil` when absent/empty. The sole structured home for the resume id.
   """

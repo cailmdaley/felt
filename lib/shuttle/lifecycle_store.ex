@@ -291,7 +291,14 @@ defmodule Shuttle.LifecycleStore do
   # → the dead-orphan reconciler marks it awaiting → the human re-accepts. Rare
   # (crash during a human action), recoverable, standing-only. Best-effort: a
   # resolution miss or a non-zero `felt` exit is logged, never fails the re-arm.
-  defp conclude_run(fiber_id, opts) do
+  #
+  # Public because the poller's dead-standing-role reconciler reuses it to
+  # SELF-HEAL a run with inverted/implausible markers (`handed_off_at` earlier
+  # than `dispatched_at` — physically impossible in a real run): stamping
+  # `handed_off_at = now` corrects the marker so the phantom "still dispatched"
+  # signal clears and the role stays armed, instead of being force-closed.
+  @spec conclude_run(String.t(), keyword()) :: :ok
+  def conclude_run(fiber_id, opts \\ []) do
     runner = Keyword.get(opts, :runner, Shuttle.Runner.Default)
 
     case resolve_runtime_target(fiber_id, Keyword.get(opts, :felt_stores)) do
