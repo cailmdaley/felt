@@ -55,6 +55,11 @@ defmodule ShuttleWeb.LifecycleController do
         conn
         |> put_resp_content_type("text/plain")
         |> send_resp(422, "shuttle exited #{status}: #{output}")
+
+      {:error, :timeout, reason} ->
+        conn
+        |> put_resp_content_type("text/plain")
+        |> send_resp(503, reason)
     end
   end
 
@@ -109,6 +114,7 @@ defmodule ShuttleWeb.LifecycleController do
     case FeltStores.resolve_fiber(identifier) do
       {:ok, resolved} -> {:ok, resolved}
       {:error, :not_found} -> {:error, "fiber not found: #{identifier}"}
+      {:error, :timeout} -> {:error, :timeout, "felt timed out resolving #{identifier}"}
     end
   end
 

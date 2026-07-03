@@ -19,7 +19,8 @@ defmodule Shuttle.LifecycleService do
 
   alias Shuttle.{FeltStores, LifecycleStore, Poller}
 
-  @spec accept(String.t(), keyword()) :: {:ok, String.t()} | {:error, String.t()}
+  @spec accept(String.t(), keyword()) ::
+          {:ok, String.t()} | {:error, String.t()} | {:error, :timeout, String.t()}
   def accept(fiber_id, opts \\ []) when is_binary(fiber_id) do
     with {:ok, address} <- fiber_address(fiber_id) do
       case transition(:accept, address, opts) do
@@ -29,7 +30,8 @@ defmodule Shuttle.LifecycleService do
     end
   end
 
-  @spec resume(String.t()) :: {:ok, String.t()} | {:error, String.t()}
+  @spec resume(String.t()) ::
+          {:ok, String.t()} | {:error, String.t()} | {:error, :timeout, String.t()}
   def resume(fiber_id) when is_binary(fiber_id) do
     with {:ok, address} <- fiber_address(fiber_id) do
       case transition(:resume, address, []) do
@@ -58,6 +60,7 @@ defmodule Shuttle.LifecycleService do
     case FeltStores.resolve_fiber(identifier) do
       {:ok, %{fiber_id: fiber_id}} -> {:ok, fiber_id}
       {:error, :not_found} -> {:error, "fiber not found: #{identifier}"}
+      {:error, :timeout} -> {:error, :timeout, "felt timed out resolving #{identifier}"}
     end
   end
 

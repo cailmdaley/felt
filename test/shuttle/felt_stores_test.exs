@@ -275,6 +275,53 @@ defmodule Shuttle.FeltStoresTest do
     end
   end
 
+  describe "timeout is world-unknown, never absence" do
+    # A wedged felt (runner :timeout) must surface as {:error, :timeout}, not
+    # {:error, :not_found}: consumers treat :not_found as authoritative absence
+    # and would act against the wrong store (the review's kanban-Resume bug).
+    defmodule TimeoutRunner do
+      @behaviour Shuttle.Runner
+      def cmd("felt", _args, _opts), do: {"felt timed out after 60000ms", :timeout}
+    end
+
+    # One store wedged, another resolving: the positive answer must win.
+    defmodule SplitRunner do
+      @behaviour Shuttle.Runner
+
+      def cmd("felt", ["-C", host, "show", _id, "-j"], _opts) do
+        if String.contains?(host, "wedged") do
+          {"felt timed out after 60000ms", :timeout}
+        else
+          {Jason.encode!(%{"id" => "debug", "path" => Path.join(host, ".felt/debug/debug.md")}),
+           0}
+        end
+      end
+    end
+
+    setup do
+      on_exit(fn -> Application.delete_env(:shuttle, :felt_stores_runner) end)
+      :ok
+    end
+
+    test "resolve_fiber/2 and host_for_fiber/2 report {:error, :timeout}, not :not_found" do
+      Application.put_env(:shuttle, :felt_stores_runner, TimeoutRunner)
+      store = tmp_dir()
+
+      assert {:error, :timeout} = FeltStores.resolve_fiber("some/fiber", [store])
+      assert {:error, :timeout} = FeltStores.host_for_fiber("some/fiber", [store])
+    end
+
+    test "a positive resolution from another store wins over a wedged one" do
+      Application.put_env(:shuttle, :felt_stores_runner, SplitRunner)
+      wedged = Path.join(tmp_dir(), "wedged")
+      healthy = tmp_dir()
+      File.mkdir_p!(Path.join(wedged, ".felt"))
+      File.mkdir_p!(Path.join(healthy, ".felt"))
+
+      assert {:ok, %{fiber_id: "debug"}} = FeltStores.resolve_fiber("debug", [wedged, healthy])
+    end
+  end
+
   defp write_fiber(felt_dir, slug_segments, opts \\ []) do
     leaf = List.last(slug_segments)
     dir = Path.join([felt_dir | slug_segments])

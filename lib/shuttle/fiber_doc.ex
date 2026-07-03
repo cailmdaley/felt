@@ -36,6 +36,9 @@ defmodule Shuttle.FiberDoc do
     case resolve_path(fiber_id) do
       {:ok, path} -> read_path(path)
       {:error, :not_found} -> {:error, "fiber not found: #{fiber_id}"}
+      # A wedged felt is not absence — say so, never "not found" (a caller
+      # acting on "not found" would write against the wrong store).
+      {:error, :timeout} -> {:error, "felt timed out resolving #{fiber_id}"}
     end
   end
 
@@ -49,13 +52,31 @@ defmodule Shuttle.FiberDoc do
   def read_path(path) when is_binary(path) do
     with {:ok, text} <- File.read(path),
          {:ok, frontmatter_yaml, body} <- split_frontmatter(text),
-         {:ok, frontmatter} <- YamlElixir.read_from_string(frontmatter_yaml) do
-      {:ok, path, frontmatter_yaml, stringify_keys(frontmatter || %{}), body}
+         {:ok, frontmatter} <- parse_frontmatter(frontmatter_yaml, path) do
+      {:ok, path, frontmatter_yaml, frontmatter, body}
     else
       {:error, reason} when is_atom(reason) -> {:error, to_string(reason)}
       {:error, reason} when is_binary(reason) -> {:error, reason}
       {:error, reason} -> {:error, inspect(reason)}
     end
+  end
+
+  # Malformed frontmatter does not always come back as `{:error, _}`: some
+  # documents RAISE instead — YamlElixir on pathological input, and our own
+  # key normalization on YAML that parses to a non-map (a bare list) or with
+  # a non-scalar mapping key (`? [a, b]`), where `stringify_keys/1` blows up.
+  # A user hand-edits a fiber; the daemon must return a readable error, not
+  # crash the Poller GenServer mid-handle_call. Same `{:error, binary}` shape
+  # as every other failure of `read_path/1`. The rescue spans ONLY the
+  # parse + normalize — a bug in the file read or splitting above must crash
+  # loudly, not masquerade as YAML corruption.
+  defp parse_frontmatter(frontmatter_yaml, path) do
+    case YamlElixir.read_from_string(frontmatter_yaml) do
+      {:ok, frontmatter} -> {:ok, stringify_keys(frontmatter || %{})}
+      {:error, _} = error -> error
+    end
+  rescue
+    error -> {:error, "malformed fiber document #{path}: #{Exception.message(error)}"}
   end
 
   @doc """
@@ -104,7 +125,7 @@ defmodule Shuttle.FiberDoc do
   defp resolve_path(fiber_id) do
     case FeltStores.resolve_fiber(fiber_id) do
       {:ok, %{path: path}} -> {:ok, path}
-      {:error, :not_found} -> {:error, :not_found}
+      {:error, _} = error -> error
     end
   end
 

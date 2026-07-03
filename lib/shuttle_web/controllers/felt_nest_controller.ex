@@ -61,6 +61,11 @@ defmodule ShuttleWeb.FeltNestController do
         conn
         |> put_resp_content_type("text/plain")
         |> send_resp(422, "felt exited #{status}: #{output}")
+
+      {:error, :timeout, reason} ->
+        conn
+        |> put_resp_content_type("text/plain")
+        |> send_resp(503, reason)
     end
   end
 
@@ -68,6 +73,7 @@ defmodule ShuttleWeb.FeltNestController do
     case FeltStores.resolve_fiber(fiber_id) do
       {:ok, %{host: host, fiber_id: address}} -> {:ok, host, address}
       {:error, :not_found} -> {:error, "fiber not found: #{fiber_id}"}
+      {:error, :timeout} -> {:error, :timeout, "felt timed out resolving #{fiber_id}"}
     end
   end
 
@@ -87,6 +93,9 @@ defmodule ShuttleWeb.FeltNestController do
 
       {:error, :not_found} ->
         {:error, "parent fiber not found: #{parent}"}
+
+      {:error, :timeout} ->
+        {:error, :timeout, "felt timed out resolving #{parent}"}
     end
   end
 

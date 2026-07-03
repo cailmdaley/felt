@@ -168,9 +168,9 @@ defmodule Shuttle.FeltStores do
   defp inside?(path, prefix), do: path == prefix or String.starts_with?(path, prefix <> "/")
 
   @doc """
-  Resolve which configured felt store owns `fiber_id`, as `{:ok, host}` or
-  `{:error, :not_found}`. Thin wrapper over `resolve_fiber/1` returning just the
-  owning store root.
+  Resolve which configured felt store owns `fiber_id`, as `{:ok, host}`,
+  `{:error, :not_found}`, or `{:error, :timeout}`. Thin wrapper over
+  `resolve_fiber/1` returning just the owning store root.
   """
   @type resolved_fiber :: %{
           host: String.t(),
@@ -179,14 +179,15 @@ defmodule Shuttle.FeltStores do
           uid: String.t() | nil
         }
 
-  @spec host_for_fiber(String.t()) :: {:ok, String.t()} | {:error, :not_found}
+  @spec host_for_fiber(String.t()) :: {:ok, String.t()} | {:error, :not_found | :timeout}
   def host_for_fiber(fiber_id), do: host_for_fiber(fiber_id, configured_hosts())
 
-  @spec host_for_fiber(String.t(), host_list()) :: {:ok, String.t()} | {:error, :not_found}
+  @spec host_for_fiber(String.t(), host_list()) ::
+          {:ok, String.t()} | {:error, :not_found | :timeout}
   def host_for_fiber(fiber_id, hosts) do
     case resolve_fiber(fiber_id, hosts) do
       {:ok, %{host: host}} -> {:ok, host}
-      {:error, :not_found} -> {:error, :not_found}
+      {:error, _} = error -> error
     end
   end
 
@@ -206,8 +207,17 @@ defmodule Shuttle.FeltStores do
   (for shelling subsequent felt commands), `fiber_id` is felt's addressable
   slug, `path` is the absolute on-disk file, and `uid` is the intrinsic identity
   when felt carries one.
+
+  `{:error, :timeout}` and `{:error, :not_found}` are distinct on purpose:
+  a `:not_found` is felt's authoritative "no store owns this fiber", while a
+  `:timeout` means a wedged store never answered — the world is UNKNOWN, and a
+  caller that treated it as absence would act against the wrong store (the
+  kanban's Resume falling back to a default store, a lifecycle verb 404ing a
+  fiber that exists). A timeout on one store never masks a positive resolution
+  from another: the scan finishes, and only an otherwise-empty result reports
+  `:timeout`.
   """
-  @spec resolve_fiber(String.t()) :: {:ok, resolved_fiber()} | {:error, :not_found}
+  @spec resolve_fiber(String.t()) :: {:ok, resolved_fiber()} | {:error, :not_found | :timeout}
   def resolve_fiber(identifier) when is_binary(identifier),
     do: resolve_fiber(identifier, configured_hosts())
 
@@ -218,12 +228,23 @@ defmodule Shuttle.FeltStores do
   that daemon instance is configured for (which may differ from the global
   `configured_hosts/0`, e.g. in tests or multi-store overrides).
   """
-  @spec resolve_fiber(String.t(), host_list()) :: {:ok, resolved_fiber()} | {:error, :not_found}
+  @spec resolve_fiber(String.t(), host_list()) ::
+          {:ok, resolved_fiber()} | {:error, :not_found | :timeout}
   def resolve_fiber(identifier, hosts) when is_binary(identifier) and is_list(hosts) do
-    with nil <- show_resolution(hosts, identifier),
-         nil <- uid_resolution(hosts, identifier) do
-      {:error, :not_found}
-    else
+    # `:timeout` is sticky-but-weak: it survives a miss (the world stayed
+    # unknown) but loses to any positive resolution — so a wedged store never
+    # masks an answer another store, or the uid scan, can still give.
+    show = show_resolution(hosts, identifier)
+
+    result =
+      case show do
+        %{} -> show
+        _ -> uid_resolution(hosts, identifier) || show
+      end
+
+    case result do
+      nil -> {:error, :not_found}
+      :timeout -> {:error, :timeout}
       resolved -> {:ok, resolved}
     end
   end
@@ -235,17 +256,30 @@ defmodule Shuttle.FeltStores do
   # one whose realpath `.felt/` physically contains it. Re-querying felt against
   # the owner yields the owner-relative `id` (the address subsequent
   # `felt -C <owner>` commands need), instead of a symlink-view alias.
+  # Returns the resolved map, `:timeout` (some store never answered and none
+  # resolved — absence is not established), or nil (every store answered "not
+  # mine").
   defp show_resolution(hosts, identifier) do
-    Enum.find_value(hosts, fn host ->
-      case felt_show_json(host, identifier) do
-        {:ok, %{"path" => path} = fiber} when is_binary(path) and path != "" ->
-          owner = owning_store(hosts, path) || host
-          owner_fiber = if owner == host, do: fiber, else: felt_for_path(owner, identifier, fiber)
-          resolved_from(owner, owner_fiber)
+    Enum.reduce(hosts, nil, fn
+      _host, %{} = resolved ->
+        resolved
 
-        _ ->
-          nil
-      end
+      host, acc ->
+        case felt_show_json(host, identifier) do
+          {:ok, %{"path" => path} = fiber} when is_binary(path) and path != "" ->
+            owner = owning_store(hosts, path) || host
+
+            owner_fiber =
+              if owner == host, do: fiber, else: felt_for_path(owner, identifier, fiber)
+
+            resolved_from(owner, owner_fiber) || acc
+
+          {:error, :timeout} ->
+            :timeout
+
+          _ ->
+            acc
+        end
     end)
   end
 
@@ -253,23 +287,31 @@ defmodule Shuttle.FeltStores do
   # falls through to scanning each store's `felt ls -j` for a matching `uid`,
   # reading the carried `path`, and assigning ownership by that path. Skipped
   # entirely for non-ULID identifiers (those resolve via `show_resolution`).
+  # Same nil / `:timeout` / resolved-map contract as `show_resolution/2`.
   defp uid_resolution(hosts, uid) do
     if Shuttle.ULID.valid?(uid) do
-      Enum.find_value(hosts, fn host ->
-        case felt_ls_json(host) do
-          {:ok, rows} when is_list(rows) ->
-            Enum.find_value(rows, fn
-              %{"uid" => ^uid, "path" => path} = fiber when is_binary(path) and path != "" ->
-                owner = owning_store(hosts, path) || host
-                resolved_from(owner, fiber)
+      Enum.reduce(hosts, nil, fn
+        _host, %{} = resolved ->
+          resolved
 
-              _ ->
-                nil
-            end)
+        host, acc ->
+          case felt_ls_json(host) do
+            {:ok, rows} when is_list(rows) ->
+              Enum.find_value(rows, acc, fn
+                %{"uid" => ^uid, "path" => path} = fiber when is_binary(path) and path != "" ->
+                  owner = owning_store(hosts, path) || host
+                  resolved_from(owner, fiber)
 
-          _ ->
-            nil
-        end
+                _ ->
+                  nil
+              end)
+
+            {:error, :timeout} ->
+              :timeout
+
+            _ ->
+              acc
+          end
       end)
     end
   end
@@ -312,8 +354,11 @@ defmodule Shuttle.FeltStores do
   defp felt_show_json(host, identifier) do
     # Never fold stderr into stdout: felt prints "no felt found matching …" to
     # stderr and JSON to stdout. A miss exits non-zero with empty stdout.
-    case System.cmd("felt", ["-C", host, "show", identifier, "-j"], stderr_to_stdout: false) do
+    # A `:timeout` from the bounded runner is kept distinct from a miss: the
+    # store never answered, so "not found" is not established.
+    case runner().cmd("felt", ["-C", host, "show", identifier, "-j"], stderr_to_stdout: false) do
       {output, 0} -> Jason.decode(output)
+      {_output, :timeout} -> {:error, :timeout}
       {_output, _status} -> {:error, :not_found}
     end
   rescue
@@ -324,13 +369,21 @@ defmodule Shuttle.FeltStores do
   # default `ls` filters to open/active. felt walks the tree and carries `uid`
   # and `path` per row, so no index build is required.
   defp felt_ls_json(host) do
-    case System.cmd("felt", ["-C", host, "ls", "-j", "-s", "all"], stderr_to_stdout: false) do
+    case runner().cmd("felt", ["-C", host, "ls", "-j", "-s", "all"], stderr_to_stdout: false) do
       {output, 0} -> Jason.decode(output)
+      {_output, :timeout} -> {:error, :timeout}
       {_output, _status} -> {:error, :not_found}
     end
   rescue
     _ -> {:error, :not_found}
   end
+
+  # The command runner, behind the same config seam as `Shuttle.Felt` — these
+  # calls run from whatever process resolves a fiber (Poller, controllers), so
+  # injection is by config rather than a threaded opt. Tests set
+  # `:shuttle, :felt_stores_runner` to a mock; production defaults to the
+  # bounded runner.
+  defp runner, do: Application.get_env(:shuttle, :felt_stores_runner, Shuttle.Runner.Default)
 
   defp resolved(path, host, fiber_id, uid) do
     %{host: host, fiber_id: fiber_id, path: path, uid: uid}

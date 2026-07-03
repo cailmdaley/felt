@@ -72,6 +72,11 @@ defmodule ShuttleWeb.FeltEditController do
         conn
         |> put_resp_content_type("text/plain")
         |> send_resp(422, "felt exited #{status}: #{output}")
+
+      {:error, :timeout, reason} ->
+        conn
+        |> put_resp_content_type("text/plain")
+        |> send_resp(503, reason)
     end
   end
 
@@ -79,6 +84,7 @@ defmodule ShuttleWeb.FeltEditController do
     case FeltStores.resolve_fiber(fiber_id) do
       {:ok, %{host: host, fiber_id: address}} -> {:ok, host, address}
       {:error, :not_found} -> {:error, "fiber not found: #{fiber_id}"}
+      {:error, :timeout} -> {:error, :timeout, "felt timed out resolving #{fiber_id}"}
     end
   end
 

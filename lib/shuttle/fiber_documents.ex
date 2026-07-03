@@ -131,7 +131,12 @@ defmodule Shuttle.FiberDocuments do
     # prints "no felt found matching …" (and parse warnings) to stderr while
     # emitting JSON on stdout. A missing fiber exits non-zero with empty stdout,
     # which we treat as "not in this store" and fall through to the next.
-    case System.cmd("felt", ["show", id, "-j"], cd: store) do
+    #
+    # A runner `:timeout` also lands in `:miss` — deliberately: `get/2` then
+    # falls through to `scan_lookup/3`, whose per-store error reports the wedged
+    # store as `{:error, errors}` (5xx-shaped) unless another store positively
+    # resolves the fiber first. A timeout is never reported as "fiber absent".
+    case runner().cmd("felt", ["show", id, "-j"], cd: store) do
       {output, 0} ->
         case Jason.decode(output) do
           {:ok, %{} = fiber} ->
@@ -178,7 +183,12 @@ defmodule Shuttle.FiberDocuments do
     # those warnings to the JSON and break Jason.decode for the whole store —
     # 500ing the entire /fibers endpoint. Felt's warnings land in the daemon log
     # instead; only stdout is parsed.
-    case System.cmd("felt", args, cd: store) do
+    #
+    # Runs through the bounded runner (not bare System.cmd) so a felt wedged on
+    # an overloaded node times out into the ordinary per-store error path —
+    # `status: :timeout` in the error map names it — instead of hanging the
+    # request.
+    case runner().cmd("felt", args, cd: store) do
       {output, 0} ->
         decode_store(store, output, mode)
 
@@ -186,6 +196,11 @@ defmodule Shuttle.FiberDocuments do
         {:error, %{felt_store: store, status: status, error: String.trim(output)}}
     end
   end
+
+  # The command runner, behind the same config seam as `Shuttle.Felt` /
+  # `Shuttle.FeltStores`. Tests set `:shuttle, :fiber_documents_runner` to a
+  # mock; production defaults to the bounded runner.
+  defp runner, do: Application.get_env(:shuttle, :fiber_documents_runner, Shuttle.Runner.Default)
 
   # `with_body? == true` is the content/search reader path: every field, body
   # included, no narrowing. The narrowed owner walk carries only kanban metadata
