@@ -23,7 +23,7 @@ LOG := $(HOME)/Library/Logs/shuttle.log
 # Match both the local `bin/shuttle ... -extra bin/shuttle start` shape and
 # remote respawn-loop `./bin/shuttle ... -extra ./bin/shuttle start` shape.
 # `[b]in` prevents pgrep from matching its own shell command.
-PIDPATTERN := [b]in/shuttle -B .* -extra \.?/?bin/shuttle start
+PIDPATTERN := [b]in/shuttle -B .* -extra \S*bin/shuttle start
 AGENT_LABEL := io.shuttle.daemon
 AGENT_PLIST := $(HOME)/Library/LaunchAgents/$(AGENT_LABEL).plist
 # Felt stores the launchd daemon polls. Defaults to the aggregate store (~/loom,
