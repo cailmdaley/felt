@@ -120,7 +120,7 @@ func TestIntegration(t *testing.T) {
 		t.Fatalf("show: expected fiber title, got: %s", out)
 	}
 	out = mustFelt(t, dir, "show", fiberID, "--body")
-	if !strings.Contains(out, "Body start line: 7") {
+	if !strings.Contains(out, "Body start line: 8") {
 		t.Fatalf("new fiber body should report the editable insertion point, got: %s", out)
 	}
 

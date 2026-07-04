@@ -64,12 +64,16 @@ defmodule ShuttleWeb.APIControllerTest do
 
     defp synth_path(id) do
       leaf = id |> String.split("/") |> List.last()
-      resolve_tmp_symlink(Path.expand(Path.join(["/tmp/.felt", id, "#{leaf}.md"])))
-    end
+      # Resolve with the SAME resolver the poller uses for store ownership, so
+      # the carried path agrees on every OS (macOS /tmp → /private/tmp; Linux
+      # /tmp stays /tmp). A hardcoded rewrite passed only on macOS.
+      path = Path.expand(Path.join(["/tmp/.felt", id, "#{leaf}.md"]))
 
-    defp resolve_tmp_symlink("/tmp/" <> rest), do: "/private/tmp/" <> rest
-    defp resolve_tmp_symlink("/var/" <> rest), do: "/private/var/" <> rest
-    defp resolve_tmp_symlink(path), do: path
+      case Shuttle.Realpath.resolve(path) do
+        {:ok, resolved} -> resolved
+        {:error, _} -> path
+      end
+    end
 
     # Write a real .md file carrying the given shuttle: block and felt status so
     # that walk_shuttle_fibers (the file-walk discovery path) can find it.
