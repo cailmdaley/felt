@@ -140,14 +140,19 @@ defmodule Shuttle.PollerTest do
     # a write path (e.g. the claim's frontmatter stamp) wrote to the real file.
     def fiber(id), do: Agent.get(__MODULE__, &Map.get(&1.fibers, id))
 
-    # Absolute, symlink-resolved path of a written fiber file. macOS resolves
-    # `/tmp` and `/var` to `/private/...`; mirror that so the carried path
-    # matches the store realpath the poller computes for ownership.
-    defp realpath(path), do: resolve_tmp_symlink(Path.expand(path))
+    # Absolute, symlink-resolved path of a written fiber file, computed with the
+    # SAME resolver the poller uses for store ownership (Shuttle.Realpath). This
+    # keeps both sides in agreement on every OS: on macOS `/tmp` → `/tmp`,
+    # on Linux `/tmp` stays `/tmp`. A hardcoded /tmp→/tmp rewrite passed
+    # only on macOS and dropped every fiber as unowned on Linux CI.
+    defp realpath(path) do
+      expanded = Path.expand(path)
 
-    defp resolve_tmp_symlink("/tmp/" <> rest), do: "/private/tmp/" <> rest
-    defp resolve_tmp_symlink("/var/" <> rest), do: "/private/var/" <> rest
-    defp resolve_tmp_symlink(path), do: path
+      case Shuttle.Realpath.resolve(expanded) do
+        {:ok, resolved} -> resolved
+        {:error, _} -> expanded
+      end
+    end
 
     # Kept for backward compat; no longer consulted by discover_candidates
     # (discovery now walks files for shuttle: blocks).  Still used by the
@@ -1403,10 +1408,10 @@ defmodule Shuttle.PollerTest do
     #
     # The exit handler routes through felt (LifecycleStore → FeltStores.resolve_
     # fiber), so the mock fiber must be felt-resolvable: point FELT_STORES at the
-    # mock store the factory wrote to (/private/tmp/.felt). Without this a
+    # mock store the factory wrote to (/tmp/.felt). Without this a
     # park regression would silently no-op — masking whether the gate even fired.
     prev_loom = System.get_env("FELT_STORES")
-    System.put_env("FELT_STORES", "/private/tmp")
+    System.put_env("FELT_STORES", "/tmp")
 
     on_exit(fn ->
       if prev_loom,
@@ -1446,7 +1451,7 @@ defmodule Shuttle.PollerTest do
 
     # The on-disk document is parked: active → open (back to the strip), and NOT
     # marked closed/awaiting (that's the standing closer, not the pinned one).
-    doc = File.read!("/private/tmp/.felt/#{fiber_id}/#{leaf}.md")
+    doc = File.read!("/tmp/.felt/#{fiber_id}/#{leaf}.md")
     assert doc =~ ~r/status:\s*open/
     refute doc =~ ~r/status:\s*closed/
     refute doc =~ "closed-at"
@@ -1464,7 +1469,7 @@ defmodule Shuttle.PollerTest do
     # still marks the role awaiting, so the cron does not re-fire it this cycle.
     # This is what guards the gate against being broadened to skip standing too.
     prev_loom = System.get_env("FELT_STORES")
-    System.put_env("FELT_STORES", "/private/tmp")
+    System.put_env("FELT_STORES", "/tmp")
 
     on_exit(fn ->
       if prev_loom,
@@ -1502,7 +1507,7 @@ defmodule Shuttle.PollerTest do
     send(poller, {:worker_exited, fiber_id, :normal_exit, false})
     _ = Poller.snapshot(poller)
 
-    doc = File.read!("/private/tmp/.felt/#{fiber_id}/#{leaf}.md")
+    doc = File.read!("/tmp/.felt/#{fiber_id}/#{leaf}.md")
     assert doc =~ ~r/status:\s*closed/
   end
 
