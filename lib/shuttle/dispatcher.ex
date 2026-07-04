@@ -938,12 +938,32 @@ defmodule Shuttle.Dispatcher do
     end
   end
 
+  # Shell `felt shuttle reopen`. Always passes `--host <own_host_id>` so felt's
+  # ownership guard resolves the write's owner LOCALLY. Force-dispatch runs the
+  # reopen inside a blocked Poller `handle_call`, so felt's default resolution —
+  # a callback to GET /api/v1/state — would deadlock to a 1.5s timeout, then fall
+  # back to `os.Hostname()`, wrong on a host whose owner id is an alias (candide
+  # vs c03): the guard fires and the reopen fails spuriously. Same fix, same
+  # reason as `Continuation.mark_runtime/4`. Best-effort: if own_host_id can't be
+  # resolved, omit --host and let felt fall back to its own resolution.
   defp run_reopen(fiber_id, runner, felt_store) do
+    host_flag =
+      case own_host_id_safe() do
+        h when is_binary(h) and h != "" -> ["--host", h]
+        _ -> []
+      end
+
     runner.cmd(
       "felt",
-      ["shuttle", "--felt-store", felt_store, "reopen", fiber_id],
+      ["shuttle", "--felt-store", felt_store, "reopen", fiber_id] ++ host_flag,
       stderr_to_stdout: true
     )
+  end
+
+  defp own_host_id_safe do
+    Shuttle.Poller.own_host_id()
+  rescue
+    _ -> nil
   end
 
   defp closed?(fiber), do: Map.get(fiber, "status", "") == "closed"
