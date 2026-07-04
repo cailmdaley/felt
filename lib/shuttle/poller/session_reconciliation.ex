@@ -114,7 +114,9 @@ defmodule Shuttle.Poller.SessionReconciliation do
               running = Map.put(state.running, runtime_key, running_meta)
 
               Logger.info("Adopted orphan session: #{session}")
+
               %{state | running: running, claimed: MapSet.put(state.claimed, runtime_key)}
+              |> Poller.note_running(runtime_key)
 
             {:error, reason} ->
               Logger.warning("Failed to adopt session #{session}: #{inspect(reason)}")

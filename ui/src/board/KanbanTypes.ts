@@ -72,6 +72,16 @@ export interface KanbanCard {
    */
   lastActivityAt?: number
   /**
+   * True when the owning daemon is holding this fiber under boot quarantine — a
+   * genuinely-fresh launch parked in `pending_launch`, awaiting
+   * `bin/shuttle release`. Distinct from `runningWorker` (a live worker) and from
+   * an idle-active card: it reads as "held, awaiting release", not "running" or
+   * "idle between workers". Served per-fiber by the owning host.
+   */
+  held?: boolean
+  /** Ms timestamp the boot-quarantine hold began (`parked_at`), for a tooltip. */
+  heldSince?: number
+  /**
    * Pinned local city whose `.felt/` physically owns this fiber, when the
    * server can resolve it (loom-deduped to the deepest project root).
    * Pairs with `projectSlug` to drive the click-to-open flow: the frontend

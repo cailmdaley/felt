@@ -1499,6 +1499,28 @@
 .kbn-card-phase + .kbn-card-date {
   margin-left: 0;
 }
+/* Boot-quarantine hold: the daemon is WITHHOLDING this fresh launch after a
+   restart (parked in pending_launch, awaiting `bin/shuttle release`). Cool,
+   inert slate — deliberately unlike the teal "aloft" pill (running) and the warm
+   gold/amber phase chips (dispatch lifecycle). A dashed border reads as a held
+   boundary, not a solid live state; no pulse — it's parked, not churning. */
+.kbn-card-held {
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 9.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #4C5B73;
+  background: rgba(90, 105, 140, 0.12);
+  border: 1px dashed rgba(90, 105, 140, 0.45);
+  padding: 1px 6px;
+  border-radius: 2px;
+  margin-left: auto;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.kbn-card-held + .kbn-card-date {
+  margin-left: 0;
+}
 /* retrying is a soft-error state — warmer, and a slow pulse to read as "still
    churning" rather than settled. */
 .kbn-card-phase-retrying {

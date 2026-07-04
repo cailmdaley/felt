@@ -75,6 +75,14 @@ export interface CompositeEntry {
   /** Owner-served liveness — present iff the owning daemon runs a live worker
    * for this fiber. The single reconciled liveness observation per fiber. */
   runtime?: CompositeRuntime;
+  /** Owner-served boot-quarantine hold — true iff the owning daemon is
+   * withholding this fiber as a genuinely-fresh launch in `pending_launch`
+   * (awaiting `bin/shuttle release`). Distinct from `runtime` (a live worker)
+   * and from an idle-active card. Served through the per-fiber feed by the
+   * owning host, so it works cross-host with no board-side global-state lookup. */
+  held?: boolean;
+  /** Ms timestamp the hold began (`parked_at`), for a "held Nm" tooltip. */
+  heldSince?: number;
   /** Absolute path to the fiber's own directory on the owning host
    * (`dirname(felt.path)`), owner-resolved. The base a relative `:::{embed}` /
    * image in the body resolves against before the `/file` route reads it.
@@ -124,10 +132,12 @@ export function parseCompositeFeed(body: unknown): CompositeFeed {
 
     const origin = typeof item.origin === 'string' && item.origin ? item.origin : host;
     const runtime = parseRuntime(item.runtime);
+    const held = item.held === true;
+    const heldSince = typeof item.held_since === 'number' ? item.held_since : undefined;
     const dir = typeof item.dir === 'string' ? item.dir : undefined;
     const reportPath = typeof item.report_path === 'string' ? item.report_path : undefined;
 
-    entries.push({ origin, feltStore, path, fiber, runtime, dir, reportPath });
+    entries.push({ origin, feltStore, path, fiber, runtime, held, heldSince, dir, reportPath });
   }
 
   const origins: Record<string, CompositeOrigin> = {};

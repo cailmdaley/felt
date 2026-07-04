@@ -284,6 +284,8 @@ function toCard(
   const runningWorker = entry.runtime?.tmuxSession;
   const runtimePhase = entry.runtime?.phase;
   const lastActivityAt = entry.runtime?.lastActivityAt;
+  const held = entry.held === true;
+  const heldSince = entry.heldSince;
   const horizon = effectiveHorizon(f, nowMs);
   const city = resolveCity?.(entry);
 
@@ -312,6 +314,8 @@ function toCard(
     runningWorker,
     runtimePhase,
     lastActivityAt,
+    held,
+    heldSince,
     cityId: city?.cityId,
     projectSlug: city?.projectSlug,
     shuttleFiberId: city?.shuttleFiberId,

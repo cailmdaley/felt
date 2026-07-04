@@ -218,6 +218,12 @@ defmodule ShuttleWeb.FiberDocumentsController do
 
   defp overlay_runtime(entries) do
     index = Shuttle.Poller.runtime_index()
-    Enum.map(entries, &Snapshot.put_runtime(&1, index))
+    held = Shuttle.Poller.parked_index()
+
+    Enum.map(entries, fn entry ->
+      entry
+      |> Snapshot.put_runtime(index)
+      |> Snapshot.put_held(held)
+    end)
   end
 end

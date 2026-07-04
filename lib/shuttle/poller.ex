@@ -162,33 +162,49 @@ defmodule Shuttle.Poller do
       # the fiber leaving the active candidate set. NOT persisted — a restart is a
       # clean slate (and re-adopts live workers rather than re-dispatching).
       resume_loop: %{},
-      # Boot quarantine: a daemon restart is NOT dispatch authority. An
-      # overloaded login node once crashed the daemon repeatedly, and each
-      # restart's first poll dispatched every active, host-owned, workerless
-      # fiber — ~8 token-burning fresh launches in 4 minutes, several
-      # redundant. The rule is BROAD: a daemon that just restarted grants no
-      # autonomous dispatches of ANY kind — fresh launches and resumes alike.
-      # (Steady-state resume of a worker that dies while the daemon is healthy
-      # is untouched; this gate covers only the just-restarted window.) While
-      # true, the autonomous tick parks every dispatchable candidate
-      # (`parked_launches`) and dispatches nothing; release is PURE MANUAL —
-      # `release_boot_quarantine/0` / POST /api/v1/quarantine/release — with
-      # no stabilization timer. Human force-dispatch bypasses (and does not
-      # clear) the quarantine. Set at init from the `:boot_quarantine` opt /
-      # app config (default true; config/test.exs disables it).
+      # Boot quarantine: a daemon restart is NOT dispatch authority for a FRESH
+      # launch. An overloaded login node once crashed the daemon repeatedly, and
+      # each restart's first poll dispatched every active, host-owned,
+      # workerless fiber — ~8 token-burning fresh launches in 4 minutes, several
+      # redundant. While true, the autonomous tick parks every *genuinely-fresh*
+      # candidate (`parked_launches`) and dispatches nothing fresh; release is
+      # PURE MANUAL — `release_boot_quarantine/0` / POST
+      # /api/v1/quarantine/release — with no stabilization timer.
+      #
+      # In-flight work this daemon OBSERVED running under its own uptime is NOT
+      # held: a candidate whose runtime key is in `was_running` (adopted at boot,
+      # or dispatched/claimed since) is the sanctioned continuation of work that
+      # was demonstrably alive moments ago, so it re-dispatches normally even
+      # while quarantined (resume-vs-fresh unchanged — `continuation.ex` still
+      # decides). Only NEVER-seen candidates are parked. The predicate is
+      # runtime-observation, never on-disk markers: that is what makes it immune
+      # to the stale-row escape that sank an earlier resume exemption (a stale
+      # `dispatched_at` could masquerade as a resume and dispatch FRESH).
+      #
+      # Human force-dispatch bypasses (and does not clear) the quarantine. Set at
+      # init from the `:boot_quarantine` opt / app config (default true;
+      # config/test.exs disables it).
       # See [[ai-futures/shuttle/restart-not-dispatch-authority]].
       boot_quarantine: false,
+      # Runtime keys this daemon has OBSERVED with a live worker under its own
+      # uptime — the union of every key that ever entered `state.running` (boot
+      # adoption, per-poll adoption, dispatch, claim). Durable for the daemon's
+      # lifetime: NEVER removed on worker exit, so "was running" outlives "is
+      # running". Sole consumer is the boot-quarantine gate
+      # (`park_autonomous_launches/2`): members auto-resume, only non-members
+      # park. Not persisted — a restart re-seeds it from `adopt_orphans`.
+      was_running: MapSet.new(),
       # %{runtime_key => %{fiber_id: slug, uid: String.t() | nil, parked_at:
-      # DateTime.t}} — every autonomous dispatch the boot quarantine is
-      # withholding, surfaced in the snapshot as `pending_launch` rows
-      # (first-class, not `blocked`: nothing failed — the daemon is
-      # withholding launch authority until a human releases it). Rebuilt each
-      # poll cycle from the current dispatchable set (a fiber that closes or
-      # pauses simply drops out); `parked_at` is preserved across cycles.
-      # Emptied on release. No classification is applied — an earlier design
-      # exempted dirty-death resumes, but the split ran on possibly-stale
-      # cached rows, so a stale row could slip the gate and dispatch fresh;
-      # `park_autonomous_launches/2` parks the whole set instead.
+      # DateTime.t}} — every genuinely-fresh autonomous launch the boot
+      # quarantine is withholding, surfaced in the snapshot as `pending_launch`
+      # rows (first-class, not `blocked`: nothing failed — the daemon is
+      # withholding launch authority until a human releases it) and as the
+      # board's per-fiber `held` indicator. Rebuilt each poll cycle from the
+      # current fresh-candidate set (a fiber that closes, pauses, or reclassifies
+      # as was-running simply drops out); `parked_at` is preserved across cycles.
+      # Emptied on release. `park_autonomous_launches/2` splits the dispatchable
+      # set by `was_running` — members re-dispatch, only non-members land here
+      # (runtime-observation, never stale on-disk markers).
       parked_launches: %{},
       # %{host => rows} — the last SUCCESSFUL `felt ls` shuttle listing per
       # host, retained VERBATIM (no reshape: `created_at`, `tempered`, `slug`,
@@ -250,6 +266,22 @@ defmodule Shuttle.Poller do
   @spec runtime_index(GenServer.server()) :: map()
   def runtime_index(server \\ __MODULE__) do
     GenServer.call(server, :runtime_index, @orchestrator_state_call_timeout_ms)
+  catch
+    :exit, _ -> %{}
+  end
+
+  @doc """
+  Returns the serve-time held overlay for boot-quarantine-parked launches.
+
+  The parked-launch analog of `runtime_index/1`: keyed by fiber_id/uid so the
+  owning host's per-fiber feed can stamp a `held` marker onto a card WITHOUT any
+  board-side lookup of the daemon-global `pending_launch`. A parked (fresh,
+  awaiting-release) launch reads as `held` on its card; released or reclassified
+  work carries no entry and the marker clears.
+  """
+  @spec parked_index(GenServer.server()) :: map()
+  def parked_index(server \\ __MODULE__) do
+    GenServer.call(server, :parked_index, @orchestrator_state_call_timeout_ms)
   catch
     :exit, _ -> %{}
   end
@@ -641,6 +673,10 @@ defmodule Shuttle.Poller do
     {:reply, Snapshot.runtime_index(state.running, session_activity()), state}
   end
 
+  def handle_call(:parked_index, _from, state) do
+    {:reply, Snapshot.parked_index(state.parked_launches), state}
+  end
+
   def handle_call({:cached_fiber_documents, opts}, _from, state) do
     if state.document_cache_ready do
       # Owner-only kanban feed: the document cache holds every shuttle fiber
@@ -919,6 +955,28 @@ defmodule Shuttle.Poller do
     metadata_uid(fiber) || fiber_id
   end
 
+  @doc false
+  # Record `runtime_key` as "observed running under this daemon's uptime." The
+  # single seam that maintains `state.was_running`; called at every insertion
+  # into `state.running` (boot adoption, per-poll adoption, dispatch, claim).
+  # Membership is durable — never removed on exit — so the boot-quarantine gate
+  # auto-resumes in-flight work while still parking genuinely-fresh launches.
+  # Runtime-observation, never on-disk markers.
+  #
+  # Also drops any `parked_launches` entry for the key: a fiber that just entered
+  # `running` (force-dispatch or claim, not only the poll's own re-dispatch) is
+  # no longer held, so the board's `held` indicator clears the instant the worker
+  # exists rather than lingering — co-rendered with the "aloft" pill — until the
+  # next poll rebuilds the parked map. Same key-space (`parked_launches` is keyed
+  # by `runtime_key`), so this keeps held ⟺ not-running synchronous.
+  def note_running(%State{} = state, runtime_key) do
+    %{
+      state
+      | was_running: MapSet.put(state.was_running, runtime_key),
+        parked_launches: Map.delete(state.parked_launches, runtime_key)
+    }
+  end
+
   # Resolve any public identifier (a uid from the UI, a slug from the CLI) to
   # `{runtime_key, slug}`: the runtime key is what `running`/`claimed`/
   # `dispatch_failures`/`rearmed_at` are keyed by (uid when the fiber has one,
@@ -1104,9 +1162,12 @@ defmodule Shuttle.Poller do
     {dispatchable, state} =
       cond do
         state.boot_quarantine ->
-          # Parks the WHOLE dispatchable set and returns [], so the reduce
-          # below is a no-op: a just-restarted daemon dispatches nothing
-          # autonomously until a human releases the hold.
+          # Splits the dispatchable set by `was_running`: in-flight work this
+          # daemon observed running (adopted at boot / dispatched since)
+          # re-dispatches through the reduce below, while genuinely-fresh
+          # launches are parked. A just-restarted daemon grants NO fresh
+          # autonomous dispatch until a human releases the hold, but never
+          # strands work that was demonstrably alive moments ago.
           candidates
           |> filter_eligible(state)
           |> sort_candidates()
@@ -1463,27 +1524,40 @@ defmodule Shuttle.Poller do
   end
 
   # Boot quarantine gate on the autonomous tick (see the State field comment):
-  # a daemon that just restarted grants NO autonomous dispatches of any kind.
-  # While `boot_quarantine` is set, EVERY dispatchable candidate is parked into
-  # `parked_launches` for the snapshot's `pending_launch` rows — no
-  # classification, no resume exemption. An earlier design let dirty-death
-  # resumes through, but the split ran on possibly-stale cached rows while
-  # `Dispatcher.dispatch` re-fetches and re-decides, so a stale dirty-death row
-  # could slip the pre-flight gate and dispatch FRESH; the broad rule closes
-  # that escape by withholding launch authority wholesale. Steady-state resume
-  # of a worker that dies while the daemon is HEALTHY is untouched — this gate
-  # is scoped to the just-restarted window, released by a human. The map is
-  # rebuilt from the current set each cycle, so a fiber that
-  # closes/pauses/starts running drops out on its own; `parked_at` is preserved
-  # for fibers that stay parked. Only this tick path is gated: the explicit
-  # `{:dispatch, …}` call (kanban force-dispatch, claim) never routes here.
-  # Called only while quarantined (`apply_poll_cycle`'s cond clears the parked
-  # map itself on the other branches).
+  # a just-restarted daemon grants no *fresh* autonomous dispatch, but never
+  # strands in-flight work it observed running. Splits the dispatchable set by
+  # `was_running` (runtime keys this daemon saw alive under its own uptime —
+  # adopted at boot, or dispatched/claimed since):
+  #
+  #   - Members re-dispatch: they are the sanctioned continuation of work that
+  #     was demonstrably alive moments ago, so they flow out as the returned
+  #     dispatchable list and the reduce launches them (resume-vs-fresh decided
+  #     downstream by `continuation.ex`, unchanged). Once running they leave the
+  #     candidate set, so there is no repeated dispatch.
+  #   - Non-members park into `parked_launches` for the snapshot's
+  #     `pending_launch` rows (and the board's `held` indicator).
+  #
+  # The predicate is runtime-observation, never on-disk markers — which is what
+  # closes the escape that sank an earlier resume exemption: it classified on
+  # cached `dispatched_at`/`handed_off_at` rows, so a stale dirty-death row could
+  # slip the gate and dispatch FRESH. A fiber the daemon never saw running is
+  # parked no matter what its markers say. The parked map is rebuilt from the
+  # current fresh set each cycle (a fiber that closes/pauses/reclassifies as
+  # was-running drops out on its own); `parked_at` is preserved for fibers that
+  # stay parked. Only this tick path is gated: the explicit `{:dispatch, …}` call
+  # (kanban force-dispatch, claim) never routes here. Called only while
+  # quarantined (`apply_poll_cycle`'s cond clears the parked map on the other
+  # branches).
   defp park_autonomous_launches(dispatchable, %State{} = state) do
     now = DateTime.utc_now()
 
+    {resume, fresh} =
+      Enum.split_with(dispatchable, fn fiber ->
+        MapSet.member?(state.was_running, runtime_key_for_fiber(fiber))
+      end)
+
     parked =
-      Map.new(dispatchable, fn fiber ->
+      Map.new(fresh, fn fiber ->
         key = runtime_key_for_fiber(fiber)
 
         {key,
@@ -1491,7 +1565,7 @@ defmodule Shuttle.Poller do
            %{fiber_id: fiber_address(fiber), uid: metadata_uid(fiber), parked_at: now}}
       end)
 
-    {[], %{state | parked_launches: parked}}
+    {resume, %{state | parked_launches: parked}}
   end
 
   defp pinned_role?(fiber) do
@@ -2084,12 +2158,14 @@ defmodule Shuttle.Poller do
             # the source of truth; a restart re-adopts live sessions.
             running = Map.put(state.running, runtime_key, running_meta)
 
-            state = %{
-              state
-              | running: running,
-                claimed: MapSet.put(state.claimed, runtime_key),
-                dispatch_failures: Map.delete(state.dispatch_failures, runtime_key)
-            }
+            state =
+              %{
+                state
+                | running: running,
+                  claimed: MapSet.put(state.claimed, runtime_key),
+                  dispatch_failures: Map.delete(state.dispatch_failures, runtime_key)
+              }
+              |> note_running(runtime_key)
 
             {state, {:ok, session}}
 
@@ -2233,12 +2309,14 @@ defmodule Shuttle.Poller do
       {:ok, running_meta} ->
         runtime_key = runtime_key_for_fiber(fiber)
 
-        state = %{
-          state
-          | running: Map.put(state.running, runtime_key, running_meta),
-            claimed: MapSet.put(state.claimed, runtime_key),
-            dispatch_failures: Map.delete(state.dispatch_failures, runtime_key)
-        }
+        state =
+          %{
+            state
+            | running: Map.put(state.running, runtime_key, running_meta),
+              claimed: MapSet.put(state.claimed, runtime_key),
+              dispatch_failures: Map.delete(state.dispatch_failures, runtime_key)
+          }
+          |> note_running(runtime_key)
 
         log_worker_claim(state, fiber_id, Keyword.get(opts, :session_uuid))
         state = refresh_document_entry(state, fiber_id)

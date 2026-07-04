@@ -1191,6 +1191,25 @@ export class KanbanSurfaceRenderer {
       phase.title = title
       meta.append(phase)
     }
+    // Boot-quarantine hold: a genuinely-fresh launch the owning daemon is
+    // withholding after a restart. Reads as "held, awaiting release" — distinct
+    // from the "▸ aloft" running pill and from an idle-active card (mutually
+    // exclusive with `runningWorker`: held means parked, not running). Release is
+    // global (`bin/shuttle release`), so this is a status indicator, not a
+    // per-card action button.
+    if (card.held) {
+      const heldEl = document.createElement('span')
+      heldEl.className = 'kbn-card-held'
+      heldEl.setAttribute('role', 'status')
+      heldEl.textContent = '⏹︎ held'
+      const since = card.heldSince
+        ? ` since ${new Date(card.heldSince).toLocaleTimeString()}`
+        : ''
+      heldEl.title =
+        `Held by boot quarantine — a fresh launch parked until release${since}. ` +
+        'The daemon restarted; run `bin/shuttle release` to dispatch held launches.'
+      meta.append(heldEl)
+    }
     if (card.runningWorker) {
       const tmuxName = card.runningWorker
       const w = document.createElement('button')

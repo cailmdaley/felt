@@ -188,6 +188,37 @@ defmodule Shuttle.Poller.Snapshot do
     end
   end
 
+  @doc """
+  Builds the `fiber_id | uid => held payload` index for boot-quarantine-parked
+  launches, keyed under every identifier a feed entry might carry (the same
+  scheme as `runtime_index/2`) so the owning host's per-fiber feed can stamp
+  `held` on a card without any board-side global-state lookup.
+  """
+  def parked_index(parked_launches) do
+    Enum.reduce(parked_launches, %{}, fn {_runtime_key, entry}, acc ->
+      payload = %{parked_at: DateTime.to_unix(entry.parked_at, :millisecond)}
+
+      [entry.fiber_id, entry.uid]
+      |> Enum.filter(&(is_binary(&1) and &1 != ""))
+      |> Enum.reduce(acc, fn key, a -> Map.put_new(a, key, payload) end)
+    end)
+  end
+
+  @doc """
+  Stamps a feed entry with `held: true` (and its `held_since` timestamp) when the
+  parked index has a match under the fiber's uid/slug/id; otherwise returns the
+  entry unchanged. The card renders "held by boot quarantine" — distinct from the
+  running `:runtime` overlay and from an idle-active card.
+  """
+  def put_held(%{fiber: fiber} = entry, index) do
+    [Map.get(fiber, "uid"), Map.get(fiber, "slug"), Map.get(fiber, "id")]
+    |> Enum.find_value(fn k -> is_binary(k) and k != "" and Map.get(index, k) end)
+    |> case do
+      nil -> entry
+      %{parked_at: at} -> entry |> Map.put(:held, true) |> Map.put(:held_since, at)
+    end
+  end
+
   # The eligible-row subset of a worker's meta, as a wire payload. Mirrors the
   # `eligible` snapshot row so the feed's `runtime` and the snapshot agree on
   # shape; the viewer reads `tmux_session` for liveness and may surface the rest.

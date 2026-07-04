@@ -2,6 +2,7 @@ defmodule Shuttle.PollerTest do
   use ExUnit.Case
 
   alias Shuttle.Poller
+  alias Shuttle.Poller.Snapshot
   alias Shuttle.Dispatcher
 
   # ── Mock Runner ──
@@ -1650,18 +1651,30 @@ defmodule Shuttle.PollerTest do
     snap = Poller.snapshot(poller)
     assert snap.boot_quarantine == true
     assert snap.eligible == []
+
     refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
              cmd == "tmux" and hd(args) == "new-session"
            end)
+
+    # The held state reaches the per-fiber feed (board indicator): parked_index
+    # is keyed by fiber_id, and put_held stamps the matching feed row `held`.
+    index = Poller.parked_index(poller)
+    assert %{parked_at: _} = Map.get(index, fiber_id)
+
+    assert %{held: true, held_since: _} =
+             Snapshot.put_held(%{fiber: %{"id" => fiber_id}}, index)
+
+    refute Map.has_key?(Snapshot.put_held(%{fiber: %{"id" => "tests/not-held"}}, index), :held)
   end
 
-  test "boot quarantine parks a dirty-death resume too (broad rule, no exemption)" do
-    # A dispatched_at with no newer handed_off_at means the prior worker died
-    # mid-thought. An earlier design exempted such resumes from the
-    # quarantine, but the classification ran on possibly-stale cached rows —
-    # a stale dirty-death row could slip the gate and dispatch FRESH. The
-    # broad rule parks everything: a just-restarted daemon grants no
-    # autonomous dispatches of any kind until a human releases the hold.
+  test "boot quarantine parks an on-disk resume marker the daemon never observed running" do
+    # A dispatched_at with no newer handed_off_at LOOKS like a dirty-death
+    # resume, but the quarantine gate keys off runtime observation
+    # (`was_running`), NOT the on-disk marker. This daemon never saw a live
+    # worker for the fiber (no adopted session), so its marker is exactly the
+    # stale-row case the earlier resume exemption let escape: it is parked, not
+    # dispatched. Only work the daemon actually observed running auto-resumes
+    # (see the was-running test below).
     fiber_id = "tests/quarantine-dirty-resume"
     MockRunner.set_fiber(fiber_id, make_fiber(fiber_id))
     MockRunner.set_shuttle(fiber_id, @oneshot_shuttle)
@@ -1691,6 +1704,55 @@ defmodule Shuttle.PollerTest do
     refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
              cmd == "tmux" and hd(args) == "new-session"
            end)
+  end
+
+  test "boot quarantine does NOT park work it observed running; a was-running fiber re-dispatches on exit" do
+    # The core of the fix: in-flight work the daemon observed running under its
+    # own uptime auto-resumes even while quarantined — only genuinely-fresh
+    # launches are held. Field scenario reproduced: a oneshot whose worker was
+    # adopted at boot, then exits mid-uptime, must re-dispatch, not park.
+    fiber_id = "tests/quarantine-was-running"
+    session = Dispatcher.session_name(fiber_id)
+    MockRunner.set_shuttle(fiber_id, @oneshot_shuttle)
+    # Live worker present at boot → adopt_orphans adopts it (adoption runs
+    # regardless of quarantine), so its runtime key enters the durable
+    # `was_running` set.
+    MockRunner.add_tmux_session(session)
+
+    {:ok, poller} =
+      start_poller!(
+        name: :test_poller_quarantine_was_running,
+        runner: MockRunner,
+        poll_interval_ms: 60_000,
+        felt_stores: ["/tmp"],
+        boot_quarantine: true
+      )
+
+    # Adopted as running while quarantined (not parked): observed-running now
+    # carries this fiber's key, and nothing is in pending_launch.
+    assert_eventually(fn ->
+      state = :sys.get_state(poller)
+      assert MapSet.member?(state.was_running, fiber_id)
+      assert Enum.any?(state.running, fn {_k, m} -> Map.get(m, :fiber_id) == fiber_id end)
+    end)
+
+    assert Poller.snapshot(poller).pending_launch == []
+
+    # Worker exits mid-uptime; the next poll reconciles the missing session
+    # (drops it from running, releases the claim) → the fiber is a candidate
+    # again. Was-running membership survives the exit, so it re-dispatches.
+    MockRunner.remove_tmux_session(session)
+    send(poller, :run_poll_cycle)
+
+    assert_eventually(fn ->
+      assert Enum.any?(MockRunner.commands(), fn {cmd, args} ->
+               cmd == "tmux" and hd(args) == "new-session"
+             end)
+    end)
+
+    snap = Poller.snapshot(poller)
+    assert snap.boot_quarantine == true
+    refute Enum.any?(snap.pending_launch, &(&1.fiber_id == fiber_id))
   end
 
   test "boot quarantine parks a due standing role (occurrences are fresh launches)" do
@@ -1822,10 +1884,22 @@ defmodule Shuttle.PollerTest do
         boot_quarantine: true
       )
 
+    # First a poll parks it as a fresh launch (held): the autonomous tick's
+    # parking is not slot-gated, so it runs even with 0 worker slots.
+    send(poller, :run_poll_cycle)
+
+    assert_eventually(fn ->
+      assert %{parked_at: _} = Map.get(Poller.parked_index(poller), fiber_id)
+    end)
+
     # The human clicked dispatch: honor the intent — but one manual "go" on one
     # fiber is not a bulk release; the quarantine stays up for everything else.
     assert {:ok, _session} = Poller.dispatch_fiber(poller, fiber_id, force: true)
     assert Poller.snapshot(poller).boot_quarantine == true
+
+    # Held clears the instant the worker exists — synchronously, not a poll cycle
+    # later — so the card never co-renders the held and "aloft" pills.
+    refute Map.has_key?(Poller.parked_index(poller), fiber_id)
   end
 
   test "poller does not dispatch a scheduled standing role before it is due" do
