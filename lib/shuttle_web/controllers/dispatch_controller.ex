@@ -105,6 +105,18 @@ defmodule ShuttleWeb.DispatchController do
               "This role is awaiting review#{review_detail(run_id, completed_at)}. Accept first with `felt shuttle accept #{fiber_id}`, or use `felt shuttle resume #{fiber_id}` to continue the same run."
           })
 
+        {:error, reopen} when reopen in [:reopen_unavailable, :reopen_failed] ->
+          conn
+          |> put_status(422)
+          |> json(%{
+            dispatched: false,
+            reason: to_string(reopen),
+            fiber_id: fiber_id,
+            message:
+              "Could not reopen the closed fiber — no worker was spawned. " <>
+                "Reopen it (`felt shuttle reopen #{fiber_id}`) and try again."
+          })
+
         {:error, reason} ->
           conn
           |> put_status(500)

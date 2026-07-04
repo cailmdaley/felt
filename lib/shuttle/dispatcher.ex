@@ -18,6 +18,8 @@ defmodule Shuttle.Dispatcher do
           | {:error, :not_found}
           | {:error, :closed}
           | {:error, :already_running}
+          | {:error, :reopen_unavailable}
+          | {:error, :reopen_failed}
           | {:error, :missing_session_id}
           | {:error, String.t()}
 
@@ -854,42 +856,97 @@ defmodule Shuttle.Dispatcher do
   # lets the card reclassify as in-flight on the next poll.
   #
   # Skips the shell-out when the fiber is already in a clean active state —
-  # re-dispatching a healthy in-flight oneshot shouldn't rewrite
-  # frontmatter on every click. Failures are non-fatal: the worker can still
-  # spawn; we just log the sticky-column risk loudly so it doesn't go silent
-  # the way the prior "frontend orchestrates transition" path did.
+  # re-dispatching a healthy in-flight oneshot shouldn't rewrite frontmatter
+  # on every click.
+  #
+  # For a CLOSED fiber the reopen is AUTHORITATIVE: it must succeed before any
+  # worker spawns. A worker dispatched against a still-`closed` fiber has no
+  # live mandate — it boots and dies within seconds (the "terminal opens and
+  # immediately closes" symptom) while the card stays in its closed column. So
+  # a missing felt store (`{:error, :reopen_unavailable}`) or a non-zero
+  # `felt shuttle reopen` (`{:error, :reopen_failed}`) ABORTS the dispatch and
+  # propagates through the `with` chain to the caller. (This reverses the prior
+  # deliberate "reopen is non-fatal" choice for the closed case.)
+  #
+  # For a non-closed-but-not-clean fiber (e.g. tempered yet still active) the
+  # reopen stays best-effort: the worker has a live mandate regardless, so a
+  # failed reopen only risks a sticky kanban column, which we log loudly.
   defp maybe_reopen_on_force(_fiber_id, _fiber, false, _runner, _felt_store), do: :ok
 
-  defp maybe_reopen_on_force(fiber_id, _fiber, true, _runner, nil) do
+  defp maybe_reopen_on_force(fiber_id, fiber, true, runner, felt_store) do
+    cond do
+      already_clean?(fiber) ->
+        :ok
+
+      closed?(fiber) ->
+        reopen_closed(fiber_id, runner, felt_store)
+
+      true ->
+        reopen_best_effort(fiber_id, runner, felt_store)
+    end
+  end
+
+  # Authoritative reopen for a closed fiber — failure aborts the dispatch.
+  defp reopen_closed(fiber_id, _runner, nil) do
+    Logger.error(
+      "Force-dispatch aborted for #{fiber_id}: fiber is closed and no felt store is " <>
+        "configured, so it cannot be reopened — refusing to spawn a worker with no live mandate"
+    )
+
+    {:error, :reopen_unavailable}
+  end
+
+  defp reopen_closed(fiber_id, runner, felt_store) do
+    case run_reopen(fiber_id, runner, felt_store) do
+      {output, 0} ->
+        Logger.info("Force-dispatch reopened closed fiber #{fiber_id}: #{String.trim(output)}")
+        :ok
+
+      {output, code} ->
+        Logger.error(
+          "Force-dispatch aborted for #{fiber_id}: `felt shuttle reopen` failed " <>
+            "(exit #{code}: #{String.trim(output)}) — refusing to spawn a worker against a " <>
+            "still-closed fiber"
+        )
+
+        {:error, :reopen_failed}
+    end
+  end
+
+  # Best-effort reopen for a non-closed-but-not-clean fiber (e.g. tempered but
+  # active). The worker has a live mandate regardless; a failed reopen only
+  # risks a sticky kanban column, which we log loudly.
+  defp reopen_best_effort(fiber_id, _runner, nil) do
     Logger.warning("Force-dispatch reopen skipped for #{fiber_id}: no felt store configured")
     :ok
   end
 
-  defp maybe_reopen_on_force(fiber_id, fiber, true, runner, felt_store) do
-    if already_clean?(fiber) do
-      :ok
-    else
-      case runner.cmd(
-             "felt",
-             ["shuttle", "--felt-store", felt_store, "reopen", fiber_id],
-             stderr_to_stdout: true
-           ) do
-        {output, 0} ->
-          Logger.info("Force-dispatch reopened #{fiber_id}: #{String.trim(output)}")
+  defp reopen_best_effort(fiber_id, runner, felt_store) do
+    case run_reopen(fiber_id, runner, felt_store) do
+      {output, 0} ->
+        Logger.info("Force-dispatch reopened #{fiber_id}: #{String.trim(output)}")
+        :ok
 
-          :ok
+      {output, code} ->
+        Logger.warning(
+          "Force-dispatch reopen failed for #{fiber_id} " <>
+            "(worker will still spawn but kanban card may stick in its prior column): " <>
+            "exit #{code}: #{String.trim(output)}"
+        )
 
-        {output, code} ->
-          Logger.warning(
-            "Force-dispatch reopen failed for #{fiber_id} " <>
-              "(worker will still spawn but kanban card may stick in its prior column): " <>
-              "exit #{code}: #{String.trim(output)}"
-          )
-
-          :ok
-      end
+        :ok
     end
   end
+
+  defp run_reopen(fiber_id, runner, felt_store) do
+    runner.cmd(
+      "felt",
+      ["shuttle", "--felt-store", felt_store, "reopen", fiber_id],
+      stderr_to_stdout: true
+    )
+  end
+
+  defp closed?(fiber), do: Map.get(fiber, "status", "") == "closed"
 
   defp already_clean?(fiber) do
     status = Map.get(fiber, "status", "")

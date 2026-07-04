@@ -78,6 +78,14 @@ defmodule Shuttle.DispatcherTest do
         tags: ["constitution"],
         shuttle: %{"resolved" => %{"agent" => @claude_sonnet_resolved}}
       },
+      "tests/reopen-fails" => %{
+        # Closed fiber whose `felt shuttle reopen` shell-out fails (see the
+        # reopen branch in handle_felt/1) — exercises the authoritative-reopen
+        # abort for the CLOSED case.
+        status: "closed",
+        tags: ["constitution"],
+        shuttle: %{"resolved" => %{"agent" => @claude_sonnet_resolved}}
+      },
       "tests/pi-tagged" => %{
         status: "active",
         tags: ["constitution", "pi"],
@@ -195,6 +203,12 @@ defmodule Shuttle.DispatcherTest do
       cond do
         is_nil(fiber_id) ->
           {"fiber not found", 1}
+
+        # `felt shuttle reopen tests/reopen-fails` fails — the store rejects
+        # the reopen. The dispatcher must treat this as fatal for a closed
+        # fiber and abort before any tmux spawn.
+        "reopen" in args and fiber_id == "tests/reopen-fails" ->
+          {"reopen: could not reopen fiber in store", 1}
 
         # `felt show <id> --json` (felt v1.0.4+) — tool-owned namespaces
         # like `shuttle:` round-trip as flat top-level JSON keys alongside
@@ -554,6 +568,50 @@ defmodule Shuttle.DispatcherTest do
              _ -> false
            end),
            "expected no felt shuttle reopen on already-clean fiber; got #{inspect(MockRunner.commands())}"
+  end
+
+  test "dispatch with force: true aborts when reopen of a closed fiber fails" do
+    # Authoritative reopen: a closed fiber whose `felt shuttle reopen` exits
+    # non-zero must ABORT the dispatch — never spawn a worker with no live
+    # mandate (the doomed "terminal opens and immediately closes" worker).
+    result = Dispatcher.dispatch("tests/reopen-fails", runner: MockRunner, force: true)
+    assert {:error, :reopen_failed} = result
+
+    commands = MockRunner.commands()
+
+    assert Enum.any?(commands, fn
+             {"felt", args} -> "reopen" in args and "tests/reopen-fails" in args
+             _ -> false
+           end),
+           "expected the reopen attempt to have been made; got #{inspect(commands)}"
+
+    refute Enum.any?(commands, fn
+             {"tmux", args} -> hd(args) == "new-session"
+             _ -> false
+           end),
+           "no worker/tmux session may spawn when reopen fails; got #{inspect(commands)}"
+  end
+
+  test "dispatch with force: true on a closed fiber aborts when no felt store is configured" do
+    # Without a felt store the closed fiber cannot be reopened, so the reopen
+    # is neither attempted nor assumed — the dispatch aborts rather than
+    # spawning a worker against a still-closed fiber.
+    result = Dispatcher.dispatch("tests/closed", runner: MockRunner, force: true, felt_store: nil)
+    assert {:error, :reopen_unavailable} = result
+
+    commands = MockRunner.commands()
+
+    refute Enum.any?(commands, fn
+             {"felt", args} -> "reopen" in args
+             _ -> false
+           end),
+           "reopen must not be attempted with no felt store; got #{inspect(commands)}"
+
+    refute Enum.any?(commands, fn
+             {"tmux", args} -> hd(args) == "new-session"
+             _ -> false
+           end),
+           "no worker/tmux session may spawn with no felt store; got #{inspect(commands)}"
   end
 
   test "dispatch refuses already-running fiber" do
