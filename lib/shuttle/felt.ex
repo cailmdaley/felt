@@ -31,12 +31,16 @@ defmodule Shuttle.Felt do
   end
 
   # The command runner, behind the same test seam the dispatcher uses. Defaults
-  # to `System` — i.e. `System.cmd/3`, the production path, byte-identical to the
-  # former direct call, including the `:enoent` ErlangError the rescue above maps
-  # to `{:error, _}` (the documented PATH-missing-felt mode). Tests set
-  # `:shuttle, :felt_runner` to a `Shuttle.Runner` mock so endpoints that shell
-  # felt (e.g. `GET /api/v1/agents`) are deterministic without a live felt on
-  # PATH — the failure mode where a real felt on the dev box made the
-  # "degrades when felt is unavailable" test flap.
-  defp felt_runner, do: Application.get_env(:shuttle, :felt_runner, System)
+  # to `Shuttle.Runner.Default` — bounded by a wall-clock timeout and reaped by
+  # SIGKILL on expiry (see its moduledoc), so a wedged `felt` on a loaded node
+  # degrades to a timeout instead of hanging every caller (human-facing
+  # pause/close/reopen/set-outcome writes among them) and leaking the process
+  # forever. Its `{output, status}` contract is byte-identical to bare
+  # `System.cmd/3` on the success/failure paths, including the `:enoent`
+  # ErlangError-turned-127 mapping the rescue above still catches for the
+  # documented PATH-missing-felt mode. Tests set `:shuttle, :felt_runner` to a
+  # mock so endpoints that shell felt (e.g. `GET /api/v1/agents`) are
+  # deterministic without a live felt on PATH — the failure mode where a real
+  # felt on the dev box made the "degrades when felt is unavailable" test flap.
+  defp felt_runner, do: Application.get_env(:shuttle, :felt_runner, Shuttle.Runner.Default)
 end

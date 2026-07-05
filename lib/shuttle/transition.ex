@@ -190,13 +190,16 @@ defmodule Shuttle.Transition do
 
   defp lifecycle_offline_env, do: [{"SHUTTLE_LIFECYCLE_OFFLINE", "1"}]
 
+  # Routed through `Shuttle.Felt.run` — same `felt` shell-out, now bounded by
+  # `Shuttle.Runner`'s timeout+SIGKILL reap instead of a bare `System.cmd/3`
+  # that would hang this Phoenix request (and leak the process) forever
+  # against a wedged felt on a loaded node.
   defp run_cmd(args, env) do
-    case System.cmd("felt", ["shuttle" | args], stderr_to_stdout: true, env: env) do
-      {_, 0} -> :ok
-      {output, status} -> {:error, {:command_error, status, output}}
+    case Shuttle.Felt.run(["shuttle" | args], env: env) do
+      {:ok, _output} -> :ok
+      {:command_error, status, output} -> {:error, {:command_error, status, output}}
+      {:error, reason} -> {:error, reason}
     end
-  rescue
-    e in ErlangError -> {:error, Exception.message(e)}
   end
 
   # ── Forward branch: relay to the owning remote daemon ──

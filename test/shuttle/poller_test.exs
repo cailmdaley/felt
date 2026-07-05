@@ -189,6 +189,24 @@ defmodule Shuttle.PollerTest do
     def set_new_session_delay(ms),
       do: Agent.update(__MODULE__, &Map.put(&1, :new_session_delay_ms, ms))
 
+    # Force `tmux kill-session` to fail. `:not_found` mimics tmux's own
+    # "session already gone" exit (the case kill_session must still treat as
+    # success); any other value simulates a genuine kill failure (e.g. a
+    # zombie process tmux couldn't reap).
+    def set_kill_session_failure(:not_found),
+      do:
+        Agent.update(
+          __MODULE__,
+          &Map.put(&1, :kill_session_failure, {"can't find session: nope", 1})
+        )
+
+    def set_kill_session_failure(enabled) when is_boolean(enabled),
+      do:
+        Agent.update(
+          __MODULE__,
+          &Map.put(&1, :kill_session_failure, enabled && {"tmux: hung up", 1})
+        )
+
     def commands, do: Agent.get(__MODULE__, & &1.commands)
 
     # Real felt inlines a fully-resolved `shuttle.resolved.agent` on every fiber
@@ -320,8 +338,11 @@ defmodule Shuttle.PollerTest do
 
         command == "tmux" and hd(args) == "kill-session" ->
           session = Enum.at(args, 2)
-          remove_tmux_session(session)
-          {"", 0}
+
+          case Agent.get(__MODULE__, &Map.get(&1, :kill_session_failure, false)) do
+            {output, status} -> {output, status}
+            false -> remove_tmux_session(session) && {"", 0}
+          end
 
         command == "tmux" and hd(args) == "rename-session" ->
           ["rename-session", "-t", "=" <> old_name, new_name] = args
@@ -1125,6 +1146,108 @@ defmodule Shuttle.PollerTest do
 
     # Idempotent: killing again when nothing runs is a clean no-op.
     assert {:ok, :no_session} = Poller.kill_session(poller, "tests/killme")
+  end
+
+  test "kill_session treats tmux's \"session not found\" as a successful teardown" do
+    uid = "01JZ00000000000000000000KN"
+
+    fiber =
+      make_fiber("tests/killme-gone", %{
+        "uid" => uid,
+        "modified_at" => "2026-06-08T01:00:00Z"
+      })
+
+    MockRunner.set_fiber("tests/killme-gone", fiber)
+    MockRunner.set_shuttle("tests/killme-gone", "enabled: true\nkind: oneshot\nhost: candide\n")
+
+    {:ok, poller} =
+      start_poller!(
+        name: :test_poller_kill_session_gone,
+        runner: MockRunner,
+        own_host_id: "candide",
+        poll_interval_ms: 60_000,
+        felt_stores: ["/tmp"]
+      )
+
+    send(poller, :run_poll_cycle)
+
+    assert wait_until(fn ->
+             case Poller.cached_fiber_documents(poller) do
+               {:ok, %{fibers: [entry]}} -> Map.has_key?(entry, :runtime)
+               _ -> false
+             end
+           end)
+
+    {:ok, %{fibers: [live]}} = Poller.cached_fiber_documents(poller)
+    session = get_in(live, [:runtime, :tmux_session])
+
+    # tmux itself reports the session is already gone (exit 1, "can't find
+    # session") — the poller must still treat this as a successful kill and
+    # tear down runtime tracking, not surface it as a failure.
+    MockRunner.set_kill_session_failure(:not_found)
+    assert {:ok, ^session} = Poller.kill_session(poller, "tests/killme-gone")
+
+    assert wait_until(fn ->
+             case Poller.cached_fiber_documents(poller) do
+               {:ok, %{fibers: [entry]}} -> not Map.has_key?(entry, :runtime)
+               _ -> false
+             end
+           end)
+  end
+
+  test "kill_session surfaces a genuine tmux kill failure and leaves runtime tracking intact" do
+    uid = "01JZ00000000000000000000KF"
+
+    fiber =
+      make_fiber("tests/killme-fail", %{
+        "uid" => uid,
+        "modified_at" => "2026-06-08T01:00:00Z"
+      })
+
+    MockRunner.set_fiber("tests/killme-fail", fiber)
+    MockRunner.set_shuttle("tests/killme-fail", "enabled: true\nkind: oneshot\nhost: candide\n")
+
+    {:ok, poller} =
+      start_poller!(
+        name: :test_poller_kill_session_fail,
+        runner: MockRunner,
+        own_host_id: "candide",
+        poll_interval_ms: 60_000,
+        felt_stores: ["/tmp"]
+      )
+
+    send(poller, :run_poll_cycle)
+
+    assert wait_until(fn ->
+             case Poller.cached_fiber_documents(poller) do
+               {:ok, %{fibers: [entry]}} -> Map.has_key?(entry, :runtime)
+               _ -> false
+             end
+           end)
+
+    state_before = :sys.get_state(poller)
+    [{runtime_key, meta_before}] = Map.to_list(state_before.running)
+    original_watcher_pid = meta_before.pid
+    assert is_pid(original_watcher_pid) and Process.alive?(original_watcher_pid)
+
+    # A genuine kill failure (session still alive, tmux refused): the ghost
+    # worker keeps running, so tracking must NOT be torn down and the reply
+    # must surface the failure rather than a false {:ok, ...}.
+    MockRunner.set_kill_session_failure(true)
+    assert {:error, reason} = Poller.kill_session(poller, "tests/killme-fail")
+    assert reason =~ "tmux kill-session failed"
+
+    {:ok, %{fibers: [still_live]}} = Poller.cached_fiber_documents(poller)
+    assert Map.has_key?(still_live, :runtime)
+
+    # `kill_session` stops the watcher BEFORE attempting the kill, so a
+    # failed kill must re-arm a fresh watcher against the still-live
+    # session — otherwise nobody observes its eventual exit until this
+    # daemon restarts, a second flavor of ghost worker.
+    state_after = :sys.get_state(poller)
+    meta_after = Map.get(state_after.running, runtime_key)
+    assert is_pid(meta_after.pid) and Process.alive?(meta_after.pid)
+    refute meta_after.pid == original_watcher_pid
   end
 
   test "New session (force + resume_mode:fresh) CUTS an open session: marker stamped, live tmux killed, then dispatched fresh" do

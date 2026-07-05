@@ -33,6 +33,7 @@ defmodule ShuttleWeb.KillController do
         case Poller.kill_session(fiber_id) do
           {:ok, :no_session} -> json(conn, %{fiber_id: fiber_id, killed: false})
           {:ok, session} -> json(conn, %{fiber_id: fiber_id, killed: true, session: session})
+          {:error, reason} -> conn |> put_status(500) |> json(%{fiber_id: fiber_id, killed: false, error: reason})
         end
     end
   end

@@ -374,11 +374,20 @@ defmodule Shuttle.Poller do
   is the verdict, so the frontend's subsequent column write is the sole status
   authority; the kill only stops the process. Idempotent: `{:ok, :no_session}`
   when nothing is running for the fiber.
+
+  A `tmux kill-session` that exits nonzero because the session is already gone
+  ("can't find session" / "session not found" in its stderr) is a SUCCESSFUL
+  teardown, not a failure — tmux itself is reporting there's nothing left to
+  kill, which is exactly the outcome we want. Any other nonzero exit means the
+  kill genuinely failed (an actually-running session survived it); tracking is
+  left in place — no `{:ok, ...}` reply and no runtime teardown — so the board
+  doesn't show a stopped card while a worker keeps mutating the fiber.
   """
-  @spec kill_session(String.t()) :: {:ok, String.t() | :no_session}
+  @spec kill_session(String.t()) :: {:ok, String.t() | :no_session} | {:error, String.t()}
   def kill_session(fiber_id), do: kill_session(__MODULE__, fiber_id)
 
-  @spec kill_session(GenServer.server(), String.t()) :: {:ok, String.t() | :no_session}
+  @spec kill_session(GenServer.server(), String.t()) ::
+          {:ok, String.t() | :no_session} | {:error, String.t()}
   def kill_session(server, fiber_id) do
     GenServer.call(server, {:kill_session, fiber_id}, @dispatch_call_timeout_ms)
   end
@@ -734,10 +743,38 @@ defmodule Shuttle.Poller do
         # Stop the watcher BEFORE the kill so its has-session poll doesn't also
         # report the exit and double-handle through handle_worker_exit.
         stop_watcher(meta)
-        _ = state.runner.cmd("tmux", ["kill-session", "-t", session], stderr_to_stdout: true)
-        # Pure runtime teardown — drop running entry + claim, no status write.
-        state = remove_running(state, runtime_key)
-        {:reply, {:ok, session}, state}
+
+        case state.runner.cmd("tmux", ["kill-session", "-t", session], stderr_to_stdout: true) do
+          {_output, 0} ->
+            # Pure runtime teardown — drop running entry + claim, no status write.
+            state = remove_running(state, runtime_key)
+            {:reply, {:ok, session}, state}
+
+          {output, status} ->
+            if session_already_gone?(output) do
+              # tmux itself reports the session is already gone — a
+              # successful teardown, just one we didn't cause.
+              state = remove_running(state, runtime_key)
+              {:reply, {:ok, session}, state}
+            else
+              # A real failure: the session is (or may still be) alive. Leave
+              # tracking in place — no teardown — so the board doesn't show a
+              # stopped card while a ghost worker keeps mutating the fiber.
+              # But the watcher we stopped above is now gone too, and nothing
+              # else will restart it — without re-arming it, a live session
+              # nobody observes is a second ghost-worker flavor, invisible
+              # until this daemon restarts. Re-start it against the same
+              # session so the exit still gets handled eventually.
+              Logger.error(
+                "kill_session #{fiber_id}: tmux kill-session exited #{inspect(status)}: #{output}"
+              )
+
+              state = restart_watcher_after_failed_kill(state, fiber_id, runtime_key, meta)
+
+              {:reply,
+               {:error, "tmux kill-session failed (exit #{inspect(status)}): #{output}"}, state}
+            end
+        end
     end
   end
 
@@ -2751,6 +2788,13 @@ defmodule Shuttle.Poller do
     }
   end
 
+  # tmux's message for "no such session" (seen across tmux versions/platforms)
+  # — `kill_session` treats this as a successful teardown, not a failure.
+  defp session_already_gone?(output) when is_binary(output),
+    do: output =~ "can't find session" or output =~ "session not found"
+
+  defp session_already_gone?(_output), do: false
+
   # "New session" on a fiber that still holds an OPEN tmux session is a CUT, not
   # a refusal. A forced fresh dispatch (`force` + `resume_mode:"fresh"` — the
   # kanban New-session button and drag-launch both send these) stamps the
@@ -2858,6 +2902,27 @@ defmodule Shuttle.Poller do
         :exit, {:noproc, _} -> :ok
         :exit, :noproc -> :ok
       end
+    end
+  end
+
+  # `kill_session` stops the watcher before attempting the kill (see its own
+  # comment); when the kill then genuinely fails, the session survives but
+  # nothing is watching it anymore. Re-arm a watcher against the still-live
+  # session so its eventual exit is still handled, rather than silently
+  # ghosting until this daemon restarts. Best-effort: a failure to restart is
+  # logged, not raised — the kill_session caller already has an error to
+  # surface, and the next poll cycle's reconciliation is the backstop.
+  defp restart_watcher_after_failed_kill(%State{} = state, fiber_id, runtime_key, meta) do
+    case start_watcher(state, fiber_id, meta) do
+      {:ok, new_meta} ->
+        %{state | running: Map.put(state.running, runtime_key, new_meta)}
+
+      {:error, reason} ->
+        Logger.error(
+          "kill_session #{fiber_id}: failed to restart watcher after failed kill: #{inspect(reason)}"
+        )
+
+        state
     end
   end
 

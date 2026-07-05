@@ -204,16 +204,18 @@ defmodule ShuttleWeb.LifecycleController do
   defp truthy?(true), do: true
   defp truthy?(_), do: false
 
+  # Routed through `Shuttle.Felt.run` (which owns the `felt` shell-out via
+  # `Shuttle.Runner`'s timeout+SIGKILL reap) rather than a private
+  # `System.cmd/3` copy — one implementation of the bounding, not two.
   defp run(args, host) do
     env = [{"SHUTTLE_LIFECYCLE_OFFLINE", "1"}]
     args = if is_binary(host) and host != "", do: ["--felt-store", host | args], else: args
 
-    case System.cmd("felt", ["shuttle" | args], stderr_to_stdout: true, env: env) do
-      {output, 0} -> {:ok, output}
-      {output, status} -> {:command_error, status, clean_command_output(output)}
+    case Shuttle.Felt.run(["shuttle" | args], env: env) do
+      {:ok, output} -> {:ok, output}
+      {:command_error, status, output} -> {:command_error, status, clean_command_output(output)}
+      {:error, reason} -> {:error, reason}
     end
-  rescue
-    e in ErlangError -> {:error, Exception.message(e)}
   end
 
   defp clean_command_output(output) when is_binary(output) do
