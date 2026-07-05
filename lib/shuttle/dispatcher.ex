@@ -1096,7 +1096,28 @@ defmodule Shuttle.Dispatcher do
             fiber_path: Keyword.get(opts, :fiber_path)
           )
 
-        spawn_tmux(session, work_dir, run_script, runner)
+        case spawn_tmux(session, work_dir, run_script, runner) do
+          {:ok, _} = result ->
+            # Resuming is a dispatch boundary too: stamp a FRESH dispatched_at
+            # (same session_id — resuming doesn't change session identity, and
+            # the fresh-fallback path above reuses it as well) so the
+            # continuation heuristic compares a subsequent clean-exit or
+            # died-mid-window against THIS run, not the run being resumed. The
+            # session id is already known synchronously here (it's the resume
+            # target itself), unlike fresh codex/pi dispatch — no capture/
+            # backfill needed, one synchronous stamp same as fresh dispatch.
+            if Keyword.get(opts, :store_session_id, true) do
+              record_dispatch_session(fiber_id, session_id, runner,
+                felt_store: felt_store,
+                run_id: Keyword.get(opts, :run_id)
+              )
+            end
+
+            result
+
+          error ->
+            error
+        end
 
       :fresh ->
         # Fresh mode: build the full dispatch prompt.
@@ -1191,22 +1212,32 @@ defmodule Shuttle.Dispatcher do
     end
   end
 
-  # Record the session UUID in the fiber's `shuttle:` block after a successful
-  # fresh dispatch, so "Resume previous" and the autonomous continuation
-  # heuristic can recover it (the block is the only structured session-id home —
-  # the worker never knows its own UUID, the daemon does). `opts` carries
-  # `:fiber_path` (the fiber's `.md`, from `fiber["path"]`) and `:run_id` (the
-  # standing run id, nil for a oneshot).
-  # - Claude: UUID was pre-specified; write synchronously (fire-and-forget Task).
-  # - Codex/Pi: capture UUID from session file asynchronously with backoff.
-  # - None: agent doesn't support session IDs; skip.
-  defp store_session_id(fiber_id, {:claude, uuid}, runner, opts) do
-    # Fire-and-forget: recording the UUID is best-effort; blocking dispatch on a
-    # marker write would delay WorkerWatcher startup and cause flaky tests.
-    Task.start(fn ->
-      record_dispatch_session(fiber_id, uuid, runner, opts)
-    end)
-  end
+  # Stamp the dispatch marker in the fiber's `shuttle:` block right after a
+  # successful fresh dispatch, so "Resume previous" and the autonomous
+  # continuation heuristic can recover it (the block is the only structured
+  # session-id home — the worker never knows its own UUID, the daemon does).
+  # `opts` carries `:fiber_path` (the fiber's `.md`, from `fiber["path"]`) and
+  # `:run_id` (the standing run id, nil for a oneshot).
+  #
+  # `dispatched_at` is the dispatch-boundary ground truth the continuation
+  # heuristic compares `handed_off_at` against — it must exist the moment the
+  # tmux session starts doing work, not some seconds later. So for EVERY
+  # agent, `record_dispatch_session/4` runs SYNCHRONOUSLY here, before
+  # `store_session_id` returns (Runner-bounded felt shell-outs now make this a
+  # bounded, not unbounded, blocking call — see F3). Only the piece that
+  # genuinely can't be known yet — codex/pi's session UUID, scraped from a
+  # JSONL file the harness hasn't necessarily written when tmux launches — is
+  # deferred to an async task, and that task only BACKFILLS `session_uuid`
+  # into the marker already stamped here; it never creates the marker itself.
+  #
+  # - Claude: UUID was pre-specified (`--session-id`) — the sync write already
+  #   carries it, nothing left to backfill.
+  # - Codex/Pi: sync write carries `dispatched_at` (+ `run_id`) with no
+  #   `session_uuid` yet; the async task backfills it once scraped.
+  # - None: agent doesn't support session IDs; sync write still stamps
+  #   `dispatched_at` so the continuation heuristic has a real boundary.
+  defp store_session_id(fiber_id, {:claude, uuid}, runner, opts),
+    do: record_dispatch_session(fiber_id, uuid, runner, opts)
 
   defp store_session_id(
          fiber_id,
@@ -1214,14 +1245,17 @@ defmodule Shuttle.Dispatcher do
          runner,
          opts
        ) do
+    record_dispatch_session(fiber_id, nil, runner, opts)
+
     # Fire-and-forget: capture the session UUID from the harness's JSONL file
     # in a background task. The race window (50 ms × 20 attempts = ~1 s) is
     # short enough that the kanban card will show "Resume previous" by the
-    # next manual refresh.
+    # next manual refresh. Losing this race no longer costs the dispatch
+    # boundary itself — `dispatched_at` is already on disk above.
     Task.start(fn ->
       case capture_session_uuid(cli, work_dir, capture_fiber_id, dispatched_after, 100) do
         {:ok, uuid} ->
-          record_dispatch_session(fiber_id, uuid, runner, opts)
+          backfill_session_uuid(fiber_id, uuid, runner, opts)
 
         {:error, reason} ->
           Logger.warning(
@@ -1232,7 +1266,8 @@ defmodule Shuttle.Dispatcher do
     end)
   end
 
-  defp store_session_id(_fiber_id, :none, _runner, _opts), do: :ok
+  defp store_session_id(fiber_id, :none, runner, opts),
+    do: record_dispatch_session(fiber_id, nil, runner, opts)
 
   # Stamp `{session_uuid, dispatched_at, run_id}` into the fiber's
   # `shuttle.runtime` block by shelling `felt shuttle mark-runtime` (felt owns
@@ -1240,7 +1275,9 @@ defmodule Shuttle.Dispatcher do
   # `handed_off_at` is compared against this `dispatched_at` to decide
   # fresh-vs-resume. `felt_store` + `fiber_id` are the store/scoped-id pair the
   # dispatch read the fiber with, so felt resolves it. A missing `:felt_store`
-  # skips the write — the fiber then reads as a fresh dispatch, the safe default.
+  # skips the write — the fiber then reads as a fresh dispatch, the safe
+  # default. `uuid` may be `nil` (codex/pi at launch, or `:none` agents) — the
+  # marker still gets a `dispatched_at` boundary, just no `session_uuid` yet.
   defp record_dispatch_session(fiber_id, uuid, runner, opts) do
     case Keyword.get(opts, :felt_store) do
       store when is_binary(store) and store != "" ->
@@ -1249,11 +1286,15 @@ defmodule Shuttle.Dispatcher do
                run_id: Keyword.get(opts, :run_id)
              }) do
           :ok ->
-            Logger.info("Recorded session UUID #{uuid} for #{fiber_id} in shuttle.runtime")
+            if is_binary(uuid) and uuid != "" do
+              Logger.info("Recorded session UUID #{uuid} for #{fiber_id} in shuttle.runtime")
+            else
+              Logger.info("Stamped dispatched_at for #{fiber_id} in shuttle.runtime")
+            end
 
           {:error, reason} ->
             Logger.warning(
-              "Could not record session UUID for #{fiber_id} (#{store}): #{inspect(reason)}"
+              "Could not record dispatch marker for #{fiber_id} (#{store}): #{inspect(reason)}"
             )
         end
 
@@ -1262,6 +1303,32 @@ defmodule Shuttle.Dispatcher do
     end
   rescue
     e -> Logger.warning("Could not record session UUID for #{fiber_id}: #{inspect(e)}")
+  end
+
+  # Backfill `session_uuid` into an ALREADY-STAMPED marker — the codex/pi
+  # async capture path. Deliberately does not touch `dispatched_at`: it shells
+  # `felt shuttle mark-runtime --session <uuid>` with no `--dispatched-at`
+  # flag, and mark-runtime only writes fields whose flag is present, so the
+  # boundary `record_dispatch_session/4` stamped synchronously at launch is
+  # left exactly as it was.
+  defp backfill_session_uuid(fiber_id, uuid, runner, opts) do
+    case Keyword.get(opts, :felt_store) do
+      store when is_binary(store) and store != "" ->
+        case Shuttle.Continuation.backfill_session_uuid(runner, store, fiber_id, uuid) do
+          :ok ->
+            Logger.info("Recorded session UUID #{uuid} for #{fiber_id} in shuttle.runtime")
+
+          {:error, reason} ->
+            Logger.warning(
+              "Could not backfill session UUID for #{fiber_id} (#{store}): #{inspect(reason)}"
+            )
+        end
+
+      _ ->
+        Logger.debug("backfill_session_uuid: no felt_store for #{fiber_id}; skipping")
+    end
+  rescue
+    e -> Logger.warning("Could not backfill session UUID for #{fiber_id}: #{inspect(e)}")
   end
 
   # Poll for the session UUID written by codex/pi to their respective session

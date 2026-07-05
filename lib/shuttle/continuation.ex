@@ -182,6 +182,25 @@ defmodule Shuttle.Continuation do
   def write_dispatch(_runner, _felt_store, _fiber_id, _fields), do: :ok
 
   @doc """
+  Backfill `shuttle.runtime.session_uuid` into an ALREADY-STAMPED marker,
+  without touching `dispatched_at` (or `run_id`) — the codex/pi path, where
+  `write_dispatch/4` already stamped the dispatch boundary synchronously at
+  launch and the session UUID is only scraped from the harness's JSONL
+  afterward. Shells `felt shuttle mark-runtime --session <uuid>` with no
+  `--dispatched-at` flag; `mark-runtime` only writes fields whose flag is
+  present, so the boundary written at launch is left untouched.
+  """
+  @spec backfill_session_uuid(module(), String.t(), String.t(), String.t()) ::
+          :ok | {:error, term()}
+  def backfill_session_uuid(runner, felt_store, fiber_id, uuid)
+      when is_binary(felt_store) and felt_store != "" and is_binary(fiber_id) and fiber_id != "" and
+             is_binary(uuid) and uuid != "" do
+    mark_runtime(runner, felt_store, fiber_id, [{"--session", uuid}])
+  end
+
+  def backfill_session_uuid(_runner, _felt_store, _fiber_id, _uuid), do: :ok
+
+  @doc """
   Stamp `shuttle.runtime.handed_off_at = now` — the clean-exit / human-re-arm
   signal — by shelling `felt shuttle mark-runtime --handed-off-at`
   (`cd: felt_store`). The worker's own exit uses the Go `felt shuttle handoff`;

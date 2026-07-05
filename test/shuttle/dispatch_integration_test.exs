@@ -377,6 +377,17 @@ defmodule Shuttle.DispatchIntegrationTest do
     # fallback whose full dispatch prompt is exercised in the deadlock test below).
     assert script =~ "Shuttle resumed your previous session"
     assert script =~ "Fiber: tests/kanban-resume"
+
+    # F2: resuming is a dispatch boundary too — a fresh `dispatched_at` must be
+    # stamped synchronously (same session id, since resuming doesn't change
+    # session identity), or the continuation heuristic would compare a
+    # subsequent clean-exit/died-mid-window against the PRIOR run's stamp.
+    assert Enum.any?(IntegrationRunner.commands(), fn {cmd, args} ->
+             cmd == "felt" and match?(["shuttle", "mark-runtime" | _], args) and
+               "--dispatched-at" in args and "--session" in args and
+               "kanban-session-uuid-5678" in args
+           end),
+           "expected a fresh dispatched_at stamp carrying the resumed session id"
   end
 
   # Regression for the launch deadlock (the CNRS own-words fiber): a resume whose
@@ -612,15 +623,27 @@ defmodule Shuttle.DispatchIntegrationTest do
                work_dir: work_dir
              )
 
-    # The captured worker session id is stamped into the fiber's shuttle.runtime
-    # block via `felt shuttle mark-runtime` (felt owns the nesting — Stage 5) so
-    # resume can recover it; the wrong (human) session is ignored. The daemon's
-    # contract is the verb it shells — felt's own suite + the lockstep round-trip
-    # cover that mark-runtime nests under shuttle.runtime.
+    # F2: dispatched_at is the dispatch-boundary ground truth and must exist
+    # the moment the tmux session launches — codex/pi doesn't know its session
+    # UUID yet at that instant, but the marker is stamped SYNCHRONOUSLY before
+    # `dispatch/1` returns regardless, carrying `--dispatched-at` with no
+    # `--session` (there is nothing to backfill into yet).
+    assert Enum.any?(IntegrationRunner.commands(), fn {cmd, args} ->
+             cmd == "felt" and match?(["shuttle", "mark-runtime" | _], args) and
+               "--dispatched-at" in args and "--session" not in args
+           end),
+           "expected dispatched_at to be stamped synchronously before dispatch returned"
+
+    # The captured worker session id is BACKFILLED into that already-stamped
+    # marker via `felt shuttle mark-runtime --session` (felt owns the nesting —
+    # Stage 5) so resume can recover it; the wrong (human) session is ignored.
+    # The daemon's contract is the verb it shells — felt's own suite + the
+    # lockstep round-trip cover that mark-runtime nests under shuttle.runtime.
     assert eventually(fn ->
              Enum.any?(IntegrationRunner.commands(), fn {cmd, args} ->
                cmd == "felt" and match?(["shuttle", "mark-runtime" | _], args) and
-                 "--session" in args and "right-worker-session" in args
+                 "--session" in args and "right-worker-session" in args and
+                 "--dispatched-at" not in args
              end)
            end)
   end
@@ -1284,9 +1307,11 @@ defmodule Shuttle.DispatchIntegrationTest do
            "expected the document cache to warm"
 
     # Warming the cache runs a poll that DISPATCHES this status:active fiber,
-    # which fires an async Task that shells `felt shuttle mark-runtime` to stamp
-    # the dispatch fields (felt owns the runtime nesting — Stage 5). Wait for that
-    # async dispatch task to have issued the verb before mutating out of band, so
+    # which shells `felt shuttle mark-runtime` SYNCHRONOUSLY (before dispatch
+    # returns) to stamp the dispatch fields (felt owns the runtime nesting —
+    # Stage 5; the sync stamp is F2 — `dispatched_at` must exist the moment
+    # the tmux session launches). `eventually` here just waits out the poll
+    # cycle itself, not the mark-runtime write, before mutating out of band so
     # the two writes are serialized rather than racing.
     assert eventually(fn ->
              Enum.any?(IntegrationRunner.commands(), fn {cmd, args} ->
