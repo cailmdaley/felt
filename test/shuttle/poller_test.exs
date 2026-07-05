@@ -268,7 +268,7 @@ defmodule Shuttle.PollerTest do
         # skew set `:contract_level`/`:contract_exit` before starting the
         # poller — see the S2 tests.
         command == "felt" and match?(["shuttle", "contract"], args) ->
-          level = Agent.get(__MODULE__, &Map.get(&1, :contract_level, "1"))
+          level = Agent.get(__MODULE__, &Map.get(&1, :contract_level, "2"))
           {level, Agent.get(__MODULE__, &Map.get(&1, :contract_exit, 0))}
 
         # `felt shuttle agents resolve <name> ...` — the capture path's no-fiber
@@ -2055,7 +2055,7 @@ defmodule Shuttle.PollerTest do
   # tests exercise the skew gate in isolation from it.
 
   test "a matching contract level dispatches normally and reports ok in the snapshot" do
-    MockRunner.set_contract_level("1")
+    MockRunner.set_contract_level("2")
     fiber_id = "tests/contract-match"
     MockRunner.set_fiber(fiber_id, make_fiber(fiber_id))
     MockRunner.set_shuttle(fiber_id, @oneshot_shuttle)
@@ -2068,7 +2068,7 @@ defmodule Shuttle.PollerTest do
         felt_stores: ["/tmp"]
       )
 
-    assert Poller.snapshot(poller).contract == %{expected: 1, observed: 1, ok: true, reason: nil}
+    assert Poller.snapshot(poller).contract == %{expected: 2, observed: 2, ok: true, reason: nil}
 
     send(poller, :run_poll_cycle)
 
@@ -2082,7 +2082,7 @@ defmodule Shuttle.PollerTest do
   end
 
   test "a mismatched contract level holds fresh launches and surfaces the skew" do
-    MockRunner.set_contract_level("2")
+    MockRunner.set_contract_level("3")
     fiber_id = "tests/contract-mismatch"
     MockRunner.set_fiber(fiber_id, make_fiber(fiber_id))
     MockRunner.set_shuttle(fiber_id, @oneshot_shuttle)
@@ -2097,9 +2097,9 @@ defmodule Shuttle.PollerTest do
 
     snap = Poller.snapshot(poller)
 
-    assert %{expected: 1, observed: 2, ok: false, reason: reason} = snap.contract
-    assert reason =~ "expected contract level 1"
-    assert reason =~ "CLI reports 2"
+    assert %{expected: 2, observed: 3, ok: false, reason: reason} = snap.contract
+    assert reason =~ "expected contract level 2"
+    assert reason =~ "CLI reports 3"
 
     send(poller, :run_poll_cycle)
 
@@ -2110,7 +2110,7 @@ defmodule Shuttle.PollerTest do
                Poller.snapshot(poller).pending_launch
 
       assert parked_reason =~ "contract skew"
-      assert parked_reason =~ "CLI reports 2"
+      assert parked_reason =~ "CLI reports 3"
     end)
 
     refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
@@ -2136,7 +2136,7 @@ defmodule Shuttle.PollerTest do
         felt_stores: ["/tmp"]
       )
 
-    assert %{expected: 1, ok: false} = Poller.snapshot(poller).contract
+    assert %{expected: 2, ok: false} = Poller.snapshot(poller).contract
 
     send(poller, :run_poll_cycle)
 
@@ -2153,7 +2153,7 @@ defmodule Shuttle.PollerTest do
     # Same was-running exemption as boot quarantine: skew means "no NEW
     # autonomous work", not "abandon what's alive". A worker this daemon
     # observed running (adopted at boot) must still re-dispatch on exit.
-    MockRunner.set_contract_level("2")
+    MockRunner.set_contract_level("3")
     fiber_id = "tests/contract-skew-was-running"
     session = Dispatcher.session_name(fiber_id)
     MockRunner.set_shuttle(fiber_id, @oneshot_shuttle)

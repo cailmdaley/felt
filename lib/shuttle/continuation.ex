@@ -217,26 +217,31 @@ defmodule Shuttle.Continuation do
 
   # ── internals ────────────────────────────────────────────────────────────────
 
-  # Shell `felt shuttle mark-runtime <fiber_id> <flags...>` (cd: felt_store).
-  # `flags` is a list of `{flag, value}` pairs, already filtered to non-empty.
+  # Shell `felt shuttle mark-runtime <fiber_id> <flags...>` (cd: felt_store)
+  # through the one audited write helper (`Shuttle.Felt.Shuttle`). `flags` is
+  # a list of `{flag, value}` pairs, already filtered to non-empty.
   #
-  # Always passes `--host <own_host_id>` so felt's ownership guard resolves the
-  # write's owner LOCALLY instead of calling back to GET /api/v1/state. That
-  # callback is re-entrant for a conclude/claim write (those run inside a blocked
-  # Poller `handle_call`, so the GenServer-served `/api/v1/state` would deadlock
-  # to a 1.5s timeout, then felt would fall back to `os.Hostname()` — wrong on a
-  # host whose owner id is an alias (candide vs c03), silently failing the write).
+  # Post-S1/C1, felt's own `resolveOwnHost` is pure local state — no
+  # re-entrant `--host` override needed here (or anywhere else in the
+  # daemon-shelled write plane); see `Shuttle.Felt.Shuttle`'s moduledoc.
   defp mark_runtime(runner, felt_store, fiber_id, flags) do
-    flags = add_flag(flags, "--host", own_host())
-    args = ["shuttle", "mark-runtime", fiber_id] ++ Enum.flat_map(flags, fn {f, v} -> [f, v] end)
+    args = Enum.flat_map(flags, fn {f, v} -> [f, v] end)
 
-    case runner.cmd("felt", args, cd: felt_store, stderr_to_stdout: true) do
-      {_output, 0} ->
+    case Shuttle.Felt.Shuttle.run("mark-runtime", fiber_id, args, runner: runner, cd: felt_store) do
+      {:ok, _output} ->
         :ok
 
-      {output, status} ->
+      {:command_error, status, output} ->
         reason = "felt shuttle mark-runtime exited #{status}: #{String.trim(to_string(output))}"
         Logger.warning("Continuation: #{reason} (fiber=#{fiber_id}, store=#{felt_store})")
+        {:error, reason}
+
+      {:error, reason} ->
+        Logger.warning(
+          "Continuation: felt shuttle mark-runtime raised #{inspect(reason)} " <>
+            "(fiber=#{fiber_id}, store=#{felt_store})"
+        )
+
         {:error, reason}
     end
   end
@@ -247,16 +252,6 @@ defmodule Shuttle.Continuation do
   defp add_flag(flags, _flag, value) when value in [nil, ""], do: flags
   defp add_flag(flags, flag, value) when is_binary(value), do: flags ++ [{flag, value}]
   defp add_flag(flags, flag, value), do: flags ++ [{flag, to_string(value)}]
-
-  # This daemon's authoritative own_host_id (SHUTTLE_HOST → ~/.shuttle/host →
-  # gethostname) — a pure function, safe to call inside a Poller handle_call (it
-  # never messages the Poller process). Best-effort: if it raises (gethostname
-  # failure), omit --host and let felt fall back to its own resolution.
-  defp own_host do
-    Shuttle.Poller.own_host_id()
-  rescue
-    _ -> nil
-  end
 
   defp iso_now, do: DateTime.to_iso8601(DateTime.utc_now())
 

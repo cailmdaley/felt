@@ -51,6 +51,11 @@ defmodule Shuttle.Poller do
   # start_link opt override it (config/test.exs sets false so dispatch tests
   # exercise the tick directly; quarantine tests opt back in per-poller).
   @default_boot_quarantine true
+  # S4: the persistent_term namespace `own_host_id/1` freezes each Poller
+  # instance's identity under (keyed further by that instance's self_ref —
+  # see init/1). A plain atom tag, not `__MODULE__`, so it reads unambiguously
+  # in `:persistent_term.info/0` dumps.
+  @own_host_pt_namespace :shuttle_own_host_id
   @dispatch_call_timeout_ms 30_000
   @orchestrator_state_call_timeout_ms 30_000
 
@@ -576,6 +581,15 @@ defmodule Shuttle.Poller do
         {:registered_name, name} when is_atom(name) -> name
         _ -> self()
       end
+
+    own_host_id = to_string(own_host_id)
+
+    # S4: freeze this instance's own_host_id into a persistent_term keyed by
+    # its self_ref, so `own_host_id/1`'s public accessor never re-touches
+    # SHUTTLE_HOST/~/.shuttle/host per call — see that function's doc. Keyed
+    # per-instance (not one global slot) so distinct named Pollers in the same
+    # BEAM (multi-host tests) never stomp on each other's frozen identity.
+    :persistent_term.put({@own_host_pt_namespace, self_ref}, own_host_id)
 
     state = %State{
       self_ref: self_ref,
@@ -1892,7 +1906,7 @@ defmodule Shuttle.Poller do
   defp project_dir_available?(_), do: true
 
   @doc """
-  Resolves this daemon's `own_host_id` — the identity it advertises for the
+  This daemon's `own_host_id` — the identity it advertises for the
   `shuttle.host` dispatch filter. Public so other callers (e.g.
   `ShuttleWeb.FiberController` when stamping a `host:` on a new fiber) share
   the exact same resolution.
@@ -1906,30 +1920,62 @@ defmodule Shuttle.Poller do
   (the raw hostname) while its fibers were stamped `candide` (the alias),
   and the owner-only feed silently dropped every one of them.
 
-  Precedence:
+  S4: reads the value `init/1` froze into a `:persistent_term` at boot
+  (keyed by `server`'s registered name/pid), NOT a fresh env/file/hostname
+  lookup — post-launch env/file drift (an operator editing `~/.shuttle/host`
+  while the daemon runs, a respawn exporting a different `SHUTTLE_HOST`)
+  must not split routing from ownership mid-run: every consumer within one
+  daemon lifetime sees the SAME identity, computed once. Falls back to a
+  fresh `resolve_own_host_id/0` computation only when no Poller by that name
+  has booted yet — the common case for pure-unit tests with no live Poller,
+  and the daemon's own very first `init/1` call before it has written the
+  cache.
 
-    1. `SHUTTLE_HOST` env var, if set and non-empty. The explicit override
-       and the test seam — `config/test.exs` pins it via `System.put_env/2`,
-       and the daemon's tmux respawn loop can export it.
-
-    2. `~/.shuttle/host` file (first non-empty line), if present. The durable
-       per-host canonical identity: unlike the env var it survives every
-       daemon launch path (`make start`, a bare `bin/shuttle start`, a
-       respawn outside the loop), so the daemon *derives* its friendly name
-       (`candide` instead of `c03`) rather than depending on an operator
-       remembering to export it. Override the path with `SHUTTLE_HOST_FILE`.
-
-    3. `:inet.gethostname()` — short OS hostname. Two separately-deployed
-       daemons get distinct ids automatically; no per-machine config needed.
-
-  No `Application.get_env(:shuttle, :host)` step and no `"local"` default:
-  an absent `host:` is unowned everywhere, never silently grabbed.
-
-  Raises if `:inet.gethostname/0` truly fails — a system-level problem;
-  silently degrading into a no-op filter would make the failure invisible.
+  `own_host_id/0` targets the default-named `#{inspect(__MODULE__)}` — the
+  production singleton every external consumer (controllers, `Shuttle.Kitty`,
+  `Shuttle.Cli`, `Shuttle.FiberDocuments`, `Shuttle.OriginRouter`) means by
+  "this daemon's identity". `own_host_id/1` targets a specific `server` for
+  a test poller started under a different name.
   """
   @spec own_host_id() :: String.t()
-  def own_host_id do
+  def own_host_id, do: own_host_id(__MODULE__)
+
+  @spec own_host_id(GenServer.server()) :: String.t()
+  def own_host_id(server) do
+    case :persistent_term.get({@own_host_pt_namespace, server}, nil) do
+      nil -> resolve_own_host_id()
+      frozen -> frozen
+    end
+  end
+
+  # The actual env → host-file → hostname computation (formerly the public
+  # `own_host_id/0` body). Runs exactly once per Poller boot (`init/1` calls
+  # this to compute the value it then freezes) plus as `own_host_id/1`'s
+  # fallback when nothing has frozen a value yet.
+  #
+  # Precedence:
+  #
+  #   1. `SHUTTLE_HOST` env var, if set and non-empty. The explicit override
+  #      and the test seam — `config/test.exs` pins it via `System.put_env/2`,
+  #      and the daemon's tmux respawn loop can export it.
+  #
+  #   2. `~/.shuttle/host` file (first non-empty line), if present. The durable
+  #      per-host canonical identity: unlike the env var it survives every
+  #      daemon launch path (`make start`, a bare `bin/shuttle start`, a
+  #      respawn outside the loop), so the daemon *derives* its friendly name
+  #      (`candide` instead of `c03`) rather than depending on an operator
+  #      remembering to export it. Override the path with `SHUTTLE_HOST_FILE`.
+  #
+  #   3. `:inet.gethostname()` — short OS hostname. Two separately-deployed
+  #      daemons get distinct ids automatically; no per-machine config needed.
+  #
+  # No `Application.get_env(:shuttle, :host)` step and no `"local"` default:
+  # an absent `host:` is unowned everywhere, never silently grabbed.
+  #
+  # Raises if `:inet.gethostname/0` truly fails — a system-level problem;
+  # silently degrading into a no-op filter would make the failure invisible.
+  @spec resolve_own_host_id() :: String.t()
+  defp resolve_own_host_id do
     case System.get_env("SHUTTLE_HOST") do
       env when is_binary(env) and env != "" ->
         env
@@ -1982,11 +2028,6 @@ defmodule Shuttle.Poller do
       _ -> Path.expand("~/.shuttle/host")
     end
   end
-
-  # Internal alias used by the Poller's own startup. Kept for callsite
-  # readability — `resolve_own_host_id()` reads naturally inside the
-  # init/handle_call code.
-  defp resolve_own_host_id, do: own_host_id()
 
   # Resolves which configured felt store owns `fiber_id` — the store root used
   # to shell subsequent felt commands, NOT the shuttle.host dispatch-affinity

@@ -19,7 +19,11 @@ defmodule Shuttle.Contract do
 
   require Logger
 
-  @expected_level 1
+  # Level 2 (C1): removed `--host` from mark-runtime and reopen — post-S1,
+  # `resolveOwnHost` is pure local state, so the daemon-shelled ownership
+  # override carried no correctness. Bumped in lockstep with
+  # cmd/shuttle_contract.go's ShuttleContractLevel.
+  @expected_level 2
 
   @doc "The daemon's expected `felt shuttle contract` level."
   @spec expected_level() :: pos_integer()

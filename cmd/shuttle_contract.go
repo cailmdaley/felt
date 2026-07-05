@@ -34,7 +34,14 @@ import (
 // integer it prints on stdout, and compares it to its own baked expectation —
 // surfacing a version-skew warning/refusal at startup instead of failing one
 // shelled write at a time.
-const ShuttleContractLevel = 1
+//
+// Level 2 (C1): removed `--host` from mark-runtime and reopen — post-S1,
+// `resolveOwnHost` is pure local state, so the daemon-shelled ownership
+// override carried no correctness and a CLI that still expects it (or a
+// daemon that still sends it against a CLI that dropped it) is exactly the
+// kind of flag-shape skew this level exists to catch. Bumped in lockstep
+// with lib/shuttle/contract.ex's @expected_level.
+const ShuttleContractLevel = 2
 
 var shuttleContractCmd = &cobra.Command{
 	Use:   "contract",

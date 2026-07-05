@@ -151,7 +151,7 @@ defmodule ShuttleWeb.APIControllerTest do
         # matches — these tests don't exercise S2, they exercise the API
         # surface with a Poller that must actually dispatch.
         command == "felt" and match?(["shuttle", "contract"], args) ->
-          {"1", 0}
+          {"2", 0}
 
         command == "felt" and String.contains?(full_args, "ls") ->
           show_all =

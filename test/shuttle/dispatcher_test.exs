@@ -554,19 +554,14 @@ defmodule Shuttle.DispatcherTest do
 
     assert reopen_call != nil, "expected felt shuttle reopen call; got #{inspect(commands)}"
 
-    # The reopen must carry --host <own_host_id> so felt's ownership guard
-    # resolves the owner locally. Force-dispatch runs the reopen inside a blocked
-    # Poller handle_call, so felt's default /api/v1/state round-trip would
-    # deadlock and fall back to os.Hostname() — wrong on an alias host (candide
-    # vs c03), spuriously firing the guard and aborting with :reopen_failed.
+    # C1: no `--host` override — post-S1 `resolveOwnHost` is pure local state
+    # (env → host file → hostname), so the daemon-shelled reopen no longer
+    # needs to hand felt its own_host_id; felt resolves it locally, same as
+    # every other write verb. `--felt-store` (the STORE selector, not an
+    # identity override) is still there.
     {"felt", reopen_args} = reopen_call
-    host_index = Enum.find_index(reopen_args, &(&1 == "--host"))
-
-    assert host_index != nil,
-           "reopen must pass --host <own_host_id>; got #{inspect(reopen_args)}"
-
-    assert Enum.at(reopen_args, host_index + 1) not in [nil, ""],
-           "reopen --host must carry a non-empty own_host_id; got #{inspect(reopen_args)}"
+    refute "--host" in reopen_args, "reopen must not pass --host; got #{inspect(reopen_args)}"
+    assert "--felt-store" in reopen_args
 
     # And it must precede tmux new-session — reopen-then-spawn, not the other way.
     reopen_index =

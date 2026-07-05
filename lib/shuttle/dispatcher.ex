@@ -898,15 +898,23 @@ defmodule Shuttle.Dispatcher do
 
   defp reopen_closed(fiber_id, runner, felt_store) do
     case run_reopen(fiber_id, runner, felt_store) do
-      {output, 0} ->
+      {:ok, output} ->
         Logger.info("Force-dispatch reopened closed fiber #{fiber_id}: #{String.trim(output)}")
         :ok
 
-      {output, code} ->
+      {:command_error, code, output} ->
         Logger.error(
           "Force-dispatch aborted for #{fiber_id}: `felt shuttle reopen` failed " <>
-            "(exit #{code}: #{String.trim(output)}) — refusing to spawn a worker against a " <>
-            "still-closed fiber"
+            "(exit #{code}: #{String.trim(to_string(output))}) — refusing to spawn a worker " <>
+            "against a still-closed fiber"
+        )
+
+        {:error, :reopen_failed}
+
+      {:error, reason} ->
+        Logger.error(
+          "Force-dispatch aborted for #{fiber_id}: `felt shuttle reopen` raised " <>
+            "#{inspect(reason)} — refusing to spawn a worker against a still-closed fiber"
         )
 
         {:error, :reopen_failed}
@@ -923,47 +931,37 @@ defmodule Shuttle.Dispatcher do
 
   defp reopen_best_effort(fiber_id, runner, felt_store) do
     case run_reopen(fiber_id, runner, felt_store) do
-      {output, 0} ->
+      {:ok, output} ->
         Logger.info("Force-dispatch reopened #{fiber_id}: #{String.trim(output)}")
         :ok
 
-      {output, code} ->
+      {:command_error, code, output} ->
         Logger.warning(
           "Force-dispatch reopen failed for #{fiber_id} " <>
             "(worker will still spawn but kanban card may stick in its prior column): " <>
-            "exit #{code}: #{String.trim(output)}"
+            "exit #{code}: #{String.trim(to_string(output))}"
+        )
+
+        :ok
+
+      {:error, reason} ->
+        Logger.warning(
+          "Force-dispatch reopen raised for #{fiber_id} " <>
+            "(worker will still spawn but kanban card may stick in its prior column): " <>
+            "#{inspect(reason)}"
         )
 
         :ok
     end
   end
 
-  # Shell `felt shuttle reopen`. Always passes `--host <own_host_id>` so felt's
-  # ownership guard resolves the write's owner LOCALLY. Force-dispatch runs the
-  # reopen inside a blocked Poller `handle_call`, so felt's default resolution —
-  # a callback to GET /api/v1/state — would deadlock to a 1.5s timeout, then fall
-  # back to `os.Hostname()`, wrong on a host whose owner id is an alias (candide
-  # vs c03): the guard fires and the reopen fails spuriously. Same fix, same
-  # reason as `Continuation.mark_runtime/4`. Best-effort: if own_host_id can't be
-  # resolved, omit --host and let felt fall back to its own resolution.
+  # Shell `felt shuttle reopen` through the one audited write helper
+  # (`Shuttle.Felt.Shuttle`). Post-S1/C1, felt's own `resolveOwnHost` is pure
+  # local state (no re-entrant daemon round-trip), so this no longer needs to
+  # hand felt an explicit `--host` override the way it once did — see
+  # `Shuttle.Felt.Shuttle`'s moduledoc.
   defp run_reopen(fiber_id, runner, felt_store) do
-    host_flag =
-      case own_host_id_safe() do
-        h when is_binary(h) and h != "" -> ["--host", h]
-        _ -> []
-      end
-
-    runner.cmd(
-      "felt",
-      ["shuttle", "--felt-store", felt_store, "reopen", fiber_id] ++ host_flag,
-      stderr_to_stdout: true
-    )
-  end
-
-  defp own_host_id_safe do
-    Shuttle.Poller.own_host_id()
-  rescue
-    _ -> nil
+    Shuttle.Felt.Shuttle.run("reopen", fiber_id, [], runner: runner, felt_store: felt_store)
   end
 
   defp closed?(fiber), do: Map.get(fiber, "status", "") == "closed"

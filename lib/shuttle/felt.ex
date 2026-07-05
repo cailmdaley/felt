@@ -19,10 +19,20 @@ defmodule Shuttle.Felt do
 
   @type result :: {:ok, String.t()} | {:command_error, integer(), String.t()} | {:error, String.t()}
 
-  @doc "Run `felt` with `args`. See the moduledoc for the error mapping."
+  @doc """
+  Run `felt` with `args`. See the moduledoc for the error mapping.
+
+  `opts` forwards to the runner's `cmd/3` (`:cd`, `:env`, `:timeout_ms`, …),
+  EXCEPT `:runner` — pop that out first to shell through an explicit module
+  (the Poller's `state.runner` test seam) instead of the app-config default.
+  `Shuttle.Felt.Shuttle` is the one place that seam and this default-config
+  path get unified for the daemon-shelled `felt shuttle <verb>` write plane.
+  """
   @spec run([String.t()], keyword()) :: result()
   def run(args, opts \\ []) do
-    case felt_runner().cmd("felt", args, Keyword.put(opts, :stderr_to_stdout, true)) do
+    {runner, opts} = Keyword.pop(opts, :runner, felt_runner())
+
+    case runner.cmd("felt", args, Keyword.put(opts, :stderr_to_stdout, true)) do
       {output, 0} -> {:ok, output}
       {output, status} -> {:command_error, status, output}
     end

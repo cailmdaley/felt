@@ -37,15 +37,17 @@ func shuttleRuntimeMap(t *testing.T, f *felt.Felt) map[string]any {
 
 // TestShuttleMarkRuntime_DaemonDispatchArgv locks in the exact argv
 // Shuttle.Continuation.write_dispatch/4 shells (lib/shuttle/continuation.ex,
-// the `mark_runtime/4` private helper, ~line 201-217):
+// the `mark_runtime/4` private helper), post-C1:
 //
-//	felt shuttle mark-runtime <fiber_id> --dispatched-at <ts> --session <uuid> --run-id <run_id> --host <own_host_id>
+//	felt shuttle mark-runtime <fiber_id> --dispatched-at <ts> --session <uuid> --run-id <run_id>
 //
-// --host is always appended last, carrying the daemon's own_host_id so the
-// ownership guard resolves locally instead of round-tripping to the (blocked)
-// daemon. The daemon is DOWN here (unroutable SHUTTLE_DAEMON_URL) and identity
-// is seeded only via the host file, proving mark-runtime never depends on a
-// live daemon for either the flags themselves or the ownership check.
+// No `--host` override: post-S1, `resolveOwnHost` is pure local state (no
+// daemon round-trip), so the daemon no longer hands felt its own_host_id —
+// ambient resolution (env → host file → hostname) drives the ownership guard
+// the same way for every write verb now. The daemon is DOWN here (unroutable
+// SHUTTLE_DAEMON_URL) and identity is seeded only via the host file, proving
+// mark-runtime never depends on a live daemon for either the flags
+// themselves or the ownership check.
 func TestShuttleMarkRuntime_DaemonDispatchArgv(t *testing.T) {
 	defer saveShuttleGlobals()()
 	t.Setenv("SHUTTLE_DAEMON_URL", "http://127.0.0.1:1") // closed port: any round-trip fails loudly
@@ -60,7 +62,6 @@ func TestShuttleMarkRuntime_DaemonDispatchArgv(t *testing.T) {
 		"--dispatched-at", "2026-07-05T12:00:00Z",
 		"--session", "sess-abc-123",
 		"--run-id", "20260705T120000Z",
-		"--host", "candide",
 	)
 	if err != nil {
 		t.Fatalf("mark-runtime with the daemon's exact dispatch argv must succeed: %v\n%s", err, out)
@@ -79,12 +80,13 @@ func TestShuttleMarkRuntime_DaemonDispatchArgv(t *testing.T) {
 }
 
 // TestShuttleMarkRuntime_DaemonHandoffArgv locks in the exact argv
-// Shuttle.Continuation.mark_handed_off/3 shells (lib/shuttle/continuation.ex,
-// ~line 185-201) — the daemon-side conclude write after an accept/resume/rearm:
+// Shuttle.Continuation.mark_handed_off/3 shells (lib/shuttle/continuation.ex)
+// — the daemon-side conclude write after an accept/resume/rearm, post-C1:
 //
-//	felt shuttle mark-runtime <fiber_id> --handed-off-at <ts> --host <own_host_id>
+//	felt shuttle mark-runtime <fiber_id> --handed-off-at <ts>
 //
-// Same daemon-down + host-file-only identity setup as the dispatch test.
+// Same daemon-down + host-file-only identity setup as the dispatch test; no
+// `--host` override (see that test's comment for why).
 func TestShuttleMarkRuntime_DaemonHandoffArgv(t *testing.T) {
 	defer saveShuttleGlobals()()
 	t.Setenv("SHUTTLE_DAEMON_URL", "http://127.0.0.1:1")
@@ -97,7 +99,6 @@ func TestShuttleMarkRuntime_DaemonHandoffArgv(t *testing.T) {
 
 	out, err := runCommand(t, dir, "shuttle", "mark-runtime", "f",
 		"--handed-off-at", "2026-07-05T12:05:00Z",
-		"--host", "candide",
 	)
 	if err != nil {
 		t.Fatalf("mark-runtime with the daemon's exact handoff argv must succeed: %v\n%s", err, out)

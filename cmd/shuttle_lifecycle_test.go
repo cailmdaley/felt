@@ -254,39 +254,15 @@ func TestShuttleReopen_AsDraft(t *testing.T) {
 	}
 }
 
-// A daemon force-dispatching a closed, alias-owned fiber shells `reopen` from
-// inside a blocked Poller handle_call. Its own /api/v1/state callback deadlocks,
-// so felt would fall back to os.Hostname() (the raw short name c03) — mismatching
-// the fiber's alias owner (candide) and spuriously firing the ownership guard.
-// Passing --host <own_host_id> makes the guard resolve locally, never consulting
-// ambient resolution. Regression for the "Could not reopen the closed fiber" /
-// :reopen_failed dispatch abort.
-func TestShuttleReopen_HostOverrideBypassesAliasGuard(t *testing.T) {
-	defer saveShuttleGlobals()()
-	// Ambient own-host resolves to the raw short name c03 (the os.Hostname
-	// fallback a re-entrant daemon lands on); the fiber is owned by alias candide.
-	withOwnHost(t, "c03")
-	dir, storage := newShuttleStore(t)
-	seedShuttleRole(t, storage, "aliased", felt.StatusClosed, map[string]any{
-		"kind": "oneshot", "agent": "claude-fable", "host": "candide",
-	}, nil)
-
-	// Without --host: ambient own-host (c03) ≠ owner (candide) → guard fires.
-	if _, err := runCommand(t, dir, "shuttle", "reopen", "aliased"); err == nil {
-		t.Fatal("bare reopen with own-host c03 on a candide-owned fiber must be refused")
-	} else if _, ok := err.(ownerMismatchError); !ok {
-		t.Fatalf("expected ownerMismatchError, got %T: %v", err, err)
-	}
-
-	// With --host candide (the daemon's authoritative own_host_id): guard uses
-	// the override, never consults ambient resolution, and the reopen lands.
-	if out, err := runCommand(t, dir, "shuttle", "reopen", "aliased", "--host", "candide"); err != nil {
-		t.Fatalf("reopen --host candide must succeed: %v\n%s", err, out)
-	}
-	if mustRead(t, storage, "aliased").Status != felt.StatusActive {
-		t.Fatal("reopen --host candide must set status: active")
-	}
-}
+// C1: `reopen --host <override>` is gone — post-S1, `resolveOwnHost` is pure
+// local state (env var → host file → hostname; no daemon round-trip to guard
+// against), so ambient resolution alone drives the ownership guard for
+// reopen the same way it does for every other write verb. This regression
+// test's whole premise (a --host override bypassing a MISMATCHED ambient
+// identity) no longer applies; the alias-guard-fires-without-an-override
+// half survives as `TestShuttleMarkRuntime_AliasGuardWithoutOverride`
+// (cmd/shuttle_mark_runtime_test.go), which exercises the same guard on a
+// different verb.
 
 // ---- resume ----------------------------------------------------------------
 

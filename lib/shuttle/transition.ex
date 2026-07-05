@@ -97,8 +97,8 @@ defmodule Shuttle.Transition do
   @spec invoke(String.t(), String.t()) :: :ok | {:error, term()}
   def invoke(fiber_id, action) do
     with :ok <- validate_action(action),
-         {:ok, host} <- validate_available(fiber_id, action),
-         :ok <- invoke_action(fiber_id, action, host) do
+         {:ok, felt_store} <- validate_available(fiber_id, action),
+         :ok <- invoke_action(fiber_id, action, felt_store) do
       # Every transition mutates the felt doc (status / tempered / closed-at).
       # Re-read it into the daemon's document cache NOW so the kanban's
       # post-transition refetch reflects the move instead of snapping the card
@@ -115,13 +115,13 @@ defmodule Shuttle.Transition do
 
   # Action availability resolves through the same fast query path as
   # transition_local/2: felt document + tmux liveness, outside the Poller
-  # mailbox. The host is resolved separately for the `felt shuttle` verbs that
-  # still shell out (close / pause / reopen).
+  # mailbox. The felt store is resolved separately for the `felt shuttle`
+  # verbs that still shell out (close / pause / reopen).
   defp validate_available(fiber_id, action) do
     case ActionQueries.actions_for(fiber_id) do
       {:ok, actions} ->
         if Enum.any?(actions, &(Map.get(&1, :id) == action || Map.get(&1, "id") == action)) do
-          host_for_fiber(fiber_id)
+          felt_store_for_fiber(fiber_id)
         else
           {:error, :action_not_available}
         end
@@ -138,7 +138,7 @@ defmodule Shuttle.Transition do
   # Resolve the felt store owning `fiber_id` (so `felt shuttle` verbs get the right
   # `--felt-store`) by asking felt for the carried path — the same resolution
   # /api/v1/fibers uses, so it never disagrees with the id we advertised.
-  defp host_for_fiber(fiber_id), do: FeltStores.host_for_fiber(fiber_id)
+  defp felt_store_for_fiber(fiber_id), do: FeltStores.host_for_fiber(fiber_id)
 
   # pause / reopen / close shell the Go frontmatter writer with
   # SHUTTLE_LIFECYCLE_OFFLINE so it writes frontmatter only (status, tempered,
@@ -146,61 +146,62 @@ defmodule Shuttle.Transition do
   # document carries the entire lifecycle (status + tempered) — there is no
   # runtime row to reset, so close/reopen are a single felt write and
   # re-arm/awaiting are recomputed from the document on the next poll.
-  defp invoke_action(fiber_id, "pause", host), do: run_offline(["pause", fiber_id], host)
+  defp invoke_action(fiber_id, "pause", felt_store), do: run_offline("pause", fiber_id, [], felt_store)
 
-  defp invoke_action(fiber_id, "reopen", host), do: run_offline(["reopen", fiber_id], host)
+  defp invoke_action(fiber_id, "reopen", felt_store),
+    do: run_offline("reopen", fiber_id, [], felt_store)
 
   # reopen-draft: status:open + verdict cleared — a paused draft, NOT armed.
   # The kanban's "drag a closed card to Drafts" verb, and the park-as-draft
   # half it composes before a planning-surface drop on a closed card (the
   # slides snap-back fix; see Portolan kanban-ux-rework/placement-pipeline-invariants).
-  defp invoke_action(fiber_id, "reopen-draft", host),
-    do: run_offline(["reopen", fiber_id, "--as-draft"], host)
+  defp invoke_action(fiber_id, "reopen-draft", felt_store),
+    do: run_offline("reopen", fiber_id, ["--as-draft"], felt_store)
 
   # accept-run goes through the in-process lifecycle path so the felt-document
   # re-arm happens atomically against poll cycles, not the shelled-out
   # `felt shuttle accept` (which can race a concurrent poll's document read).
-  defp invoke_action(fiber_id, "accept-run", _host) do
+  defp invoke_action(fiber_id, "accept-run", _felt_store) do
     case LifecycleService.accept(fiber_id) do
       {:ok, _output} -> :ok
       {:error, reason} -> {:error, {:command_error, 1, reason}}
     end
   end
 
-  defp invoke_action(fiber_id, "close-awaiting-review", host),
-    do: run_offline(["close", fiber_id], host)
+  defp invoke_action(fiber_id, "close-awaiting-review", felt_store),
+    do: run_offline("close", fiber_id, [], felt_store)
 
-  defp invoke_action(fiber_id, "close-tempered", host),
-    do: run_offline(["close", fiber_id, "--tempered=true"], host)
+  defp invoke_action(fiber_id, "close-tempered", felt_store),
+    do: run_offline("close", fiber_id, ["--tempered=true"], felt_store)
 
-  defp invoke_action(fiber_id, "close-composted", host),
-    do: run_offline(["close", fiber_id, "--tempered=false"], host)
+  defp invoke_action(fiber_id, "close-composted", felt_store),
+    do: run_offline("close", fiber_id, ["--tempered=false"], felt_store)
 
-  defp invoke_action(fiber_id, "dispatch-ad-hoc", _host) do
+  defp invoke_action(fiber_id, "dispatch-ad-hoc", _felt_store) do
     case Poller.dispatch_fiber(Poller, fiber_id, force: true, ad_hoc: true) do
       {:ok, _session} -> :ok
       {:error, reason} -> {:error, reason}
     end
   end
 
-  defp run_offline(args, nil), do: run_cmd(args, lifecycle_offline_env())
-
-  defp run_offline(args, host) when is_binary(host),
-    do: run_cmd(["--felt-store", host | args], lifecycle_offline_env())
-
-  defp lifecycle_offline_env, do: [{"SHUTTLE_LIFECYCLE_OFFLINE", "1"}]
-
-  # Routed through `Shuttle.Felt.run` — same `felt` shell-out, now bounded by
-  # `Shuttle.Runner`'s timeout+SIGKILL reap instead of a bare `System.cmd/3`
-  # that would hang this Phoenix request (and leak the process) forever
-  # against a wedged felt on a loaded node.
-  defp run_cmd(args, env) do
-    case Shuttle.Felt.run(["shuttle" | args], env: env) do
+  # Routed through the one audited write helper (`Shuttle.Felt.Shuttle`),
+  # which itself sits on `Shuttle.Felt.run` — bounded by `Shuttle.Runner`'s
+  # timeout+SIGKILL reap instead of a bare `System.cmd/3` that would hang this
+  # Phoenix request (and leak the process) forever against a wedged felt on a
+  # loaded node. `felt_store` may be `nil` (no store resolved) — the helper
+  # omits `--felt-store` in that case, same as before.
+  defp run_offline(verb, fiber_id, args, felt_store) do
+    case Shuttle.Felt.Shuttle.run(verb, fiber_id, args,
+           felt_store: felt_store,
+           env: lifecycle_offline_env()
+         ) do
       {:ok, _output} -> :ok
       {:command_error, status, output} -> {:error, {:command_error, status, output}}
       {:error, reason} -> {:error, reason}
     end
   end
+
+  defp lifecycle_offline_env, do: [{"SHUTTLE_LIFECYCLE_OFFLINE", "1"}]
 
   # ── Forward branch: relay to the owning remote daemon ──
 

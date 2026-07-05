@@ -84,10 +84,14 @@ defmodule ShuttleWeb.LifecycleController do
 
   defp execute(action, %{"fiber" => fiber} = params)
        when action in ~w(pause set-model set-agent set-outcome uninstall) do
-    with {:ok, %{host: host, fiber_id: fiber_id}} <- resolve_fiber(fiber) do
+    # `resolve_fiber`'s `:host` key is the felt-STORE path (`--felt-store`),
+    # not an identity override — see `Shuttle.Felt.Shuttle`'s C4 note. Renamed
+    # only at this local boundary; `FeltStores.resolve_fiber/1`'s wire shape
+    # is out of scope for this pass.
+    with {:ok, %{host: felt_store, fiber_id: fiber_id}} <- resolve_fiber(fiber) do
       action
       |> args_for(%{params | "fiber" => fiber_id})
-      |> run_elem(host)
+      |> run_elem(felt_store)
     end
   end
 
@@ -118,9 +122,9 @@ defmodule ShuttleWeb.LifecycleController do
     end
   end
 
-  defp run_elem(args, host \\ nil)
-  defp run_elem({:ok, args}, host), do: run(args, host)
-  defp run_elem(error, _host), do: error
+  defp run_elem(args, felt_store \\ nil)
+  defp run_elem({:ok, args}, felt_store), do: run(args, felt_store)
+  defp run_elem(error, _felt_store), do: error
 
   defp args_for("install", %{"fiber" => fiber} = params) do
     args = ["install", fiber]
@@ -204,14 +208,16 @@ defmodule ShuttleWeb.LifecycleController do
   defp truthy?(true), do: true
   defp truthy?(_), do: false
 
-  # Routed through `Shuttle.Felt.run` (which owns the `felt` shell-out via
-  # `Shuttle.Runner`'s timeout+SIGKILL reap) rather than a private
-  # `System.cmd/3` copy — one implementation of the bounding, not two.
-  defp run(args, host) do
+  # Routed through the one audited write helper (`Shuttle.Felt.Shuttle`),
+  # which itself sits on `Shuttle.Felt.run` (Runner-bounded — F3/C3) rather
+  # than a private `System.cmd/3` copy. Every `args_for/2` clause returns
+  # `[verb, fiber_id | rest]`, so destructuring here is enough to feed the
+  # helper's `(verb, fiber_id, args, opts)` shape without touching a single
+  # `args_for` clause.
+  defp run([verb, fiber_id | rest], felt_store) do
     env = [{"SHUTTLE_LIFECYCLE_OFFLINE", "1"}]
-    args = if is_binary(host) and host != "", do: ["--felt-store", host | args], else: args
 
-    case Shuttle.Felt.run(["shuttle" | args], env: env) do
+    case Shuttle.Felt.Shuttle.run(verb, fiber_id, rest, felt_store: felt_store, env: env) do
       {:ok, output} -> {:ok, output}
       {:command_error, status, output} -> {:command_error, status, clean_command_output(output)}
       {:error, reason} -> {:error, reason}

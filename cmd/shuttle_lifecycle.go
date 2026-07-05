@@ -30,14 +30,6 @@ import (
 // the fiber's cross-process lock (see internal/felt/lock.go, F4) is held for the
 // caller's entire read-modify-write cycle and released exactly once no matter
 // which return path fires.
-func resolveOwnedShuttleFiber(query string) (*felt.Felt, *felt.Storage, *shuttle.Block, func() error, error) {
-	return resolveOwnedShuttleFiberAs(query, "")
-}
-
-// resolveOwnedShuttleFiberAs is resolveOwnedShuttleFiber with an explicit
-// own-host for the ownership guard (see ensureOwnedHereAs). The daemon-facing
-// mark-runtime passes its own_host_id so the guard never round-trips to the
-// daemon it is being shelled from. An empty override keeps the default behavior.
 //
 // Locks BEFORE re-reading, not before the initial shuttleResolveFiber lookup:
 // resolving `query` to a fiber id can itself require scanning/reading multiple
@@ -48,7 +40,13 @@ func resolveOwnedShuttleFiber(query string) (*felt.Felt, *felt.Storage, *shuttle
 // lookup and the lock. That reload is the "acquire lock -> read" half of the
 // acquire/read/modify/write/release cycle this function starts on behalf of
 // every lifecycle verb.
-func resolveOwnedShuttleFiberAs(query, ownHostOverride string) (*felt.Felt, *felt.Storage, *shuttle.Block, func() error, error) {
+//
+// C1: previously took an explicit own-host override for the daemon-shelled
+// mark-runtime/reopen verbs (`resolveOwnedShuttleFiberAs`), so the ownership
+// guard never round-tripped back to the daemon it was being shelled from.
+// Post-S1, `resolveOwnHost` (see ensureOwnedHere) is pure local state — no
+// round-trip to guard against — so every caller now takes this same path.
+func resolveOwnedShuttleFiber(query string) (*felt.Felt, *felt.Storage, *shuttle.Block, func() error, error) {
 	f, st, err := shuttleResolveFiber(query, true)
 	if err != nil {
 		return nil, nil, nil, nil, err
@@ -66,7 +64,7 @@ func resolveOwnedShuttleFiberAs(query, ownHostOverride string) (*felt.Felt, *fel
 		unlock()
 		return nil, nil, nil, nil, fmt.Errorf("fiber %s has no shuttle: block", query)
 	}
-	if err := ensureOwnedHereAs(f, query, ownHostOverride); err != nil {
+	if err := ensureOwnedHere(f, query); err != nil {
 		unlock()
 		return nil, nil, nil, nil, err
 	}
@@ -279,7 +277,6 @@ until they are reopened.`,
 // ---- reopen ----------------------------------------------------------------
 
 var reopenAsDraft bool
-var reopenHost string
 
 var reopenCmd = &cobra.Command{
 	Use:   "reopen <fiber>",
@@ -291,7 +288,7 @@ With --as-draft, sets status = open instead: the card reopens as a PAUSED DRAFT
 — visible on the board, never auto-dispatched.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		f, st, _, unlock, err := resolveOwnedShuttleFiberAs(args[0], reopenHost)
+		f, st, _, unlock, err := resolveOwnedShuttleFiber(args[0])
 		if err != nil {
 			return err
 		}
@@ -673,7 +670,6 @@ func registerShuttleLifecycleFlags() {
 	pauseCmd.Flags().BoolVar(&pauseNoKill, "no-kill", false, "Only disable future dispatch; leave any live worker tmux session running")
 	closeCmd.Flags().StringVar(&closeTempered, "tempered", "", "Set tempered verdict (true/false); omit to clear it for awaiting review")
 	reopenCmd.Flags().BoolVar(&reopenAsDraft, "as-draft", false, "reopen to status: open (a paused draft, not auto-dispatched) instead of status: active")
-	reopenCmd.Flags().StringVar(&reopenHost, "host", "", "Owner host for the ownership guard (the daemon's own_host_id); avoids a re-entrant /api/v1/state call")
 	setOutcomeCmd.Flags().StringVar(&setOutcomeValue, "outcome", "", "Outcome text; omit to read from stdin")
 	acceptCmd.Flags().BoolVar(&acceptKeepOutcome, "keep-outcome", false, "Preserve the existing outcome instead of clearing it for the next dispatch")
 	setAgentCmd.Flags().StringVar(&setAgentEffort, "effort", "", `Effort level (harness-native token, e.g. low|medium|high|xhigh|max); "" clears`)

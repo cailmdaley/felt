@@ -147,20 +147,14 @@ func (e ownerMismatchError) Error() string {
 // write in that state is how a wrong-host mirror-write (and the resurrecting
 // git-sync bug this guard exists to prevent) would happen invisibly; failing
 // loud surfaces it instead.
+// C1: previously delegated to `ensureOwnedHereAs(f, fiber, "")` — an explicit
+// own-host override the daemon passed on mark-runtime/reopen so the guard
+// never round-tripped back to GET /api/v1/state (re-entrant while the Poller
+// is blocked on the felt subprocess). Post-S1, `resolveOwnHost` is pure local
+// state (env var → host file → os.Hostname, no daemon call), so there is
+// nothing left to avoid round-tripping to — every caller resolves the same
+// way now.
 func ensureOwnedHere(f *felt.Felt, fiber string) error {
-	return ensureOwnedHereAs(f, fiber, "")
-}
-
-// ensureOwnedHereAs is ensureOwnedHere with an explicit own-host. When
-// ownHostOverride is non-empty it is used directly and resolveOwnHost is NOT
-// consulted — the daemon passes its authoritative own_host_id via
-// `mark-runtime --host` so the ownership check needs no round-trip back to
-// GET /api/v1/state. That callback is re-entrant for a daemon-shelled write
-// (the Poller is blocked on the felt subprocess, so /api/v1/state times out and
-// resolveOwnHost falls back to os.Hostname() — wrong on a host whose owner id is
-// an alias, e.g. candide vs c03 — silently failing the write). An empty override
-// preserves the original resolveOwnHost precedence for human-facing verbs.
-func ensureOwnedHereAs(f *felt.Felt, fiber, ownHostOverride string) error {
 	block, ok, err := f.ShuttleBlock()
 	if err != nil || !ok || block == nil {
 		return nil
@@ -169,14 +163,11 @@ func ensureOwnedHereAs(f *felt.Felt, fiber, ownHostOverride string) error {
 	if owner == "" {
 		return nil
 	}
-	own := strings.TrimSpace(ownHostOverride)
-	if own == "" {
-		resolved, err := resolveOwnHost("")
-		if err != nil {
-			return fmt.Errorf("cannot verify fiber %s ownership (owned by %q): %w", fiber, owner, err)
-		}
-		own = strings.TrimSpace(resolved)
+	own, err := resolveOwnHost("")
+	if err != nil {
+		return fmt.Errorf("cannot verify fiber %s ownership (owned by %q): %w", fiber, owner, err)
 	}
+	own = strings.TrimSpace(own)
 	if own == "" || owner == own {
 		return nil
 	}
