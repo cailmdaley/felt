@@ -42,7 +42,7 @@ func resolveOwnHost(flagVal string) (string, error) {
 	if h, ok := hostConfigFileValue(); ok {
 		return h, nil
 	}
-	if name, err := os.Hostname(); err == nil {
+	if name, err := osHostname(); err == nil {
 		if name = strings.TrimSpace(name); name != "" {
 			return name, nil
 		}
@@ -52,6 +52,12 @@ func resolveOwnHost(flagVal string) (string, error) {
 		hostConfigFilePath(),
 	)
 }
+
+// osHostname is os.Hostname, indirected so tests can force the
+// last-resort tier of resolveOwnHost's precedence to fail without needing an
+// OS-level way to break the real hostname syscall (there isn't a portable
+// one). Production code never reassigns it.
+var osHostname = os.Hostname
 
 // hostConfigFilePath is the canonical per-host identity file: SHUTTLE_HOST_FILE
 // if set, else ~/.shuttle/host. Mirrors host_config_file/0 in the Elixir poller
@@ -126,10 +132,21 @@ func (e ownerMismatchError) Error() string {
 // wrongly (the resurrecting tempered-card bug). The owning daemon is the single
 // writer; cross-host lifecycle must reach it (the kanban routes there).
 //
-// Best-effort, fail-open: a fiber with no/invalid shuttle block, a host-less
-// block (legacy, pre-"born-owned"), or an unresolvable own-host identity falls
-// through to a normal local write rather than hard-blocking. The guard closes the
-// known mirror-write footgun; it is not a gate on every edit.
+// Fail-open only where there is genuinely nothing to guard: a fiber with
+// no/invalid shuttle block, or a host-less block (legacy, pre-"born-owned"),
+// falls through to a normal local write rather than hard-blocking — the guard
+// closes the known mirror-write footgun, it is not a gate on every edit.
+//
+// An UNRESOLVABLE own-host identity is different and fails loud (returns the
+// wrapped resolveOwnHost error) rather than falling through. Pre-S1, own-host
+// resolution round-tripped to the local daemon, so a resolution failure could
+// mean nothing worse than "daemon briefly down" — permitting the write was the
+// lesser risk. Post-S1, resolution is pure local state (env var, host file,
+// os.Hostname), so a failure means those are ALL absent/empty — something
+// genuinely broken, not a transient daemon hiccup. Silently permitting the
+// write in that state is how a wrong-host mirror-write (and the resurrecting
+// git-sync bug this guard exists to prevent) would happen invisibly; failing
+// loud surfaces it instead.
 func ensureOwnedHere(f *felt.Felt, fiber string) error {
 	return ensureOwnedHereAs(f, fiber, "")
 }
@@ -156,7 +173,7 @@ func ensureOwnedHereAs(f *felt.Felt, fiber, ownHostOverride string) error {
 	if own == "" {
 		resolved, err := resolveOwnHost("")
 		if err != nil {
-			return nil
+			return fmt.Errorf("cannot verify fiber %s ownership (owned by %q): %w", fiber, owner, err)
 		}
 		own = strings.TrimSpace(resolved)
 	}

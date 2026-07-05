@@ -1,9 +1,11 @@
 package cmd
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/cailmdaley/felt/internal/felt"
@@ -142,6 +144,34 @@ func TestEnsureOwnedHere(t *testing.T) {
 	}
 	if err := ensureOwnedHere(shuttleFeltWithBlock(t, nil), "f"); err != nil {
 		t.Fatalf("pure note (no block) should pass: %v", err)
+	}
+}
+
+// TestEnsureOwnedHere_UnresolvableIdentityFailsLoud is the S3 lock-in: when a
+// fiber DOES carry an owner (block.host non-empty) but own-host resolution
+// itself fails — every tier of resolveOwnHost's precedence empty/absent — the
+// guard must refuse the write rather than silently falling through. Post-S1,
+// resolution is pure local state, so a failure here means something is
+// genuinely broken (not "daemon briefly unreachable", the pre-S1 excuse for
+// fail-open).
+func TestEnsureOwnedHere_UnresolvableIdentityFailsLoud(t *testing.T) {
+	t.Setenv("SHUTTLE_HOST", "")
+	t.Setenv("SHUTTLE_HOST_FILE", filepath.Join(t.TempDir(), "does-not-exist"))
+
+	prevHostname := osHostname
+	osHostname = func() (string, error) { return "", fmt.Errorf("forced failure: no OS hostname") }
+	t.Cleanup(func() { osHostname = prevHostname })
+
+	fiber := shuttleFeltWithBlock(t, map[string]any{"kind": "oneshot", "host": "candide"})
+	err := ensureOwnedHere(fiber, "f")
+	if err == nil {
+		t.Fatal("unresolvable own-host identity against an owned fiber must refuse the write, not fall through")
+	}
+	if _, ok := err.(ownerMismatchError); ok {
+		t.Fatalf("expected a wrapped resolution error, not ownerMismatchError: %v", err)
+	}
+	if !strings.Contains(err.Error(), "cannot verify fiber") {
+		t.Fatalf("error should explain resolution failure, got: %v", err)
 	}
 }
 
