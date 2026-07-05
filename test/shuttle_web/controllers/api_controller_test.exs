@@ -147,6 +147,12 @@ defmodule ShuttleWeb.APIControllerTest do
       full_args = Enum.join(args, " ")
 
       cond do
+        # S2 boot-time contract handshake (`Shuttle.Poller.init/1`). Always
+        # matches — these tests don't exercise S2, they exercise the API
+        # surface with a Poller that must actually dispatch.
+        command == "felt" and match?(["shuttle", "contract"], args) ->
+          {"1", 0}
+
         command == "felt" and String.contains?(full_args, "ls") ->
           show_all =
             case Enum.find_index(args, &(&1 in ["-s", "--status"])) do

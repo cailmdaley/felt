@@ -186,6 +186,18 @@ defmodule Shuttle.Poller do
       # config/test.exs disables it).
       # See [[ai-futures/shuttle/restart-not-dispatch-authority]].
       boot_quarantine: false,
+      # `Shuttle.Contract.check/1`'s result, probed ONCE at `init/1` (S2): the
+      # daemon shells `felt shuttle contract` and compares it to
+      # `Shuttle.Contract.expected_level/0`. `ok: false` (a mismatched level,
+      # unparseable stdout, or a nonzero exit — an old CLI where `contract` is
+      # unknown included) means every shelled write this daemon makes is
+      # suspect — the exact skew that shipped 80ce7b3, now caught once at boot
+      # instead of failing one shelled write at a time. Gates the autonomous
+      # dispatch tick the same way `boot_quarantine` does (park fresh, let
+      # already-observed work resume) — see `apply_poll_cycle/2`'s cond. No
+      # self-clearing: a restart is what re-probes, after the CLI/daemon pair
+      # is actually fixed.
+      contract_check: %{expected: 0, observed: nil, ok: true, reason: nil},
       # Runtime keys this daemon has OBSERVED with a live worker under its own
       # uptime — the union of every key that ever entered `state.running` (boot
       # adoption, per-poll adoption, dispatch, claim). Durable for the daemon's
@@ -587,7 +599,12 @@ defmodule Shuttle.Poller do
           opts,
           :boot_quarantine,
           Application.get_env(:shuttle, :boot_quarantine, @default_boot_quarantine)
-        )
+        ),
+      # S2 boot-time version handshake: probe ONCE here, before the first
+      # tick, so a skewed CLI is caught (and fresh dispatch held) before any
+      # autonomous work is even considered. Runner-bounded, so a slow/wedged
+      # `felt` degrades to a logged skew rather than hanging boot.
+      contract_check: Shuttle.Contract.check_and_log(runner)
     }
 
     Logger.info("configured felt stores: #{inspect(felt_stores)}")
@@ -1198,13 +1215,18 @@ defmodule Shuttle.Poller do
     # its result is consumed: to park (quarantine) or to dispatch (free slots).
     {dispatchable, state} =
       cond do
-        state.boot_quarantine ->
+        state.boot_quarantine or not state.contract_check.ok ->
           # Splits the dispatchable set by `was_running`: in-flight work this
           # daemon observed running (adopted at boot / dispatched since)
           # re-dispatches through the reduce below, while genuinely-fresh
           # launches are parked. A just-restarted daemon grants NO fresh
           # autonomous dispatch until a human releases the hold, but never
-          # strands work that was demonstrably alive moments ago.
+          # strands work that was demonstrably alive moments ago. A CLI/daemon
+          # contract skew (S2) rides the SAME gate: every shelled write is
+          # suspect, so fresh launches are held the same way, but read-only
+          # polling and already-observed resumes stay alive. Unlike boot
+          # quarantine, skew has no release endpoint — a restart (after the
+          # skew is actually fixed) is what re-probes and clears it.
           candidates
           |> filter_eligible(state)
           |> sort_candidates()
@@ -1583,8 +1605,8 @@ defmodule Shuttle.Poller do
   # was-running drops out on its own); `parked_at` is preserved for fibers that
   # stay parked. Only this tick path is gated: the explicit `{:dispatch, …}` call
   # (kanban force-dispatch, claim) never routes here. Called only while
-  # quarantined (`apply_poll_cycle`'s cond clears the parked map on the other
-  # branches).
+  # quarantined OR contract-skewed (`apply_poll_cycle`'s cond clears the
+  # parked map on the other branches).
   defp park_autonomous_launches(dispatchable, %State{} = state) do
     now = DateTime.utc_now()
 

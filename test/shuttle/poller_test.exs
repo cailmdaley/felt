@@ -207,6 +207,15 @@ defmodule Shuttle.PollerTest do
           &Map.put(&1, :kill_session_failure, enabled && {"tmux: hung up", 1})
         )
 
+    # S2: override what `felt shuttle contract` reports, for tests exercising
+    # the boot-time contract handshake. Must be called BEFORE the poller
+    # starts (init/1 probes once, synchronously). `level` is the raw stdout
+    # string (a mismatched integer, or garbage to exercise "unparseable");
+    # `exit_status` defaults to 0 (a nonzero exit is a separate skew shape).
+    def set_contract_level(level, exit_status \\ 0) when is_binary(level),
+      do:
+        Agent.update(__MODULE__, &(&1 |> Map.put(:contract_level, level) |> Map.put(:contract_exit, exit_status)))
+
     def commands, do: Agent.get(__MODULE__, & &1.commands)
 
     # Real felt inlines a fully-resolved `shuttle.resolved.agent` on every fiber
@@ -252,6 +261,16 @@ defmodule Shuttle.PollerTest do
       full_args = Enum.join(args, " ")
 
       cond do
+        # S2 boot-time contract handshake (`Shuttle.Poller.init/1`, via
+        # `Shuttle.Contract.check/1`). The mock reports the current expected
+        # level by default — matching, not skewed — so tests that don't care
+        # about S2 aren't silently quarantined by it. Tests that DO want a
+        # skew set `:contract_level`/`:contract_exit` before starting the
+        # poller — see the S2 tests.
+        command == "felt" and match?(["shuttle", "contract"], args) ->
+          level = Agent.get(__MODULE__, &Map.get(&1, :contract_level, "1"))
+          {level, Agent.get(__MODULE__, &Map.get(&1, :contract_exit, 0))}
+
         # `felt shuttle agents resolve <name> ...` — the capture path's no-fiber
         # resolution. The daemon shells felt (registry owner) rather than
         # re-resolving; the mock returns felt's resolved.agent JSON shape. These
@@ -2023,6 +2042,151 @@ defmodule Shuttle.PollerTest do
     # Held clears the instant the worker exists — synchronously, not a poll cycle
     # later — so the card never co-renders the held and "aloft" pills.
     refute Map.has_key?(Poller.parked_index(poller), fiber_id)
+  end
+
+  # ── S2: boot-time CLI/daemon contract handshake ──
+  #
+  # `Shuttle.Poller.init/1` shells `felt shuttle contract` once and compares it
+  # to `Shuttle.Contract.expected_level/0`. A mismatch (or unparseable/nonzero
+  # exit — an old CLI where `contract` is unknown) rides the SAME dispatch gate
+  # as boot quarantine: fresh launches park, already-observed work still
+  # resumes, and the reason surfaces on `snapshot().contract` /
+  # `pending_launch`. `config/test.exs` disables `boot_quarantine`, so these
+  # tests exercise the skew gate in isolation from it.
+
+  test "a matching contract level dispatches normally and reports ok in the snapshot" do
+    MockRunner.set_contract_level("1")
+    fiber_id = "tests/contract-match"
+    MockRunner.set_fiber(fiber_id, make_fiber(fiber_id))
+    MockRunner.set_shuttle(fiber_id, @oneshot_shuttle)
+
+    {:ok, poller} =
+      start_poller!(
+        name: :test_poller_contract_match,
+        runner: MockRunner,
+        poll_interval_ms: 60_000,
+        felt_stores: ["/tmp"]
+      )
+
+    assert Poller.snapshot(poller).contract == %{expected: 1, observed: 1, ok: true, reason: nil}
+
+    send(poller, :run_poll_cycle)
+
+    assert_eventually(fn ->
+      assert Enum.any?(MockRunner.commands(), fn {cmd, args} ->
+               cmd == "tmux" and hd(args) == "new-session"
+             end)
+    end)
+
+    assert Poller.snapshot(poller).pending_launch == []
+  end
+
+  test "a mismatched contract level holds fresh launches and surfaces the skew" do
+    MockRunner.set_contract_level("2")
+    fiber_id = "tests/contract-mismatch"
+    MockRunner.set_fiber(fiber_id, make_fiber(fiber_id))
+    MockRunner.set_shuttle(fiber_id, @oneshot_shuttle)
+
+    {:ok, poller} =
+      start_poller!(
+        name: :test_poller_contract_mismatch,
+        runner: MockRunner,
+        poll_interval_ms: 60_000,
+        felt_stores: ["/tmp"]
+      )
+
+    snap = Poller.snapshot(poller)
+
+    assert %{expected: 1, observed: 2, ok: false, reason: reason} = snap.contract
+    assert reason =~ "expected contract level 1"
+    assert reason =~ "CLI reports 2"
+
+    send(poller, :run_poll_cycle)
+
+    # Held, not dispatched: parked as a pending_launch with the skew reason,
+    # and no tmux session spawned — same shape as a boot-quarantine park.
+    assert_eventually(fn ->
+      assert [%{fiber_id: ^fiber_id, reason: parked_reason}] =
+               Poller.snapshot(poller).pending_launch
+
+      assert parked_reason =~ "contract skew"
+      assert parked_reason =~ "CLI reports 2"
+    end)
+
+    refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
+             cmd == "tmux" and hd(args) == "new-session"
+           end)
+  end
+
+  test "unparseable contract output (old CLI, unknown subcommand) is treated as skew, not a crash" do
+    # Mirrors a pre-e1f65b1 CLI: `felt shuttle contract` is an unknown
+    # subcommand, so real felt exits nonzero with its usage text on stdout —
+    # exactly the shape the CLI's own doc-comment says must be treated as
+    # "cannot determine the level", same as an explicit mismatch.
+    MockRunner.set_contract_level("Error: unknown command \"contract\"", 1)
+    fiber_id = "tests/contract-garbage"
+    MockRunner.set_fiber(fiber_id, make_fiber(fiber_id))
+    MockRunner.set_shuttle(fiber_id, @oneshot_shuttle)
+
+    {:ok, poller} =
+      start_poller!(
+        name: :test_poller_contract_garbage,
+        runner: MockRunner,
+        poll_interval_ms: 60_000,
+        felt_stores: ["/tmp"]
+      )
+
+    assert %{expected: 1, ok: false} = Poller.snapshot(poller).contract
+
+    send(poller, :run_poll_cycle)
+
+    assert_eventually(fn ->
+      assert [%{fiber_id: ^fiber_id}] = Poller.snapshot(poller).pending_launch
+    end)
+
+    refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
+             cmd == "tmux" and hd(args) == "new-session"
+           end)
+  end
+
+  test "a contract skew does not strand work observed running; a was-running fiber still resumes" do
+    # Same was-running exemption as boot quarantine: skew means "no NEW
+    # autonomous work", not "abandon what's alive". A worker this daemon
+    # observed running (adopted at boot) must still re-dispatch on exit.
+    MockRunner.set_contract_level("2")
+    fiber_id = "tests/contract-skew-was-running"
+    session = Dispatcher.session_name(fiber_id)
+    MockRunner.set_shuttle(fiber_id, @oneshot_shuttle)
+    MockRunner.add_tmux_session(session)
+
+    {:ok, poller} =
+      start_poller!(
+        name: :test_poller_contract_skew_was_running,
+        runner: MockRunner,
+        poll_interval_ms: 60_000,
+        felt_stores: ["/tmp"]
+      )
+
+    assert_eventually(fn ->
+      state = :sys.get_state(poller)
+      assert MapSet.member?(state.was_running, fiber_id)
+      assert Enum.any?(state.running, fn {_k, m} -> Map.get(m, :fiber_id) == fiber_id end)
+    end)
+
+    assert Poller.snapshot(poller).pending_launch == []
+
+    MockRunner.remove_tmux_session(session)
+    send(poller, :run_poll_cycle)
+
+    assert_eventually(fn ->
+      assert Enum.any?(MockRunner.commands(), fn {cmd, args} ->
+               cmd == "tmux" and hd(args) == "new-session"
+             end)
+    end)
+
+    snap = Poller.snapshot(poller)
+    refute snap.contract.ok
+    refute Enum.any?(snap.pending_launch, &(&1.fiber_id == fiber_id))
   end
 
   test "poller does not dispatch a scheduled standing role before it is due" do

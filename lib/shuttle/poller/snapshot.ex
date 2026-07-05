@@ -74,18 +74,26 @@ defmodule Shuttle.Poller.Snapshot do
 
     blocked = dispatch_blocked ++ loop_blocked
 
-    # Autonomous dispatches the boot quarantine is withholding — all of them,
-    # resumes included. First-class rows, not `blocked`: nothing failed — the
-    # daemon is deliberately withholding autonomous dispatch authority until a
-    # human posts /api/v1/quarantine/release. The
-    # kanban reads `boot_quarantine` for its banner/release button and these
-    # rows for the per-fiber "parked" badge.
+    # Autonomous dispatches the boot quarantine (or an S2 contract skew) is
+    # withholding — all of them, resumes included. First-class rows, not
+    # `blocked`: nothing failed — the daemon is deliberately withholding
+    # autonomous dispatch authority until a human releases it (quarantine) or
+    # fixes + restarts (skew). The kanban reads `boot_quarantine`/
+    # `contract_skew` for its banner and these rows for the per-fiber
+    # "parked" badge. Skew takes reason precedence when both are true — it's
+    # the more actionable signal (quarantine self-explains via its own
+    # release button; skew needs the CLI/daemon pair fixed first).
+    pending_reason =
+      if state.contract_check.ok,
+        do: "boot quarantine — awaiting release",
+        else: "contract skew — #{state.contract_check.reason}"
+
     pending_launch =
       Enum.map(state.parked_launches, fn {_runtime_key, entry} ->
         %{
           fiber_id: entry.fiber_id,
           uid: entry.uid,
-          reason: "boot quarantine — awaiting release",
+          reason: pending_reason,
           parked_at: DateTime.to_unix(entry.parked_at, :millisecond)
         }
       end)
@@ -100,6 +108,10 @@ defmodule Shuttle.Poller.Snapshot do
       eligible: eligible,
       blocked: blocked,
       boot_quarantine: state.boot_quarantine,
+      # S2: the boot-time `felt shuttle contract` handshake result — always
+      # present (not just on skew) so /api/v1/state and /api/v1/version can
+      # both show "what we expect" and "what we saw" even when they match.
+      contract: Map.take(state.contract_check, [:expected, :observed, :ok, :reason]),
       pending_launch: pending_launch,
       orphans: state.orphans,
       # Retries collapsed into the poll loop: a status:active fiber with
