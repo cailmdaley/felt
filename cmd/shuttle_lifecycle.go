@@ -24,9 +24,13 @@ import (
 // from shuttle-ctl's cmd/shuttle/lifecycle.go.
 
 // resolveOwnedShuttleFiber is the common preamble for a lifecycle write verb: a
-// full read (body preserved for the re-serialize), a required shuttle: block, and
-// the ownership guard. Returns the fiber, its storage, and the typed block.
-func resolveOwnedShuttleFiber(query string) (*felt.Felt, *felt.Storage, *shuttle.Block, error) {
+// full read (body preserved for the re-serialize), a required shuttle: block,
+// and the ownership guard. Returns the fiber, its storage, the typed block, and
+// an unlock func the caller MUST defer immediately (before any other return) so
+// the fiber's cross-process lock (see internal/felt/lock.go, F4) is held for the
+// caller's entire read-modify-write cycle and released exactly once no matter
+// which return path fires.
+func resolveOwnedShuttleFiber(query string) (*felt.Felt, *felt.Storage, *shuttle.Block, func() error, error) {
 	return resolveOwnedShuttleFiberAs(query, "")
 }
 
@@ -34,22 +38,58 @@ func resolveOwnedShuttleFiber(query string) (*felt.Felt, *felt.Storage, *shuttle
 // own-host for the ownership guard (see ensureOwnedHereAs). The daemon-facing
 // mark-runtime passes its own_host_id so the guard never round-trips to the
 // daemon it is being shelled from. An empty override keeps the default behavior.
-func resolveOwnedShuttleFiberAs(query, ownHostOverride string) (*felt.Felt, *felt.Storage, *shuttle.Block, error) {
+//
+// Locks BEFORE re-reading, not before the initial shuttleResolveFiber lookup:
+// resolving `query` to a fiber id can itself require scanning/reading multiple
+// candidates, so it runs unlocked. Once the target id is known, this acquires
+// the lock and re-reads fresh from disk — discarding the unlocked read — so the
+// mutation callers build on the RunE below is guaranteed current as of lock
+// acquisition, not raced against whatever wrote in the gap between the unlocked
+// lookup and the lock. That reload is the "acquire lock -> read" half of the
+// acquire/read/modify/write/release cycle this function starts on behalf of
+// every lifecycle verb.
+func resolveOwnedShuttleFiberAs(query, ownHostOverride string) (*felt.Felt, *felt.Storage, *shuttle.Block, func() error, error) {
 	f, st, err := shuttleResolveFiber(query, true)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
+	}
+	f, unlock, err := lockAndReloadFiber(st, f)
+	if err != nil {
+		return nil, nil, nil, nil, err
 	}
 	block, ok, err := f.ShuttleBlock()
 	if err != nil {
-		return nil, nil, nil, err
+		unlock()
+		return nil, nil, nil, nil, err
 	}
 	if !ok {
-		return nil, nil, nil, fmt.Errorf("fiber %s has no shuttle: block", query)
+		unlock()
+		return nil, nil, nil, nil, fmt.Errorf("fiber %s has no shuttle: block", query)
 	}
 	if err := ensureOwnedHereAs(f, query, ownHostOverride); err != nil {
-		return nil, nil, nil, err
+		unlock()
+		return nil, nil, nil, nil, err
 	}
-	return f, st, block, nil
+	return f, st, block, unlock, nil
+}
+
+// lockAndReloadFiber acquires f.ID's cross-process advisory lock (F4,
+// internal/felt/lock.go) and re-reads it fresh from disk, so a resolver that
+// already did an unlocked read to match a query doesn't hand its caller a copy
+// that a concurrent writer could have raced between that read and lock
+// acquisition. On any error the lock (if acquired) is released before
+// returning, so a failed reload never leaks a held lock.
+func lockAndReloadFiber(st *felt.Storage, f *felt.Felt) (*felt.Felt, func() error, error) {
+	unlock, err := st.LockFiber(f.ID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("locking fiber %s: %w", f.ID, err)
+	}
+	fresh, err := st.Read(f.ID)
+	if err != nil {
+		unlock()
+		return nil, nil, fmt.Errorf("re-reading fiber %s under lock: %w", f.ID, err)
+	}
+	return fresh, unlock, nil
 }
 
 // ---- pause -----------------------------------------------------------------
@@ -68,10 +108,11 @@ Use --no-kill to stop scheduling only and let a live worker finish naturally.
 status:active is the sole dispatch gate; there is no enabled flag.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		f, st, _, err := resolveOwnedShuttleFiber(args[0])
+		f, st, _, unlock, err := resolveOwnedShuttleFiber(args[0])
 		if err != nil {
 			return err
 		}
+		defer unlock()
 
 		statusBefore := f.Status
 		f.Status = felt.StatusOpen
@@ -131,10 +172,11 @@ armed straight to active. Refuses on a tempered/composted close — use
 'felt shuttle reopen' to requeue a finished fiber.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		f, st, block, err := resolveOwnedShuttleFiber(args[0])
+		f, st, block, unlock, err := resolveOwnedShuttleFiber(args[0])
 		if err != nil {
 			return err
 		}
+		defer unlock()
 
 		// A standing role awaiting review (status:closed + untempered) re-arms
 		// through the owning daemon, which clears the awaiting marker and
@@ -197,10 +239,11 @@ The shuttle block stays installed; closed fibers are ignored by the daemon
 until they are reopened.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		f, st, _, err := resolveOwnedShuttleFiber(args[0])
+		f, st, _, unlock, err := resolveOwnedShuttleFiber(args[0])
 		if err != nil {
 			return err
 		}
+		defer unlock()
 
 		var tempered *bool
 		if closeTempered != "" {
@@ -248,10 +291,11 @@ With --as-draft, sets status = open instead: the card reopens as a PAUSED DRAFT
 — visible on the board, never auto-dispatched.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		f, st, _, err := resolveOwnedShuttleFiberAs(args[0], reopenHost)
+		f, st, _, unlock, err := resolveOwnedShuttleFiberAs(args[0], reopenHost)
 		if err != nil {
 			return err
 		}
+		defer unlock()
 
 		status := felt.StatusActive
 		if reopenAsDraft {
@@ -294,10 +338,11 @@ Examples:
   printf 'First line\nSecond line\n' | felt shuttle set-outcome <fiber>`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		f, st, _, err := resolveOwnedShuttleFiber(args[0])
+		f, st, _, unlock, err := resolveOwnedShuttleFiber(args[0])
 		if err != nil {
 			return err
 		}
+		defer unlock()
 
 		outcome, err := resolveOutcomeValue(cmd, setOutcomeValue)
 		if err != nil {
@@ -354,10 +399,11 @@ Routes to the owning daemon when reachable (a single in-process re-arm); falls
 back to a local document write when the daemon is down.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		f, st, block, err := resolveOwnedShuttleFiber(args[0])
+		f, st, block, unlock, err := resolveOwnedShuttleFiber(args[0])
 		if err != nil {
 			return err
 		}
+		defer unlock()
 		if block.Kind != "standing" {
 			return fmt.Errorf("accept only applies to standing roles (fiber has kind=%s)", block.Kind)
 		}
@@ -418,10 +464,11 @@ preserved.`,
 		if err != nil {
 			return fmt.Errorf("loading agent registry: %w", err)
 		}
-		f, st, block, err := resolveShuttleFiberForConfig(args[0])
+		f, st, block, unlock, err := resolveShuttleFiberForConfig(args[0])
 		if err != nil {
 			return err
 		}
+		defer unlock()
 
 		agentID := args[1]
 		// Resolve the new base agent together with the block's existing axes:
@@ -468,10 +515,11 @@ back to the harness default.`,
 		if err != nil {
 			return fmt.Errorf("loading agent registry: %w", err)
 		}
-		f, st, block, err := resolveShuttleFiberForConfig(args[0])
+		f, st, block, unlock, err := resolveShuttleFiberForConfig(args[0])
 		if err != nil {
 			return err
 		}
+		defer unlock()
 
 		agentID := block.Agent
 		if len(args) == 2 {
@@ -540,22 +588,29 @@ func axisValue(s string) any {
 // resolveShuttleFiberForConfig is the preamble for the config verbs
 // (set-model/set-agent): like resolveOwnedShuttleFiber but with the "install
 // first" hint on a missing block.
-func resolveShuttleFiberForConfig(query string) (*felt.Felt, *felt.Storage, *shuttle.Block, error) {
+func resolveShuttleFiberForConfig(query string) (*felt.Felt, *felt.Storage, *shuttle.Block, func() error, error) {
 	f, st, err := shuttleResolveFiber(query, true)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
+	}
+	f, unlock, err := lockAndReloadFiber(st, f)
+	if err != nil {
+		return nil, nil, nil, nil, err
 	}
 	block, ok, err := f.ShuttleBlock()
 	if err != nil {
-		return nil, nil, nil, err
+		unlock()
+		return nil, nil, nil, nil, err
 	}
 	if !ok {
-		return nil, nil, nil, fmt.Errorf("fiber %s has no shuttle: block (use 'felt shuttle repeat' to install first)", query)
+		unlock()
+		return nil, nil, nil, nil, fmt.Errorf("fiber %s has no shuttle: block (use 'felt shuttle repeat' to install first)", query)
 	}
 	if err := ensureOwnedHere(f, query); err != nil {
-		return nil, nil, nil, err
+		unlock()
+		return nil, nil, nil, nil, err
 	}
-	return f, st, block, nil
+	return f, st, block, unlock, nil
 }
 
 // ---- set-interactive (retired stub) ----------------------------------------
@@ -592,6 +647,11 @@ daemon will no longer dispatch it. The felt status and tags are not changed.`,
 			fmt.Printf("fiber %s has no shuttle: block (nothing to do)\n", args[0])
 			return nil
 		}
+		f, unlock, err := lockAndReloadFiber(st, f)
+		if err != nil {
+			return err
+		}
+		defer unlock()
 		if err := ensureOwnedHere(f, args[0]); err != nil {
 			return err
 		}

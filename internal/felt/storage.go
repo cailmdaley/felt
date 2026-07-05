@@ -44,6 +44,7 @@ index.db-wal
 index.db-shm
 index-sync.lock
 index-sync.request
+*.md.lock
 `
 
 // Storage handles reading and writing felt files.

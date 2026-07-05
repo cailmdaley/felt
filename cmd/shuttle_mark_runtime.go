@@ -48,10 +48,11 @@ The daemon passes --host <own_host_id> so the ownership guard resolves without a
 re-entrant round-trip back to the daemon it is being shelled from.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		f, st, _, err := resolveOwnedShuttleFiberAs(args[0], markRuntimeHost)
+		f, st, _, unlock, err := resolveOwnedShuttleFiberAs(args[0], markRuntimeHost)
 		if err != nil {
 			return err
 		}
+		defer unlock()
 
 		fields := []struct{ flag, key, val string }{
 			{"dispatched-at", "dispatched_at", markRuntimeDispatchedAt},

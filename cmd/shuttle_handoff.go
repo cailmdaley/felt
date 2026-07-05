@@ -76,7 +76,19 @@ func resolveHandoffPath(fiber string) (string, error) {
 // Operates on the file at `path` directly (read -> Parse -> stamp -> Marshal ->
 // atomic rename) rather than through Storage, because SHUTTLE_FIBER_PATH may name
 // a fiber in a store other than the worker's cwd; the path is unambiguous.
+//
+// F4: acquires path's cross-process advisory lock (internal/felt/lock.go)
+// BEFORE the read, and holds it through the write. A worker's handoff and a
+// daemon-shelled `mark-runtime` (the dispatch stamp, or a conclude re-arm) can
+// race the same fiber file; without the lock, whichever writes last silently
+// drops the other's field. The lock forces them to serialize instead.
 func stampHandedOff(path string) (string, error) {
+	unlock, err := felt.LockFiberFile(path)
+	if err != nil {
+		return "", err
+	}
+	defer unlock()
+
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return "", err
