@@ -11,8 +11,10 @@ import (
 // The decoded shapes of the daemon's state endpoints — the structured half of the
 // :4000 HTTP client whose primitives (daemonURL, the lifecycle hop) live in
 // shuttle_daemon.go. Most `felt shuttle` verbs are pure local-frontmatter writes;
-// these types back the daemon-coupled READ verbs: snapshot (raw passthrough),
-// status --all / --remote (composite render), and the fetchLocalHost identity probe.
+// these types back the daemon-coupled READ verbs: snapshot (raw passthrough) and
+// status --all / --remote (composite render). Own-host identity resolution
+// (resolveOwnHost, shuttle_host.go) no longer round-trips through here — it
+// reads SHUTTLE_HOST / ~/.shuttle/host / os.Hostname() locally.
 //
 // Cross-host visibility goes through the local daemon's composite endpoint: the
 // daemon's RemoteRegistry already polls each configured remote over its
@@ -59,9 +61,9 @@ type RetryEntry struct {
 	Error   string `json:"error,omitempty"`
 }
 
-// Snapshot is the daemon's per-host runtime state (GET /api/v1/state). Host alone
-// backs fetchLocalHost (the install/repeat/pin ownership probe); the rest backs the
-// cross-host composite render.
+// Snapshot is the daemon's per-host runtime state (GET /api/v1/state). Used by
+// the raw snapshot passthrough and the cross-host composite render; own-host
+// identity resolution (resolveOwnHost) does not consume this type.
 type Snapshot struct {
 	PollAt        int64               `json:"poll_at,omitempty"`
 	Host          string              `json:"host,omitempty"`

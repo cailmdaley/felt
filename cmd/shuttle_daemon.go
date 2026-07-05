@@ -33,34 +33,6 @@ func daemonURL() string {
 	return defaultDaemonURL
 }
 
-// fetchLocalHost queries the local daemon for its own_host_id — the authoritative
-// identity the poller compares a block's host: against. install/repeat/pin stamp
-// it so a block is born owned. Returns an error when the daemon is unreachable;
-// callers fall back to SHUTTLE_HOST / os.Hostname().
-func fetchLocalHost() (string, error) {
-	url := daemonURL() + "/api/v1/state"
-	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Get(url)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", err
-	}
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("daemon returned %d: %s", resp.StatusCode, string(body))
-	}
-
-	var s Snapshot
-	if err := json.Unmarshal(body, &s); err != nil {
-		return "", err
-	}
-	return s.Host, nil
-}
-
 // lifecycleStatusError is a non-200 response from POST /api/v1/lifecycle — the
 // daemon was reached but rejected the request (a logic error, NOT a transport
 // failure). A distinct type so isLifecycleTransportError can tell "daemon down,

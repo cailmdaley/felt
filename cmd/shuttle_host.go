@@ -14,24 +14,33 @@ import (
 // dispatch predicate (block.host == own_host_id) has a value to match, and no
 // host-less block is produced by normal flows.
 //
-// Precedence: explicit --host (cross-host install) → the local daemon's
-// own_host_id via GET /api/v1/state .host (the authoritative identity the poller
-// compares against; the common path) → SHUTTLE_HOST env (the same override the
-// daemon honors; keeps install working when the daemon is briefly down) →
-// os.Hostname() (last-resort OS short name, matching the daemon's own
-// :inet.gethostname() fallback). Errors only when every source fails — an empty
-// host would silently never dispatch, so fail loud instead.
+// Precedence mirrors the Elixir daemon's own_host_id (lib/shuttle/poller.ex)
+// exactly, so the CLI and the daemon it's shelled from never disagree about
+// "this machine's name": explicit --host (cross-host install, an explicit
+// per-invocation override — checked first because it's a deliberate ask, not
+// an ambient identity source) → SHUTTLE_HOST env var → the `~/.shuttle/host`
+// file (first non-empty trimmed line; path overridable via
+// SHUTTLE_HOST_FILE) → os.Hostname() (last-resort OS short name, matching the
+// daemon's :inet.gethostname() fallback).
+//
+// Deliberately no daemon round-trip: the old path called GET /api/v1/state,
+// which is re-entrant when the daemon shells this CLI (the Poller is blocked
+// on the subprocess, so the request times out and the fallback silently gave
+// the wrong name on a host whose identity is an alias, e.g. candide vs c03).
+// This resolver is pure local state, so it's correct offline and can never
+// deadlock against the process that invoked it.
+//
+// Errors only when every source fails — an empty host would silently never
+// dispatch, so fail loud instead.
 func resolveOwnHost(flagVal string) (string, error) {
 	if s := strings.TrimSpace(flagVal); s != "" {
 		return s, nil
 	}
-	if h, err := fetchLocalHost(); err == nil {
-		if h = strings.TrimSpace(h); h != "" {
-			return h, nil
-		}
-	}
 	if env := strings.TrimSpace(os.Getenv("SHUTTLE_HOST")); env != "" {
 		return env, nil
+	}
+	if h, ok := hostConfigFileValue(); ok {
+		return h, nil
 	}
 	if name, err := os.Hostname(); err == nil {
 		if name = strings.TrimSpace(name); name != "" {
@@ -39,9 +48,59 @@ func resolveOwnHost(flagVal string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf(
-		"could not resolve a host to stamp: daemon unreachable at %s, SHUTTLE_HOST unset, and os.Hostname() empty; pass --host <name> explicitly",
-		daemonURL(),
+		"could not resolve a host to stamp: SHUTTLE_HOST unset, %s empty/missing, and os.Hostname() empty; pass --host <name> explicitly",
+		hostConfigFilePath(),
 	)
+}
+
+// hostConfigFilePath is the canonical per-host identity file: SHUTTLE_HOST_FILE
+// if set, else ~/.shuttle/host. Mirrors host_config_file/0 in the Elixir poller
+// so both the CLI and the daemon read the same file by default.
+func hostConfigFilePath() string {
+	if v := strings.TrimSpace(os.Getenv("SHUTTLE_HOST_FILE")); v != "" {
+		if expanded, err := homedirExpand(v); err == nil {
+			return expanded
+		}
+		return v
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ".shuttle/host"
+	}
+	return home + "/.shuttle/host"
+}
+
+// homedirExpand expands a leading "~" (or "~/...") in path to the user's home
+// directory, matching Elixir's Path.expand behavior for SHUTTLE_HOST_FILE.
+func homedirExpand(path string) (string, error) {
+	if path != "~" && !strings.HasPrefix(path, "~/") {
+		return path, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	if path == "~" {
+		return home, nil
+	}
+	return home + path[1:], nil
+}
+
+// hostConfigFileValue returns the trimmed FIRST line of the host config file,
+// or ("", false) when the file is absent/unreadable or that line is blank.
+// First-line-only (not first non-empty line) to match host_config_file_value/0
+// in the Elixir poller exactly — any divergence here recreates the split
+// identity this resolver exists to prevent.
+func hostConfigFileValue() (string, bool) {
+	data, err := os.ReadFile(hostConfigFilePath())
+	if err != nil {
+		return "", false
+	}
+	line, _, _ := strings.Cut(string(data), "\n")
+	if line = strings.TrimSpace(line); line != "" {
+		return line, true
+	}
+	return "", false
 }
 
 // ownerMismatchError is returned by ensureOwnedHere when a write verb runs

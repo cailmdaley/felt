@@ -1,32 +1,27 @@
 package cmd
 
 import (
-	"encoding/json"
-	"net/http"
-	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 
 	"github.com/cailmdaley/felt/internal/felt"
 )
 
-// withOwnHost points the CLI's daemon-state lookup at a stub returning hostID so
-// resolveOwnHost (and thus ensureOwnedHere) resolves deterministically,
-// independent of any real daemon running on the test machine. Shared by the
-// foundation and lifecycle/create verb tests.
+// withOwnHost seeds identity via a host file (SHUTTLE_HOST_FILE) so
+// resolveOwnHost (and thus ensureOwnedHere) resolves deterministically to
+// hostID, independent of any real daemon, env var, or OS hostname on the test
+// machine. Shared by the foundation and lifecycle/create verb tests.
 func withOwnHost(t *testing.T, hostID string) {
 	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/v1/state" {
-			_ = json.NewEncoder(w).Encode(map[string]any{"host": hostID})
-			return
-		}
-		w.WriteHeader(http.StatusNotFound)
-	}))
-	t.Cleanup(srv.Close)
-
-	t.Setenv("SHUTTLE_DAEMON_URL", srv.URL)
+	t.Setenv("SHUTTLE_HOST", "") // guard against ambient env leaking into the test
+	dir := t.TempDir()
+	path := filepath.Join(dir, "host")
+	if err := os.WriteFile(path, []byte(hostID+"\n"), 0o644); err != nil {
+		t.Fatalf("writing host file: %v", err)
+	}
+	t.Setenv("SHUTTLE_HOST_FILE", path)
 }
 
 // shuttleFeltWithBlock builds an in-memory fiber carrying a shuttle: block, for
@@ -46,15 +41,80 @@ func shuttleFeltWithBlock(t *testing.T, block map[string]any) *felt.Felt {
 }
 
 func TestResolveOwnHost_Precedence(t *testing.T) {
-	withOwnHost(t, "daemonhost")
+	withOwnHost(t, "filehost")
+	t.Setenv("SHUTTLE_HOST", "envhost")
 
 	// Explicit flag wins over everything.
 	if got, err := resolveOwnHost("flaghost"); err != nil || got != "flaghost" {
 		t.Fatalf("flag should win: got %q err %v", got, err)
 	}
-	// No flag → the daemon's own_host_id from the stub.
-	if got, err := resolveOwnHost(""); err != nil || got != "daemonhost" {
-		t.Fatalf("daemon host should resolve: got %q err %v", got, err)
+	// No flag → SHUTTLE_HOST env wins over the host file.
+	if got, err := resolveOwnHost(""); err != nil || got != "envhost" {
+		t.Fatalf("env should win over host file: got %q err %v", got, err)
+	}
+}
+
+// TestResolveOwnHost_EnvBeatsFile locks in that SHUTTLE_HOST takes precedence
+// over the ~/.shuttle/host file, mirroring the Elixir daemon's own_host_id.
+func TestResolveOwnHost_EnvBeatsFile(t *testing.T) {
+	withOwnHost(t, "filehost")
+	t.Setenv("SHUTTLE_HOST", "envhost")
+
+	if got, err := resolveOwnHost(""); err != nil || got != "envhost" {
+		t.Fatalf("env should beat file: got %q err %v", got, err)
+	}
+}
+
+// TestResolveOwnHost_FileBeatsHostname locks in that the host file wins over
+// os.Hostname() when no flag or env var is set — the offline-correct path
+// that keeps a machine's friendly alias (e.g. candide) stable regardless of
+// its OS-reported hostname (e.g. c03).
+func TestResolveOwnHost_FileBeatsHostname(t *testing.T) {
+	withOwnHost(t, "candide")
+
+	got, err := resolveOwnHost("")
+	if err != nil {
+		t.Fatalf("resolveOwnHost: %v", err)
+	}
+	if got != "candide" {
+		t.Fatalf("host file should beat os.Hostname(): got %q", got)
+	}
+	if osHost, _ := os.Hostname(); got == osHost {
+		t.Fatalf("test is not exercising the file-vs-hostname distinction (file value %q equals os.Hostname())", got)
+	}
+}
+
+// TestResolveOwnHost_DaemonDown_HostFileOnly is the keystone lock-in: with no
+// daemon reachable at all (SHUTTLE_DAEMON_URL pointed at a closed port) and
+// identity seeded ONLY via the host file, resolveOwnHost must still resolve —
+// proving the resolution path never round-trips to the daemon. It then drives
+// ensureOwnedHere end-to-end: a fiber whose shuttle block names this same host
+// as owner is writable with no daemon involved.
+func TestResolveOwnHost_DaemonDown_HostFileOnly(t *testing.T) {
+	// An unroutable/closed local port: nothing is listening, so any accidental
+	// round-trip to the daemon would fail loudly (dial refused) rather than
+	// silently succeeding and masking the bug this test guards against.
+	t.Setenv("SHUTTLE_DAEMON_URL", "http://127.0.0.1:1")
+	t.Setenv("SHUTTLE_HOST", "")
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "host")
+	if err := os.WriteFile(path, []byte("candide\n"), 0o644); err != nil {
+		t.Fatalf("writing host file: %v", err)
+	}
+	t.Setenv("SHUTTLE_HOST_FILE", path)
+
+	got, err := resolveOwnHost("")
+	if err != nil {
+		t.Fatalf("resolveOwnHost with daemon down: %v", err)
+	}
+	if got != "candide" {
+		t.Fatalf("expected host-file identity %q, got %q", "candide", got)
+	}
+
+	fiber := shuttleFeltWithBlock(t, map[string]any{"kind": "oneshot", "host": "candide"})
+	if err := ensureOwnedHere(fiber, "f"); err != nil {
+		t.Fatalf("ownership-guarded local write should succeed with daemon down and host-file identity: %v", err)
 	}
 }
 
