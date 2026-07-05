@@ -75,7 +75,11 @@ cli:
 cli-install:
 	GOBIN=$(INSTALL_DIR) go install .
 
-daemon:
+# daemon depends on cli-install: the escript shells the felt CLI for its
+# writes (reopen --host, mark-runtime, …), so the two artifacts must never
+# skew — a daemon built against an older installed CLI silently breaks
+# daemon-shelled commands (unknown flags exit 1 mid-dispatch).
+daemon: cli-install
 	mix shuttle.gen_version
 	mix escript.build
 
