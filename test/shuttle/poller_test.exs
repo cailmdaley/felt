@@ -206,15 +206,30 @@ defmodule Shuttle.PollerTest do
     def set_new_session_delay(ms),
       do: Agent.update(__MODULE__, &Map.put(&1, :new_session_delay_ms, ms))
 
-    # Force `tmux kill-session` to fail. `:not_found` mimics tmux's own
-    # "session already gone" exit (the case kill_session must still treat as
-    # success); any other value simulates a genuine kill failure (e.g. a
-    # zombie process tmux couldn't reap).
+    # Force `tmux kill-session` to fail. The message atoms mimic tmux's own
+    # "session/server already gone" exits — every one of these kill_session must
+    # still treat as success: `:not_found`/`:no_such` are per-session phrasings,
+    # `:no_server` is tmux with no server at all. Any boolean value simulates a
+    # genuine kill failure (e.g. a zombie process tmux couldn't reap).
     def set_kill_session_failure(:not_found),
       do:
         Agent.update(
           __MODULE__,
           &Map.put(&1, :kill_session_failure, {"can't find session: nope", 1})
+        )
+
+    def set_kill_session_failure(:no_such),
+      do:
+        Agent.update(
+          __MODULE__,
+          &Map.put(&1, :kill_session_failure, {"no such session: shuttle-x", 1})
+        )
+
+    def set_kill_session_failure(:no_server),
+      do:
+        Agent.update(
+          __MODULE__,
+          &Map.put(&1, :kill_session_failure, {"no server running on /tmp/tmux-501/default", 1})
         )
 
     def set_kill_session_failure(enabled) when is_boolean(enabled),
@@ -1229,6 +1244,62 @@ defmodule Shuttle.PollerTest do
                _ -> false
              end
            end)
+  end
+
+  # Twin of the "session not found" test above for the two other tmux
+  # "already gone" phrasings session_already_gone? must also treat as success:
+  # a whole-server-down "no server running" and the per-session "no such
+  # session". Each is its own test (not a loop) so a fresh MockRunner + poller
+  # keeps them from cross-claiming each other's fiber.
+  for {variant, uid_suffix, gone_output} <- [
+        {:no_server, "K0", "\"no server running\""},
+        {:no_such, "K1", "\"no such session\""}
+      ] do
+    test "kill_session treats tmux's #{gone_output} as a successful teardown" do
+      variant = unquote(variant)
+      fiber_id = "tests/killme-#{variant}"
+      uid = "01JZ00000000000000000000#{unquote(uid_suffix)}"
+
+      fiber =
+        make_fiber(fiber_id, %{
+          "uid" => uid,
+          "modified_at" => "2026-06-08T01:00:00Z"
+        })
+
+      MockRunner.set_fiber(fiber_id, fiber)
+      MockRunner.set_shuttle(fiber_id, "enabled: true\nkind: oneshot\nhost: candide\n")
+
+      {:ok, poller} =
+        start_poller!(
+          name: :"test_poller_kill_session_#{variant}",
+          runner: MockRunner,
+          own_host_id: "candide",
+          poll_interval_ms: 60_000,
+          felt_stores: ["/tmp"]
+        )
+
+      send(poller, :run_poll_cycle)
+
+      assert wait_until(fn ->
+               case Poller.cached_fiber_documents(poller) do
+                 {:ok, %{fibers: [entry]}} -> Map.has_key?(entry, :runtime)
+                 _ -> false
+               end
+             end)
+
+      {:ok, %{fibers: [live]}} = Poller.cached_fiber_documents(poller)
+      session = get_in(live, [:runtime, :tmux_session])
+
+      MockRunner.set_kill_session_failure(variant)
+      assert {:ok, ^session} = Poller.kill_session(poller, fiber_id)
+
+      assert wait_until(fn ->
+               case Poller.cached_fiber_documents(poller) do
+                 {:ok, %{fibers: [entry]}} -> not Map.has_key?(entry, :runtime)
+                 _ -> false
+               end
+             end)
+    end
   end
 
   test "kill_session surfaces a genuine tmux kill failure and leaves runtime tracking intact" do

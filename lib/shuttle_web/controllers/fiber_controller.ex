@@ -146,14 +146,12 @@ defmodule ShuttleWeb.FiberController do
         body_args(body) ++ tag_args(frontmatter)
 
     with :ok <- ensure_felt_repo(root),
-         {_output, 0} <- System.cmd("felt", args, stderr_to_stdout: true) do
+         {:ok, _output} <- Shuttle.Felt.run(args) do
       felt_path(root, fiber_id)
     else
       {:error, reason} -> {:error, reason}
-      {output, _status} -> {:error, "felt add failed: #{String.trim(output)}"}
+      {:command_error, _status, output} -> {:error, "felt add failed: #{String.trim(output)}"}
     end
-  rescue
-    error -> {:error, "felt add failed: #{Exception.message(error)}"}
   end
 
   # Keep the endpoint self-sufficient the way the old raw-write was: a daemon
@@ -165,25 +163,27 @@ defmodule ShuttleWeb.FiberController do
   defp ensure_felt_repo(root) do
     File.mkdir_p!(root)
 
-    case System.cmd("felt", ["init"], cd: root, stderr_to_stdout: true) do
-      {_output, 0} -> :ok
-      {output, _status} -> {:error, "felt init failed: #{String.trim(output)}"}
+    case Shuttle.Felt.run(["init"], cd: root) do
+      {:ok, _output} -> :ok
+      {:command_error, _status, output} -> {:error, "felt init failed: #{String.trim(output)}"}
+      {:error, reason} -> {:error, "felt init failed: #{reason}"}
     end
   end
 
   defp felt_path(root, fiber_id) do
-    case System.cmd("felt", ["-C", root, "show", fiber_id, "-j"], stderr_to_stdout: false) do
-      {output, 0} ->
+    case Shuttle.Felt.run(["-C", root, "show", fiber_id, "-j"]) do
+      {:ok, output} ->
         case Jason.decode(output) do
           {:ok, %{"path" => path}} when is_binary(path) and path != "" -> {:ok, path}
           _ -> {:error, "felt show returned no path for #{fiber_id}"}
         end
 
-      {_output, _status} ->
+      {:command_error, _status, _output} ->
         {:error, "felt show could not locate #{fiber_id} after create"}
+
+      {:error, reason} ->
+        {:error, "felt show failed: #{reason}"}
     end
-  rescue
-    error -> {:error, "felt show failed: #{Exception.message(error)}"}
   end
 
   defp status_of(frontmatter), do: Map.get(frontmatter, "status", "active")

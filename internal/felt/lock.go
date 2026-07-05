@@ -12,14 +12,24 @@ import (
 
 // F4 — cross-process mutual exclusion for a fiber's read-modify-write cycle.
 //
-// Every write verb (felt CLI or daemon-shelled) that mutates a fiber follows
-// the same shape: read the current file, mutate the in-memory Felt, write it
-// back. Two processes doing this concurrently on the SAME fiber — e.g. a
-// worker's `felt shuttle handoff` stamping handed_off_at at the same instant
-// the daemon shells `felt shuttle mark-runtime` to stamp dispatched_at — race:
-// whichever writes last wins, and the other's read (already stale) silently
-// clobbers it on write. Rare (needs true simultaneity) but real for shared
-// fibers, and silent — nothing errors, a field just reverts.
+// This serializes the Go CLI write verbs that mutate a fiber — both a direct
+// `felt <verb>` invocation and one the daemon shells as a subprocess. Every
+// such verb follows the same shape: read the current file, mutate the
+// in-memory Felt, write it back. Two processes doing this concurrently on the
+// SAME fiber — e.g. a worker's `felt shuttle handoff` stamping handed_off_at at
+// the same instant the daemon shells `felt shuttle mark-runtime` to stamp
+// dispatched_at — race: whichever writes last wins, and the other's read
+// (already stale) silently clobbers it on write. Rare (needs true simultaneity)
+// but real for shared fibers, and silent — nothing errors, a field just
+// reverts.
+//
+// Scope: this lock covers Go CLI writers only. The daemon's OWN in-process
+// Elixir document writers — LifecycleStore resume_from_doc / mark_awaiting via
+// FiberDoc.write! — do NOT take this flock; they write inside the daemon
+// process and are outside this cross-process guard. In practice they run
+// sequentially within the daemon rather than being concurrently excluded, so
+// they don't race each other; the flock's job is to keep the CLI writers above
+// from racing anyone (including a daemon-shelled CLI subprocess).
 //
 // LockFiberFile/Storage.LockFiber close that window: acquire the lock, THEN
 // read (so the read is guaranteed fresh, not raced against a writer that

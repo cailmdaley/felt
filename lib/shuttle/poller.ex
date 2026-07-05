@@ -2911,10 +2911,15 @@ defmodule Shuttle.Poller do
     }
   end
 
-  # tmux's message for "no such session" (seen across tmux versions/platforms)
-  # — `kill_session` treats this as a successful teardown, not a failure.
+  # tmux's messages for a session (or the whole server) that's already gone,
+  # across tmux versions/platforms — `kill_session` treats any of these as a
+  # successful teardown, not a failure. "no server running" is tmux with no
+  # server at all (every session already dead, the target trivially gone); the
+  # rest are per-session "that session doesn't exist" phrasings.
   defp session_already_gone?(output) when is_binary(output),
-    do: output =~ "can't find session" or output =~ "session not found"
+    do:
+      output =~ "can't find session" or output =~ "session not found" or
+        output =~ "no such session" or output =~ "no server running"
 
   defp session_already_gone?(_output), do: false
 
