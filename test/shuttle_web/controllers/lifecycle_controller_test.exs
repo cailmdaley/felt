@@ -109,6 +109,76 @@ defmodule ShuttleWeb.LifecycleControllerTest do
              "--felt-store\n#{store}\nset-outcome\ntests/outcome-edit\n--outcome\nBlocked: waiting on ADS token\nsecond line\n"
   end
 
+  # T2: pause is the kanban's most-hit lifecycle write — the drag-a-card-off
+  # column gesture. Post-C2 this argv is built by `Shuttle.Felt.Shuttle.run/4`
+  # (destructuring `run/2`'s `[verb, fiber_id | rest]`), not a per-callsite
+  # hand-rolled list; this locks in that the store flag lands BEFORE the verb
+  # and the verb/fiber_id/flags land in the right order after it — the exact
+  # shape a real `felt` binary requires.
+  test "pause delegates to felt shuttle with the store flag ahead of the verb" do
+    root =
+      System.tmp_dir!()
+      |> Path.join("shuttle-lifecycle-pause-#{System.unique_integer([:positive])}")
+
+    store = Path.join(root, "loom")
+    fiber_dir = Path.join([store, ".felt", "tests", "pause-edit"])
+    File.mkdir_p!(fiber_dir)
+    File.write!(Path.join(fiber_dir, "pause-edit.md"), "---\nname: Pause edit\n---\n\n")
+
+    args_file = install_fake_felt!()
+    old_felt_stores = System.get_env("FELT_STORES")
+    System.put_env("FELT_STORES", store)
+
+    on_exit(fn ->
+      restore_env("FELT_STORES", old_felt_stores)
+      File.rm_rf(root)
+    end)
+
+    conn =
+      post(
+        api_conn(),
+        "/api/v1/lifecycle",
+        Jason.encode!(%{"action" => "pause", "fiber" => "tests/pause-edit"})
+      )
+
+    assert conn.status == 200
+
+    assert File.read!(args_file) ==
+             "--felt-store\n#{store}\npause\ntests/pause-edit\n"
+  end
+
+  test "pause --no-kill appends the flag after the verb and fiber id" do
+    root =
+      System.tmp_dir!()
+      |> Path.join("shuttle-lifecycle-pause-nokill-#{System.unique_integer([:positive])}")
+
+    store = Path.join(root, "loom")
+    fiber_dir = Path.join([store, ".felt", "tests", "pause-nokill"])
+    File.mkdir_p!(fiber_dir)
+    File.write!(Path.join(fiber_dir, "pause-nokill.md"), "---\nname: Pause no-kill\n---\n\n")
+
+    args_file = install_fake_felt!()
+    old_felt_stores = System.get_env("FELT_STORES")
+    System.put_env("FELT_STORES", store)
+
+    on_exit(fn ->
+      restore_env("FELT_STORES", old_felt_stores)
+      File.rm_rf(root)
+    end)
+
+    conn =
+      post(
+        api_conn(),
+        "/api/v1/lifecycle",
+        Jason.encode!(%{"action" => "pause", "fiber" => "tests/pause-nokill", "no_kill" => true})
+      )
+
+    assert conn.status == 200
+
+    assert File.read!(args_file) ==
+             "--felt-store\n#{store}\npause\ntests/pause-nokill\n--no-kill\n"
+  end
+
   # set-agent composes base agent × effort × chrome in one validated write.
   # The agent positional is optional and the axes ride as flags; chrome always
   # renders explicitly (`--chrome=true|false`) so a toggle-off is unambiguous,

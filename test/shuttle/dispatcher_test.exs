@@ -1362,18 +1362,28 @@ defmodule Shuttle.DispatcherTest do
   defp iso_now, do: DateTime.to_iso8601(DateTime.utc_now())
 
   # A oneshot fiber map carrying the daemon-at-dispatch shuttle fields (session
-  # uuid + dispatched_at from the test context), with `extra` merged over them
-  # (e.g. a `handed_off_at`, or `kind: standing`).
+  # uuid + dispatched_at from the test context), nested under shuttle.runtime
+  # (C5 — the reader no longer falls back to flat). `extra` merges over the
+  # whole shuttle map for config keys (e.g. `kind: standing`) EXCEPT the
+  # runtime-key names, which route into the nested runtime block instead (e.g.
+  # a clean-exit test's `handed_off_at`).
+  @runtime_key_names ~w(dispatched_at session_uuid handed_off_at run_id)
+
   defp dispatched_fiber(ctx, extra \\ %{}) do
+    {runtime_extra, config_extra} = Map.split(extra, @runtime_key_names)
+
     %{
       "shuttle" =>
         Map.merge(
           %{
             "kind" => "oneshot",
-            "session_uuid" => ctx.session_uuid,
-            "dispatched_at" => ctx.dispatched_at
+            "runtime" =>
+              Map.merge(
+                %{"session_uuid" => ctx.session_uuid, "dispatched_at" => ctx.dispatched_at},
+                runtime_extra
+              )
           },
-          extra
+          config_extra
         )
     }
   end

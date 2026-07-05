@@ -32,8 +32,8 @@ defmodule Shuttle.ContinuationTest do
     def cmd(_command, _args, _opts), do: {"boom", 1}
   end
 
-  describe "nested-OR-flat readers" do
-    test "nested runtime wins over the flat legacy keys" do
+  describe "nested-only readers (C5 — the flat fallback is retired)" do
+    test "reads the nested runtime block, ignoring flat legacy siblings entirely" do
       fiber = %{
         "shuttle" => %{
           "kind" => "oneshot",
@@ -50,7 +50,7 @@ defmodule Shuttle.ContinuationTest do
       assert Continuation.resumable_session_id(fiber) == "nested-uuid"
     end
 
-    test "falls back to a flat key when its nested counterpart is absent" do
+    test "does NOT fall back to a flat key when its nested counterpart is absent" do
       fiber = %{
         "shuttle" => %{
           "dispatched_at" => "2026-01-01T00:00:00Z",
@@ -59,28 +59,31 @@ defmodule Shuttle.ContinuationTest do
         }
       }
 
-      assert Continuation.dispatched_at(fiber) == ~U[2026-01-01 00:00:00Z]
-      assert Continuation.handed_off_at(fiber) == ~U[2026-01-02 00:00:00Z]
+      refute Continuation.dispatched_at(fiber)
+      refute Continuation.handed_off_at(fiber)
       assert Continuation.resumable_session_id(fiber) == "nested-uuid"
     end
 
-    test "reads flat keys when there is no runtime sub-map (un-migrated fiber)" do
+    test "an un-migrated fiber (flat keys, no runtime sub-map at all) reads as having no continuation state" do
       fiber = %{
         "shuttle" => %{"dispatched_at" => "2026-01-01T00:00:00Z", "session_uuid" => "flat"}
       }
 
-      assert Continuation.dispatched_at(fiber) == ~U[2026-01-01 00:00:00Z]
-      assert Continuation.resumable_session_id(fiber) == "flat"
+      refute Continuation.dispatched_at(fiber)
+      refute Continuation.resumable_session_id(fiber)
     end
 
-    test "tolerates a degenerate (non-map) runtime value, falling back to flat" do
+    test "tolerates a degenerate (non-map) runtime value, reading as absent rather than falling back to flat" do
       fiber = %{"shuttle" => %{"dispatched_at" => "2026-01-01T00:00:00Z", "runtime" => "oops"}}
-      assert Continuation.dispatched_at(fiber) == ~U[2026-01-01 00:00:00Z]
+      refute Continuation.dispatched_at(fiber)
     end
 
-    test "clean_handoff?: a fresh NESTED dispatch shadows a stale FLAT handoff → resume" do
-      # The mixed-on-disk transition state: a redispatch wrote nested
-      # dispatched_at; the prior run's flat handed_off_at is older → not clean.
+    test "clean_handoff?: a nested dispatch with only a FLAT handoff reads as no handoff → resume" do
+      # C5: the flat handed_off_at is invisible now (no fallback) — a nested
+      # dispatched_at with nothing nested under handed_off_at reads as "never
+      # handed off since this dispatch", same conclusion as before the
+      # fallback was retired, but for the right reason now (absent, not
+      # shadowed-because-flat).
       fiber = %{
         "shuttle" => %{
           "handed_off_at" => "2026-01-02T00:00:00Z",

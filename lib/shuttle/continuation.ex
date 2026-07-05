@@ -33,14 +33,21 @@ defmodule Shuttle.Continuation do
   store + its store-scoped id and shell that verb, instead of editing the `.md`
   directly.
 
-  ## Reading: nested-OR-flat
+  ## Reading: nested only (C5 — the flat fallback is retired)
 
-  Readers prefer `shuttle.runtime.<key>` and fall back to the legacy flat
-  `shuttle.<key>`. This is what makes a mixed-on-disk state safe across the
-  runtime-nesting migration: a freshly written nested value always shadows a
-  stale flat one (it is newer, written at the latest dispatch/handoff), and an
-  un-migrated fiber still reads correctly off its flat keys until
-  `felt shuttle migrate-runtime` lifts it.
+  Readers read ONLY `shuttle.runtime.<key>`. The migration this shim covered
+  (Stage 5's cutover to nested writes) is long done — no code writes a flat
+  runtime key anymore (`internal/felt/shuttle.go`'s `SetShuttleField` still
+  supports it as a generic primitive, but the only production caller left is
+  `set-agent`'s `agent` field, never a runtime key) — so the dual-read was a
+  pure ambiguity surface: a STALE flat key left over from before the cutover
+  could shadow a since-written-but-since-cleared nested one, or simply mask
+  the fact that a fiber was never lifted. `Shuttle.Poller`'s boot-time scan
+  (`scan_flat_runtime_fibers_once/2`) logs any fiber still carrying ONLY flat
+  keys with no nested counterpart; such a fiber now reads as having no
+  continuation state (the existing safe-default: absent `dispatched_at` treats
+  as fresh) rather than silently resurrecting a possibly-stale flat value.
+  `felt shuttle migrate-runtime <fiber>` lifts it into the nested form.
 
   ## Continuation decision
 
@@ -76,21 +83,21 @@ defmodule Shuttle.Continuation do
     end
   end
 
-  @doc "`shuttle.runtime.dispatched_at` (or legacy flat) as a `DateTime`, or `nil`."
+  @doc "`shuttle.runtime.dispatched_at` as a `DateTime`, or `nil`."
   @spec dispatched_at(map()) :: DateTime.t() | nil
   def dispatched_at(fiber),
     do: fiber |> shuttle_block() |> runtime_field("dispatched_at") |> parse_iso()
 
-  @doc "`shuttle.runtime.handed_off_at` (or legacy flat) as a `DateTime`, or `nil`."
+  @doc "`shuttle.runtime.handed_off_at` as a `DateTime`, or `nil`."
   @spec handed_off_at(map()) :: DateTime.t() | nil
   def handed_off_at(fiber),
     do: fiber |> shuttle_block() |> runtime_field("handed_off_at") |> parse_iso()
 
   @doc """
-  `shuttle.runtime.run_id` (or legacy flat) as a string, or `nil` when
-  absent/empty. Stamped by the daemon at dispatch; an ad-hoc (force-dispatched
-  extra) run carries an `adhoc-<ms>` id (`StandingRole.ad_hoc_run_id/1`), a
-  scheduled run a cron timestamp label.
+  `shuttle.runtime.run_id` as a string, or `nil` when absent/empty. Stamped by
+  the daemon at dispatch; an ad-hoc (force-dispatched extra) run carries an
+  `adhoc-<ms>` id (`StandingRole.ad_hoc_run_id/1`), a scheduled run a cron
+  timestamp label.
   """
   @spec run_id(map()) :: String.t() | nil
   def run_id(fiber) do
@@ -101,8 +108,8 @@ defmodule Shuttle.Continuation do
   end
 
   @doc """
-  The resumable session UUID — `shuttle.runtime.session_uuid` (or legacy flat),
-  or `nil` when absent/empty. The sole structured home for the resume id.
+  The resumable session UUID — `shuttle.runtime.session_uuid`, or `nil` when
+  absent/empty. The sole structured home for the resume id.
   """
   @spec resumable_session_id(map()) :: String.t() | nil
   def resumable_session_id(fiber) do
@@ -110,6 +117,34 @@ defmodule Shuttle.Continuation do
       uuid when is_binary(uuid) and uuid != "" -> uuid
       _ -> nil
     end
+  end
+
+  @runtime_keys ~w(dispatched_at session_uuid handed_off_at run_id)
+
+  @doc """
+  C5 boot-scan primitive: legacy flat runtime keys present on `fiber`'s
+  `shuttle:` block whose nested `shuttle.runtime.<key>` counterpart is
+  ABSENT — a fiber never lifted by `felt shuttle migrate-runtime`, which now
+  reads as having no continuation state at all (the readers above no longer
+  fall back to flat). Returns `[]` when there is nothing to flag (already
+  nested, or never had runtime state).
+  """
+  @spec flat_only_runtime_keys(map()) :: [String.t()]
+  def flat_only_runtime_keys(fiber) do
+    shuttle = shuttle_block(fiber)
+
+    runtime =
+      case Map.get(shuttle, "runtime") do
+        m when is_map(m) -> m
+        _ -> %{}
+      end
+
+    Enum.filter(@runtime_keys, fn key ->
+      case Map.get(shuttle, key) do
+        v when is_binary(v) and v != "" -> not Map.has_key?(runtime, key)
+        _ -> false
+      end
+    end)
   end
 
   @doc """
@@ -134,18 +169,12 @@ defmodule Shuttle.Continuation do
     end
   end
 
-  # nested-OR-flat: `shuttle.runtime.<key>` wins over the legacy flat
-  # `shuttle.<key>`. A non-map `runtime:` (degenerate/null) falls back to flat.
+  # C5: nested-only. A non-map `runtime:` (degenerate/null) reads as absent —
+  # no flat fallback (see the moduledoc's "Reading: nested only" section).
   defp runtime_field(shuttle, key) do
     case shuttle do
-      %{"runtime" => runtime} when is_map(runtime) ->
-        case Map.get(runtime, key) do
-          nil -> Map.get(shuttle, key)
-          value -> value
-        end
-
-      _ ->
-        Map.get(shuttle, key)
+      %{"runtime" => runtime} when is_map(runtime) -> Map.get(runtime, key)
+      _ -> nil
     end
   end
 

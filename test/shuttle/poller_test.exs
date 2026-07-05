@@ -129,10 +129,27 @@ defmodule Shuttle.PollerTest do
     # (or the worker stamping `handed_off_at`) into the fiber's frontmatter. The
     # poller reads these straight off the `felt show -j` map, so updating the map
     # is what the continuation/orphan readers see on the next poll.
+    #
+    # C5: nests runtime-key fields under `shuttle.runtime`, mirroring real felt's
+    # on-disk shape (Stage 5 — `mark-runtime` only ever writes nested) now that
+    # `Shuttle.Continuation`'s readers no longer fall back to flat. Any
+    # non-runtime key in `fields` (there are none among current callers, but
+    # keeping this generic) still merges at the top level.
+    @runtime_key_names ~w(dispatched_at session_uuid handed_off_at run_id)
+
     def put_shuttle_fields(id, fields) do
+      {runtime_fields, config_fields} = Map.split(fields, @runtime_key_names)
+
       Agent.update(__MODULE__, fn state ->
         fiber = Map.get(state.fibers, id) || %{"id" => id, "shuttle" => %{}}
-        shuttle = Map.merge(Map.get(fiber, "shuttle") || %{}, fields)
+        shuttle = Map.get(fiber, "shuttle") || %{}
+        runtime = Map.merge(Map.get(shuttle, "runtime") || %{}, runtime_fields)
+
+        shuttle =
+          shuttle
+          |> Map.merge(config_fields)
+          |> Map.put("runtime", runtime)
+
         put_in(state.fibers[id], Map.put(fiber, "shuttle", shuttle))
       end)
     end
@@ -3959,6 +3976,17 @@ defmodule Shuttle.PollerTest do
     # the retry re-dispatches again — so "running right now" flaps on watcher
     # timing. The stable invariants are the orphan record and that a second
     # dispatch happened, so assert those instead of catching the flap.
+    #
+    # Ceiling 1200 (~30s), not the file's 80-attempt (~2s) norm: this assert
+    # needs the reconcile-then-redispatch round trip to land TWICE over —
+    # once implicitly (the initial manual dispatch already happened), once via
+    # the full async tick→Task→:poll_world→apply_poll_cycle→dispatch chain
+    # this test's single `send(poller, :run_poll_cycle)` triggers. On a shared,
+    # variably-loaded machine this occasionally took >10s wall-clock (not
+    # stuck — every observed run eventually resolved, just slower under a
+    # transient load spike), so the margin is generous on purpose:
+    # `wait_until` returns the instant the condition holds, so this costs
+    # nothing beyond the ~10ms round trip on the common, unloaded path.
     assert wait_until(
              fn ->
                snap = Poller.snapshot(poller)
@@ -3969,7 +3997,7 @@ defmodule Shuttle.PollerTest do
 
                Enum.any?(snap.orphans, &(&1.fiber_id == fiber_id)) and new_session_count >= 2
              end,
-             80
+             1200
            )
 
     snap = Poller.snapshot(poller)

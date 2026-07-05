@@ -30,7 +30,9 @@ defmodule Shuttle.OriginRouter do
   error, never a silent wrong-host write.
   """
 
-  alias Shuttle.{Poller, Remote}
+  alias Shuttle.{Poller, RegistryCommon, Remote}
+
+  require Logger
 
   @default_forward_timeout_ms 30_000
 
@@ -46,7 +48,16 @@ defmodule Shuttle.OriginRouter do
 
   `nil` / `""` / `"local"` / this daemon's own host id → `:local`. An origin
   matching a configured remote → `{:remote, remote}`. Any other (unknown)
-  origin → `:local`, where the endpoint's own resolution arbitrates.
+  origin → `:local` (the endpoint's own resolution is the final arbiter — see
+  the moduledoc's Safety note), but LOUDLY now (C6): a non-empty origin that
+  reached here without matching local OR any configured remote is
+  "remote-shaped" — the composite board only ever stamps an origin that is
+  either this daemon or a name from `:remotes` — so this is either a stale
+  remote list (a remote was renamed/removed since the board cached it) or a
+  genuine misconfiguration, either of which deserves a log, not a silent
+  degrade. `Logger.warning` rather than raising: silently falling to `:local`
+  was already deliberately safe (never a wrong-host write), only the silence
+  itself was the gap.
 
   Opts (for tests / explicit wiring): `:own_host_id`, `:remotes`.
   """
@@ -60,17 +71,41 @@ defmodule Shuttle.OriginRouter do
 
       true ->
         case find_remote(origin, opts) do
-          %Remote{} = remote -> {:remote, remote}
-          nil -> :local
+          %Remote{} = remote ->
+            {:remote, remote}
+
+          nil ->
+            Logger.warning(
+              "OriginRouter: origin #{inspect(origin)} matches neither this daemon " <>
+                "(#{inspect(own)}) nor any configured remote (#{inspect(configured_remote_names(opts))}) " <>
+                "— degrading to :local; the endpoint's own resolution is the final arbiter."
+            )
+
+            :local
         end
     end
   end
 
+  defp configured_remote_names(opts), do: opts |> configured_remotes() |> Enum.map(& &1.name)
+
   defp find_remote(origin, opts) do
     opts
-    |> Keyword.get(:remotes, Application.get_env(:shuttle, :remotes, []))
-    |> Remote.from_config_list()
+    |> configured_remotes()
     |> Enum.find(&(&1.name == origin))
+  end
+
+  # C6: the ONE place `:remotes` config is read and normalized for origin
+  # routing — `RegistryCommon.normalize_remotes/1` is the same primitive
+  # `Shuttle.RemoteRegistry`/`Shuttle.RemoteFiberRegistry` already use, so a
+  # remote this daemon polls for visibility and a remote it routes writes to
+  # are guaranteed to agree; before C6 this module (and
+  # `ShuttleWeb.FeltStoresController`) called `Remote.from_config_list/1`
+  # directly instead — two parse entry points that could drift if either
+  # gained normalization the other didn't.
+  defp configured_remotes(opts) do
+    opts
+    |> Keyword.get(:remotes, Application.get_env(:shuttle, :remotes, []))
+    |> RegistryCommon.normalize_remotes()
   end
 
   @doc """

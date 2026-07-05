@@ -17,7 +17,7 @@ defmodule ShuttleWeb.FeltStoresController do
 
   use Phoenix.Controller, formats: [:json]
 
-  alias Shuttle.{FeltStores, Poller, Remote}
+  alias Shuttle.{FeltStores, Poller, RegistryCommon, Remote}
 
   @remote_timeout_ms 8_000
 
@@ -25,9 +25,13 @@ defmodule ShuttleWeb.FeltStoresController do
     own = Poller.own_host_id()
     local = local_origin(own)
 
+    # C6: the same `:remotes` normalize path `Shuttle.OriginRouter` and the two
+    # remote registries use — not `Remote.from_config_list/1` directly, so
+    # this endpoint's remote list can never drift from what routing/polling
+    # consider "configured".
     origins =
       Application.get_env(:shuttle, :remotes, [])
-      |> Remote.from_config_list()
+      |> RegistryCommon.normalize_remotes()
       |> Enum.reduce(%{own => local}, fn remote, acc ->
         Map.put(acc, remote.name, remote_origin(remote))
       end)

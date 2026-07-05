@@ -119,24 +119,45 @@ defmodule Shuttle.DispatchIntegrationTest do
 
   # ── Continuation helpers (the felt-history replacement) ──
 
-  # Mirror the dispatcher's at-spawn stamp: `session_uuid` + `dispatched_at` into
-  # the fiber's `shuttle:` block (the real .md under `host`). `at` lets a test
-  # order a later handoff against it. The fiber must already exist (write_fiber).
-  defp write_dispatch_marker(host, id, session_id, at \\ DateTime.utc_now()) do
-    :ok =
-      Shuttle.FiberDoc.edit_path(fiber_md_path(host, id), [
-        {:put_nested, "shuttle", "session_uuid", session_id},
-        {:put_nested, "shuttle", "dispatched_at", DateTime.to_iso8601(at)}
-      ])
+  # Mirror the dispatcher's at-spawn stamp: `session_uuid` + `dispatched_at`
+  # into the fiber's `shuttle.runtime` block (the real .md under `host`), by
+  # shelling the REAL `felt shuttle mark-runtime` — the actual production
+  # write path (C5: it nests under shuttle.runtime; `FrontmatterEdit`'s
+  # `:put_nested` only reaches one level deep, so hand-rolled text surgery
+  # can't produce the real shape here — shelling the CLI can). `at` lets a
+  # test order a later handoff against it. The fiber must already exist
+  # (write_fiber).
+  defp write_dispatch_marker(_host, id, session_id, at \\ DateTime.utc_now()) do
+    {_output, 0} =
+      IntegrationRunner.cmd(
+        "felt",
+        [
+          "shuttle",
+          "mark-runtime",
+          id,
+          "--dispatched-at",
+          DateTime.to_iso8601(at),
+          "--session",
+          session_id
+        ],
+        []
+      )
+
+    :ok
   end
 
-  # Mirror the worker's `felt shuttle handoff`: stamp `shuttle.handed_off_at` in
-  # RFC3339 UTC — the clean-exit signal the daemon compares against dispatched_at.
-  defp write_handoff_marker(host, id, at \\ DateTime.utc_now()) do
-    :ok =
-      Shuttle.FiberDoc.edit_path(fiber_md_path(host, id), [
-        {:put_nested, "shuttle", "handed_off_at", DateTime.to_iso8601(at)}
-      ])
+  # Mirror the worker's `felt shuttle handoff`: stamp `shuttle.runtime.handed_off_at`
+  # in RFC3339 UTC (via the real `felt shuttle mark-runtime`) — the clean-exit
+  # signal the daemon compares against dispatched_at.
+  defp write_handoff_marker(_host, id, at \\ DateTime.utc_now()) do
+    {_output, 0} =
+      IntegrationRunner.cmd(
+        "felt",
+        ["shuttle", "mark-runtime", id, "--handed-off-at", DateTime.to_iso8601(at)],
+        []
+      )
+
+    :ok
   end
 
   # The fiber's on-disk `.md`: host/.felt/<id segments>/<basename>.md (mirrors
