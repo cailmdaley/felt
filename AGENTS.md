@@ -307,7 +307,7 @@ there, then run `~/loom/setup.sh`. The hook needs `jq` on PATH; without it it
 exits silently (no events → no activity ranking, but the board still serves).
 Each host's daemon tails its own host's `~/.shuttle/events.jsonl`.
 
-**Connecting to candide and cineca (SSH auth — read this first).** The two
+**Connecting to candide, cineca, and amundsen (SSH auth — read this first).** The
 remotes authenticate differently, and getting it wrong looks like "the host is
 down" when it isn't:
 
@@ -335,6 +335,13 @@ down" when it isn't:
   (it suppresses the cert path and falsely reports a dead host), and ignore
   `~/.ssh/ssh_wrapper.sh` entirely — it's VS Code's remote helper, unrelated to
   Shuttle.
+- **amundsen** (`amundsen.grid.uchicago.edu`, user `cailmdaley`, UChicago SPT
+  grid) — plain pubkey auth, no cert dance; `ssh amundsen` just works. Use the
+  ssh **alias** `amundsen` (not the bare hostname — the alias carries the user
+  and is what the tunnel/rsync commands assume). The alias also sets a couple of
+  LocalForwards (plot ports) + a RemoteForward that collide harmlessly when a
+  session already holds them; pass `-o ClearAllForwardings=yes` on one-off
+  ssh/rsync to silence the `Address already in use` noise.
 
 **Deploying is ALWAYS safe — local or remote — and is never a blocker.**
 Rebuilding and restarting the daemon (`make all`, cycling `:4000`, reloading the
@@ -369,18 +376,21 @@ in on before it ships (a capability removed, a contract redrawn, a load-bearing
 model choice); even then, surface the alternatives in the fiber and keep moving
 rather than treating the deploy *mechanics* as the gate.
 
-**Deploying to remote hosts (candide, cineca):** push to GitHub first, then build
-on the host — don't copy the macOS escript, as BEAM bytecode format varies across
-OTP versions and the binary will crash on startup on a different host. Both
-clusters run the merged felt repo from **`~/dev/felt`** (post-B3); the respawn
-loop is driven by `~/.local/bin/shuttle-launch` — a copy of the tracked
+**Deploying to remote hosts (candide, cineca, amundsen):** push to GitHub first,
+then build on the host — don't copy the macOS escript, as BEAM bytecode format
+varies across OTP versions and the binary will crash on startup on a different
+host. candide/cineca run the merged felt repo from **`~/dev/felt`** (post-B3);
+**amundsen's checkout is `~/code/felt`** (its BEAM toolchain is kerl-OTP +
+precompiled Elixir under `~/.local`, not `~/dev/felt`). The respawn loop is
+driven by `~/.local/bin/shuttle-launch` — a copy of the tracked
 `bin/shuttle-launch` that `bootstrap.sh` installs (repo resolved via
 `SHUTTLE_DIR` or the script's own location; the loop backs off exponentially
 on fast daemon exits, 2s→300s).
 
 ```bash
-ssh candide "cd ~/dev/felt && git pull && make daemon"
-ssh cineca  "cd ~/dev/felt && git pull && make daemon"
+ssh candide  "cd ~/dev/felt  && git pull && make daemon"
+ssh cineca   "cd ~/dev/felt  && git pull && make daemon"
+ssh amundsen "cd ~/code/felt && git pull && make daemon"   # note: ~/code/felt
 ```
 
 After a remote deploy, verify both `/api/v1/version` and one behavior-shaped
@@ -436,6 +446,7 @@ path is **build `ui/dist` locally (where the deps resolve) and `rsync` it**:
 cd ui && npm run build              # locally; lightcone-ui present → paper entry included
 rsync -az --delete ui/dist/ candide:~/dev/felt/ui/dist/
 rsync -az --delete ui/dist/ cineca:~/dev/felt/ui/dist/
+rsync -az --delete -e "ssh -o ClearAllForwardings=yes" ui/dist/ amundsen:code/felt/ui/dist/   # amundsen: ~/code/felt
 ```
 
 (The renderer is compiled *into* the bundle, so a remote serving the shipped
@@ -524,7 +535,7 @@ felt shuttle validate-identity                # UID migration/cross-city validat
   WRITE is **owner-routed via `Shuttle.OriginRouter`**: the composite board
   stamps each fiber's `origin`, the client carries it back, and the local daemon
   forwards to the owner's identical endpoint over the SSH LocalForward
-  (candide→:4001, cineca→:4002). The `~/loom` git mirror replicating a remote
+  (candide→:4001, cineca→:4002, amundsen→:4003). The `~/loom` git mirror replicating a remote
   fiber's files locally is **incidental and must never be relied on** — if any
   feature works only because a file happened to git-sync, that is a bug. The
   symptom when this invariant is violated: a remote card shows its outcome (it
@@ -619,7 +630,7 @@ tmux ls | grep '^shuttle-'               # live workers
 curl -s http://127.0.0.1:4000/api/v1/agents | jq
 curl -s http://127.0.0.1:4000/api/v1/state | jq
 curl -s http://127.0.0.1:4000/api/v1/state/composite | jq
-felt shuttle validate-identity                # checks :4000/:4001/:4002 by default
+felt shuttle validate-identity                # checks :4000/:4001/:4002/:4003 by default
 ```
 
 Dispatch sanity ladder:

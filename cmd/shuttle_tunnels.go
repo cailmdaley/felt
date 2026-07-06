@@ -44,8 +44,9 @@ type tunnelTemplateData struct {
 }
 
 var defaultTunnelSpecs = map[string]tunnelSpec{
-	"candide": {Name: "candide", LocalPort: 4001, HoldCommand: "sleep 2147483647"},
-	"cineca":  {Name: "cineca", LocalPort: 4002},
+	"candide":  {Name: "candide", LocalPort: 4001, HoldCommand: "sleep 2147483647"},
+	"cineca":   {Name: "cineca", LocalPort: 4002},
+	"amundsen": {Name: "amundsen", LocalPort: 4003},
 }
 
 var (
@@ -63,13 +64,13 @@ onto local ports. The generated plists are written into ~/Library/LaunchAgents
 by default.
 
 Examples:
-  felt shuttle tunnels install              # candide + cineca, write + bootstrap
+  felt shuttle tunnels install              # candide + cineca + amundsen, write + bootstrap
   felt shuttle tunnels install candide      # only candide
   felt shuttle tunnels install --write-only # write plists but don't call launchctl`,
 }
 
 var tunnelsInstallCmd = &cobra.Command{
-	Use:   "install [candide|cineca ...]",
+	Use:   "install [candide|cineca|amundsen ...]",
 	Short: "Write and optionally bootstrap launchd plists for Shuttle tunnels",
 	Args:  cobra.ArbitraryArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -179,7 +180,7 @@ func resolveTunnelSpecs(requested []string) ([]tunnelSpec, error) {
 	for _, name := range requested {
 		spec, ok := defaultTunnelSpecs[name]
 		if !ok {
-			return nil, fmt.Errorf("unknown tunnel %q (supported: candide, cineca)", name)
+			return nil, fmt.Errorf("unknown tunnel %q (supported: candide, cineca, amundsen)", name)
 		}
 		if seen[name] {
 			continue
