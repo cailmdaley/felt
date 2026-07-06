@@ -22,18 +22,32 @@ defmodule ShuttleWeb.KillController do
 
   use Phoenix.Controller, formats: [:json]
 
-  alias Shuttle.{OriginRouter, Poller}
+  alias Shuttle.{OriginRouter, Poller, RemoteFiberRegistry}
 
   def create(conn, %{"fiber_id" => fiber_id} = params) when is_binary(fiber_id) do
     case OriginRouter.route(Map.get(params, "origin")) do
       {:remote, remote} ->
-        relay(conn, OriginRouter.forward(remote, "/api/v1/kill", conn.body_params))
+        result = OriginRouter.forward(remote, "/api/v1/kill", conn.body_params)
+        # A forwarded kill tore down the remote's worker; invalidate the
+        # RemoteFiberRegistry feed cache so the board stops showing it live before
+        # the next remote poll. Mirrors Shuttle.Transition's refresh_remote_feed.
+        refresh_remote_feed(remote.name, result)
+        relay(conn, result)
 
       :local ->
         case Poller.kill_session(fiber_id) do
-          {:ok, :no_session} -> json(conn, %{fiber_id: fiber_id, killed: false})
-          {:ok, session} -> json(conn, %{fiber_id: fiber_id, killed: true, session: session})
-          {:error, reason} -> conn |> put_status(500) |> json(%{fiber_id: fiber_id, killed: false, error: reason})
+          {:ok, :no_session} ->
+            json(conn, %{fiber_id: fiber_id, killed: false})
+
+          {:ok, session} ->
+            # Poller.serve stamps liveness from state.running, so the kill's
+            # synchronous teardown already drops the card off in-flight; the
+            # document refresh keeps the cached doc consistent (belt-and-braces).
+            Poller.refresh_document(fiber_id)
+            json(conn, %{fiber_id: fiber_id, killed: true, session: session})
+
+          {:error, reason} ->
+            conn |> put_status(500) |> json(%{fiber_id: fiber_id, killed: false, error: reason})
         end
     end
   end
@@ -55,4 +69,16 @@ defmodule ShuttleWeb.KillController do
     |> put_status(502)
     |> json(%{error: "forward to #{name} failed: #{inspect(reason)}"})
   end
+
+  # Best-effort remote feed invalidation after a successful forward, mirroring
+  # Shuttle.Transition.refresh_remote_feed: only on a 2xx, and a refresh failure
+  # (or a dead registry) must never fail the request.
+  defp refresh_remote_feed(name, {:forwarded, status, _body}) when status in 200..299 do
+    RemoteFiberRegistry.refresh(name)
+    :ok
+  catch
+    :exit, _reason -> :ok
+  end
+
+  defp refresh_remote_feed(_name, _result), do: :ok
 end

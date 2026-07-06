@@ -32,12 +32,17 @@ defmodule ShuttleWeb.FeltEditController do
   use Phoenix.Controller, formats: [:json]
   import ShuttleWeb.RelayHelpers, only: [relay_text: 2]
 
-  alias Shuttle.{Felt, FeltStores, OriginRouter}
+  alias Shuttle.{Felt, FeltStores, OriginRouter, Poller, RemoteFiberRegistry}
 
   def create(conn, %{"fiber_id" => fiber_id} = params) when is_binary(fiber_id) do
     case OriginRouter.route(Map.get(params, "origin")) do
       {:remote, remote} ->
-        relay_text(conn, OriginRouter.forward(remote, "/api/v1/felt-edit", conn.body_params))
+        result = OriginRouter.forward(remote, "/api/v1/felt-edit", conn.body_params)
+        # The forwarded edit mutated the remote's loom mirror; invalidate the
+        # RemoteFiberRegistry feed cache so the board reflects it before the next
+        # remote poll. Mirrors Shuttle.Transition's refresh_remote_feed.
+        refresh_remote_feed(remote.name, result)
+        relay_text(conn, result)
 
       :local ->
         create_local(conn, fiber_id, params)
@@ -59,6 +64,11 @@ defmodule ShuttleWeb.FeltEditController do
          {:ok, due_args} <- due_args(params),
          {:ok, host, address} <- host_for_fiber(fiber_id),
          {:ok, output} <- run(host, address, add, remove, unset, set_pairs, due_args) do
+      # The edit mutated the felt doc (tags / horizon / due); re-read it into the
+      # document cache NOW so the kanban's post-edit refetch reflects the change
+      # instead of snapping the card back until the next poll.
+      Poller.refresh_document(address)
+
       conn
       |> put_resp_content_type("text/plain")
       |> send_resp(200, output)
@@ -143,4 +153,16 @@ defmodule ShuttleWeb.FeltEditController do
   end
 
   defp string_list(_), do: []
+
+  # Best-effort remote feed invalidation after a successful forward, mirroring
+  # Shuttle.Transition.refresh_remote_feed: only on a 2xx, and a refresh failure
+  # (or a dead registry) must never fail the request.
+  defp refresh_remote_feed(name, {:forwarded, status, _body}) when status in 200..299 do
+    RemoteFiberRegistry.refresh(name)
+    :ok
+  catch
+    :exit, _reason -> :ok
+  end
+
+  defp refresh_remote_feed(_name, _result), do: :ok
 end
