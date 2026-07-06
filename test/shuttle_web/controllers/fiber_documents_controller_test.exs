@@ -308,6 +308,124 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
     assert entry["runtime"]["agent"] == "codex"
   end
 
+  test "GET /api/v1/fibers?shuttle=true serves the warm poller cache with runtime AND held overlays",
+       %{store: store} do
+    # This fiber is NEVER written to disk: only the poller's in-memory document
+    # cache can produce it. If the endpoint fell through to the live `felt ls`
+    # path the row would be absent and this test would fail — its presence proves
+    # the warm cache was served. The cache pre-stamps `runtime` (a running
+    # worker); the controller layers `held` (a boot-quarantine-parked launch) on
+    # top. Asserting BOTH overlays proves the controller applies `put_held` over
+    # the cached, already-runtime-stamped rows without re-stamping runtime.
+    uid = "01KVRTNM000000000000000001"
+    session = "shuttle-tests-live"
+
+    entry = %{
+      felt_store: store,
+      path: "tests/live/live.md",
+      fiber: %{
+        "id" => "tests/live",
+        "slug" => "tests/live",
+        "uid" => uid,
+        "name" => "Live worker",
+        "status" => "active",
+        "shuttle" => %{"kind" => "pinned", "host" => "test-host"}
+      }
+    }
+
+    now = DateTime.utc_now()
+    {poller, original_state} = start_or_reuse_poller(store)
+
+    # Let the Poller's boot poll (`schedule_tick(0)` in init/1) SETTLE before we
+    # inject: that poll rebuilds `document_cache` from disk (where "tests/live"
+    # does not exist) and would wipe the row below. Once it has settled the next
+    # tick is 600s away, so the injected cache survives deterministically.
+    wait_until(fn -> :sys.get_state(poller).document_cache_ready end)
+
+    :sys.replace_state(poller, fn state ->
+      %{
+        state
+        | own_host_id: "test-host",
+          document_cache_ready: true,
+          document_cache: %{uid => %{modified_at: "m1", entry: entry}},
+          running:
+            Map.put(state.running, uid, %{
+              fiber_id: "tests/live",
+              uid: uid,
+              session: session,
+              agent_id: "codex",
+              started_at: now,
+              last_activity_at: now
+            }),
+          parked_launches: %{uid => %{fiber_id: "tests/live", uid: uid, parked_at: now}}
+      }
+    end)
+
+    restore_poller_on_exit(poller, original_state)
+
+    conn = get(api_conn(), "/api/v1/fibers?shuttle=true")
+    assert conn.status == 200
+
+    row =
+      conn.resp_body
+      |> Jason.decode!()
+      |> Map.fetch!("fibers")
+      |> Enum.find(&(&1["fiber"]["slug"] == "tests/live"))
+
+    assert row, "warm-cache row was not served — the endpoint fell through to the live path"
+
+    # Runtime overlay: already stamped by the cache (not re-applied by the controller).
+    assert row["runtime"]["tmux_session"] == session
+    assert row["runtime"]["agent"] == "codex"
+
+    # Held overlay: applied by the controller on top of the cached rows.
+    assert row["held"] == true
+    assert is_integer(row["held_since"])
+  end
+
+  test "GET /api/v1/fibers?shuttle=true falls back to the live path when the cache is cold",
+       %{store: store} do
+    # The poller is up but its document cache is NOT ready (no poll has warmed
+    # it). The endpoint must fall back to the live `felt ls` path and still serve
+    # this on-disk owned fiber.
+    write_fiber!(store, "tests/cold", """
+    ---
+    name: Cold fallback
+    status: active
+    shuttle:
+      kind: oneshot
+      host: test-host
+    ---
+
+    Body.
+    """)
+
+    {poller, original_state} = start_or_reuse_poller(store)
+
+    # Wait out the boot poll, THEN force the cache cold — otherwise that poll
+    # could settle after our injection, flip `document_cache_ready` back to true,
+    # and serve "tests/cold" from the cache instead of the live fallback we mean
+    # to exercise here. Post-settle, the next tick is 600s away, so cold sticks.
+    wait_until(fn -> :sys.get_state(poller).document_cache_ready end)
+
+    :sys.replace_state(poller, fn state ->
+      %{state | own_host_id: "test-host", document_cache_ready: false, document_cache: %{}}
+    end)
+
+    restore_poller_on_exit(poller, original_state)
+
+    conn = get(api_conn(), "/api/v1/fibers?shuttle=true")
+    assert conn.status == 200
+
+    names =
+      conn.resp_body
+      |> Jason.decode!()
+      |> Map.fetch!("fibers")
+      |> Enum.map(& &1["fiber"]["name"])
+
+    assert "Cold fallback" in names
+  end
+
   test "GET /api/v1/fibers canonicalizes ids through symlinked stores", %{store: store} do
     # Build the shapepipe shape: loom's `.felt/shapepipe` is a symlink into a
     # separate project store. `felt ls` walks loom and reports the traversal id
@@ -917,6 +1035,54 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
 
   defp restore_app_env(key, nil), do: Application.delete_env(:shuttle, key)
   defp restore_app_env(key, value), do: Application.put_env(:shuttle, key, value)
+
+  # Start a Poller under its default name (so the controller's calls reach it),
+  # or reuse a running one — returning the original state to restore on exit.
+  defp start_or_reuse_poller(store) do
+    case Process.whereis(Shuttle.Poller) do
+      nil ->
+        {:ok, pid} =
+          Shuttle.Poller.start_link(
+            name: Shuttle.Poller,
+            poll_interval_ms: 600_000,
+            max_concurrent_workers: 0,
+            felt_stores: [store]
+          )
+
+        {pid, nil}
+
+      pid ->
+        {pid, :sys.get_state(pid)}
+    end
+  end
+
+  # Block until `fun` returns truthy, polling briefly (default ≤2s). Used to let
+  # a freshly started Poller's boot poll settle before injecting state.
+  defp wait_until(fun, tries \\ 200) do
+    cond do
+      fun.() ->
+        :ok
+
+      tries <= 0 ->
+        flunk("wait_until: condition never became true")
+
+      true ->
+        Process.sleep(10)
+        wait_until(fun, tries - 1)
+    end
+  end
+
+  defp restore_poller_on_exit(poller, original_state) do
+    on_exit(fn ->
+      if Process.alive?(poller) do
+        if original_state do
+          :sys.replace_state(poller, fn _ -> original_state end)
+        else
+          GenServer.stop(poller)
+        end
+      end
+    end)
+  end
 
   defp write_fiber!(store, fiber_id, content) do
     segments = String.split(fiber_id, "/")

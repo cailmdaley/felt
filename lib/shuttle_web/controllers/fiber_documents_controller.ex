@@ -174,11 +174,12 @@ defmodule ShuttleWeb.FiberDocumentsController do
     })
   end
 
-  # The local owner feed: same body as `GET /api/v1/fibers?shuttle=true`. Felt is
-  # the authority for which local constitutions exist; the poller cache is only a
-  # runtime overlay. That keeps board visibility independent from the poller's
-  # narrower dispatch/cache lifecycle while preserving local tmux liveness when
-  # the poller has it.
+  # The local owner feed: same body as `GET /api/v1/fibers?shuttle=true`. It now
+  # routes through the same cache-first path (`list_fibers(false, true)`): the
+  # poller's document cache (which mirrors felt) serves it fast, and a cold or
+  # absent cache falls back to a live felt read — so board visibility survives
+  # the poller's narrower dispatch/cache lifecycle, with local tmux liveness
+  # overlaid when the poller has it.
   defp local_feed do
     case list_fibers(false, true) do
       {:ok, %{host: host, fibers: entries}} -> {host, entries, false}
@@ -202,7 +203,54 @@ defmodule ShuttleWeb.FiberDocumentsController do
   defp render_error(reason) when is_atom(reason), do: to_string(reason)
   defp render_error(reason), do: inspect(reason)
 
+  # The owner-only kanban feed (`GET /api/v1/fibers?shuttle=true`) — the path
+  # remote viewers poll every 5s over the SSH tunnel. Serve it from the poller's
+  # in-memory document cache (microseconds) instead of a LIVE `felt ls` per store
+  # (5-12s on an overloaded shared login node, which blows the viewer's 8s
+  # timeout and paints a spurious staleness badge).
+  #
+  # The cached rows are ALREADY owner-filtered (same predicate as the live path —
+  # see the equivalence note below) and runtime-stamped, but the cache does NOT
+  # carry the parked/held overlay, so we map `Snapshot.put_held/2` over them here.
+  # We do NOT re-apply `put_runtime` — the cache already did.
+  #
+  # A cold cache (before the first poll warms it) or an unavailable poller (down,
+  # timing out, not started in tests) falls back to the live path UNCHANGED,
+  # preserving correctness at every moment.
+  #
+  # Owner-predicate equivalence: the cache filters with
+  # `Shuttle.Poller.owned_feed_entry?`/`host_owned?` and the live path with
+  # `Shuttle.FiberDocuments`'s `owned_kanban_fiber?`/`host_owned?`. Both admit a
+  # fiber iff its `shuttle:` block carries a non-empty `host:` equal to this
+  # daemon's `own_host_id` (both resolve it via `Shuttle.Poller.own_host_id/0`),
+  # and both include every felt status (the cache's `felt ls --has-field shuttle`
+  # widens to all statuses; the live path passes `-s all`). Same set of fibers.
   defp list_fibers(false, true) do
+    case cached_owner_feed() do
+      {:ok, body} -> {:ok, body}
+      :fallback -> live_owner_feed()
+    end
+  end
+
+  defp list_fibers(with_body?, shuttle_only?) do
+    Shuttle.FiberDocuments.list(with_body: with_body?, shuttle_only: shuttle_only?)
+  end
+
+  defp cached_owner_feed do
+    case Shuttle.Poller.cached_fiber_documents(felt_stores: Shuttle.FeltStores.configured_hosts()) do
+      {:ok, %{fibers: entries} = body} ->
+        held = Shuttle.Poller.parked_index()
+        {:ok, %{body | fibers: Enum.map(entries, &Snapshot.put_held(&1, held))}}
+
+      _ ->
+        :fallback
+    end
+  catch
+    # Poller down / not started / call timeout → serve the live path instead.
+    :exit, _ -> :fallback
+  end
+
+  defp live_owner_feed do
     case Shuttle.FiberDocuments.list(with_body: false, shuttle_only: true) do
       {:ok, %{fibers: entries} = body} ->
         {:ok, %{body | fibers: overlay_runtime(entries)}}
@@ -210,10 +258,6 @@ defmodule ShuttleWeb.FiberDocumentsController do
       other ->
         other
     end
-  end
-
-  defp list_fibers(with_body?, shuttle_only?) do
-    Shuttle.FiberDocuments.list(with_body: with_body?, shuttle_only: shuttle_only?)
   end
 
   defp overlay_runtime(entries) do
