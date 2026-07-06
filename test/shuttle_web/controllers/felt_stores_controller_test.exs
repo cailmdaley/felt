@@ -65,6 +65,41 @@ defmodule ShuttleWeb.FeltStoresControllerTest do
            ]
   end
 
+  test "surfaces the curated picker-project list on the local origin" do
+    prev_projects_file = System.get_env("FELT_PROJECTS_FILE")
+
+    projects_path =
+      Path.join(
+        System.tmp_dir!(),
+        "shuttle-projects-controller-#{System.unique_integer([:positive])}.json"
+      )
+
+    System.put_env("FELT_PROJECTS_FILE", projects_path)
+    File.mkdir_p!(Path.dirname(projects_path))
+
+    File.write!(
+      projects_path,
+      Jason.encode!(%{"version" => 1, "projects" => ["~/loom", "/tmp/talks"]})
+    )
+
+    on_exit(fn ->
+      File.rm(projects_path)
+
+      case prev_projects_file do
+        nil -> System.delete_env("FELT_PROJECTS_FILE")
+        value -> System.put_env("FELT_PROJECTS_FILE", value)
+      end
+    end)
+
+    conn = get(api_conn(), "/api/v1/felt-stores")
+    assert conn.status == 200
+    body = Jason.decode!(conn.resp_body)
+    host = body["host"]
+
+    # Picker-project list is its own field, distinct from the poll-store list.
+    assert get_in(body, ["origins", host, "projects"]) == [Path.expand("~/loom"), "/tmp/talks"]
+  end
+
   test "persists normalized felt stores" do
     conn =
       post(

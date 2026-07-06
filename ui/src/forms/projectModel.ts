@@ -87,6 +87,11 @@ export interface StoreRegistryOrigin {
   stale?: boolean
   felt_stores?: string[]
   feltStores?: string[]
+  /** Curated picker-project list (Stash/Capture cities). When present it is
+   *  authoritative for this origin — it replaces the felt-store + current-cards
+   *  derivation. Absent → fall back to that derivation, so an uncurated host is
+   *  unchanged. Separate from `felt_stores`, which stays TCC-scoped for polling. */
+  projects?: string[]
   last_error?: string
 }
 
@@ -225,6 +230,7 @@ function parseStoreRegistry(body: unknown): StoreRegistry {
         kind: typeof rec.kind === 'string' ? rec.kind : undefined,
         stale: rec.stale === true,
         felt_stores: feltStores,
+        projects: stringArray(rec.projects),
         last_error: typeof rec.last_error === 'string' ? rec.last_error : undefined,
       }
     }
@@ -248,9 +254,16 @@ function projectsFromRegistry(
   const origins = registry.origins ?? {}
   const projects: ProjectEntry[] = []
   const seen = new Set<string>()
+  // Origins that ship a curated `projects` list own their entries outright: the
+  // list is the city set, and the felt-store + current-cards derivation is
+  // skipped for them (below). An origin with no curated list keeps the old
+  // behavior, so this is purely additive.
+  const curatedOrigins = new Set<string>()
 
   for (const [originId, origin] of Object.entries(origins)) {
-    const stores = origin.felt_stores ?? origin.feltStores ?? []
+    const curated = origin.projects ?? []
+    if (curated.length > 0) curatedOrigins.add(originId)
+    const stores = curated.length > 0 ? curated : origin.felt_stores ?? origin.feltStores ?? []
     for (const rawPath of stores) {
       const path = rawPath.trim().replace(/\/+$/, '')
       if (!path) continue
@@ -261,14 +274,20 @@ function projectsFromRegistry(
       const acc = groups.get(key)
       const name = basename(path)
       const kind = origin.kind === 'remote' || feedOrigins[originId]?.kind === 'remote' ? 'remote' : 'local'
+      const feltStore = acc?.feltStore ?? path
+      // A project that IS its own felt store (the loom root, a private store)
+      // has store-root-relative ids → prefix `''`. Structural, so it overrides
+      // the basename heuristic (which a stray `loom/`-pathed fiber would mislead).
+      const norm = (p: string): string => p.replace(/\/+$/, '')
+      const isStoreRoot = norm(path) === norm(feltStore)
       projects.push({
         id: key,
         name,
         path,
         originId,
         isLocal: kind === 'local' || originId === feedHost || originId === registry.host,
-        loomPrefix: acc ? substorePrefix(acc.slugs, name) : '',
-        feltStore: acc?.feltStore ?? path,
+        loomPrefix: isStoreRoot ? '' : acc ? substorePrefix(acc.slugs, name) : '',
+        feltStore,
         lastActivity: acc?.lastActivity ?? 0,
       })
     }
@@ -279,6 +298,9 @@ function projectsFromRegistry(
   // the authoritative signal for those working dirs; closed-only dirs are
   // historical and local dirs stay registry-curated.
   for (const acc of groups.values()) {
+    // A curated origin's city set is closed — don't let a current card resurrect
+    // a project dir the human deliberately left off the list.
+    if (curatedOrigins.has(acc.originId)) continue
     const origin = origins[acc.originId]
     const feedOrigin = feedOrigins[acc.originId]
     if (!acc.current || origin?.stale === true || feedOrigin?.stale === true) continue

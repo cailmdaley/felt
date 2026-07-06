@@ -17,7 +17,7 @@ defmodule ShuttleWeb.FeltStoresController do
 
   use Phoenix.Controller, formats: [:json]
 
-  alias Shuttle.{FeltStores, Poller, RegistryCommon, Remote}
+  alias Shuttle.{FeltStores, Poller, Projects, RegistryCommon, Remote}
 
   @remote_timeout_ms 8_000
 
@@ -69,7 +69,11 @@ defmodule ShuttleWeb.FeltStoresController do
       kind: "local",
       stale: false,
       felt_stores: FeltStores.configured_base_hosts(),
-      expanded_felt_stores: FeltStores.configured_hosts()
+      expanded_felt_stores: FeltStores.configured_hosts(),
+      # The curated picker-project list (Stash/Capture cities), separate from the
+      # TCC-scoped poll-store list above. Absent/empty → the forms fall back to
+      # store-registry + current-cards derivation, so this is purely additive.
+      projects: Projects.configured_projects()
     }
     |> Map.put(:host, host)
   end
