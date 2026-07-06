@@ -27,7 +27,12 @@ config :shuttle,
   # SSH tunnels. Each entry: %{name: String, url: String,
   # poll_interval_ms: pos_integer (default 5000), request_timeout_ms:
   # pos_integer (default 2000), stale_multiplier: pos_integer (default
-  # 2)}. Empty by default — local-only setups pay nothing.
+  # 4 ⇒ 20s grace at the 5s poll interval)}. Staleness is purely
+  # time-since-last-success, so this grace is the hysteresis: 20s
+  # tolerates a single 8s-timeout blip (and most double-blips) without
+  # flashing the "waiting on <host>" badge, while still surfacing a
+  # genuine outage within ~20s. Empty by default — local-only setups
+  # pay nothing.
   #
   # Example, after running `felt shuttle tunnels install`:
   #

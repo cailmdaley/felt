@@ -23,7 +23,7 @@ defmodule Shuttle.Remote do
     :url,
     poll_interval_ms: 5_000,
     request_timeout_ms: 2_000,
-    stale_multiplier: 2
+    stale_multiplier: 4
   ]
 
   @type t :: %__MODULE__{
@@ -55,8 +55,12 @@ defmodule Shuttle.Remote do
   Defaults:
     * `poll_interval_ms` — 5_000
     * `request_timeout_ms` — 2_000
-    * `stale_multiplier` — 2 (entry becomes stale after
-      `stale_multiplier × poll_interval_ms` without a successful poll)
+    * `stale_multiplier` — 4 (entry becomes stale after
+      `stale_multiplier × poll_interval_ms` without a successful poll ⇒
+      20s at the 5s poll interval). Staleness is purely time-since-last-success,
+      so this grace is the hysteresis: it tolerates a single 8s-timeout blip
+      (and most double-blips) without flashing the badge, while still surfacing
+      a genuine outage within ~20s.
   """
   @spec from_config(map() | keyword()) :: t() | nil
   def from_config(%{} = entry) do
@@ -71,7 +75,7 @@ defmodule Shuttle.Remote do
         fetch(entry, :request_timeout_ms) || fetch(entry, "request_timeout_ms") || 2_000
 
       stale_multiplier =
-        fetch(entry, :stale_multiplier) || fetch(entry, "stale_multiplier") || 2
+        fetch(entry, :stale_multiplier) || fetch(entry, "stale_multiplier") || 4
 
       %__MODULE__{
         name: name,

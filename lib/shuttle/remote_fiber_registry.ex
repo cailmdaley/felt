@@ -226,7 +226,8 @@ defmodule Shuttle.RemoteFiberRegistry do
   end
 
   # A fetch Task crashed before sending a result (the Default client rescues, so
-  # this is rare). Mark the origin's feed stale and clear the in-flight guard.
+  # this is rare). Record the failure (without flipping the badge) and clear the
+  # in-flight guard.
   def handle_info({:DOWN, ref, :process, _pid, reason}, state) when is_reference(ref) do
     case Map.pop(state.tasks, ref) do
       {nil, _tasks} ->
@@ -234,7 +235,7 @@ defmodule Shuttle.RemoteFiberRegistry do
 
       {name, tasks} ->
         Logger.warning("RemoteFiberRegistry: #{name} fiber fetch crashed: #{inspect(reason)}")
-        feeds = mark_stale(state.feeds, name, reason, DateTime.utc_now())
+        feeds = record_failure(state.feeds, name, reason, DateTime.utc_now())
         {:noreply, %{state | tasks: tasks, feeds: feeds}}
     end
   end
@@ -318,7 +319,6 @@ defmodule Shuttle.RemoteFiberRegistry do
       fibers: [],
       last_polled_at: nil,
       last_attempt_at: nil,
-      stale: true,
       last_error: nil,
       remote: remote
     }
@@ -327,7 +327,7 @@ defmodule Shuttle.RemoteFiberRegistry do
   defp initial_entry_for(%State{remotes: remotes}, name) do
     case Enum.find(remotes, &(&1.name == name)) do
       %Remote{} = remote -> initial_entry(remote)
-      _ -> %{fibers: [], last_polled_at: nil, last_attempt_at: nil, stale: true, last_error: nil}
+      _ -> %{fibers: [], last_polled_at: nil, last_attempt_at: nil, last_error: nil}
     end
   end
 
@@ -342,25 +342,31 @@ defmodule Shuttle.RemoteFiberRegistry do
       | fibers: fibers,
         last_polled_at: now,
         last_attempt_at: now,
-        stale: false,
         last_error: nil
     }
   end
 
   defp apply_result(entry, {:error, reason}, now) do
     Logger.debug("RemoteFiberRegistry: fiber fetch failed: #{inspect(reason)}")
-    # Keep the last good feed but mark it stale, mirroring RemoteRegistry's
-    # failure_entry: a transient blip shouldn't blank the board.
-    %{entry | last_attempt_at: now, stale: true, last_error: reason}
+    # A failed poll records THAT it failed but does not itself declare the feed
+    # stale: last-good `fibers` and the last-success `last_polled_at` are left
+    # untouched, so a single blip only lets time accrue toward the grace window.
+    # Staleness is decided purely by `stale?/2` (time since last success) — a
+    # genuine outage crosses stale_multiplier × poll_interval; one 8s-timeout
+    # does not.
+    %{entry | last_attempt_at: now, last_error: reason}
   end
 
-  defp mark_stale(feeds, name, reason, now) do
+  # The `:DOWN` crash path (rare — the Default client rescues). Same contract as
+  # a failed fetch: record the failure without touching last-good state or the
+  # last-success timestamp; time alone drives the badge.
+  defp record_failure(feeds, name, reason, now) do
     case Map.get(feeds, name) do
       nil ->
         feeds
 
       entry ->
-        Map.put(feeds, name, %{entry | last_attempt_at: now, stale: true, last_error: reason})
+        Map.put(feeds, name, %{entry | last_attempt_at: now, last_error: reason})
     end
   end
 
@@ -380,12 +386,19 @@ defmodule Shuttle.RemoteFiberRegistry do
     end)
   end
 
-  # Time-based staleness (Remote.stale?) OR-ed with the flag a failed fetch
-  # sets: a feed that hasn't refreshed within stale_multiplier × poll_interval
-  # is stale even if the last fetch succeeded.
-  defp stale?(%{remote: %Remote{} = remote, last_polled_at: last, stale: flag}, now) do
-    flag or Remote.stale?(remote, last, now)
+  # Staleness is purely "no successful poll within the grace window": a feed is
+  # stale iff its last SUCCESS (`last_polled_at`) is older than
+  # stale_multiplier × poll_interval (a `nil` last-success is always stale). A
+  # failed fetch never sets a flag — it only withholds a fresh `last_polled_at`,
+  # letting time accrue. This is the hysteresis: a success flips `stale?` to
+  # false INSTANTLY (fast recovery), while a failure only slowly ages toward the
+  # alarm.
+  defp stale?(%{remote: %Remote{} = remote, last_polled_at: last}, now) do
+    Remote.stale?(remote, last, now)
   end
 
-  defp stale?(%{stale: flag}, _now), do: flag
+  # No `remote` to time-check against (the initial_entry_for nil-remote
+  # fallback): an unknown/unconfigured remote can't be time-checked, so treat as
+  # stale.
+  defp stale?(_entry, _now), do: true
 end

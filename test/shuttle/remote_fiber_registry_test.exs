@@ -127,15 +127,19 @@ defmodule Shuttle.RemoteFiberRegistryTest do
                RemoteFiberRegistry.feeds(pid)
     end
 
-    test "a non-200 / transport error keeps the last good feed but marks it stale" do
+    test "a SINGLE failed poll after a success does not flip stale, keeps last-good fibers" do
       url = Remote.fibers_url(candide())
       MockClient.set(url, {:ok, feed_body([sample_fiber("foo")])})
 
+      # Generous poll_interval (60s) so the grace window (stale_multiplier ×
+      # poll_interval = 2 × 60s here) comfortably outlasts the test: staleness is
+      # now purely time-since-last-success, so a single blip within the window
+      # must NOT flip the badge.
       pid =
         start_supervised!(
           {RemoteFiberRegistry,
            name: :reg_blip,
-           remotes: [candide(poll_interval_ms: 0)],
+           remotes: [candide(poll_interval_ms: 60_000)],
            client: MockClient,
            auto_poll: false}
         )
@@ -143,17 +147,18 @@ defmodule Shuttle.RemoteFiberRegistryTest do
       :ok = RemoteFiberRegistry.refresh_now(pid)
       assert %{"candide" => %{stale: false, fibers: [_]}} = RemoteFiberRegistry.feeds(pid)
 
-      # Next poll fails: cards persist (last-known-good) but the feed is stale.
+      # Next poll fails: the failure is recorded (last_error) but the feed stays
+      # fresh — last-good cards persist and the badge does NOT light.
       MockClient.set(url, {:error, :econnrefused})
       :ok = RemoteFiberRegistry.refresh_now(pid)
 
       assert %{"candide" => entry} = RemoteFiberRegistry.feeds(pid)
-      assert entry.stale == true
+      assert entry.stale == false
       assert entry.last_error == :econnrefused
       assert [%{"fiber" => %{"id" => "foo"}}] = entry.fibers
     end
 
-    test "malformed JSON marks the feed stale" do
+    test "malformed JSON on a never-succeeded feed reads stale (nil last-success)" do
       url = Remote.fibers_url(candide())
       MockClient.set(url, {:ok, "{not json"})
 
@@ -230,6 +235,72 @@ defmodule Shuttle.RemoteFiberRegistryTest do
       Process.sleep(10)
 
       assert %{"candide" => %{stale: true}} = RemoteFiberRegistry.feeds(pid)
+    end
+
+    test "sustained failure past the grace window DOES go stale, keeping last-good fibers" do
+      # Tiny threshold (1ms × 1) so the grace elapses within the test. A success
+      # stamps last_polled_at; a subsequent failure leaves it untouched; once
+      # real time exceeds the threshold the feed reads stale — the slow alarm.
+      remote = candide(poll_interval_ms: 1, stale_multiplier: 1)
+      url = Remote.fibers_url(remote)
+      MockClient.set(url, {:ok, feed_body([sample_fiber("foo")])})
+
+      pid =
+        start_supervised!(
+          {RemoteFiberRegistry,
+           name: :reg_sustained_fail, remotes: [remote], client: MockClient, auto_poll: false}
+        )
+
+      :ok = RemoteFiberRegistry.refresh_now(pid)
+
+      # A failed poll records the error but does not stamp a fresh success.
+      MockClient.set(url, {:error, :econnrefused})
+      :ok = RemoteFiberRegistry.refresh_now(pid)
+      Process.sleep(10)
+
+      assert %{"candide" => entry} = RemoteFiberRegistry.feeds(pid)
+      assert entry.stale == true
+      assert entry.last_error == :econnrefused
+      # Last-good cards are still served even while the badge is lit.
+      assert [%{"fiber" => %{"id" => "foo"}}] = entry.fibers
+    end
+
+    test "a fresh success clears staleness immediately (fast recovery)" do
+      remote = candide(poll_interval_ms: 1, stale_multiplier: 1)
+      url = Remote.fibers_url(remote)
+      MockClient.set(url, {:ok, feed_body([sample_fiber("foo")])})
+
+      pid =
+        start_supervised!(
+          {RemoteFiberRegistry,
+           name: :reg_fast_recover, remotes: [remote], client: MockClient, auto_poll: false}
+        )
+
+      :ok = RemoteFiberRegistry.refresh_now(pid)
+      # Age past the 1ms threshold so the feed reads stale.
+      Process.sleep(10)
+      assert %{"candide" => %{stale: true}} = RemoteFiberRegistry.feeds(pid)
+
+      # A single fresh success flips stale → false instantly (no grace to re-earn).
+      MockClient.set(url, {:ok, feed_body([sample_fiber("bar")])})
+      :ok = RemoteFiberRegistry.refresh_now(pid)
+
+      assert %{"candide" => %{stale: false, fibers: [%{"fiber" => %{"id" => "bar"}}]}} =
+               RemoteFiberRegistry.feeds(pid)
+    end
+
+    test "a never-polled feed (nil last-success) is stale" do
+      # No refresh_now, no auto_poll: last_polled_at stays nil, so the feed is
+      # stale from birth via Remote.stale?/3's nil clause.
+      MockClient.set(Remote.fibers_url(candide()), {:ok, feed_body([sample_fiber("foo")])})
+
+      pid =
+        start_supervised!(
+          {RemoteFiberRegistry,
+           name: :reg_never_polled, remotes: [candide()], client: MockClient, auto_poll: false}
+        )
+
+      assert %{"candide" => %{stale: true, fibers: []}} = RemoteFiberRegistry.feeds(pid)
     end
   end
 end
