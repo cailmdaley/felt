@@ -44,7 +44,7 @@ type tunnelTemplateData struct {
 }
 
 var defaultTunnelSpecs = map[string]tunnelSpec{
-	"candide":  {Name: "candide", LocalPort: 4001, HoldCommand: "sleep 2147483647"},
+	"candide":  {Name: "candide", LocalPort: 4001},
 	"cineca":   {Name: "cineca", LocalPort: 4002},
 	"amundsen": {Name: "amundsen", LocalPort: 4003},
 }
