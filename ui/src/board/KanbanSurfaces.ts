@@ -203,13 +203,90 @@ export class KanbanSurfaceRenderer {
       hint.textContent = 'Drag a role here to park it on the strip'
       row.append(hint)
     } else {
-      for (const card of pinned) {
-        row.append(this.renderCard(card, 'pinned', staleness[card.originId]))
+      // Stable ordering by fiber path (id) so the launcher band holds still —
+      // pinned is a *launcher*, and muscle memory only works if a role sits in
+      // the same place every visit. The read model's most-recently-used order
+      // would shuffle chips out from under the user's hand.
+      const ordered = [...pinned].sort((a, b) => a.id.localeCompare(b.id))
+      for (const card of ordered) {
+        row.append(this.renderPinnedChip(card, staleness[card.originId]))
       }
     }
     section.append(row)
     this.installPinnedDropHandlers(section)
     return section
+  }
+
+  /**
+   * One pinned role as a compact launcher chip — the launcher-not-monitor
+   * rework. The user arrives with intent ("start X") and scans for the role,
+   * so the chip carries only what locates and launches it: an actor glyph,
+   * the role name, a status/staleness dot, and the agent/host hint. No outcome
+   * text (it lives on the `title` tooltip for the rare glance). The two
+   * human-attention phases (`attention`/`waiting`) still earn a small marker —
+   * they're genuinely "this one needs you." Click opens the fiber detail (same
+   * as the old card); the chip stays draggable so drag-to-In-flight dispatches
+   * it and drag-off-strip is handled upstream.
+   */
+  private renderPinnedChip(
+    card: KanbanCard,
+    originStaleness: KanbanOriginStaleness | undefined,
+  ): HTMLElement {
+    const isStale = originStaleness?.status === 'stale'
+    const isAgent = isAgentCard(card)
+
+    const el = document.createElement('button')
+    el.type = 'button'
+    el.className = `kbn-pin-chip${isAgent ? ' kbn-pin-chip-agent' : ' kbn-pin-chip-human'}${isStale ? ' kbn-card--stale' : ''}`
+    el.dataset.fiberId = card.id
+    el.setAttribute('role', 'listitem')
+    el.draggable = !isStale
+    el.title = card.outcome ? `${card.name} — ${card.outcome}` : card.name
+    el.setAttribute('aria-label', `${card.name}${isStale ? ' — waiting on origin, drag disabled' : ''}`)
+
+    if (!isStale) this.installDraggable(el, card, true)
+
+    // Status/staleness dot: stale (grey), live worker (teal, pulsing), or at-
+    // rest (faint). The dot is the whole health read — no text needed.
+    const dotState = isStale ? 'stale' : card.runningWorker ? 'live' : card.held ? 'held' : 'rest'
+    const dot = document.createElement('span')
+    dot.className = `kbn-pin-chip-dot kbn-pin-chip-dot-${dotState}`
+    dot.setAttribute('aria-hidden', 'true')
+
+    const glyph = document.createElement('span')
+    glyph.className = 'kbn-pin-chip-glyph'
+    glyph.setAttribute('aria-hidden', 'true')
+    glyph.textContent = isAgent ? '◐' : '✓'
+
+    const name = document.createElement('span')
+    name.className = 'kbn-pin-chip-name'
+    name.textContent = card.name
+
+    const hint = document.createElement('span')
+    hint.className = 'kbn-pin-chip-hint'
+    hint.textContent = isAgent ? (card.shuttleAgent ?? 'agent') : 'me'
+
+    el.append(dot, glyph, name, hint)
+
+    // Attention-bearing marker — the one thing that overrides "launcher, not
+    // monitor." A parked role whose worker raised its hand (or is waiting on
+    // input) shows a small manicule/pause chip so it can call you back.
+    const phase = card.runtimePhase
+    if (phase === 'attention' || phase === 'waiting') {
+      const badge = RUNTIME_PHASE_BADGES[phase]
+      const mark = document.createElement('span')
+      mark.className = `kbn-pin-chip-attn kbn-pin-chip-attn-${phase}`
+      mark.textContent = phase === 'attention' ? '☞︎' : '⏸'
+      mark.title = badge.title
+      mark.setAttribute('aria-label', badge.label)
+      el.append(mark)
+    }
+
+    el.addEventListener('click', (e) => {
+      if ((e.target as HTMLElement).closest('a')) return
+      this.openDetail(card, 'pinned')
+    })
+    return el
   }
 
   /**
@@ -291,7 +368,7 @@ export class KanbanSurfaceRenderer {
     const axisCellByIso = new Map<string, HTMLElement>()
     for (let i = 0; i < days.length; i += 1) {
       const dropCol = document.createElement('div')
-      dropCol.className = 'kbn-timeline-dropcol'
+      dropCol.className = `kbn-timeline-dropcol${days[i].isToday ? ' kbn-timeline-dropcol-today' : ''}`
       dropCol.style.gridColumn = String(i + 1)
       dropCol.dataset.timelineDayIso = days[i].iso
       this.installTimelineDayDropHandlers(dropCol, days[i].iso, axisCells[i])
@@ -505,7 +582,13 @@ export class KanbanSurfaceRenderer {
         if (r !== undefined && r > maxRows) maxRows = r
       }
       const visibleRows = Math.min(maxRows, TIMELINE_MAX_VISIBLE_ROWS)
-      strip.style.height = `${visibleRows * ROW_PX + STRIP_PADDING_PX}px`
+      // Publish the measured full height as a CSS variable rather than setting
+      // `height` directly. CSS owns the compact↔expanded switch (a slim ribbon
+      // by default; grows to this full height on hover and while a drag is in
+      // flight anywhere on the board — drag-to-schedule means dragging *up*
+      // into an inviting horizon). Keeping the switch + transition in CSS keeps
+      // this measurement job pure and the animation jank-free.
+      strip.style.setProperty('--tl-full-height', `${visibleRows * ROW_PX + STRIP_PADDING_PX}px`)
     }
     let rafScheduled = false
     const schedule = (): void => {

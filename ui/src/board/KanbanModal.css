@@ -95,14 +95,12 @@
   inset: 0;
   width: 100%;
   height: 100%;
-  /* The masthead dissolved, so the Now board would otherwise start flush at
-     the modal's top edge — straight under the fixed workspace ✕ / new-window
-     corner buttons (top:4px, 24px tall, hugging the top-left). This top inset
-     lifts the first column head clear of them (~32px to the head once the
-     body's own 12px padding is added). box-sizing keeps the inset:0 +
-     100%/100% sizing honest with the added padding. */
+  /* No top inset: the standalone web UI runs in a plain browser tab with no
+     workspace corner chrome to clear (the ✕ / new-window buttons were
+     Portolan's native shell). The page starts nearly flush — the Timeline
+     ribbon sits just below the body's own tight top padding. box-sizing keeps
+     the inset:0 + 100%/100% sizing honest. */
   box-sizing: border-box;
-  padding-top: 20px;
   /* Pigment & Parchment warm-cool wash — the page is *lit*, not glowing.
      A warm ochre/cinnabar breath at the upper-left, a cool cobalt
      breath at the lower-right, and a faint parchment-tooth grain on
@@ -159,7 +157,10 @@
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding: 12px;
+  /* Tight top margin — intentional, not a dead band. Sides/bottom keep the
+     12px breathing room; the top hugs so the Timeline ribbon reads as a
+     horizon strip at the very top of the page. */
+  padding: 6px 12px 12px;
   overflow-x: hidden;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
@@ -292,13 +293,14 @@
   display: none !important;
 }
 .kbn-section-now {
-  /* Now claims most of the modal's height by default. Timeline + Stash
-     sit below the fold by design — visible as a "peek" at the bottom
-     of the initial viewport, fully reachable by scrolling the body.
-     Falls back to `flex: 1` when the modal is short enough that
-     Timeline + Stash fit naturally above the fold. */
+  /* Now claims most of the height that's left once the two slim top strips
+     (Timeline ribbon + Pinned band) take their fixed footprint. Stash sits
+     below the fold by design — a "peek" at the bottom, reached by scrolling.
+     The floor subtracts the top strips' resting height (~200px) so the board
+     stays generous without the strips stealing from it; falls back to plain
+     `flex: 1` on a short viewport. */
   flex: 1 1 auto;
-  min-height: min(78vh, calc(100% - 240px));
+  min-height: min(72vh, calc(100% - 200px));
 }
 .kbn-now-board {
   display: grid;
@@ -308,48 +310,129 @@
   min-height: 0;
 }
 
-/* Pinned strip — schedule-less umbrella roles, dispatchable on demand. Sits
-   between Now and the Timeline as a compact single row. Gold-leaf accent marks
-   it as a standing/always-around surface, distinct from the dated timeline. */
+/* Pinned band — schedule-less umbrella roles, dispatchable on demand. A slim
+   launcher strip between the Timeline ribbon and the Now board. Pinned is a
+   *launcher*, not a monitor: the user arrives with intent and scans for a role,
+   so this reads as a dense band of chips, not a section competing with the
+   board. Gold-leaf left edge marks it as the standing/always-around surface. */
 .kbn-section-pinned {
   flex: 0 0 auto;
+  flex-direction: row;
+  align-items: center;
   border: 1px solid rgba(154, 123, 53, 0.28);
   border-left: 3px solid #9A7B35;
   background: rgba(154, 123, 53, 0.07);
   border-radius: 3px;
-  padding: 8px 10px 10px;
-  gap: 6px;
+  padding: 5px 10px 5px 12px;
+  gap: 12px;
 }
 .kbn-pinned-title {
   margin: 0;
+  flex: 0 0 auto;
   font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   color: #7A5E1E;
+  white-space: nowrap;
 }
-/* Single row that scrolls horizontally as the roles accumulate — same
-   scroll-the-overflow model as the timeline below, rather than wrapping into
-   ever-taller rows. Dispatch is drag-to-In-flight; no per-card button. */
+/* Single dense row that scrolls horizontally as roles accumulate — stable
+   left-to-right order (chips sorted by fiber path) so muscle memory works. */
 .kbn-pinned-row {
   display: flex;
   flex-direction: row;
   flex-wrap: nowrap;
-  gap: 10px;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
   overflow-x: auto;
   overflow-y: hidden;
   -webkit-overflow-scrolling: touch;
-  padding-bottom: 4px;
+  padding: 1px 0;
 }
-/* Pinned cards keep a fixed compact width and don't shrink, so the row scrolls
-   instead of cramming. */
-.kbn-pinned-row .kbn-card {
-  flex: 0 0 280px;
+/* Launcher chip: dot · glyph · name · agent/host hint. Compact pill; no
+   outcome text (that's on the title tooltip). Reads as a thing you click to
+   *go*, not a card you read. */
+.kbn-pin-chip {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 260px;
+  margin: 0;
+  padding: 3px 9px;
+  background: rgba(255, 251, 237, 0.85);
+  border: 0.5px solid rgba(154, 123, 53, 0.35);
+  border-radius: 11px;
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  color: #1B1611;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  transition: background 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
 }
-/* Empty strip: a slim, dashed "drop a role here" target. The strip ALWAYS
-   renders (it's the park/drop target), so when nothing is parked it shrinks to
-   this hint rather than vanishing. */
+.kbn-pin-chip:hover {
+  background: rgba(255, 253, 245, 0.98);
+  border-color: rgba(154, 123, 53, 0.6);
+  box-shadow: 0 1px 3px rgba(122, 94, 30, 0.14);
+}
+.kbn-pin-chip:focus-visible {
+  outline: 1px dashed #9A7B35;
+  outline-offset: 2px;
+}
+.kbn-pin-chip.kbn-card-dragging { opacity: 0.4; }
+.kbn-pin-chip-dot {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(122, 111, 92, 0.4);
+}
+.kbn-pin-chip-dot-live {
+  background: #3F8278;
+  box-shadow: 0 0 0 2px rgba(63, 130, 120, 0.20);
+}
+.kbn-pin-chip-dot-held { background: #C49333; }
+.kbn-pin-chip-dot-stale { background: rgba(122, 111, 92, 0.35); }
+.kbn-pin-chip-glyph {
+  flex: 0 0 auto;
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 10px;
+  line-height: 1;
+}
+.kbn-pin-chip-human .kbn-pin-chip-glyph { color: #3F8278; }
+.kbn-pin-chip-agent .kbn-pin-chip-glyph { color: #3D5BA0; }
+.kbn-pin-chip-name {
+  font-size: 14px;
+  line-height: 1.1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kbn-pin-chip-hint {
+  flex: 0 0 auto;
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  text-transform: lowercase;
+  color: rgba(122, 111, 92, 0.75);
+}
+/* Attention marker — the one override to "launcher, not monitor." A parked
+   role calling for the human wears a small manicule/pause chip. */
+.kbn-pin-chip-attn {
+  flex: 0 0 auto;
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-variant-emoji: text;
+  font-size: 12px;
+  line-height: 1;
+}
+.kbn-pin-chip-attn-attention { color: #BC4538; }
+.kbn-pin-chip-attn-waiting { color: #C49333; }
+.kbn-pin-chip.kbn-card--stale { opacity: 0.5; cursor: default; }
+/* Empty band: a slim, dashed "drop a role here" target. The band ALWAYS
+   renders (it's the park/drop target), so when nothing is parked it shows this
+   hint rather than vanishing. */
 .kbn-section-pinned-empty {
   background: rgba(154, 123, 53, 0.04);
   border-style: dashed;
@@ -359,7 +442,7 @@
   font-size: 10.5px;
   letter-spacing: 0.04em;
   color: rgba(122, 94, 30, 0.6);
-  padding: 4px 2px;
+  padding: 2px 2px;
   font-style: italic;
 }
 
@@ -462,9 +545,9 @@
 .kbn-timeline-day-past { background: rgba(0, 0, 0, 0.015); }
 .kbn-timeline-day-weekend { background: rgba(0, 0, 0, 0.04); }
 .kbn-timeline-day-today {
-  background: rgba(188, 69, 56, 0.10);
-  border-left: 1.5px solid #BC4538;
-  border-right: 1.5px solid #BC4538;
+  background: rgba(154, 123, 53, 0.14);
+  border-left: 1.5px solid #9A7B35;
+  border-right: 1.5px solid #9A7B35;
 }
 .kbn-timeline-day-week-boundary {
   border-right: 1px solid rgba(122, 111, 92, 0.45);
@@ -495,8 +578,8 @@
 }
 .kbn-timeline-day-today .kbn-timeline-day-num,
 .kbn-timeline-day-today .kbn-timeline-day-dow {
-  color: #BC4538;
-  font-weight: 500;
+  color: #9A7B35;
+  font-weight: 600;
 }
 .kbn-timeline-strip {
   display: grid;
@@ -513,8 +596,19 @@
      is set imperatively by `installAdaptiveStripHeight()`. */
   width: max-content;
   overflow-x: hidden;
+  overflow-y: hidden;
+  /* Slim horizon by default — clamped to ~two rows of markers so the ribbon
+     reads as a strip, not a section. `--tl-full-height` is the measured full
+     stack height, published by installAdaptiveStripHeight(). On hover and while
+     a drag is in flight (`.kbn-body.kbn-dragging`) the strip grows to that full
+     height: dragging a card up meets an inviting, expanded horizon. */
+  height: min(var(--tl-full-height, 50px), 50px);
+  transition: height 200ms cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+.kbn-section-timeline:hover .kbn-timeline-strip,
+.kbn-body.kbn-dragging .kbn-timeline-strip {
+  height: var(--tl-full-height, 50px);
   overflow-y: auto;
-  transition: height 160ms ease-out;
 }
 .kbn-timeline-dropcol {
   /* Span the full strip height; `1 / -1` is a no-op without
@@ -522,6 +616,11 @@
   grid-row: 1 / span 999;
   z-index: 0;
   pointer-events: auto;
+}
+/* Today's column carries a faint gold-leaf wash down the whole strip so the
+   "now" line reads top-to-bottom, matching the illuminated axis cell above. */
+.kbn-timeline-dropcol-today {
+  background: linear-gradient(rgba(154, 123, 53, 0.10), rgba(154, 123, 53, 0.05));
 }
 .kbn-timeline-dropcol-active {
   background: rgba(196, 147, 51, 0.10);

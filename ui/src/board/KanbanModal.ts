@@ -315,9 +315,10 @@ export class KanbanModal {
    * The masthead band dissolved (board-chrome-redesign): no "Kanban" title,
    * no scope subtitle, no stats line. Its three actions — Stash `+`, New idea
    * `✶`, Refresh `↻` — folded into the three column heads, one per lane (see
-   * KanbanSurfaceRenderer.makeColumnAction). The Now board starts at the top
-   * of the modal with only a small top inset (CSS) clearing the workspace
-   * ✕ / new-window corner buttons.
+   * KanbanSurfaceRenderer.makeColumnAction). The page starts nearly flush at
+   * the top (the Timeline ribbon), with only the body's own tight top padding
+   * as margin — the standalone web UI has no workspace corner chrome to clear
+   * (that was Portolan's native shell; this bundle runs in a plain tab).
    */
   private assembleChrome(): void {
     this.container = document.createElement('div')
@@ -1010,11 +1011,14 @@ export class KanbanModal {
     this.body.innerHTML = ''
     this.body.classList.remove('kbn-body-zoomed')
 
-    this.body.append(this.surfaces.renderNowSection(now, staleness))
+    // "Sky over board" order: the Timeline horizon strip sits at the top of
+    // the page, the pinned-role launcher band beneath it, then the Now board,
+    // then Stash. Time reads as an illuminated strip you drag work *up* into.
+    this.body.append(this.surfaces.renderTimelineSection(timeline, now, timelineWindow, staleness))
     // The Pinned strip always renders (a permanent park/drop target) — see
     // renderPinnedSection; no null guard needed.
     this.body.append(this.surfaces.renderPinnedSection(pinned, staleness))
-    this.body.append(this.surfaces.renderTimelineSection(timeline, now, timelineWindow, staleness))
+    this.body.append(this.surfaces.renderNowSection(now, staleness))
     this.body.append(this.surfaces.renderStashSection(stash, staleness))
 
     this.restoreScrollSnapshot(scrollSnapshot)
