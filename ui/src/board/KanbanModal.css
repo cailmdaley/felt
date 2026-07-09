@@ -496,8 +496,8 @@
   overflow-y: hidden;
   /* Resting horizon: four rows of markers. `--tl-full-height` is the measured
      full stack height (tallest visible day, no cap), published by
-     installAdaptiveStripHeight(). On hover and while a drag is in flight
-     (`.kbn-body.kbn-dragging`) the strip grows to that full height — the
+     installAdaptiveStripHeight(). On hover, and while a drag is actually over
+     the ribbon (`.kbn-drag-open`), the strip grows to that full height — the
      busiest day renders completely, no scroll. Dragging a card up meets an
      inviting, fully-open horizon. (4 rows × 22px + 6px padding = 94px.) */
   height: min(var(--tl-full-height, 94px), 94px);
@@ -510,9 +510,12 @@
   height: var(--tl-full-height, 94px);
   transition-delay: 320ms;
 }
-/* Drag-expand is immediate — dragging a card up must meet the open horizon
-   at once. Placed after the hover rule so its zero delay wins during a drag. */
-.kbn-body.kbn-dragging .kbn-timeline-strip {
+/* Drag-expand is immediate and gated to a drag actually *over* the timeline
+   (`.kbn-drag-open`, toggled by the wrap's dragover/leave) — dragging a card up
+   into the horizon opens it at once, while a drag heading elsewhere (e.g. down
+   to the Pinned band) leaves it closed so the board below doesn't shift under
+   the cursor. Placed after the hover rule so its zero delay wins. */
+.kbn-timeline-wrap.kbn-drag-open .kbn-timeline-strip {
   height: var(--tl-full-height, 94px);
   transition-delay: 0ms;
 }

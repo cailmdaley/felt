@@ -682,12 +682,17 @@ export class KanbanSurfaceRenderer {
   }
 
   /** Edge-scroll the timeline wrap when a drag approaches its left or
-   *  right edge. Mirrors the body's vertical drag-scroll. */
+   *  right edge. Mirrors the body's vertical drag-scroll. Also opens the
+   *  ribbon (`.kbn-drag-open`) *only while a drag is actually over the
+   *  timeline* — expanding on any board-wide drag pushed the board down and
+   *  made a drag *down* to the Pinned band chase a moving target. Now the
+   *  horizon opens when you drag up into it, and stays put otherwise. */
   private installTimelineEdgeScroll(wrap: HTMLElement): void {
     const EDGE_PX = 80
     const MAX_STEP_PX = 28
     const onDragOver = (e: DragEvent): void => {
       if (!this.getDragSourceId()) return
+      wrap.classList.add('kbn-drag-open')
       const r = wrap.getBoundingClientRect()
       const leftPressure = Math.max(0, EDGE_PX - (e.clientX - r.left))
       const rightPressure = Math.max(0, EDGE_PX - (r.right - e.clientX))
@@ -705,9 +710,13 @@ export class KanbanSurfaceRenderer {
     }
     const onDragLeave = (e: DragEvent): void => {
       if (e.relatedTarget && wrap.contains(e.relatedTarget as Node)) return
+      wrap.classList.remove('kbn-drag-open')
       this.stopTimelineEdgeScroll()
     }
-    const onDrop = (): void => this.stopTimelineEdgeScroll()
+    const onDrop = (): void => {
+      wrap.classList.remove('kbn-drag-open')
+      this.stopTimelineEdgeScroll()
+    }
     wrap.addEventListener('dragover', onDragOver)
     wrap.addEventListener('dragleave', onDragLeave)
     wrap.addEventListener('drop', onDrop)

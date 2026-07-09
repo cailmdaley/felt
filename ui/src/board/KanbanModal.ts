@@ -147,12 +147,13 @@ export class KanbanModal {
   private inflightFetchToken = 0
   /**
    * Backing field for `dragSourceId`. Mutate via the property accessor below
-   * (or via `setDragSource`) so the `kbn-dragging` body class stays in sync.
-   * That class drives the immediate timeline drag-expand
-   * (`.kbn-body.kbn-dragging .kbn-timeline-strip`) — dragging a card up meets
-   * the open horizon at once. (It once also carried a Chromium-only
-   * `pointer-events: none` timeline-card fix, retired in favor of the
-   * strip-level elementsFromPoint fallback in installTimelineStripDragFallback.)
+   * (or via `setDragSource`) so the `kbn-dragging` body class stays in sync as
+   * a general drag-state hook. (The timeline's drag-expand is NOT driven by
+   * this global class — that would open the ribbon on any drag, including a
+   * drag down to Pinned; it's gated on `.kbn-drag-open`, toggled only while a
+   * drag is actually over the timeline wrap. This class once also carried a
+   * Chromium-only `pointer-events: none` timeline-card fix, retired in favor of
+   * the strip-level elementsFromPoint fallback in installTimelineStripDragFallback.)
    */
   private _dragSourceId: string | null = null
   private get dragSourceId(): string | null { return this._dragSourceId }
