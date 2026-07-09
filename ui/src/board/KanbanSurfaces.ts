@@ -506,7 +506,8 @@ export class KanbanSurfaceRenderer {
 
     // No collapse chevron on the Timeline: it's the always-visible horizon
     // ribbon now, so a collapse toggle is redundant (and the user never used
-    // it). Now/Stash keep their chrome via installSectionChrome.
+    // it). The Timeline was the only section that ever carried collapse chrome,
+    // so it retired with this section (installSectionChrome deleted wholesale).
     return section
   }
 
