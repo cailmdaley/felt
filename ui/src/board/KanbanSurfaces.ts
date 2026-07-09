@@ -440,19 +440,25 @@ export class KanbanSurfaceRenderer {
     }
     this.installTimelineStripDragFallback(strip, dropColByIso, axisCellByIso)
 
+    // Card elements grouped by day column — the adaptive-height pass measures
+    // the tallest *visible* column's stack from these (never the strip itself,
+    // whose height is the value we're computing).
+    const cardsByCol = new Map<number, HTMLElement[]>()
     const rowByCol = new Map<number, number>()
-    const nextRow = (col: number): number => {
+    const place = (col: number, card: KanbanCard, kind: TimelineCardKind): void => {
       const row = (rowByCol.get(col) ?? 0) + 1
       rowByCol.set(col, row)
-      return row
+      const el = this.renderTimelineCard(card, col, row, kind, staleness[card.originId])
+      strip.append(el)
+      const list = cardsByCol.get(col) ?? []
+      list.push(el)
+      cardsByCol.set(col, list)
     }
 
     const todayIso = isoDay(new Date())
     const todayCol = dayIndex.get(todayIso) ?? null
     if (todayCol !== null) {
-      for (const card of now.inFlight) {
-        strip.append(this.renderTimelineCard(card, todayCol, nextRow(todayCol), 'inflight', staleness[card.originId]))
-      }
+      for (const card of now.inFlight) place(todayCol, card, 'inflight')
     }
     for (const card of now.awaitingReview) {
       // Ghost at closedAt — but a closed fiber can carry a null closed_at (a
@@ -462,12 +468,12 @@ export class KanbanSurfaceRenderer {
       // run closed it), then today, so an awaiting card is always findable.
       const col = awaitingGhostDayColumn(card, dayIndex, todayCol)
       if (col === null) continue
-      strip.append(this.renderTimelineCard(card, col, nextRow(col), 'awaiting', staleness[card.originId]))
+      place(col, card, 'awaiting')
     }
     for (const card of timeline.past) {
       const col = dayIndexForIso(card.closedAt, dayIndex)
       if (col === null) continue
-      strip.append(this.renderTimelineCard(card, col, nextRow(col), 'past', staleness[card.originId]))
+      place(col, card, 'past')
     }
     if (todayCol !== null) {
       for (const card of now.drafts) {
@@ -476,18 +482,17 @@ export class KanbanSurfaceRenderer {
         // real date") while still appearing in the Now board. Undated drafts
         // sit at today, their natural now-position.
         const col = card.due ? (dayIndexForIso(card.due, dayIndex) ?? todayCol) : todayCol
-        strip.append(this.renderTimelineCard(card, col, nextRow(col), 'draft', staleness[card.originId]))
+        place(col, card, 'draft')
       }
     }
     for (const card of timeline.futureDated) {
       const col = dayIndexForIso(card.nextLaunchAt ?? card.due, dayIndex)
       if (col === null) continue
-      const kind = card.status === 'closed' ? 'awaiting' : 'future'
-      strip.append(this.renderTimelineCard(card, col, nextRow(col), kind, staleness[card.originId]))
+      place(col, card, card.status === 'closed' ? 'awaiting' : 'future')
     }
     wrap.append(strip)
 
-    this.installAdaptiveStripHeight(wrap, strip)
+    this.installAdaptiveStripHeight(wrap, strip, cardsByCol, days.length)
     this.installTimelineEdgeScroll(wrap)
 
     // The day-strip (14-day window, horizontally scrollable) and a fixed
@@ -623,17 +628,38 @@ export class KanbanSurfaceRenderer {
     this.timelineEdgeScrollFrame = null
   }
 
-  /** Publish the strip's full content height as `--tl-full-height` so CSS can
-   *  expand to it on hover/drag with no inner scroll. Measured from the live
-   *  `scrollHeight` (exact, whatever the rendered row height works out to)
-   *  rather than an assumed per-row constant — the strip has a fixed clipped
-   *  height at rest, so scrollHeight still reports the full tallest-day stack.
-   *  Re-measured on resize (card heights are constant, but a font/layout shift
-   *  could nudge them). */
-  private installAdaptiveStripHeight(wrap: HTMLElement, strip: HTMLElement): void {
+  /** Publish `--tl-full-height` so CSS can expand the strip to fit its content
+   *  on hover/drag with no inner scroll.
+   *
+   *  Measured from the tallest day column *currently on screen* — recomputed on
+   *  horizontal scroll so a sparse week opens short and a busy day opens tall,
+   *  and the value never includes the strip's own (expanded) height. Height is
+   *  taken from each card's real laid-out bottom (`offsetTop + offsetHeight`,
+   *  relative to the positioned strip) rather than an assumed per-row constant,
+   *  so it's exact whatever the rendered row height is. Critically it reads only
+   *  the card elements, never the strip or the full-height dropcols (whose
+   *  offsetHeight IS the strip height) — that self-reference is what made hover
+   *  ratchet taller each frame. */
+  private installAdaptiveStripHeight(
+    wrap: HTMLElement,
+    strip: HTMLElement,
+    cardsByCol: Map<number, HTMLElement[]>,
+    totalDays: number,
+  ): void {
+    const STRIP_PADDING_PX = 6
     const recompute = (): void => {
-      // +2px guards against sub-pixel rounding clipping the last row's border.
-      strip.style.setProperty('--tl-full-height', `${strip.scrollHeight + 2}px`)
+      const sLeft = wrap.scrollLeft
+      const sRight = sLeft + wrap.clientWidth
+      const firstCol = Math.max(0, Math.floor(sLeft / TIMELINE_DAY_WIDTH_PX))
+      const lastCol = Math.min(totalDays - 1, Math.floor((sRight - 1) / TIMELINE_DAY_WIDTH_PX))
+      let maxBottom = 0
+      for (let c = firstCol; c <= lastCol; c += 1) {
+        for (const el of cardsByCol.get(c) ?? []) {
+          const bottom = el.offsetTop + el.offsetHeight
+          if (bottom > maxBottom) maxBottom = bottom
+        }
+      }
+      strip.style.setProperty('--tl-full-height', `${Math.max(maxBottom + STRIP_PADDING_PX, 28)}px`)
     }
     let rafScheduled = false
     const schedule = (): void => {
@@ -644,11 +670,13 @@ export class KanbanSurfaceRenderer {
         recompute()
       })
     }
+    wrap.addEventListener('scroll', schedule, { passive: true })
     const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(schedule) : null
     ro?.observe(wrap)
     window.requestAnimationFrame(recompute)
 
     this.setTimelineAdaptiveCleanup(() => {
+      wrap.removeEventListener('scroll', schedule)
       ro?.disconnect()
     })
   }
