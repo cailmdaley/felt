@@ -487,7 +487,7 @@ export class KanbanSurfaceRenderer {
     }
     wrap.append(strip)
 
-    this.installAdaptiveStripHeight(wrap, strip, rowByCol, days.length)
+    this.installAdaptiveStripHeight(wrap, strip)
     this.installTimelineEdgeScroll(wrap)
 
     // The day-strip (14-day window, horizontally scrollable) and a fixed
@@ -623,35 +623,17 @@ export class KanbanSurfaceRenderer {
     this.timelineEdgeScrollFrame = null
   }
 
-  /** Bind a scroll + resize listener that sizes the strip to fit the max
-   *  card stack among horizontally-visible day-columns. */
-  private installAdaptiveStripHeight(
-    wrap: HTMLElement,
-    strip: HTMLElement,
-    rowByCol: Map<number, number>,
-    totalDays: number,
-  ): void {
-    const ROW_PX = 22
-    const STRIP_PADDING_PX = 6
-    const TIMELINE_MAX_VISIBLE_ROWS = 10
+  /** Publish the strip's full content height as `--tl-full-height` so CSS can
+   *  expand to it on hover/drag with no inner scroll. Measured from the live
+   *  `scrollHeight` (exact, whatever the rendered row height works out to)
+   *  rather than an assumed per-row constant — the strip has a fixed clipped
+   *  height at rest, so scrollHeight still reports the full tallest-day stack.
+   *  Re-measured on resize (card heights are constant, but a font/layout shift
+   *  could nudge them). */
+  private installAdaptiveStripHeight(wrap: HTMLElement, strip: HTMLElement): void {
     const recompute = (): void => {
-      const sLeft = wrap.scrollLeft
-      const sRight = sLeft + wrap.clientWidth
-      const firstCol = Math.max(0, Math.floor(sLeft / TIMELINE_DAY_WIDTH_PX))
-      const lastCol = Math.min(totalDays - 1, Math.floor((sRight - 1) / TIMELINE_DAY_WIDTH_PX))
-      let maxRows = 1
-      for (let c = firstCol; c <= lastCol; c += 1) {
-        const r = rowByCol.get(c)
-        if (r !== undefined && r > maxRows) maxRows = r
-      }
-      const visibleRows = Math.min(maxRows, TIMELINE_MAX_VISIBLE_ROWS)
-      // Publish the measured full height as a CSS variable rather than setting
-      // `height` directly. CSS owns the compact↔expanded switch (a slim ribbon
-      // by default; grows to this full height on hover and while a drag is in
-      // flight anywhere on the board — drag-to-schedule means dragging *up*
-      // into an inviting horizon). Keeping the switch + transition in CSS keeps
-      // this measurement job pure and the animation jank-free.
-      strip.style.setProperty('--tl-full-height', `${visibleRows * ROW_PX + STRIP_PADDING_PX}px`)
+      // +2px guards against sub-pixel rounding clipping the last row's border.
+      strip.style.setProperty('--tl-full-height', `${strip.scrollHeight + 2}px`)
     }
     let rafScheduled = false
     const schedule = (): void => {
@@ -662,13 +644,11 @@ export class KanbanSurfaceRenderer {
         recompute()
       })
     }
-    wrap.addEventListener('scroll', schedule, { passive: true })
     const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(schedule) : null
     ro?.observe(wrap)
     window.requestAnimationFrame(recompute)
 
     this.setTimelineAdaptiveCleanup(() => {
-      wrap.removeEventListener('scroll', schedule)
       ro?.disconnect()
     })
   }

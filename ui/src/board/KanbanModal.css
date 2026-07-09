@@ -489,30 +489,31 @@
      day-column alignment during horizontal scroll. The adaptive height
      is set imperatively by `installAdaptiveStripHeight()`. */
   width: max-content;
+  /* No inner vertical scroll anywhere in the ribbon — at rest the strip clips
+     to four rows; on expansion it grows to the full stack height so nothing is
+     ever hidden behind a scrollbar. */
   overflow-x: hidden;
   overflow-y: hidden;
-  /* Slim horizon by default — clamped to ~two rows of markers so the ribbon
-     reads as a strip, not a section. `--tl-full-height` is the measured full
-     stack height, published by installAdaptiveStripHeight(). On hover and while
-     a drag is in flight (`.kbn-body.kbn-dragging`) the strip grows to that full
-     height (scrolling inside if the stack is tall): dragging a card up meets an
-     inviting, expanded horizon. */
-  height: min(var(--tl-full-height, 50px), 50px);
+  /* Resting horizon: four rows of markers. `--tl-full-height` is the measured
+     full stack height (tallest visible day, no cap), published by
+     installAdaptiveStripHeight(). On hover and while a drag is in flight
+     (`.kbn-body.kbn-dragging`) the strip grows to that full height — the
+     busiest day renders completely, no scroll. Dragging a card up meets an
+     inviting, fully-open horizon. (4 rows × 22px + 6px padding = 94px.) */
+  height: min(var(--tl-full-height, 94px), 94px);
   transition: height 200ms cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 /* Hover-expand is deliberately *lazy* — a 320ms delay so a cursor merely
    brushing across the ribbon doesn't twitch the page open. Collapse is
    immediate (the base rule carries no delay). */
 .kbn-section-timeline:hover .kbn-timeline-strip {
-  height: var(--tl-full-height, 50px);
-  overflow-y: auto;
+  height: var(--tl-full-height, 94px);
   transition-delay: 320ms;
 }
 /* Drag-expand is immediate — dragging a card up must meet the open horizon
    at once. Placed after the hover rule so its zero delay wins during a drag. */
 .kbn-body.kbn-dragging .kbn-timeline-strip {
-  height: var(--tl-full-height, 50px);
-  overflow-y: auto;
+  height: var(--tl-full-height, 94px);
   transition-delay: 0ms;
 }
 .kbn-timeline-dropcol {
