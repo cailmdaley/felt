@@ -1012,13 +1012,14 @@ export class KanbanModal {
     this.body.classList.remove('kbn-body-zoomed')
 
     // "Sky over board" order: the Timeline horizon strip sits at the top of
-    // the page, the pinned-role launcher band beneath it, then the Now board,
-    // then Stash. Time reads as an illuminated strip you drag work *up* into.
+    // the page (time as an illuminated strip you drag work *up* into), then the
+    // Now board, then the pinned-role launcher band, then Stash. Pinned sits
+    // between the board and Stash — a slim launcher shelf under the work.
     this.body.append(this.surfaces.renderTimelineSection(timeline, now, timelineWindow, staleness))
+    this.body.append(this.surfaces.renderNowSection(now, staleness))
     // The Pinned strip always renders (a permanent park/drop target) — see
     // renderPinnedSection; no null guard needed.
     this.body.append(this.surfaces.renderPinnedSection(pinned, staleness))
-    this.body.append(this.surfaces.renderNowSection(now, staleness))
     this.body.append(this.surfaces.renderStashSection(stash, staleness))
 
     this.restoreScrollSnapshot(scrollSnapshot)

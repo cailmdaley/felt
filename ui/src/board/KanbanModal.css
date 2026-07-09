@@ -185,12 +185,12 @@
   outline-offset: -2px;
 }
 .kbn-section-now {
-  /* Now claims most of the height that's left once the two slim top strips
-     (Timeline ribbon + Pinned band) take their fixed footprint. Stash sits
-     below the fold by design — a "peek" at the bottom, reached by scrolling.
-     The floor subtracts the top strips' resting height (~200px) so the board
-     stays generous without the strips stealing from it; falls back to plain
-     `flex: 1` on a short viewport. */
+  /* Now claims most of the height, sitting just under the Timeline ribbon.
+     The Pinned band and Stash sit below it — visible as a "peek" at the
+     bottom, reached by scrolling. The floor reserves ~200px for the ribbon
+     above plus the pinned/stash peek below so the board stays generous
+     without those strips stealing from it; falls back to plain `flex: 1` on
+     a short viewport. */
   flex: 1 1 auto;
   min-height: min(72vh, calc(100% - 200px));
 }
