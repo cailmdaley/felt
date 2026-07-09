@@ -20,14 +20,21 @@ defmodule ShuttleWeb.LifecycleController do
   use Phoenix.Controller, formats: [:json]
   import ShuttleWeb.RelayHelpers, only: [relay_text: 2]
 
-  alias Shuttle.{FeltStores, LifecycleService, OriginRouter}
+  alias Shuttle.{FeltStores, LifecycleService, OriginRouter, RemoteFiberRegistry}
 
   @allowed ~w(install pause resume repeat pin accept set-model set-agent set-outcome uninstall)
 
   def create(conn, params) do
     case OriginRouter.route(Map.get(params, "origin")) do
       {:remote, remote} ->
-        relay_text(conn, OriginRouter.forward(remote, "/api/v1/lifecycle", conn.body_params))
+        result = OriginRouter.forward(remote, "/api/v1/lifecycle", conn.body_params)
+        # The forwarded verb (pin/uninstall/…) mutated the remote's loom mirror;
+        # invalidate the RemoteFiberRegistry feed cache so the board reflects it
+        # before the next remote poll — otherwise pinning a remote-owned role
+        # snaps back until a manual refresh. Mirrors Shuttle.Transition and
+        # FeltEditController's refresh_remote_feed.
+        refresh_remote_feed(remote.name, result)
+        relay_text(conn, result)
 
       :local ->
         create_local(conn, params)
@@ -109,6 +116,18 @@ defmodule ShuttleWeb.LifecycleController do
   end
 
   defp refresh_card(_), do: :ok
+
+  # Best-effort remote feed invalidation after a successful forward, mirroring
+  # Shuttle.Transition.refresh_remote_feed: only on a 2xx, and a refresh failure
+  # (or a dead registry) must never fail the request.
+  defp refresh_remote_feed(name, {:forwarded, status, _body}) when status in 200..299 do
+    RemoteFiberRegistry.refresh(name)
+    :ok
+  catch
+    :exit, _reason -> :ok
+  end
+
+  defp refresh_remote_feed(_name, _result), do: :ok
 
   defp fiber_address(identifier) do
     with {:ok, %{fiber_id: fiber_id}} <- resolve_fiber(identifier), do: {:ok, fiber_id}
