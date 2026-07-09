@@ -166,12 +166,10 @@
   -webkit-overflow-scrolling: touch;
   min-height: 0;
 }
-/* ── Three-surface layout: Now → Timeline → Stash ──────────────────── */
-/* Section heads retired (the layout reads on its own). Each section keeps
-   a tiny top-right collapse toggle + a `.kbn-section-strip` that takes
-   over the section's footprint when collapsed. The toggle is faded by
-   default; section-hover brightens it so the affordance is present
-   without competing for attention. */
+/* ── Section layout: Timeline → Pinned → Now → Stash ───────────────── */
+/* Section heads retired (the layout reads on its own); the collapse-toggle
+   chrome retired too (the Timeline is the always-visible ribbon now, and it
+   was the only section that carried it). */
 .kbn-section {
   position: relative;
   display: flex;
@@ -179,118 +177,12 @@
   border-radius: 3px;
   transition: background 140ms ease;
   /* Spacing between sections lives on `.kbn-body { gap }` — no margin
-     here so the Now grid sits flush against the timeline strip. */
+     here so the sections sit flush in their vertical rhythm. */
 }
 .kbn-section-drop {
   background: rgba(196, 147, 51, 0.08);
   outline: 1px dashed rgba(196, 147, 51, 0.45);
   outline-offset: -2px;
-}
-.kbn-section-toggle {
-  position: absolute;
-  top: 2px;
-  right: 4px;
-  z-index: 4;
-  width: 18px;
-  height: 18px;
-  padding: 0;
-  background: transparent;
-  border: none;
-  border-radius: 2px;
-  font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: 12px;
-  line-height: 1;
-  color: rgba(122, 111, 92, 0.4);
-  cursor: pointer;
-  transition: color 120ms ease, background 120ms ease, opacity 120ms ease;
-  /* Faintly visible at rest so the affordance is discoverable; brightens
-     on section-hover or focus. Always full opacity when the section is
-     collapsed (the chevron is the only visible-text cue that something
-     is hidden). */
-  opacity: 0.25;
-}
-.kbn-section:hover > .kbn-section-toggle,
-.kbn-section-toggle:focus-visible,
-.kbn-section-collapsed > .kbn-section-toggle {
-  opacity: 1;
-}
-.kbn-section-toggle:hover {
-  color: #7A6F5C;
-  background: rgba(122, 111, 92, 0.08);
-}
-.kbn-section-toggle:focus-visible {
-  outline: 1px dashed #7A6F5C;
-  outline-offset: 2px;
-}
-/* The collapsed-state strip — hidden when section is expanded, shown as
-   a thin small-caps row with label + count when collapsed. Click anywhere
-   on the strip re-expands; the section still accepts drops via its
-   ambient drag handlers, so a drag-from-Now to a collapsed Stash lands
-   on the strip and writes horizon=stashed without the user thinking
-   about it. */
-.kbn-section-strip {
-  display: none;
-  align-items: baseline;
-  gap: 10px;
-  padding: 6px 14px;
-  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
-  cursor: pointer;
-  user-select: none;
-}
-/* Section strip — visible only when the section is collapsed.
-   Treated like a manuscript catch-line: italic small caps with a
-   layered F1/F2 dropcap on the leading letter. Reads like a
-   marginal tab. */
-.kbn-section-strip-label {
-  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
-  font-size: 26px;
-  font-style: italic;
-  font-variant-caps: small-caps;
-  font-feature-settings: "smcp";
-  letter-spacing: 0.05em;
-  color: #2A231A;
-}
-.kbn-section-strip-label .kbn-cap {
-  /* Body grew 1.5× (17 → 26px); keep the F2+F1 dropcap at its tuned
-     absolute size (~24.7px). 24.7/26 ≈ 0.95em. Vertical-align dropped
-     to -0.08em so the cap sits on the baseline. */
-  font-size: 0.95em;
-  font-style: normal;
-  font-variant: normal;
-  margin-right: 0.05em;
-  vertical-align: -0.08em;
-  line-height: 0.82;
-}
-.kbn-section-strip-count {
-  font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: 11px;
-  color: #7A6F5C;
-  letter-spacing: 0.04em;
-}
-/* A small fleuron at the end of the strip — the printer's ornament
-   that closes a catch-line. Set in ochre at the same height as the
-   small-caps body so it reads as type, not graphic. */
-.kbn-section-strip::after {
-  content: '❦';
-  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
-  font-size: 12px;
-  color: #C49333;
-  opacity: 0.55;
-  margin-left: 6px;
-}
-.kbn-section-collapsed {
-  flex: 0 0 auto !important;
-  min-height: 0 !important;
-  margin-bottom: 6px;
-  background: rgba(237, 226, 206, 0.7);
-  border: 1px solid rgba(27, 22, 17, 0.10);
-}
-.kbn-section-collapsed > .kbn-section-strip {
-  display: flex;
-}
-/* Everything except the strip + toggle disappears when collapsed. */
-.kbn-section-collapsed > *:not(.kbn-section-strip):not(.kbn-section-toggle) {
-  display: none !important;
 }
 .kbn-section-now {
   /* Now claims most of the height that's left once the two slim top strips
@@ -595,20 +487,27 @@
      day-column alignment during horizontal scroll. The adaptive height
      is set imperatively by `installAdaptiveStripHeight()`. */
   width: max-content;
-  overflow-x: hidden;
-  overflow-y: hidden;
-  /* Slim horizon by default — clamped to ~two rows of markers so the ribbon
-     reads as a strip, not a section. `--tl-full-height` is the measured full
-     stack height, published by installAdaptiveStripHeight(). On hover and while
-     a drag is in flight (`.kbn-body.kbn-dragging`) the strip grows to that full
-     height: dragging a card up meets an inviting, expanded horizon. */
-  height: min(var(--tl-full-height, 50px), 50px);
+  /* Never scroll inside the strip — a scrollbar overlaid the mini-cards and
+     made them unusable. Overflow is clipped; day columns with more than two
+     cards paginate (see .kbn-tl-pager) instead. */
+  overflow: hidden;
+  /* Slim horizon by default (a one-row peek); grows to two full rows + pager
+     on hover and while a drag is in flight anywhere on the board. */
+  height: 30px;
   transition: height 200ms cubic-bezier(0.22, 0.61, 0.36, 1);
 }
-.kbn-section-timeline:hover .kbn-timeline-strip,
+/* Hover-expand is deliberately *lazy* — a 320ms delay so a cursor merely
+   brushing across the ribbon doesn't twitch the page open. Collapse is
+   immediate (the base rule carries no delay). */
+.kbn-section-timeline:hover .kbn-timeline-strip {
+  height: 74px;
+  transition-delay: 320ms;
+}
+/* Drag-expand is immediate — dragging a card up must meet the open horizon
+   at once. Placed after the hover rule so its zero delay wins during a drag. */
 .kbn-body.kbn-dragging .kbn-timeline-strip {
-  height: var(--tl-full-height, 50px);
-  overflow-y: auto;
+  height: 74px;
+  transition-delay: 0ms;
 }
 .kbn-timeline-dropcol {
   /* Span the full strip height; `1 / -1` is a no-op without
@@ -732,6 +631,35 @@
   overflow: hidden;
   text-overflow: ellipsis;
   font-family: var(--font-serif, 'EB Garamond', serif);
+}
+/* Per-day pager — a slim footer chip under the two visible mini-cards, for
+   days holding more cards than a page. Mono small-caps, gold-leaf on hover,
+   so it reads as a manuscript catchword rather than a UI scrollbar. */
+.kbn-tl-pager {
+  align-self: start;
+  justify-self: start;
+  margin: 1px 2px 0;
+  padding: 0 6px;
+  height: 15px;
+  background: transparent;
+  border: 0.5px solid rgba(154, 123, 53, 0.35);
+  border-radius: 8px;
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  color: #7A5E1E;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+.kbn-tl-pager:hover {
+  background: rgba(154, 123, 53, 0.14);
+  border-color: rgba(154, 123, 53, 0.6);
+  color: #5C4715;
+}
+.kbn-tl-pager:focus-visible {
+  outline: 1px dashed #9A7B35;
+  outline-offset: 2px;
 }
 /* Stash */
 .kbn-cluster-grid {

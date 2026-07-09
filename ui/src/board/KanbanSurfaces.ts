@@ -25,6 +25,11 @@ const NOW_COLUMN_ORDER: NowColumnKind[] = ['drafts', 'inFlight', 'awaitingReview
 // scrollable for the server-provided range.
 const TIMELINE_DAY_WIDTH_PX = 225
 
+// Each day column shows at most this many mini-cards at once (two full rows,
+// no inner scroll). A day with more cards paginates — a footer pager cycles
+// through pages — so the ribbon never grows an overlaying scrollbar.
+const TIMELINE_PAGE_SIZE = 2
+
 /** Stash cluster-key derivation: skip umbrella roots (`ai-futures`,
  *  `ai`) and use the first project-level segment instead. Containment-
  *  path remains the load-bearing axis (always present, no user
@@ -67,6 +72,16 @@ export const SURFACE_TITLE: Record<HorizonKind, string> = {
   now: 'Now',
   soon: 'Soon',
   stashed: 'Stash',
+}
+
+/** The visual variants a timeline mini-card can take, by lifecycle position. */
+type TimelineCardKind = 'past' | 'future' | 'awaiting' | 'inflight' | 'draft'
+
+/** One card gathered into a day column, awaiting paginated layout. */
+interface TimelineColEntry {
+  card: KanbanCard
+  kind: TimelineCardKind
+  staleness: KanbanOriginStaleness | undefined
 }
 
 /** Stash cluster: project key + warmth + cards under that key. */
@@ -129,6 +144,10 @@ export class KanbanSurfaceRenderer {
   private timelineEdgeScrollFrame: number | null = null
   private timelineEdgeScrollVelocity = 0
   private timelineEdgeScrollTarget: HTMLElement | null = null
+  /** Per-day-column pagination page, keyed by day ISO so a user's page
+   *  selection survives the poll re-render. A day with more than
+   *  TIMELINE_PAGE_SIZE cards shows a pager that cycles this. */
+  private timelinePages = new Map<string, number>()
 
   constructor(options: KanbanSurfaceRendererOptions) {
     this.getDragSourceId = options.getDragSourceId
@@ -378,19 +397,22 @@ export class KanbanSurfaceRenderer {
     }
     this.installTimelineStripDragFallback(strip, dropColByIso, axisCellByIso)
 
-    const rowByCol = new Map<number, number>()
-    const nextRow = (col: number): number => {
-      const row = (rowByCol.get(col) ?? 0) + 1
-      rowByCol.set(col, row)
-      return row
+    // Gather every card into its day column first (preserving the priority
+    // order inflight → awaiting → past → draft → future), then lay each column
+    // out with pagination. This replaces the old scroll-the-overflow model: a
+    // column shows at most TIMELINE_PAGE_SIZE cards and a pager cycles the rest,
+    // so no inner scrollbar ever overlays the mini-cards.
+    const colCards = new Map<number, TimelineColEntry[]>()
+    const push = (col: number, card: KanbanCard, kind: TimelineCardKind): void => {
+      const list = colCards.get(col) ?? []
+      list.push({ card, kind, staleness: staleness[card.originId] })
+      colCards.set(col, list)
     }
 
     const todayIso = isoDay(new Date())
     const todayCol = dayIndex.get(todayIso) ?? null
     if (todayCol !== null) {
-      for (const card of now.inFlight) {
-        strip.append(this.renderTimelineCard(card, todayCol, nextRow(todayCol), 'inflight', staleness[card.originId]))
-      }
+      for (const card of now.inFlight) push(todayCol, card, 'inflight')
     }
     for (const card of now.awaitingReview) {
       // Ghost at closedAt — but a closed fiber can carry a null closed_at (a
@@ -400,12 +422,12 @@ export class KanbanSurfaceRenderer {
       // run closed it), then today, so an awaiting card is always findable.
       const col = awaitingGhostDayColumn(card, dayIndex, todayCol)
       if (col === null) continue
-      strip.append(this.renderTimelineCard(card, col, nextRow(col), 'awaiting', staleness[card.originId]))
+      push(col, card, 'awaiting')
     }
     for (const card of timeline.past) {
       const col = dayIndexForIso(card.closedAt, dayIndex)
       if (col === null) continue
-      strip.append(this.renderTimelineCard(card, col, nextRow(col), 'past', staleness[card.originId]))
+      push(col, card, 'past')
     }
     if (todayCol !== null) {
       for (const card of now.drafts) {
@@ -414,18 +436,45 @@ export class KanbanSurfaceRenderer {
         // real date") while still appearing in the Now board. Undated drafts
         // sit at today, their natural now-position.
         const col = card.due ? (dayIndexForIso(card.due, dayIndex) ?? todayCol) : todayCol
-        strip.append(this.renderTimelineCard(card, col, nextRow(col), 'draft', staleness[card.originId]))
+        push(col, card, 'draft')
       }
     }
     for (const card of timeline.futureDated) {
       const col = dayIndexForIso(card.nextLaunchAt ?? card.due, dayIndex)
       if (col === null) continue
-      const kind = card.status === 'closed' ? 'awaiting' : 'future'
-      strip.append(this.renderTimelineCard(card, col, nextRow(col), kind, staleness[card.originId]))
+      push(col, card, card.status === 'closed' ? 'awaiting' : 'future')
     }
+
+    // Lay out one column's current page (and its pager, if it overflows). Kept
+    // as a closure so the pager can re-render just its own column in place.
+    const layoutColumn = (col: number): void => {
+      const iso = days[col].iso
+      const entries = colCards.get(col) ?? []
+      for (const el of strip.querySelectorAll(`[data-tl-col="${col}"]`)) el.remove()
+      const total = entries.length
+      const totalPages = Math.max(1, Math.ceil(total / TIMELINE_PAGE_SIZE))
+      const page = Math.min(this.timelinePages.get(iso) ?? 0, totalPages - 1)
+      const start = page * TIMELINE_PAGE_SIZE
+      entries.slice(start, start + TIMELINE_PAGE_SIZE).forEach((entry, i) => {
+        const el = this.renderTimelineCard(entry.card, col, i + 1, entry.kind, entry.staleness)
+        el.dataset.tlCol = String(col)
+        strip.append(el)
+      })
+      if (totalPages > 1) {
+        const pager = this.buildTimelinePager(col, total, page, totalPages, () => {
+          this.timelinePages.set(iso, (page + 1) % totalPages)
+          layoutColumn(col)
+        })
+        pager.dataset.tlCol = String(col)
+        strip.append(pager)
+      }
+    }
+    for (const col of colCards.keys()) layoutColumn(col)
     wrap.append(strip)
 
-    this.installAdaptiveStripHeight(wrap, strip, rowByCol, days.length)
+    // Height is fixed by CSS (compact peek ↔ two-row expanded); no adaptive
+    // measurement is needed now that columns paginate instead of scroll.
+    this.setTimelineAdaptiveCleanup(null)
     this.installTimelineEdgeScroll(wrap)
 
     // The day-strip (14-day window, horizontally scrollable) and a fixed
@@ -442,9 +491,9 @@ export class KanbanSurfaceRenderer {
     }
     section.append(row)
 
-    const timelineCount =
-      timeline.past.length + timeline.futureDated.length + timeline.anytimeSoon.length
-    this.installSectionChrome(section, 'timeline', 'Past · Soon', timelineCount)
+    // No collapse chevron on the Timeline: it's the always-visible horizon
+    // ribbon now, so a collapse toggle is redundant (and the user never used
+    // it). Now/Stash keep their chrome via installSectionChrome.
     return section
   }
 
@@ -560,54 +609,32 @@ export class KanbanSurfaceRenderer {
     this.timelineEdgeScrollFrame = null
   }
 
-  /** Bind a scroll + resize listener that sizes the strip to fit the max
-   *  card stack among horizontally-visible day-columns. */
-  private installAdaptiveStripHeight(
-    wrap: HTMLElement,
-    strip: HTMLElement,
-    rowByCol: Map<number, number>,
-    totalDays: number,
-  ): void {
-    const ROW_PX = 22
-    const STRIP_PADDING_PX = 6
-    const TIMELINE_MAX_VISIBLE_ROWS = 10
-    const recompute = (): void => {
-      const sLeft = wrap.scrollLeft
-      const sRight = sLeft + wrap.clientWidth
-      const firstCol = Math.max(0, Math.floor(sLeft / TIMELINE_DAY_WIDTH_PX))
-      const lastCol = Math.min(totalDays - 1, Math.floor((sRight - 1) / TIMELINE_DAY_WIDTH_PX))
-      let maxRows = 1
-      for (let c = firstCol; c <= lastCol; c += 1) {
-        const r = rowByCol.get(c)
-        if (r !== undefined && r > maxRows) maxRows = r
-      }
-      const visibleRows = Math.min(maxRows, TIMELINE_MAX_VISIBLE_ROWS)
-      // Publish the measured full height as a CSS variable rather than setting
-      // `height` directly. CSS owns the compact↔expanded switch (a slim ribbon
-      // by default; grows to this full height on hover and while a drag is in
-      // flight anywhere on the board — drag-to-schedule means dragging *up*
-      // into an inviting horizon). Keeping the switch + transition in CSS keeps
-      // this measurement job pure and the animation jank-free.
-      strip.style.setProperty('--tl-full-height', `${visibleRows * ROW_PX + STRIP_PADDING_PX}px`)
-    }
-    let rafScheduled = false
-    const schedule = (): void => {
-      if (rafScheduled) return
-      rafScheduled = true
-      window.requestAnimationFrame(() => {
-        rafScheduled = false
-        recompute()
-      })
-    }
-    wrap.addEventListener('scroll', schedule, { passive: true })
-    const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(schedule) : null
-    ro?.observe(wrap)
-    window.requestAnimationFrame(recompute)
-
-    this.setTimelineAdaptiveCleanup(() => {
-      wrap.removeEventListener('scroll', schedule)
-      ro?.disconnect()
+  /** Build a day column's pager: a compact footer chip sitting under the two
+   *  visible mini-cards. Reads "+N more" while cards remain ahead and "↺ N"
+   *  on the last page (click wraps back to the first). Click cycles the page;
+   *  the caller re-lays-out just that column. */
+  private buildTimelinePager(
+    col: number,
+    total: number,
+    page: number,
+    totalPages: number,
+    onClick: () => void,
+  ): HTMLButtonElement {
+    const shownThrough = (page + 1) * TIMELINE_PAGE_SIZE
+    const remaining = Math.max(0, total - shownThrough)
+    const btn = document.createElement('button')
+    btn.type = 'button'
+    btn.className = 'kbn-tl-pager'
+    btn.style.gridColumn = String(col + 1)
+    btn.style.gridRow = String(TIMELINE_PAGE_SIZE + 1)
+    btn.textContent = remaining > 0 ? `+${remaining} more` : `↺ ${totalPages}`
+    btn.title = `Day has ${total} cards — page ${page + 1}/${totalPages}. Click to cycle.`
+    btn.setAttribute('aria-label', `Show more cards for this day (page ${page + 1} of ${totalPages})`)
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation()
+      onClick()
     })
+    return btn
   }
 
   /** Edge-scroll the timeline wrap when a drag approaches its left or
@@ -654,54 +681,6 @@ export class KanbanSurfaceRenderer {
       this.timelineEdgeScrollFrame = window.requestAnimationFrame(tick)
     }
     this.timelineEdgeScrollFrame = window.requestAnimationFrame(tick)
-  }
-
-  /** Section chrome shared across Now / Timeline / Stash: the section heads
-   *  retired (the layout speaks), but each section gets a subtle top-right
-   *  collapse toggle and a compact strip. */
-  private installSectionChrome(
-    section: HTMLElement,
-    key: 'now' | 'timeline' | 'stash',
-    label: string,
-    count: number,
-  ): void {
-    const collapsed = readSectionCollapsed(key)
-    if (collapsed) section.classList.add('kbn-section-collapsed')
-
-    const strip = document.createElement('div')
-    strip.className = 'kbn-section-strip'
-    strip.setAttribute('aria-hidden', collapsed ? 'false' : 'true')
-    const stripLabel = document.createElement('span')
-    stripLabel.className = 'kbn-section-strip-label'
-    appendCappedText(stripLabel, label)
-    const stripCount = document.createElement('span')
-    stripCount.className = 'kbn-section-strip-count'
-    stripCount.textContent = count > 0 ? String(count) : '—'
-    strip.append(stripLabel, stripCount)
-    strip.addEventListener('click', () => toggle())
-    section.append(strip)
-
-    const toggleBtn = document.createElement('button')
-    toggleBtn.type = 'button'
-    toggleBtn.className = 'kbn-section-toggle'
-    const updateAria = (isCollapsed: boolean) => {
-      toggleBtn.setAttribute('aria-label', `${isCollapsed ? 'Expand' : 'Collapse'} ${label}`)
-      toggleBtn.title = isCollapsed ? `Expand ${label}` : `Collapse ${label}`
-      toggleBtn.textContent = isCollapsed ? '⌃' : '⌄'
-      strip.setAttribute('aria-hidden', isCollapsed ? 'false' : 'true')
-    }
-    updateAria(collapsed)
-    const toggle = (): void => {
-      const next = !section.classList.contains('kbn-section-collapsed')
-      section.classList.toggle('kbn-section-collapsed', next)
-      writeSectionCollapsed(key, next)
-      updateAria(next)
-    }
-    toggleBtn.addEventListener('click', (e) => {
-      e.stopPropagation()
-      toggle()
-    })
-    section.append(toggleBtn)
   }
 
   /** Install drop handlers on a section (Now or Stash) - drop anywhere
@@ -927,7 +906,7 @@ export class KanbanSurfaceRenderer {
     card: KanbanCard,
     column: number,
     row: number,
-    kind: 'past' | 'future' | 'awaiting' | 'inflight' | 'draft',
+    kind: TimelineCardKind,
     staleness: KanbanOriginStaleness | undefined,
   ): HTMLElement {
     const isStale = staleness?.status === 'stale'
@@ -1385,31 +1364,6 @@ export function appendCappedText(el: HTMLElement, label: string): void {
   el.append(cap)
   const rest = label.slice(1)
   if (rest) el.append(document.createTextNode(rest))
-}
-
-const SECTION_COLLAPSED_STORAGE_KEY = 'shuttle:kanban:collapsed-sections'
-
-function readSectionCollapsed(key: 'now' | 'timeline' | 'stash'): boolean {
-  try {
-    const raw = window.localStorage.getItem(SECTION_COLLAPSED_STORAGE_KEY)
-    if (!raw) return false
-    const set = new Set(JSON.parse(raw) as string[])
-    return set.has(key)
-  } catch {
-    return false
-  }
-}
-
-function writeSectionCollapsed(key: 'now' | 'timeline' | 'stash', collapsed: boolean): void {
-  try {
-    const raw = window.localStorage.getItem(SECTION_COLLAPSED_STORAGE_KEY)
-    const set = new Set(raw ? (JSON.parse(raw) as string[]) : [])
-    if (collapsed) set.add(key)
-    else set.delete(key)
-    window.localStorage.setItem(SECTION_COLLAPSED_STORAGE_KEY, JSON.stringify([...set]))
-  } catch {
-    // localStorage unavailable; section state just won't persist.
-  }
 }
 
 function isoDay(date: Date): string {
