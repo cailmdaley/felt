@@ -25,10 +25,9 @@ const NOW_COLUMN_ORDER: NowColumnKind[] = ['drafts', 'inFlight', 'awaitingReview
 // scrollable for the server-provided range.
 const TIMELINE_DAY_WIDTH_PX = 225
 
-// Each day column shows at most this many mini-cards at once (two full rows,
-// no inner scroll). A day with more cards paginates — a footer pager cycles
-// through pages — so the ribbon never grows an overlaying scrollbar.
-const TIMELINE_PAGE_SIZE = 2
+// The Pinned band wraps its launcher chips to at most this many rows; extra
+// roles page behind a "+N more" affordance rather than scrolling.
+const PINNED_MAX_ROWS = 2
 
 /** Stash cluster-key derivation: skip umbrella roots (`ai-futures`,
  *  `ai`) and use the first project-level segment instead. Containment-
@@ -76,13 +75,6 @@ export const SURFACE_TITLE: Record<HorizonKind, string> = {
 
 /** The visual variants a timeline mini-card can take, by lifecycle position. */
 type TimelineCardKind = 'past' | 'future' | 'awaiting' | 'inflight' | 'draft'
-
-/** One card gathered into a day column, awaiting paginated layout. */
-interface TimelineColEntry {
-  card: KanbanCard
-  kind: TimelineCardKind
-  staleness: KanbanOriginStaleness | undefined
-}
 
 /** Stash cluster: project key + warmth + cards under that key. */
 interface StashCluster {
@@ -144,10 +136,9 @@ export class KanbanSurfaceRenderer {
   private timelineEdgeScrollFrame: number | null = null
   private timelineEdgeScrollVelocity = 0
   private timelineEdgeScrollTarget: HTMLElement | null = null
-  /** Per-day-column pagination page, keyed by day ISO so a user's page
-   *  selection survives the poll re-render. A day with more than
-   *  TIMELINE_PAGE_SIZE cards shows a pager that cycles this. */
-  private timelinePages = new Map<string, number>()
+  /** Current page of the Pinned band when its chips overflow two rows.
+   *  Cycled by the "+N more" pager; survives poll re-renders. */
+  private pinnedPage = 0
 
   constructor(options: KanbanSurfaceRendererOptions) {
     this.getDragSourceId = options.getDragSourceId
@@ -186,17 +177,18 @@ export class KanbanSurfaceRenderer {
     return section
   }
 
-  /** Render the Pinned strip: a horizontally-scrolling row of at-rest pinned
-   *  umbrella roles, sitting between Now and the Timeline. These are
+  /** Render the Pinned band: a dense wrap of at-rest pinned-role launcher
+   *  chips, sitting between the Timeline ribbon and the Now board. These are
    *  schedule-less `kind:pinned` roles the poller never auto-fires; you
-   *  dispatch one by dragging it onto the Now In-flight column (the cards are
-   *  the standard draggable `kbn-card`, and `classifyFiber` returns 'pinned'
-   *  so `findCardColumn` routes the drag through `transition(card,'inFlight')`).
-   *  Ordered most-recently-used first by the read model. ALWAYS rendered —
-   *  even with zero parked roles — because the strip IS the drop target for
-   *  parking a role, so hiding it when empty made parking impossible exactly
-   *  when nothing was parked. The empty state shrinks to a slim "drag a role
-   *  here" hint (parity with the Portolan board).
+   *  dispatch one by dragging it onto the Now In-flight column (the chips are
+   *  draggable and `findCardColumn` returns 'pinned' so the drag routes through
+   *  `transition(card,'inFlight')`). Chips are stable-ordered by fiber path and
+   *  wrap to at most PINNED_MAX_ROWS rows in the available width; extra roles
+   *  page behind a "+N more" affordance rather than scrolling (measured after
+   *  layout in installPinnedPagination). ALWAYS rendered — even with zero parked
+   *  roles — because the band IS the drop target for parking a role, so hiding
+   *  it when empty made parking impossible exactly when nothing was parked. The
+   *  empty state shrinks to a slim "drag a role here" hint.
    */
   renderPinnedSection(
     pinned: KanbanCard[],
@@ -227,13 +219,64 @@ export class KanbanSurfaceRenderer {
       // the same place every visit. The read model's most-recently-used order
       // would shuffle chips out from under the user's hand.
       const ordered = [...pinned].sort((a, b) => a.id.localeCompare(b.id))
-      for (const card of ordered) {
-        row.append(this.renderPinnedChip(card, staleness[card.originId]))
-      }
+      const chips = ordered.map((card) => this.renderPinnedChip(card, staleness[card.originId]))
+      for (const chip of chips) row.append(chip)
+      // Wrapping + "+N more" paging is a post-layout measurement (chip widths
+      // aren't known until the band is in the DOM), so defer to a rAF once the
+      // section has been attached by the modal's render pass.
+      window.requestAnimationFrame(() => this.installPinnedPagination(row, chips))
     }
     section.append(row)
     this.installPinnedDropHandlers(section)
     return section
+  }
+
+  /**
+   * Cap the Pinned band to PINNED_MAX_ROWS rows and page the overflow. Chips
+   * wrap naturally; we measure their row ranks (by offsetTop), keep the chips
+   * that fall in the first two rows for the current page, hide the rest, and —
+   * when there's overflow — append a "+N more" pager that cycles pages in place.
+   * Re-runnable and idempotent: it first reveals every chip and drops any prior
+   * pager so each measurement starts from the full set.
+   */
+  private installPinnedPagination(row: HTMLElement, chips: HTMLElement[]): void {
+    if (chips.length === 0) return
+    row.querySelector('.kbn-pin-more')?.remove()
+    for (const chip of chips) chip.style.display = ''
+    if (row.clientWidth === 0) return // not laid out yet; a later render retries
+
+    // Row rank of each chip from its vertical offset (chips on the same visual
+    // row share an offsetTop). perPageBase = how many fit in the first two rows.
+    const tops = chips.map((c) => c.offsetTop)
+    const distinctTops = [...new Set(tops)].sort((a, b) => a - b)
+    if (distinctTops.length <= PINNED_MAX_ROWS) {
+      this.pinnedPage = 0
+      return // everything fits; no paging needed
+    }
+    const rowTopCutoff = distinctTops[PINNED_MAX_ROWS] // first row that overflows
+    // Reserve one slot for the pager so it always sits within the two rows.
+    const perPage = Math.max(1, tops.filter((t) => t < rowTopCutoff).length - 1)
+    const totalPages = Math.ceil(chips.length / perPage)
+    this.pinnedPage = Math.min(this.pinnedPage, totalPages - 1)
+
+    const start = this.pinnedPage * perPage
+    const end = start + perPage
+    chips.forEach((chip, i) => {
+      chip.style.display = i >= start && i < end ? '' : 'none'
+    })
+    const remaining = chips.length - end
+    const more = document.createElement('button')
+    more.type = 'button'
+    more.className = 'kbn-tl-pager kbn-pin-more'
+    more.textContent = remaining > 0 ? `+${remaining} more` : `↺ ${totalPages}`
+    more.title = `${chips.length} pinned roles — page ${this.pinnedPage + 1}/${totalPages}. Click to cycle.`
+    more.setAttribute('aria-label', `Show more pinned roles (page ${this.pinnedPage + 1} of ${totalPages})`)
+    more.addEventListener('click', (e) => {
+      e.stopPropagation()
+      this.pinnedPage = (this.pinnedPage + 1) % totalPages
+      this.installPinnedPagination(row, chips)
+    })
+    row.append(more)
   }
 
   /**
@@ -397,22 +440,19 @@ export class KanbanSurfaceRenderer {
     }
     this.installTimelineStripDragFallback(strip, dropColByIso, axisCellByIso)
 
-    // Gather every card into its day column first (preserving the priority
-    // order inflight → awaiting → past → draft → future), then lay each column
-    // out with pagination. This replaces the old scroll-the-overflow model: a
-    // column shows at most TIMELINE_PAGE_SIZE cards and a pager cycles the rest,
-    // so no inner scrollbar ever overlays the mini-cards.
-    const colCards = new Map<number, TimelineColEntry[]>()
-    const push = (col: number, card: KanbanCard, kind: TimelineCardKind): void => {
-      const list = colCards.get(col) ?? []
-      list.push({ card, kind, staleness: staleness[card.originId] })
-      colCards.set(col, list)
+    const rowByCol = new Map<number, number>()
+    const nextRow = (col: number): number => {
+      const row = (rowByCol.get(col) ?? 0) + 1
+      rowByCol.set(col, row)
+      return row
     }
 
     const todayIso = isoDay(new Date())
     const todayCol = dayIndex.get(todayIso) ?? null
     if (todayCol !== null) {
-      for (const card of now.inFlight) push(todayCol, card, 'inflight')
+      for (const card of now.inFlight) {
+        strip.append(this.renderTimelineCard(card, todayCol, nextRow(todayCol), 'inflight', staleness[card.originId]))
+      }
     }
     for (const card of now.awaitingReview) {
       // Ghost at closedAt — but a closed fiber can carry a null closed_at (a
@@ -422,12 +462,12 @@ export class KanbanSurfaceRenderer {
       // run closed it), then today, so an awaiting card is always findable.
       const col = awaitingGhostDayColumn(card, dayIndex, todayCol)
       if (col === null) continue
-      push(col, card, 'awaiting')
+      strip.append(this.renderTimelineCard(card, col, nextRow(col), 'awaiting', staleness[card.originId]))
     }
     for (const card of timeline.past) {
       const col = dayIndexForIso(card.closedAt, dayIndex)
       if (col === null) continue
-      push(col, card, 'past')
+      strip.append(this.renderTimelineCard(card, col, nextRow(col), 'past', staleness[card.originId]))
     }
     if (todayCol !== null) {
       for (const card of now.drafts) {
@@ -436,45 +476,18 @@ export class KanbanSurfaceRenderer {
         // real date") while still appearing in the Now board. Undated drafts
         // sit at today, their natural now-position.
         const col = card.due ? (dayIndexForIso(card.due, dayIndex) ?? todayCol) : todayCol
-        push(col, card, 'draft')
+        strip.append(this.renderTimelineCard(card, col, nextRow(col), 'draft', staleness[card.originId]))
       }
     }
     for (const card of timeline.futureDated) {
       const col = dayIndexForIso(card.nextLaunchAt ?? card.due, dayIndex)
       if (col === null) continue
-      push(col, card, card.status === 'closed' ? 'awaiting' : 'future')
+      const kind = card.status === 'closed' ? 'awaiting' : 'future'
+      strip.append(this.renderTimelineCard(card, col, nextRow(col), kind, staleness[card.originId]))
     }
-
-    // Lay out one column's current page (and its pager, if it overflows). Kept
-    // as a closure so the pager can re-render just its own column in place.
-    const layoutColumn = (col: number): void => {
-      const iso = days[col].iso
-      const entries = colCards.get(col) ?? []
-      for (const el of strip.querySelectorAll(`[data-tl-col="${col}"]`)) el.remove()
-      const total = entries.length
-      const totalPages = Math.max(1, Math.ceil(total / TIMELINE_PAGE_SIZE))
-      const page = Math.min(this.timelinePages.get(iso) ?? 0, totalPages - 1)
-      const start = page * TIMELINE_PAGE_SIZE
-      entries.slice(start, start + TIMELINE_PAGE_SIZE).forEach((entry, i) => {
-        const el = this.renderTimelineCard(entry.card, col, i + 1, entry.kind, entry.staleness)
-        el.dataset.tlCol = String(col)
-        strip.append(el)
-      })
-      if (totalPages > 1) {
-        const pager = this.buildTimelinePager(col, total, page, totalPages, () => {
-          this.timelinePages.set(iso, (page + 1) % totalPages)
-          layoutColumn(col)
-        })
-        pager.dataset.tlCol = String(col)
-        strip.append(pager)
-      }
-    }
-    for (const col of colCards.keys()) layoutColumn(col)
     wrap.append(strip)
 
-    // Height is fixed by CSS (compact peek ↔ two-row expanded); no adaptive
-    // measurement is needed now that columns paginate instead of scroll.
-    this.setTimelineAdaptiveCleanup(null)
+    this.installAdaptiveStripHeight(wrap, strip, rowByCol, days.length)
     this.installTimelineEdgeScroll(wrap)
 
     // The day-strip (14-day window, horizontally scrollable) and a fixed
@@ -609,32 +622,54 @@ export class KanbanSurfaceRenderer {
     this.timelineEdgeScrollFrame = null
   }
 
-  /** Build a day column's pager: a compact footer chip sitting under the two
-   *  visible mini-cards. Reads "+N more" while cards remain ahead and "↺ N"
-   *  on the last page (click wraps back to the first). Click cycles the page;
-   *  the caller re-lays-out just that column. */
-  private buildTimelinePager(
-    col: number,
-    total: number,
-    page: number,
-    totalPages: number,
-    onClick: () => void,
-  ): HTMLButtonElement {
-    const shownThrough = (page + 1) * TIMELINE_PAGE_SIZE
-    const remaining = Math.max(0, total - shownThrough)
-    const btn = document.createElement('button')
-    btn.type = 'button'
-    btn.className = 'kbn-tl-pager'
-    btn.style.gridColumn = String(col + 1)
-    btn.style.gridRow = String(TIMELINE_PAGE_SIZE + 1)
-    btn.textContent = remaining > 0 ? `+${remaining} more` : `↺ ${totalPages}`
-    btn.title = `Day has ${total} cards — page ${page + 1}/${totalPages}. Click to cycle.`
-    btn.setAttribute('aria-label', `Show more cards for this day (page ${page + 1} of ${totalPages})`)
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation()
-      onClick()
+  /** Bind a scroll + resize listener that sizes the strip to fit the max
+   *  card stack among horizontally-visible day-columns. */
+  private installAdaptiveStripHeight(
+    wrap: HTMLElement,
+    strip: HTMLElement,
+    rowByCol: Map<number, number>,
+    totalDays: number,
+  ): void {
+    const ROW_PX = 22
+    const STRIP_PADDING_PX = 6
+    const TIMELINE_MAX_VISIBLE_ROWS = 10
+    const recompute = (): void => {
+      const sLeft = wrap.scrollLeft
+      const sRight = sLeft + wrap.clientWidth
+      const firstCol = Math.max(0, Math.floor(sLeft / TIMELINE_DAY_WIDTH_PX))
+      const lastCol = Math.min(totalDays - 1, Math.floor((sRight - 1) / TIMELINE_DAY_WIDTH_PX))
+      let maxRows = 1
+      for (let c = firstCol; c <= lastCol; c += 1) {
+        const r = rowByCol.get(c)
+        if (r !== undefined && r > maxRows) maxRows = r
+      }
+      const visibleRows = Math.min(maxRows, TIMELINE_MAX_VISIBLE_ROWS)
+      // Publish the measured full height as a CSS variable rather than setting
+      // `height` directly. CSS owns the compact↔expanded switch (a slim ribbon
+      // by default; grows to this full height on hover and while a drag is in
+      // flight anywhere on the board — drag-to-schedule means dragging *up*
+      // into an inviting horizon). Keeping the switch + transition in CSS keeps
+      // this measurement job pure and the animation jank-free.
+      strip.style.setProperty('--tl-full-height', `${visibleRows * ROW_PX + STRIP_PADDING_PX}px`)
+    }
+    let rafScheduled = false
+    const schedule = (): void => {
+      if (rafScheduled) return
+      rafScheduled = true
+      window.requestAnimationFrame(() => {
+        rafScheduled = false
+        recompute()
+      })
+    }
+    wrap.addEventListener('scroll', schedule, { passive: true })
+    const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(schedule) : null
+    ro?.observe(wrap)
+    window.requestAnimationFrame(recompute)
+
+    this.setTimelineAdaptiveCleanup(() => {
+      wrap.removeEventListener('scroll', schedule)
+      ro?.disconnect()
     })
-    return btn
   }
 
   /** Edge-scroll the timeline wrap when a drag approaches its left or

@@ -229,18 +229,20 @@
   color: #7A5E1E;
   white-space: nowrap;
 }
-/* Single dense row that scrolls horizontally as roles accumulate — stable
-   left-to-right order (chips sorted by fiber path) so muscle memory works. */
+/* Dense wrap — chips fill the available width and wrap to at most two rows;
+   overflow pages behind "+N more" (installPinnedPagination), no scrollbar.
+   Stable left-to-right order (chips sorted by fiber path) so muscle memory
+   works. `overflow: hidden` clips the one-frame flash of all chips before the
+   post-layout measurement hides the paged-out ones. */
 .kbn-pinned-row {
   display: flex;
-  flex-direction: row;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   align-items: center;
+  align-content: flex-start;
   gap: 6px;
   min-width: 0;
-  overflow-x: auto;
-  overflow-y: hidden;
-  -webkit-overflow-scrolling: touch;
+  flex: 1 1 auto;
+  overflow: hidden;
   padding: 1px 0;
 }
 /* Launcher chip: dot · glyph · name · agent/host hint. Compact pill; no
@@ -487,26 +489,30 @@
      day-column alignment during horizontal scroll. The adaptive height
      is set imperatively by `installAdaptiveStripHeight()`. */
   width: max-content;
-  /* Never scroll inside the strip — a scrollbar overlaid the mini-cards and
-     made them unusable. Overflow is clipped; day columns with more than two
-     cards paginate (see .kbn-tl-pager) instead. */
-  overflow: hidden;
-  /* Slim horizon by default (a one-row peek); grows to two full rows + pager
-     on hover and while a drag is in flight anywhere on the board. */
-  height: 30px;
+  overflow-x: hidden;
+  overflow-y: hidden;
+  /* Slim horizon by default — clamped to ~two rows of markers so the ribbon
+     reads as a strip, not a section. `--tl-full-height` is the measured full
+     stack height, published by installAdaptiveStripHeight(). On hover and while
+     a drag is in flight (`.kbn-body.kbn-dragging`) the strip grows to that full
+     height (scrolling inside if the stack is tall): dragging a card up meets an
+     inviting, expanded horizon. */
+  height: min(var(--tl-full-height, 50px), 50px);
   transition: height 200ms cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 /* Hover-expand is deliberately *lazy* — a 320ms delay so a cursor merely
    brushing across the ribbon doesn't twitch the page open. Collapse is
    immediate (the base rule carries no delay). */
 .kbn-section-timeline:hover .kbn-timeline-strip {
-  height: 74px;
+  height: var(--tl-full-height, 50px);
+  overflow-y: auto;
   transition-delay: 320ms;
 }
 /* Drag-expand is immediate — dragging a card up must meet the open horizon
    at once. Placed after the hover rule so its zero delay wins during a drag. */
 .kbn-body.kbn-dragging .kbn-timeline-strip {
-  height: 74px;
+  height: var(--tl-full-height, 50px);
+  overflow-y: auto;
   transition-delay: 0ms;
 }
 .kbn-timeline-dropcol {
@@ -632,9 +638,9 @@
   text-overflow: ellipsis;
   font-family: var(--font-serif, 'EB Garamond', serif);
 }
-/* Per-day pager — a slim footer chip under the two visible mini-cards, for
-   days holding more cards than a page. Mono small-caps, gold-leaf on hover,
-   so it reads as a manuscript catchword rather than a UI scrollbar. */
+/* Pager chip — reused by the Pinned band's "+N more" overflow control
+   (.kbn-pin-more). A slim gold-leaf pill that reads as a manuscript catchword
+   rather than a UI scrollbar; click cycles pages. */
 .kbn-tl-pager {
   align-self: start;
   justify-self: start;
