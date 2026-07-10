@@ -1,0 +1,139 @@
+#!/usr/bin/env bash
+#
+# shuttle-deploy — one verb, whole fleet. Push, rebuild, cycle, verify, release.
+#
+#   bin/shuttle-deploy                        # deploy everywhere (local + all remotes)
+#   bin/shuttle-deploy --hosts local,candide  # a subset
+#   bin/shuttle-deploy --list                 # show the host table
+#   bin/shuttle-deploy --no-push              # skip the git push (already pushed)
+#
+# Per host the ritual is the one AGENTS.md documents ("Deploying is ALWAYS
+# safe"): pull → make daemon → cycle the daemon (launchd kickstart on macOS,
+# kill the :4000 listener so the respawn loop restarts from the fresh escript
+# on clusters) → verify git_short_sha flipped → release the boot quarantine the
+# restart armed. Remote hosts also get ui/dist rsync'd (clusters don't build
+# the UI; macOS is the build host).
+#
+# The host table (fleet_dir/fleet_flags below) is the single place a machine's
+# quirks live. Adding a host to the fleet = one case arm (+ ssh config). Hosts
+# whose ssh is interactive (nibi's Duo, cineca's step cert) rely on a live
+# credential — a ControlMaster socket or a fresh cert; the preflight check
+# fails fast with the fix. Portable to macOS bash 3.2 (no assoc arrays).
+
+set -uo pipefail
+
+FLEET_ORDER="local candide cineca amundsen nibi"
+
+fleet_dir() { # host → checkout dir (empty = unknown host)
+  case "$1" in
+    local)    echo "$HOME/dev/felt" ;;
+    candide)  echo "~/dev/felt" ;;
+    cineca)   echo "~/dev/felt" ;;
+    amundsen) echo "~/code/felt" ;;
+    nibi)     echo "~/code/felt" ;;
+    *)        echo "" ;;
+  esac
+}
+
+fleet_flags() { # host → extra ssh flags (amundsen's alias carries LocalForwards
+  case "$1" in  # that collide when a session already holds them)
+    amundsen) echo "-o ClearAllForwardings=yes" ;;
+    *)        echo "" ;;
+  esac
+}
+
+# Clusters keep their toolchain under ~/.local (kerl OTP + precompiled Elixir +
+# Go), not on the default PATH of a non-interactive ssh shell.
+REMOTE_PATH='export PATH=$HOME/.local/bin:$HOME/.local/go/bin:$HOME/.local/elixir/bin:$HOME/.local/otp/27/bin:$PATH'
+
+BOLD=$'\033[1m'; GREEN=$'\033[32m'; RED=$'\033[31m'; RESET=$'\033[0m'
+ok()   { printf '  %s✓%s %s\n' "$GREEN" "$RESET" "$1"; }
+bad()  { printf '  %s✗%s %s\n' "$RED" "$RESET" "$1"; }
+say()  { printf '\n%s▸ %s%s\n' "$BOLD" "$1" "$RESET"; }
+
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+HOSTS="$FLEET_ORDER"
+PUSH=1
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --hosts) HOSTS="$(echo "$2" | tr ',' ' ')"; shift 2 ;;
+    --hosts=*) HOSTS="$(echo "${1#*=}" | tr ',' ' ')"; shift ;;
+    --no-push) PUSH=0; shift ;;
+    --list) for h in $FLEET_ORDER; do printf '%-10s %s\n' "$h" "$(fleet_dir "$h")"; done; exit 0 ;;
+    -h|--help) sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "unknown flag: $1" >&2; exit 2 ;;
+  esac
+done
+
+for h in $HOSTS; do
+  [ -n "$(fleet_dir "$h")" ] || { echo "unknown host: $h (see --list)" >&2; exit 2; }
+done
+
+TARGET_SHA="$(git -C "$REPO" rev-parse --short HEAD)"
+
+if [ "$PUSH" = 1 ]; then
+  say "push (target $TARGET_SHA)"
+  git -C "$REPO" push && ok "pushed" || { bad "git push failed"; exit 1; }
+fi
+
+version_sha() { # $1 = "" (local) | host
+  local cmd="curl -s --max-time 10 localhost:4000/api/v1/version"
+  if [ -z "$1" ]; then $cmd; else ssh $(fleet_flags "$1") "$1" "$cmd"; fi 2>/dev/null \
+    | sed -n 's/.*"git_short_sha":"\([^"]*\)".*/\1/p'
+}
+
+release_quarantine() { # $1 = "" | host
+  local cmd="curl -s --max-time 10 -X POST localhost:4000/api/v1/quarantine/release"
+  if [ -z "$1" ]; then $cmd; else ssh $(fleet_flags "$1") "$1" "$cmd"; fi 2>/dev/null \
+    | grep -q '"ok":true'
+}
+
+wait_for_sha() { # $1 = "" | host — poll until version reports TARGET_SHA
+  for _ in $(seq 1 30); do
+    [ "$(version_sha "$1")" = "$TARGET_SHA" ] && return 0
+    sleep 5
+  done
+  return 1
+}
+
+deploy_local() {
+  say "local ($TARGET_SHA)"
+  (cd "$REPO" && make daemon >/dev/null) || { bad "make daemon failed"; return 1; }
+  launchctl kickstart -k "gui/$(id -u)/io.shuttle.daemon" 2>/dev/null \
+    || (cd "$REPO" && make restart >/dev/null)
+  wait_for_sha "" || { bad "daemon did not come up on $TARGET_SHA"; return 1; }
+  release_quarantine "" && ok "live on $TARGET_SHA, quarantine released" \
+    || { bad "quarantine release failed"; return 1; }
+}
+
+deploy_remote() {
+  local host="$1" dir flags
+  dir="$(fleet_dir "$host")"; flags="$(fleet_flags "$host")"
+  say "$host ($dir)"
+  ssh $flags "$host" "true" 2>/dev/null \
+    || { bad "ssh unreachable (expired cert / no ControlMaster? see AGENTS.md hosts section)"; return 1; }
+  ssh $flags "$host" "$REMOTE_PATH && cd $dir && git pull --ff-only -q && make daemon" >/dev/null \
+    || { bad "pull/build failed"; return 1; }
+  rsync -az -e "ssh $flags" "$REPO/ui/dist/" "$host:$dir/ui/dist/" 2>/dev/null || true
+  # Cycle: the respawn loop owns the daemon; kill the :4000 listener and it
+  # restarts from the rebuilt escript (make stop targets the wrong pidfile).
+  ssh $flags "$host" "lsof -ti:4000 -sTCP:LISTEN | xargs -r kill" 2>/dev/null
+  wait_for_sha "$host" \
+    || { bad "daemon did not come up on $TARGET_SHA (slow boot? check tmux shuttle-daemon)"; return 1; }
+  release_quarantine "$host" && ok "live on $TARGET_SHA, quarantine released" \
+    || { bad "quarantine release failed"; return 1; }
+}
+
+FAILED=""
+for h in $HOSTS; do
+  if [ "$h" = local ]; then deploy_local || FAILED="$FAILED $h"
+  else deploy_remote "$h" || FAILED="$FAILED $h"; fi
+done
+
+echo
+if [ -z "$FAILED" ]; then
+  printf '%s✓ fleet on %s%s\n' "$GREEN$BOLD" "$TARGET_SHA" "$RESET"
+else
+  printf '%s✗ failed:%s%s\n' "$RED$BOLD" "$FAILED" "$RESET"; exit 1
+fi

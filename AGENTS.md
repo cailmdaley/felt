@@ -342,6 +342,27 @@ down" when it isn't:
   LocalForwards (plot ports) + a RemoteForward that collide harmlessly when a
   session already holds them; pass `-o ClearAllForwardings=yes` on one-off
   ssh/rsync to silence the `Address already in use` noise.
+- **nibi** (`nibi.alliancecan.ca`, user `cdaley`, Alliance Canada) — pubkey +
+  **Duo keyboard-interactive 2FA**: every new master connection prompts
+  "Passcode or option (1-1)"; answering `1` sends a push to Cail's phone. The
+  ssh config sets `ControlMaster auto` + `ControlPersist`, so after one approved
+  login every further ssh/rsync multiplexes over the live socket with no 2FA.
+  Automating a fresh login: run `ssh nibi` in a tmux pane, `send-keys '1' Enter`,
+  and ask Cail to approve the push; the Duo prompt times out in ~60s, so
+  trigger it only when he's reachable. Checkout is **`~/code/felt`** (like
+  amundsen); toolchain under `~/.local` (kerl OTP 27 + Elixir + Go), not on the
+  non-interactive PATH.
+
+**`bin/shuttle-deploy` is the fleet deploy verb — use it instead of hand-rolling
+the ritual.** `bin/shuttle-deploy` (macOS hub, from the repo root) pushes once,
+then per host: pull → `make daemon` → rsync `ui/dist` → cycle the daemon
+(launchctl kickstart locally; kill the `:4000` listener on clusters so the
+respawn loop restarts it) → poll `/api/v1/version` until `git_short_sha`
+matches → release the boot quarantine. `--hosts local,candide,…` for a subset,
+`--list` for the host table (the single place per-host checkout paths and ssh
+quirks live — adding a fleet member is one case arm there plus ssh config).
+Preflight fails fast on dead ssh (expired cineca cert, no nibi ControlMaster)
+with a pointer here.
 
 **Deploying is ALWAYS safe — local or remote — and is never a blocker.**
 Rebuilding and restarting the daemon (`make all`, cycling `:4000`, reloading the
