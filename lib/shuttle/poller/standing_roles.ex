@@ -118,18 +118,27 @@ defmodule Shuttle.Poller.StandingRoles do
       not standing_role_dispatched_unexited?(fiber) ->
         state
 
-      # SELF-HEAL, don't close, on inverted/implausible markers. A run whose
-      # `handed_off_at` is EARLIER than its `dispatched_at` is physically
-      # impossible — you can't hand off before you're dispatched — so the markers
-      # are corrupt, not a genuine in-flight run. `dispatched_unexited?` reads the
-      # inversion as "dispatched, never handed off" → orphan → close, and with no
-      # live session every gate below passes and it re-closes a healthy
-      # `status: active` role every poll. A corrupt-marker inference must never
-      # override the file's `status: active` (commit 3d51276, "restart is not
-      # dispatch authority"): conclude the phantom run (stamp `handed_off_at = now`,
-      # exactly what `conclude_run` does on a human accept), so the marker
-      # self-corrects and the role stays armed. Never mark awaiting/park.
-      standing_role_markers_inverted?(fiber) ->
+      # SELF-HEAL, don't close, on inverted markers — STANDING ONLY. An
+      # inverted pair (`handed_off_at` earlier than `dispatched_at`) is NOT
+      # physically impossible: it is the ordinary shape of any re-dispatched
+      # role, because the PREVIOUS run's handoff stamp persists while the new
+      # dispatch writes a newer `dispatched_at` (the re-arm-then-dispatch write
+      # ordering alone produces a ~100ms inversion). For a STANDING role, the
+      # safe reading of that shape with no live session is "conclude the
+      # phantom run and stay armed" — stamping `handed_off_at = now` is
+      # harmless because the CRON gates the next fire, and it avoids the
+      # re-close-every-poll oscillation this branch was born for (a
+      # corrupt-marker inference must never override the file's
+      # `status: active`; commit 3d51276, "restart is not dispatch authority").
+      #
+      # For a PINNED role the same stamp is catastrophic: `handed_off_at >=
+      # dispatched_at` IS the pinned autonomous relaunch trigger
+      # (`deliberate_handoff_since_dispatch?`), so "healing" a pinned dirty
+      # death manufactures a relaunch signal and the role loops forever
+      # (heal → dispatch → dirty death → heal → …). A pinned role with an
+      # un-exited dispatch and no live session is a dead interface regardless
+      # of marker ordering; it falls through to the park branch below.
+      kind == "standing" and standing_role_markers_inverted?(fiber) ->
         Logger.info(
           "Standing role #{fiber_id} has inverted runtime markers (handed_off_at earlier than " <>
             "dispatched_at) — corrupt, not genuinely in-flight; self-healing (stamping " <>

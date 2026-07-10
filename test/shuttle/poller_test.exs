@@ -4018,6 +4018,60 @@ defmodule Shuttle.PollerTest do
            end)
   end
 
+  test "poller PARKS (never self-heals) a dead pinned role whose markers are time-inverted" do
+    # Regression for the pinned relaunch loop: an inverted pair (handed_off_at
+    # earlier than dispatched_at) is NOT corrupt — it is the ordinary shape of
+    # any re-dispatched role, because the PREVIOUS run's handoff stamp persists
+    # under the new dispatch's newer dispatched_at. The standing-only self-heal
+    # (stamp handed_off_at=now) applied to a pinned dirty death MANUFACTURES the
+    # pinned autonomous relaunch trigger (deliberate_handoff_since_dispatch?),
+    # looping the role forever: heal → dispatch → dirty death → heal → …
+    # A dead pinned role must fall through to the park branch (status: open),
+    # with no handoff stamp and no fresh dispatch.
+    fiber_id = "tests/pinned-inverted-markers"
+
+    previous_loom_homes = System.get_env("FELT_STORES")
+    System.put_env("FELT_STORES", "/tmp")
+    on_exit(fn -> restore_env("FELT_STORES", previous_loom_homes) end)
+
+    MockRunner.set_shuttle(fiber_id, """
+    kind: pinned
+    agent: claude-sonnet
+    """)
+
+    # A prior run's handoff, then a newer dispatch that died dirty (no live
+    # session): handed_off_at < dispatched_at.
+    dispatched = DateTime.utc_now()
+    write_dispatch_marker(fiber_id, "pinned-inverted-uuid", dispatched)
+    write_handoff_marker(fiber_id, DateTime.add(dispatched, -3600, :second))
+
+    doc_path = "/tmp/.felt/#{fiber_id}/pinned-inverted-markers.md"
+
+    {:ok, poller} =
+      start_poller!(
+        name: :test_poller_pinned_inverted,
+        runner: MockRunner,
+        poll_interval_ms: 60_000,
+        felt_stores: ["/tmp"]
+      )
+
+    send(poller, :run_poll_cycle)
+
+    # Parked back to the strip.
+    assert wait_until(fn -> File.read!(doc_path) =~ "status: open" end, 80)
+
+    # No self-heal write: stamping handed_off_at would arm the relaunch trigger.
+    refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
+             cmd == "felt" and match?(["shuttle", "mark-runtime" | _], args) and
+               "--handed-off-at" in args
+           end)
+
+    # And no fresh worker was spawned.
+    refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
+             cmd == "tmux" and hd(args) == "new-session"
+           end)
+  end
+
   test "poller leaves a scheduled standing role armed when a dead ADHOC extra-run is its last run" do
     # Fix #2: a force-dispatched ad-hoc extra-run that dies dirty (daemon down
     # across its exit) must NOT close the SCHEDULED standing role to awaiting —
