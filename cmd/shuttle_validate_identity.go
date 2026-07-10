@@ -88,7 +88,7 @@ intrinsic-identity migration invariants:
   - uid values do not describe multiple slug addresses in one daemon feed
   - open/active shuttle fibers have shuttle.host ownership
 
-By default it checks the usual local tunnel ports (:4000, :4001, :4002, :4003).
+By default it checks the usual local tunnel ports (:4000, :4001, :4002, :4003, :4004).
 Pass --daemon-url repeatedly to validate another set of daemon base URLs.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -99,6 +99,7 @@ Pass --daemon-url repeatedly to validate another set of daemon base URLs.`,
 				"http://127.0.0.1:4001",
 				"http://127.0.0.1:4002",
 				"http://127.0.0.1:4003",
+				"http://127.0.0.1:4004",
 			}
 		}
 

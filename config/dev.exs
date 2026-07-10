@@ -26,6 +26,12 @@ remotes =
         url: "http://127.0.0.1:4003",
         poll_interval_ms: 5000,
         request_timeout_ms: 8000
+      },
+      %{
+        name: "nibi",
+        url: "http://127.0.0.1:4004",
+        poll_interval_ms: 5000,
+        request_timeout_ms: 8000
       }
     ]
   else

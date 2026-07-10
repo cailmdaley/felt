@@ -14,7 +14,13 @@
     <string>-M</string>
     <string>0</string>
     <string>-S</string>
+    {{- if .Multiplex }}
+    {{- /* reuse-only: ride a human-authenticated ControlMaster socket (2FA
+           hosts); ControlMaster stays "no" below so this never CREATES one. */}}
+    <string>{{ .Home }}/.ssh/ctl/%C</string>
+    {{- else }}
     <string>none</string>
+    {{- end }}
     <string>-o</string>
     <string>ServerAliveInterval=30</string>
     <string>-o</string>

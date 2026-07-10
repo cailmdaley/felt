@@ -30,6 +30,16 @@ type tunnelSpec struct {
 	Name        string
 	LocalPort   int
 	HoldCommand string
+	// Multiplex: ride an existing ControlMaster socket (~/.ssh/ctl/%C, the
+	// ssh-config ControlPath) instead of opening independent connections.
+	// For hosts behind interactive 2FA (nibi's Duo) a fresh unattended ssh can
+	// never authenticate, so the tunnel's only viable transport is the socket a
+	// human-approved login left behind: alive → tunnel up for free; dead →
+	// autossh retries harmlessly until the next approved `ssh <host>` login
+	// revives the master, then the tunnel comes back on its own. Reuse-only —
+	// ControlMaster stays "no" so a headless launchd job never tries (and
+	// fails) to *create* a master.
+	Multiplex bool
 }
 
 type tunnelTemplateData struct {
@@ -41,12 +51,14 @@ type tunnelTemplateData struct {
 	SSHAuthSock string
 	LogPath     string
 	Home        string
+	Multiplex   bool
 }
 
 var defaultTunnelSpecs = map[string]tunnelSpec{
 	"candide":  {Name: "candide", LocalPort: 4001},
 	"cineca":   {Name: "cineca", LocalPort: 4002},
 	"amundsen": {Name: "amundsen", LocalPort: 4003},
+	"nibi":     {Name: "nibi", LocalPort: 4004, Multiplex: true},
 }
 
 var (
@@ -128,6 +140,7 @@ func installTunnels(requested []string) error {
 			SSHHost:     spec.Name,
 			LocalPort:   spec.LocalPort,
 			HoldCommand: spec.HoldCommand,
+			Multiplex:   spec.Multiplex,
 			AutoSSHPath: autosshPath,
 			SSHAuthSock: os.Getenv("SSH_AUTH_SOCK"),
 			LogPath:     logPath,
