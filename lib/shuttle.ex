@@ -37,6 +37,15 @@ defmodule Shuttle.Application do
     # the load-bearing wiring for `tz` in the escript daemon.
     Calendar.put_time_zone_database(Tz.TimeZoneDatabase)
 
+    # Boot stamp for /api/v1/version's `booted_at`. Load-bearing for deploy
+    # verification: the escript loads modules LAZILY from the file on disk, so
+    # a not-yet-referenced module (Shuttle.BuildInfo) can load from a freshly
+    # deployed escript while the long-booted Poller keeps running old code —
+    # the compile-time git_sha then reports the NEW build from an OLD daemon.
+    # Boot time can't lie that way: a deploy is only verified when git_sha
+    # matches AND booted_at is newer than the deploy started.
+    Application.put_env(:shuttle, :booted_at, DateTime.utc_now())
+
     children = [
       {Phoenix.PubSub, name: Shuttle.PubSub},
       {Task.Supervisor, name: Shuttle.TaskSupervisor},

@@ -111,16 +111,30 @@ for h in $HOSTS; do
 done
 
 TARGET_SHA="$(git -C "$REPO" rev-parse --short HEAD)"
+DEPLOY_STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%S)"
 
 if [ "$PUSH" = 1 ]; then
   say "push (target $TARGET_SHA)"
   git -C "$REPO" push && ok "pushed" || { bad "git push failed"; exit 1; }
 fi
 
-version_sha() { # $1 = "" (local) | host
+version_json() { # $1 = "" (local) | host
   local cmd="curl -s --max-time 10 localhost:4000/api/v1/version"
-  if [ -z "$1" ]; then $cmd; else ssh $(fleet_flags "$1") "$1" "$cmd"; fi 2>/dev/null \
-    | sed -n 's/.*"git_short_sha":"\([^"]*\)".*/\1/p'
+  if [ -z "$1" ]; then $cmd; else ssh $(fleet_flags "$1") "$1" "$cmd"; fi 2>/dev/null
+}
+
+version_sha() { # $1 = "" (local) | host
+  version_json "$1" | sed -n 's/.*"git_short_sha":"\([^"]*\)".*/\1/p'
+}
+
+# The daemon's runtime boot stamp. Load-bearing alongside the sha: the escript
+# loads modules lazily from disk, so git_short_sha can report the FRESH build
+# out of a STALE long-booted daemon (BuildInfo first referenced after the
+# escript file was replaced). A daemon is only verified when the sha matches
+# AND it booted after this deploy started. Old daemons without booted_at
+# return "" — treated as unverified.
+version_booted_at() { # $1 = "" | host
+  version_json "$1" | sed -n 's/.*"booted_at":"\([^"]*\)".*/\1/p'
 }
 
 release_quarantine() { # $1 = "" | host
@@ -129,9 +143,15 @@ release_quarantine() { # $1 = "" | host
     | grep -q '"ok":true'
 }
 
-wait_for_sha() { # $1 = "" | host — poll until version reports TARGET_SHA
+wait_for_sha() { # $1 = "" | host — poll until version reports TARGET_SHA from a FRESH boot
+  local booted
   for _ in $(seq 1 30); do
-    [ "$(version_sha "$1")" = "$TARGET_SHA" ] && return 0
+    if [ "$(version_sha "$1")" = "$TARGET_SHA" ]; then
+      booted="$(version_booted_at "$1")"
+      # ISO-8601 UTC compares lexicographically; DEPLOY_STARTED_AT is stamped
+      # below. Empty booted_at = pre-booted_at daemon = can't verify freshness.
+      [ -n "$booted" ] && [ "$booted" \> "$DEPLOY_STARTED_AT" ] && return 0
+    fi
     sleep 5
   done
   return 1
@@ -140,6 +160,12 @@ wait_for_sha() { # $1 = "" | host — poll until version reports TARGET_SHA
 deploy_local() {
   say "local ($TARGET_SHA)"
   (cd "$REPO" && make daemon >/dev/null) || { bad "make daemon failed"; return 1; }
+  # Kill the :4000 listener FIRST: the daemon may be running outside launchd
+  # (a hand-started `bin/shuttle start`), where kickstart restarts nothing and
+  # the old BEAM keeps running stale code while lazily serving the new
+  # BuildInfo sha. The booted_at check in wait_for_sha catches that lie; this
+  # makes the cycle actually happen.
+  lsof -ti:4000 -sTCP:LISTEN | xargs -r kill 2>/dev/null; sleep 2
   launchctl kickstart -k "gui/$(id -u)/io.shuttle.daemon" 2>/dev/null \
     || (cd "$REPO" && make restart >/dev/null)
   wait_for_sha "" || { bad "daemon did not come up on $TARGET_SHA"; return 1; }

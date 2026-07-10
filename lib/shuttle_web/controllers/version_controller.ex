@@ -21,9 +21,22 @@ defmodule ShuttleWeb.VersionController do
       git_sha: git_sha,
       git_short_sha: short_sha(git_sha),
       built_at: build_info(:built_at),
+      # Runtime boot stamp (Shuttle.start/2), NOT compile-time: the escript
+      # loads modules lazily from the file on disk, so git_sha alone can
+      # report a fresh build out of a stale, long-booted daemon (BuildInfo
+      # first referenced after the escript was replaced). Deploy verifiers
+      # must check both: sha matches AND booted_at postdates the deploy.
+      booted_at: booted_at(),
       mix_vsn: Shuttle.version(),
       contract: contract_check()
     })
+  end
+
+  defp booted_at do
+    case Application.get_env(:shuttle, :booted_at) do
+      %DateTime{} = dt -> DateTime.to_iso8601(dt)
+      _ -> "unknown"
+    end
   end
 
   defp build_info(function) do
