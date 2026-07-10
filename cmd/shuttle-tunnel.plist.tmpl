@@ -7,6 +7,22 @@
 
   <key>ProgramArguments</key>
   <array>
+    {{- if .Multiplex }}
+    {{- /* 2FA hosts (nibi's Duo): the tunnel can only ride a
+           human-authenticated ControlMaster socket — a headless job can never
+           answer keyboard-interactive, and plain `ssh -S <sock>` silently
+           falls back to a FRESH connection when the socket is absent (Duo
+           denial spam, then autossh exits 0 and SuccessfulExit=false parks
+           the job dead). So: supervise with a shell loop that gates every
+           attempt on `ssh -O check` — socket dead → poll every 30s, quiet;
+           socket alive → run the forward (BatchMode=yes so a race can never
+           degrade into interactive auth). Master dies → ssh exits → back to
+           polling. The next approved human login revives the tunnel on its
+           own, within 30s. */}}
+    <string>/bin/sh</string>
+    <string>-c</string>
+    <string>while :; do if ssh -O check {{ .SSHHost }} 2>/dev/null; then ssh -N -S {{ .Home }}/.ssh/ctl/%C -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o ControlMaster=no -o ExitOnForwardFailure=yes -o BatchMode=yes -L {{ .LocalPort }}:localhost:4000 {{ .SSHHost }}; fi; sleep 30; done</string>
+    {{- else }}
     <string>{{ .AutoSSHPath }}</string>
     {{- if not .HoldCommand }}
     <string>-N</string>
@@ -14,13 +30,7 @@
     <string>-M</string>
     <string>0</string>
     <string>-S</string>
-    {{- if .Multiplex }}
-    {{- /* reuse-only: ride a human-authenticated ControlMaster socket (2FA
-           hosts); ControlMaster stays "no" below so this never CREATES one. */}}
-    <string>{{ .Home }}/.ssh/ctl/%C</string>
-    {{- else }}
     <string>none</string>
-    {{- end }}
     <string>-o</string>
     <string>ServerAliveInterval=30</string>
     <string>-o</string>
@@ -38,6 +48,7 @@
     <string>{{ .SSHHost }}</string>
     {{- if .HoldCommand }}
     <string>{{ .HoldCommand }}</string>
+    {{- end }}
     {{- end }}
   </array>
 
