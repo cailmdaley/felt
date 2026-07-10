@@ -374,7 +374,40 @@ func TestShuttleAccept_RejectsOneshot(t *testing.T) {
 	seedShuttleRole(t, storage, "f", felt.StatusClosed, oneshot(), nil)
 
 	if _, err := runCommand(t, dir, "shuttle", "accept", "f"); err == nil {
-		t.Fatal("accept on a oneshot must refuse (standing only)")
+		t.Fatal("accept on a oneshot must refuse (standing/pinned only)")
+	}
+}
+
+func TestShuttleAccept_PinnedReParks(t *testing.T) {
+	defer saveShuttleGlobals()()
+	t.Setenv("SHUTTLE_LIFECYCLE_OFFLINE", "1")
+	dir, storage := newShuttleStore(t)
+	// Awaiting review: pinned, closed, untempered — the arc finished and is
+	// pending the human verdict. Accept RE-PARKS it to the strip (status: open),
+	// the kind-aware other half of accept (standing re-arms active).
+	closedAt := mustParseTime(t, "2026-07-10T09:00:00Z")
+	f := &felt.Felt{ID: "f", Name: "f", Status: felt.StatusClosed, ClosedAt: &closedAt}
+	if err := f.SetExtraField("shuttle", map[string]any{
+		"kind": "pinned", "agent": "claude-opus",
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := storage.Write(f); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	if out, err := runCommand(t, dir, "shuttle", "accept", "f"); err != nil {
+		t.Fatalf("accept pinned (offline): %v\n%s", err, out)
+	}
+	got := mustRead(t, storage, "f")
+	if got.Status != felt.StatusOpen {
+		t.Fatalf("status = %q, want open (re-parked to the strip)", got.Status)
+	}
+	if readTempered(got) != nil {
+		t.Fatalf("accept should clear tempered, got %v", readTempered(got))
+	}
+	if got.ClosedAt != nil {
+		t.Fatalf("accept should clear closed-at, got %v", got.ClosedAt)
 	}
 }
 

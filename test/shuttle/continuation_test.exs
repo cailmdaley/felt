@@ -106,6 +106,31 @@ defmodule Shuttle.ContinuationTest do
 
       assert Continuation.clean_handoff_since_dispatch?(fiber)
     end
+
+    test "deliberate_handoff?: absent dispatched_at is NOT deliberate (strict default inverts)" do
+      # The strict sibling exists precisely because the two decisions want
+      # opposite defaults on missing markers: resume-vs-fresh defaults fresh
+      # (clean_handoff? → true), dispatch-vs-don't defaults don't (this → false).
+      fiber = %{"shuttle" => %{}}
+      assert Continuation.clean_handoff_since_dispatch?(fiber)
+      refute Continuation.deliberate_handoff_since_dispatch?(fiber)
+    end
+
+    test "deliberate_handoff?: dispatch with no handoff → false; handoff >= dispatch → true" do
+      dirty = %{"shuttle" => %{"runtime" => %{"dispatched_at" => "2026-06-21T12:00:00Z"}}}
+      refute Continuation.deliberate_handoff_since_dispatch?(dirty)
+
+      handed = %{
+        "shuttle" => %{
+          "runtime" => %{
+            "dispatched_at" => "2026-06-21T12:00:00Z",
+            "handed_off_at" => "2026-06-21T13:00:00Z"
+          }
+        }
+      }
+
+      assert Continuation.deliberate_handoff_since_dispatch?(handed)
+    end
   end
 
   describe "write_dispatch / mark_handed_off shell `felt shuttle mark-runtime`" do

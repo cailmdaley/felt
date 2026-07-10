@@ -31,10 +31,15 @@ defmodule Shuttle.Poller.StandingRoles do
   # `handle_worker_exit`, so its document stays `status:active` with no live
   # session. Scan tmux: an owned, active role with NO live session and NO live
   # watcher → a standing role is marked awaiting (status:closed) so the cron
-  # doesn't re-fire; a pinned role is parked (status:open) back to the strip so a
-  # dead interface neither sits stuck `active` in In-flight nor relaunches.
-  # Oneshots need no analog — a status:active oneshot with no live session is
-  # simply eligible again next tick (retries collapsed into the poll loop).
+  # doesn't re-fire; a pinned role that died DIRTY is parked (status:open) back to
+  # the strip so a dead interface neither sits stuck `active` in In-flight nor
+  # relaunches. A pinned role that handed off CLEANLY before the daemon went down
+  # is deliberately left `active` for an autonomous redispatch — and it never
+  # reaches the park branch anyway: the `standing_role_dispatched_unexited?` gate
+  # below treats a clean handoff (`handed_off_at >= dispatched_at`) as "not an
+  # orphan" and skips the fiber. Oneshots need no analog — a status:active
+  # oneshot with no live session is simply eligible again next tick (retries
+  # collapsed into the poll loop).
   #
   # `adopt_orphans` (init) and `reconcile_orphaned_sessions` (per-poll) handle
   # the *live* analog: a tmux session exists, we just aren't watching it. This
@@ -151,14 +156,18 @@ defmodule Shuttle.Poller.StandingRoles do
 
         state
 
-      # Daemon-down analog of handle_worker_exit, split by kind:
+      # Daemon-down analog of handle_worker_exit, split by kind. Only reached for
+      # a DIRTY exit — the `standing_role_dispatched_unexited?` gate above already
+      # skipped any role that handed off cleanly (a cleanly-handed-off pinned role
+      # is left `active` for an autonomous redispatch, exactly as the live-exit
+      # path leaves it):
       #  • standing → awaiting (status:closed) so the cron doesn't re-fire;
       #  • pinned   → parked (status:open) back to the strip, so a dead interface
       #    doesn't sit stuck `active` in In-flight and never relaunches itself.
       kind == "pinned" ->
         Logger.info(
           "Pinned role #{fiber_id} active with an un-exited dispatch but no live tmux " <>
-            "session/watcher — session ended while daemon was down; parking (status:open)"
+            "session/watcher — session ended dirty while daemon was down; parking (status:open)"
         )
 
         mark_pinned_parked(fiber_id)

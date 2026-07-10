@@ -212,9 +212,11 @@ defmodule Shuttle.Dispatcher do
   # `session_uuid`. Store-agnostic — no work_dir/aggregate federation, no
   # `SQLITE_BUSY` append-drop that could make a clean exit look dirty.
   #
-  # Scoped to oneshots: pinned roles park on session-end (human Resume handles
-  # their resume), and standing roles dispatch discrete scheduled occurrences
-  # (always fresh). First run / no prior session → fresh (nothing to resume).
+  # Scoped to oneshots: pinned and standing roles always start fresh. A pinned
+  # role only autonomously redispatches after a CLEAN handoff (the worker asked
+  # for a fresh session; a dirty death parks it instead), and standing roles
+  # dispatch discrete scheduled occurrences — both fresh. First run / no prior
+  # session → fresh (nothing to resume).
   defp decide_continuation(fiber, session_id) do
     cond do
       fiber_kind(fiber) != "oneshot" -> :fresh
@@ -500,19 +502,32 @@ defmodule Shuttle.Dispatcher do
 
   defp render_headless_notice(_), do: ""
 
-  # Pinned roles invert the default exit contract. A pinned role is an
-  # INTERACTIVE INTERFACE — a status hub, a debug intake — that a human drives;
-  # the session IS the interface, so a worker that runs out of immediate work
-  # must STAY ALIVE and wait, not `kill $PPID`. The poll loop never re-spawns a
-  # pinned role (see Poller.filter_eligible/2), so a worker that exits leaves the
-  # interface dark until the human manually resumes it — exactly the dead-chat
-  # gap that made this fix necessary. The session ends when the human ends it
-  # (parking the role: `active → open`), never autonomously.
+  # Pinned roles carry a three-case exit contract. A pinned role is a standing
+  # interface a human drives — a status hub, a debug intake, a long-lived
+  # workbench — that rests parked on the strip and is started by hand. Its exit
+  # semantics depend on what the worker is doing:
+  #
+  #  (a) while a human is actively driving, the session IS the interface — run
+  #      out of immediate work and STAY ALIVE at idle, waiting for the next
+  #      message, never `kill $PPID`.
+  #  (b) for a long AUTONOMOUS arc, write `## Status` and run `felt shuttle
+  #      handoff` — the daemon reads the fresh handoff marker and relaunches a
+  #      fresh worker next tick, so the arc continues across clean sessions.
+  #  (c) when the arc is genuinely DONE, set `status: closed` first, then hand
+  #      off — it lands in Awaiting review and returns to the pinned strip when
+  #      the human accepts.
+  #
+  # The load-bearing distinction (b vs. a dirty death): only a clean `felt
+  # shuttle handoff` stamps a fresh marker, and only that relaunches. An idle
+  # exit without handoff, a crash, or a human kill leaves no fresh marker → the
+  # role parks back to the strip and waits for a human Resume. So the default
+  # when there's nothing left to drive and no autonomous arc in flight is (a):
+  # stay alive.
   defp render_exit_contract("pinned") do
     render_block(
       "Exit Contract",
       nil,
-      "This is a pinned interactive role — a standing interface a human drives, not a one-shot task. Keep the fiber current as you work (outcome, findings, commits at clean checkpoints), but when you run out of immediate work DO NOT exit: stay alive and wait for the next message. The session is the interface; it ends only when the human parks the role (`active → open`), not when you finish the task at hand. The poll loop will not re-spawn this role, so exiting goes dark on the human until they manually resume — don't. Reply normally and wait when there's nothing left to drive."
+      "This is a pinned interactive role — a standing interface a human drives, not a one-shot task. It rests parked on the strip; a human starts it, and it keeps the fiber current as you work (outcome, findings, commits at clean checkpoints). Three ways a session ends: (a) While a human is driving and you run out of immediate work, DO NOT exit — stay alive and wait for the next message; the session is the interface. (b) If you're deep in a long AUTONOMOUS arc and want to continue in a fresh session, rewrite the constitution's `## Status` in prose (where the work stands, where the next session picks up) then run `felt shuttle handoff <fiber-id>` — the daemon WILL relaunch a fresh worker on the clean handoff marker, so the arc carries across sessions. (c) When the arc is genuinely done, set `status: closed` (e.g. `felt shuttle close <fiber-id>`) FIRST, then `felt shuttle handoff` — it lands in Awaiting review and returns to the pinned strip when the human accepts. The distinction is load-bearing: only a clean handoff relaunches; an idle exit with no handoff, a crash, or a human kill parks the role back to the strip and goes dark until a human resumes — so when there's nothing left to drive and no autonomous arc is in flight, stay alive (a)."
     )
   end
 
@@ -1015,7 +1030,8 @@ defmodule Shuttle.Dispatcher do
 
   # The shuttle block's `kind` (new-format) / `mode` (old-format), defaulting to
   # "oneshot". Threaded into the prompt so the exit contract can diverge for
-  # pinned interactive roles (stay alive) vs oneshot/standing work (exit).
+  # pinned interactive roles (stay alive at idle, or handoff for an autonomous
+  # arc) vs oneshot/standing work (rewrite `## Status`, then handoff).
   defp fiber_kind(fiber) do
     case Map.get(fiber, "shuttle") do
       shuttle when is_map(shuttle) ->

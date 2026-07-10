@@ -383,17 +383,20 @@ var acceptKeepOutcome bool
 
 var acceptCmd = &cobra.Command{
 	Use:   "accept <fiber>",
-	Short: "Accept a completed standing-role run and re-arm it",
-	Long: `Re-arms a standing role awaiting review (status: closed + untempered) by
-writing status: active back to the document and clearing closed-at / tempered.
-Due-ness is recomputed by the daemon from the schedule — there is no stored
-next_due_at and no review block (status + tempered is the whole lifecycle).
+	Short: "Accept a completed standing or pinned run (re-arm / re-park)",
+	Long: `Resolves the human verdict on a role awaiting review (status: closed +
+untempered), kind-aware:
 
-Clears the outcome field so the next dispatch starts with a blank slate; pass
---keep-outcome to preserve the existing outcome.
+  standing → re-arms it (status: active), clearing closed-at / tempered.
+             Due-ness is recomputed by the daemon from the schedule (no stored
+             next_due_at, no review block). Clears the outcome so the next
+             dispatch starts blank; pass --keep-outcome to preserve it.
+  pinned   → re-parks it back to the strip (status: open), clearing
+             closed-at / tempered. A human Resume (force-dispatch) starts it
+             again.
 
-Routes to the owning daemon when reachable (a single in-process re-arm); falls
-back to a local document write when the daemon is down.`,
+Routes to the owning daemon when reachable (a single in-process transition);
+falls back to a local document write when the daemon is down.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		f, st, block, unlock, err := resolveOwnedShuttleFiber(args[0])
@@ -401,8 +404,8 @@ back to a local document write when the daemon is down.`,
 			return err
 		}
 		defer unlock()
-		if block.Kind != "standing" {
-			return fmt.Errorf("accept only applies to standing roles (fiber has kind=%s)", block.Kind)
+		if block.Kind != "standing" && block.Kind != "pinned" {
+			return fmt.Errorf("accept only applies to standing or pinned roles (fiber has kind=%s)", block.Kind)
 		}
 		// Awaiting is felt-native: status: closed + untempered.
 		if !(f.Status == felt.StatusClosed && readTempered(f) == nil) {
@@ -410,6 +413,31 @@ back to a local document write when the daemon is down.`,
 				"fiber %s is not awaiting review (accept requires status:closed + untempered; status=%q tempered=%v)",
 				args[0], f.Status, readTempered(f))
 		}
+
+		// PINNED accept RE-PARKS the finished arc back to the strip (status: open,
+		// verdict cleared) — the kind-aware other half of accept (standing re-arms
+		// active, pinned re-parks open). No schedule, no recurrence to advance.
+		// Routes to the owning daemon (LifecycleStore.accept is kind-aware) with a
+		// local-write fallback when the daemon is down.
+		if block.Kind == "pinned" {
+			if output, err := postLifecycle("accept", map[string]any{"fiber": f.ID}); err == nil {
+				fmt.Print(output)
+				return nil
+			} else if !isLifecycleTransportError(err) {
+				return err
+			}
+			f.Status = felt.StatusOpen
+			if err := setTempered(f, nil); err != nil {
+				return err
+			}
+			clearClosedAt(f)
+			if err := st.Write(f); err != nil {
+				return fmt.Errorf("writing fiber: %w", err)
+			}
+			fmt.Printf("accepted pinned role %s (re-parked to the strip: status: open)\n", args[0])
+			return nil
+		}
+
 		if block.Schedule == nil {
 			return fmt.Errorf("fiber %s has no schedule", args[0])
 		}

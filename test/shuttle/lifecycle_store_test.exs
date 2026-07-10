@@ -188,11 +188,10 @@ defmodule Shuttle.LifecycleStoreTest do
       )
     end
 
-    test "accept and mark_awaiting reject a pinned role (standing-only)" do
-      # Pinned is no longer cyclical (Option D): a pinned run does not close to
-      # awaiting-review and there is no accept/re-arm cycle. mark_awaiting (the
-      # standing worker-exit closer) and accept (the standing recurrence-advance)
-      # both reject a pinned block by KIND — even in the awaiting-shaped
+    test "mark_awaiting rejects a pinned role (standing worker-exit closer is standing-only)" do
+      # mark_awaiting is the STANDING worker-exit closer (writes status:closed).
+      # A pinned worker exit is handled differently (park / redispatch), so
+      # mark_awaiting rejects a pinned block by KIND — even in the awaiting-shaped
       # status:closed + untempered state a standing role would accept from.
       with_pinned_role(
         fn fiber_id, path ->
@@ -200,9 +199,24 @@ defmodule Shuttle.LifecycleStoreTest do
           assert msg =~ "standing"
           # Untouched: mark_awaiting did not close it.
           assert read_frontmatter(path)["status"] == "closed"
+        end,
+        status: "closed"
+      )
+    end
 
-          assert {:error, accept_msg} = LifecycleStore.accept(fiber_id)
-          assert accept_msg =~ "standing"
+    test "accept RE-PARKS a closed pinned role to the strip (status: open, verdict cleared)" do
+      # Pinned joins the unified lifecycle: a finished pinned arc closes to
+      # Awaiting review (status:closed + untempered), and the human verdict is a
+      # kind-aware accept that RE-PARKS it to the strip (status:open) — the mirror
+      # of standing's accept (which re-arms to active). tempered/closed-at cleared.
+      with_pinned_role(
+        fn fiber_id, path ->
+          assert {:ok, msg} = LifecycleStore.accept(fiber_id)
+          assert msg =~ "re-parked"
+          fm = read_frontmatter(path)
+          assert fm["status"] == "open"
+          assert is_nil(fm["tempered"])
+          assert is_nil(fm["closed-at"])
         end,
         status: "closed"
       )

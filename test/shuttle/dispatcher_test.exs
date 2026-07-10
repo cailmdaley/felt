@@ -310,15 +310,25 @@ defmodule Shuttle.DispatcherTest do
     refute prompt =~ "felt history append"
   end
 
-  test "render_prompt for a pinned role inverts the exit contract to stay-alive" do
-    # A pinned role is an interactive interface — the worker must NOT kill $PPID
-    # when it runs out of immediate work; it stays attached and waits. The
-    # default (oneshot) contract is the opposite, so the two must not collide.
+  test "render_prompt for a pinned role carries the three-case unified-lifecycle contract" do
+    # A pinned role is an interactive interface, but under the unified lifecycle
+    # its exit contract has three cases: (a) while a human drives, stay alive at
+    # idle; (b) for a long autonomous arc, hand off and the daemon relaunches
+    # fresh; (c) when the arc is done, close then hand off (→ Awaiting review →
+    # strip on accept). The default (oneshot) contract is single-case exit, so the
+    # two must not collide.
     pinned = Dispatcher.render_prompt("tests/haiku", kind: "pinned")
     assert pinned =~ "Exit Contract"
     assert pinned =~ "pinned interactive role"
+    # (a) stay alive at idle while a human drives.
     assert pinned =~ "DO NOT exit"
     assert pinned =~ "stay alive and wait"
+    # (b) an autonomous arc can hand off for a fresh relaunch.
+    assert pinned =~ "felt shuttle handoff"
+    assert pinned =~ "relaunch a fresh worker"
+    # (c) a finished arc closes to Awaiting review, returning to the strip on accept.
+    assert pinned =~ "status: closed"
+    assert pinned =~ "Awaiting review"
     # The autonomous kill-on-exit instruction must be absent for pinned.
     refute pinned =~ "your final action must be `kill $PPID`"
 

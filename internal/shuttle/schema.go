@@ -165,11 +165,15 @@ func (b *Block) UnmarshalJSON(data []byte) error {
 //   - oneshot  — one-time dispatch, picked up on the next poll when status:active.
 //   - standing — recurring; the cron `schedule` decides when the poller dispatches.
 //   - pinned   — schedule-less interactive role that rests PARKED on the board's
-//     pinned strip (status:open). It never auto-dispatches: the human starts it
-//     (Resume / strip → In-flight, which force-dispatches and flips it active);
-//     the worker stays alive as a standing interface; on session end the poller
-//     parks it back to the strip (active → open). Human-driven, not looped —
-//     see Poller.filter_eligible and mark_pinned_parked.
+//     pinned strip (status:open). A human starts it (Resume / strip → In-flight,
+//     which force-dispatches and flips it active). It then joins the unified
+//     lifecycle: a worker that hands off cleanly (`felt shuttle handoff`) is
+//     redispatched fresh next tick — a long autonomous arc across clean sessions
+//     — while a dirty death or idle exit parks it back to the strip
+//     (active → open). When the arc is done it closes to Awaiting review, and a
+//     human accept re-parks it to the strip. See Poller.filter_eligible /
+//     tick_kind_eligible?, handle_worker_exit's pinned branch, and
+//     LifecycleStore.accept / park.
 var ValidKinds = []string{"oneshot", "standing", "pinned"}
 
 // ---- Validation ------------------------------------------------------------
@@ -222,10 +226,11 @@ func Validate(b *Block, agents *AgentRegistry) ValidationErrors {
 		}
 	}
 
-	// A pinned role has no cron recurrence — it never auto-dispatches at all:
-	// the human starts it (Resume/force-dispatch) and it parks back to the
-	// strip on exit. A schedule would be meaningless (and misleading on the
-	// board). Reject the combination loudly rather than silently ignoring it.
+	// A pinned role has no cron recurrence — its arming source is human, not the
+	// clock: the human starts it (Resume/force-dispatch), and it continues only
+	// by clean handoff (autonomous arc) or parks to the strip on a dirty exit. A
+	// schedule would be meaningless (and misleading on the board). Reject the
+	// combination loudly rather than silently ignoring it.
 	if b.Kind == "pinned" && b.Schedule != nil {
 		add("schedule", "not allowed for kind=pinned (pinned roles are human-driven, not cron-driven)")
 	}

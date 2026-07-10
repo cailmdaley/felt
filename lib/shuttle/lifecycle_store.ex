@@ -13,8 +13,11 @@ defmodule Shuttle.LifecycleStore do
   loops a parked pinned role (open → active). There is no runtime store and no
   review axis: the document carries the
   entire lifecycle, and `next_due` is recomputed from the cron schedule on the
-  next poll. Pinned is not cyclical (Option D): it loops while active and parks
-  at open, so it has no accept/awaiting cycle here — only the `rearm` open.
+  next poll. Pinned joins the unified lifecycle: it redispatches autonomously
+  after a clean handoff, closes to Awaiting review when its arc is done, and
+  `accept` re-parks it to the strip (`status: open`) — the kind-aware other half
+  of `accept` (standing re-arms `active`, pinned re-parks `open`). `rearm` (the
+  force-dispatch open) starts a parked pinned role.
   """
 
   require Logger
@@ -31,18 +34,40 @@ defmodule Shuttle.LifecycleStore do
   def accept(fiber_id, opts \\ []) when is_binary(fiber_id) do
     with {:ok, path, raw_fm, frontmatter, body} <- FiberDoc.read(fiber_id),
          {:ok, shuttle} <- shuttle_block(frontmatter),
-         :ok <- require_standing(shuttle),
          :ok <- require_doc_acceptable(frontmatter) do
       # Awaiting is `status: closed` + untempered in the document itself — there
-      # is no `review.state` axis. Recognize it
-      # straight from the doc and re-arm, advancing the cron recurrence (next_due
-      # from the schedule). The previous run's outcome is preserved — it stays
-      # the card's headline until the next run overwrites it (accept no longer
-      # blanks it; see rearm_ops). Accept is standing-only: a pinned role
-      # is not cyclical (Option D — it loops while active, parks at open), so it
-      # has no awaiting/accept cycle to advance.
-      accept_from_doc(fiber_id, path, raw_fm, body, shuttle, opts)
+      # is no `review.state` axis. Accept is KIND-AWARE — one verb, two termini:
+      #
+      #  • STANDING → re-arm (`status: active`), advancing the cron recurrence
+      #    (next_due from the schedule). The previous run's outcome is preserved
+      #    — it stays the card's headline until the next run overwrites it
+      #    (accept no longer blanks it; see rearm_ops).
+      #  • PINNED → re-park (`status: open`) back to the strip: the pinned arc is
+      #    done and the human accepts it back to its resting state, from which a
+      #    human Resume (force-dispatch → rearm) starts it again.
+      #
+      # A oneshot has no accept re-target here (its accept is the tempered
+      # terminus) and is rejected.
+      cond do
+        pinned?(shuttle) -> accept_pinned(fiber_id, path, raw_fm, body)
+        standing?(shuttle) -> accept_from_doc(fiber_id, path, raw_fm, body, shuttle, opts)
+        true -> require_perennial(shuttle)
+      end
     end
+  end
+
+  # Pinned accept = re-park to the strip: `status: open`, tempered / closed-at
+  # cleared, daemon-owned runtime keys wiped. No schedule advance, no
+  # conclude_run — a pinned role is not cyclical; accepting a finished pinned arc
+  # simply returns it to rest. Mirror of the standing `accept_from_doc` re-arm,
+  # writing `open` where that writes `active`.
+  defp accept_pinned(fiber_id, path, raw_fm, body) do
+    ops =
+      [{:put, "status", "open"}, {:delete, "tempered"}, {:delete, "closed-at"}] ++
+        evict_runtime_ops()
+
+    FiberDoc.write!(path, raw_fm, body, ops)
+    {:ok, "accepted pinned role #{fiber_id} (re-parked to the strip: status: open)\n"}
   end
 
   defp accept_from_doc(fiber_id, path, raw_fm, body, shuttle, opts) do
@@ -125,9 +150,9 @@ defmodule Shuttle.LifecycleStore do
   This is the **force-dispatch** re-arm: an explicit human "go" from the board
   (force-dispatch) is the verdict, so unlike `accept`/`resume` it does not
   require the awaiting precondition — it reopens a closed role whether it was
-  awaiting, tempered, or composted, and (Option D) starts a parked pinned role
-  by writing `open → active` so the board's strip → In-flight "start" gesture
-  both spawns the worker now AND leaves the role looping. Clears
+  awaiting, tempered, or composted, and starts a parked pinned role by writing
+  `open → active` so the board's strip → In-flight "start" gesture both spawns
+  the worker now AND arms the role for the unified lifecycle. Clears
   `tempered`/`closed-at`, keeps the outcome, and wipes daemon-owned runtime keys.
   A no-op `{:ok, ...}` for a role already active, and an `{:error, _}` for a
   oneshot or unreadable fiber (a force-dispatched oneshot runs once and stays
@@ -154,12 +179,13 @@ defmodule Shuttle.LifecycleStore do
   Pinned-worker exit writer: park an interactive role back to its rest state by
   writing `status: open` straight to the felt document — the strip resting state.
 
-  A pinned role is an interactive interface, not a loop: when its session ends
-  (the human killed the tmux session, a crash, or a clean exit), the role must
-  return to the **pinned strip** (`status: open`), not stay stuck `active` with
-  no live worker in In-flight, and not relaunch (the poller's `filter_eligible`
-  already excludes pinned from the autonomous tick). Resume from the strip
-  (force-dispatch → `rearm`) re-attaches.
+  Called on a DIRTY pinned exit (crash, idle exit without a handoff marker, human
+  kill): the interface went dark with no fresh-session request, so the role
+  returns to the **pinned strip** (`status: open`) rather than staying stuck
+  `active` with no live worker in In-flight. Resume from the strip (force-dispatch
+  → `rearm`) re-attaches. A CLEAN handoff takes the other branch in
+  `handle_worker_exit` — the document is left `active` and the tick redispatches a
+  fresh worker, so `park` is never called there.
 
   Mirror of `mark_awaiting/1` (the standing-role closer, which writes
   `status: closed`): this is the pinned closer. Pinned-only — a no-op-shaped
@@ -223,10 +249,12 @@ defmodule Shuttle.LifecycleStore do
   end
 
   # Standing = the cron-driven active→closed→active lifecycle this module's
-  # accept/resume/mark_awaiting paths implement (a run closes to awaiting-review;
-  # accept advances the recurrence). Pinned is NOT standing under Option D — it
-  # loops while active and parks at open, with no awaiting/accept cycle — so
-  # those three paths reject it along with oneshots and non-shuttle fibers.
+  # resume/mark_awaiting paths implement (a run closes to awaiting-review; accept
+  # advances the recurrence). Pinned is NOT standing: it redispatches on clean
+  # handoff and its accept RE-PARKS to the strip (the kind-aware branch in
+  # `accept`) rather than advancing a schedule — so `resume`/`mark_awaiting`, the
+  # schedule-bound paths, reject it along with oneshots and non-shuttle fibers.
+  # (`accept` itself no longer requires standing — it dispatches by kind.)
   defp require_standing(%{"kind" => "standing"}), do: :ok
   defp require_standing(%{"mode" => "standing"}), do: :ok
 
@@ -252,6 +280,11 @@ defmodule Shuttle.LifecycleStore do
 
   defp require_pinned(shuttle),
     do: {:error, "park only applies to pinned roles (kind=#{inspect(Map.get(shuttle, "kind"))})"}
+
+  # Boolean kind predicates for the kind-aware `accept` dispatch (one verb, two
+  # termini: standing re-arm vs pinned re-park).
+  defp standing?(shuttle), do: Map.get(shuttle, "kind", Map.get(shuttle, "mode")) == "standing"
+  defp pinned?(shuttle), do: Map.get(shuttle, "kind", Map.get(shuttle, "mode")) == "pinned"
 
   defp require_schedule(%{"schedule" => schedule}) when is_map(schedule), do: {:ok, schedule}
   defp require_schedule(_), do: {:error, "fiber has no schedule"}

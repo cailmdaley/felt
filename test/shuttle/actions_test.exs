@@ -316,6 +316,57 @@ defmodule Shuttle.ActionsTest do
     end
   end
 
+  describe "pinned re-park (unified lifecycle)" do
+    # A closed + untempered pinned role is awaiting review after its arc
+    # finished. The human verdict RE-PARKS it to the strip via accept — the
+    # kind-aware pinned half of accept (standing re-arms active; pinned re-parks
+    # open). One verb, two gestures: the accept gestures (inFlight/tempered) AND
+    # dragging the card back to the strip (drafts) all resolve to accept-run.
+    test "closed + untempered pinned resolves to accept-run (re-park), never close-tempered/reopen" do
+      fiber = awaiting_pinned()
+
+      for target <- ["inFlight", "tempered", "drafts"] do
+        assert {:ok, %{id: "accept-run", invocation: %{verb: "accept"}}} =
+                 Actions.resolve_transition(fiber, target),
+               "closed pinned dragged to #{target} must re-park via accept-run"
+      end
+
+      # Drag-safety invariant: the resolved action is in the available set, and a
+      # bare reopen/close-tempered is NOT what these gestures produce.
+      actions = Actions.actions_for(fiber) |> Enum.map(& &1.id)
+      assert "accept-run" in actions
+      refute "reopen" in actions
+      refute "reopen-draft" in actions
+    end
+
+    test "a tempered/composted pinned role is a terminus, NOT accept-run" do
+      # A pinned role that already carries a verdict (accepted/composted) is
+      # terminal — accept-run is reserved for the untempered awaiting state. It
+      # falls through to the generic closed clauses.
+      for verdict <- [true, false] do
+        fiber = %{
+          "id" => "work/pinned",
+          "status" => "closed",
+          "tempered" => verdict,
+          "shuttle" => %{"kind" => "pinned"}
+        }
+
+        available = Actions.actions_for(fiber) |> Enum.map(& &1.id)
+        refute "accept-run" in available
+      end
+    end
+  end
+
+  # An awaiting pinned role: status:closed + untempered — the arc finished and
+  # is pending the human verdict (re-park).
+  defp awaiting_pinned do
+    %{
+      "id" => "work/pinned",
+      "status" => "closed",
+      "shuttle" => %{"kind" => "pinned"}
+    }
+  end
+
   # An armed standing role: status:active, no verdict.
   defp armed_standing do
     %{

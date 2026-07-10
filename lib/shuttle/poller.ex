@@ -1609,22 +1609,49 @@ defmodule Shuttle.Poller do
   end
 
   # The autonomous-tick eligibility filter. Beyond the shared `eligible?`
-  # predicate, the tick excludes pinned roles: a pinned role is an INTERACTIVE
-  # INTERFACE (a status hub, a debug intake), not autonomous work. The human
+  # predicate, it gates pinned roles on the clean-handoff signal — the one place
+  # the unified lifecycle diverges by kind on the tick.
+  #
+  # A pinned role rests as an INTERACTIVE INTERFACE a human drives: the human
   # starts it (drag-to-in-flight / New session / Resume — all force-dispatch),
   # the worker stays attached as the interface, and the session ends when the
-  # human ends it. The poll loop must never re-spawn it: a pinned `active` role
-  # whose session has ended (human closed the chat, worker crashed) would
-  # otherwise re-dispatch every tick — surveying, finding nothing, exiting —
-  # burning tokens on an idle interface (the shapepipe redispatch loop). Pinned
-  # roles remain explicitly dispatchable: force-dispatch bypasses this entirely,
-  # and a plain `felt shuttle dispatch <id>` still routes through `eligible?`
-  # (which has no pinned gate), so only the *autonomous* path is severed.
+  # human ends it. But a pinned worker deep in a long autonomous arc can
+  # deliberately ask for a fresh session by running `felt shuttle handoff` (which
+  # stamps `handed_off_at` newer than its `dispatched_at`) — that is the worker
+  # saying "keep going in a clean session," and the tick honors it by
+  # re-dispatching next poll. Any other exit — a dirty death, an idle exit with
+  # no handoff marker, a human kill — leaves no fresh marker, so the role is NOT
+  # eligible here; it parks back to the strip (see handle_worker_exit) and waits
+  # for the human to re-attach. This is what severs the old hollow-relaunch loop
+  # (a pinned `active` role re-dispatching every tick, surveying, finding
+  # nothing, exiting) while still letting a genuine long-running pinned arc
+  # continue across sessions.
+  #
+  # oneshot/standing are unconditionally eligible here (their own gates live in
+  # `eligible?`). Force-dispatch bypasses this filter entirely, and a plain
+  # `felt shuttle dispatch <id>` routes through `eligible?` (no pinned gate), so
+  # a human can always start or continue a pinned role by hand.
   # See [[ai-futures/shuttle/findings/finding-pinned-roles-are-interfaces-not-loops]].
   defp filter_eligible(candidates, state) do
     Enum.filter(candidates, fn fiber ->
-      eligible?(fiber, state) and not pinned_role?(fiber)
+      eligible?(fiber, state) and tick_kind_eligible?(fiber)
     end)
+  end
+
+  # Kind-specific autonomous-tick gate layered on top of `eligible?`. Pinned is
+  # eligible iff the worker DELIBERATELY handed off since the last dispatch (a
+  # positive "relaunch me fresh" — both markers present, handoff >= dispatch);
+  # every other kind is unconditionally eligible (their gates are in
+  # `eligible?`). The STRICT predicate, not `clean_handoff_since_dispatch?`:
+  # that one defaults to clean when `dispatched_at` is absent (right for
+  # resume-vs-fresh, wrong here — it would auto-dispatch a hand-edited-active
+  # or marker-wiped pinned role that no worker asked to relaunch).
+  defp tick_kind_eligible?(fiber) do
+    if pinned_role?(fiber) do
+      Shuttle.Continuation.deliberate_handoff_since_dispatch?(fiber)
+    else
+      true
+    end
   end
 
   # Boot quarantine gate on the autonomous tick (see the State field comment):
@@ -1739,11 +1766,13 @@ defmodule Shuttle.Poller do
         # Pinned roles need no bespoke branch HERE: this predicate also serves
         # the explicit-dispatch path (`felt shuttle dispatch`, plain POST
         # /dispatch), where a pinned role IS eligible — it's a human asking for
-        # it. The autonomous tick is what must never loop a pinned interface;
-        # that exclusion lives in `filter_eligible/2` (the tick's only caller),
-        # not here. A pinned `active` role with no live session therefore sits
-        # idle until the human re-attaches, instead of re-dispatching every
-        # poll.
+        # it. The autonomous tick applies its own kind gate in
+        # `tick_kind_eligible?/1` (`filter_eligible/2`, the tick's only caller):
+        # a pinned role auto-redispatches only when its worker handed off cleanly
+        # since the last dispatch. A pinned `active` role that died dirty (or was
+        # parked to the strip on session end) is not active-with-a-fresh-marker,
+        # so it sits idle until the human re-attaches, instead of re-dispatching
+        # every poll.
 
         # Standing roles have additional preconditions; oneshots go to dep check.
         # Support both new-format (kind:) and old-format (mode:) shuttle blocks.
@@ -2712,18 +2741,31 @@ defmodule Shuttle.Poller do
                     release_claim(state, runtime_key)
 
                   pinned_role?(fiber) ->
-                    # A PINNED interactive role's session ended — the human killed
-                    # the tmux session, the worker crashed, or it exited despite
-                    # the stay-alive contract. The role must NOT relaunch (the
-                    # poller's filter_eligible already excludes pinned from the
-                    # autonomous tick) and must NOT get stuck `active` with no live
-                    # worker in In-flight. Park it back to the strip by writing
-                    # `active → open`; the human re-attaches with Resume
-                    # (force-dispatch → rearm). Write BEFORE release_claim so the
-                    # document reflects the parked state before the claim frees.
-                    StandingRoles.mark_pinned_parked(fiber_id)
-
-                    release_claim(state, runtime_key)
+                    # A PINNED role's session ended. Two cases, split by the
+                    # deliberate-handoff signal (STRICT predicate — positive
+                    # markers only, so a marker-less exit parks instead of
+                    # staying `active` in a state the tick gate can never pick
+                    # up):
+                    #
+                    #  • DELIBERATE handoff since dispatch (the worker ran `felt shuttle
+                    #    handoff`, stamping a fresh marker) → a deliberate ask for a
+                    #    fresh session in a long autonomous arc. Leave the document
+                    #    `active` and just release the claim; `filter_eligible`'s
+                    #    `tick_kind_eligible?` sees the fresh marker next tick and
+                    #    re-dispatches a fresh worker.
+                    #  • DIRTY death / idle exit with no fresh marker / human kill →
+                    #    the interface went dark. Park it back to the strip
+                    #    (`active → open`) so it neither sits stuck `active` with no
+                    #    live worker in In-flight nor auto-relaunches; the human
+                    #    re-attaches with Resume (force-dispatch → rearm). Write
+                    #    BEFORE release_claim so the document reflects the parked
+                    #    state before the claim frees.
+                    if Shuttle.Continuation.deliberate_handoff_since_dispatch?(fiber) do
+                      release_claim(state, runtime_key)
+                    else
+                      StandingRoles.mark_pinned_parked(fiber_id)
+                      release_claim(state, runtime_key)
+                    end
 
                   true ->
                     # A still-active ONESHOT continuation: the next poll re-picks
@@ -3086,14 +3128,15 @@ defmodule Shuttle.Poller do
   # Does this role's worker exit close it to awaiting-review? Only STANDING
   # (cron-driven) roles do. Marking a role awaiting on exit is an anti-re-fire
   # gate — `status: closed` is what stops the cron from re-dispatching the role
-  # again this cycle. A PINNED role does NOT come here (pinned is an interactive
-  # interface, not a loop): on exit-while-active the pinned branch above parks
-  # it back to the strip (`active → open` via mark_pinned_parked), and
-  # filter_eligible excludes pinned from the autonomous tick, so it never
-  # relaunches — the human re-attaches with Resume (force-dispatch). A pinned
-  # worker that's genuinely done self-closes to `status: closed` — handled by
-  # the `status == "closed"` branch before this gate is reached. The "it ran" record lives in the per-host
-  # dispatch/handoff markers, not in the status field.
+  # again this cycle. A PINNED role does NOT come here: its session-end handling
+  # (the pinned branch above) splits on the clean-handoff signal — a clean
+  # handoff leaves it `active` for an autonomous redispatch next tick, a dirty
+  # death parks it to the strip (`active → open` via mark_pinned_parked). A
+  # pinned worker that's genuinely done self-closes to `status: closed` — handled
+  # by the `status == "closed"` branch before this gate is reached (it lands in
+  # Awaiting review and returns to the strip when the human accepts). The "it
+  # ran" record lives in the per-host dispatch/handoff markers, not in the status
+  # field.
   defp standing_role?(fiber, state) do
     case StandingRoles.fetch_standing_role(Map.get(fiber, "id", ""), state) do
       {:ok, role} -> StandingRole.standing?(role)

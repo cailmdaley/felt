@@ -1561,17 +1561,19 @@ defmodule Shuttle.PollerTest do
            end)
   end
 
-  test "poller does NOT auto-dispatch a status:active pinned role (it's an interface, not a loop)" do
-    # A pinned role is an INTERACTIVE INTERFACE: the human starts it, the worker
-    # stays attached, the session ends when the human ends it. The autonomous
-    # poll loop must never re-spawn it — a status:active pinned role whose session
-    # ended (human closed the chat, worker crashed) would otherwise re-dispatch
-    # every tick, surveying-and-exiting, burning tokens (the shapepipe loop).
-    # The exclusion lives in filter_eligible/2 (the tick), NOT in eligible? — so
-    # force-dispatch still launches it (covered below).
+  test "poller does NOT auto-dispatch a status:active pinned role with a DIRTY dispatch marker" do
+    # The anti-hollow-relaunch invariant. A pinned role that was dispatched but
+    # never handed off cleanly (dispatched_at present, no newer handed_off_at —
+    # a mid-flight or dirty-dead marker) is NOT eligible for the autonomous tick:
+    # tick_kind_eligible? gates pinned on deliberate_handoff_since_dispatch?,
+    # which is false here. This is what severs the old shapepipe redispatch loop
+    # (survey, find nothing, exit, re-dispatch). Force-dispatch still launches
+    # it (below).
     fiber = make_fiber("tests/pinned-active", %{"status" => "active"})
     MockRunner.set_fiber("tests/pinned-active", fiber)
     MockRunner.set_shuttle("tests/pinned-active", "kind: pinned\nagent: claude-opus\n", "active")
+    # A dirty marker: dispatched, never handed off → clean_handoff? is false.
+    write_dispatch_marker("tests/pinned-active", "sess-pinned-active")
 
     {:ok, poller} =
       start_poller!(
@@ -1588,10 +1590,10 @@ defmodule Shuttle.PollerTest do
     refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
              cmd == "tmux" and hd(args) == "new-session"
            end),
-           "the autonomous tick must not spawn a worker for a pinned role"
+           "the autonomous tick must not spawn a fresh worker for a dirty-marker pinned role"
 
     # But an explicit force-dispatch (the strip's "start"/"Resume" gesture) DOES
-    # launch it — pinned roles are human-dispatch-only, not never-dispatch.
+    # launch it — pinned roles are human-dispatch-startable, not never-dispatch.
     assert {:ok, _session} =
              Poller.dispatch_fiber(poller, "tests/pinned-active", force: true, ad_hoc: true)
 
@@ -1600,6 +1602,69 @@ defmodule Shuttle.PollerTest do
                cmd == "tmux" and hd(args) == "new-session"
              end)
            end)
+  end
+
+  test "poller does NOT auto-dispatch a status:active pinned role with NO runtime markers" do
+    # The strict-predicate case. deliberate_handoff_since_dispatch? demands a
+    # POSITIVE signal (both markers, handoff >= dispatch); a marker-less
+    # `status: active` pinned fiber (hand-edited active, legacy pre-marker, or
+    # runtime keys wiped) must sit idle until a human Resumes it — exactly the
+    # old blanket-exclusion behavior. The lenient clean_handoff_since_dispatch?
+    # defaults TRUE here (a resume-vs-fresh safety), so gating on it would
+    # auto-dispatch a role no worker asked to relaunch.
+    fiber = make_fiber("tests/pinned-markerless", %{"status" => "active"})
+    MockRunner.set_fiber("tests/pinned-markerless", fiber)
+    MockRunner.set_shuttle("tests/pinned-markerless", "kind: pinned\nagent: claude-opus\n", "active")
+
+    {:ok, poller} =
+      start_poller!(
+        name: :test_poller_pinned_markerless,
+        runner: MockRunner,
+        poll_interval_ms: 60_000,
+        felt_stores: ["/tmp"]
+      )
+
+    send(poller, :run_poll_cycle)
+    _ = Poller.snapshot(poller)
+
+    refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
+             cmd == "tmux" and hd(args) == "new-session"
+           end),
+           "the autonomous tick must not spawn a worker for a marker-less pinned role"
+  end
+
+  test "poller DOES auto-redispatch a status:active pinned role after a CLEAN handoff" do
+    # The unified-lifecycle other half: a pinned worker in a long autonomous arc
+    # that ran `felt shuttle handoff` (stamping handed_off_at >= dispatched_at)
+    # is deliberately asking for a fresh session. tick_kind_eligible? sees the
+    # clean handoff and the tick re-dispatches a fresh worker — the arc continues
+    # across clean sessions instead of going dark.
+    fiber = make_fiber("tests/pinned-clean-handoff", %{"status" => "active"})
+    MockRunner.set_fiber("tests/pinned-clean-handoff", fiber)
+    MockRunner.set_shuttle("tests/pinned-clean-handoff", "kind: pinned\nagent: claude-opus\n", "active")
+
+    # Dispatched, then a strictly-later clean handoff → clean_handoff? is true.
+    base = DateTime.utc_now()
+    write_dispatch_marker("tests/pinned-clean-handoff", "sess-clean", base)
+    write_handoff_marker("tests/pinned-clean-handoff", DateTime.add(base, 60, :second))
+
+    {:ok, poller} =
+      start_poller!(
+        name: :test_poller_pinned_clean_handoff,
+        runner: MockRunner,
+        poll_interval_ms: 60_000,
+        felt_stores: ["/tmp"]
+      )
+
+    send(poller, :run_poll_cycle)
+    _ = Poller.snapshot(poller)
+
+    assert wait_until(fn ->
+             Enum.any?(MockRunner.commands(), fn {cmd, args} ->
+               cmd == "tmux" and hd(args) == "new-session"
+             end)
+           end),
+           "a cleanly-handed-off pinned role must auto-redispatch a fresh worker"
   end
 
   test "poller does NOT auto-dispatch a PARKED (status:open) pinned role" do
@@ -1693,6 +1758,63 @@ defmodule Shuttle.PollerTest do
     send(poller, :run_poll_cycle)
     _ = Poller.snapshot(poller)
     assert new_sessions.() == 1
+  end
+
+  test "a pinned worker CLEAN handoff leaves the role active and redispatches (no park)" do
+    # The clean-handoff counterpart of the park test: a pinned worker that stamps
+    # handed_off_at and exits is asking for a fresh session (long autonomous arc).
+    # handle_worker_exit's pinned branch leaves the document `active` (does NOT
+    # park to open), and the next tick re-dispatches a fresh worker.
+    prev_loom = System.get_env("FELT_STORES")
+    System.put_env("FELT_STORES", "/tmp")
+
+    on_exit(fn ->
+      if prev_loom,
+        do: System.put_env("FELT_STORES", prev_loom),
+        else: System.delete_env("FELT_STORES")
+    end)
+
+    fiber_id = "tests/pinned-clean-exit"
+    leaf = fiber_id |> String.split("/") |> List.last()
+    session = Dispatcher.session_name(fiber_id)
+    MockRunner.set_fiber(fiber_id, make_fiber(fiber_id, %{"status" => "active"}))
+    MockRunner.set_shuttle(fiber_id, "kind: pinned\nagent: claude-opus\n", "active")
+
+    {:ok, poller} =
+      start_poller!(
+        name: :test_poller_pinned_clean_exit,
+        runner: MockRunner,
+        poll_interval_ms: 60_000,
+        felt_stores: ["/tmp"]
+      )
+
+    new_sessions = fn ->
+      Enum.count(MockRunner.commands(), fn {cmd, args} ->
+        cmd == "tmux" and hd(args) == "new-session" and session in args
+      end)
+    end
+
+    assert {:ok, _session} = Poller.dispatch_fiber(poller, fiber_id, force: true, ad_hoc: true)
+    assert new_sessions.() == 1
+
+    # The worker hands off cleanly (stamps handed_off_at strictly after dispatch),
+    # then its session ends.
+    write_handoff_marker(fiber_id, DateTime.add(DateTime.utc_now(), 60, :second))
+    MockRunner.remove_tmux_session(session)
+    send(poller, {:worker_exited, fiber_id, :normal_exit, false})
+    _ = Poller.snapshot(poller)
+
+    # The document stays active — NOT parked to open (that's the dirty-exit path).
+    doc = File.read!("/tmp/.felt/#{fiber_id}/#{leaf}.md")
+    assert doc =~ ~r/status:\s*active/
+    refute doc =~ ~r/status:\s*open/
+
+    # And the next autonomous tick re-dispatches a fresh worker (clean handoff →
+    # tick_kind_eligible?), so the session count climbs to 2.
+    send(poller, :run_poll_cycle)
+
+    assert wait_until(fn -> new_sessions.() == 2 end),
+           "a cleanly-handed-off pinned role must redispatch on the next tick"
   end
 
   test "a standing worker exit DOES close the role to awaiting-review (status:closed)" do
