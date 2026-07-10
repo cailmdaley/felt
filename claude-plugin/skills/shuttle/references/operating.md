@@ -21,13 +21,13 @@ Column membership derives from felt `status` + `tempered` + `shuttle.kind` + tmu
 
 - **Drafts**: `status: open`, or no `shuttle:` block at all (a stash awaiting refinement; `felt shuttle pause` lands a card here).
 - **Scheduled**: an armed standing role between firings (`status: active`, no live worker) — it fires on its own cron, so it sits on the timeline at its next launch rather than in the Now lane.
-- **Pinned**: a resting `kind: pinned` role — the strip of perennial interfaces; enters a session only by explicit human dispatch.
+- **Pinned**: a resting `kind: pinned` role — the strip of perennial interfaces. A human starts it (Resume / strip → In-flight); once running it joins the unified lifecycle: a worker that deliberately hands off is relaunched fresh next tick (a long autonomous arc), a dirty death or idle exit parks it back to the strip, and a close-out lands in Awaiting review.
 - **In flight**: a live tmux worker (any kind), or an armed oneshot (`status: active` — even when blocked by deps; it flies when the dep clears).
 - **Awaiting review**: `status: closed`, `tempered` absent. Worker exited; Shuttle ignores it pending human verdict.
 - **Tempered**: `status: closed`, `tempered: true`. Human-accepted (oneshot terminus).
 - **Composted**: `status: closed`, `tempered: false`. Human-rejected (mooted, superseded). The block is preserved as historical record.
 
-The drag-to-tempered gesture is **kind-aware**: on a standing role awaiting review it invokes `felt shuttle accept` (re-arms the role, `next_due` recomputed from cron); on a oneshot it sets `tempered: true` (terminus). Same gesture, different semantics — the classifier reads `shuttle.kind`.
+The drag-to-tempered gesture is **kind-aware**: on a standing role awaiting review it invokes `felt shuttle accept` (re-arms the role, `next_due` recomputed from cron); on a pinned role awaiting review it also invokes accept, which **re-parks it to the strip** (`status: open`, verdict cleared) — dragging the card back to the strip/drafts is the same accept; on a oneshot it sets `tempered: true` (terminus). Same gesture, kind-aware semantics — the classifier reads `shuttle.kind`.
 
 ## Lifecycle verbs
 

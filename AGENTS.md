@@ -607,7 +607,8 @@ All prompt variants share this shape (`compose_prompt/3` in dispatcher.ex):
    fallback mechanical (`felt -C <felt-store> show <id>`).
 4. **`Exit Contract`** block — always present; one uniform contract for
    oneshot + standing (rewrite `## Status`, then `felt shuttle handoff`),
-   inverted for pinned roles (stay alive; the session is the interface).
+   three-case for pinned roles (stay alive while the human drives; handoff
+   relaunches a fresh worker for autonomous arcs; close → awaiting review).
    A `Headless` block follows for print-mode agents (no human can attach).
 5. **`From User`** — the user's directive, when one rides this dispatch. It
    is the `user_message` dispatch *parameter* (inlined into the prompt at
