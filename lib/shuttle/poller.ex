@@ -3086,12 +3086,13 @@ defmodule Shuttle.Poller do
   # Does this role's worker exit close it to awaiting-review? Only STANDING
   # (cron-driven) roles do. Marking a role awaiting on exit is an anti-re-fire
   # gate — `status: closed` is what stops the cron from re-dispatching the role
-  # again this cycle. A PINNED role does NOT come here (pinned is not
-  # cyclical, just a oneshot-shaped looper): on exit-while-active it stays
-  # `status: active` and re-dispatches next poll (the loop); a human stops the
-  # loop by parking it (`active → open`). A pinned worker that's genuinely done
-  # self-closes to `status: closed` — handled by the `status == "closed"` branch
-  # before this gate is reached. The "it ran" record lives in the per-host
+  # again this cycle. A PINNED role does NOT come here (pinned is an interactive
+  # interface, not a loop): on exit-while-active the pinned branch above parks
+  # it back to the strip (`active → open` via mark_pinned_parked), and
+  # filter_eligible excludes pinned from the autonomous tick, so it never
+  # relaunches — the human re-attaches with Resume (force-dispatch). A pinned
+  # worker that's genuinely done self-closes to `status: closed` — handled by
+  # the `status == "closed"` branch before this gate is reached. The "it ran" record lives in the per-host
   # dispatch/handoff markers, not in the status field.
   defp standing_role?(fiber, state) do
     case StandingRoles.fetch_standing_role(Map.get(fiber, "id", ""), state) do

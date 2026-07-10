@@ -164,12 +164,12 @@ func (b *Block) UnmarshalJSON(data []byte) error {
 //
 //   - oneshot  — one-time dispatch, picked up on the next poll when status:active.
 //   - standing — recurring; the cron `schedule` decides when the poller dispatches.
-//   - pinned   — schedule-less umbrella role that rests PARKED on the board's
-//     pinned strip (status:open). Started (status:active, the strip → In-flight
-//     gesture) it LOOPS like a oneshot — dispatched and re-dispatched on every
-//     worker exit — until a human parks it (In-flight → strip, active → open) or
-//     a worker closes it. A oneshot whose resting state is open; perennial
-//     (Option D).
+//   - pinned   — schedule-less interactive role that rests PARKED on the board's
+//     pinned strip (status:open). It never auto-dispatches: the human starts it
+//     (Resume / strip → In-flight, which force-dispatches and flips it active);
+//     the worker stays alive as a standing interface; on session end the poller
+//     parks it back to the strip (active → open). Human-driven, not looped —
+//     see Poller.filter_eligible and mark_pinned_parked.
 var ValidKinds = []string{"oneshot", "standing", "pinned"}
 
 // ---- Validation ------------------------------------------------------------
@@ -222,12 +222,12 @@ func Validate(b *Block, agents *AgentRegistry) ValidationErrors {
 		}
 	}
 
-	// A pinned role has no cron recurrence — its loop is driven by status:active
-	// (re-dispatch on every worker exit), not a schedule. A schedule would be
-	// meaningless (and misleading on the board). Reject the combination loudly
-	// rather than silently ignoring the schedule.
+	// A pinned role has no cron recurrence — it never auto-dispatches at all:
+	// the human starts it (Resume/force-dispatch) and it parks back to the
+	// strip on exit. A schedule would be meaningless (and misleading on the
+	// board). Reject the combination loudly rather than silently ignoring it.
 	if b.Kind == "pinned" && b.Schedule != nil {
-		add("schedule", "not allowed for kind=pinned (pinned roles loop on status, not a cron)")
+		add("schedule", "not allowed for kind=pinned (pinned roles are human-driven, not cron-driven)")
 	}
 
 	if b.Kind == "standing" {

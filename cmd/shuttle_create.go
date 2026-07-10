@@ -390,9 +390,9 @@ rests PARKED on the board's pinned strip (status:open) until you start it.
   felt shuttle pin <fiber> --project-dir "$PWD"                      # parked, default agent
   felt shuttle pin <fiber> --project-dir "$PWD" --model claude-opus  # explicit agent
 
-Started (status:active) it LOOPS — dispatched and re-dispatched on every worker
-exit — until a human parks it again or a worker closes it. Perennial: you park
-it, you don't delete it.`,
+Started (status:active, via Resume / strip → In-flight) a worker attaches and
+stays alive as a standing interface; it never auto-dispatches, and on session
+end it parks back to the strip. Perennial: you park it, you don't delete it.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		reg, err := shuttle.LoadAgentRegistry()
@@ -450,7 +450,7 @@ it, you don't delete it.`,
 			return fmt.Errorf("writing fiber: %w", err)
 		}
 
-		fmt.Printf("pinned %s (parked on the strip; start it to loop)\n", args[0])
+		fmt.Printf("pinned %s (parked on the strip; Resume to attach a worker)\n", args[0])
 		fmt.Printf("  host: %s\n", block.Host)
 		if block.Agent != "" {
 			fmt.Printf("  agent: %s\n", block.Agent)
