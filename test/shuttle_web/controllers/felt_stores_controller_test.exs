@@ -9,6 +9,12 @@ defmodule ShuttleWeb.FeltStoresControllerTest do
     original = System.get_env("FELT_STORES_FILE")
     original_remotes = Application.get_env(:shuttle, :remotes)
 
+    # FELT_STORES env WINS over the registry file (FeltStores resolution
+    # order), so an operator shell exporting it leaks into every assertion
+    # here. Clear it for the test; restore after.
+    original_env_stores = System.get_env("FELT_STORES")
+    System.delete_env("FELT_STORES")
+
     path =
       Path.join(
         System.tmp_dir!(),
@@ -29,6 +35,11 @@ defmodule ShuttleWeb.FeltStoresControllerTest do
       case original_remotes do
         nil -> Application.delete_env(:shuttle, :remotes)
         value -> Application.put_env(:shuttle, :remotes, value)
+      end
+
+      case original_env_stores do
+        nil -> System.delete_env("FELT_STORES")
+        value -> System.put_env("FELT_STORES", value)
       end
     end)
 
