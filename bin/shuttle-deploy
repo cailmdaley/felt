@@ -6,6 +6,8 @@
 #   bin/shuttle-deploy --hosts local,candide  # a subset
 #   bin/shuttle-deploy --list                 # show the host table
 #   bin/shuttle-deploy --no-push              # skip the git push (already pushed)
+#   bin/shuttle-deploy --handshake            # bootstrap 2FA ssh (Duo push) when
+#                                             # no live master — human must approve
 #
 # Per host the ritual is the one AGENTS.md documents ("Deploying is ALWAYS
 # safe"): pull → make daemon → cycle the daemon (launchd kickstart on macOS,
@@ -17,8 +19,9 @@
 # The host table (fleet_dir/fleet_flags below) is the single place a machine's
 # quirks live. Adding a host to the fleet = one case arm (+ ssh config). Hosts
 # whose ssh is interactive (nibi's Duo, cineca's step cert) rely on a live
-# credential — a ControlMaster socket or a fresh cert; the preflight check
-# fails fast with the fix. Portable to macOS bash 3.2 (no assoc arrays).
+# credential — a ControlMaster socket or a fresh cert; the preflight fails
+# fast with the fix, or with --handshake bootstraps the Duo master itself
+# (fleet_handshake/try_handshake). Portable to macOS bash 3.2 (no assoc arrays).
 
 set -uo pipefail
 
@@ -42,6 +45,41 @@ fleet_flags() { # host → extra ssh flags (amundsen's alias carries LocalForwar
   esac
 }
 
+# Hosts whose ssh needs an interactive human credential get a handshake verb:
+# when the preflight finds no live connection, we can BOOTSTRAP one instead of
+# failing — provided a human is around to approve it. nibi is Duo
+# keyboard-interactive: a fresh master connection prompts "Passcode or option
+# (1-1)"; answering `1` fires a push to Cail's phone (~60s timeout). The ritual
+# (AGENTS.md hosts section): open `ssh <host>` in a throwaway tmux session,
+# send `1`, wait for `ssh -O check` to report a live ControlMaster (the ssh
+# config's ControlMaster auto + ControlPersist keeps it alive for every
+# subsequent ssh/rsync). Only worth firing when the human is reachable — hence
+# opt-in via --handshake, never part of an unattended run.
+fleet_handshake() { # host → "duo" for hosts we know how to bootstrap
+  case "$1" in
+    nibi) echo "duo" ;;
+    *)    echo "" ;;
+  esac
+}
+
+try_handshake() { # $1 = host; returns 0 with a live master, 1 otherwise
+  local host="$1" sess="shuttle-handshake-$1"
+  [ "$(fleet_handshake "$host")" = "duo" ] || return 1
+  [ "$HANDSHAKE" = 1 ] || { bad "no live ControlMaster; rerun with --handshake (human must approve the Duo push)"; return 1; }
+  tmux kill-session -t "$sess" 2>/dev/null
+  tmux new-session -d -s "$sess" "ssh $host" || { bad "could not open tmux for handshake"; return 1; }
+  sleep 5
+  tmux send-keys -t "$sess" '1' Enter
+  printf '  %s…%s Duo push sent — approve it on your phone (times out in ~60s)\n' "$BOLD" "$RESET"
+  for _ in $(seq 1 25); do
+    ssh -O check "$host" 2>/dev/null && { ok "ControlMaster live"; tmux kill-session -t "$sess" 2>/dev/null; return 0; }
+    sleep 3
+  done
+  bad "handshake timed out (push not approved?)"
+  tmux kill-session -t "$sess" 2>/dev/null
+  return 1
+}
+
 # Clusters keep their toolchain under ~/.local (kerl OTP + precompiled Elixir +
 # Go), not on the default PATH of a non-interactive ssh shell.
 REMOTE_PATH='export PATH=$HOME/.local/bin:$HOME/.local/go/bin:$HOME/.local/elixir/bin:$HOME/.local/otp/27/bin:$PATH'
@@ -54,12 +92,14 @@ say()  { printf '\n%s▸ %s%s\n' "$BOLD" "$1" "$RESET"; }
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 HOSTS="$FLEET_ORDER"
 PUSH=1
+HANDSHAKE=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --hosts) HOSTS="$(echo "$2" | tr ',' ' ')"; shift 2 ;;
     --hosts=*) HOSTS="$(echo "${1#*=}" | tr ',' ' ')"; shift ;;
     --no-push) PUSH=0; shift ;;
+    --handshake) HANDSHAKE=1; shift ;;
     --list) for h in $FLEET_ORDER; do printf '%-10s %s\n' "$h" "$(fleet_dir "$h")"; done; exit 0 ;;
     -h|--help) sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown flag: $1" >&2; exit 2 ;;
@@ -112,6 +152,7 @@ deploy_remote() {
   dir="$(fleet_dir "$host")"; flags="$(fleet_flags "$host")"
   say "$host ($dir)"
   ssh $flags "$host" "true" 2>/dev/null \
+    || try_handshake "$host" \
     || { bad "ssh unreachable (expired cert / no ControlMaster? see AGENTS.md hosts section)"; return 1; }
   ssh $flags "$host" "$REMOTE_PATH && cd $dir && git pull --ff-only -q && make daemon" >/dev/null \
     || { bad "pull/build failed"; return 1; }

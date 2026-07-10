@@ -362,7 +362,9 @@ matches → release the boot quarantine. `--hosts local,candide,…` for a subse
 `--list` for the host table (the single place per-host checkout paths and ssh
 quirks live — adding a fleet member is one case arm there plus ssh config).
 Preflight fails fast on dead ssh (expired cineca cert, no nibi ControlMaster)
-with a pointer here.
+with a pointer here — or, with `--handshake` and a human reachable, it
+bootstraps the nibi Duo master itself (the ritual above, scripted: tmux
+`ssh nibi`, send `1`, wait for the approved push).
 
 **Deploying is ALWAYS safe — local or remote — and is never a blocker.**
 Rebuilding and restarting the daemon (`make all`, cycling `:4000`, reloading the
