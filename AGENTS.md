@@ -342,15 +342,25 @@ down" when it isn't:
   LocalForwards (plot ports) + a RemoteForward that collide harmlessly when a
   session already holds them; pass `-o ClearAllForwardings=yes` on one-off
   ssh/rsync to silence the `Address already in use` noise.
-- **nibi** (`nibi.alliancecan.ca`, user `cdaley`, Alliance Canada) — pubkey +
-  **Duo keyboard-interactive 2FA**: every new master connection prompts
-  "Passcode or option (1-1)"; answering `1` sends a push to Cail's phone. The
-  ssh config sets `ControlMaster auto` + `ControlPersist`, so after one approved
-  login every further ssh/rsync multiplexes over the live socket with no 2FA.
-  Automating a fresh login: run `ssh nibi` in a tmux pane, `send-keys '1' Enter`,
-  and ask Cail to approve the push; the Duo prompt times out in ~60s, so
-  trigger it only when he's reachable. Checkout is **`~/code/felt`** (like
-  amundsen); toolchain under `~/.local` (kerl OTP 27 + Elixir + Go), not on the
+- **nibi** (user `cdaley`, Alliance Canada) — the public name
+  `nibi.alliancecan.ca` is a **TCP load balancer over login nodes l1–l4**, and
+  tmux + the shuttle daemon are per-node (they live on **l1**), so an unpinned
+  connection can land on the wrong node and see no tmux/daemon at all. The ssh
+  config therefore pins in two hops: `Host nibi-lb` holds the master to the
+  balancer, `Host nibi` is `HostName l1.nibi.sharcnet` + `ProxyJump nibi-lb`
+  (login nodes are not externally resolvable). Auth is pubkey + **Duo
+  keyboard-interactive 2FA** on BOTH hops — the in-cluster jump does not bypass
+  MFA — each prompting "Passcode or option (1-1)"; answering `1` sends a push
+  to Cail's phone. `ControlMaster auto` + `ControlPersist` on both hosts, so
+  after the masters are up every further ssh/rsync multiplexes with no 2FA.
+  Automating a fresh login: run `ssh nibi` in a tmux pane, `send-keys '1'
+  Enter`, and ask Cail to approve the push; the Duo prompt times out in ~60s,
+  so trigger it only when he's reachable — and let the remote shell exit
+  cleanly (don't kill the tmux session) so ControlPersist keeps the forked
+  master. If the `:4004` tunnel can't bind after a master cycle, a stale
+  forward on the lb master is squatting the port: `ssh -O cancel -L
+  4004:localhost:4000 nibi-lb`. Checkout is **`~/code/felt`** (like amundsen);
+  toolchain under `~/.local` (kerl OTP 27 + Elixir + Go), not on the
   non-interactive PATH.
 
 **`bin/shuttle-deploy` is the fleet deploy verb — use it instead of hand-rolling
