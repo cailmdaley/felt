@@ -228,6 +228,7 @@ export class KanbanModal {
       pin: (card) => this.pinRole(card),
       openDetail: (card, column) => this.detailModal?.open(card, this.cityScope?.cityId, column),
       openWorker: this.openWorkerAfterGesture,
+      releaseQuarantine: (host) => this.releaseQuarantine(host),
       setTimelineAdaptiveCleanup: (cleanup) => { this.timelineAdaptiveCleanup = cleanup },
       // The masthead dissolved; its three actions now live in the column heads
       // (Drafts → Stash, In flight → New idea, Awaiting review → Refresh).
@@ -1252,6 +1253,40 @@ export class KanbanModal {
    *  `origin`. */
   private killUrl(): string {
     return `${this.shuttleBase}/api/v1/kill`
+  }
+
+  /** POST a boot-quarantine release to the daemon, owner-routed by `origin`
+   *  (the held card's owning host). */
+  private releaseUrl(): string {
+    return `${this.shuttleBase}/api/v1/quarantine/release`
+  }
+
+  /**
+   * Release the boot quarantine on a held card's owning host — the `⏹︎ held` →
+   * `▶ release` click. Release is global per daemon: a restart parks every
+   * fresh launch on that host, and this one call frees them all (idempotent).
+   * Owner-routed by `origin` so a remote-owned card releases its own host's
+   * daemon, not the board's. On success the parked set drops and the next poll
+   * clears the held badges; refetch immediately so it reads freed without the
+   * ~15s poll wait.
+   */
+  private async releaseQuarantine(shuttleHost?: string): Promise<void> {
+    try {
+      const res = await fetch(this.releaseUrl(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ origin: shuttleHost }),
+      })
+      if (!res.ok) {
+        this.showBanner(`Couldn't release the hold${shuttleHost ? ` on ${shuttleHost}` : ''}: ${await errorMessageFromResponse(res, 'release failed')}`, 'error')
+        return
+      }
+      this.announce(`Released held launches${shuttleHost ? ` on ${shuttleHost}` : ''}; dispatch resumes on the next tick.`)
+      await this.fetchAndRender()
+    } catch (err: unknown) {
+      const msg = (err as { message?: string })?.message ?? String(err)
+      this.showBanner(`Couldn't release the hold${shuttleHost ? ` on ${shuttleHost}` : ''}: ${msg}`, 'error')
+    }
   }
 
   /**

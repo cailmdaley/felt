@@ -99,6 +99,10 @@ interface KanbanSurfaceRendererOptions {
   pin: (card: KanbanCard) => void | Promise<void>
   openDetail: (card: KanbanCard, column: ColumnKind) => void
   openWorker?: (tmuxSessionName: string, shuttleHost?: string) => void
+  /** Release the boot quarantine on a card's owning host — the `⏹︎ held` →
+   *  `▶ release` click. Release is global per daemon (one restart parks the
+   *  whole board, one click frees it), so the card only names which host. */
+  releaseQuarantine?: (shuttleHost?: string) => void | Promise<void>
   setTimelineAdaptiveCleanup: (cleanup: (() => void) | null) => void
   /** Stash a new fiber — the Drafts head's `+` action. Omit to render the
    *  Drafts head title + count alone (read-only context). */
@@ -125,6 +129,7 @@ export class KanbanSurfaceRenderer {
   private readonly pin: (card: KanbanCard) => void | Promise<void>
   private readonly openDetail: (card: KanbanCard, column: ColumnKind) => void
   private readonly openWorker?: (tmuxSessionName: string, shuttleHost?: string) => void
+  private readonly releaseQuarantine?: (shuttleHost?: string) => void | Promise<void>
   private readonly setTimelineAdaptiveCleanup: (cleanup: (() => void) | null) => void
   private readonly onStashClick?: () => void
   private readonly onNewIdeaClick?: () => void
@@ -150,6 +155,7 @@ export class KanbanSurfaceRenderer {
     this.pin = options.pin
     this.openDetail = options.openDetail
     this.openWorker = options.openWorker
+    this.releaseQuarantine = options.releaseQuarantine
     this.setTimelineAdaptiveCleanup = options.setTimelineAdaptiveCleanup
     this.onStashClick = options.onStashClick
     this.onNewIdeaClick = options.onNewIdeaClick
@@ -1309,20 +1315,41 @@ export class KanbanSurfaceRenderer {
     // Boot-quarantine hold: a genuinely-fresh launch the owning daemon is
     // withholding after a restart. Reads as "held, awaiting release" — distinct
     // from the "▸ aloft" running pill and from an idle-active card (mutually
-    // exclusive with `runningWorker`: held means parked, not running). Release is
-    // global (`bin/shuttle release`), so this is a status indicator, not a
-    // per-card action button.
+    // exclusive with `runningWorker`: held means parked, not running). The badge
+    // IS the release control: hover flips `⏹︎ held` → `▶ release`, click POSTs
+    // the release to the card's OWNING host. Release is global per daemon (one
+    // restart parks the whole board, one click frees every held launch on that
+    // host), so `title` names that so a single click isn't a surprise.
     if (card.held) {
-      const heldEl = document.createElement('span')
+      const heldEl = document.createElement('button')
+      heldEl.type = 'button'
       heldEl.className = 'kbn-card-held'
-      heldEl.setAttribute('role', 'status')
-      heldEl.textContent = '⏹︎ held'
       const since = card.heldSince
         ? ` since ${new Date(card.heldSince).toLocaleTimeString()}`
         : ''
+      const host = card.shuttleHost
+      heldEl.setAttribute(
+        'aria-label',
+        `Release boot quarantine${host ? ` on ${host}` : ''} — dispatches every held launch`,
+      )
       heldEl.title =
         `Held by boot quarantine — a fresh launch parked until release${since}. ` +
-        'The daemon restarted; run `bin/shuttle release` to dispatch held launches.'
+        `The daemon restarted; click to release${host ? ` ${host}` : ''} and dispatch ` +
+        'every held launch on that host.'
+      const heldLabel = document.createElement('span')
+      heldLabel.className = 'kbn-card-held-label'
+      heldLabel.textContent = '⏹︎ held'
+      const releaseLabel = document.createElement('span')
+      releaseLabel.className = 'kbn-card-held-release'
+      releaseLabel.textContent = '▶ release'
+      heldEl.append(heldLabel, releaseLabel)
+      heldEl.addEventListener('click', (e) => {
+        e.stopPropagation()
+        heldEl.disabled = true
+        void Promise.resolve(this.releaseQuarantine?.(host)).finally(() => {
+          heldEl.disabled = false
+        })
+      })
       meta.append(heldEl)
     }
     if (card.runningWorker) {
