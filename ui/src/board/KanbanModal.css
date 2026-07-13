@@ -1543,9 +1543,10 @@
    not a solid live state; no pulse — it's parked, not churning.
 
    The badge IS the release control: it's a <button> whose default face shows
-   `⏹︎ held`; on hover/focus it swaps to a warm `▶ release` (the amber "go"
-   colour) so the click's meaning is unmistakable. Global-per-host release —
-   one click frees every held launch on the owning daemon (see the title). */
+   `⏹︎ held`; on hover/focus it swaps to `▶ release` in the teal "aloft" colour
+   (matching the running-worker pill — release means "let it fly") so the
+   click's meaning is unmistakable. Global-per-host release — one click frees
+   every held launch on the owning daemon (see the title). */
 .kbn-card-held {
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
   font-size: 9.5px;
@@ -1566,10 +1567,10 @@
    crossfade handled by toggling which child span is shown. */
 .kbn-card-held:hover,
 .kbn-card-held:focus-visible {
-  color: #7A5E1E;
-  background: rgba(154, 123, 53, 0.14);
+  color: #1E5852;
+  background: rgba(63, 130, 120, 0.14);
   border-style: solid;
-  border-color: rgba(154, 123, 53, 0.55);
+  border-color: rgba(63, 130, 120, 0.55);
 }
 .kbn-card-held:focus { outline: none; }
 .kbn-card-held:focus-visible { outline-offset: 2px; }
