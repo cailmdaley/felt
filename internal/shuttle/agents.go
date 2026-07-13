@@ -24,8 +24,8 @@ type AgentRecord struct {
 	RequiresModel bool   `json:"requires_model,omitempty"`
 	// Axis constraint metadata (base agents only). EffortLevels is the literal
 	// set of effort tokens this harness/model accepts — rendered through to the
-	// CLI verbatim, so each harness's native vocabulary lives here (claude:
-	// …xhigh,max; codex: …xhigh; Copilot Sonnet capped at high). Empty =
+	// CLI verbatim, so each harness/model's native vocabulary lives here (Claude:
+	// …xhigh,max; Codex varies through max/ultra; Copilot Sonnet caps at high). Empty =
 	// effort axis unsupported. DefaultEffort is applied when a fiber omits
 	// effort (preserves the pi `:level` suffix behaviour). ChromeCapable gates
 	// the chrome axis.

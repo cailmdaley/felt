@@ -32,6 +32,47 @@ func TestNewResolvedAgent_MatchesResolveBlock(t *testing.T) {
 	}
 }
 
+func TestCodexModelFamily(t *testing.T) {
+	reg, err := LoadAgentRegistry()
+	if err != nil {
+		t.Fatalf("LoadAgentRegistry: %v", err)
+	}
+
+	tests := []struct {
+		name          string
+		model         string
+		defaultEffort string
+		maxEffort     string
+	}{
+		{name: "codex-sol", model: "gpt-5.6-sol", defaultEffort: "low", maxEffort: "ultra"},
+		{name: "codex-terra", model: "gpt-5.6-terra", defaultEffort: "medium", maxEffort: "ultra"},
+		{name: "codex-luna", model: "gpt-5.6-luna", defaultEffort: "medium", maxEffort: "max"},
+		{name: "codex", model: "gpt-5.6-sol", defaultEffort: "low", maxEffort: "ultra"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec, axes, err := reg.Resolve(tt.name, "", false)
+			if err != nil {
+				t.Fatalf("Resolve(%s): %v", tt.name, err)
+			}
+			if rec.Model != tt.model || axes.Effort != tt.defaultEffort {
+				t.Fatalf("Resolve(%s) = model %q effort %q, want %q/%q", tt.name, rec.Model, axes.Effort, tt.model, tt.defaultEffort)
+			}
+			if _, _, err := reg.Resolve(tt.name, tt.maxEffort, false); err != nil {
+				t.Fatalf("Resolve(%s, %s): %v", tt.name, tt.maxEffort, err)
+			}
+		})
+	}
+
+	if _, _, err := reg.Resolve("codex-luna", "ultra", false); err == nil {
+		t.Fatal("codex-luna should reject unsupported ultra effort")
+	}
+	if _, ok := reg.Find("gpt-5.5"); ok {
+		t.Fatal("gpt-5.5 should no longer resolve")
+	}
+}
+
 func TestResolveBlock_Oneshot(t *testing.T) {
 	reg, err := LoadAgentRegistry()
 	if err != nil {

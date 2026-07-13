@@ -87,16 +87,48 @@
     "default": false
   },
   {
-    "id": "codex",
+    "id": "codex-sol",
     "cli": "codex",
     "wrapper": "codex",
-    "model": "gpt-5.5",
+    "model": "gpt-5.6-sol",
     "extra_flags": "--dangerously-bypass-approvals-and-sandbox",
-    "effort_levels": ["low", "medium", "high", "xhigh"],
-    "default_effort": "xhigh",
+    "effort_levels": ["low", "medium", "high", "xhigh", "max", "ultra"],
+    "default_effort": "low",
+    "chrome_capable": false,
+    "cost_class": "premium",
+    "aliases": ["gpt-5.6-sol"],
+    "default": false
+  },
+  {
+    "id": "codex-terra",
+    "cli": "codex",
+    "wrapper": "codex",
+    "model": "gpt-5.6-terra",
+    "extra_flags": "--dangerously-bypass-approvals-and-sandbox",
+    "effort_levels": ["low", "medium", "high", "xhigh", "max", "ultra"],
+    "default_effort": "medium",
     "chrome_capable": false,
     "cost_class": "standard",
-    "aliases": ["codex"],
+    "aliases": ["gpt-5.6-terra"],
+    "default": false
+  },
+  {
+    "id": "codex-luna",
+    "cli": "codex",
+    "wrapper": "codex",
+    "model": "gpt-5.6-luna",
+    "extra_flags": "--dangerously-bypass-approvals-and-sandbox",
+    "effort_levels": ["low", "medium", "high", "xhigh", "max"],
+    "default_effort": "medium",
+    "chrome_capable": false,
+    "cost_class": "economy",
+    "aliases": ["gpt-5.6-luna"],
+    "default": false
+  },
+  {
+    "id": "codex",
+    "alias_of": "codex-sol",
+    "aliases": [],
     "default": false
   },
   {
