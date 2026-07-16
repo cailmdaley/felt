@@ -33,8 +33,8 @@ Understanding crystallized. Accrete:
 
 Search and read:
     felt ls                                        # tracked (open and active)
-    felt ls "query" [-t tag] [-s closed]          # any filter widens to all statuses
-    felt ls --body "query"                         # FTS5 body search
+    felt ls "query" [-t tag] [-s closed]          # substring over name, outcome, YAML, slug; any filter widens to all statuses
+    felt ls --body "query"                         # adds body search — whole-word (FTS5), NOT substring; use -r --body for partial matches
     felt session                                   # SessionStart context as plain text
     felt tree [<id>]                               # containment hierarchy
     felt show <id>                                 # full
@@ -85,7 +85,7 @@ Relationships: directory containment, `[[wikilinks]]` in bodies, and optional pr
 
 **CLAUDE.md stays lean.** Commands, paths, context pointers. Documentation fibers carry the depth.
 
-**Cross-project stores are useful.** A `.felt/` store can be linked into a broader cross-project store via filesystem symlink — same bytes, two paths — letting `felt -C <cross-project-store> ls` search across every linked project. Threads that span projects get a home; cross-pollination becomes possible. There are two valid symlink directions (cross-project store as canonical, or per-project as canonical, depending on whether the project has its own sync constraint); see [cross-project.md](references/cross-project.md) for setup mechanics, choosing a direction, and how to avoid clobbering existing fibers.
+**Cross-project stores are useful.** A `.felt/` store can be symlinked into a cross-project store so `felt -C <store> ls` searches every linked project; see [cross-project.md](references/cross-project.md) for direction choice and safe setup.
 
 ---
 
