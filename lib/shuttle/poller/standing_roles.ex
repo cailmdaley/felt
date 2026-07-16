@@ -368,7 +368,7 @@ defmodule Shuttle.Poller.StandingRoles do
 
     with true <- Map.get(fiber, "status", "") == "active",
          true <- is_nil(Map.get(fiber, "tempered")),
-         true <- Poller.dependencies_satisfied?(fiber_id, state),
+         true <- Poller.dependencies_satisfied?(fiber, state),
          {:ok, role} <- fetch_standing_role(fiber_id, state) do
       now = DateTime.utc_now()
       now_ms = DateTime.to_unix(now, :millisecond)

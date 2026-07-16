@@ -1,6 +1,7 @@
 defmodule Shuttle.PollerTest do
   use ExUnit.Case
 
+  alias Shuttle.ActionQueries
   alias Shuttle.Poller
   alias Shuttle.Poller.Snapshot
   alias Shuttle.Dispatcher
@@ -826,7 +827,7 @@ defmodule Shuttle.PollerTest do
                    "--has-field",
                    "shuttle",
                    "--json-field",
-                   "id,uid,status,shuttle,path,modified_at"
+                   "id,uid,status,shuttle,path,modified_at,depends_on"
                  ]
              end)
            end)
@@ -2612,13 +2613,15 @@ defmodule Shuttle.PollerTest do
 
     send(poller, :run_poll_cycle)
 
+    query_opts = [felt_stores: ["/tmp"], runner: MockRunner]
+
     assert_eventually(fn ->
-      {:ok, actions} = Poller.actions_for(poller, fiber_id, [])
+      {:ok, actions} = ActionQueries.actions_for(fiber_id, query_opts)
       ids = Enum.map(actions, &(Map.get(&1, :id) || Map.get(&1, "id")))
       assert "accept-run" in ids
 
       assert {:ok, %{id: "accept-run"}} =
-               Poller.resolve_action(poller, fiber_id, "tempered", [])
+               ActionQueries.resolve_action(fiber_id, "tempered", query_opts)
     end)
   end
 
@@ -2836,7 +2839,7 @@ defmodule Shuttle.PollerTest do
 
     # Non-forced ad_hoc (the poller's own path) is still refused with the
     # awaiting marker, and never spawns.
-    assert {:error, {:awaiting_review, nil, "2026-05-24T10:00:00Z"}} =
+    assert {:error, {:awaiting_review, "2026-05-24T10:00:00Z"}} =
              Poller.dispatch_fiber(poller, fiber_id, ad_hoc: true)
 
     refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
@@ -2880,8 +2883,10 @@ defmodule Shuttle.PollerTest do
     session = Dispatcher.session_name(fiber_id)
     assert wait_until(fn -> Poller.worker_status(poller, fiber_id) != nil end)
 
+    query_opts = [felt_stores: ["/tmp"], runner: MockRunner]
+
     # While the session is live, the running branch is read: inFlight → pause.
-    assert {:ok, %{id: "pause"}} = Poller.resolve_action(poller, fiber_id, "inFlight", [])
+    assert {:ok, %{id: "pause"}} = ActionQueries.resolve_action(fiber_id, "inFlight", query_opts)
 
     # Kill the tmux session WITHOUT a poll tick or :worker_exited message.
     MockRunner.remove_tmux_session(session)
@@ -2891,9 +2896,9 @@ defmodule Shuttle.PollerTest do
     # discriminator is the inFlight resolution — `pause` is in the idle
     # availability set too (drafts→pause), so we assert on resolve, not the set.
     assert {:ok, %{id: "dispatch-ad-hoc"}} =
-             Poller.resolve_action(poller, fiber_id, "inFlight", [])
+             ActionQueries.resolve_action(fiber_id, "inFlight", query_opts)
 
-    {:ok, actions} = Poller.actions_for(poller, fiber_id, [])
+    {:ok, actions} = ActionQueries.actions_for(fiber_id, query_opts)
     ids = Enum.map(actions, &(Map.get(&1, :id) || Map.get(&1, "id")))
     assert "dispatch-ad-hoc" in ids
   end

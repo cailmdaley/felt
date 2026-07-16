@@ -30,7 +30,6 @@ defmodule Shuttle.Poller do
   require Logger
 
   alias Shuttle.{
-    ActionQueries,
     Continuation,
     Dispatcher,
     LifecycleStore,
@@ -434,37 +433,6 @@ defmodule Shuttle.Poller do
     GenServer.call(server, {:capture, yap, opts}, @dispatch_call_timeout_ms)
   end
 
-  @spec actions_for(String.t(), keyword()) :: {:ok, [map()]} | {:error, term()}
-  def actions_for(fiber_id, opts \\ []), do: ActionQueries.actions_for(fiber_id, opts)
-
-  @spec actions_for(GenServer.server(), String.t(), keyword()) ::
-          {:ok, [map()]} | {:error, term()}
-  def actions_for(server, fiber_id, opts) do
-    GenServer.call(server, {:actions, fiber_id, opts}, @dispatch_call_timeout_ms)
-  end
-
-  @spec actions_for(GenServer.server(), String.t(), keyword(), non_neg_integer()) ::
-          {:ok, [map()]} | {:error, term()}
-  def actions_for(server, fiber_id, opts, timeout_ms) do
-    GenServer.call(server, {:actions, fiber_id, opts}, timeout_ms)
-  end
-
-  @spec resolve_action(String.t(), String.t(), keyword()) :: {:ok, map()} | {:error, term()}
-  def resolve_action(fiber_id, target, opts \\ []),
-    do: ActionQueries.resolve_action(fiber_id, target, opts)
-
-  @spec resolve_action(GenServer.server(), String.t(), String.t(), keyword()) ::
-          {:ok, map()} | {:error, term()}
-  def resolve_action(server, fiber_id, target, opts) do
-    GenServer.call(server, {:resolve_action, fiber_id, target, opts}, @dispatch_call_timeout_ms)
-  end
-
-  @spec resolve_action(GenServer.server(), String.t(), String.t(), keyword(), non_neg_integer()) ::
-          {:ok, map()} | {:error, term()}
-  def resolve_action(server, fiber_id, target, opts, timeout_ms) do
-    GenServer.call(server, {:resolve_action, fiber_id, target, opts}, timeout_ms)
-  end
-
   @doc """
   Run a standing-role lifecycle transition (`:accept` / `:resume`) through the
   Poller so the felt-document write is atomic against poll cycles. accept/resume
@@ -611,7 +579,7 @@ defmodule Shuttle.Poller do
       tick_timer_ref: nil,
       tick_token: nil,
       felt_stores: felt_stores,
-      own_host_id: to_string(own_host_id),
+      own_host_id: own_host_id,
       auto_discover_felt_stores: auto_discover,
       runner: runner,
       # Restart is not dispatch authority: quarantine every autonomous
@@ -905,20 +873,6 @@ defmodule Shuttle.Poller do
             {:reply, {:error, reason}, state}
         end
     end
-  end
-
-  def handle_call({:actions, fiber_id, opts}, _from, state) do
-    {_runtime_key, slug} = resolve_identity(state, fiber_id)
-
-    opts = Keyword.merge([felt_stores: state.felt_stores, runner: state.runner], opts)
-    {:reply, ActionQueries.actions_for(slug, opts), state}
-  end
-
-  def handle_call({:resolve_action, fiber_id, target, opts}, _from, state) do
-    {_runtime_key, slug} = resolve_identity(state, fiber_id)
-
-    opts = Keyword.merge([felt_stores: state.felt_stores, runner: state.runner], opts)
-    {:reply, ActionQueries.resolve_action(slug, target, opts), state}
   end
 
   def handle_call({:lifecycle_transition, verb, fiber_id, opts}, _from, state) do
@@ -1575,7 +1529,7 @@ defmodule Shuttle.Poller do
            "--has-field",
            "shuttle",
            "--json-field",
-           "id,uid,status,shuttle,path,modified_at"
+           "id,uid,status,shuttle,path,modified_at,depends_on"
          ]) do
       {:ok, output} ->
         {:ok, output}
@@ -1781,7 +1735,7 @@ defmodule Shuttle.Poller do
 
         # Dependencies must be satisfied
         true ->
-          dependencies_satisfied?(fiber_id, state)
+          dependencies_satisfied?(fiber, state)
       end
     else
       false
@@ -1815,7 +1769,7 @@ defmodule Shuttle.Poller do
         force_dispatch_eligible?(fiber, state)
 
       Keyword.get(opts, :ad_hoc, false) and force_dispatchable_standing_role?(fiber, state) ->
-        dependencies_satisfied?(Map.get(fiber, "id", ""), state)
+        dependencies_satisfied?(fiber, state)
 
       true ->
         eligible?(fiber, state)
@@ -1922,7 +1876,7 @@ defmodule Shuttle.Poller do
       with true <- status == "closed" and is_nil(tempered),
            {:ok, role} <- StandingRoles.fetch_standing_role(fiber_id, state),
            true <- StandingRole.standing?(role) do
-        {:error, {:awaiting_review, role.run_id, Map.get(fiber, "closed-at")}}
+        {:error, {:awaiting_review, Map.get(fiber, "closed-at")}}
       else
         _ -> false
       end
@@ -2156,14 +2110,20 @@ defmodule Shuttle.Poller do
   # Tilde-prefixed paths are expanded. Falls back to the fiber's resolved felt
   # host (or the first configured host if resolution fails) when `project_dir`
   # is absent, empty, or does not exist on disk.
-  defp fiber_work_dir(fiber_id, state) do
+  #
+  # The `project_dir` rides the fiber map already in hand at dispatch (the poll
+  # candidate row carries the whole `shuttle` block; the API path fetched the
+  # full fiber), so this reads it directly rather than re-shelling `felt show`.
+  # Only the felt-store fallback resolves via `host_for_fiber/2` (cache hit on
+  # the poll path — no shell).
+  defp fiber_work_dir(fiber, fiber_id, state) do
     fallback_host =
       case host_for_fiber(fiber_id, state) do
         {:ok, h} -> h
         {:error, _} -> List.first(state.felt_stores)
       end
 
-    with {:ok, shuttle} <- fetch_shuttle_block(fiber_id, state),
+    with shuttle when is_map(shuttle) <- Map.get(fiber, "shuttle"),
          dir when is_binary(dir) and dir != "" <- Map.get(shuttle, "project_dir"),
          expanded = Path.expand(dir),
          true <- File.dir?(expanded) do
@@ -2173,31 +2133,30 @@ defmodule Shuttle.Poller do
     end
   end
 
+  # Deps ride the cheap `felt ls` shuttle projection (`depends_on` is in the
+  # --json-field list), so a dependency-free oneshot — the common case —
+  # satisfies here off the candidate row with NO per-tick `felt show`. Only a
+  # fiber that actually declares dependencies shells felt, and then only to read
+  # each dep's `tempered` flag.
   @doc false
-  def dependencies_satisfied?(fiber_id, state) do
-    case fetch_fiber_full(fiber_id, state) do
-      {:ok, full_fiber} ->
-        deps = Map.get(full_fiber, "depends_on", [])
+  def dependencies_satisfied?(fiber, state) when is_map(fiber) do
+    deps = Map.get(fiber, "depends_on", [])
 
-        if deps == [] or is_nil(deps) do
-          true
-        else
-          Enum.all?(deps, fn dep ->
-            case dep_id(dep) do
-              nil ->
-                false
+    if deps == [] or is_nil(deps) do
+      true
+    else
+      Enum.all?(deps, fn dep ->
+        case dep_id(dep) do
+          nil ->
+            false
 
-              dep_id ->
-                case fetch_fiber_full(dep_id, state) do
-                  {:ok, dep} -> Map.get(dep, "tempered", false) == true
-                  {:error, _} -> false
-                end
+          dep_id ->
+            case fetch_fiber_full(dep_id, state) do
+              {:ok, dep} -> Map.get(dep, "tempered", false) == true
+              {:error, _} -> false
             end
-          end)
         end
-
-      {:error, _} ->
-        false
+      end)
     end
   end
 
@@ -2279,7 +2238,7 @@ defmodule Shuttle.Poller do
     case Dispatcher.dispatch(
            fiber_id,
            runner: state.runner,
-           work_dir: fiber_work_dir(fiber_id, state),
+           work_dir: fiber_work_dir(fiber, fiber_id, state),
            prompt_context: prompt_context,
            felt_store: felt_store,
            force_fresh: Keyword.get(opts, :force_fresh, false),
