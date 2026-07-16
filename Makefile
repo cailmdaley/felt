@@ -23,7 +23,10 @@ LOG := $(HOME)/Library/Logs/shuttle.log
 # Match both the local `bin/shuttle ... -extra bin/shuttle start` shape and
 # remote respawn-loop `./bin/shuttle ... -extra ./bin/shuttle start` shape.
 # `[b]in` prevents pgrep from matching its own shell command.
-PIDPATTERN := [b]in/shuttle -B .* -extra \S*bin/shuttle start
+# `[^ ]*` (not `\S`) — macOS pgrep uses basic regex and treats `\S` as a
+# literal, so it never matches and stop/start/status all silently miss the
+# daemon.
+PIDPATTERN := [b]in/shuttle -B .* -extra [^ ]*bin/shuttle start
 AGENT_LABEL := io.shuttle.daemon
 AGENT_PLIST := $(HOME)/Library/LaunchAgents/$(AGENT_LABEL).plist
 # Felt stores the launchd daemon polls. Defaults to the aggregate store (~/loom,
@@ -96,17 +99,37 @@ mix-test:
 all: restart
 
 start:
+	@# Readiness is binding :4000, not a fixed wait. Two boot paths converge here:
+	@#   - nohup dev launch: we spawn bin/shuttle ourselves.
+	@#   - launchd KeepAlive: `make stop` killed the daemon and launchd is already
+	@#     respawning the freshly-built escript, so a daemon is (re)appearing on
+	@#     its own — launching our own would just collide on :4000.
+	@# So: if one's already running (launchd respawn / never down), adopt it and
+	@# wait for :4000; otherwise nohup-launch. Either way poll /api/v1/version up
+	@# to ~120s (launchd/candide slow boots adopt orphans before binding), and
+	@# fail fast the moment the daemon process dies — a real boot crash surfaces
+	@# immediately instead of after the full timeout.
 	@if pgrep -f '$(PIDPATTERN)' >/dev/null; then \
-	  echo "shuttle already running (pid $$(pgrep -f '$(PIDPATTERN)'))"; exit 1; \
-	fi
-	@echo "=== shuttle start $$(date -u +%Y-%m-%dT%H:%M:%SZ) ===" >> $(LOG)
-	@nohup bin/shuttle start >> $(LOG) 2>&1 &
-	@sleep 1
-	@if pgrep -f '$(PIDPATTERN)' >/dev/null; then \
-	  echo "shuttle started (pid $$(pgrep -f '$(PIDPATTERN)')); logs → $(LOG)"; \
+	  pid=$$(pgrep -f '$(PIDPATTERN)' | head -1); \
+	  echo "shuttle already running (pid $$pid); waiting for :4000"; \
 	else \
-	  echo "shuttle failed to start; check $(LOG)"; exit 1; \
-	fi
+	  echo "=== shuttle start $$(date -u +%Y-%m-%dT%H:%M:%SZ) ===" >> $(LOG); \
+	  nohup bin/shuttle start >> $(LOG) 2>&1 & \
+	  pid=$$!; \
+	fi; \
+	deadline=$$(( $$(date +%s) + 120 )); \
+	while :; do \
+	  if curl -fsS -o /dev/null http://127.0.0.1:4000/api/v1/version 2>/dev/null; then \
+	    echo "shuttle up (pid $$(pgrep -f '$(PIDPATTERN)' | head -1)); answering :4000; logs → $(LOG)"; exit 0; \
+	  fi; \
+	  if ! kill -0 $$pid 2>/dev/null; then \
+	    echo "shuttle failed to start (process $$pid exited during boot); check $(LOG)"; exit 1; \
+	  fi; \
+	  if [ $$(date +%s) -ge $$deadline ]; then \
+	    echo "shuttle failed to start (no :4000 response within 120s); check $(LOG)"; exit 1; \
+	  fi; \
+	  sleep 1; \
+	done
 
 stop:
 	@pid=$$(pgrep -f '$(PIDPATTERN)'); \
