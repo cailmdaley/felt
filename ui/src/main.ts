@@ -27,7 +27,7 @@ const board = new KanbanModal({
   // wired only to satisfy the board's option shape.
   onOpenFiber: () => {},
   // Stash (`+`) / Capture (`✶`) header buttons — providing these callbacks is
-  // what surfaces the buttons. Each opens its React island (slice 2); the
+  // what surfaces the buttons. Each opens its React island; the
   // result lands as a board toast. The board polls, so a new card appears on
   // its own once the daemon writes the fiber / the capture session claims it.
   onStashClick: () => {

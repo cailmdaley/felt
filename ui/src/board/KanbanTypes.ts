@@ -103,11 +103,11 @@ export interface KanbanCard {
   shuttleFiberId?: string
   /**
    * Session UUID of the most recently dispatched worker, IFF the fiber's
-   * frontmatter still carries `shuttle.session.id`. Effectively always absent
-   * now: shuttle retired that frontmatter write (slice 6) — felt history is the
-   * session id's only durable home, resolved by the daemon at dispatch time.
-   * Display-only hint data; must NOT gate Resume (which always tries). Kept
-   * because a stray legacy frontmatter id still enriches the sent-files query.
+   * frontmatter still carries `shuttle.session.id`. Effectively always absent:
+   * continuation state lives in the `shuttle:` block's `session_uuid`, resolved
+   * by the daemon at dispatch time. Display-only hint data; must NOT gate Resume
+   * (which always tries). Kept because a stray legacy frontmatter id still
+   * enriches the sent-files query.
    */
   sessionId?: string
   /**

@@ -168,7 +168,7 @@ export class KanbanModal {
   /** Null = global (default). Set by mount(...{cityScope}); cleared by
    *  unmount(). */
   private cityScope: KanbanCityScope | null = null
-  /** Bug 3: lightweight auto-poll while mounted. 15s default. */
+  /** Lightweight auto-poll while mounted. 15s default. */
   private pollTimer: number | null = null
   private readonly pollIntervalMs = 15_000
   private timelinePastDays = 0
@@ -1331,7 +1331,7 @@ export class KanbanModal {
     await this.fetchAndRender()
   }
 
-  /** Bug 3: lightweight auto-poll while mounted. 15s interval. */
+  /** Lightweight auto-poll while mounted. 15s interval. */
   private startPolling(): void {
     this.stopPolling()
     this.pollTimer = window.setInterval(() => {

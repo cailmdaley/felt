@@ -235,10 +235,6 @@ function dueDay(value: unknown): string | undefined {
   return Number.isFinite(ms) ? isoDayLocal(ms) : undefined;
 }
 
-export function isKanbanHorizon(value: unknown): value is KanbanHorizon {
-  return typeof value === 'string' && HORIZON_SET.has(value);
-}
-
 function normalizeHorizon(value: unknown): KanbanHorizon | undefined {
   if (typeof value !== 'string') return undefined;
   const trimmed = value.trim();
