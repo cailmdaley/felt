@@ -13,7 +13,7 @@ A CLI for the durable trail that builds up around work. Each entry is a *fiber*:
 
 The directory tree gives hierarchy. `[[wikilinks]]` in bodies give narrative cross-references. Native metadata stays small (`name`, `status`, tags, timestamps, `outcome`, `due`, `description`). Any other top-level YAML keys are preserved opaquely so downstream tools can own their own schema without felt claiming it.
 
-A rebuildable SQLite index at `.felt/index.db` caches narrative back-references, reverse data-flow consumers, and search rows, but plain markdown is the source of truth and the cache carries no extra authoring burden.
+Narrative back-references, reverse data-flow consumers, and body search are computed from the markdown tree on demand — there is no derived state on disk. The markdown *is* the store, so it carries no extra authoring burden.
 
 Felt is designed to be persistent memory for AI coding agents as much as for you. The bundled [Claude Code plugin](#agent-integration) and Codex hooks make `.felt/` the substrate agents reach for between sessions.
 
@@ -99,7 +99,7 @@ For backward compatibility, felt also extracts `[tag]` prefixes from the slug ar
 
 ### Relationships
 
-Containment comes from the directory tree. Narrative connections live in `[[wikilinks]]` inside the body. Some projects also use conventions like `inputs.from` to express data flow; when present, felt indexes reverse consumers without treating the rest of that frontmatter as a felt-owned schema.
+Containment comes from the directory tree. Narrative connections live in `[[wikilinks]]` inside the body. Some projects also use conventions like `inputs.from` to express data flow; when present, felt computes reverse consumers without treating the rest of that frontmatter as a felt-owned schema.
 
 ```bash
 felt tree                               # containment hierarchy
@@ -142,10 +142,6 @@ felt show bao/damping-prior --json    # extra top-level keys included in JSON
 
 Fibers are plain markdown in git, so a fiber's chronology is its file's `git log` — there is no separate event log to maintain. The current handoff state lives in the body itself (the `outcome`, and a `## Status` section where a fiber keeps one), travelling with the file across machines and tools.
 
-```bash
-felt index sync                                 # refresh the rebuildable SQLite cache
-```
-
 ### Progressive disclosure
 
 ```bash
@@ -157,7 +153,6 @@ felt show <id> --body             # body + body start line for editing
 felt show <id> --citations        # narrative back-references only
 felt show <id> --consumers        # reverse data-flow consumers only
 felt show <id> --field shuttle    # one raw frontmatter field
-felt index sync                   # explicit SQLite cache refresh
 ```
 
 ## Obsidian
@@ -202,7 +197,7 @@ felt ls [query]                   felt check
 felt shuttle <verb>               # agent dispatch (status, ps, install, …)
 felt tree                         felt nest|unnest <id>
 felt migrate [--dry-run]          felt rm <id>
-felt index sync                   felt session
+felt session
 felt backfill-ids [--dry-run]     # owner-only intrinsic id migration
 felt setup claude|codex|skills    felt update
 ```
@@ -235,7 +230,7 @@ Felt borrows from several projects exploring how to give AI coding agents struct
 
 - **[Zettelkasten](https://en.wikipedia.org/wiki/Zettelkasten)** — Niklas Luhmann's slip-box method, the ancestor of modern linked-note knowledge management. Emergent structure from connections rather than prescribed hierarchy.
 - **[Beads](https://github.com/steveyegge/beads)** — Steve Yegge's graph-based, git-backed issue tracker designed as agent memory. The core conviction — that coding agents need structured persistent memory they can query, not just scratch files — is load-bearing for felt.
-- **[Dots](https://github.com/joelreymont/dots)** — Joel Reymont's minimalist counterpart to Beads. The directory tree as source-of-truth stance runs through felt too — the SQLite cache at `.felt/index.db` is strictly a rebuildable index, not storage.
+- **[Dots](https://github.com/joelreymont/dots)** — Joel Reymont's minimalist counterpart to Beads. The directory tree as source-of-truth stance runs through felt too — the markdown *is* the store, with no derived state on disk.
 - **[Ralph Wiggum](https://github.com/ghuntley/how-to-ralph-wiggum)** — Geoffrey Huntley's autonomous iteration technique: feed the agent the same spec on a loop until the work is done. It shaped how a `shuttle` constitution gets driven — a fresh worker redispatched against the fiber until its desired state holds — rather than any skill felt itself bundles.
 - **[Ouroboros](https://github.com/Q00/ouroboros)** — Q00's specification-first AI coding workflow. The Double Diamond rhythm (Wonder → Ontology, Design → Delivery) in the bundled writing references is adapted from this lineage.
 

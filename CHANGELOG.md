@@ -8,6 +8,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Removed
 
+- The SQLite index cache (`.felt/index.db`) and the `felt index sync`
+  command. felt is now pure markdown: citations, reverse data-flow
+  consumers, and body search are computed from the markdown tree on
+  demand, with no derived state on disk. `felt ls --body` is plain
+  substring (`--body -r` for regex). Any leftover `.felt/index.db` files
+  are inert — the `.felt/.gitignore` still ignores them as a transition
+  guard.
 - `felt history append --edit-window-start` / `--edit-window-end`. The
   flags only ever wrote `edit_window_start` / `edit_window_end` into the
   event payload; nothing read them back (the edit-window pointer is

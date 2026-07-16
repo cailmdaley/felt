@@ -17,8 +17,8 @@ daemon is the production dispatcher.
 ## felt CLI — the data layer
 
 Markdown fiber tracker. Directory-based markdown fibers with YAML frontmatter,
-plain markdown bodies, containment by path, wikilinks for narrative references,
-and a rebuildable SQLite cache at `.felt/index.db`.
+plain markdown bodies, containment by path, and wikilinks for narrative
+references. The markdown tree is the whole store — no derived state on disk.
 
 ### Data model
 
@@ -43,15 +43,12 @@ intrinsic value as `uid`.
 `felt add <slug> "name" -s open` enters tracking; `felt edit <id> -s active`
 enters tracking. `felt ls` only shows tracked fibers.
 
-**Relationships and index.** Containment is the directory tree. `[[wikilinks]]`
+**Relationships.** Containment is the directory tree. `[[wikilinks]]`
 are narrative references. If a project uses `inputs.from` as a data-flow
-convention, felt indexes reverse consumers without claiming the rest of that
-schema. The SQLite cache indexes links, tags, additional YAML field text, and
-FTS5 body text; `felt show` uses it for citations/consumers and `felt ls --body`
-queries the FTS5 index for fast body search (tokenized whole-word matching, not
-raw substring; falls back to a markdown scan when the index is absent/busy, and
-regex `--body -r` always scans). The cache is strictly a rebuildable index —
-plain markdown is the source of truth.
+convention, felt computes reverse consumers without claiming the rest of that
+schema. Citations/consumers (for `felt show`) and body search (`felt ls --body`,
+plain substring; `--body -r` for regex) are all computed from the markdown tree
+on demand. The markdown *is* the store — there is no derived state on disk.
 
 **Editing.** `felt edit` owns native metadata only: name, status, tags, due,
 body, outcome. For non-native frontmatter, read then edit the markdown file
@@ -72,7 +69,7 @@ felt edit <id> [flags]            felt show <id> [-d level]
 felt ls [query]                   felt check
 felt tree                         felt nest|unnest <id>
 felt migrate [--dry-run]          felt rm <id>
-felt index sync                   felt session
+felt session
 felt backfill-ids [--dry-run]     # owner-only intrinsic id migration
 felt setup claude|codex|skills    felt update
 ```
@@ -133,8 +130,7 @@ and the surface; the two are one package, not two that shell to each other.
 **felt history is gone.** The daemon detects clean worker exits via the
 `shuttle.runtime.handed_off_at` frontmatter field — not a felt-history event. The
 editorial chain felt-history used to carry now lives in the constitution body's
-`## Status` block plus the git log of the fiber. (The synced-SQLite index slice —
-treating the index purely as a throwaway cache — is deferred to a follow-on.)
+`## Status` block plus the git log of the fiber.
 
 ### Portolan provenance
 
@@ -711,7 +707,7 @@ felt/
 │   # felt CLI — Go (the data layer)
 ├── main.go  go.mod  go.sum
 ├── cmd/                     cobra commands; `felt shuttle <verb>` = cmd/shuttle*.go
-├── internal/felt/           core felt logic (storage, parsing, graph, index)
+├── internal/felt/           core felt logic (storage, parsing, graph, search)
 ├── internal/shuttle/        shuttle: block schema + agent registry (agents.json)
 ├── claude-plugin/           plugin payload for Claude Code + Codex
 ├── scripts/release.sh       bumps plugin manifests + commits + tags

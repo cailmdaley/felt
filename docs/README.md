@@ -4,7 +4,7 @@ Directory-contained markdown fibers with YAML frontmatter, wikilinks, and opaque
 
 ## Why
 
-Fibers are markdown files. Human-readable, version-controllable, greppable. The markdown tree is the source of truth; felt also keeps a rebuildable SQLite cache at `.felt/index.db` for typed links, citations, reverse data-flow consumers, history lookups, and rebuildable search rows.
+Fibers are markdown files. Human-readable, version-controllable, greppable. The markdown tree is the store — the whole store. Typed links, citations, reverse data-flow consumers, and body search are computed from the tree on demand, with no derived state on disk.
 
 Containment comes from the directory tree, narrative connections come from `[[wikilinks]]` in the body, and projects may use conventions like `inputs.from` when they want data-flow edges. felt preserves non-native frontmatter opaquely instead of owning its schema.
 
@@ -35,7 +35,7 @@ Felt uses three relationship mechanisms:
 - Containment via directory nesting
 - Narrative references via `[[wikilinks]]`
 - Optional data flow via conventions like `inputs.from`
-- Citations, reverse consumers, and body search derived from markdown, with `.felt/index.db` used as a rebuildable cache where appropriate
+- Citations, reverse consumers, and body search computed from the markdown tree on demand — no derived state on disk
 
 ### Status (opt-in)
 
@@ -165,7 +165,6 @@ felt edit <id> --untag <tag>      # remove tag
 
 ```bash
 felt check                        # broken refs/fragments, legacy format residue, layout issues
-felt index sync                   # refresh the rebuildable SQLite cache
 felt migrate --dry-run            # preview legacy storage migration
 ```
 

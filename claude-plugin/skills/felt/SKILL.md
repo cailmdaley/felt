@@ -34,7 +34,7 @@ Understanding crystallized. Accrete:
 Search and read:
     felt ls                                        # tracked (open and active)
     felt ls "query" [-t tag] [-s closed]          # substring over name, outcome, YAML, slug; any filter widens to all statuses
-    felt ls --body "query"                         # adds body search — whole-word (FTS5), NOT substring; use -r --body for partial matches
+    felt ls --body "query"                         # adds body search — plain substring; use -r --body for regex
     felt session                                   # SessionStart context as plain text
     felt tree [<id>]                               # containment hierarchy
     felt show <id>                                 # full
