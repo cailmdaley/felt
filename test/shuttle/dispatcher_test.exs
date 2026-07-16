@@ -426,8 +426,7 @@ defmodule Shuttle.DispatcherTest do
 
     assert Dispatcher.prompt_fiber_id(
              "ai-futures/shuttle/constitution-shuttle-ctl-ux-fixes",
-             work_dir,
-             loom
+             work_dir
            ) == "constitution-shuttle-ctl-ux-fixes"
   end
 
@@ -461,8 +460,7 @@ defmodule Shuttle.DispatcherTest do
 
     assert Dispatcher.prompt_fiber_id(
              "ai-futures/portolan/portolan/constitution-shuttle-portolan-version-sync",
-             work_dir,
-             loom
+             work_dir
            ) == "portolan/constitution-shuttle-portolan-version-sync"
   end
 

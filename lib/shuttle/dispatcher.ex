@@ -408,7 +408,7 @@ defmodule Shuttle.Dispatcher do
   end
 
   @doc false
-  @spec prompt_fiber_id(String.t(), String.t(), String.t(), module()) :: String.t()
+  @spec prompt_fiber_id(String.t(), String.t(), module()) :: String.t()
   # The worker runs `felt show <id>` from inside `work_dir`, whose `.felt`
   # symlinks into a sub-store view of the loom — so the id it sees is
   # project-local (e.g. global `ai-futures/shuttle/X` → local `constitution/X`).
@@ -416,13 +416,13 @@ defmodule Shuttle.Dispatcher do
   # resolves the fiber against the worker's felt view and carries its
   # view-relative `id`. Read it directly rather than reconstructing it from a
   # globbed path. On any felt miss/error fall back to the global `fiber_id`,
-  # preserving the previous safe-fail. `_felt_store` is retained for signature
-  # stability; the worker's view is `work_dir`, not the configured store root.
+  # preserving the previous safe-fail. The worker's view is `work_dir`, not the
+  # configured store root, so no felt_store is needed here.
   # Runs through the injected `runner` — this sits on the Poller's dispatch
   # path (via `create_tmux_session/7`), so a bare System.cmd here was the one
   # unbounded felt call left in it: a wedged felt would block the Poller
   # GenServer. Bounded, a timeout degrades to the global-id fallback.
-  def prompt_fiber_id(fiber_id, work_dir, _felt_store, runner \\ Shuttle.Runner.Default) do
+  def prompt_fiber_id(fiber_id, work_dir, runner \\ Shuttle.Runner.Default) do
     case felt_show_id(work_dir, fiber_id, runner) do
       {:ok, local_id} -> local_id
       :error -> fiber_id
@@ -1054,7 +1054,7 @@ defmodule Shuttle.Dispatcher do
   defp create_tmux_session(fiber_id, agent, work_dir, runner, prompt_context, resume_intent, opts) do
     session = session_name(fiber_id, Keyword.get(opts, :uid))
     felt_store = Keyword.get(opts, :felt_store, default_felt_store())
-    worker_fiber_id = prompt_fiber_id(fiber_id, work_dir, felt_store, runner)
+    worker_fiber_id = prompt_fiber_id(fiber_id, work_dir, runner)
 
     prompt_opts =
       opts

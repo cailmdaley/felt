@@ -19,17 +19,13 @@ defmodule ShuttleTest do
             %{
               fiber_id: "life/email-triage",
               state: "review",
-              run_id: "20260502T090000+0200",
               next_due_at: nil,
-              last_run_at: 1_777_650_600_000,
               validation_errors: []
             },
             %{
               fiber_id: "life/invalid-role",
               state: "scheduled",
-              run_id: nil,
               next_due_at: 1_777_736_400_000,
-              last_run_at: nil,
               validation_errors: ["accepted_run_id must match run_id in accepted review state"]
             }
           ]
@@ -38,8 +34,6 @@ defmodule ShuttleTest do
 
     assert output =~ "Standing roles (2):"
     assert output =~ "life/email-triage — review"
-    assert output =~ "run: 20260502T090000+0200"
-    assert output =~ "last run: 2026-05-01T15:50:00.000Z"
     assert output =~ "life/invalid-role — scheduled"
     assert output =~ "next due: 2026-05-02T15:40:00.000Z"
     assert output =~ "validation: accepted_run_id must match run_id in accepted review state"

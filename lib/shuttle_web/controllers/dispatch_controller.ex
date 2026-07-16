@@ -92,17 +92,16 @@ defmodule ShuttleWeb.DispatchController do
             )
           )
 
-        {:error, {:awaiting_review, run_id, completed_at}} ->
+        {:error, {:awaiting_review, completed_at}} ->
           conn
           |> put_status(422)
           |> json(%{
             dispatched: false,
             reason: "awaiting_review",
             fiber_id: fiber_id,
-            run_id: run_id,
             completed_at: completed_at,
             message:
-              "This role is awaiting review#{review_detail(run_id, completed_at)}. Accept first with `felt shuttle accept #{fiber_id}`, or use `felt shuttle resume #{fiber_id}` to continue the same run."
+              "This role is awaiting review#{review_detail(completed_at)}. Accept first with `felt shuttle accept #{fiber_id}`, or use `felt shuttle resume #{fiber_id}` to continue the same run."
           })
 
         {:error, reopen} when reopen in [:reopen_unavailable, :reopen_failed] ->
@@ -215,17 +214,8 @@ defmodule ShuttleWeb.DispatchController do
   defp describe_host(value) when is_binary(value) and value != "", do: value
   defp describe_host(_), do: "(unset)"
 
-  defp review_detail(run_id, completed_at) do
-    parts =
-      [
-        if(is_binary(run_id) and run_id != "", do: "run #{run_id}"),
-        if(is_binary(completed_at) and completed_at != "", do: "completed #{completed_at}")
-      ]
-      |> Enum.reject(&is_nil/1)
+  defp review_detail(completed_at) when is_binary(completed_at) and completed_at != "",
+    do: " (completed #{completed_at})"
 
-    case parts do
-      [] -> ""
-      _ -> " (" <> Enum.join(parts, ", ") <> ")"
-    end
-  end
+  defp review_detail(_), do: ""
 end

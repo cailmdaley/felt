@@ -42,8 +42,6 @@ defmodule Shuttle.StandingRole do
     # schedule.
     :next_due_at,
     :prev_due,
-    :last_run_at,
-    :run_id,
     validation_errors: []
   ]
 
@@ -54,8 +52,6 @@ defmodule Shuttle.StandingRole do
           schedule: map() | nil,
           next_due_at: DateTime.t() | nil,
           prev_due: DateTime.t() | nil,
-          last_run_at: DateTime.t() | nil,
-          run_id: String.t() | nil,
           validation_errors: [String.t()]
         }
 
@@ -71,9 +67,7 @@ defmodule Shuttle.StandingRole do
       # next_due/prev_due come from felt's resolution; fall back to the legacy
       # flat next_due_at only if felt emitted nothing (pre-Stage-2 documents).
       next_due_at: parse_datetime(resolved["next_due"] || data["next_due_at"]),
-      prev_due: parse_datetime(resolved["prev_due"]),
-      last_run_at: parse_datetime(data["last_run_at"]),
-      run_id: nil
+      prev_due: parse_datetime(resolved["prev_due"])
     }
 
     {:ok, %{role | validation_errors: validation_errors(role)}}
@@ -176,15 +170,6 @@ defmodule Shuttle.StandingRole do
   def valid?(%__MODULE__{validation_errors: []}), do: true
   def valid?(_), do: false
 
-  @spec next_run_id(t(), DateTime.t()) :: String.t()
-  def next_run_id(%__MODULE__{next_due_at: %DateTime{} = next_due_at}, _now) do
-    Calendar.strftime(next_due_at, "%Y%m%dT%H%M%S%z")
-  end
-
-  def next_run_id(%__MODULE__{}, now) do
-    Calendar.strftime(now, "%Y%m%dT%H%M%S%z")
-  end
-
   @doc """
   Run id for a *scheduled* (non-ad-hoc) standing dispatch — a display label for
   the prompt's `Run:` line, minted from felt's next_due (or now).
@@ -194,8 +179,12 @@ defmodule Shuttle.StandingRole do
   from this id. The id is therefore free to be a fresh timestamp every dispatch.
   """
   @spec dispatch_run_id(t(), DateTime.t()) :: String.t()
-  def dispatch_run_id(%__MODULE__{} = role, now) do
-    next_run_id(role, now)
+  def dispatch_run_id(%__MODULE__{next_due_at: %DateTime{} = next_due_at}, _now) do
+    Calendar.strftime(next_due_at, "%Y%m%dT%H%M%S%z")
+  end
+
+  def dispatch_run_id(%__MODULE__{}, now) do
+    Calendar.strftime(now, "%Y%m%dT%H%M%S%z")
   end
 
   @spec ad_hoc_run_id(DateTime.t()) :: String.t()
@@ -212,9 +201,7 @@ defmodule Shuttle.StandingRole do
     %{
       fiber_id: role.fiber_id,
       state: state(role, now, running?),
-      run_id: role.run_id,
       next_due_at: unix_ms(role.next_due_at),
-      last_run_at: unix_ms(role.last_run_at),
       schedule: role.schedule,
       validation_errors: role.validation_errors
     }

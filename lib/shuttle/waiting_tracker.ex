@@ -72,7 +72,6 @@ defmodule Shuttle.WaitingTracker do
 
   @poll_interval_ms 1_000
   @max_age_ms 48 * 60 * 60 * 1_000
-  @shuttle_session_suffix "-shuttle"
 
   defmodule State do
     @moduledoc false
@@ -262,7 +261,7 @@ defmodule Shuttle.WaitingTracker do
     case Jason.decode(line) do
       {:ok, %{"type" => type, "tmuxSession" => session} = ev}
       when is_binary(type) and is_binary(session) and session != "" ->
-        if shuttle_session?(session) do
+        if Shuttle.Dispatcher.shuttle_session?(session) do
           at =
             case Map.get(ev, "timestamp") do
               ts when is_integer(ts) -> ts
@@ -283,8 +282,6 @@ defmodule Shuttle.WaitingTracker do
     cutoff = now - @max_age_ms
     Map.reject(sessions, fn {_s, %{at: at}} -> at < cutoff end)
   end
-
-  defp shuttle_session?(session), do: String.ends_with?(session, @shuttle_session_suffix)
 
   defp now_ms(%State{clock: clock}) when is_function(clock, 0), do: clock.()
   defp now_ms(%State{}), do: default_clock()

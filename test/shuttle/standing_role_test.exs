@@ -107,23 +107,18 @@ defmodule Shuttle.StandingRoleTest do
   describe "dispatch_run_id — a fresh display label every dispatch" do
     @resume_now ~U[2026-06-05 16:04:19Z]
 
-    test "agrees with next_run_id — the id is no longer load-bearing for resume continuity" do
+    test "mints the label from felt's next_due — not load-bearing for resume continuity" do
       # Continuation is decided from the per-host dispatch/handoff markers, not
-      # parsed from this id. The id is a fresh label every dispatch.
-      role = role()
-
-      assert StandingRole.dispatch_run_id(role, @resume_now) ==
-               StandingRole.next_run_id(role, @resume_now)
+      # parsed from this id. The id is felt's next_due formatted for display.
+      # role()'s next_due is @now + 30s = 2026-06-02 10:01:00Z.
+      assert StandingRole.dispatch_run_id(role(), @resume_now) == "20260602T100100+0000"
     end
 
     test "a stray review.run_id in the block does not pin the id" do
       with_stray_review =
         role(-30, 30, %{"review" => %{"state" => "scheduled", "run_id" => "20260605T070000+0000"}})
 
-      refute StandingRole.dispatch_run_id(with_stray_review, @resume_now) == "20260605T070000+0000"
-
-      assert StandingRole.dispatch_run_id(with_stray_review, @resume_now) ==
-               StandingRole.next_run_id(with_stray_review, @resume_now)
+      assert StandingRole.dispatch_run_id(with_stray_review, @resume_now) == "20260602T100100+0000"
     end
   end
 end

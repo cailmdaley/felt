@@ -206,9 +206,7 @@ defmodule Shuttle.CLI do
 
     Enum.each(roles, fn role ->
       IO.puts("  • #{role.fiber_id} — #{role.state}")
-      print_optional("run", role.run_id)
       print_optional("next due", format_unix_ms(role.next_due_at))
-      print_optional("last run", format_unix_ms(role.last_run_at))
 
       if role.validation_errors != [] do
         IO.puts("    validation: #{Enum.join(role.validation_errors, "; ")}")
