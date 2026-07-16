@@ -153,19 +153,8 @@ defmodule Shuttle.Poller.Snapshot do
         }
       end)
 
-    reservations =
-      Enum.map(state.reservations, fn {{resource, host}, res} ->
-        %{
-          resource: resource,
-          host: host,
-          fiber_id: res.fiber_id,
-          expires_in_ms: max(0, res.expires_at_ms - System.monotonic_time(:millisecond))
-        }
-      end)
-
     Map.merge(snap, %{
       running_detail: running_detail,
-      reservations: reservations,
       # No waiters: the Channel transport (the only producer) was removed; the
       # key stays for payload-shape stability and is always empty.
       waiters: []

@@ -33,7 +33,6 @@ defmodule ShuttleWeb.Router do
     # Deliberately NOT owner-routed: the terminal opens on the host serving the
     # UI (where the human is), ssh-ing out for a remote worker. See Shuttle.Kitty.
     post("/attach", AttachController, :create)
-    post("/reserve", ReserveController, :create)
     get("/state", StateController, :show)
     get("/state/composite", StateController, :composite)
     get("/fibers", FiberDocumentsController, :index)
@@ -55,7 +54,6 @@ defmodule ShuttleWeb.Router do
     get("/astra", AstraController, :show)
     get("/felt-stores", FeltStoresController, :show)
     post("/felt-stores", FeltStoresController, :create)
-    post("/cache/bust", CacheBustController, :create)
     # Pure-manual release of the boot quarantine: a restarted daemon parks
     # fresh autonomous launches (restart is not dispatch authority) until a
     # human posts here; dirty-death resumes were never withheld.

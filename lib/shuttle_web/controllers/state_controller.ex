@@ -3,7 +3,7 @@ defmodule ShuttleWeb.StateController do
   Agent-API endpoints for orchestrator state.
 
   * `GET /api/v1/state` — full local state (running workers, retry
-    queue, reservations, waiters).
+    queue, waiters).
 
   * `GET /api/v1/state/composite` — local state plus per-origin remote
     snapshots, for the laptop's cross-host kanban view. See
@@ -31,7 +31,6 @@ defmodule ShuttleWeb.StateController do
           retrying: [],
           running: [],
           running_detail: [],
-          reservations: [],
           waiters: []
         })
     end

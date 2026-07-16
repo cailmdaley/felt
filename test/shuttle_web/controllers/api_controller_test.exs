@@ -1006,73 +1006,6 @@ defmodule ShuttleWeb.APIControllerTest do
     assert StubPostClient.last() == nil
   end
 
-  # ── POST /api/v1/reserve ──
-
-  test "reserve succeeds for available resource" do
-    conn =
-      post(
-        api_conn(),
-        "/api/v1/reserve",
-        Jason.encode!(%{
-          "resource" => "gpu",
-          "host" => "candide",
-          "duration_ms" => 3_600_000,
-          "fiber_id" => "tests/reserve-gpu"
-        })
-      )
-
-    assert conn.status == 200
-    body = Jason.decode!(conn.resp_body)
-    assert body["reserved"] == true
-    assert body["resource"] == "gpu"
-    assert body["fiber_id"] == "tests/reserve-gpu"
-  end
-
-  test "reserve returns 409 for already reserved resource" do
-    post(
-      api_conn(),
-      "/api/v1/reserve",
-      Jason.encode!(%{
-        "resource" => "gpu",
-        "host" => "candide",
-        "duration_ms" => 3_600_000,
-        "fiber_id" => "tests/reserve-gpu-first"
-      })
-    )
-
-    conn =
-      post(
-        api_conn(),
-        "/api/v1/reserve",
-        Jason.encode!(%{
-          "resource" => "gpu",
-          "host" => "candide",
-          "duration_ms" => 3_600_000,
-          "fiber_id" => "tests/reserve-gpu-second"
-        })
-      )
-
-    assert conn.status == 409
-    body = Jason.decode!(conn.resp_body)
-    assert body["reserved"] == false
-    assert body["reason"] =~ "already reserved"
-  end
-
-  test "reserve returns 400 without resource or fiber_id" do
-    conn =
-      post(
-        api_conn(),
-        "/api/v1/reserve",
-        Jason.encode!(%{
-          "fiber_id" => "tests/missing-resource"
-        })
-      )
-
-    assert conn.status == 400
-    body = Jason.decode!(conn.resp_body)
-    assert body["error"] == "resource and fiber_id are required"
-  end
-
   # ── GET /api/v1/state ──
 
   test "state returns full orchestrator state" do
@@ -1108,7 +1041,6 @@ defmodule ShuttleWeb.APIControllerTest do
              }
            ] = body["eligible"]
 
-    assert is_list(body["reservations"])
     assert is_list(body["waiters"])
   end
 

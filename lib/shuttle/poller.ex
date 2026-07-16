@@ -22,8 +22,7 @@ defmodule Shuttle.Poller do
   Each fiber resolves to exactly one host: the first configured host whose
   `.felt/` directory contains the fiber file. The resolution is cached in
   `State.fiber_host_cache` for the daemon's lifetime. Call
-  `bust_fiber_host_cache/1` or `POST /api/v1/cache/bust` to evict an entry
-  when a fiber moves between hosts.
+  `bust_fiber_host_cache/1` to evict an entry when a fiber moves between hosts.
   """
 
   use GenServer
@@ -114,7 +113,6 @@ defmodule Shuttle.Poller do
       # Re-keyed off slug in the identity cutover so it shares `running`'s key:
       # the only slug consumer left is felt I/O.
       claimed: MapSet.new(),
-      reservations: %{},
       standing_roles: [],
       orphans: [],
       # %{fiber_id => felt_store} — populated by discover_candidates/1 on each
@@ -457,22 +455,6 @@ defmodule Shuttle.Poller do
       {:lifecycle_transition, verb, fiber_id, opts},
       @dispatch_call_timeout_ms
     )
-  end
-
-  @spec reserve_resource(String.t(), String.t(), non_neg_integer(), String.t()) ::
-          {:ok, atom()} | {:error, String.t()}
-  def reserve_resource(resource, host, duration_ms, fiber_id),
-    do: reserve_resource(__MODULE__, resource, host, duration_ms, fiber_id)
-
-  @spec reserve_resource(
-          GenServer.server(),
-          String.t(),
-          String.t(),
-          non_neg_integer(),
-          String.t()
-        ) :: {:ok, atom()} | {:error, String.t()}
-  def reserve_resource(server, resource, host, duration_ms, fiber_id) do
-    GenServer.call(server, {:reserve, resource, host, duration_ms, fiber_id})
   end
 
   @spec orchestrator_state() :: map()
@@ -907,26 +889,7 @@ defmodule Shuttle.Poller do
     {:reply, result, state}
   end
 
-  def handle_call({:reserve, resource, host, duration_ms, fiber_id}, _from, state) do
-    key = {resource, host}
-    state = clean_expired_reservations(state)
-    now_ms = System.monotonic_time(:millisecond)
-
-    case Map.get(state.reservations, key) do
-      nil ->
-        expires_at = now_ms + duration_ms
-        reservation = %{fiber_id: fiber_id, expires_at_ms: expires_at}
-
-        {:reply, {:ok, :reserved},
-         %{state | reservations: Map.put(state.reservations, key, reservation)}}
-
-      existing ->
-        {:reply, {:error, "already reserved by #{existing.fiber_id}"}, state}
-    end
-  end
-
   def handle_call(:orchestrator_state, _from, state) do
-    state = clean_expired_reservations(state)
     {:reply, Snapshot.build_full_state(state), state}
   end
 
@@ -1927,7 +1890,7 @@ defmodule Shuttle.Poller do
 
   This is THE one host-identity resolver. Every surface that stamps or
   matches `shuttle.host` — the dispatch filter, the `/api/v1/fibers` owned
-  feed, the CLI's `host:` stamp on new fibers, the state/reserve/snapshot
+  feed, the CLI's `host:` stamp on new fibers, the state/snapshot
   endpoints — goes through here, so a daemon's advertised identity is
   single-valued by construction. Do not re-derive `:inet.gethostname()`
   anywhere else; that drift is exactly how candide came to own by `c03`
@@ -2534,7 +2497,6 @@ defmodule Shuttle.Poller do
     state = reconcile_fiber_closures(state)
     state = reconcile_missing_running_sessions(state)
     state = SessionReconciliation.reconcile_orphaned_sessions(state)
-    state = clean_expired_reservations(state)
     state
   end
 
@@ -3015,12 +2977,6 @@ defmodule Shuttle.Poller do
       {:error, reason} ->
         {:error, reason}
     end
-  end
-
-  defp clean_expired_reservations(%State{} = state) do
-    now_ms = System.monotonic_time(:millisecond)
-    remaining = Enum.filter(state.reservations, fn {_key, res} -> res.expires_at_ms > now_ms end)
-    %{state | reservations: Map.new(remaining)}
   end
 
   defp stop_watcher(meta) do
