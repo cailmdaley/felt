@@ -1,7 +1,9 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
+	"os"
 	"path"
 	"regexp"
 	"sort"
@@ -428,7 +430,49 @@ func matchesQuery(f *felt.Felt, queryLower string, re *regexp.Regexp, useRegex b
 		strings.Contains(strings.ToLower(f.SearchText()), queryLower)
 }
 
+// appendBodyMatches folds candidates whose body matches the query into filtered.
+// Non-regex queries go through the synced FTS5 index (fiber_fts) — the per-sync
+// body index is what makes this fast — falling back to a markdown scan only when
+// the index is absent or busy. Regex queries always scan markdown: FTS5 has no
+// regex operator. Note the FTS path matches on tokenized terms, not raw
+// substrings, so a query behaves like a whole-word (prefix-free) match.
 func appendBodyMatches(storage *felt.Storage, filtered, candidates []*felt.Felt, useRegex bool, re *regexp.Regexp, queryLower string) ([]*felt.Felt, error) {
+	if useRegex {
+		return scanBodyMatches(storage, filtered, candidates, re, queryLower, true)
+	}
+
+	idx, err := storage.OpenIndexReadOnly()
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return scanBodyMatches(storage, filtered, candidates, re, queryLower, false)
+		}
+		if errors.Is(err, felt.ErrIndexBusy) {
+			fmt.Fprintf(os.Stderr, "warning: index busy — scanning markdown for body matches\n")
+			return scanBodyMatches(storage, filtered, candidates, re, queryLower, false)
+		}
+		return nil, err
+	}
+	defer idx.Close()
+
+	ids, err := idx.SearchBodyIDs(queryLower)
+	if err != nil {
+		return nil, err
+	}
+	matched := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		matched[id] = true
+	}
+	for _, f := range candidates {
+		if matched[f.ID] {
+			filtered = append(filtered, f)
+		}
+	}
+	return filtered, nil
+}
+
+// scanBodyMatches is the markdown-scan fallback: it hydrates each candidate's
+// body and matches by regex or lowercased substring.
+func scanBodyMatches(storage *felt.Storage, filtered, candidates []*felt.Felt, re *regexp.Regexp, queryLower string, useRegex bool) ([]*felt.Felt, error) {
 	fullCandidates, err := hydrateBodies(storage, candidates)
 	if err != nil {
 		return nil, err
@@ -617,23 +661,6 @@ func printContainmentNode(node *ContainmentNode, prefix string, last bool, depth
 	for i, child := range node.Children {
 		printContainmentNode(child, childPrefix, i == len(node.Children)-1, depth+1)
 	}
-}
-
-// validateContainment checks for orphaned nested fibers (parent doesn't exist).
-func validateContainment(felts []*felt.Felt) []string {
-	ids := make(map[string]bool, len(felts))
-	for _, f := range felts {
-		ids[f.ID] = true
-	}
-
-	var errors []string
-	for _, f := range felts {
-		parent := parentPath(f.ID)
-		if parent != "" && !ids[parent] {
-			errors = append(errors, fmt.Sprintf("%s nested under non-existent %s", f.ID, parent))
-		}
-	}
-	return errors
 }
 
 func init() {
