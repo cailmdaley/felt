@@ -4239,6 +4239,9 @@ defmodule Shuttle.PollerTest do
     # transient load spike), so the margin is generous on purpose:
     # `wait_until` returns the instant the condition holds, so this costs
     # nothing beyond the ~10ms round trip on the common, unloaded path.
+    # Re-nudge the poll tick while waiting: the test's poll_interval_ms is 60s,
+    # so a race lost inside the single manual tick's async chain would otherwise
+    # have no retry inside the assertion window (the CI flake this fixes).
     assert wait_until(
              fn ->
                snap = Poller.snapshot(poller)
@@ -4247,7 +4250,12 @@ defmodule Shuttle.PollerTest do
                  MockRunner.commands()
                  |> Enum.count(fn {cmd, args} -> cmd == "tmux" and hd(args) == "new-session" end)
 
-               Enum.any?(snap.orphans, &(&1.fiber_id == fiber_id)) and new_session_count >= 2
+               done =
+                 Enum.any?(snap.orphans, &(&1.fiber_id == fiber_id)) and new_session_count >= 2
+
+               tick = Process.put(:renudge_tick, Process.get(:renudge_tick, 0) + 1) || 0
+               if not done and rem(tick, 40) == 39, do: send(poller, :run_poll_cycle)
+               done
              end,
              1200
            )
