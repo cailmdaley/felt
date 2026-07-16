@@ -19,7 +19,8 @@ Current checks cover:
   - legacy depends-on frontmatter keys
   - legacy MyST body anchors
   - slug collisions between bare and nested fiber forms
-  - multiple bare .md files at .felt/ root`,
+  - multiple bare .md files at .felt/ root
+  - orphaned pins: fibers claiming a pinned role with no shuttle: block (warning)`,
 	Args:         cobra.NoArgs,
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {

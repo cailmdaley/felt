@@ -254,3 +254,28 @@ func TestCheckStructureCleanRepo(t *testing.T) {
 		t.Fatalf("issues = %+v, want none", issues)
 	}
 }
+
+func TestCheckPinnedOrphan_Tag(t *testing.T) {
+	issues := Check([]*Felt{{ID: "orphan", Name: "Orphan", Tags: []string{"pinned-role"}}})
+	if len(issues) != 1 || issues[0].Level != CheckLevelWarning {
+		t.Fatalf("want 1 warning, got %+v", issues)
+	}
+	if !strings.Contains(issues[0].Message, "orphaned pin") {
+		t.Fatalf("message = %q", issues[0].Message)
+	}
+}
+
+func TestCheckPinnedOrphan_BodyClaim(t *testing.T) {
+	issues := Check([]*Felt{{ID: "orphan", Name: "Orphan", Body: "This is a pinned role that rests on the strip."}})
+	if len(issues) != 1 || issues[0].Level != CheckLevelWarning {
+		t.Fatalf("want 1 warning, got %+v", issues)
+	}
+}
+
+func TestCheckPinnedOrphan_SilentWithBlock(t *testing.T) {
+	f := &Felt{ID: "role", Name: "Role", Tags: []string{"pinned-role"}}
+	mustExtra(t, f, "shuttle", map[string]any{"kind": "pinned", "host": "h", "project_dir": "/tmp"})
+	if issues := Check([]*Felt{f}); len(issues) != 0 {
+		t.Fatalf("a pinned fiber WITH a block should not warn, got %+v", issues)
+	}
+}

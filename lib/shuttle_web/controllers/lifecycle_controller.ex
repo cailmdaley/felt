@@ -11,10 +11,12 @@ defmodule ShuttleWeb.LifecycleController do
   install/pause/resume/repeat/pin/accept/set-model/set-outcome/uninstall.
 
   `pin` reshapes a fiber to the schedule-less `kind: pinned` umbrella role
-  (the board's drag-onto-the-Pinned-strip gesture). Like a kind reshape, the
-  caller composes `uninstall` then `pin` client-side — `felt shuttle pin`
-  refuses to clobber an existing block — echoing the fiber's model / host /
-  project_dir so the block survives the round trip.
+  (the board's drag-onto-the-Pinned-strip gesture). Reshaping an existing block
+  is ONE atomic call: `install`/`repeat`/`pin` with `reshape: true` clobber the
+  block in place with a single guarded write (omitted model/host/project_dir
+  echo from the old block). This replaces the old client-side `uninstall` +
+  re-install composition, which could strand a de-pinned fiber if the second
+  write failed. `uninstall` remains for genuine removals.
   """
 
   use Phoenix.Controller, formats: [:json]
@@ -124,6 +126,7 @@ defmodule ShuttleWeb.LifecycleController do
     args = add_string_flag(args, "--model", params["model"])
     args = add_string_flag(args, "--project-dir", params["project_dir"])
     args = add_bool_flag(args, "--disabled", params["disabled"])
+    args = add_bool_flag(args, "--reshape", params["reshape"])
     {:ok, args}
   end
 
@@ -138,14 +141,16 @@ defmodule ShuttleWeb.LifecycleController do
      ["pin", fiber]
      |> add_string_flag("--model", params["model"])
      |> add_string_flag("--project-dir", params["project_dir"])
-     |> add_string_flag("--host", params["host"])}
+     |> add_string_flag("--host", params["host"])
+     |> add_bool_flag("--reshape", params["reshape"])}
   end
 
   defp args_for("repeat", %{"fiber" => fiber, "schedule" => schedule} = params) do
     {:ok,
      ["repeat", fiber, "--schedule", schedule, "--tz", Map.get(params, "tz", "UTC")]
      |> add_string_flag("--model", params["model"])
-     |> add_string_flag("--project-dir", params["project_dir"])}
+     |> add_string_flag("--project-dir", params["project_dir"])
+     |> add_bool_flag("--reshape", params["reshape"])}
   end
 
   defp args_for("accept", %{"fiber" => fiber} = params) do

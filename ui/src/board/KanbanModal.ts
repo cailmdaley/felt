@@ -804,37 +804,28 @@ export class KanbanModal {
   }
 
   /**
-   * Network half of {@link pinRole}: uninstall the existing block (pin refuses
-   * to clobber), then pin with the fiber's model/host/project_dir echoed so the
-   * reshaped block stays owned and dispatchable. Mirrors the FiberDetailModal
-   * kind-reshape composition; reconciles via the trailing refetch.
+   * Network half of {@link pinRole}: a SINGLE atomic `pin --reshape` — the
+   * daemon's Go verb clobbers any existing block in one guarded write, settling
+   * status to open (parked on the strip) and echoing the fiber's model / host /
+   * project_dir from the old block when a hint is absent. Replaces the old
+   * uninstall + pin composition, whose second-write failure could strand a
+   * de-pinned fiber. A running card is killed first (a kill writes no status,
+   * so the reshape still settles cleanly); a closed source revives straight to
+   * the strip, since the reshape settles closed → open itself.
+   *
+   * `project_dir` is a hint only: when it can't resolve here (undefined),
+   * `postLifecycle` drops it and the daemon echoes the old block's value, so a
+   * remote card with no city fallback no longer strands — it reshapes in place.
+   * Reconciles via the trailing refetch.
    */
   private async commitPin(card: KanbanCard): Promise<void> {
     try {
-      // A running card is stopped before the reshape — `pin` refuses a closed
-      // fiber, but a kill writes no status, so the resting role pins cleanly and
-      // comes to rest on the strip immediately.
       await this.killWorkerIfRunning(card)
-      // `pin` refuses a status:closed fiber, so a closed source (awaiting-review
-      // or a tempered past run) is reopened as a draft first — status:open,
-      // verdict cleared — exactly the park-as-draft the stash drop composes.
-      // pin then sees status:open and brings the role to rest at active. (A
-      // bare reopen → active would auto-dispatch before the reshape lands.)
-      if (card.status === 'closed') {
-        const reopenRes = await fetch(this.transitionUrl(), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ fiber_id: card.id, target: 'drafts', origin: card.originId }),
-        })
-        if (!reopenRes.ok) {
-          throw new Error(await errorMessageFromResponse(reopenRes, 'Reopen-as-draft failed'))
-        }
-      }
       // The /lifecycle endpoint keys on `fiber` (not `fiber_id`, which
       // /dispatch and /felt-edit use) — matching FiberDetailModal's reshape.
-      await this.postLifecycle({ action: 'uninstall', fiber: card.id, origin: card.originId })
       await this.postLifecycle({
         action: 'pin',
+        reshape: true,
         fiber: card.id,
         origin: card.originId,
         model: card.shuttleAgent,

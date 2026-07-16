@@ -27,17 +27,63 @@ var (
 	installProjectDir string
 	installHost       string
 	installDisabled   bool
+	installReshape    bool
 
 	repeatSchedule   string
 	repeatTZ         string
 	repeatModel      string
 	repeatProjectDir string
 	repeatHost       string
+	repeatReshape    bool
 
 	pinModel      string
 	pinProjectDir string
 	pinHost       string
+	pinReshape    bool
 )
+
+// echoStr returns override when non-empty, else the fallback echoed from an
+// existing block. The reshape verbs use it so an omitted --model/--host/
+// --project-dir inherits the value already on the block being clobbered — the
+// caller need not re-supply what it isn't changing.
+func echoStr(override, fallback string) string {
+	if strings.TrimSpace(override) != "" {
+		return override
+	}
+	return fallback
+}
+
+// reshapeProjectDir resolves the project_dir for a reshape: the explicit flag
+// (validated) when given, else the existing block's project_dir echoed
+// through, else the required-flag error. Echoing the existing value BEFORE any
+// write is what makes a reshape atomic — a fiber whose project_dir can't be
+// resolved fails here, with the old block still intact on disk.
+// blockHost / blockAgent read a field off an existing block only when one is
+// present (ok), returning "" otherwise — so the echo helpers see a fresh
+// install as "no fallback."
+func blockHost(b *shuttle.Block, ok bool) string {
+	if ok {
+		return b.Host
+	}
+	return ""
+}
+
+func blockAgent(b *shuttle.Block, ok bool) string {
+	if ok {
+		return b.Agent
+	}
+	return ""
+}
+
+func reshapeProjectDir(flag, existing string) (string, error) {
+	if strings.TrimSpace(flag) != "" {
+		return resolveProjectDirFlag(flag)
+	}
+	if strings.TrimSpace(existing) != "" {
+		return existing, nil
+	}
+	return "", fmt.Errorf("--project-dir is required (the block being reshaped has none to echo)")
+}
 
 // printShuttleValidationErrors renders a constructed block's validation failures
 // CLI-style and returns a terminal error, matching shuttle-ctl's output. Writes
@@ -79,36 +125,63 @@ flag points at the right mutation verb (pause / resume / set-model / uninstall).
 		if err != nil {
 			return err
 		}
+		f, unlock, err := lockAndReloadFiber(st, f)
+		if err != nil {
+			return err
+		}
+		defer unlock()
 
-		// If a block already exists, treat install as idempotent state reporting +
-		// conflict detection (read-only, no write). A malformed-but-mapping block
-		// surfaces its decode error cleanly rather than nil-dereferencing.
+		// If a block already exists, install is either read-only state reporting +
+		// conflict detection (the default) or, with --reshape, an atomic in-place
+		// clobber to oneshot. A malformed-but-mapping block surfaces its decode
+		// error cleanly rather than nil-dereferencing.
 		existing, ok, err := f.ShuttleBlock()
 		if err != nil {
 			return err
 		}
-		if ok {
+		if ok && !installReshape {
 			return reportExistingBlock(cmd, args[0], f, existing, installModel, installDisabled, installProjectDir, installHost)
 		}
+		if ok {
+			if err := ensureOwnedHere(f, args[0]); err != nil {
+				return err
+			}
+		}
 
-		host, err := resolveOwnHost(installHost)
+		host, err := resolveOwnHost(echoStr(installHost, blockHost(existing, ok)))
 		if err != nil {
 			return err
 		}
 
 		block := &shuttle.Block{Kind: "oneshot", Host: host}
-		if installModel != "" {
-			block.Agent = installModel
+		if agent := echoStr(installModel, blockAgent(existing, ok)); agent != "" {
+			block.Agent = agent
 		}
-		if !installDisabled {
-			projectDir, err := resolveProjectDirFlag(installProjectDir)
-			if err != nil {
-				return err
+		// On a reshape, preserve the existing project_dir even when --disabled
+		// (dropping it would strand a later resume with no cwd) — echo it whenever
+		// the flag is omitted. All resolution happens before the single write, so
+		// a fiber that can't resolve one fails with its old block still intact.
+		if ok {
+			// reshape: echo existing project_dir when the flag is omitted. Tolerate
+			// an empty result on a disabled draft (drafts don't require a cwd).
+			if strings.TrimSpace(installProjectDir) != "" || existing.ProjectDir != "" {
+				projectDir, perr := reshapeProjectDir(installProjectDir, existing.ProjectDir)
+				if perr != nil {
+					return perr
+				}
+				block.ProjectDir = projectDir
+			} else if !installDisabled {
+				return fmt.Errorf("--project-dir is required (the block being reshaped has none to echo)")
+			}
+		} else if !installDisabled {
+			projectDir, perr := resolveProjectDirFlag(installProjectDir)
+			if perr != nil {
+				return perr
 			}
 			block.ProjectDir = projectDir
-			if strings.TrimSpace(block.Host) == "" {
-				return fmt.Errorf("armed install requires a host (the owning daemon's host id; pass --host or run on the owning machine)")
-			}
+		}
+		if !installDisabled && strings.TrimSpace(block.Host) == "" {
+			return fmt.Errorf("armed install requires a host (the owning daemon's host id; pass --host or run on the owning machine)")
 		}
 
 		if errs := shuttle.Validate(block, reg); len(errs) > 0 {
@@ -296,6 +369,11 @@ The running daemon picks it up on its next poll.`,
 		if err != nil {
 			return err
 		}
+		f, unlock, err := lockAndReloadFiber(st, f)
+		if err != nil {
+			return err
+		}
+		defer unlock()
 		// Capture any existing block up front (a malformed-but-mapping block
 		// surfaces its decode error cleanly rather than nil-dereferencing).
 		existing, hasBlock, err := f.ShuttleBlock()
@@ -308,11 +386,24 @@ The running daemon picks it up on its next poll.`,
 		if err := ensureOwnedHere(f, args[0]); err != nil {
 			return err
 		}
-		projectDir, err := resolveProjectDirFlag(repeatProjectDir)
+		// On a --reshape over an existing block, echo project_dir / host from it
+		// when the flags are omitted, so a kind reshape need not re-supply what it
+		// isn't changing. All resolution happens before the single write below, so
+		// a reshape that can't resolve a field fails with the old block intact.
+		var projectDir string
+		if repeatReshape && hasBlock {
+			projectDir, err = reshapeProjectDir(repeatProjectDir, existing.ProjectDir)
+		} else {
+			projectDir, err = resolveProjectDirFlag(repeatProjectDir)
+		}
 		if err != nil {
 			return err
 		}
-		host, err := resolveOwnHost(repeatHost)
+		hostFlag := repeatHost
+		if repeatReshape && hasBlock {
+			hostFlag = echoStr(repeatHost, existing.Host)
+		}
+		host, err := resolveOwnHost(hostFlag)
 		if err != nil {
 			return err
 		}
@@ -406,27 +497,47 @@ strip. Perennial: you park it, you don't delete it.`,
 		if err != nil {
 			return err
 		}
+		f, unlock, err := lockAndReloadFiber(st, f)
+		if err != nil {
+			return err
+		}
+		defer unlock()
 
 		existing, ok, err := f.ShuttleBlock()
 		if err != nil {
 			return err
 		}
+		if ok && !pinReshape {
+			return fmt.Errorf("fiber %s already has a shuttle: block (kind=%s); uninstall it first to re-pin, or pass --reshape to clobber it in place", args[0], existing.Kind)
+		}
 		if ok {
-			return fmt.Errorf("fiber %s already has a shuttle: block (kind=%s); uninstall it first to re-pin", args[0], existing.Kind)
+			// A reshape rewrites an existing block, so it must pass the ownership
+			// guard — never mirror-write a fiber another daemon owns.
+			if err := ensureOwnedHere(f, args[0]); err != nil {
+				return err
+			}
 		}
 
-		host, err := resolveOwnHost(pinHost)
+		host, err := resolveOwnHost(echoStr(pinHost, blockHost(existing, ok)))
 		if err != nil {
 			return err
 		}
-		projectDir, err := resolveProjectDirFlag(pinProjectDir)
+		// Echo the existing project_dir when --project-dir is omitted on a reshape;
+		// resolved before the single write, so a reshape that can't resolve one
+		// fails with the old pinned block still intact.
+		var projectDir string
+		if ok {
+			projectDir, err = reshapeProjectDir(pinProjectDir, existing.ProjectDir)
+		} else {
+			projectDir, err = resolveProjectDirFlag(pinProjectDir)
+		}
 		if err != nil {
 			return err
 		}
 
 		block := &shuttle.Block{Kind: "pinned", Host: host, ProjectDir: projectDir}
-		if pinModel != "" {
-			block.Agent = pinModel
+		if agent := echoStr(pinModel, blockAgent(existing, ok)); agent != "" {
+			block.Agent = agent
 		}
 		if strings.TrimSpace(block.Host) == "" {
 			return fmt.Errorf("pinned role requires a host (the owning daemon's host id; pass --host or run on the owning machine)")
@@ -477,17 +588,20 @@ func registerShuttleCreateFlags() {
 	installCmd.Flags().StringVar(&installProjectDir, "project-dir", "", "Worker cwd on the target host (required unless --disabled)")
 	installCmd.Flags().StringVar(&installHost, "host", "", "Owning daemon's host id (default: local daemon's own_host_id; set for cross-host install)")
 	installCmd.Flags().BoolVar(&installDisabled, "disabled", false, "Install as a draft (status: open); use 'felt shuttle resume' to arm it")
+	installCmd.Flags().BoolVar(&installReshape, "reshape", false, "Atomically clobber an existing shuttle: block in place (single guarded write; omitted model/host/project-dir echo from the old block)")
 
 	repeatCmd.Flags().StringVarP(&repeatSchedule, "schedule", "s", "", "Cron expression (5-field standard syntax) — required")
 	repeatCmd.Flags().StringVarP(&repeatTZ, "tz", "z", "UTC", "IANA timezone name (default: UTC)")
 	repeatCmd.Flags().StringVarP(&repeatModel, "model", "m", "", "Agent ID (default: registry default)")
 	repeatCmd.Flags().StringVar(&repeatProjectDir, "project-dir", "", "Worker cwd on the target host (required)")
 	repeatCmd.Flags().StringVar(&repeatHost, "host", "", "Owning daemon's host id (default: local daemon's own_host_id; set for cross-host install)")
+	repeatCmd.Flags().BoolVar(&repeatReshape, "reshape", false, "Atomically clobber an existing shuttle: block in place (single guarded write; omitted model/host/project-dir echo from the old block)")
 	_ = repeatCmd.MarkFlagRequired("schedule")
 
 	pinCmd.Flags().StringVarP(&pinModel, "model", "m", "", "Agent ID (default: registry default)")
 	pinCmd.Flags().StringVar(&pinProjectDir, "project-dir", "", "Worker cwd on the target host (required)")
 	pinCmd.Flags().StringVar(&pinHost, "host", "", "Owning daemon's host id (default: local daemon's own_host_id; set for cross-host install)")
+	pinCmd.Flags().BoolVar(&pinReshape, "reshape", false, "Atomically clobber an existing shuttle: block in place (single guarded write; omitted model/host/project-dir echo from the old block)")
 }
 
 func init() {

@@ -23,8 +23,6 @@ defmodule Shuttle.Kitty do
   `$KITTY_LISTEN_ON` when the daemon *was* launched inside kitty).
   """
 
-  require Logger
-
   @kitty_candidates [
     "/opt/homebrew/bin/kitty",
     "/usr/local/bin/kitty",

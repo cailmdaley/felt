@@ -812,7 +812,6 @@ defmodule Shuttle.Poller do
     {runtime_key, fiber_id} = resolve_identity(state, fiber_id)
     state = reconcile_running_fiber(state, fiber_id)
     uid = running_uid(state, fiber_id) || if(Shuttle.ULID.valid?(runtime_key), do: runtime_key)
-    session = Dispatcher.session_name(fiber_id, uid)
 
     # "New session" on an OPEN session is a CUT, not a refusal: a forced fresh
     # dispatch (force + resume_mode:"fresh" — the kanban New-session button and
@@ -845,7 +844,7 @@ defmodule Shuttle.Poller do
 
               dispatch_eligible?(fiber, state, opts) ->
                 {new_state, result} = do_dispatch_fiber(state, fiber, opts)
-                {:reply, result || {:ok, session}, new_state}
+                {:reply, result, new_state}
 
               true ->
                 {:reply, {:error, dispatch_ineligible_reason(fiber, state, opts)}, state}

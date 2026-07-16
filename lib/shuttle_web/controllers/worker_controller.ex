@@ -26,8 +26,6 @@ defmodule ShuttleWeb.WorkerController do
     end
   end
 
-  defp runtime(nil), do: 0
-
   defp runtime(%DateTime{} = started_at) do
     max(0, DateTime.diff(DateTime.utc_now(), started_at, :second))
   end

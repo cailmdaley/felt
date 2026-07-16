@@ -727,11 +727,16 @@ func (s *Storage) listWithModeHavingFrontmatterFields(mode ParseMode, includeMod
 	}
 
 	var felts []*Felt
+	evicted := 0 // iCloud-dataless files that couldn't be materialized during the walk
 	for _, file := range files {
 		if len(fields) > 0 && mode == ParseMetadataOnly {
 			matched, err := fileFrontmatterHasTopLevelFields(file.path, fields)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "warning: failed to parse %s: %v\n", file.path, err)
+				if isEvictedFileError(err) {
+					evicted++
+				} else {
+					fmt.Fprintf(os.Stderr, "warning: failed to parse %s: %v\n", file.path, err)
+				}
 				continue
 			}
 			if !matched {
@@ -740,7 +745,11 @@ func (s *Storage) listWithModeHavingFrontmatterFields(mode ParseMode, includeMod
 		}
 		f, err := s.readPathWithMode(file.path, file.id, mode)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "warning: failed to parse %s: %v\n", file.path, err)
+			if isEvictedFileError(err) {
+				evicted++
+			} else {
+				fmt.Fprintf(os.Stderr, "warning: failed to parse %s: %v\n", file.path, err)
+			}
 			continue
 		}
 		if includeModTime {
@@ -752,7 +761,28 @@ func (s *Storage) listWithModeHavingFrontmatterFields(mode ParseMode, includeMod
 		felts = append(felts, f)
 	}
 
+	if evicted > 0 {
+		fmt.Fprintf(os.Stderr, "warning: %d file(s) not materialized (iCloud) under %s; run `brctl download` or open them in Files to hydrate\n", evicted, s.root)
+	}
+
 	return felts, nil
+}
+
+// isEvictedFileError reports whether err is the failure signature of an
+// iCloud-dataless file — one whose metadata is present but whose contents
+// haven't been downloaded locally. Reading such a file returns EDEADLK
+// ("resource deadlock avoided") on macOS as the CloudDocs daemon declines to
+// fault it in synchronously. We match the errno directly (portable via
+// syscall) and fall back to a conservative string match so the same eviction
+// signature is recognized even when wrapped without an errno.
+func isEvictedFileError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, syscall.EDEADLK) {
+		return true
+	}
+	return strings.Contains(err.Error(), "resource deadlock avoided")
 }
 
 // FindInScope returns the first felt matching the query using lexical scoped

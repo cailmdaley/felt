@@ -93,8 +93,7 @@ defmodule Shuttle.Remote do
 
   def from_config(_), do: nil
 
-  defp fetch(map, key) when is_map(map), do: Map.get(map, key)
-  defp fetch(_, _), do: nil
+  defp fetch(map, key), do: Map.get(map, key)
 
   @doc """
   The full `GET /api/v1/state` URL for this remote.

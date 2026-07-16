@@ -1098,7 +1098,7 @@ export class FiberDetailModal {
     // Console-style editor for the fiber's shuttle frontmatter block: agent,
     // kind, schedule cadence. Server-side, agent-only changes route through
     // `shuttle-ctl set-model` (preserves session.id + review history);
-    // kind/schedule/tz changes trigger a full uninstall + install/repeat.
+    // kind/schedule/tz changes trigger an atomic install/repeat --reshape.
     let agentSelect: HTMLSelectElement | null = null
     const originalAgent = card.shuttleAgent ?? ''
     // The kind editor toggles oneshot↔standing only; `pinned` is a CLI-managed
@@ -2596,11 +2596,13 @@ export class FiberDetailModal {
         typeof changes.shuttleTz === 'string'
 
       if (wantsReshape) {
-        // Kind/schedule/tz is a full uninstall + install/repeat reshape —
-        // the shuttle-ctl writers refuse to clobber an existing block, so
-        // the daemon's `/lifecycle` verbs are composed client-side, exactly
-        // as Portolan's retired `/kanban/fiber-patch` composed shuttle-ctl
-        // server-side. Current block state comes from the card.
+        // Kind/schedule/tz reshape is ONE atomic call: `install`/`repeat` with
+        // `reshape: true` clobbers the existing block in a single guarded write
+        // (omitted project_dir echoes from the old block server-side). This
+        // replaces the old uninstall + re-install composition, whose
+        // second-write failure could strand a de-installed fiber. When no block
+        // exists yet, reshape is harmless — it installs fresh. Current block
+        // state comes from the card.
         const targetKind: 'oneshot' | 'standing' =
           changes.shuttleKind ?? (card.shuttleKind === 'standing' ? 'standing' : 'oneshot')
         const targetAgent = changes.shuttleAgent || card.shuttleAgent
@@ -2621,21 +2623,16 @@ export class FiberDetailModal {
             throw new Error('standing-kind shuttle blocks require a schedule (cron expression)')
           }
           reinstall = {
-            action: 'repeat', origin, fiber: fiberId,
+            action: 'repeat', origin, fiber: fiberId, reshape: true,
             schedule, tz, model: targetAgent, project_dir: projectDir,
           }
         } else {
           reinstall = {
-            action: 'install', origin, fiber: fiberId,
+            action: 'install', origin, fiber: fiberId, reshape: true,
             model: targetAgent, project_dir: projectDir, disabled: wasDisabled,
           }
         }
 
-        // Uninstall first — install/repeat refuse to clobber. Skip when no
-        // block exists yet (the patch installs fresh).
-        if (card.shuttleKind !== undefined) {
-          await this.postLifecycle({ action: 'uninstall', origin, fiber: fiberId })
-        }
         await this.postLifecycle(reinstall)
       } else if (typeof changes.shuttleAgent === 'string' && changes.shuttleAgent) {
         // Agent-only change is the daemon's `set-model` lifecycle action —

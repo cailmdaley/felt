@@ -5,13 +5,20 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 )
 
 const (
-	CheckLevelError = "error"
+	CheckLevelError   = "error"
+	CheckLevelWarning = "warning"
 )
+
+// pinnedRoleClaim matches a body that calls itself a pinned role — the cheap
+// orphan heuristic paired with the pinned-role tag. Case-insensitive
+// "pinned role" / "pinned-role".
+var pinnedRoleClaim = regexp.MustCompile(`(?i)pinned[ -]role`)
 
 type CheckIssue struct {
 	Level   string `json:"level"`
@@ -33,6 +40,7 @@ func (i CheckIssue) String() string {
 func Check(felts []*Felt) []CheckIssue {
 	issues := checkNativeMetadata(felts)
 	issues = append(issues, checkRelationshipIntegrity(felts)...)
+	issues = append(issues, checkPinnedOrphans(felts)...)
 
 	sort.Slice(issues, func(i, j int) bool {
 		if issues[i].FiberID != issues[j].FiberID {
@@ -186,6 +194,39 @@ func CheckLegacyFormat(s *Storage) ([]CheckIssue, error) {
 		return issues[i].Message < issues[j].Message
 	})
 	return issues, nil
+}
+
+// checkPinnedOrphans warns about a fiber that claims to be a pinned role — via a
+// `pinned-role`/`pinned` tag or a body that names itself one — yet carries no
+// shuttle: block. That is the fingerprint of a reshape that stranded the fiber
+// de-pinned (a failed non-atomic uninstall+pin), which the atomic reshape path
+// now prevents; this is the cheap detector for any that slipped through before
+// the fix or by hand-edit. A warning, not an error: the fiber is intact, just
+// no longer dispatchable, and only a human knows whether to re-pin or drop the
+// claim.
+func checkPinnedOrphans(felts []*Felt) []CheckIssue {
+	var issues []CheckIssue
+	for _, f := range felts {
+		if f.HasShuttleFacet() {
+			continue
+		}
+		claimsPinned := pinnedRoleClaim.MatchString(f.Body)
+		for _, t := range f.Tags {
+			if tag := strings.ToLower(strings.TrimSpace(t)); tag == "pinned-role" || tag == "pinned" {
+				claimsPinned = true
+				break
+			}
+		}
+		if !claimsPinned {
+			continue
+		}
+		issues = append(issues, CheckIssue{
+			Level:   CheckLevelWarning,
+			FiberID: f.ID,
+			Message: "claims to be a pinned role (tag or body) but has no shuttle: block — orphaned pin; re-pin with `felt shuttle pin` or drop the claim",
+		})
+	}
+	return issues
 }
 
 func checkRelationshipIntegrity(felts []*Felt) []CheckIssue {
