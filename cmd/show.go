@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"errors"
 	"fmt"
 	"os"
 
@@ -31,8 +30,8 @@ Detail levels control progressive disclosure:
 
 Targeted views:
   --body            return the body plus its start line for editing
-  --citations       return indexed narrative back-references only
-  --consumers       return indexed reverse data-flow consumers only
+  --citations       return narrative back-references only
+  --consumers       return reverse data-flow consumers only
   --field <name>    return one frontmatter field by raw YAML key, formatted
                     for shell consumers (scalars on one line, sequences of
                     scalars one-per-line, structured values as YAML)`,
@@ -89,14 +88,14 @@ Targeted views:
 				return outputShowBody(storage, f)
 			}
 			if showCitations {
-				citations, err := showCitationsFor(storage, f.ID)
+				citations, err := storage.ScanCitations(f.ID)
 				if err != nil {
 					return err
 				}
 				return outputShowSelection(citations)
 			}
 			if showConsumers {
-				consumers, err := showConsumersFor(storage, f.ID)
+				consumers, err := storage.ScanConsumers(f.ID)
 				if err != nil {
 					return err
 				}
@@ -123,40 +122,11 @@ Targeted views:
 		var citations []felt.Citation
 		var consumers []felt.DataFlowConsumer
 		if detail == DepthSummary || detail == DepthFull {
-			// Ordinary show is a continuity/read path, so keep it responsive
-			// even when the link index is stale, throwaway, or absent.
-			// Relationship context is a best-effort read-only cache lookup;
-			// on a missing or busy index we scan the markdown directly so the
-			// reverse-edge block never silently shows empty.
-			idx, idxErr := storage.OpenIndexReadOnly()
-			switch {
-			case idxErr == nil:
-				defer idx.Close()
-				citations, err = idx.Citations(f.ID)
-				if err != nil {
-					return err
-				}
-				consumers, err = idx.Consumers(f.ID)
-				if err != nil {
-					return err
-				}
-			case errors.Is(idxErr, os.ErrNotExist):
-				if citations, err = storage.ScanCitations(f.ID); err != nil {
-					return err
-				}
-				if consumers, err = storage.ScanConsumers(f.ID); err != nil {
-					return err
-				}
-			case errors.Is(idxErr, felt.ErrIndexBusy):
-				fmt.Fprintf(os.Stderr, "warning: index busy — scanning markdown for citations and consumers\n")
-				if citations, err = storage.ScanCitations(f.ID); err != nil {
-					return err
-				}
-				if consumers, err = storage.ScanConsumers(f.ID); err != nil {
-					return err
-				}
-			default:
-				return idxErr
+			// Reverse-edge context is read straight from the markdown source of
+			// truth in a single walk, so the block is always fresh.
+			citations, consumers, err = storage.ScanRelationships(f.ID)
+			if err != nil {
+				return err
 			}
 		}
 
@@ -188,44 +158,12 @@ func graphForBodyRefs(storage *felt.Storage, f *felt.Felt) *Graph {
 	return g
 }
 
-func showCitationsFor(storage *felt.Storage, targetID string) ([]felt.Citation, error) {
-	idx, err := storage.OpenIndexReadOnly()
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return storage.ScanCitations(targetID)
-		}
-		if errors.Is(err, felt.ErrIndexBusy) {
-			fmt.Fprintf(os.Stderr, "warning: index busy — scanning markdown for citations\n")
-			return storage.ScanCitations(targetID)
-		}
-		return nil, err
-	}
-	defer idx.Close()
-	return idx.Citations(targetID)
-}
-
-func showConsumersFor(storage *felt.Storage, targetID string) ([]felt.DataFlowConsumer, error) {
-	idx, err := storage.OpenIndexReadOnly()
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return storage.ScanConsumers(targetID)
-		}
-		if errors.Is(err, felt.ErrIndexBusy) {
-			fmt.Fprintf(os.Stderr, "warning: index busy — scanning markdown for consumers\n")
-			return storage.ScanConsumers(targetID)
-		}
-		return nil, err
-	}
-	defer idx.Close()
-	return idx.Consumers(targetID)
-}
-
 func init() {
 	rootCmd.AddCommand(showCmd)
 	showCmd.Flags().BoolVarP(&showBodyOnly, "body", "b", false, "Output the body plus its start line")
 	showCmd.Flags().StringVarP(&showDetail, "detail", "d", "", "Detail level (name, compact, summary, full)")
-	showCmd.Flags().BoolVar(&showCitations, "citations", false, "Output indexed narrative back-references only")
-	showCmd.Flags().BoolVar(&showConsumers, "consumers", false, "Output indexed reverse data-flow consumers only")
+	showCmd.Flags().BoolVar(&showCitations, "citations", false, "Output narrative back-references only")
+	showCmd.Flags().BoolVar(&showConsumers, "consumers", false, "Output reverse data-flow consumers only")
 	showCmd.Flags().StringVar(&showField, "field", "", "Output one frontmatter field by raw YAML key (shell-friendly formatting)")
 }
 

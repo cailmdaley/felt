@@ -47,13 +47,11 @@ func runShuttleContract(t *testing.T, dir string) (stdout, stderr string) {
 
 	oldArgs := os.Args
 	oldChangeDir := changeDir
-	oldIndexSyncBackground := indexSyncBackground
 	oldStdout := os.Stdout
 	oldStderr := os.Stderr
 	defer func() {
 		os.Args = oldArgs
 		changeDir = oldChangeDir
-		indexSyncBackground = oldIndexSyncBackground
 		os.Stdout = oldStdout
 		os.Stderr = oldStderr
 	}()

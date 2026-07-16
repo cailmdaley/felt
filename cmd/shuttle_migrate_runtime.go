@@ -98,7 +98,6 @@ daemon. Use --dir to point at a store, --host to target a different owner, and
 			return nil
 		}
 		fmt.Printf("Migrated %d fibers owned by %q (%d foreign skipped)\n", migrated, ownHost, skippedForeign)
-		requestAsyncIndexSync(storage)
 		return nil
 	},
 }

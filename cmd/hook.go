@@ -161,11 +161,10 @@ func buildSessionContext() string {
 	}
 
 	// Recency signal is the git-durable frontmatter anchor — updated-at when
-	// present, else created-at (RecencyAnchor) — never file mtime and never the
-	// history index. felt is git-synced across machines: mtime is flattened by
-	// every clone/checkout/reorg, and the history event log lives in a per-store
-	// index.db that is NOT git-synced, so two machines disagree on it. updated-at
-	// rides in the frontmatter, so every machine reads the same recency. It is
+	// present, else created-at (RecencyAnchor) — never file mtime. felt is
+	// git-synced across machines: mtime is flattened by every
+	// clone/checkout/reorg, so two machines disagree on it. updated-at rides in
+	// the frontmatter, so every machine reads the same recency. It is
 	// stamped on every real content write — felt add/edit and the PostToolUse
 	// hook on direct Edit-tool edits — and deliberately preserved (not bumped)
 	// across moves/renames, which is what keeps it reorg-immune.
@@ -492,8 +491,8 @@ var postToolEditTools = map[string]struct{}{
 // runPostToolHook stamps the durable recency anchor (updated-at) on the fiber
 // whose file an agent just edited directly. Every path is a silent pass: a
 // PostToolUse hook must never fail the tool call, and losing one stamp is
-// cheaper than blocking. felt's own Sync still catches the edit warm in the
-// index; this only adds the cold-clone-durable frontmatter stamp.
+// cheaper than blocking. The frontmatter stamp is the recency mechanism —
+// a missed stamp just means one edit reads slightly stale.
 func runPostToolHook(stdin *os.File) error {
 	var input postToolInput
 	if err := json.NewDecoder(stdin).Decode(&input); err != nil {

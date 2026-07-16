@@ -50,8 +50,8 @@ func TestStorageInit(t *testing.T) {
 	if string(gitignoreData) != defaultGitignore {
 		t.Fatalf(".gitignore = %q, want default ignore", string(gitignoreData))
 	}
-	if !strings.Contains(string(gitignoreData), "index-sync.request") {
-		t.Fatalf(".gitignore missing sync request ignore: %q", string(gitignoreData))
+	if !strings.Contains(string(gitignoreData), "*.md.lock") {
+		t.Fatalf(".gitignore missing lock-sidecar ignore: %q", string(gitignoreData))
 	}
 
 	// Init again should work (idempotent)

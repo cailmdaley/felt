@@ -34,7 +34,7 @@ var rmCmd = &cobra.Command{
 			return err
 		}
 
-		// Deletion records nothing: the index rebuilds from disk, so a
+		// Deletion records nothing: every read walks the markdown tree, so a
 		// removed fiber is observable as absence. Git history of .felt/
 		// captures the deletion if archaeology is needed.
 

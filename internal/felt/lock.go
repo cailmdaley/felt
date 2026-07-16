@@ -39,7 +39,7 @@ import (
 
 // lockSuffix names a fiber's advisory-lock sidecar file: "<mdPath>.lock". It is
 // never a fiber itself (felt only reads/globs "*.md"), so it is completely
-// inert to every other code path — reads, `felt ls`, the FTS index walk, git —
+// inert to every other code path — reads, `felt ls`, the relationship walk, git —
 // and never needs cleanup beyond the directory itself.
 const lockSuffix = ".lock"
 

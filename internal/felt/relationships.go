@@ -5,10 +5,27 @@ import (
 	"strings"
 )
 
+// Citation is a resolved wikilink from one fiber to another — a narrative
+// reference surfaced under `show --citations`.
+type Citation struct {
+	SourceID   string
+	TargetID   string
+	Fragment   string
+	SourceName string
+}
+
+// DataFlowConsumer is a fiber that names another as a data-flow input via the
+// `inputs.from` convention — surfaced under `show --consumers`.
+type DataFlowConsumer struct {
+	SourceID   string
+	TargetID   string
+	OutputID   string
+	InputID    string
+	SourceName string
+}
+
 // ScanCitations answers a targeted reverse-reference query directly from the
-// markdown source of truth. It is intentionally independent of the SQLite
-// index so explicit `show --citations` reads stay fresh without taking an
-// index write lock or synchronizing unrelated fibers.
+// markdown source of truth.
 func (s *Storage) ScanCitations(targetID string) ([]Citation, error) {
 	felts, err := s.List()
 	if err != nil {
@@ -27,6 +44,53 @@ func (s *Storage) ScanConsumers(targetID string) ([]DataFlowConsumer, error) {
 	return ConsumersFromFelts(felts, targetID), nil
 }
 
+// ScanRelationships answers both reverse-reference queries for a target in a
+// single markdown walk. Callers that need citations and consumers together
+// (show -d summary/full) get one List() plus one iterRefs pass instead of the
+// two the single-sided Scan* functions would cost, since iterRefs already
+// yields both edge kinds.
+func (s *Storage) ScanRelationships(targetID string) ([]Citation, []DataFlowConsumer, error) {
+	felts, err := s.List()
+	if err != nil {
+		return nil, nil, err
+	}
+	return RelationshipsFromFelts(felts, targetID)
+}
+
+// RelationshipsFromFelts collects citations and consumers for targetID in one
+// iterRefs pass, dispatching each yielded ref to the matching accumulator.
+func RelationshipsFromFelts(felts []*Felt, targetID string) ([]Citation, []DataFlowConsumer, error) {
+	ids := sortedFeltIDs(felts)
+	var citations []Citation
+	var consumers []DataFlowConsumer
+	_ = iterRefs(felts, ids, func(r resolvedRef) error {
+		if r.ResolveErr != nil || r.ResolvedID != targetID {
+			return nil
+		}
+		switch r.Kind {
+		case refKindReference:
+			citations = append(citations, Citation{
+				SourceID:   r.Source.ID,
+				TargetID:   r.ResolvedID,
+				Fragment:   r.Fragment,
+				SourceName: r.Source.DisplayName(),
+			})
+		case refKindDataFlow:
+			consumers = append(consumers, DataFlowConsumer{
+				SourceID:   r.Source.ID,
+				TargetID:   r.ResolvedID,
+				OutputID:   r.Fragment,
+				InputID:    r.InputID,
+				SourceName: r.Source.DisplayName(),
+			})
+		}
+		return nil
+	})
+	sortCitations(citations)
+	sortConsumers(consumers)
+	return citations, consumers, nil
+}
+
 // Ref edge-kind discriminants, matching the link table's edge_type values.
 const (
 	refKindReference = "reference"
@@ -35,10 +99,9 @@ const (
 
 // resolvedRef is one outbound reference from a source fiber after scope
 // resolution. It carries BOTH outcomes: ResolvedID is set when resolution
-// succeeded, ResolveErr is set otherwise (the index acts on the unresolved
-// branch via insertRawRef, and check emits a broken-ref issue on it). The
-// fields are sufficient to reconstruct every site-specific need without a
-// second pass over the source.
+// succeeded, ResolveErr is set otherwise (check emits a broken-ref issue on
+// the unresolved branch). The fields are sufficient to reconstruct every
+// site-specific need without a second pass over the source.
 type resolvedRef struct {
 	Source    *Felt
 	Kind      string // refKindReference | refKindDataFlow
@@ -58,8 +121,7 @@ type resolvedRef struct {
 // inputs) of each felt in document order, resolving each against ids and
 // invoking yield once per ref. Empty/blank data-flow targets are skipped
 // before yielding — matching every existing call site. A non-nil yield error
-// halts iteration and propagates (the index path needs this; the read-only
-// consumers/check paths always return nil).
+// halts iteration and propagates.
 //
 // The resolver is built once for the whole walk rather than per-ref, since
 // newScopedIDResolver rebuilds maps + sorts over every id.
@@ -68,8 +130,8 @@ func iterRefs(felts []*Felt, ids []string, yield func(resolvedRef) error) error 
 }
 
 // iterRefsResolved is iterRefs against a prebuilt resolver, so a caller that
-// reindexes many fibers against the same id set (Sync) builds the resolver
-// once instead of once per fiber.
+// walks many fibers against the same id set builds the resolver once instead
+// of once per fiber.
 func iterRefsResolved(felts []*Felt, resolver *scopedIDResolver, yield func(resolvedRef) error) error {
 	for _, f := range felts {
 		for _, ref := range ExtractBodyRefs(f.Body) {
@@ -128,13 +190,17 @@ func CitationsFromFelts(felts []*Felt, targetID string) []Citation {
 		})
 		return nil
 	})
+	sortCitations(citations)
+	return citations
+}
+
+func sortCitations(citations []Citation) {
 	sort.Slice(citations, func(i, j int) bool {
 		if citations[i].SourceID != citations[j].SourceID {
 			return citations[i].SourceID < citations[j].SourceID
 		}
 		return citations[i].Fragment < citations[j].Fragment
 	})
-	return citations
 }
 
 func ConsumersFromFelts(felts []*Felt, targetID string) []DataFlowConsumer {
@@ -153,6 +219,11 @@ func ConsumersFromFelts(felts []*Felt, targetID string) []DataFlowConsumer {
 		})
 		return nil
 	})
+	sortConsumers(consumers)
+	return consumers
+}
+
+func sortConsumers(consumers []DataFlowConsumer) {
 	sort.Slice(consumers, func(i, j int) bool {
 		leftOutput := strings.TrimSpace(consumers[i].OutputID)
 		rightOutput := strings.TrimSpace(consumers[j].OutputID)
@@ -164,7 +235,6 @@ func ConsumersFromFelts(felts []*Felt, targetID string) []DataFlowConsumer {
 		}
 		return strings.TrimSpace(consumers[i].InputID) < strings.TrimSpace(consumers[j].InputID)
 	})
-	return consumers
 }
 
 func sortedFeltIDs(felts []*Felt) []string {

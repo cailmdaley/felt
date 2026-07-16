@@ -117,8 +117,6 @@ Examples:
 			return err
 		}
 
-		requestAsyncIndexSync(storage)
-
 		fmt.Println(f.ID)
 		return nil
 	},

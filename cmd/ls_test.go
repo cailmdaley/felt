@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"os"
 	"strings"
 	"testing"
 
@@ -75,7 +74,7 @@ func TestLsJSONEmptyEmitsArrayNotNull(t *testing.T) {
 	}
 }
 
-func TestLsBodySearchScansMarkdownWithoutCreatingIndex(t *testing.T) {
+func TestLsBodySearchScansMarkdown(t *testing.T) {
 	dir := t.TempDir()
 	storage := felt.NewStorage(dir)
 	if err := storage.Init(); err != nil {
@@ -102,9 +101,6 @@ func TestLsBodySearchScansMarkdownWithoutCreatingIndex(t *testing.T) {
 	}
 	if strings.Contains(out, "project/question") {
 		t.Fatalf("ls --body included non-match:\n%s", out)
-	}
-	if _, err := os.Stat(dir + "/.felt/index.db"); !os.IsNotExist(err) {
-		t.Fatalf("ls --body should not create index.db, stat err = %v", err)
 	}
 }
 

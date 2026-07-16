@@ -56,8 +56,8 @@ type Felt struct {
 	// UpdatedAt is the git-durable recency anchor — the last time felt itself
 	// recorded a content write (add/edit). Unlike file mtime it survives the
 	// clone/checkout/reorg rewrites that cross-machine git sync inflicts, so a
-	// fresh clone (where the index.db event log is rebuilt from scratch) can
-	// still seed recency from a real last-touched time. Pointer + omitempty:
+	// fresh clone can still seed recency from a real last-touched time.
+	// Pointer + omitempty:
 	// absent on fibers never touched since the field shipped, where recency
 	// falls back to created-at.
 	UpdatedAt   *time.Time `yaml:"updated-at,omitempty" json:"updated_at,omitempty"`

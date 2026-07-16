@@ -74,9 +74,6 @@ func TestShowBodyIncludesStartLine(t *testing.T) {
 	if !strings.Contains(out, "first line\nsecond line") {
 		t.Fatalf("show --body missing body:\n%s", out)
 	}
-	if _, err := os.Stat(dir + "/.felt/index.db"); !os.IsNotExist(err) {
-		t.Fatalf("show --body should not create index.db, stat err = %v", err)
-	}
 }
 
 func TestShowBodyJSONIncludesStartLine(t *testing.T) {
@@ -111,12 +108,9 @@ func TestShowBodyJSONIncludesStartLine(t *testing.T) {
 	if got := payload["body"]; got != "body text" {
 		t.Fatalf("body = %#v, want %q", got, "body text")
 	}
-	if _, err := os.Stat(dir + "/.felt/index.db"); !os.IsNotExist(err) {
-		t.Fatalf("show --body --json should not create index.db, stat err = %v", err)
-	}
 }
 
-func TestShowCompactDoesNotCreateIndexWhenNotNeeded(t *testing.T) {
+func TestShowCompactRendersOutcomeAndFieldKeys(t *testing.T) {
 	dir := t.TempDir()
 	storage := felt.NewStorage(dir)
 	if err := storage.Init(); err != nil {
@@ -146,12 +140,9 @@ func TestShowCompactDoesNotCreateIndexWhenNotNeeded(t *testing.T) {
 	if !strings.Contains(out, "Frontmatter: decisions") {
 		t.Fatalf("show -d compact should list additional YAML field keys:\n%s", out)
 	}
-	if _, err := os.Stat(dir + "/.felt/index.db"); !os.IsNotExist(err) {
-		t.Fatalf("show -d compact should not create index.db, stat err = %v", err)
-	}
 }
 
-func TestShowDefaultDoesNotCreateIndexWhenMissing(t *testing.T) {
+func TestShowDefaultRendersBody(t *testing.T) {
 	dir := t.TempDir()
 	storage := felt.NewStorage(dir)
 	if err := storage.Init(); err != nil {
@@ -175,9 +166,6 @@ func TestShowDefaultDoesNotCreateIndexWhenMissing(t *testing.T) {
 	}
 	if !strings.Contains(out, "Default show remains file-backed.") {
 		t.Fatalf("show output mismatch:\n%s", out)
-	}
-	if _, err := os.Stat(dir + "/.felt/index.db"); !os.IsNotExist(err) {
-		t.Fatalf("show should not create index.db, stat err = %v", err)
 	}
 }
 
@@ -282,7 +270,7 @@ func TestRenderFullResolvesScopedBodyRefs(t *testing.T) {
 	}
 }
 
-func TestShowIncludesIndexedCitations(t *testing.T) {
+func TestShowIncludesCitations(t *testing.T) {
 	dir := t.TempDir()
 	storage := felt.NewStorage(dir)
 	if err := storage.Init(); err != nil {
@@ -296,7 +284,6 @@ func TestShowIncludesIndexedCitations(t *testing.T) {
 			t.Fatalf("Write(%s) error: %v", fiber.ID, err)
 		}
 	}
-	syncShowIndex(t, storage)
 
 	reset := saveShowGlobals()
 	defer reset()
@@ -310,7 +297,7 @@ func TestShowIncludesIndexedCitations(t *testing.T) {
 	}
 }
 
-func TestShowIncludesIndexedConsumers(t *testing.T) {
+func TestShowIncludesConsumers(t *testing.T) {
 	dir := t.TempDir()
 	storage := felt.NewStorage(dir)
 	if err := storage.Init(); err != nil {
@@ -325,7 +312,6 @@ func TestShowIncludesIndexedConsumers(t *testing.T) {
 			t.Fatalf("Write(%s) error: %v", fiber.ID, err)
 		}
 	}
-	syncShowIndex(t, storage)
 
 	reset := saveShowGlobals()
 	defer reset()
@@ -365,9 +351,6 @@ func TestShowConsumersSelectorOutputsStructuredResults(t *testing.T) {
 	if !strings.Contains(out, "sourceid: project/analysis") || !strings.Contains(out, "inputid: catalog") || !strings.Contains(out, "outputid: posterior") {
 		t.Fatalf("show --consumers output mismatch:\n%s", out)
 	}
-	if _, err := os.Stat(dir + "/.felt/index.db"); !os.IsNotExist(err) {
-		t.Fatalf("show --consumers should not create index.db, stat err = %v", err)
-	}
 }
 
 func TestShowCitationsSelectorOutputsStructuredResults(t *testing.T) {
@@ -394,9 +377,6 @@ func TestShowCitationsSelectorOutputsStructuredResults(t *testing.T) {
 	}
 	if !strings.Contains(out, "sourceid: project/analysis") || !strings.Contains(out, "sourcename: Analysis") {
 		t.Fatalf("show --citations output mismatch:\n%s", out)
-	}
-	if _, err := os.Stat(dir + "/.felt/index.db"); !os.IsNotExist(err) {
-		t.Fatalf("show --citations should not create index.db, stat err = %v", err)
 	}
 }
 
@@ -425,38 +405,6 @@ func TestShowCitationsSelectorDoesNotSyncFiberIndex(t *testing.T) {
 	}
 	if !strings.Contains(out, "sourceid: project/analysis") {
 		t.Fatalf("show --citations missing source:\n%s", out)
-	}
-	if _, err := os.Stat(dir + "/.felt/index.db"); !os.IsNotExist(err) {
-		t.Fatalf("show --citations should not create index.db, stat err = %v", err)
-	}
-}
-
-func TestShowCitationsSelectorUsesExistingIndexWithoutSync(t *testing.T) {
-	dir := t.TempDir()
-	storage := felt.NewStorage(dir)
-	if err := storage.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
-	for _, fiber := range []*felt.Felt{
-		{ID: "project/question", Name: "Question", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")},
-		{ID: "project/analysis", Name: "Analysis", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z"), Body: "See [[question]]."},
-	} {
-		if err := storage.Write(fiber); err != nil {
-			t.Fatalf("Write(%s) error: %v", fiber.ID, err)
-		}
-	}
-	syncShowIndex(t, storage)
-	writeMalformedFiber(t, dir)
-
-	reset := saveShowGlobals()
-	defer reset()
-
-	out, err := runCommand(t, dir, "show", "project/question", "--citations")
-	if err != nil {
-		t.Fatalf("show --citations should not sync existing index: %v\n%s", err, out)
-	}
-	if !strings.Contains(out, "sourceid: project/analysis") {
-		t.Fatalf("show --citations missing indexed source:\n%s", out)
 	}
 }
 
@@ -575,17 +523,6 @@ func mustParseTime(t *testing.T, value string) time.Time {
 		t.Fatalf("parse time %q: %v", value, err)
 	}
 	return ts
-}
-
-func syncShowIndex(t *testing.T, storage *felt.Storage) {
-	t.Helper()
-	idx, err := storage.OpenIndex()
-	if err != nil {
-		t.Fatalf("OpenIndex() error: %v", err)
-	}
-	if err := idx.Close(); err != nil {
-		t.Fatalf("Close index: %v", err)
-	}
 }
 
 func TestShowFieldRefusesJSON(t *testing.T) {

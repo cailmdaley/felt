@@ -49,9 +49,8 @@ only multiple bare files are treated as orphaned legacy and migrated.`,
 			return nil
 		}
 
-		// One verb-parameterized pass over the four result slices. The only
-		// behavioral differences (early return vs. index sync) stay outside the
-		// printing below.
+		// One verb-parameterized pass over the four result slices; dry-run vs.
+		// applied differs only in the verbs and summary line.
 		var migrateVerb, renameVerb, removeVerb, stripVerb string
 		var summary string
 		if migrateDryRun {
@@ -79,10 +78,6 @@ only multiple bare files are treated as orphaned legacy and migrated.`,
 			len(result.Entries), len(result.TitleToNameIDs), len(result.RemovedDependsOnIDs), len(result.StrippedMystAnchorIDs),
 		)
 
-		if migrateDryRun {
-			return nil
-		}
-		requestAsyncIndexSync(storage)
 		return nil
 	},
 }
@@ -122,7 +117,6 @@ Replicas should inherit the committed ids rather than minting their own.`,
 			fmt.Printf("Assigned intrinsic id to %s\n", id)
 		}
 		fmt.Printf("Assigned %d intrinsic ids\n", len(result.AssignedIDs))
-		requestAsyncIndexSync(storage)
 		return nil
 	},
 }
@@ -170,7 +164,6 @@ var nestCmd = &cobra.Command{
 		if err := storage.MoveSubtree(child.ID, targetID); err != nil {
 			return err
 		}
-		requestAsyncIndexSync(storage)
 
 		fmt.Printf("Nested %s under %s as %s\n", child.ID, parent.ID, targetID)
 		return nil
@@ -210,7 +203,6 @@ var unnestCmd = &cobra.Command{
 		if err := storage.MoveSubtree(child.ID, targetID); err != nil {
 			return err
 		}
-		requestAsyncIndexSync(storage)
 
 		fmt.Printf("Promoted %s to %s\n", child.ID, targetID)
 		return nil

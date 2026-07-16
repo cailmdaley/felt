@@ -156,8 +156,6 @@ keys have dedicated flags; use those.`,
 			return err
 		}
 
-		requestAsyncIndexSync(storage)
-
 		switch {
 		case bodyCleared:
 			fmt.Printf("Updated %s (body cleared; previous content removed)\n", f.ID)
