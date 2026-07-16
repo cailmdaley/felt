@@ -24,7 +24,7 @@ defmodule ShuttleWeb.FeltNestController do
   """
 
   use Phoenix.Controller, formats: [:json]
-  import ShuttleWeb.RelayHelpers, only: [relay_text: 2]
+  import ShuttleWeb.RelayHelpers, only: [relay_text: 2, send_cli_result: 3, host_for_fiber: 1]
 
   alias Shuttle.{Felt, FeltStores, OriginRouter}
 
@@ -45,36 +45,13 @@ defmodule ShuttleWeb.FeltNestController do
   end
 
   defp create_local(conn, fiber_id, params) do
-    with {:ok, host, address} <- host_for_fiber(fiber_id),
-         {:ok, args} <- args(host, address, Map.fetch(params, "parent")),
-         {:ok, output} <- run(host, args) do
-      conn
-      |> put_resp_content_type("text/plain")
-      |> send_resp(200, output)
-    else
-      {:error, reason} when is_binary(reason) ->
-        conn
-        |> put_resp_content_type("text/plain")
-        |> send_resp(400, reason)
+    result =
+      with {:ok, host, address} <- host_for_fiber(fiber_id),
+           {:ok, args} <- args(host, address, Map.fetch(params, "parent")) do
+        run(host, args)
+      end
 
-      {:command_error, status, output} ->
-        conn
-        |> put_resp_content_type("text/plain")
-        |> send_resp(422, "felt exited #{status}: #{output}")
-
-      {:error, :timeout, reason} ->
-        conn
-        |> put_resp_content_type("text/plain")
-        |> send_resp(503, reason)
-    end
-  end
-
-  defp host_for_fiber(fiber_id) do
-    case FeltStores.resolve_fiber(fiber_id) do
-      {:ok, %{host: host, fiber_id: address}} -> {:ok, host, address}
-      {:error, :not_found} -> {:error, "fiber not found: #{fiber_id}"}
-      {:error, :timeout} -> {:error, :timeout, "felt timed out resolving #{fiber_id}"}
-    end
+    send_cli_result(conn, "felt", result)
   end
 
   # `parent` is required (absent is a caller bug, not a no-op); null or ""

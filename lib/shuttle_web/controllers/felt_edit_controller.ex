@@ -30,9 +30,9 @@ defmodule ShuttleWeb.FeltEditController do
   """
 
   use Phoenix.Controller, formats: [:json]
-  import ShuttleWeb.RelayHelpers, only: [relay_text: 2]
+  import ShuttleWeb.RelayHelpers, only: [relay_text: 2, send_cli_result: 3, host_for_fiber: 1]
 
-  alias Shuttle.{Felt, FeltStores, OriginRouter, Poller, RemoteFiberRegistry}
+  alias Shuttle.{Felt, OriginRouter, Poller, RemoteFiberRegistry}
 
   def create(conn, %{"fiber_id" => fiber_id} = params) when is_binary(fiber_id) do
     case OriginRouter.route(Map.get(params, "origin")) do
@@ -40,8 +40,8 @@ defmodule ShuttleWeb.FeltEditController do
         result = OriginRouter.forward(remote, "/api/v1/felt-edit", conn.body_params)
         # The forwarded edit mutated the remote's loom mirror; invalidate the
         # RemoteFiberRegistry feed cache so the board reflects it before the next
-        # remote poll. Mirrors Shuttle.Transition's refresh_remote_feed.
-        refresh_remote_feed(remote.name, result)
+        # remote poll.
+        RemoteFiberRegistry.refresh_after_forward(remote.name, result)
         relay_text(conn, result)
 
       :local ->
@@ -73,28 +73,7 @@ defmodule ShuttleWeb.FeltEditController do
       |> put_resp_content_type("text/plain")
       |> send_resp(200, output)
     else
-      {:error, reason} when is_binary(reason) ->
-        conn
-        |> put_resp_content_type("text/plain")
-        |> send_resp(400, reason)
-
-      {:command_error, status, output} ->
-        conn
-        |> put_resp_content_type("text/plain")
-        |> send_resp(422, "felt exited #{status}: #{output}")
-
-      {:error, :timeout, reason} ->
-        conn
-        |> put_resp_content_type("text/plain")
-        |> send_resp(503, reason)
-    end
-  end
-
-  defp host_for_fiber(fiber_id) do
-    case FeltStores.resolve_fiber(fiber_id) do
-      {:ok, %{host: host, fiber_id: address}} -> {:ok, host, address}
-      {:error, :not_found} -> {:error, "fiber not found: #{fiber_id}"}
-      {:error, :timeout} -> {:error, :timeout, "felt timed out resolving #{fiber_id}"}
+      other -> send_cli_result(conn, "felt", other)
     end
   end
 
@@ -153,16 +132,4 @@ defmodule ShuttleWeb.FeltEditController do
   end
 
   defp string_list(_), do: []
-
-  # Best-effort remote feed invalidation after a successful forward, mirroring
-  # Shuttle.Transition.refresh_remote_feed: only on a 2xx, and a refresh failure
-  # (or a dead registry) must never fail the request.
-  defp refresh_remote_feed(name, {:forwarded, status, _body}) when status in 200..299 do
-    RemoteFiberRegistry.refresh(name)
-    :ok
-  catch
-    :exit, _reason -> :ok
-  end
-
-  defp refresh_remote_feed(_name, _result), do: :ok
 end

@@ -18,7 +18,7 @@ defmodule ShuttleWeb.LifecycleController do
   """
 
   use Phoenix.Controller, formats: [:json]
-  import ShuttleWeb.RelayHelpers, only: [relay_text: 2]
+  import ShuttleWeb.RelayHelpers, only: [relay_text: 2, send_cli_result: 3]
 
   alias Shuttle.{FeltStores, LifecycleService, OriginRouter, RemoteFiberRegistry}
 
@@ -31,9 +31,8 @@ defmodule ShuttleWeb.LifecycleController do
         # The forwarded verb (pin/uninstall/…) mutated the remote's loom mirror;
         # invalidate the RemoteFiberRegistry feed cache so the board reflects it
         # before the next remote poll — otherwise pinning a remote-owned role
-        # snaps back until a manual refresh. Mirrors Shuttle.Transition and
-        # FeltEditController's refresh_remote_feed.
-        refresh_remote_feed(remote.name, result)
+        # snaps back until a manual refresh.
+        RemoteFiberRegistry.refresh_after_forward(remote.name, result)
         relay_text(conn, result)
 
       :local ->
@@ -53,20 +52,7 @@ defmodule ShuttleWeb.LifecycleController do
       |> put_resp_content_type("text/plain")
       |> send_resp(200, output)
     else
-      {:error, reason} when is_binary(reason) ->
-        conn
-        |> put_resp_content_type("text/plain")
-        |> send_resp(400, reason)
-
-      {:command_error, status, output} ->
-        conn
-        |> put_resp_content_type("text/plain")
-        |> send_resp(422, "shuttle exited #{status}: #{output}")
-
-      {:error, :timeout, reason} ->
-        conn
-        |> put_resp_content_type("text/plain")
-        |> send_resp(503, reason)
+      other -> send_cli_result(conn, "shuttle", other)
     end
   end
 
@@ -116,18 +102,6 @@ defmodule ShuttleWeb.LifecycleController do
   end
 
   defp refresh_card(_), do: :ok
-
-  # Best-effort remote feed invalidation after a successful forward, mirroring
-  # Shuttle.Transition.refresh_remote_feed: only on a 2xx, and a refresh failure
-  # (or a dead registry) must never fail the request.
-  defp refresh_remote_feed(name, {:forwarded, status, _body}) when status in 200..299 do
-    RemoteFiberRegistry.refresh(name)
-    :ok
-  catch
-    :exit, _reason -> :ok
-  end
-
-  defp refresh_remote_feed(_name, _result), do: :ok
 
   defp fiber_address(identifier) do
     with {:ok, %{fiber_id: fiber_id}} <- resolve_fiber(identifier), do: {:ok, fiber_id}

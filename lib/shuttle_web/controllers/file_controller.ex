@@ -26,13 +26,14 @@ defmodule ShuttleWeb.FileController do
   """
 
   use Phoenix.Controller, formats: [:json]
+  import ShuttleWeb.RelayHelpers, only: [relay_bytes: 2]
 
   alias Shuttle.OriginRouter
 
   def show(conn, %{"path" => path} = params) when is_binary(path) and path != "" do
     case OriginRouter.route(Map.get(params, "origin")) do
       {:remote, remote} ->
-        relay(conn, OriginRouter.forward_get(remote, "/api/v1/file", %{"path" => path}))
+        relay_bytes(conn, OriginRouter.forward_get(remote, "/api/v1/file", %{"path" => path}))
 
       :local ->
         serve_local(conn, path)
@@ -56,24 +57,5 @@ defmodule ShuttleWeb.FileController do
         |> put_resp_content_type(MIME.from_path(path))
         |> send_file(200, path)
     end
-  end
-
-  # Relay the owning remote's bytes + content-type + status verbatim, so a remote
-  # 404 reads as a remote 404, not a tunnel 502.
-  defp relay(conn, {:forwarded, status, content_type, body}) do
-    conn
-    # `nil` charset → relay the content-type AS-IS. The remote already served it
-    # through Phoenix, so it carries `; charset=utf-8`; the default 2-arg form
-    # would append a SECOND charset (`image/png; charset=utf-8; charset=utf-8`),
-    # which browsers reject — a remote-owned image then renders as a broken-image
-    # icon. (Local serve_local's single charset is tolerated; the double is not.)
-    |> put_resp_content_type(content_type, nil)
-    |> send_resp(status, body)
-  end
-
-  defp relay(conn, {:error, {:forward_failed, name, reason}}) do
-    conn
-    |> put_status(502)
-    |> json(%{error: "forward to #{name} failed: #{inspect(reason)}"})
   end
 end

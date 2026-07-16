@@ -136,6 +136,29 @@ defmodule Shuttle.RemoteFiberRegistry do
   @spec refresh(String.t()) :: :ok | {:error, term()}
   def refresh(name), do: refresh(__MODULE__, name)
 
+  @doc """
+  Best-effort feed invalidation after a forwarded remote mutation: refresh the
+  origin's owner feed so the composite board reflects the write before the next
+  scheduled poll, but only on a 2xx — a failed forward changed nothing — and
+  never fail the request if the registry is down or slow.
+
+  Accepts either call shape the write plane forwards with: a controller's
+  `{:forwarded, status, body}` tuple or `Shuttle.Transition`'s raw status int.
+  """
+  @spec refresh_after_forward(String.t(), {:forwarded, non_neg_integer(), term()} | integer()) ::
+          :ok
+  def refresh_after_forward(name, {:forwarded, status, _body}),
+    do: refresh_after_forward(name, status)
+
+  def refresh_after_forward(name, status) when is_integer(status) and status in 200..299 do
+    refresh(name)
+    :ok
+  catch
+    :exit, _reason -> :ok
+  end
+
+  def refresh_after_forward(_name, _result), do: :ok
+
   @spec refresh(GenServer.server(), String.t()) :: :ok | {:error, term()}
   def refresh(server, name) when is_binary(name) do
     if RegistryCommon.registry_alive?(server) do

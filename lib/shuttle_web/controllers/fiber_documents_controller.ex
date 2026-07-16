@@ -26,6 +26,7 @@ defmodule ShuttleWeb.FiberDocumentsController do
   """
 
   use Phoenix.Controller, formats: [:json]
+  import ShuttleWeb.RelayHelpers, only: [relay_bytes: 2]
 
   alias Shuttle.OriginRouter
   alias Shuttle.Poller.Snapshot
@@ -68,7 +69,7 @@ defmodule ShuttleWeb.FiberDocumentsController do
 
     case OriginRouter.route(Map.get(params, "origin")) do
       {:remote, remote} ->
-        relay_show(
+        relay_bytes(
           conn,
           OriginRouter.forward_get(remote, fibers_show_path(id), %{
             "body" => to_string(with_body?)
@@ -101,22 +102,6 @@ defmodule ShuttleWeb.FiberDocumentsController do
       |> Enum.map_join("/", &URI.encode(&1, fn c -> URI.char_unreserved?(c) end))
 
     "/api/v1/fibers/" <> encoded
-  end
-
-  # Relay the owning remote's JSON + status verbatim, so a remote "fiber not
-  # here" reads as that, not a tunnel error.
-  defp relay_show(conn, {:forwarded, status, content_type, body}) do
-    conn
-    # `nil` charset → relay verbatim; avoids doubling the remote's own charset
-    # (see FileController.relay/2 — a doubled charset breaks image rendering).
-    |> put_resp_content_type(content_type, nil)
-    |> send_resp(status, body)
-  end
-
-  defp relay_show(conn, {:error, {:forward_failed, name, reason}}) do
-    conn
-    |> put_status(:bad_gateway)
-    |> json(%{error: "forward to #{name} failed: #{inspect(reason)}"})
   end
 
   @doc """

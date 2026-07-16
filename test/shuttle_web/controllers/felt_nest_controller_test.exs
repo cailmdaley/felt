@@ -5,6 +5,22 @@ defmodule ShuttleWeb.FeltNestControllerTest do
 
   @endpoint ShuttleWeb.Endpoint
 
+  # POST transport stub for the write-forward plane: records the last (url, body)
+  # and replays a scripted response.
+  defmodule FeltNestForwardClient do
+    use Agent
+
+    def start_link(response),
+      do: Agent.start_link(fn -> %{response: response, last: nil} end, name: __MODULE__)
+
+    def last, do: Agent.get(__MODULE__, & &1.last)
+
+    def post(url, body, _content_type, _timeout_ms) do
+      Agent.update(__MODULE__, &Map.put(&1, :last, %{url: url, body: body}))
+      Agent.get(__MODULE__, & &1.response)
+    end
+  end
+
   test "nest shells felt nest <fiber> <parent> against the owning store" do
     {store, args_file} = setup_store!("nest")
 
@@ -43,6 +59,47 @@ defmodule ShuttleWeb.FeltNestControllerTest do
     assert conn.resp_body =~ "parent is required"
     refute File.exists?(args_file)
   end
+
+  test "forwards a remote-origin nest to the owning daemon, origin stripped, relaying its response" do
+    start_supervised!({FeltNestForwardClient, {:ok, 200, "tests/parent/child\n"}})
+
+    previous_remotes = Application.get_env(:shuttle, :remotes)
+    previous_client = Application.get_env(:shuttle, :write_forward_client)
+    Application.put_env(:shuttle, :remotes, [%{name: "candide", url: "http://localhost:4001"}])
+    Application.put_env(:shuttle, :write_forward_client, FeltNestForwardClient)
+
+    on_exit(fn ->
+      restore_app_env(:remotes, previous_remotes)
+      restore_app_env(:write_forward_client, previous_client)
+    end)
+
+    conn =
+      post(
+        api_conn(),
+        "/api/v1/felt-nest",
+        Jason.encode!(%{
+          "fiber_id" => "tests/child",
+          "parent" => "tests/parent",
+          "origin" => "candide"
+        })
+      )
+
+    # The owning daemon's response is relayed verbatim.
+    assert conn.status == 200
+    assert conn.resp_body == "tests/parent/child\n"
+
+    # Forwarded to the owning remote's identical /felt-nest, origin stripped so
+    # the owner re-parents within its own store.
+    last = FeltNestForwardClient.last()
+    assert last.url == "http://localhost:4001/api/v1/felt-nest"
+    forwarded = Jason.decode!(last.body)
+    refute Map.has_key?(forwarded, "origin")
+    assert forwarded["fiber_id"] == "tests/child"
+    assert forwarded["parent"] == "tests/parent"
+  end
+
+  defp restore_app_env(key, nil), do: Application.delete_env(:shuttle, key)
+  defp restore_app_env(key, value), do: Application.put_env(:shuttle, key, value)
 
   defp api_conn do
     build_conn()

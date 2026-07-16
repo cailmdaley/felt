@@ -30,8 +30,8 @@ defmodule ShuttleWeb.KillController do
         result = OriginRouter.forward(remote, "/api/v1/kill", conn.body_params)
         # A forwarded kill tore down the remote's worker; invalidate the
         # RemoteFiberRegistry feed cache so the board stops showing it live before
-        # the next remote poll. Mirrors Shuttle.Transition's refresh_remote_feed.
-        refresh_remote_feed(remote.name, result)
+        # the next remote poll.
+        RemoteFiberRegistry.refresh_after_forward(remote.name, result)
         relay(conn, result)
 
       :local ->
@@ -69,16 +69,4 @@ defmodule ShuttleWeb.KillController do
     |> put_status(502)
     |> json(%{error: "forward to #{name} failed: #{inspect(reason)}"})
   end
-
-  # Best-effort remote feed invalidation after a successful forward, mirroring
-  # Shuttle.Transition.refresh_remote_feed: only on a 2xx, and a refresh failure
-  # (or a dead registry) must never fail the request.
-  defp refresh_remote_feed(name, {:forwarded, status, _body}) when status in 200..299 do
-    RemoteFiberRegistry.refresh(name)
-    :ok
-  catch
-    :exit, _reason -> :ok
-  end
-
-  defp refresh_remote_feed(_name, _result), do: :ok
 end

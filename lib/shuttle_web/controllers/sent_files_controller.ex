@@ -21,13 +21,14 @@ defmodule ShuttleWeb.SentFilesController do
   """
 
   use Phoenix.Controller, formats: [:json]
+  import ShuttleWeb.RelayHelpers, only: [relay_bytes: 2]
 
   alias Shuttle.{OriginRouter, SentFiles}
 
   def show(conn, %{"uid" => uid} = params) when is_binary(uid) and uid != "" do
     case OriginRouter.route(Map.get(params, "origin")) do
       {:remote, remote} ->
-        relay(conn, OriginRouter.forward_get(remote, "/api/v1/sent-files", %{"uid" => uid}))
+        relay_bytes(conn, OriginRouter.forward_get(remote, "/api/v1/sent-files", %{"uid" => uid}))
 
       :local ->
         json(conn, %{files: SentFiles.for_uid(uid)})
@@ -36,21 +37,5 @@ defmodule ShuttleWeb.SentFilesController do
 
   def show(conn, _params) do
     conn |> put_status(400) |> json(%{error: "uid is required"})
-  end
-
-  # Relay the owning remote's JSON body + status verbatim, so a remote result
-  # reads as the remote's own result, not a tunnel artifact.
-  defp relay(conn, {:forwarded, status, content_type, body}) do
-    conn
-    # `nil` charset → relay verbatim; avoids doubling the remote's own charset
-    # (see FileController.relay/2 — a doubled charset breaks image rendering).
-    |> put_resp_content_type(content_type, nil)
-    |> send_resp(status, body)
-  end
-
-  defp relay(conn, {:error, {:forward_failed, name, reason}}) do
-    conn
-    |> put_status(502)
-    |> json(%{error: "forward to #{name} failed: #{inspect(reason)}"})
   end
 end

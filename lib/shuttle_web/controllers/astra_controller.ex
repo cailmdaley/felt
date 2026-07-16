@@ -27,6 +27,7 @@ defmodule ShuttleWeb.AstraController do
   """
 
   use Phoenix.Controller, formats: [:json]
+  import ShuttleWeb.RelayHelpers, only: [relay_bytes: 2]
 
   require Logger
   alias Shuttle.OriginRouter
@@ -41,7 +42,7 @@ defmodule ShuttleWeb.AstraController do
   def show(conn, %{"path" => path} = params) when is_binary(path) and path != "" do
     case OriginRouter.route(Map.get(params, "origin")) do
       {:remote, remote} ->
-        relay(conn, OriginRouter.forward_get(remote, "/api/v1/astra", Map.take(params, ["path", "universe"])))
+        relay_bytes(conn, OriginRouter.forward_get(remote, "/api/v1/astra", Map.take(params, ["path", "universe"])))
 
       :local ->
         bake_local(conn, path, Map.get(params, "universe"))
@@ -98,15 +99,4 @@ defmodule ShuttleWeb.AstraController do
       System.cmd("bash", ["-lc", ~s(exec node "$@"), "bake" | args], stderr_to_stdout: false)
   end
 
-  # Relay the owning remote's JSON + status verbatim, so a remote 404/502 reads
-  # as itself, not a tunnel error.
-  defp relay(conn, {:forwarded, status, content_type, body}) do
-    # `nil` charset → relay verbatim; avoids doubling the remote's own charset
-    # (see FileController.relay/2 — a doubled charset breaks image rendering).
-    conn |> put_resp_content_type(content_type, nil) |> send_resp(status, body)
-  end
-
-  defp relay(conn, {:error, {:forward_failed, name, reason}}) do
-    conn |> put_status(502) |> json(%{error: "forward to #{name} failed: #{inspect(reason)}"})
-  end
 end

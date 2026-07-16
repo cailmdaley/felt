@@ -217,24 +217,13 @@ defmodule Shuttle.Transition do
            opts
          ) do
       {:forwarded, status, body} ->
-        refresh_remote_feed(remote.name, status)
+        RemoteFiberRegistry.refresh_after_forward(remote.name, status)
         {:forwarded, status, Map.put(decode_body(body), "origin", origin)}
 
       {:error, _reason} = error ->
         error
     end
   end
-
-  defp refresh_remote_feed(name, status) when status >= 200 and status < 300 do
-    case RemoteFiberRegistry.refresh(name) do
-      :ok -> :ok
-      {:error, _reason} -> :ok
-    end
-  catch
-    :exit, _reason -> :ok
-  end
-
-  defp refresh_remote_feed(_name, _status), do: :ok
 
   defp decode_body(body) when is_binary(body) do
     case Jason.decode(body) do

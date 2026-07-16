@@ -5,6 +5,37 @@ defmodule ShuttleWeb.FeltEditControllerTest do
 
   @endpoint ShuttleWeb.Endpoint
 
+  # POST transport stub for the write-forward plane: records the last (url, body)
+  # and replays a scripted response.
+  defmodule FeltEditForwardClient do
+    use Agent
+
+    def start_link(response),
+      do: Agent.start_link(fn -> %{response: response, last: nil} end, name: __MODULE__)
+
+    def last, do: Agent.get(__MODULE__, & &1.last)
+
+    def post(url, body, _content_type, _timeout_ms) do
+      Agent.update(__MODULE__, &Map.put(&1, :last, %{url: url, body: body}))
+      Agent.get(__MODULE__, & &1.response)
+    end
+  end
+
+  # Feed transport stub for RemoteFiberRegistry: counts how many times a feed
+  # fetch was issued, so the test can prove the post-forward refresh fired (or
+  # didn't). Returns a well-formed empty feed.
+  defmodule FeltEditFeedClient do
+    use Agent
+
+    def start_link(_ \\ []), do: Agent.start_link(fn -> 0 end, name: __MODULE__)
+    def get_count, do: Agent.get(__MODULE__, & &1)
+
+    def get(_url, _timeout_ms) do
+      Agent.update(__MODULE__, &(&1 + 1))
+      {:ok, Jason.encode!(%{"fibers" => []})}
+    end
+  end
+
   test "applies a tag diff against the configured felt store that owns the fiber" do
     root =
       System.tmp_dir!()
@@ -126,6 +157,86 @@ defmodule ShuttleWeb.FeltEditControllerTest do
     assert conn.status == 200
     refute File.exists?(args_file)
   end
+
+  test "forwards a remote-origin edit to the owning daemon, origin stripped, and refreshes its feed on a 2xx" do
+    setup_forward_plane!({:ok, 200, "ok\n"})
+
+    conn =
+      post(
+        api_conn(),
+        "/api/v1/felt-edit",
+        Jason.encode!(%{
+          "fiber_id" => "tests/remote-tags",
+          "origin" => "candide",
+          "add" => ["constitution"]
+        })
+      )
+
+    # The owning daemon's response is relayed verbatim (status + body).
+    assert conn.status == 200
+    assert conn.resp_body == "ok\n"
+
+    # Forwarded to the owning remote's identical /felt-edit with origin stripped,
+    # so the owner edits its own loom mirror as local.
+    last = FeltEditForwardClient.last()
+    assert last.url == "http://localhost:4001/api/v1/felt-edit"
+    forwarded = Jason.decode!(last.body)
+    refute Map.has_key?(forwarded, "origin")
+    assert forwarded["add"] == ["constitution"]
+
+    # A 2xx forward invalidates the owner's feed cache — the fiber registry
+    # refetched candide's feed.
+    assert FeltEditFeedClient.get_count() == 1
+  end
+
+  test "a non-2xx forward is relayed verbatim and does NOT refresh the owner feed" do
+    setup_forward_plane!({:ok, 422, "felt exited 1: nope\n"})
+
+    conn =
+      post(
+        api_conn(),
+        "/api/v1/felt-edit",
+        Jason.encode!(%{
+          "fiber_id" => "tests/remote-tags",
+          "origin" => "candide",
+          "add" => ["constitution"]
+        })
+      )
+
+    assert conn.status == 422
+    assert conn.resp_body == "felt exited 1: nope\n"
+
+    # A failed forward changed nothing on the owner, so no feed refetch fires.
+    assert FeltEditFeedClient.get_count() == 0
+  end
+
+  # Wire the forward POST plane and a live RemoteFiberRegistry (auto_poll off)
+  # with candide configured, so a remote-origin edit forwards through the stub
+  # and the post-forward refresh is observable via the feed stub's call count.
+  defp setup_forward_plane!(forward_response) do
+    start_supervised!({FeltEditForwardClient, forward_response})
+    start_supervised!(FeltEditFeedClient)
+
+    start_supervised!(
+      {Shuttle.RemoteFiberRegistry,
+       remotes: [%{name: "candide", url: "http://localhost:4001"}],
+       client: FeltEditFeedClient,
+       auto_poll: false}
+    )
+
+    previous_remotes = Application.get_env(:shuttle, :remotes)
+    previous_client = Application.get_env(:shuttle, :write_forward_client)
+    Application.put_env(:shuttle, :remotes, [%{name: "candide", url: "http://localhost:4001"}])
+    Application.put_env(:shuttle, :write_forward_client, FeltEditForwardClient)
+
+    on_exit(fn ->
+      restore_app_env(:remotes, previous_remotes)
+      restore_app_env(:write_forward_client, previous_client)
+    end)
+  end
+
+  defp restore_app_env(key, nil), do: Application.delete_env(:shuttle, key)
+  defp restore_app_env(key, value), do: Application.put_env(:shuttle, key, value)
 
   defp api_conn do
     build_conn()
