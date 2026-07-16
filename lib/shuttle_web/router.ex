@@ -2,7 +2,7 @@ defmodule ShuttleWeb.Router do
   @moduledoc """
   Router for the Shuttle Phoenix surface.
 
-  Stage 5: Agent-API REST endpoints for worker coordination.
+  Agent-API REST endpoints for worker coordination.
   """
 
   use Phoenix.Router

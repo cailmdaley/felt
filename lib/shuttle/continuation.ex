@@ -1,12 +1,10 @@
 defmodule Shuttle.Continuation do
   @moduledoc """
   Worker-continuation signals, carried in the fiber's `shuttle:` frontmatter
-  block — the substrate that replaced felt history (and, before this, the
-  per-host marker files).
+  block — the substrate for clean-exit detection and resume-vs-fresh decisions.
 
-  Four runtime fields live under `shuttle.runtime` (Stage 5: nested,
-  machine-managed), written at the two natural moments and read straight off the
-  polled fiber map:
+  Four runtime fields live under `shuttle.runtime` (nested, machine-managed),
+  written at the two natural moments and read straight off the polled fiber map:
 
     * `shuttle.runtime.session_uuid` + `shuttle.runtime.dispatched_at`
       (+ `shuttle.runtime.run_id` for standing) — **written by the daemon at
@@ -24,7 +22,7 @@ defmodule Shuttle.Continuation do
   non-owned fibers). Reassigning `host` degrades gracefully to a failed resume →
   fresh.
 
-  ## felt owns the nested write (Stage 5, Option B)
+  ## felt owns the nested write
 
   The runtime nesting lives in ONE engine — felt's `yaml.Node` code. The daemon
   never edits the two-level `shuttle.runtime` structure with its own text
@@ -33,11 +31,10 @@ defmodule Shuttle.Continuation do
   store + its store-scoped id and shell that verb, instead of editing the `.md`
   directly.
 
-  ## Reading: nested only (C5 — the flat fallback is retired)
+  ## Reading: nested only
 
-  Readers read ONLY `shuttle.runtime.<key>`. The migration this shim covered
-  (Stage 5's cutover to nested writes) is long done — no code writes a flat
-  runtime key anymore (`internal/felt/shuttle.go`'s `SetShuttleField` still
+  Readers read ONLY `shuttle.runtime.<key>`. No code writes a flat
+  runtime key (`internal/felt/shuttle.go`'s `SetShuttleField` still
   supports it as a generic primitive, but the only production caller left is
   `set-agent`'s `agent` field, never a runtime key) — so the dual-read was a
   pure ambiguity surface: a STALE flat key left over from before the cutover
@@ -122,7 +119,7 @@ defmodule Shuttle.Continuation do
   @runtime_keys ~w(dispatched_at session_uuid handed_off_at run_id)
 
   @doc """
-  C5 boot-scan primitive: legacy flat runtime keys present on `fiber`'s
+  Boot-scan primitive: legacy flat runtime keys present on `fiber`'s
   `shuttle:` block whose nested `shuttle.runtime.<key>` counterpart is
   ABSENT — a fiber never lifted by `felt shuttle migrate-runtime`, which now
   reads as having no continuation state at all (the readers above no longer
@@ -192,7 +189,7 @@ defmodule Shuttle.Continuation do
     end
   end
 
-  # C5: nested-only. A non-map `runtime:` (degenerate/null) reads as absent —
+  # Nested-only. A non-map `runtime:` (degenerate/null) reads as absent —
   # no flat fallback (see the moduledoc's "Reading: nested only" section).
   defp runtime_field(shuttle, key) do
     case shuttle do

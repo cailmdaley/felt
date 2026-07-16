@@ -9,7 +9,7 @@ defmodule Shuttle.StandingRole do
   is none; the schedule-derived phase here only answers sleeping/due/running for
   an armed role.
 
-  **felt is the cron authority; this module is the timing decider (Stage 4b).**
+  **felt is the cron authority; this module is the timing decider.**
   The daemon no longer parses cron. felt resolves the schedule on every read and
   inlines two timestamps under `shuttle.resolved`: `next_due` (the next
   occurrence strictly after now — display) and `prev_due` (the most recent

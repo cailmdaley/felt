@@ -74,9 +74,9 @@ defmodule Shuttle.LifecycleStore do
     with {:ok, _schedule} <- require_schedule(shuttle) do
       # The document carries the entire lifecycle: writing `status: active` re-arms
       # the role and `next_due` is recomputed by felt on the next poll (the daemon
-      # no longer parses cron — Stage 4b). The prior run is then concluded by a
+      # does not parse cron). The prior run is then concluded by a
       # SECOND write (`conclude_run`: `felt shuttle mark-runtime --handed-off-at`),
-      # because felt owns the nesting (Stage 5, Option B) — see conclude_run.
+      # because felt owns the nesting — see conclude_run.
       FiberDoc.write!(path, raw_fm, body, rearm_ops() ++ evict_runtime_ops())
       conclude_run(fiber_id, opts)
 
@@ -100,7 +100,7 @@ defmodule Shuttle.LifecycleStore do
     # Re-arm by writing `status: active`; the next poll's cron window picks the
     # role up immediately (the active document IS the re-queue). The prior run is
     # concluded by `conclude_run` (a second `felt shuttle mark-runtime` write —
-    # felt owns the runtime nesting, Stage 5). No runtime row.
+    # felt owns the runtime nesting). No runtime row.
     FiberDoc.write!(path, raw_fm, body, rearm_ops() ++ evict_runtime_ops())
     conclude_run(fiber_id, opts)
 
@@ -316,8 +316,8 @@ defmodule Shuttle.LifecycleStore do
   # (`handed_off_at >= dispatched_at`) and the cron lookback baseline advances —
   # stopping the temper oscillation with no separate re-arm field.
   #
-  # Stage 5, Option B: felt owns the nesting, so the daemon cannot fold this into
-  # the atomic status write the way the old flat `conclude_run_op` did. It is a
+  # felt owns the nesting, so the daemon cannot fold this into
+  # the atomic status write a single flat op could. It is a
   # SECOND write — `felt shuttle mark-runtime --handed-off-at` — after the status
   # re-arm. The sub-ms non-atomic window between the two is the one accepted
   # tradeoff: a daemon crash there leaves the role `active` with no fresh handoff

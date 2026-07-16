@@ -236,7 +236,7 @@ defmodule Shuttle.Poller do
       # rows only nominate candidates — `Dispatcher.dispatch` re-fetches the
       # fiber and re-verifies status before any launch.
       last_known_listings: %{},
-      # C5: has the one-shot flat-runtime-key boot scan run yet? Flips true
+      # Has the one-shot flat-runtime-key boot scan run yet? Flips true
       # after the FIRST `apply_poll_cycle/2` (the earliest point candidates —
       # already-fetched, no extra felt shell-out — are available). Logs any
       # fiber still carrying ONLY legacy flat `shuttle.<key>` runtime fields
@@ -2493,7 +2493,7 @@ defmodule Shuttle.Poller do
   # chat-captured session stamps (refreshes) the fiber's `shuttle.runtime`
   # dispatch fields so the continuation heuristic and "Resume previous" can
   # recover its session UUID. Routes through `felt shuttle mark-runtime` (felt
-  # owns the nesting — Stage 5). The store/scoped-id pair mirrors the dispatch
+  # owns the nesting). The store/scoped-id pair mirrors the dispatch
   # path: `host_for_fiber` (the same owning-store the poll enumerated this fiber
   # from), falling back to the primary configured store. A claim with no captured
   # session_uuid still stamps `dispatched_at` (the run-window anchor) so a clean
@@ -2539,7 +2539,7 @@ defmodule Shuttle.Poller do
     %{state | dispatch_failures: Map.put(state.dispatch_failures, runtime_key, entry)}
   end
 
-  # C5: one-shot, first-poll-cycle scan for fibers still carrying ONLY legacy
+  # One-shot, first-poll-cycle scan for fibers still carrying ONLY legacy
   # flat runtime keys (no nested shuttle.runtime.<key> counterpart) — the
   # exact fibers `Shuttle.Continuation`'s reader stopped falling back to when
   # the nested-OR-flat shim was deleted. Rides the already-fetched `candidates`

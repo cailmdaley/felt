@@ -1285,7 +1285,7 @@ defmodule Shuttle.Dispatcher do
 
   # Stamp `{session_uuid, dispatched_at, run_id}` into the fiber's
   # `shuttle.runtime` block by shelling `felt shuttle mark-runtime` (felt owns
-  # the nesting — Stage 5, Option B). At the next dispatch the worker's
+  # the nesting). At the next dispatch the worker's
   # `handed_off_at` is compared against this `dispatched_at` to decide
   # fresh-vs-resume. `felt_store` + `fiber_id` are the store/scoped-id pair the
   # dispatch read the fiber with, so felt resolves it. A missing `:felt_store`
