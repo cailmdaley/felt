@@ -13,7 +13,7 @@ A CLI for the durable trail that builds up around work. Each entry is a *fiber*:
 
 The directory tree gives hierarchy. `[[wikilinks]]` in bodies give narrative cross-references. Native metadata stays small (`name`, `status`, tags, timestamps, `outcome`, `due`, `description`). Any other top-level YAML keys are preserved opaquely so downstream tools can own their own schema without felt claiming it.
 
-A rebuildable SQLite index at `.felt/index.db` caches narrative back-references, reverse data-flow consumers, history lookups, and search rows, but plain markdown is the source of truth and the cache carries no extra authoring burden.
+A rebuildable SQLite index at `.felt/index.db` caches narrative back-references, reverse data-flow consumers, and search rows, but plain markdown is the source of truth and the cache carries no extra authoring burden.
 
 Felt is designed to be persistent memory for AI coding agents as much as for you. The bundled [Claude Code plugin](#agent-integration) and Codex hooks make `.felt/` the substrate agents reach for between sessions.
 
@@ -169,7 +169,7 @@ Because felt treats non-native frontmatter opaquely, Dataview can still query wh
 ```dataview
 TABLE status, outcome
 FROM "."
-WHERE shuttle.enabled = true
+WHERE shuttle
 ```
 
 Obsidian is not a dependency. The CLI and the `.felt/` tree are the source of truth; use them separately or together.
@@ -243,7 +243,7 @@ Felt borrows from several projects exploring how to give AI coding agents struct
 
 The same repo ships **Shuttle**: an OTP dispatcher that polls the felt tree and
 launches one tmux worker per eligible fiber — a fiber carrying a `shuttle:`
-frontmatter block whose status is `open` or `active`. It serves a kanban board at
+frontmatter block whose status is `active`. It serves a kanban board at
 `http://127.0.0.1:4000/` for watching and steering those autonomous workers.
 Workers stay attachable (`tmux attach -t shuttle-<fiber-id>`); the daemon
 supervises the watcher, not the worker.

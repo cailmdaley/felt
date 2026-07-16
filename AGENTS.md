@@ -48,8 +48,10 @@ are narrative references. If a project uses `inputs.from` as a data-flow
 convention, felt indexes reverse consumers without claiming the rest of that
 schema. The SQLite cache indexes links, tags, additional YAML field text, and
 FTS5 body text; `felt show` uses it for citations/consumers and `felt ls --body`
-uses it for fast body search. The cache is strictly a rebuildable index — plain
-markdown is the source of truth.
+queries the FTS5 index for fast body search (tokenized whole-word matching, not
+raw substring; falls back to a markdown scan when the index is absent/busy, and
+regex `--body -r` always scans). The cache is strictly a rebuildable index —
+plain markdown is the source of truth.
 
 **Editing.** `felt edit` owns native metadata only: name, status, tags, due,
 body, outcome. For non-native frontmatter, read then edit the markdown file
@@ -90,7 +92,7 @@ only the manifest at the plugin root differs (`.claude-plugin/` and
 
 - `felt setup claude` registers the `cailmdaley/felt` marketplace and installs
   the plugin; `felt setup codex` symlinks skills and configures Codex hooks.
-- The plugin bundles the `felt` skill, a SessionStart hook (lists active +
+- The plugin bundles the `felt` and `shuttle` skills, a SessionStart hook (lists active +
   recently touched fibers), and a PreToolUse deny gate (`cmd/hook.go`).
   **Updating the binary updates hook behavior** — the plugin only needs
   refreshing when skill content changes.
@@ -568,7 +570,7 @@ felt shuttle validate-identity                # UID migration/cross-city validat
   WRITE is **owner-routed via `Shuttle.OriginRouter`**: the composite board
   stamps each fiber's `origin`, the client carries it back, and the local daemon
   forwards to the owner's identical endpoint over the SSH LocalForward
-  (candide→:4001, cineca→:4002, amundsen→:4003). The `~/loom` git mirror replicating a remote
+  (candide→:4001, cineca→:4002, amundsen→:4003, nibi→:4004). The `~/loom` git mirror replicating a remote
   fiber's files locally is **incidental and must never be relied on** — if any
   feature works only because a file happened to git-sync, that is a bug. The
   symptom when this invariant is violated: a remote card shows its outcome (it
