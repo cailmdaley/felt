@@ -8,6 +8,7 @@ defmodule ShuttleWeb.LifecycleControllerTest do
   # Interactivity is retired: install never forwards --interactive, even if a
   # stale client still posts the key. The flag is silently dropped, not relayed.
   test "install drops a stale interactive key rather than forwarding it" do
+    store = fixture_store!("shuttle-lifecycle-install", "tests/interactive", "Interactive")
     args_file = install_fake_felt!()
 
     conn =
@@ -25,13 +26,18 @@ defmodule ShuttleWeb.LifecycleControllerTest do
     assert conn.status == 200
 
     assert File.read!(args_file) ==
-             "install\ntests/interactive\n--project-dir\n/tmp/project\n"
+             "--felt-store\n#{store}\ninstall\ntests/interactive\n--project-dir\n/tmp/project\n"
   end
 
   # pin reshapes a fiber to the schedule-less kind:pinned role — the board's
   # drag-onto-the-Pinned-strip gesture. The controller forwards model / project
   # / host to `felt shuttle pin`; no schedule (a pinned block has none).
+  #
+  # `--host` here is the cross-host INSTALL TARGET, unrelated to `--felt-store`
+  # (which names the store the id resolves against). Both ride the same argv;
+  # this locks in that they stay distinct.
   test "pin delegates to felt shuttle with model, project_dir and host" do
+    store = fixture_store!("shuttle-lifecycle-pin", "tests/operator", "Operator")
     args_file = install_fake_felt!()
 
     conn =
@@ -50,7 +56,88 @@ defmodule ShuttleWeb.LifecycleControllerTest do
     assert conn.status == 200
 
     assert File.read!(args_file) ==
-             "pin\ntests/operator\n--model\nclaude-fable\n--project-dir\n/tmp/loom\n--host\ndapmcw68\n"
+             "--felt-store\n#{store}\npin\ntests/operator\n--model\nclaude-fable\n" <>
+               "--project-dir\n/tmp/loom\n--host\ndapmcw68\n"
+  end
+
+  # `repeat` rides the same id-resolution clause as `install` and `pin` — a
+  # scheduled role reshaped from a card whose row came from a nested project
+  # store must resolve to the owning store like any other lifecycle write.
+  test "repeat delegates to felt shuttle with the store flag ahead of the verb" do
+    store = fixture_store!("shuttle-lifecycle-repeat", "tests/nightly", "Nightly")
+    args_file = install_fake_felt!()
+
+    conn =
+      post(
+        api_conn(),
+        "/api/v1/lifecycle",
+        Jason.encode!(%{
+          "action" => "repeat",
+          "fiber" => "tests/nightly",
+          "schedule" => "0 7 * * *",
+          "tz" => "Europe/Paris",
+          "reshape" => true
+        })
+      )
+
+    assert conn.status == 200
+
+    assert File.read!(args_file) ==
+             "--felt-store\n#{store}\nrepeat\ntests/nightly\n--schedule\n0 7 * * *\n" <>
+               "--tz\nEurope/Paris\n--reshape\n"
+  end
+
+  # Regression: a project whose `.felt` symlinks INTO a subtree of the loom sees
+  # its fibers under project-relative ids (`lightcone/desk`), while the loom that
+  # actually owns the file sees `ai-futures/lightcone/lightcone/desk`. The board
+  # sends whichever id served the card's row. Before the fix, `pin` forwarded
+  # that id raw against the default store and died with
+  # `no felt found matching "lightcone/desk"`, stranding a de-pinned fiber in
+  # Awaiting review. The controller must resolve to the OWNING store and rewrite
+  # the id owner-relative.
+  test "pin rewrites a project-relative id to its owning store" do
+    root =
+      System.tmp_dir!()
+      |> Path.join("shuttle-lifecycle-nested-#{System.unique_integer([:positive])}")
+
+    loom = Path.join(root, "loom")
+    nested = Path.join([loom, ".felt", "ai-futures", "lightcone"])
+    fiber_dir = Path.join([nested, "lightcone", "desk"])
+    File.mkdir_p!(fiber_dir)
+    File.write!(Path.join(fiber_dir, "desk.md"), "---\nname: Desk\n---\n\n")
+
+    # The project store is a symlink into the loom subtree — the real topology
+    # that produces two valid ids for one file.
+    project = Path.join(root, "LightconeResearch")
+    File.mkdir_p!(project)
+    File.ln_s!(nested, Path.join(project, ".felt"))
+
+    args_file = install_fake_felt!()
+    old_felt_stores = System.get_env("FELT_STORES")
+    System.put_env("FELT_STORES", "#{loom},#{project}")
+
+    on_exit(fn ->
+      restore_env("FELT_STORES", old_felt_stores)
+      File.rm_rf(root)
+    end)
+
+    conn =
+      post(
+        api_conn(),
+        "/api/v1/lifecycle",
+        Jason.encode!(%{
+          "action" => "pin",
+          "fiber" => "lightcone/desk",
+          "model" => "claude-fable",
+          "reshape" => true
+        })
+      )
+
+    assert conn.status == 200
+
+    assert File.read!(args_file) ==
+             "--felt-store\n#{loom}\npin\nai-futures/lightcone/lightcone/desk\n" <>
+               "--model\nclaude-fable\n--reshape\n"
   end
 
   # set-interactive is retired: the controller no longer allows the action, so a
@@ -641,6 +728,32 @@ defmodule ShuttleWeb.LifecycleControllerTest do
     end)
 
     args_file
+  end
+
+  # A throwaway single-store felt root holding one empty fiber at `slug`, wired
+  # to `FELT_STORES` for the duration of the test. Lifecycle verbs resolve the
+  # posted id against the configured stores, so a test that posts an id needs
+  # that id to actually exist somewhere — otherwise the controller (correctly)
+  # answers 400 `fiber not found` before it ever shells out to felt.
+  defp fixture_store!(prefix, slug, name) do
+    root =
+      System.tmp_dir!()
+      |> Path.join("#{prefix}-#{System.unique_integer([:positive])}")
+
+    store = Path.join(root, "loom")
+    fiber_dir = Path.join([store, ".felt" | Path.split(slug)])
+    File.mkdir_p!(fiber_dir)
+    File.write!(Path.join(fiber_dir, "#{Path.basename(slug)}.md"), "---\nname: #{name}\n---\n\n")
+
+    old_felt_stores = System.get_env("FELT_STORES")
+    System.put_env("FELT_STORES", store)
+
+    on_exit(fn ->
+      restore_env("FELT_STORES", old_felt_stores)
+      File.rm_rf(root)
+    end)
+
+    store
   end
 
   defp restore_env(key, nil), do: System.delete_env(key)

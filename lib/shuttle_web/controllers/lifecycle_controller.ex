@@ -69,16 +69,16 @@ defmodule ShuttleWeb.LifecycleController do
   end
 
   defp execute("resume", %{"fiber" => fiber}) do
-    with {:ok, fiber_id} <- fiber_address(fiber) do
+    with {:ok, %{host: felt_store, fiber_id: fiber_id}} <- resolve_fiber(fiber) do
       case LifecycleService.resume(fiber_id) do
         {:ok, output} -> {:ok, output}
-        {:error, _reason} -> args_for("resume", %{"fiber" => fiber_id}) |> then(&run_elem/1)
+        {:error, _reason} -> args_for("resume", %{"fiber" => fiber_id}) |> run_elem(felt_store)
       end
     end
   end
 
   defp execute(action, %{"fiber" => fiber} = params)
-       when action in ~w(pause set-model set-agent set-outcome uninstall) do
+       when action in ~w(install pin repeat pause set-model set-agent set-outcome uninstall) do
     # `resolve_fiber`'s `:host` key is the felt-STORE path (`--felt-store`),
     # not an identity override — see `Shuttle.Felt.Shuttle`'s C4 note. Renamed
     # only at this local boundary; `FeltStores.resolve_fiber/1`'s wire shape
