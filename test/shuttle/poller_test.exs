@@ -816,24 +816,20 @@ defmodule Shuttle.PollerTest do
 
     send(poller, :run_poll_cycle)
 
-    # The poller uses felt's cheap path-carrying projection; broad listing is
-    # only a fallback for older remote felt binaries.
+    # The poller uses felt's widened kanban projection (the full field set the
+    # document cache builds entries from); broad listing is only a fallback for
+    # older remote felt binaries.
+    projection = Enum.join(Shuttle.FiberDocuments.kanban_fields(), ",")
+
     assert wait_until(fn ->
              Enum.any?(MockRunner.commands(), fn {cmd, args} ->
                cmd == "felt" and
-                 args == [
-                   "ls",
-                   "--json",
-                   "--has-field",
-                   "shuttle",
-                   "--json-field",
-                   "id,uid,status,shuttle,path,modified_at,depends_on"
-                 ]
+                 args == ["ls", "--json", "--has-field", "shuttle", "--json-field", projection]
              end)
            end)
   end
 
-  test "poller caches document entries by uid and modified_at" do
+  test "poller builds document cache entries from candidate rows, no felt show" do
     uid = "01JZ00000000000000000000CA"
 
     fiber =
@@ -860,10 +856,11 @@ defmodule Shuttle.PollerTest do
            end)
 
     first_stats = Poller.snapshot(poller)[:document_cache]
-    first_show_count = felt_show_count()
 
     assert %{"hits" => 0, "misses" => 1, "entries" => 1} = first_stats
-    assert first_show_count == 1
+    # The cache builds each entry directly from its candidate row — the widened
+    # `felt ls` projection carries every field — so NO `felt show` fires.
+    assert felt_show_count() == 0
 
     send(poller, :run_poll_cycle)
 
@@ -872,7 +869,7 @@ defmodule Shuttle.PollerTest do
              stats["hits"] == 1 and stats["misses"] == 0
            end)
 
-    assert felt_show_count() == first_show_count
+    assert felt_show_count() == 0
 
     assert {:ok, body} = Poller.cached_fiber_documents(poller)
     assert [%{fiber: %{"id" => ^uid, "slug" => "tests/cached-document"}}] = body.fibers
@@ -893,7 +890,7 @@ defmodule Shuttle.PollerTest do
              stats["hits"] == 0 and stats["misses"] == 1
            end)
 
-    assert felt_show_count() == first_show_count + 1
+    assert felt_show_count() == 0
     assert {:ok, body} = Poller.cached_fiber_documents(poller)
     assert [%{fiber: %{"id" => ^uid, "name" => "changed document"}}] = body.fibers
   end
@@ -934,6 +931,11 @@ defmodule Shuttle.PollerTest do
     # now times out. The tick degrades by retaining the last-known candidate:
     # the card stays served, and the mtime-keyed cache reuses the entry
     # without re-shelling a felt that just timed out.
+    # Capture the last all-fresh refreshed_at before the failure, so we can prove
+    # the partial tick does NOT advance it.
+    fresh_refreshed_at = Poller.snapshot(poller)[:document_cache]["refreshed_at"]
+    assert is_binary(fresh_refreshed_at)
+
     MockRunner.set_felt_ls_timeout(true)
     send(poller, :run_poll_cycle)
 
@@ -946,14 +948,176 @@ defmodule Shuttle.PollerTest do
     assert {:ok, body} = Poller.cached_fiber_documents(poller)
     assert [%{fiber: %{"id" => ^uid, "slug" => "tests/retained-document"}}] = body.fibers
 
-    # felt recovers: the live listing resumes and the same entry is served.
+    # A store's listing FAILED, so this tick is "partial": the cache state says
+    # so and refreshed_at is frozen at the last all-fresh tick (staleness honest).
+    partial_stats = Poller.snapshot(poller)[:document_cache]
+    assert partial_stats["state"] == "partial"
+    assert partial_stats["refreshed_at"] == fresh_refreshed_at
+    assert body.cache.state == "partial"
+    assert body.cache.refreshed_at == fresh_refreshed_at
+
+    # felt recovers: the live listing resumes, the entry is served, and the tick
+    # is "fresh" again with an ADVANCED refreshed_at.
     MockRunner.set_felt_ls_timeout(false)
     send(poller, :run_poll_cycle)
 
     assert_eventually(fn ->
       assert {:ok, body} = Poller.cached_fiber_documents(poller)
       assert [%{fiber: %{"id" => ^uid, "slug" => "tests/retained-document"}}] = body.fibers
+      assert body.cache.state == "fresh"
     end)
+  end
+
+  test "seam patch survives a poll built from a pre-mutation snapshot (prefer-newer merge)" do
+    uid = "01JZ0000000000000000000SEA"
+
+    fiber =
+      make_fiber("tests/seam", %{
+        "uid" => uid,
+        "modified_at" => "2026-06-06T01:00:00Z",
+        "name" => "disk-old"
+      })
+
+    MockRunner.set_fiber("tests/seam", fiber)
+    MockRunner.set_shuttle("tests/seam", @oneshot_shuttle)
+
+    {:ok, poller} =
+      start_poller!(
+        name: :test_poller_seam_merge,
+        runner: MockRunner,
+        poll_interval_ms: 60_000,
+        max_concurrent_workers: 0,
+        felt_stores: ["/tmp"]
+      )
+
+    assert wait_until(fn ->
+             get_in(Poller.snapshot(poller), [:document_cache, "entries"]) == 1
+           end)
+
+    # Simulate a mid-poll `refresh_document` patch landing on the LIVE cache: a
+    # NEWER mtime and a fresh body. The on-disk candidate still reads the OLD
+    # mtime, so the next poll's cache rebuild produces the stale "disk-old" entry.
+    patched_entry = %{
+      felt_store: "/tmp",
+      path: "tests/seam/seam.md",
+      fiber: %{
+        "id" => uid,
+        "slug" => "tests/seam",
+        "uid" => uid,
+        "name" => "patched-newer",
+        "status" => "active",
+        "shuttle" => %{"kind" => "oneshot", "host" => "test-host"}
+      }
+    }
+
+    :sys.replace_state(poller, fn state ->
+      %{state | document_cache: %{uid => %{modified_at: "2026-06-06T02:00:00Z", entry: patched_entry}}}
+    end)
+
+    send(poller, :run_poll_cycle)
+
+    # The Task-built cache carries "disk-old" (mtime m1); the merge prefers the
+    # live "patched-newer" entry (mtime m2 > m1) instead of clobbering it.
+    assert_eventually(fn ->
+      assert {:ok, body} = Poller.cached_fiber_documents(poller)
+      assert [%{fiber: %{"name" => "patched-newer"}}] = body.fibers
+    end)
+  end
+
+  test "mtime-reuse hit reconciles report_path when a sibling report is added/removed" do
+    uid = "01JZ0000000000000000000RPT"
+
+    fiber =
+      make_fiber("tests/report-toggle", %{
+        "uid" => uid,
+        "modified_at" => "2026-06-06T03:00:00Z"
+      })
+
+    MockRunner.set_fiber("tests/report-toggle", fiber)
+    MockRunner.set_shuttle("tests/report-toggle", @oneshot_shuttle)
+
+    {:ok, poller} =
+      start_poller!(
+        name: :test_poller_report_toggle,
+        runner: MockRunner,
+        poll_interval_ms: 60_000,
+        max_concurrent_workers: 0,
+        felt_stores: ["/tmp"]
+      )
+
+    assert wait_until(fn ->
+             get_in(Poller.snapshot(poller), [:document_cache, "entries"]) == 1
+           end)
+
+    # No report yet.
+    {:ok, body} = Poller.cached_fiber_documents(poller)
+    assert [entry] = body.fibers
+    refute Map.has_key?(entry, :report_path)
+
+    # A report.html appears — but adding it does NOT bump the fiber's mtime, so
+    # the next poll is a mtime-REUSE hit. The reconcile must still surface it from
+    # the candidate row's native report_path field.
+    current = MockRunner.fiber("tests/report-toggle")
+    MockRunner.set_fiber(
+      "tests/report-toggle",
+      Map.put(current, "report_path", "/tmp/.felt/tests/report-toggle/report.html")
+    )
+
+    send(poller, :run_poll_cycle)
+
+    assert_eventually(fn ->
+      assert {:ok, body} = Poller.cached_fiber_documents(poller)
+      assert [entry] = body.fibers
+      assert Map.has_key?(entry, :report_path)
+      assert String.ends_with?(entry.report_path, "report.html")
+    end)
+
+    # The report is removed (field drops) — again without an mtime bump. The
+    # reconcile drops the stale report_path on the reuse hit.
+    MockRunner.set_fiber("tests/report-toggle", Map.delete(current, "report_path"))
+    send(poller, :run_poll_cycle)
+
+    assert_eventually(fn ->
+      assert {:ok, body} = Poller.cached_fiber_documents(poller)
+      assert [entry] = body.fibers
+      refute Map.has_key?(entry, :report_path)
+    end)
+  end
+
+  test "cold-cache serve logs once per cold period, not per request" do
+    {:ok, poller} =
+      start_poller!(
+        name: :test_poller_cold_log,
+        runner: MockRunner,
+        poll_interval_ms: 60_000,
+        max_concurrent_workers: 0,
+        felt_stores: ["/tmp"]
+      )
+
+    # Let the boot poll warm the cache, then force it cold and re-arm the guard.
+    assert wait_until(fn -> :sys.get_state(poller).document_cache_ready end)
+
+    :sys.replace_state(poller, fn state ->
+      %{state | document_cache_ready: false, cold_feed_logged: false, document_cache: %{}}
+    end)
+
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        {:ok, _} = Poller.cached_fiber_documents(poller)
+        {:ok, _} = Poller.cached_fiber_documents(poller)
+        {:ok, _} = Poller.cached_fiber_documents(poller)
+        # Flush the GenServer so its logging is done before capture_log returns.
+        _ = :sys.get_state(poller)
+      end)
+
+    occurrences =
+      log
+      |> String.split("owner feed served from COLD document cache")
+      |> length()
+      |> Kernel.-(1)
+
+    assert occurrences == 1
+    assert :sys.get_state(poller).cold_feed_logged == true
   end
 
   test "owner feed stamps serve-time runtime onto an owned fiber with a live worker" do

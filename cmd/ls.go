@@ -334,6 +334,8 @@ var nativeFields = map[string]nativeFieldSpec{
 	"modified_at":    {accessor: feltModifiedAtValue, prefilterable: false},
 	"modified-at":    {accessor: feltModifiedAtValue, prefilterable: false},
 	"path":           {accessor: func(f *felt.Felt) (any, bool) { return f.Path, f.Path != "" }, prefilterable: false},
+	"report_path":    {accessor: func(f *felt.Felt) (any, bool) { return f.ReportPath, f.ReportPath != "" }, prefilterable: false},
+	"report-path":    {accessor: func(f *felt.Felt) (any, bool) { return f.ReportPath, f.ReportPath != "" }, prefilterable: false},
 	"entry_point":    {accessor: func(f *felt.Felt) (any, bool) { return f.EntryPoint, f.EntryPoint }, prefilterable: false},
 	"entry-point":    {accessor: func(f *felt.Felt) (any, bool) { return f.EntryPoint, f.EntryPoint }, prefilterable: false},
 }

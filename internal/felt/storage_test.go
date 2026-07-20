@@ -1821,6 +1821,65 @@ func TestStorageListSymlinkedSubstoreLiftsIds(t *testing.T) {
 	}
 }
 
+// TestStorageListSymlinkedFiberFile guards against a walker regression: a
+// symlink whose target is a regular file (not a directory) — e.g. a single
+// fiber .md symlinked in from elsewhere — must still be visited. The prior
+// filepath.WalkDir-based walker handled this because it resolves symlinks
+// transparently; the hand-rolled os.ReadDir walker introduced to reuse
+// sibling DirEntry lists for report.html detection initially special-cased
+// the symlink branch to only recurse-or-skip, silently dropping any symlink
+// that didn't resolve to a directory.
+func TestStorageListSymlinkedFiberFile(t *testing.T) {
+	tmp := t.TempDir()
+	s := NewStorage(tmp)
+	if err := s.Init(); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	// Real fiber file living outside the store's directory, in the
+	// dir-basename-matches-file-stem shape fiberIDFromRelativePath expects
+	// (id derivation walks the *resolved* symlink target, not the link's
+	// own location, so the target itself must satisfy the convention).
+	realDir := filepath.Join(tmp, "external", "linked")
+	if err := os.MkdirAll(realDir, 0755); err != nil {
+		t.Fatalf("mkdir external/linked: %v", err)
+	}
+	realMd := filepath.Join(realDir, "linked.md")
+	if err := os.WriteFile(realMd, []byte("---\nname: linked\n---\n"), 0644); err != nil {
+		t.Fatalf("write real md: %v", err)
+	}
+	realMdResolved, err := filepath.EvalSymlinks(realMd)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(realMd): %v", err)
+	}
+
+	// A symlink at the store root pointing directly at that file (not a
+	// directory) — the shape the walker regression dropped.
+	linkPath := filepath.Join(s.root, "pointer.md")
+	if err := os.Symlink(realMd, linkPath); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	felts, err := s.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	found := false
+	for _, f := range felts {
+		if f.Path == realMdResolved {
+			found = true
+			break
+		}
+	}
+	if !found {
+		var paths []string
+		for _, f := range felts {
+			paths = append(paths, f.Path)
+		}
+		t.Fatalf("symlinked fiber file missing from List(); got paths = %v", paths)
+	}
+}
+
 // TestStorageListSymlinkedFeltDirIntoOuter models a monorepo arrangement
 // where a project's `.felt/` is itself a symlink into a subdirectory of an
 // outer store's `.felt/`. The project view should see project-relative ids

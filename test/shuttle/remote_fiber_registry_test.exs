@@ -18,6 +18,53 @@ defmodule Shuttle.RemoteFiberRegistryTest do
 
     @impl true
     def get(url, _timeout_ms), do: Agent.get(__MODULE__, &Map.get(&1, url, {:error, :not_set}))
+
+    # Conditional-fetch transport. Derives a content etag from the scripted
+    # response body and honors If-None-Match: a matching etag returns 304 (empty
+    # body); otherwise a 200 with the body and an `etag` header. Errors pass
+    # through unchanged. This lets tests exercise the real 200/304 round-trip.
+    @impl true
+    def get(url, req_headers, _timeout_ms) do
+      case Agent.get(__MODULE__, &Map.get(&1, url, {:error, :not_set})) do
+        {:ok, body} ->
+          etag = etag_for(body)
+          inm = header(req_headers, "if-none-match")
+          # Mirror the server: the cache block rides `x-shuttle-cache` on both
+          # 200 and 304 (a 304 has no body to carry it).
+          resp_headers = [{"etag", etag} | cache_header(body)]
+
+          if inm == etag,
+            do: {:ok, 304, resp_headers, ""},
+            else: {:ok, 200, resp_headers, body}
+
+        {:error, reason} ->
+          {:error, reason}
+      end
+    end
+
+    # Mirror the server: the etag is over the FIBERS only, not the cache block —
+    # so a cache-only change (e.g. refreshed_at advancing) still 304s and the new
+    # cache rides the header.
+    defp etag_for(body) do
+      fibers =
+        case Jason.decode(body) do
+          {:ok, %{"fibers" => f}} -> f
+          _ -> body
+        end
+
+      ~s("#{Integer.to_string(:erlang.phash2(fibers), 16)}")
+    end
+
+    defp cache_header(body) do
+      case Jason.decode(body) do
+        {:ok, %{"cache" => cache}} -> [{"x-shuttle-cache", Jason.encode!(cache)}]
+        _ -> []
+      end
+    end
+
+    defp header(headers, key) do
+      Enum.find_value(headers, fn {k, v} -> if String.downcase(k) == key, do: v end)
+    end
   end
 
   setup do
@@ -187,6 +234,166 @@ defmodule Shuttle.RemoteFiberRegistryTest do
       :ok = RemoteFiberRegistry.refresh_now(pid)
 
       assert %{"candide" => %{stale: false, fibers: []}} = RemoteFiberRegistry.feeds(pid)
+    end
+  end
+
+  describe "conditional fetch (etag / 304)" do
+    test "a 304 keeps last-good fibers and advances last_polled_at (clears staleness)" do
+      # Generous poll_interval so freshness is stable across the assertions; the
+      # point is that the 304 SUCCEEDS (keeps fibers, advances the success clock),
+      # not the time-based staleness edge (covered elsewhere).
+      remote = candide(poll_interval_ms: 60_000)
+      url = Remote.fibers_url(remote)
+      MockClient.set(url, {:ok, feed_body([sample_fiber("foo")])})
+
+      pid =
+        start_supervised!(
+          {RemoteFiberRegistry,
+           name: :reg_304, remotes: [remote], client: MockClient, auto_poll: false}
+        )
+
+      # First fetch: 200, stores the feed AND the etag.
+      :ok = RemoteFiberRegistry.refresh_now(pid)
+      %{"candide" => first} = RemoteFiberRegistry.feeds(pid)
+      assert first.stale == false
+      assert [%{"fiber" => %{"id" => "foo"}}] = first.fibers
+      t1 = first.last_polled_at
+
+      Process.sleep(5)
+
+      # Body UNCHANGED → the conditional re-fetch sends the stored etag and the
+      # stub replies 304. The feed keeps its fibers and, because the poll
+      # SUCCEEDED, last_polled_at advances and staleness stays clear.
+      :ok = RemoteFiberRegistry.refresh_now(pid)
+      %{"candide" => second} = RemoteFiberRegistry.feeds(pid)
+
+      assert second.stale == false
+      assert second.last_error == nil
+      assert [%{"fiber" => %{"id" => "foo"}}] = second.fibers
+      assert DateTime.compare(second.last_polled_at, t1) == :gt
+    end
+
+    test "a changed body busts the etag and delivers the new feed (200)" do
+      url = Remote.fibers_url(candide())
+      MockClient.set(url, {:ok, feed_body([sample_fiber("before")])})
+
+      pid =
+        start_supervised!(
+          {RemoteFiberRegistry,
+           name: :reg_etag_change, remotes: [candide()], client: MockClient, auto_poll: false}
+        )
+
+      :ok = RemoteFiberRegistry.refresh_now(pid)
+      assert %{"candide" => %{fibers: [%{"fiber" => %{"id" => "before"}}]}} =
+               RemoteFiberRegistry.feeds(pid)
+
+      # Different body → different etag → the stored If-None-Match no longer
+      # matches → a full 200 with the new fibers.
+      MockClient.set(url, {:ok, feed_body([sample_fiber("after")])})
+      :ok = RemoteFiberRegistry.refresh_now(pid)
+
+      assert %{"candide" => %{fibers: [%{"fiber" => %{"id" => "after"}}]}} =
+               RemoteFiberRegistry.feeds(pid)
+    end
+
+    test "a 304 refreshes cache metadata from the x-shuttle-cache header (no freeze)" do
+      remote = candide(poll_interval_ms: 60_000)
+      url = Remote.fibers_url(remote)
+
+      body_at = fn t ->
+        Jason.encode!(%{
+          "host" => "candide",
+          "fibers" => [sample_fiber("foo")],
+          "cache" => %{"state" => "fresh", "refreshed_at" => t, "entries" => 1}
+        })
+      end
+
+      MockClient.set(url, {:ok, body_at.("2026-07-20T10:00:00Z")})
+
+      pid =
+        start_supervised!(
+          {RemoteFiberRegistry,
+           name: :reg_304_cache, remotes: [remote], client: MockClient, auto_poll: false}
+        )
+
+      :ok = RemoteFiberRegistry.refresh_now(pid)
+      assert %{"candide" => %{cache: %{"refreshed_at" => "2026-07-20T10:00:00Z"}}} =
+               RemoteFiberRegistry.feeds(pid)
+
+      # The server's fibers are UNCHANGED but its cache advanced refreshed_at.
+      # Since the etag is over fibers only, the conditional re-fetch 304s — and
+      # the fresher cache block rides the x-shuttle-cache header, so the client's
+      # refreshed_at tracks instead of freezing.
+      MockClient.set(url, {:ok, body_at.("2026-07-20T10:05:00Z")})
+      :ok = RemoteFiberRegistry.refresh_now(pid)
+
+      assert %{"candide" => entry} = RemoteFiberRegistry.feeds(pid)
+      assert entry.cache["refreshed_at"] == "2026-07-20T10:05:00Z"
+      assert [%{"fiber" => %{"id" => "foo"}}] = entry.fibers
+    end
+
+    test "a cold empty 200 keeps last-good fibers and does NOT advance last_polled_at" do
+      remote = candide(poll_interval_ms: 60_000)
+      url = Remote.fibers_url(remote)
+
+      warm =
+        Jason.encode!(%{
+          "host" => "candide",
+          "fibers" => [sample_fiber("foo")],
+          "cache" => %{"state" => "fresh", "entries" => 1}
+        })
+
+      MockClient.set(url, {:ok, warm})
+
+      pid =
+        start_supervised!(
+          {RemoteFiberRegistry,
+           name: :reg_cold_keep, remotes: [remote], client: MockClient, auto_poll: false}
+        )
+
+      :ok = RemoteFiberRegistry.refresh_now(pid)
+      %{"candide" => first} = RemoteFiberRegistry.feeds(pid)
+      assert [%{"fiber" => %{"id" => "foo"}}] = first.fibers
+      t1 = first.last_polled_at
+
+      Process.sleep(5)
+
+      # The owner restarts: its next poll hasn't warmed yet, so it serves a COLD
+      # empty feed. The viewer must NOT lose its last-good cards, and staleness
+      # must stay honest (last_polled_at frozen at the last WARM success).
+      cold = Jason.encode!(%{"host" => "candide", "fibers" => [], "cache" => %{"state" => "cold"}})
+      MockClient.set(url, {:ok, cold})
+      :ok = RemoteFiberRegistry.refresh_now(pid)
+
+      %{"candide" => second} = RemoteFiberRegistry.feeds(pid)
+      assert [%{"fiber" => %{"id" => "foo"}}] = second.fibers
+      assert second.last_polled_at == t1
+      assert second.last_error == nil
+      assert second.cache["state"] == "cold"
+    end
+
+    test "carries the server's cache staleness metadata into the feed" do
+      url = Remote.fibers_url(candide())
+
+      body =
+        Jason.encode!(%{
+          "host" => "candide",
+          "fibers" => [sample_fiber("foo")],
+          "cache" => %{"state" => "fresh", "entries" => 1, "last_refresh_ms" => 42}
+        })
+
+      MockClient.set(url, {:ok, body})
+
+      pid =
+        start_supervised!(
+          {RemoteFiberRegistry,
+           name: :reg_cache_meta, remotes: [candide()], client: MockClient, auto_poll: false}
+        )
+
+      :ok = RemoteFiberRegistry.refresh_now(pid)
+
+      assert %{"candide" => %{cache: %{"state" => "fresh", "entries" => 1}}} =
+               RemoteFiberRegistry.feeds(pid)
     end
   end
 

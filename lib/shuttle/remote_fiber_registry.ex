@@ -213,8 +213,8 @@ defmodule Shuttle.RemoteFiberRegistry do
 
     feeds =
       Enum.reduce(state.remotes, state.feeds, fn remote, acc ->
-        result = fetch_fibers(remote, state.client, state.request_timeout_ms)
         entry = Map.get(acc, remote.name, initial_entry(remote))
+        result = fetch_fibers(remote, state.client, state.request_timeout_ms, entry[:etag])
         Map.put(acc, remote.name, apply_result(entry, result, now))
       end)
 
@@ -225,8 +225,8 @@ defmodule Shuttle.RemoteFiberRegistry do
     case Enum.find(state.remotes, &(&1.name == name)) do
       %Remote{} = remote ->
         now = DateTime.utc_now()
-        result = fetch_fibers(remote, state.client, state.request_timeout_ms)
         entry = Map.get(state.feeds, remote.name, initial_entry(remote))
+        result = fetch_fibers(remote, state.client, state.request_timeout_ms, entry[:etag])
         feeds = Map.put(state.feeds, remote.name, apply_result(entry, result, now))
         {:reply, :ok, %{state | feeds: feeds}}
 
@@ -295,10 +295,11 @@ defmodule Shuttle.RemoteFiberRegistry do
     client = state.client
     timeout = state.request_timeout_ms
     name = remote.name
+    etag = get_in(state.feeds, [name, :etag])
 
     task =
       Task.Supervisor.async_nolink(state.task_supervisor, fn ->
-        {name, fetch_fibers(remote, client, timeout)}
+        {name, fetch_fibers(remote, client, timeout, etag)}
       end)
 
     feeds = stamp_attempt(state.feeds, remote)
@@ -317,21 +318,78 @@ defmodule Shuttle.RemoteFiberRegistry do
     end
   end
 
-  defp fetch_fibers(%Remote{} = remote, client, timeout_ms) do
+  # Conditional fetch: send the last etag as `If-None-Match`. A 304 is SUCCESS
+  # with an unchanged feed (`{:ok, :not_modified}`) — the cached fibers stay put
+  # and only `last_polled_at` advances, so the stale badge clears without moving
+  # a byte of feed. A 200 carries the new fibers, the fresh etag, and the
+  # server's `cache` staleness metadata.
+  #
+  # Clients that implement only the unconditional get/2 (test stubs, older
+  # transports) fall back to it: no etag is sent, every response is a full 200,
+  # and the etag stays nil — correct, just without the 304 optimization.
+  defp fetch_fibers(%Remote{} = remote, client, timeout_ms, etag) do
     url = Remote.fibers_url(remote)
 
-    case client.get(url, timeout_ms) do
-      {:ok, body} ->
-        case Jason.decode(body) do
-          {:ok, %{"fibers" => fibers}} when is_list(fibers) -> {:ok, fibers}
-          # Well-formed envelope without a fibers list (e.g. an error envelope):
-          # treat as zero owned fibers rather than a transport failure.
-          {:ok, %{}} -> {:ok, []}
-          _ -> {:error, :malformed_json}
-        end
+    case conditional_get(client, url, etag, timeout_ms) do
+      {:ok, 304, headers, _body} ->
+        # The 304 has no body, so the fresh cache metadata rides the
+        # `x-shuttle-cache` header — carry it so `refreshed_at`/`state` don't
+        # freeze across a run of 304s.
+        {:ok, {:not_modified, cache_from_header(headers)}}
+
+      {:ok, status, headers, body} when status in 200..299 ->
+        decode_feed(body, header_value(headers, "etag"))
+
+      {:ok, status, _headers, _body} ->
+        {:error, {:http_status, status}}
 
       {:error, reason} ->
         {:error, reason}
+    end
+  end
+
+  defp conditional_get(client, url, etag, timeout_ms) do
+    if function_exported?(client, :get, 3) do
+      headers = if is_binary(etag), do: [{"if-none-match", etag}], else: []
+      client.get(url, headers, timeout_ms)
+    else
+      # get/2 has no status/headers: normalize its {:ok, body} to a 200 tuple.
+      case client.get(url, timeout_ms) do
+        {:ok, body} -> {:ok, 200, [], body}
+        {:error, reason} -> {:error, reason}
+      end
+    end
+  end
+
+  defp decode_feed(body, etag) do
+    case Jason.decode(body) do
+      {:ok, %{"fibers" => fibers} = env} when is_list(fibers) ->
+        {:ok, {fibers, etag, Map.get(env, "cache")}}
+
+      # Well-formed envelope without a fibers list (e.g. an error envelope):
+      # treat as zero owned fibers rather than a transport failure.
+      {:ok, %{} = env} ->
+        {:ok, {[], etag, Map.get(env, "cache")}}
+
+      _ ->
+        {:error, :malformed_json}
+    end
+  end
+
+  defp header_value(headers, key) do
+    Enum.find_value(headers, fn {k, v} -> if k == key, do: v end)
+  end
+
+  defp cache_from_header(headers) do
+    case header_value(headers, "x-shuttle-cache") do
+      value when is_binary(value) ->
+        case Jason.decode(value) do
+          {:ok, %{} = cache} -> cache
+          _ -> nil
+        end
+
+      _ ->
+        nil
     end
   end
 
@@ -343,14 +401,29 @@ defmodule Shuttle.RemoteFiberRegistry do
       last_polled_at: nil,
       last_attempt_at: nil,
       last_error: nil,
+      # Last etag seen from this remote's feed (sent as If-None-Match) and the
+      # server's `cache` staleness metadata (state/refreshed_at/…), surfaced so
+      # the board renders "stale as of T" instead of "down".
+      etag: nil,
+      cache: nil,
       remote: remote
     }
   end
 
   defp initial_entry_for(%State{remotes: remotes}, name) do
     case Enum.find(remotes, &(&1.name == name)) do
-      %Remote{} = remote -> initial_entry(remote)
-      _ -> %{fibers: [], last_polled_at: nil, last_attempt_at: nil, last_error: nil}
+      %Remote{} = remote ->
+        initial_entry(remote)
+
+      _ ->
+        %{
+          fibers: [],
+          last_polled_at: nil,
+          last_attempt_at: nil,
+          last_error: nil,
+          etag: nil,
+          cache: nil
+        }
     end
   end
 
@@ -359,10 +432,35 @@ defmodule Shuttle.RemoteFiberRegistry do
     Map.put(feeds, name, %{entry | last_attempt_at: DateTime.utc_now()})
   end
 
-  defp apply_result(entry, {:ok, fibers}, now) do
+  # 304 Not Modified: the feed is unchanged. Keep last-good fibers and etag,
+  # refresh the cache metadata from the header (so `refreshed_at`/`state` track),
+  # and advance the success timestamps so staleness clears.
+  defp apply_result(entry, {:ok, {:not_modified, cache}}, now) do
+    %{
+      entry
+      | cache: cache || entry.cache,
+        last_polled_at: now,
+        last_attempt_at: now,
+        last_error: nil
+    }
+  end
+
+  # A COLD empty 200 (owner just restarted; its first Lustre poll hasn't warmed
+  # the cache) must NOT erase the viewer's last-good feed — that is the exact
+  # regression the deleted live fallback used to avoid. Keep last-good fibers,
+  # refresh etag/cache, clear the error, but do NOT advance `last_polled_at`:
+  # staleness stays honest (time-since-last-WARM-success) until a warm feed
+  # arrives.
+  defp apply_result(entry, {:ok, {[], etag, %{"state" => "cold"} = cache}}, now) do
+    %{entry | etag: etag, cache: cache, last_attempt_at: now, last_error: nil}
+  end
+
+  defp apply_result(entry, {:ok, {fibers, etag, cache}}, now) do
     %{
       entry
       | fibers: fibers,
+        etag: etag,
+        cache: cache,
         last_polled_at: now,
         last_attempt_at: now,
         last_error: nil
@@ -404,7 +502,11 @@ defmodule Shuttle.RemoteFiberRegistry do
          fibers: entry.fibers,
          last_polled_at: entry.last_polled_at,
          stale: stale?(entry, now),
-         last_error: entry.last_error
+         last_error: entry.last_error,
+         # The owning host's own cache-freshness signal, carried through so the
+         # board can render "stale as of T" from the server's view (nil until
+         # the remote serves the cache metadata block).
+         cache: Map.get(entry, :cache)
        }}
     end)
   end

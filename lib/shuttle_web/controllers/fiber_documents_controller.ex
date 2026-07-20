@@ -35,7 +35,19 @@ defmodule ShuttleWeb.FiberDocumentsController do
     with_body? = Map.get(params, "body") in ["1", "true", true]
     shuttle_only? = Map.get(params, "shuttle") in ["1", "true", true]
 
-    case list_fibers(with_body?, shuttle_only?) do
+    # The polled owner feed (`?shuttle=true` without bodies) is the hot path
+    # remote viewers hit every 5s: serve it from the poller's in-memory cache
+    # with a conditional-fetch etag. The body/content and non-shuttle variants
+    # keep their direct `FiberDocuments.list/1` behavior.
+    if shuttle_only? and not with_body? do
+      serve_owner_feed(conn)
+    else
+      serve_direct(conn, with_body?, shuttle_only?)
+    end
+  end
+
+  defp serve_direct(conn, with_body?, shuttle_only?) do
+    case Shuttle.FiberDocuments.list(with_body: with_body?, shuttle_only: shuttle_only?) do
       {:ok, body} ->
         json(conn, body)
 
@@ -43,6 +55,78 @@ defmodule ShuttleWeb.FiberDocumentsController do
         conn
         |> put_status(:service_unavailable)
         |> json(%{error: "felt_list_failed", stores: errors})
+    end
+  end
+
+  # The owner-only kanban feed, served ALWAYS from the poller's in-memory
+  # document cache — never a live `felt ls` in the request path. A cold cache
+  # returns an empty feed with `cache.state == "cold"` (200, not an error);
+  # only an unavailable poller (down / call timeout — near-impossible now that
+  # the reply is a pure state read) is a 503.
+  #
+  # Conditional fetch: a WARM response carries a strong `etag` computed from the
+  # final stamped entries (any visible change changes it). A matching
+  # `If-None-Match` short-circuits to 304 with an empty body, so an unchanged
+  # feed costs the tunnel a header exchange instead of the full transfer.
+  #
+  # A COLD feed carries NO etag and never 304s: cold and warm-empty stamp
+  # byte-identical entries (both `[]`), so an etag over entries alone would let a
+  # zero-fiber host 304 forever with `cache.state` pinned "cold". Withholding the
+  # etag while cold forces the first post-warm poll to deliver a fresh 200 (and a
+  # fresh cache block). The `cache` metadata rides an `x-shuttle-cache` response
+  # header on BOTH 200 and 304 so the client's `refreshed_at`/`state` never
+  # freeze across a run of 304s (the 304 has no body to carry it).
+  defp serve_owner_feed(conn) do
+    case cached_owner_feed() do
+      {:ok, body} ->
+        conn = put_cache_header(conn, body)
+        cold? = get_in(body, [:cache, :state]) == "cold"
+
+        cond do
+          cold? ->
+            json(conn, body)
+
+          true ->
+            etag = feed_etag(body.fibers)
+            conn = put_resp_header(conn, "etag", etag)
+
+            if if_none_match_matches?(conn, etag),
+              do: send_resp(conn, 304, ""),
+              else: json(conn, body)
+        end
+
+      :unavailable ->
+        conn
+        |> put_status(:service_unavailable)
+        |> json(%{error: "poller_unavailable"})
+    end
+  end
+
+  # The cache metadata block as a JSON `x-shuttle-cache` header, so a 304 (no
+  # body) still carries `state`/`refreshed_at`/`entries`/`last_refresh_ms`.
+  defp put_cache_header(conn, %{cache: cache}) when is_map(cache) do
+    put_resp_header(conn, "x-shuttle-cache", Jason.encode!(cache))
+  end
+
+  defp put_cache_header(conn, _body), do: conn
+
+  # Strong etag over the stamped entries only (not `generated_at` or the cache
+  # timestamps, which change every tick without the feed changing). SHA-256 of
+  # the term-encoded entries, hex, truncated — collision-resistant enough for a
+  # cache validator.
+  defp feed_etag(entries) do
+    hash =
+      :crypto.hash(:sha256, :erlang.term_to_binary(entries))
+      |> Base.encode16(case: :lower)
+      |> binary_part(0, 32)
+
+    ~s("#{hash}")
+  end
+
+  defp if_none_match_matches?(conn, etag) do
+    case get_req_header(conn, "if-none-match") do
+      [value | _] -> String.trim(value) == etag
+      [] -> false
     end
   end
 
@@ -124,7 +208,7 @@ defmodule ShuttleWeb.FiberDocumentsController do
   to ONE (local) Shuttle and sees local + every configured remote.
   """
   def composite(conn, _params) do
-    {local_origin, local_owner_entries, local_stale} = local_feed()
+    {local_origin, local_owner_entries, local_stale, local_cache} = local_feed()
     remote_feeds = Shuttle.RemoteFiberRegistry.feeds()
 
     fibers =
@@ -142,13 +226,18 @@ defmodule ShuttleWeb.FiberDocumentsController do
            stale: feed.stale,
            last_polled_at: format_dt(feed.last_polled_at),
            last_error: render_error(feed.last_error),
-           fiber_count: length(feed.fibers)
+           fiber_count: length(feed.fibers),
+           # The owning host's own cache-freshness block (cold/partial/fresh +
+           # refreshed_at), so the board can render "warming / stale as of T"
+           # rather than a binary badge. nil until the remote serves it.
+           cache: Map.get(feed, :cache)
          }}
       end)
       |> Map.put(local_origin, %{
         kind: "local",
         stale: local_stale,
-        fiber_count: length(local_owner_entries)
+        fiber_count: length(local_owner_entries),
+        cache: local_cache
       })
 
     json(conn, %{
@@ -159,19 +248,28 @@ defmodule ShuttleWeb.FiberDocumentsController do
     })
   end
 
-  # The local owner feed: same body as `GET /api/v1/fibers?shuttle=true`. It now
-  # routes through the same cache-first path (`list_fibers(false, true)`): the
-  # poller's document cache (which mirrors felt) serves it fast, and a cold or
-  # absent cache falls back to a live felt read — so board visibility survives
-  # the poller's narrower dispatch/cache lifecycle, with local tmux liveness
-  # overlaid when the poller has it.
+  # The local owner feed: same rows as `GET /api/v1/fibers?shuttle=true`, served
+  # from the poller's document cache. A cold cache yields an empty feed marked
+  # stale (the board shows "warming" rather than dropping the local column); an
+  # unavailable poller is stale too. The cache's own `cache.state` metadata
+  # rides through as the staleness signal.
   defp local_feed do
-    case list_fibers(false, true) do
-      {:ok, %{host: host, fibers: entries}} -> {host, entries, false}
-      {:ok, %{fibers: entries}} -> {own_host_id(), entries, false}
-      {:error, _errors} -> {own_host_id(), [], true}
+    case cached_owner_feed() do
+      {:ok, %{host: host, fibers: entries} = body} ->
+        {host, entries, cold?(body), Map.get(body, :cache)}
+
+      {:ok, %{fibers: entries} = body} ->
+        {own_host_id(), entries, cold?(body), Map.get(body, :cache)}
+
+      :unavailable ->
+        {own_host_id(), [], true, nil}
     end
   end
+
+  # The local column is "stale" while its cache has not warmed to a full "fresh"
+  # tick — cold (no poll yet) or partial (a store served from last-known rows).
+  defp cold?(%{cache: %{state: state}}), do: state != "fresh"
+  defp cold?(_), do: false
 
   # Remote entries arrive as raw decoded JSON (string keys); stamp origin with a
   # string key so the wire shape matches the atom-keyed local rows after JSON
@@ -189,38 +287,21 @@ defmodule ShuttleWeb.FiberDocumentsController do
   defp render_error(reason), do: inspect(reason)
 
   # The owner-only kanban feed (`GET /api/v1/fibers?shuttle=true`) — the path
-  # remote viewers poll every 5s over the SSH tunnel. Serve it from the poller's
-  # in-memory document cache (microseconds) instead of a LIVE `felt ls` per store
-  # (5-12s on an overloaded shared login node, which blows the viewer's 8s
-  # timeout and paints a spurious staleness badge).
+  # remote viewers poll every 5s over the SSH tunnel. Served ALWAYS from the
+  # poller's in-memory document cache (microseconds), never a LIVE `felt ls` per
+  # store (5-12s on an overloaded shared login node, which blows the viewer's 8s
+  # timeout and paints a spurious staleness badge). There is no live fallback:
+  # the reply is a pure read of GenServer state, so a cold cache is an empty
+  # feed marked `cache.state == "cold"`, not a filesystem walk.
   #
-  # The cached rows are ALREADY owner-filtered (same predicate as the live path —
-  # see the equivalence note below) and runtime-stamped, but the cache does NOT
-  # carry the parked/held overlay, so we map `Snapshot.put_held/2` over them here.
-  # We do NOT re-apply `put_runtime` — the cache already did.
+  # The cached rows are ALREADY owner-filtered and runtime-stamped, but the cache
+  # does NOT carry the parked/held overlay, so we map `Snapshot.put_held/2` over
+  # them here. We do NOT re-apply `put_runtime` — the cache already did.
   #
-  # A cold cache (before the first poll warms it) or an unavailable poller (down,
-  # timing out, not started in tests) falls back to the live path UNCHANGED,
-  # preserving correctness at every moment.
-  #
-  # Owner-predicate equivalence: the cache filters with
-  # `Shuttle.Poller.owned_feed_entry?`/`host_owned?` and the live path with
-  # `Shuttle.FiberDocuments`'s `owned_kanban_fiber?`/`host_owned?`. Both admit a
-  # fiber iff its `shuttle:` block carries a non-empty `host:` equal to this
-  # daemon's `own_host_id` (both resolve it via `Shuttle.Poller.own_host_id/0`),
-  # and both include every felt status (the cache's `felt ls --has-field shuttle`
-  # widens to all statuses; the live path passes `-s all`). Same set of fibers.
-  defp list_fibers(false, true) do
-    case cached_owner_feed() do
-      {:ok, body} -> {:ok, body}
-      :fallback -> live_owner_feed()
-    end
-  end
-
-  defp list_fibers(with_body?, shuttle_only?) do
-    Shuttle.FiberDocuments.list(with_body: with_body?, shuttle_only: shuttle_only?)
-  end
-
+  # Only an unreachable poller (down / not started / call timeout — near-
+  # impossible for a pure state read) yields `:unavailable`, which the callers
+  # turn into a 503 (owner-feed endpoint) or a stale-marked empty local column
+  # (composite board).
   defp cached_owner_feed do
     case Shuttle.Poller.cached_fiber_documents(felt_stores: Shuttle.FeltStores.configured_hosts()) do
       {:ok, %{fibers: entries} = body} ->
@@ -228,31 +309,10 @@ defmodule ShuttleWeb.FiberDocumentsController do
         {:ok, %{body | fibers: Enum.map(entries, &Snapshot.put_held(&1, held))}}
 
       _ ->
-        :fallback
+        :unavailable
     end
   catch
-    # Poller down / not started / call timeout → serve the live path instead.
-    :exit, _ -> :fallback
-  end
-
-  defp live_owner_feed do
-    case Shuttle.FiberDocuments.list(with_body: false, shuttle_only: true) do
-      {:ok, %{fibers: entries} = body} ->
-        {:ok, %{body | fibers: overlay_runtime(entries)}}
-
-      other ->
-        other
-    end
-  end
-
-  defp overlay_runtime(entries) do
-    index = Shuttle.Poller.runtime_index()
-    held = Shuttle.Poller.parked_index()
-
-    Enum.map(entries, fn entry ->
-      entry
-      |> Snapshot.put_runtime(index)
-      |> Snapshot.put_held(held)
-    end)
+    # Poller down / not started / call timeout → the caller decides (503 / stale).
+    :exit, _ -> :unavailable
   end
 end

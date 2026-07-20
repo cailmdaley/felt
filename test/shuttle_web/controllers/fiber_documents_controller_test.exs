@@ -219,6 +219,8 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
            ]
 
     # shuttle=true: ONLY the rows this daemon owns (shuttle block + host == own).
+    # Served from the poller's warm document cache (no live fallback).
+    warm_poller!(store)
     only = get(api_conn(), "/api/v1/fibers?shuttle=true")
     assert only.status == 200
 
@@ -250,30 +252,15 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
     Body.
     """)
 
-    {poller, original_state} =
-      case Process.whereis(Shuttle.Poller) do
-        nil ->
-          {:ok, pid} =
-            Shuttle.Poller.start_link(
-              name: Shuttle.Poller,
-              poll_interval_ms: 600_000,
-              max_concurrent_workers: 0,
-              felt_stores: [store]
-            )
-
-          {pid, nil}
-
-        pid ->
-          {pid, :sys.get_state(pid)}
-      end
-
+    # Warm the cache from disk, THEN layer the running worker on top (preserving
+    # the warmed document_cache) so the owner feed stamps serve-time runtime.
+    poller = warm_poller!(store)
     now = DateTime.utc_now()
 
     :sys.replace_state(poller, fn state ->
       %{
         state
-        | own_host_id: "test-host",
-          running:
+        | running:
             Map.put(state.running, uid, %{
               fiber_id: "tests/live",
               uid: uid,
@@ -283,16 +270,6 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
               last_activity_at: now
             })
       }
-    end)
-
-    on_exit(fn ->
-      if Process.alive?(poller) do
-        if original_state do
-          :sys.replace_state(poller, fn _ -> original_state end)
-        else
-          GenServer.stop(poller)
-        end
-      end
     end)
 
     conn = get(api_conn(), "/api/v1/fibers?shuttle=true")
@@ -383,11 +360,13 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
     assert is_integer(row["held_since"])
   end
 
-  test "GET /api/v1/fibers?shuttle=true falls back to the live path when the cache is cold",
+  test "GET /api/v1/fibers?shuttle=true serves an empty cold-cache feed, never the live path",
        %{store: store} do
     # The poller is up but its document cache is NOT ready (no poll has warmed
-    # it). The endpoint must fall back to the live `felt ls` path and still serve
-    # this on-disk owned fiber.
+    # it). Serve-from-cache-ALWAYS: the endpoint returns a 200 with an empty
+    # feed and `cache.state == "cold"` — it must NOT fall through to a live
+    # `felt ls` (which would stall on a slow filesystem). The on-disk fiber is
+    # therefore ABSENT until the poll warms the cache.
     write_fiber!(store, "tests/cold", """
     ---
     name: Cold fallback
@@ -403,9 +382,8 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
     {poller, original_state} = start_or_reuse_poller(store)
 
     # Wait out the boot poll, THEN force the cache cold — otherwise that poll
-    # could settle after our injection, flip `document_cache_ready` back to true,
-    # and serve "tests/cold" from the cache instead of the live fallback we mean
-    # to exercise here. Post-settle, the next tick is 600s away, so cold sticks.
+    # could settle after our injection and flip `document_cache_ready` back to
+    # true. Post-settle, the next tick is 600s away, so cold sticks.
     wait_until(fn -> :sys.get_state(poller).document_cache_ready end)
 
     :sys.replace_state(poller, fn state ->
@@ -417,13 +395,151 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
     conn = get(api_conn(), "/api/v1/fibers?shuttle=true")
     assert conn.status == 200
 
-    names =
-      conn.resp_body
-      |> Jason.decode!()
-      |> Map.fetch!("fibers")
-      |> Enum.map(& &1["fiber"]["name"])
+    body = Jason.decode!(conn.resp_body)
+    assert body["fibers"] == []
+    assert body["cache"]["state"] == "cold"
+    refute "Cold fallback" in Enum.map(body["fibers"], & &1["fiber"]["name"])
 
-    assert "Cold fallback" in names
+    # A cold feed emits NO etag (cold and warm-empty stamp identical `[]`
+    # entries; an etag would let a zero-fiber host 304 forever with state pinned
+    # "cold"). The cache block still rides the x-shuttle-cache header.
+    assert get_resp_header(conn, "etag") == []
+    assert [cache_header] = get_resp_header(conn, "x-shuttle-cache")
+    assert Jason.decode!(cache_header)["state"] == "cold"
+  end
+
+  test "GET /api/v1/fibers?shuttle=true sets an etag and answers If-None-Match with 304",
+       %{store: store} do
+    uid = "01KVRTNM000000000000000ET1"
+
+    entry = %{
+      felt_store: store,
+      path: "tests/etag/etag.md",
+      fiber: %{
+        "id" => "tests/etag",
+        "slug" => "tests/etag",
+        "uid" => uid,
+        "name" => "Etag fiber",
+        "status" => "active",
+        "shuttle" => %{"kind" => "oneshot", "host" => "test-host"}
+      }
+    }
+
+    {poller, original_state} = start_or_reuse_poller(store)
+    wait_until(fn -> :sys.get_state(poller).document_cache_ready end)
+
+    :sys.replace_state(poller, fn state ->
+      %{
+        state
+        | own_host_id: "test-host",
+          document_cache_ready: true,
+          document_cache: %{uid => %{modified_at: "m1", entry: entry}}
+      }
+    end)
+
+    restore_poller_on_exit(poller, original_state)
+
+    # First fetch: 200 with an etag header.
+    conn = get(api_conn(), "/api/v1/fibers?shuttle=true")
+    assert conn.status == 200
+    assert [etag] = get_resp_header(conn, "etag")
+    assert etag != ""
+
+    # Conditional re-fetch with the SAME etag: 304, empty body, etag echoed.
+    conn304 =
+      api_conn()
+      |> put_req_header("if-none-match", etag)
+      |> get("/api/v1/fibers?shuttle=true")
+
+    assert conn304.status == 304
+    assert conn304.resp_body == ""
+    # The 304 (no body) still carries the cache block so the client's
+    # refreshed_at/state don't freeze across a run of 304s.
+    assert [cache_header] = get_resp_header(conn304, "x-shuttle-cache")
+    assert Jason.decode!(cache_header)["state"] == "fresh"
+
+    # A stale etag still gets the full 200 feed.
+    conn_stale =
+      api_conn()
+      |> put_req_header("if-none-match", ~s("deadbeef"))
+      |> get("/api/v1/fibers?shuttle=true")
+
+    assert conn_stale.status == 200
+    assert [%{"fiber" => %{"slug" => "tests/etag"}}] = Jason.decode!(conn_stale.resp_body)["fibers"]
+  end
+
+  test "GET /api/v1/fibers?shuttle=true etag changes when the feed content changes",
+       %{store: store} do
+    uid = "01KVRTNM000000000000000ET2"
+
+    base = %{
+      felt_store: store,
+      path: "tests/etag2/etag2.md",
+      fiber: %{
+        "id" => "tests/etag2",
+        "slug" => "tests/etag2",
+        "uid" => uid,
+        "name" => "Before",
+        "status" => "active",
+        "shuttle" => %{"kind" => "oneshot", "host" => "test-host"}
+      }
+    }
+
+    {poller, original_state} = start_or_reuse_poller(store)
+    wait_until(fn -> :sys.get_state(poller).document_cache_ready end)
+
+    :sys.replace_state(poller, fn state ->
+      %{
+        state
+        | own_host_id: "test-host",
+          document_cache_ready: true,
+          document_cache: %{uid => %{modified_at: "m1", entry: base}}
+      }
+    end)
+
+    restore_poller_on_exit(poller, original_state)
+
+    conn1 = get(api_conn(), "/api/v1/fibers?shuttle=true")
+    [etag1] = get_resp_header(conn1, "etag")
+
+    changed = put_in(base.fiber["name"], "After")
+
+    :sys.replace_state(poller, fn state ->
+      %{state | document_cache: %{uid => %{modified_at: "m2", entry: changed}}}
+    end)
+
+    conn2 = get(api_conn(), "/api/v1/fibers?shuttle=true")
+    [etag2] = get_resp_header(conn2, "etag")
+
+    assert etag1 != etag2
+  end
+
+  test "entries_for_fiber reads report_path from the felt field without stat'ing",
+       %{store: store} do
+    # The owner-feed build path (:field): a candidate row carrying a non-empty
+    # native `report_path` yields an entry with `:report_path` set, even though
+    # NO report.html exists on disk — proving the list path trusts the field and
+    # never stats. A row WITHOUT the field yields no report_path (again, no stat
+    # discovers a non-existent file).
+    dir = Path.join([store, ".felt", "tests", "reported"])
+    File.mkdir_p!(dir)
+    fiber_path = Path.join(dir, "reported.md")
+
+    with_field = %{
+      "id" => "tests/reported",
+      "name" => "Reported",
+      "path" => fiber_path,
+      "report_path" => "tests/reported/report.html",
+      "shuttle" => %{"host" => "test-host"}
+    }
+
+    assert [entry] = Shuttle.FiberDocuments.entries_for_fiber(store, with_field)
+    assert entry.report_path == Path.join(dir, "report.html")
+    refute File.exists?(entry.report_path)
+
+    without_field = Map.delete(with_field, "report_path")
+    assert [bare] = Shuttle.FiberDocuments.entries_for_fiber(store, without_field)
+    refute Map.has_key?(bare, :report_path)
   end
 
   test "GET /api/v1/fibers canonicalizes ids through symlinked stores", %{store: store} do
@@ -769,6 +885,7 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
     Body.
     """)
 
+    warm_poller!(store)
     conn = get(api_conn(), "/api/v1/fibers/composite")
     assert conn.status == 200
     body = Jason.decode!(conn.resp_body)
@@ -825,6 +942,7 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
 
     :ok = RemoteFiberRegistry.refresh_now()
 
+    warm_poller!(store)
     conn = get(api_conn(), "/api/v1/fibers/composite")
     assert conn.status == 200
     body = Jason.decode!(conn.resp_body)
@@ -879,6 +997,7 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
     Body.
     """)
 
+    warm_poller!(store)
     conn = get(api_conn(), "/api/v1/fibers/composite")
     assert conn.status == 200
     body = Jason.decode!(conn.resp_body)
@@ -919,6 +1038,7 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
     File.ln_s!(Path.join(project, ".felt"), Path.join([store, ".felt", "felt-project"]))
     System.put_env("FELT_STORES", Enum.join([store, project], ","))
 
+    warm_poller!(store)
     conn = get(api_conn(), "/api/v1/fibers?shuttle=true")
     assert conn.status == 200
 
@@ -1054,6 +1174,42 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
       pid ->
         {pid, :sys.get_state(pid)}
     end
+  end
+
+  # Start (or reuse) the singleton Poller, force a real poll against this test's
+  # configured stores, and block until its document cache is warm. The owner
+  # feed (`?shuttle=true`) and the composite board are now served ALWAYS from
+  # this cache — there is no live `felt ls` fallback — so a test that expects
+  # on-disk shuttle fibers to appear must warm the cache first. Returns the pid.
+  defp warm_poller!(store) do
+    stores =
+      case System.get_env("FELT_STORES") do
+        nil -> [store]
+        "" -> [store]
+        value -> String.split(value, ",", trim: true)
+      end
+
+    {poller, original_state} = start_or_reuse_poller(store)
+
+    :sys.replace_state(poller, fn state ->
+      %{
+        state
+        | felt_stores: stores,
+          own_host_id: "test-host",
+          document_cache_ready: false,
+          document_cache: %{}
+      }
+    end)
+
+    send(poller, :run_poll_cycle)
+
+    wait_until(fn ->
+      state = :sys.get_state(poller)
+      state.document_cache_ready and map_size(state.document_cache) > 0
+    end)
+
+    restore_poller_on_exit(poller, original_state)
+    poller
   end
 
   # Block until `fun` returns truthy, polling briefly (default ≤2s). Used to let

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
@@ -50,7 +49,8 @@ type Storage struct {
 type fiberFile struct {
 	id         string
 	path       string
-	entryPoint bool // bare `.felt/<slug>.md` at the .felt/ root
+	entryPoint bool   // bare `.felt/<slug>.md` at the .felt/ root
+	reportPath string // sibling report.html, if any (absolute, symlink-resolved dir)
 }
 
 type MigrationEntry struct {
@@ -758,6 +758,7 @@ func (s *Storage) listWithModeHavingFrontmatterFields(mode ParseMode, includeMod
 			}
 		}
 		f.EntryPoint = file.entryPoint
+		f.ReportPath = file.reportPath
 		felts = append(felts, f)
 	}
 
@@ -956,42 +957,63 @@ func (s *Storage) listFiberFiles() ([]fiberFile, error) {
 	// directories work: the path you place a symlink at *is* its name in
 	// the outer namespace.
 	var walkFn func(walkBase, idPrefix string) error
-	walkFn = func(walkBase, idPrefix string) error {
-		walkBaseResolved, err := filepath.EvalSymlinks(walkBase)
+	// walkDirFn walks a single tier by hand (os.ReadDir + manual recursion)
+	// rather than filepath.WalkDir, so it holds each directory's sibling
+	// DirEntry list in memory. That list is what fs.WalkDir would have read
+	// internally anyway; keeping it lets a fiber's `report.html` sibling be
+	// detected by scanning entries already in hand — zero extra syscalls —
+	// instead of an os.Stat per fiber.
+	var walkDirFn func(dir, walkBaseResolved, idPrefix string) error
+	walkDirFn = func(dir, walkBaseResolved, idPrefix string) error {
+		entries, err := os.ReadDir(dir)
 		if err != nil {
-			return nil // skip unresolvable roots
+			return err
 		}
-		if _, seen := visited[walkBaseResolved]; seen {
-			return nil
-		}
-		visited[walkBaseResolved] = struct{}{}
-		return filepath.WalkDir(walkBaseResolved, func(fullPath string, d fs.DirEntry, walkErr error) error {
-			if walkErr != nil {
-				return walkErr
+		hasReportHTML := false
+		for _, e := range entries {
+			if !e.IsDir() && e.Name() == "report.html" {
+				hasReportHTML = true
+				break
 			}
+		}
+		for _, d := range entries {
+			fullPath := filepath.Join(dir, d.Name())
 			// Symlinked subdirectory: capture its logical position relative to
 			// walkBaseResolved before resolving, so the recursive walk lifts
 			// every inner id back into the outer namespace.
 			if d.Type()&os.ModeSymlink != 0 {
 				target, err := filepath.EvalSymlinks(fullPath)
 				if err != nil {
-					return nil // skip broken symlinks
+					continue // skip broken symlinks
 				}
 				info, err := os.Stat(target)
 				if err != nil {
-					return nil
+					continue
 				}
 				if info.IsDir() {
 					inner, err := filepath.Rel(walkBaseResolved, fullPath)
 					if err != nil {
-						return nil
+						continue
 					}
 					nextPrefix := path.Join(idPrefix, filepath.ToSlash(inner))
-					return walkFn(target, nextPrefix)
+					if err := walkFn(target, nextPrefix); err != nil {
+						return err
+					}
+					continue
 				}
+				// Symlink to a regular file (e.g. a fiber .md symlinked in from
+				// elsewhere): fall through to the normal file handling below —
+				// filepath.WalkDir used to visit these too, since it doesn't
+				// distinguish a symlink-to-file from a real file once resolved.
 			}
-			if d.IsDir() || !strings.HasSuffix(d.Name(), FileExt) {
-				return nil
+			if d.IsDir() {
+				if err := walkDirFn(fullPath, walkBaseResolved, idPrefix); err != nil {
+					return err
+				}
+				continue
+			}
+			if !strings.HasSuffix(d.Name(), FileExt) {
+				continue
 			}
 			// Compute rel within this tier (clean inner namespace), then prepend
 			// the accumulated outer prefix to lift the id back into the parent
@@ -1010,7 +1032,7 @@ func (s *Storage) listFiberFiles() ([]fiberFile, error) {
 			}
 			id, entryPoint, ok := fiberIDFromRelativePath(rel)
 			if !ok {
-				return nil
+				continue
 			}
 			if idPrefix != "" {
 				id = path.Join(idPrefix, id)
@@ -1019,9 +1041,27 @@ func (s *Storage) listFiberFiles() ([]fiberFile, error) {
 				// applies at the root the user is asking about.
 				entryPoint = false
 			}
-			files = append(files, fiberFile{id: id, path: fullPath, entryPoint: entryPoint})
+			// report.html sibling: same directory as the fiber's own file,
+			// detected from the DirEntry list already read for this tier
+			// (hasReportHTML above) rather than an extra os.Stat per fiber.
+			var reportPath string
+			if hasReportHTML {
+				reportPath = filepath.Join(dir, "report.html")
+			}
+			files = append(files, fiberFile{id: id, path: fullPath, entryPoint: entryPoint, reportPath: reportPath})
+		}
+		return nil
+	}
+	walkFn = func(walkBase, idPrefix string) error {
+		walkBaseResolved, err := filepath.EvalSymlinks(walkBase)
+		if err != nil {
+			return nil // skip unresolvable roots
+		}
+		if _, seen := visited[walkBaseResolved]; seen {
 			return nil
-		})
+		}
+		visited[walkBaseResolved] = struct{}{}
+		return walkDirFn(walkBaseResolved, walkBaseResolved, idPrefix)
 	}
 	if err := walkFn(rootResolved, ""); err != nil {
 		return nil, fmt.Errorf("walking .felt directory: %w", err)

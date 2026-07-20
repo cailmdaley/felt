@@ -122,7 +122,18 @@ defmodule Shuttle.Poller.Snapshot do
         StandingRoles.standing_role_snapshots(state.standing_roles, state.running, now, state),
       claimed_count: MapSet.size(state.claimed),
       max_concurrent: state.max_concurrent_workers,
-      document_cache: stringify_keys(state.document_cache_stats)
+      document_cache:
+        state.document_cache_stats
+        |> stringify_keys()
+        |> Map.put("state", document_cache_state(state))
+        |> Map.put("last_refresh_ms", state.document_cache_last_refresh_ms)
+        |> Map.put(
+          "refreshed_at",
+          case state.document_cache_refreshed_at do
+            %DateTime{} = dt -> DateTime.to_iso8601(dt)
+            _ -> nil
+          end
+        )
     }
 
     # No separate per-fiber runtime index. The runtime store and the
@@ -257,6 +268,13 @@ defmodule Shuttle.Poller.Snapshot do
   end
 
   defp stringify_keys(_), do: %{}
+
+  # "cold" before the first poll warms the cache; "partial" when the last tick
+  # served at least one store from last-known rows (a listing failure); else
+  # "fresh". Mirrors `Shuttle.Poller.document_cache_meta/1`.
+  defp document_cache_state(%{document_cache_ready: false}), do: "cold"
+  defp document_cache_state(%{document_cache_partial: true}), do: "partial"
+  defp document_cache_state(_state), do: "fresh"
 
   # Stringifies dispatch-failure reasons for the snapshot. Atoms become their
   # name (':missing_session_id' is more useful in the UI than the raw atom);

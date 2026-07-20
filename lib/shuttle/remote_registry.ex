@@ -933,6 +933,15 @@ defmodule Shuttle.RemoteRegistry.Client do
   @callback get(url :: String.t(), timeout_ms :: non_neg_integer()) ::
               {:ok, body :: String.t()} | {:error, term()}
 
+  @callback get(
+              url :: String.t(),
+              req_headers :: [{String.t(), String.t()}],
+              timeout_ms :: non_neg_integer()
+            ) ::
+              {:ok, status :: non_neg_integer(), resp_headers :: [{String.t(), String.t()}],
+               body :: String.t()}
+              | {:error, term()}
+
   @callback post(
               url :: String.t(),
               body :: String.t(),
@@ -947,8 +956,10 @@ defmodule Shuttle.RemoteRegistry.Client do
 
   # Only the write transport (Transition forwarding) needs post/4, and only the
   # file-bytes forward (`OriginRouter.forward_get/4`) needs get_file/2; the
-  # read-only registry stubs implement get/2 alone.
-  @optional_callbacks post: 4, get_file: 2
+  # read-only registry stubs implement get/2 alone. get/3 is the conditional-fetch
+  # transport (`If-None-Match` → 304) the fiber feed uses; a client without it
+  # falls back to unconditional get/2.
+  @optional_callbacks post: 4, get_file: 2, get: 3
 end
 
 defmodule Shuttle.RemoteRegistry.Client.Default do
@@ -980,6 +991,36 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
     end
   rescue
     e -> {:error, {:exception, Exception.message(e)}}
+  end
+
+  # Conditional GET: send request headers (the fiber feed sends `If-None-Match`
+  # with the last etag) and return the raw status + response headers so the
+  # caller can treat 304 as "unchanged". Binary-safe like get/2.
+  @impl true
+  def get(url, req_headers, timeout_ms)
+      when is_binary(url) and is_list(req_headers) and is_integer(timeout_ms) do
+    {:ok, _} = Application.ensure_all_started(:inets)
+    {:ok, _} = Application.ensure_all_started(:ssl)
+
+    headers = Enum.map(req_headers, fn {k, v} -> {String.to_charlist(k), String.to_charlist(v)} end)
+    request = {String.to_charlist(url), headers}
+    http_opts = [{:timeout, timeout_ms}, {:connect_timeout, timeout_ms}]
+
+    case :httpc.request(:get, request, http_opts, body_format: :binary) do
+      {:ok, {{_, status, _}, resp_headers, body}} ->
+        {:ok, status, normalize_headers(resp_headers), body}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  rescue
+    e -> {:error, {:exception, Exception.message(e)}}
+  end
+
+  # httpc returns header keys/values as charlists; normalize to lowercased-key
+  # string tuples so the caller reads `etag` case-insensitively.
+  defp normalize_headers(headers) do
+    Enum.map(headers, fn {k, v} -> {k |> to_string() |> String.downcase(), to_string(v)} end)
   end
 
   @impl true

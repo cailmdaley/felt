@@ -136,6 +136,23 @@ defmodule Shuttle.Poller do
       document_cache: %{},
       document_cache_stats: %{hits: 0, misses: 0, evictions: 0, entries: 0},
       document_cache_ready: false,
+      # When the document cache was last rebuilt (nil until the first poll warms
+      # it) and how long that rebuild took. Surfaced in the owner-feed envelope's
+      # `cache` metadata (state/refreshed_at/entries/last_refresh_ms) so a viewer
+      # renders "stale as of T" instead of "down", and in the poller snapshot's
+      # `document_cache` stats for observability.
+      document_cache_refreshed_at: nil,
+      document_cache_last_refresh_ms: 0,
+      # `true` when this tick's cache was built while at least one store's felt
+      # listing FAILED (its rows served from `last_known_listings`). The feed's
+      # `cache.state` reports "partial" instead of "fresh" so a viewer knows the
+      # world is stale for some store, and `refreshed_at` is NOT advanced on a
+      # partial tick (staleness stays honest).
+      document_cache_partial: false,
+      # One-shot guard so the "served from a cold cache" log fires once per cold
+      # PERIOD, not once per request (a remote viewer polls every 5s). Reset to
+      # false when the first poll flips `document_cache_ready` true.
+      cold_feed_logged: false,
       # %{runtime_key => %{reason: term, attempted_at: DateTime.t, attempts:
       # pos_integer, fiber_id: slug, uid: String.t() | nil}} — fibers the
       # dispatcher rejected with an error other than :already_running. Keyed by
@@ -698,26 +715,46 @@ defmodule Shuttle.Poller do
   end
 
   def handle_call({:cached_fiber_documents, opts}, _from, state) do
-    if state.document_cache_ready do
-      # Owner-only kanban feed: the document cache holds every shuttle fiber
-      # PHYSICALLY ROOTED in a configured store, which includes fibers pinned to
-      # another host's `shuttle.host:`. The feed serves strictly this daemon's
-      # owned rows (the same predicate the direct FiberDocuments path applies),
-      # so a viewer reading us as a remote origin gets only what we own — no
-      # peer-mirror rows to merge or elect.
-      entries =
-        state.document_cache
-        |> Map.values()
-        |> Enum.map(& &1.entry)
-        |> Enum.filter(&owned_feed_entry?(&1, state.own_host_id))
-        |> Enum.sort_by(&get_in(&1, [:fiber, "id"]))
-        |> stamp_runtime(state.running)
+    # Serve-from-cache-ALWAYS: this reply is a pure read of GenServer state, so
+    # it never blocks on the filesystem. A cold cache (before the first poll
+    # warms it) returns an empty feed with `cache.state == "cold"` rather than an
+    # error — the request path stays microsecond-fast on a slow filesystem and
+    # the viewer renders "warming" from the metadata instead of falling through
+    # to a live `felt ls` that could stall 5-12s on an overloaded login node.
+    #
+    # Owner-only kanban feed: the document cache holds every shuttle fiber
+    # PHYSICALLY ROOTED in a configured store, which includes fibers pinned to
+    # another host's `shuttle.host:`. The feed serves strictly this daemon's
+    # owned rows (the same predicate the direct FiberDocuments path applies), so
+    # a viewer reading us as a remote origin gets only what we own — no
+    # peer-mirror rows to merge or elect.
+    {entries, state} =
+      if state.document_cache_ready do
+        rows =
+          state.document_cache
+          |> Map.values()
+          |> Enum.map(& &1.entry)
+          |> Enum.filter(&owned_feed_entry?(&1, state.own_host_id))
+          |> Enum.sort_by(&get_in(&1, [:fiber, "id"]))
+          |> stamp_runtime(state.running)
 
-      stores = Keyword.get(opts, :felt_stores, state.felt_stores)
-      {:reply, {:ok, Shuttle.FiberDocuments.envelope(stores, entries)}, state}
-    else
-      {:reply, {:error, :cold_document_cache}, state}
-    end
+        {rows, state}
+      else
+        # Log once per cold period, not once per (5s-cadence) request.
+        state =
+          if state.cold_feed_logged do
+            state
+          else
+            Logger.info("owner feed served from COLD document cache (poll not yet warmed)")
+            %{state | cold_feed_logged: true}
+          end
+
+        {[], state}
+      end
+
+    stores = Keyword.get(opts, :felt_stores, state.felt_stores)
+    cache_meta = document_cache_meta(state)
+    {:reply, {:ok, Shuttle.FiberDocuments.envelope(stores, entries, cache_meta)}, state}
   end
 
   def handle_call({:refresh_document, fiber_id}, _from, state) do
@@ -1099,7 +1136,9 @@ defmodule Shuttle.Poller do
   defp poll_reads(%State{} = state) do
     state = refresh_felt_stores(state)
     {:ok, candidates, host_map, host_listings} = discover_candidates(state)
-    {document_cache, document_cache_stats} = refresh_document_cache(state, candidates, host_map)
+
+    {refresh_us, {document_cache, document_cache_stats}} =
+      :timer.tc(fn -> refresh_document_cache(state, candidates, host_map) end)
 
     {:ok,
      %{
@@ -1108,7 +1147,8 @@ defmodule Shuttle.Poller do
        host_map: host_map,
        host_listings: host_listings,
        document_cache: document_cache,
-       document_cache_stats: document_cache_stats
+       document_cache_stats: document_cache_stats,
+       document_cache_refresh_ms: div(refresh_us, 1000)
      }}
   rescue
     error ->
@@ -1131,8 +1171,27 @@ defmodule Shuttle.Poller do
          host_map: new_host_map,
          host_listings: host_listings,
          document_cache: document_cache,
-         document_cache_stats: document_cache_stats
+         document_cache_stats: document_cache_stats,
+         document_cache_refresh_ms: document_cache_refresh_ms
        }) do
+    log_document_cache_refresh(state, document_cache_stats, document_cache_refresh_ms)
+
+    # The Task built `document_cache` from a PRE-mutation snapshot. A
+    # `{:refresh_document, …}` patch that landed on the live cache mid-poll must
+    # NOT be reverted by installing the Task build wholesale: merge per key,
+    # preferring the live entry when its `modified_at` is strictly newer. Only
+    # keys the Task build carries survive — a fiber the Task evicted (deleted /
+    # uninstalled) is not resurrected.
+    document_cache = merge_document_cache(state.document_cache, document_cache)
+
+    # A partial tick — at least one store's listing FAILED (its rows came from
+    # `last_known_listings`) — reports `cache.state == "partial"` and does NOT
+    # advance `refreshed_at`, so staleness stays honest for the failed store.
+    listings_ok? = map_size(host_listings) == length(felt_stores)
+
+    refreshed_at =
+      if listings_ok?, do: DateTime.utc_now(), else: state.document_cache_refreshed_at
+
     state = scan_flat_runtime_fibers_once(state, candidates)
     state = reconcile(%{state | felt_stores: felt_stores})
 
@@ -1150,6 +1209,12 @@ defmodule Shuttle.Poller do
         document_cache: document_cache,
         document_cache_stats: document_cache_stats,
         document_cache_ready: true,
+        document_cache_refreshed_at: refreshed_at,
+        document_cache_last_refresh_ms: document_cache_refresh_ms,
+        document_cache_partial: not listings_ok?,
+        # Ready is (re)established this tick: re-arm the cold-serve log guard so a
+        # future cold period (only reachable in tests) logs once again.
+        cold_feed_logged: false,
         standing_roles: standing_roles,
         dispatch_failures: evict_stale_dispatch_failures(state.dispatch_failures, candidates),
         resume_loop: evict_stale_resume_loop(state.resume_loop, candidates),
@@ -1330,6 +1395,59 @@ defmodule Shuttle.Poller do
 
   defp owned_feed_entry?(_, _), do: false
 
+  # The owner-feed envelope's `cache` metadata block: the freshness signal a
+  # viewer renders instead of a binary up/down. `state` is "cold" until the
+  # first poll warms the cache, then "fresh" — or "partial" when this tick built
+  # the cache with at least one store served from last-known rows (a listing
+  # failure). `refreshed_at` reflects the last ALL-stores-fresh tick.
+  defp document_cache_meta(%State{} = state) do
+    %{
+      state: document_cache_state(state),
+      refreshed_at: iso8601_or_nil(state.document_cache_refreshed_at),
+      entries: map_size(state.document_cache),
+      last_refresh_ms: state.document_cache_last_refresh_ms
+    }
+  end
+
+  defp document_cache_state(%State{document_cache_ready: false}), do: "cold"
+  defp document_cache_state(%State{document_cache_partial: true}), do: "partial"
+  defp document_cache_state(_state), do: "fresh"
+
+  defp iso8601_or_nil(%DateTime{} = dt), do: DateTime.to_iso8601(dt)
+  defp iso8601_or_nil(_), do: nil
+
+  # Merge the Task-built cache over the live cache, preferring a live entry whose
+  # `modified_at` is strictly newer (a mid-poll `refresh_document` patch that the
+  # Task's pre-mutation snapshot could not see). Only keys the Task build carries
+  # are kept — a fiber the Task evicted (deleted / uninstalled) is not
+  # resurrected from the live cache.
+  defp merge_document_cache(live, task_built) do
+    Map.new(task_built, fn {key, task_entry} ->
+      case Map.get(live, key) do
+        %{modified_at: live_mt} = live_entry when is_binary(live_mt) ->
+          if modified_after?(live_mt, Map.get(task_entry, :modified_at)),
+            do: {key, live_entry},
+            else: {key, task_entry}
+
+        _ ->
+          {key, task_entry}
+      end
+    end)
+  end
+
+  # Strictly-newer comparison of two ISO8601 mtimes. Parses both so mixed offsets
+  # compare correctly; if either is unparseable, prefer the live patch on any
+  # difference (it is the more recent disk read).
+  defp modified_after?(live_mt, task_mt) do
+    case {DateTime.from_iso8601(live_mt), from_iso8601(task_mt)} do
+      {{:ok, live_dt, _}, {:ok, task_dt, _}} -> DateTime.compare(live_dt, task_dt) == :gt
+      _ -> live_mt != task_mt
+    end
+  end
+
+  defp from_iso8601(value) when is_binary(value), do: DateTime.from_iso8601(value)
+  defp from_iso8601(_), do: :error
+
   # Stamp serve-time tmux liveness onto each owned feed row. The owner is the
   # only daemon that knows its own running workers (`state.running`), so it
   # carries that truth on the same `/api/v1/fibers` rows a viewer already reads
@@ -1397,11 +1515,25 @@ defmodule Shuttle.Poller do
   end
 
   # The poll-cycle document cache lives in `Shuttle.Poller.DocumentCache`; the
-  # cache itself stays on `State`. felt shell-out is injected as a closure so
-  # `run_felt/3` stays private to the poller.
+  # cache itself stays on `State`. Entries are built directly from the candidate
+  # rows the poll already discovered — one `felt ls` per store, no per-miss
+  # `felt show` and no filesystem stat.
   defp refresh_document_cache(%State{} = state, candidates, host_map) do
-    run_felt = fn store, args -> run_felt(store, state.runner, args) end
-    Shuttle.Poller.DocumentCache.refresh(state, candidates, host_map, run_felt)
+    Shuttle.Poller.DocumentCache.refresh(state, candidates, host_map)
+  end
+
+  # One :info line per refresh: store count, entry/hit/miss counts, rebuild
+  # duration, and the cold→fresh transition (the pre-update `state` still reads
+  # cold on the warming tick). This is the operator's window into the owner-feed
+  # cache without shelling into the daemon.
+  defp log_document_cache_refresh(%State{} = state, stats, refresh_ms) do
+    transition = if state.document_cache_ready, do: "", else: " cold→fresh"
+
+    Logger.info(
+      "document cache refresh#{transition}: stores=#{length(state.felt_stores)} " <>
+        "entries=#{Map.get(stats, :entries, 0)} hits=#{Map.get(stats, :hits, 0)} " <>
+        "misses=#{Map.get(stats, :misses, 0)} refresh_ms=#{refresh_ms}"
+    )
   end
 
   # Read one host's shuttle fibers via felt's JSON, keeping only those
@@ -1481,17 +1613,20 @@ defmodule Shuttle.Poller do
   defp owned_by_store?(_, _), do: false
 
   defp run_felt_ls_for_shuttle(host, state) do
-    # Cheap projection: felt filters by raw top-level frontmatter first, then
-    # emits only fields the poller needs for eligibility, ownership, and identity.
-    # Keep the broad fallback so a not-yet-upgraded remote felt fails soft
-    # instead of hiding every card on that city.
+    # Widened projection: felt filters by raw top-level frontmatter first, then
+    # emits the FULL kanban field set (`FiberDocuments.kanban_fields/0` — a
+    # superset of the fields the poller needs for eligibility, ownership, and
+    # identity). Widening it lets the document cache build each entry DIRECTLY
+    # from its candidate row (no per-miss `felt show`, no stat), so a poll tick
+    # costs one `felt ls` per store. Keep the broad fallback so a not-yet-upgraded
+    # remote felt fails soft instead of hiding every card on that host.
     case run_felt(host, state.runner, [
            "ls",
            "--json",
            "--has-field",
            "shuttle",
            "--json-field",
-           "id,uid,status,shuttle,path,modified_at,depends_on"
+           Enum.join(Shuttle.FiberDocuments.kanban_fields(), ",")
          ]) do
       {:ok, output} ->
         {:ok, output}

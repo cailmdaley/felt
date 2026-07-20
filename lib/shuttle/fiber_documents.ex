@@ -19,12 +19,19 @@ defmodule Shuttle.FiberDocuments do
         }
 
   # The metadata fields the kanban board needs from each Shuttle fiber.
-  @kanban_json_fields Enum.join(
-                        ~w(id uid name status tags created_at closed_at modified_at
-                           outcome due horizon cold kind priority depends_on tempered
-                           shuttle path),
-                        ","
-                      )
+  # `report_path` is felt's native "does a sibling report.html exist" signal —
+  # carried on the list JSON so the owner feed never stats the filesystem (the
+  # Lustre-scale win). The poller's candidate projection unions this set (see
+  # `kanban_fields/0`) so cache entries build directly from candidate rows.
+  @kanban_fields ~w(id uid name status tags created_at closed_at modified_at
+                    outcome due horizon cold kind priority depends_on tempered
+                    shuttle path report_path)
+
+  @kanban_json_fields Enum.join(@kanban_fields, ",")
+
+  @doc "The kanban metadata field names the owner feed projects from felt JSON."
+  @spec kanban_fields() :: [String.t()]
+  def kanban_fields, do: @kanban_fields
 
   @spec list(keyword()) :: {:ok, map()} | {:error, term()}
   def list(opts \\ []) do
@@ -57,17 +64,29 @@ defmodule Shuttle.FiberDocuments do
   responses preserve the same path, slug, logical-id, and report sibling
   semantics as the direct felt-list path.
   """
+  #
+  # Rows here come from `felt ls` (the poller's candidate projection), which
+  # carries the native `report_path` field — so report detection reads the
+  # field, never stats. See `entry_for/3`.
   @spec entries_for_fiber(String.t(), map()) :: [entry()]
-  def entries_for_fiber(store, fiber), do: entry_for(store, fiber)
+  def entries_for_fiber(store, fiber), do: entry_for(store, fiber, :field)
 
-  @spec envelope([String.t()], [entry()]) :: map()
-  def envelope(stores, entries) do
-    %{
+  @doc """
+  Builds the response envelope. An optional `cache` metadata map (poller
+  cache-state: `%{state, refreshed_at, entries, last_refresh_ms}`) is stamped
+  under `:cache` when given, so a viewer can render "stale as of T" instead of
+  "down". The direct (uncached) `list/1` path passes no cache metadata.
+  """
+  @spec envelope([String.t()], [entry()], map() | nil) :: map()
+  def envelope(stores, entries, cache \\ nil) do
+    base = %{
       host: own_host_id(),
       felt_stores: stores,
       generated_at: DateTime.to_iso8601(DateTime.utc_now()),
       fibers: entries
     }
+
+    if cache, do: Map.put(base, :cache, cache), else: base
   end
 
   @doc """
@@ -141,7 +160,10 @@ defmodule Shuttle.FiberDocuments do
         case Jason.decode(output) do
           {:ok, %{} = fiber} ->
             fiber = if with_body?, do: fiber, else: Map.delete(fiber, "body")
-            {:ok, entry_for(store, fiber)}
+            # `felt show` does not yet carry the native `report_path` field, so
+            # the single-fiber path stats for report existence. The high-volume
+            # list path (:field) never stats.
+            {:ok, entry_for(store, fiber, :stat)}
 
           _ ->
             :miss
@@ -216,7 +238,12 @@ defmodule Shuttle.FiberDocuments do
   defp decode_store(store, output, mode) do
     with {:ok, decoded} when is_list(decoded) <- Jason.decode(output) do
       rows = filter_rows(decoded, mode)
-      {:ok, rows |> Enum.flat_map(&entry_for(store, &1))}
+      # The direct `felt ls` reader (content/search/graph + `body=true`) is not
+      # the Lustre-scale owner-feed hot path, so it keeps the `:stat` report
+      # fallback for felt binaries that do not yet carry the native field. The
+      # owner feed builds entries through `entries_for_fiber/2` (:field), which
+      # never stats.
+      {:ok, rows |> Enum.flat_map(&entry_for(store, &1, :stat))}
     else
       {:ok, _} -> {:error, %{felt_store: store, error: "felt ls returned non-list JSON"}}
       {:error, error} -> {:error, %{felt_store: store, error: Exception.message(error)}}
@@ -284,7 +311,7 @@ defmodule Shuttle.FiberDocuments do
 
   defp host_owned?(_), do: false
 
-  defp entry_for(store, %{"id" => id} = fiber) when is_binary(id) and id != "" do
+  defp entry_for(store, %{"id" => id} = fiber, report_mode) when is_binary(id) and id != "" do
     # Three values, all read from felt, none reverse-derived or guessed by Shuttle:
     #
     #   * The wire `path` is the SERVED-store-relative address Portolan opens the
@@ -326,10 +353,9 @@ defmodule Shuttle.FiberDocuments do
     case fiber_dir(fiber) do
       {:ok, dir} ->
         entry = Map.put(entry, :dir, dir)
-        report_path = Path.join(dir, "report.html")
 
-        if File.exists?(report_path),
-          do: [Map.put(entry, :report_path, report_path)],
+        if report_present?(fiber, dir, report_mode),
+          do: [Map.put(entry, :report_path, Path.join(dir, "report.html"))],
           else: [entry]
 
       :error ->
@@ -337,7 +363,34 @@ defmodule Shuttle.FiberDocuments do
     end
   end
 
-  defp entry_for(_store, _fiber), do: []
+  defp entry_for(_store, _fiber, _report_mode), do: []
+
+  # Whether the fiber has a sibling report.html. Two sources:
+  #
+  #   * `:field` — the felt-list path. felt's native `report_path` field is the
+  #     authoritative signal: a non-empty string means a report exists; ABSENT
+  #     means none. We never stat here — that is the whole point on a slow
+  #     filesystem (726 shuttle fibers on a Lustre login node). The field's VALUE
+  #     is ignored; we always emit the canonical absolute sibling below, keeping
+  #     the wire `report_path` byte-stable regardless of felt's relative/absolute
+  #     rendering.
+  #
+  #   * `:stat` — the single-fiber `felt show` path, which does not yet carry the
+  #     native field, so we fall back to a `File.exists?` on the sibling. One
+  #     stat for one fiber is fine; the list path must never take this branch.
+  defp report_present?(fiber, _dir, :field) do
+    case Map.get(fiber, "report_path") do
+      value when is_binary(value) and value != "" -> true
+      _ -> false
+    end
+  end
+
+  defp report_present?(fiber, dir, :stat) do
+    case Map.get(fiber, "report_path") do
+      value when is_binary(value) and value != "" -> true
+      _ -> File.exists?(Path.join(dir, "report.html"))
+    end
+  end
 
   defp entry_matches_id?(%{fiber: %{"id" => id}}, id), do: true
   defp entry_matches_id?(%{fiber: %{"slug" => id}}, id), do: true

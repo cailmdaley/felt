@@ -1,6 +1,9 @@
 package cmd
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -101,6 +104,81 @@ func TestLsBodySearchScansMarkdown(t *testing.T) {
 	}
 	if strings.Contains(out, "project/question") {
 		t.Fatalf("ls --body included non-match:\n%s", out)
+	}
+}
+
+// A fiber directory with a report.html sibling surfaces report_path (absolute,
+// pointing at that sibling); a fiber without one omits/empties the field. Both
+// the plain walk and the --json-field projection must agree.
+func TestLsJSONReportPath(t *testing.T) {
+	dir := t.TempDir()
+	storage := felt.NewStorage(dir)
+	if err := storage.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+	for _, fiber := range []*felt.Felt{
+		{ID: "project/reported", Name: "Reported", Status: felt.StatusOpen, CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")},
+		{ID: "project/plain", Name: "Plain", Status: felt.StatusOpen, CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")},
+	} {
+		if err := storage.Write(fiber); err != nil {
+			t.Fatalf("Write(%s) error: %v", fiber.ID, err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".felt", "project", "reported", "report.html"), []byte("<html></html>"), 0644); err != nil {
+		t.Fatalf("writing report.html: %v", err)
+	}
+
+	reset := saveLsGlobals()
+	defer reset()
+
+	out, err := runCommand(t, dir, "ls", "-j", "--json-field", "id,report_path")
+	if err != nil {
+		t.Fatalf("ls -j --json-field id,report_path: %v\n%s", err, out)
+	}
+
+	var rows []map[string]any
+	if err := json.Unmarshal([]byte(out), &rows); err != nil {
+		t.Fatalf("unmarshal: %v\n%s", err, out)
+	}
+
+	byID := make(map[string]map[string]any, len(rows))
+	for _, row := range rows {
+		byID[row["id"].(string)] = row
+	}
+
+	reported, ok := byID["project/reported"]
+	if !ok {
+		t.Fatalf("missing project/reported in %v", rows)
+	}
+	wantSuffix := filepath.Join("project", "reported", "report.html")
+	gotPath, _ := reported["report_path"].(string)
+	if !strings.HasSuffix(gotPath, wantSuffix) {
+		t.Fatalf("report_path = %q, want suffix %q", gotPath, wantSuffix)
+	}
+
+	plain, ok := byID["project/plain"]
+	if !ok {
+		t.Fatalf("missing project/plain in %v", rows)
+	}
+	if _, present := plain["report_path"]; present {
+		t.Fatalf("project/plain unexpectedly has report_path: %v", plain)
+	}
+
+	// --json-field is a repeatable pflag StringArrayVar: it appends across
+	// Execute() calls rather than resetting, so the prior --json-field value
+	// would otherwise leak into this second, unprojected call.
+	lsJSONFields = nil
+	if f := lsCmd.Flags().Lookup("json-field"); f != nil {
+		f.Changed = false
+	}
+
+	// Full --json output (no field projection) carries the same contract.
+	out, err = runCommand(t, dir, "ls", "-j")
+	if err != nil {
+		t.Fatalf("ls -j: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, `"report_path"`) {
+		t.Fatalf("full --json output missing report_path key:\n%s", out)
 	}
 }
 
