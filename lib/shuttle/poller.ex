@@ -136,6 +136,22 @@ defmodule Shuttle.Poller do
       document_cache: %{},
       document_cache_stats: %{hits: 0, misses: 0, evictions: 0, entries: 0},
       document_cache_ready: false,
+      # Memoized owner-feed filter+sort: `{document_cache_it_was_built_from,
+      # base_rows}`, `nil` until first computed. `owner_feed_base/1` recomputes
+      # iff `state.document_cache` is no longer the SAME term this was built
+      # from — self-healing against every mutation path (`apply_poll_cycle/2`,
+      # `refresh_document_entry/2`, and any test harness that pokes
+      # `document_cache` directly via `:sys.replace_state`) without each one
+      # having to remember to also touch a derived field. `:cached_fiber_documents`
+      # used to re-run this filter+sort (an O(entries) Enum pass) on EVERY hit of
+      # the 5s-polled owner feed; under login-node CPU contention that redundant
+      # per-request work was enough on its own to push a "pure state read" past
+      # callers' timeouts (see felt fiber
+      # ai-futures/felt/debug/finding-nibi-fibers-endpoint-login-node-contention).
+      # `stamp_runtime/2` (cheap; a no-op when nothing is running) still runs
+      # per-request over the memoized base so live worker status stays
+      # request-fresh.
+      owner_feed_cache: nil,
       # When the document cache was last rebuilt (nil until the first poll warms
       # it) and how long that rebuild took. Surfaced in the owner-feed envelope's
       # `cache` metadata (state/refreshed_at/entries/last_refresh_ms) so a viewer
@@ -728,17 +744,16 @@ defmodule Shuttle.Poller do
     # owned rows (the same predicate the direct FiberDocuments path applies), so
     # a viewer reading us as a remote origin gets only what we own — no
     # peer-mirror rows to merge or elect.
+    #
+    # `owner_feed_base/1` memoizes the filter+sort against `document_cache`'s own
+    # identity, so a request that used to redo an O(entries) Enum pass on every
+    # hit now does an O(1) reuse whenever `document_cache` hasn't changed since
+    # the last request. Only the cheap runtime overlay (`stamp_runtime/2`, a
+    # no-op when nothing is running) runs fresh every time.
     {entries, state} =
       if state.document_cache_ready do
-        rows =
-          state.document_cache
-          |> Map.values()
-          |> Enum.map(& &1.entry)
-          |> Enum.filter(&owned_feed_entry?(&1, state.own_host_id))
-          |> Enum.sort_by(&get_in(&1, [:fiber, "id"]))
-          |> stamp_runtime(state.running)
-
-        {rows, state}
+        {base, state} = owner_feed_base(state)
+        {stamp_runtime(base, state.running), state}
       else
         # Log once per cold period, not once per (5s-cadence) request.
         state =
@@ -1394,6 +1409,30 @@ defmodule Shuttle.Poller do
     do: host_owned?(shuttle, own_host_id)
 
   defp owned_feed_entry?(_, _), do: false
+
+  # The owner-feed's filter+sort, memoized against `document_cache`'s identity.
+  # A cache hit (`document_cache` unchanged since the last call) is a plain
+  # equality check against the stored term — cheap, and BEAM short-circuits it
+  # on pointer equality before ever attempting a structural comparison, so an
+  # unchanged multi-hundred-entry cache costs this check nothing close to
+  # re-deriving it. A miss (poll cycle landed, `refresh_document/2` patched one
+  # fiber, or anything else replaced `document_cache`) recomputes once and
+  # re-memoizes — there is no separate derived field for a mutation path to
+  # forget to update.
+  defp owner_feed_base(%State{owner_feed_cache: {cache, base}, document_cache: cache} = state) do
+    {base, state}
+  end
+
+  defp owner_feed_base(%State{document_cache: document_cache, own_host_id: own_host_id} = state) do
+    base =
+      document_cache
+      |> Map.values()
+      |> Enum.map(& &1.entry)
+      |> Enum.filter(&owned_feed_entry?(&1, own_host_id))
+      |> Enum.sort_by(&get_in(&1, [:fiber, "id"]))
+
+    {base, %{state | owner_feed_cache: {document_cache, base}}}
+  end
 
   # The owner-feed envelope's `cache` metadata block: the freshness signal a
   # viewer renders instead of a binary up/down. `state` is "cold" until the
