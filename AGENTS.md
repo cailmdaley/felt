@@ -360,6 +360,29 @@ down" when it isn't:
   4004:localhost:4000 nibi-lb`. Checkout is **`~/code/felt`** (like amundsen);
   toolchain under `~/.local` (kerl OTP 27 + Elixir + Go), not on the
   non-interactive PATH.
+  **The `:4004` LaunchAgent** (`com.cailmdaley.shuttle-tunnel-nibi`, unlike
+  candide/amundsen/cineca's plain `autossh`) can't just reconnect on its own
+  the way the others do — a fresh master would need a Duo push, so it must
+  reuse the interactively-authenticated ControlMaster instead of opening one.
+  It runs `~/.local/bin/shuttle-tunnel-nibi.sh`, which every 30s curls
+  `localhost:4004/api/v1/version` (the thing that actually matters, not just
+  "is a control socket file present") and only touches anything if that
+  fails: kills any stale forward and rebinds if the master's still up, or
+  logs a rate-limited "needs a human" line if it isn't. **Gotcha that cost a
+  day of silent breakage:** `~/.ssh/config` is a symlink into ProtonDrive
+  CloudStorage, and a background LaunchAgent has no Full Disk Access /
+  FileProvider grant outside a Terminal process tree — `ssh -O check nibi`
+  run from the LaunchAgent silently never reads it and fails with "No
+  ControlPath specified for -O command", even though the identical command
+  works fine interactively. The original hand-rolled loop hit exactly this
+  and sat inert for 18+ hours with nothing in its log (the failure was
+  piped to `/dev/null`). Fix: the script passes `-F
+  ~/.ssh/nibi-tunnel-lb.conf`, a plain local (non-symlinked) copy of just the
+  `nibi`/`nibi-lb` Host blocks — same `HostName`/`User`/`ControlPath`, so
+  `%C` hashes identically and it attaches to the same already-running
+  master. Keep that file in sync by hand if the real config's nibi blocks
+  change. Details: felt fiber
+  `ai-futures/felt/debug/finding-nibi-4004-tunnel-loop-not-self-healing`.
 
 **`bin/shuttle-deploy` is the fleet deploy verb — use it instead of hand-rolling
 the ritual.** `bin/shuttle-deploy` (macOS hub, from the repo root) pushes once,
