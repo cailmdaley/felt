@@ -1701,7 +1701,7 @@ export function applyOptimisticSurface(
   // park-as-draft transition): closed reopens to open with the verdict
   // cleared, active pauses to open, and the kill strips the worker pill —
   // mirrored here so the optimistic card matches the committed reclassify
-  // (the no-snap-back invariant, KanbanGestures.property.test.ts).
+  // (the no-snap-back invariant).
   const moved: KanbanCard = {
     ...card,
     status: 'open',

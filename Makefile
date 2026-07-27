@@ -45,7 +45,7 @@ AGENT_PATH ?= $(shell /bin/bash -lc 'echo $$PATH')
 # ~/.ssh/agent.sock is the stable login-agent path; override if yours differs.
 AGENT_SSH_AUTH_SOCK ?= $(HOME)/.ssh/agent.sock
 
-.PHONY: build cli cli-install daemon test go-test mix-test all start stop restart \
+.PHONY: build cli cli-install daemon test go-test mix-test js-test all start stop restart \
         logs status clean help install install-agent uninstall-agent
 
 help:
@@ -54,7 +54,7 @@ help:
 	@echo "  make cli         — build the felt CLI (go build .)"
 	@echo "  make cli-install — install felt CLI → $(INSTALL_DIR)"
 	@echo "  make daemon      — build the daemon escript → bin/shuttle (MIX_ENV=dev)"
-	@echo "  make test        — go test ./...  AND  mix test"
+	@echo "  make test        — go test ./...  AND  mix test  AND  the ui suite"
 	@echo "  make install     — full from-source bootstrap (CLI + daemon + ui + hook + keep-alive)"
 	@echo ""
 	@echo "daemon lifecycle:"
@@ -87,13 +87,18 @@ daemon: cli-install
 	mix escript.build
 
 # ── test ─────────────────────────────────────────────────────────────────
-test: go-test mix-test
+test: go-test mix-test js-test
 
 go-test:
 	go test ./...
 
 mix-test:
 	mix test
+
+# The board's own suite. `npm test` runs it twice, once per pinned timezone —
+# the civil-day rules are only meaningful against a real UTC offset.
+js-test:
+	cd ui && npm test
 
 # ── daemon lifecycle ──────────────────────────────────────────────────────
 all: restart
