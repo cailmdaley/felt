@@ -1,5 +1,6 @@
 import { CronExpressionParser } from 'cron-parser';
 import type { Fiber } from './KanbanFiber.js';
+import { dueCivilDay, isoDayLocal } from './civilDay.js';
 
 // The kanban's single classifier, in the view. Shuttle (the engine) speaks
 // engine vocabulary — eligible/blocked/running — and never names a kanban
@@ -13,8 +14,6 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 export const KANBAN_HORIZONS = ['now', 'soon', 'stashed'] as const;
 export type KanbanHorizon = typeof KANBAN_HORIZONS[number];
 const HORIZON_SET = new Set<string>(KANBAN_HORIZONS);
-
-const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 export const KANBAN_TIMELINE_WINDOW = {
   pastDays: 14,
@@ -138,12 +137,14 @@ export function effectiveHorizon(
 ): { storedHorizon?: KanbanHorizon; effectiveHorizon: KanbanHorizon; drifted: boolean } {
   const storedHorizon = normalizeHorizon(f.horizon);
   // The Now desk holds only what's chosen for today: a `due:` card earns desk
-  // presence when its due *day* is today or already past (local calendar day),
-  // never on a forward-looking window. Anything due tomorrow or later lives on
-  // the timeline at its date — drag a card to tomorrow and it leaves Now. The
-  // comparison is day-aligned so it's correct across timezones for a bare
-  // `YYYY-MM-DD` due (taken at face value as a tz-free calendar day).
-  const due = dueDay(f.due);
+  // presence when its due *day* is today or already past, never on a forward-
+  // looking window. Anything due tomorrow or later lives on the timeline at its
+  // date — drag a card to tomorrow and it leaves Now. Both sides of the
+  // comparison are civil days: `dueCivilDay` reads the day the `due:` names
+  // (including through felt's UTC-midnight storage — see civilDay.ts), and
+  // `isoDayLocal` gives today's local day. Without that, a negative-offset zone
+  // read tomorrow's due as today's and yanked the card onto the desk a day early.
+  const due = dueCivilDay(f.due);
   const duePromotesToNow = due !== undefined && due <= isoDayLocal(nowMs);
 
   if (duePromotesToNow) {
@@ -211,28 +212,6 @@ export function parseDueMs(value: unknown): number | undefined {
   if (typeof value !== 'string' || !value.trim()) return undefined;
   const ms = Date.parse(value);
   return Number.isFinite(ms) ? ms : undefined;
-}
-
-/** Local calendar day (`YYYY-MM-DD`) for a timestamp. */
-function isoDayLocal(ms: number): string {
-  const d = new Date(ms);
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
-}
-
-/** The calendar day a `due:` value falls on. A bare `YYYY-MM-DD` is taken at
- *  face value — a timezone-free calendar day — so the desk boundary matches
- *  what the user authored regardless of UTC offset; a full timestamp resolves
- *  to its local day. Undefined when absent or unparseable. */
-function dueDay(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined;
-  const trimmed = value.trim();
-  if (!trimmed) return undefined;
-  if (DATE_ONLY_RE.test(trimmed)) return trimmed;
-  const ms = Date.parse(trimmed);
-  return Number.isFinite(ms) ? isoDayLocal(ms) : undefined;
 }
 
 function normalizeHorizon(value: unknown): KanbanHorizon | undefined {

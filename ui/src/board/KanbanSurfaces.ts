@@ -1,4 +1,5 @@
 import { renderMarkdown } from './utils.js'
+import { dayIndexForDue, dueCivilDay, isoDayLocal } from './civilDay.js'
 import type {
   ColumnKind,
   HorizonKind,
@@ -487,12 +488,17 @@ export class KanbanSurfaceRenderer {
         // at their due-date column ("every card lives on the timeline at its
         // real date") while still appearing in the Now board. Undated drafts
         // sit at today, their natural now-position.
-        const col = card.due ? (dayIndexForIso(card.due, dayIndex) ?? todayCol) : todayCol
+        const col = card.due ? (dayIndexForDue(card.due, dayIndex) ?? todayCol) : todayCol
         place(col, card, 'draft')
       }
     }
     for (const card of timeline.futureDated) {
-      const col = dayIndexForIso(card.nextLaunchAt ?? card.due, dayIndex)
+      // Two different kinds of value: `nextLaunchAt` is a real instant (a cron
+      // firing, placed by its local day), `due` is a civil day (placed by the
+      // day it names — see civilDay.ts).
+      const col = card.nextLaunchAt
+        ? dayIndexForIso(card.nextLaunchAt, dayIndex)
+        : dayIndexForDue(card.due, dayIndex)
       if (col === null) continue
       place(col, card, card.status === 'closed' ? 'awaiting' : 'future')
     }
@@ -562,7 +568,11 @@ export class KanbanSurfaceRenderer {
 
     const when = document.createElement('span')
     when.className = 'kbn-tl-later-when'
-    when.textContent = formatLaterWhen(card.nextLaunchAt ?? card.due)
+    // Same split as timeline placement: an instant resolves to its local day, a
+    // `due:` to the civil day it names.
+    when.textContent = formatLaterWhen(
+      card.nextLaunchAt ? localDayOfInstant(card.nextLaunchAt) : dueCivilDay(card.due),
+    )
     const title = document.createElement('span')
     title.className = 'kbn-tl-later-title'
     title.textContent = card.name
@@ -1503,12 +1513,23 @@ function buildDayCell(day: TimelineDay): HTMLElement {
   return el
 }
 
-/** Compact launch-date label for a Later-rail card. Month + day for a
- *  same-year firing; adds the year once the cron reaches into another
- *  calendar year so a far-future role reads unambiguously. */
-function formatLaterWhen(iso: string | undefined): string {
-  if (!iso) return '—'
-  const d = new Date(iso)
+/** The local calendar day an instant falls on, or undefined if unparseable. */
+function localDayOfInstant(iso: string): string | undefined {
+  const ms = Date.parse(iso)
+  return Number.isFinite(ms) ? isoDayLocal(ms) : undefined
+}
+
+/** Compact launch-date label for a Later-rail card, from a civil day
+ *  (`YYYY-MM-DD`). Month + day for a same-year firing; adds the year once the
+ *  cron reaches into another calendar year so a far-future role reads
+ *  unambiguously. The day is materialized as a LOCAL date, never re-parsed as
+ *  an instant — parsing `2026-07-30` would yield UTC midnight and label it Jul
+ *  29 west of Greenwich (see civilDay.ts). */
+function formatLaterWhen(day: string | undefined): string {
+  if (!day) return '—'
+  const parts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day)
+  if (!parts) return '—'
+  const d = new Date(Number(parts[1]), Number(parts[2]) - 1, Number(parts[3]))
   if (Number.isNaN(d.getTime())) return '—'
   const sameYear = d.getFullYear() === new Date().getFullYear()
   return d.toLocaleDateString(
@@ -1518,11 +1539,10 @@ function formatLaterWhen(iso: string | undefined): string {
 }
 
 /**
- * The timeline day-column for an awaiting-review ghost. Pure and exported so
- * the placement table suite can assert the closed-card sub-invariant — "an
- * awaiting card is always findable on BOTH the desk and the timeline" — over
- * every generated card state: with a non-null todayCol this NEVER returns
- * null. Fallback chain closedAt → modifiedAt → today (a closed fiber can
+ * The timeline day-column for an awaiting-review ghost. Pure and exported to
+ * keep the closed-card sub-invariant checkable — "an awaiting card is always
+ * findable on BOTH the desk and the timeline": with a non-null todayCol this
+ * NEVER returns null. Fallback chain closedAt → modifiedAt → today (a closed fiber can
  * carry `closed_at: null`, and with no fallback the ghost silently vanished —
  * 11eeb43); an out-of-window stamp also falls through to today rather than
  * dropping the ghost.
