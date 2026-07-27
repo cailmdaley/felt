@@ -466,6 +466,19 @@ falls back to a local document write when the daemon is down.`,
 		if !acceptKeepOutcome {
 			f.Outcome = ""
 		}
+		// Stamp the same conclude-the-run signal the daemon-reachable path folds in
+		// (LifecycleStore.accept -> conclude_run -> handed_off_at = now): the
+		// poller's repeat-firing guard is `prev_due > last_serviced`, and
+		// last_serviced_at_ms (standing_roles.ex:385) is the max of dispatched_at /
+		// handed_off_at / rearmed_at / created_at. Without a fresh handed_off_at
+		// here, last_serviced stays pinned at the PREVIOUS dispatch, so the guard is
+		// immediately satisfied and the role fires on the very next poll — while
+		// this command just printed a next-due tomorrow morning. UTC instant, same
+		// as every other stamp on this path (and matching the wire format
+		// stampHandedOff uses in shuttle_handoff.go).
+		if err := f.SetShuttleRuntimeField("handed_off_at", time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+			return fmt.Errorf("stamping handed_off_at: %w", err)
+		}
 		if err := st.Write(f); err != nil {
 			return fmt.Errorf("writing fiber: %w", err)
 		}

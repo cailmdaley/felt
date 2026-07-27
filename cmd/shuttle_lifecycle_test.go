@@ -4,6 +4,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/cailmdaley/felt/internal/felt"
 )
@@ -349,6 +350,77 @@ func TestShuttleAccept_OfflineRearmsAndClearsOutcome(t *testing.T) {
 	}
 	if got.Outcome != "" {
 		t.Fatalf("accept should clear outcome, got %q", got.Outcome)
+	}
+}
+
+// TestShuttleAccept_OfflineStampsHandedOffAt locks in the fix for the
+// scheduling-idempotency bug the audit surfaced: the daemon-unreachable branch
+// of accept re-arms and prints a next occurrence, but must ALSO stamp
+// shuttle.runtime.handed_off_at = now — the same conclude-the-run signal the
+// daemon-reachable path folds in via LifecycleStore.accept -> conclude_run
+// (standing_roles.ex:253). The poller's repeat-firing guard is
+// `prev_due > last_serviced`, and last_serviced_at_ms (standing_roles.ex:385)
+// is the max of dispatched_at / handed_off_at / rearmed_at / created_at.
+// Without a fresh handed_off_at, last_serviced stays pinned at the prior
+// dispatched_at, the guard is immediately satisfied, and the role fires on the
+// very next poll — while this command just printed "next due: tomorrow
+// morning" to the user.
+func TestShuttleAccept_OfflineStampsHandedOffAt(t *testing.T) {
+	defer saveShuttleGlobals()()
+	t.Setenv("SHUTTLE_LIFECYCLE_OFFLINE", "1")
+	dir, storage := newShuttleStore(t)
+
+	// A prior dispatch from days ago is the run being accepted now. If accept
+	// fails to advance last_serviced past this, the poller's
+	// `prev_due > last_serviced` guard is satisfied on the very next tick.
+	priorDispatch := "2026-07-20T09:00:00Z"
+	f := &felt.Felt{ID: "f", Name: "f", Status: felt.StatusClosed, CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")}
+	if err := f.SetExtraField("shuttle", map[string]any{
+		"kind": "standing", "agent": "claude-sonnet",
+		"schedule": map[string]any{"expr": "0 9 * * 1-5", "tz": "Europe/Paris"},
+		"runtime":  map[string]any{"dispatched_at": priorDispatch},
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := storage.Write(f); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	before := time.Now().UTC()
+	if out, err := runCommand(t, dir, "shuttle", "accept", "f"); err != nil {
+		t.Fatalf("accept (offline): %v\n%s", err, out)
+	}
+	after := time.Now().UTC()
+
+	got := mustRead(t, storage, "f")
+	rt := shuttleRuntimeMap(t, got)
+	raw, ok := rt["handed_off_at"].(string)
+	if !ok || raw == "" {
+		t.Fatalf("shuttle.runtime.handed_off_at missing after offline accept: %#v", rt)
+	}
+	handedOff, err := time.Parse(time.RFC3339Nano, raw)
+	if err != nil {
+		t.Fatalf("handed_off_at %q not RFC3339: %v", raw, err)
+	}
+	if handedOff.Location() != time.UTC {
+		// time.Parse with a "Z" offset yields UTC; guard against a future
+		// regression that stamps local time instead.
+		t.Fatalf("handed_off_at %q is not a UTC instant", raw)
+	}
+	if handedOff.Before(before) || handedOff.After(after) {
+		t.Fatalf("handed_off_at %v is not within the accept call's window [%v, %v]", handedOff, before, after)
+	}
+
+	// The actual guard this closes: last_serviced (the max of dispatched_at /
+	// handed_off_at / rearmed_at / created_at) must now be the fresh stamp, not
+	// the prior dispatch — so any prev_due at or before "now" does NOT satisfy
+	// `prev_due > last_serviced` and the role stays quiet until its real next
+	// occurrence.
+	priorDispatchTime := mustParseTime(t, priorDispatch)
+	if !handedOff.After(priorDispatchTime) {
+		t.Fatalf("handed_off_at %v must be after the prior dispatched_at %v, or the poller's "+
+			"prev_due > last_serviced guard is immediately satisfied and the role fires on the next poll",
+			handedOff, priorDispatchTime)
 	}
 }
 
