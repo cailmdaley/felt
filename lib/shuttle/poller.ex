@@ -2301,11 +2301,28 @@ defmodule Shuttle.Poller do
   defp dep_id(%{id: id}) when is_binary(id), do: id
   defp dep_id(_), do: nil
 
-  defp sort_candidates(candidates) do
+  # `created_at` is an INSTANT, and the store legitimately holds mixed offsets —
+  # a fiber created in Paris reads `+02:00`, the same second in Berkeley reads
+  # `-07:00`. String order resolves inside the time field long before it reaches
+  # the offset suffix, so comparing the raw strings orders by local wall clock
+  # rather than by instant: "2026-07-27T09:00:00-07:00" sorts BELOW
+  # "2026-07-27T18:00:00+02:00" though both are 16:00Z. Parse to a comparable
+  # instant and compare numerically. This is a comparator fix only — the mixed
+  # offsets are correct data that was being read wrongly, so nothing migrates.
+  # A missing or unparseable value keeps its previous position (first), then
+  # ties break on id, so ordering stays total and deterministic.
+  @doc false
+  def sort_candidates(candidates) do
     Enum.sort_by(candidates, fn fiber ->
-      created = Map.get(fiber, "created_at", "")
-      {created, Map.get(fiber, "id", "")}
+      {created_at_key(Map.get(fiber, "created_at")), Map.get(fiber, "id", "")}
     end)
+  end
+
+  defp created_at_key(value) do
+    case iso_to_unix_ms(value) do
+      ms when is_integer(ms) -> {1, ms}
+      _ -> {0, 0}
+    end
   end
 
   # Re-arm a perennial role (standing or pinned) on the forced path. Returns the

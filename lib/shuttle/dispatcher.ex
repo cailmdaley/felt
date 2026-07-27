@@ -1376,23 +1376,28 @@ defmodule Shuttle.Dispatcher do
   end
 
   defp find_session_file("codex", work_dir, fiber_id, dispatched_after) do
-    dir = codex_sessions_dir()
+    paths =
+      codex_session_dirs()
+      |> Enum.flat_map(fn dir ->
+        case File.ls(dir) do
+          {:ok, files} ->
+            files
+            |> Enum.filter(&String.starts_with?(&1, "rollout-"))
+            |> Enum.map(&{&1, Path.join(dir, &1)})
 
-    case File.ls(dir) do
-      {:ok, files} ->
-        paths =
-          files
-          |> Enum.filter(&String.starts_with?(&1, "rollout-"))
-          |> Enum.sort(:desc)
-          |> Enum.map(&Path.join(dir, &1))
-
-        case Enum.find(paths, &codex_session_matches?(&1, work_dir, fiber_id, dispatched_after)) do
-          nil -> {:error, :not_found}
-          path -> {:ok, path}
+          {:error, _} ->
+            []
         end
+      end)
+      # A rollout basename leads with its local-wall-clock ISO stamp, so
+      # descending basename order is newest-first both within a day directory
+      # and across the three we search.
+      |> Enum.sort_by(&elem(&1, 0), :desc)
+      |> Enum.map(&elem(&1, 1))
 
-      {:error, reason} ->
-        {:error, reason}
+    case Enum.find(paths, &codex_session_matches?(&1, work_dir, fiber_id, dispatched_after)) do
+      nil -> {:error, :not_found}
+      path -> {:ok, path}
     end
   end
 
@@ -1420,16 +1425,51 @@ defmodule Shuttle.Dispatcher do
   defp find_session_file(_cli, _work_dir, _fiber_id, _dispatched_after),
     do: {:error, :unsupported}
 
-  defp codex_sessions_dir do
-    case System.get_env("SHUTTLE_CODEX_SESSIONS_DIR") do
-      dir when is_binary(dir) and dir != "" ->
-        dir
+  # Codex files a rollout under the LOCAL civil day, not the UTC one. Verified
+  # on disk: ~/.codex/sessions/2026/07/22/rollout-2026-07-22T17-41-02-*.jsonl
+  # whose first line carries "timestamp":"2026-07-22T15:41:03.435Z" — 17:41
+  # Paris, filed under the Paris date. Deriving this path from
+  # `Date.utc_today()` therefore names a directory that does not exist for
+  # every dispatch made west of UTC late in the day (at UTC-7: 17:00–23:59
+  # local), and the capture burns its whole retry budget for nothing — the
+  # worker runs, its session_uuid is lost, and it cannot be resumed.
+  #
+  # One day is also not enough on its own: the dispatch and the transcript
+  # write can straddle local midnight in either direction. So search
+  # yesterday / today / tomorrow in local time and take the newest matching
+  # transcript across all three. That window also absorbs a stale zone read —
+  # the BEAM resolves the local zone through libc, which on some platforms
+  # holds the value captured when the OS process started, and no zone on earth
+  # is more than one civil day from another.
+  #
+  # `SHUTTLE_CODEX_SESSIONS_DIR` overrides the ROOT (the `~/.codex/sessions`
+  # equivalent); the YYYY/MM/DD fan-out below applies to it too.
+  @codex_session_day_offsets [1, 0, -1]
 
-      _ ->
-        home = System.user_home!()
-        date = Date.utc_today()
-        Path.join([home, ".codex", "sessions", "#{date.year}", pad2(date.month), pad2(date.day)])
+  @doc false
+  def codex_session_dirs do
+    root = codex_sessions_root()
+    today = local_today()
+
+    Enum.map(@codex_session_day_offsets, fn offset ->
+      date = Date.add(today, offset)
+      Path.join([root, "#{date.year}", pad2(date.month), pad2(date.day)])
+    end)
+  end
+
+  defp codex_sessions_root do
+    case System.get_env("SHUTTLE_CODEX_SESSIONS_DIR") do
+      dir when is_binary(dir) and dir != "" -> dir
+      _ -> Path.join([System.user_home!(), ".codex", "sessions"])
     end
+  end
+
+  # The local civil day, read from the OS zone via `:calendar.local_time/0`.
+  # Needs no TZ variable in the daemon's environment and no time-zone database.
+  @doc false
+  def local_today do
+    {{year, month, day}, _time} = :calendar.local_time()
+    Date.new!(year, month, day)
   end
 
   defp codex_session_matches?(path, work_dir, fiber_id, dispatched_after) do

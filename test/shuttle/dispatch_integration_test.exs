@@ -589,19 +589,8 @@ defmodule Shuttle.DispatchIntegrationTest do
   end
 
   test "codex session capture ignores newer non-worker session in same cwd", %{host: host} do
-    session_dir = Path.join(host, "codex-sessions")
-    File.mkdir_p!(session_dir)
-
-    previous_dir = System.get_env("SHUTTLE_CODEX_SESSIONS_DIR")
-    System.put_env("SHUTTLE_CODEX_SESSIONS_DIR", session_dir)
-
-    on_exit(fn ->
-      if previous_dir do
-        System.put_env("SHUTTLE_CODEX_SESSIONS_DIR", previous_dir)
-      else
-        System.delete_env("SHUTTLE_CODEX_SESSIONS_DIR")
-      end
-    end)
+    root = put_codex_sessions_root(Path.join(host, "codex-sessions"))
+    session_dir = codex_day_dir(root, 0)
 
     work_dir = File.cwd!()
     timestamp = DateTime.utc_now() |> DateTime.add(30, :second) |> DateTime.to_iso8601()
@@ -667,6 +656,92 @@ defmodule Shuttle.DispatchIntegrationTest do
                  "--dispatched-at" not in args
              end)
            end)
+  end
+
+  # Codex files a rollout under the LOCAL civil day, and a dispatch can straddle
+  # local midnight: the tmux launch lands at 23:59 and Codex writes the
+  # transcript at 00:01 the next day, into a directory the dispatch-time date
+  # never names. The capture therefore searches yesterday/today/tomorrow in
+  # local time. Against a single-directory search this test fails with the
+  # capture timing out, which is the live UTC-vs-local bug in miniature.
+  test "codex session capture finds a transcript filed under the adjacent local day", %{
+    host: host
+  } do
+    root = put_codex_sessions_root(Path.join(host, "codex-sessions"))
+    tomorrow = Date.add(Dispatcher.local_today(), 1)
+
+    work_dir = File.cwd!()
+    timestamp = DateTime.utc_now() |> DateTime.add(30, :second) |> DateTime.to_iso8601()
+
+    write_codex_session(
+      codex_day_dir(root, 1),
+      "rollout-#{Date.to_iso8601(tomorrow)}T00-01-00-aaaa-worker.jsonl",
+      "straddle-worker-session",
+      work_dir,
+      timestamp,
+      "Fiber: tests/codex-straddle"
+    )
+
+    write_fiber(host, "tests/codex-straddle", """
+    ---
+    name: Codex straddle test
+    status: active
+    tags:
+      - constitution
+    shuttle:
+      kind: oneshot
+      agent: codex
+    ---
+    A codex fiber whose transcript lands after local midnight.
+    """)
+
+    assert {:ok, "codex-straddle-shuttle"} =
+             Dispatcher.dispatch("tests/codex-straddle",
+               runner: IntegrationRunner,
+               felt_store: host,
+               work_dir: work_dir
+             )
+
+    assert eventually(fn ->
+             Enum.any?(IntegrationRunner.commands(), fn {cmd, args} ->
+               cmd == "felt" and match?(["shuttle", "mark-runtime" | _], args) and
+                 "--session" in args and "straddle-worker-session" in args
+             end)
+           end),
+           "expected the transcript filed under tomorrow's local day to be captured"
+  end
+
+  # The directory set is derived from the LOCAL civil day, never `Date.utc_today/0`.
+  # West of UTC after 17:00 the two disagree and the UTC day names a directory
+  # Codex has not created yet. Anchored on `:calendar.local_time/0` — the OS
+  # zone, read without a TZ variable and without a time-zone database — rather
+  # than on the function under test, so a UTC regression bites whenever the two
+  # civil days differ.
+  test "codex session dirs are the local civil day and its neighbours" do
+    root = put_codex_sessions_root(Path.join(System.tmp_dir!(), "codex-sessions-shape"))
+    {{year, month, day}, _time} = :calendar.local_time()
+    local_today = Date.new!(year, month, day)
+
+    assert Dispatcher.local_today() == local_today
+
+    expected =
+      for offset <- [1, 0, -1] do
+        d = Date.add(local_today, offset)
+
+        Path.join([
+          root,
+          Integer.to_string(d.year),
+          String.pad_leading(Integer.to_string(d.month), 2, "0"),
+          String.pad_leading(Integer.to_string(d.day), 2, "0")
+        ])
+      end
+
+    assert Dispatcher.codex_session_dirs() == expected
+
+    # The +/-1 window is what makes the fix robust independently of the zone
+    # read: no two civil days on earth are more than a day apart, so even a
+    # stale or UTC-valued "today" still names a directory inside this set.
+    assert abs(Date.diff(local_today, Date.utc_today())) <= 1
   end
 
   # Interactivity is retired as a dispatch mode: the prompt never renders an
@@ -1559,6 +1634,39 @@ defmodule Shuttle.DispatchIntegrationTest do
     # The session id lives in the per-host dispatch marker (the only structured
     # session-id home). Keyed by the fiber's runtime key (slug for these fibers).
     if session, do: write_dispatch_marker(host, id, session)
+  end
+
+  # `SHUTTLE_CODEX_SESSIONS_DIR` overrides the sessions ROOT; the YYYY/MM/DD
+  # fan-out still applies under it, so tests exercise the real day layout.
+  defp put_codex_sessions_root(root) do
+    previous = System.get_env("SHUTTLE_CODEX_SESSIONS_DIR")
+    File.mkdir_p!(root)
+    System.put_env("SHUTTLE_CODEX_SESSIONS_DIR", root)
+
+    on_exit(fn ->
+      if previous do
+        System.put_env("SHUTTLE_CODEX_SESSIONS_DIR", previous)
+      else
+        System.delete_env("SHUTTLE_CODEX_SESSIONS_DIR")
+      end
+    end)
+
+    root
+  end
+
+  defp codex_day_dir(root, offset, opts \\ []) do
+    date = Date.add(Dispatcher.local_today(), offset)
+
+    dir =
+      Path.join([
+        root,
+        Integer.to_string(date.year),
+        String.pad_leading(Integer.to_string(date.month), 2, "0"),
+        String.pad_leading(Integer.to_string(date.day), 2, "0")
+      ])
+
+    if Keyword.get(opts, :create, true), do: File.mkdir_p!(dir)
+    dir
   end
 
   defp write_codex_session(session_dir, filename, uuid, cwd, timestamp, prompt) do

@@ -5277,4 +5277,45 @@ defmodule Shuttle.PollerTest do
              cmd == "tmux" and hd(args) == "kill-session" and Enum.at(args, 2) =~ "capture-"
            end)
   end
+  # `created_at` is an INSTANT and the store holds mixed offsets — thousands of
+  # `+02:00` and `+01:00` values from Paris, a growing tail of `-07:00` from
+  # Berkeley, plus `Z`, `-05:00`, `-04:00`, `+03:00`. Lexicographic string order
+  # resolves inside the time field long before it reaches the offset suffix, so
+  # it orders by local wall clock instead of by instant. These two cases both
+  # fail against the string comparator.
+  describe "sort_candidates orders by instant, not by wall clock" do
+    test "a later instant written at a western offset still sorts later" do
+      # 16:00Z, then 16:30Z. As strings, "09:30" sorts below "18:00".
+      paris = %{"id" => "paris", "created_at" => "2026-07-27T18:00:00+02:00"}
+      berkeley = %{"id" => "berkeley", "created_at" => "2026-07-27T09:30:00-07:00"}
+
+      assert Poller.sort_candidates([berkeley, paris]) == [paris, berkeley]
+      assert Poller.sort_candidates([paris, berkeley]) == [paris, berkeley]
+    end
+
+    test "the same instant at two offsets ties, and the tie breaks on id" do
+      # Both are 16:00Z. Correct order is by id; the string comparator puts the
+      # "09:00" row first no matter what its id is.
+      alpha = %{"id" => "alpha", "created_at" => "2026-07-27T18:00:00+02:00"}
+      zulu = %{"id" => "zulu", "created_at" => "2026-07-27T09:00:00-07:00"}
+
+      assert Poller.sort_candidates([zulu, alpha]) == [alpha, zulu]
+    end
+
+    test "a Z value compares against an offset value on the same axis" do
+      # 16:00Z, then 16:05Z. As strings, "09:05" sorts below "16:00".
+      utc = %{"id" => "a", "created_at" => "2026-07-27T16:00:00Z"}
+      offset = %{"id" => "b", "created_at" => "2026-07-27T09:05:00-07:00"}
+
+      assert Poller.sort_candidates([offset, utc]) == [utc, offset]
+    end
+
+    test "a missing or unparseable created_at keeps its head position" do
+      missing = %{"id" => "missing"}
+      junk = %{"id" => "junk", "created_at" => "not-a-timestamp"}
+      real = %{"id" => "real", "created_at" => "2020-01-01T00:00:00Z"}
+
+      assert Poller.sort_candidates([real, junk, missing]) == [junk, missing, real]
+    end
+  end
 end
