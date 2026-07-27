@@ -1,5 +1,12 @@
 import { renderMarkdown } from './utils.js'
-import { dayIndexForDue, dueCivilDay, isoDayLocal } from './civilDay.js'
+import {
+  civilDayToLocalDate,
+  dayIndexForDue,
+  descByKey,
+  dueCivilDay,
+  instantMs,
+  isoDayLocal,
+} from './civilDay.js'
 import type {
   ColumnKind,
   HorizonKind,
@@ -78,7 +85,7 @@ export const SURFACE_TITLE: Record<HorizonKind, string> = {
 type TimelineCardKind = 'past' | 'future' | 'awaiting' | 'inflight' | 'draft'
 
 /** Stash cluster: project key + warmth + cards under that key. */
-interface StashCluster {
+export interface StashCluster {
   key: string
   cold: boolean
   cards: KanbanCard[]
@@ -1463,7 +1470,7 @@ function isoDay(date: Date): string {
   return `${y}-${m}-${d}`
 }
 
-interface TimelineDay {
+export interface TimelineDay {
   iso: string
   label: string
   weekdayLabel: string
@@ -1473,12 +1480,28 @@ interface TimelineDay {
   weekBoundary: boolean
 }
 
-function buildTimelineDays(past: number, future: number): TimelineDay[] {
+/**
+ * The strip of day columns, from `past` days back to `future` days ahead.
+ *
+ * Strides by CALENDAR day, not by 86_400_000 ms. A fixed-millisecond stride
+ * drifts an hour across a DST transition and eventually skips or repeats a
+ * civil day — and a skipped column is a card that VANISHES, because its due
+ * day finds no column to land on. `setDate(getDate() + 1)` is local-calendar
+ * arithmetic: it always lands on the next civil day, 23- or 25-hour.
+ * `today` is injectable so the DST crossings are testable.
+ */
+export function buildTimelineDays(
+  past: number,
+  future: number,
+  today: Date = new Date(),
+): TimelineDay[] {
   const days: TimelineDay[] = []
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
+  const cursor = new Date(today.getTime())
+  cursor.setHours(0, 0, 0, 0)
+  cursor.setDate(cursor.getDate() - past)
   for (let offset = -past; offset <= future; offset += 1) {
-    const d = new Date(today.getTime() + offset * 86_400_000)
+    const d = new Date(cursor.getTime())
+    cursor.setDate(cursor.getDate() + 1)
     const dow = d.getDay()
     days.push({
       iso: isoDay(d),
@@ -1526,11 +1549,8 @@ function localDayOfInstant(iso: string): string | undefined {
  *  an instant — parsing `2026-07-30` would yield UTC midnight and label it Jul
  *  29 west of Greenwich (see civilDay.ts). */
 function formatLaterWhen(day: string | undefined): string {
-  if (!day) return '—'
-  const parts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day)
-  if (!parts) return '—'
-  const d = new Date(Number(parts[1]), Number(parts[2]) - 1, Number(parts[3]))
-  if (Number.isNaN(d.getTime())) return '—'
+  const d = civilDayToLocalDate(day)
+  if (!d) return '—'
   const sameYear = d.getFullYear() === new Date().getFullYear()
   return d.toLocaleDateString(
     undefined,
@@ -1569,7 +1589,7 @@ function dayIndexForIso(
   return dayIndex.get(isoDay(d)) ?? null
 }
 
-function clusterStashCards(stash: KanbanCard[]): StashCluster[] {
+export function clusterStashCards(stash: KanbanCard[]): StashCluster[] {
   const byKey = new Map<string, StashCluster>()
   for (const card of stash) {
     const key = stashClusterKey(card.id)
@@ -1584,13 +1604,14 @@ function clusterStashCards(stash: KanbanCard[]): StashCluster[] {
   }
   const out = [...byKey.values()]
   for (const c of out) {
-    c.cards.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
+    // `createdAt` is an INSTANT: compare epoch ms, never the RFC3339 strings —
+    // a string compare orders by local wall clock, so a Berkeley-created fiber
+    // sinks below an older Paris one (see civilDay.ts).
+    c.cards.sort((a, b) => descByKey(instantMs(a.createdAt), instantMs(b.createdAt)))
   }
   out.sort((a, b) => {
     if (a.cold !== b.cold) return a.cold ? 1 : -1
-    const aT = a.cards[0]?.createdAt ?? ''
-    const bT = b.cards[0]?.createdAt ?? ''
-    return bT.localeCompare(aT)
+    return descByKey(instantMs(a.cards[0]?.createdAt), instantMs(b.cards[0]?.createdAt))
   })
   return out
 }
@@ -1603,9 +1624,14 @@ function stashClusterKey(id: string): string {
   return segments[segments.length - 1] ?? id
 }
 
-function formatDue(iso: string): string {
-  const date = new Date(iso)
-  if (Number.isNaN(date.getTime())) return iso
+/** The `due <date>` chip on a card. Reads the value as the CIVIL DAY it names,
+ *  the same way the timeline places the card — otherwise one render pass showed
+ *  two different days: the card sat on the Thursday column while its own chip
+ *  read Wednesday. The day is materialized as a local date, never re-parsed as
+ *  an instant (see civilDay.ts). */
+export function formatDue(iso: string): string {
+  const date = civilDayToLocalDate(dueCivilDay(iso))
+  if (!date) return iso
   return date.toLocaleDateString(undefined, {
     month: 'short',
     day: 'numeric',

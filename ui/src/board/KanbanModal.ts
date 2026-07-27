@@ -43,6 +43,7 @@ import { COLUMN_TITLES, KanbanSurfaceRenderer, SURFACE_TITLE, findCardColumn } f
 import { parseCompositeFeed } from './KanbanComposite.js'
 import { buildKanbanResponseFromComposite } from './KanbanReadModel.js'
 import { nextStandingLaunch, STANDING_TIMELINE_HORIZON_MS } from './KanbanRules.js'
+import { sameCivilDue } from './civilDay.js'
 import { buildCityResolver, type CityFeltRoot } from './KanbanCityResolver.js'
 import { shouldRunVisiblePoll } from '../runtime/PageAttention'
 import { fetchWithBootPrefetch } from '../runtime/bootPrefetch'
@@ -644,7 +645,7 @@ export class KanbanModal {
     const due = horizon === 'stashed' && opts.due === undefined ? null : opts.due
     const sameHorizon =
       card.storedHorizon === horizon && (card.cold ?? false) === (opts.cold ?? false)
-    const sameDue = due === undefined || (card.due ?? null) === due
+    const sameDue = due === undefined || sameCivilDue(card.due, due)
     // Any CLOSED card — a tempered/composted past run OR an awaiting-review one
     // (closed, untempered) — classifies by its lifecycle state, not its stored
     // horizon: it sits in Awaiting review / Past regardless of a `horizon:

@@ -36,6 +36,7 @@ import type {
   KanbanOriginStaleness,
   KanbanResponse,
 } from './KanbanTypes.js';
+import { ascByKey, descByKey, dueSortMs, instantMs } from './civilDay.js';
 
 /**
  * Resolve the pinned local city + project-relative slug for a composite entry,
@@ -431,30 +432,39 @@ function emptyResponse(
   };
 }
 
-function byCreatedAtDesc(a: KanbanCard, b: KanbanCard): number {
-  return (b.createdAt || '').localeCompare(a.createdAt || '');
+// `createdAt` / `modifiedAt` / `closedAt` / `nextLaunchAt` are INSTANTS. Order
+// them by epoch milliseconds, never by the RFC3339 string: the string carries
+// an offset, so a lexicographic compare orders by LOCAL WALL CLOCK.
+// `2026-07-27T09:00:00-07:00` sorts below `2026-07-27T18:00:00+02:00` although
+// both name the same instant, which sank every Berkeley-created fiber below
+// older Paris work in Drafts, the Past lane and the Pinned strip. See
+// civilDay.ts. `due:` is the exception — a civil day, keyed by its local
+// midnight, not by an instant.
+
+export function byCreatedAtDesc(a: KanbanCard, b: KanbanCard): number {
+  return descByKey(instantMs(a.createdAt), instantMs(b.createdAt));
 }
 
-function byRecentActivityThenName(a: KanbanCard, b: KanbanCard): number {
-  const aT = a.modifiedAt || a.createdAt || '';
-  const bT = b.modifiedAt || b.createdAt || '';
-  if (aT !== bT) return bT.localeCompare(aT);
+export function byRecentActivityThenName(a: KanbanCard, b: KanbanCard): number {
+  const aT = instantMs(a.modifiedAt) ?? instantMs(a.createdAt);
+  const bT = instantMs(b.modifiedAt) ?? instantMs(b.createdAt);
+  if (aT !== bT) return descByKey(aT, bT);
   return (a.name || '').localeCompare(b.name || '');
 }
 
-function byClosedAtDesc(a: KanbanCard, b: KanbanCard): number {
-  const aT = a.closedAt || a.createdAt || '';
-  const bT = b.closedAt || b.createdAt || '';
-  return bT.localeCompare(aT);
+export function byClosedAtDesc(a: KanbanCard, b: KanbanCard): number {
+  const aT = instantMs(a.closedAt) ?? instantMs(a.createdAt);
+  const bT = instantMs(b.closedAt) ?? instantMs(b.createdAt);
+  return descByKey(aT, bT);
 }
 
-function byDueAtAsc(a: KanbanCard, b: KanbanCard): number {
-  const aT = a.nextLaunchAt ?? a.due ?? '';
-  const bT = b.nextLaunchAt ?? b.due ?? '';
-  if (aT === bT) return 0;
-  if (!aT) return 1;
-  if (!bT) return -1;
-  return aT.localeCompare(bT);
+export function byDueAtAsc(a: KanbanCard, b: KanbanCard): number {
+  // Soonest first. A standing role sorts by its next launch (an instant); a
+  // dated card by the civil day its `due:` names, keyed to local midnight so
+  // the two are comparable on one axis.
+  const aT = a.nextLaunchAt ? instantMs(a.nextLaunchAt) : dueSortMs(a.due);
+  const bT = b.nextLaunchAt ? instantMs(b.nextLaunchAt) : dueSortMs(b.due);
+  return ascByKey(aT, bT);
 }
 
 function mergeByClosedAtDesc(a: KanbanCard[], b: KanbanCard[]): KanbanCard[] {
