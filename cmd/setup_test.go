@@ -3,6 +3,7 @@ package cmd
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -114,4 +115,81 @@ func TestFindPluginDir_EnvVar(t *testing.T) {
 	if resolved != pluginDir {
 		t.Fatalf("expected %s, got %s", pluginDir, resolved)
 	}
+}
+
+// fakeClaudeOnPath puts a stub `claude` at the front of PATH for the duration
+// of the test. The stub appends every invocation to a log file, answers
+// `plugin list --json` with listJSON, and answers `plugin marketplace list
+// --json` with the felt marketplace already registered — the state every
+// caller of installPluginViaCLI is really in, since setup registers the
+// marketplace on first run and uninstall never removes it. Returns a func
+// reading the log.
+func fakeClaudeOnPath(t *testing.T, listJSON string) func() string {
+	t.Helper()
+	dir := t.TempDir()
+	log := filepath.Join(dir, "calls.log")
+	marketplaceJSON := `[{"name":"` + marketplaceName + `","source":"directory","path":"/tmp/felt-repo"}]`
+	script := "#!/bin/sh\n" +
+		"echo \"$@\" >> " + log + "\n" +
+		"if [ \"$1\" = plugin ] && [ \"$2\" = marketplace ] && [ \"$3\" = list ]; then\n" +
+		"  cat <<'JSON'\n" + marketplaceJSON + "\nJSON\n" +
+		"elif [ \"$1\" = plugin ] && [ \"$2\" = list ]; then\n" +
+		"  cat <<'JSON'\n" + listJSON + "\nJSON\n" +
+		"fi\n" +
+		"exit 0\n"
+	if err := os.WriteFile(filepath.Join(dir, "claude"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return func() string {
+		b, err := os.ReadFile(log)
+		if err != nil {
+			return ""
+		}
+		return string(b)
+	}
+}
+
+// TestInstallPluginViaCLI_OpFollowsPluginNotMarketplace pins the fix for a
+// setup that could not recover from its own uninstall. `felt setup claude
+// --uninstall` leaves the marketplace registered on purpose, so choosing
+// install-vs-update by marketplace registration sent the next setup to
+// `claude plugin update` — which hard-fails on a plugin that isn't installed.
+// The op must follow whether the PLUGIN is installed.
+func TestInstallPluginViaCLI_OpFollowsPluginNotMarketplace(t *testing.T) {
+	pluginRef := "felt@" + marketplaceName
+
+	t.Run("plugin absent → install", func(t *testing.T) {
+		// A registered marketplace with no felt plugin: exactly the state
+		// `felt setup claude --uninstall` leaves behind.
+		calls := fakeClaudeOnPath(t, `[{"id":"other@somewhere"}]`)
+		if err := installPluginViaCLI("/tmp/felt-repo"); err != nil {
+			t.Fatalf("install: %v", err)
+		}
+		if got := calls(); !strings.Contains(got, "plugin install "+pluginRef) {
+			t.Errorf("expected `plugin install`, got calls:\n%s", got)
+		}
+	})
+
+	t.Run("plugin present → update", func(t *testing.T) {
+		calls := fakeClaudeOnPath(t, `[{"id":"`+pluginRef+`"}]`)
+		if err := installPluginViaCLI("/tmp/felt-repo"); err != nil {
+			t.Fatalf("install: %v", err)
+		}
+		if got := calls(); !strings.Contains(got, "plugin update "+pluginRef) {
+			t.Errorf("expected `plugin update`, got calls:\n%s", got)
+		}
+	})
+
+	t.Run("unreadable plugin list → install", func(t *testing.T) {
+		// Install is the safe guess: installing an installed plugin is a
+		// no-op, updating a missing one is an error.
+		calls := fakeClaudeOnPath(t, `not json`)
+		if err := installPluginViaCLI("/tmp/felt-repo"); err != nil {
+			t.Fatalf("install: %v", err)
+		}
+		if got := calls(); !strings.Contains(got, "plugin install "+pluginRef) {
+			t.Errorf("expected `plugin install`, got calls:\n%s", got)
+		}
+	})
 }

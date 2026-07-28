@@ -332,18 +332,23 @@ func installPluginViaCLI(repoRoot string) error {
 	}
 
 	pluginRef := "felt@" + marketplaceName
-	wasRegistered := isMarketplaceRegistered(marketplaceName)
+	// Ask whether the PLUGIN is installed, not whether its marketplace is
+	// registered: `felt setup claude --uninstall` leaves the marketplace
+	// behind on purpose, so a marketplace-based check sends the next setup
+	// down the update path for a plugin that isn't there — and `claude
+	// plugin update` hard-fails on a missing plugin.
+	installed := isPluginInstalled(pluginRef)
 
 	if err := runClaudeCLI("plugin", "marketplace", "add", repoRoot); err != nil {
 		return fmt.Errorf("registering marketplace: %w", err)
 	}
 
-	op := "install"
-	if wasRegistered {
-		op = "update"
+	op, gerund := "install", "installing"
+	if installed {
+		op, gerund = "update", "updating"
 	}
 	if err := runClaudeCLI("plugin", op, pluginRef); err != nil {
-		return fmt.Errorf("%sing %s: %w", op, pluginRef, err)
+		return fmt.Errorf("%s %s: %w", gerund, pluginRef, err)
 	}
 
 	fmt.Println()
@@ -352,11 +357,38 @@ func installPluginViaCLI(repoRoot string) error {
 }
 
 // isMarketplaceRegistered returns true if the given marketplace name appears
-// in `claude plugin marketplace list` output. Used to choose between the
-// add+install and update+update paths in installPluginViaCLI.
+// in `claude plugin marketplace list` output.
 func isMarketplaceRegistered(name string) bool {
 	_, ok := marketplaceEntry(name)
 	return ok
+}
+
+// claudePluginEntry mirrors the structured `claude plugin list --json`
+// output. Only the fields we read are decoded.
+type claudePluginEntry struct {
+	ID string `json:"id"` // "<plugin>@<marketplace>"
+}
+
+// isPluginInstalled reports whether `claude plugin list` knows the given
+// "<plugin>@<marketplace>" ref. Chooses between the install and update paths
+// in installPluginViaCLI. Returns false when the CLI is missing or the call
+// fails — install is the safe guess, since installing an installed plugin is
+// a no-op while updating a missing one is an error.
+func isPluginInstalled(ref string) bool {
+	out, err := exec.Command("claude", "plugin", "list", "--json").Output()
+	if err != nil {
+		return false
+	}
+	var entries []claudePluginEntry
+	if err := json.Unmarshal(out, &entries); err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if e.ID == ref {
+			return true
+		}
+	}
+	return false
 }
 
 // claudeMarketplaceEntry mirrors the structured `claude plugin marketplace
