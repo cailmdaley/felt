@@ -247,7 +247,10 @@ defmodule Shuttle.PollerTest do
     # `exit_status` defaults to 0 (a nonzero exit is a separate skew shape).
     def set_contract_level(level, exit_status \\ 0) when is_binary(level),
       do:
-        Agent.update(__MODULE__, &(&1 |> Map.put(:contract_level, level) |> Map.put(:contract_exit, exit_status)))
+        Agent.update(
+          __MODULE__,
+          &(&1 |> Map.put(:contract_level, level) |> Map.put(:contract_exit, exit_status))
+        )
 
     def commands, do: Agent.get(__MODULE__, & &1.commands)
 
@@ -1011,7 +1014,10 @@ defmodule Shuttle.PollerTest do
     }
 
     :sys.replace_state(poller, fn state ->
-      %{state | document_cache: %{uid => %{modified_at: "2026-06-06T02:00:00Z", entry: patched_entry}}}
+      %{
+        state
+        | document_cache: %{uid => %{modified_at: "2026-06-06T02:00:00Z", entry: patched_entry}}
+      }
     end)
 
     send(poller, :run_poll_cycle)
@@ -1058,6 +1064,7 @@ defmodule Shuttle.PollerTest do
     # the next poll is a mtime-REUSE hit. The reconcile must still surface it from
     # the candidate row's native report_path field.
     current = MockRunner.fiber("tests/report-toggle")
+
     MockRunner.set_fiber(
       "tests/report-toggle",
       Map.put(current, "report_path", "/tmp/.felt/tests/report-toggle/report.html")
@@ -1779,7 +1786,12 @@ defmodule Shuttle.PollerTest do
     # auto-dispatch a role no worker asked to relaunch.
     fiber = make_fiber("tests/pinned-markerless", %{"status" => "active"})
     MockRunner.set_fiber("tests/pinned-markerless", fiber)
-    MockRunner.set_shuttle("tests/pinned-markerless", "kind: pinned\nagent: claude-opus\n", "active")
+
+    MockRunner.set_shuttle(
+      "tests/pinned-markerless",
+      "kind: pinned\nagent: claude-opus\n",
+      "active"
+    )
 
     {:ok, poller} =
       start_poller!(
@@ -1806,7 +1818,12 @@ defmodule Shuttle.PollerTest do
     # across clean sessions instead of going dark.
     fiber = make_fiber("tests/pinned-clean-handoff", %{"status" => "active"})
     MockRunner.set_fiber("tests/pinned-clean-handoff", fiber)
-    MockRunner.set_shuttle("tests/pinned-clean-handoff", "kind: pinned\nagent: claude-opus\n", "active")
+
+    MockRunner.set_shuttle(
+      "tests/pinned-clean-handoff",
+      "kind: pinned\nagent: claude-opus\n",
+      "active"
+    )
 
     # Dispatched, then a strictly-later clean handoff → clean_handoff? is true.
     base = DateTime.utc_now()
@@ -1857,6 +1874,102 @@ defmodule Shuttle.PollerTest do
            end)
 
     refute Enum.any?(Poller.snapshot(poller).eligible, &(&1.fiber_id == "tests/pinned-parked"))
+  end
+
+  test "poller never stats a pure-ineligible fiber's project_dir (iCloud/TCC guard)" do
+    # `project_dir_available?/1` is the only per-tick filesystem read that
+    # leaves the felt store — it stats `shuttle.project_dir`. On a fiber whose
+    # project_dir lives on a macOS file provider (iCloud Drive,
+    # ~/Library/CloudStorage), statting it every poll raises a repeating
+    # un-grantable TCC "access data from other apps" prompt. `filter_eligible/2`
+    # and `eligible?/2` must run every cheap, pure, in-memory gate BEFORE
+    # touching that stat, so a fiber a pure predicate already rejects (here: a
+    # pinned role with no deliberate-handoff marker) never reaches it. This
+    # test proves that by tracing real calls to `File.dir?/1` inside the
+    # poller process across a poll tick and asserting the sentinel
+    # project_dir path is never among the args — a regression that
+    # reintroduces `project_dir_available?` ahead of the pure gates would stat
+    # it and fail this test, even though the resulting eligibility decision
+    # (not dispatched) looks identical either way.
+    sentinel_dir = "/tmp/felt-icloud-sentinel-#{System.unique_integer([:positive])}"
+    refute File.exists?(sentinel_dir)
+
+    fiber = make_fiber("tests/pinned-icloud-sentinel", %{"status" => "active"})
+    MockRunner.set_fiber("tests/pinned-icloud-sentinel", fiber)
+
+    MockRunner.set_shuttle(
+      "tests/pinned-icloud-sentinel",
+      "kind: pinned\nagent: claude-opus\nproject_dir: #{sentinel_dir}\n",
+      "active"
+    )
+
+    {:ok, poller} =
+      start_poller!(
+        name: :test_poller_pinned_icloud_sentinel,
+        runner: MockRunner,
+        poll_interval_ms: 60_000,
+        felt_stores: ["/tmp"]
+      )
+
+    # `:dbg` (runtime_tools) ships on-disk with the OTP install but, unlike
+    # :logger/etc, isn't automatically on this project's code path — locate
+    # and add it so the real stdlib :dbg tracer is usable without touching
+    # mix.exs.
+    [runtime_tools_ebin] =
+      :code.root_dir()
+      |> to_string()
+      |> Path.join("lib/runtime_tools-*/ebin")
+      |> Path.wildcard()
+
+    :code.add_pathz(String.to_charlist(runtime_tools_ebin))
+    {:ok, _} = Application.ensure_all_started(:runtime_tools)
+
+    test_pid = self()
+
+    # Called via apply/3 (not a compile-time :dbg.foo(...) call) because :dbg
+    # only lands on the code path above, at runtime — the compiler can't see
+    # it ahead of time and mix's --warnings-as-errors would otherwise choke
+    # on "module :dbg is not available".
+    apply(:dbg, :tracer, [
+      :process,
+      {fn msg, n ->
+         send(test_pid, {:dbg_relay, msg})
+         n + 1
+       end, 0}
+    ])
+
+    apply(:dbg, :p, [poller, [:call]])
+    apply(:dbg, :tpl, [File, :dir?, :x])
+
+    on_exit(fn -> apply(:dbg, :stop_clear, []) end)
+
+    send(poller, :run_poll_cycle)
+    Process.sleep(150)
+
+    apply(:dbg, :stop_clear, [])
+
+    stat_calls =
+      Stream.repeatedly(fn ->
+        receive do
+          {:dbg_relay, msg} -> {:ok, msg}
+        after
+          0 -> :done
+        end
+      end)
+      |> Enum.take_while(&(&1 != :done))
+      |> Enum.map(fn {:ok, msg} -> msg end)
+
+    refute Enum.any?(stat_calls, fn
+             {:trace, _pid, :call, {File, :dir?, [^sentinel_dir]}} -> true
+             _ -> false
+           end),
+           "poller must not stat a pinned-without-handoff fiber's project_dir " <>
+             "(tick_kind_eligible?/1 must run before the filesystem gate)"
+
+    refute Enum.any?(
+             Poller.snapshot(poller).eligible,
+             &(&1.fiber_id == "tests/pinned-icloud-sentinel")
+           )
   end
 
   test "a pinned worker exit parks the role back to the strip (status:open), no re-dispatch" do
@@ -2274,7 +2387,11 @@ defmodule Shuttle.PollerTest do
 
   test "boot quarantine parks a due standing role (occurrences are fresh launches)" do
     fiber_id = "tests/quarantine-standing"
-    MockRunner.set_fiber(fiber_id, make_fiber(fiber_id, %{"tags" => ["constitution", "standing"]}))
+
+    MockRunner.set_fiber(
+      fiber_id,
+      make_fiber(fiber_id, %{"tags" => ["constitution", "standing"]})
+    )
 
     MockRunner.set_shuttle(
       fiber_id,
@@ -5277,6 +5394,7 @@ defmodule Shuttle.PollerTest do
              cmd == "tmux" and hd(args) == "kill-session" and Enum.at(args, 2) =~ "capture-"
            end)
   end
+
   # `created_at` is an INSTANT and the store holds mixed offsets — thousands of
   # `+02:00` and `+01:00` values from Paris, a growing tail of `-07:00` from
   # Berkeley, plus `Z`, `-05:00`, `-04:00`, `+03:00`. Lexicographic string order

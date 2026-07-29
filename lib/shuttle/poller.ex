@@ -1724,7 +1724,12 @@ defmodule Shuttle.Poller do
   # See [[ai-futures/shuttle/findings/finding-pinned-roles-are-interfaces-not-loops]].
   defp filter_eligible(candidates, state) do
     Enum.filter(candidates, fn fiber ->
-      eligible?(fiber, state) and tick_kind_eligible?(fiber)
+      # `tick_kind_eligible?/1` is pure (in-memory only) and rejects most
+      # pinned roles, so it must run before `eligible?/2`, which touches the
+      # filesystem (project_dir_available?/1) — check the free predicate
+      # first so the filesystem stat only happens for a fiber that is
+      # otherwise still in the running.
+      tick_kind_eligible?(fiber) and eligible?(fiber, state)
     end)
   end
 
@@ -1800,81 +1805,89 @@ defmodule Shuttle.Poller do
   end
 
   defp eligible?(fiber, state) do
-    status = Map.get(fiber, "status", "")
-    fiber_id = Map.get(fiber, "id", "")
     shuttle = Map.get(fiber, "shuttle")
 
     if is_map(shuttle) do
-      cond do
-        # Human-worker fibers opt out of auto-dispatch entirely. The user
-        # is doing the work themselves; the kanban shows the card in
-        # inFlight via status:active, but Shuttle never tries to spawn
-        # anything. This is the sole gate that keeps human-worker fibers out
-        # of dispatch.
-        human_worker?(fiber) ->
-          false
-
-        # Must target this daemon. Exactly `block.host == own_host_id`; an
-        # absent host is unowned and ineligible everywhere (no wildcard, no
-        # "local" default).
-        not host_owned?(shuttle, state.own_host_id) ->
-          false
-
-        # A declared project_dir must exist on this host — disqualify, don't
-        # downgrade the worker cwd to a felt store.
-        not project_dir_available?(shuttle) ->
-          false
-
-        # `status: active` is the SOLE dispatch gate. A fiber is shuttle-managed
-        # iff it carries a shuttle: block;
-        # it dispatches iff status is active. `open` is a draft/paused (not
-        # dispatched); `closed` is the awaiting-review / anti-oscillation gate —
-        # a oneshot terminus, or a standing role that ran this cycle and is
-        # `status: closed` + untempered pending a human verdict. Re-arming is an
-        # explicit accept that writes `status: active`. This keeps tempered
-        # fibers from ever oscillating back to dispatching on a later poll (the
-        # citation-audit-skill tempered-never-reverts invariant).
-        status != "active" ->
-          false
-
-        # Must not already be running
-        running_key(state, fiber_id) != nil ->
-          false
-
-        # Must not be claimed (retry queued). `claimed` is keyed by runtime key
-        # (uid when present), so match the candidate's runtime key, not its slug.
-        MapSet.member?(state.claimed, runtime_key_for_fiber(fiber)) ->
-          false
-
-        # Resume-loop circuit breaker is open: this fiber's workers keep dying
-        # almost immediately, so autonomous re-dispatch is paused for a cooldown
-        # (it surfaces as `blocked`). A human force-dispatch bypasses eligible?
-        # entirely and clears the breaker; a healthy run clears it on exit.
-        resume_loop_open?(state, runtime_key_for_fiber(fiber)) ->
-          false
-
-        # Pinned roles need no bespoke branch HERE: this predicate also serves
-        # the explicit-dispatch path (`felt shuttle dispatch`, plain POST
-        # /dispatch), where a pinned role IS eligible — it's a human asking for
-        # it. The autonomous tick applies its own kind gate in
-        # `tick_kind_eligible?/1` (`filter_eligible/2`, the tick's only caller):
-        # a pinned role auto-redispatches only when its worker handed off cleanly
-        # since the last dispatch. A pinned `active` role that died dirty (or was
-        # parked to the strip on session end) is not active-with-a-fresh-marker,
-        # so it sits idle until the human re-attaches, instead of re-dispatching
-        # every poll.
-
-        # Standing roles have additional preconditions; oneshots go to dep check.
-        # Support both new-format (kind:) and old-format (mode:) shuttle blocks.
-        role_kind(shuttle) == "standing" ->
-          StandingRoles.standing_role_due?(fiber, state)
-
-        # Dependencies must be satisfied
-        true ->
-          dependencies_satisfied?(fiber, state)
-      end
+      # `project_dir_available?/1` is the only predicate in this function that
+      # touches the filesystem — it stats `shuttle.project_dir`. For a
+      # project_dir hosted in a macOS file provider (iCloud Drive,
+      # `~/Library/CloudStorage`), a per-tick stat raises a repeating TCC
+      # "access data from other apps" prompt that cannot be granted away. It
+      # is evaluated LAST, after every cheap in-memory gate, so the stat only
+      # happens for a fiber that is otherwise about to dispatch — a fiber
+      # already rejected by a pure predicate never reaches it.
+      dispatch_gates_pass?(fiber, shuttle, state) and project_dir_available?(shuttle)
     else
       false
+    end
+  end
+
+  defp dispatch_gates_pass?(fiber, shuttle, state) do
+    status = Map.get(fiber, "status", "")
+    fiber_id = Map.get(fiber, "id", "")
+
+    cond do
+      # Human-worker fibers opt out of auto-dispatch entirely. The user
+      # is doing the work themselves; the kanban shows the card in
+      # inFlight via status:active, but Shuttle never tries to spawn
+      # anything. This is the sole gate that keeps human-worker fibers out
+      # of dispatch.
+      human_worker?(fiber) ->
+        false
+
+      # Must target this daemon. Exactly `block.host == own_host_id`; an
+      # absent host is unowned and ineligible everywhere (no wildcard, no
+      # "local" default).
+      not host_owned?(shuttle, state.own_host_id) ->
+        false
+
+      # `status: active` is the SOLE dispatch gate. A fiber is shuttle-managed
+      # iff it carries a shuttle: block;
+      # it dispatches iff status is active. `open` is a draft/paused (not
+      # dispatched); `closed` is the awaiting-review / anti-oscillation gate —
+      # a oneshot terminus, or a standing role that ran this cycle and is
+      # `status: closed` + untempered pending a human verdict. Re-arming is an
+      # explicit accept that writes `status: active`. This keeps tempered
+      # fibers from ever oscillating back to dispatching on a later poll (the
+      # citation-audit-skill tempered-never-reverts invariant).
+      status != "active" ->
+        false
+
+      # Must not already be running
+      running_key(state, fiber_id) != nil ->
+        false
+
+      # Must not be claimed (retry queued). `claimed` is keyed by runtime key
+      # (uid when present), so match the candidate's runtime key, not its slug.
+      MapSet.member?(state.claimed, runtime_key_for_fiber(fiber)) ->
+        false
+
+      # Resume-loop circuit breaker is open: this fiber's workers keep dying
+      # almost immediately, so autonomous re-dispatch is paused for a cooldown
+      # (it surfaces as `blocked`). A human force-dispatch bypasses eligible?
+      # entirely and clears the breaker; a healthy run clears it on exit.
+      resume_loop_open?(state, runtime_key_for_fiber(fiber)) ->
+        false
+
+      # Pinned roles need no bespoke branch HERE: this predicate also serves
+      # the explicit-dispatch path (`felt shuttle dispatch`, plain POST
+      # /dispatch), where a pinned role IS eligible — it's a human asking for
+      # it. The autonomous tick applies its own kind gate in
+      # `tick_kind_eligible?/1` (`filter_eligible/2`, the tick's only caller):
+      # a pinned role auto-redispatches only when its worker handed off cleanly
+      # since the last dispatch. A pinned `active` role that died dirty (or was
+      # parked to the strip on session end) is not active-with-a-fresh-marker,
+      # so it sits idle until the human re-attaches, instead of re-dispatching
+      # every poll.
+
+      # Standing roles have additional preconditions; oneshots go to dep check.
+      # Support both new-format (kind:) and old-format (mode:) shuttle blocks.
+      role_kind(shuttle) == "standing" ->
+        StandingRoles.standing_role_due?(fiber, state)
+
+      # Dependencies must be satisfied
+      true ->
+        dependencies_satisfied?(fiber, state)
     end
   end
 
