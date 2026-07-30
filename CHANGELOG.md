@@ -4,22 +4,113 @@ All notable changes to felt are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## Unreleased
+
+This is the largest change in the project's history. Two things happened.
+Shuttle — the Elixir orchestration daemon and its board UI — moved into
+this repository and behind the `felt` binary. And felt went back to pure
+markdown: the SQLite index and the history log are gone, and identity and
+recency now live in the frontmatter.
+
+> **Note.** The `felt shuttle` command group and the daemon are currently
+> fleet-oriented. The agent registry is compiled into the binary, the tunnel
+> verbs hardcode the maintainer's hosts, and the daemon and UI are not release
+> artifacts — only the Go binary ships. Homebrew users get the verb tree; the
+> daemon-HTTP verbs will fail with nothing listening on `:4000`. Treat it as
+> readable prior art, not a product you can install.
+
+### Added
+
+#### Shuttle, merged into felt
+
+- The Shuttle daemon, its browser board UI, and its dispatch CLI now live
+  in this repository. One repo, one checkout, one command surface.
+- New `felt shuttle` command group, replacing the standalone `shuttle-ctl`
+  binary. Lifecycle writes: `install`, `repeat`, `pin`, `uninstall`,
+  `pause`, `resume`, `close`, `reopen`, `accept`, `set-outcome`,
+  `set-model`, `set-agent`, `handoff`. Local reads: `status`, `ps`,
+  `session-name`, `attach`. Daemon-HTTP verbs: `snapshot`, `dispatch`,
+  `validate-identity`, `status --all` / `--remote`. Plus `agents`,
+  `tunnels`, `contract`, `mark-runtime`, and `migrate-runtime`.
+- The verbs are reimplemented on felt's own internals — resolve, read,
+  mutate, validate, write. There is no second fiber-I/O layer.
+- `shuttle:` is a first-class felt frontmatter facet with a real schema
+  (`internal/shuttle`). It is validated on `add` and `edit`, and resolved
+  additively in `show -j` and `ls --json`. Runtime keys nest under
+  `shuttle.runtime`; `felt shuttle migrate-runtime` lifts the old flat
+  keys into place.
+- A numbered contract level (`felt shuttle contract`) with a boot-time
+  handshake. The daemon refuses fresh launches when the CLI and the daemon
+  disagree, so a stale binary cannot dispatch.
+
+#### Identity and recency in the files
+
+- Fibers carry an intrinsic ULID `id`. `felt backfill-ids` mints ids for
+  existing stores (`--dry-run` previews). Fibers resolve by UID as well as
+  by slug.
+- Recency is an `updated-at` frontmatter field (`updated_at` in JSON), so it
+  survives clone, sync, and checkout instead of depending on file mtime. A
+  new PostToolUse hook stamps it when an agent edits a fiber file directly.
+- Session context lists five active-or-open fibers with a recency
+  timestamp on each entry.
+
+#### Smaller CLI additions
+
+- `felt edit --set key=value` / `--unset key` writes and removes opaque
+  top-level scalar frontmatter that felt does not parse natively.
+- `felt check` flags fibers with a blank `name`.
+- Fiber JSON carries the fiber's physical path, including in narrow field
+  projections.
+
+### Changed
+
+- **`felt ls --body` is plain substring matching**, with `--body -r` for
+  regex. It was FTS5 whole-word matching. Scripts that relied on word
+  boundaries will now get more hits. This is a silent behavior change —
+  check anything downstream that parses the output.
+- Recency ranking uses `updated-at` only. Fibers that predate the
+  backfill have no `updated-at` and sort last.
+- The store-config vocabulary is de-loomed: the store registry lives at
+  `~/.config/felt/stores.json`.
+- Frontmatter marshalling preserves the order of extra fields, so
+  tool-owned blocks stop churning the diff.
+- `felt nest` / `felt unnest` preserve companion artifacts when moving a
+  fiber subtree.
+- Fiber resolution prefers an exact id over descendants, then falls back
+  to a globally unique slug.
+- `felt check`'s failure line dropped the always-zero warning count:
+  `check failed: N error(s), 0 warning(s)` → `check failed: N error(s)`.
+  Warnings (orphaned pins, for one) are still printed in the issue list;
+  only the summary line stopped counting them.
+- The board UI got a sky-over-board refresh: a timeline ribbon, pinned
+  launcher chips, a Pinned band below the Now board, paginated days, and
+  hover-lazy expansion.
+- Board time handling is kind-aware. A `due:` date and a Codex session are
+  civil days; `created_at` is an instant. A JavaScript suite runs under two
+  pinned timezones to keep it that way.
+- Board feeds are served from the poller document cache with etag/304 and
+  a single tree walk per refresh. Staleness hysteresis tracks the last
+  success, so one failed poll no longer flips the badge.
+- The plugin bundles the shuttle skill alongside the felt skill. Both
+  skills were rewritten against the current CLI.
 
 ### Removed
 
 - The SQLite index cache (`.felt/index.db`) and the `felt index sync`
   command. felt is now pure markdown: citations, reverse data-flow
   consumers, and body search are computed from the markdown tree on
-  demand, with no derived state on disk. `felt ls --body` is plain
-  substring (`--body -r` for regex). Any leftover `.felt/index.db` files
-  are inert — the `.felt/.gitignore` still ignores them as a transition
-  guard.
-- `felt history append --edit-window-start` / `--edit-window-end`. The
-  flags only ever wrote `edit_window_start` / `edit_window_end` into the
-  event payload; nothing read them back (the edit-window pointer is
-  auto-derived). The append surface is now `summary` / `actor` / `kind` /
-  `field`.
+  demand, with no derived state on disk. Any leftover `.felt/index.db`
+  file is inert and safe to delete.
+- The whole history subsystem: the `history_events` table, the `felt
+  history` command group, and hash-on-read `external_edit` detection.
+  Editorial history is git's job. Recency is `updated-at`.
+- `felt history append --edit-window-start` / `--edit-window-end` went with
+  it. The flags only ever wrote `edit_window_start` / `edit_window_end`
+  into the event payload; nothing read them back.
+- The `ralph` skill is retired, and the plugin no longer advertises it.
+- Inert daemon machinery: the reservation code path and the `/cache/bust`
+  endpoint. The legacy felt-store registry and the obsolete human-due
+  reader are also gone.
 - Large internal cleanup (behavior-preserving, ~1,440 LOC net): the
   retired in-memory dependency-graph subsystem (`BuildGraph`, cycle
   detection, topological `ready`, mermaid/dot/text export — orphaned when
@@ -29,11 +120,41 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   twins, the ID scan-resolve scaffold, the `ls` field-alias tables, the
   native-frontmatter field list) were collapsed to single sources of truth.
 
-### Changed
+### Fixed
 
-- `felt check`'s failure line dropped the always-zero warning count:
-  `check failed: N error(s), 0 warning(s)` → `check failed: N error(s)`.
-  No check ever emitted a warning.
+- A per-fiber `flock` serializes every CLI read-modify-write verb. Two
+  concurrent writers no longer race a fiber's frontmatter. The lock files
+  (`*.md.lock`) are gitignored by `felt init`.
+- Every shell-out to `felt` is bounded by a runner that reaps the OS
+  process. A timeout now reports "world unknown" rather than "not found",
+  so a slow host cannot look like a missing fiber.
+- Dispatch markers stamp synchronously at each boundary. Async capture only
+  backfills what is already true.
+- Ownership resolution fails loudly when it cannot resolve its own host,
+  instead of quietly attributing work to the wrong one.
+- The standing-role reconciler self-heals inverted markers instead of
+  re-closing live work. Dead pinned roles park rather than relaunching in a
+  loop.
+- Force-dispatch reopens a closed fiber authoritatively, not on a
+  best-effort basis.
+- CI: several tests assumed macOS and failed on Linux.
+
+#### Fleet operability
+
+These entries concern the maintainer's own machines. They are listed for
+completeness.
+
+- Registered remotes: amundsen (`:4003`) and nibi (`:4004`).
+- Multiplexed tunnels for 2FA hosts, supervised by a socket-gated loop
+  instead of autossh.
+- `bin/shuttle-deploy` gained a fleet verb and `--handshake`.
+- `bin/shuttle-launch` is a tracked respawner with exponential backoff
+  (2s → 300s), and the daemon log is size-rotated.
+- A boot quarantine holds *fresh* dispatch after a daemon restart while
+  auto-resuming in-flight work. `bin/shuttle release` lifts it, as does
+  clicking the held badge on the board.
+- Deploy verification reports `booted_at` alongside `git_sha`, because a
+  compile-time sha can lie about what is actually running.
 
 ## [1.0.9] — 2026-05-18
 
@@ -141,7 +262,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   contract felt already promises elsewhere. Backward-compatible: existing
   consumers that ignore unknown keys are unaffected.
 
-## [1.0.3] — 2026-05-03
+## 1.0.3 — 2026-05-03
 
 ### Changed
 
@@ -326,3 +447,7 @@ the source of truth — `.felt/index.db` is a rebuildable cache.
 [1.0.0]: https://github.com/cailmdaley/felt/releases/tag/v1.0.0
 [1.0.1]: https://github.com/cailmdaley/felt/releases/tag/v1.0.1
 [1.0.2]: https://github.com/cailmdaley/felt/releases/tag/v1.0.2
+[1.0.4]: https://github.com/cailmdaley/felt/releases/tag/v1.0.4
+[1.0.5]: https://github.com/cailmdaley/felt/releases/tag/v1.0.5
+[1.0.8]: https://github.com/cailmdaley/felt/releases/tag/v1.0.8
+[1.0.9]: https://github.com/cailmdaley/felt/releases/tag/v1.0.9

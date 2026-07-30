@@ -41,3 +41,6 @@ shuttle-*.tar
 # ── Shuttle UI (offline verification harness build output) ───────────────
 ui/harness-dist/
 ui/harness-board-dist/
+
+# mkdocs build output
+/site/
