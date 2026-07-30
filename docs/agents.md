@@ -1,10 +1,10 @@
 # Working with Agents
 
 felt ships as a plugin for [Claude Code](https://claude.com/claude-code) and
-[Codex](https://developers.openai.com/codex). The plugin gives an agent
-fiber-awareness: it sees active fibers at session start, is nudged to use
-felt instead of raw file edits, and keeps fiber timestamps honest when it
-edits a fiber file directly.
+[Codex](https://developers.openai.com/codex). The plugin makes an agent
+fiber-aware. It shows the agent the active fibers at session start. It nudges
+the agent toward felt instead of raw file edits. It keeps fiber timestamps
+honest when the agent edits a fiber file directly.
 
 ## Requirement: `felt` on `PATH`
 
@@ -44,9 +44,9 @@ GitHub. A tagged `felt` binary pins the plugin to the matching tag; a `dev`
 build tracks the default branch, so the plugin content always matches the
 binary that installed it.
 
-Both commands are idempotent — re-running is safe — and both take
-`--uninstall` to remove what they installed. `felt uninstall` removes from
-both harnesses at once and is the general inverse.
+Both commands are idempotent, so re-running is safe. Both take `--uninstall` to
+remove what they installed. `felt uninstall` clears both harnesses at once, and
+serves as the general inverse.
 
 `install.sh` (the curl installer) runs both commands automatically for whichever
 CLI it finds on `PATH`, with no opt-out flag — see
@@ -62,7 +62,7 @@ Symlinks felt's skills into a directory without touching the plugin
 marketplace — `~/.claude/skills` by default. Useful if you want the skill
 content without the hooks.
 
-## What the plugin bundles
+## Plugin contents
 
 One plugin directory serves both harnesses. It bundles two skills and three
 hooks.
@@ -82,16 +82,16 @@ plugin.
 
 ### Hooks
 
-| Hook | Event | What it does |
+| Hook | Event | Effect |
 |---|---|---|
 | `session.sh` | `SessionStart` | Wraps `felt session`'s plain-text context (active + recently-touched fibers) in the harness's `additionalContext` envelope |
 | `remind.sh` | `PreToolUse` | Gates the first non-skill tool call in a felt-enabled project until the felt skill has activated this session; a pass-through everywhere else |
 | `touch.sh` | `PostToolUse` (Edit/Write/MultiEdit) | Stamps a fiber's `updated-at` when the agent edits its markdown file directly, so hand-edits count toward recency the same as `felt edit` does |
 
-The logic lives in the binary, not the script. `remind.sh` and `touch.sh` are
-one-line shims over `felt hook pretool` and `felt hook posttool`. `session.sh`
-wraps `felt session` with a `jq -Rs` pipeline, and falls back to `felt hook
-session` when `jq` is absent.
+The logic lives in the binary, not the script. `remind.sh` and `touch.sh` each
+shim a single line over `felt hook pretool` and `felt hook posttool`.
+`session.sh` wraps `felt session` with a `jq -Rs` pipeline, and falls back to
+`felt hook session` when `jq` is absent.
 
 !!! note
     **Updating the binary updates hook behavior.** `felt update` (and

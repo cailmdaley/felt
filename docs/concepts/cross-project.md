@@ -1,13 +1,13 @@
 # Cross-project stores
 
-A felt store is just a `.felt/` directory. Nothing stops you having more than
-one, and the useful pattern pairs a **per-project store** with a
+A felt store lives in a plain `.felt/` directory. Nothing stops you having more
+than one. The useful pattern pairs a **per-project store** with a
 **cross-project store** that aggregates several projects into one searchable
 tree.
 
-The two are joined by a filesystem symlink. Same bytes, two paths.
+A filesystem symlink joins the two. Same bytes, two paths.
 
-## Why bother
+## The payoff
 
 **Search across everything.** One store that contains every project answers
 "have I solved this before?" and "where did that decision land?" without
@@ -19,25 +19,25 @@ felt ls "jackknife covariance"          # scoped to the current project
 ```
 
 **Threads that belong to no project.** Recurring conversations, admin, notes
-about the tools themselves. They need a home that does not pollute any single
+about the tools themselves. They need a home that keeps them out of any single
 project's tree.
 
 **Cross-pollination.** Reading across occasionally surfaces a pattern from
 project A that resolves a question in project B. A per-project view cannot show
 you that.
 
-The cost is one filesystem indirection.
+You pay one filesystem indirection.
 
-!!! note "`~/loom` is a name, not a feature"
-    Throughout felt's own docs and skills, `~/loom` is the maintainer's
-    cross-project store. It is a private directory on their machines, not
-    something felt ships or expects. Yours can live anywhere and be called
-    anything — the mechanism is entirely the symlink plus the `-C` flag.
+!!! note "Name your cross-project store whatever you like"
+    felt's own docs and skills use `~/loom` for the maintainer's cross-project
+    store. It sits as a private directory on their machines; felt neither ships
+    it nor expects it. Yours can live anywhere and be called anything. Only the
+    symlink and the `-C` flag do the work.
 
 ## The `-C` flag
 
-`-C, --directory <dir>` runs felt as if it had been started in `dir`. It is
-global, so it works with every verb:
+`-C, --directory <dir>` runs felt as if it had been started in `dir`. It
+applies globally, so it works with every verb:
 
 ```bash
 felt -C ~/loom ls "query"
@@ -45,13 +45,13 @@ felt -C ~/loom tree
 felt -C ~/loom show some-project/a-fiber
 ```
 
-This is the whole cross-store mechanism on the read side. There is no "remote
-store" concept — just a different working directory.
+That covers the read side of cross-store work. You point felt at a different
+working directory; nothing else changes.
 
 ## Which end holds the real bytes
 
-The link is a plain symlink, so one end is canonical (real files) and the other
-is a pointer. Both directions are valid.
+A plain symlink joins the two ends. One end holds the real files, and the other
+points at them. Both directions work.
 
 ### Cross-project store as canonical
 
@@ -60,8 +60,8 @@ is a pointer. Both directions are valid.
 <project-path>/.felt/            ← symlink → ~/loom/.felt/<project-name>/
 ```
 
-The typical case. One git repo to back up, and `felt` from inside any project
-sees its own fibers normally — the symlink is transparent.
+Take this in the typical case. You back up one git repo, and `felt` from inside
+any project sees its own fibers normally, because the symlink is transparent.
 
 ### Per-project as canonical
 
@@ -110,8 +110,8 @@ ls <project-path>/.felt/
 rm -rf <project-path>/.felt.pre-link
 ```
 
-For the reverse direction, swap which side is the symlink target. The
-move-aside, verify, then remove discipline is the same.
+For the reverse direction, swap which side is the symlink target. Keep the same
+discipline: move aside, verify, then remove.
 
 **Never `rm -rf` either side before verifying.** Fibers hold accreted context
 that is expensive to reconstruct.
@@ -119,8 +119,7 @@ that is expensive to reconstruct.
 ## Links across stores
 
 A `[[wikilink]]` targeting a fiber in a different store reads as broken to
-`felt check`. felt scopes to one store at a time, so this is expected rather
-than a bug.
+`felt check`. felt scopes to one store at a time, so expect the warning.
 
 If the link genuinely matters:
 

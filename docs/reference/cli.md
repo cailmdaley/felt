@@ -1,7 +1,7 @@
 # CLI Reference
 
-This page lists every `felt` verb, grouped by area. Each command also has its
-own `--help` text with examples — this page is for scanning, not for the full
+This page lists every `felt` verb, grouped by area. Scan it to find a command.
+Then read that command's `--help` text, which adds examples and the full
 story.
 
 Every command accepts these global flags:
@@ -12,8 +12,8 @@ Every command accepts these global flags:
 | `-j, --json` | Output in JSON format |
 | `-h, --help` | Show help for the command |
 
-`felt -v` / `felt --version` prints the version. Under `felt shuttle`,
-`--felt-store <dir>` is accepted as an alias for `-C`.
+`felt -v` / `felt --version` prints the version. `felt shuttle` also accepts
+`--felt-store <dir>` as an alias for `-C`.
 
 ## Core fiber verbs
 
@@ -60,7 +60,8 @@ Every command accepts these global flags:
 
 ## `felt hook` (agent-harness adapters)
 
-Thin envelopes over the primary commands above; not the human-facing surface.
+These commands wrap the primary verbs above for agent harnesses, not for
+people.
 
 | Command | Purpose |
 |---|---|
@@ -70,8 +71,8 @@ Thin envelopes over the primary commands above; not the human-facing surface.
 
 ## `felt shuttle` (dispatch layer)
 
-Optional — only relevant once a fiber carries a `shuttle:` block. Write verbs
-work offline and validate before touching disk; a few read verbs talk to the
+These optional verbs apply once a fiber carries a `shuttle:` block. Write verbs
+work offline, and validate before they touch disk. A few read verbs talk to the
 local daemon at `:4000`.
 
 ### Install / reshape the contract
@@ -121,6 +122,6 @@ local daemon at `:4000`.
 
 !!! note
     `felt shuttle tunnels`, `validate-identity`, `mark-runtime`, and
-    `migrate-runtime` are daemon/fleet plumbing. An adopter running Shuttle
-    solo won't need them — see
+    `migrate-runtime` serve daemon and fleet plumbing. An adopter running
+    Shuttle solo will not need them — see
     [Honest scoping](../shuttle/index.md#honest-scoping).

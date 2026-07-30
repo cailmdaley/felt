@@ -52,8 +52,8 @@ plugin in the same step, so the two never skew.
 
 ## Create a store
 
-A store is a `.felt/` directory at a project root. Create one where your work
-lives:
+Create a store — a `.felt/` directory — at the root of the project where your
+work lives:
 
 ```bash
 cd ~/dev/my-project
@@ -77,7 +77,7 @@ else is optional. `-s open` opts this fiber into status tracking, which is what
 makes it show up in `felt ls`.
 
 Most fibers do not need a status. A fiber that records a decision or a finding
-is complete the moment you write it — it is not a todo. Reach for `-s` when you
+completes the moment you write it. Nothing stays to do. Reach for `-s` when you
 want the thing to nag you.
 
 Give it a body:
@@ -106,8 +106,8 @@ Nested jackknife-patches under covariance-estimation as covariance-estimation/ja
 ```
 
 `felt nest <child> <parent>` moves the whole subtree on disk and rewrites the
-addresses that point at it. Containment *is* the directory tree — there is no
-parent field to keep in sync. `felt unnest <child>` promotes it back to the top
+addresses that point at it. The directory tree carries containment on its own,
+so no parent field can drift. `felt unnest <child>` promotes it back to the top
 level.
 
 ## Look at the store
@@ -152,22 +152,22 @@ metadata and outcome only, `-d full` for everything.
 
 ## Close it with a real outcome
 
-This is the part that matters.
+This part matters most.
 
 ```bash
 felt edit jackknife-patches -s closed \
   -o "150 patches: stable off-diagonal, <2% bias at all scales"
 ```
 
-The `outcome` is the one-line conclusion, and it is what `felt show -d compact`
-puts in front of you months later. It should say what was learned, decided, or
-measured, in a sentence that stands alone. An outcome that says "done" has
-failed — the status field already said that.
+Write the `outcome` as a one-line conclusion. `felt show -d compact` puts that
+line in front of you months later. Say what you learned, decided, or measured,
+in a sentence that stands alone. An outcome that says "done" has failed — the
+status field already said that.
 
-Closing stamps `closed-at`. The fiber stays in the tree; `felt ls -s all` still
-finds it. Nothing is deleted, because the closed fibers are the point.
+Closing stamps `closed-at`. The fiber stays in the tree. `felt ls -s all` still
+finds it. felt deletes nothing.
 
-## What the file looks like
+## The file on disk
 
 ```yaml
 ---
@@ -185,10 +185,10 @@ Tried 50 and 300 as well. Below 100 the off-diagonal is noise-dominated.
 Rolls up into [[covariance-estimation]].
 ```
 
-That is the whole storage format. The `id` is a ULID minted once at `felt add`
-and preserved across moves. The `[[wikilink]]` is a narrative reference — felt
-computes the reverse direction on demand, so `felt show covariance-estimation
---citations` finds this fiber pointing at it.
+That covers the whole storage format. felt mints the `id` as a ULID at `felt
+add` and preserves it across moves. The `[[wikilink]]` points at another fiber
+in the narrative. felt computes the reverse direction on demand, so `felt show
+covariance-estimation --citations` finds this fiber pointing at it.
 
 ## Next steps
 
