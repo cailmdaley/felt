@@ -53,6 +53,31 @@ if git rev-parse --verify --quiet "$TAG" >/dev/null; then
     exit 1
 fi
 
+# ── Docs-freshness gate ──────────────────────────────────────────────
+# The docs site (docs/ + mkdocs.yml) and README must not fall more than
+# one release behind the code. Before tagging, an agent audits the
+# release range for user-facing changes the docs don't reflect and
+# reports PASS or FAIL. Requires the `claude` CLI; skip explicitly with
+# SKIP_DOCS_AUDIT=1 (e.g. for a docs-only or emergency release).
+if [ "${SKIP_DOCS_AUDIT:-0}" != "1" ]; then
+    if ! command -v claude >/dev/null 2>&1; then
+        echo "ERROR: docs audit needs the claude CLI (or set SKIP_DOCS_AUDIT=1)" >&2
+        exit 1
+    fi
+    PREV_TAG="$(git describe --tags --abbrev=0 2>/dev/null || true)"
+    RANGE="${PREV_TAG:+$PREV_TAG..}HEAD"
+    echo "→ Docs audit over $RANGE (claude -p, this takes a minute)…"
+    VERDICT="$(claude -p --model claude-sonnet-4-5 "You are the docs-freshness gate for a felt release. Review 'git log --stat $RANGE' for user-facing changes (CLI verbs/flags, frontmatter schema, install steps, daemon behavior) and check whether docs/, mkdocs.yml, and README.md reflect them. Ignore internal refactors. Reply with exactly one line: 'PASS' or 'FAIL: <the drifted claims, briefly>'.")"
+    echo "$VERDICT"
+    case "$VERDICT" in
+        PASS*) echo "✓ Docs audit passed" ;;
+        *)
+            echo "ERROR: docs audit did not pass; fix the drift or rerun with SKIP_DOCS_AUDIT=1" >&2
+            exit 1
+            ;;
+    esac
+fi
+
 MANIFESTS=(
     claude-plugin/.claude-plugin/plugin.json
     claude-plugin/.codex-plugin/plugin.json

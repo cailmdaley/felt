@@ -6,6 +6,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+(nothing yet)
+
+## [1.1.0] — 2026-07-30
+
 This is the largest change in the project's history. Two things happened.
 Shuttle — the Elixir orchestration daemon and its board UI — moved into
 this repository and behind the `felt` binary. And felt went back to pure
@@ -451,3 +455,4 @@ the source of truth — `.felt/index.db` is a rebuildable cache.
 [1.0.5]: https://github.com/cailmdaley/felt/releases/tag/v1.0.5
 [1.0.8]: https://github.com/cailmdaley/felt/releases/tag/v1.0.8
 [1.0.9]: https://github.com/cailmdaley/felt/releases/tag/v1.0.9
+[1.1.0]: https://github.com/cailmdaley/felt/releases/tag/v1.1.0

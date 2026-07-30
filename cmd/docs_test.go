@@ -277,24 +277,26 @@ func TestReadmeListsPluginSkills(t *testing.T) {
 
 func TestDocsAvoidLegacyTagExtractionExample(t *testing.T) {
 	root := repoRoot(t)
-	for {
-		if _, err := os.Stat(filepath.Join(root, "docs", "README.md")); err == nil {
-			break
-		}
-		parent := filepath.Dir(root)
-		if parent == root {
-			t.Fatal("could not find repository docs/README.md")
-		}
-		root = parent
+	docsDir := filepath.Join(root, "docs")
+	if _, err := os.Stat(docsDir); err != nil {
+		t.Fatalf("could not find repository docs/: %v", err)
 	}
 
-	data, err := os.ReadFile(filepath.Join(root, "docs", "README.md"))
+	err := filepath.WalkDir(docsDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() || filepath.Ext(path) != ".md" {
+			return err
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if strings.Contains(string(data), "extracted from title") {
+			t.Errorf("%s still documents legacy tag extraction on the name/title argument", path)
+		}
+		return nil
+	})
 	if err != nil {
-		t.Fatalf("read docs/README.md: %v", err)
-	}
-	text := string(data)
-	if strings.Contains(text, "extracted from title") {
-		t.Fatal("docs/README.md still documents legacy tag extraction on the name/title argument")
+		t.Fatalf("walk docs/: %v", err)
 	}
 }
 

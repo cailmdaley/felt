@@ -25,8 +25,8 @@ body search are computed from the markdown tree on demand. The markdown *is* the
 no authoring burden and diffs like the rest of your repo.
 
 felt is built to be persistent memory for AI coding agents as much as for you. It ships one plugin
-that installs into both Claude Code and Codex, and makes `.felt/` the thing an agent reaches for
-between sessions.
+that installs into both Claude Code and Codex — bundling the **felt** and **shuttle** skills —
+and makes `.felt/` the thing an agent reaches for between sessions.
 
 A fiber on disk, at `.felt/covariance-estimation/covariance-estimation.md`:
 
