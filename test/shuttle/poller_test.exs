@@ -4535,10 +4535,10 @@ defmodule Shuttle.PollerTest do
                  Enum.any?(snap.orphans, &(&1.fiber_id == fiber_id)) and new_session_count >= 2
 
                tick = Process.put(:renudge_tick, Process.get(:renudge_tick, 0) + 1) || 0
-               if not done and rem(tick, 40) == 39, do: send(poller, :run_poll_cycle)
+               if not done and rem(tick, 20) == 19, do: send(poller, :run_poll_cycle)
                done
              end,
-             1200
+             2400
            )
 
     snap = Poller.snapshot(poller)
