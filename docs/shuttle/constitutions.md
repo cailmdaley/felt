@@ -172,14 +172,13 @@ block.
 
 ## Agent selection
 
-`felt shuttle agents` prints the registry — run it for the current list. Today
-it spans four CLI harnesses:
+`felt shuttle agents` prints the effective registry — run it for your current
+list. Eight records ship built in:
 
-| Family | Examples | Notes |
+| Family | Built-in ids | Notes |
 |---|---|---|
-| Claude | `claude-sonnet` (registry default), `claude-opus`, `claude-fable`, `claude-haiku` | Plus `-headless` variants and `claude-opus-chrome` |
-| Codex | `codex-sol`, `codex-terra`, `codex-luna`, `codex-spark` | `codex` is an alias of `codex-sol` |
-| Pi | `pi-sonnet`, `pi-gpt-5.4`, `pi-gpt-5.4-mini`, `pi-gpt-5-mini`, `pi-kimi`, `pi-deepseek-*` | GitHub Copilot and OpenRouter billing |
+| Claude | `claude-sonnet` (registry default), `claude-opus`, `claude-fable`, `claude-haiku` | Plus `claude-sonnet-headless` and `claude-opus-headless` |
+| Codex | `codex` | |
 | `human` | `human` | A pseudo-agent. The card shows as in-flight; Shuttle never spawns anything. |
 
 Two orthogonal axes layer on the base id: `effort` (validated against the
@@ -190,11 +189,11 @@ felt shuttle set-agent <fiber> claude-opus --effort high
 felt shuttle set-model <fiber> codex          # agent-only shorthand
 ```
 
-!!! warning "The build compiles in the registry"
-    The build embeds `internal/shuttle/agents.json` into the Go binary. To add
-    or rename an agent, edit that file and run `make cli-install` — on every
-    host. A user-level registry file does not exist yet. See
-    [Honest scoping](index.md#honest-scoping).
+!!! note "Add your own agents"
+    Your registry file layers over the built-ins. Run `felt shuttle agents
+    init` to seed `~/.config/felt/agents.json` (or `$FELT_AGENTS_FILE`), then
+    edit it — new ids, aliases, or replacements for built-in ones. See
+    [Configuring agents](installation.md#configuring-agents).
 
 ## Required gates
 

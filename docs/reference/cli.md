@@ -68,6 +68,7 @@ people.
 | `felt hook session` | Emit the SessionStart `additionalContext` envelope |
 | `felt hook pretool` | PreToolUse gate: deny non-felt tool calls until the felt skill activates |
 | `felt hook posttool` | PostToolUse: stamp `updated-at` when an agent edits a fiber file directly |
+| `felt hook event` | Append one harness hook event to the host-local Shuttle activity stream (`~/.shuttle/events.jsonl`) |
 
 ## `felt shuttle` (dispatch layer)
 
@@ -106,7 +107,8 @@ local daemon at `:4000`.
 | `felt shuttle ps` | Live tmux worker sessions only |
 | `felt shuttle snapshot` | Print the local daemon's state snapshot |
 | `felt shuttle dispatch <fiber>` | Ask the local daemon to dispatch a fiber now (`--ad-hoc`) |
-| `felt shuttle agents [resolve <agent>]` | List (or resolve) the embedded agent registry |
+| `felt shuttle agents [resolve <agent>]` | List (or resolve) the effective agent registry (`--source builtin\|user`) |
+| `felt shuttle agents init` | Seed `~/.config/felt/agents.json` from the built-ins (`--path`, `--force`) |
 | `felt shuttle attach <fiber>` | Attach to a running worker's tmux session |
 | `felt shuttle session-name <fiber>` | Print the canonical tmux session name for a fiber |
 
@@ -114,14 +116,18 @@ local daemon at `:4000`.
 
 | Command | Purpose |
 |---|---|
-| `felt shuttle tunnels install [remote]` | Write (and optionally bootstrap) launchd autossh tunnels for remote daemons — hardcodes the maintainer's fleet hostnames |
+| `felt shuttle remotes list` | List the configured remote daemons; also the validator (parse errors, duplicate names, port collisions) |
+| `felt shuttle remotes add <name>` | Add or replace a remote (`--port`, `--ssh`, `--remote-port`, `--display`, `--checkout`, `--multiplex`) |
+| `felt shuttle remotes rm <name>` | Remove a remote |
+| `felt shuttle remotes path` | Print the fleet file path (`~/.config/felt/remotes.json`) |
+| `felt shuttle tunnels install [remote]` | Write (and optionally bootstrap) launchd autossh tunnels for the remotes in the fleet file |
 | `felt shuttle validate-identity` | Check federated fiber UID invariants across daemon feeds |
 | `felt shuttle contract` | Print the daemon-facing CLI contract version (used at daemon boot to detect a stale CLI) |
 | `felt shuttle mark-runtime <fiber>` | Stamp `shuttle.runtime` continuation fields; daemon-facing, not for manual use |
 | `felt shuttle migrate-runtime` | Lift flat legacy runtime keys into the nested `shuttle.runtime` block (`--dir`, `--host`, `--dry-run`) |
 
 !!! note
-    `felt shuttle tunnels`, `validate-identity`, `mark-runtime`, and
+    `felt shuttle remotes`, `tunnels`, `validate-identity`, `mark-runtime`, and
     `migrate-runtime` serve daemon and fleet plumbing. An adopter running
     Shuttle solo will not need them — see
     [Honest scoping](../shuttle/index.md#honest-scoping).

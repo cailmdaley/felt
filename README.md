@@ -81,10 +81,11 @@ daemon polls your felt stores. It launches one tmux worker per eligible constitu
 kanban board at `http://127.0.0.1:4000/` for watching and steering them. Workers stay attachable.
 Each one rewrites the fiber's `outcome` and `## Status` on exit, so the next worker lands warm.
 
-Shuttle stays honest about its origins: it currently serves **one maintainer's fleet**. The binary
-compiles in the agent registry. `cmd/shuttle_tunnels.go` and `config/dev.exs` hardcode hostnames.
-The launchd keep-alive defaults `FELT_STORES` to `~/loom`, a private store. It runs, but you will be
-adapting someone else's fleet rather than configuring your own. felt works without the daemon.
+Configure Shuttle from your home directory. `~/.config/felt/agents.json` layers your agents over the
+built-in set (`felt shuttle agents init` seeds it). `~/.config/felt/remotes.json` lists the remote
+daemons a hub aggregates (`felt shuttle remotes add`). Shuttle still shows where it grew up: macOS
+gets the most use, `bin/shuttle-deploy` targets the maintainer's host layout, and the launchd
+keep-alive defaults `FELT_STORES` to `~/loom`, a private store. felt works without the daemon.
 Full list:
 [Honest scoping](https://cailmdaley.github.io/felt/shuttle/#honest-scoping).
 

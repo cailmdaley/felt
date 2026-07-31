@@ -90,17 +90,16 @@ prior transcript.
 Shuttle runs the maintainer's machines every day, and parts of it still show
 that. This section lists them all; the other pages point here.
 
-- The **agent registry compiles into the felt binary**
-  (`internal/shuttle/agents.json`). To add an agent, edit that file and rebuild.
-  A user-level registry file does not exist yet.
-- **Multi-host support hardcodes hostnames in two places.**
-  `cmd/shuttle_tunnels.go` maps four fixed hostnames to ports 4001–4004.
-  `config/dev.exs` carries the daemon's remote registry, gated on one specific
-  hostname. Single-machine use needs neither. A different fleet means editing
-  both files and rebuilding.
-- The optional **hook event stream** expects a script from the maintainer's
-  private `~/loom` store, outside this repo. Without it the board still works;
-  you lose per-session activity ranking.
+- **`bin/shuttle-deploy` serves the maintainer's fleet.** It rsyncs a checkout
+  to named hosts and restarts their daemons. The general name oversells it.
+  Ignore it unless you run the same layout.
+- **macOS gets the most use.** The launchd keep-alive, the tunnel plists, and
+  the TCC workarounds are all macOS-first. Linux runs on a thinner path: a tmux
+  respawn loop, no systemd unit.
+- **Several examples name a private store.** Docs and Makefile defaults point at
+  `~/loom`, the maintainer's [cross-project
+  store](../concepts/cross-project.md). Substitute your own store path
+  everywhere it appears.
 - **The daemon ships no release artifact.** You build it from a checkout and you
   keep the checkout. See [Installation](installation.md).
 

@@ -16,14 +16,36 @@ this repository and behind the `felt` binary. And felt went back to pure
 markdown: the SQLite index and the history log are gone, and identity and
 recency now live in the frontmatter.
 
-> **Note.** The `felt shuttle` command group and the daemon are currently
-> fleet-oriented. The agent registry is compiled into the binary, the tunnel
-> verbs hardcode the maintainer's hosts, and the daemon and UI are not release
-> artifacts — only the Go binary ships. Homebrew users get the verb tree; the
-> daemon-HTTP verbs will fail with nothing listening on `:4000`. Treat it as
-> readable prior art, not a product you can install.
+> **Note.** The daemon and UI are not release artifacts — only the Go binary
+> ships. Homebrew users get the `felt shuttle` verb tree, but the daemon-HTTP
+> verbs need a daemon you build from source (see the docs site). The daemon
+> path is macOS-primary and rough on Linux.
 
 ### Added
+
+#### User-level configuration
+
+- The agent registry now layers `~/.config/felt/agents.json` (or
+  `$FELT_AGENTS_FILE`) over a small generic builtin set (`claude-sonnet`,
+  `claude-opus`, `claude-haiku`, `claude-fable`, `codex`, `human`, plus
+  headless aliases). `builtins: "merge"` (default) folds by id, last wins
+  wholesale; `"replace"` drops the builtin layer (`human` stays reserved).
+  A fuller example ships as `share/agents.example.json`; `felt shuttle
+  agents` shows each record's provenance. A malformed file fails loud with
+  its path; a missing file is silent.
+- Remote daemons live in `~/.config/felt/remotes.json`, managed by
+  `felt shuttle remotes list|add|rm|path` and read at runtime by both the
+  CLI (tunnels, `status --remote`) and the daemon. `config/dev.exs`
+  carries no hostnames; `secret_key_base` is random per boot. The launchd
+  tunnel label prefix is configurable via `launchd_label_prefix`. Shared
+  fixtures keep the Go and Elixir readers in agreement, and a hygiene test
+  fails on personal hostnames in `config/`, `lib/`, `cmd/`, `share/`.
+- `felt hook event` writes the Shuttle activity stream (one JSONL line per
+  harness event), registered through the plugin on seven events for both
+  Claude Code and Codex. It writes only when the events file's parent
+  directory exists (default `~/.shuttle/events.jsonl`); `SHUTTLE_EVENTS=off`
+  disables it; files rotate at 64 MiB; oversized tool inputs are trimmed.
+  No external dependencies — `jq` and `perl` are not required.
 
 #### Shuttle, merged into felt
 

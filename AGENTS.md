@@ -211,7 +211,8 @@ shell-started via `make start`.)
   ```
 
   Builds+installs the felt CLI, builds the daemon escript, places `ui/dist`,
-  registers the loom event-stream hook, installs the keep-alive (launchd
+  registers the plugin event hook (`felt hook event`) and probes it, installs
+  the keep-alive (launchd
   LaunchAgent on macOS / the `shuttle-daemon` tmux respawn loop on the clusters).
   `go` is a bootstrap prerequisite. Flags include `--skip-ui` / `--build-ui` (UI
   defaults to build on macOS, skip on clusters), `--skip-hook`, `--with-tunnels`
@@ -609,11 +610,23 @@ felt shuttle validate-identity                # UID migration/cross-city validat
   mirror", because the read was attempted locally instead of being owner-routed.
   New endpoints that surface a fiber's host-local content MUST route through
   `OriginRouter`, not assume the bytes are reachable on this host.
-- **Agent records live in one source of truth: felt's registry.** Felt owns
-  the registry (`internal/shuttle/agents.json`, built into the CLI); the daemon
-  reads the already-resolved record off felt's `shuttle.resolved.agent` JSON and
-  shells `felt shuttle agents [resolve]` for the registry / no-fiber cases.
-  There is no daemon-embedded `share/agents.json` and no `config/agents.exs`.
+- **Agent records live in one source of truth: felt's registry.** Felt resolves
+  the registry as two layers — `internal/shuttle/agents.builtin.json` (embedded)
+  with the user file (`$FELT_AGENTS_FILE`, else `~/.config/felt/agents.json`)
+  merged over it. `share/agents.example.json` carries the full fleet roster and
+  is what this fleet's hosts install as their user file. `human` is reserved and
+  always present; a malformed user file fails loud with its path, a missing one
+  is silent. The daemon reads the already-resolved record off felt's
+  `shuttle.resolved.agent` JSON and shells `felt shuttle agents [resolve]` for
+  the registry / no-fiber cases. There is no daemon-embedded `share/agents.json`
+  and no `config/agents.exs`.
+- **Remote daemons live in `~/.config/felt/remotes.json`.** The Go CLI
+  (`cmd/shuttle_remotes.go`) and the daemon (`lib/shuttle/remotes.ex`) read the
+  same file at runtime, so nothing about the fleet is baked at build time.
+  `felt shuttle remotes list|add|rm|path` manages it, and `list` doubles as the
+  validator. `test/fixtures/remotes/` enforces Go/Elixir parity, and
+  `cmd/hygiene_test.go` fails the build on a personal hostname in `config/`,
+  `lib/`, `cmd/`, or `share/`.
 - **`shuttle.agent` field drives agent selection.** The `shuttle:` block's
   `agent:` field resolves against the registry. Default agent is
   `claude-sonnet`.
@@ -743,7 +756,7 @@ felt/
 ├── main.go  go.mod  go.sum
 ├── cmd/                     cobra commands; `felt shuttle <verb>` = cmd/shuttle*.go
 ├── internal/felt/           core felt logic (storage, parsing, graph, search)
-├── internal/shuttle/        shuttle: block schema + agent registry (agents.json)
+├── internal/shuttle/        shuttle: block schema + agent registry (agents.builtin.json + user layer)
 ├── claude-plugin/           plugin payload for Claude Code + Codex
 ├── scripts/release.sh       bumps plugin manifests + commits + tags
 │

@@ -64,7 +64,7 @@ content without the hooks.
 
 ## Plugin contents
 
-One plugin directory serves both harnesses. It bundles two skills and three
+One plugin directory serves both harnesses. It bundles two skills and four
 hooks.
 
 ### Skills
@@ -87,9 +87,11 @@ plugin.
 | `session.sh` | `SessionStart` | Wraps `felt session`'s plain-text context (active + recently-touched fibers) in the harness's `additionalContext` envelope |
 | `remind.sh` | `PreToolUse` | Gates the first non-skill tool call in a felt-enabled project until the felt skill has activated this session; a pass-through everywhere else |
 | `touch.sh` | `PostToolUse` (Edit/Write/MultiEdit) | Stamps a fiber's `updated-at` when the agent edits its markdown file directly, so hand-edits count toward recency the same as `felt edit` does |
+| `event.sh` | `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `Stop`, `SubagentStop`, `Notification`, `SessionEnd` | Appends one JSON line per event to the Shuttle event stream (`~/.shuttle/events.jsonl`), which the daemon reads for activity ranking and the sent-files trail; writes nothing unless `~/.shuttle` exists |
 
-The logic lives in the binary, not the script. `remind.sh` and `touch.sh` each
-shim a single line over `felt hook pretool` and `felt hook posttool`.
+The logic lives in the binary, not the script. `remind.sh`, `touch.sh`, and
+`event.sh` each shim a single line over `felt hook pretool`, `felt hook
+posttool`, and `felt hook event`.
 `session.sh` wraps `felt session` with a `jq -Rs` pipeline, and falls back to
 `felt hook session` when `jq` is absent.
 

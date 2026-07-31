@@ -229,8 +229,9 @@ files locally. That replication is incidental; treat any behaviour that depends
 on it as a bug. If a remote card is missing, debug the tunnel, not the git
 state.
 
-!!! warning "Remote hosts are hardcoded"
-    The remote registry lives in `config/dev.exs` and the tunnel port map in
-    `cmd/shuttle_tunnels.go`. Both name the maintainer's machines. A
-    single-machine setup needs neither — see
-    [Honest scoping](index.md#honest-scoping).
+!!! note "Remotes come from one config file"
+    `~/.config/felt/remotes.json` lists every remote daemon: its name, its
+    local forwarded port, and how to reach it. The CLI and the daemon both read
+    it at runtime. Manage it with `felt shuttle remotes list|add|rm|path`. A
+    single-machine setup needs no such file — see [Configuring
+    remotes](installation.md#configuring-remotes).

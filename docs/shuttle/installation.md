@@ -20,7 +20,7 @@ and you keep the checkout.
 | `escript` | yes | The daemon runs *as* an escript. It ships with Erlang/OTP. |
 | `tmux` | yes | Every worker runs in a tmux session. On Linux the daemon's own keep-alive runs as a tmux loop. |
 | `node` 22+ / `npm` | only for the board | Builds the kanban bundle into `ui/dist`. |
-| `jq` | optional | The Claude Code event hook uses it. Without it, activity ranking and the sent-files trail stay empty; the board still serves. |
+| `jq` | optional | `session.sh` uses it to pretty-print the SessionStart envelope. Without it the hook falls back to `felt hook session`. |
 
 `bootstrap.sh` checks all of these and names what is missing. Its Elixir hint
 text says "OTP 26+ and Elixir 1.16+". Ignore that hint — `mix deps.get` fails on
@@ -49,10 +49,10 @@ Six steps run in order.
 4. **`ui/dist`.** The served board bundle. Built by default on macOS, skipped by
    default on Linux, because this step fails on a fresh clone — see
    [Sharp edges](#sharp-edges).
-5. **Event hook.** Checks whether `shuttle-hook.sh` is registered in
-   `~/.claude/settings.json`. The hook lives in `~/loom`, the maintainer's
-   private [cross-project store](../concepts/cross-project.md). Without one,
-   this step warns and continues.
+5. **Event stream.** Runs `felt setup claude` and `felt setup codex` against
+   this checkout, so the plugin hooks match the binary. Then it pipes a probe
+   payload through `felt hook event` and checks the line it writes. See
+   [The event stream](#the-event-stream).
 6. **Keep-alive.** macOS: a launchd LaunchAgent. Linux: a tmux respawn loop.
 
 Useful flags: `--dry-run`, `--skip-ui`, `--build-ui`, `--skip-hook`,
@@ -139,6 +139,65 @@ The registry file takes this canonical shape. A bare JSON array also works.
 `POST /api/v1/felt-stores` rewrites the file, and the board's store picker uses
 that endpoint. A store path must contain a `.felt/` directory.
 
+## Configuring agents
+
+`felt shuttle agents` prints the effective registry. It layers your own file
+over a built-in set of eight records. Set `$FELT_AGENTS_FILE` to choose the
+path; otherwise felt reads `~/.config/felt/agents.json`.
+
+```bash
+felt shuttle agents init      # seed the user file from the built-ins
+felt shuttle agents           # the merged table, with a source footer
+felt shuttle agents --source user
+```
+
+Each record names a CLI, a model, and its axis metadata (`effort_levels`,
+`default_effort`, `chrome_capable`). `share/agents.example.json` in the repo
+works every field across several harnesses — copy from it. A missing file is
+silent. A malformed file fails loudly and names the path.
+
+The file's `builtins` key controls the merge. `"merge"` (the default) folds your
+records over the built-ins by id, last one wins. `"replace"` drops the built-in
+layer entirely; `human` stays reserved either way.
+
+## Configuring remotes
+
+One daemon can aggregate other daemons over SSH tunnels. The fleet file lists
+them, and both the Go CLI and the daemon read it at runtime.
+
+```bash
+felt shuttle remotes path                          # ~/.config/felt/remotes.json
+felt shuttle remotes add hub-a --port 4001         # --ssh, --remote-port, --display, --checkout
+felt shuttle remotes add hub-b --port 4004 --multiplex
+felt shuttle remotes list                          # also the validator
+felt shuttle remotes rm hub-a
+```
+
+`list` reports parse errors, duplicate names, and port collisions. `--multiplex`
+rides an existing `ControlMaster` socket, which is what a 2FA host needs. A
+`launchd_label_prefix` key in the file names the launchd labels
+`felt shuttle tunnels install` writes. Single-machine use needs none of this: an
+absent file means no remotes.
+
+## The event stream
+
+The daemon ranks in-flight workers by idle time and renders each card's
+sent-files trail. Both read one host-local file, `~/.shuttle/events.jsonl`.
+
+`felt hook event` writes it. The plugin registers that command on seven events —
+SessionStart, UserPromptSubmit, PreToolUse, Stop, SubagentStop, Notification,
+and SessionEnd — for Claude Code and Codex alike. `felt setup claude` and `felt
+setup codex` install the wiring; bootstrap step 5 runs both.
+
+The hook writes only when the stream's parent directory already exists, so a
+felt-only install grows no stream. `SHUTTLE_EVENTS_FILE` overrides the path and
+creates its parent. `SHUTTLE_EVENTS=off` disables recording. Probe the writer
+by hand:
+
+```bash
+echo '{"hook_event_name":"SessionStart"}' | SHUTTLE_EVENTS_FILE=/tmp/e.jsonl felt hook event
+```
+
 ## Verify
 
 ```bash
@@ -218,23 +277,25 @@ wildcard. The host id comes from `SHUTTLE_HOST`, else the file
 hostname. For the full ordered predicate list the daemon evaluates, see
 [Dispatch eligibility](lifecycle.md#dispatch-eligibility).
 
-**The build compiles in the agent registry.** The build bakes
-`internal/shuttle/agents.json` into the `felt` binary. It lists the CLIs and
-models on the maintainer's machines (`claude-sonnet` is the default). Each entry
-assumes that CLI is installed and authenticated. To register your own agent
-today, edit that file and rebuild.
+**Every built-in agent assumes its CLI is installed.** The eight built-in
+records name `claude`, `codex`, and the `human` pseudo-agent, with
+`claude-sonnet` as the default. A record whose CLI is absent or unauthenticated
+fails at dispatch, not at install. Run `felt shuttle agents init` and cut the
+list down to what you actually have — see [Configuring
+agents](#configuring-agents).
 
-**Tunnels hardcode four hosts.** `felt shuttle tunnels`
-(`cmd/shuttle_tunnels.go`) maps a fixed set of hostnames to ports 4001–4004, and
-the daemon's matching remote registry sits in `config/dev.exs`.
-`bootstrap.sh --with-tunnels` and `bin/shuttle-deploy` serve the private fleet
-despite their general-purpose names. Ignore them unless you are on that fleet.
+**`felt shuttle tunnels` needs a fleet file first.** It renders launchd autossh
+plists from `~/.config/felt/remotes.json`. With no remotes configured it has
+nothing to write, and `bootstrap.sh --with-tunnels` does nothing useful.
+`bin/shuttle-deploy` still targets the maintainer's host layout despite its
+general name.
 
-**The event stream needs `~/loom`, which is private.** Step 5 looks for
-`~/loom/hooks/shuttle-hook.sh` registered in `~/.claude/settings.json`. That
-store stays private, and no documented substitute exists. Degradation is
-graceful — no activity ranking, no sent-files trail, board still serves — but
-that column of the board will stay empty.
+**The event stream stays empty until `~/.shuttle` exists.** `felt hook event`
+refuses to create its own directory, so a felt-only install records nothing.
+Degradation is graceful — the board still serves — but the activity ranking and
+the sent-files trail stay empty. Bootstrap step 3 creates the directory, so a
+bootstrapped host is already enabled. See [The event
+stream](#the-event-stream).
 
 ## License
 
