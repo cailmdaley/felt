@@ -333,7 +333,7 @@ defmodule Shuttle.CLI do
   def daemon_port do
     # Application.get_env is unreliable in escript mode before
     # Application.ensure_all_started — compile-time config isn't loaded.
-    # Read from env var instead, matching maybe_configure_endpoint/0.
+    # Read from env var instead, matching Shuttle.Application.configure_endpoint/0.
     System.get_env("SHUTTLE_PORT", "4000") |> String.to_integer()
   end
 

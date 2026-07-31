@@ -22,11 +22,14 @@ defmodule Shuttle.RemoteRegistry do
 
   ## Configuration
 
+  The fleet comes from `Shuttle.Remotes` — `~/.config/felt/remotes.json`, or
+  `config :shuttle, :remotes, [...]` when set:
+
       config :shuttle, :remotes, [
-        %{name: "candide", url: "http://localhost:4001", poll_interval_ms: 5000}
+        %{name: "hub-a", url: "http://localhost:4001", poll_interval_ms: 5000}
       ]
 
-  See `Shuttle.Remote` for the remote config shape.
+  See `Shuttle.Remote` for the entry shape.
 
   ## Test injection
 
@@ -92,6 +95,8 @@ defmodule Shuttle.RemoteRegistry do
       :backoff_schedule_ms,
       :tripped_poll_floor_ms,
       :user_uid,
+      :remotes_token,
+      reload_from_file?: false,
       snapshots: %{}
     ]
   end
@@ -102,8 +107,11 @@ defmodule Shuttle.RemoteRegistry do
   Starts the registry. Accepts:
 
     * `:remotes` — list of `%Shuttle.Remote{}` (or maps/keyword lists
-      that `Shuttle.Remote.from_config/1` understands). Defaults to
-      `Application.get_env(:shuttle, :remotes, [])`.
+      that `Shuttle.Remote.from_config/1` understands). Omit it and the
+      fleet resolves through `Shuttle.Remotes.configured/0`, and the
+      registry then follows the fleet file: a change to it is picked up on
+      the next tick. Passing this opt pins the list for the registry's
+      lifetime.
     * `:client` — module implementing `Shuttle.RemoteRegistry.Client`.
       Defaults to `Shuttle.RemoteRegistry.Client.Default` (`:httpc`).
     * `:runner` — module implementing `Shuttle.Runner`. Defaults to
@@ -222,10 +230,11 @@ defmodule Shuttle.RemoteRegistry do
 
   @impl true
   def init(opts) do
-    remotes =
-      opts
-      |> Keyword.get(:remotes, Application.get_env(:shuttle, :remotes, []))
-      |> RegistryCommon.normalize_remotes()
+    remotes = RegistryCommon.configured_remotes(opts)
+
+    # Only a registry whose fleet came from the file follows the file. One given
+    # an explicit `:remotes` opt keeps that list for its lifetime.
+    reload_from_file? = not Keyword.has_key?(opts, :remotes)
 
     client = Keyword.get(opts, :client, Shuttle.RemoteRegistry.Client.Default)
     runner = Keyword.get(opts, :runner, Runner.Default)
@@ -266,7 +275,9 @@ defmodule Shuttle.RemoteRegistry do
       backoff_schedule_ms: backoff_schedule_ms,
       tripped_poll_floor_ms: tripped_poll_floor_ms,
       user_uid: user_uid,
-      snapshots: snapshots
+      snapshots: snapshots,
+      reload_from_file?: reload_from_file?,
+      remotes_token: Shuttle.Remotes.config_token()
     }
 
     state =
@@ -328,9 +339,50 @@ defmodule Shuttle.RemoteRegistry do
 
   def handle_info(_msg, state), do: {:noreply, state}
 
+  # ── Fleet reload ──
+
+  # Stat the fleet file each tick; on a change, re-read it and re-key the
+  # snapshot map. A stat per second is free, and it removes the whole
+  # "I added a remote and nothing happened" class of confusion — `felt shuttle
+  # remotes add` is live without a daemon bounce. Existing entries keep their
+  # recovery state (see `RegistryCommon.reconcile/3`), so a reload never
+  # restarts a cascade in flight.
+  defp reload_remotes(%State{reload_from_file?: false} = state), do: state
+
+  defp reload_remotes(%State{} = state) do
+    case Shuttle.Remotes.config_token() do
+      token when token == state.remotes_token ->
+        state
+
+      token ->
+        remotes = RegistryCommon.configured_remotes()
+        added = Enum.map(remotes, & &1.name) -- Enum.map(state.remotes, & &1.name)
+        removed = Enum.map(state.remotes, & &1.name) -- Enum.map(remotes, & &1.name)
+
+        if added != [] or removed != [] do
+          Logger.info(
+            "RemoteRegistry: fleet reloaded (added: #{inspect(added)}, removed: #{inspect(removed)})"
+          )
+        end
+
+        %{
+          state
+          | remotes: remotes,
+            remotes_token: token,
+            snapshots: RegistryCommon.reconcile(state.snapshots, remotes, &initial_entry/1)
+        }
+    end
+  end
+
   # ── Polling ──
 
-  defp poll_all(%State{remotes: remotes} = state) do
+  # Every poll cycle — tick or the synchronous `poll_now/1` — starts by picking
+  # up a fleet edit, so the two paths can never disagree about the fleet.
+  defp poll_all(%State{} = state) do
+    state |> reload_remotes() |> poll_configured()
+  end
+
+  defp poll_configured(%State{remotes: remotes} = state) do
     now = DateTime.utc_now()
     now_ms = DateTime.to_unix(now, :millisecond)
 
@@ -405,6 +457,20 @@ defmodule Shuttle.RemoteRegistry do
          now
        ) do
     case recovery.step do
+      # A remote with no locally-managed tunnel has nothing to bounce: there is
+      # no launchd job, so `launchctl kickstart` would fail on every cascade and
+      # the useful step (the ssh check) would be reached only via that failure.
+      # Advance straight to it.
+      :bounce_tunnel when remote.tunnel.manager == :none ->
+        with_recovery(entry, %{
+          recovery
+          | state: :reviving,
+            step: :ssh_check,
+            action_due_at: now,
+            last_action: "no local tunnel to bounce; checking over ssh",
+            next_retry_at: nil
+        })
+
       :bounce_tunnel ->
         case bounce_tunnel(remote, state.runner, state.user_uid) do
           :ok ->
@@ -761,8 +827,8 @@ defmodule Shuttle.RemoteRegistry do
 
   # ── Recovery commands ──
 
-  defp bounce_tunnel(%Remote{name: name}, runner, user_uid) do
-    label = tunnel_label(name)
+  defp bounce_tunnel(%Remote{} = remote, runner, user_uid) do
+    label = Shuttle.Remotes.label_for(remote)
     target = "gui/#{user_uid}/#{label}"
 
     case runner.cmd("launchctl", ["kickstart", "-k", target], stderr_to_stdout: true) do
@@ -771,15 +837,15 @@ defmodule Shuttle.RemoteRegistry do
     end
   end
 
-  defp ssh_check(%Remote{name: name}, runner) do
+  defp ssh_check(%Remote{} = remote, runner) do
     script =
       [
         ~s(if tmux has-session -t shuttle-daemon 2>/dev/null || tmux -S "$HOME/.shuttle/tmux.sock" has-session -t shuttle-daemon 2>/dev/null; then echo session=present; else echo session=absent; fi),
-        ~s(if curl -sf --max-time 3 http://127.0.0.1:4000/api/v1/state >/dev/null; then echo http=healthy; else echo http=unhealthy; fi)
+        ~s(if curl -sf --max-time 3 http://127.0.0.1:#{remote.remote_port}/api/v1/state >/dev/null; then echo http=healthy; else echo http=unhealthy; fi)
       ]
       |> Enum.join("; ")
 
-    case runner.cmd("ssh", ssh_args(name, script), stderr_to_stdout: true) do
+    case runner.cmd("ssh", ssh_args(Remote.ssh_host(remote), script), stderr_to_stdout: true) do
       {out, 0} ->
         {:ok,
          %{
@@ -806,10 +872,10 @@ defmodule Shuttle.RemoteRegistry do
   # cascade may fire before the breaker trips, so the two rate-limiters
   # compose: the loop absorbs fast local crashes, the breaker caps how many
   # cascades an unreachable remote gets before we stop hammering it.
-  defp restart_remote(%Remote{name: name}, runner) do
+  defp restart_remote(%Remote{} = remote, runner) do
     script = ~s("$HOME/.local/bin/shuttle-launch")
 
-    case runner.cmd("ssh", ssh_args(name, script), stderr_to_stdout: true) do
+    case runner.cmd("ssh", ssh_args(Remote.ssh_host(remote), script), stderr_to_stdout: true) do
       {_out, 0} -> :ok
       {out, code} -> {:error, {:ssh_restart_failed, code, trim_output(out)}}
     end
@@ -825,8 +891,6 @@ defmodule Shuttle.RemoteRegistry do
       script
     ]
   end
-
-  defp tunnel_label(name), do: "com.cailmdaley.shuttle-tunnel-#{name}"
 
   defp current_uid do
     case System.get_env("UID") do
@@ -1002,7 +1066,9 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
     {:ok, _} = Application.ensure_all_started(:inets)
     {:ok, _} = Application.ensure_all_started(:ssl)
 
-    headers = Enum.map(req_headers, fn {k, v} -> {String.to_charlist(k), String.to_charlist(v)} end)
+    headers =
+      Enum.map(req_headers, fn {k, v} -> {String.to_charlist(k), String.to_charlist(v)} end)
+
     request = {String.to_charlist(url), headers}
     http_opts = [{:timeout, timeout_ms}, {:connect_timeout, timeout_ms}]
 
@@ -1025,7 +1091,8 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
 
   @impl true
   def post(url, body, content_type, timeout_ms)
-      when is_binary(url) and is_binary(body) and is_binary(content_type) and is_integer(timeout_ms) do
+      when is_binary(url) and is_binary(body) and is_binary(content_type) and
+             is_integer(timeout_ms) do
     {:ok, _} = Application.ensure_all_started(:inets)
     {:ok, _} = Application.ensure_all_started(:ssl)
 

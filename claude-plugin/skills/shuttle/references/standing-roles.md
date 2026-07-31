@@ -160,7 +160,7 @@ tags:
   - <topic>
 shuttle:
   kind: standing
-  agent: claude-opus            # or claude-sonnet, codex, pi-*
+  agent: claude-opus            # or claude-sonnet, codex, any registry id
   host: <owning-daemon-host-id>
   project_dir: /abs/path/on/host
   schedule:

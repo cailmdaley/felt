@@ -46,7 +46,7 @@ AGENT_PATH ?= $(shell /bin/bash -lc 'echo $$PATH')
 AGENT_SSH_AUTH_SOCK ?= $(HOME)/.ssh/agent.sock
 
 .PHONY: build cli cli-install daemon test go-test mix-test js-test all start stop restart \
-        logs status clean help install install-agent uninstall-agent
+        logs status clean help install install-agent uninstall-agent lint-personal
 
 help:
 	@echo "felt + shuttle (one repo, two artifacts):"
@@ -55,6 +55,7 @@ help:
 	@echo "  make cli-install — install felt CLI → $(INSTALL_DIR)"
 	@echo "  make daemon      — build the daemon escript → bin/shuttle (MIX_ENV=dev)"
 	@echo "  make test        — go test ./...  AND  mix test  AND  the ui suite"
+	@echo "  make lint-personal — fail on maintainer host/account names in tracked source"
 	@echo "  make install     — full from-source bootstrap (CLI + daemon + ui + hook + keep-alive)"
 	@echo ""
 	@echo "daemon lifecycle:"
@@ -99,6 +100,12 @@ mix-test:
 # the civil-day rules are only meaningful against a real UTC offset.
 js-test:
 	cd ui && npm test
+
+# Fail if a maintainer's own host or account name has crept back into tracked
+# source. Fleet members belong in ~/.config/felt/remotes.json, not in the repo.
+# Runs as part of `make go-test` too; this target is for a quick standalone check.
+lint-personal:
+	go test ./cmd/ -run TestNoPersonalIdentifiersInSource
 
 # ── daemon lifecycle ──────────────────────────────────────────────────────
 all: restart

@@ -9,11 +9,11 @@
 #
 # Composes what were separate manual steps into one bootstrap:
 #
-#   1. prerequisites   — honest check (go, elixir/OTP, node, tmux, jq)
+#   1. prerequisites   — honest check (go, elixir/OTP, node, tmux; jq optional)
 #   2. felt CLI        — go install . → ~/.local/bin/felt (the daemon shells to it)
 #   3. daemon escript  — mix deps.get + escript build → bin/shuttle
 #   4. ui/dist         — the served kanban board (built on macOS; rsync'd to clusters)
-#   5. loom hook       — the Claude Code event stream the daemon reads
+#   5. event stream    — the plugin hook (`felt hook event`) the daemon reads
 #   6. keep-alive      — launchd LaunchAgent (macOS) / shuttle-daemon respawn loop (clusters)
 #
 # `felt shuttle install <fiber>` already means "install a fiber as a dispatch
@@ -25,7 +25,7 @@
 #   ./bootstrap.sh --dry-run       check prerequisites + print the plan, change nothing
 #   ./bootstrap.sh --skip-ui       don't build ui/dist (default on clusters — rsync it instead)
 #   ./bootstrap.sh --build-ui      force the ui/dist build (default on macOS)
-#   ./bootstrap.sh --skip-hook     don't touch the loom hook step
+#   ./bootstrap.sh --skip-hook     don't touch the event-stream step
 #   ./bootstrap.sh --skip-cli      don't (re)build/install the felt CLI (it's already on PATH)
 #   ./bootstrap.sh --with-tunnels  also (re)install the autossh tunnels to remotes (macOS hub)
 #   ./bootstrap.sh -h | --help     this help
@@ -114,7 +114,10 @@ if [ "$UI_MODE" = build ]; then
   require "npm"   npm  "needed to build the served ui/dist board." "ships with Node."
 fi
 
-optional "jq" jq "the loom hook needs jq; without it activity-ranking + sent-files stay empty (board still serves)." \
+# jq is a nicety now, not a dependency: the event stream is written by the felt
+# binary, and the SessionStart hook falls back to `felt hook session` when jq is
+# absent. It only pretty-prints the SessionStart envelope.
+optional "jq" jq "only used to pretty-print the SessionStart envelope; session.sh falls back to \`felt hook session\`." \
          "brew install jq  /  apt install jq."
 
 # ── plan / dry-run ───────────────────────────────────────────────────────
@@ -138,7 +141,7 @@ if [ "$DRY_RUN" = 1 ]; then
   note "2. felt CLI : $(cli_desc)"
   note "3. daemon   : mix deps.get && make daemon → bin/shuttle"
   note "4. ui/dist  : $(ui_desc)"
-  note "5. loom hook: $([ "$SKIP_HOOK" = 1 ] && echo SKIP || echo 'detect registration; guide to ~/loom/setup.sh if absent')"
+  note "5. events   : $([ "$SKIP_HOOK" = 1 ] && echo SKIP || echo 'felt setup claude/codex (plugin hooks) + probe felt hook event')"
   note "6. keepalive: $(keepalive_desc)"
   [ "$WITH_TUNNELS" = 1 ] && note "+  tunnels  : felt shuttle tunnels install"
   if [ "$MISSING_REQUIRED" = 1 ]; then
@@ -200,28 +203,59 @@ else
        note "build it on a Mac and rsync it over:  rsync -az --delete ui/dist/ <host>:$REPO/ui/dist/"; fi
 fi
 
-# ── 5. loom hook ────────────────────────────────────────────────────────────
-# The daemon derives per-session activity + the sent-files trail from its OWN
-# Claude Code hook stream (~/.shuttle/events.jsonl), fed by ~/loom/hooks/shuttle-hook.sh.
-# That hook is registered by loom/setup.sh — loom owns it (the same script wires
-# every loom→.claude link, plugins, felt skills). We do NOT re-run all of that
-# or reimplement its settings.json merge here; we verify the dependency and
-# point at the canonical registrar when it's missing.
-step "Loom hook (event stream)"
+# ── 5. event stream ─────────────────────────────────────────────────────────
+# The daemon derives per-session activity + the sent-files trail from this
+# host's own hook stream (~/.shuttle/events.jsonl). The felt binary writes it
+# (`felt hook event`) and the bundled plugin registers it, so this step is
+# self-contained: install/refresh the plugin, then prove the writer works here.
+#
+# The plugin hook is gated on ~/.shuttle existing — step 3 created it, so the
+# writer is already enabled on every bootstrapped host.
+step "Event stream (plugin hook → ~/.shuttle/events.jsonl)"
 if [ "$SKIP_HOOK" = 1 ]; then
   warn "skipped (--skip-hook)."
 else
+  FELT_BIN="$([ "$SKIP_CLI" = 1 ] && command -v felt || echo "$CLI_INSTALL_DIR/felt")"
+
+  if [ -d "$HOME/.shuttle" ]; then
+    ok "~/.shuttle present — the stream is enabled on this host."
+  else
+    warn "~/.shuttle missing; the hook writes nothing until it exists."
+  fi
+
+  # Register the plugin from THIS checkout so hooks and binary always match.
+  # Both are idempotent; both need their harness CLI on PATH.
+  for harness in claude codex; do
+    if have "$harness"; then
+      "$FELT_BIN" setup "$harness" --source "$REPO" >/dev/null 2>&1 \
+        && ok "felt plugin registered for $harness." \
+        || warn "felt setup $harness failed — run it by hand to see why."
+    else
+      note "$harness CLI not on PATH; skipping its plugin registration."
+    fi
+  done
+
+  # Probe the writer end-to-end: no jq, no perl, no tmux required. An explicit
+  # SHUTTLE_EVENTS_FILE overrides the directory gate, so this never touches the
+  # real stream.
+  PROBE="$(mktemp -t shuttle-events-probe)"
+  printf '%s\n' '{"hook_event_name":"SessionStart","session_id":"bootstrap-probe","cwd":"'"$REPO"'"}' \
+    | SHUTTLE_EVENTS_FILE="$PROBE" SHUTTLE_EVENTS= "$FELT_BIN" hook event >/dev/null 2>&1
+  if [ "$(wc -l < "$PROBE" | tr -d ' ')" = "1" ] && grep -q '"type":"session_start"' "$PROBE"; then
+    ok "felt hook event writes a well-formed line on this host."
+  else
+    warn "felt hook event probe failed — activity ranking + sent-files will stay empty."
+    note "reproduce:  echo '{\"hook_event_name\":\"SessionStart\"}' | SHUTTLE_EVENTS_FILE=/tmp/e.jsonl felt hook event"
+  fi
+  rm -f "$PROBE"
+
+  # A host still carrying the retired loom registration writes every event
+  # twice. Harmless — both readers are idempotent — but worth naming.
   SETTINGS="$HOME/.claude/settings.json"
   if [ -f "$SETTINGS" ] && grep -q 'shuttle-hook.sh' "$SETTINGS" 2>/dev/null; then
-    ok "shuttle-hook.sh registered in ~/.claude/settings.json."
-  elif [ -x "$HOME/loom/setup.sh" ]; then
-    warn "shuttle-hook.sh not registered yet."
-    note "run loom's canonical setup to register it (wires the whole loom→.claude surface):"
-    note "  ~/loom/setup.sh"
-  else
-    warn "~/loom not found — the event stream won't be fed."
-    note "sync loom to ~/loom, then run ~/loom/setup.sh. Without it: no activity ranking /"
-    note "sent-files trail (the board still serves)."
+    warn "legacy loom registration still active in ~/.claude/settings.json."
+    note "every event is written twice (harmless — both readers dedupe)."
+    note "clear it:  git -C ~/loom pull && ~/loom/setup.sh"
   fi
 fi
 

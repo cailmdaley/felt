@@ -25,10 +25,10 @@ defmodule Shuttle.Application do
   @impl true
   def start(_type, _args) do
     # In escript mode, Mix compile-time config (config/dev.exs) is not loaded
-    # into the application environment automatically. Ensure the HTTP endpoint
-    # has what it needs to bind. If the config is already present (Mix test /
-    # Mix run context), this is a no-op.
-    maybe_configure_endpoint()
+    # into the application environment automatically — and what IS baked in was
+    # evaluated on the build machine. Resolve the endpoint's binding, server
+    # flag, and signing key here, at runtime.
+    configure_endpoint()
 
     # Same escript-config gap applies to the time zone database: the
     # `config :elixir, :time_zone_database` line in config/config.exs is not
@@ -90,54 +90,58 @@ defmodule Shuttle.Application do
     Supervisor.start_link(children, strategy: :one_for_one, name: Shuttle.Supervisor)
   end
 
-  # Ensure the HTTP endpoint has its :http binding config.
+  # Resolve everything the HTTP endpoint needs to bind, at RUNTIME.
   #
-  # In escript mode the runtime application env doesn't have values from
-  # config/dev.exs, so we seed them from the SHUTTLE_PORT env var (default 4000).
-  # When running under Mix (tests, `mix run`), the env is already populated and
-  # this is a no-op.
-  # Ensure the HTTP endpoint has what it needs to bind.
+  # `mix escript.build` bakes the EVALUATED compile-time config into the
+  # artifact, so a value decided in config/dev.exs travels to every host that
+  # escript is copied to. Anything machine-specific therefore has to be decided
+  # here instead — this function is the daemon's runtime config layer, and it
+  # always runs.
   #
-  # In the common case (dev.exs loaded in escript mode), config/dev.exs already
-  # sets server: true. This fallback handles edge cases where config is absent
-  # (e.g., custom environments, future release builds, test harness overrides).
-  # The SHUTTLE_PORT env var overrides the port.
-  defp maybe_configure_endpoint do
+  # It used to early-return whenever `:server` was already set. Since
+  # config/dev.exs sets `server: true`, that made the whole body dead in every
+  # escript build (and SHUTTLE_PORT dead with it). Each value now falls back
+  # individually, so an explicitly-configured one still wins — config/test.exs's
+  # `server: false` and port 4002 survive untouched.
+  @doc false
+  def configure_endpoint do
     existing = Application.get_env(:shuttle, ShuttleWeb.Endpoint, [])
+    http = Keyword.get(existing, :http, [])
 
-    # Only patch when there is no explicit :server setting in the existing config.
-    # If :server is set (to true or false), that is authoritative — test.exs sets
-    # server: false and we must not override it. When dev.exs is loaded (server:
-    # true, http: [...]), this is a no-op via the first branch too.
-    if Keyword.has_key?(existing, :server) do
-      :ok
-    else
-      port =
-        existing
-        |> Keyword.get(:http, [])
-        |> Keyword.get(:port, System.get_env("SHUTTLE_PORT", "4000") |> String.to_integer())
+    port =
+      case System.get_env("SHUTTLE_PORT") do
+        value when is_binary(value) and value != "" -> String.to_integer(value)
+        _ -> Keyword.get(http, :port, 4000)
+      end
 
-      secret_key_base =
-        Keyword.get(
-          existing,
-          :secret_key_base,
-          System.get_env(
-            "SHUTTLE_SECRET_KEY_BASE",
-            "shuttlelocaldevkeybaseshuttlelocaldevkeybaseshuttlelocaldevkeybase"
-          )
-        )
+    merged =
+      Keyword.merge(existing,
+        http: Keyword.merge([ip: {127, 0, 0, 1}], Keyword.put(http, :port, port)),
+        adapter: Keyword.get(existing, :adapter, Bandit.PhoenixAdapter),
+        pubsub_server: Shuttle.PubSub,
+        url: Keyword.get(existing, :url, host: "localhost"),
+        server: Keyword.get(existing, :server, true),
+        secret_key_base: secret_key_base(existing)
+      )
 
-      merged =
-        Keyword.merge(existing,
-          http: [ip: {127, 0, 0, 1}, port: port],
-          adapter: Keyword.get(existing, :adapter, Bandit.PhoenixAdapter),
-          pubsub_server: Shuttle.PubSub,
-          url: Keyword.get(existing, :url, [host: "localhost"]),
-          server: true,
-          secret_key_base: secret_key_base
-        )
+    Application.put_env(:shuttle, ShuttleWeb.Endpoint, merged)
+  end
 
-      Application.put_env(:shuttle, ShuttleWeb.Endpoint, merged)
-    end
+  # The endpoint's signing key.
+  #
+  # Generated per boot when nothing supplies one. That is not a compromise, it
+  # is the correct choice here: this endpoint is JSON-only, bound to 127.0.0.1,
+  # with no Plug.Session, no cookies, and no LiveView — nothing signed by this
+  # key needs to survive a restart. An ephemeral key is strictly safer than a
+  # persisted one and needs no file, no permissions, and no migration. The
+  # previous behavior shipped a fixed key as a source literal: inert today, a
+  # real vulnerability the day anything signed appears.
+  #
+  # If signed state ever must outlive a restart, the upgrade is local to this
+  # function: persist to ~/.config/felt/secret_key_base with 0600 on first boot.
+  defp secret_key_base(existing) do
+    Keyword.get(existing, :secret_key_base) ||
+      System.get_env("SHUTTLE_SECRET_KEY_BASE") ||
+      Base.encode64(:crypto.strong_rand_bytes(48))
   end
 end

@@ -13,11 +13,16 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// felt shuttle tunnels — laptop-side operator tooling that maps the remote
-// Shuttle daemons onto local ports via launchd-managed autossh tunnels (so the
-// daemon's owner-routing can reach candide:4001 / cineca:4002 over an SSH
-// LocalForward). It is the typed setup command for the cross-host network; the
-// running daemon owns the network at runtime, this just installs the plumbing.
+// felt shuttle tunnels — hub-side operator tooling that maps the remote Shuttle
+// daemons onto local ports via launchd-managed autossh tunnels (so the daemon's
+// owner-routing can reach a remote's :4000 over an SSH LocalForward). It is the
+// typed setup command for the cross-host network; the running daemon owns the
+// network at runtime, this just installs the plumbing.
+//
+// The fleet itself is NOT described here. Every name, port, and tunnel option
+// comes from the shared fleet file (see shuttle_remotes.go), which the Elixir
+// daemon reads too — so the plist a tunnel is installed as and the launchd label
+// the recovery cascade kickstarts cannot drift.
 //
 // Ported from shuttle-ctl's tunnels verb in the shuttle->felt merge. The plist
 // template is go:embed'd (like the agents registry) so there is no on-disk
@@ -28,12 +33,15 @@ var tunnelPlistTemplate string
 
 type tunnelSpec struct {
 	Name        string
+	SSHHost     string
+	Label       string
 	LocalPort   int
+	RemotePort  int
 	HoldCommand string
 	// Multiplex: ride an existing ControlMaster socket (~/.ssh/ctl/%C, the
 	// ssh-config ControlPath) instead of opening independent connections.
-	// For hosts behind interactive 2FA (nibi's Duo) a fresh unattended ssh can
-	// never authenticate, so the tunnel's only viable transport is the socket a
+	// For a host behind interactive 2FA a fresh unattended ssh can never
+	// authenticate, so the tunnel's only viable transport is the socket a
 	// human-approved login left behind: alive → tunnel up for free; dead →
 	// autossh retries harmlessly until the next approved `ssh <host>` login
 	// revives the master, then the tunnel comes back on its own. Reuse-only —
@@ -46,19 +54,13 @@ type tunnelTemplateData struct {
 	Label       string
 	SSHHost     string
 	LocalPort   int
+	RemotePort  int
 	HoldCommand string
 	AutoSSHPath string
 	SSHAuthSock string
 	LogPath     string
 	Home        string
 	Multiplex   bool
-}
-
-var defaultTunnelSpecs = map[string]tunnelSpec{
-	"candide":  {Name: "candide", LocalPort: 4001},
-	"cineca":   {Name: "cineca", LocalPort: 4002},
-	"amundsen": {Name: "amundsen", LocalPort: 4003},
-	"nibi":     {Name: "nibi", LocalPort: 4004, Multiplex: true},
 }
 
 var (
@@ -71,18 +73,20 @@ var (
 var tunnelsCmd = &cobra.Command{
 	Use:   "tunnels",
 	Short: "Install launchd-managed autossh tunnels for Shuttle remotes",
-	Long: `Manage the laptop-side autossh tunnels that map remote Shuttle daemons
+	Long: `Manage the hub-side autossh tunnels that map remote Shuttle daemons
 onto local ports. The generated plists are written into ~/Library/LaunchAgents
 by default.
 
+The remotes come from the fleet file (` + "`felt shuttle remotes path`" + `).
+
 Examples:
-  felt shuttle tunnels install              # candide + cineca + amundsen, write + bootstrap
-  felt shuttle tunnels install candide      # only candide
+  felt shuttle tunnels install              # every configured remote, write + bootstrap
+  felt shuttle tunnels install <name>       # only that remote
   felt shuttle tunnels install --write-only # write plists but don't call launchctl`,
 }
 
 var tunnelsInstallCmd = &cobra.Command{
-	Use:   "install [candide|cineca|amundsen ...]",
+	Use:   "install [name ...]",
 	Short: "Write and optionally bootstrap launchd plists for Shuttle tunnels",
 	Args:  cobra.ArbitraryArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -131,14 +135,15 @@ func installTunnels(requested []string) error {
 
 	uid := os.Getuid()
 	for _, spec := range specs {
-		label := tunnelLabel(spec.Name)
+		label := spec.Label
 		plistPath := filepath.Join(plistDir, label+".plist")
 		logPath := filepath.Join(logDir, fmt.Sprintf("tunnel-%s.log", spec.Name))
 
 		rendered, err := renderTunnelPlist(tmpl, tunnelTemplateData{
 			Label:       label,
-			SSHHost:     spec.Name,
+			SSHHost:     spec.SSHHost,
 			LocalPort:   spec.LocalPort,
+			RemotePort:  spec.RemotePort,
 			HoldCommand: spec.HoldCommand,
 			Multiplex:   spec.Multiplex,
 			AutoSSHPath: autosshPath,
@@ -174,32 +179,67 @@ func installTunnels(requested []string) error {
 	return nil
 }
 
+// resolveTunnelSpecs turns the configured fleet into the tunnels to install.
+//
+// With no arguments it is every enabled remote whose tunnel manager is launchd.
+// With arguments it is exactly those remotes, and an unknown one is an error
+// that names what IS configured — the fleet lives in one file, so the error can
+// always be specific.
 func resolveTunnelSpecs(requested []string) ([]tunnelSpec, error) {
+	doc, err := loadRemotesFile()
+	if err != nil {
+		return nil, err
+	}
+
+	byName := make(map[string]remoteSpec, len(doc.Remotes))
+	for _, r := range doc.Remotes {
+		byName[r.Name] = r
+	}
+
+	toSpec := func(r remoteSpec) tunnelSpec {
+		return tunnelSpec{
+			Name:       r.Name,
+			SSHHost:    r.SSH,
+			Label:      r.label(doc.LaunchdLabelPrefix),
+			LocalPort:  r.Port,
+			RemotePort: r.RemotePort,
+			Multiplex:  r.tunnelOpts().Multiplex,
+		}
+	}
+
 	if len(requested) == 0 {
-		names := make([]string, 0, len(defaultTunnelSpecs))
-		for name := range defaultTunnelSpecs {
-			names = append(names, name)
+		if len(doc.Remotes) == 0 {
+			path, _ := feltRemotesPath()
+			return nil, fmt.Errorf(
+				"no remotes configured; run 'felt shuttle remotes add <name> --port <n>' (file: %s)", path)
 		}
-		sort.Strings(names)
-		resolved := make([]tunnelSpec, 0, len(names))
-		for _, name := range names {
-			resolved = append(resolved, defaultTunnelSpecs[name])
+		resolved := make([]tunnelSpec, 0, len(doc.Remotes))
+		for _, r := range doc.Remotes {
+			if !r.enabledOr() || r.tunnelOpts().Manager != "launchd" {
+				continue
+			}
+			resolved = append(resolved, toSpec(r))
 		}
+		if len(resolved) == 0 {
+			return nil, fmt.Errorf("no remotes use launchd-managed tunnels (configured: %s)",
+				remoteNameList(doc.Remotes))
+		}
+		sort.Slice(resolved, func(i, j int) bool { return resolved[i].Name < resolved[j].Name })
 		return resolved, nil
 	}
 
 	resolved := make([]tunnelSpec, 0, len(requested))
 	seen := map[string]bool{}
 	for _, name := range requested {
-		spec, ok := defaultTunnelSpecs[name]
+		r, ok := byName[name]
 		if !ok {
-			return nil, fmt.Errorf("unknown tunnel %q (supported: candide, cineca, amundsen)", name)
+			return nil, fmt.Errorf("unknown tunnel %q (configured: %s)", name, remoteNameList(doc.Remotes))
 		}
 		if seen[name] {
 			continue
 		}
 		seen[name] = true
-		resolved = append(resolved, spec)
+		resolved = append(resolved, toSpec(r))
 	}
 	sort.Slice(resolved, func(i, j int) bool { return resolved[i].Name < resolved[j].Name })
 	return resolved, nil
@@ -211,10 +251,6 @@ func renderTunnelPlist(tmpl *template.Template, data tunnelTemplateData) ([]byte
 		return nil, err
 	}
 	return buf.Bytes(), nil
-}
-
-func tunnelLabel(name string) string {
-	return fmt.Sprintf("com.cailmdaley.shuttle-tunnel-%s", name)
 }
 
 func runLaunchctl(args ...string) error {

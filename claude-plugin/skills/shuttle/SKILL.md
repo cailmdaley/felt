@@ -9,12 +9,12 @@ description: >
   **Authoring:** the user mentions a **constitution** (writing, drafting,
   "stash this as a constitution", "shuttle this", "let's shuttle <X>"), or
   names a **Shuttle agent** by registry id (`claude-opus`, `claude-fable`,
-  `codex`, `pi-sonnet`, … — `felt shuttle agents` lists them) in a context
+  `codex`, `claude-sonnet`, … — `felt shuttle agents` lists them) in a context
   that implies dispatch. The phrase **"shuttle [with] <model-name>"** is
   the canonical author trigger.
   **Operator questions:** the user asks about Shuttle itself, the kanban
-  board, why a card is or isn't appearing, agent selection / Copilot
-  budget, or how to prepare work for autonomous follow-through.
+  board, why a card is or isn't appearing, agent selection, or how to
+  prepare work for autonomous follow-through.
 ---
 
 # Shuttle

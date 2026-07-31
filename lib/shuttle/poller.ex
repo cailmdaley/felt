@@ -147,7 +147,7 @@ defmodule Shuttle.Poller do
       # the 5s-polled owner feed; under login-node CPU contention that redundant
       # per-request work was enough on its own to push a "pure state read" past
       # callers' timeouts (see felt fiber
-      # ai-futures/felt/debug/finding-nibi-fibers-endpoint-login-node-contention).
+      # felt/debug/fibers-endpoint-login-node-contention).
       # `stamp_runtime/2` (cheap; a no-op when nothing is running) still runs
       # per-request over the memoized base so live worker status stays
       # request-fresh.
@@ -1941,8 +1941,8 @@ defmodule Shuttle.Poller do
   # Names WHY a dispatch was refused so the kanban can say something true
   # instead of the catch-all "disabled, not yet due, or closed". The most
   # common confusing case is a remote-homed fiber dispatched against the wrong
-  # daemon: a force-dispatch of a `host: cineca` fiber that reaches any daemon
-  # whose `own_host_id != cineca` fails `host_owned?` and used to report a flat
+  # daemon: a force-dispatch of a `host: <remote>` fiber that reaches any daemon
+  # whose `own_host_id` differs fails `host_owned?` and used to report a flat
   # `not_eligible`. The reason atoms (`:homed_elsewhere`, `:project_dir_missing`,
   # `:disabled`, `:closed`, `:human_worker`, `:no_shuttle_block`,
   # `:not_due_or_blocked`) are surfaced to the UI as accurate copy.
@@ -2079,9 +2079,9 @@ defmodule Shuttle.Poller do
   feed, the CLI's `host:` stamp on new fibers, the state/snapshot
   endpoints — goes through here, so a daemon's advertised identity is
   single-valued by construction. Do not re-derive `:inet.gethostname()`
-  anywhere else; that drift is exactly how candide came to own by `c03`
-  (the raw hostname) while its fibers were stamped `candide` (the alias),
-  and the owner-only feed silently dropped every one of them.
+  anywhere else; that drift is exactly how a daemon came to own by its raw
+  login-node hostname while its fibers were stamped with its friendly ssh
+  alias, and the owner-only feed silently dropped every one of them.
 
   S4: reads the value `init/1` froze into a `:persistent_term` at boot
   (keyed by `server`'s registered name/pid), NOT a fresh env/file/hostname
@@ -2126,8 +2126,9 @@ defmodule Shuttle.Poller do
   #      per-host canonical identity: unlike the env var it survives every
   #      daemon launch path (`make start`, a bare `bin/shuttle start`, a
   #      respawn outside the loop), so the daemon *derives* its friendly name
-  #      (`candide` instead of `c03`) rather than depending on an operator
-  #      remembering to export it. Override the path with `SHUTTLE_HOST_FILE`.
+  #      (the ssh alias instead of a raw login-node hostname) rather than
+  #      depending on an operator remembering to export it. Override the path
+  #      with `SHUTTLE_HOST_FILE`.
   #
   #   3. `:inet.gethostname()` — short OS hostname. Two separately-deployed
   #      daemons get distinct ids automatically; no per-machine config needed.

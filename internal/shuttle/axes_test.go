@@ -1,16 +1,21 @@
 package shuttle
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 )
 
-// loadReg loads the embedded registry for axis tests.
+// loadReg loads the fleet fixture — a registry wide enough to exercise every
+// axis shape (a harness with no effort axis, one that caps below claude's, a
+// chrome alias, a headless alias, an alias-of-alias base). These tests are about
+// axis *logic*, not about which agents felt ships, so they read a fixture rather
+// than the built-ins; trimming the shipped set must not touch them.
 func loadReg(t *testing.T) *AgentRegistry {
 	t.Helper()
-	reg, err := LoadAgentRegistry()
+	reg, err := LoadAgentRegistryFromFile(filepath.Join("testdata", "agents.fleet.json"))
 	if err != nil {
-		t.Fatalf("loading registry: %v", err)
+		t.Fatalf("loading fleet fixture: %v", err)
 	}
 	return reg
 }

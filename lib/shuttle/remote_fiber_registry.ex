@@ -19,8 +19,8 @@ defmodule Shuttle.RemoteFiberRegistry do
 
   Keeping them apart matters for two reasons: a slow or failing fiber feed never
   triggers a tunnel bounce, and the two endpoints have different latency
-  profiles (cineca's `/state` answers in milliseconds, but its `/fibers` is
-  genuinely ~7-8s). Because a healthy feed fetch can take seconds, the fetch
+  profiles (a busy remote's `/state` answers in milliseconds while its `/fibers`
+  is genuinely ~7-8s). Because a healthy feed fetch can take seconds, the fetch
   runs in a supervised `Task` (`async_nolink`) rather than inline in the
   GenServer loop — otherwise a single slow origin would queue every `feeds/0`
   read behind it.
@@ -61,6 +61,8 @@ defmodule Shuttle.RemoteFiberRegistry do
       :tick_timer_ref,
       :tick_interval_ms,
       :request_timeout_ms,
+      :remotes_token,
+      reload_from_file?: false,
       feeds: %{},
       # ref => remote name, for the in-flight fetch guard
       tasks: %{}
@@ -72,15 +74,17 @@ defmodule Shuttle.RemoteFiberRegistry do
   @doc """
   Starts the registry. Accepts:
 
-    * `:remotes` — list of `%Shuttle.Remote{}` (or maps/keyword lists). Defaults
-      to `Application.get_env(:shuttle, :remotes, [])`.
+    * `:remotes` — list of `%Shuttle.Remote{}` (or maps/keyword lists). Omit it
+      and the fleet resolves through `Shuttle.Remotes.configured/0`, and the
+      registry follows the fleet file on each tick. Passing this opt pins the
+      list for the registry's lifetime.
     * `:client` — module implementing `Shuttle.RemoteRegistry.Client`. Defaults
       to `Shuttle.RemoteRegistry.Client.Default`.
     * `:task_supervisor` — `Task.Supervisor` name for the async fetches.
       Defaults to `Shuttle.TaskSupervisor`.
     * `:tick_interval_ms` — registry tick cadence. Defaults to 1_000.
     * `:request_timeout_ms` — per-fetch HTTP timeout. Defaults to 20_000
-      (cineca's healthy `/fibers` latency is ~7-8s).
+      (a loaded remote's healthy `/fibers` latency is ~7-8s).
     * `:auto_poll` — schedule the background tick. Defaults to `true`; tests set
       `false` and drive deterministically with `refresh_now/1`.
     * `:name` — GenServer name. Defaults to `__MODULE__`.
@@ -172,13 +176,14 @@ defmodule Shuttle.RemoteFiberRegistry do
 
   @impl true
   def init(opts) do
-    remotes =
-      opts
-      |> Keyword.get(:remotes, Application.get_env(:shuttle, :remotes, []))
-      |> RegistryCommon.normalize_remotes()
+    remotes = RegistryCommon.configured_remotes(opts)
 
     state = %State{
       remotes: remotes,
+      # Only a registry whose fleet came from the file follows the file. One
+      # given an explicit `:remotes` opt keeps that list for its lifetime.
+      reload_from_file?: not Keyword.has_key?(opts, :remotes),
+      remotes_token: Shuttle.Remotes.config_token(),
       client: Keyword.get(opts, :client, Shuttle.RemoteRegistry.Client.Default),
       task_supervisor: Keyword.get(opts, :task_supervisor, Shuttle.TaskSupervisor),
       tick_interval_ms: Keyword.get(opts, :tick_interval_ms, @default_tick_interval_ms),
@@ -209,6 +214,7 @@ defmodule Shuttle.RemoteFiberRegistry do
   end
 
   def handle_call(:refresh_now, _from, state) do
+    state = reload_remotes(state)
     now = DateTime.utc_now()
 
     feeds =
@@ -265,9 +271,39 @@ defmodule Shuttle.RemoteFiberRegistry do
 
   def handle_info(_msg, state), do: {:noreply, state}
 
+  # ── Fleet reload ──
+
+  # Same mtime-gated reload as `Shuttle.RemoteRegistry`: one stat per tick, and
+  # a fleet edit lands without a daemon bounce. Kept entries retain their ETag
+  # and cache metadata, so a reload never forces a full refetch of every feed.
+  defp reload_remotes(%State{reload_from_file?: false} = state), do: state
+
+  defp reload_remotes(%State{} = state) do
+    case Shuttle.Remotes.config_token() do
+      token when token == state.remotes_token ->
+        state
+
+      token ->
+        remotes = RegistryCommon.configured_remotes()
+
+        %{
+          state
+          | remotes: remotes,
+            remotes_token: token,
+            feeds: RegistryCommon.reconcile(state.feeds, remotes, &initial_entry/1)
+        }
+    end
+  end
+
   # ── Fetch orchestration ──
 
+  # Every fetch cycle — tick or the synchronous `refresh_now/1` — starts by
+  # picking up a fleet edit, so the two paths can never disagree about the fleet.
   defp start_due_fetches(%State{} = state) do
+    state |> reload_remotes() |> start_due_fetches_for_fleet()
+  end
+
+  defp start_due_fetches_for_fleet(%State{} = state) do
     now_ms = DateTime.to_unix(DateTime.utc_now(), :millisecond)
     in_flight = MapSet.new(Map.values(state.tasks))
 

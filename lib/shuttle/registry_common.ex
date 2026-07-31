@@ -29,6 +29,45 @@ defmodule Shuttle.RegistryCommon do
     end)
   end
 
+  @doc """
+  The one place the fleet is resolved for a consumer.
+
+  An explicit `:remotes` opt wins (tests, callers with their own list);
+  otherwise `Shuttle.Remotes.configured/0` applies the full precedence
+  (application config when set, else the fleet file, else none).
+
+  This completes C6: that change unified remote *parsing* behind
+  `normalize_remotes/1` but left four copies of the *source* expression
+  (`Application.get_env(:shuttle, :remotes, [])`) in the two registries, the
+  origin router, and the felt-stores controller. Four sources could disagree
+  about where the fleet comes from even while agreeing on how to parse it.
+  """
+  @spec configured_remotes(keyword()) :: [Remote.t()]
+  def configured_remotes(opts \\ []) do
+    case Keyword.fetch(opts, :remotes) do
+      {:ok, entries} -> normalize_remotes(entries)
+      :error -> Shuttle.Remotes.configured()
+    end
+  end
+
+  @doc """
+  Re-key a registry's per-remote entry map onto a new fleet.
+
+  Existing entries are kept — with their `:remote` refreshed, so a changed port
+  or timeout takes effect — because they carry state the registry must not lose
+  on a config reload: the recovery cascade's position, failure counts, the ETag
+  cache. Added remotes get `init_fun.(remote)`. Removed remotes are dropped.
+  """
+  @spec reconcile(map(), [Remote.t()], (Remote.t() -> map())) :: map()
+  def reconcile(entries, remotes, init_fun) when is_map(entries) and is_function(init_fun, 1) do
+    Map.new(remotes, fn %Remote{name: name} = remote ->
+      case Map.get(entries, name) do
+        nil -> {name, init_fun.(remote)}
+        existing -> {name, Map.put(existing, :remote, remote)}
+      end
+    end)
+  end
+
   @doc "True iff `server` resolves to a live process."
   @spec registry_alive?(GenServer.server()) :: boolean()
   def registry_alive?(server) do

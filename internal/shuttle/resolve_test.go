@@ -11,10 +11,7 @@ import (
 // capture flow) yields the byte-identical record ResolveBlock emits under
 // shuttle.resolved.agent (the poll/dispatch path). One projection, two callers.
 func TestNewResolvedAgent_MatchesResolveBlock(t *testing.T) {
-	reg, err := LoadAgentRegistry()
-	if err != nil {
-		t.Fatalf("LoadAgentRegistry: %v", err)
-	}
+	reg := loadReg(t)
 	for _, name := range []string{"claude-opus", "claude-opus-chrome", "codex", "pi-sonnet"} {
 		block := &Block{Kind: "oneshot", Agent: name, Effort: "", Chrome: false}
 		viaBlock, err := ResolveBlock(block, reg, time.Now())
@@ -33,10 +30,7 @@ func TestNewResolvedAgent_MatchesResolveBlock(t *testing.T) {
 }
 
 func TestCodexModelFamily(t *testing.T) {
-	reg, err := LoadAgentRegistry()
-	if err != nil {
-		t.Fatalf("LoadAgentRegistry: %v", err)
-	}
+	reg := loadReg(t)
 
 	tests := []struct {
 		name          string

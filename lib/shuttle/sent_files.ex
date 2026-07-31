@@ -1,26 +1,29 @@
 defmodule Shuttle.SentFiles do
   @moduledoc """
   Read the sent-files trail for a fiber from the host-local Claude/Codex hook
-  stream (`~/.portolan/data/events.jsonl`).
+  stream (`~/.shuttle/events.jsonl`).
 
   The standalone Shuttle board shows the artifacts a worker pushed with
   `SendUserFile` on each card. Those sends are recorded — always fresh, server
-  independent — by `portolan-hook.sh` as `pre_tool_use` events with
+  independent — by `felt hook event` as `pre_tool_use` events with
   `tool == "SendUserFile"`, carrying `toolInput.files` (absolute, or relative to
   the event's `cwd` — resolved to absolute here so the `/file` route can serve
   them),
   `tmuxSession` (e.g. `morning-post-<ULID>-shuttle`, the embedded 26-char
   Crockford ULID being the fiber id = card `uid`), `sessionId`, and `timestamp`.
-  (Portolan's derived `sent-files.json` is stale the moment its server stops —
-  events.jsonl is ground truth. See finding 01KVC1N5XMAAMYXDAGR4V6QA9G.)
+  A derived, server-owned index would be stale the moment that server stops —
+  events.jsonl is ground truth. (See finding 01KVC1N5XMAAMYXDAGR4V6QA9G.)
 
   **The trail for a `uid`** = SendUserFile events whose tmux-embedded ULID — or
   `sessionId` — matches the requested `uid`, with `toolInput.files` flattened
   into one entry per path, deduped by `fullPath` keeping the newest send, sorted
   newest-first, capped at `@cap`.
 
-  The events file is ~10 MB and only grows, so it is **streamed** line-by-line
-  (never slurped); malformed lines and non-SendUserFile events are skipped. The
+  The events file grows to tens of megabytes between rollovers, so it is
+  **streamed** line-by-line (never slurped); malformed lines and
+  non-SendUserFile events are skipped. Only the live file is read — a trail
+  that rolled over to `events.jsonl.1` is gone, which costs nothing at the
+  50-entry cap. The
   path honors the same env the hook reads, via
   `Shuttle.WaitingTracker.default_events_file/0`, so the source can't drift from
   the writer.

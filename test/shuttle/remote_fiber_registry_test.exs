@@ -284,6 +284,7 @@ defmodule Shuttle.RemoteFiberRegistryTest do
         )
 
       :ok = RemoteFiberRegistry.refresh_now(pid)
+
       assert %{"candide" => %{fibers: [%{"fiber" => %{"id" => "before"}}]}} =
                RemoteFiberRegistry.feeds(pid)
 
@@ -317,6 +318,7 @@ defmodule Shuttle.RemoteFiberRegistryTest do
         )
 
       :ok = RemoteFiberRegistry.refresh_now(pid)
+
       assert %{"candide" => %{cache: %{"refreshed_at" => "2026-07-20T10:00:00Z"}}} =
                RemoteFiberRegistry.feeds(pid)
 
@@ -361,7 +363,9 @@ defmodule Shuttle.RemoteFiberRegistryTest do
       # The owner restarts: its next poll hasn't warmed yet, so it serves a COLD
       # empty feed. The viewer must NOT lose its last-good cards, and staleness
       # must stay honest (last_polled_at frozen at the last WARM success).
-      cold = Jason.encode!(%{"host" => "candide", "fibers" => [], "cache" => %{"state" => "cold"}})
+      cold =
+        Jason.encode!(%{"host" => "candide", "fibers" => [], "cache" => %{"state" => "cold"}})
+
       MockClient.set(url, {:ok, cold})
       :ok = RemoteFiberRegistry.refresh_now(pid)
 
@@ -508,6 +512,95 @@ defmodule Shuttle.RemoteFiberRegistryTest do
         )
 
       assert %{"candide" => %{stale: true, fibers: []}} = RemoteFiberRegistry.feeds(pid)
+    end
+  end
+
+  # ── Live fleet reload ──
+
+  describe "fleet reload" do
+    setup do
+      dir = Path.join(System.tmp_dir!(), "rfr-fleet-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(dir)
+      path = Path.join(dir, "remotes.json")
+
+      prev_file = System.get_env("FELT_REMOTES_FILE")
+      prev_remotes = Application.get_env(:shuttle, :remotes)
+      System.put_env("FELT_REMOTES_FILE", path)
+      Application.delete_env(:shuttle, :remotes)
+
+      on_exit(fn ->
+        File.rm_rf(dir)
+        if prev_file, do: System.put_env("FELT_REMOTES_FILE", prev_file)
+        if prev_file == nil, do: System.delete_env("FELT_REMOTES_FILE")
+
+        if prev_remotes == nil,
+          do: Application.delete_env(:shuttle, :remotes),
+          else: Application.put_env(:shuttle, :remotes, prev_remotes)
+      end)
+
+      {:ok, path: path}
+    end
+
+    defp write_fleet(path, entries),
+      do: File.write!(path, Jason.encode!(%{"version" => 1, "remotes" => entries}))
+
+    test "an added remote joins the board and a removed one leaves it", %{path: path} do
+      write_fleet(path, [%{"name" => "candide", "port" => 4001}])
+
+      MockClient.set(
+        "http://127.0.0.1:4001/api/v1/fibers?shuttle=true",
+        {:ok, feed_body([sample_fiber("a")])}
+      )
+
+      pid =
+        start_supervised!(
+          {RemoteFiberRegistry, name: :rfr_fleet, client: MockClient, auto_poll: false}
+        )
+
+      :ok = RemoteFiberRegistry.refresh_now(pid)
+      assert Map.keys(RemoteFiberRegistry.feeds(pid)) == ["candide"]
+
+      write_fleet(path, [
+        %{"name" => "candide", "port" => 4001},
+        %{"name" => "cineca", "port" => 4002}
+      ])
+
+      MockClient.set(
+        "http://127.0.0.1:4002/api/v1/fibers?shuttle=true",
+        {:ok, feed_body([sample_fiber("b")])}
+      )
+
+      :ok = RemoteFiberRegistry.refresh_now(pid)
+
+      feeds = RemoteFiberRegistry.feeds(pid)
+      assert Enum.sort(Map.keys(feeds)) == ["candide", "cineca"]
+
+      # The pre-existing feed kept its cached rows — a reload must not force a
+      # cold refetch of every origin.
+      assert [%{"fiber" => %{"id" => "a"}}] = feeds["candide"].fibers
+
+      write_fleet(path, [%{"name" => "cineca", "port" => 4002}])
+      :ok = RemoteFiberRegistry.refresh_now(pid)
+      assert Map.keys(RemoteFiberRegistry.feeds(pid)) == ["cineca"]
+    end
+
+    test "an explicit :remotes opt pins the list against the file", %{path: path} do
+      write_fleet(path, [%{"name" => "from-file", "port" => 4001}])
+      MockClient.set(Remote.fibers_url(candide()), {:ok, feed_body([sample_fiber("a")])})
+
+      pid =
+        start_supervised!(
+          {RemoteFiberRegistry,
+           name: :rfr_fleet_pinned, remotes: [candide()], client: MockClient, auto_poll: false}
+        )
+
+      write_fleet(path, [
+        %{"name" => "from-file", "port" => 4001},
+        %{"name" => "another", "port" => 4002}
+      ])
+
+      :ok = RemoteFiberRegistry.refresh_now(pid)
+      assert Map.keys(RemoteFiberRegistry.feeds(pid)) == ["candide"]
     end
   end
 end

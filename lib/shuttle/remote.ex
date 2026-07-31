@@ -1,43 +1,67 @@
 defmodule Shuttle.Remote do
   @moduledoc """
-  Configuration record for a remote Shuttle daemon the laptop polls for
+  Configuration record for a remote Shuttle daemon this host polls for
   visibility.
 
-  A remote is identified by name (e.g. "candide", "cineca"); its `url`
-  is whatever local URL the SSH tunnel maps the remote daemon's
-  `127.0.0.1:4000` to (e.g. `http://localhost:4001`).
+  A remote is identified by `name` — the routing key everywhere. It must equal
+  that daemon's own host id and the `shuttle.host` its fibers carry; origin
+  stamping, `Shuttle.OriginRouter.route/2`, and `--remote NAME` all key off it.
 
-  Remotes are configured via `config :shuttle, :remotes, [...]`. Each
-  entry may be a map (`%{name: "candide", url: "http://localhost:4001"}`)
-  or a keyword list. Missing fields fall back to defaults documented on
-  `from_config/1`.
+  `url` is whatever local URL the SSH tunnel maps the remote daemon's
+  `127.0.0.1:<remote_port>` to. Give a `port` and the URL derives from it
+  (`http://127.0.0.1:<port>`); give a `url` outright for a remote reached
+  without a locally-managed tunnel.
 
-  See [[constitution-shuttle-remote-dispatch]] for the cross-host
-  contract: each daemon owns its host's `.felt/`, the laptop is a
-  viewer that composites snapshots over HTTP.
+  Entries come from `Shuttle.Remotes` (the fleet file `~/.config/felt/remotes.json`)
+  or from `config :shuttle, :remotes, [...]`. Each entry may be a map
+  (string- or atom-keyed) or a keyword list.
+
+  See [[constitution-shuttle-remote-dispatch]] for the cross-host contract:
+  each daemon owns its host's `.felt/`, the hub is a viewer that composites
+  snapshots over HTTP.
   """
 
   @enforce_keys [:name, :url]
   defstruct [
     :name,
     :url,
+    :ssh,
+    :display,
+    :port,
+    remote_port: 4_000,
+    tunnel: %{manager: :launchd, multiplex: false, label: nil},
+    enabled: true,
     poll_interval_ms: 5_000,
     request_timeout_ms: 2_000,
     stale_multiplier: 4
   ]
 
+  @type tunnel :: %{
+          manager: :launchd | :none,
+          multiplex: boolean(),
+          label: String.t() | nil
+        }
+
   @type t :: %__MODULE__{
           name: String.t(),
           url: String.t(),
+          ssh: String.t(),
+          display: String.t(),
+          port: pos_integer() | nil,
+          remote_port: pos_integer(),
+          tunnel: tunnel(),
+          enabled: boolean(),
           poll_interval_ms: pos_integer(),
           request_timeout_ms: pos_integer(),
           stale_multiplier: pos_integer()
         }
 
+  @default_remote_port 4_000
+
   @doc """
   Parses a list of config entries (maps or keyword lists) into
   `%Shuttle.Remote{}` structs. Drops entries missing the required
-  `:name` or `:url`.
+  `:name`, or lacking both `:url` and `:port`.
   """
   @spec from_config_list([map() | keyword()]) :: [t()]
   def from_config_list(entries) when is_list(entries) do
@@ -49,10 +73,20 @@ defmodule Shuttle.Remote do
   def from_config_list(_), do: []
 
   @doc """
-  Parses a single entry. Returns `nil` when required fields are
-  missing.
+  Parses a single entry. Returns `nil` when the required fields are missing.
 
   Defaults:
+    * `ssh` — `name` (the SSH destination usually IS the routing name; they
+      diverge when ssh-config uses an alias)
+    * `display` — `name`. Presentation only, never an address: two ways to name
+      one origin is how a mis-stamped origin silently degrades to `:local`.
+    * `url` — `http://127.0.0.1:<port>`
+    * `remote_port` — 4000 (the daemon port on the far side of the tunnel)
+    * `tunnel.manager` — `:launchd` on darwin, `:none` elsewhere (the same rule
+      `cmd/shuttle_remotes.go` applies, so the installer and the daemon agree).
+      `:none` skips the tunnel bounce in the recovery cascade and goes straight
+      to the ssh check
+    * `enabled` — true
     * `poll_interval_ms` — 5_000
     * `request_timeout_ms` — 2_000
     * `stale_multiplier` — 4 (entry becomes stale after
@@ -63,26 +97,26 @@ defmodule Shuttle.Remote do
       a genuine outage within ~20s.
   """
   @spec from_config(map() | keyword()) :: t() | nil
+  def from_config(%__MODULE__{} = remote), do: remote
+
   def from_config(%{} = entry) do
-    name = fetch(entry, :name) || fetch(entry, "name")
-    url = fetch(entry, :url) || fetch(entry, "url")
+    name = fetch(entry, :name)
+    port = fetch(entry, :port)
+    url = fetch(entry, :url) || derived_url(port)
 
     if is_binary(name) and name != "" and is_binary(url) and url != "" do
-      poll_interval_ms =
-        fetch(entry, :poll_interval_ms) || fetch(entry, "poll_interval_ms") || 5_000
-
-      request_timeout_ms =
-        fetch(entry, :request_timeout_ms) || fetch(entry, "request_timeout_ms") || 2_000
-
-      stale_multiplier =
-        fetch(entry, :stale_multiplier) || fetch(entry, "stale_multiplier") || 4
-
       %__MODULE__{
         name: name,
         url: url,
-        poll_interval_ms: poll_interval_ms,
-        request_timeout_ms: request_timeout_ms,
-        stale_multiplier: stale_multiplier
+        ssh: string_or(fetch(entry, :ssh), name),
+        display: string_or(fetch(entry, :display), name),
+        port: port,
+        remote_port: fetch(entry, :remote_port) || @default_remote_port,
+        tunnel: tunnel_from(fetch(entry, :tunnel)),
+        enabled: fetch(entry, :enabled) != false,
+        poll_interval_ms: fetch(entry, :poll_interval_ms) || 5_000,
+        request_timeout_ms: fetch(entry, :request_timeout_ms) || 2_000,
+        stale_multiplier: fetch(entry, :stale_multiplier) || 4
       }
     end
   end
@@ -93,7 +127,69 @@ defmodule Shuttle.Remote do
 
   def from_config(_), do: nil
 
-  defp fetch(map, key), do: Map.get(map, key)
+  defp derived_url(port) when is_integer(port) and port > 0, do: "http://127.0.0.1:#{port}"
+  defp derived_url(_), do: nil
+
+  defp string_or(value, _fallback) when is_binary(value) and value != "", do: value
+  defp string_or(_value, fallback), do: fallback
+
+  defp tunnel_from(nil), do: %{manager: default_tunnel_manager(), multiplex: false, label: nil}
+
+  defp tunnel_from(tunnel) when is_list(tunnel), do: tunnel_from(Map.new(tunnel))
+
+  defp tunnel_from(%{} = tunnel) do
+    %{
+      manager: tunnel_manager(fetch(tunnel, :manager)),
+      multiplex: fetch(tunnel, :multiplex) == true,
+      label: string_or(fetch(tunnel, :label), nil)
+    }
+  end
+
+  defp tunnel_from(_), do: %{manager: default_tunnel_manager(), multiplex: false, label: nil}
+
+  defp tunnel_manager("launchd"), do: :launchd
+  defp tunnel_manager(:launchd), do: :launchd
+  defp tunnel_manager("none"), do: :none
+  defp tunnel_manager(:none), do: :none
+  defp tunnel_manager(_), do: default_tunnel_manager()
+
+  # Mirrors `defaultTunnelManager()` in cmd/shuttle_remotes.go. A Mac hub manages
+  # its tunnels with launchd; anywhere else there is no launchd, so a remote with
+  # no explicit policy is assumed already reachable and the recovery cascade goes
+  # straight to the ssh check instead of shelling a `launchctl` that cannot exist.
+  # The two readers must agree: the Go installer decides which plists to write
+  # from this same rule.
+  #
+  # Note the struct's own `:tunnel` default stays `:launchd` — a hand-built
+  # `%Remote{}` (tests, literal config) is an explicit statement, not a parse.
+  defp default_tunnel_manager do
+    case :os.type() do
+      {:unix, :darwin} -> :launchd
+      _ -> :none
+    end
+  end
+
+  # Accept both atom and string keys: app config is atom-keyed, the fleet file
+  # decodes to string keys, and one struct serves both.
+  defp fetch(map, key) when is_atom(key) do
+    case Map.fetch(map, key) do
+      {:ok, value} -> value
+      :error -> Map.get(map, Atom.to_string(key))
+    end
+  end
+
+  @doc """
+  The SSH destination for this remote — `ssh` when set, else `name`. Use this
+  rather than `remote.name` for anything that shells `ssh`: a struct built
+  literally (tests, hand-written config) carries no `ssh`, and the name is the
+  right fallback.
+  """
+  @spec ssh_host(t()) :: String.t()
+  def ssh_host(%__MODULE__{ssh: ssh, name: name}), do: string_or(ssh, name)
+
+  @doc "The presentation label for this remote — `display` when set, else `name`."
+  @spec display_name(t()) :: String.t()
+  def display_name(%__MODULE__{display: display, name: name}), do: string_or(display, name)
 
   @doc """
   The full `GET /api/v1/state` URL for this remote.

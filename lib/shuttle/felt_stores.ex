@@ -63,8 +63,8 @@ defmodule Shuttle.FeltStores do
   Expand a store list with the project roots of any **symlinked substores**
   reachable from each store's `.felt/`.
 
-  A project-canonical substore — candide's
-  `~/loom/.felt/science/unions/shapepipe -> .../code/shapepipe/.felt` — is
+  A project-canonical substore — say
+  `~/loom/.felt/science/group/project -> .../code/project/.felt` — is
   physically rooted *outside* the store it is linked into. The poller enumerates
   a fiber only from the store where its felt `path` physically roots
   (`run_shuttle_listing/2`'s `store_felt_realpath` prefix check), so the loom
@@ -75,8 +75,8 @@ defmodule Shuttle.FeltStores do
 
   For each store, scan `<store>/.felt/` **recursively** for symlinks resolving to
   an external real `.felt/` directory and add its parent (the project root). The
-  scan must recurse, not just read the top level: candide mounts substores deep in
-  the tree mirror (`science/unions/shapepipe`), so a shallow scan finds nothing and
+  scan must recurse, not just read the top level: a store can mount substores deep
+  in its tree mirror (`science/group/project`), so a shallow scan finds nothing and
   the substore silently vanishes from dispatch. Dedup is by
   `store_felt_realpath/1` — the same canonicalization the ownership check uses —
   so a store reached two ways (configured explicitly *and* discovered, or via two
@@ -117,7 +117,7 @@ defmodule Shuttle.FeltStores do
   # Project roots of symlinked substores reachable under `<store>/.felt/`: every
   # entry that is a symlink resolving to a real directory named `.felt` yields
   # that `.felt`'s parent. The walk recurses into REAL subdirectories at any depth
-  # (candide nests substores as `science/unions/shapepipe`) but never follows a
+  # (substores nest as `science/group/project`) but never follows a
   # symlink during traversal — a substore link is *detected*, not *descended*, so
   # the walk cannot loop or wander into another store's tree. A root that lands
   # back inside the linking store is dropped (the store already enumerates it).

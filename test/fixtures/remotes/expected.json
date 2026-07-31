@@ -1,0 +1,107 @@
+{
+  "_comment": "Normalized readings of the sibling fixtures, asserted by BOTH the Go suite (cmd/shuttle_remotes_test.go) and the Elixir suite (test/shuttle/remotes_test.exs). Two readers, one expectation file: a default that drifts in one language fails in both. `port: 0` means absent (Go's zero value; Elixir's nil).",
+  "canonical.json": {
+    "launchd_label_prefix": "com.example",
+    "remotes": [
+      {
+        "name": "hub-a",
+        "url": "http://127.0.0.1:4001",
+        "ssh": "hub-a-login",
+        "display": "hub-a (site A)",
+        "port": 4001,
+        "remote_port": 4200,
+        "poll_interval_ms": 5000,
+        "request_timeout_ms": 2000,
+        "stale_multiplier": 4,
+        "label": "com.example.shuttle-tunnel-hub-a"
+      },
+      {
+        "name": "hub-b",
+        "url": "http://127.0.0.1:4004",
+        "ssh": "hub-b",
+        "display": "hub-b",
+        "port": 4004,
+        "remote_port": 4000,
+        "poll_interval_ms": 9000,
+        "request_timeout_ms": 30000,
+        "stale_multiplier": 6,
+        "label": "com.example.shuttle-tunnel-hub-b"
+      }
+    ]
+  },
+  "bare_array.json": {
+    "launchd_label_prefix": "io.shuttle",
+    "remotes": [
+      {
+        "name": "hub-a",
+        "url": "http://127.0.0.1:4001",
+        "ssh": "hub-a",
+        "display": "hub-a",
+        "port": 4001,
+        "remote_port": 4000,
+        "poll_interval_ms": 5000,
+        "request_timeout_ms": 2000,
+        "stale_multiplier": 4,
+        "label": "io.shuttle.shuttle-tunnel-hub-a"
+      },
+      {
+        "name": "hub-b",
+        "url": "http://127.0.0.1:4002",
+        "ssh": "hub-b-login",
+        "display": "hub-b",
+        "port": 4002,
+        "remote_port": 4000,
+        "poll_interval_ms": 5000,
+        "request_timeout_ms": 2000,
+        "stale_multiplier": 4,
+        "label": "io.shuttle.shuttle-tunnel-hub-b"
+      }
+    ]
+  },
+  "defaults.json": {
+    "launchd_label_prefix": "io.shuttle",
+    "remotes": [
+      {
+        "name": "hub-a",
+        "url": "http://127.0.0.1:4001",
+        "ssh": "hub-a",
+        "display": "hub-a",
+        "port": 4001,
+        "remote_port": 4000,
+        "poll_interval_ms": 7000,
+        "request_timeout_ms": 20000,
+        "stale_multiplier": 3,
+        "label": "io.shuttle.shuttle-tunnel-hub-a"
+      },
+      {
+        "name": "hub-b",
+        "url": "http://127.0.0.1:4002",
+        "ssh": "hub-b",
+        "display": "hub-b",
+        "port": 4002,
+        "remote_port": 4000,
+        "poll_interval_ms": 7000,
+        "request_timeout_ms": 1000,
+        "stale_multiplier": 3,
+        "label": "io.shuttle.shuttle-tunnel-hub-b"
+      }
+    ]
+  },
+  "url_only.json": {
+    "launchd_label_prefix": "io.shuttle",
+    "remotes": [
+      {
+        "name": "hub-a",
+        "url": "http://10.0.0.5:8080",
+        "ssh": "hub-a",
+        "display": "hub-a",
+        "port": 0,
+        "remote_port": 4000,
+        "poll_interval_ms": 5000,
+        "request_timeout_ms": 2000,
+        "stale_multiplier": 4,
+        "label": "io.shuttle.shuttle-tunnel-hub-a"
+      }
+    ]
+  }
+}

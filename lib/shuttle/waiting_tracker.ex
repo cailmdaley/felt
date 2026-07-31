@@ -1,13 +1,14 @@
 defmodule Shuttle.WaitingTracker do
   @moduledoc """
   Tracks the *most recent hook event* per worker session by tailing this host's
-  Claude Code hook-event stream (`~/.portolan/data/events.jsonl`), so the feed
-  can rank in-flight workers by how long they've been idle.
+  agent hook-event stream (`~/.shuttle/events.jsonl`), so the feed can rank
+  in-flight workers by how long they've been idle.
 
   ## Why tail the local stream
 
-  `~/loom/hooks/portolan-hook.sh` already appends every Claude Code hook event
-  to a host-local `events.jsonl` on every machine a worker runs on. The owning
+  `felt hook event` — registered by the bundled plugin on both Claude Code and
+  Codex — appends every hook event to a host-local `events.jsonl` on every
+  machine a worker runs on. The owning
   daemon stamps runtime liveness for *its own* fibers (local daemon for local
   workers, the remote daemon for remote workers — the resolve/invoke split in
   the composite feed). So the simplest transport that respects that split is:
@@ -108,8 +109,9 @@ defmodule Shuttle.WaitingTracker do
   Default host-local events stream path, honoring the same env the hook writes.
 
   Shuttle owns its own stream: `SHUTTLE_EVENTS_FILE`, else
-  `$SHUTTLE_DATA_DIR/events.jsonl`, default `~/.shuttle/events.jsonl` — written by
-  `~/loom/hooks/shuttle-hook.sh` (registered by `loom/setup.sh`).
+  `$SHUTTLE_DATA_DIR/events.jsonl`, default `~/.shuttle/events.jsonl` — written
+  by `felt hook event` (`cmd/shuttle_events.go` mirrors this resolver exactly;
+  `cmd/hook_event.go` writes the lines).
   """
   def default_events_file do
     System.get_env("SHUTTLE_EVENTS_FILE") ||

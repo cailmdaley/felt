@@ -17,7 +17,7 @@ import (
 // Origin semantics:
 //   - Local rows have Origin == "" (kept omitempty in JSON for back-compat with the
 //     single-host status output).
-//   - Remote rows have Origin == "<remote name>" (e.g. "candide").
+//   - Remote rows have Origin == "<remote name>" — the name from the fleet file.
 //
 // A remote daemon's snapshot only enumerates what is running, retrying, or a
 // standing role — not idle/scheduled one-shot fibers. Cross-host rows therefore

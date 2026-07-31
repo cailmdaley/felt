@@ -23,14 +23,12 @@
 # hands off cleanly or sleeps to be killed mid-thought. The argv line is the gold
 # observable; we cross-check it against the fiber's stamped frontmatter.
 #
-# STATUS (Stage 4a, felt-registry migration): BROKEN, needs a felt-side rewire.
-# The fake-claude agent was injected by patching the daemon's compile-time
-# `share/agents.json`. That file is gone — felt now owns the registry and the
-# daemon reads the already-resolved record off `shuttle.resolved.agent`. To
-# revive this gate, inject the fake agent into felt's registry (so felt emits it
-# under resolved.agent) instead of editing a daemon-embedded JSON. Until then the
-# guard below exits non-zero with this explanation rather than failing obscurely
-# on the missing file.
+# The fake agent reaches the run through felt's USER agent registry: a temp
+# $FELT_AGENTS_FILE holding one `shuttle-e2e-stub` record whose `wrapper` is the
+# absolute path to the stand-in. felt merges it over the built-ins and emits it
+# under `shuttle.resolved.agent`; the daemon launches what it is handed. So this
+# gate patches nothing tracked in the repo, and it cannot inherit the operator's
+# own registry.
 #
 # Determinism: every dispatch is driven by `POST /dispatch {force:true}`
 # (force_dispatch_eligible? — host-match only), and the probe fibers are born
@@ -40,9 +38,10 @@
 #   FELT=<path>          override the felt binary (default: `felt` on PATH)
 #   SHUTTLE_E2E_PORT=<n> override the daemon port (default: 4071)
 #
-# SAFETY: an isolated SHUTTLE_DATA_DIR + a temp FELT_STORES + a private port keep
-# this fully separate from any production daemon on :4000. All tmux sessions,
-# the daemon, and temp dirs are torn down on EXIT.
+# SAFETY: an isolated SHUTTLE_DATA_DIR, a temp FELT_STORES, a temp
+# FELT_AGENTS_FILE and a private port keep this fully separate from any
+# production daemon on :4000. All tmux sessions, the daemon, and temp dirs are
+# torn down on EXIT.
 set -uo pipefail
 
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
@@ -54,10 +53,7 @@ STORE="$WORK/store"
 BIN="$WORK/bin"
 DATA="$WORK/data"
 DAEMON_LOG="$WORK/daemon.log"
-AGENTS_JSON="$REPO/share/agents.json"
-AGENTS_BAK="$WORK/agents.json.bak"
-DEV_EXS="$REPO/config/dev.exs"
-DEV_BAK="$WORK/dev.exs.bak"
+AGENTS_FILE="$WORK/agents.json"     # temp user agent registry (holds the fake agent)
 FAKE_CLAUDE="$BIN/fake-claude"
 DAEMON="$WORK/shuttle"
 FELT_BIN=$(command -v "$FELT" || true)
@@ -77,31 +73,17 @@ cleanup() {
     tmux kill-session -t "$s" 2>/dev/null || true
   done
   [ -n "$DAEMON_PID" ] && kill "$DAEMON_PID" 2>/dev/null || true
-  # Restore the patched tracked files no matter what (registry got the fake
-  # agent; dev.exs got the private port).
-  [ -f "$AGENTS_BAK" ] && cp "$AGENTS_BAK" "$AGENTS_JSON"
-  [ -f "$DEV_BAK" ] && cp "$DEV_BAK" "$DEV_EXS"
+  # Nothing tracked to restore: the fake agent rides a temp FELT_AGENTS_FILE and
+  # the private port rides SHUTTLE_PORT, so this run never edits the repo.
   rm -rf "$WORK"
 }
 trap cleanup EXIT
 
 [ -n "$FELT_BIN" ] || { echo "felt not found (set FELT=<path>)"; exit 2; }
 
-# Stage 4a guard: the fake-agent injection below patches a daemon-embedded
-# share/agents.json that no longer exists (felt owns the registry now). Fail
-# fast with the rewire note rather than cp-ing a missing file. See the header.
-if [ ! -f "$AGENTS_JSON" ]; then
-  echo "handoff_live.sh is BROKEN by the felt-registry migration (Stage 4a):" >&2
-  echo "  the fake agent was injected into the daemon's compile-time" >&2
-  echo "  share/agents.json, which is gone — felt owns the registry now." >&2
-  echo "  Rewire: inject the fake agent into felt's registry so it appears" >&2
-  echo "  under shuttle.resolved.agent. See this script's header." >&2
-  exit 2
-fi
-
 mkdir -p "$BIN" "$DATA"
 
-# Pick a free port (baked into the escript below). Default 4071; bump if busy,
+# Pick a free port (passed to the daemon as SHUTTLE_PORT). Default 4071; bump if busy,
 # so a coincidental listener never masquerades as a daemon-boot failure.
 port_busy() { lsof -iTCP:"$1" -sTCP:LISTEN >/dev/null 2>&1; }
 if command -v lsof >/dev/null && port_busy "$PORT"; then
@@ -134,40 +116,43 @@ fi
 FAKE
 chmod +x "$FAKE_CLAUDE"
 
-# ── 3. Patch the agent registry with the fake, build the escript, restore ────
-info "injecting fake test agent + private port :$PORT, building daemon escript"
-cp "$AGENTS_JSON" "$AGENTS_BAK"
-cp "$DEV_EXS" "$DEV_BAK"
-# dev.exs hardcodes `port: 4000` + `server: true` (which makes the runtime
-# SHUTTLE_PORT fallback a no-op). The escript bundles this config at build, so
-# bake our private port in for this build, then restore.
-sed -i '' "s/port: 4000/port: $PORT/" "$DEV_EXS"
-grep -q "port: $PORT" "$DEV_EXS" || { echo "FATAL: could not bake private port into dev.exs (no 'port: 4000' literal?)"; exit 2; }
-python3 - "$AGENTS_JSON" "$FAKE_CLAUDE" <<'PY'
-import json, sys
-path, wrapper = sys.argv[1], sys.argv[2]
-agents = json.load(open(path))
-agents.append({
-    "id": "shuttle-e2e-stub",
-    "cli": "claude",
-    "wrapper": wrapper,
-    "model": "sonnet",
-    "extra_flags": "",
-    "effort_levels": ["low", "medium", "high", "xhigh", "max"],
-    "default_effort": "low",
-    "headless": True,
-    "chrome_capable": False,
-    "cost_class": "standard",
-    "aliases": [],
-    "default": False,
-})
-json.dump(agents, open(path, "w"), indent=2)
-PY
+# ── 3. Register the fake agent, build the escript ────────────────────────────
+# One USER-layer record in a temp registry. Exporting FELT_AGENTS_FILE covers
+# every felt in this run — the ones this script calls and the ones the daemon
+# shells — and shadows the operator's own registry, so the gate is reproducible
+# on any machine.
+info "registering fake test agent (wrapper=$FAKE_CLAUDE)"
+cat > "$AGENTS_FILE" <<AGENTS
+{
+  "version": 1,
+  "builtins": "merge",
+  "agents": [
+    {
+      "id": "shuttle-e2e-stub",
+      "cli": "claude",
+      "wrapper": "$FAKE_CLAUDE",
+      "model": "sonnet",
+      "effort_levels": ["low", "medium", "high", "xhigh", "max"],
+      "default_effort": "low",
+      "cost_class": "standard"
+    }
+  ]
+}
+AGENTS
+export FELT_AGENTS_FILE="$AGENTS_FILE"
+"$FELT" shuttle agents resolve shuttle-e2e-stub --json >/dev/null || {
+  echo "FATAL: felt does not resolve shuttle-e2e-stub from $AGENTS_FILE" >&2
+  exit 2
+}
+
+info "building daemon escript (port comes from SHUTTLE_PORT at run time)"
+# No config patching. config/dev.exs no longer decides the port —
+# Shuttle.Application.configure_endpoint/0 reads SHUTTLE_PORT at boot, so the
+# private port is passed to the daemon in step 5 like any other runtime value.
+# This script therefore patches no tracked file at all.
 ( cd "$REPO" && mix escript.build >/dev/null 2>&1 ) || { echo "escript build failed"; exit 2; }
 cp "$REPO/bin/shuttle" "$DAEMON"
 rm -f "$REPO/bin/shuttle"          # don't leave a test-contaminated binary behind
-cp "$AGENTS_BAK" "$AGENTS_JSON"    # restore tracked files immediately (escript already embedded them)
-cp "$DEV_BAK" "$DEV_EXS"
 
 # ── 4. Create the temp store + two probe fibers ──────────────────────────────
 make_fiber() {  # make_fiber <slug> <mode>
@@ -198,7 +183,8 @@ make_fiber probe-dirty dirty
 
 # ── 5. Start the daemon (isolated port / store / data dir / host) ────────────
 info "starting daemon on :$PORT (store=$STORE host=$HOST)"
-SHUTTLE_PORT="$PORT" FELT_STORES="$STORE" SHUTTLE_HOST="$HOST" SHUTTLE_DATA_DIR="$DATA" \
+SHUTTLE_PORT="$PORT" FELT_STORES="$STORE" FELT_AGENTS_FILE="$AGENTS_FILE" \
+  SHUTTLE_HOST="$HOST" SHUTTLE_DATA_DIR="$DATA" \
   nohup "$DAEMON" start --force >"$DAEMON_LOG" 2>&1 &
 DAEMON_PID=$!
 

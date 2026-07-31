@@ -1,7 +1,6 @@
 package shuttle
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -39,6 +38,13 @@ type AgentRecord struct {
 	Axes    *Axes    `json:"axes,omitempty"`
 	Aliases []string `json:"aliases"`
 	Default bool     `json:"default"`
+	// Source is provenance, set by the loader and never read from JSON (a user
+	// file that carries one has it stripped): "builtin" for a record from the
+	// embedded set, "user" for one from the user registry. Emitted by
+	// `felt shuttle agents [--json]` so "did my file load?" is one command.
+	// Deliberately absent from ResolvedAgent — dispatch does not care where a
+	// record came from.
+	Source string `json:"source,omitempty"`
 }
 
 // Axes carries the orthogonal per-fiber dispatch axes beyond base agent: effort
@@ -56,34 +62,85 @@ type Axes struct {
 // IsAlias reports whether this record is an alias (resolves to another agent).
 func (a AgentRecord) IsAlias() bool { return a.AliasOf != "" }
 
-// AgentRegistry is the loaded registry of agents.
+// AgentRegistry is the loaded registry of agents: the embedded built-in layer
+// with the user layer (if any) folded on top. userPath/builtinsMode/
+// builtinCount describe how it was assembled — `felt shuttle agents` reports
+// them so a misplaced config file is a one-command diagnosis.
 type AgentRegistry struct {
-	agents []AgentRecord
+	agents       []AgentRecord
+	userPath     string
+	builtinsMode string
+	builtinCount int
+	warnings     []string
 }
 
-// LoadAgentRegistry returns the built-in agent registry, parsed from the
-// agents.json embedded into the binary at compile time (see embed.go).
+// LoadAgentRegistry returns the effective agent registry: the built-ins
+// embedded at compile time, with the user registry ($FELT_AGENTS_FILE, else
+// ~/.config/felt/agents.json) folded on top. A missing user file is normal — the
+// built-ins stand alone. A present but unreadable or malformed one is fatal, and
+// the error names the path: a typo must not look like "my agents vanished".
 func LoadAgentRegistry() (*AgentRegistry, error) {
-	return LoadAgentRegistryFromBytes(embeddedAgentJSON)
-}
-
-// LoadAgentRegistryFromBytes parses an agents.json payload from raw bytes.
-func LoadAgentRegistryFromBytes(data []byte) (*AgentRegistry, error) {
-	var agents []AgentRecord
-	if err := json.Unmarshal(data, &agents); err != nil {
-		return nil, fmt.Errorf("parsing agents.json: %w", err)
+	builtins, err := LoadBuiltinAgentRegistry()
+	if err != nil {
+		return nil, err
 	}
-	return &AgentRegistry{agents: agents}, nil
+	return layerUserAgents(builtins)
 }
 
-// LoadAgentRegistryFromFile reads agents.json from the given path.
+// LoadBuiltinAgentRegistry returns only the embedded built-in registry, with no
+// filesystem access. Tests and the `agents init` seed use it to stay hermetic.
+func LoadBuiltinAgentRegistry() (*AgentRegistry, error) {
+	agents, err := parseAgentRecords(embeddedAgentJSON, "the embedded agents.builtin.json")
+	if err != nil {
+		return nil, err
+	}
+	for i := range agents {
+		agents[i].Source = SourceBuiltin
+	}
+	return &AgentRegistry{agents: agents, builtinsMode: BuiltinsMerge, builtinCount: len(agents)}, nil
+}
+
+// LoadAgentRegistryFromBytes parses an agents payload from raw bytes — either a
+// bare array of records or the `{"version":1,"agents":[…]}` envelope. Records
+// carry no provenance: the caller supplied the bytes.
+func LoadAgentRegistryFromBytes(data []byte) (*AgentRegistry, error) {
+	agents, err := parseAnyAgentsPayload(data, "agents.json")
+	if err != nil {
+		return nil, err
+	}
+	return &AgentRegistry{agents: agents, builtinsMode: BuiltinsMerge}, nil
+}
+
+// LoadAgentRegistryFromFile reads an agents registry from the given path,
+// bypassing the built-in layer entirely (a fixture is the whole registry).
 func LoadAgentRegistryFromFile(path string) (*AgentRegistry, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("reading %s: %w", path, err)
 	}
-	return LoadAgentRegistryFromBytes(data)
+	agents, err := parseAnyAgentsPayload(data, path)
+	if err != nil {
+		return nil, err
+	}
+	return &AgentRegistry{agents: agents, builtinsMode: BuiltinsMerge}, nil
 }
+
+// Warnings returns the non-fatal problems found while loading (duplicate
+// defaults, dangling aliases, unknown fields). They are for a person reading a
+// terminal: `felt shuttle agents` prints them in table mode only, because the
+// daemon shells the --json form with stderr folded into stdout.
+func (r *AgentRegistry) Warnings() []string { return r.warnings }
+
+// UserPath is the user registry path that was folded in, or "" when none was
+// found. UserAgentsPath() reports where one would have been read from.
+func (r *AgentRegistry) UserPath() string { return r.userPath }
+
+// BuiltinsMode is the user file's `builtins` setting ("merge" or "replace");
+// "merge" when there is no user file.
+func (r *AgentRegistry) BuiltinsMode() string { return r.builtinsMode }
+
+// BuiltinCount is the size of the built-in layer before the fold.
+func (r *AgentRegistry) BuiltinCount() int { return r.builtinCount }
 
 // Find returns the agent with the given ID or alias.
 func (r *AgentRegistry) Find(nameOrAlias string) (AgentRecord, bool) {

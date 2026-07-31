@@ -94,18 +94,13 @@ defmodule Shuttle.OriginRouter do
     |> Enum.find(&(&1.name == origin))
   end
 
-  # C6: the ONE place `:remotes` config is read and normalized for origin
-  # routing — `RegistryCommon.normalize_remotes/1` is the same primitive
-  # `Shuttle.RemoteRegistry`/`Shuttle.RemoteFiberRegistry` already use, so a
-  # remote this daemon polls for visibility and a remote it routes writes to
-  # are guaranteed to agree; before C6 this module (and
-  # `ShuttleWeb.FeltStoresController`) called `Remote.from_config_list/1`
-  # directly instead — two parse entry points that could drift if either
-  # gained normalization the other didn't.
+  # C6: origin routing resolves the fleet through the ONE chokepoint
+  # (`RegistryCommon.configured_remotes/1`) that the two registries and the
+  # felt-stores controller also use — so a remote this daemon polls for
+  # visibility and a remote it routes writes to are guaranteed to agree, both
+  # in where the list comes from and in how it parses.
   defp configured_remotes(opts) do
-    opts
-    |> Keyword.get(:remotes, Application.get_env(:shuttle, :remotes, []))
-    |> RegistryCommon.normalize_remotes()
+    RegistryCommon.configured_remotes(opts)
   end
 
   @doc """

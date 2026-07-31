@@ -6,10 +6,13 @@ defmodule Shuttle.RealHarnessSmokeTest do
 
   @enable_env "SHUTTLE_REAL_HARNESS_SMOKE"
   @prompt_sentinel "SHUTTLE_SMOKE_PROMPT_SHOULD_NOT_APPEAR"
+  # The harnesses felt ships built-in registry records for. Model tiers and extra
+  # harnesses (pi, a routed provider, a premium codex) live in an operator's user
+  # registry, so naming one here would flunk on any machine that has not written
+  # that file. Add a pair only when the built-in set grows a harness.
   @agent_ids [
     {"claude-sonnet", "claude"},
-    {"codex", "codex"},
-    {"pi-deepseek-flash", "pi"}
+    {"codex", "codex"}
   ]
 
   unless System.get_env(@enable_env) in ["1", "true", "yes"] do
@@ -92,11 +95,7 @@ defmodule Shuttle.RealHarnessSmokeTest do
   # /api/v1/agents). This is the opt-in real-harness path, so a live felt is
   # already a precondition — flunk loudly if the verb or the id is missing.
   defp agent!(agent_id) do
-    records =
-      case System.cmd("felt", ["shuttle", "agents", "--json"], stderr_to_stdout: true) do
-        {output, 0} -> Jason.decode!(output)
-        {output, status} -> flunk("felt shuttle agents --json exited #{status}: #{output}")
-      end
+    records = agent_records!()
 
     record =
       Enum.find(records, &(&1["id"] == agent_id)) ||
@@ -110,6 +109,25 @@ defmodule Shuttle.RealHarnessSmokeTest do
       model: record["model"],
       extra_flags: record["extra_flags"]
     }
+  end
+
+  # `--json` must emit the array and NOTHING else — the daemon shells this verb
+  # with stderr folded into stdout (Shuttle.Felt.run), so a provenance footer or
+  # a load warning on stderr would arrive inside these bytes. Folding the streams
+  # here is the check: this is the one place a live felt binary is a precondition.
+  defp agent_records! do
+    case System.cmd("felt", ["shuttle", "agents", "--json"], stderr_to_stdout: true) do
+      {output, 0} -> Jason.decode!(output)
+      {output, status} -> flunk("felt shuttle agents --json exited #{status}: #{output}")
+    end
+  end
+
+  test "the registry a live felt serves keeps the reserved human id" do
+    ids = Enum.map(agent_records!(), & &1["id"])
+
+    assert "human" in ids,
+           "`human` is reserved — the dispatcher checks agent.id == \"human\" to mean " <>
+             "never spawn a harness. Got: #{inspect(ids)}"
   end
 
   defp idle_command(agent) do

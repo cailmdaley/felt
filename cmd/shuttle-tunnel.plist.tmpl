@@ -8,7 +8,7 @@
   <key>ProgramArguments</key>
   <array>
     {{- if .Multiplex }}
-    {{- /* 2FA hosts (nibi's Duo): the tunnel can only ride a
+    {{- /* 2FA hosts (tunnel.multiplex): the tunnel can only ride a
            human-authenticated ControlMaster socket — a headless job can never
            answer keyboard-interactive, and plain `ssh -S <sock>` silently
            falls back to a FRESH connection when the socket is absent (Duo
@@ -21,7 +21,7 @@
            own, within 30s. */}}
     <string>/bin/sh</string>
     <string>-c</string>
-    <string>while :; do if ssh -O check {{ .SSHHost }} 2>/dev/null; then ssh -N -S {{ .Home }}/.ssh/ctl/%C -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o ControlMaster=no -o ExitOnForwardFailure=yes -o BatchMode=yes -L {{ .LocalPort }}:localhost:4000 {{ .SSHHost }}; fi; sleep 30; done</string>
+    <string>while :; do if ssh -O check {{ .SSHHost }} 2>/dev/null; then ssh -N -S {{ .Home }}/.ssh/ctl/%C -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o ControlMaster=no -o ExitOnForwardFailure=yes -o BatchMode=yes -L {{ .LocalPort }}:localhost:{{ .RemotePort }} {{ .SSHHost }}; fi; sleep 30; done</string>
     {{- else }}
     <string>{{ .AutoSSHPath }}</string>
     {{- if not .HoldCommand }}
@@ -44,7 +44,7 @@
     <string>IdentityAgent={{ .SSHAuthSock }}</string>
     {{- end }}
     <string>-L</string>
-    <string>{{ .LocalPort }}:localhost:4000</string>
+    <string>{{ .LocalPort }}:localhost:{{ .RemotePort }}</string>
     <string>{{ .SSHHost }}</string>
     {{- if .HoldCommand }}
     <string>{{ .HoldCommand }}</string>

@@ -340,7 +340,7 @@ defmodule Shuttle.RemoteRegistryTest do
       assert healed.recovery.attempt == 0
       assert get_in(healed, [:snapshot, "eligible"]) == [%{"fiber_id" => "work/recovered"}]
 
-      assert [{"launchctl", ["kickstart", "-k", "gui/501/com.cailmdaley.shuttle-tunnel-candide"]}] =
+      assert [{"launchctl", ["kickstart", "-k", "gui/501/io.shuttle.shuttle-tunnel-candide"]}] =
                MockRunner.calls()
     end
 
@@ -590,6 +590,220 @@ defmodule Shuttle.RemoteRegistryTest do
     test "snapshot/2 returns nil when registry is not started" do
       # Use a name we know isn't registered.
       assert RemoteRegistry.snapshot(:reg_does_not_exist, "candide") == nil
+    end
+  end
+
+  # ── Fleet identity: ssh destination, tunnel label, tunnel manager ──
+
+  describe "remote addressing" do
+    test "ssh commands use `ssh`, launchd uses `name`" do
+      # The two names differ on purpose: `name` is the routing key (it must equal
+      # the remote daemon's own host id), while `ssh` is whatever ssh_config
+      # calls the box. Conflating them installs a tunnel under one name and
+      # bounces a job under another.
+      MockClient.set("http://localhost:4001/api/v1/state", {:error, :econnrefused})
+      MockRunner.set("launchctl", [{"", 0}])
+      MockRunner.set("ssh", [{"session=present\nhttp=healthy\n", 0}])
+
+      remote = %Remote{
+        candide_remote(poll_interval_ms: 1)
+        | ssh: "candide-login"
+      }
+
+      {:ok, _pid} =
+        RemoteRegistry.start_link(
+          name: :reg_ssh_alias,
+          remotes: [remote],
+          client: MockClient,
+          runner: MockRunner,
+          auto_poll: false,
+          tick_interval_ms: 60_000,
+          failure_threshold: 1,
+          bounce_wait_ms: 1,
+          user_uid: "501"
+        )
+
+      # Failure threshold 1: one bad poll degrades, the next cycle bounces, the
+      # one after that probes and falls through to the ssh check.
+      Enum.each(1..4, fn _ ->
+        :ok = RemoteRegistry.poll_now(:reg_ssh_alias)
+        Process.sleep(2)
+      end)
+
+      calls = MockRunner.calls()
+
+      assert Enum.any?(calls, fn {cmd, args} ->
+               cmd == "launchctl" and "gui/501/io.shuttle.shuttle-tunnel-candide" in args
+             end),
+             "launchd label must key off the remote NAME, got #{inspect(calls)}"
+
+      assert Enum.any?(calls, fn {cmd, args} -> cmd == "ssh" and "candide-login" in args end),
+             "ssh must target the ssh destination, got #{inspect(calls)}"
+    end
+
+    test "tunnel.manager :none skips the bounce and goes straight to the ssh check" do
+      # A remote reachable without a locally-managed tunnel has no launchd job.
+      # Kickstarting a nonexistent label would fail on every cascade and reach
+      # the useful step only through that failure.
+      MockClient.set("http://localhost:4001/api/v1/state", {:error, :econnrefused})
+      MockRunner.set("ssh", [{"session=present\nhttp=healthy\n", 0}])
+
+      remote = %Remote{
+        candide_remote(poll_interval_ms: 1)
+        | tunnel: %{manager: :none, multiplex: false, label: nil}
+      }
+
+      {:ok, _pid} =
+        RemoteRegistry.start_link(
+          name: :reg_no_tunnel,
+          remotes: [remote],
+          client: MockClient,
+          runner: MockRunner,
+          auto_poll: false,
+          tick_interval_ms: 60_000,
+          failure_threshold: 1,
+          bounce_wait_ms: 1,
+          user_uid: "501"
+        )
+
+      Enum.each(1..3, fn _ ->
+        :ok = RemoteRegistry.poll_now(:reg_no_tunnel)
+        Process.sleep(2)
+      end)
+
+      calls = MockRunner.calls()
+      refute Enum.any?(calls, fn {cmd, _} -> cmd == "launchctl" end)
+      assert Enum.any?(calls, fn {cmd, _} -> cmd == "ssh" end)
+    end
+  end
+
+  # ── Live fleet reload ──
+
+  describe "fleet reload" do
+    setup do
+      dir = Path.join(System.tmp_dir!(), "reg-fleet-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(dir)
+      path = Path.join(dir, "remotes.json")
+
+      prev_file = System.get_env("FELT_REMOTES_FILE")
+      prev_remotes = Application.get_env(:shuttle, :remotes)
+      System.put_env("FELT_REMOTES_FILE", path)
+      Application.delete_env(:shuttle, :remotes)
+
+      on_exit(fn ->
+        File.rm_rf(dir)
+        if prev_file, do: System.put_env("FELT_REMOTES_FILE", prev_file)
+        if prev_file == nil, do: System.delete_env("FELT_REMOTES_FILE")
+
+        if prev_remotes == nil,
+          do: Application.delete_env(:shuttle, :remotes),
+          else: Application.put_env(:shuttle, :remotes, prev_remotes)
+      end)
+
+      {:ok, path: path}
+    end
+
+    defp write_fleet(path, entries) do
+      File.write!(path, Jason.encode!(%{"version" => 1, "remotes" => entries}))
+      # POSIX mtime is 1-second granular; the change token folds in size, and
+      # these fleets differ in length, so the edit is always observable.
+      :ok
+    end
+
+    test "an added remote is initialized and an existing one keeps its recovery state",
+         %{path: path} do
+      # A long poll interval freezes the existing origin after its first failed
+      # probe: it is not due again, so anything that changes about it across the
+      # reload is the reload's doing.
+      write_fleet(path, [%{"name" => "candide", "port" => 4001, "poll_interval_ms" => 60_000}])
+      MockClient.set("http://127.0.0.1:4001/api/v1/state", {:error, :econnrefused})
+
+      {:ok, _pid} =
+        RemoteRegistry.start_link(
+          name: :reg_fleet_add,
+          client: MockClient,
+          runner: MockRunner,
+          auto_poll: false,
+          tick_interval_ms: 60_000,
+          failure_threshold: 5
+        )
+
+      :ok = RemoteRegistry.poll_now(:reg_fleet_add)
+      before = RemoteRegistry.snapshot(:reg_fleet_add, "candide")
+      assert before.last_error == :econnrefused
+
+      write_fleet(path, [
+        %{"name" => "candide", "port" => 4001, "poll_interval_ms" => 60_000},
+        %{"name" => "cineca", "port" => 4002, "poll_interval_ms" => 60_000}
+      ])
+
+      MockClient.set("http://127.0.0.1:4002/api/v1/state", {:ok, snapshot_with_running(["b"])})
+      :ok = RemoteRegistry.poll_now(:reg_fleet_add)
+
+      snapshots = RemoteRegistry.snapshots(:reg_fleet_add)
+
+      # The added remote was initialized and polled on the same cycle.
+      assert Map.has_key?(snapshots, "cineca")
+      refute snapshots["cineca"].stale
+
+      # The pre-existing origin kept its accumulated state — a re-initialized
+      # entry would have last_error: nil, so this is the reload proving it did
+      # not throw the origin's history away.
+      assert snapshots["candide"].last_error == :econnrefused
+      assert snapshots["candide"].recovery == before.recovery
+    end
+
+    test "a removed remote is dropped without disturbing the rest", %{path: path} do
+      write_fleet(path, [
+        %{"name" => "candide", "port" => 4001, "poll_interval_ms" => 1},
+        %{"name" => "cineca", "port" => 4002, "poll_interval_ms" => 1}
+      ])
+
+      MockClient.set("http://127.0.0.1:4001/api/v1/state", {:ok, snapshot_with_running(["a"])})
+      MockClient.set("http://127.0.0.1:4002/api/v1/state", {:ok, snapshot_with_running(["b"])})
+
+      {:ok, _pid} =
+        RemoteRegistry.start_link(
+          name: :reg_fleet_rm,
+          client: MockClient,
+          runner: MockRunner,
+          auto_poll: false,
+          tick_interval_ms: 60_000
+        )
+
+      :ok = RemoteRegistry.poll_now(:reg_fleet_rm)
+      assert map_size(RemoteRegistry.snapshots(:reg_fleet_rm)) == 2
+
+      write_fleet(path, [%{"name" => "candide", "port" => 4001, "poll_interval_ms" => 1}])
+      :ok = RemoteRegistry.poll_now(:reg_fleet_rm)
+
+      snapshots = RemoteRegistry.snapshots(:reg_fleet_rm)
+      assert Map.keys(snapshots) == ["candide"]
+      refute snapshots["candide"].stale
+    end
+
+    test "an explicit :remotes opt pins the list against the file", %{path: path} do
+      write_fleet(path, [%{"name" => "from-file", "port" => 4001}])
+
+      MockClient.set("http://localhost:4001/api/v1/state", {:ok, snapshot_with_running(["a"])})
+
+      {:ok, _pid} =
+        RemoteRegistry.start_link(
+          name: :reg_fleet_pinned,
+          remotes: [candide_remote()],
+          client: MockClient,
+          runner: MockRunner,
+          auto_poll: false,
+          tick_interval_ms: 60_000
+        )
+
+      write_fleet(path, [
+        %{"name" => "from-file", "port" => 4001},
+        %{"name" => "another", "port" => 4002}
+      ])
+
+      :ok = RemoteRegistry.poll_now(:reg_fleet_pinned)
+      assert Map.keys(RemoteRegistry.snapshots(:reg_fleet_pinned)) == ["candide"]
     end
   end
 end

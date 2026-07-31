@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "remotes": [
+    {"name": "hub-a", "url": "http://10.0.0.5:8080", "tunnel": {"manager": "none"}}
+  ]
+}

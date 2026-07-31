@@ -26,7 +26,8 @@ import (
 // Deliberately no daemon round-trip: the old path called GET /api/v1/state,
 // which is re-entrant when the daemon shells this CLI (the Poller is blocked
 // on the subprocess, so the request times out and the fallback silently gave
-// the wrong name on a host whose identity is an alias, e.g. candide vs c03).
+// the wrong name on a host whose identity is an alias, e.g. a friendly name
+// vs the raw login-node hostname).
 // This resolver is pure local state, so it's correct offline and can never
 // deadlock against the process that invoked it.
 //

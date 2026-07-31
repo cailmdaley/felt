@@ -25,13 +25,11 @@ defmodule ShuttleWeb.FeltStoresController do
     own = Poller.own_host_id()
     local = local_origin(own)
 
-    # C6: the same `:remotes` normalize path `Shuttle.OriginRouter` and the two
-    # remote registries use — not `Remote.from_config_list/1` directly, so
-    # this endpoint's remote list can never drift from what routing/polling
-    # consider "configured".
+    # C6: the same fleet chokepoint `Shuttle.OriginRouter` and the two remote
+    # registries use, so this endpoint's remote list can never drift from what
+    # routing and polling consider "configured".
     origins =
-      Application.get_env(:shuttle, :remotes, [])
-      |> RegistryCommon.normalize_remotes()
+      RegistryCommon.configured_remotes()
       |> Enum.reduce(%{own => local}, fn remote, acc ->
         Map.put(acc, remote.name, remote_origin(remote))
       end)
@@ -88,6 +86,10 @@ defmodule ShuttleWeb.FeltStoresController do
       origin
       |> Map.put("kind", "remote")
       |> Map.put("stale", false)
+      # Presentation label, carried so the board can title an origin without
+      # inventing its own name mapping. Never an address — routing keys off
+      # `name` alone.
+      |> Map.put("display", Remote.display_name(remote))
       |> Map.delete("expanded_felt_stores")
     else
       {:error, reason} -> remote_error(remote, reason)
@@ -105,10 +107,11 @@ defmodule ShuttleWeb.FeltStoresController do
 
   defp origin_for_remote(_, _name), do: nil
 
-  defp remote_error(%Remote{name: name}, reason) do
+  defp remote_error(%Remote{name: name} = remote, reason) do
     %{
       "kind" => "remote",
       "host" => name,
+      "display" => Remote.display_name(remote),
       "stale" => true,
       "felt_stores" => [],
       "last_error" => format_error(reason)

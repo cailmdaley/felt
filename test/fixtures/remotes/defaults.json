@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "defaults": {"poll_interval_ms": 7000, "request_timeout_ms": 20000, "stale_multiplier": 3},
+  "remotes": [
+    {"name": "hub-a", "port": 4001},
+    {"name": "hub-b", "port": 4002, "request_timeout_ms": 1000}
+  ]
+}

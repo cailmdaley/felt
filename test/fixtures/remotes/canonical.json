@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "launchd_label_prefix": "com.example",
+  "remotes": [
+    {
+      "name": "hub-a",
+      "display": "hub-a (site A)",
+      "ssh": "hub-a-login",
+      "port": 4001,
+      "remote_port": 4200,
+      "checkout": "~/dev/felt",
+      "auth": "pubkey",
+      "tunnel": {"manager": "launchd", "multiplex": false}
+    },
+    {
+      "name": "hub-b",
+      "port": 4004,
+      "poll_interval_ms": 9000,
+      "request_timeout_ms": 30000,
+      "stale_multiplier": 6,
+      "ssh_flags": ["-o", "ClearAllForwardings=yes"],
+      "tunnel": {"manager": "launchd", "multiplex": true}
+    }
+  ]
+}

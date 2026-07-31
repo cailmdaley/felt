@@ -1,0 +1,65 @@
+[
+  {
+    "id": "claude-sonnet",
+    "cli": "claude",
+    "model": "sonnet",
+    "extra_flags": "--permission-mode auto",
+    "effort_levels": ["low", "medium", "high", "xhigh", "max"],
+    "default_effort": "low",
+    "chrome_capable": true,
+    "cost_class": "standard",
+    "default": true
+  },
+  {
+    "id": "claude-opus",
+    "cli": "claude",
+    "model": "opus",
+    "extra_flags": "--permission-mode auto",
+    "effort_levels": ["low", "medium", "high", "xhigh", "max"],
+    "default_effort": "xhigh",
+    "chrome_capable": true,
+    "cost_class": "premium"
+  },
+  {
+    "id": "claude-haiku",
+    "cli": "claude",
+    "model": "haiku",
+    "extra_flags": "--permission-mode auto",
+    "effort_levels": ["low", "medium", "high", "xhigh", "max"],
+    "default_effort": "low",
+    "chrome_capable": true,
+    "cost_class": "economy"
+  },
+  {
+    "id": "claude-fable",
+    "cli": "claude",
+    "model": "fable",
+    "extra_flags": "--permission-mode auto",
+    "effort_levels": ["low", "medium", "high", "xhigh", "max"],
+    "default_effort": "low",
+    "chrome_capable": true,
+    "cost_class": "premium"
+  },
+  {
+    "id": "claude-sonnet-headless",
+    "alias_of": "claude-sonnet",
+    "axes": { "headless": true }
+  },
+  {
+    "id": "claude-opus-headless",
+    "alias_of": "claude-opus",
+    "axes": { "headless": true }
+  },
+  {
+    "id": "codex",
+    "cli": "codex",
+    "extra_flags": "--dangerously-bypass-approvals-and-sandbox",
+    "effort_levels": ["low", "medium", "high", "xhigh"],
+    "default_effort": "medium",
+    "cost_class": "standard"
+  },
+  {
+    "id": "human",
+    "cli": "human"
+  }
+]

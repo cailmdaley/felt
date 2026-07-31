@@ -285,25 +285,37 @@ escape hatch — granting FDA to each I/O binary in the tree (`…/erlang/<v>/�
 re-granted after every erlang upgrade, plus `~/.local/bin/felt`) — but it's
 fragile and per-binary; relocating out of Documents is the supported fix.
 
-### Owning the event stream — `~/loom/hooks/shuttle-hook.sh`
+### Owning the event stream — `felt hook event`
 
 Shuttle derives per-session activity (`WaitingTracker`) and the sent-files trail
-(`SentFiles`) from its OWN Claude Code hook-event stream. `~/loom/hooks/shuttle-hook.sh`
-appends one JSON line per hook event to `$SHUTTLE_EVENTS_FILE` (default
-`~/.shuttle/events.jsonl`, dir `$SHUTTLE_DATA_DIR`). The readers read ONLY this
-path.
+(`SentFiles`) from its OWN agent hook-event stream. `felt hook event`
+(`cmd/hook_event.go`) appends one JSON line per hook event to
+`$SHUTTLE_EVENTS_FILE` (default `~/.shuttle/events.jsonl`, dir
+`$SHUTTLE_DATA_DIR`). The readers read ONLY this path, and
+`cmd/shuttle_events.go` mirrors `WaitingTracker.default_events_file/0` so the
+writer and the readers cannot drift.
 
-**The hook lives in loom, registered by `loom/setup.sh`.** It can't live in this
-repo: `~/loom` is the git-synced, same-absolute-path anchor on every machine, so
-a hook placed there is distributed and stable for free, and
-`~/.claude/settings.json` needs a stable absolute `command` path. (The checkout
-is now `~/dev/felt` on every host too, but loom remains the natural home.)
-`loom/setup.sh`'s Python block registers `~/loom/hooks/shuttle-hook.sh` into
-`~/.claude/settings.json` across the tracked events (UserPromptSubmit, PreToolUse,
-Stop, Notification, SessionStart, SessionEnd). To install on a machine: sync loom
-there, then run `~/loom/setup.sh`. The hook needs `jq` on PATH; without it it
-exits silently (no events → no activity ranking, but the board still serves).
-Each host's daemon tails its own host's `~/.shuttle/events.jsonl`.
+**The writer is the binary; the plugin registers it.**
+`claude-plugin/hooks/event.sh` is a one-line shim (`exec felt hook event`), wired
+in `claude-plugin/hooks/hooks.json` on SessionStart, UserPromptSubmit,
+PreToolUse, Stop, SubagentStop, Notification, and SessionEnd. `.codex-plugin`
+points at the same file, so Codex sessions feed the stream too. Install with
+`felt setup claude` / `felt setup codex`; `bootstrap.sh` step 5 does both and
+then probes the writer. No `jq`, `perl`, or `hostname` — the whole line is built
+in Go, which is what makes it work on a bare cluster login node.
+
+**Writing is gated on `~/.shuttle` already existing** — the daemon's state
+directory is the opt-in, and the hook never creates it, so a felt-only install
+grows no stream. `SHUTTLE_EVENTS_FILE` overrides the gate (and creates its
+parent); `SHUTTLE_EVENTS=off` disables recording. The live file rotates to
+`.jsonl.1` past `SHUTTLE_EVENTS_MAX_BYTES` (64 MiB), and a `toolInput` over
+8 KiB is trimmed to its file paths plus `truncated: true` — otherwise every
+`Write` parks a whole file body in the stream.
+
+`cmd/testdata/events_golden.jsonl` is the cross-language contract: written
+byte-for-byte by `cmd/hook_event_test.go`, parsed by both Elixir readers in
+`test/shuttle/events_parity_test.exs`. Each host's daemon tails its own host's
+`~/.shuttle/events.jsonl`.
 
 **Connecting to candide, cineca, and amundsen (SSH auth — read this first).** The
 remotes authenticate differently, and getting it wrong looks like "the host is

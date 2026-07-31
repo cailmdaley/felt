@@ -111,6 +111,29 @@ func init() {
 	hookCmd.AddCommand(hookSessionCmd)
 	hookCmd.AddCommand(hookPreToolCmd)
 	hookCmd.AddCommand(hookPostToolCmd)
+	hookCmd.AddCommand(hookEventCmd)
+}
+
+// ----------------------------------------------------------------------------
+// Harness discrimination
+// ----------------------------------------------------------------------------
+
+// harnessFor names the agent harness a hook payload came from, from the one
+// discriminator every harness gives us: Claude Code writes its transcript under
+// ~/.claude/projects/, and nothing else does. An empty transcript_path is not
+// Claude — Codex sends no such field.
+//
+// Two callers depend on this and must agree: the PreToolUse gate skips the felt
+// deny for non-Claude sessions (there is no Skill tool to satisfy it, so the
+// deny would deadlock the loop), and `felt hook event` stamps the same verdict
+// as the line's `harness` field.
+func harnessFor(transcriptPath string) string {
+	home, _ := os.UserHomeDir()
+	claudePrefix := filepath.Join(home, ".claude", "projects") + string(filepath.Separator)
+	if transcriptPath != "" && strings.HasPrefix(transcriptPath, claudePrefix) {
+		return "claude-code"
+	}
+	return "codex"
 }
 
 // ----------------------------------------------------------------------------
@@ -440,10 +463,9 @@ func runPreToolHook(stdin *os.File, stdout *os.File) error {
 	}
 
 	// Codex sessions: no Skill tool to activate, and the deny would deadlock
-	// the loop. Detect by transcript_path NOT being under ~/.claude/projects/.
-	home, _ := os.UserHomeDir()
-	claudePrefix := filepath.Join(home, ".claude", "projects") + string(filepath.Separator)
-	if input.TranscriptPath == "" || !strings.HasPrefix(input.TranscriptPath, claudePrefix) {
+	// the loop. harnessFor carries the transcript_path discriminator, shared
+	// with `felt hook event` so both agree on what a session is.
+	if harnessFor(input.TranscriptPath) != "claude-code" {
 		_ = os.WriteFile(flagPath, nil, 0644)
 		return nil
 	}

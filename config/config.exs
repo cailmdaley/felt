@@ -22,24 +22,17 @@ config :shuttle,
   # feed and caches it for the local daemon's composite cross-host board. Kept
   # separate so a slow/failing fiber feed never perturbs the health-probe
   # recovery cascade. See Shuttle.RemoteFiberRegistry.
-  start_remote_fiber_registry: true,
-  # Per-host snapshots from remote Shuttle daemons reachable via
-  # SSH tunnels. Each entry: %{name: String, url: String,
-  # poll_interval_ms: pos_integer (default 5000), request_timeout_ms:
-  # pos_integer (default 2000), stale_multiplier: pos_integer (default
-  # 4 ⇒ 20s grace at the 5s poll interval)}. Staleness is purely
-  # time-since-last-success, so this grace is the hysteresis: 20s
-  # tolerates a single 8s-timeout blip (and most double-blips) without
-  # flashing the "waiting on <host>" badge, while still surfacing a
-  # genuine outage within ~20s. Empty by default — local-only setups
-  # pay nothing.
-  #
-  # Example, after running `felt shuttle tunnels install`:
-  #
-  #   remotes: [
-  #     %{name: "candide", url: "http://localhost:4001"}
-  #   ]
-  remotes: []
+  start_remote_fiber_registry: true
+
+# `:remotes` is intentionally left unset here — the same move `:host` makes
+# above, for the same reason. The remote fleet resolves at runtime through
+# `Shuttle.Remotes.configured/0`: application config when set, else the
+# operator's `~/.config/felt/remotes.json`, else none. An `unset` key is what
+# lets the file speak; a `remotes: []` default here would shadow it on every
+# host and silently reduce the hub to a local-only board.
+#
+# `[]` therefore means "explicitly no remotes" — which is exactly what
+# config/test.exs sets, so the suite never reaches a real fleet file.
 
 config :shuttle, ShuttleWeb.Endpoint,
   url: [host: "localhost"],

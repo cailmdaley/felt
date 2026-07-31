@@ -1,0 +1,4 @@
+[
+  {"name": "hub-a", "port": 4001},
+  {"name": "hub-b", "port": 4002, "ssh": "hub-b-login"}
+]

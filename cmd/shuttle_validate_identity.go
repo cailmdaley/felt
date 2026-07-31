@@ -88,18 +88,17 @@ intrinsic-identity migration invariants:
   - uid values do not describe multiple slug addresses in one daemon feed
   - open/active shuttle fibers have shuttle.host ownership
 
-By default it checks the usual local tunnel ports (:4000, :4001, :4002, :4003, :4004).
+By default it checks the local daemon (:4000) plus every configured remote's
+tunnel URL (see 'felt shuttle remotes list').
 Pass --daemon-url repeatedly to validate another set of daemon base URLs.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		urls := identityDaemonURLs
 		if len(urls) == 0 {
-			urls = []string{
-				"http://127.0.0.1:4000",
-				"http://127.0.0.1:4001",
-				"http://127.0.0.1:4002",
-				"http://127.0.0.1:4003",
-				"http://127.0.0.1:4004",
+			var err error
+			urls, err = defaultIdentityDaemonURLs()
+			if err != nil {
+				return err
 			}
 		}
 
@@ -125,6 +124,21 @@ Pass --daemon-url repeatedly to validate another set of daemon base URLs.`,
 		}
 		return nil
 	},
+}
+
+// defaultIdentityDaemonURLs is the local daemon plus every configured remote's
+// URL. The fleet file is the single source of the port map, so this list can no
+// longer drift from what the tunnels install and the daemon polls.
+func defaultIdentityDaemonURLs() ([]string, error) {
+	urls := []string{fmt.Sprintf("http://127.0.0.1:%d", defaultRemoteDaemonPort)}
+	remotes, err := configuredRemotes()
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range remotes {
+		urls = append(urls, r.URL)
+	}
+	return urls, nil
 }
 
 func validateIdentity(urls []string) identityReport {

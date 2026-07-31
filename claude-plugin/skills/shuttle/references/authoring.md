@@ -17,7 +17,7 @@ A good constitution makes worker decisions inferable from system purpose + codeb
 **Default to drafts.** Most authored constitutions are stash-now-decide-later. Switch to immediate dispatch when context plainly signals it:
 
 - The user is mid-iteration on the topic and pushing toward action.
-- The user names the agent in an action-shaped sentence ("write this up as a constitution that uses pi-sonnet").
+- The user names the agent in an action-shaped sentence ("write this up as a constitution that uses claude-sonnet").
 - The user says "launch" / "go" / "dispatch now" / "shuttle this and start it."
 - A just-shipped sibling fiber went straight to dispatch — same arc, same posture.
 
@@ -33,7 +33,7 @@ Every dispatch is autonomous: the worker drives to a clean checkpoint and exits 
 
 **Per-dispatch "talk to me first."** When *this* run should pause for Cail before doing anything heavy — he wants to steer, or the autonomous scope is unclear — put it in the **From User directive**. The kanban requeue/resume modal has a one-click **"wait for me"** affordance that prepends a canned talk-first line to the directive box; or write your own. The worker reads the From User block at the top of context: talk-first signal → light survey (constitution + last handoff), greet, wait; no signal → ordinary autonomous run. This is a property of the *moment*, not the fiber — the next dispatch starts clean unless its directive says otherwise.
 
-**Structural human-gates.** When the work *structurally* can't one-shot — a final **send** in Cail's voice, a **2FA** step only he can complete, any "draft-and-stage, human commits" shape — write the gate into the **constitution text** (Desired State or Context): *"Cail will be present; drive to the send and wait for him."* The worker reads the spec as its contract and stays alive at that gate because the spec says so. `claude-opus-chrome` portal work almost always carries such a gate. Genuinely headless work — a refactor, a research sweep, a triage pass producing a report — writes no gate and runs to exit.
+**Structural human-gates.** When the work *structurally* can't one-shot — a final **send** in Cail's voice, a **2FA** step only he can complete, any "draft-and-stage, human commits" shape — write the gate into the **constitution text** (Desired State or Context): *"Cail will be present; drive to the send and wait for him."* The worker reads the spec as its contract and stays alive at that gate because the spec says so. Portal work on the chrome axis (`set-agent … --chrome`, driving a logged-in browser) almost always carries such a gate. Genuinely headless work — a refactor, a research sweep, a triage pass producing a report — writes no gate and runs to exit.
 
 **Talking to a worker, finished or not.** Resume from the kanban — on an awaiting-review, composted, or still-in-flight card — drops you into the stored session as a live tmux you can attach to, with the directive box for steering text. This is the replacement for "leave it running so I can chat": autonomous workers close normally, and you resume when you want the conversation. A missing/expired session id degrades to a fresh dispatch carrying the directive.
 
@@ -41,23 +41,19 @@ So when authoring: if a flow has a human-gated step, **write the gate into the s
 
 ## Agent selection
 
-Three CLI harnesses cover the working space. Cail's setup runs **subscription-first**: Claude ($200/mo) and Codex have weekly quotas that should get fully used before they reset, so default to those. Pi (Copilot) is the fill-in once weeklies run out.
+Felt ships a small built-in registry. It covers the Claude CLI, the Codex CLI, and a `human` pseudo-agent for work only a person can do.
 
-**Copilot bills per message, not per token, with per-model multipliers** — a dispatch that runs two hours and writes ten commits is the same charge as one that runs two minutes. Long-running shuttle dispatches are exactly where pi pays off; ad-hoc one-shots are where it doesn't (the bare `pi` CLI default is `pi-deepseek-flash` on openrouter, so casual use doesn't burn the Copilot budget). Thinking level is pinned per-model in the registry via the `:level` suffix; Copilot caps Sonnet at `:high` and the GPT family at `:xhigh`.
+| Agent | Use for |
+|---|---|
+| `claude-opus` | **The recommended default for real work.** The bulk of dispatches — taste-y implementation, design/UX/narrative, architecture, exploratory work. Defaults to `xhigh` effort. |
+| `claude-fable` | The heavyweight. Subagent/workflow orchestration (fan-out surveys, migrations, in-session adversarial review), the hardest architecture and taste work, arcs that should converge in one dispatch instead of five. Reach for it when the task earns it, not by default. |
+| `claude-sonnet` | Lighter-weight dispatches where Opus is overkill — routine general/frontend work. This is also the bare fallback when a fiber names no agent. |
+| `claude-haiku` | Cheap and fast. Easy, repetitive, or low-stakes tasks. |
+| `codex` | Hard well-defined implementation — gritty refactors, tight algorithmic problems, work that wants the codex CLI's harness (sandbox, head-down focus). |
+| `human` | The step no agent should take. Parks the card for a person. |
 
-| Agent | Cost | Use for |
-|---|---|---|
-| `claude-opus` | subscription | **Shuttle default.** The bulk of dispatches — taste-y implementation, design/UX/narrative, architecture, exploratory work. Drains the weekly first. |
-| `claude-fable` | subscription, expensive | The heavyweight. Subagent/workflow orchestration (fan-out surveys, migrations, in-session adversarial review), the hardest architecture and taste work, arcs that should converge in one dispatch instead of five. Burns the weekly fast — reach for it when the task earns it, not by default. |
-| `claude-sonnet` | subscription | Lighter-weight dispatches where Opus is overkill — cheaper weekly burn for routine general/frontend work. |
-| `claude-opus-chrome` | subscription | Portal automation that needs Cail's *running* Chrome — logged-in sessions, bot-walls, anything driven through a real browser. Connects via the `agent-browser` skill (Chrome-CDP). Almost always carries a **structural human-gate in its constitution** (the human does 2FA / the final send). See [[personal/travel/flight-check-in]] for conventions. |
-| `codex` | subscription | Hard well-defined implementation — gritty refactors, tight algorithmic problems, work that wants codex CLI's harness (sandbox, head-down focus). |
-| `codex-spark` | separate Codex Spark quota | Fast, low-latency Codex work. Quick iteration, straightforward bugfixes, mechanical implementation. |
-| `pi-sonnet` (Sonnet 4.6, `:high`) | 1× Copilot | Sonnet-shape work after the Claude weekly is used up. |
-| `pi-gpt-5.4` (`:xhigh`) | 1× Copilot | GPT-shape work after subscriptions are used up. |
-| `pi-gpt-5.4-mini` (`:xhigh`) | 0.3× Copilot | Cheap. Easy/repetitive tasks. ~3.3 dispatches per "real" message. |
-| `pi-gpt-5-mini` (`:xhigh`) | **0× (free)** | Free. Anything where capability margin is comfortable; low-stakes or exploratory dispatches. |
+`claude-sonnet-headless` and `claude-opus-headless` are aliases that pin the headless axis. All claude agents dispatch with `--permission-mode auto`.
 
-Other entries (`pi-kimi`, `pi-deepseek-pro`, `pi-deepseek-flash`, `claude-haiku`) exist but aren't defaults; reach for them only when the user names them. All claude agents dispatch with `--permission-mode auto`.
+**Your registry may be larger.** Run `felt shuttle agents` to list the effective set on this machine. Users layer their own records on top of the builtins in `~/.config/felt/agents.json` — other CLIs, other models, cost classes, aliases. `share/agents.example.json` in the felt repo is a fuller worked example. Prefer an agent the listing actually shows; when the user names one you don't recognize, check the listing before assuming it exists.
 
-Set with `felt shuttle set-agent <fiber> <agent-id> [--effort E] [--chrome]` (`set-model` is the agent-only shorthand). The registry is felt's single source of truth — `internal/shuttle/agents.json` in the felt repo (`~/dev/felt`), embedded into the CLI at build; `felt shuttle agents` lists it. Registry changes need `make cli-install` and a rebuild on each remote host.
+Set with `felt shuttle set-agent <fiber> <agent-id> [--effort E] [--chrome]` (`set-model` is the agent-only shorthand). Edits to `~/.config/felt/agents.json` take effect on the next read — no rebuild — but each remote host reads its own copy.
