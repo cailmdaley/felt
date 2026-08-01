@@ -14,10 +14,15 @@
 # agent registry — it reads the already-resolved record off felt's
 # `shuttle.resolved.agent` JSON and shells `felt shuttle agents [resolve]`.
 #
-# On cluster login nodes use `make all` / `make daemon` — they build
-# only the escript and need no Go toolchain. `make build` (both) is a Mac/dev
-# convenience and needs `go` on PATH.
+# On cluster login nodes without a Go toolchain, `make all` / `make daemon`
+# build only the escript automatically (no Go on PATH -> no CLI rebuild). On a
+# host that DOES have Go, daemon rebuilds the CLI first to keep the two in
+# lockstep; pass SKIP_CLI=1 to force-skip that and build against whatever felt
+# is already on PATH (this is what bootstrap.sh --skip-cli does). `make build`
+# (both) is a Mac/dev convenience and needs `go` on PATH.
 
+# SKIP_CLI=1 makes `daemon` skip the felt-CLI rebuild step (see daemon: below).
+SKIP_CLI ?=
 INSTALL_DIR := $(HOME)/.local/bin
 LOG := $(HOME)/Library/Logs/shuttle.log
 # Match both the local `bin/shuttle ... -extra bin/shuttle start` shape and
@@ -80,11 +85,21 @@ cli:
 cli-install:
 	GOBIN=$(INSTALL_DIR) go install .
 
-# daemon depends on cli-install: the escript shells the felt CLI for its
-# writes (reopen --host, mark-runtime, …), so the two artifacts must never
-# skew — a daemon built against an older installed CLI silently breaks
-# daemon-shelled commands (unknown flags exit 1 mid-dispatch).
-daemon: cli-install
+# daemon refreshes the felt CLI first when Go is on PATH: the escript shells
+# the felt CLI for its writes (reopen --host, mark-runtime, …), so the two
+# artifacts must never skew — a daemon built against an older installed CLI
+# silently breaks daemon-shelled commands (unknown flags exit 1 mid-dispatch).
+# SKIP_CLI=1 forces that rebuild off (bootstrap.sh --skip-cli passes it) so
+# daemon builds only the escript, trusting whatever felt is already on PATH.
+# With no Go toolchain the rebuild is skipped automatically either way.
+daemon:
+ifeq ($(SKIP_CLI),1)
+	@:
+else ifneq ($(shell command -v go 2>/dev/null),)
+	$(MAKE) cli-install
+else
+	@command -v felt >/dev/null 2>&1 || { echo "felt not found on PATH and no Go toolchain to build it — install felt first."; exit 1; }
+endif
 	mix shuttle.gen_version
 	mix escript.build
 

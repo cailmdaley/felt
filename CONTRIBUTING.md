@@ -17,7 +17,7 @@ mix deps.get && mix compile   # the daemon
 make build                    # both (CLI + daemon escript)
 ```
 
-Requirements: Go 1.23+, Erlang/OTP 26+, Elixir 1.16+, and `tmux` (the daemon
+Requirements: Go 1.23+, Erlang/OTP 27+, Elixir 1.19+, and `tmux` (the daemon
 launches each worker in a tmux session). Node 22+ is needed only to build the UI
 bundle (`cd ui && npm run build`).
 
@@ -30,7 +30,7 @@ make test       # both
 ```
 
 CI runs `go build`/`go test ./...`, `mix compile --warnings-as-errors` +
-`mix test`, and a `vite build` of the board on every PR.
+`mix test`, and `npm run build` of the board on every PR.
 
 ## Invariants
 

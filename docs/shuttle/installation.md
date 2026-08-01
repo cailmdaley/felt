@@ -22,9 +22,7 @@ and you keep the checkout.
 | `node` 22+ / `npm` | only for the board | Builds the kanban bundle into `ui/dist`. |
 | `jq` | optional | `session.sh` uses it to pretty-print the SessionStart envelope. Without it the hook falls back to `felt hook session`. |
 
-`bootstrap.sh` checks all of these and names what is missing. Its Elixir hint
-text says "OTP 26+ and Elixir 1.16+". Ignore that hint — `mix deps.get` fails on
-1.16.
+`bootstrap.sh` checks all of these and names what is missing.
 
 ## Bootstrap
 
@@ -46,9 +44,8 @@ Six steps run in order.
 3. **Daemon escript.** `mix deps.get`, then `make daemon` → `bin/shuttle`. The
    step records the checkout path in `~/.shuttle/repo`, so remote revival over
    SSH can find it without an environment.
-4. **`ui/dist`.** The served board bundle. Built by default on macOS, skipped by
-   default on Linux, because this step fails on a fresh clone — see
-   [Sharp edges](#sharp-edges).
+4. **`ui/dist`.** The served board bundle. Built by default when Node is on
+   PATH, skipped otherwise — rsync it from a host that has Node instead.
 5. **Event stream.** Runs `felt setup claude` and `felt setup codex` against
    this checkout, so the plugin hooks match the binary. Then it pipes a probe
    payload through `felt hook event` and checks the line it writes. See
@@ -225,25 +222,23 @@ reach it.
 
 Roughly in the order a new installer hits them.
 
-**`make daemon` needs Go, despite what the docs say.** `daemon: cli-install`,
-and `cli-install` runs `go install .`. The dependency is deliberate — a daemon
-built against a stale installed CLI breaks mid-dispatch. But the Makefile header
-and `AGENTS.md` both still claim `make daemon` needs no Go toolchain. They are
-wrong. `bootstrap.sh --skip-cli` also does not skip the Go build, because step 3
-calls `make daemon` anyway.
+**`make daemon` refreshes the felt CLI when Go is available.** The daemon
+shells the felt CLI for its writes, so a stale installed CLI can break
+daemon-shelled commands mid-dispatch — `make daemon` rebuilds it first whenever
+Go is on PATH. On a host with no Go toolchain, `make daemon` builds only the
+escript, against whatever `felt` is already installed there. `bootstrap.sh
+--skip-cli` passes `SKIP_CLI=1` through to `make daemon`, so it skips the CLI
+rebuild too, even on a host that has Go.
 
-**The UI build fails on a fresh clone. Use `npx vite build`.** `npm run build`
-runs `tsc --noEmit && vite build`. The typecheck covers a `src/paper` entry that
-imports `@lightcone/renderer`, a private package you cannot resolve. The Vite
-build itself drops that entry when it is absent, so the bundle builds fine; only
-the typecheck fails. CI works around this and so should you:
+**The UI build needs no private checkout.** `npm run build` runs `tsc --noEmit
+&& vite build`. The `src/paper` entry imports `@lightcone/renderer`, a private
+package — but `ui/src/paper/lightcone.d.ts` ships ambient type declarations
+that satisfy the typecheck without it, and the Vite build drops the paper entry
+when the real package isn't resolvable. A fresh clone builds `ui/dist` fine:
 
 ```bash
-cd ui && npm ci && npx vite build
+cd ui && npm ci && npm run build
 ```
-
-`bootstrap.sh` still calls `npm run build`, catches the failure, warns, and
-continues. `ui/dist` is gitignored, so you end with a live daemon and no board.
 
 **macOS TCC: keep the checkout out of `~/Documents`.** launchd-spawned processes
 cannot read `~/Documents`, `~/Desktop`, or `~/Downloads`. Full Disk Access does

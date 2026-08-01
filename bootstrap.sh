@@ -12,7 +12,7 @@
 #   1. prerequisites   — honest check (go, elixir/OTP, node, tmux; jq optional)
 #   2. felt CLI        — go install . → ~/.local/bin/felt (the daemon shells to it)
 #   3. daemon escript  — mix deps.get + escript build → bin/shuttle
-#   4. ui/dist         — the served kanban board (built on macOS; rsync'd to clusters)
+#   4. ui/dist         — the served kanban board (built with npm; rsync'd to hosts without Node)
 #   5. event stream    — the plugin hook (`felt hook event`) the daemon reads
 #   6. keep-alive      — launchd LaunchAgent (macOS) / shuttle-daemon respawn loop (clusters)
 #
@@ -23,8 +23,8 @@
 # Usage:
 #   ./bootstrap.sh                 full bootstrap for this host
 #   ./bootstrap.sh --dry-run       check prerequisites + print the plan, change nothing
-#   ./bootstrap.sh --skip-ui       don't build ui/dist (default on clusters — rsync it instead)
-#   ./bootstrap.sh --build-ui      force the ui/dist build (default on macOS)
+#   ./bootstrap.sh --skip-ui       don't build ui/dist (default when Node isn't on PATH — rsync it instead)
+#   ./bootstrap.sh --build-ui      force the ui/dist build (default when Node is on PATH)
 #   ./bootstrap.sh --skip-hook     don't touch the event-stream step
 #   ./bootstrap.sh --skip-cli      don't (re)build/install the felt CLI (it's already on PATH)
 #   ./bootstrap.sh --with-tunnels  also (re)install the autossh tunnels to remotes (macOS hub)
@@ -35,6 +35,7 @@ set -uo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OS="$(uname -s)"
 CLI_INSTALL_DIR="${FELT_INSTALL_DIR:-$HOME/.local/bin}"
+have() { command -v "$1" >/dev/null 2>&1; }
 
 # ── presentation ─────────────────────────────────────────────────────────
 if [ -t 1 ]; then
@@ -69,14 +70,14 @@ for arg in "$@"; do
   esac
 done
 
-# Resolve UI default by host: macOS builds it (the renderer deps resolve from a
-# sibling lightcone-ui); the clusters cannot build it from a source-only clone,
-# so the bundle is built once on a Mac and rsync'd over (see AGENTS.md).
+# Resolve UI default: build it here if Node is on PATH, else skip (rsync
+# ui/dist from a host that has Node — see AGENTS.md). npm run build needs no
+# private checkout; the ambient src/paper/lightcone.d.ts declarations satisfy
+# its typecheck and the Vite build drops the paper entry when the optional
+# lightcone-ui renderer source isn't present.
 if [ "$UI_MODE" = auto ]; then
-  [ "$OS" = Darwin ] && UI_MODE=build || UI_MODE=skip
+  have node && have npm && UI_MODE=build || UI_MODE=skip
 fi
-
-have() { command -v "$1" >/dev/null 2>&1; }
 
 printf '%s\n' "${BOLD}felt + shuttle bootstrap${RESET}  ${DIM}($OS · $REPO)${RESET}"
 
@@ -99,7 +100,7 @@ if [ "$SKIP_CLI" = 0 ]; then
           "install Go 1.23+ (brew install go / asdf)."
 fi
 require "elixir/mix"  mix     "needed to build the daemon escript." \
-        "install Erlang/OTP 26+ and Elixir 1.16+ (brew install elixir / asdf)."
+        "install Erlang/OTP 27+ and Elixir 1.19+ (brew install elixir / asdf)."
 require "escript"     escript "the daemon is an escript; needs Erlang/OTP on PATH." \
         "comes with Erlang/OTP."
 require "tmux"        tmux    "workers and the cluster respawn loop run in tmux." \
@@ -128,7 +129,7 @@ keepalive_desc() {
 ui_desc() {
   case "$UI_MODE" in
     build) echo "cd ui && npm run build  → ui/dist" ;;
-    skip)  echo "SKIP (rsync ui/dist from a macOS build host — see AGENTS.md)" ;;
+    skip)  echo "SKIP (rsync ui/dist from a host with Node — see AGENTS.md)" ;;
   esac
 }
 cli_desc() {
@@ -176,7 +177,7 @@ fi
 # ── 3. daemon escript ──────────────────────────────────────────────────────
 step "Build the daemon escript"
 ( cd "$REPO" && mix deps.get ) || die "mix deps.get failed."
-make -C "$REPO" daemon || die "escript build failed."
+make -C "$REPO" daemon SKIP_CLI="$SKIP_CLI" || die "escript build failed."
 ok "bin/shuttle built."
 
 # Record the bootstrapped checkout in ~/.shuttle (alongside the daemon's other
@@ -195,12 +196,12 @@ if [ "$UI_MODE" = build ]; then
   ( cd "$REPO/ui" && { [ -d node_modules ] || npm ci || npm install; } && npm run build ) \
     && ok "ui/dist built." \
     || { warn "ui/dist build failed."
-         note "on a host without the lightcone-ui renderer deps, build ui/dist on a Mac and rsync it:"
+         note "build ui/dist on a host with Node and rsync it over:"
          note "  rsync -az --delete ui/dist/ <host>:$REPO/ui/dist/"; }
 else
   if [ -d "$REPO/ui/dist" ]; then ok "ui/dist present (not rebuilt)."
   else warn "ui/dist absent and not built on this host."
-       note "build it on a Mac and rsync it over:  rsync -az --delete ui/dist/ <host>:$REPO/ui/dist/"; fi
+       note "build it on a host with Node and rsync it over:  rsync -az --delete ui/dist/ <host>:$REPO/ui/dist/"; fi
 fi
 
 # ── 5. event stream ─────────────────────────────────────────────────────────

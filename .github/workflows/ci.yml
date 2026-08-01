@@ -92,10 +92,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # The board entry builds without the lightcone-ui renderer checkout — the
-      # paper entry is dropped by vite.config's existsSync guard when absent
-      # (CI has no lightcone-ui). We run `vite build` directly rather than
-      # `npm run build`, whose `tsc` step would need lightcone-ui to typecheck
-      # src/paper. This proves the served board bundle compiles + bundles.
+      # Ambient declarations in src/paper/lightcone.d.ts satisfy the typecheck
+      # even without the private lightcone-ui checkout, and vite.config's
+      # existsSync guard drops the paper entry when it's absent — so the full
+      # build (tsc + vite) succeeds on a stranger's clone, CI included.
       - name: Build board bundle
-        run: npx vite build
+        run: npm run build
