@@ -29,6 +29,17 @@
 
 set -u
 
+# Guarantee the canonical CLI dir is on PATH for the daemon we launch. The
+# daemon shells out to `felt` (contract check at boot, dispatch); on a fresh
+# Debian-family host ~/.local/bin joins PATH only if it existed when the login
+# profile ran, so a first bootstrap's respawn loop — or a bare SSH revival —
+# can otherwise start a daemon that cannot find its own CLI (contract skew,
+# dispatches held).
+case ":$PATH:" in
+  *":$HOME/.local/bin:"*) ;;
+  *) PATH="$HOME/.local/bin:$PATH"; export PATH ;;
+esac
+
 SESSION=shuttle-daemon
 
 resolve_repo() {
