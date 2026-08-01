@@ -10,11 +10,12 @@
 #                                             # no live master — human must approve
 #
 # Per host the ritual is the one AGENTS.md documents ("Deploying is ALWAYS
-# safe"): pull → make daemon → cycle the daemon (launchd kickstart on macOS,
-# kill the :4000 listener so the respawn loop restarts from the fresh escript
-# on clusters) → verify git_short_sha flipped → release the boot quarantine the
-# restart armed. Remote hosts also get ui/dist rsync'd (clusters don't build
-# the UI; macOS is the build host).
+# safe"): pull → make daemon → cycle the daemon (kill the :4000 listener, then
+# let the host's own supervisor bring it back — launchd kickstart on macOS, a
+# systemd user unit's Restart=always, or the tmux respawn loop) → verify
+# git_short_sha flipped → release the boot quarantine the restart armed.
+# Remote hosts also get ui/dist rsync'd (clusters don't build the UI; macOS is
+# the build host).
 #
 # The fleet is NOT written here. It comes from ~/.config/felt/remotes.json
 # ($FELT_REMOTES_FILE overrides) — the same file the daemon and `felt shuttle

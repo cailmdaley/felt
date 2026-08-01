@@ -12,9 +12,11 @@ defmodule Shuttle.Kitty do
 
   Re-opening focuses the existing tab (matched by exact title) instead of
   spawning a duplicate — the same idempotent focus-then-launch Portolan's
-  server uses. macOS in practice (kitty + `osascript` to raise the window);
-  a host without kitty, or a kitty without remote control enabled, fails
-  cleanly with `{:error, reason}` and the board surfaces a toast.
+  server uses. This is terminal lock-in, not platform lock-in: kitty runs on
+  Linux too, so `kitty @ launch` works there identically; only the
+  `osascript` window-raise is macOS-specific (a no-op elsewhere). A host
+  without kitty, or a kitty without remote control enabled, fails cleanly
+  with `{:error, reason}` and the board surfaces a toast.
 
   Requires kitty's remote control to be reachable from outside a kitty window —
   i.e. `allow_remote_control yes` + a `listen_on unix:/tmp/kitty` in kitty.conf

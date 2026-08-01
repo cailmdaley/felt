@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"text/template"
 
@@ -18,6 +19,11 @@ import (
 // owner-routing can reach a remote's :4000 over an SSH LocalForward). It is the
 // typed setup command for the cross-host network; the running daemon owns the
 // network at runtime, this just installs the plumbing.
+//
+// **macOS only.** The transport is launchd, so `install` refuses elsewhere
+// (see the guard in installTunnels). This is the one platform-bound piece of
+// Shuttle: a single host runs the daemon and the board on Linux and macOS
+// alike, and it is multi-host aggregation that needs a Mac hub.
 //
 // The fleet itself is NOT described here. Every name, port, and tunnel option
 // comes from the shared fleet file (see shuttle_remotes.go), which the Elixir
@@ -72,10 +78,11 @@ var (
 
 var tunnelsCmd = &cobra.Command{
 	Use:   "tunnels",
-	Short: "Install launchd-managed autossh tunnels for Shuttle remotes",
+	Short: "Install launchd-managed autossh tunnels for Shuttle remotes (macOS only)",
 	Long: `Manage the hub-side autossh tunnels that map remote Shuttle daemons
 onto local ports. The generated plists are written into ~/Library/LaunchAgents
-by default.
+by default, so this is macOS-only — install refuses on any other platform.
+Single-host use needs no tunnels, and runs on Linux and macOS alike.
 
 The remotes come from the fleet file (` + "`felt shuttle remotes path`" + `).
 
@@ -95,6 +102,15 @@ var tunnelsInstallCmd = &cobra.Command{
 }
 
 func installTunnels(requested []string) error {
+	// Everything below writes launchd plists into ~/Library/LaunchAgents and
+	// drives launchctl. Off macOS that would create a ~/Library nobody reads and
+	// report success for tunnels that will never come up, so refuse instead.
+	// Linux and macOS both run the daemon and the board for a single host; only
+	// the multi-host tunnel layer is macOS-bound.
+	if runtime.GOOS != "darwin" {
+		return fmt.Errorf("multi-host tunnel management is macOS-only (it installs launchd autossh jobs); this host is %s", runtime.GOOS)
+	}
+
 	specs, err := resolveTunnelSpecs(requested)
 	if err != nil {
 		return err

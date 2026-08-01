@@ -83,9 +83,10 @@ Each one rewrites the fiber's `outcome` and `## Status` on exit, so the next wor
 
 Configure Shuttle from your home directory. `~/.config/felt/agents.json` layers your agents over the
 built-in set (`felt shuttle agents init` seeds it). `~/.config/felt/remotes.json` lists the remote
-daemons a hub aggregates (`felt shuttle remotes add`). Shuttle still shows where it grew up: macOS
-gets the most use, and the daemon ships as a checkout you build, not a release binary. felt works
-without the daemon.
+daemons a hub aggregates (`felt shuttle remotes add`). Linux and macOS both run a single host —
+daemon, board, and workers — with the keep-alive installed as a systemd user unit or a launchd
+LaunchAgent. Multi-host tunnel management (`felt shuttle tunnels`) is macOS-only. The daemon ships
+as a checkout you build, not a release binary. felt works without the daemon.
 Full list:
 [Honest scoping](https://cailmdaley.github.io/felt/shuttle/#honest-scoping).
 

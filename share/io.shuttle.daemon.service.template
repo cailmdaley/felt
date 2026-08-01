@@ -1,0 +1,73 @@
+# Shuttle daemon systemd **user** unit — the Linux analog of
+# share/io.shuttle.daemon.plist.template. Generated from this template by
+# `make install-agent` on Linux (placeholders __SHUTTLE_DIR__ / __LOG__ /
+# __FELT_STORES__ / __PATH__ / __SSH_AUTH_SOCK__ are filled in), installed to
+# ~/.config/systemd/user/shuttle-daemon.service. Do not enable this template
+# directly — it isn't a valid unit until installed.
+#
+# A *user* unit, not a system one: the daemon runs as you, reads your felt
+# stores, writes your ~/.shuttle, and shells out to your `felt`. Nothing here
+# wants root.
+#
+# LINGERING. A systemd user manager normally starts at your first login and
+# stops at your last logout, which would take the daemon down with your ssh
+# session. `loginctl enable-linger <user>` keeps the manager (and so the
+# daemon) alive across logout and starts it at boot. `make install-agent`
+# prints the command; it is the one manual step, because enabling linger for
+# another user's account needs privileges this install does not assume.
+#
+# PATH is captured from a login shell at install time, for the same reason the
+# macOS plist does it: the unit's environment is not your login environment.
+# systemd --user inherits almost nothing, so the `#!/usr/bin/env escript`
+# shebang would not find escript/erl and the daemon would not find `felt` in
+# ~/.local/bin at runtime — and a PATH without `felt` yields `:enoent` -> 500
+# on /api/v1/fibers/composite (board loads, kanban does not). Capturing the
+# real login PATH once, at install, is deterministic and needs no
+# hand-maintained list.
+#
+# There is no TCC on Linux, so — unlike the macOS LaunchAgent — the checkout
+# may live anywhere, including under ~/Documents.
+
+[Unit]
+Description=Shuttle daemon (felt fiber dispatcher)
+Documentation=https://cailmdaley.github.io/felt/shuttle/installation/
+
+[Service]
+Type=simple
+WorkingDirectory=__SHUTTLE_DIR__
+# StandardOutput=append: (below) never rotates on its own, unlike the tmux
+# respawn loop's own log (bin/shuttle-launch), which size-rotates at 50MB on
+# every iteration. Mirror that here so a systemd-supervised daemon gets the
+# same fidelity: on each restart, if the log has grown past 50MB, move it to
+# .1 (clobbering any previous .1) before the new instance starts appending.
+# $$ (not $) below: systemd itself expands bare $VAR/$() in ExecStart lines
+# before handing the string to the shell, so dollars meant for /bin/sh must be
+# doubled to survive systemd's own pass.
+ExecStartPre=/bin/sh -c 'if [ -f "__LOG__" ] && [ "$$(wc -c < "__LOG__")" -gt 52428800 ]; then mv -f "__LOG__" "__LOG__.1"; fi'
+# `start --force` skips the already-running guard, so a restart never refuses.
+ExecStart=__SHUTTLE_DIR__/bin/shuttle start --force
+
+# The user's real login PATH, captured at install time (see header).
+Environment=PATH=__PATH__
+# FELT_STORES scopes the daemon's felt polling. felt re-discovers each
+# project's substores by following the symlinks under a store's .felt/, so an
+# aggregate store is usually the only entry you need. Filled in from
+# AGENT_FELT_STORES.
+Environment=FELT_STORES=__FELT_STORES__
+# SSH_AUTH_SOCK points at the ssh-agent that holds your remote credentials, so
+# the daemon's own remote feed and the Attach path can authenticate. Dropped
+# from the rendered unit when the value is empty — on Linux the agent socket
+# has no canonical path, and an empty setting is worse than none.
+Environment=SSH_AUTH_SOCK=__SSH_AUTH_SOCK__
+
+# The launchd analogs: KeepAlive + ThrottleInterval 10.
+Restart=always
+RestartSec=10
+
+# systemd does not create the parent directory for append:; `make
+# install-agent` mkdir -p's it. append: needs systemd >= 240.
+StandardOutput=append:__LOG__
+StandardError=append:__LOG__
+
+[Install]
+WantedBy=default.target

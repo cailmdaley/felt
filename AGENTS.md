@@ -145,6 +145,28 @@ simplifies — no runtime dependency.
 
 ## Build + lifecycle
 
+### Platform story
+
+**Linux and macOS are both supported for single-host use.** One host runs the
+daemon, the board, and its workers on either OS. The keep-alive differs — a
+launchd LaunchAgent on macOS, a systemd user unit on Linux (`make
+install-agent` picks the branch from `uname -s`) — and so does the log path,
+but the daemon, the CLI, and the bundle are the same artifacts.
+
+**Multi-host tunnel management is macOS-only.** `felt shuttle tunnels install`
+writes launchd autossh jobs, so it refuses on any other platform. A Linux host
+can still be a *remote* that a Mac hub aggregates: the tunnel is installed on
+the hub, not on the remote.
+
+**`kitty` attach is terminal lock-in, not platform lock-in.** Attach opens the
+worker's tmux session in kitty via kitty's remote-control CLI, and kitty runs on
+Linux. What is mac-specific is only the `osascript` call that raises the kitty
+window, and that is already a no-op off macOS (`activate/1` in
+`lib/shuttle/kitty.ex`). A non-kitty user gets nothing on either OS; `tmux
+attach -t shuttle-<id>` always works.
+
+Windows is unsupported.
+
 ### What builds what
 
 ```
@@ -155,13 +177,13 @@ make daemon       # daemon escript only → bin/shuttle (MIX_ENV=dev)
 make test         # go test ./...  AND  mix test
 make restart      # daemon (rebuild escript) + stop + start  [load-bearing dev loop]
 make all          # restart
-make start        # nohup detached; logs → ~/Library/Logs/shuttle.log (macOS)
+make start        # nohup detached; logs → $(LOG) (macOS ~/Library/Logs/shuttle.log, Linux ~/.shuttle/shuttle.log)
 make stop         # SIGTERM with 5s grace
 make logs         # tail -f the log
 make status       # felt shuttle ps + snapshot summary
 make clean        # rm _build, stray Elixir.*.beam, built binaries
 make install      # full from-source bootstrap (bootstrap.sh)
-make install-agent / uninstall-agent   # durable launchd keep-alive (macOS)
+make install-agent / uninstall-agent   # durable keep-alive: launchd (macOS) / systemd user unit (Linux)
 ```
 
 `make build` needs `go` on PATH. `make all` / `make daemon` rebuild the felt CLI
@@ -215,8 +237,9 @@ shell-started via `make start`.)
 
   Builds+installs the felt CLI, builds the daemon escript, places `ui/dist`,
   registers the plugin event hook (`felt hook event`) and probes it, installs
-  the keep-alive (launchd LaunchAgent on macOS / the `shuttle-daemon` tmux
-  respawn loop on Linux).
+  the keep-alive (launchd LaunchAgent on macOS / a systemd user unit on Linux,
+  falling back to the `shuttle-daemon` tmux respawn loop where there is no
+  systemd user session).
   `go` is a bootstrap prerequisite. Flags include `--skip-ui` / `--build-ui` (UI
   defaults to build on macOS, skip on Linux), `--skip-hook`, `--with-tunnels`
   (also installs the SSH tunnels on the macOS hub). bootstrap.sh branches by host
@@ -229,10 +252,18 @@ Put the checkout anywhere you like, with one macOS constraint: it must live
 launchd/TCC rationale below. Linux hosts are unconstrained. Using the same path
 on every host you run a daemon on keeps the deploy commands uniform.
 
-### Durable launch (macOS) — `make install-agent`
+### Durable launch — `make install-agent`
 
 `make start` is a bare `nohup` with no supervisor: it won't restart on crash or
-relaunch at login. Shuttle's own durable surface is a **launchd LaunchAgent**
+relaunch at login. `make install-agent` installs the real supervisor, branching
+on `uname -s`: launchd on macOS, a systemd user unit on Linux. Both templates
+live in `share/` and bake in the same three environment values (`PATH`,
+`FELT_STORES`, `SSH_AUTH_SOCK`) for the same reason — neither supervisor gives
+the daemon your login environment.
+
+#### macOS — the LaunchAgent
+
+Shuttle's macOS durable surface is a **launchd LaunchAgent**
 (`share/io.shuttle.daemon.plist.template` → `~/Library/LaunchAgents/io.shuttle.daemon.plist`),
 installed by `make install-agent`: `KeepAlive` restarts the daemon on crash,
 `RunAtLoad` starts it at login. Independent of any other process.
@@ -274,10 +305,30 @@ The clean setup:
 
 Result: `make install-agent` from a checkout outside Documents → daemon binds
 `:4000`, KeepAlive + RunAtLoad, **zero Full Disk Access grants**, survives erlang
-upgrades. On Linux the durable surface is `bin/shuttle-launch` — a
-tracked respawn script that `bootstrap.sh` installs to `~/.local/bin` and runs
-in tmux session `shuttle-daemon`, backing off exponentially on fast daemon
-exits (2s→300s); no launchd, the LaunchAgent is macOS-only.
+upgrades.
+
+#### Linux — the systemd user unit
+
+`share/io.shuttle.daemon.service.template` →
+`~/.config/systemd/user/shuttle-daemon.service`, rendered and enabled by the
+same `make install-agent`. `Restart=always` + `RestartSec=10` are the KeepAlive
+/ ThrottleInterval analogs; `WantedBy=default.target` starts it at login. It is
+a *user* unit — the daemon runs as you, reads your stores, wants no root. **Run
+`loginctl enable-linger <user>` so the user manager (and the daemon) survives
+logout and starts at boot** — the install prints this; it is the one manual
+step, because lingering needs privileges the install doesn't assume. There is
+no TCC on Linux, so the checkout may live anywhere.
+
+`make install-agent` retires the tmux respawn loop first, since both would bind
+`:4000`.
+
+**Where there is no systemd user session** — a typical HPC login node, a
+container — `make install-agent` says so and refuses, and the durable surface
+stays `bin/shuttle-launch`: a tracked respawn script that `bootstrap.sh`
+installs to `~/.local/bin` and runs in tmux session `shuttle-daemon`, backing
+off exponentially on fast daemon exits (2s→300s). `bootstrap.sh` picks between
+the two automatically, and installs `shuttle-launch` either way because remote
+revival (`remote_registry.ex` over SSH) invokes it.
 
 `make install-agent` warns if `$PWD` is under a protected folder. There *is* an
 escape hatch — granting FDA to each I/O binary in the tree (`…/erlang/<v>/…/beam.smp`,
@@ -327,8 +378,10 @@ that flashes and dies. Refresh the credential before concluding Shuttle is
 broken.
 
 **The deploy ritual per host** is: push → on the host, pull → `make daemon` →
-rsync `ui/dist` → cycle the daemon (launchctl kickstart on macOS; kill the
-`:4000` listener on Linux so the respawn loop restarts it) → poll
+rsync `ui/dist` → cycle the daemon (kill the `:4000` listener, then let
+whichever supervisor owns the host bring it back — launchd kickstart on
+macOS, a systemd user unit's `Restart=always` on a systemd Linux host, or the
+tmux respawn loop elsewhere) → poll
 `/api/v1/version` until `git_short_sha` matches → release the boot quarantine.
 `bin/shuttle-deploy` scripts exactly that. It reads the fleet from
 `~/.config/felt/remotes.json` — a remote with a `checkout` field is a deploy
@@ -384,8 +437,9 @@ payload. A new `git_short_sha` only proves `BuildInfo` was rebuilt; if the live
 payload still has old semantics, run `make clean && make daemon`, then let the
 respawn loop restart the daemon from the clean escript.
 
-**The respawn loop owns the remote daemon — `make stop`/`make all` may not
-cycle it.** Where `shuttle-launch --loop` runs in tmux session `shuttle-daemon`,
+**A supervised daemon is not yours to cycle with `make stop`/`make all`.** Under
+systemd, use `systemctl --user restart shuttle-daemon`. Where `shuttle-launch
+--loop` runs in tmux session `shuttle-daemon` instead,
 that loop owns the live daemon. `make stop`/`make all` target the
 pidfile that `make start` writes, which is *not* the respawn-spawned daemon, so
 they can build a fresh `bin/shuttle` yet leave the old binary serving `:4000`. To
@@ -608,7 +662,8 @@ shuttle skill prescribes the worker reads it on arrival.
 felt shuttle status                      # offline walker view (independent of daemon)
 bin/shuttle snapshot                     # raw JSON snapshot
 make status                              # daemon-side view (ps + snapshot)
-~/Library/Logs/shuttle.log               # daemon stdout/stderr (macOS)
+make logs                                # daemon stdout/stderr — ~/Library/Logs/shuttle.log
+                                         # (macOS) / ~/.shuttle/shuttle.log (Linux)
 tmux ls | grep '^shuttle-'               # live workers
 curl -s http://127.0.0.1:4000/api/v1/agents | jq
 curl -s http://127.0.0.1:4000/api/v1/state | jq
@@ -694,7 +749,7 @@ felt/
 │   └── shuttle_web/           agent-API HTTP endpoints (/api/v1/...)
 ├── config/                  Elixir env config (dev/test/prod endpoint settings)
 ├── priv/                    daemon assets (e.g. mystra/bake.mjs)
-├── share/                   shared data (plist template, launchd assets)
+├── share/                   keep-alive templates (launchd plist, systemd unit) + agents example
 ├── test/                    Mix test suite
 │
 │   # the board UI — TypeScript

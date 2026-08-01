@@ -90,9 +90,14 @@ prior transcript.
 Shuttle runs the maintainer's machines every day, and parts of it still show
 that. This section lists them all; the other pages point here.
 
-- **macOS gets the most use.** The launchd keep-alive, the tunnel plists, and
-  the TCC workarounds are all macOS-first. Linux runs on a thinner path: a tmux
-  respawn loop, no systemd unit.
+- **Multi-host aggregation needs a macOS hub.** `felt shuttle tunnels install`
+  writes launchd autossh jobs and refuses on any other platform. Single-host
+  use — the daemon, the board, and workers on one machine — is supported on
+  Linux and macOS alike, each with its own keep-alive (a systemd user unit or a
+  launchd LaunchAgent). A Linux machine can be a *remote* a Mac hub aggregates;
+  the tunnel lives on the hub.
+- **macOS gets the most use.** The TCC workarounds and the tunnel plists are
+  macOS-first, and the maintainer's own hub is a Mac.
 - **Several examples name the maintainer's store.** Docs use `~/loom`, a
   [cross-project store](../concepts/cross-project.md), as the running example.
   Substitute your own store path everywhere it appears.

@@ -3,10 +3,48 @@ package cmd
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"text/template"
 )
+
+// TestInstallTunnels_MacOSOnly — the tunnels are launchd autossh jobs, so
+// `install` must refuse off macOS rather than writing plists into a ~/Library
+// it just created. Everything else about Shuttle runs on Linux; this is the one
+// platform-bound verb, and the refusal is what keeps that claim honest.
+func TestInstallTunnels_MacOSOnly(t *testing.T) {
+	writeRemotes(t, `[{"name":"alpha","port":4001,"tunnel":{"manager":"launchd"}}]`)
+
+	// Keep the macOS arm from touching the real ~/Library/LaunchAgents or
+	// calling launchctl: write-only, into a temp dir, with a stub autossh path.
+	dir := t.TempDir()
+	defer func(pd, ld, as string, wo bool) {
+		tunnelsPlistDir, tunnelsLogDir, tunnelsAutoSSH, tunnelsWriteOnly = pd, ld, as, wo
+	}(tunnelsPlistDir, tunnelsLogDir, tunnelsAutoSSH, tunnelsWriteOnly)
+	tunnelsPlistDir = filepath.Join(dir, "LaunchAgents")
+	tunnelsLogDir = filepath.Join(dir, "logs")
+	tunnelsAutoSSH = "/usr/bin/autossh"
+	tunnelsWriteOnly = true
+
+	err := installTunnels([]string{"alpha"})
+
+	if runtime.GOOS == "darwin" {
+		if err != nil {
+			t.Fatalf("installTunnels on darwin should not refuse: %v", err)
+		}
+		return
+	}
+	if err == nil {
+		t.Fatalf("installTunnels on %s should refuse", runtime.GOOS)
+	}
+	if !strings.Contains(err.Error(), "macOS-only") {
+		t.Fatalf("refusal should name the platform limit, got %q", err)
+	}
+	if _, statErr := os.Stat(tunnelsPlistDir); statErr == nil {
+		t.Errorf("refusal must not create the plist dir %s", tunnelsPlistDir)
+	}
+}
 
 // The tunnels command had no tests while the fleet lived in a hardcoded map.
 // Now that every name, port, and label comes from the fleet file, these lock the

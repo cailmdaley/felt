@@ -14,7 +14,8 @@
 #   3. daemon escript  — mix deps.get + escript build → bin/shuttle
 #   4. ui/dist         — the served kanban board (built with npm; rsync'd to hosts without Node)
 #   5. event stream    — the plugin hook (`felt hook event`) the daemon reads
-#   6. keep-alive      — launchd LaunchAgent (macOS) / shuttle-daemon respawn loop (clusters)
+#   6. keep-alive      — launchd LaunchAgent (macOS) / systemd user unit (Linux),
+#                        falling back to the shuttle-daemon tmux respawn loop
 #
 # `felt shuttle install <fiber>` already means "install a fiber as a dispatch
 # role", so the system bootstrap deliberately is NOT that verb. It is reached
@@ -103,7 +104,7 @@ require "elixir/mix"  mix     "needed to build the daemon escript." \
         "install Erlang/OTP 27+ and Elixir 1.19+ (brew install elixir / asdf)."
 require "escript"     escript "the daemon is an escript; needs Erlang/OTP on PATH." \
         "comes with Erlang/OTP."
-require "tmux"        tmux    "workers and the cluster respawn loop run in tmux." \
+require "tmux"        tmux    "workers run in tmux, as does the Linux respawn-loop keep-alive." \
         "brew install tmux  /  apt install tmux."
 if [ "$SKIP_CLI" = 1 ]; then
   require "felt"      felt    "the daemon shells out to felt for every store walk." \
@@ -122,9 +123,12 @@ optional "jq" jq "only used to pretty-print the SessionStart envelope; session.s
          "brew install jq  /  apt install jq."
 
 # ── plan / dry-run ───────────────────────────────────────────────────────
+have_systemd_user() { have systemctl && systemctl --user show-environment >/dev/null 2>&1; }
+
 keepalive_desc() {
   if [ "$OS" = Darwin ]; then echo "launchd LaunchAgent (make install-agent: build + render plist + load)"
-  else echo "shuttle-daemon respawn loop (tmux: while true; ./bin/shuttle start)"; fi
+  elif have_systemd_user; then echo "systemd user unit (make install-agent: render + enable --now shuttle-daemon.service)"
+  else echo "shuttle-daemon respawn loop (tmux: while true; ./bin/shuttle start) — no systemd user session here"; fi
 }
 ui_desc() {
   case "$UI_MODE" in
@@ -182,9 +186,9 @@ ok "bin/shuttle built."
 
 # Record the bootstrapped checkout in ~/.shuttle (alongside the daemon's other
 # state: events.jsonl, tmux.sock). bin/shuttle-launch resolves its repo as
-# SHUTTLE_DIR > ~/.shuttle/repo > script location > ~/dev/felt, so remote
-# revival (remote_registry.ex invoking ~/.local/bin/shuttle-launch over SSH,
-# no env) always lands on this checkout instead of the heuristic fallback.
+# $SHUTTLE_DIR > ~/.shuttle/repo > script location, so this state file is what
+# lets a bare `~/.local/bin/shuttle-launch` (remote revival — remote_registry.ex
+# invoking it over SSH, no env) find this checkout.
 mkdir -p "$HOME/.shuttle" \
   && printf '%s\n' "$REPO" > "$HOME/.shuttle/repo" \
   || die "failed to record checkout path in ~/.shuttle/repo."
@@ -239,7 +243,9 @@ else
   # Probe the writer end-to-end: no jq, no perl, no tmux required. An explicit
   # SHUTTLE_EVENTS_FILE overrides the directory gate, so this never touches the
   # real stream.
-  PROBE="$(mktemp -t shuttle-events-probe)"
+  # Explicit template, not `mktemp -t`: BSD mktemp appends XXXXXX to a -t
+  # prefix, GNU mktemp requires the template to carry it and errors without.
+  PROBE="$(mktemp "${TMPDIR:-/tmp}/shuttle-events-probe.XXXXXX")"
   printf '%s\n' '{"hook_event_name":"SessionStart","session_id":"bootstrap-probe","cwd":"'"$REPO"'"}' \
     | SHUTTLE_EVENTS_FILE="$PROBE" SHUTTLE_EVENTS= "$FELT_BIN" hook event >/dev/null 2>&1
   if [ "$(wc -l < "$PROBE" | tr -d ' ')" = "1" ] && grep -q '"type":"session_start"' "$PROBE"; then
@@ -253,24 +259,10 @@ else
 fi
 
 # ── 6. keep-alive ───────────────────────────────────────────────────────────
-step "Keep-alive ($([ "$OS" = Darwin ] && echo launchd || echo 'respawn loop'))"
-if [ "$OS" = Darwin ]; then
-  # The launchd path lives in the Makefile: it captures the real login PATH and
-  # the persistent ssh-agent socket, renders the plist, and (re)loads the agent.
-  # Reuse it rather than duplicating that subtle env capture here.
-  make -C "$REPO" install-agent || die "make install-agent failed."
-  ok "launchd agent loaded (KeepAlive + RunAtLoad)."
-else
-  # Clusters have no launchd; the durable surface is bin/shuttle-launch — a
-  # respawn loop (exponential backoff on fast exits) in a named tmux session.
-  # Install it to ~/.local/bin so remote revival (remote_registry.ex invokes
-  # ~/.local/bin/shuttle-launch over SSH) always finds a current copy. The
-  # loop keeps `start --force` (see comments in bin/shuttle-launch).
-  mkdir -p "$HOME/.local/bin"
-  cp "$REPO/bin/shuttle-launch" "$HOME/.local/bin/shuttle-launch" \
-    && chmod +x "$HOME/.local/bin/shuttle-launch" \
-    || die "failed to install shuttle-launch to ~/.local/bin."
-  ok "shuttle-launch installed to ~/.local/bin."
+# Both macOS and Linux get a real supervisor: launchd there, a systemd user
+# unit here. The tmux respawn loop remains the honest fallback for a Linux host
+# with no systemd user session — an HPC login node usually has none.
+start_respawn_loop() {
   if tmux has-session -t shuttle-daemon 2>/dev/null; then
     ok "respawn loop already running (tmux session 'shuttle-daemon')."
     note "to cycle to the freshly-built escript, kill the :4000 listener — the loop respawns it:"
@@ -280,6 +272,47 @@ else
     SHUTTLE_DIR="$REPO" "$HOME/.local/bin/shuttle-launch" \
       && ok "respawn loop started (tmux session 'shuttle-daemon')." \
       || die "failed to start respawn loop."
+  fi
+}
+
+if [ "$OS" = Darwin ]; then KEEPALIVE_KIND=launchd
+elif have_systemd_user; then KEEPALIVE_KIND=systemd
+else KEEPALIVE_KIND="respawn loop"; fi
+step "Keep-alive ($KEEPALIVE_KIND)"
+if [ "$OS" = Darwin ]; then
+  # The launchd path lives in the Makefile: it captures the real login PATH and
+  # the persistent ssh-agent socket, renders the plist, and (re)loads the agent.
+  # Reuse it rather than duplicating that subtle env capture here.
+  make -C "$REPO" install-agent || die "make install-agent failed."
+  ok "launchd agent loaded (KeepAlive + RunAtLoad)."
+else
+  # bin/shuttle-launch goes to ~/.local/bin on every Linux host regardless of
+  # which supervisor wins: remote revival (remote_registry.ex invokes
+  # ~/.local/bin/shuttle-launch over SSH) must always find a current copy.
+  mkdir -p "$HOME/.local/bin"
+  cp "$REPO/bin/shuttle-launch" "$HOME/.local/bin/shuttle-launch" \
+    && chmod +x "$HOME/.local/bin/shuttle-launch" \
+    || die "failed to install shuttle-launch to ~/.local/bin."
+  ok "shuttle-launch installed to ~/.local/bin."
+
+  if have_systemd_user; then
+    # Same Makefile target as macOS, systemd arm: it captures the login PATH
+    # and renders share/io.shuttle.daemon.service.template. It needs
+    # AGENT_FELT_STORES (make inherits it from this environment) — without one
+    # it refuses, and the respawn loop is still a working keep-alive, so warn
+    # and fall back rather than aborting a bootstrap that got this far.
+    if make -C "$REPO" install-agent; then
+      ok "systemd user unit enabled (Restart=always + starts at login)."
+      note "survive logout and start at boot:  loginctl enable-linger $(id -un)"
+    else
+      warn "make install-agent failed (see above) — falling back to the tmux respawn loop."
+      note "retry it with a store:  make install-agent AGENT_FELT_STORES=~/my-store"
+      start_respawn_loop
+    fi
+  else
+    warn "no systemd user session here; using the tmux respawn loop instead."
+    note "systemd would give you Restart=always + start at boot; a login node often has neither."
+    start_respawn_loop
   fi
 fi
 

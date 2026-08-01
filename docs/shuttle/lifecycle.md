@@ -116,6 +116,12 @@ roles, a fiber and file viewer, Stash and Capture dialogs, Attach (opens the
 worker's tmux session in kitty specifically — a non-kitty user gets nothing),
 and a requeue/resume dialog with a directive box.
 
+Attach is terminal lock-in, not platform lock-in: it drives kitty's
+remote-control CLI, and kitty runs on Linux and macOS alike. The only
+mac-specific part is the `osascript` call that raises the kitty window, and
+that is already a no-op elsewhere. `tmux attach -t shuttle-<fiber-id>` reaches
+any worker on any platform.
+
 Two gestures carry different meanings. **Drag-and-drop** advances the card's
 state. **Modal buttons** give you another worker on the same run.
 Drag-to-tempered acts by kind: on a standing role it accepts and re-arms, on a
