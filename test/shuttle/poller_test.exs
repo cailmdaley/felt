@@ -4481,6 +4481,10 @@ defmodule Shuttle.PollerTest do
            end)
   end
 
+  # The wait_until ceiling below is ~60s of sleep alone (2400 × 25ms), plus a
+  # snapshot round trip per probe — ExUnit's default 60s timeout kills the test
+  # before the margin can be used. The tag is what makes the ceiling real.
+  @tag timeout: 150_000
   test "poller clears stale running state when the tmux session disappears" do
     fiber_id = "tests/missing-running-session"
 
