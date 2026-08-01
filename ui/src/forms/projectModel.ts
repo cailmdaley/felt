@@ -59,7 +59,7 @@ export interface ProjectEntry {
   name: string
   /** `shuttle.project_dir` — the worker cwd AND the create endpoint's felt root. */
   path: string
-  /** Owning host/remote (bare name, e.g. `dapmcw68`, `candide`). */
+  /** Owning host/remote (bare name, e.g. `my-laptop`, `cluster-a`). */
   originId: string
   /** This origin is the local daemon's own host. Owner-routed writes (Stash
    *  create, Capture spawn) send `origin: 'local'` for these; remote projects

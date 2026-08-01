@@ -132,7 +132,7 @@ The registry file takes this canonical shape. A bare JSON array also works.
 ```json
 {
   "version": 1,
-  "felt_stores": ["/Users/you/dev/myproject"]
+  "felt_stores": ["/home/you/dev/myproject"]
 }
 ```
 
@@ -179,6 +179,15 @@ rides an existing `ControlMaster` socket, which is what a 2FA host needs. A
 `felt shuttle tunnels install` writes. Single-machine use needs none of this: an
 absent file means no remotes.
 
+`bin/shuttle-deploy` reads the same file, so the fleet is described once. Give
+a remote a `checkout` (its repo path) to make it a deploy target — a remote
+without one is skipped. Two more optional keys serve deploy only: `ssh_flags`,
+a list of extra ssh arguments, and `auth`, which the deploy script reads as
+`"pubkey"` (the default) or `"interactive"`. Mark a host `"interactive"` when
+its ssh needs a live human credential — push-2FA or a short-lived certificate —
+and `bin/shuttle-deploy --handshake` will bootstrap a `ControlMaster` for it
+instead of failing.
+
 ## The event stream
 
 The daemon ranks in-flight workers by idle time and renders each card's
@@ -202,7 +211,7 @@ echo '{"hook_event_name":"SessionStart"}' | SHUTTLE_EVENTS_FILE=/tmp/e.jsonl fel
 
 ```bash
 curl -s http://127.0.0.1:4000/api/v1/version   # daemon answers
-open http://127.0.0.1:4000/                    # the kanban board
+open http://127.0.0.1:4000/                    # the kanban board (macOS; use `xdg-open` on Linux)
 felt shuttle ps                                # running workers
 make logs                                      # tail the daemon log
 make status                                    # ps + a snapshot summary

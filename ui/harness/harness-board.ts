@@ -108,11 +108,11 @@ const IN_FLIGHT: MockFiber[] = [
     shuttle: shuttleBlock(),
   },
   {
-    id: 'work/cea/cea-admin/reimbursement',
-    name: 'File the CEA mission reimbursement',
+    id: 'work/admin/conference-travel-receipts',
+    name: 'File the conference travel reimbursement',
     status: 'active',
-    outcome: 'Attach the Moriond receipts; submit before the quarter closes.',
-    tags: ['cea', 'admin'],
+    outcome: 'Attach the receipts; submit before the quarter closes.',
+    tags: ['admin'],
     shuttle: shuttleBlock(),
   },
 ]

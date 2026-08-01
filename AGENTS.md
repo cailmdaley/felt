@@ -110,8 +110,8 @@ The merge that earlier notes framed as a goal is the achieved state:
 
 - **One CLI surface.** Every caller speaks `felt shuttle <verb>`; the standalone
   `shuttle-ctl` Go shim is retired (Stage A).
-- **One repo, one checkout.** felt and Shuttle live together at `~/dev/felt`,
-  building three artifacts from one source tree (Stage B). Portolan is retired —
+- **One repo, one checkout.** felt and Shuttle live in one source tree, building
+  three artifacts from it (Stage B). Portolan is retired —
   Shuttle is self-contained, with its own browser UI and launch story, and
   assumes no Portolan process is running.
 - **The `shuttle:` block is in felt's surface.** The contract that used to be
@@ -164,9 +164,9 @@ make install      # full from-source bootstrap (bootstrap.sh)
 make install-agent / uninstall-agent   # durable launchd keep-alive (macOS)
 ```
 
-`make build` needs `go` on PATH. **On the clusters (candide/cineca) use
-`make all` / `make daemon`** — they build only the escript and need no Go
-toolchain.
+`make build` needs `go` on PATH. **On a host with no Go toolchain — typically a
+Linux server where you only run the daemon — use `make all` / `make daemon`**:
+they build only the escript.
 
 The escript loads its BEAMs at boot, so editing Elixir source has zero effect on
 a running daemon until you restart. **`make restart` always** for daemon source
@@ -201,7 +201,7 @@ shell-started via `make start`.)
   writable; override with `FELT_INSTALL_DIR`). Also Homebrew
   (`brew install cailmdaley/tap/felt`) or `go install github.com/cailmdaley/felt@latest`.
 
-- **(b) Fleet / dev from-source bootstrap** — stands up the **entire** local
+- **(b) Dev / multi-host from-source bootstrap** — stands up the **entire** local
   surface:
 
   ```bash
@@ -212,21 +212,19 @@ shell-started via `make start`.)
 
   Builds+installs the felt CLI, builds the daemon escript, places `ui/dist`,
   registers the plugin event hook (`felt hook event`) and probes it, installs
-  the keep-alive (launchd
-  LaunchAgent on macOS / the `shuttle-daemon` tmux respawn loop on the clusters).
+  the keep-alive (launchd LaunchAgent on macOS / the `shuttle-daemon` tmux
+  respawn loop on Linux).
   `go` is a bootstrap prerequisite. Flags include `--skip-ui` / `--build-ui` (UI
-  defaults to build on macOS, skip on clusters), `--skip-hook`, `--with-tunnels`
+  defaults to build on macOS, skip on Linux), `--skip-hook`, `--with-tunnels`
   (also installs the SSH tunnels on the macOS hub). bootstrap.sh branches by host
   type and is honest about missing prerequisites.
 
-### Canonical checkout — `~/dev/felt` (outside Documents is load-bearing)
+### Where the checkout lives — outside `~/Documents` on macOS
 
-The canonical checkout is **`~/dev/felt`** on **every** host — the macOS hub and
-both clusters (candide, cineca) — after the Stage-B3 cutover. The old
-`~/dev/shuttle` (hub) and `~/Documents/projects/shuttle` (clusters) are retired.
-It must live **outside `~/Documents`** — see the launchd/TCC rationale below
-(load-bearing on macOS; the clusters are Linux so unconstrained, but `~/dev/felt`
-is used there too for one uniform path).
+Put the checkout anywhere you like, with one macOS constraint: it must live
+**outside `~/Documents`** (and `~/Desktop` / `~/Downloads`) — see the
+launchd/TCC rationale below. Linux hosts are unconstrained. Using the same path
+on every host you run a daemon on keeps the deploy commands uniform.
 
 ### Durable launch (macOS) — `make install-agent`
 
@@ -248,22 +246,19 @@ fails to walk stores — and the fix would be granting FDA to *each* binary in t
 tree (`beam.smp`, `felt`, …), which is fragile (the erlang path is
 version-pinned) and exactly the per-binary grind to avoid.
 
-The clean setup, and the current production layout:
+The clean setup:
 
-- **The repo lives outside Documents** — the canonical checkout is
-  **`~/dev/felt`**. The escript and `ui/dist` are then readable by launchd with
-  no grant.
-- **`AGENT_FELT_STORES` scopes felt polling** (the Makefile default is
-  `~/loom`, baked into the plist as `FELT_STORES`). `~/loom` is outside Documents
-  and is the felt aggregate — it re-discovers each project's substores by
-  following symlinks under `~/loom/.felt/`
-  (`FeltStores.expand_with_symlinked_substores`), so configuring just `~/loom`
-  is enough when those symlinks point to readable project roots. **Caveat:**
-  substores whose real root is itself under a protected folder (for example a
-  Documents `lightcone`) are discovered but may be unreadable to the launchd
-  daemon until the project root also moves out of Documents. The iCloud wedding
-  store is intentionally not linked into `~/loom/.felt/` and is not an active
-  felt city.
+- **The repo lives outside Documents.** The escript and `ui/dist` are then
+  readable by launchd with no grant.
+- **`AGENT_FELT_STORES` scopes felt polling** (a Makefile variable, baked into
+  the plist as `FELT_STORES`). Point it at an aggregate store outside the
+  protected folders: felt re-discovers each project's substores by following
+  symlinks under `<store>/.felt/`
+  (`FeltStores.expand_with_symlinked_substores`), so configuring the aggregate
+  alone is enough when those symlinks point to readable project roots.
+  **Caveat:** a substore whose real root sits under a protected folder is
+  discovered but may be unreadable to the launchd daemon until that project root
+  also moves out of Documents.
 - **`PATH` is captured from a login shell at install time** (`AGENT_PATH` in the
   Makefile, baked into the plist). launchd's own env is too bare to find
   `escript` (Homebrew) at boot or `felt` (`~/.local/bin`) at runtime — and a
@@ -274,9 +269,9 @@ The clean setup, and the current production layout:
   Capturing the real login PATH once, at install, is deterministic and needs no
   hand-maintained list.
 
-Result: `make install-agent` from `~/dev/felt` → daemon binds `:4000`,
-KeepAlive + RunAtLoad, **zero Full Disk Access grants**, survives erlang
-upgrades. On the clusters the durable surface is `bin/shuttle-launch` — a
+Result: `make install-agent` from a checkout outside Documents → daemon binds
+`:4000`, KeepAlive + RunAtLoad, **zero Full Disk Access grants**, survives erlang
+upgrades. On Linux the durable surface is `bin/shuttle-launch` — a
 tracked respawn script that `bootstrap.sh` installs to `~/.local/bin` and runs
 in tmux session `shuttle-daemon`, backing off exponentially on fast daemon
 exits (2s→300s); no launchd, the LaunchAgent is macOS-only.
@@ -303,7 +298,7 @@ PreToolUse, Stop, SubagentStop, Notification, and SessionEnd. `.codex-plugin`
 points at the same file, so Codex sessions feed the stream too. Install with
 `felt setup claude` / `felt setup codex`; `bootstrap.sh` step 5 does both and
 then probes the writer. No `jq`, `perl`, or `hostname` — the whole line is built
-in Go, which is what makes it work on a bare cluster login node.
+in Go, which is what makes it work on a bare remote login node.
 
 **Writing is gated on `~/.shuttle` already existing** — the daemon's state
 directory is the opt-in, and the hook never creates it, so a felt-only install
@@ -318,97 +313,23 @@ byte-for-byte by `cmd/hook_event_test.go`, parsed by both Elixir readers in
 `test/shuttle/events_parity_test.exs`. Each host's daemon tails its own host's
 `~/.shuttle/events.jsonl`.
 
-**Connecting to candide, cineca, and amundsen (SSH auth — read this first).** The
-remotes authenticate differently, and getting it wrong looks like "the host is
-down" when it isn't:
+**Remote hosts are configured in `~/.config/felt/remotes.json`** (`felt shuttle
+remotes list|add|rm|path`). Each entry names an ssh alias and a local forwarded
+port; the daemon reaches a remote's API over that tunnel. How a given host
+authenticates is your ssh config's business — but note that an ssh alias needing
+a live credential (a short-lived certificate, a 2FA-backed ControlMaster) fails
+*instantly* with `Permission denied` once that credential lapses, and the
+symptom looks like a dead host: the kanban **Attach** button opens a terminal
+that flashes and dies. Refresh the credential before concluding Shuttle is
+broken.
 
-- **candide** (`candid03.iap.fr`, IAP) — plain pubkey auth with `~/.ssh/id_rsa`
-  (the `Host *` identity), reached through an `nc` `ProxyCommand` hop. No cert
-  dance: `ssh candide` just works whenever you're on a network that can reach
-  IAP. Nothing expires.
-- **cineca** (`login07-ext.leonardo.cineca.it`, user `cdaley00`, Leonardo) —
-  auth is a **step-ca short-lived SSH certificate** held in the ssh-agent,
-  valid **24h**. Refresh it once per day with:
-
-  ```bash
-  step ssh login 'cail.daley@cea.fr' --provisioner cineca-hpc
-  ```
-
-  When the cert is fresh, `ssh cineca` works non-interactively. When it has
-  expired, **every** `ssh cineca` fails instantly with `Permission denied` —
-  including the kanban **Attach** button, which runs `ssh -tt cineca tmux attach
-  …` in a kitty tab, so the symptom is a terminal that **flashes open and dies**.
-  That is the expired cert, not a Shuttle bug: re-run the `step ssh login` and
-  attach works again. The `~/.ssh/cineca_key` / `cineca_key-cert.pub` paths in
-  the ssh config are step's cert store — they may be absent on disk and ssh
-  prints a harmless `no such identity` warning; the live credential is the cert
-  in the agent. **Do not** pass `-o BatchMode=yes` when sanity-checking cineca
-  (it suppresses the cert path and falsely reports a dead host), and ignore
-  `~/.ssh/ssh_wrapper.sh` entirely — it's VS Code's remote helper, unrelated to
-  Shuttle.
-- **amundsen** (`amundsen.grid.uchicago.edu`, user `cailmdaley`, UChicago SPT
-  grid) — plain pubkey auth, no cert dance; `ssh amundsen` just works. Use the
-  ssh **alias** `amundsen` (not the bare hostname — the alias carries the user
-  and is what the tunnel/rsync commands assume). The alias also sets a couple of
-  LocalForwards (plot ports) + a RemoteForward that collide harmlessly when a
-  session already holds them; pass `-o ClearAllForwardings=yes` on one-off
-  ssh/rsync to silence the `Address already in use` noise.
-- **nibi** (user `cdaley`, Alliance Canada) — the public name
-  `nibi.alliancecan.ca` is a **TCP load balancer over login nodes l1–l4**, and
-  tmux + the shuttle daemon are per-node (they live on **l1**), so an unpinned
-  connection can land on the wrong node and see no tmux/daemon at all. The ssh
-  config therefore pins in two hops: `Host nibi-lb` holds the master to the
-  balancer, `Host nibi` is `HostName l1.nibi.sharcnet` + `ProxyJump nibi-lb`
-  (login nodes are not externally resolvable). Auth is pubkey + **Duo
-  keyboard-interactive 2FA** on BOTH hops — the in-cluster jump does not bypass
-  MFA — each prompting "Passcode or option (1-1)"; answering `1` sends a push
-  to Cail's phone. `ControlMaster auto` + `ControlPersist` on both hosts, so
-  after the masters are up every further ssh/rsync multiplexes with no 2FA.
-  Automating a fresh login: run `ssh nibi` in a tmux pane, `send-keys '1'
-  Enter`, and ask Cail to approve the push; the Duo prompt times out in ~60s,
-  so trigger it only when he's reachable — and let the remote shell exit
-  cleanly (don't kill the tmux session) so ControlPersist keeps the forked
-  master. If the `:4004` tunnel can't bind after a master cycle, a stale
-  forward on the lb master is squatting the port: `ssh -O cancel -L
-  4004:localhost:4000 nibi-lb`. Checkout is **`~/code/felt`** (like amundsen);
-  toolchain under `~/.local` (kerl OTP 27 + Elixir + Go), not on the
-  non-interactive PATH.
-  **The `:4004` LaunchAgent** (`com.cailmdaley.shuttle-tunnel-nibi`, unlike
-  candide/amundsen/cineca's plain `autossh`) can't just reconnect on its own
-  the way the others do — a fresh master would need a Duo push, so it must
-  reuse the interactively-authenticated ControlMaster instead of opening one.
-  It runs `~/.local/bin/shuttle-tunnel-nibi.sh`, which every 30s curls
-  `localhost:4004/api/v1/version` (the thing that actually matters, not just
-  "is a control socket file present") and only touches anything if that
-  fails: kills any stale forward and rebinds if the master's still up, or
-  logs a rate-limited "needs a human" line if it isn't. **Gotcha that cost a
-  day of silent breakage:** `~/.ssh/config` is a symlink into ProtonDrive
-  CloudStorage, and a background LaunchAgent has no Full Disk Access /
-  FileProvider grant outside a Terminal process tree — `ssh -O check nibi`
-  run from the LaunchAgent silently never reads it and fails with "No
-  ControlPath specified for -O command", even though the identical command
-  works fine interactively. The original hand-rolled loop hit exactly this
-  and sat inert for 18+ hours with nothing in its log (the failure was
-  piped to `/dev/null`). Fix: the script passes `-F
-  ~/.ssh/nibi-tunnel-lb.conf`, a plain local (non-symlinked) copy of just the
-  `nibi`/`nibi-lb` Host blocks — same `HostName`/`User`/`ControlPath`, so
-  `%C` hashes identically and it attaches to the same already-running
-  master. Keep that file in sync by hand if the real config's nibi blocks
-  change. Details: felt fiber
-  `ai-futures/felt/debug/finding-nibi-4004-tunnel-loop-not-self-healing`.
-
-**`bin/shuttle-deploy` is the fleet deploy verb — use it instead of hand-rolling
-the ritual.** `bin/shuttle-deploy` (macOS hub, from the repo root) pushes once,
-then per host: pull → `make daemon` → rsync `ui/dist` → cycle the daemon
-(launchctl kickstart locally; kill the `:4000` listener on clusters so the
-respawn loop restarts it) → poll `/api/v1/version` until `git_short_sha`
-matches → release the boot quarantine. `--hosts local,candide,…` for a subset,
-`--list` for the host table (the single place per-host checkout paths and ssh
-quirks live — adding a fleet member is one case arm there plus ssh config).
-Preflight fails fast on dead ssh (expired cineca cert, no nibi ControlMaster)
-with a pointer here — or, with `--handshake` and a human reachable, it
-bootstraps the nibi Duo master itself (the ritual above, scripted: tmux
-`ssh nibi`, send `1`, wait for the approved push).
+**The deploy ritual per host** is: push → on the host, pull → `make daemon` →
+rsync `ui/dist` → cycle the daemon (launchctl kickstart on macOS; kill the
+`:4000` listener on Linux so the respawn loop restarts it) → poll
+`/api/v1/version` until `git_short_sha` matches → release the boot quarantine.
+`bin/shuttle-deploy` scripts exactly that. It reads the fleet from
+`~/.config/felt/remotes.json` — a remote with a `checkout` field is a deploy
+target; without one it is skipped.
 
 **Deploying is ALWAYS safe — local or remote — and is never a blocker.**
 Rebuilding and restarting the daemon (`make all`, cycling `:4000`, reloading the
@@ -418,8 +339,8 @@ below). A restart cycles the watcher and rebinds the API; the `shuttle-<id>`
 tmux sessions keep running untouched and the daemon re-adopts them on boot. So
 deploy freely whenever there's a fix to ship — never hold back, gate it behind
 "there are workers running," or frame a deploy as risky. The costs are the
-brief API/board blip during the ~1s (local) to ~2min (candide cold-walk)
-restart, and one deliberate follow-up: **every restart arms the boot
+brief API/board blip during the restart — ~1s locally, up to a couple of minutes
+on a remote host with a cold store walk — and one deliberate follow-up: **every restart arms the boot
 quarantine** — the rule is BROAD: while quarantined, NO autonomous dispatch of
 any kind proceeds, fresh launches and dirty-death resumes alike, all parked in
 `pending_launch` until a human runs `bin/shuttle release` (POST
@@ -438,26 +359,21 @@ review (a subagent over the diff-against-constitution, an adversarial pass for
 complex work) → **then deploy, in the same session** (and release the boot
 quarantine the restart armed — `bin/shuttle release` — so fresh dispatch
 resumes). Reserve "stop for the
-human" for the genuinely different case — a change whose *design* he should weigh
-in on before it ships (a capability removed, a contract redrawn, a load-bearing
+human" for the genuinely different case — a change whose *design* a human should
+weigh in on before it ships (a capability removed, a contract redrawn, a load-bearing
 model choice); even then, surface the alternatives in the fiber and keep moving
 rather than treating the deploy *mechanics* as the gate.
 
-**Deploying to remote hosts (candide, cineca, amundsen):** push to GitHub first,
-then build on the host — don't copy the macOS escript, as BEAM bytecode format
-varies across OTP versions and the binary will crash on startup on a different
-host. candide/cineca run the merged felt repo from **`~/dev/felt`** (post-B3);
-**amundsen's checkout is `~/code/felt`** (its BEAM toolchain is kerl-OTP +
-precompiled Elixir under `~/.local`, not `~/dev/felt`). The respawn loop is
-driven by `~/.local/bin/shuttle-launch` — a copy of the tracked
-`bin/shuttle-launch` that `bootstrap.sh` installs (repo resolved via
-`SHUTTLE_DIR` or the script's own location; the loop backs off exponentially
-on fast daemon exits, 2s→300s).
+**Deploying to a remote host:** push to your git remote first, then build on the
+host — don't copy an escript built elsewhere, as BEAM bytecode format varies
+across OTP versions and the binary will crash on startup on a host with a
+different OTP. The respawn loop is driven by `~/.local/bin/shuttle-launch` — a
+copy of the tracked `bin/shuttle-launch` that `bootstrap.sh` installs (repo
+resolved via `SHUTTLE_DIR` or the script's own location; the loop backs off
+exponentially on fast daemon exits, 2s→300s).
 
 ```bash
-ssh candide  "cd ~/dev/felt  && git pull && make daemon"
-ssh cineca   "cd ~/dev/felt  && git pull && make daemon"
-ssh amundsen "cd ~/code/felt && git pull && make daemon"   # note: ~/code/felt
+ssh <host> "cd <checkout> && git pull && make daemon"
 ```
 
 After a remote deploy, verify both `/api/v1/version` and one behavior-shaped
@@ -466,16 +382,16 @@ payload still has old semantics, run `make clean && make daemon`, then let the
 respawn loop restart the daemon from the clean escript.
 
 **The respawn loop owns the remote daemon — `make stop`/`make all` may not
-cycle it.** On candide/cineca the `shuttle-launch --loop` respawn loop in tmux
-session `shuttle-daemon` owns the live daemon. `make stop`/`make all` target the
+cycle it.** Where `shuttle-launch --loop` runs in tmux session `shuttle-daemon`,
+that loop owns the live daemon. `make stop`/`make all` target the
 pidfile that `make start` writes, which is *not* the respawn-spawned daemon, so
 they can build a fresh `bin/shuttle` yet leave the old binary serving `:4000`. To
 actually cycle to the new binary, **kill the `:4000` listener directly**
 (`lsof -ti:4000 -sTCP:LISTEN | xargs kill`) — the respawn loop restarts it from
 the rebuilt escript. Confirm `git_short_sha` flipped; if not, the old process is
-still bound. **candide startup is slow (~2 min)** — it scans large shapepipe felt
-stores and adopts orphan sessions before binding `:4000`; wait it out, don't
-assume a crash.
+still bound. **A host with large felt stores can take minutes to start** — it
+walks every store and adopts orphan sessions before binding `:4000`; wait it
+out, don't assume a crash.
 
 **`RemoteRegistry`'s circuit breaker — a remote gets 3 failed revive cascades,
 then a human.** Each configured remote is driven by a recovery state machine;
@@ -488,12 +404,6 @@ just comes back). To force one more cascade before that: `bin/shuttle reset
 <remote>` or `POST /api/v1/remotes/:name/reset` — one reset buys exactly one
 cascade, and it 409s if the breaker isn't currently tripped.
 
-Candide: OTP 27.3.4.12 pinned in `~/.tool-versions`. Daemon log:
-`~/.shuttle/shuttle.log`. cineca runs OTP 28.0.2 and **compiles fine** (the old
-"OTP 28.0.x compilation crash" no longer reproduces on current `main`; only a
-non-fatal "regexes re-compiled at runtime" perf warning remains — OTP 28.1+ or
-27- silences it).
-
 **The daemon serves its own web UI at `http://127.0.0.1:4000/`** — the kanban
 board, Stash/Capture, and the fiber/file viewer, served as the static `ui/dist`
 bundle by the same process as the `:4000` API (`Plug.Static` + `SpaController`).
@@ -502,22 +412,18 @@ checkout that hasn't built the bundle gets a 404 with the hint
 `cd ui && npm run build`; the API stays usable regardless.
 
 **The UI bundle is shipped, not built on-host.** `make all` rebuilds only the
-Elixir escript — it does *not* build `ui/dist`. And the UI **can't** be built on
-the clusters from a source-only `lightcone-ui` clone: the aliased renderer source
-imports its myst peers (`myst-to-react`, `@myst-theme/*`), which Node resolves
-from `lightcone-ui`'s *own* `node_modules` — present only after a `pnpm install`
-of that workspace. But the bundle is host-independent static output, so the lean
-path is **build `ui/dist` locally (where the deps resolve) and `rsync` it**:
+Elixir escript — it does *not* build `ui/dist`. The bundle is host-independent
+static output, so the lean path is **build `ui/dist` on a host that has the
+Node toolchain and `rsync` it to the rest**:
 
 ```bash
-cd ui && npm run build              # locally; lightcone-ui present → paper entry included
-rsync -az --delete ui/dist/ candide:~/dev/felt/ui/dist/
-rsync -az --delete ui/dist/ cineca:~/dev/felt/ui/dist/
-rsync -az --delete -e "ssh -o ClearAllForwardings=yes" ui/dist/ amundsen:code/felt/ui/dist/   # amundsen: ~/code/felt
+cd ui && npm run build
+rsync -az --delete ui/dist/ <host>:<checkout>/ui/dist/
 ```
 
-(The renderer is compiled *into* the bundle, so a remote serving the shipped
-`dist` self-serves the paper render — it needs no `lightcone-ui` at runtime.)
+An optional MyST renderer is compiled *into* the bundle when its source is
+present at build time, so a remote serving the shipped `dist` needs no Node
+toolchain at runtime.
 
 **A daemon route change is a bundle-rebuild event.** `make all` rebuilds the
 escript and rebinds `:4000` but never touches `ui/dist`, and nothing checks that
@@ -527,21 +433,14 @@ run build` + rsync to every host — the browser always runs the *local* bundle,
 a route mismatch fails silently as a 404 with no daemon-side error. This is exactly
 how the shed-history merge broke *all* launches: it deleted `POST /api/v1/felt-history`,
 but the stale `dist` still posted the directive there as the first step of New
-Session, so the launch 404'd before it ever dispatched (provenance:
-[[shuttle/findings/finding-uidist-stale-after-route-removal]]). If a fresh
+Session, so the launch 404'd before it ever dispatched. If a fresh
 `npm run build` exits 194 with *zero* output, that's not a type error — it's a
 corrupted `node_modules` (circular `.bin` symlinks); `npm ci` fixes it.
 
-**The ASTRA paper path needs node + a built MySTRA on each owning host.**
-`GET /api/v1/astra` is owner-routed and shells out to `priv/mystra/bake.mjs`,
-which imports MySTRA's built `dist`. Each host that *owns* astra.yamls you want
-to render needs: `node` (any v22+) and a MySTRA checkout built once —
-`git clone -b cail/migrate-to-astra-spec-sdk …/MySTRA && cd MySTRA && npm install
-&& npm run build` at `~/Documents/projects/LightconeResearch/MySTRA` (the sibling
-path `bake.mjs` resolves by default; its `dist/` is gitignored). The bake finds
-node via a `bash -lc` login-shell fallback, so it works even though the respawn
-loop sources asdf but not nvm. A host without node/MySTRA fails `/astra` cleanly;
-the board + fibers are unaffected.
+**`GET /api/v1/astra` is a maintainer-only integration.** It is owner-routed and
+shells out to `priv/mystra/bake.mjs`, which needs `node` plus a built MySTRA
+checkout beside the repo on the host that owns the astra.yaml. A host without
+them fails `/astra` cleanly; the board and fibers are unaffected.
 
 **The repo builds three things.** The **felt CLI** (Go: `main.go`, `cmd/`,
 `internal/`) — including the `felt shuttle <verb>` subcommands, which ARE Go code
@@ -601,8 +500,9 @@ felt shuttle validate-identity                # UID migration/cross-city validat
   READ (`/api/v1/fibers/:id?body=true`, `/file`, `/astra`) and every cross-host
   WRITE is **owner-routed via `Shuttle.OriginRouter`**: the composite board
   stamps each fiber's `origin`, the client carries it back, and the local daemon
-  forwards to the owner's identical endpoint over the SSH LocalForward
-  (candide→:4001, cineca→:4002, amundsen→:4003, nibi→:4004). The `~/loom` git mirror replicating a remote
+  forwards to the owner's identical endpoint over the SSH LocalForward each
+  remote declares in `~/.config/felt/remotes.json` (`:4000` is local; remotes
+  take `:4001`, `:4002`, …). A git mirror that happens to replicate a remote
   fiber's files locally is **incidental and must never be relied on** — if any
   feature works only because a file happened to git-sync, that is a bug. The
   symptom when this invariant is violated: a remote card shows its outcome (it
@@ -613,8 +513,8 @@ felt shuttle validate-identity                # UID migration/cross-city validat
 - **Agent records live in one source of truth: felt's registry.** Felt resolves
   the registry as two layers — `internal/shuttle/agents.builtin.json` (embedded)
   with the user file (`$FELT_AGENTS_FILE`, else `~/.config/felt/agents.json`)
-  merged over it. `share/agents.example.json` carries the full fleet roster and
-  is what this fleet's hosts install as their user file. `human` is reserved and
+  merged over it. `share/agents.example.json` is a worked example of that
+  user file — copy it and edit it for your own agents. `human` is reserved and
   always present; a malformed user file fails loud with its path, a missing one
   is silent. The daemon reads the already-resolved record off felt's
   `shuttle.resolved.agent` JSON and shells `felt shuttle agents [resolve]` for
@@ -622,7 +522,7 @@ felt shuttle validate-identity                # UID migration/cross-city validat
   and no `config/agents.exs`.
 - **Remote daemons live in `~/.config/felt/remotes.json`.** The Go CLI
   (`cmd/shuttle_remotes.go`) and the daemon (`lib/shuttle/remotes.ex`) read the
-  same file at runtime, so nothing about the fleet is baked at build time.
+  same file at runtime, so nothing about your hosts is baked at build time.
   `felt shuttle remotes list|add|rm|path` manages it, and `list` doubles as the
   validator. `test/fixtures/remotes/` enforces Go/Elixir parity, and
   `cmd/hygiene_test.go` fails the build on a personal hostname in `config/`,
@@ -660,8 +560,8 @@ felt shuttle validate-identity                # UID migration/cross-city validat
   its `project_dir` exists here, felt `status` is `active`, and it isn't
   already running/claimed (see `eligible?/2` in poller.ex).
 - **Configured stores** come from `FELT_STORES` (comma-separated env var) →
-  persisted `~/.config/felt/stores.json`. There is no implicit `~/loom`
-  fallback and no legacy Shuttle-named registry authority. `POST
+  persisted `~/.config/felt/stores.json`. There is no implicit default store
+  and no legacy Shuttle-named registry authority. `POST
   /api/v1/felt-stores` rewrites the persisted file.
 - **Dispatcher** (`lib/shuttle/dispatcher.ex`) resolves the agent, spawns
   the `shuttle-<fiber-id>` tmux session.
@@ -798,7 +698,7 @@ are not available in `bash -l`.
 
 ## License
 
-The repo is **MIT** (the felt CLI + UI — Cail's original work). The Shuttle
+The repo is **MIT** (the felt CLI + UI). The Shuttle
 daemon (`lib/`) contains code derived from OpenAI's Symphony under the **Apache
 License 2.0**, preserved in `NOTICE` and `LICENSE-APACHE`.
 

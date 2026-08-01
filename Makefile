@@ -14,7 +14,7 @@
 # agent registry — it reads the already-resolved record off felt's
 # `shuttle.resolved.agent` JSON and shells `felt shuttle agents [resolve]`.
 #
-# On the clusters (candide/cineca) use `make all` / `make daemon` — they build
+# On cluster login nodes use `make all` / `make daemon` — they build
 # only the escript and need no Go toolchain. `make build` (both) is a Mac/dev
 # convenience and needs `go` on PATH.
 
@@ -29,10 +29,11 @@ LOG := $(HOME)/Library/Logs/shuttle.log
 PIDPATTERN := [b]in/shuttle -B .* -extra [^ ]*bin/shuttle start
 AGENT_LABEL := io.shuttle.daemon
 AGENT_PLIST := $(HOME)/Library/LaunchAgents/$(AGENT_LABEL).plist
-# Felt stores the launchd daemon polls. Defaults to the aggregate store (~/loom,
-# outside ~/Documents) so the agent touches no TCC-protected path and needs no
-# Full Disk Access. Override to add stores: make install-agent AGENT_FELT_STORES=~/loom,/some/other
-AGENT_FELT_STORES ?= $(HOME)/loom
+# Felt stores the launchd daemon polls. No default: pass your own, e.g.
+#   make install-agent AGENT_FELT_STORES=~/my-store,/some/other
+# Prefer stores outside ~/Documents / ~/Desktop / ~/Downloads so the agent
+# touches no TCC-protected path and needs no Full Disk Access.
+AGENT_FELT_STORES ?=
 # The daemon's PATH, captured from a login shell at install time so it carries
 # Homebrew (escript/erl) and ~/.local/bin (felt), etc. — launchd's own env is
 # too bare, and sourcing the profile at runtime under launchd doesn't
@@ -40,8 +41,8 @@ AGENT_FELT_STORES ?= $(HOME)/loom
 AGENT_PATH ?= $(shell /bin/bash -lc 'echo $$PATH')
 # The user's PERSISTENT ssh-agent socket. launchd hands the daemon a bare
 # per-session Keychain agent that only holds the default key, so remote creds
-# added to the real agent — e.g. cineca's step-ca SSH cert — are invisible and
-# fresh ssh to cineca fails (dead remote feed; Attach tabs that open and die).
+# added to the real agent — e.g. a remote host's step-ca SSH cert — are invisible
+# and fresh ssh to that host fails (dead remote feed; Attach tabs that open and die).
 # ~/.ssh/agent.sock is the stable login-agent path; override if yours differs.
 AGENT_SSH_AUTH_SOCK ?= $(HOME)/.ssh/agent.sock
 
@@ -118,7 +119,7 @@ start:
 	@#     its own — launching our own would just collide on :4000.
 	@# So: if one's already running (launchd respawn / never down), adopt it and
 	@# wait for :4000; otherwise nohup-launch. Either way poll /api/v1/version up
-	@# to ~120s (launchd/candide slow boots adopt orphans before binding), and
+	@# to ~120s (launchd / slow remote boots adopt orphans before binding), and
 	@# fail fast the moment the daemon process dies — a real boot crash surfaces
 	@# immediately instead of after the full timeout.
 	@if pgrep -f '$(PIDPATTERN)' >/dev/null; then \
@@ -173,6 +174,10 @@ install:
 # run; `make stop` clears any nohup-spawned daemon so launchd owns the single
 # live instance.
 install-agent: daemon stop
+	@test -n "$(AGENT_FELT_STORES)" || { \
+	  echo "AGENT_FELT_STORES is required (comma-separated felt stores the daemon polls):"; \
+	  echo "  make install-agent AGENT_FELT_STORES=~/my-store"; \
+	  exit 1; }
 	@case "$(CURDIR)" in \
 	  $(HOME)/Documents/*|$(HOME)/Desktop/*|$(HOME)/Downloads/*) \
 	    echo "⚠️  $(CURDIR) is under a TCC-protected folder (~/Documents, ~/Desktop,"; \

@@ -17,7 +17,7 @@ export interface KanbanCard {
   originId: string
   /**
    * The owning host's felt store path (the feed row's `felt_store`, e.g.
-   * `/home/cdaley/loom` for a candide card). Threaded into owner-routed
+   * `/home/user/store` for a remote-host card). Threaded into owner-routed
    * fiber reads so the detail view reads the OWNER's copy, not the
    * git-synced local one.
    */
@@ -129,7 +129,7 @@ export interface KanbanCard {
   shuttleChrome?: boolean
   /**
    * `shuttle.host` — the daemon that owns this fiber's dispatch (e.g.
-   * `cineca`, `dapmcw68`). Routes a force-dispatch to the owning daemon and
+   * `cluster-a`, `my-laptop`). Routes a force-dispatch to the owning daemon and
    * tells the human where a worker will run.
    */
   shuttleHost?: string
@@ -195,7 +195,7 @@ export interface KanbanCard {
  */
 export interface KanbanOriginStaleness {
   status: 'fresh' | 'loading' | 'stale'
-  /** Hostname for human-readable badging (e.g. "waiting on cineca"). */
+  /** Hostname for human-readable badging (e.g. "waiting on cluster-a"). */
   hostname?: string
   /** ISO timestamp; only set when status === 'stale'. */
   staleSince?: string

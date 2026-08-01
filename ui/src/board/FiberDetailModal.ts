@@ -1092,7 +1092,7 @@ export class FiberDetailModal {
       actionsSec.append(actionsRow, actionsErr)
     }
 
-    // Tags editor removed (Cail) — not needed in the detail panel.
+    // Tags editor removed — not needed in the detail panel.
 
     // ── Worker (shuttle options) ──────────────────────────────────────────
     // Console-style editor for the fiber's shuttle frontmatter block: agent,
@@ -2012,7 +2012,7 @@ export class FiberDetailModal {
     // ── Fallback: parse the LOCAL events.jsonl over /file ──
     // The old gate was `card.originId === 'local'`, which is NEVER true for a
     // real local card: the composite feed stamps local rows with the daemon's
-    // own host id (`own_host_id()`, e.g. `dapmcw68`) and sets the feed's top-
+    // own host id (`own_host_id()`, e.g. `my-laptop`) and sets the feed's top-
     // level `host` to that same id — so a local card has `originId === feed.host`
     // (a hostname), not the literal `'local'`. That false gate short-circuited
     // the fallback for every real local card, so until `/api/v1/sent-files`
@@ -2029,7 +2029,7 @@ export class FiberDetailModal {
     // once per panel-open, primary endpoint already tried).
     const home = homeFromDir(card.fiberDir)
     if (!home) return []
-    const eventsPath = `${home}/.portolan/data/events.jsonl`
+    const eventsPath = `${home}/.shuttle/events.jsonl`
     try {
       const res = await fetch(fileBytesUrl(this.shuttleBase, eventsPath, 'local'))
       if (!res.ok) return []
@@ -2699,7 +2699,7 @@ function relativeTime(timestamp: number): string {
 /**
  * Derive the user's home dir from a fiber's directory — the first two path
  * segments on macOS/Linux (`/Users/<name>` or `/home/<name>`). The
- * events.jsonl fallback reads `<home>/.portolan/data/events.jsonl`. Returns
+ * events.jsonl fallback reads `<home>/.shuttle/events.jsonl`. Returns
  * null for a path too shallow to carry a home (or absent).
  */
 /**

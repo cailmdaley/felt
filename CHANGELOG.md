@@ -119,6 +119,20 @@ recency now live in the frontmatter.
   success, so one failed poll no longer flips the badge.
 - The plugin bundles the shuttle skill alongside the felt skill. Both
   skills were rewritten against the current CLI.
+- **The repo passes a stranger test on its prose, not just its code.**
+  The maintainer's operator notes (~190 lines of hostnames, SSH rituals,
+  per-host checkouts) moved out of AGENTS.md; the hygiene test now scans
+  `ui/`, `bin/`, `share/`, every Markdown file, the Makefile, and
+  `bootstrap.sh` for personal identifiers and paths, so they cannot creep
+  back. `bin/shuttle-deploy` reads the fleet from
+  `~/.config/felt/remotes.json` (a remote with a `checkout` key is a
+  deploy target; `auth: "interactive"` marks hosts needing a live human
+  credential). `make install-agent` requires `AGENT_FELT_STORES`
+  explicitly instead of defaulting to a private store. The kitty
+  window-raise is a no-op off macOS, and `~/.local/bin` joined the kitty
+  binary candidates. The Elixir suite pins `FELT_REMOTES_FILE` alongside
+  `FELT_AGENTS_FILE`, so a developer's own fleet config can no longer
+  fail the label assertions.
 
 ### Removed
 
@@ -170,7 +184,7 @@ recency now live in the frontmatter.
 These entries concern the maintainer's own machines. They are listed for
 completeness.
 
-- Registered remotes: amundsen (`:4003`) and nibi (`:4004`).
+- Registered two additional remotes (`:4003`, `:4004`).
 - Multiplexed tunnels for 2FA hosts, supervised by a socket-gated loop
   instead of autossh.
 - `bin/shuttle-deploy` gained a fleet verb and `--handshake`.

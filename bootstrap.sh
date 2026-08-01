@@ -249,14 +249,6 @@ else
   fi
   rm -f "$PROBE"
 
-  # A host still carrying the retired loom registration writes every event
-  # twice. Harmless — both readers are idempotent — but worth naming.
-  SETTINGS="$HOME/.claude/settings.json"
-  if [ -f "$SETTINGS" ] && grep -q 'shuttle-hook.sh' "$SETTINGS" 2>/dev/null; then
-    warn "legacy loom registration still active in ~/.claude/settings.json."
-    note "every event is written twice (harmless — both readers dedupe)."
-    note "clear it:  git -C ~/loom pull && ~/loom/setup.sh"
-  fi
 fi
 
 # ── 6. keep-alive ───────────────────────────────────────────────────────────

@@ -764,7 +764,7 @@
    PAST that — explicit `width:100%` (not object-fit/max-width) gives the image a
    concrete layout size that `zoom` actually multiplies, so the cell overflows
    and pans in both axes. (max-width/contain absorbed the zoom → the fit-width
-   "cap" Cail hit.) */
+   cap that motivated this.) */
 .kbn-detail-view-cell > .kbn-fileview-image-wrap {
   display: block;
   width: 100%;
@@ -802,7 +802,7 @@
   display: block;
   /* Fill the panel: no narrow reading column, only a slim gutter — the page
      IS the panel, so the prose tracks the panel width and grows as it's
-     resized (per Cail's parity note: text should be ~full width, tiny
+     resized (per the parity note: text should be ~full width, tiny
      margins, and follow the pop-up's size). */
   max-width: none;
   margin: 0;

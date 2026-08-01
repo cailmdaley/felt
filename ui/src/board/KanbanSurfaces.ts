@@ -37,12 +37,12 @@ const TIMELINE_DAY_WIDTH_PX = 225
 // roles page behind a "+N more" affordance rather than scrolling.
 const PINNED_MAX_ROWS = 2
 
-/** Stash cluster-key derivation: skip umbrella roots (`ai-futures`,
- *  `ai`) and use the first project-level segment instead. Containment-
- *  path remains the load-bearing axis (always present, no user
- *  effort); the skip list is empirically-noisy umbrellas that don't
- *  carry meaning for the user. */
-const CLUSTER_KEY_SKIP_ROOTS = new Set<string>(['ai-futures', 'ai'])
+/** Stash cluster-key derivation: skip umbrella roots and use the first
+ *  project-level segment instead. Containment-path remains the load-bearing
+ *  axis (always present, no user effort); the skip list is for umbrella
+ *  root fibers that are too broad to carry meaning as a cluster key on
+ *  their own — populate it with root fiber names specific to your store. */
+const CLUSTER_KEY_SKIP_ROOTS = new Set<string>()
 
 /**
  * Daemon runtime phases that earn a chip on an In-flight card.

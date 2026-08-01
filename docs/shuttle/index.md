@@ -22,7 +22,7 @@ status: active
 shuttle:
   kind: oneshot
   host: my-laptop
-  project_dir: /Users/me/dev/pipeline
+  project_dir: /home/me/dev/pipeline
   agent: claude-opus
 ---
 ```
@@ -90,16 +90,12 @@ prior transcript.
 Shuttle runs the maintainer's machines every day, and parts of it still show
 that. This section lists them all; the other pages point here.
 
-- **`bin/shuttle-deploy` serves the maintainer's fleet.** It rsyncs a checkout
-  to named hosts and restarts their daemons. The general name oversells it.
-  Ignore it unless you run the same layout.
 - **macOS gets the most use.** The launchd keep-alive, the tunnel plists, and
   the TCC workarounds are all macOS-first. Linux runs on a thinner path: a tmux
   respawn loop, no systemd unit.
-- **Several examples name a private store.** Docs and Makefile defaults point at
-  `~/loom`, the maintainer's [cross-project
-  store](../concepts/cross-project.md). Substitute your own store path
-  everywhere it appears.
+- **Several examples name the maintainer's store.** Docs use `~/loom`, a
+  [cross-project store](../concepts/cross-project.md), as the running example.
+  Substitute your own store path everywhere it appears.
 - **The daemon ships no release artifact.** You build it from a checkout and you
   keep the checkout. See [Installation](installation.md).
 

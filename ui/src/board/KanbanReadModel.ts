@@ -187,7 +187,7 @@ function assembleSurfaces(
   // stability among never-run roles.
   pinned.sort(byRecentActivityThenName);
   drafts.sort(byCreatedAtDesc);
-  // In-flight order surfaces the workers most likely to need Cail at the TOP and
+  // In-flight order surfaces the workers most likely to need the human at the TOP and
   // sinks the busy ones to the bottom — the inverse of a newest-first list.
   //   tier 0  attention   — the worker raised its hand (last hook event is a
   //                         Notification). Pinned to the very top.

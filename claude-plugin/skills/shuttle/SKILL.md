@@ -23,7 +23,7 @@ description: >
 
 Shuttle turns fibers into autonomous work. A fiber carrying a `shuttle:` block is a **constitution** — a spec whose body describes a desired state, not a plan. The daemon polls the fiber tree and keeps one tmux **worker** per eligible fiber (carries the block, felt `status: active`). A worker drives toward the desired state, exits at a clean checkpoint with a handoff, and the daemon dispatches fresh workers while the gap remains — work commonly spans sessions. Realization is asymptotic, not a checklist emptied; the constitution itself is amended as the world changes.
 
-The human's surfaces: the **kanban board** (served by the daemon at `:4000`) is a pure view over the same fibers and sessions — stash ideas, launch dispatches, steer workers, review what comes back. The **agent registry** (`felt shuttle agents`) maps a fiber's `shuttle.agent` to the CLI + model each dispatch runs. The daemon ships with felt; `~/dev/felt`'s AGENTS.md is the operator guide.
+The human's surfaces: the **kanban board** (served by the daemon at `:4000`) is a pure view over the same fibers and sessions — stash ideas, launch dispatches, steer workers, review what comes back. The **agent registry** (`felt shuttle agents`) maps a fiber's `shuttle.agent` to the CLI + model each dispatch runs. The daemon ships with felt; the operator guide lives at <https://cailmdaley.github.io/felt/> (AGENTS.md in the felt repo, for contributors).
 
 ## Reading by role
 

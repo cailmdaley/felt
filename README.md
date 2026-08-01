@@ -84,8 +84,8 @@ Each one rewrites the fiber's `outcome` and `## Status` on exit, so the next wor
 Configure Shuttle from your home directory. `~/.config/felt/agents.json` layers your agents over the
 built-in set (`felt shuttle agents init` seeds it). `~/.config/felt/remotes.json` lists the remote
 daemons a hub aggregates (`felt shuttle remotes add`). Shuttle still shows where it grew up: macOS
-gets the most use, `bin/shuttle-deploy` targets the maintainer's host layout, and the launchd
-keep-alive defaults `FELT_STORES` to `~/loom`, a private store. felt works without the daemon.
+gets the most use, and the daemon ships as a checkout you build, not a release binary. felt works
+without the daemon.
 Full list:
 [Honest scoping](https://cailmdaley.github.io/felt/shuttle/#honest-scoping).
 

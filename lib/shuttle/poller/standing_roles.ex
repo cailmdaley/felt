@@ -205,8 +205,8 @@ defmodule Shuttle.Poller.StandingRoles do
   # *concluding the run* — `LifecycleStore` folds `handed_off_at = now` into the
   # re-arm write, the same signal a clean worker exit leaves, since a human
   # accepting the run IS concluding it. This is what stops the standing-role
-  # temper oscillation Cail hit on his morning-post / weekly-arxiv roles (a worker
-  # that died without handing off was re-closed to awaiting on every reconcile).
+  # temper oscillation observed on standing roles like morning-post / weekly-arxiv
+  # (a worker that died without handing off was re-closed to awaiting on every reconcile).
   # Git-native, durable across a daemon restart, and needs no separate re-arm
   # field — the same `handed_off_at` covers both worker exit and human re-arm.
   def standing_role_dispatched_unexited?(fiber) do

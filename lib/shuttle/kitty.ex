@@ -24,6 +24,7 @@ defmodule Shuttle.Kitty do
   """
 
   @kitty_candidates [
+    Path.expand("~/.local/bin/kitty"),
     "/opt/homebrew/bin/kitty",
     "/usr/local/bin/kitty",
     "/Applications/kitty.app/Contents/MacOS/kitty"
@@ -209,13 +210,20 @@ defmodule Shuttle.Kitty do
     end
   end
 
-  # Raise kitty to the front (best-effort, macOS).
+  # Raise kitty to the front (best-effort, macOS-only — a no-op elsewhere).
   defp activate(_kitty) do
-    run("osascript", ["-e", ~s(tell application "kitty" to activate)])
-    :ok
+    case :os.type() do
+      {:unix, :darwin} ->
+        run("osascript", ["-e", ~s(tell application "kitty" to activate)])
+        :ok
+
+      _ ->
+        :ok
+    end
   end
 
   @kitten_candidates [
+    Path.expand("~/.local/bin/kitten"),
     "/opt/homebrew/bin/kitten",
     "/usr/local/bin/kitten",
     "/Applications/kitty.app/Contents/MacOS/kitten"

@@ -3235,8 +3235,8 @@ defmodule Shuttle.Poller do
       # run_felt already wraps a non-zero exit in a descriptive
       # `felt -C <host> show <id> failed: <stderr>` string. A common case here
       # is a felt-store path that doesn't exist on THIS host — e.g. a foreign
-      # absolute path (`/Users/.../loom`) that another machine's portolan
-      # registered. Surfacing the path + stderr instead of a bare reason is what
+      # absolute path (`/path/to/store` on another machine) that another
+      # machine's portolan registered. Surfacing the path + stderr instead of a bare reason is what
       # turns the old undiagnosable blank 500 into an actionable error. See
       # `gotcha-remote-daemon-foreign-felt-store-path`.
       {:error, reason} ->
