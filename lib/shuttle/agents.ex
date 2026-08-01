@@ -51,6 +51,57 @@ defmodule Shuttle.Agents do
   end
 
   @doc """
+  The token bash resolves when it runs this wrapper — its *command word*.
+
+  `build_command/3` interpolates `wrapper` into the run script UNQUOTED, so a
+  record may legitimately carry more than one token (`env FOO=1 claude`, a
+  `nice -n10` prefix). Bash resolves only the first of them as the command;
+  everything after is argument text. So the command word is the only part whose
+  resolution can be meaningfully checked, and quoting the whole string as one
+  token — as an earlier version of the probe did — would refuse a wrapper that
+  works perfectly well.
+
+  Returns `nil` when there is no token at all.
+  """
+  @spec wrapper_command_word(String.t() | nil) :: String.t() | nil
+  def wrapper_command_word(wrapper) when is_binary(wrapper) do
+    case String.split(wrapper, ~r/\s+/, trim: true) do
+      [word | _] -> word
+      [] -> nil
+    end
+  end
+
+  def wrapper_command_word(_), do: nil
+
+  @doc """
+  The shell probe that answers "does this agent's wrapper resolve?".
+
+  `build_command/3` renders the wrapper into a script the daemon runs as
+  `bash -l`, so its command word may be an executable on PATH *or* a shell
+  function the login profile sources. Only a login bash can tell them apart —
+  and only a login bash can tell you that neither is there. `type` reports both.
+
+  Returns the `{command, argv}` pair for `Shuttle.Runner.cmd/3`. A zero exit
+  means the word resolves; stdout then names what it resolved to (`file`,
+  `function`, `builtin`, `alias`). A non-zero exit means it resolves to nothing,
+  which is the failure the caller must refuse to spawn against.
+
+  Returns `:none` for a record carrying no wrapper at all — there is nothing to
+  probe, and answering is the caller's job, not a reason to raise in here.
+  """
+  @spec wrapper_probe(agent_record() | String.t() | nil) :: {String.t(), [String.t()]} | :none
+  def wrapper_probe(%{wrapper: wrapper}), do: wrapper_probe(wrapper)
+
+  def wrapper_probe(wrapper) when is_binary(wrapper) do
+    case wrapper_command_word(wrapper) do
+      nil -> :none
+      word -> {"bash", ["-lc", "type -t -- #{shell_escape(word)}"]}
+    end
+  end
+
+  def wrapper_probe(_), do: :none
+
+  @doc """
   Builds the shell command string for invoking an agent with the dispatch prompt.
 
   ## Options

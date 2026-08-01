@@ -52,6 +52,11 @@ defmodule Shuttle.CLI do
             IO.puts(:stderr, "Shuttle worker already running for #{fiber_id}")
             System.halt(0)
 
+          {:error, {tag, message}}
+          when tag in [:wrapper_unresolved, :work_dir_missing] and is_binary(message) ->
+            IO.puts(:stderr, "Dispatch refused — #{message}")
+            System.halt(1)
+
           {:error, reason} ->
             IO.puts(:stderr, "Dispatch failed: #{reason}")
             System.halt(1)
@@ -288,7 +293,8 @@ defmodule Shuttle.CLI do
   # POST the quarantine-release endpoint (`release`). A 503 means the daemon
   # is up but the poller isn't running.
   @doc false
-  def release_quarantine(port \\ nil), do: daemon_request(:post, "/api/v1/quarantine/release", port)
+  def release_quarantine(port \\ nil),
+    do: daemon_request(:post, "/api/v1/quarantine/release", port)
 
   # POST the circuit-breaker reset endpoint (`reset <remote>`). 404 = unknown
   # remote, 409 = breaker not tripped, 503 = remote registry not running.
@@ -336,5 +342,4 @@ defmodule Shuttle.CLI do
     # Read from env var instead, matching Shuttle.Application.configure_endpoint/0.
     System.get_env("SHUTTLE_PORT", "4000") |> String.to_integer()
   end
-
 end

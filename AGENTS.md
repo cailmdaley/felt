@@ -164,9 +164,12 @@ make install      # full from-source bootstrap (bootstrap.sh)
 make install-agent / uninstall-agent   # durable launchd keep-alive (macOS)
 ```
 
-`make build` needs `go` on PATH. **On a host with no Go toolchain — typically a
-Linux server where you only run the daemon — use `make all` / `make daemon`**:
-they build only the escript.
+`make build` needs `go` on PATH. `make all` / `make daemon` rebuild the felt CLI
+first when Go is present, to keep the CLI and daemon in lockstep. **On a host
+with no Go toolchain — typically a Linux server where you only run the
+daemon — that rebuild is skipped automatically** and they build only the
+escript, against whatever `felt` is already installed. Pass `SKIP_CLI=1` to
+force the same skip on a host that does have Go.
 
 The escript loads its BEAMs at boot, so editing Elixir source has zero effect on
 a running daemon until you restart. **`make restart` always** for daemon source
@@ -625,6 +628,28 @@ Dispatch sanity ladder:
    `make restart` (then `bin/shuttle release`).
 5. Daemon sees it but agent never appears → check the resolved agent's `cli`
    (`felt shuttle agents`) and that the wrapper is on `PATH`.
+
+**"The terminal opens and closes instantly", or the card never moves and no
+session exists.** The daemon preflights the resolved agent's wrapper before it
+spawns anything: it probes `bash -lc 'type -t <wrapper>'`, because the run
+script itself executes under `bash -l`. A wrapper that resolves to nothing
+there — never installed, or a shell function your *zsh/fish* config defines and
+your bash login profile does not — aborts the dispatch instead of spawning a
+session that dies in under a second. The refusal names the wrapper and the fix
+in the daemon log, in the snapshot's `blocked` row (so the board shows it), and
+in the dispatch API's 422. A wrapper that exists only as a shell **alias** is
+refused too — a non-interactive login bash does not expand aliases, so define it
+as a function or an executable on `PATH`. (Which message you get for an alias
+depends on your bash: 5.x reports `alias` and you get the alias-specific text;
+3.2, still the system bash on macOS, exits non-zero instead and you get the
+generic "did not resolve" text. Both refuse the dispatch.)
+
+The same preflight refuses a fiber whose `project_dir` is not a directory on
+this host — a checkout that lives on another machine. The autonomous path
+already skipped those; this catches the force-dispatch path (Requeue,
+drag-to-launch), which bypasses eligibility. After either refusal the daemon
+parks that fiber for 5 minutes rather than re-probing a login shell every tick;
+a force-dispatch skips the wait.
 
 **Kanban stuck on "Loading…" / `/api/v1/state` returns
 `{"error":"poller_unavailable", ..., "{:timeout, {GenServer, :call, [Shuttle.Poller, …, 1500]}}"}`

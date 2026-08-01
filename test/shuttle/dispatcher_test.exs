@@ -11,12 +11,37 @@ defmodule Shuttle.DispatcherTest do
 
     use Agent
 
+    @empty %{
+      commands: [],
+      tmux_sessions: MapSet.new(),
+      # Wrapper tokens the mock login bash resolves to something other than an
+      # executable — keyed token → what `type -t` reports, or `:missing` /
+      # `:wedged`. Everything not listed resolves as a plain `file` on PATH,
+      # which is what the vast majority of tests want.
+      wrapper_kinds: %{}
+    }
+
     def start_link(_ \\ []) do
-      Agent.start_link(fn -> %{commands: [], tmux_sessions: MapSet.new()} end, name: __MODULE__)
+      Agent.start_link(fn -> @empty end, name: __MODULE__)
     end
 
     def reset do
-      Agent.update(__MODULE__, fn _ -> %{commands: [], tmux_sessions: MapSet.new()} end)
+      Agent.update(__MODULE__, fn _ -> @empty end)
+    end
+
+    @doc """
+    Makes the mock login bash report `kind` for `wrapper` — `:missing` (nothing
+    of that name in a `bash -l` environment), `:wedged` (the probe never
+    answers), or a `type -t` word like `"alias"` / `"function"`.
+    """
+    def set_wrapper_kind(wrapper, kind) do
+      Agent.update(__MODULE__, fn state ->
+        %{state | wrapper_kinds: Map.put(state.wrapper_kinds, wrapper, kind)}
+      end)
+    end
+
+    def wrapper_kinds do
+      Agent.get(__MODULE__, & &1.wrapper_kinds)
     end
 
     def add_tmux_session(session) do
@@ -137,6 +162,12 @@ defmodule Shuttle.DispatcherTest do
         command == "felt" ->
           handle_felt(args)
 
+        # The wrapper preflight: `bash -lc "type -t -- '<wrapper>'"`. Modeled
+        # faithfully — zero exit and a kind word when the token resolves in a
+        # login shell, non-zero and no output when it does not.
+        command == "bash" ->
+          handle_wrapper_probe(args)
+
         command == "tmux" and hd(args) == "has-session" ->
           session = Enum.at(args, 2)
 
@@ -153,6 +184,28 @@ defmodule Shuttle.DispatcherTest do
 
         true ->
           {"", 0}
+      end
+    end
+
+    defp handle_wrapper_probe(["-lc", script]) do
+      wrapper = probed_wrapper(script)
+
+      case Map.get(wrapper_kinds(), wrapper, "file") do
+        # `type -t` prints nothing and exits non-zero when the token resolves
+        # to nothing at all.
+        :missing -> {"", 1}
+        :wedged -> {"bash timed out", :timeout}
+        kind -> {kind <> "\n", 0}
+      end
+    end
+
+    defp handle_wrapper_probe(_args), do: {"", 0}
+
+    # Pull the single-quoted token back out of `type -t -- 'claude'`.
+    defp probed_wrapper(script) do
+      case Regex.run(~r/type -t -- '(.*)'\z/, script) do
+        [_, wrapper] -> String.replace(wrapper, "'\\''", "'")
+        _ -> script
       end
     end
 
@@ -173,6 +226,11 @@ defmodule Shuttle.DispatcherTest do
       chrome = "--chrome" in rest
 
       cond do
+        # A broken registry entry: neither cli nor wrapper, so there is nothing
+        # for the preflight to probe.
+        name == "no-wrapper" ->
+          {Jason.encode!(%{"id" => "no-wrapper", "model" => "sonnet"}), 0}
+
         name == "codex" and chrome ->
           {"chrome not supported by agent codex (claude harness only)", 1}
 
@@ -181,7 +239,13 @@ defmodule Shuttle.DispatcherTest do
            1}
 
         name == "claude-opus" ->
-          resolved = %{"id" => "claude-opus", "cli" => "claude", "wrapper" => "claude", "model" => "opus"}
+          resolved = %{
+            "id" => "claude-opus",
+            "cli" => "claude",
+            "wrapper" => "claude",
+            "model" => "opus"
+          }
+
           resolved = if is_binary(effort), do: Map.put(resolved, "effort", effort), else: resolved
           resolved = if chrome, do: Map.put(resolved, "chrome", true), else: resolved
           {Jason.encode!(resolved), 0}
@@ -516,6 +580,149 @@ defmodule Shuttle.DispatcherTest do
            end)
   end
 
+  # ── Wrapper preflight ──
+  #
+  # The dispatch path's worst silent failure: the run script invokes the agent's
+  # wrapper as a bare token under `bash -l`. If nothing of that name resolves
+  # there — the wrapper was never installed, or it is a shell function defined
+  # only in the user's zsh/fish config — the tmux session spawns and dies inside
+  # a second, `tmux new-session` still exits 0, and the board shows nothing at
+  # all. These tests pin the preflight that turns that into a loud refusal.
+
+  test "dispatch preflights the wrapper in a login bash before spawning tmux" do
+    assert {:ok, "haiku-shuttle"} = Dispatcher.dispatch("tests/haiku", runner: MockRunner)
+
+    commands = MockRunner.commands()
+
+    # The probe must run through a LOGIN bash — the whole point is to test the
+    # environment the run script gets, where a profile-sourced shell function
+    # counts as resolution just as much as an executable on PATH.
+    assert Enum.any?(commands, fn
+             {"bash", ["-lc", script]} -> script =~ "type -t -- 'claude'"
+             _ -> false
+           end)
+
+    # And it must run BEFORE the spawn, not alongside it.
+    probe_at = Enum.find_index(commands, &match?({"bash", ["-lc", _]}, &1))
+    spawn_at = Enum.find_index(commands, &match?({"tmux", ["new-session" | _]}, &1))
+    assert probe_at < spawn_at
+  end
+
+  test "dispatch refuses loudly and spawns no tmux session when the wrapper does not resolve" do
+    MockRunner.set_wrapper_kind("claude", :missing)
+
+    assert {:error, {:wrapper_unresolved, message}} =
+             Dispatcher.dispatch("tests/haiku", runner: MockRunner)
+
+    # The message is the whole deliverable: it must name the wrapper, say where
+    # it was looked for, and point at the fix.
+    assert message =~ "claude"
+    assert message =~ "bash -l"
+    assert message =~ "agents.json"
+
+    # No zombie: the session must never have been created.
+    refute Enum.any?(MockRunner.commands(), &match?({"tmux", ["new-session" | _]}, &1))
+    assert MockRunner.tmux_sessions() == MapSet.new()
+  end
+
+  test "dispatch refuses a wrapper that resolves only as a shell alias" do
+    # `type` reports an alias, but the run script is a NON-interactive login
+    # bash, which does not expand aliases — so an alias probes "resolved" and
+    # still dies at launch. Same silent failure, so it gets the same refusal.
+    MockRunner.set_wrapper_kind("claude", "alias")
+
+    assert {:error, {:wrapper_unresolved, message}} =
+             Dispatcher.dispatch("tests/haiku", runner: MockRunner)
+
+    assert message =~ "ALIAS"
+    assert message =~ "does not expand aliases"
+    refute Enum.any?(MockRunner.commands(), &match?({"tmux", ["new-session" | _]}, &1))
+  end
+
+  test "a wedged login shell does not read as a missing wrapper" do
+    # A timeout is never evidence of absence (Shuttle.Runner's contract). An
+    # overloaded machine whose login shell is slow must not have every dispatch
+    # refused with "your wrapper is missing" — the dispatch proceeds and the
+    # spawn reports whatever it actually finds.
+    MockRunner.set_wrapper_kind("claude", :wedged)
+
+    assert {:ok, "haiku-shuttle"} = Dispatcher.dispatch("tests/haiku", runner: MockRunner)
+    assert Enum.any?(MockRunner.commands(), &match?({"tmux", ["new-session" | _]}, &1))
+  end
+
+  test "a resume is preflighted too — a missing wrapper cannot spawn a resume session" do
+    # Resume renders the same wrapper token into the same login-bash script, so
+    # it fails exactly the same way and must be guarded on the same path.
+    MockRunner.set_wrapper_kind("claude", :missing)
+
+    assert {:error, {:wrapper_unresolved, _}} =
+             Dispatcher.dispatch("tests/haiku", runner: MockRunner, resume_mode: "previous")
+
+    refute Enum.any?(MockRunner.commands(), &match?({"tmux", ["new-session" | _]}, &1))
+  end
+
+  test "capture refuses to spawn when the wrapper does not resolve" do
+    MockRunner.set_wrapper_kind("claude", :missing)
+
+    assert {:error, {:wrapper_unresolved, message}} =
+             Dispatcher.capture("an idea", runner: MockRunner, work_dir: "/tmp")
+
+    assert message =~ "claude"
+    refute Enum.any?(MockRunner.commands(), &match?({"tmux", ["new-session" | _]}, &1))
+  end
+
+  test "a work_dir that is not on this host is named, not blamed on the wrapper" do
+    # The probe runs with `cd: work_dir`, so a missing directory makes it fail
+    # in exactly the shape a missing wrapper does — non-zero, no output. Without
+    # its own check the operator would be told to fix a harness that is fine,
+    # when the real fact is that the checkout lives on another machine. Reachable
+    # via force-dispatch, which skips the Poller's project_dir gate.
+    missing = "/definitely/not/a/directory/on/this/host"
+
+    assert {:error, {:work_dir_missing, message}} =
+             Dispatcher.dispatch("tests/haiku", runner: MockRunner, work_dir: missing)
+
+    assert message =~ missing
+    assert message =~ "project_dir"
+    # Distinctly NOT a wrapper accusation.
+    refute message =~ "bash -l"
+
+    # It must refuse before spending a login shell on the probe, and before tmux.
+    refute Enum.any?(MockRunner.commands(), &match?({"bash", ["-lc", _]}, &1))
+    refute Enum.any?(MockRunner.commands(), &match?({"tmux", ["new-session" | _]}, &1))
+  end
+
+  test "a multi-token wrapper is probed by its command word, not as one quoted token" do
+    # `build_command/3` interpolates the wrapper UNQUOTED, so `env FOO=1 claude`
+    # is a legitimate record: bash resolves `env` and passes the rest along.
+    # Quoting the whole string into one token — as the first cut of the probe
+    # did — would refuse a wrapper that works.
+    assert {"bash", ["-lc", script]} = Agents.wrapper_probe(%{wrapper: "env FOO=1 claude"})
+    assert script == "type -t -- 'env'"
+  end
+
+  test "wrapper_probe answers :none for a record with no wrapper instead of raising" do
+    assert Agents.wrapper_probe(%{wrapper: nil}) == :none
+    assert Agents.wrapper_probe(%{wrapper: "   "}) == :none
+    assert Agents.wrapper_probe(nil) == :none
+  end
+
+  test "an agent record naming nothing to invoke is refused with its own message" do
+    # felt fills `wrapper` from `cli`, so a record with neither is a broken
+    # registry entry. It must be refused by name rather than raising out of the
+    # probe builder.
+    assert {:error, {:wrapper_unresolved, message}} =
+             Dispatcher.capture("an idea",
+               runner: MockRunner,
+               work_dir: "/tmp",
+               agent: "no-wrapper"
+             )
+
+    assert message =~ "no-wrapper"
+    assert message =~ "registry record is incomplete"
+    refute Enum.any?(MockRunner.commands(), &match?({"tmux", ["new-session" | _]}, &1))
+  end
+
   test "dispatch launches the worker under the uid-keyed session name" do
     uid = "01KTHDNZS287ZSSG8X8V59XKWB"
     expected = "uid-fiber-#{uid}-shuttle"
@@ -722,7 +929,14 @@ defmodule Shuttle.DispatcherTest do
   defp resolved(fields), do: Agents.from_resolved(fields)
 
   test "build_command for claude uses here-string" do
-    agent = resolved(%{"id" => "claude-sonnet", "cli" => "claude", "wrapper" => "claude", "model" => "sonnet"})
+    agent =
+      resolved(%{
+        "id" => "claude-sonnet",
+        "cli" => "claude",
+        "wrapper" => "claude",
+        "model" => "sonnet"
+      })
+
     cmd = Agents.build_command(agent, "hello world")
     assert cmd =~ "claude"
     assert cmd =~ "<<<"
@@ -730,7 +944,14 @@ defmodule Shuttle.DispatcherTest do
   end
 
   test "build_command for codex uses positional arg" do
-    agent = resolved(%{"id" => "codex", "cli" => "codex", "wrapper" => "codex", "model" => "gpt-5.5-codex"})
+    agent =
+      resolved(%{
+        "id" => "codex",
+        "cli" => "codex",
+        "wrapper" => "codex",
+        "model" => "gpt-5.5-codex"
+      })
+
     cmd = Agents.build_command(agent, "hello world")
     assert cmd =~ "codex"
     refute cmd =~ "<<<"
@@ -739,7 +960,12 @@ defmodule Shuttle.DispatcherTest do
 
   test "build_command for codex spark selects the spark model" do
     agent =
-      resolved(%{"id" => "codex-spark", "cli" => "codex", "wrapper" => "codex", "model" => "gpt-5.3-codex-spark"})
+      resolved(%{
+        "id" => "codex-spark",
+        "cli" => "codex",
+        "wrapper" => "codex",
+        "model" => "gpt-5.3-codex-spark"
+      })
 
     cmd = Agents.build_command(agent, "hello world")
     assert cmd =~ "codex"
@@ -802,7 +1028,13 @@ defmodule Shuttle.DispatcherTest do
 
   test "pi renders effort as :level suffix on the model" do
     agent =
-      resolved(%{"id" => "pi-gpt-5.4", "cli" => "pi", "wrapper" => "pi", "model" => "gpt-5.4", "effort" => "high"})
+      resolved(%{
+        "id" => "pi-gpt-5.4",
+        "cli" => "pi",
+        "wrapper" => "pi",
+        "model" => "gpt-5.4",
+        "effort" => "high"
+      })
 
     cmd = Agents.build_command(agent, "hi")
     assert cmd =~ "--model 'gpt-5.4:high'"
@@ -825,7 +1057,13 @@ defmodule Shuttle.DispatcherTest do
 
   test "codex renders effort via -c model_reasoning_effort" do
     agent =
-      resolved(%{"id" => "codex", "cli" => "codex", "wrapper" => "codex", "model" => "gpt-5.5-codex", "effort" => "high"})
+      resolved(%{
+        "id" => "codex",
+        "cli" => "codex",
+        "wrapper" => "codex",
+        "model" => "gpt-5.5-codex",
+        "effort" => "high"
+      })
 
     cmd = Agents.build_command(agent, "hi")
     assert cmd =~ ~s(-c model_reasoning_effort='high')
@@ -833,7 +1071,13 @@ defmodule Shuttle.DispatcherTest do
 
   test "codex renders the resolved default effort" do
     agent =
-      resolved(%{"id" => "codex", "cli" => "codex", "wrapper" => "codex", "model" => "gpt-5.5-codex", "effort" => "xhigh"})
+      resolved(%{
+        "id" => "codex",
+        "cli" => "codex",
+        "wrapper" => "codex",
+        "model" => "gpt-5.5-codex",
+        "effort" => "xhigh"
+      })
 
     cmd = Agents.build_command(agent, "hi")
     assert cmd =~ ~s(-c model_reasoning_effort='xhigh')
@@ -843,7 +1087,13 @@ defmodule Shuttle.DispatcherTest do
     # felt expanded the chrome alias to the claude-opus base with chrome:true;
     # the daemon renders it.
     agent =
-      resolved(%{"id" => "claude-opus", "cli" => "claude", "wrapper" => "claude", "model" => "opus", "chrome" => true})
+      resolved(%{
+        "id" => "claude-opus",
+        "cli" => "claude",
+        "wrapper" => "claude",
+        "model" => "opus",
+        "chrome" => true
+      })
 
     cmd = Agents.build_command(agent, "hi")
     assert cmd =~ "--model 'opus'"
@@ -909,7 +1159,14 @@ defmodule Shuttle.DispatcherTest do
   # ── Resume command shape ──
 
   test "build_resume_command for claude with empty prompt: --resume only, no stdin pipe" do
-    agent = resolved(%{"id" => "claude-sonnet", "cli" => "claude", "wrapper" => "claude", "model" => "sonnet"})
+    agent =
+      resolved(%{
+        "id" => "claude-sonnet",
+        "cli" => "claude",
+        "wrapper" => "claude",
+        "model" => "sonnet"
+      })
+
     cmd = Agents.build_resume_command(agent, "abc-123", "")
     assert cmd =~ "claude"
     assert cmd =~ "--resume 'abc-123'"
@@ -917,20 +1174,41 @@ defmodule Shuttle.DispatcherTest do
   end
 
   test "build_resume_command for claude with prompt: pipes via here-string" do
-    agent = resolved(%{"id" => "claude-sonnet", "cli" => "claude", "wrapper" => "claude", "model" => "sonnet"})
+    agent =
+      resolved(%{
+        "id" => "claude-sonnet",
+        "cli" => "claude",
+        "wrapper" => "claude",
+        "model" => "sonnet"
+      })
+
     cmd = Agents.build_resume_command(agent, "abc-123", "address the typo")
     assert cmd =~ "--resume 'abc-123'"
     assert cmd =~ "<<< 'address the typo'"
   end
 
   test "build_resume_command for claude with whitespace-only prompt: treated as empty" do
-    agent = resolved(%{"id" => "claude-sonnet", "cli" => "claude", "wrapper" => "claude", "model" => "sonnet"})
+    agent =
+      resolved(%{
+        "id" => "claude-sonnet",
+        "cli" => "claude",
+        "wrapper" => "claude",
+        "model" => "sonnet"
+      })
+
     cmd = Agents.build_resume_command(agent, "abc-123", "   \n  ")
     refute cmd =~ "<<<"
   end
 
   test "build_resume_command for codex with prompt: positional arg" do
-    agent = resolved(%{"id" => "codex", "cli" => "codex", "wrapper" => "codex", "model" => "gpt-5.5-codex"})
+    agent =
+      resolved(%{
+        "id" => "codex",
+        "cli" => "codex",
+        "wrapper" => "codex",
+        "model" => "gpt-5.5-codex"
+      })
+
     cmd = Agents.build_resume_command(agent, "abc-123", "address the typo")
     assert cmd =~ "codex"
     assert cmd =~ "resume 'abc-123'"
@@ -939,7 +1217,14 @@ defmodule Shuttle.DispatcherTest do
   end
 
   test "build_resume_command for codex with empty prompt: resume only" do
-    agent = resolved(%{"id" => "codex", "cli" => "codex", "wrapper" => "codex", "model" => "gpt-5.5-codex"})
+    agent =
+      resolved(%{
+        "id" => "codex",
+        "cli" => "codex",
+        "wrapper" => "codex",
+        "model" => "gpt-5.5-codex"
+      })
+
     cmd = Agents.build_resume_command(agent, "abc-123", "")
     assert cmd =~ "resume 'abc-123'"
     # No trailing prompt arg.
@@ -962,7 +1247,14 @@ defmodule Shuttle.DispatcherTest do
   end
 
   test "build_resume_command/2 default-arg form still works (zero-arg prompt)" do
-    agent = resolved(%{"id" => "claude-sonnet", "cli" => "claude", "wrapper" => "claude", "model" => "sonnet"})
+    agent =
+      resolved(%{
+        "id" => "claude-sonnet",
+        "cli" => "claude",
+        "wrapper" => "claude",
+        "model" => "sonnet"
+      })
+
     cmd = Agents.build_resume_command(agent, "abc-123")
     assert cmd =~ "--resume 'abc-123'"
     refute cmd =~ "<<<"
@@ -1068,7 +1360,8 @@ defmodule Shuttle.DispatcherTest do
                Dispatcher.check_resume_intent("task", dispatched_fiber(ctx))
     end
 
-    test "starts fresh when the worker left a clean handoff (handed_off_at >= dispatched_at)", ctx do
+    test "starts fresh when the worker left a clean handoff (handed_off_at >= dispatched_at)",
+         ctx do
       # The worker stamped `handed_off_at` at or after the dispatch → clean close →
       # next worker starts fresh.
       fiber = dispatched_fiber(ctx, %{"handed_off_at" => "2026-06-20T18:05:00.000000Z"})
@@ -1091,7 +1384,9 @@ defmodule Shuttle.DispatcherTest do
       # The human clicked "Resume previous". The session id comes from
       # `shuttle.session_uuid` the daemon stamped (the worker never knew its UUID).
       assert {:previous, "aaaa-bbbb-cccc-dddd"} =
-               Dispatcher.check_resume_intent("task", dispatched_fiber(ctx), resume_mode: "previous")
+               Dispatcher.check_resume_intent("task", dispatched_fiber(ctx),
+                 resume_mode: "previous"
+               )
     end
 
     test "resume_mode=previous with no session_uuid surfaces the missing-id error", _ctx do

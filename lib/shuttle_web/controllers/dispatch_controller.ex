@@ -116,6 +116,23 @@ defmodule ShuttleWeb.DispatchController do
                 "Reopen it (`felt shuttle reopen #{fiber_id}`) and try again."
           })
 
+        # A dispatch preflight refused before anything spawned: the agent's
+        # wrapper does not resolve in the login bash the worker launches
+        # through, or the work directory is not on this host. Both are operator
+        # config problems, not server faults, so 422 with the message that names
+        # the thing and the fix. No worker was spawned; the alternative is the
+        # tmux session that dies invisibly.
+        {:error, {tag, message}}
+        when tag in [:wrapper_unresolved, :work_dir_missing] and is_binary(message) ->
+          conn
+          |> put_status(422)
+          |> json(%{
+            dispatched: false,
+            reason: to_string(tag),
+            fiber_id: fiber_id,
+            message: message
+          })
+
         {:error, reason} ->
           conn
           |> put_status(500)

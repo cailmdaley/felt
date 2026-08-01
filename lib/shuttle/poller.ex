@@ -73,6 +73,25 @@ defmodule Shuttle.Poller do
   @resume_loop_max_rapid_exits 5
   @resume_loop_cooldown_ms 600_000
 
+  # The dispatch preflight (`Shuttle.Dispatcher`) refuses before anything spawns
+  # when the agent's wrapper does not resolve in a login bash, or the work
+  # directory is not on this host. Both are HOST CONFIG facts: re-testing them 30
+  # seconds later cannot change the answer, and each retry spawns a fresh
+  # `bash -l` synchronously inside this GenServer — seconds per tick on a host
+  # with a heavy login profile.
+  #
+  # They also fall through the resume-loop breaker above, which is why they need
+  # their own. That breaker counts worker EXITS, and a refused dispatch never
+  # spawns a worker to exit — before the preflight existed these fibers *did*
+  # spawn a dying session each tick and the breaker caught them, so closing the
+  # silent failure would have removed their only brake.
+  #
+  # So a refusal parks the fiber, same shape as the breaker: it already surfaces
+  # as `blocked`, a human force-dispatch bypasses `eligible?/2` entirely, and a
+  # successful dispatch drops the entry. Shorter window than the resume loop —
+  # the fix is usually a one-line config edit, and re-testing costs one probe.
+  @preflight_cooldown_ms 300_000
+
   defmodule State do
     @moduledoc false
     defstruct [
@@ -834,8 +853,8 @@ defmodule Shuttle.Poller do
 
               state = restart_watcher_after_failed_kill(state, fiber_id, runtime_key, meta)
 
-              {:reply,
-               {:error, "tmux kill-session failed (exit #{inspect(status)}): #{output}"}, state}
+              {:reply, {:error, "tmux kill-session failed (exit #{inspect(status)}): #{output}"},
+               state}
             end
         end
     end
@@ -1867,6 +1886,15 @@ defmodule Shuttle.Poller do
       # (it surfaces as `blocked`). A human force-dispatch bypasses eligible?
       # entirely and clears the breaker; a healthy run clears it on exit.
       resume_loop_open?(state, runtime_key_for_fiber(fiber)) ->
+        false
+
+      # A dispatch preflight refused this fiber recently — its agent's wrapper
+      # does not resolve in a login bash, or its work directory is not on this
+      # host. Neither changes between ticks, and re-probing costs a fresh
+      # `bash -l` every time, so the fiber is parked for a cooldown (it surfaces
+      # as `blocked`, carrying the message that names the fix). A force-dispatch
+      # bypasses eligible? entirely; a successful dispatch drops the entry.
+      preflight_cooldown_open?(state, runtime_key_for_fiber(fiber)) ->
         false
 
       # Pinned roles need no bespoke branch HERE: this predicate also serves
@@ -2990,6 +3018,27 @@ defmodule Shuttle.Poller do
   # for fibers that left the active candidate set.
   defp clear_resume_loop(%State{} = state, runtime_key) do
     %{state | resume_loop: Map.delete(state.resume_loop, runtime_key)}
+  end
+
+  # True while a dispatch-preflight refusal is still inside its cooldown window
+  # (see `@preflight_cooldown_ms`). Read straight off `dispatch_failures` — the
+  # refusal is already recorded there for the `blocked` snapshot, so the breaker
+  # needs no state of its own.
+  #
+  # `record_dispatch_failure/3` refreshes `attempted_at` on each attempt, so the
+  # window restarts from the last *attempt*: the fiber gets one retry per
+  # cooldown while the problem persists, and the moment a dispatch succeeds the
+  # entry is deleted and the fiber is immediately eligible again.
+  @doc false
+  def preflight_cooldown_open?(%State{} = state, runtime_key) do
+    case Map.get(state.dispatch_failures, runtime_key) do
+      %{reason: {tag, _message}, attempted_at: %DateTime{} = at}
+      when tag in [:wrapper_unresolved, :work_dir_missing] ->
+        DateTime.diff(DateTime.utc_now(), at, :millisecond) < @preflight_cooldown_ms
+
+      _ ->
+        false
+    end
   end
 
   # Drops resume_loop entries for fibers shuttle no longer auto-dispatches —

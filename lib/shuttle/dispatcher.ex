@@ -21,6 +21,8 @@ defmodule Shuttle.Dispatcher do
           | {:error, :reopen_unavailable}
           | {:error, :reopen_failed}
           | {:error, :missing_session_id}
+          | {:error, {:wrapper_unresolved, String.t()}}
+          | {:error, {:work_dir_missing, String.t()}}
           | {:error, String.t()}
 
   @doc """
@@ -70,7 +72,9 @@ defmodule Shuttle.Dispatcher do
          :ok <- maybe_reopen_on_force(fiber_id, fiber, force, runner, felt_store),
          :ok <- check_not_running(fiber_id, uid, runner),
          {:ok, agent} <- resolve_agent(fiber),
-         :ok <- validate_agent(agent) do
+         :ok <- validate_agent(agent),
+         :ok <- check_work_dir(agent, work_dir),
+         :ok <- preflight_wrapper(agent, work_dir, runner) do
       # Human-worker no-op: when the fiber's agent is `human`, the user is
       # working on it themselves; Shuttle has nothing to dispatch. Return a
       # sentinel so the caller (Poller / DispatchController) can skip the
@@ -587,7 +591,9 @@ defmodule Shuttle.Dispatcher do
     host = Keyword.get(opts, :host)
 
     with {:ok, agent} <- capture_resolve_axes(agent_name, effort, chrome, runner),
-         :ok <- validate_agent(agent) do
+         :ok <- validate_agent(agent),
+         :ok <- check_work_dir(agent, work_dir),
+         :ok <- preflight_wrapper(agent, work_dir, runner) do
       session = capture_session_name()
 
       {command, session_uuid} =
@@ -1025,6 +1031,161 @@ defmodule Shuttle.Dispatcher do
       {:error, "agent #{agent.id} requires a model but none configured"}
     else
       :ok
+    end
+  end
+
+  # ── Dispatch preflight ──
+
+  # The work directory is load-bearing twice over: `spawn_tmux` hands it to
+  # `tmux new-session -c`, and the wrapper probe below runs in it. When it is not
+  # a directory on this host BOTH fail — and the probe fails in exactly the shape
+  # a missing wrapper does (non-zero exit, no output), so without this check the
+  # operator is told their harness is broken when the real fact is that the
+  # fiber's checkout lives on another machine.
+  #
+  # The Poller's `project_dir_available?/1` already disqualifies such a fiber on
+  # the autonomous path, but a human force-dispatch (kanban Requeue, drag to
+  # launch) bypasses eligibility entirely and lands straight here — so this is
+  # the only place the forced path can learn it.
+  # `human` spawns nothing at all (see the no-op branch in `dispatch/2`), so it
+  # never touches the work directory and must not be refused for one that lives
+  # on another machine — a person can hold a fiber whose checkout is elsewhere.
+  defp check_work_dir(%{id: "human"}, _work_dir), do: :ok
+
+  defp check_work_dir(_agent, work_dir) when is_binary(work_dir) and work_dir != "" do
+    if File.dir?(work_dir) do
+      :ok
+    else
+      dispatch_refused(
+        :work_dir_missing,
+        "work directory #{work_dir} is not a directory on this host, so neither the worker's " <>
+          "tmux session nor its harness could start there. The fiber's `project_dir` most " <>
+          "likely names a checkout that lives on another machine — dispatch it from that host, " <>
+          "or correct `project_dir` in the fiber's `shuttle:` block."
+      )
+    end
+  end
+
+  defp check_work_dir(_agent, _work_dir), do: :ok
+
+  # The dispatch path's worst silent failure. `Agents.build_command/3` renders
+  # the agent's `wrapper` into a script the daemon runs as `bash -l`. When the
+  # wrapper's command word resolves to nothing there — a zsh/fish user whose bash
+  # login profile never defines the shell function, or a wrapper that was simply
+  # never installed — bash exits 127 the instant the script reaches it. The tmux
+  # session spawns and dies inside a second; `spawn_tmux` saw a successful `tmux
+  # new-session` and reported a successful dispatch; the board shows nothing at
+  # all. A stranger's very first dispatch can vanish with no error on any surface.
+  #
+  # So resolution is checked BEFORE the spawn, in the same environment the run
+  # script will use, and a failure aborts the dispatch as a first-class error.
+  # The existing failure surfaces then carry it without further plumbing: the
+  # daemon log (`Logger.error` here), the snapshot's `blocked` rows (the Poller
+  # records every dispatch error there), and the dispatch API's 422.
+  #
+  # The result is not cached, but a refusal is not re-probed every tick either —
+  # the Poller parks the fiber for a cooldown (see `wrapper_preflight_open?/2`).
+  # Caching the ANSWER would be wrong at exactly the moment it mattered (the
+  # operator installs the wrapper and the daemon goes on refusing); parking the
+  # FIBER expires on its own and a force-dispatch skips it.
+  #
+  # `human` never spawns a harness (see the no-op branch in `dispatch/2`), so it
+  # has no wrapper to resolve and is exempt.
+  @wrapper_probe_timeout_ms 15_000
+
+  defp preflight_wrapper(%{id: "human"}, _work_dir, _runner), do: :ok
+
+  defp preflight_wrapper(agent, work_dir, runner) do
+    case Agents.wrapper_probe(agent) do
+      # felt fills a record's `wrapper` from its `cli` when the record omits it
+      # (internal/shuttle/registry_config.go), so nothing to probe means the
+      # registry record itself names nothing to invoke.
+      :none ->
+        dispatch_refused(
+          :wrapper_unresolved,
+          "agent #{agent.id} names no wrapper or cli to invoke — its registry record is " <>
+            "incomplete (`felt shuttle agents` prints the effective registry)."
+        )
+
+      {command, args} ->
+        run_wrapper_probe(agent, command, args, work_dir, runner)
+    end
+  end
+
+  defp run_wrapper_probe(agent, command, args, work_dir, runner) do
+    word = Agents.wrapper_command_word(agent.wrapper)
+
+    # Probed from the work_dir the run script will start in, so a per-directory
+    # environment (direnv and kin) is in scope for the probe exactly as it will
+    # be for the worker. `check_work_dir/2` has already established it exists,
+    # so a failure here is about the wrapper and nothing else.
+    opts = [stderr_to_stdout: true, timeout_ms: @wrapper_probe_timeout_ms]
+
+    opts =
+      if is_binary(work_dir) and work_dir != "", do: Keyword.put(opts, :cd, work_dir), else: opts
+
+    case runner.cmd(command, args, opts) do
+      {output, 0} ->
+        check_wrapper_kind(agent, word, String.trim(output))
+
+      # A timeout is never evidence of absence (see `Shuttle.Runner`): a wedged
+      # login shell must not be reported to the operator as a missing wrapper.
+      # Let the dispatch through and let the spawn report what it finds.
+      {_output, :timeout} ->
+        Logger.warning(
+          "Wrapper preflight for #{agent.id} timed out probing `#{word}` in a login bash; " <>
+            "dispatching anyway (a timeout is not evidence the wrapper is missing)"
+        )
+
+        :ok
+
+      {output, _status} ->
+        dispatch_refused(
+          :wrapper_unresolved,
+          "agent #{agent.id}'s wrapper `#{word}` did not resolve in a `bash -l` environment " <>
+            "(`type -t #{word}` failed#{probe_detail(output)}). Shuttle launches every worker " <>
+            "through a login bash, so the wrapper must be an executable on PATH or a shell " <>
+            "function defined by your bash login profile — a definition that exists only in zsh " <>
+            "or fish is invisible here. Install it, or point the agent at a CLI that is on PATH " <>
+            "in `~/.config/felt/agents.json` (`felt shuttle agents` prints the effective registry)."
+        )
+    end
+  end
+
+  # `type` reported an alias. The run script is a NON-INTERACTIVE login bash,
+  # which does not expand aliases, so an alias-only wrapper probes clean and
+  # still dies at launch — the same silent failure this preflight exists to end,
+  # so it is refused just as loudly.
+  #
+  # Not every bash reaches this branch: bash 3.2 (still the system bash on macOS)
+  # exits non-zero from `type -t` for an alias rather than printing `alias`, so
+  # there the generic unresolved message covers the case instead. Both refuse the
+  # dispatch, which is the part that matters.
+  defp check_wrapper_kind(agent, word, "alias") do
+    dispatch_refused(
+      :wrapper_unresolved,
+      "agent #{agent.id}'s wrapper `#{word}` is a shell ALIAS. Shuttle runs workers in a " <>
+        "non-interactive login bash, which does not expand aliases, so the launch would die " <>
+        "immediately. Define it as a shell function or an executable on PATH instead."
+    )
+  end
+
+  defp check_wrapper_kind(_agent, _word, _kind), do: :ok
+
+  # Every preflight refusal takes this shape: a tagged reason the surfaces can
+  # match on, and an operator-facing message they render verbatim (the Poller's
+  # `blocked` row, the dispatch API's 422, the CLI's stderr).
+  defp dispatch_refused(tag, message) do
+    Logger.error("Dispatch refused — #{message}")
+    {:error, {tag, message}}
+  end
+
+  # `type -t` prints nothing on failure; anything on stderr is the login shell's
+  # own noise and is worth quoting when there is some.
+  defp probe_detail(output) do
+    case String.trim(to_string(output)) do
+      "" -> ""
+      detail -> ": #{detail}"
     end
   end
 

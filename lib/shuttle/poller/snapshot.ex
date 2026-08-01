@@ -279,6 +279,14 @@ defmodule Shuttle.Poller.Snapshot do
   # Stringifies dispatch-failure reasons for the snapshot. Atoms become their
   # name (':missing_session_id' is more useful in the UI than the raw atom);
   # strings pass through; everything else falls back to inspect/1.
+
+  # A dispatch preflight refusal carries its own operator-facing message — the
+  # one thing a stranger needs on the board to fix their install. Show the
+  # message, not the tuple.
+  defp format_block_reason({tag, message})
+       when tag in [:wrapper_unresolved, :work_dir_missing] and is_binary(message),
+       do: message
+
   defp format_block_reason(reason) when is_atom(reason), do: Atom.to_string(reason)
   defp format_block_reason(reason) when is_binary(reason), do: reason
   defp format_block_reason(reason), do: inspect(reason)

@@ -14,9 +14,19 @@ defmodule Shuttle.PollerTest do
     use Agent
 
     def start_link(_ \\ []) do
+      # Each MockRunner gets its own throwaway store root under a unique temp
+      # dir rather than the shared global `/tmp/.felt` — on a shared box, a
+      # concurrent user's `/tmp/.felt` (or its own leftover state) must never
+      # be read from or `rm -rf`'d by this suite.
+      root =
+        Path.join(System.tmp_dir!(), "shuttle-poller-mock-#{System.unique_integer([:positive])}")
+
+      File.mkdir_p!(Path.join(root, ".felt"))
+
       Agent.start_link(
         fn ->
           %{
+            felt_root: root,
             commands: [],
             tmux_sessions: MapSet.new(),
             fibers: %{},
@@ -31,12 +41,22 @@ defmodule Shuttle.PollerTest do
       )
     end
 
+    # The store root (the directory containing `.felt/`) this run's MockRunner
+    # writes fiber files under — pass this to `felt_stores:` / `FELT_STORES`
+    # instead of the old hardcoded `/tmp`.
+    def felt_root, do: Agent.get(__MODULE__, & &1.felt_root)
+
+    # `<felt_root>/.felt` — replaces the old hardcoded `/tmp/.felt`.
+    def felt_dir, do: Path.join(felt_root(), ".felt")
+
     def reset do
       # Remove any fiber files written by set_shuttle so tests start clean.
-      File.rm_rf("/tmp/.felt")
+      File.rm_rf(felt_dir())
+      File.mkdir_p!(felt_dir())
 
-      Agent.update(__MODULE__, fn _ ->
+      Agent.update(__MODULE__, fn state ->
         %{
+          felt_root: state.felt_root,
           commands: [],
           tmux_sessions: MapSet.new(),
           fibers: %{},
@@ -54,16 +74,23 @@ defmodule Shuttle.PollerTest do
     # an existing path when `set_shuttle` already wrote one, and synthesizes the
     # canonical `<id>/<leaf>.md` shape otherwise, mirroring real felt's output.
     def set_fiber(id, fiber) do
+      # Computed OUTSIDE the Agent.update closure: felt_dir/0 itself calls
+      # back into this same Agent, and a GenServer can't call itself from
+      # inside its own callback (deadlocks as "process attempted to call
+      # itself"). Only used as a fallback, so the eager call is harmless when
+      # an existing/explicit path already wins below.
+      fallback_path = synth_path(felt_dir(), id)
+
       Agent.update(__MODULE__, fn state ->
         existing_path = get_in(state.fibers, [id, "path"])
-        path = Map.get(fiber, "path") || existing_path || synth_path(id)
+        path = Map.get(fiber, "path") || existing_path || fallback_path
         put_in(state.fibers[id], Map.put(fiber, "path", path))
       end)
     end
 
-    defp synth_path(id) do
+    defp synth_path(dir, id) do
       leaf = id |> String.split("/") |> List.last()
-      realpath(Path.join(["/tmp/.felt", id, "#{leaf}.md"]))
+      realpath(Path.join([dir, id, "#{leaf}.md"]))
     end
 
     # Write a real .md file carrying the given shuttle: block and felt status so
@@ -86,10 +113,10 @@ defmodule Shuttle.PollerTest do
           String.trim_trailing(yaml) <> "\nhost: test-host\n"
         end
 
-      felt_dir = "/tmp/.felt"
+      dir = felt_dir()
       segments = String.split(id, "/")
       basename = List.last(segments)
-      dir_path = Path.join([felt_dir | segments] ++ ["#{basename}.md"])
+      dir_path = Path.join([dir | segments] ++ ["#{basename}.md"])
       File.mkdir_p!(Path.dirname(dir_path))
       indented = yaml |> String.trim() |> String.split("\n") |> Enum.map_join("\n", &("  " <> &1))
       File.write!(dir_path, "---\nstatus: #{status}\nshuttle:\n#{indented}\n---\nbody\n")
@@ -180,6 +207,12 @@ defmodule Shuttle.PollerTest do
 
     def set_felt_ls_stderr_warning(enabled),
       do: Agent.update(__MODULE__, &Map.put(&1, :felt_ls_stderr_warning, enabled))
+
+    # Simulate a host where the agent's wrapper resolves to nothing in a login
+    # bash — the dispatcher's preflight probe (`bash -lc "type -t -- '<word>'"`)
+    # then exits non-zero, and the dispatch is refused before any tmux spawn.
+    def set_wrapper_missing(enabled),
+      do: Agent.update(__MODULE__, &Map.put(&1, :wrapper_missing, enabled))
 
     # Simulate a wedged felt on an overloaded node: every `felt ls` variant
     # returns the bounded runner's timeout shape ({message, :timeout}) while
@@ -303,6 +336,16 @@ defmodule Shuttle.PollerTest do
         # about S2 aren't silently quarantined by it. Tests that DO want a
         # skew set `:contract_level`/`:contract_exit` before starting the
         # poller — see the S2 tests.
+        # The dispatcher's wrapper preflight. Resolves by default so every other
+        # test dispatches as before; `set_wrapper_missing(true)` makes the login
+        # shell find nothing, the shape a real missing wrapper produces.
+        command == "bash" and match?(["-lc", _], args) ->
+          if Agent.get(__MODULE__, &Map.get(&1, :wrapper_missing, false)) do
+            {"", 1}
+          else
+            {"file\n", 0}
+          end
+
         command == "felt" and match?(["shuttle", "contract"], args) ->
           level = Agent.get(__MODULE__, &Map.get(&1, :contract_level, "2"))
           {level, Agent.get(__MODULE__, &Map.get(&1, :contract_exit, 0))}
@@ -478,6 +521,8 @@ defmodule Shuttle.PollerTest do
   setup do
     start_supervised!(MockRunner)
     MockRunner.reset()
+    mock_felt_root = MockRunner.felt_root()
+    on_exit(fn -> File.rm_rf(mock_felt_root) end)
 
     # Isolate the per-host runtime markers (dispatch / handoff / re-arm) under a
     # throwaway SHUTTLE_DATA_DIR so continuation/orphan tests don't bleed across
@@ -638,7 +683,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_1,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     # Trigger a poll cycle manually
@@ -671,7 +716,7 @@ defmodule Shuttle.PollerTest do
         runner: MockRunner,
         own_host_id: "local",
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     send(poller, :run_poll_cycle)
@@ -697,7 +742,7 @@ defmodule Shuttle.PollerTest do
         runner: MockRunner,
         own_host_id: "candide",
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     send(poller, :run_poll_cycle)
@@ -730,7 +775,7 @@ defmodule Shuttle.PollerTest do
           name: :test_poller_env_host,
           runner: MockRunner,
           poll_interval_ms: 60_000,
-          felt_stores: ["/tmp"]
+          felt_stores: [MockRunner.felt_root()]
         )
 
       assert Poller.snapshot(poller).host == "candide"
@@ -755,7 +800,7 @@ defmodule Shuttle.PollerTest do
           name: :test_poller_host_file,
           runner: MockRunner,
           poll_interval_ms: 60_000,
-          felt_stores: ["/tmp"]
+          felt_stores: [MockRunner.felt_root()]
         )
 
       assert Poller.snapshot(poller).host == "candide"
@@ -791,7 +836,7 @@ defmodule Shuttle.PollerTest do
           name: :test_poller_gethostname,
           runner: MockRunner,
           poll_interval_ms: 60_000,
-          felt_stores: ["/tmp"]
+          felt_stores: [MockRunner.felt_root()]
         )
 
       assert Poller.snapshot(poller).host == expected
@@ -814,7 +859,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_projected_listing,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     send(poller, :run_poll_cycle)
@@ -851,7 +896,7 @@ defmodule Shuttle.PollerTest do
         runner: MockRunner,
         poll_interval_ms: 60_000,
         max_concurrent_workers: 0,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     assert wait_until(fn ->
@@ -921,7 +966,7 @@ defmodule Shuttle.PollerTest do
         runner: MockRunner,
         poll_interval_ms: 60_000,
         max_concurrent_workers: 0,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     assert wait_until(fn ->
@@ -990,7 +1035,7 @@ defmodule Shuttle.PollerTest do
         runner: MockRunner,
         poll_interval_ms: 60_000,
         max_concurrent_workers: 0,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     assert wait_until(fn ->
@@ -1001,7 +1046,7 @@ defmodule Shuttle.PollerTest do
     # NEWER mtime and a fresh body. The on-disk candidate still reads the OLD
     # mtime, so the next poll's cache rebuild produces the stale "disk-old" entry.
     patched_entry = %{
-      felt_store: "/tmp",
+      felt_store: MockRunner.felt_root(),
       path: "tests/seam/seam.md",
       fiber: %{
         "id" => uid,
@@ -1048,7 +1093,7 @@ defmodule Shuttle.PollerTest do
         runner: MockRunner,
         poll_interval_ms: 60_000,
         max_concurrent_workers: 0,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     assert wait_until(fn ->
@@ -1067,7 +1112,7 @@ defmodule Shuttle.PollerTest do
 
     MockRunner.set_fiber(
       "tests/report-toggle",
-      Map.put(current, "report_path", "/tmp/.felt/tests/report-toggle/report.html")
+      Map.put(current, "report_path", "#{MockRunner.felt_dir()}/tests/report-toggle/report.html")
     )
 
     send(poller, :run_poll_cycle)
@@ -1098,7 +1143,7 @@ defmodule Shuttle.PollerTest do
         runner: MockRunner,
         poll_interval_ms: 60_000,
         max_concurrent_workers: 0,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     # Let the boot poll warm the cache, then force it cold and re-arm the guard.
@@ -1145,7 +1190,7 @@ defmodule Shuttle.PollerTest do
         runner: MockRunner,
         own_host_id: "candide",
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     send(poller, :run_poll_cycle)
@@ -1190,7 +1235,7 @@ defmodule Shuttle.PollerTest do
         runner: MockRunner,
         own_host_id: "candide",
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     send(poller, :run_poll_cycle)
@@ -1238,7 +1283,7 @@ defmodule Shuttle.PollerTest do
         runner: MockRunner,
         own_host_id: "candide",
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     send(poller, :run_poll_cycle)
@@ -1300,7 +1345,7 @@ defmodule Shuttle.PollerTest do
         # No worker slots: the document caches but nothing runs, so no runtime.
         max_concurrent_workers: 0,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     send(poller, :run_poll_cycle)
@@ -1332,7 +1377,7 @@ defmodule Shuttle.PollerTest do
         runner: MockRunner,
         own_host_id: "candide",
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     send(poller, :run_poll_cycle)
@@ -1389,7 +1434,7 @@ defmodule Shuttle.PollerTest do
         runner: MockRunner,
         own_host_id: "candide",
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     send(poller, :run_poll_cycle)
@@ -1447,7 +1492,7 @@ defmodule Shuttle.PollerTest do
           runner: MockRunner,
           own_host_id: "candide",
           poll_interval_ms: 60_000,
-          felt_stores: ["/tmp"]
+          felt_stores: [MockRunner.felt_root()]
         )
 
       send(poller, :run_poll_cycle)
@@ -1492,7 +1537,7 @@ defmodule Shuttle.PollerTest do
         runner: MockRunner,
         own_host_id: "candide",
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     send(poller, :run_poll_cycle)
@@ -1551,7 +1596,7 @@ defmodule Shuttle.PollerTest do
         own_host_id: "test-host",
         poll_interval_ms: 60_000,
         max_concurrent_workers: 0,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     # First dispatch makes the fiber live (a fresh worker, a real tmux session).
@@ -1625,7 +1670,7 @@ defmodule Shuttle.PollerTest do
         own_host_id: "test-host",
         poll_interval_ms: 60_000,
         max_concurrent_workers: 0,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     assert {:ok, session} = Poller.dispatch_fiber(poller, fiber_id, force: true, ad_hoc: true)
@@ -1667,7 +1712,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_slow_felt_snapshot,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     send(poller, :run_poll_cycle)
@@ -1695,7 +1740,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_2,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     send(poller, :run_poll_cycle)
@@ -1720,7 +1765,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_3,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     send(poller, :run_poll_cycle)
@@ -1752,7 +1797,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_pinned_active,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     send(poller, :run_poll_cycle)
@@ -1798,7 +1843,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_pinned_markerless,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     send(poller, :run_poll_cycle)
@@ -1835,7 +1880,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_pinned_clean_handoff,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     send(poller, :run_poll_cycle)
@@ -1863,7 +1908,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_pinned_parked,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     send(poller, :run_poll_cycle)
@@ -1908,7 +1953,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_pinned_icloud_sentinel,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     # `:dbg` (runtime_tools) ships on-disk with the OTP install but, unlike
@@ -1985,7 +2030,7 @@ defmodule Shuttle.PollerTest do
     # mock store the factory wrote to (/tmp/.felt). Without this a
     # park regression would silently no-op — masking whether the gate even fired.
     prev_loom = System.get_env("FELT_STORES")
-    System.put_env("FELT_STORES", "/tmp")
+    System.put_env("FELT_STORES", MockRunner.felt_root())
 
     on_exit(fn ->
       if prev_loom,
@@ -2004,7 +2049,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_pinned_exit_parks,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     new_sessions = fn ->
@@ -2025,7 +2070,7 @@ defmodule Shuttle.PollerTest do
 
     # The on-disk document is parked: active → open (back to the strip), and NOT
     # marked closed/awaiting (that's the standing closer, not the pinned one).
-    doc = File.read!("/tmp/.felt/#{fiber_id}/#{leaf}.md")
+    doc = File.read!("#{MockRunner.felt_dir()}/#{fiber_id}/#{leaf}.md")
     assert doc =~ ~r/status:\s*open/
     refute doc =~ ~r/status:\s*closed/
     refute doc =~ "closed-at"
@@ -2044,7 +2089,7 @@ defmodule Shuttle.PollerTest do
     # handle_worker_exit's pinned branch leaves the document `active` (does NOT
     # park to open), and the next tick re-dispatches a fresh worker.
     prev_loom = System.get_env("FELT_STORES")
-    System.put_env("FELT_STORES", "/tmp")
+    System.put_env("FELT_STORES", MockRunner.felt_root())
 
     on_exit(fn ->
       if prev_loom,
@@ -2063,7 +2108,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_pinned_clean_exit,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     new_sessions = fn ->
@@ -2083,7 +2128,7 @@ defmodule Shuttle.PollerTest do
     _ = Poller.snapshot(poller)
 
     # The document stays active — NOT parked to open (that's the dirty-exit path).
-    doc = File.read!("/tmp/.felt/#{fiber_id}/#{leaf}.md")
+    doc = File.read!("#{MockRunner.felt_dir()}/#{fiber_id}/#{leaf}.md")
     assert doc =~ ~r/status:\s*active/
     refute doc =~ ~r/status:\s*open/
 
@@ -2100,7 +2145,7 @@ defmodule Shuttle.PollerTest do
     # still marks the role awaiting, so the cron does not re-fire it this cycle.
     # This is what guards the gate against being broadened to skip standing too.
     prev_loom = System.get_env("FELT_STORES")
-    System.put_env("FELT_STORES", "/tmp")
+    System.put_env("FELT_STORES", MockRunner.felt_root())
 
     on_exit(fn ->
       if prev_loom,
@@ -2129,7 +2174,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_standing_exit_closes,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     assert {:ok, _session} = Poller.dispatch_fiber(poller, fiber_id, force: true, ad_hoc: true)
@@ -2138,7 +2183,7 @@ defmodule Shuttle.PollerTest do
     send(poller, {:worker_exited, fiber_id, :normal_exit, false})
     _ = Poller.snapshot(poller)
 
-    doc = File.read!("/tmp/.felt/#{fiber_id}/#{leaf}.md")
+    doc = File.read!("#{MockRunner.felt_dir()}/#{fiber_id}/#{leaf}.md")
     assert doc =~ ~r/status:\s*closed/
   end
 
@@ -2199,7 +2244,7 @@ defmodule Shuttle.PollerTest do
         runner: MockRunner,
         poll_interval_ms: 60_000,
         max_concurrent_workers: 0,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     # Four rapid (0s-lifetime) exits — one short of tripping; breaker stays closed.
@@ -2217,6 +2262,65 @@ defmodule Shuttle.PollerTest do
     refute loop_blocked?(poller, fiber_id)
   end
 
+  test "a refused wrapper preflight parks the fiber instead of re-probing every tick" do
+    # The preflight closed the silent failure, but it also removed that failure's
+    # only brake: the resume-loop breaker counts worker EXITS, and a refused
+    # dispatch never spawns a worker to exit. Left ungated, a host whose wrapper
+    # is missing would spawn a fresh `bash -l` for every fiber on every tick —
+    # synchronously, inside this GenServer — forever. So a refusal parks the
+    # fiber for @preflight_cooldown_ms.
+    fiber_id = "tests/preflight-cooldown"
+    MockRunner.set_fiber(fiber_id, make_fiber(fiber_id, %{"status" => "active"}))
+    MockRunner.set_shuttle(fiber_id, "kind: oneshot\nagent: claude-sonnet\n", "active")
+    MockRunner.set_wrapper_missing(true)
+
+    {:ok, poller} =
+      start_poller!(
+        name: :test_poller_preflight_cooldown,
+        runner: MockRunner,
+        poll_interval_ms: 60_000,
+        max_concurrent_workers: 0,
+        felt_stores: [MockRunner.felt_root()]
+      )
+
+    assert {:error, {:wrapper_unresolved, message}} =
+             Poller.dispatch_fiber(poller, fiber_id, [])
+
+    # It surfaces on the board carrying the message that names the fix — not an
+    # inspected tuple.
+    blocked =
+      Enum.find(Poller.snapshot(poller).blocked, &(&1.fiber_id == fiber_id))
+
+    assert blocked.reason == message
+    assert blocked.reason =~ "did not resolve"
+
+    # Parked: a second autonomous (non-force) dispatch is refused by the
+    # cooldown WITHOUT spending another login shell. The probe count not moving
+    # is the whole point of the gate.
+    probes_before =
+      Enum.count(MockRunner.commands(), &match?({"bash", ["-lc", _]}, &1))
+
+    assert {:error, _} = Poller.dispatch_fiber(poller, fiber_id, [])
+
+    assert Enum.count(MockRunner.commands(), &match?({"bash", ["-lc", _]}, &1)) ==
+             probes_before
+
+    # A human force-dispatch is an explicit "go" and bypasses the cooldown —
+    # it still refuses (the wrapper is still missing) but it did re-probe,
+    # which is what lets an operator retry the instant they fix it.
+
+    assert {:error, {:wrapper_unresolved, _}} =
+             Poller.dispatch_fiber(poller, fiber_id, force: true)
+
+    probes_after = Enum.count(MockRunner.commands(), &match?({"bash", ["-lc", _]}, &1))
+    assert probes_after > probes_before
+
+    # And once the wrapper is installed, a successful dispatch clears the entry.
+    MockRunner.set_wrapper_missing(false)
+    assert {:ok, _} = Poller.dispatch_fiber(poller, fiber_id, force: true)
+    refute Enum.any?(Poller.snapshot(poller).blocked, &(&1.fiber_id == fiber_id))
+  end
+
   test "a healthy worker run resets the resume-loop breaker count" do
     # A long-lived run (≥ the rapid-exit threshold) is the system working: it must
     # zero the consecutive-rapid-exit count so a fiber that occasionally has a fast
@@ -2231,7 +2335,7 @@ defmodule Shuttle.PollerTest do
         runner: MockRunner,
         poll_interval_ms: 60_000,
         max_concurrent_workers: 0,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     # 4 rapid exits — one short of tripping.
@@ -2265,7 +2369,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_quarantine_fresh,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"],
+        felt_stores: [MockRunner.felt_root()],
         boot_quarantine: true
       )
 
@@ -2315,7 +2419,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_quarantine_resume,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"],
+        felt_stores: [MockRunner.felt_root()],
         boot_quarantine: true
       )
 
@@ -2354,7 +2458,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_quarantine_was_running,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"],
+        felt_stores: [MockRunner.felt_root()],
         boot_quarantine: true
       )
 
@@ -2415,7 +2519,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_quarantine_standing,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"],
+        felt_stores: [MockRunner.felt_root()],
         boot_quarantine: true
       )
 
@@ -2444,7 +2548,7 @@ defmodule Shuttle.PollerTest do
         runner: MockRunner,
         poll_interval_ms: 60_000,
         max_concurrent_workers: 0,
-        felt_stores: ["/tmp"],
+        felt_stores: [MockRunner.felt_root()],
         boot_quarantine: true
       )
 
@@ -2476,7 +2580,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_quarantine_release,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"],
+        felt_stores: [MockRunner.felt_root()],
         boot_quarantine: true
       )
 
@@ -2514,7 +2618,7 @@ defmodule Shuttle.PollerTest do
         runner: MockRunner,
         poll_interval_ms: 60_000,
         max_concurrent_workers: 0,
-        felt_stores: ["/tmp"],
+        felt_stores: [MockRunner.felt_root()],
         boot_quarantine: true
       )
 
@@ -2557,7 +2661,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_contract_match,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     assert Poller.snapshot(poller).contract == %{expected: 2, observed: 2, ok: true, reason: nil}
@@ -2584,7 +2688,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_contract_mismatch,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     snap = Poller.snapshot(poller)
@@ -2625,7 +2729,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_contract_garbage,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     assert %{expected: 2, ok: false} = Poller.snapshot(poller).contract
@@ -2656,7 +2760,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_contract_skew_was_running,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     assert_eventually(fn ->
@@ -2723,7 +2827,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_standing_sleeping,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     send(poller, :run_poll_cycle)
@@ -2767,7 +2871,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_standing_lifecycle_persist,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     send(poller, :run_poll_cycle)
@@ -2811,7 +2915,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_standing_wedge,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     send(poller, :run_poll_cycle)
@@ -2851,7 +2955,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_standing_awaiting_no_relaunch,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     send(poller, :run_poll_cycle)
@@ -2889,12 +2993,12 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_actions_overlay,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     send(poller, :run_poll_cycle)
 
-    query_opts = [felt_stores: ["/tmp"], runner: MockRunner]
+    query_opts = [felt_stores: [MockRunner.felt_root()], runner: MockRunner]
 
     assert_eventually(fn ->
       {:ok, actions} = ActionQueries.actions_for(fiber_id, query_opts)
@@ -2913,7 +3017,7 @@ defmodule Shuttle.PollerTest do
     fiber_id = "tests/standing-accept-sticks"
 
     previous_loom_homes = System.get_env("FELT_STORES")
-    System.put_env("FELT_STORES", "/tmp")
+    System.put_env("FELT_STORES", MockRunner.felt_root())
 
     on_exit(fn ->
       restore_env("FELT_STORES", previous_loom_homes)
@@ -2940,20 +3044,21 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_accept_sticks,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     assert {:ok, _output} = Poller.lifecycle_transition(poller, :accept, fiber_id, [])
 
     # The document is re-armed to status:active.
-    armed = File.read!("/tmp/.felt/#{fiber_id}/standing-accept-sticks.md")
+    armed = File.read!("#{MockRunner.felt_dir()}/#{fiber_id}/standing-accept-sticks.md")
     assert armed =~ "status: active"
 
     send(poller, :run_poll_cycle)
     Process.sleep(75)
 
     # Still active after the poll — nothing clobbers the document back to awaiting.
-    assert File.read!("/tmp/.felt/#{fiber_id}/standing-accept-sticks.md") =~ "status: active"
+    assert File.read!("#{MockRunner.felt_dir()}/#{fiber_id}/standing-accept-sticks.md") =~
+             "status: active"
   end
 
   test "an accept that lands during a poll read is not clobbered when the poll completes" do
@@ -2965,7 +3070,7 @@ defmodule Shuttle.PollerTest do
     fiber_id = "tests/standing-accept-during-poll"
 
     previous_loom_homes = System.get_env("FELT_STORES")
-    System.put_env("FELT_STORES", "/tmp")
+    System.put_env("FELT_STORES", MockRunner.felt_root())
 
     on_exit(fn ->
       restore_env("FELT_STORES", previous_loom_homes)
@@ -2991,10 +3096,10 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_accept_during_poll,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
-    doc_path = "/tmp/.felt/#{fiber_id}/standing-accept-during-poll.md"
+    doc_path = "#{MockRunner.felt_dir()}/#{fiber_id}/standing-accept-during-poll.md"
 
     # Hold the next poll inside its read-only felt walk; its snapshot still sees
     # the role as the closed (awaiting) document.
@@ -3047,7 +3152,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_standing_force_now,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     # Enabled standing role whose schedule is far in the future: a plain
@@ -3115,7 +3220,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_standing_awaiting_refuses_adhoc,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     # Non-forced ad_hoc (the poller's own path) is still refused with the
@@ -3153,7 +3258,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_reconcile_dead_session,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     # Let the initial poll auto-dispatch the eligible fiber and settle, so the
@@ -3164,7 +3269,7 @@ defmodule Shuttle.PollerTest do
     session = Dispatcher.session_name(fiber_id)
     assert wait_until(fn -> Poller.worker_status(poller, fiber_id) != nil end)
 
-    query_opts = [felt_stores: ["/tmp"], runner: MockRunner]
+    query_opts = [felt_stores: [MockRunner.felt_root()], runner: MockRunner]
 
     # While the session is live, the running branch is read: inFlight → pause.
     assert {:ok, %{id: "pause"}} = ActionQueries.resolve_action(fiber_id, "inFlight", query_opts)
@@ -3209,7 +3314,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_standing_force_scheduled,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     assert {:ok, _session} = Poller.dispatch_fiber(poller, fiber_id, force: true)
@@ -3242,7 +3347,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_standing_force_resume_before_window,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     # The prior run's session id lives in the per-host dispatch marker; a forced
@@ -3285,7 +3390,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_force_closed,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     # Without force, a closed fiber is not eligible — and the reason now names
@@ -3310,7 +3415,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_force_disabled,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     assert {:error, {:not_eligible, :disabled}} = Poller.dispatch_fiber(poller, fiber_id, [])
@@ -3334,7 +3439,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_force_wrong_host,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     # The refusal now NAMES the cause: the fiber is homed elsewhere, carrying
@@ -3358,7 +3463,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_force_human,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     # Human-worker fibers short-circuit to {:ok, "human"} before the
@@ -3398,7 +3503,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_standing_due,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     send(poller, :run_poll_cycle)
@@ -3493,7 +3598,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_standing_stale,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     send(poller, :run_poll_cycle)
@@ -3576,7 +3681,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_standing_snapshot_states,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     send(poller, :run_poll_cycle)
@@ -3603,7 +3708,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_4,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     send(poller, :run_poll_cycle)
@@ -3627,7 +3732,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_untracked,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     send(poller, :run_poll_cycle)
@@ -3653,7 +3758,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_5,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     send(poller, :run_poll_cycle)
@@ -3678,7 +3783,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_6,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     send(poller, :run_poll_cycle)
@@ -3707,7 +3812,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_7,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     # Dispatch
@@ -3755,7 +3860,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_running_uid_keyed,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     assert {:ok, _session} = Poller.dispatch_fiber(poller, fiber_id, [])
@@ -3804,7 +3909,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_force_resume_unified,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     # An explicit force-dispatch carrying resume_mode: "previous" produces a
@@ -3838,7 +3943,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_continuation_died,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     send(poller, :run_poll_cycle)
@@ -3872,7 +3977,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_continuation_handoff,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     send(poller, :run_poll_cycle)
@@ -3896,7 +4001,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_8,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     # Dispatch
@@ -3924,7 +4029,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_9,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     assert_eventually(fn ->
@@ -3946,7 +4051,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_orphan_uid,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     assert_eventually(fn ->
@@ -3968,7 +4073,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_orphan_stderr_warning,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     assert_eventually(fn ->
@@ -3995,7 +4100,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_orphan_legacy,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     assert_eventually(fn ->
@@ -4028,7 +4133,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_pinned_orphan,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     assert_eventually(fn ->
@@ -4060,7 +4165,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_resurrect_orphan,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     assert wait_until(fn ->
@@ -4093,7 +4198,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_resurrect_foreign_host,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     send(poller, :run_poll_cycle)
@@ -4123,7 +4228,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_resurrect_missing_project_dir,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     send(poller, :run_poll_cycle)
@@ -4149,7 +4254,7 @@ defmodule Shuttle.PollerTest do
     # factory's host injection so the block genuinely has no host: key —
     # exercising the literal "absent host" branch. The fiber is discovered
     # (it carries a shuttle block) but unowned, hence ineligible everywhere.
-    dir_path = Path.join(["/tmp/.felt", fiber_id <> ".md"])
+    dir_path = Path.join([MockRunner.felt_dir(), fiber_id <> ".md"])
     File.mkdir_p!(Path.dirname(dir_path))
 
     File.write!(dir_path, """
@@ -4180,7 +4285,7 @@ defmodule Shuttle.PollerTest do
         runner: MockRunner,
         own_host_id: "test-host",
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     send(poller, :run_poll_cycle)
@@ -4194,7 +4299,7 @@ defmodule Shuttle.PollerTest do
              cmd == "tmux" and hd(args) == "new-session"
            end)
   after
-    File.rm_rf!(Path.join(["/tmp/.felt", "tests/host-absent.md"]))
+    File.rm_rf!(Path.join([MockRunner.felt_dir(), "tests/host-absent.md"]))
   end
 
   test "poller marks an armed standing role awaiting when its worker died while the daemon was down" do
@@ -4206,7 +4311,7 @@ defmodule Shuttle.PollerTest do
     fiber_id = "tests/standing-dead-orphan"
 
     previous_loom_homes = System.get_env("FELT_STORES")
-    System.put_env("FELT_STORES", "/tmp")
+    System.put_env("FELT_STORES", MockRunner.felt_root())
     on_exit(fn -> restore_env("FELT_STORES", previous_loom_homes) end)
 
     # A far-future schedule so the role is NOT cron-due — the only thing that
@@ -4223,14 +4328,14 @@ defmodule Shuttle.PollerTest do
     # after it marks this as a daemon-down-across-exit dead orphan.
     write_dispatch_marker(fiber_id, "dead-session-uuid")
 
-    doc_path = "/tmp/.felt/#{fiber_id}/standing-dead-orphan.md"
+    doc_path = "#{MockRunner.felt_dir()}/#{fiber_id}/standing-dead-orphan.md"
 
     {:ok, poller} =
       start_poller!(
         name: :test_poller_standing_dead_orphan,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     send(poller, :run_poll_cycle)
@@ -4254,7 +4359,7 @@ defmodule Shuttle.PollerTest do
     fiber_id = "tests/standing-inverted-markers"
 
     previous_loom_homes = System.get_env("FELT_STORES")
-    System.put_env("FELT_STORES", "/tmp")
+    System.put_env("FELT_STORES", MockRunner.felt_root())
     on_exit(fn -> restore_env("FELT_STORES", previous_loom_homes) end)
 
     MockRunner.set_shuttle(fiber_id, """
@@ -4270,14 +4375,14 @@ defmodule Shuttle.PollerTest do
     write_dispatch_marker(fiber_id, "inverted-session-uuid", dispatched)
     write_handoff_marker(fiber_id, DateTime.add(dispatched, -94, :millisecond))
 
-    doc_path = "/tmp/.felt/#{fiber_id}/standing-inverted-markers.md"
+    doc_path = "#{MockRunner.felt_dir()}/#{fiber_id}/standing-inverted-markers.md"
 
     {:ok, poller} =
       start_poller!(
         name: :test_poller_standing_inverted,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     send(poller, :run_poll_cycle)
@@ -4317,7 +4422,7 @@ defmodule Shuttle.PollerTest do
     fiber_id = "tests/pinned-inverted-markers"
 
     previous_loom_homes = System.get_env("FELT_STORES")
-    System.put_env("FELT_STORES", "/tmp")
+    System.put_env("FELT_STORES", MockRunner.felt_root())
     on_exit(fn -> restore_env("FELT_STORES", previous_loom_homes) end)
 
     MockRunner.set_shuttle(fiber_id, """
@@ -4331,14 +4436,14 @@ defmodule Shuttle.PollerTest do
     write_dispatch_marker(fiber_id, "pinned-inverted-uuid", dispatched)
     write_handoff_marker(fiber_id, DateTime.add(dispatched, -3600, :second))
 
-    doc_path = "/tmp/.felt/#{fiber_id}/pinned-inverted-markers.md"
+    doc_path = "#{MockRunner.felt_dir()}/#{fiber_id}/pinned-inverted-markers.md"
 
     {:ok, poller} =
       start_poller!(
         name: :test_poller_pinned_inverted,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     send(poller, :run_poll_cycle)
@@ -4367,7 +4472,7 @@ defmodule Shuttle.PollerTest do
     fiber_id = "tests/standing-dead-adhoc"
 
     previous_loom_homes = System.get_env("FELT_STORES")
-    System.put_env("FELT_STORES", "/tmp")
+    System.put_env("FELT_STORES", MockRunner.felt_root())
     on_exit(fn -> restore_env("FELT_STORES", previous_loom_homes) end)
 
     MockRunner.set_shuttle(fiber_id, """
@@ -4383,14 +4488,14 @@ defmodule Shuttle.PollerTest do
     write_dispatch_marker(fiber_id, "dead-adhoc-uuid")
     MockRunner.put_shuttle_fields(fiber_id, %{"run_id" => "adhoc-1751558400000"})
 
-    doc_path = "/tmp/.felt/#{fiber_id}/standing-dead-adhoc.md"
+    doc_path = "#{MockRunner.felt_dir()}/#{fiber_id}/standing-dead-adhoc.md"
 
     {:ok, poller} =
       start_poller!(
         name: :test_poller_standing_dead_adhoc,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     send(poller, :run_poll_cycle)
@@ -4414,7 +4519,7 @@ defmodule Shuttle.PollerTest do
     fiber_id = "tests/standing-tmux-wedged"
 
     previous_loom_homes = System.get_env("FELT_STORES")
-    System.put_env("FELT_STORES", "/tmp")
+    System.put_env("FELT_STORES", MockRunner.felt_root())
     on_exit(fn -> restore_env("FELT_STORES", previous_loom_homes) end)
 
     # Same shape as the dead-orphan case — armed, dispatched, un-exited, not
@@ -4429,7 +4534,7 @@ defmodule Shuttle.PollerTest do
 
     write_dispatch_marker(fiber_id, "wedged-session-uuid")
 
-    doc_path = "/tmp/.felt/#{fiber_id}/standing-tmux-wedged.md"
+    doc_path = "#{MockRunner.felt_dir()}/#{fiber_id}/standing-tmux-wedged.md"
 
     # MockRunner is reset per test, so the wedge does not bleed across tests.
     MockRunner.set_tmux_ls_timeout(true)
@@ -4439,7 +4544,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_standing_tmux_wedged,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     send(poller, :run_poll_cycle)
@@ -4469,7 +4574,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_closed_not_resurrected,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     send(poller, :run_poll_cycle)
@@ -4493,7 +4598,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_missing_running_session,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     fiber = make_fiber(fiber_id)
@@ -4572,7 +4677,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_runtime_rehydrate_live_1,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     assert {:ok, session} = Poller.dispatch_fiber(poller, fiber_id, [])
@@ -4587,7 +4692,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_runtime_rehydrate_live_2,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     assert wait_until(fn ->
@@ -4611,7 +4716,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_runtime_rehydrate_missing_1,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     assert {:ok, session} = Poller.dispatch_fiber(poller, fiber_id, [])
@@ -4624,7 +4729,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_runtime_rehydrate_missing_2,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     # The dead session is not adopted: the restarted poller has no running entry
@@ -4642,7 +4747,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_prefix_parent,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     fiber = make_fiber(fiber_id)
@@ -4681,7 +4786,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_project_dir,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     send(poller, :run_poll_cycle)
@@ -4721,7 +4826,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_missing_project_dir,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     send(poller, :run_poll_cycle)
@@ -4756,7 +4861,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_10,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     assert_eventually(fn ->
@@ -4780,7 +4885,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_untagged_shuttle,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     send(poller, {:tick, Poller.snapshot(poller) |> Map.get(:tick_token)})
@@ -4809,7 +4914,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_slow_dispatch,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     started_at_ms = System.monotonic_time(:millisecond)
@@ -5265,7 +5370,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_claim,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     assert {:ok, %{session: session}} =
@@ -5326,7 +5431,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_claim_guards,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     # Session not live in tmux.
@@ -5362,7 +5467,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_claim_closed,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     assert {:error, :closed} = Poller.claim_session(poller, id, "capture-closed1", [])
@@ -5376,7 +5481,7 @@ defmodule Shuttle.PollerTest do
         name: :test_poller_capture,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: ["/tmp"]
+        felt_stores: [MockRunner.felt_root()]
       )
 
     assert {:ok, %{session: "capture-" <> _ = session, agent_id: "claude-sonnet"}} =

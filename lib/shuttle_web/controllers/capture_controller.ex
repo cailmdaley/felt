@@ -28,7 +28,11 @@ defmodule ShuttleWeb.CaptureController do
   def create(conn, params) do
     case OriginRouter.route(Map.get(params, "origin")) do
       {:remote, remote} ->
-        relay_json(conn, OriginRouter.forward(remote, "/api/v1/capture", conn.body_params), &capture_failed/2)
+        relay_json(
+          conn,
+          OriginRouter.forward(remote, "/api/v1/capture", conn.body_params),
+          &capture_failed/2
+        )
 
       :local ->
         create_local(conn, params)
@@ -65,6 +69,17 @@ defmodule ShuttleWeb.CaptureController do
             # Axes-validation failures are client errors (bad effort token,
             # chrome on a non-claude harness) — 422 naming the constraint.
             conn |> put_status(422) |> json(%{spawned: false, reason: msg})
+
+          # A dispatch preflight refused before anything spawned — the agent's
+          # wrapper does not resolve in a login bash, or the work directory is
+          # not on this host. Operator config, not a server fault, and the
+          # message is the whole point: render it rather than `inspect`ing the
+          # tuple into a 500.
+          {:error, {tag, msg}}
+          when tag in [:wrapper_unresolved, :work_dir_missing] and is_binary(msg) ->
+            conn
+            |> put_status(422)
+            |> json(%{spawned: false, reason: to_string(tag), message: msg})
 
           {:error, reason} ->
             conn
