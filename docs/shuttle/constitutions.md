@@ -76,8 +76,8 @@ as "answer me," not "review me."
 ### Optional: `report.html`
 
 If the product is something a human *reads* — findings, figures, comparisons —
-say so in the constitution. The worker then maintains a `report.html` companion
-file in the fiber directory and embeds it in the body:
+say so in the constitution. The worker then rewrites a `report.html` companion
+file in the fiber directory each session, and embeds it in the body:
 
 ```markdown
 :::{embed} report.html

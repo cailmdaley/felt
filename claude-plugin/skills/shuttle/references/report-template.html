@@ -1,35 +1,51 @@
 <!doctype html>
 <!--
-  Starter template for a fiber's report.html companion. Vellum
-  auto-prepends report.html when rendering the fiber's narrative view,
-  so this becomes the rich head of the document; the fiber's markdown
-  body holds spec (Desired State, Context) below.
+  Starter template for a fiber's report.html companion. This file is a
+  VISUAL PALETTE — typography, colors, classes. It is not a content
+  model to fill in. The rules that govern what goes in a report live in
+  references/report.md; read that first. The three that bite hardest:
 
-  The injected Layer-1 protocol runtime handles iframe sizing and
-  scrollbar suppression — you don't need to add a height handshake.
-  The injected Layer-2 tokens stylesheet provides palette CSS variables
-  (--parchment, --cinnabar, --ink, --teal, --cobalt, --ochre, --rule,
-  --tooth, --serif, --mono), EB Garamond + IBM Plex Mono, and a base
-  body style (parchment background, ink text, 19px / 1.55 line-height).
-  Build on those; override anything (`--parchment` to swap palette,
-  `body { font-family: ... }` to swap typeface, etc.).
+    1. REWRITE, DON'T APPEND. Each session restates the whole report
+       against current understanding. No session numbering, no dated
+       update notes, no per-section time stamps — the one stamp below
+       is the only time marker the document carries. Findings are
+       grouped by MEANING, never by when they were found; superseded
+       hypotheses and resolved false alarms are cut, not archived.
+    2. INLINE EVERY IMAGE as a base64 data URI. A report travels alone
+       — sent as a file, opened off disk, read from a checkout on
+       another machine, and most fiber stores gitignore binaries — so
+       <img src="plot.png"> renders broken exactly where it is read.
+       See the <figure> block below.
+    3. OPEN QUESTIONS ARE WORKED FIRST. Each surviving one names what
+       would resolve it.
 
-  The three sections below are the convention for constitution reports
-  — Current State / Findings / Open Questions. Other fibers (idea
-  fibers, doc fibers, vision sketches) can structure their report
-  however the content wants. The standalone <link rel="stylesheet"> and
-  :root block let the file render correctly when opened directly in a
-  browser (file://, dev server, etc.); inside vellum the injected
-  tokens overlay these identical values harmlessly.
+  The report renders only where something embeds it — an explicit
+  `:::{embed} report.html` line in the fiber body, usually at the top,
+  with the markdown spec (Desired State, earned sections) below. Nothing
+  prepends it for you.
+
+  This file must stand on its own CSS: the kanban mounts it in an
+  iframe and injects no styles, so the :root block below is
+  load-bearing, not a convenience. (A richer viewer may overlay its own
+  palette tokens with identical values — harmless.)
+
+  Everything between EXAMPLE fences below is fabricated sample content,
+  there to show the register. Delete it as you write; never leave a
+  sample number standing.
+
+  The sections below are the default skeleton. Structure follows
+  content — an idea fiber, a doc fiber or a vision sketch should take
+  whatever shape its content wants — but for a constitution report the
+  reading order (state → findings → open → depth) is the default.
 -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Report — fiber-slug</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<!-- No external fetches: a report is one self-contained file. The font
+     stacks below fall back to Georgia and a system mono where EB Garamond
+     and IBM Plex Mono are not installed. -->
 <style>
   :root {
     --parchment: #EDE2CE;
@@ -67,6 +83,7 @@
   section { margin-top: 48px; }
   .section-mark { font-family: var(--mono); font-size: 11px; letter-spacing: 0.15em; text-transform: uppercase; color: var(--cinnabar); margin-bottom: 8px; }
   h2 { font-family: var(--serif); font-style: italic; font-weight: 500; font-size: 30px; line-height: 1.2; margin: 0 0 20px; }
+  h3 { font-family: var(--serif); font-weight: 600; font-size: 21px; line-height: 1.3; margin: 32px 0 10px; }
   p { margin: 0 0 16px; }
   ul, ol { margin: 0 0 16px; padding-left: 22px; }
   li { margin-bottom: 8px; }
@@ -74,6 +91,19 @@
   hr { border: none; border-top: 1px solid var(--rule); margin: 40px 0; }
   hr.short { width: 80px; margin: 32px 0; border-top-width: 2px; border-top-color: var(--cinnabar); }
   blockquote { margin: 16px 0; padding-left: 20px; border-left: 2px solid var(--ochre); font-style: italic; }
+  /* Figures. The caption carries a claim — what the reader should see —
+     not a label. The src is always a base64 data URI. */
+  /* The page has no reading-column cap, so cap the figure instead — a
+     600px plot upscaled to a 1800px viewport reads as mush. */
+  figure { margin: 24px 0; max-width: 900px; }
+  figure img { display: block; width: auto; max-width: 100%; height: auto; background: var(--rag); border: 1px solid var(--rule); }
+  figcaption { font-size: 16px; color: var(--ink-muted); margin-top: 8px; }
+  /* Working-number marker. Standalone, at the END of a claim — never
+     dropped mid-clause, where it reads as a badge interrupting a sentence.
+     Hedging inside a sentence stays prose. */
+  .hedge { color: var(--ochre); font-family: var(--mono); font-size: 0.78em; letter-spacing: 0.08em; text-transform: uppercase; }
+  .depth { font-size: 16px; }
+  .depth code { font-size: 0.88em; }
 </style>
 </head>
 <body>
@@ -86,46 +116,117 @@
     <span>fiber-slug</span>
   </div>
 
-  <h1>Headline — what this report is.</h1>
+  <h1>The verdict, as a sentence — not the topic.</h1>
 
   <hr>
 
   <section>
-    <div class="section-mark">§ Current state</div>
-    <h2>Where the work stands now.</h2>
+    <div class="section-mark">§ State</div>
 
-    <!-- Rewrite each dispatch. What's running, what landed, what the
-         artifact looks like right now. Embed images via standard <img>
-         tags (save them alongside report.html in the fiber directory).
-         Lead with the action the human should take if any. -->
+    <!-- A few sentences, verdict-bearing, written for someone who has
+         never seen this fiber. Where the work stands, what it means,
+         and the action the human takes next — or explicitly that there
+         is none. Name state as you use it ("run 04, the apodized-mask
+         one"). No account of how you got here. No h2 here: the h1
+         above is this section's verdict line. -->
 
-    <p>...</p>
+    <!-- EXAMPLE — DELETE -->
+    <p>The mock pipeline recovers every input spectrum inside the sampling window, so
+    the measurement path is validated end to end. The one live constraint is covariance:
+    the cut-sky Gaussian estimate under-covers by 20–35% at low z, so every σ quoted
+    below comes from the 200-seed ensemble instead. <strong>Nothing needs your
+    decision;</strong> the remaining work is a coordination call on where this lands.</p>
+    <!-- END EXAMPLE -->
   </section>
 
   <hr class="short">
 
   <section>
-    <div class="section-mark">§ Findings</div>
-    <h2>What's worth naming.</h2>
+    <div class="section-mark">§ Standing findings</div>
+    <h2>What is true, and how firmly.</h2>
 
-    <!-- Accretes. Insights, decisions, evidence, links to sub-fibers
-         and external references. Free-form prose; structure earns its
-         place when the content actually wants structure. -->
+    <!-- One h3 per claim, NAMED FOR THE CLAIM. Group by meaning — the
+         covariance findings together, the recovery findings together —
+         never in the order you found them, and never with a session or
+         date marker in the heading. Evidence attached to each: the
+         number, the plot, the command, the sub-fiber. Cut anything
+         superseded. Keep a ruled-out line only where it stops a costly
+         re-investigation, and phrase it as current knowledge:
+         "the solver's convergence flag zero-divides on exact-zero cross
+         spectra; we audit per-multipole residuals instead" — not
+         "the excess turned out to be a false alarm".
+         A claim with its own sub-fiber gets the verdict, the number and
+         the link — not the argument. -->
 
-    <p>...</p>
+    <!-- EXAMPLE — DELETE -->
+    <h3>Cut-sky Gaussian covariance under-covers, worst at low-z shear</h3>
+    <p>Against 200 seeds the NaMaster Gaussian diagonal is low by 20–35% in the first
+    two tomographic bins and within 5% above z ≈ 0.8. Every σ in this report therefore
+    uses the ensemble. Numbers: <code>results/cov_compare.json</code>.</p>
+
+    <figure>
+      <!-- ALWAYS a data URI. Read the PNG, base64 it, paste it in place
+           of the blank placeholder below. A sibling-file src renders
+           broken wherever the report is actually read. -->
+      <img src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
+           alt="Ensemble vs Gaussian diagonal, five tomographic bins">
+      <figcaption>The ratio sits below unity only in bins 1–2; the tail bins land on the
+      Gaussian prediction, which is why the shortfall reads as a cut-sky mode-coupling
+      effect and not a normalization error.</figcaption>
+    </figure>
+
+    <h3>Exact-truth sampling recovers every probe inside the window</h3>
+    <p>Catalog-level recovery is within 1σ of input across all auto- and cross-spectra
+    for 40 &lt; ℓ &lt; 700. Outside the window the integral constraint biases the lowest
+    bandpower low by ~8% — expected, and the reason the window starts at ℓ = 40.
+    <span class="hedge">one field only</span></p>
+
+    <h3>The solver's convergence flag carries no information</h3>
+    <p>It zero-divides on exact-zero cross spectra, so its warnings fire on healthy runs.
+    We audit per-multipole residuals instead; those are exact to &lt; 3 × 10⁻⁶.</p>
+    <!-- END EXAMPLE -->
   </section>
 
   <hr class="short">
 
   <section>
-    <div class="section-mark">§ Open questions</div>
-    <h2>What's not yet settled.</h2>
+    <div class="section-mark">§ Open</div>
+    <h2>What is not settled.</h2>
 
-    <!-- What the human needs to decide, or what awaits more evidence.
-         If empty, say so explicitly so the human knows nothing is
-         pending. -->
+    <!-- Each item was attempted this session and did not close. Each
+         names what would resolve it — the run, the check, the person,
+         the decision. A question that reappears here unchanged is a
+         flag, not a fixture. If nothing is open, say so plainly so the
+         reader knows the silence is real. -->
 
-    <p>...</p>
+    <!-- EXAMPLE — DELETE -->
+    <ul>
+      <li><strong>Does the low-z excess survive tighter sampling?</strong> It is +1.9σ
+      against the ensemble covariance — suggestive, not significant. A 200-seed run at
+      lmax 700 separates signal from the noise floor; ~40 node-minutes, queued but not
+      yet run.</li>
+      <li><strong>Which venue takes this?</strong> A coordination call, not a technical
+      one — needs a decision from you before the write-up starts.</li>
+    </ul>
+    <!-- END EXAMPLE -->
+  </section>
+
+  <hr class="short">
+
+  <section class="depth">
+    <div class="section-mark">§ Depth</div>
+
+    <!-- Pointers, not restatements. The report is a hub; derivations,
+         raw stats and long argument live where they were made. -->
+
+    <!-- EXAMPLE — DELETE -->
+    <ul>
+      <li>Per-probe recovery statistics — <code>results/recovery_stats.json</code></li>
+      <li>Covariance comparison and the ensemble build — sibling fiber
+      <code>…/covariance-ensemble</code></li>
+      <li>Contract and done-conditions — this fiber's <code>## Desired State</code>, below.</li>
+    </ul>
+    <!-- END EXAMPLE -->
   </section>
 
 </main>

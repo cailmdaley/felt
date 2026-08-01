@@ -81,6 +81,7 @@ depth in one self-contained file. Keep it self-contained — base64 the images �
 so the report renders wherever the fiber is opened, including on a different
 machine.
 
-Shuttle workers follow a shape for these reports (Current State / Findings /
-Open Questions) and ship a template; see
+Shuttle workers follow a shape for these reports — current state, standing
+findings, open questions, pointers to depth — rewritten whole each session,
+never appended; they ship a template. See
 [Constitutions](../shuttle/constitutions.md).
