@@ -3,6 +3,27 @@ defmodule Shuttle.DispatchIntegrationTest do
 
   alias Shuttle.{Dispatcher, Poller}
 
+  # Every test here dispatches through the REAL `felt` binary (see
+  # IntegrationRunner.cmd/3 below, and the direct `System.cmd("felt", ...)`
+  # call further down) — on a clean machine without felt installed, the whole
+  # module fails rather than exercising anything. Skip it there (this is NOT
+  # tagged `:integration` — that tag is globally excluded by test_helper.exs,
+  # and this suite is meant to run by default wherever felt is available, the
+  # same as any dev machine today).
+  #
+  # System.find_executable/1 is the exact predicate that matters: it asks
+  # "can System.cmd("felt", ...) find an executable on the BEAM's PATH", the
+  # same PATH resolution System.cmd/3 itself uses. A login-shell `type -t`
+  # check diverges in both directions — a shell function/alias named `felt`
+  # would pass it and then every test raises :enoent, and a binary outside
+  # the login shell's PATH (e.g. Debian's /etc/profile rewriting PATH) would
+  # fail it and skip a module that would otherwise have run. It also needs no
+  # subprocess, so an absent `bash` can't crash the whole `mix test` run —
+  # exactly the failure mode this guard exists to prevent.
+  unless System.find_executable("felt") do
+    @moduletag skip: "felt binary not found on PATH — this module dispatches through the real CLI"
+  end
+
   # ── Integration Runner ─────────────────────────────────────────────────────
   # Passes `felt` commands to the real felt CLI (with -C felt_store).
   # Intercepts `tmux` calls with an in-memory session set.

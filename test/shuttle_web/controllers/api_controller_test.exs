@@ -20,9 +20,19 @@ defmodule ShuttleWeb.APIControllerTest do
     use Agent
 
     def start_link(_ \\ []) do
+      # Each MockRunner gets its own throwaway store root under a unique temp
+      # dir rather than the shared global `/tmp/.felt` — on a shared box, a
+      # concurrent user's `/tmp/.felt` (or its own leftover state) must never
+      # be read from or `rm -rf`'d by this suite.
+      root =
+        Path.join(System.tmp_dir!(), "shuttle-api-mock-#{System.unique_integer([:positive])}")
+
+      File.mkdir_p!(Path.join(root, ".felt"))
+
       Agent.start_link(
         fn ->
           %{
+            felt_root: root,
             commands: [],
             tmux_sessions: MapSet.new(),
             fibers: %{},
@@ -35,12 +45,22 @@ defmodule ShuttleWeb.APIControllerTest do
       )
     end
 
+    # The store root (the directory containing `.felt/`) this run's MockRunner
+    # writes fiber files under — pass this to `felt_stores:` / `FELT_STORES`
+    # instead of the old hardcoded `/tmp`.
+    def felt_root, do: Agent.get(__MODULE__, & &1.felt_root)
+
+    # `<felt_root>/.felt` — replaces the old hardcoded `/tmp/.felt`.
+    def felt_dir, do: Path.join(felt_root(), ".felt")
+
     def reset do
       # Remove any fiber files written by set_shuttle so tests start clean.
-      File.rm_rf("/tmp/.felt")
+      File.rm_rf(felt_dir())
+      File.mkdir_p!(felt_dir())
 
-      Agent.update(__MODULE__, fn _ ->
+      Agent.update(__MODULE__, fn state ->
         %{
+          felt_root: state.felt_root,
           commands: [],
           tmux_sessions: MapSet.new(),
           fibers: %{},
@@ -55,19 +75,26 @@ defmodule ShuttleWeb.APIControllerTest do
     # (which reads felt's `path`) sees the fiber as rooted in `/tmp`. Mirrors
     # real felt, which now emits `path` on every listed/shown fiber.
     def set_fiber(id, fiber) do
+      # Computed OUTSIDE the Agent.update closure: felt_dir/0 itself calls
+      # back into this same Agent, and a GenServer can't call itself from
+      # inside its own callback (deadlocks as "process attempted to call
+      # itself"). Only used as a fallback, so the eager call is harmless when
+      # an existing/explicit path already wins below.
+      fallback_path = synth_path(felt_dir(), id)
+
       Agent.update(__MODULE__, fn state ->
         existing_path = get_in(state.fibers, [id, "path"])
-        path = Map.get(fiber, "path") || existing_path || synth_path(id)
+        path = Map.get(fiber, "path") || existing_path || fallback_path
         put_in(state.fibers[id], Map.put(fiber, "path", path))
       end)
     end
 
-    defp synth_path(id) do
+    defp synth_path(dir, id) do
       leaf = id |> String.split("/") |> List.last()
       # Resolve with the SAME resolver the poller uses for store ownership, so
       # the carried path agrees on every OS (macOS /tmp → /private/tmp; Linux
       # /tmp stays /tmp). A hardcoded rewrite passed only on macOS.
-      path = Path.expand(Path.join(["/tmp/.felt", id, "#{leaf}.md"]))
+      path = Path.expand(Path.join([dir, id, "#{leaf}.md"]))
 
       case Shuttle.Realpath.resolve(path) do
         {:ok, resolved} -> resolved
@@ -88,10 +115,10 @@ defmodule ShuttleWeb.APIControllerTest do
           do: yaml,
           else: String.trim_trailing(yaml) <> "\nhost: test-host\n"
 
-      felt_dir = "/tmp/.felt"
+      dir = felt_dir()
       segments = String.split(id, "/")
       basename = List.last(segments)
-      dir_path = Path.join([felt_dir | segments] ++ ["#{basename}.md"])
+      dir_path = Path.join([dir | segments] ++ ["#{basename}.md"])
       File.mkdir_p!(Path.dirname(dir_path))
       indented = yaml |> String.trim() |> String.split("\n") |> Enum.map_join("\n", &("  " <> &1))
       File.write!(dir_path, "---\nstatus: #{status}\nshuttle:\n#{indented}\n---\nbody\n")
@@ -102,7 +129,7 @@ defmodule ShuttleWeb.APIControllerTest do
           _ -> %{}
         end
 
-      carried_path = synth_path(id)
+      carried_path = synth_path(dir, id)
 
       Agent.update(__MODULE__, fn state ->
         fiber =
@@ -309,9 +336,12 @@ defmodule ShuttleWeb.APIControllerTest do
 
     start_supervised!(MockRunner)
     MockRunner.reset()
+    mock_felt_root = MockRunner.felt_root()
+    on_exit(fn -> File.rm_rf(mock_felt_root) end)
 
     start_supervised!(
-      {Poller, runner: MockRunner, poll_interval_ms: 600_000, felt_stores: ["/tmp"]}
+      {Poller,
+       runner: MockRunner, poll_interval_ms: 600_000, felt_stores: [MockRunner.felt_root()]}
     )
 
     Process.sleep(50)
@@ -342,7 +372,7 @@ defmodule ShuttleWeb.APIControllerTest do
 
   defp with_actions_host do
     previous = System.get_env("FELT_STORES")
-    System.put_env("FELT_STORES", "/tmp")
+    System.put_env("FELT_STORES", MockRunner.felt_root())
 
     on_exit(fn ->
       case previous do
@@ -665,7 +695,7 @@ defmodule ShuttleWeb.APIControllerTest do
     assert body["target"] == "tempered"
 
     captured = argv_log |> File.read!() |> String.split("\n", trim: true)
-    assert Enum.take(captured, 2) == ["--felt-store", "/tmp"]
+    assert Enum.take(captured, 2) == ["--felt-store", MockRunner.felt_root()]
     assert "close" in captured
     assert "--tempered=true" in captured
   end
