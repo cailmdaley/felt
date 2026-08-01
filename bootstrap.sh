@@ -333,5 +333,10 @@ note "verify:   curl -s http://127.0.0.1:4000/api/v1/version"
 note "board:    http://127.0.0.1:4000/"
 note "logs:     make logs"
 note "workers:  felt shuttle ps"
-[ "$WITH_TUNNELS" = 0 ] && [ "$OS" = Darwin ] && \
+# The trailing guard must not decide the script's exit code (a false test on
+# Linux would make a fully successful bootstrap exit 1 — caught by the
+# clean-container acceptance run).
+if [ "$WITH_TUNNELS" = 0 ] && [ "$OS" = Darwin ]; then
   note "remotes:  ./bootstrap.sh --with-tunnels  (or: felt shuttle tunnels install)"
+fi
+exit 0
