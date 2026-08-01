@@ -19,13 +19,13 @@ defmodule ShuttleWeb.CORSPlug do
 
   import Plug.Conn
 
-  @allowed_origins [
-    # Dev server (Vite + legacy :3000 fallback).
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-  ]
+  # Vite dev-server ports: 5173 is the default, but Vite falls back to the
+  # next free port (5174, 5175, ...) whenever 5173 is already taken by
+  # another local project, so a couple of fallbacks are allowlisted too.
+  @dev_ports [3000, 5173, 5174, 5175]
+
+  @allowed_origins for host <- ["localhost", "127.0.0.1"], port <- @dev_ports,
+                        do: "http://#{host}:#{port}"
 
   @allowed_methods "GET, POST, OPTIONS"
   @allowed_headers "Content-Type, Accept"

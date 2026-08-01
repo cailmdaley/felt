@@ -65,11 +65,9 @@ func TestNoPersonalIdentifiersInSource(t *testing.T) {
 		if strings.HasSuffix(base, "_test.go") || strings.HasSuffix(base, "_test.exs") {
 			continue
 		}
-		// testdata/ is Go's canonical fixture directory and ui/harness/ is the
-		// UI's visual-test fixture set — test material by definition; a fixture
-		// may legitimately name a host or carry a local path.
-		if strings.Contains(filepath.ToSlash(rel), "/testdata/") ||
-			strings.HasPrefix(filepath.ToSlash(rel), "ui/harness/") {
+		// testdata/ is Go's canonical fixture directory — test material by
+		// definition.
+		if strings.Contains(filepath.ToSlash(rel), "/testdata/") {
 			continue
 		}
 		body, err := os.ReadFile(filepath.Join(root, rel))

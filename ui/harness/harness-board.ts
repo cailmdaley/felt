@@ -32,10 +32,10 @@ const iso = (offsetMs: number) => new Date(now + offsetMs).toISOString()
 
 const shuttleBlock = (kind = 'oneshot') => ({
   kind,
-  host: 'dapmcw68',
+  host: 'ada-workstation',
   agent: 'claude-opus',
   effort: 'high',
-  project_dir: '/Users/cd280747/loom',
+  project_dir: '/home/ada/loom',
 })
 
 interface MockFiber {
@@ -52,9 +52,9 @@ interface MockFiber {
 
 const fiber = (f: MockFiber) => ({
   origin: 'local',
-  felt_store: '/Users/cd280747/loom',
+  felt_store: '/home/ada/loom',
   path: `.felt/${f.id}.md`,
-  dir: `/Users/cd280747/loom/.felt/${f.id}`,
+  dir: `/home/ada/loom/.felt/${f.id}`,
   fiber: {
     id: f.id,
     uid: f.uid,

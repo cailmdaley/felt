@@ -46,9 +46,9 @@ const MOCK_UID = '01KVBR1F9BWBVKF97473PV67K8'
 // Real fixtures shipped on disk — the viewer's iframe/img point at these via
 // file:// so the accordion shows actual content. (Absolute file:// URLs; the
 // rewriter maps a mock daemon path to one of these.)
-const FIXTURE_REPORT = 'file:///Users/cd280747/loom/.felt/loom/email/morning-post/report.html'
-const FIXTURE_REPORT2 = 'file:///Users/cd280747/loom/.felt/ai-futures/portolan/standalone-kanban/report.html'
-const FIXTURE_PNG = 'file:///Users/cd280747/loom/.felt/ai-futures/analysis-frontispiece/desi-bao-v1-deterministic.png'
+const FIXTURE_REPORT = 'file:///home/ada/loom/.felt/loom/email/morning-post/report.html'
+const FIXTURE_REPORT2 = 'file:///home/ada/loom/.felt/ai-futures/portolan/standalone-kanban/report.html'
+const FIXTURE_PNG = 'file:///home/ada/loom/.felt/ai-futures/analysis-frontispiece/desi-bao-v1-deterministic.png'
 
 const MOCK_BODY = `The standalone Shuttle board is a lean web client the daemon serves at \`:4000\`.
 
@@ -68,9 +68,9 @@ while we iterate on the **two-column file viewer** offline.
 More prose. The point of the harness is faithful CSS, not faithful data.`
 
 const MOCK_SENT_FILES = [
-  { fullPath: '/Users/cd280747/loom/.felt/loom/email/morning-post/report.html', basename: 'report.html', timestamp: Date.now() - 2 * 60_000, sessionId: '' },
-  { fullPath: '/Users/cd280747/loom/.felt/work/spectra/desi-bao-v1.png', basename: 'desi-bao-v1.png', timestamp: Date.now() - 48 * 60_000, sessionId: '' },
-  { fullPath: '/Users/cd280747/loom/.felt/ai-futures/portolan/standalone-kanban/report.html', basename: 'standalone-kanban-report.html', timestamp: Date.now() - 5 * 24 * 60 * 60_000, sessionId: '' },
+  { fullPath: '/home/ada/loom/.felt/loom/email/morning-post/report.html', basename: 'report.html', timestamp: Date.now() - 2 * 60_000, sessionId: '' },
+  { fullPath: '/home/ada/loom/.felt/work/spectra/desi-bao-v1.png', basename: 'desi-bao-v1.png', timestamp: Date.now() - 48 * 60_000, sessionId: '' },
+  { fullPath: '/home/ada/loom/.felt/ai-futures/portolan/standalone-kanban/report.html', basename: 'standalone-kanban-report.html', timestamp: Date.now() - 5 * 24 * 60 * 60_000, sessionId: '' },
 ]
 
 // A realistic events.jsonl blob for the ?fallback scenario: three SendUserFile
@@ -80,32 +80,32 @@ const MOCK_SENT_FILES = [
 // `report.html` rows share a basename, so this also exercises disambiguation on
 // the real fallback data (not just the disambiguated endpoint mock).
 const FALLBACK_EVENTS_JSONL = [
-  { tool: 'SendUserFile', tmuxSession: `morning-post-${MOCK_UID}-shuttle`, sessionId: 's1', timestamp: Date.now() - 5 * 24 * 60 * 60_000, toolInput: { files: ['/Users/cd280747/loom/.felt/ai-futures/portolan/standalone-kanban/report.html'] } },
+  { tool: 'SendUserFile', tmuxSession: `morning-post-${MOCK_UID}-shuttle`, sessionId: 's1', timestamp: Date.now() - 5 * 24 * 60 * 60_000, toolInput: { files: ['/home/ada/loom/.felt/ai-futures/portolan/standalone-kanban/report.html'] } },
   { tool: 'PreToolUse', tmuxSession: `morning-post-${MOCK_UID}-shuttle`, timestamp: Date.now() - 60_000 },
-  { tool: 'SendUserFile', tmuxSession: `morning-post-${MOCK_UID}-shuttle`, sessionId: 's1', timestamp: Date.now() - 48 * 60_000, toolInput: { files: ['/Users/cd280747/loom/.felt/work/spectra/desi-bao-v1.png'] } },
-  { tool: 'SendUserFile', tmuxSession: `morning-post-${MOCK_UID}-shuttle`, sessionId: 's1', timestamp: Date.now() - 2 * 60_000, toolInput: { files: ['/Users/cd280747/loom/.felt/loom/email/morning-post/report.html'] } },
+  { tool: 'SendUserFile', tmuxSession: `morning-post-${MOCK_UID}-shuttle`, sessionId: 's1', timestamp: Date.now() - 48 * 60_000, toolInput: { files: ['/home/ada/loom/.felt/work/spectra/desi-bao-v1.png'] } },
+  { tool: 'SendUserFile', tmuxSession: `morning-post-${MOCK_UID}-shuttle`, sessionId: 's1', timestamp: Date.now() - 2 * 60_000, toolInput: { files: ['/home/ada/loom/.felt/loom/email/morning-post/report.html'] } },
 ].map((e) => JSON.stringify(e)).join('\n')
 
 // Map a mock daemon path → a real fixture file:// URL for the iframe/img.
 const FIXTURE_MAP: Record<string, string> = {
-  '/Users/cd280747/loom/.felt/loom/email/morning-post/report.html': FIXTURE_REPORT,
-  '/Users/cd280747/loom/.felt/ai-futures/portolan/standalone-kanban/report.html': FIXTURE_REPORT2,
-  '/Users/cd280747/loom/.felt/work/spectra/desi-bao-v1.png': FIXTURE_PNG,
+  '/home/ada/loom/.felt/loom/email/morning-post/report.html': FIXTURE_REPORT,
+  '/home/ada/loom/.felt/ai-futures/portolan/standalone-kanban/report.html': FIXTURE_REPORT2,
+  '/home/ada/loom/.felt/work/spectra/desi-bao-v1.png': FIXTURE_PNG,
 }
 
 const MOCK_CARD: KanbanCard = {
   id: 'ai-futures/portolan/standalone-kanban/board-chrome-redesign',
   uid: MOCK_UID,
   name: 'Board chrome + the fiber panel’s two-column file viewer',
-  path: '/Users/cd280747/loom/.felt/ai-futures/portolan/standalone-kanban/board-chrome-redesign/board-chrome-redesign.md',
-  fiberDir: '/Users/cd280747/loom/.felt/ai-futures/portolan/standalone-kanban/board-chrome-redesign',
-  feltStore: '/Users/cd280747/loom',
+  path: '/home/ada/loom/.felt/ai-futures/portolan/standalone-kanban/board-chrome-redesign/board-chrome-redesign.md',
+  fiberDir: '/home/ada/loom/.felt/ai-futures/portolan/standalone-kanban/board-chrome-redesign',
+  feltStore: '/home/ada/loom',
   // A real LOCAL card's originId is the daemon's own host id (a hostname), NOT
   // the literal 'local' — the composite feed stamps local rows with
   // own_host_id() and sets feed.host to the same. Using the realistic shape
   // here is what lets the ?fallback scenario exercise the (previously broken)
   // local-ness gate; 'local' would have masked the bug.
-  originId: 'dapmcw68',
+  originId: 'ada-workstation',
   status: 'active',
   outcome: 'BUILDING: chrome redesign + the new two-column multi-file viewer for the fiber panel. This lede shows the manuscript outcome treatment.',
   tags: ['constitution', 'kanban', 'portolan', 'design'],
