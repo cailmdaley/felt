@@ -17,9 +17,10 @@ mix deps.get && mix compile   # the daemon
 make build                    # both (CLI + daemon escript)
 ```
 
-Requirements: Go 1.23+, Erlang/OTP 27+, Elixir 1.19+, and `tmux` (the daemon
-launches each worker in a tmux session). Node 22+ is needed only to build the UI
-bundle (`cd ui && npm run build`).
+Requirements: Go 1.23+, Erlang/OTP 27+, Elixir 1.19+. Working on the felt CLI
+alone needs only Go. `tmux` matters once you touch the Shuttle daemon or its
+dispatch path — it launches each worker in a tmux session. Node 22+ is needed
+only to build the UI bundle (`cd ui && npm run build`).
 
 ## Running tests
 
@@ -53,7 +54,9 @@ belong in a fork or a `Shuttle.WorkSource` adapter once that abstraction lands.
 
 ## Opening issues
 
-- **Bugs:** include steps to reproduce and the output of `bin/shuttle snapshot`.
+- **Bugs:** include steps to reproduce. For a Shuttle/daemon bug, also include
+  the output of `bin/shuttle snapshot`; a felt-CLI-only bug report doesn't need
+  it.
 - **Features:** describe the problem, not just the solution. A concrete
   use-case helps.
 

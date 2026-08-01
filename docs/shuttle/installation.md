@@ -8,8 +8,13 @@ and you keep the checkout.
     Shuttle runs on one person's machines: a macOS hub and a few HPC login
     nodes. Several defaults still point at private things — see
     [Honest scoping](index.md#honest-scoping). [Sharp edges](#sharp-edges) below
-    names each one you will actually trip over. macOS gets the most use. Linux
-    works, on a thinner path. Windows is unsupported.
+    names each one you will actually trip over.
+
+    **Platform:** Linux and macOS both support single-host use — the daemon,
+    the board, and workers on one machine, with a real keep-alive on either.
+    Multi-host tunnel management (`felt shuttle tunnels`) is macOS-only, since
+    it manages launchd autossh jobs. macOS gets the most use. Windows is
+    unsupported.
 
 ## Prerequisites
 
@@ -18,7 +23,7 @@ and you keep the checkout.
 | `go` 1.23+ | yes | Builds the `felt` CLI. The daemon shells out to `felt` for every store walk. |
 | `elixir` 1.19+ / OTP 27 | yes | `mix.exs` declares `elixir: "~> 1.19"`. CI builds on OTP 27. |
 | `escript` | yes | The daemon runs *as* an escript. It ships with Erlang/OTP. |
-| `tmux` | yes | Every worker runs in a tmux session. On Linux the daemon's own keep-alive runs as a tmux loop. |
+| `tmux` | yes | Every worker runs in a tmux session. On a Linux host without systemd, the daemon's own keep-alive is a tmux loop too. |
 | `node` 22+ / `npm` | only for the board | Builds the kanban bundle into `ui/dist`. |
 | `jq` | optional | `session.sh` uses it to pretty-print the SessionStart envelope. Without it the hook falls back to `felt hook session`. |
 
@@ -50,12 +55,20 @@ Six steps run in order.
    this checkout, so the plugin hooks match the binary. Then it pipes a probe
    payload through `felt hook event` and checks the line it writes. See
    [The event stream](#the-event-stream).
-6. **Keep-alive.** macOS: a launchd LaunchAgent. Linux: a tmux respawn loop.
+6. **Keep-alive.** macOS: a launchd LaunchAgent. Linux: a systemd user unit,
+   falling back to a tmux respawn loop where there is no systemd user session.
 
 Useful flags: `--dry-run`, `--skip-ui`, `--build-ui`, `--skip-hook`,
 `--skip-cli`, `--with-tunnels`.
 
-## Keep-alive on macOS (launchd)
+## Keep-alive
+
+`make install-agent` installs the supervisor, branching on `uname -s`. Both
+arms render a template from `share/` and bake in the same three environment
+values, for the same reason: neither supervisor hands the daemon your login
+environment.
+
+### macOS (launchd)
 
 Step 6 calls `make install-agent`, which renders
 `share/io.shuttle.daemon.plist.template` into
@@ -73,12 +86,12 @@ exists because the obvious approach failed:
   self-sufficient from a bare environment. So the plist freezes the real login
   `PATH`. A `PATH` without `felt` on it gives you a daemon that boots, serves
   the board, and returns 500 on `/api/v1/fibers/composite`.
-- **`FELT_STORES`** — the stores the daemon polls. The Makefile default is
-  `$HOME/loom`, the maintainer's private
-  [cross-project store](../concepts/cross-project.md). Override it:
-  `make install-agent AGENT_FELT_STORES=~/myproject`. This launchd default
-  supplies the *only* assumed store path; the daemon itself assumes none.
-- **`SSH_AUTH_SOCK`** — `~/.ssh/agent.sock`, the persistent login agent. launchd
+- **`FELT_STORES`** — the stores the daemon polls, comma-separated. There is no
+  default: `make install-agent AGENT_FELT_STORES=~/myproject` is required, and
+  the target refuses without it. felt re-discovers a store's symlinked
+  substores, so one [cross-project store](../concepts/cross-project.md) is
+  usually the only entry you need.
+- **`SSH_AUTH_SOCK`** — `~/.ssh/agent.sock` on macOS, the persistent login agent. launchd
   hands the daemon a bare per-session Keychain agent that holds only the default
   key, which breaks every SSH the daemon makes to a remote host. Override with
   `AGENT_SSH_AUTH_SOCK` if your socket lives elsewhere.
@@ -86,11 +99,52 @@ exists because the obvious approach failed:
 Logs go to `~/Library/Logs/shuttle.log` (`make logs` tails it). Remove the agent
 with `make uninstall-agent`.
 
-## Keep-alive on Linux (tmux)
+### Linux (systemd user unit)
 
-This repo ships no systemd unit. On Linux, bootstrap copies
-`bin/shuttle-launch` to `~/.local/bin` and starts a tmux session named
-`shuttle-daemon` running a respawn loop.
+`make install-agent` renders `share/io.shuttle.daemon.service.template` into
+`~/.config/systemd/user/shuttle-daemon.service`, then runs `systemctl --user
+enable --now`. `Restart=always` with `RestartSec=10` is the KeepAlive analog;
+`WantedBy=default.target` starts the daemon at login. It bakes in the same
+`PATH`, `FELT_STORES`, and `SSH_AUTH_SOCK` as the plist, for the same reasons —
+a systemd user manager inherits almost nothing either. An empty
+`SSH_AUTH_SOCK` is dropped from the rendered unit rather than baked in as a
+dead path, since Linux has no canonical agent socket.
+
+It is a **user** unit: the daemon runs as you and wants no root.
+
+```bash
+loginctl enable-linger $(id -un)
+```
+
+Run that once. A systemd user manager normally stops at your last logout, which
+would take the daemon down with your ssh session; lingering keeps it alive
+across logout and starts it at boot. `make install-agent` prints the command
+but does not run it, because enabling linger needs privileges the install does
+not assume.
+
+Day-to-day:
+
+```bash
+systemctl --user status shuttle-daemon     # is it up
+systemctl --user restart shuttle-daemon    # cycle onto a freshly built escript
+journalctl --user -u shuttle-daemon        # unit-level events
+make logs                                  # the daemon's own log
+```
+
+Logs go to `~/.shuttle/shuttle.log` on Linux — beside the daemon's other state,
+and the same file `make start` and the respawn loop write, so `make logs` finds
+it whichever path is running. Remove the unit with `make uninstall-agent`.
+
+`make install-agent` kills the tmux respawn loop first; both would bind `:4000`.
+
+### Linux without systemd (tmux respawn loop)
+
+Plenty of Linux hosts have no systemd user session — an HPC login node
+typically does not, and neither does a bare container. `make install-agent`
+says so and refuses there. Bootstrap detects the same thing and falls back:
+it copies `bin/shuttle-launch` to `~/.local/bin` and starts a tmux session named
+`shuttle-daemon` running a respawn loop. (It installs `shuttle-launch` on every
+Linux host either way, because remote revival invokes it over SSH.)
 
 The loop runs `./bin/shuttle start --force` and backs off exponentially. A
 daemon that exits within 60 seconds doubles the sleep, from 2s up to a 300s cap.
@@ -120,9 +174,9 @@ The daemon polls felt stores. It resolves them in this order:
 
 **Shuttle assumes no default store.** An unset variable and an absent registry
 resolve to an empty list. The daemon then polls nothing: it boots, binds
-`:4000`, serves an empty board, and dispatches nothing. The launchd plist above
-sets `FELT_STORES=$HOME/loom`, so a fresh install on a machine without that
-directory lands exactly here.
+`:4000`, serves an empty board, and dispatches nothing. `make install-agent`
+requires `AGENT_FELT_STORES` precisely so a supervised daemon never boots into
+that state by accident.
 
 The registry file takes this canonical shape. A bare JSON array also works.
 
@@ -135,6 +189,47 @@ The registry file takes this canonical shape. A bare JSON array also works.
 
 `POST /api/v1/felt-stores` rewrites the file, and the board's store picker uses
 that endpoint. A store path must contain a `.felt/` directory.
+
+## From an empty board to a first dispatch
+
+With the daemon up and a store registered, here is the fastest path from
+nothing to a worker running.
+
+Add the store, if `FELT_STORES` does not already cover it:
+
+```bash
+curl -s -X POST http://127.0.0.1:4000/api/v1/felt-stores \
+  -H 'Content-Type: application/json' \
+  -d '{"felt_stores": ["'"$PWD"'"]}'
+```
+
+Add a fiber and give it a `constitution` tag — tags gate nothing, but they
+make the fiber findable as one:
+
+```bash
+felt add pipeline/first-pass "Rewrite the covariance loader" -t constitution
+```
+
+Open `.felt/pipeline/first-pass/first-pass.md` and write the spec: a
+heading-less lede, then a `## Desired State` section stating what "done" looks
+like in checkable terms. See [Writing a
+constitution](constitutions.md#2-write-the-spec) for the shape.
+
+Install the `shuttle:` block. This is what turns the fiber into something the
+daemon will pick up:
+
+```bash
+felt shuttle install pipeline/first-pass --project-dir "$PWD" --model claude-sonnet
+```
+
+Open <http://127.0.0.1:4000/> — the fiber shows up as a card, armed. The
+daemon polls every 30 seconds by default, so the card moves to in-flight on
+its own; `felt shuttle dispatch pipeline/first-pass` skips the wait. `felt
+shuttle ps` lists the live tmux session, and `felt shuttle attach
+pipeline/first-pass` drops you into it.
+
+When the worker hands off, the fiber's `outcome` and `## Status` rewrite in
+place and the card lands in Awaiting review.
 
 ## Configuring agents
 
@@ -208,11 +303,12 @@ echo '{"hook_event_name":"SessionStart"}' | SHUTTLE_EVENTS_FILE=/tmp/e.jsonl fel
 
 ```bash
 curl -s http://127.0.0.1:4000/api/v1/version   # daemon answers
-open http://127.0.0.1:4000/                    # the kanban board (macOS; use `xdg-open` on Linux)
 felt shuttle ps                                # running workers
 make logs                                      # tail the daemon log
 make status                                    # ps + a snapshot summary
 ```
+
+Open <http://127.0.0.1:4000/> in your browser for the kanban board.
 
 The daemon binds `127.0.0.1:4000` and nothing else. It stays loopback-only by
 construction. It carries no auth layer, because nothing off the machine can
@@ -248,13 +344,14 @@ walks. `make install-agent` warns and installs anyway. Use `~/dev/felt`, or
 anything else outside those folders. The same trap catches a *store* whose real
 path sits under `~/Documents`, even when the checkout is clean.
 
-**`make restart` silently no-ops under launchd.** `make stop` matches the daemon
-by a relative-path pattern; the plist launches it by absolute path. So after
-`make install-agent`, `make restart` rebuilds the escript, stops nothing, and
-reports "already running." Bounce it properly:
+**`make restart` silently no-ops under a supervisor.** `make stop` matches the
+daemon by a relative-path pattern; launchd and systemd both launch it by
+absolute path. So after `make install-agent`, `make restart` rebuilds the
+escript, stops nothing, and reports "already running." Bounce it properly:
 
 ```bash
-launchctl kickstart -k gui/$(id -u)/io.shuttle.daemon
+launchctl kickstart -k gui/$(id -u)/io.shuttle.daemon   # macOS
+systemctl --user restart shuttle-daemon                 # Linux
 ```
 
 `make restart` works only when you started the daemon with `make start`.
@@ -288,8 +385,10 @@ fails at dispatch, not at install. Run `felt shuttle agents init` and cut the
 list down to what you actually have — see [Configuring
 agents](#configuring-agents).
 
-**`felt shuttle tunnels` needs a fleet file first.** It renders launchd autossh
-plists from `~/.config/felt/remotes.json`. With no remotes configured it has
+**`felt shuttle tunnels` is macOS-only, and needs a fleet file first.** It
+renders launchd autossh plists from `~/.config/felt/remotes.json`, so `install`
+refuses outright on Linux — multi-host aggregation runs from a Mac hub, though
+the remotes it aggregates can be any platform. With no remotes configured it has
 nothing to write, and `bootstrap.sh --with-tunnels` does nothing useful.
 `bin/shuttle-deploy` still targets the maintainer's host layout despite its
 general name.

@@ -83,5 +83,5 @@ machine.
 
 Shuttle workers follow a shape for these reports — current state, standing
 findings, open questions, pointers to depth — rewritten whole each session,
-never appended; they ship a template. See
-[Constitutions](../shuttle/constitutions.md).
+never appended. See
+[Optional: report.html](../shuttle/constitutions.md#optional-reporthtml).
