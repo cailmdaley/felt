@@ -47,7 +47,22 @@ defmodule Shuttle.Activity do
   `from_ms`/`to_ms` are inclusive epoch milliseconds. An inverted window, or
   one wider than 120 days, is refused rather than served — the caller is a
   polling browser view, and an unbounded window means an unbounded scan.
+
+  ## Known cost: every request rescans the whole file
+
+  There is no index and no cache. A request for the last ten minutes still
+  streams every line of a stream that grows to 64 MB between rollovers, and a
+  polling client pays that on each tick. It is acceptable today because the
+  scan is a `Jason.decode` per line over a local file and the window cap bounds
+  the worst case — but it does not scale with either poll frequency or the
+  number of open boards. The shape of the fix, when it is needed: keep the
+  tally in a GenServer that tails the stream the way `Shuttle.WaitingTracker`
+  already does (seed once, then read forward from a byte offset) and serve
+  buckets from memory, letting requests read slightly stale data rather than
+  re-deriving history. Deliberately not built yet.
   """
+
+  require Logger
 
   @minute_ms 60_000
   @max_range_days 120
@@ -124,8 +139,12 @@ defmodule Shuttle.Activity do
     |> Enum.reduce(acc, &tally_line(&1, from_ms, to_ms, &2))
   rescue
     # The file vanished or became unreadable between the stat and the stream —
-    # a rotation racing this scan. Serve what the other file gave us.
-    _ -> acc
+    # a rotation racing this scan. Serve what the other file gave us, but leave
+    # a trace: a silently-swallowed read is otherwise indistinguishable from a
+    # genuinely quiet hour, which is a miserable thing to debug from a graph.
+    error ->
+      Logger.debug("activity: skipped #{path} — #{Exception.message(error)}")
+      acc
   end
 
   defp tally_line(line, from_ms, to_ms, acc) do

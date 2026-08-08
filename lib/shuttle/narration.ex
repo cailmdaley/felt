@@ -1,6 +1,6 @@
 defmodule Shuttle.Narration do
   @moduledoc """
-  Commit narration for a civil-day range — the data layer behind
+  Commit narration for a time window — the data layer behind
   `GET /api/v1/narration`.
 
   ## What it reads
@@ -9,44 +9,117 @@ defmodule Shuttle.Narration do
   first entry — the same store the poller treats as primary) is a git repo, or
   sits inside one. `git log` there is the closest thing this system has to a
   narrated history: by convention every commit subject reads
-  `<fiber-slug>: what happened`, so a day's subjects are a day's story. This
+  `<fiber-slug>: what happened`, so a window's subjects are its story. This
   module returns those subjects verbatim; parsing the convention is the
-  reader's business, not ours.
+  reader's business, not ours. Merge commits are excluded — `Merge branch 'x'`
+  is plumbing, not narration.
 
-  ## Civil days, local time
+  ## Two ways to name the window, and why instants are the right one
 
-  `from`/`to` are civil dates and both ends are inclusive: the window runs from
-  `from 00:00:00` to `to 23:59:59` in the **daemon's local timezone**, which is
-  what a human means by "what happened Tuesday". `git log --since/--until`
-  filter on committer date, and `%cI` renders that date in the committer's own
-  offset, so the returned `iso` strings are directly comparable to the bounds a
-  human typed.
+  `commits_between/3` takes **epoch-millisecond instants** and is the form
+  callers should use. It hands git `--since=@<secs>` / `--until=@<secs>`, the
+  raw-seconds form, which is parsed identically no matter what timezone the
+  daemon process runs in.
+
+  `commits/3` takes **civil dates** and runs `from 00:00:00` to `to 23:59:59`
+  in the **daemon's local timezone**. This is the legacy form, kept so an
+  already-shipped `ui/dist` keeps working (a route-shape change is a
+  bundle-rebuild event — see AGENTS.md), and it carries a real defect: the
+  browser computes civil days in *its* zone while git resolves them in the
+  daemon's. A UTC daemon serving a UTC+2 browser shifts the whole window two
+  hours. Measured on a throwaway repo, the same civil-day request returned the
+  commit under `TZ=UTC` and nothing under `TZ=Europe/Paris`, while the
+  `@<secs>` form returned it under UTC, Paris, Los Angeles, and Tokyo alike.
+  Prefer `commits_between/3`; reach for `commits/3` only to stay compatible.
+
+  ## Bounded, because this is a shell-out in a request path
+
+  The git call goes through `Shuttle.Runner.Default`, not bare `System.cmd/3`,
+  which has no timeout. A store root on a stalled network mount would otherwise
+  block its request process forever while the board re-asks every 60 s, piling
+  up wedged processes — the exact hazard `Shuttle.Runner`'s moduledoc was
+  written about and that `Shuttle.FiberDocuments` already defends against. The
+  bound here is 10 s rather than the runner's 60 s default: this is a
+  decorative strip behind a 60 s poll, so it should give up well inside one
+  poll interval.
+
+  Callers are expected to bound the *width* of the window too; the controller
+  refuses anything past `max_range_days/0`.
 
   ## Never 500
 
   Every failure is the empty list: a store root that is not a git repo, a repo
   with no commits, a missing directory, a git binary that is not installed, a
-  daemon with no configured store at all. The narration strip is decoration on
-  a temporal view — it degrades to blank, it does not take the view down.
+  store on an unresponsive filesystem (the timeout lands here as a non-zero
+  status), a daemon with no configured store at all. The narration strip is
+  decoration on a temporal view — it degrades to blank, it does not take the
+  view down.
   """
 
   # ASCII unit separator: git subjects can contain anything printable, so the
   # date/subject delimiter has to be something a subject cannot.
   @separator "\x1f"
 
+  # Well inside the board's 60 s narration poll — see the moduledoc.
+  @timeout_ms 10_000
+
+  # A year plus slack, so "the last twelve months" and "this calendar year,
+  # edges included" both fit while a hand-crafted full-history walk does not.
+  @max_range_days 370
+
   @typedoc "One commit, in the wire shape the endpoint serves."
   @type commit :: %{iso: String.t(), subject: String.t()}
+
+  @doc "The widest window the endpoint will serve, in days."
+  @spec max_range_days() :: pos_integer()
+  def max_range_days, do: @max_range_days
+
+  @doc "The widest window the endpoint will serve, in milliseconds."
+  @spec max_range_ms() :: pos_integer()
+  def max_range_ms, do: @max_range_days * 24 * 60 * 60 * 1_000
+
+  @doc """
+  Commits whose committer date falls in the inclusive instant range
+  `from_ms..to_ms` (epoch milliseconds), newest first (git's own order).
+
+  Timezone-free: the bounds reach git as raw seconds. This is the form callers
+  should use.
+
+  Opts (for tests): `:store_root`, `:runner`.
+  """
+  @spec commits_between(integer(), integer(), keyword()) :: [commit()]
+  def commits_between(from_ms, to_ms, opts \\ [])
+      when is_integer(from_ms) and is_integer(to_ms) do
+    # git resolves `@<secs>` at whole-second granularity, so both bounds
+    # truncate down. That widens the window by at most 999 ms at the head,
+    # which is nothing against a strip of commit subjects.
+    run(["--since=@#{div(from_ms, 1_000)}", "--until=@#{div(to_ms, 1_000)}"], opts)
+  end
 
   @doc """
   Commits whose committer date falls in the inclusive civil-day range
   `from..to`, newest first (git's own order).
 
-  Opts (for tests): `:store_root`, overriding the daemon's primary felt store.
+  **Legacy, daemon-zone.** The window is resolved in the daemon process's
+  timezone, which is not necessarily the caller's — see the moduledoc. Kept for
+  already-shipped clients; new callers want `commits_between/3`.
+
+  Opts (for tests): `:store_root`, `:runner`.
   """
   @spec commits(Date.t(), Date.t(), keyword()) :: [commit()]
   def commits(%Date{} = from, %Date{} = to, opts \\ []) do
+    run(
+      [
+        "--since=#{Date.to_iso8601(from)} 00:00:00",
+        "--until=#{Date.to_iso8601(to)} 23:59:59"
+      ],
+      opts
+    )
+  end
+
+  defp run(bounds, opts) do
     case Keyword.get(opts, :store_root) || default_store_root() do
-      root when is_binary(root) and root != "" -> git_log(Path.expand(root), from, to)
+      root when is_binary(root) and root != "" -> git_log(Path.expand(root), bounds, opts)
       _ -> []
     end
   end
@@ -58,32 +131,32 @@ defmodule Shuttle.Narration do
   end
 
   # `git -C` discovers the enclosing repo itself, so a store that merely lives
-  # *inside* a repo works with no extra probing. A non-repo (or missing) path
-  # exits non-zero, which is the empty list.
-  defp git_log(root, from, to) do
-    args = [
-      "-C",
-      root,
-      "log",
-      "--since=#{Date.to_iso8601(from)} 00:00:00",
-      "--until=#{Date.to_iso8601(to)} 23:59:59",
-      "--pretty=format:%cI#{@separator}%s"
-    ]
+  # *inside* a repo works with no extra probing. `-C` rather than the runner's
+  # `:cd` deliberately: `cd:` into a missing directory raises inside
+  # `Port.open`, where `-C` just exits non-zero, which is the empty list.
+  defp git_log(root, bounds, opts) do
+    args =
+      ["-C", root, "log", "--no-merges"] ++ bounds ++ ["--pretty=format:%cI#{@separator}%s"]
 
     # Fold stderr in rather than letting it reach the daemon's console: a store
     # that isn't a repo would otherwise print `fatal: not a git repository` on
     # every poll. Folded lines are harmless — `parse/1` keeps only lines
-    # carrying the separator, and a non-zero status discards the output whole.
-    case System.cmd("git", args, stderr_to_stdout: true) do
+    # carrying the separator, and any non-zero status (`:timeout` included)
+    # discards the output whole.
+    case runner(opts).cmd("git", args, stderr_to_stdout: true, timeout_ms: @timeout_ms) do
       {output, 0} -> parse(output)
       _ -> []
     end
   rescue
-    # No git on PATH, or an unreadable cwd — System.cmd raises rather than
-    # returning a status for those.
     _ -> []
   catch
     :exit, _ -> []
+  end
+
+  # Same config seam as `Shuttle.Felt` and `Shuttle.FiberDocuments`.
+  defp runner(opts) do
+    Keyword.get(opts, :runner) ||
+      Application.get_env(:shuttle, :narration_runner, Shuttle.Runner.Default)
   end
 
   defp parse(output) do
