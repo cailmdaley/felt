@@ -22,6 +22,12 @@
  * day, so it is 23 or 25 hours twice a year and every position is a fraction
  * of the real span. Never hard-code 1440.
  *
+ * WHICH DAY comes from the board's shared temporal cursor (`ctx.focusDate`),
+ * not from anything this view remembers. The chevrons and the arrow keys write
+ * to the cursor and stop; the refresh that write triggers is what redraws the
+ * page. So paging here and pressing `4` opens Week around the same day, and
+ * the two views can never drift apart.
+ *
  * The join from a bucket to a fiber is the tmux session name: a Shuttle worker
  * runs in `<slug>-<ULID>-shuttle`, and that ULID is the fiber's `uid`. A bucket
  * with no session, or one whose ULID matches no card on the board, is
@@ -29,11 +35,16 @@
  * below the fiber lanes, because it happened and the day should say so.
  */
 
-import { civilDayToLocalDate, isoDayLocal } from '../civilDay.js'
+import { civilDayToLocalDate, instantMs, isoDayLocal, railCivilDay } from '../civilDay.js'
 import type { KanbanCard } from '../KanbanTypes.js'
-import type { ActivityResult, NarrationCommit } from './TemporalData.js'
+import type { ActivityBucket, ActivityResult, NarrationCommit } from './TemporalData.js'
 import { createViewEmptyState, createViewPage } from './ViewPage.js'
-import { registerView, type TemporalView, type ViewContext } from './ViewRegistry.js'
+import {
+  normalizeFocusDate,
+  registerView,
+  type TemporalView,
+  type ViewContext,
+} from './ViewRegistry.js'
 import './DayView.css'
 
 // ── Shape of a day ───────────────────────────────────────────────────────────
@@ -50,11 +61,13 @@ const TICK_HOURS = 4
 /**
  * The civil day the view opens on: today, unless local now is before 06:00,
  * in which case yesterday — the day this small-hours work grew out of.
+ *
+ * Delegates to civilDay's `railCivilDay`, which is the ONE definition of the
+ * dawn-boundary rule; Week classifies its rows with the same call. Two copies
+ * of this rule drifting apart is exactly the defect it exists to prevent.
  */
 export function defaultDayISO(nowMs: number): string {
-  const d = new Date(nowMs)
-  if (d.getHours() < DAY_START_HOUR) d.setDate(d.getDate() - 1)
-  return isoDayLocal(d.getTime())
+  return railCivilDay(nowMs, DAY_START_HOUR)
 }
 
 /** A civil day, `delta` days later (negative for earlier). */
@@ -63,6 +76,31 @@ export function shiftCivilDay(dayISO: string, delta: number): string {
   if (!d) return dayISO
   d.setDate(d.getDate() + delta)
   return isoDayLocal(d.getTime())
+}
+
+/**
+ * The day the page shows: the shared cursor when it holds one, else the
+ * 06:00-aware default. The cursor is the authority — this view keeps no day
+ * state of its own, so Day and Week never disagree about where "here" is.
+ *
+ * A null cursor is the LIVE present, not a snapshot: it re-resolves against
+ * the clock on every call, so a board left open overnight rolls to the new
+ * day at 06:00 instead of freezing on the day it mounted.
+ */
+export function resolveDayISO(focusDate: string | null | undefined, nowMs: number): string {
+  return normalizeFocusDate(focusDate ?? null) ?? defaultDayISO(nowMs)
+}
+
+/**
+ * What a chevron or arrow key writes back to the cursor.
+ *
+ * Stepping ONTO today hands the cursor back to null — the live present —
+ * rather than pinning it to a date that would go stale at 06:00 tomorrow.
+ * Every other day is written explicitly.
+ */
+export function stepTarget(fromDayISO: string, delta: number, nowMs: number): string | null {
+  const next = shiftCivilDay(fromDayISO, delta)
+  return next === defaultDayISO(nowMs) ? null : next
 }
 
 export interface DayWindow {
@@ -117,26 +155,87 @@ export function formatSpanHM(minutes: number): string {
   return h > 0 ? `${h}h ${String(m).padStart(2, '0')}m` : `${m}m`
 }
 
-/** The fiber ULID a Shuttle tmux session name embeds (`<slug>-<ULID>-shuttle`).
- *  Same shape FiberDetailModal reads; replicated rather than imported so this
- *  view does not pull the 120k-line panel into its module graph. */
-const TMUX_ULID_RE = /-([0-9A-HJKMNP-TV-Z]{26})-shuttle$/
-const BARE_ULID_RE = /^[0-9A-HJKMNP-TV-Z]{26}$/
+/**
+ * A Crockford-base32 ULID embedded in a longer name. Shuttle's tmux sessions
+ * are `<slug>-<ULID>-shuttle`, and the ULID is the one token in a session name
+ * that identifies a fiber exactly.
+ *
+ * Case-INSENSITIVE and not anchored to the `-shuttle` suffix, deliberately.
+ * An uppercase-only, suffix-anchored pattern misses a lowercased session name
+ * and every session the dispatcher builds in another shape. Since `cwd` joins
+ * nothing, the session name is the ONLY route from a bucket to a fiber: a miss
+ * here does not merely mislabel the work, it costs the fiber its lane.
+ */
+const ULID_RE = /(?:^|[^0-9a-hjkmnp-tv-z])([0-7][0-9a-hjkmnp-tv-z]{25})(?![0-9a-hjkmnp-tv-z])/i
 
+/** The fiber ULID a session name carries, upper-cased, or null. */
 export function tmuxFiberUlid(session: string | null | undefined): string | null {
-  if (!session) return null
-  return TMUX_ULID_RE.exec(session)?.[1] ?? null
+  if (typeof session !== 'string' || !session) return null
+  return ULID_RE.exec(session)?.[1]?.toUpperCase() ?? null
 }
 
-/** `/home/ada/dev/felt` → `~/dev/felt · interactive`. The lane name for work
- *  that never went through a worker. */
+/**
+ * The human-readable half of a session name: the `-shuttle` suffix and the
+ * ULID stripped. `bmodes-2d-01K…-shuttle` → `bmodes-2d`, and the legacy
+ * leaf-only `morning-post-shuttle` → `morning-post`. The weaker join key —
+ * a slug is a fiber's leaf name, not its identity — so it is consulted only
+ * after the ULID misses, and only when it resolves to exactly one card.
+ */
+export function sessionSlug(name: string | null | undefined): string | null {
+  if (typeof name !== 'string') return null
+  let s = name.trim().toLowerCase()
+  if (!s) return null
+  s = s.replace(/-shuttle$/, '')
+  s = s.replace(/-[0-7][0-9a-hjkmnp-tv-z]{25}$/, '')
+  return s || null
+}
+
+/**
+ * The name of a lane for work that joined to no fiber.
+ *
+ * The suffix is a factual claim about who was at the keyboard, so it follows
+ * the evidence: a bucket carrying a session id was a WORKER whose fiber we
+ * could not identify (`unmatched`), while a bucket with no session at all was
+ * someone typing (`interactive`). Calling an unmatched worker "interactive"
+ * puts an agent's hours on a human's ledger.
+ */
 const HOME_RE = /^\/(?:home|Users)\/[^/]+(?=\/|$)/
-export function cwdLaneLabel(cwd: string | null | undefined): string {
-  if (!cwd) return 'elsewhere · interactive'
-  return `${cwd.replace(HOME_RE, '~') || '/'} · interactive`
+export function cwdLaneLabel(cwd: string | null | undefined, fromWorker = false): string {
+  const suffix = fromWorker ? 'unmatched' : 'interactive'
+  if (!cwd) return `elsewhere · ${suffix}`
+  return `${cwd.replace(HOME_RE, '~') || '/'} · ${suffix}`
 }
 
 // ── Narration ────────────────────────────────────────────────────────────────
+
+/**
+ * The civil days to ASK narration for, to cover a 06:00→06:00 rail.
+ *
+ * The two read routes do not speak the same language. `/activity` takes
+ * instants, so it gets the rail exactly. `/narration` takes INCLUSIVE CIVIL
+ * DAYS, midnight to midnight — so asking it for `(day, day)` returns
+ * 00:00–06:00 of the day (which belongs to YESTERDAY's rail) and misses
+ * 00:00–06:00 of the next day (which belongs to THIS one). On a store whose
+ * author works past midnight that is not an edge case: those commits are the
+ * end of the session the rail is drawing, and they would land a page early
+ * while the fiber that made them got an outcome fallback saying it "worked,
+ * wrote nothing down".
+ *
+ * So: widen by a day and discard by the rail's real edges
+ * ({@link commitsOnRail}) — the same widen-then-discard WeekView uses.
+ */
+export function narrationRange(dayISO: string): { from: string; to: string } {
+  return { from: dayISO, to: shiftCivilDay(dayISO, 1) }
+}
+
+/** The commits that actually fall inside the rail, by instant. Both the early
+ *  and the late overhang of {@link narrationRange} are dropped here. */
+export function commitsOnRail(commits: NarrationCommit[], win: DayWindow): NarrationCommit[] {
+  return commits.filter((commit) => {
+    const at = instantMs(commit.iso)
+    return at !== undefined && at >= win.startMs && at < win.endMs
+  })
+}
 
 /** `slug: what happened` — felt's commit convention. The slug is the bold
  *  token in the prose section; the remainder is the sentence. */
@@ -237,14 +336,121 @@ function minuteIndex(ms: number, win: DayWindow): number | null {
   return index
 }
 
-/** Slugs a card answers to: the tail of its id, and of its project slug. */
-function cardSlugs(card: KanbanCard): string[] {
+/**
+ * The slugs a fiber answers to WHEN MATCHING A COMMIT PREFIX: the leaf of its
+ * id and of its project slug, and nothing else.
+ *
+ * Deliberately narrower than {@link cardPathSegments}, which the activity join
+ * uses. A `felt: …` commit prefix names the fiber whose leaf is `felt`, not
+ * every fiber that happens to live under `felt/` — widening this would make
+ * one parent directory swallow the narration of everything beneath it.
+ */
+export function commitSlugsForCard(card: KanbanCard): string[] {
   const out = new Set<string>()
   for (const source of [card.id, card.projectSlug]) {
     const tail = source?.split('/').filter(Boolean).pop()
     if (tail) out.add(tail.toLowerCase())
   }
   return [...out]
+}
+
+/** Every ULID a card can be recognized by — its own `uid`, plus any embedded
+ *  in the ids and session names it carries. */
+function cardUlids(card: KanbanCard): string[] {
+  const out = new Set<string>()
+  const push = (value: string | null | undefined): void => {
+    const trimmed = typeof value === 'string' ? value.trim().toUpperCase() : ''
+    if (/^[0-7][0-9A-HJKMNP-TV-Z]{25}$/.test(trimmed)) out.add(trimmed)
+    const embedded = tmuxFiberUlid(value)
+    if (embedded) out.add(embedded)
+  }
+  push(card.uid)
+  push(card.id)
+  push(card.shuttleFiberId)
+  push(card.runningWorker)
+  return [...out]
+}
+
+/** Path segments a card can be recognized by when no ULID is available. Short
+ *  segments are dropped — a two-letter directory name is not evidence. */
+function cardPathSegments(card: KanbanCard): string[] {
+  const out = new Set<string>()
+  for (const segment of [...card.id.split('/'), ...(card.projectSlug ?? '').split('/')]) {
+    const s = segment.trim().toLowerCase()
+    if (s.length >= 3) out.add(s)
+  }
+  return [...out]
+}
+
+/**
+ * Which fiber a bucket belongs to, strongest evidence first:
+ *
+ *   1. `s` is exactly a live worker's tmux name.
+ *   2. `s` embeds a fiber ULID a card claims. Exact identity.
+ *   3. `s`'s slug half names exactly one card's path segment — the name the
+ *      dispatcher built the session from, including the legacy leaf-only form.
+ *   4. nothing: the bucket belongs to its working directory.
+ *
+ * ATTRIBUTION BY DECLARED IDENTITY ONLY. Every rung above reads `s`, the
+ * session — something the dispatcher WROTE about which fiber this worker is
+ * realizing. `cwd` deliberately joins nothing. A directory names a project,
+ * never a fiber: a repo root routinely shares its name with exactly one fiber
+ * nested inside it, so `~/dev/felt` would resolve to whichever single card
+ * happens to carry a `felt` segment, and an afternoon's work would be filed
+ * under a fiber it may have nothing to do with. That holds whether or not the
+ * bucket has a session — an unresolvable session is not made resolvable by the
+ * folder it ran in — so there is no case left where a directory should name a
+ * fiber. Unjoined work still appears, on a cwd lane that says exactly what is
+ * known: which directory, and whether a worker or a human. Same ladder
+ * ChronicleView runs; kept as its own copy rather than imported, since one view
+ * importing another's internals is a coupling neither owner asked for.
+ *
+ * Rung 3 demands a UNIQUE match. A token several cards answer to is a project
+ * directory, not a fiber, so ambiguity falls through rather than picking an
+ * arbitrary winner.
+ */
+interface JoinIndex {
+  byWorker: Map<string, KanbanCard>
+  byUlid: Map<string, KanbanCard>
+  /** null marks a token claimed by more than one card — unusable. */
+  bySegment: Map<string, KanbanCard | null>
+}
+
+function buildJoinIndex(cards: KanbanCard[]): JoinIndex {
+  const byWorker = new Map<string, KanbanCard>()
+  const byUlid = new Map<string, KanbanCard>()
+  const bySegment = new Map<string, KanbanCard | null>()
+  for (const card of cards) {
+    if (card.runningWorker) byWorker.set(card.runningWorker, card)
+    for (const ulid of cardUlids(card)) byUlid.set(ulid, card)
+    for (const segment of cardPathSegments(card)) {
+      const seen = bySegment.get(segment)
+      if (seen === undefined) bySegment.set(segment, card)
+      else if (seen && seen.id !== card.id) bySegment.set(segment, null)
+    }
+  }
+  return { byWorker, byUlid, bySegment }
+}
+
+export function joinBucketToCard(
+  bucket: Pick<ActivityBucket, 's'>,
+  index: JoinIndex,
+): KanbanCard | null {
+  if (bucket.s) {
+    const worker = index.byWorker.get(bucket.s)
+    if (worker) return worker
+    const ulid = tmuxFiberUlid(bucket.s)
+    if (ulid) {
+      const byUlid = index.byUlid.get(ulid)
+      if (byUlid) return byUlid
+    }
+    const slug = sessionSlug(bucket.s)
+    if (slug) {
+      const bySlug = index.bySegment.get(slug)
+      if (bySlug) return bySlug
+    }
+  }
+  return null
 }
 
 /**
@@ -258,11 +464,7 @@ export function buildDayLanes(
   cards: KanbanCard[],
   win: DayWindow,
 ): DayLane[] {
-  const byUlid = new Map<string, KanbanCard>()
-  for (const card of cards) {
-    if (card.uid) byUlid.set(card.uid.toUpperCase(), card)
-    if (BARE_ULID_RE.test(card.id)) byUlid.set(card.id.toUpperCase(), card)
-  }
+  const index = buildJoinIndex(cards)
 
   interface Acc {
     lane: Omit<DayLane, 'agent' | 'attention' | 'notify' | 'weight'>
@@ -274,10 +476,17 @@ export function buildDayLanes(
   const acc = new Map<string, Acc>()
 
   for (const bucket of activity.buckets) {
-    const index = minuteIndex(bucket.m, win)
-    if (index === null) continue
-    const card = byUlid.get(tmuxFiberUlid(bucket.s) ?? '')
-    const key = card ? `fiber:${card.id}` : `loose:${bucket.cwd ?? ''}`
+    const minute = minuteIndex(bucket.m, win)
+    if (minute === null) continue
+    const card = joinBucketToCard(bucket, index)
+    // Unjoined buckets split by ORIGIN as well as by directory: a worker whose
+    // fiber we could not name and a human at a shell are different claims
+    // about the same folder, and merging them would put one behind the other's
+    // label. See cwdLaneLabel.
+    const fromWorker = bucket.s !== null
+    const key = card
+      ? `fiber:${card.id}`
+      : `loose:${fromWorker ? 'worker' : 'human'}:${bucket.cwd ?? ''}`
     let entry = acc.get(key)
     if (!entry) {
       entry = {
@@ -288,12 +497,12 @@ export function buildDayLanes(
               label: card.name,
               host: (card.shuttleHost ?? activity.host ?? '').toLowerCase(),
               cardId: card.id,
-              slugs: cardSlugs(card),
+              slugs: commitSlugsForCard(card),
             }
           : {
               key,
               kind: 'loose',
-              label: cwdLaneLabel(bucket.cwd),
+              label: cwdLaneLabel(bucket.cwd, fromWorker),
               host: (activity.host ?? '').toLowerCase(),
               slugs: [],
             },
@@ -304,10 +513,10 @@ export function buildDayLanes(
       }
       acc.set(key, entry)
     }
-    entry.all.add(index)
-    if (bucket.k === 'agent') entry.agent.add(index)
-    else if (bucket.k === 'attention') entry.attention.add(index)
-    else entry.notify.add(index)
+    entry.all.add(minute)
+    if (bucket.k === 'agent') entry.agent.add(minute)
+    else if (bucket.k === 'attention') entry.attention.add(minute)
+    else entry.notify.add(minute)
   }
 
   const lanes: DayLane[] = [...acc.values()].map((entry) => ({
@@ -343,6 +552,15 @@ export interface DayEntry {
  * "The day, by fiber": one entry per commit slug, then one per fiber that was
  * live on a lane but committed nothing (its outcome's first sentence stands
  * in), then the unprefixed commits under a muted marginal head.
+ *
+ * A LEAF SLUG IS NOT AN IDENTITY. Nested ids are the norm in this store, so
+ * `felt/board` and `lightcone/board` both answer to `board`. Attributing such
+ * a commit to whichever lane came first would open the wrong fiber on click,
+ * and — worse — would count BOTH lanes as narrated, silently deleting the
+ * other fiber's entry from a page that draws its rail. So an ambiguous slug is
+ * refused instead: the commit entry keeps its prose but carries no card, and
+ * every lane that answers to that slug still gets its own fallback line. Same
+ * refusal ChronicleView makes on the same hazard.
  */
 export function buildDayEntries(
   commits: NarrationCommit[],
@@ -350,8 +568,29 @@ export function buildDayEntries(
   cards: KanbanCard[],
 ): DayEntry[] {
   const groups = groupCommitsBySlug(commits)
-  const narrated = new Set(groups.map((g) => g.slug?.toLowerCase()).filter(Boolean) as string[])
   const cardById = new Map(cards.map((card) => [card.id, card]))
+
+  // slug → the one lane that owns it, or null when several answer to it.
+  const laneBySlug = new Map<string, DayLane | null>()
+  for (const lane of lanes) {
+    if (lane.kind !== 'fiber') continue
+    for (const slug of lane.slugs) {
+      const seen = laneBySlug.get(slug)
+      if (seen === undefined) laneBySlug.set(slug, lane)
+      else if (seen && seen.key !== lane.key) laneBySlug.set(slug, null)
+    }
+  }
+  const ambiguous = new Set(
+    [...laneBySlug.entries()].filter(([, lane]) => lane === null).map(([slug]) => slug),
+  )
+  // Narration suppresses a fallback PER LANE, never per slug: only the lane a
+  // commit could actually be attributed to counts as having spoken.
+  const narratedLanes = new Set<string>()
+  for (const group of groups) {
+    if (!group.slug) continue
+    const lane = laneBySlug.get(group.slug.toLowerCase())
+    if (lane) narratedLanes.add(lane.key)
+  }
 
   const entries: DayEntry[] = []
   let loose: DayEntry | null = null
@@ -361,19 +600,19 @@ export function buildDayEntries(
       loose = { key: 'loose', title: '— elsewhere in the store —', body, loose: true }
       continue
     }
-    // A commit slug that names a lane's fiber carries that lane's card, so the
-    // prose entry opens the same fiber the lane label does.
-    const lane = lanes.find((l) => l.slugs.includes(group.slug!.toLowerCase()))
+    // Only an unambiguous slug carries a card, so the prose entry always opens
+    // the same fiber its lane label does — or nothing at all.
+    const lane = laneBySlug.get(group.slug.toLowerCase()) ?? undefined
     entries.push({ key: `slug:${group.slug}`, title: group.slug, body, cardId: lane?.cardId })
   }
 
   for (const lane of lanes) {
-    if (lane.kind !== 'fiber' || lane.slugs.some((slug) => narrated.has(slug))) continue
+    if (lane.kind !== 'fiber' || narratedLanes.has(lane.key)) continue
     const card = lane.cardId ? cardById.get(lane.cardId) : undefined
     const sentence = firstSentence(card?.outcome)
     entries.push({
       key: `lane:${lane.key}`,
-      title: lane.slugs[0] ?? lane.label,
+      title: laneEntryTitle(lane, ambiguous),
       body: sentence || 'worked, wrote nothing down',
       fallback: true,
       cardId: lane.cardId,
@@ -382,6 +621,16 @@ export function buildDayEntries(
 
   if (loose) entries.push(loose)
   return entries
+}
+
+/** A fallback entry's bold token. Two lanes sharing a leaf both appear here,
+ *  so a contested leaf is qualified by its parent rather than printed twice. */
+function laneEntryTitle(lane: DayLane, ambiguous: Set<string>): string {
+  const leaf = lane.slugs[0]
+  if (!leaf) return lane.label
+  if (!ambiguous.has(leaf)) return leaf
+  const parts = (lane.cardId ?? '').split('/').filter(Boolean)
+  return parts.length >= 2 ? parts.slice(-2).join('/') : leaf
 }
 
 export interface DayModel {
@@ -405,7 +654,10 @@ export function buildDayModel(
     window: win,
     totals: dayTotals(activity, win),
     lanes,
-    entries: buildDayEntries(commits, lanes, cards),
+    // The commits are the widened civil-day range; the rail decides which of
+    // them are this day's. Filtering here rather than at the call site keeps
+    // every caller of buildDayModel honest.
+    entries: buildDayEntries(commitsOnRail(commits, win), lanes, cards),
   }
 }
 
@@ -468,8 +720,10 @@ class DayViewImpl implements TemporalView {
   private statsEl: HTMLElement | null = null
   private bodyEl: HTMLElement | null = null
   private ctx: ViewContext | null = null
-  /** Sticky across refreshes; only the chevrons and the arrow keys move it. */
-  private dayISO = defaultDayISO(Date.now())
+  /** The day currently PAINTED. Not authority — the cursor is (see
+   *  {@link resolveDayISO}); this only says what the DOM is showing, so a
+   *  refresh can tell whether the heading and body need to move. */
+  private shownDay: string | null = null
   private signature: string | null = null
   /** Monotonic load id — a fetch that lands after a newer one is discarded. */
   private loadToken = 0
@@ -479,12 +733,12 @@ class DayViewImpl implements TemporalView {
     if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return
     if (keystrokeIsSpokenFor()) return
     e.preventDefault()
-    this.goto(shiftCivilDay(this.dayISO, e.key === 'ArrowLeft' ? -1 : 1))
+    this.step(e.key === 'ArrowLeft' ? -1 : 1)
   }
 
   mount(host: HTMLElement, ctx: ViewContext): void {
     this.ctx = ctx
-    this.dayISO = defaultDayISO(Date.now())
+    this.shownDay = null
     this.signature = null
 
     const page = createViewPage(this.title)
@@ -492,14 +746,22 @@ class DayViewImpl implements TemporalView {
     const head = document.createElement('div')
     head.className = 'kbn-day-head'
 
+    // The date is a quiet way up a zoom level: it hands the week the day you
+    // are looking at, so Week opens around it rather than on the current week.
+    this.headingEl = document.createElement('button')
+    this.headingEl.className = 'kbn-day-date'
+    ;(this.headingEl as HTMLButtonElement).type = 'button'
+    this.headingEl.title = 'See the week this day sits in'
+    this.headingEl.addEventListener('click', () => {
+      const ctxNow = this.ctx
+      if (ctxNow) ctxNow.switchView('week', { focusDate: this.currentDay() })
+    })
+
     const dateRow = document.createElement('div')
     dateRow.className = 'kbn-day-daterow'
     dateRow.append(
       this.buildChevron('‹', 'Previous day', -1),
-      (this.headingEl = Object.assign(document.createElement('h3'), {
-        className: 'kbn-day-date',
-        textContent: formatDayHeading(this.dayISO),
-      })),
+      this.headingEl,
       this.buildChevron('›', 'Next day', 1),
     )
 
@@ -515,12 +777,12 @@ class DayViewImpl implements TemporalView {
     host.append(page.root)
 
     document.addEventListener('keydown', this.onKeyDown)
-    void this.load()
+    this.syncToCursor()
   }
 
   refresh(ctx: ViewContext): void {
     this.ctx = ctx
-    void this.load()
+    this.syncToCursor()
   }
 
   unmount(): void {
@@ -532,7 +794,37 @@ class DayViewImpl implements TemporalView {
     this.statsEl = null
     this.bodyEl = null
     this.ctx = null
+    this.shownDay = null
     this.signature = null
+  }
+
+  /** The day to show right now, read from the shared cursor. */
+  private currentDay(): string {
+    return resolveDayISO(this.ctx?.focusDate, Date.now())
+  }
+
+  /**
+   * Bring the page to the cursor. Called from mount and from every refresh —
+   * including the refresh `setFocusDate` itself triggers, which is why paging
+   * writes to the cursor and then does nothing else.
+   */
+  private syncToCursor(): void {
+    const day = this.currentDay()
+    if (day !== this.shownDay) {
+      this.shownDay = day
+      if (this.headingEl) this.headingEl.textContent = formatDayHeading(day)
+      // A different day is different content; never let the old day's
+      // signature suppress its render.
+      this.signature = null
+    }
+    void this.load(day)
+  }
+
+  /** Page the cursor, and let the refresh it triggers do the drawing. */
+  private step(delta: number): void {
+    const ctx = this.ctx
+    if (!ctx) return
+    ctx.setFocusDate(stepTarget(this.currentDay(), delta, Date.now()))
   }
 
   private buildChevron(glyph: string, label: string, delta: number): HTMLButtonElement {
@@ -542,32 +834,26 @@ class DayViewImpl implements TemporalView {
     button.textContent = glyph
     button.title = label
     button.setAttribute('aria-label', label)
-    button.addEventListener('click', () => this.goto(shiftCivilDay(this.dayISO, delta)))
+    button.addEventListener('click', () => this.step(delta))
     return button
   }
 
-  private goto(dayISO: string): void {
-    if (dayISO === this.dayISO) return
-    this.dayISO = dayISO
-    this.signature = null
-    if (this.headingEl) this.headingEl.textContent = formatDayHeading(dayISO)
-    void this.load()
-  }
-
   /** One activity call + one narration call, both memoized upstream. */
-  private async load(): Promise<void> {
+  private async load(dayISO: string): Promise<void> {
     const ctx = this.ctx
     if (!ctx) return
-    const dayISO = this.dayISO
     const win = dayWindow(dayISO)
     const token = (this.loadToken += 1)
 
+    const range = narrationRange(dayISO)
     const [activity, narration] = await Promise.all([
-      ctx.activity(win.startMs, win.endMs),
-      ctx.narration(dayISO, dayISO),
+      // `to_ms` is INCLUSIVE on the endpoint while the rail's own end is
+      // exclusive, so ask for the last minute we draw, not the first we don't.
+      ctx.activity(win.startMs, win.endMs - MINUTE_MS),
+      ctx.narration(range.from, range.to),
     ])
     // A day the human has since navigated away from, or an unmounted view.
-    if (token !== this.loadToken || !this.bodyEl || dayISO !== this.dayISO) return
+    if (token !== this.loadToken || !this.bodyEl || dayISO !== this.shownDay) return
 
     const model = buildDayModel(dayISO, activity, narration.commits, ctx.cards)
     const signature = dayModelSignature(model)

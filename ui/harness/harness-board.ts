@@ -17,8 +17,11 @@
  *
  * The temporal views (chronicle / day / week, hotkeys 2-4) are exercised the
  * same way: `MOCK_TEMPORAL` below injects deterministic activity + narration
- * in place of the daemon routes, so the views render offline with no `/api/v1/
- * activity` endpoint in existence.
+ * in place of the `/api/v1/activity` and `/api/v1/narration` routes, so the
+ * views render with no daemon to serve them. The mock mirrors those routes'
+ * wire contract — one-minute buckets keyed {minute, session, cwd, kind};
+ * narration over inclusive civil days — so what the views are exercised
+ * against is the shape the daemon actually returns.
  *
  * Distinct from harness/harness.ts (slice C), which mounts FiberDetailModal.
  * Build: `npx vite build -c vite.harness-board.config.ts` → harness-board-dist/.
@@ -308,19 +311,28 @@ const MOCK_FEED = {
 
 // ── Mock temporal read plane ─────────────────────────────────────────────────
 //
-// The daemon has no /api/v1/activity or /api/v1/narration route yet, and the
-// real fetchers answer a 404 with an empty result — which would leave every
-// temporal view blank in the harness, verifying nothing. So the harness injects
-// a `TemporalFetchers` pair directly instead of stubbing the routes.
+// `GET /api/v1/activity` and `/api/v1/narration` exist on the daemon now
+// (lib/shuttle/activity.ex, lib/shuttle/narration.ex), but the harness has no
+// daemon at all — it runs off `file://` with a stubbed `fetch`. So it injects a
+// `TemporalFetchers` pair directly, standing in for those two routes and
+// mirroring their wire contract rather than the transport.
 //
-// SEEDED, NOT RANDOM: bucket presence, count, session and cwd are all derived
-// from the bucket's index through mulberry32, so two loads of the same window
-// produce byte-identical data and a screenshot diff means a real change. The
-// window itself is now-relative because the mock feed is (its fibers are dated
-// off `now`), so the views cover the same three days the board's cards do.
+// SEEDED, NOT RANDOM: every span, actor and count is derived from absolute
+// clock position through mulberry32, so two loads of the same window produce
+// byte-identical data and a screenshot diff means a real change. The window
+// itself is now-relative because the mock feed is (its fibers are dated off
+// `now`), so the views cover the same three days the board's cards do.
 
 const FEED_SPAN_MS = 3 * 86_400_000
-const BUCKET_MS = 5 * 60_000
+/**
+ * ONE MINUTE, matching the wire. `Shuttle.Activity` buckets on a fixed
+ * `@minute_ms 60_000` grid, unconditionally — there is no coarser mode and no
+ * width field on the wire for a client to infer from. A 5-minute mock grid
+ * therefore under-reported every duration by the factor between the two: the
+ * raster looked dense while Week's totals read "1h 52m · quiet", which is a
+ * harness artifact that any glance would blame on Week.
+ */
+const BUCKET_MS = 60_000
 
 /** mulberry32 — a small deterministic PRNG. Same seed, same stream. */
 function seeded(seed: number): () => number {
@@ -349,31 +361,68 @@ function seedFromString(text: string): number {
  * Who was working, and where. Each entry is one (session, cwd) actor the
  * generator draws from, `weight` copies of it in the draw pool.
  *
- * The first four JOIN: their session names carry a real fiber's ULID, so a
- * bucket lands in that fiber's named lane. The last three deliberately DO NOT —
- * an old-style session name with no ULID, and bare interactive work with no
- * session at all — because the unjoined path (grouped into muted per-cwd lanes)
- * is half of what the views have to render and must stay exercised offline.
+ * All three lane labels the views can draw are exercised here, because each is
+ * a different factual claim and each has its own bug:
+ *
+ *   JOINED      the first four. Their session names carry a real fiber's ULID,
+ *               so a bucket lands in that fiber's named lane.
+ *   UNMATCHED   `scratch-shuttle`. A session id that resolves to no fiber — a
+ *               worker whose fiber the view could not name.
+ *   INTERACTIVE the two with `s: null`. No session at all: a human at a shell.
+ *
+ * THE CWD IS LOAD-BEARING FOR THE UNMATCHED ONE. `joinBucketToCard` tries four
+ * rungs for a session-bearing bucket, and the LAST is the cwd's tail against
+ * fiber id segments. `scratch-shuttle` used to sit in `/home/ada/dev/felt`,
+ * whose tail `felt` is a segment of `loom/felt/shuttle/agent-registry-audit` —
+ * so it joined on that fourth rung and quietly rendered as a fifth fiber lane,
+ * and `· unmatched` never appeared offline at all. Its directory must keep a
+ * tail that matches NO fiber segment. `scratch` is safe; anything named after
+ * a project in the mock feed is not.
  */
 const MOCK_ACTORS: Array<{ s: string | null; cwd: string | null; weight: number }> = [
   { s: sessionFor('work/spt3g_papers/bmodes-2d/run', ULID.bmodes), cwd: '/home/ada/work/spt3g_papers', weight: 5 },
   { s: sessionFor('loom/email/morning-post/refine', ULID.refine), cwd: '/home/ada/loom', weight: 4 },
   { s: sessionFor('work/euclid/euclid-github/triage', ULID.triage), cwd: '/home/ada/work/euclid', weight: 3 },
   { s: sessionFor('work/admin/conference-travel-receipts', ULID.receipts), cwd: '/home/ada/loom', weight: 2 },
-  { s: 'scratch-shuttle', cwd: '/home/ada/dev/felt', weight: 3 },
+  { s: 'scratch-shuttle', cwd: '/home/ada/scratch', weight: 3 },
   { s: null, cwd: '/home/ada/dev/felt', weight: 3 },
   { s: null, cwd: '/home/ada/notes', weight: 2 },
 ]
 const ACTOR_POOL = MOCK_ACTORS.flatMap((a) => Array<typeof a>(a.weight).fill(a))
 
-const MOCK_KINDS: ActivityBucket['k'][] = ['agent', 'attention', 'notify']
+const HOUR_MS = 3_600_000
+/** A span can run past the hour that spawned it, so generation starts this far
+ *  back of the window to catch one that spills into it. Comfortably longer than
+ *  the longest span below. */
+const SPAN_LOOKBACK_HOURS = 2
+
+/** Sessions per hour and their length, by time of day. Work arrives in RUNS,
+ *  not as independent minutes — that is the whole reason for spans. */
+function hourShape(hour: number): { spans: number; minLen: number; maxLen: number } {
+  if (hour < 7) return { spans: 0.35, minLen: 3, maxLen: 12 }     // small hours: rare, short
+  if (hour < 10) return { spans: 1.6, minLen: 6, maxLen: 25 }     // morning ramp
+  if (hour < 19) return { spans: 2.4, minLen: 8, maxLen: 40 }     // the working day
+  return { spans: 1.1, minLen: 5, maxLen: 20 }                    // evening tail
+}
 
 /**
- * Generate the activity buckets covering [fromMs, toMs). Each 5-minute slot is
- * seeded on its absolute index so the same slot always yields the same bucket
- * regardless of the requested window — a view asking for one day and a view
- * asking for three agree on their overlap. Nights (00:00-07:00 local) are
- * sparse and daytime is dense, so the day/week views have a shape to draw.
+ * Generate the activity buckets covering [fromMs, toMs) on the wire's OWN
+ * one-minute grid — one bucket per `{minute, session, cwd, kind}`, exactly as
+ * `Shuttle.Activity` aggregates them.
+ *
+ * Work is generated as SPANS, not as independently sampled minutes. Sampling
+ * each minute on its own would put a 60_000ms grid at whatever per-minute
+ * probability you pick and produce uniform static — no runs to merge, no
+ * shape for Day's wash to draw, and a duration total that is really just a
+ * coin-flip count. Instead each absolute HOUR seeds its own handful of spans
+ * (start minute, length, actor), and every minute inside a span emits a
+ * bucket. Density lives in how much of the hour the spans cover, which is what
+ * a duration total is actually measuring.
+ *
+ * Generation is keyed on ABSOLUTE hour index, never on the requested window,
+ * so a view asking for one day and a view asking for a week agree exactly on
+ * their overlap. Generation starts SPAN_LOOKBACK_HOURS early so a span that
+ * began before `fromMs` still contributes the minutes that fall inside it.
  *
  * Never emits a bucket later than page load: a view whose window runs to the
  * end of the civil day (DayView's is 06:00 → 06:00) would otherwise draw work
@@ -381,26 +430,63 @@ const MOCK_KINDS: ActivityBucket['k'][] = ['agent', 'attention', 'notify']
  * reads as a rendering bug.
  */
 function mockActivity(fromMs: number, toMs: number): ActivityResult {
-  const buckets: ActivityBucket[] = []
-  const first = Math.floor(fromMs / BUCKET_MS)
-  const last = Math.floor(Math.min(toMs, now) / BUCKET_MS)
-  for (let index = first; index < last; index += 1) {
-    const m = index * BUCKET_MS
-    const rng = seeded(index)
-    const hour = new Date(m).getHours()
-    const density = hour < 7 ? 0.06 : hour < 10 ? 0.4 : hour < 19 ? 0.72 : 0.3
-    if (rng() > density) continue
-    const kind = MOCK_KINDS[Math.floor(rng() * MOCK_KINDS.length)]
-    const actor = ACTOR_POOL[Math.floor(rng() * ACTOR_POOL.length)]
-    buckets.push({
-      m,
-      s: actor.s,
-      cwd: actor.cwd,
-      k: kind,
-      // `attention` and `notify` are single events; agent work comes in runs.
-      n: kind === 'agent' ? 1 + Math.floor(rng() * 24) : 1,
-    })
+  // Keyed exactly as the daemon keys them — {minute, session, cwd, kind} — so
+  // two spans by the same actor overlapping one minute MERGE into a single
+  // bucket with summed `n`, rather than emitting a duplicate key the real feed
+  // could never produce.
+  const byKey = new Map<string, ActivityBucket>()
+  const add = (bucket: ActivityBucket): void => {
+    const key = `${bucket.m}|${bucket.s ?? ''}|${bucket.cwd ?? ''}|${bucket.k}`
+    const hit = byKey.get(key)
+    if (hit) hit.n += bucket.n
+    else byKey.set(key, bucket)
   }
+  const endMs = Math.min(toMs, now)
+  const firstHour = Math.floor(fromMs / HOUR_MS) - SPAN_LOOKBACK_HOURS
+  const lastHour = Math.floor(endMs / HOUR_MS)
+
+  for (let hourIndex = firstHour; hourIndex <= lastHour; hourIndex += 1) {
+    const hourStart = hourIndex * HOUR_MS
+    const rng = seeded(hourIndex)
+    const shape = hourShape(new Date(hourStart).getHours())
+    // Fractional span counts read as a probability for the last one.
+    const spanCount = Math.floor(shape.spans) + (rng() < shape.spans % 1 ? 1 : 0)
+
+    for (let s = 0; s < spanCount; s += 1) {
+      const startMinute = Math.floor(rng() * 60)
+      const length = shape.minLen + Math.floor(rng() * (shape.maxLen - shape.minLen + 1))
+      const actor = ACTOR_POOL[Math.floor(rng() * ACTOR_POOL.length)]
+      // One notify per span at most, and only sometimes: the agent raising its
+      // hand is an event, not a texture.
+      const notifyAt = rng() < 0.35 ? Math.floor(rng() * length) : -1
+
+      for (let i = 0; i < length; i += 1) {
+        const m = hourStart + (startMinute + i) * BUCKET_MS
+        if (m < fromMs || m >= endMs) continue
+        const mRng = seeded(Math.floor(m / BUCKET_MS))
+        // A span is the agent's own time, punctuated by the human. The first
+        // minute is nearly always attention — that is the prompt that started
+        // it — and a steer lands here and there after.
+        const steering = i === 0 ? mRng() < 0.8 : mRng() < 0.06
+        if (steering) {
+          add({ m, s: actor.s, cwd: actor.cwd, k: 'attention', n: 1 })
+        }
+        // The agent works through the minute regardless (a steer and the work
+        // it provokes share a minute — two buckets, distinct `k`, exactly as
+        // the daemon would key them).
+        if (i > 0 || !steering) {
+          add({ m, s: actor.s, cwd: actor.cwd, k: 'agent', n: 1 + Math.floor(mRng() * 11) })
+        }
+        if (i === notifyAt) {
+          add({ m, s: actor.s, cwd: actor.cwd, k: 'notify', n: 1 })
+        }
+      }
+    }
+  }
+  // The daemon streams its events in file order, so buckets arrive roughly
+  // time-ordered; sort so the mock does not accidentally exercise a tolerance
+  // the real feed never asks a view for.
+  const buckets = [...byKey.values()].sort((a, b) => a.m - b.m)
   return { host: 'ada-workstation', from_ms: fromMs, to_ms: toMs, buckets }
 }
 

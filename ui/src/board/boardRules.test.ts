@@ -10,6 +10,7 @@
 import { describe, expect, it } from 'vitest'
 import { effectiveHorizon, humanizeCron, restingUntil } from './KanbanRules.js'
 import { humanizeIdleAge, phasePillLabel } from './KanbanSurfaces.js'
+import { sessionWindow } from './FiberDetailModal.js'
 import { isoDayLocal } from './civilDay.js'
 
 const NOW = Date.parse('2026-08-08T15:30:00Z')
@@ -105,6 +106,79 @@ describe('phasePillLabel', () => {
   it('falls back to the bare label with no activity stamp', () => {
     expect(phasePillLabel('waiting', undefined, NOW)).toBe('⏸ waiting')
     expect(phasePillLabel('dispatched', NOW - DAY, NOW)).toBe('▸ dispatched')
+  })
+})
+
+describe('sessionWindow', () => {
+  // The rendered clock is the READER's local time, so these assert on shape,
+  // not on digits — a fixed "12:01" would only ever be right in one zone.
+  const BARE = /^dispatched \d{2}:\d{2}/
+  const DATED = /^dispatched [A-Za-z]{3}\.? ?\d{1,2} \d{2}:\d{2}/
+  const at = (offsetMs: number): string => new Date(NOW + offsetMs).toISOString()
+
+  it('is nothing at all for a fiber that never ran', () => {
+    expect(sessionWindow({}, NOW)).toBeNull()
+    expect(sessionWindow({ handedOffAt: at(-3_600_000) }, NOW)).toBeNull()
+  })
+
+  it("leaves today's run bare — a date on every line is noise", () => {
+    const w = sessionWindow(
+      { dispatchedAt: at(-5 * 3_600_000), handedOffAt: at(-90 * 60_000) },
+      NOW,
+    )
+    expect(w?.text).toMatch(BARE)
+    expect(w?.text).toContain('3h 30m')
+    expect(w?.clean).toBe(true)
+  })
+
+  it('dates a run from another day, so it cannot read as today', () => {
+    const w = sessionWindow(
+      { dispatchedAt: at(-4 * DAY), handedOffAt: at(-4 * DAY + 2 * 3_600_000) },
+      NOW,
+    )
+    expect(w?.text).toMatch(DATED)
+    expect(w?.text).toContain('2h 0m')
+  })
+
+  it('dates the handoff too when the run crossed midnight', () => {
+    // Anchored to local 22:00 so the +4h handoff lands on the next civil day in
+    // whatever zone the suite runs in.
+    const start = new Date(NOW)
+    start.setDate(start.getDate() - 3)
+    start.setHours(22, 0, 0, 0)
+    const startMs = start.getTime()
+    const w = sessionWindow(
+      {
+        dispatchedAt: new Date(startMs).toISOString(),
+        handedOffAt: new Date(startMs + 4 * 3_600_000).toISOString(),
+      },
+      NOW,
+    )
+    expect(isoDayLocal(startMs + 4 * 3_600_000)).not.toBe(isoDayLocal(startMs))
+    expect(w?.text).toMatch(/handed off [A-Za-z]{3}\.? ?\d{1,2} \d{2}:\d{2}/)
+    expect(w?.text).toContain('4h 0m')
+  })
+
+  it('says aloft for a live worker, and claims no clean exit', () => {
+    const w = sessionWindow(
+      { dispatchedAt: at(-20 * 60_000), runningWorker: 'a-shuttle' },
+      NOW,
+    )
+    expect(w?.text).toMatch(/· aloft$/)
+    expect(w?.clean).toBe(false)
+  })
+
+  it('refuses a handoff stamp older than the dispatch — that is the PREVIOUS run', () => {
+    // The real shape seen in the loom: a stale `handed_off_at` left over from an
+    // earlier run. Reading it as this run's would print a negative span under a
+    // teal check.
+    const w = sessionWindow(
+      { dispatchedAt: at(-2 * 3_600_000), handedOffAt: at(-6 * 3_600_000) },
+      NOW,
+    )
+    expect(w?.text).toMatch(/· no clean handoff$/)
+    expect(w?.clean).toBe(false)
+    expect(w?.text).not.toMatch(/-\d/)
   })
 })
 

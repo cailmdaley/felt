@@ -109,15 +109,33 @@
 
 /* ── Day label ────────────────────────────────────────────────────────────── */
 
+/* Also the way down a level — clicking the day's name opens it in Day view.
+   Styled as type, not as a control: no chrome at rest, a warm wash on hover.
+   The affordance is that the name lights up, which is enough for a block that
+   is already the row's handle. */
 .wk-daylabel {
+  appearance: none;
+  border: none;
+  background: none;
+  cursor: pointer;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
   justify-content: center;
   gap: 1px;
-  padding-right: 2px;
+  padding: 2px 3px 2px 0;
+  margin: 3px 0;
   line-height: 1;
+  border-radius: 2px;
+  transition: background-color 120ms ease;
 }
+.wk-daylabel:hover { background: rgba(196, 147, 51, 0.16); }
+.wk-daylabel:focus-visible {
+  outline: 1px solid rgba(154, 123, 53, 0.6);
+  outline-offset: 1px;
+}
+.wk-daylabel:hover .wk-dow { color: #7A6F5C; }
+.wk-daylabel:hover .wk-daynum { color: #1B1611; }
 .wk-dow {
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
   font-size: 10px;

@@ -27,7 +27,7 @@
  * silently dropped.
  */
 
-import { registerView, type TemporalView, type ViewContext } from './ViewRegistry.js'
+import { normalizeFocusDate, registerView, type TemporalView, type ViewContext } from './ViewRegistry.js'
 import { createViewEmptyState, createViewPage } from './ViewPage.js'
 import type { ActivityBucket } from './TemporalData.js'
 import type { KanbanCard, KanbanResponse } from '../KanbanTypes.js'
@@ -37,13 +37,34 @@ import './ChronicleView.css'
 
 // ── Window ───────────────────────────────────────────────────────────────────
 
+/**
+ * Two different spans, and the difference is the point.
+ *
+ * PAST_DAYS/FUTURE_DAYS are how much chronicle EXISTS — the columns built, the
+ * activity window fetched. VISIBLE_PAST_DAYS/VISIBLE_FUTURE_DAYS are how much
+ * of it is on screen at rest: "two weeks is plenty to show at a time". The day
+ * column is sized at render so exactly that many columns fill the viewport,
+ * and the rest of the record is a horizontal scroll away.
+ */
 const PAST_DAYS = 28
 const FUTURE_DAYS = 14
+const VISIBLE_PAST_DAYS = 14
+const VISIBLE_FUTURE_DAYS = 7
+const VISIBLE_DAYS = VISIBLE_PAST_DAYS + VISIBLE_FUTURE_DAYS + 1
+
+/** Bounds on the fitted day width, so a very narrow or very wide board still
+ *  gets columns a day numeral fits in and marks read at. */
+const DAY_W_MIN_PX = 16
+const DAY_W_MAX_PX = 56
+
 /** Rows drawn before the "+N more" expander takes over. */
 const MAX_ROWS = 40
-/** Where today sits in the viewport on the first render, as a fraction of the
- *  visible width. Matches the window's own 28/14 balance. */
-const TODAY_ANCHOR = 0.65
+/**
+ * Where today sits across the day area on the first render. This is the same
+ * statement as the visible split — 14 past of 22 visible days IS 65% — so the
+ * anchor and the window agree by construction rather than by coincidence.
+ */
+const TODAY_ANCHOR = VISIBLE_PAST_DAYS / VISIBLE_DAYS
 /**
  * `nowMs` is rounded UP to this, so the argument tuple handed to
  * `ctx.activity` is stable between polls. TemporalData keys its TTL cache on
@@ -84,14 +105,6 @@ export function sessionSlug(name: string | null | undefined): string | null {
   return s || null
 }
 
-/** Last path segment of a working directory, lower-cased. */
-export function cwdTail(cwd: string | null | undefined): string | null {
-  if (typeof cwd !== 'string') return null
-  const parts = cwd.split('/').filter(Boolean)
-  const tail = parts[parts.length - 1]
-  return tail ? tail.toLowerCase() : null
-}
-
 /**
  * A working directory as a row label: a home prefix folds to `~`, and anything
  * else keeps its last three segments. There is no `$HOME` in a browser, so the
@@ -100,7 +113,8 @@ export function cwdTail(cwd: string | null | undefined): string | null {
 export function abbreviateCwd(cwd: string): string {
   const parts = cwd.split('/').filter(Boolean)
   if (parts.length >= 2 && (parts[0] === 'home' || parts[0] === 'Users')) {
-    return `~/${parts.slice(2).join('/')}` || '~'
+    const rest = parts.slice(2).join('/')
+    return rest ? `~/${rest}` : '~'
   }
   if (parts.length <= 3) return `/${parts.join('/')}`
   return `…/${parts.slice(-3).join('/')}`
@@ -149,13 +163,31 @@ export interface Attribution {
  *   2. `s` embeds a fiber ULID that a card claims. Exact identity.
  *   3. `s`'s slug half names exactly one card's path segment. A guess, but a
  *      good one — it is the name the dispatcher built the session from.
- *   4. `cwd`'s tail segment names exactly one card's path segment.
- *   5. otherwise the bucket belongs to its `cwd`, as human work.
+ *   4. otherwise the bucket belongs to its `cwd`, as human work.
  *
- * Rungs 3 and 4 require a UNIQUE match. A token matching several cards is a
- * project directory, not a fiber — `~/loom` names every fiber under the loom —
- * so ambiguity deliberately falls through to the cwd rung rather than picking
- * an arbitrary winner.
+ * Rung 3 requires a UNIQUE match. A token matching several cards is a project
+ * directory, not a fiber — `~/loom` names every fiber under the loom — so
+ * ambiguity falls to the cwd row rather than picking an arbitrary winner.
+ *
+ * NO DIRECTORY RUNG. There used to be one: "`cwd`'s tail segment names exactly
+ * one card". It was wrong in both directions, and each direction was caught on
+ * real data:
+ *
+ *   - for a bucket WITH a session, a worker whose fiber is off this board
+ *     (another store, a city-scoped board, a deleted fiber) had its minutes
+ *     inked onto whichever card happened to own the directory's tail — a
+ *     wedding-planning worker drawn on a website fiber's lifeline;
+ *   - for a bucket WITHOUT one, an afternoon of a human's keystrokes in a
+ *     project directory was filed under the single nested fiber whose path
+ *     happened to contain that segment.
+ *
+ * The two failures share a cause, which is the principle this ladder now
+ * follows: A DIRECTORY TAIL IS EVIDENCE ABOUT A PROJECT; A SESSION NAME IS
+ * EVIDENCE ABOUT A WORKER. A project is not a fiber, so a directory can never
+ * establish fiber identity — narrowing which buckets may use it only picks
+ * which half of the error to keep. Work that names no fiber lands on a
+ * synthetic cwd row, visible and labelled for what it is. Nothing is dropped;
+ * it is simply not attributed to a fiber that did not earn it.
  */
 export function attributeActivity(
   buckets: readonly ActivityBucket[],
@@ -187,11 +219,7 @@ export function attributeActivity(
   }
 
   for (const bucket of buckets) {
-    const cardId =
-      (bucket.s ? byWorker.get(bucket.s) : undefined) ??
-      byUlid.get(sessionUlid(bucket.s) ?? ' ') ??
-      (bySlug.get(sessionSlug(bucket.s) ?? ' ') || undefined) ??
-      (bySlug.get(cwdTail(bucket.cwd) ?? ' ') || undefined)
+    const cardId = resolveCard(bucket, byWorker, byUlid, bySlug)
     if (cardId) {
       push(byCard, cardId, bucket)
       continue
@@ -201,6 +229,41 @@ export function attributeActivity(
   }
 
   return { byCard, byCwd, dropped }
+}
+
+/**
+ * Walk one bucket down the ladder. Written as explicit checks rather than a
+ * chain of `map.get(x ?? SENTINEL)` — a lookup keyed on a stand-in for "absent"
+ * only works while the stand-in is a string no real key could be, and that is a
+ * property nobody can see at the call site.
+ */
+function resolveCard(
+  bucket: ActivityBucket,
+  byWorker: Map<string, string>,
+  byUlid: Map<string, string>,
+  bySlug: Map<string, string | null>,
+): string | undefined {
+  // 1. The exact tmux name of a worker the board knows is running.
+  if (bucket.s !== null) {
+    const worker = byWorker.get(bucket.s)
+    if (worker !== undefined) return worker
+  }
+  // 2. A fiber ULID embedded in the session name. Exact identity.
+  const ulid = sessionUlid(bucket.s)
+  if (ulid !== null) {
+    const byUlidId = byUlid.get(ulid)
+    if (byUlidId !== undefined) return byUlidId
+  }
+  // 3. The session's slug half, when it names exactly one card.
+  const slug = sessionSlug(bucket.s)
+  if (slug !== null) {
+    const bySlugId = bySlug.get(slug)
+    if (bySlugId) return bySlugId
+  }
+  // And that is the end of the ladder. A working directory is NOT a fourth
+  // rung: see the note above `attributeActivity` for why the directory-tail
+  // rung was removed rather than narrowed.
+  return undefined
 }
 
 /** One civil day's worth of one row's activity. */
@@ -263,6 +326,15 @@ interface ChronicleRow {
   /** Inclusive day-column range the solid lifeline covers. Never past today. */
   startIdx: number
   endIdx: number
+  /**
+   * Where the close actually HAPPENED, which is not the same question as where
+   * the lifeline ends. Null when the fiber is open, when the close carries no
+   * date, or when it landed outside the window — and a null suppresses the
+   * mark rather than defaulting it, the way `dueIdx`/`launchIdx` already do.
+   * Stamping ✓ on today because we could not place the real close is the view
+   * asserting something it does not know.
+   */
+  closeIdx: number | null
   live: boolean
   closed: boolean
   /** Composted (`tempered === false`) closes get ✗; everything else ✓. */
@@ -308,6 +380,56 @@ function dayNoonMs(day: string): number {
   return d.getTime()
 }
 
+/** What one fiber's line covers, and where its close belongs. */
+export interface LifelineExtent {
+  startIdx: number
+  endIdx: number
+  closeIdx: number | null
+  closed: boolean
+}
+
+/**
+ * Resolve a fiber's lifeline against the day columns.
+ *
+ * The distinction this function exists to hold: WHERE THE CLOSE HAPPENED
+ * (`closeIdx`, which may be unknowable) is not WHERE THE LINE ENDS (`endIdx`,
+ * which always has an answer). Collapsing the two is what put a ✓ under today
+ * on every fiber closed before the window — the page asserting a close date it
+ * did not have.
+ *
+ * Three closed cases, and only the first may draw a mark:
+ *   - a close we can place        → line ends there, mark there.
+ *   - a DATED close we cannot place → it is necessarily before the window
+ *     (nothing closes in the future), so the line stops at the fiber's start
+ *     rather than running to today and claiming a month of work. No mark.
+ *   - an UNDATED close            → fall back to today, because we genuinely
+ *     know nothing better; a closed fiber can carry a null `closed_at`. No mark.
+ *
+ * Activity then stretches both ends: a fiber born before the window opened
+ * still shows the work it did inside it.
+ */
+export function lifelineExtent(
+  card: Pick<KanbanCard, 'createdAt' | 'closedAt' | 'status'>,
+  activityDays: Iterable<string>,
+  dayIndex: Map<string, number>,
+  todayIdx: number,
+): LifelineExtent {
+  let startIdx = idxOfInstant(card.createdAt, dayIndex) ?? 0
+  const closed = Boolean(card.closedAt) || card.status === 'closed'
+  const closeIdx = idxOfInstant(card.closedAt, dayIndex)
+  const closedMs = instantMs(card.closedAt)
+  let endIdx = closed ? (closeIdx ?? (closedMs !== undefined ? startIdx : todayIdx)) : todayIdx
+  for (const day of activityDays) {
+    const idx = dayIndex.get(day)
+    if (idx === undefined) continue
+    if (idx < startIdx) startIdx = idx
+    if (idx > endIdx) endIdx = idx
+  }
+  startIdx = clamp(startIdx, 0, todayIdx)
+  endIdx = clamp(Math.max(endIdx, startIdx), 0, todayIdx)
+  return { startIdx, endIdx, closeIdx, closed }
+}
+
 function buildFiberRow(
   card: KanbanCard,
   buckets: readonly ActivityBucket[],
@@ -316,27 +438,23 @@ function buildFiberRow(
   todayIdx: number,
 ): ChronicleRow {
   const days = aggregateByCivilDay(buckets)
+  const { startIdx, endIdx, closeIdx, closed } = lifelineExtent(
+    card,
+    days.keys(),
+    dayIndex,
+    todayIdx,
+  )
 
-  // The solid line spans birth → close (or today), then stretches to cover any
-  // activity that landed outside that range — a fiber created before the window
-  // opened still shows the work it did inside it.
-  let startIdx = idxOfInstant(card.createdAt, dayIndex) ?? 0
-  const closed = Boolean(card.closedAt) || card.status === 'closed'
-  let endIdx = closed ? (idxOfInstant(card.closedAt, dayIndex) ?? todayIdx) : todayIdx
-  for (const day of days.keys()) {
-    const idx = dayIndex.get(day)
-    if (idx === undefined) continue
-    if (idx < startIdx) startIdx = idx
-    if (idx > endIdx) endIdx = idx
-  }
-  startIdx = clamp(startIdx, 0, todayIdx)
-  endIdx = clamp(Math.max(endIdx, startIdx), 0, todayIdx)
-
+  // Deliberately NOT `lastActivityAt`. It is a live worker's last hook event at
+  // millisecond precision, so it moves on every poll — putting it in the sort
+  // would mean putting it in the refresh signature, and rebuilding the page
+  // every 15s to reorder rows that cannot visibly move: a live fiber already
+  // floats to the top on its own flag, and at day granularity `modifiedAt` plus
+  // the activity days say everything it would.
   let sortMs = Math.max(
     instantMs(card.modifiedAt) ?? 0,
     instantMs(card.closedAt) ?? 0,
     instantMs(card.createdAt) ?? 0,
-    card.lastActivityAt ?? 0,
   )
   for (const day of days.keys()) sortMs = Math.max(sortMs, dayNoonMs(day))
 
@@ -349,6 +467,7 @@ function buildFiberRow(
     days,
     startIdx,
     endIdx,
+    closeIdx,
     live: Boolean(card.runningWorker),
     closed,
     closedOk: card.tempered !== false,
@@ -389,6 +508,7 @@ function buildCwdRow(
     days,
     startIdx,
     endIdx,
+    closeIdx: null,
     live: false,
     closed: false,
     closedOk: true,
@@ -409,6 +529,38 @@ function buildCwdRow(
  * week it took. Only `timeline.past` is left to the activity join: a finished,
  * tempered fiber earns its row by having actually been worked on in the window.
  */
+/**
+ * A fiber that finished before this window opened and did nothing inside it.
+ *
+ * The Now lanes carry closed-but-unreviewed fibers with no age bound, so a
+ * fiber closed in January still arrives here in August. With the close mark now
+ * suppressed rather than defaulted, such a row would draw a one-day stub at the
+ * left edge and nothing else — a line that says only "this exists", on a page
+ * about when work happened. It keeps its place on the Desk; it just has no
+ * entry in this stretch of the record.
+ *
+ * Deliberately narrow: an UNDATED close is not silent history (we cannot say
+ * when it happened, so it still reads as current), and anything with in-window
+ * activity or a future promise has a mark to make.
+ */
+export function saysNothingHere(
+  card: KanbanCard,
+  buckets: readonly ActivityBucket[],
+  dayIndex: Map<string, number>,
+): boolean {
+  const closed = Boolean(card.closedAt) || card.status === 'closed'
+  if (!closed) return false
+  if (instantMs(card.closedAt) === undefined) return false
+  if (idxOfInstant(card.closedAt, dayIndex) !== null) return false
+  if (idxOfDue(card.due, dayIndex) !== null) return false
+  if (idxOfInstant(card.nextLaunchAt, dayIndex) !== null) return false
+  // Work inside the window is a mark, whatever the close date says.
+  for (const day of aggregateByCivilDay(buckets).keys()) {
+    if (dayIndex.has(day)) return false
+  }
+  return true
+}
+
 function buildRows(
   response: KanbanResponse,
   cards: readonly KanbanCard[],
@@ -433,7 +585,9 @@ function buildRows(
   for (const id of include) {
     const card = byId.get(id)
     if (!card) continue
-    fibers.push(buildFiberRow(card, attribution.byCard.get(id) ?? [], response, dayIndex, todayIdx))
+    const buckets = attribution.byCard.get(id) ?? []
+    if (saysNothingHere(card, buckets, dayIndex)) continue
+    fibers.push(buildFiberRow(card, buckets, response, dayIndex, todayIdx))
   }
   fibers.sort((a, b) => {
     if (a.live !== b.live) return a.live ? -1 : 1
@@ -482,6 +636,14 @@ class ChronicleView implements TemporalView {
   private signature = ''
   private expanded = false
   private didAnchor = false
+  /** The cursor value the scroll is currently anchored on, so a move re-anchors
+   *  while an unrelated refresh leaves the reader where they were. */
+  private anchoredOn: string | null = null
+  /** Watches the page, not the scroller: the scroller's own width is set by the
+   *  page, while its CONTENT width is what we change — observing the content
+   *  side could feed back on itself. */
+  private resizeObserver: ResizeObserver | null = null
+  private dayWidthPx = 0
 
   mount(host: HTMLElement, ctx: ViewContext): void {
     const page = createViewPage(this.title)
@@ -490,7 +652,16 @@ class ChronicleView implements TemporalView {
     this.ctx = ctx
     this.signature = ''
     this.didAnchor = false
+    this.dayWidthPx = 0
     host.append(page.root)
+
+    // Refit the columns when the board changes width. Only the CSS variable
+    // moves; every mark's position is a calc() over it, so the whole chronicle
+    // rescales without a rebuild.
+    if (typeof ResizeObserver !== 'undefined') {
+      this.resizeObserver = new ResizeObserver(() => this.fitDayWidth())
+      this.resizeObserver.observe(page.body)
+    }
     void this.load(ctx)
   }
 
@@ -501,6 +672,8 @@ class ChronicleView implements TemporalView {
 
   unmount(): void {
     this.generation += 1
+    this.resizeObserver?.disconnect()
+    this.resizeObserver = null
     this.root?.remove()
     this.root = null
     this.body = null
@@ -508,6 +681,7 @@ class ChronicleView implements TemporalView {
     this.ctx = null
     this.signature = ''
     this.didAnchor = false
+    this.dayWidthPx = 0
   }
 
   /** One window fetch, then a signature check, then at most one DOM rebuild. */
@@ -521,28 +695,80 @@ class ChronicleView implements TemporalView {
     const activity = await ctx.activity(windowStart, toMs)
     if (generation !== this.generation || !this.body) return
 
-    const signature = this.signatureOf(days, activity.buckets, ctx.cards)
+    const signature = this.signatureOf(days, activity.buckets, ctx)
     if (signature === this.signature) return
     this.signature = signature
     this.render(ctx, days, activity.buckets)
   }
 
   /**
-   * A cheap fingerprint of everything the render reads. Cards contribute the
-   * fields that move a mark; buckets contribute their count and newest stamp,
-   * which is enough — the daemon only ever appends to a window.
+   * A cheap fingerprint of everything the render reads.
+   *
+   * THE RULE: every field that can move a mark on this page appears here. A
+   * field the render reads but the signature omits is a stale render nobody
+   * will attribute to caching — a fiber renamed on disk kept its old label
+   * until some other field happened to change, which is exactly how that bug
+   * presents. So the list below is deliberately over-inclusive and is meant to
+   * be extended whenever the render learns to read something new.
+   *
+   * Buckets contribute their count and newest stamp, which is enough — the
+   * daemon only ever appends to a window.
    */
   private signatureOf(
     days: TimelineDay[],
     buckets: readonly ActivityBucket[],
-    cards: readonly KanbanCard[],
+    ctx: ViewContext,
   ): string {
     let latest = 0
     for (const b of buckets) if (b.m > latest) latest = b.m
-    const parts = [days[0].iso, String(buckets.length), String(latest), this.expanded ? 'x' : 'c']
+    const { response, cards } = ctx
+    const parts = [
+      days[0].iso,
+      String(buckets.length),
+      String(latest),
+      this.expanded ? 'x' : 'c',
+      // The cursor is in here so a move made in another view re-anchors this
+      // page's scroll on arrival, rather than being skipped as "no change".
+      ctx.focusDate ?? '',
+      // hostLabel's last two rungs.
+      response.feltHost,
+    ]
+    // hostLabel's first rung: a hostname that lands late must repaint the notes.
+    for (const originId of Object.keys(response.staleness ?? {})) {
+      parts.push(`o:${originId}=${response.staleness[originId]?.hostname ?? ''}`)
+    }
+    // Which surface a card sits on decides whether it gets a row at all, and
+    // the server owns that routing — read the lists rather than trying to
+    // re-derive them from card fields and drifting when the rules change.
+    for (const list of [
+      response.now.drafts,
+      response.now.inFlight,
+      response.now.awaitingReview,
+      response.pinned,
+      response.timeline.futureDated,
+      response.timeline.anytimeSoon,
+    ]) {
+      parts.push(list.map((c) => c.id).join(','))
+    }
     for (const c of cards) {
       parts.push(
-        `${c.id}|${c.status}|${c.closedAt ?? ''}|${c.modifiedAt ?? ''}|${c.due ?? ''}|${c.nextLaunchAt ?? ''}|${c.runningWorker ?? ''}`,
+        [
+          c.id, // row key, openCard target
+          c.name, // label
+          c.status, // closed
+          c.createdAt, // lifeline start, sort
+          c.closedAt ?? '', // close mark, lifeline end, sort
+          c.modifiedAt ?? '', // sort
+          c.due ?? '', // ◴
+          c.nextLaunchAt ?? '', // ◐
+          c.runningWorker ?? '', // live flag, join rung 1
+          c.tempered === undefined ? '' : String(c.tempered), // ✓ vs ✗
+          c.originId, // host note
+          c.shuttleHost ?? '', // host note
+          c.uid ?? '', // join rung 2
+          c.shuttleFiberId ?? '', // join rung 2
+          c.projectSlug ?? '', // join rungs 3-4
+        ].join('|'),
       )
     }
     return fnv1a(parts.join('\n'))
@@ -556,6 +782,10 @@ class ChronicleView implements TemporalView {
     const scrollTop = this.scroller?.scrollTop ?? 0
     body.replaceChildren()
     this.scroller = null
+    // The fitted width lives as an inline variable ON the scroller, and this
+    // rebuild makes a new one. Forget the cached value too, or fitDayWidth sees
+    // "no change" and leaves the fresh element on the CSS fallback width.
+    this.dayWidthPx = 0
 
     const dayIndex = new Map(days.map((d, i) => [d.iso, i]))
     const todayIdx = days.findIndex((d) => d.isToday)
@@ -587,7 +817,7 @@ class ChronicleView implements TemporalView {
     grid.style.gridTemplateRows = `var(--chr-head-h) repeat(${shown.length + (hidden > 0 ? 1 : 0)}, var(--chr-row-h))`
 
     const fiberCount = rows.reduce((n, row) => (row.kind === 'fiber' ? n + 1 : n), 0)
-    grid.append(this.buildCorner(fiberCount), ...this.buildHead(days))
+    grid.append(this.buildCorner(fiberCount), ...this.buildHead(days, ctx))
     grid.append(...this.buildWashes(days, shown.length + (hidden > 0 ? 1 : 0)))
     for (let r = 0; r < shown.length; r += 1) {
       grid.append(...this.buildRow(shown[r], r, days, dayIndex, peak, ctx))
@@ -597,13 +827,58 @@ class ChronicleView implements TemporalView {
     scroller.append(grid)
     body.append(scroller)
     this.scroller = scroller
+    this.fitDayWidth()
 
-    if (this.didAnchor) {
+    // The cursor decides where the page opens. Null means today — re-resolved
+    // against the clock every render, never frozen at the day we first saw. A
+    // cursor pointing outside the window falls back to today rather than
+    // scrolling to an edge that means nothing.
+    const focus = normalizeFocusDate(ctx.focusDate)
+    const focusIdx = focus === null ? null : (dayIndex.get(focus) ?? null)
+    const anchorIdx = focusIdx ?? (todayIdx < 0 ? lastIdx : todayIdx)
+    const focusMoved = focus !== this.anchoredOn
+
+    if (this.didAnchor && !focusMoved) {
       scroller.scrollLeft = scrollLeft
       scroller.scrollTop = scrollTop
     } else {
-      this.anchorToday(scroller, todayIdx < 0 ? lastIdx : todayIdx)
+      scroller.scrollTop = scrollTop
+      this.anchorDay(scroller, anchorIdx)
     }
+    this.anchoredOn = focus
+  }
+
+  /**
+   * Size the day column so exactly {@link VISIBLE_DAYS} of them fill the space
+   * beside the label gutter — two weeks back and one forward, at rest. The
+   * deeper window stays where it is, one scroll to the left.
+   *
+   * Scroll position is carried across in DAYS rather than pixels: after a
+   * resize the reader should still be looking at the same week, not at the same
+   * pixel offset into a differently-scaled record.
+   */
+  private fitDayWidth(): void {
+    const scroller = this.scroller
+    if (!scroller) return
+    const available = scroller.clientWidth - this.labelWidth(scroller)
+    if (available <= 0) return
+    const next = clamp(available / VISIBLE_DAYS, DAY_W_MIN_PX, DAY_W_MAX_PX)
+    const previous = this.dayWidthPx
+    if (Math.abs(next - previous) < 0.5) return
+    // Read the scroll offset BEFORE the variable moves. Narrowing the columns
+    // shrinks the content, and the browser clamps scrollLeft to the new maximum
+    // the moment that happens — so a read afterwards reports a position the
+    // reader never chose, and the carried-over week comes out wrong.
+    const previousScroll = scroller.scrollLeft
+    scroller.style.setProperty('--chr-day-w', `${next.toFixed(2)}px`)
+    this.dayWidthPx = next
+    if (previous > 0 && previousScroll > 0) {
+      scroller.scrollLeft = (previousScroll / previous) * next
+    }
+  }
+
+  private labelWidth(scroller: HTMLElement): number {
+    return parseFloat(getComputedStyle(scroller).getPropertyValue('--chr-label-w')) || 300
   }
 
   /** Sticky top-left cell — the row-label column's own head. Counts fibers
@@ -620,9 +895,20 @@ class ChronicleView implements TemporalView {
     return corner
   }
 
-  private buildHead(days: TimelineDay[]): HTMLElement[] {
+  /**
+   * The almanac head. Each day is a real `<button>`, not a tinted div: clicking
+   * a column opens the Day view on that civil day, and making it a button is
+   * what gets that gesture keyboard focus, Enter/Space, and a name in the
+   * accessibility tree for free.
+   *
+   * `day.iso` is already the bare civil day the cursor wants — it comes from
+   * `buildTimelineDays`, which strides the local calendar. No Date round trip
+   * on the way out, so nothing can lose a day here.
+   */
+  private buildHead(days: TimelineDay[], ctx: ViewContext): HTMLElement[] {
     return days.map((day, i) => {
-      const cell = document.createElement('div')
+      const cell = document.createElement('button')
+      cell.type = 'button'
       const classes = ['chr-head']
       if (day.isToday) classes.push('chr-head-today')
       if (day.isPast) classes.push('chr-head-past')
@@ -640,6 +926,15 @@ class ChronicleView implements TemporalView {
       num.className = 'chr-head-num'
       num.textContent = day.label
       cell.append(dow, num)
+
+      const spoken = civilDayToLocalDate(day.iso)?.toLocaleDateString(undefined, {
+        weekday: 'long',
+        month: 'long',
+        day: 'numeric',
+      })
+      cell.title = `Open ${spoken ?? day.iso} in the Day view`
+      cell.setAttribute('aria-label', cell.title)
+      cell.addEventListener('click', () => ctx.switchView('day', { focusDate: day.iso }))
       return cell
     })
   }
@@ -734,10 +1029,10 @@ class ChronicleView implements TemporalView {
       }
     }
 
-    if (row.closed) {
+    if (row.closed && row.closeIdx !== null) {
       const end = document.createElement('div')
       end.className = `chr-mark chr-end${row.closedOk ? '' : ' chr-end-compost'}`
-      end.style.left = colLeft(row.endIdx)
+      end.style.left = colLeft(row.closeIdx)
       end.textContent = row.closedOk ? '✓' : '✗'
       track.append(end)
     }
@@ -780,16 +1075,23 @@ class ChronicleView implements TemporalView {
     return btn
   }
 
-  /** Put today at {@link TODAY_ANCHOR} of the visible width, once. Later
-   *  renders restore whatever the reader had scrolled to instead. */
-  private anchorToday(scroller: HTMLElement, todayIdx: number): void {
+  /**
+   * Put day column `idx` at {@link TODAY_ANCHOR} across the DAY AREA — the area
+   * beside the sticky gutter, not the whole viewport. Measuring against the
+   * viewport would push the day right by the gutter's width and quietly hide a
+   * chunk of the recent past behind it. Runs on the first render and whenever
+   * the cursor moves; otherwise a render restores whatever the reader had
+   * scrolled to.
+   */
+  private anchorDay(scroller: HTMLElement, idx: number): void {
     requestAnimationFrame(() => {
       if (this.scroller !== scroller) return
       const styles = getComputedStyle(scroller)
       const dayW = parseFloat(styles.getPropertyValue('--chr-day-w')) || 24
-      const labelW = parseFloat(styles.getPropertyValue('--chr-label-w')) || 240
-      const center = labelW + (todayIdx + 0.5) * dayW
-      scroller.scrollLeft = Math.max(0, center - scroller.clientWidth * TODAY_ANCHOR)
+      const labelW = this.labelWidth(scroller)
+      const center = labelW + (idx + 0.5) * dayW
+      const restingX = labelW + (scroller.clientWidth - labelW) * TODAY_ANCHOR
+      scroller.scrollLeft = Math.max(0, center - restingX)
       this.didAnchor = true
     })
   }

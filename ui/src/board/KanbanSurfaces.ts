@@ -1,11 +1,9 @@
 import { renderMarkdown } from './utils.js'
 import {
   civilDayToLocalDate,
-  dayIndexForDue,
   descByKey,
   dueCivilDay,
   instantMs,
-  isoDayLocal,
 } from './civilDay.js'
 import type {
   ColumnKind,
@@ -27,11 +25,6 @@ export const COLUMN_TITLES: Record<ColumnKind, string> = {
 
 type NowColumnKind = 'drafts' | 'inFlight' | 'awaitingReview'
 const NOW_COLUMN_ORDER: NowColumnKind[] = ['drafts', 'inFlight', 'awaitingReview']
-
-// 225px per day column -> ~7 days visible at a time in the standard
-// kanban modal viewport (~1574px wide). The wrap stays horizontally
-// scrollable for the server-provided range.
-const TIMELINE_DAY_WIDTH_PX = 225
 
 // The Pinned band wraps its launcher chips to at most this many rows; extra
 // roles page behind a "+N more" affordance rather than scrolling.
@@ -128,11 +121,6 @@ export const SURFACE_TITLE: Record<HorizonKind, string> = {
   stashed: 'Resting',
 }
 
-/** The visual variants a timeline mini-card can take, by lifecycle position.
- *  `resting` is a snoozed card's ghost: it lives in Resting and shows here at
- *  the day it wakes on. */
-type TimelineCardKind = 'past' | 'future' | 'awaiting' | 'inflight' | 'draft' | 'resting'
-
 /** Stash cluster: project key + warmth + cards under that key. */
 export interface StashCluster {
   key: string
@@ -160,7 +148,6 @@ interface KanbanSurfaceRendererOptions {
    *  `▶ release` click. Release is global per daemon (one restart parks the
    *  whole board, one click frees it), so the card only names which host. */
   releaseQuarantine?: (shuttleHost?: string) => void | Promise<void>
-  setTimelineAdaptiveCleanup: (cleanup: (() => void) | null) => void
   /** Stash a new fiber — the Drafts head's `+` action. Omit to render the
    *  Drafts head title + count alone (read-only context). */
   onStashClick?: () => void
@@ -187,17 +174,15 @@ export class KanbanSurfaceRenderer {
   private readonly openDetail: (card: KanbanCard, column: ColumnKind) => void
   private readonly openWorker?: (tmuxSessionName: string, shuttleHost?: string) => void
   private readonly releaseQuarantine?: (shuttleHost?: string) => void | Promise<void>
-  private readonly setTimelineAdaptiveCleanup: (cleanup: (() => void) | null) => void
   private readonly onStashClick?: () => void
   private readonly onNewIdeaClick?: () => void
   private readonly onRefresh: () => void
-  /** Horizontal edge-scroll for the timeline wrap during drag. Lets the
-   *  user drag a card from Now toward the timeline's left/right edge to
-   *  auto-scroll into off-screen days. Separate from the body's vertical
-   *  drag scroll so they can run concurrently. */
-  private timelineEdgeScrollFrame: number | null = null
-  private timelineEdgeScrollVelocity = 0
-  private timelineEdgeScrollTarget: HTMLElement | null = null
+  /** Horizontal edge-scroll for the drag horizon. Lets a held card push
+   *  against the strip's left/right edge to reach off-screen days. Separate
+   *  from the body's vertical drag scroll so the two can run concurrently. */
+  private edgeScrollFrame: number | null = null
+  private edgeScrollVelocity = 0
+  private edgeScrollTarget: HTMLElement | null = null
   /** Current page of the Pinned band when its chips overflow two rows.
    *  Cycled by the "+N more" pager; survives poll re-renders. */
   private pinnedPage = 0
@@ -213,7 +198,6 @@ export class KanbanSurfaceRenderer {
     this.openDetail = options.openDetail
     this.openWorker = options.openWorker
     this.releaseQuarantine = options.releaseQuarantine
-    this.setTimelineAdaptiveCleanup = options.setTimelineAdaptiveCleanup
     this.onStashClick = options.onStashClick
     this.onNewIdeaClick = options.onNewIdeaClick
     this.onRefresh = options.onRefresh
@@ -448,213 +432,54 @@ export class KanbanSurfaceRenderer {
     })
   }
 
-  /** Render the Timeline surface: scrollable day-column grid with past
-   *  landings on the left, today centered, future-dated cards on the
-   *  right.
+  /**
+   * The drag-reveal horizon: a slim row of future days that materializes below
+   * the tab strip for the duration of a drag, and nothing at all the rest of
+   * the time.
    *
-   *  Now cards project onto the strip too - drafts and inflight stack
-   *  on today's column, awaiting-review on its closedAt. They still
-   *  live in the Now section above; the timeline ghosts give the user
-   *  one comprehensive temporal view, and let them drag any active
-   *  card forward as a visual-scheduling gesture (drop on a future
-   *  date -> setSurface(soon, due=iso), which routes the card to
-   *  timeline.futureDated and out of the Now column).
+   * The Desk used to carry a permanent timeline ribbon. Three chronological
+   * views now tell that story better, so the ribbon's DISPLAY job is gone —
+   * but its DROP job was load-bearing, and it was the only way to say "this one
+   * on Tuesday." So the day axis survives as a pure gesture surface: it appears
+   * when you pick a card up, and it is gone the moment you let go. That's why
+   * there are no mini-cards on it. A drop target does not need to show you what
+   * it already holds; you are aiming at a date, not reading a schedule.
    *
-   *  `resting` is the Resting surface, passed in whole. Its snoozed
-   *  members — the ones carrying a `due:` — ghost onto the day they wake
-   *  on, so a card put down for later is still *somewhere* on the horizon
-   *  instead of vanishing to the bottom of the page. Dateless resting
-   *  cards have no day to sit on and are skipped.
+   * FUTURE DAYS ONLY, today first. The past was never a legal drop (the old
+   * ribbon's drop guard refused it), so rendering it only ever offered targets
+   * that bounced. Today means "onto the desk now" and the future days mean
+   * schedule-or-snooze — `dayDropHorizon` decides which, exactly as it did when
+   * the ribbon was permanent.
+   *
+   * Cells flex to fill the width and scroll (with drag edge-scroll) only when
+   * they cannot: a wide board gets generous targets, a narrow one keeps all
+   * fourteen reachable.
    */
-  renderTimelineSection(
-    timeline: KanbanResponse['timeline'],
-    now: KanbanResponse['now'],
-    resting: KanbanCard[],
-    timelineWindow: KanbanResponse['timelineWindow'],
-    staleness: Record<string, KanbanOriginStaleness>,
-  ): HTMLElement {
-    const section = document.createElement('section')
-    section.className = 'kbn-section kbn-section-timeline'
-    section.setAttribute('role', 'region')
-    section.setAttribute('aria-label', 'Timeline — past and soon')
-
+  renderDragHorizon(futureDays: number): HTMLElement {
     const wrap = document.createElement('div')
-    wrap.className = 'kbn-timeline-wrap'
-    wrap.dataset.timelineWrap = '1'
+    wrap.className = 'kbn-draghorizon-wrap'
+    wrap.dataset.draghorizonWrap = '1'
+    wrap.setAttribute('role', 'region')
+    wrap.setAttribute('aria-label', 'Drop a card on a day to schedule or snooze it')
 
-    const days = buildTimelineDays(timelineWindow.pastDays, timelineWindow.futureDays)
-    const dayIndex = new Map<string, number>(days.map((d, i) => [d.iso, i]))
-
-    const axis = document.createElement('div')
-    axis.className = 'kbn-timeline-axis'
-    axis.style.gridTemplateColumns = `repeat(${days.length}, ${TIMELINE_DAY_WIDTH_PX}px)`
-    const axisCells = days.map((day) => buildDayCell(day))
-    for (const cell of axisCells) axis.append(cell)
-    wrap.append(axis)
-
-    const strip = document.createElement('div')
-    strip.className = 'kbn-timeline-strip'
-    strip.style.gridTemplateColumns = `repeat(${days.length}, ${TIMELINE_DAY_WIDTH_PX}px)`
-
-    const dropColByIso = new Map<string, HTMLElement>()
-    const axisCellByIso = new Map<string, HTMLElement>()
-    for (let i = 0; i < days.length; i += 1) {
-      const dropCol = document.createElement('div')
-      dropCol.className = `kbn-timeline-dropcol${days[i].isToday ? ' kbn-timeline-dropcol-today' : ''}`
-      dropCol.style.gridColumn = String(i + 1)
-      dropCol.dataset.timelineDayIso = days[i].iso
-      this.installTimelineDayDropHandlers(dropCol, days[i].iso, axisCells[i])
-      strip.append(dropCol)
-      dropColByIso.set(days[i].iso, dropCol)
-      axisCellByIso.set(days[i].iso, axisCells[i])
-    }
-    this.installTimelineStripDragFallback(strip, dropColByIso, axisCellByIso)
-
-    // Card elements grouped by day column — the adaptive-height pass measures
-    // the tallest *visible* column's stack from these (never the strip itself,
-    // whose height is the value we're computing).
-    const cardsByCol = new Map<number, HTMLElement[]>()
-    const rowByCol = new Map<number, number>()
-    const place = (col: number, card: KanbanCard, kind: TimelineCardKind): void => {
-      const row = (rowByCol.get(col) ?? 0) + 1
-      rowByCol.set(col, row)
-      const el = this.renderTimelineCard(card, col, row, kind, staleness[card.originId])
-      strip.append(el)
-      const list = cardsByCol.get(col) ?? []
-      list.push(el)
-      cardsByCol.set(col, list)
-    }
-
-    const todayIso = isoDay(new Date())
-    const todayCol = dayIndex.get(todayIso) ?? null
-    if (todayCol !== null) {
-      for (const card of now.inFlight) place(todayCol, card, 'inflight')
-    }
-    for (const card of now.awaitingReview) {
-      // Ghost at closedAt — but a closed fiber can carry a null closed_at (a
-      // close that didn't stamp the date), and with no fallback that silently
-      // dropped the card off the timeline entirely (it showed on the desk but
-      // "vanished" from the temporal view). Fall back to modifiedAt (≈ when the
-      // run closed it), then today, so an awaiting card is always findable.
-      const col = awaitingGhostDayColumn(card, dayIndex, todayCol)
-      if (col === null) continue
-      place(col, card, 'awaiting')
-    }
-    for (const card of timeline.past) {
-      const col = dayIndexForIso(card.closedAt, dayIndex)
-      if (col === null) continue
-      place(col, card, 'past')
-    }
-    if (todayCol !== null) {
-      for (const card of now.drafts) {
-        // Drifted drafts — an imminent `due:` pulled them onto the desk — park
-        // at their due-date column ("every card lives on the timeline at its
-        // real date") while still appearing in the Now board. Undated drafts
-        // sit at today, their natural now-position.
-        const col = card.due ? (dayIndexForDue(card.due, dayIndex) ?? todayCol) : todayCol
-        place(col, card, 'draft')
-      }
-    }
-    for (const card of timeline.futureDated) {
-      // Two different kinds of value: `nextLaunchAt` is a real instant (a cron
-      // firing, placed by its local day), `due` is a civil day (placed by the
-      // day it names — see civilDay.ts).
-      const col = card.nextLaunchAt
-        ? dayIndexForIso(card.nextLaunchAt, dayIndex)
-        : dayIndexForDue(card.due, dayIndex)
-      if (col === null) continue
-      place(col, card, card.status === 'closed' ? 'awaiting' : 'future')
-    }
-    for (const card of resting) {
-      // A snoozed card: resting below, ghosted here at the day it wakes on.
-      // `dayIndexForDue` reads the `due:` as the civil day it names, the same
-      // way the drift rule that wakes it does — the ghost and the return
-      // ticket must agree on which day they mean.
-      const col = dayIndexForDue(card.due, dayIndex)
-      if (col === null) continue
-      place(col, card, 'resting')
-    }
-    wrap.append(strip)
-
-    this.installAdaptiveStripHeight(wrap, strip, cardsByCol, days.length)
-    this.installTimelineEdgeScroll(wrap)
-
-    // The day-strip (14-day window, horizontally scrollable) and a fixed
-    // "Later" rail sit side by side. The rail holds armed standing roles
-    // firing beyond the strip horizon (timeline.anytimeSoon) — placeless on
-    // the day axis, but they must not silently vanish, so they get a compact
-    // always-visible column pinned to the strip's right. Rendered only when
-    // populated; otherwise the wrap claims the full width as before.
     const row = document.createElement('div')
-    row.className = 'kbn-timeline-row'
-    row.append(wrap)
-    if (timeline.anytimeSoon.length > 0) {
-      row.append(this.renderLaterRail(timeline.anytimeSoon, staleness))
+    row.className = 'kbn-draghorizon-row'
+
+    for (const day of buildTimelineDays(0, futureDays)) {
+      // One element is both the date label and the drop target. The old ribbon
+      // split them (an axis cell above a full-height column) only because cards
+      // stacked in between; with nothing in between, the split would be two
+      // nodes pretending to be one.
+      const cell = buildDayCell(day)
+      cell.classList.add('kbn-timeline-dropcol', 'kbn-draghorizon-day')
+      cell.dataset.timelineDayIso = day.iso
+      this.installTimelineDayDropHandlers(cell, day.iso, cell)
+      row.append(cell)
     }
-    section.append(row)
 
-    // No collapse chevron on the Timeline: it's the always-visible horizon
-    // ribbon now, so a collapse toggle is redundant (and the user never used
-    // it). The Timeline was the only section that ever carried collapse chrome,
-    // so it retired with this section (installSectionChrome deleted wholesale).
-    return section
-  }
-
-  /** Render the "Later" rail: a compact, always-visible column pinned to the
-   *  right of the scrollable day strip, holding armed standing roles whose
-   *  next firing lies beyond the 14-day window (timeline.anytimeSoon). These
-   *  have no place on the day axis, but a far-future cron must still *show*
-   *  somewhere — this is that somewhere. Read-only (no drag): a cron's date
-   *  is set by its schedule, not by dropping it on a day. */
-  private renderLaterRail(
-    cards: KanbanCard[],
-    staleness: Record<string, KanbanOriginStaleness>,
-  ): HTMLElement {
-    const rail = document.createElement('aside')
-    rail.className = 'kbn-timeline-later'
-    rail.setAttribute('aria-label', `Later — ${cards.length} scheduled beyond the strip`)
-
-    const head = document.createElement('div')
-    head.className = 'kbn-timeline-later-head'
-    head.textContent = 'Later'
-    rail.append(head)
-
-    const list = document.createElement('div')
-    list.className = 'kbn-timeline-later-cards'
-    list.setAttribute('role', 'list')
-    for (const card of cards) list.append(this.renderLaterCard(card, staleness[card.originId]))
-    rail.append(list)
-    return rail
-  }
-
-  private renderLaterCard(
-    card: KanbanCard,
-    staleness: KanbanOriginStaleness | undefined,
-  ): HTMLElement {
-    const isStale = staleness?.status === 'stale'
-    const el = document.createElement('div')
-    el.className = `kbn-tl-later-card${isStale ? ' kbn-card--stale' : ''}`
-    el.dataset.fiberId = card.id
-    el.title = card.name
-    el.setAttribute('role', 'listitem')
-
-    const when = document.createElement('span')
-    when.className = 'kbn-tl-later-when'
-    // Same split as timeline placement: an instant resolves to its local day, a
-    // `due:` to the civil day it names.
-    when.textContent = formatLaterWhen(
-      card.nextLaunchAt ? localDayOfInstant(card.nextLaunchAt) : dueCivilDay(card.due),
-    )
-    const title = document.createElement('span')
-    title.className = 'kbn-tl-later-title'
-    title.textContent = card.name
-    el.append(when, title)
-
-    el.addEventListener('click', (e) => {
-      if ((e.target as HTMLElement).closest('button')) return
-      this.openDetail(card, 'inFlight')
-    })
-    return el
+    wrap.append(row)
+    this.installEdgeScroll(wrap)
+    return wrap
   }
 
   /** Render the Resting surface: cluster grid keyed by containment-path's
@@ -714,132 +539,64 @@ export class KanbanSurfaceRenderer {
     return section
   }
 
-  /** Position the timeline horizontal scroll so today sits at ~28% from
-   *  the left, matching the playground reference. Skipped when the
-   *  snapshot already had a horizontal scroll position. */
-  scrollTimelineToToday(body: HTMLElement | null, timelinePastDays: number): void {
-    if (!body) return
-    const wrap = body.querySelector<HTMLElement>('[data-timeline-wrap]')
-    if (!wrap) return
-    const todayOffset = timelinePastDays * TIMELINE_DAY_WIDTH_PX
-    const target = todayOffset - wrap.clientWidth * 0.28
-    wrap.scrollLeft = Math.max(0, target)
+  /** Halt the horizon's edge-scroll rAF. Called on drop, on drag-leave, and by
+   *  the modal on unmount so the tick can't outlive the board. */
+  stopEdgeScroll(): void {
+    this.edgeScrollVelocity = 0
+    this.edgeScrollTarget = null
+    if (this.edgeScrollFrame === null) return
+    window.cancelAnimationFrame(this.edgeScrollFrame)
+    this.edgeScrollFrame = null
   }
 
-  stopTimelineEdgeScroll(): void {
-    this.timelineEdgeScrollVelocity = 0
-    this.timelineEdgeScrollTarget = null
-    if (this.timelineEdgeScrollFrame === null) return
-    window.cancelAnimationFrame(this.timelineEdgeScrollFrame)
-    this.timelineEdgeScrollFrame = null
-  }
-
-  /** Publish `--tl-full-height` so CSS can expand the strip to fit its content
-   *  on hover/drag with no inner scroll.
+  /** Edge-scroll the drag horizon when a drag approaches its left or right
+   *  edge — the horizontal twin of the body's vertical drag-scroll, and the
+   *  only way to reach day fourteen on a narrow board while holding a card.
+   *  Velocity rises with how far into the 80px margin the cursor has pushed.
    *
-   *  Measured from the tallest day column *currently on screen* — recomputed on
-   *  horizontal scroll so a sparse week opens short and a busy day opens tall,
-   *  and the value never includes the strip's own (expanded) height. Height is
-   *  taken from each card's real laid-out bottom (`offsetTop + offsetHeight`,
-   *  relative to the positioned strip) rather than an assumed per-row constant,
-   *  so it's exact whatever the rendered row height is. Critically it reads only
-   *  the card elements, never the strip or the full-height dropcols (whose
-   *  offsetHeight IS the strip height) — that self-reference is what made hover
-   *  ratchet taller each frame. */
-  private installAdaptiveStripHeight(
-    wrap: HTMLElement,
-    strip: HTMLElement,
-    cardsByCol: Map<number, HTMLElement[]>,
-    totalDays: number,
-  ): void {
-    const STRIP_PADDING_PX = 6
-    const recompute = (): void => {
-      const sLeft = wrap.scrollLeft
-      const sRight = sLeft + wrap.clientWidth
-      const firstCol = Math.max(0, Math.floor(sLeft / TIMELINE_DAY_WIDTH_PX))
-      const lastCol = Math.min(totalDays - 1, Math.floor((sRight - 1) / TIMELINE_DAY_WIDTH_PX))
-      let maxBottom = 0
-      for (let c = firstCol; c <= lastCol; c += 1) {
-        for (const el of cardsByCol.get(c) ?? []) {
-          const bottom = el.offsetTop + el.offsetHeight
-          if (bottom > maxBottom) maxBottom = bottom
-        }
-      }
-      strip.style.setProperty('--tl-full-height', `${Math.max(maxBottom + STRIP_PADDING_PX, 28)}px`)
-    }
-    let rafScheduled = false
-    const schedule = (): void => {
-      if (rafScheduled) return
-      rafScheduled = true
-      window.requestAnimationFrame(() => {
-        rafScheduled = false
-        recompute()
-      })
-    }
-    wrap.addEventListener('scroll', schedule, { passive: true })
-    const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(schedule) : null
-    ro?.observe(wrap)
-    window.requestAnimationFrame(recompute)
-
-    this.setTimelineAdaptiveCleanup(() => {
-      wrap.removeEventListener('scroll', schedule)
-      ro?.disconnect()
-    })
-  }
-
-  /** Edge-scroll the timeline wrap when a drag approaches its left or
-   *  right edge. Mirrors the body's vertical drag-scroll. Also opens the
-   *  ribbon (`.kbn-drag-open`) *only while a drag is actually over the
-   *  timeline* — expanding on any board-wide drag pushed the board down and
-   *  made a drag *down* to the Pinned band chase a moving target. Now the
-   *  horizon opens when you drag up into it, and stays put otherwise. */
-  private installTimelineEdgeScroll(wrap: HTMLElement): void {
+   *  (It used to also toggle the ribbon's `.kbn-drag-open` expand class. The
+   *  horizon has no closed state to open now: it exists only during a drag.) */
+  private installEdgeScroll(wrap: HTMLElement): void {
     const EDGE_PX = 80
     const MAX_STEP_PX = 28
     const onDragOver = (e: DragEvent): void => {
       if (!this.getDragSourceId()) return
-      wrap.classList.add('kbn-drag-open')
       const r = wrap.getBoundingClientRect()
       const leftPressure = Math.max(0, EDGE_PX - (e.clientX - r.left))
       const rightPressure = Math.max(0, EDGE_PX - (r.right - e.clientX))
       const direction = rightPressure > 0 ? 1 : leftPressure > 0 ? -1 : 0
       const pressure = Math.max(leftPressure, rightPressure) / EDGE_PX
-      this.timelineEdgeScrollVelocity = direction === 0
+      this.edgeScrollVelocity = direction === 0
         ? 0
         : direction * Math.max(6, Math.round(Math.pow(pressure, 1.35) * MAX_STEP_PX))
-      if (this.timelineEdgeScrollVelocity === 0) {
-        this.stopTimelineEdgeScroll()
+      if (this.edgeScrollVelocity === 0) {
+        this.stopEdgeScroll()
         return
       }
-      this.timelineEdgeScrollTarget = wrap
-      this.startTimelineEdgeScroll()
+      this.edgeScrollTarget = wrap
+      this.startEdgeScroll()
     }
     const onDragLeave = (e: DragEvent): void => {
       if (e.relatedTarget && wrap.contains(e.relatedTarget as Node)) return
-      wrap.classList.remove('kbn-drag-open')
-      this.stopTimelineEdgeScroll()
-    }
-    const onDrop = (): void => {
-      wrap.classList.remove('kbn-drag-open')
-      this.stopTimelineEdgeScroll()
+      this.stopEdgeScroll()
     }
     wrap.addEventListener('dragover', onDragOver)
     wrap.addEventListener('dragleave', onDragLeave)
-    wrap.addEventListener('drop', onDrop)
+    wrap.addEventListener('drop', () => this.stopEdgeScroll())
   }
 
-  private startTimelineEdgeScroll(): void {
-    if (this.timelineEdgeScrollFrame !== null) return
+  private startEdgeScroll(): void {
+    if (this.edgeScrollFrame !== null) return
     const tick = (): void => {
-      const target = this.timelineEdgeScrollTarget
-      if (!target || !this.getDragSourceId() || this.timelineEdgeScrollVelocity === 0) {
-        this.stopTimelineEdgeScroll()
+      const target = this.edgeScrollTarget
+      if (!target || !this.getDragSourceId() || this.edgeScrollVelocity === 0) {
+        this.stopEdgeScroll()
         return
       }
-      target.scrollLeft += this.timelineEdgeScrollVelocity
-      this.timelineEdgeScrollFrame = window.requestAnimationFrame(tick)
+      target.scrollLeft += this.edgeScrollVelocity
+      this.edgeScrollFrame = window.requestAnimationFrame(tick)
     }
-    this.timelineEdgeScrollFrame = window.requestAnimationFrame(tick)
+    this.edgeScrollFrame = window.requestAnimationFrame(tick)
   }
 
   /** Install drop handlers on a section (Now or Stash) - drop anywhere
@@ -869,85 +626,6 @@ export class KanbanSurfaceRenderer {
       const card = findCardById(this.getLastResponse(), fiberId)
       if (!card) return
       void this.setSurface(card, horizon)
-    })
-  }
-
-  /**
-   * Cursor-based forwarder for timeline strip drops: when an overlay card
-   * sits on top of a dropcol and WKWebView delivers the dragover to the
-   * card instead of the dropcol underneath, this handler finds the dropcol
-   * at cursor coordinates and mirrors its handler.
-   */
-  private installTimelineStripDragFallback(
-    strip: HTMLElement,
-    dropColByIso: Map<string, HTMLElement>,
-    axisCellByIso: Map<string, HTMLElement>,
-  ): void {
-    const findDropcolAt = (clientX: number, clientY: number): HTMLElement | null => {
-      const els = document.elementsFromPoint(clientX, clientY)
-      for (const el of els) {
-        if (el instanceof HTMLElement && el.classList.contains('kbn-timeline-dropcol')) {
-          return el
-        }
-      }
-      return null
-    }
-    const isDropEligible = (id: string, iso: string): boolean => {
-      const today = isoDay(new Date())
-      if (iso < today) return false
-      return !!findCardById(this.getLastResponse(), id)
-    }
-    const clearActives = (): void => {
-      for (const dc of dropColByIso.values()) dc.classList.remove('kbn-timeline-dropcol-active')
-      for (const ac of axisCellByIso.values()) ac.classList.remove('kbn-timeline-day-drop-active')
-    }
-
-    strip.addEventListener('dragover', (e) => {
-      const dragSourceId = this.getDragSourceId()
-      if (!dragSourceId) return
-      const target = e.target as HTMLElement | null
-      if (target && target.classList.contains('kbn-timeline-dropcol')) return
-      const dropcol = findDropcolAt(e.clientX, e.clientY)
-      if (!dropcol) return
-      const iso = dropcol.dataset.timelineDayIso
-      if (!iso) return
-      if (!isDropEligible(dragSourceId, iso)) return
-      e.preventDefault()
-      e.stopPropagation()
-      if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
-      clearActives()
-      dropcol.classList.add('kbn-timeline-dropcol-active')
-      const axis = axisCellByIso.get(iso)
-      axis?.classList.add('kbn-timeline-day-drop-active')
-    })
-
-    strip.addEventListener('dragleave', (e) => {
-      if (e.relatedTarget && strip.contains(e.relatedTarget as Node)) return
-      clearActives()
-    })
-
-    strip.addEventListener('drop', (e) => {
-      const target = e.target as HTMLElement | null
-      if (target && target.classList.contains('kbn-timeline-dropcol')) return
-      const dropcol = findDropcolAt(e.clientX, e.clientY)
-      if (!dropcol) return
-      const iso = dropcol.dataset.timelineDayIso
-      if (!iso) return
-      const fiberId = e.dataTransfer?.getData('text/x-fiber-id') || this.getDragSourceId()
-      e.preventDefault()
-      e.stopPropagation()
-      clearActives()
-      this.setDragSourceId(null)
-      this.stopDragAutoScroll()
-      if (!fiberId) return
-      if (!isDropEligible(fiberId, iso)) return
-      const card = findCardById(this.getLastResponse(), fiberId)
-      if (!card) return
-      if (iso === isoDay(new Date())) {
-        void this.setSurface(card, 'now', { due: null })
-      } else {
-        void this.setSurface(card, dayDropHorizon(this.getLastResponse(), card.id), { due: iso })
-      }
     })
   }
 
@@ -1067,82 +745,6 @@ export class KanbanSurfaceRenderer {
     el.addEventListener('click', (e) => {
       if ((e.target as HTMLElement).closest('button')) return
       this.openDetail(card, 'drafts')
-    })
-    return el
-  }
-
-  /** Compact card variant for the timeline strip - single-line with
-   *  glyph + title, color-coded by past/future/agent/human. */
-  private renderTimelineCard(
-    card: KanbanCard,
-    column: number,
-    row: number,
-    kind: TimelineCardKind,
-    staleness: KanbanOriginStaleness | undefined,
-  ): HTMLElement {
-    const isStale = staleness?.status === 'stale'
-    const isComposted = kind === 'past' && card.tempered === false
-    const variantClass =
-      kind === 'past'
-        ? (isComposted ? 'kbn-tl-card-composted' : 'kbn-tl-card-past')
-        : kind === 'awaiting'
-          ? 'kbn-tl-card-awaiting'
-          : kind === 'resting'
-            ? 'kbn-tl-card-resting'
-            : kind === 'inflight'
-              ? 'kbn-tl-card-inflight'
-              : kind === 'draft'
-                ? 'kbn-tl-card-draft'
-                : (isAgentCard(card) ? 'kbn-tl-card-agent' : 'kbn-tl-card-human')
-
-    const el = document.createElement('div')
-    el.className = `kbn-tl-card ${variantClass}${isStale ? ' kbn-card--stale' : ''}`
-    el.style.gridColumn = String(column + 1)
-    el.style.gridRow = String(row)
-    const isFutureAwaiting = kind === 'awaiting' && !!card.due
-    const isNowProjection = kind === 'inflight' || kind === 'draft'
-    const isDraggable =
-      !isStale &&
-      (kind === 'future' || kind === 'past' || kind === 'resting' || isFutureAwaiting || isNowProjection)
-    el.draggable = isDraggable
-    el.dataset.fiberId = card.id
-    // A resting ghost says what it is: the card is not scheduled for this day,
-    // it wakes on it.
-    el.title = kind === 'resting' && card.due
-      ? `${card.name} — resting until ${formatDue(card.due)}`
-      : card.name
-    el.setAttribute('role', 'listitem')
-
-    if (isDraggable) this.installDraggable(el, card, false)
-
-    const glyph = document.createElement('span')
-    glyph.className = 'kbn-tl-card-glyph'
-    glyph.textContent =
-      kind === 'past'
-        ? (isComposted ? '✗' : '✓')
-        : kind === 'awaiting' || kind === 'resting'
-          ? '◌'
-          : kind === 'inflight'
-            ? '◐'
-            : kind === 'draft'
-              ? '○'
-              : (isAgentCard(card) ? '◐' : '✓')
-    const title = document.createElement('span')
-    title.className = 'kbn-tl-card-title'
-    title.textContent = card.name
-    el.append(glyph, title)
-
-    el.addEventListener('click', (e) => {
-      if ((e.target as HTMLElement).closest('button')) return
-      const colKind: ColumnKind =
-        kind === 'past'
-          ? (isComposted ? 'composted' : 'tempered')
-          : kind === 'awaiting'
-            ? 'awaitingReview'
-            : kind === 'inflight'
-              ? 'inFlight'
-              : 'drafts'
-      this.openDetail(card, colKind)
     })
     return el
   }
@@ -1642,59 +1244,6 @@ function buildDayCell(day: TimelineDay): HTMLElement {
   num.textContent = day.label
   el.append(dow, num)
   return el
-}
-
-/** The local calendar day an instant falls on, or undefined if unparseable. */
-function localDayOfInstant(iso: string): string | undefined {
-  const ms = Date.parse(iso)
-  return Number.isFinite(ms) ? isoDayLocal(ms) : undefined
-}
-
-/** Compact launch-date label for a Later-rail card, from a civil day
- *  (`YYYY-MM-DD`). Month + day for a same-year firing; adds the year once the
- *  cron reaches into another calendar year so a far-future role reads
- *  unambiguously. The day is materialized as a LOCAL date, never re-parsed as
- *  an instant — parsing `2026-07-30` would yield UTC midnight and label it Jul
- *  29 west of Greenwich (see civilDay.ts). */
-function formatLaterWhen(day: string | undefined): string {
-  const d = civilDayToLocalDate(day)
-  if (!d) return '—'
-  const sameYear = d.getFullYear() === new Date().getFullYear()
-  return d.toLocaleDateString(
-    undefined,
-    sameYear ? { month: 'short', day: 'numeric' } : { month: 'short', day: 'numeric', year: 'numeric' },
-  )
-}
-
-/**
- * The timeline day-column for an awaiting-review ghost. Pure and exported to
- * keep the closed-card sub-invariant checkable — "an awaiting card is always
- * findable on BOTH the desk and the timeline": with a non-null todayCol this
- * NEVER returns null. Fallback chain closedAt → modifiedAt → today (a closed fiber can
- * carry `closed_at: null`, and with no fallback the ghost silently vanished —
- * 11eeb43); an out-of-window stamp also falls through to today rather than
- * dropping the ghost.
- */
-export function awaitingGhostDayColumn(
-  card: Pick<KanbanCard, 'closedAt' | 'modifiedAt'>,
-  dayIndex: Map<string, number>,
-  todayCol: number | null,
-): number | null {
-  return (
-    dayIndexForIso(card.closedAt, dayIndex) ??
-    dayIndexForIso(card.modifiedAt, dayIndex) ??
-    todayCol
-  )
-}
-
-function dayIndexForIso(
-  iso: string | undefined,
-  dayIndex: Map<string, number>,
-): number | null {
-  if (!iso) return null
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return null
-  return dayIndex.get(isoDay(d)) ?? null
 }
 
 export function clusterStashCards(stash: KanbanCard[]): StashCluster[] {

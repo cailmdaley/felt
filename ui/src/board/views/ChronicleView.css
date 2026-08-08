@@ -14,11 +14,14 @@
    #3D5BA0, teal #3F8278, cinnabar #BC4538. */
 
 .chr-scroll {
+  /* Fallback only — ChronicleView sizes the day column at render so that
+     exactly one resting window of days fills the space beside the gutter. */
   --chr-day-w: 24px;
   --chr-label-w: 300px;
-  /* Segment width as a fraction of the column. Well under 1: a run of busy
-     days has to read as a row of separate day-marks, not as one solid bar. */
-  --chr-seg-w: 14px;
+  /* Segment width as a fraction of the column, so it tracks the fitted day
+     width. Well under 1: a run of busy days has to read as a row of separate
+     day-marks, not as one solid bar. */
+  --chr-seg-w: calc(var(--chr-day-w) * 0.58);
   --chr-row-h: 20px;
   --chr-head-h: 32px;
 
@@ -69,7 +72,12 @@
 
 /* Weekday small-caps over an oldstyle numeral — the timeline ribbon's day
    vocabulary, stacked instead of inline because a chronicle column is a
-   quarter the width of a ribbon column. */
+   quarter the width of a ribbon column.
+
+   It is a <button>: clicking a day opens the Day view on it. The affordance is
+   deliberately quiet — no chrome at rest, just a warm wash and a darkened
+   numeral under the cursor. A whole row of buttons that each announced
+   themselves would turn the almanac into a toolbar. */
 .chr-head {
   position: sticky;
   top: 0;
@@ -79,11 +87,31 @@
   align-items: center;
   justify-content: flex-end;
   gap: 0;
-  padding-bottom: 3px;
+  margin: 0;
+  padding: 0 0 3px;
   line-height: 1;
+  font: inherit;
+  color: inherit;
   background: #EDE2CE;
+  border: 0;
   border-right: 0.5px solid rgba(122, 111, 92, 0.16);
   border-bottom: 0.5px solid rgba(122, 111, 92, 0.30);
+  -webkit-appearance: none;
+  appearance: none;
+  cursor: pointer;
+  transition: background-color 90ms ease-out;
+}
+.chr-head:hover {
+  background: rgba(196, 147, 51, 0.20);
+}
+.chr-head:hover .chr-head-num { color: #1B1611; }
+.chr-head:hover .chr-head-dow { color: #7A6F5C; }
+/* Keyboard focus gets a real ring — the hover wash alone is too quiet to
+   locate when you are tabbing rather than pointing. */
+.chr-head:focus-visible {
+  outline: 1.5px solid #9A7B35;
+  outline-offset: -2px;
+  background: rgba(196, 147, 51, 0.20);
 }
 .chr-head-past { background: #EAE0CB; }
 .chr-head-weekend { background: #E6DCC5; }

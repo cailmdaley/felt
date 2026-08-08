@@ -23,8 +23,15 @@
   gap: 9px;
 }
 
+/* The date is also the way up to the week: a button that reads as the
+   heading it is, and only admits to being clickable when you approach it. */
 .kbn-day-date {
+  appearance: none;
+  border: 0;
+  background: none;
   margin: 0;
+  padding: 0 1px;
+  cursor: pointer;
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
   font-style: italic;
   font-weight: 400;
@@ -33,6 +40,17 @@
   letter-spacing: 0.005em;
   color: #1B1611;
   white-space: nowrap;
+  border-bottom: 0.5px solid transparent;
+  transition: color 90ms ease-out, border-color 90ms ease-out;
+}
+.kbn-day-date:hover {
+  color: #3D5BA0;
+  border-bottom-color: rgba(61, 91, 160, 0.4);
+}
+.kbn-day-date:focus-visible {
+  outline: 1px solid rgba(61, 91, 160, 0.55);
+  outline-offset: 3px;
+  border-radius: 2px;
 }
 
 .kbn-day-chev {

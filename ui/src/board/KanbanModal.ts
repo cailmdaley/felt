@@ -1,31 +1,39 @@
 /**
- * KanbanModal — three-surface view of Shuttle-managed fibers.
+ * KanbanModal — the Desk, plus the chronological views it tabs between.
  *
- * Top-to-bottom on a long page:
+ * The Desk, top to bottom:
  *
- *   Now      — the desk. Three lifecycle columns (Drafts | In flight |
- *              Awaiting review). The dense workflow board for what's
- *              actively being worked.
- *   Timeline — the road behind and ahead. Past landings on the left,
- *              future-dated fibers on the right. One horizontal
- *              axis, scrollable.
- *   Stash    — visible cluster grid keyed on containment-path's first
- *              meaningful project token. Held-open clusters (cold:true)
- *              appear below warm clusters in a dimmer style.
+ *   Now     — three lifecycle columns (Drafts | In flight | Awaiting review).
+ *             The dense workflow board for what is actively being worked.
+ *   Pinned  — a slim launcher band of at-rest `kind:pinned` umbrella roles.
+ *   Resting — deliberately paused work, clustered on the containment path's
+ *             first meaningful project token. Held-open clusters (cold:true)
+ *             sit below warm ones in a dimmer style. Stored as
+ *             `horizon: stashed`; "Resting" is the human name.
+ *
+ * TIME IS NOT A DESK SURFACE. A permanent day-ribbon used to sit above Now,
+ * showing past landings and future-dated work on one scrollable axis. The
+ * chronicle / week / day views tell that story better, so the ribbon's display
+ * job retired and Pinned + Resting inherited its vertical room. What the ribbon
+ * uniquely OWNED was the gesture — "this one on Tuesday" — so the day axis
+ * survives as the drag-reveal horizon: a slim row of future days that appears
+ * under the tab strip while a card is in the air and vanishes on drop. See
+ * `syncDragHorizon` here and `renderDragHorizon` in KanbanSurfaces.
  *
  * Interaction:
- *   • Drag a card down onto a timeline date column → due=that date
- *     (legacy horizon storage clears).
- *   • Drag into the stash → horizon=stashed.
+ *   • Drag a card onto a day in the drag horizon → schedule or snooze, decided
+ *     by where the card sits (`dayDropHorizon`): a desk or resting card gets
+ *     `due` + `horizon: stashed` (snooze); anything else just gets `due`.
+ *   • Drag onto today → onto the desk now (due cleared).
+ *   • Drag into Resting → horizon=stashed, dateless.
  *   • Drag back up to the now-board → clear horizon/cold.
  *   • Drop on a now-board column header routes through the daemon's
  *     /api/v1/transition lifecycle path.
  *   • Click a card body to open its detail modal.
  *
  * Classification happens once, frontend-side: `classifyFiber` in
- * `src/ui/KanbanRules.ts` buckets the composite feed into surfaces. The
- * drag handler's only knob is which surface command plus due/cold tuple
- * to POST.
+ * `KanbanRules.ts` buckets the composite feed into surfaces. The drag handler's
+ * only knob is which surface command plus due/cold tuple to POST.
  */
 
 import './KanbanModal.css'
@@ -42,7 +50,11 @@ import { dispatchIneligibleReason, errorMessageFromResponse } from './KanbanModa
 import { COLUMN_TITLES, KanbanSurfaceRenderer, SURFACE_TITLE, findCardColumn } from './KanbanSurfaces.js'
 import { parseCompositeFeed } from './KanbanComposite.js'
 import { buildKanbanResponseFromComposite } from './KanbanReadModel.js'
-import { nextStandingLaunch, STANDING_TIMELINE_HORIZON_MS } from './KanbanRules.js'
+import {
+  KANBAN_TIMELINE_WINDOW,
+  nextStandingLaunch,
+  STANDING_TIMELINE_HORIZON_MS,
+} from './KanbanRules.js'
 import { sameCivilDue } from './civilDay.js'
 import { buildCityResolver, type CityFeltRoot } from './KanbanCityResolver.js'
 import { shouldRunVisiblePoll } from '../runtime/PageAttention'
@@ -52,6 +64,7 @@ import {
   createTemporalFetchers,
   getView,
   listViews,
+  normalizeFocusDate,
   type BoardViewId,
   type TemporalFetchers,
   type TemporalView,
@@ -168,7 +181,6 @@ interface KanbanScrollSnapshot {
   bodyLeft: number
   bodyTop: number
   columns: Partial<Record<ColumnKind, number>>
-  timelineLeft?: number
 }
 
 export class KanbanModal {
@@ -201,27 +213,45 @@ export class KanbanModal {
    * trip through another view.
    */
   private deskEl: HTMLDivElement | null = null
+  /**
+   * Host for the drag-reveal horizon — the slim row of future days that stands
+   * in for the retired Timeline ribbon. Empty and zero-height at rest; filled
+   * and expanded for exactly as long as a card is in the air. It sits OUTSIDE
+   * `deskEl` so a board re-render (a poll landing mid-drag) can't tear the drop
+   * target out from under the cursor.
+   */
+  private dragHorizonEl: HTMLDivElement | null = null
   /** Full-width slot the active temporal view mounts into. Hidden on Desk. */
   private viewHostEl: HTMLDivElement | null = null
   private activeViewId: BoardViewId = 'desk'
   /** The mounted view, or null on Desk / before the first response lands. */
   private activeView: TemporalView | null = null
+  /**
+   * The shared temporal cursor — one bare civil day (`YYYY-MM-DD`) across all
+   * views, or null for today/current. Held here rather than in any view so it
+   * SURVIVES a tab switch: page Day back to Tuesday, press `4`, and Week opens
+   * on Tuesday's week. Read into every ViewContext, so a view sees it on mount
+   * and on every refresh. Reset to null on unmount, with the rest of the
+   * chrome state.
+   */
+  private focusDate: string | null = null
   private inflightFetchToken = 0
   /**
    * Backing field for `dragSourceId`. Mutate via the property accessor below
-   * (or via `setDragSource`) so the `kbn-dragging` body class stays in sync as
-   * a general drag-state hook. (The timeline's drag-expand is NOT driven by
-   * this global class — that would open the ribbon on any drag, including a
-   * drag down to Pinned; it's gated on `.kbn-drag-open`, toggled only while a
-   * drag is actually over the timeline wrap. This class once also carried a
-   * Chromium-only `pointer-events: none` timeline-card fix, retired in favor of
-   * the strip-level elementsFromPoint fallback in installTimelineStripDragFallback.)
+   * (or via `setDragSource`) so drag state stays in sync everywhere it shows:
+   * the `kbn-dragging` body class, and the drag-reveal horizon.
+   *
+   * This setter is the single choke point for "a drag is in progress" — every
+   * surface starts its drags through `installDraggable` and every drop ends
+   * them through `setDragSourceId(null)` — which is exactly why the horizon
+   * hangs off it rather than off per-surface handlers.
    */
   private _dragSourceId: string | null = null
   private get dragSourceId(): string | null { return this._dragSourceId }
   private set dragSourceId(value: string | null) {
     this._dragSourceId = value
     if (this.body) this.body.classList.toggle('kbn-dragging', value !== null)
+    this.syncDragHorizon(value !== null)
   }
   private dragAutoScrollFrame: number | null = null
   private dragAutoScrollVelocity = 0
@@ -233,12 +263,10 @@ export class KanbanModal {
   /** Lightweight auto-poll while mounted. 15s default. */
   private pollTimer: number | null = null
   private readonly pollIntervalMs = 15_000
-  private timelinePastDays = 0
+  /** Server-owned forward window, from the last response — how many future
+   *  days the drag horizon offers. */
+  private timelineFutureDays: number = KANBAN_TIMELINE_WINDOW.futureDays
   private lastFetchStartedAt: number | null = null
-  /** Disconnects ResizeObserver + scroll listener installed by the timeline
-   *  strip's adaptive-height handler. Called at the start of each render
-   *  (the strip gets rebuilt) and on unmount. */
-  private timelineAdaptiveCleanup: (() => void) | null = null
   /** Intermediate fiber-detail modal — one instance, re-used across opens. */
   private detailModal: FiberDetailModal | null = null
   private readonly surfaces: KanbanSurfaceRenderer
@@ -292,7 +320,6 @@ export class KanbanModal {
       openDetail: (card, column) => this.detailModal?.open(card, this.cityScope?.cityId, column),
       openWorker: this.openWorkerAfterGesture,
       releaseQuarantine: (host) => this.releaseQuarantine(host),
-      setTimelineAdaptiveCleanup: (cleanup) => { this.timelineAdaptiveCleanup = cleanup },
       // The masthead dissolved; its three actions now live in the column heads
       // (Drafts → Stash, In flight → New idea, Awaiting review → Refresh).
       onStashClick: this.onStashClick,
@@ -358,8 +385,6 @@ export class KanbanModal {
       this.resizeRaf = null
     }
     this.stopPolling()
-    this.timelineAdaptiveCleanup?.()
-    this.timelineAdaptiveCleanup = null
     this.container.remove()
     this.teardownState()
   }
@@ -385,8 +410,8 @@ export class KanbanModal {
    * no scope subtitle, no stats line. Its three actions — Stash `+`, New idea
    * `✶`, Refresh `↻` — folded into the three column heads, one per lane (see
    * KanbanSurfaceRenderer.makeColumnAction). The page starts nearly flush at
-   * the top (the Timeline ribbon), with only the body's own tight top padding
-   * as margin — the standalone web UI has no workspace corner chrome to clear
+   * the top (the tab strip), with only the body's own tight top padding as
+   * margin — the standalone web UI has no workspace corner chrome to clear
    * (that was Portolan's native shell; this bundle runs in a plain tab).
    */
   private assembleChrome(): void {
@@ -417,15 +442,19 @@ export class KanbanModal {
     this.bannerEl.setAttribute('role', 'alert')
     this.bannerEl.style.display = 'none'
 
-    // The body's three permanent children: the view tab strip, the Desk
-    // wrapper (display: contents — see the field docstring), and the slot a
-    // temporal view mounts into. `render()` only ever rebuilds inside deskEl.
+    // The body's four permanent children: the view tab strip, the drag-reveal
+    // horizon (zero-height and empty until a drag starts), the Desk wrapper
+    // (display: contents — see the field docstring), and the slot a temporal
+    // view mounts into. `render()` only ever rebuilds inside deskEl; the
+    // horizon is filled and emptied by `syncDragHorizon`, never by render.
     this.tabsEl = this.buildViewTabs()
+    this.dragHorizonEl = document.createElement('div')
+    this.dragHorizonEl.className = 'kbn-draghorizon'
     this.deskEl = document.createElement('div')
     this.deskEl.className = 'kbn-desk'
     this.viewHostEl = document.createElement('div')
     this.viewHostEl.className = 'kbn-view-host'
-    this.body.append(this.tabsEl, this.deskEl, this.viewHostEl)
+    this.body.append(this.tabsEl, this.dragHorizonEl, this.deskEl, this.viewHostEl)
     this.syncViewChrome()
 
     this.container.append(this.bannerEl, this.body, this.liveEl)
@@ -435,9 +464,9 @@ export class KanbanModal {
 
   /**
    * The tab strip: `desk` plus one tab per registered view, right-aligned on
-   * its own hairline row above the Timeline ribbon. Built once — the registry
-   * is populated at import time, so the strip never needs to re-render; only
-   * the selected tab's classes change.
+   * its own hairline row at the top of the page. Built once — the registry is
+   * populated at import time, so the strip never needs to re-render; only the
+   * selected tab's classes change.
    */
   private buildViewTabs(): HTMLDivElement {
     const strip = document.createElement('div')
@@ -479,12 +508,89 @@ export class KanbanModal {
     if (this.viewHostEl) this.viewHostEl.innerHTML = ''
     this.activeViewId = id
     this.syncViewChrome()
+    // Coming home to the Desk with data that landed while it was hidden: paint
+    // it NOW, after syncViewChrome has given the Desk a layout box again, so
+    // the post-render measurement passes have something real to measure. This
+    // is the second half of the deferral in `render` — see `pendingDeskData`.
+    if (id === 'desk' && this.pendingDeskData) {
+      const pending = this.pendingDeskData
+      this.pendingDeskData = null
+      this.render(pending)
+      return
+    }
     this.mountOrRefreshActiveView()
+  }
+
+  /**
+   * Move the shared temporal cursor and let the active view redraw on it.
+   *
+   * Deliberately NOT a re-mount: the view keeps its DOM, its scroll position
+   * and any local UI state, and patches itself from the new `focusDate` in its
+   * `refresh`. Unconditional — calling it with the day already showing still
+   * refreshes, so a "go to today" control works from any state without the
+   * caller having to know whether it is already there.
+   */
+  private setFocusDate(dayISO: string | null): void {
+    this.focusDate = normalizeFocusDate(dayISO)
+    this.mountOrRefreshActiveView()
+  }
+
+  /**
+   * The programmatic twin of clicking a tab — one entry point for a view that
+   * wants to hand off to another ("see this week", "open that day"), optionally
+   * moving the cursor as part of the same gesture so the destination mounts
+   * already on the right day instead of flashing today first.
+   *
+   * Re-targeting the ALREADY-ACTIVE view is a refresh rather than a no-op when
+   * the cursor moved: "show me this in Day" is a real request even when Day is
+   * what you are looking at.
+   */
+  private switchView(id: BoardViewId, opts?: { focusDate?: string }): void {
+    const requested = opts?.focusDate
+    const nextFocus = requested === undefined ? this.focusDate : normalizeFocusDate(requested)
+    const focusMoved = nextFocus !== this.focusDate
+    this.focusDate = nextFocus
+    if (id !== this.activeViewId) {
+      // setView mounts (or refreshes) with a context built from the cursor we
+      // just set, so the destination never renders the old day.
+      this.setView(id)
+      return
+    }
+    if (focusMoved) this.mountOrRefreshActiveView()
+  }
+
+  /**
+   * Raise or drop the drag-reveal horizon.
+   *
+   * Built fresh on every drag rather than kept around, so its "today" is always
+   * the real today (a board left open overnight would otherwise offer yesterday
+   * as a drop target) and its width always matches the last response's forward
+   * window. Fourteen day cells is nothing to build.
+   *
+   * Desk only: the temporal views own their own time axis, and a horizon
+   * hovering over them would be a second, contradictory one.
+   */
+  private syncDragHorizon(dragging: boolean): void {
+    const host = this.dragHorizonEl
+    if (!host) return
+    const wanted = dragging && this.activeViewId === 'desk'
+    if (wanted === host.classList.contains('kbn-draghorizon-open')) return
+    if (wanted) {
+      host.innerHTML = ''
+      host.append(this.surfaces.renderDragHorizon(this.timelineFutureDays))
+      host.classList.add('kbn-draghorizon-open')
+      return
+    }
+    host.classList.remove('kbn-draghorizon-open')
+    host.innerHTML = ''
+    this.surfaces.stopEdgeScroll()
   }
 
   /** Paint the selected tab and show exactly one of Desk / view host. */
   private syncViewChrome(): void {
     const onDesk = this.activeViewId === 'desk'
+    // Leaving the Desk mid-drag takes the horizon with it.
+    if (!onDesk) this.syncDragHorizon(false)
     if (this.deskEl) this.deskEl.style.display = onDesk ? '' : 'none'
     if (this.viewHostEl) this.viewHostEl.style.display = onDesk ? 'none' : ''
     for (const tab of this.tabsEl?.querySelectorAll<HTMLElement>('.kbn-viewtab') ?? []) {
@@ -530,6 +636,12 @@ export class KanbanModal {
         if (card) this.detailModal?.open(card, this.cityScope?.cityId)
       },
       requestRefresh: () => { void this.fetchAndRender() },
+      // Read at build time, and the context is rebuilt for every mount and
+      // refresh — so a view always sees the current cursor, never a snapshot
+      // from when it mounted.
+      focusDate: this.focusDate,
+      setFocusDate: (dayISO) => this.setFocusDate(dayISO),
+      switchView: (id, opts) => this.switchView(id, opts),
     }
   }
 
@@ -564,6 +676,7 @@ export class KanbanModal {
     this.viewHostEl = null
     this.activeView = null
     this.activeViewId = 'desk'
+    this.focusDate = null
     this.dragSourceId = null
     this.hasClaimedInitialFocus = false
     this.stopDragAutoScroll()
@@ -1199,6 +1312,16 @@ export class KanbanModal {
     // Into the Desk, not the body — the tab strip stays reachable so a failed
     // load doesn't strand the user on a page they can't leave.
     if (!this.deskEl) return
+    // Painting an error means the Desk is no longer showing `lastResponse`, so
+    // the dedup signature is now a claim about DOM that doesn't exist. Drop it,
+    // or a transient 500 sticks: the next poll succeeds with a byte-identical
+    // payload, agrees with the stale signature, skips the re-render, and leaves
+    // "Failed to load kanban" on screen until the fiber feed happens to change
+    // — minutes on a quiet board, and a manual refresh can't clear it either
+    // (it goes through the same dedup). `lastResponse` is deliberately kept:
+    // the temporal views read it through `viewContext`, so they keep working
+    // through the outage.
+    this.lastResponseSig = null
     this.deskEl.innerHTML = ''
     const errEl = document.createElement('div')
     errEl.className = 'kbn-error'
@@ -1209,26 +1332,45 @@ export class KanbanModal {
   private render(data: KanbanResponse): void {
     if (!this.body || !this.deskEl) return
 
-    const scrollSnapshot = this.captureScrollSnapshot()
-    const { now, timeline, timelineWindow, stash, pinned, staleness } = data
-    this.timelinePastDays = timelineWindow.pastDays
-    // The masthead stats line dissolved (board-chrome-redesign) — the board
-    // speaks for itself (column counts, the Pinned/Timeline/Stash sections),
-    // and stale origins already dim their cards + show "waiting on <host>".
+    // Never rebuild the Desk while it is hidden behind a temporal view. Every
+    // pass at the end of this method MEASURES — `expandOutcomesToFillSpace`
+    // reads column heights, `restoreScrollSnapshot` writes scrollTops — and a
+    // `display:none` subtree has no layout box, so each one silently does
+    // nothing. Worse than nothing, in fact: the clamp pass clears
+    // `--card-line-clamp` before it measures, so a hidden rebuild leaves every
+    // column pinned to the 4-line CSS default and the outcome text it had
+    // expanded to fill the column comes back truncated. Nothing repairs it on
+    // the way back either, so the board sat wrong until the next data-changing
+    // poll — up to 15 seconds after the user returned.
+    //
+    // Holding the payload instead is also what makes the promise in the
+    // `deskEl` docstring true: the Desk that comes back is the one the user
+    // left, scroll positions and clamps intact, repainted from fresh data at
+    // the moment it can see what it is doing.
+    if (this.activeViewId !== 'desk') {
+      this.lastResponse = data
+      this.pendingDeskData = data
+      this.mountOrRefreshActiveView()
+      return
+    }
+    this.pendingDeskData = null
 
-    // Tear down any per-render observers from the previous strip before we
-    // throw away the DOM nodes they observed.
-    this.timelineAdaptiveCleanup?.()
-    this.timelineAdaptiveCleanup = null
+    const scrollSnapshot = this.captureScrollSnapshot()
+    const { now, timelineWindow, stash, pinned, staleness } = data
+    this.timelineFutureDays = timelineWindow.futureDays
+    // The masthead stats line dissolved (board-chrome-redesign) — the board
+    // speaks for itself (column counts, the Pinned/Resting sections), and stale
+    // origins already dim their cards + show "waiting on <host>".
 
     this.deskEl.innerHTML = ''
     this.body.classList.remove('kbn-body-zoomed')
 
-    // "Sky over board" order: the Timeline horizon strip sits at the top of
-    // the page (time as an illuminated strip you drag work *up* into), then the
-    // Now board, then the pinned-role launcher band, then Stash. Pinned sits
-    // between the board and Stash — a slim launcher shelf under the work.
-    this.deskEl.append(this.surfaces.renderTimelineSection(timeline, now, stash, timelineWindow, staleness))
+    // Three surfaces, top to bottom: the Now board, the pinned-role launcher
+    // band, then Resting. The Timeline ribbon that used to sit above all of
+    // them is gone — the chronological views tell that story now, and the day
+    // axis survives only as the drag-reveal horizon under the tab strip (see
+    // `syncDragHorizon`). Its removal is what gives Pinned and Resting the room
+    // to sit on screen instead of below the fold.
     this.deskEl.append(this.surfaces.renderNowSection(now, staleness))
     // The Pinned strip always renders (a permanent park/drop target) — see
     // renderPinnedSection; no null guard needed.
@@ -1245,12 +1387,6 @@ export class KanbanModal {
     window.requestAnimationFrame(() => {
       window.requestAnimationFrame(() => this.expandOutcomesToFillSpace())
     })
-    // Scroll the timeline strip so today sits ~28% from the left on
-    // initial render, matching the playground reference. Skipped when
-    // the snapshot already had a horizontal scroll position.
-    if (!scrollSnapshot?.timelineLeft) {
-      window.requestAnimationFrame(() => this.surfaces.scrollTimelineToToday(this.body, this.timelinePastDays))
-    }
     this.lastResponse = data
     // A temporal view is fed by the same data the Desk just rebuilt from —
     // including optimistic re-renders, which never reach fetchAndRender.
@@ -1377,12 +1513,12 @@ export class KanbanModal {
       const list = col.querySelector<HTMLElement>('.kbn-col-list')
       if (kind && list) columns[kind] = list.scrollTop
     }
-    const timeline = this.body.querySelector<HTMLElement>('[data-timeline-wrap]')
+    // The drag horizon's own scrollLeft is deliberately NOT captured: it only
+    // exists during a drag, and a drag never survives a re-render.
     return {
       bodyLeft: this.body.scrollLeft,
       bodyTop: this.body.scrollTop,
       columns,
-      timelineLeft: timeline?.scrollLeft,
     }
   }
 
@@ -1396,10 +1532,6 @@ export class KanbanModal {
       for (const [kind, scrollTop] of Object.entries(snapshot.columns) as [ColumnKind, number][]) {
         const list = this.body.querySelector<HTMLElement>(`.kbn-col[data-column="${kind}"] .kbn-col-list`)
         if (list) list.scrollTop = scrollTop
-      }
-      if (snapshot.timelineLeft !== undefined) {
-        const timeline = this.body.querySelector<HTMLElement>('[data-timeline-wrap]')
-        if (timeline) timeline.scrollLeft = snapshot.timelineLeft
       }
       this.updateBodyScrollAffordance()
     }
@@ -1426,6 +1558,15 @@ export class KanbanModal {
 
   /** Stash the latest response so drop handlers can resolve cards by id. */
   private lastResponse: KanbanResponse | null = null
+  /**
+   * A response that arrived while a temporal view was up, waiting for the Desk
+   * to be visible again. The Desk is `display:none` behind a view, and every
+   * post-render pass in `render` measures a layout box that doesn't exist
+   * there, so the rebuild is deferred rather than thrown away. `setView`
+   * replays it the moment the Desk comes back; null means the standing Desk
+   * DOM is already current.
+   */
+  private pendingDeskData: KanbanResponse | null = null
   /**
    * Signature of the last-rendered response (columns + totals only). Lets
    * fetchAndRender skip identical-payload re-renders — the 15-second poll
@@ -1553,6 +1694,13 @@ export class KanbanModal {
   private startPolling(): void {
     this.stopPolling()
     this.pollTimer = window.setInterval(() => {
+      // Never rebuild the board out from under a held card. The drop targets
+      // would move mid-gesture, and — worse — the source node gets replaced, so
+      // its `dragend` listener dies with it and the drag state never clears,
+      // stranding the drag horizon open across the top of the page. The drag is
+      // seconds long and every drop refetches on landing, so nothing goes stale
+      // for waiting.
+      if (this.dragSourceId !== null) return
       // Hidden tabs stop polling; visible but unfocused tiled windows slow
       // down to the shared page-attention cadence.
       if (!shouldRunVisiblePoll(this.lastFetchStartedAt, Date.now(), this.pollIntervalMs)) return
@@ -1696,9 +1844,9 @@ export class KanbanModal {
 
   private stopDragAutoScroll(): void {
     // Every dragend / drop path in the modal funnels through here. Also
-    // wind down the horizontal timeline edge-scroll so its rAF tick
+    // wind down the horizon's horizontal edge-scroll so its rAF tick
     // doesn't keep running past the drag's lifetime.
-    this.surfaces.stopTimelineEdgeScroll()
+    this.surfaces.stopEdgeScroll()
     this.dragAutoScrollVelocity = 0
     if (this.dragAutoScrollFrame === null) return
     window.cancelAnimationFrame(this.dragAutoScrollFrame)

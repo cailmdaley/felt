@@ -22,14 +22,16 @@ import {
   abbreviateCwd,
   aggregateByCivilDay,
   attributeActivity,
-  cwdTail,
   densityStep,
+  lifelineExtent,
+  saysNothingHere,
   sessionSlug,
   sessionUlid,
 } from './ChronicleView.js'
 import type { ActivityBucket } from './TemporalData.js'
 import type { KanbanCard } from '../KanbanTypes.js'
-import { isoDayLocal } from '../civilDay.js'
+import { civilDayToLocalDate, isoDayLocal } from '../civilDay.js'
+import { buildTimelineDays } from '../KanbanSurfaces.js'
 
 const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone
 
@@ -94,13 +96,13 @@ describe('reading a tmux session name', () => {
     expect(sessionSlug('')).toBeNull()
   })
 
-  it('reads a working directory down to its tail and its label', () => {
-    expect(cwdTail('/home/ada/dev/Felt')).toBe('felt')
-    expect(cwdTail('/home/ada/loom/')).toBe('loom')
-    expect(cwdTail(null)).toBeNull()
+  it('labels a working directory for its row', () => {
     expect(abbreviateCwd('/home/ada/dev/felt')).toBe('~/dev/felt')
     expect(abbreviateCwd('/Users/ada/dev/felt')).toBe('~/dev/felt')
     expect(abbreviateCwd('/srv/data/runs/nightly/2026')).toBe('…/runs/nightly/2026')
+    // The home directory itself is `~`, not a `~/` with nothing after it.
+    expect(abbreviateCwd('/home/ada')).toBe('~')
+    expect(abbreviateCwd('/Users/ada/')).toBe('~')
   })
 })
 
@@ -131,12 +133,57 @@ describe('attributing activity to fibers', () => {
     expect(at.byCard.get(morning.id)).toHaveLength(1)
   })
 
-  it('falls back to the cwd tail when the session resolves to nothing', () => {
+  // A directory tail is evidence about a PROJECT; a session name is evidence
+  // about a WORKER. These two cases are the same error caught from both sides,
+  // and they are why there is no directory rung at all.
+  it('will not file a human\'s keystrokes under the one fiber nested in that directory', () => {
+    // Two sessionless actors editing in a project directory. `daily-digest` is
+    // a path segment of exactly one card, so the old ladder handed them to it.
+    const at = attributeActivity(
+      [
+        bucket(1, { s: null, cwd: '/home/ada/work/daily-digest' }),
+        bucket(2, { s: null, cwd: '/home/ada/work/daily-digest', k: 'attention' }),
+      ],
+      cards,
+    )
+    expect(at.byCard.size).toBe(0)
+    expect(at.byCwd.get('/home/ada/work/daily-digest')).toHaveLength(2)
+  })
+
+  it('will not guess a directory for a worker whose fiber is off the board', () => {
+    const at = attributeActivity(
+      [
+        bucket(1, {
+          s: 'planning-01KXAX9HHA9VZC9DFA7RTATQC5-shuttle',
+          cwd: '/home/ada/work/daily-digest',
+        }),
+      ],
+      cards,
+    )
+    expect(at.byCard.size).toBe(0)
+    expect(at.byCwd.get('/home/ada/work/daily-digest')).toHaveLength(1)
+  })
+
+  it('holds the same line for a ULID-free session name that resolves to nothing', () => {
     const at = attributeActivity(
       [bucket(1, { s: 'euclid-triage-shuttle', cwd: '/home/ada/work/daily-digest' })],
       cards,
     )
-    expect(at.byCard.get(digest.id)).toHaveLength(1)
+    expect(at.byCard.size).toBe(0)
+    expect(at.byCwd.get('/home/ada/work/daily-digest')).toHaveLength(1)
+  })
+
+  it('labels a row of unresolved sessions `unmatched`, not `interactive`', () => {
+    const at = attributeActivity(
+      [
+        bucket(1, { s: 'off-board-shuttle', cwd: '/home/ada/elsewhere' }),
+        bucket(2, { s: null, cwd: '/home/ada/elsewhere' }),
+      ],
+      cards,
+    )
+    const list = at.byCwd.get('/home/ada/elsewhere') ?? []
+    expect(list).toHaveLength(2)
+    expect(list.every((b) => b.s === null)).toBe(false)
   })
 
   it('refuses an ambiguous token — a directory two fibers share is not a fiber', () => {
@@ -235,6 +282,144 @@ describe('folding buckets into civil days', () => {
 
   it('ignores a bucket with an unusable timestamp', () => {
     expect(aggregateByCivilDay([bucket(Number.NaN)]).size).toBe(0)
+  })
+})
+
+// ── The lifeline, and the honesty of its close mark ──────────────────────────
+
+// The real column layout: 28 back, 14 forward, today at index 28. Built from
+// the production helper against a fixed LOCAL day, so the fixture is the same
+// shape in both zones.
+const WINDOW_DAYS = buildTimelineDays(28, 14, new Date(2026, 6, 15))
+const DAY_INDEX = new Map(WINDOW_DAYS.map((d, i) => [d.iso, i]))
+const TODAY_IDX = 28
+
+/** An INSTANT at local noon on a civil day — safely inside that day's column
+ *  in any zone, unlike a midnight that a DST shift can push over the edge. */
+function noonOf(dayISO: string): string {
+  const d = civilDayToLocalDate(dayISO)
+  if (!d) throw new Error(`not a civil day: ${dayISO}`)
+  d.setHours(12, 0, 0, 0)
+  return d.toISOString()
+}
+
+describe('placing a fiber lifeline and its close', () => {
+  it('ends the line at a close it can place, and marks it there', () => {
+    const ext = lifelineExtent(
+      {
+        createdAt: noonOf(WINDOW_DAYS[20].iso),
+        closedAt: noonOf(WINDOW_DAYS[24].iso),
+        status: 'closed',
+      },
+      [],
+      DAY_INDEX,
+      TODAY_IDX,
+    )
+    expect(ext).toEqual({ startIdx: 20, endIdx: 24, closeIdx: 24, closed: true })
+  })
+
+  // The bug: a fiber closed months ago drew a solid line across the whole
+  // window and stamped ✓ under today, reading as "closed today, 29 days".
+  it('refuses to place a dated close that predates the window', () => {
+    const ext = lifelineExtent(
+      { createdAt: '2026-01-02T09:00:00Z', closedAt: '2026-01-05T09:00:00Z', status: 'closed' },
+      [],
+      DAY_INDEX,
+      TODAY_IDX,
+    )
+    expect(ext.closeIdx).toBeNull()
+    // Not today: the line must not claim the whole window.
+    expect(ext.endIdx).toBe(0)
+    expect(ext.startIdx).toBe(0)
+  })
+
+  it('falls back to today only when the close carries no date at all', () => {
+    const ext = lifelineExtent(
+      { createdAt: noonOf(WINDOW_DAYS[26].iso), closedAt: undefined, status: 'closed' },
+      [],
+      DAY_INDEX,
+      TODAY_IDX,
+    )
+    expect(ext.closed).toBe(true)
+    // No mark — we cannot say when it closed…
+    expect(ext.closeIdx).toBeNull()
+    // …but the line still has to end somewhere, and today is the honest guess.
+    expect(ext.endIdx).toBe(TODAY_IDX)
+  })
+
+  it('runs an open fiber to today with no close mark', () => {
+    const ext = lifelineExtent(
+      { createdAt: noonOf(WINDOW_DAYS[10].iso), closedAt: undefined, status: 'active' },
+      [],
+      DAY_INDEX,
+      TODAY_IDX,
+    )
+    expect(ext).toEqual({ startIdx: 10, endIdx: TODAY_IDX, closeIdx: null, closed: false })
+  })
+
+  it('stretches to cover in-window activity, close mark still suppressed', () => {
+    const ext = lifelineExtent(
+      { createdAt: '2026-01-02T09:00:00Z', closedAt: '2026-01-05T09:00:00Z', status: 'closed' },
+      [WINDOW_DAYS[12].iso, WINDOW_DAYS[19].iso],
+      DAY_INDEX,
+      TODAY_IDX,
+    )
+    expect(ext.startIdx).toBe(0)
+    expect(ext.endIdx).toBe(19)
+    expect(ext.closeIdx).toBeNull()
+  })
+
+  it('never lets a lifeline reach past today', () => {
+    const ext = lifelineExtent(
+      { createdAt: noonOf(WINDOW_DAYS[TODAY_IDX + 5].iso), closedAt: undefined, status: 'active' },
+      [],
+      DAY_INDEX,
+      TODAY_IDX,
+    )
+    expect(ext.startIdx).toBeLessThanOrEqual(TODAY_IDX)
+    expect(ext.endIdx).toBeLessThanOrEqual(TODAY_IDX)
+  })
+})
+
+describe('dropping fibers that finished before the window', () => {
+  const closedLongAgo = (over: Partial<KanbanCard> = {}): KanbanCard =>
+    card({
+      id: 'work/old/thing',
+      status: 'closed',
+      createdAt: '2026-01-02T09:00:00Z',
+      closedAt: '2026-01-05T09:00:00Z',
+      ...over,
+    })
+
+  it('drops a dated close before the window with nothing to show', () => {
+    expect(saysNothingHere(closedLongAgo(), [], DAY_INDEX)).toBe(true)
+  })
+
+  it('keeps it when it worked inside the window after all', () => {
+    const buckets = [bucket(civilDayToLocalDate(WINDOW_DAYS[15].iso)!.getTime() + 12 * 3_600_000)]
+    expect(saysNothingHere(closedLongAgo(), buckets, DAY_INDEX)).toBe(false)
+  })
+
+  it('keeps it when something is still promised inside the window', () => {
+    expect(saysNothingHere(closedLongAgo({ due: WINDOW_DAYS[35].iso }), [], DAY_INDEX)).toBe(false)
+    expect(
+      saysNothingHere(
+        closedLongAgo({ nextLaunchAt: noonOf(WINDOW_DAYS[32].iso) }),
+        [],
+        DAY_INDEX,
+      ),
+    ).toBe(false)
+  })
+
+  it('keeps an undated close — we cannot say it is history', () => {
+    expect(saysNothingHere(closedLongAgo({ closedAt: undefined }), [], DAY_INDEX)).toBe(false)
+  })
+
+  it('keeps a close inside the window, and every open fiber', () => {
+    expect(
+      saysNothingHere(closedLongAgo({ closedAt: noonOf(WINDOW_DAYS[22].iso) }), [], DAY_INDEX),
+    ).toBe(false)
+    expect(saysNothingHere(card({ id: 'open/one' }), [], DAY_INDEX)).toBe(false)
   })
 })
 

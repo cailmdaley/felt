@@ -19,6 +19,7 @@ export {
   collectCards,
   getView,
   listViews,
+  normalizeFocusDate,
   registerView,
   type BoardViewId,
   type TemporalView,

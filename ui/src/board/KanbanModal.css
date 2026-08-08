@@ -224,10 +224,11 @@
   display: contents;
 }
 
-/* ── Section layout: Timeline → Pinned → Now → Stash ───────────────── */
-/* Section heads retired (the layout reads on its own); the collapse-toggle
-   chrome retired too (the Timeline is the always-visible ribbon now, and it
-   was the only section that carried it). */
+/* ── Section layout: Now → Pinned → Resting ──────────────────────────────── */
+/* Section heads are gone except Pinned's and Resting's (the layout reads on its
+   own; those two name a surface whose meaning isn't self-evident). The
+   collapse-toggle chrome retired with the Timeline ribbon, which was the only
+   section that ever carried it. */
 .kbn-section {
   position: relative;
   display: flex;
@@ -243,14 +244,15 @@
   outline-offset: -2px;
 }
 .kbn-section-now {
-  /* Now claims most of the height, sitting just under the Timeline ribbon.
-     The Pinned band and Stash sit below it — visible as a "peek" at the
-     bottom, reached by scrolling. The floor reserves ~200px for the ribbon
-     above plus the pinned/stash peek below so the board stays generous
-     without those strips stealing from it; falls back to plain `flex: 1` on
-     a short viewport. */
+  /* Now claims most of the height and the other two sit under it. The floor
+     used to reserve ~200px for the Timeline ribbon ABOVE plus a bare peek of
+     Pinned and Resting below, which left Resting permanently under the fold.
+     With the ribbon gone that reservation is pure surplus: 260px is enough for
+     the Pinned band plus a full row of Resting clusters, so the whole Desk
+     fits on a normal viewport and Resting stops being a place you scroll to
+     find. Falls back to plain `flex: 1` on a short viewport. */
   flex: 1 1 auto;
-  min-height: min(72vh, calc(100% - 200px));
+  min-height: min(64vh, calc(100% - 260px));
 }
 .kbn-now-board {
   display: grid;
@@ -398,91 +400,51 @@
   font-style: italic;
 }
 
-/* Timeline */
-.kbn-section-timeline {
-  border: 1px solid rgba(27, 22, 17, 0.10);
-  background: rgba(237, 226, 206, 0.45);
+/* ── Drag-reveal horizon ─────────────────────────────────────────────────────
+   The Desk's permanent day-ribbon retired: three chronological views tell the
+   past-and-future story, and the room it took now goes to Pinned and Resting.
+   What it uniquely owned was the GESTURE — dropping a card on a date — so the
+   day axis comes back for exactly as long as a card is in the air.
+
+   Height, not display, is what animates: a zero-height overflow-hidden band
+   that grows to one row. `display:none` can't be transitioned, and the small
+   downward nudge of the board is a useful signal that the drop surface arrived.
+   Emptied on close (see syncDragHorizon), so it costs nothing at rest. */
+.kbn-draghorizon {
+  flex: 0 0 auto;
+  height: 0;
+  overflow: hidden;
+  transition: height 130ms cubic-bezier(0.22, 0.61, 0.36, 1);
 }
-/* The scrollable day-strip and the fixed "Later" rail sit side by side:
-   the strip scrolls the 14-day window, the rail stays pinned to its right. */
-.kbn-timeline-row {
-  display: flex;
-  align-items: stretch;
-  min-width: 0;
+.kbn-draghorizon-open {
+  height: 34px;
 }
-.kbn-timeline-wrap {
-  flex: 1 1 auto;
-  min-width: 0;
+.kbn-draghorizon-wrap {
+  height: 34px;
   overflow-x: auto;
   overflow-y: hidden;
   -webkit-overflow-scrolling: touch;
-  padding: 2px 0 6px;
+  background: rgba(237, 226, 206, 0.55);
+  border: 1px solid rgba(154, 123, 53, 0.30);
+  border-radius: 3px;
 }
-/* "Later" rail — armed standing roles whose next firing lies beyond the
-   14-day strip (timeline.anytimeSoon). They have no place on the day axis,
-   but a far-future cron must still *show* somewhere rather than silently
-   vanish; this fixed, always-visible column is that somewhere. Read-only:
-   a cron's date comes from its schedule, not from a drop on a day. */
-.kbn-timeline-later {
-  flex: 0 0 auto;
-  width: 150px;
+/* Cells share the width and only scroll when they cannot fit — a wide board
+   gets generous targets, a narrow one keeps all fourteen days reachable (with
+   the drag edge-scroll in installEdgeScroll). */
+.kbn-draghorizon-row {
   display: flex;
-  flex-direction: column;
-  border-left: 0.5px solid rgba(122, 111, 92, 0.30);
-  padding: 2px 6px 6px 10px;
-  margin-left: 2px;
+  align-items: stretch;
+  height: 100%;
+  min-width: min-content;
 }
-.kbn-timeline-later-head {
-  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
-  font-size: 11px;
-  font-variant-caps: all-small-caps;
-  font-feature-settings: "smcp", "c2sc";
-  letter-spacing: 0.08em;
-  color: #A89B83;
-  padding: 1px 2px 4px;
-  border-bottom: 0.5px solid rgba(122, 111, 92, 0.18);
-  margin-bottom: 3px;
+.kbn-draghorizon-day {
+  flex: 1 1 auto;
+  min-width: 58px;
 }
-.kbn-timeline-later-cards {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  overflow-y: auto;
-  max-height: 220px;
-}
-.kbn-tl-later-card {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  background: rgba(255, 251, 237, 0.95);
-  border: 0.5px solid rgba(122, 111, 92, 0.30);
-  border-left: 2px solid #3D5BA0;
-  border-radius: 2px;
-  padding: 2px 7px 3px;
-  cursor: pointer;
-  user-select: none;
-  -webkit-user-select: none;
-}
-.kbn-tl-later-when {
-  font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: 10px;
-  letter-spacing: 0.03em;
-  color: #7A6F5C;
-}
-.kbn-tl-later-title {
-  font-family: var(--font-serif, 'EB Garamond', serif);
-  font-size: 13px;
-  line-height: 1.15;
-  color: #1B1611;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.kbn-timeline-axis {
-  display: grid;
-  border-bottom: 0.5px solid rgba(122, 111, 92, 0.30);
-  margin: 0 14px 2px;
-}
+
+/* Day cells. Kept verbatim from the retired ribbon's axis — same small-caps
+   serif weekday, same oldstyle numeral, same gold-leaf today — because the
+   horizon should read as the ribbon returning, not as a new control. */
 .kbn-timeline-day {
   display: flex;
   flex-direction: row;
@@ -494,7 +456,6 @@
   position: relative;
   line-height: 1;
 }
-.kbn-timeline-day-past { background: rgba(0, 0, 0, 0.015); }
 .kbn-timeline-day-weekend { background: rgba(0, 0, 0, 0.04); }
 .kbn-timeline-day-today {
   background: rgba(154, 123, 53, 0.14);
@@ -503,13 +464,6 @@
 }
 .kbn-timeline-day-week-boundary {
   border-right: 1px solid rgba(122, 111, 92, 0.45);
-}
-/* Drop-target highlight extends from the strip up through the axis cell
-   when a drag hovers — feels like one column reaching from the date
-   label down through the card stack. Drop-target outline lives on the
-   strip portion only; the axis just gets the matching warm-gold tint. */
-.kbn-timeline-day-drop-active {
-  background: rgba(196, 147, 51, 0.18);
 }
 /* Day-of-week label — set as small caps in the serif rather than the
    technical mono, so the strip reads as a manuscript almanac. */
@@ -533,190 +487,16 @@
   color: #9A7B35;
   font-weight: 600;
 }
-.kbn-timeline-strip {
-  display: grid;
-  grid-auto-rows: min-content;
-  position: relative;
-  min-height: 28px;
-  padding: 0 14px;
-  align-content: start;
-  /* `width: max-content` keeps the strip's horizontal footprint tied
-     to all day columns, while `overflow-y: auto` clips extra rows once
-     the 10-row cap kicks in. Without explicit max-content width, the
-     parent wrap can collapse the strip to viewport width and distort
-     day-column alignment during horizontal scroll. The adaptive height
-     is set imperatively by `installAdaptiveStripHeight()`. */
-  width: max-content;
-  /* No inner vertical scroll anywhere in the ribbon — at rest the strip clips
-     to four rows; on expansion it grows to the full stack height so nothing is
-     ever hidden behind a scrollbar. */
-  overflow-x: hidden;
-  overflow-y: hidden;
-  /* Resting horizon: four rows of markers. `--tl-full-height` is the measured
-     full stack height (tallest visible day, no cap), published by
-     installAdaptiveStripHeight(). On hover, and while a drag is actually over
-     the ribbon (`.kbn-drag-open`), the strip grows to that full height — the
-     busiest day renders completely, no scroll. Dragging a card up meets an
-     inviting, fully-open horizon. (4 rows × 22px + 6px padding = 94px.) */
-  height: min(var(--tl-full-height, 94px), 94px);
-  transition: height 200ms cubic-bezier(0.22, 0.61, 0.36, 1);
-}
-/* Hover-expand is deliberately *lazy* — a 320ms delay so a cursor merely
-   brushing across the ribbon doesn't twitch the page open. Collapse is
-   immediate (the base rule carries no delay). */
-.kbn-section-timeline:hover .kbn-timeline-strip {
-  height: var(--tl-full-height, 94px);
-  transition-delay: 320ms;
-}
-/* Drag-expand is immediate and gated to a drag actually *over* the timeline
-   (`.kbn-drag-open`, toggled by the wrap's dragover/leave) — dragging a card up
-   into the horizon opens it at once, while a drag heading elsewhere (e.g. down
-   to the Pinned band) leaves it closed so the board below doesn't shift under
-   the cursor. Placed after the hover rule so its zero delay wins. */
-.kbn-timeline-wrap.kbn-drag-open .kbn-timeline-strip {
-  height: var(--tl-full-height, 94px);
-  transition-delay: 0ms;
-}
-.kbn-timeline-dropcol {
-  /* Span the full strip height; `1 / -1` is a no-op without
-     grid-template-rows, so use a large explicit span. */
-  grid-row: 1 / span 999;
-  z-index: 0;
-  pointer-events: auto;
-}
-/* Today's column carries a faint gold-leaf wash down the whole strip so the
-   "now" line reads top-to-bottom, matching the illuminated axis cell above. */
-.kbn-timeline-dropcol-today {
-  background: linear-gradient(rgba(154, 123, 53, 0.10), rgba(154, 123, 53, 0.05));
+/* Hovered drop target. Both classes land on the same element now (the day cell
+   IS the drop column), so they are written to compose rather than compete. */
+.kbn-timeline-day-drop-active {
+  background: rgba(196, 147, 51, 0.18);
 }
 .kbn-timeline-dropcol-active {
-  background: rgba(196, 147, 51, 0.10);
-  outline: 1px dashed rgba(196, 147, 51, 0.45);
+  outline: 1px dashed rgba(196, 147, 51, 0.65);
   outline-offset: -2px;
 }
-/* Overlay-card pointer capture during a timeline-strip drop was the
-   original Chromium-only fix (pointer-events: none on every .kbn-tl-card
-   during drag, so dragover would fall through to the dropcol underneath).
-   Two reasons it's gone now: (1) WKWebView doesn't honor pointer-events
-   for platform-level HTML5 DnD hit-testing anyway, and the strip-level
-   `elementsFromPoint` fallback in `installTimelineStripDragFallback`
-   handles the case in every engine; (2) the rule swept up the *source*
-   card too, which killed drags that originated from the timeline itself
-   (timeline-card → Now) — the source going pointer-events:none mid-drag
-   aborts the operation. The `.kbn-dragging` body class is still toggled
-   by the dragSourceId setter in case future fixes need it as a hook. */
-.kbn-tl-card {
-  position: relative;
-  z-index: 1;
-  background: rgba(255, 251, 237, 0.95);
-  border: 0.5px solid rgba(122, 111, 92, 0.30);
-  border-left: 2px solid #3D5BA0;
-  border-radius: 2px;
-  padding: 2px 8px 3px;
-  margin: 1px 2px;
-  font-size: 13px;
-  line-height: 1.2;
-  cursor: pointer;
-  display: flex;
-  align-items: baseline;
-  gap: 5px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
-  /* Timeline cards are meant to be grabbed, not text-selected. Without
-     this, a mousedown-and-drag selects the title text instead of starting
-     an HTML5 drag — the browser's "selectable text" heuristic wins over
-     `draggable=true` when the cursor lands on a text node. */
-  user-select: none;
-  -webkit-user-select: none;
-}
-.kbn-tl-card-human { border-left-color: #3F8278; }
-.kbn-tl-card-agent { border-left-color: #3D5BA0; }
-.kbn-tl-card-past {
-  background: rgba(237, 226, 206, 0.6);
-  border-color: rgba(122, 111, 92, 0.20);
-  border-left-color: #3F8278;
-  opacity: 0.78;
-}
-.kbn-tl-card-past .kbn-tl-card-title {
-  color: #2A231A;
-  font-style: italic;
-}
-.kbn-tl-card-composted {
-  border-left-color: #A89B83;
-  opacity: 0.55;
-}
-.kbn-tl-card-composted .kbn-tl-card-title {
-  text-decoration: line-through;
-  text-decoration-thickness: 0.5px;
-}
-/* Ghost variant: closed-but-not-tempered ("awaiting review") cards
-   projected onto their closedAt day. Dashed outline + paper-white
-   background mark them as in-flux — they live in the Now → Awaiting
-   Review lane and will solidify into a past card when tempered. */
-.kbn-tl-card-awaiting {
-  background: rgba(255, 252, 246, 0.55);
-  border: 0.5px dashed rgba(154, 123, 53, 0.55);
-  border-left: 2px dashed #9A7B35;
-  opacity: 0.85;
-}
-.kbn-tl-card-awaiting .kbn-tl-card-title {
-  color: #2A231A;
-}
-.kbn-tl-card-awaiting .kbn-tl-card-glyph {
-  color: #9A7B35;
-}
-/* Resting ghost: a snoozed card showing at the day it wakes on. Same dashed
-   ochre ◌ vocabulary as the awaiting ghost — both mean "in the wings, not on
-   stage" — but lighter and italic, because this one isn't waiting on you: it's
-   waiting on the calendar. */
-.kbn-tl-card-resting {
-  background: rgba(255, 252, 246, 0.40);
-  border: 0.5px dashed rgba(154, 123, 53, 0.40);
-  border-left: 2px dashed rgba(154, 123, 53, 0.70);
-  opacity: 0.72;
-}
-.kbn-tl-card-resting .kbn-tl-card-title {
-  color: #4A4034;
-  font-style: italic;
-}
-.kbn-tl-card-resting .kbn-tl-card-glyph {
-  color: rgba(154, 123, 53, 0.85);
-}
-/* Now-section projections onto the today column. Inflight uses the
-   "working" teal accent from the Porch Morning palette to read as live;
-   drafts use a muted graphite to read as in-progress-but-not-running.
-   Both keep the default parchment background so they stand apart from
-   the dimmer past/awaiting ghosts. */
-.kbn-tl-card-inflight {
-  border-left: 2px solid #5A7B7B;
-}
-.kbn-tl-card-inflight .kbn-tl-card-glyph {
-  color: #5A7B7B;
-}
-.kbn-tl-card-draft {
-  border-left: 2px solid #7A6F5C;
-  background: rgba(255, 251, 237, 0.75);
-}
-.kbn-tl-card-draft .kbn-tl-card-glyph {
-  color: #7A6F5C;
-}
-.kbn-tl-card-glyph {
-  font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: 11px;
-  flex-shrink: 0;
-  color: #3D5BA0;
-}
-.kbn-tl-card-human .kbn-tl-card-glyph { color: #3F8278; }
-.kbn-tl-card-past .kbn-tl-card-glyph { color: #3F8278; }
-.kbn-tl-card-composted .kbn-tl-card-glyph { color: #7A6F5C; }
-.kbn-tl-card-title {
-  color: #1B1611;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-family: var(--font-serif, 'EB Garamond', serif);
-}
+
 /* Pager chip — reused by the Pinned band's "+N more" overflow control
    (.kbn-pin-more). A slim gold-leaf pill that reads as a manuscript catchword
    rather than a UI scrollbar; click cycles pages. */

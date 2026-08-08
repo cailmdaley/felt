@@ -42,6 +42,36 @@ export function isoDayLocal(ms: number): string {
   return `${y}-${m}-${day}`;
 }
 
+/**
+ * The civil day whose RAIL contains an instant — the "which day is it" a view
+ * whose day begins at dawn has to ask.
+ *
+ * The temporal views draw a day as a `startHour → startHour` rail, because work
+ * that runs past midnight belongs to the evening it grew from. That makes this a
+ * different question from {@link isoDayLocal}: at 02:00 on Wednesday the rail
+ * being worked is TUESDAY's. Asking the midnight question while drawing the dawn
+ * one is a real defect — it puts "today" on a row that has not started yet, pins
+ * the now-marker to the left edge of an empty rail, and greys out the live row as
+ * past, taking its in-flight marginalia and its obligation marks with it.
+ *
+ * The boundary is a WALL-CLOCK hour, so this reads `getHours()` and steps back a
+ * calendar day rather than subtracting `startHour` hours of milliseconds. On a
+ * DST day those are not the same thing, and only the wall-clock reading agrees
+ * with the rail the view actually drew.
+ *
+ * One definition, shared: WeekView's row classification and DayView's
+ * `defaultDayISO` are the same rule and must not drift apart.
+ */
+export function railCivilDay(ms: number, startHour = 6): string {
+  const d = new Date(ms);
+  if (d.getHours() >= startHour) return isoDayLocal(ms);
+  // Noon anchor before the stride — midnight is the one wall-clock time a
+  // spring-forward day can lack.
+  d.setHours(12, 0, 0, 0);
+  d.setDate(d.getDate() - 1);
+  return isoDayLocal(d.getTime());
+}
+
 const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
 // A civil day serialized as a timestamp: midnight, exactly, in whatever offset
 // the value itself declares — `Z`, `+00:00`, `+02:00`, `-07:00`. The optional

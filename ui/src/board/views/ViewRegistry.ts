@@ -41,6 +41,46 @@ export interface ViewContext {
   narration(fromISO: string, toISO: string): Promise<NarrationResult>
   openCard(cardId: string): void
   requestRefresh(): void
+  /**
+   * The shared temporal cursor: a bare civil day (`YYYY-MM-DD`), or null for
+   * "today / current", which is the default and the state after a reset.
+   *
+   * It is ONE cursor across all views, held by KanbanModal, and it survives
+   * tab switches — so paging Day back to Tuesday and pressing `4` opens Week
+   * on the week containing Tuesday, not on this week. A view that keeps its
+   * own local day state instead will disagree with its neighbours; read this
+   * on every mount and refresh and let it be the source of truth.
+   *
+   * Null is not "no opinion" — it is the live present, and a view should
+   * re-resolve it against the clock each time rather than freezing the day it
+   * first saw.
+   */
+  focusDate: string | null
+  /**
+   * Move the cursor. Pass null to return it to today/current.
+   *
+   * This does NOT re-mount: it updates the shared state and calls the active
+   * view's `refresh` with a context carrying the new `focusDate`, so the
+   * caller patches itself in place. Do not call it from inside your own
+   * `refresh` — that is a loop.
+   *
+   * The argument is a bare civil day. A full ISO timestamp is accepted for
+   * convenience (its leading day is taken) but warns, because a civil day and
+   * an instant are different kinds and the board keeps them apart — see
+   * src/board/civilDay.ts.
+   */
+  setFocusDate(dayISO: string | null): void
+  /**
+   * Switch the page programmatically — a Day lane's "see this week" link, a
+   * Chronicle entry jumping into its day. Same path as clicking the tab or
+   * pressing the hotkey, tab styling included; `'desk'` returns to the kanban.
+   *
+   * `opts.focusDate` moves the cursor as part of the same gesture, so the
+   * destination mounts already showing the right day rather than flashing
+   * today first. Switching to the view that is already active is not a no-op
+   * when it carries a new `focusDate`: the view refreshes on the new cursor.
+   */
+  switchView(id: BoardViewId, opts?: { focusDate?: string }): void
 }
 
 /** A view's id, or `desk` for the kanban page KanbanModal renders itself. */
@@ -72,6 +112,36 @@ export function listViews(): TemporalView[] {
 /** Test/hot-reload escape hatch — drops every registration. */
 export function clearViews(): void {
   registry.clear()
+}
+
+const CIVIL_DAY_RE = /^\d{4}-\d{2}-\d{2}$/
+const LEADING_CIVIL_DAY_RE = /^(\d{4}-\d{2}-\d{2})/
+
+/**
+ * Coerce a `setFocusDate` / `switchView` argument to the cursor's own kind: a
+ * bare civil day, or null for today/current.
+ *
+ * A civil day and an instant are different kinds, and the board keeps them
+ * apart on purpose (src/board/civilDay.ts opens with why — reading a civil day
+ * through `new Date()` loses a day west of Greenwich). So a full timestamp is
+ * accepted, since the caller's intent is unambiguous, but it warns: passing one
+ * means the call site is holding an instant where the cursor wants a day, and
+ * that is worth seeing before it becomes a date-off-by-one somewhere downstream.
+ * Anything unparseable resolves to null rather than poisoning the cursor.
+ */
+export function normalizeFocusDate(value: string | null | undefined): string | null {
+  if (value === null || value === undefined) return null
+  const trimmed = value.trim()
+  if (CIVIL_DAY_RE.test(trimmed)) return trimmed
+  const leading = LEADING_CIVIL_DAY_RE.exec(trimmed)?.[1]
+  if (leading) {
+    console.warn(
+      `[views] focusDate wants a bare civil day (YYYY-MM-DD); got "${value}". Using "${leading}".`,
+    )
+    return leading
+  }
+  console.warn(`[views] focusDate is not a civil day: "${value}". Falling back to today.`)
+  return null
 }
 
 /**

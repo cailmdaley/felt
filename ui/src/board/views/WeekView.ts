@@ -28,11 +28,22 @@
 
 import './WeekView.css'
 
-import { registerView, type TemporalView, type ViewContext } from './ViewRegistry.js'
+import {
+  normalizeFocusDate,
+  registerView,
+  type TemporalView,
+  type ViewContext,
+} from './ViewRegistry.js'
 import { createViewPage, type ViewPage } from './ViewPage.js'
 import type { ActivityBucket, ActivityResult, NarrationResult } from './TemporalData.js'
 import type { KanbanCard } from '../KanbanTypes.js'
-import { civilDayToLocalDate, dueCivilDay, instantMs, isoDayLocal } from '../civilDay.js'
+import {
+  civilDayToLocalDate,
+  dueCivilDay,
+  instantMs,
+  isoDayLocal,
+  railCivilDay,
+} from '../civilDay.js'
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -40,9 +51,11 @@ import { civilDayToLocalDate, dueCivilDay, instantMs, isoDayLocal } from '../civ
  *  to the day it started, so the day boundary is dawn, not midnight. */
 export const RAIL_START_HOUR = 6
 
-/** Widest a raster tick may be in time. Finer buckets are folded into one tick,
- *  because a 24h rail is ~800px and a per-minute tick would be half a pixel —
- *  a smear, not a raster. 5 minutes gives 288 slots, ~2.8px apiece. */
+/** How much time one raster tick stands for. The wire's minute buckets are
+ *  folded into these, because a 24h rail is ~800px and a per-minute tick would
+ *  be half a pixel — a smear, not a raster. 5 minutes gives 288 slots, ~2.8px
+ *  apiece. This is a DRAWING quantum only; it never touches the arithmetic,
+ *  which counts minutes (see BUCKET_MS). */
 const RASTER_SLOT_MS = 5 * 60_000
 
 /** Where an undated obligation sits on the rail — mid-morning, 10am. */
@@ -112,6 +125,24 @@ export function shiftWeekMonday(monday: string, weeks: number): string {
   return shiftCivilDay(monday, weeks * 7)
 }
 
+/**
+ * The week to show for a given temporal cursor — the Monday of the week
+ * containing the focus day.
+ *
+ * The cursor is shared across all four views and is the SOURCE OF TRUTH; this
+ * view holds no week state of its own beyond a cache of what it last drew.
+ * Null means today/current and is re-resolved against the clock every time,
+ * never frozen at the day the view first saw — a board left open overnight must
+ * roll onto the new week by itself.
+ */
+export function weekMondayForFocus(focusDate: string | null, nowMs: number): string {
+  // `railCivilDay`, NOT `isoDayLocal`: at 01:00 on a Monday the rail being
+  // worked is the previous week's Sunday, so the view must not have jumped to
+  // the new week yet. Reading the midnight day here also made the week start
+  // four hours in the future, which suppressed the activity request entirely.
+  return mondayOfWeek(normalizeFocusDate(focusDate) ?? railCivilDay(nowMs, RAIL_START_HOUR))
+}
+
 export interface RailBounds {
   /** Local 6am on the day — the rail's left edge. */
   startMs: number
@@ -138,6 +169,33 @@ export function railFraction(ms: number, bounds: RailBounds): number {
   const span = bounds.endMs - bounds.startMs
   if (span <= 0) return 0
   return Math.min(1, Math.max(0, (ms - bounds.startMs) / span))
+}
+
+/**
+ * Where the 4-hourly rules fall on one day's rail — the interior ones only
+ * (10am, 2pm, 6pm, 10pm, 2am), since 6am is the rail's own two edges.
+ *
+ * Even sixths would be wrong on a DST rail: a 25h day's 2pm is 8 of 25 along,
+ * not 8 of 24, so fixed fractions would drift the rules up to an hour away from
+ * the ink they are supposed to measure. Each rule is therefore a real
+ * wall-clock instant put through `railFraction`, which is what makes them agree
+ * with the rasters on the two days a year it matters.
+ */
+export function railRuleFractions(day: string, bounds: RailBounds): number[] {
+  const out: number[] = []
+  for (let step = 1; step < 6; step += 1) {
+    const hour = RAIL_START_HOUR + step * 4
+    const at = noonOn(day)
+    if (!at) continue
+    // 26 is 2am tomorrow — the rail crosses midnight, so the late rules belong
+    // to the next calendar day. On a spring-forward rail that 2am does not
+    // exist; `setHours` resolves it to 03:00, which is exactly where the rule
+    // belongs — the first instant at or after where 2am would have been.
+    if (hour >= 24) at.setDate(at.getDate() + 1)
+    at.setHours(hour % 24, 0, 0, 0)
+    out.push(railFraction(at.getTime(), bounds))
+  }
+  return out
 }
 
 // ── The read window ──────────────────────────────────────────────────────────
@@ -205,26 +263,25 @@ export function weekWindow(monday: string, nowMs: number): WeekWindow {
 // ── Activity summarizing ─────────────────────────────────────────────────────
 
 /**
- * How much time one bucket stands for.
+ * How much time one bucket stands for. A CONSTANT, not something to infer.
  *
- * The wire does not declare its bucket width — the route is documented as
- * "coarse per-minute buckets", but the harness (and any daemon that coarsens
- * for a wide window) emits 5-minute ones, and assuming 60s would under-report a
- * real day by five times and call every day quiet. So infer it: the smallest
- * positive gap between distinct bucket starts IS the grid the daemon is on.
- * Clamped to [1min, 15min] — a "bucket" wider than a quarter hour is not one,
- * and a single-bucket window falls back to a minute.
+ * The wire contract is fixed: `Shuttle.Activity` keys every event by
+ * `div(ts, @minute_ms) * @minute_ms` with `@minute_ms 60_000`
+ * (lib/shuttle/activity.ex), unconditionally — there is no width parameter and
+ * no window-dependent coarsening, and the controller serves those buckets
+ * untouched.
+ *
+ * An earlier version inferred the width from the smallest gap between bucket
+ * starts, to accommodate the harness mock's 5-minute grid. That was backwards
+ * and actively wrong: on a sparse window — a light week, a week of nothing but
+ * notifications, a week that just started — no two buckets are adjacent, so the
+ * "grid" it measured was the SPARSITY, and every total was multiplied by it.
+ * Four buckets scattered over half an hour reported 28 minutes of work for 4.
+ * Since the daemon only ever emits minutes, the inference could never correct
+ * anything; it could only over-report. The harness mock is the thing that is
+ * wrong, and it is the harness's to fix.
  */
-export function inferBucketMs(buckets: ActivityBucket[]): number {
-  const starts = [...new Set(buckets.map((b) => b.m))].sort((a, b) => a - b)
-  let smallest = Number.POSITIVE_INFINITY
-  for (let i = 1; i < starts.length; i += 1) {
-    const gap = starts[i] - starts[i - 1]
-    if (gap > 0 && gap < smallest) smallest = gap
-  }
-  if (!Number.isFinite(smallest)) return 60_000
-  return Math.min(Math.max(smallest, 60_000), 900_000)
-}
+export const BUCKET_MS = 60_000
 
 export interface ActivitySpend {
   /** Time in buckets carrying ANY signal — a bucket counts once, not once per
@@ -236,7 +293,7 @@ export interface ActivitySpend {
 }
 
 /** Fold buckets into wall-clock time per kind. */
-export function summarizeSpend(buckets: ActivityBucket[], bucketMs: number): ActivitySpend {
+export function summarizeSpend(buckets: ActivityBucket[], bucketMs = BUCKET_MS): ActivitySpend {
   const any = new Set<number>()
   const attention = new Set<number>()
   const agent = new Set<number>()
@@ -348,8 +405,14 @@ export function marksForDay(cards: KanbanCard[], day: string, bounds: RailBounds
   const marks: DayMark[] = []
   for (const card of cards) {
     if (card.status === 'closed') continue
+    // Rail membership, NOT the calendar day. A launch is an instant and is
+    // drawn at its real rail fraction, so it has to be selected by the same
+    // predicate the activity and narration ingesters use — otherwise a 03:00
+    // firing is filed on that morning's row, where 03:00 lies before the rail
+    // even opens, and `railFraction` clamps it to 0: a dawn cron drawn under
+    // the 6am tick of the wrong day, while the row that owns it shows nothing.
     const launch = instantMs(card.nextLaunchAt)
-    if (launch !== undefined && isoDayLocal(launch) === day) {
+    if (launch !== undefined && launch >= bounds.startMs && launch < bounds.endMs) {
       marks.push({
         kind: 'launch',
         glyph: MARK_GLYPH.launch,
@@ -377,7 +440,6 @@ export function marksForDay(cards: KanbanCard[], day: string, bounds: RailBounds
 
 interface LoadedActivity {
   monday: string
-  bucketMs: number
   /** Buckets grouped by the civil day whose RAIL they fall on (so a 2am bucket
    *  sits with the previous day, where the work started). */
   byDay: Map<string, ActivityBucket[]>
@@ -411,8 +473,13 @@ class WeekView implements TemporalView {
   private page: ViewPage | null = null
   private ctx: ViewContext | null = null
 
-  /** The shown week, sticky across refreshes and across a tab round trip. */
-  private monday = mondayOfWeek(isoDayLocal(Date.now()))
+  /**
+   * The shown week, re-derived from `ctx.focusDate` on every mount and refresh.
+   * NOT state this view owns — a cache of what the shared cursor currently
+   * resolves to, kept as a field only so the async guards below can compare
+   * "the week that request was for" against "the week on screen now".
+   */
+  private monday = weekMondayForFocus(null, Date.now())
   /** The week the current DOM shell was built for. */
   private shellMonday: string | null = null
 
@@ -447,6 +514,9 @@ class WeekView implements TemporalView {
   refresh(ctx: ViewContext): void {
     this.ctx = ctx
     if (!this.page) return
+    // The cursor leads; this view follows. Re-resolved every time, so a null
+    // cursor rolls onto the new week when the clock does.
+    this.monday = weekMondayForFocus(ctx.focusDate, Date.now())
     this.ensureShell()
     this.load(ctx)
     this.paint()
@@ -492,16 +562,23 @@ class WeekView implements TemporalView {
     return head
   }
 
+  /**
+   * Page the week. Moves the SHARED cursor by seven days rather than this
+   * view's own idea of the week — so the weekday survives the jump (paging
+   * from a Wednesday lands on the next Wednesday), and Day and Chronicle come
+   * along. `setFocusDate` calls `refresh` for us; never refresh here as well.
+   */
   private goWeek(delta: number): void {
-    this.monday = shiftWeekMonday(this.monday, delta)
-    if (this.ctx) this.refresh(this.ctx)
+    const ctx = this.ctx
+    if (!ctx) return
+    const focus = normalizeFocusDate(ctx.focusDate) ?? railCivilDay(Date.now(), RAIL_START_HOUR)
+    ctx.setFocusDate(shiftCivilDay(focus, delta * 7))
   }
 
+  /** Back to the live present — null, not today's date, so the cursor keeps
+   *  tracking the clock instead of pinning to the day this was clicked. */
   private goToday(): void {
-    const current = mondayOfWeek(isoDayLocal(Date.now()))
-    if (current === this.monday) return
-    this.monday = current
-    if (this.ctx) this.refresh(this.ctx)
+    this.ctx?.setFocusDate(null)
   }
 
   // ── Shell ──────────────────────────────────────────────────────────────────
@@ -531,7 +608,7 @@ class WeekView implements TemporalView {
     const date = civilDayToLocalDate(this.monday)
     if (this.label && date) {
       this.label.textContent = `Week of ${date.toLocaleDateString(undefined, { month: 'long', day: 'numeric' })}`
-      const isCurrent = this.monday === mondayOfWeek(isoDayLocal(Date.now()))
+      const isCurrent = this.monday === weekMondayForFocus(null, Date.now())
       this.label.classList.toggle('wk-weeklabel-away', !isCurrent)
       this.label.title = isCurrent ? 'This week' : 'Back to this week'
     }
@@ -544,8 +621,18 @@ class WeekView implements TemporalView {
     root.dataset.day = day
     if (date && (date.getDay() === 0 || date.getDay() === 6)) root.classList.add('wk-row-weekend')
 
-    const label = document.createElement('div')
+    // The label block is the way down a level: the week names a day, clicking
+    // the name opens it. It carries the cursor with it, so Day arrives already
+    // on that date instead of flashing today first.
+    const label = document.createElement('button')
+    label.type = 'button'
     label.className = 'wk-daylabel'
+    const full = date
+      ? date.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })
+      : day
+    label.title = `Open ${full} in Day view`
+    label.setAttribute('aria-label', label.title)
+    label.addEventListener('click', () => this.ctx?.switchView('day', { focusDate: day }))
     const dow = document.createElement('span')
     dow.className = 'wk-dow'
     dow.textContent = date ? date.toLocaleDateString(undefined, { weekday: 'short' }) : ''
@@ -556,13 +643,14 @@ class WeekView implements TemporalView {
 
     const rail = document.createElement('div')
     rail.className = 'wk-rail'
-    // Hour rules every 4h — static, so they live outside the patched layer.
+    // Hour rules every 4h, at their real positions on THIS day's rail — static
+    // for the row's lifetime, so they live outside the patched layer.
     const rules = document.createElement('div')
     rules.className = 'wk-rules'
-    for (let i = 1; i < 6; i += 1) {
+    for (const fraction of railRuleFractions(day, railBounds(day))) {
       const rule = document.createElement('span')
       rule.className = 'wk-rule'
-      rule.style.left = `${(i / 6) * 100}%`
+      rule.style.left = `${fraction * 100}%`
       rules.append(rule)
     }
     const paint = document.createElement('div')
@@ -614,7 +702,6 @@ class WeekView implements TemporalView {
   }
 
   private acceptActivity(monday: string, days: string[], res: ActivityResult): void {
-    const bucketMs = inferBucketMs(res.buckets)
     const byDay = new Map<string, ActivityBucket[]>()
     const edges = days.map((day) => ({ day, bounds: railBounds(day) }))
     for (const bucket of res.buckets) {
@@ -624,13 +711,12 @@ class WeekView implements TemporalView {
       if (list) list.push(bucket)
       else byDay.set(hit.day, [bucket])
     }
-    const print = `${res.buckets.length}:${bucketMs}:${res.buckets.at(-1)?.m ?? 0}`
+    const print = `${res.buckets.length}:${res.buckets.at(-1)?.m ?? 0}`
     if (this.activity?.monday === monday && this.activity.print === print) return
     this.activity = {
       monday,
-      bucketMs,
       byDay,
-      week: summarizeSpend(res.buckets, bucketMs),
+      week: summarizeSpend(res.buckets),
       print,
     }
     this.dataGen += 1
@@ -666,7 +752,9 @@ class WeekView implements TemporalView {
     // Coarse clock in every signature: today's row must follow the now-marker,
     // and no row may re-render for a millisecond that changed nothing.
     const minute = Math.floor(now / 60_000)
-    const todayCivil = isoDayLocal(now)
+    // The rail that CONTAINS now, not the midnight calendar day — between
+    // midnight and 6am those are different rows, and the live one is the rail's.
+    const todayCivil = railCivilDay(now, RAIL_START_HOUR)
     const activity = this.activity?.monday === this.monday ? this.activity : null
     const narration = this.narration?.monday === this.monday ? this.narration : null
 
@@ -703,7 +791,7 @@ class WeekView implements TemporalView {
 
       row.paint.innerHTML = ''
       if (buckets.length > 0 && activity) {
-        paintRaster(row.paint, buckets, bounds, activity.bucketMs, isToday ? now : bounds.endMs)
+        paintRaster(row.paint, buckets, bounds, isToday ? now : bounds.endMs)
       }
       for (const mark of visible) row.paint.append(this.buildMark(mark, visible))
       if (isToday) {
@@ -713,7 +801,7 @@ class WeekView implements TemporalView {
         row.paint.append(nowLine)
       }
 
-      const spend = activity ? summarizeSpend(buckets, activity.bucketMs) : null
+      const spend = activity ? summarizeSpend(buckets) : null
       row.annot.textContent =
         isPast || isToday
           ? spend && spend.totalMs > 0
@@ -777,7 +865,16 @@ function navButton(glyph: string, title: string, onClick: () => void): HTMLEleme
   return el
 }
 
-/** The one shared tick row under all seven rails. */
+/**
+ * The one shared tick row under all seven rails.
+ *
+ * Nominal by necessity: one legend cannot track seven rails that are not all
+ * the same length, so the labels sit at even sixths. That is exact for a normal
+ * 24h rail and for six of the seven rows in a DST week — both zones move their
+ * clocks on a Sunday, so only the last rail is off, and only by up to an hour.
+ * The per-row rules (`railRuleFractions`) are the exact ones; this row names
+ * them.
+ */
 function buildTickRow(): HTMLElement {
   const row = document.createElement('div')
   row.className = 'wk-row wk-tickrow'
@@ -809,10 +906,8 @@ function paintRaster(
   host: HTMLElement,
   buckets: ActivityBucket[],
   bounds: RailBounds,
-  bucketMs: number,
   cutoffMs: number,
 ): void {
-  const slotMs = Math.max(bucketMs, RASTER_SLOT_MS)
   const span = bounds.endMs - bounds.startMs
   if (span <= 0) return
 
@@ -820,7 +915,7 @@ function paintRaster(
   const slots = new Map<number, Map<ActivityBucket['k'], number>>()
   for (const b of buckets) {
     if (b.m > cutoffMs) continue
-    const index = Math.floor((b.m - bounds.startMs) / slotMs)
+    const index = Math.floor((b.m - bounds.startMs) / RASTER_SLOT_MS)
     let kinds = slots.get(index)
     if (!kinds) {
       kinds = new Map()
@@ -834,7 +929,7 @@ function paintRaster(
     for (const [index, kinds] of slots) {
       const n = kinds.get(kind)
       if (n === undefined) continue
-      const at = bounds.startMs + (index + 0.5) * slotMs
+      const at = bounds.startMs + (index + 0.5) * RASTER_SLOT_MS
       const tick = document.createElement('span')
       tick.className = `wk-ras wk-ras-${kind}`
       tick.style.left = `${((at - bounds.startMs) / span) * 100}%`

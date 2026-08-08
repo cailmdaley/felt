@@ -8,12 +8,14 @@
  * one sign of UTC offset fails loudly instead of passing vacuously.
  */
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { KanbanCard } from '../KanbanTypes.js'
 import type { ActivityBucket, ActivityResult, NarrationCommit } from './TemporalData.js'
 import {
   buildDayEntries,
   buildDayLanes,
+  buildDayModel,
+  commitsOnRail,
   cwdLaneLabel,
   dayTotals,
   dayWindow,
@@ -22,8 +24,13 @@ import {
   formatSpanHM,
   groupCommitsBySlug,
   mergeMinuteRuns,
+  narrationRange,
+  resolveDayISO,
+  sessionSlug,
   shiftCivilDay,
+  stepTarget,
   tmuxFiberUlid,
+  type DayLane,
 } from './DayView.js'
 
 const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone
@@ -63,6 +70,54 @@ describe('which day the view opens on', () => {
     expect(shiftCivilDay('2026-08-04', 1)).toBe('2026-08-05')
     expect(shiftCivilDay('2026-03-01', -1)).toBe('2026-02-28')
     expect(shiftCivilDay('2026-12-31', 1)).toBe('2027-01-01')
+  })
+})
+
+describe('the shared temporal cursor', () => {
+  const NOW = at(2026, 8, 4, 13, 30)
+
+  it('shows the cursor day when the cursor holds one', () => {
+    expect(resolveDayISO('2026-07-19', NOW)).toBe('2026-07-19')
+  })
+
+  it('resolves a null cursor against the clock, not once at mount', () => {
+    expect(resolveDayISO(null, NOW)).toBe('2026-08-04')
+    expect(resolveDayISO(undefined, NOW)).toBe('2026-08-04')
+    // The same null cursor, read after midnight but before 06:00, is still
+    // the day the evening grew from — the live present, re-resolved.
+    expect(resolveDayISO(null, at(2026, 8, 5, 2, 0))).toBe('2026-08-04')
+    expect(resolveDayISO(null, at(2026, 8, 5, 6, 1))).toBe('2026-08-05')
+  })
+
+  it('coerces a cursor carrying an instant, and falls back on nonsense', () => {
+    // normalizeFocusDate warns on both — that is the point of it, and the
+    // warning is not what this test is about.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      expect(resolveDayISO('2026-07-19T22:15:00Z', NOW)).toBe('2026-07-19')
+      expect(resolveDayISO('not a day', NOW)).toBe('2026-08-04')
+      expect(resolveDayISO('', NOW)).toBe('2026-08-04')
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it('writes an explicit day when paging away from today', () => {
+    expect(stepTarget('2026-08-04', -1, NOW)).toBe('2026-08-03')
+    expect(stepTarget('2026-08-03', -1, NOW)).toBe('2026-08-02')
+    expect(stepTarget('2026-08-04', 1, NOW)).toBe('2026-08-05')
+  })
+
+  it('hands the cursor back to the live present when a step lands on today', () => {
+    // Null, not "2026-08-04": pinning the date would go stale at 06:00
+    // tomorrow, and the board can be left open overnight.
+    expect(stepTarget('2026-08-03', 1, NOW)).toBeNull()
+    expect(stepTarget('2026-08-05', -1, NOW)).toBeNull()
+    // And the "today" it compares against is the 06:00-aware one: at 03:00 on
+    // the 5th, today is still the 4th, so a step onto the 4th releases the
+    // cursor while a step onto the 5th pins it.
+    expect(stepTarget('2026-08-03', 1, at(2026, 8, 5, 3, 0))).toBeNull()
+    expect(stepTarget('2026-08-04', 1, at(2026, 8, 5, 3, 0))).toBe('2026-08-05')
   })
 })
 
@@ -234,6 +289,7 @@ describe('lanes', () => {
       activity([
         bucket(10, 'agent', null, '/home/ada/dev/felt'),
         bucket(11, 'agent', null, '/home/ada/dev/felt'),
+        // A session that resolves to no card: a worker, not a person.
         bucket(12, 'agent', 'some-other-01ZZZ-shuttle', '/Users/ada/loom'),
         bucket(13, 'agent', SESSION),
       ]),
@@ -242,7 +298,7 @@ describe('lanes', () => {
     )
     expect(lanes.map((l) => l.kind)).toEqual(['fiber', 'loose', 'loose'])
     expect(lanes[1].label).toBe('~/dev/felt · interactive')
-    expect(lanes[2].label).toBe('~/loom · interactive')
+    expect(lanes[2].label).toBe('~/loom · unmatched')
     expect(lanes[1].cardId).toBeUndefined()
   })
 
@@ -275,6 +331,234 @@ describe('lanes', () => {
       WIN,
     )
     expect(lanes[0].agent).toEqual([{ start: 100, end: 107 }])
+  })
+})
+
+describe('the join ladder', () => {
+  // Every rung below is a session shape the daemon really produces, and every
+  // miss has the same consequence: the bucket lands on a lane labelled
+  // "interactive", which says a human was typing when an agent was working.
+
+  it('joins a session name whose ULID is lower-cased', () => {
+    expect(tmuxFiberUlid(`bmodes-2d-${FIBER_ULID.toLowerCase()}-shuttle`)).toBe(FIBER_ULID)
+    const lanes = buildDayLanes(
+      activity([bucket(20, 'agent', `bmodes-2d-${FIBER_ULID.toLowerCase()}-shuttle`)]),
+      [card()],
+      WIN,
+    )
+    expect(lanes[0].kind).toBe('fiber')
+    expect(lanes[0].cardId).toBe('work/spt3g_papers/bmodes-2d')
+  })
+
+  it('joins the legacy leaf-only session name the dispatcher still emits', () => {
+    expect(sessionSlug('morning-post-shuttle')).toBe('morning-post')
+    expect(sessionSlug(`bmodes-2d-${FIBER_ULID}-shuttle`)).toBe('bmodes-2d')
+    const lanes = buildDayLanes(
+      activity([bucket(20, 'agent', 'morning-post-shuttle', '/home/ada/loom')]),
+      [card({ id: 'loom/email/morning-post/refine', uid: undefined, name: 'Morning post' })],
+      WIN,
+    )
+    expect(lanes[0].kind).toBe('fiber')
+    expect(lanes[0].label).toBe('Morning post')
+  })
+
+  it('joins an exact live-worker tmux name even with no ULID in it', () => {
+    const lanes = buildDayLanes(
+      activity([bucket(20, 'agent', 'legacy-worker-name')]),
+      [card({ uid: undefined, runningWorker: 'legacy-worker-name' })],
+      WIN,
+    )
+    expect(lanes[0].kind).toBe('fiber')
+  })
+
+  it('never joins on the working directory — a directory names a project', () => {
+    // The cwd tail `spt3g_papers` uniquely names this card's path. It still
+    // does not join, for a WORKER whose session resolved to nothing…
+    const worker = buildDayLanes(
+      activity([bucket(20, 'agent', 'scratch-shuttle', '/home/ada/work/spt3g_papers')]),
+      [card()],
+      WIN,
+    )
+    expect(worker[0].kind).toBe('loose')
+    expect(worker[0].label).toBe('~/work/spt3g_papers · unmatched')
+
+    // …nor for a person typing in the same directory. A repo root routinely
+    // shares its name with one fiber nested inside it, and that coincidence is
+    // not evidence about what the work was.
+    const human = buildDayLanes(
+      activity([bucket(20, 'agent', null, '/home/ada/work/spt3g_papers')]),
+      [card()],
+      WIN,
+    )
+    expect(human[0].kind).toBe('loose')
+    expect(human[0].label).toBe('~/work/spt3g_papers · interactive')
+  })
+
+  it('refuses a session slug two cards answer to, rather than guessing', () => {
+    // Both cards have a `refine` segment, so the session slug names neither.
+    const lanes = buildDayLanes(
+      activity([bucket(20, 'agent', 'refine-shuttle', '/home/ada/loom')]),
+      [
+        card({ id: 'loom/email/refine', uid: undefined, name: 'One' }),
+        card({ id: 'loom/notes/refine', uid: undefined, name: 'Two' }),
+      ],
+      WIN,
+    )
+    expect(lanes[0].kind).toBe('loose')
+    expect(lanes[0].label).toBe('~/loom · unmatched')
+  })
+
+  it('calls an unjoined WORKER unmatched and a sessionless bucket interactive', () => {
+    expect(cwdLaneLabel('/home/ada/loom', true)).toBe('~/loom · unmatched')
+    expect(cwdLaneLabel('/home/ada/loom', false)).toBe('~/loom · interactive')
+    expect(cwdLaneLabel(null, true)).toBe('elsewhere · unmatched')
+  })
+
+  it('keeps worker and human work in the same directory on separate lanes', () => {
+    const lanes = buildDayLanes(
+      activity([
+        bucket(20, 'agent', 'stranger-01ZZZ-shuttle', '/home/ada/loom'),
+        bucket(21, 'attention', null, '/home/ada/loom'),
+      ]),
+      [],
+      WIN,
+    )
+    expect(lanes.map((l) => l.label).sort()).toEqual([
+      '~/loom · interactive',
+      '~/loom · unmatched',
+    ])
+  })
+})
+
+describe('the narration window against the rail', () => {
+  // The rail is 06:00→06:00; the narration route speaks inclusive civil days,
+  // midnight to midnight. Widen by a day, then discard by the rail's edges.
+
+  it('asks for the day and the one after it', () => {
+    expect(narrationRange('2026-08-04')).toEqual({ from: '2026-08-04', to: '2026-08-05' })
+    expect(narrationRange('2026-12-31')).toEqual({ from: '2026-12-31', to: '2027-01-01' })
+  })
+
+  const commitAt = (ms: number, subject = 'x: y'): NarrationCommit => ({
+    iso: new Date(ms).toISOString(),
+    subject,
+  })
+
+  it('keeps a post-midnight commit on the rail it was made on', () => {
+    // 01:30 on the 5th is the tail of the 4th's session, not the 5th's morning.
+    const late = commitAt(at(2026, 8, 5, 1, 30))
+    expect(commitsOnRail([late], WIN)).toEqual([late])
+  })
+
+  it('discards the early overhang — before 06:00 belongs to yesterday', () => {
+    expect(commitsOnRail([commitAt(at(2026, 8, 4, 3, 0))], WIN)).toEqual([])
+  })
+
+  it('is inclusive at 06:00 and exclusive at the next 06:00', () => {
+    expect(commitsOnRail([commitAt(WIN.startMs)], WIN)).toHaveLength(1)
+    expect(commitsOnRail([commitAt(WIN.endMs)], WIN)).toHaveLength(0)
+    expect(commitsOnRail([commitAt(WIN.endMs - 1)], WIN)).toHaveLength(1)
+  })
+
+  it('drops a commit whose timestamp will not parse', () => {
+    expect(commitsOnRail([{ iso: 'not a time', subject: 'x: y' }], WIN)).toEqual([])
+  })
+
+  it('does not fabricate "wrote nothing down" for a fiber that committed at 01:30', () => {
+    // The review's scenario end to end: work 22:00 → 02:00 on one fiber, its
+    // commit landing after midnight. Before the fix the prose said the fiber
+    // worked and wrote nothing, while its own commit sat on the next page.
+    const model = buildDayModel(
+      DAY,
+      activity([bucket(16 * 60, 'agent', SESSION), bucket(19 * 60 + 30, 'agent', SESSION)]),
+      [commitAt(at(2026, 8, 5, 1, 30), 'bmodes-2d: ran the nulls')],
+      [card()],
+    )
+    expect(model.entries).toHaveLength(1)
+    expect(model.entries[0]).toMatchObject({
+      title: 'bmodes-2d',
+      body: 'ran the nulls',
+      cardId: 'work/spt3g_papers/bmodes-2d',
+    })
+    expect(model.entries[0].fallback).toBeUndefined()
+  })
+
+  it('keeps yesterday’s small hours off this page', () => {
+    const model = buildDayModel(
+      DAY,
+      activity([bucket(60, 'agent', SESSION)]),
+      [commitAt(at(2026, 8, 4, 2, 0), 'somewhere-else: finished last night')],
+      [card({ outcome: 'Ran the nulls.' })],
+    )
+    // The 02:00 commit is Aug 3's; all this page can say is the fallback.
+    expect(model.entries.map((e) => e.title)).toEqual(['bmodes-2d'])
+    expect(model.entries[0].fallback).toBe(true)
+  })
+})
+
+describe('two fibers with the same leaf slug', () => {
+  // Nested ids are the norm in this store, so a shared leaf is ordinary. Each
+  // fiber has its own ULID, which is how both lanes get drawn at all — the
+  // ambiguity bites at the NARRATION step, where all a commit carries is
+  // `board: `.
+  const OTHER_ULID = '01KVBR5W2QJ6K8M3N7P4R9TSDF'
+  const felt = card({ id: 'felt/board', name: 'Felt board', outcome: 'Tidy it.' })
+  const lightcone = card({
+    id: 'lightcone/board',
+    uid: OTHER_ULID,
+    name: 'Lightcone board',
+    outcome: 'Ship it.',
+  })
+  const twoLanes = (): DayLane[] =>
+    buildDayLanes(
+      activity([
+        bucket(10, 'agent', `board-${FIBER_ULID}-shuttle`, '/home/ada/felt/board'),
+        bucket(20, 'agent', `board-${OTHER_ULID}-shuttle`, '/home/ada/lightcone/board'),
+      ]),
+      [felt, lightcone],
+      WIN,
+    )
+
+  it('draws both lanes', () => {
+    const lanes = twoLanes()
+    expect(lanes.map((l) => l.cardId).sort()).toEqual(['felt/board', 'lightcone/board'])
+    // Both answer to the same commit prefix — that is the hazard.
+    expect(lanes.every((l) => l.slugs.includes('board'))).toBe(true)
+  })
+
+  it('refuses to attribute the shared slug to either fiber', () => {
+    const entries = buildDayEntries(
+      [{ iso: new Date(WIN.startMs).toISOString(), subject: 'board: fold the masthead' }],
+      twoLanes(),
+      [felt, lightcone],
+    )
+    const commitEntry = entries.find((e) => e.key === 'slug:board')
+    expect(commitEntry?.body).toBe('fold the masthead')
+    // No card: a click that opened one of two candidates would open the wrong
+    // fiber half the time.
+    expect(commitEntry?.cardId).toBeUndefined()
+  })
+
+  it('still gives BOTH lanes their fallback line, qualified by parent', () => {
+    const entries = buildDayEntries(
+      [{ iso: new Date(WIN.startMs).toISOString(), subject: 'board: fold the masthead' }],
+      twoLanes(),
+      [felt, lightcone],
+    )
+    const fallbacks = entries.filter((e) => e.fallback)
+    expect(fallbacks.map((e) => e.title).sort()).toEqual(['felt/board', 'lightcone/board'])
+    expect(fallbacks.map((e) => e.body).sort()).toEqual(['Ship it.', 'Tidy it.'])
+  })
+
+  it('still attributes — and still suppresses — when the slug is unique', () => {
+    const lanes = buildDayLanes(activity([bucket(10, 'agent', SESSION)]), [card()], WIN)
+    const entries = buildDayEntries(
+      [{ iso: new Date(WIN.startMs).toISOString(), subject: 'bmodes-2d: ran the nulls' }],
+      lanes,
+      [card()],
+    )
+    expect(entries).toHaveLength(1)
+    expect(entries[0].cardId).toBe('work/spt3g_papers/bmodes-2d')
   })
 })
 

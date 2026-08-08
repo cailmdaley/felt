@@ -8,23 +8,26 @@
  * a spring-forward week and a fall-back week in each direction.
  */
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   dayWeight,
-  inferBucketMs,
+  BUCKET_MS,
   marksForDay,
   mondayOfWeek,
   pickDaySubjects,
   RAIL_START_HOUR,
   railBounds,
   railFraction,
+  railRuleFractions,
   readableSubject,
+  shiftCivilDay,
   shiftWeekMonday,
   summarizeSpend,
   weekCivilDays,
+  weekMondayForFocus,
   weekWindow,
 } from './WeekView.js';
-import { isoDayLocal } from '../civilDay.js';
+import { civilDayToLocalDate, isoDayLocal, railCivilDay } from '../civilDay.js';
 import type { ActivityBucket } from './TemporalData.js';
 import type { KanbanCard } from '../KanbanTypes.js';
 
@@ -157,6 +160,180 @@ describe('a DST week still has exactly seven rails', () => {
       const { startMs, endMs } = railBounds(day);
       expect(endMs - startMs).toBe(24 * HOUR);
     }
+  });
+
+  it('puts the 4-hourly rules on the wall-clock hours they name', () => {
+    // Even sixths are only right on a 24h rail. On a 25h rail 2pm is 8/25
+    // along, not 8/24, so fixed fractions would drift the rules up to an hour
+    // off the ink they measure. Every rule must land on its real hour.
+    const wanted = [10, 14, 18, 22, 2];
+    for (const monday of [...Object.values(DST_WEEKS).flat(), '2026-08-03']) {
+      for (const day of weekCivilDays(monday)) {
+        const bounds = railBounds(day);
+        const fractions = railRuleFractions(day, bounds);
+        expect(fractions).toHaveLength(5);
+        const span = bounds.endMs - bounds.startMs;
+        // On a SPRING-FORWARD rail the 2am rule names a wall-clock time that
+        // does not exist — the clock jumps 02:00 → 03:00 — and `Date` resolves
+        // it forward to 03:00. That is the right place for the rule: it is the
+        // first instant at or after where 2am would have been. Only the last
+        // rule on a 23h rail can hit this, so the exception is that narrow.
+        const skipsTwoAm = span === 23 * HOUR;
+        fractions.forEach((f, i) => {
+          expect(f).toBeGreaterThan(0);
+          expect(f).toBeLessThan(1);
+          if (i > 0) expect(f).toBeGreaterThan(fractions[i - 1]);
+          const hour = new Date(bounds.startMs + f * span).getHours();
+          expect(hour).toBe(i === 4 && skipsTwoAm ? wanted[i] + 1 : wanted[i]);
+        });
+      }
+    }
+  });
+
+  it('is even sixths on an ordinary rail and is NOT on a DST one', () => {
+    const even = [1, 2, 3, 4, 5].map((i) => i / 6);
+    for (const f of railRuleFractions('2026-08-05', railBounds('2026-08-05'))) {
+      expect(even.some((e) => Math.abs(e - f) < 1e-9)).toBe(true);
+    }
+    const oddRail = (DST_WEEKS[TZ] ?? [])
+      .flatMap((monday) => weekCivilDays(monday))
+      .find((day) => {
+        const { startMs, endMs } = railBounds(day);
+        return endMs - startMs !== 24 * HOUR;
+      });
+    expect(oddRail, `no off-nominal rail found for ${TZ}`).toBeDefined();
+    const drifted = railRuleFractions(oddRail!, railBounds(oddRail!));
+    expect(drifted.some((f, i) => Math.abs(f - even[i]) > 1e-6)).toBe(true);
+  });
+});
+
+describe('the day a rail belongs to is the dawn day, not the midnight one', () => {
+  // The whole view is built on 6am→6am rails, so "which row is now on" has to
+  // be asked in the same terms. Asking the midnight question put the gold seam
+  // on a row that had not started yet, clamped the now-marker to its left edge,
+  // and greyed out the live rail as past — losing its in-flight marginalia and
+  // suppressing every mark on it, for six hours every night.
+  const localMs = (day: string, hour: number, minute = 0) => {
+    const d = civilDayToLocalDate(day);
+    if (!d) throw new Error(`bad day ${day}`);
+    d.setHours(hour, minute, 0, 0);
+    return d.getTime();
+  };
+
+  // [hour of Wednesday 2026-08-05, the rail day it belongs to]
+  const cases: Array<[number, string]> = [
+    [0, '2026-08-04'], // midnight is still Tuesday's evening
+    [2, '2026-08-04'],
+    [5, '2026-08-04'],
+    [6, '2026-08-05'], // the rail opens
+    [12, '2026-08-05'],
+    [23, '2026-08-05'],
+  ];
+  for (const [hour, expected] of cases) {
+    it(`${String(hour).padStart(2, '0')}:00 Wednesday sits on ${expected}'s rail`, () => {
+      expect(railCivilDay(localMs('2026-08-05', hour), RAIL_START_HOUR)).toBe(expected);
+    });
+  }
+
+  it('agrees with the rail it names — the instant is inside those bounds', () => {
+    for (const hour of [0, 2, 5, 6, 12, 23]) {
+      const at = localMs('2026-08-05', hour);
+      const { startMs, endMs } = railBounds(railCivilDay(at, RAIL_START_HOUR));
+      expect(at).toBeGreaterThanOrEqual(startMs);
+      expect(at).toBeLessThan(endMs);
+    }
+  });
+
+  it('rolls back across a month boundary at 02:00 on the first', () => {
+    expect(railCivilDay(localMs('2026-08-01', 2), RAIL_START_HOUR)).toBe('2026-07-31');
+  });
+
+  it('does not jump the week early in the small hours of a Monday', () => {
+    // 01:00 Monday: the rail being worked is the PREVIOUS week's Sunday, so the
+    // view must still show that week. Reading the midnight day here also put
+    // the week's start four hours in the future, which made `weekWindow`
+    // suppress the activity request entirely and blanked the whole page.
+    const smallHoursMonday = localMs('2026-08-10', 1);
+    expect(weekMondayForFocus(null, smallHoursMonday)).toBe('2026-08-03');
+    const win = weekWindow(weekMondayForFocus(null, smallHoursMonday), smallHoursMonday);
+    expect(win.days).toContain('2026-08-09');
+    expect(win.activityToMs).toBeGreaterThan(win.fromMs); // it still asks
+  });
+
+  it('has moved on by 06:00 that Monday', () => {
+    expect(weekMondayForFocus(null, localMs('2026-08-10', 6))).toBe('2026-08-10');
+  });
+});
+
+describe('the week follows the shared temporal cursor', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const nowMs = Date.parse('2026-08-05T12:00:00Z'); // a Wednesday in both zones
+
+  it('shows the current week when the cursor is null', () => {
+    expect(weekMondayForFocus(null, nowMs)).toBe(mondayOfWeek(isoDayLocal(nowMs)));
+  });
+
+  it('re-resolves null against the clock rather than freezing a week', () => {
+    const later = Date.parse('2026-08-19T12:00:00Z'); // two weeks on
+    expect(weekMondayForFocus(null, nowMs)).not.toBe(weekMondayForFocus(null, later));
+  });
+
+  // [cursor, the Monday it should open]
+  const cases: Array<[string, string]> = [
+    ['2026-08-03', '2026-08-03'], // the Monday itself
+    ['2026-08-05', '2026-08-03'], // midweek
+    ['2026-08-09', '2026-08-03'], // Sunday stays in the week that began
+    ['2026-08-10', '2026-08-10'], // the next Monday opens the next week
+    ['2026-08-01', '2026-07-27'], // reaches back across a month boundary
+    ['2027-01-01', '2026-12-28'], // and across a year boundary
+    ['2026-10-25', '2026-10-19'], // Paris's fall-back Sunday
+    ['2026-03-08', '2026-03-02'], // Los Angeles's spring-forward Sunday
+  ];
+  for (const [cursor, monday] of cases) {
+    it(`a cursor on ${cursor} opens the week of ${monday}`, () => {
+      expect(weekMondayForFocus(cursor, nowMs)).toBe(monday);
+    });
+  }
+
+  it('takes the leading day of a full timestamp, and says so', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    // A caller holding an instant where the cursor wants a civil day. It works,
+    // but it is worth seeing before it becomes an off-by-one downstream.
+    expect(weekMondayForFocus('2026-08-05T23:30:00Z', nowMs)).toBe('2026-08-03');
+    expect(warn).toHaveBeenCalledOnce();
+  });
+
+  it('falls back to the current week on an unparseable cursor', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(weekMondayForFocus('last tuesday', nowMs)).toBe(mondayOfWeek(isoDayLocal(nowMs)));
+    expect(warn).toHaveBeenCalledOnce();
+  });
+
+  it('pages by seven days on the cursor, so the weekday survives the jump', () => {
+    // ‹ › and the arrow keys move the CURSOR ±7 days rather than this view's
+    // idea of the week, which is what keeps Day and Chronicle in step. A
+    // seven-day civil stride must land on the same weekday even across a DST
+    // transition — the bug an `+ 7 * 86_400_000` stride would introduce.
+    const weekdayOf = (day: string) => civilDayToLocalDate(day)?.getDay();
+    for (const day of ['2026-08-05', '2026-03-06', '2026-10-23', '2026-12-30']) {
+      expect(weekdayOf(shiftCivilDay(day, 7))).toBe(weekdayOf(day));
+      expect(weekdayOf(shiftCivilDay(day, -7))).toBe(weekdayOf(day));
+    }
+    expect(shiftCivilDay('2026-08-05', 7)).toBe('2026-08-12');
+    expect(shiftCivilDay('2026-08-05', -7)).toBe('2026-07-29');
+  });
+
+  it('lands the paged cursor in the neighbouring week, not the same one', () => {
+    const monday = weekMondayForFocus('2026-08-05', nowMs);
+    expect(weekMondayForFocus(shiftCivilDay('2026-08-05', 7), nowMs)).toBe(
+      shiftWeekMonday(monday, 1),
+    );
+    expect(weekMondayForFocus(shiftCivilDay('2026-08-05', -7), nowMs)).toBe(
+      shiftWeekMonday(monday, -1),
+    );
   });
 });
 
@@ -317,6 +494,24 @@ describe('a `due:` is a civil day, and lands on the day it names', () => {
     expect(marks[0].fraction).toBeCloseTo(15.5 / 24, 6);
   });
 
+  it('files a pre-dawn launch on the rail that contains it, not the calendar day', () => {
+    // A `0 3 * * *` role firing at 03:00 Thursday. 03:00 is three hours BEFORE
+    // Thursday's rail opens, so the calendar day is the wrong row: the glyph
+    // clamped to fraction 0 and drew under the 6am tick, while Wednesday's row
+    // — which really owns that instant, near its right end — showed nothing.
+    const wed = railBounds('2026-08-12');
+    const at = new Date(wed.startMs + 21 * HOUR); // 03:00 Thursday local
+    expect(at.getHours()).toBe(3);
+    const cards = [card({ id: 'role/dawn', status: 'active', nextLaunchAt: at.toISOString() })];
+
+    expect(marksForDay(cards, '2026-08-13', railBounds('2026-08-13'))).toHaveLength(0);
+    const onWed = marksForDay(cards, '2026-08-12', wed);
+    expect(onWed.map((m) => m.kind)).toEqual(['launch']);
+    // Near the right end of Wednesday's rail, and emphatically not clamped.
+    expect(onWed[0].fraction).toBeCloseTo(21 / 24, 6);
+    expect(onWed[0].fraction).toBeGreaterThan(0);
+  });
+
   it('prefers the launch instant over a due when a card carries both', () => {
     const bounds = railBounds('2026-08-14');
     const cards = [
@@ -364,31 +559,30 @@ describe('how full a day was', () => {
     expect(spend.notifyCount).toBe(1);
   });
 
-  it('reads the bucket grid off the data rather than assuming a minute', () => {
-    const at = (m: number): ActivityBucket => ({ m, s: null, cwd: null, k: 'agent', n: 1 });
-    // A 5-minute grid with a gap in it — the SMALLEST gap is the grid.
-    expect(inferBucketMs([at(0), at(300_000), at(600_000), at(3_000_000)])).toBe(300_000);
-    expect(inferBucketMs([at(0), at(60_000)])).toBe(60_000);
-    // Too few buckets to tell: fall back to a minute rather than guess wide.
-    expect(inferBucketMs([])).toBe(60_000);
-    expect(inferBucketMs([at(0)])).toBe(60_000);
-    // Same minute, several kinds — not a gap.
-    expect(
-      inferBucketMs([at(0), { m: 0, s: null, cwd: null, k: 'attention', n: 1 }]),
-    ).toBe(60_000);
-  });
-
-  it('turns a five-minute grid into the hours it stands for', () => {
-    // 72 five-minute buckets = 6h = the `full` threshold, exactly.
+  it('counts one minute per bucket — the wire grid is fixed, never inferred', () => {
+    // `Shuttle.Activity` keys every event by div(ts, 60_000) * 60_000
+    // unconditionally (lib/shuttle/activity.ex), so a bucket IS a minute.
+    expect(BUCKET_MS).toBe(60_000);
+    // 360 minute-buckets = 6h = the `full` threshold, exactly.
     const buckets: ActivityBucket[] = [];
-    for (let i = 0; i < 72; i += 1) {
-      buckets.push({ m: i * 300_000, s: null, cwd: null, k: 'agent', n: 3 });
+    for (let i = 0; i < 360; i += 1) {
+      buckets.push({ m: i * BUCKET_MS, s: null, cwd: null, k: 'agent', n: 3 });
     }
-    const bucketMs = inferBucketMs(buckets);
-    expect(bucketMs).toBe(300_000);
-    const spend = summarizeSpend(buckets, bucketMs);
+    const spend = summarizeSpend(buckets);
     expect(spend.totalMs).toBe(6 * HOUR);
     expect(dayWeight(spend.totalMs)).toBe('full');
+  });
+
+  it('does not inflate a sparse day by the distance between its buckets', () => {
+    // The regression that killed the old `inferBucketMs`: four scattered
+    // minutes must read as four minutes, not as four times the widest gap.
+    // Under the inference these reported 28 minutes, and a slightly larger set
+    // crossed the 2h `half` threshold on a genuinely quiet day.
+    const at = (minutes: number): ActivityBucket =>
+      ({ m: minutes * 60_000, s: null, cwd: null, k: 'agent', n: 1 });
+    const spend = summarizeSpend([at(0), at(7), at(19), at(31)]);
+    expect(spend.totalMs).toBe(4 * 60_000);
+    expect(dayWeight(spend.totalMs)).toBe('quiet');
   });
 });
 

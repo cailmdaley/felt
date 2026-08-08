@@ -12,7 +12,7 @@ import {
 import { buildFileViewer, basenameOf, isScrollableFile } from './FileViewerPanel.js'
 import { fileBytesUrl, showToast } from './utils.js'
 import { humanizeCron } from './KanbanRules.js'
-import { instantMs } from './civilDay.js'
+import { instantMs, isoDayLocal } from './civilDay.js'
 import './FiberDetailModal.css'
 
 /**
@@ -64,6 +64,13 @@ function clockTime(ms: number): string {
   })
 }
 
+/** A calendar day in front of a clock time — `Aug 4 12:01`. Used only when the
+ *  bare time would lie about which day it names. */
+function dayStamp(ms: number): string {
+  const day = new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+  return `${day} ${clockTime(ms)}`
+}
+
 /** A run's length as "3h 36m" / "12m" — hours only when there are hours. Sub-
  *  minute runs read "0m" rather than seconds: the pair of clock times above
  *  already tells that story, and this figure is for scale, not precision. */
@@ -73,13 +80,29 @@ function formatSpan(ms: number): string {
   return hours > 0 ? `${hours}h ${minutes % 60}m` : `${minutes}m`
 }
 
+export interface SessionWindow {
+  text: string
+  /** The run ended on the worker's own handoff stamp — earns the teal ✓. */
+  clean: boolean
+  /** Full localized instants for the hover. */
+  title: string
+}
+
 /**
- * The session window: one mono line saying when the last worker launched, when
- * it handed off, and how long it held the fiber.
+ * The session window: one line saying when the last worker launched, when it
+ * handed off, and how long it held the fiber.
  *
- *   dispatched 14:02 · handed off 17:38 · 3h 36m ✓   — a clean, concluded run
+ *   dispatched 14:02 · handed off 17:38 · 3h 36m      — a clean, concluded run
+ *   dispatched Aug 4 14:02 · handed off 17:38 · …     — the same run, days ago
  *   dispatched 14:02 · aloft                          — a worker still running
  *   dispatched 14:02 · no clean handoff               — it stopped without one
+ *
+ * A DAY appears in front of a time exactly when the bare time would mislead:
+ * on the dispatch when the run didn't start today, and on the handoff when it
+ * concluded on a later day than it started (a run over midnight). Otherwise the
+ * times stand alone — most runs are today's, and "Aug 8" on every one of them
+ * would be noise you learn to skip, which is how the one that matters gets
+ * skipped too.
  *
  * Both instants ride the composite feed inside felt's `shuttle` map
  * (`shuttle.runtime.dispatched_at` / `handed_off_at`), so this needs nothing
@@ -90,38 +113,67 @@ function formatSpan(ms: number): string {
  * not this one's (the daemon's own `last_serviced` guard turns on the same
  * comparison). Reading it as this run's handoff would print a negative
  * duration and a ✓ on a run that never finished, so it reads as no handoff.
+ *
+ * Pure, and exported for the tests: everything here is a formatting decision
+ * over two instants and the clock.
  */
-function buildSessionWindow(card: KanbanCard): HTMLElement | null {
+export function sessionWindow(
+  card: Pick<KanbanCard, 'dispatchedAt' | 'handedOffAt' | 'runningWorker'>,
+  nowMs: number = Date.now(),
+): SessionWindow | null {
   const dispatched = instantMs(card.dispatchedAt)
   if (dispatched === undefined) return null
   const handedOff = instantMs(card.handedOffAt)
   const concluded = handedOff !== undefined && handedOff >= dispatched
 
+  const startedToday = isoDayLocal(dispatched) === isoDayLocal(nowMs)
+  const parts = [`dispatched ${startedToday ? clockTime(dispatched) : dayStamp(dispatched)}`]
+
+  if (card.runningWorker) {
+    return {
+      text: [...parts, 'aloft'].join(' · '),
+      clean: false,
+      title: `Worker launched ${new Date(dispatched).toLocaleString()} and is still running.`,
+    }
+  }
+  if (concluded && handedOff !== undefined) {
+    const spannedMidnight = isoDayLocal(handedOff) !== isoDayLocal(dispatched)
+    parts.push(
+      `handed off ${spannedMidnight ? dayStamp(handedOff) : clockTime(handedOff)}`,
+      formatSpan(handedOff - dispatched),
+    )
+    return {
+      text: parts.join(' · '),
+      clean: true,
+      title:
+        `Launched ${new Date(dispatched).toLocaleString()}; ` +
+        `handed off ${new Date(handedOff).toLocaleString()}.`,
+    }
+  }
+  return {
+    text: [...parts, 'no clean handoff'].join(' · '),
+    clean: false,
+    title:
+      `Launched ${new Date(dispatched).toLocaleString()}. The worker never stamped a ` +
+      'handoff for this run — it was killed, crashed, or is still being reconciled.',
+  }
+}
+
+/** {@link sessionWindow} as the one mono line the detail panel shows. */
+function buildSessionWindow(card: KanbanCard): HTMLElement | null {
+  const window_ = sessionWindow(card)
+  if (!window_) return null
+
   const el = document.createElement('div')
   el.className = 'kbn-detail-session'
-
-  const parts = [`dispatched ${clockTime(dispatched)}`]
-  if (card.runningWorker) {
-    parts.push('aloft')
-    el.title = `Worker launched ${new Date(dispatched).toLocaleString()} and is still running.`
-  } else if (concluded && handedOff !== undefined) {
-    parts.push(`handed off ${clockTime(handedOff)}`, formatSpan(handedOff - dispatched))
-    el.title =
-      `Launched ${new Date(dispatched).toLocaleString()}; ` +
-      `handed off ${new Date(handedOff).toLocaleString()}.`
-  } else {
-    parts.push('no clean handoff')
-    el.title =
-      `Launched ${new Date(dispatched).toLocaleString()}. The worker never stamped a ` +
-      'handoff for this run — it was killed, crashed, or is still being reconciled.'
-  }
+  el.title = window_.title
 
   const line = document.createElement('span')
   line.className = 'kbn-detail-session-line'
-  line.textContent = parts.join(' · ')
+  line.textContent = window_.text
   el.append(line)
 
-  if (concluded && !card.runningWorker) {
+  if (window_.clean) {
     const mark = document.createElement('span')
     mark.className = 'kbn-detail-session-clean'
     mark.textContent = '✓'
