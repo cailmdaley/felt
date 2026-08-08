@@ -112,6 +112,14 @@ interface RenderMarkdownOptions {
   basePath?: string
   /** Origin ID for remote (owner-routed) file access */
   originId?: string
+  /**
+   * The fiber's `shuttle.project_dir` — the SECOND place a relative link may
+   * mean. A body written by a worker says `[AGENTS.md](AGENTS.md)` meaning the
+   * repo it was working in, not the fiber's own folder in the felt store; those
+   * are different directories and only one of them holds the file. Emitted as
+   * an alternate candidate the host probes; see `installBodyFileLinks`.
+   */
+  projectDir?: string
 }
 
 /**
@@ -141,9 +149,27 @@ export function renderMarkdown(text: string, opts?: RenderMarkdownOptions): stri
         const external = /^(https?:|mailto:|data:)/i.test(href) || href.startsWith('#')
         const resolved = external ? null : fileUrl(href, opts)
         if (resolved === null) return renderer.link({ href, text } as never)
+        // TWO candidates, because a relative link in a fiber body is genuinely
+        // ambiguous. The fiber's own directory is the first guess and the right
+        // one for an attachment written beside the fiber. But a worker writing
+        // `[AGENTS.md](AGENTS.md)` means the repo it was dispatched into —
+        // `shuttle.project_dir` — and in the store's one real instance of this
+        // the fiber-dir candidate does not exist while the project-dir one is a
+        // 44KB file. Which is right cannot be known from the markdown, so both
+        // ride out and the host probes; see `installBodyFileLinks`.
+        const altBase = opts.projectDir
+        const alt =
+          altBase && altBase !== opts.basePath
+            ? fileUrl(href, { ...opts, basePath: altBase })
+            : null
+        const altPath =
+          alt !== null ? resolveAbs(href, { ...opts, basePath: altBase }) : null
         return (
           `<a href="${escapeAttr(resolved)}" class="md-link md-link-file"` +
           ` data-file-path="${escapeAttr(resolveAbs(href, opts) ?? href)}"` +
+          (alt !== null && altPath !== null
+            ? ` data-file-url-alt="${escapeAttr(alt)}" data-file-path-alt="${escapeAttr(altPath)}"`
+            : '') +
           ` target="_blank" rel="noopener">${text}</a>`
         )
       }

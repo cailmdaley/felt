@@ -45,6 +45,38 @@ describe('relative links in a fiber body', () => {
     expect(hrefIn(renderMarkdown('[a](AGENTS.md)'))).toBe('AGENTS.md')
   })
 
+  it('offers the project dir as a SECOND candidate', () => {
+    // The store's one real relative link: `[AGENTS.md](AGENTS.md)` in
+    // ai-futures/felt/debug. Anchored to the fiber dir it 404s (verified against
+    // the live daemon); the file it means is at the repo root the worker was
+    // dispatched into, `shuttle.project_dir`. The markdown cannot say which, so
+    // both ride out and the panel probes.
+    const html = renderMarkdown('[AGENTS.md](AGENTS.md)', {
+      basePath: '/Users/cd280747/loom/.felt/ai-futures/felt/debug',
+      originId: 'local',
+      projectDir: '/Users/cd280747/dev/felt',
+    })
+    expect(decodeURIComponent(/data-file-path="([^"]*)"/.exec(html)?.[1] ?? ''))
+      .toBe('/Users/cd280747/loom/.felt/ai-futures/felt/debug/AGENTS.md')
+    expect(decodeURIComponent(/data-file-path-alt="([^"]*)"/.exec(html)?.[1] ?? ''))
+      .toBe('/Users/cd280747/dev/felt/AGENTS.md')
+    expect(decodeURIComponent(/data-file-url-alt="([^"]*)"/.exec(html)?.[1] ?? ''))
+      .toContain('/Users/cd280747/dev/felt/AGENTS.md')
+  })
+
+  it('offers no alternate when there is nothing else it could mean', () => {
+    // No project dir, or a project dir that IS the fiber dir — one candidate,
+    // so the panel skips the probe entirely.
+    expect(renderMarkdown('[a](notes.md)', opts)).not.toContain('data-file-path-alt')
+    expect(renderMarkdown('[a](notes.md)', { ...opts, projectDir: opts.basePath }))
+      .not.toContain('data-file-path-alt')
+  })
+
+  it('never offers an alternate for an external link', () => {
+    const html = renderMarkdown('[t](https://arxiv.org/abs/1)', { ...opts, projectDir: '/repo' })
+    expect(html).not.toContain('data-file-path-alt')
+  })
+
   it('carries the origin for a remote-owned fiber', () => {
     const html = renderMarkdown('[a](notes.md)', { ...opts, originId: 'candide' })
     expect(hrefIn(html)).toContain('origin=candide')

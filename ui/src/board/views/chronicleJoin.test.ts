@@ -36,6 +36,7 @@ import {
   saysNothingHere,
   sessionSlug,
   sessionUlid,
+  shuttleOrigin,
 } from './ChronicleView.js'
 import type { ActivityBucket } from './TemporalData.js'
 import type { KanbanCard } from '../KanbanTypes.js'
@@ -81,7 +82,7 @@ function card(over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard {
 
 /** A cycle as the `cycles` surface delivers it — just the span and a name. */
 function cycle(id: string, start: string | null, due: string | undefined): CycleCard {
-  return { id, name: id, cycleStart: start, due }
+  return { id, name: id, originId: 'local', cycleStart: start, due }
 }
 
 // ── Session parsing ──────────────────────────────────────────────────────────
@@ -580,6 +581,30 @@ describe('placing a cycle band on the day grid', () => {
       startIdx: TODAY_IDX + 2,
       endIdx: TODAY_IDX + 9,
     })
+  })
+})
+
+describe('routing a cycle write to its owner', () => {
+  it('strips the remote- prefix and defaults to local', () => {
+    expect(shuttleOrigin('remote-cineca-login')).toBe('cineca-login')
+    expect(shuttleOrigin('local')).toBe('local')
+    expect(shuttleOrigin(undefined)).toBe('local')
+  })
+
+  it('carries the owning origin onto the band, so an edge drag can route by it', () => {
+    // The grips and the review write act on an existing fiber, and a
+    // remote-owned cycle has to be written where it lives. Same-host the two
+    // origins agree, which is exactly why sending a literal went unnoticed.
+    const remote: CycleCard = {
+      id: 'cycles/remote-era',
+      name: 'Remote era',
+      originId: 'remote-cineca-login',
+      cycleStart: WINDOW_DAYS[10].iso,
+      due: WINDOW_DAYS[20].iso,
+    }
+    const band = readCycleBand(remote, WINDOW_DAYS, DAY_INDEX, CYCLE_NOW)
+    expect(band?.originId).toBe('remote-cineca-login')
+    expect(shuttleOrigin(band?.originId)).toBe('cineca-login')
   })
 })
 

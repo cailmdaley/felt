@@ -114,6 +114,23 @@ export function railDate(nowMs: number): Date {
  */
 const SHUTTLE_BASE = (import.meta.env.VITE_SHUTTLE_BASE as string | undefined) ?? ''
 
+/**
+ * The origin key a write is routed by — `local`, or a bare hostname for a
+ * remote-owned fiber. Mirrors `shuttleOrigin` in src/forms/projectModel.ts;
+ * duplicated rather than imported because the board does not otherwise depend
+ * on the forms layer, and a one-line regex is a cheaper coupling than a
+ * cross-layer import.
+ */
+export function shuttleOrigin(originId: string | undefined): string {
+  return (originId ?? 'local').replace(/^remote-/, '')
+}
+
+/** Origin for a write with no card behind it yet — a cycle being created. The
+ *  board's own scope: the remote it is pinned to, else this daemon. */
+function boardOrigin(response: KanbanResponse): string {
+  return shuttleOrigin(response.remoteScope?.originId)
+}
+
 // ── Pure join + aggregation (exported for chronicleJoin.test.ts) ─────────────
 
 /**
@@ -388,12 +405,14 @@ export function densityStep(agent: number, peak: number): 1 | 2 | 3 {
  * optimistically drawn cycle — one that exists only in this session, between
  * the create and the poll that confirms it — be the same shape as a real one.
  */
-export type CycleCard = Pick<KanbanCard, 'id' | 'name' | 'cycleStart' | 'due'>
+export type CycleCard = Pick<KanbanCard, 'id' | 'name' | 'cycleStart' | 'due' | 'originId'>
 
 /** A cycle placed on the day grid. */
 export interface CycleBand {
   id: string
   name: string
+  /** Whose daemon owns this cycle — the routing key for an edge or a review. */
+  originId: string
   /** Inclusive day-column range, clamped to the window. */
   startIdx: number
   endIdx: number
@@ -451,6 +470,7 @@ export function readCycleBand(
   return {
     id: card.id,
     name: card.name,
+    originId: card.originId,
     startIdx,
     endIdx,
     openStart: startsBefore,
@@ -1437,6 +1457,7 @@ class ChronicleView implements TemporalView {
     const ghosts: CycleCard[] = this.pendingCycles.map((p) => ({
       id: `pending:${p.name}`,
       name: p.name,
+      originId: boardOrigin(ctx.response),
       cycleStart: p.startDay,
       due: p.endDay,
     }))
@@ -1723,7 +1744,7 @@ class ChronicleView implements TemporalView {
       .filter(Boolean)
       .join(' · ')
     if (!text) throw new Error('nothing to inscribe')
-    const origin = ctx.response.remoteScope?.originId?.replace(/^remote-/, '') ?? 'local'
+    const origin = shuttleOrigin(band.originId)
     const res = await fetch(`${SHUTTLE_BASE}/api/v1/felt-edit`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1836,8 +1857,11 @@ class ChronicleView implements TemporalView {
         this.draft = null
         bandEl.classList.remove('chr-band-resizing')
         const dropped = edge === 'start' ? fromDay : toDay
-        const origin = edge === 'start' ? originStart : originEnd
-        if (dropped !== origin) void this.writeCycleEdge(band.id, edge, dropped, ctx)
+        // `originalDay`, not `origin` — this file now uses that word for the
+        // daemon a write routes to, and one of them silently meaning "the day
+        // the edge started on" is a trap for the next reader.
+        const originalDay = edge === 'start' ? originStart : originEnd
+        if (dropped !== originalDay) void this.writeCycleEdge(band, edge, dropped, ctx)
       }
       document.addEventListener('mousemove', onMove)
       document.addEventListener('mouseup', onUp)
@@ -1852,17 +1876,20 @@ class ChronicleView implements TemporalView {
   /** One `felt-edit` per dropped edge. `start:` is opaque frontmatter and rides
    *  `set`; `due` is felt-native and has its own field on the endpoint. */
   private async writeCycleEdge(
-    id: string,
+    band: CycleBand,
     edge: 'start' | 'due',
     day: string,
     ctx: ViewContext,
   ): Promise<void> {
+    const id = band.id
     const previous = this.cycleEdits.get(id)
     this.cycleEdits.set(id, { ...previous, [edge]: day })
     this.signature = ''
     if (this.ctx) void this.load(this.ctx)
 
-    const origin = ctx.response.remoteScope?.originId?.replace(/^remote-/, '') ?? 'local'
+    // The CARD's origin, not the board's: a remote-owned cycle has to be
+    // written where it lives, and same-host the two happen to agree.
+    const origin = shuttleOrigin(band.originId)
     const payload =
       edge === 'start'
         ? { fiber_id: id, origin, set: { start: day } }
@@ -2089,7 +2116,9 @@ class ChronicleView implements TemporalView {
       void this.load(this.ctx)
     }
 
-    const origin = ctx.response.remoteScope?.originId?.replace(/^remote-/, '') ?? 'local'
+    // No card exists yet, so this is the board's own scope rather than a
+    // fiber's — the same resolution the capture forms use.
+    const origin = boardOrigin(ctx.response)
     const slug =
       name
         .toLowerCase()

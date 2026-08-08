@@ -92,15 +92,39 @@ export function buildFileViewer(
   iframe.className = 'kbn-fileview-frame'
   iframe.src = src
   iframe.title = basenameOf(fullPath)
+
+  /** Show the failure, whether or not `load` already lifted the veil. */
+  const failed = (detail: string): void => {
+    veil.classList.add('kbn-fileview-loading-error')
+    veil.textContent = `Couldn't load ${basenameOf(fullPath)} — ${detail}`
+    if (!veil.isConnected) wrap.append(veil)
+  }
+
   iframe.addEventListener('load', () => {
+    // The 404 document loads too, and it loads AFTER the probe has usually
+    // answered. Lifting the veil unconditionally here would erase the error the
+    // probe just wrote — which is the original blank frame, reintroduced from
+    // the other direction. Only a frame nobody has faulted gets revealed.
+    if (veil.classList.contains('kbn-fileview-loading-error')) return
     veil.remove()
     prepareIframeExternalLinks(iframe)
     onFrameLoad?.(iframe)
   })
-  iframe.addEventListener('error', () => {
-    veil.classList.add('kbn-fileview-loading-error')
-    veil.textContent = `Couldn't load ${basenameOf(fullPath)}`
-  })
+  // `error` on an iframe fires for NETWORK failures only. An HTTP 404 is a
+  // perfectly successful navigation to an error document, so `load` fires, the
+  // veil lifts, and the reader is left looking at an empty frame with nothing
+  // saying why. That was the whole defect: the file viewer's one failure mode
+  // rendered as a blank rectangle.
+  iframe.addEventListener('error', () => failed('the daemon could not be reached'))
+
+  // So ASK. A HEAD settles what the iframe's own events cannot tell us apart.
+  // Ordering is not a race: `failed` re-attaches the veil if `load` already
+  // removed it, so whichever resolves second still tells the truth.
+  void fetch(src, { method: 'HEAD' })
+    .then((res) => {
+      if (!res.ok) failed(`${res.status}${res.statusText ? ` ${res.statusText}` : ''}`)
+    })
+    .catch(() => failed('the daemon could not be reached'))
 
   wrap.append(iframe, veil)
   return wrap

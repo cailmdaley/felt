@@ -15,41 +15,22 @@ import './DayView.js'
 import './WeekView.js'
 
 export {
-  clearViews,
   collectCards,
   getView,
-  isBlockingDialog,
-  isTypingTarget,
   keystrokeIsSpokenFor,
   listViews,
   normalizeFocusDate,
-  registerView,
   viewFallbackKind,
-  BLOCKING_DIALOG_SELECTOR,
   type BoardViewId,
   type TemporalView,
   type ViewContext,
-  type ViewFallbackKind,
-  type ViewId,
 } from './ViewRegistry.js'
 export {
-  buildSessionIndex,
   createTemporalFetchers,
-  parseSessions,
-  TEMPORAL_TTL_MS,
   type ActivityBucket,
   type ActivityResult,
-  type NarrationCommit,
   type NarrationResult,
-  type SessionIndex,
-  type SessionPairing,
   type SessionRecord,
-  type SessionsResult,
   type TemporalFetchers,
 } from './TemporalData.js'
-export {
-  createViewEmptyState,
-  createViewFallbackPage,
-  createViewPage,
-  type ViewPage,
-} from './ViewPage.js'
+export { createViewFallbackPage } from './ViewPage.js'

@@ -736,7 +736,11 @@ export class FiberDetailModal {
       // (carried on the card from the composite feed) and route the bytes
       // through `/file`. A fiber whose dir didn't resolve degrades to embed
       // placeholders + un-rewritten images, but the prose still reads.
-      const bodyOpts = { basePath: card.fiberDir, originId: card.originId }
+      const bodyOpts = {
+        basePath: card.fiberDir,
+        originId: card.originId,
+        projectDir: card.shuttleProjectDir,
+      }
       prose.innerHTML = lede + renderMarkdown(renderEmbeds(body, bodyOpts), bodyOpts)
       this.autosizeEmbeds(prose)
       this.installBodyFileLinks(prose, card)
@@ -787,12 +791,49 @@ export class FiberDetailModal {
         if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return
         e.preventDefault()
         e.stopPropagation()
+        const target = link.dataset.filePath ?? fullPath
         this.activateFile(
-          { fullPath, basename: basenameOf(fullPath), timestamp: Date.now() },
+          { fullPath: target, basename: basenameOf(target), timestamp: Date.now() },
           card,
         )
       })
+      void this.settleLinkAnchor(link)
     }
+  }
+
+  /**
+   * Decide which of a body link's two candidate directories actually holds the
+   * file, by asking.
+   *
+   * A relative link is ambiguous: `[AGENTS.md](AGENTS.md)` is either a file
+   * beside the fiber or a file at the root of the repo the worker was dispatched
+   * into. Both are plausible and the markdown does not say. So the renderer
+   * emits both and this probes the primary with a HEAD; on anything but a
+   * success it swaps the anchor over to the project-dir candidate. One extra
+   * HEAD per relative link, and only for links that carry an alternate.
+   *
+   * Deliberately not a race: the swap only happens when the FIRST candidate is
+   * confirmed missing, so a slow probe can never overwrite a good anchor. On a
+   * network failure the primary stands — an unverified guess beats swapping to
+   * a second unverified guess.
+   */
+  private async settleLinkAnchor(link: HTMLAnchorElement): Promise<void> {
+    const altUrl = link.dataset.fileUrlAlt
+    const altPath = link.dataset.filePathAlt
+    if (!altUrl || !altPath) return
+    const primary = link.getAttribute('href')
+    if (!primary) return
+    try {
+      // Relative, like the images the same renderer emits — the bundle is served
+      // by the daemon, so a relative `/api/v1/file` reaches it without CORS.
+      const res = await fetch(primary, { method: 'HEAD' })
+      if (res.ok) return
+    } catch {
+      return
+    }
+    link.setAttribute('href', altUrl)
+    link.dataset.filePath = altPath
+    link.title = `Open ${basenameOf(altPath)} in the viewer`
   }
 
   /**
@@ -1290,6 +1331,9 @@ export class FiberDetailModal {
     const originalTz = card.shuttleTz ?? 'Europe/Paris'
 
     let selectedKind: 'oneshot' | 'standing' = originalKind
+    /** Set on mousedown over the One-shot segment while a promotion is staged
+     *  but uncommitted, so the cron field's blur doesn't commit on the way out. */
+    let abandoningPromotion = false
     let selectedSchedule = originalSchedule
     let selectedTz = originalTz
 
@@ -1668,9 +1712,22 @@ export class FiberDetailModal {
       })
     }
     for (const btn of kindSegmented.querySelectorAll<HTMLButtonElement>('button')) {
+      // Backing OUT of an uncommitted promotion must write nothing, and the
+      // hazard is not the click — it's the BLUR the click causes. Toggling to
+      // Standing focuses the cron field; clicking One-shot blurs it, and blur is
+      // what commits the schedule. Left alone, `mousedown → blur → click` fired
+      // the promotion with the SEEDED cron a fraction of a second before the
+      // click that meant "never mind". mousedown runs before blur, so this is
+      // where the intent is knowable.
+      btn.addEventListener('mousedown', () => {
+        if (btn.dataset.kind === 'oneshot' && baseline.kind !== 'standing') {
+          abandoningPromotion = true
+        }
+      })
       btn.addEventListener('click', () => {
         const value = btn.dataset.kind as 'oneshot' | 'standing' | undefined
         if (value) commitKind(value)
+        abandoningPromotion = false
       })
     }
 
@@ -1683,6 +1740,14 @@ export class FiberDetailModal {
     // than `baseline.kind` (what the wire currently says). Confirming the cron
     // IS the act of promoting; until then the toggle is just a revealed form.
     const commitScheduleTz = (): void => {
+      // The user is on their way out of an uncommitted promotion (see the
+      // mousedown guard on the kind control) — this blur is the side effect of
+      // backing out, not a confirmation.
+      if (abandoningPromotion) {
+        abandoningPromotion = false
+        statusEl.textContent = ''
+        return
+      }
       if (selectedKind !== 'standing') return
       const newSchedule = scheduleInput.value.trim()
       const newTz = tzInput.value.trim() || 'UTC'
