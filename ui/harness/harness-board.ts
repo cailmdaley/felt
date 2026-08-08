@@ -15,10 +15,21 @@
  * `buildKanbanResponseFromComposite`) so what you see is the real DOM/CSS the
  * daemon would serve — only the data is mock.
  *
+ * The temporal views (chronicle / day / week, hotkeys 2-4) are exercised the
+ * same way: `MOCK_TEMPORAL` below injects deterministic activity + narration
+ * in place of the daemon routes, so the views render offline with no `/api/v1/
+ * activity` endpoint in existence.
+ *
  * Distinct from harness/harness.ts (slice C), which mounts FiberDetailModal.
  * Build: `npx vite build -c vite.harness-board.config.ts` → harness-board-dist/.
  */
 import { KanbanModal } from '../src/board/KanbanModal.js'
+import type {
+  ActivityBucket,
+  ActivityResult,
+  NarrationResult,
+  TemporalFetchers,
+} from '../src/board/views/index.js'
 
 // ── Mock composite feed ──────────────────────────────────────────────────────
 // Shaped exactly like the daemon's `GET /api/v1/fibers/composite` body, so
@@ -167,6 +178,113 @@ const MOCK_FEED = {
   },
 }
 
+// ── Mock temporal read plane ─────────────────────────────────────────────────
+//
+// The daemon has no /api/v1/activity or /api/v1/narration route yet, and the
+// real fetchers answer a 404 with an empty result — which would leave every
+// temporal view blank in the harness, verifying nothing. So the harness injects
+// a `TemporalFetchers` pair directly instead of stubbing the routes.
+//
+// SEEDED, NOT RANDOM: bucket presence, count, session and cwd are all derived
+// from the bucket's index through mulberry32, so two loads of the same window
+// produce byte-identical data and a screenshot diff means a real change. The
+// window itself is now-relative because the mock feed is (its fibers are dated
+// off `now`), so the views cover the same three days the board's cards do.
+
+const FEED_SPAN_MS = 3 * 86_400_000
+const BUCKET_MS = 5 * 60_000
+
+/** mulberry32 — a small deterministic PRNG. Same seed, same stream. */
+function seeded(seed: number): () => number {
+  let a = seed >>> 0
+  return () => {
+    a = (a + 0x6D2B79F5) >>> 0
+    let t = Math.imul(a ^ (a >>> 15), 1 | a)
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+}
+
+const MOCK_CWDS = [
+  '/home/ada/loom',
+  '/home/ada/dev/felt',
+  '/home/ada/work/spt3g_papers',
+  '/home/ada/work/euclid',
+]
+const MOCK_SESSIONS = ['bmodes-2d-shuttle', 'morning-post-shuttle', 'euclid-triage-shuttle']
+const MOCK_KINDS: ActivityBucket['k'][] = ['agent', 'attention', 'notify']
+
+/**
+ * Generate the activity buckets covering [fromMs, toMs). Each 5-minute slot is
+ * seeded on its absolute index so the same slot always yields the same bucket
+ * regardless of the requested window — a view asking for one day and a view
+ * asking for three agree on their overlap. Nights (00:00-07:00 local) are
+ * sparse and daytime is dense, so the day/week views have a shape to draw.
+ */
+function mockActivity(fromMs: number, toMs: number): ActivityResult {
+  const buckets: ActivityBucket[] = []
+  const first = Math.floor(fromMs / BUCKET_MS)
+  const last = Math.floor(toMs / BUCKET_MS)
+  for (let index = first; index < last; index += 1) {
+    const m = index * BUCKET_MS
+    const rng = seeded(index)
+    const hour = new Date(m).getHours()
+    const density = hour < 7 ? 0.06 : hour < 10 ? 0.4 : hour < 19 ? 0.72 : 0.3
+    if (rng() > density) continue
+    const kind = MOCK_KINDS[Math.floor(rng() * MOCK_KINDS.length)]
+    buckets.push({
+      m,
+      s: MOCK_SESSIONS[Math.floor(rng() * MOCK_SESSIONS.length)],
+      cwd: MOCK_CWDS[Math.floor(rng() * MOCK_CWDS.length)],
+      k: kind,
+      // `attention` and `notify` are single events; agent work comes in runs.
+      n: kind === 'agent' ? 1 + Math.floor(rng() * 24) : 1,
+    })
+  }
+  return { host: 'ada-workstation', from_ms: fromMs, to_ms: toMs, buckets }
+}
+
+const MOCK_SUBJECTS = [
+  'board: fold the masthead actions into the column heads',
+  'kanban: drag onto a day column writes due:',
+  'views: hang the temporal pages off a hotkey row',
+  'timeline: adaptive strip height from the tallest visible day',
+  'daemon: owner-route the felt-edit write plane',
+  'stash: cluster on the containment path first token',
+  'detail: sent-files strip opens in the viewer',
+  'poller: back off a stale remote instead of retrying hot',
+]
+
+/** Commits over the window: roughly six a day, deterministic per day index. */
+function mockNarration(fromISO: string, toISO: string): NarrationResult {
+  const from = Date.parse(fromISO)
+  const to = Date.parse(toISO)
+  if (!Number.isFinite(from) || !Number.isFinite(to)) return { commits: [] }
+  const commits: NarrationResult['commits'] = []
+  const firstDay = Math.floor(from / 86_400_000)
+  const lastDay = Math.floor(to / 86_400_000)
+  for (let day = firstDay; day <= lastDay; day += 1) {
+    const rng = seeded(day * 7919)
+    const count = 4 + Math.floor(rng() * 5)
+    for (let i = 0; i < count; i += 1) {
+      // 09:00-21:00 local-ish, spread across the day and sorted by construction.
+      const ms = day * 86_400_000 + Math.floor((9 + (12 * (i + rng())) / count) * 3_600_000)
+      if (ms < from || ms > to) continue
+      commits.push({
+        iso: new Date(ms).toISOString(),
+        subject: MOCK_SUBJECTS[Math.floor(rng() * MOCK_SUBJECTS.length)],
+      })
+    }
+  }
+  commits.sort((a, b) => a.iso.localeCompare(b.iso))
+  return { commits }
+}
+
+const MOCK_TEMPORAL: TemporalFetchers = {
+  activity: (fromMs, toMs) => Promise.resolve(mockActivity(fromMs, toMs)),
+  narration: (fromISO, toISO) => Promise.resolve(mockNarration(fromISO, toISO)),
+}
+
 // ── Fetch stub: stand in for the daemon ──────────────────────────────────────
 const realFetch = window.fetch.bind(window)
 window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -191,6 +309,7 @@ try {
     onStashClick: () => { window.console.log('stash click') },
     onNewIdeaClick: () => { window.console.log('new-idea click') },
     shuttleBase: '',
+    temporalFetchers: MOCK_TEMPORAL,
   })
 
   const host = document.createElement('div')
@@ -198,8 +317,17 @@ try {
   document.body.append(host)
   modal.mount(host)
 
-  // expose for agent-browser-driven interaction
-  ;(window as unknown as { __harness: unknown }).__harness = { modal, MOCK_FEED }
+  // expose for agent-browser-driven interaction. `feedSpanMs` is the window the
+  // mock activity/narration cover, so a driving script can ask for exactly the
+  // range the board's cards live in.
+  ;(window as unknown as { __harness: unknown }).__harness = {
+    modal,
+    MOCK_FEED,
+    temporal: MOCK_TEMPORAL,
+    feedSpanMs: FEED_SPAN_MS,
+    feedFromMs: now - FEED_SPAN_MS,
+    feedToMs: now,
+  }
 } catch (err) {
   const pre = document.createElement('pre')
   pre.style.cssText = 'position:fixed; inset:20px; white-space:pre-wrap; color:#A2362A; font:13px monospace; z-index:99999;'

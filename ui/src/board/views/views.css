@@ -1,0 +1,102 @@
+/* Temporal-view scaffold — the shared page every non-Desk view is built on.
+   Per-view styles arrive in their own files alongside their views; this file
+   holds only what all four pages agree on: the host box, the sheet, the
+   illuminated head, and the empty state.
+
+   Palette is KanbanModal.css's — iron-gall #1B1611, muted #7A6F5C, faded
+   #A89B83, ochre #C49333, cinnabar #BC4538 — and the same 0.5px hairlines. */
+
+/* The full-width slot the active view mounts into. Sits where the Desk
+   surfaces would be, as a sibling of `.kbn-desk` inside `.kbn-body`, and
+   inherits the body's own padding. Scrolls itself so a long view never
+   fights the body's horizontal drag-scroll affordances. */
+.kbn-view-host {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* One sheet. Bordered like `.kbn-section-timeline` so the four views read as
+   the same substrate the Desk's sections are laid on. */
+.kbn-view-page {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border: 1px solid rgba(27, 22, 17, 0.10);
+  background: rgba(237, 226, 206, 0.45);
+  border-radius: 3px;
+  padding: 8px 14px 14px;
+}
+
+.kbn-view-titlerow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 6px;
+  border-bottom: 0.5px solid rgba(122, 111, 92, 0.22);
+  margin-bottom: 10px;
+}
+
+/* Same hand as `.kbn-col-title` — EB Garamond small caps carrying the layered
+   F2/F1 dropcap on its leading letter — a size down, because a page head sits
+   above a whole view rather than a single lane. */
+.kbn-view-title {
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-size: 28px;
+  line-height: 1.0;
+  font-weight: 500;
+  font-variant-caps: all-small-caps;
+  font-feature-settings: "smcp", "c2sc";
+  letter-spacing: 0.06em;
+  text-transform: none;
+  color: #1B1611;
+  margin: 0;
+}
+.kbn-view-title .kbn-cap {
+  font-size: 0.73em;
+  vertical-align: -0.08em;
+  margin-right: 0.04em;
+  line-height: 0.82;
+}
+
+.kbn-view-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Empty page — `.kbn-empty`'s marginal line, centered in the sheet rather
+   than sitting at the top of a column list. */
+.kbn-view-empty {
+  /* A block, not a flex container: the fleurons are ::before/::after inline
+     content, and a flex box would turn them into flex items and eat the
+     spacing that sets them off from the rule. `margin: auto` inside the
+     flex-column body centers the line on both axes. */
+  margin: auto;
+  text-align: center;
+  color: #A89B83;
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-style: italic;
+  font-size: 14px;
+  letter-spacing: 0.01em;
+  padding: 40px 8px;
+}
+.kbn-view-empty::before {
+  content: '✶  ';
+  color: #C49333;
+  opacity: 0.55;
+  font-style: normal;
+}
+.kbn-view-empty::after {
+  content: '  ✶';
+  color: #C49333;
+  opacity: 0.55;
+  font-style: normal;
+}

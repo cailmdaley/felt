@@ -47,6 +47,16 @@ import { sameCivilDue } from './civilDay.js'
 import { buildCityResolver, type CityFeltRoot } from './KanbanCityResolver.js'
 import { shouldRunVisiblePoll } from '../runtime/PageAttention'
 import { fetchWithBootPrefetch } from '../runtime/bootPrefetch'
+import {
+  collectCards,
+  createTemporalFetchers,
+  getView,
+  listViews,
+  type BoardViewId,
+  type TemporalFetchers,
+  type TemporalView,
+  type ViewContext,
+} from './views/index.js'
 
 export { FiberDetailModal } from './FiberDetailModal.js'
 export { dispatchIneligibleReason } from './KanbanModalShared.js'
@@ -109,6 +119,14 @@ interface KanbanModalOptions {
    *  pushes) to build the browser `CityResolver` that attributes composite-feed
    *  rows to cities. Omit in read-only/test contexts (rows go unattributed). */
   getCityFeltRoots?: () => CityFeltRoot[]
+  /**
+   * Override the temporal views' read plane — the `activity` / `narration`
+   * fetchers a {@link ViewContext} carries. Defaults to
+   * {@link createTemporalFetchers} over `shuttleBase`. The offline harness
+   * injects deterministic mocks here so the views are exercisable with no
+   * daemon (see harness/harness-board.ts).
+   */
+  temporalFetchers?: TemporalFetchers
 }
 
 /**
@@ -120,6 +138,30 @@ interface KanbanModalOptions {
 interface KanbanCityScope {
   cityId: string
   cityName: string
+}
+
+/** The Desk's own hotkey. The other three come from the view registry, so a
+ *  view names its own key and nothing here has to agree with it twice. */
+const DESK_HOTKEY = '1'
+
+/**
+ * True when a bare keystroke belongs to something other than the board: a text
+ * field has focus, or a layer sits over the board. The layers are a Radix
+ * dialog (Stash / Capture — Radix stamps `data-state="open"` on its content;
+ * the board's own `role="dialog"` container carries no such attribute) and the
+ * vanilla fiber-detail panel, which floats on document.body rather than inside
+ * the modal.
+ */
+function keystrokeIsSpokenFor(): boolean {
+  const active = document.activeElement as HTMLElement | null
+  if (active) {
+    const tag = active.tagName
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true
+    if (active.isContentEditable) return true
+  }
+  if (document.querySelector('[role="dialog"][data-state="open"]')) return true
+  if (document.querySelector('.kbn-detail-overlay')) return true
+  return false
 }
 
 interface KanbanScrollSnapshot {
@@ -141,10 +183,29 @@ export class KanbanModal {
   private readonly getCityFeltRoots?: () => CityFeltRoot[]
   private readonly handleDocumentKeyDown = (e: KeyboardEvent): void => this.handleKanbanKeyDown(e)
 
+  private readonly temporal: TemporalFetchers
+
   private container: HTMLDivElement | null = null
   private body: HTMLDivElement | null = null
   private liveEl: HTMLDivElement | null = null
   private bannerEl: HTMLDivElement | null = null
+  /** The view tab strip — persistent chrome, built once in assembleChrome. */
+  private tabsEl: HTMLDivElement | null = null
+  /**
+   * Wrapper around the four Desk surfaces (ribbon + Now + Pinned + Stash).
+   * `display: contents` in CSS, so it adds a toggle handle WITHOUT adding a
+   * layout box — the sections keep participating in `.kbn-body`'s flex column
+   * exactly as they did when they were its direct children. Switching to a
+   * temporal view sets `display: none` here rather than rebuilding the Desk,
+   * so scroll positions, drag state and column line-clamps survive a round
+   * trip through another view.
+   */
+  private deskEl: HTMLDivElement | null = null
+  /** Full-width slot the active temporal view mounts into. Hidden on Desk. */
+  private viewHostEl: HTMLDivElement | null = null
+  private activeViewId: BoardViewId = 'desk'
+  /** The mounted view, or null on Desk / before the first response lands. */
+  private activeView: TemporalView | null = null
   private inflightFetchToken = 0
   /**
    * Backing field for `dragSourceId`. Mutate via the property accessor below
@@ -202,6 +263,7 @@ export class KanbanModal {
     this.onNewIdeaClick = options.onNewIdeaClick
     this.shuttleBase = options.shuttleBase ?? `http://${window.location.hostname}:4000`
     this.getCityFeltRoots = options.getCityFeltRoots
+    this.temporal = options.temporalFetchers ?? createTemporalFetchers(this.shuttleBase)
     this.detailModal = new FiberDetailModal(
       this.shuttleBase,
       this.onOpenFiber,
@@ -285,6 +347,10 @@ export class KanbanModal {
     // its presence makes the workspace's Escape handler yield, so the orphan
     // would eat the first Escape too).
     this.detailModal?.close()
+    // A mounted temporal view may hold timers/listeners of its own — give it
+    // its unmount() before the container (and its host) go away.
+    this.activeView?.unmount()
+    this.activeView = null
     document.removeEventListener('keydown', this.handleDocumentKeyDown, true)
     window.removeEventListener('resize', this.handleResize)
     if (this.resizeRaf !== null) {
@@ -351,7 +417,139 @@ export class KanbanModal {
     this.bannerEl.setAttribute('role', 'alert')
     this.bannerEl.style.display = 'none'
 
+    // The body's three permanent children: the view tab strip, the Desk
+    // wrapper (display: contents — see the field docstring), and the slot a
+    // temporal view mounts into. `render()` only ever rebuilds inside deskEl.
+    this.tabsEl = this.buildViewTabs()
+    this.deskEl = document.createElement('div')
+    this.deskEl.className = 'kbn-desk'
+    this.viewHostEl = document.createElement('div')
+    this.viewHostEl.className = 'kbn-view-host'
+    this.body.append(this.tabsEl, this.deskEl, this.viewHostEl)
+    this.syncViewChrome()
+
     this.container.append(this.bannerEl, this.body, this.liveEl)
+  }
+
+  // ── View switching ──────────────────────────────────────────────────────────
+
+  /**
+   * The tab strip: `desk` plus one tab per registered view, right-aligned on
+   * its own hairline row above the Timeline ribbon. Built once — the registry
+   * is populated at import time, so the strip never needs to re-render; only
+   * the selected tab's classes change.
+   */
+  private buildViewTabs(): HTMLDivElement {
+    const strip = document.createElement('div')
+    strip.className = 'kbn-viewtabs'
+    strip.setAttribute('role', 'tablist')
+    strip.setAttribute('aria-label', 'Board views')
+
+    const specs: Array<{ id: BoardViewId; label: string; hotkey: string }> = [
+      { id: 'desk', label: 'desk', hotkey: DESK_HOTKEY },
+      ...listViews().map((view) => ({
+        id: view.id as BoardViewId,
+        label: view.title.toLowerCase(),
+        hotkey: view.hotkey,
+      })),
+    ]
+
+    for (const spec of specs) {
+      const tab = document.createElement('button')
+      tab.type = 'button'
+      tab.className = 'kbn-viewtab'
+      tab.dataset.view = spec.id
+      tab.textContent = spec.label
+      tab.setAttribute('role', 'tab')
+      tab.title = `${spec.label} (${spec.hotkey})`
+      tab.addEventListener('click', () => this.setView(spec.id))
+      strip.append(tab)
+    }
+    return strip
+  }
+
+  /**
+   * Switch the page. Idempotent — re-selecting the active view is a no-op, so
+   * a stray click or repeated hotkey never tears a view down and back up.
+   */
+  private setView(id: BoardViewId): void {
+    if (id === this.activeViewId) return
+    this.activeView?.unmount()
+    this.activeView = null
+    if (this.viewHostEl) this.viewHostEl.innerHTML = ''
+    this.activeViewId = id
+    this.syncViewChrome()
+    this.mountOrRefreshActiveView()
+  }
+
+  /** Paint the selected tab and show exactly one of Desk / view host. */
+  private syncViewChrome(): void {
+    const onDesk = this.activeViewId === 'desk'
+    if (this.deskEl) this.deskEl.style.display = onDesk ? '' : 'none'
+    if (this.viewHostEl) this.viewHostEl.style.display = onDesk ? 'none' : ''
+    for (const tab of this.tabsEl?.querySelectorAll<HTMLElement>('.kbn-viewtab') ?? []) {
+      const selected = tab.dataset.view === this.activeViewId
+      tab.classList.toggle('kbn-viewtab-active', selected)
+      tab.setAttribute('aria-selected', String(selected))
+    }
+  }
+
+  /**
+   * Drive the active view's lifecycle from board data. Mounts on the first
+   * call that has a response to give it (a view selected before the first
+   * fetch lands waits here, not in a half-built state), and refreshes on every
+   * call after that — including polls the Desk dedups away, since a view's
+   * content also moves with the clock.
+   */
+  private mountOrRefreshActiveView(): void {
+    if (this.activeViewId === 'desk' || !this.viewHostEl) return
+    const view = getView(this.activeViewId)
+    if (!view) return
+    const ctx = this.viewContext()
+    if (!ctx) return
+    if (this.activeView !== view) {
+      this.activeView = view
+      view.mount(this.viewHostEl, ctx)
+    } else {
+      view.refresh(ctx)
+    }
+  }
+
+  /** The per-call context handed to a view. Null until the first response. */
+  private viewContext(): ViewContext | null {
+    const response = this.lastResponse
+    if (!response) return null
+    const cards = collectCards(response)
+    return {
+      response,
+      cards,
+      activity: (fromMs, toMs) => this.temporal.activity(fromMs, toMs),
+      narration: (fromISO, toISO) => this.temporal.narration(fromISO, toISO),
+      openCard: (cardId) => {
+        const card = cards.find((c) => c.id === cardId)
+        if (card) this.detailModal?.open(card, this.cityScope?.cityId)
+      },
+      requestRefresh: () => { void this.fetchAndRender() },
+    }
+  }
+
+  /**
+   * `1`–`4` switch views. Deliberately narrow: a bare digit only, so
+   * `Cmd/Ctrl+1` stays the browser's tab switch, and only when the keystroke
+   * is not going somewhere it matters — a focused text field, or a Radix
+   * dialog / fiber-detail panel layered over the board. Returns true when the
+   * key was consumed.
+   */
+  private handleViewHotkey(e: KeyboardEvent): boolean {
+    if (e.metaKey || e.ctrlKey || e.altKey) return false
+    const match = listViews().find((v) => v.hotkey === e.key)
+    if (!match && e.key !== DESK_HOTKEY) return false
+    if (keystrokeIsSpokenFor()) return false
+    const id: BoardViewId = match ? match.id : 'desk'
+    e.preventDefault()
+    e.stopPropagation()
+    this.setView(id)
+    return true
   }
 
   /** Reset all field state to "not mounted." DOM removal is `unmount()`'s
@@ -361,6 +559,11 @@ export class KanbanModal {
     this.body = null
     this.liveEl = null
     this.bannerEl = null
+    this.tabsEl = null
+    this.deskEl = null
+    this.viewHostEl = null
+    this.activeView = null
+    this.activeViewId = 'desk'
     this.dragSourceId = null
     this.hasClaimedInitialFocus = false
     this.stopDragAutoScroll()
@@ -940,7 +1143,13 @@ export class KanbanModal {
       const sig = this.computeResponseSignature(data)
       const wasFirstRender = this.lastResponse === null
       this.lastResponse = data
-      if (!wasFirstRender && sig === this.lastResponseSig) return
+      if (!wasFirstRender && sig === this.lastResponseSig) {
+        // The Desk skips an identical-payload re-render, but a temporal view
+        // still gets its poll: its content moves with the clock (and with
+        // activity/narration), not only with the fiber feed.
+        this.mountOrRefreshActiveView()
+        return
+      }
       this.lastResponseSig = sig
       this.render(data)
     } catch (err: unknown) {
@@ -979,16 +1188,18 @@ export class KanbanModal {
   }
 
   private renderError(msg: string): void {
-    if (!this.body) return
-    this.body.innerHTML = ''
+    // Into the Desk, not the body — the tab strip stays reachable so a failed
+    // load doesn't strand the user on a page they can't leave.
+    if (!this.deskEl) return
+    this.deskEl.innerHTML = ''
     const errEl = document.createElement('div')
     errEl.className = 'kbn-error'
     errEl.textContent = `Failed to load kanban: ${msg}`
-    this.body.append(errEl)
+    this.deskEl.append(errEl)
   }
 
   private render(data: KanbanResponse): void {
-    if (!this.body) return
+    if (!this.body || !this.deskEl) return
 
     const scrollSnapshot = this.captureScrollSnapshot()
     const { now, timeline, timelineWindow, stash, pinned, staleness } = data
@@ -1002,19 +1213,19 @@ export class KanbanModal {
     this.timelineAdaptiveCleanup?.()
     this.timelineAdaptiveCleanup = null
 
-    this.body.innerHTML = ''
+    this.deskEl.innerHTML = ''
     this.body.classList.remove('kbn-body-zoomed')
 
     // "Sky over board" order: the Timeline horizon strip sits at the top of
     // the page (time as an illuminated strip you drag work *up* into), then the
     // Now board, then the pinned-role launcher band, then Stash. Pinned sits
     // between the board and Stash — a slim launcher shelf under the work.
-    this.body.append(this.surfaces.renderTimelineSection(timeline, now, timelineWindow, staleness))
-    this.body.append(this.surfaces.renderNowSection(now, staleness))
+    this.deskEl.append(this.surfaces.renderTimelineSection(timeline, now, timelineWindow, staleness))
+    this.deskEl.append(this.surfaces.renderNowSection(now, staleness))
     // The Pinned strip always renders (a permanent park/drop target) — see
     // renderPinnedSection; no null guard needed.
-    this.body.append(this.surfaces.renderPinnedSection(pinned, staleness))
-    this.body.append(this.surfaces.renderStashSection(stash, staleness))
+    this.deskEl.append(this.surfaces.renderPinnedSection(pinned, staleness))
+    this.deskEl.append(this.surfaces.renderStashSection(stash, staleness))
 
     this.restoreScrollSnapshot(scrollSnapshot)
     this.claimInitialFocus()
@@ -1033,6 +1244,9 @@ export class KanbanModal {
       window.requestAnimationFrame(() => this.surfaces.scrollTimelineToToday(this.body, this.timelinePastDays))
     }
     this.lastResponse = data
+    // A temporal view is fed by the same data the Desk just rebuilt from —
+    // including optimistic re-renders, which never reach fetchAndRender.
+    this.mountOrRefreshActiveView()
   }
 
   /**
@@ -1132,6 +1346,10 @@ export class KanbanModal {
 
   private claimInitialFocus(): void {
     if (this.hasClaimedInitialFocus || !this.body) return
+    // Nothing to claim while a temporal view is up — the Desk's column heads
+    // are hidden, so focusing one would be a silent no-op that also burns the
+    // one-shot flag.
+    if (this.activeViewId !== 'desk') return
 
     this.hasClaimedInitialFocus = true
     window.requestAnimationFrame(() => {
@@ -1364,7 +1582,11 @@ export class KanbanModal {
   }
 
   private handleKanbanKeyDown(e: KeyboardEvent): void {
-    if (!this.body || e.key !== 'Tab') return
+    if (!this.body) return
+    if (this.handleViewHotkey(e)) return
+    // Column Tab-nav is a Desk gesture — a temporal view owns its own focus
+    // order, and the Desk's column heads are display:none behind it anyway.
+    if (e.key !== 'Tab' || this.activeViewId !== 'desk') return
 
     const active = document.activeElement as HTMLElement | null
     const heads = Array.from(this.body.querySelectorAll<HTMLElement>('.kbn-col-head'))

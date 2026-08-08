@@ -166,6 +166,64 @@
   -webkit-overflow-scrolling: touch;
   min-height: 0;
 }
+/* ── View tabs ────────────────────────────────────────────────────────
+   Four pages behind one hairline row: desk (the kanban below) plus the
+   temporal views. Right-aligned above the Timeline ribbon, minimal
+   chrome — no pills, no boxes. The active tab is iron-gall ink over a
+   cinnabar underline; the rest sit faded, the way a running head sits
+   quieter than the text it names. */
+.kbn-viewtabs {
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: flex-end;
+  align-items: baseline;
+  gap: 15px;
+  padding: 0 2px 4px;
+  border-bottom: 0.5px solid rgba(122, 111, 92, 0.22);
+  /* Pulls the ribbon up under the row — `.kbn-body`'s 10px gap is spacing
+     between *sections*, and the tabs are a label for what follows, not a
+     section of their own. */
+  margin-bottom: -4px;
+}
+.kbn-viewtab {
+  appearance: none;
+  background: none;
+  border: 0;
+  border-bottom: 1.5px solid transparent;
+  border-radius: 0;
+  margin: 0;
+  padding: 0 1px 2px;
+  cursor: pointer;
+  font-family: var(--font-mono, 'IBM Plex Mono', monospace);
+  font-size: 10px;
+  line-height: 1.2;
+  font-weight: 400;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #A89B83;
+  transition: color 120ms ease, border-color 120ms ease;
+}
+.kbn-viewtab:hover {
+  color: #7A6F5C;
+}
+.kbn-viewtab:focus-visible {
+  outline: 1px dashed rgba(188, 69, 56, 0.55);
+  outline-offset: 2px;
+}
+.kbn-viewtab-active {
+  color: #1B1611;
+  border-bottom-color: #BC4538;
+}
+
+/* The Desk wrapper is a toggle handle, not a box: `display: contents` keeps
+   the four surfaces as direct flex items of `.kbn-body`, so their gaps,
+   `flex: 1` and percentage heights resolve exactly as they did before the
+   wrapper existed. Switching to a temporal view sets `display: none` here
+   inline, which hides the subtree without rebuilding it. */
+.kbn-desk {
+  display: contents;
+}
+
 /* ── Section layout: Timeline → Pinned → Now → Stash ───────────────── */
 /* Section heads retired (the layout reads on its own); the collapse-toggle
    chrome retired too (the Timeline is the always-visible ribbon now, and it
