@@ -68,6 +68,12 @@ defmodule ShuttleWeb.Router do
     # events.jsonl hook stream. JSON-native, so it lives in the :api pipeline
     # (unlike /file, which serves raw bytes).
     get("/sent-files", SentFilesController, :show)
+    # The temporal view's two read planes, both HOST-scoped rather than
+    # owner-routed (see each controller): /activity buckets this host's
+    # events.jsonl per minute, /narration reads git subjects out of this
+    # host's primary felt store. A cross-host view fans out and merges.
+    get("/activity", ActivityController, :show)
+    get("/narration", NarrationController, :show)
   end
 
   # File/asset bytes by absolute path (owner-routed). Unlocks `:::{embed}` +

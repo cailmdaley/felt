@@ -1,0 +1,315 @@
+defmodule ShuttleWeb.ActivityControllerTest do
+  @moduledoc """
+  Reader + wiring for `GET /api/v1/activity` — the per-minute activity
+  histogram the temporal view polls.
+
+  The reader (`Shuttle.Activity`) is exercised against fixture `events.jsonl`
+  files covering bucket aggregation, the three-way kind mapping, window bounds,
+  nil session/cwd, malformed-line tolerance, and the mtime gate that decides
+  whether the rotated `events.jsonl.1` is read at all. The controller's tests
+  point `$SHUTTLE_EVENTS_FILE` at those fixtures and cover the 400s.
+  """
+  use ExUnit.Case
+  import Plug.Conn
+  import Phoenix.ConnTest
+
+  @endpoint ShuttleWeb.Endpoint
+
+  # An exact minute boundary (2026-02-02T02:40:00Z), so `@t0 + 59_999` is the
+  # last millisecond of the same bucket and `@t0 + 60_000` opens the next one.
+  @t0 1_770_000_000_000
+  @minute 60_000
+
+  @session "morning-post-01KTS261GJMMRDRHS2QDMEFV3K-shuttle"
+  @other_session "review-01KTCA2CY6X6P126ZMBK9686SH-shuttle"
+  @cwd "/Users/x/dev/felt"
+
+  defp event(overrides) do
+    %{
+      "id" => "sess-1-#{System.unique_integer([:positive])}",
+      "timestamp" => @t0,
+      "type" => "pre_tool_use",
+      "sessionId" => "sess-1",
+      "cwd" => @cwd,
+      "tmuxSession" => @session,
+      "harness" => "claude",
+      "originName" => "test-host"
+    }
+    |> Map.merge(overrides)
+    |> Jason.encode!()
+  end
+
+  # Write a fixture stream and return its path; cleaned up (with its rotated
+  # sibling) on exit.
+  defp write_fixture(lines) do
+    path =
+      Path.join(
+        System.tmp_dir!(),
+        "shuttle_activity_#{System.unique_integer([:positive])}.jsonl"
+      )
+
+    File.write!(path, Enum.join(lines, "\n") <> "\n")
+    on_exit(fn -> File.rm(path) && File.rm(path <> ".1") end)
+    path
+  end
+
+  # Write the rotated sibling of `path` and stamp its mtime, which is what the
+  # reader's overlap gate consults.
+  defp write_rotated(path, lines, mtime_s) do
+    File.write!(path <> ".1", Enum.join(lines, "\n") <> "\n")
+    File.touch!(path <> ".1", mtime_s)
+  end
+
+  defp buckets!(path, from_ms, to_ms) do
+    {:ok, buckets} = Shuttle.Activity.buckets(from_ms, to_ms, events_file: path)
+    buckets
+  end
+
+  describe "Shuttle.Activity.buckets/3 — aggregation" do
+    test "counts events sharing a (minute, session, cwd, kind) key into one bucket" do
+      path =
+        write_fixture([
+          event(%{"timestamp" => @t0}),
+          event(%{"timestamp" => @t0 + 1_000}),
+          event(%{"timestamp" => @t0 + 59_999})
+        ])
+
+      assert buckets!(path, @t0, @t0 + @minute) == [
+               %{m: @t0, s: @session, cwd: @cwd, k: "agent", n: 3}
+             ]
+    end
+
+    test "splits on the minute, on the session, and on the cwd" do
+      path =
+        write_fixture([
+          event(%{"timestamp" => @t0}),
+          event(%{"timestamp" => @t0 + @minute}),
+          event(%{"timestamp" => @t0, "tmuxSession" => @other_session}),
+          event(%{"timestamp" => @t0, "cwd" => "/other/repo"})
+        ])
+
+      buckets = buckets!(path, @t0, @t0 + 2 * @minute)
+
+      assert length(buckets) == 4
+      assert Enum.all?(buckets, &(&1.n == 1))
+
+      # Sorted by {m, s, cwd, k}: the whole first minute before the second.
+      assert Enum.map(buckets, & &1.m) == [@t0, @t0, @t0, @t0 + @minute]
+
+      assert %{m: @t0, s: @other_session, cwd: @cwd, k: "agent", n: 1} in buckets
+      assert %{m: @t0, s: @session, cwd: "/other/repo", k: "agent", n: 1} in buckets
+    end
+
+    test "nils an absent or empty session and cwd" do
+      path =
+        write_fixture([
+          event(%{"tmuxSession" => "", "cwd" => ""}),
+          event(%{}) |> Jason.decode!() |> Map.drop(["tmuxSession", "cwd"]) |> Jason.encode!()
+        ])
+
+      assert buckets!(path, @t0, @t0 + @minute) == [
+               %{m: @t0, s: nil, cwd: nil, k: "agent", n: 2}
+             ]
+    end
+  end
+
+  describe "Shuttle.Activity.buckets/3 — kind mapping" do
+    test "user_prompt_submit is attention, notification is notify, all else is agent" do
+      path =
+        write_fixture([
+          event(%{"type" => "user_prompt_submit"}),
+          event(%{"type" => "notification"}),
+          event(%{"type" => "pre_tool_use"}),
+          event(%{"type" => "post_tool_use"}),
+          event(%{"type" => "stop"}),
+          event(%{"type" => "subagent_stop"}),
+          event(%{"type" => "session_start"}),
+          event(%{"type" => "session_end"}),
+          # A hook type invented after this endpoint shipped must still land in
+          # the agent band rather than vanishing.
+          event(%{"type" => "some_future_hook"})
+        ])
+
+      by_kind = Map.new(buckets!(path, @t0, @t0 + @minute), &{&1.k, &1.n})
+
+      assert by_kind == %{"attention" => 1, "notify" => 1, "agent" => 7}
+    end
+  end
+
+  describe "Shuttle.Activity.buckets/3 — window and tolerance" do
+    test "both window bounds are inclusive and events outside are dropped" do
+      path =
+        write_fixture([
+          event(%{"timestamp" => @t0 - 1}),
+          event(%{"timestamp" => @t0}),
+          event(%{"timestamp" => @t0 + @minute}),
+          event(%{"timestamp" => @t0 + @minute + 1})
+        ])
+
+      buckets = buckets!(path, @t0, @t0 + @minute)
+
+      assert Enum.map(buckets, & &1.m) == [@t0, @t0 + @minute]
+      assert Enum.all?(buckets, &(&1.n == 1))
+    end
+
+    test "skips malformed lines, blank lines, and lines missing timestamp or type" do
+      path =
+        write_fixture([
+          "{ not json at all",
+          "",
+          "   ",
+          ~s({"timestamp":#{@t0},"type":123}),
+          ~s({"type":"stop"}),
+          ~s({"timestamp":"#{@t0}","type":"stop"}),
+          event(%{})
+        ])
+
+      assert buckets!(path, @t0, @t0 + @minute) == [
+               %{m: @t0, s: @session, cwd: @cwd, k: "agent", n: 1}
+             ]
+    end
+
+    test "a missing events file yields no buckets (no crash)" do
+      assert Shuttle.Activity.buckets(@t0, @t0 + @minute, events_file: "/no/such/events.jsonl") ==
+               {:ok, []}
+    end
+  end
+
+  describe "Shuttle.Activity.buckets/3 — rotated sibling" do
+    test "reads events.jsonl.1 when its mtime falls inside the window" do
+      path = write_fixture([event(%{"timestamp" => @t0 + @minute, "type" => "stop"})])
+
+      write_rotated(
+        path,
+        [event(%{"timestamp" => @t0, "type" => "user_prompt_submit"})],
+        div(@t0, 1_000) + 30
+      )
+
+      assert buckets!(path, @t0, @t0 + 2 * @minute) == [
+               %{m: @t0, s: @session, cwd: @cwd, k: "attention", n: 1},
+               %{m: @t0 + @minute, s: @session, cwd: @cwd, k: "agent", n: 1}
+             ]
+    end
+
+    test "skips events.jsonl.1 when its mtime predates the window" do
+      # The gate is deliberately coarse: rotation renames the file and never
+      # writes it again, so an mtime before from_ms proves every line predates
+      # the window. The in-range line below is unreachable in production for
+      # exactly that reason; the test asserts the 64 MB scan really is skipped.
+      path = write_fixture([event(%{"timestamp" => @t0, "type" => "stop"})])
+
+      write_rotated(
+        path,
+        [event(%{"timestamp" => @t0, "type" => "user_prompt_submit"})],
+        div(@t0, 1_000) - 3_600
+      )
+
+      assert buckets!(path, @t0, @t0 + @minute) == [
+               %{m: @t0, s: @session, cwd: @cwd, k: "agent", n: 1}
+             ]
+    end
+  end
+
+  describe "Shuttle.Activity.buckets/3 — refused windows" do
+    test "an inverted window is an error" do
+      assert Shuttle.Activity.buckets(@t0, @t0 - 1) == {:error, :inverted_range}
+    end
+
+    test "a window wider than 120 days is an error, and 120 days exactly is not" do
+      assert Shuttle.Activity.buckets(@t0, @t0 + Shuttle.Activity.max_range_ms() + 1) ==
+               {:error, :range_too_wide}
+
+      assert {:ok, _} =
+               Shuttle.Activity.buckets(@t0, @t0 + Shuttle.Activity.max_range_ms(),
+                 events_file: "/no/such/events.jsonl"
+               )
+    end
+  end
+
+  describe "GET /api/v1/activity" do
+    test "200 with the host stamp, echoed bounds, and the buckets" do
+      path =
+        write_fixture([
+          event(%{"type" => "user_prompt_submit"}),
+          event(%{"timestamp" => @t0 + 5_000}),
+          event(%{"timestamp" => @t0 + 6_000})
+        ])
+
+      with_events_file(path)
+
+      conn = get(api_conn(), "/api/v1/activity?from_ms=#{@t0}&to_ms=#{@t0 + @minute}")
+
+      assert conn.status == 200
+
+      assert json_response(conn, 200) == %{
+               "host" => Shuttle.Poller.own_host_id(),
+               "from_ms" => @t0,
+               "to_ms" => @t0 + @minute,
+               "buckets" => [
+                 %{"m" => @t0, "s" => @session, "cwd" => @cwd, "k" => "agent", "n" => 2},
+                 %{"m" => @t0, "s" => @session, "cwd" => @cwd, "k" => "attention", "n" => 1}
+               ]
+             }
+    end
+
+    test "200 with an empty bucket list when this host has no events file" do
+      with_events_file(Path.join(System.tmp_dir!(), "shuttle_activity_absent.jsonl"))
+
+      conn = get(api_conn(), "/api/v1/activity?from_ms=#{@t0}&to_ms=#{@t0 + @minute}")
+      assert %{"buckets" => []} = json_response(conn, 200)
+    end
+
+    test "400 when a bound is missing or is not an integer" do
+      for query <- [
+            "",
+            "?from_ms=#{@t0}",
+            "?to_ms=#{@t0}",
+            "?from_ms=abc&to_ms=#{@t0}",
+            "?from_ms=#{@t0}&to_ms=17e11",
+            "?from_ms=#{@t0}&to_ms=#{@t0}x"
+          ] do
+        conn = get(api_conn(), "/api/v1/activity" <> query)
+        assert conn.status == 400, "expected 400 for #{inspect(query)}"
+        assert %{"error" => _} = json_response(conn, 400)
+      end
+    end
+
+    test "400 on an inverted window" do
+      conn = get(api_conn(), "/api/v1/activity?from_ms=#{@t0}&to_ms=#{@t0 - 1}")
+
+      assert conn.status == 400
+      assert %{"error" => error} = json_response(conn, 400)
+      assert error =~ "from_ms"
+    end
+
+    test "400 on a window wider than 120 days" do
+      to_ms = @t0 + Shuttle.Activity.max_range_ms() + 1
+      conn = get(api_conn(), "/api/v1/activity?from_ms=#{@t0}&to_ms=#{to_ms}")
+
+      assert conn.status == 400
+      assert %{"error" => error} = json_response(conn, 400)
+      assert error =~ "120 days"
+    end
+  end
+
+  # Point the reader at a fixture. Clears SHUTTLE_DATA_DIR too, so resolution
+  # can never fall through to the real ~/.shuttle/events.jsonl on a dev machine.
+  defp with_events_file(path) do
+    keys = ~w(SHUTTLE_EVENTS_FILE SHUTTLE_DATA_DIR)
+    previous = Map.new(keys, &{&1, System.get_env(&1)})
+
+    Enum.each(keys, &System.delete_env/1)
+    System.put_env("SHUTTLE_EVENTS_FILE", path)
+
+    on_exit(fn ->
+      Enum.each(previous, fn {k, v} ->
+        if v, do: System.put_env(k, v), else: System.delete_env(k)
+      end)
+    end)
+  end
+
+  defp api_conn do
+    build_conn()
+    |> put_req_header("accept", "application/json")
+  end
+end
