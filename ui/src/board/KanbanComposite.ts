@@ -91,6 +91,14 @@ export interface CompositeEntry {
   /** Absolute path to a sibling `report.html`, when the owning daemon resolved
    * one. (Always `<dir>/report.html`; presence is the report-exists signal.) */
   reportPath?: string;
+  /**
+   * Other origins that served this same fiber, set by `dedupeMirroredRows` on
+   * the row it kept. A git-synced store is served by every daemon that has it
+   * on disk, so one fiber can arrive several times; the board shows ONE card
+   * and names the other hosts on it rather than pretending they don't exist.
+   * Absent for the ordinary single-origin row.
+   */
+  mirroredOrigins?: string[];
 }
 
 export interface CompositeOrigin {

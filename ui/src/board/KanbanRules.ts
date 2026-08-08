@@ -35,7 +35,66 @@ export type KanbanColumn =
   | 'inFlight'
   | 'awaitingReview'
   | 'tempered'
-  | 'composted';
+  | 'composted'
+  | 'cycles';
+
+/** The tag that makes a fiber a cycle. Matched case-insensitively on a trimmed
+ *  tag so `Cycle` and ` cycle ` are the same declaration. */
+const CYCLE_TAG = 'cycle';
+
+/**
+ * Is this fiber a CYCLE — a named span of time rather than a piece of work?
+ *
+ * A cycle is an annotation on the calendar: `start:` opens it, `due:` closes
+ * it, and the temporal views draw it as a band behind the work. It is not
+ * something you do, so it never belongs in a lifecycle column — see the first
+ * branch of `classifyFiber`, which is where that is enforced.
+ */
+export function isCycleFiber(f: Pick<Fiber, 'tags'>): boolean {
+  return (f.tags ?? []).some((t) => typeof t === 'string' && t.trim().toLowerCase() === CYCLE_TAG);
+}
+
+/** The civil days a cycle covers, inclusive at both ends. */
+export interface CycleSpan {
+  /** First day of the band (`YYYY-MM-DD`). */
+  start: string;
+  /** Last day of the band (`YYYY-MM-DD`). */
+  end: string;
+  /** True when the cycle has no `due:` and so runs to today — a band with no
+   *  right edge yet, which a view may want to draw differently (fading out,
+   *  no end cap) rather than as a span that happens to stop at today. */
+  openEnded: boolean;
+}
+
+/**
+ * Resolve a cycle's span to two civil days, applying the three degenerate
+ * cases so no view has to invent its own answer:
+ *
+ *   start + due   → the span as written.
+ *   due, no start → a ONE-DAY span on the due day. A cycle that names only its
+ *                   end is a deadline, and a deadline is a day.
+ *   start, no due → OPEN-ENDED: runs from start to today. The band grows with
+ *                   the calendar until someone closes it by writing a `due:`.
+ *   neither       → null. There is no span to draw, and a view that guessed
+ *                   one would be inventing a date the human never wrote.
+ *
+ * Both edges come back as bare civil days read through `dueCivilDay`, so a
+ * caller must NOT re-parse them with `new Date` (that reads a civil day as UTC
+ * midnight and labels it a day early west of Greenwich — see civilDay.ts).
+ * An `end` before `start` is returned as written rather than swapped: that is
+ * the human's typo to see and fix, not ours to silently paper over.
+ */
+export function cycleSpan(
+  f: Pick<Fiber, 'start' | 'due'>,
+  nowMs: number = Date.now(),
+): CycleSpan | null {
+  const start = dueCivilDay(f.start);
+  const end = dueCivilDay(f.due);
+  if (start !== undefined && end !== undefined) return { start, end, openEnded: false };
+  if (start === undefined && end !== undefined) return { start: end, end, openEnded: false };
+  if (start !== undefined) return { start, end: isoDayLocal(nowMs), openEnded: true };
+  return null;
+}
 
 /**
  * Classify a fiber into the kanban column it belongs in. The single source
@@ -92,6 +151,16 @@ export function classifyFiber(
   f: Fiber,
   opts: { runningWorker?: boolean; dependsOnSatisfied?: boolean } = {},
 ): KanbanColumn {
+  // A CYCLE is an annotation on time, not work, so it leaves before any
+  // lifecycle question is asked. This branch is FIRST on purpose and it is
+  // unconditional: a cycle's `status`, its `due:`, even a `shuttle:` block
+  // someone pasted onto it, must not put it on the desk. Every other branch
+  // below would happily claim it — an open cycle reads as a draft, a cycle
+  // whose end date has passed reads as a drifted card on the desk — and one
+  // stray "Autumn 2026" sitting in Drafts teaches the human to distrust the
+  // column.
+  if (isCycleFiber(f)) return 'cycles';
+
   if (f.status === 'closed') {
     if (f.tempered === true) return 'tempered';
     if (f.tempered === false) return 'composted';

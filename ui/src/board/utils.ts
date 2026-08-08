@@ -105,10 +105,30 @@ export function renderMarkdown(text: string, opts?: RenderMarkdownOptions): stri
     // Use a per-call renderer to handle image path resolution
     if (opts?.basePath) {
       const localRenderer = new marked.Renderer()
-      // Inherit code/codespan/link from the global renderer
+      // Inherit code/codespan from the global renderer
       localRenderer.code = renderer.code
       localRenderer.codespan = renderer.codespan
-      localRenderer.link = renderer.link
+      // LINKS resolve like images do. Inheriting the global link renderer left
+      // `[AGENTS.md](AGENTS.md)` pointing at the page origin, so every relative
+      // link in a fiber body opened a 404 on `localhost:4000/AGENTS.md` — the
+      // image beside it worked, because only the image renderer was overridden
+      // here. A relative href is a path in the fiber's own directory and
+      // belongs on the same owner-routed `/file` route.
+      //
+      // `data-file-path` carries the resolved absolute path so a host that can
+      // do better than a new tab — the detail panel, which has a file viewer —
+      // intercepts the click and opens it in place. Without such a host the
+      // href alone is already a working URL.
+      localRenderer.link = ({ href, text }: { href: string; text: string }) => {
+        const external = /^(https?:|mailto:|data:)/i.test(href) || href.startsWith('#')
+        const resolved = external ? null : fileUrl(href, opts)
+        if (resolved === null) return renderer.link({ href, text } as never)
+        return (
+          `<a href="${escapeAttr(resolved)}" class="md-link md-link-file"` +
+          ` data-file-path="${escapeAttr(resolveAbs(href, opts) ?? href)}"` +
+          ` target="_blank" rel="noopener">${text}</a>`
+        )
+      }
       localRenderer.image = ({ href, text: alt }: { href: string; text?: string }) => {
         // Relative/absolute local paths resolve through /file; http(s)/data
         // URLs (and an unresolvable relative path) pass through unchanged.

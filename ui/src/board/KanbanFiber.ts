@@ -29,6 +29,15 @@ export interface Fiber {
   closedAt?: string; // ISO date from frontmatter
   modifiedAt?: string; // file mtime felt reports as `modified_at`.
   due?: string;       // project-owned frontmatter `due:` for human-facing deadlines
+  /**
+   * Project-owned frontmatter `start:` — the opening edge of a CYCLE's span
+   * (`due:` is its closing edge). A CIVIL DAY, and felt round-trips it exactly
+   * as it does `due:`: authored `start: 2026-09-01`, it comes back
+   * `2026-09-01T00:00:00Z` (verified against a real store). So it must be read
+   * with `dueCivilDay`, never `new Date` — see civilDay.ts, where reading a
+   * civil day as an instant loses a day in every negative-offset zone.
+   */
+  start?: string;
   horizon?: string;   // legacy project-owned planning field. New Kanban writes
                       // only persist `stashed`; `now`/`soon` are read for
                       // compatibility and normalized by KanbanRules.
@@ -116,6 +125,11 @@ export function mapFeltJsonToFiber(item: unknown): Fiber | null {
   const outcome = typeof f.outcome === 'string' ? f.outcome : undefined;
   const body = typeof f.body === 'string' ? f.body : undefined;
   const due = typeof f.due === 'string' && f.due.trim() ? f.due.trim() : undefined;
+  // `start:` is not one of felt's native fields — it is opaque extra
+  // frontmatter felt preserves and re-emits. It only reaches the browser when
+  // the daemon's kanban projection asks for it; see the gap noted on
+  // `Fiber.start`.
+  const start = typeof f.start === 'string' && f.start.trim() ? f.start.trim() : undefined;
   const horizon = typeof f.horizon === 'string' && f.horizon.trim() ? f.horizon.trim() : undefined;
   const cold = typeof f.cold === 'boolean' ? f.cold : undefined;
 
@@ -228,6 +242,7 @@ export function mapFeltJsonToFiber(item: unknown): Fiber | null {
     outcome,
     body,
     due,
+    start,
     horizon,
     cold,
     tags,

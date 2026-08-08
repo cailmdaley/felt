@@ -11,15 +11,22 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   dayWeight,
+  annotationFor,
   BUCKET_MS,
+  advanceSwipe,
+  cyclesInWeek,
+  IDLE_SWIPE,
+  spanOfCycleCard,
+  SWIPE_NUDGE_CAP_PX,
+  SWIPE_SETTLE_MS,
+  type SwipeState,
+  weekStepTarget,
   marksForDay,
   mondayOfWeek,
-  pickDaySubjects,
   RAIL_START_HOUR,
   railBounds,
   railFraction,
   railRuleFractions,
-  readableSubject,
   shiftCivilDay,
   shiftWeekMonday,
   summarizeSpend,
@@ -33,6 +40,28 @@ import type { KanbanCard } from '../KanbanTypes.js';
 
 const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
 const HOUR = 3_600_000;
+
+/**
+ * An instant at a LOCAL wall-clock time on a civil day — the only safe way for
+ * this suite to say "now".
+ *
+ * A UTC literal (`Date.parse('2026-08-08T12:00:00Z')`) names a different local
+ * day either side of the Atlantic, so an assertion written against one only
+ * ever tests the hemisphere it was authored in. Every clock here is built
+ * locally instead, which makes the pinned-zone runs agree by construction
+ * rather than by luck — and keeps them honest in zones neither run covers.
+ *
+ * NOON by default, never midnight: under this view's 6am rail rule, 00:00 on
+ * day X still belongs to day X-1's rail, so a midnight clock silently shifts
+ * every rail-derived expectation a day early. That has bitten this file more
+ * than once.
+ */
+function atLocal(day: string, hour = 12, minute = 0): number {
+  const d = civilDayToLocalDate(day);
+  if (!d) throw new Error(`not a civil day: ${day}`);
+  d.setHours(hour, minute, 0, 0);
+  return d.getTime();
+}
 
 /** The Mondays whose weeks contain a DST transition, per zone. Both zones move
  *  their clocks on a Sunday, so the transition always lands on the LAST row —
@@ -52,6 +81,10 @@ function card(over: Partial<KanbanCard> & { id: string }): KanbanCard {
     dependsOnSatisfied: true,
     effectiveHorizon: 'now',
     drifted: false,
+    // Required on KanbanCard since the cycles contract landed; a plain card is
+    // not a cycle, and `over` overrides for the ones that are.
+    isCycle: false,
+    cycleStart: null,
     ...over,
   };
 }
@@ -213,13 +246,6 @@ describe('the day a rail belongs to is the dawn day, not the midnight one', () =
   // on a row that had not started yet, clamped the now-marker to its left edge,
   // and greyed out the live rail as past — losing its in-flight marginalia and
   // suppressing every mark on it, for six hours every night.
-  const localMs = (day: string, hour: number, minute = 0) => {
-    const d = civilDayToLocalDate(day);
-    if (!d) throw new Error(`bad day ${day}`);
-    d.setHours(hour, minute, 0, 0);
-    return d.getTime();
-  };
-
   // [hour of Wednesday 2026-08-05, the rail day it belongs to]
   const cases: Array<[number, string]> = [
     [0, '2026-08-04'], // midnight is still Tuesday's evening
@@ -231,13 +257,13 @@ describe('the day a rail belongs to is the dawn day, not the midnight one', () =
   ];
   for (const [hour, expected] of cases) {
     it(`${String(hour).padStart(2, '0')}:00 Wednesday sits on ${expected}'s rail`, () => {
-      expect(railCivilDay(localMs('2026-08-05', hour), RAIL_START_HOUR)).toBe(expected);
+      expect(railCivilDay(atLocal('2026-08-05', hour), RAIL_START_HOUR)).toBe(expected);
     });
   }
 
   it('agrees with the rail it names — the instant is inside those bounds', () => {
     for (const hour of [0, 2, 5, 6, 12, 23]) {
-      const at = localMs('2026-08-05', hour);
+      const at = atLocal('2026-08-05', hour);
       const { startMs, endMs } = railBounds(railCivilDay(at, RAIL_START_HOUR));
       expect(at).toBeGreaterThanOrEqual(startMs);
       expect(at).toBeLessThan(endMs);
@@ -245,7 +271,7 @@ describe('the day a rail belongs to is the dawn day, not the midnight one', () =
   });
 
   it('rolls back across a month boundary at 02:00 on the first', () => {
-    expect(railCivilDay(localMs('2026-08-01', 2), RAIL_START_HOUR)).toBe('2026-07-31');
+    expect(railCivilDay(atLocal('2026-08-01', 2), RAIL_START_HOUR)).toBe('2026-07-31');
   });
 
   it('does not jump the week early in the small hours of a Monday', () => {
@@ -253,7 +279,7 @@ describe('the day a rail belongs to is the dawn day, not the midnight one', () =
     // view must still show that week. Reading the midnight day here also put
     // the week's start four hours in the future, which made `weekWindow`
     // suppress the activity request entirely and blanked the whole page.
-    const smallHoursMonday = localMs('2026-08-10', 1);
+    const smallHoursMonday = atLocal('2026-08-10', 1);
     expect(weekMondayForFocus(null, smallHoursMonday)).toBe('2026-08-03');
     const win = weekWindow(weekMondayForFocus(null, smallHoursMonday), smallHoursMonday);
     expect(win.days).toContain('2026-08-09');
@@ -261,7 +287,7 @@ describe('the day a rail belongs to is the dawn day, not the midnight one', () =
   });
 
   it('has moved on by 06:00 that Monday', () => {
-    expect(weekMondayForFocus(null, localMs('2026-08-10', 6))).toBe('2026-08-10');
+    expect(weekMondayForFocus(null, atLocal('2026-08-10', 6))).toBe('2026-08-10');
   });
 });
 
@@ -270,14 +296,14 @@ describe('the week follows the shared temporal cursor', () => {
     vi.restoreAllMocks();
   });
 
-  const nowMs = Date.parse('2026-08-05T12:00:00Z'); // a Wednesday in both zones
+  const nowMs = atLocal('2026-08-05'); // midday Wednesday, wherever you are
 
   it('shows the current week when the cursor is null', () => {
     expect(weekMondayForFocus(null, nowMs)).toBe(mondayOfWeek(isoDayLocal(nowMs)));
   });
 
   it('re-resolves null against the clock rather than freezing a week', () => {
-    const later = Date.parse('2026-08-19T12:00:00Z'); // two weeks on
+    const later = atLocal('2026-08-19'); // two weeks on
     expect(weekMondayForFocus(null, nowMs)).not.toBe(weekMondayForFocus(null, later));
   });
 
@@ -337,67 +363,20 @@ describe('the week follows the shared temporal cursor', () => {
   });
 });
 
-describe('the read window handed to the two routes', () => {
-  // The daemon parses narration bounds with Elixir's `Date.from_iso8601/1`
-  // (lib/shuttle_web/controllers/narration_controller.ex), which accepts a bare
-  // date and NOTHING else. A full timestamp is a 400, the fetcher turns every
-  // failure into an empty result, and the marginalia goes blank in silence —
-  // the offline harness cannot catch it, because its mock parses anything.
-  const BARE_CIVIL_DAY = /^\d{4}-\d{2}-\d{2}$/;
-  const noon = (day: string) => Date.parse(`${day}T12:00:00Z`);
+describe('the read window handed to the activity route', () => {
+  // Week asks for activity and nothing else. It used to ask for narration too,
+  // and the bare-civil-day rule that call needed is now Day's to keep — see
+  // DayView. What survives here is the instant side and the now-cap.
 
-  // Ordinary week, a DST week in each zone, and a month/year boundary.
-  const mondays = [
-    '2026-08-03',
-    '2026-07-27',
-    '2026-12-28',
-    ...Object.values(DST_WEEKS).flat(),
-  ];
-
-  for (const monday of mondays) {
-    it(`asks narration for bare civil days, week of ${monday}`, () => {
-      const win = weekWindow(monday, noon('2026-08-08'));
-      expect(win.narrationFrom).toMatch(BARE_CIVIL_DAY);
-      expect(win.narrationTo).toMatch(BARE_CIVIL_DAY);
-      // No stray time-of-day, offset or `T` sneaking back in.
-      expect(win.narrationFrom).not.toContain('T');
-      expect(win.narrationTo).not.toContain('T');
-      // The range must not be inverted — the daemon 400s on that too.
-      expect(win.narrationFrom <= win.narrationTo).toBe(true);
-    });
-  }
-
-  it('opens the narration range on the shown Monday', () => {
-    expect(weekWindow('2026-08-03', noon('2026-08-08')).narrationFrom).toBe('2026-08-03');
-  });
-
-  it('closes it the day AFTER Sunday, so the last rail keeps its late night', () => {
-    // A rail runs 6am→6am but the daemon's range is inclusive whole days.
-    // Stopping at Sunday would drop Sunday's after-midnight commits, which
-    // belong to Sunday's row — every other row gets its tail from the
-    // following day, and Sunday must not be the exception.
-    const win = weekWindow('2026-08-03', noon('2026-08-08'));
-    expect(win.days.at(-1)).toBe('2026-08-09');
-    expect(win.narrationTo).toBe('2026-08-10');
-    // The range is inclusive, so its last day must be the LOCAL day the rail's
-    // right edge falls on — that is what makes the edge covered.
-    expect(isoDayLocal(win.toMs)).toBe(win.narrationTo);
-  });
-
-  it('crosses a month and a year boundary as civil days, not by adding a day of ms', () => {
-    expect(weekWindow('2026-07-27', noon('2026-08-08')).narrationTo).toBe('2026-08-03');
-    expect(weekWindow('2026-12-28', noon('2026-08-08')).narrationTo).toBe('2027-01-04');
-  });
-
-  it('gives activity INSTANTS, not days — the two routes differ', () => {
-    const win = weekWindow('2026-08-03', noon('2026-08-08'));
+  it('gives activity INSTANTS with a 6am-local left edge', () => {
+    const win = weekWindow('2026-08-03', atLocal('2026-08-08'));
     expect(typeof win.fromMs).toBe('number');
     expect(new Date(win.fromMs).getHours()).toBe(RAIL_START_HOUR);
     expect(win.toMs - win.fromMs).toBe(7 * 24 * HOUR);
   });
 
   it('caps the activity window at now, rounded up to the fetch quantum', () => {
-    const now = Date.parse('2026-08-05T14:03:20Z');
+    const now = atLocal('2026-08-05', 14, 3) + 20_000;
     const win = weekWindow('2026-08-03', now);
     expect(win.activityToMs).toBeGreaterThanOrEqual(now);
     expect(win.activityToMs).toBeLessThan(now + 5 * 60_000);
@@ -406,19 +385,54 @@ describe('the read window handed to the two routes', () => {
   });
 
   it('asks for no activity at all on a week wholly in the future', () => {
-    const win = weekWindow('2026-08-10', noon('2026-08-05'));
+    const win = weekWindow('2026-08-10', atLocal('2026-08-05'));
     expect(win.activityToMs).toBeLessThanOrEqual(win.fromMs);
   });
 
   it('asks for the whole span on a week wholly in the past', () => {
-    const win = weekWindow('2026-07-27', noon('2026-08-05'));
+    const win = weekWindow('2026-07-27', atLocal('2026-08-05'));
     expect(win.activityToMs).toBe(win.toMs);
   });
 
   it('degrades to an empty window rather than throwing on a bad Monday', () => {
-    const win = weekWindow('not-a-day', noon('2026-08-05'));
+    const win = weekWindow('not-a-day', atLocal('2026-08-05'));
     expect(win.days).toEqual([]);
-    expect(win.narrationFrom).toBe('');
+    expect(win.fromMs).toBe(0);
+  });
+});
+
+describe('the right-edge annotation, now the only text out there', () => {
+  const spend = (hours: number) => ({ totalMs: hours * HOUR });
+
+  it('reports how a past day went', () => {
+    expect(annotationFor(spend(8), true, false, 0)).toBe('8h · full');
+    expect(annotationFor(spend(3), true, false, 0)).toBe('3h · half');
+  });
+
+  it('says nothing on a future row — `—` there would read as "no activity"', () => {
+    // A day that has not happened has not been quiet; it has not happened.
+    expect(annotationFor(null, false, false, 0)).toBe('');
+    expect(annotationFor(spend(8), false, false, 3)).toBe('');
+  });
+
+  it('marks a past day with no activity as an em dash, not as nothing', () => {
+    expect(annotationFor(null, true, false, 0)).toBe('—');
+    expect(annotationFor(spend(0), true, false, 0)).toBe('—');
+  });
+
+  it('appends the aloft count on today, and only there', () => {
+    // The one signal the removed marginalia carried that the rasters cannot:
+    // the seam says something is running, a count says how much.
+    expect(annotationFor(spend(7), false, true, 3)).toBe('7h · full · 3 aloft');
+    expect(annotationFor(spend(7), true, false, 3)).toBe('7h · full');
+  });
+
+  it('drops the count when nothing is aloft, rather than saying "0 aloft"', () => {
+    expect(annotationFor(spend(7), false, true, 0)).toBe('7h · full');
+  });
+
+  it('still reports today when it has been quiet so far', () => {
+    expect(annotationFor(null, false, true, 2)).toBe('— · 2 aloft');
   });
 });
 
@@ -472,6 +486,20 @@ describe('a `due:` is a civil day, and lands on the day it names', () => {
     expect(marks[0].glyph).toBe('◌');
   });
 
+  it('never draws a cycle as an obligation, however it reaches the rails', () => {
+    // A cycle's `due` is the END of a span, not a deadline. If one ever leaked
+    // onto `ctx.cards` — say by `collectCards` growing a `take(response.cycles)`
+    // — a ◴ on its closing day would invent work that was never owed.
+    const cycle = card({
+      id: 'c/q3',
+      isCycle: true,
+      cycleStart: '2026-07-01',
+      due: '2026-08-14',
+      status: 'active',
+    });
+    expect(marksForDay([cycle], '2026-08-14', railBounds('2026-08-14'))).toHaveLength(0);
+  });
+
   it('carries no obligation for a closed card', () => {
     const cards = [card({ id: 'fiber/done', due: '2026-08-14', status: 'closed' })];
     expect(marksForDay(cards, '2026-08-14', railBounds('2026-08-14'))).toHaveLength(0);
@@ -522,6 +550,279 @@ describe('a `due:` is a civil day, and lands on the day it names', () => {
       }),
     ];
     expect(marksForDay(cards, '2026-08-14', bounds).map((m) => m.kind)).toEqual(['launch']);
+  });
+});
+
+describe('paging hands the cursor back to the present', () => {
+  // "Now" is midday Wednesday 2026-08-05; the live week is Mon 08-03 … Sun
+  // 08-09. MIDDAY, not midnight: by this view's own 6am rule, 00:00 Wednesday
+  // still belongs to Tuesday's rail, so a midnight clock would silently make
+  // every expectation here a day early. (It did, on the first run.)
+  const NOW = atLocal('2026-08-05');
+
+  it('writes null when a step lands anywhere in the current week', () => {
+    // Paging back from next week returns to the live present, so the cursor
+    // stops being a date. Any weekday of the live week does it — the rule is
+    // the week, not the day, because the week is this view's unit.
+    for (const from of ['2026-08-10', '2026-08-12', '2026-08-16']) {
+      expect(weekStepTarget(from, -1, NOW)).toBeNull();
+    }
+    expect(weekStepTarget('2026-07-27', 1, NOW)).toBeNull();
+  });
+
+  it('writes a date when the step lands anywhere else', () => {
+    expect(weekStepTarget(null, 1, NOW)).toBe('2026-08-12');
+    expect(weekStepTarget(null, -1, NOW)).toBe('2026-07-29');
+    expect(weekStepTarget('2026-08-12', 1, NOW)).toBe('2026-08-19');
+  });
+
+  it('keeps the weekday across every step that does not snap', () => {
+    const weekdayOf = (day: string) => civilDayToLocalDate(day)?.getDay();
+    let cursor = weekStepTarget(null, 1, NOW);
+    expect(weekdayOf(cursor!)).toBe(weekdayOf('2026-08-05'));
+    cursor = weekStepTarget(cursor, 1, NOW);
+    expect(weekdayOf(cursor!)).toBe(weekdayOf('2026-08-05'));
+  });
+
+  it('round-trips out and back to null, never to a pinned today', () => {
+    // The defect this rule exists to prevent: paging away and back used to
+    // leave the cursor on a date inside the live week, so the header claimed
+    // "This week" while Day opened on that weekday instead of today.
+    const away = weekStepTarget(null, -1, NOW);
+    expect(away).not.toBeNull();
+    expect(weekStepTarget(away, 1, NOW)).toBeNull();
+  });
+
+  it('sends `t` home by writing null, at any hour including the pre-dawn ones', () => {
+    // `t` is `setFocusDate(null)`, which is what `weekStepTarget` also produces
+    // when a step lands on the live week — one meaning of "home", one rule.
+    // The 02:00 case is the one that goes wrong: by the 6am rail rule the live
+    // week at 01:00 Monday is still the one that began the PREVIOUS Monday, so
+    // a page showing that week IS home and must not read as away.
+    const smallHoursMonday = atLocal('2026-08-10', 1);
+    expect(weekMondayForFocus(null, smallHoursMonday)).toBe('2026-08-03');
+    // Home from a pinned day inside the live week, at that same hour.
+    expect(weekMondayForFocus('2026-08-05', smallHoursMonday)).toBe(
+      weekMondayForFocus(null, smallHoursMonday),
+    );
+    // And after 06:00 the live week has moved on, so the same pin is away.
+    const afterDawn = atLocal('2026-08-10', 6);
+    expect(weekMondayForFocus('2026-08-05', afterDawn)).not.toBe(
+      weekMondayForFocus(null, afterDawn),
+    );
+  });
+
+  it('reads the cursor by the RAIL day, so a 2am step is not a week early', () => {
+    // 01:00 on Monday 2026-08-10: the live week is still the one that began
+    // 08-03, so paging forward should land in the week of 08-10 — not skip it.
+    const smallHours = atLocal('2026-08-10', 1);
+    expect(weekMondayForFocus(null, smallHours)).toBe('2026-08-03');
+    const next = weekStepTarget(null, 1, smallHours);
+    expect(next).not.toBeNull();
+    expect(mondayOfWeek(next!)).toBe('2026-08-10');
+  });
+});
+
+describe('one physical swipe is one week', () => {
+  const at = (state: SwipeState, dx: number, ms: number) => advanceSwipe(state, dx, ms);
+
+  it('accumulates until the threshold, then pages once', () => {
+    let s = IDLE_SWIPE;
+    let steps = 0;
+    // A flick: eight events of 20px each. 160px total crosses 120px once.
+    for (let i = 0; i < 8; i += 1) {
+      const out = at(s, 20, 1000 + i * 10);
+      s = out.state;
+      steps += out.step;
+    }
+    expect(steps).toBe(1);
+  });
+
+  it('does not page five times from one flick with an inertial tail', () => {
+    // This is the whole reason the lock exists: a trackpad keeps sending
+    // decaying events long after the fingers lift, and a bare threshold would
+    // page again every 120px of tail.
+    let s = IDLE_SWIPE;
+    let steps = 0;
+    let ms = 1000;
+    for (const dx of [40, 60, 55, 50, 44, 38, 30, 24, 18, 12, 8, 5, 3, 2, 1]) {
+      const out = at(s, dx, ms);
+      s = out.state;
+      steps += out.step;
+      ms += 12; // well inside the settle window — one continuous gesture
+    }
+    expect(steps).toBe(1);
+  });
+
+  it('reopens after the gesture goes quiet, so a second swipe pages again', () => {
+    let s = IDLE_SWIPE;
+    let steps = 0;
+    let ms = 1000;
+    for (let gesture = 0; gesture < 3; gesture += 1) {
+      for (let i = 0; i < 8; i += 1) {
+        const out = at(s, 20, ms);
+        s = out.state;
+        steps += out.step;
+        ms += 10;
+      }
+      ms += SWIPE_SETTLE_MS + 50; // fingers lift
+    }
+    expect(steps).toBe(3);
+  });
+
+  it('pages backward on a leftward swipe', () => {
+    let s = IDLE_SWIPE;
+    let step = 0;
+    for (let i = 0; i < 8 && step === 0; i += 1) {
+      const out = at(s, -20, 1000 + i * 10);
+      s = out.state;
+      step = out.step;
+    }
+    expect(step).toBe(-1);
+  });
+
+  it('leans with the gesture, capped, and opposite to the travel', () => {
+    // The sheet slides left as you swipe forward in time, so the next week
+    // appears to come in from the right.
+    const small = at(IDLE_SWIPE, 20, 1000);
+    expect(small.nudge).toBeLessThan(0);
+    expect(Math.abs(small.nudge)).toBeLessThanOrEqual(SWIPE_NUDGE_CAP_PX);
+    // Accumulated but still under threshold: the lean must not exceed the cap.
+    let s = IDLE_SWIPE;
+    let last = 0;
+    for (let i = 0; i < 5; i += 1) {
+      const out = at(s, 22, 1000 + i * 10);
+      s = out.state;
+      last = out.nudge;
+    }
+    expect(Math.abs(last)).toBeLessThanOrEqual(SWIPE_NUDGE_CAP_PX);
+  });
+
+  it('leans back to nothing on the event that pages', () => {
+    const out = at({ offset: 110, locked: false, lastMs: 1000 }, 20, 1005);
+    expect(out.step).toBe(1);
+    expect(out.nudge).toBe(0);
+    expect(out.state.offset).toBe(0);
+    expect(out.state.locked).toBe(true);
+  });
+
+  it('treats a long pause as a new gesture even mid-accumulation', () => {
+    // Half a swipe, then the user stops and starts again the other way. The
+    // stale half must not combine with the new travel.
+    const half = at(IDLE_SWIPE, 90, 1000);
+    expect(half.state.offset).toBe(90);
+    const later = at(half.state, -40, 1000 + SWIPE_SETTLE_MS + 1);
+    expect(later.step).toBe(0);
+    expect(later.state.offset).toBe(-40);
+  });
+});
+
+describe('which cycles the week falls inside', () => {
+  // Week of Mon 2026-08-03 … Sun 2026-08-09, "now" on the Thursday.
+  const week = weekCivilDays('2026-08-03');
+  const NOW = atLocal('2026-08-06');
+
+  const cycle = (id: string, start: string | null, end?: string) =>
+    card({ id, isCycle: true, cycleStart: start, due: end });
+
+  const names = (cards: KanbanCard[]) => cards.map((c) => c.id);
+
+  it('takes a cycle that covers the whole week', () => {
+    expect(names(cyclesInWeek([cycle('c/q3', '2026-07-01', '2026-09-30')], week, NOW))).toEqual([
+      'c/q3',
+    ]);
+  });
+
+  // The edges are the whole question: a week that merely TOUCHES a cycle is
+  // inside it for the purposes of this header, at both ends.
+  it('takes a cycle ending on the Monday', () => {
+    expect(names(cyclesInWeek([cycle('c/ends-mon', '2026-07-20', '2026-08-03')], week, NOW)))
+      .toEqual(['c/ends-mon']);
+  });
+
+  it('takes a cycle starting on the Sunday', () => {
+    expect(names(cyclesInWeek([cycle('c/starts-sun', '2026-08-09', '2026-08-21')], week, NOW)))
+      .toEqual(['c/starts-sun']);
+  });
+
+  it('drops a cycle ending the day before the Monday', () => {
+    expect(cyclesInWeek([cycle('c/just-missed', '2026-07-20', '2026-08-02')], week, NOW))
+      .toHaveLength(0);
+  });
+
+  it('drops a cycle starting the day after the Sunday', () => {
+    expect(cyclesInWeek([cycle('c/next-up', '2026-08-10', '2026-08-21')], week, NOW))
+      .toHaveLength(0);
+  });
+
+  it('runs an open-ended cycle from its start onward, not just up to today', () => {
+    // No `due`: still running. `cycleSpan` clamps its end to today so a view has
+    // something concrete to draw, but for INTERSECTION that clamp would be a
+    // lie — it would drop every week after this one from a cycle that has not
+    // ended. So an open cycle covers everything from its start on.
+    const open = cycle('c/open', '2026-07-01');
+    expect(names(cyclesInWeek([open], week, NOW))).toEqual(['c/open']);
+    for (const later of ['2026-08-10', '2026-09-07', '2027-02-01']) {
+      expect(
+        names(cyclesInWeek([open], weekCivilDays(later), NOW)),
+        `an unfinished cycle still covers the week of ${later}`,
+      ).toEqual(['c/open']);
+    }
+    // A week wholly BEFORE it began is still outside it.
+    expect(cyclesInWeek([open], weekCivilDays('2026-06-01'), NOW)).toHaveLength(0);
+  });
+
+  it('does not claim a week that ends before an open cycle even starts', () => {
+    // Starts a fortnight out with no end. The clamped span is inverted
+    // (end=today precedes start), and matching on that inversion would have put
+    // a not-yet-begun cycle in this week's header.
+    expect(cyclesInWeek([cycle('c/future-open', '2026-08-20')], week, NOW)).toHaveLength(0);
+    // It does claim the week it begins in, and every week after.
+    expect(names(cyclesInWeek([cycle('c/future-open', '2026-08-20')], weekCivilDays('2026-08-17'), NOW)))
+      .toEqual(['c/future-open']);
+  });
+
+  it('treats a cycle with only an end as that single day', () => {
+    expect(names(cyclesInWeek([cycle('c/end-only', null, '2026-08-05')], week, NOW)))
+      .toEqual(['c/end-only']);
+    expect(cyclesInWeek([cycle('c/end-only-out', null, '2026-08-20')], week, NOW))
+      .toHaveLength(0);
+  });
+
+  it('ignores cards that are not cycles, however they are dated', () => {
+    const ordinary = card({ id: 'work/thing', due: '2026-08-05' });
+    expect(cyclesInWeek([ordinary], week, NOW)).toHaveLength(0);
+    // And a cycle flag with no dates at all names no span.
+    expect(spanOfCycleCard(card({ id: 'c/dateless', isCycle: true }), NOW)).toBeNull();
+  });
+
+  it('reads a cycle`s dates as CIVIL DAYS, whatever offset they were written in', () => {
+    // Authored in Paris; must not lose a day west of Greenwich.
+    const paris = cycle('c/paris', '2026-08-09T00:00:00+02:00', '2026-08-21T00:00:00+02:00');
+    expect(spanOfCycleCard(paris, NOW)).toEqual({
+      start: '2026-08-09',
+      end: '2026-08-21',
+      openEnded: false,
+    });
+    expect(names(cyclesInWeek([paris], week, NOW))).toEqual(['c/paris']);
+  });
+
+  it('orders by start, soonest first, so the header reads oldest-commitment first', () => {
+    const later = cycle('c/later', '2026-08-05', '2026-08-30');
+    const earlier = cycle('c/earlier', '2026-07-01', '2026-08-30');
+    expect(names(cyclesInWeek([later, earlier], week, NOW))).toEqual(['c/earlier', 'c/later']);
+  });
+
+  it('finds every overlapping cycle — the header decides how many to show', () => {
+    const many = [
+      cycle('c/a', '2026-07-01', '2026-08-30'),
+      cycle('c/b', '2026-08-03', '2026-08-30'),
+      cycle('c/c', '2026-08-05', '2026-08-30'),
+      cycle('c/d', '2026-08-09', '2026-08-30'),
+    ];
+    // Truncation to two plus "+N" is the renderer's job, not this function's:
+    // it must not decide for the header how much there was to say.
+    expect(cyclesInWeek(many, week, NOW)).toHaveLength(4);
   });
 });
 
@@ -583,35 +884,5 @@ describe('how full a day was', () => {
     const spend = summarizeSpend([at(0), at(7), at(19), at(31)]);
     expect(spend.totalMs).toBe(4 * 60_000);
     expect(dayWeight(spend.totalMs)).toBe('quiet');
-  });
-});
-
-describe('narration marginalia', () => {
-  it('turns a slug prefix into the marginal hand', () => {
-    expect(readableSubject('board: fold the masthead actions')).toBe(
-      'board — fold the masthead actions',
-    );
-    expect(readableSubject('no prefix here')).toBe('no prefix here');
-    // A sentence with a colon is not a slug.
-    expect(readableSubject('the point is: it works')).toBe('the point is: it works');
-  });
-
-  it('picks the busiest slugs, at most two', () => {
-    const picked = pickDaySubjects([
-      'views: hang the pages off a hotkey row',
-      'daemon: owner-route the write plane',
-      'views: patch rather than rebuild',
-      'views: the tick row is shared',
-      'daemon: back off a stale remote',
-      'stash: cluster on the containment path',
-    ]);
-    expect(picked).toEqual([
-      'views — hang the pages off a hotkey row',
-      'daemon — owner-route the write plane',
-    ]);
-  });
-
-  it('is empty for a day that said nothing', () => {
-    expect(pickDaySubjects([])).toEqual([]);
   });
 });

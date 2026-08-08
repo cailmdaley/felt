@@ -22,8 +22,17 @@ import {
   abbreviateCwd,
   aggregateByCivilDay,
   attributeActivity,
+  assignCycleLanes,
+  buildCycleBands,
   densityStep,
+  firstParagraph,
+  formatMinutes,
+  groupNarration,
   lifelineExtent,
+  spanMinutes,
+  railDate,
+  readCycleBand,
+  type CycleCard,
   saysNothingHere,
   sessionSlug,
   sessionUlid,
@@ -64,8 +73,15 @@ function card(over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard {
     dependsOnSatisfied: true,
     effectiveHorizon: 'now',
     drifted: false,
+    isCycle: false,
+    cycleStart: null,
     ...over,
   }
+}
+
+/** A cycle as the `cycles` surface delivers it — just the span and a name. */
+function cycle(id: string, start: string | null, due: string | undefined): CycleCard {
+  return { id, name: id, cycleStart: start, due }
 }
 
 // ── Session parsing ──────────────────────────────────────────────────────────
@@ -116,8 +132,8 @@ describe('attributing activity to fibers', () => {
   })
   const digest = card({ id: 'work/arxiv/daily-digest', status: 'closed' })
   const morning = card({ id: 'loom/email/morning-post/refine' })
-  const ledger = card({ id: 'loom/felt-maintenance/ledger/sweep' })
-  const cards = [bmodes, digest, morning, ledger]
+  const ledgerCard = card({ id: 'loom/felt-maintenance/ledger/sweep' })
+  const cards = [bmodes, digest, morning, ledgerCard]
 
   it('joins on the ULID the session name carries', () => {
     const at = attributeActivity(
@@ -126,6 +142,63 @@ describe('attributing activity to fibers', () => {
     )
     expect(at.byCard.get(bmodes.id)).toHaveLength(1)
     expect(at.byCwd.size).toBe(0)
+  })
+
+  // Rung 0. The ledger is a recorded fact about whose work a session was; every
+  // rung below it is an inference from a name.
+  const ledger = (pairs: Record<string, { fiber: string; uid?: string }>) =>
+    new Map(Object.entries(pairs).map(([k, v]) => [k, { fiber: v.fiber, uid: v.uid ?? null }]))
+
+  it('joins through the session ledger before trying any name', () => {
+    // A session with no ULID and a cwd that names nothing — unreachable by the
+    // lower rungs, and exactly the actor the ledger exists for.
+    const at = attributeActivity(
+      [bucket(1, { s: 'pi-2f9c41', cwd: '/home/ada/work/photoz' })],
+      cards,
+      ledger({ 'pi-2f9c41': { fiber: morning.id } }),
+    )
+    expect(at.byCard.get(morning.id)).toHaveLength(1)
+    expect(at.byCwd.size).toBe(0)
+  })
+
+  it('lets the ledger outrank a name that would have resolved elsewhere', () => {
+    const at = attributeActivity(
+      [bucket(1, { s: 'morning-post-shuttle' })],
+      cards,
+      ledger({ 'morning-post-shuttle': { fiber: ledgerCard.id } }),
+    )
+    expect(at.byCard.get(ledgerCard.id)).toHaveLength(1)
+    expect(at.byCard.has(morning.id)).toBe(false)
+  })
+
+  it('pairs on the ULID when the ledger’s path has moved under it', () => {
+    const at = attributeActivity(
+      [bucket(1, { s: 'pi-2f9c41' })],
+      cards,
+      ledger({ 'pi-2f9c41': { fiber: 'some/old/path', uid: '01KVBR1F9BWBVKF97473PV67K8' } }),
+    )
+    expect(at.byCard.get(bmodes.id)).toHaveLength(1)
+  })
+
+  // The property the ledger must not break: it can move work between rows, and
+  // it can never invent one. A record for a fiber this board does not show must
+  // fall through to the honest cwd row rather than vanishing into a card that
+  // has no row to draw.
+  it('conjures no row for a ledger record whose fiber is off the board', () => {
+    // Deliberately a session name no lower rung can match either — otherwise
+    // this would pass on the slug rung and prove nothing about rung 0.
+    const at = attributeActivity(
+      [bucket(1, { s: 'pi-9a3f21', cwd: '/home/ada/elsewhere' })],
+      cards,
+      ledger({ 'pi-9a3f21': { fiber: 'loom/felt-maintenance/ledger/sweep-2019' } }),
+    )
+    expect(at.byCard.size).toBe(0)
+    expect(at.byCwd.get('/home/ada/elsewhere')).toHaveLength(1)
+  })
+
+  it('is a no-op when no ledger is supplied', () => {
+    const at = attributeActivity([bucket(1, { s: 'morning-post-shuttle' })], cards)
+    expect(at.byCard.get(morning.id)).toHaveLength(1)
   })
 
   it('falls back to the session slug when the name has no ULID', () => {
@@ -236,37 +309,51 @@ describe('folding buckets into civil days', () => {
     expect(new Date(2026, 2, 1).getTimezoneOffset()).not.toBe(0)
   })
 
-  it('keeps a late evening and an early morning on their own local days', () => {
+  // The page groups by 6am RAILS, not midnights, so that it agrees with Day and
+  // Week about which day a piece of work belongs to. Both halves of the old
+  // UTC-floor experiment still bite — the late-evening bucket is already
+  // tomorrow in UTC west of Greenwich, the small-hours one still yesterday east
+  // of it — and the rail adds its own claim on top: 01:00 is the night before.
+  it('keeps a late evening on its own day and folds the small hours backwards', () => {
     const before = { ...DST_DAY, d: DST_DAY.d - 1 }
     const after = { ...DST_DAY, d: DST_DAY.d + 1 }
     const days = aggregateByCivilDay([
-      // 23:30 the evening before the transition — already the next day in UTC
-      // west of Greenwich, which is the Los Angeles half of the experiment.
       bucket(localMs(before, 23, 30), { n: 3 }),
-      // 00:30 the morning after — still the previous day in UTC east of
-      // Greenwich, which is the Paris half.
+      // 00:30 the morning after the transition day: before 6am, so it belongs
+      // to the transition day's rail, NOT to its own calendar date.
       bucket(localMs(after, 0, 30), { n: 5 }),
     ])
-    expect([...days.keys()].sort()).toEqual([isoDayLocal(localMs(before, 23, 30)), isoDayLocal(localMs(after, 0, 30))])
     expect(days.get(isoDayLocal(localMs(before, 12)))?.agent).toBe(3)
-    expect(days.get(isoDayLocal(localMs(after, 12)))?.agent).toBe(5)
+    expect(days.get(isoDayLocal(localMs(DST_DAY, 12)))?.agent).toBe(5)
+    expect(days.has(isoDayLocal(localMs(after, 12)))).toBe(false)
   })
 
-  it('gives the 23-hour transition day exactly one column, and its neighbours their own', () => {
+  it('splits a rail at 06:00, not at midnight', () => {
+    const days = aggregateByCivilDay([
+      bucket(localMs(DST_DAY, 5, 59), { n: 1 }), // still the previous rail
+      bucket(localMs(DST_DAY, 6, 1), { n: 2 }), // the new one
+    ])
+    const yesterday = { ...DST_DAY, d: DST_DAY.d - 1 }
+    expect(days.get(isoDayLocal(localMs(yesterday, 12)))?.agent).toBe(1)
+    expect(days.get(isoDayLocal(localMs(DST_DAY, 12)))?.agent).toBe(2)
+  })
+
+  it('gives the 23-hour transition rail exactly one column, and its neighbours their own', () => {
     const before = { ...DST_DAY, d: DST_DAY.d - 1 }
     const after = { ...DST_DAY, d: DST_DAY.d + 1 }
     const days = aggregateByCivilDay([
-      bucket(localMs(before, 22), { n: 1 }),
-      bucket(localMs(DST_DAY, 1), { n: 2 }),
-      bucket(localMs(DST_DAY, 12), { n: 4 }),
-      bucket(localMs(DST_DAY, 23), { n: 8 }),
-      bucket(localMs(after, 4), { n: 16 }),
+      bucket(localMs(before, 22), { n: 1 }), // before's rail
+      bucket(localMs(DST_DAY, 1), { n: 2 }), // still before's rail — pre-6am
+      bucket(localMs(DST_DAY, 12), { n: 4 }), // the transition rail
+      bucket(localMs(DST_DAY, 23), { n: 8 }), // ditto
+      bucket(localMs(after, 4), { n: 16 }), // ditto — the small hours after it
+      bucket(localMs(after, 9), { n: 32 }), // and finally the next rail
     ])
     expect(days.size).toBe(3)
-    // The whole transition day folds into one cell, DST notwithstanding.
-    expect(days.get(isoDayLocal(localMs(DST_DAY, 12)))?.agent).toBe(2 + 4 + 8)
-    expect(days.get(isoDayLocal(localMs(before, 12)))?.agent).toBe(1)
-    expect(days.get(isoDayLocal(localMs(after, 12)))?.agent).toBe(16)
+    // The transition rail is 23 hours long and still exactly one cell.
+    expect(days.get(isoDayLocal(localMs(DST_DAY, 12)))?.agent).toBe(4 + 8 + 16)
+    expect(days.get(isoDayLocal(localMs(before, 12)))?.agent).toBe(1 + 2)
+    expect(days.get(isoDayLocal(localMs(after, 12)))?.agent).toBe(32)
   })
 
   it('separates the three kinds within a day', () => {
@@ -420,6 +507,224 @@ describe('dropping fibers that finished before the window', () => {
       saysNothingHere(closedLongAgo({ closedAt: noonOf(WINDOW_DAYS[22].iso) }), [], DAY_INDEX),
     ).toBe(false)
     expect(saysNothingHere(card({ id: 'open/one' }), [], DAY_INDEX)).toBe(false)
+  })
+})
+
+// ── Cycles ───────────────────────────────────────────────────────────────────
+
+/** A fixed "now" inside the fixture window, so the open-ended case (which
+ *  resolves its end against the clock) is deterministic. */
+const CYCLE_NOW = civilDayToLocalDate(WINDOW_DAYS[TODAY_IDX].iso)!.getTime() + 12 * 3_600_000
+
+describe('placing a cycle band on the day grid', () => {
+  const place = (start: string | null, due: string | undefined) =>
+    readCycleBand(cycle('c', start, due), WINDOW_DAYS, DAY_INDEX, CYCLE_NOW)
+
+  it('spans start to due', () => {
+    expect(place(WINDOW_DAYS[10].iso, WINDOW_DAYS[20].iso)).toMatchObject({
+      startIdx: 10,
+      endIdx: 20,
+      openStart: false,
+      openEnd: false,
+    })
+  })
+
+  it('draws a single day when only the end is known', () => {
+    // `cycleSpan` resolves a start-less cycle to one day at its end, so the
+    // band is a dot on that column rather than a span back to the window edge.
+    expect(place(null, WINDOW_DAYS[17].iso)).toMatchObject({
+      startIdx: 17,
+      endIdx: 17,
+      openStart: false,
+      openEnd: false,
+    })
+  })
+
+  it('runs an open-ended cycle to today with an open right edge', () => {
+    // This is also the state a freshly drawn cycle sits in between its two
+    // writes — start on disk, due not yet.
+    expect(place(WINDOW_DAYS[24].iso, undefined)).toMatchObject({
+      startIdx: 24,
+      endIdx: TODAY_IDX,
+      openStart: false,
+      openEnd: true,
+    })
+  })
+
+  it('clamps to the window edges and says which edge it ran past', () => {
+    const early = place('2026-01-04', WINDOW_DAYS[6].iso)
+    expect(early).toMatchObject({ startIdx: 0, endIdx: 6, openStart: true, openEnd: false })
+    const late = place(WINDOW_DAYS[38].iso, '2027-02-01')
+    expect(late).toMatchObject({ startIdx: 38, endIdx: 42, openStart: false, openEnd: true })
+    const spanning = place('2026-01-04', '2027-02-01')
+    expect(spanning).toMatchObject({ startIdx: 0, endIdx: 42, openStart: true, openEnd: true })
+  })
+
+  it('drops a cycle that misses the window on either side', () => {
+    expect(place('2026-01-01', '2026-01-20')).toBeNull()
+    expect(place('2027-01-01', '2027-01-20')).toBeNull()
+  })
+
+  it('drops a cycle with no dates at all', () => {
+    expect(place(null, undefined)).toBeNull()
+  })
+
+  it('never draws a negative-width band from contradictory dates', () => {
+    const band = place(WINDOW_DAYS[20].iso, WINDOW_DAYS[12].iso)
+    expect(band?.startIdx).toBe(20)
+    expect(band?.endIdx).toBe(20)
+  })
+
+  it('places bands in the future half — a cycle is a span, not a memory', () => {
+    expect(place(WINDOW_DAYS[TODAY_IDX + 2].iso, WINDOW_DAYS[TODAY_IDX + 9].iso)).toMatchObject({
+      startIdx: TODAY_IDX + 2,
+      endIdx: TODAY_IDX + 9,
+    })
+  })
+})
+
+describe('stacking overlapping cycles into lanes', () => {
+  const lanes = (spans: Array<[number, number]>) =>
+    assignCycleLanes(spans.map(([startIdx, endIdx]) => ({ startIdx, endIdx }))).map((b) => b.lane)
+
+  it('keeps disjoint cycles on one lane', () => {
+    expect(lanes([[0, 4], [5, 9], [10, 14]])).toEqual([0, 0, 0])
+  })
+
+  it('opens a lane per overlapping cycle', () => {
+    expect(lanes([[0, 10], [2, 12], [4, 14]])).toEqual([0, 1, 2])
+  })
+
+  it('reuses a lane the moment its band has ended', () => {
+    // Touching is not overlapping the other way round: [0,4] then [5,9] share.
+    // But [0,5] and [5,9] do overlap on day 5, so they must not.
+    expect(lanes([[0, 5], [5, 9]])).toEqual([0, 1])
+  })
+
+  it('shares the soonest-free lane past the cap rather than hiding a cycle', () => {
+    const assigned = lanes([[0, 20], [1, 20], [2, 20], [3, 20], [4, 20]])
+    expect(assigned).toHaveLength(5) // nothing dropped
+    expect(Math.max(...assigned)).toBe(2) // never exceeds MAX_CYCLE_LANES - 1
+  })
+
+  it('honours a caller-supplied cap', () => {
+    const assigned = assignCycleLanes(
+      [{ startIdx: 0, endIdx: 9 }, { startIdx: 1, endIdx: 9 }, { startIdx: 2, endIdx: 9 }],
+      2,
+    ).map((b) => b.lane)
+    expect(Math.max(...assigned)).toBe(1)
+  })
+
+  it('builds bands and lanes together, dropping the out-of-window ones', () => {
+    const bands = buildCycleBands(
+      [
+        cycle('a', WINDOW_DAYS[2].iso, WINDOW_DAYS[12].iso),
+        cycle('b', WINDOW_DAYS[6].iso, WINDOW_DAYS[18].iso),
+        cycle('gone', '2020-01-01', '2020-02-01'),
+      ],
+      WINDOW_DAYS,
+      DAY_INDEX,
+      CYCLE_NOW,
+    )
+    expect(bands.map((b) => b.id)).toEqual(['a', 'b'])
+    expect(bands.map((b) => b.lane)).toEqual([0, 1])
+  })
+})
+
+describe('which day the page calls today', () => {
+  it('is the rail that is running, not the calendar date, before 6am', () => {
+    // 01:00 — Day and Week are still on yesterday's rail, and so must this page
+    // be, or clicking its today header opens a rail that has not started.
+    const smallHours = new Date(2026, 6, 15, 1, 0, 0).getTime()
+    expect(isoDayLocal(railDate(smallHours).getTime())).toBe('2026-07-14')
+  })
+
+  it('is the calendar date once the rail has opened', () => {
+    expect(isoDayLocal(railDate(new Date(2026, 6, 15, 6, 1, 0).getTime()).getTime())).toBe(
+      '2026-07-15',
+    )
+    expect(isoDayLocal(railDate(new Date(2026, 6, 15, 23, 30, 0).getTime()).getTime())).toBe(
+      '2026-07-15',
+    )
+  })
+
+  it('lands at noon, the one wall-clock hour every DST day has', () => {
+    // A spring-forward day has no 02:00; anchoring the rail date at midnight
+    // and striding from it is how a day goes missing.
+    const d = railDate(new Date(DST_DAY.y, DST_DAY.m, DST_DAY.d, 14, 0, 0).getTime())
+    expect(d.getHours()).toBe(12)
+  })
+})
+
+// ── The look-back ────────────────────────────────────────────────────────────
+
+describe('composing an era’s look-back', () => {
+  it('counts minutes, not events — a busy minute is still one minute', () => {
+    const t = localMs(DST_DAY, 10)
+    const buckets = [
+      bucket(t, { k: 'agent', n: 40 }),
+      bucket(t, { k: 'agent', n: 7 }), // same minute, second bucket
+      bucket(t + 60_000, { k: 'agent', n: 1 }),
+      bucket(t + 120_000, { k: 'attention', n: 1 }),
+    ]
+    expect(spanMinutes(buckets, 'agent', t - 1, t + 300_000)).toBe(2)
+    expect(spanMinutes(buckets, 'attention', t - 1, t + 300_000)).toBe(1)
+  })
+
+  it('counts only what falls inside the span', () => {
+    const t = localMs(DST_DAY, 10)
+    const buckets = [bucket(t - 600_000, { k: 'agent' }), bucket(t, { k: 'agent' })]
+    expect(spanMinutes(buckets, 'agent', t - 1, t + 1)).toBe(1)
+  })
+
+  it('reads a duration the way a person says it', () => {
+    expect(formatMinutes(0)).toBe('—')
+    expect(formatMinutes(45)).toBe('45m')
+    expect(formatMinutes(200)).toBe('3h 20m')
+    expect(formatMinutes(120)).toBe('2h 0m')
+  })
+
+  it('gathers commits under the thing each was about', () => {
+    const groups = groupNarration([
+      { iso: 'x', subject: 'board: fold the masthead' },
+      { iso: 'x', subject: 'board: adaptive strip height' },
+      { iso: 'x', subject: 'daemon: owner-route the write plane' },
+      { iso: 'x', subject: 'no colon here' },
+    ])
+    expect(groups.map((g) => [g.slug, g.count])).toEqual([
+      ['board', 2],
+      ['daemon', 1],
+      ['elsewhere', 1],
+    ])
+    expect(groups[0].subjects).toEqual(['fold the masthead', 'adaptive strip height'])
+  })
+
+  it('keeps two subjects a group and four groups — a memoir, not a log', () => {
+    const many = Array.from({ length: 9 }, (_, i) => ({ iso: 'x', subject: `s${i}: did a thing` }))
+    const deep = Array.from({ length: 5 }, (_, i) => ({ iso: 'x', subject: `one: thing ${i}` }))
+    expect(groupNarration(many)).toHaveLength(4)
+    expect(groupNarration(deep)[0].subjects).toHaveLength(2)
+    // Trimming what is shown must never trim what is counted.
+    expect(groupNarration(deep)[0].count).toBe(5)
+  })
+
+  it('says a repeated message once, and lets the count carry the repetition', () => {
+    const groups = groupNarration(
+      Array.from({ length: 13 }, () => ({ iso: 'x', subject: 'board: fold the masthead' })),
+    )
+    expect(groups[0].count).toBe(13)
+    expect(groups[0].subjects).toEqual(['fold the masthead'])
+  })
+
+  it('takes the intention from the first real paragraph of a body', () => {
+    expect(firstParagraph('# Heading\n\nThe intention.\nSecond line.\n\nLater.')).toBe(
+      'The intention. Second line.',
+    )
+    // `Fiber.body` is the markdown AFTER the frontmatter, so there is no fence
+    // to strip — only headings and blank blocks stand between us and the line.
+    expect(firstParagraph('## Why\n\nBecause it was time.')).toBe('Because it was time.')
+    expect(firstParagraph(undefined)).toBe('')
+    expect(firstParagraph('\n\n   \n')).toBe('')
   })
 })
 

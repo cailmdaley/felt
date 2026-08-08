@@ -20,23 +20,27 @@
  * its real position on the rail. Conflating the two is the bug this whole
  * module is written around; read civilDay.ts before touching the arithmetic.
  *
- * DATA. One `activity` call and one `narration` call per refresh, both covering
- * the week's rail span — but the two routes take different KINDS of argument
- * (activity instants, narration bare civil days), so both are derived in one
- * place by `weekWindow`. Read its comment before changing either call.
+ * DATA. One `activity` call per refresh, over the week's rail span capped at
+ * now — see `weekWindow`. Week does NOT read narration: it once drew a commit
+ * subject per past row, but a single truncated subject read as "the name of one
+ * fiber" rather than as what the day was about, so the column went and the
+ * request went with it. Narration belongs to Day, which has the room to do it
+ * justice.
  */
 
 import './WeekView.css'
 
 import {
+  keystrokeIsSpokenFor,
   normalizeFocusDate,
   registerView,
   type TemporalView,
   type ViewContext,
 } from './ViewRegistry.js'
 import { createViewPage, type ViewPage } from './ViewPage.js'
-import type { ActivityBucket, ActivityResult, NarrationResult } from './TemporalData.js'
+import type { ActivityBucket, ActivityResult } from './TemporalData.js'
 import type { KanbanCard } from '../KanbanTypes.js'
+import { cycleSpan, type CycleSpan } from '../KanbanRules.js'
 import {
   civilDayToLocalDate,
   dueCivilDay,
@@ -52,11 +56,16 @@ import {
 export const RAIL_START_HOUR = 6
 
 /** How much time one raster tick stands for. The wire's minute buckets are
- *  folded into these, because a 24h rail is ~800px and a per-minute tick would
- *  be half a pixel — a smear, not a raster. 5 minutes gives 288 slots, ~2.8px
- *  apiece. This is a DRAWING quantum only; it never touches the arithmetic,
- *  which counts minutes (see BUCKET_MS). */
-const RASTER_SLOT_MS = 5 * 60_000
+ *  folded into these, because a per-minute tick on a 24h rail would be a
+ *  fraction of a pixel — a smear, not a raster.
+ *
+ *  FOUR minutes, not five: dropping the marginalia column gave the rails
+ *  ~200px, and the honest thing to spend that on is RESOLUTION rather than
+ *  thicker ink. 360 slots across ~1050px is ~2.9px apiece, which is what a
+ *  5-minute slot used to get at the old narrower width — same density to the
+ *  eye, a quarter more temporal detail. A DRAWING quantum only; it never
+ *  touches the arithmetic, which counts minutes (see BUCKET_MS). */
+const RASTER_SLOT_MS = 4 * 60_000
 
 /** Where an undated obligation sits on the rail — mid-morning, 10am. */
 const MID_MORNING_FRACTION = (10 - RAIL_START_HOUR) / 24
@@ -72,6 +81,24 @@ const FETCH_CAP_QUANTUM_MS = 5 * 60_000
 
 /** Labels under the shared tick row, one per 4h rule. */
 const TICK_LABELS = ['6am', '10am', '2pm', '6pm', '10pm', '2am', '6am']
+
+/**
+ * What the three raster pigments mean, in words.
+ *
+ * SHARED VERBATIM WITH DayView — one phrasing across the board, so the same
+ * hue is never explained two ways. Change it here and there together.
+ *
+ * MIND THE NAMES. The wire's kind `attention` is the human at the keyboard
+ * ("you steering"); the kind `notify` is a worker raising its hand, which is
+ * what "attention called" names. The word `attention` therefore appears in the
+ * vocabulary AND in the gloss of the OTHER kind, which makes this exactly the
+ * pairing someone tidies backwards. It is correct as written.
+ */
+const KEY_ITEMS: Array<{ kind: ActivityBucket['k']; label: string }> = [
+  { kind: 'agent', label: 'agents working' },
+  { kind: 'attention', label: 'you steering' },
+  { kind: 'notify', label: 'attention called' },
+]
 
 // ── Week arithmetic — civil days only ────────────────────────────────────────
 //
@@ -143,6 +170,30 @@ export function weekMondayForFocus(focusDate: string | null, nowMs: number): str
   return mondayOfWeek(normalizeFocusDate(focusDate) ?? railCivilDay(nowMs, RAIL_START_HOUR))
 }
 
+/**
+ * What paging ‹ › (or a swipe, or an arrow key) writes back to the cursor.
+ *
+ * THE SHARED RULE, which DayView's `stepTarget` states at its own scale: a
+ * paging affordance that lands back on the view's LIVE PRESENT hands the cursor
+ * to null rather than pinning it to a date. Null keeps tracking the clock; a
+ * date does not, and a cursor pinned to "today's date" goes quietly stale at
+ * the next boundary.
+ *
+ * The two views differ only in what their present IS. Day's unit is a day, so
+ * it returns null when the step lands on today. Week's unit is a week, so it
+ * returns null when the step lands anywhere in the current week — the same
+ * predicate the week label uses to decide whether it is showing "This week",
+ * so the label and the cursor can never disagree. Were this Day's literal rule
+ * instead, paging out and back from a Wednesday would leave the cursor pinned
+ * to that Wednesday while the header still claimed the live week, and pressing
+ * `3` would open Day on Wednesday rather than today.
+ */
+export function weekStepTarget(focusDate: string | null, delta: number, nowMs: number): string | null {
+  const from = normalizeFocusDate(focusDate) ?? railCivilDay(nowMs, RAIL_START_HOUR)
+  const next = shiftCivilDay(from, delta * 7)
+  return mondayOfWeek(next) === weekMondayForFocus(null, nowMs) ? null : next
+}
+
 export interface RailBounds {
   /** Local 6am on the day — the rail's left edge. */
   startMs: number
@@ -210,9 +261,6 @@ export interface WeekWindow {
    *  greater than `fromMs` the week is wholly future and must not be asked
    *  for at all. */
   activityToMs: number
-  /** `from` / `to` for the narration call — INCLUSIVE BARE CIVIL DAYS. */
-  narrationFrom: string
-  narrationTo: string
 }
 
 /**
@@ -246,7 +294,7 @@ export interface WeekWindow {
 export function weekWindow(monday: string, nowMs: number): WeekWindow {
   const days = weekCivilDays(monday)
   if (days.length !== 7) {
-    return { days: [], fromMs: 0, toMs: 0, activityToMs: 0, narrationFrom: '', narrationTo: '' }
+    return { days: [], fromMs: 0, toMs: 0, activityToMs: 0 }
   }
   const fromMs = railBounds(days[0]).startMs
   const toMs = railBounds(days[6]).endMs
@@ -255,8 +303,6 @@ export function weekWindow(monday: string, nowMs: number): WeekWindow {
     fromMs,
     toMs,
     activityToMs: Math.min(toMs, Math.ceil(nowMs / FETCH_CAP_QUANTUM_MS) * FETCH_CAP_QUANTUM_MS),
-    narrationFrom: days[0],
-    narrationTo: shiftCivilDay(days[6], 1),
   }
 }
 
@@ -333,6 +379,26 @@ export function formatSpan(ms: number): string {
   return `${h}h ${m}m`
 }
 
+/**
+ * The one line of right-edge text a row carries.
+ *
+ * Past and today report how the day went; a future row reports nothing, because
+ * nothing has happened on it yet and `—` there would read as "no activity"
+ * rather than "not yet". Today alone appends the aloft count.
+ */
+export function annotationFor(
+  spend: { totalMs: number } | null,
+  isPast: boolean,
+  isToday: boolean,
+  aloft: number,
+): string {
+  if (!isPast && !isToday) return ''
+  const body = spend && spend.totalMs > 0
+    ? `${formatSpan(spend.totalMs)} · ${dayWeight(spend.totalMs)}`
+    : '—'
+  return isToday && aloft > 0 ? `${body} · ${aloft} aloft` : body
+}
+
 /** `12h` · `45m` — the header's coarser hand. */
 function formatCoarseSpan(ms: number): string {
   const minutes = Math.round(ms / 60_000)
@@ -341,38 +407,134 @@ function formatCoarseSpan(ms: number): string {
   return `${Math.round(minutes / 60)}h`
 }
 
-// ── Narration ────────────────────────────────────────────────────────────────
+// ── Swipe paging ─────────────────────────────────────────────────────────────
 
-/** `board: fold the masthead` → `board — fold the masthead`. A subject with no
- *  slug prefix is returned as written. */
-export function readableSubject(subject: string): string {
-  const at = subject.indexOf(': ')
-  if (at <= 0) return subject.trim()
-  const slug = subject.slice(0, at).trim()
-  // A prefix with a space in it is a sentence, not a slug — leave it alone.
-  if (!slug || /\s/.test(slug)) return subject.trim()
-  return `${slug} — ${subject.slice(at + 2).trim()}`
+/** Horizontal distance one page costs. Roughly a deliberate two-finger flick;
+ *  low enough to feel willing, high enough that a diagonal scroll never pages. */
+export const SWIPE_THRESHOLD_PX = 120
+/** Quiet time that ends a gesture. Trackpads emit wheel events in a burst with
+ *  a long inertial tail, so "the gesture ended" is silence, not a distance. */
+export const SWIPE_SETTLE_MS = 200
+/** How far the grid may lean while a swipe accumulates. */
+export const SWIPE_NUDGE_CAP_PX = 24
+/** Fraction of the accumulated distance the lean shows. Well under 1: the grid
+ *  hints that it is attached to the finger, it does not track it. */
+const SWIPE_NUDGE_RATIO = 0.25
+
+export interface SwipeState {
+  /** Signed distance accumulated since the last page or settle. */
+  offset: number
+  /** True after a page fires, until the gesture goes quiet. */
+  locked: boolean
+  /** When the last wheel event arrived. */
+  lastMs: number
+}
+
+export const IDLE_SWIPE: SwipeState = { offset: 0, locked: false, lastMs: 0 }
+
+export interface SwipeAdvance {
+  state: SwipeState
+  /** -1 (previous week), +1 (next), or 0 — this event paged or it did not. */
+  step: number
+  /** Signed px to translate the grid by, for the attached feel. */
+  nudge: number
 }
 
 /**
- * Up to `limit` subjects that stand for the day. Commits cluster by slug, so
- * the day's shape is "which slugs did the work touch" — take the busiest slugs
- * and show each one's first subject. Ties keep the order the day ran in.
+ * Fold one wheel event into the swipe gesture.
+ *
+ * ONE PHYSICAL SWIPE IS ONE WEEK. A trackpad flick delivers dozens of wheel
+ * events and keeps delivering them, decaying, long after the fingers lift, so
+ * a bare threshold would page four or five times from a single gesture. The
+ * lock is what prevents that: once a page fires the accumulator stops counting
+ * and only silence — {@link SWIPE_SETTLE_MS} without an event — reopens it.
+ *
+ * Pure, and takes its clock as an argument, so the lockout is testable without
+ * a trackpad or a timer.
  */
-export function pickDaySubjects(subjects: string[], limit = 2): string[] {
-  const bySlug = new Map<string, { first: string; count: number; order: number }>()
-  for (const subject of subjects) {
-    const at = subject.indexOf(': ')
-    const slug = at > 0 && !/\s/.test(subject.slice(0, at)) ? subject.slice(0, at) : subject
-    const hit = bySlug.get(slug)
-    if (hit) hit.count += 1
-    else bySlug.set(slug, { first: subject, count: 1, order: bySlug.size })
+export function advanceSwipe(state: SwipeState, deltaX: number, atMs: number): SwipeAdvance {
+  // Silence since the last event means the previous gesture is over, whatever
+  // it left behind.
+  const settled = atMs - state.lastMs >= SWIPE_SETTLE_MS
+  const base: SwipeState = settled ? { offset: 0, locked: false, lastMs: atMs } : { ...state, lastMs: atMs }
+
+  if (base.locked) return { state: base, step: 0, nudge: 0 }
+
+  const offset = base.offset + deltaX
+  if (Math.abs(offset) >= SWIPE_THRESHOLD_PX) {
+    return {
+      state: { offset: 0, locked: true, lastMs: atMs },
+      step: offset > 0 ? 1 : -1,
+      nudge: 0,
+    }
   }
-  return [...bySlug.values()]
-    .sort((a, b) => (b.count - a.count) || (a.order - b.order))
-    .slice(0, limit)
-    .map((entry) => readableSubject(entry.first))
+  return {
+    state: { ...base, offset },
+    step: 0,
+    // Negated: swiping right-to-left (positive deltaX) walks FORWARD in time,
+    // so the sheet slides left and the next week comes in from the right.
+    nudge: clamp(-offset * SWIPE_NUDGE_RATIO, -SWIPE_NUDGE_CAP_PX, SWIPE_NUDGE_CAP_PX),
+  }
 }
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value))
+}
+
+// ── Cycles ───────────────────────────────────────────────────────────────────
+
+/**
+ * The span a cycle CARD covers, via the rule KanbanRules owns.
+ *
+ * `cycleSpan` there takes a fiber's `start`/`due`; a card carries the same two
+ * civil days as `cycleStart`/`due`. Going through it rather than reading the
+ * fields directly is deliberate — it owns the three degenerate cases (no start,
+ * no end, neither), and a second reading of them here would be a second rule to
+ * keep in step.
+ */
+export function spanOfCycleCard(card: KanbanCard, nowMs: number): CycleSpan | null {
+  if (!card.isCycle) return null
+  return cycleSpan({ start: card.cycleStart ?? undefined, due: card.due }, nowMs)
+}
+
+/**
+ * The cycles the shown week falls inside, soonest-started first.
+ *
+ * Overlap is inclusive at both ends and asked in civil days, which compare
+ * correctly as strings because they are fixed-width and zero-padded. A cycle
+ * ending on the Monday and one starting on the Sunday both count — the week
+ * touches them, which is what the header is asking.
+ *
+ * An OPEN-ENDED cycle has no right edge yet. `cycleSpan` clamps its `end` to
+ * today so a view has something concrete to draw, but for intersection that
+ * clamp would be a lie in two directions: it would drop every future week from
+ * a cycle that is still running, and — where the cycle starts later today or
+ * later this week — it would invert the span and match on the inversion rather
+ * than on the cycle. So an open cycle is treated as covering everything from
+ * its start onward, which is what "still running" means.
+ */
+export function cyclesInWeek(
+  cycles: readonly KanbanCard[],
+  days: readonly string[],
+  nowMs: number,
+): KanbanCard[] {
+  if (days.length === 0) return []
+  const weekStart = days[0]
+  const weekEnd = days[days.length - 1]
+  return cycles
+    .map((card) => ({ card, span: spanOfCycleCard(card, nowMs) }))
+    .filter(
+      (entry): entry is { card: KanbanCard; span: CycleSpan } =>
+        entry.span !== null &&
+        entry.span.start <= weekEnd &&
+        (entry.span.openEnded || entry.span.end >= weekStart),
+    )
+    .sort((a, b) => a.span.start.localeCompare(b.span.start) || a.card.name.localeCompare(b.card.name))
+    .map((entry) => entry.card)
+}
+
+/** How many cycle names the header shows before it starts counting. */
+const CYCLE_CHIP_LIMIT = 2
 
 // ── Future marks ─────────────────────────────────────────────────────────────
 
@@ -405,6 +567,12 @@ export function marksForDay(cards: KanbanCard[], day: string, bounds: RailBounds
   const marks: DayMark[] = []
   for (const card of cards) {
     if (card.status === 'closed') continue
+    // A cycle is a span of time, not an obligation, and its `due` is the span's
+    // END rather than a deadline — drawn as a ◴ it would read as work owed on
+    // the day the cycle happens to close. `classifyFiber` keeps cycles off
+    // every lifecycle surface so they should never reach here, but this is the
+    // one place where letting one through would silently invent a commitment.
+    if (card.isCycle) continue
     // Rail membership, NOT the calendar day. A launch is an instant and is
     // drawn at its real rail fraction, so it has to be selected by the same
     // predicate the activity and narration ingesters use — otherwise a 03:00
@@ -448,12 +616,6 @@ interface LoadedActivity {
   print: string
 }
 
-interface LoadedNarration {
-  monday: string
-  byDay: Map<string, string[]>
-  print: string
-}
-
 interface WeekRow {
   day: string
   root: HTMLElement
@@ -461,7 +623,6 @@ interface WeekRow {
   /** Everything that is patched: rasters, marks, the now line. */
   paint: HTMLElement
   annot: HTMLElement
-  margin: HTMLElement
   sig: string
 }
 
@@ -485,21 +646,73 @@ class WeekView implements TemporalView {
 
   private label: HTMLElement | null = null
   private totals: HTMLElement | null = null
+  private cycles: HTMLElement | null = null
+  /** Last-rendered cycle chip key, so the header does not churn every poll. */
+  private cyclesKey = ''
+  private grid: HTMLElement | null = null
+  private key: HTMLElement | null = null
   private rows: WeekRow[] = []
 
+  /** Horizontal-swipe gesture state, and the timer that detects its end. */
+  private swipe: SwipeState = IDLE_SWIPE
+  private swipeSettleTimer: ReturnType<typeof setTimeout> | null = null
+
   private activity: LoadedActivity | null = null
-  private narration: LoadedNarration | null = null
   /** Bumped when loaded data actually changes; part of every row signature. */
   private dataGen = 0
   private activityKey = ''
 
+  /**
+   * ‹ › paging, and `t` for today — the same binding DayView carries, so one
+   * key means "back to now" wherever you are in the temporal views.
+   *
+   * The guard is the SHARED one. This file used to hold its own copy that knew
+   * only Radix's `[data-state="open"]`, which let a bare arrow page the week out
+   * from under the hand-rolled Stash form — it is `aria-modal` and carries no
+   * data-state at all.
+   */
   private readonly onKeyDown = (e: KeyboardEvent): void => {
     if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return
-    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight' && e.key !== 't') return
     if (!this.page?.root.isConnected) return
     if (keystrokeIsSpokenFor()) return
     e.preventDefault()
-    this.goWeek(e.key === 'ArrowLeft' ? -1 : 1)
+    if (e.key === 't') this.goToday()
+    else this.goWeek(e.key === 'ArrowLeft' ? -1 : 1)
+  }
+
+  /**
+   * Trackpad paging. Only a horizontally-DOMINANT wheel event is ours; anything
+   * with more vertical than horizontal travel belongs to the page's own scroll
+   * and is left entirely alone, unprevented.
+   */
+  private readonly onWheel = (e: WheelEvent): void => {
+    if (Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return
+    e.preventDefault()
+    const { state, step, nudge } = advanceSwipe(this.swipe, e.deltaX, e.timeStamp)
+    this.swipe = state
+    if (step !== 0) {
+      this.leanGrid(0, true)
+      this.goWeek(step)
+    } else {
+      this.leanGrid(nudge, false)
+    }
+    // The gesture ends in silence, so the only way to notice is to wait for it.
+    if (this.swipeSettleTimer !== null) clearTimeout(this.swipeSettleTimer)
+    this.swipeSettleTimer = setTimeout(() => {
+      this.swipe = IDLE_SWIPE
+      this.leanGrid(0, true)
+      this.swipeSettleTimer = null
+    }, SWIPE_SETTLE_MS)
+  }
+
+  /** Tip the sheet a few px so the gesture feels attached. `spring` eases the
+   *  return; the lean itself tracks the finger and must not lag behind it. */
+  private leanGrid(px: number, spring: boolean): void {
+    const grid = this.grid
+    if (!grid) return
+    grid.classList.toggle('wk-grid-springing', spring)
+    grid.style.transform = px === 0 ? '' : `translateX(${px.toFixed(1)}px)`
   }
 
   mount(host: HTMLElement, ctx: ViewContext): void {
@@ -508,6 +721,9 @@ class WeekView implements TemporalView {
     page.titleRow.append(this.buildHead())
     host.append(page.root)
     document.addEventListener('keydown', this.onKeyDown)
+    // On the body, not the grid: `ensureShell` replaces the grid every time the
+    // week changes, and a listener on it would be swept away by the first page.
+    page.body.addEventListener('wheel', this.onWheel, { passive: false })
     this.refresh(ctx)
   }
 
@@ -524,11 +740,19 @@ class WeekView implements TemporalView {
 
   unmount(): void {
     document.removeEventListener('keydown', this.onKeyDown)
+    this.page?.body.removeEventListener('wheel', this.onWheel)
+    if (this.swipeSettleTimer !== null) clearTimeout(this.swipeSettleTimer)
+    this.swipeSettleTimer = null
+    this.swipe = IDLE_SWIPE
+    this.grid = null
     this.page?.root.remove()
     this.page = null
     this.ctx = null
     this.label = null
     this.totals = null
+    this.cycles = null
+    this.cyclesKey = ''
+    this.key = null
     this.rows = []
     this.shellMonday = null
     this.activityKey = ''
@@ -558,7 +782,13 @@ class WeekView implements TemporalView {
     totals.className = 'wk-totals'
     this.totals = totals
 
-    head.append(nav, totals)
+    // Which cycle(s) this week falls inside — the week's place in something
+    // longer than itself, in the marginal hand rather than the technical one.
+    const cycles = document.createElement('div')
+    cycles.className = 'wk-cycles'
+    this.cycles = cycles
+
+    head.append(nav, totals, cycles)
     return head
   }
 
@@ -571,8 +801,7 @@ class WeekView implements TemporalView {
   private goWeek(delta: number): void {
     const ctx = this.ctx
     if (!ctx) return
-    const focus = normalizeFocusDate(ctx.focusDate) ?? railCivilDay(Date.now(), RAIL_START_HOUR)
-    ctx.setFocusDate(shiftCivilDay(focus, delta * 7))
+    ctx.setFocusDate(weekStepTarget(ctx.focusDate, delta, Date.now()))
   }
 
   /** Back to the live present — null, not today's date, so the cursor keeps
@@ -602,16 +831,33 @@ class WeekView implements TemporalView {
     }
 
     grid.append(buildTickRow())
+    this.key = buildKeyRow()
+    grid.append(this.key)
     page.body.append(grid)
+    this.grid = grid
     this.shellMonday = this.monday
 
     const date = civilDayToLocalDate(this.monday)
     if (this.label && date) {
       this.label.textContent = `Week of ${date.toLocaleDateString(undefined, { month: 'long', day: 'numeric' })}`
-      const isCurrent = this.monday === weekMondayForFocus(null, Date.now())
-      this.label.classList.toggle('wk-weeklabel-away', !isCurrent)
-      this.label.title = isCurrent ? 'This week' : 'Back to this week'
     }
+  }
+
+  /**
+   * Whether the shown week is the live one — repainted every refresh, NOT once
+   * per shell.
+   *
+   * The week's NAME only changes when the week does, so it belongs in the
+   * shell. This does not: it compares the shown week against the clock, and the
+   * clock moves while the shell stands still. With the cursor pinned to a date,
+   * `this.monday` never changes, `ensureShell` early-returns, and a board left
+   * open across a Sunday midnight went on calling last week "This week".
+   */
+  private paintWeekLabelState(): void {
+    if (!this.label) return
+    const isCurrent = this.monday === weekMondayForFocus(null, Date.now())
+    this.label.classList.toggle('wk-weeklabel-away', !isCurrent)
+    this.label.title = isCurrent ? 'This week' : 'Back to this week'
   }
 
   private buildRow(day: string): WeekRow {
@@ -659,20 +905,16 @@ class WeekView implements TemporalView {
 
     const annot = document.createElement('div')
     annot.className = 'wk-annot'
-    const margin = document.createElement('div')
-    margin.className = 'wk-margin'
-
-    root.append(label, rail, annot, margin)
-    return { day, root, rail, paint, annot, margin, sig: '' }
+    root.append(label, rail, annot)
+    return { day, root, rail, paint, annot, sig: '' }
   }
 
   // ── Data ───────────────────────────────────────────────────────────────────
 
   /**
-   * Ask for the week's activity and narration. Both calls go out on every
-   * refresh — the fetchers memoize per argument tuple, so a repeat is free —
-   * and land into `this.activity` / `this.narration` only if the week they were
-   * asked for is still the week on screen.
+   * Ask for the week's activity. The call goes out on every refresh — the
+   * fetcher memoizes per argument tuple, so a repeat is free — and lands into
+   * `this.activity` only if the week it was asked for is still on screen.
    */
   private load(ctx: ViewContext): void {
     const monday = this.monday
@@ -696,9 +938,6 @@ class WeekView implements TemporalView {
       })
     }
 
-    void ctx.narration(win.narrationFrom, win.narrationTo).then((res) => {
-      if (this.monday === monday) this.acceptNarration(monday, win.days, res)
-    })
   }
 
   private acceptActivity(monday: string, days: string[], res: ActivityResult): void {
@@ -723,25 +962,6 @@ class WeekView implements TemporalView {
     this.paint()
   }
 
-  private acceptNarration(monday: string, days: string[], res: NarrationResult): void {
-    const byDay = new Map<string, string[]>()
-    const edges = days.map((day) => ({ day, bounds: railBounds(day) }))
-    for (const commit of res.commits) {
-      const at = instantMs(commit.iso)
-      if (at === undefined) continue
-      const hit = edges.find((e) => at >= e.bounds.startMs && at < e.bounds.endMs)
-      if (!hit) continue
-      const list = byDay.get(hit.day)
-      if (list) list.push(commit.subject)
-      else byDay.set(hit.day, [commit.subject])
-    }
-    const print = `${res.commits.length}:${res.commits.at(-1)?.iso ?? ''}`
-    if (this.narration?.monday === monday && this.narration.print === print) return
-    this.narration = { monday, byDay, print }
-    this.dataGen += 1
-    this.paint()
-  }
-
   // ── Paint ──────────────────────────────────────────────────────────────────
 
   private paint(): void {
@@ -756,7 +976,8 @@ class WeekView implements TemporalView {
     // midnight and 6am those are different rows, and the live one is the rail's.
     const todayCivil = railCivilDay(now, RAIL_START_HOUR)
     const activity = this.activity?.monday === this.monday ? this.activity : null
-    const narration = this.narration?.monday === this.monday ? this.narration : null
+
+    this.paintWeekLabelState()
 
     if (this.totals) {
       const week = activity?.week
@@ -764,6 +985,14 @@ class WeekView implements TemporalView {
         ? `attention ${formatCoarseSpan(week.attentionMs)} · agents ${formatCoarseSpan(week.agentMs)}`
         : ''
     }
+
+    // From `response.cycles`, NOT `ctx.cards`: a cycle is a span of time rather
+    // than a piece of work, and `classifyFiber` keeps it off every lifecycle
+    // surface, so `collectCards` never sees one.
+    // Only explain ink that is on the page.
+    if (this.key) this.key.style.display = (activity?.week.totalMs ?? 0) > 0 ? '' : 'none'
+
+    this.paintCycles(cyclesInWeek(ctx.response.cycles ?? [], this.rows.map((r) => r.day), now))
 
     const inFlight = ctx.response.now.inFlight
 
@@ -801,38 +1030,54 @@ class WeekView implements TemporalView {
         row.paint.append(nowLine)
       }
 
+      // The only right-edge text now. Today additionally carries how many
+      // workers are up: the seam and the live rasters say that SOMETHING is
+      // running, and a count is the one thing they cannot say. Not their names
+      // — a name at this size was the column we just removed.
       const spend = activity ? summarizeSpend(buckets) : null
-      row.annot.textContent =
-        isPast || isToday
-          ? spend && spend.totalMs > 0
-            ? `${formatSpan(spend.totalMs)} · ${dayWeight(spend.totalMs)}`
-            : '—'
-          : ''
-
-      row.margin.className = 'wk-margin'
-      row.margin.textContent = ''
-      if (isToday) {
-        row.margin.classList.add('wk-margin-live')
-        row.margin.textContent = inFlight.map((c) => c.name).join(' · ')
-      } else if (isPast) {
-        row.margin.textContent = pickDaySubjects(narration?.byDay.get(row.day) ?? []).join(' · ')
-      } else {
-        row.margin.classList.add('wk-margin-marks')
-        // The glyph keeps its rail colour in the margin, so the line and the
-        // row read as one statement rather than a legend and a caption.
-        visible.forEach((mark, i) => {
-          if (i > 0) row.margin.append(document.createTextNode(' · '))
-          const glyph = document.createElement('span')
-          glyph.className = `wk-margin-glyph wk-mark-${mark.kind}`
-          glyph.textContent = mark.glyph
-          row.margin.append(glyph, document.createTextNode(` ${mark.label}`))
-        })
-      }
-      row.margin.title = row.margin.textContent ?? ''
+      row.annot.textContent = annotationFor(spend, isPast, isToday, inFlight.length)
       row.root.setAttribute(
         'aria-label',
-        `${row.day} — ${row.annot.textContent || 'no activity'}${row.margin.textContent ? `; ${row.margin.textContent}` : ''}`,
+        `${row.day} — ${row.annot.textContent || 'no activity'}${
+          visible.length > 0 ? `; ${visible.map((m) => `${m.kind} ${m.label}`).join(', ')}` : ''
+        }`,
       )
+    }
+  }
+
+  /**
+   * "· in Sprint 14, Q3 push +1" — the week's place in something longer than
+   * itself. Two names, then a count: the header states which cycles are in
+   * play, it does not list them.
+   */
+  private paintCycles(cycles: KanbanCard[]): void {
+    const host = this.cycles
+    if (!host) return
+    const key = cycles.map((c) => c.id).join(',')
+    if (this.cyclesKey === key) return
+    this.cyclesKey = key
+
+    host.textContent = ''
+    if (cycles.length === 0) return
+
+    host.append(document.createTextNode('· in '))
+    cycles.slice(0, CYCLE_CHIP_LIMIT).forEach((card, i) => {
+      if (i > 0) host.append(document.createTextNode(', '))
+      const chip = document.createElement('button')
+      chip.type = 'button'
+      chip.className = 'wk-cycle'
+      chip.textContent = card.name
+      chip.title = `Open ${card.name}`
+      chip.addEventListener('click', () => this.ctx?.openCard(card.id))
+      host.append(chip)
+    })
+    const overflow = cycles.length - CYCLE_CHIP_LIMIT
+    if (overflow > 0) {
+      const more = document.createElement('span')
+      more.className = 'wk-cycle-more'
+      more.textContent = ` +${overflow}`
+      more.title = cycles.slice(CYCLE_CHIP_LIMIT).map((c) => c.name).join(' · ')
+      host.append(more)
     }
   }
 
@@ -892,8 +1137,27 @@ function buildTickRow(): HTMLElement {
     rail.append(tick)
   })
 
-  row.append(rail, document.createElement('div'), document.createElement('div'))
+  row.append(rail, document.createElement('div'))
   return row
+}
+
+/**
+ * The key. Rendered only when there are rasters to explain — a week wholly in
+ * the future draws no ink, and a legend for marks that are not on the page is
+ * the same noise the de-vibing removed.
+ */
+function buildKeyRow(): HTMLElement {
+  const key = document.createElement('div')
+  key.className = 'wk-key'
+  for (const { kind, label } of KEY_ITEMS) {
+    const item = document.createElement('span')
+    item.className = 'wk-key-item'
+    const glyph = document.createElement('span')
+    glyph.className = `wk-key-glyph wk-key-${kind}`
+    item.append(glyph, document.createTextNode(label))
+    key.append(item)
+  }
+  return key
 }
 
 /**
@@ -939,22 +1203,6 @@ function paintRaster(
       host.append(tick)
     }
   }
-}
-
-/** The view's own copy of the board's "this keystroke belongs to someone else"
- *  guard — a text field, a Radix dialog, or the fiber-detail panel layered over
- *  the board. KanbanModal keeps its version private, and a shared-file edit is
- *  not this view's to make. */
-function keystrokeIsSpokenFor(): boolean {
-  const active = document.activeElement as HTMLElement | null
-  if (active) {
-    const tag = active.tagName
-    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true
-    if (active.isContentEditable) return true
-  }
-  if (document.querySelector('[role="dialog"][data-state="open"]')) return true
-  if (document.querySelector('.kbn-detail-overlay')) return true
-  return false
 }
 
 registerView(new WeekView())

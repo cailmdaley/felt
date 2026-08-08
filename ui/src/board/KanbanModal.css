@@ -577,13 +577,29 @@
   padding-bottom: 3px;
   border-bottom: 0.5px solid rgba(122, 111, 92, 0.20);
 }
+/* Containment path. Mono and small so a split key (`science/unions`) stays
+   scannable at a glance; the parent segments recede so the eye lands on the
+   segment that distinguishes this cluster from its siblings. */
 .kbn-cluster-name {
-  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
-  font-size: 13px;
-  font-weight: 500;
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
   color: #1B1611;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
+.kbn-cluster-name-parents { color: #A89B83; }
+.kbn-cluster-name-leaf { font-weight: 600; }
 .kbn-cluster-cold .kbn-cluster-name { color: #7A6F5C; }
+.kbn-cluster-cold .kbn-cluster-name-parents { color: #B6AA95; }
+/* "+N more" on a cluster that could not be split any deeper. Sits flush left
+   under the four it does show. */
+.kbn-cluster-more {
+  margin-top: 3px;
+  margin-left: 0;
+}
 .kbn-cluster-count {
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
   font-size: 9px;
@@ -628,6 +644,10 @@
   cursor: pointer;
   line-height: 1.28;
 }
+/* `display: flex` above outranks the UA's `[hidden] { display: none }`, so the
+   overflow items past "+N more" stayed visible while reporting themselves
+   hidden. Restate it at matching specificity. */
+.kbn-cluster-item[hidden] { display: none; }
 .kbn-cluster-item:hover {
   color: #1B1611;
   background: rgba(232, 220, 193, 0.5);
@@ -1588,6 +1608,10 @@
   letter-spacing: 0.02em;
 }
 .kbn-error {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
   margin: 24px;
   padding: 16px;
   border: 1px solid rgba(196, 147, 51, 0.4);
@@ -1596,6 +1620,27 @@
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
   font-size: 13px;
 }
+/* The error state replaces the whole Desk, taking the column heads — and with
+   them the only refresh control — off screen. This is that control. */
+.kbn-error-retry {
+  flex: 0 0 auto;
+  padding: 3px 12px;
+  background: rgba(255, 251, 237, 0.9);
+  border: 0.5px solid rgba(196, 147, 51, 0.55);
+  border-radius: 11px;
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: #8C6A24;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.kbn-error-retry:hover:not(:disabled) {
+  background: rgba(196, 147, 51, 0.16);
+  border-color: rgba(196, 147, 51, 0.8);
+}
+.kbn-error-retry:disabled { opacity: 0.6; cursor: default; }
+.kbn-error-retry:focus-visible { outline: 1px dashed #9A7B35; outline-offset: 2px; }
 
 /* Temper / Compost inline in the meta row (awaiting-review cards only).
    Sit directly left of the date stamp; inherit .kbn-action base chrome.

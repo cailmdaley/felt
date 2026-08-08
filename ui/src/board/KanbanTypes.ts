@@ -192,6 +192,32 @@ export interface KanbanCard {
   drifted: boolean
   /** Top-level `cold:` flag; held-open cluster marker on stashed cards. */
   cold?: boolean
+  /**
+   * True when the fiber carries the `cycle` tag — a named span of time drawn as
+   * a band by the temporal views, not a piece of work. A cycle card appears
+   * ONLY in `KanbanResponse.cycles`; `classifyFiber` keeps it out of every
+   * lifecycle column, so no desk surface and no column count ever sees one.
+   */
+  /**
+   * Other hosts that also serve this fiber (a git-synced store mirrored across
+   * daemons). The board renders ONE card — the locally-owned or freshest row,
+   * per `dedupeMirroredRows` — and names the rest here, so a mirrored fiber
+   * reads as one thing living in several places rather than as duplicate work.
+   * Absent for the ordinary single-origin fiber.
+   */
+  mirroredOrigins?: string[]
+  isCycle: boolean
+  /**
+   * The cycle's opening edge as a BARE CIVIL DAY (`YYYY-MM-DD`), already
+   * normalized from frontmatter `start:` — do NOT re-parse it with `new Date`,
+   * which reads a civil day as UTC midnight and labels it a day early west of
+   * Greenwich (see civilDay.ts). Null on a non-cycle card, and on a cycle whose
+   * `start:` is absent or unreadable — `cycleSpan` in KanbanRules resolves that
+   * case (and the open-ended one) into two concrete days for drawing.
+   *
+   * The closing edge is plain `due`, which is already on this card.
+   */
+  cycleStart: string | null
 }
 
 /**
@@ -235,6 +261,17 @@ export interface KanbanResponse {
    * umbrella roles. Dispatchable on demand; the poller never auto-fires them.
    * A *running* pinned role shows live in `now.inFlight` instead. */
   pinned: KanbanCard[]
+  /**
+   * Cycles — `cycle`-tagged fibers, each a named span of time. Read ONLY by the
+   * temporal views, which draw them as bands behind the work; the Desk never
+   * renders this surface and `totals` deliberately omits it, so a cycle can
+   * never inflate a column count or land in a Resting cluster.
+   *
+   * Use `cycleSpan` (KanbanRules) to turn a card into two civil days rather
+   * than reading `cycleStart`/`due` directly — it owns the single-day and
+   * open-ended cases.
+   */
+  cycles: KanbanCard[]
   totals: {
     drafts: number
     inFlight: number

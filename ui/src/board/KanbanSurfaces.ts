@@ -675,7 +675,19 @@ export class KanbanSurfaceRenderer {
     })
   }
 
-  /** Render a single cluster (project name + count + items list). */
+  /**
+   * Render a single cluster: containment path + count + items.
+   *
+   * The heading is the FULL path a split descended to (`science/unions`), set
+   * small in the mono face so a deep key stays scannable — the parent segments
+   * dimmed, the last one at full strength. You read "unions" and keep "science"
+   * as context, which is the whole point of splitting rather than renaming.
+   *
+   * A cluster that could not be split (every card shares the next segment, or
+   * none has one) still caps at four cards, with the rest behind a "+N more"
+   * that expands in place. Expanding, not paging: paging hides cards you were
+   * about to compare, and Resting is a place you read rather than operate.
+   */
   private renderCluster(
     cluster: StashCluster,
     staleness: Record<string, KanbanOriginStaleness>,
@@ -688,7 +700,19 @@ export class KanbanSurfaceRenderer {
     head.className = 'kbn-cluster-head'
     const name = document.createElement('span')
     name.className = 'kbn-cluster-name'
-    name.textContent = cluster.key
+    name.title = cluster.key
+    const segments = cluster.key.split('/')
+    const leaf = segments.pop() ?? cluster.key
+    if (segments.length > 0) {
+      const parents = document.createElement('span')
+      parents.className = 'kbn-cluster-name-parents'
+      parents.textContent = `${segments.join('/')}/`
+      name.append(parents)
+    }
+    const leafEl = document.createElement('span')
+    leafEl.className = 'kbn-cluster-name-leaf'
+    leafEl.textContent = leaf
+    name.append(leafEl)
     const count = document.createElement('span')
     count.className = 'kbn-cluster-count'
     count.textContent = String(cluster.cards.length)
@@ -701,8 +725,29 @@ export class KanbanSurfaceRenderer {
     }
     el.append(head)
 
-    for (const card of cluster.cards) {
+    const overflow = cluster.cards.slice(MAX_CLUSTER_CARDS)
+    for (const card of cluster.cards.slice(0, MAX_CLUSTER_CARDS)) {
       el.append(this.renderClusterItem(card, staleness[card.originId]))
+    }
+    if (overflow.length > 0) {
+      const hidden = overflow.map((card) => {
+        const item = this.renderClusterItem(card, staleness[card.originId])
+        item.hidden = true
+        el.append(item)
+        return item
+      })
+      const more = document.createElement('button')
+      more.type = 'button'
+      more.className = 'kbn-tl-pager kbn-cluster-more'
+      more.textContent = `+${overflow.length} more`
+      more.title = `${cluster.cards.length} resting under ${cluster.key} — click to show them all`
+      more.addEventListener('click', (e) => {
+        e.stopPropagation()
+        const opening = hidden[0]?.hidden === true
+        for (const item of hidden) item.hidden = !opening
+        more.textContent = opening ? '− fewer' : `+${overflow.length} more`
+      })
+      el.append(more)
     }
     return el
   }
@@ -915,6 +960,12 @@ export class KanbanSurfaceRenderer {
     el.setAttribute('aria-label', `${card.name} — ${COLUMN_TITLES[kind]}${ariaSuffix}`)
     el.draggable = !isStale
     el.dataset.fiberId = card.id
+    // A fiber in a git-synced store is served by every daemon holding it. The
+    // board shows one card (see `dedupeMirroredRows`); say on hover where else
+    // it lives, so "one card" doesn't read as "the other host lost it".
+    if (card.mirroredOrigins?.length) {
+      el.title = `${card.name}\nAlso on ${card.mirroredOrigins.join(', ')} — shown from ${card.originId}`
+    }
 
     if (!isStale) this.installDraggable(el, card, true)
 
@@ -1246,20 +1297,96 @@ function buildDayCell(day: TimelineDay): HTMLElement {
   return el
 }
 
-export function clusterStashCards(stash: KanbanCard[]): StashCluster[] {
-  const byKey = new Map<string, StashCluster>()
-  for (const card of stash) {
-    const key = stashClusterKey(card.id)
-    const cold = card.cold === true
-    const composite = `${key}::${cold ? 'cold' : 'warm'}`
-    let cluster = byKey.get(composite)
-    if (!cluster) {
-      cluster = { key, cold, cards: [] }
-      byKey.set(composite, cluster)
-    }
-    cluster.cards.push(card)
+/**
+ * The containment path a card clusters under — its id's segments, minus two
+ * things that are not groups:
+ *
+ *   - leading umbrella roots (`CLUSTER_KEY_SKIP_ROOTS`), too broad to mean
+ *     anything as a heading;
+ *   - THE CARD'S OWN LEAF SLUG. This is the one that matters for splitting: the
+ *     last segment names the fiber, not a folder it lives in. Descend into it
+ *     and every card becomes a cluster of one, which is how a "split deeper"
+ *     rule turns a readable group of six into six headings.
+ *
+ * A top-level card (`foo`) keeps its own name as its only segment — it has no
+ * containing folder, and a cluster has to be called something.
+ */
+function containmentSegments(id: string): string[] {
+  const segments = id.split('/').filter(Boolean)
+  let start = 0
+  while (start < segments.length && CLUSTER_KEY_SKIP_ROOTS.has(segments[start])) start += 1
+  const meaningful = segments.slice(start)
+  return meaningful.length > 1 ? meaningful.slice(0, -1) : meaningful
+}
+
+/** Above this many cards, a cluster splits on its next path segment. Four is
+ *  what fits a cluster card without it becoming a list you scroll. */
+const MAX_CLUSTER_CARDS = 4
+
+/**
+ * Split one over-full group by descending its containment path until no group
+ * exceeds `MAX_CLUSTER_CARDS` — "science 6" becomes "science/unions 3" +
+ * "science/spt3g 3".
+ *
+ * Two ways this stops, and the second is the one that keeps it honest:
+ *
+ *   1. The group is small enough. Done.
+ *   2. Descending one segment yields a SINGLE group — every card shares the
+ *      next segment, or none of them has one. There is nothing to discriminate
+ *      on, so the group stays over-full and the renderer caps it at four behind
+ *      a "+N more". Splitting anyway would produce a deeper heading holding
+ *      exactly the same cards, which reads as progress and isn't.
+ *
+ * A card with no deeper segment stays at the current level rather than being
+ * dropped, so `science/loose` and `science/unions/a…e` split into "science 1"
+ * and "science/unions 5" instead of losing the loose one.
+ */
+function splitByPathDepth(cards: KanbanCard[], depth: number): Array<{ key: string; cards: KanbanCard[] }> {
+  const keyAt = (card: KanbanCard, d: number): string =>
+    containmentSegments(card.id).slice(0, d).join('/')
+  const here = { key: keyAt(cards[0], depth), cards }
+  if (cards.length <= MAX_CLUSTER_CARDS) return [here]
+
+  const deeper = new Map<string, KanbanCard[]>()
+  for (const card of cards) {
+    const segments = containmentSegments(card.id)
+    // A card that has run out of path stays where it is.
+    const key = keyAt(card, segments.length > depth ? depth + 1 : depth)
+    const bucket = deeper.get(key)
+    if (bucket) bucket.push(card)
+    else deeper.set(key, [card])
   }
-  const out = [...byKey.values()]
+  if (deeper.size <= 1) return here.cards.length > 0 ? [here] : []
+  return [...deeper.values()].flatMap((group) => splitByPathDepth(group, depth + 1))
+}
+
+/**
+ * Group the Resting cards into clusters by containment path, splitting any
+ * cluster that would hold more than four cards (see `splitByPathDepth`).
+ *
+ * Warm and cold never mix: a held-open card belongs under the divider, so the
+ * split runs independently within each warmth and a cluster is wholly one or
+ * the other.
+ */
+export function clusterStashCards(stash: KanbanCard[]): StashCluster[] {
+  const out: StashCluster[] = []
+  for (const cold of [false, true]) {
+    const mine = stash.filter((card) => (card.cold === true) === cold)
+    if (mine.length === 0) continue
+    // First pass at depth 1 (today's behavior), then descend only where needed.
+    const roots = new Map<string, KanbanCard[]>()
+    for (const card of mine) {
+      const key = containmentSegments(card.id).slice(0, 1).join('/')
+      const bucket = roots.get(key)
+      if (bucket) bucket.push(card)
+      else roots.set(key, [card])
+    }
+    for (const group of roots.values()) {
+      for (const split of splitByPathDepth(group, 1)) {
+        out.push({ key: split.key, cold, cards: split.cards })
+      }
+    }
+  }
   for (const c of out) {
     // `createdAt` is an INSTANT: compare epoch ms, never the RFC3339 strings —
     // a string compare orders by local wall clock, so a Berkeley-created fiber
@@ -1271,14 +1398,6 @@ export function clusterStashCards(stash: KanbanCard[]): StashCluster[] {
     return descByKey(instantMs(a.cards[0]?.createdAt), instantMs(b.cards[0]?.createdAt))
   })
   return out
-}
-
-function stashClusterKey(id: string): string {
-  const segments = id.split('/').filter(Boolean)
-  for (const seg of segments) {
-    if (!CLUSTER_KEY_SKIP_ROOTS.has(seg)) return seg
-  }
-  return segments[segments.length - 1] ?? id
 }
 
 /** The `due <date>` chip on a card. Reads the value as the CIVIL DAY it names,

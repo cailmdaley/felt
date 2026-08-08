@@ -24,6 +24,9 @@
   --chr-seg-w: calc(var(--chr-day-w) * 0.58);
   --chr-row-h: 20px;
   --chr-head-h: 32px;
+  /* A cycle lane is shallower than a fiber row: the strip annotates the page,
+     and stacked lanes must not push the work below the fold. */
+  --chr-cycle-h: 17px;
 
   flex: 1 1 auto;
   min-height: 0;
@@ -153,10 +156,356 @@
 .chr-wash-past { background: rgba(27, 22, 17, 0.018); }
 .chr-wash-weekend { background: rgba(27, 22, 17, 0.045); }
 .chr-wash-week { border-right-color: rgba(122, 111, 92, 0.34); }
+/* The tint only — the gold edges are drawn by `.chr-seam`, which is appended
+   after everything else so no band or lifeline can break the line. */
 .chr-wash-today {
   background: linear-gradient(rgba(154, 123, 53, 0.12), rgba(154, 123, 53, 0.05));
+}
+.chr-seam {
+  z-index: 2;
+  pointer-events: none;
   box-shadow: inset 1.5px 0 0 #9A7B35, inset -1.5px 0 0 #9A7B35;
 }
+
+/* ── The face: one era, read closely ────────────────────────────────────── */
+
+/* Parchment, not a dashboard. A head line, a row of quiet figures, a memoir.
+   The gold left edge is the only strong mark, and it is there to say "you are
+   inside something" — the page behind is still the page. */
+.chr-face {
+  flex: 0 0 auto;
+  margin: 0 0 10px;
+  padding: 9px 14px 11px;
+  border: 0.5px solid rgba(154, 123, 53, 0.34);
+  border-left: 2px solid #9A7B35;
+  border-radius: 3px;
+  background: rgba(255, 251, 237, 0.72);
+  box-shadow: 0 1px 2px rgba(27, 22, 17, 0.05);
+}
+.chr-face-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.chr-face-title {
+  padding: 0;
+  border: 0;
+  background: none;
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-size: 19px;
+  font-variant-caps: all-small-caps;
+  font-feature-settings: "smcp", "c2sc";
+  letter-spacing: 0.045em;
+  color: #1B1611;
+  cursor: pointer;
+}
+.chr-face-title:hover {
+  color: #3D5BA0;
+  text-decoration: underline;
+  text-decoration-thickness: 0.5px;
+  text-underline-offset: 3px;
+}
+.chr-face-span {
+  flex: 1 1 auto;
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  color: #7A6F5C;
+}
+.chr-face-close {
+  flex: 0 0 auto;
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  font-size: 12px;
+  line-height: 1;
+  color: #A89B83;
+  cursor: pointer;
+}
+.chr-face-close:hover { color: #BC4538; }
+
+.chr-face-intent {
+  margin: 5px 0 0;
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-style: italic;
+  font-size: 14px;
+  line-height: 1.34;
+  color: #2A231A;
+  max-width: 74ch;
+}
+
+/* Figures read as a line of marginalia, not as tiles. */
+.chr-face-stats {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 16px;
+  margin: 8px 0 0;
+  padding: 6px 0 0;
+  border-top: 0.5px solid rgba(122, 111, 92, 0.20);
+}
+.chr-face-stats dt {
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-variant-caps: all-small-caps;
+  font-feature-settings: "smcp", "c2sc";
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  color: #A89B83;
+}
+.chr-face-stats dd {
+  margin: 0 6px 0 0;
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-feature-settings: "onum";
+  font-size: 14px;
+  color: #1B1611;
+}
+
+.chr-face-memoir {
+  margin-top: 9px;
+  padding-top: 7px;
+  border-top: 0.5px solid rgba(122, 111, 92, 0.20);
+}
+.chr-face-memoir-head {
+  margin: 0 0 4px;
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-variant-caps: all-small-caps;
+  font-feature-settings: "smcp", "c2sc";
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.09em;
+  color: #BC4538;
+}
+.chr-face-line {
+  margin: 0 0 2px;
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-size: 13px;
+  line-height: 1.36;
+  color: #2A231A;
+  max-width: 92ch;
+}
+.chr-face-slug {
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 10px;
+  color: #3D5BA0;
+  margin-right: 4px;
+}
+.chr-face-count {
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 9px;
+  color: #A89B83;
+}
+.chr-face-closed { color: #4A4033; }
+.chr-face-mark-ok { color: #3F8278; }
+.chr-face-mark-x { color: #A89B83; }
+.chr-face-quiet {
+  margin: 0;
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-style: italic;
+  font-size: 13px;
+  color: #A89B83;
+}
+
+.chr-face-inscribe {
+  margin-top: 9px;
+  padding: 2px 12px;
+  border: 0.5px solid rgba(154, 123, 53, 0.5);
+  border-radius: 2px;
+  background: rgba(196, 147, 51, 0.13);
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-style: italic;
+  font-size: 12.5px;
+  color: #6E5A2E;
+  cursor: pointer;
+}
+.chr-face-inscribe:hover:not(:disabled) {
+  background: rgba(196, 147, 51, 0.24);
+  color: #4A3C1C;
+}
+.chr-face-inscribe:disabled { opacity: 0.6; cursor: default; }
+
+/* Outside the era: present, but not what you are reading. */
+.chr-outside { opacity: 0.28; }
+.chr-band-scoped {
+  background: rgba(196, 147, 51, 0.34);
+  border-color: #9A7B35;
+  color: #4A3C1C;
+}
+
+/* ── The cycle strip ────────────────────────────────────────────────────── */
+
+/* Bands are ANNOTATION. They sit above the work and must read as behind it:
+   ochre-family tints at low alpha, hairline edges, italic serif at a size
+   below the row labels. If a band ever competes with a lifeline for attention,
+   the tint is too strong. */
+
+.chr-cycle-gutter {
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 0 10px 0 2px;
+  background: #EDE2CE;
+  border-right: 0.5px solid rgba(122, 111, 92, 0.30);
+}
+.chr-cycle-tag {
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-variant-caps: all-small-caps;
+  font-feature-settings: "smcp", "c2sc";
+  font-size: 10px;
+  letter-spacing: 0.07em;
+  color: #A89B83;
+}
+
+.chr-cycle-lane {
+  position: relative;
+  z-index: 2;
+  min-width: 0;
+  cursor: crosshair;
+}
+/* A hairline closes the strip off from the work, so the bands read as a header
+   band rather than as two more rows. */
+.chr-cycle-lane.chr-cycle-last,
+.chr-cycle-gutter.chr-cycle-last {
+  border-bottom: 0.5px solid rgba(122, 111, 92, 0.22);
+}
+
+.chr-band {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  display: flex;
+  align-items: center;
+  padding: 0 6px;
+  margin: 0;
+  border: 0.5px solid rgba(154, 123, 53, 0.42);
+  border-radius: 7px;
+  background: rgba(196, 147, 51, 0.16);
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-style: italic;
+  font-size: 11.5px;
+  line-height: 1;
+  color: #6E5A2E;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.chr-band:hover {
+  background: rgba(196, 147, 51, 0.26);
+  color: #4A3C1C;
+}
+.chr-band:focus-visible {
+  outline: 1.5px solid #9A7B35;
+  outline-offset: -2px;
+}
+/* An edge the span runs past is squared off and faded — the capsule is cut by
+   the window, not closed by it. */
+.chr-band-open-start {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  border-left-color: transparent;
+  -webkit-mask-image: linear-gradient(to right, rgba(0, 0, 0, 0.35), #000 18px);
+  mask-image: linear-gradient(to right, rgba(0, 0, 0, 0.35), #000 18px);
+}
+.chr-band-open-end {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  border-right-color: transparent;
+}
+.chr-band-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* Edge grips. Invisible until the band is hovered — a row of handles at rest
+   would turn the strip into a control panel. Wide enough to catch (7px), which
+   is more than the hairline they suggest. */
+.chr-grip {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 7px;
+  cursor: ew-resize;
+  opacity: 0;
+  transition: opacity 110ms ease-out;
+}
+.chr-grip-start { left: -1px; }
+.chr-grip-due { right: -1px; }
+.chr-grip::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 2.5px;
+  width: 2px;
+  border-radius: 1px;
+  background: #9A7B35;
+}
+.chr-band:hover .chr-grip { opacity: 0.9; }
+.chr-band-resizing {
+  background: rgba(196, 147, 51, 0.3);
+  border-color: #9A7B35;
+}
+.chr-band-resizing .chr-grip { opacity: 1; }
+
+/* Saved-but-unconfirmed: present, not yet a fact. */
+.chr-band-pending {
+  border-style: dashed;
+  opacity: 0.7;
+  cursor: default;
+}
+/* The span under the cursor mid-drag. */
+.chr-band-ghost {
+  background: rgba(196, 147, 51, 0.22);
+  border-style: dashed;
+  pointer-events: none;
+}
+
+/* Name-in-place. Sits exactly where the band will be, so the gesture never
+   moves the reader's eye. */
+.chr-cycle-name {
+  position: absolute;
+  top: 1px;
+  bottom: 1px;
+  z-index: 6;
+  padding: 0 6px;
+  border: 0.5px solid #9A7B35;
+  border-radius: 7px;
+  background: rgba(255, 251, 237, 0.98);
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-style: italic;
+  font-size: 11.5px;
+  color: #1B1611;
+  outline: none;
+  box-shadow: 0 1px 3px rgba(27, 22, 17, 0.12);
+}
+.chr-cycle-name::placeholder {
+  color: #A89B83;
+}
+
+/* Only when the strip is empty, and only under the cursor: the invitation. */
+.chr-cycle-hint {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-style: italic;
+  font-size: 11px;
+  color: #A89B83;
+  opacity: 0;
+  transition: opacity 140ms ease-out;
+  pointer-events: none;
+}
+.chr-cycle-lane:hover .chr-cycle-hint { opacity: 0.85; }
 
 /* ── The row gutter ─────────────────────────────────────────────────────── */
 
@@ -346,4 +695,11 @@ button.chr-name:hover {
   text-decoration: underline;
   text-decoration-thickness: 0.5px;
   text-underline-offset: 2px;
+}
+
+/* A chatty era must not push the grid off the page: the memoir scrolls inside
+   the face rather than growing it without limit. The grid is still the page. */
+.chr-face-memoir {
+  max-height: 27vh;
+  overflow-y: auto;
 }

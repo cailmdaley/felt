@@ -11,14 +11,33 @@
 
 .wk-grid {
   --wk-gutter: 54px;
-  --wk-annot: 96px;
-  --wk-margin: 212px;
+  /* Compact: the day's weight and, on today, how many workers are up. This is
+     the ONLY right-edge text now — the marginalia column that used to sit
+     beyond it is gone, and the rails took its 212px. A single truncated commit
+     subject read as the name of one fiber rather than as what the day was
+     about, which is a worse failure than saying nothing. */
+  --wk-annot: 104px;
   --wk-ochre-deep: #A57D2B;
+
+  /* The three activity pigments, named ONCE. Both the rasters and the key's
+     glyphs read them from here, so a swatch cannot drift from the mark it
+     stands for — the worst bug a legend can have, and one that would be
+     invisible until someone trusted it. (Borrowed from DayView, which pays for
+     the same guarantee the same way.) */
+  --wk-agent: #3D5BA0;
+  --wk-attention: #3F8278;
+  --wk-notify: #BC4538;
 
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
   flex-direction: column;
+}
+
+/* Springing back after a swipe — eased. The lean itself is applied with no
+   transition at all, because it tracks a finger and any easing reads as lag. */
+.wk-grid-springing {
+  transition: transform 180ms cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
 /* ── Head ─────────────────────────────────────────────────────────────────── */
@@ -80,11 +99,51 @@
   white-space: nowrap;
 }
 
+/* "· in Sprint 14" — the week's place in something longer than itself. Set in
+   the marginal italic rather than the totals' mono: a cycle is a name someone
+   chose, not a measurement. Shares the head line with the totals, so it stays
+   on one row and truncates rather than wrapping the header. */
+.wk-cycles {
+  --wk-ochre-deep: #A57D2B;
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-style: italic;
+  font-size: 13px;
+  color: var(--wk-ochre-deep);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wk-cycle {
+  appearance: none;
+  border: none;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  border-bottom: 1px solid transparent;
+  transition: border-color 120ms ease;
+}
+.wk-cycle:hover { border-bottom-color: rgba(165, 125, 43, 0.5); }
+.wk-cycle:focus-visible {
+  outline: 1px solid rgba(154, 123, 53, 0.6);
+  outline-offset: 2px;
+}
+.wk-cycle-more {
+  color: #A89B83;
+  font-style: normal;
+  font-size: 11px;
+}
+
 /* ── Rows ─────────────────────────────────────────────────────────────────── */
 
 .wk-row {
   display: grid;
-  grid-template-columns: var(--wk-gutter) minmax(0, 1fr) var(--wk-annot) var(--wk-margin);
+  /* The annot column sizes to its longest line — today's, which carries the
+     aloft count — so every row stays aligned and nothing clips. A fixed width
+     truncated "· 2 aloft" the moment a worker was up. */
+  grid-template-columns: var(--wk-gutter) minmax(0, 1fr) minmax(var(--wk-annot), max-content);
   align-items: stretch;
   column-gap: 10px;
   flex: 1 1 0;
@@ -204,16 +263,16 @@
    exactly that. A hairline keeps "full height" legible as emphasis. */
 .wk-ras-agent {
   height: 56%;
-  background: #3D5BA0;
+  background: var(--wk-agent);
 }
 .wk-ras-attention {
   height: 72%;
-  background: #3F8278;
+  background: var(--wk-attention);
   opacity: 0.85;
 }
 .wk-ras-notify {
   height: 100%;
-  background: #BC4538;
+  background: var(--wk-notify);
   /* Same 1.5px as the other two kinds, deliberately: the ticks sit at
      fractional pixel positions, so a 1px rule gets antialiased across two
      columns at half alpha each and the cinnabar renders as a dark grey — it
@@ -254,7 +313,7 @@
 .wk-mark-due { color: var(--wk-ochre-deep); }
 /* ◐ is half-filled, so at raster weight it reads as a solid dot and out-shouts
    everything else on an empty future row. Held back to an outline's worth. */
-.wk-mark-launch { color: #3D5BA0; opacity: 0.78; font-size: 12px; }
+.wk-mark-launch { color: var(--wk-agent); opacity: 0.78; font-size: 12px; }
 .wk-mark-snooze { color: #A89B83; opacity: 0.7; }
 
 /* ── Right-edge annotation ────────────────────────────────────────────────── */
@@ -269,38 +328,6 @@
   white-space: nowrap;
 }
 .wk-row-today .wk-annot { color: #9A7B35; }
-
-/* ── Marginalia ───────────────────────────────────────────────────────────── */
-
-.wk-margin {
-  align-self: center;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
-  font-style: italic;
-  font-size: 12px;
-  line-height: 1.25;
-  color: #7A6F5C;
-}
-/* What is running right now, and what is promised — both are facts about the
-   machine rather than the record, so both drop the italic serif for mono. */
-.wk-margin-live,
-.wk-margin-marks {
-  font-family: var(--font-mono, 'IBM Plex Mono', monospace);
-  font-style: normal;
-  font-size: 9.5px;
-  letter-spacing: 0.02em;
-  color: var(--wk-ochre-deep);
-}
-/* The mark glyphs are not in the mono face (it has no ◴/◐/◌ and falls back),
-   so set them in the serif deliberately and a size up, or they shrink to
-   indistinguishable dots. Declared after the mark colours so it wins the size
-   without fighting them for the hue. */
-.wk-margin-glyph {
-  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
-  font-size: 11px;
-}
 
 /* ── Shared tick row ──────────────────────────────────────────────────────── */
 
@@ -327,3 +354,40 @@
 }
 .wk-tick-first { transform: none; }
 .wk-tick-last { transform: translateX(-100%); }
+
+/* ── The key ──────────────────────────────────────────────────────────────── */
+
+/* A caption, not a legend box: it sits in the margin under the axis, inside the
+   grid so it cannot drift from the rails it explains. Italic serif rather than
+   the mono of the tick labels immediately above — a caption should not read as
+   another row of them. Wording is shared verbatim with DayView; the GLYPHS are
+   not, because each view's marks have their own shapes and a key should teach
+   the marks you are actually looking at. */
+.wk-key {
+  display: flex;
+  justify-content: flex-end;
+  gap: 13px;
+  padding-top: 3px;
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-style: italic;
+  font-size: 11px;
+  color: #7A6F5C;
+}
+.wk-key-item {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 5px;
+}
+/* Miniatures of Week's own rasters, keeping the rail's height hierarchy — the
+   key teaches "taller means more human" while it teaches the colours. Wider
+   than the real 1.5px marks on purpose: at rail scale a tick is read by its
+   position among hundreds, but a swatch has one job, which is to show a hue. */
+.wk-key-glyph {
+  display: inline-block;
+  width: 3px;
+  border-radius: 0.5px;
+  margin-bottom: 1px;
+}
+.wk-key-agent { height: 7px; background: var(--wk-agent); }
+.wk-key-attention { height: 9px; background: var(--wk-attention); opacity: 0.85; }
+.wk-key-notify { height: 12px; background: var(--wk-notify); opacity: 0.78; }

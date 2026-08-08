@@ -739,6 +739,7 @@ export class FiberDetailModal {
       const bodyOpts = { basePath: card.fiberDir, originId: card.originId }
       prose.innerHTML = lede + renderMarkdown(renderEmbeds(body, bodyOpts), bodyOpts)
       this.autosizeEmbeds(prose)
+      this.installBodyFileLinks(prose, card)
       return
     }
     if (!outcome && reached && found) {
@@ -761,6 +762,35 @@ export class FiberDetailModal {
     if (note.includes('kbn-detail-body-retry')) {
       prose.querySelector('.kbn-detail-body-retry')?.addEventListener('click', () => {
         void this.renderFiberBody(prose, card, overlay)
+      })
+    }
+  }
+
+  /**
+   * Route a body's relative links into this panel's own file viewer.
+   *
+   * `renderMarkdown` already resolved them to working `/api/v1/file` URLs, so
+   * the href alone is correct and middle-click / cmd-click still open a tab.
+   * But a sibling `AGENTS.md` belongs in the viewer beside the fiber, not in a
+   * new tab — the same place the sent-files strip opens things, reached the
+   * same way. Only paths the resolver understood carry `data-file-path`, so an
+   * external link never reaches this handler.
+   */
+  private installBodyFileLinks(prose: HTMLElement, card: KanbanCard): void {
+    for (const link of prose.querySelectorAll<HTMLAnchorElement>('a[data-file-path]')) {
+      const fullPath = link.dataset.filePath
+      if (!fullPath) continue
+      link.title = `Open ${basenameOf(fullPath)} in the viewer`
+      link.addEventListener('click', (e) => {
+        // Leave the modified clicks to the browser — a cmd-click means "new
+        // tab" everywhere else and should here too.
+        if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return
+        e.preventDefault()
+        e.stopPropagation()
+        this.activateFile(
+          { fullPath, basename: basenameOf(fullPath), timestamp: Date.now() },
+          card,
+        )
       })
     }
   }
@@ -1371,9 +1401,10 @@ export class FiberDetailModal {
           sibling.setAttribute('aria-checked', isActive ? 'true' : 'false')
         }
         scheduleRow.style.display = shuttleManaged && value === 'standing' ? '' : 'none'
-        // Surface a sensible cron + tz default when promoting to standing
-        // for the first time so the user edits rather than fighting an
-        // empty input that fails validation on save.
+        // Seed a plausible cron + tz so the user edits rather than fighting an
+        // empty input — but SEEDING IS NOT CHOOSING. Nothing is written until
+        // the cron is confirmed (see `commitScheduleTz`); focus the field so
+        // the thing left to do is the thing under the cursor.
         if (value === 'standing') {
           if (!selectedSchedule) {
             selectedSchedule = '0 9 * * 1-5'
@@ -1383,6 +1414,8 @@ export class FiberDetailModal {
             selectedTz = 'Europe/Paris'
             tzInput.value = selectedTz
           }
+          scheduleInput.focus()
+          scheduleInput.select()
         }
       })
       return btn
@@ -1609,42 +1642,30 @@ export class FiberDetailModal {
       )
     }
 
-    // Kind: fire on click. When promoting oneshot → standing, batch
-    // schedule + tz alongside so the server's reshape path has the full
-    // block. A bare standing → oneshot collapse just sends shuttleKind.
+    // Kind. Collapsing standing → oneshot commits on the click: it needs no
+    // information the user hasn't already given, and it throws nothing away
+    // that a re-toggle can't restore.
+    //
+    // PROMOTING oneshot → standing does NOT commit. It used to, and it wrote a
+    // cron the user had never seen: the button's own handler seeds `0 9 * * 1-5
+    // / Europe/Paris` into the inputs, and this then read those inputs straight
+    // back out and PATCHed them. One click on "Standing" and the fiber was a
+    // weekday-09:00 role by our choice, not theirs. Now the toggle only reveals
+    // and seeds the fields; `commitScheduleTz` writes the promotion when the
+    // cron is confirmed on blur or Enter. A card abandoned mid-toggle stays
+    // oneshot on the wire, which matches the Stash form's explicit-schedule
+    // ethos — a schedule is something you state, never something you're given.
     const commitKind = (value: 'oneshot' | 'standing'): void => {
       if (value === baseline.kind) return
-      const newSchedule = scheduleInput.value.trim()
-      const newTz = tzInput.value.trim()
       if (value === 'standing') {
-        if (!newSchedule) {
-          errorEl.textContent = 'A cron expression is required for standing roles.'
-          errorEl.style.display = ''
-          for (const sibling of kindSegmented.querySelectorAll<HTMLButtonElement>('button')) {
-            const isActive = sibling.dataset.kind === baseline.kind
-            sibling.classList.toggle('kbn-detail-segment-active', isActive)
-            sibling.setAttribute('aria-checked', isActive ? 'true' : 'false')
-          }
-          selectedKind = baseline.kind
-          return
-        }
-        livePatch(
-          {
-            shuttleKind: 'standing',
-            shuttleSchedule: newSchedule,
-            shuttleTz: newTz || 'UTC',
-          },
-          () => {
-            baseline.kind = 'standing'
-            baseline.schedule = newSchedule
-            baseline.tz = newTz || 'UTC'
-          },
-        )
-      } else {
-        livePatch({ shuttleKind: 'oneshot' }, () => {
-          baseline.kind = 'oneshot'
-        })
+        errorEl.style.display = 'none'
+        statusEl.textContent = 'confirm the cron to save'
+        return
       }
+      statusEl.textContent = ''
+      livePatch({ shuttleKind: 'oneshot' }, () => {
+        baseline.kind = 'oneshot'
+      })
     }
     for (const btn of kindSegmented.querySelectorAll<HTMLButtonElement>('button')) {
       btn.addEventListener('click', () => {
@@ -1656,11 +1677,17 @@ export class FiberDetailModal {
     // Schedule + tz: fire on `blur` and Enter — `input` would generate
     // noisy patches from mid-typing cron fragments. The reshape path
     // requires kind=standing alongside, so always send all three.
+    //
+    // This is ALSO where a oneshot → standing promotion lands, which is why the
+    // guard reads `selectedKind` (what the user has chosen in the panel) rather
+    // than `baseline.kind` (what the wire currently says). Confirming the cron
+    // IS the act of promoting; until then the toggle is just a revealed form.
     const commitScheduleTz = (): void => {
-      if (baseline.kind !== 'standing') return
+      if (selectedKind !== 'standing') return
       const newSchedule = scheduleInput.value.trim()
       const newTz = tzInput.value.trim() || 'UTC'
-      if (newSchedule === baseline.schedule && newTz === baseline.tz) return
+      const promoting = baseline.kind !== 'standing'
+      if (!promoting && newSchedule === baseline.schedule && newTz === baseline.tz) return
       if (!newSchedule) {
         errorEl.textContent = 'A cron expression is required for standing roles.'
         errorEl.style.display = ''
@@ -1673,8 +1700,12 @@ export class FiberDetailModal {
           shuttleTz: newTz,
         },
         () => {
+          // The promotion lands here too, so the baseline kind advances with
+          // the schedule that carried it.
+          baseline.kind = 'standing'
           baseline.schedule = newSchedule
           baseline.tz = newTz
+          statusEl.textContent = ''
         },
       )
     }

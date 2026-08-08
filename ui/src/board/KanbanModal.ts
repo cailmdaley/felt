@@ -64,11 +64,14 @@ import {
   createTemporalFetchers,
   getView,
   listViews,
+  createViewFallbackPage,
+  keystrokeIsSpokenFor,
   normalizeFocusDate,
   type BoardViewId,
   type TemporalFetchers,
   type TemporalView,
   type ViewContext,
+  viewFallbackKind,
 } from './views/index.js'
 
 export { FiberDetailModal } from './FiberDetailModal.js'
@@ -157,26 +160,6 @@ interface KanbanCityScope {
  *  view names its own key and nothing here has to agree with it twice. */
 const DESK_HOTKEY = '1'
 
-/**
- * True when a bare keystroke belongs to something other than the board: a text
- * field has focus, or a layer sits over the board. The layers are a Radix
- * dialog (Stash / Capture — Radix stamps `data-state="open"` on its content;
- * the board's own `role="dialog"` container carries no such attribute) and the
- * vanilla fiber-detail panel, which floats on document.body rather than inside
- * the modal.
- */
-function keystrokeIsSpokenFor(): boolean {
-  const active = document.activeElement as HTMLElement | null
-  if (active) {
-    const tag = active.tagName
-    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true
-    if (active.isContentEditable) return true
-  }
-  if (document.querySelector('[role="dialog"][data-state="open"]')) return true
-  if (document.querySelector('.kbn-detail-overlay')) return true
-  return false
-}
-
 interface KanbanScrollSnapshot {
   bodyLeft: number
   bodyTop: number
@@ -235,6 +218,10 @@ export class KanbanModal {
    * chrome state.
    */
   private focusDate: string | null = null
+  /** True when the most recent composite fetch failed. Drives the view
+   *  host's error page — the Desk shows `renderError` for the same state,
+   *  but a temporal view has no surfaces of its own to put it in. */
+  private lastFetchFailed = false
   private inflightFetchToken = 0
   /**
    * Backing field for `dragSourceId`. Mutate via the property accessor below
@@ -506,6 +493,7 @@ export class KanbanModal {
     this.activeView?.unmount()
     this.activeView = null
     if (this.viewHostEl) this.viewHostEl.innerHTML = ''
+    this.viewFallbackSig = null
     this.activeViewId = id
     this.syncViewChrome()
     // Coming home to the Desk with data that landed while it was hidden: paint
@@ -612,7 +600,13 @@ export class KanbanModal {
     const view = getView(this.activeViewId)
     if (!view) return
     const ctx = this.viewContext()
-    if (!ctx) return
+    if (!ctx) {
+      // No response to mount with. Say so on the page rather than leaving it
+      // blank — see renderViewFallback.
+      this.renderViewFallback(view.title)
+      return
+    }
+    this.clearViewFallback()
     if (this.activeView !== view) {
       this.activeView = view
       view.mount(this.viewHostEl, ctx)
@@ -620,6 +614,71 @@ export class KanbanModal {
       view.refresh(ctx)
     }
   }
+
+  /**
+   * Open a card's detail panel by id — the `openCard` a ViewContext exposes.
+   *
+   * Looks past `ctx.cards`, which is the WORK surfaces only. A cycle is an
+   * annotation, not work: it lives in `response.cycles` and deliberately
+   * appears in none of the eight surfaces `collectCards` walks, so a view that
+   * draws cycle bands or chips would hand over an id this list has never heard
+   * of. Widening `collectCards` would have been the smaller diff and the wrong
+   * one — views walk `ctx.cards` to place due-marks, and a cycle's `due` is a
+   * span's closing edge, not a deadline, so every such view would have to learn
+   * to skip them. The lookup widens here instead; the contract stays put.
+   *
+   * A miss WARNS rather than returning quietly. The bug this replaces was
+   * silent — a click that did nothing at all, with no throw and no log, found
+   * only by someone watching the overlay in a browser. A no-op that says
+   * nothing is its own defect class, so the next unknown id announces itself.
+   */
+  private openCardById(cardId: string, cards: KanbanCard[]): void {
+    const card = resolveOpenTarget(cardId, cards, this.lastResponse?.cycles ?? [])
+    if (card) this.detailModal?.open(card, this.cityScope?.cityId)
+  }
+
+  /**
+   * Put a stand-in page in the view host when there is no response to mount a
+   * view with — the fix for a temporal tab rendering as a completely blank
+   * page when the composite feed is unreachable.
+   *
+   * Two states, because they are different facts: before the first response we
+   * are WAITING, and after a failure the daemon is NOT ANSWERING and there is
+   * something to retry. `viewFallbackKind` decides which. The page is rebuilt
+   * only when the state changes, so the 15s poll does not thrash the DOM or
+   * steal focus from the retry button while the user is aiming at it.
+   */
+  private renderViewFallback(title: string): void {
+    if (!this.viewHostEl) return
+    const kind = viewFallbackKind({
+      onDesk: false,
+      hasResponse: this.lastResponse !== null,
+      lastFetchFailed: this.lastFetchFailed,
+    })
+    if (kind === 'none') return
+    const signature = `${title}:${kind}`
+    if (this.viewFallbackSig === signature) return
+    this.viewFallbackSig = signature
+    this.viewHostEl.innerHTML = ''
+    this.viewHostEl.append(
+      kind === 'error'
+        ? createViewFallbackPage(title, {
+            message: '— the daemon is not answering —',
+            onRetry: () => { void this.fetchAndRender() },
+          })
+        : createViewFallbackPage(title, { message: '— waiting for the first response —' }),
+    )
+  }
+
+  /** Drop the stand-in page (and its signature) before a real view mounts. */
+  private clearViewFallback(): void {
+    if (this.viewFallbackSig === null) return
+    this.viewFallbackSig = null
+    if (this.viewHostEl) this.viewHostEl.innerHTML = ''
+  }
+
+  /** Which fallback is currently painted, so it is not rebuilt every poll. */
+  private viewFallbackSig: string | null = null
 
   /** The per-call context handed to a view. Null until the first response. */
   private viewContext(): ViewContext | null {
@@ -631,10 +690,14 @@ export class KanbanModal {
       cards,
       activity: (fromMs, toMs) => this.temporal.activity(fromMs, toMs),
       narration: (fromISO, toISO) => this.temporal.narration(fromISO, toISO),
-      openCard: (cardId) => {
-        const card = cards.find((c) => c.id === cardId)
-        if (card) this.detailModal?.open(card, this.cityScope?.cityId)
-      },
+      sessions: (sinceMs) => this.temporal.sessions(sinceMs),
+      openCard: (cardId) => this.openCardById(cardId, cards),
+      // The Desk's worker pill, handed to the views. Passed through rather than
+      // wrapped: it is already the gesture-deferred form (see the constructor —
+      // kitty hides on focus loss, so activation waits for the click to finish),
+      // and it is already undefined when the host wired no `onOpenWorker`, which
+      // is exactly the optionality the contract promises.
+      openWorker: this.openWorkerAfterGesture,
       requestRefresh: () => { void this.fetchAndRender() },
       // Read at build time, and the context is rebuilt for every mount and
       // refresh — so a view always sees the current cursor, never a snapshot
@@ -677,6 +740,8 @@ export class KanbanModal {
     this.activeView = null
     this.activeViewId = 'desk'
     this.focusDate = null
+    this.viewFallbackSig = null
+    this.lastFetchFailed = false
     this.dragSourceId = null
     this.hasClaimedInitialFocus = false
     this.stopDragAutoScroll()
@@ -719,6 +784,25 @@ export class KanbanModal {
    * it AND fires the action that column means.
    */
   private transition(card: KanbanCard, target: ColumnKind): void {
+    // A verdict on a card with a LIVE worker kills that worker (commitTransition
+    // → killWorkerIfRunning), and it did so silently — one click on Compost and
+    // a running session was gone, while "New session", which destroys less,
+    // asked first. Confirm the destructive one too. Gated on `runningWorker`, so
+    // the overwhelmingly common case (a verdict on a finished run) stays a
+    // single click. This is the choke point for every path — the card's inline
+    // buttons, the detail panel's terminal moves, and a drag onto the column —
+    // so one guard covers all three.
+    if ((target === 'tempered' || target === 'composted') && card.runningWorker) {
+      const verb = target === 'tempered' ? 'temper' : 'compost'
+      const ok = window.confirm(
+        `“${card.name}” has a live worker. This stops it — ${verb} anyway?`,
+      )
+      if (!ok) {
+        this.announce(`Left ${card.name} running.`)
+        return
+      }
+    }
+
     // Use the server's placement from the last response — that's the source
     // of truth for which column the card is in. Re-deriving from card fields
     // here is a footgun: column classification depends on `shuttle.enabled`,
@@ -1239,7 +1323,7 @@ export class KanbanModal {
       const res = await fetchWithBootPrefetch(this.kanbanUrl())
       if (token !== this.inflightFetchToken) return
       if (!res.ok) {
-        this.renderError(`Server returned ${res.status}`)
+        this.markFetchFailed(`Server returned ${res.status}`)
         return
       }
       // The kanban now reads Shuttle's loom-wide composite feed and classifies
@@ -1261,6 +1345,8 @@ export class KanbanModal {
       // each just to rebuild them identically. Hash the meaningful
       // payload (columns + totals + staleness); `generatedAt` flickers each
       // poll even on no-op refreshes.
+      // A response landed: clear any error page the views were showing.
+      this.lastFetchFailed = false
       const sig = this.computeResponseSignature(data)
       const wasFirstRender = this.lastResponse === null
       this.lastResponse = data
@@ -1276,7 +1362,7 @@ export class KanbanModal {
     } catch (err: unknown) {
       if (token !== this.inflightFetchToken) return
       const msg = (err as { message?: string })?.message ?? String(err)
-      this.renderError(msg)
+      this.markFetchFailed(msg)
     }
   }
 
@@ -1325,8 +1411,39 @@ export class KanbanModal {
     this.deskEl.innerHTML = ''
     const errEl = document.createElement('div')
     errEl.className = 'kbn-error'
-    errEl.textContent = `Failed to load kanban: ${msg}`
+    const text = document.createElement('span')
+    text.textContent = `Failed to load kanban: ${msg}`
+    // The error branch replaces the whole Desk, and the board's only refresh
+    // control lives in a column head that is no longer on screen — so the state
+    // that most needs a retry was the one state with no way to ask for one.
+    // (The poll does recover on its own now that the error clears the dedup
+    // signature, but waiting up to 15s without a button is indistinguishable
+    // from being stuck.)
+    const retry = document.createElement('button')
+    retry.type = 'button'
+    retry.className = 'kbn-error-retry'
+    retry.textContent = '↻ retry'
+    retry.addEventListener('click', () => {
+      retry.disabled = true
+      retry.textContent = '↻ retrying…'
+      void this.fetchAndRender()
+    })
+    errEl.append(text, retry)
     this.deskEl.append(errEl)
+  }
+
+  /**
+   * Record a failed fetch and show it on whichever page is up. The Desk has
+   * `renderError` and its own surfaces; a temporal view has neither, so it gets
+   * the fallback page instead of the blank host it used to get.
+   */
+  private markFetchFailed(msg: string): void {
+    this.lastFetchFailed = true
+    this.renderError(msg)
+    if (this.activeViewId !== 'desk') {
+      const view = getView(this.activeViewId)
+      if (view) this.renderViewFallback(view.title)
+    }
   }
 
   private render(data: KanbanResponse): void {
@@ -1950,6 +2067,36 @@ function withSurfaces(
     },
     temperedTotal: Math.max(0, s.temperedTotal),
   }
+}
+
+/**
+ * Resolve the card an `openCard(id)` names, across BOTH places a view can get
+ * an id from: the work surfaces, and the cycles.
+ *
+ * Cycles are searched second and separately rather than being folded into
+ * `collectCards`, because the two lists answer different questions. `ctx.cards`
+ * is what a view ITERATES — due-marks, lanes, counts — and a cycle's `due` is a
+ * span's closing edge, not a deadline, so a cycle in that list draws a mark
+ * that means the wrong thing. What a view can OPEN is a wider set than what it
+ * iterates, and this is where that widens.
+ *
+ * The warning is part of the contract, not debug leftovers. This function
+ * replaces a lookup that returned quietly on a miss, which made a dead click
+ * indistinguishable from a working one and cost a browser session to find. A
+ * no-op that says nothing is its own defect class; the next unresolvable id
+ * announces itself.
+ *
+ * Exported for tests, alongside the optimistic-relocation helpers below.
+ */
+export function resolveOpenTarget(
+  cardId: string,
+  cards: readonly KanbanCard[],
+  cycles: readonly KanbanCard[],
+): KanbanCard | null {
+  const card = cards.find((c) => c.id === cardId) ?? cycles.find((c) => c.id === cardId)
+  if (card) return card
+  console.warn(`[kanban] openCard: no card, and no cycle, with id "${cardId}"`)
+  return null
 }
 
 /**

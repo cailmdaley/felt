@@ -25,6 +25,7 @@ import type { Fiber } from './KanbanFiber.js';
 import {
   classifyFiber,
   effectiveHorizon,
+  isCycleFiber,
   KANBAN_TIMELINE_WINDOW,
   nextStandingLaunch,
   parseDueMs,
@@ -36,7 +37,7 @@ import type {
   KanbanOriginStaleness,
   KanbanResponse,
 } from './KanbanTypes.js';
-import { ascByKey, descByKey, dueSortMs, instantMs } from './civilDay.js';
+import { ascByKey, descByKey, dueCivilDay, dueSortMs, instantMs } from './civilDay.js';
 
 /**
  * Resolve the pinned local city + project-relative slug for a composite entry,
@@ -89,6 +90,12 @@ export interface BuildKanbanResponseOptions {
  */
 export function shouldIncludeInKanban(fiber: Fiber): boolean {
   if (fiber.hasShuttleBlock === true) return true;
+  // A CYCLE is admitted on its tag alone — no shuttle block, no `due:`, no
+  // lifecycle status required. An open-ended cycle (a `start:` and nothing
+  // else) is a legitimate band the views must draw, and the due test below
+  // would drop it. Cycles are also the one admitted row that is not work:
+  // `classifyFiber` sends them straight to the `cycles` surface.
+  if (isCycleFiber(fiber)) return true;
   return (
     (fiber.status === 'open' || fiber.status === 'active') &&
     parseDueMs(fiber.due) !== undefined
@@ -116,13 +123,16 @@ export function buildKanbanResponseFromComposite(
     return emptyResponse(feed, nowMs, staleness, tagIndex);
   }
 
-  const eligible = feed.entries
-    .filter((e) => shouldIncludeInKanban(e.fiber))
-    .filter((e) =>
-      opts.scopeCityId === undefined
-        ? true
-        : opts.resolveCity?.(e)?.cityId === opts.scopeCityId,
-    );
+  const eligible = dedupeMirroredRows(
+    feed.entries
+      .filter((e) => shouldIncludeInKanban(e.fiber))
+      .filter((e) =>
+        opts.scopeCityId === undefined
+          ? true
+          : opts.resolveCity?.(e)?.cityId === opts.scopeCityId,
+      ),
+    feed,
+  );
   const surfaces = assembleSurfaces(eligible, byId, nowMs, opts.resolveCity);
 
   return {
@@ -131,6 +141,7 @@ export function buildKanbanResponseFromComposite(
     timeline: surfaces.timeline,
     stash: surfaces.stash,
     pinned: surfaces.pinned,
+    cycles: surfaces.cycles,
     totals: surfaceTotals(surfaces),
     temperedTotal: surfaces.temperedTotal,
     timelineWindow: KANBAN_TIMELINE_WINDOW,
@@ -140,11 +151,77 @@ export function buildKanbanResponseFromComposite(
   };
 }
 
+/**
+ * One fiber, one card — collapse the rows a mirrored fiber contributes.
+ *
+ * A fiber that lives in a git-synced store is served by EVERY daemon that has
+ * it on disk, one row per origin. On the real board that is 245 rows for 240
+ * fibers: five fibers under `science/unions` arrive from both the laptop and
+ * `candide`, and each rendered twice in Drafts. Worse than cosmetic — the twins
+ * disagree. Under a stale remote one copy dims and refuses drag while the other
+ * looks fine, so which card you happened to grab decided whether the gesture
+ * worked.
+ *
+ * Identity is `uid` (felt's intrinsic ULID, stable across stores) falling back
+ * to the slug id for the handful of rows that predate uids. The survivor is
+ * chosen by a fixed precedence, because "whichever the feed listed first" is
+ * how you get a board that reshuffles between polls:
+ *
+ *   1. the LOCALLY-OWNED row — this host can actually write to it, and its
+ *      liveness is first-hand rather than a cached remote snapshot;
+ *   2. failing that, a row from a FRESH origin over a stale one — a stale
+ *      origin's rows are last-known-good, which is exactly what you don't want
+ *      to show when a live copy exists;
+ *   3. failing that, the newest `modified_at`.
+ *
+ * The losing origin is not discarded silently: it rides on `mirroredOrigins` so
+ * the card can say where else this fiber lives.
+ */
+export function dedupeMirroredRows(
+  entries: CompositeEntry[],
+  feed: CompositeFeed,
+): CompositeEntry[] {
+  const isStale = (origin: string): boolean => feed.origins[origin]?.stale === true;
+  const isLocal = (origin: string): boolean =>
+    origin === feed.host || feed.origins[origin]?.kind === 'local';
+
+  // Lower rank wins.
+  const rank = (e: CompositeEntry): number => (isLocal(e.origin) ? 0 : isStale(e.origin) ? 2 : 1);
+
+  const winners = new Map<string, CompositeEntry>();
+  const alsoOn = new Map<string, string[]>();
+  for (const entry of entries) {
+    const key = entry.fiber.uid ?? entry.fiber.id;
+    const held = winners.get(key);
+    if (!held) {
+      winners.set(key, entry);
+      continue;
+    }
+    alsoOn.set(key, [...(alsoOn.get(key) ?? []), entry.origin]);
+    const heldRank = rank(held);
+    const mineRank = rank(entry);
+    const better =
+      mineRank !== heldRank
+        ? mineRank < heldRank
+        : (instantMs(entry.fiber.modifiedAt) ?? 0) > (instantMs(held.fiber.modifiedAt) ?? 0);
+    if (better) {
+      winners.set(key, entry);
+      alsoOn.set(key, [...(alsoOn.get(key) ?? []).filter((o) => o !== entry.origin), held.origin]);
+    }
+  }
+
+  return [...winners.entries()].map(([key, entry]) => {
+    const others = alsoOn.get(key);
+    return others && others.length > 0 ? { ...entry, mirroredOrigins: others } : entry;
+  });
+}
+
 type AssembledSurfaces = {
   now: KanbanResponse['now'];
   timeline: KanbanResponse['timeline'];
   stash: KanbanCard[];
   pinned: KanbanCard[];
+  cycles: KanbanCard[];
   temperedTotal: number;
 };
 
@@ -168,9 +245,10 @@ function assembleSurfaces(
   const awaitingReview: KanbanCard[] = [];
   const tempered: KanbanCard[] = [];
   const composted: KanbanCard[] = [];
+  const cycles: KanbanCard[] = [];
 
   const buckets: Record<KanbanColumn, KanbanCard[]> = {
-    drafts, scheduled, pinned, inFlight, awaitingReview, tempered, composted,
+    drafts, scheduled, pinned, inFlight, awaitingReview, tempered, composted, cycles,
   };
   for (const entry of entries) {
     const card = toCard(entry, byId, nowMs, resolveCity);
@@ -253,11 +331,21 @@ function assembleSurfaces(
   futureDated.sort(byDueAtAsc);
   anytimeSoon.sort(byDueAtAsc);
 
+  // Cycles are the calendar's backdrop, so they read left to right: earliest
+  // band first, ties broken by name so the order holds still across polls.
+  cycles.sort((a, b) => {
+    const aStart = a.cycleStart ?? dueCivilDay(a.due) ?? '';
+    const bStart = b.cycleStart ?? dueCivilDay(b.due) ?? '';
+    if (aStart !== bStart) return aStart < bStart ? -1 : 1;
+    return (a.name || '').localeCompare(b.name || '');
+  });
+
   return {
     now: { drafts: nowDrafts, inFlight, awaitingReview: nowAwaitingReview },
     timeline: { past, futureDated, anytimeSoon },
     stash,
     pinned,
+    cycles,
     temperedTotal: tempered.length,
   };
 }
@@ -288,6 +376,7 @@ function toCard(
   const held = entry.held === true;
   const heldSince = entry.heldSince;
   const horizon = effectiveHorizon(f, nowMs);
+  const isCycle = isCycleFiber(f);
   const city = resolveCity?.(entry);
 
   return {
@@ -317,6 +406,7 @@ function toCard(
     lastActivityAt,
     held,
     heldSince,
+    mirroredOrigins: entry.mirroredOrigins,
     cityId: city?.cityId,
     projectSlug: city?.projectSlug,
     shuttleFiberId: city?.shuttleFiberId,
@@ -336,6 +426,11 @@ function toCard(
     effectiveHorizon: horizon.effectiveHorizon,
     drifted: horizon.drifted,
     cold: typeof f.cold === 'boolean' ? f.cold : undefined,
+    isCycle,
+    // Normalized to a bare civil day here, once, so no view re-derives it (and
+    // no view re-parses it as an instant and loses a day). `cycleSpan` fills in
+    // the start for a cycle that only names its end.
+    cycleStart: isCycle ? dueCivilDay(f.start) ?? null : null,
   };
 }
 
@@ -433,6 +528,7 @@ function emptyResponse(
     timeline: { past: [], futureDated: [], anytimeSoon: [] },
     stash: [],
     pinned: [],
+    cycles: [],
     totals: {
       drafts: 0, inFlight: 0, awaitingReview: 0,
       past: 0, futureDated: 0, anytimeSoon: 0, stash: 0, pinned: 0,

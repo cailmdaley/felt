@@ -1,9 +1,23 @@
 /* Day view — two clocks on one lane, then the day as prose.
 
-   Palette is KanbanModal.css's: iron-gall #1B1611, muted #7A6F5C, faded
-   #A89B83, ochre #C49333, cobalt #3D5BA0, teal #3F8278, cinnabar #BC4538.
-   Hairlines are 0.5px. Nothing here carries a host colour or a score — the
-   rail says when, the prose says what, and neither needs a legend. */
+   NO COLOUR WITHOUT A MEANING. The board's pigments are a grammar, not a
+   palette to draw from, and this page spends exactly three of them:
+
+     cobalt  rgba(40,78,180,.30)  the agent was working
+     teal    #3F8278              you were steering
+     cinnabar #BC4538             attention demanded — and, as rubric ink, the
+                                  section head, which is the board's own
+                                  convention for a head (see `.kbn-cap`)
+
+   Ochre is not here: on this board it means an obligation, and nothing on this
+   page is one. Everything structural — bullets, gridlines, the midnight rule,
+   hovers, focus rings — is iron gall #1B1611 at some weight, with muted
+   #7A6F5C and faded #A89B83 for text that recedes. A hue is a claim; a hue
+   that means nothing is a claim the data never made.
+
+   Interaction follows the board rather than inventing its own: hover darkens
+   toward ink, focus is a 1px DASHED ring at 2px offset (KanbanModal.css does
+   the same). Hairlines are 0.5px. */
 
 /* ── Head: the date, its chevrons, and the day's two totals ──────────────── */
 
@@ -44,11 +58,11 @@
   transition: color 90ms ease-out, border-color 90ms ease-out;
 }
 .kbn-day-date:hover {
-  color: #3D5BA0;
-  border-bottom-color: rgba(61, 91, 160, 0.4);
+  color: #1B1611;
+  border-bottom-color: rgba(27, 22, 17, 0.35);
 }
 .kbn-day-date:focus-visible {
-  outline: 1px solid rgba(61, 91, 160, 0.55);
+  outline: 1px dashed rgba(27, 22, 17, 0.45);
   outline-offset: 3px;
   border-radius: 2px;
 }
@@ -65,9 +79,37 @@
   color: #A89B83;
   transition: color 90ms ease-out;
 }
-.kbn-day-chev:hover { color: #BC4538; }
+.kbn-day-chev:hover { color: #1B1611; }
 .kbn-day-chev:focus-visible {
-  outline: 1px solid rgba(61, 91, 160, 0.55);
+  outline: 1px dashed rgba(27, 22, 17, 0.45);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* Back to today. Absent — not merely disabled — while today is what you are
+   looking at: a control that would do nothing is worse than no control. Gold,
+   because gold is this board's "now", and the same signal Week's away-state
+   week-label carries. */
+.kbn-day-today {
+  appearance: none;
+  border: 0;
+  background: none;
+  padding: 0 1px 1px;
+  cursor: pointer;
+  display: none;
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: #9A7B35;
+  border-bottom: 0.5px solid rgba(154, 123, 53, 0.45);
+}
+.kbn-day-today-shown { display: inline-block; }
+.kbn-day-today:hover {
+  color: #7A5E1E;
+  border-bottom-color: rgba(154, 123, 53, 0.8);
+}
+.kbn-day-today:focus-visible {
+  outline: 1px dashed rgba(154, 123, 53, 0.7);
   outline-offset: 2px;
   border-radius: 2px;
 }
@@ -86,6 +128,12 @@
 /* Two columns — label, rail — with one gridline layer spanning every lane
    row, so the hour rules run unbroken down the stack. */
 .kbn-day-chart {
+  /* The three pigments, declared once. The rail marks and the key glyphs both
+     read them, so a mark and the swatch that explains it cannot drift apart —
+     which would be the worst possible bug in a legend. */
+  --day-agent: rgba(40, 78, 180, 0.30);
+  --day-attention: #3F8278;
+  --day-notify: #BC4538;
   display: grid;
   grid-template-columns: minmax(86px, 232px) 1fr;
   column-gap: 12px;
@@ -108,9 +156,23 @@
   width: 0;
 }
 .kbn-day-gridline { border-left: 0.5px solid rgba(122, 111, 92, 0.16); }
-/* The date itself turning over — off the 4h grid, and dressed differently
-   so it reads as a boundary rather than another hour. */
-.kbn-day-midnight { border-left: 0.5px dashed rgba(196, 147, 51, 0.55); }
+/* The date itself turning over — off the 4h grid, and dashed rather than
+   solid so it reads as a boundary. Deliberately NOT ochre: on this board ochre
+   means an obligation, and midnight is not one. */
+.kbn-day-midnight { border-left: 0.5px dashed rgba(27, 22, 17, 0.28); }
+
+/* Now — a thin gold thread down today's rails, the same mark WeekView draws
+   down its today row. Gold is the board's "this moment"; everything right of
+   the thread is a day that has not happened yet, not an idle evening. */
+.kbn-day-now {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 1.5px;
+  margin-left: -0.75px;
+  background: #9A7B35;
+  box-shadow: 0 0 0 2px rgba(154, 123, 53, 0.12);
+}
 
 .kbn-day-label {
   grid-column: 1;
@@ -139,12 +201,12 @@
 }
 button.kbn-day-lanename { cursor: pointer; }
 button.kbn-day-lanename:hover {
-  color: #3D5BA0;
-  text-decoration: underline dotted rgba(61, 91, 160, 0.5);
+  color: #1B1611;
+  text-decoration: underline dotted rgba(27, 22, 17, 0.4);
   text-underline-offset: 2px;
 }
 button.kbn-day-lanename:focus-visible {
-  outline: 1px solid rgba(61, 91, 160, 0.55);
+  outline: 1px dashed rgba(27, 22, 17, 0.45);
   outline-offset: 2px;
   border-radius: 2px;
 }
@@ -186,7 +248,7 @@ button.kbn-day-lanename:focus-visible {
   top: 3px;
   bottom: 3px;
   min-width: 2px;
-  background: rgba(40, 78, 180, 0.30);
+  background: var(--day-agent);
   border-radius: 1px;
 }
 
@@ -196,7 +258,7 @@ button.kbn-day-lanename:focus-visible {
   top: 1.5px;
   bottom: 1.5px;
   min-width: 2.5px;
-  background: #3F8278;
+  background: var(--day-attention);
   border-radius: 1px;
 }
 
@@ -208,7 +270,7 @@ button.kbn-day-lanename:focus-visible {
   bottom: -3px;
   width: 1.5px;
   margin-left: -0.75px;
-  background: #BC4538;
+  background: var(--day-notify);
 }
 .kbn-day-notify::before {
   content: '';
@@ -217,7 +279,7 @@ button.kbn-day-lanename:focus-visible {
   left: -1.25px;
   width: 4px;
   height: 3px;
-  background: #BC4538;
+  background: var(--day-notify);
 }
 
 /* Interactive lanes are the same marks, spoken quieter. */
@@ -242,11 +304,60 @@ button.kbn-day-lanename:focus-visible {
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
   font-size: 8.5px;
   letter-spacing: 0.04em;
-  color: #A89B83;
+  color: #7A6F5C;
   white-space: nowrap;
 }
 .kbn-day-tick-first { transform: translateX(0); }
 .kbn-day-tick-last { transform: translateX(-100%); }
+
+/* The key — a marginal gloss under the rails, right-aligned so it sits out of
+   the way of the reading. Italic serif rather than mono: the mono hand belongs
+   to the tick labels directly above it, and a caption should not be mistaken
+   for another row of them. */
+.kbn-day-legend {
+  grid-column: 2;
+  justify-self: end;
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  margin-top: 5px;
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-style: italic;
+  font-size: 11px;
+  line-height: 1;
+  color: #7A6F5C;
+}
+.kbn-day-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+/* Each glyph is its mark in miniature, keeping the rails' height hierarchy —
+   the wash lies low and wide, the block stands taller, the tick is tallest. */
+.kbn-day-keyglyph {
+  display: inline-block;
+  flex: 0 0 auto;
+  border-radius: 1px;
+}
+.kbn-day-key-wash {
+  width: 15px;
+  height: 6px;
+  background: var(--day-agent);
+}
+/* Wider than the 2.5px mark it stands for: at rail scale a block is read by
+   its position among hundreds, but a swatch has one job — to show its colour —
+   and a 3px bar of teal at caption size does not do it. */
+.kbn-day-key-att {
+  width: 5px;
+  height: 10px;
+  background: var(--day-attention);
+}
+.kbn-day-key-tick {
+  width: 3px;
+  height: 12px;
+  background: var(--day-notify);
+}
 
 /* ── The day, by fiber ───────────────────────────────────────────────────── */
 
@@ -276,34 +387,137 @@ button.kbn-day-lanename:focus-visible {
   max-width: 72em;
 }
 
+/* ── Operational rows ─────────────────────────────────────────────────────
+   Day is the cockpit, not the filing cabinet: a ledger row says how a fiber
+   STANDS (the chip), what it cost today (the stats), and what it said (the
+   prose). The chip is literally the Desk's `.kbn-card-worker` pill — same
+   classes, same pixels, same gesture — because one board must not grow two
+   dialects for "there is a worker here". Only its layout is re-scoped. */
+
+.kbn-day-entryhead {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 1px;
+}
+
+/* The Desk pill sits in a flex meta row and pushes itself right; here it leads
+   the line, so its auto margin has to go. Nothing else about it changes. */
+.kbn-day-chip {
+  margin-left: 0 !important;
+  align-self: center;
+}
+
+/* Closed inside this rail. A statement, not a control: the verdict lives on
+   the Desk, and two places to do one irreversible thing is one too many. */
+.kbn-day-closed {
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-variant-emoji: text;
+  font-size: 12px;
+  line-height: 1;
+  color: #7A6F5C;
+}
+
+/* Today's cost, in the head's mono register — the same hand as the page's own
+   attention/agents line, one size down, because it says the same kind of thing
+   about one fiber that the head says about the day. */
+.kbn-day-entrystats {
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 8.5px;
+  letter-spacing: 0.04em;
+  color: #7A6F5C;
+  white-space: nowrap;
+}
+
+/* ── Still ahead ───────────────────────────────────────────────────────────
+   What today has not done yet — role firings and dues, in Week's own glyphs
+   (◐ launch, ◴ due) so an obligation looks the same wherever it is drawn. */
+
+.kbn-day-ahead {
+  margin-top: 12px;
+  padding-top: 7px;
+  border-top: 0.5px solid rgba(122, 111, 92, 0.22);
+}
+.kbn-day-aheaditems {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+}
+.kbn-day-aheaditem {
+  appearance: none;
+  border: 0;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-size: 12.5px;
+  color: #1B1611;
+}
+.kbn-day-aheaditem:hover .kbn-day-aheadname {
+  text-decoration: underline dotted rgba(27, 22, 17, 0.4);
+  text-underline-offset: 2px;
+}
+.kbn-day-aheaditem:focus-visible {
+  outline: 1px dashed rgba(27, 22, 17, 0.45);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+/* Ochre: on this board an obligation is ochre, and these are the only
+   obligations the page draws. */
+.kbn-day-aheadglyph {
+  font-variant-emoji: text;
+  color: #9A7B35;
+  font-size: 11px;
+}
+.kbn-day-aheadwhen {
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 8.5px;
+  letter-spacing: 0.04em;
+  color: #A89B83;
+}
+
 /* Ragged right, not justified: the columns are narrow enough that justifying
    opens rivers around the long unbreakable tokens these subjects carry
    (`χ²_B`, `board-chrome-redesign`). The hanging indent lets the bullet sit
    in the margin, so wrapped lines align under the text. */
 .kbn-day-entry {
   break-inside: avoid;
-  margin: 0 0 7px;
+  margin: 0 0 9px;
   padding-left: 12px;
-  text-indent: -12px;
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
   font-size: 13px;
   line-height: 1.44;
   color: #1B1611;
   text-wrap: pretty;
 }
+/* The prose sits under the head, always, so the heads stay scannable straight
+   down the column. Every row has the same two-part shape whether or not it
+   carries a chip. */
+.kbn-day-entrybody {
+  display: block;
+  margin: 0;
+}
+.kbn-day-entryhead {
+  margin-left: -12px;
+}
 
+/* One uniform ink lozenge, an anchor for the eye down a two-column ledger.
+   It was a rotating four-hue cycle keyed on the entry's INDEX — a different
+   pigment per paragraph, signifying nothing, which is exactly the decoration
+   this page cannot afford. Every entry is the same kind of thing, so every
+   bullet is the same mark. */
 .kbn-day-sq {
   display: inline-block;
-  width: 6px;
-  height: 6px;
-  margin-right: 6px;
+  width: 5px;
+  height: 5px;
+  margin-right: 7px;
   transform: translateY(-1px);
-  background: #A89B83;
+  background: rgba(27, 22, 17, 0.55);
 }
-.kbn-day-sq[data-hue='0'] { background: #C49333; }
-.kbn-day-sq[data-hue='1'] { background: #3D5BA0; }
-.kbn-day-sq[data-hue='2'] { background: #3F8278; }
-.kbn-day-sq[data-hue='3'] { background: #A2362A; }
 
 .kbn-day-entrytitle {
   appearance: none;
@@ -316,19 +530,21 @@ button.kbn-day-lanename:focus-visible {
   font-weight: 600;
   color: #1B1611;
 }
-.kbn-day-entrytitle::after {
-  content: ' — ';
-  font-weight: 400;
-  color: #A89B83;
+/* On an operational row the chip and the stats are the new information; the
+   name is only there to say WHICH fiber, and it already appears on the lane
+   above. So it steps back from a heading to an identifier — enough to find,
+   not enough to repeat itself at you. */
+.kbn-day-entry-op .kbn-day-entrytitle {
+  font-weight: 500;
 }
 button.kbn-day-entrytitle { cursor: pointer; }
 button.kbn-day-entrytitle:hover {
-  color: #3D5BA0;
-  text-decoration: underline dotted rgba(61, 91, 160, 0.5);
+  color: #1B1611;
+  text-decoration: underline dotted rgba(27, 22, 17, 0.4);
   text-underline-offset: 2px;
 }
 button.kbn-day-entrytitle:focus-visible {
-  outline: 1px solid rgba(61, 91, 160, 0.55);
+  outline: 1px dashed rgba(27, 22, 17, 0.45);
   outline-offset: 2px;
   border-radius: 2px;
 }
@@ -345,4 +561,138 @@ button.kbn-day-entrytitle:focus-visible {
   font-style: italic;
   color: #A89B83;
 }
-.kbn-day-entry-loose .kbn-day-entrytitle::after { content: ' '; }
+
+/* ── Where things stand ────────────────────────────────────────────────────
+   Each fiber's own rendered page, at thumbnail size. A report already states
+   its status spatially — headings, tables, the shape of an argument — so the
+   day closes with those pages rather than another paraphrase of them.
+
+   The frame is inert on purpose: `pointer-events: none` keeps the wheel with
+   the strip instead of trapping it in a nested document, and the caption is
+   the way in. Reading happens in the detail panel, at full size. */
+
+.kbn-day-previews {
+  margin-top: 14px;
+  padding-top: 7px;
+  border-top: 0.5px solid rgba(122, 111, 92, 0.22);
+}
+
+.kbn-day-previewstrip {
+  display: flex;
+  gap: 14px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 6px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(122, 111, 92, 0.35) transparent;
+}
+
+/* A mounted plate, not a browser tile: hairline, whisper shadow, parchment
+   mat — the same treatment FileViewerPanel gives an image deliverable. */
+.kbn-day-pane {
+  flex: 0 0 auto;
+  width: 360px;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.kbn-day-panebody {
+  position: relative;
+  height: 230px;
+  overflow: hidden;
+  background: #FFFDF6;
+  border: 0.5px solid rgba(27, 22, 17, 0.16);
+  border-radius: 2px;
+  box-shadow: 0 1px 2px rgba(27, 22, 17, 0.06);
+}
+
+/* Rendered at double size and halved, so the report's own type comes down to
+   thumbnail scale with its layout intact rather than reflowing to a narrow
+   column and ceasing to look like the page it is. */
+.kbn-day-paneframe {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 720px;
+  height: 460px;
+  border: 0;
+  transform: scale(0.5);
+  transform-origin: top left;
+  pointer-events: none;
+  background: #FFFDF6;
+  opacity: 0;
+  transition: opacity 160ms ease-out;
+}
+.kbn-day-pane-loaded .kbn-day-paneframe { opacity: 1; }
+.kbn-day-pane-loaded .kbn-day-paneveil { display: none; }
+
+/* FileViewerPanel's veil, at pane scale — a blank frame reads as broken, and
+   a report can be multi-megabyte over a tunnel. */
+.kbn-day-paneveil {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #FFFDF6;
+  color: #7A7368;
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-style: italic;
+  font-size: 12px;
+  animation: kbn-day-panepulse 1.6s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .kbn-day-paneveil { animation: none; opacity: 0.8; }
+}
+@keyframes kbn-day-panepulse {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+
+/* No report: the outcome, set as the page it stands in for. Not a placeholder
+   — an outcome IS the fiber's statement of where it stands. */
+.kbn-day-paneoutcome {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  padding: 14px 16px;
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-size: 13px;
+  line-height: 1.5;
+  color: #1B1611;
+  /* Fades out rather than clipping mid-letter when the outcome runs long. */
+  mask-image: linear-gradient(to bottom, #000 78%, transparent 100%);
+}
+.kbn-day-paneoutcome em { color: #A89B83; }
+.kbn-day-paneoutcome > *:first-child { margin-top: 0; }
+
+.kbn-day-panecap {
+  display: flex;
+  min-width: 0;
+}
+.kbn-day-panename {
+  appearance: none;
+  border: 0;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-size: 12px;
+  color: #7A6F5C;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.kbn-day-panename:hover {
+  color: #1B1611;
+  text-decoration: underline dotted rgba(27, 22, 17, 0.4);
+  text-underline-offset: 2px;
+}
+.kbn-day-panename:focus-visible {
+  outline: 1px dashed rgba(27, 22, 17, 0.45);
+  outline-offset: 2px;
+  border-radius: 2px;
+}

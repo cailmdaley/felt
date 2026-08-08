@@ -32,6 +32,7 @@ import type {
   ActivityBucket,
   ActivityResult,
   NarrationResult,
+  SessionRecord,
   TemporalFetchers,
 } from '../src/board/views/index.js'
 
@@ -55,6 +56,25 @@ const shuttleBlock = (kind = 'oneshot') => ({
 
 /** A shuttle block carrying a concluded run's `runtime` stamps — what the
  *  detail panel's session-window line reads (dispatched → handed off → span). */
+/**
+ * A block whose worker runs somewhere OTHER than the host serving this page.
+ *
+ * LOAD-BEARING, do not normalize away. Day prints a lane's hostname only when
+ * that lane ran elsewhere (`noteFor` suppresses a note matching the page host,
+ * because a hostname repeated on every row is a constant pretending to be
+ * information), and Chronicle does the same with its host text. With every
+ * mock fiber on `ada-workstation` — which is also the mock activity's `host` —
+ * those paths could never fire, and a span that never renders looks exactly
+ * like a span that is correctly suppressed. Exactly one fiber wears this so
+ * both branches are visible at once: one lane with a hostname, the rest bare.
+ */
+const FOREIGN_HOST = 'cineca-login-02'
+const shuttleBlockElsewhere = () => ({
+  ...shuttleBlock(),
+  host: FOREIGN_HOST,
+  project_dir: '/leonardo_work/spt3g/papers',
+})
+
 const shuttleBlockWithRun = (dispatchedMsAgo: number, ranForMs: number) => ({
   ...shuttleBlock(),
   runtime: {
@@ -98,6 +118,10 @@ const ULID = {
   registryAudit: '01KVBR9Q4KN32VQ52289Y356V6',
   lensingScope: '01KVBRAR5MP43WR63390Z467W7',
   morningPost: '01KVBRBS6NQ54XS74401Z578X8',
+  mirrored: '01KTCA2D1FGAJNHX5WKQ34BSZF',
+  shearSprint: '01KVBRCT7PR65YT85512Z689Y9',
+  rentreePush: '01KVBRDV8QS76ZV96623Z790Z0',
+  summerSchool: '01KVBREW9RT870W07734Z801Z1',
 } as const
 
 /** The tmux session a Shuttle worker on this fiber runs in — the real
@@ -119,6 +143,10 @@ interface MockFiber {
    *  card rests below and ghosts onto the timeline at the day it wakes. */
   due?: string
   horizon?: string
+  /** A CYCLE's opening edge. Not one of felt's native fields — opaque extra
+   *  frontmatter felt preserves and re-emits; `KanbanFiber` reads it as
+   *  `Fiber.start` and the read model turns it into `cycleStart`. */
+  start?: string
   shuttle?: ReturnType<typeof shuttleBlock>
 }
 
@@ -138,6 +166,7 @@ const fiber = (f: MockFiber) => ({
     closed_at: f.closed_at,
     due: f.due,
     horizon: f.horizon,
+    start: f.start,
     shuttle: f.shuttle,
   },
 })
@@ -182,7 +211,9 @@ const IN_FLIGHT: MockFiber[] = [
     status: 'active',
     outcome: 'Compute χ²_B and the PTE across the patch set; checking the covariance Hartlap factor.',
     tags: ['spt3g', 'research'],
-    shuttle: shuttleBlock(),
+    // The one fiber running off-box — see shuttleBlockElsewhere. A null-test
+    // sweep on an HPC login node is also the most plausible candidate.
+    shuttle: shuttleBlockElsewhere(),
   },
   {
     id: 'work/admin/conference-travel-receipts',
@@ -255,6 +286,34 @@ const RESTING: MockFiber[] = [
     horizon: 'stashed',
     shuttle: shuttleBlock(),
   },
+  // Six more under `science`, across two subdirectories — the case that must
+  // SPLIT into `science/unions` + `science/spt3g` rather than show "science 6".
+  ...['sp-validation/rerun', 'shear-2d/covariance', 'photoz/recalibrate'].map((leaf) => ({
+    id: `science/unions/${leaf}`,
+    name: leaf.replace(/[/-]/g, ' '),
+    status: 'open',
+    tags: ['science'],
+    horizon: 'stashed',
+    shuttle: shuttleBlock(),
+  })),
+  ...['bmodes/null-suite', 'lensing/mask-audit', 'cluster/richness'].map((leaf) => ({
+    id: `science/spt3g/${leaf}`,
+    name: leaf.replace(/[/-]/g, ' '),
+    status: 'open',
+    tags: ['science'],
+    horizon: 'stashed',
+    shuttle: shuttleBlock(),
+  })),
+  // Six leaves in ONE folder — the degenerate case: no deeper segment to split
+  // on, so it stays one cluster capped at four behind "+2 more".
+  ...['alpha', 'beta', 'gamma', 'delta', 'epsilon', 'zeta'].map((leaf) => ({
+    id: `admin/${leaf}`,
+    name: `Admin ${leaf}`,
+    status: 'open',
+    tags: ['admin'],
+    horizon: 'stashed',
+    shuttle: shuttleBlock(),
+  })),
 ]
 
 // A standing role, for the humanized-cron chip in the detail panel.
@@ -267,6 +326,72 @@ const STANDING: MockFiber[] = [
     outcome: 'Groups the routine auto-archives; itemizes the signal.',
     tags: ['loom', 'email'],
     shuttle: standingBlock('0 9 * * 1-5'),
+  },
+]
+
+/**
+ * CYCLES — `cycle`-tagged fibers, each a named span of time. They are drawn as
+ * bands behind the work by the temporal views and appear on NO desk surface:
+ * `classifyFiber` routes a cycle to `response.cycles` and nowhere else, so the
+ * column counts never see one.
+ *
+ * The harness carried none until now, which is exactly why a dead cycle click
+ * survived to a browser session — with no band on screen there was nothing to
+ * click offline. One live cycle spanning today (so a band is always visible
+ * whenever the harness is opened) and one closed last week, so the views get
+ * both a current and a past span to place.
+ */
+const CYCLES: MockFiber[] = [
+  {
+    id: 'work/cycles/shear-paper-sprint',
+    uid: ULID.shearSprint,
+    name: 'shear-paper sprint',
+    status: 'open',
+    outcome: 'Push the cosmic-shear paper to a complete draft: covariance, nulls, and the systematics appendix.',
+    tags: ['cycle'],
+    start: civilDay(-5),
+    due: civilDay(10),
+  },
+  {
+    // OPEN-ENDED — a `start:` and no `due:`. `cycleSpan` clamps its end to
+    // today, so it draws as a band with no right edge yet rather than a span
+    // that happens to stop. That is a distinct render path from the dated
+    // cycle above, and this is the only card exercising it.
+    id: 'loom/cycles/rentree-push',
+    uid: ULID.rentreePush,
+    name: 'rentrée push',
+    status: 'open',
+    outcome: 'Everything that has to be standing before the lab fills up again in September.',
+    tags: ['cycle'],
+    start: civilDay(-12),
+  },
+  {
+    // WHOLLY PAST — started and ended before today, closed last week. The two
+    // above both reach the present, so without this one no view ever draws a
+    // band that lies entirely behind the cursor: Chronicle's past bands, and
+    // any "this week sits after the cycle" branch, would go unexercised.
+    id: 'work/cycles/summer-school-block',
+    uid: ULID.summerSchool,
+    name: 'summer-school block',
+    status: 'closed',
+    outcome: 'Lectures written and delivered; the lensing problem sets are in the shared drive.',
+    tags: ['cycle'],
+    start: civilDay(-19),
+    due: civilDay(-6),
+    closed_at: iso(-6 * 86_400_000),
+  },
+]
+
+// Served by BOTH the laptop and `candide` out of one git-synced store.
+const MIRRORED: MockFiber[] = [
+  {
+    id: 'science/unions/shear_2d/final-push',
+    uid: ULID.mirrored,
+    name: 'Final push on the A&A submission',
+    status: 'open',
+    outcome: 'Mirrored across the laptop and candide — one card, two hosts.',
+    tags: ['unions'],
+    shuttle: shuttleBlock(),
   },
 ]
 
@@ -303,9 +428,19 @@ const MOCK_FEED = {
     ...AWAITING.map(fiber),
     ...RESTING.map(fiber),
     ...STANDING.map(fiber),
+    ...CYCLES.map(fiber),
+    // The SAME fiber served by two daemons — a git-synced store is served by
+    // every host that has it on disk. The board must render ONE card (the
+    // locally-owned row) and name the other host on it, not two twins that
+    // disagree about staleness.
+    ...MIRRORED.flatMap((f) => [
+      fiber(f),
+      { ...fiber(f), origin: 'candide', felt_store: '/home/ada/loom-candide' },
+    ]),
   ],
   origins: {
-    local: { kind: 'local', stale: false, last_polled_at: iso(0), fiber_count: 11 },
+    local: { kind: 'local', stale: false, last_polled_at: iso(0), fiber_count: 12 },
+    candide: { kind: 'remote', stale: true, last_polled_at: iso(-3_600_000), fiber_count: 1 },
   },
 }
 
@@ -384,6 +519,15 @@ const MOCK_ACTORS: Array<{ s: string | null; cwd: string | null; weight: number 
   { s: sessionFor('loom/email/morning-post/refine', ULID.refine), cwd: '/home/ada/loom', weight: 4 },
   { s: sessionFor('work/euclid/euclid-github/triage', ULID.triage), cwd: '/home/ada/work/euclid', weight: 3 },
   { s: sessionFor('work/admin/conference-travel-receipts', ULID.receipts), cwd: '/home/ada/loom', weight: 2 },
+  // LEDGER-ONLY: no ULID in the name, so every name-derived rung misses it —
+  // but the session ledger pairs it, so RUNG 0 resolves it to a fiber. The
+  // one actor that demonstrates what rung 0 can do that nothing else can.
+  // Its cwd tail (`photoz`) deliberately matches NO fiber segment: with a
+  // tail like `euclid` the cwd rung would guess a fiber, and guess the WRONG
+  // one (the ledger pairs this session to photoz-systematics, not triage).
+  // So today it reads `· unmatched`, and adopting rung 0 moves it into the
+  // photoz lane — a clean before/after rather than a silent mis-join.
+  { s: 'pi-2f9c41', cwd: '/home/ada/work/photoz', weight: 3 },
   { s: 'scratch-shuttle', cwd: '/home/ada/scratch', weight: 3 },
   { s: null, cwd: '/home/ada/dev/felt', weight: 3 },
   { s: null, cwd: '/home/ada/notes', weight: 2 },
@@ -565,9 +709,98 @@ function mockNarration(fromISO: string, toISO: string): NarrationResult {
   return { commits }
 }
 
+/**
+ * The session ledger — `GET /api/v1/sessions`, one line per fiber↔session
+ * pairing. Views join activity buckets through it as RUNG 0.
+ *
+ * Three things it deliberately covers:
+ *
+ *   · the four ULID-bearing sessions, where rung 0 AGREES with the existing
+ *     name-derived rungs — adopting it must not move those lanes.
+ *   · `pi-2f9c41`, whose tmux name carries no ULID at all. Every name-derived
+ *     rung misses it; only the ledger can say whose work it was. This is the
+ *     case that justifies rung 0 existing.
+ *   · a HISTORICAL pairing (`sweep`) with no activity in any window the views
+ *     ask for — the ledger outliving its session, which is the whole point of
+ *     the file. It must not conjure a lane on its own.
+ *
+ * `scratch-shuttle` is deliberately ABSENT, so the `· unmatched` label keeps
+ * its coverage. Pairing it here would resolve it and quietly delete that path.
+ */
+const MOCK_SESSIONS: SessionRecord[] = [
+  {
+    at: now - 5 * 3_600_000,
+    fiber: 'work/spt3g_papers/bmodes-2d/run',
+    uid: ULID.bmodes,
+    session: '6bc045dc-92e0-473a-bf9e-e1cc263223bc',
+    harness: 'claude-code',
+    host: FOREIGN_HOST,
+    tmux: sessionFor('work/spt3g_papers/bmodes-2d/run', ULID.bmodes),
+    kind: 'dispatch',
+  },
+  {
+    at: now - 4 * 3_600_000,
+    fiber: 'loom/email/morning-post/refine',
+    uid: ULID.refine,
+    session: '2a7f1e30-5c84-4a1b-9f22-0d3b8c7e6a55',
+    harness: 'claude-code',
+    host: 'ada-workstation',
+    tmux: sessionFor('loom/email/morning-post/refine', ULID.refine),
+    kind: 'dispatch',
+  },
+  {
+    at: now - 3 * 3_600_000,
+    fiber: 'work/euclid/euclid-github/triage',
+    uid: ULID.triage,
+    session: 'b1d9c4a2-77e5-4f60-8c31-9ab204ef1d78',
+    harness: 'codex',
+    host: 'ada-workstation',
+    tmux: sessionFor('work/euclid/euclid-github/triage', ULID.triage),
+    kind: 'claim',
+  },
+  {
+    at: now - 2 * 3_600_000,
+    fiber: 'work/admin/conference-travel-receipts',
+    uid: ULID.receipts,
+    session: 'f3e8a015-2b6d-4c99-a7f4-51c8d0b93e2a',
+    harness: 'claude-code',
+    host: 'ada-workstation',
+    tmux: sessionFor('work/admin/conference-travel-receipts', ULID.receipts),
+    kind: 'resume',
+  },
+  {
+    // The ledger-only pairing: a pi session whose name says nothing.
+    at: now - 6 * 3_600_000,
+    fiber: 'work/euclid/photoz-systematics/reread',
+    uid: ULID.photoz,
+    session: '9c2b7d41-8a03-4e15-b6f8-72d5a1c04b93',
+    harness: 'pi',
+    host: 'ada-workstation',
+    tmux: 'pi-2f9c41',
+    kind: 'dispatch',
+  },
+  {
+    // Historical: paired days ago, no activity left in any window.
+    at: now - 3 * 86_400_000,
+    fiber: 'loom/felt-maintenance/ledger/sweep',
+    uid: ULID.ledgerSweep,
+    session: '4d6e2f88-1c37-4b52-9e04-a8f31b76c250',
+    harness: 'claude-code',
+    host: 'ada-workstation',
+    tmux: sessionFor('loom/felt-maintenance/ledger/sweep', ULID.ledgerSweep),
+    kind: 'dispatch',
+  },
+]
+
 const MOCK_TEMPORAL: TemporalFetchers = {
   activity: (fromMs, toMs) => Promise.resolve(mockActivity(fromMs, toMs)),
   narration: (fromISO, toISO) => Promise.resolve(mockNarration(fromISO, toISO)),
+  // Oldest first, and filtered by the bound, exactly as the daemon serves it.
+  sessions: (sinceMs) =>
+    Promise.resolve({
+      host: 'ada-workstation',
+      records: MOCK_SESSIONS.filter((r) => r.at >= sinceMs).sort((a, b) => a.at - b.at),
+    }),
 }
 
 /**

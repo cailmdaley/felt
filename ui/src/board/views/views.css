@@ -88,6 +88,36 @@
   letter-spacing: 0.01em;
   padding: 40px 8px;
 }
+/* Retry, on the chassis's "daemon is not answering" page. A quiet inline
+   affordance rather than a button-shaped button: it sits inside the marginal
+   line, so it should read as the last word of that sentence, underlined the
+   way a reference in a manuscript margin would be. */
+.kbn-view-retry {
+  appearance: none;
+  background: none;
+  border: 0;
+  border-bottom: 0.5px solid rgba(188, 69, 56, 0.55);
+  border-radius: 0;
+  margin: 0 0 0 0.75em;
+  padding: 0 0 1px;
+  cursor: pointer;
+  font-family: var(--font-mono, 'IBM Plex Mono', monospace);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-style: normal;
+  color: #A2362A;
+  transition: color 120ms ease, border-color 120ms ease;
+}
+.kbn-view-retry:hover {
+  color: #BC4538;
+  border-bottom-color: #BC4538;
+}
+.kbn-view-retry:focus-visible {
+  outline: 1px dashed rgba(188, 69, 56, 0.55);
+  outline-offset: 2px;
+}
+
 .kbn-view-empty::before {
   content: '✶  ';
   color: #C49333;

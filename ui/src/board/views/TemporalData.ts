@@ -5,8 +5,17 @@
  *
  *   GET /api/v1/activity?from_ms=&to_ms=   coarse per-minute activity buckets
  *                                          (what the machine was doing, and where)
- *   GET /api/v1/narration?from=&to=        the commit trail over a window
+ *   GET /api/v1/narration?from_ms=&to_ms=  the commit trail over a window
  *                                          (what the work says it did)
+ *
+ * BOTH ROUTES TAKE INSTANTS, and that is the point. `narration` still *reads*
+ * inclusive civil days from its callers — that is the unit a temporal view
+ * thinks in — but it resolves them to epoch-ms HERE, in the browser's zone,
+ * and sends `from_ms`/`to_ms`. The daemon's older civil-day form
+ * (`?from=&to=`) resolves the same dates in the DAEMON's zone, so a UTC daemon
+ * serving a UTC+2 browser shifted the whole window two hours and could drop a
+ * day's commits outright (measured; see `Shuttle.Narration`'s moduledoc).
+ * Instants are timezone-free, so the skew cannot happen. Callers saw no change.
  *
  * A daemon older than these routes answers 404. That must not break the board,
  * so every failure path — 404, 5xx, network error, malformed body — resolves to
@@ -19,6 +28,8 @@
  * window. Empty (failed) results are cached the same way, which keeps an old
  * daemon from being re-probed every poll.
  */
+
+import { civilDayToLocalDate } from '../civilDay.js'
 
 /** One coarse activity bucket. Field names are the wire's — deliberately
  *  terse, because a day of minute buckets is a lot of JSON:
@@ -47,6 +58,64 @@ export interface NarrationCommit {
   subject: string
 }
 
+/**
+ * One line of this host's session ledger — a fiber↔session pairing and its
+ * provenance, as `Shuttle.SessionLedger` wrote it.
+ *
+ * `fiber`, `session` and `kind` are always present: the daemon refuses to write
+ * a line without them (an unpaired row is the one thing the ledger exists to
+ * rule out). Everything else can be absent — notably `tmux`, and therefore
+ * `uid`, which the daemon derives FROM the tmux name when it is not supplied.
+ *
+ *   at       epoch-ms of the pairing
+ *   fiber    fiber id
+ *   uid      the fiber's ULID, or null when it could not be derived
+ *   session  harness session UUID — the ledger's own key
+ *   harness  'claude-code', 'codex', …
+ *   host     the daemon that recorded it (a cross-host view merges on this)
+ *   tmux     tmux session name, or null for a session with no terminal
+ *   kind     which moment produced the line
+ */
+export interface SessionRecord {
+  at: number
+  fiber: string
+  uid: string | null
+  session: string
+  harness: string | null
+  host: string | null
+  tmux: string | null
+  kind: 'dispatch' | 'claim' | 'resume'
+}
+
+export interface SessionsResult {
+  host: string
+  records: SessionRecord[]
+}
+
+/** What the ledger can tell you about a session: whose work it was. */
+export interface SessionPairing {
+  fiber: string
+  uid: string | null
+}
+
+/**
+ * The ledger, turned into the two lookups a view actually performs.
+ *
+ * `byTmux` is JOIN RUNG 0 for today's views: an `ActivityBucket`'s `s` is the
+ * TMUX SESSION NAME (see `Shuttle.Activity` — buckets key on
+ * `{minute, tmuxSession, cwd, kind}`), so this is the map a bucket joins
+ * through, and it beats every existing rung because it is a recorded fact
+ * rather than an inference from a name.
+ *
+ * `bySession` is keyed by harness session UUID. Nothing on the activity path
+ * carries one today; it is here for the transcript-side joins that will, and
+ * it costs nothing to build in the same pass.
+ */
+export interface SessionIndex {
+  byTmux: Map<string, SessionPairing>
+  bySession: Map<string, SessionPairing>
+}
+
 export interface NarrationResult {
   commits: NarrationCommit[]
 }
@@ -61,6 +130,7 @@ export const TEMPORAL_TTL_MS = 60_000
 export interface TemporalFetchers {
   activity(fromMs: number, toMs: number): Promise<ActivityResult>
   narration(fromISO: string, toISO: string): Promise<NarrationResult>
+  sessions(sinceMs: number): Promise<SessionsResult>
 }
 
 interface CacheEntry<T> {
@@ -144,12 +214,26 @@ export function createTemporalFetchers(shuttleBase: string): TemporalFetchers {
       })
     },
 
+    /**
+     * @param fromISO first civil day, inclusive (`YYYY-MM-DD`).
+     * @param toISO   last civil day, INCLUSIVE — the window runs through the
+     *                end of this day, not up to its start.
+     *
+     * The cache key stays the caller's ISO tuple, not the resolved instants:
+     * the day pair is what a view re-asks for, and keying on the instants
+     * would only add a way for the two to disagree.
+     */
     narration(fromISO: string, toISO: string): Promise<NarrationResult> {
       return memo(`narration:${fromISO}:${toISO}`, async () => {
         const empty: NarrationResult = { commits: [] }
+        const span = civilDaysToInstants(fromISO, toISO)
+        // Unreadable days used to be sent as-is and answered with a 400, which
+        // the degrade path turned into an empty result. Same outcome, one round
+        // trip cheaper.
+        if (!span) return empty
         try {
           const body = await readJson(
-            `${shuttleBase}/api/v1/narration?from=${encodeURIComponent(fromISO)}&to=${encodeURIComponent(toISO)}`,
+            `${shuttleBase}/api/v1/narration?from_ms=${span.fromMs}&to_ms=${span.toMs}`,
           )
           return parseNarration(body, empty)
         } catch {
@@ -157,7 +241,67 @@ export function createTemporalFetchers(shuttleBase: string): TemporalFetchers {
         }
       })
     },
+
+    /**
+     * This host's session ledger from `sinceMs` onward, oldest first.
+     *
+     * `since_ms` is optional daemon-side and defaults to the whole ledger; pass
+     * 0 for that. There is no width cap on this route — the file holds one line
+     * per SESSION rather than one per hook event, so the whole history is
+     * smaller than a busy hour of `/activity`.
+     */
+    sessions(sinceMs: number): Promise<SessionsResult> {
+      return memo(`sessions:${sinceMs}`, async () => {
+        const empty: SessionsResult = { host: '', records: [] }
+        try {
+          const body = await readJson(
+            `${shuttleBase}/api/v1/sessions?since_ms=${encodeURIComponent(String(sinceMs))}`,
+          )
+          return parseSessions(body, empty)
+        } catch {
+          return empty
+        }
+      })
+    },
   }
+}
+
+const LEADING_CIVIL_DAY_RE = /^(\d{4}-\d{2}-\d{2})/
+
+/**
+ * Resolve an INCLUSIVE civil-day pair to the epoch-ms window covering it, in
+ * the BROWSER's timezone — the whole substance of the instant migration.
+ *
+ * `from` becomes local midnight of its day; `to` becomes local 23:59:59.999 of
+ * its day, because `to` is inclusive and the window has to reach the end of it.
+ * Those two land exactly where the daemon's legacy civil form put them
+ * (`--since=<day> 00:00:00` / `--until=<day> 23:59:59`), so a browser and
+ * daemon sharing a timezone see byte-identical results before and after — the
+ * migration only bites where the two zones DIFFER, which is the bug.
+ *
+ * `new Date(y, m, d, …)` is the local-time constructor, so DST is handled by
+ * the platform: a 23-hour day is 23 hours here. The one place it slips is a
+ * zone whose DST transition is at midnight itself (America/Santiago, Lord
+ * Howe), where local midnight does not exist and the runtime rolls forward an
+ * hour. That costs an hour at the head of the window in two zones twice a
+ * year, against a decorative commit strip — not worth a timezone library.
+ *
+ * Null when either end carries no readable civil day. A full ISO timestamp is
+ * read for its leading day, which keeps a caller that hands over an instant
+ * working rather than blanking its strip.
+ */
+export function civilDaysToInstants(
+  fromISO: string,
+  toISO: string,
+): { fromMs: number; toMs: number } | null {
+  const fromDay = LEADING_CIVIL_DAY_RE.exec(fromISO.trim())?.[1]
+  const toDay = LEADING_CIVIL_DAY_RE.exec(toISO.trim())?.[1]
+  if (!fromDay || !toDay) return null
+  const from = civilDayToLocalDate(fromDay)
+  const to = civilDayToLocalDate(toDay)
+  if (!from || !to) return null
+  to.setHours(23, 59, 59, 999)
+  return { fromMs: from.getTime(), toMs: to.getTime() }
 }
 
 const BUCKET_KINDS = new Set<ActivityBucket['k']>(['attention', 'notify', 'agent'])
@@ -202,6 +346,97 @@ export function parseNarration(body: unknown, fallback: NarrationResult): Narrat
     commits.push({ iso: entry.iso, subject: entry.subject })
   }
   return { commits }
+}
+
+const SESSION_KINDS = new Set<SessionRecord['kind']>(['dispatch', 'claim', 'resume'])
+
+/**
+ * Coerce a wire body into a SessionsResult, dropping malformed lines.
+ *
+ * A line without `fiber`, `session` or a known `kind` is dropped rather than
+ * repaired: the daemon never writes one, so its presence means the body is not
+ * a ledger, and a half-record would pair a session to nothing. Blank strings
+ * count as absent — `""` is what a missing field looks like after a bad
+ * serializer, not a fiber named empty.
+ */
+export function parseSessions(body: unknown, fallback: SessionsResult): SessionsResult {
+  if (!isRecord(body)) return fallback
+  const raw = Array.isArray(body.records) ? body.records : []
+  const records: SessionRecord[] = []
+  for (const entry of raw) {
+    if (!isRecord(entry)) continue
+    const fiber = text(entry.fiber)
+    const session = text(entry.session)
+    const kind = text(entry.kind)
+    if (!fiber || !session) continue
+    if (!kind || !SESSION_KINDS.has(kind as SessionRecord['kind'])) continue
+    records.push({
+      at: typeof entry.at === 'number' && Number.isFinite(entry.at) ? entry.at : 0,
+      fiber,
+      uid: text(entry.uid),
+      session,
+      harness: text(entry.harness),
+      host: text(entry.host),
+      tmux: text(entry.tmux),
+      kind: kind as SessionRecord['kind'],
+    })
+  }
+  return {
+    host: typeof body.host === 'string' ? body.host : fallback.host,
+    records,
+  }
+}
+
+/**
+ * Turn ledger records into the two pairing lookups, in ONE pass.
+ *
+ * LAST RECORD WINS, and "last" means newest by `at`, not last in the array. The
+ * wire is oldest-first, so array order would usually do — but the ledger is
+ * host-scoped and a cross-host view merges several daemons' records, and a
+ * merged array is not globally sorted. Ordering by `at` (ties broken by the
+ * later array position) makes the result independent of how the caller
+ * assembled its input, which is the only way two views can be relied on to
+ * agree. It matters in practice: a session dispatched, then resumed, has two
+ * lines, and the resume is the one that describes it now.
+ *
+ * A record with no `tmux` contributes to `bySession` only. That is not an
+ * error — a session with no terminal is a real thing the ledger records — so it
+ * is silently absent from `byTmux` rather than dropped from both.
+ */
+export function buildSessionIndex(records: readonly SessionRecord[]): SessionIndex {
+  const byTmux = new Map<string, SessionPairing>()
+  const bySession = new Map<string, SessionPairing>()
+  // `at` of whatever currently occupies each key, so a later-arriving OLDER
+  // record does not overwrite a newer one.
+  const tmuxAt = new Map<string, number>()
+  const sessionAt = new Map<string, number>()
+
+  const claim = (
+    into: Map<string, SessionPairing>,
+    stamps: Map<string, number>,
+    key: string,
+    at: number,
+    pairing: SessionPairing,
+  ): void => {
+    const held = stamps.get(key)
+    if (held !== undefined && held > at) return
+    stamps.set(key, at)
+    into.set(key, pairing)
+  }
+
+  for (const record of records) {
+    const pairing: SessionPairing = { fiber: record.fiber, uid: record.uid }
+    claim(bySession, sessionAt, record.session, record.at, pairing)
+    if (record.tmux) claim(byTmux, tmuxAt, record.tmux, record.at, pairing)
+  }
+  return { byTmux, bySession }
+}
+
+/** A wire string, or null — treating blank as absent. */
+function text(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const trimmed = value.trim()
+  return trimmed ? trimmed : null
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
