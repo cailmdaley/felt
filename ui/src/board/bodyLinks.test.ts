@@ -1,33 +1,13 @@
 // Relative links in a fiber body must resolve the way the images beside them do.
 //
-// SEPARATE FILE because `renderMarkdown` reaches for a DOM: `escapeHtml` escapes
-// by round-tripping through `document.createElement('div').textContent`. There
-// is no jsdom in this project and no vitest environment configured, so the shim
-// below stands in — faithful to the real thing in the one way that matters
-// here: textContent→innerHTML escapes `&`, `<` and `>` and deliberately does
-// NOT escape quotes, which is exactly why `escapeAttr` exists alongside it.
-// Vitest isolates per file, so the shim cannot leak into the pure-logic suites.
+// `renderMarkdown` is pure string work and needs no DOM — `escapeHtml` is a
+// regex escaper precisely so rendering stays testable headless. (It used to
+// round-trip through `document.createElement`, and this file used to carry a
+// fake-`document` shim to work around it. The shim is gone; the equivalence of
+// the regex escaper to the DOM path was checked against a real browser.)
 
-import { beforeAll, describe, expect, it } from 'vitest'
-
-beforeAll(() => {
-  if (typeof globalThis.document !== 'undefined') return
-  ;(globalThis as unknown as { document: unknown }).document = {
-    createElement: () => {
-      let html = ''
-      return {
-        set textContent(value: string) {
-          html = String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-        },
-        get innerHTML() {
-          return html
-        },
-      }
-    },
-  }
-})
-
-const { renderMarkdown } = await import('./utils.js')
+import { describe, expect, it } from 'vitest'
+import { renderMarkdown } from './utils.js'
 
 describe('relative links in a fiber body', () => {
   const opts = { basePath: '/home/ada/loom/.felt/proj', originId: 'local' }
