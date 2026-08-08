@@ -5,6 +5,7 @@ import {
   dayIndexForDue,
   descByKey,
   dueCivilDay,
+  formatSpanMinutes,
   instantMs,
   isoDayLocal,
   sameCivilDue,
@@ -340,5 +341,27 @@ describe('civilDayToLocalDate', () => {
   it('is undefined for anything that is not a bare civil day', () => {
     expect(civilDayToLocalDate(undefined)).toBeUndefined();
     expect(civilDayToLocalDate('2026-07-30T00:00:00Z')).toBeUndefined();
+  });
+});
+
+describe('formatSpanMinutes', () => {
+  // The bare form — no `pad`, no `empty` — is what the fiber detail panel's
+  // session window renders. The padded and em-dash variants the views use are
+  // pinned in dayShape.test.ts and chronicleJoin.test.ts.
+  it('renders a whole hour with an unpadded zero, not a bare hour', () => {
+    expect(formatSpanMinutes(120)).toBe('2h 0m');
+    expect(formatSpanMinutes(216)).toBe('3h 36m');
+  });
+
+  it('renders a sub-hour span as minutes alone, and zero as 0m', () => {
+    expect(formatSpanMinutes(47)).toBe('47m');
+    expect(formatSpanMinutes(0)).toBe('0m');
+  });
+
+  // Without `empty` a negative span shows as itself. It means the caller handed
+  // over an inverted pair, which is worth seeing rather than hiding behind a
+  // placeholder — the detail panel clamps at its own call site instead.
+  it('does not hide a negative span when no empty placeholder is given', () => {
+    expect(formatSpanMinutes(-5)).toBe('-5m');
   });
 });

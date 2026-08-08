@@ -38,7 +38,15 @@ import {
   type ViewContext,
 } from './ViewRegistry.js'
 import { createViewPage, type ViewPage } from './ViewPage.js'
-import type { ActivityBucket, ActivityResult } from './TemporalData.js'
+import { ACTIVITY_KEY_ITEMS, MARK_GLYPH, type MarkKind } from './vocabulary.js'
+import {
+  civilDayNoon,
+  RAIL_START_HOUR,
+  railBounds,
+  shiftCivilDay,
+  type RailBounds,
+} from './railTime.js'
+import { foldActiveMinutes, type ActivityBucket, type ActivityResult } from './TemporalData.js'
 import type { KanbanCard } from '../KanbanTypes.js'
 import { cycleSpan, type CycleSpan } from '../KanbanRules.js'
 import {
@@ -49,11 +57,11 @@ import {
   railCivilDay,
 } from '../civilDay.js'
 
-// ── Constants ────────────────────────────────────────────────────────────────
+// Week's rail vocabulary is the board's; re-exported here because this view's
+// published surface has always carried it.
+export { RAIL_START_HOUR, railBounds, type RailBounds }
 
-/** The hour a rail opens (and the next one closes). Work past midnight belongs
- *  to the day it started, so the day boundary is dawn, not midnight. */
-export const RAIL_START_HOUR = 6
+// ── Constants ────────────────────────────────────────────────────────────────
 
 /** How much time one raster tick stands for. The wire's minute buckets are
  *  folded into these, because a per-minute tick on a 24h rail would be a
@@ -82,24 +90,6 @@ const FETCH_CAP_QUANTUM_MS = 5 * 60_000
 /** Labels under the shared tick row, one per 4h rule. */
 const TICK_LABELS = ['6am', '10am', '2pm', '6pm', '10pm', '2am', '6am']
 
-/**
- * What the three raster pigments mean, in words.
- *
- * SHARED VERBATIM WITH DayView — one phrasing across the board, so the same
- * hue is never explained two ways. Change it here and there together.
- *
- * MIND THE NAMES. The wire's kind `attention` is the human at the keyboard
- * ("you steering"); the kind `notify` is a worker raising its hand, which is
- * what "attention called" names. The word `attention` therefore appears in the
- * vocabulary AND in the gloss of the OTHER kind, which makes this exactly the
- * pairing someone tidies backwards. It is correct as written.
- */
-const KEY_ITEMS: Array<{ kind: ActivityBucket['k']; label: string }> = [
-  { kind: 'agent', label: 'agents working' },
-  { kind: 'attention', label: 'you steering' },
-  { kind: 'notify', label: 'attention called' },
-]
-
 // ── Week arithmetic — civil days only ────────────────────────────────────────
 //
 // Every function here strides by CALENDAR DAY from a noon anchor. Noon because
@@ -108,27 +98,11 @@ const KEY_ITEMS: Array<{ kind: ActivityBucket['k']; label: string }> = [
 // zone and across every transition. Adding 86_400_000 does not: it skips a day
 // forward in spring and repeats one in autumn.
 
-/** A local `Date` parked at noon on a civil day — the safe stride anchor. */
-function noonOn(day: string): Date | undefined {
-  const d = civilDayToLocalDate(day)
-  if (!d) return undefined
-  d.setHours(12, 0, 0, 0)
-  return d
-}
-
-/** The civil day `delta` calendar days from `day`. */
-export function shiftCivilDay(day: string, delta: number): string {
-  const d = noonOn(day)
-  if (!d) return day
-  d.setDate(d.getDate() + delta)
-  return isoDayLocal(d.getTime())
-}
-
 /** The Monday of the week containing `day`. Weeks start Monday, so Sunday
  *  belongs to the week that began six days earlier, not the one starting
  *  tomorrow. */
 export function mondayOfWeek(day: string): string {
-  const d = noonOn(day)
+  const d = civilDayNoon(day)
   if (!d) return day
   // getDay(): 0=Sun … 6=Sat. Monday must map to 0 and Sunday to 6.
   d.setDate(d.getDate() - ((d.getDay() + 6) % 7))
@@ -137,7 +111,7 @@ export function mondayOfWeek(day: string): string {
 
 /** The seven civil days of the week beginning at `monday`, Monday→Sunday. */
 export function weekCivilDays(monday: string): string[] {
-  const d = noonOn(monday)
+  const d = civilDayNoon(monday)
   if (!d) return []
   const days: string[] = []
   for (let i = 0; i < 7; i += 1) {
@@ -167,7 +141,7 @@ export function weekMondayForFocus(focusDate: string | null, nowMs: number): str
   // worked is the previous week's Sunday, so the view must not have jumped to
   // the new week yet. Reading the midnight day here also made the week start
   // four hours in the future, which suppressed the activity request entirely.
-  return mondayOfWeek(normalizeFocusDate(focusDate) ?? railCivilDay(nowMs, RAIL_START_HOUR))
+  return mondayOfWeek(normalizeFocusDate(focusDate) ?? railCivilDay(nowMs))
 }
 
 /**
@@ -189,28 +163,9 @@ export function weekMondayForFocus(focusDate: string | null, nowMs: number): str
  * `3` would open Day on Wednesday rather than today.
  */
 export function weekStepTarget(focusDate: string | null, delta: number, nowMs: number): string | null {
-  const from = normalizeFocusDate(focusDate) ?? railCivilDay(nowMs, RAIL_START_HOUR)
+  const from = normalizeFocusDate(focusDate) ?? railCivilDay(nowMs)
   const next = shiftCivilDay(from, delta * 7)
   return mondayOfWeek(next) === weekMondayForFocus(null, nowMs) ? null : next
-}
-
-export interface RailBounds {
-  /** Local 6am on the day — the rail's left edge. */
-  startMs: number
-  /** Local 6am on the NEXT calendar day — the right edge. 23h, 24h or 25h. */
-  endMs: number
-}
-
-/** The instant span one row covers. Both edges are real 6am wall-clock times,
- *  so a DST rail is genuinely 23h or 25h long and everything positioned on it
- *  by time fraction stays in the right place. */
-export function railBounds(day: string): RailBounds {
-  const start = noonOn(day)
-  const end = noonOn(shiftCivilDay(day, 1))
-  if (!start || !end) return { startMs: 0, endMs: 0 }
-  start.setHours(RAIL_START_HOUR, 0, 0, 0)
-  end.setHours(RAIL_START_HOUR, 0, 0, 0)
-  return { startMs: start.getTime(), endMs: end.getTime() }
 }
 
 /** Where an instant sits on a rail, as 0…1. Outside the rail it clamps, so a
@@ -236,7 +191,7 @@ export function railRuleFractions(day: string, bounds: RailBounds): number[] {
   const out: number[] = []
   for (let step = 1; step < 6; step += 1) {
     const hour = RAIL_START_HOUR + step * 4
-    const at = noonOn(day)
+    const at = civilDayNoon(day)
     if (!at) continue
     // 26 is 2am tomorrow — the rail crosses midnight, so the late rules belong
     // to the next calendar day. On a spring-forward rail that 2am does not
@@ -264,28 +219,13 @@ export interface WeekWindow {
 }
 
 /**
- * Everything one refresh needs to ask the read plane for. Pure, so the two
+ * Everything one refresh needs to ask the read plane for. Pure, so the
  * argument shapes are testable without a DOM.
  *
- * THE TWO ROUTES DO NOT SPEAK THE SAME LANGUAGE, and this is the whole reason
- * this function exists:
- *
- *   /api/v1/activity   takes INSTANTS (`from_ms` / `to_ms`, epoch ms).
- *   /api/v1/narration  takes CIVIL DAYS, and only bare `YYYY-MM-DD`. The
- *                      daemon parses them with Elixir's `Date.from_iso8601/1`
- *                      (lib/shuttle_web/controllers/narration_controller.ex),
- *                      which rejects a full timestamp outright. Handing it
- *                      `2026-08-03T06:00:00.000Z` is a 400, the fetcher turns
- *                      every failure into an empty result, and the week's
- *                      marginalia goes blank with nothing to show for it — a
- *                      silent failure the offline harness cannot catch, because
- *                      its mock parses whatever it is given.
- *
- * `narrationTo` is the day AFTER Sunday, not Sunday. The daemon's range is
- * inclusive and midnight-bounded while a rail runs 6am→6am, so stopping at
- * Sunday would drop Sunday's after-midnight tail — the one row whose late-night
- * work would go unnarrated while every other row kept its own. One extra civil
- * day of commits comes back; the rail edges discard what falls outside.
+ * The week is named by CIVIL DAYS but read by INSTANTS: `/api/v1/activity`
+ * takes `from_ms`/`to_ms` in epoch ms, so the seven rows are resolved to a rail
+ * span here, in the browser's zone, before anything is asked for. Week reads
+ * activity only — see the module header for why the narration column went.
  *
  * The activity `to` is capped at now, rounded UP to `FETCH_CAP_QUANTUM_MS`.
  * Uncapped it would move every poll, so the fetcher's per-tuple memo would
@@ -338,23 +278,14 @@ export interface ActivitySpend {
   notifyCount: number
 }
 
-/** Fold buckets into wall-clock time per kind. */
+/** Fold buckets into wall-clock time per kind. Callers pre-filter the window. */
 export function summarizeSpend(buckets: ActivityBucket[], bucketMs = BUCKET_MS): ActivitySpend {
-  const any = new Set<number>()
-  const attention = new Set<number>()
-  const agent = new Set<number>()
-  let notifyCount = 0
-  for (const b of buckets) {
-    any.add(b.m)
-    if (b.k === 'attention') attention.add(b.m)
-    else if (b.k === 'agent') agent.add(b.m)
-    else notifyCount += 1
-  }
+  const minutes = foldActiveMinutes(buckets)
   return {
-    totalMs: any.size * bucketMs,
-    attentionMs: attention.size * bucketMs,
-    agentMs: agent.size * bucketMs,
-    notifyCount,
+    totalMs: minutes.all * bucketMs,
+    attentionMs: minutes.attention * bucketMs,
+    agentMs: minutes.agent * bucketMs,
+    notifyCount: minutes.notifyBuckets,
   }
 }
 
@@ -538,7 +469,7 @@ const CYCLE_CHIP_LIMIT = 2
 
 // ── Future marks ─────────────────────────────────────────────────────────────
 
-export type MarkKind = 'due' | 'launch' | 'snooze'
+export type { MarkKind }
 
 export interface DayMark {
   kind: MarkKind
@@ -549,16 +480,15 @@ export interface DayMark {
   cardId: string
 }
 
-const MARK_GLYPH: Record<MarkKind, string> = { due: '◴', launch: '◐', snooze: '◌' }
-
 /**
- * The hollow marks a day carries: obligations, not events.
+ * The hollow marks a day carries: obligations, not events. The three glyphs
+ * and what they claim live in `./vocabulary.js`; here is where they land.
  *
- *   ◴ due       a card whose `due:` names this CIVIL DAY, at mid-morning —
- *               a due has no time of day, so it may not pretend to one.
+ *   ◴ due       at mid-morning — a due has no time of day, so it may not
+ *               pretend to one.
  *   ◐ launch    a standing role's `nextLaunchAt`, an INSTANT, at its real
  *               position on the rail.
- *   ◌ snooze    a stashed card whose due lands here — deferred work returning.
+ *   ◌ snooze    a stashed card whose due lands here.
  *
  * A stashed card takes the hollow ◌ instead of ◴, never both. Closed cards
  * carry no obligation and are skipped.
@@ -974,7 +904,7 @@ class WeekView implements TemporalView {
     const minute = Math.floor(now / 60_000)
     // The rail that CONTAINS now, not the midnight calendar day — between
     // midnight and 6am those are different rows, and the live one is the rail's.
-    const todayCivil = railCivilDay(now, RAIL_START_HOUR)
+    const todayCivil = railCivilDay(now)
     const activity = this.activity?.monday === this.monday ? this.activity : null
 
     this.paintWeekLabelState()
@@ -1149,7 +1079,7 @@ function buildTickRow(): HTMLElement {
 function buildKeyRow(): HTMLElement {
   const key = document.createElement('div')
   key.className = 'wk-key'
-  for (const { kind, label } of KEY_ITEMS) {
+  for (const { kind, label } of ACTIVITY_KEY_ITEMS) {
     const item = document.createElement('span')
     item.className = 'wk-key-item'
     const glyph = document.createElement('span')

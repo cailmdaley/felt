@@ -82,21 +82,6 @@ export interface KanbanCard {
   /** Ms timestamp the boot-quarantine hold began (`parked_at`), for a tooltip. */
   heldSince?: number
   /**
-   * Pinned local city whose `.felt/` physically owns this fiber, when the
-   * server can resolve it (loom-deduped to the deepest project root).
-   * Pairs with `projectSlug` to drive the click-to-open flow: the frontend
-   * pivots vellum to this city and navigates to `projectSlug` instead of
-   * the loom-relative `id`. Undefined for remote-origin fibers and for
-   * paths that don't fall under any pinned city.
-   */
-  cityId?: string
-  /**
-   * Slug relative to the owning city's `.felt/` root. The vellum collection's
-   * fiber graph is keyed by these project-relative slugs, so this is what
-   * the frontend hands to `navigate()` once it's pivoted to `cityId`.
-   */
-  projectSlug?: string
-  /**
    * Fiber id in Shuttle's canonical felt store. City-scoped kanban cards may
    * use project-relative ids for navigation; dispatch must use this id.
    */
@@ -297,21 +282,9 @@ export interface KanbanResponse {
    * stale badge and to disable drag for stale-origin cards.
    */
   staleness: Record<string, KanbanOriginStaleness>
-  shuttleDiagnostics?: {
-    remoteSnapshots: RemoteShuttleSnapshotDiagnostic[]
-  }
   remoteScope?: {
     originId: string
     hostname: string
   }
-  tagIndex?: string[]
   generatedAt: number
-}
-
-export interface RemoteShuttleSnapshotDiagnostic {
-  originId: string
-  receivedAt: string
-  eligibleCount: number | null
-  blockedCount: number | null
-  orphanCount: number | null
 }

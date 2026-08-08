@@ -149,4 +149,75 @@ defmodule ShuttleWeb.FeltStoresControllerTest do
     assert conn.status == 400
     assert Jason.decode!(conn.resp_body)["error"] =~ "felt_stores"
   end
+
+  # A remote origin is read over the SAME transport the write plane forwards
+  # with — `OriginRouter.forward_client/0`, resolved from `:write_forward_client`.
+  # Stubbing that one key has to reach this read path, or the two planes have
+  # drifted back apart.
+  defmodule StubClient do
+    @behaviour Shuttle.RemoteRegistry.Client
+
+    @impl true
+    def get(url, _timeout) do
+      send(self(), {:registry_get, url})
+
+      {:ok,
+       Jason.encode!(%{
+         "host" => "candide",
+         "origins" => %{"candide" => %{"felt_stores" => ["/remote/loom"]}}
+       })}
+    end
+  end
+
+  defmodule RaisingClient do
+    @behaviour Shuttle.RemoteRegistry.Client
+
+    @impl true
+    def get(_url, _timeout), do: raise("boom")
+  end
+
+  defp with_remote_client(module, fun) do
+    previous = Application.get_env(:shuttle, :write_forward_client)
+    Application.put_env(:shuttle, :write_forward_client, module)
+
+    Application.put_env(:shuttle, :remotes, [
+      %{name: "candide", url: "http://candide.example:4000"}
+    ])
+
+    try do
+      fun.()
+    after
+      case previous do
+        nil -> Application.delete_env(:shuttle, :write_forward_client)
+        value -> Application.put_env(:shuttle, :write_forward_client, value)
+      end
+    end
+  end
+
+  test "reads a remote origin over the write plane's transport" do
+    with_remote_client(StubClient, fn ->
+      conn = get(api_conn(), "/api/v1/felt-stores")
+
+      assert conn.status == 200
+      body = Jason.decode!(conn.resp_body)
+
+      assert_received {:registry_get, "http://candide.example:4000/api/v1/felt-stores"}
+      assert get_in(body, ["origins", "candide", "kind"]) == "remote"
+      assert get_in(body, ["origins", "candide", "stale"]) == false
+      assert get_in(body, ["origins", "candide", "felt_stores"]) == ["/remote/loom"]
+    end)
+  end
+
+  test "a transport blow-up degrades the remote origin to stale, not a 500" do
+    with_remote_client(RaisingClient, fn ->
+      conn = get(api_conn(), "/api/v1/felt-stores")
+
+      assert conn.status == 200
+      body = Jason.decode!(conn.resp_body)
+
+      assert get_in(body, ["origins", "candide", "stale"]) == true
+      assert get_in(body, ["origins", "candide", "felt_stores"]) == []
+      assert get_in(body, ["origins", "candide", "last_error"]) =~ "boom"
+    end)
+  end
 end

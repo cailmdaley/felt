@@ -25,36 +25,26 @@ defmodule ShuttleWeb.SessionsController do
 
   use Phoenix.Controller, formats: [:json]
 
+  import ShuttleWeb.RelayHelpers, only: [integer_param: 3]
+
   alias Shuttle.{Poller, SessionLedger}
 
+  # Absent means "the whole ledger", so the bound defaults to 0 rather than
+  # 400ing the way the required `/activity` bounds do. That is also why the 400
+  # copy is this endpoint's own: `epoch_ms_message/1` says "is required", and
+  # `since_ms` is not.
   def show(conn, params) do
-    case since_ms(params) do
+    case integer_param(params, "since_ms", default: 0) do
       {:ok, since_ms} ->
         json(conn, %{
           host: Poller.own_host_id(),
           records: SessionLedger.read_since(since_ms)
         })
 
-      :error ->
+      {:error, {:bad_param, key}} ->
         conn
         |> put_status(400)
-        |> json(%{error: "since_ms must be an integer (epoch ms)"})
-    end
-  end
-
-  defp since_ms(params) do
-    case Map.get(params, "since_ms") do
-      nil ->
-        {:ok, 0}
-
-      value when is_binary(value) ->
-        case Integer.parse(value) do
-          {int, ""} -> {:ok, int}
-          _ -> :error
-        end
-
-      _ ->
-        :error
+        |> json(%{error: "#{key} must be an integer (epoch ms)"})
     end
   end
 end

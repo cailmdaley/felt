@@ -1,6 +1,6 @@
 defmodule ShuttleWeb.RelayHelpers do
   @moduledoc """
-  Shared response helpers for the owner-routing controllers.
+  Shared request and response helpers for the API controllers.
 
   Every write endpoint behind `Shuttle.OriginRouter` relays the owning daemon's
   verbatim response on a forward, and surfaces a tunnel failure as a 502. The
@@ -124,4 +124,37 @@ defmodule ShuttleWeb.RelayHelpers do
 
   @doc "True for a non-empty binary — the required-string guard the controllers share."
   def present?(value), do: is_binary(value) and value != ""
+
+  @doc """
+  Read a query param that must be a whole integer — an epoch-millisecond bound.
+
+  Strict: the entire value must parse, so `from_ms=17e11` or a trailing-garbage
+  bound is refused rather than silently truncated to a window the caller did not
+  ask for. A missing param is `{:error, {:bad_param, key}}` unless `:default`
+  supplies a value, which is how an *optional* bound is read
+  (`integer_param(params, "since_ms", default: 0)`).
+  """
+  @spec integer_param(map(), String.t(), keyword()) ::
+          {:ok, integer()} | {:error, {:bad_param, String.t()}}
+  def integer_param(params, key, opts \\ []) do
+    # `Keyword.fetch/2`, not `Keyword.get/2`: the latter cannot tell "no default
+    # configured" from "the default is nil", which would turn a required bound's
+    # 400 into `{:ok, nil}` and a 500 further down.
+    case {Map.get(params, key), Keyword.fetch(opts, :default)} do
+      {nil, {:ok, default}} ->
+        {:ok, default}
+
+      {value, _} when is_binary(value) ->
+        case Integer.parse(value) do
+          {int, ""} -> {:ok, int}
+          _ -> {:error, {:bad_param, key}}
+        end
+
+      _ ->
+        {:error, {:bad_param, key}}
+    end
+  end
+
+  @doc "The 400 sentence for a required epoch-millisecond bound."
+  def epoch_ms_message(key), do: "#{key} is required and must be an integer (epoch ms)"
 end

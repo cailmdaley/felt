@@ -144,6 +144,8 @@ defmodule Shuttle.ActionsTest do
     # no live worker, dragged to inFlight, means "launch it now" → dispatch-ad-hoc
     # (NOT reopen, which only applies to a closed or draft fiber). This test pins
     # the invariant: every resolved action must be present in actions_for.
+    # A double dispatch is refused by `Poller.dispatch_fiber`'s own
+    # `:already_running`, not by any availability gate.
     fiber = %{
       "id" => "work/idle-armed",
       "status" => "active",
@@ -191,10 +193,15 @@ defmodule Shuttle.ActionsTest do
   describe "resolve/availability invariant (the whole 409 class)" do
     # The load-bearing property: for every (state × kanban target) combination,
     # the action `resolve_transition` picks for a drag MUST be present in the
-    # `actions_for` availability set. When it isn't, the daemon's
-    # `validate_available` rejects the invoke with 409 `action_not_available`.
-    # action_ids is derived from action_for_target, so the two can never disagree
-    # by construction; this test sweeps the full matrix to keep it that way.
+    # `actions_for` availability set. action_ids is derived from
+    # action_for_target, so the two can never disagree by construction; this
+    # test sweeps the full matrix to keep it that way.
+    #
+    # This invariant is what licenses `Shuttle.Transition` invoking a resolved
+    # action with NO availability re-check. If it ever breaks, the daemon stops
+    # refusing the drag with 409 `action_not_available` and instead invokes an
+    # action the fiber's state does not support — so this sweep is the guard,
+    # not a nicety.
     @kanban_targets ~w(drafts inFlight awaitingReview tempered composted)
     @statuses ~w(open active closed)
     @kinds ~w(oneshot standing)

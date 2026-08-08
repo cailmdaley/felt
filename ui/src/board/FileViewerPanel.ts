@@ -8,7 +8,9 @@
  * point of this module — is the by-extension rendering dispatch, factored into
  * the exported `buildFileViewer`: images get an <img>, audio an <audio
  * controls>, everything else (HTML / PDF / text / `astra.yaml`-as-paper) an
- * <iframe>. The accordion mounts these directly.
+ * <iframe>. The accordion mounts these directly. The extension VOCABULARY the
+ * dispatch keys off lives in utils.js, shared with the `:::{embed}` renderer;
+ * what is owned here is the DOM construction for each kind.
  *
  * Bytes resolve through the daemon's owner-routed `GET /api/v1/file` route
  * (utils.fileBytesUrl) — HTML served as `text/html` is natively iframe-
@@ -19,10 +21,16 @@
  */
 
 import './FileViewerPanel.css'
-import { fileBytesUrl, paperUrl, prepareIframeExternalLinks } from './utils.js'
-
-export const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'avif'])
-export const AUDIO_EXTS = new Set(['wav', 'mp3', 'm4a', 'ogg', 'flac', 'aac'])
+import {
+  AUDIO_EXTS,
+  IMAGE_EXTS,
+  basename,
+  fileBytesUrl,
+  fileExt,
+  isAstraYaml,
+  paperUrl,
+  prepareIframeExternalLinks,
+} from './utils.js'
 
 /**
  * The byte-source URL for a deliverable. An `astra.yaml` renders as the full
@@ -31,7 +39,7 @@ export const AUDIO_EXTS = new Set(['wav', 'mp3', 'm4a', 'ogg', 'flac', 'aac'])
  * gets in a fiber body; it falls back to the raw bytes if the dir can't
  * resolve. Everything else streams from `/api/v1/file`.
  */
-export function fileViewerSrc(shuttleBase: string, fullPath: string, originId: string): string {
+function fileViewerSrc(shuttleBase: string, fullPath: string, originId: string): string {
   if (isAstraYaml(fullPath)) {
     return paperUrl(fullPath, { originId }) ?? fileBytesUrl(shuttleBase, fullPath, originId)
   }
@@ -54,7 +62,7 @@ export function buildFileViewer(
   originId: string,
   onFrameLoad?: (iframe: HTMLIFrameElement) => void,
 ): HTMLElement {
-  const ext = extOf(fullPath)
+  const ext = fileExt(fullPath)
   const src = fileViewerSrc(shuttleBase, fullPath, originId)
 
   if (IMAGE_EXTS.has(ext)) {
@@ -65,7 +73,7 @@ export function buildFileViewer(
     const img = document.createElement('img')
     img.className = 'kbn-fileview-image'
     img.src = src
-    img.alt = basenameOf(fullPath)
+    img.alt = basename(fullPath)
     wrap.append(img)
     return wrap
   }
@@ -86,17 +94,17 @@ export function buildFileViewer(
 
   const veil = document.createElement('div')
   veil.className = 'kbn-fileview-loading'
-  veil.textContent = `Loading ${basenameOf(fullPath)}…`
+  veil.textContent = `Loading ${basename(fullPath)}…`
 
   const iframe = document.createElement('iframe')
   iframe.className = 'kbn-fileview-frame'
   iframe.src = src
-  iframe.title = basenameOf(fullPath)
+  iframe.title = basename(fullPath)
 
   /** Show the failure, whether or not `load` already lifted the veil. */
   const failed = (detail: string): void => {
     veil.classList.add('kbn-fileview-loading-error')
-    veil.textContent = `Couldn't load ${basenameOf(fullPath)} — ${detail}`
+    veil.textContent = `Couldn't load ${basename(fullPath)} — ${detail}`
     if (!veil.isConnected) wrap.append(veil)
   }
 
@@ -130,23 +138,9 @@ export function buildFileViewer(
   return wrap
 }
 
-export function basenameOf(path: string): string {
-  return path.split('/').filter(Boolean).pop() ?? path
-}
-
-export function extOf(path: string): string {
-  const base = basenameOf(path)
-  const dot = base.lastIndexOf('.')
-  return dot > 0 ? base.slice(dot + 1).toLowerCase() : ''
-}
-
-export function isAstraYaml(path: string): boolean {
-  return basenameOf(path) === 'astra.yaml'
-}
-
 /** True when a deliverable scrolls inside an iframe (HTML/PDF/text/paper) and
  *  so can carry a restorable scroll offset. Images and audio cannot. */
 export function isScrollableFile(path: string): boolean {
-  const ext = extOf(path)
+  const ext = fileExt(path)
   return !IMAGE_EXTS.has(ext) && !AUDIO_EXTS.has(ext)
 }

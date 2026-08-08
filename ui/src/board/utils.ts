@@ -101,10 +101,9 @@ export function escapeHtml(text: string): string {
 // Local/relative image paths in rendered markdown resolve through the Shuttle
 // daemon's owner-routed file route (GET /api/v1/file?path=&origin=). Relative,
 // so both the daemon-served bundle and the dev proxy reach :4000 without CORS.
-// The kanban board renders outcomes without a basePath, so this branch is
-// dormant for the board today; the file route itself lands with the backend
-// slice. (Portolan's :4004 /file-content service is eliminated per the
-// Shuttle-UI constitution.)
+// Fiber bodies render with a basePath (FiberDetailModal passes the fiber's
+// dir), so relative paths resolve through this route; card outcomes render
+// without one and leave relative paths untouched.
 const FILE_ROUTE = `/api/v1/file`
 
 interface RenderMarkdownOptions {
@@ -301,8 +300,12 @@ export function paperUrl(astraPath: string, opts?: RenderMarkdownOptions): strin
   return url
 }
 
-const EMBED_IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'avif'])
-const EMBED_AUDIO_EXTS = new Set(['wav', 'mp3', 'm4a', 'ogg', 'flac', 'aac'])
+/** The by-extension image/audio vocabulary, shared by the two dispatches that
+ *  key off it: `embedHtml` here (MyST `:::{embed}` blocks) and
+ *  `buildFileViewer` in FileViewerPanel (sent deliverables). One vocabulary so
+ *  the two can never drift. Read-only — never mutate these. */
+export const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'avif'])
+export const AUDIO_EXTS = new Set(['wav', 'mp3', 'm4a', 'ogg', 'flac', 'aac'])
 const EMBED_DEFAULT_IFRAME_HEIGHT = 600
 // An ASTRA paper render is the full lightcone chrome (masthead + scope rail) —
 // it earns more vertical room than a generic file preview; it scrolls inside.
@@ -364,19 +367,19 @@ function embedHtml(
   // An embedded `astra.yaml` opens the full Lightcone paper render in the paper
   // entry (isolated React + Tailwind), not the generic /file iframe. The paper
   // entry bakes the project dir and renders via @lightcone/renderer.
-  if (basename(path) === 'astra.yaml') {
+  if (isAstraYaml(path)) {
     const purl = paperUrl(path, opts)
     if (!purl) return embedPlaceholderHtml(path, embedOpts.title)
     const height = heightCss ?? `${EMBED_ASTRA_IFRAME_HEIGHT}px`
     return `<div class="kbn-detail-embed-frame kbn-detail-embed-astra" style="height:${height}"><iframe src="${escapeAttr(purl)}" title="${safeTitle}" loading="lazy"></iframe></div>`
   }
 
-  if (EMBED_IMAGE_EXTS.has(ext)) {
+  if (IMAGE_EXTS.has(ext)) {
     const style = heightCss ? ` style="height:${heightCss}"` : ''
     return `<figure class="kbn-detail-embed-figure"><img class="kbn-detail-embed-img" src="${safeSrc}" alt="${safeTitle}" loading="lazy"${style} />${caption}</figure>`
   }
 
-  if (EMBED_AUDIO_EXTS.has(ext)) {
+  if (AUDIO_EXTS.has(ext)) {
     return `<figure class="kbn-detail-embed-figure"><audio class="kbn-detail-embed-audio" controls src="${safeSrc}"></audio>${caption}</figure>`
   }
 
@@ -398,8 +401,14 @@ function embedHtml(
   return `<div class="kbn-detail-embed-frame" style="height:${height}"><iframe src="${safeSrc}" title="${safeTitle}" loading="lazy"></iframe></div>`
 }
 
-function basename(path: string): string {
+export function basename(path: string): string {
   return path.split('/').filter(Boolean).pop() ?? path
+}
+
+/** An `astra.yaml` renders as the full Lightcone paper rather than raw YAML,
+ *  in a fiber body and in the sent-file viewer alike. */
+export function isAstraYaml(path: string): boolean {
+  return basename(path) === 'astra.yaml'
 }
 
 function dirname(path: string): string {
@@ -407,10 +416,14 @@ function dirname(path: string): string {
   return i <= 0 ? '/' : path.slice(0, i)
 }
 
-function fileExt(path: string): string {
-  const base = basename(path).split(/[?#]/)[0]
+export function fileExt(path: string): string {
+  // Strip a trailing `?query` / `#frag` off the EXTENSION rather than off the
+  // whole basename: stripping first is right for a URL embed (`plot.png?v=2`)
+  // but loses the extension on a filesystem path (`figure#1.png`), and the
+  // sent-file viewer only ever passes filesystem paths.
+  const base = basename(path)
   const dot = base.lastIndexOf('.')
-  return dot > 0 ? base.slice(dot + 1).toLowerCase() : ''
+  return dot > 0 ? base.slice(dot + 1).split(/[?#]/)[0].toLowerCase() : ''
 }
 
 /**

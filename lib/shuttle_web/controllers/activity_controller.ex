@@ -22,6 +22,8 @@ defmodule ShuttleWeb.ActivityController do
 
   use Phoenix.Controller, formats: [:json]
 
+  import ShuttleWeb.RelayHelpers, only: [integer_param: 2, epoch_ms_message: 1]
+
   alias Shuttle.{Activity, Poller}
 
   def show(conn, params) do
@@ -39,23 +41,7 @@ defmodule ShuttleWeb.ActivityController do
     end
   end
 
-  # Strict: the whole value must be an integer, so `from_ms=17e11` or a
-  # trailing-garbage bound is refused rather than silently truncated to a
-  # window the caller did not ask for.
-  defp integer_param(params, key) do
-    case Map.get(params, key) do
-      value when is_binary(value) ->
-        case Integer.parse(value) do
-          {int, ""} -> {:ok, int}
-          _ -> {:error, {:bad_param, key}}
-        end
-
-      _ ->
-        {:error, {:bad_param, key}}
-    end
-  end
-
-  defp message({:bad_param, key}), do: "#{key} is required and must be an integer (epoch ms)"
+  defp message({:bad_param, key}), do: epoch_ms_message(key)
   defp message(:inverted_range), do: "to_ms must be greater than or equal to from_ms"
   defp message(:range_too_wide), do: "range must not exceed #{Activity.max_range_days()} days"
 end

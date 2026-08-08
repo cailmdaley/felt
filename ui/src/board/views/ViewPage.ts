@@ -2,9 +2,10 @@
  * ViewPage — the parchment scaffold every temporal view is built on.
  *
  * A view page is one sheet: an illuminated title in the board's column-title
- * hand, a hairline under it, then the view's own body. Views own their body
- * and nothing else, so the four pages sit at the same optical margin and wear
- * the same head. Styles live in ./views.css.
+ * hand, a hairline under it, then the view's own body. Views fill their body
+ * and may hang controls off `titleRow`; the scaffold owns the rest, so every
+ * page sits at the same optical margin and wears the same head. Styles live
+ * in ./views.css.
  */
 
 import { appendCappedText } from '../KanbanSurfaces.js'
@@ -45,11 +46,6 @@ export function createViewPage(title: string): ViewPage {
 }
 
 /**
- * The board's empty-state marginal line, sized for a full page rather than a
- * column. The fleurons are drawn by CSS (`.kbn-view-empty::before/::after`),
- * matching `.kbn-empty` in KanbanModal.css — pass the text alone.
- */
-/**
  * The stand-in page the CHASSIS renders when a view cannot be given a context —
  * before the first board response, or after a fetch has failed.
  *
@@ -82,6 +78,11 @@ export function createViewFallbackPage(
   return page.root
 }
 
+/**
+ * The board's empty-state marginal line, sized for a full page rather than a
+ * column. The fleurons are drawn by CSS (`.kbn-view-empty::before/::after`),
+ * matching `.kbn-empty` in KanbanModal.css — pass the text alone.
+ */
 export function createViewEmptyState(text = '— not yet inked —'): HTMLElement {
   const el = document.createElement('div')
   el.className = 'kbn-view-empty'

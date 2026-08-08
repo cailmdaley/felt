@@ -18,7 +18,6 @@ defmodule Shuttle.Actions do
           | :close_composted
 
   @transition_targets ~w(drafts inFlight queued active awaitingReview tempered composted)
-  @action_ids ~w(pause reopen reopen-draft accept-run dispatch-ad-hoc close-awaiting-review close-tempered close-composted)
 
   @spec actions_for(map(), boolean()) :: [map()]
   def actions_for(fiber, running? \\ false) when is_map(fiber) do
@@ -37,9 +36,6 @@ defmodule Shuttle.Actions do
   end
 
   def resolve_transition(_fiber, _target, _running?), do: {:error, :unknown_target}
-
-  @spec known_action?(String.t()) :: boolean()
-  def known_action?(id), do: id in @action_ids
 
   # The normalized kanban drag targets, in column order. `action_ids/2`
   # derives the available-action set from `action_for_target/3` over exactly

@@ -8,8 +8,6 @@ defmodule Shuttle.FiberDocuments do
   without relying on Portolan's WebSocket fiber-tree snapshots.
   """
 
-  require Logger
-
   alias Shuttle.FeltStores
 
   @type entry :: %{
@@ -28,8 +26,6 @@ defmodule Shuttle.FiberDocuments do
   @kanban_fields ~w(id uid name status tags created_at closed_at modified_at
                     outcome due horizon cold kind priority depends_on tempered
                     shuttle start path report_path)
-
-  @kanban_json_fields Enum.join(@kanban_fields, ",")
 
   @doc "The kanban metadata field names the owner feed projects from felt JSON."
   @spec kanban_fields() :: [String.t()]
@@ -261,18 +257,6 @@ defmodule Shuttle.FiberDocuments do
     end
   end
 
-  # The narrowed owner walk is a union of several felt filters, so it takes its
-  # own path; every other mode is still one `felt ls`.
-  defp list_store(store, false, :owned) do
-    case list_owned_union(store) do
-      {:ok, rows} ->
-        {:ok, rows |> filter_rows(:owned) |> Enum.flat_map(&entry_for(store, &1, :stat))}
-
-      {:error, detail} ->
-        {:error, detail}
-    end
-  end
-
   defp list_store(store, with_body?, mode) do
     args = list_args(with_body?, mode)
 
@@ -293,64 +277,6 @@ defmodule Shuttle.FiberDocuments do
 
       {output, status} ->
         {:error, %{felt_store: store, status: status, error: String.trim(output)}}
-    end
-  end
-
-  # The narrowed owner walk is a UNION of `kanban_walks/0`, one `felt ls` per
-  # filter, deduped by `id` with the first (shuttle) walk winning. A fiber
-  # matching two walks — a `due:` card that also carries a `shuttle:` block —
-  # appears exactly once.
-  #
-  # An aux walk that fails is logged and skipped rather than failing the store:
-  # the `shuttle:` walk is the load-bearing one, and losing the whole feed
-  # because a supplementary filter errored would be a bad trade. A failing
-  # PRIMARY walk still errors the store, exactly as before.
-  defp list_owned_union(store) do
-    [primary | aux] = @kanban_walks
-
-    case owned_walk(store, primary) do
-      {:ok, rows} ->
-        {:ok, union_by_id(rows, Enum.flat_map(aux, &aux_walk_rows(store, &1)))}
-
-      {:error, detail} ->
-        {:error, Map.put(detail, :felt_store, store)}
-    end
-  end
-
-  defp aux_walk_rows(store, filter) do
-    case owned_walk(store, filter) do
-      {:ok, rows} ->
-        rows
-
-      {:error, detail} ->
-        Logger.warning(
-          "kanban aux walk #{inspect(filter)} failed for #{store}: #{inspect(detail)}"
-        )
-
-        []
-    end
-  end
-
-  defp owned_walk(store, filter) do
-    args = ["ls", "-s", "all", "-j"] ++ filter ++ ["--json-field", @kanban_json_fields]
-
-    case runner().cmd("felt", args, cd: store) do
-      {output, 0} -> decode_walk(output)
-      {output, status} -> {:error, %{status: status, error: String.trim(to_string(output))}}
-    end
-  rescue
-    # The runner spawns through a Port and lets spawn failures raise, matching
-    # `System.cmd/3`. Under fork pressure (a host at its process limit) that
-    # would take down the request instead of the one walk; degrade it to the
-    # ordinary per-walk error so an aux filter can never 500 the feed.
-    error -> {:error, %{error: Exception.message(error)}}
-  end
-
-  defp decode_walk(output) do
-    case Jason.decode(output) do
-      {:ok, rows} when is_list(rows) -> {:ok, Enum.filter(rows, &is_map/1)}
-      {:ok, _} -> {:error, %{error: "felt ls returned non-list JSON"}}
-      {:error, error} -> {:error, %{error: Exception.message(error)}}
     end
   end
 
@@ -383,21 +309,20 @@ defmodule Shuttle.FiberDocuments do
     primary ++ Enum.reverse(kept)
   end
 
-  # The command runner, behind the same config seam as `Shuttle.Felt` /
-  # `Shuttle.FeltStores`. Tests set `:shuttle, :fiber_documents_runner` to a
-  # mock; production defaults to the bounded runner.
-  defp runner, do: Application.get_env(:shuttle, :fiber_documents_runner, Shuttle.Runner.Default)
+  # The bounded command runner. No injection seam, unlike `Shuttle.Felt` and
+  # `Shuttle.FeltStores`: both callsites shell `felt` at a real store, and the
+  # suite drives them that way.
+  defp runner, do: Shuttle.Runner.Default
 
   # `with_body? == true` is the content/search reader path: every field, body
-  # included, no narrowing. The narrowed owner walk carries only kanban metadata
-  # fields and never the body.
+  # included. Neither variant narrows. The narrowed kanban projection lives in
+  # `Shuttle.Poller`'s walk (`kanban_walks/0` + `kanban_fields/0`), which is what
+  # builds the owner feed; this direct path serves only the unfiltered readers.
+  # `mode` still reaches `decode_store/3`, where `filter_rows(:owned)` applies
+  # the owner predicate in memory.
   defp list_args(true, _mode), do: ["ls", "-s", "all", "-j", "--body"]
 
-  defp list_args(false, :owned) do
-    ["ls", "-s", "all", "-j", "--has-field", "shuttle", "--json-field", @kanban_json_fields]
-  end
-
-  defp list_args(false, :all), do: ["ls", "-s", "all", "-j"]
+  defp list_args(false, _mode), do: ["ls", "-s", "all", "-j"]
 
   defp decode_store(store, output, mode) do
     with {:ok, decoded} when is_list(decoded) <- Jason.decode(output) do

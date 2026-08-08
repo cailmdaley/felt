@@ -29,7 +29,16 @@
 
 import { normalizeFocusDate, registerView, type TemporalView, type ViewContext } from './ViewRegistry.js'
 import { createViewEmptyState, createViewPage } from './ViewPage.js'
-import { buildSessionIndex, type ActivityBucket, type SessionPairing } from './TemporalData.js'
+import { cardPathSegments, cardUlids, sessionSlug, sessionUlid } from './sessionNames.js'
+import { MARK_GLYPH } from './vocabulary.js'
+import { civilDayNoon, formatSpanMinutes, shiftCivilDay } from './railTime.js'
+import {
+  buildSessionIndex,
+  foldActiveMinutes,
+  parseCommitSlug,
+  type ActivityBucket,
+  type SessionPairing,
+} from './TemporalData.js'
 import type { KanbanCard, KanbanResponse } from '../KanbanTypes.js'
 import { buildTimelineDays, type TimelineDay } from '../KanbanSurfaces.js'
 import { civilDayToLocalDate, dueCivilDay, instantMs, isoDayLocal, railCivilDay } from '../civilDay.js'
@@ -38,7 +47,7 @@ import {
   daysBetween,
   planExtension,
   windowOf,
-  type DayWindow,
+  type DayRange,
 } from './chronicleWindow.js'
 import { cycleSpan } from '../KanbanRules.js'
 import './ChronicleView.css'
@@ -90,29 +99,19 @@ const TODAY_ANCHOR = VISIBLE_PAST_DAYS / VISIBLE_DAYS
  * every night between midnight and 6am the page would ink solid marks one
  * column PAST its own today line, on a page whose rule is that the future
  * carries no solid ink. Columns are still LABELLED by calendar date, because
- * that is what a rail is named by: the date it opened on.
+ * that is what a rail is named by: the date it opened on. The boundary itself
+ * is `RAIL_START_HOUR` in ./railTime.js, which `railCivilDay` defaults to.
  */
-const RAIL_START_HOUR = 6
 
 /** The current rail as a local Date at noon — the shape `buildTimelineDays`
  *  wants, and noon-anchored because midnight is the one wall-clock time a
  *  spring-forward day can lack. */
 export function railDate(nowMs: number): Date {
-  const d = civilDayToLocalDate(railCivilDay(nowMs, RAIL_START_HOUR))
+  const d = civilDayToLocalDate(railCivilDay(nowMs))
   if (!d) return new Date(nowMs)
   d.setHours(12, 0, 0, 0)
   return d
 }
-
-/**
- * Daemon base for the two cycle writes. ViewContext is a READ contract — it
- * carries no base — so this resolves the same way `src/main.ts` does: empty for
- * the same-origin bundle the daemon serves (and for the offline harness, whose
- * build defines it empty), an absolute origin when `VITE_SHUTTLE_BASE` is set.
- * If writes ever become a third view's business, this belongs on ViewContext
- * rather than copied again.
- */
-const SHUTTLE_BASE = (import.meta.env.VITE_SHUTTLE_BASE as string | undefined) ?? ''
 
 /**
  * The origin key a write is routed by — `local`, or a bare hostname for a
@@ -134,36 +133,6 @@ function boardOrigin(response: KanbanResponse): string {
 // ── Pure join + aggregation (exported for chronicleJoin.test.ts) ─────────────
 
 /**
- * A Crockford-base32 ULID embedded in a longer name. Shuttle's tmux sessions
- * are `<slug>-<26-char ULID>-shuttle`, so the ULID is the one token in a
- * session name that identifies a fiber exactly.
- */
-const ULID_RE = /(?:^|[^0-9a-hjkmnp-tv-z])([0-7][0-9a-hjkmnp-tv-z]{25})(?![0-9a-hjkmnp-tv-z])/i
-
-/** The fiber ULID a session name carries, upper-cased, or null. */
-export function sessionUlid(name: string | null | undefined): string | null {
-  if (typeof name !== 'string' || !name) return null
-  const m = ULID_RE.exec(name)
-  return m ? m[1].toUpperCase() : null
-}
-
-/**
- * The human-readable slug half of a session name: the tmux name with its
- * `-shuttle` suffix and its ULID stripped. `bmodes-2d-01K…-shuttle` → `bmodes-2d`.
- * This is the weaker join key — a slug is a fiber's leaf name, not its identity —
- * so it is only consulted after the ULID misses, and only when it resolves to
- * exactly one card.
- */
-export function sessionSlug(name: string | null | undefined): string | null {
-  if (typeof name !== 'string') return null
-  let s = name.trim().toLowerCase()
-  if (!s) return null
-  s = s.replace(/-shuttle$/, '')
-  s = s.replace(/-[0-7][0-9a-hjkmnp-tv-z]{25}$/, '')
-  return s || null
-}
-
-/**
  * A working directory as a row label: a home prefix folds to `~`, and anything
  * else keeps its last three segments. There is no `$HOME` in a browser, so the
  * home shapes are matched structurally (`/home/<user>/…`, `/Users/<user>/…`).
@@ -176,31 +145,6 @@ export function abbreviateCwd(cwd: string): string {
   }
   if (parts.length <= 3) return `/${parts.join('/')}`
   return `…/${parts.slice(-3).join('/')}`
-}
-
-/** Every ULID a card can be recognized by. */
-function cardUlids(card: KanbanCard): string[] {
-  const out: string[] = []
-  const push = (v: string | null): void => {
-    if (v && !out.includes(v)) out.push(v)
-  }
-  if (typeof card.uid === 'string') push(card.uid.trim().toUpperCase())
-  push(sessionUlid(card.id))
-  push(sessionUlid(card.shuttleFiberId))
-  push(sessionUlid(card.runningWorker))
-  return out.filter((u) => /^[0-7][0-9A-HJKMNP-TV-Z]{25}$/.test(u))
-}
-
-/** Path segments a card can be recognized by when no ULID is available. */
-function cardSlugs(card: KanbanCard): string[] {
-  const raw = [...card.id.split('/'), ...(card.projectSlug ?? '').split('/')]
-  const out: string[] = []
-  for (const seg of raw) {
-    const s = seg.trim().toLowerCase()
-    if (s.length < 3 || out.includes(s)) continue
-    out.push(s)
-  }
-  return out
 }
 
 export interface Attribution {
@@ -263,7 +207,7 @@ export function attributeActivity(
   for (const card of cards) {
     if (card.runningWorker) byWorker.set(card.runningWorker, card.id)
     for (const ulid of cardUlids(card)) byUlid.set(ulid, card.id)
-    for (const slug of cardSlugs(card)) {
+    for (const slug of cardPathSegments(card)) {
       const seen = bySlug.get(slug)
       if (seen === undefined) bySlug.set(slug, card.id)
       else if (seen !== card.id) bySlug.set(slug, null)
@@ -365,7 +309,7 @@ export function aggregateByCivilDay(buckets: readonly ActivityBucket[]): Map<str
   const out = new Map<string, DayCell>()
   for (const b of buckets) {
     if (!Number.isFinite(b.m)) continue
-    const day = railCivilDay(b.m, RAIL_START_HOUR)
+    const day = railCivilDay(b.m)
     let cell = out.get(day)
     if (!cell) {
       cell = { agent: 0, attention: 0, notify: 0 }
@@ -534,31 +478,6 @@ export function buildCycleBands(
 
 // ── The look-back ────────────────────────────────────────────────────────────
 
-/** Minutes of a given kind inside a span. A bucket is one minute of one kind,
- *  so distinct timestamps ARE the minute count — counting `n` would count
- *  events, and a busy minute is still one minute. */
-export function spanMinutes(
-  buckets: readonly ActivityBucket[],
-  kind: ActivityBucket['k'],
-  fromMs: number,
-  toMs: number,
-): number {
-  const minutes = new Set<number>()
-  for (const b of buckets) {
-    if (b.k !== kind || b.m < fromMs || b.m > toMs) continue
-    minutes.add(Math.floor(b.m / 60_000))
-  }
-  return minutes.size
-}
-
-/** `3h 20m`, `45m`, `—`. */
-export function formatMinutes(total: number): string {
-  if (total <= 0) return '—'
-  const h = Math.floor(total / 60)
-  const m = total % 60
-  return h > 0 ? `${h}h ${m}m` : `${m}m`
-}
-
 export interface NarrationGroup {
   slug: string
   count: number
@@ -579,9 +498,8 @@ export function groupNarration(
 ): NarrationGroup[] {
   const bySlug = new Map<string, NarrationGroup>()
   for (const commit of commits) {
-    const match = /^([a-z0-9][a-z0-9._/-]{1,40}):\s*(.+)$/i.exec(commit.subject.trim())
-    const slug = match ? match[1].toLowerCase() : 'elsewhere'
-    const rest = match ? match[2] : commit.subject.trim()
+    const { slug: parsed, rest } = parseCommitSlug(commit.subject)
+    const slug = parsed ? parsed.toLowerCase() : 'elsewhere'
     let group = bySlug.get(slug)
     if (!group) {
       group = { slug, count: 0, subjects: [] }
@@ -652,16 +570,6 @@ function hostLabel(card: KanbanCard, response: KanbanResponse): string {
   return (card.shuttleHost ?? 'local').toLowerCase()
 }
 
-/** The civil day `delta` calendar days on. Noon anchor: midnight is the one
- *  wall-clock time a spring-forward day can lack. */
-function addCivilDays(day: string, delta: number): string {
-  const d = civilDayToLocalDate(day)
-  if (!d) return day
-  d.setHours(12, 0, 0, 0)
-  d.setDate(d.getDate() + delta)
-  return isoDayLocal(d.getTime())
-}
-
 function clamp(v: number, lo: number, hi: number): number {
   return v < lo ? lo : v > hi ? hi : v
 }
@@ -677,15 +585,6 @@ function idxOfInstant(iso: string | undefined, dayIndex: Map<string, number>): n
 function idxOfDue(due: string | undefined, dayIndex: Map<string, number>): number | null {
   const day = dueCivilDay(due)
   return day === undefined ? null : (dayIndex.get(day) ?? null)
-}
-
-/** Local-noon ms of a civil day — a sort key that cannot drift across a DST
- *  boundary the way local midnight can. */
-function dayNoonMs(day: string): number {
-  const d = civilDayToLocalDate(day)
-  if (!d) return 0
-  d.setHours(12, 0, 0, 0)
-  return d.getTime()
 }
 
 /** What one fiber's line covers, and where its close belongs. */
@@ -764,7 +663,7 @@ function buildFiberRow(
     instantMs(card.closedAt) ?? 0,
     instantMs(card.createdAt) ?? 0,
   )
-  for (const day of days.keys()) sortMs = Math.max(sortMs, dayNoonMs(day))
+  for (const day of days.keys()) sortMs = Math.max(sortMs, (civilDayNoon(day)?.getTime() ?? 0))
 
   return {
     key: `fiber:${card.id}`,
@@ -800,7 +699,7 @@ function buildCwdRow(
     if (idx === undefined) continue
     if (idx < startIdx) startIdx = idx
     if (idx > endIdx) endIdx = idx
-    sortMs = Math.max(sortMs, dayNoonMs(day))
+    sortMs = Math.max(sortMs, (civilDayNoon(day)?.getTime() ?? 0))
   }
   startIdx = clamp(startIdx, 0, todayIdx)
   endIdx = clamp(Math.max(endIdx, startIdx), 0, todayIdx)
@@ -986,7 +885,7 @@ class ChronicleView implements TemporalView {
    * the viewer scrolls (see `maybeExtend`); null until the first load, which
    * seeds it from PAST_DAYS/FUTURE_DAYS around the rail's today.
    */
-  private window: DayWindow | null = null
+  private window: DayRange | null = null
   /**
    * Pixels the next render must ADD to the restored `scrollLeft`.
    *
@@ -1092,10 +991,10 @@ class ChronicleView implements TemporalView {
     // yesterday's date before 6am); the FETCH still has to reach the real
     // present, or everything since noon goes unrequested.
     const nowMs = Date.now()
-    const today = railCivilDay(nowMs, RAIL_START_HOUR)
+    const today = railCivilDay(nowMs)
     // The window is the chronicle's own state once scrolling has grown it; the
     // constants only seed it.
-    const window = this.window ?? windowOf(addCivilDays(today, -PAST_DAYS), addCivilDays(today, FUTURE_DAYS))
+    const window = this.window ?? windowOf(shiftCivilDay(today, -PAST_DAYS), shiftCivilDay(today, FUTURE_DAYS))
     this.window = window
     const days = buildTimelineDays(
       daysBetween(window.first, today),
@@ -1216,7 +1115,6 @@ class ChronicleView implements TemporalView {
           c.shuttleHost ?? '', // host note
           c.uid ?? '', // join rung 2
           c.shuttleFiberId ?? '', // join rung 2
-          c.projectSlug ?? '', // join rungs 3-4
         ].join('|'),
       )
     }
@@ -1300,7 +1198,7 @@ class ChronicleView implements TemporalView {
     const scoped = this.scopedCycleId === null ? null : bands.find((b) => b.id === this.scopedCycleId)
     if (scoped) {
       body.append(this.buildFace(scoped, days, shown, buckets, ctx))
-      void this.loadIntention(scoped.id)
+      void this.loadIntention(scoped.id, ctx)
     } else if (this.scopedCycleId !== null) {
       // The era left the window (its dates moved, or it was deleted). Silently
       // stop scoping rather than showing a face for a band that is not there.
@@ -1608,8 +1506,11 @@ class ChronicleView implements TemporalView {
     stat('fibers touched', String(touched))
     stat('dues inside', String(dues))
     stat('closed', String(closed.length))
-    stat('steering', formatMinutes(spanMinutes(buckets, 'attention', fromMs, toMs)))
-    stat('agents', formatMinutes(spanMinutes(buckets, 'agent', fromMs, toMs)))
+    // `toMs + 1` keeps the old inclusive right bound literally intact; the
+    // shared fold's span is half-open.
+    const spend = foldActiveMinutes(buckets, { fromMs, toMs: toMs + 1 })
+    stat('steering', formatSpanMinutes(spend.attention, { empty: '—' }))
+    stat('agents', formatSpanMinutes(spend.agent, { empty: '—' }))
     face.append(stats)
 
     // ── the look back ───────────────────────────────────────────────────────
@@ -1710,11 +1611,11 @@ class ChronicleView implements TemporalView {
   }
 
   /** The intention line, read once from the cycle fiber's body. */
-  private async loadIntention(id: string): Promise<void> {
+  private async loadIntention(id: string, ctx: ViewContext): Promise<void> {
     if (this.intentions.has(id)) return
     this.intentions.set(id, '') // claim it, so a re-render does not re-ask
     try {
-      const res = await fetch(`${SHUTTLE_BASE}/api/v1/fibers/${id.split('/').map(encodeURIComponent).join('/')}`)
+      const res = await fetch(`${ctx.shuttleBase}/api/v1/fibers/${id.split('/').map(encodeURIComponent).join('/')}`)
       if (!res.ok) return
       const doc = (await res.json()) as { fiber?: { body?: string }; body?: string }
       const text = firstParagraph(doc.fiber?.body ?? doc.body)
@@ -1745,7 +1646,7 @@ class ChronicleView implements TemporalView {
       .join(' · ')
     if (!text) throw new Error('nothing to inscribe')
     const origin = shuttleOrigin(band.originId)
-    const res = await fetch(`${SHUTTLE_BASE}/api/v1/felt-edit`, {
+    const res = await fetch(`${ctx.shuttleBase}/api/v1/felt-edit`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ fiber_id: band.id, origin, set: { outcome: text } }),
@@ -1895,7 +1796,7 @@ class ChronicleView implements TemporalView {
         ? { fiber_id: id, origin, set: { start: day } }
         : { fiber_id: id, origin, due: day }
     try {
-      const res = await fetch(`${SHUTTLE_BASE}/api/v1/felt-edit`, {
+      const res = await fetch(`${ctx.shuttleBase}/api/v1/felt-edit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -2128,7 +2029,7 @@ class ChronicleView implements TemporalView {
     const id = `cycles/${slug}`
 
     try {
-      const created = await fetch(`${SHUTTLE_BASE}/api/v1/fiber/create`, {
+      const created = await fetch(`${ctx.shuttleBase}/api/v1/fiber/create`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -2319,7 +2220,7 @@ class ChronicleView implements TemporalView {
       const due = document.createElement('div')
       due.className = 'chr-mark chr-due'
       due.style.left = colLeft(row.dueIdx)
-      due.textContent = '◴'
+      due.textContent = MARK_GLYPH.due
       due.title = 'due'
       track.append(due)
     }
@@ -2327,7 +2228,7 @@ class ChronicleView implements TemporalView {
       const launch = document.createElement('div')
       launch.className = 'chr-mark chr-launch'
       launch.style.left = colLeft(row.launchIdx)
-      launch.textContent = '◐'
+      launch.textContent = MARK_GLYPH.launch
       launch.title = 'next launch'
       track.append(launch)
     }

@@ -58,15 +58,8 @@ export interface DispatchIneligibleBody {
  * is now only the last resort for a bare `not_eligible` with no detail — the
  * common confusing case (a fiber that simply needs to run on another host)
  * now says exactly that.
- *
- * Accepts either the response body or a bare reason string for back-compat.
  */
-export function dispatchIneligibleReason(
-  input: DispatchIneligibleBody | string | undefined,
-): string {
-  const body: DispatchIneligibleBody =
-    typeof input === 'string' || input === undefined ? { reason: input } : input
-
+export function dispatchIneligibleReason(body: DispatchIneligibleBody): string {
   if (body.message && body.message.trim()) return body.message.trim()
 
   const code = body.detail ?? body.reason
@@ -92,25 +85,4 @@ export function dispatchIneligibleReason(
     default:
       return `Not eligible: ${code}`
   }
-}
-
-/**
- * Format an ISO timestamp as a short relative string ("3h", "2d", "Apr 18").
- */
-export function formatRelative(iso: string): string {
-  const t = new Date(iso).getTime()
-  if (!Number.isFinite(t)) return ''
-  const now = Date.now()
-  const diff = now - t
-  const sec = diff / 1000
-  if (sec < 60) return 'just now'
-  const min = sec / 60
-  if (min < 60) return `${Math.floor(min)}m`
-  const hr = min / 60
-  if (hr < 24) return `${Math.floor(hr)}h`
-  const day = hr / 24
-  if (day < 7) return `${Math.floor(day)}d`
-  // Older — show a month-day stamp.
-  const d = new Date(iso)
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 }

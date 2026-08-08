@@ -17,14 +17,18 @@
  *
  * The temporal views (chronicle / day / week, hotkeys 2-4) are exercised the
  * same way: `MOCK_TEMPORAL` below injects deterministic activity + narration
- * in place of the `/api/v1/activity` and `/api/v1/narration` routes, so the
- * views render with no daemon to serve them. The mock mirrors those routes'
- * wire contract — one-minute buckets keyed {minute, session, cwd, kind};
- * narration over inclusive civil days — so what the views are exercised
- * against is the shape the daemon actually returns.
+ * as the `TemporalFetchers` the board would otherwise build over
+ * `/api/v1/activity` and `/api/v1/narration`, so the views render with no
+ * daemon to serve them. The mock mirrors the FETCHER contract — one-minute
+ * buckets keyed {minute, session, cwd, kind}; narration over inclusive civil
+ * days — so what the views are exercised against is the shape they really
+ * receive. Both routes themselves take instants; the fetchers resolve civil
+ * days to epoch-ms browser-side (see TemporalData.ts).
  *
  * Distinct from harness/harness.ts (slice C), which mounts FiberDetailModal.
- * Build: `npx vite build -c vite.harness-board.config.ts` → harness-board-dist/.
+ * Build: `npx vite build -c vite.harness-board.config.ts`; open the emitted
+ * harness-board-dist/index.html via file://. The page ships with the bundle,
+ * so the output directory is self-sufficient — nothing to copy in by hand.
  */
 import { KanbanModal } from '../src/board/KanbanModal.js'
 import { civilDayToLocalDate } from '../src/board/civilDay.js'
@@ -99,7 +103,7 @@ const civilDay = (offsetDays: number) => {
 /**
  * Every mock fiber carries a ULID, because the temporal views join a bucket to
  * a fiber THROUGH one: a Shuttle worker runs in `<slug>-<ULID>-shuttle` and
- * that ULID is the fiber's `uid` (see DayView's `tmuxFiberUlid`). With uids
+ * that ULID is the fiber's `uid` (see `sessionUlid` in views/sessionNames.ts). With uids
  * missing the join can never succeed, and the views would only ever exercise
  * their unjoined path offline — which is how this started.
  *
@@ -654,22 +658,26 @@ const MOCK_SUBJECTS = [
 ]
 
 /**
- * Commits over an INCLUSIVE CIVIL-DAY range — the daemon's contract, not an
- * instant range. `GET /api/v1/narration?from=&to=` parses both bounds with
- * Elixir's `Date.from_iso8601` and both ends are inclusive in the daemon's
- * local zone (lib/shuttle_web/controllers/narration_controller.ex), so the
- * spec-correct single-day call is `narration(day, day)` — which an instant
- * range reads as a zero-width window and answers with nothing.
+ * Commits over an INCLUSIVE CIVIL-DAY range — the FETCHER's contract. This
+ * mock stands in for `TemporalFetchers.narration`, not for the HTTP route, and
+ * that fetcher takes civil days because that is the unit a temporal view thinks
+ * in. So `narration(day, day)` is one whole day, not a zero-width window.
  *
- * Leniency, deliberate and one-directional: the daemon accepts ONLY a bare
- * `YYYY-MM-DD` and 400s anything else, while this mock takes the leading civil
- * day off a full ISO timestamp too. That keeps a caller passing timestamps
- * working offline rather than silently blank — but such a caller is a bug
- * against the live daemon, so do not read a working harness as proof the call
- * is well-formed.
+ * The daemon underneath takes instants only: `GET /api/v1/narration` requires
+ * `from_ms`/`to_ms` and 400s anything else. The live fetcher resolves the civil
+ * days to epoch-ms in the BROWSER's zone (`civilDaysToInstants`, snapping `to`
+ * to 23:59:59.999) before it asks. Resolving them daemon-side is what the
+ * retired `?from=&to=` form did, and it shifted the window for every browser
+ * that did not share the daemon's zone.
  *
- * An inverted range is the daemon's 400, which the real fetcher turns into an
- * empty result; mirrored here as `{commits: []}`.
+ * Leniency here MATCHES production rather than exceeding it: this mock reads
+ * the leading civil day off a full ISO timestamp, and so does
+ * `civilDaysToInstants`. A caller passing timestamps is well-formed against the
+ * live daemon too.
+ *
+ * An inverted range answers `{commits: []}`. The live fetcher leaves it
+ * inverted on purpose, the daemon 400s it, and the degrade path turns that
+ * into the same empty result.
  */
 const CIVIL_DAY_PREFIX_RE = /^(\d{4}-\d{2}-\d{2})/
 const MAX_NARRATION_DAYS = 400
@@ -840,7 +848,6 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
 try {
   assertUlids()
   const modal = new KanbanModal({
-    onOpenFiber: () => {},
     onStashClick: () => { window.console.log('stash click') },
     onNewIdeaClick: () => { window.console.log('new-idea click') },
     shuttleBase: '',

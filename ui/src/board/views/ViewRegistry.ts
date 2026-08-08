@@ -47,6 +47,12 @@ export interface ViewContext {
    * into two civil days.
    */
   cards: KanbanCard[]
+  /**
+   * The daemon origin every request is built on — '' for the same-origin
+   * bundle the daemon serves, an absolute origin when the host was given one.
+   * The board resolves it once; a view must never re-resolve it from the env.
+   */
+  shuttleBase: string
   activity(fromMs: number, toMs: number): Promise<ActivityResult>
   narration(fromISO: string, toISO: string): Promise<NarrationResult>
   /**
@@ -147,11 +153,6 @@ export function getView(id: ViewId): TemporalView | undefined {
 /** Every registered view, in registration order. */
 export function listViews(): TemporalView[] {
   return [...registry.values()]
-}
-
-/** Test/hot-reload escape hatch — drops every registration. */
-export function clearViews(): void {
-  registry.clear()
 }
 
 // ── View fallback ────────────────────────────────────────────────────────────

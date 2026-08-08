@@ -17,7 +17,7 @@ defmodule ShuttleWeb.FeltStoresController do
 
   use Phoenix.Controller, formats: [:json]
 
-  alias Shuttle.{FeltStores, Poller, Projects, RegistryCommon, Remote}
+  alias Shuttle.{FeltStores, OriginRouter, Poller, Projects, RegistryCommon, Remote}
 
   @remote_timeout_ms 8_000
 
@@ -118,12 +118,12 @@ defmodule ShuttleWeb.FeltStoresController do
     }
   end
 
-  defp remote_client do
-    Application.get_env(:shuttle, :write_forward_client, Shuttle.RemoteRegistry.Client.Default)
-  end
-
+  # Transport comes from the same chokepoint as the write plane — see
+  # `OriginRouter.forward_client/0`. This is a read, not a forward, but it is the
+  # same config key and the same client behaviour, so a test that stubs the
+  # forward plane stubs this too.
   defp fetch_remote_registry(url, timeout) do
-    remote_client().get(url, timeout)
+    OriginRouter.forward_client().get(url, timeout)
   rescue
     error -> {:error, error}
   catch

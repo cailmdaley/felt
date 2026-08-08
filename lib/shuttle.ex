@@ -80,12 +80,10 @@ defmodule Shuttle.Application do
         children
       end
 
-    children =
-      if Application.get_env(:shuttle, :start_endpoint, true) do
-        children ++ [ShuttleWeb.Endpoint]
-      else
-        children
-      end
+    # The endpoint is unconditional and last. The test env keeps it from
+    # listening with `server: false` (config/test.exs), not by omitting the
+    # child — the Phoenix.ConnTest modules need it in the tree.
+    children = children ++ [ShuttleWeb.Endpoint]
 
     Supervisor.start_link(children, strategy: :one_for_one, name: Shuttle.Supervisor)
   end

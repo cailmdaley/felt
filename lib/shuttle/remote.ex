@@ -59,20 +59,6 @@ defmodule Shuttle.Remote do
   @default_remote_port 4_000
 
   @doc """
-  Parses a list of config entries (maps or keyword lists) into
-  `%Shuttle.Remote{}` structs. Drops entries missing the required
-  `:name`, or lacking both `:url` and `:port`.
-  """
-  @spec from_config_list([map() | keyword()]) :: [t()]
-  def from_config_list(entries) when is_list(entries) do
-    entries
-    |> Enum.map(&from_config/1)
-    |> Enum.reject(&is_nil/1)
-  end
-
-  def from_config_list(_), do: []
-
-  @doc """
   Parses a single entry. Returns `nil` when the required fields are missing.
 
   Defaults:

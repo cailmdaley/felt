@@ -15,14 +15,15 @@ defmodule Shuttle.Transition do
        gates are the final arbiter (mirroring Portolan's prior
        `resolveShuttleDaemonUrl` fallback).
 
-    2. **Local branch** = resolve + invoke, in one process. `ActionQueries`
-       reads the live felt document and tmux liveness outside the Poller
-       mailbox to map `target` → a canonical action id; the same query path the
-       availability gate reads, so the resolved action is in the availability
-       set by construction (the `resolve ⊆ availability` invariant — see
-       `gotcha-shuttle-resolve-invoke-daemon-split`). Then the invoke pipeline
-       mutates: pause/reopen/close shell the offline frontmatter writer,
-       accept-run / dispatch-ad-hoc go through the in-process lifecycle.
+    2. **Local branch** = resolve + invoke, in one process, on ONE read.
+       `ActionQueries` reads the live felt document and tmux liveness outside
+       the Poller mailbox to map `target` → a canonical action id. Nothing
+       re-checks availability afterward: the resolved action is in the
+       availability set by construction (the `resolve ⊆ availability` invariant
+       — see `gotcha-shuttle-resolve-invoke-daemon-split`), so a second read
+       could only disagree with the first by racing it. Then the mutation:
+       pause/reopen/close shell the offline frontmatter writer, accept-run /
+       dispatch-ad-hoc go through the in-process lifecycle.
 
     3. **Forward branch** = `POST <remote>/api/v1/transition` with `origin`
        omitted, so the owning daemon runs its OWN local branch against its
@@ -32,13 +33,12 @@ defmodule Shuttle.Transition do
        relayed response's `origin`. Terminating in one hop: a fiber has exactly
        one owner, and the owner never re-forwards.
 
-  This service's `/transition` endpoint uses `invoke/2` and `http_error/1`, so the invoke pipeline and its
-  status mapping have a single implementation.
+  This service's `/transition` endpoint uses `http_error/1`, so the write-plane's
+  status mapping has a single implementation.
   """
 
   alias Shuttle.{
     ActionQueries,
-    Actions,
     FeltStores,
     LifecycleService,
     OriginRouter,
@@ -74,71 +74,48 @@ defmodule Shuttle.Transition do
 
   # ── Local branch: resolve + invoke ──
 
+  # The local branch, end to end: resolve the drag target to an action, resolve
+  # the felt store that owns the fiber (so the `felt shuttle` verbs that still
+  # shell out get the right `--felt-store` — the same resolution /api/v1/fibers
+  # uses, so it never disagrees with the id we advertised), mutate, then re-read
+  # the document into the daemon's cache NOW so the kanban's post-transition
+  # refetch reflects the move instead of snapping the card back to its old
+  # column until the next poll.
+  #
+  # There is deliberately no availability gate between resolve and invoke.
+  # `Actions.action_ids/2` is a projection of `action_for_target/3` over the same
+  # targets `resolve_transition/3` normalizes into, so the resolved action is in
+  # the availability set by construction; a re-check would cost a second felt
+  # read and tmux probe per drag and could only ever 409 on a race between its
+  # own two reads. See `gotcha-shuttle-resolve-invoke-daemon-split`. Double
+  # dispatch is refused by `Poller.dispatch_fiber`'s own `:already_running`,
+  # which is the real guard.
   defp transition_local(fiber_id, target) do
+    with {:ok, %{id: action_id}} <- resolve(fiber_id, target),
+         {:ok, felt_store} <- FeltStores.host_for_fiber(fiber_id),
+         :ok <- invoke_action(fiber_id, action_id, felt_store) do
+      Poller.refresh_document(fiber_id)
+      {:ok, action_id}
+    end
+  end
+
+  defp resolve(fiber_id, target) do
     case ActionQueries.resolve_action(fiber_id, target) do
-      {:ok, %{id: action_id}} ->
-        with :ok <- invoke(fiber_id, action_id), do: {:ok, action_id}
+      {:ok, action} ->
+        {:ok, action}
 
       {:error, :unknown_target} ->
         {:error, :unknown_target}
 
       # Any other resolve failure is an unresolvable fiber (unknown id,
       # unreadable frontmatter, foreign store) — the read paths 404 it, so match
-      # them rather than falling to the catch-all 500.
+      # them rather than falling to the catch-all 500. A `host_for_fiber`
+      # `:timeout` is deliberately NOT folded in here: a wedged store means the
+      # world is unknown, not that the fiber is absent.
       {:error, _reason} ->
         {:error, :not_found}
     end
   end
-
-  @doc """
-  The invoke pipeline: validate the action id, confirm it is available for the
-  fiber right now, then perform the mutation.
-  """
-  @spec invoke(String.t(), String.t()) :: :ok | {:error, term()}
-  def invoke(fiber_id, action) do
-    with :ok <- validate_action(action),
-         {:ok, felt_store} <- validate_available(fiber_id, action),
-         :ok <- invoke_action(fiber_id, action, felt_store) do
-      # Every transition mutates the felt doc (status / tempered / closed-at).
-      # Re-read it into the daemon's document cache NOW so the kanban's
-      # post-transition refetch reflects the move instead of snapping the card
-      # back to its old column until the next poll. (dispatch-ad-hoc also re-reads
-      # here; the spawn path itself no longer patches the cache.)
-      Poller.refresh_document(fiber_id)
-      :ok
-    end
-  end
-
-  defp validate_action(action) do
-    if Actions.known_action?(action), do: :ok, else: {:error, :unknown_action}
-  end
-
-  # Action availability resolves through the same fast query path as
-  # transition_local/2: felt document + tmux liveness, outside the Poller
-  # mailbox. The felt store is resolved separately for the `felt shuttle`
-  # verbs that still shell out (close / pause / reopen).
-  defp validate_available(fiber_id, action) do
-    case ActionQueries.actions_for(fiber_id) do
-      {:ok, actions} ->
-        if Enum.any?(actions, &(Map.get(&1, :id) == action || Map.get(&1, "id") == action)) do
-          felt_store_for_fiber(fiber_id)
-        else
-          {:error, :action_not_available}
-        end
-
-      # actions_for failed to resolve/read the fiber (unknown id, unreadable
-      # frontmatter, foreign felt-store path). The read paths (show / resolve)
-      # map this to 404; normalize it to :not_found so invoke matches them
-      # instead of the catch-all 500.
-      {:error, _reason} ->
-        {:error, :not_found}
-    end
-  end
-
-  # Resolve the felt store owning `fiber_id` (so `felt shuttle` verbs get the right
-  # `--felt-store`) by asking felt for the carried path — the same resolution
-  # /api/v1/fibers uses, so it never disagrees with the id we advertised.
-  defp felt_store_for_fiber(fiber_id), do: FeltStores.host_for_fiber(fiber_id)
 
   # pause / reopen / close shell the Go frontmatter writer with
   # SHUTTLE_LIFECYCLE_OFFLINE so it writes frontmatter only (status, tempered,
@@ -146,7 +123,8 @@ defmodule Shuttle.Transition do
   # document carries the entire lifecycle (status + tempered) — there is no
   # runtime row to reset, so close/reopen are a single felt write and
   # re-arm/awaiting are recomputed from the document on the next poll.
-  defp invoke_action(fiber_id, "pause", felt_store), do: run_offline("pause", fiber_id, [], felt_store)
+  defp invoke_action(fiber_id, "pause", felt_store),
+    do: run_offline("pause", fiber_id, [], felt_store)
 
   defp invoke_action(fiber_id, "reopen", felt_store),
     do: run_offline("reopen", fiber_id, [], felt_store)

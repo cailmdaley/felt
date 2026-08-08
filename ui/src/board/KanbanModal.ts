@@ -42,9 +42,7 @@ import type {
   ColumnKind,
   HorizonKind,
   KanbanCard,
-  KanbanOriginStaleness,
   KanbanResponse,
-  RemoteShuttleSnapshotDiagnostic,
 } from './KanbanTypes.js'
 import { dispatchIneligibleReason, errorMessageFromResponse } from './KanbanModalShared.js'
 import { COLUMN_TITLES, KanbanSurfaceRenderer, SURFACE_TITLE, findCardColumn } from './KanbanSurfaces.js'
@@ -56,9 +54,7 @@ import {
   STANDING_TIMELINE_HORIZON_MS,
 } from './KanbanRules.js'
 import { sameCivilDue } from './civilDay.js'
-import { buildCityResolver, type CityFeltRoot } from './KanbanCityResolver.js'
 import { shouldRunVisiblePoll } from '../runtime/PageAttention'
-import { fetchWithBootPrefetch } from '../runtime/bootPrefetch'
 import {
   collectCards,
   createTemporalFetchers,
@@ -74,44 +70,18 @@ import {
   viewFallbackKind,
 } from './views/index.js'
 
-export { FiberDetailModal } from './FiberDetailModal.js'
-export { dispatchIneligibleReason } from './KanbanModalShared.js'
-
 // (Action-button helpers removed — drag is the only transition surface for
 // now. The DnD drop handler reads `target` from the column the card lands
 // on, no per-card mapping needed. Re-introduce TRANSITIONS_FROM if a
 // keyboard / context-menu path returns later.)
 
 interface KanbanModalOptions {
-  /** Called when the user activates a card — host opens the fiber's md in vellum. */
-  onOpenFiber: (card: KanbanCard, options?: { openInNewWindow?: boolean }) => void
   /**
    * Called when the user clicks a card's running-worker indicator. The host
    * resolves the tmux session name to a portolan session id and focuses that
    * kitty tab. No-op when the running tmux session isn't tracked by portolan.
    */
   onOpenWorker?: (tmuxSessionName: string, shuttleHost?: string) => void
-  /**
-   * Called when the user clicks a sent deliverable in a card's detail panel
-   * — host opens the absolute path in vellum's file viewer (owner-routed by
-   * the card's origin for remote paths). Optional; absent → inert rows.
-   */
-  onOpenFile?: (fullPath: string, originId: string) => void
-  /**
-   * Called right after a successful Shuttle dispatch (Resume / New Session
-   * buttons → daemon `tmux new-session -d` succeeded) to attach a kitty
-   * tab to the freshly-spawned tmux session by name. Distinct from
-   * `onOpenWorker` because portolan's SessionTracker hasn't polled the
-   * new session yet, so a session-id lookup would silently no-op.
-   *
-   * Pairs with the wait-for-client gate in shuttle's run-script: the
-   * harness pauses until an interactive client attaches, then renders
-   * its first frame at the kitty terminal's size instead of tmux's
-   * detached default-size 80x24. Without this auto-attach the gate
-   * would time out (~10s) and the harness would proceed at default-size,
-   * leaving content baked into scrollback at 80 cols.
-   */
-  onAttachFreshTmux?: (tmuxSessionName: string) => void
   /**
    * Called when the user clicks the header's `+` stash button. The host
    * (KanbanHost in src/vellum/mount.tsx) opens the StashForm modal. Mirrors
@@ -131,10 +101,6 @@ interface KanbanModalOptions {
    *  dispatch endpoints (dispatch carries user_message + resume_mode inline),
    *  owner-routed by `origin`. Defaults to `http://${hostname}:4000`. */
   shuttleBase?: string
-  /** Pinned cities' `.felt` realpaths, read FRESH per fetch (cities update on WS
-   *  pushes) to build the browser `CityResolver` that attributes composite-feed
-   *  rows to cities. Omit in read-only/test contexts (rows go unattributed). */
-  getCityFeltRoots?: () => CityFeltRoot[]
   /**
    * Override the temporal views' read plane — the `activity` / `narration`
    * fetchers a {@link ViewContext} carries. Defaults to
@@ -143,17 +109,6 @@ interface KanbanModalOptions {
    * daemon (see harness/harness-board.ts).
    */
   temporalFetchers?: TemporalFetchers
-}
-
-/**
- * When set, scope the kanban to a single city via `?cityId=` query param.
- * Default null = loom-wide (the original v0 behaviour). Stage 1 of the
- * vellum-kanban constitution: local-origin cities only; remote-origin
- * city scoping unlocks in Stage 3.
- */
-interface KanbanCityScope {
-  cityId: string
-  cityName: string
 }
 
 /** The Desk's own hotkey. The other three come from the view registry, so a
@@ -167,15 +122,11 @@ interface KanbanScrollSnapshot {
 }
 
 export class KanbanModal {
-  private readonly onOpenFiber: (card: KanbanCard, options?: { openInNewWindow?: boolean }) => void
   private readonly onOpenWorker?: (tmuxSessionName: string, shuttleHost?: string) => void
   private readonly openWorkerAfterGesture?: (tmuxSessionName: string, shuttleHost?: string) => void
-  private readonly onOpenFile?: (fullPath: string, originId: string) => void
-  private readonly onAttachFreshTmux?: (tmuxSessionName: string) => void
   private readonly onStashClick?: () => void
   private readonly onNewIdeaClick?: () => void
   private readonly shuttleBase: string
-  private readonly getCityFeltRoots?: () => CityFeltRoot[]
   private readonly handleDocumentKeyDown = (e: KeyboardEvent): void => this.handleKanbanKeyDown(e)
 
   private readonly temporal: TemporalFetchers
@@ -244,9 +195,6 @@ export class KanbanModal {
   private dragAutoScrollVelocity = 0
   private bannerTimer: number | null = null
   private hasClaimedInitialFocus = false
-  /** Null = global (default). Set by mount(...{cityScope}); cleared by
-   *  unmount(). */
-  private cityScope: KanbanCityScope | null = null
   /** Lightweight auto-poll while mounted. 15s default. */
   private pollTimer: number | null = null
   private readonly pollIntervalMs = 15_000
@@ -257,10 +205,8 @@ export class KanbanModal {
   /** Intermediate fiber-detail modal — one instance, re-used across opens. */
   private detailModal: FiberDetailModal | null = null
   private readonly surfaces: KanbanSurfaceRenderer
-  /** Unsubscribe from the kanban-delta bus; set on mount, called on unmount. */
 
   constructor(options: KanbanModalOptions) {
-    this.onOpenFiber = options.onOpenFiber
     this.onOpenWorker = options.onOpenWorker
     // Kitty's quick-access panel hides on focus loss. If we activate it inside
     // the originating button's click handler, macOS can return focus to the
@@ -272,29 +218,19 @@ export class KanbanModal {
           window.setTimeout(() => this.onOpenWorker?.(tmuxSessionName, shuttleHost), 0)
         }
       : undefined
-    this.onOpenFile = options.onOpenFile
-    this.onAttachFreshTmux = options.onAttachFreshTmux
     this.onStashClick = options.onStashClick
     this.onNewIdeaClick = options.onNewIdeaClick
     this.shuttleBase = options.shuttleBase ?? `http://${window.location.hostname}:4000`
-    this.getCityFeltRoots = options.getCityFeltRoots
     this.temporal = options.temporalFetchers ?? createTemporalFetchers(this.shuttleBase)
     this.detailModal = new FiberDetailModal(
       this.shuttleBase,
-      this.onOpenFiber,
       () => { void this.fetchAndRender() },
-      this.onAttachFreshTmux,
       // Terminal moves (Temper / Compost) route through the same optimistic
       // path as the inline card buttons and drags — instant relocation,
       // background commit, reconcile.
       (card, target) => this.transition(card, target),
       // Status-pill double-click → focus the running worker's kitty tab.
       this.openWorkerAfterGesture,
-      // City → project_dir for shuttle installs (promote + reshape echo).
-      (cityId) =>
-        this.getCityFeltRoots?.().find((r) => r.cityId === cityId)?.projectPath || undefined,
-      // Sent-files strip → vellum file viewer via the host's openFile.
-      { onOpenFile: (fullPath, originId) => this.onOpenFile?.(fullPath, originId) },
     )
     this.surfaces = new KanbanSurfaceRenderer({
       getDragSourceId: () => this.dragSourceId,
@@ -304,7 +240,7 @@ export class KanbanModal {
       transition: (card, target) => this.transition(card, target),
       setSurface: (card, horizon, opts) => this.setSurface(card, horizon, opts),
       pin: (card) => this.pinRole(card),
-      openDetail: (card, column) => this.detailModal?.open(card, this.cityScope?.cityId, column),
+      openDetail: (card) => this.detailModal?.open(card),
       openWorker: this.openWorkerAfterGesture,
       releaseQuarantine: (host) => this.releaseQuarantine(host),
       // The masthead dissolved; its three actions now live in the column heads
@@ -321,26 +257,17 @@ export class KanbanModal {
    * slot supplies the host div and the modal chrome around it; the kanban
    * only stretches to fill it.
    *
-   * Re-mount with a different `cityScope` is supported in place: scope swap
-   * updates the chrome and refetches without rebuilding the DOM. Re-mount
-   * onto a different host element isn't supported (call `unmount()` first).
+   * Re-mount onto a different host element isn't supported (call `unmount()`
+   * first); a repeat call on the same host just refetches in place.
    *
    * @param host  container element; the kanban appends a single child div.
-   * @param opts.cityScope  optional per-city scope; null = global aggregation.
    */
-  mount(
-    host: HTMLElement,
-    opts: { cityScope?: KanbanCityScope | null } = {},
-  ): void {
+  mount(host: HTMLElement): void {
     if (this.container !== null) {
-      // Already mounted: scope swap is the only meaningful re-call. The
-      // masthead (and its scope subtitle) dissolved, so there's no chrome to
-      // update — just refetch in place rather than rebuilding DOM from scratch.
-      this.cityScope = opts.cityScope ?? null
+      // Already mounted — refetch in place rather than rebuilding the DOM.
       void this.fetchAndRender()
       return
     }
-    this.cityScope = opts.cityScope ?? null
     this.assembleChrome()
     host.append(this.container!)
     document.addEventListener('keydown', this.handleDocumentKeyDown, true)
@@ -634,7 +561,7 @@ export class KanbanModal {
    */
   private openCardById(cardId: string, cards: KanbanCard[]): void {
     const card = resolveOpenTarget(cardId, cards, this.lastResponse?.cycles ?? [])
-    if (card) this.detailModal?.open(card, this.cityScope?.cityId)
+    if (card) this.detailModal?.open(card)
   }
 
   /**
@@ -688,6 +615,7 @@ export class KanbanModal {
     return {
       response,
       cards,
+      shuttleBase: this.shuttleBase,
       activity: (fromMs, toMs) => this.temporal.activity(fromMs, toMs),
       narration: (fromISO, toISO) => this.temporal.narration(fromISO, toISO),
       sessions: (sinceMs) => this.temporal.sessions(sinceMs),
@@ -745,10 +673,6 @@ export class KanbanModal {
     this.dragSourceId = null
     this.hasClaimedInitialFocus = false
     this.stopDragAutoScroll()
-    // Reset scope on every teardown so the next mount lands at default
-    // global scope; a follow-on `mount(...{cityScope})` with a scope
-    // re-sets before assemble.
-    this.cityScope = null
     if (this.bannerTimer !== null) {
       window.clearTimeout(this.bannerTimer)
       this.bannerTimer = null
@@ -1264,13 +1188,10 @@ export class KanbanModal {
     }
   }
 
-  /** Worker cwd for a reshape: the fiber's own `project_dir`, else the owning
-   *  city's project path. Mirrors FiberDetailModal.projectDirFor. */
+  /** Worker cwd for a reshape: the fiber's own `project_dir`. Mirrors
+   *  FiberDetailModal.projectDirFor. */
   private resolveProjectDir(card: KanbanCard): string | undefined {
-    return (
-      card.shuttleProjectDir ??
-      (card.cityId ? this.getCityFeltRoots?.().find((r) => r.cityId === card.cityId)?.projectPath : undefined)
-    )
+    return card.shuttleProjectDir
   }
 
   private announce(msg: string): void {
@@ -1316,11 +1237,7 @@ export class KanbanModal {
     this.lastFetchStartedAt = Date.now()
     const token = ++this.inflightFetchToken
     try {
-      // First mount on a `#mode=kanban` deep link picks up the
-      // boot-stashed prefetch (kicked off from index.html's inline
-      // script). Subsequent fetches (15s poll, scope swap) hit the
-      // fallthrough `fetch()` directly.
-      const res = await fetchWithBootPrefetch(this.kanbanUrl())
+      const res = await fetch(this.kanbanUrl())
       if (token !== this.inflightFetchToken) return
       if (!res.ok) {
         this.markFetchFailed(`Server returned ${res.status}`)
@@ -1330,15 +1247,8 @@ export class KanbanModal {
       // it frontend-side — the sole classifier. `parseCompositeFeed` validates
       // the wire shape; `buildKanbanResponseFromComposite` collects → classifies
       // → assembles the exact `KanbanResponse` the renderer already consumes.
-      // City attribution is the injected browser `buildCityResolver`, rebuilt
-      // each fetch from the latest pinned-city realpaths (cities update on WS
-      // pushes); a city-scoped board narrows to its own city.
       const feed = parseCompositeFeed(await res.json())
-      const resolveCity = buildCityResolver(this.getCityFeltRoots?.() ?? [])
-      const data = buildKanbanResponseFromComposite(feed, {
-        resolveCity,
-        scopeCityId: this.cityScope?.cityId,
-      })
+      const data = buildKanbanResponseFromComposite(feed)
       if (token !== this.inflightFetchToken) return
       // Skip re-render when the response is semantically unchanged —
       // every 15-second poll otherwise tears down ~50 cards × ~30 nodes
@@ -1390,7 +1300,6 @@ export class KanbanModal {
       tt: data.temperedTotal,
       tw: data.timelineWindow,
       st: data.staleness,
-      sd: shuttleDiagnosticsSignature(data.shuttleDiagnostics),
     })
   }
 
@@ -1657,22 +1566,6 @@ export class KanbanModal {
     window.requestAnimationFrame(restore)
   }
 
-  renderColumn(
-    kind: ColumnKind,
-    cards: KanbanCard[],
-    staleness: Record<string, KanbanOriginStaleness>,
-  ): HTMLElement {
-    return this.surfaces.renderColumn(kind, cards, staleness)
-  }
-
-  renderCard(
-    card: KanbanCard,
-    kind: ColumnKind,
-    originStaleness?: KanbanOriginStaleness,
-  ): HTMLElement {
-    return this.surfaces.renderCard(card, kind, originStaleness)
-  }
-
   /** Stash the latest response so drop handlers can resolve cards by id. */
   private lastResponse: KanbanResponse | null = null
   /**
@@ -1692,18 +1585,16 @@ export class KanbanModal {
    */
   private lastResponseSig: string | null = null
 
-  // ── URL + chrome helpers (city-scope aware) ────────────────────────────────
+  // ── URL + chrome helpers ───────────────────────────────────────────────────
 
-  /** GET the loom-wide composite fiber feed from the Shuttle daemon. No
-   *  `?cityId=` — the feed is loom-wide and scope narrowing happens
-   *  frontend-side in `buildKanbanResponseFromComposite`. */
+  /** GET the loom-wide composite fiber feed from the Shuttle daemon.
+   *  `buildKanbanResponseFromComposite` classifies it frontend-side. */
   private kanbanUrl(): string {
     return `${this.shuttleBase}/api/v1/fibers/composite`
   }
 
   /** POST a drag transition to the daemon. The daemon maps the column `target`
-   *  → a lifecycle action and owner-routes by `origin` (carried in the body),
-   *  so no `?cityId=` scoping. */
+   *  → a lifecycle action and owner-routes by `origin`, carried in the body. */
   private transitionUrl(): string {
     return `${this.shuttleBase}/api/v1/transition`
   }
@@ -2287,18 +2178,3 @@ export function applyOptimisticPin(
     temperedTotal: resp.temperedTotal,
   })
 }
-
-function shuttleDiagnosticsSignature(
-  diagnostics: KanbanResponse['shuttleDiagnostics'] | undefined,
-): Array<Pick<RemoteShuttleSnapshotDiagnostic, 'originId' | 'receivedAt' | 'eligibleCount' | 'blockedCount' | 'orphanCount'>> {
-  return (diagnostics?.remoteSnapshots ?? [])
-    .map(({ originId, receivedAt, eligibleCount, blockedCount, orphanCount }) => ({
-      originId,
-      receivedAt,
-      eligibleCount,
-      blockedCount,
-      orphanCount,
-    }))
-    .sort((a, b) => a.originId.localeCompare(b.originId))
-}
-

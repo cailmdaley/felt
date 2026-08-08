@@ -14,10 +14,11 @@
  *   NO VISUAL JUMP — prepending days pushes existing content right by exactly
  *     `added × dayWidthPx`, so `scrollLeft` must grow by the same amount in the
  *     same frame. Off by one day and the view lurches under the cursor.
- *   NO CORRUPTED JOINS — prepending SHIFTS EVERY EXISTING INDEX. Chronicle
- *     keys its rows, cycle bands and drag draft by day index, so any index held
- *     across an extension is silently wrong afterwards, pointing a fortnight off.
- *     See {@link shiftIndex}.
+ *   NOTHING HELD BY INDEX — a prepend renumbers every day index, so this module
+ *     hands back none that outlive it. Chronicle rebuilds its rows, cycle bands
+ *     and drag draft from civil days on every extension (`maybeExtend` clears
+ *     the signature and reloads), which is why the renumbering costs nothing.
+ *     Keep it that way: a civil day survives any extension; an index does not.
  *
  * WHAT A DAY IS HERE. The same 6am→6am rail the rest of the board uses
  * (`railCivilDay` in ../civilDay.ts). A chunk's instants are real local 6am
@@ -25,12 +26,18 @@
  * that much longer — never `days × 86_400_000`.
  */
 
-import { civilDayToLocalDate, isoDayLocal, railCivilDay } from '../civilDay.js'
+import { railCivilDay } from '../civilDay.js'
+import { railBounds, RAIL_START_HOUR, shiftCivilDay } from './railTime.js'
+
+// chronicleWindow.test.ts pins the dawn boundary its assertions are written
+// against; the rule itself lives in ./railTime.js.
+export { RAIL_START_HOUR }
 
 // ── Shape ────────────────────────────────────────────────────────────────────
 
-/** A contiguous run of civil days, inclusive at both ends. */
-export interface DayWindow {
+/** A contiguous run of civil days, inclusive at both ends. Not a window of
+ *  TIME — DayView's `DayRange` is that, and the two must not be confused. */
+export interface DayRange {
   first: string
   last: string
   /** Day count, both ends included. `first === last` is a window of 1. */
@@ -56,10 +63,6 @@ export const FUTURE_BLOCK_DAYS = 14
  *  gesture usually costs exactly one request. */
 export const CHUNK_DAYS = 28
 
-/** The rail's opening hour — the same dawn boundary `railCivilDay` defaults to
- *  and the same one Chronicle folds its buckets on. */
-export const RAIL_START_HOUR = 6
-
 /** Rounding applied to the live chunk's right edge. Coarser than the poll on
  *  purpose: an uncapped or per-poll `to` mints a fresh entry in the fetcher's
  *  memo every single poll, so the cache never hits and never evicts. */
@@ -67,24 +70,10 @@ export const LIVE_QUANTUM_MS = 5 * 60_000
 
 // ── Civil-day arithmetic ─────────────────────────────────────────────────────
 //
-// Strides go through a NOON anchor, because midnight is the one wall-clock time
-// a spring-forward day can lack. Differences go through UTC parsing, which is
-// exact for civil days precisely because no zone enters either side.
-
-function noonOn(day: string): Date | undefined {
-  const d = civilDayToLocalDate(day)
-  if (!d) return undefined
-  d.setHours(12, 0, 0, 0)
-  return d
-}
-
-/** The civil day `delta` calendar days from `day`. */
-export function addDays(day: string, delta: number): string {
-  const d = noonOn(day)
-  if (!d) return day
-  d.setDate(d.getDate() + delta)
-  return isoDayLocal(d.getTime())
-}
+// Strides go through a NOON anchor (see `shiftCivilDay` in ./railTime.js),
+// because midnight is the one wall-clock time a spring-forward day can lack.
+// Differences go through UTC parsing, which is exact for civil days precisely
+// because no zone enters either side.
 
 /**
  * Whole days from `from` to `to`, signed. Both sides are parsed as UTC, so the
@@ -99,14 +88,14 @@ export function daysBetween(from: string, to: string): number {
 }
 
 /** A window from its two ends. */
-export function windowOf(first: string, last: string): DayWindow {
+export function windowOf(first: string, last: string): DayRange {
   return { first, last, length: Math.max(0, daysBetween(first, last) + 1) }
 }
 
 /** The furthest the window may ever reach, measured from the rail's today. */
 export function windowLimits(nowMs: number): { earliest: string; latest: string } {
-  const today = railCivilDay(nowMs, RAIL_START_HOUR)
-  return { earliest: addDays(today, -MAX_PAST_DAYS), latest: addDays(today, MAX_FUTURE_DAYS) }
+  const today = railCivilDay(nowMs)
+  return { earliest: shiftCivilDay(today, -MAX_PAST_DAYS), latest: shiftCivilDay(today, MAX_FUTURE_DAYS) }
 }
 
 // ── Extension ────────────────────────────────────────────────────────────────
@@ -126,18 +115,13 @@ export interface ExtensionPlan {
   /** Days actually added — fewer than a full block when a cap intervenes. */
   added: number
   /** The window after the extension. */
-  next: DayWindow
+  next: DayRange
   /**
    * Pixels to ADD to `scrollLeft`, in the same frame the days are inserted.
    * Non-zero only when prepending: new content to the left of the viewport
    * displaces everything right, and this cancels it exactly.
    */
   scrollDelta: number
-  /**
-   * How far every pre-existing day index moves. Equals `added` on a prepend and
-   * zero on an append. Feed any retained index through {@link shiftIndex}.
-   */
-  indexShift: number
 }
 
 /**
@@ -148,7 +132,7 @@ export interface ExtensionPlan {
  * compute a zero scroll compensation and jump).
  */
 export function planExtension(
-  window: DayWindow,
+  window: DayRange,
   probe: ScrollProbe,
   nowMs: number,
 ): ExtensionPlan | null {
@@ -163,9 +147,8 @@ export function planExtension(
       return {
         side: 'past',
         added,
-        next: windowOf(addDays(window.first, -added), window.last),
+        next: windowOf(shiftCivilDay(window.first, -added), window.last),
         scrollDelta: added * probe.dayWidthPx,
-        indexShift: added,
       }
     }
   }
@@ -178,58 +161,15 @@ export function planExtension(
       return {
         side: 'future',
         added,
-        next: windowOf(window.first, addDays(window.last, added)),
+        next: windowOf(window.first, shiftCivilDay(window.last, added)),
         // Appending happens to the right of everything already rendered, so
         // nothing the viewer is looking at moves.
         scrollDelta: 0,
-        indexShift: 0,
       }
     }
   }
 
   return null
-}
-
-/**
- * Move a day index across an extension.
- *
- * THE TRAP THIS EXISTS FOR: a prepend inserts days at position 0, so index 12
- * afterwards names a day 28 columns later than it did before. Chronicle holds
- * indices in at least its drag draft (`fromIdx`/`toIdx`) and its cycle bands
- * (`startIdx`/`endIdx`); every one of them is wrong the instant the window
- * grows leftward, and wrong quietly — the band simply lands on the wrong
- * fortnight.
- *
- * The better fix, where a call site can take it, is to hold the CIVIL DAY and
- * look the index up again: a day survives any extension untouched, which is
- * the whole reason the rest of the board keys by civil day. Use this for state
- * that genuinely must stay numeric.
- */
-export function shiftIndex(index: number, plan: ExtensionPlan | null): number {
-  if (!plan) return index
-  return index + plan.indexShift
-}
-
-/** {@link shiftIndex} for an inclusive index span — a cycle band, a drag draft. */
-export function shiftSpan<T extends { startIdx: number; endIdx: number }>(
-  span: T,
-  plan: ExtensionPlan | null,
-): T {
-  if (!plan || plan.indexShift === 0) return span
-  return { ...span, startIdx: span.startIdx + plan.indexShift, endIdx: span.endIdx + plan.indexShift }
-}
-
-/** The index a civil day sits at within a window, or null when outside it.
- *  The extension-proof way to hold a position. */
-export function indexOfDay(window: DayWindow, day: string): number | null {
-  const offset = daysBetween(window.first, day)
-  return offset >= 0 && offset < window.length ? offset : null
-}
-
-/** The civil day at an index, or null when out of range. */
-export function dayAtIndex(window: DayWindow, index: number): string | null {
-  if (!Number.isInteger(index) || index < 0 || index >= window.length) return null
-  return addDays(window.first, index)
 }
 
 // ── Chunked activity ─────────────────────────────────────────────────────────
@@ -249,14 +189,6 @@ export interface ActivityChunk {
   live: boolean
 }
 
-/** Local 6am on a civil day. */
-function railStartMs(day: string): number {
-  const d = noonOn(day)
-  if (!d) return 0
-  d.setHours(RAIL_START_HOUR, 0, 0, 0)
-  return d.getTime()
-}
-
 /**
  * Which chunk a civil day belongs to.
  *
@@ -272,8 +204,8 @@ export function chunkIndexOf(day: string): number {
 
 /** The civil-day span of a chunk index. */
 export function chunkBounds(chunkIndex: number): { first: string; last: string } {
-  const first = addDays('1970-01-01', chunkIndex * CHUNK_DAYS)
-  return { first, last: addDays(first, CHUNK_DAYS - 1) }
+  const first = shiftCivilDay('1970-01-01', chunkIndex * CHUNK_DAYS)
+  return { first, last: shiftCivilDay(first, CHUNK_DAYS - 1) }
 }
 
 /**
@@ -288,11 +220,16 @@ export function chunkBounds(chunkIndex: number): { first: string; last: string }
  * A STABLE KEY IS NOT A KEPT ENTRY. TemporalData prunes — entries expire at
  * their TTL and are evicted oldest-first at a ceiling — so a settled chunk's
  * memo entry is gone a minute after it is written even though its key is
- * eternal. What actually makes a chunk cost one request per session is the
- * CALLER's own record of what it has fetched; see {@link pendingChunks} and the
- * `fetched` set it takes. That set is load-bearing, not an optimization.
+ * eternal. What makes a chunk cost one request per session is the CALLER's own
+ * record of what it holds: ChronicleView keeps `fetchedChunks`, keyed the same
+ * way. That record is load-bearing, not an optimization.
+ *
+ * Render from ALL of these chunks, reusing the buckets you already hold; use
+ * your record only to decide which ones need a round trip. Build the bucket
+ * array from just the chunks fetched on this pass and the older days render
+ * empty — a wiring mistake that reads as a fetch bug.
  */
-export function activityChunks(window: DayWindow, nowMs: number): ActivityChunk[] {
+export function activityChunks(window: DayRange, nowMs: number): ActivityChunk[] {
   if (window.length <= 0) return []
   const cap = Math.ceil(nowMs / LIVE_QUANTUM_MS) * LIVE_QUANTUM_MS
   const out: ActivityChunk[] = []
@@ -301,8 +238,8 @@ export function activityChunks(window: DayWindow, nowMs: number): ActivityChunk[
 
   for (let index = firstChunk; index <= lastChunk; index += 1) {
     const { first, last } = chunkBounds(index)
-    const fromMs = railStartMs(first)
-    const rawEnd = railStartMs(addDays(last, 1))
+    const fromMs = railBounds(first).startMs
+    const rawEnd = railBounds(last).endMs
     if (fromMs >= cap) continue // wholly in the future — nothing happened there
     const live = cap < rawEnd
     out.push({
@@ -315,22 +252,4 @@ export function activityChunks(window: DayWindow, nowMs: number): ActivityChunk[
     })
   }
   return out
-}
-
-/**
- * Chunks a window needs that have not been requested yet, by key.
- *
- * FOR DECIDING WHAT TO REQUEST — NEVER WHAT TO RENDER. A caller that maps over
- * this to build its bucket array holds only the chunks fetched on that pass,
- * while `fetched` cheerfully reports the rest as done, so the older days render
- * empty and it reads as a fetch bug rather than the wiring mistake it is.
- * Render from {@link activityChunks} (all of them, reusing what you hold) and
- * use this only to decide which ones need a round trip.
- */
-export function pendingChunks(
-  window: DayWindow,
-  nowMs: number,
-  fetched: ReadonlySet<string>,
-): ActivityChunk[] {
-  return activityChunks(window, nowMs).filter((chunk) => !fetched.has(chunk.key))
 }

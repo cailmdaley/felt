@@ -49,12 +49,17 @@ import { fileBytesUrl, renderMarkdown } from '../utils.js'
 import type { KanbanCard } from '../KanbanTypes.js'
 import {
   buildSessionIndex,
+  foldActiveMinutes,
+  parseCommitSlug,
   type ActivityBucket,
   type ActivityResult,
   type NarrationCommit,
   type SessionPairing,
 } from './TemporalData.js'
 import { createViewEmptyState, createViewPage } from './ViewPage.js'
+import { cardPathSegments, cardUlids, sessionSlug, sessionUlid } from './sessionNames.js'
+import { formatSpanMinutes, railBounds, shiftCivilDay } from './railTime.js'
+import { ACTIVITY_KEY_ITEMS, MARK_GLYPH } from './vocabulary.js'
 import {
   keystrokeIsSpokenFor,
   normalizeFocusDate,
@@ -66,8 +71,6 @@ import './DayView.css'
 
 // ── Shape of a day ───────────────────────────────────────────────────────────
 
-/** Where a civil day starts and ends, for this view. */
-const DAY_START_HOUR = 6
 const MINUTE_MS = 60_000
 /** Inactive minutes a wash/block span reaches across before it breaks. Five
  *  quiet minutes inside a work run is a pause, not an end. */
@@ -84,15 +87,7 @@ const TICK_HOURS = 4
  * of this rule drifting apart is exactly the defect it exists to prevent.
  */
 export function defaultDayISO(nowMs: number): string {
-  return railCivilDay(nowMs, DAY_START_HOUR)
-}
-
-/** A civil day, `delta` days later (negative for earlier). */
-export function shiftCivilDay(dayISO: string, delta: number): string {
-  const d = civilDayToLocalDate(dayISO)
-  if (!d) return dayISO
-  d.setDate(d.getDate() + delta)
-  return isoDayLocal(d.getTime())
+  return railCivilDay(nowMs)
 }
 
 /**
@@ -150,12 +145,10 @@ export interface DayWindow {
 
 /** The 06:00→06:00 window a civil day names, in the viewer's zone. */
 export function dayWindow(dayISO: string): DayWindow {
-  const base = civilDayToLocalDate(dayISO) ?? new Date()
-  const y = base.getFullYear()
-  const m = base.getMonth()
-  const d = base.getDate()
-  const startMs = new Date(y, m, d, DAY_START_HOUR).getTime()
-  const endMs = new Date(y, m, d + 1, DAY_START_HOUR).getTime()
+  // An unparseable day falls back to today, as it always has — `railBounds`
+  // would hand back a zero-length 1970 window and divide the rail by zero.
+  const day = civilDayToLocalDate(dayISO) ? dayISO : isoDayLocal(Date.now())
+  const { startMs, endMs } = railBounds(day)
   return { startMs, endMs, minutes: Math.round((endMs - startMs) / MINUTE_MS) }
 }
 
@@ -184,55 +177,6 @@ export function mergeMinuteRuns(minutes: Iterable<number>, bridge = BRIDGE_MINUT
   return runs
 }
 
-/** `2h 05m`, or `47m` under the hour — the mono head line's unit. */
-export function formatSpanHM(minutes: number): string {
-  const h = Math.floor(minutes / 60)
-  const m = minutes % 60
-  return h > 0 ? `${h}h ${String(m).padStart(2, '0')}m` : `${m}m`
-}
-
-// MIND THE NAMES. The wire kind spelled `attention` is a HUMAN typing — the
-// key glosses it "you steering". The kind that means an agent asked for a human
-// is `notify`, glossed "attention called". So the word *attention* names one
-// kind and describes the other, and the pairing looks backwards at a glance.
-// It is correct as written; TemporalData's bucket docs are the authority.
-// (Flagged by builder-week, who hit the same inversion wiring Week's key.)
-
-/**
- * A Crockford-base32 ULID embedded in a longer name. Shuttle's tmux sessions
- * are `<slug>-<ULID>-shuttle`, and the ULID is the one token in a session name
- * that identifies a fiber exactly.
- *
- * Case-INSENSITIVE and not anchored to the `-shuttle` suffix, deliberately.
- * An uppercase-only, suffix-anchored pattern misses a lowercased session name
- * and every session the dispatcher builds in another shape. Since `cwd` joins
- * nothing, the session name is the ONLY route from a bucket to a fiber: a miss
- * here does not merely mislabel the work, it costs the fiber its lane.
- */
-const ULID_RE = /(?:^|[^0-9a-hjkmnp-tv-z])([0-7][0-9a-hjkmnp-tv-z]{25})(?![0-9a-hjkmnp-tv-z])/i
-
-/** The fiber ULID a session name carries, upper-cased, or null. */
-export function tmuxFiberUlid(session: string | null | undefined): string | null {
-  if (typeof session !== 'string' || !session) return null
-  return ULID_RE.exec(session)?.[1]?.toUpperCase() ?? null
-}
-
-/**
- * The human-readable half of a session name: the `-shuttle` suffix and the
- * ULID stripped. `bmodes-2d-01K…-shuttle` → `bmodes-2d`, and the legacy
- * leaf-only `morning-post-shuttle` → `morning-post`. The weaker join key —
- * a slug is a fiber's leaf name, not its identity — so it is consulted only
- * after the ULID misses, and only when it resolves to exactly one card.
- */
-export function sessionSlug(name: string | null | undefined): string | null {
-  if (typeof name !== 'string') return null
-  let s = name.trim().toLowerCase()
-  if (!s) return null
-  s = s.replace(/-shuttle$/, '')
-  s = s.replace(/-[0-7][0-9a-hjkmnp-tv-z]{25}$/, '')
-  return s || null
-}
-
 /**
  * The name of a lane for work that joined to no fiber.
  *
@@ -254,18 +198,19 @@ export function cwdLaneLabel(cwd: string | null | undefined, fromWorker = false)
 /**
  * The civil days to ASK narration for, to cover a 06:00→06:00 rail.
  *
- * The two read routes do not speak the same language. `/activity` takes
- * instants, so it gets the rail exactly. `/narration` takes INCLUSIVE CIVIL
- * DAYS, midnight to midnight — so asking it for `(day, day)` returns
- * 00:00–06:00 of the day (which belongs to YESTERDAY's rail) and misses
- * 00:00–06:00 of the next day (which belongs to THIS one). On a store whose
- * author works past midnight that is not an edge case: those commits are the
- * end of the session the rail is drawing, and they would land a page early
- * while the fiber that made them got an outcome fallback saying it "worked,
- * wrote nothing down".
+ * Both daemon routes take instants. The asymmetry is one layer up, in what
+ * `TemporalData` accepts: `activity` is asked in instants and gets the rail
+ * exactly, while `narration` is asked in INCLUSIVE CIVIL DAYS — the unit a
+ * temporal view thinks in — and resolves them to midnight-to-midnight local
+ * instants itself. So asking it for `(day, day)` returns 00:00–06:00 of the
+ * day (which belongs to YESTERDAY's rail) and misses 00:00–06:00 of the next
+ * day (which belongs to THIS one). On a store whose author works past midnight
+ * that is not an edge case: those commits are the end of the session the rail
+ * is drawing, and they would land a page early while the fiber that made them
+ * got an outcome fallback saying it "worked, wrote nothing down".
  *
  * So: widen by a day and discard by the rail's real edges
- * ({@link commitsOnRail}) — the same widen-then-discard WeekView uses.
+ * ({@link commitsOnRail}).
  */
 export function narrationRange(dayISO: string): { from: string; to: string } {
   return { from: dayISO, to: shiftCivilDay(dayISO, 1) }
@@ -282,8 +227,6 @@ export function commitsOnRail(commits: NarrationCommit[], win: DayWindow): Narra
 
 /** `slug: what happened` — felt's commit convention. The slug is the bold
  *  token in the prose section; the remainder is the sentence. */
-const SLUG_RE = /^([A-Za-z0-9][A-Za-z0-9._/-]*):[ \t]+(\S.*)$/
-
 export interface SlugGroup {
   /** The commit prefix, or null for the commits that carried none. */
   slug: string | null
@@ -301,21 +244,19 @@ export function groupCommitsBySlug(commits: NarrationCommit[]): SlugGroup[] {
   const bySlug = new Map<string, string[]>()
   const loose: string[] = []
   for (const commit of commits) {
-    const subject = commit.subject.trim()
-    if (!subject) continue
-    const match = SLUG_RE.exec(subject)
-    if (!match) {
-      loose.push(subject)
+    if (!commit.subject.trim()) continue
+    const { slug, rest } = parseCommitSlug(commit.subject)
+    if (!slug) {
+      loose.push(rest)
       continue
     }
-    const slug = match[1]
     let bucket = bySlug.get(slug)
     if (!bucket) {
       bucket = []
       bySlug.set(slug, bucket)
       order.push(slug)
     }
-    bucket.push(match[2].trim())
+    bucket.push(rest)
   }
   const groups: SlugGroup[] = order.map((slug) => ({ slug, subjects: bySlug.get(slug) ?? [] }))
   if (loose.length > 0) groups.push({ slug: null, subjects: loose })
@@ -378,15 +319,11 @@ export interface DayTotals {
 /** Minutes the whole day was attended / worked, counted once per minute
  *  however many lanes were live in it. */
 export function dayTotals(activity: ActivityResult, win: DayWindow): DayTotals {
-  const attention = new Set<number>()
-  const agent = new Set<number>()
-  for (const bucket of activity.buckets) {
-    const index = minuteIndex(bucket.m, win)
-    if (index === null) continue
-    if (bucket.k === 'attention') attention.add(index)
-    else if (bucket.k === 'agent') agent.add(index)
-  }
-  return { attention: attention.size, agent: agent.size }
+  const { attention, agent } = foldActiveMinutes(activity.buckets, {
+    fromMs: win.startMs,
+    toMs: win.endMs,
+  })
+  return { attention, agent }
 }
 
 function minuteIndex(ms: number, win: DayWindow): number | null {
@@ -396,49 +333,18 @@ function minuteIndex(ms: number, win: DayWindow): number | null {
 }
 
 /**
- * The slugs a fiber answers to WHEN MATCHING A COMMIT PREFIX: the leaf of its
- * id and of its project slug, and nothing else.
+ * The slug a fiber answers to WHEN MATCHING A COMMIT PREFIX: the leaf of its
+ * id, and nothing else.
  *
- * Deliberately narrower than {@link cardPathSegments}, which the activity join
- * uses. A `felt: …` commit prefix names the fiber whose leaf is `felt`, not
- * every fiber that happens to live under `felt/` — widening this would make
- * one parent directory swallow the narration of everything beneath it.
+ * Deliberately narrower than `cardPathSegments` (./sessionNames.js), which the
+ * activity join uses. A `felt: …` commit prefix names the fiber whose leaf is
+ * `felt`, not every fiber that happens to live under `felt/` — widening this
+ * would make one parent directory swallow the narration of everything beneath
+ * it.
  */
 export function commitSlugsForCard(card: KanbanCard): string[] {
-  const out = new Set<string>()
-  for (const source of [card.id, card.projectSlug]) {
-    const tail = source?.split('/').filter(Boolean).pop()
-    if (tail) out.add(tail.toLowerCase())
-  }
-  return [...out]
-}
-
-/** Every ULID a card can be recognized by — its own `uid`, plus any embedded
- *  in the ids and session names it carries. */
-function cardUlids(card: KanbanCard): string[] {
-  const out = new Set<string>()
-  const push = (value: string | null | undefined): void => {
-    const trimmed = typeof value === 'string' ? value.trim().toUpperCase() : ''
-    if (/^[0-7][0-9A-HJKMNP-TV-Z]{25}$/.test(trimmed)) out.add(trimmed)
-    const embedded = tmuxFiberUlid(value)
-    if (embedded) out.add(embedded)
-  }
-  push(card.uid)
-  push(card.id)
-  push(card.shuttleFiberId)
-  push(card.runningWorker)
-  return [...out]
-}
-
-/** Path segments a card can be recognized by when no ULID is available. Short
- *  segments are dropped — a two-letter directory name is not evidence. */
-function cardPathSegments(card: KanbanCard): string[] {
-  const out = new Set<string>()
-  for (const segment of [...card.id.split('/'), ...(card.projectSlug ?? '').split('/')]) {
-    const s = segment.trim().toLowerCase()
-    if (s.length >= 3) out.add(s)
-  }
-  return [...out]
+  const tail = card.id.split('/').filter(Boolean).pop()
+  return tail ? [tail.toLowerCase()] : []
 }
 
 /**
@@ -472,8 +378,8 @@ function cardPathSegments(card: KanbanCard): string[] {
  * folder it ran in — so there is no case left where a directory should name a
  * fiber. Unjoined work still appears, on a cwd lane that says exactly what is
  * known: which directory, and whether a worker or a human. Same ladder
- * ChronicleView runs; kept as its own copy rather than imported, since one view
- * importing another's internals is a coupling neither owner asked for.
+ * ChronicleView runs, over the shared vocabulary in `./sessionNames.js` — a
+ * leaf module both views import, so neither reaches into the other.
  *
  * Rung 3 demands a UNIQUE match. A token several cards answer to is a project
  * directory, not a fiber, so ambiguity falls through rather than picking an
@@ -528,7 +434,7 @@ export function joinBucketToCard(
     }
     const worker = index.byWorker.get(bucket.s)
     if (worker) return worker
-    const ulid = tmuxFiberUlid(bucket.s)
+    const ulid = sessionUlid(bucket.s)
     if (ulid) {
       const byUlid = index.byUlid.get(ulid)
       if (byUlid) return byUlid
@@ -708,7 +614,7 @@ export function closureMark(
 
 export interface StillAheadItem {
   key: string
-  /** ◐ a standing role's next firing · ◴ something owed today. Week's glyphs. */
+  /** ◐ a standing role's next firing · ◴ something owed today. See vocabulary.ts. */
   glyph: string
   label: string
   /** Clock time, for a launch. A `due:` names a day and carries no hour. */
@@ -752,7 +658,7 @@ export function buildStillAhead(
     if (launch !== undefined && launch > nowMs && launch < win.endMs) {
       launches.push({
         key: `launch:${card.id}`,
-        glyph: '◐',
+        glyph: MARK_GLYPH.launch,
         label: card.name,
         when: formatClockTime(launch),
         atMs: launch,
@@ -764,7 +670,7 @@ export function buildStillAhead(
     if (dueCivilDay(card.due) === dayISO) {
       dues.push({
         key: `due:${card.id}`,
-        glyph: '◴',
+        glyph: MARK_GLYPH.due,
         label: card.name,
         cardId: card.id,
         title: 'Due today',
@@ -791,15 +697,6 @@ export function buildStillAhead(
 /** The file a fiber's rendered status lives in, by convention. */
 const REPORT_FILENAME = 'report.html'
 
-/**
- * The daemon origin for file reads. Read from the same env var main.ts reads
- * (`VITE_SHUTTLE_BASE`), not threaded through ViewContext: it is one build-time
- * constant with one source of truth, and asking the context to carry it would
- * make two. Empty means same-origin, which is how the daemon serves the bundle.
- */
-const SHUTTLE_BASE: string =
-  (import.meta.env?.VITE_SHUTTLE_BASE as string | undefined) ?? ''
-
 export interface DayPreview {
   key: string
   cardId: string
@@ -820,7 +717,11 @@ export interface DayPreview {
  * snapshot without one) gets no report URL and goes straight to its outcome;
  * guessing a path would produce a 404 per pane per render.
  */
-export function buildDayPreviews(lanes: DayLane[], cards: KanbanCard[]): DayPreview[] {
+export function buildDayPreviews(
+  lanes: DayLane[],
+  cards: KanbanCard[],
+  shuttleBase: string,
+): DayPreview[] {
   const cardById = new Map(cards.map((card) => [card.id, card]))
   const out: DayPreview[] = []
   for (const lane of lanes) {
@@ -832,7 +733,7 @@ export function buildDayPreviews(lanes: DayLane[], cards: KanbanCard[]): DayPrev
       cardId: lane.cardId,
       label: lane.label,
       reportUrl: card.fiberDir
-        ? fileBytesUrl(SHUTTLE_BASE, `${card.fiberDir}/${REPORT_FILENAME}`, card.originId)
+        ? fileBytesUrl(shuttleBase, `${card.fiberDir}/${REPORT_FILENAME}`, card.originId)
         : undefined,
       outcome: card.outcome ?? '',
       originId: card.originId,
@@ -853,8 +754,8 @@ export interface DayEntryStats {
  *  printed as zeros — a row of `0m`s is noise, not information. */
 export function formatEntryStats(stats: DayEntryStats): string {
   const parts: string[] = []
-  if (stats.attention > 0) parts.push(`you ${formatSpanHM(stats.attention)}`)
-  if (stats.agent > 0) parts.push(`agents ${formatSpanHM(stats.agent)}`)
+  if (stats.attention > 0) parts.push(`you ${formatSpanMinutes(stats.attention, { pad: true })}`)
+  if (stats.agent > 0) parts.push(`agents ${formatSpanMinutes(stats.agent, { pad: true })}`)
   if (stats.commits > 0) parts.push(`${stats.commits} commit${stats.commits === 1 ? '' : 's'}`)
   return parts.join(' · ')
 }
@@ -1032,6 +933,7 @@ export function buildDayModel(
   activity: ActivityResult,
   commits: NarrationCommit[],
   cards: KanbanCard[],
+  shuttleBase: string,
   nowMs: number = Date.now(),
   byTmux?: ReadonlyMap<string, SessionPairing>,
 ): DayModel {
@@ -1048,7 +950,7 @@ export function buildDayModel(
     // every caller of buildDayModel honest.
     entries: buildDayEntries(commitsOnRail(commits, win), lanes, cards, win, nowMs),
     stillAhead: buildStillAhead(cards, dayISO, win, nowMs),
-    previews: buildDayPreviews(lanes, cards),
+    previews: buildDayPreviews(lanes, cards, shuttleBase),
     ledgerSize: byTmux?.size ?? 0,
   }
 }
@@ -1096,6 +998,14 @@ function formatHourTick(ms: number): string {
 
 function pct(value: number): string {
   return `${(value * 100).toFixed(4)}%`
+}
+
+/** Day's own mark for each activity kind — the same three pigments the shared
+ *  key names, drawn as this view draws them. */
+const DAY_KEY_CLASS: Record<ActivityBucket['k'], string> = {
+  agent: 'kbn-day-key-wash',
+  attention: 'kbn-day-key-att',
+  notify: 'kbn-day-key-tick',
 }
 
 /** One entry in the key: the mark itself, in miniature, then what it means. */
@@ -1318,6 +1228,7 @@ class DayViewImpl implements TemporalView {
       activity,
       narration.commits,
       ctx.cards,
+      ctx.shuttleBase,
       Date.now(),
       this.byTmux,
     )
@@ -1340,8 +1251,8 @@ class DayViewImpl implements TemporalView {
       // lane only repeats it when it disagrees (see DayLane.hostNote).
       this.statsEl.textContent =
         (model.host ? `${model.host} · ` : '') +
-        `attention ${formatSpanHM(model.totals.attention)}` +
-        ` · agents ${formatSpanHM(model.totals.agent)}`
+        `attention ${formatSpanMinutes(model.totals.attention, { pad: true })}` +
+        ` · agents ${formatSpanMinutes(model.totals.agent, { pad: true })}`
       this.statsEl.classList.toggle('kbn-day-stats-quiet', model.lanes.length === 0)
     }
 
@@ -1462,17 +1373,14 @@ class DayViewImpl implements TemporalView {
     // stated, once, in the margin under the rails it explains: a caption, not
     // a legend box, and only on a page that actually drew the marks.
     //
-    // The wording is shared with WeekView, which spends the same three
-    // pigments; the GLYPHS are each view's own marks in miniature, which is
-    // why they are shapes rather than uniform swatches — the key teaches the
-    // height hierarchy (wash, then block, then tick) at the same time.
+    // The GLYPHS are each view's own marks in miniature, which is why they are
+    // shapes rather than uniform swatches — the key teaches the height
+    // hierarchy (wash, then block, then tick) at the same time.
     const legend = document.createElement('div')
     legend.className = 'kbn-day-legend'
     legend.style.gridRow = String(model.lanes.length + 2)
     legend.append(
-      buildKey('kbn-day-key-wash', 'agents working'),
-      buildKey('kbn-day-key-att', 'you steering'),
-      buildKey('kbn-day-key-tick', 'attention called'),
+      ...ACTIVITY_KEY_ITEMS.map(({ kind, label }) => buildKey(DAY_KEY_CLASS[kind], label)),
     )
     chart.append(legend)
     return chart

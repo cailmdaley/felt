@@ -124,9 +124,9 @@ export function CaptureForm({
     let cancelled = false
     fetch(`${shuttleBase}/api/v1/agents`)
       .then((res) => (res.ok ? res.json() : null))
-      .then((raw: AgentEntry[] | { agents?: AgentEntry[] } | null) => {
-        if (cancelled || !raw) return
-        const list = (Array.isArray(raw) ? raw : raw.agents ?? []).filter((a) => !a.alias_of)
+      .then((raw: AgentEntry[] | null) => {
+        if (cancelled || !Array.isArray(raw)) return
+        const list = raw.filter((a) => !a.alias_of)
         if (list.length) setAgents(list)
       })
       .catch(() => {})

@@ -6,12 +6,11 @@ import Config
 config :elixir, :time_zone_database, Tz.TimeZoneDatabase
 
 config :shuttle,
-  env: config_env(),
-  # `:host` is intentionally left unset here. Per-daemon identity resolves at
-  # runtime in `Shuttle.Poller.resolve_own_host_id/0`: SHUTTLE_HOST env var →
-  # explicit app config (e.g. config/test.exs) → :inet.gethostname() →
-  # "local". The historical literal "local" default was a no-op filter that
-  # let remote and local daemons fight over the same fibers.
+  # `:host` is intentionally left unset here — the key is read nowhere. Each
+  # daemon's identity resolves at runtime in
+  # `Shuttle.Poller.resolve_own_host_id/0`, which documents the chain; there is
+  # no app-config step and no `"local"` default, because a literal "local" is a
+  # no-op filter that lets remote and local daemons fight over the same fibers.
   start_poller: true,
   # `:boot_quarantine` is intentionally left unset here: the default (true —
   # restart is not dispatch authority) lives in one place,

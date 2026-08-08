@@ -26,19 +26,17 @@ import {
   firstSentence,
   formatClockTime,
   formatEntryStats,
-  formatSpanHM,
   groupCommitsBySlug,
   isLivePresent,
   laneChip,
   mergeMinuteRuns,
   narrationRange,
   resolveDayISO,
-  sessionSlug,
-  shiftCivilDay,
   stepTarget,
-  tmuxFiberUlid,
   type DayLane,
 } from './DayView.js'
+import { sessionSlug, sessionUlid } from './sessionNames.js'
+import { formatSpanMinutes, shiftCivilDay } from './railTime.js'
 
 const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone
 
@@ -299,18 +297,22 @@ describe("the day's two totals", () => {
   })
 
   it('formats a span the head line can wear', () => {
-    expect(formatSpanHM(0)).toBe('0m')
-    expect(formatSpanHM(47)).toBe('47m')
-    expect(formatSpanHM(60)).toBe('1h 00m')
-    expect(formatSpanHM(125)).toBe('2h 05m')
+    expect(formatSpanMinutes(0, { pad: true })).toBe('0m')
+    expect(formatSpanMinutes(47, { pad: true })).toBe('47m')
+    expect(formatSpanMinutes(60, { pad: true })).toBe('1h 00m')
+    expect(formatSpanMinutes(125, { pad: true })).toBe('2h 05m')
+    // Unpadded and with no empty case — the other two spellings the one
+    // formatter has to cover.
+    expect(formatSpanMinutes(125)).toBe('2h 5m')
+    expect(formatSpanMinutes(0)).toBe('0m')
   })
 })
 
 describe('lanes', () => {
   it('joins a bucket to a fiber through the ULID in its tmux session name', () => {
-    expect(tmuxFiberUlid(SESSION)).toBe(FIBER_ULID)
-    expect(tmuxFiberUlid('morning-post-shuttle')).toBeNull()
-    expect(tmuxFiberUlid(null)).toBeNull()
+    expect(sessionUlid(SESSION)).toBe(FIBER_ULID)
+    expect(sessionUlid('morning-post-shuttle')).toBeNull()
+    expect(sessionUlid(null)).toBeNull()
 
     const lanes = buildDayLanes(
       activity([bucket(60, 'agent', SESSION), bucket(61, 'attention', SESSION)]),
@@ -401,7 +403,7 @@ describe('the join ladder', () => {
   // "interactive", which says a human was typing when an agent was working.
 
   it('joins a session name whose ULID is lower-cased', () => {
-    expect(tmuxFiberUlid(`bmodes-2d-${FIBER_ULID.toLowerCase()}-shuttle`)).toBe(FIBER_ULID)
+    expect(sessionUlid(`bmodes-2d-${FIBER_ULID.toLowerCase()}-shuttle`)).toBe(FIBER_ULID)
     const lanes = buildDayLanes(
       activity([bucket(20, 'agent', `bmodes-2d-${FIBER_ULID.toLowerCase()}-shuttle`)]),
       [card()],
@@ -500,7 +502,7 @@ describe('rung 0 — the session ledger', () => {
 
   it('joins a session name that carries nothing to infer from', () => {
     // `pi-2f9c41`: no ULID, no slug matching any card. Every lower rung misses.
-    expect(tmuxFiberUlid('pi-2f9c41')).toBeNull()
+    expect(sessionUlid('pi-2f9c41')).toBeNull()
     const naked = buildDayLanes(activity([bucket(20, 'agent', 'pi-2f9c41')]), [card()], WIN)
     expect(naked[0].kind).toBe('loose')
 
@@ -612,6 +614,7 @@ describe('the narration window against the rail', () => {
       activity([bucket(16 * 60, 'agent', SESSION), bucket(19 * 60 + 30, 'agent', SESSION)]),
       [commitAt(at(2026, 8, 5, 1, 30), 'bmodes-2d: ran the nulls')],
       [card()],
+      '',
     )
     expect(model.entries).toHaveLength(1)
     expect(model.entries[0]).toMatchObject({
@@ -628,6 +631,7 @@ describe('the narration window against the rail', () => {
       activity([bucket(60, 'agent', SESSION)]),
       [commitAt(at(2026, 8, 4, 2, 0), 'somewhere-else: finished last night')],
       [card({ outcome: 'Ran the nulls.' })],
+      '',
     )
     // The 02:00 commit is Aug 3's; all this page can say is the fallback.
     expect(model.entries.map((e) => e.title)).toEqual(['Run the 2D B-mode null tests'])
@@ -868,14 +872,14 @@ describe('where things stand', () => {
     const previews = buildDayPreviews(lanes, [
       withDir(),
       withDir({ id: 'a/second', uid: other, name: 'Second' }),
-    ])
+    ], '')
     // The interactive lane has no fiber, so it has no page to show.
     expect(previews.map((p) => p.label)).toEqual(['Run the 2D B-mode null tests', 'Second'])
   })
 
   it('points at report.html inside the fiber dir the feed carries', () => {
     const lanes = buildDayLanes(activity([bucket(10, 'agent', SESSION)]), [withDir()], WIN)
-    const [preview] = buildDayPreviews(lanes, [withDir()])
+    const [preview] = buildDayPreviews(lanes, [withDir()], '')
     expect(preview.reportUrl).toBe(
       '/api/v1/file?path=%2Fhome%2Fada%2Floom%2F.felt%2Fbmodes-2d%2Freport.html',
     )
@@ -884,21 +888,21 @@ describe('where things stand', () => {
   it('owner-routes a remote fiber, and leaves a local one unrouted', () => {
     const lanes = buildDayLanes(activity([bucket(10, 'agent', SESSION)]), [withDir()], WIN)
     const remote = withDir({ originId: 'remote-cineca' })
-    expect(buildDayPreviews(lanes, [remote])[0].reportUrl).toContain('&origin=remote-cineca')
-    expect(buildDayPreviews(lanes, [withDir()])[0].reportUrl).not.toContain('&origin=')
+    expect(buildDayPreviews(lanes, [remote], '')[0].reportUrl).toContain('&origin=remote-cineca')
+    expect(buildDayPreviews(lanes, [withDir()], '')[0].reportUrl).not.toContain('&origin=')
   })
 
   it('asks for nothing when the feed carries no directory', () => {
     // Guessing a path here would be a 404 per pane per render.
     const lanes = buildDayLanes(activity([bucket(10, 'agent', SESSION)]), [card()], WIN)
-    const [preview] = buildDayPreviews(lanes, [card({ outcome: 'Ran the nulls.' })])
+    const [preview] = buildDayPreviews(lanes, [card({ outcome: 'Ran the nulls.' })], '')
     expect(preview.reportUrl).toBeUndefined()
     expect(preview.outcome).toBe('Ran the nulls.')
   })
 
   it('carries the outcome even when a report exists — it is the fallback', () => {
     const lanes = buildDayLanes(activity([bucket(10, 'agent', SESSION)]), [withDir()], WIN)
-    const [preview] = buildDayPreviews(lanes, [withDir({ outcome: 'Compute the PTE.' })])
+    const [preview] = buildDayPreviews(lanes, [withDir({ outcome: 'Compute the PTE.' })], '')
     expect(preview.reportUrl).toBeDefined()
     expect(preview.outcome).toBe('Compute the PTE.')
   })

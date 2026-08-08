@@ -1,6 +1,13 @@
-import { prepareIframeExternalLinks, renderEmbeds, renderMarkdown } from './utils.js'
+import {
+  basename,
+  fileBytesUrl,
+  prepareIframeExternalLinks,
+  renderEmbeds,
+  renderMarkdown,
+  showToast,
+} from './utils.js'
 import type { ColumnKind, KanbanCard } from './KanbanTypes.js'
-import { dispatchIneligibleReason, errorMessageFromResponse, isAgentCard } from './KanbanModalShared.js'
+import { dispatchIneligibleReason, isAgentCard } from './KanbanModalShared.js'
 import { fetchFiberIndex, filterParentCandidates, type FiberSearchResult } from './fiberSearch.js'
 import {
   attachPanelDrag,
@@ -9,10 +16,9 @@ import {
   animatePanelGeometry,
   type PanelGeometry,
 } from './FloatingPanelChrome.js'
-import { buildFileViewer, basenameOf, isScrollableFile } from './FileViewerPanel.js'
-import { fileBytesUrl, showToast } from './utils.js'
+import { buildFileViewer, isScrollableFile } from './FileViewerPanel.js'
 import { humanizeCron } from './KanbanRules.js'
-import { instantMs, isoDayLocal } from './civilDay.js'
+import { formatSpanMinutes, instantMs, isoDayLocal } from './civilDay.js'
 import './FiberDetailModal.css'
 
 /**
@@ -69,15 +75,6 @@ function clockTime(ms: number): string {
 function dayStamp(ms: number): string {
   const day = new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
   return `${day} ${clockTime(ms)}`
-}
-
-/** A run's length as "3h 36m" / "12m" — hours only when there are hours. Sub-
- *  minute runs read "0m" rather than seconds: the pair of clock times above
- *  already tells that story, and this figure is for scale, not precision. */
-function formatSpan(ms: number): string {
-  const minutes = Math.max(0, Math.round(ms / 60_000))
-  const hours = Math.floor(minutes / 60)
-  return hours > 0 ? `${hours}h ${minutes % 60}m` : `${minutes}m`
 }
 
 export interface SessionWindow {
@@ -140,7 +137,9 @@ export function sessionWindow(
     const spannedMidnight = isoDayLocal(handedOff) !== isoDayLocal(dispatched)
     parts.push(
       `handed off ${spannedMidnight ? dayStamp(handedOff) : clockTime(handedOff)}`,
-      formatSpan(handedOff - dispatched),
+      // Sub-minute runs read `0m` rather than seconds: the pair of clock times
+      // above already tells that story, and this figure is for scale.
+      formatSpanMinutes(Math.max(0, Math.round((handedOff - dispatched) / 60_000))),
     )
     return {
       text: parts.join(' · '),
@@ -240,7 +239,7 @@ interface DetailPersist {
    * both literally named `report.html`, distinguished as
    * `standalone-kanban-report.html` vs `morning-post-report.html`). Persisting
    * it keeps the tab label stable across reload; legacy records without it fall
-   * back to `basenameOf(path)`. `zoom` is the per-file Cmd-scroll magnification
+   * back to `basename(path)`. `zoom` is the per-file Cmd-scroll magnification
    * (1 = native), `scroll` the last reading offset — both restored per tab.
    */
   open: Array<{ path: string; basename?: string; scroll: number; zoom?: number }>
@@ -345,8 +344,7 @@ interface AgentRecord {
  *
  * Every card action lives in one dropdown directly under the title,
  * collapsed by default: directive box + "wait for me", New session /
- * Resume, Temper / Compost, agent / kind / schedule, tags, parent fiber,
- * and the drill-out to the full workspace.
+ * Resume, Temper / Compost, agent / kind / schedule, and parent fiber.
  *
  * Deliberately NOT a Radix AppDialog and NOT background-locked: the panel
  * is non-modal by design — "drag it aside to keep an eye on one fiber
@@ -370,17 +368,12 @@ export class FiberDetailModal {
    *  Disconnected on close so a re-opened panel never leaks observers. */
   private embedObservers: ResizeObserver[] = []
   /** Shuttle daemon base (`:4000`). Every verb routes here — transition,
-   *  dispatch (carrying user_message + resume_mode inline), felt-edit,
-   *  lifecycle, felt-nest — owner-routed by the card's `originId` carried as
+   *  dispatch (carrying user_message + resume_mode inline), lifecycle,
+   *  felt-nest — owner-routed by the card's `originId` carried as
    *  `origin` in the body. Reads (agent registry, parent-picker fiber index)
    *  hit the daemon's GET routes. Portolan's `:4004` no longer serves the
    *  kanban at all. */
   private readonly shuttleBase: string
-  /** Map a card's `cityId` to the city's project directory — the
-   *  `project_dir` a shuttle install needs (worker cwd). Wired from the
-   *  parent kanban's pinned-city roots; absent in tests/embeds, where
-   *  promotion installs without a project dir (valid for paused drafts). */
-  private readonly resolveCityProjectPath?: (cityId: string) => string | undefined
   /** Parent-picker index: one `GET /api/v1/fibers` per panel-open, filtered
    *  client-side per keystroke. Cleared on close. */
   private fiberIndex: Promise<Array<{ id: string; name: string }>> | null = null
@@ -388,18 +381,17 @@ export class FiberDetailModal {
    *  dropdown — see the comment inside searchParents. */
   private searchRenderToken = 0
   private readonly onSaved: () => void
-  private readonly onAttachFreshTmux?: (tmuxSessionName: string) => void
   /** Focus an already-running worker's kitty tab. Wired from the parent
    *  kanban's onOpenWorker; drives the status pill's double-click. */
   private readonly onOpenWorker?: (tmuxSessionName: string, shuttleHost?: string) => void
   /**
-   * Terminal-move delegate. When wired, Temper / Compost close the panel
-   * immediately and hand the move to the parent kanban's optimistic
-   * transition path (instant card relocation + background commit + banner
-   * on failure) instead of blocking on an in-panel fetch. Absent → the
-   * legacy in-panel `runTransition` fetch runs.
+   * Terminal-move delegate. Temper / Compost close the panel immediately and
+   * hand the move to the parent kanban's optimistic transition path (instant
+   * card relocation + background commit + banner on failure). The product
+   * always wires it; the no-op default exists only for the offline harness
+   * fixture, which mounts the panel with no board behind it.
    */
-  private readonly onTransition?: (card: KanbanCard, target: ColumnKind) => void
+  private readonly onTransition: (card: KanbanCard, target: ColumnKind) => void
   // ── Two-column file viewer state (the right column) ─────────────────────
   /** The card the panel is currently showing — every accordion action
    *  (open/close/expand/scroll) keys its persistence off `card.uid`. */
@@ -438,43 +430,20 @@ export class FiberDetailModal {
 
   constructor(
     shuttleBase: string,
-    // Accepted for positional signature compatibility with KanbanModal's call
-    // (and Portolan's panel), but unused in the standalone UI: there's no full
-    // workspace to "open elsewhere" — the panel itself is the fiber view.
-    _onOpenFiber: (card: KanbanCard, options?: { openInNewWindow?: boolean }) => void,
     onSaved: () => void,
-    onAttachFreshTmux?: (tmuxSessionName: string) => void,
     onTransition?: (card: KanbanCard, target: ColumnKind) => void,
     onOpenWorker?: (tmuxSessionName: string, shuttleHost?: string) => void,
-    resolveCityProjectPath?: (cityId: string) => string | undefined,
-    // `portolanBase` is still accepted in the options bag for call-site
-    // signature compatibility, but the standalone UI no longer talks to
-    // Portolan's retired `:4004` — sent files and bytes both route through the
-    // shuttle daemon (`shuttleBase`).
-    opts?: { onOpenFile?: (fullPath: string, originId: string) => void; portolanBase?: string },
   ) {
     this.shuttleBase = shuttleBase
-    this.resolveCityProjectPath = resolveCityProjectPath
     this.onSaved = onSaved
-    this.onAttachFreshTmux = onAttachFreshTmux
-    this.onTransition = onTransition
+    this.onTransition = onTransition ?? (() => {})
     this.onOpenWorker = onOpenWorker
-    // `opts.onOpenFile` / `opts.portolanBase` are accepted for call-site
-    // signature compatibility (Portolan's full file workspace, the retired
-    // :4004 base) but unused — the standalone UI opens files in its own
-    // right-column accordion, all bytes via the shuttle daemon.
-    void opts
   }
 
   /**
    * @param card the card the user clicked
-   * @param scopeCityId  the cityId the parent kanban view is scoped to
-   *   (`undefined` for the global kanban). Drives the vellum content fetch
-   *   only — card ids are loom-relative everywhere (the composite feed),
-   *   and every write is owner-routed by `card.originId`, so no endpoint
-   *   needs city-scoped URL routing anymore.
    */
-  open(card: KanbanCard, scopeCityId?: string | null, _columnKind?: ColumnKind): void {
+  open(card: KanbanCard): void {
     // Tear down any existing open panel first (rapid re-click).
     this.close()
 
@@ -560,9 +529,8 @@ export class FiberDetailModal {
     // ── Controls dropdown ───────────────────────────────────────────────────
     // One cluster, directly under the title, collapsed by default. Expanded
     // it holds the directive entry and every action the card supports.
-    const scope = scopeCityId ?? undefined
     const shuttleManaged = isAgentCard(card)
-    const controls = this.buildControls(card, scope, shuttleManaged)
+    const controls = this.buildControls(card, shuttleManaged)
 
     // ── Fiber body pane ─────────────────────────────────────────────────────
     // The fiber itself: outcome lede, then the markdown body, rendered by the
@@ -784,7 +752,7 @@ export class FiberDetailModal {
     for (const link of prose.querySelectorAll<HTMLAnchorElement>('a[data-file-path]')) {
       const fullPath = link.dataset.filePath
       if (!fullPath) continue
-      link.title = `Open ${basenameOf(fullPath)} in the viewer`
+      link.title = `Open ${basename(fullPath)} in the viewer`
       link.addEventListener('click', (e) => {
         // Leave the modified clicks to the browser — a cmd-click means "new
         // tab" everywhere else and should here too.
@@ -793,7 +761,7 @@ export class FiberDetailModal {
         e.stopPropagation()
         const target = link.dataset.filePath ?? fullPath
         this.activateFile(
-          { fullPath: target, basename: basenameOf(target), timestamp: Date.now() },
+          { fullPath: target, basename: basename(target), timestamp: Date.now() },
           card,
         )
       })
@@ -833,7 +801,7 @@ export class FiberDetailModal {
     }
     link.setAttribute('href', altUrl)
     link.dataset.filePath = altPath
-    link.title = `Open ${basenameOf(altPath)} in the viewer`
+    link.title = `Open ${basename(altPath)} in the viewer`
   }
 
   /**
@@ -1086,7 +1054,7 @@ export class FiberDetailModal {
     const entry = this.openFiles.find((e) => e.file.fullPath === this.activePath)
     if (!entry || !this.card) return
     const fullPath = entry.file.fullPath
-    const filename = basenameOf(fullPath)
+    const filename = basename(fullPath)
     const url = fileBytesUrl(this.shuttleBase, fullPath, this.card.originId)
     try {
       const res = await fetch(url)
@@ -1138,12 +1106,10 @@ export class FiberDetailModal {
   /**
    * The one cluster holding every card action. Collapsed: a slim toggle row
    * with at-a-glance worker chips. Expanded: directive + dispatch actions,
-   * review moves, worker config (agent / kind / schedule), tags, parent,
-   * and the drill-out to the full workspace.
+   * review moves, worker config (agent / kind / schedule), and parent.
    */
   private buildControls(
     card: KanbanCard,
-    scope: string | undefined,
     shuttleManaged: boolean,
   ): HTMLElement {
     const wrap = document.createElement('div')
@@ -1207,14 +1173,13 @@ export class FiberDetailModal {
     // finish cleanly?" is the question you open a card to answer.
     const sessionWindow = buildSessionWindow(card)
     wrap.append(toggle, ...(sessionWindow ? [sessionWindow] : []), body)
-    this.buildControlsBody(body, card, scope, shuttleManaged)
+    this.buildControlsBody(body, card, shuttleManaged)
     return wrap
   }
 
   private buildControlsBody(
     body: HTMLElement,
     card: KanbanCard,
-    scope: string | undefined,
     shuttleManaged: boolean,
   ): void {
     // ── Next dispatch (message + action buttons) ──────────────────────────
@@ -1280,11 +1245,11 @@ export class FiberDetailModal {
 
       requeueBtn.addEventListener('click', (e) => {
         e.stopPropagation()
-        void this.runRequeue(card, messageTa.value.trim(), 'fresh', scope, requeueBtn, actionsErr)
+        void this.runRequeue(card, messageTa.value.trim(), 'fresh', requeueBtn, actionsErr)
       })
       resumeBtn.addEventListener('click', (e) => {
         e.stopPropagation()
-        void this.runRequeue(card, messageTa.value.trim(), 'previous', scope, resumeBtn, actionsErr)
+        void this.runRequeue(card, messageTa.value.trim(), 'previous', resumeBtn, actionsErr)
       })
     } else {
       actionsRow.append(temperBtn, compostBtn)
@@ -1292,13 +1257,13 @@ export class FiberDetailModal {
 
     temperBtn.addEventListener('click', (e) => {
       e.stopPropagation()
-      if (this.onTransition) { this.close(); this.onTransition(card, 'tempered'); return }
-      void this.runTransition(card, 'tempered', scope, temperBtn, actionsErr)
+      this.close()
+      this.onTransition(card, 'tempered')
     })
     compostBtn.addEventListener('click', (e) => {
       e.stopPropagation()
-      if (this.onTransition) { this.close(); this.onTransition(card, 'composted'); return }
-      void this.runTransition(card, 'composted', scope, compostBtn, actionsErr)
+      this.close()
+      this.onTransition(card, 'composted')
     })
 
     // One storyline row under the directive: set intent (⏸), dispatch
@@ -1312,13 +1277,12 @@ export class FiberDetailModal {
       actionsSec.append(actionsRow, actionsErr)
     }
 
-    // Tags editor removed — not needed in the detail panel.
-
     // ── Worker (shuttle options) ──────────────────────────────────────────
     // Console-style editor for the fiber's shuttle frontmatter block: agent,
-    // kind, schedule cadence. Server-side, agent-only changes route through
-    // `shuttle-ctl set-model` (preserves session.id + review history);
-    // kind/schedule/tz changes trigger an atomic install/repeat --reshape.
+    // kind, schedule cadence. Agent axes (base × effort × chrome) commit
+    // through `commitAxes` → the daemon's `set-agent` action (preserves
+    // session.id + review history); kind/schedule/tz changes go through
+    // `livePatch` → an atomic install/repeat --reshape.
     let agentSelect: HTMLSelectElement | null = null
     const originalAgent = card.shuttleAgent ?? ''
     // The kind editor toggles oneshot↔standing only; `pinned` is a CLI-managed
@@ -1647,7 +1611,6 @@ export class FiberDetailModal {
 
     const livePatch = (
       changes: {
-        shuttleAgent?: string
         shuttleKind?: 'oneshot' | 'standing'
         shuttleSchedule?: string
         shuttleTz?: string
@@ -1819,13 +1782,13 @@ export class FiberDetailModal {
       })
     }
 
-    // ── Footer: drill-out + live-save status ──────────────────────────────
+    // ── Footer: live-save status ──────────────────────────────────────────
     const footer = document.createElement('div')
     footer.className = 'kbn-detail-footer'
 
     footer.append(errorEl, statusEl)
 
-    // Worker config on the left, card metadata (tags + parent) on the
+    // Worker config on the left, card metadata (parent fiber) on the
     // right — a shallow two-column cluster at comfortable widths, one
     // column on narrow panels (container query in FiberDetailModal.css).
     const grid = document.createElement('div')
@@ -2211,7 +2174,7 @@ export class FiberDetailModal {
         fullPath: saved.path,
         // Prefer the persisted display label (preserves the disambiguated
         // basename); fall back to the path tail for legacy records.
-        basename: saved.basename ?? basenameOf(saved.path),
+        basename: saved.basename ?? basename(saved.path),
         timestamp: 0,
       }
       this.addOpenFile(file, card, saved.scroll, saved.zoom ?? 1)
@@ -2323,13 +2286,6 @@ export class FiberDetailModal {
     return btn
   }
 
-  /** Shuttle daemon transition endpoint. Owner-routed by `origin` in the
-   *  body, so no `?cityId=` scoping — the daemon maps the column `target`
-   *  to a lifecycle action itself. */
-  private transitionUrl(): string {
-    return `${this.shuttleBase}/api/v1/transition`
-  }
-
   /** Shuttle daemon dispatch endpoint (force/ad-hoc launches), owner-routed
    *  by `origin`. */
   private dispatchUrl(): string {
@@ -2350,15 +2306,12 @@ export class FiberDetailModal {
     }
   }
 
-  /** The `project_dir` for a card's shuttle install: the block's own
-   *  `project_dir` when present (reshape echo), else the owning city's
-   *  project path. Undefined when neither resolves — valid for paused
-   *  installs; an arming install without one fails loudly in shuttle-ctl. */
+  /** The `project_dir` for a card's shuttle install — the block's own
+   *  `project_dir` (a reshape echo). Undefined when the block carries none,
+   *  which a paused install permits; an arming install without one fails
+   *  loudly in shuttle-ctl. */
   private projectDirFor(card: KanbanCard): string | undefined {
-    return (
-      card.shuttleProjectDir ??
-      (card.cityId ? this.resolveCityProjectPath?.(card.cityId) : undefined)
-    )
+    return card.shuttleProjectDir
   }
 
   /**
@@ -2378,7 +2331,6 @@ export class FiberDetailModal {
     card: KanbanCard,
     directive: string,
     mode: 'fresh' | 'previous',
-    _cityId: string | undefined,
     btn: HTMLButtonElement,
     errorEl: HTMLElement,
   ): Promise<void> {
@@ -2465,47 +2417,7 @@ export class FiberDetailModal {
   }
 
   private openWorkerForCard(card: KanbanCard, tmuxSessionName: string): void {
-    if (this.onOpenWorker) {
-      this.onOpenWorker(tmuxSessionName, card.originId ?? card.shuttleHost)
-      return
-    }
-
-    this.onAttachFreshTmux?.(tmuxSessionName)
-  }
-
-  /**
-   * Single-step transition (no directive). Used for Temper / Compost
-   * buttons — those are terminal moves where a directive is moot.
-   */
-  private async runTransition(
-    card: KanbanCard,
-    target: string,
-    _cityId: string | undefined,
-    btn: HTMLButtonElement,
-    errorEl: HTMLElement,
-  ): Promise<void> {
-    const original = btn.textContent ?? ''
-    btn.disabled = true
-    btn.textContent = '…'
-    errorEl.style.display = 'none'
-    try {
-      const res = await fetch(this.transitionUrl(), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fiber_id: card.id, target, origin: card.originId }),
-      })
-      if (!res.ok) {
-        throw new Error(await errorMessageFromResponse(res, 'Transition failed'))
-      }
-      this.close()
-      this.onSaved()
-    } catch (err: unknown) {
-      const msg = (err as { message?: string })?.message ?? String(err)
-      errorEl.textContent = msg
-      errorEl.style.display = ''
-      btn.disabled = false
-      btn.textContent = original
-    }
+    this.onOpenWorker?.(tmuxSessionName, card.originId)
   }
 
   private showDispatchError(
@@ -2541,12 +2453,13 @@ export class FiberDetailModal {
     const { agentSelect, effortSelect, chromeToggle } = controls
     let records: AgentRecord[]
     try {
-      // The daemon's registry is a bare array; Portolan's retired proxy used
-      // to wrap it as `{agents: [...]}`. Accept both for embed compatibility.
+      // The daemon's registry is a bare array (`felt shuttle agents --json`,
+      // degrading to `[]` when felt is unavailable). A non-array body is
+      // malformed — treat it as empty rather than trusting it.
       const res = await fetch(`${this.shuttleBase}/api/v1/agents`)
       if (!res.ok) throw new Error(`${res.status}`)
-      const raw = (await res.json()) as AgentRecord[] | { agents: AgentRecord[] }
-      records = Array.isArray(raw) ? raw : raw.agents ?? []
+      const raw = (await res.json()) as AgentRecord[]
+      records = Array.isArray(raw) ? raw : []
     } catch {
       agentSelect.innerHTML = '<option value="">Failed to load agents</option>'
       effortSelect.innerHTML = ''
@@ -2767,10 +2680,9 @@ export class FiberDetailModal {
   /**
    * Promote a human card to a paused shuttle draft: `:4000/api/v1/lifecycle`
    * `install --disabled`, owner-routed by `origin`. `project_dir` (the
-   * worker's cwd) comes from the card's owning city via
-   * `resolveCityProjectPath`; a card with no resolvable city installs
-   * without one, which a paused draft permits — arming it later supplies
-   * the dir or fails loudly in shuttle-ctl.
+   * worker's cwd) comes from the card's own shuttle block; a card without
+   * one installs without it, which a paused draft permits — arming it later
+   * supplies the dir or fails loudly in shuttle-ctl.
    */
   private async promoteToShuttle(
     card: KanbanCard,
@@ -2818,7 +2730,6 @@ export class FiberDetailModal {
   private async livePatch(
     card: KanbanCard,
     changes: {
-      shuttleAgent?: string
       shuttleKind?: 'oneshot' | 'standing'
       shuttleSchedule?: string
       shuttleTz?: string
@@ -2850,7 +2761,7 @@ export class FiberDetailModal {
         // state comes from the card.
         const targetKind: 'oneshot' | 'standing' =
           changes.shuttleKind ?? (card.shuttleKind === 'standing' ? 'standing' : 'oneshot')
-        const targetAgent = changes.shuttleAgent || card.shuttleAgent
+        const targetAgent = card.shuttleAgent
         const projectDir = this.projectDirFor(card)
         // A paused draft must stay paused across the reshape (install
         // defaults to armed; status `open` means draft).
@@ -2879,12 +2790,6 @@ export class FiberDetailModal {
         }
 
         await this.postLifecycle(reinstall)
-      } else if (typeof changes.shuttleAgent === 'string' && changes.shuttleAgent) {
-        // Agent-only change is the daemon's `set-model` lifecycle action —
-        // preserves session.id + review history and the rest of the block.
-        await this.postLifecycle({
-          action: 'set-model', origin, fiber: fiberId, agent: changes.shuttleAgent,
-        })
       }
 
       // Reparent: the daemon's `/felt-nest` shells `felt nest`/`felt unnest`

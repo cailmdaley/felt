@@ -13,29 +13,23 @@
 import { describe, expect, it } from 'vitest';
 import {
   activityChunks,
-  addDays,
   CHUNK_DAYS,
   chunkBounds,
   chunkIndexOf,
-  dayAtIndex,
   daysBetween,
   EDGE_TRIGGER_DAYS,
   FUTURE_BLOCK_DAYS,
-  indexOfDay,
   LIVE_QUANTUM_MS,
   MAX_FUTURE_DAYS,
   MAX_PAST_DAYS,
   PAST_BLOCK_DAYS,
-  pendingChunks,
   planExtension,
-  RAIL_START_HOUR,
-  shiftIndex,
-  shiftSpan,
   windowLimits,
   windowOf,
   type ScrollProbe,
 } from './chronicleWindow.js';
 import { civilDayToLocalDate } from '../civilDay.js';
+import { RAIL_START_HOUR, shiftCivilDay } from './railTime.js';
 
 const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
@@ -82,8 +76,8 @@ describe('civil-day arithmetic', () => {
   it('strides by calendar day, not by 86_400_000', () => {
     for (const day of ['2026-03-07', '2026-03-28', '2026-10-24', '2026-10-31']) {
       // Round-tripping a DST-straddling stride must land back where it started.
-      expect(addDays(addDays(day, 1), -1)).toBe(day);
-      expect(daysBetween(day, addDays(day, 1))).toBe(1);
+      expect(shiftCivilDay(shiftCivilDay(day, 1), -1)).toBe(day);
+      expect(daysBetween(day, shiftCivilDay(day, 1))).toBe(1);
     }
   });
 
@@ -115,7 +109,7 @@ describe('extension only near an edge', () => {
     const plan = planExtension(win, probe, NOW);
     expect(plan?.side).toBe('past');
     expect(plan?.added).toBe(PAST_BLOCK_DAYS);
-    expect(plan?.next.first).toBe(addDays(win.first, -PAST_BLOCK_DAYS));
+    expect(plan?.next.first).toBe(shiftCivilDay(win.first, -PAST_BLOCK_DAYS));
     expect(plan?.next.last).toBe(win.last);
   });
 
@@ -128,7 +122,7 @@ describe('extension only near an edge', () => {
     expect(plan?.side).toBe('future');
     expect(plan?.added).toBe(FUTURE_BLOCK_DAYS);
     expect(FUTURE_BLOCK_DAYS).toBeLessThan(PAST_BLOCK_DAYS);
-    expect(plan?.next.last).toBe(addDays(win.last, FUTURE_BLOCK_DAYS));
+    expect(plan?.next.last).toBe(shiftCivilDay(win.last, FUTURE_BLOCK_DAYS));
     expect(plan?.next.first).toBe(win.first);
   });
 
@@ -151,7 +145,7 @@ describe('the no-jump property', () => {
       // And the day under the left edge is unchanged afterwards.
       const before = Math.round(probe.scrollLeft / dayWidthPx);
       const after = Math.round((probe.scrollLeft + (plan?.scrollDelta ?? 0)) / dayWidthPx);
-      expect(dayAtIndex(plan!.next, after)).toBe(dayAtIndex(windowOf('2026-06-01', '2026-08-20'), before));
+      expect(shiftCivilDay(plan!.next.first, after)).toBe(shiftCivilDay('2026-06-01', before));
     }
   });
 
@@ -163,55 +157,6 @@ describe('the no-jump property', () => {
     const plan = planExtension(windowOf('2026-06-01', '2026-08-20'), probe, NOW);
     expect(plan?.side).toBe('future');
     expect(plan?.scrollDelta).toBe(0);
-    expect(plan?.indexShift).toBe(0);
-  });
-});
-
-describe('indices survive an extension', () => {
-  const win = windowOf('2026-06-01', '2026-08-20');
-  const plan = planExtension(win, { ...settled, scrollLeft: 0 }, NOW)!;
-
-  it('shifts a retained index by the block size on a prepend', () => {
-    // Index 12 named 2026-06-13 before; without the shift it names a day 28
-    // columns later afterwards, and the band lands on the wrong fortnight.
-    const day = dayAtIndex(win, 12);
-    expect(dayAtIndex(plan.next, 12)).not.toBe(day);
-    expect(dayAtIndex(plan.next, shiftIndex(12, plan))).toBe(day);
-  });
-
-  it('shifts a whole span — a cycle band, a drag draft', () => {
-    const band = { startIdx: 4, endIdx: 9, name: 'Q3 push' };
-    const moved = shiftSpan(band, plan);
-    expect(dayAtIndex(plan.next, moved.startIdx)).toBe(dayAtIndex(win, band.startIdx));
-    expect(dayAtIndex(plan.next, moved.endIdx)).toBe(dayAtIndex(win, band.endIdx));
-    expect(moved.name).toBe('Q3 push'); // carries its other fields through
-  });
-
-  it('leaves indices alone on an append, and on no plan at all', () => {
-    const append = planExtension(
-      windowOf('2026-06-01', '2026-08-20'),
-      { ...settled, scrollLeft: settled.scrollWidth - settled.clientWidth },
-      NOW,
-    )!;
-    expect(shiftIndex(12, append)).toBe(12);
-    expect(shiftIndex(12, null)).toBe(12);
-    expect(shiftSpan({ startIdx: 1, endIdx: 2 }, null)).toEqual({ startIdx: 1, endIdx: 2 });
-  });
-
-  it('holds a CIVIL DAY across extension with no mapping at all', () => {
-    // The better fix where a call site can take it: a day is the same day
-    // whatever the window did.
-    const day = '2026-06-13';
-    expect(indexOfDay(win, day)).toBe(12);
-    expect(indexOfDay(plan.next, day)).toBe(12 + PAST_BLOCK_DAYS);
-    expect(dayAtIndex(plan.next, indexOfDay(plan.next, day)!)).toBe(day);
-  });
-
-  it('reports null for a day outside the window rather than a bogus index', () => {
-    expect(indexOfDay(win, '2026-01-01')).toBeNull();
-    expect(indexOfDay(win, '2027-01-01')).toBeNull();
-    expect(dayAtIndex(win, -1)).toBeNull();
-    expect(dayAtIndex(win, win.length)).toBeNull();
   });
 });
 
@@ -225,7 +170,7 @@ describe('the caps', () => {
   it('adds a partial block rather than overshooting the past cap', () => {
     const { earliest } = windowLimits(NOW);
     // Ten days short of the cap: the block must shrink to ten, not add 28.
-    const win = windowOf(addDays(earliest, 10), '2026-08-20');
+    const win = windowOf(shiftCivilDay(earliest, 10), '2026-08-20');
     const plan = planExtension(win, { ...settled, scrollLeft: 0 }, NOW);
     expect(plan?.added).toBe(10);
     expect(plan?.next.first).toBe(earliest);
@@ -269,7 +214,7 @@ describe('activity chunks', () => {
   it('lays chunks end to end with no gap and no overlap', () => {
     const chunks = activityChunks(windowOf('2026-05-01', '2026-08-05'), NOW);
     for (let i = 1; i < chunks.length; i += 1) {
-      expect(chunks[i].first).toBe(addDays(chunks[i - 1].last, 1));
+      expect(chunks[i].first).toBe(shiftCivilDay(chunks[i - 1].last, 1));
       // Settled chunks abut exactly; only the live one stops early.
       if (!chunks[i - 1].live) expect(chunks[i].fromMs).toBe(chunks[i - 1].toMs);
     }
@@ -362,21 +307,13 @@ describe('activity chunks', () => {
     }
   });
 
-  it('only hands back what has not been fetched', () => {
-    const win = windowOf('2026-05-01', '2026-08-05');
-    const all = activityChunks(win, NOW);
-    expect(pendingChunks(win, NOW, new Set())).toHaveLength(all.length);
-    const fetched = new Set(all.slice(0, 2).map((c) => c.key));
-    expect(pendingChunks(win, NOW, fetched)).toHaveLength(all.length - 2);
-    expect(pendingChunks(win, NOW, new Set(all.map((c) => c.key)))).toHaveLength(0);
-  });
-
   it('asks for exactly one more chunk after a typical prepend', () => {
     // The payoff of matching CHUNK_DAYS to PAST_BLOCK_DAYS: one scroll gesture
     // usually costs one request, not a rescan of everything already held.
     const win = windowOf('2026-06-01', '2026-08-05');
     const fetched = new Set(activityChunks(win, NOW).map((c) => c.key));
     const plan = planExtension(win, { ...settled, scrollLeft: 0 }, NOW)!;
-    expect(pendingChunks(plan.next, NOW, fetched).length).toBeLessThanOrEqual(2);
+    const fresh = activityChunks(plan.next, NOW).filter((c) => !fetched.has(c.key));
+    expect(fresh.length).toBeLessThanOrEqual(2);
   });
 });

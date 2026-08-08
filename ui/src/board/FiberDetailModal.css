@@ -436,49 +436,6 @@
   color: #1B1611;
 }
 
-/* Tags */
-.kbn-detail-tags-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-}
-.kbn-detail-tag-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 4px 2px 8px;
-  border: 1px solid rgba(27, 22, 17, 0.14);
-  border-radius: 10px;
-  background: rgba(255, 251, 237, 0.6);
-  font-size: 12.5px;
-  color: #4A443C;
-}
-.kbn-detail-tag-remove {
-  border: none;
-  background: transparent;
-  color: #9A8F80;
-  font-size: 13px;
-  line-height: 1;
-  cursor: pointer;
-  padding: 0 3px;
-}
-.kbn-detail-tag-remove:hover {
-  color: #1B1611;
-}
-.kbn-detail-tag-input {
-  border: none;
-  background: transparent;
-  font-family: var(--font-main, 'EB Garamond', serif);
-  font-size: 13px;
-  color: #1B1611;
-  min-width: 80px;
-  padding: 3px 2px;
-}
-.kbn-detail-tag-input:focus {
-  outline: none;
-}
-
 /* Parent fiber autocomplete */
 .kbn-detail-current-parent {
   font-family: var(--font-mono, 'JetBrains Mono', monospace);

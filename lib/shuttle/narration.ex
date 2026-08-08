@@ -14,23 +14,19 @@ defmodule Shuttle.Narration do
   reader's business, not ours. Merge commits are excluded — `Merge branch 'x'`
   is plumbing, not narration.
 
-  ## Two ways to name the window, and why instants are the right one
+  ## The window is an instant range
 
-  `commits_between/3` takes **epoch-millisecond instants** and is the form
-  callers should use. It hands git `--since=@<secs>` / `--until=@<secs>`, the
-  raw-seconds form, which is parsed identically no matter what timezone the
-  daemon process runs in.
+  `commits_between/3` takes **epoch-millisecond instants**, the only form. It
+  hands git `--since=@<secs>` / `--until=@<secs>`, the raw-seconds form, which
+  is parsed identically no matter what timezone the daemon process runs in.
 
-  `commits/3` takes **civil dates** and runs `from 00:00:00` to `to 23:59:59`
-  in the **daemon's local timezone**. This is the legacy form, kept so an
-  already-shipped `ui/dist` keeps working (a route-shape change is a
-  bundle-rebuild event — see AGENTS.md), and it carries a real defect: the
-  browser computes civil days in *its* zone while git resolves them in the
-  daemon's. A UTC daemon serving a UTC+2 browser shifts the whole window two
+  That zone-independence is the whole reason for the form. A civil-day window
+  would be resolved here, in the daemon's zone, while the browser computed those
+  dates in its own — a UTC daemon serving a UTC+2 browser shifts the window two
   hours. Measured on a throwaway repo, the same civil-day request returned the
-  commit under `TZ=UTC` and nothing under `TZ=Europe/Paris`, while the
-  `@<secs>` form returned it under UTC, Paris, Los Angeles, and Tokyo alike.
-  Prefer `commits_between/3`; reach for `commits/3` only to stay compatible.
+  commit under `TZ=UTC` and nothing under `TZ=Europe/Paris`, while the `@<secs>`
+  form returned it under UTC, Paris, Los Angeles, and Tokyo alike. Callers that
+  think in civil days resolve them to instants on their own side.
 
   ## Bounded, because this is a shell-out in a request path
 
@@ -82,8 +78,7 @@ defmodule Shuttle.Narration do
   Commits whose committer date falls in the inclusive instant range
   `from_ms..to_ms` (epoch milliseconds), newest first (git's own order).
 
-  Timezone-free: the bounds reach git as raw seconds. This is the form callers
-  should use.
+  Timezone-free: the bounds reach git as raw seconds.
 
   Opts (for tests): `:store_root`, `:runner`.
   """
@@ -94,27 +89,6 @@ defmodule Shuttle.Narration do
     # truncate down. That widens the window by at most 999 ms at the head,
     # which is nothing against a strip of commit subjects.
     run(["--since=@#{div(from_ms, 1_000)}", "--until=@#{div(to_ms, 1_000)}"], opts)
-  end
-
-  @doc """
-  Commits whose committer date falls in the inclusive civil-day range
-  `from..to`, newest first (git's own order).
-
-  **Legacy, daemon-zone.** The window is resolved in the daemon process's
-  timezone, which is not necessarily the caller's — see the moduledoc. Kept for
-  already-shipped clients; new callers want `commits_between/3`.
-
-  Opts (for tests): `:store_root`, `:runner`.
-  """
-  @spec commits(Date.t(), Date.t(), keyword()) :: [commit()]
-  def commits(%Date{} = from, %Date{} = to, opts \\ []) do
-    run(
-      [
-        "--since=#{Date.to_iso8601(from)} 00:00:00",
-        "--until=#{Date.to_iso8601(to)} 23:59:59"
-      ],
-      opts
-    )
   end
 
   defp run(bounds, opts) do
@@ -153,11 +127,8 @@ defmodule Shuttle.Narration do
     :exit, _ -> []
   end
 
-  # Same config seam as `Shuttle.Felt` and `Shuttle.FiberDocuments`.
-  defp runner(opts) do
-    Keyword.get(opts, :runner) ||
-      Application.get_env(:shuttle, :narration_runner, Shuttle.Runner.Default)
-  end
+  # Injection is per-call, through the `:runner` opt the tests use to script git.
+  defp runner(opts), do: Keyword.get(opts, :runner, Shuttle.Runner.Default)
 
   defp parse(output) do
     output

@@ -71,15 +71,14 @@
    F1 flourish (.kbn-cap::before, ochre) stays consistent across all
    columns — the gilt language ties the row together.
 
-   Tempered + Composted are kept here for safety: the buckets still
-   exist in classifyFiber (server/src/HttpApiKanban.ts) even though the
-   current three-surfaces layout doesn't render them as columns. */
+   Tempered + Composted column and card styling was removed in the dead-CSS
+   sweep: the buckets still exist in classifyFiber (ui/src/board/KanbanRules.ts)
+   and feed the timeline, but renderColumn/renderCard only ever take the three
+   Now kinds, so the rules matched nothing. Restyle from scratch if a future
+   surface brings them back. */
 .kbn-col-drafts .kbn-cap { color: #C49333; }                   /* ochre */
 .kbn-col-inFlight .kbn-cap { color: #3D5BA0; }                 /* cobalt */
-.kbn-col-awaiting .kbn-cap,
 .kbn-col-awaitingReview .kbn-cap { color: #3F8278; }           /* teal */
-.kbn-col-tempered .kbn-cap { color: #C49333; }                 /* ochre (off-surface) */
-.kbn-col-composted .kbn-cap { color: #7A6F5C; }                /* muted (off-surface) */
 
 /* Fills the host element supplied by vellum's workspace slot
    (KanbanHost in src/vellum/mount.tsx). The host gives us a fixed-
@@ -119,12 +118,6 @@
   color: #1B1611;
   overflow: hidden;
 }
-/* The masthead band (.kbn-header, .kbn-title*, .kbn-subtitle, .kbn-status)
-   and its floated round buttons (.kbn-stash-btn / .kbn-newidea-btn /
-   .kbn-refresh-btn) dissolved in board-chrome-redesign. The three actions
-   they carried now live in the column heads as one tinted round-button
-   family — see .kbn-col-action near .kbn-col-head below. ~80px of vertical
-   room reclaimed; the Now board starts at the top of the modal. */
 /* aria-live region — invisible but observable in the a11y tree. */
 .kbn-live {
   position: absolute;
@@ -721,19 +714,6 @@
 /* Drafts body stays in default iron-gall — only the D dropcap is
    illuminated. (Earlier passes painted the whole title cobalt; reading
    the body of "DRAFTS" in pigment felt over-illuminated.) */
-/* Composted column: desaturated Earth tone, visually sits at the
-   boundary between Tempered and "the unbuilt" (Drafts on wrap). */
-.kbn-col-composted {
-  background: #E0D4B8;
-  border-color: rgba(122, 111, 92, 0.35);
-  box-shadow: inset 0 0 0 1px rgba(122, 111, 92, 0.12);
-}
-/* Composted column doesn't render in three-surfaces — rule left
-   neutral if a future surface brings it back. */
-.kbn-col-composted .kbn-col-title { color: #7A6F5C; }
-.kbn-col-tempered {
-  background: #E8DCC1;
-}
 /* Active drop target while a drag is in progress. */
 .kbn-col-drop {
   background: rgba(196, 147, 51, 0.10);
@@ -823,12 +803,9 @@
   margin-right: 0.04em;
   line-height: 0.82;
 }
-/* Awaiting + Tempered title bodies stay default iron-gall too — only
-   the dropcap carries the column pigment, like a rubricated initial
-   on otherwise plain manuscript text. The pigment is the dropcap's
-   job; the body is the body's job. */
-/* (no .kbn-col-awaiting .kbn-col-title color override) */
-/* (no .kbn-col-tempered .kbn-col-title color override) */
+/* Awaiting title bodies stay default iron-gall too — only the dropcap
+   carries the column pigment, like a rubricated initial on otherwise plain
+   manuscript text. The pigment is the dropcap's job; the body is the body's. */
 .kbn-col-count {
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
   font-size: 12px;
@@ -987,26 +964,6 @@
 .kbn-card-awaitingReview {
   border-color: rgba(196, 147, 51, 0.45);
 }
-.kbn-card-composted {
-  padding: 6px 10px;
-  gap: 4px;
-  background: #E0D4B8;
-  border-style: dashed;
-}
-.kbn-card-composted .kbn-card-name {
-  font-size: 13px;
-  font-weight: 500;
-}
-.kbn-card-composted .kbn-card-outcome {
-  font-size: 11.5px;
-  color: #5A4F3A;
-}
-/* Tempered cards are smaller — they're for the record, not the focus. */
-.kbn-card-tempered {
-  padding: 6px 10px;
-  gap: 4px;
-  background: #E8DCC1;
-}
 .kbn-card-header {
   display: flex;
   align-items: baseline;
@@ -1034,10 +991,6 @@
   text-align: left;
   color: inherit;
 }
-.kbn-card-tempered .kbn-card-name {
-  font-size: 13px;
-  font-weight: 500;
-}
 .kbn-pill {
   display: inline-block;
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
@@ -1062,16 +1015,6 @@
   background: rgba(122, 111, 92, 0.15);
   color: #7A6F5C;
   border: 1px solid rgba(122, 111, 92, 0.35);
-}
-.kbn-pill-tempered {
-  background: rgba(63, 130, 120, 0.18);
-  color: #2E6862;
-  border: 1px solid rgba(63, 130, 120, 0.4);
-}
-.kbn-pill-composted {
-  background: rgba(122, 111, 92, 0.12);
-  color: #7A6F5C;
-  border: 1px solid rgba(122, 111, 92, 0.3);
 }
 .kbn-card-id {
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
@@ -1145,25 +1088,11 @@
   text-decoration: underline;
   text-decoration-thickness: 1px;
 }
-.kbn-card-tempered .kbn-card-outcome {
-  font-size: 11.5px;
-  color: #5A4F3A;
-}
 .kbn-card-meta {
   display: flex; align-items: center;
   gap: 6px;
   margin-top: 2px;
   flex-wrap: wrap;
-}
-.kbn-card-actions {
-  display: flex; gap: 6px; flex-wrap: wrap;
-  padding-top: 6px;
-  margin-top: 2px;
-  border-top: 1px dashed rgba(27, 22, 17, 0.10);
-}
-.kbn-card-tempered .kbn-card-actions {
-  padding-top: 4px;
-  gap: 4px;
 }
 .kbn-action {
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
@@ -1197,23 +1126,6 @@
   background: rgba(63, 130, 120, 0.20);
   color: #1E5852;
 }
-.kbn-action-awaitingReview {
-  background: rgba(196, 147, 51, 0.10);
-  color: #8C6A24;
-  border-color: rgba(196, 147, 51, 0.45);
-}
-.kbn-action-awaitingReview:hover {
-  background: rgba(196, 147, 51, 0.20);
-  color: #5C4810;
-}
-.kbn-action-inFlight {
-  background: rgba(63, 130, 120, 0.08);
-  color: #2E6862;
-  border-color: rgba(63, 130, 120, 0.35);
-}
-.kbn-action-inFlight:hover {
-  background: rgba(63, 130, 120, 0.18);
-}
 .kbn-action-drafts {
   background: rgba(122, 111, 92, 0.08);
   color: #7A6F5C;
@@ -1228,122 +1140,6 @@
 .kbn-card-drafts {
   background: #E8DCC1;
   border-style: dashed;
-}
-.kbn-card-tags {
-  display: flex; flex-wrap: wrap; gap: 4px;
-}
-.kbn-tag {
-  font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: 9.5px;
-  color: #7A6F5C;
-  background: rgba(27, 22, 17, 0.05);
-  padding: 1px 5px;
-  border-radius: 2px;
-}
-/* Feature 4: tag edit affordance — ✎ button next to tags */
-.kbn-tag-edit-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 16px;
-  height: 16px;
-  padding: 0;
-  margin: 0;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 3px;
-  font-size: 11px;
-  line-height: 1;
-  color: #C5B89E;
-  cursor: pointer;
-  transition: color 120ms ease, background 120ms ease, border-color 120ms ease;
-  flex-shrink: 0;
-}
-.kbn-tag-edit-btn:hover,
-.kbn-tag-edit-btn:focus-visible {
-  color: #7A6F5C;
-  background: rgba(27, 22, 17, 0.08);
-  border-color: rgba(122, 111, 92, 0.3);
-  outline: none;
-}
-.kbn-tag-edit-btn:focus-visible {
-  outline: 1px dashed #7A6F5C;
-  outline-offset: 1px;
-}
-/* Tag editor: inline card-level editor for adding/removing tags */
-.kbn-tag-editor {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  width: 100%;
-}
-.kbn-tag-editor-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  align-items: center;
-}
-.kbn-tag-editable {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  background: rgba(27, 22, 17, 0.07);
-  padding: 1px 2px 1px 5px;
-}
-.kbn-tag-remove {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 14px;
-  height: 14px;
-  padding: 0;
-  margin: 0;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 2px;
-  font-size: 11px;
-  line-height: 1;
-  color: #BC4538;
-  cursor: pointer;
-  transition: color 120ms ease, background 120ms ease;
-}
-.kbn-tag-remove:hover,
-.kbn-tag-remove:focus-visible {
-  color: #BC4538;
-  background: rgba(188, 69, 56, 0.10);
-  outline: none;
-}
-.kbn-tag-add-input {
-  flex: 0 1 80px;
-  min-width: 60px;
-  max-width: 120px;
-  height: 18px;
-  padding: 0 5px;
-  border: 1px solid rgba(122, 111, 92, 0.22);
-  border-radius: 2px;
-  background: rgba(255, 255, 255, 0.6);
-  font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: 10px;
-  color: #1B1611;
-  outline: none;
-}
-.kbn-tag-add-input:focus {
-  border-color: rgba(122, 111, 92, 0.5);
-  background: #FFFFFF;
-}
-.kbn-tag-add-input::placeholder {
-  color: #C5B89E;
-}
-.kbn-tag-editor-actions {
-  display: flex;
-  gap: 6px;
-}
-.kbn-card-date {
-  font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: 10.5px;
-  color: #B8AC9A;
-  flex-shrink: 0;
-  margin-left: auto;
 }
 .kbn-card-actor,
 .kbn-card-due,
@@ -1423,12 +1219,6 @@
   outline: 1px dashed #2E6862;
   outline-offset: 2px;
 }
-/* When .kbn-card-worker is followed by .kbn-card-date, zero the date's
-   own auto-margin so the pill (margin-left:auto) doesn't compete with
-   it for slack — same trick used for review-meta-actions. */
-.kbn-card-worker + .kbn-card-date {
-  margin-left: 0;
-}
 
 /* Worker-less runtime phase badge (retrying / due / dispatched). Gold rather
    than the teal "aloft" pill: the daemon considers it active, but nothing is
@@ -1445,9 +1235,6 @@
   margin-left: auto;
   white-space: nowrap;
   flex-shrink: 0;
-}
-.kbn-card-phase + .kbn-card-date {
-  margin-left: 0;
 }
 /* Boot-quarantine hold: the daemon is WITHHOLDING this fresh launch after a
    restart (parked in pending_launch, awaiting release). Cool, inert slate —
@@ -1493,9 +1280,6 @@
 .kbn-card-held:focus-visible .kbn-card-held-label { display: none; }
 .kbn-card-held:hover .kbn-card-held-release,
 .kbn-card-held:focus-visible .kbn-card-held-release { display: inline; }
-.kbn-card-held + .kbn-card-date {
-  margin-left: 0;
-}
 /* retrying is a soft-error state — warmer, and a slow pulse to read as "still
    churning" rather than settled. */
 .kbn-card-phase-retrying {
@@ -1643,18 +1427,14 @@
 .kbn-error-retry:focus-visible { outline: 1px dashed #9A7B35; outline-offset: 2px; }
 
 /* Temper / Compost inline in the meta row (awaiting-review cards only).
-   Sit directly left of the date stamp; inherit .kbn-action base chrome.
-   margin-left:auto pushes the whole group right; the adjacent-sibling rule
-   zeroes out the date's own auto-margin so space isn't split between them. */
+   Inherit .kbn-action base chrome; margin-left:auto pushes the whole group
+   to the right end of the row. */
 .kbn-card-review-meta-actions {
   display: flex;
   gap: 4px;
   align-items: center;
   flex-shrink: 0;
   margin-left: auto;
-}
-.kbn-card-review-meta-actions + .kbn-card-date {
-  margin-left: 0;
 }
 .kbn-review-meta-btn {
   font-size: 9.5px;
@@ -1664,16 +1444,3 @@
 .kbn-review-meta-btn:hover {
   opacity: 1;
 }
-
-@media (max-width: 1100px) {
-  .kbn-horizon-body {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
-@media (max-width: 720px) {
-  .kbn-horizon-body {
-    grid-template-columns: 1fr;
-  }
-}
-

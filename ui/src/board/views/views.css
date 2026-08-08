@@ -1,6 +1,6 @@
 /* Temporal-view scaffold — the shared page every non-Desk view is built on.
    Per-view styles arrive in their own files alongside their views; this file
-   holds only what all four pages agree on: the host box, the sheet, the
+   holds only what every view page agrees on: the host box, the sheet, the
    illuminated head, and the empty state.
 
    Palette is KanbanModal.css's — iron-gall #1B1611, muted #7A6F5C, faded

@@ -23,10 +23,7 @@ defmodule Shuttle.RegistryCommon do
   """
   @spec normalize_remotes(list()) :: [Remote.t()]
   def normalize_remotes(entries) do
-    Enum.flat_map(entries, fn
-      %Remote{} = r -> [r]
-      other -> List.wrap(Remote.from_config(other))
-    end)
+    Enum.flat_map(entries, &List.wrap(Remote.from_config(&1)))
   end
 
   @doc """

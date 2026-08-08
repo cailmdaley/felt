@@ -30,13 +30,6 @@ const NOW_COLUMN_ORDER: NowColumnKind[] = ['drafts', 'inFlight', 'awaitingReview
 // roles page behind a "+N more" affordance rather than scrolling.
 const PINNED_MAX_ROWS = 2
 
-/** Stash cluster-key derivation: skip umbrella roots and use the first
- *  project-level segment instead. Containment-path remains the load-bearing
- *  axis (always present, no user effort); the skip list is for umbrella
- *  root fibers that are too broad to carry meaning as a cluster key on
- *  their own — populate it with root fiber names specific to your store. */
-const CLUSTER_KEY_SKIP_ROOTS = new Set<string>()
-
 /**
  * Daemon runtime phases that earn a chip on an In-flight card.
  *
@@ -142,7 +135,7 @@ interface KanbanSurfaceRendererOptions {
   /** Reshape a fiber to a resting `kind:pinned` role — the drag-onto-the-
    *  Pinned-strip gesture. The off-the-shelf twin of `setSurface`/`transition`. */
   pin: (card: KanbanCard) => void | Promise<void>
-  openDetail: (card: KanbanCard, column: ColumnKind) => void
+  openDetail: (card: KanbanCard) => void
   openWorker?: (tmuxSessionName: string, shuttleHost?: string) => void
   /** Release the boot quarantine on a card's owning host — the `⏹︎ held` →
    *  `▶ release` click. Release is global per daemon (one restart parks the
@@ -171,7 +164,7 @@ export class KanbanSurfaceRenderer {
     opts?: { cold?: boolean; due?: string | null },
   ) => void | Promise<void>
   private readonly pin: (card: KanbanCard) => void | Promise<void>
-  private readonly openDetail: (card: KanbanCard, column: ColumnKind) => void
+  private readonly openDetail: (card: KanbanCard) => void
   private readonly openWorker?: (tmuxSessionName: string, shuttleHost?: string) => void
   private readonly releaseQuarantine?: (shuttleHost?: string) => void | Promise<void>
   private readonly onStashClick?: () => void
@@ -393,7 +386,7 @@ export class KanbanSurfaceRenderer {
 
     el.addEventListener('click', (e) => {
       if ((e.target as HTMLElement).closest('a')) return
-      this.openDetail(card, 'pinned')
+      this.openDetail(card)
     })
     return el
   }
@@ -789,7 +782,7 @@ export class KanbanSurfaceRenderer {
 
     el.addEventListener('click', (e) => {
       if ((e.target as HTMLElement).closest('button')) return
-      this.openDetail(card, 'drafts')
+      this.openDetail(card)
     })
     return el
   }
@@ -799,7 +792,7 @@ export class KanbanSurfaceRenderer {
    * column header doubles as the lifecycle-transition drop target.
    */
   renderColumn(
-    kind: ColumnKind,
+    kind: NowColumnKind,
     cards: KanbanCard[],
     staleness: Record<string, KanbanOriginStaleness>,
   ): HTMLElement {
@@ -946,7 +939,7 @@ export class KanbanSurfaceRenderer {
    */
   renderCard(
     card: KanbanCard,
-    kind: ColumnKind,
+    kind: NowColumnKind,
     originStaleness?: KanbanOriginStaleness,
   ): HTMLElement {
     const isStale = originStaleness?.status === 'stale'
@@ -1180,7 +1173,7 @@ export class KanbanSurfaceRenderer {
 
     el.addEventListener('click', (e) => {
       if ((e.target as HTMLElement).closest('a, button, textarea')) return
-      this.openDetail(card, kind)
+      this.openDetail(card)
     })
 
     return el
@@ -1298,25 +1291,18 @@ function buildDayCell(day: TimelineDay): HTMLElement {
 }
 
 /**
- * The containment path a card clusters under — its id's segments, minus two
- * things that are not groups:
- *
- *   - leading umbrella roots (`CLUSTER_KEY_SKIP_ROOTS`), too broad to mean
- *     anything as a heading;
- *   - THE CARD'S OWN LEAF SLUG. This is the one that matters for splitting: the
- *     last segment names the fiber, not a folder it lives in. Descend into it
- *     and every card becomes a cluster of one, which is how a "split deeper"
- *     rule turns a readable group of six into six headings.
+ * The containment path a card clusters under — its id's segments, minus the
+ * one thing that is not a group: THE CARD'S OWN LEAF SLUG. The last segment
+ * names the fiber, not a folder it lives in. Descend into it and every card
+ * becomes a cluster of one, which is how a "split deeper" rule turns a
+ * readable group of six into six headings.
  *
  * A top-level card (`foo`) keeps its own name as its only segment — it has no
  * containing folder, and a cluster has to be called something.
  */
 function containmentSegments(id: string): string[] {
   const segments = id.split('/').filter(Boolean)
-  let start = 0
-  while (start < segments.length && CLUSTER_KEY_SKIP_ROOTS.has(segments[start])) start += 1
-  const meaningful = segments.slice(start)
-  return meaningful.length > 1 ? meaningful.slice(0, -1) : meaningful
+  return segments.length > 1 ? segments.slice(0, -1) : segments
 }
 
 /** Above this many cards, a cluster splits on its next path segment. Four is
@@ -1356,7 +1342,7 @@ function splitByPathDepth(cards: KanbanCard[], depth: number): Array<{ key: stri
     if (bucket) bucket.push(card)
     else deeper.set(key, [card])
   }
-  if (deeper.size <= 1) return here.cards.length > 0 ? [here] : []
+  if (deeper.size <= 1) return [here]
   return [...deeper.values()].flatMap((group) => splitByPathDepth(group, depth + 1))
 }
 

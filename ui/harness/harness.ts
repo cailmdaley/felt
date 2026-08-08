@@ -22,9 +22,10 @@
  *
  * Query params drive the scenario:
  *   ?open=2        — pre-open the first 2 sent files into the accordion
- *   ?close=1       — open 1 file, then close it → the panel must GLIDE BACK to a
- *                    proper full-width single column (regression guard: the
- *                    left column must not stay stuck at the split flex-basis)
+ *   ?close=1       — open 1 file, then close the viewer window via its ✕ → the
+ *                    window must unmount cleanly and the card must KEEP the
+ *                    half-and-half geometry it glided to (closing the viewer
+ *                    deliberately does not resize the card)
  *   ?recency=1     — open 3, then re-activate the oldest to show it bump to top
  *   ?reload=1      — open 2 files, tear the modal down, re-instantiate +
  *                    re-open the SAME card → confirm persistence rehydrates
@@ -140,7 +141,7 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   // Parent-picker index
   if (url.includes('/api/v1/fibers') && !url.includes('body=true')) return json({ fibers: [] })
   // Agent registry
-  if (url.includes('/api/v1/agents')) return json({ agents: [] })
+  if (url.includes('/api/v1/agents')) return json([])
 
   return realFetch(input as RequestInfo, init)
 }) as typeof fetch
@@ -177,12 +178,8 @@ function makeModal(): FiberDetailModal {
   return new FiberDetailModal(
     '', // shuttleBase relative
     () => {},
-    () => {},
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    {},
+    // No board behind the panel — a terminal move just logs and closes.
+    (card, target) => { console.log('[harness] transition', card.id, '→', target) },
   )
 }
 
@@ -203,12 +200,13 @@ window.setTimeout(() => {
   const closeLast = params.get('close') === '1'
 
   if (closeLast) {
-    // Open the newest file, then close it via the accordion ✕. The panel must
-    // glide back to a full-width single column — guards the hideRightColumn()
-    // bug where the left column stayed pinned at the split flex-basis.
+    // Open the newest file, then close the whole viewer window via its ✕
+    // (`.kbn-fileview-win-close`). The window must unmount, and the card must
+    // stay where it glided to on open — closeViewerWindow() removes the window
+    // without restoring the card's pre-split geometry, by design.
     launcherClick(0)
     window.setTimeout(() => {
-      document.querySelector<HTMLButtonElement>('.kbn-detail-acc-close')?.click()
+      document.querySelector<HTMLButtonElement>('.kbn-fileview-win-close')?.click()
     }, 350)
     return
   }

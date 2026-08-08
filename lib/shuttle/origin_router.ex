@@ -163,9 +163,17 @@ defmodule Shuttle.OriginRouter do
     String.trim_trailing(url, "/") <> path
   end
 
-  # The write-plane forward transport. One config key for every write endpoint's
-  # cross-host POST, so a test stubs the whole forward plane at a single point.
-  defp forward_client do
+  @doc """
+  The cross-host transport module — the ONE place `:write_forward_client` is
+  resolved, so a test stubs every cross-host request at a single point.
+
+  Public because a caller can need the transport without needing a forward: the
+  felt-stores controller GETs a remote's registry over the same client
+  (`Shuttle.RemoteRegistry.Client.get/2`) rather than POSTing through
+  `forward/4`. It calls this instead of re-reading the config key.
+  """
+  @spec forward_client() :: module()
+  def forward_client do
     Application.get_env(:shuttle, :write_forward_client, Shuttle.RemoteRegistry.Client.Default)
   end
 end

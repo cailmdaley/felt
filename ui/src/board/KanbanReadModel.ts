@@ -39,45 +39,11 @@ import type {
 } from './KanbanTypes.js';
 import { ascByKey, descByKey, dueCivilDay, dueSortMs, instantMs } from './civilDay.js';
 
-/**
- * Resolve the pinned local city + project-relative slug for a composite entry,
- * for the click-to-open-in-vellum flow. Injected by the modal at fetch time —
- * city pinning is a Portolan-local concept the daemon feed doesn't carry.
- *
- * The resolver matches the row's felt FILE path (`<entry.feltStore>/.felt/<entry.path>`)
- * against each pinned city's `.felt` realpath, longest prefix wins — a verbatim
- * browser port of the backend's `resolveCityForCanonicalPath`. It does NOT match
- * `entry.feltStore` alone: on a loom-canonical host `feltStore` is uniformly the
- * loom for every loom-served row and so can't discriminate `portolan` from
- * `ai-futures`, while a symlinked substore (the iCloud `wedding` store) reports
- * its own `feltStore` and must match its own city. See `KanbanCityResolver.ts`
- * (`buildCityResolver`) for the implementation and its real-row equivalence tests.
- *
- * A resolver that returns `undefined` (or no resolver at all) leaves the card
- * city-less; `onOpenFiber` then falls back to in-place `navigate(/${card.id})`.
- * Keeping it injectable is what holds `buildKanbanResponseFromComposite` pure
- * and unit-testable.
- */
-export type CityResolver = (
-  entry: CompositeEntry,
-) => { cityId: string; projectSlug: string; shuttleFiberId?: string } | undefined;
-
 export interface BuildKanbanResponseOptions {
   /** Reference instant for due-drift, standing-role placement, and the response
    * `generatedAt`. Defaults to `Date.now()`. Thread it in tests for
    * determinism. */
   nowMs?: number;
-  resolveCity?: CityResolver;
-  /**
-   * City-scoped board: when set, only cards whose `resolveCity` attributes them
-   * to this `cityId` are classified onto surfaces (the composite feed is
-   * loom-wide; a board opened from a city vellum shows just that city). Omit for
-   * the global loom-wide board. Dependency resolution still spans the whole feed
-   * — only the eligible/classified set is narrowed. Unattributed rows (remote /
-   * unpinned) are excluded from a scoped view, matching the backend
-   * `?cityId=`-scoped board.
-   */
-  scopeCityId?: string;
 }
 
 /**
@@ -117,23 +83,16 @@ export function buildKanbanResponseFromComposite(
   // (a local fiber may depend on a remote-owned one and vice versa), while only
   // the kanban-eligible subset is actually classified onto surfaces.
   const byId = new Map<string, Fiber>(feed.entries.map((e) => [e.fiber.id, e.fiber]));
-  const tagIndex = collectTagIndex(feed.entries);
 
   if (feed.entries.length === 0) {
-    return emptyResponse(feed, nowMs, staleness, tagIndex);
+    return emptyResponse(feed, nowMs, staleness);
   }
 
   const eligible = dedupeMirroredRows(
-    feed.entries
-      .filter((e) => shouldIncludeInKanban(e.fiber))
-      .filter((e) =>
-        opts.scopeCityId === undefined
-          ? true
-          : opts.resolveCity?.(e)?.cityId === opts.scopeCityId,
-      ),
+    feed.entries.filter((e) => shouldIncludeInKanban(e.fiber)),
     feed,
   );
-  const surfaces = assembleSurfaces(eligible, byId, nowMs, opts.resolveCity);
+  const surfaces = assembleSurfaces(eligible, byId, nowMs);
 
   return {
     feltHost: feed.host,
@@ -146,7 +105,6 @@ export function buildKanbanResponseFromComposite(
     temperedTotal: surfaces.temperedTotal,
     timelineWindow: KANBAN_TIMELINE_WINDOW,
     staleness,
-    tagIndex,
     generatedAt: nowMs,
   };
 }
@@ -236,7 +194,6 @@ function assembleSurfaces(
   entries: CompositeEntry[],
   byId: Map<string, Fiber>,
   nowMs: number,
-  resolveCity?: CityResolver,
 ): AssembledSurfaces {
   const drafts: KanbanCard[] = [];
   const scheduled: KanbanCard[] = [];
@@ -251,7 +208,7 @@ function assembleSurfaces(
     drafts, scheduled, pinned, inFlight, awaitingReview, tempered, composted, cycles,
   };
   for (const entry of entries) {
-    const card = toCard(entry, byId, nowMs, resolveCity);
+    const card = toCard(entry, byId, nowMs);
     buckets[classifyFiber(entry.fiber, {
       runningWorker: !!card.runningWorker,
       dependsOnSatisfied: card.dependsOnSatisfied,
@@ -356,15 +313,12 @@ function assembleSurfaces(
  *   - `runningWorker` is the feed row's owner-served `runtime.tmuxSession` —
  *     uniform for local and remote, ONE observer per fiber. No `resolveRunningWorker`,
  *     no local tmux index, no per-origin branch. This is the bounce-kill.
- *   - `cityId`/`projectSlug`/`shuttleFiberId` come from the injected resolver,
- *     not a `realpath` + pinned-city walk (browser can't realpath).
  * Dependency satisfaction still reads `byId` across the whole feed.
  */
 function toCard(
   entry: CompositeEntry,
   byId: Map<string, Fiber>,
   nowMs: number,
-  resolveCity?: CityResolver,
 ): KanbanCard {
   const f = entry.fiber;
   const dependsOn = f.dependsOn ?? [];
@@ -377,7 +331,6 @@ function toCard(
   const heldSince = entry.heldSince;
   const horizon = effectiveHorizon(f, nowMs);
   const isCycle = isCycleFiber(f);
-  const city = resolveCity?.(entry);
 
   return {
     id: f.id,
@@ -407,9 +360,6 @@ function toCard(
     held,
     heldSince,
     mirroredOrigins: entry.mirroredOrigins,
-    cityId: city?.cityId,
-    projectSlug: city?.projectSlug,
-    shuttleFiberId: city?.shuttleFiberId,
     sessionId: f.shuttleSessionId,
     dispatchedAt: f.shuttleDispatchedAt,
     handedOffAt: f.shuttleHandedOffAt,
@@ -474,20 +424,6 @@ function surfaceTotals(s: AssembledSurfaces): KanbanResponse['totals'] {
   };
 }
 
-function collectTagIndex(entries: CompositeEntry[]): string[] {
-  const seen = new Set<string>();
-  for (const { fiber } of entries) {
-    if (!Array.isArray(fiber.tags)) continue;
-    for (const t of fiber.tags) {
-      if (typeof t !== 'string') continue;
-      const trimmed = t.trim();
-      if (trimmed.length === 0) continue;
-      seen.add(trimmed);
-    }
-  }
-  return [...seen].sort((a, b) => a.localeCompare(b));
-}
-
 /**
  * Per-origin freshness from the composite feed's `origins` map. The daemon's
  * federated registry marks an unreachable remote `stale` (keeping its
@@ -520,7 +456,6 @@ function emptyResponse(
   feed: CompositeFeed,
   nowMs: number,
   staleness: Record<string, KanbanOriginStaleness>,
-  tagIndex: string[],
 ): KanbanResponse {
   return {
     feltHost: feed.host,
@@ -536,7 +471,6 @@ function emptyResponse(
     temperedTotal: 0,
     timelineWindow: KANBAN_TIMELINE_WINDOW,
     staleness,
-    tagIndex,
     generatedAt: nowMs,
   };
 }

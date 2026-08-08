@@ -27,7 +27,6 @@ import {
   railBounds,
   railFraction,
   railRuleFractions,
-  shiftCivilDay,
   shiftWeekMonday,
   summarizeSpend,
   weekCivilDays,
@@ -35,6 +34,7 @@ import {
   weekWindow,
 } from './WeekView.js';
 import { civilDayToLocalDate, isoDayLocal, railCivilDay } from '../civilDay.js';
+import { shiftCivilDay } from './railTime.js';
 import type { ActivityBucket } from './TemporalData.js';
 import type { KanbanCard } from '../KanbanTypes.js';
 
@@ -884,5 +884,17 @@ describe('how full a day was', () => {
     const spend = summarizeSpend([at(0), at(7), at(19), at(31)]);
     expect(spend.totalMs).toBe(4 * 60_000);
     expect(dayWeight(spend.totalMs)).toBe('quiet');
+  });
+
+  it('counts notify BUCKETS, not notify minutes — two hands up is two', () => {
+    // The one figure in the fold that is not a minute count. Two workers
+    // raising a hand in the same minute are two requests; folding them into a
+    // minute Set would silently report one.
+    const spend = summarizeSpend([
+      { m: 0, s: 'a-shuttle', cwd: null, k: 'notify', n: 1 },
+      { m: 0, s: 'b-shuttle', cwd: null, k: 'notify', n: 1 },
+    ]);
+    expect(spend.notifyCount).toBe(2);
+    expect(spend.totalMs).toBe(60_000);
   });
 });

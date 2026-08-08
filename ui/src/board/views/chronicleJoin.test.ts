@@ -26,18 +26,17 @@ import {
   buildCycleBands,
   densityStep,
   firstParagraph,
-  formatMinutes,
   groupNarration,
   lifelineExtent,
-  spanMinutes,
   railDate,
   readCycleBand,
   type CycleCard,
   saysNothingHere,
-  sessionSlug,
-  sessionUlid,
   shuttleOrigin,
 } from './ChronicleView.js'
+import { sessionSlug, sessionUlid } from './sessionNames.js'
+import { formatSpanMinutes } from './railTime.js'
+import { foldActiveMinutes } from './TemporalData.js'
 import type { ActivityBucket } from './TemporalData.js'
 import type { KanbanCard } from '../KanbanTypes.js'
 import { civilDayToLocalDate, isoDayLocal } from '../civilDay.js'
@@ -692,21 +691,21 @@ describe('composing an era’s look-back', () => {
       bucket(t + 60_000, { k: 'agent', n: 1 }),
       bucket(t + 120_000, { k: 'attention', n: 1 }),
     ]
-    expect(spanMinutes(buckets, 'agent', t - 1, t + 300_000)).toBe(2)
-    expect(spanMinutes(buckets, 'attention', t - 1, t + 300_000)).toBe(1)
+    expect(foldActiveMinutes(buckets, { fromMs: t - 1, toMs: t + 300_001 }).agent).toBe(2)
+    expect(foldActiveMinutes(buckets, { fromMs: t - 1, toMs: t + 300_001 }).attention).toBe(1)
   })
 
   it('counts only what falls inside the span', () => {
     const t = localMs(DST_DAY, 10)
     const buckets = [bucket(t - 600_000, { k: 'agent' }), bucket(t, { k: 'agent' })]
-    expect(spanMinutes(buckets, 'agent', t - 1, t + 1)).toBe(1)
+    expect(foldActiveMinutes(buckets, { fromMs: t - 1, toMs: t + 2 }).agent).toBe(1)
   })
 
   it('reads a duration the way a person says it', () => {
-    expect(formatMinutes(0)).toBe('—')
-    expect(formatMinutes(45)).toBe('45m')
-    expect(formatMinutes(200)).toBe('3h 20m')
-    expect(formatMinutes(120)).toBe('2h 0m')
+    expect(formatSpanMinutes(0, { empty: '—' })).toBe('—')
+    expect(formatSpanMinutes(45, { empty: '—' })).toBe('45m')
+    expect(formatSpanMinutes(200, { empty: '—' })).toBe('3h 20m')
+    expect(formatSpanMinutes(120, { empty: '—' })).toBe('2h 0m')
   })
 
   it('gathers commits under the thing each was about', () => {

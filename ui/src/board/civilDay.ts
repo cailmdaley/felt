@@ -42,6 +42,13 @@ export function isoDayLocal(ms: number): string {
   return `${y}-${m}-${day}`;
 }
 
+/** The hour a rail opens, and the next one closes. Work past midnight belongs
+ *  to the day it started, so the day boundary is dawn, not midnight. Day, Week
+ *  and Chronicle all draw from this one value (re-exported by
+ *  views/railTime.ts) — three views disagreeing about which day it is, is the
+ *  defect it exists to prevent. */
+export const RAIL_START_HOUR = 6;
+
 /**
  * The civil day whose RAIL contains an instant — the "which day is it" a view
  * whose day begins at dawn has to ask.
@@ -62,7 +69,7 @@ export function isoDayLocal(ms: number): string {
  * One definition, shared: WeekView's row classification and DayView's
  * `defaultDayISO` are the same rule and must not drift apart.
  */
-export function railCivilDay(ms: number, startHour = 6): string {
+export function railCivilDay(ms: number, startHour = RAIL_START_HOUR): string {
   const d = new Date(ms);
   if (d.getHours() >= startHour) return isoDayLocal(ms);
   // Noon anchor before the stride — midnight is the one wall-clock time a
@@ -189,4 +196,31 @@ export function sameCivilDue(cardDue: string | undefined, next: string | null): 
   if (next === null) return (cardDue ?? '') === '';
   const a = dueCivilDay(cardDue);
   return a !== undefined && a === dueCivilDay(next);
+}
+
+// ── Durations ────────────────────────────────────────────────────────────────
+// Not a civil-day concern — a span has no zone. It lives here because this is
+// the module every time-facing surface already imports, views and the fiber
+// detail panel alike.
+
+/**
+ * A span of minutes as `2h 05m` / `47m`.
+ *
+ * `pad` zero-pads the minutes when there are hours, for mono columns that must
+ * line up. `empty`, when given, replaces any non-positive span — omit it to
+ * render `0m` (and to let a negative span show as itself, which is a bug worth
+ * seeing rather than hiding).
+ *
+ * WeekView keeps its own `formatSpan`: it renders a whole hour as `1h`, not
+ * `1h 0m`, and that difference does not fit an option.
+ */
+export function formatSpanMinutes(
+  minutes: number,
+  opts: { pad?: boolean; empty?: string } = {},
+): string {
+  if (opts.empty !== undefined && minutes <= 0) return opts.empty;
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  if (h <= 0) return `${m}m`;
+  return `${h}h ${opts.pad ? String(m).padStart(2, '0') : m}m`;
 }

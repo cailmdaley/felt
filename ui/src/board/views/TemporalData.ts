@@ -11,11 +11,12 @@
  * BOTH ROUTES TAKE INSTANTS, and that is the point. `narration` still *reads*
  * inclusive civil days from its callers — that is the unit a temporal view
  * thinks in — but it resolves them to epoch-ms HERE, in the browser's zone,
- * and sends `from_ms`/`to_ms`. The daemon's older civil-day form
- * (`?from=&to=`) resolves the same dates in the DAEMON's zone, so a UTC daemon
- * serving a UTC+2 browser shifted the whole window two hours and could drop a
- * day's commits outright (measured; see `Shuttle.Narration`'s moduledoc).
- * Instants are timezone-free, so the skew cannot happen. Callers saw no change.
+ * and sends `from_ms`/`to_ms`. Resolving a civil day in the DAEMON's zone
+ * instead shifts the whole window by the offset between them: a UTC daemon
+ * serving a UTC+2 browser moved it two hours and could drop a day's commits
+ * outright (measured; see `Shuttle.Narration`'s moduledoc). Instants are
+ * timezone-free, so the skew cannot happen — which is why the zone-resolving
+ * form is the browser's job and the routes do not offer one.
  *
  * A daemon older than these routes answers 404. That must not break the board,
  * so every failure path — 404, 5xx, network error, malformed body — resolves to
@@ -56,6 +57,62 @@ export interface ActivityResult {
 export interface NarrationCommit {
   iso: string
   subject: string
+}
+
+export interface ActiveMinutes {
+  /** Minutes carrying ANY signal — a minute counts once, not once per kind, so
+   *  this is wall-clock time and not a sum of overlaps. */
+  all: number
+  attention: number
+  agent: number
+  /** Notify BUCKETS, not notify minutes. Buckets key on
+   *  `{minute, tmuxSession, cwd, kind}` (Shuttle.Activity), so two workers
+   *  raising a hand in the same minute are two here — deliberately: this
+   *  counts requests, not time. */
+  notifyBuckets: number
+}
+
+/**
+ * Distinct active minutes by kind, inside an optional half-open span.
+ *
+ * A bucket IS a minute: `Shuttle.Activity` keys every event by
+ * `div(ts, 60_000) * 60_000` unconditionally (lib/shuttle/activity.ex), so
+ * distinct `m` values ARE the minute count. Counting buckets, or summing `n`,
+ * would count events — and a busy minute is still one minute.
+ *
+ * `span` is `[fromMs, toMs)`, closed at the start and OPEN at the end. That is
+ * what makes 06:00→06:00 day windows tile: the minute at one day's `endMs`
+ * belongs to the next day, and to it only.
+ */
+export function foldActiveMinutes(
+  buckets: readonly ActivityBucket[],
+  span?: { fromMs: number; toMs: number },
+): ActiveMinutes {
+  const all = new Set<number>()
+  const attention = new Set<number>()
+  const agent = new Set<number>()
+  let notifyBuckets = 0
+  for (const b of buckets) {
+    if (span && (b.m < span.fromMs || b.m >= span.toMs)) continue
+    const minute = Math.floor(b.m / 60_000)
+    all.add(minute)
+    if (b.k === 'attention') attention.add(minute)
+    else if (b.k === 'agent') agent.add(minute)
+    else notifyBuckets += 1
+  }
+  return { all: all.size, attention: attention.size, agent: agent.size, notifyBuckets }
+}
+
+/** `slug: what happened` — felt's commit-subject convention. The slug is the
+ *  bold/mono token the writer already chose as the grouping; the remainder is
+ *  the sentence. A subject with no prefix parses to a null slug and its own
+ *  text as the rest — each view decides where those land. */
+const COMMIT_SLUG_RE = /^([A-Za-z0-9][A-Za-z0-9._/-]*):[ \t]+(\S.*)$/
+
+export function parseCommitSlug(subject: string): { slug: string | null; rest: string } {
+  const trimmed = subject.trim()
+  const match = COMMIT_SLUG_RE.exec(trimmed)
+  return match ? { slug: match[1], rest: match[2].trim() } : { slug: null, rest: trimmed }
 }
 
 /**
@@ -306,9 +363,8 @@ export function civilDaysToInstants(
 
 const BUCKET_KINDS = new Set<ActivityBucket['k']>(['attention', 'notify', 'agent'])
 
-/** Coerce a wire body into an ActivityResult, dropping malformed buckets.
- *  Exported for the views' own tests; the fetchers apply it themselves. */
-export function parseActivity(body: unknown, fallback: ActivityResult): ActivityResult {
+/** Coerce a wire body into an ActivityResult, dropping malformed buckets. */
+function parseActivity(body: unknown, fallback: ActivityResult): ActivityResult {
   if (!isRecord(body)) return fallback
   const raw = Array.isArray(body.buckets) ? body.buckets : []
   const buckets: ActivityBucket[] = []
@@ -336,7 +392,7 @@ export function parseActivity(body: unknown, fallback: ActivityResult): Activity
 }
 
 /** Coerce a wire body into a NarrationResult, dropping malformed commits. */
-export function parseNarration(body: unknown, fallback: NarrationResult): NarrationResult {
+function parseNarration(body: unknown, fallback: NarrationResult): NarrationResult {
   if (!isRecord(body)) return fallback
   const raw = Array.isArray(body.commits) ? body.commits : []
   const commits: NarrationCommit[] = []

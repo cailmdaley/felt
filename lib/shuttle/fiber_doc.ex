@@ -92,14 +92,6 @@ defmodule Shuttle.FiberDoc do
     end
   end
 
-  @doc "As `edit/2`, but for a known `.md` path (skips id resolution)."
-  @spec edit_path(String.t(), [FrontmatterEdit.op()]) :: :ok | {:error, String.t()}
-  def edit_path(path, ops) when is_binary(path) and is_list(ops) do
-    with {:ok, ^path, raw_fm, _frontmatter, body} <- read_path(path) do
-      write!(path, raw_fm, body, ops)
-    end
-  end
-
   @doc """
   Atomic (tmp + rename), surgical write: apply the edit `ops` to the raw
   frontmatter text and reconstruct the file. Only the targeted frontmatter lines

@@ -94,29 +94,28 @@ interface CreateFiberResponse {
 // ---------------------------------------------------------------------------
 
 /**
- * Slugify — mirrors Shuttle/felt's rule (kebab-case, lowercased, non-alphanum
- * collapsed, leading/trailing hyphens stripped, capped at 60; a timestamp
- * fallback when the title sluggifies to empty). Surfaced live under the title
- * and reused verbatim at submit so preview == reality.
+ * The slug rule — mirrors Shuttle/felt's (kebab-case, lowercased, non-alphanum
+ * collapsed, leading/trailing hyphens stripped, capped at 60). The single
+ * source for both the live preview and the submitted id, so preview == reality
+ * by construction. Empty stem means the title had no alphanumerics; each caller
+ * labels that case for itself.
  */
-function slugify(title: string): string {
-  return (
-    title
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '')
-      .slice(0, 60) || `stash-${Date.now()}`
-  )
-}
-
-/** Preview variant — same grammar, but an em-dash placeholder for the empty case. */
-function previewSlug(title: string): string {
-  const s = title
+function slugStem(title: string): string {
+  return title
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
     .slice(0, 60)
-  return s || 'stash-…'
+}
+
+/** Submit variant — a timestamp keeps an alphanumeric-free title addressable. */
+function slugify(title: string): string {
+  return slugStem(title) || `stash-${Date.now()}`
+}
+
+/** Preview variant — an ellipsis stands in for the not-yet-known timestamp. */
+function previewSlug(title: string): string {
+  return slugStem(title) || 'stash-…'
 }
 
 /** The shuttle block, assembled client-side — mirrors Portolan's
@@ -381,15 +380,15 @@ export function StashForm({
     titleRef.current?.focus()
   }, [])
 
-  // The agent registry straight from the daemon (a bare array; accept the
-  // `{agents}` envelope too). Best-effort — absence degrades to a text input.
+  // The agent registry straight from the daemon — a bare array. Best-effort:
+  // absence or a malformed body degrades to a free-text agent input.
   useEffect(() => {
     let cancelled = false
     fetch(`${shuttleBase}/api/v1/agents`)
       .then((res) => (res.ok ? res.json() : null))
-      .then((raw: AgentEntry[] | { agents?: AgentEntry[] } | null) => {
-        if (cancelled || !raw) return
-        const list = (Array.isArray(raw) ? raw : raw.agents ?? []).filter((a) => !a.alias_of)
+      .then((raw: AgentEntry[] | null) => {
+        if (cancelled || !Array.isArray(raw)) return
+        const list = raw.filter((a) => !a.alias_of)
         if (!list.length) return
         setAgents(list)
         const def = list.find((a) => a.default)

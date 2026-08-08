@@ -1171,8 +1171,12 @@ defmodule Shuttle.Poller do
     state = refresh_felt_stores(state)
     {:ok, candidates, host_map, host_listings} = discover_candidates(state)
 
+    # The poll-cycle document cache lives in `Shuttle.Poller.DocumentCache`; the
+    # cache itself stays on `State`. Entries are built directly from the candidate
+    # rows the poll already discovered — one `felt ls` per store, no per-miss
+    # `felt show` and no filesystem stat.
     {refresh_us, {document_cache, document_cache_stats}} =
-      :timer.tc(fn -> refresh_document_cache(state, candidates, host_map) end)
+      :timer.tc(fn -> Shuttle.Poller.DocumentCache.refresh(state, candidates, host_map) end)
 
     {:ok,
      %{
@@ -1556,8 +1560,9 @@ defmodule Shuttle.Poller do
 
   # Re-read one fiber from disk and replace its document-cache entry (or evict it
   # if the fiber no longer resolves). Backs `refresh_document/2`, the shared
-  # post-mutation seam. Keyed identically to the poll's `refresh_document_cache`
-  # (uid when present, else id), and any prior entries for this fiber id under a
+  # post-mutation seam. Keyed identically to the poll's cache rebuild
+  # (`Shuttle.Poller.DocumentCache.refresh/3`) — uid when present, else id — and
+  # any prior entries for this fiber id under a
   # different key are dropped first so a re-key can't leave a duplicate card. The
   # mtime is carried so the next poll's `reusable_document_cache_entry?` reuses
   # this fresh read instead of re-shelling felt.
@@ -1583,14 +1588,6 @@ defmodule Shuttle.Poller do
         Logger.warning("refresh_document #{fiber_id} skipped: #{inspect(reason)}")
         state
     end
-  end
-
-  # The poll-cycle document cache lives in `Shuttle.Poller.DocumentCache`; the
-  # cache itself stays on `State`. Entries are built directly from the candidate
-  # rows the poll already discovered — one `felt ls` per store, no per-miss
-  # `felt show` and no filesystem stat.
-  defp refresh_document_cache(%State{} = state, candidates, host_map) do
-    Shuttle.Poller.DocumentCache.refresh(state, candidates, host_map)
   end
 
   # One :info line per refresh: store count, entry/hit/miss counts, rebuild
