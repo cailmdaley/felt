@@ -147,11 +147,29 @@ export function effectiveHorizon(
   const due = dueCivilDay(f.due);
   const duePromotesToNow = due !== undefined && due <= isoDayLocal(nowMs);
 
+  // Due-drift OVERRIDES a stored `stashed`, and that override is snooze's
+  // return ticket. A snoozed card is `horizon:stashed` + a future `due:`; when
+  // the due day arrives this branch pulls it back onto the desk. Without the
+  // override, snooze would be a black hole — the card would rest forever with
+  // a date nobody reads. The branch order IS the rule: drift is checked before
+  // the stashed branch below, never after.
   if (duePromotesToNow) {
     return {
       storedHorizon,
       effectiveHorizon: 'now',
       drifted: storedHorizon !== undefined,
+    };
+  }
+
+  // SNOOZED — a future `due:` under a stored `stashed`. The two fields compose:
+  // `stashed` says where the card lives (Resting, off the desk), `due:` says
+  // when it comes back. It is NOT `soon`: a soon card sits on the timeline and
+  // nowhere else, while a snoozed one rests AND ghosts onto its due day.
+  if (due !== undefined && storedHorizon === 'stashed') {
+    return {
+      storedHorizon,
+      effectiveHorizon: 'stashed',
+      drifted: false,
     };
   }
 
@@ -176,6 +194,70 @@ export function effectiveHorizon(
     effectiveHorizon: 'now',
     drifted: false,
   };
+}
+
+/**
+ * The civil day a resting card wakes on, or undefined when it rests without a
+ * date. A snoozed card is the composition `horizon:stashed` + a future `due:`;
+ * this reads the second half back out, for the timeline ghost's placement and
+ * its "resting until <day>" title. Returns undefined once the day arrives —
+ * from that moment the card is drifted onto the desk, not resting.
+ */
+export function restingUntil(
+  card: Pick<Fiber, 'due' | 'horizon'>,
+  nowMs: number = Date.now(),
+): string | undefined {
+  const h = effectiveHorizon(card, nowMs);
+  if (h.effectiveHorizon !== 'stashed') return undefined;
+  return dueCivilDay(card.due);
+}
+
+const DOW_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+/**
+ * A cron expression as a human would say it — "weekdays 9:00", "daily 6:30",
+ * "Mon 8:00". Undefined for anything this vocabulary can't say faithfully
+ * (multiple hours, minute steps, day-of-month or month constraints), so the
+ * caller falls back to the raw expression rather than printing a lie.
+ *
+ * Faithful-or-silent is the whole contract here: a schedule the human reads
+ * wrong is worse than one they have to parse themselves, and the raw string
+ * always stays available on the `title`.
+ */
+export function humanizeCron(expr: string | undefined): string | undefined {
+  if (typeof expr !== 'string' || !expr.trim()) return undefined;
+  let fields;
+  try {
+    fields = CronExpressionParser.parse(expr.trim()).fields;
+  } catch {
+    return undefined;
+  }
+  const minutes = [...fields.minute.values];
+  const hours = [...fields.hour.values];
+  if (minutes.length !== 1 || hours.length !== 1) return undefined;
+  // Only an unconstrained day-of-month + month can be said as a weekly cadence.
+  if (fields.dayOfMonth.values.length !== 31) return undefined;
+  if (fields.month.values.length !== 12) return undefined;
+
+  const time = `${hours[0]}:${String(minutes[0]).padStart(2, '0')}`;
+  // cron-parser lists Sunday as both 0 and 7 for `*`; collapse to 0..6 so the
+  // set comparisons below have one representation to reason about. The field
+  // values are typed loosely enough to admit the non-numeric cron tokens
+  // (`L`, `W`), so coerce and drop anything that isn't a weekday number.
+  const dow = [
+    ...new Set(
+      fields.dayOfWeek.values
+        .map((d) => Number(d))
+        .filter((d) => Number.isInteger(d) && d >= 0 && d <= 7)
+        .map((d) => (d === 7 ? 0 : d)),
+    ),
+  ].sort((a, b) => a - b);
+  const key = dow.join(',');
+  if (key === '0,1,2,3,4,5,6') return `daily ${time}`;
+  if (key === '1,2,3,4,5') return `weekdays ${time}`;
+  if (key === '0,6') return `weekends ${time}`;
+  if (dow.length <= 3) return `${dow.map((d) => DOW_NAMES[d]).join(', ')} ${time}`;
+  return undefined;
 }
 
 /**

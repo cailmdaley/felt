@@ -69,6 +69,16 @@ interface CacheEntry<T> {
 }
 
 /**
+ * Hard ceiling on cached windows. The TTL sweep alone is not enough: a view
+ * that re-asks on a moving clock mints a NEW key every time (Day's window
+ * slides, Week's `cap` tracks now), so keys arrive faster than they expire and
+ * the map grows without bound over a long-lived board. Fifty is far more than
+ * the handful of windows the four views hold at once, and each entry is one
+ * result, so the cap costs nothing in practice — it only stops the leak.
+ */
+const TEMPORAL_CACHE_MAX = 50
+
+/**
  * Build the fetch pair for one daemon base. The cache is per-instance (not
  * module-global) so two boards — or a test and a board — never share state.
  *
@@ -77,10 +87,37 @@ interface CacheEntry<T> {
 export function createTemporalFetchers(shuttleBase: string): TemporalFetchers {
   const cache = new Map<string, CacheEntry<unknown>>()
 
+  /**
+   * Bound the map on every access: first drop what the TTL already made
+   * worthless, then, if the map is still at the ceiling, evict oldest-first.
+   *
+   * Oldest-first is insertion order, which `Map` preserves and which matches
+   * `at` order here because an entry is only ever written once (a refresh
+   * writes a NEW key — the windows themselves move). Evicting an entry whose
+   * promise is still in flight is harmless: the awaiting caller keeps its own
+   * reference and still resolves; a later caller simply re-requests. And a
+   * pending entry is by definition among the newest, so oldest-first reaches
+   * it last.
+   */
+  const prune = (now: number): void => {
+    for (const [key, entry] of cache) {
+      if (now - entry.at >= TEMPORAL_TTL_MS) cache.delete(key)
+    }
+    while (cache.size >= TEMPORAL_CACHE_MAX) {
+      const oldest = cache.keys().next()
+      if (oldest.done) break
+      cache.delete(oldest.value)
+    }
+  }
+
   const memo = <T>(key: string, produce: () => Promise<T>): Promise<T> => {
     const now = Date.now()
     const hit = cache.get(key)
     if (hit && now - hit.at < TEMPORAL_TTL_MS) return hit.value as Promise<T>
+    // Only prune on a MISS. A hit is the common path (the 15s poll re-asking
+    // for a window it already has) and does not grow the map, so it should not
+    // pay for a full sweep.
+    prune(now)
     const value = produce()
     cache.set(key, { at: now, value: value as Promise<unknown> })
     return value

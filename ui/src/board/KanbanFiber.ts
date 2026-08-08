@@ -48,6 +48,14 @@ export interface Fiber {
   /** `shuttle.session.id` — the most recently dispatched worker's session UUID
    * when frontmatter still carries one. Display-only hint data. */
   shuttleSessionId?: string;
+  /** `shuttle.runtime.dispatched_at` — RFC3339 INSTANT the daemon stamped when
+   * it launched the most recent worker. Machine-managed; read-only here. */
+  shuttleDispatchedAt?: string;
+  /** `shuttle.runtime.handed_off_at` — RFC3339 INSTANT the WORKER stamped on a
+   * clean exit (`felt shuttle handoff`). Compare against `shuttleDispatchedAt`
+   * to tell this run's handoff from a leftover stamp of the previous one: only
+   * `handed_off_at >= dispatched_at` concluded the run in hand. */
+  shuttleHandedOffAt?: string;
   /** `shuttle.agent` — the agent identifier to dispatch with (e.g. `claude-opus`). */
   shuttleAgent?: string;
   /** `shuttle.effort` — reasoning-effort axis (harness-native token, e.g.
@@ -131,6 +139,8 @@ export function mapFeltJsonToFiber(item: unknown): Fiber | null {
 
   let shuttleKind: 'oneshot' | 'standing' | 'pinned' | undefined;
   let shuttleSessionId: string | undefined;
+  let shuttleDispatchedAt: string | undefined;
+  let shuttleHandedOffAt: string | undefined;
   let shuttleAgent: string | undefined;
   let shuttleEffort: string | undefined;
   let shuttleSchedule: { expr: string; tz: string } | undefined;
@@ -148,6 +158,17 @@ export function mapFeltJsonToFiber(item: unknown): Fiber | null {
     if (session && typeof session === 'object' && !Array.isArray(session)) {
       const sid = (session as Record<string, unknown>).id;
       if (typeof sid === 'string' && sid) shuttleSessionId = sid;
+    }
+
+    // shuttle.runtime — the machine-managed nested block (session_uuid,
+    // dispatched_at, handed_off_at, run_id). Readers read ONLY the nested
+    // form; nothing writes the retired flat keys. Two instants surface on the
+    // board: they bound the session window the detail panel prints.
+    const runtime = s.runtime;
+    if (runtime && typeof runtime === 'object' && !Array.isArray(runtime)) {
+      const r = runtime as Record<string, unknown>;
+      shuttleDispatchedAt = pickIsoString(r, ['dispatched_at']);
+      shuttleHandedOffAt = pickIsoString(r, ['handed_off_at']);
     }
 
     if (typeof s.agent === 'string' && s.agent) shuttleAgent = s.agent;
@@ -215,6 +236,8 @@ export function mapFeltJsonToFiber(item: unknown): Fiber | null {
     hasShuttleBlock: hasShuttleBlock || undefined,
     shuttleKind,
     shuttleSessionId,
+    shuttleDispatchedAt,
+    shuttleHandedOffAt,
     shuttleAgent,
     shuttleEffort,
     shuttleSchedule,

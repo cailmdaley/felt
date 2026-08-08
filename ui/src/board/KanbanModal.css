@@ -667,6 +667,23 @@
 .kbn-tl-card-awaiting .kbn-tl-card-glyph {
   color: #9A7B35;
 }
+/* Resting ghost: a snoozed card showing at the day it wakes on. Same dashed
+   ochre ◌ vocabulary as the awaiting ghost — both mean "in the wings, not on
+   stage" — but lighter and italic, because this one isn't waiting on you: it's
+   waiting on the calendar. */
+.kbn-tl-card-resting {
+  background: rgba(255, 252, 246, 0.40);
+  border: 0.5px dashed rgba(154, 123, 53, 0.40);
+  border-left: 2px dashed rgba(154, 123, 53, 0.70);
+  opacity: 0.72;
+}
+.kbn-tl-card-resting .kbn-tl-card-title {
+  color: #4A4034;
+  font-style: italic;
+}
+.kbn-tl-card-resting .kbn-tl-card-glyph {
+  color: rgba(154, 123, 53, 0.85);
+}
 /* Now-section projections onto the today column. Inflight uses the
    "working" teal accent from the Porch Morning palette to read as live;
    drafts use a muted graphite to read as in-progress-but-not-running.
@@ -729,7 +746,34 @@
   outline: 1px dashed #9A7B35;
   outline-offset: 2px;
 }
-/* Stash */
+/* Resting (the surface stored as `horizon: stashed`) */
+/* The one section head left on the board. It earns its keep by naming what the
+   bottom of the page means: the gloss is there so a card down here doesn't read
+   as one that failed. Set in the muted empty-state idiom — italic serif, the
+   same grey the fleurons use — so it whispers rather than announces. */
+.kbn-resting-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+.kbn-resting-title {
+  margin: 0;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #7A6F5C;
+  white-space: nowrap;
+}
+.kbn-resting-gloss {
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-style: italic;
+  font-size: 11.5px;
+  color: #A89B83;
+}
 .kbn-cluster-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
@@ -829,6 +873,17 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* "wakes Aug 12" — the return date on a snoozed card. Mono and faint: it's a
+   fact to glance at, never the thing you read first. */
+.kbn-cluster-item-wakes {
+  flex: 0 0 auto;
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 8.5px;
+  letter-spacing: 0.04em;
+  color: rgba(122, 94, 30, 0.75);
+  white-space: nowrap;
+}
+.kbn-cluster-cold .kbn-cluster-item-wakes { color: rgba(122, 111, 92, 0.6); }
 
 .kbn-col {
   display: flex;

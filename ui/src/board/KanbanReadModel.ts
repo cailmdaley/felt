@@ -321,6 +321,8 @@ function toCard(
     projectSlug: city?.projectSlug,
     shuttleFiberId: city?.shuttleFiberId,
     sessionId: f.shuttleSessionId,
+    dispatchedAt: f.shuttleDispatchedAt,
+    handedOffAt: f.shuttleHandedOffAt,
     shuttleAgent: f.shuttleAgent,
     shuttleEffort: f.shuttleEffort,
     shuttleChrome: f.shuttleChrome,
@@ -337,6 +339,17 @@ function toCard(
   };
 }
 
+/**
+ * Route one open card onto its planning surface from `effectiveHorizon`:
+ * `now` → the desk, `soon` (with a due) → the timeline day column, everything
+ * else → Resting.
+ *
+ * A SNOOZED card — `horizon:stashed` plus a future `due:` — resolves to
+ * `stashed` and lands here in Resting, keeping its `due:`. It is not lost to
+ * the timeline: `renderTimelineSection` ghosts every resting card that carries
+ * a due at that day, and `effectiveHorizon`'s drift branch returns it to the
+ * desk when the day arrives.
+ */
 function routeOpenCardByPlanningSurface(
   card: KanbanCard,
   now: KanbanCard[],

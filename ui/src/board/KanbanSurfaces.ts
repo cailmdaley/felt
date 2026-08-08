@@ -67,22 +67,71 @@ const RUNTIME_PHASE_BADGES: Record<string, { label: string; title: string }> = {
   // a serif text glyph, not a color emoji — paired with `font-variant-emoji:
   // text` and the EB Garamond stack in CSS.
   attention: { label: '☞︎ needs you now', title: 'The worker raised its hand (Notification) — it needs you now. Open it to respond.' },
-  waiting: { label: '⏸ waiting for you', title: 'The worker is paused at a prompt waiting for human input — open it to respond.' },
+  waiting: { label: '⏸ waiting', title: 'The worker is paused at a prompt waiting for human input — open it to respond.' },
   retrying: { label: '⟳ retrying', title: 'Dispatch failed — daemon is retrying with backoff. No live worker right now.' },
   due: { label: '◴ due', title: 'Scheduled tick elapsed — awaiting dispatch.' },
   dispatched: { label: '▸ dispatched', title: 'Dispatch sent — worker starting up.' },
   running: { label: '▸ running', title: 'Daemon reports a running worker, but its session is not matched here.' },
 }
 
-/** Skim-able title for surface affordance announcements. */
+/** Below this, an attention chip carries no clock: a worker that just raised
+ *  its hand is simply "now", and a number there would be noise. */
+const ATTENTION_AGE_FLOOR_MS = 60 * 60_000
+
+/**
+ * An idle duration as a human reads a clock face — `12m`, `3h`, `2d`. One unit,
+ * coarsening as it grows: minutes under an hour, hours under a day, days after.
+ * No seconds — the board repaints on a 15s poll, so a seconds figure would be
+ * wrong more often than right, and "how long has this been sitting?" is never a
+ * question answered in seconds. Negative or absent input gives `0m`.
+ */
+export function humanizeIdleAge(ms: number | undefined): string {
+  const safe = typeof ms === 'number' && Number.isFinite(ms) && ms > 0 ? ms : 0
+  const minutes = Math.floor(safe / 60_000)
+  if (minutes < 60) return `${minutes}m`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}h`
+  return `${Math.floor(hours / 24)}d`
+}
+
+/**
+ * The phase pill's text, with the wait made visible. A `waiting` worker always
+ * says how long it has been waiting — that age IS the reason to look at it,
+ * and it was the one thing the pill never told you. `attention` earns a clock
+ * only once it has gone an hour unanswered; fresh attention needs no number.
+ *
+ * Computed at render, not on a timer: the board's 15s poll re-renders, so the
+ * figure refreshes without a single interval running behind the page.
+ */
+export function phasePillLabel(
+  phase: string,
+  lastActivityAt: number | undefined,
+  nowMs: number = Date.now(),
+): string {
+  const base = RUNTIME_PHASE_BADGES[phase]?.label ?? phase
+  if (lastActivityAt === undefined) return base
+  const age = nowMs - lastActivityAt
+  if (phase === 'waiting') return `${base} · ${humanizeIdleAge(age)}`
+  if (phase === 'attention' && age >= ATTENTION_AGE_FLOOR_MS) {
+    return `${base} · ${humanizeIdleAge(age)}`
+  }
+  return base
+}
+
+/** Skim-able title for surface affordance announcements. The stored horizon is
+ *  still `stashed` everywhere in the wire format and the API; "Resting" is what
+ *  the human is told, because that is what the surface means — deliberately
+ *  paused work, not a bin of failures. */
 export const SURFACE_TITLE: Record<HorizonKind, string> = {
   now: 'Now',
   soon: 'Soon',
-  stashed: 'Stash',
+  stashed: 'Resting',
 }
 
-/** The visual variants a timeline mini-card can take, by lifecycle position. */
-type TimelineCardKind = 'past' | 'future' | 'awaiting' | 'inflight' | 'draft'
+/** The visual variants a timeline mini-card can take, by lifecycle position.
+ *  `resting` is a snoozed card's ghost: it lives in Resting and shows here at
+ *  the day it wakes on. */
+type TimelineCardKind = 'past' | 'future' | 'awaiting' | 'inflight' | 'draft' | 'resting'
 
 /** Stash cluster: project key + warmth + cards under that key. */
 export interface StashCluster {
@@ -410,10 +459,17 @@ export class KanbanSurfaceRenderer {
    *  card forward as a visual-scheduling gesture (drop on a future
    *  date -> setSurface(soon, due=iso), which routes the card to
    *  timeline.futureDated and out of the Now column).
+   *
+   *  `resting` is the Resting surface, passed in whole. Its snoozed
+   *  members — the ones carrying a `due:` — ghost onto the day they wake
+   *  on, so a card put down for later is still *somewhere* on the horizon
+   *  instead of vanishing to the bottom of the page. Dateless resting
+   *  cards have no day to sit on and are skipped.
    */
   renderTimelineSection(
     timeline: KanbanResponse['timeline'],
     now: KanbanResponse['now'],
+    resting: KanbanCard[],
     timelineWindow: KanbanResponse['timelineWindow'],
     staleness: Record<string, KanbanOriginStaleness>,
   ): HTMLElement {
@@ -509,6 +565,15 @@ export class KanbanSurfaceRenderer {
       if (col === null) continue
       place(col, card, card.status === 'closed' ? 'awaiting' : 'future')
     }
+    for (const card of resting) {
+      // A snoozed card: resting below, ghosted here at the day it wakes on.
+      // `dayIndexForDue` reads the `due:` as the civil day it names, the same
+      // way the drift rule that wakes it does — the ghost and the return
+      // ticket must agree on which day they mean.
+      const col = dayIndexForDue(card.due, dayIndex)
+      if (col === null) continue
+      place(col, card, 'resting')
+    }
     wrap.append(strip)
 
     this.installAdaptiveStripHeight(wrap, strip, cardsByCol, days.length)
@@ -592,9 +657,16 @@ export class KanbanSurfaceRenderer {
     return el
   }
 
-  /** Render the Stash surface: cluster grid keyed by containment-path's
+  /** Render the Resting surface: cluster grid keyed by containment-path's
    *  first meaningful project segment. Warm clusters first, then a
-   *  divider, then held-open clusters in a dimmer style. */
+   *  divider, then held-open clusters in a dimmer style.
+   *
+   *  "Resting" is the human name for the surface the wire format calls
+   *  `horizon: stashed`. The rename is the whole point of the heading: a card
+   *  down here was put down on purpose, and the gloss says so, because the
+   *  bottom of a board reads as a graveyard unless it tells you otherwise.
+   *  Nothing internal changes — the horizon value, the endpoints and the
+   *  cluster machinery all keep their names. */
   renderStashSection(
     stash: KanbanCard[],
     staleness: Record<string, KanbanOriginStaleness>,
@@ -602,7 +674,18 @@ export class KanbanSurfaceRenderer {
     const section = document.createElement('section')
     section.className = 'kbn-section kbn-section-stash'
     section.setAttribute('role', 'region')
-    section.setAttribute('aria-label', 'Stash — set aside, visible')
+    section.setAttribute('aria-label', 'Resting — deliberately paused, still visible')
+
+    const head = document.createElement('div')
+    head.className = 'kbn-resting-head'
+    const headTitle = document.createElement('h2')
+    headTitle.className = 'kbn-resting-title'
+    headTitle.textContent = stash.length ? `Resting · ${stash.length}` : 'Resting'
+    const gloss = document.createElement('span')
+    gloss.className = 'kbn-resting-gloss'
+    gloss.textContent = '— deliberately paused; not a failure state —'
+    head.append(headTitle, gloss)
+    section.append(head)
 
     const clusters = clusterStashCards(stash)
     const warm = clusters.filter((c) => !c.cold)
@@ -622,7 +705,7 @@ export class KanbanSurfaceRenderer {
     if (clusters.length === 0) {
       const empty = document.createElement('div')
       empty.className = 'kbn-cluster-empty'
-      empty.textContent = '— nothing stashed —'
+      empty.textContent = '— drag a card here to let it rest —'
       grid.append(empty)
     }
 
@@ -863,7 +946,7 @@ export class KanbanSurfaceRenderer {
       if (iso === isoDay(new Date())) {
         void this.setSurface(card, 'now', { due: null })
       } else {
-        void this.setSurface(card, 'soon', { due: iso })
+        void this.setSurface(card, dayDropHorizon(this.getLastResponse(), card.id), { due: iso })
       }
     })
   }
@@ -909,7 +992,7 @@ export class KanbanSurfaceRenderer {
       if (iso === today) {
         void this.setSurface(card, 'now', { due: null })
       } else {
-        void this.setSurface(card, 'soon', { due: iso })
+        void this.setSurface(card, dayDropHorizon(this.getLastResponse(), card.id), { due: iso })
       }
     })
   }
@@ -969,6 +1052,18 @@ export class KanbanSurfaceRenderer {
     title.textContent = card.name
     el.append(glyph, title)
 
+    // A snoozed card carries its return date here as well as on the timeline
+    // ghost — Resting is where you come to ask "what did I put down?", and half
+    // that answer is when each thing comes back.
+    if (card.due) {
+      const wakes = document.createElement('span')
+      wakes.className = 'kbn-cluster-item-wakes'
+      wakes.textContent = `wakes ${formatDue(card.due)}`
+      wakes.title = `Resting until ${formatDue(card.due)} — it returns to the desk that day`
+      el.append(wakes)
+      el.title = `${card.name} — resting until ${formatDue(card.due)}`
+    }
+
     el.addEventListener('click', (e) => {
       if ((e.target as HTMLElement).closest('button')) return
       this.openDetail(card, 'drafts')
@@ -992,11 +1087,13 @@ export class KanbanSurfaceRenderer {
         ? (isComposted ? 'kbn-tl-card-composted' : 'kbn-tl-card-past')
         : kind === 'awaiting'
           ? 'kbn-tl-card-awaiting'
-          : kind === 'inflight'
-            ? 'kbn-tl-card-inflight'
-            : kind === 'draft'
-              ? 'kbn-tl-card-draft'
-              : (isAgentCard(card) ? 'kbn-tl-card-agent' : 'kbn-tl-card-human')
+          : kind === 'resting'
+            ? 'kbn-tl-card-resting'
+            : kind === 'inflight'
+              ? 'kbn-tl-card-inflight'
+              : kind === 'draft'
+                ? 'kbn-tl-card-draft'
+                : (isAgentCard(card) ? 'kbn-tl-card-agent' : 'kbn-tl-card-human')
 
     const el = document.createElement('div')
     el.className = `kbn-tl-card ${variantClass}${isStale ? ' kbn-card--stale' : ''}`
@@ -1004,10 +1101,16 @@ export class KanbanSurfaceRenderer {
     el.style.gridRow = String(row)
     const isFutureAwaiting = kind === 'awaiting' && !!card.due
     const isNowProjection = kind === 'inflight' || kind === 'draft'
-    const isDraggable = !isStale && (kind === 'future' || kind === 'past' || isFutureAwaiting || isNowProjection)
+    const isDraggable =
+      !isStale &&
+      (kind === 'future' || kind === 'past' || kind === 'resting' || isFutureAwaiting || isNowProjection)
     el.draggable = isDraggable
     el.dataset.fiberId = card.id
-    el.title = card.name
+    // A resting ghost says what it is: the card is not scheduled for this day,
+    // it wakes on it.
+    el.title = kind === 'resting' && card.due
+      ? `${card.name} — resting until ${formatDue(card.due)}`
+      : card.name
     el.setAttribute('role', 'listitem')
 
     if (isDraggable) this.installDraggable(el, card, false)
@@ -1017,7 +1120,7 @@ export class KanbanSurfaceRenderer {
     glyph.textContent =
       kind === 'past'
         ? (isComposted ? '✗' : '✓')
-        : kind === 'awaiting'
+        : kind === 'awaiting' || kind === 'resting'
           ? '◌'
           : kind === 'inflight'
             ? '◐'
@@ -1322,10 +1425,10 @@ export class KanbanSurfaceRenderer {
       RUNTIME_PHASE_BADGES[card.runtimePhase] &&
       !card.runningWorker
     if (showPhase && card.runtimePhase) {
-      const { label, title } = RUNTIME_PHASE_BADGES[card.runtimePhase]
+      const { title } = RUNTIME_PHASE_BADGES[card.runtimePhase]
       const phase = document.createElement('span')
       phase.className = `kbn-card-phase kbn-card-phase-${card.runtimePhase}`
-      phase.textContent = label
+      phase.textContent = phasePillLabel(card.runtimePhase, card.lastActivityAt)
       phase.title = title
       meta.append(phase)
     }
@@ -1374,15 +1477,20 @@ export class KanbanSurfaceRenderer {
       const w = document.createElement('button')
       w.type = 'button'
       if (phaseTakesOverWorker && card.runtimePhase) {
-        // The human-attention phase IS the button — the chip opens the worker.
+        // The human-attention phase IS the button — the chip opens the worker,
+        // and (for `waiting`, plus a long-unanswered `attention`) says how long
+        // it has been standing there.
+        const age = card.lastActivityAt !== undefined
+          ? humanizeIdleAge(Date.now() - card.lastActivityAt)
+          : null
         w.className = `kbn-card-worker kbn-card-worker-${card.runtimePhase}`
-        w.textContent = RUNTIME_PHASE_BADGES[card.runtimePhase].label
+        w.textContent = phasePillLabel(card.runtimePhase, card.lastActivityAt)
         if (card.runtimePhase === 'attention') {
           w.setAttribute('aria-label', `Worker needs you now — open terminal: ${tmuxName}`)
-          w.title = `Worker raised its hand — click to open ${tmuxName} in kitty`
+          w.title = `Worker raised its hand${age ? ` ${age} ago` : ''} — click to open ${tmuxName} in kitty`
         } else {
           w.setAttribute('aria-label', `Worker waiting for you — open terminal: ${tmuxName}`)
-          w.title = `Worker paused on input — click to open ${tmuxName} in kitty`
+          w.title = `Worker paused on input${age ? ` ${age} ago` : ''} — click to open ${tmuxName} in kitty`
         }
       } else {
         w.className = 'kbn-card-worker'
@@ -1636,6 +1744,30 @@ export function formatDue(iso: string): string {
     month: 'short',
     day: 'numeric',
   })
+}
+
+/**
+ * What a drop on a FUTURE day column means for this card — the one place the
+ * board decides between scheduling and snoozing.
+ *
+ *   • A card on the desk (Drafts, Awaiting review) or already Resting →
+ *     `stashed`. Dropping it on a day is "not now, come back then": the card
+ *     leaves the desk for Resting and keeps the date as its return ticket.
+ *     Composing the two fields is what snooze IS — there is no third stored
+ *     state, so nothing new has to be migrated, classified, or cleaned up.
+ *   • Anything else — an In-flight card, a card already parked on the timeline,
+ *     a closed run in the past lane → `soon`. These are being *scheduled*, and
+ *     scheduling is what a bare `due:` has always meant.
+ *
+ * A drop on TODAY never routes here: today means "onto the desk now", which is
+ * `setSurface(card, 'now', { due: null })` at the call sites.
+ */
+export function dayDropHorizon(resp: KanbanResponse | null, id: string): HorizonKind {
+  if (!resp) return 'soon'
+  if (resp.now.drafts.some((c) => c.id === id)) return 'stashed'
+  if (resp.now.awaitingReview.some((c) => c.id === id)) return 'stashed'
+  if (resp.stash.some((c) => c.id === id)) return 'stashed'
+  return 'soon'
 }
 
 /**

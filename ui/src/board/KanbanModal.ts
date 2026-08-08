@@ -774,9 +774,14 @@ export class KanbanModal {
    * client-side and posts it through the daemon's `/api/v1/felt-edit`
    * (owner-routed by `origin`) so the drag is one atomic write.
    *
-   *   • Drag onto a timeline date column → setSurface(card, 'soon', { due });
-   *     the edit persists due and clears horizon.
-   *   • Drag into stash                   → setSurface(card, 'stashed', { cold? }).
+   *   • Drag a scheduled/in-flight card onto a date column →
+   *     setSurface(card, 'soon', { due }); the edit persists due, clears horizon.
+   *   • SNOOZE — drag a desk card (Drafts / Awaiting review) or a resting card
+   *     onto a date column → setSurface(card, 'stashed', { due }); ONE felt-edit
+   *     writes `horizon: stashed` AND `due:` together, so no poll can ever
+   *     observe half of it. Which of the two a day-drop means is decided by
+   *     `dayDropHorizon` at the drop site, from where the card currently sits.
+   *   • Drag into Resting                 → setSurface(card, 'stashed', { cold? }).
    *   • Drag back up to now               → setSurface(card, 'now') clears horizon.
    *
    * When `opts.due` is omitted the existing `due:` is preserved — except
@@ -831,21 +836,24 @@ export class KanbanModal {
       this.announce(`${card.name} awaits a verdict; accept or compost it first.`)
       return
     }
+    const wantsCold = horizon === 'stashed' ? (opts.cold ?? false) : undefined
+    const due = horizon === 'stashed' && opts.due === undefined ? null : opts.due
+
     // A block-less human due-card is on the board only by virtue of its `due:`
     // (the daemon's composite feed admits non-shuttle rows via a --has-field
-    // due walk). Stashing clears the due, which would drop the card off the
-    // board entirely — a silent vanish, not a stash. Refuse with an explanation.
-    if (horizon === 'stashed' && card.shuttleKind === undefined) {
+    // due walk). A DATELESS rest clears the due, which would drop the card off
+    // the board entirely — a silent vanish, not a rest. Refuse with an
+    // explanation. A SNOOZE is safe and allowed: it keeps a `due:`, so the walk
+    // still finds the card and the drift rule still wakes it.
+    if (horizon === 'stashed' && card.shuttleKind === undefined && due === null) {
       this.showBanner(
-        `“${card.name}” is a due-date card without a shuttle block — stashing would drop it off the board. Give it a new date instead, or promote it first.`,
+        `“${card.name}” is a due-date card without a shuttle block — resting it dateless would drop it off the board. Drop it on a day to snooze it instead, or promote it first.`,
         'info',
       )
-      this.announce(`${card.name} has no shuttle block; pick a date instead of stashing.`)
+      this.announce(`${card.name} has no shuttle block; pick a day instead of resting it dateless.`)
       return
     }
 
-    const wantsCold = horizon === 'stashed' ? (opts.cold ?? false) : undefined
-    const due = horizon === 'stashed' && opts.due === undefined ? null : opts.due
     const sameHorizon =
       card.storedHorizon === horizon && (card.cold ?? false) === (opts.cold ?? false)
     const sameDue = due === undefined || sameCivilDue(card.due, due)
@@ -1220,7 +1228,7 @@ export class KanbanModal {
     // the page (time as an illuminated strip you drag work *up* into), then the
     // Now board, then the pinned-role launcher band, then Stash. Pinned sits
     // between the board and Stash — a slim launcher shelf under the work.
-    this.deskEl.append(this.surfaces.renderTimelineSection(timeline, now, timelineWindow, staleness))
+    this.deskEl.append(this.surfaces.renderTimelineSection(timeline, now, stash, timelineWindow, staleness))
     this.deskEl.append(this.surfaces.renderNowSection(now, staleness))
     // The Pinned strip always renders (a permanent park/drop target) — see
     // renderPinnedSection; no null guard needed.
@@ -1939,7 +1947,11 @@ export function applyOptimisticSurface(
   let nextStash = stash
   if (horizon === 'stashed') {
     moved.cold = opts.cold ?? false
-    moved.due = undefined                                   // stashing clears the deadline
+    // A bare stash clears the deadline; a SNOOZE is a stash that keeps one (the
+    // caller passed an explicit day). Dropping the due here would have shown a
+    // dateless resting card for one frame and then snapped the date back in on
+    // the refetch — the optimistic card must be the card the write produces.
+    moved.due = opts.due ?? undefined
     nextStash = [moved, ...stash]
   } else {
     moved.cold = undefined

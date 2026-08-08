@@ -11,6 +11,8 @@ import {
 } from './FloatingPanelChrome.js'
 import { buildFileViewer, basenameOf, isScrollableFile } from './FileViewerPanel.js'
 import { fileBytesUrl, showToast } from './utils.js'
+import { humanizeCron } from './KanbanRules.js'
+import { instantMs } from './civilDay.js'
 import './FiberDetailModal.css'
 
 /**
@@ -45,6 +47,88 @@ function applyGeometryTo(el: HTMLElement, g: PanelGeometry): void {
   el.style.top = `${Math.max(0, g.top)}px`
   el.style.width = `${g.width}px`
   el.style.height = `${g.height}px`
+}
+
+/** Wall-clock time of an INSTANT, in the reader's zone. `dispatched_at` and
+ *  `handed_off_at` are real points on the timeline, not civil days — a run
+ *  launched at 14:02 in Paris happened at 14:02 for the person who launched it,
+ *  and the panel shows the reader's own clock. */
+function clockTime(ms: number): string {
+  // 24-hour regardless of locale: the line is a mono strip where two times sit
+  // side by side, and `11:59 AM · 03:35 PM` is both wider and harder to subtract
+  // than `11:59 · 15:35`. The full localized stamp is on the hover.
+  return new Date(ms).toLocaleTimeString(undefined, {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  })
+}
+
+/** A run's length as "3h 36m" / "12m" — hours only when there are hours. Sub-
+ *  minute runs read "0m" rather than seconds: the pair of clock times above
+ *  already tells that story, and this figure is for scale, not precision. */
+function formatSpan(ms: number): string {
+  const minutes = Math.max(0, Math.round(ms / 60_000))
+  const hours = Math.floor(minutes / 60)
+  return hours > 0 ? `${hours}h ${minutes % 60}m` : `${minutes}m`
+}
+
+/**
+ * The session window: one mono line saying when the last worker launched, when
+ * it handed off, and how long it held the fiber.
+ *
+ *   dispatched 14:02 · handed off 17:38 · 3h 36m ✓   — a clean, concluded run
+ *   dispatched 14:02 · aloft                          — a worker still running
+ *   dispatched 14:02 · no clean handoff               — it stopped without one
+ *
+ * Both instants ride the composite feed inside felt's `shuttle` map
+ * (`shuttle.runtime.dispatched_at` / `handed_off_at`), so this needs nothing
+ * from the daemon. Returns null with no `dispatched_at` — a fiber that has
+ * never run has no window to show, and an empty line would be worse than none.
+ *
+ * A `handed_off_at` EARLIER than `dispatched_at` is the previous run's stamp,
+ * not this one's (the daemon's own `last_serviced` guard turns on the same
+ * comparison). Reading it as this run's handoff would print a negative
+ * duration and a ✓ on a run that never finished, so it reads as no handoff.
+ */
+function buildSessionWindow(card: KanbanCard): HTMLElement | null {
+  const dispatched = instantMs(card.dispatchedAt)
+  if (dispatched === undefined) return null
+  const handedOff = instantMs(card.handedOffAt)
+  const concluded = handedOff !== undefined && handedOff >= dispatched
+
+  const el = document.createElement('div')
+  el.className = 'kbn-detail-session'
+
+  const parts = [`dispatched ${clockTime(dispatched)}`]
+  if (card.runningWorker) {
+    parts.push('aloft')
+    el.title = `Worker launched ${new Date(dispatched).toLocaleString()} and is still running.`
+  } else if (concluded && handedOff !== undefined) {
+    parts.push(`handed off ${clockTime(handedOff)}`, formatSpan(handedOff - dispatched))
+    el.title =
+      `Launched ${new Date(dispatched).toLocaleString()}; ` +
+      `handed off ${new Date(handedOff).toLocaleString()}.`
+  } else {
+    parts.push('no clean handoff')
+    el.title =
+      `Launched ${new Date(dispatched).toLocaleString()}. The worker never stamped a ` +
+      'handoff for this run — it was killed, crashed, or is still being reconciled.'
+  }
+
+  const line = document.createElement('span')
+  line.className = 'kbn-detail-session-line'
+  line.textContent = parts.join(' · ')
+  el.append(line)
+
+  if (concluded && !card.runningWorker) {
+    const mark = document.createElement('span')
+    mark.className = 'kbn-detail-session-clean'
+    mark.textContent = '✓'
+    mark.title = 'Clean exit — the worker stamped its own handoff.'
+    el.append(mark)
+  }
+  return el
 }
 
 /** A remembered geometry is usable only if it still lands on-screen (the
@@ -959,17 +1043,26 @@ export class FiberDetailModal {
     const summary = document.createElement('span')
     summary.className = 'kbn-detail-controls-summary'
     const chips: string[] = []
+    const hovers: string[] = []
     if (card.shuttleAgent) chips.push(card.shuttleAgent)
-    if (card.shuttleKind === 'standing' && card.shuttleSchedule) chips.push(card.shuttleSchedule)
-    else if (card.shuttleKind) chips.push(card.shuttleKind)
+    if (card.shuttleKind === 'standing' && card.shuttleSchedule) {
+      // Say the cadence the way a person would — "weekdays 9:00" — and keep the
+      // raw cron on the hover. `0 9 * * 1-5` is a thing you decode, not a thing
+      // you read, and the trail exists to be read at a glance. An expression the
+      // humanizer can't say faithfully falls back to the raw string.
+      const spoken = humanizeCron(card.shuttleSchedule)
+      chips.push(spoken ?? card.shuttleSchedule)
+      if (spoken) hovers.push(`cron: ${card.shuttleSchedule}`)
+    } else if (card.shuttleKind) chips.push(card.shuttleKind)
     if (card.shuttleHost) chips.push(card.shuttleHost)
     const projectDir = this.projectDirFor(card)
     if (projectDir) {
       // Home-relativize for the chip (~/dev/shuttle); full path on hover.
       chips.push(projectDir.replace(/^\/(?:Users|home)\/[^/]+\//, '~/'))
-      summary.title = projectDir
+      hovers.push(projectDir)
     }
     summary.textContent = chips.join(' · ')
+    if (hovers.length > 0) summary.title = hovers.join('\n')
 
     toggle.append(chevron, toggleLabel, summary)
 
@@ -986,7 +1079,11 @@ export class FiberDetailModal {
       wrap.classList.toggle('kbn-detail-controls-open', expanded)
     })
 
-    wrap.append(toggle, body)
+    // The session window sits between the toggle row and the collapsible body:
+    // visible while collapsed, because "when did this last run, and did it
+    // finish cleanly?" is the question you open a card to answer.
+    const sessionWindow = buildSessionWindow(card)
+    wrap.append(toggle, ...(sessionWindow ? [sessionWindow] : []), body)
     this.buildControlsBody(body, card, scope, shuttleManaged)
     return wrap
   }

@@ -1,0 +1,330 @@
+/* Day view — two clocks on one lane, then the day as prose.
+
+   Palette is KanbanModal.css's: iron-gall #1B1611, muted #7A6F5C, faded
+   #A89B83, ochre #C49333, cobalt #3D5BA0, teal #3F8278, cinnabar #BC4538.
+   Hairlines are 0.5px. Nothing here carries a host colour or a score — the
+   rail says when, the prose says what, and neither needs a legend. */
+
+/* ── Head: the date, its chevrons, and the day's two totals ──────────────── */
+
+/* Hangs off the right edge of the shared `.kbn-view-titlerow`, so the
+   illuminated "Day" keeps the left and the date keeps the eye. */
+.kbn-day-head {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+  min-width: 0;
+}
+
+.kbn-day-daterow {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+}
+
+.kbn-day-date {
+  margin: 0;
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 25px;
+  line-height: 1.05;
+  letter-spacing: 0.005em;
+  color: #1B1611;
+  white-space: nowrap;
+}
+
+.kbn-day-chev {
+  appearance: none;
+  border: 0;
+  background: none;
+  padding: 0 2px;
+  cursor: pointer;
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-size: 21px;
+  line-height: 1;
+  color: #A89B83;
+  transition: color 90ms ease-out;
+}
+.kbn-day-chev:hover { color: #BC4538; }
+.kbn-day-chev:focus-visible {
+  outline: 1px solid rgba(61, 91, 160, 0.55);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.kbn-day-stats {
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 9.5px;
+  letter-spacing: 0.05em;
+  color: #7A6F5C;
+  white-space: nowrap;
+}
+.kbn-day-stats-quiet { color: #A89B83; }
+
+/* ── The rails ───────────────────────────────────────────────────────────── */
+
+/* Two columns — label, rail — with one gridline layer spanning every lane
+   row, so the hour rules run unbroken down the stack. */
+.kbn-day-chart {
+  display: grid;
+  grid-template-columns: minmax(86px, 232px) 1fr;
+  column-gap: 12px;
+  row-gap: 4px;
+  align-items: center;
+  padding: 7px 2px 0;
+}
+
+.kbn-day-grid {
+  grid-column: 2;
+  position: relative;
+  align-self: stretch;
+  pointer-events: none;
+}
+.kbn-day-gridline,
+.kbn-day-midnight {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 0;
+}
+.kbn-day-gridline { border-left: 0.5px solid rgba(122, 111, 92, 0.16); }
+/* The date itself turning over — off the 4h grid, and dressed differently
+   so it reads as a boundary rather than another hour. */
+.kbn-day-midnight { border-left: 0.5px dashed rgba(196, 147, 51, 0.55); }
+
+.kbn-day-label {
+  grid-column: 1;
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 5px;
+  min-width: 0;
+}
+
+.kbn-day-lanename {
+  appearance: none;
+  border: 0;
+  background: none;
+  padding: 0;
+  margin: 0;
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-size: 13px;
+  line-height: 1.15;
+  color: #1B1611;
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+button.kbn-day-lanename { cursor: pointer; }
+button.kbn-day-lanename:hover {
+  color: #3D5BA0;
+  text-decoration: underline dotted rgba(61, 91, 160, 0.5);
+  text-underline-offset: 2px;
+}
+button.kbn-day-lanename:focus-visible {
+  outline: 1px solid rgba(61, 91, 160, 0.55);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.kbn-day-lanehost {
+  flex: 0 0 auto;
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 8px;
+  letter-spacing: 0.04em;
+  text-transform: lowercase;
+  color: #A89B83;
+}
+
+.kbn-day-rail {
+  grid-column: 2;
+  position: relative;
+  height: 15px;
+}
+/* A hairline through the lane, so an hour with nothing in it still reads as
+   time that passed rather than as absence of a lane. */
+.kbn-day-rail::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 0;
+  border-top: 0.5px solid rgba(122, 111, 92, 0.20);
+}
+
+/* Three marks, three heights — the hierarchy IS the reading order:
+   wash (the machine) < attention (you) < notify (it wants you). */
+
+/* Agent work: a pale cobalt wash, inset from the lane's full height. The
+   minimum width keeps a lone agent minute from rounding away to nothing —
+   a bucket is a minute, and a minute is well under a pixel at day scale. */
+.kbn-day-wash {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  min-width: 2px;
+  background: rgba(40, 78, 180, 0.30);
+  border-radius: 1px;
+}
+
+/* You, steering: solid teal, a shade taller than the wash it sits inside. */
+.kbn-day-att {
+  position: absolute;
+  top: 1.5px;
+  bottom: 1.5px;
+  min-width: 2.5px;
+  background: #3F8278;
+  border-radius: 1px;
+}
+
+/* Attention demanded: cinnabar, over-full height, with a square head — rare
+   enough to be findable at a glance, thin enough not to shout. */
+.kbn-day-notify {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 1.5px;
+  margin-left: -0.75px;
+  background: #BC4538;
+}
+.kbn-day-notify::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -1.25px;
+  width: 4px;
+  height: 3px;
+  background: #BC4538;
+}
+
+/* Interactive lanes are the same marks, spoken quieter. */
+.kbn-day-rail-loose { opacity: 0.68; }
+.kbn-day-label-loose .kbn-day-lanename {
+  font-style: italic;
+  color: #7A6F5C;
+  font-size: 12px;
+}
+
+.kbn-day-axis {
+  grid-column: 2;
+  position: relative;
+  height: 13px;
+  margin-top: 3px;
+  border-top: 0.5px solid rgba(122, 111, 92, 0.22);
+}
+.kbn-day-tick {
+  position: absolute;
+  top: 2px;
+  transform: translateX(-50%);
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 8.5px;
+  letter-spacing: 0.04em;
+  color: #A89B83;
+  white-space: nowrap;
+}
+.kbn-day-tick-first { transform: translateX(0); }
+.kbn-day-tick-last { transform: translateX(-100%); }
+
+/* ── The day, by fiber ───────────────────────────────────────────────────── */
+
+.kbn-day-narr {
+  margin-top: 14px;
+  padding-top: 7px;
+  border-top: 0.5px solid rgba(122, 111, 92, 0.22);
+}
+
+.kbn-day-narrhead {
+  margin: 0 0 7px;
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-variant-caps: all-small-caps;
+  font-feature-settings: "smcp", "c2sc";
+  font-weight: 500;
+  font-size: 13px;
+  letter-spacing: 0.11em;
+  color: #BC4538;
+}
+
+/* Two columns, and a measure that stays readable on a wide board: without
+   the cap, a 1600px page gives each column ~110 characters a line. */
+.kbn-day-entries {
+  columns: 2;
+  column-gap: 28px;
+  column-rule: 0.5px solid rgba(122, 111, 92, 0.16);
+  max-width: 72em;
+}
+
+/* Ragged right, not justified: the columns are narrow enough that justifying
+   opens rivers around the long unbreakable tokens these subjects carry
+   (`χ²_B`, `board-chrome-redesign`). The hanging indent lets the bullet sit
+   in the margin, so wrapped lines align under the text. */
+.kbn-day-entry {
+  break-inside: avoid;
+  margin: 0 0 7px;
+  padding-left: 12px;
+  text-indent: -12px;
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-size: 13px;
+  line-height: 1.44;
+  color: #1B1611;
+  text-wrap: pretty;
+}
+
+.kbn-day-sq {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 6px;
+  transform: translateY(-1px);
+  background: #A89B83;
+}
+.kbn-day-sq[data-hue='0'] { background: #C49333; }
+.kbn-day-sq[data-hue='1'] { background: #3D5BA0; }
+.kbn-day-sq[data-hue='2'] { background: #3F8278; }
+.kbn-day-sq[data-hue='3'] { background: #A2362A; }
+
+.kbn-day-entrytitle {
+  appearance: none;
+  border: 0;
+  background: none;
+  padding: 0;
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  font-weight: 600;
+  color: #1B1611;
+}
+.kbn-day-entrytitle::after {
+  content: ' — ';
+  font-weight: 400;
+  color: #A89B83;
+}
+button.kbn-day-entrytitle { cursor: pointer; }
+button.kbn-day-entrytitle:hover {
+  color: #3D5BA0;
+  text-decoration: underline dotted rgba(61, 91, 160, 0.5);
+  text-underline-offset: 2px;
+}
+button.kbn-day-entrytitle:focus-visible {
+  outline: 1px solid rgba(61, 91, 160, 0.55);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.kbn-day-entrybody-fallback {
+  font-style: italic;
+  color: #7A6F5C;
+}
+
+/* The commits that named no fiber — kept, but kept quiet, and last. */
+.kbn-day-entry-loose { color: #7A6F5C; }
+.kbn-day-entry-loose .kbn-day-entrytitle {
+  font-weight: 400;
+  font-style: italic;
+  color: #A89B83;
+}
+.kbn-day-entry-loose .kbn-day-entrytitle::after { content: ' '; }

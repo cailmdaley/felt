@@ -111,6 +111,20 @@ export interface KanbanCard {
    */
   sessionId?: string
   /**
+   * `shuttle.runtime.dispatched_at` — the INSTANT the owning daemon launched
+   * the most recent worker. Rides the composite feed inside felt's `shuttle`
+   * map (felt serializes the whole block), so no daemon change was needed to
+   * surface it. Opens the detail panel's session-window line.
+   */
+  dispatchedAt?: string
+  /**
+   * `shuttle.runtime.handed_off_at` — the INSTANT the worker stamped on a clean
+   * exit. A stamp OLDER than `dispatchedAt` belongs to the previous run, not
+   * this one; the session-window line treats that as "no clean handoff" rather
+   * than computing a negative span.
+   */
+  handedOffAt?: string
+  /**
    * `shuttle.agent` — the agent to dispatch with. Present when the fiber
    * has a shuttle block and the block specifies an agent.
    */

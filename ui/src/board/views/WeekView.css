@@ -1,0 +1,311 @@
+/* WeekView — the two-faced week.
+
+   Seven 6am→6am rails stacked on ruled paper. Above the gold seam the week is
+   inked (activity rasters); below it the week is hollow (obligations). The
+   palette is KanbanModal.css's, borrowed rather than restated:
+     iron-gall #1B1611 · muted #7A6F5C · faded #A89B83
+     ochre #C49333 · gold-deep #9A7B35 · cobalt #3D5BA0 · teal #3F8278
+     cinnabar #BC4538
+   Only `--wk-ochre-deep` is new — a darkened ochre for the hollow marks, which
+   must sit a shade below the gold seam without turning brown. */
+
+.wk-grid {
+  --wk-gutter: 54px;
+  --wk-annot: 96px;
+  --wk-margin: 212px;
+  --wk-ochre-deep: #A57D2B;
+
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Head ─────────────────────────────────────────────────────────────────── */
+
+.wk-head {
+  display: flex;
+  align-items: baseline;
+  gap: 18px;
+}
+
+.wk-nav {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.wk-navbtn {
+  appearance: none;
+  border: none;
+  background: none;
+  cursor: pointer;
+  padding: 0 3px;
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-size: 19px;
+  line-height: 1;
+  color: #7A6F5C;
+  transition: color 120ms ease;
+}
+.wk-navbtn:hover { color: #1B1611; }
+
+/* The week's own name, in the italic hand the marginalia use — this is the
+   view speaking, not a control. It becomes a control only when you have
+   wandered off the current week, and says so with a faint gold rule. */
+.wk-weeklabel {
+  appearance: none;
+  border: none;
+  background: none;
+  padding: 0 2px 1px;
+  cursor: default;
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-style: italic;
+  font-size: 17px;
+  line-height: 1;
+  letter-spacing: 0.01em;
+  color: #1B1611;
+  border-bottom: 1px solid transparent;
+}
+.wk-weeklabel-away {
+  cursor: pointer;
+  color: #9A7B35;
+  border-bottom-color: rgba(154, 123, 53, 0.45);
+}
+
+.wk-totals {
+  font-family: var(--font-mono, 'IBM Plex Mono', monospace);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: #A89B83;
+  white-space: nowrap;
+}
+
+/* ── Rows ─────────────────────────────────────────────────────────────────── */
+
+.wk-row {
+  display: grid;
+  grid-template-columns: var(--wk-gutter) minmax(0, 1fr) var(--wk-annot) var(--wk-margin);
+  align-items: stretch;
+  column-gap: 10px;
+  flex: 1 1 0;
+  min-height: 40px;
+  border-radius: 2px;
+  /* The seam's 1.5px border must not shove today's rail sideways, so every row
+     reserves the space and only today paints it. */
+  border: 1.5px solid transparent;
+}
+
+.wk-row-weekend { background: rgba(0, 0, 0, 0.026); }
+
+/* The gold seam. Today is where reconstruction meets evaluation, so it is the
+   one row the eye is allowed to land on first. */
+.wk-row-today {
+  background: linear-gradient(rgba(154, 123, 53, 0.13), rgba(154, 123, 53, 0.06));
+  border-color: #9A7B35;
+}
+.wk-row-today.wk-row-weekend {
+  background: linear-gradient(rgba(154, 123, 53, 0.16), rgba(154, 123, 53, 0.09));
+}
+
+/* ── Day label ────────────────────────────────────────────────────────────── */
+
+.wk-daylabel {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 1px;
+  padding-right: 2px;
+  line-height: 1;
+}
+.wk-dow {
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-size: 10px;
+  font-variant-caps: all-small-caps;
+  font-feature-settings: "smcp", "c2sc";
+  letter-spacing: 0.07em;
+  color: #A89B83;
+}
+.wk-daynum {
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-feature-settings: "onum";
+  font-size: 16px;
+  font-weight: 500;
+  color: #2A231A;
+}
+.wk-row-today .wk-dow,
+.wk-row-today .wk-daynum { color: #9A7B35; }
+.wk-row-today .wk-daynum { font-weight: 600; }
+.wk-row-future .wk-daynum { color: #7A6F5C; }
+
+/* ── Rail ─────────────────────────────────────────────────────────────────── */
+
+.wk-rail {
+  position: relative;
+  align-self: stretch;
+  margin: 5px 0;
+  /* The baseline the rasters stand on — the only rule that runs the full
+     width, so the seven rails read as one ruled sheet. */
+  border-bottom: 0.5px solid rgba(122, 111, 92, 0.28);
+}
+
+.wk-rules,
+.wk-paint {
+  position: absolute;
+  inset: 0;
+}
+.wk-paint { pointer-events: none; }
+
+/* 4-hourly rules — faint enough to be paper, present enough to read a time
+   off a tick without counting. */
+.wk-rule {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 0.5px;
+  background: rgba(122, 111, 92, 0.16);
+}
+.wk-row-today .wk-rule { background: rgba(154, 123, 53, 0.22); }
+
+/* ── Rasters: one tick per active slot ────────────────────────────────────── */
+
+.wk-ras {
+  position: absolute;
+  bottom: 0;
+  width: 1.5px;
+  border-radius: 0.5px;
+}
+/* Agent work is the substrate — cobalt, and the only kind whose opacity
+   carries a weight, because only it comes in runs. Attention stands taller
+   because a human was there. A notify is full-height cinnabar: the day raised
+   its hand.
+
+   Notify is a THREAD, not a plank. It runs the whole height, so at any density
+   above the occasional it would otherwise close into a red picket fence and
+   bury the two kinds underneath it — a screenshot of a notify-heavy day showed
+   exactly that. A hairline keeps "full height" legible as emphasis. */
+.wk-ras-agent {
+  height: 56%;
+  background: #3D5BA0;
+}
+.wk-ras-attention {
+  height: 72%;
+  background: #3F8278;
+  opacity: 0.85;
+}
+.wk-ras-notify {
+  height: 100%;
+  background: #BC4538;
+  /* Same 1.5px as the other two kinds, deliberately: the ticks sit at
+     fractional pixel positions, so a 1px rule gets antialiased across two
+     columns at half alpha each and the cinnabar renders as a dark grey — it
+     stops being cinnabar. Height alone carries the distinction; the opacity is
+     what keeps a notify-heavy day from closing into a red picket fence. */
+  opacity: 0.78;
+}
+
+/* Now — a thin gold-deep thread down today's rail. Everything to its right on
+   this row is future, which is why the hollow marks may appear there. */
+.wk-now {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 1.5px;
+  background: #9A7B35;
+  box-shadow: 0 0 0 2px rgba(154, 123, 53, 0.12);
+}
+
+/* ── Hollow marks ─────────────────────────────────────────────────────────── */
+
+.wk-mark {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  appearance: none;
+  border: none;
+  background: none;
+  padding: 0 1px;
+  cursor: pointer;
+  pointer-events: auto;
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-size: 13px;
+  line-height: 1;
+  transition: transform 120ms ease, opacity 120ms ease;
+}
+.wk-mark:hover { transform: translate(-50%, -50%) scale(1.25); }
+.wk-mark-due { color: var(--wk-ochre-deep); }
+/* ◐ is half-filled, so at raster weight it reads as a solid dot and out-shouts
+   everything else on an empty future row. Held back to an outline's worth. */
+.wk-mark-launch { color: #3D5BA0; opacity: 0.78; font-size: 12px; }
+.wk-mark-snooze { color: #A89B83; opacity: 0.7; }
+
+/* ── Right-edge annotation ────────────────────────────────────────────────── */
+
+.wk-annot {
+  align-self: center;
+  text-align: right;
+  font-family: var(--font-mono, 'IBM Plex Mono', monospace);
+  font-size: 9.5px;
+  letter-spacing: 0.03em;
+  color: #A89B83;
+  white-space: nowrap;
+}
+.wk-row-today .wk-annot { color: #9A7B35; }
+
+/* ── Marginalia ───────────────────────────────────────────────────────────── */
+
+.wk-margin {
+  align-self: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-style: italic;
+  font-size: 12px;
+  line-height: 1.25;
+  color: #7A6F5C;
+}
+/* What is running right now, and what is promised — both are facts about the
+   machine rather than the record, so both drop the italic serif for mono. */
+.wk-margin-live,
+.wk-margin-marks {
+  font-family: var(--font-mono, 'IBM Plex Mono', monospace);
+  font-style: normal;
+  font-size: 9.5px;
+  letter-spacing: 0.02em;
+  color: var(--wk-ochre-deep);
+}
+/* The mark glyphs are not in the mono face (it has no ◴/◐/◌ and falls back),
+   so set them in the serif deliberately and a size up, or they shrink to
+   indistinguishable dots. Declared after the mark colours so it wins the size
+   without fighting them for the hue. */
+.wk-margin-glyph {
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-size: 11px;
+}
+
+/* ── Shared tick row ──────────────────────────────────────────────────────── */
+
+.wk-tickrow {
+  flex: 0 0 auto;
+  min-height: 0;
+  border-color: transparent;
+  background: none;
+  padding-top: 2px;
+}
+.wk-ticks {
+  position: relative;
+  height: 12px;
+}
+.wk-tick {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  font-family: var(--font-mono, 'IBM Plex Mono', monospace);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  color: #A89B83;
+  white-space: nowrap;
+}
+.wk-tick-first { transform: none; }
+.wk-tick-last { transform: translateX(-100%); }

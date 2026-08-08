@@ -1,0 +1,321 @@
+/* Chronicle — days across, fibers down.
+
+   One CSS grid does the whole page: column 1 is the sticky row-label gutter,
+   columns 2…N+1 are the calendar days, row 1 is the sticky almanac head. Each
+   day also owns a full-height "wash" element spanning every row (grid-row
+   2 / -1) which carries that day's tint and its right hairline — so the rules
+   run the height of the page and no row ever paints its own background.
+
+   Every mark on a lifeline is positioned in px against `--chr-day-w`, so the
+   whole chronicle rescales by changing one number.
+
+   Palette is KanbanModal.css's: iron-gall #1B1611, muted #7A6F5C, faded
+   #A89B83, parchment #EDE2CE, gold-leaf #9A7B35, ochre #C49333, cobalt
+   #3D5BA0, teal #3F8278, cinnabar #BC4538. */
+
+.chr-scroll {
+  --chr-day-w: 24px;
+  --chr-label-w: 300px;
+  /* Segment width as a fraction of the column. Well under 1: a run of busy
+     days has to read as a row of separate day-marks, not as one solid bar. */
+  --chr-seg-w: 14px;
+  --chr-row-h: 20px;
+  --chr-head-h: 32px;
+
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  /* The sheet's own tint, opaque — the sticky gutter and head are cut from
+     this same color so content passes cleanly under them. */
+  background: #EDE2CE;
+  border-radius: 2px;
+}
+
+.chr-grid {
+  display: grid;
+  width: max-content;
+  min-width: 100%;
+  position: relative;
+  align-items: stretch;
+  /* Clearance so an overlay horizontal scrollbar never lies across the last
+     row's lifeline. */
+  padding-bottom: 8px;
+}
+
+/* ── The almanac head ───────────────────────────────────────────────────── */
+
+.chr-corner {
+  position: sticky;
+  left: 0;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  padding: 0 10px 4px 0;
+  background: #EDE2CE;
+  border-right: 0.5px solid rgba(122, 111, 92, 0.30);
+  border-bottom: 0.5px solid rgba(122, 111, 92, 0.30);
+}
+.chr-corner-count {
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-variant-caps: all-small-caps;
+  font-feature-settings: "smcp", "c2sc";
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: #A89B83;
+}
+
+/* Weekday small-caps over an oldstyle numeral — the timeline ribbon's day
+   vocabulary, stacked instead of inline because a chronicle column is a
+   quarter the width of a ribbon column. */
+.chr-head {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0;
+  padding-bottom: 3px;
+  line-height: 1;
+  background: #EDE2CE;
+  border-right: 0.5px solid rgba(122, 111, 92, 0.16);
+  border-bottom: 0.5px solid rgba(122, 111, 92, 0.30);
+}
+.chr-head-past { background: #EAE0CB; }
+.chr-head-weekend { background: #E6DCC5; }
+.chr-head-week { border-right-color: rgba(122, 111, 92, 0.42); }
+/* Today is bracketed by a gold seam on both edges, the way the Desk ribbon
+   brackets its today column — so "now" reads as a column, not as a boundary. */
+.chr-head-today {
+  background: rgba(154, 123, 53, 0.16);
+  box-shadow: inset 1.5px 0 0 #9A7B35, inset -1.5px 0 0 #9A7B35;
+}
+.chr-head-dow {
+  font-size: 9px;
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-variant-caps: all-small-caps;
+  font-feature-settings: "smcp", "c2sc";
+  letter-spacing: 0.05em;
+  color: #A89B83;
+}
+.chr-head-num {
+  font-size: 12px;
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-weight: 500;
+  font-feature-settings: "onum";
+  color: #2A231A;
+}
+.chr-head-today .chr-head-dow,
+.chr-head-today .chr-head-num {
+  color: #9A7B35;
+  font-weight: 600;
+}
+
+/* ── Day washes: the vertical rules and tints, behind everything ────────── */
+
+.chr-wash {
+  z-index: 0;
+  pointer-events: none;
+  border-right: 0.5px solid rgba(122, 111, 92, 0.13);
+}
+.chr-wash-past { background: rgba(27, 22, 17, 0.018); }
+.chr-wash-weekend { background: rgba(27, 22, 17, 0.045); }
+.chr-wash-week { border-right-color: rgba(122, 111, 92, 0.34); }
+.chr-wash-today {
+  background: linear-gradient(rgba(154, 123, 53, 0.12), rgba(154, 123, 53, 0.05));
+  box-shadow: inset 1.5px 0 0 #9A7B35, inset -1.5px 0 0 #9A7B35;
+}
+
+/* ── The row gutter ─────────────────────────────────────────────────────── */
+
+.chr-label {
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  padding: 0 10px 0 2px;
+  background: #EDE2CE;
+  border-right: 0.5px solid rgba(122, 111, 92, 0.30);
+  border-bottom: 0.5px solid rgba(122, 111, 92, 0.07);
+}
+.chr-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-size: 14px;
+  line-height: var(--chr-row-h);
+  color: #1B1611;
+  background: none;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+}
+button.chr-name:hover {
+  color: #3D5BA0;
+  text-decoration: underline;
+  text-decoration-thickness: 0.5px;
+  text-underline-offset: 2px;
+}
+/* A live worker is the one thing on this page allowed to assert itself: the
+   name goes cobalt and a small mark sits in the margin. */
+.chr-label-live .chr-name { color: #3D5BA0; font-weight: 500; }
+.chr-label-live::before {
+  content: '▸';
+  flex: 0 0 auto;
+  font-size: 8px;
+  color: #3D5BA0;
+  line-height: var(--chr-row-h);
+}
+.chr-note {
+  flex: 0 0 auto;
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 8.5px;
+  letter-spacing: 0.01em;
+  color: #A89B83;
+  max-width: 72px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chr-span {
+  flex: 0 0 auto;
+  min-width: 22px;
+  text-align: right;
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 8.5px;
+  color: #7A6F5C;
+}
+/* Working-directory rows are the human's own passage — present, not asserted. */
+.chr-label-cwd .chr-name {
+  font-style: italic;
+  font-size: 13px;
+  color: #7A6F5C;
+}
+.chr-label-cwd .chr-span { color: #A89B83; }
+
+/* ── The lifeline ───────────────────────────────────────────────────────── */
+
+.chr-track {
+  position: relative;
+  z-index: 2;
+  min-width: 0;
+  border-bottom: 0.5px solid rgba(122, 111, 92, 0.07);
+}
+/* A working-directory row is context, not record — everything on it steps back
+   a little from the fiber rows above. */
+.chr-track-cwd { opacity: 0.7; }
+
+/* 2px of iron-gall from birth to close. Everything else on the row is drawn
+   over this line, centered on it. */
+.chr-life {
+  position: absolute;
+  top: 50%;
+  height: 2px;
+  margin-top: -1px;
+  background: rgba(27, 22, 17, 0.26);
+  border-radius: 1px;
+}
+.chr-life-cwd {
+  height: 1px;
+  margin-top: -0.5px;
+  background: rgba(122, 111, 92, 0.24);
+}
+
+/* One day's agent work. Three steps of height and opacity — texture on the
+   line, not a bar chart above it. The mark is narrower than its column and
+   centered in it, so a busy fortnight reads as fourteen days rather than as
+   one continuous bar. */
+.chr-seg {
+  position: absolute;
+  top: 50%;
+  width: var(--chr-seg-w);
+  margin-left: calc((var(--chr-day-w) - var(--chr-seg-w)) / 2);
+  background: #3D5BA0;
+  border-radius: 0.5px;
+}
+.chr-seg-1 { height: 2px; margin-top: -1px; opacity: 0.30; }
+.chr-seg-2 { height: 4px; margin-top: -2px; opacity: 0.50; }
+.chr-seg-3 { height: 7px; margin-top: -3.5px; opacity: 0.72; }
+.chr-track-cwd .chr-seg { background: #7A6F5C; }
+
+/* A day that asked for the human. Solid teal, hairline-slim, centered — kept
+   shorter than the tallest segment so it reads as an overlay on the day's
+   work rather than as a picket in front of it. */
+.chr-att {
+  position: absolute;
+  top: 50%;
+  width: 2px;
+  height: 6px;
+  margin-top: -3px;
+  margin-left: calc(var(--chr-day-w) / 2 - 1px);
+  background: #3F8278;
+}
+
+/* A day that raised its hand. Cinnabar, above the line, small. */
+.chr-notify {
+  position: absolute;
+  top: 50%;
+  width: 3px;
+  height: 3px;
+  margin-top: -6.5px;
+  margin-left: calc(var(--chr-day-w) / 2 - 1.5px);
+  border-radius: 50%;
+  background: #BC4538;
+}
+
+/* ── Marks: the close, and what is still promised ───────────────────────── */
+
+.chr-mark {
+  position: absolute;
+  top: 0;
+  width: var(--chr-day-w);
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  line-height: 1;
+  pointer-events: none;
+}
+.chr-end { color: #3F8278; }
+.chr-end-compost { color: #A89B83; }
+.chr-due { color: #C49333; font-size: 11px; }
+.chr-launch { color: #3D5BA0; font-size: 11px; opacity: 0.75; }
+
+/* ── The rest of the record ─────────────────────────────────────────────── */
+
+.chr-more {
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  width: 100%;
+  text-align: left;
+  padding: 0 10px 0 2px;
+  background: #EDE2CE;
+  border: 0;
+  border-right: 0.5px solid rgba(122, 111, 92, 0.30);
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-style: italic;
+  font-size: 12px;
+  line-height: var(--chr-row-h);
+  color: #7A6F5C;
+  cursor: pointer;
+}
+.chr-more:hover {
+  color: #1B1611;
+  text-decoration: underline;
+  text-decoration-thickness: 0.5px;
+  text-underline-offset: 2px;
+}

@@ -191,6 +191,30 @@
   letter-spacing: 0.03em;
   color: #9A8F80;
 }
+/* Session window — one mono line under the Actions row: when the last worker
+   launched, when it handed off, how long it held the fiber. Sits outside the
+   collapsible body on purpose; it's a reading, not an action. */
+.kbn-detail-session {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  padding: 2px 10px 5px;
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 9.5px;
+  letter-spacing: 0.03em;
+  color: #9A8F80;
+}
+.kbn-detail-session-line {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Teal check — the run concluded on the worker's own handoff stamp. */
+.kbn-detail-session-clean {
+  flex: 0 0 auto;
+  color: #3F8278;
+}
 .kbn-detail-controls-body {
   /* Cap the expanded cluster so the page below keeps breathing room even
      on a short panel; scrolls internally past the cap. cqh works because
