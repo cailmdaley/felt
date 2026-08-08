@@ -1339,7 +1339,11 @@ class ChronicleView implements TemporalView {
    *     would leave the gesture arithmetically correct and visually dead. Until
    *     a gesture can re-acquire its track — or extension can widen the grid
    *     without a full rebuild — auto-scroll pans within the window it has and
-   *     the window grows once the hand lets go.
+   *     the window grows on the NEXT SCROLL after release, not on the release
+   *     itself: this method only runs from a scroll event, and mouseup is not
+   *     one. Harmless, since anyone who lets go at the edge is about to scroll
+   *     again, but do not go hunting for a trigger on mouseup — there isn't
+   *     one, by design.
    *   • It must not re-anchor. `didAnchor` stays set, or the view would snap
    *     back to today at the moment the reader is reaching away from it.
    *   • It must not double-compensate. `fitDayWidth` also adjusts `scrollLeft`,

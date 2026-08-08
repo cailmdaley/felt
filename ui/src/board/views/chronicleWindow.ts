@@ -317,7 +317,16 @@ export function activityChunks(window: DayWindow, nowMs: number): ActivityChunk[
   return out
 }
 
-/** Chunks a window needs that have not been requested yet, by key. */
+/**
+ * Chunks a window needs that have not been requested yet, by key.
+ *
+ * FOR DECIDING WHAT TO REQUEST — NEVER WHAT TO RENDER. A caller that maps over
+ * this to build its bucket array holds only the chunks fetched on that pass,
+ * while `fetched` cheerfully reports the rest as done, so the older days render
+ * empty and it reads as a fetch bug rather than the wiring mistake it is.
+ * Render from {@link activityChunks} (all of them, reusing what you hold) and
+ * use this only to decide which ones need a round trip.
+ */
 export function pendingChunks(
   window: DayWindow,
   nowMs: number,
