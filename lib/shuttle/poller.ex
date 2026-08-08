@@ -1424,8 +1424,21 @@ defmodule Shuttle.Poller do
   # `shuttle.host` equals this daemon's `own_host_id`. The same `host_owned?`
   # predicate the dispatch plane uses, so the feed and dispatch agree on the
   # single owner of each fiber.
-  defp owned_feed_entry?(%{fiber: %{"shuttle" => shuttle}}, own_host_id),
-    do: host_owned?(shuttle, own_host_id)
+  #
+  # The host-less kinds the aux walks admit (`due:` cards, `cycle` fibers) have
+  # no `shuttle.host:` to compare, so they pass on the property that admitted
+  # them instead. They are local by construction — every candidate row cleared
+  # `owned_by_store?` against a configured store — and there is no peer daemon
+  # that could also claim them, so no cross-host election is being skipped here.
+  # A fiber WITH a shuttle block pinned elsewhere still fails: the aux clause
+  # widens admission for kinds that have no owner, never for work that has one.
+  defp owned_feed_entry?(%{fiber: %{"shuttle" => shuttle} = fiber}, own_host_id)
+       when is_map(shuttle) and map_size(shuttle) > 0 do
+    host_owned?(shuttle, own_host_id) or Shuttle.FiberDocuments.kanban_aux_admissible?(fiber)
+  end
+
+  defp owned_feed_entry?(%{fiber: fiber}, _own_host_id),
+    do: Shuttle.FiberDocuments.kanban_aux_admissible?(fiber)
 
   defp owned_feed_entry?(_, _), do: false
 
@@ -1650,7 +1663,7 @@ defmodule Shuttle.Poller do
                 owned_by_store?(fiber, owned_prefix)
             end)
 
-          {:ok, kept}
+          {:ok, Shuttle.FiberDocuments.union_by_id(kept, aux_rows(host, state, owned_prefix))}
         else
           _ -> {:error, :invalid_json}
         end
@@ -1669,6 +1682,34 @@ defmodule Shuttle.Poller do
   end
 
   defp owned_by_store?(_, _), do: false
+
+  # The non-`shuttle:` half of the kanban's admitted set: human `due:` cards and
+  # `cycle` fibers, neither of which carries a `shuttle:` block and so neither of
+  # which the primary walk has ever seen. One `felt ls` per aux filter (felt's
+  # `--has-field` is AND, not OR — see `FiberDocuments.kanban_walks/0`), same
+  # projection, same store-ownership gate as the primary rows.
+  #
+  # Fails SOFT, per walk: an aux filter that errors or times out logs and
+  # contributes nothing, leaving the primary listing — and therefore every
+  # dispatchable fiber — untouched. Only the primary walk can fail a store.
+  defp aux_rows(host, state, owned_prefix) do
+    [_primary | aux] = Shuttle.FiberDocuments.kanban_walks()
+    Enum.flat_map(aux, &aux_walk_rows(host, state, owned_prefix, &1))
+  end
+
+  defp aux_walk_rows(host, state, owned_prefix, filter) do
+    fields = Enum.join(Shuttle.FiberDocuments.kanban_fields(), ",")
+    args = ["ls", "--json"] ++ filter ++ ["--json-field", fields]
+
+    with {:ok, output} <- run_felt(host, state.runner, args),
+         {:ok, rows} when is_list(rows) <- Jason.decode(output) do
+      Enum.filter(rows, &(is_map(&1) and owned_by_store?(&1, owned_prefix)))
+    else
+      error ->
+        Logger.warning("kanban aux walk #{inspect(filter)} failed for #{host}: #{inspect(error)}")
+        []
+    end
+  end
 
   defp run_felt_ls_for_shuttle(host, state) do
     # Widened projection: felt filters by raw top-level frontmatter first, then
@@ -2633,6 +2674,24 @@ defmodule Shuttle.Poller do
           |> note_running(runtime_key)
 
         log_worker_claim(state, fiber_id, Keyword.get(opts, :session_uuid))
+
+        # The structural half: the claim is the moment this host learns that
+        # this externally-spawned session belongs to this fiber. `record/1`
+        # drops a claim that carried no session UUID — there is no pairing to
+        # record then, only a run window, which `log_worker_claim` already
+        # stamped.
+        Shuttle.SessionLedger.record(
+          fiber: fiber_id,
+          uid: Map.get(fiber, "uid"),
+          session: Keyword.get(opts, :session_uuid),
+          tmux: session,
+          harness:
+            Shuttle.SessionLedger.harness_for_cli(
+              get_in(fiber, ["shuttle", "resolved", "agent", "cli"])
+            ),
+          kind: :claim
+        )
+
         state = refresh_document_entry(state, fiber_id)
         Logger.info("Claimed session #{session} for #{fiber_id} (agent=#{agent_id})")
         {state, {:ok, %{session: session, agent_id: agent_id}}}

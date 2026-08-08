@@ -125,6 +125,13 @@ defmodule Shuttle.DispatchIntegrationTest do
     File.mkdir_p!(data_dir)
     System.put_env("SHUTTLE_DATA_DIR", data_dir)
 
+    # The session ledger lands under the same throwaway data dir, so each test
+    # reads only its own pairings. test_helper.exs pins a suite-wide
+    # SHUTTLE_SESSIONS_FILE (to keep the suite out of the real ~/.shuttle) and
+    # that wins over SHUTTLE_DATA_DIR — drop it here so the per-test dir applies.
+    prev_sessions_file = System.get_env("SHUTTLE_SESSIONS_FILE")
+    System.delete_env("SHUTTLE_SESSIONS_FILE")
+
     on_exit(fn ->
       File.rm_rf!(host)
 
@@ -132,10 +139,17 @@ defmodule Shuttle.DispatchIntegrationTest do
         do: System.put_env("SHUTTLE_DATA_DIR", prev_data_dir),
         else: System.delete_env("SHUTTLE_DATA_DIR")
 
+      if prev_sessions_file, do: System.put_env("SHUTTLE_SESSIONS_FILE", prev_sessions_file)
+
       File.rm_rf!(data_dir)
     end)
 
     {:ok, host: host}
+  end
+
+  # Every session-ledger line this test's dispatches recorded, oldest first.
+  defp read_ledger do
+    Shuttle.SessionLedger.read_since(0)
   end
 
   # ── Continuation helpers (the felt-history replacement) ──
@@ -244,6 +258,20 @@ defmodule Shuttle.DispatchIntegrationTest do
     # Fresh dispatch: no resume flag, no dismiss block.
     refute script =~ "--resume"
     refute script =~ "send-keys"
+
+    # …and the pairing is recorded structurally, not left to be inferred from
+    # the tmux name later. Claude's UUID is pre-specified at launch, so the
+    # `dispatch` line lands synchronously here.
+    assert [ledger] = read_ledger()
+    assert ledger["fiber"] == "tests/fresh-oneshot"
+    assert ledger["kind"] == "dispatch"
+    assert ledger["harness"] == "claude-code"
+    assert ledger["tmux"] == "fresh-oneshot-shuttle"
+    assert ledger["host"] == Shuttle.Poller.own_host_id()
+    assert is_integer(ledger["at"])
+    # The session UUID the dispatch generated, echoed into the run script.
+    assert is_binary(ledger["session"]) and ledger["session"] != ""
+    assert script =~ ledger["session"]
   end
 
   # Closed fiber is refused before any tmux interaction.
@@ -412,6 +440,17 @@ defmodule Shuttle.DispatchIntegrationTest do
 
     script = read_run_script()
     assert script =~ "--resume 'kanban-session-uuid-5678'"
+
+    # A resume is its own pairing moment: the same session, attached again, on a
+    # new run. It is recorded as `resume` so a reader can tell a relaunch from a
+    # first launch rather than seeing one dispatch and inferring the rest.
+    assert [ledger] = read_ledger()
+    assert ledger["kind"] == "resume"
+    assert ledger["fiber"] == "tests/kanban-resume"
+    assert ledger["session"] == "kanban-session-uuid-5678"
+    assert ledger["harness"] == "claude-code"
+    assert ledger["tmux"] == "kanban-resume-shuttle"
+
     # Claude's resume warning dismiss block is present.
     assert script =~ "send-keys"
     assert script =~ "sleep 2"

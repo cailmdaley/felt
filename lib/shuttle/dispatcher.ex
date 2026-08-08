@@ -1284,7 +1284,10 @@ defmodule Shuttle.Dispatcher do
             if Keyword.get(opts, :store_session_id, true) do
               record_dispatch_session(fiber_id, session_id, runner,
                 felt_store: felt_store,
-                run_id: Keyword.get(opts, :run_id)
+                run_id: Keyword.get(opts, :run_id),
+                tmux: session,
+                harness: Shuttle.SessionLedger.harness_for_cli(agent.cli),
+                ledger_kind: :resume
               )
             end
 
@@ -1314,7 +1317,10 @@ defmodule Shuttle.Dispatcher do
             if Keyword.get(opts, :store_session_id, true) do
               store_session_id(fiber_id, session_uuid, runner,
                 felt_store: felt_store,
-                run_id: Keyword.get(opts, :run_id)
+                run_id: Keyword.get(opts, :run_id),
+                tmux: session,
+                harness: Shuttle.SessionLedger.harness_for_cli(agent.cli),
+                ledger_kind: :dispatch
               )
             end
 
@@ -1467,6 +1473,12 @@ defmodule Shuttle.Dispatcher do
               Logger.info("Stamped dispatched_at for #{fiber_id} in shuttle.runtime")
             end
 
+            # The structural half of the same fact. `record/1` drops a nil uuid
+            # itself, so the codex/pi launch (boundary stamped, UUID not yet
+            # scraped) contributes no line here — its line comes from the
+            # backfill, once the pairing is actually known.
+            append_session_ledger(fiber_id, uuid, opts)
+
           {:error, reason} ->
             Logger.warning(
               "Could not record dispatch marker for #{fiber_id} (#{store}): #{inspect(reason)}"
@@ -1478,6 +1490,21 @@ defmodule Shuttle.Dispatcher do
     end
   rescue
     e -> Logger.warning("Could not record session UUID for #{fiber_id}: #{inspect(e)}")
+  end
+
+  # Append the fiber↔session pairing to this host's session ledger. Carries the
+  # tmux name and harness the dispatch site put in `opts`; the ledger derives
+  # the fiber ULID from the tmux name and stamps host and time itself. Never
+  # raises and never branches the caller — a lost ledger line costs a join row,
+  # not a worker.
+  defp append_session_ledger(fiber_id, uuid, opts) do
+    Shuttle.SessionLedger.record(
+      fiber: fiber_id,
+      session: uuid,
+      tmux: Keyword.get(opts, :tmux),
+      harness: Keyword.get(opts, :harness),
+      kind: Keyword.get(opts, :ledger_kind, :dispatch)
+    )
   end
 
   # Backfill `session_uuid` into an ALREADY-STAMPED marker — the codex/pi
@@ -1492,6 +1519,9 @@ defmodule Shuttle.Dispatcher do
         case Shuttle.Continuation.backfill_session_uuid(runner, store, fiber_id, uuid) do
           :ok ->
             Logger.info("Recorded session UUID #{uuid} for #{fiber_id} in shuttle.runtime")
+            # The codex/pi pairing becomes known here, not at launch — this is
+            # that harness's `dispatch` line.
+            append_session_ledger(fiber_id, uuid, opts)
 
           {:error, reason} ->
             Logger.warning(

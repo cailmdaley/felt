@@ -35,7 +35,11 @@ defmodule ShuttleWeb.FiberController do
   def create(conn, params) do
     case OriginRouter.route(Map.get(params, "origin")) do
       {:remote, remote} ->
-        relay_json(conn, OriginRouter.forward(remote, "/api/v1/fiber/create", conn.body_params), &forward_failed/2)
+        relay_json(
+          conn,
+          OriginRouter.forward(remote, "/api/v1/fiber/create", conn.body_params),
+          &forward_failed/2
+        )
 
       :local ->
         create_local(conn, params)
@@ -143,7 +147,7 @@ defmodule ShuttleWeb.FiberController do
 
     args =
       ["-C", root, "add", fiber_id, name, "--top-level", "-s", status_of(frontmatter)] ++
-        body_args(body) ++ tag_args(frontmatter)
+        body_args(body) ++ tag_args(frontmatter) ++ native_field_args(frontmatter)
 
     with :ok <- ensure_felt_repo(root),
          {:ok, _output} <- Shuttle.Felt.run(args) do
@@ -198,6 +202,22 @@ defmodule ShuttleWeb.FiberController do
   end
 
   defp tag_args(_frontmatter), do: []
+
+  # `due` and `outcome` are on `@felt_native_keys`, so the splice deliberately
+  # skips them as "felt's to write" — which means felt has to actually be told.
+  # They used to fall between the two owners and vanish: not spliced by us, not
+  # passed to felt, so a one-shot create of a dated fiber silently dropped its
+  # date. `felt add` takes both (`-D`, `-o`), so no follow-up edit is needed and
+  # the create stays one call.
+  defp native_field_args(frontmatter) do
+    [{"due", "-D"}, {"outcome", "-o"}]
+    |> Enum.flat_map(fn {key, flag} ->
+      case Map.get(frontmatter, key) do
+        value when is_binary(value) and value != "" -> [flag, value]
+        _ -> []
+      end
+    end)
+  end
 
   defp validate_fiber_id(fiber_id) do
     segments = String.split(fiber_id, "/")

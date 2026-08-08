@@ -218,8 +218,11 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
              "Unowned draft"
            ]
 
-    # shuttle=true: ONLY the rows this daemon owns (shuttle block + host == own).
-    # Served from the poller's warm document cache (no live fallback).
+    # shuttle=true: the rows this daemon owns (shuttle block + host == own),
+    # PLUS the host-less kinds the aux walks admit. "Plain todo" is a human
+    # `due:` card with no shuttle block — it rides the `--has-field due` walk.
+    # "Owned elsewhere" and "Unowned draft" name an owner (a peer, and nobody)
+    # so they stay out. Served from the poller's warm document cache.
     warm_poller!(store)
     only = get(api_conn(), "/api/v1/fibers?shuttle=true")
     assert only.status == 200
@@ -231,7 +234,7 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
       |> Enum.map(& &1["fiber"]["name"])
       |> Enum.sort()
 
-    assert owner_names == ["Closed pinned", "Managed"]
+    assert owner_names == ["Closed pinned", "Managed", "Plain todo"]
   end
 
   test "GET /api/v1/fibers?shuttle=true stamps live runtime from the poller",
@@ -465,7 +468,9 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
       |> get("/api/v1/fibers?shuttle=true")
 
     assert conn_stale.status == 200
-    assert [%{"fiber" => %{"slug" => "tests/etag"}}] = Jason.decode!(conn_stale.resp_body)["fibers"]
+
+    assert [%{"fiber" => %{"slug" => "tests/etag"}}] =
+             Jason.decode!(conn_stale.resp_body)["fibers"]
   end
 
   test "GET /api/v1/fibers?shuttle=true etag changes when the feed content changes",
@@ -960,7 +965,7 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
     assert body["origins"]["candide"]["fiber_count"] == 1
   end
 
-  test "GET /api/v1/fibers/composite is shuttle work only",
+  test "GET /api/v1/fibers/composite carries owned shuttle work plus human due cards, deduped",
        %{store: store} do
     write_fiber!(store, "tests/managed", """
     ---
@@ -1002,19 +1007,82 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
     assert conn.status == 200
     body = Jason.decode!(conn.resp_body)
 
+    # "Human todo" carries a `due:` and NO shuttle block. It rides the
+    # `--has-field due` walk — the one `shouldIncludeInKanban` always claimed
+    # existed and, until this walk was built, did not. Without it the Week's ◴
+    # marks and the drift machinery never saw a human's own deadlines.
     names = body["fibers"] |> Enum.map(& &1["fiber"]["name"]) |> Enum.sort()
-    assert names == ["Managed", "Owner with due"]
+    assert names == ["Human todo", "Managed", "Owner with due"]
 
     assert Enum.all?(body["fibers"], &(&1["origin"] == "test-host"))
+
+    # "Owner with due" matches BOTH the shuttle walk and the due walk; the union
+    # is deduped by fiber id, so it appears exactly once.
     assert Enum.count(body["fibers"], &(&1["fiber"]["name"] == "Owner with due")) == 1
-    assert body["origins"]["test-host"]["fiber_count"] == 2
+    assert body["origins"]["test-host"]["fiber_count"] == 3
 
     only = get(api_conn(), "/api/v1/fibers?shuttle=true")
 
     owner_names =
       Jason.decode!(only.resp_body)["fibers"] |> Enum.map(& &1["fiber"]["name"]) |> Enum.sort()
 
-    assert owner_names == ["Managed", "Owner with due"]
+    assert owner_names == ["Human todo", "Managed", "Owner with due"]
+  end
+
+  test "GET /api/v1/fibers?shuttle=true admits cycles with start, and dedupes a triple match",
+       %{store: store} do
+    # A cycle carries neither a shuttle block nor a host — it is a band on the
+    # calendar, not dispatchable work — so it reaches the board only via the
+    # `-t cycle` walk, and it renders only if `start` survives the kanban
+    # projection.
+    write_fiber!(store, "tests/cycle-autumn", """
+    ---
+    name: Autumn cycle
+    status: open
+    tags: [cycle]
+    start: 2026-09-01
+    due: 2026-11-30
+    ---
+
+    Body.
+    """)
+
+    # shuttle block + due + cycle tag: matched by all three walks, served once.
+    write_fiber!(store, "tests/triple", """
+    ---
+    name: Triple match
+    status: active
+    tags: [cycle]
+    start: 2026-09-01
+    shuttle:
+      kind: oneshot
+      host: test-host
+    ---
+
+    Body.
+    """)
+
+    warm_poller!(store)
+    conn = get(api_conn(), "/api/v1/fibers?shuttle=true")
+    assert conn.status == 200
+
+    fibers = Jason.decode!(conn.resp_body)["fibers"]
+    cycle = Enum.find(fibers, &(&1["fiber"]["name"] == "Autumn cycle"))
+
+    assert cycle, "cycle fiber was not admitted to the owner feed"
+    assert "cycle" in cycle["fiber"]["tags"]
+
+    # It carries a due AND the cycle tag, so BOTH aux walks return it. The union
+    # dedupes across aux walks, not just against the shuttle walk.
+    assert Enum.count(fibers, &(&1["fiber"]["name"] == "Autumn cycle")) == 1
+
+    # felt normalizes a bare `YYYY-MM-DD` to a full instant on the way out —
+    # `due` has always arrived this way, and `start` matches it. Pinned here so
+    # the client knows which shape to parse.
+    assert cycle["fiber"]["start"] == "2026-09-01T00:00:00Z"
+    assert cycle["fiber"]["due"] == "2026-11-30T00:00:00Z"
+
+    assert Enum.count(fibers, &(&1["fiber"]["name"] == "Triple match")) == 1
   end
 
   test "GET /api/v1/fibers?shuttle=true dedupes overlapping configured stores", %{store: store} do

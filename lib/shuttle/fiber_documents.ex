@@ -8,6 +8,8 @@ defmodule Shuttle.FiberDocuments do
   without relying on Portolan's WebSocket fiber-tree snapshots.
   """
 
+  require Logger
+
   alias Shuttle.FeltStores
 
   @type entry :: %{
@@ -25,13 +27,76 @@ defmodule Shuttle.FiberDocuments do
   # `kanban_fields/0`) so cache entries build directly from candidate rows.
   @kanban_fields ~w(id uid name status tags created_at closed_at modified_at
                     outcome due horizon cold kind priority depends_on tempered
-                    shuttle path report_path)
+                    shuttle start path report_path)
 
   @kanban_json_fields Enum.join(@kanban_fields, ",")
 
   @doc "The kanban metadata field names the owner feed projects from felt JSON."
   @spec kanban_fields() :: [String.t()]
   def kanban_fields, do: @kanban_fields
+
+  # The tag that marks a cycle fiber. Mirrors the client's `CYCLE_TAG`
+  # (ui/src/board/KanbanRules.ts) — a cycle is identified by its tag, not by a
+  # `shuttle:` block, which is exactly why it needs its own admission walk.
+  @cycle_tag "cycle"
+
+  # The felt filters that TOGETHER admit every fiber the kanban can render.
+  #
+  # `--has-field` is AND across values (measured on the live store: 392 rows
+  # carry `shuttle`, 36 carry `due`, and `--has-field shuttle,due` returns
+  # their 23-row INTERSECTION), and felt has no OR, so one narrowed walk cannot
+  # express this union. Three narrow walks stay far cheaper than the one broad
+  # walk that would: on the live store the three cost ~791 KB of JSON together
+  # against 5.2 MB for `felt ls` unfiltered — the projection narrowing is the
+  # whole Lustre-scale win, and it is worth two extra shell-outs per store per
+  # 30 s tick to keep it.
+  #
+  # Each filter also implies all-statuses (verified: `--has-field due` returns
+  # the same 36 rows with and without `-s all`), matching the primary walk's
+  # long-standing omission of `-s`.
+  @kanban_walks [
+    ["--has-field", "shuttle"],
+    ["--has-field", "due"],
+    ["-t", @cycle_tag]
+  ]
+
+  @doc """
+  The felt filter argument-groups whose UNION is the kanban's admitted set.
+
+  Callers run one `felt ls` per group with the `kanban_fields/0` projection and
+  dedupe the rows by `id`. The first group is the historical `shuttle:` walk;
+  the rest close the gaps it never covered (human `due:` cards, which carry no
+  `shuttle:` block, and `cycle` fibers, which carry neither).
+  """
+  @spec kanban_walks() :: [[String.t()]]
+  def kanban_walks, do: @kanban_walks
+
+  @doc """
+  True for a fiber admitted by one of the NON-shuttle walks — a human `due:`
+  card or a `cycle`-tagged fiber.
+
+  These kinds carry no `shuttle:` block and therefore no `shuttle.host:`, so
+  host-ownership cannot gate them. They belong to whichever store physically
+  roots them, the same as any other local fiber, and the walk that found them
+  already established that. Re-deriving admission from the row itself (rather
+  than tagging rows at walk time) keeps the feed gate honest: the same property
+  that justified admitting a row is the one that justifies serving it.
+  """
+  @spec kanban_aux_admissible?(map()) :: boolean()
+  def kanban_aux_admissible?(fiber) when is_map(fiber) do
+    has_due?(fiber) or cycle_tagged?(fiber)
+  end
+
+  def kanban_aux_admissible?(_), do: false
+
+  defp has_due?(%{"due" => due}), do: due not in [nil, ""]
+  defp has_due?(_), do: false
+
+  defp cycle_tagged?(%{"tags" => tags}) when is_list(tags) do
+    Enum.any?(tags, &(is_binary(&1) and String.downcase(String.trim(&1)) == @cycle_tag))
+  end
+
+  defp cycle_tagged?(_), do: false
 
   @spec list(keyword()) :: {:ok, map()} | {:error, term()}
   def list(opts \\ []) do
@@ -196,6 +261,18 @@ defmodule Shuttle.FiberDocuments do
     end
   end
 
+  # The narrowed owner walk is a union of several felt filters, so it takes its
+  # own path; every other mode is still one `felt ls`.
+  defp list_store(store, false, :owned) do
+    case list_owned_union(store) do
+      {:ok, rows} ->
+        {:ok, rows |> filter_rows(:owned) |> Enum.flat_map(&entry_for(store, &1, :stat))}
+
+      {:error, detail} ->
+        {:error, detail}
+    end
+  end
+
   defp list_store(store, with_body?, mode) do
     args = list_args(with_body?, mode)
 
@@ -217,6 +294,93 @@ defmodule Shuttle.FiberDocuments do
       {output, status} ->
         {:error, %{felt_store: store, status: status, error: String.trim(output)}}
     end
+  end
+
+  # The narrowed owner walk is a UNION of `kanban_walks/0`, one `felt ls` per
+  # filter, deduped by `id` with the first (shuttle) walk winning. A fiber
+  # matching two walks — a `due:` card that also carries a `shuttle:` block —
+  # appears exactly once.
+  #
+  # An aux walk that fails is logged and skipped rather than failing the store:
+  # the `shuttle:` walk is the load-bearing one, and losing the whole feed
+  # because a supplementary filter errored would be a bad trade. A failing
+  # PRIMARY walk still errors the store, exactly as before.
+  defp list_owned_union(store) do
+    [primary | aux] = @kanban_walks
+
+    case owned_walk(store, primary) do
+      {:ok, rows} ->
+        {:ok, union_by_id(rows, Enum.flat_map(aux, &aux_walk_rows(store, &1)))}
+
+      {:error, detail} ->
+        {:error, Map.put(detail, :felt_store, store)}
+    end
+  end
+
+  defp aux_walk_rows(store, filter) do
+    case owned_walk(store, filter) do
+      {:ok, rows} ->
+        rows
+
+      {:error, detail} ->
+        Logger.warning(
+          "kanban aux walk #{inspect(filter)} failed for #{store}: #{inspect(detail)}"
+        )
+
+        []
+    end
+  end
+
+  defp owned_walk(store, filter) do
+    args = ["ls", "-s", "all", "-j"] ++ filter ++ ["--json-field", @kanban_json_fields]
+
+    case runner().cmd("felt", args, cd: store) do
+      {output, 0} -> decode_walk(output)
+      {output, status} -> {:error, %{status: status, error: String.trim(to_string(output))}}
+    end
+  rescue
+    # The runner spawns through a Port and lets spawn failures raise, matching
+    # `System.cmd/3`. Under fork pressure (a host at its process limit) that
+    # would take down the request instead of the one walk; degrade it to the
+    # ordinary per-walk error so an aux filter can never 500 the feed.
+    error -> {:error, %{error: Exception.message(error)}}
+  end
+
+  defp decode_walk(output) do
+    case Jason.decode(output) do
+      {:ok, rows} when is_list(rows) -> {:ok, Enum.filter(rows, &is_map/1)}
+      {:ok, _} -> {:error, %{error: "felt ls returned non-list JSON"}}
+      {:error, error} -> {:error, %{error: Exception.message(error)}}
+    end
+  end
+
+  @doc """
+  Union two row lists by felt `id`, keeping the first occurrence.
+
+  Dedupes the additional rows against the primary list AND against each other:
+  `additional` is the concatenation of every aux walk, and one fiber can match
+  several of them — a `cycle`-tagged fiber that also carries a `due` is matched
+  by both aux walks and must still reach the feed once.
+
+  Rows without a usable `id` are dropped from the ADDITIONAL list only: they
+  cannot be deduped against, and every walk projects `id`, so a row missing one
+  is malformed rather than merely unusual.
+  """
+  @spec union_by_id([map()], [map()]) :: [map()]
+  def union_by_id(primary, additional) do
+    {kept, _seen} =
+      Enum.reduce(additional, {[], MapSet.new(primary, &Map.get(&1, "id"))}, fn row,
+                                                                                {acc, seen} ->
+        id = Map.get(row, "id")
+
+        if is_binary(id) and id != "" and not MapSet.member?(seen, id) do
+          {[row | acc], MapSet.put(seen, id)}
+        else
+          {acc, seen}
+        end
+      end)
+
+    primary ++ Enum.reverse(kept)
   end
 
   # The command runner, behind the same config seam as `Shuttle.Felt` /
@@ -290,8 +454,12 @@ defmodule Shuttle.FiberDocuments do
   # owners' answers and never merges, because no fiber is authoritatively present
   # on two hosts. A fiber physically rooted here but pinned to another host's
   # `shuttle.host:` belongs to that host's feed, never this one's mirror.
+  # Host-owned shuttle work, OR one of the host-less local kinds (`due:` cards,
+  # `cycle` fibers) that `kanban_walks/0` admits. The aux kinds carry no
+  # `shuttle.host:` to match against, so ownership for them is "this store
+  # roots it", which enumerating this store already established.
   defp owned_kanban_fiber?(fiber) do
-    shuttle_fiber?(fiber) and host_owned?(fiber)
+    (shuttle_fiber?(fiber) and host_owned?(fiber)) or kanban_aux_admissible?(fiber)
   end
 
   # A fiber is owner-feed-relevant iff it carries a non-empty `shuttle:` block.

@@ -96,9 +96,50 @@ defmodule ShuttleWeb.FiberControllerTest do
            } = parsed
   end
 
-  test "POST /api/v1/fiber/create writes under shuttle.project_dir when it differs from daemon root", %{
-    tmp: tmp
-  } do
+  test "POST /api/v1/fiber/create round-trips due and outcome", %{tmp: tmp} do
+    # Both keys are on @felt_native_keys, so the non-native splice skips them as
+    # "felt's to write". They must therefore reach `felt add`'s argv — they used
+    # to reach neither owner and vanish, so a one-shot create of a dated fiber
+    # silently lost its date.
+    conn =
+      api_conn()
+      |> post(
+        "/api/v1/fiber/create",
+        Jason.encode!(%{
+          id: "tests/dated",
+          name: "Dated fiber",
+          frontmatter: %{
+            status: "open",
+            due: "2026-11-30",
+            outcome: "The thing concluded.",
+            tags: ["constitution"],
+            shuttle: %{enabled: true, kind: "oneshot", project_dir: tmp}
+          }
+        })
+      )
+
+    assert conn.status == 200
+    assert %{"path" => path} = Jason.decode!(conn.resp_body)
+
+    assert {:ok, parsed} =
+             path |> File.read!() |> frontmatter() |> YamlElixir.read_from_string()
+
+    assert parsed["outcome"] == "The thing concluded."
+    assert parsed["status"] == "open"
+
+    # felt normalizes a bare date to a full instant on the way in, the same
+    # shape the kanban projection serves.
+    assert to_string(parsed["due"]) =~ "2026-11-30"
+
+    # Spliced exactly once — the native keys are felt's, not the splice's.
+    assert length(String.split(File.read!(path), "outcome:")) == 2
+    assert length(String.split(File.read!(path), "due:")) == 2
+  end
+
+  test "POST /api/v1/fiber/create writes under shuttle.project_dir when it differs from daemon root",
+       %{
+         tmp: tmp
+       } do
     daemon_root = Path.join(tmp, "daemon-root")
     project_dir = Path.join(tmp, "project-dir")
     File.mkdir_p!(daemon_root)
@@ -129,7 +170,9 @@ defmodule ShuttleWeb.FiberControllerTest do
 
     assert_felt_path(path, project_dir, ["tests", "project-local", "project-local.md"])
 
-    refute File.exists?(Path.join([daemon_root, ".felt", "tests", "project-local", "project-local.md"]))
+    refute File.exists?(
+             Path.join([daemon_root, ".felt", "tests", "project-local", "project-local.md"])
+           )
   end
 
   test "POST /api/v1/fiber/create rejects armed fibers without project_dir" do

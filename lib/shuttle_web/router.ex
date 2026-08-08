@@ -74,6 +74,10 @@ defmodule ShuttleWeb.Router do
     # host's primary felt store. A cross-host view fans out and merges.
     get("/activity", ActivityController, :show)
     get("/narration", NarrationController, :show)
+    # Join rung 0 for the temporal views: the structural fiber↔session pairing
+    # this host recorded at dispatch / claim / resume. Host-scoped like its two
+    # neighbours above.
+    get("/sessions", SessionsController, :show)
   end
 
   # File/asset bytes by absolute path (owner-routed). Unlocks `:::{embed}` +

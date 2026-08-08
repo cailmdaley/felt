@@ -535,8 +535,16 @@ defmodule Shuttle.PollerTest do
     File.mkdir_p!(data_dir)
     System.put_env("SHUTTLE_DATA_DIR", data_dir)
 
+    # Session-ledger lines land under the same throwaway dir. test_helper.exs
+    # pins a suite-wide SHUTTLE_SESSIONS_FILE (keeping the suite out of the real
+    # ~/.shuttle) and it wins over SHUTTLE_DATA_DIR — drop it so each test reads
+    # only its own pairings.
+    prev_sessions_file = System.get_env("SHUTTLE_SESSIONS_FILE")
+    System.delete_env("SHUTTLE_SESSIONS_FILE")
+
     on_exit(fn ->
       restore_env("SHUTTLE_DATA_DIR", prev_data_dir)
+      restore_env("SHUTTLE_SESSIONS_FILE", prev_sessions_file)
       File.rm_rf!(data_dir)
     end)
 
@@ -5394,6 +5402,18 @@ defmodule Shuttle.PollerTest do
              cmd == "felt" and match?(["shuttle", "mark-runtime" | _], args) and
                "--session" in args and "uuid-claim-1" in args
            end)
+
+    # …and the same fact structurally: a claim is the moment this host learns
+    # that an externally-spawned session belongs to this fiber. Recorded under
+    # the CANONICAL tmux name, so the ledger matches what everything downstream
+    # sees rather than the pre-rename capture name.
+    assert [ledger] = Shuttle.SessionLedger.read_since(0)
+    assert ledger["kind"] == "claim"
+    assert ledger["fiber"] == id
+    assert ledger["uid"] == "01CLAIMUID"
+    assert ledger["session"] == "uuid-claim-1"
+    assert ledger["tmux"] == session
+    assert ledger["host"] == Shuttle.Poller.own_host_id()
 
     new_sessions_before =
       Enum.count(MockRunner.commands(), fn {cmd, args} ->
