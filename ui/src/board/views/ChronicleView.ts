@@ -1782,6 +1782,11 @@ class ChronicleView implements TemporalView {
    * The band is repainted from the cursor as it moves, so the gesture reads as
    * pulling the span rather than as a request that a later poll might honour.
    * The write goes out once, on release.
+   *
+   * Like the draw gesture, this one closes over DOM that a rebuild replaces, so
+   * `this.draft` stands down both the poll and the window extension for its
+   * duration — see {@link installDrawToCreate} for why the civil-day anchors
+   * are not enough on their own.
    */
   private installEdgeDrag(
     grip: HTMLElement,
@@ -1887,6 +1892,23 @@ class ChronicleView implements TemporalView {
    * the strip — upward past the headers, or off the right edge — must still
    * track and still commit, and a lane-scoped listener would drop it silently
    * mid-gesture.
+   *
+   * A GESTURE CANNOT SURVIVE A REBUILD, and that is why `this.draft` is a
+   * stand-down signal for everything that rebuilds — `load()` returns early on
+   * it, and so does the window extension. The anchors are civil days, so the
+   * ARITHMETIC would survive a prepend; the DOM would not. This handler closes
+   * over its lane and its ghost, and `render()` replaces both, so a rebuild
+   * mid-drag leaves the gesture measuring a detached rect and painting a ghost
+   * nobody can see — right in the data, invisible on the page, which is worse
+   * than either failure alone.
+   *
+   * The accepted consequence: auto-scroll pans within the window it started
+   * with, and reaching the far edge stops rather than growing the record. The
+   * window grows on the next scroll after release. Making the growth continuous
+   * needs the ghost to outlive a rebuild, and there is no stable parent for it
+   * — `render()` clears the whole page body — so it would have to hang off the
+   * page root in viewport coordinates and track scrolling itself. Three moving
+   * parts to convert a correct restriction into a fragile capability.
    */
   private installDrawToCreate(track: HTMLElement, ctx: ViewContext): void {
     track.addEventListener('mousedown', (e) => {
