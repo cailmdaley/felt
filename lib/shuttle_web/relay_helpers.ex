@@ -157,4 +157,63 @@ defmodule ShuttleWeb.RelayHelpers do
 
   @doc "The 400 sentence for a required epoch-millisecond bound."
   def epoch_ms_message(key), do: "#{key} is required and must be an integer (epoch ms)"
+
+  @doc """
+  Serve a JSON body behind a **weak validator**, so a hub polling this endpoint
+  over an SSH tunnel pays a header exchange instead of a full transfer whenever
+  nothing has changed.
+
+  `parts` is any term that decides the response: the underlying source's cheap
+  fingerprint (an events file's `{mtime, size}`, a git HEAD sha) **plus the
+  request window**, since the same source serves different bytes per window.
+  It is hashed into a weak ETag; a matching `If-None-Match` short-circuits to
+  304 and `body_fun` is never called — that is the point, the expensive read is
+  skipped, not just the transfer.
+
+  Weak rather than strong (unlike the fibers feed's content etag in
+  `ShuttleWeb.FiberDocumentsController`) because the token is derived from file
+  metadata, not from the served bytes: it changes whenever the source changes,
+  which is the guarantee a cache validator needs, but it is not a hash of the
+  response.
+  """
+  def json_with_validator(conn, parts, body_fun) when is_function(body_fun, 0) do
+    etag = weak_etag(parts)
+    conn = put_resp_header(conn, "etag", etag)
+
+    if if_none_match?(conn, etag) do
+      send_resp(conn, 304, "")
+    else
+      json(conn, body_fun.())
+    end
+  end
+
+  defp weak_etag(parts) do
+    hash =
+      :crypto.hash(:sha256, :erlang.term_to_binary(parts))
+      |> Base.encode16(case: :lower)
+      |> binary_part(0, 32)
+
+    ~s(W/"#{hash}")
+  end
+
+  defp if_none_match?(conn, etag) do
+    case get_req_header(conn, "if-none-match") do
+      [value | _] -> String.trim(value) == etag
+      [] -> false
+    end
+  end
+
+  @doc """
+  Cheap change fingerprint for a file: `{mtime, size}`, or `nil` when it does
+  not exist. A missing file's `nil` is itself a stable token — a host that has
+  never written the file 304s forever, correctly.
+  """
+  def file_token(path) when is_binary(path) do
+    case File.stat(path, time: :posix) do
+      {:ok, %File.Stat{type: :regular, mtime: mtime, size: size}} -> {mtime, size}
+      _ -> nil
+    end
+  end
+
+  def file_token(_path), do: nil
 end

@@ -315,7 +315,7 @@ defmodule ShuttleWeb.NarrationControllerTest do
       to_ms = ms("2026-08-06T00:00:00Z")
 
       conn = get(api_conn(), "/api/v1/narration?from_ms=#{from_ms}&to_ms=#{to_ms}")
-      assert json_response(conn, 200) == %{"commits" => []}
+      assert json_response(conn, 200) == %{"commits" => [], "host" => "test-host"}
     end
 
     test "400 when a bound is missing, unparseable, or absent entirely" do

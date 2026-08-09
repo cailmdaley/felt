@@ -4,7 +4,13 @@ defmodule ShuttleWeb.NarrationController do
 
       GET /api/v1/narration?from_ms=<int>&to_ms=<int>
 
-      {"commits": [{"iso": "2026-08-05T14:02:11+02:00", "subject": "fiber-slug: what happened"}]}
+      {"host": "dapmcw68",
+       "commits": [{"iso": "2026-08-05T14:02:11+02:00", "subject": "fiber-slug: what happened"}]}
+
+  `host` is this daemon's own id, stamped for the same reason `/activity` and
+  `/sessions` stamp theirs: a cross-host view merges these feeds and needs to
+  know whose story each commit belongs to. It is top-level, not per commit —
+  one response never mixes two stores.
 
   **One window form.** `from_ms`/`to_ms` are epoch-millisecond instants, both
   required, and are timezone-free — matching `/activity`. The caller resolves
@@ -23,14 +29,47 @@ defmodule ShuttleWeb.NarrationController do
 
   use Phoenix.Controller, formats: [:json]
 
-  import ShuttleWeb.RelayHelpers, only: [integer_param: 2, epoch_ms_message: 1]
+  import ShuttleWeb.RelayHelpers,
+    only: [integer_param: 2, epoch_ms_message: 1, json_with_validator: 3]
 
-  alias Shuttle.Narration
+  alias Shuttle.{Narration, Poller}
+  alias ShuttleWeb.TemporalComposite, as: Composite
 
   def show(conn, params) do
     with {:ok, window} <- instant_window(params),
          :ok <- bounded(window) do
-      json(conn, %{commits: fetch(window)})
+      json_with_validator(conn, {window, Narration.head_sha()}, fn ->
+        %{host: Poller.own_host_id(), commits: fetch(window)}
+      end)
+    else
+      {:error, reason} -> conn |> put_status(400) |> json(%{error: message(reason)})
+    end
+  end
+
+  @doc """
+  `GET /api/v1/narration/composite?from_ms=…&to_ms=…` — every host's story.
+
+  This host's commits are read live from its own store; each remote's come from
+  `Shuttle.RemoteTemporalRegistry`'s cache, filtered to the requested sub-window
+  by each commit's `iso` date and stamped with the remote's name. Per-commit,
+  because one response mixes stores here where the single-host endpoint cannot.
+  """
+  def composite(conn, params) do
+    with {:ok, window} <- instant_window(params),
+         :ok <- bounded(window) do
+      {:instants, from_ms, to_ms} = window
+      entries = Composite.remote_entries()
+      own = Composite.own_host()
+
+      commits =
+        Enum.map(fetch(window), &Map.put(&1, :host, own)) ++
+          Enum.flat_map(entries, fn {name, entry} ->
+            entry.narration_commits
+            |> Composite.in_window(:iso, from_ms, to_ms)
+            |> Enum.map(&Composite.stamp(&1, name))
+          end)
+
+      json(conn, %{host: own, commits: commits, origins: Composite.origins(entries)})
     else
       {:error, reason} -> conn |> put_status(400) |> json(%{error: message(reason)})
     end

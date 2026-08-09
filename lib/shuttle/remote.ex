@@ -201,6 +201,39 @@ defmodule Shuttle.Remote do
   end
 
   @doc """
+  The full `GET /api/v1/activity` URL for this remote, over the inclusive
+  window `from_ms..to_ms`. Host-scoped, like the two builders below it: the
+  temporal feeds are each daemon's own telemetry, so the hub fans out and
+  merges on the origin name rather than owner-routing.
+  """
+  @spec activity_url(t(), integer(), integer()) :: String.t()
+  def activity_url(%__MODULE__{url: url}, from_ms, to_ms)
+      when is_integer(from_ms) and is_integer(to_ms) do
+    base(url) <> "/api/v1/activity?from_ms=#{from_ms}&to_ms=#{to_ms}"
+  end
+
+  @doc """
+  The full `GET /api/v1/sessions` URL for this remote, from `since_ms`. The
+  ledger is one line per session, so the hub asks for all of it (`since_ms: 0`).
+  """
+  @spec sessions_url(t(), integer()) :: String.t()
+  def sessions_url(%__MODULE__{url: url}, since_ms) when is_integer(since_ms) do
+    base(url) <> "/api/v1/sessions?since_ms=#{since_ms}"
+  end
+
+  @doc """
+  The full `GET /api/v1/narration` URL for this remote, over the inclusive
+  window `from_ms..to_ms`.
+  """
+  @spec narration_url(t(), integer(), integer()) :: String.t()
+  def narration_url(%__MODULE__{url: url}, from_ms, to_ms)
+      when is_integer(from_ms) and is_integer(to_ms) do
+    base(url) <> "/api/v1/narration?from_ms=#{from_ms}&to_ms=#{to_ms}"
+  end
+
+  defp base(url), do: String.trim_trailing(url, "/")
+
+  @doc """
   The full `GET /api/v1/felt-stores` URL for this remote.
   """
   @spec felt_stores_url(t()) :: String.t()

@@ -91,10 +91,24 @@ defmodule Shuttle.Activity do
   @spec buckets(integer(), integer(), keyword()) ::
           {:ok, [bucket()]} | {:error, :inverted_range | :range_too_wide}
   def buckets(from_ms, to_ms, opts \\ []) when is_integer(from_ms) and is_integer(to_ms) do
+    case check_range(from_ms, to_ms) do
+      :ok -> {:ok, scan(from_ms, to_ms, opts)}
+      error -> error
+    end
+  end
+
+  @doc """
+  Validates a window without reading anything.
+
+  Split out of `buckets/3` so the endpoint can refuse a bad window — and settle
+  a conditional fetch — before paying for the scan.
+  """
+  @spec check_range(integer(), integer()) :: :ok | {:error, :inverted_range | :range_too_wide}
+  def check_range(from_ms, to_ms) when is_integer(from_ms) and is_integer(to_ms) do
     cond do
       to_ms < from_ms -> {:error, :inverted_range}
       to_ms - from_ms > @max_range_ms -> {:error, :range_too_wide}
-      true -> {:ok, scan(from_ms, to_ms, opts)}
+      true -> :ok
     end
   end
 

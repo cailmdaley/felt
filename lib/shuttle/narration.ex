@@ -91,6 +91,40 @@ defmodule Shuttle.Narration do
     run(["--since=@#{div(from_ms, 1_000)}", "--until=@#{div(to_ms, 1_000)}"], opts)
   end
 
+  @doc """
+  The store's current `HEAD` sha, or `nil` when there is no repo to ask.
+
+  This is the cheap change fingerprint behind the endpoint's conditional fetch:
+  the narration of a past window can only change when a commit lands, and a
+  commit always moves `HEAD`. Same never-raise contract as `commits_between/3`
+  — every failure is `nil`, which is a stable token in its own right.
+
+  Opts (for tests): `:store_root`, `:runner`.
+  """
+  @spec head_sha(keyword()) :: String.t() | nil
+  def head_sha(opts \\ []) do
+    case Keyword.get(opts, :store_root) || default_store_root() do
+      root when is_binary(root) and root != "" -> git_head(Path.expand(root), opts)
+      _ -> nil
+    end
+  end
+
+  defp git_head(root, opts) do
+    args = ["-C", root, "rev-parse", "HEAD"]
+
+    case runner(opts).cmd("git", args, stderr_to_stdout: true, timeout_ms: @timeout_ms) do
+      {output, 0} -> presence(String.trim(output))
+      _ -> nil
+    end
+  rescue
+    _ -> nil
+  catch
+    :exit, _ -> nil
+  end
+
+  defp presence(value) when is_binary(value) and value != "", do: value
+  defp presence(_), do: nil
+
   defp run(bounds, opts) do
     case Keyword.get(opts, :store_root) || default_store_root() do
       root when is_binary(root) and root != "" -> git_log(Path.expand(root), bounds, opts)
