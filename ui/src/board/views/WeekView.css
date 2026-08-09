@@ -364,6 +364,21 @@
   white-space: nowrap;
 }
 .wk-row-today .wk-annot { color: #9A7B35; }
+/* Stale-origin rows wear the kanban's `kbn-card--stale` / `kbn-card-waiting`
+   (KanbanModal.css) — same condition, same words. Only the geometry is
+   re-fitted: that badge was cut for a card's own column, and here it sits
+   inline at the right edge of a one-line row. */
+.wk-row.kbn-card--stale {
+  background: transparent;
+  border-style: solid;
+}
+.wk-annot .kbn-card-waiting {
+  display: inline-block;
+  margin-top: 0;
+  margin-left: 6px;
+  padding: 1px 4px;
+  font-size: calc(9px * var(--kbn-type-scale, 1));
+}
 
 /* ── Shared tick row ──────────────────────────────────────────────────────── */
 

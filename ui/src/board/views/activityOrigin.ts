@@ -20,7 +20,7 @@
  */
 
 import type { KanbanCard } from '../KanbanTypes.js'
-import type { ActivityBucket, SessionPairing } from './TemporalData.js'
+import { lookupTmux, type ActivityBucket, type SessionPairing } from './TemporalData.js'
 import { cardPathSegments, cardUlids, sessionSlug, sessionUlid } from './sessionNames.js'
 
 /** What a raster tick can honestly say about itself. */
@@ -108,7 +108,11 @@ export function originOf(index: OriginIndex, bucket: ActivityBucket): BucketOrig
 function resolveCard(index: OriginIndex, bucket: ActivityBucket): KanbanCard | undefined {
   const { byWorker, byUlid, bySlug, byId, byTmux } = index
   if (bucket.s !== null) {
-    const pairing = byTmux.get(bucket.s)
+    // Host-scoped: a tmux name is unique within a host, not across the fleet,
+    // so a bucket from `ada` must not join a pairing `bob` recorded under the
+    // same session name. `lookupTmux` prefers the scoped key and only falls
+    // back to the bare name when the bucket cannot say where it ran.
+    const pairing = lookupTmux(byTmux, bucket.host, bucket.s)
     if (pairing) {
       const direct = byId.get(pairing.fiber)
       if (direct) return direct

@@ -31,13 +31,14 @@ import {
   lifelineExtent,
   railDate,
   readCycleBand,
+  rowWaitingOn,
   type CycleCard,
   saysNothingHere,
   shuttleOrigin,
 } from './ChronicleView.js'
 import { sessionSlug, sessionUlid } from './sessionNames.js'
 import { formatSpanMinutes } from './railTime.js'
-import { foldActiveMinutes } from './TemporalData.js'
+import { buildSessionIndex, foldActiveMinutes } from './TemporalData.js'
 import type { ActivityBucket } from './TemporalData.js'
 import type { KanbanCard } from '../KanbanTypes.js'
 import { civilDayToLocalDate, isoDayLocal } from '../civilDay.js'
@@ -215,6 +216,62 @@ describe('attributing activity to fibers', () => {
     )
     expect(at.byCard.size).toBe(0)
     expect(at.byCwd.get('/home/ada/elsewhere')).toHaveLength(1)
+  })
+
+  // Cross-host. Two daemons each run a tmux session called `run-shuttle`, on
+  // two different fibers. Flat, the second ledger line would overwrite the
+  // first and one host's minutes would be inked on the other's lifeline; the
+  // bucket's own `host` is what keeps the two apart.
+  const crossHostLedger = buildSessionIndex([
+    {
+      at: 1,
+      fiber: morning.id,
+      uid: null,
+      session: 'sess-ada',
+      harness: 'claude-code',
+      host: 'ada',
+      tmux: 'run-shuttle',
+      kind: 'dispatch',
+    },
+    {
+      at: 2,
+      fiber: ledgerCard.id,
+      uid: null,
+      session: 'sess-bob',
+      harness: 'claude-code',
+      host: 'bob',
+      tmux: 'run-shuttle',
+      kind: 'dispatch',
+    },
+  ]).byTmux
+
+  it('keeps two hosts’ identically-named tmux sessions on their own fibers', () => {
+    const at = attributeActivity(
+      [
+        bucket(1, { s: 'run-shuttle', host: 'ada' }),
+        bucket(2, { s: 'run-shuttle', host: 'bob' }),
+        bucket(3, { s: 'run-shuttle', host: 'bob' }),
+      ],
+      cards,
+      crossHostLedger,
+    )
+    expect(at.byCard.get(morning.id)).toHaveLength(1)
+    expect(at.byCard.get(ledgerCard.id)).toHaveLength(2)
+  })
+
+  it('falls back to the bare name only for a bucket that cannot say where it ran', () => {
+    // No host on the bucket — an old daemon's un-stamped response. The bare key
+    // resolves to whichever host paired most recently, which is `bob` here.
+    const at = attributeActivity([bucket(1, { s: 'run-shuttle' })], cards, crossHostLedger)
+    expect(at.byCard.get(ledgerCard.id)).toHaveLength(1)
+  })
+
+  it('ranks a remote host’s work on its own row, not the local one', () => {
+    // The whole point of the cross-host read: ink from `ada` lands on `ada`'s
+    // fiber even though every other rung would have looked local.
+    const at = attributeActivity([bucket(1, { s: 'run-shuttle', host: 'ada' })], cards, crossHostLedger)
+    expect(at.byCard.has(ledgerCard.id)).toBe(false)
+    expect(at.byCard.get(morning.id)).toHaveLength(1)
   })
 
   it('is a no-op when no ledger is supplied', () => {
@@ -784,5 +841,42 @@ describe('density steps', () => {
   it('never divides by an empty window', () => {
     expect(densityStep(0, 0)).toBe(1)
     expect(densityStep(3, 0)).toBe(1)
+  })
+})
+
+// ── Staleness ────────────────────────────────────────────────────────────────
+
+describe('a row waits on its origin, and only on its own', () => {
+  const origins = {
+    local: { kind: 'local' as const, stale: false },
+    ada: { kind: 'remote' as const, stale: true, lastError: 'timeout' },
+    bob: { kind: 'remote' as const, stale: false },
+  }
+
+  it('names the host a wholly-remote row is waiting on', () => {
+    expect(rowWaitingOn({ originId: 'remote-ada' }, 'ada', origins)).toBe('ada')
+  })
+
+  it('says nothing about a remote that is answering', () => {
+    expect(rowWaitingOn({ originId: 'remote-bob' }, 'bob', origins)).toBeNull()
+  })
+
+  // The local daemon answers for itself. A remote falling behind says nothing
+  // about this host's own record, and graying it would be a false claim.
+  it('never mutes a locally-owned row', () => {
+    expect(rowWaitingOn({ originId: 'local' }, 'ada', origins)).toBeNull()
+  })
+
+  // A thin window is not an error: an origin nobody reports on is one nothing
+  // claims to be waiting for.
+  it('reads an unmentioned origin as fresh rather than guessing', () => {
+    expect(rowWaitingOn({ originId: 'remote-cass' }, 'cass', origins)).toBeNull()
+    expect(rowWaitingOn({ originId: 'remote-ada' }, 'ada', {})).toBeNull()
+  })
+
+  it('resolves the origin under any of the three spellings the board uses', () => {
+    expect(rowWaitingOn({ originId: 'ada' }, 'ada', origins)).toBe('ada')
+    // Only the hostname matches here — the board's id for it is opaque.
+    expect(rowWaitingOn({ originId: 'remote-7f2' }, 'ada', origins)).toBe('ada')
   })
 })

@@ -33,5 +33,7 @@ export {
   type NarrationResult,
   type SessionRecord,
   type TemporalFetchers,
+  type TemporalOrigin,
+  type TemporalOrigins,
 } from './TemporalData.js'
 export { createViewFallbackPage } from './ViewPage.js'

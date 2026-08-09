@@ -1,12 +1,21 @@
 /**
  * TemporalData — the read plane the temporal views share.
  *
- * Two daemon routes, both read-only and both OPTIONAL:
+ * Three daemon feeds, all read-only and all OPTIONAL:
  *
- *   GET /api/v1/activity?from_ms=&to_ms=   coarse per-minute activity buckets
- *                                          (what the machine was doing, and where)
- *   GET /api/v1/narration?from_ms=&to_ms=  the commit trail over a window
- *                                          (what the work says it did)
+ *   activity   coarse per-minute activity buckets (what the machine was doing)
+ *   narration  the commit trail over a window (what the work says it did)
+ *   sessions   the fiber↔session ledger (whose work a minute was)
+ *
+ * Each is asked for CROSS-HOST FIRST — `/api/v1/<feed>/composite`, which serves
+ * this daemon's live read concatenated with every remote's cached read, each
+ * item stamped with the host it came from, plus an `origins` block reporting
+ * per-origin freshness (the fibers composite's block verbatim; see
+ * {@link TemporalOrigin}). A daemon older than the composites answers 404 on
+ * that path, so the feed falls back to the plain single-host route ONCE and
+ * remembers — the offline harness and an old daemon keep working, and neither
+ * pays a wasted probe per window. Either way the result carries hosts and an
+ * origins block, so a view never branches on which route answered.
  *
  * BOTH ROUTES TAKE INSTANTS, and that is the point. `narration` still *reads*
  * inclusive civil days from its callers — that is the unit a temporal view
@@ -45,6 +54,12 @@ export interface ActivityBucket {
   cwd: string | null
   k: 'attention' | 'notify' | 'agent'
   n: number
+  /** Which daemon's events file produced it. The composite stamps every
+   *  bucket; the single-host route does not, and the fetcher fills it from the
+   *  response's own `host` so a bucket always knows where it came from.
+   *  Absent only on a bucket nobody stamped — a mock, or a pre-host daemon —
+   *  which the joins read as "host unknown", never as "local". */
+  host?: string | null
 }
 
 export interface ActivityResult {
@@ -52,12 +67,41 @@ export interface ActivityResult {
   from_ms: number
   to_ms: number
   buckets: ActivityBucket[]
+  origins?: TemporalOrigins
 }
 
 export interface NarrationCommit {
   iso: string
   subject: string
+  /** The daemon whose store the commit came from; absent when unstamped. */
+  host?: string | null
 }
+
+/**
+ * One origin's freshness, verbatim the fibers composite's block (see
+ * `CompositeOrigin` in KanbanComposite.ts) plus activity's per-origin covered
+ * `window`.
+ *
+ * The honesty contract: an unreachable remote keeps serving its last-good data
+ * marked `stale`, and the view grays it rather than dropping it. A `window`
+ * narrower than the span asked for is not an error either — that origin's data
+ * simply thins out where it has nothing cached.
+ */
+export interface TemporalOrigin {
+  kind: 'local' | 'remote'
+  stale: boolean
+  lastPolledAt?: string
+  lastError?: string
+  /** Activity only: the span this origin can actually answer for, or absent
+   *  when it has never been polled successfully ("no idea", which is not the
+   *  same claim as an empty window). */
+  window?: { fromMs: number; toMs: number }
+}
+
+/** Origin name (host id) → its freshness. The fetchers always populate one
+ *  (synthesizing a lone local origin for a daemon that serves no block); it is
+ *  optional on the result types only so a mock can omit it. */
+export type TemporalOrigins = Record<string, TemporalOrigin>
 
 export interface ActiveMinutes {
   /** Minutes carrying ANY signal — a minute counts once, not once per kind, so
@@ -147,6 +191,7 @@ export interface SessionRecord {
 export interface SessionsResult {
   host: string
   records: SessionRecord[]
+  origins?: TemporalOrigins
 }
 
 /** What the ledger can tell you about a session: whose work it was. */
@@ -175,6 +220,7 @@ export interface SessionIndex {
 
 export interface NarrationResult {
   commits: NarrationCommit[]
+  origins?: TemporalOrigins
 }
 
 /** Cache lifetime. Comfortably longer than the board's 15s poll, so a view
@@ -256,13 +302,50 @@ export function createTemporalFetchers(shuttleBase: string): TemporalFetchers {
     return await res.json()
   }
 
+  /**
+   * Feeds whose composite route is known absent. A daemon older than the
+   * cross-host routes answers 404 on `/…/composite`; we fall back to the plain
+   * per-host route ONCE and remember, so the offline harness and an old daemon
+   * do not pay a wasted round trip on every window. Per-feed rather than
+   * global: the three routes shipped together, but a proxy that serves one and
+   * not another should degrade one feed, not all three.
+   */
+  const noComposite = new Set<string>()
+
+  /**
+   * Read a feed composite-first. `query` is shared by both routes — the
+   * composites take exactly the params their single-host originals do.
+   *
+   * A composite 404 is the ONLY signal that means "older daemon": a 5xx, a
+   * network error or a malformed body could equally be a transient hiccup on a
+   * daemon that does have the route, and latching those would strand a fleet
+   * on single-host data until the board reloads. Those paths return null and
+   * the caller degrades to empty for this window only.
+   */
+  const readFeed = async (feed: string, query: string): Promise<unknown> => {
+    if (!noComposite.has(feed)) {
+      const res = await fetch(`${shuttleBase}/api/v1/${feed}/composite?${query}`)
+      if (res.ok) return await res.json()
+      if (res.status !== 404) return null
+      noComposite.add(feed)
+    }
+    return await readJson(`${shuttleBase}/api/v1/${feed}?${query}`)
+  }
+
   return {
     activity(fromMs: number, toMs: number): Promise<ActivityResult> {
       return memo(`activity:${fromMs}:${toMs}`, async () => {
-        const empty: ActivityResult = { host: '', from_ms: fromMs, to_ms: toMs, buckets: [] }
+        const empty: ActivityResult = {
+          host: '',
+          from_ms: fromMs,
+          to_ms: toMs,
+          buckets: [],
+          origins: {},
+        }
         try {
-          const body = await readJson(
-            `${shuttleBase}/api/v1/activity?from_ms=${encodeURIComponent(String(fromMs))}&to_ms=${encodeURIComponent(String(toMs))}`,
+          const body = await readFeed(
+            'activity',
+            `from_ms=${encodeURIComponent(String(fromMs))}&to_ms=${encodeURIComponent(String(toMs))}`,
           )
           return parseActivity(body, empty)
         } catch {
@@ -282,15 +365,16 @@ export function createTemporalFetchers(shuttleBase: string): TemporalFetchers {
      */
     narration(fromISO: string, toISO: string): Promise<NarrationResult> {
       return memo(`narration:${fromISO}:${toISO}`, async () => {
-        const empty: NarrationResult = { commits: [] }
+        const empty: NarrationResult = { commits: [], origins: {} }
         const span = civilDaysToInstants(fromISO, toISO)
         // Unreadable days used to be sent as-is and answered with a 400, which
         // the degrade path turned into an empty result. Same outcome, one round
         // trip cheaper.
         if (!span) return empty
         try {
-          const body = await readJson(
-            `${shuttleBase}/api/v1/narration?from_ms=${span.fromMs}&to_ms=${span.toMs}`,
+          const body = await readFeed(
+            'narration',
+            `from_ms=${span.fromMs}&to_ms=${span.toMs}`,
           )
           return parseNarration(body, empty)
         } catch {
@@ -309,10 +393,11 @@ export function createTemporalFetchers(shuttleBase: string): TemporalFetchers {
      */
     sessions(sinceMs: number): Promise<SessionsResult> {
       return memo(`sessions:${sinceMs}`, async () => {
-        const empty: SessionsResult = { host: '', records: [] }
+        const empty: SessionsResult = { host: '', records: [], origins: {} }
         try {
-          const body = await readJson(
-            `${shuttleBase}/api/v1/sessions?since_ms=${encodeURIComponent(String(sinceMs))}`,
+          const body = await readFeed(
+            'sessions',
+            `since_ms=${encodeURIComponent(String(sinceMs))}`,
           )
           return parseSessions(body, empty)
         } catch {
@@ -366,6 +451,7 @@ const BUCKET_KINDS = new Set<ActivityBucket['k']>(['attention', 'notify', 'agent
 /** Coerce a wire body into an ActivityResult, dropping malformed buckets. */
 function parseActivity(body: unknown, fallback: ActivityResult): ActivityResult {
   if (!isRecord(body)) return fallback
+  const host = typeof body.host === 'string' ? body.host : fallback.host
   const raw = Array.isArray(body.buckets) ? body.buckets : []
   const buckets: ActivityBucket[] = []
   for (const entry of raw) {
@@ -381,27 +467,93 @@ function parseActivity(body: unknown, fallback: ActivityResult): ActivityResult 
       cwd: typeof entry.cwd === 'string' ? entry.cwd : null,
       k: k as ActivityBucket['k'],
       n: typeof n === 'number' && Number.isFinite(n) ? n : 0,
+      // The composite stamps each bucket; the single-host route stamps only the
+      // response. Filling the response's host in here means a bucket's `host`
+      // is the truth on both routes, so nothing downstream has to know which
+      // one answered.
+      host: text(entry.host) ?? (host || null),
     })
   }
   return {
-    host: typeof body.host === 'string' ? body.host : fallback.host,
+    host,
     from_ms: typeof body.from_ms === 'number' ? body.from_ms : fallback.from_ms,
     to_ms: typeof body.to_ms === 'number' ? body.to_ms : fallback.to_ms,
     buckets,
+    origins: parseOrigins(body.origins, host),
   }
+}
+
+/**
+ * Coerce the composite's `origins` block. Snake-case on the wire, camel here —
+ * the same translation `parseCompositeFeed` does for the fibers composite,
+ * because the two blocks are deliberately the same shape.
+ *
+ * The single-host routes carry no block at all. Rather than leave the views
+ * with nothing to key on, synthesize the one origin such a response describes:
+ * itself, local and fresh. That keeps "is this origin stale?" a total question
+ * on both routes.
+ */
+function parseOrigins(value: unknown, localHost: string): TemporalOrigins {
+  const out: TemporalOrigins = {}
+  if (isRecord(value)) {
+    for (const [name, raw] of Object.entries(value)) {
+      if (!isRecord(raw)) continue
+      const origin: TemporalOrigin = {
+        kind: raw.kind === 'local' ? 'local' : 'remote',
+        stale: raw.stale === true,
+      }
+      const polled = text(raw.last_polled_at)
+      const error = text(raw.last_error)
+      if (polled) origin.lastPolledAt = polled
+      if (error) origin.lastError = error
+      const window = parseWindow(raw.window)
+      if (window) origin.window = window
+      out[name] = origin
+    }
+  }
+  if (localHost && !out[localHost]) out[localHost] = { kind: 'local', stale: false }
+  return out
+}
+
+function parseWindow(value: unknown): { fromMs: number; toMs: number } | null {
+  if (!isRecord(value)) return null
+  const from = value.from_ms
+  const to = value.to_ms
+  if (typeof from !== 'number' || !Number.isFinite(from)) return null
+  if (typeof to !== 'number' || !Number.isFinite(to)) return null
+  return { fromMs: from, toMs: to }
+}
+
+/**
+ * Is `origin`'s data stale, by name? Unknown names read fresh: an origin the
+ * block does not mention is one nothing claims to be waiting on, and graying
+ * data on a name we cannot resolve would be a guess dressed as a fact.
+ */
+export function isOriginStale(origins: TemporalOrigins, host: string | null): boolean {
+  if (!host) return false
+  return origins[host]?.stale === true
+}
+
+/** The origins the block reports stale, in name order. */
+export function staleOrigins(origins: TemporalOrigins): string[] {
+  return Object.entries(origins)
+    .filter(([, origin]) => origin.stale)
+    .map(([name]) => name)
+    .sort()
 }
 
 /** Coerce a wire body into a NarrationResult, dropping malformed commits. */
 function parseNarration(body: unknown, fallback: NarrationResult): NarrationResult {
   if (!isRecord(body)) return fallback
+  const host = typeof body.host === 'string' ? body.host : ''
   const raw = Array.isArray(body.commits) ? body.commits : []
   const commits: NarrationCommit[] = []
   for (const entry of raw) {
     if (!isRecord(entry)) continue
     if (typeof entry.iso !== 'string' || typeof entry.subject !== 'string') continue
-    commits.push({ iso: entry.iso, subject: entry.subject })
+    commits.push({ iso: entry.iso, subject: entry.subject, host: text(entry.host) ?? (host || null) })
   }
-  return { commits }
+  return { commits, origins: parseOrigins(body.origins, host) }
 }
 
 const SESSION_KINDS = new Set<SessionRecord['kind']>(['dispatch', 'claim', 'resume'])
@@ -417,6 +569,7 @@ const SESSION_KINDS = new Set<SessionRecord['kind']>(['dispatch', 'claim', 'resu
  */
 export function parseSessions(body: unknown, fallback: SessionsResult): SessionsResult {
   if (!isRecord(body)) return fallback
+  const host = typeof body.host === 'string' ? body.host : fallback.host
   const raw = Array.isArray(body.records) ? body.records : []
   const records: SessionRecord[] = []
   for (const entry of raw) {
@@ -432,15 +585,14 @@ export function parseSessions(body: unknown, fallback: SessionsResult): Sessions
       uid: text(entry.uid),
       session,
       harness: text(entry.harness),
-      host: text(entry.host),
+      // A record the serving daemon wrote before it stamped hosts belongs to
+      // that daemon; on the composite every record carries its own.
+      host: text(entry.host) ?? (host || null),
       tmux: text(entry.tmux),
       kind: kind as SessionRecord['kind'],
     })
   }
-  return {
-    host: typeof body.host === 'string' ? body.host : fallback.host,
-    records,
-  }
+  return { host, records, origins: parseOrigins(body.origins, host) }
 }
 
 /**
@@ -458,6 +610,26 @@ export function parseSessions(body: unknown, fallback: SessionsResult): Sessions
  * A record with no `tmux` contributes to `bySession` only. That is not an
  * error — a session with no terminal is a real thing the ledger records — so it
  * is silently absent from `byTmux` rather than dropped from both.
+ *
+ * CROSS-HOST: a tmux name is only unique WITHIN a host. Two daemons each
+ * running a session called `run-shuttle` are two different sessions, and a
+ * flat map merging their ledgers would let either claim the other's minutes.
+ * So `byTmux` carries three kinds of key, and {@link lookupTmux} reads them in
+ * this order:
+ *
+ *   `<host>NUL<tmux>`  the scoped key — exact, written for every record that
+ *                      carries a host
+ *   `NUL<tmux>`        a marker that SOME host owns this name, which is what
+ *                      stops a bucket that knows its host from borrowing a
+ *                      different host's pairing
+ *   `<tmux>`           the bare name, for a bucket whose host is unknown (an
+ *                      old daemon's unstamped response) or a name no host has
+ *                      claimed (a ledger line written before host stamping)
+ *
+ * A NUL byte cannot occur in a hostname or a tmux name, so the namespaces
+ * cannot collide. All obey last-record-wins by `at`; on the bare key that
+ * means a collision resolves to whichever host paired most recently — a guess,
+ * and reached only when nothing in the question says where the work ran.
  */
 export function buildSessionIndex(records: readonly SessionRecord[]): SessionIndex {
   const byTmux = new Map<string, SessionPairing>()
@@ -483,9 +655,54 @@ export function buildSessionIndex(records: readonly SessionRecord[]): SessionInd
   for (const record of records) {
     const pairing: SessionPairing = { fiber: record.fiber, uid: record.uid }
     claim(bySession, sessionAt, record.session, record.at, pairing)
-    if (record.tmux) claim(byTmux, tmuxAt, record.tmux, record.at, pairing)
+    if (record.tmux) {
+      claim(byTmux, tmuxAt, record.tmux, record.at, pairing)
+      if (record.host) {
+        claim(byTmux, tmuxAt, tmuxJoinKey(record.host, record.tmux), record.at, pairing)
+        claim(byTmux, tmuxAt, tmuxOwnedKey(record.tmux), record.at, pairing)
+      }
+    }
   }
   return { byTmux, bySession }
+}
+
+/** The host-scoped key a cross-host tmux join reads. */
+export function tmuxJoinKey(host: string, tmux: string): string {
+  return `${host}\u0000${tmux}`
+}
+
+/** Marker key: SOME host has claimed this tmux name. Its presence is what
+ *  stops a bucket that knows its own host from falling back onto a different
+ *  host's pairing. */
+function tmuxOwnedKey(tmux: string): string {
+  return `\u0000${tmux}`
+}
+
+/**
+ * Resolve a tmux name to its pairing, preferring the host that owns it.
+ *
+ * The scoped key first — that is the fact. The bare name only when the caller
+ * cannot say which host it is asking about, or when the ledger line predates
+ * host stamping; on a fleet where two hosts share a session name, that fallback
+ * can land on the wrong one, which is exactly why nothing that KNOWS its host
+ * ever reaches it.
+ */
+export function lookupTmux(
+  byTmux: ReadonlyMap<string, SessionPairing>,
+  host: string | null | undefined,
+  tmux: string | null | undefined,
+): SessionPairing | undefined {
+  if (!tmux) return undefined
+  if (host) {
+    const scoped = byTmux.get(tmuxJoinKey(host, tmux))
+    if (scoped) return scoped
+    // A caller that KNOWS its host never borrows another host's pairing: if
+    // some host has claimed this name and it is not this one, the honest answer
+    // is that nothing here pairs it. Only a name no host has claimed — an
+    // unstamped ledger line — reaches the bare key from here.
+    if (byTmux.has(tmuxOwnedKey(tmux))) return undefined
+  }
+  return byTmux.get(tmux)
 }
 
 /** A wire string, or null — treating blank as absent. */

@@ -51,11 +51,14 @@ import type { KanbanCard } from '../KanbanTypes.js'
 import {
   buildSessionIndex,
   foldActiveMinutes,
+  isOriginStale,
+  lookupTmux,
   parseCommitSlug,
   type ActivityBucket,
   type ActivityResult,
   type NarrationCommit,
   type SessionPairing,
+  type TemporalOrigins,
 } from './TemporalData.js'
 import { createViewEmptyState, createViewPage } from './ViewPage.js'
 import { cardPathSegments, cardUlids, sessionSlug, sessionUlid } from './sessionNames.js'
@@ -264,12 +267,30 @@ export interface DayLane {
   /** The fiber's own name. */
   label: string
   /**
+   * Where this lane's WORK ran, lower-cased, or '' when nothing said.
+   *
+   * Taken from the activity buckets that built the lane — the composite stamps
+   * every bucket with the daemon whose events file produced it, so this is a
+   * recorded fact about the minutes drawn rather than an inference from the
+   * card. A card's `shuttleHost` stands in only when no bucket carried a host
+   * (an old daemon, or a mock), because that is the board's own claim about
+   * where the fiber's worker lives and it is better than nothing.
+   */
+  host: string
+  /**
    * The host to print beside the label — set ONLY when this lane ran somewhere
    * other than the host the page is reading. Every lane wearing the same
    * hostname is a constant repeated once per row, which reads as information
    * and is not; a hostname that appears means "this one ran elsewhere".
    */
   hostNote: string
+  /**
+   * True when the lane's host is an origin the composite reports STALE — its
+   * daemon is unreachable and what is drawn is that origin's last-good read.
+   * The rail still draws: the minutes happened, and hiding them would be a
+   * bigger lie than dimming them. Same register as a stale card on the Desk.
+   */
+  stale: boolean
   /** Board card id, when the lane joined to one — the click target. */
   cardId?: string
   /** Slugs this lane answers to when matching commit prefixes. */
@@ -401,14 +422,20 @@ function buildJoinIndex(
 }
 
 export function joinBucketToCard(
-  bucket: Pick<ActivityBucket, 's'>,
+  bucket: Pick<ActivityBucket, 's' | 'host'>,
   index: JoinIndex,
 ): KanbanCard | null {
   if (bucket.s) {
     // 0. What the daemon recorded. Both halves of the pairing are tried: the
     // ULID is identity, while the fiber id is a path that can be moved out from
     // under one.
-    const pairing = index.byTmux?.get(bucket.s)
+    //
+    // HOST-SCOPED. A tmux name is unique only within a host, and this ledger is
+    // now several daemons' merged: two machines each running `run-shuttle`
+    // would otherwise let either claim the other's minutes. `lookupTmux` tries
+    // the scoped key first and falls back to the bare name only for a bucket
+    // that cannot say where it ran.
+    const pairing = index.byTmux ? lookupTmux(index.byTmux, bucket.host, bucket.s) : undefined
     if (pairing) {
       const byFiber = index.byId.get(pairing.fiber)
       if (byFiber) return byFiber
@@ -432,30 +459,96 @@ export function joinBucketToCard(
   return null
 }
 
+/** One host's claim on a lane: how many of its buckets, and how recent. */
+interface HostTally {
+  count: number
+  last: number
+}
+
+/**
+ * Which host a lane ran on, from the buckets that built it.
+ *
+ * The buckets of one lane should agree — a fiber's worker runs on one machine
+ * — but nothing enforces it: a fiber worked on two machines in one day, or a
+ * tmux name colliding across hosts, both produce a mixed lane. So the tally is
+ * kept honest rather than assumed: the host with the MOST minutes wins, ties
+ * broken by whichever was seen most recently. Picking arbitrarily would make a
+ * one-bucket stray rename the whole lane.
+ */
+function dominantHost(hosts: ReadonlyMap<string, HostTally>): string {
+  let best = ''
+  let bestTally: HostTally | null = null
+  for (const [host, tally] of hosts) {
+    if (
+      !bestTally ||
+      tally.count > bestTally.count ||
+      (tally.count === bestTally.count && tally.last > bestTally.last)
+    ) {
+      best = host
+      bestTally = tally
+    }
+  }
+  return best
+}
+
+/**
+ * Origins keyed by LOWER-CASED name. Lane hosts are lower-cased for display
+ * (hostnames are case-insensitive and a rail full of `Cineca-Login-02` beside
+ * `cineca-login-02` would read as two machines), so the staleness lookup has to
+ * meet them there rather than miss on case alone.
+ */
+function foldOrigins(origins: TemporalOrigins | undefined): TemporalOrigins {
+  const out: TemporalOrigins = {}
+  for (const [name, origin] of Object.entries(origins ?? {})) {
+    const key = name.trim().toLowerCase()
+    if (!key) continue
+    const held = out[key]
+    // Stale wins a collision: if any spelling of this host is waiting, the
+    // honest answer for the host is "waiting".
+    out[key] = held?.stale ? held : origin
+  }
+  return out
+}
+
 /**
  * One lane per fiber that was active in the window. Buckets that joined to no
  * fiber are skipped entirely — un-fibered work is a tiny slice of the day and
  * is not worth a lane of its own. Lanes sort by weight, the day's heaviest
  * work reading first.
+ *
+ * `origins` is the composite's freshness block — activity's, merged with the
+ * ledger's by the caller. A lane whose host it reports stale is marked, and the
+ * view dims it. A `window` narrower than the rail is NOT marked: an origin that
+ * only cached part of the day is answering honestly, and its data simply thins
+ * out where it has none.
  */
 export function buildDayLanes(
   activity: ActivityResult,
   cards: KanbanCard[],
   win: DayWindow,
   byTmux?: ReadonlyMap<string, SessionPairing>,
+  origins: TemporalOrigins = activity.origins ?? {},
 ): DayLane[] {
   const index = buildJoinIndex(cards, byTmux)
   const pageHost = (activity.host ?? '').toLowerCase()
-  const noteFor = (host: string | undefined): string => {
-    const own = (host ?? '').toLowerCase()
-    return own && own !== pageHost ? own : ''
-  }
+  const folded = foldOrigins(origins)
 
   interface Acc {
     lane: Omit<
       DayLane,
-      'agent' | 'attention' | 'notify' | 'attentionMinutes' | 'agentMinutes' | 'weight'
+      | 'agent'
+      | 'attention'
+      | 'notify'
+      | 'attentionMinutes'
+      | 'agentMinutes'
+      | 'weight'
+      | 'host'
+      | 'hostNote'
+      | 'stale'
     >
+    /** The card's own claim, the fallback when no bucket carries a host. */
+    cardHost: string
+    hosts: Map<string, HostTally>
     agent: Set<number>
     attention: Set<number>
     notify: Set<number>
@@ -476,10 +569,11 @@ export function buildDayLanes(
         lane: {
           key,
           label: card.name,
-          hostNote: noteFor(card.shuttleHost),
           cardId: card.id,
           slugs: commitSlugsForCard(card),
         },
+        cardHost: (card.shuttleHost ?? '').trim().toLowerCase(),
+        hosts: new Map(),
         agent: new Set(),
         attention: new Set(),
         notify: new Set(),
@@ -487,21 +581,35 @@ export function buildDayLanes(
       }
       acc.set(key, entry)
     }
+    const host = (bucket.host ?? '').trim().toLowerCase()
+    if (host) {
+      const tally = entry.hosts.get(host)
+      if (tally) {
+        tally.count += 1
+        if (bucket.m > tally.last) tally.last = bucket.m
+      } else entry.hosts.set(host, { count: 1, last: bucket.m })
+    }
     entry.all.add(minute)
     if (bucket.k === 'agent') entry.agent.add(minute)
     else if (bucket.k === 'attention') entry.attention.add(minute)
     else entry.notify.add(minute)
   }
 
-  const lanes: DayLane[] = [...acc.values()].map((entry) => ({
-    ...entry.lane,
-    agent: mergeMinuteRuns(entry.agent),
-    attention: mergeMinuteRuns(entry.attention),
-    notify: [...entry.notify].sort((a, b) => a - b),
-    attentionMinutes: entry.attention.size,
-    agentMinutes: entry.agent.size,
-    weight: entry.all.size,
-  }))
+  const lanes: DayLane[] = [...acc.values()].map((entry) => {
+    const host = dominantHost(entry.hosts) || entry.cardHost
+    return {
+      ...entry.lane,
+      host,
+      hostNote: host && host !== pageHost ? host : '',
+      stale: isOriginStale(folded, host || null),
+      agent: mergeMinuteRuns(entry.agent),
+      attention: mergeMinuteRuns(entry.attention),
+      notify: [...entry.notify].sort((a, b) => a - b),
+      attentionMinutes: entry.attention.size,
+      agentMinutes: entry.agent.size,
+      weight: entry.all.size,
+    }
+  })
 
   lanes.sort((a, b) => {
     if (a.weight !== b.weight) return b.weight - a.weight
@@ -890,9 +998,28 @@ export interface DayModel {
   ledgerSize: number
   /** The host this page's activity came from — printed once, in the head. */
   host: string
+  /** Per-origin freshness over both feeds — what the lanes' `stale` reads. */
+  origins: TemporalOrigins
   totals: DayTotals
   lanes: DayLane[]
   entries: DayEntry[]
+}
+
+/**
+ * Two freshness blocks over the same fleet, read as one. An origin either feed
+ * reports stale IS stale: the lanes are built from both files, so a host whose
+ * activity is current but whose ledger is not is still a host we are waiting on.
+ */
+export function mergeOrigins(
+  a: TemporalOrigins | undefined,
+  b: TemporalOrigins | undefined,
+): TemporalOrigins {
+  const out: TemporalOrigins = { ...(a ?? {}) }
+  for (const [name, origin] of Object.entries(b ?? {})) {
+    const held = out[name]
+    if (!held || (origin.stale && !held.stale)) out[name] = origin
+  }
+  return out
 }
 
 export function buildDayModel(
@@ -903,13 +1030,17 @@ export function buildDayModel(
   shuttleBase: string,
   nowMs: number = Date.now(),
   byTmux?: ReadonlyMap<string, SessionPairing>,
+  /** The LEDGER's origins block; activity's rides on `activity` itself. */
+  sessionOrigins?: TemporalOrigins,
 ): DayModel {
   const win = dayWindow(dayISO)
-  const lanes = buildDayLanes(activity, cards, win, byTmux)
+  const origins = mergeOrigins(activity.origins, sessionOrigins)
+  const lanes = buildDayLanes(activity, cards, win, byTmux, origins)
   return {
     dayISO,
     window: win,
     host: (activity.host ?? '').toLowerCase(),
+    origins,
     totals: dayTotals(activity, win),
     lanes,
     // The commits are the widened civil-day range; the rail decides which of
@@ -928,7 +1059,7 @@ export function dayModelSignature(model: DayModel): string {
   const lanes = model.lanes
     .map(
       (lane) =>
-        `${lane.key}|${lane.label}|${lane.hostNote}|${lane.weight}|` +
+        `${lane.key}|${lane.label}|${lane.hostNote}|${lane.stale ? 'stale' : ''}|${lane.weight}|` +
         `${lane.agent.map((r) => `${r.start}-${r.end}`).join(',')}|` +
         `${lane.attention.map((r) => `${r.start}-${r.end}`).join(',')}|${lane.notify.join(',')}`,
     )
@@ -1198,6 +1329,7 @@ class DayViewImpl implements TemporalView {
       ctx.shuttleBase,
       Date.now(),
       this.byTmux,
+      sessions.origins,
     )
     const signature = dayModelSignature(model)
     if (signature === this.signature) {
@@ -1282,7 +1414,9 @@ class DayViewImpl implements TemporalView {
       const row = String(index + 1)
 
       const label = document.createElement('div')
-      label.className = 'kbn-day-label'
+      // The Desk's own stale register, verbatim — a lane whose daemon is
+      // unreachable must not look like a second kind of "not quite here".
+      label.className = `kbn-day-label${lane.stale ? ' kbn-card--stale' : ''}`
       label.style.gridRow = row
       const name = document.createElement(lane.cardId ? 'button' : 'span')
       name.className = 'kbn-day-lanename'
@@ -1301,9 +1435,19 @@ class DayViewImpl implements TemporalView {
         host.title = `ran on ${lane.hostNote}`
         label.append(host)
       }
+      if (lane.stale && lane.host) {
+        // Same badge and the same words the Desk puts on a stale card. The
+        // rail still draws underneath it: those minutes happened, and what is
+        // shown is that origin's last-good read, not a guess.
+        const waiting = document.createElement('span')
+        waiting.className = 'kbn-card-waiting kbn-day-lanewaiting'
+        waiting.textContent = `⌛ waiting on ${lane.host}`
+        waiting.title = `${lane.host} is unreachable — this rail is its last-known read`
+        label.append(waiting)
+      }
 
       const rail = document.createElement('div')
-      rail.className = 'kbn-day-rail'
+      rail.className = `kbn-day-rail${lane.stale ? ' kbn-card--stale' : ''}`
       rail.style.gridRow = row
       for (const run of lane.agent) rail.append(this.buildMark('kbn-day-wash', run, win))
       for (const run of lane.attention) rail.append(this.buildMark('kbn-day-att', run, win))

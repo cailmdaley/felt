@@ -59,13 +59,16 @@ export interface ViewContext {
   activity(fromMs: number, toMs: number): Promise<ActivityResult>
   narration(fromISO: string, toISO: string): Promise<NarrationResult>
   /**
-   * This host's session ledger from `sinceMs` onward, oldest first. Pass 0 for
+   * The FLEET's session ledger from `sinceMs` onward, oldest first. Pass 0 for
    * the whole history — the file holds one line per session, not per event.
    *
-   * Feed it to `buildSessionIndex` and join buckets through `byTmux`: that is
-   * RUNG 0, a recorded pairing, and it outranks every name-derived rung because
-   * it survives the session ending. Degrades to `{host: '', records: []}` on an
-   * older daemon, so a view that adopts it must still keep its existing rungs.
+   * Feed it to `buildSessionIndex` and join buckets through `lookupTmux`: that
+   * is RUNG 0, a recorded pairing, and it outranks every name-derived rung
+   * because it survives the session ending. Join through `lookupTmux` rather
+   * than `byTmux.get` — a tmux name is unique within a host, not across the
+   * fleet, and the scoped key is what keeps two daemons' identically named
+   * sessions apart. Degrades to an empty ledger on an older daemon, so a view
+   * that adopts it must still keep its existing rungs.
    */
   sessions(sinceMs: number): Promise<SessionsResult>
   /**

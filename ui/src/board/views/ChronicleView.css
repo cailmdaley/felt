@@ -710,6 +710,24 @@ button.chr-name:hover {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Stale-origin rows wear the kanban's own `kbn-card--stale` / `kbn-card-waiting`
+   (KanbanModal.css) — same condition, same register. Only the geometry is
+   re-fitted here: that vocabulary was cut for a card, and a chronicle row is one
+   line tall with a 72px note slot. The colour, the dashed rule and the dimming
+   all still come from there. */
+.chr-track.kbn-card--stale,
+.chr-label.kbn-card--stale {
+  background: transparent;
+  border-style: solid;
+}
+.chr-note.kbn-card-waiting {
+  font-size: calc(8.5px * var(--kbn-type-scale, 1));
+  padding: 0 3px;
+  margin-top: 0;
+  max-width: 108px;
+  line-height: 1.5;
+  align-self: center;
+}
 .chr-span {
   flex: 0 0 auto;
   min-width: 22px;

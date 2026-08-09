@@ -220,6 +220,25 @@ button.kbn-day-lanename:focus-visible {
   color: #A89B83;
 }
 
+/* A stale lane wears the Desk's own `kbn-card--stale` — the dimming is the
+   whole signal, and it must be the SAME dimming. What does not come across is
+   the card's plate: a rail row is not a card, so the beige fill and the dashed
+   border are dropped here rather than re-invented as something else. */
+.kbn-day-label.kbn-card--stale,
+.kbn-day-rail.kbn-card--stale {
+  background: none;
+  border: 0;
+}
+/* The waiting badge, likewise the Desk's, set inline in a baseline row instead
+   of stacked under a card head. */
+.kbn-day-lanewaiting {
+  flex: 0 0 auto;
+  margin-top: 0;
+  padding: 0 4px;
+  font-size: calc(8px * var(--kbn-type-scale, 1));
+  white-space: nowrap;
+}
+
 .kbn-day-rail {
   grid-column: 2;
   position: relative;

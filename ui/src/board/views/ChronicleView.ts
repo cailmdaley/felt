@@ -43,9 +43,13 @@ import { civilDayNoon, formatSpanMinutes, shiftCivilDay } from './railTime.js'
 import {
   buildSessionIndex,
   foldActiveMinutes,
+  isOriginStale,
+  lookupTmux,
   parseCommitSlug,
+  staleOrigins,
   type ActivityBucket,
   type SessionPairing,
+  type TemporalOrigins,
 } from './TemporalData.js'
 import type { KanbanCard, KanbanResponse } from '../KanbanTypes.js'
 import { buildTimelineDays, type TimelineDay } from '../KanbanSurfaces.js'
@@ -268,8 +272,14 @@ function resolveCard(
   // resolving. Attributing to an absent card would drop the work from the page
   // entirely — it would leave the cwd rows without gaining a fiber row — and
   // silently losing minutes is the one thing worse than mis-filing them.
+  //
+  // HOST-SCOPED. A tmux name is unique within a host, never across the fleet,
+  // and the buckets now arrive from every daemon at once — so `ada`'s
+  // `run-shuttle` minutes must not join the pairing `bob` recorded under the
+  // same session name. `lookupTmux` reads the scoped key first and only falls
+  // back to the bare name for a bucket that cannot say where it ran.
   if (bucket.s !== null && byTmux) {
-    const pairing = byTmux.get(bucket.s)
+    const pairing = lookupTmux(byTmux, bucket.host, bucket.s)
     if (pairing) {
       if (cardIds.has(pairing.fiber)) return pairing.fiber
       const byUid = pairing.uid ? byUlid.get(pairing.uid.trim().toUpperCase()) : undefined
@@ -572,6 +582,11 @@ interface ChronicleRow {
   label: string
   /** Tiny mono note under the name's right edge: the owning host. */
   note: string
+  /** The host this row is WAITING ON — set only when the fiber is wholly owned
+   *  by a remote origin whose read is stale. Null is the ordinary case, and it
+   *  is also what a thin window says: data that simply has not arrived is not
+   *  an error, so nothing but a stale origin lights this. */
+  waitingOn: string | null
   cardId?: string
   days: Map<string, DayCell>
   /** Inclusive day-column range the solid lifeline covers. Never past today. */
@@ -603,6 +618,30 @@ function hostLabel(card: KanbanCard, response: KanbanResponse): string {
   if (origin && origin !== 'local') return origin.toLowerCase()
   if (response.feltHost && response.feltHost !== 'local') return response.feltHost.toLowerCase()
   return (card.shuttleHost ?? 'local').toLowerCase()
+}
+
+/**
+ * The host a row is waiting on, or null.
+ *
+ * WHOLLY REMOTE ONLY. A locally-owned fiber is read from this daemon, which
+ * answers for itself, so nothing about a remote's freshness may gray it. A
+ * remote-owned one has exactly one source, and when that source's last read is
+ * stale the whole row — lifeline, ink and marks — is last-known-good rather
+ * than current, which is what the muted register says.
+ *
+ * The origins block is keyed by ORIGIN NAME, and the board knows the same
+ * origin by up to three spellings (`remote-ada`, `ada`, and the hostname the
+ * staleness block reports). All three are tried; the label is what the reader
+ * sees either way.
+ */
+export function rowWaitingOn(
+  card: Pick<KanbanCard, 'originId'>,
+  hostname: string,
+  origins: TemporalOrigins,
+): string | null {
+  if (card.originId === 'local') return null
+  const keys = [card.originId, card.originId.replace(/^remote-/, ''), hostname]
+  return keys.some((key) => isOriginStale(origins, key)) ? hostname : null
 }
 
 function clamp(v: number, lo: number, hi: number): number {
@@ -678,6 +717,7 @@ function buildFiberRow(
   response: KanbanResponse,
   dayIndex: Map<string, number>,
   todayIdx: number,
+  origins: TemporalOrigins,
 ): ChronicleRow {
   const days = aggregateByCivilDay(buckets)
   const { startIdx, endIdx, closeIdx, closed } = lifelineExtent(
@@ -700,10 +740,13 @@ function buildFiberRow(
   )
   for (const day of days.keys()) sortMs = Math.max(sortMs, (civilDayNoon(day)?.getTime() ?? 0))
 
+  const host = hostLabel(card, response)
+
   return {
     key: `fiber:${card.id}`,
     label: card.name,
-    note: hostLabel(card, response),
+    note: host,
+    waitingOn: rowWaitingOn(card, host, origins),
     cardId: card.id,
     days,
     startIdx,
@@ -773,6 +816,7 @@ function buildRows(
   attribution: Attribution,
   dayIndex: Map<string, number>,
   todayIdx: number,
+  origins: TemporalOrigins,
 ): ChronicleRow[] {
   const byId = new Map(cards.map((c) => [c.id, c]))
   const include = new Set<string>(attribution.byCard.keys())
@@ -793,7 +837,7 @@ function buildRows(
     if (!card) continue
     const buckets = attribution.byCard.get(id) ?? []
     if (saysNothingHere(card, buckets, dayIndex)) continue
-    fibers.push(buildFiberRow(card, buckets, response, dayIndex, todayIdx))
+    fibers.push(buildFiberRow(card, buckets, response, dayIndex, todayIdx, origins))
   }
   fibers.sort((a, b) => {
     if (a.live !== b.live) return a.live ? -1 : 1
@@ -933,6 +977,14 @@ class ChronicleView implements TemporalView {
   private autoScrollStep = 0
   /** Join rung 0, rebuilt each load from the session ledger. */
   private byTmux: ReadonlyMap<string, SessionPairing> = new Map()
+  /**
+   * Per-origin freshness, as the composites report it. Activity's block wins
+   * over the ledger's where they overlap — it is the feed the ink comes from.
+   * A window served entirely from the chunk cache carries no block, so the last
+   * one seen is kept rather than being read as "everything is fresh".
+   */
+  private activityOrigins: TemporalOrigins = {}
+  private origins: TemporalOrigins = {}
 
   mount(host: HTMLElement, ctx: ViewContext): void {
     const page = createViewPage(this.title)
@@ -1036,12 +1088,14 @@ class ChronicleView implements TemporalView {
     // year re-requests nothing it already holds. Only the chunk containing now
     // carries the 5-minute quantization. See chronicleWindow.
     const wanted = activityChunks(window, nowMs)
+    const fresh: TemporalOrigins = {}
     const [chunkResults, sessions] = await Promise.all([
       Promise.all(
         wanted.map(async (chunk) => {
           const held = this.fetchedChunks.get(chunk.key)
           if (held) return [chunk.key, held] as const
           const res = await ctx.activity(chunk.fromMs, chunk.toMs)
+          Object.assign(fresh, res.origins ?? {})
           return [chunk.key, res.buckets] as const
         }),
       ),
@@ -1058,6 +1112,8 @@ class ChronicleView implements TemporalView {
     this.fetchedChunks = keep
     const activity = { buckets: chunkResults.flatMap(([, buckets]) => buckets) }
     this.byTmux = buildSessionIndex(sessions.records).byTmux
+    if (Object.keys(fresh).length > 0) this.activityOrigins = fresh
+    this.origins = { ...(sessions.origins ?? {}), ...this.activityOrigins }
     // A rebuild would tear out the half-drawn band or the naming input under
     // the reader's cursor. The poll's data is not worth that; the next one
     // lands 15s later and the gesture is over in seconds.
@@ -1100,6 +1156,8 @@ class ChronicleView implements TemporalView {
       ctx.focusDate ?? '',
       `scope:${this.scopedCycleId ?? ''}`,
       `ledger:${this.byTmux.size}`,
+      // A remote falling behind (or catching up) mutes or un-mutes whole rows.
+      `stale:${staleOrigins(this.origins).join(',')}`,
       `look:${this.lookback?.key ?? ''}:${this.lookback?.groups.length ?? 0}`,
       `intent:${this.scopedCycleId ? (this.intentions.get(this.scopedCycleId) ?? '') : ''}`,
       // hostLabel's last two rungs.
@@ -1176,6 +1234,7 @@ class ChronicleView implements TemporalView {
       attribution,
       dayIndex,
       todayIdx < 0 ? lastIdx : todayIdx,
+      this.origins,
     )
 
     if (rows.length === 0) {
@@ -2411,8 +2470,13 @@ class ChronicleView implements TemporalView {
   ): HTMLElement[] {
     const gridRow = String(r + 2)
 
+    // The muted register is the kanban's, class for class: a row whose only
+    // origin is out of contact is showing last-known-good, exactly as a stale
+    // card does, and two vocabularies for one condition would be one too many.
+    const stale = row.waitingOn !== null ? ' kbn-card--stale' : ''
+
     const label = document.createElement('div')
-    label.className = `chr-label${row.live ? ' chr-label-live' : ''}`
+    label.className = `chr-label${row.live ? ' chr-label-live' : ''}${stale}`
     label.style.gridColumn = '1'
     label.style.gridRow = gridRow
 
@@ -2427,8 +2491,11 @@ class ChronicleView implements TemporalView {
     }
 
     const note = document.createElement('span')
-    note.className = 'chr-note'
-    note.textContent = row.note
+    // The note's slot already names the owning host, so the waiting badge
+    // replaces it rather than repeating it beside itself.
+    note.className = row.waitingOn === null ? 'chr-note' : 'chr-note kbn-card-waiting'
+    note.textContent = row.waitingOn === null ? row.note : `⌛ waiting on ${row.waitingOn}`
+    if (row.waitingOn !== null) note.setAttribute('role', 'status')
 
     const span = document.createElement('span')
     span.className = 'chr-span'
@@ -2439,7 +2506,7 @@ class ChronicleView implements TemporalView {
     label.append(name, note, span)
 
     const track = document.createElement('div')
-    track.className = 'chr-track'
+    track.className = `chr-track${stale}`
     track.style.gridColumn = `2 / span ${days.length}`
     track.style.gridRow = gridRow
 

@@ -49,9 +49,12 @@ import {
 import {
   buildSessionIndex,
   foldActiveMinutes,
+  isOriginStale,
+  staleOrigins,
   type ActivityBucket,
   type ActivityResult,
   type SessionPairing,
+  type TemporalOrigins,
 } from './TemporalData.js'
 import {
   buildOriginIndex,
@@ -299,6 +302,35 @@ export function summarizeSpend(buckets: ActivityBucket[], bucketMs = BUCKET_MS):
     agentMs: minutes.agent * bucketMs,
     notifyCount: minutes.notifyBuckets,
   }
+}
+
+/**
+ * The host a row is waiting on, or null.
+ *
+ * A rail now carries ink from every daemon at once, so "is this row current?"
+ * is a question about the origins its ink came from. The answer is muting ONLY
+ * when the row is WHOLLY remote and every one of those origins is stale: mixed
+ * ink includes this daemon's own minutes, which are current by definition, and
+ * graying them would claim something false about the local record.
+ *
+ * A row with no ink says nothing — an empty rail is an empty rail, and a
+ * remote whose window simply does not reach this week is thin data, not a
+ * failure. Hosts are named in sorted order so the note is stable across polls.
+ */
+export function rowWaitingOn(
+  buckets: readonly ActivityBucket[],
+  origins: TemporalOrigins,
+): string | null {
+  if (buckets.length === 0) return null
+  const hosts = new Set<string>()
+  for (const b of buckets) {
+    // A bucket nobody stamped cannot be attributed to a stale remote; it holds
+    // the row current rather than being guessed onto one.
+    if (!b.host) return null
+    if (!isOriginStale(origins, b.host)) return null
+    hosts.add(b.host)
+  }
+  return [...hosts].sort().join(', ')
 }
 
 export type DayWeight = 'full' | 'half' | 'quiet'
@@ -554,6 +586,8 @@ interface LoadedActivity {
    *  sits with the previous day, where the work started). */
   byDay: Map<string, ActivityBucket[]>
   week: ActivitySpend
+  /** Per-origin freshness for the window this activity came from. */
+  origins: TemporalOrigins
   /** Cheap fingerprint — bumps the render generation only on real change. */
   print: string
 }
@@ -1009,12 +1043,16 @@ class WeekView implements TemporalView {
       if (list) list.push(bucket)
       else byDay.set(hit.day, [bucket])
     }
-    const print = `${res.buckets.length}:${res.buckets.at(-1)?.m ?? 0}`
+    const origins = res.origins ?? {}
+    // Staleness is in the print: a remote falling out of contact changes what
+    // the rows say without changing a single bucket.
+    const print = `${res.buckets.length}:${res.buckets.at(-1)?.m ?? 0}:${staleOrigins(origins).join(',')}`
     if (this.activity?.monday === monday && this.activity.print === print) return
     this.activity = {
       monday,
       byDay,
       week: summarizeSpend(res.buckets),
+      origins,
       print,
     }
     this.dataGen += 1
@@ -1067,9 +1105,11 @@ class WeekView implements TemporalView {
       const visible = isToday ? marks.filter((m) => m.fraction > railFraction(now, bounds)) : marks
 
       const buckets = activity?.byDay.get(row.day) ?? []
+      const waiting = activity ? rowWaitingOn(buckets, activity.origins) : null
       const sig = [
         row.day,
         this.dataGen,
+        `w${waiting ?? ''}`,
         isToday ? `t${minute}` : isPast ? 'p' : 'f',
         visible.map((m) => `${m.kind}${m.cardId}`).join(','),
         isToday ? inFlight.map((c) => c.id).join(',') : '',
@@ -1080,6 +1120,10 @@ class WeekView implements TemporalView {
       row.root.classList.toggle('wk-row-today', isToday)
       row.root.classList.toggle('wk-row-past', isPast)
       row.root.classList.toggle('wk-row-future', !isPast && !isToday)
+      // The kanban's own muted register (KanbanModal.css), unchanged: a row
+      // whose ink comes only from an origin we have lost contact with is
+      // last-known-good, exactly as a stale card is.
+      row.root.classList.toggle('kbn-card--stale', waiting !== null)
 
       row.paint.innerHTML = ''
       row.slots = buckets.length > 0 && activity
@@ -1100,9 +1144,19 @@ class WeekView implements TemporalView {
       // — a name at this size was the column we just removed.
       const spend = activity ? summarizeSpend(buckets) : null
       row.annot.textContent = annotationFor(spend, isPast, isToday, inFlight.length)
+      const annotText = row.annot.textContent
+      if (waiting !== null) {
+        const badge = document.createElement('span')
+        badge.className = 'kbn-card-waiting'
+        badge.setAttribute('role', 'status')
+        badge.textContent = `⌛ waiting on ${waiting}`
+        row.annot.append(badge)
+      }
       row.root.setAttribute(
         'aria-label',
-        `${row.day} — ${row.annot.textContent || 'no activity'}${
+        `${row.day} — ${annotText || 'no activity'}${
+          waiting !== null ? `; waiting on ${waiting}` : ''
+        }${
           visible.length > 0 ? `; ${visible.map((m) => `${m.kind} ${m.label}`).join(', ')}` : ''
         }`,
       )

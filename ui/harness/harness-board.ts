@@ -38,6 +38,7 @@ import type {
   NarrationResult,
   SessionRecord,
   TemporalFetchers,
+  TemporalOrigins,
 } from '../src/board/views/index.js'
 
 // ── Mock composite feed ──────────────────────────────────────────────────────
@@ -73,6 +74,9 @@ const shuttleBlock = (kind = 'oneshot') => ({
  * both branches are visible at once: one lane with a hostname, the rest bare.
  */
 const FOREIGN_HOST = 'cineca-login-02'
+/** The host serving this page — what every temporal result stamps itself with,
+ *  and the note a lane suppresses because it is the page's constant. */
+const LOCAL_HOST = 'ada-workstation'
 const shuttleBlockElsewhere = () => ({
   ...shuttleBlock(),
   host: FOREIGN_HOST,
@@ -518,8 +522,22 @@ function seedFromString(text: string): number {
  * tail that matches NO fiber segment. `scratch` is safe; anything named after
  * a project in the mock feed is not.
  */
-const MOCK_ACTORS: Array<{ s: string | null; cwd: string | null; weight: number }> = [
-  { s: sessionFor('work/spt3g_papers/bmodes-2d/run', ULID.bmodes), cwd: '/home/ada/work/spt3g_papers', weight: 5 },
+const MOCK_ACTORS: Array<{
+  s: string | null
+  cwd: string | null
+  weight: number
+  /** Which daemon produced these minutes. Omitted is this host. Exactly one
+   *  actor runs elsewhere — the b-mode sweep, whose fiber already carries
+   *  `shuttleBlockElsewhere` — so the cross-host register (a lane's host note,
+   *  and the stale gray of an unreachable remote) is visible offline. */
+  host?: string
+}> = [
+  {
+    s: sessionFor('work/spt3g_papers/bmodes-2d/run', ULID.bmodes),
+    cwd: '/leonardo_work/spt3g/papers',
+    weight: 5,
+    host: FOREIGN_HOST,
+  },
   { s: sessionFor('loom/email/morning-post/refine', ULID.refine), cwd: '/home/ada/loom', weight: 4 },
   { s: sessionFor('work/euclid/euclid-github/triage', ULID.triage), cwd: '/home/ada/work/euclid', weight: 3 },
   { s: sessionFor('work/admin/conference-travel-receipts', ULID.receipts), cwd: '/home/ada/loom', weight: 2 },
@@ -584,7 +602,7 @@ function mockActivity(fromMs: number, toMs: number): ActivityResult {
   // could never produce.
   const byKey = new Map<string, ActivityBucket>()
   const add = (bucket: ActivityBucket): void => {
-    const key = `${bucket.m}|${bucket.s ?? ''}|${bucket.cwd ?? ''}|${bucket.k}`
+    const key = `${bucket.host ?? ''}|${bucket.m}|${bucket.s ?? ''}|${bucket.cwd ?? ''}|${bucket.k}`
     const hit = byKey.get(key)
     if (hit) hit.n += bucket.n
     else byKey.set(key, bucket)
@@ -617,16 +635,16 @@ function mockActivity(fromMs: number, toMs: number): ActivityResult {
         // it — and a steer lands here and there after.
         const steering = i === 0 ? mRng() < 0.8 : mRng() < 0.06
         if (steering) {
-          add({ m, s: actor.s, cwd: actor.cwd, k: 'attention', n: 1 })
+          add({ m, s: actor.s, cwd: actor.cwd, k: 'attention', n: 1, host: actor.host ?? LOCAL_HOST })
         }
         // The agent works through the minute regardless (a steer and the work
         // it provokes share a minute — two buckets, distinct `k`, exactly as
         // the daemon would key them).
         if (i > 0 || !steering) {
-          add({ m, s: actor.s, cwd: actor.cwd, k: 'agent', n: 1 + Math.floor(mRng() * 11) })
+          add({ m, s: actor.s, cwd: actor.cwd, k: 'agent', n: 1 + Math.floor(mRng() * 11), host: actor.host ?? LOCAL_HOST })
         }
         if (i === notifyAt) {
-          add({ m, s: actor.s, cwd: actor.cwd, k: 'notify', n: 1 })
+          add({ m, s: actor.s, cwd: actor.cwd, k: 'notify', n: 1, host: actor.host ?? LOCAL_HOST })
         }
       }
     }
@@ -635,7 +653,20 @@ function mockActivity(fromMs: number, toMs: number): ActivityResult {
   // time-ordered; sort so the mock does not accidentally exercise a tolerance
   // the real feed never asks a view for.
   const buckets = [...byKey.values()].sort((a, b) => a.m - b.m)
-  return { host: 'ada-workstation', from_ms: fromMs, to_ms: toMs, buckets }
+  return {
+    host: LOCAL_HOST,
+    from_ms: fromMs,
+    to_ms: toMs,
+    buckets,
+    // The remote's cache covers the trailing day only, and it has not answered
+    // in an hour. Both are ordinary states, not errors: its lanes keep their
+    // last-good ink in the stale register, and thin out before the window it
+    // can speak for.
+    origins: {
+      ...MOCK_ORIGINS,
+      [FOREIGN_HOST]: { ...MOCK_ORIGINS[FOREIGN_HOST], window: { fromMs: now - 86_400_000, toMs: now } },
+    },
+  }
 }
 
 /**
@@ -800,14 +831,34 @@ const MOCK_SESSIONS: SessionRecord[] = [
   },
 ]
 
+/**
+ * Per-origin freshness, the block the daemon's temporal composites serve.
+ *
+ * The remote is STALE on purpose. An unreachable host keeps its last-good data
+ * on screen rather than losing two weeks of history to a dropped tunnel, and
+ * the gray register saying so is a rendering path that needs a stale origin to
+ * exist at all — with every origin fresh it could never be seen offline.
+ */
+const MOCK_ORIGINS: TemporalOrigins = {
+  [LOCAL_HOST]: { kind: 'local', stale: false },
+  [FOREIGN_HOST]: {
+    kind: 'remote',
+    stale: true,
+    lastPolledAt: iso(-3_600_000),
+    lastError: 'timeout',
+  },
+}
+
 const MOCK_TEMPORAL: TemporalFetchers = {
   activity: (fromMs, toMs) => Promise.resolve(mockActivity(fromMs, toMs)),
-  narration: (fromISO, toISO) => Promise.resolve(mockNarration(fromISO, toISO)),
+  narration: (fromISO, toISO) =>
+    Promise.resolve({ ...mockNarration(fromISO, toISO), origins: MOCK_ORIGINS }),
   // Oldest first, and filtered by the bound, exactly as the daemon serves it.
   sessions: (sinceMs) =>
     Promise.resolve({
-      host: 'ada-workstation',
+      host: LOCAL_HOST,
       records: MOCK_SESSIONS.filter((r) => r.at >= sinceMs).sort((a, b) => a.at - b.at),
+      origins: MOCK_ORIGINS,
     }),
 }
 

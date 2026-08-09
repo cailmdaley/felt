@@ -29,6 +29,7 @@ import {
   railRuleFractions,
   shiftWeekMonday,
   rasterSlots,
+  rowWaitingOn,
   slotTip,
   SLOT_NO_TEXT_NOTE,
   summarizeSpend,
@@ -1034,5 +1035,43 @@ describe('what a hovered slot is willing to say', () => {
     ];
     const tip = slotTip(slotOf([bucket({ m: bounds.startMs, s: 'w-1' })], cards));
     expect(tip.rows[0]).toMatchObject({ where: 'ship it', shuttle: true });
+  });
+});
+
+describe('a rail waits on a remote only when the whole row is that remote\u2019s', () => {
+  const bucket = (over: Partial<ActivityBucket> & { m: number }): ActivityBucket =>
+    ({ s: null, cwd: null, k: 'agent', n: 1, ...over });
+  const origins = {
+    hearth: { kind: 'local' as const, stale: false },
+    ada: { kind: 'remote' as const, stale: true, lastError: 'connection refused' },
+    bob: { kind: 'remote' as const, stale: false },
+  };
+
+  it('names the stale remote whose ink is the only ink on the row', () => {
+    expect(rowWaitingOn([bucket({ m: 1, host: 'ada' }), bucket({ m: 2, host: 'ada' })], origins)).toBe(
+      'ada',
+    );
+  });
+
+  it('stays current when any of the row\u2019s ink came from an origin that is answering', () => {
+    // Mixed ink includes minutes that ARE current — muting the row would claim
+    // something false about them.
+    expect(rowWaitingOn([bucket({ m: 1, host: 'ada' }), bucket({ m: 2, host: 'hearth' })], origins)).toBeNull();
+    expect(rowWaitingOn([bucket({ m: 1, host: 'bob' })], origins)).toBeNull();
+  });
+
+  it('names every stale remote when the row is shared between them', () => {
+    const both = { ...origins, bob: { kind: 'remote' as const, stale: true } };
+    expect(rowWaitingOn([bucket({ m: 2, host: 'bob' }), bucket({ m: 1, host: 'ada' })], both)).toBe(
+      'ada, bob',
+    );
+  });
+
+  // Thin data is not an error. An empty rail is an empty rail, and a bucket
+  // nobody stamped cannot be attributed to a host that is out of contact.
+  it('says nothing about an empty row, or about ink that names no host', () => {
+    expect(rowWaitingOn([], origins)).toBeNull();
+    expect(rowWaitingOn([bucket({ m: 1 })], origins)).toBeNull();
+    expect(rowWaitingOn([bucket({ m: 1, host: 'ada' })], {})).toBeNull();
   });
 });
