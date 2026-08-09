@@ -34,7 +34,7 @@
   color: #7A7368;
   font-family: var(--font-main, 'EB Garamond', Georgia, serif);
   font-style: italic;
-  font-size: 1.05rem;
+  font-size: calc(1.05rem * var(--kbn-type-scale, 1));
   letter-spacing: 0.01em;
   animation: kbn-fileview-pulse 1.6s ease-in-out infinite;
 }

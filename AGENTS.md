@@ -137,8 +137,8 @@ editorial chain felt-history used to carry now lives in the constitution body's
 Portolan is retired; Shuttle does not depend on it. Remaining `grep -ri portolan`
 hits are historical provenance comments — they explain *why* a shape exists
 ("ported from Portolan's …") and age out as the code they describe is rewritten.
-A few conceptual carry-overs (the UI's city/pinning reconstruction in
-`KanbanCityResolver.ts` / `projectModel.ts`; client-side `kind`/`priority`/
+A few conceptual carry-overs (the UI's pinning reconstruction in
+`projectModel.ts`; client-side `kind`/`priority`/
 `isRoot` defaults in `KanbanFiber.ts`; gate/transition semantics in
 `transition.ex` / `actions.ex`) are Portolan assumptions that unwind as the UI
 simplifies — no runtime dependency.

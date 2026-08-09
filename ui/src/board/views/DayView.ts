@@ -1,5 +1,5 @@
 /**
- * DayView (hotkey 3) — one day, close up.
+ * DayView (hotkey 2) — one day, close up.
  *
  * TWO CLOCKS, ONE LANE. The page is a 24-hour rail per fiber, read left to
  * right, carrying both of the day's clocks at once:
@@ -30,10 +30,11 @@
  *
  * The join from a bucket to a fiber is the tmux session name and nothing else:
  * a Shuttle worker runs in `<slug>-<ULID>-shuttle`, and that ULID is the
- * fiber's `uid`. Work that does not join still appears, on a lane named for its
- * working directory and labelled for what is actually known about it — a
- * session we could not resolve is `unmatched`, no session at all is
- * `interactive`.
+ * fiber's `uid`. Work that does not join to a fiber is a tiny slice of the
+ * day and is not drawn: no lane, no ledger entry — its minutes are simply not
+ * on this page. The join ladder still refuses to attribute by working
+ * directory (see `joinBucketToCard`); it just means unjoined minutes go
+ * unshown instead of landing on a directory-named lane.
  *
  * NO COLOUR WITHOUT A MEANING. The board's ink has a grammar and this page
  * spends none of it decoratively: cobalt is agent activity, teal is human
@@ -177,22 +178,6 @@ export function mergeMinuteRuns(minutes: Iterable<number>, bridge = BRIDGE_MINUT
   return runs
 }
 
-/**
- * The name of a lane for work that joined to no fiber.
- *
- * The suffix is a factual claim about who was at the keyboard, so it follows
- * the evidence: a bucket carrying a session id was a WORKER whose fiber we
- * could not identify (`unmatched`), while a bucket with no session at all was
- * someone typing (`interactive`). Calling an unmatched worker "interactive"
- * puts an agent's hours on a human's ledger.
- */
-const HOME_RE = /^\/(?:home|Users)\/[^/]+(?=\/|$)/
-export function cwdLaneLabel(cwd: string | null | undefined, fromWorker = false): string {
-  const suffix = fromWorker ? 'unmatched' : 'interactive'
-  if (!cwd) return `elsewhere · ${suffix}`
-  return `${cwd.replace(HOME_RE, '~') || '/'} · ${suffix}`
-}
-
 // ── Narration ────────────────────────────────────────────────────────────────
 
 /**
@@ -276,8 +261,7 @@ export function firstSentence(text: string | undefined): string {
 
 export interface DayLane {
   key: string
-  kind: 'fiber' | 'loose'
-  /** Fiber name, or the cwd-derived interactive label. */
+  /** The fiber's own name. */
   label: string
   /**
    * The host to print beside the label — set ONLY when this lane ran somewhere
@@ -449,10 +433,10 @@ export function joinBucketToCard(
 }
 
 /**
- * One lane per fiber that was active in the window, then one per working
- * directory for everything that did not join to a fiber. Fiber lanes sort by
- * weight (the day's heaviest work reads first); interactive lanes follow, also
- * by weight.
+ * One lane per fiber that was active in the window. Buckets that joined to no
+ * fiber are skipped entirely — un-fibered work is a tiny slice of the day and
+ * is not worth a lane of its own. Lanes sort by weight, the day's heaviest
+ * work reading first.
  */
 export function buildDayLanes(
   activity: ActivityResult,
@@ -483,33 +467,19 @@ export function buildDayLanes(
     const minute = minuteIndex(bucket.m, win)
     if (minute === null) continue
     const card = joinBucketToCard(bucket, index)
-    // Unjoined buckets split by ORIGIN as well as by directory: a worker whose
-    // fiber we could not name and a human at a shell are different claims
-    // about the same folder, and merging them would put one behind the other's
-    // label. See cwdLaneLabel.
-    const fromWorker = bucket.s !== null
-    const key = card
-      ? `fiber:${card.id}`
-      : `loose:${fromWorker ? 'worker' : 'human'}:${bucket.cwd ?? ''}`
+    // A bucket that joined to no fiber is not drawn — see the module doc.
+    if (!card) continue
+    const key = `fiber:${card.id}`
     let entry = acc.get(key)
     if (!entry) {
       entry = {
-        lane: card
-          ? {
-              key,
-              kind: 'fiber',
-              label: card.name,
-              hostNote: noteFor(card.shuttleHost),
-              cardId: card.id,
-              slugs: commitSlugsForCard(card),
-            }
-          : {
-              key,
-              kind: 'loose',
-              label: cwdLaneLabel(bucket.cwd, fromWorker),
-              hostNote: '',
-              slugs: [],
-            },
+        lane: {
+          key,
+          label: card.name,
+          hostNote: noteFor(card.shuttleHost),
+          cardId: card.id,
+          slugs: commitSlugsForCard(card),
+        },
         agent: new Set(),
         attention: new Set(),
         notify: new Set(),
@@ -534,7 +504,6 @@ export function buildDayLanes(
   }))
 
   lanes.sort((a, b) => {
-    if (a.kind !== b.kind) return a.kind === 'fiber' ? -1 : 1
     if (a.weight !== b.weight) return b.weight - a.weight
     return a.label.localeCompare(b.label)
   })
@@ -725,7 +694,7 @@ export function buildDayPreviews(
   const cardById = new Map(cards.map((card) => [card.id, card]))
   const out: DayPreview[] = []
   for (const lane of lanes) {
-    if (lane.kind !== 'fiber' || !lane.cardId) continue
+    if (!lane.cardId) continue
     const card = cardById.get(lane.cardId)
     if (!card) continue
     out.push({
@@ -825,7 +794,6 @@ export function buildDayEntries(
   // slug → the one lane that owns it, or null when several answer to it.
   const laneBySlug = new Map<string, DayLane | null>()
   for (const lane of lanes) {
-    if (lane.kind !== 'fiber') continue
     for (const slug of lane.slugs) {
       const seen = laneBySlug.get(slug)
       if (seen === undefined) laneBySlug.set(slug, lane)
@@ -855,7 +823,6 @@ export function buildDayEntries(
 
   const entries: DayEntry[] = []
   for (const lane of lanes) {
-    if (lane.kind !== 'fiber') continue
     const subjects = subjectsForLane.get(lane.key)
     const card = lane.cardId ? cardById.get(lane.cardId) : undefined
     const operational = {
@@ -1021,7 +988,7 @@ function buildKey(glyphClass: string, text: string): HTMLElement {
 class DayViewImpl implements TemporalView {
   readonly id = 'day' as const
   readonly title = 'Day'
-  readonly hotkey = '3'
+  readonly hotkey = '2'
 
   private root: HTMLElement | null = null
   private headingEl: HTMLElement | null = null
@@ -1315,7 +1282,7 @@ class DayViewImpl implements TemporalView {
       const row = String(index + 1)
 
       const label = document.createElement('div')
-      label.className = `kbn-day-label kbn-day-label-${lane.kind}`
+      label.className = 'kbn-day-label'
       label.style.gridRow = row
       const name = document.createElement(lane.cardId ? 'button' : 'span')
       name.className = 'kbn-day-lanename'
@@ -1336,7 +1303,7 @@ class DayViewImpl implements TemporalView {
       }
 
       const rail = document.createElement('div')
-      rail.className = `kbn-day-rail kbn-day-rail-${lane.kind}`
+      rail.className = 'kbn-day-rail'
       rail.style.gridRow = row
       for (const run of lane.agent) rail.append(this.buildMark('kbn-day-wash', run, win))
       for (const run of lane.attention) rail.append(this.buildMark('kbn-day-att', run, win))
@@ -1544,6 +1511,17 @@ class DayViewImpl implements TemporalView {
       veil.className = 'kbn-day-paneveil'
       veil.textContent = 'reading…'
       body.append(veil)
+
+      // The whole plate is the way in. It sits UNDER the outcome prose (which
+      // is click-through except for its own links) and OVER the frame, which is
+      // inert by design — so a pane reads as one target however it is filled.
+      const hit = document.createElement('button')
+      hit.type = 'button'
+      hit.className = 'kbn-day-panehit'
+      hit.title = `${preview.label} — open`
+      hit.setAttribute('aria-label', `${preview.label} — open`)
+      hit.addEventListener('click', () => this.openPreview(pane, preview))
+      body.append(hit)
       pane.append(body)
 
       const caption = document.createElement('figcaption')
@@ -1582,14 +1560,31 @@ class DayViewImpl implements TemporalView {
     const body = pane.querySelector<HTMLElement>('.kbn-day-panebody')
     if (!body) return
 
+    const hit = pane.querySelector<HTMLButtonElement>('.kbn-day-panehit')
+
     const fallback = (): void => {
-      body.textContent = ''
+      // Keep the hit target: emptying the body would take the pane's own way in
+      // with it, and a fiber without a report is exactly the one you most want
+      // to open.
+      body.querySelector('.kbn-day-paneveil')?.remove()
+      body.querySelector('.kbn-day-paneframe')?.remove()
+      body.querySelector('.kbn-day-paneoutcome')?.remove()
       const out = document.createElement('div')
       out.className = 'kbn-day-paneoutcome'
+      const rubric = document.createElement('span')
+      rubric.className = 'kbn-day-paneoutcomerubric'
+      rubric.textContent = 'outcome'
+      const prose = document.createElement('div')
+      prose.className = 'kbn-day-paneoutcomebody'
       const text = pane.dataset.outcome ?? ''
-      if (text) out.innerHTML = renderMarkdown(text)
-      else out.append(Object.assign(document.createElement('em'), { textContent: 'no outcome yet' }))
+      if (text) prose.innerHTML = renderMarkdown(text)
+      else
+        prose.append(
+          Object.assign(document.createElement('em'), { textContent: 'no outcome yet' }),
+        )
+      out.append(rubric, prose)
       body.append(out)
+      this.markPane(pane, hit, false)
     }
 
     if (!url) {
@@ -1630,6 +1625,41 @@ class DayViewImpl implements TemporalView {
     })
     frame.addEventListener('error', fallback)
     body.prepend(frame)
+    this.markPane(pane, hit, true)
+  }
+
+  /**
+   * Settle what a pane is and where it goes, once its report is known to exist
+   * or not. The class carries the distinction to CSS; the dataset carries it to
+   * the click; the label says out loud which of the two this click will do.
+   */
+  private markPane(
+    pane: HTMLElement,
+    hit: HTMLButtonElement | null,
+    hasReport: boolean,
+  ): void {
+    pane.classList.toggle('kbn-day-pane-report', hasReport)
+    pane.classList.toggle('kbn-day-pane-outcome', !hasReport)
+    pane.dataset.report = hasReport ? '1' : ''
+    if (!hit) return
+    const label = pane.querySelector('.kbn-day-panename')?.textContent ?? ''
+    const what = hasReport ? 'open the report' : 'open the fiber'
+    hit.title = `${label} — ${what}`
+    hit.setAttribute('aria-label', `${label} — ${what}`)
+  }
+
+  /**
+   * A pane's click: its report when it has one, the fiber itself when it does
+   * not. Before the probe settles the pane opens the fiber — the answer that is
+   * always true, and one click from the report anyway (the detail panel embeds
+   * it).
+   */
+  private openPreview(pane: HTMLElement, preview: DayPreview): void {
+    if (pane.dataset.report === '1' && preview.reportUrl) {
+      window.open(preview.reportUrl, '_blank', 'noopener')
+      return
+    }
+    this.ctx?.openCard(preview.cardId)
   }
 
   private disconnectPreviewObserver(): void {

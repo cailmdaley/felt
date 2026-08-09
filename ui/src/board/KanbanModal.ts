@@ -377,7 +377,7 @@ export class KanbanModal {
   // ── View switching ──────────────────────────────────────────────────────────
 
   /**
-   * The tab strip: `desk` plus one tab per registered view, right-aligned on
+   * The tab strip: `desk` plus one tab per registered view, left-aligned on
    * its own hairline row at the top of the page. Built once — the registry is
    * populated at import time, so the strip never needs to re-render; only the
    * selected tab's classes change.
@@ -1446,8 +1446,15 @@ export class KanbanModal {
    */
   private expandOutcomesToFillSpace(): void {
     if (!this.body) return
-    // Outcome font-size × line-height = 12.5 × 1.4 = 17.5px per line.
-    const lineHeight = 17.5
+    // Outcome font-size × line-height = 12.5 × 1.4 = 17.5px per line at design
+    // size. The board's type rides `--kbn-type-scale` (KanbanModal.css), so the
+    // measure has to ride it too — a fixed 17.5 would over-count lines and clamp
+    // outcomes short as soon as the scale moves off 1.
+    const typeScale =
+      Number.parseFloat(
+        getComputedStyle(this.body).getPropertyValue('--kbn-type-scale'),
+      ) || 1
+    const lineHeight = 17.5 * typeScale
     // Gap between cards in .kbn-col-list (CSS: gap: 8px).
     const cardGap = 8
     const minClamp = 4

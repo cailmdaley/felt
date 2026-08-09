@@ -23,7 +23,10 @@
      day-marks, not as one solid bar. */
   --chr-seg-w: calc(var(--chr-day-w) * 0.58);
   --chr-row-h: 20px;
-  --chr-head-h: 32px;
+  /* Two lines' worth: the sticky month bearing sits above the fiber count in
+     the corner cell, and the day columns beside it keep their weekday/numeral
+     pair bottom-aligned to the same baseline. */
+  --chr-head-h: 34px;
   /* A cycle lane is shallower than a fiber row: the strip annotates the page,
      and stacked lanes must not push the work below the fold. */
   --chr-cycle-h: 17px;
@@ -57,18 +60,34 @@
   top: 0;
   z-index: 5;
   display: flex;
+  flex-direction: column;
   align-items: flex-end;
   justify-content: flex-end;
+  gap: 1px;
   padding: 0 10px 4px 0;
   background: #EDE2CE;
   border-right: 0.5px solid rgba(122, 111, 92, 0.30);
   border-bottom: 0.5px solid rgba(122, 111, 92, 0.30);
 }
+/* The bearing. The largest quiet thing in the head, because it answers the
+   question a long scroll creates — not "which day" (the numerals say that) but
+   "how far back am I". Iron-gall rather than gold: it is a statement of where
+   you are, not an alarm. */
+.chr-corner-month {
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-variant-caps: all-small-caps;
+  font-feature-settings: "smcp", "c2sc";
+  font-size: calc(13px * var(--kbn-type-scale, 1));
+  letter-spacing: 0.07em;
+  line-height: 1.1;
+  color: #4A4033;
+  white-space: nowrap;
+}
 .chr-corner-count {
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
   font-variant-caps: all-small-caps;
   font-feature-settings: "smcp", "c2sc";
-  font-size: 11px;
+  font-size: calc(11px * var(--kbn-type-scale, 1));
   letter-spacing: 0.06em;
   color: #A89B83;
 }
@@ -117,6 +136,18 @@
   background: rgba(196, 147, 51, 0.20);
 }
 .chr-head-past { background: #EAE0CB; }
+/* A month opens with a rule of its own — heavier than the week's, on the LEFT
+   edge, so the boundary reads as the month starting rather than the previous
+   one trailing off. */
+.chr-head-monthstart { border-left: 0.5px solid rgba(122, 111, 92, 0.55); }
+/* The month's name stands where its first day's weekday would be. Ochre and
+   small-caps: the only text in the almanac that names something larger than a
+   day, so it is allowed one step of colour. */
+.chr-head-month {
+  color: #9A7B35;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
 .chr-head-weekend { background: #E6DCC5; }
 .chr-head-week { border-right-color: rgba(122, 111, 92, 0.42); }
 /* Today is bracketed by a gold seam on both edges, the way the Desk ribbon
@@ -126,7 +157,7 @@
   box-shadow: inset 1.5px 0 0 #9A7B35, inset -1.5px 0 0 #9A7B35;
 }
 .chr-head-dow {
-  font-size: 9px;
+  font-size: calc(9px * var(--kbn-type-scale, 1));
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
   font-variant-caps: all-small-caps;
   font-feature-settings: "smcp", "c2sc";
@@ -134,7 +165,7 @@
   color: #A89B83;
 }
 .chr-head-num {
-  font-size: 12px;
+  font-size: calc(12px * var(--kbn-type-scale, 1));
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
   font-weight: 500;
   font-feature-settings: "onum";
@@ -156,6 +187,10 @@
 .chr-wash-past { background: rgba(27, 22, 17, 0.018); }
 .chr-wash-weekend { background: rgba(27, 22, 17, 0.045); }
 .chr-wash-week { border-right-color: rgba(122, 111, 92, 0.34); }
+/* The month rule, run the height of the page. Same weight as the week's so the
+   two do not compete; it is the almanac's ochre month-name above it that tells
+   you which kind of boundary you crossed. */
+.chr-wash-month { border-left: 0.5px solid rgba(122, 111, 92, 0.42); }
 /* The tint only — the gold edges are drawn by `.chr-seam`, which is appended
    after everything else so no band or lifeline can break the line. */
 .chr-wash-today {
@@ -192,7 +227,7 @@
   border: 0;
   background: none;
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
-  font-size: 19px;
+  font-size: calc(19px * var(--kbn-type-scale, 1));
   font-variant-caps: all-small-caps;
   font-feature-settings: "smcp", "c2sc";
   letter-spacing: 0.045em;
@@ -208,7 +243,7 @@
 .chr-face-span {
   flex: 1 1 auto;
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: 10px;
+  font-size: calc(10px * var(--kbn-type-scale, 1));
   letter-spacing: 0.02em;
   color: #7A6F5C;
 }
@@ -217,7 +252,7 @@
   padding: 0 4px;
   border: 0;
   background: none;
-  font-size: 12px;
+  font-size: calc(12px * var(--kbn-type-scale, 1));
   line-height: 1;
   color: #A89B83;
   cursor: pointer;
@@ -228,7 +263,7 @@
   margin: 5px 0 0;
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
   font-style: italic;
-  font-size: 14px;
+  font-size: calc(14px * var(--kbn-type-scale, 1));
   line-height: 1.34;
   color: #2A231A;
   max-width: 74ch;
@@ -248,7 +283,7 @@
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
   font-variant-caps: all-small-caps;
   font-feature-settings: "smcp", "c2sc";
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--kbn-type-scale, 1));
   letter-spacing: 0.06em;
   color: #A89B83;
 }
@@ -256,7 +291,7 @@
   margin: 0 6px 0 0;
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
   font-feature-settings: "onum";
-  font-size: 14px;
+  font-size: calc(14px * var(--kbn-type-scale, 1));
   color: #1B1611;
 }
 
@@ -270,7 +305,7 @@
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
   font-variant-caps: all-small-caps;
   font-feature-settings: "smcp", "c2sc";
-  font-size: 11px;
+  font-size: calc(11px * var(--kbn-type-scale, 1));
   font-weight: 500;
   letter-spacing: 0.09em;
   color: #BC4538;
@@ -278,20 +313,20 @@
 .chr-face-line {
   margin: 0 0 2px;
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
-  font-size: 13px;
+  font-size: calc(13px * var(--kbn-type-scale, 1));
   line-height: 1.36;
   color: #2A231A;
   max-width: 92ch;
 }
 .chr-face-slug {
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: 10px;
+  font-size: calc(10px * var(--kbn-type-scale, 1));
   color: #3D5BA0;
   margin-right: 4px;
 }
 .chr-face-count {
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: 9px;
+  font-size: calc(9px * var(--kbn-type-scale, 1));
   color: #A89B83;
 }
 .chr-face-closed { color: #4A4033; }
@@ -301,7 +336,7 @@
   margin: 0;
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
   font-style: italic;
-  font-size: 13px;
+  font-size: calc(13px * var(--kbn-type-scale, 1));
   color: #A89B83;
 }
 
@@ -313,7 +348,7 @@
   background: rgba(196, 147, 51, 0.13);
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
   font-style: italic;
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--kbn-type-scale, 1));
   color: #6E5A2E;
   cursor: pointer;
 }
@@ -353,7 +388,7 @@
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
   font-variant-caps: all-small-caps;
   font-feature-settings: "smcp", "c2sc";
-  font-size: 10px;
+  font-size: calc(10px * var(--kbn-type-scale, 1));
   letter-spacing: 0.07em;
   color: #A89B83;
 }
@@ -384,7 +419,7 @@
   background: rgba(196, 147, 51, 0.16);
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
   font-style: italic;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--kbn-type-scale, 1));
   line-height: 1;
   color: #6E5A2E;
   text-align: left;
@@ -481,7 +516,7 @@
   background: rgba(255, 251, 237, 0.98);
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
   font-style: italic;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--kbn-type-scale, 1));
   color: #1B1611;
   outline: none;
   box-shadow: 0 1px 3px rgba(27, 22, 17, 0.12);
@@ -490,22 +525,131 @@
   color: #A89B83;
 }
 
-/* Only when the strip is empty, and only under the cursor: the invitation. */
+/* The invitation. Always present on the last lane, right-aligned so it keeps
+   clear of the bands, and raised only under the cursor — the strip's gesture is
+   a drag, which nothing about a strip of coloured capsules would suggest. It
+   centers itself when there is nothing to keep clear of. */
 .chr-cycle-hint {
   position: absolute;
   inset: 0;
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-end;
+  padding-right: 10px;
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
   font-style: italic;
-  font-size: 11px;
+  font-size: calc(11px * var(--kbn-type-scale, 1));
   color: #A89B83;
   opacity: 0;
   transition: opacity 140ms ease-out;
   pointer-events: none;
 }
+.chr-cycle-hint-empty {
+  justify-content: center;
+  padding-right: 0;
+}
 .chr-cycle-lane:hover .chr-cycle-hint { opacity: 0.85; }
+/* The one standing mark that says the strip can be written on. Ochre, the
+   cycles' own pigment, and a glyph rather than a control — the gesture is a
+   drag on the lane beside it, so a button here would promise a click that does
+   nothing. */
+.chr-cycle-plus {
+  margin-left: 4px;
+  padding: 0 2px;
+  border: 0;
+  background: transparent;
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-size: calc(11px * var(--kbn-type-scale, 1));
+  line-height: 1;
+  color: #9A7B35;
+  opacity: 0.7;
+  cursor: pointer;
+}
+.chr-cycle-gutter:hover .chr-cycle-plus,
+.chr-cycle-plus:hover,
+.chr-cycle-plus:focus-visible { opacity: 1; }
+
+/* ── The era composer ───────────────────────────────────────────────────── */
+
+/* A sheet laid over the top of the page rather than a modal: the chronicle the
+   era is about stays in view underneath it. Gilt edge, because everything that
+   speaks about cycles on this page is gilt. */
+.chr-era-panel {
+  flex: 0 0 auto;
+  margin: 0 0 8px;
+  padding: 8px 10px 7px;
+  border: 0.5px solid rgba(154, 123, 53, 0.42);
+  border-radius: 3px;
+  background: rgba(255, 251, 237, 0.96);
+  box-shadow: 0 1px 4px rgba(27, 22, 17, 0.10);
+}
+.chr-era-title {
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-variant-caps: all-small-caps;
+  font-feature-settings: "smcp", "c2sc";
+  font-size: calc(11px * var(--kbn-type-scale, 1));
+  letter-spacing: 0.07em;
+  color: #9A7B35;
+}
+.chr-era-text {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  padding: 6px 8px;
+  box-sizing: border-box;
+  resize: vertical;
+  border: 0.5px solid rgba(122, 111, 92, 0.30);
+  border-radius: 2px;
+  background: #FFFBED;
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-size: calc(13px * var(--kbn-type-scale, 1));
+  line-height: 1.45;
+  color: #1B1611;
+  outline: none;
+}
+.chr-era-text:focus { border-color: #9A7B35; }
+.chr-era-text::placeholder {
+  font-style: italic;
+  color: #A89B83;
+}
+.chr-era-foot {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-top: 5px;
+}
+.chr-era-note {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-style: italic;
+  font-size: calc(11px * var(--kbn-type-scale, 1));
+  color: #A89B83;
+}
+.chr-era-cancel,
+.chr-era-begin {
+  flex: 0 0 auto;
+  padding: 2px 10px;
+  border-radius: 2px;
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-variant-caps: all-small-caps;
+  font-feature-settings: "smcp", "c2sc";
+  font-size: calc(11px * var(--kbn-type-scale, 1));
+  letter-spacing: 0.06em;
+  cursor: pointer;
+}
+.chr-era-cancel {
+  border: 0;
+  background: transparent;
+  color: #A89B83;
+}
+.chr-era-cancel:hover { color: #7A6F5C; }
+.chr-era-begin {
+  border: 0.5px solid rgba(154, 123, 53, 0.42);
+  background: rgba(196, 147, 51, 0.16);
+  color: #1B1611;
+}
+.chr-era-begin:hover { background: rgba(196, 147, 51, 0.26); }
 
 /* ── The row gutter ─────────────────────────────────────────────────────── */
 
@@ -530,7 +674,7 @@
   white-space: nowrap;
   text-align: left;
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
-  font-size: 14px;
+  font-size: calc(14px * var(--kbn-type-scale, 1));
   line-height: var(--chr-row-h);
   color: #1B1611;
   background: none;
@@ -551,14 +695,14 @@ button.chr-name:hover {
 .chr-label-live::before {
   content: '▸';
   flex: 0 0 auto;
-  font-size: 8px;
+  font-size: calc(8px * var(--kbn-type-scale, 1));
   color: #3D5BA0;
   line-height: var(--chr-row-h);
 }
 .chr-note {
   flex: 0 0 auto;
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: 8.5px;
+  font-size: calc(8.5px * var(--kbn-type-scale, 1));
   letter-spacing: 0.01em;
   color: #A89B83;
   max-width: 72px;
@@ -571,17 +715,9 @@ button.chr-name:hover {
   min-width: 22px;
   text-align: right;
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: 8.5px;
+  font-size: calc(8.5px * var(--kbn-type-scale, 1));
   color: #7A6F5C;
 }
-/* Working-directory rows are the human's own passage — present, not asserted. */
-.chr-label-cwd .chr-name {
-  font-style: italic;
-  font-size: 13px;
-  color: #7A6F5C;
-}
-.chr-label-cwd .chr-span { color: #A89B83; }
-
 /* ── The lifeline ───────────────────────────────────────────────────────── */
 
 .chr-track {
@@ -590,10 +726,6 @@ button.chr-name:hover {
   min-width: 0;
   border-bottom: 0.5px solid rgba(122, 111, 92, 0.07);
 }
-/* A working-directory row is context, not record — everything on it steps back
-   a little from the fiber rows above. */
-.chr-track-cwd { opacity: 0.7; }
-
 /* 2px of iron-gall from birth to close. Everything else on the row is drawn
    over this line, centered on it. */
 .chr-life {
@@ -604,12 +736,6 @@ button.chr-name:hover {
   background: rgba(27, 22, 17, 0.26);
   border-radius: 1px;
 }
-.chr-life-cwd {
-  height: 1px;
-  margin-top: -0.5px;
-  background: rgba(122, 111, 92, 0.24);
-}
-
 /* One day's agent work. Three steps of height and opacity — texture on the
    line, not a bar chart above it. The mark is narrower than its column and
    centered in it, so a busy fortnight reads as fourteen days rather than as
@@ -625,7 +751,6 @@ button.chr-name:hover {
 .chr-seg-1 { height: 2px; margin-top: -1px; opacity: 0.30; }
 .chr-seg-2 { height: 4px; margin-top: -2px; opacity: 0.50; }
 .chr-seg-3 { height: 7px; margin-top: -3.5px; opacity: 0.72; }
-.chr-track-cwd .chr-seg { background: #7A6F5C; }
 
 /* A day that asked for the human. Solid teal, hairline-slim, centered — kept
    shorter than the tallest segment so it reads as an overlay on the day's
@@ -662,14 +787,14 @@ button.chr-name:hover {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 10px;
+  font-size: calc(10px * var(--kbn-type-scale, 1));
   line-height: 1;
   pointer-events: none;
 }
 .chr-end { color: #3F8278; }
 .chr-end-compost { color: #A89B83; }
-.chr-due { color: #C49333; font-size: 11px; }
-.chr-launch { color: #3D5BA0; font-size: 11px; opacity: 0.75; }
+.chr-due { color: #C49333; font-size: calc(11px * var(--kbn-type-scale, 1)); }
+.chr-launch { color: #3D5BA0; font-size: calc(11px * var(--kbn-type-scale, 1)); opacity: 0.75; }
 
 /* ── The rest of the record ─────────────────────────────────────────────── */
 
@@ -685,7 +810,7 @@ button.chr-name:hover {
   border-right: 0.5px solid rgba(122, 111, 92, 0.30);
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
   font-style: italic;
-  font-size: 12px;
+  font-size: calc(12px * var(--kbn-type-scale, 1));
   line-height: var(--chr-row-h);
   color: #7A6F5C;
   cursor: pointer;
@@ -697,6 +822,87 @@ button.chr-name:hover {
   text-underline-offset: 2px;
 }
 
+/* ── The key ────────────────────────────────────────────────────────────── */
+
+/* A caption under the grid, not a legend box — the same marginal italic serif
+   Day and Week set theirs in, and the same words for the three pigments. It
+   wraps rather than scrolls: the page below the grid has room, and a key that
+   hides half of itself behind a scrollbar has failed at its one job. */
+.chr-key {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 3px 14px;
+  padding-top: 5px;
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-style: italic;
+  font-size: calc(11px * var(--kbn-type-scale, 1));
+  line-height: 1.2;
+  color: #7A6F5C;
+}
+.chr-key-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+/* Each glyph is Chronicle's own mark in miniature. The ramp is three segments
+   at the three density steps, so the key teaches "taller means busier" and the
+   relative scale in the same breath. */
+.chr-key-life {
+  display: inline-block;
+  width: 22px;
+  height: 2px;
+  border-radius: 1px;
+  background: rgba(27, 22, 17, 0.26);
+}
+.chr-key-ramp {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 8px;
+}
+.chr-key-seg {
+  display: inline-block;
+  width: 3px;
+  background: #3D5BA0;
+  border-radius: 0.5px;
+}
+.chr-key-seg-1 { height: 2px; opacity: 0.30; }
+.chr-key-seg-2 { height: 4px; opacity: 0.50; }
+.chr-key-seg-3 { height: 7px; opacity: 0.72; }
+.chr-key-attention {
+  display: inline-block;
+  width: 2px;
+  height: 6px;
+  background: #3F8278;
+}
+.chr-key-notify {
+  display: inline-block;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: #BC4538;
+}
+.chr-key-glyph {
+  font-style: normal;
+  font-size: calc(11px * var(--kbn-type-scale, 1));
+  line-height: 1;
+}
+.chr-key-due { color: #C49333; }
+.chr-key-launch { color: #3D5BA0; opacity: 0.75; }
+.chr-key-end { color: #3F8278; }
+.chr-key-band {
+  display: inline-block;
+  width: 20px;
+  height: 9px;
+  border: 0.5px solid rgba(154, 123, 53, 0.42);
+  border-radius: 5px;
+  background: rgba(196, 147, 51, 0.16);
+}
 /* A chatty era must not push the grid off the page: the memoir scrolls inside
    the face rather than growing it without limit. The grid is still the page. */
 .chr-face-memoir {

@@ -25,6 +25,7 @@ import {
   assignCycleLanes,
   buildCycleBands,
   densityStep,
+  eraName,
   firstParagraph,
   groupNarration,
   lifelineExtent,
@@ -110,6 +111,26 @@ describe('reading a tmux session name', () => {
     expect(sessionSlug('bmodes-2d-01KVBR1F9BWBVKF97473PV67K8-shuttle')).toBe('bmodes-2d')
     expect(sessionSlug('morning-post-shuttle')).toBe('morning-post')
     expect(sessionSlug('')).toBeNull()
+  })
+
+  it('takes an era\u2019s name from the opening clause of what was spoken', () => {
+    expect(eraName('Cross-correlation season. Everything points at the shear maps.')).toBe(
+      'Cross-correlation season',
+    )
+    // A line break ends the clause as surely as a full stop does — dictation
+    // puts one where the speaker paused.
+    expect(eraName('  Winter of the pipeline\nrewrite the whole runner  ')).toBe(
+      'Winter of the pipeline',
+    )
+    // No sentence at all: the opening is clipped at a word boundary, and the
+    // ellipsis says the rest is still there in the body.
+    const long = eraName(
+      'a very long stretch of unpunctuated intention that keeps going well past the width any single band on the strip could ever carry',
+    )
+    expect(long.length).toBeLessThanOrEqual(65)
+    expect(long.endsWith('\u2026')).toBe(true)
+    expect(long.startsWith('a very long stretch')).toBe(true)
+    expect(eraName('   ')).toBe('')
   })
 
   it('labels a working directory for its row', () => {

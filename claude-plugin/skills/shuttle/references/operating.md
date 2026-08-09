@@ -15,6 +15,12 @@ Agent comes from `shuttle.agent`, resolved against felt's registry — the built
 
 **Tags never gate dispatch — or the view.** Three layers feed the system: the `shuttle:` block (`kind`, `schedule`, `agent`, `host`, `project_dir`) declares shuttle-management; universal lifecycle scalars (`status`, `tempered`, `depends_on`) drive dispatch and view; tags are free-form noticings read by neither the daemon nor the kanban classifier.
 
+## Board tabs
+
+The board at `:4000` is four hotkey-switchable tabs over the same fibers and sessions: **Desk** is the kanban (below). **Day** lays fibers as lanes over a 6am→6am axis, one lane per fiber, two clocks in the lane — solid marks are human activity, wash marks are agent activity. **Week** rows past days as ink rasters, today's row carries a gold seam, future rows are hollow (nothing happened there yet). **Chronicle** draws fibers as multi-day lifelines across calendar days; dragging across days extends or starts a cycle/era.
+
+The temporal tabs (Day/Week/Chronicle) read from the same substrate the daemon already tracks, not a separate store: activity comes from `events.jsonl`, session identity from the session ledger `sessions.jsonl`, and narration (the human-readable "what happened") from the store's `git log`.
+
 ## Kanban columns
 
 Column membership derives from felt `status` + `tempered` + `shuttle.kind` + tmux liveness (`classifyFiber` in `ui/src/board/KanbanRules.ts` — the single source of truth):

@@ -28,11 +28,15 @@ import {
   railFraction,
   railRuleFractions,
   shiftWeekMonday,
+  rasterSlots,
+  slotTip,
+  SLOT_NO_TEXT_NOTE,
   summarizeSpend,
   weekCivilDays,
   weekMondayForFocus,
   weekWindow,
 } from './WeekView.js';
+import { buildOriginIndex, originOf, shortCwd } from './activityOrigin.js';
 import { civilDayToLocalDate, isoDayLocal, railCivilDay } from '../civilDay.js';
 import { shiftCivilDay } from './railTime.js';
 import type { ActivityBucket } from './TemporalData.js';
@@ -896,5 +900,139 @@ describe('how full a day was', () => {
     ]);
     expect(spend.notifyCount).toBe(2);
     expect(spend.totalMs).toBe(60_000);
+  });
+});
+
+describe('the raster tick knows whose minute it was', () => {
+  // Rung 0 (the recorded pairing) belongs to TemporalData's own suite; here the
+  // question is only what a SLOT ends up carrying, since that is what the ink
+  // and the tooltip both read.
+  const bucket = (over: Partial<ActivityBucket> & { m: number }): ActivityBucket =>
+    ({ s: null, cwd: null, k: 'agent', n: 1, ...over });
+
+  const noJoin = buildOriginIndex([]);
+  const origin = (index: ReturnType<typeof buildOriginIndex>) =>
+    (b: ActivityBucket) => originOf(index, b);
+
+  it('folds a slot per RASTER_SLOT_MS and centres its fraction in that slot', () => {
+    const bounds = railBounds('2026-08-12');
+    // Two minutes inside the first 4-minute slot, one inside the second.
+    const slots = rasterSlots(
+      [
+        bucket({ m: bounds.startMs }),
+        bucket({ m: bounds.startMs + 60_000 }),
+        bucket({ m: bounds.startMs + 5 * 60_000 }),
+      ],
+      bounds,
+      bounds.endMs,
+      origin(noJoin),
+    );
+    expect(slots.map((s) => s.index)).toEqual([0, 1]);
+    expect(slots[0].kinds[0].count).toBe(2);
+    const span = bounds.endMs - bounds.startMs;
+    // The MIDPOINT of the slot — the contract the CSS centring and the hover
+    // snap both depend on.
+    expect(slots[0].fraction).toBeCloseTo(2 * 60_000 / span, 9);
+    expect(slots[0].startMs).toBe(bounds.startMs);
+    expect(slots[0].endMs).toBe(bounds.startMs + 4 * 60_000);
+  });
+
+  it('drops everything after the cutoff, so today draws no ink in its future', () => {
+    const bounds = railBounds('2026-08-12');
+    const cut = bounds.startMs + 30 * 60_000;
+    const slots = rasterSlots(
+      [bucket({ m: bounds.startMs }), bucket({ m: cut + 60_000 })],
+      bounds,
+      cut,
+      origin(noJoin),
+    );
+    expect(slots).toHaveLength(1);
+    expect(slots[0].index).toBe(0);
+  });
+
+  it('marks the slot constitution-driven when the joined fiber carries a shuttle block', () => {
+    const bounds = railBounds('2026-08-12');
+    const index = buildOriginIndex([
+      card({ id: 'fiber/ship-it', name: 'ship it', runningWorker: 'w-1', shuttleKind: 'oneshot' }),
+      card({ id: 'fiber/notes', name: 'notes', runningWorker: 'w-2' }),
+    ]);
+    const [driven, plain] = [
+      rasterSlots([bucket({ m: bounds.startMs, s: 'w-1' })], bounds, bounds.endMs, origin(index))[0],
+      rasterSlots([bucket({ m: bounds.startMs, s: 'w-2' })], bounds, bounds.endMs, origin(index))[0],
+    ];
+    expect(driven.shuttle).toBe(true);
+    expect(driven.kinds[0].where).toEqual(['ship it']);
+    // A `shuttle:` block is what makes a fiber constitution-driven — a card
+    // that merely has a running worker is not.
+    expect(plain.shuttle).toBe(false);
+    expect(plain.kinds[0].where).toEqual(['notes']);
+  });
+
+  it('keeps unjoined work under its own name rather than guessing a fiber', () => {
+    const bounds = railBounds('2026-08-12');
+    const slots = rasterSlots(
+      [
+        bucket({ m: bounds.startMs, s: 'stray-session' }),
+        bucket({ m: bounds.startMs, s: null, cwd: '/Users/cail/dev/felt' }),
+      ],
+      bounds,
+      bounds.endMs,
+      origin(noJoin),
+    );
+    expect(slots[0].kinds[0].where).toEqual(['stray-session', '~/dev/felt']);
+    expect(slots[0].shuttle).toBe(false);
+  });
+
+  it('folds a home directory to ~ and keeps two segments of anything else', () => {
+    expect(shortCwd('/Users/cail/dev/felt')).toBe('~/dev/felt');
+    expect(shortCwd('/home/cail')).toBe('~');
+    expect(shortCwd('/var/lib/shuttle/run')).toBe('…/shuttle/run');
+  });
+});
+
+describe('what a hovered slot is willing to say', () => {
+  const bounds = railBounds('2026-08-12');
+  const bucket = (over: Partial<ActivityBucket> & { m: number }): ActivityBucket =>
+    ({ s: null, cwd: null, k: 'agent', n: 1, ...over });
+
+  const slotOf = (buckets: ActivityBucket[], cards: KanbanCard[] = []) =>
+    rasterSlots(buckets, bounds, bounds.endMs, (b) => originOf(buildOriginIndex(cards), b))[0];
+
+  it('reads strongest signal first: a hand raised, then a human, then the agent', () => {
+    const at = bounds.startMs;
+    const tip = slotTip(slotOf([
+      bucket({ m: at, k: 'agent', n: 4 }),
+      bucket({ m: at, k: 'notify' }),
+      bucket({ m: at, k: 'attention' }),
+    ]));
+    expect(tip.rows.map((r) => r.kind)).toEqual(['notify', 'attention', 'agent']);
+    expect(tip.rows.map((r) => r.phrase)).toEqual(['needed you', 'you prompted', 'agent working']);
+    expect(tip.rows.find((r) => r.kind === 'agent')?.count).toBe(4);
+  });
+
+  it('names the slot by its own span, not by the minute that happened to seed it', () => {
+    const tip = slotTip(slotOf([bucket({ m: bounds.startMs + 60_000 })]));
+    // A 4-minute slot: two clock times, and they differ.
+    const [from, to] = tip.time.split('–');
+    expect(from).not.toBe(to);
+    expect(tip.time).toContain('–');
+  });
+
+  it('says plainly that the words were never kept, and leaves room for them', () => {
+    const slot = slotOf([bucket({ m: bounds.startMs })]);
+    expect(slotTip(slot).detail).toBeUndefined();
+    expect(SLOT_NO_TEXT_NOTE).toMatch(/not the words/);
+    // The seam a later transcript or narration join fills. Nothing sources it
+    // today; the shape is here so that when something does, only the source
+    // has to change.
+    expect(slotTip(slot, 'refactor the fold').detail).toBe('refactor the fold');
+  });
+
+  it('carries the constitution flag onto the tooltip line it belongs to', () => {
+    const cards = [
+      card({ id: 'fiber/ship-it', name: 'ship it', runningWorker: 'w-1', shuttleKind: 'standing' }),
+    ];
+    const tip = slotTip(slotOf([bucket({ m: bounds.startMs, s: 'w-1' })], cards));
+    expect(tip.rows[0]).toMatchObject({ where: 'ship it', shuttle: true });
   });
 });

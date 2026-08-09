@@ -48,7 +48,7 @@
    above a whole view rather than a single lane. */
 .kbn-view-title {
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
-  font-size: 28px;
+  font-size: calc(28px * var(--kbn-type-scale, 1));
   line-height: 1.0;
   font-weight: 500;
   font-variant-caps: all-small-caps;
@@ -84,7 +84,7 @@
   color: #A89B83;
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
   font-style: italic;
-  font-size: 14px;
+  font-size: calc(14px * var(--kbn-type-scale, 1));
   letter-spacing: 0.01em;
   padding: 40px 8px;
 }
@@ -102,7 +102,7 @@
   padding: 0 0 1px;
   cursor: pointer;
   font-family: var(--font-mono, 'IBM Plex Mono', monospace);
-  font-size: 10px;
+  font-size: calc(10px * var(--kbn-type-scale, 1));
   letter-spacing: 0.12em;
   text-transform: uppercase;
   font-style: normal;

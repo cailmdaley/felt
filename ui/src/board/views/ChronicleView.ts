@@ -1,5 +1,5 @@
 /**
- * ChronicleView (hotkey 2) — the long record: what was worked on, and for how
+ * ChronicleView (hotkey 4) — the long record: what was worked on, and for how
  * long.
  *
  * THE SHAPE. Days run left to right as calendar columns (28 back, 14 ahead);
@@ -21,16 +21,24 @@
  *
  * THE JOIN. Activity buckets know a session and a working directory; they do
  * not know a fiber. Resolving one to the other is a ladder of decreasing
- * confidence — see {@link attributeActivity}. Whatever the ladder cannot place
- * on a fiber is grouped by working directory into muted synthetic rows below
- * the fiber rows, so human work at a terminal stays visible instead of being
- * silently dropped.
+ * confidence — see {@link attributeActivity}. THE PAGE DRAWS FIBER ROWS ONLY:
+ * whatever the ladder cannot place on a fiber is left undrawn. It is a thin
+ * slice of the record, and a row named after a directory would teach the wrong
+ * unit — this page is about fibers, and a chronicle that hedges about its own
+ * unit is harder to read than one that leaves a little out. The attribution
+ * still separates the unplaced work (`Attribution.byCwd`), so nothing about the
+ * join's honesty depends on what the view chooses to ink.
+ *
+ * ERAS. The strip above the rows carries cycles. Two gestures make one: drag
+ * across days to draw a span and name it, or press `+` to SPEAK an era — a
+ * paragraph about what it is, starting today and open-ended, whose span the
+ * same drag grips settle later. See {@link eraName} and `openEraComposer`.
  */
 
 import { normalizeFocusDate, registerView, type TemporalView, type ViewContext } from './ViewRegistry.js'
 import { createViewEmptyState, createViewPage } from './ViewPage.js'
 import { cardPathSegments, cardUlids, sessionSlug, sessionUlid } from './sessionNames.js'
-import { MARK_GLYPH } from './vocabulary.js'
+import { ACTIVITY_KEY_ITEMS, MARK_GLYPH } from './vocabulary.js'
 import { civilDayNoon, formatSpanMinutes, shiftCivilDay } from './railTime.js'
 import {
   buildSessionIndex,
@@ -370,6 +378,34 @@ export interface CycleBand {
   pending?: boolean
 }
 
+/** The one sentence that teaches the strip's gesture. Said in three places —
+ *  the gutter's tooltip, the lane's tooltip, and the hover hint — so it cannot
+ *  drift into three different descriptions of one drag. */
+const ERA_HINT = 'drag across days to draw an era'
+
+/** What the `+` in the cycle gutter promises. */
+const ERA_SPEAK_HINT = 'speak a new era'
+
+/**
+ * The NAME an era gets when it was spoken rather than named.
+ *
+ * A spoken era arrives as a paragraph — its ontology, its goal, what drives it,
+ * what constrains it. The band on the strip is one capsule wide, so it needs a
+ * handle, and the handle is the opening clause: the first sentence, or the
+ * first line, whichever ends sooner, clipped at the width a band can carry.
+ * The prose itself is not summarized away — it becomes the fiber's body, which
+ * is where the era's intention is read from.
+ */
+export function eraName(prose: string): string {
+  const first = prose.trim().split('\n')[0] ?? ''
+  const sentence = /^(.+?[.!?])(?:\s|$)/.exec(first)
+  const head = (sentence ? sentence[1] : first).trim().replace(/[.!?,;:]+$/, '')
+  if (head.length <= 64) return head
+  const cut = head.slice(0, 64)
+  const space = cut.lastIndexOf(' ')
+  return `${(space > 24 ? cut.slice(0, space) : cut).trim()}…`
+}
+
 /** Cycles stack this deep before overflow starts sharing a lane. */
 export const MAX_CYCLE_LANES = 3
 
@@ -533,9 +569,8 @@ export function firstParagraph(body: string | undefined): string {
 
 interface ChronicleRow {
   key: string
-  kind: 'fiber' | 'cwd'
   label: string
-  /** Tiny mono note under the name's right edge: owning host, or `interactive`. */
+  /** Tiny mono note under the name's right edge: the owning host. */
   note: string
   cardId?: string
   days: Map<string, DayCell>
@@ -667,7 +702,6 @@ function buildFiberRow(
 
   return {
     key: `fiber:${card.id}`,
-    kind: 'fiber',
     label: card.name,
     note: hostLabel(card, response),
     cardId: card.id,
@@ -684,50 +718,15 @@ function buildFiberRow(
   }
 }
 
-function buildCwdRow(
-  cwd: string,
-  buckets: readonly ActivityBucket[],
-  dayIndex: Map<string, number>,
-  todayIdx: number,
-): ChronicleRow {
-  const days = aggregateByCivilDay(buckets)
-  let startIdx = todayIdx
-  let endIdx = 0
-  let sortMs = 0
-  for (const day of days.keys()) {
-    const idx = dayIndex.get(day)
-    if (idx === undefined) continue
-    if (idx < startIdx) startIdx = idx
-    if (idx > endIdx) endIdx = idx
-    sortMs = Math.max(sortMs, (civilDayNoon(day)?.getTime() ?? 0))
-  }
-  startIdx = clamp(startIdx, 0, todayIdx)
-  endIdx = clamp(Math.max(endIdx, startIdx), 0, todayIdx)
-  // `interactive` only when nothing here carried a session at all; otherwise a
-  // session ran that the ladder could not tie to a fiber, and saying
-  // "interactive" would be a small lie.
-  const note = buckets.every((b) => b.s === null) ? 'interactive' : 'unmatched'
-  return {
-    key: `cwd:${cwd}`,
-    kind: 'cwd',
-    label: abbreviateCwd(cwd),
-    note,
-    days,
-    startIdx,
-    endIdx,
-    closeIdx: null,
-    live: false,
-    closed: false,
-    closedOk: true,
-    dueIdx: null,
-    launchIdx: null,
-    sortMs,
-  }
-}
 
 /**
  * Every row the chronicle draws, in reading order: live fibers, then fibers by
- * most-recent activity, then the working-directory rows.
+ * most-recent activity.
+ *
+ * FIBER ROWS ONLY. Activity that joined to no fiber is not drawn: it is a thin
+ * slice of the record, and a row named after a directory teaches the page's
+ * unit wrong. The attribution still separates it (`Attribution.byCwd`), so the
+ * join keeps its honesty — the chronicle simply has nothing to say about it.
  *
  * The fiber set is "anything with activity in the window" ∪ "anything still
  * open" — the three Now lanes, the pinned strip, and the two future timeline
@@ -802,13 +801,7 @@ function buildRows(
     return a.label.localeCompare(b.label)
   })
 
-  const cwds: ChronicleRow[] = []
-  for (const [cwd, buckets] of attribution.byCwd) {
-    cwds.push(buildCwdRow(cwd, buckets, dayIndex, todayIdx))
-  }
-  cwds.sort((a, b) => b.sortMs - a.sortMs || a.label.localeCompare(b.label))
-
-  return [...fibers, ...cwds]
+  return fibers
 }
 
 /** The busiest single day across every row — the scale density steps map onto. */
@@ -828,6 +821,29 @@ function prettyDay(day: string): string {
   return d ? d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : day
 }
 
+/**
+ * Month bearings. A civil day is `YYYY-MM-DD`, so the first of a month is a
+ * string test — no Date round trip, and therefore no timezone to get wrong.
+ */
+function isMonthStart(day: string): boolean {
+  return day.slice(8, 10) === '01'
+}
+
+/** A civil day's month, named. `long` for the sticky bearing, `short` for the
+ *  inline mark at a boundary column, which is one day-column wide. */
+function monthName(day: string, style: 'long' | 'short'): string {
+  const d = civilDayToLocalDate(day)
+  return d ? d.toLocaleDateString(undefined, { month: style }) : day.slice(0, 7)
+}
+
+/** The month bearing for a column, with the year when it is not this one —
+ *  scrolling back a year should not read as scrolling back a month. */
+function monthBearing(day: string, nowYear: number): string {
+  const year = Number(day.slice(0, 4))
+  const name = monthName(day, 'long')
+  return Number.isFinite(year) && year !== nowYear ? `${name} ${year}` : name
+}
+
 /** `left` for a mark sitting in day column `idx`. */
 function colLeft(idx: number): string {
   return `calc(var(--chr-day-w) * ${idx})`
@@ -838,7 +854,7 @@ function colLeft(idx: number): string {
 class ChronicleView implements TemporalView {
   readonly id = 'chronicle' as const
   readonly title = 'Chronicle'
-  readonly hotkey = '2'
+  readonly hotkey = '4'
 
   private root: HTMLElement | null = null
   private body: HTMLElement | null = null
@@ -851,6 +867,10 @@ class ChronicleView implements TemporalView {
   private signature = ''
   private expanded = false
   private didAnchor = false
+  /** The sticky month bearing in the corner cell, and what it currently says.
+   *  Held so a scroll can repaint one word without touching the grid. */
+  private monthEl: HTMLElement | null = null
+  private monthText = ''
   /** The cursor value the scroll is currently anchored on, so a move re-anchors
    *  while an unrelated refresh leaves the reader where they were. */
   private anchoredOn: string | null = null
@@ -871,7 +891,7 @@ class ChronicleView implements TemporalView {
   private draft: { fromDay: string; toDay: string; naming: boolean } | null = null
   /** Cycles created this session and not yet echoed by a poll. Held so the band
    *  appears under the cursor at once rather than up to 15s later. */
-  private pendingCycles: Array<{ name: string; startDay: string; endDay: string }> = []
+  private pendingCycles: Array<{ name: string; startDay: string; endDay: string | null }> = []
   /** Edge drags written but not yet echoed by a poll, keyed by cycle id. Held
    *  so a dragged edge stays where it was dropped instead of snapping back for
    *  the seconds until the daemon's answer comes round. */
@@ -920,7 +940,12 @@ class ChronicleView implements TemporalView {
     this.body = page.body
     this.ctx = ctx
     this.signature = ''
+    // The anchor is TWO fields — "have we scrolled yet" and "onto which cursor
+    // value" — and they only behave if they move together. Clearing one alone
+    // leaves the view believing it is anchored on a cursor from a previous
+    // visit, so both are cleared here and in unmount, side by side.
     this.didAnchor = false
+    this.anchoredOn = null
     this.dayWidthPx = 0
     // The registry holds ONE instance of this view for the life of the page, so
     // every field here outlives the mount that set it. "Show me the other 40
@@ -928,7 +953,8 @@ class ChronicleView implements TemporalView {
     // meant a board opened tomorrow still had yesterday's list unrolled, with
     // no expander visible to explain why.
     this.expanded = false
-    this.anchoredOn = null
+    this.monthEl = null
+    this.monthText = ''
     host.append(page.root)
 
     // Refit the columns when the board changes width. Only the CSS variable
@@ -971,6 +997,8 @@ class ChronicleView implements TemporalView {
     this.pendingScrollDelta = 0
     this.fetchedChunks = new Map()
     this.onScroll = null
+    this.monthEl = null
+    this.monthText = ''
     this.resizeObserver?.disconnect()
     this.resizeObserver = null
     this.root?.remove()
@@ -980,6 +1008,7 @@ class ChronicleView implements TemporalView {
     this.ctx = null
     this.signature = ''
     this.didAnchor = false
+    this.anchoredOn = null
     this.dayWidthPx = 0
   }
 
@@ -1129,6 +1158,8 @@ class ChronicleView implements TemporalView {
     const scrollTop = this.scroller?.scrollTop ?? 0
     body.replaceChildren()
     this.scroller = null
+    // The corner cell went with the old body; `buildCorner` hands back a new one.
+    this.monthEl = null
     // The fitted width lives as an inline variable ON the scroller, and this
     // rebuild makes a new one. Forget the cached value too, or fitDayWidth sees
     // "no change" and leaves the fresh element on the CSS fallback width.
@@ -1154,6 +1185,8 @@ class ChronicleView implements TemporalView {
 
     const hidden = this.expanded ? 0 : Math.max(0, rows.length - MAX_ROWS)
     const shown = hidden > 0 ? rows.slice(0, MAX_ROWS) : rows
+    // The density scale is the whole record's, not the visible slice's — the
+    // expander must not redraw every other row's segments.
     const peak = peakDayAgent(rows)
 
     const bands = this.collectBands(ctx, days, dayIndex)
@@ -1170,23 +1203,23 @@ class ChronicleView implements TemporalView {
     grid.style.gridTemplateRows =
       `var(--chr-head-h) repeat(${laneCount}, var(--chr-cycle-h)) repeat(${bodyRows}, var(--chr-row-h))`
 
-    const fiberCount = rows.reduce((n, row) => (row.kind === 'fiber' ? n + 1 : n), 0)
-    grid.append(this.buildCorner(fiberCount), ...this.buildHead(days, ctx))
+    grid.append(this.buildCorner(rows.length), ...this.buildHead(days, ctx))
     grid.append(...this.buildWashes(days, laneCount + bodyRows))
     grid.append(...this.buildCycleStrip(bands, laneCount, days, ctx))
     // Fiber rows start below the cycle strip.
     const rowOffset = laneCount
     const era = this.scopedCycleId === null ? null : bands.find((b) => b.id === this.scopedCycleId)
-    for (let r = 0; r < shown.length; r += 1) {
-      const parts = this.buildRow(shown[r], rowOffset + r, days, dayIndex, peak, ctx)
+    let r = rowOffset
+    for (let i = 0; i < shown.length; i += 1) {
+      const parts = this.buildRow(shown[i], r++, days, dayIndex, peak, ctx)
       // Dimmed, never hidden: a row with no part in the era is still part of
       // the record, and removing it would make the era look emptier than it was.
-      if (era && !this.rowInSpan(shown[r], era, days)) {
+      if (era && !this.rowInSpan(shown[i], era, days)) {
         for (const el of parts) el.classList.add('chr-outside')
       }
       grid.append(...parts)
     }
-    if (hidden > 0) grid.append(this.buildExpander(hidden, rowOffset + shown.length))
+    if (hidden > 0) grid.append(this.buildExpander(hidden, r++))
     // Appended LAST so it paints over the bands and the lifelines: today is one
     // unbroken line down the page, not a line that stops at whatever happens to
     // overlap it. Same stacking level as the tracks, so DOM order decides — and
@@ -1205,12 +1238,17 @@ class ChronicleView implements TemporalView {
       this.scopedCycleId = null
     }
     body.append(scroller)
+    body.append(this.buildKey(bands.length > 0))
     this.scroller = scroller
     // The scroller is a new element every rebuild, so the listener goes on with
     // it. Passive: extension never prevents the scroll it is reacting to.
-    this.onScroll = () => this.maybeExtend()
+    this.onScroll = () => {
+      this.bearMonth()
+      this.maybeExtend()
+    }
     scroller.addEventListener('scroll', this.onScroll, { passive: true })
     this.fitDayWidth()
+    this.bearMonth()
 
     // The cursor decides where the page opens. Null means today — re-resolved
     // against the clock every render, never frozen at the day we first saw. A
@@ -1357,7 +1395,9 @@ class ChronicleView implements TemporalView {
       name: p.name,
       originId: boardOrigin(ctx.response),
       cycleStart: p.startDay,
-      due: p.endDay,
+      // A spoken era has no end yet: `cycleSpan` runs an open-ended cycle to
+      // today, which is exactly what an era you have just entered looks like.
+      due: p.endDay ?? undefined,
     }))
     const bands = buildCycleBands([...real, ...ghosts], days, dayIndex)
     const pendingNames = new Set(this.pendingCycles.map((p) => p.name))
@@ -1383,12 +1423,31 @@ class ChronicleView implements TemporalView {
       gutter.className = 'chr-cycle-gutter'
       gutter.style.gridColumn = '1'
       gutter.style.gridRow = String(lane + 2)
-      // Names the strip once, on the lane nearest the headers.
+      // Names the strip once, on the lane nearest the headers — and says, in
+      // the same breath, that the strip is something you can write on. The
+      // gesture is a drag, so there is nothing to click here; the `+` is a
+      // legend for the lane beside it, not a button that would lie about it.
       if (lane === 0) {
         const tag = document.createElement('span')
         tag.className = 'chr-cycle-tag'
         tag.textContent = 'cycles'
-        gutter.append(tag)
+        // The `+` used to be a legend for the drag gesture — a mark that could
+        // not be clicked, on a page where the only way to make an era was to
+        // draw one. It is a real button now: it opens the composer, where an
+        // era is SPOKEN rather than measured. The two gestures answer different
+        // questions. A drag says when; the composer says what.
+        const plus = document.createElement('button')
+        plus.type = 'button'
+        plus.className = 'chr-cycle-plus'
+        plus.textContent = '+'
+        plus.title = ERA_SPEAK_HINT
+        plus.setAttribute('aria-label', ERA_SPEAK_HINT)
+        plus.addEventListener('click', (e) => {
+          e.stopPropagation()
+          this.openEraComposer(ctx)
+        })
+        gutter.append(tag, plus)
+        gutter.title = ERA_HINT
       }
       out.push(gutter)
 
@@ -1400,17 +1459,22 @@ class ChronicleView implements TemporalView {
       track.style.gridColumn = `2 / span ${days.length}`
       track.style.gridRow = String(lane + 2)
       track.dataset.lane = String(lane)
+      track.title = ERA_HINT
       this.installDrawToCreate(track, ctx)
       out.push(track)
     }
 
-    if (bands.length === 0) {
-      // Only when there is nothing to crowd: the invitation, on hover.
-      const hint = document.createElement('div')
-      hint.className = 'chr-cycle-hint'
-      hint.textContent = '· draw a cycle ·'
-      out[1]?.append(hint)
-    }
+    // The invitation. It used to appear only on an EMPTY strip, which meant the
+    // one gesture on this page that creates something was undiscoverable the
+    // moment you had a single cycle — and a hint you only see before you have
+    // ever used the feature is the wrong way round. So it now rides the LAST
+    // lane always, right-aligned out of the bands' way, and fades in when the
+    // cursor is over the strip. On an empty strip it is centered, because there
+    // is nothing to keep clear of.
+    const hint = document.createElement('div')
+    hint.className = `chr-cycle-hint${bands.length === 0 ? ' chr-cycle-hint-empty' : ''}`
+    hint.textContent = bands.length === 0 ? `· ${ERA_HINT} ·` : `· ${ERA_HINT}`
+    out[(laneCount - 1) * 2 + 1]?.append(hint)
 
     for (const band of bands) {
       const lane = out[band.lane * 2 + 1]
@@ -1991,6 +2055,95 @@ class ChronicleView implements TemporalView {
   }
 
   /**
+   * The era composer — the spoken half of making a cycle.
+   *
+   * A drag across the strip answers "when", and then asks for a name in one
+   * line. This asks the other question first: WHAT this era is — its ontology,
+   * its goal, what drives it, what constrains it — as a paragraph, dictated or
+   * typed. The prose becomes the fiber's body, so the era face reads the
+   * intention back in the words it was entered in; the opening clause becomes
+   * the band's name (see {@link eraName}).
+   *
+   * The span it starts with is today, open-ended, because an era you are
+   * entering has no end yet. The existing edge grips settle it later, so the
+   * two gestures compose rather than duplicating each other.
+   *
+   * It is a sheet laid between the title and the grid, not a modal: the
+   * chronicle it is about stays visible underneath, and dictating into a
+   * textarea wants a large, plain target with nothing to dismiss by accident.
+   */
+  private openEraComposer(ctx: ViewContext): void {
+    const root = this.root
+    if (!root || !this.body) return
+    const existing = root.querySelector('.chr-era-panel')
+    if (existing) {
+      ;(existing.querySelector('textarea') as HTMLTextAreaElement | null)?.focus()
+      return
+    }
+
+    const panel = document.createElement('div')
+    panel.className = 'chr-era-panel'
+
+    const title = document.createElement('div')
+    title.className = 'chr-era-title'
+    title.textContent = 'a new era'
+
+    const area = document.createElement('textarea')
+    area.className = 'chr-era-text'
+    area.rows = 4
+    area.placeholder =
+      'What is this era? Its ontology, its goal, what drives it, what constrains it.'
+
+    const foot = document.createElement('div')
+    foot.className = 'chr-era-foot'
+    const note = document.createElement('span')
+    note.className = 'chr-era-note'
+    note.textContent = 'begins today · open-ended · drag its edges to settle the span'
+    const cancel = document.createElement('button')
+    cancel.type = 'button'
+    cancel.className = 'chr-era-cancel'
+    cancel.textContent = 'abandon'
+    const begin = document.createElement('button')
+    begin.type = 'button'
+    begin.className = 'chr-era-begin'
+    begin.textContent = 'begin'
+    foot.append(note, cancel, begin)
+
+    panel.append(title, area, foot)
+    // Between the page title and the grid, and OUTSIDE the body: the 15s poll
+    // rebuilds the body wholesale, and a composer that vanished mid-sentence
+    // because a refresh landed would lose the paragraph it exists to collect.
+    root.insertBefore(panel, this.body)
+    area.focus()
+
+    let settled = false
+    const finish = (prose: string | null): void => {
+      if (settled) return
+      settled = true
+      panel.remove()
+      if (prose === null) return
+      const name = eraName(prose)
+      if (!name) return
+      void this.createCycle(name, isoDayLocal(Date.now()), null, ctx, prose)
+    }
+    cancel.addEventListener('click', () => finish(null))
+    begin.addEventListener('click', () => finish(area.value.trim() || null))
+    // Enter is a newline here — the point is a paragraph, and dictation puts
+    // line breaks in it. Cmd/Ctrl+Enter commits, which is the capture form's
+    // gesture, so the two captures on this board are learned once.
+    panel.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault()
+        finish(area.value.trim() || null)
+      } else if (e.key === 'Escape') {
+        e.preventDefault()
+        finish(null)
+      }
+      e.stopPropagation() // the board's hotkeys must not eat the dictation
+    })
+  }
+
+  /**
    * Write the cycle. ONE call, both dates.
    *
    * This used to be two — create with `start`, then a `felt-edit` for `due` —
@@ -2004,12 +2157,18 @@ class ChronicleView implements TemporalView {
    * intermediate state to fail into now. `start` still rides the frontmatter as
    * an opaque key; `due` rides it as a native one. The band still appears
    * immediately — `pendingCycles` holds it until a poll returns the real card.
+   *
+   * `endDay` may be null: a spoken era is open-ended, and its span is settled
+   * later with the same drag grips that reshape any other band. `prose` carries
+   * the words an era was spoken in — the first paragraph of it is what the era
+   * face reads back as the intention.
    */
   private async createCycle(
     name: string,
     startDay: string,
-    endDay: string,
+    endDay: string | null,
     ctx: ViewContext,
+    prose = '',
   ): Promise<void> {
     this.pendingCycles.push({ name, startDay, endDay })
     if (this.ctx) {
@@ -2035,13 +2194,16 @@ class ChronicleView implements TemporalView {
         body: JSON.stringify({
           id,
           name,
-          body: '',
+          body: prose,
           frontmatter: {
             name,
             status: 'open',
             tags: ['cycle'],
             start: startDay,
-            due: endDay,
+            // Omitted, not null, when the era is open-ended: `due` absent is
+            // how a cycle says "still running", and a null would be a date
+            // field the daemon has to interpret.
+            ...(endDay === null ? {} : { due: endDay }),
           },
           origin,
         }),
@@ -2060,18 +2222,108 @@ class ChronicleView implements TemporalView {
     }
   }
 
-  /** Sticky top-left cell — the row-label column's own head. Counts fibers
-   *  only; the working-directory rows below them are not fibers. */
+  /**
+   * Sticky top-left cell — the row-label column's own head. It carries two
+   * things: the month you are currently looking at, and how many fibers are on
+   * the page.
+   *
+   * The month is here rather than only at the boundary columns because a
+   * boundary scrolls away and the question "which month am I in" does not. It
+   * is the one word on this page that answers where you are.
+   */
   private buildCorner(total: number): HTMLElement {
     const corner = document.createElement('div')
     corner.className = 'chr-corner'
     corner.style.gridColumn = '1'
     corner.style.gridRow = '1'
+    const month = document.createElement('span')
+    month.className = 'chr-corner-month'
     const count = document.createElement('span')
     count.className = 'chr-corner-count'
     count.textContent = `${total} ${total === 1 ? 'fiber' : 'fibers'}`
-    corner.append(count)
+    corner.append(month, count)
+    this.monthEl = month
+    this.monthText = ''
     return corner
+  }
+
+  /**
+   * Name the month at the left edge of the day area — the sticky bearing.
+   *
+   * The leftmost VISIBLE day, not the leftmost column: the gutter covers the
+   * first stretch of the grid, so measuring from `scrollLeft` alone would name
+   * a month the reader cannot see. Writes only when the word changes, because
+   * this runs on every scroll event.
+   */
+  private bearMonth(): void {
+    const scroller = this.scroller
+    const el = this.monthEl
+    if (!scroller || !el || this.currentDays.length === 0) return
+    const dayW = this.dayWidthPx || 24
+    const idx = clamp(
+      Math.floor((scroller.scrollLeft + this.labelWidth(scroller)) / dayW),
+      0,
+      this.currentDays.length - 1,
+    )
+    const text = monthBearing(this.currentDays[idx].iso, new Date().getFullYear())
+    if (text === this.monthText) return
+    this.monthText = text
+    el.textContent = text
+  }
+
+  /**
+   * The key — a caption under the grid, in the margin, naming every mark the
+   * page spends.
+   *
+   * The wording for the three activity pigments is {@link ACTIVITY_KEY_ITEMS},
+   * verbatim, so a hue glossed here cannot come to mean something else on Day
+   * or Week. The GLYPHS are Chronicle's own marks in miniature, which is the
+   * rule the other two pages follow: a key teaches the marks you are actually
+   * looking at, and Chronicle's segment is a day, not an hour.
+   *
+   * One entry is conditional: a page with no cycles should not explain bands —
+   * a key for marks that are not on the page is the noise a key exists to
+   * remove.
+   */
+  private buildKey(hasCycles: boolean): HTMLElement {
+    const key = document.createElement('div')
+    key.className = 'chr-key'
+
+    const item = (glyph: HTMLElement, label: string): HTMLElement => {
+      const el = document.createElement('span')
+      el.className = 'chr-key-item'
+      el.append(glyph, document.createTextNode(label))
+      return el
+    }
+    const swatch = (cls: string): HTMLElement => {
+      const el = document.createElement('span')
+      el.className = cls
+      return el
+    }
+    const glyph = (cls: string, text: string): HTMLElement => {
+      const el = document.createElement('span')
+      el.className = cls
+      el.textContent = text
+      return el
+    }
+
+    // Length first: it is the page's largest claim and the one nobody guesses.
+    key.append(item(swatch('chr-key-life'), 'row spans first to last day'))
+    // The three pigments, in the shared words, with a density ramp that says
+    // the steps are relative to the busiest day in view.
+    const ramp = document.createElement('span')
+    ramp.className = 'chr-key-ramp'
+    for (const step of [1, 2, 3]) ramp.append(swatch(`chr-key-seg chr-key-seg-${step}`))
+    for (const { kind, label } of ACTIVITY_KEY_ITEMS) {
+      if (kind === 'agent') key.append(item(ramp, `${label} (busiest day in view sets the scale)`))
+      else key.append(item(swatch(`chr-key-${kind}`), label))
+    }
+    // Hollow marks: what is owed, ahead of today. Nothing solid is drawn there.
+    key.append(item(glyph('chr-key-glyph chr-key-due', MARK_GLYPH.due), 'due'))
+    key.append(item(glyph('chr-key-glyph chr-key-launch', MARK_GLYPH.launch), 'next launch'))
+    key.append(item(glyph('chr-key-glyph chr-key-end', '✓'), 'tempered · ✗ composted'))
+    if (hasCycles) key.append(item(swatch('chr-key-band'), 'an era — click to read it'))
+    return key
   }
 
   /**
@@ -2093,14 +2345,23 @@ class ChronicleView implements TemporalView {
       if (day.isPast) classes.push('chr-head-past')
       if (day.isWeekend) classes.push('chr-head-weekend')
       if (day.weekBoundary) classes.push('chr-head-week')
+      // The first of a month takes the month's name in place of its weekday.
+      // The weekday is recoverable from the column beside it; the month is not
+      // recoverable from anything on the page, which is the whole complaint.
+      const monthStart = isMonthStart(day.iso)
+      if (monthStart) classes.push('chr-head-monthstart')
       cell.className = classes.join(' ')
       cell.style.gridColumn = String(i + 2)
       cell.style.gridRow = '1'
       cell.dataset.dayIso = day.iso
 
       const dow = document.createElement('span')
-      dow.className = 'chr-head-dow'
-      dow.textContent = day.isToday ? 'today' : day.weekdayLabel
+      dow.className = `chr-head-dow${monthStart && !day.isToday ? ' chr-head-month' : ''}`
+      dow.textContent = day.isToday
+        ? 'today'
+        : monthStart
+          ? monthName(day.iso, 'short')
+          : day.weekdayLabel
       const num = document.createElement('span')
       num.className = 'chr-head-num'
       num.textContent = day.label
@@ -2130,6 +2391,9 @@ class ChronicleView implements TemporalView {
       if (day.isPast) classes.push('chr-wash-past')
       if (day.isWeekend) classes.push('chr-wash-weekend')
       if (day.weekBoundary) classes.push('chr-wash-week')
+      // A month opens with a rule the full height of the page — the bearing you
+      // cross rather than the one you read.
+      if (isMonthStart(day.iso)) classes.push('chr-wash-month')
       wash.className = classes.join(' ')
       wash.style.gridColumn = String(i + 2)
       wash.style.gridRow = '2 / -1'
@@ -2148,7 +2412,7 @@ class ChronicleView implements TemporalView {
     const gridRow = String(r + 2)
 
     const label = document.createElement('div')
-    label.className = `chr-label${row.kind === 'cwd' ? ' chr-label-cwd' : ''}${row.live ? ' chr-label-live' : ''}`
+    label.className = `chr-label${row.live ? ' chr-label-live' : ''}`
     label.style.gridColumn = '1'
     label.style.gridRow = gridRow
 
@@ -2175,12 +2439,12 @@ class ChronicleView implements TemporalView {
     label.append(name, note, span)
 
     const track = document.createElement('div')
-    track.className = `chr-track${row.kind === 'cwd' ? ' chr-track-cwd' : ''}`
+    track.className = 'chr-track'
     track.style.gridColumn = `2 / span ${days.length}`
     track.style.gridRow = gridRow
 
     const life = document.createElement('div')
-    life.className = `chr-life${row.kind === 'cwd' ? ' chr-life-cwd' : ''}`
+    life.className = 'chr-life'
     life.style.left = colLeft(row.startIdx)
     life.style.width = `calc(var(--chr-day-w) * ${row.endIdx - row.startIdx + 1})`
     track.append(life)

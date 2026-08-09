@@ -1,3 +1,20 @@
+/* One typographic scale for the whole board.
+ *
+ * Every px font-size in the board CSS — chassis, cards, detail panel, and the
+ * three temporal views — is written `calc(<design px> * var(--kbn-type-scale))`,
+ * so the design sizes stay readable in the source and the whole hierarchy moves
+ * together from one number. Nothing else scales: spacing, rules and column
+ * widths are deliberately left alone, so raising type tightens the page rather
+ * than zooming it.
+ *
+ * Declared on :root (not `.kbn-modal`) because the detail overlay and the file
+ * viewer mount outside the board's own subtree. Every call site carries a
+ * fallback of 1, so a host that never loads this file renders at design size.
+ */
+:root {
+  --kbn-type-scale: 1.18;
+}
+
 /* EB Garamond Initials F1 / F2 — the two-layer dropcap fonts. F2 is
    the character body; F1 is the flourish overlay (vine + cartouche)
    drawn on top at low opacity. Pattern adapted from
@@ -133,7 +150,7 @@
   background: rgba(196, 147, 51, 0.12);
   border: 1px solid rgba(196, 147, 51, 0.4);
   color: #8C6A24;
-  font-size: 13px;
+  font-size: calc(13px * var(--kbn-type-scale, 1));
   border-radius: 2px;
   margin-top: 8px;
 }
@@ -168,7 +185,7 @@
 .kbn-viewtabs {
   flex: 0 0 auto;
   display: flex;
-  justify-content: flex-end;
+  justify-content: flex-start;
   align-items: baseline;
   gap: 15px;
   padding: 0 2px 4px;
@@ -188,7 +205,7 @@
   padding: 0 1px 2px;
   cursor: pointer;
   font-family: var(--font-mono, 'IBM Plex Mono', monospace);
-  font-size: 10px;
+  font-size: calc(10px * var(--kbn-type-scale, 1));
   line-height: 1.2;
   font-weight: 400;
   letter-spacing: 0.14em;
@@ -275,7 +292,7 @@
   margin: 0;
   flex: 0 0 auto;
   font-family: 'JetBrains Mono', monospace;
-  font-size: 10px;
+  font-size: calc(10px * var(--kbn-type-scale, 1));
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -345,13 +362,13 @@
 .kbn-pin-chip-glyph {
   flex: 0 0 auto;
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: 10px;
+  font-size: calc(10px * var(--kbn-type-scale, 1));
   line-height: 1;
 }
 .kbn-pin-chip-human .kbn-pin-chip-glyph { color: #3F8278; }
 .kbn-pin-chip-agent .kbn-pin-chip-glyph { color: #3D5BA0; }
 .kbn-pin-chip-name {
-  font-size: 14px;
+  font-size: calc(14px * var(--kbn-type-scale, 1));
   line-height: 1.1;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -360,7 +377,7 @@
 .kbn-pin-chip-hint {
   flex: 0 0 auto;
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: 9px;
+  font-size: calc(9px * var(--kbn-type-scale, 1));
   letter-spacing: 0.04em;
   text-transform: lowercase;
   color: rgba(122, 111, 92, 0.75);
@@ -371,7 +388,7 @@
   flex: 0 0 auto;
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
   font-variant-emoji: text;
-  font-size: 12px;
+  font-size: calc(12px * var(--kbn-type-scale, 1));
   line-height: 1;
 }
 .kbn-pin-chip-attn-attention { color: #BC4538; }
@@ -386,7 +403,7 @@
 }
 .kbn-pinned-empty-hint {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--kbn-type-scale, 1));
   letter-spacing: 0.04em;
   color: rgba(122, 94, 30, 0.6);
   padding: 2px 2px;
@@ -410,10 +427,10 @@
   transition: height 130ms cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 .kbn-draghorizon-open {
-  height: 34px;
+  height: calc(34px * var(--kbn-type-scale, 1));
 }
 .kbn-draghorizon-wrap {
-  height: 34px;
+  height: calc(34px * var(--kbn-type-scale, 1));
   overflow-x: auto;
   overflow-y: hidden;
   -webkit-overflow-scrolling: touch;
@@ -461,7 +478,7 @@
 /* Day-of-week label — set as small caps in the serif rather than the
    technical mono, so the strip reads as a manuscript almanac. */
 .kbn-timeline-day-dow {
-  font-size: 10px;
+  font-size: calc(10px * var(--kbn-type-scale, 1));
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
   font-variant-caps: all-small-caps;
   font-feature-settings: "smcp", "c2sc";
@@ -469,7 +486,7 @@
   letter-spacing: 0.06em;
 }
 .kbn-timeline-day-num {
-  font-size: 12px;
+  font-size: calc(12px * var(--kbn-type-scale, 1));
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
   font-weight: 500;
   color: #2A231A;
@@ -498,12 +515,12 @@
   justify-self: start;
   margin: 1px 2px 0;
   padding: 0 6px;
-  height: 15px;
+  height: calc(15px * var(--kbn-type-scale, 1));
   background: transparent;
   border: 0.5px solid rgba(154, 123, 53, 0.35);
   border-radius: 8px;
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: 9px;
+  font-size: calc(9px * var(--kbn-type-scale, 1));
   letter-spacing: 0.04em;
   color: #7A5E1E;
   cursor: pointer;
@@ -534,7 +551,7 @@
 .kbn-resting-title {
   margin: 0;
   font-family: 'JetBrains Mono', monospace;
-  font-size: 10px;
+  font-size: calc(10px * var(--kbn-type-scale, 1));
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -544,7 +561,7 @@
 .kbn-resting-gloss {
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
   font-style: italic;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--kbn-type-scale, 1));
   color: #A89B83;
 }
 .kbn-cluster-grid {
@@ -575,7 +592,7 @@
    segment that distinguishes this cluster from its siblings. */
 .kbn-cluster-name {
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--kbn-type-scale, 1));
   letter-spacing: 0.02em;
   color: #1B1611;
   min-width: 0;
@@ -595,12 +612,12 @@
 }
 .kbn-cluster-count {
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: 9px;
+  font-size: calc(9px * var(--kbn-type-scale, 1));
   color: #A89B83;
 }
 .kbn-cluster-tag {
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: 8px;
+  font-size: calc(8px * var(--kbn-type-scale, 1));
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: #BC4538;
@@ -613,7 +630,7 @@
   text-align: center;
   font-family: var(--font-serif, 'EB Garamond', serif);
   font-style: italic;
-  font-size: 11px;
+  font-size: calc(11px * var(--kbn-type-scale, 1));
   color: #A89B83;
   padding: 6px 0;
 }
@@ -622,7 +639,7 @@
   text-align: center;
   font-family: var(--font-serif, 'EB Garamond', serif);
   font-style: italic;
-  font-size: 12px;
+  font-size: calc(12px * var(--kbn-type-scale, 1));
   color: #A89B83;
   padding: 14px 0;
 }
@@ -632,7 +649,7 @@
   gap: 6px;
   padding: 3px 2px;
   font-family: var(--font-serif, 'EB Garamond', serif);
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--kbn-type-scale, 1));
   color: #2A231A;
   cursor: pointer;
   line-height: 1.28;
@@ -653,7 +670,7 @@
 .kbn-cluster-item-glyph {
   color: #3D5BA0;
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: 9px;
+  font-size: calc(9px * var(--kbn-type-scale, 1));
   width: 10px;
   flex-shrink: 0;
   text-align: center;
@@ -671,7 +688,7 @@
 .kbn-cluster-item-wakes {
   flex: 0 0 auto;
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: 8.5px;
+  font-size: calc(8.5px * var(--kbn-type-scale, 1));
   letter-spacing: 0.04em;
   color: rgba(122, 94, 30, 0.75);
   white-space: nowrap;
@@ -776,7 +793,7 @@
      ratio runs ~0.73, so 33px body → ~24px small-cap glyphs →
      uniform "D-R-A-F-T-S" visual rhythm with the dropcap rather than
      the previous dropcap-above-small-trailer feel. */
-  font-size: 33px;
+  font-size: calc(33px * var(--kbn-type-scale, 1));
   /* Tight line-height keeps the head box hugging the illuminated
      character; the cap's F1 flourish extends a touch above the cap
      line so even 1.0 leaves a hair of breathing room. */
@@ -808,7 +825,7 @@
    manuscript text. The pigment is the dropcap's job; the body is the body's. */
 .kbn-col-count {
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: 12px;
+  font-size: calc(12px * var(--kbn-type-scale, 1));
   color: #7A6F5C;
   margin-left: 8px;
 }
@@ -822,13 +839,13 @@
    shade, set by the -drafts / -inFlight / -awaitingReview modifiers. */
 .kbn-col-action {
   flex-shrink: 0;
-  width: 28px;
-  height: 28px;
+  width: calc(28px * var(--kbn-type-scale, 1));
+  height: calc(28px * var(--kbn-type-scale, 1));
   padding: 0;
   border-radius: 50%;
   color: #FFFFFF;
   box-shadow: 0 2px 4px rgba(27, 22, 17, 0.18);
-  font-size: 18px;
+  font-size: calc(18px * var(--kbn-type-scale, 1));
   line-height: 1;
   font-family: var(--font-main, 'EB Garamond', serif);
   cursor: pointer;
@@ -860,7 +877,7 @@
 .kbn-col-action-inFlight {
   background: #3D5BA0;
   border: 1px solid #2C4378;
-  font-size: 15px;
+  font-size: calc(15px * var(--kbn-type-scale, 1));
 }
 .kbn-col-action-inFlight:hover { background: #4D6CB5; }
 .kbn-col-action-inFlight:focus-visible { box-shadow: 0 0 0 3px rgba(61, 91, 160, 0.40); }
@@ -869,7 +886,7 @@
 .kbn-col-action-awaitingReview {
   background: #3F8278;
   border: 1px solid #2E6862;
-  font-size: 16px;
+  font-size: calc(16px * var(--kbn-type-scale, 1));
 }
 .kbn-col-action-awaitingReview:hover { background: #4C9588; }
 .kbn-col-action-awaitingReview:focus-visible { box-shadow: 0 0 0 3px rgba(63, 130, 120, 0.40); }
@@ -897,7 +914,7 @@
   color: #A89B83;
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
   font-style: italic;
-  font-size: 13px;
+  font-size: calc(13px * var(--kbn-type-scale, 1));
   padding: 24px 8px;
   flex-grow: 0;
   letter-spacing: 0.01em;
@@ -973,7 +990,7 @@
   width: 15px;
   flex-shrink: 0;
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: 12px;
+  font-size: calc(12px * var(--kbn-type-scale, 1));
   line-height: 1;
   text-align: center;
   color: #C49333;
@@ -985,7 +1002,7 @@
    card opens the fiber-detail panel); the card's own cursor applies. */
 .kbn-card-name {
   flex: 1;
-  font-size: 14.5px;
+  font-size: calc(14.5px * var(--kbn-type-scale, 1));
   font-weight: 600;
   line-height: 1.25;
   text-align: left;
@@ -994,7 +1011,7 @@
 .kbn-pill {
   display: inline-block;
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--kbn-type-scale, 1));
   letter-spacing: 0.06em;
   text-transform: uppercase;
   padding: 2px 6px;
@@ -1018,7 +1035,7 @@
 }
 .kbn-card-id {
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--kbn-type-scale, 1));
   color: #B8AC9A;
   letter-spacing: 0.01em;
   word-break: break-all;
@@ -1029,7 +1046,7 @@
   line-height: 1.2;
 }
 .kbn-card-outcome {
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--kbn-type-scale, 1));
   line-height: 1.4;
   color: #3A332A;
   /* Truncate at N lines with an ellipsis. Aligns the cutoff to a line
@@ -1096,7 +1113,7 @@
 }
 .kbn-action {
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--kbn-type-scale, 1));
   letter-spacing: 0.04em;
   text-transform: uppercase;
   background: rgba(27, 22, 17, 0.04);
@@ -1145,7 +1162,7 @@
 .kbn-card-due,
 .kbn-card-drift {
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: 10px;
+  font-size: calc(10px * var(--kbn-type-scale, 1));
   letter-spacing: 0.04em;
   flex-shrink: 0;
 }
@@ -1170,8 +1187,8 @@
   background: rgba(196, 147, 51, 0.12);
   border: 1px solid rgba(196, 147, 51, 0.28);
   border-radius: 50%;
-  width: 17px;
-  height: 17px;
+  width: calc(17px * var(--kbn-type-scale, 1));
+  height: calc(17px * var(--kbn-type-scale, 1));
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1179,7 +1196,7 @@
 }
 .kbn-card-blocked {
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--kbn-type-scale, 1));
   color: #C49333;
   background: rgba(196, 147, 51, 0.10);
   padding: 4px 6px;
@@ -1192,7 +1209,7 @@
    uniformly across columns. Single line, never wraps. */
 .kbn-card-worker {
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--kbn-type-scale, 1));
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: #2E6862;
@@ -1225,7 +1242,7 @@
    running right now. No pulse — it's a state, not a heartbeat. */
 .kbn-card-phase {
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--kbn-type-scale, 1));
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: #7A5E1E;
@@ -1249,7 +1266,7 @@
    every held launch on the owning daemon (see the title). */
 .kbn-card-held {
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--kbn-type-scale, 1));
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: #4C5B73;
@@ -1325,7 +1342,7 @@
   font-variant-emoji: text;
   text-transform: none;
   letter-spacing: 0.01em;
-  font-size: 11px;
+  font-size: calc(11px * var(--kbn-type-scale, 1));
   font-weight: 700;
   color: #9A2A1E;
   background: rgba(168, 38, 28, 0.18);
@@ -1345,7 +1362,7 @@
   font-variant-emoji: text;
   text-transform: none;
   letter-spacing: 0.01em;
-  font-size: 11px;
+  font-size: calc(11px * var(--kbn-type-scale, 1));
   font-weight: 700;
   color: #8A5A12;
   background: rgba(200, 138, 30, 0.20);
@@ -1382,7 +1399,7 @@
    running." */
 .kbn-card-waiting {
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--kbn-type-scale, 1));
   color: #3D5BA0;
   background: rgba(61, 91, 160, 0.10);
   border: 1px dashed rgba(61, 91, 160, 0.35);
@@ -1402,7 +1419,7 @@
   background: rgba(196, 147, 51, 0.08);
   color: #8C6A24;
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: 13px;
+  font-size: calc(13px * var(--kbn-type-scale, 1));
 }
 /* The error state replaces the whole Desk, taking the column heads — and with
    them the only refresh control — off screen. This is that control. */
@@ -1413,7 +1430,7 @@
   border: 0.5px solid rgba(196, 147, 51, 0.55);
   border-radius: 11px;
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: 11px;
+  font-size: calc(11px * var(--kbn-type-scale, 1));
   letter-spacing: 0.04em;
   color: #8C6A24;
   cursor: pointer;
@@ -1437,7 +1454,7 @@
   margin-left: auto;
 }
 .kbn-review-meta-btn {
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--kbn-type-scale, 1));
   padding: 2px 7px;
   opacity: 0.75;
 }

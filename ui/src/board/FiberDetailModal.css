@@ -80,7 +80,7 @@
    so no pointer cursor or hover affordance. */
 .kbn-detail-title {
   font-family: var(--font-main, 'EB Garamond', serif);
-  font-size: 19px;
+  font-size: calc(19px * var(--kbn-type-scale, 1));
   font-weight: 600;
   line-height: 1.2;
   letter-spacing: -0.005em;
@@ -90,7 +90,7 @@
 /* ID slug under the title — plain identification text. */
 .kbn-detail-id {
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--kbn-type-scale, 1));
   letter-spacing: 0.02em;
   color: #7A7368;
   max-width: 100%;
@@ -101,7 +101,7 @@
 /* Status as an ink-stamped mark. */
 .kbn-detail-header .kbn-pill {
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: 9px;
+  font-size: calc(9px * var(--kbn-type-scale, 1));
   letter-spacing: 0.14em;
   text-transform: uppercase;
   padding: 3px 8px 2px;
@@ -118,7 +118,7 @@
 .kbn-detail-aloft {
   margin-left: 0;
   margin-top: 6px;
-  font-size: 9px;
+  font-size: calc(9px * var(--kbn-type-scale, 1));
   letter-spacing: 0.14em;
   padding: 3px 8px 2px;
   border-radius: 1px;
@@ -135,7 +135,7 @@
   border: none;
   background: transparent;
   color: #7A7368;
-  font-size: 18px;
+  font-size: calc(18px * var(--kbn-type-scale, 1));
   line-height: 1;
   cursor: pointer;
   border-radius: 2px;
@@ -162,7 +162,7 @@
   border: none;
   background: transparent;
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: 10px;
+  font-size: calc(10px * var(--kbn-type-scale, 1));
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: #7A7368;
@@ -174,7 +174,7 @@
   background: rgba(27, 22, 17, 0.04);
 }
 .kbn-detail-controls-chevron {
-  font-size: 9px;
+  font-size: calc(9px * var(--kbn-type-scale, 1));
   width: 10px;
   flex-shrink: 0;
 }
@@ -200,7 +200,7 @@
   gap: 5px;
   padding: 2px 10px 5px;
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--kbn-type-scale, 1));
   letter-spacing: 0.03em;
   color: #9A8F80;
 }
@@ -263,7 +263,7 @@
 }
 .kbn-detail-section-heading {
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--kbn-type-scale, 1));
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: #9A8F80;
@@ -285,7 +285,7 @@
   border-radius: 2px;
   background: rgba(255, 251, 237, 0.7);
   font-family: var(--font-main, 'EB Garamond', serif);
-  font-size: 14px;
+  font-size: calc(14px * var(--kbn-type-scale, 1));
   line-height: 1.45;
   color: #1B1611;
 }
@@ -300,7 +300,7 @@
   border-radius: 2px;
   padding: 4px 9px 3px;
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--kbn-type-scale, 1));
   color: #4A443C;
   cursor: pointer;
 }
@@ -326,7 +326,7 @@
   border-radius: 2px;
   padding: 3px 10px;
   font-family: var(--font-main, 'EB Garamond', serif);
-  font-size: 13px;
+  font-size: calc(13px * var(--kbn-type-scale, 1));
   font-weight: 600;
   color: #2E2A26;
   cursor: pointer;
@@ -363,7 +363,7 @@
 }
 .kbn-detail-label {
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: 10px;
+  font-size: calc(10px * var(--kbn-type-scale, 1));
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: #7A7368;
@@ -379,12 +379,12 @@
   border-radius: 2px;
   background: rgba(255, 251, 237, 0.7);
   font-family: var(--font-main, 'EB Garamond', serif);
-  font-size: 13.5px;
+  font-size: calc(13.5px * var(--kbn-type-scale, 1));
   color: #1B1611;
 }
 .kbn-detail-select-effort {
   flex: 0 1 150px;
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--kbn-type-scale, 1));
 }
 .kbn-detail-chrome-toggle {
   display: inline-flex;
@@ -392,7 +392,7 @@
   gap: 5px;
   flex-shrink: 0;
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: 11px;
+  font-size: calc(11px * var(--kbn-type-scale, 1));
   letter-spacing: 0.04em;
   color: #5A544B;
   cursor: pointer;
@@ -407,11 +407,11 @@
 }
 .kbn-detail-input-mono {
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: 12px;
+  font-size: calc(12px * var(--kbn-type-scale, 1));
 }
 .kbn-detail-input-tz {
   flex: 0 1 130px;
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--kbn-type-scale, 1));
 }
 .kbn-detail-segmented {
   display: inline-flex;
@@ -424,7 +424,7 @@
   background: transparent;
   padding: 4px 12px;
   font-family: var(--font-main, 'EB Garamond', serif);
-  font-size: 13px;
+  font-size: calc(13px * var(--kbn-type-scale, 1));
   color: #7A7368;
   cursor: pointer;
 }
@@ -439,7 +439,7 @@
 /* Parent fiber autocomplete */
 .kbn-detail-current-parent {
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: 11px;
+  font-size: calc(11px * var(--kbn-type-scale, 1));
   color: #7A7368;
 }
 .kbn-detail-parent-wrap {
@@ -453,7 +453,7 @@
   border-radius: 2px;
   background: rgba(255, 251, 237, 0.7);
   font-family: var(--font-main, 'EB Garamond', serif);
-  font-size: 13.5px;
+  font-size: calc(13.5px * var(--kbn-type-scale, 1));
   color: #1B1611;
 }
 .kbn-detail-parent-dropdown {
@@ -486,18 +486,18 @@
   outline: none;
 }
 .kbn-detail-parent-option-name {
-  font-size: 13px;
+  font-size: calc(13px * var(--kbn-type-scale, 1));
   color: #1B1611;
 }
 .kbn-detail-parent-option-id {
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: 10px;
+  font-size: calc(10px * var(--kbn-type-scale, 1));
   color: #9A8F80;
 }
 .kbn-detail-parent-empty {
   cursor: default;
   color: #9A8F80;
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--kbn-type-scale, 1));
 }
 
 /* Footer: live-save status */
@@ -509,7 +509,7 @@
 .kbn-detail-save-status {
   margin-left: auto;
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: 10px;
+  font-size: calc(10px * var(--kbn-type-scale, 1));
   letter-spacing: 0.08em;
   color: #9A8F80;
 }
@@ -521,7 +521,7 @@
   color: #5A7B7B;
 }
 .kbn-detail-error {
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--kbn-type-scale, 1));
   color: #8C3B2E;
 }
 
@@ -589,7 +589,7 @@
   border: none;
   background: transparent;
   color: #7A7368;
-  font-size: 17px;
+  font-size: calc(17px * var(--kbn-type-scale, 1));
   line-height: 1;
   cursor: pointer;
   border-radius: 2px;
@@ -610,7 +610,7 @@
   border: none;
   background: transparent;
   color: #7A7368;
-  font-size: 15px;
+  font-size: calc(15px * var(--kbn-type-scale, 1));
   line-height: 1;
   cursor: pointer;
   border-radius: 2px;
@@ -681,7 +681,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: 12px;
+  font-size: calc(12px * var(--kbn-type-scale, 1));
   letter-spacing: 0.01em;
 }
 .kbn-detail-tab-active .kbn-detail-tab-name { font-weight: 600; }
@@ -690,7 +690,7 @@
   border: none;
   background: transparent;
   color: #9A8F80;
-  font-size: 11px;
+  font-size: calc(11px * var(--kbn-type-scale, 1));
   line-height: 1;
   padding: 3px 4px;
   border-radius: 3px;
@@ -789,14 +789,14 @@
   margin: 0;
   padding: 1.5rem 1.6rem 3rem;
   font-family: var(--font-main, 'EB Garamond', Georgia, serif);
-  font-size: 17px;
+  font-size: calc(17px * var(--kbn-type-scale, 1));
   line-height: 1.62;
   color: #2E2A26;
 }
 @container kbn-detail (max-width: 600px) {
   .kbn-detail-prose {
     padding: 1.2rem 1.1rem 2.5rem;
-    font-size: 16px;
+    font-size: calc(16px * var(--kbn-type-scale, 1));
   }
 }
 
@@ -807,14 +807,14 @@
   color: #7A7368;
 }
 .kbn-detail-prose-note {
-  font-size: 14px;
+  font-size: calc(14px * var(--kbn-type-scale, 1));
   font-style: italic;
   color: #9A8F80;
 }
 .kbn-detail-body-status {
   font-style: italic;
   color: #9A8F80;
-  font-size: 14px;
+  font-size: calc(14px * var(--kbn-type-scale, 1));
 }
 .kbn-detail-body-retry {
   border: none;
@@ -1055,7 +1055,7 @@
   align-items: center;
   gap: 8px;
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--kbn-type-scale, 1));
   letter-spacing: 0.16em;
   text-transform: uppercase;
   color: #9A7B35;
@@ -1088,7 +1088,7 @@
     0 1px 0 rgba(255, 251, 237, 0.7) inset,
     0 1px 2px rgba(27, 22, 17, 0.05);
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: 11px;
+  font-size: calc(11px * var(--kbn-type-scale, 1));
   color: #4A443C;
   cursor: pointer;
   transition: border-color 0.14s ease, background 0.14s ease, box-shadow 0.14s ease, transform 0.12s ease, color 0.14s ease;
@@ -1152,7 +1152,7 @@
 }
 .kbn-detail-sent-when {
   flex-shrink: 0;
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--kbn-type-scale, 1));
   letter-spacing: 0.02em;
   color: #9A8F80;
 }

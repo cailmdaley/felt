@@ -1,5 +1,5 @@
 /**
- * WeekView (hotkey 4) — the two-faced week.
+ * WeekView (hotkey 3) — the two-faced week.
  *
  * The week does not end at now. Above the gold seam (today's row) the week is
  * RECONSTRUCTED from what actually happened: fine tick rasters of the activity
@@ -46,7 +46,19 @@ import {
   shiftCivilDay,
   type RailBounds,
 } from './railTime.js'
-import { foldActiveMinutes, type ActivityBucket, type ActivityResult } from './TemporalData.js'
+import {
+  buildSessionIndex,
+  foldActiveMinutes,
+  type ActivityBucket,
+  type ActivityResult,
+  type SessionPairing,
+} from './TemporalData.js'
+import {
+  buildOriginIndex,
+  originOf,
+  type BucketOrigin,
+  type OriginIndex,
+} from './activityOrigin.js'
 import type { KanbanCard } from '../KanbanTypes.js'
 import { cycleSpan, type CycleSpan } from '../KanbanRules.js'
 import {
@@ -552,14 +564,25 @@ interface WeekRow {
   rail: HTMLElement
   /** Everything that is patched: rasters, marks, the now line. */
   paint: HTMLElement
+  /** Transparent layer above the ink that catches the pointer. The ticks
+   *  themselves are 1.5px wide and cannot be hovered; this snaps to the nearest
+   *  inked slot instead, which is the only way the tooltip is reachable. */
+  hover: HTMLElement
   annot: HTMLElement
+  /** What was last inked here — the tooltip's source. */
+  slots: RasterSlot[]
   sig: string
 }
+
+/** How near the pointer must be to an inked slot for it to count, in px. Wide
+ *  enough that a hairline tick is catchable, narrow enough that hovering empty
+ *  paper says nothing. */
+const HOVER_SNAP_PX = 9
 
 class WeekView implements TemporalView {
   readonly id = 'week' as const
   readonly title = 'Week'
-  readonly hotkey = '4'
+  readonly hotkey = '3'
 
   private page: ViewPage | null = null
   private ctx: ViewContext | null = null
@@ -591,6 +614,22 @@ class WeekView implements TemporalView {
   /** Bumped when loaded data actually changes; part of every row signature. */
   private dataGen = 0
   private activityKey = ''
+
+  /**
+   * The session ledger, as the tmux→fiber map. JOIN RUNG 0 for the rasters:
+   * without it a tick can only guess whose minute it was from a session name.
+   * Asked for once per board (`sessions(0)` is a constant argument, so the
+   * fetcher's memo answers every later refresh), and absent — an old daemon,
+   * a 404 — simply leaves the weaker rungs to do the work.
+   */
+  private byTmux: ReadonlyMap<string, SessionPairing> = new Map()
+  private sessionsAsked = false
+  /** Rebuilt each paint from the cards on screen plus the ledger. */
+  private origins: OriginIndex = buildOriginIndex([])
+
+  /** The one hover tooltip, parented to the grid so it positions against the
+   *  rails rather than the page. */
+  private tip: HTMLElement | null = null
 
   /**
    * ‹ › paging, and `t` for today — the same binding DayView carries, so one
@@ -831,12 +870,79 @@ class WeekView implements TemporalView {
     }
     const paint = document.createElement('div')
     paint.className = 'wk-paint'
-    rail.append(rules, paint)
+    const hover = document.createElement('div')
+    hover.className = 'wk-hover'
+    // UNDER the paint layer, not over it. `.wk-paint` is `pointer-events: none`
+    // so the ink falls through to this catcher, but the hollow marks inside it
+    // re-enable pointer events for themselves — and a hover layer stacked on top
+    // would eat their clicks. Order is the whole mechanism; see WeekView.css.
+    rail.append(rules, hover, paint)
 
     const annot = document.createElement('div')
     annot.className = 'wk-annot'
     root.append(label, rail, annot)
-    return { day, root, rail, paint, annot, sig: '' }
+    const row: WeekRow = { day, root, rail, paint, hover, annot, slots: [], sig: '' }
+
+    hover.addEventListener('mousemove', (e) => this.showTip(row, e))
+    hover.addEventListener('mouseleave', () => this.hideTip())
+    return row
+  }
+
+  // ── Hover ──────────────────────────────────────────────────────────────────
+
+  /**
+   * Report the inked slot under the pointer, or nothing.
+   *
+   * SNAPS rather than hit-tests. The ticks are hairlines at fractional pixel
+   * positions; asking the pointer to land on one would make the tooltip a game.
+   * The nearest slot within {@link HOVER_SNAP_PX} is the answer, and empty paper
+   * — no slot that near — hides the tooltip rather than showing the closest
+   * thing on the row.
+   */
+  private showTip(row: WeekRow, e: MouseEvent): void {
+    const grid = this.grid
+    if (!grid || row.slots.length === 0) return this.hideTip()
+    const rail = row.hover.getBoundingClientRect()
+    if (rail.width <= 0) return this.hideTip()
+
+    const x = e.clientX - rail.left
+    let best: RasterSlot | null = null
+    let bestPx = Infinity
+    for (const slot of row.slots) {
+      const px = Math.abs(slot.fraction * rail.width - x)
+      if (px < bestPx) {
+        bestPx = px
+        best = slot
+      }
+    }
+    if (!best || bestPx > HOVER_SNAP_PX) return this.hideTip()
+
+    const tip = this.ensureTip()
+    renderTip(tip, slotTip(best))
+    tip.classList.add('wk-tip-open')
+
+    // Positioned against the grid, and flipped at the right edge so a slot late
+    // in the day does not push the tooltip off the sheet.
+    const box = grid.getBoundingClientRect()
+    const anchor = rail.left - box.left + best.fraction * rail.width
+    const top = rail.top - box.top
+    tip.style.top = `${top}px`
+    tip.classList.toggle('wk-tip-flip', anchor > box.width * 0.62)
+    tip.style.left = anchor > box.width * 0.62 ? 'auto' : `${anchor + 9}px`
+    tip.style.right = anchor > box.width * 0.62 ? `${box.width - anchor + 9}px` : 'auto'
+  }
+
+  private ensureTip(): HTMLElement {
+    if (this.tip?.isConnected) return this.tip
+    const tip = document.createElement('div')
+    tip.className = 'wk-tip'
+    this.grid?.append(tip)
+    this.tip = tip
+    return tip
+  }
+
+  private hideTip(): void {
+    this.tip?.classList.remove('wk-tip-open')
   }
 
   // ── Data ───────────────────────────────────────────────────────────────────
@@ -847,6 +953,29 @@ class WeekView implements TemporalView {
    * `this.activity` only if the week it was asked for is still on screen.
    */
   private load(ctx: ViewContext): void {
+    // The ledger is host-wide and window-free, so it is asked for once and then
+    // served from the fetcher's memo. A failure leaves `byTmux` empty, which is
+    // a weaker join rather than a broken view.
+    if (!this.sessionsAsked) {
+      this.sessionsAsked = true
+      void ctx
+        .sessions(0)
+        .then((res) => {
+          const byTmux = buildSessionIndex(res.records).byTmux
+          if (byTmux.size === 0) return
+          this.byTmux = byTmux
+          // Rung 0 arriving can move a tick from a session name onto a fiber —
+          // and can make it read as constitution-driven — so the rows repaint.
+          this.dataGen += 1
+          this.paint()
+        })
+        .catch(() => {
+          // A transient failure should not permanently forfeit the ledger —
+          // reset the latch so the next paint's `load` retries.
+          this.sessionsAsked = false
+        })
+    }
+
     const monday = this.monday
     const win = weekWindow(monday, Date.now())
     if (win.days.length !== 7) return
@@ -925,6 +1054,10 @@ class WeekView implements TemporalView {
     this.paintCycles(cyclesInWeek(ctx.response.cycles ?? [], this.rows.map((r) => r.day), now))
 
     const inFlight = ctx.response.now.inFlight
+    // Who did each minute of work, and whether a constitution is driving it.
+    // Rebuilt here because both inputs move: cards on every poll, the ledger
+    // when it lands.
+    this.origins = buildOriginIndex(ctx.cards, this.byTmux)
 
     for (const row of this.rows) {
       const bounds = railBounds(row.day)
@@ -949,9 +1082,10 @@ class WeekView implements TemporalView {
       row.root.classList.toggle('wk-row-future', !isPast && !isToday)
 
       row.paint.innerHTML = ''
-      if (buckets.length > 0 && activity) {
-        paintRaster(row.paint, buckets, bounds, isToday ? now : bounds.endMs)
-      }
+      row.slots = buckets.length > 0 && activity
+        ? rasterSlots(buckets, bounds, isToday ? now : bounds.endMs, (b) => originOf(this.origins, b))
+        : []
+      paintRaster(row.paint, row.slots)
       for (const mark of visible) row.paint.append(this.buildMark(mark, visible))
       if (isToday) {
         const nowLine = document.createElement('span')
@@ -972,6 +1106,15 @@ class WeekView implements TemporalView {
           visible.length > 0 ? `; ${visible.map((m) => `${m.kind} ${m.label}`).join(', ')}` : ''
         }`,
       )
+    }
+
+    // Read off the ink that ended up on the page, after every row is settled —
+    // rows that skipped their repaint keep the slots they were last drawn with,
+    // so this is the whole week either way.
+    const constItem = this.key?.querySelector<HTMLElement>('.wk-key-const-item')
+    if (constItem) {
+      const anyConst = this.rows.some((r) => r.slots.some((s) => s.shuttle))
+      constItem.style.display = anyConst ? '' : 'none'
     }
   }
 
@@ -1087,7 +1230,228 @@ function buildKeyRow(): HTMLElement {
     item.append(glyph, document.createTextNode(label))
     key.append(item)
   }
+
+  // The second axis: the stroke. Kept OUT of ACTIVITY_KEY_ITEMS because that
+  // list is the three pigments, shared verbatim with Day, and this is not a
+  // fourth pigment — it is a weight any of the three can be drawn at. Hidden
+  // until a constitution-driven tick is actually on the page (see `paint`), so
+  // a week of plain fibers is not told about a distinction it never shows.
+  const item = document.createElement('span')
+  item.className = 'wk-key-item wk-key-const-item'
+  const glyph = document.createElement('span')
+  glyph.className = 'wk-key-glyph wk-key-agent wk-key-const'
+  item.append(glyph, document.createTextNode('constitution-driven'))
+  key.append(item)
+
   return key
+}
+
+// ── Raster slots: the ink, and what it is willing to say ─────────────────────
+
+/** One kind's worth of one slot. */
+export interface SlotKind {
+  kind: ActivityBucket['k']
+  /** Events in the slot — the sum of the buckets' `n`. What the tooltip says. */
+  count: number
+  /** The largest single minute in the slot. What the ink's weight reads. */
+  peak: number
+  /** Distinct names the slot's work joined to, strongest evidence first
+   *  (fiber names; a session or directory when nothing earned it). */
+  where: string[]
+  /** Any of those names is a fiber carrying a `shuttle:` block. */
+  shuttle: boolean
+}
+
+/** One drawn column of the raster, and everything a hover may report. */
+export interface RasterSlot {
+  index: number
+  startMs: number
+  endMs: number
+  /** Centre of the slot, 0…1 along the rail. */
+  fraction: number
+  kinds: SlotKind[]
+  /** Any kind in the slot is constitution-driven — the flag the tick's line
+   *  style reads. */
+  shuttle: boolean
+}
+
+/**
+ * Fold a day's buckets into drawable slots, joined to whoever did the work.
+ *
+ * Pure and DOM-free so the join, the counts and the tooltip text are testable
+ * without a rail. `origin` is the join; passing it in rather than reaching for
+ * the index keeps this function honest about its one input that is not data.
+ */
+export function rasterSlots(
+  buckets: readonly ActivityBucket[],
+  bounds: RailBounds,
+  cutoffMs: number,
+  origin: (bucket: ActivityBucket) => BucketOrigin,
+): RasterSlot[] {
+  const span = bounds.endMs - bounds.startMs
+  if (span <= 0) return []
+
+  const byIndex = new Map<number, Map<ActivityBucket['k'], SlotKind>>()
+  for (const b of buckets) {
+    if (b.m > cutoffMs) continue
+    const index = Math.floor((b.m - bounds.startMs) / RASTER_SLOT_MS)
+    let kinds = byIndex.get(index)
+    if (!kinds) {
+      kinds = new Map()
+      byIndex.set(index, kinds)
+    }
+    let entry = kinds.get(b.k)
+    if (!entry) {
+      entry = { kind: b.k, count: 0, peak: 0, where: [], shuttle: false }
+      kinds.set(b.k, entry)
+    }
+    entry.count += b.n
+    entry.peak = Math.max(entry.peak, b.n)
+    const who = origin(b)
+    if (!entry.where.includes(who.label)) entry.where.push(who.label)
+    if (who.shuttle) entry.shuttle = true
+  }
+
+  const slots: RasterSlot[] = []
+  for (const [index, kinds] of byIndex) {
+    const startMs = bounds.startMs + index * RASTER_SLOT_MS
+    const list = [...kinds.values()]
+    slots.push({
+      index,
+      startMs,
+      endMs: startMs + RASTER_SLOT_MS,
+      fraction: (index + 0.5) * RASTER_SLOT_MS / span,
+      kinds: list,
+      shuttle: list.some((k) => k.shuttle),
+    })
+  }
+  return slots.sort((a, b) => a.index - b.index)
+}
+
+/** What each raster kind means when a person hovers it — the second person,
+ *  because a tooltip is answering "what was I doing here?". Shares its claims
+ *  with `ACTIVITY_KEY_ITEMS`; the wording is closer in. */
+const SLOT_PHRASE: Record<ActivityBucket['k'], string> = {
+  attention: 'you prompted',
+  notify: 'needed you',
+  agent: 'agent working',
+}
+
+/**
+ * The honest note under every tooltip.
+ *
+ * THE ACTIVITY PLANE HOLDS NO TEXT. A bucket is `{m, s, cwd, k, n}` — a minute,
+ * a session, a directory, a kind, a count — so the message that was sent or
+ * received that minute is simply not recorded anywhere this view can read. The
+ * tooltip therefore says who, when and how much, and says plainly that the
+ * words are gone rather than inventing a plausible sentence.
+ */
+export const SLOT_NO_TEXT_NOTE = 'the minute is recorded, not the words'
+
+export interface SlotTipRow {
+  /** The pigment this line is about, so the tooltip speaks the rail's colours
+   *  rather than restating them in words alone. */
+  kind: ActivityBucket['k']
+  phrase: string
+  where: string
+  count: number
+  shuttle: boolean
+}
+
+export interface SlotTip {
+  /** `14:32–14:36`, the slot's own span. */
+  time: string
+  rows: SlotTipRow[]
+  /** Recovered text, when a source for it ever exists (a transcript index, a
+   *  narration join). Absent today — see {@link SLOT_NO_TEXT_NOTE} — and the
+   *  renderer draws the note in its place. */
+  detail?: string
+}
+
+/** `14:32` in the browser's zone. */
+function clockTime(ms: number): string {
+  return new Date(ms).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+}
+
+/**
+ * One slot as words. Kinds read strongest-signal first — a hand raised, then a
+ * human steering, then the agent work underneath both — which is the order the
+ * ink is layered in, read top to bottom.
+ */
+export function slotTip(slot: RasterSlot, detail?: string): SlotTip {
+  const order: ActivityBucket['k'][] = ['notify', 'attention', 'agent']
+  const rows: SlotTipRow[] = []
+  for (const kind of order) {
+    const entry = slot.kinds.find((k) => k.kind === kind)
+    if (!entry) continue
+    rows.push({
+      kind,
+      phrase: SLOT_PHRASE[kind],
+      where: entry.where.join(' · '),
+      count: entry.count,
+      shuttle: entry.shuttle,
+    })
+  }
+  return {
+    time: `${clockTime(slot.startMs)}–${clockTime(slot.endMs)}`,
+    rows,
+    ...(detail ? { detail } : {}),
+  }
+}
+
+/**
+ * Draw one tooltip. Rebuilt rather than patched — it is one small subtree, and
+ * a hover that moves between slots must never show a stale half of the last one.
+ *
+ * The shape is the honest shape of what is known: a time span, then one line per
+ * pigment saying who and how much, then either recovered text (`detail`, for
+ * which nothing is a source yet) or the note that the words were never kept.
+ * Structured this way so a later transcript or narration join fills `detail` and
+ * nothing else here has to move.
+ */
+function renderTip(host: HTMLElement, tip: SlotTip): void {
+  host.textContent = ''
+
+  const when = document.createElement('div')
+  when.className = 'wk-tip-time'
+  when.textContent = tip.time
+  host.append(when)
+
+  for (const row of tip.rows) {
+    const line = document.createElement('div')
+    line.className = 'wk-tip-row'
+
+    const swatch = document.createElement('span')
+    swatch.className = `wk-tip-swatch wk-key-${row.kind}${row.shuttle ? ' wk-tip-swatch-const' : ''}`
+    line.append(swatch)
+
+    const phrase = document.createElement('span')
+    phrase.className = 'wk-tip-phrase'
+    phrase.textContent = row.phrase
+    line.append(phrase)
+
+    if (row.where) {
+      const where = document.createElement('span')
+      where.className = 'wk-tip-where'
+      where.textContent = row.where
+      line.append(where)
+    }
+
+    // A count of 1 is what a single event looks like; printing "×1" would make
+    // every ordinary minute look like it had been measured.
+    if (row.count > 1) {
+      const count = document.createElement('span')
+      count.className = 'wk-tip-count'
+      count.textContent = `×${row.count}`
+      line.append(count)
+    }
+    host.append(line)
+  }
+
+  const foot = document.createElement('div')
+  foot.className = tip.detail ? 'wk-tip-detail' : 'wk-tip-note'
+  foot.textContent = tip.detail ?? SLOT_NO_TEXT_NOTE
+  host.append(foot)
 }
 
 /**
@@ -1095,41 +1459,23 @@ function buildKeyRow(): HTMLElement {
  * agent → attention → notify so a notification always reads on top of the run
  * it interrupted. Opacity carries the run's weight, so a dense hour darkens
  * instead of merging into a block.
+ *
+ * A slot whose work is constitution-driven takes the heavier line
+ * (`wk-ras-const`): same hue, same height hierarchy — those two already carry
+ * the KIND — so the second axis has to be the stroke itself. See the key.
  */
-function paintRaster(
-  host: HTMLElement,
-  buckets: ActivityBucket[],
-  bounds: RailBounds,
-  cutoffMs: number,
-): void {
-  const span = bounds.endMs - bounds.startMs
-  if (span <= 0) return
-
-  // slot index → kind → strongest event count seen in it
-  const slots = new Map<number, Map<ActivityBucket['k'], number>>()
-  for (const b of buckets) {
-    if (b.m > cutoffMs) continue
-    const index = Math.floor((b.m - bounds.startMs) / RASTER_SLOT_MS)
-    let kinds = slots.get(index)
-    if (!kinds) {
-      kinds = new Map()
-      slots.set(index, kinds)
-    }
-    kinds.set(b.k, Math.max(kinds.get(b.k) ?? 0, b.n))
-  }
-
+function paintRaster(host: HTMLElement, slots: readonly RasterSlot[]): void {
   const order: ActivityBucket['k'][] = ['agent', 'attention', 'notify']
   for (const kind of order) {
-    for (const [index, kinds] of slots) {
-      const n = kinds.get(kind)
-      if (n === undefined) continue
-      const at = bounds.startMs + (index + 0.5) * RASTER_SLOT_MS
+    for (const slot of slots) {
+      const entry = slot.kinds.find((k) => k.kind === kind)
+      if (!entry) continue
       const tick = document.createElement('span')
-      tick.className = `wk-ras wk-ras-${kind}`
-      tick.style.left = `${((at - bounds.startMs) / span) * 100}%`
+      tick.className = `wk-ras wk-ras-${kind}${entry.shuttle ? ' wk-ras-const' : ''}`
+      tick.style.left = `${slot.fraction * 100}%`
       // Agent runs carry a count; attention and notify are single events and
       // read at a fixed weight so a busy hour of typing doesn't out-shout them.
-      if (kind === 'agent') tick.style.opacity = String(0.38 + 0.47 * Math.min(1, n / 12))
+      if (kind === 'agent') tick.style.opacity = String(0.38 + 0.47 * Math.min(1, entry.peak / 12))
       host.append(tick)
     }
   }

@@ -49,7 +49,7 @@
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
   font-style: italic;
   font-weight: 400;
-  font-size: 25px;
+  font-size: calc(25px * var(--kbn-type-scale, 1));
   line-height: 1.05;
   letter-spacing: 0.005em;
   color: #1B1611;
@@ -74,7 +74,7 @@
   padding: 0 2px;
   cursor: pointer;
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
-  font-size: 21px;
+  font-size: calc(21px * var(--kbn-type-scale, 1));
   line-height: 1;
   color: #A89B83;
   transition: color 90ms ease-out;
@@ -98,7 +98,7 @@
   cursor: pointer;
   display: none;
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: 9px;
+  font-size: calc(9px * var(--kbn-type-scale, 1));
   letter-spacing: 0.08em;
   color: #9A7B35;
   border-bottom: 0.5px solid rgba(154, 123, 53, 0.45);
@@ -116,7 +116,7 @@
 
 .kbn-day-stats {
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--kbn-type-scale, 1));
   letter-spacing: 0.05em;
   color: #7A6F5C;
   white-space: nowrap;
@@ -190,7 +190,7 @@
   padding: 0;
   margin: 0;
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
-  font-size: 13px;
+  font-size: calc(13px * var(--kbn-type-scale, 1));
   line-height: 1.15;
   color: #1B1611;
   text-align: right;
@@ -214,7 +214,7 @@ button.kbn-day-lanename:focus-visible {
 .kbn-day-lanehost {
   flex: 0 0 auto;
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: 8px;
+  font-size: calc(8px * var(--kbn-type-scale, 1));
   letter-spacing: 0.04em;
   text-transform: lowercase;
   color: #A89B83;
@@ -282,18 +282,12 @@ button.kbn-day-lanename:focus-visible {
   background: var(--day-notify);
 }
 
-/* Interactive lanes are the same marks, spoken quieter. */
-.kbn-day-rail-loose { opacity: 0.68; }
-.kbn-day-label-loose .kbn-day-lanename {
-  font-style: italic;
-  color: #7A6F5C;
-  font-size: 12px;
-}
-
 .kbn-day-axis {
   grid-column: 2;
   position: relative;
-  height: 13px;
+  /* Holds the absolutely-positioned hour ticks, so the row has to grow with
+     the type scale or the labels clip against the lane below. */
+  height: calc(13px * var(--kbn-type-scale, 1));
   margin-top: 3px;
   border-top: 0.5px solid rgba(122, 111, 92, 0.22);
 }
@@ -302,7 +296,7 @@ button.kbn-day-lanename:focus-visible {
   top: 2px;
   transform: translateX(-50%);
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: 8.5px;
+  font-size: calc(8.5px * var(--kbn-type-scale, 1));
   letter-spacing: 0.04em;
   color: #7A6F5C;
   white-space: nowrap;
@@ -323,7 +317,7 @@ button.kbn-day-lanename:focus-visible {
   margin-top: 5px;
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
   font-style: italic;
-  font-size: 11px;
+  font-size: calc(11px * var(--kbn-type-scale, 1));
   line-height: 1;
   color: #7A6F5C;
 }
@@ -373,7 +367,7 @@ button.kbn-day-lanename:focus-visible {
   font-variant-caps: all-small-caps;
   font-feature-settings: "smcp", "c2sc";
   font-weight: 500;
-  font-size: 13px;
+  font-size: calc(13px * var(--kbn-type-scale, 1));
   letter-spacing: 0.11em;
   color: #BC4538;
 }
@@ -414,7 +408,7 @@ button.kbn-day-lanename:focus-visible {
 .kbn-day-closed {
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
   font-variant-emoji: text;
-  font-size: 12px;
+  font-size: calc(12px * var(--kbn-type-scale, 1));
   line-height: 1;
   color: #7A6F5C;
 }
@@ -424,7 +418,7 @@ button.kbn-day-lanename:focus-visible {
    about one fiber that the head says about the day. */
 .kbn-day-entrystats {
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: 8.5px;
+  font-size: calc(8.5px * var(--kbn-type-scale, 1));
   letter-spacing: 0.04em;
   color: #7A6F5C;
   white-space: nowrap;
@@ -454,7 +448,7 @@ button.kbn-day-lanename:focus-visible {
   align-items: baseline;
   gap: 6px;
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--kbn-type-scale, 1));
   color: #1B1611;
 }
 .kbn-day-aheaditem:hover .kbn-day-aheadname {
@@ -471,11 +465,11 @@ button.kbn-day-lanename:focus-visible {
 .kbn-day-aheadglyph {
   font-variant-emoji: text;
   color: #9A7B35;
-  font-size: 11px;
+  font-size: calc(11px * var(--kbn-type-scale, 1));
 }
 .kbn-day-aheadwhen {
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: 8.5px;
+  font-size: calc(8.5px * var(--kbn-type-scale, 1));
   letter-spacing: 0.04em;
   color: #A89B83;
 }
@@ -489,7 +483,7 @@ button.kbn-day-lanename:focus-visible {
   margin: 0 0 9px;
   padding-left: 12px;
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
-  font-size: 13px;
+  font-size: calc(13px * var(--kbn-type-scale, 1));
   line-height: 1.44;
   color: #1B1611;
   text-wrap: pretty;
@@ -599,14 +593,36 @@ button.kbn-day-entrytitle:focus-visible {
 }
 
 .kbn-day-panebody {
+  --panebody-bg: #FFFDF6;
   position: relative;
   height: 230px;
   overflow: hidden;
-  background: #FFFDF6;
+  background: var(--panebody-bg);
   border: 0.5px solid rgba(27, 22, 17, 0.16);
   border-radius: 2px;
   box-shadow: 0 1px 2px rgba(27, 22, 17, 0.06);
 }
+
+/* The pane is a hard 230px crop, and both fillings can run past it — a scaled
+   report frame or a long outcome. Rather than clip mid-line, the last stretch
+   dissolves into the pane's own mat, so the edge reads as an intentional fade
+   instead of a cut. Non-interactive and above both fillings, below the hit
+   target (z-index 1) so the click-through survives. */
+.kbn-day-panebody::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 46px;
+  background: linear-gradient(to bottom, transparent, var(--panebody-bg));
+  pointer-events: none;
+  z-index: 2;
+}
+
+/* The outcome mat is a warmer parchment than the report's paper white — the
+   fade has to end on the same colour it sits over. */
+.kbn-day-pane-outcome .kbn-day-panebody { --panebody-bg: #FCF8ED; }
 
 /* Rendered at double size and halved, so the report's own type comes down to
    thumbnail scale with its layout intact rather than reflowing to a narrow
@@ -640,7 +656,7 @@ button.kbn-day-entrytitle:focus-visible {
   color: #7A7368;
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
   font-style: italic;
-  font-size: 12px;
+  font-size: calc(12px * var(--kbn-type-scale, 1));
   animation: kbn-day-panepulse 1.6s ease-in-out infinite;
 }
 @media (prefers-reduced-motion: reduce) {
@@ -651,22 +667,87 @@ button.kbn-day-entrytitle:focus-visible {
   50% { opacity: 1; }
 }
 
+/* The whole plate is the target: the report when there is one, the fiber when
+   there is not. A transparent button over the (inert) frame and under the
+   outcome prose, so one pane is one click however it is filled. */
+.kbn-day-panehit {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  appearance: none;
+  border: 0;
+  padding: 0;
+  background: none;
+  cursor: pointer;
+}
+.kbn-day-panehit:focus-visible {
+  outline: 1px dashed rgba(27, 22, 17, 0.45);
+  outline-offset: -3px;
+  border-radius: 2px;
+}
+
+/* Discoverability, at the board's usual weight: the plate rises a hairline and
+   its shadow deepens. Nothing colours — this is an affordance, not a claim. */
+.kbn-day-panebody {
+  transition: box-shadow 140ms ease-out, transform 140ms ease-out,
+    border-color 140ms ease-out;
+}
+.kbn-day-pane:hover .kbn-day-panebody,
+.kbn-day-pane:focus-within .kbn-day-panebody {
+  transform: translateY(-1px);
+  border-color: rgba(27, 22, 17, 0.3);
+  box-shadow: 0 3px 7px rgba(27, 22, 17, 0.1);
+}
+.kbn-day-pane:hover .kbn-day-panename { color: #1B1611; }
+@media (prefers-reduced-motion: reduce) {
+  .kbn-day-panebody { transition: none; }
+  .kbn-day-pane:hover .kbn-day-panebody,
+  .kbn-day-pane:focus-within .kbn-day-panebody { transform: none; }
+}
+
 /* No report: the outcome, set as the page it stands in for. Not a placeholder
-   — an outcome IS the fiber's statement of where it stands. */
+   — an outcome IS the fiber's statement of where it stands, so it gets the
+   same care the reports get: its own mat, a rubric naming what it is, and
+   prose at reading measure. The DISTINCTION stays legible without either side
+   looking second-class — a report shows a page, an outcome shows a statement,
+   and the warmer mat plus the rubric say which you are looking at. */
+.kbn-day-pane-outcome .kbn-day-panebody {
+  background: #FCF8ED;
+  border-color: rgba(27, 22, 17, 0.13);
+}
+
 .kbn-day-paneoutcome {
   position: absolute;
   inset: 0;
   overflow: hidden;
-  padding: 14px 16px;
+  padding: 15px 18px 16px;
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
-  font-size: 13px;
-  line-height: 1.5;
+  font-size: calc(13.5px * var(--kbn-type-scale, 1));
+  line-height: 1.58;
   color: #1B1611;
+  /* Click-through: the plate under it is the target. Links keep their own. */
+  pointer-events: none;
   /* Fades out rather than clipping mid-letter when the outcome runs long. */
   mask-image: linear-gradient(to bottom, #000 78%, transparent 100%);
 }
+.kbn-day-paneoutcome a { pointer-events: auto; }
 .kbn-day-paneoutcome em { color: #A89B83; }
-.kbn-day-paneoutcome > *:first-child { margin-top: 0; }
+.kbn-day-paneoutcomebody > *:first-child { margin-top: 0; }
+.kbn-day-paneoutcomebody > *:last-child { margin-bottom: 0; }
+
+/* The rubric: the same marginal small-caps hand the ledger's own labels use,
+   set above a hairline so the prose below reads as the body of a page. */
+.kbn-day-paneoutcomerubric {
+  display: block;
+  margin-bottom: 7px;
+  padding-bottom: 5px;
+  border-bottom: 0.5px solid rgba(122, 111, 92, 0.22);
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: calc(8.5px * var(--kbn-type-scale, 1));
+  letter-spacing: 0.06em;
+  text-transform: lowercase;
+  color: #A89B83;
+}
 
 .kbn-day-panecap {
   display: flex;
@@ -679,7 +760,7 @@ button.kbn-day-entrytitle:focus-visible {
   padding: 0;
   cursor: pointer;
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
-  font-size: 12px;
+  font-size: calc(12px * var(--kbn-type-scale, 1));
   color: #7A6F5C;
   text-align: left;
   white-space: nowrap;

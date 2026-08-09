@@ -5,9 +5,12 @@
  *
  *   1  desk       the kanban page (Timeline ribbon + Now board + Pinned +
  *                 Stash). Owned by KanbanModal itself, NOT a TemporalView.
- *   2  chronicle  ┐
- *   3  day        ├ TemporalViews — each mounts into a full-width host where
- *   4  week       ┘ the Desk surfaces would otherwise be.
+ *   2  day        ┐
+ *   3  week       ├ TemporalViews — each mounts into a full-width host where
+ *   4  chronicle  ┘ the Desk surfaces would otherwise be.
+ *
+ * The order runs from the tightest window outward, so the strip reads as a
+ * zoom: today, this week, the whole record.
  *
  * A view is a plain object with a three-call lifecycle. KanbanModal owns the
  * host element and the data; the view owns everything inside the host.

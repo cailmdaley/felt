@@ -19,7 +19,6 @@ import {
   buildStillAhead,
   closureMark,
   commitsOnRail,
-  cwdLaneLabel,
   dayTotals,
   dayWindow,
   defaultDayISO,
@@ -320,7 +319,6 @@ describe('lanes', () => {
       WIN,
     )
     expect(lanes).toHaveLength(1)
-    expect(lanes[0].kind).toBe('fiber')
     expect(lanes[0].label).toBe('Run the 2D B-mode null tests')
     expect(lanes[0].cardId).toBe('work/spt3g_papers/bmodes-2d')
     expect(lanes[0].agent).toEqual([{ start: 60, end: 61 }])
@@ -347,7 +345,7 @@ describe('lanes', () => {
     expect(sameHost[0].hostNote).toBe('')
   })
 
-  it('drops unjoined work into cwd lanes below the fiber lanes', () => {
+  it('skips work that joined to no fiber — no lane, no ledger entry', () => {
     const lanes = buildDayLanes(
       activity([
         bucket(10, 'agent', null, '/home/ada/dev/felt'),
@@ -359,18 +357,13 @@ describe('lanes', () => {
       [card()],
       WIN,
     )
-    expect(lanes.map((l) => l.kind)).toEqual(['fiber', 'loose', 'loose'])
-    expect(lanes[1].label).toBe('~/dev/felt · interactive')
-    expect(lanes[2].label).toBe('~/loom · unmatched')
-    expect(lanes[1].cardId).toBeUndefined()
+    expect(lanes).toHaveLength(1)
+    expect(lanes[0].cardId).toBe('work/spt3g_papers/bmodes-2d')
   })
 
-  it('labels a null cwd rather than dropping the minutes', () => {
-    expect(cwdLaneLabel(null)).toBe('elsewhere · interactive')
-    expect(cwdLaneLabel('/var/tmp')).toBe('/var/tmp · interactive')
+  it('yields no lanes at all when nothing joined a fiber', () => {
     const lanes = buildDayLanes(activity([bucket(4, 'agent')]), [], WIN)
-    expect(lanes).toHaveLength(1)
-    expect(lanes[0].label).toBe('elsewhere · interactive')
+    expect(lanes).toEqual([])
   })
 
   it('sorts fiber lanes by the weight of the day, heaviest first', () => {
@@ -399,8 +392,7 @@ describe('lanes', () => {
 
 describe('the join ladder', () => {
   // Every rung below is a session shape the daemon really produces, and every
-  // miss has the same consequence: the bucket lands on a lane labelled
-  // "interactive", which says a human was typing when an agent was working.
+  // miss has the same consequence: the bucket draws no lane at all.
 
   it('joins a session name whose ULID is lower-cased', () => {
     expect(sessionUlid(`bmodes-2d-${FIBER_ULID.toLowerCase()}-shuttle`)).toBe(FIBER_ULID)
@@ -409,7 +401,6 @@ describe('the join ladder', () => {
       [card()],
       WIN,
     )
-    expect(lanes[0].kind).toBe('fiber')
     expect(lanes[0].cardId).toBe('work/spt3g_papers/bmodes-2d')
   })
 
@@ -421,7 +412,6 @@ describe('the join ladder', () => {
       [card({ id: 'loom/email/morning-post/refine', uid: undefined, name: 'Morning post' })],
       WIN,
     )
-    expect(lanes[0].kind).toBe('fiber')
     expect(lanes[0].label).toBe('Morning post')
   })
 
@@ -431,7 +421,7 @@ describe('the join ladder', () => {
       [card({ uid: undefined, runningWorker: 'legacy-worker-name' })],
       WIN,
     )
-    expect(lanes[0].kind).toBe('fiber')
+    expect(lanes).toHaveLength(1)
   })
 
   it('never joins on the working directory — a directory names a project', () => {
@@ -442,8 +432,7 @@ describe('the join ladder', () => {
       [card()],
       WIN,
     )
-    expect(worker[0].kind).toBe('loose')
-    expect(worker[0].label).toBe('~/work/spt3g_papers · unmatched')
+    expect(worker).toEqual([])
 
     // …nor for a person typing in the same directory. A repo root routinely
     // shares its name with one fiber nested inside it, and that coincidence is
@@ -453,8 +442,7 @@ describe('the join ladder', () => {
       [card()],
       WIN,
     )
-    expect(human[0].kind).toBe('loose')
-    expect(human[0].label).toBe('~/work/spt3g_papers · interactive')
+    expect(human).toEqual([])
   })
 
   it('refuses a session slug two cards answer to, rather than guessing', () => {
@@ -467,17 +455,10 @@ describe('the join ladder', () => {
       ],
       WIN,
     )
-    expect(lanes[0].kind).toBe('loose')
-    expect(lanes[0].label).toBe('~/loom · unmatched')
+    expect(lanes).toEqual([])
   })
 
-  it('calls an unjoined WORKER unmatched and a sessionless bucket interactive', () => {
-    expect(cwdLaneLabel('/home/ada/loom', true)).toBe('~/loom · unmatched')
-    expect(cwdLaneLabel('/home/ada/loom', false)).toBe('~/loom · interactive')
-    expect(cwdLaneLabel(null, true)).toBe('elsewhere · unmatched')
-  })
-
-  it('keeps worker and human work in the same directory on separate lanes', () => {
+  it('draws no lane for work in the same directory whether worker or human', () => {
     const lanes = buildDayLanes(
       activity([
         bucket(20, 'agent', 'stranger-01ZZZ-shuttle', '/home/ada/loom'),
@@ -486,10 +467,7 @@ describe('the join ladder', () => {
       [],
       WIN,
     )
-    expect(lanes.map((l) => l.label).sort()).toEqual([
-      '~/loom · interactive',
-      '~/loom · unmatched',
-    ])
+    expect(lanes).toEqual([])
   })
 })
 
@@ -504,7 +482,7 @@ describe('rung 0 — the session ledger', () => {
     // `pi-2f9c41`: no ULID, no slug matching any card. Every lower rung misses.
     expect(sessionUlid('pi-2f9c41')).toBeNull()
     const naked = buildDayLanes(activity([bucket(20, 'agent', 'pi-2f9c41')]), [card()], WIN)
-    expect(naked[0].kind).toBe('loose')
+    expect(naked).toEqual([])
 
     const withLedger = buildDayLanes(
       activity([bucket(20, 'agent', 'pi-2f9c41')]),
@@ -512,7 +490,6 @@ describe('rung 0 — the session ledger', () => {
       WIN,
       new Map([['pi-2f9c41', pairing('work/spt3g_papers/bmodes-2d')]]),
     )
-    expect(withLedger[0].kind).toBe('fiber')
     expect(withLedger[0].cardId).toBe('work/spt3g_papers/bmodes-2d')
   })
 
@@ -523,9 +500,8 @@ describe('rung 0 — the session ledger', () => {
   })
 
   it('falls THROUGH a pairing for a fiber this board does not carry', () => {
-    // Resolving to an absent card would drop the minutes off the page: no
-    // fiber lane to hold them, and no cwd lane either. Losing time silently is
-    // worse than mis-filing it.
+    // Resolving to an absent card draws no lane — the minutes are simply not
+    // on the page, the same as any other unjoined bucket.
     const ledger = new Map([['pi-2f9c41', pairing('not/on/this/board', null)]])
     const lanes = buildDayLanes(
       activity([bucket(20, 'agent', 'pi-2f9c41', '/home/ada/work/photoz')]),
@@ -533,8 +509,7 @@ describe('rung 0 — the session ledger', () => {
       WIN,
       ledger,
     )
-    expect(lanes[0].kind).toBe('loose')
-    expect(lanes[0].label).toBe('~/work/photoz · unmatched')
+    expect(lanes).toEqual([])
   })
 
   it('leaves the lanes the lower rungs already got right exactly where they were', () => {
@@ -566,8 +541,7 @@ describe('rung 0 — the session ledger', () => {
       WIN,
       ledger,
     )
-    expect(lanes[0].kind).toBe('loose')
-    expect(lanes[0].label).toBe('~/notes · interactive')
+    expect(lanes).toEqual([])
   })
 })
 
@@ -873,7 +847,7 @@ describe('where things stand', () => {
       withDir(),
       withDir({ id: 'a/second', uid: other, name: 'Second' }),
     ], '')
-    // The interactive lane has no fiber, so it has no page to show.
+    // The bucket that joined no fiber drew no lane, so it has no page either.
     expect(previews.map((p) => p.label)).toEqual(['Run the 2D B-mode null tests', 'Second'])
   })
 

@@ -32,6 +32,9 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
+  /* The hover tooltip is parented here and positioned against this box, so it
+     tracks the rails rather than the page as the sheet leans under a swipe. */
+  position: relative;
 }
 
 /* Springing back after a swipe — eased. The lean itself is applied with no
@@ -61,7 +64,7 @@
   cursor: pointer;
   padding: 0 3px;
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
-  font-size: 19px;
+  font-size: calc(19px * var(--kbn-type-scale, 1));
   line-height: 1;
   color: #7A6F5C;
   transition: color 120ms ease;
@@ -79,7 +82,7 @@
   cursor: default;
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
   font-style: italic;
-  font-size: 17px;
+  font-size: calc(17px * var(--kbn-type-scale, 1));
   line-height: 1;
   letter-spacing: 0.01em;
   color: #1B1611;
@@ -93,7 +96,7 @@
 
 .wk-totals {
   font-family: var(--font-mono, 'IBM Plex Mono', monospace);
-  font-size: 10px;
+  font-size: calc(10px * var(--kbn-type-scale, 1));
   letter-spacing: 0.04em;
   color: #A89B83;
   white-space: nowrap;
@@ -107,7 +110,7 @@
   --wk-ochre-deep: #A57D2B;
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
   font-style: italic;
-  font-size: 13px;
+  font-size: calc(13px * var(--kbn-type-scale, 1));
   color: var(--wk-ochre-deep);
   min-width: 0;
   overflow: hidden;
@@ -133,7 +136,7 @@
 .wk-cycle-more {
   color: #A89B83;
   font-style: normal;
-  font-size: 11px;
+  font-size: calc(11px * var(--kbn-type-scale, 1));
 }
 
 /* ── Rows ─────────────────────────────────────────────────────────────────── */
@@ -197,7 +200,7 @@
 .wk-daylabel:hover .wk-daynum { color: #1B1611; }
 .wk-dow {
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
-  font-size: 10px;
+  font-size: calc(10px * var(--kbn-type-scale, 1));
   font-variant-caps: all-small-caps;
   font-feature-settings: "smcp", "c2sc";
   letter-spacing: 0.07em;
@@ -206,7 +209,7 @@
 .wk-daynum {
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
   font-feature-settings: "onum";
-  font-size: 16px;
+  font-size: calc(16px * var(--kbn-type-scale, 1));
   font-weight: 500;
   color: #2A231A;
 }
@@ -233,6 +236,18 @@
 }
 .wk-paint { pointer-events: none; }
 
+/* The pointer catcher, above the ink and below nothing. The ticks are 1.5px
+   hairlines and cannot be hovered; this catches the whole rail and the view
+   snaps to the nearest inked slot (HOVER_SNAP_PX). It must not swallow clicks
+   meant for the hollow marks, so it sits UNDER `.wk-paint` in the stack:
+   `.wk-paint` is `pointer-events: none` and lets the ink fall through, while
+   the marks inside it re-enable pointer events for themselves. */
+.wk-hover {
+  position: absolute;
+  inset: 0;
+  cursor: crosshair;
+}
+
 /* 4-hourly rules — faint enough to be paper, present enough to read a time
    off a tick without counting. */
 .wk-rule {
@@ -246,11 +261,17 @@
 
 /* ── Rasters: one tick per active slot ────────────────────────────────────── */
 
+/* CENTRED on its `left`, because `RasterSlot.fraction` is the slot's MIDPOINT
+   and the hover snap measures the pointer against that same midpoint. Left-
+   anchored, every tick sat half its width late — tolerable at 1.5px, visible at
+   the 3px constitution nib, and enough to put the ink and its own tooltip
+   target on different pixels. */
 .wk-ras {
   position: absolute;
   bottom: 0;
   width: 1.5px;
   border-radius: 0.5px;
+  transform: translateX(-50%);
 }
 /* Agent work is the substrate — cobalt, and the only kind whose opacity
    carries a weight, because only it comes in runs. Attention stands taller
@@ -281,6 +302,21 @@
   opacity: 0.78;
 }
 
+/* CONSTITUTION-DRIVEN work — the second axis, and it has to be the STROKE.
+   Hue already names the kind and height already names it a second time, so a
+   fiber carrying a `shuttle:` block is drawn with a broader, softer nib: 3px
+   instead of 1.5px, held back in alpha so the extra width does not also read as
+   extra intensity. The effect at week scale is the one asked for — an afternoon
+   of steady constitution work lays down a visible band, while the same minutes
+   of plain-fiber work stay a picket of hairlines. */
+.wk-ras-const {
+  width: 3px;
+  border-radius: 1px;
+}
+.wk-ras-agent.wk-ras-const { filter: saturate(0.92); }
+.wk-ras-attention.wk-ras-const { opacity: 0.7; }
+.wk-ras-notify.wk-ras-const { opacity: 0.62; }
+
 /* Now — a thin gold-deep thread down today's rail. Everything to its right on
    this row is future, which is why the hollow marks may appear there. */
 .wk-now {
@@ -305,7 +341,7 @@
   cursor: pointer;
   pointer-events: auto;
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
-  font-size: 13px;
+  font-size: calc(13px * var(--kbn-type-scale, 1));
   line-height: 1;
   transition: transform 120ms ease, opacity 120ms ease;
 }
@@ -313,7 +349,7 @@
 .wk-mark-due { color: var(--wk-ochre-deep); }
 /* ◐ is half-filled, so at raster weight it reads as a solid dot and out-shouts
    everything else on an empty future row. Held back to an outline's worth. */
-.wk-mark-launch { color: var(--wk-agent); opacity: 0.78; font-size: 12px; }
+.wk-mark-launch { color: var(--wk-agent); opacity: 0.78; font-size: calc(12px * var(--kbn-type-scale, 1)); }
 .wk-mark-snooze { color: #A89B83; opacity: 0.7; }
 
 /* ── Right-edge annotation ────────────────────────────────────────────────── */
@@ -322,7 +358,7 @@
   align-self: center;
   text-align: right;
   font-family: var(--font-mono, 'IBM Plex Mono', monospace);
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--kbn-type-scale, 1));
   letter-spacing: 0.03em;
   color: #A89B83;
   white-space: nowrap;
@@ -340,14 +376,16 @@
 }
 .wk-ticks {
   position: relative;
-  height: 12px;
+  /* Absolutely-positioned hour labels live in here — grows with the type
+     scale so they do not clip. */
+  height: calc(12px * var(--kbn-type-scale, 1));
 }
 .wk-tick {
   position: absolute;
   top: 0;
   transform: translateX(-50%);
   font-family: var(--font-mono, 'IBM Plex Mono', monospace);
-  font-size: 9px;
+  font-size: calc(9px * var(--kbn-type-scale, 1));
   letter-spacing: 0.04em;
   color: #A89B83;
   white-space: nowrap;
@@ -370,7 +408,7 @@
   padding-top: 3px;
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
   font-style: italic;
-  font-size: 11px;
+  font-size: calc(11px * var(--kbn-type-scale, 1));
   color: #7A6F5C;
 }
 .wk-key-item {
@@ -391,3 +429,90 @@
 .wk-key-agent { height: 7px; background: var(--wk-agent); }
 .wk-key-attention { height: 9px; background: var(--wk-attention); opacity: 0.85; }
 .wk-key-notify { height: 12px; background: var(--wk-notify); opacity: 0.78; }
+/* The stroke axis, taught the way it is drawn: same hue and height as the agent
+   swatch beside it, wider nib. Read as a pair, the two swatches say "this is not
+   another colour, it is a weight". */
+.wk-key-const { width: 6px; border-radius: 1px; }
+
+/* ── Hover tooltip ────────────────────────────────────────────────────────── */
+
+/* A slip of paper laid over the rail, not a chrome popover: parchment ground,
+   iron-gall text, one hairline border. It reports what the minute is RECORDED
+   as — who, which pigment, how many events — and closes with the note that the
+   words themselves were never kept. See SLOT_NO_TEXT_NOTE. */
+.wk-tip {
+  position: absolute;
+  z-index: 6;
+  transform: translateY(-6px);
+  min-width: 150px;
+  max-width: 300px;
+  padding: 6px 9px 5px;
+  background: #FBF7EE;
+  border: 0.5px solid rgba(122, 111, 92, 0.4);
+  border-radius: 2px;
+  box-shadow: 0 2px 7px rgba(27, 22, 17, 0.13);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 90ms ease;
+}
+.wk-tip-open { opacity: 1; }
+/* Flipped when the slot sits late in the day — the view swaps left for right,
+   this only moves the origin the box grows from. */
+.wk-tip-flip { text-align: left; }
+
+.wk-tip-time {
+  font-family: var(--font-mono, 'IBM Plex Mono', monospace);
+  font-size: calc(9.5px * var(--kbn-type-scale, 1));
+  letter-spacing: 0.04em;
+  color: #9A7B35;
+  margin-bottom: 3px;
+}
+
+.wk-tip-row {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-size: calc(12px * var(--kbn-type-scale, 1));
+  color: #2A231A;
+  line-height: 1.35;
+}
+/* The same three pigments, at the same height hierarchy as the key — so the
+   line about cinnabar is marked in cinnabar and nothing has to be matched up by
+   memory. `align-self` pins them to the text baseline they annotate. */
+.wk-tip-swatch {
+  flex: 0 0 auto;
+  display: inline-block;
+  width: 3px;
+  border-radius: 0.5px;
+  align-self: center;
+}
+.wk-tip-swatch-const { width: 6px; border-radius: 1px; }
+
+.wk-tip-phrase { font-style: italic; color: #7A6F5C; }
+.wk-tip-where {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wk-tip-count {
+  flex: 0 0 auto;
+  font-family: var(--font-mono, 'IBM Plex Mono', monospace);
+  font-size: calc(9px * var(--kbn-type-scale, 1));
+  color: #A89B83;
+}
+
+/* The honest footer. Deliberately quiet — it is a caveat, not a finding. */
+.wk-tip-note,
+.wk-tip-detail {
+  margin-top: 4px;
+  padding-top: 3px;
+  border-top: 0.5px solid rgba(122, 111, 92, 0.22);
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-size: calc(10.5px * var(--kbn-type-scale, 1));
+  line-height: 1.3;
+}
+.wk-tip-note { font-style: italic; color: #A89B83; }
+.wk-tip-detail { color: #2A231A; }
