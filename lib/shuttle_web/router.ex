@@ -74,6 +74,13 @@ defmodule ShuttleWeb.Router do
     # host's primary felt store. A cross-host view fans out and merges.
     get("/activity", ActivityController, :show)
     get("/narration", NarrationController, :show)
+    # The cross-host counterparts: each fans this host's live read together with
+    # the cached remote reads (Shuttle.RemoteTemporalRegistry) and reports
+    # per-origin freshness in the same `origins` block the kanban composite
+    # serves. A disconnected remote's history stays on screen, marked stale.
+    get("/activity/composite", ActivityController, :composite)
+    get("/narration/composite", NarrationController, :composite)
+    get("/sessions/composite", SessionsController, :composite)
     # Join rung 0 for the temporal views: the structural fiber↔session pairing
     # this host recorded at dispatch / claim / resume. Host-scoped like its two
     # neighbours above.

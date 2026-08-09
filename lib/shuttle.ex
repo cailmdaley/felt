@@ -67,6 +67,13 @@ defmodule Shuttle.Application do
       end
 
     children =
+      if Application.get_env(:shuttle, :start_remote_temporal_registry, true) do
+        children ++ [Shuttle.RemoteTemporalRegistry]
+      else
+        children
+      end
+
+    children =
       if Application.get_env(:shuttle, :start_waiting_tracker, true) do
         children ++ [Shuttle.WaitingTracker]
       else

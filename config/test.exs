@@ -9,6 +9,7 @@ config :shuttle,
   start_waiting_tracker: false,
   start_remote_registry: false,
   start_remote_fiber_registry: false,
+  start_remote_temporal_registry: false,
   remotes: []
 
 # Test daemon identity. Resolved at Poller boot by
