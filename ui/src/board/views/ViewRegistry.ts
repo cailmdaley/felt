@@ -26,7 +26,12 @@
  */
 
 import type { KanbanCard, KanbanResponse } from '../KanbanTypes.js'
-import type { ActivityResult, NarrationResult, SessionsResult } from './TemporalData.js'
+import type {
+  ActivityResult,
+  MomentResult,
+  NarrationResult,
+  SessionsResult,
+} from './TemporalData.js'
 
 export interface TemporalView {
   id: 'chronicle' | 'day' | 'week'
@@ -71,6 +76,17 @@ export interface ViewContext {
    * that adopts it must still keep its existing rungs.
    */
   sessions(sinceMs: number): Promise<SessionsResult>
+  /**
+   * The WORDS a session spoke inside a window — what a hovered mark was, in the
+   * conversation's own language, read from the harness transcript on the host
+   * that ran it (`host`; omit it and the daemon consults its session ledger).
+   *
+   * Reach for it only on demand — a hover, a click — never on a paint: one call
+   * reads one transcript file. It never rejects; a daemon that cannot find or
+   * reach the transcript answers with no excerpts, and the honest fallback
+   * (`SLOT_NO_TEXT_NOTE`) is what the view shows then.
+   */
+  moment(session: string, fromMs: number, toMs: number, host?: string | null): Promise<MomentResult>
   /**
    * Open a card's detail panel. Resolves against `cards` AND `response.cycles`,
    * so a cycle band or chip can hand over its id directly — the split above is

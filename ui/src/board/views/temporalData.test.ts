@@ -174,7 +174,14 @@ describe('buildSessionIndex', () => {
   it('indexes a pairing under both its tmux name and its session uuid', () => {
     const { byTmux, bySession } = buildSessionIndex([rec()])
     expect(byTmux.get('run-01KVBR4J9EZGYPJ07734SY90P1-shuttle'))
-      .toEqual({ fiber: 'work/a/run', uid: '01KVBR4J9EZGYPJ07734SY90P1' })
+      .toEqual({
+        fiber: 'work/a/run',
+        uid: '01KVBR4J9EZGYPJ07734SY90P1',
+        // The pairing carries its own session and host: a hover asks a HOST
+        // for a SESSION's transcript, and both halves have to survive the join.
+        session: 'sess-1',
+        host: 'ada',
+      })
     expect(bySession.get('sess-1')?.fiber).toBe('work/a/run')
   })
 
@@ -207,7 +214,12 @@ describe('buildSessionIndex', () => {
 
   it('carries a null uid through rather than inventing one', () => {
     const index = buildSessionIndex([rec({ uid: null, tmux: 'pi-2f9c41' })])
-    expect(index.byTmux.get('pi-2f9c41')).toEqual({ fiber: 'work/a/run', uid: null })
+    expect(index.byTmux.get('pi-2f9c41')).toEqual({
+      fiber: 'work/a/run',
+      uid: null,
+      session: 'sess-1',
+      host: 'ada',
+    })
   })
 
   it('keeps distinct sessions on the same fiber separate', () => {

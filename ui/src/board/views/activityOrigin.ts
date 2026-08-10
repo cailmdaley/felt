@@ -32,6 +32,23 @@ export interface BucketOrigin {
   label: string
   /** The joined fiber carries a `shuttle:` block: constitution-driven work. */
   shuttle: boolean
+  /**
+   * The harness session UUID this minute belongs to, when the ledger recorded
+   * one, and the host that recorded it — the pair a hover needs to ask
+   * `/api/v1/moment` for the words.
+   *
+   * This is the ONE thing that changes the module's standing claim above: the
+   * activity plane still holds no text, but the ledger's pairing names a
+   * transcript, and a transcript does. Null when the bucket joined no recorded
+   * session, which is when a hover has to keep saying so.
+   */
+  source: MomentSource | null
+}
+
+/** Where a minute's words would be found: a session, on a host. */
+export interface MomentSource {
+  session: string
+  host: string | null
 }
 
 export interface OriginIndex {
@@ -99,10 +116,28 @@ export function shortCwd(cwd: string): string {
  */
 export function originOf(index: OriginIndex, bucket: ActivityBucket): BucketOrigin {
   const card = resolveCard(index, bucket)
-  if (card) return { cardId: card.id, label: card.name, shuttle: isShuttleBacked(card) }
-  if (bucket.s) return { cardId: null, label: bucket.s, shuttle: false }
-  if (bucket.cwd) return { cardId: null, label: shortCwd(bucket.cwd), shuttle: false }
-  return { cardId: null, label: 'unattributed', shuttle: false }
+  const source = momentSource(index, bucket)
+  if (card) {
+    return { cardId: card.id, label: card.name, shuttle: isShuttleBacked(card), source }
+  }
+  if (bucket.s) return { cardId: null, label: bucket.s, shuttle: false, source }
+  if (bucket.cwd) return { cardId: null, label: shortCwd(bucket.cwd), shuttle: false, source }
+  return { cardId: null, label: 'unattributed', shuttle: false, source: null }
+}
+
+/**
+ * The transcript a bucket points at, from the ledger pairing alone.
+ *
+ * Deliberately independent of whether the bucket joined a CARD: a session whose
+ * fiber is not on this board still said what it said, and the words are the
+ * point. The bucket's own host is preferred over the ledger's — the bucket is
+ * telling us which daemon's events file this minute came out of, which is the
+ * machine the transcript sits on.
+ */
+export function momentSource(index: OriginIndex, bucket: ActivityBucket): MomentSource | null {
+  const pairing = lookupTmux(index.byTmux, bucket.host, bucket.s)
+  if (!pairing?.session) return null
+  return { session: pairing.session, host: bucket.host ?? pairing.host ?? null }
 }
 
 function resolveCard(index: OriginIndex, bucket: ActivityBucket): KanbanCard | undefined {

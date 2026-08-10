@@ -710,16 +710,20 @@ button.chr-name:hover {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* Stale-origin rows wear the kanban's own `kbn-card--stale` / `kbn-card-waiting`
-   (KanbanModal.css) — same condition, same register. Only the geometry is
-   re-fitted here: that vocabulary was cut for a card, and a chronicle row is one
-   line tall with a 72px note slot. The colour, the dashed rule and the dimming
-   all still come from there. */
-.chr-track.kbn-card--stale,
-.chr-label.kbn-card--stale {
-  background: transparent;
-  border-style: solid;
+/* A row whose only origin is out of contact reads as last-known-good: the same
+   condition the Desk's `kbn-card--stale` names, but NOT the same class. That
+   vocabulary is a card's — a dashed border, a filled background, a hover — and
+   a chronicle row has no border to dash and no ground to fill, so importing it
+   only ever meant subtracting it again (and, since `border-style: solid` with
+   no width or colour of its own resolves to a 3px currentColor rule, it drew a
+   black box around every waiting row). One line tall, so the register is what a
+   row can carry: dimming, plus the ⌛ badge in the note slot. */
+.chr-label-waiting,
+.chr-track-waiting {
+  opacity: 0.62;
 }
+.chr-label-waiting .chr-name,
+.chr-label-waiting button.chr-name:hover { color: #5A4F3A; }
 .chr-note.kbn-card-waiting {
   font-size: calc(8.5px * var(--kbn-type-scale, 1));
   padding: 0 3px;
@@ -770,27 +774,28 @@ button.chr-name:hover {
 .chr-seg-2 { height: 4px; margin-top: -2px; opacity: 0.50; }
 .chr-seg-3 { height: 7px; margin-top: -3.5px; opacity: 0.72; }
 
-/* A day that asked for the human. Solid teal, hairline-slim, centered — kept
-   shorter than the tallest segment so it reads as an overlay on the day's
-   work rather than as a picket in front of it. */
+/* A spell that asked for the human. Solid teal, hairline-slim — kept shorter
+   than the tallest segment so it reads as an overlay on the day's work rather
+   than as a picket in front of it. `left` already carries the time of day, so
+   the only margin is the half-width that centers the tick ON that instant. */
 .chr-att {
   position: absolute;
   top: 50%;
   width: 2px;
   height: 6px;
   margin-top: -3px;
-  margin-left: calc(var(--chr-day-w) / 2 - 1px);
+  margin-left: -1px;
   background: #3F8278;
 }
 
-/* A day that raised its hand. Cinnabar, above the line, small. */
+/* A moment that raised its hand. Cinnabar, above the line, small. */
 .chr-notify {
   position: absolute;
   top: 50%;
   width: 3px;
   height: 3px;
   margin-top: -6.5px;
-  margin-left: calc(var(--chr-day-w) / 2 - 1.5px);
+  margin-left: -1.5px;
   border-radius: 50%;
   background: #BC4538;
 }

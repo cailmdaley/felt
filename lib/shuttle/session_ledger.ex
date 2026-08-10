@@ -196,6 +196,32 @@ defmodule Shuttle.SessionLedger do
     |> Enum.sort_by(& &1["at"])
   end
 
+  @doc """
+  The host that ran `session`, from the newest ledger line naming it — or `nil`
+  when this host never recorded that session.
+
+  The pairing rung the transcript reader stands on: a hover asks a daemon for
+  the words of a session it may not have run, and this is how that daemon knows
+  whose disk they are on without the caller having to say.
+
+  Opts (for tests): `:path`.
+  """
+  @spec host_for_session(String.t() | nil, keyword()) :: String.t() | nil
+  def host_for_session(session, opts \\ [])
+
+  def host_for_session(session, opts) when is_binary(session) and session != "" do
+    0
+    |> read_since(opts)
+    |> Enum.filter(&(&1["session"] == session))
+    |> List.last()
+    |> case do
+      %{"host" => host} when is_binary(host) and host != "" -> host
+      _ -> nil
+    end
+  end
+
+  def host_for_session(_session, _opts), do: nil
+
   defp stream_records(path, since_ms) do
     path
     |> File.stream!()

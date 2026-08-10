@@ -1,0 +1,137 @@
+/* The shared hover tooltip for the temporal views — Week's rails and Day's
+   lanes draw the same slip of paper.
+
+   A slip laid over the rail, not a chrome popover: parchment ground, iron-gall
+   text, one hairline border. It reports what the minute is RECORDED as — who,
+   which pigment, how many events — and then either the words recovered from the
+   harness transcript or the note that they were not. See SLOT_NO_TEXT_NOTE.
+
+   The three pigments are declared HERE rather than borrowed from WeekView.css,
+   whose copies are scoped to its own sheet. Same hexes, one purpose each: a
+   swatch on a Day tooltip must be the same blue as the wash it annotates. */
+.kbn-tip {
+  --kbn-tip-agent: #3D5BA0;
+  --kbn-tip-attention: #3F8278;
+  --kbn-tip-notify: #BC4538;
+
+  position: absolute;
+  z-index: 6;
+  transform: translateY(-6px);
+  min-width: 150px;
+  max-width: 320px;
+  padding: 6px 9px 5px;
+  background: #FBF7EE;
+  border: 0.5px solid rgba(122, 111, 92, 0.4);
+  border-radius: 2px;
+  box-shadow: 0 2px 7px rgba(27, 22, 17, 0.13);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 90ms ease;
+}
+.kbn-tip-open { opacity: 1; }
+/* Flipped when the mark sits late in the day — the view swaps left for right,
+   this only moves the origin the box grows from. */
+.kbn-tip-flip { text-align: left; }
+
+.kbn-tip-time {
+  font-family: var(--font-mono, 'IBM Plex Mono', monospace);
+  font-size: calc(9.5px * var(--kbn-type-scale, 1));
+  letter-spacing: 0.04em;
+  color: #9A7B35;
+  margin-bottom: 3px;
+}
+
+.kbn-tip-row {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-size: calc(12px * var(--kbn-type-scale, 1));
+  color: #2A231A;
+  line-height: 1.35;
+}
+/* The same three pigments, at the same height hierarchy as each view's key — so
+   the line about cinnabar is marked in cinnabar and nothing has to be matched up
+   by memory. `align-self` pins them to the text baseline they annotate. */
+.kbn-tip-swatch {
+  flex: 0 0 auto;
+  display: inline-block;
+  width: 3px;
+  border-radius: 0.5px;
+  align-self: center;
+}
+.kbn-tip-key-agent { height: 7px; background: var(--kbn-tip-agent); }
+.kbn-tip-key-attention { height: 9px; background: var(--kbn-tip-attention); opacity: 0.85; }
+.kbn-tip-key-notify { height: 12px; background: var(--kbn-tip-notify); opacity: 0.78; }
+/* The stroke axis: same hue, wider nib — a weight, not another colour. */
+.kbn-tip-swatch-const { width: 6px; border-radius: 1px; }
+
+.kbn-tip-phrase { font-style: italic; color: #7A6F5C; }
+.kbn-tip-where {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kbn-tip-count {
+  flex: 0 0 auto;
+  font-family: var(--font-mono, 'IBM Plex Mono', monospace);
+  font-size: calc(9px * var(--kbn-type-scale, 1));
+  color: #A89B83;
+}
+
+/* The honest footer. Deliberately quiet — it is a caveat, not a finding. */
+.kbn-tip-note {
+  margin-top: 4px;
+  padding-top: 3px;
+  border-top: 0.5px solid rgba(122, 111, 92, 0.22);
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-size: calc(10.5px * var(--kbn-type-scale, 1));
+  line-height: 1.3;
+  font-style: italic;
+  color: #A89B83;
+}
+
+/* The words. Quoted material, set as quoted material: the same hairline rule
+   the note sits under, then one line per turn, marked by voice. Each line is
+   clamped to three lines of text — an excerpt is a reminder of what was said,
+   and a tooltip that grows into a transcript stops being a tooltip. */
+.kbn-tip-said {
+  margin-top: 4px;
+  padding-top: 3px;
+  border-top: 0.5px solid rgba(122, 111, 92, 0.22);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.kbn-tip-line {
+  display: flex;
+  gap: 5px;
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-size: calc(11px * var(--kbn-type-scale, 1));
+  line-height: 1.32;
+  color: #2A231A;
+  text-align: left;
+}
+.kbn-tip-glyph {
+  flex: 0 0 auto;
+  font-family: var(--font-mono, 'IBM Plex Mono', monospace);
+  font-size: calc(9px * var(--kbn-type-scale, 1));
+  line-height: 1.6;
+  color: #A89B83;
+}
+.kbn-tip-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+/* Who spoke, in ink weight rather than in a name: the human's own words carry
+   the page's full iron-gall, the agent's sit a shade back, a machine notice
+   further still. */
+.kbn-tip-line-user .kbn-tip-text { color: #1B1611; }
+.kbn-tip-line-assistant .kbn-tip-text { color: #4A4136; }
+.kbn-tip-line-notification .kbn-tip-text { font-style: italic; color: #7A6F5C; }

@@ -984,6 +984,49 @@ describe('the raster tick knows whose minute it was', () => {
     expect(slots[0].shuttle).toBe(false);
   });
 
+  it('carries the slot’s transcripts, deduped, so a hover knows where to ask', () => {
+    const bounds = railBounds('2026-08-12');
+    // Two minutes of one session, one of another, all inside the same slot.
+    const ledger = new Map([
+      ['w-1', { fiber: 'fiber/ship-it', uid: null, session: 'sess-a', host: 'ada' }],
+      ['w-2', { fiber: 'fiber/notes', uid: null, session: 'sess-b', host: 'ada' }],
+    ]);
+    const index = buildOriginIndex(
+      [
+        card({ id: 'fiber/ship-it', name: 'ship it', runningWorker: 'w-1' }),
+        card({ id: 'fiber/notes', name: 'notes', runningWorker: 'w-2' }),
+      ],
+      ledger,
+    );
+    const slot = rasterSlots(
+      [
+        bucket({ m: bounds.startMs, s: 'w-1' }),
+        bucket({ m: bounds.startMs + 60_000, s: 'w-1' }),
+        bucket({ m: bounds.startMs + 60_000, s: 'w-2', k: 'notify' }),
+      ],
+      bounds,
+      bounds.endMs,
+      origin(index),
+    )[0];
+    // The bucket carries no host of its own, so the ledger's stands — which is
+    // still a recorded fact about where the transcript is.
+    expect(slot.sources).toEqual([
+      { session: 'sess-a', host: 'ada' },
+      { session: 'sess-b', host: 'ada' },
+    ]);
+  });
+
+  it('has no transcript to offer for a minute the ledger never paired', () => {
+    const bounds = railBounds('2026-08-12');
+    const slot = rasterSlots(
+      [bucket({ m: bounds.startMs, s: 'stray-session' })],
+      bounds,
+      bounds.endMs,
+      origin(noJoin),
+    )[0];
+    expect(slot.sources).toEqual([]);
+  });
+
   it('folds a home directory to ~ and keeps two segments of anything else', () => {
     expect(shortCwd('/Users/cail/dev/felt')).toBe('~/dev/felt');
     expect(shortCwd('/home/cail')).toBe('~');
@@ -1019,14 +1062,22 @@ describe('what a hovered slot is willing to say', () => {
     expect(tip.time).toContain('–');
   });
 
-  it('says plainly that the words were never kept, and leaves room for them', () => {
+  it('says plainly that the words were never kept until they are recovered', () => {
     const slot = slotOf([bucket({ m: bounds.startMs })]);
+    // No transcript yet — and while none has come back, the note is the truth.
     expect(slotTip(slot).detail).toBeUndefined();
     expect(SLOT_NO_TEXT_NOTE).toMatch(/not the words/);
-    // The seam a later transcript or narration join fills. Nothing sources it
-    // today; the shape is here so that when something does, only the source
-    // has to change.
-    expect(slotTip(slot, 'refactor the fold').detail).toBe('refactor the fold');
+
+    // What `/api/v1/moment` recovered, carried through verbatim.
+    const words = {
+      excerpts: [{ at_ms: bounds.startMs, role: 'user' as const, text: 'refactor the fold' }],
+    };
+    expect(slotTip(slot, words).detail).toEqual(words.excerpts);
+
+    // A remote that could not be read says where the words live instead.
+    expect(slotTip(slot, { excerpts: [], note: 'words live on candide' }).note).toBe(
+      'words live on candide',
+    );
   });
 
   it('carries the constitution flag onto the tooltip line it belongs to', () => {

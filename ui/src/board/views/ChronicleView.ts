@@ -39,7 +39,7 @@ import { normalizeFocusDate, registerView, type TemporalView, type ViewContext }
 import { createViewEmptyState, createViewPage } from './ViewPage.js'
 import { cardPathSegments, cardUlids, sessionSlug, sessionUlid } from './sessionNames.js'
 import { ACTIVITY_KEY_ITEMS, MARK_GLYPH } from './vocabulary.js'
-import { civilDayNoon, formatSpanMinutes, shiftCivilDay } from './railTime.js'
+import { civilDayNoon, formatSpanMinutes, railBounds, shiftCivilDay } from './railTime.js'
 import {
   buildSessionIndex,
   foldActiveMinutes,
@@ -315,7 +315,52 @@ export interface DayCell {
   agent: number
   attention: number
   notify: number
+  /**
+   * WHERE in the rail the steering happened, as fractions of the rail's own
+   * length — one entry per SPELL, not per minute. A day's agent work is a
+   * density, so one segment per column says everything; a steering mark is an
+   * event, and an event collapsed to the column's midpoint claims a time that
+   * never happened. Two spells an evening apart are two ticks.
+   */
+  attentionAt: number[]
+  /** The same, for the moments the fiber raised its hand. */
+  notifyAt: number[]
 }
+
+/** Minute-ms stamps folded into spells, then each spell placed at its own
+ *  midpoint as a fraction of the rail `[startMs, endMs)`. ADJACENT minutes only
+ *  — a 40-minute sitting is one tick, a gap of even one idle minute is two.
+ *  Sorted, deduplicated, and clamped inside the column. */
+export function spellFractions(
+  minuteMs: readonly number[],
+  day: string,
+): number[] {
+  const { startMs, endMs } = railBounds(day)
+  const span = endMs - startMs
+  if (!(span > 0) || minuteMs.length === 0) return []
+  const sorted = [...new Set(minuteMs)].sort((a, b) => a - b)
+  const out: number[] = []
+  let lo = sorted[0]
+  let hi = sorted[0]
+  const flush = () => {
+    // The spell covers its last minute too, so the midpoint of [lo, hi+1min).
+    const mid = (lo + hi + MINUTE_MS) / 2
+    out.push(clamp((mid - startMs) / span, 0, 1))
+  }
+  for (const m of sorted.slice(1)) {
+    if (m - hi <= MINUTE_MS) {
+      hi = m
+      continue
+    }
+    flush()
+    lo = m
+    hi = m
+  }
+  flush()
+  return out
+}
+
+const MINUTE_MS = 60_000
 
 /**
  * Fold buckets into civil days by their LOCAL day. Never by `m / 86_400_000`:
@@ -325,18 +370,33 @@ export interface DayCell {
  */
 export function aggregateByCivilDay(buckets: readonly ActivityBucket[]): Map<string, DayCell> {
   const out = new Map<string, DayCell>()
+  // The minute stamps behind the two event kinds, kept per day until the whole
+  // day is in hand — spells can only be found once the neighbours are known.
+  const stamps = new Map<string, { attention: number[]; notify: number[] }>()
   for (const b of buckets) {
     if (!Number.isFinite(b.m)) continue
     const day = railCivilDay(b.m)
     let cell = out.get(day)
     if (!cell) {
-      cell = { agent: 0, attention: 0, notify: 0 }
+      cell = { agent: 0, attention: 0, notify: 0, attentionAt: [], notifyAt: [] }
       out.set(day, cell)
+      stamps.set(day, { attention: [], notify: [] })
     }
     const n = Number.isFinite(b.n) ? Math.max(b.n, 1) : 1
+    const at = stamps.get(day)!
     if (b.k === 'agent') cell.agent += n
-    else if (b.k === 'attention') cell.attention += n
-    else cell.notify += n
+    else if (b.k === 'attention') {
+      cell.attention += n
+      at.attention.push(b.m)
+    } else {
+      cell.notify += n
+      at.notify.push(b.m)
+    }
+  }
+  for (const [day, cell] of out) {
+    const at = stamps.get(day)!
+    cell.attentionAt = spellFractions(at.attention, day)
+    cell.notifyAt = spellFractions(at.notify, day)
   }
   return out
 }
@@ -891,6 +951,21 @@ function monthBearing(day: string, nowYear: number): string {
 /** `left` for a mark sitting in day column `idx`. */
 function colLeft(idx: number): string {
   return `calc(var(--chr-day-w) * ${idx})`
+}
+
+/** `left` for a mark `frac` of the way THROUGH day column `idx`. */
+function colLeftAt(idx: number, frac: number): string {
+  return `calc(var(--chr-day-w) * ${(idx + clamp(frac, 0, 1)).toFixed(4)})`
+}
+
+/**
+ * Where a cell's event ticks go. Normally the spell midpoints the aggregation
+ * found; a cell that carries a count but no stamps — a hand-built cell, an
+ * older cached shape — still gets its one centered tick rather than vanishing.
+ */
+function spellPositions(at: readonly number[], count: number): readonly number[] {
+  if (at.length > 0) return at
+  return count > 0 ? [0.5] : []
 }
 
 // ── The view ─────────────────────────────────────────────────────────────────
@@ -2470,13 +2545,14 @@ class ChronicleView implements TemporalView {
   ): HTMLElement[] {
     const gridRow = String(r + 2)
 
-    // The muted register is the kanban's, class for class: a row whose only
-    // origin is out of contact is showing last-known-good, exactly as a stale
-    // card does, and two vocabularies for one condition would be one too many.
-    const stale = row.waitingOn !== null ? ' kbn-card--stale' : ''
+    // A row whose only origin is out of contact is showing last-known-good. The
+    // register is the Desk's — dimmed, with the ⌛ badge — but the classes are
+    // the chronicle's own: a card's stale styling is a border and a ground, and
+    // a one-line row has neither. See the note in ChronicleView.css.
+    const waiting = row.waitingOn !== null
 
     const label = document.createElement('div')
-    label.className = `chr-label${row.live ? ' chr-label-live' : ''}${stale}`
+    label.className = `chr-label${row.live ? ' chr-label-live' : ''}${waiting ? ' chr-label-waiting' : ''}`
     label.style.gridColumn = '1'
     label.style.gridRow = gridRow
 
@@ -2506,7 +2582,7 @@ class ChronicleView implements TemporalView {
     label.append(name, note, span)
 
     const track = document.createElement('div')
-    track.className = `chr-track${stale}`
+    track.className = `chr-track${waiting ? ' chr-track-waiting' : ''}`
     track.style.gridColumn = `2 / span ${days.length}`
     track.style.gridRow = gridRow
 
@@ -2525,16 +2601,18 @@ class ChronicleView implements TemporalView {
         seg.style.left = colLeft(idx)
         track.append(seg)
       }
-      if (cell.attention > 0) {
+      // Steering and hand-raising are placed at the hour they happened, not at
+      // the column's midpoint: one tick per spell, at its own time of day.
+      for (const frac of spellPositions(cell.attentionAt, cell.attention)) {
         const tick = document.createElement('div')
         tick.className = 'chr-att'
-        tick.style.left = colLeft(idx)
+        tick.style.left = colLeftAt(idx, frac)
         track.append(tick)
       }
-      if (cell.notify > 0) {
+      for (const frac of spellPositions(cell.notifyAt, cell.notify)) {
         const dot = document.createElement('div')
         dot.className = 'chr-notify'
-        dot.style.left = colLeft(idx)
+        dot.style.left = colLeftAt(idx, frac)
         track.append(dot)
       }
     }

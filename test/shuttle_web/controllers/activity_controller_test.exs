@@ -4,10 +4,12 @@ defmodule ShuttleWeb.ActivityControllerTest do
   histogram the temporal view polls.
 
   The reader (`Shuttle.Activity`) is exercised against fixture `events.jsonl`
-  files covering bucket aggregation, the three-way kind mapping, window bounds,
-  nil session/cwd, malformed-line tolerance, and the mtime gate that decides
-  whether the rotated `events.jsonl.1` is read at all. The controller's tests
-  point `$SHUTTLE_EVENTS_FILE` at those fixtures and cover the 400s.
+  files covering bucket aggregation, the three-way kind mapping, waiting-spell
+  collapse (a `"notify"` mark is the onset of an ask, not a repeat of it),
+  window bounds, nil session/cwd, malformed-line tolerance, and the mtime gate
+  that decides whether the rotated `events.jsonl.1` is read at all. The
+  controller's tests point `$SHUTTLE_EVENTS_FILE` at those fixtures and cover
+  the 400s.
   """
   use ExUnit.Case
   import Plug.Conn
@@ -133,6 +135,125 @@ defmodule ShuttleWeb.ActivityControllerTest do
       by_kind = Map.new(buckets!(path, @t0, @t0 + @minute), &{&1.k, &1.n})
 
       assert by_kind == %{"attention" => 1, "notify" => 1, "agent" => 7}
+    end
+  end
+
+  describe "Shuttle.Activity.buckets/3 — waiting spells" do
+    # A notify mark is the ONSET of a waiting spell, not a notification. Claude
+    # Code re-fires the idle notification every minute; those repeats are the
+    # same unanswered ask.
+    test "repeat notifications inside one spell collapse to a single onset" do
+      path =
+        write_fixture(
+          for i <- 0..9, do: event(%{"timestamp" => @t0 + i * @minute, "type" => "notification"})
+        )
+
+      assert buckets!(path, @t0, @t0 + 10 * @minute) == [
+               %{m: @t0, s: @session, cwd: @cwd, k: "notify", n: 1}
+             ]
+    end
+
+    test "a user prompt closes the spell, so the next notification is a new onset" do
+      path =
+        write_fixture([
+          event(%{"timestamp" => @t0, "type" => "notification"}),
+          event(%{"timestamp" => @t0 + @minute, "type" => "notification"}),
+          event(%{"timestamp" => @t0 + 2 * @minute, "type" => "user_prompt_submit"}),
+          event(%{"timestamp" => @t0 + 3 * @minute, "type" => "notification"})
+        ])
+
+      assert buckets!(path, @t0, @t0 + 4 * @minute) == [
+               %{m: @t0, s: @session, cwd: @cwd, k: "notify", n: 1},
+               %{m: @t0 + 2 * @minute, s: @session, cwd: @cwd, k: "attention", n: 1},
+               %{m: @t0 + 3 * @minute, s: @session, cwd: @cwd, k: "notify", n: 1}
+             ]
+    end
+
+    test "agent activity closes the spell too — a permission granted elsewhere" do
+      path =
+        write_fixture([
+          event(%{"timestamp" => @t0, "type" => "notification"}),
+          event(%{"timestamp" => @t0 + @minute, "type" => "post_tool_use"}),
+          event(%{"timestamp" => @t0 + 2 * @minute, "type" => "notification"})
+        ])
+
+      assert Enum.filter(buckets!(path, @t0, @t0 + 3 * @minute), &(&1.k == "notify")) == [
+               %{m: @t0, s: @session, cwd: @cwd, k: "notify", n: 1},
+               %{m: @t0 + 2 * @minute, s: @session, cwd: @cwd, k: "notify", n: 1}
+             ]
+    end
+
+    test "two onsets inside one minute count twice in the same bucket" do
+      path =
+        write_fixture([
+          event(%{"type" => "notification"}),
+          event(%{"timestamp" => @t0 + 1_000, "type" => "stop"}),
+          event(%{"timestamp" => @t0 + 2_000, "type" => "notification"})
+        ])
+
+      assert %{m: @t0, s: @session, cwd: @cwd, k: "notify", n: 2} in buckets!(
+               path,
+               @t0,
+               @t0 + @minute
+             )
+    end
+
+    test "each identity holds its own spell, and an unattributed event holds a third" do
+      unattributed = fn ts ->
+        event(%{"timestamp" => ts, "type" => "notification", "tmuxSession" => "", "cwd" => ""})
+      end
+
+      path =
+        write_fixture([
+          event(%{"type" => "notification"}),
+          event(%{"type" => "notification", "tmuxSession" => @other_session}),
+          unattributed.(@t0),
+          # Every one of these is a repeat of its own identity's spell.
+          event(%{"timestamp" => @t0 + @minute, "type" => "notification"}),
+          event(%{
+            "timestamp" => @t0 + @minute,
+            "type" => "notification",
+            "tmuxSession" => @other_session
+          }),
+          unattributed.(@t0 + @minute)
+        ])
+
+      buckets = buckets!(path, @t0, @t0 + 2 * @minute)
+
+      assert length(buckets) == 3
+      assert Enum.all?(buckets, &(&1.m == @t0 and &1.k == "notify" and &1.n == 1))
+      assert Enum.map(buckets, & &1.s) == [nil, @session, @other_session]
+    end
+
+    test "a spell open before the window suppresses its first in-window notification" do
+      path =
+        write_fixture([
+          event(%{"timestamp" => @t0 - 5 * @minute, "type" => "notification"}),
+          event(%{"timestamp" => @t0, "type" => "notification"}),
+          event(%{"timestamp" => @t0 + @minute, "type" => "user_prompt_submit"}),
+          event(%{"timestamp" => @t0 + 2 * @minute, "type" => "notification"})
+        ])
+
+      # The onset happened before the window; only the post-answer ask is new.
+      assert buckets!(path, @t0, @t0 + 3 * @minute) == [
+               %{m: @t0 + @minute, s: @session, cwd: @cwd, k: "attention", n: 1},
+               %{m: @t0 + 2 * @minute, s: @session, cwd: @cwd, k: "notify", n: 1}
+             ]
+    end
+
+    test "events after the window neither tally nor move spell state" do
+      # to_ms cuts the stream: the fold stops contributing there, so a one-minute
+      # window sees only the onset.
+      path =
+        write_fixture([
+          event(%{"timestamp" => @t0, "type" => "notification"}),
+          event(%{"timestamp" => @t0 + @minute, "type" => "stop"}),
+          event(%{"timestamp" => @t0 + 2 * @minute, "type" => "notification"})
+        ])
+
+      assert buckets!(path, @t0, @t0) == [
+               %{m: @t0, s: @session, cwd: @cwd, k: "notify", n: 1}
+             ]
     end
   end
 

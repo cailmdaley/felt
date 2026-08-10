@@ -30,6 +30,7 @@ import {
   groupNarration,
   lifelineExtent,
   railDate,
+  spellFractions,
   readCycleBand,
   rowWaitingOn,
   type CycleCard,
@@ -37,7 +38,7 @@ import {
   shuttleOrigin,
 } from './ChronicleView.js'
 import { sessionSlug, sessionUlid } from './sessionNames.js'
-import { formatSpanMinutes } from './railTime.js'
+import { formatSpanMinutes, railBounds } from './railTime.js'
 import { buildSessionIndex, foldActiveMinutes } from './TemporalData.js'
 import type { ActivityBucket } from './TemporalData.js'
 import type { KanbanCard } from '../KanbanTypes.js'
@@ -169,7 +170,12 @@ describe('attributing activity to fibers', () => {
   // Rung 0. The ledger is a recorded fact about whose work a session was; every
   // rung below it is an inference from a name.
   const ledger = (pairs: Record<string, { fiber: string; uid?: string }>) =>
-    new Map(Object.entries(pairs).map(([k, v]) => [k, { fiber: v.fiber, uid: v.uid ?? null }]))
+    new Map(
+      Object.entries(pairs).map(([k, v]) => [
+        k,
+        { fiber: v.fiber, uid: v.uid ?? null, session: `sess-${k}`, host: null },
+      ]),
+    )
 
   it('joins through the session ledger before trying any name', () => {
     // A session with no ULID and a cwd that names nothing — unreachable by the
@@ -442,7 +448,58 @@ describe('folding buckets into civil days', () => {
       bucket(localMs(DST_DAY, 14), { k: 'agent', n: 7 }),
     ])
     const cell = days.get(isoDayLocal(localMs(DST_DAY, 12)))
-    expect(cell).toEqual({ agent: 19, attention: 1, notify: 1 })
+    expect(cell?.agent).toBe(19)
+    expect(cell?.attention).toBe(1)
+    expect(cell?.notify).toBe(1)
+  })
+
+  // A steering mark is an EVENT: collapsing a day's minutes to one centered
+  // tick invents a time that never happened, and hides a second sitting.
+  it('places each steering spell at its own time of day, and keeps two apart', () => {
+    const days = aggregateByCivilDay([
+      // 10:00 and 10:01 — one sitting, one tick.
+      bucket(localMs(DST_DAY, 10, 0), { k: 'attention' }),
+      bucket(localMs(DST_DAY, 10, 1), { k: 'attention' }),
+      // 21:00 — the evening again, a second tick.
+      bucket(localMs(DST_DAY, 21, 0), { k: 'attention' }),
+    ])
+    const cell = days.get(isoDayLocal(localMs(DST_DAY, 12)))!
+    expect(cell.attention).toBe(3)
+    expect(cell.attentionAt).toHaveLength(2)
+    // Both fractions are measured against the rail this day actually has —
+    // 23h on the spring transition, 25h in autumn — so they are checked by
+    // reconstructing the instant rather than by a hardcoded number.
+    const { startMs, endMs } = railBounds(isoDayLocal(localMs(DST_DAY, 12)))
+    const at = (f: number) => new Date(startMs + f * (endMs - startMs))
+    expect(at(cell.attentionAt[0]).getHours()).toBe(10)
+    expect(at(cell.attentionAt[1]).getHours()).toBe(21)
+    // Ordered, and both strictly inside the column.
+    expect(cell.attentionAt[0]).toBeLessThan(cell.attentionAt[1])
+    for (const f of cell.attentionAt) {
+      expect(f).toBeGreaterThan(0)
+      expect(f).toBeLessThan(1)
+    }
+  })
+
+  it('gives a pre-dawn spell its place on the PREVIOUS rail, past the far end', () => {
+    // 01:30 belongs to yesterday's rail, and sits 19.5h into it — the far
+    // right of that column, not its middle.
+    const days = aggregateByCivilDay([bucket(localMs(DST_DAY, 1, 30), { k: 'notify' })])
+    const yesterday = isoDayLocal(localMs({ ...DST_DAY, d: DST_DAY.d - 1 }, 12))
+    const cell = days.get(yesterday)!
+    expect(cell.notifyAt).toHaveLength(1)
+    expect(cell.notifyAt[0]).toBeGreaterThan(0.75)
+  })
+
+  it('folds only ADJACENT minutes into one spell', () => {
+    const day = isoDayLocal(localMs(DST_DAY, 12))
+    // Contiguous run, given out of order and with a repeat.
+    const run = [11, 9, 10, 10].map((min) => localMs(DST_DAY, 14, min))
+    expect(spellFractions(run, day)).toHaveLength(1)
+    // One idle minute in the middle is two spells.
+    expect(spellFractions([localMs(DST_DAY, 14, 9), localMs(DST_DAY, 14, 11)], day)).toHaveLength(2)
+    expect(spellFractions([], day)).toEqual([])
+    expect(spellFractions([localMs(DST_DAY, 14)], 'not-a-day')).toEqual([])
   })
 
   it('ignores a bucket with an unusable timestamp', () => {

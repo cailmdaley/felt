@@ -60,8 +60,25 @@ import {
   buildOriginIndex,
   originOf,
   type BucketOrigin,
+  type MomentSource,
   type OriginIndex,
 } from './activityOrigin.js'
+import {
+  clockTime,
+  dedupeSources,
+  MomentLoader,
+  renderTip,
+  SLOT_KIND_ORDER,
+  SLOT_NO_TEXT_NOTE,
+  SLOT_PHRASE,
+  type MomentWords,
+  type SlotTip,
+  type SlotTipRow,
+} from './momentTip.js'
+
+// Re-exported because the tooltip vocabulary was Week's before it was shared,
+// and callers (and tests) that learned it here keep working.
+export { SLOT_NO_TEXT_NOTE, type SlotTip, type SlotTipRow }
 import type { KanbanCard } from '../KanbanTypes.js'
 import { cycleSpan, type CycleSpan } from '../KanbanRules.js'
 import {
@@ -665,6 +682,15 @@ class WeekView implements TemporalView {
    *  rails rather than the page. */
   private tip: HTMLElement | null = null
 
+  /** The slot the pointer is on (`<civil day>:<slot index>`), and the loader
+   *  that fetches its words. The key is what a late answer is checked against. */
+  private hoveredKey: string | null = null
+  private moments = new MomentLoader((session, fromMs, toMs, host) =>
+    this.ctx
+      ? this.ctx.moment(session, fromMs, toMs, host)
+      : Promise.resolve({ host: host ?? '', excerpts: [] }),
+  )
+
   /**
    * ‹ › paging, and `t` for today — the same binding DayView carries, so one
    * key means "back to now" wherever you are in the temporal views.
@@ -951,9 +977,18 @@ class WeekView implements TemporalView {
     }
     if (!best || bestPx > HOVER_SNAP_PX) return this.hideTip()
 
+    const slot = best
     const tip = this.ensureTip()
-    renderTip(tip, slotTip(best))
-    tip.classList.add('wk-tip-open')
+    const key = `${row.day}:${slot.index}`
+    renderTip(tip, slotTip(slot, this.moments.peek(key)))
+    // The words arrive late or not at all; the tooltip is already correct
+    // without them, and redraws in place when they land.
+    this.moments.request(key, slot.sources, slot.startMs, slot.endMs, (words) => {
+      if (this.hoveredKey !== key) return
+      renderTip(tip, slotTip(slot, words))
+    })
+    this.hoveredKey = key
+    tip.classList.add('kbn-tip-open')
 
     // Positioned against the grid, and flipped at the right edge so a slot late
     // in the day does not push the tooltip off the sheet.
@@ -961,7 +996,7 @@ class WeekView implements TemporalView {
     const anchor = rail.left - box.left + best.fraction * rail.width
     const top = rail.top - box.top
     tip.style.top = `${top}px`
-    tip.classList.toggle('wk-tip-flip', anchor > box.width * 0.62)
+    tip.classList.toggle('kbn-tip-flip', anchor > box.width * 0.62)
     tip.style.left = anchor > box.width * 0.62 ? 'auto' : `${anchor + 9}px`
     tip.style.right = anchor > box.width * 0.62 ? `${box.width - anchor + 9}px` : 'auto'
   }
@@ -969,14 +1004,16 @@ class WeekView implements TemporalView {
   private ensureTip(): HTMLElement {
     if (this.tip?.isConnected) return this.tip
     const tip = document.createElement('div')
-    tip.className = 'wk-tip'
+    tip.className = 'kbn-tip'
     this.grid?.append(tip)
     this.tip = tip
     return tip
   }
 
   private hideTip(): void {
-    this.tip?.classList.remove('wk-tip-open')
+    this.tip?.classList.remove('kbn-tip-open')
+    this.hoveredKey = null
+    this.moments.cancel()
   }
 
   // ── Data ───────────────────────────────────────────────────────────────────
@@ -1327,6 +1364,10 @@ export interface RasterSlot {
   /** Any kind in the slot is constitution-driven — the flag the tick's line
    *  style reads. */
   shuttle: boolean
+  /** The transcripts behind this slot's minutes, deduped — what the hover asks
+   *  `/api/v1/moment` for. Empty when nothing in the slot joined a recorded
+   *  session, which is exactly when the words cannot be recovered. */
+  sources: MomentSource[]
 }
 
 /**
@@ -1346,6 +1387,10 @@ export function rasterSlots(
   if (span <= 0) return []
 
   const byIndex = new Map<number, Map<ActivityBucket['k'], SlotKind>>()
+  // Which transcripts the slot's minutes came out of — the hover's route to
+  // the words. Kept beside the kinds rather than inside them: a slot's words
+  // are the slot's, whichever pigment the minute happened to be drawn in.
+  const sourcesByIndex = new Map<number, (MomentSource | null)[]>()
   for (const b of buckets) {
     if (b.m > cutoffMs) continue
     const index = Math.floor((b.m - bounds.startMs) / RASTER_SLOT_MS)
@@ -1364,6 +1409,12 @@ export function rasterSlots(
     const who = origin(b)
     if (!entry.where.includes(who.label)) entry.where.push(who.label)
     if (who.shuttle) entry.shuttle = true
+    let found = sourcesByIndex.get(index)
+    if (!found) {
+      found = []
+      sourcesByIndex.set(index, found)
+    }
+    found.push(who.source)
   }
 
   const slots: RasterSlot[] = []
@@ -1377,65 +1428,23 @@ export function rasterSlots(
       fraction: (index + 0.5) * RASTER_SLOT_MS / span,
       kinds: list,
       shuttle: list.some((k) => k.shuttle),
+      sources: dedupeSources(sourcesByIndex.get(index) ?? []),
     })
   }
   return slots.sort((a, b) => a.index - b.index)
-}
-
-/** What each raster kind means when a person hovers it — the second person,
- *  because a tooltip is answering "what was I doing here?". Shares its claims
- *  with `ACTIVITY_KEY_ITEMS`; the wording is closer in. */
-const SLOT_PHRASE: Record<ActivityBucket['k'], string> = {
-  attention: 'you prompted',
-  notify: 'needed you',
-  agent: 'agent working',
-}
-
-/**
- * The honest note under every tooltip.
- *
- * THE ACTIVITY PLANE HOLDS NO TEXT. A bucket is `{m, s, cwd, k, n}` — a minute,
- * a session, a directory, a kind, a count — so the message that was sent or
- * received that minute is simply not recorded anywhere this view can read. The
- * tooltip therefore says who, when and how much, and says plainly that the
- * words are gone rather than inventing a plausible sentence.
- */
-export const SLOT_NO_TEXT_NOTE = 'the minute is recorded, not the words'
-
-export interface SlotTipRow {
-  /** The pigment this line is about, so the tooltip speaks the rail's colours
-   *  rather than restating them in words alone. */
-  kind: ActivityBucket['k']
-  phrase: string
-  where: string
-  count: number
-  shuttle: boolean
-}
-
-export interface SlotTip {
-  /** `14:32–14:36`, the slot's own span. */
-  time: string
-  rows: SlotTipRow[]
-  /** Recovered text, when a source for it ever exists (a transcript index, a
-   *  narration join). Absent today — see {@link SLOT_NO_TEXT_NOTE} — and the
-   *  renderer draws the note in its place. */
-  detail?: string
-}
-
-/** `14:32` in the browser's zone. */
-function clockTime(ms: number): string {
-  return new Date(ms).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
 }
 
 /**
  * One slot as words. Kinds read strongest-signal first — a hand raised, then a
  * human steering, then the agent work underneath both — which is the order the
  * ink is layered in, read top to bottom.
+ *
+ * `words` are what `/api/v1/moment` recovered for the slot, when anything was;
+ * with none the renderer draws the honest note instead.
  */
-export function slotTip(slot: RasterSlot, detail?: string): SlotTip {
-  const order: ActivityBucket['k'][] = ['notify', 'attention', 'agent']
+export function slotTip(slot: RasterSlot, words?: MomentWords): SlotTip {
   const rows: SlotTipRow[] = []
-  for (const kind of order) {
+  for (const kind of SLOT_KIND_ORDER) {
     const entry = slot.kinds.find((k) => k.kind === kind)
     if (!entry) continue
     rows.push({
@@ -1449,63 +1458,9 @@ export function slotTip(slot: RasterSlot, detail?: string): SlotTip {
   return {
     time: `${clockTime(slot.startMs)}–${clockTime(slot.endMs)}`,
     rows,
-    ...(detail ? { detail } : {}),
+    ...(words?.excerpts.length ? { detail: words.excerpts } : {}),
+    ...(words?.note ? { note: words.note } : {}),
   }
-}
-
-/**
- * Draw one tooltip. Rebuilt rather than patched — it is one small subtree, and
- * a hover that moves between slots must never show a stale half of the last one.
- *
- * The shape is the honest shape of what is known: a time span, then one line per
- * pigment saying who and how much, then either recovered text (`detail`, for
- * which nothing is a source yet) or the note that the words were never kept.
- * Structured this way so a later transcript or narration join fills `detail` and
- * nothing else here has to move.
- */
-function renderTip(host: HTMLElement, tip: SlotTip): void {
-  host.textContent = ''
-
-  const when = document.createElement('div')
-  when.className = 'wk-tip-time'
-  when.textContent = tip.time
-  host.append(when)
-
-  for (const row of tip.rows) {
-    const line = document.createElement('div')
-    line.className = 'wk-tip-row'
-
-    const swatch = document.createElement('span')
-    swatch.className = `wk-tip-swatch wk-key-${row.kind}${row.shuttle ? ' wk-tip-swatch-const' : ''}`
-    line.append(swatch)
-
-    const phrase = document.createElement('span')
-    phrase.className = 'wk-tip-phrase'
-    phrase.textContent = row.phrase
-    line.append(phrase)
-
-    if (row.where) {
-      const where = document.createElement('span')
-      where.className = 'wk-tip-where'
-      where.textContent = row.where
-      line.append(where)
-    }
-
-    // A count of 1 is what a single event looks like; printing "×1" would make
-    // every ordinary minute look like it had been measured.
-    if (row.count > 1) {
-      const count = document.createElement('span')
-      count.className = 'wk-tip-count'
-      count.textContent = `×${row.count}`
-      line.append(count)
-    }
-    host.append(line)
-  }
-
-  const foot = document.createElement('div')
-  foot.className = tip.detail ? 'wk-tip-detail' : 'wk-tip-note'
-  foot.textContent = tip.detail ?? SLOT_NO_TEXT_NOTE
-  host.append(foot)
 }
 
 /**

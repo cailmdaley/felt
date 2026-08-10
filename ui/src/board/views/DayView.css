@@ -140,6 +140,10 @@
   row-gap: 4px;
   align-items: center;
   padding: 7px 2px 0;
+  /* The hover tooltip is parented here and positioned against this box, so it
+     tracks the rails rather than the page. Same arrangement Week uses for its
+     grid; the slip itself is styled in momentTip.css. */
+  position: relative;
 }
 
 .kbn-day-grid {

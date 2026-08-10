@@ -71,6 +71,18 @@ import {
   type TemporalView,
   type ViewContext,
 } from './ViewRegistry.js'
+import {
+  clockTime,
+  dedupeSources,
+  MomentLoader,
+  renderTip,
+  SLOT_KIND_ORDER,
+  SLOT_PHRASE,
+  type MomentSource,
+  type MomentWords,
+  type SlotTip,
+  type SlotTipRow,
+} from './momentTip.js'
 import './DayView.css'
 
 // ── Shape of a day ───────────────────────────────────────────────────────────
@@ -312,6 +324,26 @@ export interface DayLane {
   agentMinutes: number
   /** Distinct active minutes, of any kind — the lane's weight. */
   weight: number
+  /**
+   * What actually happened, minute by minute, oldest first — the HOVER's ground
+   * truth.
+   *
+   * The runs above are drawing spans: they bridge up to five idle minutes so a
+   * work run reads as one stroke. Perfect for ink, useless for a tooltip, which
+   * must never report a bridged minute as work. So the beats are kept
+   * unmerged, each carrying its own counts and its own transcripts.
+   */
+  beats: DayBeat[]
+}
+
+/** One minute of a lane: what happened in it, and where its words are. */
+export interface DayBeat {
+  /** Index into the day window, as the rail measures it. */
+  minute: number
+  kinds: { kind: ActivityBucket['k']; count: number }[]
+  /** The transcripts behind this minute — what the hover asks
+   *  `/api/v1/moment` for. Empty when the minute joined no recorded session. */
+  sources: MomentSource[]
 }
 
 export interface DayTotals {
@@ -542,6 +574,7 @@ export function buildDayLanes(
       | 'attentionMinutes'
       | 'agentMinutes'
       | 'weight'
+      | 'beats'
       | 'host'
       | 'hostNote'
       | 'stale'
@@ -553,6 +586,8 @@ export function buildDayLanes(
     attention: Set<number>
     notify: Set<number>
     all: Set<number>
+    /** Per-minute counts and transcripts, unmerged — see `DayLane.beats`. */
+    beats: Map<number, { kinds: Map<ActivityBucket['k'], number>; sources: (MomentSource | null)[] }>
   }
   const acc = new Map<string, Acc>()
 
@@ -578,6 +613,7 @@ export function buildDayLanes(
         attention: new Set(),
         notify: new Set(),
         all: new Set(),
+        beats: new Map(),
       }
       acc.set(key, entry)
     }
@@ -593,6 +629,19 @@ export function buildDayLanes(
     if (bucket.k === 'agent') entry.agent.add(minute)
     else if (bucket.k === 'attention') entry.attention.add(minute)
     else entry.notify.add(minute)
+
+    let beat = entry.beats.get(minute)
+    if (!beat) {
+      beat = { kinds: new Map(), sources: [] }
+      entry.beats.set(minute, beat)
+    }
+    beat.kinds.set(bucket.k, (beat.kinds.get(bucket.k) ?? 0) + bucket.n)
+    // Rung 0 again, for a different purpose: the pairing that names this
+    // minute's fiber also names the session whose transcript holds its words.
+    const pairing = byTmux ? lookupTmux(byTmux, bucket.host, bucket.s) : undefined
+    beat.sources.push(
+      pairing?.session ? { session: pairing.session, host: bucket.host ?? pairing.host ?? null } : null,
+    )
   }
 
   const lanes: DayLane[] = [...acc.values()].map((entry) => {
@@ -608,6 +657,13 @@ export function buildDayLanes(
       attentionMinutes: entry.attention.size,
       agentMinutes: entry.agent.size,
       weight: entry.all.size,
+      beats: [...entry.beats.entries()]
+        .map(([minute, beat]) => ({
+          minute,
+          kinds: [...beat.kinds.entries()].map(([kind, count]) => ({ kind, count })),
+          sources: dedupeSources(beat.sources),
+        }))
+        .sort((a, b) => a.minute - b.minute),
     }
   })
 
@@ -1116,6 +1172,48 @@ function buildKey(glyphClass: string, text: string): HTMLElement {
   return item
 }
 
+/** Pixels a pointer may be from a minute and still be asking about it. Day's
+ *  rails are wide — a whole day across the sheet — so the snap is generous
+ *  enough that the marks are hoverable rather than a game of aim. */
+const BEAT_SNAP_PX = 9
+
+/**
+ * One lane-minute as words, in the shared tooltip's shape.
+ *
+ * The `where` on every row is the lane's own name, because on Day the lane IS
+ * the attribution — the rail you are pointing at is already labelled with the
+ * fiber, so the row says which pigment and how much, and the label says who.
+ */
+export function beatTip(
+  lane: DayLane,
+  beat: DayBeat,
+  win: DayWindow,
+  words?: MomentWords,
+): SlotTip {
+  const startMs = win.startMs + beat.minute * MINUTE_MS
+  const rows: SlotTipRow[] = []
+  for (const kind of SLOT_KIND_ORDER) {
+    const entry = beat.kinds.find((k) => k.kind === kind)
+    if (!entry) continue
+    rows.push({
+      kind,
+      phrase: SLOT_PHRASE[kind],
+      where: lane.label,
+      count: entry.count,
+      // Day has no constitution stroke on its rails, so nothing here may claim
+      // one: the flag exists to explain a mark's weight, and an unweighted mark
+      // that wore it would be the legend lying.
+      shuttle: false,
+    })
+  }
+  return {
+    time: `${clockTime(startMs)}–${clockTime(startMs + MINUTE_MS)}`,
+    rows,
+    ...(words?.excerpts.length ? { detail: words.excerpts } : {}),
+    ...(words?.note ? { note: words.note } : {}),
+  }
+}
+
 class DayViewImpl implements TemporalView {
   readonly id = 'day' as const
   readonly title = 'Day'
@@ -1129,6 +1227,22 @@ class DayViewImpl implements TemporalView {
   private nowEl: HTMLElement | null = null
   /** The back-to-today control, hidden while today is what you are looking at. */
   private todayEl: HTMLButtonElement | null = null
+  /**
+   * The hover tooltip and the words behind it — the same slip of paper Week
+   * draws, from the same module (momentTip.ts). Parented to the chart so it
+   * positions against the rails.
+   */
+  private chartEl: HTMLElement | null = null
+  private tip: HTMLElement | null = null
+  /** The lane-minute the pointer is on (`<lane key>:<minute>`); a late answer
+   *  is checked against it before it paints. */
+  private hoveredKey: string | null = null
+  private moments = new MomentLoader((session, fromMs, toMs, host) =>
+    this.ctx
+      ? this.ctx.moment(session, fromMs, toMs, host)
+      : Promise.resolve({ host: host ?? '', excerpts: [] }),
+  )
+
   /** The previews strip, kept across renders — see buildPreviews. */
   private previewsEl: HTMLElement | null = null
   private previewsKey: string | null = null
@@ -1377,6 +1491,10 @@ class DayViewImpl implements TemporalView {
     const span = win.endMs - win.startMs
     const chart = document.createElement('div')
     chart.className = 'kbn-day-chart'
+    this.chartEl = chart
+    this.tip = null
+    this.hoveredKey = null
+    this.moments.cancel()
 
     // One gridline layer behind every rail, so the hour rules run unbroken
     // down the whole stack instead of restarting per lane.
@@ -1458,6 +1576,9 @@ class DayViewImpl implements TemporalView {
         rail.append(tick)
       }
 
+      rail.addEventListener('mousemove', (e) => this.showBeatTip(lane, rail, win, e))
+      rail.addEventListener('mouseleave', () => this.hideTip())
+
       chart.append(label, rail)
     })
 
@@ -1495,6 +1616,79 @@ class DayViewImpl implements TemporalView {
     )
     chart.append(legend)
     return chart
+  }
+
+  // ── Hover ──────────────────────────────────────────────────────────────────
+
+  /**
+   * Report the lane-minute under the pointer, or nothing.
+   *
+   * SNAPS to the nearest BEAT rather than hit-testing the ink. Two reasons, and
+   * the second is the important one: a notify tick is a hairline nobody can
+   * land on, and the washes are merged runs that bridge idle minutes — so
+   * hit-testing the drawn mark would happily report a minute in which nothing
+   * happened. The beats are the unmerged record, so snapping to them can only
+   * name a minute that is real. Empty rail — no beat within
+   * {@link BEAT_SNAP_PX} — hides the tooltip rather than answering about the
+   * nearest work on the row.
+   */
+  private showBeatTip(lane: DayLane, rail: HTMLElement, win: DayWindow, e: MouseEvent): void {
+    const chart = this.chartEl
+    if (!chart || lane.beats.length === 0) return this.hideTip()
+    const box = rail.getBoundingClientRect()
+    if (box.width <= 0 || win.minutes <= 0) return this.hideTip()
+
+    const perMinute = box.width / win.minutes
+    const x = e.clientX - box.left
+    let best: DayBeat | null = null
+    let bestPx = Infinity
+    for (const beat of lane.beats) {
+      const px = Math.abs((beat.minute + 0.5) * perMinute - x)
+      if (px < bestPx) {
+        bestPx = px
+        best = beat
+      }
+    }
+    if (!best || bestPx > BEAT_SNAP_PX) return this.hideTip()
+
+    const beat = best
+    const startMs = win.startMs + beat.minute * MINUTE_MS
+    const tip = this.ensureTip()
+    const key = `${lane.key}:${beat.minute}`
+    renderTip(tip, beatTip(lane, beat, win, this.moments.peek(key)))
+    // The words arrive late or not at all; the tooltip is already correct
+    // without them, and redraws in place when they land.
+    this.moments.request(key, beat.sources, startMs, startMs + MINUTE_MS, (words) => {
+      if (this.hoveredKey !== key) return
+      renderTip(tip, beatTip(lane, beat, win, words))
+    })
+    this.hoveredKey = key
+    tip.classList.add('kbn-tip-open')
+
+    // Positioned against the chart, and flipped past the right edge so a late
+    // minute does not push the slip off the sheet.
+    const chartBox = chart.getBoundingClientRect()
+    const anchor = box.left - chartBox.left + (beat.minute + 0.5) * perMinute
+    const flip = anchor > chartBox.width * 0.62
+    tip.style.top = `${box.top - chartBox.top}px`
+    tip.classList.toggle('kbn-tip-flip', flip)
+    tip.style.left = flip ? 'auto' : `${anchor + 9}px`
+    tip.style.right = flip ? `${chartBox.width - anchor + 9}px` : 'auto'
+  }
+
+  private ensureTip(): HTMLElement {
+    if (this.tip?.isConnected) return this.tip
+    const tip = document.createElement('div')
+    tip.className = 'kbn-tip'
+    this.chartEl?.append(tip)
+    this.tip = tip
+    return tip
+  }
+
+  private hideTip(): void {
+    this.tip?.classList.remove('kbn-tip-open')
+    this.hoveredKey = null
+    this.moments.cancel()
   }
 
   private buildMark(className: string, run: MinuteRun, win: DayWindow): HTMLElement {

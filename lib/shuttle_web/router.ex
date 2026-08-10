@@ -85,6 +85,11 @@ defmodule ShuttleWeb.Router do
     # this host recorded at dispatch / claim / resume. Host-scoped like its two
     # neighbours above.
     get("/sessions", SessionsController, :show)
+    # The words behind a minute: excerpts from a session's harness transcript,
+    # for the temporal views' hover. HOST-routed rather than owner-routed — a
+    # transcript lives on the machine that ran the session, named by `host` or
+    # by this host's session ledger.
+    get("/moment", MomentController, :show)
   end
 
   # File/asset bytes by absolute path (owner-routed). Unlocks `:::{embed}` +

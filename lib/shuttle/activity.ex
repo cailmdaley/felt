@@ -15,7 +15,8 @@ defmodule Shuttle.Activity do
   temporal view distinguishes:
 
     * `user_prompt_submit` → `"attention"` — a human typed.
-    * `notification` → `"notify"` — the agent asked for a human.
+    * `notification` → `"notify"` — the agent asked for a human, **and this
+      was the onset of the ask** (see below).
     * everything else (`pre_tool_use`, `post_tool_use`, `stop`,
       `subagent_stop`, `session_start`, `session_end`, …) → `"agent"` — the
       agent worked on its own.
@@ -24,6 +25,49 @@ defmodule Shuttle.Activity do
   was present, notify marks are where the agent wanted one, and the agent band
   is the machine's own time. Any hook type invented later lands in `"agent"`
   rather than disappearing.
+
+  ## What "needed your attention" means: the waiting spell
+
+  A raw `notification` hook is not a demand for attention — it is a *reminder*
+  of one. Claude Code re-fires the idle notification every 60 s for as long as
+  a worker sits blocked, so counting raw notifications answers "how many
+  minutes was this session stuck?" when the question a temporal view asks is
+  "how many times did it need me?". An hour of one unanswered permission
+  prompt used to paint sixty consecutive marks; it is one event.
+
+  So the unit here is the **waiting spell**, the same phase notion
+  `Shuttle.WaitingTracker` derives per session at read time — lifted from "the
+  state right now" to "the state at every point in the window":
+
+    * A spell **opens** on the first `notification` for an identity that is not
+      already inside one. That minute gets a `"notify"` bucket. This is the
+      attention *demand*.
+    * While the spell is open, further `notification` events are **suppressed**
+      — same ask, still unanswered, no new mark.
+    * A spell **closes** on any other event for that identity: a
+      `user_prompt_submit` (the human answered — that minute is `"attention"`,
+      as before) or any agent event (the agent moved on by itself — a
+      permission was granted elsewhere, a tool returned, the session
+      restarted). The next `notification` after that opens a fresh spell,
+      because something genuinely new is being asked.
+
+  Identity is the bucket key minus minute and kind: `{tmuxSession, cwd}`. Two
+  workers blocked at once hold two independent spells, and an event carrying
+  neither field falls into a single unattributed spell rather than crossing
+  wires with a named session.
+
+  Spell state is carried by *every* line the scan reads, including lines
+  **before `from_ms`**. Those lines are already decoded (the window test comes
+  after the parse), so a spell that opened an hour before the window is known
+  to be open at its first minute, and a window that starts mid-spell shows no
+  spurious onset. The one gap is deliberate: when the rotated sibling is
+  skipped by the mtime gate below, its lines cannot seed state, and a spell
+  spanning the rotation reopens at its first in-window notification. That
+  over-counts by one mark, once, at a file boundary — the conservative
+  direction, and cheaper than the 64 MB read that would fix it.
+
+  `n` on a `"notify"` bucket therefore counts spell **onsets** in that minute,
+  not notifications; `n` on the other two kinds still counts events.
 
   ## Which files, and why the rotated one is conditional
 
@@ -125,13 +169,13 @@ defmodule Shuttle.Activity do
 
     live
     |> files_to_scan(from_ms)
-    |> Enum.reduce(%{}, &tally_file(&1, from_ms, to_ms, &2))
+    |> Enum.reduce({%{}, %{}}, &tally_file(&1, from_ms, to_ms, &2))
     |> emit()
   end
 
-  # Rotated (older) first, live second. Order is irrelevant to the tally — it
-  # is a count into a map — but reading oldest-first keeps the page cache warm
-  # in the direction the files were written.
+  # Rotated (older) first, live second. Oldest-first is now load-bearing, not
+  # just cache-friendly: spell state is a forward fold, so the files must be
+  # read in the order they were written.
   defp files_to_scan(live, from_ms) do
     rotated = if rotated_overlaps?(live <> ".1", from_ms), do: [live <> ".1"], else: []
     rotated ++ if File.regular?(live), do: [live], else: []
@@ -161,27 +205,51 @@ defmodule Shuttle.Activity do
       acc
   end
 
-  defp tally_line(line, from_ms, to_ms, acc) do
+  # Two folds in one pass: `tally` counts buckets, `spells` remembers which
+  # identities are currently inside an unanswered waiting spell. Lines before
+  # `from_ms` advance `spells` only — that is what makes a window opening
+  # mid-spell honest.
+  defp tally_line(line, from_ms, to_ms, {tally, spells} = acc) do
     case Jason.decode(line) do
       {:ok, %{"timestamp" => ts, "type" => type} = event}
-      when is_integer(ts) and is_binary(type) and ts >= from_ms and ts <= to_ms ->
-        key = {
-          div(ts, @minute_ms) * @minute_ms,
-          presence(event["tmuxSession"]),
-          presence(event["cwd"]),
-          kind(type)
-        }
+      when is_integer(ts) and is_binary(type) and ts <= to_ms ->
+        identity = {presence(event["tmuxSession"]), presence(event["cwd"])}
+        {kind, spells} = classify(type, identity, spells)
 
-        Map.update(acc, key, 1, &(&1 + 1))
+        cond do
+          kind == nil -> {tally, spells}
+          ts < from_ms -> {tally, spells}
+          true -> {bump(tally, div(ts, @minute_ms) * @minute_ms, identity, kind), spells}
+        end
 
       _ ->
         acc
     end
   end
 
-  defp kind("user_prompt_submit"), do: "attention"
-  defp kind("notification"), do: "notify"
-  defp kind(_), do: "agent"
+  defp bump(tally, minute, {session, cwd}, kind) do
+    Map.update(tally, {minute, session, cwd, kind}, 1, &(&1 + 1))
+  end
+
+  # The spell state machine. Returns the bucket kind this event contributes —
+  # `nil` for a notification swallowed by an open spell — and the spell map
+  # after the event. See the moduledoc for why a repeat notification is not a
+  # second demand.
+  defp classify("notification", identity, spells) do
+    if Map.has_key?(spells, identity) do
+      {nil, spells}
+    else
+      {"notify", Map.put(spells, identity, true)}
+    end
+  end
+
+  defp classify("user_prompt_submit", identity, spells) do
+    {"attention", Map.delete(spells, identity)}
+  end
+
+  defp classify(_type, identity, spells) do
+    {"agent", Map.delete(spells, identity)}
+  end
 
   defp presence(value) when is_binary(value) and value != "", do: value
   defp presence(_), do: nil
@@ -189,7 +257,7 @@ defmodule Shuttle.Activity do
   # Sorted so a polling client can diff two responses positionally. `nil` is an
   # atom and atoms precede binaries in Erlang term order, so unattributed
   # buckets lead their minute — arbitrary, but stable.
-  defp emit(tally) do
+  defp emit({tally, _spells}) do
     tally
     |> Enum.map(fn {{m, s, cwd, k}, n} -> %{m: m, s: s, cwd: cwd, k: k, n: n} end)
     |> Enum.sort_by(&{&1.m, &1.s, &1.cwd, &1.k})

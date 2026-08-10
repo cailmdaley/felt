@@ -619,6 +619,8 @@ export class KanbanModal {
       activity: (fromMs, toMs) => this.temporal.activity(fromMs, toMs),
       narration: (fromISO, toISO) => this.temporal.narration(fromISO, toISO),
       sessions: (sinceMs) => this.temporal.sessions(sinceMs),
+      moment: (session, fromMs, toMs, host) =>
+        this.temporal.moment(session, fromMs, toMs, host),
       openCard: (cardId) => this.openCardById(cardId, cards),
       // The Desk's worker pill, handed to the views. Passed through rather than
       // wrapped: it is already the gesture-deferred form (see the constructor —
@@ -1449,12 +1451,13 @@ export class KanbanModal {
     // Outcome font-size × line-height = 12.5 × 1.4 = 17.5px per line at design
     // size. The board's type rides `--kbn-type-scale` (KanbanModal.css), so the
     // measure has to ride it too — a fixed 17.5 would over-count lines and clamp
-    // outcomes short as soon as the scale moves off 1.
-    const typeScale =
+    // outcomes short as soon as the scale moves off 1. `.kbn-col` pins the
+    // scale back to 1 (Desk cards render at design size), so this has to read
+    // the effective value at the column, not the root/body default.
+    const readTypeScale = (el: HTMLElement): number =>
       Number.parseFloat(
-        getComputedStyle(this.body).getPropertyValue('--kbn-type-scale'),
+        getComputedStyle(el).getPropertyValue('--kbn-type-scale'),
       ) || 1
-    const lineHeight = 17.5 * typeScale
     // Gap between cards in .kbn-col-list (CSS: gap: 8px).
     const cardGap = 8
     const minClamp = 4
@@ -1484,6 +1487,7 @@ export class KanbanModal {
       const cards = list.querySelectorAll<HTMLElement>('.kbn-card')
       if (cards.length === 0) continue
 
+      const lineHeight = 17.5 * readTypeScale(col)
       const effectiveN = Math.min(cards.length, maxVisibleCards)
       const totalGapHeight = (effectiveN - 1) * cardGap
       // Subtract a small per-column safety buffer — browser line-height

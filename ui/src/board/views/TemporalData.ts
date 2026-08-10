@@ -194,10 +194,32 @@ export interface SessionsResult {
   origins?: TemporalOrigins
 }
 
-/** What the ledger can tell you about a session: whose work it was. */
+/** What the ledger can tell you about a session: whose work it was, and which
+ *  harness session it was — the id the transcript is filed under, and so the
+ *  one thing that can lead a hover from a minute to the words spoken in it. */
 export interface SessionPairing {
   fiber: string
   uid: string | null
+  /** Harness session UUID (the ledger's `session`). */
+  session: string
+  /** The daemon that recorded the pairing — where the transcript is on disk. */
+  host: string | null
+}
+
+/** One excerpt from a harness transcript: what was said, and when. */
+export interface MomentExcerpt {
+  at_ms: number
+  role: 'user' | 'assistant' | 'notification'
+  text: string
+}
+
+export interface MomentResult {
+  host: string
+  excerpts: MomentExcerpt[]
+  /** Set when the words exist but not on the daemon that answered — a remote
+   *  that is unreachable says where they live rather than pretending they are
+   *  gone. */
+  note?: string
 }
 
 /**
@@ -234,6 +256,16 @@ export interface TemporalFetchers {
   activity(fromMs: number, toMs: number): Promise<ActivityResult>
   narration(fromISO: string, toISO: string): Promise<NarrationResult>
   sessions(sinceMs: number): Promise<SessionsResult>
+  /**
+   * The words a session spoke inside a window — the hover's payload.
+   *
+   * `host` names the daemon whose disk holds the transcript; omit it and the
+   * serving daemon consults its own session ledger. Failure of any kind — a
+   * 4xx, a dead tunnel, a body that is not a moment — resolves to an EMPTY
+   * result rather than rejecting, because the caller is a tooltip and the
+   * honest fallback (the words were not recovered) is already its default.
+   */
+  moment(session: string, fromMs: number, toMs: number, host?: string | null): Promise<MomentResult>
 }
 
 interface CacheEntry<T> {
@@ -405,7 +437,61 @@ export function createTemporalFetchers(shuttleBase: string): TemporalFetchers {
         }
       })
     },
+
+    /**
+     * There is no `/moment/composite` and there should not be: a transcript is
+     * not a feed to merge but a file on ONE machine, so the request is aimed at
+     * that machine (`host`) and the serving daemon forwards it. Hence the plain
+     * `readJson` rather than `readFeed`.
+     */
+    moment(
+      session: string,
+      fromMs: number,
+      toMs: number,
+      host?: string | null,
+    ): Promise<MomentResult> {
+      const where = host ?? ''
+      return memo(`moment:${where}:${session}:${fromMs}:${toMs}`, async () => {
+        const empty: MomentResult = { host: where, excerpts: [] }
+        if (!session) return empty
+        const query =
+          `session=${encodeURIComponent(session)}` +
+          `&from_ms=${encodeURIComponent(String(fromMs))}` +
+          `&to_ms=${encodeURIComponent(String(toMs))}` +
+          (where ? `&host=${encodeURIComponent(where)}` : '')
+        try {
+          return parseMoment(await readJson(`${shuttleBase}/api/v1/moment?${query}`), empty)
+        } catch {
+          return empty
+        }
+      })
+    },
   }
+}
+
+const MOMENT_ROLES = new Set<MomentExcerpt['role']>(['user', 'assistant', 'notification'])
+
+/** Coerce a wire body into a MomentResult, dropping anything malformed. A
+ *  half-excerpt is dropped rather than repaired: an excerpt with no text is
+ *  not a quieter excerpt, it is not one. */
+export function parseMoment(body: unknown, fallback: MomentResult): MomentResult {
+  if (!isRecord(body)) return fallback
+  const host = typeof body.host === 'string' ? body.host : fallback.host
+  const raw = Array.isArray(body.excerpts) ? body.excerpts : []
+  const excerpts: MomentExcerpt[] = []
+  for (const entry of raw) {
+    if (!isRecord(entry)) continue
+    const value = text(entry.text)
+    const role = text(entry.role)
+    if (!value || !role || !MOMENT_ROLES.has(role as MomentExcerpt['role'])) continue
+    excerpts.push({
+      at_ms: typeof entry.at_ms === 'number' && Number.isFinite(entry.at_ms) ? entry.at_ms : 0,
+      role: role as MomentExcerpt['role'],
+      text: value,
+    })
+  }
+  const note = text(body.note)
+  return { host, excerpts, ...(note ? { note } : {}) }
 }
 
 const LEADING_CIVIL_DAY_RE = /^(\d{4}-\d{2}-\d{2})/
@@ -653,7 +739,12 @@ export function buildSessionIndex(records: readonly SessionRecord[]): SessionInd
   }
 
   for (const record of records) {
-    const pairing: SessionPairing = { fiber: record.fiber, uid: record.uid }
+    const pairing: SessionPairing = {
+      fiber: record.fiber,
+      uid: record.uid,
+      session: record.session,
+      host: record.host,
+    }
     claim(bySession, sessionAt, record.session, record.at, pairing)
     if (record.tmux) {
       claim(byTmux, tmuxAt, record.tmux, record.at, pairing)

@@ -488,7 +488,12 @@ describe('rung 0 — the session ledger', () => {
   // fiber it dispatched a session for. It goes ahead of every name-derived
   // rung because it can read a session name that carries no ULID and no
   // recognizable slug, which is the case that justifies its existence.
-  const pairing = (fiber: string, uid: string | null = null) => ({ fiber, uid })
+  const pairing = (fiber: string, uid: string | null = null) => ({
+    fiber,
+    uid,
+    session: `sess-${fiber}`,
+    host: null,
+  })
 
   it('joins a session name that carries nothing to infer from', () => {
     // `pi-2f9c41`: no ULID, no slug matching any card. Every lower rung misses.
@@ -545,6 +550,37 @@ describe('rung 0 — the session ledger', () => {
     expect(lanes).toEqual([])
   })
 
+  it('gives each minute its own beat, with the transcript behind it', () => {
+    // The hover reads BEATS, not the drawn runs: a run bridges idle minutes so
+    // it reads as one stroke, and a bridged minute must never be reported as
+    // work with words in it.
+    const ledger = new Map([['pi-2f9c41', pairing('work/spt3g_papers/bmodes-2d')]])
+    const lanes = buildDayLanes(
+      activity([
+        bucket(20, 'agent', 'pi-2f9c41'),
+        bucket(20, 'attention', 'pi-2f9c41'),
+        // Three idle minutes: the wash bridges them, the beats do not.
+        bucket(24, 'agent', 'pi-2f9c41'),
+      ]),
+      [card()],
+      WIN,
+      ledger,
+    )
+    expect(lanes[0].agent).toEqual([{ start: 20, end: 25 }])
+    expect(lanes[0].beats.map((b) => b.minute)).toEqual([20, 24])
+    expect(lanes[0].beats[0].kinds.map((k) => k.kind).sort()).toEqual(['agent', 'attention'])
+    expect(lanes[0].beats[0].sources).toEqual([
+      { session: 'sess-work/spt3g_papers/bmodes-2d', host: null },
+    ])
+  })
+
+  it('leaves a beat with no transcript when nothing paired its minute', () => {
+    const lanes = buildDayLanes(activity([bucket(20, 'agent', SESSION)]), [card()], WIN)
+    expect(lanes[0].beats).toEqual([
+      { minute: 20, kinds: [{ kind: 'agent', count: 1 }], sources: [] },
+    ])
+  })
+
   it('is ignored for a bucket with no session at all', () => {
     const ledger = new Map([['pi-2f9c41', pairing('work/spt3g_papers/bmodes-2d')]])
     const lanes = buildDayLanes(
@@ -562,7 +598,12 @@ describe('a fleet of daemons on one rail', () => {
   // daemon whose events file produced it, and the ledger is several hosts'
   // merged. So a lane's host is a fact about the minutes drawn, and a tmux
   // name means nothing without the host it ran on.
-  const pairing = (fiber: string, uid: string | null = null) => ({ fiber, uid })
+  const pairing = (fiber: string, uid: string | null = null) => ({
+    fiber,
+    uid,
+    session: `sess-${fiber}`,
+    host: null,
+  })
 
   it('takes the lane host from the BUCKETS, not from the card', () => {
     // The card says the fiber lives here; the minutes say they were produced
