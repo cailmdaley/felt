@@ -277,7 +277,7 @@ function assembleSurfaces(
     if (withinStrip) futureDated.push(card);
     else anytimeSoon.push(card);
   }
-  for (const card of drafts) routeOpenCardByPlanningSurface(card, nowDrafts, futureDated, stash);
+  for (const card of drafts) routeOpenCardByPlanningSurface(card, nowDrafts, stash);
 
   // Awaiting-review cards are closed and pending a human verdict — unconditionally
   // actionable, so they stay in the Now awaitingReview column. They must NOT be
@@ -390,28 +390,20 @@ function toCard(
 
 /**
  * Route one open card onto its planning surface from `effectiveHorizon`:
- * `now` → the desk, `soon` (with a due) → the timeline day column, everything
- * else → Resting.
+ * `now` → the desk, `stashed` → Resting. A `due:` never routes: a future-dated
+ * draft stays in Drafts and wears its date as a chip.
  *
  * A SNOOZED card — `horizon:stashed` plus a future `due:` — resolves to
- * `stashed` and lands here in Resting, keeping its `due:`. It is not lost to
- * the timeline: `renderTimelineSection` ghosts every resting card that carries
- * a due at that day, and `effectiveHorizon`'s drift branch returns it to the
- * desk when the day arrives.
+ * `stashed` and lands here in Resting, keeping its `due:`. `effectiveHorizon`'s
+ * drift branch returns it to the desk when the day arrives.
  */
 function routeOpenCardByPlanningSurface(
   card: KanbanCard,
   now: KanbanCard[],
-  futureDated: KanbanCard[],
   stash: KanbanCard[],
 ): void {
-  if (card.effectiveHorizon === 'now') {
-    now.push(card);
-  } else if (card.effectiveHorizon === 'soon' && card.due) {
-    futureDated.push(card);
-  } else {
-    stash.push(card);
-  }
+  if (card.effectiveHorizon === 'now') now.push(card);
+  else stash.push(card);
 }
 
 /** Per-bucket counts for a response, derived from the assembled surfaces. */

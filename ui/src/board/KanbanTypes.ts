@@ -1,6 +1,6 @@
 /** Column identifier within the Now surface — also doubles as the API target. */
 export type ColumnKind = 'drafts' | 'inFlight' | 'awaitingReview' | 'tempered' | 'composted' | 'pinned'
-export type HorizonKind = 'now' | 'soon' | 'stashed'
+export type HorizonKind = 'now' | 'stashed'
 
 export interface KanbanCard {
   id: string

@@ -11,7 +11,11 @@ import { civilDayToLocalDate, dueCivilDay, isoDayLocal } from './civilDay.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-export const KANBAN_HORIZONS = ['now', 'soon', 'stashed'] as const;
+// Two surfaces, not three. `now` is desk presence and `stashed` is Resting;
+// there is no separate scheduled surface, because a `due:` is a date a card
+// wears, never a place it goes. (The old `soon` exiled every future-dated card
+// to a permanent timeline strip; the strip is gone, so `soon` meant invisible.)
+export const KANBAN_HORIZONS = ['now', 'stashed'] as const;
 export type KanbanHorizon = typeof KANBAN_HORIZONS[number];
 const HORIZON_SET = new Set<string>(KANBAN_HORIZONS);
 
@@ -280,10 +284,10 @@ export function effectiveHorizon(
   nowMs: number = Date.now(),
 ): { storedHorizon?: KanbanHorizon; effectiveHorizon: KanbanHorizon; drifted: boolean } {
   const storedHorizon = normalizeHorizon(f.horizon);
-  // The Now desk holds only what's chosen for today: a `due:` card earns desk
-  // presence when its due *day* is today or already past, never on a forward-
-  // looking window. Anything due tomorrow or later lives on the timeline at its
-  // date — drag a card to tomorrow and it leaves Now. Both sides of the
+  // A `due:` day that is today or already past PROMOTES: it overrides a stored
+  // `stashed` and pulls the card back onto the desk. A future `due:` alone
+  // changes nothing about where the card lives — only an explicit snooze
+  // (`horizon: stashed`) takes it off the desk. Both sides of the
   // comparison are civil days: `dueCivilDay` reads the day the `due:` names
   // (including through felt's UTC-midnight storage — see civilDay.ts), and
   // `isoDayLocal` gives today's local day. Without that, a negative-offset zone
@@ -307,8 +311,9 @@ export function effectiveHorizon(
 
   // SNOOZED — a future `due:` under a stored `stashed`. The two fields compose:
   // `stashed` says where the card lives (Resting, off the desk), `due:` says
-  // when it comes back. It is NOT `soon`: a soon card sits on the timeline and
-  // nowhere else, while a snoozed one rests AND ghosts onto its due day.
+  // when it comes back. Only an EXPLICIT snooze takes a card off the desk: a
+  // bare future `due:` falls through to `now` below, so the card keeps its
+  // column and simply wears the date.
   if (due !== undefined && storedHorizon === 'stashed') {
     return {
       storedHorizon,
@@ -317,15 +322,7 @@ export function effectiveHorizon(
     };
   }
 
-  if (due !== undefined) {
-    return {
-      storedHorizon,
-      effectiveHorizon: 'soon',
-      drifted: false,
-    };
-  }
-
-  if (storedHorizon === 'stashed' || storedHorizon === 'soon') {
+  if (storedHorizon === 'stashed') {
     return {
       storedHorizon,
       effectiveHorizon: 'stashed',
@@ -443,6 +440,9 @@ export function parseDueMs(value: unknown): number | undefined {
 function normalizeHorizon(value: unknown): KanbanHorizon | undefined {
   if (typeof value !== 'string') return undefined;
   const trimmed = value.trim();
-  if (trimmed === 'now') return undefined;
+  // `now` is absence, and legacy `soon` frontmatter reads as absence too: the
+  // surface it named no longer exists, and a card that carried it belongs on
+  // the desk wearing whatever `due:` it has.
+  if (trimmed === 'now' || trimmed === 'soon') return undefined;
   return HORIZON_SET.has(trimmed) ? trimmed as KanbanHorizon : undefined;
 }

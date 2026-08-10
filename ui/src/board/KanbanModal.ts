@@ -898,7 +898,8 @@ export class KanbanModal {
    * (owner-routed by `origin`) so the drag is one atomic write.
    *
    *   • Drag a scheduled/in-flight card onto a date column →
-   *     setSurface(card, 'soon', { due }); the edit persists due, clears horizon.
+   *     setSurface(card, 'now', { due }); the edit persists due, clears horizon,
+   *     and the card keeps its lifecycle column while wearing the date.
    *   • SNOOZE — drag a desk card (Drafts / Awaiting review) or a resting card
    *     onto a date column → setSurface(card, 'stashed', { due }); ONE felt-edit
    *     writes `horizon: stashed` AND `due:` together, so no poll can ever
@@ -983,12 +984,12 @@ export class KanbanModal {
       return
     }
 
-    // Optimism for the unambiguous destinations: `soon` parks the card on the
-    // timeline at its due, `stashed` drops it into the stash grid. `now` stays
-    // on the refetch path — the Now surface doesn't name a lifecycle column, so
-    // an optimistic placement there would be a reclassification.
-    if (horizon === 'soon' || horizon === 'stashed') {
-      const optimistic = applyOptimisticSurface(this.lastResponse, card.id, horizon, { cold: wantsCold, due })
+    // Optimism for the one unambiguous destination: `stashed` drops the card
+    // into the stash grid. `now` stays on the refetch path — the Now surface
+    // doesn't name a lifecycle column, so an optimistic placement there would
+    // be a reclassification.
+    if (horizon === 'stashed') {
+      const optimistic = applyOptimisticSurface(this.lastResponse, card.id, { cold: wantsCold, due })
       if (optimistic) this.applyResponse(optimistic)
     }
 
@@ -2091,9 +2092,8 @@ export function applyOptimisticTransition(
 }
 
 /**
- * Optimistic relocation of one card to a planning *surface* — `soon` (parked
- * on the timeline at its `due` day-column) or `stashed` (the dateless holding
- * grid). The unambiguous-destination twin of {@link applyOptimisticTransition}:
+ * Optimistic relocation of one card to Resting — the holding grid, dateless or
+ * snoozed. The unambiguous-destination twin of {@link applyOptimisticTransition}:
  * `now` is deliberately excluded because the Now surface doesn't name a single
  * lifecycle column, so placing there would mean reclassifying. Returns null
  * when the card is absent.
@@ -2101,7 +2101,6 @@ export function applyOptimisticTransition(
 export function applyOptimisticSurface(
   resp: KanbanResponse | null,
   cardId: string,
-  horizon: 'soon' | 'stashed',
   opts: { cold?: boolean; due?: string | null } = {},
 ): KanbanResponse | null {
   if (!resp) return null
@@ -2120,25 +2119,17 @@ export function applyOptimisticSurface(
     closedAt: undefined,
     runningWorker: undefined,
     runtimePhase: undefined,
-    storedHorizon: horizon,
-    effectiveHorizon: horizon,
+    storedHorizon: 'stashed',
+    effectiveHorizon: 'stashed',
     drifted: false,
-  }
-  let nextStash = stash
-  if (horizon === 'stashed') {
-    moved.cold = opts.cold ?? false
+    cold: opts.cold ?? false,
     // A bare stash clears the deadline; a SNOOZE is a stash that keeps one (the
     // caller passed an explicit day). Dropping the due here would have shown a
     // dateless resting card for one frame and then snapped the date back in on
     // the refetch — the optimistic card must be the card the write produces.
-    moved.due = opts.due ?? undefined
-    nextStash = [moved, ...stash]
-  } else {
-    moved.cold = undefined
-    if (opts.due !== undefined && opts.due !== null) moved.due = opts.due
-    timeline.futureDated = [...timeline.futureDated, moved] // placed by due day-column; intra-day order settles on reconcile
+    due: opts.due ?? undefined,
   }
-  return withSurfaces(resp, { now, pinned, timeline, stash: nextStash, temperedTotal: resp.temperedTotal })
+  return withSurfaces(resp, { now, pinned, timeline, stash: [moved, ...stash], temperedTotal: resp.temperedTotal })
 }
 
 /**

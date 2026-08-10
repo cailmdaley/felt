@@ -118,11 +118,15 @@ describe('duePromotesToNow at the day boundary', () => {
     expect(horizon('2026-07-29T00:00:00Z')).toBe('now');
   });
 
-  it('leaves a card due tomorrow on the timeline', () => {
+  it('does NOT wake a snoozed card due tomorrow, in either spelling', () => {
     // The bug: `2026-07-31T00:00:00Z` read as an instant is Jul 30 17:00 in LA,
-    // so the card was yanked onto the Now desk a day early.
-    expect(horizon('2026-07-31')).toBe('soon');
-    expect(horizon('2026-07-31T00:00:00Z')).toBe('soon');
+    // so the card was yanked onto the Now desk a day early. Read through a
+    // SNOOZE, because that is the only state a future due still moves: a bare
+    // future `due:` leaves the card on the desk either way.
+    const snoozed = (due: string) =>
+      effectiveHorizon({ horizon: 'stashed', due }, now).effectiveHorizon;
+    expect(snoozed('2026-07-31')).toBe('stashed');
+    expect(snoozed('2026-07-31T00:00:00Z')).toBe('stashed');
   });
 });
 

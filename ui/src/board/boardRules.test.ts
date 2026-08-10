@@ -38,10 +38,21 @@ describe('effectiveHorizon — snooze is due + stashed, composed', () => {
     expect(h.drifted).toBe(false)
   })
 
-  it('keeps a plain future-dated card on the timeline, not in Resting', () => {
-    // The control for the case above: without a stored horizon the same due
-    // means "scheduled", and scheduling has always been `soon`.
-    expect(effectiveHorizon({ due: dayFromNow(3) }, NOW).effectiveHorizon).toBe('soon')
+  it('leaves a plain future-dated card on the desk — a due alone never exiles', () => {
+    // The control for the case above: without a stored horizon the same due is
+    // just a date the card wears. Only an explicit snooze takes it off the
+    // desk. (The regression this pins: such cards resolved to a `soon` surface
+    // that no longer had anywhere to render, so they vanished from the Desk.)
+    const h = effectiveHorizon({ due: dayFromNow(3) }, NOW)
+    expect(h.effectiveHorizon).toBe('now')
+    expect(h.drifted).toBe(false)
+  })
+
+  it('reads a legacy `horizon: soon` as no horizon at all', () => {
+    // The surface it named is gone; the card belongs on the desk with its date.
+    const h = effectiveHorizon({ horizon: 'soon', due: dayFromNow(3) }, NOW)
+    expect(h.effectiveHorizon).toBe('now')
+    expect(h.storedHorizon).toBeUndefined()
   })
 
   it('DRIFT OVERRIDES STASHED — the day arrives and the card returns to the desk', () => {
@@ -156,6 +167,30 @@ describe('a mirrored fiber renders as ONE card', () => {
 
   const drafts = (feed: CompositeFeed): KanbanCard[] =>
     buildKanbanResponseFromComposite(feed, { nowMs: NOW }).now.drafts
+
+  it('lands a future-dated draft in Drafts, not off the board', () => {
+    // The Desk regression: a fresh draft with `due: <future>` routed to a
+    // planning surface with no permanent home and showed up nowhere.
+    const feed = feedWith(
+      [mirrored('laptop', { due: dayFromNow(21) })],
+      { laptop: { kind: 'local', stale: false } },
+    )
+    const resp = buildKanbanResponseFromComposite(feed, { nowMs: NOW })
+    expect(resp.now.drafts.map((c) => c.id)).toEqual(['science/unions/final-push'])
+    expect(resp.now.drafts[0].due).toBeDefined()
+    expect(resp.stash).toHaveLength(0)
+    expect(resp.timeline.futureDated).toHaveLength(0)
+  })
+
+  it('still rests a SNOOZED draft — stashed plus the same future due', () => {
+    const feed = feedWith(
+      [mirrored('laptop', { horizon: 'stashed', due: dayFromNow(21) })],
+      { laptop: { kind: 'local', stale: false } },
+    )
+    const resp = buildKanbanResponseFromComposite(feed, { nowMs: NOW })
+    expect(resp.now.drafts).toHaveLength(0)
+    expect(resp.stash.map((c) => c.id)).toEqual(['science/unions/final-push'])
+  })
 
   it('keeps the LOCAL row when a remote mirrors it', () => {
     const feed = feedWith(

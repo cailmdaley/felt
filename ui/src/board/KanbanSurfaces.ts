@@ -112,7 +112,6 @@ export function phasePillLabel(
  *  paused work, not a bin of failures. */
 export const SURFACE_TITLE: Record<HorizonKind, string> = {
   now: 'Now',
-  soon: 'Soon',
   stashed: 'Resting',
 }
 
@@ -1585,19 +1584,19 @@ export function formatDue(iso: string): string {
  *     leaves the desk for Resting and keeps the date as its return ticket.
  *     Composing the two fields is what snooze IS — there is no third stored
  *     state, so nothing new has to be migrated, classified, or cleaned up.
- *   • Anything else — an In-flight card, a card already parked on the timeline,
- *     a closed run in the past lane → `soon`. These are being *scheduled*, and
- *     scheduling is what a bare `due:` has always meant.
+ *   • Anything else — an In-flight card, a closed run in the past lane → `now`.
+ *     These are being *scheduled*: they keep their column and take the date as
+ *     a bare `due:`, which is all scheduling has ever meant.
  *
  * A drop on TODAY never routes here: today means "onto the desk now", which is
  * `setSurface(card, 'now', { due: null })` at the call sites.
  */
 export function dayDropHorizon(resp: KanbanResponse | null, id: string): HorizonKind {
-  if (!resp) return 'soon'
+  if (!resp) return 'now'
   if (resp.now.drafts.some((c) => c.id === id)) return 'stashed'
   if (resp.now.awaitingReview.some((c) => c.id === id)) return 'stashed'
   if (resp.stash.some((c) => c.id === id)) return 'stashed'
-  return 'soon'
+  return 'now'
 }
 
 /**
