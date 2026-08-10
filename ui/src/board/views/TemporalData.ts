@@ -52,7 +52,7 @@ export interface ActivityBucket {
   m: number
   s: string | null
   cwd: string | null
-  k: 'attention' | 'notify' | 'agent'
+  k: 'attention' | 'notify' | 'agent' | 'reply'
   n: number
   /** Which daemon's events file produced it. The composite stamps every
    *  bucket; the single-host route does not, and the fetcher fills it from the
@@ -141,8 +141,11 @@ export function foldActiveMinutes(
     const minute = Math.floor(b.m / 60_000)
     all.add(minute)
     if (b.k === 'attention') attention.add(minute)
-    else if (b.k === 'agent') agent.add(minute)
-    else notifyBuckets += 1
+    // A reply is agent-side ink: the turn that produced it was agent work.
+    // It must NOT fall through to the notify tally — reply buckets would
+    // silently inflate "needed you" counts.
+    else if (b.k === 'agent' || b.k === 'reply') agent.add(minute)
+    else if (b.k === 'notify') notifyBuckets += 1
   }
   return { all: all.size, attention: attention.size, agent: agent.size, notifyBuckets }
 }
@@ -532,7 +535,7 @@ export function civilDaysToInstants(
   return { fromMs: from.getTime(), toMs: to.getTime() }
 }
 
-const BUCKET_KINDS = new Set<ActivityBucket['k']>(['attention', 'notify', 'agent'])
+const BUCKET_KINDS = new Set<ActivityBucket['k']>(['attention', 'notify', 'agent', 'reply'])
 
 /** Coerce a wire body into an ActivityResult, dropping malformed buckets. */
 function parseActivity(body: unknown, fallback: ActivityResult): ActivityResult {

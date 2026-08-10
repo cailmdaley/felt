@@ -28,7 +28,9 @@ import {
   dayTotals,
   dayWindow,
   defaultDayISO,
+  drawnWindow,
   firstSentence,
+  FRAME_MIN_MINUTES,
   formatClockTime,
   formatEntryStats,
   groupCommitsBySlug,
@@ -36,8 +38,10 @@ import {
   laneChip,
   mergeMinuteRuns,
   narrationRange,
+  railTicks,
   resolveDayISO,
   stepTarget,
+  tickStepMinutes,
   type DayLane,
 } from './DayView.js'
 import { sessionSlug, sessionUlid } from './sessionNames.js'
@@ -275,6 +279,132 @@ const card = (over: Partial<KanbanCard> = {}): KanbanCard => ({
   ...over,
 })
 
+describe('the drawn frame — how much of the day gets sheet', () => {
+  const bucketsAt = (...minutes: number[]): ActivityBucket[] =>
+    minutes.map((minute) => bucket(minute, 'agent', SESSION))
+
+  it('runs from the first action to the last on a finished day', () => {
+    // 10:00 and 14:00. The frame pads a quarter-hour outside each, and the last
+    // action's own minute is a full minute wide.
+    const frame = drawnWindow(WIN, bucketsAt(240, 480), at(2026, 8, 9, 12))
+    expect(frame.startMs).toBe(at(2026, 8, 4, 9, 45))
+    expect(frame.endMs).toBe(at(2026, 8, 4, 14, 16))
+  })
+
+  it('runs to NOW on the rail that contains this moment, however long since', () => {
+    // Last action at 11:00, now 15:00: the four idle hours are the day's news,
+    // not something to crop out.
+    const frame = drawnWindow(WIN, bucketsAt(240, 300), NOW_IN_RAIL)
+    expect(frame.startMs).toBe(at(2026, 8, 4, 9, 45))
+    expect(frame.endMs).toBe(at(2026, 8, 4, 15, 15))
+  })
+
+  it('never zooms below the minimum span, and keeps the action inside it', () => {
+    const frame = drawnWindow(WIN, bucketsAt(300), at(2026, 8, 9, 12))
+    expect(frame.minutes).toBeGreaterThanOrEqual(FRAME_MIN_MINUTES)
+    const action = WIN.startMs + 300 * 60_000
+    expect(frame.startMs).toBeLessThan(action)
+    expect(frame.endMs).toBeGreaterThan(action)
+  })
+
+  it('pushes the minimum span inward rather than off the rail', () => {
+    // A single burst at first light: the frame cannot open before 06:00, so the
+    // whole two hours are spent to the right of it.
+    const frame = drawnWindow(WIN, bucketsAt(0), at(2026, 8, 9, 12))
+    expect(frame.startMs).toBe(WIN.startMs)
+    expect(frame.minutes).toBeGreaterThanOrEqual(FRAME_MIN_MINUTES)
+    expect(frame.endMs).toBeLessThanOrEqual(WIN.endMs)
+  })
+
+  it('is always a sub-span of the civil day — the zoom cannot borrow a minute', () => {
+    const frame = drawnWindow(WIN, bucketsAt(0, WIN.minutes - 1), NOW_IN_RAIL)
+    expect(frame.startMs).toBe(WIN.startMs)
+    expect(frame.endMs).toBe(WIN.endMs)
+  })
+
+  it('keeps the whole rail when nothing happened — there is nothing to frame', () => {
+    expect(drawnWindow(WIN, [], NOW_IN_RAIL)).toEqual(WIN)
+    // Buckets belonging to another page do not count as something to frame to.
+    const stray: ActivityBucket = { m: WIN.endMs, s: null, cwd: null, k: 'agent', n: 1 }
+    expect(drawnWindow(WIN, [stray], NOW_IN_RAIL)).toEqual(WIN)
+  })
+
+  it('positions the lanes in the frame, not in the rail', () => {
+    // Work at 10:00 on a frame opening at 09:45 is minute 15 of the drawing,
+    // not minute 240 of the day.
+    const frame = drawnWindow(WIN, bucketsAt(240, 480), at(2026, 8, 9, 12))
+    const lanes = buildDayLanes(activity(bucketsAt(240, 480)), [card()], frame)
+    expect(lanes[0].agent[0]).toEqual({ start: 15, end: 16 })
+  })
+})
+
+describe('the hour hand over a frame that zooms', () => {
+  it('steps down its density as the frame widens', () => {
+    expect(tickStepMinutes(24 * 60)).toBe(240)
+    expect(tickStepMinutes(12 * 60)).toBe(120)
+    expect(tickStepMinutes(5 * 60)).toBe(60)
+    expect(tickStepMinutes(FRAME_MIN_MINUTES)).toBe(30)
+  })
+
+  it('rules the whole day four-hourly, as it always has', () => {
+    expect(railTicks(WIN).map((t) => t.label)).toEqual([
+      '8am',
+      '12pm',
+      '4pm',
+      '8pm',
+      '12am',
+      '4am',
+    ])
+  })
+
+  it('anchors to local midnight, so a tick names a round clock time', () => {
+    // A frame opening at 09:47 still rules on the clock's own hours, not on
+    // 09:47 + n hours — two frames of one day mark the same instants.
+    const frame: typeof WIN = {
+      startMs: at(2026, 8, 4, 9, 47),
+      endMs: at(2026, 8, 4, 16, 3),
+      minutes: 376,
+    }
+    const ticks = railTicks(frame)
+    expect(ticks.map((t) => t.label)).toEqual([
+      '10am',
+      '11am',
+      '12pm',
+      '1pm',
+      '2pm',
+      '3pm',
+      '4pm',
+    ])
+    for (const tick of ticks) {
+      const d = new Date(tick.ms)
+      expect([d.getMinutes(), d.getSeconds()]).toEqual([0, 0])
+      expect(tick.ms).toBeGreaterThanOrEqual(frame.startMs)
+      expect(tick.ms).toBeLessThan(frame.endMs)
+    }
+  })
+
+  it('names the half hour once the frame is tight enough to need it', () => {
+    const frame: typeof WIN = {
+      startMs: at(2026, 8, 4, 9, 45),
+      endMs: at(2026, 8, 4, 11, 45),
+      minutes: 120,
+    }
+    expect(railTicks(frame).map((t) => t.label)).toEqual([
+      '10:00am',
+      '10:30am',
+      '11:00am',
+      '11:30am',
+    ])
+  })
+
+  it('holds the label count down whatever the frame', () => {
+    for (const minutes of [120, 137, 200, 300, 480, 700, 900, 1440, 1500]) {
+      const frame = { startMs: WIN.startMs, endMs: WIN.startMs + minutes * 60_000, minutes }
+      expect(railTicks(frame).length, `${minutes}m`).toBeLessThanOrEqual(7)
+    }
+  })
+})
+
 describe("the day's two totals", () => {
   it('counts a minute once per kind however many buckets it holds', () => {
     const totals = dayTotals(
@@ -288,7 +418,16 @@ describe("the day's two totals", () => {
       ]),
       WIN,
     )
-    expect(totals).toEqual({ attention: 1, agent: 3 })
+    // One attention MINUTE, but two attention buckets in it — and messages are
+    // acts, not time, so both count.
+    expect(totals).toEqual({ attention: 1, agent: 3, messages: 2 })
+  })
+
+  it('sums the events in an attention bucket, not the minutes holding them', () => {
+    const busy: ActivityBucket = { ...bucket(30, 'attention', SESSION), n: 4 }
+    const totals = dayTotals(activity([busy, bucket(31, 'attention', SESSION)]), WIN)
+    expect(totals.attention).toBe(2)
+    expect(totals.messages).toBe(5)
   })
 
   it('ignores buckets outside the 06:00 → 06:00 window at both ends', () => {
@@ -300,11 +439,16 @@ describe("the day's two totals", () => {
     expect(dayTotals(activity([...outside, bucket(5, 'agent')]), WIN)).toEqual({
       attention: 0,
       agent: 1,
+      messages: 0,
     })
   })
 
   it('counts a notify minute as neither attention nor agent', () => {
-    expect(dayTotals(activity([bucket(30, 'notify')]), WIN)).toEqual({ attention: 0, agent: 0 })
+    expect(dayTotals(activity([bucket(30, 'notify')]), WIN)).toEqual({
+      attention: 0,
+      agent: 0,
+      messages: 0,
+    })
   })
 
   it('formats a span the head line can wear', () => {
@@ -966,18 +1110,43 @@ describe('what a day cost, per fiber', () => {
       WIN,
       NOW_IN_RAIL,
     )
-    expect(entries[0].stats).toEqual({ attention: 1, agent: 2, commits: 2 })
+    expect(entries[0].stats).toEqual({ messages: 1, agent: 2, commits: 2 })
+  })
+
+  it('counts your side of a lane in messages, the agents’ in minutes', () => {
+    // Three prompts inside one minute is three messages and one minute — the
+    // two measures deliberately disagree, and the ledger reports the acts.
+    const lanes = buildDayLanes(
+      activity([
+        { ...bucket(10, 'attention', SESSION), n: 3 },
+        bucket(11, 'attention', SESSION),
+        bucket(12, 'agent', SESSION),
+      ]),
+      [card()],
+      WIN,
+    )
+    expect(lanes[0].attentionMinutes).toBe(2)
+    expect(lanes[0].attentionMessages).toBe(4)
   })
 
   it('drops empty terms rather than printing zeros', () => {
-    expect(formatEntryStats({ attention: 38, agent: 130, commits: 3 })).toBe(
-      'you 38m · agents 2h 10m · 3 commits',
+    expect(formatEntryStats({ messages: 14, agent: 130, commits: 3 })).toBe(
+      'you 14 · agents 2h 10m · 3 commits',
     )
-    expect(formatEntryStats({ attention: 0, agent: 130, commits: 1 })).toBe(
+    expect(formatEntryStats({ messages: 0, agent: 130, commits: 1 })).toBe(
       'agents 2h 10m · 1 commit',
     )
-    expect(formatEntryStats({ attention: 5, agent: 0, commits: 0 })).toBe('you 5m')
-    expect(formatEntryStats({ attention: 0, agent: 0, commits: 0 })).toBe('')
+    expect(formatEntryStats({ messages: 1, agent: 0, commits: 0 })).toBe('you 1')
+    expect(formatEntryStats({ messages: 0, agent: 0, commits: 0 })).toBe('')
+  })
+
+  it('reaches for the "back" clause only when something came back', () => {
+    expect(formatEntryStats({ messages: 14, received: 9, agent: 0, commits: 0 })).toBe(
+      'you 14 · 9 back',
+    )
+    expect(formatEntryStats({ messages: 14, received: 0, agent: 0, commits: 0 })).toBe(
+      'you 14',
+    )
   })
 })
 
@@ -1022,7 +1191,7 @@ describe('the live chip', () => {
     const past = buildDayEntries([], lanes, [aloft], WIN, at(2026, 8, 6, 12, 0))
     expect(past[0].chip).toBeUndefined()
     // What the day COST is a fact about the day, and survives.
-    expect(past[0].stats).toEqual({ attention: 0, agent: 1, commits: 0 })
+    expect(past[0].stats).toEqual({ messages: 0, agent: 1, commits: 0 })
   })
 
   it('carries the owning host, so the attach can be routed', () => {

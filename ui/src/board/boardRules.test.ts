@@ -15,7 +15,9 @@ import {
   humanizeCron,
   isCycleFiber,
   restingUntil,
+  upcomingCycleDropTargets,
 } from './KanbanRules.js'
+import type { CycleDropCandidate } from './KanbanRules.js'
 import type { Fiber } from './KanbanFiber.js'
 import type { CompositeEntry, CompositeFeed } from './KanbanComposite.js'
 import type { KanbanCard } from './KanbanTypes.js'
@@ -456,6 +458,93 @@ describe('cycles — a named span of time, not work', () => {
       // Their typo to see and fix. Swapping would hide it forever.
       expect(cycleSpan({ start: asFeltWrites('2026-09-30'), due: asFeltWrites('2026-09-01') }, NOW))
         .toEqual({ start: '2026-09-30', end: '2026-09-01', openEnded: false })
+    })
+  })
+
+  describe('upcomingCycleDropTargets — the chapters the drag horizon offers', () => {
+    const cycle = (
+      id: string,
+      cycleStart: string | null,
+      due?: string,
+    ): CycleDropCandidate => ({ id, name: id, cycleStart, due })
+
+    it('offers a future cycle at its own opening day', () => {
+      const targets = upcomingCycleDropTargets(
+        [cycle('autumn', dayFromNow(10), dayFromNow(40))],
+        NOW,
+      )
+      expect(targets).toHaveLength(1)
+      expect(targets[0]).toMatchObject({
+        id: 'autumn',
+        start: dayFromNow(10),
+        end: dayFromNow(40),
+        running: false,
+        dropDay: dayFromNow(10),
+      })
+    })
+
+    it('clamps a running cycle to TOMORROW — later this chapter, never a backdate', () => {
+      const targets = upcomingCycleDropTargets(
+        [cycle('summer', dayFromNow(-10), dayFromNow(10))],
+        NOW,
+      )
+      expect(targets[0]).toMatchObject({ running: true, dropDay: dayFromNow(1) })
+    })
+
+    it('clamps a cycle opening TODAY too — today means "onto the desk", not a snooze', () => {
+      const targets = upcomingCycleDropTargets([cycle('opens-now', dayFromNow(0))], NOW)
+      expect(targets[0]).toMatchObject({ running: true, dropDay: dayFromNow(1) })
+    })
+
+    it('drops a cycle that has already closed', () => {
+      expect(upcomingCycleDropTargets(
+        [cycle('spring', dayFromNow(-40), dayFromNow(-1))],
+        NOW,
+      )).toEqual([])
+    })
+
+    it('keeps a cycle closing TODAY — the chapter is still open', () => {
+      const targets = upcomingCycleDropTargets(
+        [cycle('closing', dayFromNow(-10), dayFromNow(0))],
+        NOW,
+      )
+      expect(targets.map((t) => t.id)).toEqual(['closing'])
+    })
+
+    it('keeps an open-ended cycle, running, and says so', () => {
+      const targets = upcomingCycleDropTargets([cycle('ongoing', dayFromNow(-3))], NOW)
+      expect(targets[0]).toMatchObject({
+        openEnded: true,
+        running: true,
+        end: dayFromNow(0),
+        dropDay: dayFromNow(1),
+      })
+    })
+
+    it('is not a target without a start — a bare due is a deadline, not a chapter', () => {
+      expect(upcomingCycleDropTargets([cycle('deadline', null, dayFromNow(5))], NOW)).toEqual([])
+    })
+
+    it('reads felt\'s midnight-Z start the same as a bare civil day', () => {
+      const bare = upcomingCycleDropTargets([cycle('c', dayFromNow(4))], NOW)
+      const written = upcomingCycleDropTargets(
+        [cycle('c', asFeltWrites(dayFromNow(4)))],
+        NOW,
+      )
+      expect(written).toEqual(bare)
+    })
+
+    it('orders by start, so the strip reads as the calendar does', () => {
+      const targets = upcomingCycleDropTargets([
+        cycle('third', dayFromNow(20)),
+        cycle('first', dayFromNow(-2), dayFromNow(3)),
+        cycle('second', dayFromNow(5)),
+      ], NOW)
+      expect(targets.map((t) => t.id)).toEqual(['first', 'second', 'third'])
+    })
+
+    it('offers nothing when there are no cycles at all', () => {
+      expect(upcomingCycleDropTargets([], NOW)).toEqual([])
     })
   })
 

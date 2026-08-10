@@ -22,14 +22,20 @@
      width. Well under 1: a run of busy days has to read as a row of separate
      day-marks, not as one solid bar. */
   --chr-seg-w: calc(var(--chr-day-w) * 0.58);
-  --chr-row-h: 20px;
+  /* A reading measure, not a packing measure. At 20px the gutter was a list of
+     names with no air between them and the lifelines fused into a hatch; at 32
+     each row is a line of a page — the name has room to be read, and the ink
+     lane (the marks, which stay small on purpose) floats in white space
+     instead of filling the row. Fewer fibers fit on screen. The scroll exists,
+     and the record is long anyway. */
+  --chr-row-h: 32px;
   /* Two lines' worth: the sticky month bearing sits above the fiber count in
      the corner cell, and the day columns beside it keep their weekday/numeral
      pair bottom-aligned to the same baseline. */
-  --chr-head-h: 34px;
+  --chr-head-h: 38px;
   /* A cycle lane is shallower than a fiber row: the strip annotates the page,
      and stacked lanes must not push the work below the fold. */
-  --chr-cycle-h: 17px;
+  --chr-cycle-h: 19px;
 
   flex: 1 1 auto;
   min-height: 0;
@@ -240,6 +246,44 @@
   text-decoration-thickness: 0.5px;
   text-underline-offset: 3px;
 }
+/* Renaming from the face. Takes the title's own small-caps display so the era
+   keeps its face while its name is being changed. */
+.chr-face-rename {
+  flex: 0 1 auto;
+  min-width: 12ch;
+  padding: 0 2px;
+  border: 0;
+  border-bottom: 1px solid rgba(154, 123, 53, 0.7);
+  background: none;
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-size: calc(19px * var(--kbn-type-scale, 1));
+  font-variant-caps: all-small-caps;
+  font-feature-settings: "smcp", "c2sc";
+  letter-spacing: 0.045em;
+  color: #1B1611;
+  outline: none;
+}
+
+/* Writing the intention. Sits where the line does, in the same italic serif,
+   and holds the WHOLE body — see writeIntention for why that matters. */
+.chr-face-intent-edit {
+  display: block;
+  width: 100%;
+  max-width: 74ch;
+  margin: 5px 0 0;
+  padding: 5px 7px;
+  border: 0;
+  border-radius: 4px;
+  background: #FBF6E9;
+  outline: 1px solid rgba(154, 123, 53, 0.5);
+  resize: vertical;
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-style: italic;
+  font-size: calc(14px * var(--kbn-type-scale, 1));
+  line-height: 1.34;
+  color: #2A231A;
+}
+
 .chr-face-span {
   flex: 1 1 auto;
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
@@ -268,6 +312,19 @@
   color: #2A231A;
   max-width: 74ch;
 }
+
+/* An era nobody has written yet. Quiet enough to read as an absence, and a
+   button because the fiber is where the words go. */
+.chr-face-intent-empty {
+  display: block;
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: left;
+  color: #8A7C64;
+  cursor: pointer;
+}
+.chr-face-intent-empty:hover { color: #6E5A2E; }
 
 /* Figures read as a line of marginalia, not as tiles. */
 .chr-face-stats {
@@ -329,6 +386,33 @@
   font-size: calc(9px * var(--kbn-type-scale, 1));
   color: #A89B83;
 }
+/* A fiber named in the look-back opens it. Same blue-and-hairline register the
+   face's own title uses — a name you can reach, said the one way this page
+   says it. The button keeps the line's type: only the gesture is added. */
+.chr-face-open {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.chr-face-open:hover {
+  color: #3D5BA0;
+  text-decoration: underline;
+  text-decoration-thickness: 0.5px;
+  text-underline-offset: 2px;
+}
+/* The slug is already blue and already mono; hovering it only draws the rule.
+   Stated at two-class specificity so `font: inherit` above cannot take the
+   monospace off the one word on this line that is a filing key. */
+.chr-face-slug.chr-face-open {
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: calc(10px * var(--kbn-type-scale, 1));
+  color: #3D5BA0;
+}
+
 .chr-face-closed { color: #4A4033; }
 .chr-face-mark-ok { color: #3F8278; }
 .chr-face-mark-x { color: #A89B83; }
@@ -489,6 +573,23 @@
   border-color: #9A7B35;
 }
 .chr-band-resizing .chr-grip { opacity: 1; }
+
+/* Renaming a band, in the band. Sized to the band it fills so the name never
+   moves under the hand, and cut from the same italic serif the label is — the
+   only visible change is that the word became typeable. */
+.chr-band-rename {
+  position: absolute;
+  inset: 1px 2px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 5px;
+  background: #FBF6E9;
+  outline: 1px solid rgba(154, 123, 53, 0.7);
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-style: italic;
+  font-size: calc(11.5px * var(--kbn-type-scale, 1));
+  color: #2A231A;
+}
 
 /* Saved-but-unconfirmed: present, not yet a fact. */
 .chr-band-pending {
@@ -653,18 +754,25 @@
 
 /* ── The row gutter ─────────────────────────────────────────────────────── */
 
+/* One line of a page. Everything in the gutter shares a single baseline —
+   the name sets it (its line box is the whole row, so the baseline lands on
+   the row's optical center, where the lifeline runs), and the marginalia hang
+   off it. That is why the name keeps `line-height: var(--chr-row-h)` and the
+   container aligns on `baseline` rather than centering: the name, the host
+   note, the span and the lifeline all sit on one invisible rule that carries
+   the eye from the gutter out into the days. */
 .chr-label {
   position: sticky;
   left: 0;
   z-index: 3;
   display: flex;
   align-items: baseline;
-  gap: 6px;
+  gap: 9px;
   min-width: 0;
-  padding: 0 10px 0 2px;
+  padding: 0 13px 0 4px;
   background: #EDE2CE;
   border-right: 0.5px solid rgba(122, 111, 92, 0.30);
-  border-bottom: 0.5px solid rgba(122, 111, 92, 0.07);
+  border-bottom: 0.5px solid rgba(122, 111, 92, 0.09);
 }
 .chr-name {
   flex: 1 1 auto;
@@ -674,7 +782,8 @@
   white-space: nowrap;
   text-align: left;
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
-  font-size: calc(14px * var(--kbn-type-scale, 1));
+  font-size: calc(15px * var(--kbn-type-scale, 1));
+  letter-spacing: 0.006em;
   line-height: var(--chr-row-h);
   color: #1B1611;
   background: none;
@@ -695,17 +804,21 @@ button.chr-name:hover {
 .chr-label-live::before {
   content: '▸';
   flex: 0 0 auto;
-  font-size: calc(8px * var(--kbn-type-scale, 1));
+  margin-right: -4px;
+  font-size: calc(9px * var(--kbn-type-scale, 1));
   color: #3D5BA0;
   line-height: var(--chr-row-h);
 }
+/* Marginalia: which host, in the smallest mono on the page. It hangs off the
+   name's baseline rather than sitting beside it as an equal, and it is the
+   first thing the eye is allowed to skip. */
 .chr-note {
-  flex: 0 0 auto;
+  flex: 0 1 auto;
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: calc(8.5px * var(--kbn-type-scale, 1));
-  letter-spacing: 0.01em;
+  font-size: calc(9px * var(--kbn-type-scale, 1));
+  letter-spacing: 0.015em;
   color: #A89B83;
-  max-width: 72px;
+  max-width: 96px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -732,21 +845,52 @@ button.chr-name:hover {
   line-height: 1.5;
   align-self: center;
 }
+/* The span, as a ledger column: mono, right-aligned, always in the same place
+   so the numbers stack down the gutter's inner edge and can be compared
+   without being read one at a time. */
 .chr-span {
   flex: 0 0 auto;
-  min-width: 22px;
+  min-width: 28px;
   text-align: right;
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: calc(8.5px * var(--kbn-type-scale, 1));
-  color: #7A6F5C;
+  font-size: calc(9px * var(--kbn-type-scale, 1));
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+  color: #8A7C64;
 }
+
+/* ── Following one row across a wide sheet ──────────────────────────────── */
+
+/* The gutter and the days are separate grid children, so the row is only a row
+   in the reader's head. Under the cursor it becomes one: the same faint gold
+   wash lights the label and its whole lifeline together. Drawn on a ::before
+   overlay rather than as a background, because a row that painted its own
+   ground would cover the day washes it is meant to be read against. */
+.chr-track-hot { position: relative; }
+.chr-track-hot::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: rgba(196, 147, 51, 0.10);
+  pointer-events: none;
+}
+/* The gutter is opaque parchment, so its wash is a layer on the ground rather
+   than an overlay — same colour, same weight, no stacking to reason about. */
+.chr-label-hot {
+  background:
+    linear-gradient(rgba(196, 147, 51, 0.10), rgba(196, 147, 51, 0.10)),
+    #EDE2CE;
+}
+.chr-label-hot .chr-name { color: #1B1611; }
+.chr-label-hot .chr-note,
+.chr-label-hot .chr-span { color: #7A6F5C; }
 /* ── The lifeline ───────────────────────────────────────────────────────── */
 
 .chr-track {
   position: relative;
   z-index: 2;
   min-width: 0;
-  border-bottom: 0.5px solid rgba(122, 111, 92, 0.07);
+  border-bottom: 0.5px solid rgba(122, 111, 92, 0.09);
 }
 /* 2px of iron-gall from birth to close. Everything else on the row is drawn
    over this line, centered on it. */
@@ -770,9 +914,14 @@ button.chr-name:hover {
   background: #3D5BA0;
   border-radius: 0.5px;
 }
-.chr-seg-1 { height: 2px; margin-top: -1px; opacity: 0.30; }
-.chr-seg-2 { height: 4px; margin-top: -2px; opacity: 0.50; }
-.chr-seg-3 { height: 7px; margin-top: -3.5px; opacity: 0.72; }
+/* The ramp grew with the row, but only just: at 32px the old 2/4/7 steps read
+   as three shades of the same hairline, while a ramp scaled to the row would
+   have turned a page of lifelines into a page of bar charts. 3/6/10 keeps the
+   ink lane about a third of the row — the marks still float in the row's air,
+   and the three steps are now separable at a glance. */
+.chr-seg-1 { height: 3px; margin-top: -1.5px; opacity: 0.30; }
+.chr-seg-2 { height: 6px; margin-top: -3px; opacity: 0.52; }
+.chr-seg-3 { height: 10px; margin-top: -5px; opacity: 0.74; }
 
 /* A spell that asked for the human. Solid teal, hairline-slim — kept shorter
    than the tallest segment so it reads as an overlay on the day's work rather
@@ -782,20 +931,22 @@ button.chr-name:hover {
   position: absolute;
   top: 50%;
   width: 2px;
-  height: 6px;
-  margin-top: -3px;
+  height: 8px;
+  margin-top: -4px;
   margin-left: -1px;
   background: #3F8278;
 }
 
-/* A moment that raised its hand. Cinnabar, above the line, small. */
+/* A moment that raised its hand. Cinnabar, above the line, small. It clears
+   the tallest segment (10px, so -5px) with a hairline of daylight under it —
+   the dot must read as hovering over the day's work, never as its cap. */
 .chr-notify {
   position: absolute;
   top: 50%;
-  width: 3px;
-  height: 3px;
-  margin-top: -6.5px;
-  margin-left: -1.5px;
+  width: 3.5px;
+  height: 3.5px;
+  margin-top: -10px;
+  margin-left: -1.75px;
   border-radius: 50%;
   background: #BC4538;
 }
@@ -810,14 +961,14 @@ button.chr-name:hover {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: calc(10px * var(--kbn-type-scale, 1));
+  font-size: calc(11.5px * var(--kbn-type-scale, 1));
   line-height: 1;
   pointer-events: none;
 }
 .chr-end { color: #3F8278; }
 .chr-end-compost { color: #A89B83; }
-.chr-due { color: #C49333; font-size: calc(11px * var(--kbn-type-scale, 1)); }
-.chr-launch { color: #3D5BA0; font-size: calc(11px * var(--kbn-type-scale, 1)); opacity: 0.75; }
+.chr-due { color: #C49333; font-size: calc(12.5px * var(--kbn-type-scale, 1)); }
+.chr-launch { color: #3D5BA0; font-size: calc(12.5px * var(--kbn-type-scale, 1)); opacity: 0.75; }
 
 /* ── The rest of the record ─────────────────────────────────────────────── */
 
@@ -827,7 +978,7 @@ button.chr-name:hover {
   z-index: 3;
   width: 100%;
   text-align: left;
-  padding: 0 10px 0 2px;
+  padding: 0 13px 0 4px;
   background: #EDE2CE;
   border: 0;
   border-right: 0.5px solid rgba(122, 111, 92, 0.30);
@@ -886,7 +1037,7 @@ button.chr-name:hover {
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  height: 8px;
+  height: 10px;
 }
 .chr-key-seg {
   display: inline-block;
@@ -894,19 +1045,21 @@ button.chr-name:hover {
   background: #3D5BA0;
   border-radius: 0.5px;
 }
-.chr-key-seg-1 { height: 2px; opacity: 0.30; }
-.chr-key-seg-2 { height: 4px; opacity: 0.50; }
-.chr-key-seg-3 { height: 7px; opacity: 0.72; }
+/* Verbatim the row's ramp — a key that taught a scale the page does not draw
+   would be worse than no key. */
+.chr-key-seg-1 { height: 3px; opacity: 0.30; }
+.chr-key-seg-2 { height: 6px; opacity: 0.52; }
+.chr-key-seg-3 { height: 10px; opacity: 0.74; }
 .chr-key-attention {
   display: inline-block;
   width: 2px;
-  height: 6px;
+  height: 8px;
   background: #3F8278;
 }
 .chr-key-notify {
   display: inline-block;
-  width: 3px;
-  height: 3px;
+  width: 3.5px;
+  height: 3.5px;
   border-radius: 50%;
   background: #BC4538;
 }

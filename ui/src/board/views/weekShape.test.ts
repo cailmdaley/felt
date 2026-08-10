@@ -425,6 +425,28 @@ describe('the right-edge annotation, now the only text out there', () => {
     expect(annotationFor(spend(0), true, false, 0)).toBe('—');
   });
 
+  it('carries the day\'s exchange in messages, between the weight and the count', () => {
+    expect(annotationFor({ totalMs: 5 * HOUR, sent: 14, received: 9 }, true, false, 0)).toBe(
+      '5h · half · you 14 · 9 back',
+    );
+    expect(annotationFor({ totalMs: 5 * HOUR, sent: 14, received: 9 }, false, true, 2)).toBe(
+      '5h · half · you 14 · 9 back · 2 aloft',
+    );
+  });
+
+  it('says nothing about messages on a day that had none', () => {
+    // A batch run or an overnight sweep is not a conversation with zero turns.
+    expect(annotationFor({ totalMs: 5 * HOUR, sent: 0, received: 0 }, true, false, 0)).toBe(
+      '5h · half',
+    );
+  });
+
+  it('drops the reply half against a daemon that does not report replies', () => {
+    expect(annotationFor({ totalMs: 5 * HOUR, sent: 6, received: 0 }, true, false, 0)).toBe(
+      '5h · half · you 6',
+    );
+  });
+
   it('appends the aloft count on today, and only there', () => {
     // The one signal the removed marginalia carried that the rasters cannot:
     // the seam says something is running, a count says how much.
@@ -861,8 +883,50 @@ describe('how full a day was', () => {
     );
     expect(spend.totalMs).toBe(2 * 60_000);
     expect(spend.agentMs).toBe(2 * 60_000);
-    expect(spend.attentionMs).toBe(60_000);
     expect(spend.notifyCount).toBe(1);
+  });
+
+  it('counts human messages as EVENTS, not as minutes', () => {
+    // The asymmetry the week reads in: three prompts inside one minute are
+    // three things the person said, even though they cost one minute of clock.
+    const spend = summarizeSpend([
+      { m: 0, s: 'a-shuttle', cwd: null, k: 'attention', n: 3 },
+      { m: 60_000, s: 'a-shuttle', cwd: null, k: 'attention', n: 1 },
+    ]);
+    expect(spend.sent).toBe(4);
+  });
+
+  it('counts replies from k:"reply" buckets, which duplicate agent minutes', () => {
+    // The daemon emits both kinds for one `stop` (lib/shuttle/activity.ex), so
+    // the reply count must not disturb the agent time it shadows.
+    const reply = (m: number, n: number): ActivityBucket =>
+      ({ m, s: 'a-shuttle', cwd: null, k: 'reply' as ActivityBucket['k'], n });
+    const spend = summarizeSpend([
+      { m: 0, s: 'a-shuttle', cwd: null, k: 'agent', n: 5 },
+      reply(0, 2),
+      { m: 60_000, s: 'a-shuttle', cwd: null, k: 'agent', n: 1 },
+      reply(60_000, 1),
+    ]);
+    expect(spend.received).toBe(3);
+    expect(spend.agentMs).toBe(2 * 60_000);
+    expect(spend.totalMs).toBe(2 * 60_000);
+  });
+
+  it('never lets a reply bucket leak into the notify tally', () => {
+    // `foldActiveMinutes` sweeps every unrecognised kind into notifyBuckets.
+    // A reply is not a raised hand, and must not read as one.
+    const spend = summarizeSpend([
+      { m: 0, s: 'a-shuttle', cwd: null, k: 'reply' as ActivityBucket['k'], n: 4 },
+      { m: 0, s: 'a-shuttle', cwd: null, k: 'notify', n: 1 },
+    ]);
+    expect(spend.notifyCount).toBe(1);
+    expect(spend.received).toBe(4);
+  });
+
+  it('reports zero replies against a daemon that does not emit the kind', () => {
+    const spend = summarizeSpend([{ m: 0, s: null, cwd: null, k: 'attention', n: 2 }]);
+    expect(spend.sent).toBe(2);
+    expect(spend.received).toBe(0);
   });
 
   it('counts one minute per bucket — the wire grid is fixed, never inferred', () => {

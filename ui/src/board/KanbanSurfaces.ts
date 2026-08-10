@@ -13,6 +13,8 @@ import type {
   KanbanResponse,
 } from './KanbanTypes.js'
 import { isAgentCard } from './KanbanModalShared.js'
+import { upcomingCycleDropTargets } from './KanbanRules.js'
+import type { CycleDropTarget } from './KanbanRules.js'
 
 export const COLUMN_TITLES: Record<ColumnKind, string> = {
   drafts: 'Drafts',
@@ -447,13 +449,24 @@ export class KanbanSurfaceRenderer {
    * Cells flex to fill the width and scroll (with drag edge-scroll) only when
    * they cannot: a wide board gets generous targets, a narrow one keeps all
    * fourteen reachable.
+   *
+   * Past the last day sit the CHAPTER CHIPS: the upcoming cycles, each a drop
+   * target for its own opening day (`upcomingCycleDropTargets` in KanbanRules
+   * decides which cycles qualify and which day each one means). They are the
+   * same drop machinery as a day cell — a chip is a day cell wearing the band's
+   * clothes — because "next sprint" is a date you happen to know by name. With
+   * no upcoming cycles the strip is exactly what it was: days and nothing else.
    */
   renderDragHorizon(futureDays: number): HTMLElement {
+    const cycles = upcomingCycleDropTargets(this.getLastResponse()?.cycles ?? [])
+
     const wrap = document.createElement('div')
     wrap.className = 'kbn-draghorizon-wrap'
     wrap.dataset.draghorizonWrap = '1'
     wrap.setAttribute('role', 'region')
-    wrap.setAttribute('aria-label', 'Drop a card on a day to schedule or snooze it')
+    wrap.setAttribute('aria-label', cycles.length > 0
+      ? 'Drop a card on a day, or on a cycle, to schedule or snooze it'
+      : 'Drop a card on a day to schedule or snooze it')
 
     const row = document.createElement('div')
     row.className = 'kbn-draghorizon-row'
@@ -468,6 +481,12 @@ export class KanbanSurfaceRenderer {
       cell.dataset.timelineDayIso = day.iso
       this.installTimelineDayDropHandlers(cell, day.iso, cell)
       row.append(cell)
+    }
+
+    for (const [index, target] of cycles.entries()) {
+      const chip = buildCycleChip(target, index === 0)
+      this.installTimelineDayDropHandlers(chip, target.dropDay)
+      row.append(chip)
     }
 
     wrap.append(row)
@@ -1287,6 +1306,49 @@ function buildDayCell(day: TimelineDay): HTMLElement {
   num.className = 'kbn-timeline-day-num'
   num.textContent = day.label
   el.append(dow, num)
+  return el
+}
+
+/** `Aug 12` — a civil day said the short way, for a chip that has no room for
+ *  more. Falls back to the raw ISO if the day will not parse. */
+function shortDayLabel(iso: string): string {
+  const d = civilDayToLocalDate(iso)
+  if (!d) return iso
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+}
+
+/**
+ * One cycle as a drop target on the drag horizon: its name over its span, in
+ * the Chronicle band's ochre — the same annotation register, so a chip on the
+ * strip and a band on the page read as the same object.
+ *
+ * `leading` draws the seam between the day cells and the chapters. It is a
+ * class on the first chip rather than a separate divider node, because a
+ * divider would be one more thing a drag can be over and nothing can be
+ * dropped on.
+ */
+function buildCycleChip(target: CycleDropTarget, leading: boolean): HTMLElement {
+  const el = document.createElement('div')
+  el.className = 'kbn-timeline-dropcol kbn-draghorizon-cycle'
+  if (leading) el.classList.add('kbn-draghorizon-cycle-first')
+  if (target.running) el.classList.add('kbn-draghorizon-cycle-running')
+  el.dataset.cycleId = target.id
+  el.dataset.timelineDayIso = target.dropDay
+
+  const name = document.createElement('span')
+  name.className = 'kbn-draghorizon-cycle-name'
+  name.textContent = target.name
+
+  const span = document.createElement('span')
+  span.className = 'kbn-draghorizon-cycle-span'
+  span.textContent = target.openEnded
+    ? `${shortDayLabel(target.start)} –`
+    : `${shortDayLabel(target.start)} – ${shortDayLabel(target.end)}`
+
+  el.append(name, span)
+  el.title = target.running
+    ? `${target.name} is already running — drop here to rest until tomorrow (${shortDayLabel(target.dropDay)}), later this cycle.`
+    : `Drop here to rest until ${target.name} opens on ${shortDayLabel(target.dropDay)}.`
   return el
 }
 

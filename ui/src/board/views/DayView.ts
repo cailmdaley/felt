@@ -1,8 +1,8 @@
 /**
  * DayView (hotkey 2) — one day, close up.
  *
- * TWO CLOCKS, ONE LANE. The page is a 24-hour rail per fiber, read left to
- * right, carrying both of the day's clocks at once:
+ * TWO CLOCKS, ONE LANE. The page is a rail per fiber, read left to right,
+ * carrying both of the day's clocks at once:
  *
  *   pale cobalt wash   the agent was working (merged runs of agent minutes)
  *   solid teal block   you were steering (attention minutes — a typed prompt)
@@ -18,9 +18,23 @@
  * the morning that happens to share its date. The same rule picks the default
  * day on mount — before 06:00 local, "today" is still yesterday.
  *
- * DST-honest. The window is 06:00 local of the day to 06:00 local of the NEXT
- * day, so it is 23 or 25 hours twice a year and every position is a fraction
- * of the real span. Never hard-code 1440.
+ * THE RAIL ZOOMS. Which day's events belong to this page is the 06:00 → 06:00
+ * civil day and nothing else; how much of that day gets DRAWN is a separate
+ * question, and the answer is: only the part that happened. The frame runs from
+ * the day's first action to now (on a live day) or to its last action (on a
+ * finished one), padded a quarter-hour each side and never shorter than two
+ * hours. A day whose work sits between 09:40 and 17:20 spends the whole sheet
+ * on those hours instead of on eight inches of empty dawn.
+ *
+ * Week is the fixed-frame comparator — every row there is the same 24 hours, so
+ * rows are comparable at a glance. Day is the close read, so Day zooms and says
+ * so with its hour labels, which are real clock times anchored to local
+ * midnight (see {@link railTicks}): the same instant lands on the same label
+ * whatever the frame, and the label density steps down as the frame widens.
+ *
+ * DST-honest throughout. The civil day is 06:00 local to 06:00 local of the
+ * NEXT day, so it is 23 or 25 hours twice a year, and every position on the
+ * page is a fraction of the real span. Never hard-code 1440.
  *
  * WHICH DAY comes from the board's shared temporal cursor (`ctx.focusDate`),
  * not from anything this view remembers. The chevrons and the arrow keys write
@@ -63,7 +77,7 @@ import {
 import { createViewEmptyState, createViewPage } from './ViewPage.js'
 import { cardPathSegments, cardUlids, sessionSlug, sessionUlid } from './sessionNames.js'
 import { formatSpanMinutes, railBounds, shiftCivilDay } from './railTime.js'
-import { ACTIVITY_KEY_ITEMS, MARK_GLYPH } from './vocabulary.js'
+import { ACTIVITY_KEY_ITEMS, MARK_GLYPH, messageClause } from './vocabulary.js'
 import {
   keystrokeIsSpokenFor,
   normalizeFocusDate,
@@ -91,8 +105,13 @@ const MINUTE_MS = 60_000
 /** Inactive minutes a wash/block span reaches across before it breaks. Five
  *  quiet minutes inside a work run is a pause, not an end. */
 const BRIDGE_MINUTES = 5
-/** Tick spacing on the rail: 6am 10am 2pm 6pm 10pm 2am 6am. */
-const TICK_HOURS = 4
+/** Breathing room the drawn frame keeps outside the day's first and last
+ *  action, so the earliest mark is not flush against the sheet's edge. */
+export const FRAME_PAD_MINUTES = 15
+/** The narrowest frame Day will draw. A day holding one five-minute burst
+ *  would otherwise zoom to that burst and magnify a speck into the whole
+ *  sheet, which reads as a busy day rather than an almost empty one. */
+export const FRAME_MIN_MINUTES = 120
 
 /**
  * The civil day the view opens on: today, unless local now is before 06:00,
@@ -166,6 +185,111 @@ export function dayWindow(dayISO: string): DayWindow {
   const day = civilDayToLocalDate(dayISO) ? dayISO : isoDayLocal(Date.now())
   const { startMs, endMs } = railBounds(day)
   return { startMs, endMs, minutes: Math.round((endMs - startMs) / MINUTE_MS) }
+}
+
+/**
+ * The part of the civil day the page actually DRAWS: first action → now on the
+ * rail that contains this moment, first action → last action on a finished one,
+ * padded {@link FRAME_PAD_MINUTES} each side and widened to
+ * {@link FRAME_MIN_MINUTES} when the day is too sparse to fill that.
+ *
+ * Clamped to the rail at both ends, so the frame is always a sub-span of the
+ * civil day — the zoom can never smuggle in a minute that belongs to another
+ * page. A day with no activity at all keeps the full rail: there is no work to
+ * frame, and zooming to nothing would be arbitrary.
+ *
+ * Every drawn bucket is inside the result by construction (the frame reaches
+ * the first and last of them), so nothing is lost by positioning against this
+ * rather than against the rail.
+ */
+export function drawnWindow(
+  rail: DayWindow,
+  buckets: readonly ActivityBucket[],
+  nowMs: number,
+): DayWindow {
+  let first = Infinity
+  let last = -Infinity
+  for (const bucket of buckets) {
+    if (bucket.m < rail.startMs || bucket.m >= rail.endMs) continue
+    if (bucket.m < first) first = bucket.m
+    if (bucket.m > last) last = bucket.m
+  }
+  if (first === Infinity) return rail
+
+  const pad = FRAME_PAD_MINUTES * MINUTE_MS
+  const live = nowMs >= rail.startMs && nowMs < rail.endMs
+  let startMs = first - pad
+  // The last action's own minute is a full minute wide; and a live day runs to
+  // now however long ago the last mark was, because the empty stretch between
+  // the last action and this moment is itself the day's news.
+  let endMs = Math.max(last + MINUTE_MS, live ? nowMs : -Infinity) + pad
+
+  const shortfall = FRAME_MIN_MINUTES * MINUTE_MS - (endMs - startMs)
+  if (shortfall > 0) {
+    startMs -= shortfall / 2
+    endMs += shortfall / 2
+  }
+  // Overflow at one edge pushes the frame the other way rather than truncating
+  // it, so the minimum span survives a burst at dawn or at dusk.
+  if (startMs < rail.startMs) {
+    endMs += rail.startMs - startMs
+    startMs = rail.startMs
+  }
+  if (endMs > rail.endMs) {
+    startMs -= endMs - rail.endMs
+    endMs = rail.endMs
+  }
+  startMs = Math.max(rail.startMs, Math.floor(startMs / MINUTE_MS) * MINUTE_MS)
+  endMs = Math.min(rail.endMs, Math.ceil(endMs / MINUTE_MS) * MINUTE_MS)
+  return { startMs, endMs, minutes: Math.round((endMs - startMs) / MINUTE_MS) }
+}
+
+/** The spacings the hour hand is allowed to use, coarsest last. Half an hour is
+ *  the finest: the frame is never shorter than two hours, and a rail ruled at
+ *  ten-minute grain would be a chart of its own gridlines. */
+const TICK_STEPS_MINUTES = [30, 60, 120, 180, 240, 360, 720]
+/** Labels a frame may carry. Six over the full day is the spacing this page has
+ *  always used; holding the count fixed is what makes a zoomed frame get
+ *  finer marks instead of denser ones. */
+const MAX_TICKS = 7
+
+/** The coarsest-to-finest step that keeps a frame of `spanMinutes` under
+ *  {@link MAX_TICKS} labels — 4-hourly across a whole day, half-hourly at the
+ *  minimum zoom. */
+export function tickStepMinutes(spanMinutes: number): number {
+  for (const step of TICK_STEPS_MINUTES) {
+    if (spanMinutes / step <= MAX_TICKS) return step
+  }
+  return TICK_STEPS_MINUTES[TICK_STEPS_MINUTES.length - 1]
+}
+
+/**
+ * The hour hand for a frame: real clock times inside it, ANCHORED TO LOCAL
+ * MIDNIGHT rather than to the frame's own edge. Two frames over the same day
+ * therefore rule their lines in the same places, and a label always names a
+ * round hour of the actual clock instead of an offset from wherever the day's
+ * first action happened to fall.
+ *
+ * Stepped through a local `Date` rather than by adding milliseconds, so a
+ * spring-forward frame skips the hour that does not exist instead of labelling
+ * it.
+ */
+export function railTicks(win: DayWindow): { ms: number; label: string }[] {
+  const step = tickStepMinutes(win.minutes)
+  const cursor = new Date(win.startMs)
+  cursor.setHours(0, 0, 0, 0)
+  const out: { ms: number; label: string }[] = []
+  // Bounded: the walk starts at most 25 hours before the frame and the finest
+  // step is half an hour, so this can never be the loop that runs away.
+  for (let guard = 0; guard < 512; guard += 1) {
+    const ms = cursor.getTime()
+    if (ms >= win.endMs) break
+    if (ms >= win.startMs) {
+      out.push({ ms, label: step < 60 ? formatClockTime(ms) : formatHourTick(ms) })
+    }
+    cursor.setMinutes(cursor.getMinutes() + step)
+  }
+  return out
 }
 
 /** A run of rail minutes; `end` is exclusive, so a single minute is `n..n+1`. */
@@ -322,6 +446,15 @@ export interface DayLane {
    */
   attentionMinutes: number
   agentMinutes: number
+  /**
+   * Messages you sent to this fiber today — the sum of `n` over its attention
+   * buckets, and what the ledger row reports as "you 14 msgs".
+   *
+   * Summed, not counted per minute, deliberately: three prompts in one minute
+   * are three messages. That is the opposite rule from `attentionMinutes`
+   * above, and it has to be — one measures time, this one measures acts.
+   */
+  attentionMessages: number
   /** Distinct active minutes, of any kind — the lane's weight. */
   weight: number
   /**
@@ -351,16 +484,45 @@ export interface DayTotals {
   attention: number
   /** Minutes containing at least one agent bucket, over the whole day. */
   agent: number
+  /** Messages you sent — see {@link countMessages}. */
+  messages: number
 }
 
-/** Minutes the whole day was attended / worked, counted once per minute
- *  however many lanes were live in it. */
+/**
+ * MESSAGES SENT, not minutes attended — the human's half of the day, counted
+ * the way a human counts it.
+ *
+ * An attention bucket is a minute in which you typed at a worker, and `n` is
+ * how many prompts landed in it. Minutes were the wrong unit for that: a minute
+ * is what the AGENT spends, and reporting your side in the same unit invited
+ * the comparison "you 38m · agents 2h 10m", which reads as a productivity
+ * ratio and is not one — you are not idle in the 2h 10m, you are elsewhere.
+ * Messages are a count of things you actually did, and they do not pretend to
+ * be time.
+ *
+ * Positions on the rail are untouched by this: the ticks still mark the minutes
+ * the buckets name. Only the unit in the prose changed.
+ */
+export function countMessages(
+  buckets: readonly ActivityBucket[],
+  win: DayWindow,
+): number {
+  let sent = 0
+  for (const bucket of buckets) {
+    if (bucket.m < win.startMs || bucket.m >= win.endMs) continue
+    if (bucket.k === 'attention') sent += bucket.n
+  }
+  return sent
+}
+
+/** What the whole day cost: agent minutes, attention minutes (still the rail's
+ *  own measure) and the messages you sent across every fiber. */
 export function dayTotals(activity: ActivityResult, win: DayWindow): DayTotals {
   const { attention, agent } = foldActiveMinutes(activity.buckets, {
     fromMs: win.startMs,
     toMs: win.endMs,
   })
-  return { attention, agent }
+  return { attention, agent, messages: countMessages(activity.buckets, win) }
 }
 
 function minuteIndex(ms: number, win: DayWindow): number | null {
@@ -573,6 +735,7 @@ export function buildDayLanes(
       | 'notify'
       | 'attentionMinutes'
       | 'agentMinutes'
+      | 'attentionMessages'
       | 'weight'
       | 'beats'
       | 'host'
@@ -586,6 +749,8 @@ export function buildDayLanes(
     attention: Set<number>
     notify: Set<number>
     all: Set<number>
+    /** Attention EVENTS, summed — see `DayLane.attentionMessages`. */
+    messages: number
     /** Per-minute counts and transcripts, unmerged — see `DayLane.beats`. */
     beats: Map<number, { kinds: Map<ActivityBucket['k'], number>; sources: (MomentSource | null)[] }>
   }
@@ -613,6 +778,7 @@ export function buildDayLanes(
         attention: new Set(),
         notify: new Set(),
         all: new Set(),
+        messages: 0,
         beats: new Map(),
       }
       acc.set(key, entry)
@@ -627,8 +793,10 @@ export function buildDayLanes(
     }
     entry.all.add(minute)
     if (bucket.k === 'agent') entry.agent.add(minute)
-    else if (bucket.k === 'attention') entry.attention.add(minute)
-    else entry.notify.add(minute)
+    else if (bucket.k === 'attention') {
+      entry.attention.add(minute)
+      entry.messages += bucket.n
+    } else entry.notify.add(minute)
 
     let beat = entry.beats.get(minute)
     if (!beat) {
@@ -656,6 +824,7 @@ export function buildDayLanes(
       notify: [...entry.notify].sort((a, b) => a - b),
       attentionMinutes: entry.attention.size,
       agentMinutes: entry.agent.size,
+      attentionMessages: entry.messages,
       weight: entry.all.size,
       beats: [...entry.beats.entries()]
         .map(([minute, beat]) => ({
@@ -876,18 +1045,25 @@ export function buildDayPreviews(
 }
 
 export interface DayEntryStats {
-  /** Minutes you were steering this fiber today. */
-  attention: number
-  /** Minutes its agents were working. */
+  /** Messages you sent this fiber today. Your half of the day is COUNTED, not
+   *  timed — see {@link countMessages}. */
+  messages: number
+  /** Minutes its agents were working. Theirs still is time. */
   agent: number
+  /** Messages it sent BACK — populated wherever the feed carries `k: "reply"`
+   *  buckets for the day; absent when it does not. */
+  received?: number
   commits: number
 }
 
-/** `you 38m · agents 2h 10m · 3 commits`, with empty terms dropped rather than
- *  printed as zeros — a row of `0m`s is noise, not information. */
+/** `you 14 · 9 back · agents 2h 10m · 3 commits`, with empty terms dropped
+ *  rather than printed as zeros — a row of `0`s is noise, not information. */
 export function formatEntryStats(stats: DayEntryStats): string {
   const parts: string[] = []
-  if (stats.attention > 0) parts.push(`you ${formatSpanMinutes(stats.attention, { pad: true })}`)
+  const received = stats.received ?? 0
+  if (stats.messages > 0 || received > 0) {
+    parts.push(messageClause(stats.messages, received))
+  }
   if (stats.agent > 0) parts.push(`agents ${formatSpanMinutes(stats.agent, { pad: true })}`)
   if (stats.commits > 0) parts.push(`${stats.commits} commit${stats.commits === 1 ? '' : 's'}`)
   return parts.join(' · ')
@@ -998,7 +1174,7 @@ export function buildDayEntries(
       chip: isLiveRail ? laneChip(card, nowMs) : undefined,
       closed: closureMark(card, win),
       stats: {
-        attention: lane.attentionMinutes,
+        messages: lane.attentionMessages,
         agent: lane.agentMinutes,
         commits: subjects?.length ?? 0,
       },
@@ -1045,7 +1221,13 @@ export function buildDayEntries(
 
 export interface DayModel {
   dayISO: string
+  /** The civil day: 06:00 → 06:00. What BELONGS to this page — commits,
+   *  closures, obligations are all judged against it. */
   window: DayWindow
+  /** The part of it that gets drawn. Every position on the chart — marks,
+   *  gridlines, hour labels, the now-thread, the hover's minute arithmetic —
+   *  is a fraction of THIS. See {@link drawnWindow}. */
+  frame: DayWindow
   /** Obligations between now and the end of THIS rail. Empty on a past day. */
   stillAhead: StillAheadItem[]
   /** One pane per fiber lane — its report, or its outcome. */
@@ -1090,11 +1272,16 @@ export function buildDayModel(
   sessionOrigins?: TemporalOrigins,
 ): DayModel {
   const win = dayWindow(dayISO)
+  // The lanes are built against the FRAME, so a lane's minute indices are
+  // already the coordinates the chart draws in. Nothing is lost: the frame
+  // reaches every bucket the rail holds.
+  const frame = drawnWindow(win, activity.buckets, nowMs)
   const origins = mergeOrigins(activity.origins, sessionOrigins)
-  const lanes = buildDayLanes(activity, cards, win, byTmux, origins)
+  const lanes = buildDayLanes(activity, cards, frame, byTmux, origins)
   return {
     dayISO,
     window: win,
+    frame,
     host: (activity.host ?? '').toLowerCase(),
     origins,
     totals: dayTotals(activity, win),
@@ -1131,7 +1318,18 @@ export function dayModelSignature(model: DayModel): string {
   // The ledger's size rides the signature: a pairing arriving on a later poll
   // can move a bucket from a cwd lane onto a fiber, and the page must repaint.
   const ledger = `ledger:${model.ledgerSize}`
-  return `${model.dayISO}\n${model.totals.attention}/${model.totals.agent}\n${lanes}\n${entries}\n${ahead}\n${ledger}`
+  // The frame rides the signature — every mark's position is a fraction of it,
+  // so a frame that moved is a page that must repaint even when the lanes are
+  // unchanged. QUANTIZED TO FIVE MINUTES because a live day's frame ends at
+  // `now`: at full precision this would differ on every poll and rebuild the
+  // whole page every fifteen seconds to slide the ink by a hair.
+  const grain = 5 * MINUTE_MS
+  const frame =
+    `frame:${Math.floor(model.frame.startMs / grain)}-${Math.floor(model.frame.endMs / grain)}`
+  return (
+    `${model.dayISO}\n${model.totals.messages}/${model.totals.agent}\n` +
+    `${lanes}\n${entries}\n${ahead}\n${ledger}\n${frame}`
+  )
 }
 
 // ── Rendering ────────────────────────────────────────────────────────────────
@@ -1160,6 +1358,8 @@ const DAY_KEY_CLASS: Record<ActivityBucket['k'], string> = {
   agent: 'kbn-day-key-wash',
   attention: 'kbn-day-key-att',
   notify: 'kbn-day-key-tick',
+  // A reply is agent-side ink; it wears the wash, never its own mark.
+  reply: 'kbn-day-key-wash',
 }
 
 /** One entry in the key: the mark itself, in miniature, then what it means. */
@@ -1256,6 +1456,10 @@ class DayViewImpl implements TemporalView {
    *  {@link resolveDayISO}); this only says what the DOM is showing, so a
    *  refresh can tell whether the heading and body need to move. */
   private shownDay: string | null = null
+  /** The window the CHART is drawn in — the model's frame, held because the
+   *  now-thread slides between renders and must slide against the same
+   *  coordinates the ink was laid in. Null until a chart exists. */
+  private frame: DayWindow | null = null
   private signature: string | null = null
   /** Monotonic load id — a fetch that lands after a newer one is discarded. */
   private loadToken = 0
@@ -1347,6 +1551,7 @@ class DayViewImpl implements TemporalView {
     this.todayEl = null
     this.ctx = null
     this.shownDay = null
+    this.frame = null
     this.signature = null
   }
 
@@ -1363,8 +1568,8 @@ class DayViewImpl implements TemporalView {
    */
   private positionNow(): void {
     const el = this.nowEl
-    if (!el || !this.shownDay) return
-    const win = dayWindow(this.shownDay)
+    const win = this.frame
+    if (!el || !win) return
     const span = win.endMs - win.startMs
     const now = Date.now()
     if (span <= 0 || now < win.startMs || now >= win.endMs) {
@@ -1464,7 +1669,7 @@ class DayViewImpl implements TemporalView {
       // lane only repeats it when it disagrees (see DayLane.hostNote).
       this.statsEl.textContent =
         (model.host ? `${model.host} · ` : '') +
-        `attention ${formatSpanMinutes(model.totals.attention, { pad: true })}` +
+        `${messageClause(model.totals.messages, 0)}` +
         ` · agents ${formatSpanMinutes(model.totals.agent, { pad: true })}`
       this.statsEl.classList.toggle('kbn-day-stats-quiet', model.lanes.length === 0)
     }
@@ -1474,6 +1679,10 @@ class DayViewImpl implements TemporalView {
     // expensive to rebuild.
     this.previewsEl?.remove()
     body.textContent = ''
+    // No chart until one is built; a stale frame would let the now-thread of a
+    // page that has none slide against a window nothing is drawn in.
+    this.frame = null
+    this.nowEl = null
     if (model.lanes.length === 0 && model.entries.length === 0) {
       body.append(createViewEmptyState('— an unwritten day —'))
       // A day with nothing behind it can still have something in front of it.
@@ -1487,7 +1696,8 @@ class DayViewImpl implements TemporalView {
   }
 
   private buildChart(model: DayModel): HTMLElement {
-    const win = model.window
+    const win = model.frame
+    this.frame = win
     const span = win.endMs - win.startMs
     const chart = document.createElement('div')
     chart.className = 'kbn-day-chart'
@@ -1501,10 +1711,15 @@ class DayViewImpl implements TemporalView {
     const grid = document.createElement('div')
     grid.className = 'kbn-day-grid'
     grid.style.gridRow = `1 / span ${model.lanes.length}`
-    for (let hour = TICK_HOURS; hour * 3_600_000 < span; hour += TICK_HOURS) {
+    // One line per LABELLED tick, so the rules and the hour hand under them
+    // agree; the edges are skipped, where a line would just thicken the frame.
+    const ticks = railTicks(win)
+    for (const tick of ticks) {
+      const fraction = (tick.ms - win.startMs) / span
+      if (fraction <= 0.001 || fraction >= 0.999) continue
       const line = document.createElement('i')
       line.className = 'kbn-day-gridline'
-      line.style.left = pct((hour * 3_600_000) / span)
+      line.style.left = pct(fraction)
       grid.append(line)
     }
     // Midnight — the date itself turning over, mid-rail. Not on a 4h tick.
@@ -1586,15 +1801,16 @@ class DayViewImpl implements TemporalView {
     const axis = document.createElement('div')
     axis.className = 'kbn-day-axis'
     axis.style.gridRow = String(model.lanes.length + 1)
-    for (let hour = 0; hour * 3_600_000 <= span; hour += TICK_HOURS) {
-      const at = win.startMs + hour * 3_600_000
+    for (const { ms, label } of ticks) {
       const tick = document.createElement('span')
       tick.className = 'kbn-day-tick'
-      tick.textContent = formatHourTick(at)
-      const fraction = (at - win.startMs) / span
-      if (fraction <= 0) tick.classList.add('kbn-day-tick-first')
-      else if (fraction >= 0.999) tick.classList.add('kbn-day-tick-last')
-      tick.style.left = pct(Math.min(fraction, 1))
+      tick.textContent = label
+      const fraction = (ms - win.startMs) / span
+      // A label landing within a hair of either edge is pulled inboard rather
+      // than centred, so it cannot hang off the sheet.
+      if (fraction <= 0.02) tick.classList.add('kbn-day-tick-first')
+      else if (fraction >= 0.98) tick.classList.add('kbn-day-tick-last')
+      tick.style.left = pct(Math.min(Math.max(fraction, 0), 1))
       axis.append(tick)
     }
     chart.append(axis)

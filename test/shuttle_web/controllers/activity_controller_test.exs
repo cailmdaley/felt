@@ -134,7 +134,32 @@ defmodule ShuttleWeb.ActivityControllerTest do
 
       by_kind = Map.new(buckets!(path, @t0, @t0 + @minute), &{&1.k, &1.n})
 
-      assert by_kind == %{"attention" => 1, "notify" => 1, "agent" => 7}
+      assert by_kind == %{"attention" => 1, "notify" => 1, "agent" => 7, "reply" => 1}
+    end
+
+    test "stop emits reply ALONGSIDE agent, leaving the agent stream untouched" do
+      # The whole safety argument for adding a kind to a wire format several
+      # views read: a consumer that never heard of "reply" sees exactly the
+      # numbers it saw before.
+      path =
+        write_fixture([
+          event(%{"type" => "stop"}),
+          event(%{"type" => "stop"}),
+          event(%{"type" => "post_tool_use"})
+        ])
+
+      assert buckets!(path, @t0, @t0 + @minute) == [
+               %{m: @t0, s: @session, cwd: @cwd, k: "agent", n: 3},
+               %{m: @t0, s: @session, cwd: @cwd, k: "reply", n: 2}
+             ]
+    end
+
+    test "subagent_stop is not a reply — no human received it" do
+      path = write_fixture([event(%{"type" => "subagent_stop"})])
+
+      assert buckets!(path, @t0, @t0 + @minute) == [
+               %{m: @t0, s: @session, cwd: @cwd, k: "agent", n: 1}
+             ]
     end
   end
 
@@ -174,6 +199,20 @@ defmodule ShuttleWeb.ActivityControllerTest do
         write_fixture([
           event(%{"timestamp" => @t0, "type" => "notification"}),
           event(%{"timestamp" => @t0 + @minute, "type" => "post_tool_use"}),
+          event(%{"timestamp" => @t0 + 2 * @minute, "type" => "notification"})
+        ])
+
+      assert Enum.filter(buckets!(path, @t0, @t0 + 3 * @minute), &(&1.k == "notify")) == [
+               %{m: @t0, s: @session, cwd: @cwd, k: "notify", n: 1},
+               %{m: @t0 + 2 * @minute, s: @session, cwd: @cwd, k: "notify", n: 1}
+             ]
+    end
+
+    test "a completed reply closes the spell like any other agent event" do
+      path =
+        write_fixture([
+          event(%{"timestamp" => @t0, "type" => "notification"}),
+          event(%{"timestamp" => @t0 + @minute, "type" => "stop"}),
           event(%{"timestamp" => @t0 + 2 * @minute, "type" => "notification"})
         ])
 
@@ -298,7 +337,7 @@ defmodule ShuttleWeb.ActivityControllerTest do
 
   describe "Shuttle.Activity.buckets/3 — rotated sibling" do
     test "reads events.jsonl.1 when its mtime falls inside the window" do
-      path = write_fixture([event(%{"timestamp" => @t0 + @minute, "type" => "stop"})])
+      path = write_fixture([event(%{"timestamp" => @t0 + @minute, "type" => "post_tool_use"})])
 
       write_rotated(
         path,
@@ -317,7 +356,7 @@ defmodule ShuttleWeb.ActivityControllerTest do
       # writes it again, so an mtime before from_ms proves every line predates
       # the window. The in-range line below is unreachable in production for
       # exactly that reason; the test asserts the 64 MB scan really is skipped.
-      path = write_fixture([event(%{"timestamp" => @t0, "type" => "stop"})])
+      path = write_fixture([event(%{"timestamp" => @t0, "type" => "post_tool_use"})])
 
       write_rotated(
         path,

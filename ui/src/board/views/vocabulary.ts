@@ -45,3 +45,18 @@ export const ACTIVITY_KEY_ITEMS: Array<{ kind: ActivityBucket['k']; label: strin
   { kind: 'attention', label: 'you steering' },
   { kind: 'notify', label: 'attention called' },
 ]
+
+// ── Message tallies ──────────────────────────────────────────────────────────
+
+/**
+ * `you 14 · 9 back` — the exchange, in the order it happened.
+ *
+ * Deliberately unlabelled on the second half: "9 back" is what a person says
+ * out loud, and the first clause has already established that we are counting
+ * messages. The reply count is dropped entirely when it is zero, which is what
+ * a daemon that does not emit `k: "reply"` reports — an absent clause invites
+ * no conclusion, where "0 back" would assert one that is false.
+ */
+export function messageClause(sent: number, received: number): string {
+  return received > 0 ? `you ${sent} · ${received} back` : `you ${sent}`
+}

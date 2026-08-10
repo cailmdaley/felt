@@ -11,7 +11,7 @@ defmodule Shuttle.Activity do
       %{m: 1_770_000_000_000, s: "morning-post-…-shuttle", cwd: "/repo", k: "attention", n: 3}
 
   `m` is the minute floor in epoch ms; `s` and `cwd` are `nil` when the event
-  carried neither. `k` collapses the eight hook types into the three things a
+  carried neither. `k` collapses the eight hook types into the things a
   temporal view distinguishes:
 
     * `user_prompt_submit` → `"attention"` — a human typed.
@@ -25,6 +25,26 @@ defmodule Shuttle.Activity do
   was present, notify marks are where the agent wanted one, and the agent band
   is the machine's own time. Any hook type invented later lands in `"agent"`
   rather than disappearing.
+
+  ## `"reply"`: a facet of the agent band, not a fourth slice
+
+  A `stop` hook fires when an agent finishes a turn — one completed reply a
+  human received. That is the natural counterpart to `"attention"`: together
+  they make a *conversation* countable in messages rather than in minutes,
+  which is what a week-scale view wants from a human (nobody's attention is
+  measured in wall-clock; it is measured in exchanges).
+
+  So a `stop` event emits **two** buckets for its minute: the `"agent"` one it
+  has always emitted, and an additional `"reply"` one. `"reply"` is a *facet*
+  of agent activity, not a partition of it — the `"agent"` stream is
+  byte-identical to what it was before this kind existed, and every consumer
+  that folds agent minutes keeps its numbers without knowing `"reply"` exists.
+  Consumers that want message counts sum `n` over `"reply"`.
+
+  The duplication is deliberate and is the price of adding a kind to a wire
+  format several views read independently. When every consumer counts
+  `"reply"` alongside `"agent"` on its own, the `"agent"` copy can be dropped
+  and this becomes an ordinary partition.
 
   ## What "needed your attention" means: the waiting spell
 
@@ -49,7 +69,9 @@ defmodule Shuttle.Activity do
       as before) or any agent event (the agent moved on by itself — a
       permission was granted elsewhere, a tool returned, the session
       restarted). The next `notification` after that opens a fresh spell,
-      because something genuinely new is being asked.
+      because something genuinely new is being asked. A `stop` closes the
+      spell exactly as it always did — a completed reply is agent activity,
+      and the extra `"reply"` bucket changes the label, not the machine.
 
   Identity is the bucket key minus minute and kind: `{tmuxSession, cwd}`. Two
   workers blocked at once hold two independent spells, and an event carrying
@@ -214,12 +236,13 @@ defmodule Shuttle.Activity do
       {:ok, %{"timestamp" => ts, "type" => type} = event}
       when is_integer(ts) and is_binary(type) and ts <= to_ms ->
         identity = {presence(event["tmuxSession"]), presence(event["cwd"])}
-        {kind, spells} = classify(type, identity, spells)
+        {kinds, spells} = classify(type, identity, spells)
 
-        cond do
-          kind == nil -> {tally, spells}
-          ts < from_ms -> {tally, spells}
-          true -> {bump(tally, div(ts, @minute_ms) * @minute_ms, identity, kind), spells}
+        if kinds == [] or ts < from_ms do
+          {tally, spells}
+        else
+          minute = div(ts, @minute_ms) * @minute_ms
+          {Enum.reduce(kinds, tally, &bump(&2, minute, identity, &1)), spells}
         end
 
       _ ->
@@ -231,24 +254,31 @@ defmodule Shuttle.Activity do
     Map.update(tally, {minute, session, cwd, kind}, 1, &(&1 + 1))
   end
 
-  # The spell state machine. Returns the bucket kind this event contributes —
-  # `nil` for a notification swallowed by an open spell — and the spell map
+  # The spell state machine. Returns the bucket kinds this event contributes —
+  # `[]` for a notification swallowed by an open spell — and the spell map
   # after the event. See the moduledoc for why a repeat notification is not a
-  # second demand.
+  # second demand, and why `stop` contributes two kinds rather than one.
   defp classify("notification", identity, spells) do
     if Map.has_key?(spells, identity) do
-      {nil, spells}
+      {[], spells}
     else
-      {"notify", Map.put(spells, identity, true)}
+      {["notify"], Map.put(spells, identity, true)}
     end
   end
 
   defp classify("user_prompt_submit", identity, spells) do
-    {"attention", Map.delete(spells, identity)}
+    {["attention"], Map.delete(spells, identity)}
+  end
+
+  # A finished turn is agent activity that also happens to be a message. It
+  # closes the spell like any other agent event; the second kind is a label
+  # laid over the same event, not a reclassification of it.
+  defp classify("stop", identity, spells) do
+    {["agent", "reply"], Map.delete(spells, identity)}
   end
 
   defp classify(_type, identity, spells) do
-    {"agent", Map.delete(spells, identity)}
+    {["agent"], Map.delete(spells, identity)}
   end
 
   defp presence(value) when is_binary(value) and value != "", do: value

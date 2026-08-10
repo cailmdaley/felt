@@ -38,7 +38,7 @@ import {
   type ViewContext,
 } from './ViewRegistry.js'
 import { createViewPage, type ViewPage } from './ViewPage.js'
-import { ACTIVITY_KEY_ITEMS, MARK_GLYPH, type MarkKind } from './vocabulary.js'
+import { ACTIVITY_KEY_ITEMS, MARK_GLYPH, messageClause, type MarkKind } from './vocabulary.js'
 import {
   civilDayNoon,
   RAIL_START_HOUR,
@@ -305,19 +305,48 @@ export interface ActivitySpend {
   /** Time in buckets carrying ANY signal — a bucket counts once, not once per
    *  kind, so the total is wall-clock time and not a sum of overlaps. */
   totalMs: number
-  attentionMs: number
   agentMs: number
   notifyCount: number
+  /** Messages the human sent — every `user_prompt_submit`, counted as events
+   *  and not as minutes. */
+  sent: number
+  /** Replies the human received — every finished agent turn (`k: "reply"`).
+   *  Zero on a daemon too old to emit the kind, which reads correctly: a
+   *  count nobody reported is not a count of nothing said, but the week header
+   *  simply omits the clause rather than claiming silence. */
+  received: number
 }
 
-/** Fold buckets into wall-clock time per kind. Callers pre-filter the window. */
+/**
+ * Fold buckets into the two currencies a week reads in. Callers pre-filter the
+ * window.
+ *
+ * The asymmetry is the point. Agent work is measured in **time**, because that
+ * is what a machine spends and what a long unattended run looks like. Human
+ * presence is measured in **messages**, because nobody experiences their own
+ * attention as wall-clock minutes — they remember how many times they came
+ * back. So the human side sums `n` (events) while the agent side counts
+ * distinct minutes.
+ */
 export function summarizeSpend(buckets: ActivityBucket[], bucketMs = BUCKET_MS): ActivitySpend {
   const minutes = foldActiveMinutes(buckets)
+  let sent = 0
+  let received = 0
+  let notifyCount = 0
+  for (const b of buckets) {
+    if (b.k === 'attention') sent += b.n
+    else if (b.k === 'reply') received += b.n
+    else if (b.k === 'notify') notifyCount += 1
+  }
   return {
     totalMs: minutes.all * bucketMs,
-    attentionMs: minutes.attention * bucketMs,
     agentMs: minutes.agent * bucketMs,
-    notifyCount: minutes.notifyBuckets,
+    // Counted here rather than taken from `foldActiveMinutes`, whose else-branch
+    // sweeps every non-attention, non-agent kind (including "reply") into its
+    // notify tally.
+    notifyCount,
+    sent,
+    received,
   }
 }
 
@@ -379,17 +408,25 @@ export function formatSpan(ms: number): string {
  * rather than "not yet". Today alone appends the aloft count.
  */
 export function annotationFor(
-  spend: { totalMs: number } | null,
+  spend: { totalMs: number; sent?: number; received?: number } | null,
   isPast: boolean,
   isToday: boolean,
   aloft: number,
 ): string {
   if (!isPast && !isToday) return ''
-  const body = spend && spend.totalMs > 0
-    ? `${formatSpan(spend.totalMs)} · ${dayWeight(spend.totalMs)}`
-    : '—'
-  return isToday && aloft > 0 ? `${body} · ${aloft} aloft` : body
+  const quiet = !spend || spend.totalMs <= 0
+  const parts = quiet ? ['—'] : [formatSpan(spend.totalMs), dayWeight(spend.totalMs)]
+  // A day with no messages at all — a batch run, a cron sweep — says nothing
+  // here rather than printing a pair of zeros. Silence is the honest render of
+  // "no conversation happened", and also of a daemon that never sent the kind.
+  if (!quiet && (spend.sent || spend.received)) parts.push(messageClause(spend.sent ?? 0, spend.received ?? 0))
+  if (isToday && aloft > 0) parts.push(`${aloft} aloft`)
+  return parts.join(' · ')
 }
+
+// Re-exported for callers that historically imported it from here — the
+// definition now lives in vocabulary.ts, shared with Day and Chronicle.
+export { messageClause } from './vocabulary.js'
 
 /** `12h` · `45m` — the header's coarser hand. */
 function formatCoarseSpan(ms: number): string {
@@ -1116,7 +1153,9 @@ class WeekView implements TemporalView {
     if (this.totals) {
       const week = activity?.week
       this.totals.textContent = week
-        ? `attention ${formatCoarseSpan(week.attentionMs)} · agents ${formatCoarseSpan(week.agentMs)}`
+        ? // Two currencies, one line: what the week cost a person is a number
+          // of messages, what it cost the machines is hours.
+          `${messageClause(week.sent, week.received)} · agents ${formatCoarseSpan(week.agentMs)}`
         : ''
     }
 
@@ -1474,6 +1513,11 @@ export function slotTip(slot: RasterSlot, words?: MomentWords): SlotTip {
  * the KIND — so the second axis has to be the stroke itself. See the key.
  */
 function paintRaster(host: HTMLElement, slots: readonly RasterSlot[]): void {
+  // `reply` is absent on purpose. The daemon emits it alongside an `agent`
+  // bucket for the same minute, so that minute is already inked in the agent
+  // pigment; a second tick would darken the same instant twice and invent a
+  // distinction the eye should not be asked to make. Replies are read in the
+  // annotation, not in the raster.
   const order: ActivityBucket['k'][] = ['agent', 'attention', 'notify']
   for (const kind of order) {
     for (const slot of slots) {

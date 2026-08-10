@@ -160,7 +160,7 @@
   width: 0;
 }
 .kbn-day-gridline { border-left: 0.5px solid rgba(122, 111, 92, 0.16); }
-/* The date itself turning over — off the 4h grid, and dashed rather than
+/* The date itself turning over — off the hour grid, and dashed rather than
    solid so it reads as a boundary. Deliberately NOT ochre: on this board ochre
    means an obligation, and midnight is not one. */
 .kbn-day-midnight { border-left: 0.5px dashed rgba(27, 22, 17, 0.28); }

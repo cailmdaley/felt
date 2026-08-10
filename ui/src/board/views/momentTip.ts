@@ -55,12 +55,13 @@ export const SLOT_PHRASE: Record<ActivityBucket['k'], string> = {
   attention: 'you prompted',
   notify: 'needed you',
   agent: 'agent working',
+  reply: 'agent replied',
 }
 
 /** Strongest signal first — a hand raised, then a human steering, then the
  *  agent work underneath both. The order the ink is layered in, read top to
  *  bottom. */
-export const SLOT_KIND_ORDER: ActivityBucket['k'][] = ['notify', 'attention', 'agent']
+export const SLOT_KIND_ORDER: ActivityBucket['k'][] = ['notify', 'attention', 'agent', 'reply']
 
 export interface SlotTipRow {
   /** The pigment this line is about, so the tooltip speaks the rail's colours

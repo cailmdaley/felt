@@ -507,6 +507,58 @@
   outline-offset: -2px;
 }
 
+/* Chapter chips — the upcoming cycles, offered after the last day cell. The
+   vocabulary is the Chronicle band's verbatim (ochre tint, hairline edge,
+   italic serif), because a chip here and a band there are the same cycle. They
+   size to their own name (`flex: 0 0 auto`) rather than sharing the days'
+   stretch: a chapter is one target, not a slice of the calendar. */
+.kbn-draghorizon-cycle {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 1px;
+  max-width: 190px;
+  margin: 3px 4px;
+  padding: 0 8px;
+  border: 0.5px solid rgba(154, 123, 53, 0.42);
+  border-radius: 7px;
+  background: rgba(196, 147, 51, 0.16);
+  overflow: hidden;
+}
+/* The seam between the calendar and the chapters — days run out here. */
+.kbn-draghorizon-cycle-first {
+  margin-left: 10px;
+  border-left: 1px solid rgba(122, 111, 92, 0.45);
+}
+/* A cycle already underway is dimmer: it is a legal target, but it means
+   "later this chapter", not "the chapter after this one". */
+.kbn-draghorizon-cycle-running { background: rgba(196, 147, 51, 0.09); }
+.kbn-draghorizon-cycle-name {
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-style: italic;
+  font-size: calc(11.5px * var(--kbn-type-scale, 1));
+  line-height: 1.05;
+  color: #6E5A2E;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.kbn-draghorizon-cycle-span {
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-variant-caps: all-small-caps;
+  font-feature-settings: "smcp", "c2sc", "onum";
+  font-size: calc(9.5px * var(--kbn-type-scale, 1));
+  letter-spacing: 0.05em;
+  line-height: 1.05;
+  color: #A89B83;
+  white-space: nowrap;
+}
+.kbn-draghorizon-cycle.kbn-timeline-dropcol-active {
+  background: rgba(196, 147, 51, 0.3);
+}
+.kbn-draghorizon-cycle.kbn-timeline-dropcol-active .kbn-draghorizon-cycle-name { color: #4A3C1C; }
+
 /* Pager chip — reused by the Pinned band's "+N more" overflow control
    (.kbn-pin-more). A slim gold-leaf pill that reads as a manuscript catchword
    rather than a UI scrollbar; click cycles pages. */

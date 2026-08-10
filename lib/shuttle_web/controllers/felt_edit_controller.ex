@@ -13,7 +13,7 @@ defmodule ShuttleWeb.FeltEditController do
 
   `POST /api/v1/felt-edit` body: `{ "fiber_id": "...", "origin": "...",
   "add": [...], "remove": [...], "set": {"key": scalar, ...}, "unset": [...],
-  "due": "..." }`.
+  "due": "...", "name": "...", "body": "..." }`.
 
     * `add` / `remove` — tag diff (`felt edit --tag/--untag`).
     * `set` — opaque top-level scalar frontmatter (`felt edit --set key=value`);
@@ -22,6 +22,14 @@ defmodule ShuttleWeb.FeltEditController do
     * `unset` — remove opaque top-level keys (`felt edit --unset key`).
     * `due` — the native date. Absent leaves it; `null` clears it
       (`--due ""`); a string sets it (`--due <value>`).
+    * `name` — the fiber's name (`felt edit --name`). Native, so it has a
+      dedicated key rather than riding `set`, which felt refuses for native
+      keys. A blank name is refused here: renaming to nothing is not a rename.
+    * `body` — the full body text (`felt edit --body`), a DESTRUCTIVE overwrite
+      of everything below the frontmatter, which is felt's own semantics for
+      the flag. The caller is expected to have the current body in hand and to
+      be sending the whole of it back; `""` empties the body. There is no
+      append. The chronicle's era face writes an intention through this.
 
   felt itself owns the validation (native-key guard, scalar-only, structured
   clobber refusal) and surfaces a loud non-zero exit, so the daemon does not
@@ -62,8 +70,10 @@ defmodule ShuttleWeb.FeltEditController do
 
     with {:ok, set_pairs} <- set_pairs(params["set"]),
          {:ok, due_args} <- due_args(params),
+         {:ok, native_args} <- native_args(params),
          {:ok, host, address} <- host_for_fiber(fiber_id),
-         {:ok, output} <- run(host, address, add, remove, unset, set_pairs, due_args) do
+         {:ok, output} <-
+           run(host, address, add, remove, unset, set_pairs, due_args ++ native_args) do
       # The edit mutated the felt doc (tags / horizon / due); re-read it into the
       # document cache NOW so the kanban's post-edit refetch reflects the change
       # instead of snapping the card back until the next poll.
@@ -112,6 +122,33 @@ defmodule ShuttleWeb.FeltEditController do
   defp scalar_string(value) when is_boolean(value), do: {:ok, to_string(value)}
   defp scalar_string(value) when is_number(value), do: {:ok, to_string(value)}
   defp scalar_string(_), do: :error
+
+  # `name` and `body`: felt-native fields with dedicated flags. Absent leaves
+  # each untouched. `name` must carry actual text — felt would take a blank one
+  # and leave a fiber nothing answers to. `body` may be `""`, which empties the
+  # body; that is a deliberate erasure, not a missing value, and only the
+  # explicit key expresses it.
+  defp native_args(params) do
+    with {:ok, name} <- native_arg(params, "name", "--name", allow_blank: false),
+         {:ok, body} <- native_arg(params, "body", "--body", allow_blank: true) do
+      {:ok, name ++ body}
+    end
+  end
+
+  defp native_arg(params, key, flag, opts) do
+    case Map.fetch(params, key) do
+      :error ->
+        {:ok, []}
+
+      {:ok, value} when is_binary(value) ->
+        if String.trim(value) == "" and not Keyword.fetch!(opts, :allow_blank),
+          do: {:error, "#{key} must not be blank"},
+          else: {:ok, [flag, value]}
+
+      {:ok, _} ->
+        {:error, "#{key} must be a string"}
+    end
+  end
 
   # `due`: absent leaves the date untouched, `null` clears it (`--due ""`), a
   # string sets it. felt validates the date format and rejects loudly.

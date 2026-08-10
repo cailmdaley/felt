@@ -26,12 +26,17 @@ import {
   buildCycleBands,
   densityStep,
   eraName,
+  fiberBodyOf,
+  fiberDocUrl,
   firstParagraph,
   groupNarration,
   lifelineExtent,
   railDate,
   spellFractions,
   readCycleBand,
+  resolveNarrationSlug,
+  retirePendingCycles,
+  type PendingCycle,
   rowWaitingOn,
   type CycleCard,
   saysNothingHere,
@@ -935,5 +940,132 @@ describe('a row waits on its origin, and only on its own', () => {
     expect(rowWaitingOn({ originId: 'ada' }, 'ada', origins)).toBe('ada')
     // Only the hostname matches here — the board's id for it is opaque.
     expect(rowWaitingOn({ originId: 'remote-7f2' }, 'ada', origins)).toBe('ada')
+  })
+})
+
+/**
+ * The optimistic band and the document it stands for.
+ *
+ * A cycle drawn on the strip appears before the daemon's polled feed carries
+ * it. That courtesy cost the page its whole gesture: the ghost was retired only
+ * when a poll echoed its NAME, and until then the band took no clicks — a
+ * cycle you had just drawn, dated and named did nothing when you clicked it,
+ * for up to a poll interval. The id the create hands back closes that window.
+ */
+describe('retirePendingCycles', () => {
+  const ghost = (name: string, id?: string): PendingCycle => ({
+    name,
+    startDay: '2026-08-10',
+    endDay: '2026-08-12',
+    id,
+  })
+
+  it('retires a ghost the served feed carries by id', () => {
+    const served = [{ id: '01ULID', name: 'renamed on disk' }]
+    expect(retirePendingCycles([ghost('before', '01ULID')], served)).toEqual([])
+  })
+
+  it('retires by name for a ghost whose create has not answered yet', () => {
+    expect(retirePendingCycles([ghost('before')], [{ id: '01ULID', name: 'before' }])).toEqual([])
+  })
+
+  it('keeps a ghost the feed knows nothing about', () => {
+    const held = retirePendingCycles([ghost('before', 'cycles/before')], [{ id: '01OTHER', name: 'elsewhere' }])
+    expect(held.map((p) => p.name)).toEqual(['before'])
+  })
+})
+
+/**
+ * The intention line reads a fiber DOCUMENT, and the daemon answers documents
+ * in the list envelope — `{fibers:[{fiber:{…}}]}`. The old reader looked for
+ * `doc.fiber.body` on that envelope and so found nothing on every response it
+ * ever got: the era face was silent about every cycle, written or not.
+ */
+describe('fiberBodyOf', () => {
+  it('reads the body out of the list envelope the daemon sends', () => {
+    const doc = { fibers: [{ fiber: { id: '01ULID', body: 'The era in which.' } }] }
+    expect(fiberBodyOf(doc)).toBe('The era in which.')
+  })
+
+  it('accepts the flatter shapes a relay or an older daemon may send', () => {
+    expect(fiberBodyOf({ fiber: { body: 'flat' } })).toBe('flat')
+    expect(fiberBodyOf({ body: 'flatter' })).toBe('flatter')
+    expect(fiberBodyOf({ fibers: [{ body: 'on the entry' }] })).toBe('on the entry')
+  })
+
+  // A drawn era carries no prose — the drag asks when, not what. That is an
+  // absence the face states, not a failure it should render as one.
+  it('is undefined for a fiber with no body at all', () => {
+    expect(fiberBodyOf({ fibers: [{ fiber: { id: '01ULID' } }] })).toBeUndefined()
+    expect(fiberBodyOf({ fibers: [{ fiber: { body: '   ' } }] })).toBeUndefined()
+    expect(fiberBodyOf({ fibers: [] })).toBeUndefined()
+    expect(fiberBodyOf(null)).toBeUndefined()
+  })
+})
+
+describe('fiberDocUrl', () => {
+  it('encodes each id segment but keeps a slug id intact', () => {
+    expect(fiberDocUrl('http://h:4000', 'cycles/before')).toBe(
+      'http://h:4000/api/v1/fibers/cycles/before',
+    )
+    expect(fiberDocUrl('http://h:4000', 'cycles/a b')).toBe('http://h:4000/api/v1/fibers/cycles/a%20b')
+  })
+})
+
+/**
+ * A due written as an INSTANT is what felt stores — `2026-08-12` goes in and
+ * `2026-08-12T00:00:00Z` comes back — so a cycle band must read the civil day
+ * out of either spelling and place the same three days.
+ */
+describe('a cycle whose due came back as an instant', () => {
+  it('spans the same days as the date-only spelling', () => {
+    const [from, to] = [WINDOW_DAYS[10].iso, WINDOW_DAYS[12].iso]
+    const asWritten = readCycleBand(cycle('c', from, to), WINDOW_DAYS, DAY_INDEX, CYCLE_NOW)
+    const asStored = readCycleBand(
+      cycle('c', `${from}T00:00:00Z`, `${to}T00:00:00Z`),
+      WINDOW_DAYS,
+      DAY_INDEX,
+      CYCLE_NOW,
+    )
+    expect(asStored).toEqual(asWritten)
+    expect(asStored?.openEnd).toBe(false)
+  })
+})
+
+/**
+ * The look-back names fibers, and a name you can read is a fiber you should be
+ * able to open. The commit slug is the only link that has to be EARNED: it is a
+ * filing key, not an id, so it opens a card only when it names exactly one.
+ */
+describe('resolveNarrationSlug', () => {
+  const cards = [
+    { id: 'loom/harness/communication-skill-dogfood', name: 'Communication skill — dogfood' },
+    { id: 'science/unions/shuttle-temporal-ui', name: 'Shuttle UI reimagined' },
+    { id: 'personal/newsletter-batches', name: 'Newsletter batches' },
+  ]
+
+  it('opens the fiber whose id tail is the slug', () => {
+    expect(resolveNarrationSlug('shuttle-temporal-ui', cards)?.id).toBe(
+      'science/unions/shuttle-temporal-ui',
+    )
+  })
+
+  it('opens the fiber whose NAME slugifies to it', () => {
+    expect(resolveNarrationSlug('newsletter-batches', cards)?.id).toBe('personal/newsletter-batches')
+  })
+
+  it('stays plain text when the slug names no fiber', () => {
+    expect(resolveNarrationSlug('gh-pages-docs', cards)).toBeUndefined()
+    expect(resolveNarrationSlug('', cards)).toBeUndefined()
+  })
+
+  // Two fibers answering to one slug means the trail identifies neither, and a
+  // link that opens the wrong card is worse than a word that is not a link.
+  it('stays plain text when two fibers answer to the same slug', () => {
+    const twins = [
+      { id: 'a/morning-post', name: 'Morning post' },
+      { id: 'b/morning-post', name: 'Morning post (old)' },
+    ]
+    expect(resolveNarrationSlug('morning-post', twins)).toBeUndefined()
   })
 })

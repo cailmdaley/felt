@@ -292,4 +292,99 @@ defmodule ShuttleWeb.FeltEditControllerTest do
 
   defp restore_env(key, nil), do: System.delete_env(key)
   defp restore_env(key, value), do: System.put_env(key, value)
+
+  # The chronicle renames a cycle band in place and writes an era's intention
+  # from its face. Both are felt-NATIVE fields, so neither can ride `set` —
+  # felt refuses native keys there — and each needs its own dedicated flag.
+  test "routes a rename and a body rewrite through felt edit --name/--body" do
+    root =
+      System.tmp_dir!()
+      |> Path.join("shuttle-felt-edit-native-#{System.unique_integer([:positive])}")
+
+    store = Path.join(root, "loom")
+    fiber_dir = Path.join([store, ".felt", "tests", "remote-tags"])
+    File.mkdir_p!(fiber_dir)
+
+    File.write!(
+      Path.join(fiber_dir, "remote-tags.md"),
+      "---\nname: Remote tags\nstatus: active\n---\n\nbody\n"
+    )
+
+    args_file = install_fake_felt!(root)
+    old_loom_homes = System.get_env("FELT_STORES")
+    System.put_env("FELT_STORES", store)
+
+    on_exit(fn ->
+      restore_env("FELT_STORES", old_loom_homes)
+      File.rm_rf(root)
+    end)
+
+    conn =
+      post(
+        api_conn(),
+        "/api/v1/felt-edit",
+        Jason.encode!(%{
+          "fiber_id" => "tests/remote-tags",
+          "name" => "the long winter",
+          "body" => "What this era is for."
+        })
+      )
+
+    assert conn.status == 200
+    args = File.read!(args_file)
+    assert args =~ "--name\nthe long winter\n"
+    assert args =~ "--body\nWhat this era is for.\n"
+  end
+
+  # A fiber nothing answers to is not a rename. The blank is refused here rather
+  # than handed to felt, which would take it.
+  test "refuses a blank rename and a non-string name" do
+    for value <- ["", "   ", 7] do
+      conn =
+        post(
+          api_conn(),
+          "/api/v1/felt-edit",
+          Jason.encode!(%{"fiber_id" => "tests/remote-tags", "name" => value})
+        )
+
+      assert conn.status == 400
+    end
+  end
+
+  # An empty body is an ERASURE the caller asked for, not a missing value —
+  # `--body ""` must still reach felt.
+  test "an explicitly empty body still shells felt edit --body" do
+    root =
+      System.tmp_dir!()
+      |> Path.join("shuttle-felt-edit-empty-body-#{System.unique_integer([:positive])}")
+
+    store = Path.join(root, "loom")
+    fiber_dir = Path.join([store, ".felt", "tests", "remote-tags"])
+    File.mkdir_p!(fiber_dir)
+
+    File.write!(
+      Path.join(fiber_dir, "remote-tags.md"),
+      "---\nname: Remote tags\nstatus: active\n---\n\nbody\n"
+    )
+
+    args_file = install_fake_felt!(root)
+    old_loom_homes = System.get_env("FELT_STORES")
+    System.put_env("FELT_STORES", store)
+
+    on_exit(fn ->
+      restore_env("FELT_STORES", old_loom_homes)
+      File.rm_rf(root)
+    end)
+
+    conn =
+      post(
+        api_conn(),
+        "/api/v1/felt-edit",
+        Jason.encode!(%{"fiber_id" => "tests/remote-tags", "body" => ""})
+      )
+
+    assert conn.status == 200
+    assert File.read!(args_file) =~ "--body\n\n"
+  end
+
 end

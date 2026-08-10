@@ -38,7 +38,7 @@
 import { normalizeFocusDate, registerView, type TemporalView, type ViewContext } from './ViewRegistry.js'
 import { createViewEmptyState, createViewPage } from './ViewPage.js'
 import { cardPathSegments, cardUlids, sessionSlug, sessionUlid } from './sessionNames.js'
-import { ACTIVITY_KEY_ITEMS, MARK_GLYPH } from './vocabulary.js'
+import { ACTIVITY_KEY_ITEMS, MARK_GLYPH, messageClause } from './vocabulary.js'
 import { civilDayNoon, formatSpanMinutes, railBounds, shiftCivilDay } from './railTime.js'
 import {
   buildSessionIndex,
@@ -476,6 +476,11 @@ export function eraName(prose: string): string {
   return `${(space > 24 ? cut.slice(0, space) : cut).trim()}…`
 }
 
+/** How long a single click on a band waits to see whether it is half of a
+ *  double. The platform's own double-click window; shorter drops renames on a
+ *  slower hand, longer makes entering an era feel unanswered. */
+const DOUBLE_CLICK_MS = 250
+
 /** Cycles stack this deep before overflow starts sharing a lane. */
 export const MAX_CYCLE_LANES = 3
 
@@ -567,6 +572,45 @@ export function assignCycleLanes<T extends { startIdx: number; endIdx: number }>
   return out
 }
 
+/**
+ * A cycle drawn this session, held until the daemon's feed carries it.
+ *
+ * `id` is the fiber id the create endpoint answered with. It is the whole
+ * difference between a band that is a picture and a band that is a cycle: with
+ * it the ghost carries the SAME id the served card will, so entering the era,
+ * reading its face and fetching its intention all work immediately. Without it
+ * — the seconds between the drag and the create's answer — there is nothing on
+ * disk to enter, and the band is drawn as `pending` and does not respond.
+ */
+export interface PendingCycle {
+  name: string
+  startDay: string
+  endDay: string | null
+  /** Set the moment the create returns; undefined only while it is in flight. */
+  id?: string
+}
+
+/**
+ * Which optimistic cycles are still worth drawing.
+ *
+ * A ghost retires when the served feed carries the same cycle — matched by ID
+ * first, because that is the identity the daemon and the create response agree
+ * on. The NAME fallback covers the ghost whose create has not answered yet, and
+ * the older store where a create returned no id at all.
+ *
+ * Matching by name alone was the defect: the feed is polled, so a ghost stayed
+ * on the strip for up to a poll interval after its fiber existed, and a ghost
+ * cannot be clicked. The band was drawn, dated and named, and did nothing.
+ */
+export function retirePendingCycles(
+  pending: readonly PendingCycle[],
+  served: readonly Pick<CycleCard, 'id' | 'name'>[],
+): PendingCycle[] {
+  const ids = new Set(served.map((c) => c.id))
+  const names = new Set(served.map((c) => c.name))
+  return pending.filter((p) => !(p.id !== undefined && ids.has(p.id)) && !names.has(p.name))
+}
+
 /** Every cycle on the grid, lane-assigned and in drawing order. */
 export function buildCycleBands(
   cards: readonly CycleCard[],
@@ -620,6 +664,37 @@ export function groupNarration(
   return [...bySlug.values()].sort((a, b) => b.count - a.count || a.slug.localeCompare(b.slug)).slice(0, limit)
 }
 
+/** A name reduced to the shape a commit slug is written in. */
+function slugify(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+}
+
+/**
+ * The fiber a commit slug names, when the page can say so without guessing.
+ *
+ * Shuttle's commit subjects are `slug: what happened`, and the slug is nearly
+ * always the fiber the work was about — so the look-back can open it. The match
+ * is EXACT, against the id's last segment or the slugified name, and it must be
+ * UNIQUE: two fibers answering to one slug means the trail does not identify
+ * either, and a link that opens the wrong card is worse than a word that is not
+ * a link. Undefined in both the ambiguous and the unknown case; the caller
+ * leaves the slug as plain text.
+ */
+export function resolveNarrationSlug<T extends { id: string; name: string }>(
+  slug: string,
+  cards: readonly T[],
+): T | undefined {
+  const wanted = slugify(slug)
+  if (!wanted) return undefined
+  const hits = cards.filter(
+    (c) => slugify(c.id.split('/').pop() ?? '') === wanted || slugify(c.name) === wanted,
+  )
+  return hits.length === 1 ? hits[0] : undefined
+}
+
 /** The first paragraph of a fiber body — the cycle's intention, as written. */
 export function firstParagraph(body: string | undefined): string {
   if (!body) return ''
@@ -633,6 +708,37 @@ export function firstParagraph(body: string | undefined): string {
     if (text) return text
   }
   return ''
+}
+
+/** The document endpoint for one fiber id. Each id SEGMENT is encoded on its
+ *  own, so a slug id (`cycles/before`) keeps its separators and reconstructs as
+ *  the same id on the daemon's wildcard route. */
+export function fiberDocUrl(shuttleBase: string, id: string): string {
+  return `${shuttleBase}/api/v1/fibers/${id.split('/').map(encodeURIComponent).join('/')}`
+}
+
+/**
+ * The body out of a fiber-document response.
+ *
+ * The endpoint answers with the LIST envelope — `{ fibers: [{ fiber: {…} }] }`
+ * — and the body rides the fiber object, only when the request asked for it
+ * (`?body=1`). Reading `doc.fiber.body` off the envelope, as this once did,
+ * finds nothing on every response the daemon has ever sent: the intention line
+ * was not missing on some cycles, it was missing on all of them. The flatter
+ * shapes are still accepted so a relayed or older daemon reads the same.
+ */
+export function fiberBodyOf(doc: unknown): string | undefined {
+  if (typeof doc !== 'object' || doc === null) return undefined
+  const d = doc as {
+    fibers?: Array<{ fiber?: { body?: unknown }; body?: unknown }>
+    fiber?: { body?: unknown }
+    body?: unknown
+  }
+  const entry = d.fibers?.[0]
+  for (const candidate of [entry?.fiber?.body, entry?.body, d.fiber?.body, d.body]) {
+    if (typeof candidate === 'string' && candidate.trim()) return candidate
+  }
+  return undefined
 }
 
 // ── Row model ────────────────────────────────────────────────────────────────
@@ -1008,13 +1114,28 @@ class ChronicleView implements TemporalView {
    * size of the block that arrived. A day survives that; an index does not.
    */
   private draft: { fromDay: string; toDay: string; naming: boolean } | null = null
+  /** An in-place editor is open (a band rename, or the face's name/intention).
+   *  Stands the poll down for the same reason `draft` does: a rebuild would
+   *  take the field out from under the hand mid-word. */
+  private editing = false
+  /** Clicks on the face's title are ignored until this instant. An in-place
+   *  editor's own open and close can emit a stray click on the element it
+   *  covered, and that click must not be read as a request to open a modal. */
+  private gestureLockUntil = 0
   /** Cycles created this session and not yet echoed by a poll. Held so the band
-   *  appears under the cursor at once rather than up to 15s later. */
-  private pendingCycles: Array<{ name: string; startDay: string; endDay: string | null }> = []
+   *  appears under the cursor at once rather than up to 15s later.
+   *
+   *  `id` arrives with the create's own response, well before the daemon's feed
+   *  carries the fiber. From that moment the band is a REAL band — see
+   *  {@link PendingCycle}. */
+  private pendingCycles: PendingCycle[] = []
   /** Edge drags written but not yet echoed by a poll, keyed by cycle id. Held
    *  so a dragged edge stays where it was dropped instead of snapping back for
    *  the seconds until the daemon's answer comes round. */
   private cycleEdits = new Map<string, { start?: string; due?: string }>()
+  /** Renames written but not yet echoed by a poll, keyed by cycle id. Same
+   *  contract as {@link cycleEdits}: held until the daemon's copy agrees. */
+  private cycleNames = new Map<string, string>()
   private teardownDraw: (() => void) | null = null
   /** The day columns of the current render, so a gesture handler can convert a
    *  cursor position into a civil day without threading them through. */
@@ -1117,8 +1238,10 @@ class ChronicleView implements TemporalView {
     this.lookback = null
     this.stopAutoScroll()
     this.draft = null
+    this.editing = false
     this.pendingCycles = []
     this.cycleEdits.clear()
+    this.cycleNames.clear()
     this.currentDays = []
     this.window = null
     this.pendingScrollDelta = 0
@@ -1189,10 +1312,10 @@ class ChronicleView implements TemporalView {
     this.byTmux = buildSessionIndex(sessions.records).byTmux
     if (Object.keys(fresh).length > 0) this.activityOrigins = fresh
     this.origins = { ...(sessions.origins ?? {}), ...this.activityOrigins }
-    // A rebuild would tear out the half-drawn band or the naming input under
-    // the reader's cursor. The poll's data is not worth that; the next one
-    // lands 15s later and the gesture is over in seconds.
-    if (this.draft !== null) return
+    // A rebuild would tear out the half-drawn band, the naming input, or an
+    // open rename under the reader's cursor. The poll's data is not worth that;
+    // the next one lands 15s later and the gesture is over in seconds.
+    if (this.draft !== null || this.editing) return
 
     const signature = this.signatureOf(days, activity.buckets, ctx)
     if (signature === this.signature) return
@@ -1444,9 +1567,9 @@ class ChronicleView implements TemporalView {
     const scroller = this.scroller
     const ctx = this.ctx
     if (!scroller || !ctx || !this.window) return
-    // A half-drawn band or an open naming input would be torn out by the
-    // rebuild, exactly as the poll declines to do.
-    if (this.draft !== null) return
+    // A half-drawn band, an open naming input or a rename in progress would be
+    // torn out by the rebuild, exactly as the poll declines to do.
+    if (this.draft !== null || this.editing) return
 
     const plan = planExtension(
       this.window,
@@ -1511,21 +1634,27 @@ class ChronicleView implements TemporalView {
     // Cycles have their own surface — they are deliberately absent from
     // `ctx.cards`, so a cycle can never be mistaken for a piece of work.
     const served: CycleCard[] = ctx.response.cycles ?? []
-    const known = new Set(served.map((c) => c.name))
-    this.pendingCycles = this.pendingCycles.filter((p) => !known.has(p.name))
+    this.pendingCycles = retirePendingCycles(this.pendingCycles, served)
 
     // Lay any un-echoed edge drag over the served card, and retire the override
     // the moment the daemon's copy agrees with it.
     const real: CycleCard[] = served.map((c) => {
       const edit = this.cycleEdits.get(c.id)
-      if (!edit) return c
-      const next = { ...c, cycleStart: edit.start ?? c.cycleStart, due: edit.due ?? c.due }
-      if (next.cycleStart === c.cycleStart && next.due === c.due) this.cycleEdits.delete(c.id)
+      const renamed = this.cycleNames.get(c.id)
+      if (renamed !== undefined && renamed === c.name) this.cycleNames.delete(c.id)
+      if (!edit && renamed === undefined) return c
+      const next = {
+        ...c,
+        name: renamed ?? c.name,
+        cycleStart: edit?.start ?? c.cycleStart,
+        due: edit?.due ?? c.due,
+      }
+      if (edit && next.cycleStart === c.cycleStart && next.due === c.due) this.cycleEdits.delete(c.id)
       return next
     })
 
     const ghosts: CycleCard[] = this.pendingCycles.map((p) => ({
-      id: `pending:${p.name}`,
+      id: p.id ?? `pending:${p.name}`,
       name: p.name,
       originId: boardOrigin(ctx.response),
       cycleStart: p.startDay,
@@ -1534,8 +1663,11 @@ class ChronicleView implements TemporalView {
       due: p.endDay ?? undefined,
     }))
     const bands = buildCycleBands([...real, ...ghosts], days, dayIndex)
-    const pendingNames = new Set(this.pendingCycles.map((p) => p.name))
-    for (const band of bands) if (pendingNames.has(band.name)) band.pending = true
+    // Only a cycle whose create is still IN FLIGHT is pending. Once the id has
+    // come back the fiber exists, so the band takes its clicks even though the
+    // feed has not come round yet.
+    const unsaved = new Set(this.pendingCycles.filter((p) => p.id === undefined).map((p) => p.name))
+    for (const band of bands) if (unsaved.has(band.name)) band.pending = true
     return bands
   }
 
@@ -1660,8 +1792,27 @@ class ChronicleView implements TemporalView {
     title.type = 'button'
     title.className = 'chr-face-title'
     title.textContent = band.name
-    title.title = 'Open this cycle’s fiber'
-    title.addEventListener('click', () => ctx.openCard(band.id))
+    title.title = 'Open this cycle’s fiber · double-click to rename'
+    // Same two readings as the band: a click opens the document, a double-click
+    // edits the one line of it that is on this page.
+    // Opening the fiber is not idempotent the way entering an era is — it puts
+    // a modal over the page — so this one has to tell a single click from half
+    // of a double. The wait is the double-click window, and the lock covers the
+    // stray click a closing editor can emit after it.
+    let titleClick: number | null = null
+    title.addEventListener('click', () => {
+      if (titleClick !== null || this.editing || Date.now() < this.gestureLockUntil) return
+      titleClick = window.setTimeout(() => {
+        titleClick = null
+        if (!this.editing && Date.now() >= this.gestureLockUntil) ctx.openCard(band.id)
+      }, DOUBLE_CLICK_MS)
+    })
+    title.addEventListener('dblclick', (e) => {
+      e.preventDefault()
+      if (titleClick !== null) window.clearTimeout(titleClick)
+      titleClick = null
+      this.openBandRename(head, title, band, ctx, 'chr-face-rename')
+    })
     const when = document.createElement('span')
     when.className = 'chr-face-span'
     when.textContent = `${prettyDay(fromDay)} – ${prettyDay(toDay)} · ${spanDays}d${band.openEnd ? ' · running' : ''}`
@@ -1674,12 +1825,26 @@ class ChronicleView implements TemporalView {
     head.append(title, when, close)
     face.append(head)
 
+    // The intention, or the invitation to write one. A drawn era has no body —
+    // the drag asks when, not what — and a face that simply omitted the line
+    // read as a face that had failed to load. Saying the era is unwritten, and
+    // where to write it, is the honest version of the same silence.
     const intent = this.intentions.get(band.id)
     if (intent) {
       const line = document.createElement('p')
       line.className = 'chr-face-intent'
       line.textContent = intent
+      line.title = 'Double-click to write this era’s intention'
+      line.addEventListener('dblclick', () => void this.openIntentionEditor(face, line, band, ctx))
       face.append(line)
+    } else if (!band.pending) {
+      const invite = document.createElement('button')
+      invite.type = 'button'
+      invite.className = 'chr-face-intent chr-face-intent-empty'
+      invite.textContent = 'no intention written — click to say what this era is for'
+      invite.title = 'Write this era’s intention'
+      invite.addEventListener('click', () => void this.openIntentionEditor(face, invite, band, ctx))
+      face.append(invite)
     }
 
     // ── figures ─────────────────────────────────────────────────────────────
@@ -1707,7 +1872,19 @@ class ChronicleView implements TemporalView {
     // `toMs + 1` keeps the old inclusive right bound literally intact; the
     // shared fold's span is half-open.
     const spend = foldActiveMinutes(buckets, { fromMs, toMs: toMs + 1 })
-    stat('steering', formatSpanMinutes(spend.attention, { empty: '—' }))
+    // Human presence is counted in MESSAGES, not minutes. Nobody remembers an
+    // era as forty minutes of steering; they remember how many times they came
+    // back to it. So the two sides of the ledger are measured differently on
+    // purpose — the human in turns taken, the machine in wall-clock.
+    let sent = 0
+    let received = 0
+    for (const b of buckets) {
+      // Half-open, same convention as the fold two lines up.
+      if (b.m < fromMs || b.m >= toMs + 1) continue
+      if (b.k === 'attention') sent += b.n
+      else if (b.k === 'reply') received += b.n
+    }
+    stat('you', sent === 0 && received === 0 ? '—' : messageClause(sent, received))
     stat('agents', formatSpanMinutes(spend.agent, { empty: '—' }))
     face.append(stats)
 
@@ -1730,9 +1907,20 @@ class ChronicleView implements TemporalView {
         for (const group of groups) {
           const line = document.createElement('p')
           line.className = 'chr-face-line'
-          const slug = document.createElement('span')
+          // The slug a commit was filed under is usually the fiber it was about,
+          // so it opens that fiber — but only when the trail names exactly one.
+          // A slug matching two fibers, or none, stays plain text: a link that
+          // opens the wrong card is worse than a word you cannot click.
+          const target = resolveNarrationSlug(group.slug, ctx.cards)
+          const slug = document.createElement(target ? 'button' : 'span')
           slug.className = 'chr-face-slug'
           slug.textContent = group.slug
+          if (target) {
+            ;(slug as HTMLButtonElement).type = 'button'
+            slug.classList.add('chr-face-open')
+            slug.title = `Open ${target.name}`
+            slug.addEventListener('click', () => ctx.openCard(target.id))
+          }
           const count = document.createElement('span')
           count.className = 'chr-face-count'
           count.textContent = `×${group.count}`
@@ -1745,7 +1933,16 @@ class ChronicleView implements TemporalView {
           const mark = document.createElement('span')
           mark.className = card.tempered === false ? 'chr-face-mark-x' : 'chr-face-mark-ok'
           mark.textContent = card.tempered === false ? '✗' : '✓'
-          line.append(mark, document.createTextNode(` ${card.name}`))
+          // A fiber the era closed is named here and nowhere else on the face —
+          // so this is where you reach it. The whole name is the target; the
+          // verdict mark stays a mark.
+          const open = document.createElement('button')
+          open.type = 'button'
+          open.className = 'chr-face-open'
+          open.textContent = card.name
+          open.title = `Open ${card.name}`
+          open.addEventListener('click', () => ctx.openCard(card.id))
+          line.append(mark, document.createTextNode(' '), open)
           memoir.append(line)
         }
       }
@@ -1813,10 +2010,9 @@ class ChronicleView implements TemporalView {
     if (this.intentions.has(id)) return
     this.intentions.set(id, '') // claim it, so a re-render does not re-ask
     try {
-      const res = await fetch(`${ctx.shuttleBase}/api/v1/fibers/${id.split('/').map(encodeURIComponent).join('/')}`)
+      const res = await fetch(`${fiberDocUrl(ctx.shuttleBase, id)}?body=1`)
       if (!res.ok) return
-      const doc = (await res.json()) as { fiber?: { body?: string }; body?: string }
-      const text = firstParagraph(doc.fiber?.body ?? doc.body)
+      const text = firstParagraph(fiberBodyOf(await res.json()))
       if (!text) return
       this.intentions.set(id, text)
       this.signature = ''
@@ -1824,6 +2020,191 @@ class ChronicleView implements TemporalView {
     } catch {
       // No intention line is a fine outcome; the face stands without one.
     }
+  }
+
+  /**
+   * Rename a band in place. The name becomes an input sitting exactly where it
+   * was, so the gesture never moves the reader's eye — the same discipline the
+   * naming-a-new-cycle input follows.
+   */
+  private openBandRename(
+    host: HTMLElement,
+    label: HTMLElement,
+    band: CycleBand,
+    ctx: ViewContext,
+    className = 'chr-band-rename',
+  ): void {
+    if (host.querySelector('.chr-band-rename, .chr-face-rename')) return
+    const input = document.createElement('input')
+    input.type = 'text'
+    input.className = className
+    input.value = band.name
+    label.style.visibility = 'hidden'
+    host.append(input)
+    this.editInPlace(input, {
+      commit: (value) => void this.renameCycle(band, value, ctx),
+      done: () => {
+        input.remove()
+        label.style.visibility = ''
+      },
+    })
+  }
+
+  /**
+   * Write the era's intention from the face.
+   *
+   * The editor opens on the WHOLE body, read fresh, because felt's `--body` is
+   * a destructive overwrite — see {@link writeIntention}. So the field may hold
+   * more than the one paragraph the face displays, and that is the point: what
+   * you send back is everything the fiber had.
+   */
+  private async openIntentionEditor(
+    face: HTMLElement,
+    line: HTMLElement,
+    band: CycleBand,
+    ctx: ViewContext,
+  ): Promise<void> {
+    if (face.querySelector('.chr-face-intent-edit')) return
+    const field = document.createElement('textarea')
+    field.className = 'chr-face-intent-edit'
+    field.rows = 4
+    field.placeholder = 'what this era is for — its goal, what drives it, what constrains it'
+    // Claim the slot before the read, so a slow daemon cannot leave the reader
+    // clicking a line that is already becoming an editor.
+    line.replaceWith(field)
+    this.editing = true
+    try {
+      field.value = await this.readBody(band.id, ctx)
+    } catch {
+      // An unreadable body would make the write a silent erasure. Put the line
+      // back and say nothing was lost.
+      this.editing = false
+      field.replaceWith(line)
+      window.console.error('[chronicle] could not read the cycle body to edit it')
+      return
+    }
+    this.editing = false // editInPlace claims it for the edit proper
+    this.editInPlace(field, {
+      commit: (value) => {
+        void this.writeIntention(band, value, ctx).catch((err: unknown) => {
+          window.console.error('[chronicle] could not write the intention', err)
+        })
+      },
+      done: () => field.replaceWith(line),
+    })
+  }
+
+  /**
+   * The one contract every in-place editor on this page keeps: Enter commits,
+   * Escape abandons, blur commits what is there, and the page stands down from
+   * rebuilding until it is over.
+   *
+   * That last part is not a nicety. A poll rebuilds the whole grid, and a
+   * rebuild under an open editor tears the element out from under the hand
+   * mid-word — the same hazard `this.draft` guards for the drag gestures.
+   */
+  private editInPlace(
+    field: HTMLInputElement | HTMLTextAreaElement,
+    { commit, done }: { commit: (value: string) => void; done: () => void },
+  ): void {
+    this.editing = true
+    this.gestureLockUntil = Date.now() + DOUBLE_CLICK_MS
+    field.focus()
+    field.select()
+    let settled = false
+    const finish = (value: string | null): void => {
+      if (settled) return
+      settled = true
+      this.editing = false
+      this.gestureLockUntil = Date.now() + DOUBLE_CLICK_MS
+      done()
+      if (value !== null) commit(value)
+      else if (this.ctx) void this.load(this.ctx)
+    }
+    // Typed by hand: `field` is a union of two element types, so the overload
+    // resolution hands the listener a bare Event.
+    field.addEventListener('keydown', (raw: Event) => {
+      const e = raw as KeyboardEvent
+      // Enter commits — except in a textarea, where it is a newline and the
+      // commit is Cmd/Ctrl-Enter. Prose gets to have paragraphs.
+      const enterCommits = field instanceof HTMLInputElement || e.metaKey || e.ctrlKey
+      if (e.key === 'Enter' && enterCommits) {
+        e.preventDefault()
+        finish(field.value)
+      } else if (e.key === 'Escape') {
+        e.preventDefault()
+        finish(null)
+      }
+      e.stopPropagation() // the board's own hotkeys must not eat the typing
+    })
+    field.addEventListener('blur', () => finish(field.value))
+  }
+
+  /**
+   * Rename a cycle — the band's own name, written where it lives.
+   *
+   * The new name is held locally until a poll agrees with it, for the same
+   * reason an edge drag is: the feed is polled, and a name that snapped back
+   * to the old one for a poll interval would read as a rename that failed.
+   *
+   * `name` is felt-NATIVE, so it goes through `felt-edit`'s own `name` key —
+   * `set` refuses native keys, which is why the daemon grew one.
+   */
+  private async renameCycle(band: CycleBand, next: string, ctx: ViewContext): Promise<void> {
+    const name = next.trim()
+    if (!name || name === band.name) return
+    this.cycleNames.set(band.id, name)
+    // A ghost is renamed in place too, or the retirement match (by name, for a
+    // create still in flight) would look for a name nothing carries.
+    for (const p of this.pendingCycles) if (p.id === band.id || p.name === band.name) p.name = name
+    this.signature = ''
+    if (this.ctx) void this.load(this.ctx)
+    try {
+      const res = await fetch(`${ctx.shuttleBase}/api/v1/felt-edit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fiber_id: band.id, origin: shuttleOrigin(band.originId), name }),
+      })
+      if (!res.ok) throw new Error(`felt-edit returned ${res.status}`)
+      ctx.requestRefresh()
+    } catch (err) {
+      // Put the old name back rather than leave the strip claiming a rename the
+      // store never took.
+      this.cycleNames.delete(band.id)
+      this.signature = ''
+      if (this.ctx) void this.load(this.ctx)
+      window.console.error('[chronicle] could not rename cycle', err)
+    }
+  }
+
+  /**
+   * Write an era's intention — the fiber's body, which is where the face reads
+   * it from.
+   *
+   * felt's `--body` is a DESTRUCTIVE overwrite, so the editor opens on the
+   * WHOLE body, freshly read, and sends the whole of it back. Editing only the
+   * first paragraph (which is all the face displays) and writing that would
+   * silently delete everything under it.
+   */
+  private async writeIntention(band: CycleBand, body: string, ctx: ViewContext): Promise<void> {
+    const res = await fetch(`${ctx.shuttleBase}/api/v1/felt-edit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fiber_id: band.id, origin: shuttleOrigin(band.originId), body }),
+    })
+    if (!res.ok) throw new Error(`felt-edit returned ${res.status}`)
+    this.intentions.set(band.id, firstParagraph(body))
+    this.signature = ''
+    if (this.ctx) void this.load(this.ctx)
+    ctx.requestRefresh()
+  }
+
+  /** The fiber's body as it stands right now — what the intention editor opens
+   *  on, so a write can send back everything it did not change. */
+  private async readBody(id: string, ctx: ViewContext): Promise<string> {
+    const res = await fetch(`${fiberDocUrl(ctx.shuttleBase, id)}?body=1`)
+    if (!res.ok) throw new Error(`fiber read returned ${res.status}`)
+    return fiberBodyOf(await res.json()) ?? ''
   }
 
   /**
@@ -1876,13 +2257,41 @@ class ChronicleView implements TemporalView {
     label.className = 'chr-band-label'
     label.textContent = band.name
     el.append(label)
-    el.title = band.pending ? `${band.name} — saving…` : `${band.name} — enter this era`
+    el.title = band.pending
+      ? `${band.name} — saving…`
+      : `${band.name} — enter this era · double-click to rename`
     if (band.id === this.scopedCycleId) el.classList.add('chr-band-scoped')
     if (!band.pending) {
       // The band means "enter this era". Opening the fiber lives on the face's
       // own title, so the two readings of a cycle — the span and the document —
       // each have their own gesture instead of competing for one click.
-      el.addEventListener('click', () => this.scopeTo(band.id, ctx))
+      //
+      // A click ENTERS the era; it does not toggle. That is what lets the same
+      // band also carry a double-click rename: a double-click is two clicks,
+      // and against a toggle the second one leaves the era it just entered —
+      // which is exactly the defect this replaced, made worse by browsers that
+      // emit a stray third click as the editor opens. Entering is idempotent,
+      // so any number of clicks means the same thing. Leaving keeps its two
+      // deliberate ways out, the face's ✕ and Escape.
+      // Same defer as the face title: entering scopes the band away and
+      // load() can replace this node before the second click of a
+      // double-click lands, so the click must wait out the double-click
+      // window before it commits — otherwise a rename attempt loses its
+      // dblclick to a click #1 that already scoped in and reloaded.
+      let bandClick: number | null = null
+      el.addEventListener('click', () => {
+        if (bandClick !== null || this.editing || this.scopedCycleId === band.id) return
+        bandClick = window.setTimeout(() => {
+          bandClick = null
+          if (!this.editing && this.scopedCycleId !== band.id) this.scopeTo(band.id, ctx)
+        }, DOUBLE_CLICK_MS)
+      })
+      el.addEventListener('dblclick', (e) => {
+        e.preventDefault()
+        if (bandClick !== null) window.clearTimeout(bandClick)
+        bandClick = null
+        this.openBandRename(el, label, band, ctx)
+      })
       // Only a saved cycle can be reshaped — there is nothing on disk to write
       // an edge to until the create has come back.
       for (const edge of ['start', 'due'] as const) {
@@ -2304,7 +2713,8 @@ class ChronicleView implements TemporalView {
     ctx: ViewContext,
     prose = '',
   ): Promise<void> {
-    this.pendingCycles.push({ name, startDay, endDay })
+    const held: PendingCycle = { name, startDay, endDay }
+    this.pendingCycles.push(held)
     if (this.ctx) {
       this.signature = '' // the pending band is not in the signature's inputs
       void this.load(this.ctx)
@@ -2344,12 +2754,26 @@ class ChronicleView implements TemporalView {
       })
       const body = (await created.json().catch(() => ({}))) as { id?: string; error?: string }
       if (!created.ok || !body.id) throw new Error(body.error || `create returned ${created.status}`)
+      // The fiber exists now, so the band stops being a picture of a cycle and
+      // becomes the cycle — clickable, enterable, its face readable — instead
+      // of waiting inert for the feed to come round, which is a poll interval
+      // of a band that does nothing when clicked.
+      //
+      // The id is the SLUG the create was given, and that is exactly right: the
+      // board keys a fiber by its slug when it has one (`mapFeltJsonToFiber`
+      // prefers `slug` over the ULID), so the ghost now carries the same id the
+      // served card will. Adopting felt's ULID instead would look more precise
+      // and be wrong — it matches no card, so entering the era would drop its
+      // face the moment a poll landed.
+      held.id = body.id
+      this.signature = ''
+      if (this.ctx) void this.load(this.ctx)
       ctx.requestRefresh()
     } catch (err) {
       // Drop the optimistic band rather than leave a cycle on screen that does
       // not exist on disk — a chronicle that shows work that never happened is
       // the one failure this page cannot afford.
-      this.pendingCycles = this.pendingCycles.filter((p) => p.name !== name)
+      this.pendingCycles = this.pendingCycles.filter((p) => p !== held)
       this.signature = ''
       if (this.ctx) void this.load(this.ctx)
       window.console.error('[chronicle] could not create cycle', err)
@@ -2640,6 +3064,20 @@ class ChronicleView implements TemporalView {
       launch.textContent = MARK_GLYPH.launch
       launch.title = 'next launch'
       track.append(launch)
+    }
+
+    // The gutter and the days are two grid children; the row they belong to is
+    // only in the reader's head. Pointing at either one lights both, which is
+    // what makes a name at the left edge and a mark 900px away readable as one
+    // fact. Pure CSS cannot do it — grid siblings have no selector between
+    // them — so the hover is linked here, in two lines.
+    const hot = (on: boolean): void => {
+      label.classList.toggle('chr-label-hot', on)
+      track.classList.toggle('chr-track-hot', on)
+    }
+    for (const el of [label, track]) {
+      el.addEventListener('mouseenter', () => hot(true))
+      el.addEventListener('mouseleave', () => hot(false))
     }
 
     return [label, track]
