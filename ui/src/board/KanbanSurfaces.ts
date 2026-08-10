@@ -13,8 +13,10 @@ import type {
   KanbanResponse,
 } from './KanbanTypes.js'
 import { isAgentCard } from './KanbanModalShared.js'
-import { upcomingCycleDropTargets } from './KanbanRules.js'
-import type { CycleDropTarget } from './KanbanRules.js'
+import { humanizeCron, lensCycles, upcomingCycleDropTargets } from './KanbanRules.js'
+import type { CycleDropTarget, CycleLensChip } from './KanbanRules.js'
+import { deriveCycleLens, isSleepingOnSchedule } from './KanbanReadModel.js'
+import type { CycleLens } from './KanbanReadModel.js'
 
 export const COLUMN_TITLES: Record<ColumnKind, string> = {
   drafts: 'Drafts',
@@ -206,25 +208,114 @@ export class KanbanSurfaceRenderer {
     this.onRefresh = options.onRefresh
   }
 
-  /** Render the Now surface: section header + 3-column board. */
+  /** Render the Now surface: section header + 3-column board. `lens`, when a
+   *  cycle is engaged, recedes the non-members and conjures the members that
+   *  are resting (see `renderColumn`). */
   renderNowSection(
     now: KanbanResponse['now'],
     staleness: Record<string, KanbanOriginStaleness>,
+    lens: CycleLens | null = null,
   ): HTMLElement {
     const section = document.createElement('section')
     section.className = 'kbn-section kbn-section-now'
+    if (lens) section.classList.add('kbn-section-lensed')
     section.setAttribute('role', 'region')
-    section.setAttribute('aria-label', 'Now — the desk')
+    section.setAttribute('aria-label', lens
+      ? `Now — the desk, seen through ${lens.name}`
+      : 'Now — the desk')
 
     const board = document.createElement('div')
     board.className = 'kbn-now-board'
     for (const kind of NOW_COLUMN_ORDER) {
-      board.append(this.renderColumn(kind, now[kind], staleness))
+      board.append(this.renderColumn(kind, now[kind], staleness, lens))
     }
 
     section.append(board)
     this.installSectionDragHandlers(section, 'now')
     return section
+  }
+
+  /**
+   * The CYCLE LENS ROW — a quiet line of chips above the columns, one per cycle
+   * that has not ended (`lensCycles`). Click one and the Desk is seen through
+   * it: the cycle's members keep full strength, everything else recedes, and
+   * members that were resting surface as ghosts in the column they would sit
+   * in. Click it again (or its ✕) and the Desk is exactly what it was.
+   *
+   * A lens is a way of LOOKING, not a filter and not an edit. Nothing is
+   * written, nothing is hidden, receded cards stay clickable and draggable, and
+   * the state is view-local — it does not survive a reload, because "which
+   * cycle was I squinting at" is not a fact about the board.
+   *
+   * One lens at a time: `activeId` is a single id, so engaging a second chip
+   * releases the first. Chips wear the drag horizon's clothes (`cycleChipText`)
+   * because a chip here, a chip on the horizon, and a band on the Chronicle are
+   * all the same object.
+   *
+   * Returns null when there are no live cycles — an empty row would be a line
+   * of chrome explaining that you have no chapters.
+   */
+  renderCycleLensBar(
+    activeId: string | null,
+    onToggle: (cycleId: string | null) => void,
+    nowMs: number = Date.now(),
+  ): HTMLElement | null {
+    const resp = this.getLastResponse()
+    const chips = lensCycles(resp?.cycles ?? [], nowMs)
+    if (chips.length === 0) return null
+
+    const bar = document.createElement('div')
+    bar.className = 'kbn-lensbar'
+    bar.setAttribute('role', 'region')
+    bar.setAttribute('aria-label', 'Cycles — click one to see the desk through it')
+    for (const chip of chips) {
+      const count = deriveCycleLens(resp, chip.id, nowMs)?.count ?? 0
+      bar.append(this.renderLensChip(chip, count, chip.id === activeId, onToggle))
+    }
+    return bar
+  }
+
+  /** One cycle as a lens chip: name, span, member count — and, when engaged, a
+   *  ✕ that is part of the same click target, since clicking the chip is how
+   *  you release it either way. */
+  private renderLensChip(
+    chip: CycleLensChip,
+    count: number,
+    active: boolean,
+    onToggle: (cycleId: string | null) => void,
+  ): HTMLElement {
+    const el = document.createElement('button')
+    el.type = 'button'
+    el.className = `kbn-lens-chip${chip.running ? ' kbn-lens-chip-running' : ''}${active ? ' kbn-lens-chip-active' : ''}`
+    el.dataset.cycleId = chip.id
+    el.setAttribute('aria-pressed', active ? 'true' : 'false')
+    el.title = active
+      ? `Showing the desk through ${chip.name} — click to release.`
+      : `${chip.name} · ${cycleChipText(chip)} — click to see the desk through it.`
+    el.setAttribute('aria-label', `${chip.name}, ${count} ${count === 1 ? 'card' : 'cards'}${active ? ' — engaged' : ''}`)
+
+    const name = document.createElement('span')
+    name.className = 'kbn-cyclechip-name'
+    name.textContent = chip.name
+
+    const span = document.createElement('span')
+    span.className = 'kbn-cyclechip-span'
+    span.textContent = cycleChipText(chip)
+
+    const tally = document.createElement('span')
+    tally.className = 'kbn-lens-chip-count'
+    tally.textContent = String(count)
+
+    el.append(name, span, tally)
+    if (active) {
+      const release = document.createElement('span')
+      release.className = 'kbn-lens-chip-release'
+      release.textContent = '✕'
+      release.setAttribute('aria-hidden', 'true')
+      el.append(release)
+    }
+    el.addEventListener('click', () => onToggle(active ? null : chip.id))
+    return el
   }
 
   /** Render the Pinned band: a dense wrap of at-rest pinned-role launcher
@@ -803,8 +894,10 @@ export class KanbanSurfaceRenderer {
     staleness: KanbanOriginStaleness | undefined,
   ): HTMLElement {
     const isStale = staleness?.status === 'stale'
+    const sleeping = isSleepingOnSchedule(card)
     const el = document.createElement('div')
     el.className = isAgentCard(card) ? 'kbn-cluster-item kbn-cluster-item-agent' : 'kbn-cluster-item kbn-cluster-item-human'
+    if (sleeping) el.classList.add('kbn-cluster-item-standing')
     el.draggable = !isStale
     el.dataset.fiberId = card.id
     el.title = card.name
@@ -821,10 +914,27 @@ export class KanbanSurfaceRenderer {
     title.textContent = card.name
     el.append(glyph, title)
 
-    // A snoozed card carries its return date here as well as on the timeline
-    // ghost — Resting is where you come to ask "what did I put down?", and half
-    // that answer is when each thing comes back.
-    if (card.due) {
+    // TWO WAYS OF COMING BACK, said differently on purpose.
+    //
+    // A standing role asleep on its cron returns BY ITSELF — "↻ returns Aug 12"
+    // — and the ↻ is the whole distinction from a snooze, which is a thing YOU
+    // put down and which "wakes" on a day you chose. Reading them the same way
+    // would make the desk claim you had parked a role you never touched.
+    //
+    // The day comes from `nextLaunchAt`, the cron's next occurrence (an INSTANT,
+    // so it is formatted from the instant, not read as a civil day). A role
+    // whose schedule will not parse simply shows no chip rather than a lie.
+    if (sleeping) {
+      const returns = card.nextLaunchAt ? formatLaunchDay(card.nextLaunchAt) : null
+      const schedule = humanizeCron(card.shuttleSchedule) ?? card.shuttleSchedule
+      const chip = document.createElement('span')
+      chip.className = 'kbn-cluster-item-wakes kbn-cluster-item-returns'
+      chip.textContent = returns ? `↻ returns ${returns}` : '↻ on a schedule'
+      const detail = [schedule, returns && `next ${returns}`].filter(Boolean).join(' · ')
+      chip.title = `Sleeping on its schedule${detail ? ` — ${detail}` : ''}. It dispatches itself.`
+      el.append(chip)
+      el.title = `${card.name} — sleeping on its schedule${detail ? ` (${detail})` : ''}`
+    } else if (card.due) {
       const wakes = document.createElement('span')
       wakes.className = 'kbn-cluster-item-wakes'
       wakes.textContent = `wakes ${formatDue(card.due)}`
@@ -848,8 +958,10 @@ export class KanbanSurfaceRenderer {
     kind: NowColumnKind,
     cards: KanbanCard[],
     staleness: Record<string, KanbanOriginStaleness>,
+    lens: CycleLens | null = null,
   ): HTMLElement {
     const title = COLUMN_TITLES[kind]
+    const ghosts = lens ? lens.ghosts.filter((g) => g.column === kind) : []
     const col = document.createElement('section')
     col.className = `kbn-col kbn-col-${kind}`
     col.setAttribute('role', 'region')
@@ -870,7 +982,9 @@ export class KanbanSurfaceRenderer {
     appendCappedText(headTitle, title)
     const headCount = document.createElement('span')
     headCount.className = 'kbn-col-count'
-    headCount.textContent = String(cards.length)
+    // The count is what the column is SHOWING, so it grows by the ghosts the
+    // lens conjured. With no lens, ghosts is empty and this is the plain count.
+    headCount.textContent = String(cards.length + ghosts.length)
     // Title + count cluster on the left; the per-kind action sits at the right
     // edge (the head is `justify-content: space-between`).
     const headLabel = document.createElement('div')
@@ -914,7 +1028,7 @@ export class KanbanSurfaceRenderer {
     list.className = 'kbn-col-list'
     list.setAttribute('role', 'list')
 
-    if (cards.length === 0) {
+    if (cards.length === 0 && ghosts.length === 0) {
       const empty = document.createElement('div')
       empty.className = 'kbn-empty'
       empty.setAttribute('role', 'listitem')
@@ -922,7 +1036,17 @@ export class KanbanSurfaceRenderer {
       list.append(empty)
     } else {
       for (const card of cards) {
-        list.append(this.renderCard(card, kind, staleness[card.originId]))
+        list.append(this.renderCard(card, kind, staleness[card.originId], {
+          // A lensed column recedes what the cycle does not claim. The card
+          // stays live — clickable, draggable — because a lens is a way of
+          // looking, not a filter that takes the board away from you.
+          dim: lens !== null && !lens.memberIds.has(card.id),
+        }))
+      }
+      // Ghosts sit AFTER the real cards: they are not on this column, they are
+      // being shown as belonging to the chapter you are looking at.
+      for (const ghost of ghosts) {
+        list.append(this.renderCard(ghost.card, kind, staleness[ghost.card.originId], { ghost: true }))
       }
     }
 
@@ -994,16 +1118,20 @@ export class KanbanSurfaceRenderer {
     card: KanbanCard,
     kind: NowColumnKind,
     originStaleness?: KanbanOriginStaleness,
+    lensState: { dim?: boolean; ghost?: boolean } = {},
   ): HTMLElement {
     const isStale = originStaleness?.status === 'stale'
 
     const el = document.createElement('div')
     el.className = `kbn-card kbn-card-${kind}${isStale ? ' kbn-card--stale' : ''}`
+    if (lensState.dim) el.classList.add('kbn-card--lens-off')
+    if (lensState.ghost) el.classList.add('kbn-card--lens-ghost')
     el.setAttribute('role', 'listitem')
     const ariaSuffix = isStale
       ? ` — waiting on ${originStaleness.hostname ?? card.originId}, drag disabled`
       : ''
-    el.setAttribute('aria-label', `${card.name} — ${COLUMN_TITLES[kind]}${ariaSuffix}`)
+    const lensSuffix = lensState.ghost ? ' — resting, shown for this cycle' : ''
+    el.setAttribute('aria-label', `${card.name} — ${COLUMN_TITLES[kind]}${lensSuffix}${ariaSuffix}`)
     el.draggable = !isStale
     el.dataset.fiberId = card.id
     // A fiber in a git-synced store is served by every daemon holding it. The
@@ -1430,6 +1558,15 @@ function cycleAimLabel(target: CycleDropTarget): string {
     : `→ resting until ${shortDayLabel(target.dropDay)} · ${target.name} opens`
 }
 
+/** A cycle's span as a chip says it — `Aug 12 – Aug 26`, or `Aug 12 –` for a
+ *  chapter still open at its right edge. Shared by the drag horizon's drop
+ *  chips and the lens row, so the two never drift apart. */
+export function cycleChipText(span: { start: string; end: string; openEnded: boolean }): string {
+  return span.openEnded
+    ? `${shortDayLabel(span.start)} –`
+    : `${shortDayLabel(span.start)} – ${shortDayLabel(span.end)}`
+}
+
 /**
  * One cycle as a drop target on the drag horizon: its name over its span, in
  * the Chronicle band's ochre — the same annotation register, so a chip on the
@@ -1449,14 +1586,12 @@ function buildCycleChip(target: CycleDropTarget, leading: boolean): HTMLElement 
   el.dataset.timelineDayIso = target.dropDay
 
   const name = document.createElement('span')
-  name.className = 'kbn-draghorizon-cycle-name'
+  name.className = 'kbn-cyclechip-name'
   name.textContent = target.name
 
   const span = document.createElement('span')
-  span.className = 'kbn-draghorizon-cycle-span'
-  span.textContent = target.openEnded
-    ? `${shortDayLabel(target.start)} –`
-    : `${shortDayLabel(target.start)} – ${shortDayLabel(target.end)}`
+  span.className = 'kbn-cyclechip-span'
+  span.textContent = cycleChipText(target)
 
   el.append(name, span)
   el.title = target.running
@@ -1566,6 +1701,19 @@ export function clusterStashCards(stash: KanbanCard[]): StashCluster[] {
  *  two different days: the card sat on the Thursday column while its own chip
  *  read Wednesday. The day is materialized as a local date, never re-parsed as
  *  an instant (see civilDay.ts). */
+/**
+ * `Aug 12` from an INSTANT — the next-launch twin of `formatDue`. A cron
+ * occurrence is a real point in time, so it is read with `instantMs` and shown
+ * in the reader's own zone; running it through `formatDue` would treat the
+ * offset as a civil day and could name the day before. Empty string when the
+ * instant will not parse, which the caller reads as "say nothing".
+ */
+export function formatLaunchDay(iso: string): string {
+  const ms = instantMs(iso)
+  if (ms === undefined) return ''
+  return new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+}
+
 export function formatDue(iso: string): string {
   const date = civilDayToLocalDate(dueCivilDay(iso))
   if (!date) return iso

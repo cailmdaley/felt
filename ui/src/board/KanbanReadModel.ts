@@ -24,6 +24,8 @@ import type {
 import type { Fiber } from './KanbanFiber.js';
 import {
   classifyFiber,
+  cycleMembership,
+  cycleSpan,
   effectiveHorizon,
   isCycleFiber,
   KANBAN_TIMELINE_WINDOW,
@@ -309,6 +311,135 @@ function assembleSurfaces(
     cycles,
     temperedTotal: tempered.length,
   };
+}
+
+/**
+ * EVERYTHING AT REST, in one list — what the Resting region actually draws.
+ *
+ * Two kinds of waiting, joined here because the human sees one region:
+ *
+ *   • SNOOZED work — `horizon:stashed`, on `resp.stash`. Put down on purpose,
+ *     returning on its `due:` day.
+ *   • A STANDING ROLE BETWEEN RUNS — `status:active` + a cron. `classifyFiber`
+ *     calls it `scheduled` and the read model files it on the timeline surface
+ *     at its next launch. That was right when the Desk carried a permanent
+ *     timeline ribbon. The ribbon is gone (it survives only as the drag
+ *     horizon, which draws no cards), so `scheduled` meant INVISIBLE: an armed
+ *     monthly role like `finances/cc-bills-monthly` was on the board's data and
+ *     on no surface the human could see.
+ *
+ * A role asleep on its cron is resting in every sense that matters to a person
+ * reading the desk — it is not gone, it is not waiting on them, it comes back
+ * on a day. So it is drawn in Resting, wearing its next launch ("↻ returns
+ * Aug 12") rather than a snooze's "wakes".
+ *
+ * The response shape is untouched: `timeline.futureDated` / `anytimeSoon` keep
+ * carrying these cards (drag resolution reads them through `findCardById`), and
+ * this is the JOIN, done at render time, not a second home for the card.
+ *
+ * The three statuses that are NOT here, and why they need nothing:
+ *   status:open standing   → paused/draft, classifies to `drafts` — on the desk.
+ *   status:closed standing → an awaiting run needing a verdict; it classifies to
+ *                            `awaitingReview` and belongs in that column, not
+ *                            asleep in Resting. Accept re-arms it (`felt shuttle
+ *                            accept` → `status:active`) and it lands back here.
+ *   a running standing role → the liveness branch sends it to `inFlight`.
+ */
+export function restingCards(resp: KanbanResponse | null): KanbanCard[] {
+  if (!resp) return [];
+  return [...resp.stash, ...resp.timeline.futureDated, ...resp.timeline.anytimeSoon];
+}
+
+/** True when this card is a standing role asleep between runs — armed, no live
+ *  worker, waiting on its own cron. The Resting region says so differently from
+ *  a snooze, and `nextLaunchAt` is the day it names. */
+export function isSleepingOnSchedule(card: KanbanCard): boolean {
+  return card.shuttleKind === 'standing' && card.status === 'active' && !card.runningWorker;
+}
+
+/** The Desk columns a lensed member can appear in. */
+export type LensColumn = 'drafts' | 'inFlight' | 'awaitingReview';
+
+/** A member the lens has to CONJURE: it belongs to the cycle but is not on any
+ *  Desk column right now (resting, or snoozed until a day inside the span). */
+export interface CycleLensGhost {
+  card: KanbanCard;
+  /** The column the card would sit in if it were on the desk. */
+  column: LensColumn;
+}
+
+/** One cycle, resolved into what the Desk has to draw differently. */
+export interface CycleLens {
+  cycleId: string;
+  name: string;
+  /** Every member, on the desk or off it. Non-members are everything else. */
+  memberIds: Set<string>;
+  ghosts: CycleLensGhost[];
+  /** What the chip says — members on the desk plus ghosts. */
+  count: number;
+}
+
+/**
+ * Resolve one cycle into a lens over a board response: who belongs, and which
+ * of them the Desk is not currently showing.
+ *
+ * Membership is `cycleMembership` — derived, never assigned. The Desk supplies
+ * two of its three rungs: `due:` inside the span, and "in flight right now".
+ * The third (worked inside the span) needs activity days from the temporal
+ * feeds, which the Desk does not fetch; when a caller can supply them, it puts
+ * them on the candidate and the rung starts firing with no change here.
+ *
+ * GHOSTS come from Resting. A resting card is off the desk by choice, but if it
+ * is due inside the cycle you are looking at, it is part of that chapter's
+ * work and hiding it would make the lens lie about its own count.
+ */
+export function deriveCycleLens(
+  resp: KanbanResponse | null,
+  cycleId: string | null,
+  nowMs: number = Date.now(),
+): CycleLens | null {
+  if (!resp || !cycleId) return null;
+  const cycle = resp.cycles.find((c) => c.id === cycleId);
+  if (!cycle) return null;
+  const span = cycleSpan({ start: cycle.cycleStart ?? undefined, due: cycle.due }, nowMs);
+  if (!span) return null;
+
+  const memberIds = new Set<string>();
+  const columns: LensColumn[] = ['drafts', 'inFlight', 'awaitingReview'];
+  for (const column of columns) {
+    for (const card of resp.now[column]) {
+      const reason = cycleMembership({ due: card.due, inFlight: column === 'inFlight' }, span, nowMs);
+      if (reason) memberIds.add(card.id);
+    }
+  }
+
+  // Ghosts are drawn from the same set the Resting region draws, so the lens and
+  // the region can never disagree about who is at rest. A standing role joins a
+  // cycle only if it carries a `due:` of its own — a cron is a cadence, not a
+  // commitment to a chapter.
+  const ghosts: CycleLensGhost[] = [];
+  for (const card of restingCards(resp)) {
+    // A resting card is never in flight — that is what resting means — so only
+    // the `due:` rung (and, later, `worked`) can admit it.
+    if (!cycleMembership({ due: card.due }, span, nowMs)) continue;
+    memberIds.add(card.id);
+    ghosts.push({ card, column: ghostColumn(card) });
+  }
+
+  return { cycleId, name: cycle.name, memberIds, ghosts, count: memberIds.size };
+}
+
+/**
+ * The column a resting card would surface in. Today every card on the Resting
+ * surface is an open draft (`routeOpenCardByPlanningSurface` only ever routes
+ * the drafts bucket there), so this is `drafts` in practice; the closed and
+ * running branches are here so a future Resting inhabitant lands somewhere
+ * truthful rather than silently in Drafts.
+ */
+function ghostColumn(card: KanbanCard): LensColumn {
+  if (card.status === 'closed' && card.tempered === undefined) return 'awaitingReview';
+  if (card.runningWorker || card.status === 'active') return 'inFlight';
+  return 'drafts';
 }
 
 /**

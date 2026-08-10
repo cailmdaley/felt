@@ -325,6 +325,35 @@ button.kbn-day-lanename:focus-visible {
   line-height: 1;
   color: #7A6F5C;
 }
+/* The lifecycle glyph, before a lane's name and again in the key. Marginalia:
+   a size below the name, pigments already on the page. One set of rules serves
+   both places so the legend cannot come to disagree with the gutter. */
+.kbn-day-lanestate,
+.kbn-day-stateglyph {
+  flex: 0 0 auto;
+  font-style: normal;
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-size: calc(10px * var(--kbn-type-scale, 1));
+  line-height: 1;
+}
+.kbn-state-draft { color: #7A6F5C; opacity: 0.75; }
+.kbn-state-inFlight { color: #3D5BA0; }
+.kbn-state-resting { color: #7A6F5C; }
+.kbn-state-awaitingReview { color: #C49333; }
+.kbn-state-tempered { color: #3F8278; }
+.kbn-state-composted { color: #7A6F5C; opacity: 0.6; }
+
+/* The states hang together as one key item: a narrow legend wraps between
+   groups, never inside one. */
+.kbn-day-key-states {
+  gap: 9px;
+}
+.kbn-day-key-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
 .kbn-day-key {
   display: inline-flex;
   align-items: center;

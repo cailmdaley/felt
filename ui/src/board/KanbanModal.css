@@ -602,6 +602,10 @@
   opacity: 0.42;
 }
 
+/* The two inner spans below (.kbn-cyclechip-name / -span) are SHARED with the
+   Desk's cycle lens row: a chip that names a cycle wears the same clothes
+   wherever it stands. Only the plate around them differs. */
+
 /* Chapter chips — the upcoming cycles, offered after the last day cell. The
    vocabulary is the Chronicle band's verbatim (ochre tint, hairline edge,
    italic serif), because a chip here and a band there are the same cycle. They
@@ -629,7 +633,7 @@
 /* A cycle already underway is dimmer: it is a legal target, but it means
    "later this chapter", not "the chapter after this one". */
 .kbn-draghorizon-cycle-running { background: rgba(196, 147, 51, 0.09); }
-.kbn-draghorizon-cycle-name {
+.kbn-cyclechip-name {
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
   font-style: italic;
   font-size: calc(11.5px * var(--kbn-type-scale, 1));
@@ -639,7 +643,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.kbn-draghorizon-cycle-span {
+.kbn-cyclechip-span {
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
   font-variant-caps: all-small-caps;
   font-feature-settings: "smcp", "c2sc", "onum";
@@ -656,8 +660,75 @@
   border-color: #9A7B35;
   transform: scale(1.05);
 }
-.kbn-draghorizon-cycle.kbn-timeline-dropcol-active .kbn-draghorizon-cycle-name { color: #4A3C1C; }
-.kbn-draghorizon-cycle.kbn-timeline-dropcol-active .kbn-draghorizon-cycle-span { color: #6E5A2E; }
+.kbn-draghorizon-cycle.kbn-timeline-dropcol-active .kbn-cyclechip-name { color: #4A3C1C; }
+.kbn-draghorizon-cycle.kbn-timeline-dropcol-active .kbn-cyclechip-span { color: #6E5A2E; }
+
+/* ── The cycle lens row ──────────────────────────────────────────────────────
+   A quiet line above the columns: one chip per live chapter. It is chrome that
+   should be invisible until wanted, so at rest the chips are barely tinted and
+   the row carries no rule, no heading, no count of its own. */
+.kbn-lensbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 2px 5px;
+}
+.kbn-lens-chip {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  max-width: 260px;
+  padding: 2px 8px;
+  border: 0.5px solid rgba(154, 123, 53, 0.3);
+  border-radius: 7px;
+  background: rgba(196, 147, 51, 0.07);
+  cursor: pointer;
+  overflow: hidden;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.kbn-lens-chip:hover { background: rgba(196, 147, 51, 0.16); }
+/* The chapter we are living in reads a shade warmer than the ones ahead. */
+.kbn-lens-chip-running { border-color: rgba(154, 123, 53, 0.52); }
+/* Engaged: filled ochre, the same loud step a drop target takes when it is
+   the one under the cursor — one visual grammar for "this is the live one". */
+.kbn-lens-chip-active {
+  background: rgba(196, 147, 51, 0.42);
+  border-color: #9A7B35;
+}
+.kbn-lens-chip-active .kbn-cyclechip-name { color: #4A3C1C; }
+.kbn-lens-chip-active .kbn-cyclechip-span { color: #6E5A2E; }
+.kbn-lens-chip-count {
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-feature-settings: "onum";
+  font-size: calc(10px * var(--kbn-type-scale, 1));
+  color: #8A7A5E;
+}
+.kbn-lens-chip-active .kbn-lens-chip-count { color: #4A3C1C; }
+.kbn-lens-chip-release {
+  font-size: calc(9px * var(--kbn-type-scale, 1));
+  color: #6E5A2E;
+}
+
+/* What the lens does to the columns. A receded card is DIMMED, never hidden and
+   never disabled — it still takes clicks and still drags, because the lens is a
+   way of looking and the desk underneath is unchanged. */
+.kbn-card--lens-off {
+  opacity: 0.35;
+  transition: opacity 140ms ease;
+}
+.kbn-card--lens-off:hover, .kbn-card--lens-off:focus-within { opacity: 0.7; }
+
+/* A ghost is a member the desk was not showing — resting, due inside the span.
+   Dashed plate, no fill: present, but plainly not standing on this column. */
+.kbn-card--lens-ghost {
+  border-style: dashed;
+  border-color: rgba(154, 123, 53, 0.55);
+  background: transparent;
+  box-shadow: none;
+  opacity: 0.82;
+}
+.kbn-card--lens-ghost:hover { opacity: 1; }
 
 /* Pager chip — reused by the Pinned band's "+N more" overflow control
    (.kbn-pin-more). A slim gold-leaf pill that reads as a manuscript catchword
@@ -844,6 +915,15 @@
   white-space: nowrap;
 }
 .kbn-cluster-cold .kbn-cluster-item-wakes { color: rgba(122, 111, 92, 0.6); }
+/* A standing role asleep on its cron. Cool slate against the snooze chip's
+   warm ochre — the two states are both "at rest" and must never be misread for
+   each other: one you put down, the other put itself down and will get up
+   without you. */
+.kbn-cluster-item-returns { color: rgba(74, 96, 110, 0.8); }
+.kbn-cluster-cold .kbn-cluster-item-returns { color: rgba(96, 108, 118, 0.65); }
+/* The row itself carries a hairline left edge in the same slate, so the
+   schedule-driven rows are findable in a cluster without reading each chip. */
+.kbn-cluster-item-standing { box-shadow: inset 1.5px 0 0 rgba(74, 96, 110, 0.32); }
 
 .kbn-col {
   /* Desk cards/chrome render at design size — the 1.18 scale is for the

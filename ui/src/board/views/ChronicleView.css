@@ -774,6 +774,23 @@
   border-right: 0.5px solid rgba(122, 111, 92, 0.30);
   border-bottom: 0.5px solid rgba(122, 111, 92, 0.09);
 }
+/* The lifecycle glyph, before the name. Marginalia: a size below the name and
+   a pigment already on the page, so it reads as a mark in the margin rather
+   than as a second title competing with the fiber's own. The colours are shared
+   with the key below — one rule, both places, so the legend cannot drift. */
+.chr-state {
+  flex: 0 0 auto;
+  font-style: normal;
+  font-size: calc(10px * var(--kbn-type-scale, 1));
+  line-height: 1;
+}
+.chr-state-draft { color: #7A6F5C; opacity: 0.75; }
+.chr-state-inFlight { color: #3D5BA0; }
+.chr-state-resting { color: #7A6F5C; }
+.chr-state-awaitingReview { color: #C49333; }
+.chr-state-tempered { color: #3F8278; }
+.chr-state-composted { color: #7A6F5C; opacity: 0.6; }
+
 .chr-name {
   flex: 1 1 auto;
   min-width: 0;
@@ -1050,7 +1067,16 @@ button.chr-name:hover {
 }
 .chr-key-due { color: #C49333; }
 .chr-key-launch { color: #3D5BA0; opacity: 0.75; }
-.chr-key-end { color: #3F8278; }
+/* The state group: glyph and word in pairs, one line, hanging together as a
+   single key item so a narrow key wraps between groups and never inside one. */
+.chr-key-states {
+  gap: 9px;
+}
+.chr-key-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
 .chr-key-band {
   display: inline-block;
   width: 20px;

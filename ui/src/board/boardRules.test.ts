@@ -10,19 +10,21 @@
 import { describe, expect, it } from 'vitest'
 import {
   classifyFiber,
+  cycleMembership,
   cycleSpan,
   effectiveHorizon,
   humanizeCron,
   isCycleFiber,
+  lensCycles,
   restingUntil,
   upcomingCycleDropTargets,
 } from './KanbanRules.js'
 import type { CycleDropCandidate } from './KanbanRules.js'
 import type { Fiber } from './KanbanFiber.js'
 import type { CompositeEntry, CompositeFeed } from './KanbanComposite.js'
-import type { KanbanCard } from './KanbanTypes.js'
-import { buildKanbanResponseFromComposite } from './KanbanReadModel.js'
-import { clusterStashCards, humanizeIdleAge, phasePillLabel } from './KanbanSurfaces.js'
+import type { KanbanCard, KanbanResponse } from './KanbanTypes.js'
+import { buildKanbanResponseFromComposite, deriveCycleLens, isSleepingOnSchedule, restingCards } from './KanbanReadModel.js'
+import { clusterStashCards, formatLaunchDay, humanizeIdleAge, phasePillLabel } from './KanbanSurfaces.js'
 import { sessionWindow } from './FiberDetailModal.js'
 import { isoDayLocal } from './civilDay.js'
 
@@ -831,5 +833,286 @@ describe('humanizeCron', () => {
     expect(humanizeCron('not a cron')).toBeUndefined()
     expect(humanizeCron('')).toBeUndefined()
     expect(humanizeCron(undefined)).toBeUndefined()
+  })
+})
+
+describe('the cycle lens — membership is derived, never assigned', () => {
+  const asFeltWrites = (day: string): string => `${day}T00:00:00Z`
+
+  // A span we are living in: opened three days ago, closes in ten.
+  const span = cycleSpan(
+    { start: asFeltWrites(dayFromNow(-3)), due: asFeltWrites(dayFromNow(10)) },
+    NOW,
+  )!
+
+  describe('cycleMembership', () => {
+    it('admits a fiber whose due falls inside the span', () => {
+      expect(cycleMembership({ due: asFeltWrites(dayFromNow(4)) }, span, NOW)).toBe('due')
+    })
+
+    it('admits both edges — the span is inclusive', () => {
+      expect(cycleMembership({ due: asFeltWrites(dayFromNow(-3)) }, span, NOW)).toBe('due')
+      expect(cycleMembership({ due: asFeltWrites(dayFromNow(10)) }, span, NOW)).toBe('due')
+    })
+
+    it('refuses a due one day outside either edge', () => {
+      expect(cycleMembership({ due: asFeltWrites(dayFromNow(-4)) }, span, NOW)).toBeNull()
+      expect(cycleMembership({ due: asFeltWrites(dayFromNow(11)) }, span, NOW)).toBeNull()
+    })
+
+    it('admits work in flight now — the chapter we are living in claims it', () => {
+      expect(cycleMembership({ inFlight: true }, span, NOW)).toBe('in-flight')
+    })
+
+    it('does NOT let in-flight work claim a chapter that has not opened', () => {
+      const ahead = cycleSpan(
+        { start: asFeltWrites(dayFromNow(20)), due: asFeltWrites(dayFromNow(30)) },
+        NOW,
+      )!
+      expect(cycleMembership({ inFlight: true }, ahead, NOW)).toBeNull()
+      // …but a due inside it still does. In-flight is about now; a due is not.
+      expect(cycleMembership({ inFlight: true, due: asFeltWrites(dayFromNow(25)) }, ahead, NOW)).toBe('due')
+    })
+
+    it('is null for a dateless fiber sitting at rest — a non-member', () => {
+      expect(cycleMembership({}, span, NOW)).toBeNull()
+      expect(cycleMembership({ inFlight: false, due: undefined }, span, NOW)).toBeNull()
+    })
+
+    it('has the activity rung ready for the day a caller can supply it', () => {
+      // The Desk never fills `workedDays` — the days live in the temporal feeds
+      // it does not fetch — so this rung is dark there and live here.
+      expect(cycleMembership({ workedDays: [dayFromNow(-1)] }, span, NOW)).toBe('worked')
+      expect(cycleMembership({ workedDays: [dayFromNow(-40)] }, span, NOW)).toBeNull()
+      expect(cycleMembership({ workedDays: [] }, span, NOW)).toBeNull()
+    })
+  })
+
+  describe('lensCycles — which chapters the Desk offers', () => {
+    const c = (over: Partial<CycleDropCandidate>): CycleDropCandidate =>
+      ({ id: 'cycles/x', name: 'X', cycleStart: null, ...over })
+
+    it('offers the running chapter and the ones ahead, earliest first', () => {
+      const chips = lensCycles([
+        c({ id: 'cycles/next', name: 'Next', cycleStart: dayFromNow(20), due: asFeltWrites(dayFromNow(40)) }),
+        c({ id: 'cycles/now', name: 'Now', cycleStart: dayFromNow(-3), due: asFeltWrites(dayFromNow(10)) }),
+      ], NOW)
+      expect(chips.map((k) => k.id)).toEqual(['cycles/now', 'cycles/next'])
+      expect(chips[0].running).toBe(true)
+      expect(chips[1].running).toBe(false)
+    })
+
+    it('drops a chapter that has already closed', () => {
+      const chips = lensCycles([
+        c({ cycleStart: dayFromNow(-60), due: asFeltWrites(dayFromNow(-30)) }),
+      ], NOW)
+      expect(chips).toEqual([])
+    })
+
+    it('admits a due-only cycle, which the drop-target rule refuses', () => {
+      // A lens needs no opening day to snooze to — a one-day span filters fine.
+      const bare = [c({ id: 'cycles/deadline', name: 'Deadline', due: asFeltWrites(dayFromNow(5)) })]
+      expect(lensCycles(bare, NOW).map((k) => k.id)).toEqual(['cycles/deadline'])
+      expect(upcomingCycleDropTargets(bare, NOW)).toEqual([])
+    })
+
+    it('has nothing to say about a cycle with no dates at all', () => {
+      expect(lensCycles([c({})], NOW)).toEqual([])
+    })
+  })
+
+  describe('deriveCycleLens — what the Desk draws differently', () => {
+    const card = (over: Partial<KanbanCard>): KanbanCard => ({
+      id: 'work/a',
+      name: 'A',
+      path: 'work/a.md',
+      originId: 'here',
+      status: 'active',
+      createdAt: at0,
+      dependsOnSatisfied: true,
+      effectiveHorizon: 'now',
+      drifted: false,
+      isCycle: false,
+      cycleStart: null,
+      ...over,
+    })
+
+    const board = (over: Partial<KanbanResponse> = {}): KanbanResponse => ({
+      feltHost: 'here',
+      now: { drafts: [], inFlight: [], awaitingReview: [] },
+      timeline: { past: [], futureDated: [], anytimeSoon: [] },
+      stash: [],
+      pinned: [],
+      cycles: [card({
+        id: 'cycles/now', name: 'Now', isCycle: true,
+        cycleStart: dayFromNow(-3), due: asFeltWrites(dayFromNow(10)),
+      })],
+      totals: {
+        drafts: 0, inFlight: 0, awaitingReview: 0,
+        past: 0, futureDated: 0, anytimeSoon: 0, stash: 0, pinned: 0,
+      },
+      temperedTotal: 0,
+      timelineWindow: { pastDays: 14, futureDays: 14 },
+      staleness: {},
+      generatedAt: NOW,
+      ...over,
+    })
+
+    it('claims the due-in-span and the in-flight, and leaves the rest alone', () => {
+      const lens = deriveCycleLens(board({
+        now: {
+          drafts: [
+            card({ id: 'work/due', due: asFeltWrites(dayFromNow(2)) }),
+            card({ id: 'work/later', due: asFeltWrites(dayFromNow(60)) }),
+            card({ id: 'work/undated' }),
+          ],
+          inFlight: [card({ id: 'work/aloft', runningWorker: 'sess' })],
+          awaitingReview: [],
+        },
+      }), 'cycles/now', NOW)!
+      expect([...lens.memberIds].sort()).toEqual(['work/aloft', 'work/due'])
+      expect(lens.ghosts).toEqual([])
+      expect(lens.count).toBe(2)
+      expect(lens.name).toBe('Now')
+    })
+
+    it('conjures a resting member as a ghost in the column it would sit in', () => {
+      const resting = card({
+        id: 'work/snoozed',
+        status: 'open',
+        due: asFeltWrites(dayFromNow(5)),
+        storedHorizon: 'stashed',
+        effectiveHorizon: 'stashed',
+      })
+      const lens = deriveCycleLens(board({ stash: [resting] }), 'cycles/now', NOW)!
+      expect(lens.ghosts.map((g) => [g.card.id, g.column])).toEqual([['work/snoozed', 'drafts']])
+      expect(lens.memberIds.has('work/snoozed')).toBe(true)
+      expect(lens.count).toBe(1)
+    })
+
+    it('leaves a resting card that is due outside the span alone', () => {
+      const lens = deriveCycleLens(board({
+        stash: [card({ id: 'work/far', effectiveHorizon: 'stashed', due: asFeltWrites(dayFromNow(90)) })],
+      }), 'cycles/now', NOW)!
+      expect(lens.ghosts).toEqual([])
+      expect(lens.count).toBe(0)
+    })
+
+    it('is null with no lens asked for, and null for a cycle the feed has lost', () => {
+      expect(deriveCycleLens(board(), null, NOW)).toBeNull()
+      expect(deriveCycleLens(board(), 'cycles/vanished', NOW)).toBeNull()
+      expect(deriveCycleLens(null, 'cycles/now', NOW)).toBeNull()
+    })
+
+    it('is null for a cycle with no dates — there is no span to look through', () => {
+      const dateless = board({
+        cycles: [card({ id: 'cycles/vague', name: 'Vague', isCycle: true })],
+      })
+      expect(deriveCycleLens(dateless, 'cycles/vague', NOW)).toBeNull()
+    })
+  })
+})
+
+describe('Resting holds standing roles asleep between runs', () => {
+  // The hole this closes: `classifyFiber` calls an armed standing role
+  // `scheduled` and the read model files it on the timeline surface. The Desk
+  // stopped drawing a timeline, so `finances/cc-bills-monthly` — armed, monthly,
+  // perfectly healthy — was on no surface a human could see.
+  const role = (over: Partial<Fiber> = {}): CompositeEntry => ({
+    origin: 'laptop',
+    feltStore: '/store/laptop',
+    path: '.felt/finances/cc-bills-monthly.md',
+    fiber: {
+      id: 'finances/cc-bills-monthly',
+      name: 'CC bills',
+      status: 'active',
+      kind: 'task',
+      priority: 2,
+      createdAt: at0,
+      hasShuttleBlock: true,
+      shuttleKind: 'standing',
+      shuttleSchedule: { expr: '0 9 12 * *', tz: 'UTC' },
+      ...over,
+    },
+  })
+  const boardOf = (entries: CompositeEntry[]): KanbanResponse =>
+    buildKanbanResponseFromComposite(
+      { host: 'laptop', entries, origins: { laptop: { kind: 'local', stale: false, fiberCount: entries.length } } },
+      { nowMs: NOW },
+    )
+
+  it('draws an armed standing role in Resting, with a next launch to show', () => {
+    const resp = boardOf([role()])
+    const resting = restingCards(resp)
+    expect(resting.map((c) => c.id)).toEqual(['finances/cc-bills-monthly'])
+    expect(isSleepingOnSchedule(resting[0])).toBe(true)
+    // The day the chip names comes from the cron, and it is a real instant.
+    expect(resting[0].nextLaunchAt).toBeDefined()
+    expect(formatLaunchDay(resting[0].nextLaunchAt!)).not.toBe('')
+    // And it is nowhere on the desk — Resting is its only home.
+    expect(resp.now.drafts).toEqual([])
+    expect(resp.now.inFlight).toEqual([])
+    expect(resp.now.awaitingReview).toEqual([])
+  })
+
+  it('keeps snoozed work and sleeping roles in the same region, told apart', () => {
+    const snoozed: CompositeEntry = {
+      origin: 'laptop',
+      feltStore: '/store/laptop',
+      path: '.felt/work/later.md',
+      fiber: {
+        id: 'work/later', name: 'Later', status: 'open', kind: 'task', priority: 2,
+        createdAt: at0, hasShuttleBlock: true, shuttleKind: 'oneshot',
+        horizon: 'stashed', due: dayFromNow(6),
+      },
+    }
+    const resting = restingCards(boardOf([role(), snoozed]))
+    expect(resting.map((c) => c.id).sort()).toEqual(['finances/cc-bills-monthly', 'work/later'])
+    const bySleep = Object.fromEntries(resting.map((c) => [c.id, isSleepingOnSchedule(c)]))
+    expect(bySleep).toEqual({ 'finances/cc-bills-monthly': true, 'work/later': false })
+  })
+
+  it('sends a RUNNING standing role to In flight, not to Resting', () => {
+    // Live work is activity worth showing on the desk; the liveness branch of
+    // classifyFiber already owns this and Resting must not double-claim it.
+    const resp = buildKanbanResponseFromComposite(
+      {
+        host: 'laptop',
+        entries: [{ ...role(), runtime: { tmuxSession: 'shuttle-cc', phase: 'running' } }],
+        origins: { laptop: { kind: 'local', stale: false, fiberCount: 1 } },
+      },
+      { nowMs: NOW },
+    )
+    expect(resp.now.inFlight.map((c) => c.id)).toEqual(['finances/cc-bills-monthly'])
+    expect(restingCards(resp)).toEqual([])
+  })
+
+  it('leaves a CLOSED standing role in Awaiting review — it wants a verdict, not a nap', () => {
+    // What the daemon actually does (shuttle standing-roles reference): a
+    // standing role's run ends `status:closed` + untempered, which IS the
+    // awaiting-review state, and `felt shuttle accept` re-arms it to `active`.
+    // So a closed role is not parked — it is holding a work product for you —
+    // and drawing it asleep in Resting would hide the one thing it needs.
+    const resp = boardOf([role({ status: 'closed', outcome: 'Paid 3 bills' })])
+    expect(resp.now.awaitingReview.map((c) => c.id)).toEqual(['finances/cc-bills-monthly'])
+    expect(restingCards(resp)).toEqual([])
+  })
+
+  it('leaves a PAUSED standing role in Drafts, where pause put it', () => {
+    // `felt shuttle pause` writes status:open and preserves the schedule. An
+    // open role is not armed, so it has no next launch to sleep until.
+    const resp = boardOf([role({ status: 'open' })])
+    expect(resp.now.drafts.map((c) => c.id)).toEqual(['finances/cc-bills-monthly'])
+    expect(restingCards(resp)).toEqual([])
+    expect(resp.now.drafts[0].nextLaunchAt).toBeUndefined()
+    expect(isSleepingOnSchedule(resp.now.drafts[0])).toBe(false)
+  })
+
+  it('shows a role whose next run is far off — no horizon drops it', () => {
+    // A yearly role lands outside the 14-day strip (`anytimeSoon`, not
+    // `futureDated`). Both lists are Resting, so distance never means invisible.
+    const resp = boardOf([role({ shuttleSchedule: { expr: '0 9 1 1 *', tz: 'UTC' } })])
+    expect(resp.timeline.futureDated).toEqual([])
+    expect(restingCards(resp).map((c) => c.id)).toEqual(['finances/cc-bills-monthly'])
   })
 })

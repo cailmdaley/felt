@@ -47,7 +47,7 @@ import type {
 import { dispatchIneligibleReason, errorMessageFromResponse } from './KanbanModalShared.js'
 import { COLUMN_TITLES, KanbanSurfaceRenderer, SURFACE_TITLE, findCardColumn } from './KanbanSurfaces.js'
 import { parseCompositeFeed } from './KanbanComposite.js'
-import { buildKanbanResponseFromComposite } from './KanbanReadModel.js'
+import { buildKanbanResponseFromComposite, deriveCycleLens, restingCards } from './KanbanReadModel.js'
 import {
   KANBAN_TIMELINE_WINDOW,
   nextStandingLaunch,
@@ -169,6 +169,15 @@ export class KanbanModal {
    * chrome state.
    */
   private focusDate: string | null = null
+  /**
+   * The cycle the Desk is currently seen through, or null for the plain Desk.
+   * VIEW-LOCAL on purpose: never persisted, never sent anywhere, and dropped on
+   * unmount. "Which chapter was I squinting at" is a posture of the moment, not
+   * a fact about the board, and a lens that survived a reload would be a filter
+   * you forgot you set. One at a time — this is a single id, so engaging a
+   * second chip releases the first.
+   */
+  private lensCycleId: string | null = null
   /** True when the most recent composite fetch failed. Drives the view
    *  host's error page — the Desk shows `renderError` for the same state,
    *  but a temporal view has no surfaces of its own to put it in. */
@@ -670,6 +679,7 @@ export class KanbanModal {
     this.activeView = null
     this.activeViewId = 'desk'
     this.focusDate = null
+    this.lensCycleId = null
     this.viewFallbackSig = null
     this.lastFetchFailed = false
     this.dragSourceId = null
@@ -1368,7 +1378,7 @@ export class KanbanModal {
     this.pendingDeskData = null
 
     const scrollSnapshot = this.captureScrollSnapshot()
-    const { now, timelineWindow, stash, pinned, staleness } = data
+    const { now, timelineWindow, pinned, staleness } = data
     this.timelineFutureDays = timelineWindow.futureDays
     // The masthead stats line dissolved (board-chrome-redesign) — the board
     // speaks for itself (column counts, the Pinned/Resting sections), and stale
@@ -1383,11 +1393,28 @@ export class KanbanModal {
     // axis survives only as the drag-reveal horizon under the tab strip (see
     // `syncDragHorizon`). Its removal is what gives Pinned and Resting the room
     // to sit on screen instead of below the fold.
-    this.deskEl.append(this.surfaces.renderNowSection(now, staleness))
+    // The cycle lens: a row of chips above the columns, and — when one is
+    // engaged — a lens the Now board is drawn through. Derived fresh from the
+    // response every render, so a poll that changes a `due:` moves a card in or
+    // out of the chapter without anything to invalidate. A lens whose cycle has
+    // vanished from the feed resolves to null and simply releases itself.
+    const lens = deriveCycleLens(data, this.lensCycleId)
+    if (this.lensCycleId !== null && lens === null) this.lensCycleId = null
+    const lensBar = this.surfaces.renderCycleLensBar(
+      this.lensCycleId,
+      (cycleId) => this.setLensCycle(cycleId),
+    )
+    if (lensBar) this.deskEl.append(lensBar)
+
+    this.deskEl.append(this.surfaces.renderNowSection(now, staleness, lens))
     // The Pinned strip always renders (a permanent park/drop target) — see
     // renderPinnedSection; no null guard needed.
     this.deskEl.append(this.surfaces.renderPinnedSection(pinned, staleness))
-    this.deskEl.append(this.surfaces.renderStashSection(stash, staleness))
+    // Resting draws everything at rest — snoozed work AND standing roles asleep
+    // between runs. The second kind classifies as `scheduled` and used to be
+    // drawn only by the timeline ribbon, which no longer exists; see
+    // `restingCards`.
+    this.deskEl.append(this.surfaces.renderStashSection(restingCards(data), staleness))
 
     this.restoreScrollSnapshot(scrollSnapshot)
     this.claimInitialFocus()
@@ -1740,8 +1767,28 @@ export class KanbanModal {
     this.updateBodyScrollAffordance()
   }
 
+  /**
+   * Engage (or release) the cycle lens and repaint the Desk from the response
+   * already in hand. No fetch: membership is derived from data the board has,
+   * so the lens turns on at the speed of a repaint.
+   */
+  private setLensCycle(cycleId: string | null): void {
+    if (this.lensCycleId === cycleId) return
+    this.lensCycleId = cycleId
+    if (this.lastResponse) this.render(this.lastResponse)
+  }
+
   private handleKanbanKeyDown(e: KeyboardEvent): void {
     if (!this.body) return
+    // Escape releases the lens FIRST, before it can reach the workspace handler
+    // that closes the whole board. Releasing a lens and closing the board are
+    // both "back out of what I'm looking at"; the nearer one wins.
+    if (e.key === 'Escape' && this.lensCycleId !== null && this.activeViewId === 'desk') {
+      e.preventDefault()
+      e.stopPropagation()
+      this.setLensCycle(null)
+      return
+    }
     if (this.handleViewHotkey(e)) return
     // Column Tab-nav is a Desk gesture — a temporal view owns its own focus
     // order, and the Desk's column heads are display:none behind it anyway.

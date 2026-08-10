@@ -172,6 +172,108 @@ export function upcomingCycleDropTargets(
 }
 
 /**
+ * Why a fiber belongs to a cycle. Membership is always DERIVED — a fiber is
+ * never assigned to a cycle, so there is no field to write, nothing to keep in
+ * sync, and no way for a cycle's roster to disagree with the calendar.
+ *
+ * Three rungs, in the order this function tries them:
+ *
+ *   'due'       the fiber's `due:` falls inside the span. The plain reading of
+ *               "this is due this sprint".
+ *   'in-flight' the fiber is being worked RIGHT NOW and the cycle is the one we
+ *               are living in. Work in flight belongs to the current chapter by
+ *               definition; it says nothing about a chapter that hasn't opened,
+ *               which is why this rung is gated on the span covering today.
+ *   'worked'    the fiber was worked on some day inside the span. This is the
+ *               real historical rule, and it is the one the Desk CANNOT answer:
+ *               activity days live in the temporal feeds, which the Desk does
+ *               not fetch. The rung is implemented and tested here so the day a
+ *               caller can supply `workedDays` it simply passes them; the Desk
+ *               leaves the field undefined and the rung is skipped.
+ */
+export type CycleMembershipReason = 'due' | 'in-flight' | 'worked';
+
+/** What membership reads off a fiber. Structural, like `CycleDropCandidate`:
+ *  the rules module owns no view types, and `KanbanCard` satisfies this. */
+export interface CycleMemberCandidate {
+  due?: string;
+  /** True when the fiber is currently being worked — on the Desk, that it sits
+   *  in the In flight column. A fact supplied by the caller, not re-derived
+   *  here, so the predicate stays independent of how a surface is assembled. */
+  inFlight?: boolean;
+  /** Civil days (`YYYY-MM-DD`) this fiber was worked on. Undefined wherever the
+   *  caller has no activity data — see the `worked` rung above. */
+  workedDays?: readonly string[];
+}
+
+/**
+ * Does this fiber belong to `span`, and by which rung? Returns null for a
+ * non-member. Both edges of the span are inclusive, and every comparison is
+ * between bare civil days, so no caller re-parses a `due:` as an instant.
+ */
+export function cycleMembership(
+  card: CycleMemberCandidate,
+  span: CycleSpan,
+  nowMs: number = Date.now(),
+): CycleMembershipReason | null {
+  const due = dueCivilDay(card.due);
+  if (due !== undefined && due >= span.start && due <= span.end) return 'due';
+
+  const today = isoDayLocal(nowMs);
+  if (card.inFlight === true && span.start <= today && today <= span.end) return 'in-flight';
+
+  if (card.workedDays?.some((d) => d >= span.start && d <= span.end)) return 'worked';
+
+  return null;
+}
+
+/** One cycle offered as a lens on the Desk. */
+export interface CycleLensChip {
+  id: string;
+  name: string;
+  start: string;
+  end: string;
+  openEnded: boolean;
+  /** True when the cycle has already opened and has not closed — the chapter
+   *  we are living in. */
+  running: boolean;
+}
+
+/**
+ * The cycles the Desk offers as lenses — the current one plus everything still
+ * ahead. A cycle qualifies when its span has not ended.
+ *
+ * Deliberately WIDER than `upcomingCycleDropTargets`, which is the drop-target
+ * rule: that one refuses a cycle without a `start:`, because a bare deadline
+ * has no opening day to snooze to. A lens needs no opening day — a one-day
+ * span is a perfectly good filter — so a due-only cycle is admitted here.
+ *
+ * Ordered by start, then name, so the row holds still across polls.
+ */
+export function lensCycles(
+  cycles: readonly CycleDropCandidate[],
+  nowMs: number = Date.now(),
+): CycleLensChip[] {
+  const today = isoDayLocal(nowMs);
+  const chips: CycleLensChip[] = [];
+  for (const c of cycles) {
+    const span = cycleSpan({ start: c.cycleStart ?? undefined, due: c.due }, nowMs);
+    if (!span) continue;
+    if (span.end < today) continue;
+    chips.push({
+      id: c.id,
+      name: c.name,
+      start: span.start,
+      end: span.end,
+      openEnded: span.openEnded,
+      running: span.start <= today,
+    });
+  }
+  chips.sort((a, b) => (a.start === b.start ? a.name.localeCompare(b.name) : a.start < b.start ? -1 : 1));
+  return chips;
+}
+
+/**
  * Classify a fiber into the kanban column it belongs in. The single source
  * of truth for "what column is this?". Reads ONLY the document-lifecycle
  * signals the frozen Shuttle contract names — `status`, `tempered`, `kind`,

@@ -76,7 +76,16 @@ import {
 import { createViewEmptyState, createViewPage } from './ViewPage.js'
 import { cardPathSegments, cardUlids, sessionSlug, sessionUlid } from './sessionNames.js'
 import { formatSpanMinutes, railBounds, shiftCivilDay } from './railTime.js'
-import { ACTIVITY_KEY_ITEMS, MARK_GLYPH, messageClause } from './vocabulary.js'
+import {
+  ACTIVITY_KEY_ITEMS,
+  MARK_GLYPH,
+  STATE_GLYPH,
+  STATE_KEY_ITEMS,
+  STATE_WORD,
+  cardState,
+  messageClause,
+  type LifecycleState,
+} from './vocabulary.js'
 import {
   keystrokeIsSpokenFor,
   normalizeFocusDate,
@@ -427,6 +436,8 @@ export interface DayLane {
    * bigger lie than dimming them. Same register as a stale card on the Desk.
    */
   stale: boolean
+  /** Where the fiber stands, drawn as a glyph before the lane's name. */
+  state: LifecycleState
   /** Board card id, when the lane joined to one — the click target. */
   cardId?: string
   /** Slugs this lane answers to when matching commit prefixes. */
@@ -787,6 +798,7 @@ export function buildDayLanes(
         lane: {
           key,
           label: card.name,
+          state: cardState(card),
           cardId: card.id,
           slugs: commitSlugsForCard(card),
         },
@@ -1324,7 +1336,7 @@ export function dayModelSignature(model: DayModel): string {
   const lanes = model.lanes
     .map(
       (lane) =>
-        `${lane.key}|${lane.label}|${lane.hostNote}|${lane.stale ? 'stale' : ''}|${lane.weight}|` +
+        `${lane.key}|${lane.label}|${lane.state}|${lane.hostNote}|${lane.stale ? 'stale' : ''}|${lane.weight}|` +
         `${lane.agent.map((r) => `${r.start}-${r.end}`).join(',')}|` +
         `${lane.attention.map((r) => `${r.start}-${r.end}`).join(',')}`,
     )
@@ -1390,6 +1402,24 @@ function buildKey(glyphClass: string, text: string): HTMLElement {
   const glyph = document.createElement('i')
   glyph.className = `kbn-day-keyglyph ${glyphClass}`
   item.append(glyph, document.createTextNode(text))
+  return item
+}
+
+/** The state group in Day's key: every glyph and its word, one line. The
+ *  pigments are the lane gutter's own, so the key cannot drift from the marks
+ *  it explains. */
+function buildStateKey(): HTMLElement {
+  const item = document.createElement('span')
+  item.className = 'kbn-day-key kbn-day-key-states'
+  for (const state of STATE_KEY_ITEMS) {
+    const pair = document.createElement('span')
+    pair.className = 'kbn-day-key-state'
+    const glyph = document.createElement('i')
+    glyph.className = `kbn-day-stateglyph kbn-state-${state}`
+    glyph.textContent = STATE_GLYPH[state]
+    pair.append(glyph, document.createTextNode(STATE_WORD[state]))
+    item.append(pair)
+  }
   return item
 }
 
@@ -1772,6 +1802,17 @@ class DayViewImpl implements TemporalView {
       // unreachable must not look like a second kind of "not quite here".
       label.className = `kbn-day-label${lane.stale ? ' kbn-card--stale' : ''}`
       label.style.gridRow = row
+      // The state, ahead of the name — outside the click target for the same
+      // reason Chronicle keeps it outside: the button opens the card, and a
+      // glyph inside it would read as part of the fiber's title.
+      const state = document.createElement('span')
+      state.className = `kbn-day-lanestate kbn-state-${lane.state}`
+      state.textContent = STATE_GLYPH[lane.state]
+      state.title = STATE_WORD[lane.state]
+      state.setAttribute('aria-label', STATE_WORD[lane.state])
+      state.setAttribute('role', 'img')
+      label.append(state)
+
       const name = document.createElement(lane.cardId ? 'button' : 'span')
       name.className = 'kbn-day-lanename'
       name.textContent = lane.label
@@ -1844,6 +1885,7 @@ class DayViewImpl implements TemporalView {
     legend.style.gridRow = String(model.lanes.length + 2)
     legend.append(
       ...ACTIVITY_KEY_ITEMS.map(({ kind, label }) => buildKey(DAY_KEY_CLASS[kind], label)),
+      buildStateKey(),
     )
     chart.append(legend)
     return chart

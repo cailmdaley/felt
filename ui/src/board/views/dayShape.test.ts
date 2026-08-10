@@ -44,6 +44,7 @@ import {
   tickStepMinutes,
   type DayLane,
 } from './DayView.js'
+import { cardState } from './vocabulary.js'
 import { sessionSlug, sessionUlid } from './sessionNames.js'
 import { formatSpanMinutes, shiftCivilDay } from './railTime.js'
 
@@ -335,6 +336,17 @@ describe('the drawn frame — how much of the day gets sheet', () => {
     const frame = drawnWindow(WIN, bucketsAt(240, 480), at(2026, 8, 9, 12))
     const lanes = buildDayLanes(activity(bucketsAt(240, 480)), [card()], frame)
     expect(lanes[0].agent[0]).toEqual({ start: 15, end: 16 })
+  })
+
+  it('carries the card lifecycle state onto the lane', () => {
+    const lanes = buildDayLanes(activity(bucketsAt(240, 480)), [card()], WIN)
+    expect(lanes[0].state).toBe(cardState(card()))
+    const running = buildDayLanes(
+      activity(bucketsAt(240, 480)),
+      [card({ runningWorker: 'sess-1' })],
+      WIN,
+    )
+    expect(running[0].state).toBe('inFlight')
   })
 })
 

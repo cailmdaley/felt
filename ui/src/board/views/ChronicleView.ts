@@ -38,7 +38,16 @@
 import { normalizeFocusDate, registerView, type TemporalView, type ViewContext } from './ViewRegistry.js'
 import { createViewEmptyState, createViewPage } from './ViewPage.js'
 import { cardPathSegments, cardUlids, sessionSlug, sessionUlid } from './sessionNames.js'
-import { ACTIVITY_KEY_ITEMS, MARK_GLYPH, messageClause } from './vocabulary.js'
+import {
+  ACTIVITY_KEY_ITEMS,
+  MARK_GLYPH,
+  STATE_GLYPH,
+  STATE_KEY_ITEMS,
+  STATE_WORD,
+  cardState,
+  messageClause,
+  type LifecycleState,
+} from './vocabulary.js'
 import { civilDayNoon, formatSpanMinutes, railBounds, shiftCivilDay } from './railTime.js'
 import {
   buildSessionIndex,
@@ -749,6 +758,8 @@ interface ChronicleRow {
    *  is also what a thin window says: data that simply has not arrived is not
    *  an error, so nothing but a stale origin lights this. */
   waitingOn: string | null
+  /** Where the fiber stands, drawn as a glyph before the name. */
+  state: LifecycleState
   cardId?: string
   days: Map<string, DayCell>
   /** Inclusive day-column range the solid lifeline covers. Never past today. */
@@ -909,6 +920,7 @@ function buildFiberRow(
     label: card.name,
     note: host,
     waitingOn: rowWaitingOn(card, host, origins),
+    state: cardState(card),
     cardId: card.id,
     days,
     startIdx,
@@ -2875,7 +2887,21 @@ class ChronicleView implements TemporalView {
     // Hollow marks: what is owed, ahead of today. Nothing solid is drawn there.
     key.append(item(glyph('chr-key-glyph chr-key-due', MARK_GLYPH.due), 'due'))
     key.append(item(glyph('chr-key-glyph chr-key-launch', MARK_GLYPH.launch), 'next launch'))
-    key.append(item(glyph('chr-key-glyph chr-key-end', '✓'), 'tempered · ✗ composted'))
+    // The state group. It also stands for the marks that END a lifeline (✓ ·
+    // ✗ · ◦ are the same ink in a different place), so closure is explained
+    // here and nowhere else — one gloss per mark is the rule this key keeps.
+    const states = document.createElement('span')
+    states.className = 'chr-key-item chr-key-states'
+    for (const state of STATE_KEY_ITEMS) {
+      const el = document.createElement('span')
+      el.className = 'chr-key-state'
+      el.append(
+        glyph(`chr-key-glyph chr-state-${state}`, STATE_GLYPH[state]),
+        document.createTextNode(STATE_WORD[state]),
+      )
+      states.append(el)
+    }
+    key.append(states)
     if (hasCycles) key.append(item(swatch('chr-key-band'), 'an era — click to read it'))
     return key
   }
@@ -2976,6 +3002,17 @@ class ChronicleView implements TemporalView {
     label.style.gridColumn = '1'
     label.style.gridRow = gridRow
 
+    // The state, ahead of the name, in the marginalia register. It is a
+    // `<span>` outside the name button on purpose: the name's job is to open
+    // the card, and a glyph inside it would join the click target and read as
+    // part of the title in the accessibility tree.
+    const state = document.createElement('span')
+    state.className = `chr-state chr-state-${row.state}`
+    state.textContent = STATE_GLYPH[row.state]
+    state.title = STATE_WORD[row.state]
+    state.setAttribute('aria-label', STATE_WORD[row.state])
+    state.setAttribute('role', 'img')
+
     const name = document.createElement(row.cardId ? 'button' : 'span')
     name.className = 'chr-name'
     name.textContent = row.label
@@ -2999,7 +3036,7 @@ class ChronicleView implements TemporalView {
     span.textContent = `${spanDays}d`
     span.title = `${spanDays} day${spanDays === 1 ? '' : 's'} on the chronicle`
 
-    label.append(name, note, span)
+    label.append(state, name, note, span)
 
     const track = document.createElement('div')
     track.className = `chr-track${waiting ? ' chr-track-waiting' : ''}`
