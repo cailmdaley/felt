@@ -181,6 +181,15 @@ export class KanbanSurfaceRenderer {
   /** Current page of the Pinned band when its chips overflow two rows.
    *  Cycled by the "+N more" pager; survives poll re-renders. */
   private pinnedPage = 0
+  /** The horizon's aim readout — the fixed spot that names, in words, the
+   *  target under the cursor. Rebuilt with the horizon on every drag. */
+  private aimReadoutEl: HTMLElement | null = null
+  /** Which drop target currently owns the readout, so a late `dragleave` from
+   *  the cell you just left cannot blank the label the new cell just wrote. */
+  private aimOwner: HTMLElement | null = null
+  /** The offscreen node handed to `setDragImage`, kept only until the drag
+   *  ends (the browser needs it alive for the snapshot, not after). */
+  private dragGhostEl: HTMLElement | null = null
 
   constructor(options: KanbanSurfaceRendererOptions) {
     this.getDragSourceId = options.getDragSourceId
@@ -460,6 +469,9 @@ export class KanbanSurfaceRenderer {
   renderDragHorizon(futureDays: number): HTMLElement {
     const cycles = upcomingCycleDropTargets(this.getLastResponse()?.cycles ?? [])
 
+    const outer = document.createElement('div')
+    outer.className = 'kbn-draghorizon-inner'
+
     const wrap = document.createElement('div')
     wrap.className = 'kbn-draghorizon-wrap'
     wrap.dataset.draghorizonWrap = '1'
@@ -479,19 +491,50 @@ export class KanbanSurfaceRenderer {
       const cell = buildDayCell(day)
       cell.classList.add('kbn-timeline-dropcol', 'kbn-draghorizon-day')
       cell.dataset.timelineDayIso = day.iso
-      this.installTimelineDayDropHandlers(cell, day.iso, cell)
+      this.installTimelineDayDropHandlers(cell, day.iso, dayAimLabel(day), cell)
       row.append(cell)
     }
 
     for (const [index, target] of cycles.entries()) {
       const chip = buildCycleChip(target, index === 0)
-      this.installTimelineDayDropHandlers(chip, target.dropDay)
+      this.installTimelineDayDropHandlers(chip, target.dropDay, cycleAimLabel(target))
       row.append(chip)
     }
 
     wrap.append(row)
     this.installEdgeScroll(wrap)
-    return wrap
+
+    // The aim readout: one fixed line that says, in words, where the card will
+    // land. The hovered cell shouts in colour; this says it in language, in a
+    // spot the cursor is never on top of.
+    const readout = document.createElement('div')
+    readout.className = 'kbn-draghorizon-aim'
+    readout.setAttribute('role', 'status')
+    readout.setAttribute('aria-live', 'polite')
+    readout.textContent = ''
+    this.aimReadoutEl = readout
+    this.aimOwner = null
+
+    outer.append(wrap, readout)
+    return outer
+  }
+
+  /** Point the aim readout at `target` (or clear it, if `target` is the one
+   *  that currently owns the line). Ownership keeps a trailing `dragleave`
+   *  from erasing the label its successor just wrote. */
+  private setAim(owner: HTMLElement, label: string | null): void {
+    const readout = this.aimReadoutEl
+    if (!readout) return
+    if (label === null) {
+      if (this.aimOwner !== owner) return
+      this.aimOwner = null
+      readout.textContent = ''
+      readout.classList.remove('kbn-draghorizon-aim-live')
+      return
+    }
+    this.aimOwner = owner
+    readout.textContent = label
+    readout.classList.add('kbn-draghorizon-aim-live')
   }
 
   /** Render the Resting surface: cluster grid keyed by containment-path's
@@ -644,6 +687,7 @@ export class KanbanSurfaceRenderer {
   private installTimelineDayDropHandlers(
     dropCol: HTMLElement,
     iso: string,
+    aimLabel?: string,
     axisCell?: HTMLElement,
   ): void {
     const isDropEligible = (id: string): boolean => {
@@ -654,6 +698,7 @@ export class KanbanSurfaceRenderer {
     const setActive = (active: boolean): void => {
       dropCol.classList.toggle('kbn-timeline-dropcol-active', active)
       axisCell?.classList.toggle('kbn-timeline-day-drop-active', active)
+      if (aimLabel) this.setAim(dropCol, active ? aimLabel : null)
     }
     dropCol.addEventListener('dragover', (e) => {
       const dragSourceId = this.getDragSourceId()
@@ -1206,13 +1251,48 @@ export class KanbanSurfaceRenderer {
         e.dataTransfer.effectAllowed = 'move'
         e.dataTransfer.setData('text/x-fiber-id', card.id)
         if (includePlainText) e.dataTransfer.setData('text/plain', card.name)
+        this.attachDragGhost(e, el, card)
       }
     })
     el.addEventListener('dragend', () => {
       el.classList.remove('kbn-card-dragging')
       this.setDragSourceId(null)
+      this.releaseDragGhost()
       if (includePlainText) this.stopDragAutoScroll()
     })
+  }
+
+  /**
+   * Replace the browser's default drag image with a small translucent token.
+   *
+   * The default is a full-opacity snapshot of the card, and a card is a tall
+   * opaque object: held over the drag horizon it covers the very day cell you
+   * are aiming at. (The `.kbn-card-dragging` fade cannot help — it styles the
+   * SOURCE element, and the snapshot is of the element as it was picked up.)
+   *
+   * So the ghost is an explicit clone: the card's title alone, one line, half
+   * opaque, anchored just below-right of the cursor so the cursor itself is
+   * never under it. You still see what you are carrying; you can also see
+   * what you are about to drop it on, which is the point.
+   *
+   * The node has to be in the document and rendered for the snapshot to work,
+   * so it lives offscreen and is removed on `dragend`.
+   */
+  private attachDragGhost(e: DragEvent, source: HTMLElement, card: KanbanCard): void {
+    if (typeof e.dataTransfer?.setDragImage !== 'function') return
+    this.releaseDragGhost()
+    const ghost = document.createElement('div')
+    ghost.className = 'kbn-drag-ghost'
+    ghost.textContent = card.name
+    ghost.style.width = `${Math.min(240, Math.max(120, source.offsetWidth || 200))}px`
+    document.body.append(ghost)
+    this.dragGhostEl = ghost
+    e.dataTransfer.setDragImage(ghost, -12, -10)
+  }
+
+  private releaseDragGhost(): void {
+    this.dragGhostEl?.remove()
+    this.dragGhostEl = null
   }
 }
 
@@ -1315,6 +1395,22 @@ function shortDayLabel(iso: string): string {
   const d = civilDayToLocalDate(iso)
   if (!d) return iso
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+}
+
+/** What the aim readout says while a day cell is the target. Today is a
+ *  different act from the rest of the strip — it puts the card back on the
+ *  desk — so it gets its own sentence rather than a date. */
+function dayAimLabel(day: TimelineDay): string {
+  if (day.isToday) return '→ onto the desk, today'
+  return `→ resting until ${day.weekdayLabel} ${shortDayLabel(day.iso)}`
+}
+
+/** What the aim readout says while a cycle chip is the target. A cycle
+ *  already underway means "later this chapter", not "when it opens". */
+function cycleAimLabel(target: CycleDropTarget): string {
+  return target.running
+    ? `→ resting until ${shortDayLabel(target.dropDay)} · later in ${target.name}`
+    : `→ resting until ${shortDayLabel(target.dropDay)} · ${target.name} opens`
 }
 
 /**

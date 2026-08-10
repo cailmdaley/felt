@@ -427,8 +427,28 @@
   transition: height 130ms cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 .kbn-draghorizon-open {
-  height: calc(34px * var(--kbn-type-scale, 1));
+  height: calc(51px * var(--kbn-type-scale, 1));
 }
+.kbn-draghorizon-inner {
+  display: flex;
+  flex-direction: column;
+}
+/* The aim readout — a fixed line under the strip naming the target under the
+   cursor. It holds its height whether or not it has words, so the strip does
+   not jump as you cross from cell to cell. */
+.kbn-draghorizon-aim {
+  height: calc(15px * var(--kbn-type-scale, 1));
+  padding: 0 4px;
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-style: italic;
+  font-size: calc(11px * var(--kbn-type-scale, 1));
+  line-height: calc(15px * var(--kbn-type-scale, 1));
+  color: #A89B83;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.kbn-draghorizon-aim-live { color: #6E5A2E; }
 .kbn-draghorizon-wrap {
   height: calc(34px * var(--kbn-type-scale, 1));
   overflow-x: auto;
@@ -498,13 +518,31 @@
   font-weight: 600;
 }
 /* Hovered drop target. Both classes land on the same element now (the day cell
-   IS the drop column), so they are written to compose rather than compete. */
+   IS the drop column), so they are written to compose rather than compete.
+
+   The hovered target has to win against a card ghost passing over it, so it
+   is a filled block with a solid gold edge, not a dashed hint. Its unhovered
+   neighbours step back (see the :has rule below) so the candidate is the only
+   lit thing on the strip. */
 .kbn-timeline-day-drop-active {
-  background: rgba(196, 147, 51, 0.18);
+  background: rgba(196, 147, 51, 0.42);
+}
+.kbn-timeline-day-drop-active .kbn-timeline-day-num,
+.kbn-timeline-day-drop-active .kbn-timeline-day-dow {
+  color: #4A3C1C;
+  font-weight: 600;
 }
 .kbn-timeline-dropcol-active {
-  outline: 1px dashed rgba(196, 147, 51, 0.65);
+  outline: 2px solid #9A7B35;
   outline-offset: -2px;
+  z-index: 1;
+}
+/* Quiet the field while one target is lit. Pure CSS so nothing has to track
+   which sibling is active; if :has is unavailable the strip simply stays at
+   full strength, which is where it was before. */
+.kbn-draghorizon-row:has(.kbn-timeline-dropcol-active)
+  .kbn-timeline-dropcol:not(.kbn-timeline-dropcol-active) {
+  opacity: 0.42;
 }
 
 /* Chapter chips — the upcoming cycles, offered after the last day cell. The
@@ -554,10 +592,15 @@
   color: #A89B83;
   white-space: nowrap;
 }
+/* Same loud step as a day cell, in the chip's own clothes: filled ochre, solid
+   edge, and a small lift so it reads through a ghost passing over it. */
 .kbn-draghorizon-cycle.kbn-timeline-dropcol-active {
-  background: rgba(196, 147, 51, 0.3);
+  background: rgba(196, 147, 51, 0.5);
+  border-color: #9A7B35;
+  transform: scale(1.05);
 }
 .kbn-draghorizon-cycle.kbn-timeline-dropcol-active .kbn-draghorizon-cycle-name { color: #4A3C1C; }
+.kbn-draghorizon-cycle.kbn-timeline-dropcol-active .kbn-draghorizon-cycle-span { color: #6E5A2E; }
 
 /* Pager chip — reused by the Pinned band's "+N more" overflow control
    (.kbn-pin-more). A slim gold-leaf pill that reads as a manuscript catchword
@@ -1034,6 +1077,27 @@
   opacity: 0.45;
   transform: scale(0.98);
   cursor: grabbing;
+}
+/* The drag image (see attachDragGhost). Offscreen at rest — the browser only
+   needs it rendered long enough to snapshot it. A single translucent line of
+   title, so the drop target underneath stays readable. */
+.kbn-drag-ghost {
+  position: fixed;
+  top: 0;
+  left: -10000px;
+  pointer-events: none;
+  opacity: 0.5;
+  padding: 3px 8px;
+  border: 1px solid rgba(154, 123, 53, 0.55);
+  border-radius: 3px;
+  background: #FFFBED;
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-size: calc(12px * var(--kbn-type-scale, 1));
+  line-height: 1.25;
+  color: #2A231A;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .kbn-card-awaitingReview {
   border-color: rgba(196, 147, 51, 0.45);
