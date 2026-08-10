@@ -251,10 +251,7 @@ export class KanbanSurfaceRenderer {
     section.setAttribute('role', 'region')
     section.setAttribute('aria-label', `Pinned (${pinned.length}) — drag a role here to park it; drag one to In flight to start it`)
 
-    const head = document.createElement('h2')
-    head.className = 'kbn-pinned-title'
-    head.textContent = pinned.length ? `Pinned · ${pinned.length}` : 'Pinned'
-    section.append(head)
+    section.append(renderBandHead('Pinned', pinned.length))
 
     const row = document.createElement('div')
     row.className = 'kbn-pinned-row'
@@ -556,16 +553,9 @@ export class KanbanSurfaceRenderer {
     section.setAttribute('role', 'region')
     section.setAttribute('aria-label', 'Resting — deliberately paused, still visible')
 
-    const head = document.createElement('div')
-    head.className = 'kbn-resting-head'
-    const headTitle = document.createElement('h2')
-    headTitle.className = 'kbn-resting-title'
-    headTitle.textContent = stash.length ? `Resting · ${stash.length}` : 'Resting'
-    const gloss = document.createElement('span')
-    gloss.className = 'kbn-resting-gloss'
-    gloss.textContent = '— deliberately paused; not a failure state —'
-    head.append(headTitle, gloss)
-    section.append(head)
+    section.append(
+      renderBandHead('Resting', stash.length, '— deliberately paused; not a failure state —'),
+    )
 
     const clusters = clusterStashCards(stash)
     const warm = clusters.filter((c) => !c.cold)
@@ -1294,6 +1284,34 @@ export class KanbanSurfaceRenderer {
     this.dragGhostEl?.remove()
     this.dragGhostEl = null
   }
+}
+
+/** The head of a Desk band (Pinned, Resting) — the column head's own parts at
+ *  band scale: an illuminated small-caps title, the count in mono beside it,
+ *  and an optional italic gloss. `.kbn-bandhead` carries the shared voice; the
+ *  section modifier tints the dropcap. */
+function renderBandHead(label: string, count: number, gloss?: string): HTMLElement {
+  const head = document.createElement('div')
+  head.className = 'kbn-bandhead'
+
+  const title = document.createElement('h2')
+  title.className = 'kbn-bandhead-title'
+  appendCappedText(title, label)
+  head.append(title)
+
+  if (count > 0) {
+    const countEl = document.createElement('span')
+    countEl.className = 'kbn-bandhead-count'
+    countEl.textContent = String(count)
+    head.append(countEl)
+  }
+  if (gloss) {
+    const glossEl = document.createElement('span')
+    glossEl.className = 'kbn-bandhead-gloss'
+    glossEl.textContent = gloss
+    head.append(glossEl)
+  }
+  return head
 }
 
 /** Append `label` to `el` with the leading alphabetic character wrapped in

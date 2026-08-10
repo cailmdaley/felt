@@ -272,32 +272,90 @@
   min-height: 0;
 }
 
+/* ── Band head ────────────────────────────────────────────────────────────
+   The one heading voice for the Desk's two named bands, Pinned and Resting.
+   Same hand as `.kbn-col-title` and `.kbn-view-title` — EB Garamond small
+   caps carrying the layered F2/F1 dropcap on its leading letter — a size
+   down again, because a band label sits beside its own contents rather than
+   above a lane (33px) or a whole view page (28px).
+
+   Differentiation between the two bands is carried by the dropcap pigment
+   alone, exactly as it is between the three columns: ochre for Pinned (the
+   standing surface, the gold-leaf the band used to wear as a left edge),
+   faded grey for Resting (asleep). No other chrome distinguishes them. */
+.kbn-bandhead {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.kbn-bandhead-title {
+  margin: 0;
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-size: calc(17px * var(--kbn-type-scale, 1));
+  line-height: 1.0;
+  font-weight: 500;
+  font-variant-caps: all-small-caps;
+  font-feature-settings: "smcp", "c2sc";
+  letter-spacing: 0.06em;
+  text-transform: none;
+  color: #1B1611;
+  white-space: nowrap;
+}
+.kbn-bandhead-title .kbn-cap {
+  font-size: 0.73em;
+  vertical-align: -0.08em;
+  margin-right: 0.04em;
+  line-height: 0.82;
+}
+.kbn-section-pinned .kbn-bandhead-title .kbn-cap { color: #C49333; }
+.kbn-section-stash .kbn-bandhead-title .kbn-cap { color: #A89B83; }
+/* Count in the column-count idiom — same mono, same muted ink, same offset. */
+.kbn-bandhead-count {
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: calc(12px * var(--kbn-type-scale, 1));
+  color: #7A6F5C;
+}
+/* The gloss under Resting — the board's marginal-line idiom (italic serif in
+   the fleuron grey), so it whispers the way an empty column does. */
+.kbn-bandhead-gloss {
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-style: italic;
+  font-size: calc(11.5px * var(--kbn-type-scale, 1));
+  color: #A89B83;
+}
+
 /* Pinned band — schedule-less umbrella roles, dispatchable on demand. A slim
-   launcher strip between the Timeline ribbon and the Now board. Pinned is a
-   *launcher*, not a monitor: the user arrives with intent and scans for a role,
-   so this reads as a dense band of chips, not a section competing with the
-   board. Gold-leaf left edge marks it as the standing/always-around surface. */
+   launcher strip above the Now board. Pinned is a *launcher*, not a monitor:
+   the user arrives with intent and scans for a role, so this reads as a dense
+   band of chips, not a section competing with the board.
+
+   Ground and hairline are the board's section substrate — the same recipe
+   `.kbn-view-page` lays a whole view on. The live columns are the brighter
+   rag sheets set ON that substrate; Pinned and Resting are the substrate
+   itself, which is what makes them read as standing furniture rather than
+   two more lanes. Deliberately flatter than a column: no shadow, no lift.
+
+   The head sits at the left of the row with the column head's own hairline
+   rule turned ninety degrees to follow the band. */
 .kbn-section-pinned {
   flex: 0 0 auto;
   flex-direction: row;
   align-items: center;
-  border: 1px solid rgba(154, 123, 53, 0.28);
-  border-left: 3px solid #9A7B35;
-  background: rgba(154, 123, 53, 0.07);
+  border: 1px solid rgba(27, 22, 17, 0.10);
+  background: rgba(237, 226, 206, 0.45);
   border-radius: 3px;
-  padding: 5px 10px 5px 12px;
-  gap: 12px;
+  padding: 5px 10px;
+  gap: 10px;
 }
-.kbn-pinned-title {
-  margin: 0;
+.kbn-section-pinned .kbn-bandhead {
   flex: 0 0 auto;
-  font-family: 'JetBrains Mono', monospace;
-  font-size: calc(10px * var(--kbn-type-scale, 1));
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: #7A5E1E;
-  white-space: nowrap;
+  align-self: stretch;
+  align-items: center;
+  flex-wrap: nowrap;
+  padding-right: 10px;
+  border-right: 1px solid rgba(196, 147, 51, 0.32);
 }
 /* Dense wrap — chips fill the available width and wrap to at most two rows;
    overflow pages behind "+N more" (installPinnedPagination), no scrollbar.
@@ -315,9 +373,14 @@
   overflow: hidden;
   padding: 1px 0;
 }
-/* Launcher chip: dot · glyph · name · agent/host hint. Compact pill; no
-   outcome text (that's on the title tooltip). Reads as a thing you click to
-   *go*, not a card you read. */
+/* Launcher chip: dot · glyph · name · agent/host hint. Wears `.kbn-card`'s
+   plate — same rag ground, same ink hairline, same 3px radius, same hover
+   (brighter ground, firmer edge, one-pixel lift) — because a parked role is
+   the same object as a card on the board, only standing still.
+
+   The systematic variation for "standing interface": one dense row instead
+   of a stacked block, and no outcome text (that's on the title tooltip). It
+   is a thing you click to *go*, not a card you read. */
 .kbn-pin-chip {
   flex: 0 0 auto;
   display: inline-flex;
@@ -325,25 +388,25 @@
   gap: 6px;
   max-width: 260px;
   margin: 0;
-  padding: 3px 9px;
-  background: rgba(255, 251, 237, 0.85);
-  border: 0.5px solid rgba(154, 123, 53, 0.35);
-  border-radius: 11px;
+  padding: 3px 8px;
+  background: #FBF6E9;
+  border: 1px solid rgba(27, 22, 17, 0.12);
+  border-radius: 3px;
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
   color: #1B1611;
   cursor: pointer;
   user-select: none;
   -webkit-user-select: none;
-  transition: background 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
+  transition: background 120ms ease, border-color 120ms ease, transform 120ms ease, opacity 120ms ease;
 }
 .kbn-pin-chip:hover {
-  background: rgba(255, 253, 245, 0.98);
-  border-color: rgba(154, 123, 53, 0.6);
-  box-shadow: 0 1px 3px rgba(122, 94, 30, 0.14);
+  background: #FFFBED;
+  border-color: rgba(27, 22, 17, 0.22);
+  transform: translateY(-1px);
 }
 .kbn-pin-chip:focus-visible {
-  outline: 1px dashed #9A7B35;
-  outline-offset: 2px;
+  outline: 1px dashed rgba(188, 69, 56, 0.55);
+  outline-offset: -2px;
 }
 .kbn-pin-chip.kbn-card-dragging { opacity: 0.4; }
 .kbn-pin-chip-dot {
@@ -396,18 +459,18 @@
 .kbn-pin-chip.kbn-card--stale { opacity: 0.5; cursor: default; }
 /* Empty band: a slim, dashed "drop a role here" target. The band ALWAYS
    renders (it's the park/drop target), so when nothing is parked it shows this
-   hint rather than vanishing. */
+   hint rather than vanishing. Dashed edge is `.kbn-col-drafts`'s mark for a
+   surface that is not yet holding anything; the hint itself is the board's
+   marginal line (italic serif, fleuron grey) like `.kbn-cluster-empty`. */
 .kbn-section-pinned-empty {
-  background: rgba(154, 123, 53, 0.04);
   border-style: dashed;
 }
 .kbn-pinned-empty-hint {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: calc(10.5px * var(--kbn-type-scale, 1));
-  letter-spacing: 0.04em;
-  color: rgba(122, 94, 30, 0.6);
-  padding: 2px 2px;
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
   font-style: italic;
+  font-size: calc(12px * var(--kbn-type-scale, 1));
+  color: #A89B83;
+  padding: 2px;
 }
 
 /* ── Drag-reveal horizon ─────────────────────────────────────────────────────
@@ -631,57 +694,52 @@
   outline: 1px dashed #9A7B35;
   outline-offset: 2px;
 }
-/* Resting (the surface stored as `horizon: stashed`) */
-/* The one section head left on the board. It earns its keep by naming what the
-   bottom of the page means: the gloss is there so a card down here doesn't read
-   as one that failed. Set in the muted empty-state idiom — italic serif, the
-   same grey the fleurons use — so it whispers rather than announces. */
-.kbn-resting-head {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  flex-wrap: wrap;
-  margin-bottom: 6px;
+/* Resting (the surface stored as `horizon: stashed`) — the same section
+   substrate Pinned sits on, so the two bands bracketing the Now board read as
+   one pair of standing surfaces. The head names what the bottom of the page
+   means; the gloss is there so a card down here doesn't read as one that
+   failed. Under the head, the column head's own hairline rule. */
+.kbn-section-stash {
+  flex: 0 0 auto;
+  border: 1px solid rgba(27, 22, 17, 0.10);
+  background: rgba(237, 226, 206, 0.45);
+  border-radius: 3px;
+  padding: 5px 10px 10px;
 }
-.kbn-resting-title {
-  margin: 0;
-  font-family: 'JetBrains Mono', monospace;
-  font-size: calc(10px * var(--kbn-type-scale, 1));
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: #7A6F5C;
-  white-space: nowrap;
-}
-.kbn-resting-gloss {
-  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
-  font-style: italic;
-  font-size: calc(11.5px * var(--kbn-type-scale, 1));
-  color: #A89B83;
+.kbn-section-stash .kbn-bandhead {
+  padding-bottom: 4px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid rgba(196, 147, 51, 0.32);
 }
 .kbn-cluster-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: 10px;
 }
+/* A cluster is a small column: a rag sheet with a ruled head over a list. It
+   wears `.kbn-col`'s plate — same #F2E8D2 ground, same ochre hairline, same
+   ruled head — at cluster scale. What makes Resting read as asleep is not a
+   different container but the register of its contents (flattened list lines
+   instead of card plates) and the `-cold` variation below. */
 .kbn-cluster {
-  background: rgba(255, 251, 237, 0.78);
-  border: 0.5px solid rgba(122, 111, 92, 0.30);
+  background: #F2E8D2;
+  border: 1px solid rgba(196, 147, 51, 0.22);
   border-radius: 3px;
-  padding: 7px 9px 8px;
+  padding: 4px 8px 8px;
 }
 .kbn-cluster-cold {
   background: rgba(232, 220, 193, 0.40);
-  border-color: rgba(122, 111, 92, 0.20);
+  border-color: rgba(196, 147, 51, 0.12);
 }
 .kbn-cluster-head {
   display: flex;
   align-items: baseline;
   gap: 6px;
-  margin-bottom: 4px;
+  margin-bottom: 6px;
   padding-bottom: 3px;
-  border-bottom: 0.5px solid rgba(122, 111, 92, 0.20);
+  border-bottom: 1px solid rgba(196, 147, 51, 0.32);
 }
+.kbn-cluster-cold .kbn-cluster-head { border-bottom-color: rgba(196, 147, 51, 0.18); }
 /* Containment path. Mono and small so a split key (`science/unions`) stays
    scannable at a glance; the parent segments recede so the eye lands on the
    segment that distinguishes this cluster from its siblings. */
@@ -753,10 +811,13 @@
    overflow items past "+N more" stayed visible while reporting themselves
    hidden. Restate it at matching specificity. */
 .kbn-cluster-item[hidden] { display: none; }
+/* Hover in the card's own direction — brighter rag ground, ink firming up —
+   at the weight a plateless list line can carry, and on the board's single
+   3px radius. */
 .kbn-cluster-item:hover {
   color: #1B1611;
-  background: rgba(232, 220, 193, 0.5);
-  border-radius: 2px;
+  background: #FBF6E9;
+  border-radius: 3px;
 }
 .kbn-cluster-cold .kbn-cluster-item {
   color: #7A6F5C;
