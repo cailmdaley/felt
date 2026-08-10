@@ -1287,16 +1287,16 @@ export class KanbanSurfaceRenderer {
 }
 
 /** The head of a Desk band (Pinned, Resting) — the column head's own parts at
- *  band scale: an illuminated small-caps title, the count in mono beside it,
- *  and an optional italic gloss. `.kbn-bandhead` carries the shared voice; the
- *  section modifier tints the dropcap. */
+ *  band scale: a small-caps title, the count in mono beside it, and an
+ *  optional italic gloss. No dropcap: the F2/F1 initial needs the column
+ *  title's size to read as illumination (see `.kbn-bandhead-title`). */
 function renderBandHead(label: string, count: number, gloss?: string): HTMLElement {
   const head = document.createElement('div')
   head.className = 'kbn-bandhead'
 
   const title = document.createElement('h2')
   title.className = 'kbn-bandhead-title'
-  appendCappedText(title, label)
+  title.textContent = label
   head.append(title)
 
   if (count > 0) {

@@ -258,7 +258,11 @@ export function classifyFiber(
     return 'pinned';
   }
 
-  if (f.hasShuttleBlock !== true) return 'drafts';
+  // Everything still here carries a shuttle block: `shouldIncludeInKanban`
+  // admits nothing else onto a Desk column, and the one block-less kind it does
+  // admit — a cycle — left at the top of this function. A block-less row that
+  // somehow reached this far falls through to `drafts` at the bottom, which is
+  // where it would have been sent anyway.
   if (f.status === 'active') {
     // An armed standing role between firings needs no action now — it fires on
     // its own cron. Route it to `scheduled` (→ timeline, placed by the card's

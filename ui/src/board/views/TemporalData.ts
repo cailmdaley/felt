@@ -109,11 +109,6 @@ export interface ActiveMinutes {
   all: number
   attention: number
   agent: number
-  /** Notify BUCKETS, not notify minutes. Buckets key on
-   *  `{minute, tmuxSession, cwd, kind}` (Shuttle.Activity), so two workers
-   *  raising a hand in the same minute are two here — deliberately: this
-   *  counts requests, not time. */
-  notifyBuckets: number
 }
 
 /**
@@ -135,19 +130,18 @@ export function foldActiveMinutes(
   const all = new Set<number>()
   const attention = new Set<number>()
   const agent = new Set<number>()
-  let notifyBuckets = 0
   for (const b of buckets) {
     if (span && (b.m < span.fromMs || b.m >= span.toMs)) continue
     const minute = Math.floor(b.m / 60_000)
     all.add(minute)
     if (b.k === 'attention') attention.add(minute)
     // A reply is agent-side ink: the turn that produced it was agent work.
-    // It must NOT fall through to the notify tally — reply buckets would
-    // silently inflate "needed you" counts.
     else if (b.k === 'agent' || b.k === 'reply') agent.add(minute)
-    else if (b.k === 'notify') notifyBuckets += 1
+    // `notify` still arrives on the wire and is counted in `all` as a minute
+    // that happened, but it has no tally of its own: the board draws no notify
+    // state anywhere.
   }
-  return { all: all.size, attention: attention.size, agent: agent.size, notifyBuckets }
+  return { all: all.size, attention: attention.size, agent: agent.size }
 }
 
 /** `slug: what happened` — felt's commit-subject convention. The slug is the

@@ -420,7 +420,7 @@ describe("the day's two totals", () => {
     )
     // One attention MINUTE, but two attention buckets in it — and messages are
     // acts, not time, so both count.
-    expect(totals).toEqual({ attention: 1, agent: 3, messages: 2 })
+    expect(totals).toEqual({ attention: 1, agent: 3, messages: 2, received: 0 })
   })
 
   it('sums the events in an attention bucket, not the minutes holding them', () => {
@@ -440,7 +440,27 @@ describe("the day's two totals", () => {
       attention: 0,
       agent: 1,
       messages: 0,
+      received: 0,
     })
+  })
+
+  it('counts the replies back, so the header can say both halves', () => {
+    // The live feed carries `k:"reply"` in volume (167 buckets / 358 events in
+    // a two-day window on this daemon), and the day head used to hardcode the
+    // received half to zero.
+    const totals = dayTotals(
+      activity([
+        bucket(0, 'attention', SESSION),
+        { ...bucket(1, 'reply' as ActivityBucket['k'], SESSION), n: 3 },
+        bucket(2, 'agent', SESSION),
+      ]),
+      WIN,
+    )
+    expect(totals.messages).toBe(1)
+    expect(totals.received).toBe(3)
+    // A reply's minute is agent time, and is not attention.
+    expect(totals.agent).toBe(2)
+    expect(totals.attention).toBe(1)
   })
 
   it('counts a notify minute as neither attention nor agent', () => {
@@ -448,6 +468,7 @@ describe("the day's two totals", () => {
       attention: 0,
       agent: 0,
       messages: 0,
+      received: 0,
     })
   })
 
@@ -520,6 +541,33 @@ describe('lanes', () => {
   it('yields no lanes at all when nothing joined a fiber', () => {
     const lanes = buildDayLanes(activity([bucket(4, 'agent')]), [], WIN)
     expect(lanes).toEqual([])
+  })
+
+  it('carries each lane its own reply count, for the per-fiber ledger row', () => {
+    const lanes = buildDayLanes(
+      activity([
+        bucket(10, 'attention', SESSION),
+        { ...bucket(11, 'reply' as ActivityBucket['k'], SESSION), n: 2 },
+        bucket(11, 'agent', SESSION),
+      ]),
+      [card()],
+      WIN,
+    )
+    expect(lanes[0].attentionMessages).toBe(1)
+    expect(lanes[0].replyMessages).toBe(2)
+  })
+
+  it('gives a notify no lane, no weight and no beat — it is not a drawn state', () => {
+    // Notify still arrives on the wire and is dropped at ingest, so a fiber
+    // whose whole day was nudges draws nothing rather than an empty rail.
+    expect(buildDayLanes(activity([bucket(9, 'notify', SESSION)]), [card()], WIN)).toEqual([])
+    const mixed = buildDayLanes(
+      activity([bucket(9, 'notify', SESSION), bucket(10, 'agent', SESSION)]),
+      [card()],
+      WIN,
+    )
+    expect(mixed[0].weight).toBe(1)
+    expect(mixed[0].beats.map((b) => b.minute)).toEqual([10])
   })
 
   it('sorts fiber lanes by the weight of the day, heaviest first', () => {
@@ -1110,7 +1158,7 @@ describe('what a day cost, per fiber', () => {
       WIN,
       NOW_IN_RAIL,
     )
-    expect(entries[0].stats).toEqual({ messages: 1, agent: 2, commits: 2 })
+    expect(entries[0].stats).toEqual({ messages: 1, received: 0, agent: 2, commits: 2 })
   })
 
   it('counts your side of a lane in messages, the agents’ in minutes', () => {
@@ -1191,7 +1239,7 @@ describe('the live chip', () => {
     const past = buildDayEntries([], lanes, [aloft], WIN, at(2026, 8, 6, 12, 0))
     expect(past[0].chip).toBeUndefined()
     // What the day COST is a fact about the day, and survives.
-    expect(past[0].stats).toEqual({ messages: 0, agent: 1, commits: 0 })
+    expect(past[0].stats).toEqual({ messages: 0, received: 0, agent: 1, commits: 0 })
   })
 
   it('carries the owning host, so the attach can be routed', () => {

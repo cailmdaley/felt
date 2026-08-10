@@ -7,7 +7,7 @@
  * owns its own shapes: the CSS behind these marks differs per view on purpose.
  */
 
-import type { ActivityBucket } from './TemporalData.js'
+import type { DrawnKind } from './momentTip.js'
 
 // ── Obligations ──────────────────────────────────────────────────────────────
 
@@ -28,22 +28,17 @@ export const MARK_GLYPH: Record<MarkKind, string> = { due: '◴', launch: '◐',
 // ── The activity key ─────────────────────────────────────────────────────────
 
 /**
- * What the three raster pigments mean, in words. One phrasing across the
- * board: Day and Week both spend these pigments and read from this list, so
- * the same hue is never glossed two ways.
+ * What the raster pigments mean, in words. One phrasing across the board: Day
+ * and Week both spend these pigments and read from this list, so the same hue
+ * is never glossed two ways.
  *
- * MIND THE NAMES. The wire's kind `attention` is the human at the keyboard
- * ("you steering"); the kind `notify` is a worker raising its hand, which is
- * what "attention called" names. The word `attention` therefore appears in the
- * vocabulary AND in the gloss of the OTHER kind, which makes this exactly the
- * pairing someone tidies backwards. It is correct as written; TemporalData's
- * bucket docs are the authority. (Flagged twice independently — by
- * builder-week wiring Week's key, and again in Day.)
+ * The wire's kind `notify` is not here and draws nothing anywhere. A notify is
+ * an idle nudge, not a state of the work; an agent truly blocked on you shows
+ * as the GAP on a live lane, which no pigment improves on.
  */
-export const ACTIVITY_KEY_ITEMS: Array<{ kind: ActivityBucket['k']; label: string }> = [
+export const ACTIVITY_KEY_ITEMS: Array<{ kind: DrawnKind; label: string }> = [
   { kind: 'agent', label: 'agents working' },
   { kind: 'attention', label: 'you steering' },
-  { kind: 'notify', label: 'attention called' },
 ]
 
 // ── Message tallies ──────────────────────────────────────────────────────────

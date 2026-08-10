@@ -1,13 +1,14 @@
 /* Day view — two clocks on one lane, then the day as prose.
 
    NO COLOUR WITHOUT A MEANING. The board's pigments are a grammar, not a
-   palette to draw from, and this page spends exactly three of them:
+   palette to draw from, and this page spends exactly two of them:
 
      cobalt  rgba(40,78,180,.30)  the agent was working
      teal    #3F8278              you were steering
-     cinnabar #BC4538             attention demanded — and, as rubric ink, the
-                                  section head, which is the board's own
-                                  convention for a head (see `.kbn-cap`)
+
+   Cinnabar appears only as rubric ink, for the section head — the board's own
+   convention for a head (see `.kbn-cap`). It marks no activity: notify is not
+   a state this board draws.
 
    Ochre is not here: on this board it means an obligation, and nothing on this
    page is one. Everything structural — bullets, gridlines, the midnight rule,
@@ -128,12 +129,11 @@
 /* Two columns — label, rail — with one gridline layer spanning every lane
    row, so the hour rules run unbroken down the stack. */
 .kbn-day-chart {
-  /* The three pigments, declared once. The rail marks and the key glyphs both
+  /* The two pigments, declared once. The rail marks and the key glyphs both
      read them, so a mark and the swatch that explains it cannot drift apart —
      which would be the worst possible bug in a legend. */
   --day-agent: rgba(40, 78, 180, 0.30);
   --day-attention: #3F8278;
-  --day-notify: #BC4538;
   display: grid;
   grid-template-columns: minmax(86px, 232px) 1fr;
   column-gap: 12px;
@@ -260,8 +260,8 @@ button.kbn-day-lanename:focus-visible {
   border-top: 0.5px solid rgba(122, 111, 92, 0.20);
 }
 
-/* Three marks, three heights — the hierarchy IS the reading order:
-   wash (the machine) < attention (you) < notify (it wants you). */
+/* Two marks, two heights — the hierarchy IS the reading order:
+   wash (the machine) < attention (you). */
 
 /* Agent work: a pale cobalt wash, inset from the lane's full height. The
    minimum width keeps a lone agent minute from rounding away to nothing —
@@ -285,25 +285,6 @@ button.kbn-day-lanename:focus-visible {
   border-radius: 1px;
 }
 
-/* Attention demanded: cinnabar, over-full height, with a square head — rare
-   enough to be findable at a glance, thin enough not to shout. */
-.kbn-day-notify {
-  position: absolute;
-  top: -3px;
-  bottom: -3px;
-  width: 1.5px;
-  margin-left: -0.75px;
-  background: var(--day-notify);
-}
-.kbn-day-notify::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: -1.25px;
-  width: 4px;
-  height: 3px;
-  background: var(--day-notify);
-}
 
 .kbn-day-axis {
   grid-column: 2;
@@ -369,11 +350,6 @@ button.kbn-day-lanename:focus-visible {
   width: 5px;
   height: 10px;
   background: var(--day-attention);
-}
-.kbn-day-key-tick {
-  width: 3px;
-  height: 12px;
-  background: var(--day-notify);
 }
 
 /* ── The day, by fiber ───────────────────────────────────────────────────── */

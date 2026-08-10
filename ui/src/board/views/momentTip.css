@@ -6,13 +6,12 @@
    which pigment, how many events — and then either the words recovered from the
    harness transcript or the note that they were not. See SLOT_NO_TEXT_NOTE.
 
-   The three pigments are declared HERE rather than borrowed from WeekView.css,
+   The pigments are declared HERE rather than borrowed from WeekView.css,
    whose copies are scoped to its own sheet. Same hexes, one purpose each: a
    swatch on a Day tooltip must be the same blue as the wash it annotates. */
 .kbn-tip {
   --kbn-tip-agent: #3D5BA0;
   --kbn-tip-attention: #3F8278;
-  --kbn-tip-notify: #BC4538;
 
   position: absolute;
   z-index: 6;
@@ -50,9 +49,9 @@
   color: #2A231A;
   line-height: 1.35;
 }
-/* The same three pigments, at the same height hierarchy as each view's key — so
-   the line about cinnabar is marked in cinnabar and nothing has to be matched up
-   by memory. `align-self` pins them to the text baseline they annotate. */
+/* The same pigments, at the same height hierarchy as each view's key — so the
+   line about the wash is marked in the wash's own blue and nothing has to be
+   matched up by memory. `align-self` pins them to the text baseline they annotate. */
 .kbn-tip-swatch {
   flex: 0 0 auto;
   display: inline-block;
@@ -62,7 +61,6 @@
 }
 .kbn-tip-key-agent { height: 7px; background: var(--kbn-tip-agent); }
 .kbn-tip-key-attention { height: 9px; background: var(--kbn-tip-attention); opacity: 0.85; }
-.kbn-tip-key-notify { height: 12px; background: var(--kbn-tip-notify); opacity: 0.78; }
 /* The stroke axis: same hue, wider nib — a weight, not another colour. */
 .kbn-tip-swatch-const { width: 6px; border-radius: 1px; }
 

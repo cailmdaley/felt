@@ -883,7 +883,6 @@ describe('how full a day was', () => {
     );
     expect(spend.totalMs).toBe(2 * 60_000);
     expect(spend.agentMs).toBe(2 * 60_000);
-    expect(spend.notifyCount).toBe(1);
   });
 
   it('counts human messages as EVENTS, not as minutes', () => {
@@ -912,15 +911,16 @@ describe('how full a day was', () => {
     expect(spend.totalMs).toBe(2 * 60_000);
   });
 
-  it('never lets a reply bucket leak into the notify tally', () => {
-    // `foldActiveMinutes` sweeps every unrecognised kind into notifyBuckets.
-    // A reply is not a raised hand, and must not read as one.
+  it('lets a notify bucket count as a minute but tally nothing', () => {
+    // Notify still arrives on the wire. It is not a drawn state, so it earns
+    // no figure of its own — but the minute it names did happen.
     const spend = summarizeSpend([
       { m: 0, s: 'a-shuttle', cwd: null, k: 'reply' as ActivityBucket['k'], n: 4 },
-      { m: 0, s: 'a-shuttle', cwd: null, k: 'notify', n: 1 },
+      { m: 60_000, s: 'a-shuttle', cwd: null, k: 'notify', n: 1 },
     ]);
-    expect(spend.notifyCount).toBe(1);
     expect(spend.received).toBe(4);
+    expect(spend.sent).toBe(0);
+    expect(spend.totalMs).toBe(2 * 60_000);
   });
 
   it('reports zero replies against a daemon that does not emit the kind', () => {
@@ -955,16 +955,13 @@ describe('how full a day was', () => {
     expect(dayWeight(spend.totalMs)).toBe('quiet');
   });
 
-  it('counts notify BUCKETS, not notify minutes — two hands up is two', () => {
-    // The one figure in the fold that is not a minute count. Two workers
-    // raising a hand in the same minute are two requests; folding them into a
-    // minute Set would silently report one.
+  it('gives a notify-only minute clock time and no agent time', () => {
     const spend = summarizeSpend([
       { m: 0, s: 'a-shuttle', cwd: null, k: 'notify', n: 1 },
       { m: 0, s: 'b-shuttle', cwd: null, k: 'notify', n: 1 },
     ]);
-    expect(spend.notifyCount).toBe(2);
     expect(spend.totalMs).toBe(60_000);
+    expect(spend.agentMs).toBe(0);
   });
 });
 
@@ -1066,7 +1063,7 @@ describe('the raster tick knows whose minute it was', () => {
       [
         bucket({ m: bounds.startMs, s: 'w-1' }),
         bucket({ m: bounds.startMs + 60_000, s: 'w-1' }),
-        bucket({ m: bounds.startMs + 60_000, s: 'w-2', k: 'notify' }),
+        bucket({ m: bounds.startMs + 60_000, s: 'w-2' }),
       ],
       bounds,
       bounds.endMs,
@@ -1106,16 +1103,24 @@ describe('what a hovered slot is willing to say', () => {
   const slotOf = (buckets: ActivityBucket[], cards: KanbanCard[] = []) =>
     rasterSlots(buckets, bounds, bounds.endMs, (b) => originOf(buildOriginIndex(cards), b))[0];
 
-  it('reads strongest signal first: a hand raised, then a human, then the agent', () => {
+  it('reads strongest signal first: the human, then the agent under them', () => {
     const at = bounds.startMs;
     const tip = slotTip(slotOf([
       bucket({ m: at, k: 'agent', n: 4 }),
-      bucket({ m: at, k: 'notify' }),
       bucket({ m: at, k: 'attention' }),
     ]));
-    expect(tip.rows.map((r) => r.kind)).toEqual(['notify', 'attention', 'agent']);
-    expect(tip.rows.map((r) => r.phrase)).toEqual(['needed you', 'you prompted', 'agent working']);
+    expect(tip.rows.map((r) => r.kind)).toEqual(['attention', 'agent']);
+    expect(tip.rows.map((r) => r.phrase)).toEqual(['you prompted', 'agent working']);
     expect(tip.rows.find((r) => r.kind === 'agent')?.count).toBe(4);
+  });
+
+  it('says nothing at all about a notify — it is not a drawn state', () => {
+    const at = bounds.startMs;
+    // A notify alongside real work adds no row...
+    const tip = slotTip(slotOf([bucket({ m: at, k: 'agent' }), bucket({ m: at, k: 'notify' })]));
+    expect(tip.rows.map((r) => r.kind)).toEqual(['agent']);
+    // ...and a slot of nothing but notify is not a slot.
+    expect(slotOf([bucket({ m: at, k: 'notify' })])).toBeUndefined();
   });
 
   it('names the slot by its own span, not by the minute that happened to seed it', () => {

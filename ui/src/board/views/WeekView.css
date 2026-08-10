@@ -5,7 +5,6 @@
    palette is KanbanModal.css's, borrowed rather than restated:
      iron-gall #1B1611 · muted #7A6F5C · faded #A89B83
      ochre #C49333 · gold-deep #9A7B35 · cobalt #3D5BA0 · teal #3F8278
-     cinnabar #BC4538
    Only `--wk-ochre-deep` is new — a darkened ochre for the hollow marks, which
    must sit a shade below the gold seam without turning brown. */
 
@@ -26,7 +25,6 @@
      the same guarantee the same way.) */
   --wk-agent: #3D5BA0;
   --wk-attention: #3F8278;
-  --wk-notify: #BC4538;
 
   flex: 1 1 auto;
   min-height: 0;
@@ -275,13 +273,7 @@
 }
 /* Agent work is the substrate — cobalt, and the only kind whose opacity
    carries a weight, because only it comes in runs. Attention stands taller
-   because a human was there. A notify is full-height cinnabar: the day raised
-   its hand.
-
-   Notify is a THREAD, not a plank. It runs the whole height, so at any density
-   above the occasional it would otherwise close into a red picket fence and
-   bury the two kinds underneath it — a screenshot of a notify-heavy day showed
-   exactly that. A hairline keeps "full height" legible as emphasis. */
+   because a human was there. */
 .wk-ras-agent {
   height: 56%;
   background: var(--wk-agent);
@@ -290,16 +282,6 @@
   height: 72%;
   background: var(--wk-attention);
   opacity: 0.85;
-}
-.wk-ras-notify {
-  height: 100%;
-  background: var(--wk-notify);
-  /* Same 1.5px as the other two kinds, deliberately: the ticks sit at
-     fractional pixel positions, so a 1px rule gets antialiased across two
-     columns at half alpha each and the cinnabar renders as a dark grey — it
-     stops being cinnabar. Height alone carries the distinction; the opacity is
-     what keeps a notify-heavy day from closing into a red picket fence. */
-  opacity: 0.78;
 }
 
 /* CONSTITUTION-DRIVEN work — the second axis, and it has to be the STROKE.
@@ -315,7 +297,6 @@
 }
 .wk-ras-agent.wk-ras-const { filter: saturate(0.92); }
 .wk-ras-attention.wk-ras-const { opacity: 0.7; }
-.wk-ras-notify.wk-ras-const { opacity: 0.62; }
 
 /* Now — a thin gold-deep thread down today's rail. Everything to its right on
    this row is future, which is why the hollow marks may appear there. */
@@ -443,7 +424,6 @@
 }
 .wk-key-agent { height: 7px; background: var(--wk-agent); }
 .wk-key-attention { height: 9px; background: var(--wk-attention); opacity: 0.85; }
-.wk-key-notify { height: 12px; background: var(--wk-notify); opacity: 0.78; }
 /* The stroke axis, taught the way it is drawn: same hue and height as the agent
    swatch beside it, wider nib. Read as a pair, the two swatches say "this is not
    another colour, it is a weight". */

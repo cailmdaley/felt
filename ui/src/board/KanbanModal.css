@@ -279,10 +279,12 @@
    down again, because a band label sits beside its own contents rather than
    above a lane (33px) or a whole view page (28px).
 
-   Differentiation between the two bands is carried by the dropcap pigment
-   alone, exactly as it is between the three columns: ochre for Pinned (the
-   standing surface, the gold-leaf the band used to wear as a left edge),
-   faded grey for Resting (asleep). No other chrome distinguishes them. */
+   No dropcap here, deliberately. The layered F2/F1 initial is sized as a
+   fraction of its title (0.73em), so at band scale the flourish falls below
+   the size where its detail strokes read — it looks like a smudge rather than
+   an illumination. Illumination is reserved for the two heads big enough to
+   carry it: the column title and the view-page title. The bands get the same
+   hand, plain — marginalia, not rubrication. */
 .kbn-bandhead {
   display: flex;
   align-items: baseline;
@@ -303,14 +305,6 @@
   color: #1B1611;
   white-space: nowrap;
 }
-.kbn-bandhead-title .kbn-cap {
-  font-size: 0.73em;
-  vertical-align: -0.08em;
-  margin-right: 0.04em;
-  line-height: 0.82;
-}
-.kbn-section-pinned .kbn-bandhead-title .kbn-cap { color: #C49333; }
-.kbn-section-stash .kbn-bandhead-title .kbn-cap { color: #A89B83; }
 /* Count in the column-count idiom — same mono, same muted ink, same offset. */
 .kbn-bandhead-count {
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
@@ -950,15 +944,36 @@
 .kbn-col-title {
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
   /* Body font-size is sized so the small-caps glyph height matches
-     the dropcap's visible height (~24px). EB Garamond's small-cap
-     ratio runs ~0.73, so 33px body → ~24px small-cap glyphs →
-     uniform "D-R-A-F-T-S" visual rhythm with the dropcap rather than
-     the previous dropcap-above-small-trailer feel. */
-  font-size: calc(33px * var(--kbn-type-scale, 1));
-  /* Tight line-height keeps the head box hugging the illuminated
-     character; the cap's F1 flourish extends a touch above the cap
-     line so even 1.0 leaves a hair of breathing room. */
-  line-height: 1.0;
+     the dropcap's visible height. EB Garamond's small-cap ratio runs
+     ~0.73, and the cap is set at 0.73em, so the two land together for
+     a uniform "D-R-A-F-T-S" rhythm rather than a dropcap-above-small-
+     trailer feel. That ratio is fixed; this number scales both.
+
+     33px → 38px fills the vertical slack the head was carrying. The
+     head band is 41px tall (4 + 33 line box + 3 + rule) and at 33px
+     the ink only spanned 9.4px→31.6px from the band's top, leaving
+     ~9px of air above the caps and ~9px below the baseline. At 38px
+     the ink spans 8.5px→34.0px: 8.5px clear of the column edge, 6px
+     clear of the head rule. Nothing clips.
+
+     The ceiling is set by width, not height. The longest title,
+     "Awaiting review", measures 8.85em of advance in EB Garamond
+     Medium small caps (dropcap included, with the 0.06em tracking),
+     so a column head needs 8.85 × font-size + 73px of chrome (side
+     padding, count, round action) and the board needs three of those
+     plus its gaps: a minimum board width of 26.5 × font-size + 263px.
+     At 33px that was 1139px; at 38px it is 1272px, which a maximized
+     window on any current laptop clears. Past ~40px the longest title
+     starts wrapping the head to two lines on a 1280px board — which
+     would grow the very box this is meant to fill. */
+  font-size: calc(38px * var(--kbn-type-scale, 1));
+  /* Pins the line box at the 33px it occupied when the type was 33px
+     at line-height 1.0, so the head's height is unchanged: 33/38.
+     The strut governs both edges of the line box (the cap's inline
+     block runs from the baseline to 0.60em above it, inside the
+     strut's own ascent), so line-height alone holds the box — the
+     larger type spends its extra size on ink, not on chrome. */
+  line-height: 0.868;
   font-weight: 500;
   font-variant-caps: all-small-caps;
   font-feature-settings: "smcp", "c2sc";
@@ -974,8 +989,10 @@
      differentiation rather than size. Deliberately breaks the
      historical "versal initial slightly larger" convention in favor
      of a flatter, more contemporary manuscript-line rhythm. Body
-     33px × EB Garamond's ~0.74 small-cap ratio → ~24px small-caps;
-     cap at 0.73em × 33px → ~24px. */
+     38px × EB Garamond's ~0.73 small-cap ratio → ~28px small-caps;
+     cap at 0.73em × 38px → ~28px. Ratio-locked to the body size in
+     em, so raising `.kbn-col-title`'s font-size carries the
+     illumination up with the word. */
   font-size: 0.73em;
   vertical-align: -0.08em;
   margin-right: 0.04em;

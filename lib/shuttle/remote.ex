@@ -222,6 +222,16 @@ defmodule Shuttle.Remote do
   end
 
   @doc """
+  The full `GET /api/v1/spend` URL for this remote, from `since_ms`. One row
+  per ledgered session, so the hub asks for the whole ledger the way it does
+  for `/sessions`; the far side caps the window at 90 days on its own.
+  """
+  @spec spend_url(t(), integer()) :: String.t()
+  def spend_url(%__MODULE__{url: url}, since_ms) when is_integer(since_ms) do
+    base(url) <> "/api/v1/spend?since_ms=#{since_ms}"
+  end
+
+  @doc """
   The full `GET /api/v1/narration` URL for this remote, over the inclusive
   window `from_ms..to_ms`.
   """

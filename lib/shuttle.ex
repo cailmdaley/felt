@@ -49,7 +49,10 @@ defmodule Shuttle.Application do
     children = [
       {Phoenix.PubSub, name: Shuttle.PubSub},
       {Task.Supervisor, name: Shuttle.TaskSupervisor},
-      {DynamicSupervisor, strategy: :one_for_one, name: Shuttle.WatcherSupervisor}
+      {DynamicSupervisor, strategy: :one_for_one, name: Shuttle.WatcherSupervisor},
+      # Owns the ETS table the per-session token folds are cached in. Pure
+      # cache: a restart costs one re-read per session, never a wrong number.
+      Shuttle.TokenSpend
     ]
 
     children =

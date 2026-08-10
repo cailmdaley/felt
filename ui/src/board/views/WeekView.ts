@@ -71,6 +71,7 @@ import {
   SLOT_KIND_ORDER,
   SLOT_NO_TEXT_NOTE,
   SLOT_PHRASE,
+  type DrawnKind,
   type MomentWords,
   type SlotTip,
   type SlotTipRow,
@@ -306,7 +307,6 @@ export interface ActivitySpend {
    *  kind, so the total is wall-clock time and not a sum of overlaps. */
   totalMs: number
   agentMs: number
-  notifyCount: number
   /** Messages the human sent — every `user_prompt_submit`, counted as events
    *  and not as minutes. */
   sent: number
@@ -332,19 +332,13 @@ export function summarizeSpend(buckets: ActivityBucket[], bucketMs = BUCKET_MS):
   const minutes = foldActiveMinutes(buckets)
   let sent = 0
   let received = 0
-  let notifyCount = 0
   for (const b of buckets) {
     if (b.k === 'attention') sent += b.n
     else if (b.k === 'reply') received += b.n
-    else if (b.k === 'notify') notifyCount += 1
   }
   return {
     totalMs: minutes.all * bucketMs,
     agentMs: minutes.agent * bucketMs,
-    // Counted here rather than taken from `foldActiveMinutes`, whose else-branch
-    // sweeps every non-attention, non-agent kind (including "reply") into its
-    // notify tally.
-    notifyCount,
     sent,
     received,
   }
@@ -1362,8 +1356,8 @@ function buildKeyRow(): HTMLElement {
   }
 
   // The second axis: the stroke. Kept OUT of ACTIVITY_KEY_ITEMS because that
-  // list is the three pigments, shared verbatim with Day, and this is not a
-  // fourth pigment — it is a weight any of the three can be drawn at. Hidden
+  // list is the pigments, shared verbatim with Day, and this is not another
+  // pigment — it is a weight any of them can be drawn at. Hidden
   // until a constitution-driven tick is actually on the page (see `paint`), so
   // a week of plain fibers is not told about a distinction it never shows.
   const item = document.createElement('span')
@@ -1380,7 +1374,7 @@ function buildKeyRow(): HTMLElement {
 
 /** One kind's worth of one slot. */
 export interface SlotKind {
-  kind: ActivityBucket['k']
+  kind: DrawnKind
   /** Events in the slot — the sum of the buckets' `n`. What the tooltip says. */
   count: number
   /** The largest single minute in the slot. What the ink's weight reads. */
@@ -1425,13 +1419,16 @@ export function rasterSlots(
   const span = bounds.endMs - bounds.startMs
   if (span <= 0) return []
 
-  const byIndex = new Map<number, Map<ActivityBucket['k'], SlotKind>>()
+  const byIndex = new Map<number, Map<DrawnKind, SlotKind>>()
   // Which transcripts the slot's minutes came out of — the hover's route to
   // the words. Kept beside the kinds rather than inside them: a slot's words
   // are the slot's, whichever pigment the minute happened to be drawn in.
   const sourcesByIndex = new Map<number, (MomentSource | null)[]>()
   for (const b of buckets) {
     if (b.m > cutoffMs) continue
+    // Notify draws nothing and says nothing: dropped here so it cannot conjure
+    // a slot, a tooltip row, or a source fetch out of an idle nudge.
+    if (b.k === 'notify') continue
     const index = Math.floor((b.m - bounds.startMs) / RASTER_SLOT_MS)
     let kinds = byIndex.get(index)
     if (!kinds) {
@@ -1504,8 +1501,8 @@ export function slotTip(slot: RasterSlot, words?: MomentWords): SlotTip {
 
 /**
  * Ink the day's rasters: one tick per active slot per kind, layered
- * agent → attention → notify so a notification always reads on top of the run
- * it interrupted. Opacity carries the run's weight, so a dense hour darkens
+ * agent → attention so a human's steering always reads on top of the run it
+ * interrupted. Opacity carries the run's weight, so a dense hour darkens
  * instead of merging into a block.
  *
  * A slot whose work is constitution-driven takes the heavier line
@@ -1518,7 +1515,7 @@ function paintRaster(host: HTMLElement, slots: readonly RasterSlot[]): void {
   // pigment; a second tick would darken the same instant twice and invent a
   // distinction the eye should not be asked to make. Replies are read in the
   // annotation, not in the raster.
-  const order: ActivityBucket['k'][] = ['agent', 'attention', 'notify']
+  const order: DrawnKind[] = ['agent', 'attention']
   for (const kind of order) {
     for (const slot of slots) {
       const entry = slot.kinds.find((k) => k.kind === kind)
@@ -1526,8 +1523,8 @@ function paintRaster(host: HTMLElement, slots: readonly RasterSlot[]): void {
       const tick = document.createElement('span')
       tick.className = `wk-ras wk-ras-${kind}${entry.shuttle ? ' wk-ras-const' : ''}`
       tick.style.left = `${slot.fraction * 100}%`
-      // Agent runs carry a count; attention and notify are single events and
-      // read at a fixed weight so a busy hour of typing doesn't out-shout them.
+      // Agent runs carry a count; attention is a single event and reads at a
+      // fixed weight so a busy hour of typing doesn't out-shout them.
       if (kind === 'agent') tick.style.opacity = String(0.38 + 0.47 * Math.min(1, entry.peak / 12))
       host.append(tick)
     }

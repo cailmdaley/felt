@@ -48,25 +48,33 @@ export type { MomentSource }
  *  span — and while a fetch is still out. */
 export const SLOT_NO_TEXT_NOTE = 'the minute is recorded, not the words'
 
+/**
+ * The kinds the board draws.
+ *
+ * `notify` arrives on the wire and is deliberately absent: an idle nudge is
+ * not a state of the work. An agent that is genuinely blocked on you already
+ * reads as the GAP on a live lane — no wash, no steering tick — and that
+ * absence is the truer mark than a hairline nobody could act on.
+ */
+export type DrawnKind = Exclude<ActivityBucket['k'], 'notify'>
+
 /** What each raster kind means when a person hovers it — the second person,
  *  because a tooltip is answering "what was I doing here?". Shares its claims
  *  with `ACTIVITY_KEY_ITEMS`; the wording is closer in. */
-export const SLOT_PHRASE: Record<ActivityBucket['k'], string> = {
+export const SLOT_PHRASE: Record<DrawnKind, string> = {
   attention: 'you prompted',
-  notify: 'needed you',
   agent: 'agent working',
   reply: 'agent replied',
 }
 
-/** Strongest signal first — a hand raised, then a human steering, then the
- *  agent work underneath both. The order the ink is layered in, read top to
- *  bottom. */
-export const SLOT_KIND_ORDER: ActivityBucket['k'][] = ['notify', 'attention', 'agent', 'reply']
+/** Strongest signal first — a human steering, then the agent work underneath
+ *  it. The order the ink is layered in, read top to bottom. */
+export const SLOT_KIND_ORDER: DrawnKind[] = ['attention', 'agent', 'reply']
 
 export interface SlotTipRow {
   /** The pigment this line is about, so the tooltip speaks the rail's colours
    *  rather than restating them in words alone. */
-  kind: ActivityBucket['k']
+  kind: DrawnKind
   phrase: string
   where: string
   count: number

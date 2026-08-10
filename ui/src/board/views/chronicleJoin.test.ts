@@ -445,7 +445,7 @@ describe('folding buckets into civil days', () => {
     expect(days.get(isoDayLocal(localMs(after, 12)))?.agent).toBe(32)
   })
 
-  it('separates the three kinds within a day', () => {
+  it('separates the drawn kinds within a day, and drops notify entirely', () => {
     const days = aggregateByCivilDay([
       bucket(localMs(DST_DAY, 9), { k: 'agent', n: 12 }),
       bucket(localMs(DST_DAY, 10), { k: 'attention', n: 1 }),
@@ -455,7 +455,8 @@ describe('folding buckets into civil days', () => {
     const cell = days.get(isoDayLocal(localMs(DST_DAY, 12)))
     expect(cell?.agent).toBe(19)
     expect(cell?.attention).toBe(1)
-    expect(cell?.notify).toBe(1)
+    // The notify bucket contributes to no figure — it is not a drawn state.
+    expect(cell?.attentionAt).toHaveLength(1)
   })
 
   // A steering mark is an EVENT: collapsing a day's minutes to one centered
@@ -489,11 +490,11 @@ describe('folding buckets into civil days', () => {
   it('gives a pre-dawn spell its place on the PREVIOUS rail, past the far end', () => {
     // 01:30 belongs to yesterday's rail, and sits 19.5h into it — the far
     // right of that column, not its middle.
-    const days = aggregateByCivilDay([bucket(localMs(DST_DAY, 1, 30), { k: 'notify' })])
+    const days = aggregateByCivilDay([bucket(localMs(DST_DAY, 1, 30), { k: 'attention' })])
     const yesterday = isoDayLocal(localMs({ ...DST_DAY, d: DST_DAY.d - 1 }, 12))
     const cell = days.get(yesterday)!
-    expect(cell.notifyAt).toHaveLength(1)
-    expect(cell.notifyAt[0]).toBeGreaterThan(0.75)
+    expect(cell.attentionAt).toHaveLength(1)
+    expect(cell.attentionAt[0]).toBeGreaterThan(0.75)
   })
 
   it('folds only ADJACENT minutes into one spell', () => {

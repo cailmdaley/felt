@@ -314,7 +314,6 @@ export interface DayCell {
   /** Summed `n` over the day's agent buckets — the density signal. */
   agent: number
   attention: number
-  notify: number
   /**
    * WHERE in the rail the steering happened, as fractions of the rail's own
    * length — one entry per SPELL, not per minute. A day's agent work is a
@@ -323,8 +322,6 @@ export interface DayCell {
    * never happened. Two spells an evening apart are two ticks.
    */
   attentionAt: number[]
-  /** The same, for the moments the fiber raised its hand. */
-  notifyAt: number[]
 }
 
 /** Minute-ms stamps folded into spells, then each spell placed at its own
@@ -370,17 +367,17 @@ const MINUTE_MS = 60_000
  */
 export function aggregateByCivilDay(buckets: readonly ActivityBucket[]): Map<string, DayCell> {
   const out = new Map<string, DayCell>()
-  // The minute stamps behind the two event kinds, kept per day until the whole
-  // day is in hand — spells can only be found once the neighbours are known.
-  const stamps = new Map<string, { attention: number[]; notify: number[] }>()
+  // The minute stamps behind the steering, kept per day until the whole day is
+  // in hand — spells can only be found once the neighbours are known.
+  const stamps = new Map<string, { attention: number[] }>()
   for (const b of buckets) {
     if (!Number.isFinite(b.m)) continue
     const day = railCivilDay(b.m)
     let cell = out.get(day)
     if (!cell) {
-      cell = { agent: 0, attention: 0, notify: 0, attentionAt: [], notifyAt: [] }
+      cell = { agent: 0, attention: 0, attentionAt: [] }
       out.set(day, cell)
-      stamps.set(day, { attention: [], notify: [] })
+      stamps.set(day, { attention: [] })
     }
     const n = Number.isFinite(b.n) ? Math.max(b.n, 1) : 1
     const at = stamps.get(day)!
@@ -388,15 +385,14 @@ export function aggregateByCivilDay(buckets: readonly ActivityBucket[]): Map<str
     else if (b.k === 'attention') {
       cell.attention += n
       at.attention.push(b.m)
-    } else {
-      cell.notify += n
-      at.notify.push(b.m)
     }
+    // `notify` and `reply` fold into nothing: neither is a state of the work.
+    // A reply's minute is already inked by its agent bucket, and a notify is
+    // an idle nudge the board no longer draws anywhere.
   }
   for (const [day, cell] of out) {
     const at = stamps.get(day)!
     cell.attentionAt = spellFractions(at.attention, day)
-    cell.notifyAt = spellFractions(at.notify, day)
   }
   return out
 }
@@ -1987,7 +1983,7 @@ class ChronicleView implements TemporalView {
     if (row.dueIdx !== null && row.dueIdx >= band.startIdx && row.dueIdx <= band.endIdx) return true
     for (let i = band.startIdx; i <= band.endIdx; i += 1) {
       const cell = row.days.get(days[i].iso)
-      if (cell && (cell.agent > 0 || cell.attention > 0 || cell.notify > 0)) return true
+      if (cell && (cell.agent > 0 || cell.attention > 0)) return true
     }
     return false
   }
@@ -2867,7 +2863,7 @@ class ChronicleView implements TemporalView {
 
     // Length first: it is the page's largest claim and the one nobody guesses.
     key.append(item(swatch('chr-key-life'), 'row spans first to last day'))
-    // The three pigments, in the shared words, with a density ramp that says
+    // The pigments, in the shared words, with a density ramp that says
     // the steps are relative to the busiest day in view.
     const ramp = document.createElement('span')
     ramp.className = 'chr-key-ramp'
@@ -3025,19 +3021,13 @@ class ChronicleView implements TemporalView {
         seg.style.left = colLeft(idx)
         track.append(seg)
       }
-      // Steering and hand-raising are placed at the hour they happened, not at
-      // the column's midpoint: one tick per spell, at its own time of day.
+      // Steering is placed at the hour it happened, not at the column's
+      // midpoint: one tick per spell, at its own time of day.
       for (const frac of spellPositions(cell.attentionAt, cell.attention)) {
         const tick = document.createElement('div')
         tick.className = 'chr-att'
         tick.style.left = colLeftAt(idx, frac)
         track.append(tick)
-      }
-      for (const frac of spellPositions(cell.notifyAt, cell.notify)) {
-        const dot = document.createElement('div')
-        dot.className = 'chr-notify'
-        dot.style.left = colLeftAt(idx, frac)
-        track.append(dot)
       }
     }
 

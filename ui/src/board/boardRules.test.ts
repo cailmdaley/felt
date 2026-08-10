@@ -245,6 +245,66 @@ describe('a mirrored fiber renders as ONE card', () => {
   })
 })
 
+describe('what the board admits — a shuttle block, or a cycle', () => {
+  // The policy: if it is a to-do, it becomes a shuttled thing. A bare `due:`
+  // is a date, not a commitment the Desk can act on, so it is promoted rather
+  // than shown. The daemon's feed is deliberately wider (it runs a
+  // `--has-field due` walk); this is where the board narrows it.
+  const row = (over: Partial<Fiber>): CompositeEntry => ({
+    origin: 'laptop',
+    feltStore: '/store/laptop',
+    path: '.felt/x.md',
+    fiber: {
+      id: 'science/x',
+      uid: '01KTCA2D1FGAJNHX5WKQ34BSZG',
+      name: 'X',
+      status: 'open',
+      kind: 'task',
+      priority: 2,
+      createdAt: at0,
+      ...over,
+    },
+  })
+  const boardOf = (entries: CompositeEntry[]) =>
+    buildKanbanResponseFromComposite(
+      { host: 'laptop', entries, origins: { laptop: { kind: 'local', stale: false, fiberCount: entries.length } } },
+      { nowMs: NOW },
+    )
+
+  const everywhere = (board: ReturnType<typeof boardOf>): KanbanCard[] => [
+    ...board.now.drafts,
+    ...board.now.inFlight,
+    ...board.now.awaitingReview,
+    ...board.timeline.past,
+    ...board.timeline.futureDated,
+    ...board.timeline.anytimeSoon,
+    ...board.stash,
+    ...board.pinned,
+  ]
+
+  it('turns away an open fiber whose only claim is a due date', () => {
+    // It carries a real, future due — the strongest case the old third
+    // admission clause had — and it appears on no surface, ribbon included.
+    expect(everywhere(boardOf([row({ due: dayFromNow(2) })]))).toEqual([])
+  })
+
+  it('admits the same fiber the moment it carries a shuttle block', () => {
+    const board = boardOf([
+      row({ due: dayFromNow(2), hasShuttleBlock: true, shuttleKind: 'oneshot' }),
+    ])
+    expect(everywhere(board).map((c) => c.id)).toEqual(['science/x'])
+  })
+
+  it('still admits a cycle, which carries neither block nor due', () => {
+    // Open-ended on purpose: a `start:` and nothing else is a legitimate band,
+    // and the Chronicle must keep drawing it.
+    const board = boardOf([row({ id: 'cycles/autumn', tags: ['cycle'], start: dayFromNow(-10) })])
+    expect(board.cycles).toHaveLength(1)
+    // ...and it reaches the Chronicle without ever touching a Desk column.
+    expect(everywhere(board)).toEqual([])
+  })
+})
+
 describe('Resting clusters split when they overflow', () => {
   // Ordering inside a cluster is by createdAt desc, so give each card a
   // distinct instant to keep assertions stable. The clustering itself is

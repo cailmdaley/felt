@@ -81,6 +81,11 @@ defmodule ShuttleWeb.Router do
     get("/activity/composite", ActivityController, :composite)
     get("/narration/composite", NarrationController, :composite)
     get("/sessions/composite", SessionsController, :composite)
+    # What the ledgered sessions cost, folded out of their transcripts and
+    # rolled up per fiber. Host-scoped for the same reason as its neighbours —
+    # a transcript lives on the machine that wrote it.
+    get("/spend/composite", SpendController, :composite)
+    get("/spend", SpendController, :show)
     # Join rung 0 for the temporal views: the structural fiber↔session pairing
     # this host recorded at dispatch / claim / resume. Host-scoped like its two
     # neighbours above.

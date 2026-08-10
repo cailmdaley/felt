@@ -218,6 +218,103 @@ defmodule ShuttleWeb.TemporalCompositeTest do
     end
   end
 
+  describe "GET /api/v1/spend/composite" do
+    # /spend caps its ledger walk at 90 days, so these rows are dated relative
+    # to now rather than to the fixed @t0 the bucket feeds use.
+    @recent System.system_time(:millisecond) - 86_400_000
+
+    test "merges each host's rows and re-rolls a fiber worked from both" do
+      # Local: one ledgered session with no transcript on this disk, so it
+      # contributes a found:false row — the shape a hub sees most often.
+      with_data_files([], [
+        %{
+          "fiber" => "shared/fiber",
+          "session" => "s1",
+          "host" => "test-host",
+          "at" => @recent + 10
+        }
+      ])
+
+      with_remote(%{
+        "/api/v1/spend" => %{
+          "sessions" => [
+            %{
+              "fiber" => "shared/fiber",
+              "session" => "s0",
+              "at" => @recent,
+              "found" => true,
+              "input" => 5,
+              "output" => 50,
+              "cache_read" => 500,
+              "cache_write" => 25,
+              "messages" => 3
+            },
+            %{
+              "fiber" => "candide/only",
+              "session" => "s2",
+              "at" => @recent + 20,
+              "found" => true,
+              "input" => 1,
+              "output" => 1,
+              "cache_read" => 1,
+              "cache_write" => 1,
+              "messages" => 1
+            }
+          ],
+          "fibers" => []
+        }
+      })
+
+      conn = get(api_conn(), "/api/v1/spend/composite?since_ms=0")
+
+      assert %{"sessions" => sessions, "fibers" => fibers, "origins" => origins} =
+               json_response(conn, 200)
+
+      assert Enum.map(sessions, & &1["session"]) == ["s0", "s1", "s2"]
+      assert Enum.find(sessions, &(&1["session"] == "s0"))["host"] == "candide"
+
+      shared = Enum.find(fibers, &(&1["fiber"] == "shared/fiber"))
+      assert shared["sessions"] == 2
+      assert shared["measured"] == 1
+      assert shared["output"] == 50
+      assert shared["cache_read"] == 500
+
+      assert origins["candide"]["kind"] == "remote"
+      assert origins[own_host()]["kind"] == "local"
+    end
+
+    test "a remote that has gone away keeps its spend on screen, marked stale" do
+      with_data_files([], [])
+
+      with_remote(%{
+        "/api/v1/spend" => %{
+          "sessions" => [
+            %{
+              "fiber" => "candide/work",
+              "session" => "s0",
+              "at" => @recent,
+              "found" => true,
+              "input" => 1,
+              "output" => 2,
+              "cache_read" => 3,
+              "cache_write" => 4,
+              "messages" => 1
+            }
+          ]
+        }
+      })
+
+      Agent.update(MockClient, fn _ -> %{} end)
+      :ok = RemoteTemporalRegistry.refresh_now()
+
+      conn = get(api_conn(), "/api/v1/spend/composite?since_ms=0")
+
+      assert %{"fibers" => fibers, "origins" => origins} = json_response(conn, 200)
+      assert Enum.find(fibers, &(&1["fiber"] == "candide/work"))["output"] == 2
+      assert origins["candide"]["last_error"] == "not_set"
+    end
+  end
+
   describe "GET /api/v1/narration/composite" do
     test "stamps each commit with its origin and filters to the window" do
       with_remote(%{

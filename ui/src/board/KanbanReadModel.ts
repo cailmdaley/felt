@@ -28,7 +28,6 @@ import {
   isCycleFiber,
   KANBAN_TIMELINE_WINDOW,
   nextStandingLaunch,
-  parseDueMs,
   STANDING_TIMELINE_HORIZON_MS,
   type KanbanColumn,
 } from './KanbanRules.js';
@@ -47,25 +46,30 @@ export interface BuildKanbanResponseOptions {
 }
 
 /**
- * Faithful to the backend predicate: a `shuttle:` row is always admitted; a
- * non-shuttle row is admitted iff it's an open/active human `due:` card. The
- * daemon's `/api/v1/fibers/composite` now carries those local human due-date
- * rows too (Shuttle serves them into the LOCAL portion via a `--has-field due`
- * walk; remotes have no human-due analog), so this branch is live once
- * `KanbanModal` reads the composite feed and the `:4000` daemon restarts.
+ * WHAT THE BOARD ADMITS — two kinds of row, and nothing else.
+ *
+ * A `shuttle:` row is work, and every piece of work on the Desk carries a
+ * shuttle block: if it is a to-do, it becomes a shuttled thing. A bare `due:`
+ * on a fiber is a date, not a commitment the board can act on — there is no
+ * constitution to dispatch, no lifecycle verb that will take it (shuttle-ctl
+ * refuses without a block), and a card the Desk cannot move is a card that
+ * teaches you to distrust the column. Such a fiber is promoted, not shown.
+ *
+ * A CYCLE is the exception, and it is not work: admitted on its tag alone —
+ * no shuttle block, no `due:`, no lifecycle status required, because an
+ * open-ended cycle (a `start:` and nothing else) is a legitimate band the
+ * Chronicle must draw. `classifyFiber` sends it straight to the `cycles`
+ * surface, so it never reaches a Desk column.
+ *
+ * The daemon's feed is WIDER than this on purpose (`--has-field due` is one of
+ * its three admission walks, see lib/shuttle/fiber_documents.ex): it serves
+ * every row the board might want, and this predicate is where the board says
+ * which of them it draws. A due-only row arriving on the wire is expected and
+ * simply not admitted here.
  */
 export function shouldIncludeInKanban(fiber: Fiber): boolean {
   if (fiber.hasShuttleBlock === true) return true;
-  // A CYCLE is admitted on its tag alone — no shuttle block, no `due:`, no
-  // lifecycle status required. An open-ended cycle (a `start:` and nothing
-  // else) is a legitimate band the views must draw, and the due test below
-  // would drop it. Cycles are also the one admitted row that is not work:
-  // `classifyFiber` sends them straight to the `cycles` surface.
-  if (isCycleFiber(fiber)) return true;
-  return (
-    (fiber.status === 'open' || fiber.status === 'active') &&
-    parseDueMs(fiber.due) !== undefined
-  );
+  return isCycleFiber(fiber);
 }
 
 /**

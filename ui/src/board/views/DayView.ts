@@ -6,7 +6,6 @@
  *
  *   pale cobalt wash   the agent was working (merged runs of agent minutes)
  *   solid teal block   you were steering (attention minutes — a typed prompt)
- *   cinnabar tick      the agent raised its hand (a notification)
  *
  * Below the rails, the same day told the other way: "the day, by fiber" —
  * the commit trail, grouped by its own `<slug>: ` prefixes, set as prose.
@@ -51,8 +50,8 @@
  * unshown instead of landing on a directory-named lane.
  *
  * NO COLOUR WITHOUT A MEANING. The board's ink has a grammar and this page
- * spends none of it decoratively: cobalt is agent activity, teal is human
- * steering, cinnabar is attention demanded (and, as rubric, a section head).
+ * spends none of it decoratively: cobalt is agent activity and teal is human
+ * steering. Cinnabar appears only as rubric — a section head.
  * Everything else on the page — bullets, rules, hovers, focus rings — is iron
  * gall at some weight. A hue here is a claim, so a hue that means nothing is a
  * claim the data never made.
@@ -92,6 +91,7 @@ import {
   renderTip,
   SLOT_KIND_ORDER,
   SLOT_PHRASE,
+  type DrawnKind,
   type MomentSource,
   type MomentWords,
   type SlotTip,
@@ -433,8 +433,6 @@ export interface DayLane {
   slugs: string[]
   agent: MinuteRun[]
   attention: MinuteRun[]
-  /** Minute indices where the agent asked for a human. */
-  notify: number[]
   /**
    * Distinct minutes carrying an attention / agent bucket — the figures the
    * ledger reports as "you 38m · agents 2h 10m".
@@ -455,6 +453,11 @@ export interface DayLane {
    * above, and it has to be — one measures time, this one measures acts.
    */
   attentionMessages: number
+  /** Messages this fiber sent BACK today — the sum of `n` over its `k:
+   *  "reply"` buckets. Counted as acts for the same reason `attentionMessages`
+   *  is: the two halves of an exchange must be in the same unit to be read as
+   *  one. Zero on a daemon that does not emit the kind. */
+  replyMessages: number
   /** Distinct active minutes, of any kind — the lane's weight. */
   weight: number
   /**
@@ -484,13 +487,18 @@ export interface DayTotals {
   attention: number
   /** Minutes containing at least one agent bucket, over the whole day. */
   agent: number
-  /** Messages you sent — see {@link countMessages}. */
+  /** Messages you sent — see {@link countExchange}. */
   messages: number
+  /** Messages you got back: the sum of `n` over the day's `k: "reply"`
+   *  buckets, one per finished agent turn. Zero on a daemon too old to emit
+   *  the kind, which the header reads as "say nothing" rather than "nothing
+   *  was said" — see `messageClause`. */
+  received: number
 }
 
 /**
- * MESSAGES SENT, not minutes attended — the human's half of the day, counted
- * the way a human counts it.
+ * THE EXCHANGE — messages sent and messages back, not minutes attended. The
+ * conversational half of the day, counted the way a human counts it.
  *
  * An attention bucket is a minute in which you typed at a worker, and `n` is
  * how many prompts landed in it. Minutes were the wrong unit for that: a minute
@@ -503,26 +511,31 @@ export interface DayTotals {
  * Positions on the rail are untouched by this: the ticks still mark the minutes
  * the buckets name. Only the unit in the prose changed.
  */
-export function countMessages(
+export function countExchange(
   buckets: readonly ActivityBucket[],
   win: DayWindow,
-): number {
+): { sent: number; received: number } {
   let sent = 0
+  let received = 0
   for (const bucket of buckets) {
     if (bucket.m < win.startMs || bucket.m >= win.endMs) continue
     if (bucket.k === 'attention') sent += bucket.n
+    // A reply is the same kind of thing counted the same way: an act, not a
+    // span. The agent's minutes are already reported as time beside it.
+    else if (bucket.k === 'reply') received += bucket.n
   }
-  return sent
+  return { sent, received }
 }
 
 /** What the whole day cost: agent minutes, attention minutes (still the rail's
- *  own measure) and the messages you sent across every fiber. */
+ *  own measure) and the exchange across every fiber. */
 export function dayTotals(activity: ActivityResult, win: DayWindow): DayTotals {
   const { attention, agent } = foldActiveMinutes(activity.buckets, {
     fromMs: win.startMs,
     toMs: win.endMs,
   })
-  return { attention, agent, messages: countMessages(activity.buckets, win) }
+  const { sent, received } = countExchange(activity.buckets, win)
+  return { attention, agent, messages: sent, received }
 }
 
 function minuteIndex(ms: number, win: DayWindow): number | null {
@@ -732,10 +745,10 @@ export function buildDayLanes(
       DayLane,
       | 'agent'
       | 'attention'
-      | 'notify'
       | 'attentionMinutes'
       | 'agentMinutes'
       | 'attentionMessages'
+      | 'replyMessages'
       | 'weight'
       | 'beats'
       | 'host'
@@ -747,10 +760,11 @@ export function buildDayLanes(
     hosts: Map<string, HostTally>
     agent: Set<number>
     attention: Set<number>
-    notify: Set<number>
     all: Set<number>
     /** Attention EVENTS, summed — see `DayLane.attentionMessages`. */
     messages: number
+    /** Reply EVENTS, summed — see `DayLane.replyMessages`. */
+    replies: number
     /** Per-minute counts and transcripts, unmerged — see `DayLane.beats`. */
     beats: Map<number, { kinds: Map<ActivityBucket['k'], number>; sources: (MomentSource | null)[] }>
   }
@@ -762,6 +776,10 @@ export function buildDayLanes(
     const card = joinBucketToCard(bucket, index)
     // A bucket that joined to no fiber is not drawn — see the module doc.
     if (!card) continue
+    // Notify is not a drawn state. It is dropped at ingest rather than at
+    // paint time so a minute of pure nudge cannot give a lane weight, a beat,
+    // or a tooltip row it has nothing to say in.
+    if (bucket.k === 'notify') continue
     const key = `fiber:${card.id}`
     let entry = acc.get(key)
     if (!entry) {
@@ -776,9 +794,9 @@ export function buildDayLanes(
         hosts: new Map(),
         agent: new Set(),
         attention: new Set(),
-        notify: new Set(),
         all: new Set(),
         messages: 0,
+        replies: 0,
         beats: new Map(),
       }
       acc.set(key, entry)
@@ -796,7 +814,7 @@ export function buildDayLanes(
     else if (bucket.k === 'attention') {
       entry.attention.add(minute)
       entry.messages += bucket.n
-    } else entry.notify.add(minute)
+    } else if (bucket.k === 'reply') entry.replies += bucket.n
 
     let beat = entry.beats.get(minute)
     if (!beat) {
@@ -821,10 +839,10 @@ export function buildDayLanes(
       stale: isOriginStale(folded, host || null),
       agent: mergeMinuteRuns(entry.agent),
       attention: mergeMinuteRuns(entry.attention),
-      notify: [...entry.notify].sort((a, b) => a - b),
       attentionMinutes: entry.attention.size,
       agentMinutes: entry.agent.size,
       attentionMessages: entry.messages,
+      replyMessages: entry.replies,
       weight: entry.all.size,
       beats: [...entry.beats.entries()]
         .map(([minute, beat]) => ({
@@ -1050,8 +1068,11 @@ export interface DayEntryStats {
   messages: number
   /** Minutes its agents were working. Theirs still is time. */
   agent: number
-  /** Messages it sent BACK — populated wherever the feed carries `k: "reply"`
-   *  buckets for the day; absent when it does not. */
+  /** Messages it sent BACK — the lane's `k: "reply"` buckets. Zero, not
+   *  absent, whenever a lane was built: a daemon that emits no replies and a
+   *  fiber that sent none are the same claim, and `formatEntryStats` drops the
+   *  clause either way. Optional only for the entries with no lane behind
+   *  them. */
   received?: number
   commits: number
 }
@@ -1175,6 +1196,7 @@ export function buildDayEntries(
       closed: closureMark(card, win),
       stats: {
         messages: lane.attentionMessages,
+        received: lane.replyMessages,
         agent: lane.agentMinutes,
         commits: subjects?.length ?? 0,
       },
@@ -1304,7 +1326,7 @@ export function dayModelSignature(model: DayModel): string {
       (lane) =>
         `${lane.key}|${lane.label}|${lane.hostNote}|${lane.stale ? 'stale' : ''}|${lane.weight}|` +
         `${lane.agent.map((r) => `${r.start}-${r.end}`).join(',')}|` +
-        `${lane.attention.map((r) => `${r.start}-${r.end}`).join(',')}|${lane.notify.join(',')}`,
+        `${lane.attention.map((r) => `${r.start}-${r.end}`).join(',')}`,
     )
     .join('\n')
   const entries = model.entries
@@ -1327,7 +1349,7 @@ export function dayModelSignature(model: DayModel): string {
   const frame =
     `frame:${Math.floor(model.frame.startMs / grain)}-${Math.floor(model.frame.endMs / grain)}`
   return (
-    `${model.dayISO}\n${model.totals.messages}/${model.totals.agent}\n` +
+    `${model.dayISO}\n${model.totals.messages}/${model.totals.received}/${model.totals.agent}\n` +
     `${lanes}\n${entries}\n${ahead}\n${ledger}\n${frame}`
   )
 }
@@ -1352,12 +1374,11 @@ function pct(value: number): string {
   return `${(value * 100).toFixed(4)}%`
 }
 
-/** Day's own mark for each activity kind — the same three pigments the shared
- *  key names, drawn as this view draws them. */
-const DAY_KEY_CLASS: Record<ActivityBucket['k'], string> = {
+/** Day's own mark for each activity kind — the same pigments the shared key
+ *  names, drawn as this view draws them. */
+const DAY_KEY_CLASS: Record<DrawnKind, string> = {
   agent: 'kbn-day-key-wash',
   attention: 'kbn-day-key-att',
-  notify: 'kbn-day-key-tick',
   // A reply is agent-side ink; it wears the wash, never its own mark.
   reply: 'kbn-day-key-wash',
 }
@@ -1669,7 +1690,7 @@ class DayViewImpl implements TemporalView {
       // lane only repeats it when it disagrees (see DayLane.hostNote).
       this.statsEl.textContent =
         (model.host ? `${model.host} · ` : '') +
-        `${messageClause(model.totals.messages, 0)}` +
+        `${messageClause(model.totals.messages, model.totals.received)}` +
         ` · agents ${formatSpanMinutes(model.totals.agent, { pad: true })}`
       this.statsEl.classList.toggle('kbn-day-stats-quiet', model.lanes.length === 0)
     }
@@ -1784,12 +1805,6 @@ class DayViewImpl implements TemporalView {
       rail.style.gridRow = row
       for (const run of lane.agent) rail.append(this.buildMark('kbn-day-wash', run, win))
       for (const run of lane.attention) rail.append(this.buildMark('kbn-day-att', run, win))
-      for (const minute of lane.notify) {
-        const tick = document.createElement('i')
-        tick.className = 'kbn-day-notify'
-        tick.style.left = pct(minute / win.minutes)
-        rail.append(tick)
-      }
 
       rail.addEventListener('mousemove', (e) => this.showBeatTip(lane, rail, win, e))
       rail.addEventListener('mouseleave', () => this.hideTip())
@@ -1840,8 +1855,8 @@ class DayViewImpl implements TemporalView {
    * Report the lane-minute under the pointer, or nothing.
    *
    * SNAPS to the nearest BEAT rather than hit-testing the ink. Two reasons, and
-   * the second is the important one: a notify tick is a hairline nobody can
-   * land on, and the washes are merged runs that bridge idle minutes — so
+   * the second is the important one: the ink can be a hairline nobody can land
+   * on, and the washes are merged runs that bridge idle minutes — so
    * hit-testing the drawn mark would happily report a minute in which nothing
    * happened. The beats are the unmerged record, so snapping to them can only
    * name a minute that is real. Empty rail — no beat within

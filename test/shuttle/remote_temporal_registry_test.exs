@@ -64,11 +64,23 @@ defmodule Shuttle.RemoteTemporalRegistryTest do
   @bucket %{"m" => 1_770_000_000_000, "s" => nil, "cwd" => "/repo", "k" => "agent", "n" => 3}
   @record %{"fiber" => "work/paper", "host" => "candide", "at" => 1_770_000_000_000}
   @commit %{"iso" => "2026-02-02T02:40:00Z", "subject" => "paper: a section"}
+  @spend %{
+    "fiber" => "work/paper",
+    "session" => "s0",
+    "at" => 1_770_000_000_000,
+    "found" => true,
+    "input" => 1,
+    "output" => 2,
+    "cache_read" => 3,
+    "cache_write" => 4,
+    "messages" => 1
+  }
 
   defp script(:full) do
     MockClient.set("/api/v1/activity", {:ok, Jason.encode!(%{"buckets" => [@bucket]})})
     MockClient.set("/api/v1/sessions", {:ok, Jason.encode!(%{"records" => [@record]})})
     MockClient.set("/api/v1/narration", {:ok, Jason.encode!(%{"commits" => [@commit]})})
+    MockClient.set("/api/v1/spend", {:ok, Jason.encode!(%{"sessions" => [@spend]})})
   end
 
   defp script(_), do: :ok
@@ -99,8 +111,8 @@ defmodule Shuttle.RemoteTemporalRegistryTest do
     {pid, name}
   end
 
-  describe "caching the three feeds" do
-    test "a successful poll caches activity, sessions, and narration", %{dir: dir} do
+  describe "caching the four feeds" do
+    test "a successful poll caches activity, sessions, narration, and spend", %{dir: dir} do
       {_pid, name} = start_registry(dir)
       :ok = RemoteTemporalRegistry.refresh_now(name)
 
@@ -109,6 +121,7 @@ defmodule Shuttle.RemoteTemporalRegistryTest do
       assert entry.activity_buckets == [@bucket]
       assert entry.sessions == [@record]
       assert entry.narration_commits == [@commit]
+      assert entry.spend == [@spend]
       assert entry.last_error == nil
       refute entry.stale
       assert {from_ms, to_ms} = entry.activity_window
@@ -144,6 +157,7 @@ defmodule Shuttle.RemoteTemporalRegistryTest do
       assert entry.activity_buckets == [@bucket]
       assert entry.sessions == [@record]
       assert entry.narration_commits == [@commit]
+      assert entry.spend == [@spend]
       assert entry.last_error == :not_set
     end
 

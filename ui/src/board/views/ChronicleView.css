@@ -11,7 +11,7 @@
 
    Palette is KanbanModal.css's: iron-gall #1B1611, muted #7A6F5C, faded
    #A89B83, parchment #EDE2CE, gold-leaf #9A7B35, ochre #C49333, cobalt
-   #3D5BA0, teal #3F8278, cinnabar #BC4538. */
+   #3D5BA0, teal #3F8278. */
 
 .chr-scroll {
   /* Fallback only — ChronicleView sizes the day column at render so that
@@ -937,19 +937,6 @@ button.chr-name:hover {
   background: #3F8278;
 }
 
-/* A moment that raised its hand. Cinnabar, above the line, small. It clears
-   the tallest segment (10px, so -5px) with a hairline of daylight under it —
-   the dot must read as hovering over the day's work, never as its cap. */
-.chr-notify {
-  position: absolute;
-  top: 50%;
-  width: 3.5px;
-  height: 3.5px;
-  margin-top: -10px;
-  margin-left: -1.75px;
-  border-radius: 50%;
-  background: #BC4538;
-}
 
 /* ── Marks: the close, and what is still promised ───────────────────────── */
 
@@ -999,7 +986,7 @@ button.chr-name:hover {
 /* ── The key ────────────────────────────────────────────────────────────── */
 
 /* A caption under the grid, not a legend box — the same marginal italic serif
-   Day and Week set theirs in, and the same words for the three pigments. It
+   Day and Week set theirs in, and the same words for the pigments. It
    wraps rather than scrolls: the page below the grid has room, and a key that
    hides half of itself behind a scrollbar has failed at its one job. */
 .chr-key {
@@ -1055,13 +1042,6 @@ button.chr-name:hover {
   width: 2px;
   height: 8px;
   background: #3F8278;
-}
-.chr-key-notify {
-  display: inline-block;
-  width: 3.5px;
-  height: 3.5px;
-  border-radius: 50%;
-  background: #BC4538;
 }
 .chr-key-glyph {
   font-style: normal;

@@ -962,21 +962,6 @@ export class KanbanModal {
     const wantsCold = horizon === 'stashed' ? (opts.cold ?? false) : undefined
     const due = horizon === 'stashed' && opts.due === undefined ? null : opts.due
 
-    // A block-less human due-card is on the board only by virtue of its `due:`
-    // (the daemon's composite feed admits non-shuttle rows via a --has-field
-    // due walk). A DATELESS rest clears the due, which would drop the card off
-    // the board entirely — a silent vanish, not a rest. Refuse with an
-    // explanation. A SNOOZE is safe and allowed: it keeps a `due:`, so the walk
-    // still finds the card and the drift rule still wakes it.
-    if (horizon === 'stashed' && card.shuttleKind === undefined && due === null) {
-      this.showBanner(
-        `“${card.name}” is a due-date card without a shuttle block — resting it dateless would drop it off the board. Drop it on a day to snooze it instead, or promote it first.`,
-        'info',
-      )
-      this.announce(`${card.name} has no shuttle block; pick a day instead of resting it dateless.`)
-      return
-    }
-
     const sameHorizon =
       card.storedHorizon === horizon && (card.cold ?? false) === (opts.cold ?? false)
     const sameDue = due === undefined || sameCivilDue(card.due, due)
@@ -1031,12 +1016,10 @@ export class KanbanModal {
       // snap-back fix), an armed/active card pauses (otherwise an active
       // oneshot reclassifies straight back to In flight after the refetch).
       // setSurface's guards already bannered the states where this verb is
-      // wrong (standing, resting pinned, cyclical awaiting run). Block-less
-      // human due-cards are skipped: the lifecycle verbs need a shuttle block
-      // (shuttle-ctl refuses without one), and the classifier routes a
-      // block-less card to the planning surfaces regardless of open/active,
-      // so there is nothing to park.
-      if (card.status !== 'open' && card.shuttleKind !== undefined) {
+      // wrong (standing, resting pinned, cyclical awaiting run). Every card on
+      // a Desk column carries a shuttle block, so the lifecycle verbs always
+      // apply — see `shouldIncludeInKanban`.
+      if (card.status !== 'open') {
         const parkRes = await fetch(this.transitionUrl(), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
