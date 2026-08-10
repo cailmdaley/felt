@@ -15,17 +15,43 @@ Agent comes from `shuttle.agent`, resolved against felt's registry — the built
 
 **Tags never gate dispatch — or the view.** Three layers feed the system: the `shuttle:` block (`kind`, `schedule`, `agent`, `host`, `project_dir`) declares shuttle-management; universal lifecycle scalars (`status`, `tempered`, `depends_on`) drive dispatch and view; tags are free-form noticings read by neither the daemon nor the kanban classifier.
 
+## What the board admits
+
+Two kinds of row, and nothing else (`shouldIncludeInKanban` in `ui/src/board/KanbanReadModel.ts`): a fiber with a `shuttle:` block, and a **cycle** fiber. Everything the human means to do carries a block — a bare `due:` is a date the Desk cannot act on, so such a fiber is promoted, not shown. The daemon's feed is deliberately wider (one of its three admission walks is `--has-field due`, `lib/shuttle/fiber_documents.ex`); the board is where the narrowing happens. Cycles are the exception because they are not work: admitted on the tag alone, routed straight to the `cycles` surface, never in a Desk column.
+
 ## Board tabs
 
-The board at `:4000` is four hotkey-switchable tabs over the same fibers and sessions: **Desk** is the kanban (below). **Day** lays fibers as lanes over a 6am→6am axis, one lane per fiber, two clocks in the lane — solid marks are human activity, wash marks are agent activity. **Week** rows past days as ink rasters, today's row carries a gold seam, future rows are hollow (nothing happened there yet). **Chronicle** draws fibers as multi-day lifelines across calendar days; dragging across days extends or starts a cycle/era.
+The board at `:4000` is four hotkey-switchable tabs over the same fibers and sessions. **Desk** is the kanban (below). **Day** lays fibers as lanes over a 6am→6am axis, with the rail zoomed to first-action→now rather than the full 24 hours. **Week** rows past days as ink rasters, today's row carries a gold seam, future rows are hollow. **Chronicle** draws fibers as multi-day lifelines across calendar days, under a strip of cycle bands.
 
-The temporal tabs (Day/Week/Chronicle) read from the same substrate the daemon already tracks, not a separate store: activity comes from `events.jsonl`, session identity from the session ledger `sessions.jsonl`, and narration (the human-readable "what happened") from the store's `git log`.
+**Two-state activity grammar.** Every raster spends exactly two pigments: solid for human steering, wash for agent work. There is no third "attention called" state — an idle nudge is not a state of the work, and an agent blocked on you reads as the **gap** on a live lane, which no pigment improves on. Effort is counted in the unit each side actually spends: human effort in messages sent and received (`you 14 · 9 back`), agent effort in minutes. Hover any mark for the actual words — transcript excerpts fetched from `/api/v1/moment`.
+
+The temporal tabs read from the same substrate the daemon already tracks, not a separate store: activity from `events.jsonl`, session identity from the session ledger `sessions.jsonl`, narration from the store's `git log`. **Cross-host:** the hub caches each remote's activity, sessions, narration, and spend, so one board shows the whole fleet's time; an origin that goes unreachable grays out and says "waiting on `<host>`" rather than silently drawing an empty day.
+
+## Cycles and eras
+
+A **cycle** is a fiber tagged `cycle` with `start:` and `due:` as civil days, and a body whose first paragraph is the *intention* — what this stretch of time is for. The Chronicle draws it as a named band over the day grid.
+
+- **Make one** by dragging across days in the cycle strip and naming the span, or press `+` to *speak* an era: dictate the intention, which starts today and runs open-ended (a start with no end runs to the horizon; an end with no start is a single day).
+- **Membership is always derived**, never a list: a fiber belongs to an era if it was worked during the span or is due inside it. Nothing to maintain, nothing to fall out of sync.
+- **Click the band** for the era face — span, intention, derived figures, and "the look back", a memoir composed from the commit trail. **Inscribe this review** writes that memoir back into the cycle fiber. **Double-click the name** to rename; **drag an edge** to respan.
+
+## Snooze
+
+Dragging a card reveals the **drag horizon** — a slim row of upcoming days under the tab strip, plus a chip per upcoming cycle.
+
+- **Onto a day**: a desk or resting card gets `due:` + `horizon: stashed` — it leaves the Now board for **Resting** and returns on its due day. A card that already lives elsewhere just gets the `due:`.
+- **Onto a cycle chip**: due lands on that cycle's start day, clamped to tomorrow when the cycle is already running ("rest until tomorrow, later this cycle").
+- **Onto today** puts it back on the desk (due cleared); **into Resting** stashes it dateless; **back up to the now-board** clears horizon and cold.
+
+## Token spend
+
+`GET /api/v1/spend?since_ms=…` folds transcript usage into per-session and per-fiber token rollups, joining the session ledger (which fiber a session belonged to) to the transcript record (what it cost). Neither join estimates: a session whose transcript this host cannot read is reported `found: false` with zeroed counters and still counts in its fiber's session tally. `/api/v1/spend/composite` merges every host's spend into one view.
 
 ## Kanban columns
 
 Column membership derives from felt `status` + `tempered` + `shuttle.kind` + tmux liveness (`classifyFiber` in `ui/src/board/KanbanRules.ts` — the single source of truth):
 
-- **Drafts**: `status: open`, or no `shuttle:` block at all (a stash awaiting refinement; `felt shuttle pause` lands a card here).
+- **Drafts**: `status: open` — a stash awaiting refinement, dispatching nothing until launched (`felt shuttle pause` lands a card here). A fiber with no block at all is not a draft; it is not on the board.
 - **Scheduled**: an armed standing role between firings (`status: active`, no live worker) — it fires on its own cron, so it sits on the timeline at its next launch rather than in the Now lane.
 - **Pinned**: a resting `kind: pinned` role — the strip of perennial interfaces. A human starts it (Resume / strip → In-flight); once running it joins the unified lifecycle: a worker that deliberately hands off is relaunched fresh next tick (a long autonomous arc), a dirty death or idle exit parks it back to the strip, and a close-out lands in Awaiting review.
 - **In flight**: a live tmux worker (any kind), or an armed oneshot (`status: active` — even when blocked by deps; it flies when the dep clears).

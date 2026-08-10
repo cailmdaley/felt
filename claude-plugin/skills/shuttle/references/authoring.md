@@ -1,6 +1,10 @@
 # Authoring a constitution
 
-You're writing a constitution, not realizing one. The flow has three steps:
+You're writing a constitution, not realizing one.
+
+**Anything that needs to be done gets a shuttle block.** The block is not a claim that the work is ready to fly — it is what makes the fiber *a thing the board can hold*. Without one, the fiber is invisible to Desk and Chronicle alike, and no lifecycle verb will take it. With one, an `open` fiber is a Drafts card that dispatches nothing until launched. So don't hoard task-shaped fibers as bare bodies with a `due:`: install the block, leave it disabled, decide later.
+
+The flow has three steps:
 
 1. **Create the fiber.** `felt add <slug> "<name>" -t constitution [-t <project> ...]` — creates the directory and a markdown skeleton. Path the slug under the right parent so containment carries the relationship (`<root>/<branch>/<deliverable>-<purpose>`); felt resolves the leading segment against existing fibers when nesting is implied.
 2. **Write the spec.** Open with a standalone **lede** — a heading-less paragraph that orients both readers (human skimming the card, worker landing cold): what this is, why now, where it sits, `[[wikilinks]]` woven in. Then `## Desired State` — the one fixed heading: the contract, including any specifically-NOT-doing and any quality bar that earns naming, with done-conditions in checkable terms where the work allows (a desired state phrased checkably is its own evidence). Any further sections are *earned* and named for what they contain — "Touch points", "Why X", "Considered alternatives" — never a default "Context": background that matters gets linked where it's used; a section named for nothing in particular fills like a junk drawer. Keep the body small and the network rich; the felt skill's `constitution.md` reference carries the craft. Don't write worker mechanics (verification cadence, exit discipline, subagent use) into the spec — this skill carries those for every worker, and prescription dated to one model generation degrades the next.
