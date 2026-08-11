@@ -24,6 +24,7 @@ import {
   buildDayPreviews,
   buildStillAhead,
   closureMark,
+  commitSlugsForCard,
   commitsOnRail,
   dayTotals,
   dayWindow,
@@ -1585,5 +1586,110 @@ describe('the day, by fiber', () => {
     expect(firstSentence('No full stop here')).toBe('No full stop here')
     expect(firstSentence('Ends in a question? Then more.')).toBe('Ends in a question?')
     expect(firstSentence(undefined)).toBe('')
+  })
+})
+
+/**
+ * A fiber is filed under a path and CALLED something else, and its commits are
+ * prefixed with the name. Both have to reach the same lane.
+ */
+describe('commitSlugsForCard — what a fiber answers to', () => {
+  it('answers to its id leaf', () => {
+    expect(commitSlugsForCard(card())).toContain('bmodes-2d')
+  })
+
+  it("answers to its name's first word when the leaf is a role", () => {
+    const vizier = card({
+      id: 'ai-futures/tokenmaxxing/operator',
+      name: "Vizier — at Cail's left hand",
+    })
+    expect(commitSlugsForCard(vizier)).toEqual(['operator', 'vizier'])
+  })
+
+  it('does not repeat the leaf when the name says the same thing', () => {
+    expect(commitSlugsForCard(card({ id: 'loom/shuttle', name: 'Shuttle — the board' }))).toEqual([
+      'shuttle',
+    ])
+  })
+
+  // A one- or two-letter word is a collision waiting to happen, not an identity.
+  it('refuses a first word too short to be a name', () => {
+    expect(commitSlugsForCard(card({ id: 'work/ap', name: 'AP — the polarimeter' }))).toEqual(['ap'])
+    expect(commitSlugsForCard(card({ id: 'work/thing', name: 'Ai futures' }))).toEqual(['thing'])
+  })
+
+  it('gives a vizier-prefixed commit its own lane in the ledger', () => {
+    const vizier = card({
+      id: 'ai-futures/tokenmaxxing/operator',
+      name: "Vizier — at Cail's left hand",
+    })
+    const lane: DayLane = {
+      key: 'fiber:ai-futures/tokenmaxxing/operator',
+      label: vizier.name,
+      state: cardState(vizier),
+      cardId: vizier.id,
+      slugs: commitSlugsForCard(vizier),
+      host: '',
+      hostNote: '',
+      stale: false,
+      agent: [],
+      attention: [],
+      attentionMinutes: 0,
+      agentMinutes: 0,
+      attentionMessages: 0,
+      replyMessages: 0,
+      weight: 1,
+      beats: [],
+    }
+    const entries = buildDayEntries(
+      [{ iso: new Date(WIN.startMs + 60_000).toISOString(), subject: 'vizier: read the morning mail' }],
+      [lane],
+      [vizier],
+      WIN,
+      WIN.startMs + 120_000,
+    )
+    expect(entries).toHaveLength(1)
+    expect(entries[0].title).toBe(vizier.name)
+    expect(entries[0].body).toBe('read the morning mail')
+    expect(entries[0].noLane).toBeUndefined()
+  })
+
+  // The alias widens what a lane claims; the existing ambiguity guard is what
+  // keeps that safe. Two lanes answering to `vizier` narrate neither.
+  it('refuses an aliased slug two lanes answer to', () => {
+    const mk = (id: string, name: string): DayLane => ({
+      key: `fiber:${id}`,
+      label: name,
+      state: cardState(card({ id, name })),
+      cardId: id,
+      slugs: commitSlugsForCard(card({ id, name })),
+      host: '',
+      hostNote: '',
+      stale: false,
+      agent: [],
+      attention: [],
+      attentionMinutes: 0,
+      agentMinutes: 0,
+      attentionMessages: 0,
+      replyMessages: 0,
+      weight: 1,
+      beats: [],
+    })
+    const lanes = [mk('a/operator', 'Vizier — one'), mk('b/vizier', 'Vizier — two')]
+    const cards = [
+      card({ id: 'a/operator', name: 'Vizier — one' }),
+      card({ id: 'b/vizier', name: 'Vizier — two' }),
+    ]
+    const entries = buildDayEntries(
+      [{ iso: new Date(WIN.startMs + 60_000).toISOString(), subject: 'vizier: something' }],
+      lanes,
+      cards,
+      WIN,
+      WIN.startMs + 120_000,
+    )
+    const orphan = entries.find((e) => e.noLane)
+    expect(orphan?.title).toBe('vizier')
+    // Both lanes keep their own line rather than one swallowing the other.
+    expect(entries.filter((e) => e.key.startsWith('lane:'))).toHaveLength(2)
   })
 })

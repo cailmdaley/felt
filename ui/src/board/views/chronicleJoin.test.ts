@@ -1055,6 +1055,24 @@ describe('resolveNarrationSlug', () => {
     expect(resolveNarrationSlug('newsletter-batches', cards)?.id).toBe('personal/newsletter-batches')
   })
 
+  // A fiber filed under a role commits under what it is CALLED.
+  it("opens the fiber whose NAME'S FIRST WORD is the slug", () => {
+    const vizier = [{ id: 'ai-futures/tokenmaxxing/operator', name: "Vizier — at Cail's left hand" }]
+    expect(resolveNarrationSlug('vizier', vizier)?.id).toBe('ai-futures/tokenmaxxing/operator')
+  })
+
+  it('refuses a first word too short to be a name', () => {
+    expect(resolveNarrationSlug('ap', [{ id: 'work/thing', name: 'AP — the polarimeter' }])).toBeUndefined()
+  })
+
+  it('stays plain text when two fibers answer to the same first word', () => {
+    const twins = [
+      { id: 'a/operator', name: 'Vizier — one' },
+      { id: 'b/steward', name: 'Vizier — two' },
+    ]
+    expect(resolveNarrationSlug('vizier', twins)).toBeUndefined()
+  })
+
   it('stays plain text when the slug names no fiber', () => {
     expect(resolveNarrationSlug('gh-pages-docs', cards)).toBeUndefined()
     expect(resolveNarrationSlug('', cards)).toBeUndefined()

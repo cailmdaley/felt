@@ -576,6 +576,38 @@ button.kbn-day-entrytitle:focus-visible {
   color: #7A6F5C;
 }
 
+/* What the fiber HANDED OVER today: the files its workers sent, under the
+   prose that describes the work. A marginal row on purpose — the deliverable
+   is named, not displayed; the pane above and the detail panel are where one
+   is read. Absent entirely on a fiber that sent nothing, so a quiet day costs
+   no line. */
+.kbn-day-entryfiles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 4px;
+}
+.kbn-day-file {
+  appearance: none;
+  padding: 0 5px;
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 16px;
+  color: #7A6F5C;
+  background: rgba(122, 111, 92, 0.06);
+  border: 0.5px solid rgba(122, 111, 92, 0.28);
+  border-radius: 2px;
+  cursor: pointer;
+}
+.kbn-day-file:hover {
+  color: #1B1611;
+  border-color: rgba(27, 22, 17, 0.4);
+}
+.kbn-day-file:focus-visible {
+  outline: 1px dashed rgba(27, 22, 17, 0.45);
+  outline-offset: 2px;
+}
+
 /* The commits that named no fiber — kept, but kept quiet, and last. */
 .kbn-day-entry-loose { color: #7A6F5C; }
 .kbn-day-entry-loose .kbn-day-entrytitle {
@@ -590,7 +622,7 @@ button.kbn-day-entrytitle:focus-visible {
    day closes with those pages rather than another paraphrase of them.
 
    The frame is inert on purpose: `pointer-events: none` keeps the wheel with
-   the strip instead of trapping it in a nested document, and the caption is
+   the page instead of trapping it in a nested document, and the caption is
    the way in. Reading happens in the detail panel, at full size. */
 
 .kbn-day-previews {
@@ -599,14 +631,16 @@ button.kbn-day-entrytitle:focus-visible {
   border-top: 0.5px solid rgba(122, 111, 92, 0.22);
 }
 
+/* WRAPS RATHER THAN SCROLLS. A single row clipped the day: on macOS the
+   horizontal overflow shows no scrollbar at all, so a fiber past the fourth
+   pane was simply not on the page. Panes keep their plate size and their lane
+   order and run onto further rows, where the page's own vertical scroll
+   reaches every one of them. */
 .kbn-day-previewstrip {
   display: flex;
+  flex-wrap: wrap;
   gap: 14px;
-  overflow-x: auto;
-  overflow-y: hidden;
   padding-bottom: 6px;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(122, 111, 92, 0.35) transparent;
 }
 
 /* A mounted plate, not a browser tile: hairline, whisper shadow, parchment

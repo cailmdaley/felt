@@ -60,6 +60,7 @@
 import { civilDayToLocalDate, dueCivilDay, instantMs, isoDayLocal, railCivilDay } from '../civilDay.js'
 import { humanizeIdleAge, phasePillLabel } from '../KanbanSurfaces.js'
 import { fileBytesUrl, renderMarkdown } from '../utils.js'
+import { normalizeSentFiles, sentFilesInWindow, type SentFile } from '../sentFiles.js'
 import type { KanbanCard } from '../KanbanTypes.js'
 import {
   buildSessionIndex,
@@ -556,18 +557,41 @@ function minuteIndex(ms: number, win: DayWindow): number | null {
 }
 
 /**
- * The slug a fiber answers to WHEN MATCHING A COMMIT PREFIX: the leaf of its
- * id, and nothing else.
+ * The slugs a fiber answers to WHEN MATCHING A COMMIT PREFIX: the leaf of its
+ * id, plus the first word of its display name — and nothing else.
  *
  * Deliberately narrower than `cardPathSegments` (./sessionNames.js), which the
  * activity join uses. A `felt: …` commit prefix names the fiber whose leaf is
  * `felt`, not every fiber that happens to live under `felt/` — widening this
  * would make one parent directory swallow the narration of everything beneath
  * it.
+ *
+ * THE NAME'S FIRST WORD, because a fiber is routinely filed under a path leaf
+ * that is a role (`ai-futures/tokenmaxxing/operator`) while its commits are
+ * prefixed with what it is CALLED ("Vizier — at Cail's left hand" →
+ * `vizier: …`). Matching the leaf alone dropped every one of those commits to
+ * the no-lane group, on the page whose whole claim is that the two halves tell
+ * the same day. Only the first token — the rest of a name is prose, not a
+ * prefix — only when it survives slugification to three or more characters (a
+ * one- or two-letter word is a collision waiting to happen, not an identity),
+ * and only when it differs from the leaf.
+ *
+ * Widening cannot mis-attribute: `buildDayEntries` already refuses any slug
+ * two lanes answer to (`laneBySlug` → null), so a new claim that collides
+ * costs the collision, not a wrong card.
  */
 export function commitSlugsForCard(card: KanbanCard): string[] {
+  const slugs: string[] = []
   const tail = card.id.split('/').filter(Boolean).pop()
-  return tail ? [tail.toLowerCase()] : []
+  const leaf = tail ? tail.toLowerCase() : ''
+  if (leaf) slugs.push(leaf)
+  const first = (card.name ?? '').trim().split(/\s+/)[0] ?? ''
+  const alias = first
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+  if (alias.length >= 3 && alias !== leaf) slugs.push(alias)
+  return slugs
 }
 
 /**
@@ -1118,6 +1142,11 @@ export interface DayEntry {
   /** True for the unprefixed-commit group, which sits last and muted. */
   loose?: boolean
   cardId?: string
+  /** The fiber's ULID and origin — what `/api/v1/sent-files` is asked with,
+   *  after render, for the day's deliverables. Absent on a row with no card,
+   *  and on a card the feed carries no uid for (nothing to ask). */
+  uid?: string
+  originId?: string
   /** Live worker state, when one is in the air for this fiber. */
   chip?: DayChip
   /** Today's cost, for a lane's entry. Absent on rows that have no rail. */
@@ -1200,6 +1229,8 @@ export function buildDayEntries(
     const card = lane.cardId ? cardById.get(lane.cardId) : undefined
     const operational = {
       cardId: lane.cardId,
+      uid: typeof card?.uid === 'string' && card.uid.trim() ? card.uid.trim() : undefined,
+      originId: card?.originId,
       // A chip is a claim about THIS MOMENT — "there is a worker in the air".
       // On a past day that claim is false however true it is right now, so the
       // chip belongs only to the rail that contains now. The stats below are
@@ -2034,9 +2065,67 @@ class DayViewImpl implements TemporalView {
       item.append(bodyText)
 
       list.append(item)
+      // The deliverables come from a second call, per fiber, after the ledger
+      // is on screen — the same manner as the moment tooltips. The ledger must
+      // not wait on them, and a fiber that sent nothing (the common case) must
+      // cost nothing to say so.
+      if (entry.uid) void this.attachSentFiles(item, entry, model.window)
     }
     section.append(list)
     return section
+  }
+
+  /**
+   * Hang today's sent files off one ledger row.
+   *
+   * Degrades to silence at every step it can fail: no board context, an older
+   * daemon with no `/api/v1/sent-files` route, a network error, a fiber whose
+   * whole trail predates this day. A row that says nothing about deliverables
+   * is the honest rendering of "we could not ask" and of "there were none"
+   * alike — a visible empty slot would claim to distinguish them.
+   */
+  private async attachSentFiles(
+    item: HTMLElement,
+    entry: DayEntry,
+    win: DayWindow,
+  ): Promise<void> {
+    const ctx = this.ctx
+    if (!ctx || !entry.uid) return
+    const params = new URLSearchParams({ uid: entry.uid })
+    if (entry.originId) params.set('origin', entry.originId)
+    let files: SentFile[]
+    try {
+      const res = await fetch(`${ctx.shuttleBase}/api/v1/sent-files?${params.toString()}`)
+      if (!res.ok) return
+      const data = (await res.json()) as { files?: unknown }
+      files = sentFilesInWindow(normalizeSentFiles(data.files), win.startMs, win.endMs)
+    } catch {
+      return
+    }
+    // The page may have moved to another day, or re-rendered, while the call
+    // was in flight — the row we were handed is then no longer on it.
+    if (files.length === 0 || !item.isConnected) return
+
+    const row = document.createElement('div')
+    row.className = 'kbn-day-entryfiles'
+    for (const file of files) {
+      const chip = document.createElement('button')
+      chip.type = 'button'
+      chip.className = 'kbn-day-file'
+      chip.textContent = file.basename
+      chip.title = file.fullPath
+      chip.setAttribute('aria-label', `${file.basename} — open`)
+      chip.addEventListener('click', (e) => {
+        e.stopPropagation()
+        window.open(
+          fileBytesUrl(ctx.shuttleBase, file.fullPath, entry.originId ?? ''),
+          '_blank',
+          'noopener',
+        )
+      })
+      row.append(chip)
+    }
+    item.append(row)
   }
 
   /**
@@ -2097,7 +2186,10 @@ class DayViewImpl implements TemporalView {
     strip.className = 'kbn-day-previewstrip'
 
     // One observer for the strip: panes hydrate as they are scrolled to, so a
-    // ten-fiber day does not open ten reports at once.
+    // ten-fiber day does not open ten reports at once. Against the VIEWPORT,
+    // not the strip — the strip wraps and scrolls nothing of its own, so
+    // rooting the observer there would call every pane visible at once and
+    // undo the staging.
     const observer = new IntersectionObserver(
       (entries) => {
         for (const entry of entries) {
@@ -2106,7 +2198,7 @@ class DayViewImpl implements TemporalView {
           void this.hydratePane(entry.target as HTMLElement)
         }
       },
-      { root: strip, rootMargin: '200px' },
+      { rootMargin: '200px' },
     )
     this.previewObserver = observer
 

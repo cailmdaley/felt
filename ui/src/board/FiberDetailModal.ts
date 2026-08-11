@@ -17,6 +17,7 @@ import {
   type PanelGeometry,
 } from './FloatingPanelChrome.js'
 import { buildFileViewer, isScrollableFile } from './FileViewerPanel.js'
+import { disambiguateBasenames, normalizeSentFiles, type SentFile } from './sentFiles.js'
 import { humanizeCron } from './KanbanRules.js'
 import { formatSpanMinutes, instantMs, isoDayLocal } from './civilDay.js'
 import './FiberDetailModal.css'
@@ -207,18 +208,6 @@ function halfAndHalf(): { card: PanelGeometry; viewer: PanelGeometry } {
     card: { left: gutter, top, width: half, height },
     viewer: { left: 2 * gutter + half, top, width: half, height },
   }
-}
-
-/**
- * One sent deliverable on a card's trail. `fullPath` is the absolute path the
- * `/api/v1/file` route reads; `sessionId` is the worker session that pushed it
- * (display-only).
- */
-interface SentFile {
-  fullPath: string
-  basename: string
-  timestamp: number
-  sessionId?: string
 }
 
 /**
@@ -2209,8 +2198,8 @@ export class FiberDetailModal {
     try {
       const res = await fetch(`${this.shuttleBase}/api/v1/sent-files?${params.toString()}`)
       if (res.ok) {
-        const data = (await res.json()) as { files?: SentFile[] }
-        if (Array.isArray(data.files)) return data.files
+        const data = (await res.json()) as { files?: unknown }
+        if (Array.isArray(data.files)) return normalizeSentFiles(data.files)
       }
       // A non-ok (404 on an older daemon) falls through to the fallback.
     } catch {
@@ -2852,46 +2841,6 @@ function relativeTime(timestamp: number): string {
  * events.jsonl fallback reads `<home>/.shuttle/events.jsonl`. Returns
  * null for a path too shallow to carry a home (or absent).
  */
-/**
- * Give each sent file a display label that's unique within the trail. The data
- * sources (the `/api/v1/sent-files` endpoint and the events.jsonl parser) each
- * emit a bare path tail, so two distinct files both named `report.html` would be
- * indistinguishable in the launcher and the accordion. Where a basename
- * collides, walk up the path one parent segment at a time, prefixing
- * `parent-…/basename` (joined by `/`) until every colliding file's label is
- * distinct (e.g. `morning-post/report.html` vs `standalone-kanban/report.html`).
- * Files whose basename is already unique keep the bare name. The full path stays
- * available as the row/header `title` tooltip. Returns a new array; inputs are
- * not mutated (recency order is preserved).
- */
-function disambiguateBasenames(files: SentFile[]): SentFile[] {
-  const tail = (p: string) => p.split('/').filter(Boolean)
-  const byBase = new Map<string, SentFile[]>()
-  for (const f of files) {
-    const base = tail(f.fullPath).pop() ?? f.fullPath
-    ;(byBase.get(base) ?? byBase.set(base, []).get(base)!).push(f)
-  }
-  const labelFor = new Map<string, string>()
-  for (const [base, group] of byBase) {
-    if (group.length === 1) {
-      labelFor.set(group[0].fullPath, base)
-      continue
-    }
-    // Collision: extend each label leftward until all are distinct (or we run
-    // out of parent segments — then the fullest path stands in).
-    const segs = group.map((f) => tail(f.fullPath))
-    let depth = 1
-    const maxDepth = Math.max(...segs.map((s) => s.length))
-    while (depth < maxDepth) {
-      depth += 1
-      const labels = segs.map((s) => s.slice(-depth).join('/'))
-      if (new Set(labels).size === group.length) break
-    }
-    group.forEach((f, i) => labelFor.set(f.fullPath, segs[i].slice(-depth).join('/')))
-  }
-  return files.map((f) => ({ ...f, basename: labelFor.get(f.fullPath) ?? f.basename }))
-}
-
 function homeFromDir(dir: string | undefined): string | null {
   if (!dir || !dir.startsWith('/')) return null
   const segs = dir.split('/').filter(Boolean)
