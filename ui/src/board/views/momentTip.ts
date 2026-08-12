@@ -24,6 +24,13 @@
  * true statement whenever the words are not recovered, and it must never be
  * replaced by an invented sentence.
  *
+ * Between the two sits a third answer. A minute of pure tool work said nothing
+ * — but the transcript knows WHAT IT DID, and `/api/v1/moment` returns that as
+ * `tools` (`"Bash ×2 · Read"`) whenever it has no words to return. So the
+ * footer has a precedence: the words, else the tools, else the note. The tools
+ * line is drawn in a monospaced, dimmed register precisely because it is not
+ * speech; the note now appears only when there were neither words nor tools.
+ *
  * ## Fetch discipline
  *
  * A pointer crossing a rail passes over dozens of marks. {@link MomentLoader}
@@ -86,8 +93,13 @@ export interface SlotTip {
   time: string
   rows: SlotTipRow[]
   /** The recovered words, when `/api/v1/moment` found any. Absent means the
-   *  renderer draws {@link SLOT_NO_TEXT_NOTE} in their place. */
+   *  renderer falls through to {@link SlotTip.tools}, and then to
+   *  {@link SLOT_NO_TEXT_NOTE}. */
   detail?: MomentExcerpt[]
+  /** What the minute DID when it said nothing — `"Bash ×2 · Read"`. Drawn in
+   *  place of the words, in a register that is visibly not speech: nobody said
+   *  this, and a tooltip that let it read as a quote would be inventing one. */
+  tools?: string
   /** Where the words live when they could not be read from here — a remote
    *  daemon that is down. Shown instead of the note, because "gone" and
    *  "elsewhere" are different answers. */
@@ -179,6 +191,17 @@ export function renderTip(host: HTMLElement, tip: SlotTip): void {
     return
   }
 
+  // No words. What DID happen is still knowable, and naming the tools beats
+  // saying nothing happened to be said. The note survives underneath it, for
+  // the minutes where even this is unavailable.
+  if (tip.tools) {
+    const tools = document.createElement('div')
+    tools.className = 'kbn-tip-tools'
+    tools.textContent = tip.tools
+    host.append(tools)
+    return
+  }
+
   const foot = document.createElement('div')
   foot.className = 'kbn-tip-note'
   foot.textContent = tip.note ?? SLOT_NO_TEXT_NOTE
@@ -201,6 +224,8 @@ const MAX_EXCERPTS = 6
 
 export interface MomentWords {
   excerpts: MomentExcerpt[]
+  /** The tool line for a wordless mark. See {@link SlotTip.tools}. */
+  tools?: string
   /** Set when a source could not be read from here — "words live on <host>". */
   note?: string
 }
@@ -296,10 +321,14 @@ export class MomentLoader {
       .sort((a, b) => a.at_ms - b.at_ms)
       .slice(0, MAX_EXCERPTS)
     const note = results.find((result) => result.note)?.note
-    // A note only earns the footer when there is nothing to show instead: if
-    // one host answered and another is down, the words that ARE here are the
-    // better answer.
-    return excerpts.length > 0 ? { excerpts } : { ...(note ? { note } : {}) , excerpts }
+    // Precedence, strongest answer first: what was said, else what was done,
+    // else where the words live. A note only earns the footer when there is
+    // nothing to show instead — if one host answered and another is down, the
+    // words that ARE here are the better answer.
+    if (excerpts.length > 0) return { excerpts }
+    const tools = results.find((result) => result.tools)?.tools
+    if (tools) return { excerpts, tools }
+    return { ...(note ? { note } : {}), excerpts }
   }
 }
 

@@ -6,6 +6,10 @@ defmodule ShuttleWeb.MomentController do
       {"host": "dapmcw68",
        "excerpts": [{"at_ms": …, "role": "user", "text": "hi french class!…"}]}
 
+  A minute of silent tool work has no excerpts. Then — and only then — a
+  `"tools"` field carries what ran instead (`"Bash ×2 · Read"`). It is absent
+  whenever there are words, so a client never has to choose between them.
+
   `Shuttle.Moment` does the reading (a Claude Code transcript under
   `~/.claude/projects`); this controller parses the window, decides whose disk
   the words are on, and stamps the host.
@@ -49,10 +53,10 @@ defmodule ShuttleWeb.MomentController do
 
   # `nil` target = read here. Anything else is a configured remote to forward to.
   defp serve(conn, session, from_ms, to_ms, nil) do
-    json(conn, %{
-      host: Poller.own_host_id(),
-      excerpts: Moment.excerpts(session, from_ms, to_ms)
-    })
+    %{excerpts: excerpts, tools: tools} = Moment.moment(session, from_ms, to_ms)
+
+    body = %{host: Poller.own_host_id(), excerpts: excerpts}
+    json(conn, if(tools, do: Map.put(body, :tools, tools), else: body))
   end
 
   defp serve(conn, session, from_ms, to_ms, %Remote{} = remote) do

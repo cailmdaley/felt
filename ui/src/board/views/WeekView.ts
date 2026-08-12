@@ -1495,6 +1495,7 @@ export function slotTip(slot: RasterSlot, words?: MomentWords): SlotTip {
     time: `${clockTime(slot.startMs)}–${clockTime(slot.endMs)}`,
     rows,
     ...(words?.excerpts.length ? { detail: words.excerpts } : {}),
+    ...(words?.tools ? { tools: words.tools } : {}),
     ...(words?.note ? { note: words.note } : {}),
   }
 }

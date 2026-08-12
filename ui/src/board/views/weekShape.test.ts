@@ -1149,6 +1149,14 @@ describe('what a hovered slot is willing to say', () => {
     );
   });
 
+  it('carries the tool line for a slot that worked without speaking', () => {
+    const slot = slotOf([bucket({ m: bounds.startMs })]);
+    const tip = slotTip(slot, { excerpts: [], tools: 'Bash ×2 · Read' });
+    expect(tip.tools).toBe('Bash ×2 · Read');
+    // It is not speech and must never be dressed as any.
+    expect(tip.detail).toBeUndefined();
+  });
+
   it('carries the constitution flag onto the tooltip line it belongs to', () => {
     const cards = [
       card({ id: 'fiber/ship-it', name: 'ship it', runningWorker: 'w-1', shuttleKind: 'standing' }),

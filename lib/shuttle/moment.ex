@@ -24,6 +24,25 @@ defmodule Shuttle.Moment do
     * `"notification"` — `type: "system"` records with string content (bridge
       status, hook notices). Machine speech, kept separate from either voice.
 
+  ## When there are no words: what the tools were
+
+  A minute of pure tool work is silent by the rule above — the agent said
+  nothing, it *did* things. The tooltip used to answer such a minute with "the
+  minute is recorded, not the words", which is true and useless: the transcript
+  knows exactly which tools ran.
+
+  So `moment/4` returns a second field. When a window yields **zero** prose
+  excerpts, the same assistant records' `tool_use` blocks are summarised into a
+  compact line — tool names in first-appearance order, deduped with counts, and
+  one short hint for the dominant tool when the call carried a `description`:
+
+      "Bash ×2 · Read ×3 · Edit — run the activity tests"
+
+  It is deliberately a separate field (`:tools`) and not a synthetic excerpt.
+  Nobody said this; the UI must be able to draw it in a register that is
+  visibly not speech. When there are real words, `:tools` is `nil` — the words
+  are the better answer and the tooltip has no room for both.
+
   ## Defensive by construction
 
   A transcript is another program's private format, read from a directory this
@@ -49,6 +68,16 @@ defmodule Shuttle.Moment do
   @max_window_ms 2 * 60 * 60 * 1000
   @cap 6
   @max_chars 280
+
+  # The tool summary's bounds: distinct names shown, the hint's length, and the
+  # whole line's. A tooltip footer, not a log.
+  @tool_cap 5
+  @tool_hint_chars 48
+  @tool_summary_chars 120
+
+  # Tools whose input carries a human-written one-liner. Everything else's
+  # arguments are paths and payloads — noise in a footer.
+  @hint_tools ~w(Bash)
 
   # Canonical UUID. Narrow on purpose: this string becomes a glob segment.
   @uuid ~r/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/
@@ -96,26 +125,89 @@ defmodule Shuttle.Moment do
   Opts (for tests): `:root` (transcript root), `:cap`, `:max_chars`.
   """
   @spec excerpts(String.t(), integer(), integer(), keyword()) :: [excerpt()]
-  def excerpts(session, from_ms, to_ms, opts \\ [])
+  def excerpts(session, from_ms, to_ms, opts \\ []) do
+    moment(session, from_ms, to_ms, opts).excerpts
+  end
 
-  def excerpts(session, from_ms, to_ms, opts)
+  @doc """
+  Everything the transcript can say about the window: the words, and — only
+  when there are none — a one-line summary of the tools that ran instead.
+
+  Same guarantees as `excerpts/4`: never raises, absence is `%{excerpts: [],
+  tools: nil}`.
+  """
+  @spec moment(String.t(), integer(), integer(), keyword()) ::
+          %{excerpts: [excerpt()], tools: String.t() | nil}
+  def moment(session, from_ms, to_ms, opts \\ [])
+
+  def moment(session, from_ms, to_ms, opts)
       when is_binary(session) and is_integer(from_ms) and is_integer(to_ms) do
     cap = Keyword.get(opts, :cap, @cap)
     max_chars = Keyword.get(opts, :max_chars, @max_chars)
 
     case transcript_path(session, opts) do
       nil ->
-        []
+        %{excerpts: [], tools: nil}
 
       path ->
-        path
-        |> stream_excerpts(from_ms, to_ms, max_chars)
-        |> Enum.sort_by(& &1.at_ms)
-        |> Enum.take(cap)
+        {excerpts, tools} = stream_window(path, from_ms, to_ms, max_chars)
+
+        case Enum.sort_by(excerpts, & &1.at_ms) do
+          [] -> %{excerpts: [], tools: tool_summary(Enum.reverse(tools))}
+          found -> %{excerpts: Enum.take(found, cap), tools: nil}
+        end
     end
   end
 
-  def excerpts(_session, _from_ms, _to_ms, _opts), do: []
+  def moment(_session, _from_ms, _to_ms, _opts), do: %{excerpts: [], tools: nil}
+
+  @doc """
+  The tool line for a window's `tool_use` calls, oldest first, or `nil` for
+  none. Public because it is the whole judgment in this module worth testing on
+  its own: `[{"Bash", "run the tests"}, {"Bash", nil}, {"Read", nil}]` becomes
+  `"Bash ×2 · Read — run the tests"`.
+  """
+  @spec tool_summary([{String.t(), String.t() | nil}]) :: String.t() | nil
+  def tool_summary([]), do: nil
+
+  def tool_summary(calls) do
+    # First appearance fixes the order; the hint is the first one that tool
+    # offered. `Enum.reduce` over an ordered list keeps both without a sort.
+    {names, counts, hints} =
+      Enum.reduce(calls, {[], %{}, %{}}, fn {name, hint}, {names, counts, hints} ->
+        {
+          if(Map.has_key?(counts, name), do: names, else: [name | names]),
+          Map.update(counts, name, 1, &(&1 + 1)),
+          if(hint, do: Map.put_new(hints, name, hint), else: hints)
+        }
+      end)
+
+    names = names |> Enum.reverse()
+    shown = Enum.take(names, @tool_cap)
+
+    line =
+      shown
+      |> Enum.map_join(" · ", fn name ->
+        case counts[name] do
+          1 -> name
+          n -> "#{name} ×#{n}"
+        end
+      end)
+
+    line = if length(names) > @tool_cap, do: line <> " · …", else: line
+
+    dominant = Enum.max_by(shown, &counts[&1])
+
+    line =
+      case hints[dominant] do
+        nil -> line
+        hint -> line <> " — " <> hint
+      end
+
+    if String.length(line) <= @tool_summary_chars,
+      do: line,
+      else: String.slice(line, 0, @tool_summary_chars - 1) <> "…"
+  end
 
   @doc """
   The transcript file for `session`, or `nil` when no harness on this host
@@ -134,31 +226,71 @@ defmodule Shuttle.Moment do
     end
   end
 
-  defp stream_excerpts(path, from_ms, to_ms, max_chars) do
+  # One pass, two harvests: the prose excerpts and the tool calls behind them.
+  # Tools accumulate reversed — `tool_summary/1` is given them oldest-first.
+  defp stream_window(path, from_ms, to_ms, max_chars) do
     path
     |> File.stream!()
-    |> Stream.flat_map(&excerpt_for_line(&1, from_ms, to_ms, max_chars))
-    |> Enum.to_list()
+    |> Enum.reduce({[], []}, fn line, {excerpts, tools} ->
+      case in_window(line, from_ms, to_ms) do
+        {:ok, record} ->
+          {
+            excerpt_for(record, max_chars) ++ excerpts,
+            Enum.reverse(tool_calls(record)) ++ tools
+          }
+
+        :skip ->
+          {excerpts, tools}
+      end
+    end)
   rescue
     # Vanished or unreadable mid-read (a session compacting its own file).
     # A hover shows nothing rather than failing.
     error ->
       Logger.debug("moment: skipped #{path} — #{Exception.message(error)}")
-      []
+      {[], []}
   end
 
-  defp excerpt_for_line(line, from_ms, to_ms, max_chars) do
+  defp in_window(line, from_ms, to_ms) do
     with {:ok, record} <- Jason.decode(line),
          true <- is_map(record),
          {:ok, at_ms} <- at_ms(record),
-         true <- at_ms >= from_ms and at_ms <= to_ms,
-         {:ok, role} <- role(record),
+         true <- at_ms >= from_ms and at_ms <= to_ms do
+      {:ok, Map.put(record, :at_ms, at_ms)}
+    else
+      _ -> :skip
+    end
+  end
+
+  defp excerpt_for(record, max_chars) do
+    with {:ok, role} <- role(record),
          {:ok, text} <- text(record, max_chars) do
-      [%{at_ms: at_ms, role: role, text: text}]
+      [%{at_ms: record.at_ms, role: role, text: text}]
     else
       _ -> []
     end
   end
+
+  # `{name, hint}` per assistant `tool_use` block, in the order they were made.
+  defp tool_calls(%{"type" => "assistant", "message" => %{"content" => blocks}})
+       when is_list(blocks) do
+    for %{"type" => "tool_use", "name" => name} = block <- blocks, is_binary(name), name != "" do
+      {name, hint(name, block["input"])}
+    end
+  end
+
+  defp tool_calls(_), do: []
+
+  defp hint(name, %{"description" => description}) when is_binary(description) do
+    if name in @hint_tools do
+      case trim(description, @tool_hint_chars) do
+        {:ok, hint} -> hint
+        _ -> nil
+      end
+    end
+  end
+
+  defp hint(_name, _input), do: nil
 
   defp at_ms(%{"timestamp" => stamp}) when is_binary(stamp) do
     case DateTime.from_iso8601(stamp) do

@@ -1711,6 +1711,7 @@ export function beatTip(
     time: `${clockTime(startMs)}–${clockTime(startMs + MINUTE_MS)}`,
     rows,
     ...(words?.excerpts.length ? { detail: words.excerpts } : {}),
+    ...(words?.tools ? { tools: words.tools } : {}),
     ...(words?.note ? { note: words.note } : {}),
   }
 }

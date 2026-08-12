@@ -175,6 +175,113 @@ defmodule ShuttleWeb.MomentControllerTest do
     end
   end
 
+  describe "Shuttle.Moment.tool_summary/1 (the wordless minute's answer)" do
+    test "names the tools in order, deduped with counts" do
+      assert Moment.tool_summary([{"Bash", nil}, {"Read", nil}, {"Bash", nil}, {"Read", nil},
+               {"Read", nil}, {"Edit", nil}]) == "Bash ×2 · Read ×3 · Edit"
+    end
+
+    test "no calls means no line" do
+      assert Moment.tool_summary([]) == nil
+    end
+
+    test "the dominant tool's hint is appended, once" do
+      assert Moment.tool_summary([
+               {"Read", nil},
+               {"Bash", "run the activity tests"},
+               {"Bash", "and again"}
+             ]) == "Read · Bash ×2 — run the activity tests"
+    end
+
+    test "past five distinct tools the list elides rather than growing" do
+      calls = for name <- ~w(A B C D E F G), do: {name, nil}
+      assert Moment.tool_summary(calls) == "A · B · C · D · E · …"
+    end
+
+    test "the whole line is bounded" do
+      calls = [{String.duplicate("Tool", 40), "x"}]
+      summary = Moment.tool_summary(calls)
+      assert String.length(summary) == 120
+      assert String.ends_with?(summary, "…")
+    end
+  end
+
+  describe "Shuttle.Moment.moment/4 (words, else tools)" do
+    # A minute of silent tool work is the case this exists for.
+    defp tool_tree do
+      write_tree([
+        {"-Users-cail-felt", @session,
+         [
+           assistant(@t0 + 1_000, [
+             %{"type" => "thinking", "thinking" => "not addressed to anyone"},
+             %{
+               "type" => "tool_use",
+               "name" => "Bash",
+               "input" => %{"command" => "mix test", "description" => "run the tests"}
+             },
+             %{"type" => "tool_use", "name" => "Read", "input" => %{"file_path" => "/a.ex"}}
+           ]),
+           assistant(@t0 + 2_000, [%{"type" => "tool_use", "name" => "Bash", "input" => %{}}]),
+           # A tool RESULT is not a call: it must not be counted twice.
+           %{
+             "type" => "user",
+             "timestamp" => iso(@t0 + 2_500),
+             "message" => %{"content" => [%{"type" => "tool_result", "content" => "ok"}]}
+           },
+           assistant(@t0 + 9_000, [%{"type" => "text", "text" => "Done — tests pass."}])
+         ]}
+      ])
+    end
+
+    test "a wordless window answers with its tools" do
+      assert %{excerpts: [], tools: "Bash ×2 · Read — run the tests"} =
+               Moment.moment(@session, @t0, @t0 + 3_000, root: tool_tree())
+    end
+
+    test "words win: a window with prose reports no tools" do
+      assert %{excerpts: [%{text: "Done — tests pass."}], tools: nil} =
+               Moment.moment(@session, @t0, @t0 + 10_000, root: tool_tree())
+    end
+
+    test "an empty window, and an unknown session, are silent in both fields" do
+      root = tool_tree()
+      assert Moment.moment(@session, @t0 + 100_000, @t0 + 200_000, root: root) ==
+               %{excerpts: [], tools: nil}
+
+      assert Moment.moment("../../*", @t0, @t0 + 10_000, root: root) ==
+               %{excerpts: [], tools: nil}
+    end
+
+    test "the endpoint carries the tools field only when there are no words" do
+      root = tool_tree()
+      System.put_env("SHUTTLE_CLAUDE_PROJECTS_DIR", root)
+      on_exit(fn -> System.delete_env("SHUTTLE_CLAUDE_PROJECTS_DIR") end)
+
+      wordless =
+        build_conn()
+        |> get("/api/v1/moment", %{
+          "session" => @session,
+          "from_ms" => "#{@t0}",
+          "to_ms" => "#{@t0 + 3_000}"
+        })
+        |> json_response(200)
+
+      assert wordless["excerpts"] == []
+      assert wordless["tools"] == "Bash ×2 · Read — run the tests"
+
+      spoken =
+        build_conn()
+        |> get("/api/v1/moment", %{
+          "session" => @session,
+          "from_ms" => "#{@t0}",
+          "to_ms" => "#{@t0 + 10_000}"
+        })
+        |> json_response(200)
+
+      refute Map.has_key?(spoken, "tools")
+    end
+  end
+
   describe "GET /api/v1/moment (local)" do
     setup do
       root = default_tree()

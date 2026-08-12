@@ -117,6 +117,22 @@ describe('the moment fetcher', () => {
   })
 })
 
+describe('parseMoment — the tool line', () => {
+  const empty: MomentResult = { host: '', excerpts: [] }
+
+  it('reads the tools field a wordless minute carries', () => {
+    expect(parseMoment({ host: 'ada', excerpts: [], tools: 'Bash ×2 · Read' }, empty).tools).toBe(
+      'Bash ×2 · Read',
+    )
+  })
+
+  it('drops a tools field that is not a usable string', () => {
+    expect(parseMoment({ host: 'ada', excerpts: [], tools: '  ' }, empty).tools).toBeUndefined()
+    expect(parseMoment({ host: 'ada', excerpts: [], tools: 42 }, empty).tools).toBeUndefined()
+    expect(parseMoment({ host: 'ada', excerpts: [] }, empty).tools).toBeUndefined()
+  })
+})
+
 describe('MomentLoader', () => {
   const source = { session: 'sess-1', host: 'ada' }
 
@@ -183,6 +199,48 @@ describe('MomentLoader', () => {
     await vi.advanceTimersByTimeAsync(500)
     expect(calls).toEqual([])
     expect(loader.peek('slot-1')).toBeUndefined()
+  })
+
+  it('falls back to the tools of a wordless mark, and never over real words', async () => {
+    vi.useFakeTimers()
+    const { loader } = loaderOver([
+      { host: 'ada', excerpts: [], tools: 'Bash ×2 · Read' },
+      { host: 'ada', excerpts: [excerpt()], tools: 'Bash' },
+    ])
+    const seen: MomentWords[] = []
+
+    loader.request('slot-1', [source], 0, 60_000, (words) => seen.push(words))
+    await vi.advanceTimersByTimeAsync(200)
+    expect(seen[0]).toEqual({ excerpts: [], tools: 'Bash ×2 · Read' })
+
+    // The second answer has words. The daemon should not have sent tools with
+    // them, but if anything ever does, the words are what the tooltip shows.
+    loader.request('slot-2', [source], 60_000, 120_000, (words) => seen.push(words))
+    await vi.advanceTimersByTimeAsync(200)
+    expect(seen[1].tools).toBeUndefined()
+    expect(seen[1].excerpts).toHaveLength(1)
+  })
+
+  it('prefers the tools of a wordless mark to a note about a host that is down', async () => {
+    vi.useFakeTimers()
+    const loader = new MomentLoader(async (session) => {
+      return session === 'down'
+        ? { host: 'candide', excerpts: [], note: 'words live on candide' }
+        : { host: 'ada', excerpts: [], tools: 'Edit · Bash' }
+    }, 150)
+    let words: MomentWords | undefined
+
+    loader.request(
+      'slot-1',
+      [{ session: 'down', host: 'candide' }, source],
+      0,
+      60_000,
+      (w) => {
+        words = w
+      },
+    )
+    await vi.advanceTimersByTimeAsync(200)
+    expect(words).toEqual({ excerpts: [], tools: 'Edit · Bash' })
   })
 
   it('merges several sources in time order and keeps a note only when nothing was read', async () => {

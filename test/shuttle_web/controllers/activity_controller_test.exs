@@ -370,6 +370,125 @@ defmodule ShuttleWeb.ActivityControllerTest do
     end
   end
 
+  describe "Shuttle.Activity.buckets/3 — tool spans" do
+    # The whole point of the fill: a long tool call is one continuous stretch of
+    # work, and the minutes between its two stamped events belong to it.
+    test "a seven-minute tool call yields seven continuous minutes" do
+      path =
+        write_fixture([
+          event(%{"type" => "pre_tool_use", "timestamp" => @t0}),
+          event(%{"type" => "post_tool_use", "timestamp" => @t0 + 6 * @minute + 30_000})
+        ])
+
+      buckets = buckets!(path, @t0, @t0 + 10 * @minute)
+
+      assert Enum.map(buckets, & &1.m) == Enum.map(0..6, &(@t0 + &1 * @minute))
+      assert Enum.all?(buckets, &(&1 == %{m: &1.m, s: @session, cwd: @cwd, k: "agent", n: 1}))
+    end
+
+    test "an unmatched pre fills nothing at all" do
+      path = write_fixture([event(%{"type" => "pre_tool_use", "timestamp" => @t0})])
+
+      assert buckets!(path, @t0, @t0 + 10 * @minute) == [
+               %{m: @t0, s: @session, cwd: @cwd, k: "agent", n: 1}
+             ]
+    end
+
+    test "the fill stops at the cap, however late the post arrives" do
+      path =
+        write_fixture([
+          event(%{"type" => "pre_tool_use", "timestamp" => @t0}),
+          event(%{"type" => "post_tool_use", "timestamp" => @t0 + 90 * @minute})
+        ])
+
+      minutes = buckets!(path, @t0, @t0 + 120 * @minute) |> Enum.map(& &1.m)
+
+      # Minute 0 (the pre) through minute 29 (the last filled one), then the
+      # post's own minute. Nothing in between.
+      assert minutes == Enum.map(0..29, &(@t0 + &1 * @minute)) ++ [@t0 + 90 * @minute]
+    end
+
+    test "a session_start between the two ends the pairing" do
+      path =
+        write_fixture([
+          event(%{"type" => "pre_tool_use", "timestamp" => @t0}),
+          event(%{"type" => "session_start", "timestamp" => @t0 + 2 * @minute}),
+          event(%{"type" => "post_tool_use", "timestamp" => @t0 + 5 * @minute})
+        ])
+
+      assert buckets!(path, @t0, @t0 + 10 * @minute) |> Enum.map(& &1.m) ==
+               [@t0, @t0 + 2 * @minute, @t0 + 5 * @minute]
+    end
+
+    test "interleaved sessions do not cross-fill" do
+      path =
+        write_fixture([
+          event(%{"type" => "pre_tool_use", "timestamp" => @t0, "sessionId" => "sess-a"}),
+          event(%{
+            "type" => "pre_tool_use",
+            "timestamp" => @t0 + @minute,
+            "sessionId" => "sess-b",
+            "tmuxSession" => @other_session
+          }),
+          # B's tool returns first, and must fill nothing — its own pre is one
+          # minute back, and A's is not its business.
+          event(%{
+            "type" => "post_tool_use",
+            "timestamp" => @t0 + 2 * @minute,
+            "sessionId" => "sess-b",
+            "tmuxSession" => @other_session
+          }),
+          event(%{"type" => "post_tool_use", "timestamp" => @t0 + 4 * @minute, "sessionId" => "sess-a"})
+        ])
+
+      buckets = buckets!(path, @t0, @t0 + 10 * @minute)
+      by_session = Enum.group_by(buckets, & &1.s, & &1.m)
+
+      assert by_session[@session] == Enum.map(0..4, &(@t0 + &1 * @minute))
+      assert by_session[@other_session] == [@t0 + @minute, @t0 + 2 * @minute]
+    end
+
+    # A filled minute is a statement that the minute was busy. A real event in
+    # it is a count of something. The real event wins, in either order.
+    test "a real event in a filled minute replaces the fill rather than adding to it" do
+      before_post =
+        write_fixture([
+          event(%{"type" => "pre_tool_use", "timestamp" => @t0}),
+          event(%{"type" => "notification", "timestamp" => @t0 + @minute}),
+          event(%{"type" => "subagent_stop", "timestamp" => @t0 + @minute + 1_000}),
+          event(%{"type" => "post_tool_use", "timestamp" => @t0 + 3 * @minute})
+        ])
+
+      # …and the same minute reached by a real event only after the fill landed.
+      after_post =
+        write_fixture([
+          event(%{"type" => "pre_tool_use", "timestamp" => @t0, "sessionId" => "sess-a"}),
+          event(%{"type" => "post_tool_use", "timestamp" => @t0 + 3 * @minute, "sessionId" => "sess-a"}),
+          event(%{"type" => "subagent_stop", "timestamp" => @t0 + @minute, "sessionId" => "sess-b"})
+        ])
+
+      for path <- [before_post, after_post] do
+        agent =
+          path
+          |> buckets!(@t0, @t0 + 10 * @minute)
+          |> Enum.filter(&(&1.k == "agent" and &1.m == @t0 + @minute))
+
+        assert agent == [%{m: @t0 + @minute, s: @session, cwd: @cwd, k: "agent", n: 1}]
+      end
+    end
+
+    test "a call that began before the window fills only inside it" do
+      path =
+        write_fixture([
+          event(%{"type" => "pre_tool_use", "timestamp" => @t0}),
+          event(%{"type" => "post_tool_use", "timestamp" => @t0 + 5 * @minute})
+        ])
+
+      assert buckets!(path, @t0 + 2 * @minute, @t0 + 3 * @minute) |> Enum.map(& &1.m) ==
+               [@t0 + 2 * @minute, @t0 + 3 * @minute]
+    end
+  end
+
   describe "Shuttle.Activity.buckets/3 — refused windows" do
     test "an inverted window is an error" do
       assert Shuttle.Activity.buckets(@t0, @t0 - 1) == {:error, :inverted_range}

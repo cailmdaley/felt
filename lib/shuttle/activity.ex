@@ -91,6 +91,40 @@ defmodule Shuttle.Activity do
   `n` on a `"notify"` bucket therefore counts spell **onsets** in that minute,
   not notifications; `n` on the other two kinds still counts events.
 
+  ## A tool call is an interval, not two instants
+
+  `pre_tool_use` stamps the minute a tool started and `post_tool_use` the
+  minute it returned. Nothing stamps the minutes in between, so a seven-minute
+  `Bash` used to read as two marks with a five-minute hole — work that plainly
+  happened, drawn as absence. (The Day view's drawing bridge hid holes of five
+  minutes or less, which made the bug look like a long-call bug rather than
+  what it is: unrecorded interior time.)
+
+  So the fold pairs the two events and **fills the interior**. Within a
+  session, a `post_tool_use` closes the most recent unmatched `pre_tool_use`,
+  and every minute strictly between the two gains an `"agent"` bucket
+  attributed to the pre's `{tmuxSession, cwd}`. Nesting is not modelled: one
+  pending pre per session, and a second pre replaces the first.
+
+  Three guards:
+
+    * **Cap.** Only the first 30 minutes after the pre are filled. A pair
+      wider than that is either a genuinely enormous call or an abandoned pre
+      that a much later post happened to close; filling half a day of ink on
+      that guess is worse than under-drawing.
+    * **No crossing a `session_start`.** A restart discards the session's
+      pending pre — whatever that tool was doing, it was not doing it across
+      the restart.
+    * **Idempotent w.r.t. real events.** A filled minute is remembered as
+      filled; a real event landing on the same `{minute, session, cwd, kind}`
+      *replaces* the fill rather than incrementing past it, in either order. A
+      filled minute always reads `n: 1` — it is a statement that the minute was
+      busy, not a count of anything.
+
+  Pairing state, like spell state, is carried by lines before `from_ms`, so a
+  call that began before the window still fills its in-window minutes; fills
+  are clipped to the window.
+
   ## Which files, and why the rotated one is conditional
 
   `felt hook event` rotates the stream at 64 MB: the live file is renamed to
@@ -131,6 +165,9 @@ defmodule Shuttle.Activity do
   require Logger
 
   @minute_ms 60_000
+  # The widest tool call whose interior is drawn. See the moduledoc's cap note.
+  @max_fill_minutes 30
+  @max_fill_ms @max_fill_minutes * @minute_ms
   @max_range_days 120
   @max_range_ms @max_range_days * 24 * 60 * 60 * 1_000
 
@@ -191,9 +228,14 @@ defmodule Shuttle.Activity do
 
     live
     |> files_to_scan(from_ms)
-    |> Enum.reduce({%{}, %{}}, &tally_file(&1, from_ms, to_ms, &2))
+    |> Enum.reduce(new_acc(), &tally_file(&1, from_ms, to_ms, &2))
     |> emit()
   end
+
+  # `tally` counts buckets; `spells` remembers which identities sit inside an
+  # unanswered waiting spell; `pending` holds each session's open tool call;
+  # `filled` names the buckets that exist only because an interval was drawn.
+  defp new_acc, do: %{tally: %{}, spells: %{}, pending: %{}, filled: MapSet.new()}
 
   # Rotated (older) first, live second. Oldest-first is now load-bearing, not
   # just cache-friendly: spell state is a forward fold, so the files must be
@@ -227,22 +269,31 @@ defmodule Shuttle.Activity do
       acc
   end
 
-  # Two folds in one pass: `tally` counts buckets, `spells` remembers which
-  # identities are currently inside an unanswered waiting spell. Lines before
-  # `from_ms` advance `spells` only — that is what makes a window opening
-  # mid-spell honest.
-  defp tally_line(line, from_ms, to_ms, {tally, spells} = acc) do
+  # Several folds in one pass. Lines before `from_ms` advance `spells` and
+  # `pending` only — that is what makes a window opening mid-spell, or
+  # mid-tool-call, honest.
+  defp tally_line(line, from_ms, to_ms, acc) do
     case Jason.decode(line) do
+      # Past `to_ms` only one thing still matters: a tool that returns after the
+      # window closes was nonetheless running inside it, and its fill is
+      # clipped to the window. Nothing else — no kinds, no spell transition —
+      # can reach back across the boundary.
       {:ok, %{"timestamp" => ts, "type" => type} = event}
-      when is_integer(ts) and is_binary(type) and ts <= to_ms ->
+      when is_integer(ts) and is_binary(type) and ts > to_ms ->
+        track_span(acc, type, event, ts, from_ms, to_ms)
+
+      {:ok, %{"timestamp" => ts, "type" => type} = event}
+      when is_integer(ts) and is_binary(type) ->
         identity = {presence(event["tmuxSession"]), presence(event["cwd"])}
-        {kinds, spells} = classify(type, identity, spells)
+        {kinds, spells} = classify(type, identity, acc.spells)
+        acc = %{acc | spells: spells}
+        acc = track_span(acc, type, event, ts, from_ms, to_ms)
 
         if kinds == [] or ts < from_ms do
-          {tally, spells}
+          acc
         else
-          minute = div(ts, @minute_ms) * @minute_ms
-          {Enum.reduce(kinds, tally, &bump(&2, minute, identity, &1)), spells}
+          minute = floor_minute(ts)
+          Enum.reduce(kinds, acc, &bump(&2, minute, identity, &1))
         end
 
       _ ->
@@ -250,8 +301,79 @@ defmodule Shuttle.Activity do
     end
   end
 
-  defp bump(tally, minute, {session, cwd}, kind) do
-    Map.update(tally, {minute, session, cwd, kind}, 1, &(&1 + 1))
+  defp floor_minute(ts), do: div(ts, @minute_ms) * @minute_ms
+
+  # A real event owns its bucket outright. If an interval fill got there first,
+  # the fill's mark is replaced rather than added to — see the moduledoc.
+  defp bump(acc, minute, {session, cwd}, kind) do
+    key = {minute, session, cwd, kind}
+
+    if MapSet.member?(acc.filled, key) do
+      %{acc | tally: Map.put(acc.tally, key, 1), filled: MapSet.delete(acc.filled, key)}
+    else
+      %{acc | tally: Map.update(acc.tally, key, 1, &(&1 + 1))}
+    end
+  end
+
+  # ── Tool calls as intervals ────────────────────────────────────────────────
+
+  # One pending pre per session: a second pre abandons the first, which is what
+  # "the most recent unmatched pre" means when nesting is not modelled.
+  defp track_span(acc, "pre_tool_use", event, ts, _from_ms, _to_ms) do
+    case presence(event["sessionId"]) do
+      nil ->
+        acc
+
+      sid ->
+        identity = {presence(event["tmuxSession"]), presence(event["cwd"])}
+        %{acc | pending: Map.put(acc.pending, sid, {ts, identity})}
+    end
+  end
+
+  defp track_span(acc, "post_tool_use", event, ts, from_ms, to_ms) do
+    case presence(event["sessionId"]) do
+      nil ->
+        acc
+
+      sid ->
+        case Map.pop(acc.pending, sid) do
+          {{start_ts, identity}, pending} when start_ts <= ts ->
+            fill_interior(%{acc | pending: pending}, start_ts, ts, identity, from_ms, to_ms)
+
+          _ ->
+            acc
+        end
+    end
+  end
+
+  # A restarted session is not still inside whatever tool it was running.
+  defp track_span(acc, "session_start", event, _ts, _from_ms, _to_ms) do
+    case presence(event["sessionId"]) do
+      nil -> acc
+      sid -> %{acc | pending: Map.delete(acc.pending, sid)}
+    end
+  end
+
+  defp track_span(acc, _type, _event, _ts, _from_ms, _to_ms), do: acc
+
+  # The minutes strictly between the two stamped ones, capped and clipped.
+  defp fill_interior(acc, start_ts, end_ts, {session, cwd}, from_ms, to_ms) do
+    first = floor_minute(start_ts) + @minute_ms
+    last = min(floor_minute(end_ts), floor_minute(start_ts + @max_fill_ms)) - @minute_ms
+
+    first
+    |> max(floor_minute(from_ms))
+    |> Stream.iterate(&(&1 + @minute_ms))
+    |> Stream.take_while(&(&1 <= min(last, to_ms)))
+    |> Enum.reduce(acc, fn minute, acc ->
+      key = {minute, session, cwd, "agent"}
+
+      if Map.has_key?(acc.tally, key) do
+        acc
+      else
+        %{acc | tally: Map.put(acc.tally, key, 1), filled: MapSet.put(acc.filled, key)}
+      end
+    end)
   end
 
   # The spell state machine. Returns the bucket kinds this event contributes —
@@ -287,7 +409,7 @@ defmodule Shuttle.Activity do
   # Sorted so a polling client can diff two responses positionally. `nil` is an
   # atom and atoms precede binaries in Erlang term order, so unattributed
   # buckets lead their minute — arbitrary, but stable.
-  defp emit({tally, _spells}) do
+  defp emit(%{tally: tally}) do
     tally
     |> Enum.map(fn {{m, s, cwd, k}, n} -> %{m: m, s: s, cwd: cwd, k: k, n: n} end)
     |> Enum.sort_by(&{&1.m, &1.s, &1.cwd, &1.k})

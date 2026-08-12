@@ -275,6 +275,10 @@ export interface MomentExcerpt {
 export interface MomentResult {
   host: string
   excerpts: MomentExcerpt[]
+  /** What ran in a minute that said nothing — `"Bash ×2 · Read"`. The daemon
+   *  sends it ONLY when `excerpts` is empty, so it is a fallback by
+   *  construction and never competes with real words. */
+  tools?: string
   /** Set when the words exist but not on the daemon that answered — a remote
    *  that is unreachable says where they live rather than pretending they are
    *  gone. */
@@ -588,7 +592,8 @@ export function parseMoment(body: unknown, fallback: MomentResult): MomentResult
     })
   }
   const note = text(body.note)
-  return { host, excerpts, ...(note ? { note } : {}) }
+  const tools = text(body.tools)
+  return { host, excerpts, ...(note ? { note } : {}), ...(tools ? { tools } : {}) }
 }
 
 const LEADING_CIVIL_DAY_RE = /^(\d{4}-\d{2}-\d{2})/

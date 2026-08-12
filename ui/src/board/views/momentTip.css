@@ -4,7 +4,9 @@
    A slip laid over the rail, not a chrome popover: parchment ground, iron-gall
    text, one hairline border. It reports what the minute is RECORDED as — who,
    which pigment, how many events — and then either the words recovered from the
-   harness transcript or the note that they were not. See SLOT_NO_TEXT_NOTE.
+   harness transcript, or — for a minute that worked without speaking — the
+   tools that ran, or the note that neither was recovered. See
+   SLOT_NO_TEXT_NOTE and .kbn-tip-tools.
 
    The pigments are declared HERE rather than borrowed from WeekView.css,
    whose copies are scoped to its own sheet. Same hexes, one purpose each: a
@@ -133,3 +135,18 @@
 .kbn-tip-line-user .kbn-tip-text { color: #1B1611; }
 .kbn-tip-line-assistant .kbn-tip-text { color: #4A4136; }
 .kbn-tip-line-notification .kbn-tip-text { font-style: italic; color: #7A6F5C; }
+
+/* What a wordless minute did. Monospaced and dimmed so it never passes for
+   something anyone said — the tool names ARE the machine's own vocabulary, and
+   the register makes that legible without a label. */
+.kbn-tip-tools {
+  margin-top: 4px;
+  padding-top: 3px;
+  border-top: 0.5px solid rgba(122, 111, 92, 0.22);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: calc(9.5px * var(--kbn-type-scale, 1));
+  line-height: 1.35;
+  letter-spacing: 0.01em;
+  color: #97917F;
+  overflow-wrap: anywhere;
+}
