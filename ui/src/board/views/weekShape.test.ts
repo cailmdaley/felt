@@ -37,7 +37,7 @@ import {
   weekMondayForFocus,
   weekWindow,
 } from './WeekView.js';
-import { buildOriginIndex, originOf, shortCwd } from './activityOrigin.js';
+import { buildJoinIndex, originOf } from './join.js';
 import { civilDayToLocalDate, isoDayLocal, railCivilDay } from '../civilDay.js';
 import { shiftCivilDay } from './railTime.js';
 import type { ActivityBucket } from './TemporalData.js';
@@ -966,14 +966,16 @@ describe('how full a day was', () => {
 });
 
 describe('the raster tick knows whose minute it was', () => {
-  // Rung 0 (the recorded pairing) belongs to TemporalData's own suite; here the
-  // question is only what a SLOT ends up carrying, since that is what the ink
-  // and the tooltip both read.
+  // The join itself belongs to TemporalData's own suite; here the question is
+  // only what a SLOT ends up carrying, since that is what the ink and the
+  // tooltip both read. Every bucket that should be DRAWN therefore names the
+  // worker of a card the index carries — an unjoined bucket has no tick.
   const bucket = (over: Partial<ActivityBucket> & { m: number }): ActivityBucket =>
-    ({ s: null, cwd: null, k: 'agent', n: 1, ...over });
+    ({ s: 'w-1', cwd: null, k: 'agent', n: 1, ...over });
 
-  const noJoin = buildOriginIndex([]);
-  const origin = (index: ReturnType<typeof buildOriginIndex>) =>
+  const noJoin = buildJoinIndex([]);
+  const joined = buildJoinIndex([card({ id: 'fiber/notes', name: 'notes', runningWorker: 'w-1' })]);
+  const origin = (index: ReturnType<typeof buildJoinIndex>) =>
     (b: ActivityBucket) => originOf(index, b);
 
   it('folds a slot per RASTER_SLOT_MS and centres its fraction in that slot', () => {
@@ -987,7 +989,7 @@ describe('the raster tick knows whose minute it was', () => {
       ],
       bounds,
       bounds.endMs,
-      origin(noJoin),
+      origin(joined),
     );
     expect(slots.map((s) => s.index)).toEqual([0, 1]);
     expect(slots[0].kinds[0].count).toBe(2);
@@ -1006,7 +1008,7 @@ describe('the raster tick knows whose minute it was', () => {
       [bucket({ m: bounds.startMs }), bucket({ m: cut + 60_000 })],
       bounds,
       cut,
-      origin(noJoin),
+      origin(joined),
     );
     expect(slots).toHaveLength(1);
     expect(slots[0].index).toBe(0);
@@ -1014,7 +1016,7 @@ describe('the raster tick knows whose minute it was', () => {
 
   it('marks the slot constitution-driven when the joined fiber carries a shuttle block', () => {
     const bounds = railBounds('2026-08-12');
-    const index = buildOriginIndex([
+    const index = buildJoinIndex([
       card({ id: 'fiber/ship-it', name: 'ship it', runningWorker: 'w-1', shuttleKind: 'oneshot' }),
       card({ id: 'fiber/notes', name: 'notes', runningWorker: 'w-2' }),
     ]);
@@ -1030,7 +1032,11 @@ describe('the raster tick knows whose minute it was', () => {
     expect(plain.kinds[0].where).toEqual(['notes']);
   });
 
-  it('keeps unjoined work under its own name rather than guessing a fiber', () => {
+  it('draws nothing at all for work no ledger placed on a fiber', () => {
+    // A rail of shuttle work. A session the ledger never paired, and a minute
+    // in a directory, are both real work — but neither names a fiber, and a
+    // tick labelled with a session name or a folder would put a project where
+    // a fiber belongs. So the minute goes unshown rather than mislabelled.
     const bounds = railBounds('2026-08-12');
     const slots = rasterSlots(
       [
@@ -1041,8 +1047,7 @@ describe('the raster tick knows whose minute it was', () => {
       bounds.endMs,
       origin(noJoin),
     );
-    expect(slots[0].kinds[0].where).toEqual(['stray-session', '~/dev/felt']);
-    expect(slots[0].shuttle).toBe(false);
+    expect(slots).toEqual([]);
   });
 
   it('carries the slot’s transcripts, deduped, so a hover knows where to ask', () => {
@@ -1052,7 +1057,7 @@ describe('the raster tick knows whose minute it was', () => {
       ['w-1', { fiber: 'fiber/ship-it', uid: null, session: 'sess-a', host: 'ada' }],
       ['w-2', { fiber: 'fiber/notes', uid: null, session: 'sess-b', host: 'ada' }],
     ]);
-    const index = buildOriginIndex(
+    const index = buildJoinIndex(
       [
         card({ id: 'fiber/ship-it', name: 'ship it', runningWorker: 'w-1' }),
         card({ id: 'fiber/notes', name: 'notes', runningWorker: 'w-2' }),
@@ -1078,30 +1083,30 @@ describe('the raster tick knows whose minute it was', () => {
   });
 
   it('has no transcript to offer for a minute the ledger never paired', () => {
+    // Joined by the live worker's name — the tick is drawn — but no pairing
+    // means no session UUID, and so no transcript to ask `/moment` for.
     const bounds = railBounds('2026-08-12');
     const slot = rasterSlots(
-      [bucket({ m: bounds.startMs, s: 'stray-session' })],
+      [bucket({ m: bounds.startMs })],
       bounds,
       bounds.endMs,
-      origin(noJoin),
+      origin(joined),
     )[0];
     expect(slot.sources).toEqual([]);
-  });
-
-  it('folds a home directory to ~ and keeps two segments of anything else', () => {
-    expect(shortCwd('/Users/cail/dev/felt')).toBe('~/dev/felt');
-    expect(shortCwd('/home/cail')).toBe('~');
-    expect(shortCwd('/var/lib/shuttle/run')).toBe('…/shuttle/run');
   });
 });
 
 describe('what a hovered slot is willing to say', () => {
   const bounds = railBounds('2026-08-12');
+  // Every bucket names `w-1`, and the default card carries that worker: only
+  // joined work reaches a slot at all.
   const bucket = (over: Partial<ActivityBucket> & { m: number }): ActivityBucket =>
-    ({ s: null, cwd: null, k: 'agent', n: 1, ...over });
+    ({ s: 'w-1', cwd: null, k: 'agent', n: 1, ...over });
 
-  const slotOf = (buckets: ActivityBucket[], cards: KanbanCard[] = []) =>
-    rasterSlots(buckets, bounds, bounds.endMs, (b) => originOf(buildOriginIndex(cards), b))[0];
+  const slotOf = (
+    buckets: ActivityBucket[],
+    cards: KanbanCard[] = [card({ id: 'fiber/notes', name: 'notes', runningWorker: 'w-1' })],
+  ) => rasterSlots(buckets, bounds, bounds.endMs, (b) => originOf(buildJoinIndex(cards), b))[0];
 
   it('reads strongest signal first: the human, then the agent under them', () => {
     const at = bounds.startMs;

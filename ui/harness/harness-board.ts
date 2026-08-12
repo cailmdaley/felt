@@ -16,14 +16,12 @@
  * daemon would serve — only the data is mock.
  *
  * The temporal views (chronicle / day / week, hotkeys 2-4) are exercised the
- * same way: `MOCK_TEMPORAL` below injects deterministic activity + narration
- * as the `TemporalFetchers` the board would otherwise build over
- * `/api/v1/activity` and `/api/v1/narration`, so the views render with no
- * daemon to serve them. The mock mirrors the FETCHER contract — one-minute
- * buckets keyed {minute, session, cwd, kind}; narration over inclusive civil
- * days — so what the views are exercised against is the shape they really
- * receive. Both routes themselves take instants; the fetchers resolve civil
- * days to epoch-ms browser-side (see TemporalData.ts).
+ * same way: `MOCK_TEMPORAL` below injects a deterministic activity plane and
+ * the two ledgers as the `TemporalFetchers` the board would otherwise build
+ * over `/api/v1/activity`, `/sessions` and `/commits`, so the views render with
+ * no daemon to serve them. The mock mirrors the FETCHER contract — one-minute
+ * buckets, and ledger records over an instant range — so what the views are
+ * exercised against is the shape they really receive.
  *
  * Distinct from harness/harness.ts (slice C), which mounts FiberDetailModal.
  * Build: `npx vite build -c vite.harness-board.config.ts`; open the emitted
@@ -31,11 +29,10 @@
  * so the output directory is self-sufficient — nothing to copy in by hand.
  */
 import { KanbanModal } from '../src/board/KanbanModal.js'
-import { civilDayToLocalDate } from '../src/board/civilDay.js'
 import type {
   ActivityBucket,
   ActivityResult,
-  NarrationResult,
+  CommitRecord,
   SessionRecord,
   TemporalFetchers,
   TemporalOrigins,
@@ -454,11 +451,10 @@ const MOCK_FEED = {
 
 // ── Mock temporal read plane ─────────────────────────────────────────────────
 //
-// `GET /api/v1/activity` and `/api/v1/narration` exist on the daemon now
-// (lib/shuttle/activity.ex, lib/shuttle/narration.ex), but the harness has no
-// daemon at all — it runs off `file://` with a stubbed `fetch`. So it injects a
-// `TemporalFetchers` pair directly, standing in for those two routes and
-// mirroring their wire contract rather than the transport.
+// `GET /api/v1/activity`, `/sessions` and `/commits` exist on the daemon now,
+// but the harness has no daemon at all — it runs off `file://` with a stubbed
+// `fetch`. So it injects a `TemporalFetchers` set directly, standing in for
+// those routes and mirroring their wire contract rather than the transport.
 //
 // SEEDED, NOT RANDOM: every span, actor and count is derived from absolute
 // clock position through mulberry32, so two loads of the same window produce
@@ -689,63 +685,59 @@ const MOCK_SUBJECTS = [
 ]
 
 /**
- * Commits over an INCLUSIVE CIVIL-DAY range — the FETCHER's contract. This
- * mock stands in for `TemporalFetchers.narration`, not for the HTTP route, and
- * that fetcher takes civil days because that is the unit a temporal view thinks
- * in. So `narration(day, day)` is one whole day, not a zero-width window.
+ * The COMMIT LEDGER over an instant range — `GET /api/v1/commits`, one record
+ * per commit, each stamped with the harness session that made it.
  *
- * The daemon underneath takes instants only: `GET /api/v1/narration` requires
- * `from_ms`/`to_ms` and 400s anything else. The live fetcher resolves the civil
- * days to epoch-ms in the BROWSER's zone (`civilDaysToInstants`, snapping `to`
- * to 23:59:59.999) before it asks. Resolving them daemon-side is what the
- * retired `?from=&to=` form did, and it shifted the window for every browser
- * that did not share the daemon's zone.
- *
- * Leniency here MATCHES production rather than exceeding it: this mock reads
- * the leading civil day off a full ISO timestamp, and so does
- * `civilDaysToInstants`. A caller passing timestamps is well-formed against the
- * live daemon too.
- *
- * An inverted range answers `{commits: []}`. The live fetcher leaves it
- * inverted on purpose, the daemon 400s it, and the degrade path turns that
- * into the same empty result.
+ * Every record is attributed to one of {@link MOCK_SESSIONS}, because that is
+ * the only way a commit reaches a page: the views join `record.session` through
+ * the session ledger to a fiber, and a record naming no known session is drawn
+ * nowhere. A mock that emitted bare subject lines would exercise a path
+ * production does not have.
  */
-const CIVIL_DAY_PREFIX_RE = /^(\d{4}-\d{2}-\d{2})/
-const MAX_NARRATION_DAYS = 400
+const MAX_LEDGER_DAYS = 400
 
-function mockNarration(fromISO: string, toISO: string): NarrationResult {
-  const fromDay = CIVIL_DAY_PREFIX_RE.exec(fromISO.trim())?.[1]
-  const toDay = CIVIL_DAY_PREFIX_RE.exec(toISO.trim())?.[1]
-  if (!fromDay || !toDay) return { commits: [] }
-  if (fromDay > toDay) return { commits: [] }          // inverted → the daemon's 400
-  const firstDay = civilDayToLocalDate(fromDay)
-  if (!firstDay) return { commits: [] }
-
-  const commits: NarrationResult['commits'] = []
-  for (let offset = 0; offset < MAX_NARRATION_DAYS; offset += 1) {
-    const day = new Date(firstDay.getFullYear(), firstDay.getMonth(), firstDay.getDate() + offset)
+function mockCommits(fromMs: number, toMs: number): CommitRecord[] {
+  if (!(toMs >= fromMs)) return []
+  const sessions = MOCK_SESSIONS.filter((r) => r.session)
+  const records: CommitRecord[] = []
+  const first = new Date(fromMs)
+  for (let offset = 0; offset < MAX_LEDGER_DAYS; offset += 1) {
+    const day = new Date(first.getFullYear(), first.getMonth(), first.getDate() + offset)
+    if (day.getTime() > toMs) break
     const dayISO = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`
-    if (dayISO > toDay) break                          // `to` is INCLUSIVE
     const rng = seeded(seedFromString(dayISO))
     const count = 4 + Math.floor(rng() * 5)
     // Walk the subject list from a seeded start with a seeded ODD stride.
     // MOCK_SUBJECTS.length is a power of two, so any odd stride is coprime
     // with it and the walk visits distinct subjects — a day never repeats one.
     // Drawing independently did repeat, and two identical subjects under one
-    // slug render as `…; …` prose that reads like a duplication bug.
+    // fiber render as `…; …` prose that reads like a duplication bug.
     const subjectStart = Math.floor(rng() * MOCK_SUBJECTS.length)
     const subjectStride = 1 + 2 * Math.floor(rng() * (MOCK_SUBJECTS.length / 2))
     for (let i = 0; i < count; i += 1) {
       // Local 09:00-21:00, spread across the day and ordered by construction.
       const minutes = Math.floor((9 + (12 * (i + rng())) / count) * 60)
-      const at = new Date(day.getFullYear(), day.getMonth(), day.getDate(), 0, minutes)
-      commits.push({
-        iso: at.toISOString(),
+      const at = new Date(day.getFullYear(), day.getMonth(), day.getDate(), 0, minutes).getTime()
+      if (at < fromMs || at > toMs) continue
+      const source = sessions[Math.floor(rng() * sessions.length)]
+      records.push({
+        at,
+        // 40 hex digits: the parser drops anything else, exactly as the
+        // daemon's does.
+        sha: `${dayISO.replace(/-/g, '')}${String(i).padStart(2, '0')}`.padEnd(40, 'f'),
         subject: MOCK_SUBJECTS[(subjectStart + i * subjectStride) % MOCK_SUBJECTS.length],
+        repo: null,
+        files: 1 + Math.floor(rng() * 6),
+        insertions: Math.floor(rng() * 120),
+        deletions: Math.floor(rng() * 40),
+        session: source.session,
+        tmux: source.tmux,
+        cwd: null,
+        host: source.host ?? null,
       })
     }
   }
-  return { commits }
+  return records.sort((a, b) => a.at - b.at)
 }
 
 /**
@@ -851,8 +843,6 @@ const MOCK_ORIGINS: TemporalOrigins = {
 
 const MOCK_TEMPORAL: TemporalFetchers = {
   activity: (fromMs, toMs) => Promise.resolve(mockActivity(fromMs, toMs)),
-  narration: (fromISO, toISO) =>
-    Promise.resolve({ ...mockNarration(fromISO, toISO), origins: MOCK_ORIGINS }),
   // Oldest first, and filtered by the bound, exactly as the daemon serves it.
   sessions: (sinceMs) =>
     Promise.resolve({
@@ -860,10 +850,8 @@ const MOCK_TEMPORAL: TemporalFetchers = {
       records: MOCK_SESSIONS.filter((r) => r.at >= sinceMs).sort((a, b) => a.at - b.at),
       origins: MOCK_ORIGINS,
     }),
-  // The harness has no commit hook behind it, so the ledger is empty and the
-  // views fall to their prefix path — which is the state every pre-hook day of
-  // real history is in, and so worth being the offline board's default.
-  commits: () => Promise.resolve({ host: LOCAL_HOST, records: [], origins: MOCK_ORIGINS }),
+  commits: (fromMs, untilMs) =>
+    Promise.resolve({ host: LOCAL_HOST, records: mockCommits(fromMs, untilMs), origins: MOCK_ORIGINS }),
 }
 
 /**
@@ -915,7 +903,7 @@ try {
   modal.mount(host)
 
   // expose for agent-browser-driven interaction. `feedSpanMs` is the window the
-  // mock activity/narration cover, so a driving script can ask for exactly the
+  // mock activity/commits cover, so a driving script can ask for exactly the
   // range the board's cards live in.
   ;(window as unknown as { __harness: unknown }).__harness = {
     modal,

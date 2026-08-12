@@ -47,13 +47,11 @@
  * page. So paging here and pressing `4` opens Week around the same day, and
  * the two views can never drift apart.
  *
- * The join from a bucket to a fiber is the tmux session name and nothing else:
- * a Shuttle worker runs in `<slug>-<ULID>-shuttle`, and that ULID is the
- * fiber's `uid`. Work that does not join to a fiber is a tiny slice of the
- * day and is not drawn: no lane, no ledger entry — its minutes are simply not
- * on this page. The join ladder still refuses to attribute by working
- * directory (see `joinBucketToCard`); it just means unjoined minutes go
- * unshown instead of landing on a directory-named lane.
+ * THIS PAGE DRAWS SHUTTLE WORK. Both halves of it — the rails and the prose —
+ * are joined by recorded evidence alone (`./join.js`): the session ledger for
+ * the minutes, the commit ledger for the sentences. A bucket or a commit that
+ * joins no fiber is not drawn at all, and the day's totals count only what was
+ * drawn, so the figures in the head and the ink beneath them are one claim.
  *
  * NO COLOUR WITHOUT A MEANING. The board's ink has a grammar and this page
  * spends none of it decoratively: cobalt is agent activity and teal is human
@@ -72,18 +70,21 @@ import {
   buildSessionIndex,
   foldActiveMinutes,
   isOriginStale,
-  lookupSession,
-  lookupTmux,
-  parseCommitSlug,
   type ActivityBucket,
   type ActivityResult,
   type CommitRecord,
-  type NarrationCommit,
   type SessionPairing,
   type TemporalOrigins,
 } from './TemporalData.js'
 import { createViewEmptyState, createViewPage } from './ViewPage.js'
-import { cardPathSegments, cardUlids, sessionSlug, sessionUlid } from './sessionNames.js'
+import {
+  buildJoinIndex,
+  buildLedgerNarration,
+  joinBucket,
+  ledgerBetween,
+  momentSource,
+  type LedgerNarration,
+} from './join.js'
 import { formatSpanMinutes, railBounds, shiftCivilDay } from './railTime.js'
 import {
   ACTIVITY_KEY_ITEMS,
@@ -337,74 +338,6 @@ export function mergeMinuteRuns(minutes: Iterable<number>, bridge = BRIDGE_MINUT
 
 // ── Narration ────────────────────────────────────────────────────────────────
 
-/**
- * The civil days to ASK narration for, to cover a 06:00→06:00 rail.
- *
- * Both daemon routes take instants. The asymmetry is one layer up, in what
- * `TemporalData` accepts: `activity` is asked in instants and gets the rail
- * exactly, while `narration` is asked in INCLUSIVE CIVIL DAYS — the unit a
- * temporal view thinks in — and resolves them to midnight-to-midnight local
- * instants itself. So asking it for `(day, day)` returns 00:00–06:00 of the
- * day (which belongs to YESTERDAY's rail) and misses 00:00–06:00 of the next
- * day (which belongs to THIS one). On a store whose author works past midnight
- * that is not an edge case: those commits are the end of the session the rail
- * is drawing, and they would land a page early while the fiber that made them
- * got an outcome fallback saying it "worked, wrote nothing down".
- *
- * So: widen by a day and discard by the rail's real edges
- * ({@link commitsOnRail}).
- */
-export function narrationRange(dayISO: string): { from: string; to: string } {
-  return { from: dayISO, to: shiftCivilDay(dayISO, 1) }
-}
-
-/** The commits that actually fall inside the rail, by instant. Both the early
- *  and the late overhang of {@link narrationRange} are dropped here. */
-export function commitsOnRail(commits: NarrationCommit[], win: DayWindow): NarrationCommit[] {
-  return commits.filter((commit) => {
-    const at = instantMs(commit.iso)
-    return at !== undefined && at >= win.startMs && at < win.endMs
-  })
-}
-
-/** `slug: what happened` — felt's commit convention. The slug is the bold
- *  token in the prose section; the remainder is the sentence. */
-export interface SlugGroup {
-  /** The commit prefix, or null for the commits that carried none. */
-  slug: string | null
-  /** Subjects with the `slug: ` prefix removed, verbatim otherwise. */
-  subjects: string[]
-}
-
-/**
- * Group commit subjects by their leading `<slug>: ` prefix, keeping
- * first-appearance order. Commits with no prefix collect into a single
- * trailing group with a null slug.
- */
-export function groupCommitsBySlug(commits: NarrationCommit[]): SlugGroup[] {
-  const order: string[] = []
-  const bySlug = new Map<string, string[]>()
-  const loose: string[] = []
-  for (const commit of commits) {
-    if (!commit.subject.trim()) continue
-    const { slug, rest } = parseCommitSlug(commit.subject)
-    if (!slug) {
-      loose.push(rest)
-      continue
-    }
-    let bucket = bySlug.get(slug)
-    if (!bucket) {
-      bucket = []
-      bySlug.set(slug, bucket)
-      order.push(slug)
-    }
-    bucket.push(rest)
-  }
-  const groups: SlugGroup[] = order.map((slug) => ({ slug, subjects: bySlug.get(slug) ?? [] }))
-  if (loose.length > 0) groups.push({ slug: null, subjects: loose })
-  return groups
-}
-
 /** The first sentence of an outcome — the fallback line for a fiber that
  *  worked today but committed nothing. */
 export function firstSentence(text: string | undefined): string {
@@ -412,153 +345,6 @@ export function firstSentence(text: string | undefined): string {
   if (!trimmed) return ''
   const match = /^(.+?[.!?])(?:\s|$)/.exec(trimmed)
   return (match ? match[1] : trimmed).trim()
-}
-
-// ── The commit ledger ────────────────────────────────────────────────────────
-//
-// RUNG 0 FOR NARRATION, and the same kind of move rung 0 of the activity join
-// was: replace an inference with a record.
-//
-// The prose half of this page used to be attributed entirely by reading the
-// `<slug>: ` prefix off each commit subject and matching it against a lane.
-// That is a convention a human types — it can be mistyped, omitted, or shared
-// by two fibers (`felt/board` and `lightcone/board` both answer to `board`,
-// which is why the ambiguous case has to be refused rather than guessed). The
-// commit ledger is written by a hook AT COMMIT TIME and carries the harness
-// session that made the commit, so joining it through the session ledger names
-// the fiber exactly, whatever the subject line says or fails to say.
-//
-// It does not replace the prefix path, because it cannot: no ledger line exists
-// for any commit made before the hook did. So both run, and the ledger's
-// commits shadow the store log's — see {@link commitDedupeKey}.
-
-/** The ledger commits that fall inside the rail, by their recorded instant —
- *  the same edges {@link commitsOnRail} applies to the store log. */
-export function ledgerOnRail(
-  records: readonly CommitRecord[],
-  win: DayWindow,
-): CommitRecord[] {
-  return records.filter((record) => record.at >= win.startMs && record.at < win.endMs)
-}
-
-/** What the ledger says one fiber did today. */
-export interface LedgerFiber {
-  /** Subjects with the `slug: ` prefix removed — the prose the entry sets, in
-   *  the same form the prefix path produces, so a mixed entry reads as one
-   *  sentence rather than as two registers spliced. */
-  subjects: string[]
-  insertions: number
-  deletions: number
-}
-
-/**
- * The ledger, resolved onto this page: what each fiber committed, and which
- * commits are therefore spoken for.
- *
- * `claimed` holds the dedupe keys of the commits that were ATTRIBUTED, and only
- * those. A ledger record naming a fiber this board does not carry resolves to
- * nothing and claims nothing — the store-log copy of that same commit then
- * flows down the prefix path as it always did, which is the difference between
- * a commit that is narrated elsewhere and a commit that vanishes.
- */
-export interface LedgerNarration {
-  byCard: Map<string, LedgerFiber>
-  claimed: Set<string>
-}
-
-/**
- * The identity ONE store-log commit is looked up by — the sha when the log
- * carries one, else its own subject.
- *
- * The ledger claims both forms ({@link commitClaims}), so a store-log commit
- * matches whichever of the two it can offer. `Shuttle.Narration` parses
- * `git log` into `{iso, subject}` and stamps no sha, so today that is always
- * the subject; the sha path is what takes over, exactly and silently, the day
- * the store log carries one.
- */
-export function commitDedupeKey(commit: { sha?: string | null; subject: string }): string {
-  return commit.sha ? shaKey(commit.sha) : subjectKey(commit.subject)
-}
-
-/**
- * Both keys a ledger commit claims: its sha, and its subject.
- *
- * The sha is exact. The subject is a weaker key and deliberately so, because it
- * is the only one the store log can currently answer with. Its failure mode is
- * to match two genuinely different commits given the identical subject inside
- * one civil day, which UNDER-counts by one; the failure mode of having no
- * subject key at all is that every hooked commit is narrated TWICE — once
- * attributed, once by prefix — inflating every `N commits` on the page. Between
- * a rare quiet undercount and a routine visible double count, take the
- * undercount.
- *
- * A blank subject claims no subject key: it would match every other blank one.
- */
-function commitClaims(record: CommitRecord): string[] {
-  const subject = record.subject.trim()
-  return subject ? [shaKey(record.sha), subjectKey(subject)] : [shaKey(record.sha)]
-}
-
-function shaKey(sha: string): string {
-  return `sha:${sha}`
-}
-
-function subjectKey(subject: string): string {
-  return `subject:${subject.trim()}`
-}
-
-/**
- * Resolve the day's ledger commits onto the board's fibers.
- *
- * The join is `commit.session` → the session ledger's pairing → a card, HOST
- * SCOPED the way the activity join is: a commit stamped with the host it was
- * recorded on may only read a pairing recorded on that same host (see
- * `lookupSession`). Nothing here reads the subject line, which is the point.
- *
- * A record with no session (a commit made by hand, outside a harness) resolves
- * to nothing and is left to the prefix path, where a `slug: ` a human typed is
- * genuinely the best evidence available.
- */
-export function buildLedgerNarration(
-  records: readonly CommitRecord[],
-  cards: KanbanCard[],
-  bySession: ReadonlyMap<string, SessionPairing> | undefined,
-): LedgerNarration {
-  const byCard = new Map<string, LedgerFiber>()
-  const claimed = new Set<string>()
-  if (!bySession || bySession.size === 0) return { byCard, claimed }
-  const index = buildJoinIndex(cards)
-  const seen = new Set<string>()
-  for (const record of records) {
-    // The composite can serve one commit twice — a remote's cached read
-    // overlapping the local one — and a sha is a sha on every host.
-    if (seen.has(record.sha)) continue
-    const pairing = lookupSession(bySession, record.host, record.session)
-    if (!pairing) continue
-    const card = cardForPairing(index, pairing)
-    if (!card) continue
-    seen.add(record.sha)
-    let fiber = byCard.get(card.id)
-    if (!fiber) {
-      fiber = { subjects: [], insertions: 0, deletions: 0 }
-      byCard.set(card.id, fiber)
-    }
-    const { rest } = parseCommitSlug(record.subject)
-    if (rest) fiber.subjects.push(rest)
-    fiber.insertions += record.insertions
-    fiber.deletions += record.deletions
-    for (const key of commitClaims(record)) claimed.add(key)
-  }
-  return { byCard, claimed }
-}
-
-/** The store-log commits the ledger has NOT already narrated. */
-export function unclaimedCommits(
-  commits: NarrationCommit[],
-  ledger: LedgerNarration | undefined,
-): NarrationCommit[] {
-  if (!ledger || ledger.claimed.size === 0) return commits
-  return commits.filter((commit) => !ledger.claimed.has(commitDedupeKey(commit)))
 }
 
 // ── The day, assembled ───────────────────────────────────────────────────────
@@ -594,10 +380,9 @@ export interface DayLane {
   stale: boolean
   /** Where the fiber stands, drawn as a glyph before the lane's name. */
   state: LifecycleState
-  /** Board card id, when the lane joined to one — the click target. */
-  cardId?: string
-  /** Slugs this lane answers to when matching commit prefixes. */
-  slugs: string[]
+  /** The fiber this lane is. Every lane has one — an unjoined bucket is not
+   *  drawn — so this is also the click target, unconditionally. */
+  cardId: string
   agent: MinuteRun[]
   attention: MinuteRun[]
   /**
@@ -694,14 +479,28 @@ export function countExchange(
   return { sent, received }
 }
 
-/** What the whole day cost: agent minutes, attention minutes (still the rail's
- *  own measure) and the exchange across every fiber. */
-export function dayTotals(activity: ActivityResult, win: DayWindow): DayTotals {
-  const { attention, agent } = foldActiveMinutes(activity.buckets, {
+/**
+ * What the whole day cost: agent minutes, attention minutes (still the rail's
+ * own measure) and the exchange, summed across every fiber THE PAGE DRAWS.
+ *
+ * Counted over the joined buckets only, the same set the lanes are built from.
+ * A head figure larger than the ink beneath it would be a number with nothing
+ * to point at — and the minutes it counted would be work this board never
+ * dispatched.
+ */
+export function dayTotals(
+  activity: ActivityResult,
+  cards: KanbanCard[],
+  win: DayWindow,
+  byTmux?: ReadonlyMap<string, SessionPairing>,
+): DayTotals {
+  const index = buildJoinIndex(cards, byTmux)
+  const buckets = activity.buckets.filter((bucket) => joinBucket(index, bucket) !== null)
+  const { attention, agent } = foldActiveMinutes(buckets, {
     fromMs: win.startMs,
     toMs: win.endMs,
   })
-  const { sent, received } = countExchange(activity.buckets, win)
+  const { sent, received } = countExchange(buckets, win)
   return { attention, agent, messages: sent, received }
 }
 
@@ -709,139 +508,6 @@ function minuteIndex(ms: number, win: DayWindow): number | null {
   const index = Math.floor((ms - win.startMs) / MINUTE_MS)
   if (index < 0 || index >= win.minutes) return null
   return index
-}
-
-/**
- * The slug a fiber answers to WHEN MATCHING A COMMIT PREFIX: the leaf of its
- * id, and nothing else.
- *
- * Deliberately narrower than `cardPathSegments` (./sessionNames.js), which the
- * activity join uses. A `felt: …` commit prefix names the fiber whose leaf is
- * `felt`, not every fiber that happens to live under `felt/` — widening this
- * would make one parent directory swallow the narration of everything beneath
- * it.
- */
-export function commitSlugsForCard(card: KanbanCard): string[] {
-  const tail = card.id.split('/').filter(Boolean).pop()
-  return tail ? [tail.toLowerCase()] : []
-}
-
-/**
- * Which fiber a bucket belongs to, strongest evidence first:
- *
- *   0. The SESSION LEDGER — the daemon wrote down which fiber this tmux
- *      session was dispatched for. Not an inference at all: a record. It goes
- *      first because it is the only rung that can read a session name carrying
- *      no ULID and no recognizable slug (`pi-2f9c41`), which every rung below
- *      must miss.
- *   1. `s` is exactly a live worker's tmux name.
- *   2. `s` embeds a fiber ULID a card claims. Exact identity.
- *   3. `s`'s slug half names exactly one card's path segment — the name the
- *      dispatcher built the session from, including the legacy leaf-only form.
- *   4. nothing: the bucket belongs to its working directory.
- *
- * A LEDGER PAIRING NAMING A FIBER THIS BOARD DOES NOT CARRY falls THROUGH
- * rather than resolving — same refusal ChronicleView makes. Attributing to an
- * absent card would drop the minutes off the page entirely: no fiber lane to
- * receive them, and no cwd lane either, because they would count as joined.
- * Silently losing time is worse than mis-filing it.
- *
- * ATTRIBUTION BY DECLARED IDENTITY ONLY. Every rung above reads `s`, the
- * session — something the dispatcher WROTE about which fiber this worker is
- * realizing. `cwd` deliberately joins nothing. A directory names a project,
- * never a fiber: a repo root routinely shares its name with exactly one fiber
- * nested inside it, so `~/dev/felt` would resolve to whichever single card
- * happens to carry a `felt` segment, and an afternoon's work would be filed
- * under a fiber it may have nothing to do with. That holds whether or not the
- * bucket has a session — an unresolvable session is not made resolvable by the
- * folder it ran in — so there is no case left where a directory should name a
- * fiber. Unjoined work still appears, on a cwd lane that says exactly what is
- * known: which directory, and whether a worker or a human. Same ladder
- * ChronicleView runs, over the shared vocabulary in `./sessionNames.js` — a
- * leaf module both views import, so neither reaches into the other.
- *
- * Rung 3 demands a UNIQUE match. A token several cards answer to is a project
- * directory, not a fiber, so ambiguity falls through rather than picking an
- * arbitrary winner.
- */
-interface JoinIndex {
-  byWorker: Map<string, KanbanCard>
-  byUlid: Map<string, KanbanCard>
-  /** null marks a token claimed by more than one card — unusable. */
-  bySegment: Map<string, KanbanCard | null>
-  byId: Map<string, KanbanCard>
-  /** The session ledger's tmux→fiber pairings, when the board has them. */
-  byTmux?: ReadonlyMap<string, SessionPairing>
-}
-
-function buildJoinIndex(
-  cards: KanbanCard[],
-  byTmux?: ReadonlyMap<string, SessionPairing>,
-): JoinIndex {
-  const byWorker = new Map<string, KanbanCard>()
-  const byUlid = new Map<string, KanbanCard>()
-  const bySegment = new Map<string, KanbanCard | null>()
-  const byId = new Map<string, KanbanCard>()
-  for (const card of cards) {
-    byId.set(card.id, card)
-    if (card.runningWorker) byWorker.set(card.runningWorker, card)
-    for (const ulid of cardUlids(card)) byUlid.set(ulid, card)
-    for (const segment of cardPathSegments(card)) {
-      const seen = bySegment.get(segment)
-      if (seen === undefined) bySegment.set(segment, card)
-      else if (seen && seen.id !== card.id) bySegment.set(segment, null)
-    }
-  }
-  return { byWorker, byUlid, bySegment, byId, byTmux }
-}
-
-export function joinBucketToCard(
-  bucket: Pick<ActivityBucket, 's' | 'host'>,
-  index: JoinIndex,
-): KanbanCard | null {
-  if (bucket.s) {
-    // 0. What the daemon recorded. Both halves of the pairing are tried: the
-    // ULID is identity, while the fiber id is a path that can be moved out from
-    // under one.
-    //
-    // HOST-SCOPED. A tmux name is unique only within a host, and this ledger is
-    // now several daemons' merged: two machines each running `run-shuttle`
-    // would otherwise let either claim the other's minutes. `lookupTmux` tries
-    // the scoped key first and falls back to the bare name only for a bucket
-    // that cannot say where it ran.
-    const pairing = index.byTmux ? lookupTmux(index.byTmux, bucket.host, bucket.s) : undefined
-    const paired = pairing ? cardForPairing(index, pairing) : null
-    if (paired) return paired
-    const worker = index.byWorker.get(bucket.s)
-    if (worker) return worker
-    const ulid = sessionUlid(bucket.s)
-    if (ulid) {
-      const byUlid = index.byUlid.get(ulid)
-      if (byUlid) return byUlid
-    }
-    const slug = sessionSlug(bucket.s)
-    if (slug) {
-      const bySlug = index.bySegment.get(slug)
-      if (bySlug) return bySlug
-    }
-  }
-  return null
-}
-
-/**
- * The card a ledger pairing names, or null when this board does not carry it.
- *
- * BOTH HALVES of the pairing are tried, in this order: the fiber id, which is
- * the name the ledger wrote; then its ULID, which is identity and survives the
- * fiber being moved out from under that path. Shared by the two joins that read
- * a pairing — a bucket's minute and a commit's attribution — so neither can
- * drift from the other about which fiber a session belongs to.
- */
-function cardForPairing(index: JoinIndex, pairing: SessionPairing): KanbanCard | null {
-  const byFiber = index.byId.get(pairing.fiber)
-  if (byFiber) return byFiber
-  const uid = pairing.uid?.trim().toUpperCase()
-  return (uid ? index.byUlid.get(uid) : undefined) ?? null
 }
 
 /** One host's claim on a lane: how many of its buckets, and how recent. */
@@ -951,7 +617,7 @@ export function buildDayLanes(
   for (const bucket of activity.buckets) {
     const minute = minuteIndex(bucket.m, win)
     if (minute === null) continue
-    const card = joinBucketToCard(bucket, index)
+    const card = joinBucket(index, bucket)
     // A bucket that joined to no fiber is not drawn — see the module doc.
     if (!card) continue
     // Notify is not a drawn state. It is dropped at ingest rather than at
@@ -967,7 +633,6 @@ export function buildDayLanes(
           label: card.name,
           state: cardState(card),
           cardId: card.id,
-          slugs: commitSlugsForCard(card),
         },
         cardHost: (card.shuttleHost ?? '').trim().toLowerCase(),
         hosts: new Map(),
@@ -1001,12 +666,9 @@ export function buildDayLanes(
       entry.beats.set(minute, beat)
     }
     beat.kinds.set(bucket.k, (beat.kinds.get(bucket.k) ?? 0) + bucket.n)
-    // Rung 0 again, for a different purpose: the pairing that names this
-    // minute's fiber also names the session whose transcript holds its words.
-    const pairing = byTmux ? lookupTmux(byTmux, bucket.host, bucket.s) : undefined
-    beat.sources.push(
-      pairing?.session ? { session: pairing.session, host: bucket.host ?? pairing.host ?? null } : null,
-    )
+    // The same pairing that named this minute's fiber also names the session
+    // whose transcript holds its words.
+    beat.sources.push(momentSource(index, bucket))
   }
 
   const lanes: DayLane[] = [...acc.values()].map((entry) => {
@@ -1224,7 +886,6 @@ export function buildDayPreviews(
   const cardById = new Map(cards.map((card) => [card.id, card]))
   const out: DayPreview[] = []
   for (const lane of lanes) {
-    if (!lane.cardId) continue
     const card = cardById.get(lane.cardId)
     if (!card) continue
     out.push({
@@ -1299,20 +960,14 @@ function formatDiffClause(insertions: number, deletions: number): string {
 
 export interface DayEntry {
   key: string
-  /** Bold leading token. For a lane's entry it is the lane's own label, word
-   *  for word, so the two halves of the page name the same thing; for a commit
-   *  with no lane it is the slug the commit itself carried. */
+  /** Bold leading token: the lane's own label, word for word, so the two
+   *  halves of the page name the same thing. */
   title: string
   /** The prose: subjects joined with "; ", or an italic outcome fallback. */
   body: string
   /** True for the outcome fallback — set in italic, it is not a commit. */
   fallback?: boolean
-  /** True when the commit's slug names no lane on this page — work that was
-   *  committed here but did none of its running here. */
-  noLane?: boolean
-  /** True for the unprefixed-commit group, which sits last and muted. */
-  loose?: boolean
-  cardId?: string
+  cardId: string
   /** The fiber's ULID and origin — what `/api/v1/sent-files` is asked with,
    *  after render, for the day's deliverables. Absent on a row with no card,
    *  and on a card the feed carries no uid for (nothing to ask). */
@@ -1327,87 +982,35 @@ export interface DayEntry {
 }
 
 /**
- * "The day, by fiber": one entry per commit slug, then one per fiber that was
- * live on a lane but committed nothing (its outcome's first sentence stands
- * in), then the unprefixed commits under a muted marginal head.
+ * "The day, by fiber": one entry per lane, in lane order, titled exactly as its
+ * lane is — what it committed, or, when it committed nothing, the first
+ * sentence of its own outcome.
  *
- * THE LEDGER READS IN LANE ORDER, and each lane's entry is titled with that
- * lane's own label. The two halves of the page are the same day told twice —
- * rails for when, prose for what — so the reader must be able to go from a
- * rail to its sentence without hunting. Ordering the ledger by commit
- * chronology instead (as this first did) puts the two halves in unrelated
- * orders and turns an obvious correspondence into a lookup.
+ * THE PROSE READS IN LANE ORDER. The two halves of the page are the same day
+ * told twice — rails for when, prose for what — so the reader must be able to
+ * go from a rail to its sentence without hunting. Ordering by commit chronology
+ * instead (as this first did) puts the two halves in unrelated orders and turns
+ * an obvious correspondence into a lookup.
  *
- * So: one entry per fiber lane, in lane order, each titled exactly as its lane
- * is; then commits whose slug names no lane on this page; then the commits
- * that named no fiber at all. A title that is a bare slug therefore MEANS
- * "there is no rail above for this" — the name form carries the distinction
- * rather than a decoration.
- *
- * A LEAF SLUG IS NOT AN IDENTITY. Nested ids are the norm in this store, so
- * `felt/board` and `lightcone/board` both answer to `board`. Attributing such
- * a commit to whichever lane came first would open the wrong fiber on click,
- * and — worse — would count BOTH lanes as narrated, silently deleting the
- * other fiber's entry from a page that draws its rail. So an ambiguous slug is
- * refused instead: it falls to the no-lane group, carrying no card, and every
- * lane that answers to it still gets its own line. Same refusal ChronicleView
- * makes on the same hazard.
+ * There is no third kind of row. A commit the ledger cannot attribute to a
+ * fiber on this page is not this page's to narrate.
  */
 export function buildDayEntries(
-  commits: NarrationCommit[],
   lanes: DayLane[],
   cards: KanbanCard[],
   win: DayWindow,
   nowMs: number = Date.now(),
-  /** What the COMMIT LEDGER attributed — rung 0. Its commits are already
-   *  removed from `commits` by the caller, so nothing here is counted twice. */
+  /** What the COMMIT LEDGER attributed — the whole of the prose. */
   ledger?: LedgerNarration,
 ): DayEntry[] {
-  const groups = groupCommitsBySlug(commits)
   const cardById = new Map(cards.map((card) => [card.id, card]))
   const isLiveRail = nowMs >= win.startMs && nowMs < win.endMs
 
-  // slug → the one lane that owns it, or null when several answer to it.
-  const laneBySlug = new Map<string, DayLane | null>()
-  for (const lane of lanes) {
-    for (const slug of lane.slugs) {
-      const seen = laneBySlug.get(slug)
-      if (seen === undefined) laneBySlug.set(slug, lane)
-      else if (seen && seen.key !== lane.key) laneBySlug.set(slug, null)
-    }
-  }
-
-  // Sort the commit groups into: the lane each narrates (by lane key), the
-  // ones naming no lane, and the one that named no fiber at all.
-  const subjectsForLane = new Map<string, string[]>()
-  const noLane: SlugGroup[] = []
-  let loose: SlugGroup | null = null
-  for (const group of groups) {
-    if (group.slug === null) {
-      loose = group
-      continue
-    }
-    const lane = laneBySlug.get(group.slug.toLowerCase())
-    if (!lane) {
-      noLane.push(group)
-      continue
-    }
-    const existing = subjectsForLane.get(lane.key)
-    if (existing) existing.push(...group.subjects)
-    else subjectsForLane.set(lane.key, [...group.subjects])
-  }
-
   const entries: DayEntry[] = []
   for (const lane of lanes) {
-    // Rung 0 first, then the prefix path's leftovers: the recorded attribution
-    // opens the sentence, and anything the ledger could not speak for follows
-    // it. Both halves are the same register — `slug: ` already stripped — so
-    // the join reads as one line however it was assembled.
-    const recorded = lane.cardId ? ledger?.byCard.get(lane.cardId) : undefined
-    const inferred = subjectsForLane.get(lane.key)
-    const subjects =
-      recorded || inferred ? [...(recorded?.subjects ?? []), ...(inferred ?? [])] : undefined
-    const card = lane.cardId ? cardById.get(lane.cardId) : undefined
+    const recorded = ledger?.byCard.get(lane.cardId)
+    const subjects = recorded?.subjects ?? []
+    const card = cardById.get(lane.cardId)
     const operational = {
       cardId: lane.cardId,
       uid: typeof card?.uid === 'string' && card.uid.trim() ? card.uid.trim() : undefined,
@@ -1422,47 +1025,24 @@ export function buildDayEntries(
         messages: lane.attentionMessages,
         received: lane.replyMessages,
         agent: lane.agentMinutes,
-        commits: subjects?.length ?? 0,
+        commits: recorded?.commits ?? 0,
         insertions: recorded?.insertions,
         deletions: recorded?.deletions,
       },
     }
-    if (subjects && subjects.length > 0) {
-      entries.push({
-        key: `lane:${lane.key}`,
-        title: lane.label,
-        body: subjects.join('; '),
-        ...operational,
-      })
-      continue
-    }
-    // Worked, but said nothing: its own outcome stands in, in italic, so the
-    // line cannot be mistaken for something the day actually reported.
-    entries.push({
-      key: `lane:${lane.key}`,
-      title: lane.label,
-      body: firstSentence(card?.outcome) || 'worked, wrote nothing down',
-      fallback: true,
-      ...operational,
-    })
-  }
-
-  for (const group of noLane) {
-    entries.push({
-      key: `slug:${group.slug}`,
-      title: group.slug as string,
-      body: group.subjects.join('; '),
-      noLane: true,
-    })
-  }
-
-  if (loose) {
-    entries.push({
-      key: 'loose',
-      title: '— elsewhere in the store —',
-      body: loose.subjects.join('; '),
-      loose: true,
-    })
+    entries.push(
+      subjects.length > 0
+        ? { key: `lane:${lane.key}`, title: lane.label, body: subjects.join('; '), ...operational }
+        : {
+            // Worked, but said nothing: its own outcome stands in, in italic,
+            // so the line cannot be mistaken for something the day reported.
+            key: `lane:${lane.key}`,
+            title: lane.label,
+            body: firstSentence(card?.outcome) || 'worked, wrote nothing down',
+            fallback: true,
+            ...operational,
+          },
+    )
   }
   return entries
 }
@@ -1525,7 +1105,6 @@ export interface DayLedgerInput {
 export function buildDayModel(
   dayISO: string,
   activity: ActivityResult,
-  commits: NarrationCommit[],
   cards: KanbanCard[],
   shuttleBase: string,
   nowMs: number = Date.now(),
@@ -1533,8 +1112,8 @@ export function buildDayModel(
   /** The LEDGER's origins block; activity's rides on `activity` itself. */
   sessionOrigins?: TemporalOrigins,
   /** The COMMIT ledger, and the session index it joins through. Absent on a
-   *  daemon with no such route, which leaves the page exactly as it was: every
-   *  commit attributed by its `slug: ` prefix. */
+   *  daemon with no such route, which leaves the page its rails and no prose:
+   *  there is no second source for what the day said. */
   ledger?: DayLedgerInput,
 ): DayModel {
   const win = dayWindow(dayISO)
@@ -1547,10 +1126,10 @@ export function buildDayModel(
     ledger?.origins,
   )
   const lanes = buildDayLanes(activity, cards, frame, byTmux, origins)
-  // Rung 0 of the narration ladder, resolved against the RAIL — the same edges
-  // the store log is cut to, so the two sources describe one day.
+  // The prose, cut to the RAIL — the same edges the lanes are drawn to, so
+  // both halves of the page describe one day.
   const recorded = ledger
-    ? buildLedgerNarration(ledgerOnRail(ledger.records, win), cards, ledger.bySession)
+    ? buildLedgerNarration(ledgerBetween(ledger.records, win.startMs, win.endMs), cards, ledger.bySession)
     : undefined
   return {
     dayISO,
@@ -1558,22 +1137,9 @@ export function buildDayModel(
     frame,
     host: (activity.host ?? '').toLowerCase(),
     origins,
-    totals: dayTotals(activity, win),
+    totals: dayTotals(activity, cards, win, byTmux),
     lanes,
-    // The commits are the widened civil-day range; the rail decides which of
-    // them are this day's. Filtering here rather than at the call site keeps
-    // every caller of buildDayModel honest.
-    entries: buildDayEntries(
-      // Ledger first, store log second, and the store log's copy of a commit
-      // the ledger already spoke for is dropped here — one commit, one line,
-      // one tick on the `N commits` count.
-      unclaimedCommits(commitsOnRail(commits, win), recorded),
-      lanes,
-      cards,
-      win,
-      nowMs,
-      recorded,
-    ),
+    entries: buildDayEntries(lanes, cards, win, nowMs, recorded),
     stillAhead: buildStillAhead(cards, dayISO, win, nowMs),
     previews: buildDayPreviews(lanes, cards, shuttleBase),
     ledgerSize: byTmux?.size ?? 0,
@@ -1600,7 +1166,7 @@ export function dayModelSignature(model: DayModel): string {
     .join('\n')
   const ahead = model.stillAhead.map((i) => `${i.key}|${i.when ?? ''}`).join(',')
   // The ledger's size rides the signature: a pairing arriving on a later poll
-  // can move a bucket from a cwd lane onto a fiber, and the page must repaint.
+  // can give a bucket a fiber it had none for, and the page must repaint.
   const ledger = `ledger:${model.ledgerSize}`
   // The frame rides the signature — every mark's position is a fraction of it,
   // so a frame that moved is a page that must repaint even when the lanes are
@@ -1920,27 +1486,22 @@ class DayViewImpl implements TemporalView {
     return button
   }
 
-  /** Four reads — activity, narration, the session ledger and the commit
-   *  ledger — all memoized upstream, all degrading to empty on their own. */
+  /** Three reads — activity, the session ledger and the commit ledger — all
+   *  memoized upstream, all degrading to empty on their own. */
   private async load(dayISO: string): Promise<void> {
     const ctx = this.ctx
     if (!ctx) return
     const win = dayWindow(dayISO)
     const token = (this.loadToken += 1)
 
-    const range = narrationRange(dayISO)
-    const [activity, narration, sessions, commits] = await Promise.all([
-      // `to_ms` is INCLUSIVE on the endpoint while the rail's own end is
+    const [activity, sessions, commits] = await Promise.all([
+      // `to_ms` is INCLUSIVE on both endpoints while the rail's own end is
       // exclusive, so ask for the last minute we draw, not the first we don't.
       ctx.activity(win.startMs, win.endMs - MINUTE_MS),
-      ctx.narration(range.from, range.to),
       // The whole ledger, with a CONSTANT argument: it is keyed by the tuple
       // upstream, so a moving `since` would mint a fresh cache entry per poll
       // and re-fetch a file that changes a few times a day.
       ctx.sessions(0),
-      // The RAIL, not the widened civil range narration asks for: the ledger
-      // records an instant per commit, so it can be cut to the exact window
-      // this page draws and nothing has to be discarded afterwards.
       ctx.commits(win.startMs, win.endMs - MINUTE_MS),
     ])
     // A day the human has since navigated away from, or an unmounted view.
@@ -1951,7 +1512,6 @@ class DayViewImpl implements TemporalView {
     const model = buildDayModel(
       dayISO,
       activity,
-      narration.commits,
       ctx.cards,
       ctx.shuttleBase,
       Date.now(),
@@ -2071,15 +1631,13 @@ class DayViewImpl implements TemporalView {
       state.setAttribute('role', 'img')
       label.append(state)
 
-      const name = document.createElement(lane.cardId ? 'button' : 'span')
+      const name = document.createElement('button')
+      name.type = 'button'
       name.className = 'kbn-day-lanename'
       name.textContent = lane.label
       name.title = lane.label
-      if (lane.cardId && name instanceof HTMLButtonElement) {
-        name.type = 'button'
-        const cardId = lane.cardId
-        name.addEventListener('click', () => this.ctx?.openCard(cardId))
-      }
+      const laneCardId = lane.cardId
+      name.addEventListener('click', () => this.ctx?.openCard(laneCardId))
       label.append(name)
       if (lane.hostNote) {
         const host = document.createElement('span')
@@ -2244,7 +1802,6 @@ class DayViewImpl implements TemporalView {
     for (const entry of model.entries) {
       const item = document.createElement('div')
       item.className = 'kbn-day-entry'
-      if (entry.loose) item.classList.add('kbn-day-entry-loose')
       if (entry.chip || entry.stats) item.classList.add('kbn-day-entry-op')
 
       // The head: what this fiber IS right now. The chip leads because it is
@@ -2265,14 +1822,12 @@ class DayViewImpl implements TemporalView {
         head.append(square)
       }
 
-      const title = document.createElement(entry.cardId ? 'button' : 'strong')
+      const title = document.createElement('button')
+      title.type = 'button'
       title.className = 'kbn-day-entrytitle'
       title.textContent = entry.title
-      if (entry.cardId && title instanceof HTMLButtonElement) {
-        title.type = 'button'
-        const cardId = entry.cardId
-        title.addEventListener('click', () => this.ctx?.openCard(cardId))
-      }
+      const entryCardId = entry.cardId
+      title.addEventListener('click', () => this.ctx?.openCard(entryCardId))
       head.append(title)
 
       const statLine = entry.stats ? formatEntryStats(entry.stats) : ''
@@ -2364,7 +1919,7 @@ class DayViewImpl implements TemporalView {
    * worker actions already live. Both land somewhere useful — the fallback is
    * one click further from the tmux session.
    */
-  private buildChip(chip: DayChip, cardId: string | undefined): HTMLButtonElement {
+  private buildChip(chip: DayChip, cardId: string): HTMLButtonElement {
     const el = document.createElement('button')
     el.type = 'button'
     el.className = `kbn-card-worker kbn-day-chip${
@@ -2381,7 +1936,7 @@ class DayViewImpl implements TemporalView {
       // opens the fiber instead, where the worker actions live.
       const ctx = this.ctx
       if (ctx?.openWorker) ctx.openWorker(chip.tmux, chip.host)
-      else if (cardId) ctx?.openCard(cardId)
+      else ctx?.openCard(cardId)
     })
     return el
   }

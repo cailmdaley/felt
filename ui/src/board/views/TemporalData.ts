@@ -1,20 +1,16 @@
 /**
  * TemporalData — the read plane the temporal views share.
  *
- * Four daemon feeds, all read-only and all OPTIONAL:
+ * Three daemon feeds, all read-only and all OPTIONAL:
  *
  *   activity   coarse per-minute activity buckets (what the machine was doing)
- *   narration  the commit trail over a window (what the work says it did)
  *   sessions   the fiber↔session ledger (whose work a minute was)
  *   commits    the commit↔session ledger (whose work a COMMIT was)
  *
- * `narration` and `commits` describe the same events from opposite ends.
- * Narration reads `git log` at read time — it covers all history and knows
- * nothing about who made a commit beyond what the subject line says. The commit
- * ledger is written by a hook at commit time — it knows the session exactly and
- * so the fiber exactly, and it covers only what happened after the hook
- * existed. A view wanting attribution reads the ledger first and falls back to
- * the subject line, deduping on sha.
+ * The two ledgers are RECORDS, written when the thing happened: the dispatcher
+ * wrote the session down, a hook wrote the commit down. That is why they are
+ * the only sources the views join on — a commit's subject line is a convention
+ * a human types, and a page built on it attributes work by guessing.
  *
  * Each is asked for CROSS-HOST FIRST — `/api/v1/<feed>/composite`, which serves
  * this daemon's live read concatenated with every remote's cached read, each
@@ -26,15 +22,12 @@
  * pays a wasted probe per window. Either way the result carries hosts and an
  * origins block, so a view never branches on which route answered.
  *
- * BOTH ROUTES TAKE INSTANTS, and that is the point. `narration` still *reads*
- * inclusive civil days from its callers — that is the unit a temporal view
- * thinks in — but it resolves them to epoch-ms HERE, in the browser's zone,
- * and sends `from_ms`/`to_ms`. Resolving a civil day in the DAEMON's zone
- * instead shifts the whole window by the offset between them: a UTC daemon
- * serving a UTC+2 browser moved it two hours and could drop a day's commits
- * outright (measured; see `Shuttle.Narration`'s moduledoc). Instants are
- * timezone-free, so the skew cannot happen — which is why the zone-resolving
- * form is the browser's job and the routes do not offer one.
+ * EVERY ROUTE TAKES INSTANTS, and that is the point. A civil day resolved in
+ * the DAEMON's zone is a different window from the same day resolved in the
+ * browser's: a UTC daemon serving a UTC+2 browser moves it two hours and can
+ * drop a day's work outright (measured). So a view resolves its own civil days
+ * here, in the browser's zone, and the routes only ever speak `from_ms`/
+ * `to_ms`.
  *
  * A daemon older than these routes answers 404. That must not break the board,
  * so every failure path — 404, 5xx, network error, malformed body — resolves to
@@ -48,7 +41,6 @@
  * daemon from being re-probed every poll.
  */
 
-import { civilDayToLocalDate } from '../civilDay.js'
 
 /** One coarse activity bucket. Field names are the wire's — deliberately
  *  terse, because a day of minute buckets is a lot of JSON:
@@ -77,23 +69,6 @@ export interface ActivityResult {
   to_ms: number
   buckets: ActivityBucket[]
   origins?: TemporalOrigins
-}
-
-export interface NarrationCommit {
-  iso: string
-  subject: string
-  /** The daemon whose store the commit came from; absent when unstamped. */
-  host?: string | null
-  /**
-   * The commit's own sha, when the store log carries one.
-   *
-   * `Shuttle.Narration` parses `<iso><sep><subject>` and stamps no sha today,
-   * so this is absent on every live line — it is read here because the sha is
-   * the only exact identity a store-log commit and a LEDGER commit can be
-   * matched on, and a daemon that starts emitting it should be believed
-   * without a second migration. See `dedupeAgainstLedger` in DayView.
-   */
-  sha?: string | null
 }
 
 /**
@@ -214,15 +189,15 @@ export interface SessionsResult {
  * One line of the COMMIT LEDGER — a commit and the harness session that made
  * it, as the commit hook wrote it.
  *
- * This is the record that retires prefix-parsing as the primary attribution.
- * A `slug: ` prefix is a convention a human types and can mistype; `session` is
- * the id the harness was running under at the moment of the commit, so joining
- * it through the session ledger names the fiber as a FACT rather than as a
- * reading of the subject line. The prefix path stays as the fallback, because
- * every commit made before the hook existed has no ledger line at all.
+ * This is the record that retired prefix-parsing. A `slug: ` prefix is a
+ * convention a human types and can mistype; `session` is the id the harness was
+ * running under at the moment of the commit, so joining it through the session
+ * ledger names the fiber as a FACT rather than as a reading of the subject
+ * line. It covers only commits made after the hook existed — a page simply has
+ * no prose for the days before that, which is the honest answer.
  *
  *   at          epoch-ms the commit was recorded
- *   sha         the commit's 40-hex sha — the identity the dedupe rests on
+ *   sha         the commit's 40-hex sha — the commit's identity
  *   subject     the commit subject, verbatim
  *   repo        absolute path of the repo root, or null
  *   files       files touched
@@ -303,11 +278,6 @@ export interface SessionIndex {
   bySession: Map<string, SessionPairing>
 }
 
-export interface NarrationResult {
-  commits: NarrationCommit[]
-  origins?: TemporalOrigins
-}
-
 /** Cache lifetime. Comfortably longer than the board's 15s poll, so a view
  *  that refreshes on every poll hits the network at most once a minute. */
 export const TEMPORAL_TTL_MS = 60_000
@@ -317,7 +287,6 @@ export const TEMPORAL_TTL_MS = 60_000
  *  mock implementation of the same shape. */
 export interface TemporalFetchers {
   activity(fromMs: number, toMs: number): Promise<ActivityResult>
-  narration(fromISO: string, toISO: string): Promise<NarrationResult>
   sessions(sinceMs: number): Promise<SessionsResult>
   /**
    * The FLEET's commit ledger over `[sinceMs, untilMs]` — every commit the
@@ -463,35 +432,6 @@ export function createTemporalFetchers(shuttleBase: string): TemporalFetchers {
     },
 
     /**
-     * @param fromISO first civil day, inclusive (`YYYY-MM-DD`).
-     * @param toISO   last civil day, INCLUSIVE — the window runs through the
-     *                end of this day, not up to its start.
-     *
-     * The cache key stays the caller's ISO tuple, not the resolved instants:
-     * the day pair is what a view re-asks for, and keying on the instants
-     * would only add a way for the two to disagree.
-     */
-    narration(fromISO: string, toISO: string): Promise<NarrationResult> {
-      return memo(`narration:${fromISO}:${toISO}`, async () => {
-        const empty: NarrationResult = { commits: [], origins: {} }
-        const span = civilDaysToInstants(fromISO, toISO)
-        // Unreadable days used to be sent as-is and answered with a 400, which
-        // the degrade path turned into an empty result. Same outcome, one round
-        // trip cheaper.
-        if (!span) return empty
-        try {
-          const body = await readFeed(
-            'narration',
-            `from_ms=${span.fromMs}&to_ms=${span.toMs}`,
-          )
-          return parseNarration(body, empty)
-        } catch {
-          return empty
-        }
-      })
-    },
-
-    /**
      * This host's session ledger from `sinceMs` onward, oldest first.
      *
      * `since_ms` is optional daemon-side and defaults to the whole ledger; pass
@@ -596,44 +536,6 @@ export function parseMoment(body: unknown, fallback: MomentResult): MomentResult
   return { host, excerpts, ...(note ? { note } : {}), ...(tools ? { tools } : {}) }
 }
 
-const LEADING_CIVIL_DAY_RE = /^(\d{4}-\d{2}-\d{2})/
-
-/**
- * Resolve an INCLUSIVE civil-day pair to the epoch-ms window covering it, in
- * the BROWSER's timezone — the whole substance of the instant migration.
- *
- * `from` becomes local midnight of its day; `to` becomes local 23:59:59.999 of
- * its day, because `to` is inclusive and the window has to reach the end of it.
- * Those two land exactly where the daemon's legacy civil form put them
- * (`--since=<day> 00:00:00` / `--until=<day> 23:59:59`), so a browser and
- * daemon sharing a timezone see byte-identical results before and after — the
- * migration only bites where the two zones DIFFER, which is the bug.
- *
- * `new Date(y, m, d, …)` is the local-time constructor, so DST is handled by
- * the platform: a 23-hour day is 23 hours here. The one place it slips is a
- * zone whose DST transition is at midnight itself (America/Santiago, Lord
- * Howe), where local midnight does not exist and the runtime rolls forward an
- * hour. That costs an hour at the head of the window in two zones twice a
- * year, against a decorative commit strip — not worth a timezone library.
- *
- * Null when either end carries no readable civil day. A full ISO timestamp is
- * read for its leading day, which keeps a caller that hands over an instant
- * working rather than blanking its strip.
- */
-export function civilDaysToInstants(
-  fromISO: string,
-  toISO: string,
-): { fromMs: number; toMs: number } | null {
-  const fromDay = LEADING_CIVIL_DAY_RE.exec(fromISO.trim())?.[1]
-  const toDay = LEADING_CIVIL_DAY_RE.exec(toISO.trim())?.[1]
-  if (!fromDay || !toDay) return null
-  const from = civilDayToLocalDate(fromDay)
-  const to = civilDayToLocalDate(toDay)
-  if (!from || !to) return null
-  to.setHours(23, 59, 59, 999)
-  return { fromMs: from.getTime(), toMs: to.getTime() }
-}
-
 const BUCKET_KINDS = new Set<ActivityBucket['k']>(['attention', 'notify', 'agent', 'reply'])
 
 /** Coerce a wire body into an ActivityResult, dropping malformed buckets. */
@@ -730,25 +632,6 @@ export function staleOrigins(origins: TemporalOrigins): string[] {
     .sort()
 }
 
-/** Coerce a wire body into a NarrationResult, dropping malformed commits. */
-function parseNarration(body: unknown, fallback: NarrationResult): NarrationResult {
-  if (!isRecord(body)) return fallback
-  const host = typeof body.host === 'string' ? body.host : ''
-  const raw = Array.isArray(body.commits) ? body.commits : []
-  const commits: NarrationCommit[] = []
-  for (const entry of raw) {
-    if (!isRecord(entry)) continue
-    if (typeof entry.iso !== 'string' || typeof entry.subject !== 'string') continue
-    commits.push({
-      iso: entry.iso,
-      subject: entry.subject,
-      host: text(entry.host) ?? (host || null),
-      sha: normalizeSha(entry.sha),
-    })
-  }
-  return { commits, origins: parseOrigins(body.origins, host) }
-}
-
 const SESSION_KINDS = new Set<SessionRecord['kind']>(['dispatch', 'claim', 'resume'])
 
 /**
@@ -800,10 +683,10 @@ export function normalizeSha(value: unknown): string | null {
 /**
  * Coerce a wire body into a CommitsResult, dropping malformed lines.
  *
- * A line with no readable SHA is dropped, not repaired. The sha is what lets a
- * ledger commit and a store-log commit be recognized as one commit; a record
- * without one cannot be deduped, so keeping it would risk narrating the same
- * commit twice — the exact defect the ledger exists to remove.
+ * A line with no readable SHA is dropped, not repaired. The sha is a commit's
+ * identity, and it is what lets the same commit served twice — a remote's
+ * cached read overlapping the local one — be recognized as one commit rather
+ * than narrated twice.
  *
  * `kind` is read but not required: the route serves commits, and a daemon that
  * stamps the field is only agreeing with the path it was reached on. A record

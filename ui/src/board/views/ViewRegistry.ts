@@ -30,7 +30,6 @@ import type {
   ActivityResult,
   CommitsResult,
   MomentResult,
-  NarrationResult,
   SessionsResult,
 } from './TemporalData.js'
 
@@ -63,7 +62,6 @@ export interface ViewContext {
    */
   shuttleBase: string
   activity(fromMs: number, toMs: number): Promise<ActivityResult>
-  narration(fromISO: string, toISO: string): Promise<NarrationResult>
   /**
    * The FLEET's session ledger from `sinceMs` onward, oldest first. Pass 0 for
    * the whole history — the file holds one line per session, not per event.
@@ -81,12 +79,11 @@ export interface ViewContext {
    * The FLEET's COMMIT ledger over `[sinceMs, untilMs]`, both instants — every
    * commit the hook recorded, each carrying the harness session that made it.
    *
-   * This is what retires prefix-parsing as a view's primary attribution: join
-   * `record.session` through `buildSessionIndex(...).bySession` (with
-   * `lookupSession`, host-scoped) and the fiber is a recorded fact rather than
-   * a reading of the subject line. It covers only commits made since the hook
-   * existed, so a view must keep its prefix path for older history and dedupe
-   * the two by `sha`.
+   * This is what retired prefix-parsing: join `record.session` through
+   * `buildSessionIndex(...).bySession` (with `lookupSession`, host-scoped) and
+   * the fiber is a recorded fact rather than a reading of the subject line. It
+   * covers only commits made since the hook existed — the days before it have
+   * no prose, which is the honest answer rather than a guessed one.
    */
   commits(sinceMs: number, untilMs: number): Promise<CommitsResult>
   /**

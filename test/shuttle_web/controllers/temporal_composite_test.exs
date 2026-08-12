@@ -315,29 +315,6 @@ defmodule ShuttleWeb.TemporalCompositeTest do
     end
   end
 
-  describe "GET /api/v1/narration/composite" do
-    test "stamps each commit with its origin and filters to the window" do
-      with_remote(%{
-        "/api/v1/narration" => %{
-          "commits" => [
-            %{"iso" => "2026-02-02T02:40:00Z", "subject" => "inside"},
-            %{"iso" => "2020-01-01T00:00:00Z", "subject" => "outside"}
-          ]
-        }
-      })
-
-      conn = get(api_conn(), "/api/v1/narration/composite?from_ms=#{@t0}&to_ms=#{@t0 + @day}")
-
-      assert %{"commits" => commits, "origins" => origins, "host" => host} =
-               json_response(conn, 200)
-
-      remote = Enum.filter(commits, &(&1["host"] == "candide"))
-      assert Enum.map(remote, & &1["subject"]) == ["inside"]
-      assert origins["candide"]["kind"] == "remote"
-      assert origins[host]["kind"] == "local"
-    end
-  end
-
   describe "a disconnected remote" do
     test "keeps its history on screen, marked stale with its last-seen time" do
       with_data_files([], [])
@@ -365,10 +342,6 @@ defmodule ShuttleWeb.TemporalCompositeTest do
     test "/sessions serves an ETag and 304s an unchanged ledger" do
       with_data_files([], [%{"fiber" => "a", "session" => "s", "at" => @t0}])
       assert_etag_round_trip("/api/v1/sessions?since_ms=0")
-    end
-
-    test "/narration serves an ETag and 304s an unchanged store" do
-      assert_etag_round_trip("/api/v1/narration?from_ms=#{@t0}&to_ms=#{@t0 + @day}")
     end
 
     test "/activity's ETag distinguishes windows" do

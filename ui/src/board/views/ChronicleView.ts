@@ -19,15 +19,12 @@
  * `buildTimelineDays`, which strides by calendar day, so a 23-hour DST day is
  * still exactly one column.
  *
- * THE JOIN. Activity buckets know a session and a working directory; they do
- * not know a fiber. Resolving one to the other is a ladder of decreasing
- * confidence — see {@link attributeActivity}. THE PAGE DRAWS FIBER ROWS ONLY:
- * whatever the ladder cannot place on a fiber is left undrawn. It is a thin
- * slice of the record, and a row named after a directory would teach the wrong
- * unit — this page is about fibers, and a chronicle that hedges about its own
- * unit is harder to read than one that leaves a little out. The attribution
- * still separates the unplaced work (`Attribution.byCwd`), so nothing about the
- * join's honesty depends on what the view chooses to ink.
+ * THE JOIN. An activity bucket knows a session, not a fiber; the session
+ * ledger is what pairs the two, and it is the only thing consulted (`./join.js`
+ * carries the whole of it, shared with Day and Week). THE PAGE DRAWS FIBER ROWS
+ * ONLY: a bucket the ledger cannot place is not drawn. This page is about
+ * fibers, and a row named after a working directory would teach its unit
+ * wrong.
  *
  * ERAS. The strip above the rows carries cycles. Two gestures make one: drag
  * across days to draw a span and name it, or press `+` to SPEAK an era — a
@@ -37,7 +34,12 @@
 
 import { normalizeFocusDate, registerView, type TemporalView, type ViewContext } from './ViewRegistry.js'
 import { createViewEmptyState, createViewPage } from './ViewPage.js'
-import { cardPathSegments, cardUlids, sessionSlug, sessionUlid } from './sessionNames.js'
+import {
+  buildJoinIndex,
+  buildLedgerNarration,
+  joinBucket,
+  type LedgerNarration,
+} from './join.js'
 import {
   ACTIVITY_KEY_ITEMS,
   MARK_GLYPH,
@@ -53,8 +55,6 @@ import {
   buildSessionIndex,
   foldActiveMinutes,
   isOriginStale,
-  lookupTmux,
-  parseCommitSlug,
   staleOrigins,
   type ActivityBucket,
   type SessionPairing,
@@ -154,168 +154,27 @@ function boardOrigin(response: KanbanResponse): string {
 // ── Pure join + aggregation (exported for chronicleJoin.test.ts) ─────────────
 
 /**
- * A working directory as a row label: a home prefix folds to `~`, and anything
- * else keeps its last three segments. There is no `$HOME` in a browser, so the
- * home shapes are matched structurally (`/home/<user>/…`, `/Users/<user>/…`).
- */
-export function abbreviateCwd(cwd: string): string {
-  const parts = cwd.split('/').filter(Boolean)
-  if (parts.length >= 2 && (parts[0] === 'home' || parts[0] === 'Users')) {
-    const rest = parts.slice(2).join('/')
-    return rest ? `~/${rest}` : '~'
-  }
-  if (parts.length <= 3) return `/${parts.join('/')}`
-  return `…/${parts.slice(-3).join('/')}`
-}
-
-export interface Attribution {
-  /** Buckets that resolved to a fiber, keyed by card id. */
-  byCard: Map<string, ActivityBucket[]>
-  /** Buckets that did not, grouped by their raw working directory. */
-  byCwd: Map<string, ActivityBucket[]>
-  /** Buckets with neither a resolvable session nor a cwd — nowhere to draw. */
-  dropped: number
-}
-
-/**
- * Place each activity bucket on a fiber, on a working directory, or nowhere.
+ * Place each activity bucket on the fiber the session ledger recorded for it.
  *
- * The ladder, strongest rung first:
- *
- *   0. the SESSION LEDGER pairs `s` with a fiber. A recorded fact about whose
- *      work the session was, so it beats every rung below it, all of which are
- *      inferences from a name.
- *   1. `s` is exactly a live worker's tmux name (`card.runningWorker`).
- *   2. `s` embeds a fiber ULID that a card claims. Exact identity.
- *   3. `s`'s slug half names exactly one card's path segment. A guess, but a
- *      good one — it is the name the dispatcher built the session from.
- *   4. otherwise the bucket belongs to its `cwd`, as human work.
- *
- * Rung 3 requires a UNIQUE match. A token matching several cards is a project
- * directory, not a fiber — `~/loom` names every fiber under the loom — so
- * ambiguity falls to the cwd row rather than picking an arbitrary winner.
- *
- * NO DIRECTORY RUNG. There used to be one: "`cwd`'s tail segment names exactly
- * one card". It was wrong in both directions, and each direction was caught on
- * real data:
- *
- *   - for a bucket WITH a session, a worker whose fiber is off this board
- *     (another store, a city-scoped board, a deleted fiber) had its minutes
- *     inked onto whichever card happened to own the directory's tail — a
- *     wedding-planning worker drawn on a website fiber's lifeline;
- *   - for a bucket WITHOUT one, an afternoon of a human's keystrokes in a
- *     project directory was filed under the single nested fiber whose path
- *     happened to contain that segment.
- *
- * The two failures share a cause, which is the principle this ladder now
- * follows: A DIRECTORY TAIL IS EVIDENCE ABOUT A PROJECT; A SESSION NAME IS
- * EVIDENCE ABOUT A WORKER. A project is not a fiber, so a directory can never
- * establish fiber identity — narrowing which buckets may use it only picks
- * which half of the error to keep. Work that names no fiber lands on a
- * synthetic cwd row, visible and labelled for what it is. Nothing is dropped;
- * it is simply not attributed to a fiber that did not earn it.
+ * The ladder and its refusals live in `./join.js`, shared with Day and Week so
+ * the three pages can never disagree about whose minute a minute was. Buckets
+ * that join nothing are dropped here: the chronicle has no row to draw them on.
  */
 export function attributeActivity(
   buckets: readonly ActivityBucket[],
   cards: readonly KanbanCard[],
   byTmux?: ReadonlyMap<string, SessionPairing>,
-): Attribution {
-  const byWorker = new Map<string, string>()
-  const byUlid = new Map<string, string>()
-  // `null` marks a token claimed by more than one card — ambiguous, unusable.
-  const bySlug = new Map<string, string | null>()
-
-  for (const card of cards) {
-    if (card.runningWorker) byWorker.set(card.runningWorker, card.id)
-    for (const ulid of cardUlids(card)) byUlid.set(ulid, card.id)
-    for (const slug of cardPathSegments(card)) {
-      const seen = bySlug.get(slug)
-      if (seen === undefined) bySlug.set(slug, card.id)
-      else if (seen !== card.id) bySlug.set(slug, null)
-    }
-  }
-
-  const cardIds = new Set(cards.map((c) => c.id))
-
+): Map<string, ActivityBucket[]> {
+  const index = buildJoinIndex(cards, byTmux)
   const byCard = new Map<string, ActivityBucket[]>()
-  const byCwd = new Map<string, ActivityBucket[]>()
-  let dropped = 0
-
-  const push = (map: Map<string, ActivityBucket[]>, key: string, b: ActivityBucket): void => {
-    const list = map.get(key)
-    if (list) list.push(b)
-    else map.set(key, [b])
-  }
-
   for (const bucket of buckets) {
-    const cardId = resolveCard(bucket, byWorker, byUlid, bySlug, byTmux, cardIds)
-    if (cardId) {
-      push(byCard, cardId, bucket)
-      continue
-    }
-    if (bucket.cwd) push(byCwd, bucket.cwd, bucket)
-    else dropped += 1
+    const card = joinBucket(index, bucket)
+    if (!card) continue
+    const list = byCard.get(card.id)
+    if (list) list.push(bucket)
+    else byCard.set(card.id, [bucket])
   }
-
-  return { byCard, byCwd, dropped }
-}
-
-/**
- * Walk one bucket down the ladder. Written as explicit checks rather than a
- * chain of `map.get(x ?? SENTINEL)` — a lookup keyed on a stand-in for "absent"
- * only works while the stand-in is a string no real key could be, and that is a
- * property nobody can see at the call site.
- */
-function resolveCard(
-  bucket: ActivityBucket,
-  byWorker: Map<string, string>,
-  byUlid: Map<string, string>,
-  bySlug: Map<string, string | null>,
-  byTmux: ReadonlyMap<string, SessionPairing> | undefined,
-  cardIds: ReadonlySet<string>,
-): string | undefined {
-  // 0. The session ledger. Both halves of the pairing are tried, because the
-  // ULID is identity while the id is a path that can be moved underneath one.
-  //
-  // A pairing whose fiber is NOT on this board falls THROUGH rather than
-  // resolving. Attributing to an absent card would drop the work from the page
-  // entirely — it would leave the cwd rows without gaining a fiber row — and
-  // silently losing minutes is the one thing worse than mis-filing them.
-  //
-  // HOST-SCOPED. A tmux name is unique within a host, never across the fleet,
-  // and the buckets now arrive from every daemon at once — so `ada`'s
-  // `run-shuttle` minutes must not join the pairing `bob` recorded under the
-  // same session name. `lookupTmux` reads the scoped key first and only falls
-  // back to the bare name for a bucket that cannot say where it ran.
-  if (bucket.s !== null && byTmux) {
-    const pairing = lookupTmux(byTmux, bucket.host, bucket.s)
-    if (pairing) {
-      if (cardIds.has(pairing.fiber)) return pairing.fiber
-      const byUid = pairing.uid ? byUlid.get(pairing.uid.trim().toUpperCase()) : undefined
-      if (byUid !== undefined) return byUid
-    }
-  }
-  // 1. The exact tmux name of a worker the board knows is running.
-  if (bucket.s !== null) {
-    const worker = byWorker.get(bucket.s)
-    if (worker !== undefined) return worker
-  }
-  // 2. A fiber ULID embedded in the session name. Exact identity.
-  const ulid = sessionUlid(bucket.s)
-  if (ulid !== null) {
-    const byUlidId = byUlid.get(ulid)
-    if (byUlidId !== undefined) return byUlidId
-  }
-  // 3. The session's slug half, when it names exactly one card.
-  const slug = sessionSlug(bucket.s)
-  if (slug !== null) {
-    const bySlugId = bySlug.get(slug)
-    if (bySlugId) return bySlugId
-  }
-  // And that is the end of the ladder. A working directory is NOT a fourth
-  // rung: see the note above `attributeActivity` for why the directory-tail
-  // rung was removed rather than narrowed.
-  return undefined
+  return byCard
 }
 
 /** One civil day's worth of one row's activity. */
@@ -634,70 +493,43 @@ export function buildCycleBands(
 // ── The look-back ────────────────────────────────────────────────────────────
 
 export interface NarrationGroup {
-  slug: string
+  /** The fiber that made these commits — the row's click target. */
+  cardId: string
+  name: string
   count: number
   subjects: string[]
 }
 
 /**
- * The span's commit trail, gathered under the thing each commit was about.
+ * The span's commit trail, gathered under the fiber that made each commit.
  *
- * Shuttle's commit subjects are conventionally `slug: what happened`, so the
- * leading token is already the grouping the writer intended. A subject without
- * one goes under `elsewhere` rather than becoming its own group of one — the
- * point of the look-back is shape, and a list of singletons has none.
+ * The grouping is the COMMIT LEDGER's attribution: a hook recorded which
+ * harness session each commit came out of, and the session ledger names that
+ * session's fiber. So every row here opens the fiber it names, exactly — no
+ * subject line is read for identity, and a commit the ledger cannot place is
+ * not in the look back at all.
  */
 export function groupNarration(
-  commits: readonly { iso: string; subject: string }[],
+  ledger: LedgerNarration,
+  cards: readonly KanbanCard[],
   limit = 4,
 ): NarrationGroup[] {
-  const bySlug = new Map<string, NarrationGroup>()
-  for (const commit of commits) {
-    const { slug: parsed, rest } = parseCommitSlug(commit.subject)
-    const slug = parsed ? parsed.toLowerCase() : 'elsewhere'
-    let group = bySlug.get(slug)
-    if (!group) {
-      group = { slug, count: 0, subjects: [] }
-      bySlug.set(slug, group)
-    }
-    group.count += 1
-    // DISTINCT subjects. A run of identical messages is one thing said many
-    // times — the count already carries "many", and repeating the sentence
-    // three times turns a memoir into a stutter.
-    if (group.subjects.length < 2 && !group.subjects.includes(rest)) group.subjects.push(rest)
+  const byId = new Map(cards.map((card) => [card.id, card]))
+  const groups: NarrationGroup[] = []
+  for (const [cardId, fiber] of ledger.byCard) {
+    const card = byId.get(cardId)
+    if (!card) continue
+    groups.push({
+      cardId,
+      name: card.name,
+      count: fiber.commits,
+      // DISTINCT subjects. A run of identical messages is one thing said many
+      // times — the count already carries "many", and repeating the sentence
+      // three times turns a memoir into a stutter.
+      subjects: [...new Set<string>(fiber.subjects)].slice(0, 2),
+    })
   }
-  return [...bySlug.values()].sort((a, b) => b.count - a.count || a.slug.localeCompare(b.slug)).slice(0, limit)
-}
-
-/** A name reduced to the shape a commit slug is written in. */
-function slugify(text: string): string {
-  return text
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-}
-
-/**
- * The fiber a commit slug names, when the page can say so without guessing.
- *
- * Shuttle's commit subjects are `slug: what happened`, and the slug is nearly
- * always the fiber the work was about — so the look-back can open it. The match
- * is EXACT, against the id's last segment or the slugified name, and it must be
- * UNIQUE: two fibers answering to one slug means the trail does not identify
- * either, and a link that opens the wrong card is worse than a word that is not
- * a link. Undefined in both the ambiguous and the unknown case; the caller
- * leaves the slug as plain text.
- */
-export function resolveNarrationSlug<T extends { id: string; name: string }>(
-  slug: string,
-  cards: readonly T[],
-): T | undefined {
-  const wanted = slugify(slug)
-  if (!wanted) return undefined
-  const hits = cards.filter(
-    (c) => slugify(c.id.split('/').pop() ?? '') === wanted || slugify(c.name) === wanted,
-  )
-  return hits.length === 1 ? hits[0] : undefined
+  return groups.sort((a, b) => b.count - a.count || a.name.localeCompare(b.name)).slice(0, limit)
 }
 
 /** The first paragraph of a fiber body — the cycle's intention, as written. */
@@ -940,10 +772,8 @@ function buildFiberRow(
  * Every row the chronicle draws, in reading order: live fibers, then fibers by
  * most-recent activity.
  *
- * FIBER ROWS ONLY. Activity that joined to no fiber is not drawn: it is a thin
- * slice of the record, and a row named after a directory teaches the page's
- * unit wrong. The attribution still separates it (`Attribution.byCwd`), so the
- * join keeps its honesty — the chronicle simply has nothing to say about it.
+ * FIBER ROWS ONLY. Activity that joined to no fiber is not drawn: a row named
+ * after a working directory teaches the page's unit wrong.
  *
  * The fiber set is "anything with activity in the window" ∪ "anything still
  * open" — the three Now lanes, the pinned strip, and the two future timeline
@@ -987,13 +817,13 @@ export function saysNothingHere(
 function buildRows(
   response: KanbanResponse,
   cards: readonly KanbanCard[],
-  attribution: Attribution,
+  attribution: Map<string, ActivityBucket[]>,
   dayIndex: Map<string, number>,
   todayIdx: number,
   origins: TemporalOrigins,
 ): ChronicleRow[] {
   const byId = new Map(cards.map((c) => [c.id, c]))
-  const include = new Set<string>(attribution.byCard.keys())
+  const include = new Set<string>(attribution.keys())
   for (const card of [
     ...response.now.drafts,
     ...response.now.inFlight,
@@ -1009,7 +839,7 @@ function buildRows(
   for (const id of include) {
     const card = byId.get(id)
     if (!card) continue
-    const buckets = attribution.byCard.get(id) ?? []
+    const buckets = attribution.get(id) ?? []
     if (saysNothingHere(card, buckets, dayIndex)) continue
     fibers.push(buildFiberRow(card, buckets, response, dayIndex, todayIdx, origins))
   }
@@ -1915,24 +1745,17 @@ class ChronicleView implements TemporalView {
         for (const group of groups) {
           const line = document.createElement('p')
           line.className = 'chr-face-line'
-          // The slug a commit was filed under is usually the fiber it was about,
-          // so it opens that fiber — but only when the trail names exactly one.
-          // A slug matching two fibers, or none, stays plain text: a link that
-          // opens the wrong card is worse than a word you cannot click.
-          const target = resolveNarrationSlug(group.slug, ctx.cards)
-          const slug = document.createElement(target ? 'button' : 'span')
-          slug.className = 'chr-face-slug'
-          slug.textContent = group.slug
-          if (target) {
-            ;(slug as HTMLButtonElement).type = 'button'
-            slug.classList.add('chr-face-open')
-            slug.title = `Open ${target.name}`
-            slug.addEventListener('click', () => ctx.openCard(target.id))
-          }
+          // The ledger named the fiber, so the name opens it — no guessing.
+          const fiber = document.createElement('button')
+          fiber.type = 'button'
+          fiber.className = 'chr-face-fiber chr-face-open'
+          fiber.textContent = group.name
+          fiber.title = `Open ${group.name}`
+          fiber.addEventListener('click', () => ctx.openCard(group.cardId))
           const count = document.createElement('span')
           count.className = 'chr-face-count'
           count.textContent = `×${group.count}`
-          line.append(slug, count, document.createTextNode(` ${group.subjects.join('; ')}`))
+          line.append(fiber, count, document.createTextNode(` ${group.subjects.join('; ')}`))
           memoir.append(line)
         }
         for (const card of closed) {
@@ -2006,9 +1829,10 @@ class ChronicleView implements TemporalView {
     toMs: number,
     ctx: ViewContext,
   ): Promise<void> {
-    const result = await ctx.narration(new Date(fromMs).toISOString(), new Date(toMs).toISOString())
+    const [commits, sessions] = await Promise.all([ctx.commits(fromMs, toMs), ctx.sessions(0)])
     if (this.scopedCycleId === null) return
-    this.lookback = { key, groups: groupNarration(result.commits) }
+    const ledger = buildLedgerNarration(commits.records, ctx.cards, buildSessionIndex(sessions.records).bySession)
+    this.lookback = { key, groups: groupNarration(ledger, ctx.cards) }
     this.signature = ''
     if (this.ctx) void this.load(this.ctx)
   }

@@ -1,7 +1,7 @@
 defmodule Shuttle.RemoteTemporalRegistry do
   @moduledoc """
-  Polls each configured remote Shuttle daemon's five **temporal** feeds —
-  `/activity`, `/sessions`, `/commits`, `/narration`, `/spend` — caches them per origin, and persists
+  Polls each configured remote Shuttle daemon's four **temporal** feeds —
+  `/activity`, `/sessions`, `/commits`, `/spend` — caches them per origin, and persists
   each cache to disk so the hub's memory of a remote survives both a disconnect
   and a daemon restart.
 
@@ -16,10 +16,10 @@ defmodule Shuttle.RemoteTemporalRegistry do
       `@poll_interval_multiplier ×` the remote's `poll_interval_ms` (~30s at
       the 5s default).
 
-    * **Five feeds per remote, one task.** The GETs run sequentially
+    * **Four feeds per remote, one task.** The GETs run sequentially
       inside one supervised task per remote. Each feed applies independently:
-      a partial tick (activity 200s, narration times out) keeps last-good
-      narration and takes the new activity.
+      a partial tick (activity 200s, commits times out) keeps last-good
+      commits and takes the new activity.
 
     * **Disk persistence.** On every successful refresh the entry is written
       as JSON under `$SHUTTLE_DATA_DIR/remote-temporal/<name>.json` and read
@@ -29,7 +29,7 @@ defmodule Shuttle.RemoteTemporalRegistry do
 
   ## The window
 
-  Activity and narration are fetched over a **trailing 14-day window**, refetched
+  Activity is fetched over a **trailing 14-day window**, refetched
   whole on each tick rather than merged incrementally. Minute buckets are
   immutable once past, so a full refetch is redundant — but it is redundant
   behind an `If-None-Match`, which makes the common case a 304 with no body.
@@ -60,11 +60,11 @@ defmodule Shuttle.RemoteTemporalRegistry do
   # Telemetry is not liveness: poll at a multiple of the remote's own cadence.
   @poll_interval_multiplier 6
 
-  # The trailing window activity and narration are cached over.
+  # The trailing window activity is cached over.
   @window_days 14
   @window_ms @window_days * 24 * 60 * 60 * 1_000
 
-  @feeds [:activity, :sessions, :commits, :narration, :spend]
+  @feeds [:activity, :sessions, :commits, :spend]
 
   defmodule State do
     @moduledoc false
@@ -93,7 +93,7 @@ defmodule Shuttle.RemoteTemporalRegistry do
 
     * `:store_dir` — directory the per-remote JSON caches live in. Defaults to
       `$SHUTTLE_DATA_DIR/remote-temporal` (`~/.shuttle/remote-temporal`).
-    * `:window_ms` — trailing window width for activity/narration. Defaults to
+    * `:window_ms` — trailing window width for activity. Defaults to
       #{@window_days} days.
   """
   @spec start_link(keyword()) :: GenServer.on_start()
@@ -118,7 +118,7 @@ defmodule Shuttle.RemoteTemporalRegistry do
   @doc """
   The cached temporal entries keyed by remote name. Each value carries
   `:activity_buckets`, `:activity_window`, `:sessions`, `:commits`,
-  `:narration_commits`, `:spend`, `:last_polled_at`, `:last_error`, and
+  `:spend`, `:last_polled_at`, `:last_error`, and
   `:stale`.
 
   An empty map means no remotes are configured (or the registry isn't running —
@@ -140,7 +140,7 @@ defmodule Shuttle.RemoteTemporalRegistry do
   end
 
   @doc """
-  Synchronously fetches every remote's five feeds once and returns when all
+  Synchronously fetches every remote's four feeds once and returns when all
   have been handled. Inline (no `Task`) — used by tests to drive the registry
   deterministically against a stub client.
   """
@@ -324,15 +324,15 @@ defmodule Shuttle.RemoteTemporalRegistry do
 
   # ── Fetching ──
 
-  # Trailing window, recomputed each tick. Activity and narration ride it;
-  # sessions and commits ask for the whole ledger, which is one line per
+  # Trailing window, recomputed each tick. Activity rides it; sessions,
+  # commits, and spend ask for the whole ledger, which is one line per
   # session / one line per commit.
   defp window(%State{window_ms: width}, now) do
     to_ms = DateTime.to_unix(now, :millisecond)
     {to_ms - width, to_ms}
   end
 
-  # The five GETs, sequential inside one task. Returns a keyword-shaped map of
+  # The four GETs, sequential inside one task. Returns a keyword-shaped map of
   # per-feed results so `apply_results/4` can take the successes and leave the
   # failures' last-good data alone, feed by feed.
   defp fetch_all(%Remote{} = remote, entry, client, timeout_ms, {from_ms, to_ms}) do
@@ -349,10 +349,6 @@ defmodule Shuttle.RemoteTemporalRegistry do
         ),
       commits:
         fetch(client, Remote.commits_url(remote, 0), etags[:commits], timeout_ms, key: "records"),
-      narration:
-        fetch(client, Remote.narration_url(remote, from_ms, to_ms), etags[:narration], timeout_ms,
-          key: "commits"
-        ),
       spend:
         fetch(client, Remote.spend_url(remote, 0), etags[:spend], timeout_ms, key: "sessions")
     }
@@ -414,7 +410,6 @@ defmodule Shuttle.RemoteTemporalRegistry do
       activity_window: nil,
       sessions: [],
       commits: [],
-      narration_commits: [],
       spend: [],
       etags: %{},
       last_polled_at: nil,
@@ -445,7 +440,7 @@ defmodule Shuttle.RemoteTemporalRegistry do
   #
   # `last_polled_at` (the timestamp staleness is measured from) advances when
   # AT LEAST ONE feed succeeded, and `last_error` is set when at least one
-  # failed. A tick where activity lands and narration times out is therefore
+  # failed. A tick where activity lands and commits times out is therefore
   # fresh-with-an-error: the data on screen is current, and the origins block
   # still tells the truth about the failure.
   defp apply_results(entry, results, window, now) do
@@ -481,7 +476,6 @@ defmodule Shuttle.RemoteTemporalRegistry do
 
   defp put_items(entry, :sessions, items, _window), do: %{entry | sessions: items}
   defp put_items(entry, :commits, items, _window), do: %{entry | commits: items}
-  defp put_items(entry, :narration, items, _window), do: %{entry | narration_commits: items}
   defp put_items(entry, :spend, items, _window), do: %{entry | spend: items}
 
   defp record_failure(entries, name, reason, now) do
@@ -503,7 +497,6 @@ defmodule Shuttle.RemoteTemporalRegistry do
          activity_window: entry.activity_window,
          sessions: entry.sessions,
          commits: entry.commits,
-         narration_commits: entry.narration_commits,
          spend: entry.spend,
          last_polled_at: entry.last_polled_at,
          last_error: entry.last_error,
@@ -558,7 +551,6 @@ defmodule Shuttle.RemoteTemporalRegistry do
       "activity_window" => encode_window(entry.activity_window),
       "sessions" => entry.sessions,
       "commits" => entry.commits,
-      "narration_commits" => entry.narration_commits,
       "spend" => entry.spend,
       "etags" => Map.new(entry.etags || %{}, fn {k, v} -> {Atom.to_string(k), v} end),
       "last_polled_at" => encode_dt(entry.last_polled_at)
@@ -610,7 +602,6 @@ defmodule Shuttle.RemoteTemporalRegistry do
         activity_window: decode_window(persisted["activity_window"]),
         sessions: list_or_empty(persisted["sessions"]),
         commits: list_or_empty(persisted["commits"]),
-        narration_commits: list_or_empty(persisted["narration_commits"]),
         spend: list_or_empty(persisted["spend"]),
         etags: decode_etags(persisted["etags"]),
         last_polled_at: decode_dt(persisted["last_polled_at"])

@@ -14,7 +14,6 @@ import type {
   ActivityBucket,
   ActivityResult,
   CommitRecord,
-  NarrationCommit,
   SessionPairing,
   TemporalOrigins,
 } from './TemporalData.js'
@@ -22,13 +21,10 @@ import { tmuxJoinKey } from './TemporalData.js'
 import {
   buildDayEntries,
   buildDayLanes,
-  buildLedgerNarration,
   buildDayModel,
   buildDayPreviews,
   buildStillAhead,
   closureMark,
-  commitDedupeKey,
-  commitsOnRail,
   dayTotals,
   dayWindow,
   defaultDayISO,
@@ -37,22 +33,18 @@ import {
   FRAME_MIN_MINUTES,
   formatClockTime,
   formatEntryStats,
-  groupCommitsBySlug,
   isLivePresent,
   laneChip,
-  ledgerOnRail,
   mergeMinuteRuns,
-  narrationRange,
   railTicks,
   resolveDayISO,
   stepTarget,
   tickStepMinutes,
-  unclaimedCommits,
   type DayEntry,
   type DayLane,
 } from './DayView.js'
+import { buildLedgerNarration, ledgerBetween, type LedgerNarration } from './join.js'
 import { cardState } from './vocabulary.js'
-import { sessionSlug, sessionUlid } from './sessionNames.js'
 import { formatSpanMinutes, shiftCivilDay } from './railTime.js'
 
 const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone
@@ -271,9 +263,14 @@ const activity = (
 const FIBER_ULID = '01KVBR1F9BWBVKF97473PV67K8'
 const SESSION = `bmodes-2d-${FIBER_ULID}-shuttle`
 
+// `runningWorker` defaults to SESSION — the join's rung 1, a bucket's session
+// name being exactly a card's live worker. A test that builds a SECOND card
+// alongside this one must override it (to whichever session its own buckets
+// use, or to `undefined`), or the two would collide on this default.
 const card = (over: Partial<KanbanCard> = {}): KanbanCard => ({
   id: 'work/spt3g_papers/bmodes-2d',
   uid: FIBER_ULID,
+  runningWorker: SESSION,
   name: 'Run the 2D B-mode null tests',
   path: '.felt/x.md',
   originId: 'local',
@@ -348,12 +345,16 @@ describe('the drawn frame — how much of the day gets sheet', () => {
   it('carries the card lifecycle state onto the lane', () => {
     const lanes = buildDayLanes(activity(bucketsAt(240, 480)), [card()], WIN)
     expect(lanes[0].state).toBe(cardState(card()))
-    const running = buildDayLanes(
-      activity(bucketsAt(240, 480)),
-      [card({ runningWorker: 'sess-1' })],
-      WIN,
-    )
-    expect(running[0].state).toBe('inFlight')
+
+    // A closed fiber has no live worker, so its bucket joins through the
+    // ledger (rung 0) rather than the exact-worker rung — and the lane still
+    // carries the card's own lifecycle glyph, not the running one.
+    const ledger = new Map([
+      [SESSION, { fiber: 'work/spt3g_papers/bmodes-2d', uid: null, session: 'sess-x', host: null }],
+    ])
+    const closed = card({ runningWorker: undefined, status: 'closed' })
+    const closedLanes = buildDayLanes(activity(bucketsAt(240, 480)), [closed], WIN, ledger)
+    expect(closedLanes[0].state).toBe('awaitingReview')
   })
 })
 
@@ -429,33 +430,34 @@ describe("the day's two totals", () => {
     const totals = dayTotals(
       activity([
         bucket(0, 'attention', SESSION),
+        // Unjoined — no session, no card to carry it. The totals count only
+        // what the page actually draws, so this contributes nothing.
         bucket(0, 'attention', null, '/home/ada/loom'),
         bucket(0, 'agent', SESSION),
         bucket(1, 'agent', SESSION),
         bucket(2, 'agent', SESSION),
         bucket(9, 'notify', SESSION),
       ]),
+      [card()],
       WIN,
     )
-    // One attention MINUTE, but two attention buckets in it — and messages are
-    // acts, not time, so both count.
-    expect(totals).toEqual({ attention: 1, agent: 3, messages: 2, received: 0 })
+    expect(totals).toEqual({ attention: 1, agent: 3, messages: 1, received: 0 })
   })
 
   it('sums the events in an attention bucket, not the minutes holding them', () => {
     const busy: ActivityBucket = { ...bucket(30, 'attention', SESSION), n: 4 }
-    const totals = dayTotals(activity([busy, bucket(31, 'attention', SESSION)]), WIN)
+    const totals = dayTotals(activity([busy, bucket(31, 'attention', SESSION)]), [card()], WIN)
     expect(totals.attention).toBe(2)
     expect(totals.messages).toBe(5)
   })
 
   it('ignores buckets outside the 06:00 → 06:00 window at both ends', () => {
     const outside: ActivityBucket[] = [
-      { m: WIN.startMs - 60_000, s: null, cwd: null, k: 'agent', n: 1 },
-      { m: WIN.endMs, s: null, cwd: null, k: 'agent', n: 1 },
-      { m: WIN.endMs + 60_000, s: null, cwd: null, k: 'attention', n: 1 },
+      { m: WIN.startMs - 60_000, s: SESSION, cwd: null, k: 'agent', n: 1 },
+      { m: WIN.endMs, s: SESSION, cwd: null, k: 'agent', n: 1 },
+      { m: WIN.endMs + 60_000, s: SESSION, cwd: null, k: 'attention', n: 1 },
     ]
-    expect(dayTotals(activity([...outside, bucket(5, 'agent')]), WIN)).toEqual({
+    expect(dayTotals(activity([...outside, bucket(5, 'agent', SESSION)]), [card()], WIN)).toEqual({
       attention: 0,
       agent: 1,
       messages: 0,
@@ -473,6 +475,7 @@ describe("the day's two totals", () => {
         { ...bucket(1, 'reply' as ActivityBucket['k'], SESSION), n: 3 },
         bucket(2, 'agent', SESSION),
       ]),
+      [card()],
       WIN,
     )
     expect(totals.messages).toBe(1)
@@ -483,7 +486,7 @@ describe("the day's two totals", () => {
   })
 
   it('counts a notify minute as neither attention nor agent', () => {
-    expect(dayTotals(activity([bucket(30, 'notify')]), WIN)).toEqual({
+    expect(dayTotals(activity([bucket(30, 'notify', SESSION)]), [card()], WIN)).toEqual({
       attention: 0,
       agent: 0,
       messages: 0,
@@ -504,11 +507,7 @@ describe("the day's two totals", () => {
 })
 
 describe('lanes', () => {
-  it('joins a bucket to a fiber through the ULID in its tmux session name', () => {
-    expect(sessionUlid(SESSION)).toBe(FIBER_ULID)
-    expect(sessionUlid('morning-post-shuttle')).toBeNull()
-    expect(sessionUlid(null)).toBeNull()
-
+  it('joins a bucket to a fiber through its exact live-worker tmux name', () => {
     const lanes = buildDayLanes(
       activity([bucket(60, 'agent', SESSION), bucket(61, 'attention', SESSION)]),
       [card({ shuttleHost: 'Ada-Workstation' })],
@@ -597,7 +596,10 @@ describe('lanes', () => {
         bucket(2, 'agent', SESSION),
         bucket(3, 'agent', SESSION),
       ]),
-      [card(), card({ id: 'other', uid: otherUlid, name: 'A lighter fiber' })],
+      [
+        card(),
+        card({ id: 'other', uid: otherUlid, name: 'A lighter fiber', runningWorker: `light-${otherUlid}-shuttle` }),
+      ],
       WIN,
     )
     expect(lanes.map((l) => l.label)).toEqual(['Run the 2D B-mode null tests', 'A lighter fiber'])
@@ -617,28 +619,7 @@ describe('the join ladder', () => {
   // Every rung below is a session shape the daemon really produces, and every
   // miss has the same consequence: the bucket draws no lane at all.
 
-  it('joins a session name whose ULID is lower-cased', () => {
-    expect(sessionUlid(`bmodes-2d-${FIBER_ULID.toLowerCase()}-shuttle`)).toBe(FIBER_ULID)
-    const lanes = buildDayLanes(
-      activity([bucket(20, 'agent', `bmodes-2d-${FIBER_ULID.toLowerCase()}-shuttle`)]),
-      [card()],
-      WIN,
-    )
-    expect(lanes[0].cardId).toBe('work/spt3g_papers/bmodes-2d')
-  })
-
-  it('joins the legacy leaf-only session name the dispatcher still emits', () => {
-    expect(sessionSlug('morning-post-shuttle')).toBe('morning-post')
-    expect(sessionSlug(`bmodes-2d-${FIBER_ULID}-shuttle`)).toBe('bmodes-2d')
-    const lanes = buildDayLanes(
-      activity([bucket(20, 'agent', 'morning-post-shuttle', '/home/ada/loom')]),
-      [card({ id: 'loom/email/morning-post/refine', uid: undefined, name: 'Morning post' })],
-      WIN,
-    )
-    expect(lanes[0].label).toBe('Morning post')
-  })
-
-  it('joins an exact live-worker tmux name even with no ULID in it', () => {
+  it('joins an exact live-worker tmux name', () => {
     const lanes = buildDayLanes(
       activity([bucket(20, 'agent', 'legacy-worker-name')]),
       [card({ uid: undefined, runningWorker: 'legacy-worker-name' })],
@@ -668,19 +649,6 @@ describe('the join ladder', () => {
     expect(human).toEqual([])
   })
 
-  it('refuses a session slug two cards answer to, rather than guessing', () => {
-    // Both cards have a `refine` segment, so the session slug names neither.
-    const lanes = buildDayLanes(
-      activity([bucket(20, 'agent', 'refine-shuttle', '/home/ada/loom')]),
-      [
-        card({ id: 'loom/email/refine', uid: undefined, name: 'One' }),
-        card({ id: 'loom/notes/refine', uid: undefined, name: 'Two' }),
-      ],
-      WIN,
-    )
-    expect(lanes).toEqual([])
-  })
-
   it('draws no lane for work in the same directory whether worker or human', () => {
     const lanes = buildDayLanes(
       activity([
@@ -707,8 +675,7 @@ describe('rung 0 — the session ledger', () => {
   })
 
   it('joins a session name that carries nothing to infer from', () => {
-    // `pi-2f9c41`: no ULID, no slug matching any card. Every lower rung misses.
-    expect(sessionUlid('pi-2f9c41')).toBeNull()
+    // `pi-2f9c41` names no live worker on this board, so rung 1 misses.
     const naked = buildDayLanes(activity([bucket(20, 'agent', 'pi-2f9c41')]), [card()], WIN)
     expect(naked).toEqual([])
 
@@ -911,7 +878,7 @@ describe('a fleet of daemons on one rail', () => {
         'ada-workstation',
         origins,
       ),
-      [card(), card({ id: 'a/second', uid: other, name: 'Second' })],
+      [card(), card({ id: 'a/second', uid: other, name: 'Second', runningWorker: `second-${other}-shuttle` })],
       WIN,
     )
     const remote = lanes.find((l) => l.cardId === 'work/spt3g_papers/bmodes-2d')
@@ -970,7 +937,6 @@ describe('a fleet of daemons on one rail', () => {
       activity([bucket(60, 'agent', SESSION, null, 'cineca-login-02')], 'ada-workstation', {
         'cineca-login-02': { kind: 'remote', stale: false },
       }),
-      [],
       [card()],
       '',
       NOW_IN_RAIL,
@@ -979,148 +945,6 @@ describe('a fleet of daemons on one rail', () => {
     )
     expect(model.lanes[0].stale).toBe(true)
     expect(model.origins['cineca-login-02'].stale).toBe(true)
-  })
-})
-
-describe('the narration window against the rail', () => {
-  // The rail is 06:00→06:00; the narration route speaks inclusive civil days,
-  // midnight to midnight. Widen by a day, then discard by the rail's edges.
-
-  it('asks for the day and the one after it', () => {
-    expect(narrationRange('2026-08-04')).toEqual({ from: '2026-08-04', to: '2026-08-05' })
-    expect(narrationRange('2026-12-31')).toEqual({ from: '2026-12-31', to: '2027-01-01' })
-  })
-
-  const commitAt = (ms: number, subject = 'x: y'): NarrationCommit => ({
-    iso: new Date(ms).toISOString(),
-    subject,
-  })
-
-  it('keeps a post-midnight commit on the rail it was made on', () => {
-    // 01:30 on the 5th is the tail of the 4th's session, not the 5th's morning.
-    const late = commitAt(at(2026, 8, 5, 1, 30))
-    expect(commitsOnRail([late], WIN)).toEqual([late])
-  })
-
-  it('discards the early overhang — before 06:00 belongs to yesterday', () => {
-    expect(commitsOnRail([commitAt(at(2026, 8, 4, 3, 0))], WIN)).toEqual([])
-  })
-
-  it('is inclusive at 06:00 and exclusive at the next 06:00', () => {
-    expect(commitsOnRail([commitAt(WIN.startMs)], WIN)).toHaveLength(1)
-    expect(commitsOnRail([commitAt(WIN.endMs)], WIN)).toHaveLength(0)
-    expect(commitsOnRail([commitAt(WIN.endMs - 1)], WIN)).toHaveLength(1)
-  })
-
-  it('drops a commit whose timestamp will not parse', () => {
-    expect(commitsOnRail([{ iso: 'not a time', subject: 'x: y' }], WIN)).toEqual([])
-  })
-
-  it('does not fabricate "wrote nothing down" for a fiber that committed at 01:30', () => {
-    // The review's scenario end to end: work 22:00 → 02:00 on one fiber, its
-    // commit landing after midnight. Before the fix the prose said the fiber
-    // worked and wrote nothing, while its own commit sat on the next page.
-    const model = buildDayModel(
-      DAY,
-      activity([bucket(16 * 60, 'agent', SESSION), bucket(19 * 60 + 30, 'agent', SESSION)]),
-      [commitAt(at(2026, 8, 5, 1, 30), 'bmodes-2d: ran the nulls')],
-      [card()],
-      '',
-    )
-    expect(model.entries).toHaveLength(1)
-    expect(model.entries[0]).toMatchObject({
-      title: 'Run the 2D B-mode null tests',
-      body: 'ran the nulls',
-      cardId: 'work/spt3g_papers/bmodes-2d',
-    })
-    expect(model.entries[0].fallback).toBeUndefined()
-  })
-
-  it('keeps yesterday’s small hours off this page', () => {
-    const model = buildDayModel(
-      DAY,
-      activity([bucket(60, 'agent', SESSION)]),
-      [commitAt(at(2026, 8, 4, 2, 0), 'somewhere-else: finished last night')],
-      [card({ outcome: 'Ran the nulls.' })],
-      '',
-    )
-    // The 02:00 commit is Aug 3's; all this page can say is the fallback.
-    expect(model.entries.map((e) => e.title)).toEqual(['Run the 2D B-mode null tests'])
-    expect(model.entries[0].fallback).toBe(true)
-  })
-})
-
-describe('two fibers with the same leaf slug', () => {
-  // Nested ids are the norm in this store, so a shared leaf is ordinary. Each
-  // fiber has its own ULID, which is how both lanes get drawn at all — the
-  // ambiguity bites at the NARRATION step, where all a commit carries is
-  // `board: `.
-  const OTHER_ULID = '01KVBR5W2QJ6K8M3N7P4R9TSDF'
-  const felt = card({ id: 'felt/board', name: 'Felt board', outcome: 'Tidy it.' })
-  const lightcone = card({
-    id: 'lightcone/board',
-    uid: OTHER_ULID,
-    name: 'Lightcone board',
-    outcome: 'Ship it.',
-  })
-  const twoLanes = (): DayLane[] =>
-    buildDayLanes(
-      activity([
-        bucket(10, 'agent', `board-${FIBER_ULID}-shuttle`, '/home/ada/felt/board'),
-        bucket(20, 'agent', `board-${OTHER_ULID}-shuttle`, '/home/ada/lightcone/board'),
-      ]),
-      [felt, lightcone],
-      WIN,
-    )
-
-  it('draws both lanes', () => {
-    const lanes = twoLanes()
-    expect(lanes.map((l) => l.cardId).sort()).toEqual(['felt/board', 'lightcone/board'])
-    // Both answer to the same commit prefix — that is the hazard.
-    expect(lanes.every((l) => l.slugs.includes('board'))).toBe(true)
-  })
-
-  it('refuses to attribute the shared slug to either fiber', () => {
-    const entries = buildDayEntries(
-      [{ iso: new Date(WIN.startMs).toISOString(), subject: 'board: fold the masthead' }],
-      twoLanes(),
-      [felt, lightcone],
-      WIN,
-      NOW_IN_RAIL,
-    )
-    const commitEntry = entries.find((e) => e.key === 'slug:board')
-    expect(commitEntry?.body).toBe('fold the masthead')
-    // No card: a click that opened one of two candidates would open the wrong
-    // fiber half the time.
-    expect(commitEntry?.cardId).toBeUndefined()
-  })
-
-  it('still gives BOTH lanes their own line', () => {
-    const entries = buildDayEntries(
-      [{ iso: new Date(WIN.startMs).toISOString(), subject: 'board: fold the masthead' }],
-      twoLanes(),
-      [felt, lightcone],
-      WIN,
-      NOW_IN_RAIL,
-    )
-    const fallbacks = entries.filter((e) => e.fallback)
-    // Titled as their LANES are, which is also what makes them distinguishable
-    // where the shared leaf slug would not have been.
-    expect(fallbacks.map((e) => e.title).sort()).toEqual(['Felt board', 'Lightcone board'])
-    expect(fallbacks.map((e) => e.body).sort()).toEqual(['Ship it.', 'Tidy it.'])
-  })
-
-  it('still attributes — and still suppresses — when the slug is unique', () => {
-    const lanes = buildDayLanes(activity([bucket(10, 'agent', SESSION)]), [card()], WIN)
-    const entries = buildDayEntries(
-      [{ iso: new Date(WIN.startMs).toISOString(), subject: 'bmodes-2d: ran the nulls' }],
-      lanes,
-      [card()],
-      WIN,
-      NOW_IN_RAIL,
-    )
-    expect(entries).toHaveLength(1)
-    expect(entries[0].cardId).toBe('work/spt3g_papers/bmodes-2d')
   })
 })
 
@@ -1167,17 +991,13 @@ describe('what a day cost, per fiber', () => {
       [card()],
       WIN,
     )
-    const entries = buildDayEntries(
-      [
-        { iso: new Date(WIN.startMs).toISOString(), subject: 'bmodes-2d: one' },
-        { iso: new Date(WIN.startMs).toISOString(), subject: 'bmodes-2d: two' },
-      ],
-      lanes,
-      [card()],
-      WIN,
-      NOW_IN_RAIL,
-    )
-    expect(entries[0].stats).toEqual({ messages: 1, received: 0, agent: 2, commits: 2 })
+    const ledger: LedgerNarration = {
+      byCard: new Map([
+        ['work/spt3g_papers/bmodes-2d', { subjects: ['one', 'two'], commits: 2, insertions: 0, deletions: 0 }],
+      ]),
+    }
+    const entries = buildDayEntries(lanes, [card()], WIN, NOW_IN_RAIL, ledger)
+    expect(entries[0].stats).toEqual({ messages: 1, received: 0, agent: 2, commits: 2, insertions: 0, deletions: 0 })
   })
 
   it('counts your side of a lane in messages, the agents’ in minutes', () => {
@@ -1222,7 +1042,9 @@ describe('the live chip', () => {
     card({ runningWorker: 'bmodes-2d-x-shuttle', ...over })
 
   it('is absent when no worker is in the air', () => {
-    expect(laneChip(card(), NOW_IN_RAIL)).toBeUndefined()
+    // The default card carries a live worker, for the join's sake; a chip is
+    // a claim about a worker in the air, so this asks about a card with none.
+    expect(laneChip(card({ runningWorker: undefined }), NOW_IN_RAIL)).toBeUndefined()
     expect(laneChip(undefined, NOW_IN_RAIL)).toBeUndefined()
   })
 
@@ -1250,12 +1072,12 @@ describe('the live chip', () => {
 
   it('never appears on a past day — aloft is a fact about now', () => {
     const aloft = card({ runningWorker: 'x-shuttle', runtimePhase: 'working' })
-    const lanes = buildDayLanes(activity([bucket(30, 'agent', SESSION)]), [aloft], WIN)
-    const live = buildDayEntries([], lanes, [aloft], WIN, NOW_IN_RAIL)
+    const lanes = buildDayLanes(activity([bucket(30, 'agent', 'x-shuttle')]), [aloft], WIN)
+    const live = buildDayEntries(lanes, [aloft], WIN, NOW_IN_RAIL)
     expect(live[0].chip).toBeDefined()
     // Same card, same lane, read from two days later: the worker is still in
     // the air, but it was not in the air on the day being drawn.
-    const past = buildDayEntries([], lanes, [aloft], WIN, at(2026, 8, 6, 12, 0))
+    const past = buildDayEntries(lanes, [aloft], WIN, at(2026, 8, 6, 12, 0))
     expect(past[0].chip).toBeUndefined()
     // What the day COST is a fact about the day, and survives.
     expect(past[0].stats).toEqual({ messages: 0, received: 0, agent: 1, commits: 0 })
@@ -1302,12 +1124,12 @@ describe('where things stand', () => {
         bucket(20, 'agent', `second-${other}-shuttle`),
         bucket(30, 'agent', null, '/home/ada/notes'),
       ]),
-      [withDir(), withDir({ id: 'a/second', uid: other, name: 'Second' })],
+      [withDir(), withDir({ id: 'a/second', uid: other, name: 'Second', runningWorker: `second-${other}-shuttle` })],
       WIN,
     )
     const previews = buildDayPreviews(lanes, [
       withDir(),
-      withDir({ id: 'a/second', uid: other, name: 'Second' }),
+      withDir({ id: 'a/second', uid: other, name: 'Second', runningWorker: `second-${other}-shuttle` }),
     ], '')
     // The bucket that joined no fiber drew no lane, so it has no page either.
     expect(previews.map((p) => p.label)).toEqual(['Run the 2D B-mode null tests', 'Second'])
@@ -1435,102 +1257,50 @@ describe('still ahead', () => {
 })
 
 describe('the day, by fiber', () => {
-  const commit = (subject: string): NarrationCommit => ({
-    iso: new Date(WIN.startMs).toISOString(),
-    subject,
-  })
+  // Narration is ledger-only now — there is no second, subject-prefix reading
+  // of the commit log, so there is no "elsewhere in the store" row and no
+  // `noLane` entry: a commit the ledger cannot place to a card on this page
+  // has nothing to say here, the same as any other unjoined minute.
 
-  it('groups commits by their leading slug, keeping first-appearance order', () => {
-    const groups = groupCommitsBySlug([
-      commit('board: fold the masthead actions into the column heads'),
-      commit('views: hang the temporal pages off a hotkey row'),
-      commit('board: drag onto a day column writes due:'),
-    ])
-    expect(groups).toEqual([
-      {
-        slug: 'board',
-        subjects: [
-          'fold the masthead actions into the column heads',
-          'drag onto a day column writes due:',
-        ],
-      },
-      { slug: 'views', subjects: ['hang the temporal pages off a hotkey row'] },
-    ])
-  })
-
-  it('collects unprefixed commits into one trailing null-slug group', () => {
-    const groups = groupCommitsBySlug([
-      commit('board: a prefixed one'),
-      commit('Merge branch main'),
-      commit('fix the thing'),
-    ])
-    expect(groups.map((g) => g.slug)).toEqual(['board', null])
-    expect(groups[1].subjects).toEqual(['Merge branch main', 'fix the thing'])
-  })
-
-  it('reads a slash-bearing slug, and refuses a colon with no space after it', () => {
-    expect(groupCommitsBySlug([commit('shuttle/day: two clocks')])[0]).toEqual({
-      slug: 'shuttle/day',
-      subjects: ['two clocks'],
-    })
-    expect(groupCommitsBySlug([commit('ratio 3:1 held')])[0].slug).toBeNull()
-  })
-
-  it('gives a fiber that worked but committed nothing its outcome, as a fallback', () => {
+  it('gives a fiber that worked but the ledger said nothing about its outcome, as a fallback', () => {
     const lanes = buildDayLanes(activity([bucket(30, 'agent', SESSION)]), [card()], WIN)
     const entries = buildDayEntries(
-      [commit('views: a different fiber entirely')],
       lanes,
       [card({ outcome: 'Compute the PTE across the patch set. Then check Hartlap.' })],
       WIN,
       NOW_IN_RAIL,
     )
-    // Lane first (it has a rail on this page), then the commit that named no
-    // lane — and the lane's entry is titled exactly as its lane label reads.
-    expect(entries.map((e) => e.title)).toEqual(['Run the 2D B-mode null tests', 'views'])
+    expect(entries).toHaveLength(1)
     expect(entries[0].fallback).toBe(true)
     expect(entries[0].body).toBe('Compute the PTE across the patch set.')
     expect(entries[0].cardId).toBe('work/spt3g_papers/bmodes-2d')
-    expect(entries[1].noLane).toBe(true)
   })
 
-  it('gives no fallback to a fiber whose slug the commits already name', () => {
+  it('gives no fallback to a fiber the ledger recorded commits for', () => {
     const lanes = buildDayLanes(activity([bucket(30, 'agent', SESSION)]), [card()], WIN)
-    const entries = buildDayEntries(
-      [commit('bmodes-2d: ran the nulls')],
-      lanes,
-      [card()],
-      WIN,
-      NOW_IN_RAIL,
-    )
+    const ledger: LedgerNarration = {
+      byCard: new Map([
+        ['work/spt3g_papers/bmodes-2d', { subjects: ['ran the nulls'], commits: 1, insertions: 0, deletions: 0 }],
+      ]),
+    }
+    const entries = buildDayEntries(lanes, [card()], WIN, NOW_IN_RAIL, ledger)
     expect(entries).toHaveLength(1)
     expect(entries[0].fallback).toBeUndefined()
-    // The commit slug resolves to the same card the lane label opens.
+    expect(entries[0].body).toBe('ran the nulls')
     expect(entries[0].cardId).toBe('work/spt3g_papers/bmodes-2d')
   })
 
-  it('puts the unprefixed commits last, muted, under their own head', () => {
-    const lanes = buildDayLanes(activity([bucket(30, 'agent', SESSION)]), [card()], WIN)
-    const entries = buildDayEntries(
-      [commit('bmodes-2d: ran the nulls'), commit('typo')],
-      lanes,
-      [card()],
-      WIN,
-      NOW_IN_RAIL,
-    )
-    expect(entries[entries.length - 1]).toMatchObject({
-      title: '— elsewhere in the store —',
-      body: 'typo',
-      loose: true,
-    })
-  })
-
   it('reads in LANE ORDER, so a rail and its sentence line up', () => {
-    // Three lanes of descending weight, and commits arriving in an order that
-    // has nothing to do with it. The ledger must follow the lanes, not the
-    // commit log — otherwise the two halves of the page are a lookup.
+    // Three lanes of descending weight. The entries must follow the same
+    // order — otherwise the two halves of the page are a lookup rather than
+    // an obvious correspondence.
     const second = '01KVBR6X3RK7J9N4P8Q5S2TVEG'
     const third = '01KVBR7Y4SM8N2P5Q9R6T3VWFH'
+    const cards = [
+      card(),
+      card({ id: 'a/second', uid: second, name: 'Second heaviest', runningWorker: `second-${second}-shuttle` }),
+      card({ id: 'a/third', uid: third, name: 'Lightest', runningWorker: `third-${third}-shuttle` }),
+    ]
     const lanes = buildDayLanes(
       activity([
         bucket(10, 'agent', SESSION),
@@ -1540,11 +1310,7 @@ describe('the day, by fiber', () => {
         bucket(21, 'agent', `second-${second}-shuttle`),
         bucket(30, 'agent', `third-${third}-shuttle`),
       ]),
-      [
-        card(),
-        card({ id: 'a/second', uid: second, name: 'Second heaviest' }),
-        card({ id: 'a/third', uid: third, name: 'Lightest' }),
-      ],
+      cards,
       WIN,
     )
     expect(lanes.map((l) => l.label)).toEqual([
@@ -1553,38 +1319,15 @@ describe('the day, by fiber', () => {
       'Lightest',
     ])
 
-    const entries = buildDayEntries(
-      [commit('third: went last'), commit('bmodes-2d: went first')],
-      lanes,
-      [card(), card({ id: 'a/second', uid: second, name: 'Second heaviest' }), card({ id: 'a/third', uid: third, name: 'Lightest' })],
-      WIN,
-      NOW_IN_RAIL,
-    )
+    const entries = buildDayEntries(lanes, cards, WIN, NOW_IN_RAIL)
     expect(entries.map((e) => e.title)).toEqual([
       'Run the 2D B-mode null tests',
       'Second heaviest',
       'Lightest',
     ])
-    // …and the middle one, which committed nothing, still holds its place.
+    // …and the middle one, which the ledger said nothing about, still holds
+    // its place, with its outcome standing in.
     expect(entries[1].fallback).toBe(true)
-  })
-
-  it('puts commits with no lane on this page after every lane', () => {
-    const lanes = buildDayLanes(activity([bucket(30, 'agent', SESSION)]), [card()], WIN)
-    const entries = buildDayEntries(
-      [commit('elsewhere-fiber: ran on another machine'), commit('bmodes-2d: ran the nulls')],
-      lanes,
-      [card()],
-      WIN,
-      NOW_IN_RAIL,
-    )
-    expect(entries.map((e) => e.title)).toEqual([
-      'Run the 2D B-mode null tests',
-      'elsewhere-fiber',
-    ])
-    // A bare slug as a title MEANS "no rail above for this one".
-    expect(entries[1].noLane).toBe(true)
-    expect(entries[0].noLane).toBeUndefined()
   })
 
   it('takes the first sentence, or the whole line when there is no full stop', () => {
@@ -1598,10 +1341,11 @@ describe('the day, by fiber', () => {
 // ── The commit ledger — rung 0 of the narration ladder ───────────────────────
 
 describe('attributing a commit by the session that made it', () => {
-  // The prefix path reads `<slug>: ` off the subject — a convention a human
-  // types. The ledger records the harness session AT COMMIT TIME, so the fiber
-  // is a fact. These cover the join, the dedupe against the store log, and the
-  // diff figures only the ledger can know.
+  // Narration is ledger-only. A hook recorded the harness session AT COMMIT
+  // TIME, so the fiber is a fact rather than a reading of the subject line —
+  // there is no second, prefix-parsing source to dedupe against any more.
+  // These cover the join, host scoping, the refusal to attribute to a card
+  // this board does not carry, and the diff figures only the ledger can know.
 
   const SHA = (n: number): string => String(n).padStart(40, '0')
   const HARNESS = 'a1b2c3d4-0000-4000-8000-000000000001'
@@ -1617,7 +1361,7 @@ describe('attributing a commit by the session that made it', () => {
   const record = (over: Partial<CommitRecord> = {}): CommitRecord => ({
     at: WIN.startMs + 60_000,
     sha: SHA(1),
-    subject: 'bmodes-2d: ran the nulls',
+    subject: 'ran the nulls',
     repo: '/home/ada/work',
     files: 1,
     insertions: 0,
@@ -1634,23 +1378,14 @@ describe('attributing a commit by the session that made it', () => {
 
   const narrate = (
     records: CommitRecord[],
-    commits: NarrationCommit[] = [],
     index = bySession([HARNESS, pairing('work/spt3g_papers/bmodes-2d')]),
     cards: KanbanCard[] = [card()],
   ): DayEntry[] => {
-    const ledger = buildLedgerNarration(ledgerOnRail(records, WIN), cards, index)
-    return buildDayEntries(
-      unclaimedCommits(commitsOnRail(commits, WIN), ledger),
-      lanes(),
-      cards,
-      WIN,
-      NOW_IN_RAIL,
-      ledger,
-    )
+    const ledger = buildLedgerNarration(ledgerBetween(records, WIN.startMs, WIN.endMs), cards, index)
+    return buildDayEntries(lanes(), cards, WIN, NOW_IN_RAIL, ledger)
   }
 
-  it('names the fiber from the session, with nothing to read off the subject', () => {
-    // No `slug: ` at all — the whole case the ledger exists for.
+  it('names the fiber from the session, with no subject prefix to read', () => {
     const entries = narrate([record({ subject: 'ran the nulls' })])
     expect(entries).toHaveLength(1)
     expect(entries[0]).toMatchObject({
@@ -1662,18 +1397,9 @@ describe('attributing a commit by the session that made it', () => {
     expect(entries[0].stats?.commits).toBe(1)
   })
 
-  it('outranks a prefix naming a different fiber', () => {
-    // The subject says `photoz: `; the session says this fiber. The record wins,
-    // and the mistyped prefix does not open a second entry for a lane-less slug.
-    const entries = narrate([record({ subject: 'photoz: ran the nulls' })])
-    expect(entries.map((e) => e.key)).toEqual(['lane:fiber:work/spt3g_papers/bmodes-2d'])
-    expect(entries[0].body).toBe('ran the nulls')
-  })
-
   it('resolves through the pairing’s ULID when the fiber path has moved', () => {
     const entries = narrate(
-      [record({ subject: 'ran the nulls' })],
-      [],
+      [record()],
       bySession([HARNESS, pairing('some/old/path', { uid: FIBER_ULID.toLowerCase() })]),
     )
     expect(entries[0].cardId).toBe('work/spt3g_papers/bmodes-2d')
@@ -1681,77 +1407,35 @@ describe('attributing a commit by the session that made it', () => {
 
   it('refuses a pairing recorded on another host', () => {
     // Two daemons, one ledger merged by the composite. A commit recorded on
-    // cineca must not read ada's pairing — it falls to the prefix path, which
-    // still narrates it because the subject happens to carry the slug.
-    const entries = narrate([record({ host: 'cineca-login-02', subject: 'ran the nulls' })])
+    // cineca must not read ada's pairing, so the fiber's lane falls back to
+    // its outcome as though the ledger said nothing.
+    const entries = narrate([record({ host: 'cineca-login-02' })])
     expect(entries[0].fallback).toBe(true)
     expect(entries[0].stats?.commits).toBe(0)
   })
 
   it('falls THROUGH a pairing for a fiber this board does not carry', () => {
-    // Attributing to an absent card would delete the commit from the page. It
-    // claims nothing, so the store log's copy still narrates it by prefix.
-    const entries = narrate(
-      [record()],
-      [{ iso: new Date(WIN.startMs + 60_000).toISOString(), subject: 'bmodes-2d: ran the nulls' }],
-      bySession([HARNESS, pairing('not/on/this/board')]),
-    )
-    expect(entries[0].body).toBe('ran the nulls')
-    expect(entries[0].stats?.commits).toBe(1)
+    // Attributing to an absent card would put a claim on the page nothing can
+    // open. It claims nothing instead, and the fiber's own lane falls back.
+    const entries = narrate([record()], bySession([HARNESS, pairing('not/on/this/board')]))
+    expect(entries[0].fallback).toBe(true)
+    expect(entries[0].stats?.commits).toBe(0)
   })
 
-  it('leaves a session-less commit to the prefix path', () => {
-    // `git commit` typed by hand, outside any harness: the subject a human
-    // wrote really is the best evidence there is.
-    const entries = narrate(
-      [record({ session: null })],
-      [{ iso: new Date(WIN.startMs + 60_000).toISOString(), subject: 'bmodes-2d: ran the nulls' }],
-    )
-    expect(entries[0].body).toBe('ran the nulls')
-    expect(entries[0].stats?.commits).toBe(1)
+  it('leaves a session-less commit unattributed', () => {
+    // `git commit` typed by hand, outside any harness: there is no session for
+    // the ledger to read, so this page has nothing to say about it.
+    const entries = narrate([record({ session: null })])
+    expect(entries[0].fallback).toBe(true)
+    expect(entries[0].stats?.commits).toBe(0)
   })
 
   it('cuts the ledger to the rail at both ends', () => {
     const inside = record({ at: WIN.startMs })
-    expect(ledgerOnRail([inside], WIN)).toEqual([inside])
-    expect(ledgerOnRail([record({ at: WIN.startMs - 1 })], WIN)).toEqual([])
-    expect(ledgerOnRail([record({ at: WIN.endMs })], WIN)).toEqual([])
-    expect(ledgerOnRail([record({ at: WIN.endMs - 1 })], WIN)).toHaveLength(1)
-  })
-
-  it('narrates a commit ONCE when both sources know it, matching on sha', () => {
-    const iso = new Date(WIN.startMs + 60_000).toISOString()
-    const entries = narrate(
-      [record({ sha: SHA(9), subject: 'ran the nulls' })],
-      // A store log that stamps shas: the exact match, and the reason the
-      // subject fallback is only a fallback.
-      [{ iso, subject: 'bmodes-2d: ran the nulls', sha: SHA(9) }],
-    )
-    expect(entries[0].body).toBe('ran the nulls')
-    expect(entries[0].stats?.commits).toBe(1)
-  })
-
-  it('narrates it once on subject alone, which is all the store log carries', () => {
-    const iso = new Date(WIN.startMs + 60_000).toISOString()
-    const entries = narrate(
-      [record({ subject: 'bmodes-2d: ran the nulls' })],
-      [{ iso, subject: 'bmodes-2d: ran the nulls' }],
-    )
-    expect(entries[0].body).toBe('ran the nulls')
-    expect(entries[0].stats?.commits).toBe(1)
-  })
-
-  it('keeps a genuinely different commit the store log alone knows', () => {
-    const iso = new Date(WIN.startMs + 60_000).toISOString()
-    const entries = narrate(
-      [record({ subject: 'bmodes-2d: ran the nulls' })],
-      [
-        { iso, subject: 'bmodes-2d: ran the nulls' },
-        { iso, subject: 'bmodes-2d: fixed the mask' },
-      ],
-    )
-    expect(entries[0].body).toBe('ran the nulls; fixed the mask')
-    expect(entries[0].stats?.commits).toBe(2)
+    expect(ledgerBetween([inside], WIN.startMs, WIN.endMs)).toEqual([inside])
+    expect(ledgerBetween([record({ at: WIN.startMs - 1 })], WIN.startMs, WIN.endMs)).toEqual([])
+    expect(ledgerBetween([record({ at: WIN.endMs })], WIN.startMs, WIN.endMs)).toEqual([])
+    expect(ledgerBetween([record({ at: WIN.endMs - 1 })], WIN.startMs, WIN.endMs)).toHaveLength(1)
   })
 
   it('counts one commit once when the composite serves it twice', () => {
@@ -1767,7 +1451,10 @@ describe('attributing a commit by the session that made it', () => {
   it('sums the diff over that fiber’s day, and nobody else’s', () => {
     const other = '01KVBR9A6VP2Q4R7S3T8W5XYHK'
     const otherSession = 'b2c3d4e5-0000-4000-8000-000000000002'
-    const cards = [card(), card({ id: 'a/second', uid: other, name: 'Second' })]
+    const cards = [
+      card(),
+      card({ id: 'a/second', uid: other, name: 'Second', runningWorker: `second-${other}-shuttle` }),
+    ]
     const twoLanes = buildDayLanes(
       activity([
         bucket(60, 'agent', SESSION),
@@ -1794,7 +1481,7 @@ describe('attributing a commit by the session that made it', () => {
         [otherSession, pairing('a/second', { session: otherSession })],
       ),
     )
-    const entries = buildDayEntries([], twoLanes, cards, WIN, NOW_IN_RAIL, ledger)
+    const entries = buildDayEntries(twoLanes, cards, WIN, NOW_IN_RAIL, ledger)
     const mine = entries.find((e) => e.cardId === 'work/spt3g_papers/bmodes-2d')
     expect(mine?.body).toBe('ran the nulls; fixed the mask')
     expect(mine?.stats).toMatchObject({ commits: 2, insertions: 50, deletions: 7 })
@@ -1807,23 +1494,15 @@ describe('attributing a commit by the session that made it', () => {
   it('leaves the diff figures absent when no ledger covers the day', () => {
     // Pre-hook history: the page reads exactly as it did before the ledger
     // existed, with no `+0 −0` where a real figure would be.
-    const entries = buildDayEntries(
-      [{ iso: new Date(WIN.startMs).toISOString(), subject: 'bmodes-2d: ran the nulls' }],
-      lanes(),
-      [card()],
-      WIN,
-      NOW_IN_RAIL,
-    )
+    const entries = buildDayEntries(lanes(), [card()], WIN, NOW_IN_RAIL)
     expect(entries[0].stats?.insertions).toBeUndefined()
-    expect(formatEntryStats(entries[0].stats!)).toBe('agents 1m · 1 commit')
+    expect(formatEntryStats(entries[0].stats!)).toBe('agents 1m')
   })
 
   it('carries the whole ladder through buildDayModel', () => {
     const model = buildDayModel(
       DAY,
       activity([bucket(60, 'agent', SESSION)]),
-      // The store log's copy of the same commit, by subject.
-      [{ iso: new Date(WIN.startMs + 60_000).toISOString(), subject: 'ran the nulls' }],
       [card()],
       '',
       NOW_IN_RAIL,
@@ -1843,24 +1522,9 @@ describe('attributing a commit by the session that made it', () => {
   })
 
   it('is inert on a daemon that serves no commit ledger', () => {
-    const withOut = buildDayModel(
-      DAY,
-      activity([bucket(60, 'agent', SESSION)]),
-      [{ iso: new Date(WIN.startMs).toISOString(), subject: 'bmodes-2d: ran the nulls' }],
-      [card()],
-      '',
-      NOW_IN_RAIL,
-    )
-    expect(withOut.entries[0].body).toBe('ran the nulls')
-    expect(withOut.entries[0].stats?.commits).toBe(1)
-  })
-
-  it('looks a store-log commit up by sha when it has one, by subject when not', () => {
-    // The ledger claims BOTH forms, so a log line matches on whichever it can
-    // offer — and today `git log` offers only the subject.
-    expect(commitDedupeKey({ sha: SHA(4), subject: 'x: y' })).toBe(`sha:${SHA(4)}`)
-    expect(commitDedupeKey({ subject: '  x: y  ' })).toBe('subject:x: y')
-    expect(commitDedupeKey({ sha: null, subject: 'x: y' })).toBe('subject:x: y')
+    const withOut = buildDayModel(DAY, activity([bucket(60, 'agent', SESSION)]), [card()], '', NOW_IN_RAIL)
+    expect(withOut.entries[0].fallback).toBe(true)
+    expect(withOut.entries[0].stats?.commits).toBe(0)
   })
 })
 

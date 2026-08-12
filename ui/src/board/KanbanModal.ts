@@ -102,8 +102,8 @@ interface KanbanModalOptions {
    *  owner-routed by `origin`. Defaults to `http://${hostname}:4000`. */
   shuttleBase?: string
   /**
-   * Override the temporal views' read plane — the `activity` / `narration`
-   * fetchers a {@link ViewContext} carries. Defaults to
+   * Override the temporal views' read plane — the `activity`, `sessions` and
+   * `commits` fetchers a {@link ViewContext} carries. Defaults to
    * {@link createTemporalFetchers} over `shuttleBase`. The offline harness
    * injects deterministic mocks here so the views are exercisable with no
    * daemon (see harness/harness-board.ts).
@@ -626,7 +626,6 @@ export class KanbanModal {
       cards,
       shuttleBase: this.shuttleBase,
       activity: (fromMs, toMs) => this.temporal.activity(fromMs, toMs),
-      narration: (fromISO, toISO) => this.temporal.narration(fromISO, toISO),
       sessions: (sinceMs) => this.temporal.sessions(sinceMs),
       commits: (sinceMs, untilMs) => this.temporal.commits(sinceMs, untilMs),
       moment: (session, fromMs, toMs, host) =>
@@ -1260,7 +1259,7 @@ export class KanbanModal {
       if (!wasFirstRender && sig === this.lastResponseSig) {
         // The Desk skips an identical-payload re-render, but a temporal view
         // still gets its poll: its content moves with the clock (and with
-        // activity/narration), not only with the fiber feed.
+        // activity and the ledgers), not only with the fiber feed.
         this.mountOrRefreshActiveView()
         return
       }

@@ -19,7 +19,6 @@
 
 import { describe, expect, it } from 'vitest'
 import {
-  abbreviateCwd,
   aggregateByCivilDay,
   attributeActivity,
   assignCycleLanes,
@@ -34,7 +33,6 @@ import {
   railDate,
   spellFractions,
   readCycleBand,
-  resolveNarrationSlug,
   retirePendingCycles,
   type PendingCycle,
   rowWaitingOn,
@@ -42,7 +40,7 @@ import {
   saysNothingHere,
   shuttleOrigin,
 } from './ChronicleView.js'
-import { sessionSlug, sessionUlid } from './sessionNames.js'
+import type { LedgerNarration } from './join.js'
 import { formatSpanMinutes, railBounds } from './railTime.js'
 import { buildSessionIndex, foldActiveMinutes } from './TemporalData.js'
 import type { ActivityBucket } from './TemporalData.js'
@@ -92,34 +90,9 @@ function cycle(id: string, start: string | null, due: string | undefined): Cycle
   return { id, name: id, originId: 'local', cycleStart: start, due }
 }
 
-// ── Session parsing ──────────────────────────────────────────────────────────
+// ── Naming an era ────────────────────────────────────────────────────────────
 
-describe('reading a tmux session name', () => {
-  it('lifts the ULID out of `<slug>-<ULID>-shuttle`', () => {
-    expect(sessionUlid('bmodes-2d-01KVBR1F9BWBVKF97473PV67K8-shuttle')).toBe(
-      '01KVBR1F9BWBVKF97473PV67K8',
-    )
-  })
-
-  it('upper-cases a lower-case ULID, so the two spellings join', () => {
-    expect(sessionUlid('triage-01kvbr1f9bwbvkf97473pv67k8-shuttle')).toBe(
-      '01KVBR1F9BWBVKF97473PV67K8',
-    )
-  })
-
-  it('finds nothing in a name that carries no ULID', () => {
-    expect(sessionUlid('morning-post-shuttle')).toBeNull()
-    expect(sessionUlid(null)).toBeNull()
-    // 25 characters is not a ULID.
-    expect(sessionUlid('x-01KVBR1F9BWBVKF97473PV67K-shuttle')).toBeNull()
-  })
-
-  it('strips the suffix and the ULID to leave the slug', () => {
-    expect(sessionSlug('bmodes-2d-01KVBR1F9BWBVKF97473PV67K8-shuttle')).toBe('bmodes-2d')
-    expect(sessionSlug('morning-post-shuttle')).toBe('morning-post')
-    expect(sessionSlug('')).toBeNull()
-  })
-
+describe('naming an era from what was spoken', () => {
   it('takes an era\u2019s name from the opening clause of what was spoken', () => {
     expect(eraName('Cross-correlation season. Everything points at the shear maps.')).toBe(
       'Cross-correlation season',
@@ -139,18 +112,15 @@ describe('reading a tmux session name', () => {
     expect(long.startsWith('a very long stretch')).toBe(true)
     expect(eraName('   ')).toBe('')
   })
-
-  it('labels a working directory for its row', () => {
-    expect(abbreviateCwd('/home/ada/dev/felt')).toBe('~/dev/felt')
-    expect(abbreviateCwd('/Users/ada/dev/felt')).toBe('~/dev/felt')
-    expect(abbreviateCwd('/srv/data/runs/nightly/2026')).toBe('…/runs/nightly/2026')
-    // The home directory itself is `~`, not a `~/` with nothing after it.
-    expect(abbreviateCwd('/home/ada')).toBe('~')
-    expect(abbreviateCwd('/Users/ada/')).toBe('~')
-  })
 })
 
 // ── The join ladder ──────────────────────────────────────────────────────────
+//
+// Two rungs, both recorded evidence (see join.ts's module doc): the session
+// ledger's tmux→fiber pairing, and a bucket's session name being exactly a
+// card's live worker. Nothing here reads a name for a fiber it might mean, so
+// there is no cwd row and no dropped count — a bucket that joins nothing is
+// simply absent from the returned map.
 
 describe('attributing activity to fibers', () => {
   const bmodes = card({
@@ -158,22 +128,14 @@ describe('attributing activity to fibers', () => {
     uid: '01KVBR1F9BWBVKF97473PV67K8',
     runningWorker: 'bmodes-2d-01KVBR1F9BWBVKF97473PV67K8-shuttle',
   })
-  const digest = card({ id: 'work/arxiv/daily-digest', status: 'closed' })
-  const morning = card({ id: 'loom/email/morning-post/refine' })
-  const ledgerCard = card({ id: 'loom/felt-maintenance/ledger/sweep' })
-  const cards = [bmodes, digest, morning, ledgerCard]
-
-  it('joins on the ULID the session name carries', () => {
-    const at = attributeActivity(
-      [bucket(1, { s: 'anything-01KVBR1F9BWBVKF97473PV67K8-shuttle', cwd: '/home/ada/elsewhere' })],
-      cards,
-    )
-    expect(at.byCard.get(bmodes.id)).toHaveLength(1)
-    expect(at.byCwd.size).toBe(0)
+  const morning = card({
+    id: 'loom/email/morning-post/refine',
+    runningWorker: 'morning-post-shuttle',
   })
+  const ledgerCard = card({ id: 'loom/felt-maintenance/ledger/sweep' })
+  const cards = [bmodes, morning, ledgerCard]
 
-  // Rung 0. The ledger is a recorded fact about whose work a session was; every
-  // rung below it is an inference from a name.
+  // Rung 0. The ledger is a recorded fact about whose work a session was.
   const ledger = (pairs: Record<string, { fiber: string; uid?: string }>) =>
     new Map(
       Object.entries(pairs).map(([k, v]) => [
@@ -182,51 +144,44 @@ describe('attributing activity to fibers', () => {
       ]),
     )
 
-  it('joins through the session ledger before trying any name', () => {
-    // A session with no ULID and a cwd that names nothing — unreachable by the
-    // lower rungs, and exactly the actor the ledger exists for.
+  it('joins through the session ledger — a session no other rung can place', () => {
     const at = attributeActivity(
-      [bucket(1, { s: 'pi-2f9c41', cwd: '/home/ada/work/photoz' })],
+      [bucket(1, { s: 'pi-2f9c41' })],
       cards,
       ledger({ 'pi-2f9c41': { fiber: morning.id } }),
     )
-    expect(at.byCard.get(morning.id)).toHaveLength(1)
-    expect(at.byCwd.size).toBe(0)
+    expect(at.get(morning.id)).toHaveLength(1)
   })
 
-  it('lets the ledger outrank a name that would have resolved elsewhere', () => {
+  it('lets the ledger outrank the live worker name it would otherwise have matched', () => {
     const at = attributeActivity(
       [bucket(1, { s: 'morning-post-shuttle' })],
       cards,
       ledger({ 'morning-post-shuttle': { fiber: ledgerCard.id } }),
     )
-    expect(at.byCard.get(ledgerCard.id)).toHaveLength(1)
-    expect(at.byCard.has(morning.id)).toBe(false)
+    expect(at.get(ledgerCard.id)).toHaveLength(1)
+    expect(at.has(morning.id)).toBe(false)
   })
 
-  it('pairs on the ULID when the ledger’s path has moved under it', () => {
+  it('pairs on the ULID when the ledger\u2019s path has moved under it', () => {
     const at = attributeActivity(
       [bucket(1, { s: 'pi-2f9c41' })],
       cards,
       ledger({ 'pi-2f9c41': { fiber: 'some/old/path', uid: '01KVBR1F9BWBVKF97473PV67K8' } }),
     )
-    expect(at.byCard.get(bmodes.id)).toHaveLength(1)
+    expect(at.get(bmodes.id)).toHaveLength(1)
   })
 
   // The property the ledger must not break: it can move work between rows, and
-  // it can never invent one. A record for a fiber this board does not show must
-  // fall through to the honest cwd row rather than vanishing into a card that
-  // has no row to draw.
+  // it can never invent one. A record for a fiber this board does not show
+  // falls through to nothing rather than resolving to a card that has no row.
   it('conjures no row for a ledger record whose fiber is off the board', () => {
-    // Deliberately a session name no lower rung can match either — otherwise
-    // this would pass on the slug rung and prove nothing about rung 0.
     const at = attributeActivity(
-      [bucket(1, { s: 'pi-9a3f21', cwd: '/home/ada/elsewhere' })],
+      [bucket(1, { s: 'pi-9a3f21' })],
       cards,
       ledger({ 'pi-9a3f21': { fiber: 'loom/felt-maintenance/ledger/sweep-2019' } }),
     )
-    expect(at.byCard.size).toBe(0)
-    expect(at.byCwd.get('/home/ada/elsewhere')).toHaveLength(1)
+    expect(at.size).toBe(0)
   })
 
   // Cross-host. Two daemons each run a tmux session called `run-shuttle`, on
@@ -256,7 +211,7 @@ describe('attributing activity to fibers', () => {
     },
   ]).byTmux
 
-  it('keeps two hosts’ identically-named tmux sessions on their own fibers', () => {
+  it('keeps two hosts\u2019 identically-named tmux sessions on their own fibers', () => {
     const at = attributeActivity(
       [
         bucket(1, { s: 'run-shuttle', host: 'ada' }),
@@ -266,125 +221,34 @@ describe('attributing activity to fibers', () => {
       cards,
       crossHostLedger,
     )
-    expect(at.byCard.get(morning.id)).toHaveLength(1)
-    expect(at.byCard.get(ledgerCard.id)).toHaveLength(2)
+    expect(at.get(morning.id)).toHaveLength(1)
+    expect(at.get(ledgerCard.id)).toHaveLength(2)
   })
 
   it('falls back to the bare name only for a bucket that cannot say where it ran', () => {
     // No host on the bucket — an old daemon's un-stamped response. The bare key
     // resolves to whichever host paired most recently, which is `bob` here.
     const at = attributeActivity([bucket(1, { s: 'run-shuttle' })], cards, crossHostLedger)
-    expect(at.byCard.get(ledgerCard.id)).toHaveLength(1)
+    expect(at.get(ledgerCard.id)).toHaveLength(1)
   })
 
-  it('ranks a remote host’s work on its own row, not the local one', () => {
+  it('ranks a remote host\u2019s work on its own row, not the local one', () => {
     // The whole point of the cross-host read: ink from `ada` lands on `ada`'s
-    // fiber even though every other rung would have looked local.
+    // fiber even though `run-shuttle` also matches a fiber on `bob`.
     const at = attributeActivity([bucket(1, { s: 'run-shuttle', host: 'ada' })], cards, crossHostLedger)
-    expect(at.byCard.has(ledgerCard.id)).toBe(false)
-    expect(at.byCard.get(morning.id)).toHaveLength(1)
+    expect(at.has(ledgerCard.id)).toBe(false)
+    expect(at.get(morning.id)).toHaveLength(1)
   })
 
-  it('is a no-op when no ledger is supplied', () => {
-    const at = attributeActivity([bucket(1, { s: 'morning-post-shuttle' })], cards)
-    expect(at.byCard.get(morning.id)).toHaveLength(1)
+  // Rung 1. A bucket's session name is exactly a live worker's tmux name.
+  it('joins a live worker\u2019s exact tmux name with no ledger at all', () => {
+    const at = attributeActivity([bucket(1, { s: bmodes.runningWorker })], cards)
+    expect(at.get(bmodes.id)).toHaveLength(1)
   })
 
-  it('falls back to the session slug when the name has no ULID', () => {
-    const at = attributeActivity([bucket(1, { s: 'morning-post-shuttle' })], cards)
-    expect(at.byCard.get(morning.id)).toHaveLength(1)
-  })
-
-  // A directory tail is evidence about a PROJECT; a session name is evidence
-  // about a WORKER. These two cases are the same error caught from both sides,
-  // and they are why there is no directory rung at all.
-  it('will not file a human\'s keystrokes under the one fiber nested in that directory', () => {
-    // Two sessionless actors editing in a project directory. `daily-digest` is
-    // a path segment of exactly one card, so the old ladder handed them to it.
-    const at = attributeActivity(
-      [
-        bucket(1, { s: null, cwd: '/home/ada/work/daily-digest' }),
-        bucket(2, { s: null, cwd: '/home/ada/work/daily-digest', k: 'attention' }),
-      ],
-      cards,
-    )
-    expect(at.byCard.size).toBe(0)
-    expect(at.byCwd.get('/home/ada/work/daily-digest')).toHaveLength(2)
-  })
-
-  it('will not guess a directory for a worker whose fiber is off the board', () => {
-    const at = attributeActivity(
-      [
-        bucket(1, {
-          s: 'planning-01KXAX9HHA9VZC9DFA7RTATQC5-shuttle',
-          cwd: '/home/ada/work/daily-digest',
-        }),
-      ],
-      cards,
-    )
-    expect(at.byCard.size).toBe(0)
-    expect(at.byCwd.get('/home/ada/work/daily-digest')).toHaveLength(1)
-  })
-
-  it('holds the same line for a ULID-free session name that resolves to nothing', () => {
-    const at = attributeActivity(
-      [bucket(1, { s: 'euclid-triage-shuttle', cwd: '/home/ada/work/daily-digest' })],
-      cards,
-    )
-    expect(at.byCard.size).toBe(0)
-    expect(at.byCwd.get('/home/ada/work/daily-digest')).toHaveLength(1)
-  })
-
-  it('labels a row of unresolved sessions `unmatched`, not `interactive`', () => {
-    const at = attributeActivity(
-      [
-        bucket(1, { s: 'off-board-shuttle', cwd: '/home/ada/elsewhere' }),
-        bucket(2, { s: null, cwd: '/home/ada/elsewhere' }),
-      ],
-      cards,
-    )
-    const list = at.byCwd.get('/home/ada/elsewhere') ?? []
-    expect(list).toHaveLength(2)
-    expect(list.every((b) => b.s === null)).toBe(false)
-  })
-
-  it('refuses an ambiguous token — a directory two fibers share is not a fiber', () => {
-    // `loom` is a path segment of BOTH loom fibers, so it identifies neither;
-    // the bucket becomes human work in that directory instead.
-    const at = attributeActivity([bucket(1, { s: null, cwd: '/home/ada/loom' })], cards)
-    expect(at.byCard.size).toBe(0)
-    expect(at.byCwd.get('/home/ada/loom')).toHaveLength(1)
-  })
-
-  it('groups leftover interactive work by its directory', () => {
-    const at = attributeActivity(
-      [
-        bucket(1, { s: null, cwd: '/home/ada/dev/felt' }),
-        bucket(2, { s: null, cwd: '/home/ada/dev/felt', k: 'attention' }),
-        bucket(3, { s: null, cwd: '/home/ada/notes' }),
-      ],
-      cards,
-    )
-    expect(at.byCard.size).toBe(0)
-    expect(at.byCwd.get('/home/ada/dev/felt')).toHaveLength(2)
-    expect(at.byCwd.get('/home/ada/notes')).toHaveLength(1)
-  })
-
-  it('drops only what has neither a session nor a directory', () => {
+  it('drops a session that neither rung can place', () => {
     const at = attributeActivity([bucket(1), bucket(2, { s: 'unknown-shuttle' })], cards)
-    expect(at.byCard.size).toBe(0)
-    expect(at.byCwd.size).toBe(0)
-    expect(at.dropped).toBe(2)
-  })
-
-  it('prefers the live worker name over every weaker rung', () => {
-    // The cwd tail would name `daily-digest`; the exact tmux name wins.
-    const at = attributeActivity(
-      [bucket(1, { s: bmodes.runningWorker, cwd: '/home/ada/work/daily-digest' })],
-      cards,
-    )
-    expect(at.byCard.get(bmodes.id)).toHaveLength(1)
-    expect(at.byCard.has(digest.id)).toBe(false)
+    expect(at.size).toBe(0)
   })
 })
 
@@ -849,34 +713,75 @@ describe('composing an era’s look-back', () => {
     expect(formatSpanMinutes(120, { empty: '—' })).toBe('2h 0m')
   })
 
-  it('gathers commits under the thing each was about', () => {
-    const groups = groupNarration([
-      { iso: 'x', subject: 'board: fold the masthead' },
-      { iso: 'x', subject: 'board: adaptive strip height' },
-      { iso: 'x', subject: 'daemon: owner-route the write plane' },
-      { iso: 'x', subject: 'no colon here' },
-    ])
-    expect(groups.map((g) => [g.slug, g.count])).toEqual([
-      ['board', 2],
-      ['daemon', 1],
-      ['elsewhere', 1],
+  // groupNarration reads the COMMIT LEDGER's attribution now — a hook recorded
+  // which harness session made each commit, and the session ledger names that
+  // session's fiber. No subject line is read for identity, so a group is keyed
+  // by cardId, not by a `slug: ` prefix a human might have mistyped or skipped.
+  const ledgerCards = [card({ id: 'a/board', name: 'Board work' }), card({ id: 'b/daemon', name: 'Daemon work' })]
+
+  it('gathers commits under the fiber the ledger attributed them to', () => {
+    const ledger: LedgerNarration = {
+      byCard: new Map([
+        ['a/board', { subjects: ['fold the masthead', 'adaptive strip height'], commits: 2, insertions: 0, deletions: 0 }],
+        ['b/daemon', { subjects: ['owner-route the write plane'], commits: 1, insertions: 0, deletions: 0 }],
+      ]),
+    }
+    const groups = groupNarration(ledger, ledgerCards)
+    expect(groups.map((g) => [g.cardId, g.count])).toEqual([
+      ['a/board', 2],
+      ['b/daemon', 1],
     ])
     expect(groups[0].subjects).toEqual(['fold the masthead', 'adaptive strip height'])
   })
 
+  it('drops a fiber the ledger names that this board does not carry', () => {
+    // Attributing to an absent card would put a link in the look-back that
+    // opens nothing — the ledger's claim is dropped instead.
+    const ledger: LedgerNarration = {
+      byCard: new Map([
+        ['a/board', { subjects: [], commits: 1, insertions: 0, deletions: 0 }],
+        ['gone/fiber', { subjects: [], commits: 99, insertions: 0, deletions: 0 }],
+      ]),
+    }
+    expect(groupNarration(ledger, ledgerCards).map((g) => g.cardId)).toEqual(['a/board'])
+  })
+
   it('keeps two subjects a group and four groups — a memoir, not a log', () => {
-    const many = Array.from({ length: 9 }, (_, i) => ({ iso: 'x', subject: `s${i}: did a thing` }))
-    const deep = Array.from({ length: 5 }, (_, i) => ({ iso: 'x', subject: `one: thing ${i}` }))
-    expect(groupNarration(many)).toHaveLength(4)
-    expect(groupNarration(deep)[0].subjects).toHaveLength(2)
+    const many = Array.from({ length: 9 }, (_, i) => card({ id: `f${i}`, name: `Fiber ${i}` }))
+    const deep = card({ id: 'deep', name: 'Deep' })
+    const manyLedger: LedgerNarration = {
+      byCard: new Map(
+        many.map((c, i) => [c.id, { subjects: [`thing ${i}`], commits: many.length - i, insertions: 0, deletions: 0 }]),
+      ),
+    }
+    const deepLedger: LedgerNarration = {
+      byCard: new Map([
+        [deep.id, {
+          subjects: Array.from({ length: 5 }, (_, i) => `thing ${i}`),
+          commits: 5,
+          insertions: 0,
+          deletions: 0,
+        }],
+      ]),
+    }
+    expect(groupNarration(manyLedger, many)).toHaveLength(4)
+    expect(groupNarration(deepLedger, [deep])[0].subjects).toHaveLength(2)
     // Trimming what is shown must never trim what is counted.
-    expect(groupNarration(deep)[0].count).toBe(5)
+    expect(groupNarration(deepLedger, [deep])[0].count).toBe(5)
   })
 
   it('says a repeated message once, and lets the count carry the repetition', () => {
-    const groups = groupNarration(
-      Array.from({ length: 13 }, () => ({ iso: 'x', subject: 'board: fold the masthead' })),
-    )
+    const ledger: LedgerNarration = {
+      byCard: new Map([
+        ['a/board', {
+          subjects: Array.from({ length: 13 }, () => 'fold the masthead'),
+          commits: 13,
+          insertions: 0,
+          deletions: 0,
+        }],
+      ]),
+    }
+    const groups = groupNarration(ledger, ledgerCards)
     expect(groups[0].count).toBe(13)
     expect(groups[0].subjects).toEqual(['fold the masthead'])
   })
@@ -1030,43 +935,5 @@ describe('a cycle whose due came back as an instant', () => {
     )
     expect(asStored).toEqual(asWritten)
     expect(asStored?.openEnd).toBe(false)
-  })
-})
-
-/**
- * The look-back names fibers, and a name you can read is a fiber you should be
- * able to open. The commit slug is the only link that has to be EARNED: it is a
- * filing key, not an id, so it opens a card only when it names exactly one.
- */
-describe('resolveNarrationSlug', () => {
-  const cards = [
-    { id: 'loom/harness/communication-skill-dogfood', name: 'Communication skill — dogfood' },
-    { id: 'science/unions/shuttle-temporal-ui', name: 'Shuttle UI reimagined' },
-    { id: 'personal/newsletter-batches', name: 'Newsletter batches' },
-  ]
-
-  it('opens the fiber whose id tail is the slug', () => {
-    expect(resolveNarrationSlug('shuttle-temporal-ui', cards)?.id).toBe(
-      'science/unions/shuttle-temporal-ui',
-    )
-  })
-
-  it('opens the fiber whose NAME slugifies to it', () => {
-    expect(resolveNarrationSlug('newsletter-batches', cards)?.id).toBe('personal/newsletter-batches')
-  })
-
-  it('stays plain text when the slug names no fiber', () => {
-    expect(resolveNarrationSlug('gh-pages-docs', cards)).toBeUndefined()
-    expect(resolveNarrationSlug('', cards)).toBeUndefined()
-  })
-
-  // Two fibers answering to one slug means the trail identifies neither, and a
-  // link that opens the wrong card is worse than a word that is not a link.
-  it('stays plain text when two fibers answer to the same slug', () => {
-    const twins = [
-      { id: 'a/morning-post', name: 'Morning post' },
-      { id: 'b/morning-post', name: 'Morning post (old)' },
-    ]
-    expect(resolveNarrationSlug('morning-post', twins)).toBeUndefined()
   })
 })

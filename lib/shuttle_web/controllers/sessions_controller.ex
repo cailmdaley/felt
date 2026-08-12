@@ -18,7 +18,7 @@ defmodule ShuttleWeb.SessionsController do
   the alternative is silently serving a different window than the caller asked
   for.
 
-  **Host-scoped, not owner-routed**, like `/activity` and `/narration`: the
+  **Host-scoped, not owner-routed**, like `/activity` and `/commits`: the
   ledger records the sessions THIS daemon paired. A cross-host view fans out
   and merges on the `host` stamp each record already carries.
   """

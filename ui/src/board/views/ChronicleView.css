@@ -375,9 +375,11 @@
   color: #2A231A;
   max-width: 92ch;
 }
-.chr-face-slug {
-  font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: calc(10px * var(--kbn-type-scale, 1));
+/* The fiber a group of commits belongs to. It used to be a `slug:` prefix — a
+   filing key, so it was set in mono — and it is now the fiber's own NAME, which
+   is prose: it keeps the line's serif and is distinguished by weight and hue. */
+.chr-face-fiber {
+  font-weight: 600;
   color: #3D5BA0;
   margin-right: 4px;
 }
@@ -404,12 +406,11 @@
   text-decoration-thickness: 0.5px;
   text-underline-offset: 2px;
 }
-/* The slug is already blue and already mono; hovering it only draws the rule.
-   Stated at two-class specificity so `font: inherit` above cannot take the
-   monospace off the one word on this line that is a filing key. */
-.chr-face-slug.chr-face-open {
-  font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: calc(10px * var(--kbn-type-scale, 1));
+/* The name is already blue and already weighted; hovering it only draws the
+   rule. Stated at two-class specificity so the `font: inherit` above cannot
+   take the weight off it. */
+.chr-face-fiber.chr-face-open {
+  font-weight: 600;
   color: #3D5BA0;
 }
 

@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
   buildSessionIndex,
-  civilDaysToInstants,
   createTemporalFetchers,
   isOriginStale,
   lookupSession,
@@ -58,105 +57,12 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-describe('narration wire form', () => {
-  it('sends from_ms/to_ms and never the civil-day params', async () => {
-    const calls = captureFetch(ok({ commits: [] }))
-    await createTemporalFetchers('').narration('2026-08-06', '2026-08-06')
-
-    expect(calls).toHaveLength(1)
-    const { params } = calls[0]
-    expect(params.has('from_ms')).toBe(true)
-    expect(params.has('to_ms')).toBe(true)
-    // The legacy pair must be absent, not merely ignored: the daemon selects
-    // the instant form on the PRESENCE of either instant key, so sending both
-    // pairs would work by luck rather than by contract.
-    expect(params.has('from')).toBe(false)
-    expect(params.has('to')).toBe(false)
-    // Integers, not floats or exponent notation — the daemon parses strictly.
-    expect(params.get('from_ms')).toMatch(/^\d+$/)
-    expect(params.get('to_ms')).toMatch(/^\d+$/)
-  })
-
-  it('resolves the pair to local midnight through local end-of-day', async () => {
-    const calls = captureFetch(ok({ commits: [] }))
-    await createTemporalFetchers('').narration('2026-08-06', '2026-08-08')
-
-    const fromMs = Number(calls[0].params.get('from_ms'))
-    const toMs = Number(calls[0].params.get('to_ms'))
-    const from = new Date(fromMs)
-    const to = new Date(toMs)
-
-    expect([from.getFullYear(), from.getMonth() + 1, from.getDate()]).toEqual([2026, 8, 6])
-    expect([from.getHours(), from.getMinutes(), from.getSeconds()]).toEqual([0, 0, 0])
-    // `to` is INCLUSIVE, so the window reaches the end of the 8th rather than
-    // stopping at its start.
-    expect([to.getFullYear(), to.getMonth() + 1, to.getDate()]).toEqual([2026, 8, 8])
-    expect([to.getHours(), to.getMinutes(), to.getSeconds()]).toEqual([23, 59, 59])
-  })
-
-  it('asks for a single day as that whole day, not a zero-width window', async () => {
-    // The bug this shape exists to prevent: DayView calls narration(day, day),
-    // and an instant window read as two identical points returns nothing.
-    const calls = captureFetch(ok({ commits: [] }))
-    await createTemporalFetchers('').narration('2026-08-06', '2026-08-06')
-
-    const width = Number(calls[0].params.get('to_ms')) - Number(calls[0].params.get('from_ms'))
-    // 23, 24 or 25 hours depending on DST, minus the final millisecond.
-    expect(width).toBeGreaterThanOrEqual(23 * 3_600_000 - 1)
-    expect(width).toBeLessThanOrEqual(25 * 3_600_000)
-  })
-
-  it('degrades a 404 to an empty result without throwing', async () => {
-    captureFetch(() => new Response('', { status: 404 }))
-    await expect(createTemporalFetchers('').narration('2026-08-06', '2026-08-06'))
-      .resolves.toEqual({ commits: [], origins: {} })
-  })
-
-  it('caches on the civil-day pair, so a repeat asks the daemon once', async () => {
-    const calls = captureFetch(ok({ commits: [{ iso: '2026-08-06T09:00:00Z', subject: 'a: b' }] }))
-    const fetchers = createTemporalFetchers('')
-    const first = await fetchers.narration('2026-08-06', '2026-08-06')
-    const second = await fetchers.narration('2026-08-06', '2026-08-06')
-
-    expect(calls).toHaveLength(1)
-    expect(second).toEqual(first)
-    expect(first.commits).toHaveLength(1)
-  })
-
-  it('resolves an unreadable day to empty without reaching the daemon', async () => {
-    const calls = captureFetch(ok({ commits: [] }))
-    await expect(createTemporalFetchers('').narration('not-a-day', '2026-08-06'))
-      .resolves.toEqual({ commits: [], origins: {} })
-    expect(calls).toHaveLength(0)
-  })
-})
-
-describe('civilDaysToInstants', () => {
-  it('reads the leading day off a full ISO timestamp', () => {
-    const span = civilDaysToInstants('2026-08-06T13:45:00Z', '2026-08-06T22:10:00Z')
-    expect(span).not.toBeNull()
-    expect(new Date(span!.fromMs).getDate()).toBe(6)
-    expect(new Date(span!.fromMs).getHours()).toBe(0)
-  })
-
-  it('is null when either end carries no civil day', () => {
-    expect(civilDaysToInstants('rubbish', '2026-08-06')).toBeNull()
-    expect(civilDaysToInstants('2026-08-06', '')).toBeNull()
-  })
-
-  it('leaves an inverted pair inverted, for the daemon to refuse', () => {
-    const span = civilDaysToInstants('2026-08-08', '2026-08-06')
-    expect(span).not.toBeNull()
-    expect(span!.fromMs).toBeGreaterThan(span!.toMs)
-  })
-})
-
-// ── Session ledger → join index ──────────────────────────────────────────────
+// ── The session ledger ──────────────────────────────────────────────────────
 //
-// The ledger is JOIN RUNG 0: a recorded fiber↔session pairing, which beats
-// every name-derived rung because it is a fact rather than an inference and it
-// outlives the session. `buildSessionIndex` is the shared shape both Chronicle
-// and Day consume, so its edges are worth pinning precisely.
+// The ledger is the JOIN: a recorded fiber↔session pairing, which is a fact
+// rather than an inference and outlives the session that made it.
+// `buildSessionIndex` is the shared shape Chronicle, Day and Week consume, so
+// its edges are worth pinning precisely.
 
 function rec(over: Partial<SessionRecord> = {}): SessionRecord {
   return {
@@ -368,13 +274,12 @@ describe('composite routing', () => {
     // Latching on anything but a 404 would strand a whole fleet on single-host
     // data until the board reloads.
     const calls = routedFetch([
-      ['/narration/composite', () => new Response('', { status: 503 })],
+      ['/commits/composite', () => new Response('', { status: 503 })],
     ])
     const fetchers = createTemporalFetchers('')
 
-    await expect(fetchers.narration('2026-08-06', '2026-08-06'))
-      .resolves.toEqual({ commits: [], origins: {} })
-    await fetchers.narration('2026-08-07', '2026-08-07')
+    await expect(fetchers.commits(0, 1)).resolves.toEqual({ host: '', records: [], origins: {} })
+    await fetchers.commits(2, 3)
 
     expect(calls.every((c) => c.url.includes('composite'))).toBe(true)
     expect(calls).toHaveLength(2)
@@ -399,13 +304,13 @@ describe('composite routing', () => {
   })
 
   it('synthesizes a local origin when a response carries no block', async () => {
-    routedFetch([['/narration', ok({ host: 'ada', commits: [
-      { iso: '2026-08-06T09:00:00Z', subject: 'a: b' },
+    routedFetch([['/commits', ok({ host: 'ada', records: [
+      { at: 1, sha: 'a'.repeat(40), subject: 'a: b', session: 's', insertions: 1, deletions: 0, files: 1 },
     ] })]])
-    const out = await createTemporalFetchers('').narration('2026-08-06', '2026-08-06')
+    const out = await createTemporalFetchers('').commits(0, 10)
 
     expect(out.origins).toEqual({ ada: { kind: 'local', stale: false } })
-    expect(out.commits[0].host).toBe('ada')
+    expect(out.records[0].host).toBe('ada')
   })
 })
 

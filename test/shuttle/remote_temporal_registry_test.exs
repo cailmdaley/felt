@@ -1,6 +1,6 @@
 defmodule Shuttle.RemoteTemporalRegistryTest do
   @moduledoc """
-  The cross-host temporal cache: five feeds per remote, last-good data that
+  The cross-host temporal cache: four feeds per remote, last-good data that
   survives both a failed poll and a daemon restart.
 
   Driven synchronously (`auto_poll: false` + `refresh_now/1`) against a scripted
@@ -63,7 +63,6 @@ defmodule Shuttle.RemoteTemporalRegistryTest do
 
   @bucket %{"m" => 1_770_000_000_000, "s" => nil, "cwd" => "/repo", "k" => "agent", "n" => 3}
   @record %{"fiber" => "work/paper", "host" => "candide", "at" => 1_770_000_000_000}
-  @commit %{"iso" => "2026-02-02T02:40:00Z", "subject" => "paper: a section"}
   @ledgered_commit %{
     "at" => 1_770_000_000_000,
     "kind" => "commit",
@@ -95,7 +94,6 @@ defmodule Shuttle.RemoteTemporalRegistryTest do
       "/api/v1/commits",
       {:ok, Jason.encode!(%{"records" => [@ledgered_commit]})}
     )
-    MockClient.set("/api/v1/narration", {:ok, Jason.encode!(%{"commits" => [@commit]})})
     MockClient.set("/api/v1/spend", {:ok, Jason.encode!(%{"sessions" => [@spend]})})
   end
 
@@ -127,8 +125,8 @@ defmodule Shuttle.RemoteTemporalRegistryTest do
     {pid, name}
   end
 
-  describe "caching the five feeds" do
-    test "a successful poll caches activity, sessions, commits, narration, and spend",
+  describe "caching the four feeds" do
+    test "a successful poll caches activity, sessions, commits, and spend",
          %{dir: dir} do
       {_pid, name} = start_registry(dir)
       :ok = RemoteTemporalRegistry.refresh_now(name)
@@ -138,7 +136,6 @@ defmodule Shuttle.RemoteTemporalRegistryTest do
       assert entry.activity_buckets == [@bucket]
       assert entry.sessions == [@record]
       assert entry.commits == [@ledgered_commit]
-      assert entry.narration_commits == [@commit]
       assert entry.spend == [@spend]
       assert entry.last_error == nil
       refute entry.stale
@@ -175,7 +172,6 @@ defmodule Shuttle.RemoteTemporalRegistryTest do
       assert entry.activity_buckets == [@bucket]
       assert entry.sessions == [@record]
       assert entry.commits == [@ledgered_commit]
-      assert entry.narration_commits == [@commit]
       assert entry.spend == [@spend]
       assert entry.last_error == :not_set
     end
@@ -185,15 +181,15 @@ defmodule Shuttle.RemoteTemporalRegistryTest do
       {_pid, name} = start_registry(dir)
       :ok = RemoteTemporalRegistry.refresh_now(name)
 
-      # Narration goes away; activity serves a new bucket.
+      # Commits goes away; activity serves a new bucket.
       fresh = Map.put(@bucket, "n", 9)
       MockClient.set("/api/v1/activity", {:ok, Jason.encode!(%{"buckets" => [fresh]})})
-      MockClient.set("/api/v1/narration", {:error, :timeout})
+      MockClient.set("/api/v1/commits", {:error, :timeout})
       :ok = RemoteTemporalRegistry.refresh_now(name)
 
       entry = RemoteTemporalRegistry.entries(name)["candide"]
       assert entry.activity_buckets == [fresh]
-      assert entry.narration_commits == [@commit]
+      assert entry.commits == [@ledgered_commit]
       assert entry.last_error == :timeout
       # At least one feed landed, so the origin is fresh AND carries the error.
       refute entry.stale
@@ -216,13 +212,12 @@ defmodule Shuttle.RemoteTemporalRegistryTest do
       :ok = RemoteTemporalRegistry.refresh_now(name)
       first = RemoteTemporalRegistry.entries(name)["candide"].last_polled_at
 
-      # Same scripted bodies, so the stub's If-None-Match check 304s all three.
+      # Same scripted bodies, so the stub's If-None-Match check 304s all four.
       Process.sleep(5)
       :ok = RemoteTemporalRegistry.refresh_now(name)
 
       entry = RemoteTemporalRegistry.entries(name)["candide"]
       assert entry.activity_buckets == [@bucket]
-      assert entry.narration_commits == [@commit]
       assert DateTime.compare(entry.last_polled_at, first) == :gt
       refute entry.stale
     end
@@ -243,7 +238,6 @@ defmodule Shuttle.RemoteTemporalRegistryTest do
       assert entry.activity_buckets == [@bucket]
       assert entry.sessions == [@record]
       assert entry.commits == [@ledgered_commit]
-      assert entry.narration_commits == [@commit]
       # Freshness is INHERITED, not reset: the entry reads "last seen at T",
       # where T is when the data was actually fetched, so it ages honestly from
       # there instead of a restart laundering stale data into fresh.

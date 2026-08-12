@@ -44,7 +44,7 @@
 
 import './momentTip.css'
 import type { ActivityBucket, MomentExcerpt, MomentResult } from './TemporalData.js'
-import type { MomentSource } from './activityOrigin.js'
+import type { MomentSource } from './join.js'
 
 export type { MomentSource }
 

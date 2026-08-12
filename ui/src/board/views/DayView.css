@@ -608,14 +608,6 @@ button.kbn-day-entrytitle:focus-visible {
   outline-offset: 2px;
 }
 
-/* The commits that named no fiber — kept, but kept quiet, and last. */
-.kbn-day-entry-loose { color: #7A6F5C; }
-.kbn-day-entry-loose .kbn-day-entrytitle {
-  font-weight: 400;
-  font-style: italic;
-  color: #A89B83;
-}
-
 /* ── Where things stand ────────────────────────────────────────────────────
    Each fiber's own rendered page, at thumbnail size. A report already states
    its status spatially — headings, tables, the shape of an argument — so the

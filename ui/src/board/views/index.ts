@@ -30,7 +30,7 @@ export {
   createTemporalFetchers,
   type ActivityBucket,
   type ActivityResult,
-  type NarrationResult,
+  type CommitRecord,
   type SessionRecord,
   type TemporalFetchers,
   type TemporalOrigin,

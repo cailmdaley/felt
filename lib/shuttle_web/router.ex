@@ -68,18 +68,15 @@ defmodule ShuttleWeb.Router do
     # events.jsonl hook stream. JSON-native, so it lives in the :api pipeline
     # (unlike /file, which serves raw bytes).
     get("/sent-files", SentFilesController, :show)
-    # The temporal view's two read planes, both HOST-scoped rather than
-    # owner-routed (see each controller): /activity buckets this host's
-    # events.jsonl per minute, /narration reads git subjects out of this
-    # host's primary felt store. A cross-host view fans out and merges.
+    # The temporal view's read plane, HOST-scoped rather than owner-routed
+    # (see the controller): /activity buckets this host's events.jsonl per
+    # minute. A cross-host view fans out and merges.
     get("/activity", ActivityController, :show)
-    get("/narration", NarrationController, :show)
     # The cross-host counterparts: each fans this host's live read together with
     # the cached remote reads (Shuttle.RemoteTemporalRegistry) and reports
     # per-origin freshness in the same `origins` block the kanban composite
     # serves. A disconnected remote's history stays on screen, marked stale.
     get("/activity/composite", ActivityController, :composite)
-    get("/narration/composite", NarrationController, :composite)
     get("/sessions/composite", SessionsController, :composite)
     # What the ledgered sessions cost, folded out of their transcripts and
     # rolled up per fiber. Host-scoped for the same reason as its neighbours —
@@ -90,9 +87,9 @@ defmodule ShuttleWeb.Router do
     # this host recorded at dispatch / claim / resume. Host-scoped like its two
     # neighbours above.
     get("/sessions", SessionsController, :show)
-    # Join rung 0 for narration: the commit↔session pairing the hook recorded at
-    # commit time (~/.shuttle/commits.jsonl), replacing prefix-parsing a commit
-    # subject to guess which fiber it belonged to. Host-scoped like /sessions.
+    # Join rung 0 for commit narration: the commit↔session pairing the hook
+    # recorded at commit time (~/.shuttle/commits.jsonl), the sole source for
+    # the commit strip. Host-scoped like /sessions.
     get("/commits/composite", CommitsController, :composite)
     get("/commits", CommitsController, :show)
     # The words behind a minute: excerpts from a session's harness transcript,

@@ -21,11 +21,10 @@
  * module is written around; read civilDay.ts before touching the arithmetic.
  *
  * DATA. One `activity` call per refresh, over the week's rail span capped at
- * now — see `weekWindow`. Week does NOT read narration: it once drew a commit
- * subject per past row, but a single truncated subject read as "the name of one
- * fiber" rather than as what the day was about, so the column went and the
- * request went with it. Narration belongs to Day, which has the room to do it
- * justice.
+ * now — see `weekWindow`. Week draws no commit prose: it once drew a subject
+ * per past row, but a single truncated subject read as "the name of one fiber"
+ * rather than as what the day was about, so the column went and the request
+ * went with it. The prose belongs to Day, which has the room to do it justice.
  */
 
 import './WeekView.css'
@@ -57,12 +56,12 @@ import {
   type TemporalOrigins,
 } from './TemporalData.js'
 import {
-  buildOriginIndex,
+  buildJoinIndex,
   originOf,
   type BucketOrigin,
+  type JoinIndex,
   type MomentSource,
-  type OriginIndex,
-} from './activityOrigin.js'
+} from './join.js'
 import {
   clockTime,
   dedupeSources,
@@ -258,7 +257,7 @@ export interface WeekWindow {
  * The week is named by CIVIL DAYS but read by INSTANTS: `/api/v1/activity`
  * takes `from_ms`/`to_ms` in epoch ms, so the seven rows are resolved to a rail
  * span here, in the browser's zone, before anything is asked for. Week reads
- * activity only — see the module header for why the narration column went.
+ * activity only — see the module header for why the commit column went.
  *
  * The activity `to` is capped at now, rounded UP to `FETCH_CAP_QUANTUM_MS`.
  * Uncapped it would move every poll, so the fetcher's per-tuple memo would
@@ -597,7 +596,7 @@ export function marksForDay(cards: KanbanCard[], day: string, bounds: RailBounds
     if (card.isCycle) continue
     // Rail membership, NOT the calendar day. A launch is an instant and is
     // drawn at its real rail fraction, so it has to be selected by the same
-    // predicate the activity and narration ingesters use — otherwise a 03:00
+    // predicate the activity ingester uses — otherwise a 03:00
     // firing is filed on that morning's row, where 03:00 lies before the rail
     // even opens, and `railFraction` clamps it to 0: a dawn cron drawn under
     // the 6am tick of the wrong day, while the row that owns it shows nothing.
@@ -707,7 +706,7 @@ class WeekView implements TemporalView {
   private byTmux: ReadonlyMap<string, SessionPairing> = new Map()
   private sessionsAsked = false
   /** Rebuilt each paint from the cards on screen plus the ledger. */
-  private origins: OriginIndex = buildOriginIndex([])
+  private origins: JoinIndex = buildJoinIndex([])
 
   /** The one hover tooltip, parented to the grid so it positions against the
    *  rails rather than the page. */
@@ -1165,7 +1164,7 @@ class WeekView implements TemporalView {
     // Who did each minute of work, and whether a constitution is driving it.
     // Rebuilt here because both inputs move: cards on every poll, the ledger
     // when it lands.
-    this.origins = buildOriginIndex(ctx.cards, this.byTmux)
+    this.origins = buildJoinIndex(ctx.cards, this.byTmux)
 
     for (const row of this.rows) {
       const bounds = railBounds(row.day)
@@ -1414,7 +1413,7 @@ export function rasterSlots(
   buckets: readonly ActivityBucket[],
   bounds: RailBounds,
   cutoffMs: number,
-  origin: (bucket: ActivityBucket) => BucketOrigin,
+  origin: (bucket: ActivityBucket) => BucketOrigin | null,
 ): RasterSlot[] {
   const span = bounds.endMs - bounds.startMs
   if (span <= 0) return []
@@ -1429,6 +1428,10 @@ export function rasterSlots(
     // Notify draws nothing and says nothing: dropped here so it cannot conjure
     // a slot, a tooltip row, or a source fetch out of an idle nudge.
     if (b.k === 'notify') continue
+    // Work that joined no fiber is not this board's to draw — no tick, no
+    // tooltip row, no source fetch.
+    const who = origin(b)
+    if (!who) continue
     const index = Math.floor((b.m - bounds.startMs) / RASTER_SLOT_MS)
     let kinds = byIndex.get(index)
     if (!kinds) {
@@ -1442,7 +1445,6 @@ export function rasterSlots(
     }
     entry.count += b.n
     entry.peak = Math.max(entry.peak, b.n)
-    const who = origin(b)
     if (!entry.where.includes(who.label)) entry.where.push(who.label)
     if (who.shuttle) entry.shuttle = true
     let found = sourcesByIndex.get(index)

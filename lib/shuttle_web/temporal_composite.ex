@@ -1,7 +1,8 @@
 defmodule ShuttleWeb.TemporalComposite do
   @moduledoc """
-  Shared assembly for the three cross-host temporal composites
-  (`/activity/composite`, `/sessions/composite`, `/narration/composite`).
+  Shared assembly for the cross-host temporal composites
+  (`/activity/composite`, `/sessions/composite`, `/commits/composite`,
+  `/spend/composite`).
 
   Each composite is the same shape as the kanban's
   `GET /api/v1/fibers/composite`: this host's live local read, concatenated
@@ -69,24 +70,15 @@ defmodule ShuttleWeb.TemporalComposite do
   def stamp(item, origin) when is_map(item), do: Map.put(item, "host", origin)
 
   @doc """
-  Read an item's epoch-ms timestamp under `key`, tolerating both key forms and
-  ISO-8601 strings (narration commits carry `iso`, not a number). `nil` when the
-  item carries nothing readable — such an item is kept, never silently dropped
-  by a window filter it cannot be judged against.
+  Read an item's epoch-ms timestamp under `key`, tolerating both atom and
+  string key forms. `nil` when the item carries nothing readable — such an
+  item is kept, never silently dropped by a window filter it cannot be judged
+  against.
   """
   def item_ms(item, key) do
     case Map.get(item, key) || Map.get(item, to_string(key)) do
-      value when is_integer(value) ->
-        value
-
-      value when is_binary(value) ->
-        case DateTime.from_iso8601(value) do
-          {:ok, dt, _offset} -> DateTime.to_unix(dt, :millisecond)
-          _ -> nil
-        end
-
-      _ ->
-        nil
+      value when is_integer(value) -> value
+      _ -> nil
     end
   end
 
