@@ -433,9 +433,6 @@
   /* A notch under `.kbn-card-name` (14.5px): a parked role is the same object
      as a card, held in a quieter register. */
   font-size: calc(13px * var(--kbn-type-scale, 1));
-  /* Lighter than the column card's 600 — the minimized register carries its
-     lower importance in weight as well as size. */
-  font-weight: 500;
   line-height: 1.1;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -914,8 +911,6 @@
 .kbn-cluster-cold .kbn-cluster-item-glyph { opacity: 0.6; }
 .kbn-cluster-item-title {
   flex: 1;
-  /* Same minimized weight as `.kbn-pin-chip-name`. */
-  font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
