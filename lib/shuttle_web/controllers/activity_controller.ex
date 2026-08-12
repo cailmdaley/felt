@@ -2,7 +2,7 @@ defmodule ShuttleWeb.ActivityController do
   @moduledoc """
   Per-minute activity histogram: `GET /api/v1/activity?from_ms=…&to_ms=…`.
 
-      {"host": "dapmcw68", "from_ms": …, "to_ms": …,
+      {"host": "hub-mac", "from_ms": …, "to_ms": …,
        "buckets": [{"m": …, "s": "…-shuttle", "cwd": "/repo", "k": "attention", "n": 3}]}
 
   `Shuttle.Activity` does the reading; this controller parses the window and

@@ -137,6 +137,40 @@ defmodule ShuttleWeb.ActivityControllerTest do
       assert by_kind == %{"attention" => 1, "notify" => 1, "agent" => 7, "reply" => 1}
     end
 
+    test "a machine-flagged prompt is agent activity, not attention" do
+      # The harness injects prompts of its own — a task notification, another
+      # session's message — through the same hook a person types into. Those
+      # minutes are the machine talking to itself, and a spine over them would
+      # claim someone was at the keyboard.
+      path =
+        write_fixture([
+          event(%{"type" => "user_prompt_submit", "machine" => true}),
+          event(%{"type" => "user_prompt_submit"})
+        ])
+
+      by_kind = Map.new(buckets!(path, @t0, @t0 + @minute), &{&1.k, &1.n})
+      assert by_kind == %{"attention" => 1, "agent" => 1}
+    end
+
+    test "a machine-flagged prompt still closes an open waiting spell" do
+      # It is not attention, but it IS the session moving again: whatever the
+      # agent was blocked on, it is no longer sitting there. A later
+      # notification therefore opens a fresh spell rather than being swallowed.
+      path =
+        write_fixture([
+          event(%{"type" => "notification"}),
+          event(%{
+            "timestamp" => @t0 + @minute,
+            "type" => "user_prompt_submit",
+            "machine" => true
+          }),
+          event(%{"timestamp" => @t0 + 2 * @minute, "type" => "notification"})
+        ])
+
+      buckets = buckets!(path, @t0, @t0 + 3 * @minute)
+      assert Enum.count(buckets, &(&1.k == "notify")) == 2
+    end
+
     test "stop emits reply ALONGSIDE agent, leaving the agent stream untouched" do
       # The whole safety argument for adding a kind to a wire format several
       # views read: a consumer that never heard of "reply" sees exactly the

@@ -14,7 +14,14 @@ defmodule Shuttle.Activity do
   carried neither. `k` collapses the eight hook types into the things a
   temporal view distinguishes:
 
-    * `user_prompt_submit` → `"attention"` — a human typed.
+    * `user_prompt_submit` → `"attention"` — a human typed. Unless the event
+      carries `machine: true`, in which case it is `"agent"`: the harness
+      injected that prompt (a task notification, a teammate's message) and
+      nobody was present. The RECORDER makes that call — the hook sees the
+      prompt text and stamps the flag — because a daemon that sniffed the
+      content to guess would be inventing a fact it cannot know. An event
+      without the flag is a person, which is what every event written before
+      the flag existed keeps saying; there is no retroactive fallback.
     * `notification` → `"notify"` — the agent asked for a human, **and this
       was the onset of the ask** (see below).
     * everything else (`pre_tool_use`, `post_tool_use`, `stop`,
@@ -285,7 +292,7 @@ defmodule Shuttle.Activity do
       {:ok, %{"timestamp" => ts, "type" => type} = event}
       when is_integer(ts) and is_binary(type) ->
         identity = {presence(event["tmuxSession"]), presence(event["cwd"])}
-        {kinds, spells} = classify(type, identity, acc.spells)
+        {kinds, spells} = classify(type, event, identity, acc.spells)
         acc = %{acc | spells: spells}
         acc = track_span(acc, type, event, ts, from_ms, to_ms)
 
@@ -380,7 +387,7 @@ defmodule Shuttle.Activity do
   # `[]` for a notification swallowed by an open spell — and the spell map
   # after the event. See the moduledoc for why a repeat notification is not a
   # second demand, and why `stop` contributes two kinds rather than one.
-  defp classify("notification", identity, spells) do
+  defp classify("notification", _event, identity, spells) do
     if Map.has_key?(spells, identity) do
       {[], spells}
     else
@@ -388,18 +395,30 @@ defmodule Shuttle.Activity do
     end
   end
 
-  defp classify("user_prompt_submit", identity, spells) do
+  # A prompt the HARNESS injected — a task notification, a teammate's message,
+  # a system notice — fires the same hook a person typing does, and used to draw
+  # the same attention mark. It is not attention: nobody was there. The recorder
+  # decides (the hook stamps `machine: true`; see the moduledoc), because only
+  # the hook can see the prompt text, and the daemon must never sniff content to
+  # guess. So this is a two-clause classification on a flag, and an event with no
+  # flag is a person — which is also what every event written before the flag
+  # existed will keep saying.
+  defp classify("user_prompt_submit", %{"machine" => true}, identity, spells) do
+    {["agent"], Map.delete(spells, identity)}
+  end
+
+  defp classify("user_prompt_submit", _event, identity, spells) do
     {["attention"], Map.delete(spells, identity)}
   end
 
   # A finished turn is agent activity that also happens to be a message. It
   # closes the spell like any other agent event; the second kind is a label
   # laid over the same event, not a reclassification of it.
-  defp classify("stop", identity, spells) do
+  defp classify("stop", _event, identity, spells) do
     {["agent", "reply"], Map.delete(spells, identity)}
   end
 
-  defp classify(_type, identity, spells) do
+  defp classify(_type, _event, identity, spells) do
     {["agent"], Map.delete(spells, identity)}
   end
 

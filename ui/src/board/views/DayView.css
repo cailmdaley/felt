@@ -129,14 +129,11 @@
 /* Two columns — label, rail — with one gridline layer spanning every lane
    row, so the hour rules run unbroken down the stack. */
 .kbn-day-chart {
-  /* The two poles of the curve's colour scale, declared once. The key glyphs
-     read them and `densityCurve.ts` walks between the same two values, so a
-     mark and the swatch that explains it cannot drift apart — which would be
-     the worst possible bug in a legend. Kept in step with CURVE_AGENT and
-     CURVE_HUMAN there; those two carry the note on why the teal is a notch
-     deeper than the board's #3F8278 (the palette checks against parchment). */
+  /* The curve's one pigment, declared once. The key glyph reads it and
+     `densityCurve.ts` draws the wash in the same value, so a mark and the
+     swatch that explains it cannot drift apart — which would be the worst
+     possible bug in a legend. Kept in step with CURVE_AGENT there. */
   --day-agent: #3D5BA0;
-  --day-attention: #0F8A74;
   display: grid;
   grid-template-columns: minmax(86px, 232px) 1fr;
   column-gap: 12px;
@@ -340,11 +337,8 @@ button.kbn-day-lanename:focus-visible {
   gap: 5px;
   white-space: nowrap;
 }
-/* The swatches. The two pigments are POLES of one scale rather than two marks,
-   so they are drawn the same size and shape — a size difference here would
-   claim a hierarchy the curve does not have. Each fades to nothing at its
-   outer edge, which is the one honest way a static swatch can say "and every
-   blend between these two". */
+/* The swatch. It fades to nothing at its left edge, which is the one honest
+   way a static block can say "and every weight down to none of it". */
 .kbn-day-keyglyph {
   display: inline-block;
   flex: 0 0 auto;
@@ -355,15 +349,10 @@ button.kbn-day-lanename:focus-visible {
   height: 7px;
   background: linear-gradient(90deg, rgba(61, 91, 160, 0.12), var(--day-agent));
 }
-.kbn-day-key-human {
-  width: 15px;
-  height: 7px;
-  background: linear-gradient(90deg, rgba(15, 138, 116, 0.12), var(--day-attention));
-}
-/* The spine, at its true weight and near its true height: a hairline of iron
-   gall. It is the only mark in the key that is not a pigment of the scale. */
+/* The spine, at its true weight and near its true height: 2px of iron gall.
+   It is the only mark in the key that is not the curve's pigment. */
 .kbn-day-key-spine {
-  width: 1px;
+  width: 2px;
   height: 12px;
   background: var(--curve-spine);
 }

@@ -491,7 +491,7 @@ describe('lookupSession', () => {
   })
 
   it('refuses a pairing recorded on another host', () => {
-    expect(lookupSession(index.bySession, 'cineca', 'sess-ada')).toBeUndefined()
+    expect(lookupSession(index.bySession, 'basalt', 'sess-ada')).toBeUndefined()
   })
 
   it('reads past a difference of case in the host name', () => {
@@ -502,7 +502,7 @@ describe('lookupSession', () => {
     // An asker that cannot say where it ran, and a ledger line written before
     // host stamping: both are the pre-fleet case, and both still join.
     expect(lookupSession(index.bySession, null, 'sess-ada')?.fiber).toBe('work/a/run')
-    expect(lookupSession(index.bySession, 'cineca', 'sess-loose')?.fiber).toBe('work/loose')
+    expect(lookupSession(index.bySession, 'basalt', 'sess-loose')?.fiber).toBe('work/loose')
   })
 
   it('is undefined for no session and for an unknown one', () => {

@@ -2,15 +2,13 @@
  * DayView (hotkey 2) — one day, close up.
  *
  * TWO CLOCKS, ONE LANE. The page is a rail per fiber, read left to right,
- * carrying both of the day's clocks at once — as ONE curve on three channels:
+ * carrying both of the day's clocks at once — as ONE curve on two channels:
  *
- *   height   how much happened, agent and human events together
- *   colour   how much of it was you — cobalt toward the machine, teal toward
- *            you, read off the human signal ALONE so that a wall of agent
- *            events can never drown a single message of yours
- *   spine    the exact minute you spoke, in iron gall over the curve
+ *   height   how much the AGENTS did, in one pigment
+ *   spine    the exact minute you spoke, in iron gall, rising to the curve's
+ *            own height at that minute
  *
- * The arithmetic and the doctrine behind all three live in `./densityCurve.js`.
+ * The arithmetic and the doctrine behind both live in `./densityCurve.js`.
  *
  * Below the rails, the same day told the other way: "the day, by fiber" —
  * the commit trail, set as prose under the fiber that made it.
@@ -559,8 +557,8 @@ function dominantHost(hosts: ReadonlyMap<string, HostTally>): string {
 
 /**
  * Origins keyed by LOWER-CASED name. Lane hosts are lower-cased for display
- * (hostnames are case-insensitive and a rail full of `Cineca-Login-02` beside
- * `cineca-login-02` would read as two machines), so the staleness lookup has to
+ * (hostnames are case-insensitive and a rail full of `Basalt-Login-02` beside
+ * `basalt-login-02` would read as two machines), so the staleness lookup has to
  * meet them there rather than miss on case alone.
  */
 function foldOrigins(origins: TemporalOrigins | undefined): TemporalOrigins {
@@ -1217,11 +1215,11 @@ function pct(value: number): string {
   return `${(value * 100).toFixed(4)}%`
 }
 
-/** Day's swatch for each pole of the curve's colour scale. A reply is
- *  agent-side ink: it pushes the curve toward cobalt, never toward teal. */
+/** Day's swatch per drawn kind. There is one wash pigment now, and a reply is
+ *  agent work like any other: what you did is the spine, not a colour. */
 const DAY_KEY_CLASS: Record<DrawnKind, string> = {
   agent: 'kbn-day-key-agent',
-  attention: 'kbn-day-key-human',
+  attention: 'kbn-day-key-agent',
   reply: 'kbn-day-key-agent',
 }
 
@@ -1315,18 +1313,16 @@ class DayViewImpl implements TemporalView {
    * positions against the rails.
    */
   private chartEl: HTMLElement | null = null
-  /** Serial for the curves' gradient ids. An SVG gradient is addressed by a
-   *  document-wide id, so two lanes sharing one would silently share a colour
-   *  walk — and a repaint that reused ids would collide with the DOM it is
-   *  replacing while both are briefly attached. Monotonic, never reset. */
-  private curveSeq = 0
   private tip: HTMLElement | null = null
   /** The lane-minute the pointer is on (`<lane key>:<minute>`); a late answer
    *  is checked against it before it paints. */
   private hoveredKey: string | null = null
-  private moments = new MomentLoader((session, fromMs, toMs, host) =>
+  /** The lane-minute a CLICK fixed the tooltip to, if any. While this is set
+   *  the pointer no longer moves or closes the slip — see {@link showBeatTip}. */
+  private pinnedKey: string | null = null
+  private moments = new MomentLoader((session, fromMs, toMs, host, full) =>
     this.ctx
-      ? this.ctx.moment(session, fromMs, toMs, host)
+      ? this.ctx.moment(session, fromMs, toMs, host, full)
       : Promise.resolve({ host: host ?? '', excerpts: [] }),
   )
 
@@ -1348,8 +1344,26 @@ class DayViewImpl implements TemporalView {
    *  coordinates the ink was laid in. Null until a chart exists. */
   private frame: DayWindow | null = null
   private signature: string | null = null
+  /** The model a repaint wanted to draw while a tooltip was pinned. Drawn when
+   *  the pin closes; see the deferral in `apply`. */
+  private pendingModel: DayModel | null = null
   /** Monotonic load id — a fetch that lands after a newer one is discarded. */
   private loadToken = 0
+
+  /** Escape closes a pinned slip — before anything else looks at the key, and
+   *  only when one is actually open, so Escape keeps every other meaning it has
+   *  on this page. */
+  private readonly onEscape = (e: KeyboardEvent): void => {
+    if (e.key !== 'Escape' || this.pinnedKey === null) return
+    e.stopPropagation()
+    this.hideTip(true)
+  }
+
+  /** A click anywhere that is not a rail puts the slip away. Bubble phase, so
+   *  the rail's own handler has already stopped the click that pinned it. */
+  private readonly onDocClick = (): void => {
+    if (this.pinnedKey !== null) this.hideTip(true)
+  }
 
   private readonly onKeyDown = (e: KeyboardEvent): void => {
     if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight' && e.key !== 't') return
@@ -1415,6 +1429,8 @@ class DayViewImpl implements TemporalView {
     host.append(page.root)
 
     document.addEventListener('keydown', this.onKeyDown)
+    document.addEventListener('keydown', this.onEscape, true)
+    document.addEventListener('click', this.onDocClick)
     this.syncToCursor()
   }
 
@@ -1425,6 +1441,9 @@ class DayViewImpl implements TemporalView {
 
   unmount(): void {
     document.removeEventListener('keydown', this.onKeyDown)
+    document.removeEventListener('keydown', this.onEscape, true)
+    document.removeEventListener('click', this.onDocClick)
+    this.pinnedKey = null
     this.disconnectPreviewObserver()
     this.previewsEl = null
     this.previewsKey = null
@@ -1544,6 +1563,17 @@ class DayViewImpl implements TemporalView {
       this.positionNow()
       return
     }
+    // A PINNED TOOLTIP HOLDS THE PAGE STILL. `buildChart` throws the chart and
+    // the slip away and builds both again, so a repaint under a pinned slip is
+    // the slip vanishing mid-sentence — and it arrives on its own schedule,
+    // which is the worst possible moment. The page is a few seconds stale for
+    // exactly as long as someone is reading it, and the deferred model is
+    // drawn the instant the pin closes.
+    if (this.pinnedKey !== null) {
+      this.pendingModel = model
+      return
+    }
+    this.pendingModel = null
     this.signature = signature
     this.render(model)
   }
@@ -1692,15 +1722,20 @@ class DayViewImpl implements TemporalView {
       const field = fields.get(lane.key)
       if (field) {
         rail.append(
-          buildCurveSvg(field, peak, {
-            id: `kbn-day-curve-${this.curveSeq++}`,
-            frameMinutes: win.minutes,
-          }),
+          buildCurveSvg(field, peak, { frameMinutes: win.minutes }),
         )
       }
 
       rail.addEventListener('mousemove', (e) => this.showBeatTip(lane, rail, win, e))
       rail.addEventListener('mouseleave', () => this.hideTip())
+      // A click fixes the slip where the pointer already is, so what you were
+      // reading stops fleeing when you move to read it. The stopPropagation is
+      // load-bearing: the document listener that unpins would otherwise see
+      // this very click and close what it just opened.
+      rail.addEventListener('click', (e) => {
+        e.stopPropagation()
+        this.showBeatTip(lane, rail, win, e, true)
+      })
 
       chart.append(label, rail)
     })
@@ -1758,11 +1793,20 @@ class DayViewImpl implements TemporalView {
    * {@link BEAT_SNAP_PX} — hides the tooltip rather than answering about the
    * nearest work on the row.
    */
-  private showBeatTip(lane: DayLane, rail: HTMLElement, win: DayWindow, e: MouseEvent): void {
+  private showBeatTip(
+    lane: DayLane,
+    rail: HTMLElement,
+    win: DayWindow,
+    e: MouseEvent,
+    pin = false,
+  ): void {
+    // A pinned slip belongs to the click that made it, not to the pointer. Only
+    // another click (which arrives with `pin`) may move it.
+    if (this.pinnedKey !== null && !pin) return
     const chart = this.chartEl
-    if (!chart || lane.beats.length === 0) return this.hideTip()
+    if (!chart || lane.beats.length === 0) return this.hideTip(pin)
     const box = rail.getBoundingClientRect()
-    if (box.width <= 0 || win.minutes <= 0) return this.hideTip()
+    if (box.width <= 0 || win.minutes <= 0) return this.hideTip(pin)
 
     const perMinute = box.width / win.minutes
     const x = e.clientX - box.left
@@ -1775,21 +1819,38 @@ class DayViewImpl implements TemporalView {
         best = beat
       }
     }
-    if (!best || bestPx > BEAT_SNAP_PX) return this.hideTip()
+    if (!best || bestPx > BEAT_SNAP_PX) return this.hideTip(pin)
 
     const beat = best
     const startMs = win.startMs + beat.minute * MINUTE_MS
     const tip = this.ensureTip()
     const key = `${lane.key}:${beat.minute}`
-    renderTip(tip, beatTip(lane, beat, win, this.moments.peek(key)))
+    renderTip(tip, beatTip(lane, beat, win, this.moments.peek(key, pin)))
     // The words arrive late or not at all; the tooltip is already correct
-    // without them, and redraws in place when they land.
-    this.moments.request(key, beat.sources, startMs, startMs + MINUTE_MS, (words) => {
-      if (this.hoveredKey !== key) return
-      renderTip(tip, beatTip(lane, beat, win, words))
-    })
+    // without them, and redraws in place when they land. A pin asks again for
+    // the UNTRUNCATED words — the daemon does the cutting, so the pinned slip
+    // cannot show the rest of a sentence it was never sent.
+    this.moments.request(
+      key,
+      beat.sources,
+      startMs,
+      startMs + MINUTE_MS,
+      (words) => {
+        // Guard the pin state as well as the mark: a hover answer landing on a
+        // tooltip that has since been pinned would paint the cut text back over
+        // the full text.
+        if (this.hoveredKey !== key || (this.pinnedKey === key) !== pin) return
+        renderTip(tip, beatTip(lane, beat, win, words))
+      },
+      pin,
+    )
     this.hoveredKey = key
+    this.pinnedKey = pin ? key : null
     tip.classList.add('kbn-tip-open')
+    // Pinned, the slip stops being a passing annotation and becomes something
+    // you read: it takes the pointer (so a long transcript can be scrolled) and
+    // is allowed to grow. See momentTip.css.
+    tip.classList.toggle('kbn-tip-pinned', pin)
 
     // Positioned against the chart, and flipped past the right edge so a late
     // minute does not push the slip off the sheet.
@@ -1811,10 +1872,24 @@ class DayViewImpl implements TemporalView {
     return tip
   }
 
-  private hideTip(): void {
-    this.tip?.classList.remove('kbn-tip-open')
+  /** Close the slip. A pinned one ignores this — the pointer wandering off is
+   *  exactly the thing pinning exists to survive — unless `force`, which is the
+   *  click elsewhere, the Escape key, and a click that pins somewhere new. */
+  private hideTip(force = false): void {
+    if (this.pinnedKey !== null && !force) return
+    const wasPinned = this.pinnedKey !== null
+    this.pinnedKey = null
+    this.tip?.classList.remove('kbn-tip-open', 'kbn-tip-pinned')
     this.hoveredKey = null
     this.moments.cancel()
+    // Whatever the page wanted to become while you were reading, it becomes
+    // now — the deferral is a pause, not a dropped update.
+    if (wasPinned && this.pendingModel) {
+      const model = this.pendingModel
+      this.pendingModel = null
+      this.signature = dayModelSignature(model)
+      this.render(model)
+    }
   }
 
   private buildNarration(model: DayModel): HTMLElement {

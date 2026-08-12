@@ -121,7 +121,7 @@ export function buildKanbanResponseFromComposite(
  * A fiber that lives in a git-synced store is served by EVERY daemon that has
  * it on disk, one row per origin. On the real board that is 245 rows for 240
  * fibers: five fibers under `science/unions` arrive from both the laptop and
- * `candide`, and each rendered twice in Drafts. Worse than cosmetic — the twins
+ * `kelvin`, and each rendered twice in Drafts. Worse than cosmetic — the twins
  * disagree. Under a stale remote one copy dims and refuses drag while the other
  * looks fine, so which card you happened to grab decided whether the gesture
  * worked.

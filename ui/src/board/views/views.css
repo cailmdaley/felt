@@ -154,7 +154,9 @@
   overflow: visible;
 }
 
-/* The body of the curve: a wash, never a block. Alpha low enough that two
+/* The body of the curve: a wash, never a block. One pigment, set in the markup
+   from `CURVE_AGENT` — the colour scale that used to walk across the rail is
+   gone, and with it the per-lane gradient each `<svg>` had to carry. Alpha low enough that two
    lanes' worth of ink under a legend still reads as paper with pigment on it,
    high enough that a dense hour is unmistakably darker than a quiet one. */
 .kbn-curve-area { opacity: 0.34; }
@@ -174,13 +176,20 @@
    gets the highest-contrast mark on it (14.6:1 on parchment), which is the
    whole reason it is a separate channel rather than a bump in the curve.
 
+   2px, not the hairline it started as. A spine no longer runs the full height
+   of the row — it rises to the curve's own height at that minute (see
+   `spineHeights`) — and a half-height hairline was a thing you had to go
+   looking for. Twice the width buys back at a glance what the shorter mark
+   gave up, and lands the mark on the 8px-target side of hoverable besides.
+
    The WEIGHT is set per spine in the markup, not here — see `spineAlphas`.
    A lone message draws at full strength; a crowd of them share the ink out
    between themselves so a busy morning reads as texture instead of as a wall.
    Which is why the stroke below is opaque: the alpha is the data. */
 .kbn-curve-spine {
   stroke: var(--curve-spine);
-  stroke-width: 1;
+  stroke-width: 2;
+  stroke-linecap: butt;
 }
 
 /* Declared on the view host so both sheets and both keys read one value. */

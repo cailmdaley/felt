@@ -2,12 +2,12 @@ defmodule ShuttleWeb.CommitsController do
   @moduledoc """
   This host's commit ledger: `GET /api/v1/commits?since_ms=<int>&until_ms=<int>`.
 
-      {"host": "dapmcw68",
+      {"host": "hub-mac",
        "records": [{"at": 1786203000000, "kind": "commit", "sha": "79def80…",
-                    "subject": "desk: cycle lens", "repo": "/Users/me/dev/felt",
+                    "subject": "desk: cycle lens", "repo": "~/dev/felt",
                     "files": 3, "insertions": 42, "deletions": 7,
                     "session": "0883ade1-…", "tmux": "edits-01KTS…-shuttle",
-                    "cwd": "/Users/me/dev/felt"}]}
+                    "cwd": "~/dev/felt"}]}
 
   `Shuttle.CommitLedger` does the reading; this controller parses the bounds and
   stamps the host. Records come back oldest-first.

@@ -15,7 +15,7 @@ defmodule Shuttle.SessionLedger do
   One line per session, not per event:
 
       {"fiber":"work/paper/edits","uid":"01KTS…","session":"0883ade1-…",
-       "harness":"claude-code","host":"dapmcw68","tmux":"edits-01KTS…-shuttle",
+       "harness":"claude-code","host":"hub-mac","tmux":"edits-01KTS…-shuttle",
        "at":1786203000000,"kind":"dispatch"}
 
   Pure machine exhaust — a pairing and its provenance, no editorial content, no

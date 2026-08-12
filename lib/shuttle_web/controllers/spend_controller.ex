@@ -3,9 +3,9 @@ defmodule ShuttleWeb.SpendController do
   What this host's sessions cost, and what each fiber cost:
   `GET /api/v1/spend?since_ms=<int>`.
 
-      {"host": "dapmcw68",
+      {"host": "hub-mac",
        "sessions": [{"fiber": "work/paper/edits", "session": "0883ade1-…",
-                     "harness": "claude-code", "host": "dapmcw68",
+                     "harness": "claude-code", "host": "hub-mac",
                      "at": 1786203000000, "kind": "dispatch", "found": true,
                      "input": 812, "output": 41203, "cache_read": 8104233,
                      "cache_write": 391044, "messages": 327,
@@ -63,7 +63,7 @@ defmodule ShuttleWeb.SpendController do
 
   Each host resolves its own transcripts, so the composite concatenates rows
   (already carrying `host`) and re-rolls the per-fiber totals across origins: a
-  fiber worked from the laptop and from candide reports one line with both
+  fiber worked from the laptop and from a-remote reports one line with both
   hosts' sessions in it. Remote rows come from `Shuttle.RemoteTemporalRegistry`
   and stay on screen, marked stale, while a remote is unreachable.
   """

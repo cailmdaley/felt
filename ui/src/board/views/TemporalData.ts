@@ -309,8 +309,19 @@ export interface TemporalFetchers {
    * 4xx, a dead tunnel, a body that is not a moment — resolves to an EMPTY
    * result rather than rejecting, because the caller is a tooltip and the
    * honest fallback (the words were not recovered) is already its default.
+   *
+   * `full` asks the daemon not to truncate each excerpt — the fetch a PINNED
+   * tooltip makes. The cut is server-side, so a pinned slip that only relaxed
+   * its CSS would still be showing an ellipsis; the two fetches are cached
+   * separately, because they are two different answers about the same minute.
    */
-  moment(session: string, fromMs: number, toMs: number, host?: string | null): Promise<MomentResult>
+  moment(
+    session: string,
+    fromMs: number,
+    toMs: number,
+    host?: string | null,
+    full?: boolean,
+  ): Promise<MomentResult>
 }
 
 interface CacheEntry<T> {
@@ -490,16 +501,18 @@ export function createTemporalFetchers(shuttleBase: string): TemporalFetchers {
       fromMs: number,
       toMs: number,
       host?: string | null,
+      full = false,
     ): Promise<MomentResult> {
       const where = host ?? ''
-      return memo(`moment:${where}:${session}:${fromMs}:${toMs}`, async () => {
+      return memo(`moment:${where}:${session}:${fromMs}:${toMs}:${full ? 'full' : 'brief'}`, async () => {
         const empty: MomentResult = { host: where, excerpts: [] }
         if (!session) return empty
         const query =
           `session=${encodeURIComponent(session)}` +
           `&from_ms=${encodeURIComponent(String(fromMs))}` +
           `&to_ms=${encodeURIComponent(String(toMs))}` +
-          (where ? `&host=${encodeURIComponent(where)}` : '')
+          (where ? `&host=${encodeURIComponent(where)}` : '') +
+          (full ? '&full=1' : '')
         try {
           return parseMoment(await readJson(`${shuttleBase}/api/v1/moment?${query}`), empty)
         } catch {

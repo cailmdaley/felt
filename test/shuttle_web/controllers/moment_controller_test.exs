@@ -287,6 +287,80 @@ defmodule ShuttleWeb.MomentControllerTest do
                Moment.moment(@session, @t0, @t0 + 3_000, root: root)
     end
 
+    test "a Bash call with no description falls back to its command" do
+      # Bare "Bash" tells a reader nothing they did not already know from the
+      # fact that the minute had tool calls in it. The command is the next best
+      # account of what happened — collapsed of newlines and cut to 48 chars,
+      # so a heredoc becomes one readable line.
+      root =
+        write_tree([
+          {"-Users-cail-felt", @session,
+           [
+             assistant(@t0 + 1_000, [
+               %{
+                 "type" => "tool_use",
+                 "name" => "Bash",
+                 "input" => %{"command" => "git status\n  --short"}
+               },
+               %{
+                 "type" => "tool_use",
+                 "name" => "Bash",
+                 "input" => %{"command" => String.duplicate("x", 60)}
+               }
+             ])
+           ]}
+        ])
+
+      assert %{
+               excerpts: [],
+               tools: "Bash — git status --short\n" <> long
+             } = Moment.moment(@session, @t0, @t0 + 3_000, root: root)
+
+      assert long == "Bash — " <> String.duplicate("x", 47) <> "…"
+    end
+
+    test "the aggregate's dominant-tool hint takes the same fallback" do
+      root =
+        write_tree([
+          {"-Users-cail-felt", @session,
+           [
+             assistant(@t0 + 1_000, [
+               %{"type" => "tool_use", "name" => "Bash", "input" => %{"command" => "make test"}},
+               %{"type" => "tool_use", "name" => "Bash", "input" => %{"command" => "make daemon"}},
+               %{"type" => "tool_use", "name" => "Bash", "input" => %{"command" => "ls"}},
+               %{"type" => "tool_use", "name" => "Read", "input" => %{"file_path" => "/a.ex"}},
+               %{"type" => "tool_use", "name" => "Read", "input" => %{"file_path" => "/b.ex"}},
+               %{"type" => "tool_use", "name" => "Read", "input" => %{"file_path" => "/c.ex"}},
+               %{"type" => "tool_use", "name" => "Edit", "input" => %{"file_path" => "/a.ex"}}
+             ])
+           ]}
+        ])
+
+      # First appearance fixes which command becomes the hint, exactly as a
+      # description would have.
+      assert %{excerpts: [], tools: "Bash ×3 · Read ×3 · Edit — make test"} =
+               Moment.moment(@session, @t0, @t0 + 3_000, root: root)
+    end
+
+    test "a description still wins over the command when the call carries one" do
+      root =
+        write_tree([
+          {"-Users-cail-felt", @session,
+           [
+             assistant(@t0 + 1_000, [
+               %{
+                 "type" => "tool_use",
+                 "name" => "Bash",
+                 "input" => %{"command" => "mix test", "description" => "run the tests"}
+               }
+             ])
+           ]}
+        ])
+
+      assert %{excerpts: [], tools: "Bash — run the tests"} =
+               Moment.moment(@session, @t0, @t0 + 3_000, root: root)
+    end
+
     test "words win: a window with prose reports no tools" do
       assert %{excerpts: [%{text: "Done — tests pass."}], tools: nil} =
                Moment.moment(@session, @t0, @t0 + 10_000, root: tool_tree())
@@ -352,6 +426,60 @@ defmodule ShuttleWeb.MomentControllerTest do
       assert host == Shuttle.Poller.own_host_id()
       assert Enum.map(excerpts, & &1["role"]) == ["user", "assistant", "notification"]
       assert hd(excerpts)["text"] == "hi french class! pasting some vocab"
+    end
+
+    test "full=1 serves the excerpt untruncated; the ordinary fetch still cuts it" do
+      # The pinned tooltip's fetch. Relaxing the CSS is not enough — the
+      # ellipsis is already in the string the hover fetch was served, so
+      # reading the whole sentence takes a round trip.
+      long = String.duplicate("la ", 400) |> String.trim()
+
+      root =
+        write_tree([{"-Users-cail-french", @other, [user(@t0 + 1_000, long)]}])
+
+      System.put_env("SHUTTLE_CLAUDE_PROJECTS_DIR", root)
+
+      ask = fn params ->
+        build_conn()
+        |> get(
+          "/api/v1/moment",
+          Map.merge(
+            %{"session" => @other, "from_ms" => "#{@t0}", "to_ms" => "#{@t0 + 10_000}"},
+            params
+          )
+        )
+        |> json_response(200)
+      end
+
+      %{"excerpts" => [hover]} = ask.(%{})
+      assert String.length(hover["text"]) == Moment.max_chars()
+      assert String.ends_with?(hover["text"], "…")
+
+      %{"excerpts" => [pinned]} = ask.(%{"full" => "1"})
+      assert pinned["text"] == long
+      refute String.ends_with?(pinned["text"], "…")
+
+      # A client that never heard of the parameter, or sends it off, is
+      # unaffected — the hover path must not change under it.
+      assert ask.(%{"full" => "0"}) == ask.(%{})
+    end
+
+    test "full=1 still bounds a pathological turn rather than serving it whole" do
+      huge = String.duplicate("x", Moment.max_chars(true) + 500)
+      root = write_tree([{"-Users-cail-french", @other, [user(@t0 + 1_000, huge)]}])
+      System.put_env("SHUTTLE_CLAUDE_PROJECTS_DIR", root)
+
+      %{"excerpts" => [excerpt]} =
+        build_conn()
+        |> get("/api/v1/moment", %{
+          "session" => @other,
+          "from_ms" => "#{@t0}",
+          "to_ms" => "#{@t0 + 10_000}",
+          "full" => "1"
+        })
+        |> json_response(200)
+
+      assert String.length(excerpt["text"]) == Moment.max_chars(true)
     end
 
     test "a session with no transcript is an empty 200, not a 500" do
@@ -447,6 +575,27 @@ defmodule ShuttleWeb.MomentControllerTest do
       assert url =~ "session=#{@session}"
       # `host=local` so the owner serves it as its own read and the hop ends there.
       assert url =~ "host=local"
+      # The ordinary hover carries no `full`; the owner's default is the same
+      # default this daemon would have applied.
+      refute url =~ "full="
+    end
+
+    test "carries full=1 across the hop, so a pinned remote minute is untruncated too" do
+      StubGetFileClient.set_response(
+        {:ok, 200, "application/json", Jason.encode!(%{host: "candide", excerpts: []})}
+      )
+
+      build_conn()
+      |> get("/api/v1/moment", %{
+        "session" => @session,
+        "from_ms" => "#{@t0}",
+        "to_ms" => "#{@t0 + 60_000}",
+        "host" => "candide",
+        "full" => "1"
+      })
+      |> json_response(200)
+
+      assert StubGetFileClient.last().url =~ "full=1"
     end
 
     test "an unreachable host is an empty 200 that says where the words live" do

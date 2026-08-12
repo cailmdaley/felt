@@ -3,8 +3,14 @@ defmodule ShuttleWeb.MomentController do
   The words behind a minute:
   `GET /api/v1/moment?session=…&from_ms=…&to_ms=…&host=…`.
 
-      {"host": "dapmcw68",
+      {"host": "hub-mac",
        "excerpts": [{"at_ms": …, "role": "user", "text": "hi french class!…"}]}
+
+  `full=1` asks for the excerpts untruncated — #{Shuttle.Moment.max_chars(true)}
+  characters each instead of the ordinary #{Shuttle.Moment.max_chars()}. The
+  shape is unchanged; it is the fetch a pinned tooltip makes, where the reader
+  has stopped glancing and started reading. Truncation is server-side, so no
+  amount of CSS recovers a sentence the ordinary fetch already cut.
 
   A minute of silent tool work has no excerpts. Then — and only then — a
   `"tools"` field carries what ran instead: one call per line
@@ -48,26 +54,28 @@ defmodule ShuttleWeb.MomentController do
          {:ok, from_ms} <- integer_param(params, "from_ms"),
          {:ok, to_ms} <- integer_param(params, "to_ms"),
          :ok <- Moment.check_window(from_ms, to_ms) do
-      serve(conn, session, from_ms, to_ms, target_host(params, session))
+      serve(conn, session, from_ms, to_ms, target_host(params, session), full?(params))
     else
       {:error, reason} -> conn |> put_status(400) |> json(%{error: message(reason)})
     end
   end
 
   # `nil` target = read here. Anything else is a configured remote to forward to.
-  defp serve(conn, session, from_ms, to_ms, nil) do
-    %{excerpts: excerpts, tools: tools} = Moment.moment(session, from_ms, to_ms)
+  defp serve(conn, session, from_ms, to_ms, nil, full?) do
+    %{excerpts: excerpts, tools: tools} =
+      Moment.moment(session, from_ms, to_ms, max_chars: Moment.max_chars(full?))
 
     body = %{host: Poller.own_host_id(), excerpts: excerpts}
     json(conn, if(tools, do: Map.put(body, :tools, tools), else: body))
   end
 
-  defp serve(conn, session, from_ms, to_ms, %Remote{} = remote) do
+  defp serve(conn, session, from_ms, to_ms, %Remote{} = remote, full?) do
     # `host=local` rather than the remote's name: the owner must serve this as
     # its own read, and this makes the hop terminate by construction — no
     # dependence on the remote's name matching its own host id, and no chance
     # of its ledger bouncing the request onward to a third daemon.
     query = %{"session" => session, "from_ms" => from_ms, "to_ms" => to_ms, "host" => "local"}
+    query = if full?, do: Map.put(query, "full", "1"), else: query
 
     case OriginRouter.forward_get(remote, "/api/v1/moment", query) do
       {:forwarded, 200, content_type, body} ->
@@ -91,6 +99,16 @@ defmodule ShuttleWeb.MomentController do
     case OriginRouter.route(name) do
       {:remote, remote} -> remote
       :local -> nil
+    end
+  end
+
+  # `full=1` — the pinned tooltip's fetch. Anything falsy-looking is the
+  # ordinary hover, so a client that has never heard of the parameter, or sends
+  # `full=0`, gets exactly what it always got.
+  defp full?(params) do
+    case Map.get(params, "full") do
+      value when value in ["1", "true", "yes"] -> true
+      _ -> false
     end
   end
 

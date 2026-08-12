@@ -721,10 +721,6 @@ class WeekView implements TemporalView {
   private sessionsAsked = false
   /** Rebuilt each paint from the cards on screen plus the ledger. */
   private origins: JoinIndex = buildJoinIndex([])
-  /** Serial for the curves' gradient ids — document-wide, so two rails must
-   *  never share one. Monotonic, never reset; see DayView's twin. */
-  private curveSeq = 0
-
   /** The one hover tooltip, parented to the grid so it positions against the
    *  rails rather than the page. */
   private tip: HTMLElement | null = null
@@ -732,9 +728,12 @@ class WeekView implements TemporalView {
   /** The slot the pointer is on (`<civil day>:<slot index>`), and the loader
    *  that fetches its words. The key is what a late answer is checked against. */
   private hoveredKey: string | null = null
-  private moments = new MomentLoader((session, fromMs, toMs, host) =>
+  /** The slot a CLICK fixed the tooltip to, if any. While this is set the
+   *  pointer no longer moves or closes the slip — see {@link showTip}. */
+  private pinnedKey: string | null = null
+  private moments = new MomentLoader((session, fromMs, toMs, host, full) =>
     this.ctx
-      ? this.ctx.moment(session, fromMs, toMs, host)
+      ? this.ctx.moment(session, fromMs, toMs, host, full)
       : Promise.resolve({ host: host ?? '', excerpts: [] }),
   )
 
@@ -747,6 +746,21 @@ class WeekView implements TemporalView {
    * from under the hand-rolled Stash form — it is `aria-modal` and carries no
    * data-state at all.
    */
+  /** Escape closes a pinned slip — before anything else looks at the key, and
+   *  only when one is actually open, so Escape keeps every other meaning it has
+   *  on this page. */
+  private readonly onEscape = (e: KeyboardEvent): void => {
+    if (e.key !== 'Escape' || this.pinnedKey === null) return
+    e.stopPropagation()
+    this.hideTip(true)
+  }
+
+  /** A click anywhere that is not a rail puts the slip away. Bubble phase, so
+   *  the rail's own handler has already stopped the click that pinned it. */
+  private readonly onDocClick = (): void => {
+    if (this.pinnedKey !== null) this.hideTip(true)
+  }
+
   private readonly onKeyDown = (e: KeyboardEvent): void => {
     if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return
     if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight' && e.key !== 't') return
@@ -797,6 +811,8 @@ class WeekView implements TemporalView {
     page.titleRow.append(this.buildHead())
     host.append(page.root)
     document.addEventListener('keydown', this.onKeyDown)
+    document.addEventListener('keydown', this.onEscape, true)
+    document.addEventListener('click', this.onDocClick)
     // On the body, not the grid: `ensureShell` replaces the grid every time the
     // week changes, and a listener on it would be swept away by the first page.
     page.body.addEventListener('wheel', this.onWheel, { passive: false })
@@ -816,6 +832,9 @@ class WeekView implements TemporalView {
 
   unmount(): void {
     document.removeEventListener('keydown', this.onKeyDown)
+    document.removeEventListener('keydown', this.onEscape, true)
+    document.removeEventListener('click', this.onDocClick)
+    this.pinnedKey = null
     this.page?.body.removeEventListener('wheel', this.onWheel)
     if (this.swipeSettleTimer !== null) clearTimeout(this.swipeSettleTimer)
     this.swipeSettleTimer = null
@@ -992,6 +1011,14 @@ class WeekView implements TemporalView {
 
     hover.addEventListener('mousemove', (e) => this.showTip(row, e))
     hover.addEventListener('mouseleave', () => this.hideTip())
+    // A click fixes the slip where the pointer already is, so what you were
+    // reading stops fleeing when you move to read it. The stopPropagation is
+    // load-bearing: the document listener that unpins would otherwise see this
+    // very click and close what it just opened.
+    hover.addEventListener('click', (e) => {
+      e.stopPropagation()
+      this.showTip(row, e, true)
+    })
     return row
   }
 
@@ -1006,11 +1033,14 @@ class WeekView implements TemporalView {
    * — no slot that near — hides the tooltip rather than showing the closest
    * thing on the row.
    */
-  private showTip(row: WeekRow, e: MouseEvent): void {
+  private showTip(row: WeekRow, e: MouseEvent, pin = false): void {
+    // A pinned slip belongs to the click that made it, not to the pointer. Only
+    // another click (which arrives with `pin`) may move it.
+    if (this.pinnedKey !== null && !pin) return
     const grid = this.grid
-    if (!grid || row.slots.length === 0) return this.hideTip()
+    if (!grid || row.slots.length === 0) return this.hideTip(pin)
     const rail = row.hover.getBoundingClientRect()
-    if (rail.width <= 0) return this.hideTip()
+    if (rail.width <= 0) return this.hideTip(pin)
 
     const x = e.clientX - rail.left
     let best: RasterSlot | null = null
@@ -1022,20 +1052,37 @@ class WeekView implements TemporalView {
         best = slot
       }
     }
-    if (!best || bestPx > HOVER_SNAP_PX) return this.hideTip()
+    if (!best || bestPx > HOVER_SNAP_PX) return this.hideTip(pin)
 
     const slot = best
     const tip = this.ensureTip()
     const key = `${row.day}:${slot.index}`
-    renderTip(tip, slotTip(slot, this.moments.peek(key)))
+    renderTip(tip, slotTip(slot, this.moments.peek(key, pin)))
     // The words arrive late or not at all; the tooltip is already correct
-    // without them, and redraws in place when they land.
-    this.moments.request(key, slot.sources, slot.startMs, slot.endMs, (words) => {
-      if (this.hoveredKey !== key) return
-      renderTip(tip, slotTip(slot, words))
-    })
+    // without them, and redraws in place when they land. A pin asks again for
+    // the UNTRUNCATED words — the daemon does the cutting, so the pinned slip
+    // cannot show the rest of a sentence it was never sent.
+    this.moments.request(
+      key,
+      slot.sources,
+      slot.startMs,
+      slot.endMs,
+      (words) => {
+        // Guard the pin state as well as the mark: a hover answer landing on a
+        // tooltip that has since been pinned would paint the cut text back over
+        // the full text.
+        if (this.hoveredKey !== key || (this.pinnedKey === key) !== pin) return
+        renderTip(tip, slotTip(slot, words))
+      },
+      pin,
+    )
     this.hoveredKey = key
+    this.pinnedKey = pin ? key : null
     tip.classList.add('kbn-tip-open')
+    // Pinned, the slip stops being a passing annotation and becomes something
+    // you read: it takes the pointer (so a long transcript can be scrolled) and
+    // is allowed to grow. See momentTip.css.
+    tip.classList.toggle('kbn-tip-pinned', pin)
 
     // Positioned against the grid, and flipped at the right edge so a slot late
     // in the day does not push the tooltip off the sheet.
@@ -1057,8 +1104,13 @@ class WeekView implements TemporalView {
     return tip
   }
 
-  private hideTip(): void {
-    this.tip?.classList.remove('kbn-tip-open')
+  /** Close the slip. A pinned one ignores this — the pointer wandering off is
+   *  exactly the thing pinning exists to survive — unless `force`, which is the
+   *  click elsewhere, the Escape key, and a click that pins somewhere new. */
+  private hideTip(force = false): void {
+    if (this.pinnedKey !== null && !force) return
+    this.pinnedKey = null
+    this.tip?.classList.remove('kbn-tip-open', 'kbn-tip-pinned')
     this.hoveredKey = null
     this.moments.cancel()
   }
@@ -1246,10 +1298,7 @@ class WeekView implements TemporalView {
       row.slots = drawn?.slots ?? []
       if (drawn) {
         row.paint.append(
-          buildCurveSvg(drawn.field, peak, {
-            id: `wk-curve-${this.curveSeq++}`,
-            frameMinutes: drawn.minutes,
-          }),
+          buildCurveSvg(drawn.field, peak, { frameMinutes: drawn.minutes }),
         )
       }
       for (const mark of visible) row.paint.append(this.buildMark(mark, visible))
@@ -1398,9 +1447,9 @@ function buildKeyRow(): HTMLElement {
     key.append(item)
   }
 
-  // The spine — the third channel, and the only mark here that is an EVENT
-  // rather than a pigment of the scale. Kept out of ACTIVITY_KEY_ITEMS for the
-  // same reason: that list is the two poles the colour walks between.
+  // The spine — the other channel, and the only mark here that is an EVENT
+  // rather than the wash. Kept out of ACTIVITY_KEY_ITEMS because that list is
+  // about the curve's pigment, and a spine is not a pigment.
   const item = document.createElement('span')
   item.className = 'wk-key-item'
   const glyph = document.createElement('span')
@@ -1410,7 +1459,7 @@ function buildKeyRow(): HTMLElement {
 
   // NOTE — the constitution-driven axis used to live here, drawn as a broader
   // nib on a slot whose work carried a `shuttle:` block. The curve has no
-  // channel left to carry it: height is volume, colour is you, and the spine is
+  // channel left to carry it: height is the agents' volume and the spine is
   // your messages. `RasterSlot.shuttle` is still recorded and still read by the
   // tooltip, so the claim is not lost — only its ink is.
 

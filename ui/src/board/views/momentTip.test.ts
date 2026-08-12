@@ -61,10 +61,10 @@ describe('parseMoment', () => {
 
   it('carries the note that says where unreachable words live', () => {
     const result = parseMoment(
-      { host: 'candide', excerpts: [], note: 'words live on candide' },
+      { host: 'kelvin', excerpts: [], note: 'words live on kelvin' },
       empty,
     )
-    expect(result.note).toBe('words live on candide')
+    expect(result.note).toBe('words live on kelvin')
   })
 
   it('falls back whole on a body that is not a moment', () => {
@@ -84,17 +84,17 @@ describe('the moment fetcher', () => {
     const urls: string[] = []
     vi.stubGlobal('fetch', async (input: RequestInfo | URL) => {
       urls.push(String(input))
-      return okJson({ host: 'candide', excerpts: [excerpt()] })
+      return okJson({ host: 'kelvin', excerpts: [excerpt()] })
     })
 
-    const result = await createTemporalFetchers('').moment('sess-1', 10, 70, 'candide')
+    const result = await createTemporalFetchers('').moment('sess-1', 10, 70, 'kelvin')
 
     expect(result.excerpts).toHaveLength(1)
     const params = new URL(urls[0], 'http://daemon.test').searchParams
     expect(params.get('session')).toBe('sess-1')
     expect(params.get('from_ms')).toBe('10')
     expect(params.get('to_ms')).toBe('70')
-    expect(params.get('host')).toBe('candide')
+    expect(params.get('host')).toBe('kelvin')
     // Deliberately NOT /moment/composite: a transcript is a file on one
     // machine, not a feed to merge.
     expect(urls[0]).not.toContain('composite')
@@ -170,6 +170,48 @@ describe('MomentLoader', () => {
     expect(seen).toEqual(['run the null tests'])
   })
 
+  it('fetches again with full for a pin, and caches the two answers apart', async () => {
+    // The excerpts are cut on the DAEMON, so a pin cannot recover the rest of a
+    // sentence by relaxing its CSS — it has to ask again. And the two answers
+    // are two different answers about one minute: sharing a cache slot would
+    // serve the pinned slip the hover's cut text (or worse, the reverse).
+    vi.useFakeTimers()
+    const asked: boolean[] = []
+    const loader = new MomentLoader(async (_session, _fromMs, _toMs, _host, full) => {
+      asked.push(full === true)
+      return {
+        host: 'ada',
+        excerpts: [{ at_ms: 0, role: 'user' as const, text: full ? 'the whole thing' : 'the wh…' }],
+      }
+    }, 150)
+
+    const seen: string[] = []
+    loader.request('slot-1', [source], 0, 60_000, (w) => seen.push(w.excerpts[0].text))
+    await vi.advanceTimersByTimeAsync(200)
+    expect(asked).toEqual([false])
+    expect(seen).toEqual(['the wh…'])
+
+    loader.request('slot-1', [source], 0, 60_000, (w) => seen.push(w.excerpts[0].text), true)
+    await vi.advanceTimersByTimeAsync(200)
+    expect(asked).toEqual([false, true])
+    expect(seen).toEqual(['the wh…', 'the whole thing'])
+
+    // Both are remembered, each under its own key.
+    expect(loader.peek('slot-1')?.excerpts[0].text).toBe('the wh…')
+    expect(loader.peek('slot-1', true)?.excerpts[0].text).toBe('the whole thing')
+  })
+
+  it('peeks the brief answer for a pin whose full text has not arrived yet', async () => {
+    // What makes pinning a mark you were already reading repaint rather than
+    // blank: the words on screen stay while the untruncated ones are fetched.
+    vi.useFakeTimers()
+    const { loader } = loaderOver([{ host: 'ada', excerpts: [excerpt()] }])
+
+    loader.request('slot-1', [source], 0, 60_000, () => {})
+    await vi.advanceTimersByTimeAsync(200)
+    expect(loader.peek('slot-1', true)?.excerpts[0].text).toBe('run the null tests')
+  })
+
   it('asks for nothing while a pointer sweeps across marks', async () => {
     vi.useFakeTimers()
     const { loader, calls } = loaderOver([{ host: 'ada', excerpts: [] }])
@@ -230,14 +272,14 @@ describe('MomentLoader', () => {
     vi.useFakeTimers()
     const loader = new MomentLoader(async (session) => {
       return session === 'down'
-        ? { host: 'candide', excerpts: [], note: 'words live on candide' }
+        ? { host: 'kelvin', excerpts: [], note: 'words live on kelvin' }
         : { host: 'ada', excerpts: [], tools: 'Edit · Bash' }
     }, 150)
     let words: MomentWords | undefined
 
     loader.request(
       'slot-1',
-      [{ session: 'down', host: 'candide' }, source],
+      [{ session: 'down', host: 'kelvin' }, source],
       0,
       60_000,
       (w) => {

@@ -1,7 +1,7 @@
 /**
  * chronicleWindow — the arithmetic behind Chronicle's continuous scroll.
  *
- * Cail: "scroll to change the date range in a pretty continuous way." Scrolling
+ * The operator: "scroll to change the date range in a pretty continuous way." Scrolling
  * near an edge grows the day window rather than stopping at it: a block of past
  * days is PREPENDED at the left edge, a smaller block APPENDED at the right,
  * and the timeline keeps going until it hits a cap.

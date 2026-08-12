@@ -30,6 +30,42 @@
   transition: opacity 90ms ease;
 }
 .kbn-tip-open { opacity: 1; }
+
+/* PINNED — clicked open, and staying open until you click elsewhere or press
+   Escape. Two things change, and both follow from the slip no longer being a
+   passing annotation:
+
+   It takes the pointer back. A hover tooltip must be transparent to the mouse
+   or it would fight the rail underneath it; a pinned one is a thing you are
+   reading, so it has to be scrollable and selectable.
+
+   It is allowed to grow. Hovering, every excerpt is clamped to three lines
+   because a tooltip that grows into a transcript stops being a tooltip — but
+   the whole reason to pin is that the clamp cut off the sentence you wanted.
+   So the clamp comes off, and the box takes a height bound and a scrollbar
+   instead: still bounded by the rail it hangs over, no longer bounded by what
+   fits in a glance. The hairline goes a shade darker and the shadow a step
+   deeper, so which of the two states you are in is legible at a glance. */
+.kbn-tip-pinned {
+  pointer-events: auto;
+  max-width: 420px;
+  max-height: min(52vh, 460px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border-color: rgba(122, 111, 92, 0.66);
+  box-shadow: 0 4px 14px rgba(27, 22, 17, 0.19);
+}
+.kbn-tip-pinned .kbn-tip-text {
+  display: block;
+  -webkit-line-clamp: none;
+  overflow: visible;
+}
+.kbn-tip-pinned .kbn-tip-tools-line,
+.kbn-tip-pinned .kbn-tip-where {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+}
 /* Flipped when the mark sits late in the day — the view swaps left for right,
    this only moves the origin the box grows from. */
 .kbn-tip-flip { text-align: left; }

@@ -499,10 +499,10 @@ describe('lanes', () => {
   it('names a host only when the lane ran somewhere other than the page', () => {
     const elsewhere = buildDayLanes(
       activity([bucket(60, 'agent', SESSION)]),
-      [card({ shuttleHost: 'Cineca-Login-02' })],
+      [card({ shuttleHost: 'Basalt-Login-02' })],
       WIN,
     )
-    expect(elsewhere[0].hostNote).toBe('cineca-login-02')
+    expect(elsewhere[0].hostNote).toBe('basalt-login-02')
 
     const sameHost = buildDayLanes(
       activity([bucket(60, 'agent', SESSION)]),
@@ -518,7 +518,7 @@ describe('lanes', () => {
         bucket(10, 'agent', null, '/home/ada/dev/felt'),
         bucket(11, 'agent', null, '/home/ada/dev/felt'),
         // A session that resolves to no card: a worker, not a person.
-        bucket(12, 'agent', 'some-other-01ZZZ-shuttle', '/Users/ada/loom'),
+        bucket(12, 'agent', 'some-other-01ZZZ-shuttle', '/home/ada/loom'),
         bucket(13, 'agent', SESSION),
       ]),
       [card()],
@@ -775,23 +775,23 @@ describe('a fleet of daemons on one rail', () => {
 
   it('takes the lane host from the BUCKETS, not from the card', () => {
     // The card says the fiber lives here; the minutes say they were produced
-    // on cineca. The minutes win — they are what the rail draws.
+    // on basalt. The minutes win — they are what the rail draws.
     const lanes = buildDayLanes(
       activity([
-        bucket(60, 'agent', SESSION, null, 'Cineca-Login-02'),
-        bucket(61, 'agent', SESSION, null, 'cineca-login-02'),
+        bucket(60, 'agent', SESSION, null, 'Basalt-Login-02'),
+        bucket(61, 'agent', SESSION, null, 'basalt-login-02'),
       ]),
       [card({ shuttleHost: 'ada-workstation' })],
       WIN,
     )
-    expect(lanes[0].host).toBe('cineca-login-02')
-    expect(lanes[0].hostNote).toBe('cineca-login-02')
+    expect(lanes[0].host).toBe('basalt-login-02')
+    expect(lanes[0].hostNote).toBe('basalt-login-02')
   })
 
   it('says nothing for a lane whose activity came from the page host', () => {
     const lanes = buildDayLanes(
       activity([bucket(60, 'agent', SESSION, null, 'ada-workstation')]),
-      [card({ shuttleHost: 'cineca-login-02' })],
+      [card({ shuttleHost: 'basalt-login-02' })],
       WIN,
     )
     expect(lanes[0].host).toBe('ada-workstation')
@@ -803,34 +803,34 @@ describe('a fleet of daemons on one rail', () => {
     // better than silence, and it is what this page printed before.
     const lanes = buildDayLanes(
       activity([bucket(60, 'agent', SESSION)]),
-      [card({ shuttleHost: 'Cineca-Login-02' })],
+      [card({ shuttleHost: 'Basalt-Login-02' })],
       WIN,
     )
-    expect(lanes[0].hostNote).toBe('cineca-login-02')
+    expect(lanes[0].hostNote).toBe('basalt-login-02')
   })
 
   it('keeps a mixed lane honest: the majority host, then the most recent', () => {
     const majority = buildDayLanes(
       activity([
-        bucket(60, 'agent', SESSION, null, 'cineca-login-02'),
-        bucket(61, 'agent', SESSION, null, 'cineca-login-02'),
-        bucket(300, 'agent', SESSION, null, 'candide'),
+        bucket(60, 'agent', SESSION, null, 'basalt-login-02'),
+        bucket(61, 'agent', SESSION, null, 'basalt-login-02'),
+        bucket(300, 'agent', SESSION, null, 'kelvin'),
       ]),
       [card()],
       WIN,
     )
-    expect(majority[0].host).toBe('cineca-login-02')
+    expect(majority[0].host).toBe('basalt-login-02')
 
     // Evenly split — the later one describes where the fiber is now.
     const tied = buildDayLanes(
       activity([
-        bucket(60, 'agent', SESSION, null, 'cineca-login-02'),
-        bucket(300, 'agent', SESSION, null, 'candide'),
+        bucket(60, 'agent', SESSION, null, 'basalt-login-02'),
+        bucket(300, 'agent', SESSION, null, 'kelvin'),
       ]),
       [card()],
       WIN,
     )
-    expect(tied[0].host).toBe('candide')
+    expect(tied[0].host).toBe('kelvin')
   })
 
   it('joins a tmux name on the host that owns it, so two fleets cannot swap', () => {
@@ -838,7 +838,7 @@ describe('a fleet of daemons on one rail', () => {
     const other = '01KVBR9A6VP2Q4R7S3T8W5XYHK'
     const ledger = new Map([
       [tmuxJoinKey('ada-workstation', 'run-shuttle'), pairing('work/spt3g_papers/bmodes-2d')],
-      [tmuxJoinKey('cineca-login-02', 'run-shuttle'), pairing('a/second')],
+      [tmuxJoinKey('basalt-login-02', 'run-shuttle'), pairing('a/second')],
       // The bare key too, as buildSessionIndex writes it — a bucket that knows
       // its host must never reach this.
       ['run-shuttle', pairing('a/second')],
@@ -856,13 +856,13 @@ describe('a fleet of daemons on one rail', () => {
   it('marks a lane whose origin is stale, and leaves a live one alone', () => {
     const origins: TemporalOrigins = {
       'ada-workstation': { kind: 'local', stale: false },
-      'cineca-login-02': { kind: 'remote', stale: true, lastError: 'timeout' },
+      'basalt-login-02': { kind: 'remote', stale: true, lastError: 'timeout' },
     }
     const other = '01KVBR9A6VP2Q4R7S3T8W5XYHK'
     const lanes = buildDayLanes(
       activity(
         [
-          bucket(60, 'agent', SESSION, null, 'cineca-login-02'),
+          bucket(60, 'agent', SESSION, null, 'basalt-login-02'),
           bucket(61, 'agent', `second-${other}-shuttle`, null, 'ada-workstation'),
         ],
         'ada-workstation',
@@ -875,15 +875,15 @@ describe('a fleet of daemons on one rail', () => {
     const local = lanes.find((l) => l.cardId === 'a/second')
     // The stale lane still DRAWS — those minutes happened; what is shown is
     // that origin's last-good read, dimmed, not dropped.
-    expect(remote).toMatchObject({ host: 'cineca-login-02', hostNote: 'cineca-login-02', stale: true })
+    expect(remote).toMatchObject({ host: 'basalt-login-02', hostNote: 'basalt-login-02', stale: true })
     expect(remote?.beats.map((b) => b.minute)).toEqual([60])
     expect(local).toMatchObject({ host: 'ada-workstation', hostNote: '', stale: false })
   })
 
   it('reads staleness past a difference of case in the origin name', () => {
     const lanes = buildDayLanes(
-      activity([bucket(60, 'agent', SESSION, null, 'Cineca-Login-02')], 'ada-workstation', {
-        'Cineca-Login-02': { kind: 'remote', stale: true },
+      activity([bucket(60, 'agent', SESSION, null, 'Basalt-Login-02')], 'ada-workstation', {
+        'Basalt-Login-02': { kind: 'remote', stale: true },
       }),
       [card()],
       WIN,
@@ -895,8 +895,8 @@ describe('a fleet of daemons on one rail', () => {
     // A narrow `window` is an origin answering honestly about what it cached.
     // The data thins out; nothing is wrong, and nothing is dimmed.
     const lanes = buildDayLanes(
-      activity([bucket(60, 'agent', SESSION, null, 'cineca-login-02')], 'ada-workstation', {
-        'cineca-login-02': {
+      activity([bucket(60, 'agent', SESSION, null, 'basalt-login-02')], 'ada-workstation', {
+        'basalt-login-02': {
           kind: 'remote',
           stale: false,
           window: { fromMs: WIN.startMs + 3_600_000, toMs: WIN.startMs + 7_200_000 },
@@ -920,21 +920,21 @@ describe('a fleet of daemons on one rail', () => {
   })
 
   it('merges the ledger’s freshness with activity’s into the day model', () => {
-    // Activity from cineca is current; the ledger has not heard from it. The
+    // Activity from basalt is current; the ledger has not heard from it. The
     // lane is built from both files, so the lane is waiting.
     const model = buildDayModel(
       DAY,
-      activity([bucket(60, 'agent', SESSION, null, 'cineca-login-02')], 'ada-workstation', {
-        'cineca-login-02': { kind: 'remote', stale: false },
+      activity([bucket(60, 'agent', SESSION, null, 'basalt-login-02')], 'ada-workstation', {
+        'basalt-login-02': { kind: 'remote', stale: false },
       }),
       [card()],
       '',
       NOW_IN_RAIL,
       undefined,
-      { 'cineca-login-02': { kind: 'remote', stale: true } },
+      { 'basalt-login-02': { kind: 'remote', stale: true } },
     )
     expect(model.lanes[0].stale).toBe(true)
-    expect(model.origins['cineca-login-02'].stale).toBe(true)
+    expect(model.origins['basalt-login-02'].stale).toBe(true)
   })
 })
 
@@ -1074,8 +1074,8 @@ describe('the live chip', () => {
   })
 
   it('carries the owning host, so the attach can be routed', () => {
-    const chip = laneChip(worker({ runtimePhase: 'working', shuttleHost: 'cineca' }), NOW_IN_RAIL)
-    expect(chip?.host).toBe('cineca')
+    const chip = laneChip(worker({ runtimePhase: 'working', shuttleHost: 'basalt' }), NOW_IN_RAIL)
+    expect(chip?.host).toBe('basalt')
   })
 })
 
@@ -1135,8 +1135,8 @@ describe('where things stand', () => {
 
   it('owner-routes a remote fiber, and leaves a local one unrouted', () => {
     const lanes = buildDayLanes(activity([bucket(10, 'agent', SESSION)]), [withDir()], WIN)
-    const remote = withDir({ originId: 'remote-cineca' })
-    expect(buildDayPreviews(lanes, [remote], '')[0].reportUrl).toContain('&origin=remote-cineca')
+    const remote = withDir({ originId: 'remote-basalt' })
+    expect(buildDayPreviews(lanes, [remote], '')[0].reportUrl).toContain('&origin=remote-basalt')
     expect(buildDayPreviews(lanes, [withDir()], '')[0].reportUrl).not.toContain('&origin=')
   })
 
@@ -1397,9 +1397,9 @@ describe('attributing a commit by the session that made it', () => {
 
   it('refuses a pairing recorded on another host', () => {
     // Two daemons, one ledger merged by the composite. A commit recorded on
-    // cineca must not read ada's pairing, so the fiber's lane falls back to
+    // basalt must not read ada's pairing, so the fiber's lane falls back to
     // its outcome as though the ledger said nothing.
-    const entries = narrate([record({ host: 'cineca-login-02' })])
+    const entries = narrate([record({ host: 'basalt-login-02' })])
     expect(entries[0].fallback).toBe(true)
     expect(entries[0].stats?.commits).toBe(0)
   })
@@ -1433,7 +1433,7 @@ describe('attributing a commit by the session that made it', () => {
     // every host, so the second copy is the same commit.
     const entries = narrate([
       record({ subject: 'ran the nulls', insertions: 10, deletions: 2 }),
-      record({ subject: 'ran the nulls', insertions: 10, deletions: 2, host: 'cineca-login-02' }),
+      record({ subject: 'ran the nulls', insertions: 10, deletions: 2, host: 'basalt-login-02' }),
     ])
     expect(entries[0].stats).toMatchObject({ commits: 1, insertions: 10, deletions: 2 })
   })
@@ -1501,14 +1501,14 @@ describe('attributing a commit by the session that made it', () => {
       {
         records: [record({ subject: 'ran the nulls', insertions: 42, deletions: 7 })],
         bySession: bySession([HARNESS, pairing('work/spt3g_papers/bmodes-2d')]),
-        origins: { 'cineca-login-02': { kind: 'remote', stale: true } },
+        origins: { 'basalt-login-02': { kind: 'remote', stale: true } },
       },
     )
     expect(model.entries).toHaveLength(1)
     expect(model.entries[0].body).toBe('ran the nulls')
     expect(model.entries[0].stats).toMatchObject({ commits: 1, insertions: 42, deletions: 7 })
     // The commit feed's freshness merges in beside activity's and the ledger's.
-    expect(model.origins['cineca-login-02'].stale).toBe(true)
+    expect(model.origins['basalt-login-02'].stale).toBe(true)
   })
 
   it('is inert on a daemon that serves no commit ledger', () => {

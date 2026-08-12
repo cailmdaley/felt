@@ -17,9 +17,9 @@ defmodule Shuttle.CommitLedger do
   One line per commit:
 
       {"at":1786203000000,"kind":"commit","sha":"79def80…",
-       "subject":"desk: cycle lens","repo":"/Users/me/dev/felt",
+       "subject":"desk: cycle lens","repo":"~/dev/felt",
        "files":3,"insertions":42,"deletions":7,
-       "session":"0883ade1-…","tmux":"edits-01KTS…-shuttle","cwd":"/Users/me/dev/felt"}
+       "session":"0883ade1-…","tmux":"edits-01KTS…-shuttle","cwd":"~/dev/felt"}
 
   Pure machine exhaust, like the session ledger: a pairing and its provenance.
   The subject rides along so a reader can render the line without going back to

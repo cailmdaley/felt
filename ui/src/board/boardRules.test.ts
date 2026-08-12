@@ -138,7 +138,7 @@ describe('phasePillLabel', () => {
 
 describe('a mirrored fiber renders as ONE card', () => {
   // Shape taken from the real board: 245 rows for 240 fibers, five of them
-  // served by both the laptop and `candide` out of the same git-synced store.
+  // served by both the laptop and `kelvin` out of the same git-synced store.
   const mirrored = (origin: string, over: Partial<Fiber> = {}): CompositeEntry => ({
     origin,
     feltStore: `/store/${origin}`,
@@ -196,23 +196,23 @@ describe('a mirrored fiber renders as ONE card', () => {
 
   it('keeps the LOCAL row when a remote mirrors it', () => {
     const feed = feedWith(
-      [mirrored('candide'), mirrored('laptop')],
-      { laptop: { kind: 'local', stale: false }, candide: { kind: 'remote', stale: false } },
+      [mirrored('kelvin'), mirrored('laptop')],
+      { laptop: { kind: 'local', stale: false }, kelvin: { kind: 'remote', stale: false } },
     )
     const cards = drafts(feed)
     expect(cards).toHaveLength(1)
     expect(cards[0].originId).toBe('laptop')
-    expect(cards[0].mirroredOrigins).toEqual(['candide'])
+    expect(cards[0].mirroredOrigins).toEqual(['kelvin'])
   })
 
   it('keeps the local row even when the remote copy is newer', () => {
     // Writes go to the host that owns it, and its liveness is first-hand.
     const feed = feedWith(
       [
-        mirrored('candide', { modifiedAt: new Date(NOW).toISOString() }),
+        mirrored('kelvin', { modifiedAt: new Date(NOW).toISOString() }),
         mirrored('laptop', { modifiedAt: new Date(NOW - 10 * DAY).toISOString() }),
       ],
-      { laptop: { kind: 'local', stale: false }, candide: { kind: 'remote', stale: false } },
+      { laptop: { kind: 'local', stale: false }, kelvin: { kind: 'remote', stale: false } },
     )
     expect(drafts(feed)[0].originId).toBe('laptop')
   })
@@ -222,48 +222,48 @@ describe('a mirrored fiber renders as ONE card', () => {
     // drag while the other looked fine, so which card you grabbed decided
     // whether the gesture worked.
     const feed = feedWith(
-      [mirrored('cineca'), mirrored('candide')],
+      [mirrored('basalt'), mirrored('kelvin')],
       {
         laptop: { kind: 'local', stale: false },
-        cineca: { kind: 'remote', stale: true },
-        candide: { kind: 'remote', stale: false },
+        basalt: { kind: 'remote', stale: true },
+        kelvin: { kind: 'remote', stale: false },
       },
     )
     const cards = drafts(feed)
     expect(cards).toHaveLength(1)
-    expect(cards[0].originId).toBe('candide')
+    expect(cards[0].originId).toBe('kelvin')
   })
 
   it('falls back to the newest modifiedAt among equals', () => {
     const feed = feedWith(
       [
-        mirrored('cineca', { modifiedAt: new Date(NOW - 5 * DAY).toISOString() }),
-        mirrored('nibi', { modifiedAt: new Date(NOW - 1 * DAY).toISOString() }),
+        mirrored('basalt', { modifiedAt: new Date(NOW - 5 * DAY).toISOString() }),
+        mirrored('talus', { modifiedAt: new Date(NOW - 1 * DAY).toISOString() }),
       ],
       {
         laptop: { kind: 'local', stale: false },
-        cineca: { kind: 'remote', stale: false },
-        nibi: { kind: 'remote', stale: false },
+        basalt: { kind: 'remote', stale: false },
+        talus: { kind: 'remote', stale: false },
       },
     )
-    expect(drafts(feed)[0].originId).toBe('nibi')
+    expect(drafts(feed)[0].originId).toBe('talus')
   })
 
   it('is stable whichever order the feed lists them in', () => {
     const origins = {
       laptop: { kind: 'local' as const, stale: false },
-      candide: { kind: 'remote' as const, stale: false },
+      kelvin: { kind: 'remote' as const, stale: false },
     }
-    const a = drafts(feedWith([mirrored('laptop'), mirrored('candide')], origins))
-    const b = drafts(feedWith([mirrored('candide'), mirrored('laptop')], origins))
+    const a = drafts(feedWith([mirrored('laptop'), mirrored('kelvin')], origins))
+    const b = drafts(feedWith([mirrored('kelvin'), mirrored('laptop')], origins))
     expect(a[0].originId).toBe(b[0].originId)
     expect(a[0].mirroredOrigins).toEqual(b[0].mirroredOrigins)
   })
 
   it('collapses on the slug when a row predates uids', () => {
     const feed = feedWith(
-      [mirrored('candide', { uid: undefined }), mirrored('laptop', { uid: undefined })],
-      { laptop: { kind: 'local', stale: false }, candide: { kind: 'remote', stale: false } },
+      [mirrored('kelvin', { uid: undefined }), mirrored('laptop', { uid: undefined })],
+      { laptop: { kind: 'local', stale: false }, kelvin: { kind: 'remote', stale: false } },
     )
     expect(drafts(feed)).toHaveLength(1)
   })
@@ -372,7 +372,7 @@ describe('Resting clusters split when they overflow', () => {
   })
 
   it('splits six across two subdirectories into two clusters', () => {
-    // The case Cail named: "science 6" → "science/unions 3" + "science/spt3g 3".
+    // The case the operator named: "science 6" → "science/unions 3" + "science/spt3g 3".
     const cards = [
       'science/unions/a', 'science/unions/b', 'science/unions/c',
       'science/spt3g/d', 'science/spt3g/e', 'science/spt3g/f',

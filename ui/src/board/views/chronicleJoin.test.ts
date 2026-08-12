@@ -590,7 +590,7 @@ describe('placing a cycle band on the day grid', () => {
 
 describe('routing a cycle write to its owner', () => {
   it('strips the remote- prefix and defaults to local', () => {
-    expect(shuttleOrigin('remote-cineca-login')).toBe('cineca-login')
+    expect(shuttleOrigin('remote-basalt-login')).toBe('basalt-login')
     expect(shuttleOrigin('local')).toBe('local')
     expect(shuttleOrigin(undefined)).toBe('local')
   })
@@ -602,13 +602,13 @@ describe('routing a cycle write to its owner', () => {
     const remote: CycleCard = {
       id: 'cycles/remote-era',
       name: 'Remote era',
-      originId: 'remote-cineca-login',
+      originId: 'remote-basalt-login',
       cycleStart: WINDOW_DAYS[10].iso,
       due: WINDOW_DAYS[20].iso,
     }
     const band = readCycleBand(remote, WINDOW_DAYS, DAY_INDEX, CYCLE_NOW)
-    expect(band?.originId).toBe('remote-cineca-login')
-    expect(shuttleOrigin(band?.originId)).toBe('cineca-login')
+    expect(band?.originId).toBe('remote-basalt-login')
+    expect(shuttleOrigin(band?.originId)).toBe('basalt-login')
   })
 })
 

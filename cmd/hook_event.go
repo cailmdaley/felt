@@ -88,6 +88,7 @@ type eventHookInput struct {
 	CWD            string          `json:"cwd"`
 	TranscriptPath string          `json:"transcript_path"`
 	ToolName       string          `json:"tool_name"`
+	Prompt         string          `json:"prompt"`
 	ToolInput      json.RawMessage `json:"tool_input"`
 }
 
@@ -103,8 +104,44 @@ type eventLine struct {
 	TmuxSession string          `json:"tmuxSession"`
 	Harness     string          `json:"harness"`
 	OriginName  string          `json:"originName"`
+	// Machine marks a prompt the harness injected rather than one a person
+	// typed — see machinePrompt. Omitted when false, so an ordinary event's
+	// line is byte-identical to what it has always been.
+	Machine     bool            `json:"machine,omitempty"`
 	Tool        string          `json:"tool,omitempty"`
 	ToolInput   json.RawMessage `json:"toolInput,omitempty"`
+}
+
+// machinePromptPrefixes are the wrappers the harness puts around a prompt it
+// injects itself: a finished task's notification, another session's message, a
+// system notice. Each fires UserPromptSubmit exactly as a person typing does.
+//
+// PREFIXES, not a search. An injected prompt is a wrapper around its payload,
+// so the marker is always at the front; matching anywhere in the text would
+// demote a real message that quoted one of these.
+var machinePromptPrefixes = []string{
+	"<task-notification",
+	"<teammate-message",
+	"Another Claude session sent a message:",
+	"[SYSTEM NOTIFICATION",
+	"<system-notification",
+}
+
+// machinePrompt reports whether a prompt was injected rather than typed.
+//
+// This is the ONLY place the question can be answered: the daemon receives an
+// event with no prompt text in it, and a daemon that sniffed content to guess
+// would be inventing a fact it cannot know. So the writer decides and the
+// reader trusts the flag (lib/shuttle/activity.ex buckets a flagged prompt as
+// agent activity instead of as your attention).
+func machinePrompt(prompt string) bool {
+	trimmed := strings.TrimLeft(prompt, " \t\r\n")
+	for _, prefix := range machinePromptPrefixes {
+		if strings.HasPrefix(trimmed, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // runEventHook decodes the payload, renders the line, and appends it. Every
@@ -154,6 +191,9 @@ func renderEventLine(stdin io.Reader) (string, bool) {
 		TmuxSession: currentTmuxSession(),
 		Harness:     harnessFor(input.TranscriptPath),
 		OriginName:  origin,
+	}
+	if eventType == "user_prompt_submit" && machinePrompt(input.Prompt) {
+		line.Machine = true
 	}
 	if input.ToolName != "" {
 		line.Tool = input.ToolName

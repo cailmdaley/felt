@@ -118,6 +118,71 @@ func TestEventTypeMapping(t *testing.T) {
 	}
 }
 
+// TestEventMachinePrompt: a prompt the harness injected is flagged; one a
+// person typed is not. The flag is what lets the board stop drawing "you sent
+// a message" over minutes nobody was awake for, and it can only be decided
+// here — the daemon never sees the prompt text.
+func TestEventMachinePrompt(t *testing.T) {
+	isolateEvents(t)
+	path := filepath.Join(t.TempDir(), "events.jsonl")
+	t.Setenv("SHUTTLE_EVENTS_FILE", path)
+
+	for _, tc := range []struct {
+		name   string
+		prompt string
+		want   bool
+	}{
+		{"task notification", "<task-notification> <task-id>abc</task-id> done", true},
+		{"teammate message", `<teammate-message teammate_id="lead">go</teammate-message>`, true},
+		{"relayed teammate message", "Another Claude session sent a message: <teammate-message>hi", true},
+		{"system notification", "[SYSTEM NOTIFICATION] budget exhausted", true},
+		{"leading whitespace still matches", "\n  <task-notification> x", true},
+		{"a person typing", "hey, can you look at the curve", false},
+		// The reason this is a prefix test and not a search: quoting one of
+		// these markers is something a person does all the time.
+		{"a person quoting a marker", "i saw a <task-notification> in the logs", false},
+		{"empty prompt", "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+				t.Fatalf("reset stream: %v", err)
+			}
+			lines := record(t, path, map[string]any{
+				"hook_event_name": "UserPromptSubmit",
+				"session_id":      "s1",
+				"prompt":          tc.prompt,
+			})
+			if len(lines) != 1 {
+				t.Fatalf("got %d lines, want 1", len(lines))
+			}
+			machine, present := lines[0]["machine"]
+			if tc.want && machine != true {
+				t.Fatalf("machine = %v (present %v), want true", machine, present)
+			}
+			// Omitted entirely when false, so an ordinary event's line is
+			// byte-identical to what it has always been.
+			if !tc.want && present {
+				t.Fatalf("machine present on a typed prompt: %v", machine)
+			}
+		})
+	}
+
+	// Only prompts carry the flag: a tool event with the same text nearby must
+	// not pick it up.
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		t.Fatalf("reset stream: %v", err)
+	}
+	lines := record(t, path, map[string]any{
+		"hook_event_name": "PreToolUse",
+		"session_id":      "s1",
+		"prompt":          "<task-notification> x",
+		"tool_name":       "Bash",
+	})
+	if _, present := lines[0]["machine"]; present {
+		t.Fatalf("machine flag leaked onto a tool event")
+	}
+}
+
 // TestEventWriteGate: with no explicit path, the daemon's state directory is
 // the opt-in. Absent, the hook writes nothing AND creates nothing — a felt
 // user who never runs Shuttle gets no surprise ~/.shuttle.

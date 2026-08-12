@@ -18,13 +18,12 @@
   --wk-annot: 104px;
   --wk-ochre-deep: #A57D2B;
 
-  /* The three activity pigments, named ONCE. Both the rasters and the key's
-     glyphs read them from here, so a swatch cannot drift from the mark it
-     stands for — the worst bug a legend can have, and one that would be
-     invisible until someone trusted it. (Borrowed from DayView, which pays for
-     the same guarantee the same way.) */
+  /* The curve's pigment, named ONCE. Both the wash and the key's glyph read
+     the same value, so a swatch cannot drift from the mark it stands for — the
+     worst bug a legend can have, and one that would be invisible until someone
+     trusted it. (Borrowed from DayView, which pays for the same guarantee the
+     same way.) */
   --wk-agent: #3D5BA0;
-  --wk-attention: #0F8A74;
 
   flex: 1 1 auto;
   min-height: 0;
@@ -381,9 +380,8 @@
   align-items: flex-end;
   gap: 5px;
 }
-/* The two POLES of the curve's colour, drawn identically because that is what
-   they are — one scale's ends, not two marks. Each fades out to its left, the
-   only way a static swatch can say "and every blend between these two". */
+/* The curve's pigment. It fades out to its left, the only way a static swatch
+   can say "and every weight down to none of it". */
 .wk-key-glyph {
   display: inline-block;
   width: 13px;
@@ -392,13 +390,10 @@
   margin-bottom: 1px;
 }
 .wk-key-agent { background: linear-gradient(90deg, rgba(61, 91, 160, 0.12), var(--wk-agent)); }
-.wk-key-attention {
-  background: linear-gradient(90deg, rgba(15, 138, 116, 0.12), var(--wk-attention));
-}
-/* The spine, at its own weight: a hairline of iron gall, the one mark in this
-   key that is an event rather than a pigment. */
+/* The spine, at its own weight: 2px of iron gall, the one mark in this key
+   that is an event rather than the wash. */
 .wk-key-spine {
-  width: 1px;
+  width: 2px;
   height: 10px;
   background: var(--curve-spine);
 }

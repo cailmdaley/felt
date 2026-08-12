@@ -70,7 +70,7 @@ const shuttleBlock = (kind = 'oneshot') => ({
  * like a span that is correctly suppressed. Exactly one fiber wears this so
  * both branches are visible at once: one lane with a hostname, the rest bare.
  */
-const FOREIGN_HOST = 'cineca-login-02'
+const FOREIGN_HOST = 'basalt-login-02'
 /** The host serving this page — what every temporal result stamps itself with,
  *  and the note a lane suppresses because it is the page's constant. */
 const LOCAL_HOST = 'ada-workstation'
@@ -387,14 +387,14 @@ const CYCLES: MockFiber[] = [
   },
 ]
 
-// Served by BOTH the laptop and `candide` out of one git-synced store.
+// Served by BOTH the laptop and `kelvin` out of one git-synced store.
 const MIRRORED: MockFiber[] = [
   {
     id: 'science/unions/shear_2d/final-push',
     uid: ULID.mirrored,
     name: 'Final push on the A&A submission',
     status: 'open',
-    outcome: 'Mirrored across the laptop and candide — one card, two hosts.',
+    outcome: 'Mirrored across the laptop and kelvin — one card, two hosts.',
     tags: ['unions'],
     shuttle: shuttleBlock(),
   },
@@ -440,12 +440,12 @@ const MOCK_FEED = {
     // disagree about staleness.
     ...MIRRORED.flatMap((f) => [
       fiber(f),
-      { ...fiber(f), origin: 'candide', felt_store: '/home/ada/loom-candide' },
+      { ...fiber(f), origin: 'kelvin', felt_store: '/home/ada/loom-kelvin' },
     ]),
   ],
   origins: {
     local: { kind: 'local', stale: false, last_polled_at: iso(0), fiber_count: 12 },
-    candide: { kind: 'remote', stale: true, last_polled_at: iso(-3_600_000), fiber_count: 1 },
+    kelvin: { kind: 'remote', stale: true, last_polled_at: iso(-3_600_000), fiber_count: 1 },
   },
 }
 

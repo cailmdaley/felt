@@ -41,7 +41,11 @@ defmodule Shuttle.Moment do
   short description:
 
       "Bash — run the activity tests"
+      "Bash — git status --short"
       "Read — DayView.ts"
+
+  A Bash call with no description falls back to its command, as the second
+  line shows: "Bash" alone says nothing a reader did not already know.
 
   Past that count the individual calls would be a wall of lines a hover can't
   hold, so the line steps back to the old aggregate instead: tool names in
@@ -85,6 +89,13 @@ defmodule Shuttle.Moment do
   @cap 6
   @max_chars 280
 
+  # What an excerpt is cut to when the caller asks for the FULL text — a pinned
+  # tooltip, which the reader is no longer glancing at but reading. Still a
+  # bound and not "no bound at all": the caller is a browser tooltip and a
+  # pathological turn (a pasted file, a base64 blob) must not become the
+  # response. Generous enough that a real message arrives whole.
+  @full_max_chars 8_000
+
   # The tool summary's bounds: distinct names shown, the hint's length, and the
   # whole line's. A tooltip footer, not a log.
   @tool_cap 5
@@ -95,8 +106,9 @@ defmodule Shuttle.Moment do
   # a hover has room for a handful of lines, not a transcript.
   @tool_calls_cap 6
 
-  # Tools whose input carries a human-written one-liner. Everything else's
-  # arguments are paths and payloads — noise in a footer.
+  # Tools whose input carries a human-written one-liner — or, failing that, an
+  # argument that reads as one anywhere it appears (Bash's command). Everything
+  # else's arguments are paths and payloads — noise in a footer.
   @hint_tools ~w(Bash)
 
   # Tools whose argument, standing alone on its own line in the per-call
@@ -141,6 +153,20 @@ defmodule Shuttle.Moment do
   @doc "The widest window `excerpts/4` will serve, in milliseconds."
   @spec max_window_ms() :: pos_integer()
   def max_window_ms, do: @max_window_ms
+
+  @doc """
+  The per-excerpt character bound: #{@max_chars} ordinarily, #{@full_max_chars}
+  for a caller that asked for the full text.
+
+  Truncation happens HERE and not in the client, which is why relaxing it takes
+  a round trip: a tooltip that widens its box still has an ellipsis in the
+  string it was given. `full?` is the whole difference between the hover fetch
+  and the pinned one.
+  """
+  @spec max_chars(boolean()) :: pos_integer()
+  def max_chars(full? \\ false)
+  def max_chars(true), do: @full_max_chars
+  def max_chars(_), do: @max_chars
 
   @doc """
   Up to #{@cap} excerpts from `session`'s transcript inside the inclusive
@@ -354,16 +380,30 @@ defmodule Shuttle.Moment do
 
   defp tool_calls(_), do: []
 
-  defp hint(name, %{"description" => description}) when is_binary(description) do
+  # A Bash call's own words, else the command it ran.
+  #
+  # `description` is optional and often absent, and a bare "Bash" tells a reader
+  # nothing they did not already know from the fact that a minute had tool calls
+  # in it. The command string is the next best account of what happened — it is
+  # not prose, but `git status --short` is a far better answer to "what was this
+  # minute" than the tool's name alone. Trimmed to the same 48 characters and
+  # collapsed of whitespace by `trim/2`, so a heredoc becomes one line.
+  defp hint(name, input) when is_map(input) do
     if name in @hint_tools do
-      case trim(description, @tool_hint_chars) do
-        {:ok, hint} -> hint
-        _ -> nil
-      end
+      described(input["description"]) || described(input["command"])
     end
   end
 
   defp hint(_name, _input), do: nil
+
+  defp described(text) when is_binary(text) do
+    case trim(text, @tool_hint_chars) do
+      {:ok, hint} -> hint
+      _ -> nil
+    end
+  end
+
+  defp described(_), do: nil
 
   defp call_hint(name, input), do: hint(name, input) || path_hint(name, input)
 

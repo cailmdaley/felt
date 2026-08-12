@@ -52,16 +52,16 @@ describe('relative links in a fiber body', () => {
     // dispatched into, `shuttle.project_dir`. The markdown cannot say which, so
     // both ride out and the panel probes.
     const html = renderMarkdown('[AGENTS.md](AGENTS.md)', {
-      basePath: '/Users/cd280747/loom/.felt/ai-futures/felt/debug',
+      basePath: '/home/ada/loom/.felt/ai-futures/felt/debug',
       originId: 'local',
-      projectDir: '/Users/cd280747/dev/felt',
+      projectDir: '/home/ada/dev/felt',
     })
     expect(decodeURIComponent(/data-file-path="([^"]*)"/.exec(html)?.[1] ?? ''))
-      .toBe('/Users/cd280747/loom/.felt/ai-futures/felt/debug/AGENTS.md')
+      .toBe('/home/ada/loom/.felt/ai-futures/felt/debug/AGENTS.md')
     expect(decodeURIComponent(/data-file-path-alt="([^"]*)"/.exec(html)?.[1] ?? ''))
-      .toBe('/Users/cd280747/dev/felt/AGENTS.md')
+      .toBe('/home/ada/dev/felt/AGENTS.md')
     expect(decodeURIComponent(/data-file-url-alt="([^"]*)"/.exec(html)?.[1] ?? ''))
-      .toContain('/Users/cd280747/dev/felt/AGENTS.md')
+      .toContain('/home/ada/dev/felt/AGENTS.md')
   })
 
   it('offers no alternate when there is nothing else it could mean', () => {
@@ -78,7 +78,7 @@ describe('relative links in a fiber body', () => {
   })
 
   it('carries the origin for a remote-owned fiber', () => {
-    const html = renderMarkdown('[a](notes.md)', { ...opts, originId: 'candide' })
-    expect(hrefIn(html)).toContain('origin=candide')
+    const html = renderMarkdown('[a](notes.md)', { ...opts, originId: 'kelvin' })
+    expect(hrefIn(html)).toContain('origin=kelvin')
   })
 })

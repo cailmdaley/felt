@@ -628,8 +628,8 @@ export class KanbanModal {
       activity: (fromMs, toMs) => this.temporal.activity(fromMs, toMs),
       sessions: (sinceMs) => this.temporal.sessions(sinceMs),
       commits: (sinceMs, untilMs) => this.temporal.commits(sinceMs, untilMs),
-      moment: (session, fromMs, toMs, host) =>
-        this.temporal.moment(session, fromMs, toMs, host),
+      moment: (session, fromMs, toMs, host, full) =>
+        this.temporal.moment(session, fromMs, toMs, host, full),
       openCard: (cardId) => this.openCardById(cardId, cards),
       // The Desk's worker pill, handed to the views. Passed through rather than
       // wrapped: it is already the gesture-deferred form (see the constructor —

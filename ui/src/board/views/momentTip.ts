@@ -48,6 +48,12 @@
  * in-flight request would poison that memo for every later hover of the same
  * mark. The debounce is what actually stops the traffic; the drop only stops a
  * late answer from painting itself over a tooltip that has moved on.
+ *
+ * A PIN fetches again with `full`, because the excerpts are truncated on the
+ * daemon: the hover's answer already has the ellipsis baked into its strings,
+ * so no amount of CSS gets the rest of the sentence back. The two answers are
+ * cached under separate keys and the pinned peek falls back to the brief one,
+ * which is what makes pinning repaint rather than blank.
  */
 
 import './momentTip.css'
@@ -255,6 +261,7 @@ type Fetcher = (
   fromMs: number,
   toMs: number,
   host?: string | null,
+  full?: boolean,
 ) => Promise<MomentResult>
 
 /**
@@ -281,9 +288,17 @@ export class MomentLoader {
     this.debounceMs = debounceMs
   }
 
-  /** Words already known for `key`, or undefined. */
-  peek(key: string): MomentWords | undefined {
-    return this.cache.get(key)
+  /**
+   * Words already known for `key`, or undefined.
+   *
+   * A `full` peek falls back to the brief answer when the untruncated one has
+   * not arrived: pinning a mark you were already hovering should paint the
+   * words you were reading immediately, and let the full text replace them a
+   * moment later — not blank the slip while a second fetch goes out.
+   */
+  peek(key: string, full = false): MomentWords | undefined {
+    if (!full) return this.cache.get(key)
+    return this.cache.get(fullKey(key)) ?? this.cache.get(key)
   }
 
   /**
@@ -299,18 +314,20 @@ export class MomentLoader {
     fromMs: number,
     toMs: number,
     onWords: (words: MomentWords) => void,
+    full = false,
   ): void {
-    if (this.pending === key) return
+    const cacheKey = full ? fullKey(key) : key
+    if (this.pending === cacheKey) return
     this.cancel()
-    if (this.cache.has(key) || sources.length === 0) return
-    this.pending = key
+    if (this.cache.has(cacheKey) || sources.length === 0) return
+    this.pending = cacheKey
     this.timer = setTimeout(() => {
       this.timer = null
-      void this.load(key, sources, fromMs, toMs).then((words) => {
-        this.cache.set(key, words)
+      void this.load(sources, fromMs, toMs, full).then((words) => {
+        this.cache.set(cacheKey, words)
         // The pointer may have moved on while this was out; that answer is
         // still worth keeping (it is cached above) but must not be painted.
-        if (this.pending !== key) return
+        if (this.pending !== cacheKey) return
         this.pending = null
         onWords(words)
       })
@@ -326,15 +343,15 @@ export class MomentLoader {
   }
 
   private async load(
-    _key: string,
     sources: readonly MomentSource[],
     fromMs: number,
     toMs: number,
+    full: boolean,
   ): Promise<MomentWords> {
     const results = await Promise.all(
       sources
         .slice(0, MAX_SOURCES)
-        .map((source) => this.fetcher(source.session, fromMs, toMs, source.host)),
+        .map((source) => this.fetcher(source.session, fromMs, toMs, source.host, full)),
     )
     const excerpts = results
       .flatMap((result) => result.excerpts)
@@ -350,6 +367,13 @@ export class MomentLoader {
     if (tools) return { excerpts, tools }
     return { ...(note ? { note } : {}), excerpts }
   }
+}
+
+/** The pinned fetch's cache slot for a mark. Two entries per mark, deliberately
+ *  — the brief answer and the untruncated one are two different answers about
+ *  the same minute, and a pin must not be served the hover's cut text. */
+function fullKey(key: string): string {
+  return `full:${key}`
 }
 
 /** The dedup a caller does before handing sources over: same session on the

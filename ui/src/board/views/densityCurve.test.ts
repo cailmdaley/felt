@@ -3,42 +3,25 @@
  * which is the one export that touches the DOM and so is left to the browser
  * to exercise. Every test below is checking the doctrine set out in
  * densityCurve.ts's own module comment, not just the numbers: HEIGHT is
- * log-compressed volume, COLOUR reads the human signal alone, and SPINES are
- * discrete marks laid over a continuous field.
+ * log-compressed AGENT volume, and SPINES are discrete marks laid over that
+ * field, drawn to its own height with a floor under them.
  */
 
 import { describe, expect, it } from 'vitest'
 import {
-  CURVE_AGENT,
-  CURVE_HUMAN,
-  HUMAN_HALF_LIFE,
   PEAK_FLOOR,
-  SIGMA_HUMAN_MINUTES,
   SIGMA_TOTAL_MINUTES,
+  SPINE_MIN_HEIGHT,
   curveField,
   curveGrid,
   curveRuns,
   edgePath,
   fieldPeak,
-  gradientStops,
-  humanMix,
-  mixHex,
   smear,
   spineAlphas,
+  spineHeights,
   type ActivitySample,
-  type CurveField,
 } from './densityCurve.js'
-
-describe('the two kernels', () => {
-  it('gives the colour channel a wider reach than the height channel', () => {
-    // See the module doc: the human kernel is wide on purpose, because "you
-    // were engaged here" is not an honest claim at sub-five-minute
-    // resolution. If this ever flips, one late-arriving human minute would
-    // read as sharply localized as the machine's own precisely-timestamped
-    // events — exactly the false precision the wide kernel exists to avoid.
-    expect(SIGMA_HUMAN_MINUTES).toBeGreaterThan(SIGMA_TOTAL_MINUTES)
-  })
-})
 
 describe('smear — the unnormalised kernel', () => {
   const grid = curveGrid(20) // step 1, so grid minutes line up with samples
@@ -51,19 +34,16 @@ describe('smear — the unnormalised kernel', () => {
 
   it('falls to exp(-0.5) one sigma from that event', () => {
     // An UNNORMALISED Gaussian, so the peak never depends on sigma — only how
-    // far the influence reaches does. This is what lets the height and colour
-    // channels share weights but use different bandwidths without the colour
-    // channel's peak drifting as SIGMA_HUMAN_MINUTES is tuned.
-    //
-    // Evaluated with an integer sigma (5, the human kernel's) and a fine grid
-    // so the sampled point falls exactly one sigma out rather than merely near
-    // it — the day/week grids are coarser than 1 minute and would only test
-    // the grid's own rounding, not the kernel.
+    // far the influence reaches does. Evaluated with an integer sigma and a
+    // fine grid so the sampled point falls exactly one sigma out rather than
+    // merely near it: the day/week grids are coarser than a minute and would
+    // only test the grid's own rounding, not the kernel.
+    const sigma = 5
     const fineGrid = curveGrid(40)
-    const samples: ActivitySample[] = [{ minute: 20, human: 1, agent: 0 }]
-    const out = smear(samples, (s) => s.human, SIGMA_HUMAN_MINUTES, fineGrid)
-    expect(out[20 + SIGMA_HUMAN_MINUTES]).toBeCloseTo(Math.exp(-0.5), 10)
-    expect(out[20 - SIGMA_HUMAN_MINUTES]).toBeCloseTo(Math.exp(-0.5), 10)
+    const samples: ActivitySample[] = [{ minute: 20, human: 0, agent: 1 }]
+    const out = smear(samples, (s) => s.agent, sigma, fineGrid)
+    expect(out[20 + sigma]).toBeCloseTo(Math.exp(-0.5), 10)
+    expect(out[20 - sigma]).toBeCloseTo(Math.exp(-0.5), 10)
   })
 
   it('is zero everywhere for a non-positive sigma', () => {
@@ -78,65 +58,27 @@ describe('smear — the unnormalised kernel', () => {
   })
 })
 
-describe('humanMix — saturating in human density alone', () => {
-  it('is zero at zero (and negative) density', () => {
-    expect(humanMix(0)).toBe(0)
-    expect(humanMix(-1)).toBe(0)
-  })
-
-  it('is monotone increasing', () => {
-    const xs = [0.01, 0.1, 0.3, HUMAN_HALF_LIFE, 1, 2, 5]
-    const ys = xs.map(humanMix)
-    for (let i = 1; i < ys.length; i += 1) expect(ys[i]).toBeGreaterThan(ys[i - 1])
-  })
-
-  it('saturates below 1 and never reaches it', () => {
-    // Large enough to be deep in the saturated tail, small enough that
-    // exp(-density/HUMAN_HALF_LIFE) has not yet underflowed to exactly 0 —
-    // 1000 does underflow at HUMAN_HALF_LIFE's current scale, which would make
-    // this assertion vacuously true instead of testing the asymptote.
-    expect(humanMix(20)).toBeLessThan(1)
-    expect(humanMix(20)).toBeGreaterThan(0.99)
-  })
-
-  it("matches the module doc's own worked example: a lone message reads 1 - exp(-1/HUMAN_HALF_LIFE) at its own instant", () => {
-    // A lone message peaks its own kernel at exactly density 1, so this is the
-    // number the doctrine hangs on — checked against the formula rather than a
-    // hardcoded percentage so it tracks HUMAN_HALF_LIFE if that constant is
-    // ever retuned "by looking" again, per its own doc comment.
-    expect(humanMix(1)).toBeCloseTo(1 - Math.exp(-1 / HUMAN_HALF_LIFE), 10)
-  })
-})
-
-describe('THE DOCTRINE — one human message among a hundred agent events still reads human', () => {
-  // This is the single most important test in this file. The whole design of
-  // the colour channel turns on it: colour reads the HUMAN signal ALONE, with
-  // no term for the machine anywhere in it, so a hundred tool calls in the
-  // same minute a person wrote one message must not dilute that minute's
-  // colour toward agent-blue. If this regresses, the board starts reading
-  // "the machine was busy" as more salient than "you were here" — exactly
-  // backwards from what this rail exists to say.
-  //
-  // The bar is HUMAN_HALF_LIFE's own worked example (a lone message alone
-  // reads 1 - exp(-1/HUMAN_HALF_LIFE) human), minus a hair of slack for the
-  // 100 agent events sharing the minute — height and mix are independent
-  // channels, but this asserts that independence rather than assuming it.
-  it('gives a minute with 1 human event and 100 agent events a high human mix', () => {
+describe('THE DOCTRINE — the curve is the machines, and only the machines', () => {
+  // The height field counts agent events alone. It used to count both, plus a
+  // whole colour channel that read the human signal — and one message among
+  // four hundred tool calls moved the height by nothing and the colour by
+  // everything. What "you were here" looks like now is a spine, so a human
+  // event must not touch the curve at all: a rail's shape is a picture of what
+  // the machines did, and a person reading it can trust that literally.
+  it('draws the same curve whether or not a human message shares the minute', () => {
     const minute = 30
-    const samples: ActivitySample[] = [{ minute, human: 1, agent: 100 }]
     const grid = curveGrid(60)
-    const field = curveField(samples, grid, [minute])
-    const soloMessage = 1 - Math.exp(-1 / HUMAN_HALF_LIFE)
-    expect(field.mix[minute]).toBeCloseTo(soloMessage, 10)
-    // And, concretely, unambiguously human — not merely "the taller side". A
-    // lone message peaks its own mix at ~0.76 (HUMAN_HALF_LIFE = 0.7); the
-    // bar sits just under that, since the 100 agent events on the height
-    // channel must not be allowed to shave any of it off the colour channel.
-    expect(field.mix[minute]).toBeGreaterThan(0.7)
-    // The height channel, meanwhile, is dominated by the 100 agent events —
-    // colour and height disagreeing on the same minute is exactly the point.
-    const agentOnly = curveField([{ minute, human: 0, agent: 100 }], grid, [])
-    expect(field.height[minute]).toBeCloseTo(agentOnly.height[minute], 1)
+    const withYou = curveField([{ minute, human: 1, agent: 100 }], grid, [minute])
+    const machineOnly = curveField([{ minute, human: 0, agent: 100 }], grid, [])
+    expect(withYou.height).toEqual(machineOnly.height)
+  })
+
+  it('leaves a minute of pure human message at zero height — the spine carries it', () => {
+    const minute = 10
+    const grid = curveGrid(30)
+    const field = curveField([{ minute, human: 4, agent: 0 }], grid, [minute])
+    expect(field.height.every((h) => h === 0)).toBe(true)
+    expect(field.spines).toEqual([minute])
   })
 })
 
@@ -181,41 +123,65 @@ describe('fieldPeak — a page-wide normaliser, never per-lane', () => {
   })
 })
 
-describe('mixHex and gradientStops', () => {
-  // mixHex lower-cases its output (`toString(16)`), so the poles are compared
-  // case-insensitively — the doctrine here is "the same pigment", not "the
-  // same string the constant happens to be written with".
-  const lower = (hex: string) => hex.toLowerCase()
-
-  it('walks from CURVE_AGENT to CURVE_HUMAN as mix goes 0 → 1', () => {
-    expect(mixHex(0)).toBe(lower(CURVE_AGENT))
-    expect(mixHex(1)).toBe(lower(CURVE_HUMAN))
+describe('spineHeights — your message, drawn inside the work it landed in', () => {
+  it("rises to the curve's own height where the agents were busy", () => {
+    const minute = 20
+    const grid = curveGrid(40)
+    const field = curveField([{ minute, human: 1, agent: 60 }], grid, [minute])
+    const peak = fieldPeak([field])
+    const [h] = spineHeights(field, peak)
+    // The spine stands in the tallest moment on the page, so it is the full
+    // height of the row — and comfortably above the floor, which is what makes
+    // this a test of the mapping rather than of the floor.
+    expect(h).toBeCloseTo(field.height[minute] / peak, 10)
+    expect(h).toBeGreaterThan(SPINE_MIN_HEIGHT)
   })
 
-  it('clamps mix outside [0, 1]', () => {
-    expect(mixHex(-5)).toBe(lower(CURVE_AGENT))
-    expect(mixHex(5)).toBe(lower(CURVE_HUMAN))
+  it('is a fraction of the row where the agents were quiet, not the whole of it', () => {
+    // Two lanes on one page: the loud one sets the peak, the quiet one is
+    // measured against it. A message during a lull must not draw as tall as a
+    // message during a burst — that height difference IS the information.
+    const grid = curveGrid(60)
+    const quiet = curveField([{ minute: 10, human: 1, agent: 2 }], grid, [10])
+    const loud = curveField([{ minute: 40, human: 1, agent: 400 }], grid, [40])
+    const peak = fieldPeak([quiet, loud])
+    const [quietSpine] = spineHeights(quiet, peak)
+    const [loudSpine] = spineHeights(loud, peak)
+    expect(quietSpine).toBeLessThan(loudSpine)
+    expect(loudSpine).toBeCloseTo(1, 10)
   })
 
-  it('collapses a lane with no human events to a flat 2-stop gradient at CURVE_AGENT', () => {
+  it('floors a message sent while nothing was running, so it is still visible', () => {
+    // The case the floor exists for: you write to an agent that is not running,
+    // which is how a great many conversations start. At the true height that
+    // message would be a mark of zero pixels — the most important event on the
+    // rail, invisible.
+    const grid = curveGrid(60)
+    const alone = curveField([], grid, [25])
+    const loud = curveField([{ minute: 40, human: 0, agent: 400 }], grid, [])
+    expect(spineHeights(alone, fieldPeak([alone, loud]))).toEqual([SPINE_MIN_HEIGHT])
+  })
+
+  it('never exceeds the full row, however suppressed the peak it is measured against', () => {
+    const grid = curveGrid(20)
+    const field = curveField([{ minute: 10, human: 1, agent: 50 }], grid, [10])
+    expect(spineHeights(field, PEAK_FLOOR)).toEqual([1])
+  })
+
+  it('gives one height per spine, in the field\'s own sorted order', () => {
+    const grid = curveGrid(30)
+    const field = curveField([{ minute: 5, human: 0, agent: 30 }], grid, [20, 5])
+    const heights = spineHeights(field, fieldPeak([field]))
+    expect(heights).toHaveLength(2)
+    // Spine 5 stands in the burst; spine 20 is out on quiet paper at the floor.
+    expect(heights[0]).toBeGreaterThan(heights[1])
+    expect(heights[1]).toBe(SPINE_MIN_HEIGHT)
+  })
+
+  it('is empty for a field with no spines', () => {
     const grid = curveGrid(10)
     const field = curveField([{ minute: 4, human: 0, agent: 10 }], grid, [])
-    const stops = gradientStops(field)
-    expect(stops).toHaveLength(2)
-    expect(stops[0].color).toBe(lower(CURVE_AGENT))
-    expect(stops[1].color).toBe(lower(CURVE_AGENT))
-    expect(stops[0].offset).toBe(0)
-    expect(stops[1].offset).toBe(1)
-  })
-
-  it('always returns at least 2 stops, even for a single-point grid', () => {
-    const field: CurveField = {
-      grid: { step: 1, count: 1 },
-      height: [0],
-      mix: [0],
-      spines: [],
-    }
-    expect(gradientStops(field).length).toBeGreaterThanOrEqual(2)
+    expect(spineHeights(field, fieldPeak([field]))).toEqual([])
   })
 })
 

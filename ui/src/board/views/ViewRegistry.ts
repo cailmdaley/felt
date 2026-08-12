@@ -96,7 +96,14 @@ export interface ViewContext {
    * reach the transcript answers with no excerpts, and the honest fallback
    * (`SLOT_NO_TEXT_NOTE`) is what the view shows then.
    */
-  moment(session: string, fromMs: number, toMs: number, host?: string | null): Promise<MomentResult>
+  moment(
+    session: string,
+    fromMs: number,
+    toMs: number,
+    host?: string | null,
+    /** Untruncated excerpts — the pinned tooltip's fetch. */
+    full?: boolean,
+  ): Promise<MomentResult>
   /**
    * Open a card's detail panel. Resolves against `cards` AND `response.cycles`,
    * so a cycle band or chip can hand over its id directly — the split above is

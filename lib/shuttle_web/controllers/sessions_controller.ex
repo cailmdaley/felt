@@ -2,10 +2,10 @@ defmodule ShuttleWeb.SessionsController do
   @moduledoc """
   This host's session ledger: `GET /api/v1/sessions?since_ms=<int>`.
 
-      {"host": "dapmcw68",
+      {"host": "hub-mac",
        "records": [{"fiber": "work/paper/edits", "uid": "01KTS…",
                     "session": "0883ade1-…", "harness": "claude-code",
-                    "host": "dapmcw68", "tmux": "edits-01KTS…-shuttle",
+                    "host": "hub-mac", "tmux": "edits-01KTS…-shuttle",
                     "at": 1786203000000, "kind": "dispatch"}]}
 
   `Shuttle.SessionLedger` does the reading; this controller parses the bound

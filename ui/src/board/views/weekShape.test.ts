@@ -1042,7 +1042,7 @@ describe('the raster tick knows whose minute it was', () => {
     const slots = rasterSlots(
       [
         bucket({ m: bounds.startMs, s: 'stray-session' }),
-        bucket({ m: bounds.startMs, s: null, cwd: '/Users/cail/dev/felt' }),
+        bucket({ m: bounds.startMs, s: null, cwd: '/home/ada/dev/felt' }),
       ],
       bounds,
       bounds.endMs,
@@ -1198,8 +1198,8 @@ describe('what a hovered slot is willing to say', () => {
     expect(slotTip(slot, words).detail).toEqual(words.excerpts);
 
     // A remote that could not be read says where the words live instead.
-    expect(slotTip(slot, { excerpts: [], note: 'words live on candide' }).note).toBe(
-      'words live on candide',
+    expect(slotTip(slot, { excerpts: [], note: 'words live on kelvin' }).note).toBe(
+      'words live on kelvin',
     );
   });
 

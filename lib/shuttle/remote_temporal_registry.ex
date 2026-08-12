@@ -24,7 +24,7 @@ defmodule Shuttle.RemoteTemporalRegistry do
     * **Disk persistence.** On every successful refresh the entry is written
       as JSON under `$SHUTTLE_DATA_DIR/remote-temporal/<name>.json` and read
       back at init. The whole point of the feature is a temporal view that
-      still shows candide's last two weeks while candide is unreachable —
+      still shows a remote's last two weeks while that host is unreachable —
       memory that evaporates on a daemon bounce would not deliver that.
 
   ## The window
@@ -38,7 +38,7 @@ defmodule Shuttle.RemoteTemporalRegistry do
 
   Each cached entry records the window it actually covers. A composite request
   for a wider window is served what is cached, and the covered window is
-  reported back in the origins block — the UI says "candide: 14 days, last seen
+  reported back in the origins block — the UI says "remote: 14 days, last seen
   2h ago" rather than silently implying the gap is quiet.
 
   ## Test injection
