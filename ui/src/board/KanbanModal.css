@@ -334,6 +334,11 @@
    The head sits at the left of the row with the column head's own hairline
    rule turned ninety degrees to follow the band. */
 .kbn-section-pinned {
+  /* Desk furniture renders at design size, like `.kbn-col` — see the note
+     there. Without this the bands inherited the root 1.18 and ran LARGER
+     than the columns they bracket, which reads backwards for a minimized
+     register. */
+  --kbn-type-scale: 1;
   flex: 0 0 auto;
   flex-direction: row;
   align-items: center;
@@ -425,7 +430,12 @@
 .kbn-pin-chip-human .kbn-pin-chip-glyph { color: #3F8278; }
 .kbn-pin-chip-agent .kbn-pin-chip-glyph { color: #3D5BA0; }
 .kbn-pin-chip-name {
-  font-size: calc(14px * var(--kbn-type-scale, 1));
+  /* A notch under `.kbn-card-name` (14.5px): a parked role is the same object
+     as a card, held in a quieter register. */
+  font-size: calc(13px * var(--kbn-type-scale, 1));
+  /* Lighter than the column card's 600 — the minimized register carries its
+     lower importance in weight as well as size. */
+  font-weight: 500;
   line-height: 1.1;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -765,6 +775,8 @@
    means; the gloss is there so a card down here doesn't read as one that
    failed. Under the head, the column head's own hairline rule. */
 .kbn-section-stash {
+  /* Design size, like `.kbn-col` and the Pinned band. */
+  --kbn-type-scale: 1;
   flex: 0 0 auto;
   border: 1px solid rgba(27, 22, 17, 0.10);
   background: rgba(237, 226, 206, 0.45);
@@ -867,7 +879,9 @@
   gap: 6px;
   padding: 3px 2px;
   font-family: var(--font-serif, 'EB Garamond', serif);
-  font-size: calc(12.5px * var(--kbn-type-scale, 1));
+  /* Same minimized register as `.kbn-pin-chip-name` — under the column
+     card's 14.5px title. */
+  font-size: calc(13px * var(--kbn-type-scale, 1));
   color: #2A231A;
   cursor: pointer;
   line-height: 1.28;
@@ -900,6 +914,8 @@
 .kbn-cluster-cold .kbn-cluster-item-glyph { opacity: 0.6; }
 .kbn-cluster-item-title {
   flex: 1;
+  /* Same minimized weight as `.kbn-pin-chip-name`. */
+  font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
