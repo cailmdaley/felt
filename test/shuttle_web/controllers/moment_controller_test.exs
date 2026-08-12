@@ -206,6 +206,30 @@ defmodule ShuttleWeb.MomentControllerTest do
     end
   end
 
+  describe "Shuttle.Moment.call_lines/1 (the individual calls, when they fit)" do
+    test "one line per call, oldest first, bare name when there is no hint" do
+      assert Moment.call_lines([{"Bash", "run the tests"}, {"Read", nil}, {"Bash", nil}]) == [
+               "Bash — run the tests",
+               "Read",
+               "Bash"
+             ]
+    end
+
+    test "no calls means no lines" do
+      assert Moment.call_lines([]) == nil
+    end
+
+    test "past the cap the lines give way to the aggregate" do
+      calls = for name <- ~w(A B C D E F G), do: {name, nil}
+      assert Moment.call_lines(calls) == nil
+    end
+
+    test "exactly at the cap still lists individually" do
+      calls = for name <- ~w(A B C D E F), do: {name, nil}
+      assert Moment.call_lines(calls) == ~w(A B C D E F)
+    end
+  end
+
   describe "Shuttle.Moment.moment/4 (words, else tools)" do
     # A minute of silent tool work is the case this exists for.
     defp tool_tree do
@@ -233,9 +257,34 @@ defmodule ShuttleWeb.MomentControllerTest do
       ])
     end
 
-    test "a wordless window answers with its tools" do
-      assert %{excerpts: [], tools: "Bash ×2 · Read — run the tests"} =
+    test "a wordless window with few calls lists them individually" do
+      assert %{excerpts: [], tools: "Bash — run the tests\nRead — a.ex\nBash"} =
                Moment.moment(@session, @t0, @t0 + 3_000, root: tool_tree())
+    end
+
+    test "a wordless window with many calls falls back to the aggregate" do
+      root =
+        write_tree([
+          {"-Users-cail-felt", @session,
+           [
+             assistant(@t0 + 1_000, [
+               %{
+                 "type" => "tool_use",
+                 "name" => "Bash",
+                 "input" => %{"description" => "run the tests"}
+               },
+               %{"type" => "tool_use", "name" => "Bash", "input" => %{}},
+               %{"type" => "tool_use", "name" => "Bash", "input" => %{}},
+               %{"type" => "tool_use", "name" => "Read", "input" => %{"file_path" => "/a.ex"}},
+               %{"type" => "tool_use", "name" => "Read", "input" => %{"file_path" => "/b.ex"}},
+               %{"type" => "tool_use", "name" => "Read", "input" => %{"file_path" => "/c.ex"}},
+               %{"type" => "tool_use", "name" => "Edit", "input" => %{"file_path" => "/a.ex"}}
+             ])
+           ]}
+        ])
+
+      assert %{excerpts: [], tools: "Bash ×3 · Read ×3 · Edit — run the tests"} =
+               Moment.moment(@session, @t0, @t0 + 3_000, root: root)
     end
 
     test "words win: a window with prose reports no tools" do
@@ -267,7 +316,7 @@ defmodule ShuttleWeb.MomentControllerTest do
         |> json_response(200)
 
       assert wordless["excerpts"] == []
-      assert wordless["tools"] == "Bash ×2 · Read — run the tests"
+      assert wordless["tools"] == "Bash — run the tests\nRead — a.ex\nBash"
 
       spoken =
         build_conn()

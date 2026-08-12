@@ -7,7 +7,10 @@ defmodule ShuttleWeb.MomentController do
        "excerpts": [{"at_ms": …, "role": "user", "text": "hi french class!…"}]}
 
   A minute of silent tool work has no excerpts. Then — and only then — a
-  `"tools"` field carries what ran instead (`"Bash ×2 · Read"`). It is absent
+  `"tools"` field carries what ran instead: one call per line
+  (`"Bash — run the tests\nRead — moment.ex"`) when there are few enough
+  calls to read that way, else the old one-line aggregate (`"Bash ×2 ·
+  Read"`) — see `Shuttle.Moment`'s moduledoc for the threshold. It is absent
   whenever there are words, so a client never has to choose between them.
 
   `Shuttle.Moment` does the reading (a Claude Code transcript under

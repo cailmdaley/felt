@@ -2,10 +2,15 @@
  * DayView (hotkey 2) — one day, close up.
  *
  * TWO CLOCKS, ONE LANE. The page is a rail per fiber, read left to right,
- * carrying both of the day's clocks at once:
+ * carrying both of the day's clocks at once — as ONE curve on three channels:
  *
- *   pale cobalt wash   the agent was working (merged runs of agent minutes)
- *   solid teal block   you were steering (attention minutes — a typed prompt)
+ *   height   how much happened, agent and human events together
+ *   colour   how much of it was you — cobalt toward the machine, teal toward
+ *            you, read off the human signal ALONE so that a wall of agent
+ *            events can never drown a single message of yours
+ *   spine    the exact minute you spoke, in iron gall over the curve
+ *
+ * The arithmetic and the doctrine behind all three live in `./densityCurve.js`.
  *
  * Below the rails, the same day told the other way: "the day, by fiber" —
  * the commit trail, set as prose under the fiber that made it.
@@ -76,6 +81,14 @@ import {
   type SessionPairing,
   type TemporalOrigins,
 } from './TemporalData.js'
+import {
+  buildCurveSvg,
+  curveField,
+  curveGrid,
+  fieldPeak,
+  type ActivitySample,
+  type CurveField,
+} from './densityCurve.js'
 import { createViewEmptyState, createViewPage } from './ViewPage.js'
 import {
   buildJoinIndex,
@@ -89,6 +102,7 @@ import { formatSpanMinutes, railBounds, shiftCivilDay } from './railTime.js'
 import {
   ACTIVITY_KEY_ITEMS,
   MARK_GLYPH,
+  SPINE_KEY_LABEL,
   STATE_GLYPH,
   STATE_KEY_ITEMS,
   STATE_WORD,
@@ -121,9 +135,6 @@ import './DayView.css'
 // ── Shape of a day ───────────────────────────────────────────────────────────
 
 const MINUTE_MS = 60_000
-/** Inactive minutes a wash/block span reaches across before it breaks. Five
- *  quiet minutes inside a work run is a pause, not an end. */
-const BRIDGE_MINUTES = 5
 /** Breathing room the drawn frame keeps outside the day's first and last
  *  action, so the earliest mark is not flush against the sheet's edge. */
 export const FRAME_PAD_MINUTES = 15
@@ -311,29 +322,33 @@ export function railTicks(win: DayWindow): { ms: number; label: string }[] {
   return out
 }
 
-/** A run of rail minutes; `end` is exclusive, so a single minute is `n..n+1`. */
-export interface MinuteRun {
-  start: number
-  end: number
-}
-
 /**
- * Collapse active minute indices into runs, reaching across gaps of at most
- * `bridge` inactive minutes. Adjacent minutes always merge (gap 0).
+ * A lane's beats as the curve wants them: weights per minute, and the minutes
+ * you spoke in.
+ *
+ * A reply lands on the AGENT side. It is a message, but it is the machine's
+ * message — counting it as human would let a talkative agent paint a rail teal
+ * on its own, which is precisely the thing the colour channel exists to
+ * prevent. Spines likewise mark attention minutes only.
  */
-export function mergeMinuteRuns(minutes: Iterable<number>, bridge = BRIDGE_MINUTES): MinuteRun[] {
-  const sorted = [...new Set(minutes)].sort((a, b) => a - b)
-  const runs: MinuteRun[] = []
-  for (const minute of sorted) {
-    const last = runs[runs.length - 1]
-    // `last.end` is exclusive, so `minute - last.end` IS the inactive gap.
-    if (last && minute - last.end <= bridge) {
-      last.end = minute + 1
-      continue
+export function laneActivity(
+  beats: readonly DayBeat[],
+): { samples: ActivitySample[]; spines: number[] } {
+  const samples: ActivitySample[] = []
+  const spines: number[] = []
+  for (const beat of beats) {
+    let human = 0
+    let agent = 0
+    for (const { kind, count } of beat.kinds) {
+      if (kind === 'attention') human += count
+      else agent += count
     }
-    runs.push({ start: minute, end: minute + 1 })
+    // The minute is a bucket, so a mark belongs at its middle rather than at
+    // the instant its first event happened to land.
+    if (human > 0 || agent > 0) samples.push({ minute: beat.minute + 0.5, human, agent })
+    if (human > 0) spines.push(beat.minute + 0.5)
   }
-  return runs
+  return { samples, spines }
 }
 
 // ── Narration ────────────────────────────────────────────────────────────────
@@ -383,16 +398,14 @@ export interface DayLane {
   /** The fiber this lane is. Every lane has one — an unjoined bucket is not
    *  drawn — so this is also the click target, unconditionally. */
   cardId: string
-  agent: MinuteRun[]
-  attention: MinuteRun[]
   /**
    * Distinct minutes carrying an attention / agent bucket — the figures the
    * ledger reports as "you 38m · agents 2h 10m".
    *
-   * Counted BEFORE the merge, deliberately. `agent`/`attention` above are
-   * render spans that bridge gaps of up to five idle minutes so a run reads as
-   * one stroke; summing those would bill the pauses as work and quietly
-   * inflate every number on the page.
+   * Counted from the buckets, never off the drawn curve. The curve is a
+   * kernel-smoothed field: it has no edges to sum, and the smoothing reaches
+   * minutes in which nothing happened. Ink and arithmetic answer to the same
+   * events, but only one of them is allowed to be blurred.
    */
   attentionMinutes: number
   agentMinutes: number
@@ -413,13 +426,15 @@ export interface DayLane {
   /** Distinct active minutes, of any kind — the lane's weight. */
   weight: number
   /**
-   * What actually happened, minute by minute, oldest first — the HOVER's ground
-   * truth.
+   * What actually happened, minute by minute, oldest first — the ground truth
+   * BOTH the curve and the hover are built from.
    *
-   * The runs above are drawing spans: they bridge up to five idle minutes so a
-   * work run reads as one stroke. Perfect for ink, useless for a tooltip, which
-   * must never report a bridged minute as work. So the beats are kept
-   * unmerged, each carrying its own counts and its own transcripts.
+   * The curve smooths these; the tooltip must not. A pointer near a lull is
+   * standing on a curve that the kernel carried there from minutes on either
+   * side, and answering with "work happened here" would be a lie the ink is
+   * allowed to tell and the words are not. So the beats stay unsmoothed, each
+   * carrying its own counts and its own transcripts, and the hover snaps to
+   * them rather than hit-testing the paint.
    */
   beats: DayBeat[]
 }
@@ -678,8 +693,6 @@ export function buildDayLanes(
       host,
       hostNote: host && host !== pageHost ? host : '',
       stale: isOriginStale(folded, host || null),
-      agent: mergeMinuteRuns(entry.agent),
-      attention: mergeMinuteRuns(entry.attention),
       attentionMinutes: entry.attention.size,
       agentMinutes: entry.agent.size,
       attentionMessages: entry.messages,
@@ -1153,8 +1166,10 @@ export function dayModelSignature(model: DayModel): string {
     .map(
       (lane) =>
         `${lane.key}|${lane.label}|${lane.state}|${lane.hostNote}|${lane.stale ? 'stale' : ''}|${lane.weight}|` +
-        `${lane.agent.map((r) => `${r.start}-${r.end}`).join(',')}|` +
-        `${lane.attention.map((r) => `${r.start}-${r.end}`).join(',')}`,
+        // The beats ARE the curve's input, so digesting them digests the ink:
+        // any minute whose weight or kind changed moves the shape and must
+        // repaint. Cheaper than the curve and exactly as sensitive.
+        `${lane.beats.map((b) => `${b.minute}:${b.kinds.map((k) => `${k.kind}${k.count}`).join('')}`).join(',')}`,
     )
     .join('\n')
   const entries = model.entries
@@ -1202,13 +1217,12 @@ function pct(value: number): string {
   return `${(value * 100).toFixed(4)}%`
 }
 
-/** Day's own mark for each activity kind — the same pigments the shared key
- *  names, drawn as this view draws them. */
+/** Day's swatch for each pole of the curve's colour scale. A reply is
+ *  agent-side ink: it pushes the curve toward cobalt, never toward teal. */
 const DAY_KEY_CLASS: Record<DrawnKind, string> = {
-  agent: 'kbn-day-key-wash',
-  attention: 'kbn-day-key-att',
-  // A reply is agent-side ink; it wears the wash, never its own mark.
-  reply: 'kbn-day-key-wash',
+  agent: 'kbn-day-key-agent',
+  attention: 'kbn-day-key-human',
+  reply: 'kbn-day-key-agent',
 }
 
 /** One entry in the key: the mark itself, in miniature, then what it means. */
@@ -1301,6 +1315,11 @@ class DayViewImpl implements TemporalView {
    * positions against the rails.
    */
   private chartEl: HTMLElement | null = null
+  /** Serial for the curves' gradient ids. An SVG gradient is addressed by a
+   *  document-wide id, so two lanes sharing one would silently share a colour
+   *  walk — and a repaint that reused ids would collide with the DOM it is
+   *  replacing while both are briefly attached. Monotonic, never reset. */
+  private curveSeq = 0
   private tip: HTMLElement | null = null
   /** The lane-minute the pointer is on (`<lane key>:<minute>`); a late answer
    *  is checked against it before it paints. */
@@ -1612,6 +1631,16 @@ class DayViewImpl implements TemporalView {
     }
     chart.append(grid)
 
+    // Every lane's curve, then the tallest moment on the page — the one height
+    // all of them are drawn against, so the rails can be read down the column.
+    const sampling = curveGrid(win.minutes)
+    const fields = new Map<string, CurveField>()
+    for (const lane of model.lanes) {
+      const { samples, spines } = laneActivity(lane.beats)
+      fields.set(lane.key, curveField(samples, sampling, spines))
+    }
+    const peak = fieldPeak([...fields.values()])
+
     model.lanes.forEach((lane, index) => {
       const row = String(index + 1)
 
@@ -1660,8 +1689,15 @@ class DayViewImpl implements TemporalView {
       const rail = document.createElement('div')
       rail.className = `kbn-day-rail${lane.stale ? ' kbn-card--stale' : ''}`
       rail.style.gridRow = row
-      for (const run of lane.agent) rail.append(this.buildMark('kbn-day-wash', run, win))
-      for (const run of lane.attention) rail.append(this.buildMark('kbn-day-att', run, win))
+      const field = fields.get(lane.key)
+      if (field) {
+        rail.append(
+          buildCurveSvg(field, peak, {
+            id: `kbn-day-curve-${this.curveSeq++}`,
+            frameMinutes: win.minutes,
+          }),
+        )
+      }
 
       rail.addEventListener('mousemove', (e) => this.showBeatTip(lane, rail, win, e))
       rail.addEventListener('mouseleave', () => this.hideTip())
@@ -1701,6 +1737,7 @@ class DayViewImpl implements TemporalView {
     legend.style.gridRow = String(model.lanes.length + 2)
     legend.append(
       ...ACTIVITY_KEY_ITEMS.map(({ kind, label }) => buildKey(DAY_KEY_CLASS[kind], label)),
+      buildKey('kbn-day-key-spine', SPINE_KEY_LABEL),
       buildStateKey(),
     )
     chart.append(legend)
@@ -1778,14 +1815,6 @@ class DayViewImpl implements TemporalView {
     this.tip?.classList.remove('kbn-tip-open')
     this.hoveredKey = null
     this.moments.cancel()
-  }
-
-  private buildMark(className: string, run: MinuteRun, win: DayWindow): HTMLElement {
-    const mark = document.createElement('i')
-    mark.className = className
-    mark.style.left = pct(run.start / win.minutes)
-    mark.style.width = pct((run.end - run.start) / win.minutes)
-    return mark
   }
 
   private buildNarration(model: DayModel): HTMLElement {

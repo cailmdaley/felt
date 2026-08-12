@@ -32,16 +32,30 @@ defmodule Shuttle.Moment do
   knows exactly which tools ran.
 
   So `moment/4` returns a second field. When a window yields **zero** prose
-  excerpts, the same assistant records' `tool_use` blocks are summarised into a
-  compact line — tool names in first-appearance order, deduped with counts, and
-  one short hint for the dominant tool when the call carried a `description`:
+  excerpts, the same assistant records' `tool_use` blocks answer instead — as
+  individual calls when there are few enough to read one by one, as a
+  summary when there are not.
+
+  Few enough (at most `@tool_calls_cap`, presently 6) and each call gets its
+  own line, oldest first, tool name and — when the call offers one — its own
+  short description:
+
+      "Bash — run the activity tests"
+      "Read — DayView.ts"
+
+  Past that count the individual calls would be a wall of lines a hover can't
+  hold, so the line steps back to the old aggregate instead: tool names in
+  first-appearance order, deduped with counts, one short hint for the
+  dominant tool:
 
       "Bash ×2 · Read ×3 · Edit — run the activity tests"
 
-  It is deliberately a separate field (`:tools`) and not a synthetic excerpt.
-  Nobody said this; the UI must be able to draw it in a register that is
-  visibly not speech. When there are real words, `:tools` is `nil` — the words
-  are the better answer and the tooltip has no room for both.
+  Both forms travel in the same field (`:tools`), a single string — the
+  per-call form is simply several lines joined by `"\n"`. It is deliberately
+  a separate field and not a synthetic excerpt: nobody said this, and the UI
+  must be able to draw it in a register that is visibly not speech. When
+  there are real words, `:tools` is `nil` — the words are the better answer
+  and the tooltip has no room for both.
 
   ## Defensive by construction
 
@@ -57,7 +71,9 @@ defmodule Shuttle.Moment do
   ## Bounds
 
   `@max_window_ms` (2 h) caps the window, `@cap` (6) the excerpts, `@max_chars`
-  (280) each excerpt's text. Lookup is a single `Path.wildcard/1` over
+  (280) each excerpt's text, `@tool_calls_cap` (6) the per-call tool listing
+  before it steps back to the aggregate. Lookup is a single `Path.wildcard/1`
+  over
   `<root>/*/<uuid>.jsonl` — a glob one level deep, never a walk — and the
   session id is validated as UUID-shaped first, so no caller-supplied pattern
   reaches the filesystem.
@@ -75,9 +91,21 @@ defmodule Shuttle.Moment do
   @tool_hint_chars 48
   @tool_summary_chars 120
 
+  # Above this many calls, the per-call listing gives way to the aggregate —
+  # a hover has room for a handful of lines, not a transcript.
+  @tool_calls_cap 6
+
   # Tools whose input carries a human-written one-liner. Everything else's
   # arguments are paths and payloads — noise in a footer.
   @hint_tools ~w(Bash)
+
+  # Tools whose argument, standing alone on its own line in the per-call
+  # listing, reads as a description rather than as payload — a path (its
+  # basename) or a search pattern. Folded into the aggregate's single footer
+  # hint this would be noise; one line to itself, it is the useful part of
+  # the call.
+  @path_hint_tools ~w(Read Edit Write NotebookEdit)
+  @pattern_hint_tools ~w(Grep Glob)
 
   # Canonical UUID. Narrow on purpose: this string becomes a glob segment.
   @uuid ~r/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/
@@ -131,7 +159,10 @@ defmodule Shuttle.Moment do
 
   @doc """
   Everything the transcript can say about the window: the words, and — only
-  when there are none — a one-line summary of the tools that ran instead.
+  when there are none — a report of the tools that ran instead. `:tools` is
+  one call per line (`"Bash — run the tests"`) when there are few enough to
+  read that way, else the old one-line aggregate (`"Bash ×2 · Read"`) — see
+  the moduledoc.
 
   Same guarantees as `excerpts/4`: never raises, absence is `%{excerpts: [],
   tools: nil}`.
@@ -153,7 +184,7 @@ defmodule Shuttle.Moment do
         {excerpts, tools} = stream_window(path, from_ms, to_ms, max_chars)
 
         case Enum.sort_by(excerpts, & &1.at_ms) do
-          [] -> %{excerpts: [], tools: tool_summary(Enum.reverse(tools))}
+          [] -> %{excerpts: [], tools: tools_line(Enum.reverse(tools))}
           found -> %{excerpts: Enum.take(found, cap), tools: nil}
         end
     end
@@ -207,6 +238,43 @@ defmodule Shuttle.Moment do
     if String.length(line) <= @tool_summary_chars,
       do: line,
       else: String.slice(line, 0, @tool_summary_chars - 1) <> "…"
+  end
+
+  @doc """
+  One line per call — `"Bash — run the tests"`, or bare `"Read"` for a call
+  with no description — oldest first, or `nil` when there are more than
+  #{@tool_calls_cap} calls to list. `moment/4` falls back to `tool_summary/1`
+  on `nil`; this function only decides whether the individual calls fit, not
+  what to say when they do not.
+  """
+  @spec call_lines([{String.t(), String.t() | nil}]) :: [String.t()] | nil
+  def call_lines([]), do: nil
+  def call_lines(calls) when length(calls) > @tool_calls_cap, do: nil
+
+  def call_lines(calls) do
+    Enum.map(calls, fn
+      {name, nil} -> name
+      {name, hint} -> name <> " — " <> hint
+    end)
+  end
+
+  # The `:tools` field itself: individual lines when there are few enough
+  # calls to read one by one, the aggregate otherwise. `calls` is oldest-first
+  # `{name, footer_hint, line_hint}` triples — see `tool_calls/1`.
+  defp tools_line([]), do: nil
+
+  defp tools_line(calls) do
+    per_call = Enum.map(calls, fn {name, _footer_hint, line_hint} -> {name, line_hint} end)
+
+    case call_lines(per_call) do
+      nil ->
+        calls
+        |> Enum.map(fn {name, footer_hint, _line_hint} -> {name, footer_hint} end)
+        |> tool_summary()
+
+      lines ->
+        Enum.join(lines, "\n")
+    end
   end
 
   @doc """
@@ -271,11 +339,16 @@ defmodule Shuttle.Moment do
     end
   end
 
-  # `{name, hint}` per assistant `tool_use` block, in the order they were made.
+  # `{name, footer_hint, line_hint}` per assistant `tool_use` block, in the
+  # order they were made. `footer_hint` is what the aggregate's dominant-tool
+  # hint may show (Bash's own words only — see `hint/2`); `line_hint` is what
+  # a per-call line may show, which also trusts a path or pattern once it has
+  # a line to itself (see `call_hint/2`).
   defp tool_calls(%{"type" => "assistant", "message" => %{"content" => blocks}})
        when is_list(blocks) do
     for %{"type" => "tool_use", "name" => name} = block <- blocks, is_binary(name), name != "" do
-      {name, hint(name, block["input"])}
+      input = block["input"]
+      {name, hint(name, input), call_hint(name, input)}
     end
   end
 
@@ -291,6 +364,26 @@ defmodule Shuttle.Moment do
   end
 
   defp hint(_name, _input), do: nil
+
+  defp call_hint(name, input), do: hint(name, input) || path_hint(name, input)
+
+  defp path_hint(name, %{"file_path" => path})
+       when name in @path_hint_tools and is_binary(path) do
+    case trim(Path.basename(path), @tool_hint_chars) do
+      {:ok, base} -> base
+      _ -> nil
+    end
+  end
+
+  defp path_hint(name, %{"pattern" => pattern})
+       when name in @pattern_hint_tools and is_binary(pattern) do
+    case trim(pattern, @tool_hint_chars) do
+      {:ok, p} -> p
+      _ -> nil
+    end
+  end
+
+  defp path_hint(_name, _input), do: nil
 
   defp at_ms(%{"timestamp" => stamp}) when is_binary(stamp) do
     case DateTime.from_iso8601(stamp) do

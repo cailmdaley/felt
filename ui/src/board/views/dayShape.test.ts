@@ -35,7 +35,7 @@ import {
   formatEntryStats,
   isLivePresent,
   laneChip,
-  mergeMinuteRuns,
+  laneActivity,
   railTicks,
   resolveDayISO,
   stepTarget,
@@ -196,42 +196,11 @@ describe('the 06:00 → 06:00 window', () => {
   })
 })
 
-describe('merging active minutes into spans', () => {
-  it('fuses adjacent minutes into one run, end-exclusive', () => {
-    expect(mergeMinuteRuns([10, 11, 12])).toEqual([{ start: 10, end: 13 }])
-  })
-
-  it('bridges a gap of exactly five inactive minutes', () => {
-    // 10 active, 11-15 idle, 16 active — a five-minute pause inside one run.
-    expect(mergeMinuteRuns([10, 16])).toEqual([{ start: 10, end: 17 }])
-  })
-
-  it('breaks on a gap of six', () => {
-    expect(mergeMinuteRuns([10, 17])).toEqual([
-      { start: 10, end: 11 },
-      { start: 17, end: 18 },
-    ])
-  })
-
-  it('honours a custom bridge, including zero (adjacency only)', () => {
-    expect(mergeMinuteRuns([10, 16], 4)).toEqual([
-      { start: 10, end: 11 },
-      { start: 16, end: 17 },
-    ])
-    expect(mergeMinuteRuns([10, 11, 13], 0)).toEqual([
-      { start: 10, end: 12 },
-      { start: 13, end: 14 },
-    ])
-  })
-
-  it('sorts and de-duplicates its input', () => {
-    expect(mergeMinuteRuns([12, 10, 10, 11])).toEqual([{ start: 10, end: 13 }])
-  })
-
-  it('is empty for no minutes', () => {
-    expect(mergeMinuteRuns([])).toEqual([])
-  })
-})
+// The old `mergeMinuteRuns` suite lived here — it tested run-fusing and
+// gap-bridging for a wash-block grammar that the kernel-smoothed curve
+// replaced outright. `mergeMinuteRuns` and `BRIDGE_MINUTES` no longer exist;
+// there is no successor to bridging (the curve is continuous, so nothing
+// needs to be stitched), so nothing here is rewritten — it is simply gone.
 
 // ── Activity fixtures ────────────────────────────────────────────────────────
 
@@ -339,7 +308,7 @@ describe('the drawn frame — how much of the day gets sheet', () => {
     // not minute 240 of the day.
     const frame = drawnWindow(WIN, bucketsAt(240, 480), at(2026, 8, 9, 12))
     const lanes = buildDayLanes(activity(bucketsAt(240, 480)), [card()], frame)
-    expect(lanes[0].agent[0]).toEqual({ start: 15, end: 16 })
+    expect(lanes[0].beats[0].minute).toBe(15)
   })
 
   it('carries the card lifecycle state onto the lane', () => {
@@ -516,8 +485,11 @@ describe('lanes', () => {
     expect(lanes).toHaveLength(1)
     expect(lanes[0].label).toBe('Run the 2D B-mode null tests')
     expect(lanes[0].cardId).toBe('work/spt3g_papers/bmodes-2d')
-    expect(lanes[0].agent).toEqual([{ start: 60, end: 61 }])
-    expect(lanes[0].attention).toEqual([{ start: 61, end: 62 }])
+    // These minutes joined this fiber, one apiece: minute 60's beat is agent
+    // only, minute 61's is attention only.
+    expect(lanes[0].beats.map((b) => b.minute)).toEqual([60, 61])
+    expect(lanes[0].beats[0].kinds).toEqual([{ kind: 'agent', count: 1 }])
+    expect(lanes[0].beats[1].kinds).toEqual([{ kind: 'attention', count: 1 }])
     expect(lanes[0].weight).toBe(2)
     // The page's own host is printed once in the head, so a lane that ran
     // there says nothing; only a lane that ran ELSEWHERE names its host.
@@ -605,14 +577,10 @@ describe('lanes', () => {
     expect(lanes.map((l) => l.label)).toEqual(['Run the 2D B-mode null tests', 'A lighter fiber'])
   })
 
-  it('bridges a five-minute pause inside one lane run', () => {
-    const lanes = buildDayLanes(
-      activity([bucket(100, 'agent', SESSION), bucket(106, 'agent', SESSION)]),
-      [card()],
-      WIN,
-    )
-    expect(lanes[0].agent).toEqual([{ start: 100, end: 107 }])
-  })
+  // The old 'bridges a five-minute pause inside one lane run' test lived here
+  // — its whole subject was mergeMinuteRuns's bridging rule, which the curve
+  // has no analogue of (a kernel-smoothed field has no runs to bridge). Gone
+  // with mergeMinuteRuns itself.
 })
 
 describe('the join ladder', () => {
@@ -729,27 +697,49 @@ describe('rung 0 — the session ledger', () => {
   })
 
   it('gives each minute its own beat, with the transcript behind it', () => {
-    // The hover reads BEATS, not the drawn runs: a run bridges idle minutes so
-    // it reads as one stroke, and a bridged minute must never be reported as
-    // work with words in it.
+    // The hover reads BEATS, unsmoothed: three idle minutes between 20 and 24
+    // must never be reported as work with words in it, so a beat exists only
+    // for a minute that actually carried a bucket.
     const ledger = new Map([['pi-2f9c41', pairing('work/spt3g_papers/bmodes-2d')]])
     const lanes = buildDayLanes(
       activity([
         bucket(20, 'agent', 'pi-2f9c41'),
         bucket(20, 'attention', 'pi-2f9c41'),
-        // Three idle minutes: the wash bridges them, the beats do not.
+        // Three idle minutes in between — no beat for 21, 22 or 23.
         bucket(24, 'agent', 'pi-2f9c41'),
       ]),
       [card()],
       WIN,
       ledger,
     )
-    expect(lanes[0].agent).toEqual([{ start: 20, end: 25 }])
     expect(lanes[0].beats.map((b) => b.minute)).toEqual([20, 24])
     expect(lanes[0].beats[0].kinds.map((k) => k.kind).sort()).toEqual(['agent', 'attention'])
     expect(lanes[0].beats[0].sources).toEqual([
       { session: 'sess-work/spt3g_papers/bmodes-2d', host: null },
     ])
+  })
+
+  it('turns beats into the curve\'s samples and spines', () => {
+    // laneActivity is what DayView hands to the density curve: one weighted
+    // sample per active minute (offset half a minute in, since a beat is a
+    // bucket), a reply counted on the AGENT side, and a spine only where you
+    // actually spoke.
+    const lanes = buildDayLanes(
+      activity([
+        bucket(20, 'agent', SESSION),
+        bucket(21, 'attention', SESSION),
+        { ...bucket(22, 'reply' as ActivityBucket['k'], SESSION), n: 2 },
+      ]),
+      [card()],
+      WIN,
+    )
+    const { samples, spines } = laneActivity(lanes[0].beats)
+    expect(samples).toEqual([
+      { minute: 20.5, human: 0, agent: 1 },
+      { minute: 21.5, human: 1, agent: 0 },
+      { minute: 22.5, human: 0, agent: 2 },
+    ])
+    expect(spines).toEqual([21.5])
   })
 
   it('leaves a beat with no transcript when nothing paired its minute', () => {
@@ -886,7 +876,7 @@ describe('a fleet of daemons on one rail', () => {
     // The stale lane still DRAWS — those minutes happened; what is shown is
     // that origin's last-good read, dimmed, not dropped.
     expect(remote).toMatchObject({ host: 'cineca-login-02', hostNote: 'cineca-login-02', stale: true })
-    expect(remote?.agent).toEqual([{ start: 60, end: 61 }])
+    expect(remote?.beats.map((b) => b.minute)).toEqual([60])
     expect(local).toMatchObject({ host: 'ada-workstation', hostNote: '', stale: false })
   })
 
@@ -949,10 +939,10 @@ describe('a fleet of daemons on one rail', () => {
 })
 
 describe('what a day cost, per fiber', () => {
-  it('counts raw minutes, NOT the bridged render spans', () => {
-    // 100 and 106 merge into one 7-minute span for drawing, because a
-    // five-minute pause inside a run is a pause. But only two minutes of work
-    // happened, and the ledger must say two.
+  it('counts raw minutes, not the distance spanned between them', () => {
+    // 100 and 106 are five idle minutes apart. Nothing here stitches them into
+    // a span any more, so the ledger's job is just to not invent the gap: two
+    // sparse minutes of agent work are two minutes, not seven.
     const lanes = buildDayLanes(
       activity([
         bucket(100, 'agent', SESSION),
@@ -962,7 +952,7 @@ describe('what a day cost, per fiber', () => {
       [card()],
       WIN,
     )
-    expect(lanes[0].agent).toEqual([{ start: 100, end: 107 }])
+    expect(lanes[0].beats.map((b) => b.minute)).toEqual([100, 106, 200])
     expect(lanes[0].agentMinutes).toBe(2)
     expect(lanes[0].attentionMinutes).toBe(1)
   })

@@ -26,10 +26,18 @@
  *
  * Between the two sits a third answer. A minute of pure tool work said nothing
  * — but the transcript knows WHAT IT DID, and `/api/v1/moment` returns that as
- * `tools` (`"Bash ×2 · Read"`) whenever it has no words to return. So the
- * footer has a precedence: the words, else the tools, else the note. The tools
- * line is drawn in a monospaced, dimmed register precisely because it is not
- * speech; the note now appears only when there were neither words nor tools.
+ * `tools` whenever it has no words to return. So the footer has a precedence:
+ * the words, else the tools, else the note. The tools text is drawn in a
+ * monospaced, dimmed register precisely because it is not speech; the note
+ * now appears only when there were neither words nor tools.
+ *
+ * `tools` itself carries one of two shapes, distinguished only by whether it
+ * contains a newline — the daemon decides which, this module just draws
+ * whichever arrives. Few enough calls (six or fewer) and it is one call per
+ * line, oldest first (`"Bash — run the tests"`); more than that and it is the
+ * old single-line aggregate (`"Bash ×2 · Read"`). Either way it is drawn as
+ * lines in `.kbn-tip-tools`, never split into a synthetic per-call list here
+ * — the daemon already decided how many lines this minute is worth.
  *
  * ## Fetch discipline
  *
@@ -96,9 +104,12 @@ export interface SlotTip {
    *  renderer falls through to {@link SlotTip.tools}, and then to
    *  {@link SLOT_NO_TEXT_NOTE}. */
   detail?: MomentExcerpt[]
-  /** What the minute DID when it said nothing — `"Bash ×2 · Read"`. Drawn in
-   *  place of the words, in a register that is visibly not speech: nobody said
-   *  this, and a tooltip that let it read as a quote would be inventing one. */
+  /** What the minute DID when it said nothing — one call per line
+   *  (`"Bash — run the tests"`) when there were few enough to list, else the
+   *  aggregate (`"Bash ×2 · Read"`) as a single line; the two are told apart
+   *  by whether a `\n` is present. Drawn in place of the words, in a register
+   *  that is visibly not speech: nobody said this, and a tooltip that let it
+   *  read as a quote would be inventing one. */
   tools?: string
   /** Where the words live when they could not be read from here — a remote
    *  daemon that is down. Shown instead of the note, because "gone" and
@@ -194,10 +205,19 @@ export function renderTip(host: HTMLElement, tip: SlotTip): void {
   // No words. What DID happen is still knowable, and naming the tools beats
   // saying nothing happened to be said. The note survives underneath it, for
   // the minutes where even this is unavailable.
+  //
+  // `tools` is one line (the aggregate) or several (one call per line); a
+  // `\n` split renders either the same way; a lone line never gains an empty
+  // sibling because a string with no `\n` splits to a one-element array.
   if (tip.tools) {
     const tools = document.createElement('div')
     tools.className = 'kbn-tip-tools'
-    tools.textContent = tip.tools
+    for (const line of tip.tools.split('\n')) {
+      const row = document.createElement('div')
+      row.className = 'kbn-tip-tools-line'
+      row.textContent = line
+      tools.append(row)
+    }
     host.append(tools)
     return
   }

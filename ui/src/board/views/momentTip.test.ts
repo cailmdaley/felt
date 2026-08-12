@@ -131,6 +131,11 @@ describe('parseMoment — the tool line', () => {
     expect(parseMoment({ host: 'ada', excerpts: [], tools: 42 }, empty).tools).toBeUndefined()
     expect(parseMoment({ host: 'ada', excerpts: [] }, empty).tools).toBeUndefined()
   })
+
+  it('keeps the newlines of a per-call listing intact — they are what tells the two shapes apart', () => {
+    const line = 'Bash — run the tests\nRead — momentTip.ts'
+    expect(parseMoment({ host: 'ada', excerpts: [], tools: line }, empty).tools).toBe(line)
+  })
 })
 
 describe('MomentLoader', () => {

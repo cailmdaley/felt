@@ -148,5 +148,16 @@
   line-height: 1.35;
   letter-spacing: 0.01em;
   color: #97917F;
-  overflow-wrap: anywhere;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+/* One row per line — the aggregate is a single row, the per-call listing
+   several. Each stays to one line of its own: a call's description is a
+   label, not a paragraph, and wrapping it would make six calls read as a
+   wall of text instead of a list. */
+.kbn-tip-tools-line {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

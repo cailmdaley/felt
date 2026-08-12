@@ -37,7 +37,21 @@ import {
   type ViewContext,
 } from './ViewRegistry.js'
 import { createViewPage, type ViewPage } from './ViewPage.js'
-import { ACTIVITY_KEY_ITEMS, MARK_GLYPH, messageClause, type MarkKind } from './vocabulary.js'
+import {
+  ACTIVITY_KEY_ITEMS,
+  MARK_GLYPH,
+  SPINE_KEY_LABEL,
+  messageClause,
+  type MarkKind,
+} from './vocabulary.js'
+import {
+  buildCurveSvg,
+  curveField,
+  curveGrid,
+  fieldPeak,
+  type ActivitySample,
+  type CurveField,
+} from './densityCurve.js'
 import {
   civilDayNoon,
   RAIL_START_HOUR,
@@ -707,6 +721,9 @@ class WeekView implements TemporalView {
   private sessionsAsked = false
   /** Rebuilt each paint from the cards on screen plus the ledger. */
   private origins: JoinIndex = buildJoinIndex([])
+  /** Serial for the curves' gradient ids — document-wide, so two rails must
+   *  never share one. Monotonic, never reset; see DayView's twin. */
+  private curveSeq = 0
 
   /** The one hover tooltip, parented to the grid so it positions against the
    *  rails rather than the page. */
@@ -1166,6 +1183,33 @@ class WeekView implements TemporalView {
     // when it lands.
     this.origins = buildJoinIndex(ctx.cards, this.byTmux)
 
+    // Every row's slots and curve FIRST, then the week's tallest moment — the
+    // single height all seven rails are drawn against. A per-row normaliser
+    // would draw a Tuesday of forty events and a Wednesday of four thousand at
+    // the same height, and the whole reason the rows are stacked is that they
+    // can be compared down the page. It also means the peak is an input to
+    // each row's signature: a busier Friday rescales Monday, so Monday has to
+    // repaint even though nothing about Monday changed.
+    const curves = new Map<string, { slots: RasterSlot[]; field: CurveField; minutes: number }>()
+    for (const row of this.rows) {
+      const bounds = railBounds(row.day)
+      const buckets = activity?.byDay.get(row.day) ?? []
+      const cutoff = row.day === todayCivil ? now : bounds.endMs
+      const slots = buckets.length > 0 && activity
+        ? rasterSlots(buckets, bounds, cutoff, (b) => originOf(this.origins, b))
+        : []
+      // DST-honest: a rail is 23, 24 or 25 hours, and the grid is cut from the
+      // real span rather than from an assumed 1440.
+      const minutes = (bounds.endMs - bounds.startMs) / 60_000
+      const { samples, spines } = slotSamples(slots, bounds)
+      curves.set(row.day, {
+        slots,
+        minutes,
+        field: curveField(samples, curveGrid(minutes), spines),
+      })
+    }
+    const peak = fieldPeak([...curves.values()].map((c) => c.field))
+
     for (const row of this.rows) {
       const bounds = railBounds(row.day)
       const isToday = row.day === todayCivil
@@ -1175,7 +1219,11 @@ class WeekView implements TemporalView {
 
       const buckets = activity?.byDay.get(row.day) ?? []
       const waiting = activity ? rowWaitingOn(buckets, activity.origins) : null
+      const drawn = curves.get(row.day)
       const sig = [
+        // Quantised: the peak is a continuous number and a hair of drift on a
+        // live Friday must not rebuild the whole week every fifteen seconds.
+        `pk${peak.toFixed(2)}`,
         row.day,
         this.dataGen,
         `w${waiting ?? ''}`,
@@ -1195,10 +1243,15 @@ class WeekView implements TemporalView {
       row.root.classList.toggle('kbn-card--stale', waiting !== null)
 
       row.paint.innerHTML = ''
-      row.slots = buckets.length > 0 && activity
-        ? rasterSlots(buckets, bounds, isToday ? now : bounds.endMs, (b) => originOf(this.origins, b))
-        : []
-      paintRaster(row.paint, row.slots)
+      row.slots = drawn?.slots ?? []
+      if (drawn) {
+        row.paint.append(
+          buildCurveSvg(drawn.field, peak, {
+            id: `wk-curve-${this.curveSeq++}`,
+            frameMinutes: drawn.minutes,
+          }),
+        )
+      }
       for (const mark of visible) row.paint.append(this.buildMark(mark, visible))
       if (isToday) {
         const nowLine = document.createElement('span')
@@ -1229,15 +1282,6 @@ class WeekView implements TemporalView {
           visible.length > 0 ? `; ${visible.map((m) => `${m.kind} ${m.label}`).join(', ')}` : ''
         }`,
       )
-    }
-
-    // Read off the ink that ended up on the page, after every row is settled —
-    // rows that skipped their repaint keep the slots they were last drawn with,
-    // so this is the whole week either way.
-    const constItem = this.key?.querySelector<HTMLElement>('.wk-key-const-item')
-    if (constItem) {
-      const anyConst = this.rows.some((r) => r.slots.some((s) => s.shuttle))
-      constItem.style.display = anyConst ? '' : 'none'
     }
   }
 
@@ -1354,17 +1398,21 @@ function buildKeyRow(): HTMLElement {
     key.append(item)
   }
 
-  // The second axis: the stroke. Kept OUT of ACTIVITY_KEY_ITEMS because that
-  // list is the pigments, shared verbatim with Day, and this is not another
-  // pigment — it is a weight any of them can be drawn at. Hidden
-  // until a constitution-driven tick is actually on the page (see `paint`), so
-  // a week of plain fibers is not told about a distinction it never shows.
+  // The spine — the third channel, and the only mark here that is an EVENT
+  // rather than a pigment of the scale. Kept out of ACTIVITY_KEY_ITEMS for the
+  // same reason: that list is the two poles the colour walks between.
   const item = document.createElement('span')
-  item.className = 'wk-key-item wk-key-const-item'
+  item.className = 'wk-key-item'
   const glyph = document.createElement('span')
-  glyph.className = 'wk-key-glyph wk-key-agent wk-key-const'
-  item.append(glyph, document.createTextNode('constitution-driven'))
+  glyph.className = 'wk-key-glyph wk-key-spine'
+  item.append(glyph, document.createTextNode(SPINE_KEY_LABEL))
   key.append(item)
+
+  // NOTE — the constitution-driven axis used to live here, drawn as a broader
+  // nib on a slot whose work carried a `shuttle:` block. The curve has no
+  // channel left to carry it: height is volume, colour is you, and the spine is
+  // your messages. `RasterSlot.shuttle` is still recorded and still read by the
+  // tooltip, so the claim is not lost — only its ink is.
 
   return key
 }
@@ -1393,9 +1441,18 @@ export interface RasterSlot {
   /** Centre of the slot, 0…1 along the rail. */
   fraction: number
   kinds: SlotKind[]
-  /** Any kind in the slot is constitution-driven — the flag the tick's line
-   *  style reads. */
+  /** Any kind in the slot is constitution-driven — the flag the ink's weight
+   *  reads. */
   shuttle: boolean
+  /**
+   * Minutes from the rail's start in which YOU sent a message — the spines.
+   *
+   * Kept at minute resolution even though everything else in a slot is folded
+   * to the slot's four, because the spine's whole job is to say exactly when.
+   * A slot is a sampling grid for a smooth field; a spine is an event, and an
+   * event rounded to the nearest four minutes is an event misreported.
+   */
+  humanMinutes: number[]
   /** The transcripts behind this slot's minutes, deduped — what the hover asks
    *  `/api/v1/moment` for. Empty when nothing in the slot joined a recorded
    *  session, which is exactly when the words cannot be recovered. */
@@ -1423,6 +1480,7 @@ export function rasterSlots(
   // the words. Kept beside the kinds rather than inside them: a slot's words
   // are the slot's, whichever pigment the minute happened to be drawn in.
   const sourcesByIndex = new Map<number, (MomentSource | null)[]>()
+  const humanByIndex = new Map<number, number[]>()
   for (const b of buckets) {
     if (b.m > cutoffMs) continue
     // Notify draws nothing and says nothing: dropped here so it cannot conjure
@@ -1447,6 +1505,12 @@ export function rasterSlots(
     entry.peak = Math.max(entry.peak, b.n)
     if (!entry.where.includes(who.label)) entry.where.push(who.label)
     if (who.shuttle) entry.shuttle = true
+    if (b.k === 'attention') {
+      const minutes = humanByIndex.get(index)
+      const at = (b.m - bounds.startMs) / 60_000
+      if (minutes) minutes.push(at)
+      else humanByIndex.set(index, [at])
+    }
     let found = sourcesByIndex.get(index)
     if (!found) {
       found = []
@@ -1466,6 +1530,7 @@ export function rasterSlots(
       fraction: (index + 0.5) * RASTER_SLOT_MS / span,
       kinds: list,
       shuttle: list.some((k) => k.shuttle),
+      humanMinutes: humanByIndex.get(index) ?? [],
       sources: dedupeSources(sourcesByIndex.get(index) ?? []),
     })
   }
@@ -1503,35 +1568,35 @@ export function slotTip(slot: RasterSlot, words?: MomentWords): SlotTip {
 }
 
 /**
- * Ink the day's rasters: one tick per active slot per kind, layered
- * agent → attention so a human's steering always reads on top of the run it
- * interrupted. Opacity carries the run's weight, so a dense hour darkens
- * instead of merging into a block.
+ * A day's slots as the curve wants them: weights at slot centres, and the
+ * exact minutes you spoke in.
  *
- * A slot whose work is constitution-driven takes the heavier line
- * (`wk-ras-const`): same hue, same height hierarchy — those two already carry
- * the KIND — so the second axis has to be the stroke itself. See the key.
+ * The four-minute slot is the SAMPLING GRID and nothing more — the kernel is
+ * defined on minutes and does not care that its input arrived in fours, so a
+ * week row and a day lane are drawn by the same arithmetic at different
+ * resolutions rather than by two grammars that happen to look alike.
+ *
+ * `reply` counts toward the agent side, as it does on Day: the daemon emits it
+ * for a finished agent turn, which is the machine's half of the exchange.
  */
-function paintRaster(host: HTMLElement, slots: readonly RasterSlot[]): void {
-  // `reply` is absent on purpose. The daemon emits it alongside an `agent`
-  // bucket for the same minute, so that minute is already inked in the agent
-  // pigment; a second tick would darken the same instant twice and invent a
-  // distinction the eye should not be asked to make. Replies are read in the
-  // annotation, not in the raster.
-  const order: DrawnKind[] = ['agent', 'attention']
-  for (const kind of order) {
-    for (const slot of slots) {
-      const entry = slot.kinds.find((k) => k.kind === kind)
-      if (!entry) continue
-      const tick = document.createElement('span')
-      tick.className = `wk-ras wk-ras-${kind}${entry.shuttle ? ' wk-ras-const' : ''}`
-      tick.style.left = `${slot.fraction * 100}%`
-      // Agent runs carry a count; attention is a single event and reads at a
-      // fixed weight so a busy hour of typing doesn't out-shout them.
-      if (kind === 'agent') tick.style.opacity = String(0.38 + 0.47 * Math.min(1, entry.peak / 12))
-      host.append(tick)
+export function slotSamples(
+  slots: readonly RasterSlot[],
+  bounds: RailBounds,
+): { samples: ActivitySample[]; spines: number[] } {
+  const samples: ActivitySample[] = []
+  const spines: number[] = []
+  for (const slot of slots) {
+    let human = 0
+    let agent = 0
+    for (const entry of slot.kinds) {
+      if (entry.kind === 'attention') human += entry.count
+      else agent += entry.count
     }
+    const centre = (slot.startMs + RASTER_SLOT_MS / 2 - bounds.startMs) / 60_000
+    if (human > 0 || agent > 0) samples.push({ minute: centre, human, agent })
+    spines.push(...slot.humanMinutes)
   }
+  return { samples, spines }
 }
 
 registerView(new WeekView())

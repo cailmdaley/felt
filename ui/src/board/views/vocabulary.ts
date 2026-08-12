@@ -125,18 +125,28 @@ export function cardState(card: StateBearing): LifecycleState {
 // ── The activity key ─────────────────────────────────────────────────────────
 
 /**
- * What the raster pigments mean, in words. One phrasing across the board: Day
- * and Week both spend these pigments and read from this list, so the same hue
- * is never glossed two ways.
+ * What the activity curve's pigments mean, in words. One phrasing across the
+ * board: Day and Week both draw the same curve and read from this list, so the
+ * same hue is never glossed two ways.
+ *
+ * The curve's height is volume and its colour runs between these two poles —
+ * so the key names the POLES, not two separate marks. It says "toward you" and
+ * "toward the agents" in that spirit: a stretch of rail is rarely purely
+ * either, and a key promising two discrete inks would misdescribe a blend.
  *
  * The wire's kind `notify` is not here and draws nothing anywhere. A notify is
  * an idle nudge, not a state of the work; an agent truly blocked on you shows
- * as the GAP on a live lane, which no pigment improves on.
+ * as the DIP on a live lane, which no pigment improves on.
  */
 export const ACTIVITY_KEY_ITEMS: Array<{ kind: DrawnKind; label: string }> = [
   { kind: 'agent', label: 'agents working' },
-  { kind: 'attention', label: 'you steering' },
+  { kind: 'attention', label: 'you engaged' },
 ]
+
+/** The third mark on every curve: the exact minute a message of yours landed.
+ *  Not a pole of the colour scale and not a height — a discrete event drawn
+ *  over a continuous field, which is why it gets its own line in the key. */
+export const SPINE_KEY_LABEL = 'you sent a message'
 
 // ── Message tallies ──────────────────────────────────────────────────────────
 

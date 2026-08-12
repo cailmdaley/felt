@@ -129,11 +129,14 @@
 /* Two columns — label, rail — with one gridline layer spanning every lane
    row, so the hour rules run unbroken down the stack. */
 .kbn-day-chart {
-  /* The two pigments, declared once. The rail marks and the key glyphs both
-     read them, so a mark and the swatch that explains it cannot drift apart —
-     which would be the worst possible bug in a legend. */
-  --day-agent: rgba(40, 78, 180, 0.30);
-  --day-attention: #3F8278;
+  /* The two poles of the curve's colour scale, declared once. The key glyphs
+     read them and `densityCurve.ts` walks between the same two values, so a
+     mark and the swatch that explains it cannot drift apart — which would be
+     the worst possible bug in a legend. Kept in step with CURVE_AGENT and
+     CURVE_HUMAN there; those two carry the note on why the teal is a notch
+     deeper than the board's #3F8278 (the palette checks against parchment). */
+  --day-agent: #3D5BA0;
+  --day-attention: #0F8A74;
   display: grid;
   grid-template-columns: minmax(86px, 232px) 1fr;
   column-gap: 12px;
@@ -246,43 +249,20 @@ button.kbn-day-lanename:focus-visible {
 .kbn-day-rail {
   grid-column: 2;
   position: relative;
-  height: 15px;
+  height: 19px;
 }
-/* A hairline through the lane, so an hour with nothing in it still reads as
-   time that passed rather than as absence of a lane. */
+/* The ground the curve stands on. At the BOTTOM rather than through the middle,
+   because the curve grows from a baseline: a rule through the ink would read as
+   a zero line with negative values under it. An hour with nothing in it still
+   reads as time that passed rather than as absence of a lane. */
 .kbn-day-rail::before {
   content: '';
   position: absolute;
   left: 0;
   right: 0;
-  top: 50%;
+  bottom: 0;
   height: 0;
   border-top: 0.5px solid rgba(122, 111, 92, 0.20);
-}
-
-/* Two marks, two heights — the hierarchy IS the reading order:
-   wash (the machine) < attention (you). */
-
-/* Agent work: a pale cobalt wash, inset from the lane's full height. The
-   minimum width keeps a lone agent minute from rounding away to nothing —
-   a bucket is a minute, and a minute is well under a pixel at day scale. */
-.kbn-day-wash {
-  position: absolute;
-  top: 3px;
-  bottom: 3px;
-  min-width: 2px;
-  background: var(--day-agent);
-  border-radius: 1px;
-}
-
-/* You, steering: solid teal, a shade taller than the wash it sits inside. */
-.kbn-day-att {
-  position: absolute;
-  top: 1.5px;
-  bottom: 1.5px;
-  min-width: 2.5px;
-  background: var(--day-attention);
-  border-radius: 1px;
 }
 
 
@@ -360,25 +340,32 @@ button.kbn-day-lanename:focus-visible {
   gap: 5px;
   white-space: nowrap;
 }
-/* Each glyph is its mark in miniature, keeping the rails' height hierarchy —
-   the wash lies low and wide, the block stands taller, the tick is tallest. */
+/* The swatches. The two pigments are POLES of one scale rather than two marks,
+   so they are drawn the same size and shape — a size difference here would
+   claim a hierarchy the curve does not have. Each fades to nothing at its
+   outer edge, which is the one honest way a static swatch can say "and every
+   blend between these two". */
 .kbn-day-keyglyph {
   display: inline-block;
   flex: 0 0 auto;
   border-radius: 1px;
 }
-.kbn-day-key-wash {
+.kbn-day-key-agent {
   width: 15px;
-  height: 6px;
-  background: var(--day-agent);
+  height: 7px;
+  background: linear-gradient(90deg, rgba(61, 91, 160, 0.12), var(--day-agent));
 }
-/* Wider than the 2.5px mark it stands for: at rail scale a block is read by
-   its position among hundreds, but a swatch has one job — to show its colour —
-   and a 3px bar of teal at caption size does not do it. */
-.kbn-day-key-att {
-  width: 5px;
-  height: 10px;
-  background: var(--day-attention);
+.kbn-day-key-human {
+  width: 15px;
+  height: 7px;
+  background: linear-gradient(90deg, rgba(15, 138, 116, 0.12), var(--day-attention));
+}
+/* The spine, at its true weight and near its true height: a hairline of iron
+   gall. It is the only mark in the key that is not a pigment of the scale. */
+.kbn-day-key-spine {
+  width: 1px;
+  height: 12px;
+  background: var(--curve-spine);
 }
 
 /* ── The day, by fiber ───────────────────────────────────────────────────── */

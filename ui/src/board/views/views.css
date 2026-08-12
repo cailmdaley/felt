@@ -130,3 +130,58 @@
   opacity: 0.55;
   font-style: normal;
 }
+
+/* ── The activity curve ──────────────────────────────────────────────────────
+   Day and Week draw the same mark, so it is styled once here rather than twice
+   in the two view sheets. The grammar and its parameters live in
+   `densityCurve.ts`; this file only says how heavy each of its three channels
+   is drawn.
+
+   The `<svg>` is stretched to its rail with `preserveAspectRatio="none"`, so
+   every stroke below carries `vector-effect: non-scaling-stroke` in the markup
+   — otherwise a rail a thousand pixels wide would smear a hairline spine into a
+   ten-pixel band while leaving the edge stroke a thread. */
+.kbn-curve {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  /* The rails catch their own pointer and snap to the nearest real minute —
+     see `showBeatTip`. The ink must not intercept that, or a pointer over a
+     spine would be answering to a different element than a pointer beside it. */
+  pointer-events: none;
+  overflow: visible;
+}
+
+/* The body of the curve: a wash, never a block. Alpha low enough that two
+   lanes' worth of ink under a legend still reads as paper with pigment on it,
+   high enough that a dense hour is unmistakably darker than a quiet one. */
+.kbn-curve-area { opacity: 0.34; }
+
+/* The drawn edge — the mark that actually carries the colour. It is here
+   because a 34% wash is under 3:1 against parchment: the edge is a full-weight
+   1px line of the same gradient, so the pigment clears contrast on its own and
+   the wash beneath it is free to stay quiet. */
+.kbn-curve-edge {
+  stroke-width: 1;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  opacity: 0.9;
+}
+
+/* A message from you. Iron gall over everything: the rarest event on the rail
+   gets the highest-contrast mark on it (14.6:1 on parchment), which is the
+   whole reason it is a separate channel rather than a bump in the curve.
+
+   The WEIGHT is set per spine in the markup, not here — see `spineAlphas`.
+   A lone message draws at full strength; a crowd of them share the ink out
+   between themselves so a busy morning reads as texture instead of as a wall.
+   Which is why the stroke below is opaque: the alpha is the data. */
+.kbn-curve-spine {
+  stroke: var(--curve-spine);
+  stroke-width: 1;
+}
+
+/* Declared on the view host so both sheets and both keys read one value. */
+.kbn-view-page { --curve-spine: #1B1611; }

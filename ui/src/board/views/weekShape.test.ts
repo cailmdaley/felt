@@ -30,6 +30,7 @@ import {
   shiftWeekMonday,
   rasterSlots,
   rowWaitingOn,
+  slotSamples,
   slotTip,
   SLOT_NO_TEXT_NOTE,
   summarizeSpend,
@@ -1093,6 +1094,54 @@ describe('the raster tick knows whose minute it was', () => {
       origin(joined),
     )[0];
     expect(slot.sources).toEqual([]);
+  });
+});
+
+describe('slots as the curve wants them', () => {
+  // slotSamples is what WeekView hands to the density curve: one weighted
+  // sample per occupied slot (human = attention, agent = everything else,
+  // including reply), and spines at the exact attention minutes rasterSlots
+  // recorded — never at a slot's centre and never at a reply.
+  const bounds = railBounds('2026-08-12');
+  const bucket = (over: Partial<ActivityBucket> & { m: number }): ActivityBucket =>
+    ({ s: 'w-1', cwd: null, k: 'agent', n: 1, ...over });
+  const joined = buildJoinIndex([card({ id: 'fiber/notes', name: 'notes', runningWorker: 'w-1' })]);
+  const origin = (b: ActivityBucket) => originOf(joined, b);
+
+  it('puts attention on the human side and agent+reply on the agent side', () => {
+    const slots = rasterSlots(
+      [
+        bucket({ m: bounds.startMs, k: 'attention', n: 2 }),
+        bucket({ m: bounds.startMs, k: 'agent', n: 3 }),
+        bucket({ m: bounds.startMs + 60_000, k: 'reply' as ActivityBucket['k'], n: 5 }),
+      ],
+      bounds,
+      bounds.endMs,
+      origin,
+    );
+    const { samples } = slotSamples(slots, bounds);
+    expect(samples).toHaveLength(1);
+    expect(samples[0]).toMatchObject({ human: 2, agent: 8 });
+  });
+
+  it('spines the real attention minutes, not the slot centre and not a reply', () => {
+    // The slot spans minutes 0–3; the attention bucket lands at minute 1, well
+    // off the slot's centre (2). A reply in the same slot must add no spine.
+    const slots = rasterSlots(
+      [
+        bucket({ m: bounds.startMs + 60_000, k: 'attention' }),
+        bucket({ m: bounds.startMs + 2 * 60_000, k: 'reply' as ActivityBucket['k'] }),
+      ],
+      bounds,
+      bounds.endMs,
+      origin,
+    );
+    const { spines } = slotSamples(slots, bounds);
+    expect(spines).toEqual([1]);
+  });
+
+  it('samples an empty slot list into nothing', () => {
+    expect(slotSamples([], bounds)).toEqual({ samples: [], spines: [] });
   });
 });
 

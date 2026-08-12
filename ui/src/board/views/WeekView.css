@@ -24,7 +24,7 @@
      invisible until someone trusted it. (Borrowed from DayView, which pays for
      the same guarantee the same way.) */
   --wk-agent: #3D5BA0;
-  --wk-attention: #3F8278;
+  --wk-attention: #0F8A74;
 
   flex: 1 1 auto;
   min-height: 0;
@@ -222,7 +222,11 @@
   position: relative;
   align-self: stretch;
   margin: 5px 0;
-  /* The baseline the rasters stand on — the only rule that runs the full
+  /* Enough height that a curve is a shape rather than a bump. The rail was
+     sized by the tallest raster tick before; now it is sized by the mark it
+     holds. */
+  min-height: 22px;
+  /* The baseline the curves stand on — the only rule that runs the full
      width, so the seven rails read as one ruled sheet. */
   border-bottom: 0.5px solid rgba(122, 111, 92, 0.28);
 }
@@ -257,46 +261,11 @@
 }
 .wk-row-today .wk-rule { background: rgba(154, 123, 53, 0.22); }
 
-/* ── Rasters: one tick per active slot ────────────────────────────────────── */
-
-/* CENTRED on its `left`, because `RasterSlot.fraction` is the slot's MIDPOINT
-   and the hover snap measures the pointer against that same midpoint. Left-
-   anchored, every tick sat half its width late — tolerable at 1.5px, visible at
-   the 3px constitution nib, and enough to put the ink and its own tooltip
-   target on different pixels. */
-.wk-ras {
-  position: absolute;
-  bottom: 0;
-  width: 1.5px;
-  border-radius: 0.5px;
-  transform: translateX(-50%);
-}
-/* Agent work is the substrate — cobalt, and the only kind whose opacity
-   carries a weight, because only it comes in runs. Attention stands taller
-   because a human was there. */
-.wk-ras-agent {
-  height: 56%;
-  background: var(--wk-agent);
-}
-.wk-ras-attention {
-  height: 72%;
-  background: var(--wk-attention);
-  opacity: 0.85;
-}
-
-/* CONSTITUTION-DRIVEN work — the second axis, and it has to be the STROKE.
-   Hue already names the kind and height already names it a second time, so a
-   fiber carrying a `shuttle:` block is drawn with a broader, softer nib: 3px
-   instead of 1.5px, held back in alpha so the extra width does not also read as
-   extra intensity. The effect at week scale is the one asked for — an afternoon
-   of steady constitution work lays down a visible band, while the same minutes
-   of plain-fiber work stay a picket of hairlines. */
-.wk-ras-const {
-  width: 3px;
-  border-radius: 1px;
-}
-.wk-ras-agent.wk-ras-const { filter: saturate(0.92); }
-.wk-ras-attention.wk-ras-const { opacity: 0.7; }
+/* ── The activity curve ──────────────────────────────────────────────────────
+   The mark itself is Day's, styled once in `views.css`. A week row is a day at
+   a twentieth of the width, so the only thing this sheet has to say is that the
+   rail needs the height to hold a curve — and that its baseline is the rule the
+   seven rails already stand on. */
 
 /* Now — a thin gold-deep thread down today's rail. Everything to its right on
    this row is future, which is why the hollow marks may appear there. */
@@ -412,22 +381,27 @@
   align-items: flex-end;
   gap: 5px;
 }
-/* Miniatures of Week's own rasters, keeping the rail's height hierarchy — the
-   key teaches "taller means more human" while it teaches the colours. Wider
-   than the real 1.5px marks on purpose: at rail scale a tick is read by its
-   position among hundreds, but a swatch has one job, which is to show a hue. */
+/* The two POLES of the curve's colour, drawn identically because that is what
+   they are — one scale's ends, not two marks. Each fades out to its left, the
+   only way a static swatch can say "and every blend between these two". */
 .wk-key-glyph {
   display: inline-block;
-  width: 3px;
+  width: 13px;
+  height: 6px;
   border-radius: 0.5px;
   margin-bottom: 1px;
 }
-.wk-key-agent { height: 7px; background: var(--wk-agent); }
-.wk-key-attention { height: 9px; background: var(--wk-attention); opacity: 0.85; }
-/* The stroke axis, taught the way it is drawn: same hue and height as the agent
-   swatch beside it, wider nib. Read as a pair, the two swatches say "this is not
-   another colour, it is a weight". */
-.wk-key-const { width: 6px; border-radius: 1px; }
+.wk-key-agent { background: linear-gradient(90deg, rgba(61, 91, 160, 0.12), var(--wk-agent)); }
+.wk-key-attention {
+  background: linear-gradient(90deg, rgba(15, 138, 116, 0.12), var(--wk-attention));
+}
+/* The spine, at its own weight: a hairline of iron gall, the one mark in this
+   key that is an event rather than a pigment. */
+.wk-key-spine {
+  width: 1px;
+  height: 10px;
+  background: var(--curve-spine);
+}
 
 /* The hover tooltip itself lives in momentTip.css — Day draws the same slip of
    paper, so the styles moved out with the renderer. Only the box it is
