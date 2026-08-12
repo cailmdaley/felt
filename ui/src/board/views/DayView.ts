@@ -557,41 +557,18 @@ function minuteIndex(ms: number, win: DayWindow): number | null {
 }
 
 /**
- * The slugs a fiber answers to WHEN MATCHING A COMMIT PREFIX: the leaf of its
- * id, plus the first word of its display name — and nothing else.
+ * The slug a fiber answers to WHEN MATCHING A COMMIT PREFIX: the leaf of its
+ * id, and nothing else.
  *
  * Deliberately narrower than `cardPathSegments` (./sessionNames.js), which the
  * activity join uses. A `felt: …` commit prefix names the fiber whose leaf is
  * `felt`, not every fiber that happens to live under `felt/` — widening this
  * would make one parent directory swallow the narration of everything beneath
  * it.
- *
- * THE NAME'S FIRST WORD, because a fiber is routinely filed under a path leaf
- * that is a role (`ai-futures/tokenmaxxing/operator`) while its commits are
- * prefixed with what it is CALLED ("Vizier — at Cail's left hand" →
- * `vizier: …`). Matching the leaf alone dropped every one of those commits to
- * the no-lane group, on the page whose whole claim is that the two halves tell
- * the same day. Only the first token — the rest of a name is prose, not a
- * prefix — only when it survives slugification to three or more characters (a
- * one- or two-letter word is a collision waiting to happen, not an identity),
- * and only when it differs from the leaf.
- *
- * Widening cannot mis-attribute: `buildDayEntries` already refuses any slug
- * two lanes answer to (`laneBySlug` → null), so a new claim that collides
- * costs the collision, not a wrong card.
  */
 export function commitSlugsForCard(card: KanbanCard): string[] {
-  const slugs: string[] = []
   const tail = card.id.split('/').filter(Boolean).pop()
-  const leaf = tail ? tail.toLowerCase() : ''
-  if (leaf) slugs.push(leaf)
-  const first = (card.name ?? '').trim().split(/\s+/)[0] ?? ''
-  const alias = first
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-  if (alias.length >= 3 && alias !== leaf) slugs.push(alias)
-  return slugs
+  return tail ? [tail.toLowerCase()] : []
 }
 
 /**

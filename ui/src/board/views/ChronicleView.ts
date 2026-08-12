@@ -682,14 +682,11 @@ function slugify(text: string): string {
  *
  * Shuttle's commit subjects are `slug: what happened`, and the slug is nearly
  * always the fiber the work was about — so the look-back can open it. The match
- * is EXACT, against the id's last segment, the slugified name, or the name's
- * FIRST WORD (a fiber called "Vizier — at Cail's left hand" commits under
- * `vizier:`, and neither its leaf nor its whole slugified name says so; three
- * characters minimum, because a shorter word is a collision, not a name). It
- * must be UNIQUE: two fibers answering to one slug means the trail does not
- * identify either, and a link that opens the wrong card is worse than a word
- * that is not a link. Undefined in both the ambiguous and the unknown case;
- * the caller leaves the slug as plain text.
+ * is EXACT, against the id's last segment or the slugified name, and it must be
+ * UNIQUE: two fibers answering to one slug means the trail does not identify
+ * either, and a link that opens the wrong card is worse than a word that is not
+ * a link. Undefined in both the ambiguous and the unknown case; the caller
+ * leaves the slug as plain text.
  */
 export function resolveNarrationSlug<T extends { id: string; name: string }>(
   slug: string,
@@ -697,15 +694,8 @@ export function resolveNarrationSlug<T extends { id: string; name: string }>(
 ): T | undefined {
   const wanted = slugify(slug)
   if (!wanted) return undefined
-  const firstWord = (name: string) => {
-    const token = slugify(name.trim().split(/\s+/)[0] ?? '')
-    return token.length >= 3 ? token : ''
-  }
   const hits = cards.filter(
-    (c) =>
-      slugify(c.id.split('/').pop() ?? '') === wanted ||
-      slugify(c.name) === wanted ||
-      firstWord(c.name) === wanted,
+    (c) => slugify(c.id.split('/').pop() ?? '') === wanted || slugify(c.name) === wanted,
   )
   return hits.length === 1 ? hits[0] : undefined
 }
