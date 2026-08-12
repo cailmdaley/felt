@@ -628,6 +628,7 @@ export class KanbanModal {
       activity: (fromMs, toMs) => this.temporal.activity(fromMs, toMs),
       narration: (fromISO, toISO) => this.temporal.narration(fromISO, toISO),
       sessions: (sinceMs) => this.temporal.sessions(sinceMs),
+      commits: (sinceMs, untilMs) => this.temporal.commits(sinceMs, untilMs),
       moment: (session, fromMs, toMs, host) =>
         this.temporal.moment(session, fromMs, toMs, host),
       openCard: (cardId) => this.openCardById(cardId, cards),

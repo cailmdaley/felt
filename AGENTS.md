@@ -367,6 +367,28 @@ byte-for-byte by `cmd/hook_event_test.go`, parsed by both Elixir readers in
 `test/shuttle/events_parity_test.exs`. Each host's daemon tails its own host's
 `~/.shuttle/events.jsonl`.
 
+### The two ledgers — `sessions.jsonl` and `commits.jsonl`
+
+Beside the event stream sit two append-only ledgers, both read by the temporal
+views as **join rung 0** — the structural pairing that replaces an inference.
+
+- `~/.shuttle/sessions.jsonl` (`lib/shuttle/session_ledger.ex`) pairs a fiber
+  with the harness session dispatched against it. **The daemon writes it**, at
+  dispatch / claim / resume.
+- `~/.shuttle/commits.jsonl` (`lib/shuttle/commit_ledger.ex`) pairs a commit
+  with the session that made it: one line per commit carrying `sha`, `subject`,
+  `repo`, the `--shortstat` counts, and `session` / `tmux` / `cwd`. It replaces
+  parsing a fiber name out of a commit subject. **The hook writes it** —
+  `~/loom/hooks/shuttle-hook.sh` on `PostToolUse` for a Bash call that ran a
+  `git commit` — because the pairing is only knowable inside the session's own
+  process tree. The daemon is a reader only. Coverage is therefore partial:
+  commits made before the hook, outside a session, or on a host whose events
+  come from the `felt hook event` writer instead are absent, and readers fall
+  back to the git log, deduping on `sha`.
+
+Both are served host-scoped (`/api/v1/sessions`, `/api/v1/commits`) with a
+cross-host `/composite` sibling fed by `Shuttle.RemoteTemporalRegistry`.
+
 **Remote hosts are configured in `~/.config/felt/remotes.json`** (`felt shuttle
 remotes list|add|rm|path`). Each entry names an ssh alias and a local forwarded
 port; the daemon reaches a remote's API over that tunnel. How a given host

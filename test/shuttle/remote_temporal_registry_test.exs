@@ -1,6 +1,6 @@
 defmodule Shuttle.RemoteTemporalRegistryTest do
   @moduledoc """
-  The cross-host temporal cache: three feeds per remote, last-good data that
+  The cross-host temporal cache: five feeds per remote, last-good data that
   survives both a failed poll and a daemon restart.
 
   Driven synchronously (`auto_poll: false` + `refresh_now/1`) against a scripted
@@ -64,6 +64,17 @@ defmodule Shuttle.RemoteTemporalRegistryTest do
   @bucket %{"m" => 1_770_000_000_000, "s" => nil, "cwd" => "/repo", "k" => "agent", "n" => 3}
   @record %{"fiber" => "work/paper", "host" => "candide", "at" => 1_770_000_000_000}
   @commit %{"iso" => "2026-02-02T02:40:00Z", "subject" => "paper: a section"}
+  @ledgered_commit %{
+    "at" => 1_770_000_000_000,
+    "kind" => "commit",
+    "sha" => "79def80887a45cfdaea4e23a6e0444df808e908a",
+    "subject" => "paper: a section",
+    "repo" => "/home/me/paper",
+    "files" => 1,
+    "insertions" => 4,
+    "deletions" => 0,
+    "session" => "s0"
+  }
   @spend %{
     "fiber" => "work/paper",
     "session" => "s0",
@@ -79,6 +90,11 @@ defmodule Shuttle.RemoteTemporalRegistryTest do
   defp script(:full) do
     MockClient.set("/api/v1/activity", {:ok, Jason.encode!(%{"buckets" => [@bucket]})})
     MockClient.set("/api/v1/sessions", {:ok, Jason.encode!(%{"records" => [@record]})})
+
+    MockClient.set(
+      "/api/v1/commits",
+      {:ok, Jason.encode!(%{"records" => [@ledgered_commit]})}
+    )
     MockClient.set("/api/v1/narration", {:ok, Jason.encode!(%{"commits" => [@commit]})})
     MockClient.set("/api/v1/spend", {:ok, Jason.encode!(%{"sessions" => [@spend]})})
   end
@@ -111,8 +127,9 @@ defmodule Shuttle.RemoteTemporalRegistryTest do
     {pid, name}
   end
 
-  describe "caching the four feeds" do
-    test "a successful poll caches activity, sessions, narration, and spend", %{dir: dir} do
+  describe "caching the five feeds" do
+    test "a successful poll caches activity, sessions, commits, narration, and spend",
+         %{dir: dir} do
       {_pid, name} = start_registry(dir)
       :ok = RemoteTemporalRegistry.refresh_now(name)
 
@@ -120,6 +137,7 @@ defmodule Shuttle.RemoteTemporalRegistryTest do
 
       assert entry.activity_buckets == [@bucket]
       assert entry.sessions == [@record]
+      assert entry.commits == [@ledgered_commit]
       assert entry.narration_commits == [@commit]
       assert entry.spend == [@spend]
       assert entry.last_error == nil
@@ -156,6 +174,7 @@ defmodule Shuttle.RemoteTemporalRegistryTest do
       entry = RemoteTemporalRegistry.entries(name)["candide"]
       assert entry.activity_buckets == [@bucket]
       assert entry.sessions == [@record]
+      assert entry.commits == [@ledgered_commit]
       assert entry.narration_commits == [@commit]
       assert entry.spend == [@spend]
       assert entry.last_error == :not_set
@@ -223,6 +242,7 @@ defmodule Shuttle.RemoteTemporalRegistryTest do
       entry = RemoteTemporalRegistry.entries(restarted)["candide"]
       assert entry.activity_buckets == [@bucket]
       assert entry.sessions == [@record]
+      assert entry.commits == [@ledgered_commit]
       assert entry.narration_commits == [@commit]
       # Freshness is INHERITED, not reset: the entry reads "last seen at T",
       # where T is when the data was actually fetched, so it ages honestly from

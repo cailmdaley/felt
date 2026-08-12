@@ -5,7 +5,9 @@ import {
   civilDaysToInstants,
   createTemporalFetchers,
   isOriginStale,
+  lookupSession,
   lookupTmux,
+  parseCommits,
   parseSessions,
   staleOrigins,
   type SessionRecord,
@@ -441,5 +443,165 @@ describe('cross-host tmux join', () => {
 
   it('is undefined for a nameless session', () => {
     expect(lookupTmux(index.byTmux, 'ada', null)).toBeUndefined()
+  })
+})
+
+// ── The commit ledger ────────────────────────────────────────────────────────
+
+const SHA_A = 'a'.repeat(40)
+const SHA_B = 'b'.repeat(40)
+
+describe('the commits wire form', () => {
+  it('reads the composite first, sending both instants', async () => {
+    const calls = captureFetch(ok({ host: 'ada', records: [], origins: {} }))
+    const result = await createTemporalFetchers('').commits(1_000, 9_000)
+    expect(calls[0].url).toContain('/api/v1/commits/composite')
+    expect(calls[0].params.get('since_ms')).toBe('1000')
+    expect(calls[0].params.get('until_ms')).toBe('9000')
+    expect(result.records).toEqual([])
+  })
+
+  it('falls back to the plain route ONCE when the composite is absent', async () => {
+    const calls = routedFetch([
+      ['/commits?', ok({ host: 'ada', records: [], origins: {} })],
+    ])
+    const fetchers = createTemporalFetchers('')
+    await fetchers.commits(1, 2)
+    await fetchers.commits(3, 4)
+    // Probe, fallback, then the second window goes straight to the plain route.
+    expect(calls.map((c) => c.url.includes('composite'))).toEqual([true, false, false])
+  })
+
+  it('degrades to an empty ledger rather than rejecting', async () => {
+    captureFetch(() => new Response('nonsense', { status: 500 }))
+    await expect(createTemporalFetchers('').commits(1, 2)).resolves.toEqual({
+      host: '',
+      records: [],
+      origins: {},
+    })
+  })
+})
+
+describe('parseCommits', () => {
+  const empty = { host: '', records: [], origins: {} }
+  const wire = (over: Record<string, unknown> = {}) => ({
+    at: 1_786_203_000_000,
+    kind: 'commit',
+    sha: SHA_A,
+    subject: 'felt: wrote it down',
+    repo: '/home/ada/dev/felt',
+    files: 3,
+    insertions: 42,
+    deletions: 7,
+    session: 'sess-1',
+    tmux: 'run-shuttle',
+    cwd: '/home/ada/dev/felt',
+    host: 'ada',
+    ...over,
+  })
+
+  it('reads a whole record off the wire', () => {
+    const { records } = parseCommits({ host: 'ada', records: [wire()] }, empty)
+    expect(records).toEqual([
+      {
+        at: 1_786_203_000_000,
+        sha: SHA_A,
+        subject: 'felt: wrote it down',
+        repo: '/home/ada/dev/felt',
+        files: 3,
+        insertions: 42,
+        deletions: 7,
+        session: 'sess-1',
+        tmux: 'run-shuttle',
+        cwd: '/home/ada/dev/felt',
+        host: 'ada',
+      },
+    ])
+  })
+
+  it('drops a record with no readable sha — an identity is what dedupe needs', () => {
+    const { records } = parseCommits(
+      { host: 'ada', records: [wire({ sha: null }), wire({ sha: 'abc123' }), wire()] },
+      empty,
+    )
+    expect(records.map((r) => r.sha)).toEqual([SHA_A])
+  })
+
+  it('lower-cases a sha, so two spellings of one commit are one commit', () => {
+    const { records } = parseCommits(
+      { host: 'ada', records: [wire({ sha: SHA_A.toUpperCase() })] },
+      empty,
+    )
+    expect(records[0].sha).toBe(SHA_A)
+  })
+
+  it('keeps an empty subject but drops a missing one', () => {
+    const { records } = parseCommits(
+      { host: 'ada', records: [wire({ subject: '' }), wire({ sha: SHA_B, subject: 7 })] },
+      empty,
+    )
+    expect(records.map((r) => r.subject)).toEqual([''])
+  })
+
+  it('drops a record announcing some other kind', () => {
+    const { records } = parseCommits(
+      { host: 'ada', records: [wire({ kind: 'push' }), wire({ kind: null })] },
+      empty,
+    )
+    expect(records).toHaveLength(1)
+  })
+
+  it('reads a missing count as zero, never as NaN', () => {
+    const { records } = parseCommits(
+      { host: 'ada', records: [wire({ files: null, insertions: 'lots', deletions: undefined })] },
+      empty,
+    )
+    expect(records[0]).toMatchObject({ files: 0, insertions: 0, deletions: 0 })
+  })
+
+  it('stamps an unstamped record with the response host', () => {
+    const { records } = parseCommits({ host: 'ada', records: [wire({ host: null })] }, empty)
+    expect(records[0].host).toBe('ada')
+  })
+
+  it('synthesizes a local origin when the body carries no block', () => {
+    const { origins } = parseCommits({ host: 'ada', records: [] }, empty)
+    expect(origins).toEqual({ ada: { kind: 'local', stale: false } })
+  })
+
+  it('falls back whole on a body that is not a ledger', () => {
+    expect(parseCommits('nope', empty)).toBe(empty)
+    expect(parseCommits({ host: 'ada', records: 'nope' }, empty).records).toEqual([])
+  })
+})
+
+describe('lookupSession', () => {
+  const index = buildSessionIndex([
+    rec({ session: 'sess-ada', tmux: 'run-shuttle', host: 'ada' }),
+    rec({ session: 'sess-loose', tmux: null, host: null, fiber: 'work/loose' }),
+  ])
+
+  it('resolves a session id to its pairing', () => {
+    expect(lookupSession(index.bySession, 'ada', 'sess-ada')?.fiber).toBe('work/a/run')
+  })
+
+  it('refuses a pairing recorded on another host', () => {
+    expect(lookupSession(index.bySession, 'cineca', 'sess-ada')).toBeUndefined()
+  })
+
+  it('reads past a difference of case in the host name', () => {
+    expect(lookupSession(index.bySession, 'ADA', 'sess-ada')?.fiber).toBe('work/a/run')
+  })
+
+  it('falls back to the id alone when either side says nothing', () => {
+    // An asker that cannot say where it ran, and a ledger line written before
+    // host stamping: both are the pre-fleet case, and both still join.
+    expect(lookupSession(index.bySession, null, 'sess-ada')?.fiber).toBe('work/a/run')
+    expect(lookupSession(index.bySession, 'cineca', 'sess-loose')?.fiber).toBe('work/loose')
+  })
+
+  it('is undefined for no session and for an unknown one', () => {
+    expect(lookupSession(index.bySession, 'ada', null)).toBeUndefined()
+    expect(lookupSession(index.bySession, 'ada', 'sess-nope')).toBeUndefined()
   })
 })

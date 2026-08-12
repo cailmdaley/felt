@@ -860,6 +860,10 @@ const MOCK_TEMPORAL: TemporalFetchers = {
       records: MOCK_SESSIONS.filter((r) => r.at >= sinceMs).sort((a, b) => a.at - b.at),
       origins: MOCK_ORIGINS,
     }),
+  // The harness has no commit hook behind it, so the ledger is empty and the
+  // views fall to their prefix path — which is the state every pre-hook day of
+  // real history is in, and so worth being the offline board's default.
+  commits: () => Promise.resolve({ host: LOCAL_HOST, records: [], origins: MOCK_ORIGINS }),
 }
 
 /**

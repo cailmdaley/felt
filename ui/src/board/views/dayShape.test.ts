@@ -13,17 +13,21 @@ import type { KanbanCard } from '../KanbanTypes.js'
 import type {
   ActivityBucket,
   ActivityResult,
+  CommitRecord,
   NarrationCommit,
+  SessionPairing,
   TemporalOrigins,
 } from './TemporalData.js'
 import { tmuxJoinKey } from './TemporalData.js'
 import {
   buildDayEntries,
   buildDayLanes,
+  buildLedgerNarration,
   buildDayModel,
   buildDayPreviews,
   buildStillAhead,
   closureMark,
+  commitDedupeKey,
   commitsOnRail,
   dayTotals,
   dayWindow,
@@ -36,12 +40,15 @@ import {
   groupCommitsBySlug,
   isLivePresent,
   laneChip,
+  ledgerOnRail,
   mergeMinuteRuns,
   narrationRange,
   railTicks,
   resolveDayISO,
   stepTarget,
   tickStepMinutes,
+  unclaimedCommits,
+  type DayEntry,
   type DayLane,
 } from './DayView.js'
 import { cardState } from './vocabulary.js'
@@ -1585,5 +1592,298 @@ describe('the day, by fiber', () => {
     expect(firstSentence('No full stop here')).toBe('No full stop here')
     expect(firstSentence('Ends in a question? Then more.')).toBe('Ends in a question?')
     expect(firstSentence(undefined)).toBe('')
+  })
+})
+
+// ── The commit ledger — rung 0 of the narration ladder ───────────────────────
+
+describe('attributing a commit by the session that made it', () => {
+  // The prefix path reads `<slug>: ` off the subject — a convention a human
+  // types. The ledger records the harness session AT COMMIT TIME, so the fiber
+  // is a fact. These cover the join, the dedupe against the store log, and the
+  // diff figures only the ledger can know.
+
+  const SHA = (n: number): string => String(n).padStart(40, '0')
+  const HARNESS = 'a1b2c3d4-0000-4000-8000-000000000001'
+
+  const pairing = (
+    fiber: string,
+    over: Partial<SessionPairing> = {},
+  ): SessionPairing => ({ fiber, uid: null, session: HARNESS, host: 'ada-workstation', ...over })
+
+  const bySession = (...pairs: [string, SessionPairing][]): Map<string, SessionPairing> =>
+    new Map(pairs)
+
+  const record = (over: Partial<CommitRecord> = {}): CommitRecord => ({
+    at: WIN.startMs + 60_000,
+    sha: SHA(1),
+    subject: 'bmodes-2d: ran the nulls',
+    repo: '/home/ada/work',
+    files: 1,
+    insertions: 0,
+    deletions: 0,
+    session: HARNESS,
+    tmux: 'run-shuttle',
+    cwd: '/home/ada/work',
+    host: 'ada-workstation',
+    ...over,
+  })
+
+  const lanes = (): DayLane[] =>
+    buildDayLanes(activity([bucket(60, 'agent', SESSION)]), [card()], WIN)
+
+  const narrate = (
+    records: CommitRecord[],
+    commits: NarrationCommit[] = [],
+    index = bySession([HARNESS, pairing('work/spt3g_papers/bmodes-2d')]),
+    cards: KanbanCard[] = [card()],
+  ): DayEntry[] => {
+    const ledger = buildLedgerNarration(ledgerOnRail(records, WIN), cards, index)
+    return buildDayEntries(
+      unclaimedCommits(commitsOnRail(commits, WIN), ledger),
+      lanes(),
+      cards,
+      WIN,
+      NOW_IN_RAIL,
+      ledger,
+    )
+  }
+
+  it('names the fiber from the session, with nothing to read off the subject', () => {
+    // No `slug: ` at all — the whole case the ledger exists for.
+    const entries = narrate([record({ subject: 'ran the nulls' })])
+    expect(entries).toHaveLength(1)
+    expect(entries[0]).toMatchObject({
+      title: 'Run the 2D B-mode null tests',
+      body: 'ran the nulls',
+      cardId: 'work/spt3g_papers/bmodes-2d',
+    })
+    expect(entries[0].fallback).toBeUndefined()
+    expect(entries[0].stats?.commits).toBe(1)
+  })
+
+  it('outranks a prefix naming a different fiber', () => {
+    // The subject says `photoz: `; the session says this fiber. The record wins,
+    // and the mistyped prefix does not open a second entry for a lane-less slug.
+    const entries = narrate([record({ subject: 'photoz: ran the nulls' })])
+    expect(entries.map((e) => e.key)).toEqual(['lane:fiber:work/spt3g_papers/bmodes-2d'])
+    expect(entries[0].body).toBe('ran the nulls')
+  })
+
+  it('resolves through the pairing’s ULID when the fiber path has moved', () => {
+    const entries = narrate(
+      [record({ subject: 'ran the nulls' })],
+      [],
+      bySession([HARNESS, pairing('some/old/path', { uid: FIBER_ULID.toLowerCase() })]),
+    )
+    expect(entries[0].cardId).toBe('work/spt3g_papers/bmodes-2d')
+  })
+
+  it('refuses a pairing recorded on another host', () => {
+    // Two daemons, one ledger merged by the composite. A commit recorded on
+    // cineca must not read ada's pairing — it falls to the prefix path, which
+    // still narrates it because the subject happens to carry the slug.
+    const entries = narrate([record({ host: 'cineca-login-02', subject: 'ran the nulls' })])
+    expect(entries[0].fallback).toBe(true)
+    expect(entries[0].stats?.commits).toBe(0)
+  })
+
+  it('falls THROUGH a pairing for a fiber this board does not carry', () => {
+    // Attributing to an absent card would delete the commit from the page. It
+    // claims nothing, so the store log's copy still narrates it by prefix.
+    const entries = narrate(
+      [record()],
+      [{ iso: new Date(WIN.startMs + 60_000).toISOString(), subject: 'bmodes-2d: ran the nulls' }],
+      bySession([HARNESS, pairing('not/on/this/board')]),
+    )
+    expect(entries[0].body).toBe('ran the nulls')
+    expect(entries[0].stats?.commits).toBe(1)
+  })
+
+  it('leaves a session-less commit to the prefix path', () => {
+    // `git commit` typed by hand, outside any harness: the subject a human
+    // wrote really is the best evidence there is.
+    const entries = narrate(
+      [record({ session: null })],
+      [{ iso: new Date(WIN.startMs + 60_000).toISOString(), subject: 'bmodes-2d: ran the nulls' }],
+    )
+    expect(entries[0].body).toBe('ran the nulls')
+    expect(entries[0].stats?.commits).toBe(1)
+  })
+
+  it('cuts the ledger to the rail at both ends', () => {
+    const inside = record({ at: WIN.startMs })
+    expect(ledgerOnRail([inside], WIN)).toEqual([inside])
+    expect(ledgerOnRail([record({ at: WIN.startMs - 1 })], WIN)).toEqual([])
+    expect(ledgerOnRail([record({ at: WIN.endMs })], WIN)).toEqual([])
+    expect(ledgerOnRail([record({ at: WIN.endMs - 1 })], WIN)).toHaveLength(1)
+  })
+
+  it('narrates a commit ONCE when both sources know it, matching on sha', () => {
+    const iso = new Date(WIN.startMs + 60_000).toISOString()
+    const entries = narrate(
+      [record({ sha: SHA(9), subject: 'ran the nulls' })],
+      // A store log that stamps shas: the exact match, and the reason the
+      // subject fallback is only a fallback.
+      [{ iso, subject: 'bmodes-2d: ran the nulls', sha: SHA(9) }],
+    )
+    expect(entries[0].body).toBe('ran the nulls')
+    expect(entries[0].stats?.commits).toBe(1)
+  })
+
+  it('narrates it once on subject alone, which is all the store log carries', () => {
+    const iso = new Date(WIN.startMs + 60_000).toISOString()
+    const entries = narrate(
+      [record({ subject: 'bmodes-2d: ran the nulls' })],
+      [{ iso, subject: 'bmodes-2d: ran the nulls' }],
+    )
+    expect(entries[0].body).toBe('ran the nulls')
+    expect(entries[0].stats?.commits).toBe(1)
+  })
+
+  it('keeps a genuinely different commit the store log alone knows', () => {
+    const iso = new Date(WIN.startMs + 60_000).toISOString()
+    const entries = narrate(
+      [record({ subject: 'bmodes-2d: ran the nulls' })],
+      [
+        { iso, subject: 'bmodes-2d: ran the nulls' },
+        { iso, subject: 'bmodes-2d: fixed the mask' },
+      ],
+    )
+    expect(entries[0].body).toBe('ran the nulls; fixed the mask')
+    expect(entries[0].stats?.commits).toBe(2)
+  })
+
+  it('counts one commit once when the composite serves it twice', () => {
+    // A remote's cached read overlapping the local one. A sha is a sha on
+    // every host, so the second copy is the same commit.
+    const entries = narrate([
+      record({ subject: 'ran the nulls', insertions: 10, deletions: 2 }),
+      record({ subject: 'ran the nulls', insertions: 10, deletions: 2, host: 'cineca-login-02' }),
+    ])
+    expect(entries[0].stats).toMatchObject({ commits: 1, insertions: 10, deletions: 2 })
+  })
+
+  it('sums the diff over that fiber’s day, and nobody else’s', () => {
+    const other = '01KVBR9A6VP2Q4R7S3T8W5XYHK'
+    const otherSession = 'b2c3d4e5-0000-4000-8000-000000000002'
+    const cards = [card(), card({ id: 'a/second', uid: other, name: 'Second' })]
+    const twoLanes = buildDayLanes(
+      activity([
+        bucket(60, 'agent', SESSION),
+        bucket(61, 'agent', `second-${other}-shuttle`),
+      ]),
+      cards,
+      WIN,
+    )
+    const ledger = buildLedgerNarration(
+      [
+        record({ sha: SHA(1), subject: 'ran the nulls', insertions: 42, deletions: 7 }),
+        record({ sha: SHA(2), subject: 'fixed the mask', insertions: 8, deletions: 0 }),
+        record({
+          sha: SHA(3),
+          subject: 'shipped it',
+          session: otherSession,
+          insertions: 100,
+          deletions: 100,
+        }),
+      ],
+      cards,
+      bySession(
+        [HARNESS, pairing('work/spt3g_papers/bmodes-2d')],
+        [otherSession, pairing('a/second', { session: otherSession })],
+      ),
+    )
+    const entries = buildDayEntries([], twoLanes, cards, WIN, NOW_IN_RAIL, ledger)
+    const mine = entries.find((e) => e.cardId === 'work/spt3g_papers/bmodes-2d')
+    expect(mine?.body).toBe('ran the nulls; fixed the mask')
+    expect(mine?.stats).toMatchObject({ commits: 2, insertions: 50, deletions: 7 })
+    expect(entries.find((e) => e.cardId === 'a/second')?.stats).toMatchObject({
+      insertions: 100,
+      deletions: 100,
+    })
+  })
+
+  it('leaves the diff figures absent when no ledger covers the day', () => {
+    // Pre-hook history: the page reads exactly as it did before the ledger
+    // existed, with no `+0 −0` where a real figure would be.
+    const entries = buildDayEntries(
+      [{ iso: new Date(WIN.startMs).toISOString(), subject: 'bmodes-2d: ran the nulls' }],
+      lanes(),
+      [card()],
+      WIN,
+      NOW_IN_RAIL,
+    )
+    expect(entries[0].stats?.insertions).toBeUndefined()
+    expect(formatEntryStats(entries[0].stats!)).toBe('agents 1m · 1 commit')
+  })
+
+  it('carries the whole ladder through buildDayModel', () => {
+    const model = buildDayModel(
+      DAY,
+      activity([bucket(60, 'agent', SESSION)]),
+      // The store log's copy of the same commit, by subject.
+      [{ iso: new Date(WIN.startMs + 60_000).toISOString(), subject: 'ran the nulls' }],
+      [card()],
+      '',
+      NOW_IN_RAIL,
+      undefined,
+      undefined,
+      {
+        records: [record({ subject: 'ran the nulls', insertions: 42, deletions: 7 })],
+        bySession: bySession([HARNESS, pairing('work/spt3g_papers/bmodes-2d')]),
+        origins: { 'cineca-login-02': { kind: 'remote', stale: true } },
+      },
+    )
+    expect(model.entries).toHaveLength(1)
+    expect(model.entries[0].body).toBe('ran the nulls')
+    expect(model.entries[0].stats).toMatchObject({ commits: 1, insertions: 42, deletions: 7 })
+    // The commit feed's freshness merges in beside activity's and the ledger's.
+    expect(model.origins['cineca-login-02'].stale).toBe(true)
+  })
+
+  it('is inert on a daemon that serves no commit ledger', () => {
+    const withOut = buildDayModel(
+      DAY,
+      activity([bucket(60, 'agent', SESSION)]),
+      [{ iso: new Date(WIN.startMs).toISOString(), subject: 'bmodes-2d: ran the nulls' }],
+      [card()],
+      '',
+      NOW_IN_RAIL,
+    )
+    expect(withOut.entries[0].body).toBe('ran the nulls')
+    expect(withOut.entries[0].stats?.commits).toBe(1)
+  })
+
+  it('looks a store-log commit up by sha when it has one, by subject when not', () => {
+    // The ledger claims BOTH forms, so a log line matches on whichever it can
+    // offer — and today `git log` offers only the subject.
+    expect(commitDedupeKey({ sha: SHA(4), subject: 'x: y' })).toBe(`sha:${SHA(4)}`)
+    expect(commitDedupeKey({ subject: '  x: y  ' })).toBe('subject:x: y')
+    expect(commitDedupeKey({ sha: null, subject: 'x: y' })).toBe('subject:x: y')
+  })
+})
+
+describe('the diff clause', () => {
+  it('appends to the muted stat register, both sides', () => {
+    expect(formatEntryStats({ messages: 0, agent: 0, commits: 3, insertions: 42, deletions: 7 }))
+      .toBe('3 commits · +42 −7')
+  })
+
+  it('sets a true minus sign, not a hyphen', () => {
+    expect(formatEntryStats({ messages: 0, agent: 0, commits: 0, deletions: 7 })).toBe('−7')
+  })
+
+  it('drops a side that is zero, and the clause when both are', () => {
+    expect(formatEntryStats({ messages: 0, agent: 0, commits: 1, insertions: 42, deletions: 0 }))
+      .toBe('1 commit · +42')
+    expect(formatEntryStats({ messages: 0, agent: 0, commits: 1, insertions: 0, deletions: 0 }))
+      .toBe('1 commit')
+  })
+
+  it('says nothing at all when the ledger does not cover the day', () => {
+    expect(formatEntryStats({ messages: 2, agent: 5, commits: 1 })).toBe(
+      'you 2 · agents 5m · 1 commit',
+    )
   })
 })

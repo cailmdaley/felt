@@ -241,6 +241,16 @@ defmodule Shuttle.Remote do
     base(url) <> "/api/v1/narration?from_ms=#{from_ms}&to_ms=#{to_ms}"
   end
 
+  @doc """
+  The full `GET /api/v1/commits` URL for this remote, from `since_ms`. One line
+  per commit, so the hub asks for the whole ledger the way it does for
+  `/sessions` — the window is applied when the composite serves it.
+  """
+  @spec commits_url(t(), integer()) :: String.t()
+  def commits_url(%__MODULE__{url: url}, since_ms) when is_integer(since_ms) do
+    base(url) <> "/api/v1/commits?since_ms=#{since_ms}"
+  end
+
   defp base(url), do: String.trim_trailing(url, "/")
 
   @doc """

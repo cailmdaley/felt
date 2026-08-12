@@ -28,6 +28,7 @@
 import type { KanbanCard, KanbanResponse } from '../KanbanTypes.js'
 import type {
   ActivityResult,
+  CommitsResult,
   MomentResult,
   NarrationResult,
   SessionsResult,
@@ -76,6 +77,18 @@ export interface ViewContext {
    * that adopts it must still keep its existing rungs.
    */
   sessions(sinceMs: number): Promise<SessionsResult>
+  /**
+   * The FLEET's COMMIT ledger over `[sinceMs, untilMs]`, both instants — every
+   * commit the hook recorded, each carrying the harness session that made it.
+   *
+   * This is what retires prefix-parsing as a view's primary attribution: join
+   * `record.session` through `buildSessionIndex(...).bySession` (with
+   * `lookupSession`, host-scoped) and the fiber is a recorded fact rather than
+   * a reading of the subject line. It covers only commits made since the hook
+   * existed, so a view must keep its prefix path for older history and dedupe
+   * the two by `sha`.
+   */
+  commits(sinceMs: number, untilMs: number): Promise<CommitsResult>
   /**
    * The WORDS a session spoke inside a window — what a hovered mark was, in the
    * conversation's own language, read from the harness transcript on the host

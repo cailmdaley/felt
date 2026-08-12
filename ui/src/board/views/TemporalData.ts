@@ -1,11 +1,20 @@
 /**
  * TemporalData — the read plane the temporal views share.
  *
- * Three daemon feeds, all read-only and all OPTIONAL:
+ * Four daemon feeds, all read-only and all OPTIONAL:
  *
  *   activity   coarse per-minute activity buckets (what the machine was doing)
  *   narration  the commit trail over a window (what the work says it did)
  *   sessions   the fiber↔session ledger (whose work a minute was)
+ *   commits    the commit↔session ledger (whose work a COMMIT was)
+ *
+ * `narration` and `commits` describe the same events from opposite ends.
+ * Narration reads `git log` at read time — it covers all history and knows
+ * nothing about who made a commit beyond what the subject line says. The commit
+ * ledger is written by a hook at commit time — it knows the session exactly and
+ * so the fiber exactly, and it covers only what happened after the hook
+ * existed. A view wanting attribution reads the ledger first and falls back to
+ * the subject line, deduping on sha.
  *
  * Each is asked for CROSS-HOST FIRST — `/api/v1/<feed>/composite`, which serves
  * this daemon's live read concatenated with every remote's cached read, each
@@ -75,6 +84,16 @@ export interface NarrationCommit {
   subject: string
   /** The daemon whose store the commit came from; absent when unstamped. */
   host?: string | null
+  /**
+   * The commit's own sha, when the store log carries one.
+   *
+   * `Shuttle.Narration` parses `<iso><sep><subject>` and stamps no sha today,
+   * so this is absent on every live line — it is read here because the sha is
+   * the only exact identity a store-log commit and a LEDGER commit can be
+   * matched on, and a daemon that starts emitting it should be believed
+   * without a second migration. See `dedupeAgainstLedger` in DayView.
+   */
+  sha?: string | null
 }
 
 /**
@@ -191,6 +210,49 @@ export interface SessionsResult {
   origins?: TemporalOrigins
 }
 
+/**
+ * One line of the COMMIT LEDGER — a commit and the harness session that made
+ * it, as the commit hook wrote it.
+ *
+ * This is the record that retires prefix-parsing as the primary attribution.
+ * A `slug: ` prefix is a convention a human types and can mistype; `session` is
+ * the id the harness was running under at the moment of the commit, so joining
+ * it through the session ledger names the fiber as a FACT rather than as a
+ * reading of the subject line. The prefix path stays as the fallback, because
+ * every commit made before the hook existed has no ledger line at all.
+ *
+ *   at          epoch-ms the commit was recorded
+ *   sha         the commit's 40-hex sha — the identity the dedupe rests on
+ *   subject     the commit subject, verbatim
+ *   repo        absolute path of the repo root, or null
+ *   files       files touched
+ *   insertions  lines added
+ *   deletions   lines removed
+ *   session     harness session UUID, or null for a commit made by hand
+ *   tmux        tmux session name, or null
+ *   cwd         where `git commit` ran
+ *   host        the daemon the record came from (the composite stamps every one)
+ */
+export interface CommitRecord {
+  at: number
+  sha: string
+  subject: string
+  repo: string | null
+  files: number
+  insertions: number
+  deletions: number
+  session: string | null
+  tmux: string | null
+  cwd: string | null
+  host: string | null
+}
+
+export interface CommitsResult {
+  host: string
+  records: CommitRecord[]
+  origins?: TemporalOrigins
+}
+
 /** What the ledger can tell you about a session: whose work it was, and which
  *  harness session it was — the id the transcript is filed under, and so the
  *  one thing that can lead a hover from a minute to the words spoken in it. */
@@ -253,6 +315,19 @@ export interface TemporalFetchers {
   activity(fromMs: number, toMs: number): Promise<ActivityResult>
   narration(fromISO: string, toISO: string): Promise<NarrationResult>
   sessions(sinceMs: number): Promise<SessionsResult>
+  /**
+   * The FLEET's commit ledger over `[sinceMs, untilMs]` — every commit the
+   * hook recorded, each carrying the harness session that made it.
+   *
+   * Both ends are INSTANTS, for the reason the whole module is: a civil window
+   * resolved in the daemon's zone is a different window from the same one
+   * resolved in the browser's.
+   *
+   * Degrades to an empty ledger on a daemon that has no such route, so a view
+   * that adopts it must keep its prefix-parsing fallback for the history the
+   * hook never saw.
+   */
+  commits(sinceMs: number, untilMs: number): Promise<CommitsResult>
   /**
    * The words a session spoke inside a window — the hover's payload.
    *
@@ -429,6 +504,31 @@ export function createTemporalFetchers(shuttleBase: string): TemporalFetchers {
             `since_ms=${encodeURIComponent(String(sinceMs))}`,
           )
           return parseSessions(body, empty)
+        } catch {
+          return empty
+        }
+      })
+    },
+
+    /**
+     * The commit ledger over a window. Same composite-first read as the other
+     * three feeds, same degrade-to-empty on every failure path.
+     *
+     * Keyed on the window, not on a constant like `sessions(0)`: this file
+     * grows one line per COMMIT rather than one per session, so a whole-history
+     * read is not the cheap thing it is there, and every caller already knows
+     * which window it is drawing.
+     */
+    commits(sinceMs: number, untilMs: number): Promise<CommitsResult> {
+      return memo(`commits:${sinceMs}:${untilMs}`, async () => {
+        const empty: CommitsResult = { host: '', records: [], origins: {} }
+        try {
+          const body = await readFeed(
+            'commits',
+            `since_ms=${encodeURIComponent(String(sinceMs))}` +
+              `&until_ms=${encodeURIComponent(String(untilMs))}`,
+          )
+          return parseCommits(body, empty)
         } catch {
           return empty
         }
@@ -634,7 +734,12 @@ function parseNarration(body: unknown, fallback: NarrationResult): NarrationResu
   for (const entry of raw) {
     if (!isRecord(entry)) continue
     if (typeof entry.iso !== 'string' || typeof entry.subject !== 'string') continue
-    commits.push({ iso: entry.iso, subject: entry.subject, host: text(entry.host) ?? (host || null) })
+    commits.push({
+      iso: entry.iso,
+      subject: entry.subject,
+      host: text(entry.host) ?? (host || null),
+      sha: normalizeSha(entry.sha),
+    })
   }
   return { commits, origins: parseOrigins(body.origins, host) }
 }
@@ -676,6 +781,66 @@ export function parseSessions(body: unknown, fallback: SessionsResult): Sessions
     })
   }
   return { host, records, origins: parseOrigins(body.origins, host) }
+}
+
+const SHA_RE = /^[0-9a-f]{40}$/
+
+/** A 40-hex sha, lower-cased, or null. Anything else is not an identity, and a
+ *  half-sha would let two different commits dedupe against each other. */
+export function normalizeSha(value: unknown): string | null {
+  const raw = text(value)?.toLowerCase()
+  return raw && SHA_RE.test(raw) ? raw : null
+}
+
+/**
+ * Coerce a wire body into a CommitsResult, dropping malformed lines.
+ *
+ * A line with no readable SHA is dropped, not repaired. The sha is what lets a
+ * ledger commit and a store-log commit be recognized as one commit; a record
+ * without one cannot be deduped, so keeping it would risk narrating the same
+ * commit twice — the exact defect the ledger exists to remove.
+ *
+ * `kind` is read but not required: the route serves commits, and a daemon that
+ * stamps the field is only agreeing with the path it was reached on. A record
+ * announcing some OTHER kind is dropped, because that is a body this parser
+ * does not understand.
+ */
+export function parseCommits(body: unknown, fallback: CommitsResult): CommitsResult {
+  if (!isRecord(body)) return fallback
+  const host = typeof body.host === 'string' ? body.host : fallback.host
+  const raw = Array.isArray(body.records) ? body.records : []
+  const records: CommitRecord[] = []
+  for (const entry of raw) {
+    if (!isRecord(entry)) continue
+    const sha = normalizeSha(entry.sha)
+    const subject = typeof entry.subject === 'string' ? entry.subject : null
+    const kind = text(entry.kind)
+    if (!sha || subject === null) continue
+    if (kind && kind !== 'commit') continue
+    records.push({
+      at: count(entry.at),
+      sha,
+      subject,
+      repo: text(entry.repo),
+      files: count(entry.files),
+      insertions: count(entry.insertions),
+      deletions: count(entry.deletions),
+      session: text(entry.session),
+      tmux: text(entry.tmux),
+      cwd: text(entry.cwd),
+      // As with the session ledger: a record the serving daemon wrote before it
+      // stamped hosts belongs to that daemon; on the composite each carries its
+      // own.
+      host: text(entry.host) ?? (host || null),
+    })
+  }
+  return { host, records, origins: parseOrigins(body.origins, host) }
+}
+
+/** A finite non-negative wire number, or 0. A missing count is not a negative
+ *  one, and a NaN in a sum poisons every figure downstream of it. */
+function count(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0
 }
 
 /**
@@ -791,6 +956,40 @@ export function lookupTmux(
     if (byTmux.has(tmuxOwnedKey(tmux))) return undefined
   }
   return byTmux.get(tmux)
+}
+
+/**
+ * Resolve a harness session UUID to its pairing, host-scoped.
+ *
+ * The same refusal {@link lookupTmux} makes, reached differently. A tmux name
+ * is ambiguous across a fleet and so needs scoped KEYS; a session UUID is not,
+ * so the map stays keyed by the id alone and the scoping is a CHECK on the way
+ * out: when the asker and the pairing both say where they are and they
+ * disagree, the honest answer is that nothing here pairs it.
+ *
+ * A UUID colliding across hosts would be a broken harness, but two daemons'
+ * ledgers merged by a composite can carry the same id for other reasons — a
+ * home directory synced between machines, a ledger copied during a migration —
+ * and either would silently file one host's commits under the other's fiber.
+ * Either side saying nothing falls back to the id alone, which is what an
+ * unstamped record has always meant here.
+ */
+export function lookupSession(
+  bySession: ReadonlyMap<string, SessionPairing>,
+  host: string | null | undefined,
+  session: string | null | undefined,
+): SessionPairing | undefined {
+  if (!session) return undefined
+  const pairing = bySession.get(session)
+  if (!pairing) return undefined
+  if (host && pairing.host && !sameHost(host, pairing.host)) return undefined
+  return pairing
+}
+
+/** Hostnames are case-insensitive; the board lower-cases them for display and
+ *  the joins have to meet them there rather than miss on case alone. */
+function sameHost(a: string, b: string): boolean {
+  return a.trim().toLowerCase() === b.trim().toLowerCase()
 }
 
 /** A wire string, or null — treating blank as absent. */
