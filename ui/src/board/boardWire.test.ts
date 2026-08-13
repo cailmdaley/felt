@@ -163,6 +163,7 @@ function makeBoard(): KanbanModal {
  *  test, and it has no public name; nothing is re-implemented here. */
 type Private = {
   commitPin: (c: KanbanCard) => Promise<void>
+  pinRole: (c: KanbanCard) => void
   setSurface: (c: KanbanCard, h: 'now' | 'stashed', o?: { cold?: boolean; due?: string | null }) => void
   livePatch: (
     c: KanbanCard,
@@ -249,32 +250,19 @@ describe('commitPin — the strip drop is two intents, said in two calls', () =>
     ])
   })
 
-  it('posts pin (the create verb) and NO pause for a block-less card', async () => {
-    // `pin` parks itself at status:open, so a second pause would be redundant.
-    // NOTE: this branch is currently unreachable from the drag — `pinRole`
-    // refuses a card with no `shuttleKind` before it ever gets here. See the
-    // report; the composition is pinned anyway so the invariant survives the
-    // day that guard changes.
+  it('never reaches the wire at all for a block-less card', async () => {
+    // The gesture turns such a card away before the network: there is no host
+    // or project_dir to install from, so `pinRole` banners "promote it first"
+    // and returns. commitPin therefore only ever handles cards that already
+    // have a block — which is why it holds no create branch. Pinning the
+    // ABSENCE of traffic is what keeps that guard and that assumption honest
+    // together: loosen one without the other and this fails.
     const c = card({ id: 'bare-1', shuttleHost: 'candide', shuttleProjectDir: '/home/cd/dev/felt' })
-    await asPrivate(makeBoard()).commitPin(c)
-    await wire.settled()
+    delete (c as { shuttleKind?: unknown }).shuttleKind
+    asPrivate(makeBoard()).pinRole(c)
+    await new Promise((r) => setTimeout(r, 20))
 
-    expect(wire.writes()).toEqual([
-      {
-        url: `${BASE}/api/v1/lifecycle`,
-        method: 'POST',
-        body: {
-          action: 'pin',
-          fiber: 'bare-1',
-          origin: 'local',
-          host: 'candide',
-          project_dir: '/home/cd/dev/felt',
-        },
-      },
-    ])
-    // `model` rode `shuttleAgent`, which this card has none of, and
-    // `postLifecycle` drops undefined keys rather than sending nulls.
-    expect(wire.writes()[0].body).not.toHaveProperty('model')
+    expect(wire.calls).toEqual([])
   })
 
   it('does not post the pause when the reshape fails', async () => {

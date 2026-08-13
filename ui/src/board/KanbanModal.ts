@@ -46,7 +46,7 @@ import type {
   KanbanCard,
   KanbanResponse,
 } from './KanbanTypes.js'
-import { dispatchIneligibleReason, errorMessageFromResponse, isAgentCard } from './KanbanModalShared.js'
+import { dispatchIneligibleReason, errorMessageFromResponse } from './KanbanModalShared.js'
 import { COLUMN_TITLES, KanbanSurfaceRenderer, SURFACE_TITLE, findCardColumn, formatDue } from './KanbanSurfaces.js'
 import { parseCompositeFeed } from './KanbanComposite.js'
 import { buildKanbanResponseFromComposite, deriveCycleLens, restingCards } from './KanbanReadModel.js'
@@ -1235,33 +1235,27 @@ export class KanbanModal {
    * isn't parked yet — visible, harmless, and re-driveable by the same drag. An
    * atomic block-rebuild would cost more than it buys.
    *
-   * A card with no block yet has nothing to reshape (the verb errors on one),
-   * so it takes `pin`, the create verb — which parks at status:open itself, no
-   * second call needed. `project_dir` is a hint only on that path: when it
-   * can't resolve here (undefined), `postLifecycle` drops it and the daemon
-   * falls back. A running card is killed first on both paths, so by the time
-   * `pause` runs its own kill is a no-op. Reconciles via the trailing refetch.
+   * There is no create path here. A card with no block has nothing to reshape
+   * and nothing to install from either — no host, no project_dir — so `pinRole`
+   * turns it away with "promote it first" before the network is touched, and
+   * Promote owns the create verbs. A running card is killed first, so by the
+   * time `pause` runs its own kill is a no-op. Reconciles via the trailing
+   * refetch.
    */
   private async commitPin(card: KanbanCard): Promise<void> {
     try {
       await this.killWorkerIfRunning(card)
+      // Every card reaching here already carries a shuttle block — `pinRole`
+      // turns away a block-less one with "promote it first", because there is
+      // no host or project_dir to install from. So this is the shape edit and
+      // nothing else; the create verbs are Promote's job, not this gesture's.
+      //
       // The /lifecycle endpoint keys on `fiber` (not `fiber_id`, which
       // /dispatch and /felt-edit use) — matching FiberDetailModal's reshape.
-      if (isAgentCard(card)) {
-        await this.postLifecycle({
-          action: 'reshape', kind: 'pinned', fiber: card.id, origin: card.originId,
-        })
-        await this.postLifecycle({ action: 'pause', fiber: card.id, origin: card.originId })
-      } else {
-        await this.postLifecycle({
-          action: 'pin',
-          fiber: card.id,
-          origin: card.originId,
-          model: card.shuttleAgent,
-          host: card.shuttleHost,
-          project_dir: this.resolveProjectDir(card),
-        })
-      }
+      await this.postLifecycle({
+        action: 'reshape', kind: 'pinned', fiber: card.id, origin: card.originId,
+      })
+      await this.postLifecycle({ action: 'pause', fiber: card.id, origin: card.originId })
       this.announce(`Pinned “${card.name}”.`)
     } catch (err: unknown) {
       const msg = (err as { message?: string })?.message ?? String(err)
@@ -1283,12 +1277,6 @@ export class KanbanModal {
     if (!res.ok) {
       throw new Error(await errorMessageFromResponse(res, 'Lifecycle action failed'))
     }
-  }
-
-  /** Worker cwd for a reshape: the fiber's own `project_dir`. Mirrors
-   *  FiberDetailModal.projectDirFor. */
-  private resolveProjectDir(card: KanbanCard): string | undefined {
-    return card.shuttleProjectDir
   }
 
   private announce(msg: string): void {
