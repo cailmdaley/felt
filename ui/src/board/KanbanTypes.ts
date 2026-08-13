@@ -234,11 +234,12 @@ export interface KanbanResponse {
     inFlight: KanbanCard[]
     awaitingReview: KanbanCard[]
   }
-  /** Timeline surface — past and future-dated, with a legacy standing-role pool. */
+  /** Timeline surface — closed work in `past`, and every armed standing role
+   *  between runs in `futureDated`, ordered by next launch. One list: how far
+   *  off a role's next firing is changes nothing about how it is drawn. */
   timeline: {
     past: KanbanCard[]
     futureDated: KanbanCard[]
-    anytimeSoon: KanbanCard[]
   }
   /** Stash surface — dateless deferred work; frontend clusters by containment path. */
   stash: KanbanCard[]
@@ -263,18 +264,12 @@ export interface KanbanResponse {
     awaitingReview: number
     past: number
     futureDated: number
-    anytimeSoon: number
     stash: number
     pinned: number
   }
   /** Historical: total tempered count. Equals
    *  `timeline.past.filter(c => c.tempered === true).length`. */
   temperedTotal: number
-  /** Server-owned timeline day window; keeps the strip in sync with backend routing. */
-  timelineWindow: {
-    pastDays: number
-    futureDays: number
-  }
   /**
    * Per-origin freshness, keyed by `originId`. Always includes `local`
    * and an entry for every remote origin with a snapshot in the store.

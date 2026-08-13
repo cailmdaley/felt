@@ -339,7 +339,6 @@ export function collectCards(response: KanbanResponse): KanbanCard[] {
   }
   take(response.timeline.past)
   take(response.timeline.futureDated)
-  take(response.timeline.anytimeSoon)
   take(response.now.drafts)
   take(response.now.inFlight)
   take(response.now.awaitingReview)

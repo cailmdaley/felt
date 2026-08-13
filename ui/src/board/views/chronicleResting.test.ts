@@ -3,7 +3,7 @@
  * "I dragged a due mark into the past and the row vanished."
  *
  * `buildRows`'s include-set used to be built from `now.*` + `pinned` +
- * `timeline.futureDated`/`anytimeSoon` only — `response.stash` (the Desk's
+ * `timeline.futureDated` only — `response.stash` (the Desk's
  * Resting region: `horizon:stashed` cards, i.e. snoozed work) was never read.
  * A snoozed, WORKLESS card's only route onto the Chronicle was therefore the
  * activity join, which it can never win by definition. Its due mark could
@@ -58,13 +58,13 @@ function restingResponse(resting: readonly KanbanCard[]): KanbanResponse {
   return {
     feltHost: 'local',
     now: { drafts: [], inFlight: [], awaitingReview: [] },
-    timeline: { past: [], futureDated: [], anytimeSoon: [] },
+    timeline: { past: [], futureDated: [] },
     stash: [...resting],
     pinned: [],
     cycles: [],
     totals: {
       drafts: 0, inFlight: 0, awaitingReview: 0, past: 0,
-      futureDated: 0, anytimeSoon: 0, stash: resting.length, pinned: 0,
+      futureDated: 0, stash: resting.length, pinned: 0,
     },
     temperedTotal: 0,
   } as unknown as KanbanResponse

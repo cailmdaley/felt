@@ -1774,7 +1774,7 @@ export class FiberDetailModal {
     // ── Due ───────────────────────────────────────────────────────────────
     // The only way to name a date the hand cannot reach. Dropping a card on a
     // day IS the usual way to say "next Tuesday", but the drag-reveal timeline
-    // renders `KANBAN_TIMELINE_WINDOW.futureDays` (14) days ahead, so a fiber
+    // renders `DRAG_HORIZON_DAYS` (14) days ahead, so a fiber
     // due in October is undatable from the board in August.
     //
     // It is also how a card gets out of the dead half of Resting. A rest with

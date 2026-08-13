@@ -9,8 +9,6 @@ import { civilDayToLocalDate, dueCivilDay, isoDayLocal } from './civilDay.js';
 // server-side in `server/src/KanbanRules.ts`; the "kanban reads Shuttle
 // directly" cutover relocated it here so there is exactly one home.)
 
-const DAY_MS = 24 * 60 * 60 * 1000;
-
 // Two surfaces, not three. `now` is desk presence and `stashed` is Resting;
 // there is no separate scheduled surface, because a `due:` is a date a card
 // wears, never a place it goes. (The old `soon` exiled every future-dated card
@@ -18,15 +16,6 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 export const KANBAN_HORIZONS = ['now', 'stashed'] as const;
 export type KanbanHorizon = typeof KANBAN_HORIZONS[number];
 const HORIZON_SET = new Set<string>(KANBAN_HORIZONS);
-
-export const KANBAN_TIMELINE_WINDOW = {
-  pastDays: 14,
-  futureDays: 14,
-} as const;
-
-// Forward-looking window for dormant standing roles on the timeline.
-// This intentionally derives from the same future-day count the frontend uses.
-export const STANDING_TIMELINE_HORIZON_MS = KANBAN_TIMELINE_WINDOW.futureDays * DAY_MS;
 
 /**
  * The set of columns the kanban renders. Differs from KanbanTarget in that

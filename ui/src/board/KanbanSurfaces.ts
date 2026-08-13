@@ -32,6 +32,12 @@ export const COLUMN_TITLES: Record<ColumnKind, string> = {
 type NowColumnKind = 'drafts' | 'inFlight' | 'awaitingReview'
 const NOW_COLUMN_ORDER: NowColumnKind[] = ['drafts', 'inFlight', 'awaitingReview']
 
+// How many days forward the drag-reveal horizon offers as drop targets. It is
+// the WIDTH OF A GESTURE SURFACE and nothing else — no card is filed by it, no
+// list is partitioned by it. Two weeks is as far ahead as "put this down on a
+// day" stays a day you can picture; past that you write a `due:`.
+const DRAG_HORIZON_DAYS = 14
+
 // The Pinned band wraps its launcher chips to at most this many rows; extra
 // roles page behind a "+N more" affordance rather than scrolling.
 const PINNED_MAX_ROWS = 2
@@ -555,7 +561,7 @@ export class KanbanSurfaceRenderer {
    * clothes — because "next sprint" is a date you happen to know by name. With
    * no upcoming cycles the strip is exactly what it was: days and nothing else.
    */
-  renderDragHorizon(futureDays: number): HTMLElement {
+  renderDragHorizon(): HTMLElement {
     const cycles = upcomingCycleDropTargets(this.getLastResponse()?.cycles ?? [])
 
     const outer = document.createElement('div')
@@ -572,7 +578,7 @@ export class KanbanSurfaceRenderer {
     const row = document.createElement('div')
     row.className = 'kbn-draghorizon-row'
 
-    for (const day of buildTimelineDays(0, futureDays)) {
+    for (const day of buildTimelineDays(0, DRAG_HORIZON_DAYS)) {
       // One element is both the date label and the drop target. The old ribbon
       // split them (an axis cell above a full-height column) only because cards
       // stacked in between; with nothing in between, the split would be two
@@ -1845,23 +1851,20 @@ export function findCardColumn(resp: KanbanResponse | null, id: string): ColumnK
   return null
 }
 
-function findCardById(resp: KanbanResponse | null, id: string): KanbanCard | null {
+export function findCardById(resp: KanbanResponse | null, id: string): KanbanCard | null {
   if (!resp) return null
   for (const kind of NOW_COLUMN_ORDER) {
     const hit = resp.now[kind].find((c) => c.id === id)
     if (hit) return hit
   }
-  // `anytimeSoon` belongs here for the same reason the others do: `restingCards`
-  // DRAWS it, so the human can see and grab those cards. Omitting it meant a
-  // standing role whose next launch falls past the drag strip's reach — a
-  // monthly role, most of the month — rendered in Resting but resolved to null
-  // here, and every drag on it silently no-opped. Anything drawn must be
-  // findable; the two lists are one population split by a horizon no pixel
-  // expresses.
+  // ANYTHING DRAWN MUST BE FINDABLE. Every list below reaches the screen —
+  // `restingCards` joins `stash` and `timeline.futureDated`, the past lane draws
+  // itself, the strip draws `pinned` — and a card that renders but resolves to
+  // null here is a card whose every drag silently no-ops. Add a list to what the
+  // board draws, add it here.
   for (const list of [
     resp.timeline.past,
     resp.timeline.futureDated,
-    resp.timeline.anytimeSoon,
     resp.stash,
     resp.pinned,
   ]) {

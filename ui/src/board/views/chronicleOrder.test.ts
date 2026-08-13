@@ -69,7 +69,7 @@ function emptyResponse(cards: readonly KanbanCard[]): KanbanResponse {
   return {
     feltHost: 'local',
     now: { drafts: [], inFlight: [], awaitingReview: [] },
-    timeline: { past: [], futureDated: [], anytimeSoon: [] },
+    timeline: { past: [], futureDated: [] },
     stash: [],
     pinned: [...cards],
     cycles: [],
@@ -79,7 +79,6 @@ function emptyResponse(cards: readonly KanbanCard[]): KanbanResponse {
       awaitingReview: 0,
       past: 0,
       futureDated: 0,
-      anytimeSoon: 0,
       stash: 0,
       pinned: cards.length,
     },

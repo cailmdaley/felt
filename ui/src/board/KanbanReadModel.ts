@@ -28,9 +28,7 @@ import {
   cycleSpan,
   effectiveHorizon,
   isCycleFiber,
-  KANBAN_TIMELINE_WINDOW,
   nextStandingLaunch,
-  STANDING_TIMELINE_HORIZON_MS,
   type KanbanColumn,
 } from './KanbanRules.js';
 import type {
@@ -109,7 +107,6 @@ export function buildKanbanResponseFromComposite(
     cycles: surfaces.cycles,
     totals: surfaceTotals(surfaces),
     temperedTotal: surfaces.temperedTotal,
-    timelineWindow: KANBAN_TIMELINE_WINDOW,
     staleness,
     generatedAt: nowMs,
   };
@@ -269,16 +266,8 @@ function assembleSurfaces(
   composted.sort(byClosedAtDesc);
 
   const stash: KanbanCard[] = [];
-  const futureDated: KanbanCard[] = [];
-  const anytimeSoon: KanbanCard[] = [];
+  const futureDated: KanbanCard[] = [...scheduled];
   const nowDrafts: KanbanCard[] = [];
-  for (const card of scheduled) {
-    const launchMs = card.nextLaunchAt ? Date.parse(card.nextLaunchAt) : NaN;
-    const withinStrip =
-      Number.isFinite(launchMs) && launchMs - nowMs <= STANDING_TIMELINE_HORIZON_MS;
-    if (withinStrip) futureDated.push(card);
-    else anytimeSoon.push(card);
-  }
   for (const card of drafts) routeOpenCardByPlanningSurface(card, nowDrafts, stash);
 
   // Awaiting-review cards are closed and pending a human verdict — unconditionally
@@ -292,7 +281,6 @@ function assembleSurfaces(
 
   const past = mergeByClosedAtDesc(tempered, composted);
   futureDated.sort(byDueAtAsc);
-  anytimeSoon.sort(byDueAtAsc);
 
   // Cycles are the calendar's backdrop, so they read left to right: earliest
   // band first, ties broken by name so the order holds still across polls.
@@ -305,7 +293,7 @@ function assembleSurfaces(
 
   return {
     now: { drafts: nowDrafts, inFlight, awaitingReview: nowAwaitingReview },
-    timeline: { past, futureDated, anytimeSoon },
+    timeline: { past, futureDated },
     stash,
     pinned,
     cycles,
@@ -333,9 +321,9 @@ function assembleSurfaces(
  * on a day. So it is drawn in Resting, wearing its next launch ("↻ returns
  * Aug 12") rather than a snooze's "wakes".
  *
- * The response shape is untouched: `timeline.futureDated` / `anytimeSoon` keep
- * carrying these cards (drag resolution reads them through `findCardById`), and
- * this is the JOIN, done at render time, not a second home for the card.
+ * The response shape is untouched: `timeline.futureDated` keeps carrying these
+ * cards (drag resolution reads them through `findCardById`), and this is the
+ * JOIN, done at render time, not a second home for the card.
  *
  * The three statuses that are NOT here, and why they need nothing:
  *   status:open standing   → paused/draft, classifies to `drafts` — on the desk.
@@ -347,7 +335,7 @@ function assembleSurfaces(
  */
 export function restingCards(resp: KanbanResponse | null): KanbanCard[] {
   if (!resp) return [];
-  return [...resp.stash, ...resp.timeline.futureDated, ...resp.timeline.anytimeSoon];
+  return [...resp.stash, ...resp.timeline.futureDated];
 }
 
 /** True when this card is a standing role asleep between runs — armed, no live
@@ -545,7 +533,6 @@ function surfaceTotals(s: AssembledSurfaces): KanbanResponse['totals'] {
     awaitingReview: s.now.awaitingReview.length,
     past: s.timeline.past.length,
     futureDated: s.timeline.futureDated.length,
-    anytimeSoon: s.timeline.anytimeSoon.length,
     stash: s.stash.length,
     pinned: s.pinned.length,
   };
@@ -587,16 +574,15 @@ function emptyResponse(
   return {
     feltHost: feed.host,
     now: { drafts: [], inFlight: [], awaitingReview: [] },
-    timeline: { past: [], futureDated: [], anytimeSoon: [] },
+    timeline: { past: [], futureDated: [] },
     stash: [],
     pinned: [],
     cycles: [],
     totals: {
       drafts: 0, inFlight: 0, awaitingReview: 0,
-      past: 0, futureDated: 0, anytimeSoon: 0, stash: 0, pinned: 0,
+      past: 0, futureDated: 0, stash: 0, pinned: 0,
     },
     temperedTotal: 0,
-    timelineWindow: KANBAN_TIMELINE_WINDOW,
     staleness,
     generatedAt: nowMs,
   };

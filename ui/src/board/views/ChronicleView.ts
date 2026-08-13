@@ -937,12 +937,11 @@ export function buildRows(
     ...response.now.awaitingReview,
     ...response.pinned,
     ...response.timeline.futureDated,
-    ...response.timeline.anytimeSoon,
     // Resting — see the doc comment above this function. `restingCards`
-    // already carries `timeline.futureDated`/`anytimeSoon` too (a standing
-    // role asleep on its cron); re-adding those ids here is a harmless no-op
-    // on the Set, and calling the one shared function is what keeps this
-    // list from drifting out of step with the Desk's own Resting region.
+    // already carries `timeline.futureDated` too (a standing role asleep on
+    // its cron); re-adding those ids here is a harmless no-op on the Set, and
+    // calling the one shared function is what keeps this list from drifting
+    // out of step with the Desk's own Resting region.
     ...restingCards(response),
   ]) {
     include.add(card.id)
@@ -1336,7 +1335,6 @@ class ChronicleView implements TemporalView {
       response.now.awaitingReview,
       response.pinned,
       response.timeline.futureDated,
-      response.timeline.anytimeSoon,
     ]) {
       parts.push(list.map((c) => c.id).join(','))
     }

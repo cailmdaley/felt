@@ -52,10 +52,8 @@ import { parseCompositeFeed } from './KanbanComposite.js'
 import { buildKanbanResponseFromComposite, deriveCycleLens, restingCards } from './KanbanReadModel.js'
 import {
   dueBouncesFromResting,
-  KANBAN_TIMELINE_WINDOW,
   nextStandingLaunch,
   restingUntil,
-  STANDING_TIMELINE_HORIZON_MS,
 } from './KanbanRules.js'
 import { sameCivilDue } from './civilDay.js'
 import { shouldRunVisiblePoll } from '../runtime/PageAttention'
@@ -211,9 +209,6 @@ export class KanbanModal {
   /** Lightweight auto-poll while mounted. 15s default. */
   private pollTimer: number | null = null
   private readonly pollIntervalMs = 15_000
-  /** Server-owned forward window, from the last response — how many future
-   *  days the drag horizon offers. */
-  private timelineFutureDays: number = KANBAN_TIMELINE_WINDOW.futureDays
   private lastFetchStartedAt: number | null = null
   /** Intermediate fiber-detail modal — one instance, re-used across opens. */
   private detailModal: FiberDetailModal | null = null
@@ -520,7 +515,7 @@ export class KanbanModal {
     if (wanted === host.classList.contains('kbn-draghorizon-open')) return
     if (wanted) {
       host.innerHTML = ''
-      host.append(this.surfaces.renderDragHorizon(this.timelineFutureDays))
+      host.append(this.surfaces.renderDragHorizon())
       host.classList.add('kbn-draghorizon-open')
       return
     }
@@ -1400,7 +1395,6 @@ export class KanbanModal {
       p: data.pinned,
       t: data.totals,
       tt: data.temperedTotal,
-      tw: data.timelineWindow,
       st: data.staleness,
     })
   }
@@ -1484,8 +1478,7 @@ export class KanbanModal {
     this.pendingDeskData = null
 
     const scrollSnapshot = this.captureScrollSnapshot()
-    const { now, timelineWindow, pinned, staleness } = data
-    this.timelineFutureDays = timelineWindow.futureDays
+    const { now, pinned, staleness } = data
     // The masthead stats line dissolved (board-chrome-redesign) — the board
     // speaks for itself (column counts, the Pinned/Resting sections), and stale
     // origins already dim their cards + show "waiting on <host>".
@@ -2064,7 +2057,6 @@ function liftCardFromSurfaces(resp: KanbanResponse, cardId: string): {
       ...resp.timeline,
       past: drop(resp.timeline.past),
       futureDated: drop(resp.timeline.futureDated),
-      anytimeSoon: drop(resp.timeline.anytimeSoon),
     },
     stash: drop(resp.stash),
     card,
@@ -2100,7 +2092,6 @@ function withSurfaces(
       awaitingReview: s.now.awaitingReview.length,
       past: s.timeline.past.length,
       futureDated: s.timeline.futureDated.length,
-      anytimeSoon: s.timeline.anytimeSoon.length,
       stash: s.stash.length,
       pinned: s.pinned.length,
     },
@@ -2195,10 +2186,7 @@ export function applyOptimisticTransition(
       },
       nowMs,
     )
-    const launchMs = moved.nextLaunchAt ? Date.parse(moved.nextLaunchAt) : NaN
-    const withinStrip = Number.isFinite(launchMs) && launchMs - nowMs <= STANDING_TIMELINE_HORIZON_MS
-    if (withinStrip) timeline.futureDated = [...timeline.futureDated, moved]
-    else timeline.anytimeSoon = [...timeline.anytimeSoon, moved]
+    timeline.futureDated = [...timeline.futureDated, moved]
     return withSurfaces(resp, { now, pinned, timeline, stash, temperedTotal: resp.temperedTotal })
   }
   if (target === 'tempered' || target === 'composted') {

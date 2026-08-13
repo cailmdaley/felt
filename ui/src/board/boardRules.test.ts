@@ -27,6 +27,7 @@ import type { KanbanCard, KanbanResponse } from './KanbanTypes.js'
 import { buildKanbanResponseFromComposite, deriveCycleLens, isSleepingOnSchedule, restingCards } from './KanbanReadModel.js'
 import {
   clusterStashCards,
+  findCardById,
   formatLaunchDay,
   humanizeIdleAge,
   phasePillLabel,
@@ -357,7 +358,6 @@ describe('what the board admits — a shuttle block, or a cycle', () => {
     ...board.now.awaitingReview,
     ...board.timeline.past,
     ...board.timeline.futureDated,
-    ...board.timeline.anytimeSoon,
     ...board.stash,
     ...board.pinned,
   ]
@@ -780,7 +780,7 @@ describe('cycles — a named span of time, not work', () => {
       expect(resp.cycles).toHaveLength(1)
       const everywhereElse = [
         ...resp.now.drafts, ...resp.now.inFlight, ...resp.now.awaitingReview,
-        ...resp.timeline.past, ...resp.timeline.futureDated, ...resp.timeline.anytimeSoon,
+        ...resp.timeline.past, ...resp.timeline.futureDated,
         ...resp.stash, ...resp.pinned,
       ]
       expect(everywhereElse.some((c) => c.isCycle)).toBe(false)
@@ -1033,7 +1033,7 @@ describe('the cycle lens — membership is derived, never assigned', () => {
     const board = (over: Partial<KanbanResponse> = {}): KanbanResponse => ({
       feltHost: 'here',
       now: { drafts: [], inFlight: [], awaitingReview: [] },
-      timeline: { past: [], futureDated: [], anytimeSoon: [] },
+      timeline: { past: [], futureDated: [] },
       stash: [],
       pinned: [],
       cycles: [card({
@@ -1042,10 +1042,9 @@ describe('the cycle lens — membership is derived, never assigned', () => {
       })],
       totals: {
         drafts: 0, inFlight: 0, awaitingReview: 0,
-        past: 0, futureDated: 0, anytimeSoon: 0, stash: 0, pinned: 0,
+        past: 0, futureDated: 0, stash: 0, pinned: 0,
       },
       temperedTotal: 0,
-      timelineWindow: { pastDays: 14, futureDays: 14 },
       staleness: {},
       generatedAt: NOW,
       ...over,
@@ -1201,11 +1200,27 @@ describe('Resting holds standing roles asleep between runs', () => {
     expect(isSleepingOnSchedule(resp.now.drafts[0])).toBe(false)
   })
 
-  it('shows a role whose next run is far off — no horizon drops it', () => {
-    // A yearly role lands outside the 14-day strip (`anytimeSoon`, not
-    // `futureDated`). Both lists are Resting, so distance never means invisible.
+  it('files a far-off role in the SAME list as an imminent one', () => {
+    // The collapse, stated: how far away a role's next firing is decides
+    // nothing. A yearly role (next run ~5 months out, past any strip) and a
+    // daily one (tomorrow) land in one `timeline.futureDated`, because the
+    // board draws them identically — one Resting region, one chip apiece.
+    const resp = boardOf([
+      role({ shuttleSchedule: { expr: '0 9 1 1 *', tz: 'UTC' } }),
+      role({ id: 'work/standup', name: 'Standup', shuttleSchedule: { expr: '0 9 * * *', tz: 'UTC' } }),
+    ])
+    expect(resp.timeline.futureDated.map((c) => c.id).sort())
+      .toEqual(['finances/cc-bills-monthly', 'work/standup'])
+    expect(restingCards(resp).map((c) => c.id).sort())
+      .toEqual(['finances/cc-bills-monthly', 'work/standup'])
+    expect(resp.totals.futureDated).toBe(2)
+  })
+
+  it('resolves a far-off role by id, so the drag it accepts is not a no-op', () => {
+    // Anything DRAWN must be FINDABLE — `findCardById` is what every drag
+    // handler resolves through, and the yearly role is exactly the card the old
+    // two-list split rendered in Resting and then failed to resolve.
     const resp = boardOf([role({ shuttleSchedule: { expr: '0 9 1 1 *', tz: 'UTC' } })])
-    expect(resp.timeline.futureDated).toEqual([])
-    expect(restingCards(resp).map((c) => c.id)).toEqual(['finances/cc-bills-monthly'])
+    expect(findCardById(resp, 'finances/cc-bills-monthly')?.id).toBe('finances/cc-bills-monthly')
   })
 })
