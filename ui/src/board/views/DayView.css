@@ -3,12 +3,17 @@
    NO COLOUR WITHOUT A MEANING. The board's pigments are a grammar, not a
    palette to draw from, and this page spends exactly two of them:
 
-     cobalt  rgba(40,78,180,.30)  the agent was working
-     teal    #3F8278              you were steering
+     cobalt    #3D5BA0  the agents were working — the curve, and the darker
+                        step (#2E4680) their delegations are drawn in
+     cinnabar  #BC4538  a message of YOURS landed here — the spine
 
-   Cinnabar appears only as rubric ink, for the section head — the board's own
-   convention for a head (see `.kbn-cap`). It marks no activity: notify is not
-   a state this board draws.
+   Cinnabar is the board's attention pigment everywhere else on it, and a
+   message you sent is the one mark on this page that was addressed to somebody.
+   It also serves as rubric ink for the section head, the board's own convention
+   (see `.kbn-cap`); a head and a spine are told apart by being a word and a
+   line, not by hue.
+
+   Notify is not a state this board draws, and has no pigment.
 
    Ochre is not here: on this board it means an obligation, and nothing on this
    page is one. Everything structural — bullets, gridlines, the midnight rule,
@@ -263,20 +268,25 @@ button.kbn-day-lanename:focus-visible {
 }
 
 
-/* THE DELEGATIONS ALOFT — one mark per subagent, stacked down from the top of
-   the rail so the depth of a fan-out is legible as a depth.
+/* THE DELEGATIONS ALOFT — one mark per subagent, stacked UP FROM THE RAIL'S
+   BASELINE so the depth of a fan-out is legible as a depth.
 
-   A SPAN NEEDS A START, or it reads as a rule. The first shape tried was a
-   plain hairline, and a three-hour delegation drawn that way looked exactly
-   like a border on the lane — the eye files a long horizontal line as chrome
-   before it reads it as data. So the mark is a tick at the moment the agent
-   was sent, trailing a dashed line for as long as it was out: the tick says
-   WHEN, the dash says HOW LONG, and neither can be mistaken for a rule.
+   BOTTOM-JUSTIFIED, not hung from the top. Floating above the curve, the lines
+   annotated nothing in particular: the eye had to measure a gap to tell which
+   lane they belonged to, and on a lane whose curve was tall they sat in open
+   paper well clear of the work they were part of. Standing on the same ground
+   the curve stands on, they read as strata under it — the delegations are the
+   floor the lane's volume was built on, which is what they are.
 
-   Over the curve, not under it: these agents were working on top of the work
-   the wash is made of. The pigment is the wash's own cobalt stepped darker, so
-   a mark laid over the paint still separates from it and no new hue enters the
-   page for a fact the existing one already owns. */
+   SOLID, not dashed. The dash was there to stop a long span reading as a border
+   on the lane; the baseline stack answers that better, because a rule does not
+   come in stacks of five. What the dash cost was legibility at the short end —
+   a six-minute delegation on a day-wide rail is a few pixels, and a few pixels
+   of a 3-on-3-off pattern is often nothing at all.
+
+   Under the curve rather than over it, for the same reason they are on the
+   ground: the pigment is the wash's own cobalt stepped darker, so the lines
+   stay visible through a 34% wash without a new hue entering the page. */
 .kbn-day-spawn {
   position: absolute;
   height: 3px;
@@ -288,17 +298,19 @@ button.kbn-day-lanename:focus-visible {
   position: absolute;
   left: 0;
   right: 0;
-  top: 1px;
+  bottom: 0;
   height: 1px;
-  background: repeating-linear-gradient(90deg, #2E4680 0 3px, transparent 3px 6px);
+  background: #2E4680;
   opacity: 0.62;
 }
-/* The launch. One pixel wide and the mark's full height — a nib, not a bar. */
+/* The launch. One pixel wide and the mark's full height — a nib, not a bar. It
+   rises from the line rather than hanging off it, so the tick still says WHEN
+   on a stack read from the ground up. */
 .kbn-day-spawn::after {
   content: '';
   position: absolute;
   left: 0;
-  top: 0;
+  bottom: 0;
   width: 1px;
   height: 3px;
   background: #2E4680;
@@ -395,23 +407,25 @@ button.kbn-day-lanename:focus-visible {
   height: 7px;
   background: linear-gradient(90deg, rgba(61, 91, 160, 0.12), var(--day-agent));
 }
-/* The spine, at its true weight and near its true height: 2px of iron gall.
-   It is the only mark in the key that is not the curve's pigment. */
+/* The spine, at its true weight and near its true height: 2px of cinnabar.
+   It is the only mark in the key that is not the curve's pigment, which is the
+   whole reason it reads as a different kind of claim. */
 .kbn-day-key-spine {
   width: 2px;
   height: 12px;
   background: var(--curve-spine);
 }
 
-/* Two stacked hairlines — the key teaches the channel's grammar (they stack)
-   at the same time as its pigment. */
+/* Two stacked hairlines — the key teaches the channel's grammar (they stack,
+   from the ground up) at the same time as its pigment. The longer line is the
+   lower one, as it is on the rail: row 0 sits on the baseline. */
 .kbn-day-key-spawn {
   width: 12px;
   height: 5px;
   background:
-    repeating-linear-gradient(90deg, #2E4680 0 3px, transparent 3px 6px) top left / 100% 1px no-repeat,
-    repeating-linear-gradient(90deg, #2E4680 0 3px, transparent 3px 6px) bottom left / 72% 1px no-repeat,
-    linear-gradient(#2E4680, #2E4680) top left / 1px 100% no-repeat;
+    linear-gradient(#2E4680, #2E4680) bottom left / 100% 1px no-repeat,
+    linear-gradient(#2E4680, #2E4680) top left / 72% 1px no-repeat,
+    linear-gradient(#2E4680, #2E4680) bottom left / 1px 100% no-repeat;
   opacity: 0.72;
 }
 

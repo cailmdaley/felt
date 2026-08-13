@@ -172,9 +172,16 @@
   opacity: 0.9;
 }
 
-/* A message from you. Iron gall over everything: the rarest event on the rail
-   gets the highest-contrast mark on it (14.6:1 on parchment), which is the
-   whole reason it is a separate channel rather than a bump in the curve.
+/* A message from you. CINNABAR over everything: on this board cinnabar is the
+   pigment of attention demanded, and a message of yours is the one event on the
+   rail that was addressed to somebody. It clears the parchment on its own
+   (4.9:1) and reads ΔE 25 against the curve's cobalt, so the two channels can
+   never be confused for one another.
+
+   It was iron gall, which is higher contrast still — and that was the problem:
+   iron gall is also every rule, bullet, gridline and hairline on the page, so a
+   spine read as a piece of chrome that happened to stand up. A hue that appears
+   nowhere else in the rails is what makes the mark legible AS a mark.
 
    2px, not the hairline it started as. A spine no longer runs the full height
    of the row — it rises to the curve's own height at that minute (see
@@ -193,4 +200,4 @@
 }
 
 /* Declared on the view host so both sheets and both keys read one value. */
-.kbn-view-page { --curve-spine: #1B1611; }
+.kbn-view-page { --curve-spine: #BC4538; }

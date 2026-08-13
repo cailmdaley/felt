@@ -5,7 +5,7 @@
  * carrying both of the day's clocks at once — as ONE curve on two channels:
  *
  *   height   how much the AGENTS did, in one pigment
- *   spine    the exact minute you spoke, in iron gall, rising to the curve's
+ *   spine    the exact minute you spoke, in cinnabar, rising to the curve's
  *            own height at that minute
  *
  * The arithmetic and the doctrine behind both live in `./densityCurve.js`.
@@ -57,8 +57,10 @@
  * drawn, so the figures in the head and the ink beneath them are one claim.
  *
  * NO COLOUR WITHOUT A MEANING. The board's ink has a grammar and this page
- * spends none of it decoratively: cobalt is agent activity and teal is human
- * steering. Cinnabar appears only as rubric — a section head.
+ * spends none of it decoratively: cobalt is agent activity and cinnabar is a
+ * message of yours — the board's attention pigment, spent on the one mark here
+ * that was addressed to somebody. It doubles as rubric ink for a section head,
+ * which no reader confuses with a line on a rail.
  * Everything else on the page — bullets, rules, hovers, focus rings — is iron
  * gall at some weight. A hue here is a claim, so a hue that means nothing is a
  * claim the data never made.
@@ -1763,16 +1765,21 @@ class DayViewImpl implements TemporalView {
           buildCurveSvg(field, peak, { frameMinutes: win.minutes }),
         )
       }
-      // One hairline per delegation, stacked down from the top of the rail —
-      // aloft, over the work, which is where they were. An interval whose close
-      // was never recorded is drawn faded: its length is a stub saying one
-      // started, not a claim about how long it ran.
+      // One line per delegation, stacked UP FROM THE BASELINE the curve stands
+      // on — row 0 on the ground, each concurrent neighbour a course above it.
+      // The delegations are what the lane's volume was built on, and a stack
+      // sitting on the same ground says so; hung from the top of the rail they
+      // floated in open paper and annotated nothing. An interval whose close was
+      // never recorded is drawn faded: its length is a stub saying one started,
+      // not a claim about how long it ran.
       for (const line of stacks.get(lane.key) ?? []) {
         const hair = document.createElement('i')
         hair.className = `kbn-day-spawn${line.open ? ' kbn-day-spawn-open' : ''}`
         hair.style.left = pct(line.start)
         hair.style.width = pct(Math.max(0, line.end - line.start))
-        hair.style.top = `${1 + line.row * pitch}px`
+        // One pixel of daylight over the rail's own ground rule, so the lowest
+        // course is a delegation and not a thickening of the baseline.
+        hair.style.bottom = `${1 + line.row * pitch}px`
         rail.append(hair)
       }
 

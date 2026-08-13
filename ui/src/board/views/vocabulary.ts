@@ -143,10 +143,19 @@ export const ACTIVITY_KEY_ITEMS: Array<{ kind: DrawnKind; label: string }> = [
   { kind: 'agent', label: 'agents working' },
 ]
 
-/** The second mark on every curve: the exact minute a message of yours landed.
- *  Not a height — a discrete event drawn over a continuous field, which is why
- *  it gets its own line in the key. */
-export const SPINE_KEY_LABEL = 'you sent a message'
+/**
+ * The second mark on every curve: the exact minute a message of yours landed.
+ * Not a height — a discrete event drawn over a continuous field, which is why
+ * it gets its own line in the key.
+ *
+ * THE PARENTHESIS IS THE POINT. Every spine is a message of YOURS — an agent's
+ * reply is agent work and lives in the curve's height, never as a mark — but
+ * spines thin out as they crowd each other (`spineAlphas`), and a faint one
+ * beside a strong one reads as a second, weaker channel. It is not: it is the
+ * same channel, rationing its claim on the eye. Saying so is cheaper than
+ * dropping the falloff, which a day of four hundred messages still needs.
+ */
+export const SPINE_KEY_LABEL = 'you sent a message — fainter in a burst'
 
 /** The third mark, and the only one about a SPAN rather than a moment: one
  *  hairline per subagent, stacked while they overlap. Its own line in the key

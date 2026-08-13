@@ -220,8 +220,14 @@ describe('curveRuns / edgePath', () => {
     const runs = curveRuns(field, fieldPeak([field]))
     expect(runs).toHaveLength(1)
     const [run] = runs
-    expect(run[0].y).toBe(100)
-    expect(run[run.length - 1].y).toBe(100)
+    // Within a hair of the baseline rather than exactly on it: the run keeps
+    // the first point BELOW `QUIET`, which is a threshold and not zero, so the
+    // touch-down carries whatever fraction of the peak that point held — under
+    // half a percent of the rail, well below one drawn pixel. Asserting an
+    // exact 100 was pinning an accident of the old bandwidth (its 4σ reach
+    // happened to cut to a true zero at that grid point).
+    expect(run[0].y).toBeGreaterThan(99.6)
+    expect(run[run.length - 1].y).toBeGreaterThan(99.6)
     // And somewhere inside the run the ink actually rises off the baseline —
     // otherwise "one run" would be true of a run that never left it either.
     expect(Math.min(...run.map((p) => p.y))).toBeLessThan(100)
@@ -264,7 +270,7 @@ describe('spineAlphas — rationing the eye, not the record', () => {
     const crowd = [0, 0, 0, 0, 0]
     const alphas = spineAlphas(crowd)
     expect(alphas.every((a) => a === 0.82 / 5)).toBe(true)
-    expect(alphas.every((a) => a > 0.09)).toBe(true)
+    expect(alphas.every((a) => a > 0.07)).toBe(true)
   })
 
   it('bottoms out at the floor for a genuine crowd, rather than fading toward invisibility', () => {
@@ -273,7 +279,7 @@ describe('spineAlphas — rationing the eye, not the record', () => {
     // which the floor catches.
     const crowd = Array.from({ length: 200 }, () => 0)
     const alphas = spineAlphas(crowd)
-    expect(alphas.every((a) => a === 0.09)).toBe(true)
+    expect(alphas.every((a) => a === 0.07)).toBe(true)
   })
 
   it('is empty for no spines', () => {

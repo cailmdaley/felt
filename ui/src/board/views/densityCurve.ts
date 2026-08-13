@@ -18,8 +18,12 @@
  *            a question the spines already answer better.
  *
  *   SPINES   exactly when YOU spoke. Rare discrete marks on a continuous field,
- *            drawn in iron gall over the wash: the most salient thing on the
- *            rail, because it is the rarest and the most yours. A spine rises
+ *            drawn in CINNABAR over the wash: the board's attention pigment,
+ *            because a message of yours is the one event on the rail that was
+ *            addressed to somebody. Iron gall carried this before, and it was
+ *            the highest-contrast ink available — but it is also the ink every
+ *            rule, bullet and gridline on the page is drawn in, so the spine
+ *            read as chrome standing up. A spine rises
  *            to the CURVE'S OWN HEIGHT at that minute — your message is drawn
  *            inside the work it landed in, not over the top of the row — with a
  *            floor under it ({@link SPINE_MIN_HEIGHT}) so a message sent while
@@ -59,8 +63,13 @@ export const CURVE_AGENT = '#3D5BA0'
  * Kernel width for the HEIGHT channel, in minutes. Tight: an agent's events are
  * stamped when they happened and mean what they say, so smoothing them further
  * would only blur a signal that is already honest.
+ *
+ * Tightened from 1.6 by looking at a real day: at that width a burst and the
+ * two quiet minutes beside it merged into one soft mound, and the rail read as
+ * a weather map rather than as work. At 1.25 a minute's events still reach
+ * their neighbours — the curve stays a curve — but a burst keeps an edge.
  */
-export const SIGMA_TOTAL_MINUTES = 1.6
+export const SIGMA_TOTAL_MINUTES = 1.25
 
 /**
  * The floor under the per-view normaliser, in compressed units — `log1p(4)`.
@@ -363,17 +372,38 @@ export function areaPath(runs: readonly CurvePoint[][]): string {
     .join(' ')
 }
 
-/** How near two spines have to be, in minutes, for each to count as crowding
- *  the other. Roughly the span in which a burst of messages reads as one act
- *  of talking rather than as separate events. */
-const SPINE_CROWD_MINUTES = 4
+/**
+ * How near two spines have to be, in minutes, for each to count as crowding
+ * the other. Roughly the span in which a burst of messages reads as one act of
+ * talking rather than as separate events.
+ *
+ * WIDENED FROM FOUR WHEN THE SPINE BECAME CINNABAR. The window is not really a
+ * fact about conversation — it is how far the ink's claim on the eye reaches,
+ * and cinnabar reaches further than iron gall did. At four minutes a talkative
+ * evening on Week's day-wide rail crowded only in threes and fours, which left
+ * every spine near full weight and filled the mound solid red. At seven the
+ * same evening thins to a pink texture while a message sent on its own — the
+ * mark this channel exists for — is untouched, because a lone spine is lone at
+ * any window.
+ */
+const SPINE_CROWD_MINUTES = 7
 
 /** A lone spine's weight. Everything else is measured down from it. */
 const SPINE_ALPHA = 0.82
 
-/** The faintest a crowded spine draws. Below this it would vanish, and a
- *  message that happened must not disappear because other messages did too. */
-const SPINE_ALPHA_FLOOR = 0.09
+/**
+ * The faintest a crowded spine draws. Below this it would vanish, and a
+ * message that happened must not disappear because other messages did too.
+ *
+ * Lowered slightly (0.09 → 0.07) when the spine became cinnabar, for the
+ * opposite of the obvious reason. Raising it was tried first, on the theory
+ * that a lighter pigment needs more floor to stay visible — and it made a busy
+ * evening WORSE, because cinnabar's problem at crowd scale is not that it
+ * vanishes but that it accumulates. The floor is the last resort for a true
+ * pile-up; the work of rationing a crowd is done by
+ * {@link SPINE_CROWD_MINUTES}, which is the parameter that actually moved.
+ */
+const SPINE_ALPHA_FLOOR = 0.07
 
 /**
  * Per-spine opacity, falling as spines crowd each other.
@@ -381,7 +411,7 @@ const SPINE_ALPHA_FLOOR = 0.09
  * A SPINE IS SALIENT BECAUSE IT IS RARE, and Week proved what happens when it
  * is not: a Monday with 468 messages drew 468 lines across a 1400-pixel rail
  * and produced a solid black band — the loudest thing on the page, saying only
- * "a lot". So weight falls as `1/neighbours`: one message stays full iron gall,
+ * "a lot". So weight falls as `1/neighbours`: one message stays full cinnabar,
  * and a burst of thirty inside four minutes bottoms out at the floor and reads
  * as a grey texture. Nothing is dropped and nothing is merged — every message
  * is still exactly where it happened, and a burst still looks like a burst.
@@ -392,11 +422,12 @@ const SPINE_ALPHA_FLOOR = 0.09
  * the falloff that makes the SOLITARY message the loudest mark on the page,
  * which is the whole point of the channel.
  *
- * The floor survived the spines getting shorter and twice as wide unchanged:
- * Monday's 468-message evening was drawn at 0.09 and at 0.05 and the two are
- * indistinguishable, because at week resolution that wall's spines crowd in
- * threes and fours and never reach the floor at all. It binds only for a true
- * pile-up inside one minute, which is the case it was written for.
+ * THE FLOOR IS NOT THE KNOB. Monday's 468-message evening is drawn the same at
+ * 0.09 and at 0.05 and at 0.15, because at week resolution that wall's spines
+ * crowd in threes and fours and never reach the floor at all — everything
+ * visible about a crowd is decided by the WINDOW. The floor binds only for a
+ * true pile-up, which is the case it was written for; twice it has been reached
+ * for to fix a crowd, and twice the crowd was unmoved.
  */
 export function spineAlphas(spines: readonly number[]): number[] {
   // A sliding window rather than the obvious pair loop: `curveField` sorts the
@@ -419,9 +450,9 @@ export function spineAlphas(spines: readonly number[]): number[] {
 // AGENTS WERE OUT. The curve says the machines were busy and the spines say
 // you spoke, but a five-way fan-out and one long tool call make identical ink
 // — and the difference between them is most of what a day of orchestration
-// is. So each delegation gets one hairline spanning its real duration, and
-// concurrent ones stack: one agent is one line, five at once is five lines,
-// and none is nothing at all.
+// is. So each delegation gets one solid line spanning its real duration, and
+// concurrent ones stack UP FROM THE LANE'S BASELINE: one agent is one line,
+// five at once is five courses, and none is nothing at all.
 //
 // Stacking is an interval-graph colouring, done greedily on a start-sorted
 // list: each delegation takes the lowest row it does not collide in. Greedy is
@@ -500,9 +531,9 @@ export function stackDepth(lanes: readonly (readonly SpawnLine[])[]): number {
   return depth
 }
 
-/** The band the stack is allowed, in pixels, measured down from the top of the
- *  rail. Deliberately under half the rail's height: these lines annotate the
- *  curve, and a channel that reached the baseline would compete with it. */
+/** The band the stack is allowed, in pixels, measured UP from the rail's
+ *  baseline. Deliberately under half the rail's height: these lines are strata
+ *  under the curve, and a stack that climbed into it would compete with it. */
 export const STACK_BAND_PX = 9
 
 /** The gap between neighbouring lines. Two pixels while the stack is shallow —
