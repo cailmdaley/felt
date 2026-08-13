@@ -197,3 +197,29 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* THE DELEGATION REGISTER — the two lines that have a direction.
+   
+   A spawn and its report are neither of the conversation's voices: nobody
+   present said them, and they are not the machine's own vocabulary either. So
+   they take a third setting — the serif of speech (they ARE prose, written by
+   an agent to an agent) held one step back in weight, with the arrow doing the
+   work a name would otherwise spend a line on. */
+.kbn-tip-deleg .kbn-tip-glyph {
+  color: #8C7A52;
+  font-size: calc(10px * var(--kbn-type-scale, 1));
+  line-height: 1.45;
+}
+.kbn-tip-deleg .kbn-tip-text { color: #5C5344; }
+/* The errand going out is the quieter half — it is a briefing, and the reader
+   usually wants what came back. */
+.kbn-tip-deleg-spawn .kbn-tip-text { color: #6E6555; font-style: italic; }
+/* Who. Small caps rather than bold: a label on the line, not a shout in it. */
+.kbn-tip-who {
+  font-family: var(--font-mono, 'IBM Plex Mono', monospace);
+  font-size: calc(9px * var(--kbn-type-scale, 1));
+  letter-spacing: 0.03em;
+  color: #8C7A52;
+  font-style: normal;
+  margin-right: 5px;
+}

@@ -38,8 +38,35 @@ describe('parseMoment', () => {
   it('reads a well-formed moment', () => {
     const result = parseMoment({ host: 'ada', excerpts: [excerpt()] }, empty)
     expect(result.host).toBe('ada')
-    expect(result.excerpts).toEqual([{ at_ms: 1_000, role: 'user', text: 'run the null tests' }])
+    expect(result.excerpts).toEqual([
+      { at_ms: 1_000, role: 'user', text: 'run the null tests', kind: 'prose', name: null },
+    ])
     expect(result.note).toBeUndefined()
+  })
+
+  it('reads the delegation register, and an unknown kind reads as prose', () => {
+    const result = parseMoment(
+      {
+        host: 'ada',
+        excerpts: [
+          excerpt({ kind: 'spawn', name: 'chart-hand', text: 'go and look' }),
+          excerpt({ kind: 'return', name: 'chart-hand', text: 'here is what I found' }),
+          excerpt({ kind: 'semaphore', text: 'not a register anyone draws' }),
+        ],
+      },
+      empty,
+    )
+    expect(result.excerpts.map((e) => [e.kind, e.name])).toEqual([
+      ['spawn', 'chart-hand'],
+      ['return', 'chart-hand'],
+      ['prose', null],
+    ])
+  })
+
+  it('reads a daemon that predates the registers as prose throughout', () => {
+    const result = parseMoment({ host: 'ada', excerpts: [excerpt()] }, empty)
+    expect(result.excerpts[0].kind).toBe('prose')
+    expect(result.excerpts[0].name).toBeNull()
   })
 
   it('drops an excerpt with no text, no role, or a role nobody speaks', () => {

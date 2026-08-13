@@ -84,8 +84,13 @@ import {
   curveField,
   curveGrid,
   fieldPeak,
+  stackDepth,
+  stackPitch,
+  stackSpawns,
   type ActivitySample,
   type CurveField,
+  type SpawnInterval,
+  type SpawnLine,
 } from './densityCurve.js'
 import { createViewEmptyState, createViewPage } from './ViewPage.js'
 import {
@@ -100,6 +105,7 @@ import { formatSpanMinutes, railBounds, shiftCivilDay } from './railTime.js'
 import {
   ACTIVITY_KEY_ITEMS,
   MARK_GLYPH,
+  SPAWN_KEY_LABEL,
   SPINE_KEY_LABEL,
   STATE_GLYPH,
   STATE_KEY_ITEMS,
@@ -435,6 +441,16 @@ export interface DayLane {
    * them rather than hit-testing the paint.
    */
   beats: DayBeat[]
+  /**
+   * The delegations this fiber had aloft today — one interval per subagent,
+   * clipped to nothing and joined exactly as a minute is (through the session
+   * ledger, on the tmux name the daemon stamped).
+   *
+   * Kept apart from the beats because it is not a per-minute fact: a
+   * delegation is a SPAN, and the one question it answers — how many agents
+   * were out at once — cannot be asked of a minute at all.
+   */
+  spawns: SpawnInterval[]
 }
 
 /** One minute of a lane: what happened in it, and where its words are. */
@@ -611,6 +627,7 @@ export function buildDayLanes(
       | 'host'
       | 'hostNote'
       | 'stale'
+      | 'spawns'
     >
     /** The card's own claim, the fallback when no bucket carries a host. */
     cardHost: string
@@ -624,6 +641,7 @@ export function buildDayLanes(
     replies: number
     /** Per-minute counts and transcripts, unmerged — see `DayLane.beats`. */
     beats: Map<number, { kinds: Map<ActivityBucket['k'], number>; sources: (MomentSource | null)[] }>
+    spawns: SpawnInterval[]
   }
   const acc = new Map<string, Acc>()
 
@@ -655,6 +673,7 @@ export function buildDayLanes(
         messages: 0,
         replies: 0,
         beats: new Map(),
+        spawns: [],
       }
       acc.set(key, entry)
     }
@@ -684,6 +703,16 @@ export function buildDayLanes(
     beat.sources.push(momentSource(index, bucket))
   }
 
+  // The delegations, onto the lanes the minutes already built. A spawn never
+  // opens a lane of its own: an interval with no activity under it would be a
+  // rail with a hairline and no curve, which says a fiber was working while
+  // showing that it was not.
+  for (const span of activity.spawns ?? []) {
+    const card = joinBucket(index, span)
+    if (!card) continue
+    acc.get(`fiber:${card.id}`)?.spawns.push(span)
+  }
+
   const lanes: DayLane[] = [...acc.values()].map((entry) => {
     const host = dominantHost(entry.hosts) || entry.cardHost
     return {
@@ -703,6 +732,7 @@ export function buildDayLanes(
           sources: dedupeSources(beat.sources),
         }))
         .sort((a, b) => a.minute - b.minute),
+      spawns: entry.spawns,
     }
   })
 
@@ -1671,6 +1701,14 @@ class DayViewImpl implements TemporalView {
     }
     const peak = fieldPeak([...fields.values()])
 
+    // The delegations, laid out into rows before any lane is drawn: the pitch
+    // the hairlines sit at is a property of the PAGE, like the curve's peak, so
+    // a five-deep fan-out on one lane and a two-deep one on another can be
+    // read against each other down the column.
+    const stacks = new Map<string, SpawnLine[]>()
+    for (const lane of model.lanes) stacks.set(lane.key, stackSpawns(lane.spawns, win))
+    const pitch = stackPitch(stackDepth([...stacks.values()]))
+
     model.lanes.forEach((lane, index) => {
       const row = String(index + 1)
 
@@ -1725,6 +1763,18 @@ class DayViewImpl implements TemporalView {
           buildCurveSvg(field, peak, { frameMinutes: win.minutes }),
         )
       }
+      // One hairline per delegation, stacked down from the top of the rail —
+      // aloft, over the work, which is where they were. An interval whose close
+      // was never recorded is drawn faded: its length is a stub saying one
+      // started, not a claim about how long it ran.
+      for (const line of stacks.get(lane.key) ?? []) {
+        const hair = document.createElement('i')
+        hair.className = `kbn-day-spawn${line.open ? ' kbn-day-spawn-open' : ''}`
+        hair.style.left = pct(line.start)
+        hair.style.width = pct(Math.max(0, line.end - line.start))
+        hair.style.top = `${1 + line.row * pitch}px`
+        rail.append(hair)
+      }
 
       rail.addEventListener('mousemove', (e) => this.showBeatTip(lane, rail, win, e))
       rail.addEventListener('mouseleave', () => this.hideTip())
@@ -1773,6 +1823,9 @@ class DayViewImpl implements TemporalView {
     legend.append(
       ...ACTIVITY_KEY_ITEMS.map(({ kind, label }) => buildKey(DAY_KEY_CLASS[kind], label)),
       buildKey('kbn-day-key-spine', SPINE_KEY_LABEL),
+      ...(model.lanes.some((lane) => lane.spawns.length > 0)
+        ? [buildKey('kbn-day-key-spawn', SPAWN_KEY_LABEL)]
+        : []),
       buildStateKey(),
     )
     chart.append(legend)

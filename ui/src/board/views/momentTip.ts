@@ -138,6 +138,18 @@ const ROLE_GLYPH: Record<MomentExcerpt['role'], string> = {
 }
 
 /**
+ * The delegation register's nibs — an arrow, because these two lines are the
+ * only ones on the slip that have a DIRECTION. A prompt goes out to an agent;
+ * a report comes back from one. The voice glyphs cannot say that (they say who
+ * is speaking, which is the parent both times), and it is the one thing a
+ * reader needs to tell the two halves of a delegation apart at a glance.
+ */
+const DELEGATION_GLYPH: Record<'spawn' | 'return', string> = {
+  spawn: '→',
+  return: '←',
+}
+
+/**
  * Draw one tooltip. Rebuilt rather than patched — it is one small subtree, and
  * a hover that moves between marks must never show a stale half of the last
  * one.
@@ -189,17 +201,34 @@ export function renderTip(host: HTMLElement, tip: SlotTip): void {
     const said = document.createElement('div')
     said.className = 'kbn-tip-said'
     for (const excerpt of tip.detail) {
+      // A missing kind is prose — that is what every excerpt was before the
+      // registers existed, and an older daemon still says it that way.
+      const delegated = excerpt.kind === 'spawn' || excerpt.kind === 'return'
       const line = document.createElement('div')
-      line.className = `kbn-tip-line kbn-tip-line-${excerpt.role}`
+      line.className = delegated
+        ? `kbn-tip-line kbn-tip-deleg kbn-tip-deleg-${excerpt.kind}`
+        : `kbn-tip-line kbn-tip-line-${excerpt.role}`
 
       const glyph = document.createElement('span')
       glyph.className = 'kbn-tip-glyph'
-      glyph.textContent = ROLE_GLYPH[excerpt.role]
+      glyph.textContent = delegated
+        ? DELEGATION_GLYPH[excerpt.kind as 'spawn' | 'return']
+        : ROLE_GLYPH[excerpt.role]
       line.append(glyph)
 
       const text = document.createElement('span')
       text.className = 'kbn-tip-text'
-      text.textContent = excerpt.text
+      // WHO is a separate span, not a prefix on the text: it is the one part of
+      // a delegation line that stays legible when the rest is clamped, and it
+      // wants its own weight. A delegation with no name recoverable simply
+      // carries none — the arrow already says which half of the pair it is.
+      if (delegated && excerpt.name) {
+        const who = document.createElement('span')
+        who.className = 'kbn-tip-who'
+        who.textContent = excerpt.name
+        text.append(who)
+      }
+      text.append(document.createTextNode(excerpt.text))
       line.append(text)
 
       said.append(line)

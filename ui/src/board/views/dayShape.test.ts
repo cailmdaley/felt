@@ -226,6 +226,7 @@ const activity = (
   from_ms: WIN.startMs,
   to_ms: WIN.endMs,
   buckets,
+  spawns: [],
   origins,
 })
 
@@ -324,6 +325,53 @@ describe('the drawn frame — how much of the day gets sheet', () => {
     const closed = card({ runningWorker: undefined, status: 'closed' })
     const closedLanes = buildDayLanes(activity(bucketsAt(240, 480)), [closed], WIN, ledger)
     expect(closedLanes[0].state).toBe('awaitingReview')
+  })
+
+  it('joins delegations to the lane their session names, and drops the rest', () => {
+    const spawn = (s: string | null, startMin: number, endMin: number, open = false) => ({
+      s,
+      cwd: null,
+      tool: 'Agent',
+      start_ms: WIN.startMs + startMin * 60_000,
+      end_ms: WIN.startMs + endMin * 60_000,
+      open,
+      host: null,
+    })
+
+    const feed = {
+      ...activity(bucketsAt(240, 480)),
+      spawns: [
+        spawn(SESSION, 240, 300),
+        spawn(SESSION, 250, 320, true),
+        // No session at all, and a session no ledger row pairs — neither can
+        // name a fiber, so neither is drawn.
+        spawn(null, 240, 300),
+        spawn('some-other-run-shuttle', 240, 300),
+      ],
+    }
+
+    const lanes = buildDayLanes(feed, [card()], WIN)
+    expect(lanes).toHaveLength(1)
+    expect(lanes[0].spawns.map((s) => s.open)).toEqual([false, true])
+  })
+
+  it('a delegation never opens a lane of its own', () => {
+    const feed = {
+      ...activity([]),
+      spawns: [
+        {
+          s: SESSION,
+          cwd: null,
+          tool: 'Agent',
+          start_ms: WIN.startMs,
+          end_ms: WIN.startMs + 60_000,
+          open: false,
+          host: null,
+        },
+      ],
+    }
+
+    expect(buildDayLanes(feed, [card()], WIN)).toEqual([])
   })
 })
 

@@ -148,6 +148,12 @@ export const ACTIVITY_KEY_ITEMS: Array<{ kind: DrawnKind; label: string }> = [
  *  it gets its own line in the key. */
 export const SPINE_KEY_LABEL = 'you sent a message'
 
+/** The third mark, and the only one about a SPAN rather than a moment: one
+ *  hairline per subagent, stacked while they overlap. Its own line in the key
+ *  because a stack of them is the one thing on the rail that counts. */
+export const SPAWN_KEY_LABEL = 'agents aloft'
+
+
 // ── Message tallies ──────────────────────────────────────────────────────────
 
 /**

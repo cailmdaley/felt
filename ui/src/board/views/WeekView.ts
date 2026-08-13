@@ -1164,6 +1164,7 @@ class WeekView implements TemporalView {
         from_ms: win.fromMs,
         to_ms: win.fromMs,
         buckets: [],
+        spawns: [],
       })
     }
 

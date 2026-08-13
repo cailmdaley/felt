@@ -63,11 +63,33 @@ export interface ActivityBucket {
   host?: string | null
 }
 
+/**
+ * One DELEGATION, as an interval — a subagent aloft between two instants.
+ *
+ * It carries a bucket's identity (`s`, `cwd`, `host`) rather than a fiber's,
+ * so it joins to a lane through exactly the same ledger a minute does. `open`
+ * marks an interval whose close was never recorded: the daemon draws those as
+ * a short stub, and its length is a mark that one STARTED, not a duration.
+ */
+export interface SpawnSpan {
+  s: string | null
+  cwd: string | null
+  tool: string
+  start_ms: number
+  end_ms: number
+  open: boolean
+  host?: string | null
+}
+
 export interface ActivityResult {
   host: string
   from_ms: number
   to_ms: number
   buckets: ActivityBucket[]
+  /** The window's delegations. Empty on a daemon that predates them, which is
+   *  indistinguishable from a window in which nobody delegated — and both draw
+   *  nothing, which is the right answer to either. */
+  spawns: SpawnSpan[]
   origins?: TemporalOrigins
 }
 
@@ -240,11 +262,25 @@ export interface SessionPairing {
   host: string | null
 }
 
-/** One excerpt from a harness transcript: what was said, and when. */
+/** Which REGISTER an excerpt belongs to: the conversation's own voices, a
+ *  delegation going out, or its report coming back. */
+export type MomentKind = 'prose' | 'spawn' | 'return'
+
+/**
+ * One excerpt from a harness transcript: what was said, when, and in which
+ * register. `name` is the agent's, on the two delegation kinds only.
+ *
+ * `kind` is OPTIONAL on the type and never absent from a parsed response: a
+ * daemon older than the registers sends excerpts with no kind at all, and
+ * those are prose — which is what every excerpt was before this existed. The
+ * renderer therefore reads a missing kind as prose rather than branching.
+ */
 export interface MomentExcerpt {
   at_ms: number
   role: 'user' | 'assistant' | 'notification'
   text: string
+  kind?: MomentKind
+  name?: string | null
 }
 
 export interface MomentResult {
@@ -428,6 +464,7 @@ export function createTemporalFetchers(shuttleBase: string): TemporalFetchers {
           from_ms: fromMs,
           to_ms: toMs,
           buckets: [],
+          spawns: [],
           origins: {},
         }
         try {
@@ -525,6 +562,8 @@ export function createTemporalFetchers(shuttleBase: string): TemporalFetchers {
 
 const MOMENT_ROLES = new Set<MomentExcerpt['role']>(['user', 'assistant', 'notification'])
 
+const MOMENT_KINDS = new Set<MomentKind>(['prose', 'spawn', 'return'])
+
 /** Coerce a wire body into a MomentResult, dropping anything malformed. A
  *  half-excerpt is dropped rather than repaired: an excerpt with no text is
  *  not a quieter excerpt, it is not one. */
@@ -538,10 +577,15 @@ export function parseMoment(body: unknown, fallback: MomentResult): MomentResult
     const value = text(entry.text)
     const role = text(entry.role)
     if (!value || !role || !MOMENT_ROLES.has(role as MomentExcerpt['role'])) continue
+    // A daemon that predates the registers sends no `kind`; its excerpts are
+    // prose, which is exactly what they always were.
+    const kind = text(entry.kind)
     excerpts.push({
       at_ms: typeof entry.at_ms === 'number' && Number.isFinite(entry.at_ms) ? entry.at_ms : 0,
       role: role as MomentExcerpt['role'],
       text: value,
+      kind: kind && MOMENT_KINDS.has(kind as MomentKind) ? (kind as MomentKind) : 'prose',
+      name: text(entry.name),
     })
   }
   const note = text(body.note)
@@ -582,8 +626,42 @@ function parseActivity(body: unknown, fallback: ActivityResult): ActivityResult 
     from_ms: typeof body.from_ms === 'number' ? body.from_ms : fallback.from_ms,
     to_ms: typeof body.to_ms === 'number' ? body.to_ms : fallback.to_ms,
     buckets,
+    spawns: parseSpawns(body.spawns, host),
     origins: parseOrigins(body.origins, host),
   }
+}
+
+/**
+ * Coerce the wire's `spawns`, dropping anything malformed.
+ *
+ * An interval with no readable pair of instants is dropped rather than
+ * repaired: half an interval is not a shorter delegation, it is not one. An
+ * inverted pair is dropped for the same reason.
+ */
+export function parseSpawns(value: unknown, host: string): SpawnSpan[] {
+  if (!Array.isArray(value)) return []
+  const out: SpawnSpan[] = []
+  for (const entry of value) {
+    if (!isRecord(entry)) continue
+    const startMs = entry.start_ms
+    const endMs = entry.end_ms
+    const tool = text(entry.tool)
+    if (typeof startMs !== 'number' || !Number.isFinite(startMs)) continue
+    if (typeof endMs !== 'number' || !Number.isFinite(endMs)) continue
+    if (endMs < startMs || !tool) continue
+    out.push({
+      s: text(entry.s),
+      cwd: text(entry.cwd),
+      tool,
+      start_ms: startMs,
+      end_ms: endMs,
+      open: entry.open === true,
+      // Same rule the buckets follow: the composite stamps each item, the
+      // single-host route stamps only the response.
+      host: text(entry.host) ?? (host || null),
+    })
+  }
+  return out
 }
 
 /**

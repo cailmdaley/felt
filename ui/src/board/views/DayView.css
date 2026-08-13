@@ -263,6 +263,52 @@ button.kbn-day-lanename:focus-visible {
 }
 
 
+/* THE DELEGATIONS ALOFT — one mark per subagent, stacked down from the top of
+   the rail so the depth of a fan-out is legible as a depth.
+
+   A SPAN NEEDS A START, or it reads as a rule. The first shape tried was a
+   plain hairline, and a three-hour delegation drawn that way looked exactly
+   like a border on the lane — the eye files a long horizontal line as chrome
+   before it reads it as data. So the mark is a tick at the moment the agent
+   was sent, trailing a dashed line for as long as it was out: the tick says
+   WHEN, the dash says HOW LONG, and neither can be mistaken for a rule.
+
+   Over the curve, not under it: these agents were working on top of the work
+   the wash is made of. The pigment is the wash's own cobalt stepped darker, so
+   a mark laid over the paint still separates from it and no new hue enters the
+   page for a fact the existing one already owns. */
+.kbn-day-spawn {
+  position: absolute;
+  height: 3px;
+  min-width: 1px;
+  pointer-events: none;
+}
+.kbn-day-spawn::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 1px;
+  height: 1px;
+  background: repeating-linear-gradient(90deg, #2E4680 0 3px, transparent 3px 6px);
+  opacity: 0.62;
+}
+/* The launch. One pixel wide and the mark's full height — a nib, not a bar. */
+.kbn-day-spawn::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 1px;
+  height: 3px;
+  background: #2E4680;
+  opacity: 0.8;
+}
+/* Never closed. The tick still stands at full weight — the agent WAS sent, and
+   that is recorded — while the trail fades, because its length is a stub the
+   daemon chose rather than a duration anybody wrote down. */
+.kbn-day-spawn-open::before { opacity: 0.22; }
+
 .kbn-day-axis {
   grid-column: 2;
   position: relative;
@@ -355,6 +401,18 @@ button.kbn-day-lanename:focus-visible {
   width: 2px;
   height: 12px;
   background: var(--curve-spine);
+}
+
+/* Two stacked hairlines — the key teaches the channel's grammar (they stack)
+   at the same time as its pigment. */
+.kbn-day-key-spawn {
+  width: 12px;
+  height: 5px;
+  background:
+    repeating-linear-gradient(90deg, #2E4680 0 3px, transparent 3px 6px) top left / 100% 1px no-repeat,
+    repeating-linear-gradient(90deg, #2E4680 0 3px, transparent 3px 6px) bottom left / 72% 1px no-repeat,
+    linear-gradient(#2E4680, #2E4680) top left / 1px 100% no-repeat;
+  opacity: 0.72;
 }
 
 /* ── The day, by fiber ───────────────────────────────────────────────────── */

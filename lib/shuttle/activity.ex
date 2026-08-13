@@ -132,6 +132,38 @@ defmodule Shuttle.Activity do
   call that began before the window still fills its in-window minutes; fills
   are clipped to the window.
 
+  ## Delegations as intervals: the `spawns` list
+
+  The buckets say a minute was busy. They cannot say the session had five
+  agents aloft in it — a fan-out and a long solo `Bash` are the same ink.
+
+  So the same pairing that fills a tool call's interior also emits, separately,
+  one interval per **delegation**: a `pre_tool_use` on `Agent` / `Task` /
+  `Workflow` opens it, the matching `post_tool_use` closes it. These do not
+  touch the buckets at all — they travel beside them as `spawns`, each
+  `%{s:, cwd:, tool:, start_ms:, end_ms:, open:}`, carrying the same
+  `{tmuxSession, cwd}` identity a bucket does so a view joins them through the
+  same ledger.
+
+  **Concurrency is the point, so nesting is modelled here** where the fill
+  refuses to model it: a session holds a QUEUE of open delegations, and a
+  `post` closes the OLDEST of them. Which post belongs to which pre is not
+  knowable — the event stream carries no tool-use id — but the multiset of
+  intervals is right either way, and that multiset is what a stack of lines
+  draws. A `session_start` closes everything the session had open, at the
+  restart.
+
+  **Most delegations never close.** An agent handed off to run in the
+  background returns no `post_tool_use` at all (measured: 433 opens to 21
+  closes on this host's stream). Drawing those at the cap would be inventing
+  hours of duration, so an unclosed delegation is drawn as a STUB —
+  `@open_spawn_minutes` long, marked `open: true` — which claims only that one
+  started here. A closed pair is drawn at its true length, capped at
+  `@max_spawn_minutes` against a pre that a much later post happened to
+  collect.
+
+  Intervals are clipped to the window and only those overlapping it are served.
+
   ## Which files, and why the rotated one is conditional
 
   `felt hook event` rotates the stream at 64 MB: the live file is renamed to
@@ -178,6 +210,23 @@ defmodule Shuttle.Activity do
   @max_range_days 120
   @max_range_ms @max_range_days * 24 * 60 * 60 * 1_000
 
+  # The tools whose call hands work to an agent of its own. Same list the
+  # transcript reader uses for its delegation register (`Shuttle.Moment`), for
+  # the same reason: these are the calls whose subject is another agent.
+  @spawn_tools ~w(Agent Task Workflow)
+
+  # A closed delegation's ceiling. Far wider than the fill's 30 minutes — a
+  # subagent working for an hour is ordinary, and this interval IS the claim
+  # about duration rather than a bridge across missing marks. It binds only on
+  # a pre that a much later post collected.
+  @max_spawn_minutes 180
+  @max_spawn_ms @max_spawn_minutes * @minute_ms
+
+  # How long an UNCLOSED delegation is drawn. Deliberately short: it is a mark
+  # that one started, not a claim about how long it ran. See the moduledoc.
+  @open_spawn_minutes 5
+  @open_spawn_ms @open_spawn_minutes * @minute_ms
+
   @typedoc "One aggregated bucket, in the wire shape the endpoint serves."
   @type bucket :: %{
           m: integer(),
@@ -187,22 +236,52 @@ defmodule Shuttle.Activity do
           n: pos_integer()
         }
 
+  @typedoc """
+  One delegation, as an interval. `s`/`cwd` are the bucket identity it shares,
+  so a view joins it through the same ledger; `open` marks an interval whose
+  close was never recorded and whose length is therefore a stub rather than a
+  duration.
+  """
+  @type spawn_span :: %{
+          s: String.t() | nil,
+          cwd: String.t() | nil,
+          tool: String.t(),
+          start_ms: integer(),
+          end_ms: integer(),
+          open: boolean()
+        }
+
   @doc """
-  Buckets for the inclusive window `from_ms..to_ms`, sorted by
-  `{m, s, cwd, k}`.
+  Everything the stream says about the inclusive window `from_ms..to_ms`: the
+  `buckets`, sorted by `{m, s, cwd, k}`, and the `spawns`, sorted by
+  `{start_ms, s, cwd}`.
 
   Returns `{:error, :inverted_range}` when `to_ms < from_ms` and
   `{:error, :range_too_wide}` past #{@max_range_days} days. A missing events
-  file is not an error — it yields `{:ok, []}`.
+  file is not an error — it yields empty lists.
 
   Opts (for tests): `:events_file`, the live stream path; its rotated sibling
   is that path plus `.1`, exactly as the writer names it.
   """
+  @spec window(integer(), integer(), keyword()) ::
+          {:ok, %{buckets: [bucket()], spawns: [spawn_span()]}}
+          | {:error, :inverted_range | :range_too_wide}
+  def window(from_ms, to_ms, opts \\ []) when is_integer(from_ms) and is_integer(to_ms) do
+    case check_range(from_ms, to_ms) do
+      :ok -> {:ok, scan(from_ms, to_ms, opts)}
+      error -> error
+    end
+  end
+
+  @doc """
+  The window's buckets alone — `window/3` for a caller that draws no
+  delegations.
+  """
   @spec buckets(integer(), integer(), keyword()) ::
           {:ok, [bucket()]} | {:error, :inverted_range | :range_too_wide}
   def buckets(from_ms, to_ms, opts \\ []) when is_integer(from_ms) and is_integer(to_ms) do
-    case check_range(from_ms, to_ms) do
-      :ok -> {:ok, scan(from_ms, to_ms, opts)}
+    case window(from_ms, to_ms, opts) do
+      {:ok, %{buckets: buckets}} -> {:ok, buckets}
       error -> error
     end
   end
@@ -236,13 +315,23 @@ defmodule Shuttle.Activity do
     live
     |> files_to_scan(from_ms)
     |> Enum.reduce(new_acc(), &tally_file(&1, from_ms, to_ms, &2))
-    |> emit()
+    |> emit(from_ms, to_ms)
   end
 
   # `tally` counts buckets; `spells` remembers which identities sit inside an
   # unanswered waiting spell; `pending` holds each session's open tool call;
-  # `filled` names the buckets that exist only because an interval was drawn.
-  defp new_acc, do: %{tally: %{}, spells: %{}, pending: %{}, filled: MapSet.new()}
+  # `filled` names the buckets that exist only because an interval was drawn;
+  # `aloft` holds each session's QUEUE of open delegations and `spans` the ones
+  # that have closed.
+  defp new_acc,
+    do: %{
+      tally: %{},
+      spells: %{},
+      pending: %{},
+      filled: MapSet.new(),
+      aloft: %{},
+      spans: []
+    }
 
   # Rotated (older) first, live second. Oldest-first is now load-bearing, not
   # just cache-friendly: spell state is a forward fold, so the files must be
@@ -287,14 +376,15 @@ defmodule Shuttle.Activity do
       # can reach back across the boundary.
       {:ok, %{"timestamp" => ts, "type" => type} = event}
       when is_integer(ts) and is_binary(type) and ts > to_ms ->
-        track_span(acc, type, event, ts, from_ms, to_ms)
+        acc |> track_span(type, event, ts, from_ms, to_ms) |> track_spawn(type, event, ts)
 
       {:ok, %{"timestamp" => ts, "type" => type} = event}
       when is_integer(ts) and is_binary(type) ->
         identity = {presence(event["tmuxSession"]), presence(event["cwd"])}
         {kinds, spells} = classify(type, event, identity, acc.spells)
         acc = %{acc | spells: spells}
-        acc = track_span(acc, type, event, ts, from_ms, to_ms)
+        acc =
+          acc |> track_span(type, event, ts, from_ms, to_ms) |> track_spawn(type, event, ts)
 
         if kinds == [] or ts < from_ms do
           acc
@@ -363,6 +453,67 @@ defmodule Shuttle.Activity do
 
   defp track_span(acc, _type, _event, _ts, _from_ms, _to_ms), do: acc
 
+  # ── Delegations as intervals ───────────────────────────────────────────────
+  #
+  # A queue per session, not one slot: a five-way fan-out is five delegations
+  # aloft at once, and collapsing them would erase exactly the fact these
+  # intervals exist to show. Windowing is left to `emit_spans/3` — an interval
+  # that opened before the window or closes after it still ran inside it.
+
+  defp track_spawn(acc, "pre_tool_use", event, ts) do
+    with sid when is_binary(sid) <- presence(event["sessionId"]),
+         tool when tool in @spawn_tools <- event["tool"] do
+      identity = {presence(event["tmuxSession"]), presence(event["cwd"])}
+      open = Map.get(acc.aloft, sid, []) ++ [{ts, identity, tool}]
+      %{acc | aloft: Map.put(acc.aloft, sid, open)}
+    else
+      _ -> acc
+    end
+  end
+
+  defp track_spawn(acc, "post_tool_use", event, ts) do
+    with sid when is_binary(sid) <- presence(event["sessionId"]),
+         tool when tool in @spawn_tools <- event["tool"],
+         [{start_ts, identity, _tool} | rest] <- Map.get(acc.aloft, sid, []) do
+      %{
+        acc
+        | aloft: Map.put(acc.aloft, sid, rest),
+          spans: [span(start_ts, min(ts, start_ts + @max_spawn_ms), identity, tool, false) | acc.spans]
+      }
+    else
+      _ -> acc
+    end
+  end
+
+  # A restart ends every delegation the session was holding, at the restart.
+  # Whatever those agents were doing, this session was no longer waiting on it.
+  defp track_spawn(acc, "session_start", event, ts) do
+    case presence(event["sessionId"]) do
+      nil ->
+        acc
+
+      sid ->
+        closed =
+          for {start_ts, identity, tool} <- Map.get(acc.aloft, sid, []),
+              do: span(start_ts, min(ts, start_ts + @max_spawn_ms), identity, tool, false)
+
+        %{acc | aloft: Map.delete(acc.aloft, sid), spans: closed ++ acc.spans}
+    end
+  end
+
+  defp track_spawn(acc, _type, _event, _ts), do: acc
+
+  defp span(start_ms, end_ms, {session, cwd}, tool, open?) do
+    %{
+      s: session,
+      cwd: cwd,
+      tool: tool,
+      start_ms: start_ms,
+      end_ms: max(end_ms, start_ms),
+      open: open?
+    }
+  end
+
   # The minutes strictly between the two stamped ones, capped and clipped.
   defp fill_interior(acc, start_ts, end_ts, {session, cwd}, from_ms, to_ms) do
     first = floor_minute(start_ts) + @minute_ms
@@ -428,9 +579,27 @@ defmodule Shuttle.Activity do
   # Sorted so a polling client can diff two responses positionally. `nil` is an
   # atom and atoms precede binaries in Erlang term order, so unattributed
   # buckets lead their minute — arbitrary, but stable.
-  defp emit(%{tally: tally}) do
-    tally
-    |> Enum.map(fn {{m, s, cwd, k}, n} -> %{m: m, s: s, cwd: cwd, k: k, n: n} end)
-    |> Enum.sort_by(&{&1.m, &1.s, &1.cwd, &1.k})
+  defp emit(%{tally: tally} = acc, from_ms, to_ms) do
+    buckets =
+      tally
+      |> Enum.map(fn {{m, s, cwd, k}, n} -> %{m: m, s: s, cwd: cwd, k: k, n: n} end)
+      |> Enum.sort_by(&{&1.m, &1.s, &1.cwd, &1.k})
+
+    %{buckets: buckets, spawns: emit_spans(acc, from_ms, to_ms)}
+  end
+
+  # The closed intervals plus a stub for each delegation still aloft at the end
+  # of the scan, all clipped to the window and sorted so a polling client can
+  # diff two responses positionally.
+  defp emit_spans(%{spans: spans, aloft: aloft}, from_ms, to_ms) do
+    stubs =
+      for {_sid, open} <- aloft,
+          {start_ts, identity, tool} <- open,
+          do: span(start_ts, start_ts + @open_spawn_ms, identity, tool, true)
+
+    (spans ++ stubs)
+    |> Enum.filter(&(&1.start_ms <= to_ms and &1.end_ms >= from_ms))
+    |> Enum.map(&%{&1 | start_ms: max(&1.start_ms, from_ms), end_ms: min(&1.end_ms, to_ms)})
+    |> Enum.sort_by(&{&1.start_ms, &1.end_ms, &1.s, &1.cwd})
   end
 end

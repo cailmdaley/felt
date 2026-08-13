@@ -18,6 +18,9 @@ import {
   edgePath,
   fieldPeak,
   smear,
+  stackDepth,
+  stackPitch,
+  stackSpawns,
   spineAlphas,
   spineHeights,
   type ActivitySample,
@@ -275,5 +278,74 @@ describe('spineAlphas — rationing the eye, not the record', () => {
 
   it('is empty for no spines', () => {
     expect(spineAlphas([])).toEqual([])
+  })
+})
+
+describe('stackSpawns', () => {
+  const frame = { startMs: 0, endMs: 100_000 }
+  const span = (start: number, end: number, open = false) => ({
+    start_ms: start,
+    end_ms: end,
+    open,
+  })
+
+  it('gives one delegation one line at the bottom row', () => {
+    expect(stackSpawns([span(25_000, 75_000)], frame)).toEqual([
+      { start: 0.25, end: 0.75, row: 0, open: false },
+    ])
+  })
+
+  it('stacks overlapping delegations and reuses a row once one has ended', () => {
+    const lines = stackSpawns(
+      [span(0, 50_000), span(10_000, 60_000), span(20_000, 30_000), span(70_000, 80_000)],
+      frame,
+    )
+    // Three were aloft at 20s; the fourth starts after all of them ended and
+    // so takes the row that freed up first.
+    expect(lines.map((l) => l.row)).toEqual([0, 1, 2, 0])
+  })
+
+  it('does not count two that merely touch as concurrent', () => {
+    const lines = stackSpawns([span(0, 50_000), span(50_000, 90_000)], frame)
+    expect(lines.map((l) => l.row)).toEqual([0, 0])
+  })
+
+  it('clips a delegation that straddles the frame and drops one outside it', () => {
+    const lines = stackSpawns(
+      [span(-40_000, 20_000), span(80_000, 400_000), span(200_000, 300_000)],
+      frame,
+    )
+    expect(lines.map((l) => [l.start, l.end])).toEqual([
+      [0, 0.2],
+      [0.8, 1],
+    ])
+  })
+
+  it('carries the open flag through, since its length is a stub', () => {
+    expect(stackSpawns([span(0, 5_000, true)], frame)[0].open).toBe(true)
+  })
+
+  it('is empty for no delegations', () => {
+    expect(stackSpawns([], frame)).toEqual([])
+  })
+})
+
+describe('stackDepth and stackPitch', () => {
+  it('reads the deepest stack anywhere on the page', () => {
+    expect(stackDepth([[], [{ start: 0, end: 1, row: 0, open: false }]])).toBe(1)
+    expect(
+      stackDepth([
+        [{ start: 0, end: 1, row: 2, open: false }],
+        [{ start: 0, end: 1, row: 0, open: false }],
+      ]),
+    ).toBe(3)
+  })
+
+  it('holds the pitch open while the stack is shallow and closes it as it deepens', () => {
+    expect(stackPitch(0)).toBe(0)
+    expect(stackPitch(1)).toBe(0)
+    expect(stackPitch(3)).toBe(2)
+    expect(stackPitch(20)).toBeLessThan(2)
+    expect(stackPitch(200)).toBeGreaterThanOrEqual(1)
   })
 })

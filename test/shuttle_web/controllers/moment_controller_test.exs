@@ -175,6 +175,218 @@ defmodule ShuttleWeb.MomentControllerTest do
     end
   end
 
+  describe "Shuttle.Moment — the delegation register" do
+    defp spawn_block(id, tool, input),
+      do: %{"type" => "tool_use", "id" => id, "name" => tool, "input" => input}
+
+    defp result(ms, id, text),
+      do: %{
+        "type" => "user",
+        "timestamp" => iso(ms),
+        "message" => %{
+          "content" => [%{"type" => "tool_result", "tool_use_id" => id, "content" => text}]
+        }
+      }
+
+    test "a spawn call becomes an excerpt naming the agent and quoting its prompt" do
+      root =
+        write_tree([
+          {"-slug", @session,
+           [
+             assistant(@t0 + 1_000, [
+               spawn_block("tu_1", "Agent", %{
+                 "name" => "chart-hand",
+                 "subagent_type" => "Explore",
+                 "prompt" => "Trace the lane admission chain and report back."
+               })
+             ])
+           ]}
+        ])
+
+      assert [excerpt] = Moment.excerpts(@session, @t0, @t0 + 10_000, root: root)
+
+      assert excerpt.kind == "spawn"
+      assert excerpt.name == "chart-hand"
+      assert excerpt.text == "Trace the lane admission chain and report back."
+      assert excerpt.role == "assistant"
+    end
+
+    test "a spawn with no name of its own falls back to its role, then to its errand" do
+      root =
+        write_tree([
+          {"-slug", @session,
+           [
+             assistant(@t0 + 1_000, [
+               spawn_block("tu_1", "Task", %{"subagent_type" => "Explore", "prompt" => "look"})
+             ]),
+             assistant(@t0 + 2_000, [
+               spawn_block("tu_2", "Workflow", %{"description" => "Sweep the views", "prompt" => "go"})
+             ])
+           ]}
+        ])
+
+      assert [first, second] = Moment.excerpts(@session, @t0, @t0 + 10_000, root: root)
+      assert first.name == "Explore"
+      assert second.name == "Sweep the views"
+    end
+
+    test "an ordinary tool call is not a delegation" do
+      root =
+        write_tree([
+          {"-slug", @session,
+           [
+             assistant(@t0 + 1_000, [
+               spawn_block("tu_1", "Bash", %{"command" => "ls", "prompt" => "not a prompt"})
+             ])
+           ]}
+        ])
+
+      assert Moment.excerpts(@session, @t0, @t0 + 10_000, root: root) == []
+    end
+
+    test "a tool result closing a spawn is the report coming back" do
+      root =
+        write_tree([
+          {"-slug", @session,
+           [
+             assistant(@t0 + 1_000, [
+               spawn_block("tu_1", "Agent", %{"name" => "chart-hand", "prompt" => "go"}),
+               spawn_block("tu_2", "Agent", %{"name" => "type-pass", "prompt" => "also go"})
+             ]),
+             result(@t0 + 2_000, "tu_1", "Found it: the lane never joined a ledger row."),
+             result(@t0 + 3_000, "tu_9", "an ordinary tool's result, not a report")
+           ]}
+        ])
+
+      assert [_spawn, _spawn2, report] = Moment.excerpts(@session, @t0, @t0 + 10_000, root: root)
+      assert report.kind == "return"
+      assert report.name == "chart-hand"
+      assert report.text == "Found it: the lane never joined a ledger row."
+      assert report.role == "user"
+    end
+
+    test "the spawn that named an agent may sit outside the window its report lands in" do
+      root =
+        write_tree([
+          {"-slug", @session,
+           [
+             assistant(@t0, [spawn_block("tu_1", "Agent", %{"name" => "chart-hand", "prompt" => "go"})]),
+             result(@t0 + 60_000, "tu_1", "done, and here is what I found")
+           ]}
+        ])
+
+      assert [report] = Moment.excerpts(@session, @t0 + 30_000, @t0 + 90_000, root: root)
+      assert report.name == "chart-hand"
+    end
+
+    test "a launch receipt is not a report" do
+      root =
+        write_tree([
+          {"-slug", @session,
+           [
+             assistant(@t0, [spawn_block("tu_1", "Agent", %{"name" => "chart-hand", "prompt" => "go"})]),
+             result(
+               @t0 + 1_000,
+               "tu_1",
+               "Spawned successfully. (This tool result is internal metadata — never quote it.)"
+             )
+           ]}
+        ])
+
+      assert [only] = Moment.excerpts(@session, @t0, @t0 + 10_000, root: root)
+      assert only.kind == "spawn"
+    end
+
+    test "a task notification is a report, named by the quotation in its summary" do
+      text = """
+      <task-notification>
+      <task-id>abc123</task-id>
+      <status>completed</status>
+      <summary>Agent "Explain the moment words" finished</summary>
+      <result>The chain is bucket → ledger → transcript.</result>
+      </task-notification>
+      """
+
+      root = write_tree([{"-slug", @session, [user(@t0 + 1_000, text)]}])
+
+      assert [report] = Moment.excerpts(@session, @t0, @t0 + 10_000, root: root)
+      assert report.kind == "return"
+      assert report.name == "Explain the moment words"
+      assert report.text == "The chain is bucket → ledger → transcript."
+    end
+
+    test "a teammate message is a report, and an idle ping is not" do
+      report_text = """
+      Another Claude session sent a message:
+      <teammate-message teammate_id="type-pass" summary="done">
+      Typography pass done. Nothing committed.
+      </teammate-message>
+      """
+
+      idle = """
+      <teammate-message teammate_id="type-pass">
+      {"type":"idle_notification","from":"type-pass"}
+      </teammate-message>
+      """
+
+      root =
+        write_tree([
+          {"-slug", @session, [user(@t0 + 1_000, report_text), user(@t0 + 2_000, idle)]}
+        ])
+
+      assert [report] = Moment.excerpts(@session, @t0, @t0 + 10_000, root: root)
+      assert report.name == "type-pass"
+      assert report.text == "Typography pass done. Nothing committed."
+    end
+
+    test "sidechain records say nothing — the spawn/return pair is the summary" do
+      root =
+        write_tree([
+          {"-slug", @session,
+           [
+             Map.put(user(@t0 + 1_000, "the subagent's own prompt"), "isSidechain", true),
+             Map.put(assistant(@t0 + 2_000, [%{"type" => "text", "text" => "its own reply"}]),
+               "isSidechain",
+               true
+             ),
+             user(@t0 + 3_000, "the parent speaking")
+           ]}
+        ])
+
+      assert [only] = Moment.excerpts(@session, @t0, @t0 + 10_000, root: root)
+      assert only.text == "the parent speaking"
+      assert only.kind == "prose"
+    end
+
+    test "a delegation is cut shorter than prose, and a full fetch relaxes both" do
+      long = String.duplicate("mot ", 400)
+
+      root =
+        write_tree([
+          {"-slug", @session,
+           [assistant(@t0 + 1_000, [spawn_block("tu_1", "Agent", %{"name" => "x", "prompt" => long})])]}
+        ])
+
+      assert [brief] = Moment.excerpts(@session, @t0, @t0 + 10_000, root: root)
+      assert String.length(brief.text) == 200
+
+      assert [full] =
+               Moment.excerpts(@session, @t0, @t0 + 10_000,
+                 root: root,
+                 max_chars: Moment.max_chars(true)
+               )
+
+      assert String.length(full.text) > 1_000
+    end
+
+    test "prose carries the register too, so a client never has to guess" do
+      root = default_tree()
+
+      assert Moment.excerpts(@session, @t0, @t0 + 10_000, root: root)
+             |> Enum.all?(&(&1.kind == "prose" and is_nil(&1.name)))
+    end
+  end
+
   describe "Shuttle.Moment.tool_summary/1 (the wordless minute's answer)" do
     test "names the tools in order, deduped with counts" do
       assert Moment.tool_summary([{"Bash", nil}, {"Read", nil}, {"Bash", nil}, {"Read", nil},

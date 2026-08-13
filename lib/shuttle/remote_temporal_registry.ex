@@ -117,7 +117,7 @@ defmodule Shuttle.RemoteTemporalRegistry do
 
   @doc """
   The cached temporal entries keyed by remote name. Each value carries
-  `:activity_buckets`, `:activity_window`, `:sessions`, `:commits`,
+  `:activity_buckets`, `:activity_spawns`, `:activity_window`, `:sessions`, `:commits`,
   `:spend`, `:last_polled_at`, `:last_error`, and
   `:stale`.
 
@@ -341,7 +341,8 @@ defmodule Shuttle.RemoteTemporalRegistry do
     %{
       activity:
         fetch(client, Remote.activity_url(remote, from_ms, to_ms), etags[:activity], timeout_ms,
-          key: "buckets"
+          key: "buckets",
+          also: ["spawns"]
         ),
       sessions:
         fetch(client, Remote.sessions_url(remote, 0), etags[:sessions], timeout_ms,
@@ -360,13 +361,14 @@ defmodule Shuttle.RemoteTemporalRegistry do
   # the unconditional `get/2` falls back to it — correct, just without the 304.
   defp fetch(client, url, etag, timeout_ms, opts) do
     key = Keyword.fetch!(opts, :key)
+    also = Keyword.get(opts, :also, [])
 
     case conditional_get(client, url, etag, timeout_ms) do
       {:ok, 304, _headers, _body} ->
         {:ok, :not_modified}
 
       {:ok, status, headers, body} when status in 200..299 ->
-        decode(body, key, header_value(headers, "etag"))
+        decode(body, key, also, header_value(headers, "etag"))
 
       {:ok, status, _headers, _body} ->
         {:error, {:http_status, status}}
@@ -389,12 +391,17 @@ defmodule Shuttle.RemoteTemporalRegistry do
   end
 
   # A well-formed envelope missing the list key is zero items, not a transport
-  # failure — a host that has never run a worker serves exactly that.
-  defp decode(body, key, etag) do
+  # failure — a host that has never run a worker serves exactly that. `also`
+  # names the envelope's SIDE lists (activity's `spawns`), which are carried in
+  # a map beside the primary one; a remote too old to serve one simply has none.
+  defp decode(body, key, also, etag) do
     case Jason.decode(body) do
-      {:ok, %{^key => items}} when is_list(items) -> {:ok, {items, etag}}
-      {:ok, %{}} -> {:ok, {[], etag}}
-      _ -> {:error, :malformed_json}
+      {:ok, %{} = envelope} ->
+        items = list_or_empty(Map.get(envelope, key))
+        {:ok, {items, Map.new(also, &{&1, list_or_empty(Map.get(envelope, &1))}), etag}}
+
+      _ ->
+        {:error, :malformed_json}
     end
   end
 
@@ -407,6 +414,7 @@ defmodule Shuttle.RemoteTemporalRegistry do
   defp initial_entry(%Remote{} = remote) do
     %{
       activity_buckets: [],
+      activity_spawns: [],
       activity_window: nil,
       sessions: [],
       commits: [],
@@ -465,18 +473,23 @@ defmodule Shuttle.RemoteTemporalRegistry do
   defp apply_feed(entry, _feed, {:ok, :not_modified}, _window), do: entry
   defp apply_feed(entry, _feed, {:error, _reason}, _window), do: entry
 
-  defp apply_feed(entry, feed, {:ok, {items, etag}}, window) do
+  defp apply_feed(entry, feed, {:ok, {items, extras, etag}}, window) do
     entry
-    |> put_items(feed, items, window)
+    |> put_items(feed, items, extras, window)
     |> Map.put(:etags, Map.put(entry.etags || %{}, feed, etag))
   end
 
-  defp put_items(entry, :activity, items, window),
-    do: %{entry | activity_buckets: items, activity_window: window}
+  defp put_items(entry, :activity, items, extras, window),
+    do: %{
+      entry
+      | activity_buckets: items,
+        activity_spawns: Map.get(extras, "spawns", []),
+        activity_window: window
+    }
 
-  defp put_items(entry, :sessions, items, _window), do: %{entry | sessions: items}
-  defp put_items(entry, :commits, items, _window), do: %{entry | commits: items}
-  defp put_items(entry, :spend, items, _window), do: %{entry | spend: items}
+  defp put_items(entry, :sessions, items, _extras, _window), do: %{entry | sessions: items}
+  defp put_items(entry, :commits, items, _extras, _window), do: %{entry | commits: items}
+  defp put_items(entry, :spend, items, _extras, _window), do: %{entry | spend: items}
 
   defp record_failure(entries, name, reason, now) do
     case Map.get(entries, name) do
@@ -494,6 +507,7 @@ defmodule Shuttle.RemoteTemporalRegistry do
       {name,
        %{
          activity_buckets: entry.activity_buckets,
+         activity_spawns: entry.activity_spawns,
          activity_window: entry.activity_window,
          sessions: entry.sessions,
          commits: entry.commits,
@@ -548,6 +562,7 @@ defmodule Shuttle.RemoteTemporalRegistry do
   defp encode_entry(entry) do
     %{
       "activity_buckets" => entry.activity_buckets,
+      "activity_spawns" => entry.activity_spawns,
       "activity_window" => encode_window(entry.activity_window),
       "sessions" => entry.sessions,
       "commits" => entry.commits,
@@ -599,6 +614,7 @@ defmodule Shuttle.RemoteTemporalRegistry do
     %{
       initial_entry(remote)
       | activity_buckets: list_or_empty(persisted["activity_buckets"]),
+        activity_spawns: list_or_empty(persisted["activity_spawns"]),
         activity_window: decode_window(persisted["activity_window"]),
         sessions: list_or_empty(persisted["sessions"]),
         commits: list_or_empty(persisted["commits"]),

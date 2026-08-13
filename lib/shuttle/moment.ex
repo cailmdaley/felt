@@ -24,6 +24,41 @@ defmodule Shuttle.Moment do
     * `"notification"` — `type: "system"` records with string content (bridge
       status, hook notices). Machine speech, kept separate from either voice.
 
+  ## The third register: delegation
+
+  A session that fans work out to subagents says almost nothing in its own
+  voice while they run — the transcript's own prose goes quiet exactly where
+  the most work is happening. What it does hold is the two ends of each
+  delegation, and those are the readable summary of it:
+
+    * a **spawn** — an assistant `tool_use` block naming a spawn tool
+      (`Agent`, `Task`, `Workflow`). Its `name`/`subagent_type`/`description`
+      is who was sent, and its `prompt` is what they were sent to do.
+    * a **return** — the report coming back. Three shapes, all of them records
+      the PARENT wrote, because the parent's own file is the only one this
+      module reads:
+        - a `tool_result` closing a spawn's `tool_use` id;
+        - a `<task-notification>` record, whose `<result>` is the report and
+          whose `<summary>` names the agent;
+        - a `<teammate-message teammate_id="…">` record, the shape an
+          asynchronous teammate's report arrives in.
+
+  These travel as ordinary excerpts carrying a `kind` of `"spawn"` or
+  `"return"` (prose is `"prose"`) and a `name`, so the UI can draw them in a
+  register that is visibly neither of the two voices. They are cut shorter than
+  prose — 200 characters against 280 — because a delegation prompt is a
+  briefing document and a hover is not; a pinned `full` fetch relaxes both to
+  the same generous bound.
+
+  Two things are deliberately NOT read. **Sidechain records** (`isSidechain:
+  true`) are the subagent's own transcript interleaved into the parent's file;
+  they are skipped entirely, because the spawn/return pair already says what
+  that agent was for and what it found, and the alternative is a tooltip full
+  of another agent's inner monologue. And a spawn `tool_result` that announces
+  itself as **internal metadata** (an async launch receipt: an id, and an
+  instruction never to quote it) carries no report at all — it is not a return,
+  and the real report arrives later in one of the other two shapes.
+
   ## When there are no words: what the tools were
 
   A minute of pure tool work is silent by the rule above — the agent said
@@ -119,11 +154,46 @@ defmodule Shuttle.Moment do
   @path_hint_tools ~w(Read Edit Write NotebookEdit)
   @pattern_hint_tools ~w(Grep Glob)
 
+  # The tools whose call is a DELEGATION — a unit of work handed to an agent of
+  # its own — rather than an action taken here. What makes them their own
+  # register is that both ends are legible: the prompt going out and the report
+  # coming back are the two sentences that say what that stretch of time was.
+  @spawn_tools ~w(Agent Task Workflow)
+
+  # A delegation excerpt's ordinary cut. Shorter than prose because a prompt is
+  # a briefing and a report is a document: the first two lines identify it, and
+  # a reader who wants the rest pins the tooltip and gets the full text.
+  @delegation_chars 200
+
+  # An agent's name is a label — a slug, a role, or the caller's one-line
+  # errand. One line's worth, whatever the excerpt bound is.
+  @name_chars 64
+
+  # The phrase a harness stamps on a tool result that is a launch receipt rather
+  # than a report — an agent id, and an explicit instruction not to surface it.
+  # A tooltip is user-facing, so such a result is treated as no report at all.
+  @internal_result "internal metadata"
+
+  # The body an idle teammate pings with. It is a machine's heartbeat wearing a
+  # report's envelope; nothing was reported, so nothing is drawn.
+  @idle_report ~s({"type":"idle_notification")
+
   # Canonical UUID. Narrow on purpose: this string becomes a glob segment.
   @uuid ~r/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/
 
-  @typedoc "One recovered message: when it landed, who spoke, what they said."
-  @type excerpt :: %{at_ms: integer(), role: String.t(), text: String.t()}
+  @typedoc """
+  One recovered message: when it landed, who spoke, what they said — and which
+  REGISTER it belongs to. `kind` is `"prose"` for the conversation's own two
+  voices, `"spawn"` for a delegation going out and `"return"` for its report
+  coming back; `name` is the agent's, and is `nil` on prose.
+  """
+  @type excerpt :: %{
+          at_ms: integer(),
+          role: String.t(),
+          text: String.t(),
+          kind: String.t(),
+          name: String.t() | nil
+        }
 
   @doc """
   The transcript root — `$SHUTTLE_CLAUDE_PROJECTS_DIR`, else
@@ -320,23 +390,40 @@ defmodule Shuttle.Moment do
     end
   end
 
-  # One pass, two harvests: the prose excerpts and the tool calls behind them.
-  # Tools accumulate reversed — `tool_summary/1` is given them oldest-first.
+  # One pass, three harvests: the excerpts, the tool calls behind them, and the
+  # spawn ids seen so far. Tools accumulate reversed — `tool_summary/1` is given
+  # them oldest-first.
+  #
+  # Spawn ids are collected from EVERY decoded line, in window or not. A
+  # delegation's report can land an hour after the call that made it, and the
+  # `tool_use` block naming the agent is the only place its name is written; a
+  # map built only from in-window lines would leave most returns anonymous.
+  # This costs nothing — the whole file is decoded either way.
   defp stream_window(path, from_ms, to_ms, max_chars) do
-    path
-    |> File.stream!()
-    |> Enum.reduce({[], []}, fn line, {excerpts, tools} ->
-      case in_window(line, from_ms, to_ms) do
-        {:ok, record} ->
-          {
-            excerpt_for(record, max_chars) ++ excerpts,
-            Enum.reverse(tool_calls(record)) ++ tools
-          }
+    {excerpts, tools, _spawns} =
+      path
+      |> File.stream!()
+      |> Enum.reduce({[], [], %{}}, fn line, {excerpts, tools, spawns} ->
+        case decode_record(line) do
+          {:ok, record} ->
+            spawns = note_spawns(spawns, record)
 
-        :skip ->
-          {excerpts, tools}
-      end
-    end)
+            if record.at_ms >= from_ms and record.at_ms <= to_ms do
+              {
+                excerpt_for(record, max_chars, spawns) ++ excerpts,
+                Enum.reverse(tool_calls(record)) ++ tools,
+                spawns
+              }
+            else
+              {excerpts, tools, spawns}
+            end
+
+          :skip ->
+            {excerpts, tools, spawns}
+        end
+      end)
+
+    {excerpts, tools}
   rescue
     # Vanished or unreadable mid-read (a session compacting its own file).
     # A hover shows nothing rather than failing.
@@ -345,25 +432,210 @@ defmodule Shuttle.Moment do
       {[], []}
   end
 
-  defp in_window(line, from_ms, to_ms) do
+  defp decode_record(line) do
     with {:ok, record} <- Jason.decode(line),
          true <- is_map(record),
-         {:ok, at_ms} <- at_ms(record),
-         true <- at_ms >= from_ms and at_ms <= to_ms do
+         {:ok, at_ms} <- at_ms(record) do
       {:ok, Map.put(record, :at_ms, at_ms)}
     else
       _ -> :skip
     end
   end
 
-  defp excerpt_for(record, max_chars) do
+  # A record's excerpts: its delegation, if it is one end of one, else its
+  # prose. Never both — a record that spawned an agent said nothing else worth
+  # quoting, and one carrying a report is the report.
+  defp excerpt_for(%{"isSidechain" => true}, _max_chars, _spawns), do: []
+
+  defp excerpt_for(record, max_chars, spawns) do
+    case delegation(record, max_chars, spawns) do
+      # Not a delegation at all — whatever else it is, it may be prose.
+      :none -> prose(record, max_chars)
+      # A delegation envelope that reported nothing (an idle ping, a launch
+      # receipt) is SILENCE, not prose. Falling through would print the
+      # envelope's own markup as if someone had typed it.
+      marks -> marks
+    end
+  end
+
+  defp prose(record, max_chars) do
     with {:ok, role} <- role(record),
          {:ok, text} <- text(record, max_chars) do
-      [%{at_ms: record.at_ms, role: role, text: text}]
+      [%{at_ms: record.at_ms, role: role, text: text, kind: "prose", name: nil}]
     else
       _ -> []
     end
   end
+
+  # ── The delegation register ────────────────────────────────────────────────
+
+  # Every spawn `tool_use` id seen so far, mapped to who it sent. The id is how
+  # a `tool_result` names the call it closes.
+  defp note_spawns(spawns, %{"type" => "assistant", "message" => %{"content" => blocks}})
+       when is_list(blocks) do
+    Enum.reduce(blocks, spawns, fn
+      %{"type" => "tool_use", "id" => id, "name" => tool, "input" => input}, acc
+      when is_binary(id) and is_map(input) ->
+        if tool in @spawn_tools, do: Map.put(acc, id, spawn_name(input)), else: acc
+
+      _block, acc ->
+        acc
+    end)
+  end
+
+  defp note_spawns(spawns, _record), do: spawns
+
+  # Who was sent. `name` is the teammate's own — the same string its report
+  # comes back under — so it is preferred; `subagent_type` names the role when
+  # nobody named the agent; `description` is the caller's own summary of the
+  # errand and is the last resort.
+  defp spawn_name(input) do
+    agent_name(input["name"]) || agent_name(input["subagent_type"]) ||
+      agent_name(input["description"])
+  end
+
+  defp delegation(%{"type" => "assistant", "message" => %{"content" => blocks}} = record, max, _s)
+       when is_list(blocks) do
+    Enum.flat_map(blocks, fn
+      %{"type" => "tool_use", "name" => tool, "input" => input} when is_map(input) ->
+        if tool in @spawn_tools,
+          do: mark(record, "assistant", "spawn", spawn_name(input), input["prompt"], max),
+          else: []
+
+      _block ->
+        []
+    end)
+    |> recognized()
+  end
+
+  defp delegation(%{"type" => "user", "message" => %{"content" => content}} = record, max, spawns),
+    do: returns(record, content, max, spawns)
+
+  defp delegation(%{"type" => "user", "content" => content} = record, max, _spawns)
+       when is_binary(content),
+       do: notice(record, content, max)
+
+  defp delegation(_record, _max, _spawns), do: :none
+
+  # An assistant turn with no spawn call in it, or a user turn carrying neither
+  # a report nor a report's envelope, is not a delegation record — it goes on
+  # to be read as prose.
+  defp recognized([]), do: :none
+  defp recognized(marks), do: marks
+
+  # A report comes back either as the tool result that closes the spawn, or —
+  # when the agent ran asynchronously and the call returned a receipt — as a
+  # notification record arriving later. Both are read; the tool result wins
+  # when a record somehow carries both.
+  defp returns(record, content, max, spawns) when is_list(content) do
+    case Enum.flat_map(content, &result_mark(record, &1, max, spawns)) do
+      [] -> notice(record, from_content(content), max)
+      marks -> marks
+    end
+  end
+
+  defp returns(record, content, max, _spawns) when is_binary(content),
+    do: notice(record, content, max)
+
+  defp returns(_record, _content, _max, _spawns), do: :none
+
+  defp result_mark(record, %{"type" => "tool_result", "tool_use_id" => id} = block, max, spawns)
+       when is_binary(id) do
+    case Map.fetch(spawns, id) do
+      {:ok, name} -> report(record, name, result_text(block["content"]), max)
+      :error -> []
+    end
+  end
+
+  defp result_mark(_record, _block, _max, _spawns), do: []
+
+  defp result_text(content) when is_binary(content), do: content
+  defp result_text(content) when is_list(content), do: from_content(content)
+  defp result_text(_), do: ""
+
+  # `<task-notification>` and `<teammate-message>` — the two envelopes a report
+  # arrives in when the agent that wrote it was not waited on.
+  defp notice(record, text, max) when is_binary(text) do
+    cond do
+      String.contains?(text, "<task-notification>") ->
+        summary = tag(text, "summary")
+        report(record, agent_name(titled(summary)), tag(text, "result") || summary || "", max)
+
+      String.contains?(text, "<teammate-message") ->
+        report(record, agent_name(attr(text, "teammate_id")), inner(text) || "", max)
+
+      true ->
+        :none
+    end
+  end
+
+  defp notice(_record, _text, _max), do: :none
+
+  # A report that is a launch receipt or an idle ping is not a report. Both are
+  # machine bookkeeping that happens to travel in a report's envelope, and
+  # drawing them would put a line on the rail for nothing having been said.
+  defp report(record, name, text, max) when is_binary(text) do
+    if String.contains?(text, @internal_result) or
+         String.starts_with?(String.trim_leading(text), @idle_report),
+      do: [],
+      else: mark(record, "user", "return", name, text, max)
+  end
+
+  defp report(_record, _name, _text, _max), do: []
+
+  defp mark(record, role, kind, name, text, max) do
+    case trim(text || "", delegation_chars(max)) do
+      {:ok, body} ->
+        [%{at_ms: record.at_ms, role: role, text: body, kind: kind, name: name}]
+
+      _ ->
+        []
+    end
+  end
+
+  # A delegation's cut. The ordinary hover gets the shorter bound; a caller that
+  # asked for MORE than prose's ordinary length is the pinned tooltip, and it
+  # gets everything, because a report is exactly what a reader pins to read.
+  defp delegation_chars(max) when max > @max_chars, do: max
+  defp delegation_chars(max), do: min(max, @delegation_chars)
+
+  defp tag(text, name) do
+    captured(Regex.run(~r/<#{name}>(.*?)<\/#{name}>/s, text))
+  end
+
+  defp attr(text, name) do
+    captured(Regex.run(~r/#{name}="([^"]*)"/, text))
+  end
+
+  defp inner(text) do
+    captured(Regex.run(~r/<teammate-message[^>]*>(.*?)<\/teammate-message>/s, text))
+  end
+
+  # The raw capture, uncut: a report's body is trimmed once, by `mark/6`, at
+  # whatever bound this fetch asked for. Cutting here would quietly cap a pinned
+  # tooltip's full text at the hover's length.
+  defp captured([_whole, value]) do
+    if String.trim(value) == "", do: nil, else: value
+  end
+
+  defp captured(_), do: nil
+
+  # An agent's name is a label, not prose: one line's worth, whatever the
+  # excerpt bound is.
+  defp agent_name(value), do: described(value, @name_chars)
+
+  # A task notification's summary is a sentence ABOUT the agent — `Agent "…"
+  # finished` — and the quoted part is the agent. The sentence around it says
+  # only what the arrow already says, so the quotation is the name and the rest
+  # is dropped. A summary with no quotation is used whole.
+  defp titled(summary) when is_binary(summary) do
+    case Regex.run(~r/"([^"]+)"/, summary) do
+      [_whole, title] -> title
+      _ -> summary
+    end
+  end
+
+  defp titled(other), do: other
 
   # `{name, footer_hint, line_hint}` per assistant `tool_use` block, in the
   # order they were made. `footer_hint` is what the aggregate's dominant-tool
@@ -390,20 +662,21 @@ defmodule Shuttle.Moment do
   # collapsed of whitespace by `trim/2`, so a heredoc becomes one line.
   defp hint(name, input) when is_map(input) do
     if name in @hint_tools do
-      described(input["description"]) || described(input["command"])
+      described(input["description"], @tool_hint_chars) ||
+        described(input["command"], @tool_hint_chars)
     end
   end
 
   defp hint(_name, _input), do: nil
 
-  defp described(text) when is_binary(text) do
-    case trim(text, @tool_hint_chars) do
+  defp described(text, max) when is_binary(text) do
+    case trim(text, max) do
       {:ok, hint} -> hint
       _ -> nil
     end
   end
 
-  defp described(_), do: nil
+  defp described(_, _), do: nil
 
   defp call_hint(name, input), do: hint(name, input) || path_hint(name, input)
 

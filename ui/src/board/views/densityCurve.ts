@@ -412,3 +412,103 @@ export function spineAlphas(spines: readonly number[]): number[] {
   }
   return out
 }
+
+// ── The delegations aloft ────────────────────────────────────────────────────
+//
+// A third channel, and the only one that is not about a moment: HOW MANY
+// AGENTS WERE OUT. The curve says the machines were busy and the spines say
+// you spoke, but a five-way fan-out and one long tool call make identical ink
+// — and the difference between them is most of what a day of orchestration
+// is. So each delegation gets one hairline spanning its real duration, and
+// concurrent ones stack: one agent is one line, five at once is five lines,
+// and none is nothing at all.
+//
+// Stacking is an interval-graph colouring, done greedily on a start-sorted
+// list: each delegation takes the lowest row it does not collide in. Greedy is
+// optimal here (this is the classic interval-partitioning result), so the
+// stack is exactly as deep as the concurrency was — never deeper, which is the
+// whole claim the channel makes.
+
+/** One delegation ready to draw: horizontal extent as fractions of the frame,
+ *  and which row of the stack it sits in. */
+export interface SpawnLine {
+  /** 0…1 across the frame. */
+  start: number
+  end: number
+  /** 0 is the topmost line; each further row is one concurrent neighbour. */
+  row: number
+  /** Its close was never recorded — the length is a stub, not a duration. */
+  open: boolean
+}
+
+/** The interval as the stacker needs it: two instants and whether it closed. */
+export interface SpawnInterval {
+  start_ms: number
+  end_ms: number
+  open: boolean
+}
+
+/**
+ * Lay a lane's delegations out in rows, clipped to `[startMs, endMs]`.
+ *
+ * Intervals that fall wholly outside the frame are dropped; one that straddles
+ * an edge is clipped, because the frame is the claim being made. Sorted by
+ * start, so the row assignment is deterministic and two renders of the same
+ * data cannot disagree about which line is which.
+ */
+export function stackSpawns(
+  spans: readonly SpawnInterval[],
+  frame: { startMs: number; endMs: number },
+): SpawnLine[] {
+  const span = Math.max(1, frame.endMs - frame.startMs)
+  const inside = spans
+    .filter((s) => s.end_ms >= frame.startMs && s.start_ms <= frame.endMs)
+    .map((s) => ({
+      startMs: Math.max(s.start_ms, frame.startMs),
+      endMs: Math.min(s.end_ms, frame.endMs),
+      open: s.open,
+    }))
+    .sort((a, b) => a.startMs - b.startMs || a.endMs - b.endMs)
+
+  // The instant each row is free from. A row is reusable the moment its last
+  // delegation ended — two that merely touch are not concurrent.
+  const freeFrom: number[] = []
+  const lines: SpawnLine[] = []
+  for (const s of inside) {
+    let row = freeFrom.findIndex((at) => at <= s.startMs)
+    if (row === -1) row = freeFrom.length
+    freeFrom[row] = s.endMs
+    lines.push({
+      start: (s.startMs - frame.startMs) / span,
+      end: (s.endMs - frame.startMs) / span,
+      row,
+      open: s.open,
+    })
+  }
+  return lines
+}
+
+/** How deep the deepest stack on a page goes — one more than the largest row
+ *  index anywhere on it. Per PAGE, like {@link fieldPeak}: the pitch the lines
+ *  are drawn at has to be one number, or two lanes' stacks could not be
+ *  compared down the column. */
+export function stackDepth(lanes: readonly (readonly SpawnLine[])[]): number {
+  let depth = 0
+  for (const lines of lanes) {
+    for (const line of lines) if (line.row + 1 > depth) depth = line.row + 1
+  }
+  return depth
+}
+
+/** The band the stack is allowed, in pixels, measured down from the top of the
+ *  rail. Deliberately under half the rail's height: these lines annotate the
+ *  curve, and a channel that reached the baseline would compete with it. */
+export const STACK_BAND_PX = 9
+
+/** The gap between neighbouring lines. Two pixels while the stack is shallow —
+ *  the pitch at which one line reads as one agent — closing up only once a
+ *  fan-out is deep enough that its DEPTH is the thing being read. */
+export function stackPitch(depth: number): number {
+  if (depth <= 1) return 0
+  return Math.max(1, Math.min(2, STACK_BAND_PX / (depth - 1)))
+}

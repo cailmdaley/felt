@@ -67,6 +67,139 @@ defmodule ShuttleWeb.ActivityControllerTest do
     buckets
   end
 
+  defp spawns!(path, from_ms, to_ms) do
+    {:ok, %{spawns: spawns}} = Shuttle.Activity.window(from_ms, to_ms, events_file: path)
+    spawns
+  end
+
+  # One end of a delegation, on `sid`'s queue.
+  defp spawn_event(type, tool, ts, overrides \\ %{}) do
+    event(
+      Map.merge(
+        %{"type" => type, "tool" => tool, "timestamp" => ts},
+        overrides
+      )
+    )
+  end
+
+  describe "Shuttle.Activity.window/3 — delegations as intervals" do
+    test "a closed pre/post pair on a spawn tool is one interval at its true length" do
+      path =
+        write_fixture([
+          spawn_event("pre_tool_use", "Agent", @t0 + 1_000),
+          spawn_event("post_tool_use", "Agent", @t0 + 8 * @minute)
+        ])
+
+      assert spawns!(path, @t0, @t0 + 20 * @minute) == [
+               %{
+                 s: @session,
+                 cwd: @cwd,
+                 tool: "Agent",
+                 start_ms: @t0 + 1_000,
+                 end_ms: @t0 + 8 * @minute,
+                 open: false
+               }
+             ]
+    end
+
+    test "an ordinary tool's pair is not a delegation" do
+      path =
+        write_fixture([
+          spawn_event("pre_tool_use", "Bash", @t0),
+          spawn_event("post_tool_use", "Bash", @t0 + @minute)
+        ])
+
+      assert spawns!(path, @t0, @t0 + 20 * @minute) == []
+    end
+
+    test "a fan-out holds every delegation aloft at once, oldest closing first" do
+      path =
+        write_fixture([
+          spawn_event("pre_tool_use", "Agent", @t0),
+          spawn_event("pre_tool_use", "Task", @t0 + 1_000),
+          spawn_event("pre_tool_use", "Agent", @t0 + 2_000),
+          spawn_event("post_tool_use", "Agent", @t0 + 5 * @minute),
+          spawn_event("post_tool_use", "Agent", @t0 + 9 * @minute)
+        ])
+
+      spawns = spawns!(path, @t0, @t0 + 60 * @minute)
+
+      assert Enum.map(spawns, &{&1.start_ms - @t0, &1.end_ms - @t0, &1.open}) == [
+               {0, 5 * @minute, false},
+               {1_000, 9 * @minute, false},
+               {2_000, 2_000 + 5 * @minute, true}
+             ]
+    end
+
+    test "two sessions hold independent queues" do
+      path =
+        write_fixture([
+          spawn_event("pre_tool_use", "Agent", @t0),
+          spawn_event("pre_tool_use", "Agent", @t0 + 1_000, %{
+            "sessionId" => "sess-2",
+            "tmuxSession" => @other_session
+          }),
+          spawn_event("post_tool_use", "Agent", @t0 + 3 * @minute, %{
+            "sessionId" => "sess-2",
+            "tmuxSession" => @other_session
+          })
+        ])
+
+      assert [first, second] = spawns!(path, @t0, @t0 + 60 * @minute)
+      assert %{s: @session, open: true} = first
+      assert %{s: @other_session, open: false, end_ms: end_ms} = second
+      assert end_ms == @t0 + 3 * @minute
+    end
+
+    test "an unclosed delegation is a stub, not a claim about how long it ran" do
+      path = write_fixture([spawn_event("pre_tool_use", "Agent", @t0)])
+
+      assert [%{open: true, start_ms: start_ms, end_ms: end_ms}] =
+               spawns!(path, @t0, @t0 + 6 * 60 * @minute)
+
+      assert start_ms == @t0
+      assert end_ms == @t0 + 5 * @minute
+    end
+
+    test "a session restart ends every delegation it was holding" do
+      path =
+        write_fixture([
+          spawn_event("pre_tool_use", "Agent", @t0),
+          spawn_event("pre_tool_use", "Agent", @t0 + 1_000),
+          spawn_event("session_start", nil, @t0 + 4 * @minute)
+        ])
+
+      spawns = spawns!(path, @t0, @t0 + 60 * @minute)
+      assert Enum.map(spawns, & &1.open) == [false, false]
+      assert Enum.map(spawns, & &1.end_ms) == [@t0 + 4 * @minute, @t0 + 4 * @minute]
+    end
+
+    test "an interval spanning the window is clipped to it, and one outside is dropped" do
+      path =
+        write_fixture([
+          spawn_event("pre_tool_use", "Agent", @t0 - 30 * @minute),
+          spawn_event("post_tool_use", "Agent", @t0 + 30 * @minute),
+          spawn_event("pre_tool_use", "Agent", @t0 + 300 * @minute, %{"sessionId" => "sess-3"}),
+          spawn_event("post_tool_use", "Agent", @t0 + 310 * @minute, %{"sessionId" => "sess-3"})
+        ])
+
+      assert [%{start_ms: start_ms, end_ms: end_ms}] = spawns!(path, @t0, @t0 + 60 * @minute)
+      assert start_ms == @t0
+      assert end_ms == @t0 + 30 * @minute
+    end
+
+    test "a delegation contributes no buckets of its own" do
+      path =
+        write_fixture([
+          spawn_event("pre_tool_use", "Agent", @t0),
+          spawn_event("post_tool_use", "Agent", @t0 + 3 * @minute)
+        ])
+
+      assert Enum.map(buckets!(path, @t0, @t0 + 60 * @minute), & &1.k) ==
+               ["agent", "agent", "agent", "agent"]
+    end
+  end
+
   describe "Shuttle.Activity.buckets/3 — aggregation" do
     test "counts events sharing a (minute, session, cwd, kind) key into one bucket" do
       path =
@@ -561,7 +694,8 @@ defmodule ShuttleWeb.ActivityControllerTest do
                "buckets" => [
                  %{"m" => @t0, "s" => @session, "cwd" => @cwd, "k" => "agent", "n" => 2},
                  %{"m" => @t0, "s" => @session, "cwd" => @cwd, "k" => "attention", "n" => 1}
-               ]
+               ],
+               "spawns" => []
              }
     end
 

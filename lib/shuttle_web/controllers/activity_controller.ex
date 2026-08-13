@@ -33,13 +33,14 @@ defmodule ShuttleWeb.ActivityController do
          {:ok, to_ms} <- integer_param(params, "to_ms"),
          :ok <- Activity.check_range(from_ms, to_ms) do
       json_with_validator(conn, validator(from_ms, to_ms), fn ->
-        {:ok, buckets} = Activity.buckets(from_ms, to_ms)
+        {:ok, %{buckets: buckets, spawns: spawns}} = Activity.window(from_ms, to_ms)
 
         %{
           host: Poller.own_host_id(),
           from_ms: from_ms,
           to_ms: to_ms,
-          buckets: buckets
+          buckets: buckets,
+          spawns: spawns
         }
       end)
     else
@@ -76,7 +77,7 @@ defmodule ShuttleWeb.ActivityController do
          :ok <- Activity.check_range(from_ms, to_ms) do
       entries = Composite.remote_entries()
       own = Composite.own_host()
-      {:ok, local} = Activity.buckets(from_ms, to_ms)
+      {:ok, %{buckets: local, spawns: local_spawns}} = Activity.window(from_ms, to_ms)
 
       buckets =
         Enum.map(local, &Map.put(&1, :host, own)) ++
@@ -86,11 +87,23 @@ defmodule ShuttleWeb.ActivityController do
             |> Enum.map(&Composite.stamp(&1, name))
           end)
 
+      # A delegation is windowed by OVERLAP, not by an instant: one that opened
+      # before this window and closed inside it belongs to it. `in_window/4`
+      # tests a single stamp, so the remote spans are filtered here.
+      spawns =
+        Enum.map(local_spawns, &Map.put(&1, :host, own)) ++
+          Enum.flat_map(entries, fn {name, entry} ->
+            entry.activity_spawns
+            |> Enum.filter(&overlaps?(&1, from_ms, to_ms))
+            |> Enum.map(&Composite.stamp(&1, name))
+          end)
+
       json(conn, %{
         host: own,
         from_ms: from_ms,
         to_ms: to_ms,
         buckets: buckets,
+        spawns: spawns,
         origins:
           Composite.origins(
             entries,
@@ -100,6 +113,19 @@ defmodule ShuttleWeb.ActivityController do
       })
     else
       {:error, reason} -> conn |> put_status(400) |> json(%{error: message(reason)})
+    end
+  end
+
+  # A remote's cached span, decoded from JSON, carries string keys; a span that
+  # cannot say when it ran is kept, exactly as `in_window/4` keeps an item with
+  # no readable stamp.
+  defp overlaps?(span, from_ms, to_ms) do
+    start_ms = Composite.item_ms(span, :start_ms)
+    end_ms = Composite.item_ms(span, :end_ms)
+
+    cond do
+      is_nil(start_ms) or is_nil(end_ms) -> true
+      true -> start_ms <= to_ms and end_ms >= from_ms
     end
   end
 
