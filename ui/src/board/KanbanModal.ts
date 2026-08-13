@@ -283,6 +283,13 @@ export class KanbanModal {
     window.addEventListener('resize', this.handleResize)
     void this.fetchAndRender()
     this.startPolling()
+    // ?view=day|week|chronicle|shelf deep-links a view — for humans sharing a
+    // spot and for headless QA, which can't press a hotkey. Unknown values
+    // fall through to the Desk.
+    const wanted = new URLSearchParams(window.location.search).get('view')
+    if (wanted && (wanted === 'desk' || listViews().some((v) => v.id === wanted))) {
+      this.setView(wanted as BoardViewId)
+    }
   }
 
   /**

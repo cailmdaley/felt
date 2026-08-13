@@ -121,6 +121,11 @@ const SHELF_WINDOW_MS = 30 * 24 * 60 * 60 * 1000
  *  docked-reader rules in ShelfView.css) and overlaps the reader's edge. */
 const DIVIDER = 6
 
+/** How long after a real drag a double-click is ignored. Long enough to cover
+ *  the release-and-click-again that a browser will happily report as a
+ *  double-click, short enough to be invisible to anyone who meant one. */
+const DBLCLICK_AFTER_DRAG_MS = 350
+
 /** A card, as the view holds it: the file, its DOM, and the state of its body. */
 interface CardHandle {
   file: ShelfFile
@@ -189,6 +194,8 @@ class ShelfView implements TemporalView {
   /** The fraction of the board the docked reader has taken, or null when it is
    *  closed or floating free. */
   private dockSplit: number | null = null
+  /** When the last gesture that actually travelled let go. */
+  private lastDragEnd = 0
 
   /** The card the layout must not move: the one under the pointer, or the one
    *  just dropped. Its neighbours are the ones that yield. */
@@ -808,11 +815,6 @@ class ShelfView implements TemporalView {
 
     head.append(star, name, fiber, age, open, dismiss)
     head.addEventListener('pointerdown', (e) => this.startGesture(e, file.fullPath, 'move'))
-    // Double-clicking the header is the same intent as ↗ at a coarser aim.
-    head.addEventListener('dblclick', (e) => {
-      e.preventDefault()
-      if (isRenderable(kind)) this.read(file)
-    })
 
     const host = document.createElement('div')
     host.className = 'kbn-shelf-body'
@@ -834,6 +836,25 @@ class ShelfView implements TemporalView {
     grip.className = 'kbn-shelf-grip'
     grip.title = 'Resize'
     grip.addEventListener('pointerdown', (e) => this.startGesture(e, file.fullPath, 'resize'))
+
+    // Double-click anywhere on the card opens it — the same intent as ↗ at a
+    // coarser aim, and the gesture most people try first on a thumbnail. Bound
+    // on the whole card rather than the header so the face and the body answer
+    // to it too; the buttons in the header opt out below, since double-tapping
+    // a star should star once and open nothing.
+    root.addEventListener('dblclick', (e) => {
+      e.preventDefault()
+      if (!isRenderable(kind)) return
+      // A drag's release can be followed closely enough by another click to
+      // synthesise a double-click. Opening the reader because someone put a
+      // card down and picked it up again would be a surprise, so a gesture
+      // that actually travelled suppresses the next one.
+      if (Date.now() - this.lastDragEnd < DBLCLICK_AFTER_DRAG_MS) return
+      this.read(file)
+    })
+    for (const control of [star, open, dismiss]) {
+      control.addEventListener('dblclick', (e) => e.stopPropagation())
+    }
 
     root.append(head, host, grip)
     return {
@@ -1296,6 +1317,7 @@ class ShelfView implements TemporalView {
       this.pump()
       return
     }
+    this.lastDragEnd = Date.now()
     if (!gesture.path) return
     // A card that has been moved or resized is PLACED: it keeps this exact
     // geometry through every reflow and reload from here on.
@@ -1368,7 +1390,8 @@ class ShelfView implements TemporalView {
    * set, which is also what the browser reads as "zoom the page". So the
    * gesture is claimed here with `preventDefault`: without it the whole
    * application would zoom, chrome and all, which is never what a pinch on a
-   * canvas means. `metaKey` is left alone — that IS a browser zoom request.
+   * canvas means. `metaKey` zooms too: on a Mac the zoom chord in the hand is
+   * ⌘-scroll, and a canvas that answers ctrl but not ⌘ reads as broken.
    */
   private readonly onWheel = (e: WheelEvent): void => {
     // Ctrl first, before every other bail: ctrl+scroll is THE zoom gesture, so
@@ -1382,7 +1405,7 @@ class ShelfView implements TemporalView {
     // unfocused card is veiled, and the veil is a parent-document element —
     // but not while hovering the one card being read. Nothing on this side can
     // change that; the event is simply not ours to hear.
-    if (e.ctrlKey) {
+    if (e.ctrlKey || e.metaKey) {
       e.preventDefault()
       // Units, not magnitude: a pinch reports pixels and ctrl+scroll reports
       // LINES, so the delta is converted before it means anything. See
@@ -1395,7 +1418,6 @@ class ShelfView implements TemporalView {
       )
       return
     }
-    if (e.metaKey) return
     if ((e.target as HTMLElement).closest('.kbn-shelf-card-focus')) return
     e.preventDefault()
     // The pan reads the same delta, and needs the same conversion.
