@@ -38,6 +38,11 @@ downstream tools.`,
 	CompletionOptions: cobra.CompletionOptions{
 		HiddenDefaultCmd: true,
 	},
+	// Execute below is the single error printer. Without this, cobra prints the
+	// error too and every failure reads twice — which a multi-line error (the
+	// create verbs' "already has a block, here are the verbs you meant") turns
+	// into a wall.
+	SilenceErrors: true,
 }
 
 // Execute runs the root command.
