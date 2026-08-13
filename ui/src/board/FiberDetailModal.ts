@@ -1777,12 +1777,13 @@ export class FiberDetailModal {
     // renders `KANBAN_TIMELINE_WINDOW.futureDays` (14) days ahead, so a fiber
     // due in October is undatable from the board in August.
     //
-    // It is also the repair for a one-way trip: dragging a card into Resting
-    // clears its `due:` on purpose (`setSurface` in KanbanModal), and undated
-    // rest is the half of Resting nothing ever surfaces again. A future date
-    // written here turns that dead rest back into a snooze — the due-drift
-    // override in `effectiveHorizon` pulls the card onto the desk when the day
-    // arrives.
+    // It is also how a card gets out of the dead half of Resting. A rest with
+    // no date is the half nothing ever surfaces again; a future date written
+    // here turns it into a snooze — the due-drift override in
+    // `effectiveHorizon` pulls the card onto the desk when the day arrives.
+    // (Dragging into Resting preserves a future due nowadays, so it no longer
+    // MAKES that dead rest — but a card can still reach it by being stashed
+    // dateless, or by having an already-elapsed deadline dropped on the way in.)
     //
     // Built here, after `livePatch` exists, rather than up by the other
     // sections; `metaCol` below decides where it lands on the page.
