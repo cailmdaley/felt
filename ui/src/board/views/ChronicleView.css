@@ -972,7 +972,18 @@ button.chr-name:hover {
 }
 .chr-end { color: #3F8278; }
 .chr-end-compost { color: #A89B83; }
-.chr-due { color: #C49333; font-size: calc(12.5px * var(--kbn-type-scale, 1)); }
+/* The one mark that writes back: a fiber's due date is a plain frontmatter
+ * field, so unlike every other mark on the row it opts back into pointer
+ * events and offers a grab cursor. `.chr-launch` stays inert — it draws a
+ * DERIVED value (the daemon's own next-run computation), and there is
+ * nothing a drag could write. */
+.chr-due {
+  color: #C49333;
+  font-size: calc(12.5px * var(--kbn-type-scale, 1));
+  pointer-events: auto;
+  cursor: grab;
+}
+.chr-mark-dragging { cursor: grabbing; opacity: 0.85; }
 .chr-launch { color: #3D5BA0; font-size: calc(12.5px * var(--kbn-type-scale, 1)); opacity: 0.75; }
 
 /* ── The rest of the record ─────────────────────────────────────────────── */

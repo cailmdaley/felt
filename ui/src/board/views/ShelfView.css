@@ -240,13 +240,20 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  /* The shell's own containment. `content-visibility: auto` lets the browser
-     skip rendering work for a card that is off-screen entirely, and
-     `contain-intrinsic-size` (set inline, per card, from the layout) is the
-     size it reserves while skipping — without it the surface would collapse
-     and jump as cards enter and leave. `contain: layout style` keeps a card's
-     internals from ever invalidating the surface around it. */
-  content-visibility: auto;
+  /* `contain: layout style` keeps a card's internals from invalidating the
+     surface around it. It is safe under the canvas transform: containment
+     changes what a subtree may affect, never how it is scaled.
+
+     `content-visibility: auto` USED TO BE HERE and had to go. It divides a
+     card in two — the frame (border, background, shadow) is painted by the
+     card element itself and always renders, while everything INSIDE it is
+     what the browser is licensed to skip and re-present from a cached raster.
+     Under the canvas scale that division became visible as the exact bug
+     reported from live use: the frame grew with the zoom while the text and
+     the framed document stayed the size they were rasterised at. Skipping
+     off-screen work is a real saving, but not at the price of a zoom that
+     only scales the furniture — and the live-body cap (shelfLoad) is the perf
+     guard that actually matters here. */
   contain: layout style;
   border: 0.5px solid rgba(27, 22, 17, 0.18);
   border-radius: 2px;

@@ -22,6 +22,7 @@ import {
   type SwipeState,
   weekStepTarget,
   marksForDay,
+  midMorningFraction,
   mondayOfWeek,
   RAIL_START_HOUR,
   railBounds,
@@ -32,7 +33,6 @@ import {
   rowWaitingOn,
   slotSamples,
   slotTip,
-  SLOT_NO_TEXT_NOTE,
   summarizeSpend,
   weekCivilDays,
   weekMondayForFocus,
@@ -506,6 +506,31 @@ describe('a `due:` is a civil day, and lands on the day it names', () => {
       }
     });
   }
+
+  it('parks an undated due on the rail`s own 10am rule, DST and all', () => {
+    // A due has no time of day, so it is placed at mid-morning — and the rule
+    // the rail already draws at 10am is exactly where the eye expects it. The
+    // flat `(10 - 6) / 24` this replaced is only right on a 24-hour rail: on a
+    // 23- or 25-hour one it drifts off its own rule by up to an hour.
+    for (const monday of [...Object.values(DST_WEEKS).flat(), '2026-08-03']) {
+      for (const day of weekCivilDays(monday)) {
+        const bounds = railBounds(day);
+        // railRuleFractions walks 10, 14, 18, 22, 26 — the first is 10am.
+        const tenAm = railRuleFractions(day, bounds)[0];
+        expect(midMorningFraction(day, bounds), `${day} in ${TZ}`).toBeCloseTo(tenAm, 12);
+        const marks = marksForDay(
+          [card({ id: 'fiber/owed', due: day })],
+          day,
+          bounds,
+        );
+        expect(marks[0].fraction).toBeCloseTo(tenAm, 12);
+      }
+    }
+  });
+
+  it('leaves the flat fraction as the answer for a day that will not parse', () => {
+    expect(midMorningFraction('not-a-day', railBounds('2026-08-05'))).toBeCloseTo(4 / 24, 12);
+  });
 
   it('marks a stashed card`s return hollow, not as a due', () => {
     const cards = [card({ id: 'fiber/later', due: '2026-08-14', effectiveHorizon: 'stashed' })];
@@ -1185,11 +1210,12 @@ describe('what a hovered slot is willing to say', () => {
     expect(tip.time).toContain('–');
   });
 
-  it('says plainly that the words were never kept until they are recovered', () => {
+  it('carries no words until they are recovered, and no gloss about it', () => {
     const slot = slotOf([bucket({ m: bounds.startMs })]);
-    // No transcript yet — and while none has come back, the note is the truth.
+    // No transcript yet — and while none has come back, the card carries no
+    // words and says nothing about not having them.
     expect(slotTip(slot).detail).toBeUndefined();
-    expect(SLOT_NO_TEXT_NOTE).toMatch(/not the words/);
+    expect(slotTip(slot).note).toBeUndefined();
 
     // What `/api/v1/moment` recovered, carried through verbatim.
     const words = {

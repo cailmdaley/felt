@@ -442,7 +442,7 @@ defmodule ShuttleWeb.MomentControllerTest do
     end
   end
 
-  describe "Shuttle.Moment.moment/4 (words, else tools)" do
+  describe "Shuttle.Moment.moment/4 (words and tools)" do
     # A minute of silent tool work is the case this exists for.
     defp tool_tree do
       write_tree([
@@ -573,9 +573,13 @@ defmodule ShuttleWeb.MomentControllerTest do
                Moment.moment(@session, @t0, @t0 + 3_000, root: root)
     end
 
-    test "words win: a window with prose reports no tools" do
-      assert %{excerpts: [%{text: "Done — tests pass."}], tools: nil} =
+    test "a window with prose reports BOTH the words and the tools that ran" do
+      assert %{excerpts: [%{text: "Done — tests pass."}], tools: tools} =
                Moment.moment(@session, @t0, @t0 + 10_000, root: tool_tree())
+
+      # The two are facts about the same minute, not alternatives: suppressing
+      # the calls left a client able to count them and unable to name them.
+      assert tools =~ "Bash"
     end
 
     test "an empty window, and an unknown session, are silent in both fields" do
@@ -587,7 +591,7 @@ defmodule ShuttleWeb.MomentControllerTest do
                %{excerpts: [], tools: nil}
     end
 
-    test "the endpoint carries the tools field only when there are no words" do
+    test "the endpoint carries the tools field whether or not there are words" do
       root = tool_tree()
       System.put_env("SHUTTLE_CLAUDE_PROJECTS_DIR", root)
       on_exit(fn -> System.delete_env("SHUTTLE_CLAUDE_PROJECTS_DIR") end)
@@ -613,7 +617,8 @@ defmodule ShuttleWeb.MomentControllerTest do
         })
         |> json_response(200)
 
-      refute Map.has_key?(spoken, "tools")
+      assert spoken["excerpts"] != []
+      assert spoken["tools"] =~ "Bash"
     end
   end
 

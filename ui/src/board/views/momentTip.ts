@@ -14,8 +14,7 @@
  * ## The words
  *
  * The activity plane holds no text — a bucket is `{m, s, cwd, k, n}`. For a
- * long time that was the end of it, and the tooltip said so
- * ({@link SLOT_NO_TEXT_NOTE}). What changed is not the activity plane but the
+ * long time that was the end of it. What changed is not the activity plane but the
  * JOIN: the session ledger pairs a tmux name to a harness session UUID, and the
  * harness writes a transcript under that UUID. `GET /api/v1/moment` reads it.
  * So a mark can now be asked what was said in it, and the note stays for the
@@ -62,12 +61,6 @@ import type { MomentSource } from './join.js'
 
 export type { MomentSource }
 
-/** The honest note under a tooltip whose words were not recovered.
- *
- *  Reached when the minute's session was never paired in the ledger, ran under
- *  a harness that keeps no readable transcript, or spoke nothing inside the
- *  span — and while a fetch is still out. */
-export const SLOT_NO_TEXT_NOTE = 'the minute is recorded, not the words'
 
 /**
  * The kinds the board draws.
@@ -108,7 +101,7 @@ export interface SlotTip {
   rows: SlotTipRow[]
   /** The recovered words, when `/api/v1/moment` found any. Absent means the
    *  renderer falls through to {@link SlotTip.tools}, and then to
-   *  {@link SLOT_NO_TEXT_NOTE}. */
+   *  the tools, and then to nothing at all. */
   detail?: MomentExcerpt[]
   /** What the minute DID when it said nothing — one call per line
    *  (`"Bash — run the tests"`) when there were few enough to list, else the
@@ -533,12 +526,14 @@ export function renderTip(host: HTMLElement, tip: SlotTip): void {
       said.append(line)
     }
     host.append(said)
-    return
   }
 
-  // No words. What DID happen is still knowable, and naming the tools beats
-  // saying nothing happened to be said. The note survives underneath it, for
-  // the minutes where even this is unavailable.
+  // WHAT RAN, alongside whatever was said rather than instead of it. This used
+  // to be an `else`: a minute with any prose in it drew its words and stopped,
+  // so a turn that spoke once and then made forty tool calls could report the
+  // count and never a single name. The two are different facts about the same
+  // minute and the card has room for both — the daemon sends both now (see
+  // `Shuttle.Moment`), and this draws both.
   //
   // `tools` is one line (the aggregate) or several (one call per line); a
   // `\n` split renders either the same way; a lone line never gains an empty
@@ -553,13 +548,23 @@ export function renderTip(host: HTMLElement, tip: SlotTip): void {
       tools.append(row)
     }
     host.append(tools)
-    return
   }
 
-  const foot = document.createElement('div')
-  foot.className = 'kbn-tip-note kbn-tip-section'
-  foot.textContent = tip.note ?? SLOT_NO_TEXT_NOTE
-  host.append(foot)
+  // NOTHING RECOVERED, AND NOTHING SAID ABOUT IT. The card used to close with
+  // "the minute is recorded, not the words" — a gloss explaining the card's own
+  // limitation to a reader who had not asked. These cards state facts; a fact
+  // nobody has is not one of them, and an empty footer says the same thing
+  // without spending a line on saying it.
+  //
+  // `note` survives because it is not a gloss: it names WHERE the words are
+  // ("words live on basalt-login-02"), which is a fact about the fleet and
+  // actionable — a different claim from "we have none".
+  if (tip.note) {
+    const foot = document.createElement('div')
+    foot.className = 'kbn-tip-note kbn-tip-section'
+    foot.textContent = tip.note
+    host.append(foot)
+  }
 }
 
 // ── Fetching the words ───────────────────────────────────────────────────────

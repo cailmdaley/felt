@@ -59,17 +59,12 @@ defmodule Shuttle.Moment do
   instruction never to quote it) carries no report at all — it is not a return,
   and the real report arrives later in one of the other two shapes.
 
-  ## When there are no words: what the tools were
+  ## What the tools were
 
-  A minute of pure tool work is silent by the rule above — the agent said
-  nothing, it *did* things. The tooltip used to answer such a minute with "the
-  minute is recorded, not the words", which is true and useless: the transcript
-  knows exactly which tools ran.
-
-  So `moment/4` returns a second field. When a window yields **zero** prose
-  excerpts, the same assistant records' `tool_use` blocks answer instead — as
-  individual calls when there are few enough to read one by one, as a
-  summary when there are not.
+  A mark says an agent was busy; the transcript knows exactly which tools ran.
+  So `moment/4` returns a second field, built from the same assistant records'
+  `tool_use` blocks — as individual calls when there are few enough to read one
+  by one, as a summary when there are not.
 
   Few enough (at most `@tool_calls_cap`, presently 6) and each call gets its
   own line, oldest first, tool name and — when the call offers one — its own
@@ -92,9 +87,14 @@ defmodule Shuttle.Moment do
   Both forms travel in the same field (`:tools`), a single string — the
   per-call form is simply several lines joined by `"\n"`. It is deliberately
   a separate field and not a synthetic excerpt: nobody said this, and the UI
-  must be able to draw it in a register that is visibly not speech. When
-  there are real words, `:tools` is `nil` — the words are the better answer
-  and the tooltip has no room for both.
+  must be able to draw it in a register that is visibly not speech.
+
+  IT TRAVELS ALONGSIDE THE WORDS, always. It was once withheld whenever a
+  window held prose, on the reasoning that the words are the better answer and
+  a client should never have to choose between them. But a minute that spoke
+  AND ran forty calls is two facts about that minute, and suppressing one left
+  the tooltip able to say "tool call ×40" with no way to learn what any of them
+  were. The calls are collected either way; only the field was being dropped.
 
   ## Defensive by construction
 
@@ -254,11 +254,14 @@ defmodule Shuttle.Moment do
   end
 
   @doc """
-  Everything the transcript can say about the window: the words, and — only
-  when there are none — a report of the tools that ran instead. `:tools` is
-  one call per line (`"Bash — run the tests"`) when there are few enough to
-  read that way, else the old one-line aggregate (`"Bash ×2 · Read"`) — see
-  the moduledoc.
+  Everything the transcript can say about the window: the words AND a report of
+  the tools that ran. `:tools` is one call per line (`"Bash — run the tests"`)
+  when there are few enough to read that way, else the one-line aggregate
+  (`"Bash ×2 · Read"`) — see the moduledoc.
+
+  Both travel together. `:tools` was once withheld whenever there were words;
+  it is not, because a minute that spoke and also ran forty calls is two facts
+  and a reader wants both.
 
   Same guarantees as `excerpts/4`: never raises, absence is `%{excerpts: [],
   tools: nil}`.
@@ -279,10 +282,17 @@ defmodule Shuttle.Moment do
       path ->
         {excerpts, tools} = stream_window(path, from_ms, to_ms, max_chars)
 
-        case Enum.sort_by(excerpts, & &1.at_ms) do
-          [] -> %{excerpts: [], tools: tools_line(Enum.reverse(tools))}
-          found -> %{excerpts: Enum.take(found, cap), tools: nil}
-        end
+        # BOTH, ALWAYS. `tools` used to be withheld whenever there were words,
+        # on the reasoning that the words are the better answer and a client
+        # should never have to choose. That was true of the choice and false of
+        # the question: a minute that spoke AND ran forty tool calls has two
+        # facts about it, and suppressing one made the tooltip say "tool call
+        # ×40" with no way to learn what any of them were. The calls are
+        # already collected either way, so this costs nothing but the field.
+        %{
+          excerpts: excerpts |> Enum.sort_by(& &1.at_ms) |> Enum.take(cap),
+          tools: tools_line(Enum.reverse(tools))
+        }
     end
   end
 

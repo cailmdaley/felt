@@ -12,12 +12,13 @@ defmodule ShuttleWeb.MomentController do
   has stopped glancing and started reading. Truncation is server-side, so no
   amount of CSS recovers a sentence the ordinary fetch already cut.
 
-  A minute of silent tool work has no excerpts. Then — and only then — a
-  `"tools"` field carries what ran instead: one call per line
+  A `"tools"` field carries what RAN in the window: one call per line
   (`"Bash — run the tests\nRead — moment.ex"`) when there are few enough
-  calls to read that way, else the old one-line aggregate (`"Bash ×2 ·
-  Read"`) — see `Shuttle.Moment`'s moduledoc for the threshold. It is absent
-  whenever there are words, so a client never has to choose between them.
+  calls to read that way, else the one-line aggregate (`"Bash ×2 · Read"`) —
+  see `Shuttle.Moment`'s moduledoc for the threshold. It rides alongside the
+  excerpts rather than instead of them: a minute that spoke and also ran forty
+  calls is two facts, and a client that could count the calls but never name
+  them was the cost of withholding it. Absent only when nothing ran.
 
   `Shuttle.Moment` does the reading (a Claude Code transcript under
   `~/.claude/projects`); this controller parses the window, decides whose disk

@@ -98,7 +98,7 @@ export interface ViewContext {
    * Reach for it only on demand — a hover, a click — never on a paint: one call
    * reads one transcript file. It never rejects; a daemon that cannot find or
    * reach the transcript answers with no excerpts, and the honest fallback
-   * (`SLOT_NO_TEXT_NOTE`) is what the view shows then.
+   * The card simply carries no words then, and says nothing about it.
    */
   moment(
     session: string,

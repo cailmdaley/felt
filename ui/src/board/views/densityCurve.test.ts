@@ -14,6 +14,7 @@ import {
   DAY_SIGMA_FLOOR_MINUTES,
   PEAK_FLOOR,
   SPINE_MIN_HEIGHT,
+  SPINE_MIN_HEIGHT_ABS,
   WEEK_KERNELS_PER_AXIS,
   WEEK_SIGMA_FLOOR_MINUTES,
   curveField,
@@ -27,6 +28,7 @@ import {
   ladderPitch,
   ladderRows,
   smear,
+  spineFloor,
   spineHeights,
   spineWidths,
   weekSigma,
@@ -284,12 +286,79 @@ describe('spineHeights — your message, drawn inside the work it landed in', ()
     // The case the floor exists for: you write to an agent that is not running,
     // which is how a great many conversations start. At the true height that
     // message would be a mark of zero pixels — the most important event on the
-    // rail, invisible.
+    // rail, invisible. A rail with no curve has no mound to be proportioned
+    // against, so it draws at the absolute minimum.
     const sigma = daySigma(60)
     const grid = curveGrid(60, sigma)
     const alone = curveField([], grid, [25], sigma)
     const loud = curveField([{ minute: 40, human: 0, agent: 400 }], grid, [], sigma)
-    expect(spineHeights(alone, fieldPeak([alone, loud]))).toEqual([SPINE_MIN_HEIGHT])
+    expect(spineHeights(alone, fieldPeak([alone, loud]))).toEqual([SPINE_MIN_HEIGHT_ABS])
+  })
+
+  it('never lets a floored spine out-top the rail it stands on', () => {
+    // THE WEEK BUG. Seven rails share one peak, so a quiet Saturday beside a
+    // twelve-thousand-event Friday draws its whole day at a third of the row —
+    // while a fixed floor kept every quiet-minute message at 0.3, exactly as
+    // tall as the busiest thing that happened all day. The accent became the
+    // mark. Measured against the real week of 2026-08-01: railMax 0.317,
+    // spine 0.300.
+    const sigma = daySigma(120)
+    const grid = curveGrid(120, sigma)
+    // A quiet rail: a small mound at minute 20, a message at minute 90 with no
+    // curve under it at all.
+    const quiet = curveField([{ minute: 20, human: 0, agent: 3 }], grid, [90], sigma)
+    const loud = curveField([{ minute: 60, human: 0, agent: 4000 }], grid, [], sigma)
+    const peak = fieldPeak([quiet, loud])
+    const railMax = Math.max(...quiet.height) / peak
+    const [spine] = spineHeights(quiet, peak)
+
+    expect(railMax).toBeLessThan(SPINE_MIN_HEIGHT)
+    // The floored spine is an accent on the rail, not a tower over it.
+    expect(spine).toBeLessThanOrEqual(SPINE_MIN_HEIGHT)
+    expect(spine).toBeGreaterThanOrEqual(SPINE_MIN_HEIGHT_ABS)
+  })
+
+  it('leaves a rail that reaches the top of the row at the floor it was tuned to', () => {
+    // The other half of the guarantee: the constant was chosen by looking at
+    // busy rails, and on a busy rail nothing may move.
+    const sigma = daySigma(60)
+    const grid = curveGrid(60, sigma)
+    const field = curveField([{ minute: 30, human: 0, agent: 400 }], grid, [5], sigma)
+    const peak = fieldPeak([field])
+    expect(Math.max(...field.height) / peak).toBe(1)
+    expect(spineHeights(field, peak)).toEqual([SPINE_MIN_HEIGHT])
+  })
+})
+
+describe('spineFloor — the floor is a property of the rail, not a constant', () => {
+  it('is the tuned floor for a rail whose curve fills the row', () => {
+    expect(spineFloor(1)).toBe(SPINE_MIN_HEIGHT)
+  })
+
+  it('is the absolute minimum for a rail with no curve at all', () => {
+    expect(spineFloor(0)).toBe(SPINE_MIN_HEIGHT_ABS)
+  })
+
+  it('is half the rail between the two clamps', () => {
+    expect(spineFloor(0.5)).toBeCloseTo(0.25, 10)
+    expect(spineFloor(0.45)).toBeCloseTo(0.225, 10)
+  })
+
+  it('never rises above the tuned floor, however tall the rail', () => {
+    expect(spineFloor(0.8)).toBe(SPINE_MIN_HEIGHT)
+    expect(spineFloor(4)).toBe(SPINE_MIN_HEIGHT)
+  })
+
+  it('never falls below the absolute minimum, however flat the rail', () => {
+    expect(spineFloor(0.01)).toBe(SPINE_MIN_HEIGHT_ABS)
+    expect(spineFloor(-1)).toBe(SPINE_MIN_HEIGHT_ABS)
+  })
+
+  it('rises with the rail — a busier day floors its spines higher', () => {
+    const heights = [0, 0.2, 0.4, 0.6, 0.8, 1].map(spineFloor)
+    for (let i = 1; i < heights.length; i += 1) {
+      expect(heights[i]).toBeGreaterThanOrEqual(heights[i - 1])
+    }
   })
 
   it('never exceeds the full row, however suppressed the peak it is measured against', () => {

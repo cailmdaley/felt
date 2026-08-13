@@ -121,12 +121,54 @@ export interface ShelfMetrics {
  * title, first figure, the start of the argument. You can tell two reports
  * apart from across the canvas, which is the entire premise of the surface.
  */
+/** The proportion of a page. */
+export const A4 = 1.414
+
 export const SHELF_METRICS: ShelfMetrics = {
   width: 1200,
-  cardW: 240,
-  cardH: Math.round(240 * 1.414),
+  cardW: 225,
+  cardH: Math.round(225 * A4),
   gap: 20,
   captionH: 26,
+}
+
+/** The band a flowed card's width may be stretched or squeezed into. Below the
+ *  floor a thumbnail stops being recognisable; above the ceiling a lone column
+ *  becomes a billboard. */
+export const FLOW_MIN_W = 190
+export const FLOW_MAX_W = 300
+
+/**
+ * How many columns fit, and how wide a card is in them.
+ *
+ * THE COLUMN COUNT IS ROUNDED, NOT FLOORED, and the card width then flexes to
+ * fill the row exactly. Flooring a fixed card width is what put most of a
+ * card's worth of dead canvas beside the docked reader: at a half-screen
+ * viewport of ~711px the arithmetic was floor((711+20)/260) = 2 columns
+ * occupying 500px, leaving 211 unusable pixels — visibly a whole empty column,
+ * and no amount of dragging the divider would ever produce the third.
+ *
+ * Rounding asks the honest question ("how many columns does this width most
+ * nearly hold?") and the flex then makes the answer true, so the flow always
+ * spans its viewport and the surface never carries a margin it did not choose.
+ * A width that would squeeze cards below the legibility floor drops a column
+ * instead — one fewer, wider column beats a row of unreadable slivers.
+ */
+export function flowMetrics(
+  width: number,
+  gap: number,
+  preferred: number,
+): { columns: number; cardW: number; cardH: number } {
+  const usable = Math.max(1, width)
+  let columns = Math.max(1, Math.round((usable + gap) / (preferred + gap)))
+  let cardW = (usable - (columns - 1) * gap) / columns
+  // Too thin to read: take a column away and give its width to the rest.
+  while (columns > 1 && cardW < FLOW_MIN_W) {
+    columns -= 1
+    cardW = (usable - (columns - 1) * gap) / columns
+  }
+  cardW = Math.floor(Math.min(FLOW_MAX_W, Math.max(FLOW_MIN_W, cardW)))
+  return { columns, cardW, cardH: Math.round(cardW * A4) }
 }
 
 export interface PlacedCard {
@@ -183,8 +225,11 @@ export function layoutShelf(
    *  the ones that yield. */
   active?: string | null,
 ): ShelfLayout {
-  const { cardW, cardH, gap, captionH } = metrics
-  const columns = Math.max(1, Math.floor((metrics.width + gap) / (cardW + gap)))
+  const { gap, captionH } = metrics
+  // The card size is a CONSEQUENCE of the width available, not a constant:
+  // `metrics.cardW` is the preferred width the column count is chosen from,
+  // and the cards then flex to fill the row. See flowMetrics.
+  const { columns, cardW, cardH } = flowMetrics(metrics.width, gap, metrics.cardW)
   const cards: PlacedCard[] = []
   const captions: ShelfCaption[] = []
 
@@ -215,7 +260,7 @@ export function layoutShelf(
   // The rects the flow must route AROUND: everything the reader placed by
   // hand. Water around stones — see shelfPack.flowSlots.
   const anchors: Rect[] = cards.map((c) => ({ x: c.x, y: c.y, w: c.w, h: c.h }))
-  const flowMetrics = { columns, cardW, cardH, gap }
+  const flowGrid = { columns, cardW, cardH, gap }
 
   const colX = (i: number): number => (i % columns) * (cardW + gap)
   const rowY = (i: number): number => Math.floor(i / columns) * (cardH + gap)
@@ -223,7 +268,7 @@ export function layoutShelf(
   let bottom = 0
   if (lens === 'recency') {
     const ordered = [...flowed].sort(byRecency)
-    const slots = flowSlots(ordered.length, flowMetrics, anchors)
+    const slots = flowSlots(ordered.length, flowGrid, anchors)
     ordered.forEach((file, i) => {
       const slot = slots[i] ?? { x: colX(i), y: rowY(i), w: cardW, h: cardH }
       cards.push({
@@ -262,7 +307,7 @@ export function layoutShelf(
         width: metrics.width,
       })
       y += captionH
-      const slots = flowSlots(group.length, flowMetrics, anchors, { x: 0, y })
+      const slots = flowSlots(group.length, flowGrid, anchors, { x: 0, y })
       group.forEach((file, i) => {
         const slot = slots[i] ?? { x: colX(i), y: y + rowY(i), w: cardW, h: cardH }
         cards.push({

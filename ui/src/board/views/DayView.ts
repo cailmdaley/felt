@@ -1397,15 +1397,38 @@ function buildStateKey(): HTMLElement {
  *  enough that the marks are hoverable rather than a game of aim. */
 const BEAT_SNAP_PX = 9
 
+/** Where a lane's click lands: the worker's terminal, or the fiber itself. */
+export type LaneOpenTarget =
+  | { kind: 'worker'; tmux: string; host?: string }
+  | { kind: 'card' }
+
+/**
+ * Resolve a lane's click target from the card behind it.
+ *
+ * The terminal needs two things and this checks both: a worker actually in the
+ * air, and a host wired to attach to one. Missing either, the click opens the
+ * fiber — a real destination rather than a dead gesture, which is what a click
+ * that resolved to nothing looked like from the outside.
+ */
+export function laneOpenTarget(
+  card: KanbanCard | undefined,
+  canAttach: boolean,
+): LaneOpenTarget {
+  const tmux = card?.runningWorker
+  if (!tmux || !canAttach) return { kind: 'card' }
+  return { kind: 'worker', tmux, ...(card.shuttleHost ? { host: card.shuttleHost } : {}) }
+}
+
 /**
  * One lane-minute as words, in the shared tooltip's shape.
  *
- * The `where` on every row is the lane's own name, because on Day the lane IS
- * the attribution — the rail you are pointing at is already labelled with the
- * fiber, so the row says which pigment and how much, and the label says who.
+ * IT DOES NOT NEED THE LANE, which is the point: `where` is empty on every row
+ * because on Day the rail you are pointing at is already labelled with the
+ * fiber, a few centimetres to the left and in view the whole time the pointer
+ * was travelling here. The row says which pigment and how much; the label
+ * beside it says who, as it always did.
  */
 export function beatTip(
-  lane: DayLane,
   beat: DayBeat,
   win: DayWindow,
   words?: MomentWords,
@@ -1418,7 +1441,14 @@ export function beatTip(
     rows.push({
       kind,
       phrase: SLOT_PHRASE[kind],
-      where: lane.label,
+      // NO FIBER NAME. The lane's own label is on the same row, a few
+      // centimetres to the left, and has been the whole time the pointer was
+      // travelling to this minute. Repeating it spent the head line on the one
+      // thing the reader could already see. The rule the card follows: never
+      // restate what the surface already shows at the pointer's position —
+      // which is why WEEK still names the fiber (its rows are days, and the
+      // fiber is exactly what its surface cannot tell you).
+      where: '',
       count: entry.count,
       // Day has no constitution stroke on its rails, so nothing here may claim
       // one: the flag exists to explain a mark's weight, and an unweighted mark
@@ -1458,7 +1488,6 @@ export const MAGNET_LOOKBACK_MINUTES = 90
  * (cinnabar you, blue agent, muted tool call) are the ones already on the page.
  */
 export function magnetTip(
-  lane: DayLane,
   exchange: LastExchange,
   words?: MomentWords,
 ): SlotTip {
@@ -1480,11 +1509,13 @@ export function magnetTip(
       shuttle: false,
     })
   }
-  // The heading names the lane, because the magnet is answering about a LANE
-  // rather than about a minute — the pointer is not standing on anything.
+  // The heading says WHEN the lane last did anything — the magnet is answering
+  // about a lane rather than about a minute, and "last at" is the part of that
+  // the surface cannot show. The lane's name is not here for the reason it is
+  // not on the rows: it is already on this row, to the left.
   const last = exchange.toolsAfter?.atMs ?? exchange.turns[exchange.turns.length - 1]?.atMs
   return {
-    time: last === undefined ? lane.label : `${lane.label} · last at ${clockTime(last)}`,
+    time: last === undefined ? '' : `last at ${clockTime(last)}`,
     rows,
     ...(words?.excerpts.length ? { detail: words.excerpts } : {}),
     ...(words?.tools ? { tools: words.tools } : {}),
@@ -1960,7 +1991,7 @@ class DayViewImpl implements TemporalView {
             line.kind === 'session'
               ? 'session up'
               : `${line.label ?? 'agent'} aloft${line.open ? ', never returned' : ''}`,
-          where: lane.label,
+          where: '',
           count: minutes,
           shuttle: false,
         },
@@ -2139,9 +2170,9 @@ class DayViewImpl implements TemporalView {
       name.type = 'button'
       name.className = 'kbn-day-lanename'
       name.textContent = lane.label
-      // The name is the lane's door, same as the rail's empty paper: to the
-      // terminal while a worker is up, to the fiber once it is not.
-      name.title = `${lane.label} — open its terminal`
+      // The name is the lane's door, same as the rail: to the terminal while a
+      // worker is up, to the fiber once it is not.
+      name.title = `${lane.label} — open ${this.laneIsAloft(lane) ? 'its terminal' : 'the fiber'}`
       name.addEventListener('click', (e) => {
         e.stopPropagation()
         this.openLaneTerminal(lane)
@@ -2252,26 +2283,51 @@ class DayViewImpl implements TemporalView {
       // THE RAIL CARRIES THREE GESTURES, and they settle in this order:
       //
       //   a drag past the threshold   → zoom      (decided in `onDragMove`)
-      //   a click ON a mark           → pin       (the tooltip's own grammar)
-      //   a click on empty paper      → terminal
+      //   Alt- or Cmd-click           → pin the moment under the pointer
+      //   a plain click               → the terminal
       //
-      // The middle rule is the one that keeps the existing grammar intact: if
-      // the pointer resolves to a beat — by ordinary snap or by the magnet —
-      // that click belongs to the tooltip, because the reader is pointing at
-      // something. Only where `pickMark` finds nothing at all is the click
-      // about the LANE rather than about a moment in it, and that is where the
-      // door is.
+      // ## Why the plain click is the door and not the pin
+      //
+      // It was the other way round for exactly one round of use, on the rule
+      // "a click on a mark pins, a click on empty paper opens" — and empty
+      // paper turned out not to exist. Measured against a real day, on the
+      // busiest lane of the page (291 inked minutes over a 435-minute frame,
+      // 2.3px to the minute) a 9px snap plus the magnet's claim on everything
+      // right of the last mark left 14% of the lane's width opening the
+      // terminal. Tightening the snap to 3px and dropping the magnet's claim
+      // took quiet lanes to 95% and that lane to 26%: at two pixels per minute
+      // EVERY pixel is genuinely within three of a beat, so no hitbox tight
+      // enough to be fair is tight enough to be reachable. The heaviest lane
+      // is also the one that sorts first and the one you most want to attach
+      // to, so the gesture was least available exactly where it was most
+      // wanted.
+      //
+      // So the surface belongs to the door, and pinning takes the modifier.
+      // The trade is cheap because HOVER ALREADY DOES THE READING — the slip
+      // opens on hover, follows the pointer, and the magnet answers the whole
+      // dead zone. Pinning only exists so the slip will hold still while you
+      // move onto it to scroll a long excerpt, which is a deliberate act and
+      // can afford a deliberate key.
+      // The promise the title makes is checked against the fleet, not assumed.
+      // A lane whose worker has landed opens the FIBER, and saying so is the
+      // difference between a fallback and a control that looks broken — the
+      // first report of this feature was "clicking a lane does nothing", from
+      // a board on which nothing was aloft at all.
+      const aloft = this.laneIsAloft(lane)
+      rail.title =
+        `${lane.label} — click to open ${aloft ? 'its terminal' : 'the fiber'}` +
+        ` · ⌥-click to pin a moment`
       rail.addEventListener('click', (e) => {
         e.stopPropagation()
         if (this.dragJustEnded) {
           this.dragJustEnded = false
           return
         }
-        if (this.beatUnder(lane, rail, win, e) === null) {
-          this.openLaneTerminal(lane)
+        if (e.altKey || e.metaKey) {
+          this.showBeatTip(lane, rail, win, e, true)
           return
         }
-        this.showBeatTip(lane, rail, win, e, true)
+        this.openLaneTerminal(lane)
       })
 
       chart.append(label, rail)
@@ -2402,7 +2458,7 @@ class DayViewImpl implements TemporalView {
     const startMs = win.startMs + beat.minute * MINUTE_MS
     const tip = this.ensureTip()
     const key = `${lane.key}:${beat.minute}`
-    renderTip(tip, beatTip(lane, beat, win, this.moments.peek(key, pin)))
+    renderTip(tip, beatTip(beat, win, this.moments.peek(key, pin)))
     // The words arrive late or not at all; the tooltip is already correct
     // without them, and redraws in place when they land. A pin asks again for
     // the UNTRUNCATED words — the daemon does the cutting, so the pinned slip
@@ -2417,7 +2473,7 @@ class DayViewImpl implements TemporalView {
         // tooltip that has since been pinned would paint the cut text back over
         // the full text.
         if (this.hoveredKey !== key || (this.pinnedKey === key) !== pin) return
-        renderTip(tip, beatTip(lane, beat, win, words))
+        renderTip(tip, beatTip(beat, win, words))
       },
       pin,
     )
@@ -2458,12 +2514,30 @@ class DayViewImpl implements TemporalView {
    * while one is up and the card once it is not. It is also what the lane's
    * name already did before this, so nothing that used to work stopped.
    */
+  /**
+   * WHERE A LANE'S CLICK GOES. Pure, and exported, because this is the branch
+   * that decides whether the gesture reaches a terminal at all — the one place
+   * the feature can silently do nothing, and therefore the one place worth
+   * pinning down without a browser.
+   *
+   * A card with a live worker AND a host that can attach goes to the terminal.
+   * Everything else goes to the fiber: no worker in the air, or a board mounted
+   * without an attach handler (the offline harness). Never neither.
+   */
+  /** Is a worker in the air for this lane right now — the question both the
+   *  rail's title and the lane name's ask before promising a terminal. */
+  private laneIsAloft(lane: DayLane): boolean {
+    return this.ctx?.cards.some((c) => c.id === lane.cardId && Boolean(c.runningWorker)) ?? false
+  }
+
   private openLaneTerminal(lane: DayLane): void {
     const ctx = this.ctx
     if (!ctx) return
-    const card = ctx.cards.find((c) => c.id === lane.cardId)
-    const tmux = card?.runningWorker
-    if (tmux && ctx.openWorker) ctx.openWorker(tmux, card.shuttleHost)
+    const target = laneOpenTarget(
+      ctx.cards.find((c) => c.id === lane.cardId),
+      Boolean(ctx.openWorker),
+    )
+    if (target.kind === 'worker') ctx.openWorker?.(target.tmux, target.host)
     else ctx.openCard(lane.cardId)
   }
 
@@ -2498,7 +2572,7 @@ class DayViewImpl implements TemporalView {
     // lane, and every pixel of the dead zone must reuse it rather than mint a
     // fresh cache entry and a fresh fetch on every mouse move.
     const key = `${lane.key}:magnet`
-    renderTip(tip, magnetTip(lane, exchange, this.moments.peek(key, pin)))
+    renderTip(tip, magnetTip(exchange, this.moments.peek(key, pin)))
     this.moments.request(
       key,
       sources,
@@ -2506,7 +2580,7 @@ class DayViewImpl implements TemporalView {
       toMs,
       (words) => {
         if (this.hoveredKey !== key || (this.pinnedKey === key) !== pin) return
-        renderTip(tip, magnetTip(lane, exchange, words))
+        renderTip(tip, magnetTip(exchange, words))
       },
       pin,
     )

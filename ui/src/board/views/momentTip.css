@@ -153,8 +153,14 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* `margin-left: auto` holds the count at the right margin. It used to be
+   pushed there by `.kbn-tip-where` growing beside it — but Day's rows carry no
+   `where` now (the lane's label already names the fiber), so without this the
+   count would sit flush against the register word on exactly the surface where
+   it matters most. */
 .kbn-tip-count {
   flex: 0 0 auto;
+  margin-left: auto;
   font-family: var(--font-mono, 'IBM Plex Mono', monospace);
   font-size: calc(9px * var(--kbn-type-scale, 1));
   color: #A89B83;

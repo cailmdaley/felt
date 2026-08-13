@@ -34,6 +34,49 @@
  *  user meant to click. */
 export const DRAG_THRESHOLD = 4
 
+/** A line of scroll, in pixels. Browsers that report scroll in LINES leave the
+ *  conversion to the page; sixteen is the conventional figure and matches the
+ *  board's own body text. */
+const PIXELS_PER_LINE = 16
+
+/** No single wheel event may zoom by more than this, whatever it claims to
+ *  have scrolled. Some browsers send 120 per notch and some send 3; without a
+ *  ceiling the same gesture is a nudge on one machine and a jump to the far
+ *  end of the range on another. */
+const MAX_STEP_PX = 40
+
+/** How much zoom one pixel of wheel travel is worth. */
+const ZOOM_PER_PIXEL = 0.0125
+
+/**
+ * A wheel event's zoom factor — the ratio to multiply the current scale by.
+ *
+ * THE UNITS ARE THE WHOLE BUG THIS FUNCTION EXISTS FOR. `WheelEvent.deltaY` is
+ * meaningless without `deltaMode`, and the two gestures that both zoom report
+ * in DIFFERENT modes:
+ *
+ *   a trackpad PINCH   arrives as pixels (deltaMode 0), tens of them per
+ *                      event, so reading deltaY as pixels happens to work.
+ *   ctrl + SCROLL      arrives as LINES (deltaMode 1) on macOS — deltaY of
+ *                      about 1 to 3 per notch.
+ *
+ * Reading a line-mode "1" as one pixel yields a factor of exp(-0.0125): a 1.2%
+ * change, which is invisible. The board zoomed under a pinch and appeared
+ * completely dead under ctrl+scroll, and the difference was never the event
+ * type or the modifier — it was that nobody converted the units.
+ */
+export function wheelZoomFactor(
+  deltaY: number,
+  deltaMode: number,
+  pageHeight = 800,
+): number {
+  if (!Number.isFinite(deltaY) || deltaY === 0) return 1
+  const perUnit = deltaMode === 1 ? PIXELS_PER_LINE : deltaMode === 2 ? pageHeight : 1
+  const px = deltaY * perUnit
+  const clamped = Math.max(-MAX_STEP_PX, Math.min(MAX_STEP_PX, px))
+  return Math.exp(-clamped * ZOOM_PER_PIXEL)
+}
+
 /** Floors for a hand-resized card: below these the header is unreadable and
  *  the body shows nothing worth showing. */
 export const MIN_CARD_W = 160

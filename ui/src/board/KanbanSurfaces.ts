@@ -493,7 +493,7 @@ export class KanbanSurfaceRenderer {
 
   /**
    * The "onto the shelf" half of the Pinned strip: dropping a card here
-   * reshapes it to a resting `kind:pinned` role via `pin`. The off-write twin
+   * reshapes it to a resting `kind:pinned` role via `reshape`. The off-write twin
    * of dragging a pinned card onto In-flight (which dispatches it). Mirrors
    * `installSectionDragHandlers` (the stash shelf), differing only in the write
    * it commits — pinning is a `/lifecycle` reshape, not a `/felt-edit` field.

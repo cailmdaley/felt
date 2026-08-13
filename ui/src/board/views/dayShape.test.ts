@@ -44,6 +44,9 @@ import {
   ZOOM_MIN_MINUTES,
   type DayEntry,
   type DayLane,
+  beatTip,
+  laneOpenTarget,
+  magnetTip,
 } from './DayView.js'
 import { buildLedgerNarration, ledgerBetween, type LedgerNarration } from './join.js'
 import { cardState } from './vocabulary.js'
@@ -1640,5 +1643,75 @@ describe('the diff clause', () => {
     expect(formatEntryStats({ messages: 2, agent: 5, commits: 1 })).toBe(
       'you 2 · agents 5m · 1 commit',
     )
+  })
+})
+
+describe('the Day card never repeats what the lane already says', () => {
+  const WIN = { startMs: at(2026, 8, 4, 6, 0), endMs: at(2026, 8, 5, 6, 0), minutes: 1440 }
+
+  it('leaves `where` empty on every row — the lane label is on the same line of the page', () => {
+    const tip = beatTip(
+      { minute: 500, kinds: [{ kind: 'attention', count: 2 }, { kind: 'agent', count: 9 }], sources: [] },
+      WIN,
+    )
+    expect(tip.rows.length).toBe(2)
+    for (const row of tip.rows) expect(row.where).toBe('')
+  })
+
+  it('still says which pigment and how many — dropping the name costs the row nothing else', () => {
+    const tip = beatTip(
+      { minute: 10, kinds: [{ kind: 'agent', count: 9 }], sources: [] },
+      WIN,
+    )
+    expect(tip.rows[0]).toMatchObject({ kind: 'agent', phrase: 'tool call', count: 9 })
+  })
+
+  it("heads the magnet with WHEN, which the surface cannot show, and not with the lane's name", () => {
+    const tip = magnetTip({
+      turns: [
+        { kind: 'attention', atMs: at(2026, 8, 4, 14, 12) },
+        { kind: 'reply', atMs: at(2026, 8, 4, 14, 31) },
+      ],
+      toolsAfter: null,
+    })
+    expect(tip.time).toMatch(/^last at /)
+    expect(tip.rows.map((r) => r.kind)).toEqual(['attention', 'reply'])
+    for (const row of tip.rows) expect(row.where).toMatch(/^\d/)
+  })
+
+  it('carries the trailing tool calls as their own row, counted and dated from the last word', () => {
+    const tip = magnetTip({
+      turns: [{ kind: 'reply', atMs: at(2026, 8, 4, 14, 31) }],
+      toolsAfter: { atMs: at(2026, 8, 4, 15, 47), count: 63 },
+    })
+    expect(tip.rows[1]).toMatchObject({ kind: 'agent', phrase: 'tool call', count: 63 })
+    expect(tip.rows[1].where).toMatch(/^since /)
+  })
+})
+
+describe('laneOpenTarget — where a lane click actually goes', () => {
+  const card = (over: Partial<KanbanCard>): KanbanCard =>
+    ({ id: 'f1', name: 'felt', originId: 'local', ...over }) as KanbanCard
+
+  it('opens the terminal when a worker is aloft and the host can attach', () => {
+    expect(laneOpenTarget(card({ runningWorker: 'shuttle-felt', shuttleHost: 'examplehost' }), true))
+      .toEqual({ kind: 'worker', tmux: 'shuttle-felt', host: 'examplehost' })
+  })
+
+  it('carries no host when the card names none, rather than an empty one', () => {
+    expect(laneOpenTarget(card({ runningWorker: 'shuttle-felt' }), true))
+      .toEqual({ kind: 'worker', tmux: 'shuttle-felt' })
+  })
+
+  it('OPENS THE FIBER when nothing is aloft — the click must never resolve to nothing', () => {
+    expect(laneOpenTarget(card({}), true)).toEqual({ kind: 'card' })
+  })
+
+  it('opens the fiber when the board was mounted without an attach handler', () => {
+    expect(laneOpenTarget(card({ runningWorker: 'shuttle-felt' }), false)).toEqual({ kind: 'card' })
+  })
+
+  it('opens the fiber for a lane whose card the feed no longer carries', () => {
+    expect(laneOpenTarget(undefined, true)).toEqual({ kind: 'card' })
   })
 })

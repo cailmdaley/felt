@@ -84,7 +84,6 @@ import {
   pickMark,
   renderTip,
   SLOT_KIND_ORDER,
-  SLOT_NO_TEXT_NOTE,
   SLOT_PHRASE,
   type DrawnKind,
   type MomentWords,
@@ -94,7 +93,7 @@ import {
 
 // Re-exported because the tooltip vocabulary was Week's before it was shared,
 // and callers (and tests) that learned it here keep working.
-export { SLOT_NO_TEXT_NOTE, type SlotTip, type SlotTipRow }
+export { type SlotTip, type SlotTipRow }
 import type { KanbanCard } from '../KanbanTypes.js'
 import { cycleSpan, type CycleSpan } from '../KanbanRules.js'
 import {
@@ -123,8 +122,26 @@ export { RAIL_START_HOUR, railBounds, type RailBounds }
  *  touches the arithmetic, which counts minutes (see BUCKET_MS). */
 const RASTER_SLOT_MS = 4 * 60_000
 
-/** Where an undated obligation sits on the rail — mid-morning, 10am. */
-const MID_MORNING_FRACTION = (10 - RAIL_START_HOUR) / 24
+/** The hour an undated obligation is parked at — mid-morning. A due has no
+ *  time of day, so it may not pretend to one; it sits where the eye reads
+ *  "morning" and on the 10am rule the rail already draws. */
+const MID_MORNING_HOUR = 10
+
+/**
+ * Where an undated obligation sits on `day`'s rail.
+ *
+ * Derived as a real instant rather than a constant fraction, for the same
+ * reason {@link railRuleFractions} is: a 25-hour rail's 10am is 4 of 25 along,
+ * not 4 of 24, and a hard `(10 - RAIL_START_HOUR) / 24` puts the mark up to an
+ * hour off the 10am rule it is supposed to sit on. Falls back to the flat
+ * fraction only for a day that will not parse.
+ */
+export function midMorningFraction(day: string, bounds: RailBounds): number {
+  const at = civilDayNoon(day)
+  if (!at) return (MID_MORNING_HOUR - RAIL_START_HOUR) / 24
+  at.setHours(MID_MORNING_HOUR, 0, 0, 0)
+  return railFraction(at.getTime(), bounds)
+}
 
 /** Day-weight thresholds. Internal vocabulary, deliberately three words wide:
  *  the view reports how full a day was, it does not grade it. */
@@ -632,7 +649,7 @@ export function marksForDay(cards: KanbanCard[], day: string, bounds: RailBounds
       marks.push({
         kind,
         glyph: MARK_GLYPH[kind],
-        fraction: MID_MORNING_FRACTION,
+        fraction: midMorningFraction(day, bounds),
         label: card.name,
         cardId: card.id,
       })
@@ -711,6 +728,9 @@ class WeekView implements TemporalView {
   /** Bumped when loaded data actually changes; part of every row signature. */
   private dataGen = 0
   private activityKey = ''
+  /** True between issuing an activity request and its settlement, so a repaint
+   *  that finds the week not yet loaded does not issue a second one. */
+  private activityInFlight = false
 
   /**
    * The session ledger, as the tmux→fiber map. JOIN RUNG 0 for the rasters:
@@ -853,6 +873,7 @@ class WeekView implements TemporalView {
     this.rows = []
     this.shellMonday = null
     this.activityKey = ''
+    this.activityInFlight = false
   }
 
   // ── Head ───────────────────────────────────────────────────────────────────
@@ -914,6 +935,17 @@ class WeekView implements TemporalView {
   private ensureShell(): void {
     const page = this.page
     if (!page || this.shellMonday === this.monday) return
+
+    // The slip and the magnet belong to the grid about to be discarded, and a
+    // PINNED slip outlives the pointer by design — so a week change would leave
+    // `pinnedKey` naming a row that no longer exists, and `showTip` would
+    // early-return on every mousemove: the new week silently loses its
+    // tooltips until the next click or Escape. Day releases the pin the same
+    // way when its window moves.
+    this.pinnedKey = null
+    this.hoveredKey = null
+    this.tip = null
+    this.moments.cancel()
 
     page.body.innerHTML = ''
     this.rows = []
@@ -1177,12 +1209,28 @@ class WeekView implements TemporalView {
     const win = weekWindow(monday, Date.now())
     if (win.days.length !== 7) return
 
+    // The key alone is not enough to say "already served". A PAST week's
+    // `activityToMs` is its own end and never moves, so paging away and back
+    // rebuilds the identical key — and the early return would then skip the
+    // request while `this.activity` still holds the OTHER week, leaving seven
+    // blank rails that never recover. The loaded week has to match too.
     const key = `${monday}:${win.activityToMs}`
-    if (win.activityToMs > win.fromMs && this.activityKey !== key) {
+    const served = this.activityKey === key && this.activity?.monday === monday
+    if (win.activityToMs > win.fromMs && !served && !this.activityInFlight) {
       this.activityKey = key
-      void ctx.activity(win.fromMs, win.activityToMs).then((res) => {
-        if (this.monday === monday) this.acceptActivity(monday, win.days, res)
-      })
+      this.activityInFlight = true
+      void ctx
+        .activity(win.fromMs, win.activityToMs)
+        .then((res) => {
+          if (this.monday === monday) this.acceptActivity(monday, win.days, res)
+        })
+        .finally(() => {
+          this.activityInFlight = false
+          // Paged away while this was in the air: the request for the week now
+          // shown was suppressed by the latch, so issue it rather than waiting
+          // for the next poll to notice.
+          if (this.monday !== monday && this.ctx) this.load(this.ctx)
+        })
     } else if (win.activityToMs <= win.fromMs && this.activity?.monday !== monday) {
       // A week wholly in the future: no rasters, and no request either.
       this.activityKey = key
@@ -1300,7 +1348,14 @@ class WeekView implements TemporalView {
       const isToday = row.day === todayCivil
       const isPast = row.day < todayCivil
       const marks = isPast ? [] : marksForDay(ctx.cards, row.day, bounds)
-      const visible = isToday ? marks.filter((m) => m.fraction > railFraction(now, bounds)) : marks
+      // Today shows only what is still ahead — but ONLY a launch has a real
+      // time of day to be ahead OF. A due is parked at mid-morning because it
+      // has no instant at all, so filtering it against the now-line makes an
+      // unmet obligation silently vanish at 10am, which is the opposite of what
+      // an obligation is for. Dues and snoozes stand all day.
+      const visible = isToday
+        ? marks.filter((m) => m.kind !== 'launch' || m.fraction > railFraction(now, bounds))
+        : marks
 
       const buckets = activity?.byDay.get(row.day) ?? []
       const waiting = activity ? rowWaitingOn(buckets, activity.origins) : null
@@ -1313,7 +1368,11 @@ class WeekView implements TemporalView {
         this.dataGen,
         `w${waiting ?? ''}`,
         isToday ? `t${minute}` : isPast ? 'p' : 'f',
-        visible.map((m) => `${m.kind}${m.cardId}`).join(','),
+        // The FRACTION is part of the mark's identity, not just its kind and
+        // card: a rescheduled `nextLaunchAt` that stays inside the same rail
+        // leaves kind and id untouched, and without this the ◐ would sit at its
+        // old position until something unrelated dirtied the row.
+        visible.map((m) => `${m.kind}${m.cardId}@${m.fraction.toFixed(3)}`).join(','),
         isToday ? inFlight.map((c) => c.id).join(',') : '',
       ].join('|')
       if (row.sig === sig) continue

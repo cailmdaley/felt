@@ -1275,7 +1275,8 @@ export class FiberDetailModal {
     // kind, schedule cadence. Agent axes (base × effort × chrome) commit
     // through `commitAxes` → the daemon's `set-agent` action (preserves
     // session.id + review history); kind/schedule/tz changes go through
-    // `livePatch` → an atomic install/repeat --reshape.
+    // `livePatch` → the daemon's `reshape` action, which rewrites the shape
+    // keys alone and leaves agent/status/outcome where they are.
     let agentSelect: HTMLSelectElement | null = null
     const originalAgent = card.shuttleAgent ?? ''
     // The kind editor toggles oneshot↔standing only; `pinned` is a CLI-managed
@@ -2758,44 +2759,53 @@ export class FiberDetailModal {
         typeof changes.shuttleTz === 'string'
 
       if (wantsReshape) {
-        // Kind/schedule/tz reshape is ONE atomic call: `install`/`repeat` with
-        // `reshape: true` clobbers the existing block in a single guarded write
-        // (omitted project_dir echoes from the old block server-side). This
-        // replaces the old uninstall + re-install composition, whose
-        // second-write failure could strand a de-installed fiber. When no block
-        // exists yet, reshape is harmless — it installs fresh. Current block
-        // state comes from the card.
+        // Changing the SHAPE of an existing block is its own surgical verb.
+        // `reshape` rewrites kind + schedule and nothing else — no model, no
+        // project_dir, no host, and above all no status: that is what lets a
+        // role sitting in Awaiting review (status: closed) be switched
+        // standing → oneshot, which the old create-with-`--reshape` route
+        // refused. The agent is NOT carried here; every axis change commits
+        // separately through `commitAxes` → `set-agent`.
+        //
+        // A card with no block yet has nothing to reshape (the verb errors on
+        // one), so it takes the create path — `install`/`repeat`, no reshape
+        // flag. Current block state comes from the card.
         const targetKind: 'oneshot' | 'standing' =
           changes.shuttleKind ?? (card.shuttleKind === 'standing' ? 'standing' : 'oneshot')
-        const targetAgent = card.shuttleAgent
-        const projectDir = this.projectDirFor(card)
-        // A paused draft must stay paused across the reshape (install
-        // defaults to armed; status `open` means draft).
-        const wasDisabled = card.status === 'open'
 
-        let reinstall: Record<string, unknown>
-        if (targetKind === 'standing') {
-          const schedule =
-            (typeof changes.shuttleSchedule === 'string' && changes.shuttleSchedule.trim()) ||
-            card.shuttleSchedule
-          const tz =
-            (typeof changes.shuttleTz === 'string' && changes.shuttleTz.trim()) ||
-            card.shuttleTz || 'UTC'
-          if (!schedule) {
-            throw new Error('standing-kind shuttle blocks require a schedule (cron expression)')
-          }
-          reinstall = {
-            action: 'repeat', origin, fiber: fiberId, reshape: true,
-            schedule, tz, model: targetAgent, project_dir: projectDir,
-          }
-        } else {
-          reinstall = {
-            action: 'install', origin, fiber: fiberId, reshape: true,
-            model: targetAgent, project_dir: projectDir, disabled: wasDisabled,
-          }
+        const schedule =
+          (typeof changes.shuttleSchedule === 'string' && changes.shuttleSchedule.trim()) ||
+          card.shuttleSchedule
+        const tz =
+          (typeof changes.shuttleTz === 'string' && changes.shuttleTz.trim()) ||
+          card.shuttleTz || 'UTC'
+        if (targetKind === 'standing' && !schedule) {
+          throw new Error('standing-kind shuttle blocks require a schedule (cron expression)')
         }
 
-        await this.postLifecycle(reinstall)
+        if (isAgentCard(card)) {
+          // A non-standing target DROPS the schedule key server-side, and
+          // sending `--schedule` alongside it is an error — so the schedule
+          // rides only when the target kind actually carries one.
+          await this.postLifecycle(
+            targetKind === 'standing'
+              ? { action: 'reshape', origin, fiber: fiberId, kind: 'standing', schedule, tz }
+              : { action: 'reshape', origin, fiber: fiberId, kind: 'oneshot' },
+          )
+        } else if (targetKind === 'standing') {
+          await this.postLifecycle({
+            action: 'repeat', origin, fiber: fiberId,
+            schedule, tz, model: card.shuttleAgent, project_dir: this.projectDirFor(card),
+          })
+        } else {
+          await this.postLifecycle({
+            action: 'install', origin, fiber: fiberId,
+            model: card.shuttleAgent, project_dir: this.projectDirFor(card),
+            // A paused draft must stay paused across the install (install
+            // defaults to armed; status `open` means draft).
+            disabled: card.status === 'open',
+          })
+        }
       }
 
       // Reparent: the daemon's `/felt-nest` shells `felt nest`/`felt unnest`

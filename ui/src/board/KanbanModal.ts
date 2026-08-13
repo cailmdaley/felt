@@ -44,7 +44,7 @@ import type {
   KanbanCard,
   KanbanResponse,
 } from './KanbanTypes.js'
-import { dispatchIneligibleReason, errorMessageFromResponse } from './KanbanModalShared.js'
+import { dispatchIneligibleReason, errorMessageFromResponse, isAgentCard } from './KanbanModalShared.js'
 import { COLUMN_TITLES, KanbanSurfaceRenderer, SURFACE_TITLE, findCardColumn } from './KanbanSurfaces.js'
 import { parseCompositeFeed } from './KanbanComposite.js'
 import { buildKanbanResponseFromComposite, deriveCycleLens, restingCards } from './KanbanReadModel.js'
@@ -1089,8 +1089,8 @@ export class KanbanModal {
    * "Onto the Pinned shelf" gesture: reshape an existing shuttle fiber to a
    * resting `kind:pinned` role. The off-the-shelf twin of dragging a pinned
    * card onto In-flight (dispatch). Optimistically lands the card on the
-   * pinned surface, then composes the daemon reshape (uninstall + pin) in the
-   * background and reconciles.
+   * pinned surface, then posts the daemon's `reshape pinned` in the background
+   * and reconciles.
    *
    * v1 scope (matches the spec): the source must already carry a shuttle block
    * (a bare human-due draft has no host/project_dir to install from — promote
@@ -1111,7 +1111,7 @@ export class KanbanModal {
       // A *running* pinned role shows in In-flight, not at rest on the strip
       // (the live-worker override in classifyFiber). Dragging it back to the
       // strip means "stop it": kill the worker so it comes to rest. No reshape —
-      // it's already pinned, so uninstall+pin would be a pointless round-trip.
+      // it's already pinned, so re-pinning would be a pointless round-trip.
       if (card.runningWorker) {
         const optimistic = applyOptimisticPin(this.lastResponse, card.id)
         if (optimistic) this.applyResponse(optimistic)
@@ -1127,10 +1127,11 @@ export class KanbanModal {
       return
     }
     // A closed card (awaiting-review or a tempered/composted past run) is no
-    // longer refused: the `pin` writer refuses status:closed, so commitPin
-    // composes a reopen-as-draft first (mirroring the stash drop's park).
-    // applyOptimisticPin already lands the card at rest (status:active) on the
-    // strip, so the optimistic move holds for a closed source too.
+    // longer refused: `reshape` writes the shape and nothing else, so commitPin
+    // follows it with a `pause` that parks the card — status:open, tempered and
+    // closed-at cleared. applyOptimisticPin already lands the card at rest
+    // (status:active) on the strip, so the optimistic move holds for a closed
+    // source too.
     // A running card dragged onto the strip is stopped first (commitPin kills
     // the worker before the reshape), so it comes to rest on the strip rather
     // than staying in Now via the live-worker override. The optimistic move to
@@ -1141,34 +1142,50 @@ export class KanbanModal {
   }
 
   /**
-   * Network half of {@link pinRole}: a SINGLE atomic `pin --reshape` — the
-   * daemon's Go verb clobbers any existing block in one guarded write, settling
-   * status to open (parked on the strip) and echoing the fiber's model / host /
-   * project_dir from the old block when a hint is absent. Replaces the old
-   * uninstall + pin composition, whose second-write failure could strand a
-   * de-pinned fiber. A running card is killed first (a kill writes no status,
-   * so the reshape still settles cleanly); a closed source revives straight to
-   * the strip, since the reshape settles closed → open itself.
+   * Network half of {@link pinRole}. The gesture means two things — "be a
+   * pinned role" and "come to rest on the strip" — so a card that already
+   * carries a shuttle block says both, in two calls:
    *
-   * `project_dir` is a hint only: when it can't resolve here (undefined),
-   * `postLifecycle` drops it and the daemon echoes the old block's value, so a
-   * remote card with no city fallback no longer strands — it reshapes in place.
-   * Reconciles via the trailing refetch.
+   *   `reshape pinned` rewrites kind (dropping any schedule) and NOTHING else,
+   *   so model, host and project_dir stay where they are instead of being
+   *   echoed back through a create verb; then `pause` parks it — status:open
+   *   with tempered / closed-at cleared, which IS rest on the strip. The old
+   *   `pin --reshape` delivered the parking by accident, as a side effect of
+   *   rebuilding the whole block; now the intent is stated.
+   *
+   * Non-atomic on purpose. The hazard this codebase learned to fear was
+   * `uninstall` + `pin`, where a failed second write left a fiber with NO block
+   * at all. Here a failed `pause` leaves a correctly pinned role that simply
+   * isn't parked yet — visible, harmless, and re-driveable by the same drag. An
+   * atomic block-rebuild would cost more than it buys.
+   *
+   * A card with no block yet has nothing to reshape (the verb errors on one),
+   * so it takes `pin`, the create verb — which parks at status:open itself, no
+   * second call needed. `project_dir` is a hint only on that path: when it
+   * can't resolve here (undefined), `postLifecycle` drops it and the daemon
+   * falls back. A running card is killed first on both paths, so by the time
+   * `pause` runs its own kill is a no-op. Reconciles via the trailing refetch.
    */
   private async commitPin(card: KanbanCard): Promise<void> {
     try {
       await this.killWorkerIfRunning(card)
       // The /lifecycle endpoint keys on `fiber` (not `fiber_id`, which
       // /dispatch and /felt-edit use) — matching FiberDetailModal's reshape.
-      await this.postLifecycle({
-        action: 'pin',
-        reshape: true,
-        fiber: card.id,
-        origin: card.originId,
-        model: card.shuttleAgent,
-        host: card.shuttleHost,
-        project_dir: this.resolveProjectDir(card),
-      })
+      if (isAgentCard(card)) {
+        await this.postLifecycle({
+          action: 'reshape', kind: 'pinned', fiber: card.id, origin: card.originId,
+        })
+        await this.postLifecycle({ action: 'pause', fiber: card.id, origin: card.originId })
+      } else {
+        await this.postLifecycle({
+          action: 'pin',
+          fiber: card.id,
+          origin: card.originId,
+          model: card.shuttleAgent,
+          host: card.shuttleHost,
+          project_dir: this.resolveProjectDir(card),
+        })
+      }
       this.announce(`Pinned “${card.name}”.`)
     } catch (err: unknown) {
       const msg = (err as { message?: string })?.message ?? String(err)

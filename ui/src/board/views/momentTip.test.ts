@@ -14,7 +14,6 @@ import {
   renderExcerptMarkdown,
   pickMark,
   renderTip,
-  SLOT_NO_TEXT_NOTE,
   SLOT_PHRASE,
   type MomentWords,
   type SlotTip,
@@ -27,9 +26,8 @@ import {
  * can lie. The wire parser must not admit a half-excerpt. The loader must not
  * paint an answer onto a mark the pointer has left, and must not go to the
  * network for a mark that has no transcript behind it. And the renderer must
- * keep saying {@link SLOT_NO_TEXT_NOTE} whenever nothing was recovered — the
- * one sentence this whole feature exists to stop being necessary, and the one
- * it must never replace with an invention.
+ * say nothing at all when nothing was recovered — never an invented sentence,
+ * and no longer a gloss explaining its own limitation either.
  */
 
 afterEach(() => {
@@ -491,13 +489,37 @@ describe('renderTip — the excerpt cards', () => {
     expect(when.className).toBe('kbn-tip-when')
   })
 
-  it('falls to the note, still under the shared section rule, when nothing was said', () => {
+  it('says NOTHING when nothing was recovered — the card states facts, and a fact nobody has is not one', () => {
     vi.stubGlobal('document', fakeDocument())
     const host = new FakeNode()
     renderTip(host as unknown as HTMLElement, { time: '', rows: [] })
+    expect(host.children.find((c) => c.className.includes('kbn-tip-note'))).toBeUndefined()
+  })
+
+  it('still says WHERE the words are, which is a fact about the fleet rather than a gloss', () => {
+    vi.stubGlobal('document', fakeDocument())
+    const host = new FakeNode()
+    renderTip(host as unknown as HTMLElement, {
+      time: '', rows: [], note: 'words live on basalt-login-02',
+    })
     const foot = host.children.find((c) => c.className.includes('kbn-tip-note'))!
-    expect(foot.className).toBe('kbn-tip-note kbn-tip-section')
-    expect(foot.textContent).toBe(SLOT_NO_TEXT_NOTE)
+    expect(foot.textContent).toBe('words live on basalt-login-02')
+  })
+
+  it('draws the tools ALONGSIDE the words, not instead of them', () => {
+    vi.stubGlobal('document', fakeDocument())
+    const host = new FakeNode()
+    renderTip(host as unknown as HTMLElement, {
+      time: '', rows: [],
+      detail: [baseExcerpt({ role: 'assistant', text: 'on it' })],
+      tools: 'Bash — run the tests\nRead — DayView.ts',
+    })
+    expect(host.children.find((c) => c.className.includes('kbn-tip-said'))).toBeDefined()
+    const tools = host.children.find((c) => c.className.includes('kbn-tip-tools'))!
+    expect(tools.children.map((r) => r.textContent)).toEqual([
+      'Bash — run the tests',
+      'Read — DayView.ts',
+    ])
   })
 })
 

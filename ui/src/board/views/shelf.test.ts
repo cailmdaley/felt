@@ -16,6 +16,9 @@ import {
 import {
   clampZoom,
   coercePersist,
+  FLOW_MAX_W,
+  FLOW_MIN_W,
+  flowMetrics,
   emptyPersist,
   isPlaced,
   layoutShelf,
@@ -51,6 +54,7 @@ import {
   MIN_CARD_W,
   settleGesture,
   travelled,
+  wheelZoomFactor,
 } from './shelfGesture.js'
 
 const MIN = 60_000
@@ -221,9 +225,13 @@ describe('layoutShelf — nothing overlaps', () => {
     }
     const { cards } = layoutShelf(files, 'recency', states, metrics)
     assertLegal(cards)
-    // The flow skipped the occupied slot and stayed ON the grid.
-    for (const card of cards.filter((c) => !c.pinned)) {
-      expect(card.x % anchorX).toBe(0)
+    // The flow skipped the occupied slot and stayed ON the grid — the grid's
+    // own pitch, which is the flexed card width plus the gutter, not the
+    // preferred width the column count was chosen from.
+    const flowed = cards.filter((c) => !c.pinned)
+    const pitch = flowed[0].w + SHELF_METRICS.gap
+    for (const card of flowed) {
+      expect(card.x % pitch).toBe(0)
     }
     expect(cards.find((c) => c.file.fullPath === '/anchor')).toMatchObject({ x: anchorX, y: 0 })
   })
@@ -413,6 +421,58 @@ describe('resetLayout — the furniture goes back, the judgements stay', () => {
   })
 })
 
+describe('flowMetrics — the flow fills the width it is given', () => {
+  const gap = SHELF_METRICS.gap
+  const pref = SHELF_METRICS.cardW
+  /** A board inset by the page's padding, then split with the reader. */
+  const splitViewport = (screen: number): number => (screen - 28) * 0.5 - 6
+
+  it('leaves no dead canvas at any width — that was the reported bug', () => {
+    for (let width = 300; width <= 2000; width += 7) {
+      const { columns, cardW } = flowMetrics(width, gap, pref)
+      const used = columns * cardW + (columns - 1) * gap
+      expect(used).toBeLessThanOrEqual(width)
+      // Never more than a rounding remainder short of the full width — the old
+      // floor-a-fixed-width arithmetic left up to a whole column empty.
+      expect(width - used).toBeLessThan(cardW)
+    }
+  })
+
+  it('fits THREE columns beside a docked reader on every laptop width', () => {
+    for (const screen of [1280, 1440, 1512, 1728]) {
+      const { columns } = flowMetrics(splitViewport(screen), gap, pref)
+      expect(columns, `screen ${screen}`).toBeGreaterThanOrEqual(3)
+    }
+  })
+
+  it('keeps cards legible rather than fitting one more column', () => {
+    for (let width = 300; width <= 2000; width += 13) {
+      const { cardW } = flowMetrics(width, gap, pref)
+      expect(cardW).toBeGreaterThanOrEqual(FLOW_MIN_W)
+      expect(cardW).toBeLessThanOrEqual(FLOW_MAX_W)
+    }
+  })
+
+  it('drops a column rather than squeezing below the floor', () => {
+    // Two columns would be 185 each here — under the floor, so one wins.
+    const { columns } = flowMetrics(390, gap, pref)
+    expect(columns).toBe(1)
+  })
+
+  it('keeps every card a page, at whatever width it settles on', () => {
+    for (const width of [400, 620, 700, 1412]) {
+      const { cardW, cardH } = flowMetrics(width, gap, pref)
+      expect(cardH / cardW).toBeGreaterThan(1.4)
+      expect(cardH / cardW).toBeLessThan(1.43)
+    }
+  })
+
+  it('always gives at least one column, however little room there is', () => {
+    expect(flowMetrics(0, gap, pref).columns).toBe(1)
+    expect(flowMetrics(-50, gap, pref).columns).toBe(1)
+  })
+})
+
 describe('the card is a page', () => {
   it('defaults to portrait at A4 proportion', () => {
     const ratio = SHELF_METRICS.cardH / SHELF_METRICS.cardW
@@ -517,6 +577,47 @@ describe('shelfGesture — a click is not a drag', () => {
         expect(beginGesture('move', '/a', down, geom, bad).scale).toBe(1)
       }
     })
+  })
+})
+
+describe('wheelZoomFactor — the units are the bug', () => {
+  it('gives a pinch (pixels) a usable step', () => {
+    // A pinch reports pixel deltas of tens per event.
+    expect(wheelZoomFactor(-10, 0)).toBeCloseTo(Math.exp(0.125), 6)
+    expect(wheelZoomFactor(10, 0)).toBeLessThan(1)
+  })
+
+  it('gives ctrl+scroll (LINES) the same order of step, not a thousandth of one', () => {
+    // This is the reported bug: macOS delivers a ctrl+scroll notch as ~1 LINE.
+    // Read as one pixel it is a 1.2% change — invisible. Converted, it is a
+    // real step, comparable to a pinch.
+    const oneNotch = wheelZoomFactor(-1, 1)
+    expect(oneNotch).toBeGreaterThan(1.15)
+    // Within a factor of two of a pinch event, so neither gesture feels alien.
+    const pinch = wheelZoomFactor(-10, 0)
+    expect(oneNotch / pinch).toBeGreaterThan(0.5)
+    expect(oneNotch / pinch).toBeLessThan(2)
+  })
+
+  it('converts page-mode deltas against the viewport', () => {
+    expect(wheelZoomFactor(-1, 2, 900)).toBeGreaterThan(1)
+  })
+
+  it('caps one event, so a browser that sends 120 per notch does not jump the range', () => {
+    const huge = wheelZoomFactor(-1200, 0)
+    const capped = wheelZoomFactor(-40, 0)
+    expect(huge).toBe(capped)
+    expect(huge).toBeLessThan(2)
+  })
+
+  it('is exactly 1 for a wheel that did not turn', () => {
+    expect(wheelZoomFactor(0, 0)).toBe(1)
+    expect(wheelZoomFactor(Number.NaN, 0)).toBe(1)
+  })
+
+  it('zooms in for negative delta and out for positive, as scrolling up means closer', () => {
+    expect(wheelZoomFactor(-5, 0)).toBeGreaterThan(1)
+    expect(wheelZoomFactor(5, 0)).toBeLessThan(1)
   })
 })
 

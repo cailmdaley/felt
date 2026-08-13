@@ -78,6 +78,7 @@ import {
 import {
   clampZoom,
   emptyPersist,
+  FLOW_MIN_W,
   isPlaced,
   layoutShelf,
   loadShelfPersist,
@@ -93,6 +94,7 @@ import {
   advanceGesture,
   beginGesture,
   settleGesture,
+  wheelZoomFactor,
   type ShelfGesture,
 } from './shelfGesture.js'
 import { packShelf, type PackCard } from './shelfPack.js'
@@ -112,6 +114,12 @@ import {
  *  that already?" is still a live question; beyond it the canvas would be an
  *  archive, which is a different surface. */
 const SHELF_WINDOW_MS = 30 * 24 * 60 * 60 * 1000
+
+/** The seam between the canvas and a docked reader. A divider, not a gutter:
+ *  wide enough to read as an edge, narrow enough that no card-sized strip of
+ *  canvas is lost to it. The grab zone for dragging it is wider (see the
+ *  docked-reader rules in ShelfView.css) and overlaps the reader's edge. */
+const DIVIDER = 6
 
 /** A card, as the view holds it: the file, its DOM, and the state of its body. */
 interface CardHandle {
@@ -251,15 +259,20 @@ class ShelfView implements TemporalView {
     if (this.readerWasOpen) requestAnimationFrame(() => this.reader?.reopen())
   }
 
-  /** The canvas's rectangle on screen — what a docked reader splits. */
+  /**
+   * The canvas's rectangle on screen — what a docked reader splits.
+   *
+   * Measured from the viewport's PARENT, whose width does not change when the
+   * canvas narrows. Deriving the full width from the narrowed viewport instead
+   * (`r.width / (1 - split)`) makes the divider's own thickness compound
+   * through the division, so the reader creeps a few pixels further left on
+   * every re-dock and the seam never settles.
+   */
   private boardRect(): { left: number; top: number; width: number; height: number } | null {
-    const vp = this.viewport
-    if (!vp) return null
-    const r = vp.getBoundingClientRect()
-    // The full width the canvas WOULD have, so the dock is measured against
-    // the board rather than against whatever the last split left behind.
-    const width = this.dockSplit === null ? r.width : r.width / (1 - this.dockSplit)
-    return { left: r.left, top: r.top, width, height: r.height }
+    const host = this.viewport?.parentElement
+    if (!host) return null
+    const r = host.getBoundingClientRect()
+    return { left: r.left, top: r.top, width: r.width, height: r.height }
   }
 
   /**
@@ -276,7 +289,12 @@ class ShelfView implements TemporalView {
     this.dockSplit = split
     const vp = this.viewport
     if (!vp) return
-    vp.style.width = split === null ? '' : `${(1 - split) * 100}%`
+    // The canvas takes what the reader does not, less the divider — a seam of
+    // a few pixels, not a margin. Everything else on this side must be zero:
+    // the flow now flexes its columns to whatever width it is given
+    // (shelfLayout.flowMetrics), so any padding left here would be dead canvas
+    // that no arrangement can ever use.
+    vp.style.width = split === null ? '' : `calc(${(1 - split) * 100}% - ${DIVIDER}px)`
     // The viewport's new width changes how many columns the flow has, so the
     // layout must follow the divider — after the browser has applied it.
     requestAnimationFrame(() => {
@@ -620,7 +638,10 @@ class ShelfView implements TemporalView {
     // camera, not a layout parameter: letting the column count follow the
     // scale would re-lay the whole board on every zoom step, and the thing you
     // zoomed out to look at would be somewhere else by the time you got there.
-    const width = Math.max(this.viewport?.clientWidth ?? 0, SHELF_METRICS.cardW) - 4
+    // `clientWidth` already excludes any scrollbar, and the flow flexes to
+    // fill exactly what it is handed, so nothing is shaved off here — a
+    // "safety" margin would be permanent dead canvas.
+    const width = Math.max(this.viewport?.clientWidth ?? 0, FLOW_MIN_W)
     const layout = layoutShelf(
       this.shown,
       this.persist.lens,
@@ -647,10 +668,6 @@ class ShelfView implements TemporalView {
       handle.root.style.transform = `translate(${card.x}px, ${card.y}px)`
       handle.root.style.width = `${card.w}px`
       handle.root.style.height = `${card.h}px`
-      // The intrinsic size the shell reserves while its content is skipped —
-      // it must track the card's real size or content-visibility will make the
-      // surface jump as cards enter the ring.
-      handle.root.style.setProperty('contain-intrinsic-size', `${card.w}px ${card.h}px`)
       handle.root.classList.toggle('kbn-shelf-card-pinned', card.pinned)
       handle.root.classList.toggle('kbn-shelf-card-starred', card.starred)
     }
@@ -1354,21 +1371,38 @@ class ShelfView implements TemporalView {
    * canvas means. `metaKey` is left alone — that IS a browser zoom request.
    */
   private readonly onWheel = (e: WheelEvent): void => {
-    // Ctrl first, and before every other bail: ctrl+scroll is THE zoom
-    // gesture, so it must work over any part of the canvas — including a
-    // focused card, whose live iframe would otherwise eat it. (A trackpad
-    // pinch arrives as exactly this event and so zooms too, which is fine.)
+    // Ctrl first, before every other bail: ctrl+scroll is THE zoom gesture, so
+    // nothing else in this handler may claim the event ahead of it. (A
+    // trackpad pinch arrives as this same event and so zooms too, which is
+    // fine — but the two report their deltas in different UNITS, see below.)
+    //
+    // One honest limit: a FOCUSED card's veil is lifted, so its live iframe
+    // owns the pointer, and a wheel event inside a frame never reaches this
+    // document at all. Zooming works everywhere else on the canvas — every
+    // unfocused card is veiled, and the veil is a parent-document element —
+    // but not while hovering the one card being read. Nothing on this side can
+    // change that; the event is simply not ours to hear.
     if (e.ctrlKey) {
       e.preventDefault()
-      this.zoomAt(e.clientX, e.clientY, Math.exp(-e.deltaY * 0.0125))
+      // Units, not magnitude: a pinch reports pixels and ctrl+scroll reports
+      // LINES, so the delta is converted before it means anything. See
+      // wheelZoomFactor — reading a line-mode delta as pixels is what made
+      // ctrl+scroll look like it did nothing at all.
+      this.zoomAt(
+        e.clientX,
+        e.clientY,
+        wheelZoomFactor(e.deltaY, e.deltaMode, this.viewport?.clientHeight ?? 800),
+      )
       return
     }
     if (e.metaKey) return
     if ((e.target as HTMLElement).closest('.kbn-shelf-card-focus')) return
     e.preventDefault()
+    // The pan reads the same delta, and needs the same conversion.
+    const lines = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? (this.viewport?.clientHeight ?? 800) : 1
     this.persist.pan = {
-      x: this.persist.pan.x - e.deltaX,
-      y: this.persist.pan.y - e.deltaY,
+      x: this.persist.pan.x - e.deltaX * lines,
+      y: this.persist.pan.y - e.deltaY * lines,
     }
     this.applyPan()
     this.holdLayer()

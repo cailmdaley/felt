@@ -62,7 +62,14 @@ import {
 } from './TemporalData.js'
 import type { KanbanCard, KanbanResponse } from '../KanbanTypes.js'
 import { buildTimelineDays, type TimelineDay } from '../KanbanSurfaces.js'
-import { civilDayToLocalDate, dueCivilDay, instantMs, isoDayLocal, railCivilDay } from '../civilDay.js'
+import {
+  civilDayToLocalDate,
+  dueCivilDay,
+  dueSortMs,
+  instantMs,
+  isoDayLocal,
+  railCivilDay,
+} from '../civilDay.js'
 import {
   activityChunks,
   daysBetween,
@@ -580,7 +587,7 @@ export function fiberBodyOf(doc: unknown): string | undefined {
 
 // ── Row model ────────────────────────────────────────────────────────────────
 
-interface ChronicleRow {
+export interface ChronicleRow {
   key: string
   label: string
   /** Tiny mono note under the name's right edge: the owning host. */
@@ -612,7 +619,18 @@ interface ChronicleRow {
   closedOk: boolean
   dueIdx: number | null
   launchIdx: number | null
+  /** Whose daemon owns this fiber — routing for the due-mark drag's write,
+   *  the row's own twin of `CycleBand.originId`. Undefined for a row with no
+   *  `cardId` (there is nothing to write back to). */
+  originId?: string
+  /** Ordering rank: most-recent evidence of actual work, or due-pressure
+   *  standing in for it. See `buildFiberRow` for what feeds it. */
   sortMs: number
+  /** Creation time, kept ONLY as the last-resort tiebreak among rows with no
+   *  work and no due signal (`sortMs === 0`) — never mixed into `sortMs`
+   *  itself, or a freshly-touched, never-worked fiber floats back to the top
+   *  on `createdAt` exactly the way it used to on `modifiedAt`. */
+  createdMs: number
 }
 
 /** The owning host, as a bare name. Origin first (it is what the board keys
@@ -651,6 +669,55 @@ export function rowWaitingOn(
 
 function clamp(v: number, lo: number, hi: number): number {
   return v < lo ? lo : v > hi ? hi : v
+}
+
+/**
+ * The snap math a horizontal drag on this page shares — the cycle edges, the
+ * cycle draw gesture, and the due-mark reschedule all convert a cursor
+ * position into a day column the same way. Pulled out of `dayAt` so the
+ * arithmetic can be pinned by a test without a DOM.
+ *
+ * Clamped, never out of range: a cursor that has strayed past either end of
+ * the strip still names the nearest column, exactly like `dayAt` always has.
+ */
+export function columnIndexAtX(
+  clientX: number,
+  trackLeft: number,
+  dayWidthPx: number,
+  dayCount: number,
+): number {
+  if (dayCount <= 0) return 0
+  const w = dayWidthPx || 1
+  return clamp(Math.floor((clientX - trackLeft) / w), 0, dayCount - 1)
+}
+
+/**
+ * Overlay pending due-mark drags on top of the daemon's cards, and say which
+ * ones the daemon has now confirmed — the same "held until echoed" contract
+ * {@link collectBands} already keeps for a cycle edge (see its `cycleEdits`
+ * overlay). A confirmed edit is retired: the served card's `due` already
+ * agrees, so holding the local patch any longer risks masking a LATER change
+ * (a second drag, or a hand edit elsewhere) behind a stale optimistic value.
+ *
+ * Pure and DOM-free on purpose — this is the "date computation" half of the
+ * due-mark drag, and it is what a test can pin without standing up a page.
+ */
+export function overlayDueEdits(
+  cards: readonly KanbanCard[],
+  edits: ReadonlyMap<string, string>,
+): { cards: KanbanCard[]; confirmed: string[] } {
+  if (edits.size === 0) return { cards: [...cards], confirmed: [] }
+  const confirmed: string[] = []
+  const next = cards.map((c) => {
+    const edit = edits.get(c.id)
+    if (edit === undefined) return c
+    if (c.due === edit) {
+      confirmed.push(c.id)
+      return c
+    }
+    return { ...c, due: edit }
+  })
+  return { cards: next, confirmed }
 }
 
 /** Day-column index for an INSTANT, by its local day. Null when out of window. */
@@ -722,6 +789,7 @@ function buildFiberRow(
   response: KanbanResponse,
   dayIndex: Map<string, number>,
   todayIdx: number,
+  todayNoonMs: number,
   origins: TemporalOrigins,
 ): ChronicleRow {
   const days = aggregateByCivilDay(buckets)
@@ -732,18 +800,39 @@ function buildFiberRow(
     todayIdx,
   )
 
-  // Deliberately NOT `lastActivityAt`. It is a live worker's last hook event at
-  // millisecond precision, so it moves on every poll — putting it in the sort
-  // would mean putting it in the refresh signature, and rebuilding the page
-  // every 15s to reorder rows that cannot visibly move: a live fiber already
-  // floats to the top on its own flag, and at day granularity `modifiedAt` plus
-  // the activity days say everything it would.
-  let sortMs = Math.max(
-    instantMs(card.modifiedAt) ?? 0,
-    instantMs(card.closedAt) ?? 0,
-    instantMs(card.createdAt) ?? 0,
-  )
-  for (const day of days.keys()) sortMs = Math.max(sortMs, (civilDayNoon(day)?.getTime() ?? 0))
+  // Deliberately NOT `modifiedAt`. It moves on any metadata touch — a due-date
+  // tweak, a frontmatter edit — with no work behind it, and letting it into the
+  // sort is exactly how an untouched fiber floated above ones actually being
+  // worked. Two honest signals stand in instead, each at day granularity so
+  // nothing here moves at 15s-poll cadence (a live fiber already floats on its
+  // own flag; below that, rows may only reorder once a day):
+  //
+  //  - workMs: the most recent day this fiber was actually touched — an
+  //    activity day, or the day it closed. A fiber finished this morning
+  //    ranks at today's noon, same as one still being worked today.
+  //  - due pressure: an overdue or due-soon fiber is lent a rank as if it had
+  //    been worked that recently, so a fiber going stale under a deadline
+  //    surfaces near the top of the unstarted rather than waiting for someone
+  //    to touch it. A due date further out lends less; no due date lends
+  //    nothing.
+  //
+  // `sortMs` is the louder of the two, and it alone decides ordering among
+  // fibers with real signal. `createdAt` never enters it — see `createdMs`
+  // and the comparator below for why a never-worked, no-due fiber sinks
+  // instead of floating on how recently it was created.
+  const DAY_MS = 86_400_000
+  let workMs = instantMs(card.closedAt) ?? 0
+  for (const day of days.keys()) workMs = Math.max(workMs, civilDayNoon(day)?.getTime() ?? 0)
+
+  const dueMs = dueSortMs(card.due)
+  let dueMsEquivalent = 0
+  if (dueMs !== undefined) {
+    const daysUntilDue = Math.round((dueMs - todayNoonMs) / DAY_MS)
+    dueMsEquivalent = todayNoonMs - Math.max(0, daysUntilDue) * DAY_MS
+  }
+
+  const sortMs = Math.max(workMs, dueMsEquivalent)
+  const createdMs = instantMs(card.createdAt) ?? 0
 
   const host = hostLabel(card, response)
 
@@ -754,6 +843,7 @@ function buildFiberRow(
     waitingOn: rowWaitingOn(card, host, origins),
     state: cardState(card),
     cardId: card.id,
+    originId: card.originId,
     days,
     startIdx,
     endIdx,
@@ -764,6 +854,7 @@ function buildFiberRow(
     dueIdx: idxOfDue(card.due, dayIndex),
     launchIdx: idxOfInstant(card.nextLaunchAt, dayIndex),
     sortMs,
+    createdMs,
   }
 }
 
@@ -814,14 +905,16 @@ export function saysNothingHere(
   return true
 }
 
-function buildRows(
+export function buildRows(
   response: KanbanResponse,
   cards: readonly KanbanCard[],
   attribution: Map<string, ActivityBucket[]>,
   dayIndex: Map<string, number>,
   todayIdx: number,
+  todayDay: string,
   origins: TemporalOrigins,
 ): ChronicleRow[] {
+  const todayNoonMs = civilDayNoon(todayDay)?.getTime() ?? Date.now()
   const byId = new Map(cards.map((c) => [c.id, c]))
   const include = new Set<string>(attribution.keys())
   for (const card of [
@@ -841,11 +934,16 @@ function buildRows(
     if (!card) continue
     const buckets = attribution.get(id) ?? []
     if (saysNothingHere(card, buckets, dayIndex)) continue
-    fibers.push(buildFiberRow(card, buckets, response, dayIndex, todayIdx, origins))
+    fibers.push(buildFiberRow(card, buckets, response, dayIndex, todayIdx, todayNoonMs, origins))
   }
   fibers.sort((a, b) => {
     if (a.live !== b.live) return a.live ? -1 : 1
     if (b.sortMs !== a.sortMs) return b.sortMs - a.sortMs
+    // Both have no work and no due pressure (sortMs === 0 on each): fall back
+    // to creation, so among equally-untouched fibers the newer one sits
+    // above the older — but this tier is, by construction, below every row
+    // with real signal, never competing with it.
+    if (b.createdMs !== a.createdMs) return b.createdMs - a.createdMs
     return a.label.localeCompare(b.label)
   })
 
@@ -974,6 +1072,11 @@ class ChronicleView implements TemporalView {
   /** Renames written but not yet echoed by a poll, keyed by cycle id. Same
    *  contract as {@link cycleEdits}: held until the daemon's copy agrees. */
   private cycleNames = new Map<string, string>()
+  /** Due-mark drags written but not yet echoed by a poll, keyed by fiber id —
+   *  the plain-fiber twin of {@link cycleEdits}. Held so a dragged due mark
+   *  stays where it was dropped instead of snapping back for the seconds
+   *  until the daemon's answer comes round; see `applyDueEdits`. */
+  private dueEdits = new Map<string, string>()
   private teardownDraw: (() => void) | null = null
   /** The day columns of the current render, so a gesture handler can convert a
    *  cursor position into a civil day without threading them through. */
@@ -1079,6 +1182,7 @@ class ChronicleView implements TemporalView {
     this.editing = false
     this.pendingCycles = []
     this.cycleEdits.clear()
+    this.dueEdits.clear()
     this.cycleNames.clear()
     this.currentDays = []
     this.window = null
@@ -1263,13 +1367,19 @@ class ChronicleView implements TemporalView {
     const dayIndex = new Map(days.map((d, i) => [d.iso, i]))
     const todayIdx = days.findIndex((d) => d.isToday)
     const lastIdx = days.length - 1
-    const attribution = attributeActivity(buckets, ctx.cards, this.byTmux)
+    // Lay any un-echoed due-mark drag over the served cards, retiring the
+    // ones the daemon has since confirmed — see `overlayDueEdits`.
+    const { cards, confirmed } = overlayDueEdits(ctx.cards, this.dueEdits)
+    for (const id of confirmed) this.dueEdits.delete(id)
+    const attribution = attributeActivity(buckets, cards, this.byTmux)
+    const resolvedTodayIdx = todayIdx < 0 ? lastIdx : todayIdx
     const rows = buildRows(
       ctx.response,
-      ctx.cards,
+      cards,
       attribution,
       dayIndex,
-      todayIdx < 0 ? lastIdx : todayIdx,
+      resolvedTodayIdx,
+      days[resolvedTodayIdx]?.iso ?? days[lastIdx]?.iso ?? '',
       this.origins,
     )
 
@@ -2253,6 +2363,134 @@ class ChronicleView implements TemporalView {
   }
 
   /**
+   * Drag a row's due mark to reschedule it — the plain-fiber twin of
+   * {@link installEdgeDrag}, over a single point instead of two. `nextLaunchAt`
+   * gets no such handler: it is the daemon's own computation of a standing
+   * role's next run (`nextStandingLaunch` in KanbanReadModel), not a value a
+   * fiber's frontmatter carries, so there is nothing for a drag to write.
+   *
+   * A drag threshold is unnecessary rather than missing: a plain click drags
+   * zero columns, so `dropped === originDay` and `writeDue` never fires — the
+   * mark had no click behavior to protect in the first place (see the CSS:
+   * `.chr-mark` is `pointer-events: none` by default, and only `.chr-due`
+   * opts back in for this gesture).
+   *
+   * Escape reverts the mark to its origin column and ends the gesture without
+   * writing, mirroring {@link openNameInput}'s own Escape-abandons. Releasing
+   * outside the scroller does the same — a "drop outside cancels" rule a
+   * mouse-position check gives for free where HTML5 drag-and-drop would have
+   * gotten it natively.
+   */
+  private installDueMarkDrag(mark: HTMLElement, row: ChronicleRow, ctx: ViewContext): void {
+    const cardId = row.cardId
+    if (!cardId) return
+    mark.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return
+      e.preventDefault()
+      e.stopPropagation() // not a click on the row, and not a new cycle draw
+
+      const track = mark.parentElement
+      const days = this.currentDays
+      if (!track || days.length === 0 || row.dueIdx === null) return
+      const originDay = days[row.dueIdx].iso
+      let day = originDay
+      this.draft = { fromDay: day, toDay: day, naming: false }
+      mark.classList.add('chr-mark-dragging')
+
+      const paint = (): void => {
+        const idx = this.currentDays.findIndex((d) => d.iso === day)
+        if (idx >= 0) mark.style.left = colLeft(idx)
+      }
+
+      const onMove = (ev: MouseEvent): void => {
+        const next = this.dayAt(track, ev.clientX)
+        if (next !== null) day = next
+        this.draft = { fromDay: day, toDay: day, naming: false }
+        paint()
+        this.autoScrollAt(ev.clientX)
+      }
+      const cleanup = (): void => {
+        document.removeEventListener('mousemove', onMove)
+        document.removeEventListener('mouseup', onUp)
+        document.removeEventListener('keydown', onKey, true)
+        this.stopAutoScroll()
+        this.teardownDraw = null
+        this.draft = null
+        mark.classList.remove('chr-mark-dragging')
+      }
+      const onUp = (ev: MouseEvent): void => {
+        const scrollerRect = this.scroller?.getBoundingClientRect()
+        const droppedOutside =
+          scrollerRect !== undefined &&
+          (ev.clientX < scrollerRect.left ||
+            ev.clientX > scrollerRect.right ||
+            ev.clientY < scrollerRect.top ||
+            ev.clientY > scrollerRect.bottom)
+        cleanup()
+        if (droppedOutside || day === originDay) {
+          paint() // snap the mark back to where it actually is
+          return
+        }
+        void this.writeDue(cardId, row.originId, day, ctx)
+      }
+      const onKey = (ev: KeyboardEvent): void => {
+        if (ev.key !== 'Escape') return
+        ev.preventDefault()
+        ev.stopPropagation()
+        day = originDay
+        cleanup()
+        paint()
+      }
+      document.addEventListener('mousemove', onMove)
+      document.addEventListener('mouseup', onUp)
+      document.addEventListener('keydown', onKey, true)
+      this.teardownDraw = (): void => {
+        document.removeEventListener('mousemove', onMove)
+        document.removeEventListener('mouseup', onUp)
+        document.removeEventListener('keydown', onKey, true)
+        this.stopAutoScroll()
+      }
+    })
+  }
+
+  /**
+   * POST the dropped date through the SAME endpoint the Desk's own due edits
+   * use (`/api/v1/felt-edit`, owner-routed by `origin`) — see `setSurface` in
+   * KanbanModal.ts, and {@link writeCycleEdge} for this file's other caller of
+   * it. No new write path: a fiber's `due:` has exactly one door, and this
+   * drag knocks on it the same way a date-column drop already does.
+   */
+  private async writeDue(
+    cardId: string,
+    originId: string | undefined,
+    day: string,
+    ctx: ViewContext,
+  ): Promise<void> {
+    const previous = this.dueEdits.get(cardId)
+    this.dueEdits.set(cardId, day)
+    this.signature = ''
+    if (this.ctx) void this.load(this.ctx)
+
+    const origin = shuttleOrigin(originId)
+    try {
+      const res = await fetch(`${ctx.shuttleBase}/api/v1/felt-edit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fiber_id: cardId, origin, due: day }),
+      })
+      if (!res.ok) throw new Error(`felt-edit returned ${res.status}`)
+      ctx.requestRefresh()
+    } catch (err) {
+      // Snap back rather than leave the mark somewhere the fiber is not.
+      if (previous !== undefined) this.dueEdits.set(cardId, previous)
+      else this.dueEdits.delete(cardId)
+      this.signature = ''
+      if (this.ctx) void this.load(this.ctx)
+      window.console.error('[chronicle] could not move due date', err)
+    }
+  }
+
+  /**
    * Drag horizontally across an empty stretch of a lane to draw a cycle.
    *
    * The move/up listeners go on the DOCUMENT, not the lane: a drag that leaves
@@ -2372,8 +2610,8 @@ class ChronicleView implements TemporalView {
     const days = this.currentDays
     if (days.length === 0) return null
     const rect = track.getBoundingClientRect()
-    const dayW = this.dayWidthPx || rect.width / days.length || 1
-    return days[clamp(Math.floor((clientX - rect.left) / dayW), 0, days.length - 1)].iso
+    const dayW = this.dayWidthPx || rect.width / days.length
+    return days[columnIndexAtX(clientX, rect.left, dayW, days.length)].iso
   }
 
   /** Two civil days as the column range they currently occupy, in order. Null
@@ -2905,8 +3143,11 @@ class ChronicleView implements TemporalView {
       due.className = 'chr-mark chr-due'
       due.style.left = colLeft(row.dueIdx)
       due.textContent = MARK_GLYPH.due
-      due.title = 'due'
+      due.title = row.cardId ? 'due — drag to reschedule' : 'due'
       track.append(due)
+      // A cycle's due-edge is grabbed by its own small handle; a fiber's due
+      // mark IS the handle — nothing else on the row promises a future date.
+      if (row.cardId) this.installDueMarkDrag(due, row, ctx)
     }
     if (row.launchIdx !== null) {
       const launch = document.createElement('div')
