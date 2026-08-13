@@ -57,6 +57,29 @@ func TestShuttleInstall_Disabled(t *testing.T) {
 	}
 }
 
+// TestShuttleInstall_DisabledKeepsExplicitProjectDir: a draft needs no cwd, but
+// one passed explicitly must survive. The board's Promote button installs
+// --disabled WITH a project_dir and nothing later supplies one, so dropping it
+// would arm a role on resume that the poller disqualifies for having no usable
+// project_dir — armed, and silently never dispatched.
+func TestShuttleInstall_DisabledKeepsExplicitProjectDir(t *testing.T) {
+	defer saveShuttleGlobals()()
+	dir, storage := newShuttleStore(t)
+	seedPlainFiber(t, storage, "task", "")
+	pdir := t.TempDir()
+
+	if out, err := runCommand(t, dir, "shuttle", "install", "task", "--host", "testhost", "--disabled", "--project-dir", pdir); err != nil {
+		t.Fatalf("install --disabled --project-dir: %v\n%s", err, out)
+	}
+	b, ok, err := mustRead(t, storage, "task").ShuttleBlock()
+	if err != nil || !ok {
+		t.Fatalf("ShuttleBlock: ok=%v err=%v", ok, err)
+	}
+	if b.ProjectDir != pdir {
+		t.Fatalf("project_dir = %q, want %q — an explicit flag must not be dropped", b.ProjectDir, pdir)
+	}
+}
+
 func TestShuttleInstall_RequiresProjectDirWhenArmed(t *testing.T) {
 	defer saveShuttleGlobals()()
 	dir, storage := newShuttleStore(t)

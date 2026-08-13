@@ -127,8 +127,13 @@ schedule, set-model / set-agent for the agent, uninstall to start over).`,
 		if installModel != "" {
 			block.Agent = installModel
 		}
-		// A draft needs no cwd (a later resume supplies one); an armed install does.
-		if !installDisabled {
+		// An armed install requires a cwd. A draft does not — but an explicitly
+		// passed one is still honored: the board's Promote button installs
+		// --disabled WITH a project_dir, and nothing later supplies one (resume
+		// only moves status), so dropping it would arm a role the poller then
+		// disqualifies for having no usable project_dir — armed, and silently
+		// never dispatched.
+		if !installDisabled || cmd.Flags().Changed("project-dir") {
 			projectDir, perr := resolveProjectDirFlag(installProjectDir)
 			if perr != nil {
 				return perr
