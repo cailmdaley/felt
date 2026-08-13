@@ -41,6 +41,11 @@ shuttle-*.tar
 # ── Shuttle UI (offline verification harness build output) ───────────────
 ui/harness-dist/
 ui/harness-board-dist/
+# npm's tree, and the vite cache it writes here. `ui/.gitignore` covers ui/'s
+# own copies; a `vite build` run from ui/ also writes node_modules/.vite at the
+# REPO ROOT, which no rule reached — so it surfaced as untracked for anyone who
+# built, and an over-broad `git add` would have swept the whole tree in.
+node_modules/
 
 # mkdocs build output
 /site/
