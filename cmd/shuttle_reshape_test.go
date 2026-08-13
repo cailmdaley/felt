@@ -3,7 +3,81 @@ package cmd
 import (
 	"strings"
 	"testing"
+
+	"github.com/cailmdaley/felt/internal/felt"
 )
+
+// TestShuttleReshape_PreservesClosedStatus: reshaping the KIND of a role that
+// sits in Awaiting review (status: closed, verdict fields set) is a config edit
+// — same class as set-model, which has never had a status gate. All three
+// create verbs must rewrite the block in place and leave status and the verdict
+// fields exactly as found, so the card stays where the human parked it.
+func TestShuttleReshape_PreservesClosedStatus(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args []string
+		kind string
+	}{
+		{"standing to oneshot", []string{"install", "role", "--reshape"}, "oneshot"},
+		{"oneshot to standing", []string{"repeat", "role", "--reshape", "--schedule", "0 9 * * 1-5", "--tz", "Europe/Paris"}, "standing"},
+		{"to pinned", []string{"pin", "role", "--reshape"}, "pinned"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			defer saveShuttleGlobals()()
+			t.Setenv("SHUTTLE_HOST", "testhost")
+			dir, storage := newShuttleStore(t)
+			pdir := t.TempDir()
+			yes := true
+			seedShuttleRole(t, storage, "role", felt.StatusClosed, map[string]any{
+				"kind": "standing", "host": "testhost", "project_dir": pdir, "agent": "claude-sonnet",
+				"schedule": map[string]any{"expr": "0 8 * * *", "tz": "UTC"},
+			}, &yes)
+
+			if out, err := runCommand(t, dir, append([]string{"shuttle"}, tc.args...)...); err != nil {
+				t.Fatalf("reshape on a closed fiber must succeed: %v\n%s", err, out)
+			}
+			f := mustRead(t, storage, "role")
+			if f.Status != felt.StatusClosed {
+				t.Fatalf("reshape moved status: got %q, want closed", f.Status)
+			}
+			if readTempered(f) == nil {
+				t.Fatal("reshape cleared the verdict field (tempered)")
+			}
+			b, ok, err := f.ShuttleBlock()
+			if err != nil || !ok {
+				t.Fatalf("ShuttleBlock: ok=%v err=%v", ok, err)
+			}
+			if b.Kind != tc.kind {
+				t.Fatalf("kind = %q, want %q", b.Kind, tc.kind)
+			}
+		})
+	}
+}
+
+// TestShuttleCreate_FreshInstallStillRefusesClosed: the refusal survives where
+// it means something — a create verb with NO block to reshape would be ARMING a
+// fiber that has already been closed out, which needs an explicit reopen.
+func TestShuttleCreate_FreshInstallStillRefusesClosed(t *testing.T) {
+	for _, args := range [][]string{
+		{"install", "role"},
+		{"repeat", "role", "--schedule", "0 9 * * 1-5"},
+	} {
+		t.Run(args[0], func(t *testing.T) {
+			defer saveShuttleGlobals()()
+			dir, storage := newShuttleStore(t)
+			pdir := t.TempDir()
+			seedPlainFiber(t, storage, "role", felt.StatusClosed)
+
+			out, err := runCommand(t, dir, append(append([]string{"shuttle"}, args...), "--host", "testhost", "--project-dir", pdir)...)
+			if err == nil {
+				t.Fatalf("fresh %s on a closed fiber must refuse; out=%s", args[0], out)
+			}
+			if !strings.Contains(err.Error(), "reopen") {
+				t.Fatalf("refusal should point at reopen; err=%v", err)
+			}
+		})
+	}
+}
 
 // TestShuttleReshape_FailedReshapeLeavesBlockIntact is the load-bearing
 // atomicity guarantee: a --reshape whose project_dir can't resolve must fail

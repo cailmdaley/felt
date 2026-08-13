@@ -53,6 +53,27 @@ func echoStr(override, fallback string) string {
 	return fallback
 }
 
+// A create verb that CLOBBERS an existing block (--reshape) changes the role's
+// SHAPE, not its lifecycle — so it leaves status exactly as it found it: a
+// closed fiber stays in Awaiting review with its verdict fields intact, a draft
+// stays parked, an armed role stays armed. Only a FRESH create settles status
+// (install/repeat arm to active, pin parks at open), and only there is a closed
+// fiber a refusal — arming something already reviewed-and-done needs an explicit
+// `felt shuttle reopen`. Lifecycle verbs (pause/resume/close/reopen) stay the
+// only way to move status; changing standing → oneshot is not one of them.
+// printPreservedStatus reports that a reshape left status untouched.
+func printPreservedStatus(status string) {
+	shown := status
+	if shown == "" {
+		shown = "(missing)"
+	}
+	note := "unchanged — a reshape changes shape, not lifecycle"
+	if status == felt.StatusClosed {
+		note = "unchanged — reshape does not requeue; `felt shuttle reopen` does"
+	}
+	fmt.Printf("  status: %s (%s)\n", shown, note)
+}
+
 // reshapeProjectDir resolves the project_dir for a reshape: the explicit flag
 // (validated) when given, else the existing block's project_dir echoed
 // through, else the required-flag error. Echoing the existing value BEFORE any
@@ -110,7 +131,9 @@ picks up on its next poll.
 
 Dispatch is gated solely by the felt-native status field: status:active is
 armed, status:open is a draft. An armed install requires --project-dir and sets
-status:active; --disabled sets status:open. Closed fibers must be reopened first.
+status:active; --disabled sets status:open. A fresh install on a closed fiber is
+refused — reopen it first. A --reshape over an existing block preserves status
+(it changes shape, not lifecycle), so a closed role can be re-shaped in place.
 
 Idempotent: if the fiber already has a shuttle: block, install reports its
 current state and exits 0 when no conflicting flags are passed. A conflicting
@@ -190,15 +213,20 @@ flag points at the right mutation verb (pause / resume / set-model / uninstall).
 
 		statusBefore := f.Status
 		statusChanged := false
-		if installDisabled {
+		switch {
+		case installDisabled:
+			// An explicit --disabled is a lifecycle instruction ("park it"), so it
+			// wins even on a reshape.
 			if statusBefore != felt.StatusOpen {
 				f.Status = felt.StatusOpen
 				clearClosedAt(f)
 				statusChanged = true
 			}
-		} else {
+		case ok:
+			// Reshape preserves status (see reshapePreservesStatus).
+		default:
 			if statusBefore == felt.StatusClosed {
-				return fmt.Errorf("fiber %s has status: closed; use 'felt shuttle reopen %s' when it already has a shuttle block, or set status: active before installing; use --disabled to park in drafts", args[0], args[0])
+				return fmt.Errorf("fiber %s has status: closed and has no shuttle block to reshape; use 'felt shuttle reopen %s' to requeue it, or set status: active before installing; use --disabled to park in drafts", args[0], args[0])
 			}
 			if statusBefore != felt.StatusActive {
 				f.Status = felt.StatusActive
@@ -225,7 +253,8 @@ flag points at the right mutation verb (pause / resume / set-model / uninstall).
 		if block.ProjectDir != "" {
 			fmt.Printf("  project_dir: %s\n", block.ProjectDir)
 		}
-		if statusChanged {
+		switch {
+		case statusChanged:
 			want := felt.StatusActive
 			if installDisabled {
 				want = felt.StatusOpen
@@ -235,6 +264,8 @@ flag points at the right mutation verb (pause / resume / set-model / uninstall).
 			} else {
 				fmt.Printf("  status: %s → %s\n", statusBefore, want)
 			}
+		case ok:
+			printPreservedStatus(statusBefore)
 		}
 		return nil
 	},
@@ -434,14 +465,18 @@ The running daemon picks it up on its next poll.`,
 			return fmt.Errorf("computing next occurrence: %w", err)
 		}
 
+		// Reshape preserves status (see printPreservedStatus); a fresh repeat arms.
+		reshaping := repeatReshape && hasBlock
 		statusBefore := f.Status
 		statusChanged := false
-		if statusBefore == felt.StatusClosed {
-			return fmt.Errorf("fiber %s has status: closed; use 'felt shuttle reopen %s' to clear verdict fields and requeue it before installing", args[0], args[0])
-		}
-		if statusBefore != felt.StatusActive {
-			f.Status = felt.StatusActive
-			statusChanged = true
+		if !reshaping {
+			if statusBefore == felt.StatusClosed {
+				return fmt.Errorf("fiber %s has status: closed and has no shuttle block to reshape; use 'felt shuttle reopen %s' to clear verdict fields and requeue it before installing", args[0], args[0])
+			}
+			if statusBefore != felt.StatusActive {
+				f.Status = felt.StatusActive
+				statusChanged = true
+			}
 		}
 
 		if err := f.SetShuttleConfig(block); err != nil {
@@ -459,12 +494,15 @@ The running daemon picks it up on its next poll.`,
 		}
 		fmt.Printf("  project_dir: %s\n", block.ProjectDir)
 		fmt.Printf("  next due: %s\n", next.Format(time.RFC3339))
-		if statusChanged {
+		switch {
+		case statusChanged:
 			if statusBefore == "" {
 				fmt.Println("  status:   active (set; was missing)")
 			} else {
 				fmt.Printf("  status:   %s → active\n", statusBefore)
 			}
+		case reshaping:
+			printPreservedStatus(statusBefore)
 		}
 		return nil
 	},
@@ -547,11 +585,12 @@ strip. Perennial: you park it, you don't delete it.`,
 			return printShuttleValidationErrors(errs)
 		}
 
-		// Pinned rest is status:open "parked on the strip". Any prior status —
-		// including closed (revive as a parked role) — settles to open.
+		// Pinned rest is status:open "parked on the strip", so a FRESH pin settles
+		// any prior status — including closed (revive as a parked role) — to open.
+		// A reshape preserves status instead (see printPreservedStatus).
 		statusBefore := f.Status
 		statusChanged := false
-		if statusBefore != felt.StatusOpen {
+		if !ok && statusBefore != felt.StatusOpen {
 			f.Status = felt.StatusOpen
 			clearClosedAt(f)
 			statusChanged = true
@@ -570,12 +609,15 @@ strip. Perennial: you park it, you don't delete it.`,
 			fmt.Printf("  agent: %s\n", block.Agent)
 		}
 		fmt.Printf("  project_dir: %s\n", block.ProjectDir)
-		if statusChanged {
+		switch {
+		case statusChanged:
 			if statusBefore == "" {
 				fmt.Println("  status: open (set; was missing)")
 			} else {
 				fmt.Printf("  status: %s → open\n", statusBefore)
 			}
+		case ok:
+			printPreservedStatus(statusBefore)
 		}
 		return nil
 	},

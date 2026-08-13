@@ -85,6 +85,12 @@ local daemon at `:4000`.
 | `felt shuttle repeat <fiber>` | Install as a standing (cron-scheduled) role (`-s/--schedule` and `--project-dir` required, `-z/--tz`, `-m`, `--host`, `--reshape`) |
 | `felt shuttle uninstall <fiber>` | Remove the `shuttle:` block; fiber and felt status untouched |
 
+A **fresh** create settles status (`install`/`repeat` arm to `active`, `pin` parks
+at `open`) and refuses a closed fiber — arming something already reviewed needs an
+explicit `reopen`. A `--reshape` over an existing block changes the role's *shape*
+only: status and verdict fields are left exactly as found, so a role in Awaiting
+review can be re-shaped in place without being requeued.
+
 ### Lifecycle
 
 | Command | Purpose |
