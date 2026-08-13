@@ -664,8 +664,11 @@ describe('lanes', () => {
     expect(mixed[0].beats.map((b) => b.minute)).toEqual([10])
   })
 
-  it('sorts fiber lanes by the weight of the day, heaviest first', () => {
+  it('sorts fiber lanes by when they let go — earliest finished first, still-running last', () => {
     const otherUlid = '01KVBR1F9BWBVKF97473PV67K9'
+    // The "light" lane finishes at minute 1; the heavier lane runs through
+    // minute 3. Volume no longer orders anything: the one that ENDED first
+    // reads first, the one still warm sits at the bottom where the eye rests.
     const lanes = buildDayLanes(
       activity([
         bucket(1, 'agent', `light-${otherUlid}-shuttle`),
@@ -678,7 +681,23 @@ describe('lanes', () => {
       ],
       WIN,
     )
-    expect(lanes.map((l) => l.label)).toEqual(['Run the 2D B-mode null tests', 'A lighter fiber'])
+    expect(lanes.map((l) => l.label)).toEqual(['A lighter fiber', 'Run the 2D B-mode null tests'])
+    // Same end (both lanes go quiet at minute 3) → the one that BEGAN earlier
+    // reads first: chronology top-left to bottom-right.
+    const tied = buildDayLanes(
+      activity([
+        bucket(2, 'agent', `light-${otherUlid}-shuttle`),
+        bucket(3, 'agent', `light-${otherUlid}-shuttle`),
+        bucket(1, 'agent', SESSION),
+        bucket(3, 'agent', SESSION),
+      ]),
+      [
+        card(),
+        card({ id: 'other', uid: otherUlid, name: 'A lighter fiber', runningWorker: `light-${otherUlid}-shuttle` }),
+      ],
+      WIN,
+    )
+    expect(tied.map((l) => l.label)).toEqual(['Run the 2D B-mode null tests', 'A lighter fiber'])
   })
 
   // The old 'bridges a five-minute pause inside one lane run' test lived here

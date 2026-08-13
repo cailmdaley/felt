@@ -841,8 +841,33 @@ export function buildDayLanes(
     }
   })
 
+  // Reading order is CHRONOLOGY OF LETTING GO: the lane that finished
+  // earliest sits at the top, the one still running sits at the bottom — so
+  // the page reads top-left to bottom-right like a day being written, and the
+  // eye's resting place (the bottom) is where the live work that can still
+  // want you is. Ties (and the live ones among themselves) break by when they
+  // began, earliest first; volume no longer orders anything.
+  // Beat minutes are FRAME-relative (see the render's `frame.startMs +
+  // b.minute * MINUTE_MS`); the ladder speaks epoch ms. Both are brought to
+  // epoch before any max/min may compare them.
+  const laneEndMs = (lane: DayLane): number => {
+    if (lane.ladder.some((r) => r.open)) return Number.POSITIVE_INFINITY
+    let end = 0
+    for (const r of lane.ladder) end = Math.max(end, r.end_ms)
+    for (const b of lane.beats) end = Math.max(end, win.startMs + (b.minute + 1) * MINUTE_MS)
+    return end
+  }
+  const laneStartMs = (lane: DayLane): number => {
+    let start = Number.POSITIVE_INFINITY
+    for (const r of lane.ladder) start = Math.min(start, r.start_ms)
+    for (const b of lane.beats) start = Math.min(start, win.startMs + b.minute * MINUTE_MS)
+    return start
+  }
   lanes.sort((a, b) => {
-    if (a.weight !== b.weight) return b.weight - a.weight
+    const end = laneEndMs(a) - laneEndMs(b)
+    if (end !== 0) return end
+    const start = laneStartMs(a) - laneStartMs(b)
+    if (start !== 0) return start
     return a.label.localeCompare(b.label)
   })
   return lanes
@@ -1389,6 +1414,17 @@ function buildStateKey(): HTMLElement {
     pair.append(glyph, document.createTextNode(STATE_WORD[state]))
     item.append(pair)
   }
+  return item
+}
+
+/** The gestures, taught once. This line replaced a per-lane `title`
+ *  attribute: the rail's hover already belongs to the moment tooltip, and the
+ *  OS's native gray box arriving late on top of it was two voices where the
+ *  legend's one suffices. */
+function buildGestureKey(): HTMLElement {
+  const item = document.createElement('span')
+  item.className = 'kbn-day-key kbn-day-key-gesture'
+  item.textContent = 'click a lane opens it · ⌥-click pins · drag zooms'
   return item
 }
 
@@ -2313,10 +2349,11 @@ class DayViewImpl implements TemporalView {
       // difference between a fallback and a control that looks broken — the
       // first report of this feature was "clicking a lane does nothing", from
       // a board on which nothing was aloft at all.
-      const aloft = this.laneIsAloft(lane)
-      rail.title =
-        `${lane.label} — click to open ${aloft ? 'its terminal' : 'the fiber'}` +
-        ` · ⌥-click to pin a moment`
+      // No `title` here, deliberately: the rail already owns a rich hover
+      // surface (the moment tooltip), and a native tooltip layered on top of
+      // it after the OS delay is a second, uglier voice saying less. The
+      // click affordance is carried by the cursor and taught once, in the
+      // legend, instead of re-whispered per lane.
       rail.addEventListener('click', (e) => {
         e.stopPropagation()
         if (this.dragJustEnded) {
@@ -2370,6 +2407,7 @@ class DayViewImpl implements TemporalView {
         ? [buildKey('kbn-day-key-aloft', ALOFT_KEY_LABEL)]
         : []),
       buildStateKey(),
+      buildGestureKey(),
     )
     // The way back out of a zoom, and the only sign that you are in one. Quiet
     // and only ever present while it has something to undo — a permanent
