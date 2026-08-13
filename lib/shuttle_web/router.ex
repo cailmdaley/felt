@@ -68,6 +68,12 @@ defmodule ShuttleWeb.Router do
     # events.jsonl hook stream. JSON-native, so it lives in the :api pipeline
     # (unlike /file, which serves raw bytes).
     get("/sent-files", SentFilesController, :show)
+    # The global sent-files feed, HOST-scoped like /commits (not owner-routed):
+    # every fiber's SendUserFile sends recorded on this host's events.jsonl, no
+    # uid filter — the composite counterpart fans in each remote's cached feed
+    # (Shuttle.RemoteTemporalRegistry) the same way /commits/composite does.
+    get("/sent-files/all/composite", SentFilesController, :composite_all)
+    get("/sent-files/all", SentFilesController, :show_all)
     # The temporal view's read plane, HOST-scoped rather than owner-routed
     # (see the controller): /activity buckets this host's events.jsonl per
     # minute. A cross-host view fans out and merges.

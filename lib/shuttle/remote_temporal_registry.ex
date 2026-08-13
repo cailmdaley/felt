@@ -1,7 +1,7 @@
 defmodule Shuttle.RemoteTemporalRegistry do
   @moduledoc """
-  Polls each configured remote Shuttle daemon's four **temporal** feeds —
-  `/activity`, `/sessions`, `/commits`, `/spend` — caches them per origin, and persists
+  Polls each configured remote Shuttle daemon's five **temporal** feeds —
+  `/activity`, `/sessions`, `/commits`, `/spend`, `/sent-files/all` — caches them per origin, and persists
   each cache to disk so the hub's memory of a remote survives both a disconnect
   and a daemon restart.
 
@@ -64,7 +64,7 @@ defmodule Shuttle.RemoteTemporalRegistry do
   @window_days 14
   @window_ms @window_days * 24 * 60 * 60 * 1_000
 
-  @feeds [:activity, :sessions, :commits, :spend]
+  @feeds [:activity, :sessions, :commits, :spend, :sent_files]
 
   defmodule State do
     @moduledoc false
@@ -351,7 +351,11 @@ defmodule Shuttle.RemoteTemporalRegistry do
       commits:
         fetch(client, Remote.commits_url(remote, 0), etags[:commits], timeout_ms, key: "records"),
       spend:
-        fetch(client, Remote.spend_url(remote, 0), etags[:spend], timeout_ms, key: "sessions")
+        fetch(client, Remote.spend_url(remote, 0), etags[:spend], timeout_ms, key: "sessions"),
+      sent_files:
+        fetch(client, Remote.sent_files_all_url(remote, 0), etags[:sent_files], timeout_ms,
+          key: "files"
+        )
     }
   end
 
@@ -419,6 +423,7 @@ defmodule Shuttle.RemoteTemporalRegistry do
       sessions: [],
       commits: [],
       spend: [],
+      sent_files: [],
       etags: %{},
       last_polled_at: nil,
       last_attempt_at: nil,
@@ -490,6 +495,7 @@ defmodule Shuttle.RemoteTemporalRegistry do
   defp put_items(entry, :sessions, items, _extras, _window), do: %{entry | sessions: items}
   defp put_items(entry, :commits, items, _extras, _window), do: %{entry | commits: items}
   defp put_items(entry, :spend, items, _extras, _window), do: %{entry | spend: items}
+  defp put_items(entry, :sent_files, items, _extras, _window), do: %{entry | sent_files: items}
 
   defp record_failure(entries, name, reason, now) do
     case Map.get(entries, name) do
@@ -512,6 +518,7 @@ defmodule Shuttle.RemoteTemporalRegistry do
          sessions: entry.sessions,
          commits: entry.commits,
          spend: entry.spend,
+         sent_files: entry.sent_files,
          last_polled_at: entry.last_polled_at,
          last_error: entry.last_error,
          stale: stale?(entry, now)
@@ -567,6 +574,7 @@ defmodule Shuttle.RemoteTemporalRegistry do
       "sessions" => entry.sessions,
       "commits" => entry.commits,
       "spend" => entry.spend,
+      "sent_files" => entry.sent_files,
       "etags" => Map.new(entry.etags || %{}, fn {k, v} -> {Atom.to_string(k), v} end),
       "last_polled_at" => encode_dt(entry.last_polled_at)
     }
@@ -619,6 +627,7 @@ defmodule Shuttle.RemoteTemporalRegistry do
         sessions: list_or_empty(persisted["sessions"]),
         commits: list_or_empty(persisted["commits"]),
         spend: list_or_empty(persisted["spend"]),
+        sent_files: list_or_empty(persisted["sent_files"]),
         etags: decode_etags(persisted["etags"]),
         last_polled_at: decode_dt(persisted["last_polled_at"])
     }

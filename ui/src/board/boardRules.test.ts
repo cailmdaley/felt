@@ -24,7 +24,14 @@ import type { Fiber } from './KanbanFiber.js'
 import type { CompositeEntry, CompositeFeed } from './KanbanComposite.js'
 import type { KanbanCard, KanbanResponse } from './KanbanTypes.js'
 import { buildKanbanResponseFromComposite, deriveCycleLens, isSleepingOnSchedule, restingCards } from './KanbanReadModel.js'
-import { clusterStashCards, formatLaunchDay, humanizeIdleAge, phasePillLabel } from './KanbanSurfaces.js'
+import {
+  clusterStashCards,
+  formatLaunchDay,
+  humanizeIdleAge,
+  phasePillLabel,
+  sortDatedByReturn,
+  splitStashByReturn,
+} from './KanbanSurfaces.js'
 import { sessionWindow } from './FiberDetailModal.js'
 import { isoDayLocal } from './civilDay.js'
 
@@ -447,6 +454,56 @@ describe('Resting clusters split when they overflow', () => {
     ]
     const clusters = clusterStashCards(ids.map((id) => restingCard(id)))
     expect(clusters.flatMap((c) => c.cards.map((card) => card.id)).sort()).toEqual([...ids].sort())
+  })
+
+  describe('splitStashByReturn — the watch list vs. the already-scheduled', () => {
+    it('sorts a bare snooze into dated, a plain rester into undated', () => {
+      const snoozed = { ...restingCard('project/snoozed'), due: dayFromNow(3) }
+      const forgettable = restingCard('project/forgettable')
+      const { undated, dated } = splitStashByReturn([snoozed, forgettable])
+      expect(undated.map((c) => c.id)).toEqual(['project/forgettable'])
+      expect(dated.map((c) => c.id)).toEqual(['project/snoozed'])
+    })
+
+    it('counts a standing role asleep on its cron as dated even with no due', () => {
+      const sleeping: KanbanCard = {
+        ...restingCard('roles/sleeper'),
+        shuttleKind: 'standing',
+        status: 'active',
+        runningWorker: undefined,
+      }
+      const { undated, dated } = splitStashByReturn([sleeping])
+      expect(undated).toEqual([])
+      expect(dated.map((c) => c.id)).toEqual(['roles/sleeper'])
+    })
+
+    it('loses nothing across the split', () => {
+      const cards = [
+        restingCard('a'),
+        { ...restingCard('b'), due: dayFromNow(1) },
+        restingCard('c'),
+      ]
+      const { undated, dated } = splitStashByReturn(cards)
+      expect([...undated, ...dated].map((c) => c.id).sort()).toEqual(['a', 'b', 'c'])
+    })
+  })
+
+  describe('sortDatedByReturn — soonest return first', () => {
+    it('orders clusters and the cards within them by ascending return date', () => {
+      const later = { ...restingCard('proj/later'), due: dayFromNow(10) }
+      const soon = { ...restingCard('other/soon'), due: dayFromNow(1) }
+      const clusters = sortDatedByReturn(clusterStashCards([later, soon]))
+      expect(clusters.flatMap((c) => c.cards.map((card) => card.id))).toEqual(['other/soon', 'proj/later'])
+    })
+
+    it('sorts a sleeping role by its next cron launch, not createdAt', () => {
+      const withinCluster = [
+        { ...restingCard('proj/a'), due: dayFromNow(5) },
+        { ...restingCard('proj/b'), due: dayFromNow(2) },
+      ]
+      const clusters = sortDatedByReturn(clusterStashCards(withinCluster))
+      expect(clusters[0].cards.map((c) => c.id)).toEqual(['proj/b', 'proj/a'])
+    })
   })
 })
 

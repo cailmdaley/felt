@@ -74,6 +74,13 @@ defmodule Shuttle.RemoteTemporalRegistryTest do
     "deletions" => 0,
     "session" => "s0"
   }
+  @sent_file %{
+    "fullPath" => "/repo/frame.png",
+    "basename" => "frame.png",
+    "timestamp" => 1_770_000_000_000,
+    "sessionId" => "s0",
+    "uid" => "01KTS261GJMMRDRHS2QDMEFV3K"
+  }
   @spend %{
     "fiber" => "work/paper",
     "session" => "s0",
@@ -95,6 +102,11 @@ defmodule Shuttle.RemoteTemporalRegistryTest do
       {:ok, Jason.encode!(%{"records" => [@ledgered_commit]})}
     )
     MockClient.set("/api/v1/spend", {:ok, Jason.encode!(%{"sessions" => [@spend]})})
+
+    MockClient.set(
+      "/api/v1/sent-files/all",
+      {:ok, Jason.encode!(%{"files" => [@sent_file]})}
+    )
   end
 
   defp script(_), do: :ok
@@ -137,6 +149,7 @@ defmodule Shuttle.RemoteTemporalRegistryTest do
       assert entry.sessions == [@record]
       assert entry.commits == [@ledgered_commit]
       assert entry.spend == [@spend]
+      assert entry.sent_files == [@sent_file]
       assert entry.last_error == nil
       refute entry.stale
       assert {from_ms, to_ms} = entry.activity_window
@@ -173,6 +186,7 @@ defmodule Shuttle.RemoteTemporalRegistryTest do
       assert entry.sessions == [@record]
       assert entry.commits == [@ledgered_commit]
       assert entry.spend == [@spend]
+      assert entry.sent_files == [@sent_file]
       assert entry.last_error == :not_set
     end
 

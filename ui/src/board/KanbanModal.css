@@ -861,6 +861,15 @@
   color: #A89B83;
   padding: 6px 0;
 }
+/* The seam between Resting's two halves — undated (watch list) above,
+   dated (already scheduled to return) below. Same quiet idiom as the
+   held-open divider, with a hairline above it so the two temperatures of
+   Resting still read as one region split, not a second section. */
+.kbn-cluster-divider-group {
+  border-top: 1px solid #E4DACB;
+  margin-top: 4px;
+  padding-top: 10px;
+}
 .kbn-cluster-empty {
   grid-column: 1 / -1;
   text-align: center;

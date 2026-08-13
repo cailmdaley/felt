@@ -241,6 +241,17 @@ defmodule Shuttle.Remote do
     base(url) <> "/api/v1/commits?since_ms=#{since_ms}"
   end
 
+  @doc """
+  The full `GET /api/v1/sent-files/all` URL for this remote, from `since_ms`.
+  One line per send across every fiber on that host, so the hub asks for the
+  whole stream the way it does for `/commits` — the window is applied when the
+  composite serves it.
+  """
+  @spec sent_files_all_url(t(), integer()) :: String.t()
+  def sent_files_all_url(%__MODULE__{url: url}, since_ms) when is_integer(since_ms) do
+    base(url) <> "/api/v1/sent-files/all?since_ms=#{since_ms}"
+  end
+
   defp base(url), do: String.trim_trailing(url, "/")
 
   @doc """

@@ -10,7 +10,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   PEAK_FLOOR,
-  SIGMA_TOTAL_MINUTES,
+  SIGMA_DAY_MINUTES,
   SPINE_MIN_HEIGHT,
   curveField,
   curveGrid,
@@ -27,22 +27,27 @@ import {
 } from './densityCurve.js'
 
 describe('smear — the unnormalised kernel', () => {
-  const grid = curveGrid(20) // step 1, so grid minutes line up with samples
+  const grid = curveGrid(20)
+  // The grid floors at GRID_STEP_FLOOR_MINUTES (a fraction of a minute) now
+  // that it must resolve Day's narrow sigma, so a sample's own minute no
+  // longer lines up with its own index — this maps minutes to the nearest
+  // grid index instead of assuming step 1.
+  const idx = (g: typeof grid, minute: number) => Math.round(minute / g.step)
 
   it('peaks a lone event of weight 1 at exactly 1, at its own position', () => {
     const samples: ActivitySample[] = [{ minute: 10, human: 0, agent: 1 }]
-    const out = smear(samples, (s) => s.agent, SIGMA_TOTAL_MINUTES, grid)
-    expect(out[10]).toBeCloseTo(1, 10)
+    const out = smear(samples, (s) => s.agent, SIGMA_DAY_MINUTES, grid)
+    expect(out[idx(grid, 10)]).toBeCloseTo(1, 10)
   })
 
   it('falls to exp(-0.5) one sigma from that event', () => {
     // An UNNORMALISED Gaussian, so the peak never depends on sigma — only how
     // far the influence reaches does. Evaluated with an integer sigma and a
-    // fine grid so the sampled point falls exactly one sigma out rather than
-    // merely near it: the day/week grids are coarser than a minute and would
-    // only test the grid's own rounding, not the kernel.
+    // grid step of exactly 1 (forced past the floor with a wide sigma) so the
+    // sampled point falls exactly one sigma out rather than merely near it.
     const sigma = 5
-    const fineGrid = curveGrid(40)
+    const fineGrid = curveGrid(2880) // minutes/MAX_GRID_POINTS = 1, past the floor: step -> 1
+    expect(fineGrid.step).toBeCloseTo(1, 10)
     const samples: ActivitySample[] = [{ minute: 20, human: 0, agent: 1 }]
     const out = smear(samples, (s) => s.agent, sigma, fineGrid)
     expect(out[20 + sigma]).toBeCloseTo(Math.exp(-0.5), 10)
@@ -56,7 +61,7 @@ describe('smear — the unnormalised kernel', () => {
 
   it('skips a sample whose weight is not positive', () => {
     const samples: ActivitySample[] = [{ minute: 10, human: 0, agent: 0 }]
-    const out = smear(samples, (s) => s.agent, SIGMA_TOTAL_MINUTES, grid)
+    const out = smear(samples, (s) => s.agent, SIGMA_DAY_MINUTES, grid)
     expect(out.every((v) => v === 0)).toBe(true)
   })
 })
@@ -71,15 +76,15 @@ describe('THE DOCTRINE — the curve is the machines, and only the machines', ()
   it('draws the same curve whether or not a human message shares the minute', () => {
     const minute = 30
     const grid = curveGrid(60)
-    const withYou = curveField([{ minute, human: 1, agent: 100 }], grid, [minute])
-    const machineOnly = curveField([{ minute, human: 0, agent: 100 }], grid, [])
+    const withYou = curveField([{ minute, human: 1, agent: 100 }], grid, [minute], SIGMA_DAY_MINUTES)
+    const machineOnly = curveField([{ minute, human: 0, agent: 100 }], grid, [], SIGMA_DAY_MINUTES)
     expect(withYou.height).toEqual(machineOnly.height)
   })
 
   it('leaves a minute of pure human message at zero height — the spine carries it', () => {
     const minute = 10
     const grid = curveGrid(30)
-    const field = curveField([{ minute, human: 4, agent: 0 }], grid, [minute])
+    const field = curveField([{ minute, human: 4, agent: 0 }], grid, [minute], SIGMA_DAY_MINUTES)
     expect(field.height.every((h) => h === 0)).toBe(true)
     expect(field.spines).toEqual([minute])
   })
@@ -88,9 +93,10 @@ describe('THE DOCTRINE — the curve is the machines, and only the machines', ()
 describe('curveField — height is log1p-compressed volume', () => {
   it('does not scale a 100-event minute up 100x over a 1-event minute', () => {
     const grid = curveGrid(10)
-    const quiet = curveField([{ minute: 5, human: 0, agent: 1 }], grid, [])
-    const busy = curveField([{ minute: 5, human: 0, agent: 100 }], grid, [])
-    const ratio = busy.height[5] / quiet.height[5]
+    const i = Math.round(5 / grid.step)
+    const quiet = curveField([{ minute: 5, human: 0, agent: 1 }], grid, [], SIGMA_DAY_MINUTES)
+    const busy = curveField([{ minute: 5, human: 0, agent: 100 }], grid, [], SIGMA_DAY_MINUTES)
+    const ratio = busy.height[i] / quiet.height[i]
     // log1p(100) / log1p(1) ≈ 6.6 — nowhere near the 100x a linear height
     // would give, and this is the whole point of the compression: a burst
     // must not flatten the rest of the day into the baseline.
@@ -100,7 +106,7 @@ describe('curveField — height is log1p-compressed volume', () => {
 
   it('dedupes and sorts spines, ascending', () => {
     const grid = curveGrid(10)
-    const field = curveField([{ minute: 3, human: 1, agent: 0 }], grid, [7, 3, 7, 1])
+    const field = curveField([{ minute: 3, human: 1, agent: 0 }], grid, [7, 3, 7, 1], SIGMA_DAY_MINUTES)
     expect(field.spines).toEqual([1, 3, 7])
   })
 })
@@ -108,7 +114,7 @@ describe('curveField — height is log1p-compressed volume', () => {
 describe('fieldPeak — a page-wide normaliser, never per-lane', () => {
   it('never returns below PEAK_FLOOR, even for an all-quiet page', () => {
     const grid = curveGrid(10)
-    const quiet = curveField([], grid, [])
+    const quiet = curveField([], grid, [], SIGMA_DAY_MINUTES)
     expect(fieldPeak([quiet])).toBe(PEAK_FLOOR)
   })
 
@@ -117,8 +123,8 @@ describe('fieldPeak — a page-wide normaliser, never per-lane', () => {
     // each rail to its own maximum would draw a fiber that saw four events and
     // one that saw four hundred at the same height.
     const grid = curveGrid(10)
-    const quiet = curveField([{ minute: 2, human: 0, agent: 1 }], grid, [])
-    const loud = curveField([{ minute: 5, human: 0, agent: 400 }], grid, [])
+    const quiet = curveField([{ minute: 2, human: 0, agent: 1 }], grid, [], SIGMA_DAY_MINUTES)
+    const loud = curveField([{ minute: 5, human: 0, agent: 400 }], grid, [], SIGMA_DAY_MINUTES)
     const peak = fieldPeak([quiet, loud])
     expect(peak).toBe(Math.max(...loud.height))
     // And the quiet field alone must not report loud's peak as its own.
@@ -130,13 +136,14 @@ describe('spineHeights — your message, drawn inside the work it landed in', ()
   it("rises to the curve's own height where the agents were busy", () => {
     const minute = 20
     const grid = curveGrid(40)
-    const field = curveField([{ minute, human: 1, agent: 60 }], grid, [minute])
+    const field = curveField([{ minute, human: 1, agent: 60 }], grid, [minute], SIGMA_DAY_MINUTES)
     const peak = fieldPeak([field])
     const [h] = spineHeights(field, peak)
     // The spine stands in the tallest moment on the page, so it is the full
     // height of the row — and comfortably above the floor, which is what makes
     // this a test of the mapping rather than of the floor.
-    expect(h).toBeCloseTo(field.height[minute] / peak, 10)
+    const i = Math.round(minute / grid.step)
+    expect(h).toBeCloseTo(field.height[i] / peak, 10)
     expect(h).toBeGreaterThan(SPINE_MIN_HEIGHT)
   })
 
@@ -145,8 +152,8 @@ describe('spineHeights — your message, drawn inside the work it landed in', ()
     // measured against it. A message during a lull must not draw as tall as a
     // message during a burst — that height difference IS the information.
     const grid = curveGrid(60)
-    const quiet = curveField([{ minute: 10, human: 1, agent: 2 }], grid, [10])
-    const loud = curveField([{ minute: 40, human: 1, agent: 400 }], grid, [40])
+    const quiet = curveField([{ minute: 10, human: 1, agent: 2 }], grid, [10], SIGMA_DAY_MINUTES)
+    const loud = curveField([{ minute: 40, human: 1, agent: 400 }], grid, [40], SIGMA_DAY_MINUTES)
     const peak = fieldPeak([quiet, loud])
     const [quietSpine] = spineHeights(quiet, peak)
     const [loudSpine] = spineHeights(loud, peak)
@@ -160,20 +167,20 @@ describe('spineHeights — your message, drawn inside the work it landed in', ()
     // message would be a mark of zero pixels — the most important event on the
     // rail, invisible.
     const grid = curveGrid(60)
-    const alone = curveField([], grid, [25])
-    const loud = curveField([{ minute: 40, human: 0, agent: 400 }], grid, [])
+    const alone = curveField([], grid, [25], SIGMA_DAY_MINUTES)
+    const loud = curveField([{ minute: 40, human: 0, agent: 400 }], grid, [], SIGMA_DAY_MINUTES)
     expect(spineHeights(alone, fieldPeak([alone, loud]))).toEqual([SPINE_MIN_HEIGHT])
   })
 
   it('never exceeds the full row, however suppressed the peak it is measured against', () => {
     const grid = curveGrid(20)
-    const field = curveField([{ minute: 10, human: 1, agent: 50 }], grid, [10])
+    const field = curveField([{ minute: 10, human: 1, agent: 50 }], grid, [10], SIGMA_DAY_MINUTES)
     expect(spineHeights(field, PEAK_FLOOR)).toEqual([1])
   })
 
   it('gives one height per spine, in the field\'s own sorted order', () => {
     const grid = curveGrid(30)
-    const field = curveField([{ minute: 5, human: 0, agent: 30 }], grid, [20, 5])
+    const field = curveField([{ minute: 5, human: 0, agent: 30 }], grid, [20, 5], SIGMA_DAY_MINUTES)
     const heights = spineHeights(field, fieldPeak([field]))
     expect(heights).toHaveLength(2)
     // Spine 5 stands in the burst; spine 20 is out on quiet paper at the floor.
@@ -183,7 +190,7 @@ describe('spineHeights — your message, drawn inside the work it landed in', ()
 
   it('is empty for a field with no spines', () => {
     const grid = curveGrid(10)
-    const field = curveField([{ minute: 4, human: 0, agent: 10 }], grid, [])
+    const field = curveField([{ minute: 4, human: 0, agent: 10 }], grid, [], SIGMA_DAY_MINUTES)
     expect(spineHeights(field, fieldPeak([field]))).toEqual([])
   })
 })
@@ -194,14 +201,14 @@ describe('curveRuns / edgePath', () => {
     // cobalt rule across days with no activity at all, reading as "the agents
     // worked here, evenly, all day". A quiet field must yield no runs.
     const grid = curveGrid(20)
-    const empty = curveField([], grid, [])
+    const empty = curveField([], grid, [], SIGMA_DAY_MINUTES)
     expect(curveRuns(empty, fieldPeak([empty]))).toEqual([])
     expect(edgePath(curveRuns(empty, fieldPeak([empty])))).toBe('')
   })
 
   it("starts each run's edge with an M, and only the first point of the run", () => {
     const grid = curveGrid(20)
-    const field = curveField([{ minute: 10, human: 0, agent: 5 }], grid, [])
+    const field = curveField([{ minute: 10, human: 0, agent: 5 }], grid, [], SIGMA_DAY_MINUTES)
     const runs = curveRuns(field, fieldPeak([field]))
     expect(runs.length).toBeGreaterThan(0)
     const path = edgePath(runs)
@@ -216,7 +223,7 @@ describe('curveRuns / edgePath', () => {
     // and ending in mid-air — the burst reads as a mound rising out of a flat
     // rail, not a shape floating over it.
     const grid = curveGrid(30)
-    const field = curveField([{ minute: 15, human: 0, agent: 20 }], grid, [])
+    const field = curveField([{ minute: 15, human: 0, agent: 20 }], grid, [], SIGMA_DAY_MINUTES)
     const runs = curveRuns(field, fieldPeak([field]))
     expect(runs).toHaveLength(1)
     const [run] = runs
@@ -239,7 +246,7 @@ describe('curveRuns / edgePath', () => {
     // being measured against, e.g. a peak suppressed below this field's own
     // height by page normalisation.
     const grid = curveGrid(10)
-    const field = curveField([{ minute: 5, human: 0, agent: 50 }], grid, [])
+    const field = curveField([{ minute: 5, human: 0, agent: 50 }], grid, [], SIGMA_DAY_MINUTES)
     const suppressedPeak = PEAK_FLOOR // smaller than this field's real height
     const runs = curveRuns(field, suppressedPeak)
     for (const run of runs) for (const p of run) expect(p.y).toBeGreaterThanOrEqual(0)

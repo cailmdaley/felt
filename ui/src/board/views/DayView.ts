@@ -86,6 +86,7 @@ import {
   curveField,
   curveGrid,
   fieldPeak,
+  SIGMA_DAY_MINUTES,
   stackDepth,
   stackPitch,
   stackSpawns,
@@ -1699,7 +1700,7 @@ class DayViewImpl implements TemporalView {
     const fields = new Map<string, CurveField>()
     for (const lane of model.lanes) {
       const { samples, spines } = laneActivity(lane.beats)
-      fields.set(lane.key, curveField(samples, sampling, spines))
+      fields.set(lane.key, curveField(samples, sampling, spines, SIGMA_DAY_MINUTES))
     }
     const peak = fieldPeak([...fields.values()])
 

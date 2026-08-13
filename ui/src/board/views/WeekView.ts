@@ -49,6 +49,7 @@ import {
   curveField,
   curveGrid,
   fieldPeak,
+  SIGMA_WEEK_MINUTES,
   type ActivitySample,
   type CurveField,
 } from './densityCurve.js'
@@ -1258,7 +1259,7 @@ class WeekView implements TemporalView {
       curves.set(row.day, {
         slots,
         minutes,
-        field: curveField(samples, curveGrid(minutes), spines),
+        field: curveField(samples, curveGrid(minutes), spines, SIGMA_WEEK_MINUTES),
       })
     }
     const peak = fieldPeak([...curves.values()].map((c) => c.field))

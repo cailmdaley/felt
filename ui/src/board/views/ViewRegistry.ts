@@ -1,16 +1,20 @@
 /**
  * ViewRegistry — the contract between KanbanModal and the temporal views.
  *
- * The board is four full-page views behind one hotkey row:
+ * The board is five full-page views behind one hotkey row:
  *
  *   1  desk       the kanban page (Timeline ribbon + Now board + Pinned +
  *                 Stash). Owned by KanbanModal itself, NOT a TemporalView.
  *   2  day        ┐
- *   3  week       ├ TemporalViews — each mounts into a full-width host where
- *   4  chronicle  ┘ the Desk surfaces would otherwise be.
+ *   3  week       ├ registered views — each mounts into a full-width host
+ *   4  chronicle  │ where the Desk surfaces would otherwise be.
+ *   5  shelf      ┘
  *
- * The order runs from the tightest window outward, so the strip reads as a
- * zoom: today, this week, the whole record.
+ * The first four run from the tightest window outward, so the strip reads as
+ * a zoom: today, this week, the whole record. Shelf sits after them because it
+ * is not a window at all — it is the fleet's sent WORK on a canvas, ordered by
+ * a lens rather than by the shared temporal cursor. It shares the lifecycle
+ * and nothing else, which is exactly what the interface asks of it.
  *
  * A view is a plain object with a three-call lifecycle. KanbanModal owns the
  * host element and the data; the view owns everything inside the host.
@@ -34,7 +38,7 @@ import type {
 } from './TemporalData.js'
 
 export interface TemporalView {
-  id: 'chronicle' | 'day' | 'week'
+  id: 'chronicle' | 'day' | 'week' | 'shelf'
   title: string
   hotkey: string
   mount(host: HTMLElement, ctx: ViewContext): void

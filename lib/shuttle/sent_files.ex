@@ -60,6 +60,65 @@ defmodule Shuttle.SentFiles do
     end
   end
 
+  @doc """
+  Every `SendUserFile` send across ALL fibers, stamped at or after `since_ms`,
+  oldest first — the global counterpart to `for_uid/2`.
+
+  Each entry additionally carries `uid`, computed the same way `for_uid/2`
+  matches (tmux-embedded ULID falling back to `sessionId`), so a caller with no
+  single fiber in mind can still group by one. Unlike `for_uid/2` this does
+  **not** dedupe by `fullPath` or cap the result — raw entries, oldest-first;
+  dedup is the client's job (house rule: recorded evidence only, no server-side
+  opinion about which send "wins").
+
+  Reads only the live `events.jsonl`, same as `for_uid/2` — no rotated `.1`
+  sibling — the source Shuttle.WaitingTracker.default_events_file/0` resolves.
+
+  Opts (for tests): `:events_file`.
+  """
+  @spec all_since(integer(), keyword()) :: [map()]
+  def all_since(since_ms, opts \\ []) when is_integer(since_ms) do
+    path = Keyword.get(opts, :events_file, default_events_file())
+
+    if File.regular?(path) do
+      path
+      |> File.stream!()
+      |> Stream.flat_map(&entries_since_line(&1, since_ms))
+      |> Enum.to_list()
+      |> Enum.sort_by(& &1.timestamp)
+    else
+      []
+    end
+  end
+
+  # One JSONL line → the (possibly empty) list of entries it contributes,
+  # unfiltered by fiber. Malformed JSON, non-SendUserFile events, and events
+  # older than `since_ms` all collapse to `[]`.
+  defp entries_since_line(line, since_ms) do
+    with {:ok, event} <- Jason.decode(line),
+         "SendUserFile" <- event["tool"],
+         timestamp when is_integer(timestamp) and timestamp >= since_ms <- event["timestamp"],
+         files when is_list(files) <- get_in(event, ["toolInput", "files"]) do
+      session_id = event["sessionId"]
+      cwd = event["cwd"]
+      uid = event_uid(event)
+
+      for full_path <- files, is_binary(full_path) do
+        abs = absolutize(full_path, cwd)
+
+        %{
+          fullPath: abs,
+          basename: Path.basename(abs),
+          timestamp: timestamp,
+          sessionId: session_id,
+          uid: uid
+        }
+      end
+    else
+      _ -> []
+    end
+  end
+
   defp default_events_file, do: Shuttle.WaitingTracker.default_events_file()
 
   # One JSONL line → the (possibly empty) list of entries it contributes for

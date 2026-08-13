@@ -60,16 +60,37 @@ export const CURVE_AGENT = '#3D5BA0'
 // ── The parameters ───────────────────────────────────────────────────────────
 
 /**
- * Kernel width for the HEIGHT channel, in minutes. Tight: an agent's events are
- * stamped when they happened and mean what they say, so smoothing them further
- * would only blur a signal that is already honest.
+ * Kernel width for the HEIGHT channel, in minutes — now one per view rather
+ * than a single constant, because Day and Week disagreed about what "tight"
+ * means. A width that kept Day's rail crisp turned Week's rail, which spans
+ * seven times the minutes over the same 1000 units of path, into a jagged
+ * saw: the same sigma is a much narrower fraction of Week's rail than of
+ * Day's, so what read as an edge on Day read as noise on Week.
+ *
+ * Tune these directly — each is a one-line knob, not a formula to solve.
+ */
+
+/**
+ * Day's kernel width, in minutes. Tight: an agent's events are stamped when
+ * they happened and mean what they say, so smoothing them further would only
+ * blur a signal that is already honest.
  *
  * Tightened from 1.6 by looking at a real day: at that width a burst and the
- * two quiet minutes beside it merged into one soft mound, and the rail read as
- * a weather map rather than as work. At 1.25 a minute's events still reach
- * their neighbours — the curve stays a curve — but a burst keeps an edge.
+ * two quiet minutes beside it merged into one soft mound, and the rail read
+ * as a weather map rather than as work. Tightened again from 1.25 to 0.75
+ * when the mounds still read as soft "little prince elephants" rather than
+ * work with edges.
  */
-export const SIGMA_TOTAL_MINUTES = 1.25
+export const SIGMA_DAY_MINUTES = 0.75
+
+/**
+ * Week's kernel width, in minutes. Broader than Day's on purpose: a week's
+ * rail draws seven days of minutes into the same 1000 units of path, so a
+ * sigma tuned for Day's resolution is a much narrower fraction of Week's
+ * rail and reads as jagged sawtooth rather than a curve. 3.0 is a starting
+ * point for taste iteration, not a derived number.
+ */
+export const SIGMA_WEEK_MINUTES = 3.0
 
 /**
  * The floor under the per-view normaliser, in compressed units — `log1p(4)`.
@@ -126,17 +147,38 @@ export interface CurveField {
 }
 
 /**
- * A sampling grid for a frame, fine enough that the tight kernel is not
- * under-sampled and coarse enough that a week of rails is not a hundred
- * thousand path commands. One point per minute until a frame passes
- * {@link MAX_GRID_POINTS}, then as coarse as it must be.
+ * The grid may never be coarser than this many minutes per step — fine
+ * enough that {@link SIGMA_DAY_MINUTES}, the narrowest kernel drawn anywhere
+ * on the board, is not under-sampled. A discrete grid samples a genuinely
+ * continuous Gaussian (the kernel is evaluated at each grid point from the
+ * event's real, unbinned minute), so a step finer than the minute samples
+ * arrive at is not wasted precision — it is resolution the curve's shape
+ * actually has.
+ *
+ * Driven off Day's sigma specifically, not Week's, because Day is the
+ * narrower kernel and the tighter constraint: a floor that satisfies Day
+ * satisfies Week for free. `/1.5` rather than `/KERNEL_REACH_SIGMAS` keeps
+ * several points inside even the steepest part of the curve (the flank
+ * within one sigma of a spike) without chasing sub-pixel precision no rail
+ * could show.
  */
-const MAX_GRID_POINTS = 720
+const GRID_STEP_FLOOR_MINUTES = SIGMA_DAY_MINUTES / 1.5
+
+/**
+ * A sampling grid for a frame, fine enough that the tightest kernel on the
+ * board ({@link GRID_STEP_FLOOR_MINUTES}) is not under-sampled and coarse
+ * enough that a long frame is not a hundred thousand path commands. The step
+ * only widens past the floor once a frame is long enough that holding it
+ * would blow {@link MAX_GRID_POINTS} — a day's frame (1440 minutes) sits
+ * comfortably under that at the floor step, so Day gets the fine grid its
+ * narrow sigma needs and nothing has to ask for it specially.
+ */
+const MAX_GRID_POINTS = 2880
 
 export function curveGrid(frameMinutes: number): CurveGrid {
   const minutes = Math.max(1, Math.ceil(frameMinutes))
-  const step = Math.max(1, Math.ceil(minutes / MAX_GRID_POINTS))
-  return { step, count: Math.floor(minutes / step) + 1 }
+  const step = Math.max(GRID_STEP_FLOOR_MINUTES, minutes / MAX_GRID_POINTS)
+  return { step, count: Math.floor(minutes / step + 1e-9) + 1 }
 }
 
 /**
@@ -181,8 +223,9 @@ export function curveField(
   samples: readonly ActivitySample[],
   grid: CurveGrid,
   spines: readonly number[],
+  sigma: number,
 ): CurveField {
-  const agent = smear(samples, (s) => s.agent, SIGMA_TOTAL_MINUTES, grid)
+  const agent = smear(samples, (s) => s.agent, sigma, grid)
   return {
     grid,
     height: agent.map((d) => Math.log1p(d)),

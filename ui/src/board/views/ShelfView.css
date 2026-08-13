@@ -1,0 +1,298 @@
+/* Shelf — the canvas of sent work.
+
+   Same pigments as the rest of the board (KanbanModal.css / views.css): iron
+   gall #1B1611, muted #7A6F5C, faded #A89B83, ochre #C49333, cinnabar #BC4538,
+   0.5px hairlines on parchment. The one thing this sheet adds is DEPTH: a card
+   is a piece of paper laid on the sheet, so it carries a real edge and a very
+   shallow shadow — the only surface on the board where things overlap. */
+
+/* ── Lens control ───────────────────────────────────────────────────────────
+   Two words in the tab strip's own hand, so it reads as chrome rather than as
+   a control panel: the active lens is inked, the other is faded. */
+.kbn-shelf-lens {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.kbn-shelf-lens-label {
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-style: italic;
+  font-size: calc(12px * var(--kbn-type-scale, 1));
+  color: #A89B83;
+}
+.kbn-shelf-lens-opt {
+  appearance: none;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  border-radius: 0;
+  margin: 0;
+  padding: 0 1px 1px;
+  cursor: pointer;
+  font-family: var(--font-mono, 'IBM Plex Mono', monospace);
+  font-size: calc(9.5px * var(--kbn-type-scale, 1));
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #A89B83;
+  transition: color 120ms ease, border-color 120ms ease;
+}
+.kbn-shelf-lens-opt:hover { color: #7A6F5C; }
+.kbn-shelf-lens-on {
+  color: #1B1611;
+  border-bottom-color: #C49333;
+}
+.kbn-shelf-lens-opt:focus-visible {
+  outline: 1px dashed rgba(188, 69, 56, 0.55);
+  outline-offset: 2px;
+}
+
+/* ── The surface ────────────────────────────────────────────────────────────
+   The viewport clips; the surface inside it is what moves. Panning is a
+   transform on one element rather than a scroll, so a card's position is in
+   surface coordinates and never has to be corrected for a scroll offset. */
+.kbn-shelf-viewport {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  cursor: grab;
+  /* A faint laid-paper wash, so an empty region of canvas reads as surface
+     rather than as a hole where cards failed to load. */
+  background-image:
+    linear-gradient(rgba(122, 111, 92, 0.045) 0.5px, transparent 0.5px),
+    linear-gradient(90deg, rgba(122, 111, 92, 0.045) 0.5px, transparent 0.5px);
+  background-size: 32px 32px;
+}
+.kbn-shelf-panning { cursor: grabbing; }
+
+.kbn-shelf-surface {
+  position: absolute;
+  top: 0;
+  left: 0;
+  will-change: transform;
+}
+
+/* The still class is worn only for the frame in which the first layout lands,
+   so cards appear where they belong instead of flying in from the origin. */
+.kbn-shelf-still .kbn-shelf-card { transition: none !important; }
+
+/* ── Fiber captions ─────────────────────────────────────────────────────────
+   In the fiber lens each band is named in small caps on a hairline, the same
+   way a column head names a lane on the Desk. */
+.kbn-shelf-caption {
+  position: absolute;
+  top: 0;
+  left: 0;
+  padding-bottom: 3px;
+  border-bottom: 0.5px solid rgba(122, 111, 92, 0.22);
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-variant-caps: all-small-caps;
+  font-feature-settings: "smcp", "c2sc";
+  letter-spacing: 0.08em;
+  font-size: calc(14px * var(--kbn-type-scale, 1));
+  color: #7A6F5C;
+  pointer-events: none;
+}
+
+/* ── A card ─────────────────────────────────────────────────────────────── */
+.kbn-shelf-card {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 0.5px solid rgba(27, 22, 17, 0.18);
+  border-radius: 2px;
+  background: #FBF6EA;
+  box-shadow: 0 1px 2px rgba(27, 22, 17, 0.06);
+  transition:
+    transform 260ms cubic-bezier(0.22, 0.61, 0.36, 1),
+    width 260ms cubic-bezier(0.22, 0.61, 0.36, 1),
+    height 260ms cubic-bezier(0.22, 0.61, 0.36, 1),
+    box-shadow 140ms ease,
+    border-color 140ms ease,
+    opacity 140ms ease;
+}
+.kbn-shelf-card-dragging {
+  transition: box-shadow 140ms ease;
+  box-shadow: 0 6px 16px rgba(27, 22, 17, 0.16);
+}
+
+/* Held down. A star is a claim on a position, so the card wears a slightly
+   heavier edge and an ochre dot at its corner — a pin through the paper. */
+.kbn-shelf-card-starred {
+  border-color: rgba(196, 147, 51, 0.55);
+}
+.kbn-shelf-card-starred .kbn-shelf-star {
+  color: #C49333;
+  opacity: 1;
+}
+
+/* Being read: cinnabar edge, the board's pigment for the thing with your
+   attention, and enough shadow to say it is off the surface. */
+.kbn-shelf-card-focus {
+  border-color: rgba(188, 69, 56, 0.55);
+  box-shadow: 0 4px 14px rgba(27, 22, 17, 0.14);
+}
+
+/* An origin that is not answering. Its cards are still the truest thing we
+   have, so they stay on the shelf and go quiet rather than disappearing. */
+.kbn-shelf-card-stale {
+  opacity: 0.55;
+  filter: grayscale(0.5);
+}
+
+/* ── Header ─────────────────────────────────────────────────────────────── */
+.kbn-shelf-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 4px 6px 4px 5px;
+  border-bottom: 0.5px solid rgba(122, 111, 92, 0.22);
+  background: rgba(237, 226, 206, 0.5);
+  cursor: move;
+  user-select: none;
+  flex: 0 0 auto;
+}
+
+.kbn-shelf-star {
+  appearance: none;
+  background: none;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  font-size: calc(11px * var(--kbn-type-scale, 1));
+  line-height: 1;
+  color: #A89B83;
+  opacity: 0.5;
+  transition: color 120ms ease, opacity 120ms ease;
+}
+.kbn-shelf-star:hover { color: #C49333; opacity: 1; }
+
+.kbn-shelf-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono, 'IBM Plex Mono', monospace);
+  font-size: calc(10px * var(--kbn-type-scale, 1));
+  color: #1B1611;
+}
+
+.kbn-shelf-fiber {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-variant-caps: all-small-caps;
+  font-feature-settings: "smcp", "c2sc";
+  letter-spacing: 0.06em;
+  font-size: calc(11px * var(--kbn-type-scale, 1));
+  color: #A89B83;
+}
+
+.kbn-shelf-age {
+  flex: 0 0 auto;
+  font-family: var(--font-mono, 'IBM Plex Mono', monospace);
+  font-size: calc(8.5px * var(--kbn-type-scale, 1));
+  letter-spacing: 0.08em;
+  color: #A89B83;
+}
+
+.kbn-shelf-open {
+  flex: 0 0 auto;
+  text-decoration: none;
+  font-size: calc(10px * var(--kbn-type-scale, 1));
+  line-height: 1;
+  color: #A89B83;
+  opacity: 0.6;
+  transition: color 120ms ease, opacity 120ms ease;
+}
+.kbn-shelf-open:hover { color: #BC4538; opacity: 1; }
+
+/* ── Body ───────────────────────────────────────────────────────────────── */
+.kbn-shelf-body {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  background: #FFFDF8;
+}
+.kbn-shelf-frame {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  display: block;
+  background: #FFFDF8;
+}
+.kbn-shelf-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+  background: #FFFDF8;
+}
+
+/* The face a file wears when the browser would download it rather than draw
+   it. Marginalia, not an error. */
+.kbn-shelf-face {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+.kbn-shelf-face-ext {
+  font-family: var(--font-mono, 'IBM Plex Mono', monospace);
+  font-size: calc(15px * var(--kbn-type-scale, 1));
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #7A6F5C;
+}
+.kbn-shelf-face-note {
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-style: italic;
+  font-size: calc(12px * var(--kbn-type-scale, 1));
+  color: #A89B83;
+}
+
+/* The veil — see ShelfView.ts. It lives INSIDE the body, so it covers exactly
+   the frame and nothing else (the header is already the drag handle) without
+   anyone having to hardcode the header's height. Lifts when the card is
+   focused. */
+.kbn-shelf-veil {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  cursor: pointer;
+}
+.kbn-shelf-card-focus .kbn-shelf-veil { display: none; }
+
+/* Resize grip: a corner of the paper turned up, drawn in hairline. */
+.kbn-shelf-grip {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 14px;
+  height: 14px;
+  z-index: 3;
+  cursor: nwse-resize;
+  background: linear-gradient(
+    135deg,
+    transparent 0 55%,
+    rgba(122, 111, 92, 0.35) 55% 62%,
+    transparent 62% 72%,
+    rgba(122, 111, 92, 0.35) 72% 79%,
+    transparent 79%
+  );
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kbn-shelf-card { transition: box-shadow 140ms ease, border-color 140ms ease; }
+}

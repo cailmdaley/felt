@@ -1,8 +1,10 @@
 import { renderMarkdown } from './utils.js'
 import {
+  ascByKey,
   civilDayToLocalDate,
   descByKey,
   dueCivilDay,
+  dueSortMs,
   instantMs,
 } from './civilDay.js'
 import type {
@@ -629,11 +631,17 @@ export class KanbanSurfaceRenderer {
    *  divider, then held-open clusters in a dimmer style.
    *
    *  "Resting" is the human name for the surface the wire format calls
-   *  `horizon: stashed`. The rename is the whole point of the heading: a card
-   *  down here was put down on purpose, and the gloss says so, because the
-   *  bottom of a board reads as a graveyard unless it tells you otherwise.
-   *  Nothing internal changes — the horizon value, the endpoints and the
-   *  cluster machinery all keep their names. */
+   *  `horizon: stashed`. Nothing internal changes — the horizon value, the
+   *  endpoints and the cluster machinery all keep their names.
+   *
+   *  Above the path clustering sits one more split, by vigilance rather than
+   *  project: cards with no return mechanism (`splitStashByReturn`'s
+   *  UNDATED half) go first, because nothing else will ever surface them
+   *  again — this is the watch list. Cards already promised back by a
+   *  snooze date or a cron sit below, soonest first, needing less attention
+   *  from a person. The seam between them is one quiet caption, not a
+   *  second heading — Resting is still one region, just two temperatures of
+   *  the same thing. */
   renderStashSection(
     stash: KanbanCard[],
     staleness: Record<string, KanbanOriginStaleness>,
@@ -643,26 +651,21 @@ export class KanbanSurfaceRenderer {
     section.setAttribute('role', 'region')
     section.setAttribute('aria-label', 'Resting — deliberately paused, still visible')
 
-    section.append(
-      renderBandHead('Resting', stash.length, '— deliberately paused; not a failure state —'),
-    )
+    section.append(renderBandHead('Resting', stash.length))
 
-    const clusters = clusterStashCards(stash)
-    const warm = clusters.filter((c) => !c.cold)
-    const cold = clusters.filter((c) => c.cold)
-
+    const { undated, dated } = splitStashByReturn(stash)
     const grid = document.createElement('div')
     grid.className = 'kbn-cluster-grid'
-    for (const c of warm) grid.append(this.renderCluster(c, staleness))
-    if (cold.length > 0) {
+    grid.append(...this.renderClusterGroup(undated, staleness))
+    if (undated.length > 0 && dated.length > 0) {
       const divider = document.createElement('div')
-      divider.className = 'kbn-cluster-divider'
+      divider.className = 'kbn-cluster-divider kbn-cluster-divider-group'
       divider.setAttribute('aria-hidden', 'true')
-      divider.textContent = '— held open —'
+      divider.textContent = '— already coming back —'
       grid.append(divider)
-      for (const c of cold) grid.append(this.renderCluster(c, staleness))
     }
-    if (clusters.length === 0) {
+    grid.append(...this.renderClusterGroup(dated, staleness, sortDatedByReturn))
+    if (stash.length === 0) {
       const empty = document.createElement('div')
       empty.className = 'kbn-cluster-empty'
       empty.textContent = '— drag a card here to let it rest —'
@@ -672,6 +675,31 @@ export class KanbanSurfaceRenderer {
     section.append(grid)
     this.installSectionDragHandlers(section, 'stashed')
     return section
+  }
+
+  /** Warm-then-held-open rendering of one Resting half (the undated watch
+   *  list or the dated returns), shared so the group split in
+   *  `renderStashSection` doesn't have to duplicate the cold divider logic. */
+  private renderClusterGroup(
+    cards: KanbanCard[],
+    staleness: Record<string, KanbanOriginStaleness>,
+    reorder?: (clusters: StashCluster[]) => StashCluster[],
+  ): HTMLElement[] {
+    const clusters = reorder ? reorder(clusterStashCards(cards)) : clusterStashCards(cards)
+    const warm = clusters.filter((c) => !c.cold)
+    const cold = clusters.filter((c) => c.cold)
+
+    const nodes: HTMLElement[] = []
+    for (const c of warm) nodes.push(this.renderCluster(c, staleness))
+    if (cold.length > 0) {
+      const divider = document.createElement('div')
+      divider.className = 'kbn-cluster-divider'
+      divider.setAttribute('aria-hidden', 'true')
+      divider.textContent = '— held open —'
+      nodes.push(divider)
+      for (const c of cold) nodes.push(this.renderCluster(c, staleness))
+    }
+    return nodes
   }
 
   /** Halt the horizon's edge-scroll rAF. Called on drop, on drag-leave, and by
@@ -1654,6 +1682,59 @@ function splitByPathDepth(cards: KanbanCard[], depth: number): Array<{ key: stri
   }
   if (deeper.size <= 1) return [here]
   return [...deeper.values()].flatMap((group) => splitByPathDepth(group, depth + 1))
+}
+
+/**
+ * When a resting card comes back on its own — a `due:` snooze date, or a
+ * standing role asleep on its cron (it dispatches itself regardless of
+ * whether `nextLaunchAt` parsed to a shown date). Anything else has no
+ * appointment at all: nothing is going to surface it again, so a person is
+ * the only mechanism that ever will.
+ */
+function hasScheduledReturn(card: KanbanCard): boolean {
+  return isSleepingOnSchedule(card) || !!card.due
+}
+
+/**
+ * Split Resting into the two kinds of paused work, which need opposite
+ * amounts of vigilance:
+ *
+ *   • UNDATED — no return mechanism at all. These are the ones that can
+ *     quietly drift out of mind, since nothing will ever put them back in
+ *     front of anyone. They come first, because they are the watch list.
+ *   • DATED — a snooze date or a cron already promises they'll be back.
+ *     Lower vigilance, so they sit below.
+ *
+ * Order within each list is untouched here — `clusterStashCards` and
+ * `sortDatedByReturn` decide that once the caller has clustered/sorted.
+ */
+export function splitStashByReturn(
+  stash: KanbanCard[],
+): { undated: KanbanCard[]; dated: KanbanCard[] } {
+  const undated: KanbanCard[] = []
+  const dated: KanbanCard[] = []
+  for (const card of stash) (hasScheduledReturn(card) ? dated : undated).push(card)
+  return { undated, dated }
+}
+
+/** The instant a dated resting card is next expected back — a cron's next
+ *  occurrence for a sleeping role, otherwise its `due:` day. Absent for a
+ *  card `splitStashByReturn` would have called undated; such a card sorts
+ *  last via `ascByKey`'s undefined-last rule, rather than crash. */
+function returnMs(card: KanbanCard): number | undefined {
+  if (isSleepingOnSchedule(card)) return card.nextLaunchAt ? instantMs(card.nextLaunchAt) : undefined
+  return dueSortMs(card.due)
+}
+
+/** Re-sort clusters already built by `clusterStashCards` so the dated half of
+ *  Resting reads soonest-return-first — the ordering the containment-path
+ *  clustering doesn't give you on its own. Cluster membership (and the
+ *  warm/cold split) is untouched; only the order of clusters and the cards
+ *  within each is affected. */
+export function sortDatedByReturn(clusters: StashCluster[]): StashCluster[] {
+  return clusters
+    .map((c) => ({ ...c, cards: [...c.cards].sort((a, b) => ascByKey(returnMs(a), returnMs(b))) }))
+    .sort((a, b) => ascByKey(returnMs(a.cards[0]), returnMs(b.cards[0])))
 }
 
 /**

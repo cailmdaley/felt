@@ -182,6 +182,83 @@ defmodule ShuttleWeb.SentFilesControllerTest do
     end
   end
 
+  describe "Shuttle.SentFiles.all_since/2 (the global reader)" do
+    test "since_ms filters, oldest first, across every fiber" do
+      path =
+        write_fixture([
+          event(%{"timestamp" => 300, "toolInput" => %{"files" => ["/tmp/c.html"]}}),
+          event(%{"timestamp" => 100, "toolInput" => %{"files" => ["/tmp/a.html"]}}),
+          event(%{
+            "tmuxSession" => "x-#{@other_ulid}-shuttle",
+            "timestamp" => 200,
+            "toolInput" => %{"files" => ["/tmp/b.html"]}
+          })
+        ])
+
+      files = Shuttle.SentFiles.all_since(150, events_file: path)
+      assert Enum.map(files, & &1.fullPath) == ["/tmp/b.html", "/tmp/c.html"]
+      assert Enum.map(files, & &1.timestamp) == [200, 300]
+    end
+
+    test "no dedup and no cap: raw entries, every fiber's uid carried" do
+      path =
+        write_fixture([
+          event(%{
+            "tmuxSession" => "morning-post-#{@match_ulid}-shuttle",
+            "timestamp" => 10,
+            "toolInput" => %{"files" => ["/tmp/dup.html"]}
+          }),
+          event(%{
+            "tmuxSession" => "morning-post-#{@match_ulid}-shuttle",
+            "timestamp" => 20,
+            "toolInput" => %{"files" => ["/tmp/dup.html"]}
+          }),
+          event(%{
+            "tmuxSession" => "x-#{@other_ulid}-shuttle",
+            "timestamp" => 30,
+            "toolInput" => %{"files" => ["/tmp/other.html"]}
+          })
+        ])
+
+      files = Shuttle.SentFiles.all_since(0, events_file: path)
+
+      # both dup.html sends survive — no server-side dedup opinion
+      assert Enum.count(files, &(&1.fullPath == "/tmp/dup.html")) == 2
+      assert Enum.map(files, & &1.uid) == [@match_ulid, @match_ulid, @other_ulid]
+    end
+
+    test "matches sessionId-only fibers, carrying that as uid" do
+      path =
+        write_fixture([
+          event(%{
+            "tmuxSession" => "",
+            "sessionId" => @session_only_uid,
+            "toolInput" => %{"files" => ["/tmp/capture.html"]}
+          })
+        ])
+
+      [entry] = Shuttle.SentFiles.all_since(0, events_file: path)
+      assert entry.uid == @session_only_uid
+    end
+
+    test "skips non-SendUserFile and malformed lines" do
+      path =
+        write_fixture([
+          event(%{"tool" => "Bash", "toolInput" => %{"command" => "ls"}}),
+          "{ this is not valid json",
+          "",
+          event(%{"timestamp" => 5, "toolInput" => %{"files" => ["/tmp/keep.html"]}})
+        ])
+
+      files = Shuttle.SentFiles.all_since(0, events_file: path)
+      assert Enum.map(files, & &1.fullPath) == ["/tmp/keep.html"]
+    end
+
+    test "a missing events file yields an empty list (no crash)" do
+      assert Shuttle.SentFiles.all_since(0, events_file: "/no/such/events.jsonl") == []
+    end
+  end
+
   describe "local serve" do
     test "200 with the fiber's trail from the events stream" do
       path =
@@ -242,6 +319,92 @@ defmodule ShuttleWeb.SentFilesControllerTest do
       conn = get(api_conn(), "/api/v1/sent-files?uid=#{@match_ulid}&origin=candide")
       assert conn.status == 502
       assert %{"error" => _} = json_response(conn, 502)
+    end
+  end
+
+  describe "global" do
+    test "200 with the host stamp and every fiber's sends, filtered by since_ms" do
+      path =
+        write_fixture([
+          event(%{"timestamp" => 100, "toolInput" => %{"files" => ["/tmp/old.html"]}}),
+          event(%{
+            "tmuxSession" => "x-#{@other_ulid}-shuttle",
+            "timestamp" => 200,
+            "toolInput" => %{"files" => ["/tmp/new.html"]}
+          })
+        ])
+
+      with_events_file(path)
+
+      conn = get(api_conn(), "/api/v1/sent-files/all?since_ms=150")
+
+      assert conn.status == 200
+      body = json_response(conn, 200)
+      assert body["host"] == Shuttle.Poller.own_host_id()
+
+      assert [
+               %{
+                 "fullPath" => "/tmp/new.html",
+                 "basename" => "new.html",
+                 "timestamp" => 200,
+                 "uid" => @other_ulid
+               }
+             ] = body["files"]
+    end
+
+    test "200 with an empty list when this host has no events file yet" do
+      with_events_file("/no/such/events.jsonl")
+      conn = get(api_conn(), "/api/v1/sent-files/all")
+      assert %{"files" => []} = json_response(conn, 200)
+    end
+
+    test "400 when since_ms is present but not an integer" do
+      conn = get(api_conn(), "/api/v1/sent-files/all?since_ms=abc")
+      assert conn.status == 400
+      assert %{"error" => error} = json_response(conn, 400)
+      assert error =~ "ms"
+    end
+
+  end
+
+  describe "global composite" do
+    test "stamps local entries with this host and reports the local origin" do
+      path =
+        write_fixture([
+          event(%{"timestamp" => 100, "toolInput" => %{"files" => ["/tmp/local.html"]}})
+        ])
+
+      with_events_file(path)
+
+      body = json_response(get(api_conn(), "/api/v1/sent-files/all/composite"), 200)
+      own = Shuttle.Poller.own_host_id()
+
+      assert body["host"] == own
+      assert [%{"fullPath" => "/tmp/local.html", "host" => ^own}] = body["files"]
+
+      assert body["origins"][own] == %{
+               "kind" => "local",
+               "stale" => false,
+               "last_polled_at" => nil,
+               "last_error" => nil
+             }
+    end
+
+    test "since_ms bounds apply to the merged stream" do
+      path =
+        write_fixture([
+          event(%{"timestamp" => 100, "toolInput" => %{"files" => ["/tmp/before.html"]}}),
+          event(%{
+            "tmuxSession" => "x-#{@other_ulid}-shuttle",
+            "timestamp" => 250,
+            "toolInput" => %{"files" => ["/tmp/inside.html"]}
+          })
+        ])
+
+      with_events_file(path)
+
+      body = json_response(get(api_conn(), "/api/v1/sent-files/all/composite?since_ms=200"), 200)
+      assert Enum.map(body["files"], & &1["fullPath"]) == ["/tmp/inside.html"]
     end
   end
 
