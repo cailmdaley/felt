@@ -316,7 +316,11 @@ export interface SessionIndex {
 
 /** Cache lifetime. Comfortably longer than the board's 15s poll, so a view
  *  that refreshes on every poll hits the network at most once a minute. */
-export const TEMPORAL_TTL_MS = 60_000
+/** Below the 15s poll interval on purpose: the memo exists to dedupe the
+ *  burst of identical fetches within one render pass (many lanes, one
+ *  window), not to outlive the poll — a TTL above the poll cadence made
+ *  the views feel dead (new activity took up to ~75s to appear). */
+export const TEMPORAL_TTL_MS = 10_000
 
 /** The pair of fetchers a {@link import('./ViewRegistry.js').ViewContext}
  *  exposes to views. KanbanModal builds one per board; the harness injects a
