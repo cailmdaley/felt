@@ -127,12 +127,14 @@ import {
 import {
   clockTime,
   dedupeSources,
+  lastExchange,
   MomentLoader,
   pickMark,
   renderTip,
   SLOT_KIND_ORDER,
   SLOT_PHRASE,
   type DrawnKind,
+  type LastExchange,
   type MomentSource,
   type MomentWords,
   type SlotTip,
@@ -1432,6 +1434,63 @@ export function beatTip(
   }
 }
 
+/**
+ * How far back the magnet's fetch may reach for the words of the last
+ * exchange, in minutes.
+ *
+ * The two turns are located from the BEATS, which cost nothing — so this bounds
+ * only the transcript read, and only in the uncommon case where your last
+ * message and the agent's are hours apart. A turn older than this keeps its row
+ * (the row is built from the recorded kinds) and simply arrives without its
+ * words, which is the same honest degradation as a transcript that was cleaned
+ * up. Inventing a sentence, or silently dropping the turn, would both be worse.
+ */
+export const MAGNET_LOOKBACK_MINUTES = 90
+
+/**
+ * The magnet's slip: THE LAST EXCHANGE ON THIS LANE, in the order it happened.
+ *
+ * A row per turn, sequenced rather than sorted into register order — see
+ * {@link lastExchange} for why the order carries the meaning — then the tool
+ * calls that landed afterwards, if any, as their own muted line. The excerpts
+ * underneath are the same cards an ordinary hover draws, so the registers
+ * (cinnabar you, blue agent, muted tool call) are the ones already on the page.
+ */
+export function magnetTip(
+  lane: DayLane,
+  exchange: LastExchange,
+  words?: MomentWords,
+): SlotTip {
+  const rows: SlotTipRow[] = exchange.turns.map((turn) => ({
+    kind: turn.kind,
+    phrase: SLOT_PHRASE[turn.kind],
+    where: clockTime(turn.atMs),
+    count: 1,
+    shuttle: false,
+  }))
+  if (exchange.toolsAfter) {
+    rows.push({
+      kind: 'agent',
+      // "since" rather than "at": the count spans every minute after the last
+      // word, and pointing it at one instant would understate it.
+      phrase: SLOT_PHRASE.agent,
+      where: `since ${clockTime(exchange.turns[exchange.turns.length - 1]?.atMs ?? exchange.toolsAfter.atMs)}`,
+      count: exchange.toolsAfter.count,
+      shuttle: false,
+    })
+  }
+  // The heading names the lane, because the magnet is answering about a LANE
+  // rather than about a minute — the pointer is not standing on anything.
+  const last = exchange.toolsAfter?.atMs ?? exchange.turns[exchange.turns.length - 1]?.atMs
+  return {
+    time: last === undefined ? lane.label : `${lane.label} · last at ${clockTime(last)}`,
+    rows,
+    ...(words?.excerpts.length ? { detail: words.excerpts } : {}),
+    ...(words?.tools ? { tools: words.tools } : {}),
+    ...(words?.note ? { note: words.note } : {}),
+  }
+}
+
 class DayViewImpl implements TemporalView {
   readonly id = 'day' as const
   readonly title = 'Day'
@@ -2280,6 +2339,9 @@ class DayViewImpl implements TemporalView {
     )
     if (!pick) return this.hideTip(pin)
     this.markMagnet(rail, pick.magnetized ? lane.beats[pick.index] : null, perMinute)
+    // Out in the dead zone the question is about the LANE, not about a minute,
+    // and it gets a different answer: the last exchange, both ways round.
+    if (pick.magnetized) return this.showMagnetTip(lane, win, e, pin)
 
     const beat = lane.beats[pick.index]
     const startMs = win.startMs + beat.minute * MINUTE_MS
@@ -2318,6 +2380,63 @@ class DayViewImpl implements TemporalView {
     const anchor = box.left - chartBox.left + (beat.minute + 0.5) * perMinute
     const flip = anchor > chartBox.width * 0.62
     tip.style.top = `${box.top - chartBox.top}px`
+    tip.classList.toggle('kbn-tip-flip', flip)
+    tip.style.left = flip ? 'auto' : `${anchor + 9}px`
+    tip.style.right = flip ? `${chartBox.width - anchor + 9}px` : 'auto'
+  }
+
+  /**
+   * The magnet's slip: this lane's last exchange, in the order it happened.
+   *
+   * The ROWS need no network — they are read off the recorded beats, so the
+   * order, the clock times and the trailing tool count are all correct before
+   * anything is fetched and stay correct if nothing comes back. The words are
+   * asked for over the span the exchange covers and painted in when they land,
+   * exactly as an ordinary hover's are.
+   */
+  private showMagnetTip(lane: DayLane, win: DayWindow, e: MouseEvent, pin: boolean): void {
+    const chart = this.chartEl
+    if (!chart) return
+    const at = (beat: DayBeat): number => win.startMs + beat.minute * MINUTE_MS
+    const exchange = lastExchange(lane.beats.map((b) => ({ atMs: at(b), kinds: b.kinds })))
+    if (exchange.turns.length === 0 && !exchange.toolsAfter) return this.hideTip(pin)
+
+    const lastBeat = lane.beats[lane.beats.length - 1]
+    const toMs = at(lastBeat) + MINUTE_MS
+    const first = exchange.turns[0]?.atMs ?? toMs - MINUTE_MS
+    const fromMs = Math.max(first, toMs - MAGNET_LOOKBACK_MINUTES * MINUTE_MS)
+    // Every transcript the spanned minutes point at — the exchange may cross
+    // more than one session on a lane that was handed between workers.
+    const sources = dedupeSources(
+      lane.beats.filter((b) => at(b) >= fromMs && at(b) < toMs).flatMap((b) => b.sources),
+    )
+
+    const tip = this.ensureTip()
+    // Keyed on the lane rather than on a minute: the magnet is one answer per
+    // lane, and every pixel of the dead zone must reuse it rather than mint a
+    // fresh cache entry and a fresh fetch on every mouse move.
+    const key = `${lane.key}:magnet`
+    renderTip(tip, magnetTip(lane, exchange, this.moments.peek(key, pin)))
+    this.moments.request(
+      key,
+      sources,
+      fromMs,
+      toMs,
+      (words) => {
+        if (this.hoveredKey !== key || (this.pinnedKey === key) !== pin) return
+        renderTip(tip, magnetTip(lane, exchange, words))
+      },
+      pin,
+    )
+    this.hoveredKey = key
+    this.pinnedKey = pin ? key : null
+    tip.classList.add('kbn-tip-open')
+    tip.classList.toggle('kbn-tip-pinned', pin)
+
+    const chartBox = chart.getBoundingClientRect()
+    const anchor = e.clientX - chartBox.left
+    const flip = anchor > chartBox.width * 0.62
+    tip.style.top = `${e.clientY - chartBox.top}px`
     tip.classList.toggle('kbn-tip-flip', flip)
     tip.style.left = flip ? 'auto' : `${anchor + 9}px`
     tip.style.right = flip ? `${chartBox.width - anchor + 9}px` : 'auto'

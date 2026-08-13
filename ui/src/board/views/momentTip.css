@@ -13,7 +13,14 @@
    swatch on a Day tooltip must be the same blue as the wash it annotates. */
 .kbn-tip {
   --kbn-tip-agent: #3D5BA0;
-  --kbn-tip-attention: #3F8278;
+  /* WAS TEAL, and the teal was a ghost. It came from the old two-pole colour
+     scale that walked the curve from the agents' cobalt to a teal reading your
+     engagement — a channel deleted when the spines took over saying when you
+     spoke. The swatch outlived the pigment, so the slip was marking your
+     messages in a colour that appears nowhere on any rail, while the cards
+     three lines below marked the same messages in cinnabar. One pigment for
+     you, everywhere: the plot's spine, the card's spine, this swatch. */
+  --kbn-tip-attention: #BC4538;
   /* Speaker identity in the excerpt cards below, matching the plot's own
      pigments: the cinnabar spine for you, the curve's blue for the agent,
      iron-gall grey — no accent — for the machine's own vocabulary. */
@@ -112,6 +119,11 @@
 }
 .kbn-tip-key-agent { height: 7px; background: var(--kbn-tip-agent); }
 .kbn-tip-key-attention { height: 9px; background: var(--kbn-tip-attention); opacity: 0.85; }
+/* The agent's own VOICE, which the magnet's last-exchange rows name directly.
+   Cobalt like its tool work, at the height of a message rather than of a wash:
+   the same machine, speaking rather than working. Never appeared before this,
+   because a per-minute tooltip folds a reply into the wash it sits in. */
+.kbn-tip-key-reply { height: 9px; background: var(--kbn-tip-agent); }
 /* The stroke axis: same hue, wider nib — a weight, not another colour. */
 .kbn-tip-swatch-const { width: 6px; border-radius: 1px; }
 
@@ -128,6 +140,12 @@
   white-space: nowrap;
   color: #7A6F5C;
 }
+/* WHO, in colour, on the summary rows too — the same three registers the
+   excerpt cards carry, so a magnet's "you / agent / tool call" ladder reads as
+   one grammar top to bottom. Tool work stays the muted default: nobody said
+   it, and an accent would give the machine's own vocabulary a voice. */
+.kbn-tip-row-attention .kbn-tip-phrase { color: var(--kbn-tip-you); }
+.kbn-tip-row-reply .kbn-tip-phrase { color: var(--kbn-tip-agent); }
 .kbn-tip-where {
   flex: 1 1 auto;
   min-width: 0;

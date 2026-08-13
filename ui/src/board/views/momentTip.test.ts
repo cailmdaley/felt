@@ -10,6 +10,7 @@ import {
   clockTime,
   dedupeSources,
   MomentLoader,
+  lastExchange,
   pickMark,
   renderTip,
   SLOT_NO_TEXT_NOTE,
@@ -493,6 +494,64 @@ describe('renderTip — the excerpt cards', () => {
     const foot = host.children.find((c) => c.className.includes('kbn-tip-note'))!
     expect(foot.className).toBe('kbn-tip-note kbn-tip-section')
     expect(foot.textContent).toBe(SLOT_NO_TEXT_NOTE)
+  })
+})
+
+describe('lastExchange — the order is the content', () => {
+  const M = 60_000
+  const mark = (min: number, kinds: Record<string, number>) => ({
+    atMs: min * M,
+    kinds: Object.entries(kinds).map(([kind, count]) => ({ kind: kind as 'agent', count })),
+  })
+
+  it('reports you-then-agent when the agent got the last word — it answered', () => {
+    const { turns } = lastExchange([mark(10, { attention: 1 }), mark(12, { reply: 1 })])
+    expect(turns.map((t) => t.kind)).toEqual(['attention', 'reply'])
+    expect(turns[1].atMs).toBe(12 * M)
+  })
+
+  it('reports agent-then-you when YOU got the last word — it is being waited on', () => {
+    const { turns } = lastExchange([mark(10, { reply: 1 }), mark(12, { attention: 1 })])
+    expect(turns.map((t) => t.kind)).toEqual(['reply', 'attention'])
+  })
+
+  it('takes the LAST of each side, not the first, however many came before', () => {
+    const { turns } = lastExchange([
+      mark(1, { attention: 1 }), mark(2, { reply: 1 }),
+      mark(30, { attention: 1 }), mark(31, { reply: 1 }),
+      mark(40, { attention: 1 }),
+    ])
+    expect(turns.map((t) => [t.kind, t.atMs / M])).toEqual([['reply', 31], ['attention', 40]])
+  })
+
+  it('carries one turn when only one side ever spoke', () => {
+    expect(lastExchange([mark(5, { attention: 3 })]).turns.map((t) => t.kind)).toEqual(['attention'])
+  })
+
+  it('counts tool calls that landed AFTER the last word, summed across every minute since', () => {
+    const { toolsAfter } = lastExchange([
+      mark(10, { attention: 1 }), mark(11, { reply: 1 }),
+      mark(12, { agent: 4 }), mark(15, { agent: 6 }),
+    ])
+    expect(toolsAfter).toEqual({ atMs: 15 * M, count: 10 })
+  })
+
+  it('reports no trailing calls when the words were the last thing to happen', () => {
+    expect(lastExchange([mark(9, { agent: 5 }), mark(10, { reply: 1 })]).toolsAfter).toBeNull()
+  })
+
+  it('reports a lane that only ever worked as tool calls and no turns at all', () => {
+    const out = lastExchange([mark(3, { agent: 2 }), mark(7, { agent: 5 })])
+    expect(out.turns).toEqual([])
+    expect(out.toolsAfter).toEqual({ atMs: 7 * M, count: 7 })
+  })
+
+  it('ignores a kind recorded with a zero count rather than treating it as a turn', () => {
+    expect(lastExchange([mark(4, { attention: 0 })]).turns).toEqual([])
+  })
+
+  it('is empty for a lane with no marks', () => {
+    expect(lastExchange([])).toEqual({ turns: [], toolsAfter: null })
   })
 })
 

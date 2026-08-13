@@ -173,6 +173,94 @@ export interface MarkPick {
  * part of the day that had not happened yet when the lane began, and "the
  * earliest thing that happened here" is not a question anybody asks of it.
  */
+// ── The last exchange ────────────────────────────────────────────────────────
+
+/** A mark on a rail as {@link lastExchange} needs it: when, and what kinds of
+ *  event landed in it. Both views' marks reduce to this. */
+export interface ExchangeMark {
+  atMs: number
+  /** The wire's own kind, not {@link DrawnKind}: a caller hands its marks over
+   *  as it holds them, and `notify` — which draws nothing anywhere — is simply
+   *  a kind this function never asks about. */
+  kinds: readonly { kind: ActivityBucket['k']; count: number }[]
+}
+
+/** One side of the last exchange — a message, and when it was sent. */
+export interface ExchangeTurn {
+  /** `attention` is yours, `reply` is the agent's. */
+  kind: 'attention' | 'reply'
+  atMs: number
+}
+
+export interface LastExchange {
+  /**
+   * The last message each way, IN THE ORDER THEY HAPPENED — the whole point of
+   * the structure. Empty when the lane holds no messages at all; one entry when
+   * only one side ever spoke.
+   */
+  turns: ExchangeTurn[]
+  /** Tool calls that landed after the last of those turns, if any. */
+  toolsAfter: { atMs: number; count: number } | null
+}
+
+/**
+ * The last thing said on a rail, both ways round.
+ *
+ * ## Why the ORDER is the content
+ *
+ * The magnet answers "what was the last thing that happened here?", and for a
+ * lane you are orchestrating, the useful form of that question is nearly always
+ * *did I get a reply yet, or am I the last word?* Those two states are the same
+ * two facts in opposite orders — your message and the agent's — so reporting
+ * them in a fixed register order (as an ordinary per-minute tooltip does, via
+ * {@link SLOT_KIND_ORDER}) throws away the only bit that distinguishes them.
+ * Here the sequence is the message: you-then-agent means it answered, and
+ * agent-then-you means it is your turn to be waited on.
+ *
+ * TOOL CALLS AFTERWARDS ARE A THIRD STATE and not a third turn. An agent that
+ * replied and then kept working, and an agent that replied and stopped, look
+ * identical if you only report the words; the first is still busy. So calls
+ * landing after the last turn are carried separately, with their count, rather
+ * than being folded in as another voice — nobody said them.
+ *
+ * Reads only what was RECORDED: the kinds on the marks, which are the activity
+ * plane's own claim about which minutes held a message of yours, a reply, or
+ * tool work. It never needs the transcript, so the order and the times are
+ * correct even when no words come back at all.
+ */
+export function lastExchange(marks: readonly ExchangeMark[]): LastExchange {
+  const latest = (kind: DrawnKind): number | null => {
+    let at: number | null = null
+    for (const mark of marks) {
+      if (!mark.kinds.some((k) => k.kind === kind && k.count > 0)) continue
+      if (at === null || mark.atMs > at) at = mark.atMs
+    }
+    return at
+  }
+
+  const you = latest('attention')
+  const agent = latest('reply')
+  const turns: ExchangeTurn[] = []
+  if (you !== null) turns.push({ kind: 'attention', atMs: you })
+  if (agent !== null) turns.push({ kind: 'reply', atMs: agent })
+  turns.sort((a, b) => a.atMs - b.atMs)
+
+  // Everything after the last WORD — or, on a lane where nothing was ever said,
+  // everything there is. A rail of pure tool work still has a last moment, and
+  // "it worked and said nothing" is the honest report of it.
+  const after = turns.length > 0 ? turns[turns.length - 1].atMs : -Infinity
+  let atMs = -Infinity
+  let count = 0
+  for (const mark of marks) {
+    if (mark.atMs <= after) continue
+    const tools = mark.kinds.find((k) => k.kind === 'agent')?.count ?? 0
+    if (tools <= 0) continue
+    count += tools
+    if (mark.atMs > atMs) atMs = mark.atMs
+  }
+  return { turns, toolsAfter: count > 0 ? { atMs, count } : null }
+}
+
 export function pickMark(
   positionsPx: readonly number[],
   x: number,
@@ -243,7 +331,10 @@ export function renderTip(host: HTMLElement, tip: SlotTip): void {
 
   for (const row of tip.rows) {
     const line = document.createElement('div')
-    line.className = 'kbn-tip-row'
+    // The kind rides on the row, so the register word can take its speaker's
+    // colour exactly as the excerpt cards below do. One grammar for "who" on
+    // the whole slip, rather than colour in the cards and grey in the summary.
+    line.className = `kbn-tip-row kbn-tip-row-${row.kind}`
 
     const swatch = document.createElement('span')
     swatch.className =
