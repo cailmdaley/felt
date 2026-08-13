@@ -10,13 +10,15 @@ defmodule ShuttleWeb.LifecycleController do
   frontmatter writer remains the single implementation of
   install/pause/resume/repeat/pin/accept/set-model/set-outcome/uninstall.
 
-  `pin` reshapes a fiber to the schedule-less `kind: pinned` umbrella role
-  (the board's drag-onto-the-Pinned-strip gesture). Reshaping an existing block
-  is ONE atomic call: `install`/`repeat`/`pin` with `reshape: true` clobber the
-  block in place with a single guarded write (omitted model/host/project_dir
-  echo from the old block). This replaces the old client-side `uninstall` +
-  re-install composition, which could strand a de-pinned fiber if the second
-  write failed. `uninstall` remains for genuine removals.
+  `install`/`repeat`/`pin` are CREATE verbs — they refuse a fiber that already
+  carries a shuttle block. Changing the SHAPE of an existing block (its kind,
+  and the schedule that a `standing` kind implies) is its own surgical verb,
+  `reshape`, alongside `set-model`/`set-agent`/`set-outcome`: it rewrites only
+  those keys and never touches status, `closed_at`, `tempered`, `outcome` or
+  the daemon-owned `runtime:` keys. That is what lets a role sitting in
+  Awaiting review (`status: closed`) be switched standing → oneshot, which the
+  old create-with-`--reshape` route refused. `uninstall` remains for genuine
+  removals.
   """
 
   use Phoenix.Controller, formats: [:json]
@@ -24,7 +26,9 @@ defmodule ShuttleWeb.LifecycleController do
 
   alias Shuttle.{FeltStores, LifecycleService, OriginRouter, RemoteFiberRegistry}
 
-  @allowed ~w(install pause resume repeat pin accept set-model set-agent set-outcome uninstall)
+  @allowed ~w(install pause resume repeat pin reshape accept set-model set-agent set-outcome uninstall)
+
+  @kinds ~w(oneshot standing pinned)
 
   def create(conn, params) do
     case OriginRouter.route(Map.get(params, "origin")) do
@@ -78,7 +82,7 @@ defmodule ShuttleWeb.LifecycleController do
   end
 
   defp execute(action, %{"fiber" => fiber} = params)
-       when action in ~w(install pin repeat pause set-model set-agent set-outcome uninstall) do
+       when action in ~w(install pin repeat reshape pause set-model set-agent set-outcome uninstall) do
     # `resolve_fiber`'s `:host` key is the felt-STORE path (`--felt-store`),
     # not an identity override — see `Shuttle.Felt.Shuttle`'s C4 note. Renamed
     # only at this local boundary; `FeltStores.resolve_fiber/1`'s wire shape
@@ -126,7 +130,6 @@ defmodule ShuttleWeb.LifecycleController do
     args = add_string_flag(args, "--model", params["model"])
     args = add_string_flag(args, "--project-dir", params["project_dir"])
     args = add_bool_flag(args, "--disabled", params["disabled"])
-    args = add_bool_flag(args, "--reshape", params["reshape"])
     {:ok, args}
   end
 
@@ -141,16 +144,28 @@ defmodule ShuttleWeb.LifecycleController do
      ["pin", fiber]
      |> add_string_flag("--model", params["model"])
      |> add_string_flag("--project-dir", params["project_dir"])
-     |> add_string_flag("--host", params["host"])
-     |> add_bool_flag("--reshape", params["reshape"])}
+     |> add_string_flag("--host", params["host"])}
   end
 
   defp args_for("repeat", %{"fiber" => fiber, "schedule" => schedule} = params) do
     {:ok,
      ["repeat", fiber, "--schedule", schedule, "--tz", Map.get(params, "tz", "UTC")]
      |> add_string_flag("--model", params["model"])
-     |> add_string_flag("--project-dir", params["project_dir"])
-     |> add_bool_flag("--reshape", params["reshape"])}
+     |> add_string_flag("--project-dir", params["project_dir"])}
+  end
+
+  # reshape is the surgical shape edit on an EXISTING block: kind, and the
+  # schedule a standing kind carries. `kind` is an optional POSITIONAL right
+  # after the fiber — omitted, the CLI keeps the current kind (a schedule-only
+  # edit passes none). Only the three legal kinds reach the CLI; anything else
+  # is rejected here rather than forwarded as an arbitrary positional.
+  defp args_for("reshape", %{"fiber" => fiber} = params) do
+    with {:ok, kind} <- reshape_kind(params["kind"]) do
+      {:ok,
+       (["reshape", fiber] ++ List.wrap(kind))
+       |> add_string_flag("--schedule", params["schedule"])
+       |> add_string_flag("--tz", params["tz"])}
+    end
   end
 
   defp args_for("accept", %{"fiber" => fiber} = params) do
@@ -195,6 +210,10 @@ defmodule ShuttleWeb.LifecycleController do
 
   defp args_for("uninstall", %{"fiber" => fiber}), do: {:ok, ["uninstall", fiber]}
   defp args_for(action, _), do: {:error, "missing required fields for #{action}"}
+
+  defp reshape_kind(kind) when kind in [nil, ""], do: {:ok, nil}
+  defp reshape_kind(kind) when kind in @kinds, do: {:ok, kind}
+  defp reshape_kind(kind), do: {:error, "unknown shuttle kind #{inspect(kind)}"}
 
   defp add_string_flag(args, _flag, nil), do: args
   defp add_string_flag(args, _flag, ""), do: args

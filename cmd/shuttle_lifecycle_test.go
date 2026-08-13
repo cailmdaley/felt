@@ -24,6 +24,8 @@ func saveShuttleGlobals() func() {
 		acceptKeepOutcome    bool
 		setAgentEffort       string
 		setAgentChrome       bool
+		reshapeSchedule      string
+		reshapeTZ            string
 		installModel         string
 		installProjectDir    string
 		installHost          string
@@ -39,6 +41,7 @@ func saveShuttleGlobals() func() {
 	}{
 		jsonOutput, statusIncludeOrphans,
 		pauseNoKill, closeTempered, reopenAsDraft, setOutcomeValue, acceptKeepOutcome, setAgentEffort, setAgentChrome,
+		reshapeSchedule, reshapeTZ,
 		installModel, installProjectDir, installHost, installDisabled,
 		repeatSchedule, repeatTZ, repeatModel, repeatProjectDir, repeatHost,
 		pinModel, pinProjectDir, pinHost,
@@ -56,6 +59,7 @@ func saveShuttleGlobals() func() {
 	acceptKeepOutcome = false
 	setAgentEffort = ""
 	setAgentChrome = false
+	reshapeSchedule, reshapeTZ = "", ""
 	installModel, installProjectDir, installHost, installDisabled = "", "", "", false
 	repeatSchedule, repeatTZ, repeatModel, repeatProjectDir, repeatHost = "", "", "", "", ""
 	pinModel, pinProjectDir, pinHost = "", "", ""
@@ -66,6 +70,7 @@ func saveShuttleGlobals() func() {
 	setOutcomeCmd.ResetFlags()
 	acceptCmd.ResetFlags()
 	setAgentCmd.ResetFlags()
+	reshapeCmd.ResetFlags()
 	registerShuttleLifecycleFlags()
 	installCmd.ResetFlags()
 	repeatCmd.ResetFlags()
@@ -84,6 +89,7 @@ func saveShuttleGlobals() func() {
 		acceptKeepOutcome = prev.acceptKeepOutcome
 		setAgentEffort = prev.setAgentEffort
 		setAgentChrome = prev.setAgentChrome
+		reshapeSchedule, reshapeTZ = prev.reshapeSchedule, prev.reshapeTZ
 		installModel, installProjectDir, installHost, installDisabled = prev.installModel, prev.installProjectDir, prev.installHost, prev.installDisabled
 		repeatSchedule, repeatTZ, repeatModel, repeatProjectDir, repeatHost = prev.repeatSchedule, prev.repeatTZ, prev.repeatModel, prev.repeatProjectDir, prev.repeatHost
 		pinModel, pinProjectDir, pinHost = prev.pinModel, prev.pinProjectDir, prev.pinHost

@@ -216,7 +216,7 @@ Closing a fiber leaves its block in place, and that is deliberate. Uninstall
 earns its keep in four cases:
 
 1. **Mistake recovery** — wrong slug, immediate undo.
-2. **Reshaping the contract** — though `--reshape` now covers most of this.
+2. **Full rebuild** — though `felt shuttle reshape` now covers most of the "change the kind or schedule" case in place, without a rebuild.
 3. **Archiving** — a closed fiber's card leaves the board entirely.
 4. **Handing ownership** to a different dispatcher.
 

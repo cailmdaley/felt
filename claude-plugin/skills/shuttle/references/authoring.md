@@ -29,7 +29,7 @@ When signals are mixed, ask via AskUserQuestion — drafts vs immediate is the o
 
 ## Writing the shuttle: block by hand
 
-The mechanical alternative — write the `shuttle:` block directly into the frontmatter while drafting — also lands somewhere useful. `felt shuttle install` is **idempotent**: on an existing block it prints the block's state plus the daemon's dispatch assessment, and exits 0 unless a passed flag conflicts with what's there. The install verb adds schema validation, which is why step 3 above is the canonical flow. A hand-written block with no `status` is reported as undispatchable (set `status: active` or run `resume`); install does not auto-arm it. On a conflict (e.g. `install --model claude-opus` against an existing `agent: codex`), install exits non-zero and points at the right mutation verb (`set-model`, `pause`, `resume`, `uninstall`).
+The mechanical alternative — write the `shuttle:` block directly into the frontmatter while drafting — also lands somewhere useful. `install` adds schema validation on top, which is why step 3 above is the canonical flow. But `install` is create-only: run it against a fiber that already has a block and it refuses, pointing at `felt shuttle status <fiber>` to inspect the block's state and the daemon's dispatch assessment, `reshape` to change kind or schedule, `set-model`/`set-agent` to change the agent, or `uninstall` to start over. A hand-written block with no `status` is reported as undispatchable (set `status: active` or run `resume`); install does not auto-arm it.
 
 ## Human in the loop — directives and gates, not a mode
 

@@ -404,3 +404,88 @@ func TestListShuttleFibers_SkipsNotesAndMalformed(t *testing.T) {
 		t.Fatalf("only the well-formed role should list: %+v", entries)
 	}
 }
+
+// ---- single-fiber report ---------------------------------------------------
+
+// TestShuttleStatus_SingleFiber is the home the deleted install-idempotent
+// report moved into: `felt shuttle status <fiber>` answers "what is this role,
+// and will the daemon dispatch it" for one fiber, and exits 0 either way — an
+// armed role and a closed one are both legitimate answers, not errors.
+func TestShuttleStatus_SingleFiber(t *testing.T) {
+	pdir := t.TempDir()
+	for _, tc := range []struct {
+		name   string
+		status string
+		want   []string
+	}{
+		{
+			name:   "armed",
+			status: felt.StatusActive,
+			want: []string{
+				"kind:        standing", "host:        testhost", "agent:       claude-opus",
+				pdir, `schedule:    "0 8 * * *" tz=UTC`, "status:      active (armed)",
+				"→ Daemon will dispatch on next poll.",
+			},
+		},
+		{
+			name:   "closed",
+			status: felt.StatusClosed,
+			want: []string{
+				"status:      closed (NOT armed", "→ Fiber is closed", "felt shuttle reopen role",
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			defer saveShuttleGlobals()()
+			withStubbedTmux(t, nil)
+			dir, storage := newShuttleStore(t)
+			seedShuttleRole(t, storage, "role", tc.status, map[string]any{
+				"kind": "standing", "host": "testhost", "agent": "claude-opus", "project_dir": pdir,
+				"schedule": map[string]any{"expr": "0 8 * * *", "tz": "UTC"},
+			}, nil)
+
+			out, err := runCommand(t, dir, "shuttle", "status", "role")
+			if err != nil {
+				t.Fatalf("status <fiber> must exit 0: %v\n%s", err, out)
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(out, want) {
+					t.Fatalf("report missing %q:\n%s", want, out)
+				}
+			}
+		})
+	}
+}
+
+// TestShuttleStatus_SingleFiberRejectsTableFlags: the flags that shape the
+// multi-fiber walk have nothing to act on for one fiber, so combining them is an
+// error rather than a silently ignored flag.
+func TestShuttleStatus_SingleFiberRejectsTableFlags(t *testing.T) {
+	for _, flag := range []string{"--all", "--include-orphans"} {
+		t.Run(flag, func(t *testing.T) {
+			defer saveShuttleGlobals()()
+			dir, storage := newShuttleStore(t)
+			seedShuttleRole(t, storage, "role", felt.StatusActive, oneshot(), nil)
+
+			out, err := runCommand(t, dir, "shuttle", "status", "role", flag)
+			if err == nil {
+				t.Fatalf("status <fiber> %s must be refused; out=%s", flag, out)
+			}
+			if !strings.Contains(err.Error(), "status table") {
+				t.Fatalf("error should explain the flag is for the table; err=%v", err)
+			}
+		})
+	}
+}
+
+// TestShuttleStatus_SingleFiberWithoutBlock: status reports shuttle roles, so a
+// plain fiber is an error that names the verbs that would make it one.
+func TestShuttleStatus_SingleFiberWithoutBlock(t *testing.T) {
+	defer saveShuttleGlobals()()
+	dir, storage := newShuttleStore(t)
+	seedPlainFiber(t, storage, "note", felt.StatusOpen)
+
+	if _, err := runCommand(t, dir, "shuttle", "status", "note"); err == nil {
+		t.Fatal("status on a block-less fiber must error")
+	}
+}

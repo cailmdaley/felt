@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"sort"
 	"strings"
@@ -53,14 +54,22 @@ type shuttleEntry struct {
 }
 
 var statusCmd = &cobra.Command{
-	Use:   "status",
-	Short: "One-line-per-fiber status overview",
-	Long: `Prints one line per fiber that carries a shuttle: facet, across the felt
-stores this machine dispatches (the -C / --felt-store store when set, otherwise
-the configured stores: FELT_STORES env, then the ~/.config/felt/stores.json
-registry). Liveness is read from tmux.
+	Use:   "status [fiber]",
+	Short: "Status overview, or a detailed report for one fiber",
+	Long: `With no argument, prints one line per fiber that carries a shuttle: facet,
+across the felt stores this machine dispatches (the -C / --felt-store store when
+set, otherwise the configured stores: FELT_STORES env, then the
+~/.config/felt/stores.json registry). Liveness is read from tmux.
 
 Columns: fiber_id  kind  state  next_due_at  agent
+
+With a fiber argument, prints the detailed single-fiber report instead: the whole
+shuttle: block, plus whether the daemon will dispatch it and — when it won't —
+the verb that changes that. This is the way to check one role's state before
+reaching for a mutation verb.
+
+  felt shuttle status                 # the table
+  felt shuttle status <fiber>         # one fiber, in full
 
 Cross-host (queries the local daemon's /api/v1/state/composite):
   --all           local plus every configured remote (composite snapshot).
@@ -74,8 +83,19 @@ Other flags:
   --include-orphans  also list live Shuttle tmux sessions that no longer map to a
                      shuttle: facet (rare; useful after manual cleanup).
   --json             emit an array of objects instead.`,
-	Args: cobra.NoArgs,
+	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// The single-fiber report is a local read of one fiber, so the flags that
+		// shape the multi-fiber walk have nothing to act on.
+		if len(args) == 1 {
+			for _, flag := range []string{"all", "remote", "include-orphans"} {
+				if cmd.Flags().Changed(flag) {
+					return fmt.Errorf("--%s applies to the status table, not to a single fiber; drop it or drop the fiber argument", flag)
+				}
+			}
+			return runStatusOneFiber(args[0])
+		}
+
 		// Cross-host paths route through the local daemon; --remote and --all are
 		// mutually exclusive (--remote NAME implies "filter to one").
 		if statusAll || statusRemote != "" {
@@ -196,6 +216,124 @@ var psCmd = &cobra.Command{
 		}
 		return nil
 	},
+}
+
+// ---- single-fiber report ---------------------------------------------------
+
+// runStatusOneFiber prints the detailed report for one fiber: the whole block,
+// then the question the report exists to answer — will the daemon dispatch this,
+// and if not, what moves it. Read-only, and it never locks: a fiber can be
+// inspected while a worker holds it.
+func runStatusOneFiber(query string) error {
+	f, _, err := shuttleResolveFiber(query, false)
+	if err != nil {
+		return err
+	}
+	block, ok, err := f.ShuttleBlock()
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("fiber %s has no shuttle: block (use 'felt shuttle install' / 'repeat' / 'pin' to create one)", query)
+	}
+
+	statusNow := f.Status
+	armed := statusNow == felt.StatusActive
+	session, running := liveWorkerSession(f)
+
+	if jsonOutput {
+		out := map[string]any{
+			"fiber_id": f.ID,
+			"kind":     block.Kind,
+			"host":     block.Host,
+			"status":   statusNow,
+			"armed":    armed,
+			"running":  running,
+			"dispatch": dispatchAssessment(f.ID, statusNow),
+		}
+		if block.Agent != "" {
+			out["agent"] = block.Agent
+		}
+		if block.ProjectDir != "" {
+			out["project_dir"] = block.ProjectDir
+		}
+		if block.Schedule != nil {
+			out["schedule"] = map[string]string{"expr": block.Schedule.Expr, "tz": block.Schedule.TZ}
+		}
+		if running {
+			out["session"] = session
+		}
+		return outputJSON(out)
+	}
+
+	fmt.Printf("shuttle: fiber %s\n\n", f.ID)
+	writeBlockSummary(os.Stdout, block, statusNow, armed)
+	if running {
+		fmt.Printf("  worker:      running (tmux %s)\n", session)
+	}
+	fmt.Println("")
+	fmt.Println(dispatchAssessment(f.ID, statusNow))
+	return nil
+}
+
+// dispatchAssessment renders the one line a single-fiber report is really for:
+// whether the daemon will pick this fiber up, and the verb that changes the
+// answer when it won't. Dispatch is gated by the felt-native status alone.
+func dispatchAssessment(fiberID, statusNow string) string {
+	switch statusNow {
+	case felt.StatusActive:
+		return "→ Daemon will dispatch on next poll. No action needed."
+	case felt.StatusClosed:
+		return fmt.Sprintf("→ Fiber is closed — daemon will NOT dispatch. Use `felt shuttle reopen %s` to clear verdict fields and requeue it.", fiberID)
+	case felt.StatusOpen:
+		return fmt.Sprintf("→ Draft (status: open). Use `felt shuttle resume %s` to arm it.", fiberID)
+	case "":
+		return fmt.Sprintf("→ Status missing — daemon will NOT dispatch. Use `felt shuttle resume %s` or set status: active in the markdown.", fiberID)
+	default:
+		return fmt.Sprintf("→ Status %q is not armed — daemon will NOT dispatch. Use `felt shuttle resume %s` to set status: active.", statusNow, fiberID)
+	}
+}
+
+// liveWorkerSession reports the tmux session holding this fiber's worker, if
+// any — recognizing both the canonical uid-keyed name and the legacy leaf-only
+// one, exactly as the table's liveness check does.
+func liveWorkerSession(f *felt.Felt) (string, bool) {
+	for _, candidate := range shuttleTmuxSessionNames(f.ID, f.UID) {
+		if tmuxSessionExists(candidate) {
+			return candidate, true
+		}
+	}
+	return "", false
+}
+
+// writeBlockSummary writes the human-readable "Current block:" report. Dispatch
+// eligibility is the felt-native status alone (status:active = armed).
+func writeBlockSummary(out io.Writer, b *shuttle.Block, statusNow string, armed bool) {
+	fmt.Fprintln(out, "Current block:")
+	fmt.Fprintf(out, "  kind:        %s\n", shuttleNonEmpty(b.Kind, "(unset)"))
+	fmt.Fprintf(out, "  host:        %s\n", shuttleNonEmpty(b.Host, "(unset — NOT eligible on any daemon)"))
+	if b.Agent != "" {
+		fmt.Fprintf(out, "  agent:       %s\n", b.Agent)
+	}
+	if b.ProjectDir != "" {
+		fmt.Fprintf(out, "  project_dir: %s\n", b.ProjectDir)
+	}
+	if b.Schedule != nil {
+		fmt.Fprintf(out, "  schedule:    %q tz=%s\n", b.Schedule.Expr, b.Schedule.TZ)
+	}
+
+	switch {
+	case statusNow == "":
+		fmt.Fprintln(out, "  status:      (missing — NOT armed; resume or set status: active in the markdown)")
+	case statusNow == felt.StatusClosed:
+		fmt.Fprintln(out, "  status:      closed (NOT armed — daemon ignores closed fibers)")
+	case statusNow == felt.StatusOpen:
+		fmt.Fprintln(out, "  status:      open (draft — NOT armed; resume to dispatch)")
+	case armed:
+		fmt.Fprintf(out, "  status:      %s (armed)\n", statusNow)
+	default:
+		fmt.Fprintf(out, "  status:      %s\n", statusNow)
+	}
 }
 
 // ---- helpers ---------------------------------------------------------------

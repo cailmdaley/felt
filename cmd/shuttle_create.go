@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"io"
 	"os"
 	"strings"
 	"time"
@@ -27,83 +26,38 @@ var (
 	installProjectDir string
 	installHost       string
 	installDisabled   bool
-	installReshape    bool
 
 	repeatSchedule   string
 	repeatTZ         string
 	repeatModel      string
 	repeatProjectDir string
 	repeatHost       string
-	repeatReshape    bool
 
 	pinModel      string
 	pinProjectDir string
 	pinHost       string
-	pinReshape    bool
 )
 
-// echoStr returns override when non-empty, else the fallback echoed from an
-// existing block. The reshape verbs use it so an omitted --model/--host/
-// --project-dir inherits the value already on the block being clobbered — the
-// caller need not re-supply what it isn't changing.
-func echoStr(override, fallback string) string {
-	if strings.TrimSpace(override) != "" {
-		return override
+// refuseExistingBlock is the one policy the three create verbs share: they
+// CREATE, so a fiber that already carries a shuttle: block is a refusal, and the
+// refusal routes the caller to the surgical verb for what they were trying to
+// change. Nothing here rewrites a block — every in-place edit has its own verb,
+// each of which preserves the daemon-owned runtime keys and the fiber's whole
+// lifecycle (status / tempered / closed-at / outcome) that a rebuild-from-scratch
+// could not.
+//
+// Ownership is checked first: a fiber another daemon owns gets the truer error,
+// since the edit verbs below would refuse it on the same grounds.
+func refuseExistingBlock(fiberID string, f *felt.Felt, b *shuttle.Block) error {
+	if err := ensureOwnedHere(f, fiberID); err != nil {
+		return err
 	}
-	return fallback
-}
-
-// A create verb that CLOBBERS an existing block (--reshape) changes the role's
-// SHAPE, not its lifecycle — so it leaves status exactly as it found it: a
-// closed fiber stays in Awaiting review with its verdict fields intact, a draft
-// stays parked, an armed role stays armed. Only a FRESH create settles status
-// (install/repeat arm to active, pin parks at open), and only there is a closed
-// fiber a refusal — arming something already reviewed-and-done needs an explicit
-// `felt shuttle reopen`. Lifecycle verbs (pause/resume/close/reopen) stay the
-// only way to move status; changing standing → oneshot is not one of them.
-// printPreservedStatus reports that a reshape left status untouched.
-func printPreservedStatus(status string) {
-	shown := status
-	if shown == "" {
-		shown = "(missing)"
-	}
-	note := "unchanged — a reshape changes shape, not lifecycle"
-	if status == felt.StatusClosed {
-		note = "unchanged — reshape does not requeue; `felt shuttle reopen` does"
-	}
-	fmt.Printf("  status: %s (%s)\n", shown, note)
-}
-
-// reshapeProjectDir resolves the project_dir for a reshape: the explicit flag
-// (validated) when given, else the existing block's project_dir echoed
-// through, else the required-flag error. Echoing the existing value BEFORE any
-// write is what makes a reshape atomic — a fiber whose project_dir can't be
-// resolved fails here, with the old block still intact on disk.
-// blockHost / blockAgent read a field off an existing block only when one is
-// present (ok), returning "" otherwise — so the echo helpers see a fresh
-// install as "no fallback."
-func blockHost(b *shuttle.Block, ok bool) string {
-	if ok {
-		return b.Host
-	}
-	return ""
-}
-
-func blockAgent(b *shuttle.Block, ok bool) string {
-	if ok {
-		return b.Agent
-	}
-	return ""
-}
-
-func reshapeProjectDir(flag, existing string) (string, error) {
-	if strings.TrimSpace(flag) != "" {
-		return resolveProjectDirFlag(flag)
-	}
-	if strings.TrimSpace(existing) != "" {
-		return existing, nil
-	}
-	return "", fmt.Errorf("--project-dir is required (the block being reshaped has none to echo)")
+	return fmt.Errorf(`fiber %s already has a shuttle: block (kind=%s); the create verbs only create. To change it in place:
+  kind or schedule:  felt shuttle reshape %s [kind] [--schedule ...]
+  agent:             felt shuttle set-model %s <agent>   (set-agent for effort/chrome)
+  inspect it:        felt shuttle status %s
+  start over:        felt shuttle uninstall %s, then install / repeat / pin`,
+		fiberID, shuttleNonEmpty(b.Kind, "(unset)"), fiberID, fiberID, fiberID, fiberID)
 }
 
 // printShuttleValidationErrors renders a constructed block's validation failures
@@ -131,13 +85,12 @@ picks up on its next poll.
 
 Dispatch is gated solely by the felt-native status field: status:active is
 armed, status:open is a draft. An armed install requires --project-dir and sets
-status:active; --disabled sets status:open. A fresh install on a closed fiber is
-refused — reopen it first. A --reshape over an existing block preserves status
-(it changes shape, not lifecycle), so a closed role can be re-shaped in place.
+status:active; --disabled sets status:open. An install on a closed fiber is
+refused — reopen it first.
 
-Idempotent: if the fiber already has a shuttle: block, install reports its
-current state and exits 0 when no conflicting flags are passed. A conflicting
-flag points at the right mutation verb (pause / resume / set-model / uninstall).`,
+install creates; it never rewrites. A fiber that already has a shuttle: block is
+refused, with a pointer at the verb that edits in place (reshape for kind or
+schedule, set-model / set-agent for the agent, uninstall to start over).`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		reg, err := shuttle.LoadAgentRegistry()
@@ -154,49 +107,28 @@ flag points at the right mutation verb (pause / resume / set-model / uninstall).
 		}
 		defer unlock()
 
-		// If a block already exists, install is either read-only state reporting +
-		// conflict detection (the default) or, with --reshape, an atomic in-place
-		// clobber to oneshot. A malformed-but-mapping block surfaces its decode
-		// error cleanly rather than nil-dereferencing.
+		// A block already on the fiber is a refusal, not a rewrite (a
+		// malformed-but-mapping block surfaces its decode error cleanly rather than
+		// nil-dereferencing).
 		existing, ok, err := f.ShuttleBlock()
 		if err != nil {
 			return err
 		}
-		if ok && !installReshape {
-			return reportExistingBlock(cmd, args[0], f, existing, installModel, installDisabled, installProjectDir, installHost)
-		}
 		if ok {
-			if err := ensureOwnedHere(f, args[0]); err != nil {
-				return err
-			}
+			return refuseExistingBlock(args[0], f, existing)
 		}
 
-		host, err := resolveOwnHost(echoStr(installHost, blockHost(existing, ok)))
+		host, err := resolveOwnHost(installHost)
 		if err != nil {
 			return err
 		}
 
 		block := &shuttle.Block{Kind: "oneshot", Host: host}
-		if agent := echoStr(installModel, blockAgent(existing, ok)); agent != "" {
-			block.Agent = agent
+		if installModel != "" {
+			block.Agent = installModel
 		}
-		// On a reshape, preserve the existing project_dir even when --disabled
-		// (dropping it would strand a later resume with no cwd) — echo it whenever
-		// the flag is omitted. All resolution happens before the single write, so
-		// a fiber that can't resolve one fails with its old block still intact.
-		if ok {
-			// reshape: echo existing project_dir when the flag is omitted. Tolerate
-			// an empty result on a disabled draft (drafts don't require a cwd).
-			if strings.TrimSpace(installProjectDir) != "" || existing.ProjectDir != "" {
-				projectDir, perr := reshapeProjectDir(installProjectDir, existing.ProjectDir)
-				if perr != nil {
-					return perr
-				}
-				block.ProjectDir = projectDir
-			} else if !installDisabled {
-				return fmt.Errorf("--project-dir is required (the block being reshaped has none to echo)")
-			}
-		} else if !installDisabled {
+		// A draft needs no cwd (a later resume supplies one); an armed install does.
+		if !installDisabled {
 			projectDir, perr := resolveProjectDirFlag(installProjectDir)
 			if perr != nil {
 				return perr
@@ -211,22 +143,20 @@ flag points at the right mutation verb (pause / resume / set-model / uninstall).
 			return printShuttleValidationErrors(errs)
 		}
 
+		// A fresh create settles status: install arms to active, --disabled parks at
+		// open. A closed fiber is a refusal — arming something already
+		// reviewed-and-done needs an explicit reopen.
 		statusBefore := f.Status
 		statusChanged := false
-		switch {
-		case installDisabled:
-			// An explicit --disabled is a lifecycle instruction ("park it"), so it
-			// wins even on a reshape.
+		if installDisabled {
 			if statusBefore != felt.StatusOpen {
 				f.Status = felt.StatusOpen
 				clearClosedAt(f)
 				statusChanged = true
 			}
-		case ok:
-			// Reshape preserves status (see reshapePreservesStatus).
-		default:
+		} else {
 			if statusBefore == felt.StatusClosed {
-				return fmt.Errorf("fiber %s has status: closed and has no shuttle block to reshape; use 'felt shuttle reopen %s' to requeue it, or set status: active before installing; use --disabled to park in drafts", args[0], args[0])
+				return fmt.Errorf("fiber %s has status: closed; use 'felt shuttle reopen %s' to requeue it, or set status: active before installing; use --disabled to park in drafts", args[0], args[0])
 			}
 			if statusBefore != felt.StatusActive {
 				f.Status = felt.StatusActive
@@ -253,8 +183,7 @@ flag points at the right mutation verb (pause / resume / set-model / uninstall).
 		if block.ProjectDir != "" {
 			fmt.Printf("  project_dir: %s\n", block.ProjectDir)
 		}
-		switch {
-		case statusChanged:
+		if statusChanged {
 			want := felt.StatusActive
 			if installDisabled {
 				want = felt.StatusOpen
@@ -264,117 +193,9 @@ flag points at the right mutation verb (pause / resume / set-model / uninstall).
 			} else {
 				fmt.Printf("  status: %s → %s\n", statusBefore, want)
 			}
-		case ok:
-			printPreservedStatus(statusBefore)
 		}
 		return nil
 	},
-}
-
-// reportExistingBlock prints the current block state and either returns nil
-// (idempotent confirmation) or an error pointing at the right mutation verb when
-// an explicitly-passed flag disagrees with the existing block. Read-only: it
-// never writes the fiber.
-func reportExistingBlock(cmd *cobra.Command, fiberID string, f *felt.Felt, b *shuttle.Block, model string, disabled bool, projectDir string, host string) error {
-	statusNow := f.Status
-	armed := statusNow == felt.StatusActive
-	draft := statusNow == felt.StatusOpen
-
-	headline := fmt.Sprintf("shuttle: fiber %s already has a shuttle: block (install is idempotent).", fiberID)
-	if b.Kind == "standing" {
-		headline = fmt.Sprintf("shuttle: fiber %s already has a standing-role shuttle: block.", fiberID)
-	}
-	fmt.Println(headline)
-	fmt.Println("")
-	writeBlockSummary(os.Stdout, b, statusNow, armed)
-
-	fmt.Println("")
-	switch {
-	case statusNow == felt.StatusClosed:
-		fmt.Printf("→ Fiber is closed — daemon will NOT dispatch. Use `felt shuttle reopen %s` to clear verdict fields and requeue it.\n", fiberID)
-	case armed:
-		fmt.Println("→ Daemon will dispatch on next poll. No action needed.")
-	case draft:
-		fmt.Printf("→ Draft (status: open). Use `felt shuttle resume %s` to arm it.\n", fiberID)
-	case statusNow == "":
-		fmt.Printf("→ Status missing — daemon will NOT dispatch. Use `felt shuttle resume %s` or set status: active in the markdown.\n", fiberID)
-	default:
-		fmt.Printf("→ Status %q is not armed — daemon will NOT dispatch. Use `felt shuttle resume %s` to set status: active.\n", statusNow, fiberID)
-	}
-
-	modelChanged := cmd.Flags().Changed("model")
-	disabledChanged := cmd.Flags().Changed("disabled")
-	projectDirChanged := cmd.Flags().Changed("project-dir")
-	hostChanged := cmd.Flags().Changed("host")
-
-	var mismatches []string
-	if hostChanged && strings.TrimSpace(host) != b.Host {
-		mismatches = append(mismatches,
-			fmt.Sprintf("--host %s ≠ current host %q  →  felt shuttle uninstall %s && felt shuttle install %s --host %s",
-				host, b.Host, fiberID, fiberID, host))
-	}
-	if modelChanged && model != b.Agent {
-		mismatches = append(mismatches,
-			fmt.Sprintf("--model %s ≠ current agent %q  →  felt shuttle set-model %s %s",
-				model, b.Agent, fiberID, model))
-	}
-	if disabledChanged {
-		if disabled && armed {
-			mismatches = append(mismatches,
-				fmt.Sprintf("--disabled passed but fiber is armed (status: active)  →  felt shuttle pause %s", fiberID))
-		} else if !disabled && draft {
-			mismatches = append(mismatches,
-				fmt.Sprintf("--disabled=false passed but fiber is a draft (status: open)  →  felt shuttle resume %s", fiberID))
-		}
-	}
-	if projectDirChanged {
-		expanded, err := resolveProjectDirFlag(projectDir)
-		if err == nil && expanded != b.ProjectDir {
-			mismatches = append(mismatches,
-				fmt.Sprintf("--project-dir %s ≠ current %q  →  felt shuttle uninstall %s && felt shuttle install %s --project-dir %s",
-					expanded, b.ProjectDir, fiberID, fiberID, expanded))
-		}
-	}
-	if len(mismatches) > 0 {
-		fmt.Fprintln(os.Stderr, "")
-		fmt.Fprintln(os.Stderr, "Conflicts with current block:")
-		for _, m := range mismatches {
-			fmt.Fprintf(os.Stderr, "  %s\n", m)
-		}
-		return fmt.Errorf("install would mutate existing block; use the verbs above")
-	}
-
-	return nil
-}
-
-// writeBlockSummary writes the human-readable "Current block:" report. Dispatch
-// eligibility is the felt-native status alone (status:active = armed).
-func writeBlockSummary(out io.Writer, b *shuttle.Block, statusNow string, armed bool) {
-	fmt.Fprintln(out, "Current block:")
-	fmt.Fprintf(out, "  kind:        %s\n", shuttleNonEmpty(b.Kind, "(unset)"))
-	fmt.Fprintf(out, "  host:        %s\n", shuttleNonEmpty(b.Host, "(unset — NOT eligible on any daemon)"))
-	if b.Agent != "" {
-		fmt.Fprintf(out, "  agent:       %s\n", b.Agent)
-	}
-	if b.ProjectDir != "" {
-		fmt.Fprintf(out, "  project_dir: %s\n", b.ProjectDir)
-	}
-	if b.Schedule != nil {
-		fmt.Fprintf(out, "  schedule:    %q tz=%s\n", b.Schedule.Expr, b.Schedule.TZ)
-	}
-
-	switch {
-	case statusNow == "":
-		fmt.Fprintln(out, "  status:      (missing — NOT armed; resume or set status: active in the markdown)")
-	case statusNow == felt.StatusClosed:
-		fmt.Fprintln(out, "  status:      closed (NOT armed — daemon ignores closed fibers)")
-	case statusNow == felt.StatusOpen:
-		fmt.Fprintln(out, "  status:      open (draft — NOT armed; resume to dispatch)")
-	case armed:
-		fmt.Fprintf(out, "  status:      %s (armed)\n", statusNow)
-	default:
-		fmt.Fprintf(out, "  status:      %s\n", statusNow)
-	}
 }
 
 // ---- repeat ----------------------------------------------------------------
@@ -389,7 +210,12 @@ The --tz flag must be an IANA timezone name (e.g. Europe/Paris, UTC).
 
   felt shuttle repeat <fiber> --schedule "0 9 * * 1-5" --tz Europe/Paris --project-dir "$PWD"
 
-The running daemon picks it up on its next poll.`,
+The running daemon picks it up on its next poll; a fresh standing role is born
+armed (status:active), and a closed fiber is refused — reopen it first.
+
+repeat creates; it never rewrites. A fiber that already has a shuttle: block is
+refused — use 'felt shuttle reshape' to change its kind or re-time its schedule,
+set-model / set-agent for the agent, uninstall to start over.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		reg, err := shuttle.LoadAgentRegistry()
@@ -405,36 +231,21 @@ The running daemon picks it up on its next poll.`,
 			return err
 		}
 		defer unlock()
-		// Capture any existing block up front (a malformed-but-mapping block
-		// surfaces its decode error cleanly rather than nil-dereferencing).
+		// A block already on the fiber is a refusal, not a rewrite (a
+		// malformed-but-mapping block surfaces its decode error cleanly rather than
+		// nil-dereferencing).
 		existing, hasBlock, err := f.ShuttleBlock()
 		if err != nil {
 			return err
 		}
-		// repeat is the one create verb that rewrites an EXISTING block, so it must
-		// pass the ownership guard — refusing to mirror-write a fiber another daemon
-		// owns (fail-open on a fresh / host-less fiber).
-		if err := ensureOwnedHere(f, args[0]); err != nil {
-			return err
+		if hasBlock {
+			return refuseExistingBlock(args[0], f, existing)
 		}
-		// On a --reshape over an existing block, echo project_dir / host from it
-		// when the flags are omitted, so a kind reshape need not re-supply what it
-		// isn't changing. All resolution happens before the single write below, so
-		// a reshape that can't resolve a field fails with the old block intact.
-		var projectDir string
-		if repeatReshape && hasBlock {
-			projectDir, err = reshapeProjectDir(repeatProjectDir, existing.ProjectDir)
-		} else {
-			projectDir, err = resolveProjectDirFlag(repeatProjectDir)
-		}
+		projectDir, err := resolveProjectDirFlag(repeatProjectDir)
 		if err != nil {
 			return err
 		}
-		hostFlag := repeatHost
-		if repeatReshape && hasBlock {
-			hostFlag = echoStr(repeatHost, existing.Host)
-		}
-		host, err := resolveOwnHost(hostFlag)
+		host, err := resolveOwnHost(repeatHost)
 		if err != nil {
 			return err
 		}
@@ -447,9 +258,6 @@ The running daemon picks it up on its next poll.`,
 		}
 		if repeatModel != "" {
 			block.Agent = repeatModel
-		} else if hasBlock && existing.Agent != "" {
-			// Inherit the agent from the block being replaced when --model is omitted.
-			block.Agent = existing.Agent
 		}
 
 		if strings.TrimSpace(block.Host) == "" {
@@ -465,18 +273,16 @@ The running daemon picks it up on its next poll.`,
 			return fmt.Errorf("computing next occurrence: %w", err)
 		}
 
-		// Reshape preserves status (see printPreservedStatus); a fresh repeat arms.
-		reshaping := repeatReshape && hasBlock
+		// A fresh standing role is born armed; a closed fiber needs an explicit
+		// reopen before it can be armed again.
 		statusBefore := f.Status
 		statusChanged := false
-		if !reshaping {
-			if statusBefore == felt.StatusClosed {
-				return fmt.Errorf("fiber %s has status: closed and has no shuttle block to reshape; use 'felt shuttle reopen %s' to clear verdict fields and requeue it before installing", args[0], args[0])
-			}
-			if statusBefore != felt.StatusActive {
-				f.Status = felt.StatusActive
-				statusChanged = true
-			}
+		if statusBefore == felt.StatusClosed {
+			return fmt.Errorf("fiber %s has status: closed; use 'felt shuttle reopen %s' to clear verdict fields and requeue it before installing", args[0], args[0])
+		}
+		if statusBefore != felt.StatusActive {
+			f.Status = felt.StatusActive
+			statusChanged = true
 		}
 
 		if err := f.SetShuttleConfig(block); err != nil {
@@ -494,15 +300,12 @@ The running daemon picks it up on its next poll.`,
 		}
 		fmt.Printf("  project_dir: %s\n", block.ProjectDir)
 		fmt.Printf("  next due: %s\n", next.Format(time.RFC3339))
-		switch {
-		case statusChanged:
+		if statusChanged {
 			if statusBefore == "" {
 				fmt.Println("  status:   active (set; was missing)")
 			} else {
 				fmt.Printf("  status:   %s → active\n", statusBefore)
 			}
-		case reshaping:
-			printPreservedStatus(statusBefore)
 		}
 		return nil
 	},
@@ -524,7 +327,11 @@ interactive interface. From there it joins the unified lifecycle: a worker that
 hands off cleanly (` + "`felt shuttle handoff`" + `) is relaunched fresh — a long autonomous
 arc across clean sessions — while a dirty exit parks it back to the strip. When
 the arc is done it closes to Awaiting review, and accepting it re-parks it to the
-strip. Perennial: you park it, you don't delete it.`,
+strip. Perennial: you park it, you don't delete it.
+
+pin creates; it never rewrites. A fiber that already has a shuttle: block is
+refused — use 'felt shuttle reshape <fiber> pinned' to convert an existing role
+in place, set-model / set-agent for the agent, uninstall to start over.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		reg, err := shuttle.LoadAgentRegistry()
@@ -541,41 +348,27 @@ strip. Perennial: you park it, you don't delete it.`,
 		}
 		defer unlock()
 
+		// A block already on the fiber is a refusal, not a rewrite.
 		existing, ok, err := f.ShuttleBlock()
 		if err != nil {
 			return err
 		}
-		if ok && !pinReshape {
-			return fmt.Errorf("fiber %s already has a shuttle: block (kind=%s); uninstall it first to re-pin, or pass --reshape to clobber it in place", args[0], existing.Kind)
-		}
 		if ok {
-			// A reshape rewrites an existing block, so it must pass the ownership
-			// guard — never mirror-write a fiber another daemon owns.
-			if err := ensureOwnedHere(f, args[0]); err != nil {
-				return err
-			}
+			return refuseExistingBlock(args[0], f, existing)
 		}
 
-		host, err := resolveOwnHost(echoStr(pinHost, blockHost(existing, ok)))
+		host, err := resolveOwnHost(pinHost)
 		if err != nil {
 			return err
 		}
-		// Echo the existing project_dir when --project-dir is omitted on a reshape;
-		// resolved before the single write, so a reshape that can't resolve one
-		// fails with the old pinned block still intact.
-		var projectDir string
-		if ok {
-			projectDir, err = reshapeProjectDir(pinProjectDir, existing.ProjectDir)
-		} else {
-			projectDir, err = resolveProjectDirFlag(pinProjectDir)
-		}
+		projectDir, err := resolveProjectDirFlag(pinProjectDir)
 		if err != nil {
 			return err
 		}
 
 		block := &shuttle.Block{Kind: "pinned", Host: host, ProjectDir: projectDir}
-		if agent := echoStr(pinModel, blockAgent(existing, ok)); agent != "" {
-			block.Agent = agent
+		if pinModel != "" {
+			block.Agent = pinModel
 		}
 		if strings.TrimSpace(block.Host) == "" {
 			return fmt.Errorf("pinned role requires a host (the owning daemon's host id; pass --host or run on the owning machine)")
@@ -585,12 +378,11 @@ strip. Perennial: you park it, you don't delete it.`,
 			return printShuttleValidationErrors(errs)
 		}
 
-		// Pinned rest is status:open "parked on the strip", so a FRESH pin settles
-		// any prior status — including closed (revive as a parked role) — to open.
-		// A reshape preserves status instead (see printPreservedStatus).
+		// Pinned rest is status:open "parked on the strip", so a pin settles any
+		// prior status — including closed (revive as a parked role) — to open.
 		statusBefore := f.Status
 		statusChanged := false
-		if !ok && statusBefore != felt.StatusOpen {
+		if statusBefore != felt.StatusOpen {
 			f.Status = felt.StatusOpen
 			clearClosedAt(f)
 			statusChanged = true
@@ -609,15 +401,12 @@ strip. Perennial: you park it, you don't delete it.`,
 			fmt.Printf("  agent: %s\n", block.Agent)
 		}
 		fmt.Printf("  project_dir: %s\n", block.ProjectDir)
-		switch {
-		case statusChanged:
+		if statusChanged {
 			if statusBefore == "" {
 				fmt.Println("  status: open (set; was missing)")
 			} else {
 				fmt.Printf("  status: %s → open\n", statusBefore)
 			}
-		case ok:
-			printPreservedStatus(statusBefore)
 		}
 		return nil
 	},
@@ -630,20 +419,17 @@ func registerShuttleCreateFlags() {
 	installCmd.Flags().StringVar(&installProjectDir, "project-dir", "", "Worker cwd on the target host (required unless --disabled)")
 	installCmd.Flags().StringVar(&installHost, "host", "", "Owning daemon's host id (default: local daemon's own_host_id; set for cross-host install)")
 	installCmd.Flags().BoolVar(&installDisabled, "disabled", false, "Install as a draft (status: open); use 'felt shuttle resume' to arm it")
-	installCmd.Flags().BoolVar(&installReshape, "reshape", false, "Atomically clobber an existing shuttle: block in place (single guarded write; omitted model/host/project-dir echo from the old block)")
 
 	repeatCmd.Flags().StringVarP(&repeatSchedule, "schedule", "s", "", "Cron expression (5-field standard syntax) — required")
 	repeatCmd.Flags().StringVarP(&repeatTZ, "tz", "z", "UTC", "IANA timezone name (default: UTC)")
 	repeatCmd.Flags().StringVarP(&repeatModel, "model", "m", "", "Agent ID (default: registry default)")
 	repeatCmd.Flags().StringVar(&repeatProjectDir, "project-dir", "", "Worker cwd on the target host (required)")
 	repeatCmd.Flags().StringVar(&repeatHost, "host", "", "Owning daemon's host id (default: local daemon's own_host_id; set for cross-host install)")
-	repeatCmd.Flags().BoolVar(&repeatReshape, "reshape", false, "Atomically clobber an existing shuttle: block in place (single guarded write; omitted model/host/project-dir echo from the old block)")
 	_ = repeatCmd.MarkFlagRequired("schedule")
 
 	pinCmd.Flags().StringVarP(&pinModel, "model", "m", "", "Agent ID (default: registry default)")
 	pinCmd.Flags().StringVar(&pinProjectDir, "project-dir", "", "Worker cwd on the target host (required)")
 	pinCmd.Flags().StringVar(&pinHost, "host", "", "Owning daemon's host id (default: local daemon's own_host_id; set for cross-host install)")
-	pinCmd.Flags().BoolVar(&pinReshape, "reshape", false, "Atomically clobber an existing shuttle: block in place (single guarded write; omitted model/host/project-dir echo from the old block)")
 }
 
 func init() {

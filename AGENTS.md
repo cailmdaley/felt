@@ -553,6 +553,7 @@ felt shuttle ps                                # live tmux workers only
 felt shuttle install <fiber> --project-dir "$PWD" [-m <agent-id>] [--disabled]
 felt shuttle repeat <fiber> --schedule "0 9 * * 1-5" --tz Europe/Paris --project-dir "$PWD"
 felt shuttle pin <fiber> --project-dir "$PWD"    # pinned, schedule-less perennial role
+felt shuttle reshape <fiber> [kind] [-s <schedule>] [-z <tz>]  # change an existing block's kind/schedule in place
 felt shuttle pause <fiber>                       # park in drafts + kill live worker; --no-kill preserves it
 felt shuttle resume / accept / reopen <fiber>
 felt shuttle set-agent <fiber> <agent-id> [--effort E] [--chrome]

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -627,6 +628,13 @@ func axisValue(s string) any {
 // (set-model/set-agent): like resolveOwnedShuttleFiber but with the "install
 // first" hint on a missing block.
 func resolveShuttleFiberForConfig(query string) (*felt.Felt, *felt.Storage, *shuttle.Block, func() error, error) {
+	return resolveShuttleFiberForConfigWithHint(query, "use 'felt shuttle repeat' to install first")
+}
+
+// resolveShuttleFiberForConfigWithHint is resolveShuttleFiberForConfig with a
+// caller-chosen hint for the no-block case — reshape points at all three create
+// verbs, set-model/set-agent at repeat.
+func resolveShuttleFiberForConfigWithHint(query, hint string) (*felt.Felt, *felt.Storage, *shuttle.Block, func() error, error) {
 	f, st, err := shuttleResolveFiber(query, true)
 	if err != nil {
 		return nil, nil, nil, nil, err
@@ -642,13 +650,171 @@ func resolveShuttleFiberForConfig(query string) (*felt.Felt, *felt.Storage, *shu
 	}
 	if !ok {
 		unlock()
-		return nil, nil, nil, nil, fmt.Errorf("fiber %s has no shuttle: block (use 'felt shuttle repeat' to install first)", query)
+		return nil, nil, nil, nil, fmt.Errorf("fiber %s has no shuttle: block (%s)", query, hint)
 	}
 	if err := ensureOwnedHere(f, query); err != nil {
 		unlock()
 		return nil, nil, nil, nil, err
 	}
 	return f, st, block, unlock, nil
+}
+
+// ---- reshape ---------------------------------------------------------------
+
+var (
+	reshapeSchedule string
+	reshapeTZ       string
+)
+
+// reshape is the surgical setter for `kind` — the one field on the shuttle:
+// block that had no set-* verb of its own. Without it, changing a role's kind
+// meant routing through a CREATE verb (the since-removed install/repeat/pin
+// --reshape flag), which
+// rebuilds the whole block from scratch: re-resolving project_dir and host,
+// echoing agent, and (historically) settling status as a side effect. That
+// indirection was a real bug source — a role in Awaiting review could not be
+// re-shaped because armed-install refuses closed fibers. Here kind (and, for a
+// standing role, the schedule) is set exactly the way set-model sets agent:
+// f.SetShuttleField on the live node, so the daemon-owned runtime: keys ride
+// through and nothing else on the block or the fiber is disturbed.
+//
+// Like every other config verb, it NEVER touches felt status / closed_at /
+// tempered / outcome: a role sitting in Awaiting review is reshaped in place and
+// stays exactly there. Also like every other config verb, there is no
+// live/dispatched guard — set-model on a running worker has always been legal,
+// and reshape deliberately matches that.
+var reshapeCmd = &cobra.Command{
+	Use:   "reshape <fiber> [kind]",
+	Short: "Change a role's kind (and standing schedule) in place",
+	Long: `Surgically rewrites the shuttle: block's kind — and, for a standing role, its
+schedule — leaving every other key (agent, host, project_dir, the daemon-owned
+runtime keys) and the fiber's whole lifecycle (status, tempered, closed-at,
+outcome) untouched.
+
+  felt shuttle reshape <fiber> oneshot                          # standing → oneshot (schedule dropped)
+  felt shuttle reshape <fiber> standing --schedule "0 9 * * 1-5" --tz Europe/Paris
+  felt shuttle reshape <fiber> --schedule "0 7 * * *"           # keep the kind, re-time it
+
+The kind argument is optional: omit it to keep the current kind (a schedule-only
+edit). A standing target needs a schedule — from --schedule, or echoed from the
+block being reshaped. A oneshot or pinned target DROPS the schedule key, so a
+schedule-less kind never carries a stale recurrence; passing --schedule with one
+is an error.
+
+Requires an existing shuttle: block — use install / repeat / pin to create one.
+This is a config edit, not a lifecycle move: it never changes status, so use
+pause / resume / close / reopen for that.`,
+	Args: cobra.RangeArgs(1, 2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		reg, err := shuttle.LoadAgentRegistry()
+		if err != nil {
+			return fmt.Errorf("loading agent registry: %w", err)
+		}
+		f, st, block, unlock, err := resolveShuttleFiberForConfigWithHint(args[0],
+			"use 'felt shuttle install' / 'repeat' / 'pin' to create one first")
+		if err != nil {
+			return err
+		}
+		defer unlock()
+
+		kind := block.Kind
+		if len(args) == 2 {
+			kind = args[1]
+		}
+		if !slices.Contains(shuttle.ValidKinds, kind) {
+			return fmt.Errorf("kind must be one of %v, got %q", shuttle.ValidKinds, kind)
+		}
+
+		// Build the candidate block off the decoded one and validate the WHOLE
+		// composition before any write, so a rejected reshape leaves the block on
+		// disk exactly as it was.
+		candidate := *block
+		candidate.Kind = kind
+		var next time.Time
+		if kind == "standing" {
+			expr := reshapeSchedule
+			if !cmd.Flags().Changed("schedule") && block.Schedule != nil {
+				expr = block.Schedule.Expr
+			}
+			if strings.TrimSpace(expr) == "" {
+				return fmt.Errorf("--schedule is required to reshape %s to a standing role (the block being reshaped has none to echo)", args[0])
+			}
+			tz := reshapeTZ
+			if !cmd.Flags().Changed("tz") {
+				tz = "UTC"
+				if block.Schedule != nil && block.Schedule.TZ != "" {
+					tz = block.Schedule.TZ
+				}
+			}
+			candidate.Schedule = &shuttle.Schedule{Expr: expr, TZ: tz}
+		} else {
+			if cmd.Flags().Changed("schedule") {
+				return fmt.Errorf("--schedule is only meaningful for kind=standing (target kind is %s)", kind)
+			}
+			if cmd.Flags().Changed("tz") {
+				return fmt.Errorf("--tz is only meaningful for kind=standing (target kind is %s)", kind)
+			}
+			candidate.Schedule = nil
+		}
+
+		if errs := shuttle.Validate(&candidate, reg); len(errs) > 0 {
+			return printShuttleValidationErrors(errs)
+		}
+		if candidate.Schedule != nil {
+			next, err = shuttle.NextOccurrence(candidate.Schedule, time.Now())
+			if err != nil {
+				return fmt.Errorf("computing next occurrence: %w", err)
+			}
+		}
+
+		// Surgical writes: kind as a scalar, schedule as a typed sub-mapping — or
+		// deleted (nil) for a schedule-less kind.
+		if err := f.SetShuttleField("kind", kind); err != nil {
+			return err
+		}
+		if candidate.Schedule != nil {
+			if err := f.SetShuttleNodeField("schedule", candidate.Schedule); err != nil {
+				return err
+			}
+		} else if err := f.SetShuttleNodeField("schedule", nil); err != nil {
+			return err
+		}
+		if err := st.Write(f); err != nil {
+			return fmt.Errorf("writing fiber: %w", err)
+		}
+
+		if block.Kind == kind {
+			fmt.Printf("reshaped %s (kind: %s, unchanged)\n", args[0], kind)
+		} else {
+			fmt.Printf("reshaped %s (kind: %s → %s)\n", args[0], shuttleNonEmpty(block.Kind, "(unset)"), kind)
+		}
+		if candidate.Schedule != nil {
+			fmt.Printf("  schedule: %s (%s)\n", candidate.Schedule.Expr, candidate.Schedule.TZ)
+			fmt.Printf("  next due: %s\n", next.Format(time.RFC3339))
+		} else if block.Schedule != nil {
+			fmt.Printf("  schedule: dropped (kind=%s has no recurrence)\n", kind)
+		}
+		printPreservedStatus(f.Status)
+		fmt.Println("  verdict fields (tempered, closed-at, outcome): untouched")
+		return nil
+	},
+}
+
+// printPreservedStatus reports that a reshape left status exactly as it found
+// it: a closed fiber stays in Awaiting review with its verdict fields intact, a
+// draft stays parked, an armed role stays armed. Lifecycle verbs
+// (pause/resume/close/reopen) are the only way to move status; changing standing
+// → oneshot is not one of them.
+func printPreservedStatus(status string) {
+	shown := status
+	if shown == "" {
+		shown = "(missing)"
+	}
+	note := "unchanged — a reshape changes shape, not lifecycle"
+	if status == felt.StatusClosed {
+		note = "unchanged — reshape does not requeue; `felt shuttle reopen` does"
+	}
+	fmt.Printf("  status: %s (%s)\n", shown, note)
 }
 
 // ---- set-interactive (retired stub) ----------------------------------------
@@ -715,6 +881,8 @@ func registerShuttleLifecycleFlags() {
 	acceptCmd.Flags().BoolVar(&acceptKeepOutcome, "keep-outcome", false, "Preserve the existing outcome instead of clearing it for the next dispatch")
 	setAgentCmd.Flags().StringVar(&setAgentEffort, "effort", "", `Effort level (harness-native token, e.g. low|medium|high|xhigh|max); "" clears`)
 	setAgentCmd.Flags().BoolVar(&setAgentChrome, "chrome", false, "Enable chrome (claude harness only)")
+	reshapeCmd.Flags().StringVarP(&reshapeSchedule, "schedule", "s", "", "Cron expression (5-field standard syntax); standing target only")
+	reshapeCmd.Flags().StringVarP(&reshapeTZ, "tz", "z", "UTC", "IANA timezone name (default: the block's existing tz, else UTC); standing target only")
 }
 
 func init() {
@@ -728,6 +896,7 @@ func init() {
 	shuttleCmd.AddCommand(acceptCmd)
 	shuttleCmd.AddCommand(setModelCmd)
 	shuttleCmd.AddCommand(setAgentCmd)
+	shuttleCmd.AddCommand(reshapeCmd)
 	shuttleCmd.AddCommand(setInteractiveCmd)
 	shuttleCmd.AddCommand(uninstallShuttleCmd)
 }

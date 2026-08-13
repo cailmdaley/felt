@@ -70,6 +70,7 @@ felt shuttle install <fiber>                # fresh oneshot, armed (status: acti
 felt shuttle install <fiber> --disabled     # land in drafts (status: open)
 felt shuttle repeat  <fiber> --schedule "0 9 * * 1-5" --tz Europe/Paris
 felt shuttle pin     <fiber>                # pinned, schedule-less perennial role
+felt shuttle reshape <fiber> [kind]         # change kind/schedule on an existing block, in place
 felt shuttle pause   <fiber>                # status: open; kills live worker unless --no-kill
 felt shuttle resume  <fiber>                # status: active
 felt shuttle accept  <fiber>                # standing roles only: accept pending run, re-arm
@@ -83,6 +84,7 @@ Read-side checks:
 
 ```bash
 felt shuttle status                         # one line per fiber with a block
+felt shuttle status <fiber>                 # detailed report on one block + dispatch assessment
 felt shuttle ps                             # live tmux workers only
 felt shuttle snapshot                       # daemon's view (:4000)
 curl -s http://127.0.0.1:4000/api/v1/agents | jq    # agent registry over HTTP
@@ -101,7 +103,7 @@ The shuttle block is the dispatch contract: agent, kind, schedule, host. Closing
 `felt shuttle uninstall` earns its keep in four cases:
 
 1. **Mistake recovery** — wrong slug, immediate undo.
-2. **Reshape the contract** — converting oneshot ↔ standing requires `uninstall` + `install`/`repeat`; both writers refuse to clobber an existing block.
+2. **Full rebuild** — converting oneshot ↔ standing is normally `felt shuttle reshape`; reach for `uninstall` + `install`/`repeat` only when you actually want project_dir/host re-resolved and status re-settled from scratch.
 3. **Archive from kanban** — a closed fiber's place is the tempered or composted column; uninstall makes it *leave the board entirely* (lesson captured elsewhere, kanban noise costs more than the record).
 4. **Tool boundary** — a different dispatcher takes ownership. (Theoretical today.)
 

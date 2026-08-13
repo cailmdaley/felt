@@ -29,9 +29,10 @@ defmodule ShuttleWeb.LifecycleControllerTest do
              "--felt-store\n#{store}\ninstall\ntests/interactive\n--project-dir\n/tmp/project\n"
   end
 
-  # pin reshapes a fiber to the schedule-less kind:pinned role — the board's
-  # drag-onto-the-Pinned-strip gesture. The controller forwards model / project
-  # / host to `felt shuttle pin`; no schedule (a pinned block has none).
+  # pin CREATES a schedule-less kind:pinned block on a fiber that has none —
+  # the board's drag-onto-the-Pinned-strip gesture for an unmanaged card (an
+  # already-managed one reshapes instead). The controller forwards model /
+  # project / host to `felt shuttle pin`; no schedule (a pinned block has none).
   #
   # `--host` here is the cross-host INSTALL TARGET, unrelated to `--felt-store`
   # (which names the store the id resolves against). Both ride the same argv;
@@ -60,11 +61,12 @@ defmodule ShuttleWeb.LifecycleControllerTest do
                "--project-dir\n/tmp/loom\n--host\ndapmcw68\n"
   end
 
-  # `repeat` rides the same id-resolution clause as `install` and `pin` — a
-  # scheduled role reshaped from a card whose row came from a nested project
-  # store must resolve to the owning store like any other lifecycle write.
-  test "repeat delegates to felt shuttle with the store flag ahead of the verb" do
-    store = fixture_store!("shuttle-lifecycle-repeat", "tests/nightly", "Nightly")
+  # `reshape` is the surgical shape edit on an existing block: the kind rides as
+  # an optional POSITIONAL right after the fiber, then the schedule flags. It
+  # rides the same id-resolution clause as `install` and `pin`, so the store
+  # flag still lands ahead of the verb.
+  test "reshape delegates to felt shuttle with kind as a positional" do
+    store = fixture_store!("shuttle-lifecycle-reshape", "tests/nightly", "Nightly")
     args_file = install_fake_felt!()
 
     conn =
@@ -72,30 +74,78 @@ defmodule ShuttleWeb.LifecycleControllerTest do
         api_conn(),
         "/api/v1/lifecycle",
         Jason.encode!(%{
-          "action" => "repeat",
+          "action" => "reshape",
           "fiber" => "tests/nightly",
+          "kind" => "standing",
           "schedule" => "0 7 * * *",
-          "tz" => "Europe/Paris",
-          "reshape" => true
+          "tz" => "Europe/Paris"
         })
       )
 
     assert conn.status == 200
 
     assert File.read!(args_file) ==
-             "--felt-store\n#{store}\nrepeat\ntests/nightly\n--schedule\n0 7 * * *\n" <>
-               "--tz\nEurope/Paris\n--reshape\n"
+             "--felt-store\n#{store}\nreshape\ntests/nightly\nstanding\n--schedule\n0 7 * * *\n" <>
+               "--tz\nEurope/Paris\n"
+  end
+
+  # A schedule-only edit passes NO kind positional — the CLI keeps the current
+  # kind. Nothing may be invented in its place (an echoed kind would be the
+  # controller choosing the shape the user didn't touch).
+  test "reshape omits the kind positional for a schedule-only edit" do
+    store = fixture_store!("shuttle-lifecycle-reshape-sched", "tests/cadence", "Cadence")
+    args_file = install_fake_felt!()
+
+    conn =
+      post(
+        api_conn(),
+        "/api/v1/lifecycle",
+        Jason.encode!(%{
+          "action" => "reshape",
+          "fiber" => "tests/cadence",
+          "schedule" => "30 6 * * 1",
+          "tz" => "UTC"
+        })
+      )
+
+    assert conn.status == 200
+
+    assert File.read!(args_file) ==
+             "--felt-store\n#{store}\nreshape\ntests/cadence\n--schedule\n30 6 * * 1\n--tz\nUTC\n"
+  end
+
+  # Only the three legal kinds reach the CLI — an arbitrary string is rejected
+  # here rather than forwarded as a positional felt would have to argue with.
+  test "reshape rejects a kind outside oneshot/standing/pinned" do
+    fixture_store!("shuttle-lifecycle-reshape-badkind", "tests/badkind", "Bad kind")
+    args_file = install_fake_felt!()
+
+    conn =
+      post(
+        api_conn(),
+        "/api/v1/lifecycle",
+        Jason.encode!(%{
+          "action" => "reshape",
+          "fiber" => "tests/badkind",
+          "kind" => "perpetual"
+        })
+      )
+
+    assert conn.status == 400
+    assert conn.resp_body =~ "unknown shuttle kind"
+    refute File.exists?(args_file)
   end
 
   # Regression: a project whose `.felt` symlinks INTO a subtree of the loom sees
   # its fibers under project-relative ids (`lightcone/desk`), while the loom that
   # actually owns the file sees `ai-futures/lightcone/lightcone/desk`. The board
-  # sends whichever id served the card's row. Before the fix, `pin` forwarded
-  # that id raw against the default store and died with
+  # sends whichever id served the card's row. Before the fix, the pin-to-the-
+  # strip write forwarded that id raw against the default store and died with
   # `no felt found matching "lightcone/desk"`, stranding a de-pinned fiber in
   # Awaiting review. The controller must resolve to the OWNING store and rewrite
-  # the id owner-relative.
-  test "pin rewrites a project-relative id to its owning store" do
+  # the id owner-relative — the gesture now posts `reshape pinned`, so the
+  # id-rewrite guard rides that verb.
+  test "reshape rewrites a project-relative id to its owning store" do
     root =
       System.tmp_dir!()
       |> Path.join("shuttle-lifecycle-nested-#{System.unique_integer([:positive])}")
@@ -126,18 +176,16 @@ defmodule ShuttleWeb.LifecycleControllerTest do
         api_conn(),
         "/api/v1/lifecycle",
         Jason.encode!(%{
-          "action" => "pin",
+          "action" => "reshape",
           "fiber" => "lightcone/desk",
-          "model" => "claude-fable",
-          "reshape" => true
+          "kind" => "pinned"
         })
       )
 
     assert conn.status == 200
 
     assert File.read!(args_file) ==
-             "--felt-store\n#{loom}\npin\nai-futures/lightcone/lightcone/desk\n" <>
-               "--model\nclaude-fable\n--reshape\n"
+             "--felt-store\n#{loom}\nreshape\nai-futures/lightcone/lightcone/desk\npinned\n"
   end
 
   # set-interactive is retired: the controller no longer allows the action, so a

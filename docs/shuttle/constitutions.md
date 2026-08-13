@@ -100,10 +100,11 @@ sets felt `status: active`. The daemon picks the fiber up on the next poll.
 Add `--disabled` to stash it as a draft (`status: open`). It lands in the
 board's Drafts column and waits. `felt shuttle resume <fiber>` arms it later.
 
-`install` is idempotent. Run it against a fiber that already has a block and it
-prints the block's state plus the daemon's dispatch assessment, then exits 0. A
-flag that conflicts with the existing block instead exits non-zero and names the
-verb you actually wanted (`pause`, `resume`, `set-model`, `uninstall`).
+`install` is create-only. Run it against a fiber that already has a block and
+it refuses, naming the verb you actually wanted — `felt shuttle status <fiber>`
+to inspect the block's state and the daemon's dispatch assessment, `reshape`
+to change kind or schedule, `set-model`/`set-agent` to change the agent, or
+`uninstall` to start over.
 
 You can also write the block by hand while drafting. `install` adds schema
 validation, which makes it the canonical path. Felt reports a hand-written block
@@ -159,16 +160,22 @@ them.
 
 ### Changing kind
 
-The three writers refuse to clobber an existing block. To convert, either run
-`felt shuttle uninstall` and reinstall, or pass `--reshape` for a single guarded
-in-place rewrite:
+`install`, `pin`, and `repeat` refuse to clobber an existing block. To convert,
+use `felt shuttle reshape`:
 
 ```bash
-felt shuttle repeat <fiber> --reshape --schedule "0 9 * * 1" --tz UTC
+felt shuttle reshape <fiber> standing --schedule "0 9 * * 1" --tz UTC
 ```
 
-On a reshape, omitted `--project-dir`, `--host`, and `--model` echo from the old
-block.
+`kind` is optional — omit it to leave the current kind alone and edit only the
+schedule (`felt shuttle reshape <fiber> --schedule "0 7 * * *"`). Reshape
+rewrites `agent`, `host`, and `project_dir` when passed, and leaves the rest of
+the block — including the daemon-owned `runtime:` keys — untouched. It never
+touches felt's lifecycle fields (`status`, `tempered`, `outcome`), so a role
+sitting in Awaiting review can be reshaped in place without being requeued. A
+`standing` target needs a schedule, from `--schedule` or echoed from the
+existing block; a `oneshot` or `pinned` target drops the schedule, and passing
+`--schedule`/`--tz` against one is an error.
 
 ## Agent selection
 

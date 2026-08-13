@@ -67,26 +67,46 @@ func TestShuttleInstall_RequiresProjectDirWhenArmed(t *testing.T) {
 	}
 }
 
-func TestShuttleInstall_IdempotentAndConflict(t *testing.T) {
-	defer saveShuttleGlobals()()
-	dir, storage := newShuttleStore(t)
-	pdir := t.TempDir()
-	seedShuttleRole(t, storage, "task", felt.StatusActive, map[string]any{
-		"kind": "oneshot", "agent": "claude-opus", "host": "testhost", "project_dir": pdir,
-	}, nil)
+// TestShuttleCreate_RefusesExistingBlock is the one policy the three create
+// verbs now share: they CREATE, so a fiber that already carries a block is a
+// refusal — and the refusal routes the caller to the verb that edits in place.
+// (install used to be idempotent here, reporting the block and exiting 0; that
+// second meaning is gone, and `felt shuttle status <fiber>` is the report.)
+func TestShuttleCreate_RefusesExistingBlock(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		{"install", []string{"install", "task"}},
+		{"repeat", []string{"repeat", "task", "--schedule", "0 9 * * 1-5"}},
+		{"pin", []string{"pin", "task"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			defer saveShuttleGlobals()()
+			withOwnHost(t, "testhost")
+			dir, storage := newShuttleStore(t)
+			pdir := t.TempDir()
+			seedShuttleRole(t, storage, "task", felt.StatusActive, map[string]any{
+				"kind": "oneshot", "agent": "claude-opus", "host": "testhost", "project_dir": pdir,
+			}, nil)
+			before, _ := os.ReadFile(storage.Path("task"))
 
-	// Plain re-install: idempotent state report, exit 0, no error.
-	out, err := runCommand(t, dir, "shuttle", "install", "task")
-	if err != nil {
-		t.Fatalf("idempotent install should exit 0: %v\n%s", err, out)
-	}
-	if !strings.Contains(out, "already has a shuttle: block") {
-		t.Fatalf("expected idempotent report, got:\n%s", out)
-	}
-
-	// Conflicting --model: error pointing at set-model.
-	if _, err := runCommand(t, dir, "shuttle", "install", "task", "--model", "claude-sonnet"); err == nil {
-		t.Fatal("install with a conflicting --model must error")
+			args := append(append([]string{"shuttle"}, tc.args...), "--project-dir", pdir)
+			out, err := runCommand(t, dir, args...)
+			if err == nil {
+				t.Fatalf("%s over an existing block must refuse; out=%s", tc.name, out)
+			}
+			// The refusal has to name the surgical verbs, or it just blocks the user.
+			for _, verb := range []string{"reshape", "set-model", "uninstall"} {
+				if !strings.Contains(err.Error(), verb) {
+					t.Fatalf("refusal should point at %s; err=%v", verb, err)
+				}
+			}
+			after, _ := os.ReadFile(storage.Path("task"))
+			if string(before) != string(after) {
+				t.Fatalf("refused %s must leave the fiber byte-identical", tc.name)
+			}
+		})
 	}
 }
 
@@ -164,54 +184,13 @@ func TestShuttlePin_Parked(t *testing.T) {
 	}
 }
 
-func TestShuttlePin_RefusesExistingBlock(t *testing.T) {
-	defer saveShuttleGlobals()()
-	dir, storage := newShuttleStore(t)
-	seedShuttleRole(t, storage, "hub", felt.StatusActive, oneshot(), nil)
-	pdir := t.TempDir()
-
-	if _, err := runCommand(t, dir, "shuttle", "pin", "hub", "--host", "testhost", "--project-dir", pdir); err == nil {
-		t.Fatal("pin on a fiber that already has a block must refuse")
-	}
-}
-
 // ---- regressions from adversarial verification ----------------------------
 
-// TestShuttleRepeat_PreservesRuntimeKeys is the regression for the
-// repeat-over-existing clobber: re-defining a live standing role's schedule must
-// keep the daemon-owned continuation keys (shuttle preserves them via
-// mergeUnknownShuttleFields; the felt port now does via SetShuttleConfig).
-func TestShuttleRepeat_PreservesRuntimeKeys(t *testing.T) {
-	defer saveShuttleGlobals()()
-	dir, storage := newShuttleStore(t)
-	pdir := t.TempDir()
-	// A live standing role carrying continuation state, host-less (guard fail-open).
-	seedShuttleRole(t, storage, "role", felt.StatusActive, map[string]any{
-		"kind": "standing", "agent": "claude-opus",
-		"schedule":     map[string]any{"expr": "0 8 * * *", "tz": "UTC"},
-		"session_uuid": "keep-uuid", "dispatched_at": "2026-06-21T00:00:00Z",
-	}, nil)
-
-	// Redefine the recurrence; --model omitted so the agent is inherited.
-	if out, err := runCommand(t, dir, "shuttle", "repeat", "role",
-		"--host", "testhost", "--schedule", "0 9 * * 1-5", "--tz", "Europe/Paris", "--project-dir", pdir); err != nil {
-		t.Fatalf("repeat: %v\n%s", err, out)
-	}
-	f := mustRead(t, storage, "role")
-	b, ok, err := f.ShuttleBlock()
-	if err != nil || !ok {
-		t.Fatalf("ShuttleBlock: ok=%v err=%v", ok, err)
-	}
-	if b.Schedule == nil || b.Schedule.Expr != "0 9 * * 1-5" || b.Agent != "claude-opus" {
-		t.Fatalf("new config / inherited agent not applied: %+v", b)
-	}
-	raw, _ := os.ReadFile(storage.Path("role"))
-	for _, want := range []string{"session_uuid: keep-uuid", "dispatched_at:", "2026-06-21T00:00:00Z"} {
-		if !strings.Contains(string(raw), want) {
-			t.Fatalf("repeat clobbered a runtime key: missing %q in\n%s", want, raw)
-		}
-	}
-}
+// The runtime-key guarantee that TestShuttleRepeat_PreservesRuntimeKeys used to
+// carry belongs to `felt shuttle reshape` now: repeat no longer rewrites an
+// existing block, so it has no daemon-owned keys to preserve. Its successor is
+// TestShuttleReshapeVerb_StandingToOneshotOnClosedFiber, which asserts the
+// runtime keys survive a kind change.
 
 // TestShuttleCreate_MalformedBlockErrors proves install/repeat/pin surface a
 // clean error (not a nil-deref panic) on a shuttle: value that is a mapping but
@@ -236,9 +215,10 @@ func TestShuttleCreate_MalformedBlockErrors(t *testing.T) {
 	}
 }
 
-// TestShuttleRepeat_RefusesRemoteOwned proves repeat (the one create verb that
-// overwrites) passes the ownership guard: re-defining a cineca-owned role from
-// macbook must refuse and leave the mirror byte-identical.
+// TestShuttleRepeat_RefusesRemoteOwned proves the ownership guard is checked
+// BEFORE the already-has-a-block refusal: a cineca-owned role addressed from
+// macbook gets the truer error (the edit verbs it would be pointed at would
+// refuse on the same grounds), and the mirror stays byte-identical.
 func TestShuttleRepeat_RefusesRemoteOwned(t *testing.T) {
 	defer saveShuttleGlobals()()
 	withOwnHost(t, "macbook")

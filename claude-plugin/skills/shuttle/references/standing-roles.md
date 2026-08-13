@@ -224,6 +224,7 @@ The daemon stamps `session_uuid` / `dispatched_at` / `run_id` into `shuttle.runt
 
 ```bash
 felt shuttle repeat  <fiber> --schedule "0 9 * * 1-5" --tz Europe/Paris
+felt shuttle reshape <fiber> --schedule "0 7 * * *"  # change the cron on an existing standing role
 felt shuttle pause   <fiber>                # status: open + kill worker
 felt shuttle resume  <fiber>                # status: active (re-arm; awaiting runs re-arm for immediate dispatch)
 felt shuttle accept  <fiber>                # accept awaiting run; re-arm (next occurrence = cron.next(now))

@@ -80,16 +80,23 @@ local daemon at `:4000`.
 
 | Command | Purpose |
 |---|---|
-| `felt shuttle install <fiber>` | Install as a one-shot dispatch role (`--project-dir` required, `-m` agent, `--host`, `--disabled`, `--reshape`) |
-| `felt shuttle pin <fiber>` | Install as a pinned, schedule-less perennial role (`--project-dir` required, `-m`, `--host`, `--reshape`) |
-| `felt shuttle repeat <fiber>` | Install as a standing (cron-scheduled) role (`-s/--schedule` and `--project-dir` required, `-z/--tz`, `-m`, `--host`, `--reshape`) |
+| `felt shuttle install <fiber>` | Install as a one-shot dispatch role (`--project-dir` required, `-m` agent, `--host`, `--disabled`) |
+| `felt shuttle pin <fiber>` | Install as a pinned, schedule-less perennial role (`--project-dir` required, `-m`, `--host`) |
+| `felt shuttle repeat <fiber>` | Install as a standing (cron-scheduled) role (`-s/--schedule` and `--project-dir` required, `-z/--tz`, `-m`, `--host`) |
+| `felt shuttle reshape <fiber> [kind]` | Change an existing block's `kind` and/or a standing role's schedule (`-s/--schedule`, `-z/--tz`) |
 | `felt shuttle uninstall <fiber>` | Remove the `shuttle:` block; fiber and felt status untouched |
 
-A **fresh** create settles status (`install`/`repeat` arm to `active`, `pin` parks
-at `open`) and refuses a closed fiber — arming something already reviewed needs an
-explicit `reopen`. A `--reshape` over an existing block changes the role's *shape*
-only: status and verdict fields are left exactly as found, so a role in Awaiting
-review can be re-shaped in place without being requeued.
+`install`, `pin`, and `repeat` are create-only: each refuses a fiber that
+already carries a `shuttle:` block, pointing at `reshape` (kind/schedule),
+`set-model`/`set-agent` (agent), or `uninstall` (start over). A fresh create
+settles status (`install`/`repeat` arm to `active`, `pin` parks at `open`) and
+refuses a closed fiber — arming something already reviewed needs an explicit
+`reopen`. `reshape` touches only the block's shape — `kind`, and a standing
+role's schedule — and leaves status and verdict fields exactly as found, so a
+role in Awaiting review can be reshaped in place without being requeued; `kind`
+is optional, so `reshape <fiber> --schedule "0 7 * * *"` is a schedule-only
+edit. Lifecycle moves (`pause`/`resume`/`close`/`reopen`/`accept`) are
+untouched by any of this.
 
 ### Lifecycle
 
@@ -109,7 +116,7 @@ review can be re-shaped in place without being requeued.
 
 | Command | Purpose |
 |---|---|
-| `felt shuttle status` | One line per shuttle-managed fiber (`--all`, `--remote <name>`, `--include-orphans`) |
+| `felt shuttle status [fiber]` | One line per shuttle-managed fiber (`--all`, `--remote <name>`, `--include-orphans`); with a fiber, a detailed single-fiber report including the daemon's dispatch assessment |
 | `felt shuttle ps` | Live tmux worker sessions only |
 | `felt shuttle snapshot` | Print the local daemon's state snapshot |
 | `felt shuttle dispatch <fiber>` | Ask the local daemon to dispatch a fiber now (`--ad-hoc`) |
