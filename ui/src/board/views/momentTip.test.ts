@@ -10,6 +10,7 @@ import {
   clockTime,
   dedupeSources,
   MomentLoader,
+  pickMark,
   renderTip,
   SLOT_NO_TEXT_NOTE,
   SLOT_PHRASE,
@@ -492,6 +493,53 @@ describe('renderTip — the excerpt cards', () => {
     const foot = host.children.find((c) => c.className.includes('kbn-tip-note'))!
     expect(foot.className).toBe('kbn-tip-note kbn-tip-section')
     expect(foot.textContent).toBe(SLOT_NO_TEXT_NOTE)
+  })
+})
+
+describe('pickMark — the rail catches the pointer out in the empty paper', () => {
+  // Three marks at 100, 200 and 300 pixels, with a 9-pixel snap.
+  const marks = [100, 200, 300]
+  const pick = (x: number) => pickMark(marks, x, 9)
+
+  it('reports the mark under the pointer as an ordinary hover, unmagnetized', () => {
+    expect(pick(200)).toEqual({ index: 1, magnetized: false })
+  })
+
+  it('snaps to the nearest mark within the snap radius, still unmagnetized', () => {
+    expect(pick(206)).toEqual({ index: 1, magnetized: false })
+    expect(pick(94)).toEqual({ index: 0, magnetized: false })
+  })
+
+  it('answers nothing in the empty paper BETWEEN two marks — there the blank really is an absence of anything to say', () => {
+    expect(pick(150)).toBeNull()
+  })
+
+  it('answers nothing left of the first mark: "the earliest thing here" is not a question anybody asks', () => {
+    expect(pick(20)).toBeNull()
+  })
+
+  it('MAGNETIZES anywhere right of the last mark, however far out', () => {
+    expect(pick(400)).toEqual({ index: 2, magnetized: true })
+    expect(pick(99_999)).toEqual({ index: 2, magnetized: true })
+  })
+
+  it('hands the two zones over to each other with no gap and no overlap at the snap radius', () => {
+    // Inside the radius the ordinary snap owns it; one pixel further out the
+    // magnet does. Every x past the last mark resolves to the last mark.
+    expect(pick(309)).toEqual({ index: 2, magnetized: false })
+    expect(pick(310)).toEqual({ index: 2, magnetized: true })
+  })
+
+  it('magnetizes to the RIGHTMOST mark, not the last one handed in', () => {
+    expect(pickMark([300, 100, 200], 400, 9)).toEqual({ index: 0, magnetized: true })
+  })
+
+  it('answers nothing at all for a lane with no marks — there is no last moment to catch', () => {
+    expect(pickMark([], 400, 9)).toBeNull()
+  })
+
+  it('still magnetizes when the lane holds exactly one mark', () => {
+    expect(pickMark([100], 400, 9)).toEqual({ index: 0, magnetized: true })
   })
 })
 

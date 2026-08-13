@@ -128,6 +128,81 @@ export function clockTime(ms: number): string {
   return new Date(ms).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
 }
 
+// ── Which mark the pointer is asking about ───────────────────────────────────
+
+/** Which mark a pointer resolved to, and how it got there. */
+export interface MarkPick {
+  /** Index into the positions handed in. */
+  index: number
+  /**
+   * The pointer was in the DEAD ZONE right of the last mark, and the rail
+   * caught it. The views draw a quiet highlight on the mark while this is set,
+   * so it is visible that the answer is the last thing that happened here
+   * rather than something under the pointer.
+   */
+  magnetized: boolean
+}
+
+/**
+ * The mark a pointer is asking about: the nearest one within `snapPx`, or —
+ * anywhere past the last mark on the rail — the last mark itself.
+ *
+ * ## Why the right-hand dead zone is a magnet
+ *
+ * The most common question a lane answers is "what was the last thing that
+ * happened here?", and the honest answer sits at one x-coordinate that gets
+ * harder to hit the quieter the lane is. On a fiber that stopped at eleven in
+ * the morning, the entire afternoon is blank paper that answers nothing, and
+ * finding the last mark means pixel-hunting a hairline at the left edge of a
+ * lot of nothing. So the blank paper answers instead: everything to the right
+ * of the last mark reports that mark.
+ *
+ * It costs nothing, because that region had no other meaning. Nothing happened
+ * there — there is no competing mark for the pointer to be asking about, and
+ * hiding the tooltip was never an *answer*, only an absence of one.
+ *
+ * THE TWO ZONES ABUT EXACTLY and there is no third rule between them. Within
+ * `snapPx` of any mark the ordinary snap wins, so a near-miss on the last mark
+ * behaves exactly as a near-miss on any other and reads as an ordinary hover;
+ * past that, the pointer is unambiguously in empty paper and the magnet takes
+ * it. The buffer past the mark is therefore `snapPx` itself rather than a
+ * constant of its own — a second number here could only open a gap or an
+ * overlap between the two rules.
+ *
+ * Left of the FIRST mark there is no magnet, deliberately. That region is the
+ * part of the day that had not happened yet when the lane began, and "the
+ * earliest thing that happened here" is not a question anybody asks of it.
+ */
+export function pickMark(
+  positionsPx: readonly number[],
+  x: number,
+  snapPx: number,
+): MarkPick | null {
+  if (positionsPx.length === 0) return null
+
+  let index = -1
+  let bestPx = Infinity
+  let last = -1
+  let lastPx = -Infinity
+  positionsPx.forEach((px, i) => {
+    const d = Math.abs(px - x)
+    if (d < bestPx) {
+      bestPx = d
+      index = i
+    }
+    // Read rather than assumed: both callers hand these in ascending order,
+    // but the rule is about the RIGHTMOST mark and should say so itself.
+    if (px > lastPx) {
+      lastPx = px
+      last = i
+    }
+  })
+
+  if (index >= 0 && bestPx <= snapPx) return { index, magnetized: false }
+  if (x > lastPx) return { index: last, magnetized: true }
+  return null
+}
+
 /** How a speaker is named in the entry header: short enough to sit on one
  *  line beside a timestamp with room to spare. Color, not the word, is what
  *  actually carries "who" at a glance (see momentTip.css) — the word is the

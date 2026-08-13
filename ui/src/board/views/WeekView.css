@@ -277,6 +277,20 @@
   box-shadow: 0 0 0 2px rgba(154, 123, 53, 0.12);
 }
 
+/* THE MAGNET'S MARK. Right of a row's last inked slot the rail catches the
+   pointer and reports that last moment (see `pickMark` in momentTip.ts); this
+   says which moment. Lighter than `.wk-now` beside it and in the same gold: the
+   now-thread is a fact about the clock, this is a fact about the pointer, and
+   the weight is what tells them apart on a row carrying both. */
+.wk-magnet {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 0;
+  border-left: 1px solid rgba(154, 123, 53, 0.62);
+  pointer-events: none;
+}
+
 /* ── Hollow marks ─────────────────────────────────────────────────────────── */
 
 .wk-mark {

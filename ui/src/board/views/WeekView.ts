@@ -81,6 +81,7 @@ import {
   clockTime,
   dedupeSources,
   MomentLoader,
+  pickMark,
   renderTip,
   SLOT_KIND_ORDER,
   SLOT_NO_TEXT_NOTE,
@@ -1011,7 +1012,12 @@ class WeekView implements TemporalView {
     const row: WeekRow = { day, root, rail, paint, hover, annot, slots: [], sig: '' }
 
     hover.addEventListener('mousemove', (e) => this.showTip(row, e))
-    hover.addEventListener('mouseleave', () => this.hideTip())
+    hover.addEventListener('mouseleave', () => {
+      // The magnet follows the POINTER, so it goes even while a pinned slip
+      // holds the tooltip open.
+      if (this.pinnedKey === null) this.markMagnet(row, null, 0)
+      this.hideTip()
+    })
     // A click fixes the slip where the pointer already is, so what you were
     // reading stops fleeing when you move to read it. The stopPropagation is
     // load-bearing: the document listener that unpins would otherwise see this
@@ -1044,18 +1050,16 @@ class WeekView implements TemporalView {
     if (rail.width <= 0) return this.hideTip(pin)
 
     const x = e.clientX - rail.left
-    let best: RasterSlot | null = null
-    let bestPx = Infinity
-    for (const slot of row.slots) {
-      const px = Math.abs(slot.fraction * rail.width - x)
-      if (px < bestPx) {
-        bestPx = px
-        best = slot
-      }
-    }
-    if (!best || bestPx > HOVER_SNAP_PX) return this.hideTip(pin)
+    // The nearest slot, or — anywhere right of the day's last inked slot —
+    // that last slot, caught out of the empty paper. The same rule Day's lanes
+    // use, from the same function: a row that stopped at noon answers "what
+    // was the last thing that happened here?" across the whole blank afternoon
+    // instead of making it a pixel hunt. See `pickMark`.
+    const pick = pickMark(row.slots.map((s) => s.fraction * rail.width), x, HOVER_SNAP_PX)
+    if (!pick) return this.hideTip(pin)
+    this.markMagnet(row, pick.magnetized ? row.slots[pick.index] : null, rail.width)
 
-    const slot = best
+    const slot = row.slots[pick.index]
     const tip = this.ensureTip()
     const key = `${row.day}:${slot.index}`
     renderTip(tip, slotTip(slot, this.moments.peek(key, pin)))
@@ -1088,7 +1092,7 @@ class WeekView implements TemporalView {
     // Positioned against the grid, and flipped at the right edge so a slot late
     // in the day does not push the tooltip off the sheet.
     const box = grid.getBoundingClientRect()
-    const anchor = rail.left - box.left + best.fraction * rail.width
+    const anchor = rail.left - box.left + slot.fraction * rail.width
     const top = rail.top - box.top
     tip.style.top = `${top}px`
     tip.classList.toggle('kbn-tip-flip', anchor > box.width * 0.62)
@@ -1111,9 +1115,31 @@ class WeekView implements TemporalView {
   private hideTip(force = false): void {
     if (this.pinnedKey !== null && !force) return
     this.pinnedKey = null
+    for (const row of this.rows) this.markMagnet(row, null, 0)
     this.tip?.classList.remove('kbn-tip-open', 'kbn-tip-pinned')
     this.hoveredKey = null
     this.moments.cancel()
+  }
+
+  /**
+   * The magnet's affordance: a quiet upright on the slot being reported, drawn
+   * only while the pointer is out in the dead zone right of the row's last ink.
+   * Without it the slip appears over blank paper with nothing to say which
+   * moment it belongs to. Parented to the HOVER layer rather than the paint
+   * layer, which `paint` empties on every repaint.
+   */
+  private markMagnet(row: WeekRow, slot: RasterSlot | null, railWidth: number): void {
+    let mark = row.hover.querySelector<HTMLElement>('.wk-magnet')
+    if (!slot) {
+      mark?.remove()
+      return
+    }
+    if (!mark) {
+      mark = document.createElement('i')
+      mark.className = 'wk-magnet'
+      row.hover.append(mark)
+    }
+    mark.style.left = `${(slot.fraction * railWidth).toFixed(2)}px`
   }
 
   // ── Data ───────────────────────────────────────────────────────────────────

@@ -355,6 +355,25 @@ button.kbn-day-lanename:focus-visible {
   opacity: 0.62;
 }
 
+/* THE MAGNET'S MARK. Out in the blank paper right of a lane's last activity,
+   the rail catches the pointer and reports that last moment (see `pickMark`).
+   This is the mark saying which moment that is — without it the slip appears
+   over nothing, and the reader has to take on trust what it refers to.
+
+   Deliberately NOT a fourth pigment: the board's gold is already "here, now",
+   which is exactly what the highlight means, and it is the same ink the drag
+   band and the now-thread are drawn in. Full lane height so it reads as a
+   position on the axis rather than as another mark on the ladder, and quiet
+   enough that it annotates the rail instead of competing with it. */
+.kbn-day-magnet {
+  position: absolute;
+  top: -1px;
+  bottom: -1px;
+  width: 0;
+  border-left: 1px solid rgba(176, 137, 44, 0.62);
+  pointer-events: none;
+}
+
 /* THE DRAG. A wash over the span being swept, in the board's own gold — the
    pigment of "now / here", which is what a live selection is. Drawn over the
    whole stack of rails rather than inside one, because the zoom is the page's

@@ -128,6 +128,7 @@ import {
   clockTime,
   dedupeSources,
   MomentLoader,
+  pickMark,
   renderTip,
   SLOT_KIND_ORDER,
   SLOT_PHRASE,
@@ -2151,7 +2152,13 @@ class DayViewImpl implements TemporalView {
         if (this.drag) return
         this.showBeatTip(lane, rail, win, e)
       })
-      rail.addEventListener('mouseleave', () => this.hideTip())
+      rail.addEventListener('mouseleave', () => {
+        // The magnet goes with the pointer even when a pinned slip is holding
+        // the tooltip open — it marks where the POINTER is being caught, not
+        // what the slip is showing.
+        if (this.pinnedKey === null) this.markMagnet(rail, null, 0)
+        this.hideTip()
+      })
       // A click fixes the slip where the pointer already is, so what you were
       // reading stops fleeing when you move to read it. The stopPropagation is
       // load-bearing: the document listener that unpins would otherwise see
@@ -2261,18 +2268,20 @@ class DayViewImpl implements TemporalView {
 
     const perMinute = box.width / win.minutes
     const x = e.clientX - box.left
-    let best: DayBeat | null = null
-    let bestPx = Infinity
-    for (const beat of lane.beats) {
-      const px = Math.abs((beat.minute + 0.5) * perMinute - x)
-      if (px < bestPx) {
-        bestPx = px
-        best = beat
-      }
-    }
-    if (!best || bestPx > BEAT_SNAP_PX) return this.hideTip(pin)
+    // The nearest beat, or — anywhere right of the lane's last one — that last
+    // beat, caught out of the empty paper. See `pickMark`. "Last" is the last
+    // beat IN THE FRAME, which is what makes this follow a zoom for free: the
+    // lanes are rebuilt against the drawn window, so a beat outside it is not
+    // in `lane.beats` at all.
+    const pick = pickMark(
+      lane.beats.map((b) => (b.minute + 0.5) * perMinute),
+      x,
+      BEAT_SNAP_PX,
+    )
+    if (!pick) return this.hideTip(pin)
+    this.markMagnet(rail, pick.magnetized ? lane.beats[pick.index] : null, perMinute)
 
-    const beat = best
+    const beat = lane.beats[pick.index]
     const startMs = win.startMs + beat.minute * MINUTE_MS
     const tip = this.ensureTip()
     const key = `${lane.key}:${beat.minute}`
@@ -2314,6 +2323,36 @@ class DayViewImpl implements TemporalView {
     tip.style.right = flip ? `${chartBox.width - anchor + 9}px` : 'auto'
   }
 
+  /**
+   * The magnet's affordance: a quiet upright at the beat being reported, drawn
+   * ONLY while the pointer is out in the dead zone and the rail has caught it.
+   *
+   * Without it the magnet is a tooltip appearing over blank paper with nothing
+   * to say which moment it belongs to — the reader would have to trust that it
+   * meant the last one. With it the gesture explains itself: the mark lights,
+   * the slip describes it, and the relation between the two is visible. It is
+   * never drawn for an ordinary hover, where the pointer is already standing on
+   * its own answer.
+   */
+  private markMagnet(rail: HTMLElement, beat: DayBeat | null, perMinute: number): void {
+    let mark = rail.querySelector<HTMLElement>('.kbn-day-magnet')
+    if (!beat) {
+      mark?.remove()
+      return
+    }
+    if (!mark) {
+      mark = document.createElement('i')
+      mark.className = 'kbn-day-magnet'
+      rail.append(mark)
+    }
+    mark.style.left = `${((beat.minute + 0.5) * perMinute).toFixed(2)}px`
+  }
+
+  /** Put every lane's magnet away — the pointer has left, or the slip closed. */
+  private clearMagnets(): void {
+    this.chartEl?.querySelectorAll('.kbn-day-magnet').forEach((el) => el.remove())
+  }
+
   private ensureTip(): HTMLElement {
     if (this.tip?.isConnected) return this.tip
     const tip = document.createElement('div')
@@ -2330,6 +2369,7 @@ class DayViewImpl implements TemporalView {
     if (this.pinnedKey !== null && !force) return
     const wasPinned = this.pinnedKey !== null
     this.pinnedKey = null
+    this.clearMagnets()
     this.tip?.classList.remove('kbn-tip-open', 'kbn-tip-pinned')
     this.hoveredKey = null
     this.moments.cancel()
