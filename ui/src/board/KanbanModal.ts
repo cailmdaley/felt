@@ -25,7 +25,9 @@
  *     by where the card sits (`dayDropHorizon`): a desk or resting card gets
  *     `due` + `horizon: stashed` (snooze); anything else just gets `due`.
  *   • Drag onto today → onto the desk now (due cleared).
- *   • Drag into Resting → horizon=stashed, dateless.
+ *   • Drag into Resting → horizon=stashed, keeping any future `due:` (which
+ *     makes it a snooze that returns on its own); an already-elapsed `due:` is
+ *     cleared, and said out loud, because it would bounce the card back.
  *   • Drag back up to the now-board → clear horizon/cold.
  *   • Drop on a now-board column header routes through the daemon's
  *     /api/v1/transition lifecycle path.
@@ -45,12 +47,14 @@ import type {
   KanbanResponse,
 } from './KanbanTypes.js'
 import { dispatchIneligibleReason, errorMessageFromResponse, isAgentCard } from './KanbanModalShared.js'
-import { COLUMN_TITLES, KanbanSurfaceRenderer, SURFACE_TITLE, findCardColumn } from './KanbanSurfaces.js'
+import { COLUMN_TITLES, KanbanSurfaceRenderer, SURFACE_TITLE, findCardColumn, formatDue } from './KanbanSurfaces.js'
 import { parseCompositeFeed } from './KanbanComposite.js'
 import { buildKanbanResponseFromComposite, deriveCycleLens, restingCards } from './KanbanReadModel.js'
 import {
+  dueBouncesFromResting,
   KANBAN_TIMELINE_WINDOW,
   nextStandingLaunch,
+  restingUntil,
   STANDING_TIMELINE_HORIZON_MS,
 } from './KanbanRules.js'
 import { sameCivilDue } from './civilDay.js'
@@ -933,12 +937,22 @@ export class KanbanModal {
    *   • Drag into Resting                 → setSurface(card, 'stashed', { cold? }).
    *   • Drag back up to now               → setSurface(card, 'now') clears horizon.
    *
-   * When `opts.due` is omitted the existing `due:` is preserved — except
-   * when stashing, where an omitted `due` resolves to `null`. Stashing
-   * clears the deadline on purpose: `due:` means timeline placement until
-   * it becomes imminent, so a hand-stash gesture that didn't drop the due
-   * would not be a dateless stash. Clearing it is what makes stash mean
-   * "future, no date." Callers can still pass an explicit `due` to override.
+   * When `opts.due` is omitted the existing `due:` is PRESERVED, stashing
+   * included. Putting a card down in Resting is one gesture and it does one
+   * thing: it moves the card. The date the human wrote is theirs, and a drag
+   * that quietly deleted it — "I'll look at Croatia in October" becoming a
+   * dateless card nothing will ever surface again — is the second, destructive
+   * act a gesture must never smuggle in. Preserved, `horizon: stashed` + a
+   * future `due:` compose into the snooze that brings the card back by itself.
+   *
+   * The ONE exception, and the reason the old blanket clear existed: a `due:`
+   * that is today or already past would bounce the card straight back onto the
+   * desk, because `effectiveHorizon`'s drift branch outranks its stashed branch
+   * — the drop would read as ignored. Such a due is cleared, and `commitSurface`
+   * says so in a banner. `dueBouncesFromResting` (KanbanRules) is the test.
+   *
+   * Callers can still pass an explicit `due` to override either way: a day
+   * (the date-column snooze) or `null` to clear on purpose.
    */
   private setSurface(
     card: KanbanCard,
@@ -986,10 +1000,21 @@ export class KanbanModal {
       return
     }
     const wantsCold = horizon === 'stashed' ? (opts.cold ?? false) : undefined
-    const due = horizon === 'stashed' && opts.due === undefined ? null : opts.due
+    // A bare stash keeps the card's own `due:` — `due` stays undefined, which
+    // commitSurface reads as "don't send the key", and felt leaves the line
+    // alone. Only a deadline that would bounce the card back is dropped, and
+    // the drop is reported rather than done under the gesture's cover.
+    const dropsStaleDue =
+      horizon === 'stashed' && opts.due === undefined && dueBouncesFromResting(card.due)
+    const due = dropsStaleDue ? null : opts.due
 
     const sameHorizon =
       card.storedHorizon === horizon && (card.cold ?? false) === (opts.cold ?? false)
+    // `undefined` means "the date is not being touched", so it can never be the
+    // half of the drop that makes it a real change — a preserved due leaves the
+    // verdict entirely to `sameHorizon`. Re-dropping an already-resting dated
+    // card into Resting is therefore a true no-op now, and the banner below
+    // says so honestly; it used to be a silent deadline deletion.
     const sameDue = due === undefined || sameCivilDue(card.due, due)
     // Any CLOSED card — a tempered/composted past run OR an awaiting-review one
     // (closed, untempered) — classifies by its lifecycle state, not its stored
@@ -1018,18 +1043,22 @@ export class KanbanModal {
       if (optimistic) this.applyResponse(optimistic)
     }
 
-    void this.commitSurface(card, horizon, { cold: wantsCold, due })
+    void this.commitSurface(card, horizon, { cold: wantsCold, due, dropsStaleDue })
   }
 
   /**
    * Network half of {@link setSurface}: POST the horizon edit, then reconcile.
    * Runs in the background after the optimistic render (when there was one), so
    * its latency is invisible; banners + snaps back on failure.
+   *
+   * `opts.dropsStaleDue` is the one thing this method reports rather than does:
+   * setSurface decided to clear an already-elapsed deadline, and the human is
+   * told which date went. See `announceSurfaceLanding`.
    */
   private async commitSurface(
     card: KanbanCard,
     horizon: HorizonKind,
-    opts: { cold?: boolean; due?: string | null },
+    opts: { cold?: boolean; due?: string | null; dropsStaleDue?: boolean },
   ): Promise<void> {
     try {
       // Parking a running card on a planning surface (stash / future date) stops
@@ -1083,13 +1112,58 @@ export class KanbanModal {
       if (!res.ok) {
         throw new Error(await errorMessageFromResponse(res, 'Surface edit failed'))
       }
-      this.announce(`Moved “${card.name}” to ${SURFACE_TITLE[horizon]}.`)
+      this.announceSurfaceLanding(card, horizon, opts)
     } catch (err: unknown) {
       const msg = (err as { message?: string })?.message ?? String(err)
       this.showBanner(`Couldn't move “${card.name}” to ${SURFACE_TITLE[horizon]}: ${msg}`, 'error')
       this.announce(`Surface move failed: ${msg}`)
     }
     await this.fetchAndRender()
+  }
+
+  /**
+   * Say where the card landed, in the register the landing deserves.
+   *
+   * Three cases, and the split is about what the human can already SEE:
+   *
+   *   • A stale deadline was dropped → a visible BANNER naming the date that
+   *     went. This is the only branch that destroys something the human wrote,
+   *     so it is the only one that interrupts. Silence here is the whole bug
+   *     this change exists to fix.
+   *   • Resting with a wake day → announce "resting until <day>". No banner:
+   *     the card itself grows a `wakes <day>` chip in the Resting grid
+   *     (KanbanSurfaces' stash card), so the sighted user is already told. The
+   *     announcement carries that same fact to a screen reader, which cannot
+   *     see the chip.
+   *   • Anything else → the plain "Moved to <surface>".
+   *
+   * The wake day comes from `restingUntil`, the same rule the chip and the
+   * timeline ghost use, rather than a date formatted by hand here — one rule,
+   * so the sentence and the chip can never name different days.
+   */
+  private announceSurfaceLanding(
+    card: KanbanCard,
+    horizon: HorizonKind,
+    opts: { due?: string | null; dropsStaleDue?: boolean },
+  ): void {
+    if (opts.dropsStaleDue === true) {
+      const gone = card.due ? formatDue(card.due) : null
+      const msg = gone
+        ? `“${card.name}” is resting, and its ${gone} deadline — already past — was cleared. Give it a new date to have it come back on its own.`
+        : `Moved “${card.name}” to Resting.`
+      this.showBanner(msg, 'info')
+      this.announce(msg)
+      return
+    }
+    // The due the write left on the document: an explicit day (or an explicit
+    // clear) from the caller, otherwise the card's own, preserved.
+    const settledDue = opts.due === undefined ? card.due : (opts.due ?? undefined)
+    const wakes = horizon === 'stashed' ? restingUntil({ horizon: 'stashed', due: settledDue }) : undefined
+    this.announce(
+      wakes
+        ? `“${card.name}” is resting until ${formatDue(wakes)}, when it returns to the desk.`
+        : `Moved “${card.name}” to ${SURFACE_TITLE[horizon]}.`,
+    )
   }
 
   /**
@@ -2202,11 +2276,12 @@ export function applyOptimisticSurface(
     effectiveHorizon: 'stashed',
     drifted: false,
     cold: opts.cold ?? false,
-    // A bare stash clears the deadline; a SNOOZE is a stash that keeps one (the
-    // caller passed an explicit day). Dropping the due here would have shown a
-    // dateless resting card for one frame and then snapped the date back in on
-    // the refetch — the optimistic card must be the card the write produces.
-    due: opts.due ?? undefined,
+    // The optimistic card must be the card the WRITE produces, or the board
+    // shows one frame of a lie and then snaps. `undefined` is setSurface's
+    // "leave the date alone" (a bare stash now preserves a future deadline), so
+    // it keeps the card's own; an explicit day or an explicit `null` — the
+    // date-column snooze, and the stale-due clear — wins over it.
+    due: opts.due === undefined ? card.due : (opts.due ?? undefined),
   }
   return withSurfaces(resp, { now, pinned, timeline, stash: [moved, ...stash], temperedTotal: resp.temperedTotal })
 }

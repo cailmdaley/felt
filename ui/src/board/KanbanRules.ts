@@ -455,6 +455,31 @@ export function restingUntil(
   return dueCivilDay(card.due);
 }
 
+/**
+ * Would this `due:` pull a card straight back onto the desk the moment it was
+ * put down in Resting?
+ *
+ * The question the Resting drop has to ask before it decides what to do with a
+ * deadline it was not handed. Dragging into Resting PRESERVES a future `due:` —
+ * that composition is the snooze, and it is the only reason a rested card ever
+ * comes back on its own. But `effectiveHorizon`'s drift branch promotes any
+ * card whose due day is today or already past, and it runs BEFORE the stashed
+ * branch, so keeping a stale deadline would land the card back in Drafts on the
+ * very next poll: the drag would read as ignored, which is the dissonance the
+ * classifier's liveness note says the board must never produce. A due that
+ * answers true here is dropped instead — out loud, never silently.
+ *
+ * Phrased as a question put TO `effectiveHorizon` rather than as its own day
+ * comparison, so this rule cannot drift from the branch that causes the bounce.
+ */
+export function dueBouncesFromResting(
+  due: string | undefined,
+  nowMs: number = Date.now(),
+): boolean {
+  if (due === undefined) return false;
+  return effectiveHorizon({ due, horizon: 'stashed' }, nowMs).effectiveHorizon === 'now';
+}
+
 const DOW_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 /**

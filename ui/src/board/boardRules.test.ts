@@ -12,6 +12,7 @@ import {
   classifyFiber,
   cycleMembership,
   cycleSpan,
+  dueBouncesFromResting,
   effectiveHorizon,
   humanizeCron,
   isCycleFiber,
@@ -103,6 +104,41 @@ describe('restingUntil', () => {
 
   it('is undefined for a scheduled card — that one is on the timeline, not resting', () => {
     expect(restingUntil({ due: dayFromNow(2) }, NOW)).toBeUndefined()
+  })
+})
+
+// What a drag into Resting does with a `due:` it was not handed. The gesture
+// PRESERVES the date — deleting what the human wrote was the bug — except for
+// the one date that cannot survive the trip.
+describe('dueBouncesFromResting', () => {
+  it('STASH PRESERVES A FUTURE DUE — the snooze that comes back on its own', () => {
+    // The Croatia case: a card due in October, dropped into Resting in August.
+    // False here means setSurface leaves the `due:` alone, so the card rests as
+    // `horizon: stashed` + a future date and the drift branch returns it on the
+    // day. This is the whole point of the rule.
+    expect(dueBouncesFromResting(dayFromNow(1), NOW)).toBe(false)
+    expect(dueBouncesFromResting(dayFromNow(49), NOW)).toBe(false)
+  })
+
+  it('STASH DROPS A STALE DUE — it would land the card straight back on the desk', () => {
+    // Today counts as stale: `effectiveHorizon` promotes on `due <= today`, so
+    // keeping either of these would put the card back in Drafts on the next
+    // poll and the drag would read as ignored.
+    expect(dueBouncesFromResting(dayFromNow(0), NOW)).toBe(true)
+    expect(dueBouncesFromResting(dayFromNow(-3), NOW)).toBe(true)
+  })
+
+  it('has nothing to say about a card with no date', () => {
+    expect(dueBouncesFromResting(undefined, NOW)).toBe(false)
+  })
+
+  it('judges the civil day the due NAMES, through felt\'s midnight storage', () => {
+    // The hemisphere trap: tomorrow written at midnight in any offset is still
+    // tomorrow, and must survive the stash in both TZs this file runs under.
+    for (const offset of ['Z', '+02:00', '-07:00']) {
+      expect(dueBouncesFromResting(`${dayFromNow(1)}T00:00:00${offset}`, NOW)).toBe(false)
+      expect(dueBouncesFromResting(`${dayFromNow(-1)}T00:00:00${offset}`, NOW)).toBe(true)
+    }
   })
 })
 
