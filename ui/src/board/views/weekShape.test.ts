@@ -1164,7 +1164,7 @@ describe('what a hovered slot is willing to say', () => {
       bucket({ m: at, k: 'attention' }),
     ]));
     expect(tip.rows.map((r) => r.kind)).toEqual(['attention', 'agent']);
-    expect(tip.rows.map((r) => r.phrase)).toEqual(['you prompted', 'agent working']);
+    expect(tip.rows.map((r) => r.phrase)).toEqual(['you', 'tool call']);
     expect(tip.rows.find((r) => r.kind === 'agent')?.count).toBe(4);
   });
 

@@ -49,7 +49,7 @@ import {
   curveField,
   curveGrid,
   fieldPeak,
-  SIGMA_WEEK_MINUTES,
+  weekSigma,
   type ActivitySample,
   type CurveField,
 } from './densityCurve.js'
@@ -1256,10 +1256,15 @@ class WeekView implements TemporalView {
       // real span rather than from an assumed 1440.
       const minutes = (bounds.endMs - bounds.startMs) / 60_000
       const { samples, spines } = slotSamples(slots, bounds)
+      // The kernel is a fraction of the rail, and Week's fraction is broad on
+      // purpose — broad enough to clear the four-minute raster slot these
+      // samples were binned onto, so the curve draws the day and not the bins.
+      // See `weekSigma`.
+      const sigma = weekSigma(minutes)
       curves.set(row.day, {
         slots,
         minutes,
-        field: curveField(samples, curveGrid(minutes), spines, SIGMA_WEEK_MINUTES),
+        field: curveField(samples, curveGrid(minutes, sigma), spines, sigma),
       })
     }
     const peak = fieldPeak([...curves.values()].map((c) => c.field))

@@ -1,11 +1,20 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { createTemporalFetchers, parseMoment, type MomentResult } from './TemporalData.js'
 import {
+  createTemporalFetchers,
+  parseMoment,
+  type MomentExcerpt,
+  type MomentResult,
+} from './TemporalData.js'
+import {
+  clockTime,
   dedupeSources,
   MomentLoader,
+  renderTip,
   SLOT_NO_TEXT_NOTE,
+  SLOT_PHRASE,
   type MomentWords,
+  type SlotTip,
 } from './momentTip.js'
 
 /**
@@ -362,8 +371,130 @@ describe('dedupeSources', () => {
   })
 })
 
-// `renderTip` itself is not covered here: this suite runs in node with no DOM,
-// as every UI suite in this package does, and adding a DOM environment for one
-// subtree would be a heavier change than the drawing it tests. What IS covered
-// is everything the drawing reads — the parse, the loader, and the note that
-// stands whenever the words did not come back.
+// ── `renderTip`'s markup ────────────────────────────────────────────────────
+//
+// This suite runs in node with no DOM, as every UI suite in this package
+// does — so `renderTip`'s two structural promises (a one-line header above
+// the words, and the class that carries who spoke) are checked against a
+// minimal fake element rather than pulling in a DOM environment for one
+// subtree. The fake tracks exactly what the assertions need: tag, className,
+// textContent, and the children `append` was given, in order.
+
+class FakeNode {
+  className = ''
+  textContent = ''
+  readonly children: FakeNode[] = []
+  append(...nodes: Array<FakeNode | { textContent: string }>): void {
+    for (const node of nodes) this.children.push(node as FakeNode)
+  }
+}
+
+function fakeDocument() {
+  return {
+    createElement: () => new FakeNode(),
+    createTextNode: (text: string) => ({ textContent: text }),
+  }
+}
+
+const EXCERPT_AT_MS = 12 * 60_000 + 34_000
+const baseExcerpt = (over: Partial<MomentExcerpt>): MomentExcerpt => ({
+  at_ms: EXCERPT_AT_MS,
+  role: 'user',
+  text: 'run the null tests',
+  ...over,
+})
+
+describe('renderTip — the excerpt cards', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('renamed the tool-call register and kept short labels for the rest', () => {
+    expect(SLOT_PHRASE).toEqual({ attention: 'you', agent: 'tool call', reply: 'agent' })
+  })
+
+  it('puts label and timestamp on one header line, above the words — never mixed in with them', () => {
+    vi.stubGlobal('document', fakeDocument())
+    const host = new FakeNode()
+    const tip: SlotTip = {
+      time: '14:32–14:36',
+      rows: [],
+      detail: [baseExcerpt({})],
+    }
+
+    renderTip(host as unknown as HTMLElement, tip)
+
+    const said = host.children.find((c) => c.className.includes('kbn-tip-said'))!
+    const line = said.children[0]
+    expect(line.className).toContain('kbn-tip-line-user')
+
+    const [head, text] = line.children
+    expect(head.className).toBe('kbn-tip-line-head')
+    const [label, when] = head.children
+    expect(label.className).toBe('kbn-tip-label')
+    expect(label.textContent).toBe('you')
+    expect(when.className).toBe('kbn-tip-when')
+    expect(when.textContent).toBe(clockTime(EXCERPT_AT_MS))
+
+    expect(text.className).toBe('kbn-tip-text')
+    expect(text.children[0].textContent).toBe('run the null tests')
+  })
+
+  it('carries who spoke in the line class and label — colour does the rest in CSS', () => {
+    vi.stubGlobal('document', fakeDocument())
+
+    const cases: Array<[MomentExcerpt[], string, string]> = [
+      [[baseExcerpt({ role: 'user' })], 'kbn-tip-line-user', 'you'],
+      [[baseExcerpt({ role: 'assistant' })], 'kbn-tip-line-assistant', 'agent'],
+      [[baseExcerpt({ role: 'notification' })], 'kbn-tip-line-notification', 'note'],
+      [
+        [baseExcerpt({ role: 'assistant', kind: 'spawn', name: 'chart-hand', text: 'go look' })],
+        'kbn-tip-deleg-spawn',
+        '→ spawn',
+      ],
+      [
+        [baseExcerpt({ role: 'assistant', kind: 'return', name: 'chart-hand', text: 'found it' })],
+        'kbn-tip-deleg-return',
+        '← return',
+      ],
+    ]
+
+    for (const [detail, expectedClass, expectedLabel] of cases) {
+      const host = new FakeNode()
+      renderTip(host as unknown as HTMLElement, { time: '', rows: [], detail })
+      const said = host.children.find((c) => c.className.includes('kbn-tip-said'))!
+      const line = said.children[0]
+      const head = line.children[0]
+      expect(line.className).toContain(expectedClass)
+      expect(head.children[0].textContent).toBe(expectedLabel)
+    }
+  })
+
+  it('names the other agent on a delegation line, once, without disturbing the timestamp', () => {
+    vi.stubGlobal('document', fakeDocument())
+    const host = new FakeNode()
+    const detail = [
+      baseExcerpt({ kind: 'spawn', name: 'chart-hand', text: 'go and look' }),
+    ]
+    renderTip(host as unknown as HTMLElement, { time: '', rows: [], detail })
+
+    const said = host.children.find((c) => c.className.includes('kbn-tip-said'))!
+    const head = said.children[0].children[0]
+    const [label, who, when] = head.children
+    expect(label.textContent).toBe('→ spawn')
+    expect(who.className).toBe('kbn-tip-who')
+    expect(who.textContent).toBe('chart-hand')
+    expect(when.className).toBe('kbn-tip-when')
+  })
+
+  it('falls to the note, still under the shared section rule, when nothing was said', () => {
+    vi.stubGlobal('document', fakeDocument())
+    const host = new FakeNode()
+    renderTip(host as unknown as HTMLElement, { time: '', rows: [] })
+    const foot = host.children.find((c) => c.className.includes('kbn-tip-note'))!
+    expect(foot.className).toBe('kbn-tip-note kbn-tip-section')
+    expect(foot.textContent).toBe(SLOT_NO_TEXT_NOTE)
+  })
+})
+
+// What is covered above is the drawing's structure; what is covered in the
+// rest of this file is everything it reads to get there — the parse, the
+// loader, and the note that stands whenever the words did not come back.

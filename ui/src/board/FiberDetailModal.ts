@@ -18,6 +18,7 @@ import {
 } from './FloatingPanelChrome.js'
 import { buildFileViewer, isScrollableFile } from './FileViewerPanel.js'
 import { disambiguateBasenames, normalizeSentFiles, type SentFile } from './sentFiles.js'
+import { closeTab, openTab } from './ReaderTabs.js'
 import { humanizeCron } from './KanbanRules.js'
 import { formatSpanMinutes, instantMs, isoDayLocal } from './civilDay.js'
 import './FiberDetailModal.css'
@@ -244,6 +245,9 @@ interface DetailPersist {
  * is built once, on first activation (`viewerBuilt`).
  */
 interface OpenFileEntry {
+  /** The tab's identity, `file.fullPath` — named `path` so the shared
+   *  tab-set arithmetic in ReaderTabs can operate on these entries. */
+  path: string
   file: SentFile
   tab: HTMLElement
   cell: HTMLElement
@@ -1914,9 +1918,14 @@ export class FiberDetailModal {
    * stay consistent.
    */
   private activateFile(file: SentFile, card: KanbanCard, opts?: { scroll?: number; zoom?: number; persist?: boolean }): void {
-    const entry =
-      this.openFiles.find((e) => e.file.fullPath === file.fullPath) ??
-      this.addOpenFile(file, card, opts?.scroll ?? 0, opts?.zoom ?? 1)
+    // The never-a-second-tab rule lives in ReaderTabs, shared with the Shelf's
+    // Reader: `addOpenFile` is called only on a genuine miss.
+    const { state, entry } = openTab(
+      { tabs: this.openFiles, active: this.activePath },
+      file.fullPath,
+      () => this.addOpenFile(file, card, opts?.scroll ?? 0, opts?.zoom ?? 1),
+    )
+    this.openFiles = [...state.tabs]
     this.setActive(entry, card)
     this.syncLauncherActiveState()
     if (opts?.persist !== false) this.writePersist()
@@ -1954,6 +1963,7 @@ export class FiberDetailModal {
     cell.hidden = true
 
     const entry: OpenFileEntry = {
+      path: file.fullPath,
       file,
       tab,
       cell,
@@ -1975,7 +1985,8 @@ export class FiberDetailModal {
       this.closeFile(entry)
     })
 
-    this.openFiles = [...this.openFiles, entry]
+    // The entry is added to `openFiles` by `activateFile`'s openTab — this
+    // builder only mounts the DOM.
     this.tabStrip?.append(tab)
     this.rightCol?.append(cell)
     return entry
@@ -2102,16 +2113,17 @@ export class FiberDetailModal {
   /** Close one open file. Switches to the nearest remaining tab if it was
    *  active; dissolves the right column if it was the last. */
   private closeFile(entry: OpenFileEntry): void {
-    const wasActive = this.activePath === entry.file.fullPath
-    const idx = this.openFiles.indexOf(entry)
+    const { state, closed } = closeTab(
+      { tabs: this.openFiles, active: this.activePath },
+      entry.path,
+    )
+    if (!closed) return
     entry.tab.remove()
     entry.cell.remove()
-    this.openFiles = this.openFiles.filter((e) => e !== entry)
-    if (wasActive) {
-      this.activePath = null
-      const next = this.openFiles[idx] ?? this.openFiles[idx - 1]
-      if (next && this.card) this.setActive(next, this.card)
-    }
+    this.openFiles = [...state.tabs]
+    this.activePath = state.active
+    const next = state.active ? this.openFiles.find((e) => e.path === state.active) : null
+    if (next && this.card) this.setActive(next, this.card)
     this.syncLauncherActiveState()
     if (this.openFiles.length === 0) this.closeViewerWindow()
     this.writePersist()
@@ -2166,12 +2178,17 @@ export class FiberDetailModal {
         basename: saved.basename ?? basename(saved.path),
         timestamp: 0,
       }
-      this.addOpenFile(file, card, saved.scroll, saved.zoom ?? 1)
+      // Through openTab, like every other open: a store that somehow holds the
+      // same path twice rehydrates as one tab, not two.
+      const { state } = openTab({ tabs: this.openFiles, active: this.activePath }, file.fullPath, () =>
+        this.addOpenFile(file, card, saved.scroll, saved.zoom ?? 1),
+      )
+      this.openFiles = [...state.tabs]
     }
     // Restore the active tab (persisted, else the last opened) — this builds
     // only that one viewer; the others build on first click.
     const active =
-      this.openFiles.find((e) => e.file.fullPath === persist.active) ??
+      this.openFiles.find((e) => e.path === persist.active) ??
       this.openFiles[this.openFiles.length - 1]
     if (active) this.setActive(active, card)
     this.syncLauncherActiveState()

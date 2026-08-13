@@ -6,6 +6,49 @@
    is a piece of paper laid on the sheet, so it carries a real edge and a very
    shallow shadow — the only surface on the board where things overlap. */
 
+/* ── Search ─────────────────────────────────────────────────────────────────
+   One ruled line, in the tab strip's own hand. It filters what is already on
+   the board and never fetches, so it stays quiet: no magnifier, no button, no
+   result count — the surface itself is the result. */
+.kbn-shelf-search {
+  display: flex;
+  align-items: baseline;
+  margin-right: 14px;
+}
+.kbn-shelf-search-input {
+  appearance: none;
+  width: 128px;
+  margin: 0;
+  padding: 0 2px 2px;
+  border: 0;
+  border-bottom: 0.5px solid rgba(122, 111, 92, 0.3);
+  border-radius: 0;
+  background: none;
+  font-family: var(--font-mono, 'IBM Plex Mono', monospace);
+  font-size: calc(10px * var(--kbn-type-scale, 1));
+  color: #1B1611;
+  transition: border-color 140ms ease, width 160ms ease;
+}
+.kbn-shelf-search-input::placeholder {
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-style: italic;
+  color: #A89B83;
+}
+.kbn-shelf-search-input:focus {
+  outline: none;
+  width: 190px;
+  border-bottom-color: rgba(196, 147, 51, 0.75);
+}
+.kbn-shelf-search-on { border-bottom-color: #C49333; }
+.kbn-shelf-search-input::-webkit-search-cancel-button {
+  appearance: none;
+  height: 9px;
+  width: 9px;
+  background: linear-gradient(45deg, transparent 44%, #A89B83 44% 56%, transparent 56%),
+              linear-gradient(-45deg, transparent 44%, #A89B83 44% 56%, transparent 56%);
+  cursor: pointer;
+}
+
 /* ── Lens control ───────────────────────────────────────────────────────────
    Two words in the tab strip's own hand, so it reads as chrome rather than as
    a control panel: the active lens is inked, the other is faded. */
@@ -46,6 +89,42 @@
   outline-offset: 2px;
 }
 
+/* ── Housekeeping controls ──────────────────────────────────────────────────
+   Reset, and the count of what has been put away. Same small-caps hand as the
+   lens: these are chrome, and chrome that shouts is chrome you resent. */
+.kbn-shelf-tools {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-left: 14px;
+}
+.kbn-shelf-tool {
+  appearance: none;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  border-radius: 0;
+  margin: 0;
+  padding: 0 1px 1px;
+  cursor: pointer;
+  font-family: var(--font-mono, 'IBM Plex Mono', monospace);
+  font-size: calc(9.5px * var(--kbn-type-scale, 1));
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #A89B83;
+  transition: color 120ms ease, border-color 120ms ease;
+}
+.kbn-shelf-tool:hover { color: #7A6F5C; }
+.kbn-shelf-tool-on {
+  color: #1B1611;
+  border-bottom-color: #C49333;
+}
+.kbn-shelf-tool[hidden] { display: none; }
+.kbn-shelf-tool:focus-visible {
+  outline: 1px dashed rgba(188, 69, 56, 0.55);
+  outline-offset: 2px;
+}
+
 /* ── The surface ────────────────────────────────────────────────────────────
    The viewport clips; the surface inside it is what moves. Panning is a
    transform on one element rather than a scroll, so a card's position is in
@@ -65,10 +144,24 @@
 }
 .kbn-shelf-panning { cursor: grabbing; }
 
+/* For the whole duration of a gesture, live bodies stop taking pointer events.
+   An iframe under the pointer would otherwise swallow the drag the moment it
+   crossed one — and hit-testing dozens of live documents per move is not free
+   either. The veil handles this at rest; this handles the focused card, whose
+   veil is lifted. */
+.kbn-shelf-gesturing .kbn-shelf-bodyel { pointer-events: none; }
+
 .kbn-shelf-surface {
   position: absolute;
   top: 0;
   left: 0;
+  /* The scale must be about the surface's own origin, not its centre (the CSS
+     default). Every coordinate the board computes — card positions, the pan
+     offset, the cursor-anchored zoom — is measured from the top-left, so a
+     centred transform origin would put the whole canvas half a surface away
+     from where the arithmetic says it is, by an amount that grows with the
+     board. */
+  transform-origin: 0 0;
   will-change: transform;
 }
 
@@ -102,6 +195,14 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  /* The shell's own containment. `content-visibility: auto` lets the browser
+     skip rendering work for a card that is off-screen entirely, and
+     `contain-intrinsic-size` (set inline, per card, from the layout) is the
+     size it reserves while skipping — without it the surface would collapse
+     and jump as cards enter and leave. `contain: layout style` keeps a card's
+     internals from ever invalidating the surface around it. */
+  content-visibility: auto;
+  contain: layout style;
   border: 0.5px solid rgba(27, 22, 17, 0.18);
   border-radius: 2px;
   background: #FBF6EA;
@@ -129,11 +230,30 @@
   opacity: 1;
 }
 
+/* A card being dragged casts a real shadow and loses its transition, so it
+   tracks the pointer exactly while the cards it displaces glide out of its way
+   under theirs. That difference in motion IS the affordance: one thing is in
+   your hand, the others are reacting to it. */
+
 /* Being read: cinnabar edge, the board's pigment for the thing with your
    attention, and enough shadow to say it is off the surface. */
 .kbn-shelf-card-focus {
   border-color: rgba(188, 69, 56, 0.55);
   box-shadow: 0 4px 14px rgba(27, 22, 17, 0.14);
+}
+
+/* Open in the Reader. A gilt spine down the leading edge — the card is not
+   marked as *active* (the Reader has its own front tab for that), only as
+   "this one is in the stack you are reading", so the canvas can be scanned for
+   what you have already pulled. */
+.kbn-shelf-card-reading {
+  box-shadow:
+    inset 2px 0 0 rgba(196, 147, 51, 0.75),
+    0 1px 2px rgba(27, 22, 17, 0.06);
+}
+.kbn-shelf-card-reading .kbn-shelf-open {
+  color: #C49333;
+  opacity: 1;
 }
 
 /* An origin that is not answering. Its cards are still the truest thing we
@@ -215,7 +335,44 @@
 }
 .kbn-shelf-open:hover { color: #BC4538; opacity: 1; }
 
-/* ── Body ───────────────────────────────────────────────────────────────── */
+/* Put this one away. Invisible until the card is hovered — a × on every card
+   at rest would make the board read as a list of things to delete, which is
+   the opposite of what it is. It still holds its space, so nothing in the
+   header shifts when it appears. */
+.kbn-shelf-dismiss {
+  appearance: none;
+  background: none;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  flex: 0 0 auto;
+  cursor: pointer;
+  font-size: calc(11px * var(--kbn-type-scale, 1));
+  line-height: 1;
+  color: #A89B83;
+  opacity: 0;
+  transition: color 120ms ease, opacity 120ms ease;
+}
+.kbn-shelf-card:hover .kbn-shelf-dismiss { opacity: 0.55; }
+.kbn-shelf-dismiss:hover { color: #BC4538; opacity: 1; }
+.kbn-shelf-dismiss:focus-visible { opacity: 1; outline: 1px dashed rgba(188, 69, 56, 0.55); }
+
+/* A card only on the surface because you asked to see what you had put away.
+   Faded and desaturated, so it reads as a ghost of the board rather than as
+   part of it — and its ↺ is always visible, since taking it back is the only
+   reason it is here. */
+.kbn-shelf-card-dismissed {
+  opacity: 0.42;
+  filter: grayscale(0.7);
+  border-style: dashed;
+}
+.kbn-shelf-card-dismissed .kbn-shelf-dismiss { opacity: 0.9; color: #C49333; }
+
+/* ── Body ─────────────────────────────────────────────────────────────────
+   Two layers in one box. The FACE is the resting state and sits at the back;
+   a BODY, when the card has one, is laid over it and crossfades in. The face
+   is never removed, so a body swept out by the eviction sweep leaves a card
+   that reads exactly as it did before it ever loaded — no blink, no hole. */
 .kbn-shelf-body {
   position: relative;
   flex: 1 1 auto;
@@ -223,6 +380,15 @@
   overflow: hidden;
   background: #FFFDF8;
 }
+.kbn-shelf-bodyel {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.kbn-shelf-body-in { opacity: 1; }
+
 .kbn-shelf-frame {
   width: 100%;
   height: 100%;
@@ -237,16 +403,35 @@
   display: block;
   background: #FFFDF8;
 }
+/* A text body is the bytes themselves, not a document: no iframe, no scripts,
+   just the head of the file in the board's own hand. */
+.kbn-shelf-text {
+  margin: 0;
+  padding: 8px 10px;
+  overflow: hidden;
+  background: #FFFDF8;
+  font-family: var(--font-mono, 'IBM Plex Mono', monospace);
+  font-size: calc(8.5px * var(--kbn-type-scale, 1));
+  line-height: 1.45;
+  color: #4A443C;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
 
-/* The face a file wears when the browser would download it rather than draw
-   it. Marginalia, not an error. */
+/* The face: name, kind, origin. Everything on it came with the feed, which is
+   why it can be the resting state instead of a skeleton — marginalia, not an
+   error, and not a placeholder either. */
 .kbn-shelf-face {
-  height: 100%;
+  position: absolute;
+  inset: 0;
+  z-index: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 6px;
+  padding: 10px;
+  text-align: center;
 }
 .kbn-shelf-face-ext {
   font-family: var(--font-mono, 'IBM Plex Mono', monospace);
@@ -260,6 +445,68 @@
   font-style: italic;
   font-size: calc(12px * var(--kbn-type-scale, 1));
   color: #A89B83;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+/* Which daemon holds the bytes. Only drawn for a file that is not this one's,
+   because "local" on every card is noise. */
+.kbn-shelf-face-origin {
+  font-family: var(--font-mono, 'IBM Plex Mono', monospace);
+  font-size: calc(8px * var(--kbn-type-scale, 1));
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #A89B83;
+  opacity: 0.75;
+}
+
+/* ── Body states ──────────────────────────────────────────────────────────
+   Each state is a hairline's worth of ink, no more. A card is legible and
+   draggable in every one of them, so none of these may take space, move
+   anything, or animate the layout. */
+
+/* Loading: a thread of ochre creeping along the card's foot. */
+.kbn-shelf-card-loading .kbn-shelf-body::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 1.5px;
+  z-index: 3;
+  background: rgba(196, 147, 51, 0.8);
+  animation: kbn-shelf-load 1.4s ease-in-out infinite;
+}
+@keyframes kbn-shelf-load {
+  0%   { left: 0; right: 92%; }
+  50%  { left: 30%; right: 8%; }
+  100% { left: 96%; right: 0; }
+}
+
+/* Stalled: the file is taking too long, or did not come. Said in words,
+   because a rectangle that stays blank explains nothing. */
+.kbn-shelf-card-stalled .kbn-shelf-face-note::after {
+  content: ' — slow to load; click to retry';
+  color: #BC4538;
+  font-style: italic;
+}
+
+/* Updated under a live body. The board never swaps a document out from under
+   someone reading it, so it says so and waits to be asked. */
+.kbn-shelf-card-updated::after {
+  content: 'updated — click to reload';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 4;
+  padding: 2px 6px;
+  background: rgba(196, 147, 51, 0.92);
+  color: #2E2418;
+  font-family: var(--font-mono, 'IBM Plex Mono', monospace);
+  font-size: calc(8px * var(--kbn-type-scale, 1));
+  letter-spacing: 0.06em;
+  pointer-events: none;
 }
 
 /* The veil — see ShelfView.ts. It lives INSIDE the body, so it covers exactly

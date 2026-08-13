@@ -83,9 +83,9 @@ export type DrawnKind = Exclude<ActivityBucket['k'], 'notify'>
  *  because a tooltip is answering "what was I doing here?". Shares its claims
  *  with `ACTIVITY_KEY_ITEMS`; the wording is closer in. */
 export const SLOT_PHRASE: Record<DrawnKind, string> = {
-  attention: 'you prompted',
-  agent: 'agent working',
-  reply: 'agent replied',
+  attention: 'you',
+  agent: 'tool call',
+  reply: 'agent',
 }
 
 /** Strongest signal first — a human steering, then the agent work underneath
@@ -128,25 +128,26 @@ export function clockTime(ms: number): string {
   return new Date(ms).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
 }
 
-/** How a speaker is marked in the tooltip: a nib per voice, no names. Who said
- *  it is a two-way distinction here, and a glyph carries it without spending a
- *  line on it. */
-const ROLE_GLYPH: Record<MomentExcerpt['role'], string> = {
-  user: '›',
-  assistant: '‹',
-  notification: '※',
+/** How a speaker is named in the entry header: short enough to sit on one
+ *  line beside a timestamp with room to spare. Color, not the word, is what
+ *  actually carries "who" at a glance (see momentTip.css) — the word is the
+ *  fallback for anyone not reading in colour. */
+const ROLE_LABEL: Record<MomentExcerpt['role'], string> = {
+  user: 'you',
+  assistant: 'agent',
+  notification: 'note',
 }
 
 /**
- * The delegation register's nibs — an arrow, because these two lines are the
- * only ones on the slip that have a DIRECTION. A prompt goes out to an agent;
- * a report comes back from one. The voice glyphs cannot say that (they say who
- * is speaking, which is the parent both times), and it is the one thing a
+ * The delegation register's labels — an arrow, because these two lines are
+ * the only ones on the slip that have a DIRECTION. A prompt goes out to an
+ * agent; a report comes back from one. The role labels cannot say that (they
+ * would both read "agent", the parent's own voice), and it is the one thing a
  * reader needs to tell the two halves of a delegation apart at a glance.
  */
-const DELEGATION_GLYPH: Record<'spawn' | 'return', string> = {
-  spawn: '→',
-  return: '←',
+const DELEGATION_LABEL: Record<'spawn' | 'return', string> = {
+  spawn: '→ spawn',
+  return: '← return',
 }
 
 /**
@@ -199,7 +200,7 @@ export function renderTip(host: HTMLElement, tip: SlotTip): void {
 
   if (tip.detail && tip.detail.length > 0) {
     const said = document.createElement('div')
-    said.className = 'kbn-tip-said'
+    said.className = 'kbn-tip-said kbn-tip-section'
     for (const excerpt of tip.detail) {
       // A missing kind is prose — that is what every excerpt was before the
       // registers existed, and an older daemon still says it that way.
@@ -209,25 +210,39 @@ export function renderTip(host: HTMLElement, tip: SlotTip): void {
         ? `kbn-tip-line kbn-tip-deleg kbn-tip-deleg-${excerpt.kind}`
         : `kbn-tip-line kbn-tip-line-${excerpt.role}`
 
-      const glyph = document.createElement('span')
-      glyph.className = 'kbn-tip-glyph'
-      glyph.textContent = delegated
-        ? DELEGATION_GLYPH[excerpt.kind as 'spawn' | 'return']
-        : ROLE_GLYPH[excerpt.role]
-      line.append(glyph)
+      // The header: who + when, on one line, always. `kbn-tip-label` is
+      // allowed to truncate before `kbn-tip-when` ever wraps — a reader can
+      // lose a long agent name, never the clock.
+      const head = document.createElement('div')
+      head.className = 'kbn-tip-line-head'
 
-      const text = document.createElement('span')
-      text.className = 'kbn-tip-text'
-      // WHO is a separate span, not a prefix on the text: it is the one part of
-      // a delegation line that stays legible when the rest is clamped, and it
-      // wants its own weight. A delegation with no name recoverable simply
-      // carries none — the arrow already says which half of the pair it is.
+      const label = document.createElement('span')
+      label.className = 'kbn-tip-label'
+      label.textContent = delegated
+        ? DELEGATION_LABEL[excerpt.kind as 'spawn' | 'return']
+        : ROLE_LABEL[excerpt.role]
+      head.append(label)
+
+      // WHO is a separate span from the label: it is the one part of a
+      // delegation header that names the other agent. A delegation with no
+      // name recoverable simply carries none — the arrow already says which
+      // half of the pair it is.
       if (delegated && excerpt.name) {
         const who = document.createElement('span')
         who.className = 'kbn-tip-who'
         who.textContent = excerpt.name
-        text.append(who)
+        head.append(who)
       }
+
+      const when = document.createElement('span')
+      when.className = 'kbn-tip-when'
+      when.textContent = clockTime(excerpt.at_ms)
+      head.append(when)
+
+      line.append(head)
+
+      const text = document.createElement('span')
+      text.className = 'kbn-tip-text'
       text.append(document.createTextNode(excerpt.text))
       line.append(text)
 
@@ -246,7 +261,7 @@ export function renderTip(host: HTMLElement, tip: SlotTip): void {
   // sibling because a string with no `\n` splits to a one-element array.
   if (tip.tools) {
     const tools = document.createElement('div')
-    tools.className = 'kbn-tip-tools'
+    tools.className = 'kbn-tip-tools kbn-tip-section'
     for (const line of tip.tools.split('\n')) {
       const row = document.createElement('div')
       row.className = 'kbn-tip-tools-line'
@@ -258,7 +273,7 @@ export function renderTip(host: HTMLElement, tip: SlotTip): void {
   }
 
   const foot = document.createElement('div')
-  foot.className = 'kbn-tip-note'
+  foot.className = 'kbn-tip-note kbn-tip-section'
   foot.textContent = tip.note ?? SLOT_NO_TEXT_NOTE
   host.append(foot)
 }

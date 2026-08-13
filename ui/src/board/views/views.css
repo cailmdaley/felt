@@ -189,13 +189,13 @@
    looking for. Twice the width buys back at a glance what the shorter mark
    gave up, and lands the mark on the 8px-target side of hoverable besides.
 
-   The WEIGHT is set per spine in the markup, not here — see `spineAlphas`.
-   A lone message draws at full strength; a crowd of them share the ink out
-   between themselves so a busy morning reads as texture instead of as a wall.
-   Which is why the stroke below is opaque: the alpha is the data. */
+   EVERY SPINE IS AT FULL STRENGTH. There is no opacity channel here at all —
+   alpha on this board means uncertainty, and a message you sent is not an
+   uncertain thing. A crowd is rationed typographically instead: the WIDTH is
+   set per spine in the markup (see `spineWidths`), so a lone message draws a
+   full 2-unit nib and a burst draws hairlines that read as texture. */
 .kbn-curve-spine {
   stroke: var(--curve-spine);
-  stroke-width: 2;
   stroke-linecap: butt;
 }
 

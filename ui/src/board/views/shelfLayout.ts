@@ -22,6 +22,7 @@
  */
 
 import type { ShelfFile } from './shelfData.js'
+import { flowSlots, packShelf, type Rect } from './shelfPack.js'
 
 /** The lens — how flowed cards are ordered on the surface. */
 export type ShelfLens = 'recency' | 'fiber'
@@ -39,13 +40,47 @@ export interface ShelfPersist {
   lens: ShelfLens
   /** The surface's pan offset, so the canvas reopens where you left it. */
   pan: { x: number; y: number }
+  /** The surface's scale. 1 is native; below it the board is a map of itself. */
+  zoom: number
   cards: Record<string, ShelfCardState>
+  /** Cards the reader has put away. Kept as paths rather than as a flag on the
+   *  card state, because a dismissal must survive the card leaving the window
+   *  and coming back — otherwise a file sent again returns from the dead. */
+  dismissed: string[]
+}
+
+/** How far the canvas may be scaled. Below the floor the cards stop being
+ *  recognisable, which is the only thing the board is for; above the ceiling
+ *  you are reading, and reading happens in a browser tab. */
+export const ZOOM_MIN = 0.4
+export const ZOOM_MAX = 1.5
+
+export function clampZoom(zoom: number): number {
+  if (!Number.isFinite(zoom)) return 1
+  return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, zoom))
 }
 
 export const SHELF_PERSIST_KEY = 'shuttle:shelf'
 
 export function emptyPersist(): ShelfPersist {
-  return { lens: 'recency', pan: { x: 0, y: 0 }, cards: {} }
+  return { lens: 'recency', pan: { x: 0, y: 0 }, zoom: 1, cards: {}, dismissed: [] }
+}
+
+/**
+ * Undo every hand placement, keeping the stars.
+ *
+ * A star is a judgement about a FILE ("this one matters"); a position is a
+ * judgement about the SURFACE. Resetting the surface should not throw away the
+ * first, so a starred card keeps its star and rejoins the flow — where the
+ * lens sorts starred cards to the front, so it is still the first thing you
+ * see. Everything else about the arrangement goes.
+ */
+export function resetLayout(persist: ShelfPersist): ShelfPersist {
+  const cards: Record<string, ShelfCardState> = {}
+  for (const [path, state] of Object.entries(persist.cards)) {
+    if (state.starred) cards[path] = { starred: true }
+  }
+  return { ...persist, pan: { x: 0, y: 0 }, zoom: 1, cards }
 }
 
 /** Is this card placed by hand (or held down by a star)? */
@@ -65,10 +100,18 @@ export interface ShelfMetrics {
   captionH: number
 }
 
+/**
+ * A card is a PAGE. The default is portrait at A4's proportion (1 : 1.414),
+ * because almost everything the fleet sends is a document — a report, a deck,
+ * a plot on a page — and a landscape tile crops every one of them to a band
+ * across the middle. At portrait the thumbnail shows a document's shape:
+ * title, first figure, the start of the argument. You can tell two reports
+ * apart from across the canvas, which is the entire premise of the surface.
+ */
 export const SHELF_METRICS: ShelfMetrics = {
   width: 1200,
-  cardW: 268,
-  cardH: 212,
+  cardW: 240,
+  cardH: Math.round(240 * 1.414),
   gap: 20,
   captionH: 26,
 }
@@ -122,6 +165,10 @@ export function layoutShelf(
   lens: ShelfLens,
   states: Record<string, ShelfCardState>,
   metrics: ShelfMetrics = SHELF_METRICS,
+  /** The card under the pointer (or just released): immovable for this
+   *  layout, so a drop keeps the ground it landed on and its neighbours are
+   *  the ones that yield. */
+  active?: string | null,
 ): ShelfLayout {
   const { cardW, cardH, gap, captionH } = metrics
   const columns = Math.max(1, Math.floor((metrics.width + gap) / (cardW + gap)))
@@ -152,19 +199,26 @@ export function layoutShelf(
     b.timestamp - a.timestamp ||
     a.fullPath.localeCompare(b.fullPath)
 
+  // The rects the flow must route AROUND: everything the reader placed by
+  // hand. Water around stones — see shelfPack.flowSlots.
+  const anchors: Rect[] = cards.map((c) => ({ x: c.x, y: c.y, w: c.w, h: c.h }))
+  const flowMetrics = { columns, cardW, cardH, gap }
+
   const colX = (i: number): number => (i % columns) * (cardW + gap)
   const rowY = (i: number): number => Math.floor(i / columns) * (cardH + gap)
 
   let bottom = 0
   if (lens === 'recency') {
     const ordered = [...flowed].sort(byRecency)
+    const slots = flowSlots(ordered.length, flowMetrics, anchors)
     ordered.forEach((file, i) => {
+      const slot = slots[i] ?? { x: colX(i), y: rowY(i), w: cardW, h: cardH }
       cards.push({
-        file, x: colX(i), y: rowY(i), w: cardW, h: cardH,
+        file, x: slot.x, y: slot.y, w: cardW, h: cardH,
         pinned: false, starred: starred(file),
       })
     })
-    bottom = ordered.length ? rowY(ordered.length - 1) + cardH : 0
+    bottom = slots.length ? Math.max(...slots.map((s) => s.y + cardH)) : 0
   } else {
     // Fiber lens: one band per fiber, bands ordered by their own most recent
     // send, so the group you touched last is still the group at the top. The
@@ -195,15 +249,45 @@ export function layoutShelf(
         width: metrics.width,
       })
       y += captionH
+      const slots = flowSlots(group.length, flowMetrics, anchors, { x: 0, y })
       group.forEach((file, i) => {
+        const slot = slots[i] ?? { x: colX(i), y: y + rowY(i), w: cardW, h: cardH }
         cards.push({
-          file, x: colX(i), y: y + rowY(i), w: cardW, h: cardH,
+          file, x: slot.x, y: slot.y, w: cardW, h: cardH,
           pinned: false, starred: starred(file),
         })
       })
-      y += rowY(group.length - 1) + cardH + gap * 2
+      // A band is as tall as its lowest card — which is lower than the plain
+      // grid would make it whenever the flow had to route around an anchor.
+      const lowest = slots.length ? Math.max(...slots.map((s) => s.y + cardH)) : y
+      y = lowest + gap * 2
       bottom = y - gap
     }
+  }
+
+  // ── Settle ──
+  // The flow already routes around the anchors, so this pass exists for the
+  // one case the flow cannot prevent: two cards the reader placed by hand on
+  // the same piece of surface. Same-fiber ones become a pile (cascaded, moved
+  // as one); everything else is pushed apart. `active` — the card under the
+  // pointer, or the one just dropped — is immovable, so a drop always wins the
+  // ground it landed on.
+  const settled = packShelf(
+    cards.map((card) => ({
+      key: card.file.fullPath,
+      group: card.file.uid ?? '',
+      x: card.x,
+      y: card.y,
+      w: card.w,
+      h: card.h,
+      rank: card.file.fullPath === active || card.starred ? 'hard' : 'soft',
+    })),
+  )
+  for (const card of cards) {
+    const at = settled.get(card.file.fullPath)
+    if (!at) continue
+    card.x = at.x
+    card.y = at.y
   }
 
   // The surface must be big enough for the furthest thing on it — including a
@@ -262,6 +346,10 @@ export function coercePersist(parsed: unknown): ShelfPersist {
   if (pan && typeof pan === 'object') {
     const p = pan as Record<string, unknown>
     out.pan = { x: num(p.x) ?? 0, y: num(p.y) ?? 0 }
+  }
+  out.zoom = clampZoom(num(rec.zoom) ?? 1)
+  if (Array.isArray(rec.dismissed)) {
+    out.dismissed = [...new Set(rec.dismissed.filter((p): p is string => typeof p === 'string' && !!p))]
   }
   const cards = rec.cards
   if (cards && typeof cards === 'object' && !Array.isArray(cards)) {

@@ -60,37 +60,108 @@ export const CURVE_AGENT = '#3D5BA0'
 // ── The parameters ───────────────────────────────────────────────────────────
 
 /**
- * Kernel width for the HEIGHT channel, in minutes — now one per view rather
- * than a single constant, because Day and Week disagreed about what "tight"
- * means. A width that kept Day's rail crisp turned Week's rail, which spans
- * seven times the minutes over the same 1000 units of path, into a jagged
- * saw: the same sigma is a much narrower fraction of Week's rail than of
- * Day's, so what read as an edge on Day read as noise on Week.
+ * KERNEL WIDTH IS A FRACTION OF THE AXIS, NOT A NUMBER OF MINUTES.
  *
- * Tune these directly — each is a one-line knob, not a formula to solve.
+ * Two constants in minutes was the wrong shape for the knob. A minute means
+ * something different on a two-hour frame than on a seven-day one, and the two
+ * views were being asked to agree on a unit they do not share. What they DO
+ * share is the drawn axis: whatever span a rail carries, it is drawn about a
+ * thousand pixels wide, so a kernel stated as `span / N` is a kernel stated in
+ * PIXELS — the only unit in which "crisp" and "calm" mean anything.
+ *
+ * So each view names one number: how many kernel widths fit across its axis.
+ * Read `span / N` as "the axis is N kernels wide", and note that a Gaussian's
+ * visible mound is roughly 2.4σ across, so a rail of 1000px at N draws each
+ * episode about `2400 / N` pixels wide.
+ *
+ * These are decoupled on purpose. Day and Week are asking different questions
+ * of the same minutes and there is no reason their answers should be within a
+ * factor of four of each other.
  */
 
 /**
- * Day's kernel width, in minutes. Tight: an agent's events are stamped when
- * they happened and mean what they say, so smoothing them further would only
- * blur a signal that is already honest.
+ * DAY: the axis is 500 kernels wide.
  *
- * Tightened from 1.6 by looking at a real day: at that width a burst and the
- * two quiet minutes beside it merged into one soft mound, and the rail read
- * as a weather map rather than as work. Tightened again from 1.25 to 0.75
- * when the mounds still read as soft "little prince elephants" rather than
- * work with edges.
+ * Day is the close read, and the thing it must resolve is ONE WORK EPISODE — a
+ * burst of tool calls with quiet either side. On a whole civil day that is
+ * σ ≈ 2.9 minutes, about 2px on a 1000px rail, and the day resolves into
+ * distinct near-spiky masses rather than the three soft hills 220 gave.
+ *
+ * Tying it to the axis rather than to a number of minutes is what makes the
+ * zoom work: Day's frame moves with the day's shape (see `drawnWindow`) and
+ * moves again whenever the reader drags one out, and a fixed sigma silently
+ * changed the grammar every time it did — the same day drawn crisp at one zoom
+ * and blurred at the next. A zoom narrows σ automatically, so this errs sharp
+ * for the full frame and gets sharper from there.
  */
-export const SIGMA_DAY_MINUTES = 0.75
+export const DAY_KERNELS_PER_AXIS = 500
 
 /**
- * Week's kernel width, in minutes. Broader than Day's on purpose: a week's
- * rail draws seven days of minutes into the same 1000 units of path, so a
- * sigma tuned for Day's resolution is a much narrower fraction of Week's
- * rail and reads as jagged sawtooth rather than a curve. 3.0 is a starting
- * point for taste iteration, not a derived number.
+ * The finest kernel Day is allowed: THREE QUARTERS OF A MINUTE.
+ *
+ * ON A TIGHT FRAME THIS IS THE NUMBER THAT GOVERNS, not the ratio above — at
+ * 500 kernels a three-hour frame asks for σ = 0.36 and gets the floor instead,
+ * so every frame under about six hours is drawn at exactly this width. It was
+ * one minute, and one minute was the real reason Day still read as rolling
+ * hills after the compression fix: the ratio was never binding on the frames
+ * anybody was looking at.
+ *
+ * The floor's job is to stop the curve degenerating into one tooth per sample,
+ * and the arithmetic says where that happens. Samples arrive one per minute, so
+ * two neighbouring active minutes overlap at `exp(−0.5/σ²)`: at σ = 0.75 that
+ * is 0.41 and they fuse into one episode with visible internal texture; at
+ * σ = 0.5 it is 0.135 and they stand apart as separate teeth. Swept against a
+ * real day's rail, that is exactly where the picture turns — 0.6 and 0.75 read
+ * as crisp episodes, 0.5 and below as a comb, 1.0 and above as hills. So the
+ * floor sits at the last width that still binds adjacent minutes together,
+ * which is the honest limit of what a per-minute record can resolve.
  */
-export const SIGMA_WEEK_MINUTES = 3.0
+export const DAY_SIGMA_FLOOR_MINUTES = 0.75
+
+/**
+ * WEEK: the axis is 200 kernels wide.
+ *
+ * Week is the comparator, and the thing it must resolve is A DAY'S SHAPE —
+ * morning, afternoon, evening — not the episodes inside it. At 200 a mound is
+ * ~12px on the rail, so a day reads as two or three masses.
+ *
+ * Its floor is the harsher of the two, and it is the whole reason Week looked
+ * wiggly: Week rasters its minutes into four-minute slots before the kernel
+ * ever sees them (`RASTER_SLOT_MS` in WeekView), so its samples are a comb with
+ * four-minute teeth. A sigma below the tooth spacing does not smooth that comb,
+ * it DRAWS it — and the sawtooth the old σ = 3.0 produced was therefore not the
+ * week's data being jagged, it was the raster grid showing through. Both the
+ * ratio (1440/200 = 7.2 minutes) and the floor keep the kernel clear of the
+ * tooth, so what is drawn is the day and not the bins it was folded into.
+ */
+export const WEEK_KERNELS_PER_AXIS = 200
+
+/** The finest kernel Week is allowed: the raster slot it bins into. Same
+ *  argument as {@link DAY_SIGMA_FLOOR_MINUTES}, one quantum coarser — you
+ *  cannot resolve below your own sampling interval, and trying draws it. */
+export const WEEK_SIGMA_FLOOR_MINUTES = 4
+
+/**
+ * The kernel width, in minutes, for a rail carrying `spanMinutes`: a fixed
+ * fraction of the axis, never finer than the grain the samples arrived at.
+ */
+export function kernelSigma(
+  spanMinutes: number,
+  kernelsPerAxis: number,
+  floorMinutes: number,
+): number {
+  return Math.max(floorMinutes, Math.max(1, spanMinutes) / Math.max(1, kernelsPerAxis))
+}
+
+/** Day's kernel for a frame of `spanMinutes`. */
+export function daySigma(spanMinutes: number): number {
+  return kernelSigma(spanMinutes, DAY_KERNELS_PER_AXIS, DAY_SIGMA_FLOOR_MINUTES)
+}
+
+/** Week's kernel for a rail of `spanMinutes` (a civil day: 23, 24 or 25h). */
+export function weekSigma(spanMinutes: number): number {
+  return kernelSigma(spanMinutes, WEEK_KERNELS_PER_AXIS, WEEK_SIGMA_FLOOR_MINUTES)
+}
 
 /**
  * The floor under the per-view normaliser, in compressed units — `log1p(4)`.
@@ -147,37 +218,30 @@ export interface CurveField {
 }
 
 /**
- * The grid may never be coarser than this many minutes per step — fine
- * enough that {@link SIGMA_DAY_MINUTES}, the narrowest kernel drawn anywhere
- * on the board, is not under-sampled. A discrete grid samples a genuinely
- * continuous Gaussian (the kernel is evaluated at each grid point from the
- * event's real, unbinned minute), so a step finer than the minute samples
- * arrive at is not wasted precision — it is resolution the curve's shape
- * actually has.
+ * How many grid points a kernel gets across one sigma. Three is the point at
+ * which a sampled Gaussian stops having visible corners; more is precision no
+ * rail a thousand pixels wide could show.
  *
- * Driven off Day's sigma specifically, not Week's, because Day is the
- * narrower kernel and the tighter constraint: a floor that satisfies Day
- * satisfies Week for free. `/1.5` rather than `/KERNEL_REACH_SIGMAS` keeps
- * several points inside even the steepest part of the curve (the flank
- * within one sigma of a spike) without chasing sub-pixel precision no rail
- * could show.
+ * THE GRID IS NOW CUT FROM THE KERNEL rather than from a constant. It used to
+ * be floored off Day's sigma and shared, which was fine while both sigmas were
+ * fixed and Day's was the narrower — and quietly wrong the moment sigma became
+ * a function of the frame. A grid finer than the kernel is wasted work; a grid
+ * coarser than the kernel draws the grid.
  */
-const GRID_STEP_FLOOR_MINUTES = SIGMA_DAY_MINUTES / 1.5
+const GRID_POINTS_PER_SIGMA = 3
 
 /**
- * A sampling grid for a frame, fine enough that the tightest kernel on the
- * board ({@link GRID_STEP_FLOOR_MINUTES}) is not under-sampled and coarse
- * enough that a long frame is not a hundred thousand path commands. The step
- * only widens past the floor once a frame is long enough that holding it
- * would blow {@link MAX_GRID_POINTS} — a day's frame (1440 minutes) sits
- * comfortably under that at the floor step, so Day gets the fine grid its
- * narrow sigma needs and nothing has to ask for it specially.
+ * A sampling grid for a frame, fine enough that a kernel of `sigma` is not
+ * under-sampled and coarse enough that a long frame is not a hundred thousand
+ * path commands. The step widens past the kernel's own demand only when the
+ * frame is long enough that holding it would blow {@link MAX_GRID_POINTS}.
  */
 const MAX_GRID_POINTS = 2880
 
-export function curveGrid(frameMinutes: number): CurveGrid {
+export function curveGrid(frameMinutes: number, sigma: number): CurveGrid {
   const minutes = Math.max(1, Math.ceil(frameMinutes))
-  const step = Math.max(GRID_STEP_FLOOR_MINUTES, minutes / MAX_GRID_POINTS)
+  const wanted = Math.max(0.05, sigma) / GRID_POINTS_PER_SIGMA
+  const step = Math.max(wanted, minutes / MAX_GRID_POINTS)
   return { step, count: Math.floor(minutes / step + 1e-9) + 1 }
 }
 
@@ -214,10 +278,36 @@ export function smear(
 }
 
 /**
- * One lane's field. Height is `log1p` of the agent density — the compression
- * that keeps a burst of fifty tool calls from flattening a quiet afternoon into
- * the baseline, while leaving the small end nearly linear so single events
- * still differ from pairs.
+ * One lane's field: `log1p` of each minute's agent count, THEN smeared.
+ *
+ * ## The order is the whole thing
+ *
+ * This used to smear first and compress the smeared density, and that was the
+ * bug behind years of "Day is still too smooth". Compression after smoothing
+ * does not preserve the kernel's width — it inflates it, and it inflates it in
+ * proportion to how loud the minute was:
+ *
+ *     log1p(n·e^(−d²/2σ²)) ≈ log n − d²/2σ²    for large n
+ *
+ * which is a parabola that does not reach the floor until `d ≈ σ·√(2 ln n)`.
+ * Measured on a real day's counts at σ = 0.75: a single event drew a mound
+ * 1.0 minutes across at half height, ten events drew 2.0, and fifty or more
+ * drew 3.0 — the same kernel producing a mound THREE TIMES wider for the busy
+ * minutes, which are precisely the ones the eye lands on. Every attempt to fix
+ * this by tightening sigma failed the same way, because sigma was never what
+ * was setting the width.
+ *
+ * Compressing per event first makes the drawn width the KERNEL'S width, full
+ * stop: a one-event minute and a five-hundred-event minute are mounds of
+ * identical shape differing only in height, which is what a density curve is
+ * supposed to say. Sigma now means what it says, which is what let it become a
+ * fraction of the axis above.
+ *
+ * The compression itself is unchanged in purpose — it keeps a burst of fifty
+ * tool calls from flattening a quiet afternoon into the baseline, while leaving
+ * the small end nearly linear so single events still differ from pairs. It is
+ * only applied to the honest thing: the count that actually arrived in that
+ * minute, before anything was smeared anywhere.
  */
 export function curveField(
   samples: readonly ActivitySample[],
@@ -225,10 +315,9 @@ export function curveField(
   spines: readonly number[],
   sigma: number,
 ): CurveField {
-  const agent = smear(samples, (s) => s.agent, sigma, grid)
   return {
     grid,
-    height: agent.map((d) => Math.log1p(d)),
+    height: smear(samples, (s) => Math.log1p(s.agent), sigma, grid),
     spines: [...new Set(spines)].sort((a, b) => a - b),
   }
 }
@@ -330,7 +419,7 @@ export function buildCurveSvg(
   }
 
   const span = Math.max(1, opts.frameMinutes)
-  const alphas = spineAlphas(field.spines)
+  const widths = spineWidths(field.spines)
   const heights = spineHeights(field, peak)
   field.spines.forEach((minute, i) => {
     if (minute < 0 || minute > span) return
@@ -341,7 +430,9 @@ export function buildCurveSvg(
     spine.setAttribute('x2', x.toFixed(2))
     spine.setAttribute('y1', (VIEW_H * (1 - heights[i])).toFixed(2))
     spine.setAttribute('y2', String(VIEW_H))
-    spine.setAttribute('opacity', alphas[i].toFixed(3))
+    // The WIDTH is the crowd channel now, and there is no opacity channel at
+    // all — see `spineWidths`.
+    spine.setAttribute('stroke-width', widths[i].toFixed(2))
     spine.setAttribute('vector-effect', 'non-scaling-stroke')
     svg.append(spine)
   })
@@ -431,48 +522,40 @@ export function areaPath(runs: readonly CurvePoint[][]): string {
  */
 const SPINE_CROWD_MINUTES = 7
 
-/** A lone spine's weight. Everything else is measured down from it. */
-const SPINE_ALPHA = 0.82
+/** A lone spine's stroke, in the curve's own 1000×100 units — the full-weight
+ *  mark, and what every spine on a quiet rail draws at. */
+const SPINE_WIDTH = 2
+
+/** The narrowest a crowded spine draws. A hairline is still a line; below this
+ *  it would start dropping out of the raster on some displays, and a message
+ *  that happened must not disappear because other messages did too. */
+const SPINE_WIDTH_FLOOR = 0.75
 
 /**
- * The faintest a crowded spine draws. Below this it would vanish, and a
- * message that happened must not disappear because other messages did too.
+ * Per-spine stroke width, narrowing as spines crowd each other.
  *
- * Lowered slightly (0.09 → 0.07) when the spine became cinnabar, for the
- * opposite of the obvious reason. Raising it was tried first, on the theory
- * that a lighter pigment needs more floor to stay visible — and it made a busy
- * evening WORSE, because cinnabar's problem at crowd scale is not that it
- * vanishes but that it accumulates. The floor is the last resort for a true
- * pile-up; the work of rationing a crowd is done by
- * {@link SPINE_CROWD_MINUTES}, which is the parameter that actually moved.
+ * ## Why this is not opacity any more
+ *
+ * It was, and the semantics were wrong. Alpha on this board means UNCERTAINTY —
+ * a stale lane, an open delegation whose length nobody recorded. A faded spine
+ * therefore read as a message we were not sure about, and the honest question
+ * came back immediately: *why is it fainter in a burst?* There is no answer.
+ * The message in a burst is exactly as real as the message on its own; only its
+ * claim on the eye needs rationing, and that is a matter of how much ink the
+ * mark spends, not how confident the mark is.
+ *
+ * So the crowd channel is TYPOGRAPHIC. A lone message draws a full 2-unit
+ * cinnabar stroke; a burst of thirty inside seven minutes draws thirty hairlines
+ * and reads as a red texture rather than a red wall. Nothing is dropped, nothing
+ * is merged, nothing is faded — every message is at full strength, exactly where
+ * it happened, and the only thing that changed is the nib.
+ *
+ * The falloff is `1/√neighbours` rather than the linear one alpha used. Width
+ * does not compound the way overlapping alpha does — two hairlines side by side
+ * are two hairlines, not a darker line — so the aggressive falloff that alpha
+ * needed would here thin a mild crowd to nothing for no gain.
  */
-const SPINE_ALPHA_FLOOR = 0.07
-
-/**
- * Per-spine opacity, falling as spines crowd each other.
- *
- * A SPINE IS SALIENT BECAUSE IT IS RARE, and Week proved what happens when it
- * is not: a Monday with 468 messages drew 468 lines across a 1400-pixel rail
- * and produced a solid black band — the loudest thing on the page, saying only
- * "a lot". So weight falls as `1/neighbours`: one message stays full cinnabar,
- * and a burst of thirty inside four minutes bottoms out at the floor and reads
- * as a grey texture. Nothing is dropped and nothing is merged — every message
- * is still exactly where it happened, and a burst still looks like a burst.
- * Only the claim on your eye is rationed.
- *
- * `1/sqrt` was the first try and was not enough: at week scale the lines still
- * overlapped into a picket fence, and overlapping alpha compounds. Linear is
- * the falloff that makes the SOLITARY message the loudest mark on the page,
- * which is the whole point of the channel.
- *
- * THE FLOOR IS NOT THE KNOB. Monday's 468-message evening is drawn the same at
- * 0.09 and at 0.05 and at 0.15, because at week resolution that wall's spines
- * crowd in threes and fours and never reach the floor at all — everything
- * visible about a crowd is decided by the WINDOW. The floor binds only for a
- * true pile-up, which is the case it was written for; twice it has been reached
- * for to fix a crowd, and twice the crowd was unmoved.
- */
-export function spineAlphas(spines: readonly number[]): number[] {
+export function spineWidths(spines: readonly number[]): number[] {
   // A sliding window rather than the obvious pair loop: `curveField` sorts the
   // spines, and a day of five hundred messages should not cost a quarter of a
   // million comparisons to draw.
@@ -482,91 +565,139 @@ export function spineAlphas(spines: readonly number[]): number[] {
   for (let i = 0; i < spines.length; i += 1) {
     while (spines[lo] < spines[i] - SPINE_CROWD_MINUTES) lo += 1
     while (hi < spines.length && spines[hi] <= spines[i] + SPINE_CROWD_MINUTES) hi += 1
-    out[i] = Math.max(SPINE_ALPHA_FLOOR, SPINE_ALPHA / Math.max(1, hi - lo))
+    const neighbours = Math.max(1, hi - lo)
+    out[i] = Math.max(SPINE_WIDTH_FLOOR, SPINE_WIDTH / Math.sqrt(neighbours))
   }
   return out
 }
 
-// ── The delegations aloft ────────────────────────────────────────────────────
+// ── The ladder: who was aloft, and for how long ──────────────────────────────
 //
-// A third channel, and the only one that is not about a moment: HOW MANY
-// AGENTS WERE OUT. The curve says the machines were busy and the spines say
-// you spoke, but a five-way fan-out and one long tool call make identical ink
-// — and the difference between them is most of what a day of orchestration
-// is. So each delegation gets one solid line spanning its real duration, and
-// concurrent ones stack UP FROM THE LANE'S BASELINE: one agent is one line,
-// five at once is five courses, and none is nothing at all.
+// A third channel, and the only one that is not about a moment: WHO WAS OUT,
+// AND BETWEEN WHICH TWO INSTANTS. The curve says the machines were busy and
+// the spines say you spoke, but a four-way fan-out and one long tool call make
+// identical ink — and the difference between them is most of what a day of
+// orchestration is.
 //
-// Stacking is an interval-graph colouring, done greedily on a start-sorted
-// list: each delegation takes the lowest row it does not collide in. Greedy is
-// optimal here (this is the classic interval-partitioning result), so the
-// stack is exactly as deep as the concurrency was — never deeper, which is the
+// So the lane grows a LADDER, read from the ground up:
+//
+//   THE FLOOR    the main session itself — one solid line spanning the session
+//                from its first recorded minute to its last. It is the thing
+//                everything else was launched from, so it is the ground the
+//                rest stands on.
+//
+//   THE RUNGS    one solid line per subagent or workflow agent, spanning spawn
+//                → return, ABOVE the floor and stacked upward whenever two
+//                overlap. Four agents launched at once is four rungs with four
+//                visibly different right-hand ends; a long solitary delegation
+//                is one long rung. You read tool-call density off the mound and
+//                fleet concurrency off the ladder, and neither can be mistaken
+//                for the other.
+//
+// The rungs are packed by interval-graph colouring, done greedily on a
+// start-sorted list: each takes the lowest free row it does not collide in.
+// Greedy is optimal here (the classic interval-partitioning result), so the
+// ladder is exactly as tall as the concurrency was — never taller, which is the
 // whole claim the channel makes.
+//
+// SESSIONS ARE PACKED FIRST, into rows of their own, and the rungs start above
+// the last of them. That is what makes "above the floor" true rather than
+// usually-true: a subagent must never be drawn level with or under the session
+// that sent it, however the intervals happen to fall.
 
-/** One delegation ready to draw: horizontal extent as fractions of the frame,
- *  and which row of the stack it sits in. */
-export interface SpawnLine {
-  /** 0…1 across the frame. */
-  start: number
-  end: number
-  /** 0 is the topmost line; each further row is one concurrent neighbour. */
-  row: number
-  /** Its close was never recorded — the length is a stub, not a duration. */
-  open: boolean
-}
+/** What a ladder line IS — the two things drawn differently, because they are
+ *  two different claims. */
+export type LadderKind = 'session' | 'agent'
 
-/** The interval as the stacker needs it: two instants and whether it closed. */
-export interface SpawnInterval {
+/** The interval as the ladder needs it: two instants, what it was, and whether
+ *  anybody recorded its close. */
+export interface LadderInterval {
   start_ms: number
   end_ms: number
   open: boolean
+  kind: LadderKind
+  /** For the hover — the agent's name, the session's id. Never drawn as text
+   *  on the rail; the rail is hairlines and the words are in the tip. */
+  label?: string
+}
+
+/** One ladder line ready to draw: horizontal extent as fractions of the frame,
+ *  and which rung it sits on. */
+export interface LadderLine {
+  /** 0…1 across the frame. */
+  start: number
+  end: number
+  /** 0 is the ground; each further row is one rung up. */
+  row: number
+  kind: LadderKind
+  /** Its close was never recorded — the length is a stub, not a duration. */
+  open: boolean
+  label?: string
+  /** The real instants, kept for the tooltip: a fraction of a frame is what the
+   *  ink needs and a clock time is what a person needs. */
+  startMs: number
+  endMs: number
 }
 
 /**
- * Lay a lane's delegations out in rows, clipped to `[startMs, endMs]`.
+ * Lay a lane's ladder out in rows, clipped to `[startMs, endMs]`.
  *
- * Intervals that fall wholly outside the frame are dropped; one that straddles
- * an edge is clipped, because the frame is the claim being made. Sorted by
- * start, so the row assignment is deterministic and two renders of the same
- * data cannot disagree about which line is which.
+ * Intervals wholly outside the frame are dropped; one that straddles an edge is
+ * clipped, because the frame is the claim being made. Sorted by start, so the
+ * row assignment is deterministic and two renders of the same data cannot
+ * disagree about which line is which.
  */
-export function stackSpawns(
-  spans: readonly SpawnInterval[],
+export function ladderRows(
+  spans: readonly LadderInterval[],
   frame: { startMs: number; endMs: number },
-): SpawnLine[] {
+): LadderLine[] {
   const span = Math.max(1, frame.endMs - frame.startMs)
-  const inside = spans
-    .filter((s) => s.end_ms >= frame.startMs && s.start_ms <= frame.endMs)
-    .map((s) => ({
-      startMs: Math.max(s.start_ms, frame.startMs),
-      endMs: Math.min(s.end_ms, frame.endMs),
-      open: s.open,
-    }))
-    .sort((a, b) => a.startMs - b.startMs || a.endMs - b.endMs)
+  const clip = (kind: LadderKind): LadderInterval[] =>
+    spans
+      .filter((s) => s.kind === kind && s.end_ms >= frame.startMs && s.start_ms <= frame.endMs)
+      .map((s) => ({
+        ...s,
+        start_ms: Math.max(s.start_ms, frame.startMs),
+        end_ms: Math.min(s.end_ms, frame.endMs),
+      }))
+      .sort((a, b) => a.start_ms - b.start_ms || a.end_ms - b.end_ms)
 
+  const lines: LadderLine[] = []
   // The instant each row is free from. A row is reusable the moment its last
-  // delegation ended — two that merely touch are not concurrent.
+  // occupant ended — two that merely touch are not concurrent.
   const freeFrom: number[] = []
-  const lines: SpawnLine[] = []
-  for (const s of inside) {
-    let row = freeFrom.findIndex((at) => at <= s.startMs)
-    if (row === -1) row = freeFrom.length
-    freeFrom[row] = s.endMs
-    lines.push({
-      start: (s.startMs - frame.startMs) / span,
-      end: (s.endMs - frame.startMs) / span,
-      row,
-      open: s.open,
-    })
+  const pack = (batch: readonly LadderInterval[], floorRow: number): number => {
+    let top = floorRow
+    for (const s of batch) {
+      let row = freeFrom.findIndex((at, i) => i >= floorRow && at <= s.start_ms)
+      if (row === -1) row = Math.max(floorRow, freeFrom.length)
+      freeFrom[row] = s.end_ms
+      top = Math.max(top, row + 1)
+      lines.push({
+        start: (s.start_ms - frame.startMs) / span,
+        end: (s.end_ms - frame.startMs) / span,
+        row,
+        kind: s.kind,
+        open: s.open,
+        ...(s.label ? { label: s.label } : {}),
+        startMs: s.start_ms,
+        endMs: s.end_ms,
+      })
+    }
+    return top
   }
+
+  // The floors first, then the rungs strictly above the highest of them.
+  const above = pack(clip('session'), 0)
+  pack(clip('agent'), above)
   return lines
 }
 
-/** How deep the deepest stack on a page goes — one more than the largest row
+/** How tall the tallest ladder on a page is — one more than the largest row
  *  index anywhere on it. Per PAGE, like {@link fieldPeak}: the pitch the lines
- *  are drawn at has to be one number, or two lanes' stacks could not be
+ *  are drawn at has to be one number, or two lanes' ladders could not be
  *  compared down the column. */
-export function stackDepth(lanes: readonly (readonly SpawnLine[])[]): number {
+export function ladderHeight(lanes: readonly (readonly LadderLine[])[]): number {
   let depth = 0
   for (const lines of lanes) {
     for (const line of lines) if (line.row + 1 > depth) depth = line.row + 1
@@ -574,15 +705,15 @@ export function stackDepth(lanes: readonly (readonly SpawnLine[])[]): number {
   return depth
 }
 
-/** The band the stack is allowed, in pixels, measured UP from the rail's
+/** The band the ladder is allowed, in pixels, measured UP from the rail's
  *  baseline. Deliberately under half the rail's height: these lines are strata
- *  under the curve, and a stack that climbed into it would compete with it. */
-export const STACK_BAND_PX = 9
+ *  under the curve, and a ladder that climbed into it would compete with it. */
+export const LADDER_BAND_PX = 11
 
-/** The gap between neighbouring lines. Two pixels while the stack is shallow —
- *  the pitch at which one line reads as one agent — closing up only once a
- *  fan-out is deep enough that its DEPTH is the thing being read. */
-export function stackPitch(depth: number): number {
-  if (depth <= 1) return 0
-  return Math.max(1, Math.min(2, STACK_BAND_PX / (depth - 1)))
+/** The gap between neighbouring rungs. Two and a half pixels while the ladder
+ *  is short — the pitch at which one line reads as one agent — closing up only
+ *  once a fan-out is deep enough that its HEIGHT is the thing being read. */
+export function ladderPitch(height: number): number {
+  if (height <= 1) return 0
+  return Math.max(1, Math.min(2.5, LADDER_BAND_PX / (height - 1)))
 }

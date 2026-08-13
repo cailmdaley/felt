@@ -144,23 +144,24 @@ export const ACTIVITY_KEY_ITEMS: Array<{ kind: DrawnKind; label: string }> = [
 ]
 
 /**
- * The second mark on every curve: the exact minute a message of yours landed.
- * Not a height — a discrete event drawn over a continuous field, which is why
- * it gets its own line in the key.
+ * A KEY THAT NEEDS NO EXPLAINING is the test this line finally passes.
  *
- * THE PARENTHESIS IS THE POINT. Every spine is a message of YOURS — an agent's
- * reply is agent work and lives in the curve's height, never as a mark — but
- * spines thin out as they crowd each other (`spineAlphas`), and a faint one
- * beside a strong one reads as a second, weaker channel. It is not: it is the
- * same channel, rationing its claim on the eye. Saying so is cheaper than
- * dropping the falloff, which a day of four hundred messages still needs.
+ * It used to end "— fainter in a burst", a parenthesis apologising for a
+ * falloff the reader had already noticed and correctly objected to: a message
+ * in a burst is not a fainter fact than a message on its own. The falloff is
+ * typographic now (`spineWidths` narrows the nib and never the strength), so
+ * there is nothing left to apologise for and the label says the one thing it
+ * has always meant.
  */
-export const SPINE_KEY_LABEL = 'you sent a message — fainter in a burst'
+export const SPINE_KEY_LABEL = 'you'
 
-/** The third mark, and the only one about a SPAN rather than a moment: one
- *  hairline per subagent, stacked while they overlap. Its own line in the key
- *  because a stack of them is the one thing on the rail that counts. */
-export const SPAWN_KEY_LABEL = 'agents aloft'
+/** The curve's height: the machines' volume, minute by minute. */
+export const MOUND_KEY_LABEL = 'agent tool calls'
+
+/** The third mark, and the only one about a SPAN rather than a moment: the
+ *  session's line on the ground and one rung per agent it sent out, each
+ *  spanning the interval it was actually up. */
+export const ALOFT_KEY_LABEL = 'sessions and agents aloft'
 
 
 // ── Message tallies ──────────────────────────────────────────────────────────

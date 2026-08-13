@@ -411,9 +411,17 @@ export class KanbanModal {
       tab.type = 'button'
       tab.className = 'kbn-viewtab'
       tab.dataset.view = spec.id
-      tab.textContent = spec.label
       tab.setAttribute('role', 'tab')
       tab.title = `${spec.label} (${spec.hotkey})`
+
+      const labelEl = document.createElement('span')
+      labelEl.className = 'kbn-viewtab-label'
+      labelEl.textContent = spec.label
+      const hotkeyEl = document.createElement('span')
+      hotkeyEl.className = 'kbn-viewtab-hotkey'
+      hotkeyEl.textContent = spec.hotkey
+      hotkeyEl.setAttribute('aria-hidden', 'true')
+      tab.append(hotkeyEl, labelEl)
       tab.addEventListener('click', () => this.setView(spec.id))
       strip.append(tab)
     }

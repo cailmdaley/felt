@@ -14,12 +14,21 @@
 .kbn-tip {
   --kbn-tip-agent: #3D5BA0;
   --kbn-tip-attention: #3F8278;
+  /* Speaker identity in the excerpt cards below, matching the plot's own
+     pigments: the cinnabar spine for you, the curve's blue for the agent,
+     iron-gall grey — no accent — for the machine's own vocabulary. */
+  --kbn-tip-you: #BC4538;
+  --kbn-tip-tool: #7A6F5C;
 
   position: absolute;
   z-index: 6;
   transform: translateY(-6px);
-  min-width: 150px;
-  max-width: 320px;
+  /* Wide enough that a typical row — register word, fiber name, count — has no
+     reason to truncate at all. The old 320px was tight enough that ordinary
+     labels were competing for room, which is what turned a missing `nowrap`
+     into a visible defect rather than a latent one. */
+  min-width: 190px;
+  max-width: 380px;
   padding: 6px 9px 5px;
   background: #FBF7EE;
   border: 0.5px solid rgba(122, 111, 92, 0.4);
@@ -48,7 +57,7 @@
    deeper, so which of the two states you are in is legible at a glance. */
 .kbn-tip-pinned {
   pointer-events: auto;
-  max-width: 420px;
+  max-width: 460px;
   max-height: min(52vh, 460px);
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -60,12 +69,13 @@
   -webkit-line-clamp: none;
   overflow: visible;
 }
-.kbn-tip-pinned .kbn-tip-tools-line,
-.kbn-tip-pinned .kbn-tip-where {
-  overflow: visible;
-  text-overflow: clip;
-  white-space: normal;
-}
+/* THE HEADS DO NOT RELAX WHEN PINNED. This rule used to hand
+   `white-space: normal` back to `.kbn-tip-where` and `.kbn-tip-tools-line`, on
+   the theory that a pinned slip should show everything — and it put the
+   wrapping straight back into exactly the rows that must never wrap. Pinning
+   lifts the clamp on the WORDS (above), which is what anybody pins for; a
+   summary row and a tool-call listing are a ledger either way, and a ledger
+   whose rows re-flow when you click it is a different document. */
 /* Flipped when the mark sits late in the day — the view swaps left for right,
    this only moves the origin the box grows from. */
 .kbn-tip-flip { text-align: left; }
@@ -78,10 +88,13 @@
   margin-bottom: 3px;
 }
 
+/* A LEDGER ROW IS ONE LINE. `nowrap` here is the belt to the flex rules'
+   braces: whatever a future child forgets to declare, the row cannot break. */
 .kbn-tip-row {
   display: flex;
   align-items: baseline;
   gap: 5px;
+  white-space: nowrap;
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
   font-size: calc(12px * var(--kbn-type-scale, 1));
   color: #2A231A;
@@ -102,7 +115,19 @@
 /* The stroke axis: same hue, wider nib — a weight, not another colour. */
 .kbn-tip-swatch-const { width: 6px; border-radius: 1px; }
 
-.kbn-tip-phrase { font-style: italic; color: #7A6F5C; }
+/* THE REGISTER WORD NEVER SHRINKS AND NEVER WRAPS.
+   This is the rule that was missing, and it is why "tool call" was setting on
+   two lines. As a plain flex child it took the default `flex: 0 1 auto` — free
+   to be squeezed below its own content — with nothing to stop it wrapping when
+   it was, so the row resolved the squeeze by breaking the two-word label rather
+   than by truncating the fiber name beside it. The wrong child was absorbing
+   the pressure. Fixed at its content width, the squeeze has nowhere to go but
+   `.kbn-tip-where`, which is built to take it. */
+.kbn-tip-phrase {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  color: #7A6F5C;
+}
 .kbn-tip-where {
   flex: 1 1 auto;
   min-width: 0;
@@ -117,73 +142,106 @@
   color: #A89B83;
 }
 
+/* Every section below the summary rows — the note, the words, the tools —
+   sits under the same one hairline. Restrained on purpose: three sections
+   that can each only ever appear alone don't need three different rules. */
+.kbn-tip-section {
+  margin-top: 5px;
+  padding-top: 4px;
+  border-top: 0.5px solid rgba(122, 111, 92, 0.22);
+}
+
 /* The honest footer. Deliberately quiet — it is a caveat, not a finding. */
 .kbn-tip-note {
-  margin-top: 4px;
-  padding-top: 3px;
-  border-top: 0.5px solid rgba(122, 111, 92, 0.22);
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
   font-size: calc(10.5px * var(--kbn-type-scale, 1));
   line-height: 1.3;
-  font-style: italic;
   color: #A89B83;
 }
 
-/* The words. Quoted material, set as quoted material: the same hairline rule
-   the note sits under, then one line per turn, marked by voice. Each line is
-   clamped to three lines of text — an excerpt is a reminder of what was said,
-   and a tooltip that grows into a transcript stops being a tooltip. */
+/* The words. Quoted material, set as quoted material: one card per turn,
+   marked by voice. Each card is clamped to three lines of text — an excerpt
+   is a reminder of what was said, and a tooltip that grows into a transcript
+   stops being a tooltip. */
 .kbn-tip-said {
-  margin-top: 4px;
-  padding-top: 3px;
-  border-top: 0.5px solid rgba(122, 111, 92, 0.22);
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 6px;
 }
+/* One card per turn: a colour spine on the left carrying who spoke, the
+   header (who, when) above the words, both on the measure a slip this narrow
+   can actually hold. */
 .kbn-tip-line {
   display: flex;
-  gap: 5px;
+  flex-direction: column;
+  gap: 1px;
+  padding-left: 6px;
+  border-left: 2px solid transparent;
+  max-width: 34em;
+}
+.kbn-tip-line-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  white-space: nowrap;
+}
+/* THE ORDER OF SURRENDER on a head line, worst-to-best thing to lose:
+   the agent's name (`.kbn-tip-who`) truncates first, the register word never,
+   the clock never. The label used to be `flex: 1 1 auto` and shared the squeeze
+   with the name beside it, so a long agent name cost you both — "tool call"
+   ellipsised to "tool…" while the name it was competing with kept half its
+   characters. Fixed at content width it is two short words that always read. */
+.kbn-tip-label {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  font-family: var(--font-mono, 'IBM Plex Mono', monospace);
+  font-size: calc(9px * var(--kbn-type-scale, 1));
+  letter-spacing: 0.03em;
+  color: #A89B83;
+}
+/* The clock never wraps or truncates — of the things on the header line, it is
+   the one a reader can't afford to lose. `margin-left: auto` holds it out at
+   the right margin on a plain card, where the label is now fixed-width and
+   there is no flexible child to push it there. On a delegation card the name
+   already absorbs the slack and this is a no-op. */
+.kbn-tip-when {
+  flex: 0 0 auto;
+  margin-left: auto;
+  white-space: nowrap;
+  font-family: var(--font-mono, 'IBM Plex Mono', monospace);
+  font-size: calc(8.5px * var(--kbn-type-scale, 1));
+  letter-spacing: 0.02em;
+  color: #A89B83;
+}
+.kbn-tip-text {
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
   font-size: calc(11px * var(--kbn-type-scale, 1));
   line-height: 1.32;
   color: #2A231A;
   text-align: left;
-}
-.kbn-tip-glyph {
-  flex: 0 0 auto;
-  font-family: var(--font-mono, 'IBM Plex Mono', monospace);
-  font-size: calc(9px * var(--kbn-type-scale, 1));
-  line-height: 1.6;
-  color: #A89B83;
-}
-.kbn-tip-text {
-  flex: 1 1 auto;
-  min-width: 0;
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 3;
   overflow: hidden;
 }
-/* Who spoke, in ink weight rather than in a name: the human's own words carry
-   the page's full iron-gall, the agent's sit a shade back, a machine notice
-   further still. */
-.kbn-tip-line-user .kbn-tip-text { color: #1B1611; }
-.kbn-tip-line-assistant .kbn-tip-text { color: #4A4136; }
-.kbn-tip-line-notification .kbn-tip-text { font-style: italic; color: #7A6F5C; }
+/* Who spoke, carried by colour: your own words take the plot's cinnabar
+   spine, the agent's its curve blue. A notice from neither voice gets no
+   spine at all — the same quiet grey as a tool call, because nobody said it. */
+.kbn-tip-line-user { border-left-color: var(--kbn-tip-you); }
+.kbn-tip-line-user .kbn-tip-label { color: var(--kbn-tip-you); }
+.kbn-tip-line-assistant { border-left-color: var(--kbn-tip-agent); }
+.kbn-tip-line-assistant .kbn-tip-label { color: var(--kbn-tip-agent); }
+.kbn-tip-line-notification .kbn-tip-text { color: #7A6F5C; }
 
 /* What a wordless minute did. Monospaced and dimmed so it never passes for
    something anyone said — the tool names ARE the machine's own vocabulary, and
    the register makes that legible without a label. */
 .kbn-tip-tools {
-  margin-top: 4px;
-  padding-top: 3px;
-  border-top: 0.5px solid rgba(122, 111, 92, 0.22);
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
   font-size: calc(9.5px * var(--kbn-type-scale, 1));
   line-height: 1.35;
   letter-spacing: 0.01em;
-  color: #97917F;
+  color: var(--kbn-tip-tool);
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -199,27 +257,31 @@
 }
 
 /* THE DELEGATION REGISTER — the two lines that have a direction.
-   
+
    A spawn and its report are neither of the conversation's voices: nobody
-   present said them, and they are not the machine's own vocabulary either. So
-   they take a third setting — the serif of speech (they ARE prose, written by
-   an agent to an agent) held one step back in weight, with the arrow doing the
-   work a name would otherwise spend a line on. */
-.kbn-tip-deleg .kbn-tip-glyph {
-  color: #8C7A52;
-  font-size: calc(10px * var(--kbn-type-scale, 1));
-  line-height: 1.45;
-}
+   present said them, and they are not the machine's own vocabulary either.
+   But they still have a direction, and direction maps onto the same two
+   colours: an errand going OUT reads as your own act (cinnabar), a report
+   coming BACK reads as the agent's (blue) — the arrow in the label just says
+   which. */
+.kbn-tip-deleg-spawn { border-left-color: var(--kbn-tip-you); }
+.kbn-tip-deleg-spawn .kbn-tip-label { color: var(--kbn-tip-you); }
+.kbn-tip-deleg-return { border-left-color: var(--kbn-tip-agent); }
+.kbn-tip-deleg-return .kbn-tip-label { color: var(--kbn-tip-agent); }
 .kbn-tip-deleg .kbn-tip-text { color: #5C5344; }
-/* The errand going out is the quieter half — it is a briefing, and the reader
-   usually wants what came back. */
-.kbn-tip-deleg-spawn .kbn-tip-text { color: #6E6555; font-style: italic; }
-/* Who. Small caps rather than bold: a label on the line, not a shout in it. */
+/* Who the errand names, set apart from the label it follows. */
+/* The one flexible thing on the head line, and so the only one that gives:
+   `1 1 auto` rather than `0 1 auto`, or a short name would leave the clock
+   floating in the middle of the row instead of out at the right margin. */
 .kbn-tip-who {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-family: var(--font-mono, 'IBM Plex Mono', monospace);
   font-size: calc(9px * var(--kbn-type-scale, 1));
   letter-spacing: 0.03em;
   color: #8C7A52;
-  font-style: normal;
-  margin-right: 5px;
 }
+.kbn-tip-who::before { content: '· '; }

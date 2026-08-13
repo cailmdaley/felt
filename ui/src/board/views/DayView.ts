@@ -85,15 +85,15 @@ import {
   buildCurveSvg,
   curveField,
   curveGrid,
+  daySigma,
   fieldPeak,
-  SIGMA_DAY_MINUTES,
-  stackDepth,
-  stackPitch,
-  stackSpawns,
+  ladderHeight,
+  ladderPitch,
+  ladderRows,
   type ActivitySample,
   type CurveField,
-  type SpawnInterval,
-  type SpawnLine,
+  type LadderInterval,
+  type LadderLine,
 } from './densityCurve.js'
 import { createViewEmptyState, createViewPage } from './ViewPage.js'
 import {
@@ -106,9 +106,9 @@ import {
 } from './join.js'
 import { formatSpanMinutes, railBounds, shiftCivilDay } from './railTime.js'
 import {
-  ACTIVITY_KEY_ITEMS,
+  ALOFT_KEY_LABEL,
   MARK_GLYPH,
-  SPAWN_KEY_LABEL,
+  MOUND_KEY_LABEL,
   SPINE_KEY_LABEL,
   STATE_GLYPH,
   STATE_KEY_ITEMS,
@@ -281,6 +281,60 @@ export function drawnWindow(
   return { startMs, endMs, minutes: Math.round((endMs - startMs) / MINUTE_MS) }
 }
 
+// ── Drag to zoom ─────────────────────────────────────────────────────────────
+//
+// Day's frame already crops the empty dawn away (see `drawnWindow`), and that
+// is a good default and a bad only-option: the hour you actually want to read
+// is usually one of eight. So the rail is draggable — sweep a span and the
+// page redraws inside it, axis and curves and spines and ladder together,
+// because every one of them is a fraction of the frame and the frame is the
+// only thing that moved.
+//
+// VIEW STATE, NOT A CURSOR. The zoom is not written to `ctx.focusDate` and not
+// persisted: it is a way of looking at a day, not a claim about which day you
+// are on. Paging away drops it, which is right — the span you swept out of
+// Tuesday means nothing on Wednesday.
+
+/** The narrowest span a drag may zoom to. Under about ten minutes the hour
+ *  hand runs out of labels it is allowed to draw (see {@link TICK_STEPS_MINUTES},
+ *  whose finest step is half an hour) and the rail becomes a picture of two
+ *  events with no clock under it. */
+export const ZOOM_MIN_MINUTES = 10
+
+/**
+ * A dragged span, made into a frame: ordered, widened to
+ * {@link ZOOM_MIN_MINUTES}, snapped to whole minutes and clamped inside the
+ * civil day.
+ *
+ * Clamped rather than rejected at the edges, and widened around its own centre,
+ * so a sloppy two-pixel drag near dawn still lands on a legible frame instead of
+ * on nothing. A zoom can never smuggle in a minute belonging to another page —
+ * the rail is the outer bound, exactly as it is for `drawnWindow`.
+ */
+export function clampZoom(
+  zoom: { startMs: number; endMs: number },
+  rail: DayWindow,
+): DayWindow {
+  let startMs = Math.min(zoom.startMs, zoom.endMs)
+  let endMs = Math.max(zoom.startMs, zoom.endMs)
+  const shortfall = ZOOM_MIN_MINUTES * MINUTE_MS - (endMs - startMs)
+  if (shortfall > 0) {
+    startMs -= shortfall / 2
+    endMs += shortfall / 2
+  }
+  if (startMs < rail.startMs) {
+    endMs += rail.startMs - startMs
+    startMs = rail.startMs
+  }
+  if (endMs > rail.endMs) {
+    startMs -= endMs - rail.endMs
+    endMs = rail.endMs
+  }
+  startMs = Math.max(rail.startMs, Math.floor(startMs / MINUTE_MS) * MINUTE_MS)
+  endMs = Math.min(rail.endMs, Math.ceil(endMs / MINUTE_MS) * MINUTE_MS)
+  return { startMs, endMs, minutes: Math.max(1, Math.round((endMs - startMs) / MINUTE_MS)) }
+}
+
 /** The spacings the hour hand is allowed to use, coarsest last. Half an hour is
  *  the finest: the frame is never shorter than two hours, and a rail ruled at
  *  ten-minute grain would be a chart of its own gridlines. */
@@ -445,15 +499,17 @@ export interface DayLane {
    */
   beats: DayBeat[]
   /**
-   * The delegations this fiber had aloft today — one interval per subagent,
-   * clipped to nothing and joined exactly as a minute is (through the session
-   * ledger, on the tmux name the daemon stamped).
+   * THE LADDER: this fiber's spans of time, as the rail draws them — the
+   * sessions that ran (the floors) and the subagents they sent out (the
+   * rungs). Joined exactly as a minute is, through the session ledger on the
+   * tmux name the daemon stamped.
    *
-   * Kept apart from the beats because it is not a per-minute fact: a
-   * delegation is a SPAN, and the one question it answers — how many agents
-   * were out at once — cannot be asked of a minute at all.
+   * Kept apart from the beats because it is not a per-minute fact: a session
+   * and a delegation are SPANS, and the questions they answer — who was aloft,
+   * between which two instants, how many at once — cannot be asked of a minute
+   * at all.
    */
-  spawns: SpawnInterval[]
+  ladder: LadderInterval[]
 }
 
 /** One minute of a lane: what happened in it, and where its words are. */
@@ -630,7 +686,7 @@ export function buildDayLanes(
       | 'host'
       | 'hostNote'
       | 'stale'
-      | 'spawns'
+      | 'ladder'
     >
     /** The card's own claim, the fallback when no bucket carries a host. */
     cardHost: string
@@ -644,7 +700,18 @@ export function buildDayLanes(
     replies: number
     /** Per-minute counts and transcripts, unmerged — see `DayLane.beats`. */
     beats: Map<number, { kinds: Map<ActivityBucket['k'], number>; sources: (MomentSource | null)[] }>
-    spawns: SpawnInterval[]
+    /**
+     * THE SESSIONS THIS LANE RAN, as first-minute → last-minute per session id.
+     *
+     * There is no "session started" record on the activity plane — a session is
+     * only ever visible as the minutes it emitted. So its extent is exactly
+     * that: the span between the first and last minute stamped with its id.
+     * That is a recorded fact rather than an inference, and it is the honest
+     * answer to "when was this session up": we know it was working then, and we
+     * know nothing about the silence either side.
+     */
+    sessions: Map<string, { first: number; last: number }>
+    spawns: LadderInterval[]
   }
   const acc = new Map<string, Acc>()
 
@@ -676,6 +743,7 @@ export function buildDayLanes(
         messages: 0,
         replies: 0,
         beats: new Map(),
+        sessions: new Map(),
         spawns: [],
       }
       acc.set(key, entry)
@@ -687,6 +755,16 @@ export function buildDayLanes(
         tally.count += 1
         if (bucket.m > tally.last) tally.last = bucket.m
       } else entry.hosts.set(host, { count: 1, last: bucket.m })
+    }
+    // The session's own extent, widened by every minute it emitted — the
+    // ladder's floor. See `Acc.sessions`.
+    const session = (bucket.s ?? '').trim()
+    if (session) {
+      const held = entry.sessions.get(session)
+      if (held) {
+        if (bucket.m < held.first) held.first = bucket.m
+        if (bucket.m > held.last) held.last = bucket.m
+      } else entry.sessions.set(session, { first: bucket.m, last: bucket.m })
     }
     entry.all.add(minute)
     if (bucket.k === 'agent') entry.agent.add(minute)
@@ -713,7 +791,13 @@ export function buildDayLanes(
   for (const span of activity.spawns ?? []) {
     const card = joinBucket(index, span)
     if (!card) continue
-    acc.get(`fiber:${card.id}`)?.spawns.push(span)
+    acc.get(`fiber:${card.id}`)?.spawns.push({
+      start_ms: span.start_ms,
+      end_ms: span.end_ms,
+      open: span.open,
+      kind: 'agent',
+      ...(span.tool ? { label: span.tool } : {}),
+    })
   }
 
   const lanes: DayLane[] = [...acc.values()].map((entry) => {
@@ -735,7 +819,21 @@ export function buildDayLanes(
           sources: dedupeSources(beat.sources),
         }))
         .sort((a, b) => a.minute - b.minute),
-      spawns: entry.spawns,
+      // The floors, then the rungs. A session of a single minute still gets a
+      // line: `ladderRows` clips but never drops, and the mark says "this
+      // session was up, briefly", which is true and is the news.
+      ladder: [
+        ...[...entry.sessions.entries()].map(([session, at]): LadderInterval => ({
+          start_ms: at.first,
+          // The last minute is a full minute wide — a session whose last event
+          // was at 14:03 was up through 14:04, not up to an instant.
+          end_ms: at.last + MINUTE_MS,
+          open: false,
+          kind: 'session',
+          label: session,
+        })),
+        ...entry.spawns,
+      ],
     }
   })
 
@@ -1159,12 +1257,18 @@ export function buildDayModel(
    *  daemon with no such route, which leaves the page its rails and no prose:
    *  there is no second source for what the day said. */
   ledger?: DayLedgerInput,
+  /** A sub-span the reader dragged out on the rail. When set it REPLACES the
+   *  computed frame, and every mark on the page is rebuilt against it — see
+   *  {@link clampZoom}. Nothing else about the page changes: the civil day, the
+   *  totals and the prose are all judged against the rail, not the frame. */
+  zoom?: { startMs: number; endMs: number } | null,
 ): DayModel {
   const win = dayWindow(dayISO)
   // The lanes are built against the FRAME, so a lane's minute indices are
   // already the coordinates the chart draws in. Nothing is lost: the frame
-  // reaches every bucket the rail holds.
-  const frame = drawnWindow(win, activity.buckets, nowMs)
+  // reaches every bucket the rail holds — and when a zoom narrows it, the
+  // minutes outside are dropped, which is what a zoom means.
+  const frame = zoom ? clampZoom(zoom, win) : drawnWindow(win, activity.buckets, nowMs)
   const origins = mergeOrigins(
     mergeOrigins(activity.origins, sessionOrigins),
     ledger?.origins,
@@ -1346,6 +1450,9 @@ class DayViewImpl implements TemporalView {
    * positions against the rails.
    */
   private chartEl: HTMLElement | null = null
+  /** The gridline layer — the one element that spans exactly the rail column
+   *  and the full stack of lanes, which is what the zoom band is drawn in. */
+  private gridEl: HTMLElement | null = null
   private tip: HTMLElement | null = null
   /** The lane-minute the pointer is on (`<lane key>:<minute>`); a late answer
    *  is checked against it before it paints. */
@@ -1383,13 +1490,47 @@ class DayViewImpl implements TemporalView {
   /** Monotonic load id — a fetch that lands after a newer one is discarded. */
   private loadToken = 0
 
+  // ── Zoom ───────────────────────────────────────────────────────────────────
+
+  /** The span the reader dragged out, or null for the computed frame. VIEW
+   *  STATE: never written to the cursor, never persisted, dropped on paging. */
+  private zoom: { startMs: number; endMs: number } | null = null
+  /** The last load's raw inputs, so a zoom can rebuild the model without going
+   *  back to the network — the day did not change, only the window on it. */
+  private lastLoad: {
+    dayISO: string
+    activity: ActivityResult
+    sessionOrigins?: TemporalOrigins
+    ledger: DayLedgerInput
+  } | null = null
+  /** A drag in flight: where it started, and the band drawn while it runs. */
+  private drag: { startMs: number; endMs: number; band: HTMLElement } | null = null
+  /** Set for exactly one click event — the synthetic one the browser fires
+   *  after a drag's mouseup, which must not pin a tooltip. */
+  private dragJustEnded = false
+  /** The chart's own geometry while a drag runs, so the move handler is
+   *  arithmetic rather than a `getBoundingClientRect` per pixel. */
+  private dragBox: { left: number; width: number; win: DayWindow } | null = null
+  /** How far the pointer must travel before a press becomes a zoom rather than
+   *  a click. Below this the gesture is a pin, and the two never fight. */
+  private static readonly DRAG_THRESHOLD_PX = 6
+  private dragOrigin: { clientX: number; armed: boolean } | null = null
+
   /** Escape closes a pinned slip — before anything else looks at the key, and
    *  only when one is actually open, so Escape keeps every other meaning it has
    *  on this page. */
   private readonly onEscape = (e: KeyboardEvent): void => {
-    if (e.key !== 'Escape' || this.pinnedKey === null) return
+    if (e.key !== 'Escape') return
+    // The slip first, the zoom second — one Escape undoes one thing, and the
+    // slip is the nearer of the two to whatever you were just doing.
+    if (this.pinnedKey !== null) {
+      e.stopPropagation()
+      this.hideTip(true)
+      return
+    }
+    if (this.zoom === null) return
     e.stopPropagation()
-    this.hideTip(true)
+    this.applyZoom(null)
   }
 
   /** A click anywhere that is not a rail puts the slip away. Bubble phase, so
@@ -1464,6 +1605,10 @@ class DayViewImpl implements TemporalView {
     document.addEventListener('keydown', this.onKeyDown)
     document.addEventListener('keydown', this.onEscape, true)
     document.addEventListener('click', this.onDocClick)
+    // The drag lives on the document once it starts, so a sweep that runs off
+    // the sheet still selects to the edge and still ends when the button does.
+    document.addEventListener('mousemove', this.onDragMove)
+    document.addEventListener('mouseup', this.onDragUp)
     this.syncToCursor()
   }
 
@@ -1476,7 +1621,14 @@ class DayViewImpl implements TemporalView {
     document.removeEventListener('keydown', this.onKeyDown)
     document.removeEventListener('keydown', this.onEscape, true)
     document.removeEventListener('click', this.onDocClick)
+    document.removeEventListener('mousemove', this.onDragMove)
+    document.removeEventListener('mouseup', this.onDragUp)
     this.pinnedKey = null
+    this.zoom = null
+    this.lastLoad = null
+    this.drag = null
+    this.dragOrigin = null
+    this.dragBox = null
     this.disconnectPreviewObserver()
     this.previewsEl = null
     this.previewsKey = null
@@ -1487,6 +1639,7 @@ class DayViewImpl implements TemporalView {
     this.statsEl = null
     this.bodyEl = null
     this.nowEl = null
+    this.gridEl = null
     this.todayEl = null
     this.ctx = null
     this.shownDay = null
@@ -1531,6 +1684,8 @@ class DayViewImpl implements TemporalView {
     }
     if (day !== this.shownDay) {
       this.shownDay = day
+      // The span you swept out of Tuesday means nothing on Wednesday.
+      this.zoom = null
       if (this.headingEl) this.headingEl.textContent = formatDayHeading(day)
       // A different day is different content; never let the old day's
       // signature suppress its render.
@@ -1580,16 +1735,13 @@ class DayViewImpl implements TemporalView {
 
     const index = buildSessionIndex(sessions.records)
     this.byTmux = index.byTmux
-    const model = buildDayModel(
+    this.lastLoad = {
       dayISO,
       activity,
-      ctx.cards,
-      ctx.shuttleBase,
-      Date.now(),
-      this.byTmux,
-      sessions.origins,
-      { records: commits.records, bySession: index.bySession, origins: commits.origins },
-    )
+      sessionOrigins: sessions.origins,
+      ledger: { records: commits.records, bySession: index.bySession, origins: commits.origins },
+    }
+    const model = this.buildModel(this.lastLoad)
     const signature = dayModelSignature(model)
     if (signature === this.signature) {
       // Nothing new to draw, but the clock still moved.
@@ -1609,6 +1761,188 @@ class DayViewImpl implements TemporalView {
     this.pendingModel = null
     this.signature = signature
     this.render(model)
+  }
+
+  /** One place the model is assembled, so a zoom rebuild and a fresh load
+   *  cannot drift into two slightly different pages of the same day. */
+  private buildModel(load: NonNullable<DayViewImpl['lastLoad']>): DayModel {
+    const ctx = this.ctx
+    return buildDayModel(
+      load.dayISO,
+      load.activity,
+      ctx?.cards ?? [],
+      ctx?.shuttleBase ?? '',
+      Date.now(),
+      this.byTmux,
+      load.sessionOrigins,
+      load.ledger,
+      this.zoom,
+    )
+  }
+
+  /**
+   * Redraw the day inside a new window, from data already in hand.
+   *
+   * The signature is reset rather than compared: the frame is part of it, so a
+   * zoom always differs — and resetting says why, which is that this is a
+   * deliberate re-frame and not a poll that happened to notice a change.
+   */
+  private applyZoom(zoom: { startMs: number; endMs: number } | null): void {
+    this.zoom = zoom
+    const load = this.lastLoad
+    if (!load || load.dayISO !== this.shownDay) return
+    // A pinned slip belongs to a mark on the old frame; the frame is going.
+    this.pinnedKey = null
+    this.pendingModel = null
+    const model = this.buildModel(load)
+    this.signature = dayModelSignature(model)
+    this.render(model)
+  }
+
+  /**
+   * Begin a drag on the rails. NOT a zoom yet — a press is a pin until the
+   * pointer has travelled {@link DayViewImpl.DRAG_THRESHOLD_PX}, which is what
+   * keeps click-to-pin and drag-to-zoom out of each other's way on a surface
+   * that has to carry both.
+   */
+  private readonly onDragDown = (e: MouseEvent): void => {
+    if (e.button !== 0) return
+    const chart = this.chartEl
+    const win = this.frame
+    if (!chart || !win) return
+    // Only the rails are draggable. A press on the legend or the hour hand is
+    // not a gesture about a span of time, and treating it as one would zoom the
+    // page whenever somebody swept a selection over the caption.
+    if (!(e.target instanceof Element) || !e.target.closest('.kbn-day-rail')) return
+    const rail = chart.querySelector<HTMLElement>('.kbn-day-rail')
+    if (!rail) return
+    const box = rail.getBoundingClientRect()
+    if (box.width <= 0 || e.clientX < box.left || e.clientX > box.right) return
+    this.dragBox = { left: box.left, width: box.width, win }
+    this.dragOrigin = { clientX: e.clientX, armed: false }
+  }
+
+  /** Where on the clock a pointer at `clientX` is standing, clamped to the
+   *  frame — a drag that wanders off the sheet still selects to its edge. */
+  private dragInstant(clientX: number): number {
+    const geom = this.dragBox
+    if (!geom) return 0
+    const fraction = Math.min(1, Math.max(0, (clientX - geom.left) / geom.width))
+    return geom.win.startMs + fraction * (geom.win.endMs - geom.win.startMs)
+  }
+
+  private readonly onDragMove = (e: MouseEvent): void => {
+    const origin = this.dragOrigin
+    const geom = this.dragBox
+    if (!origin || !geom) return
+    if (!origin.armed) {
+      if (Math.abs(e.clientX - origin.clientX) < DayViewImpl.DRAG_THRESHOLD_PX) return
+      origin.armed = true
+      // The gesture has committed: put any hover slip away and raise the band.
+      this.hideTip(true)
+      const band = document.createElement('div')
+      band.className = 'kbn-day-zoomband'
+      // Into the GRIDLINE LAYER, not the chart: the grid is the element that
+      // spans exactly the rail column and exactly the stack of lanes, so a
+      // percentage across it is a percentage across the frame. Parented to the
+      // chart the band would be offset by the whole label column.
+      ;(this.gridEl ?? this.chartEl)?.append(band)
+      this.drag = { startMs: this.dragInstant(origin.clientX), endMs: 0, band }
+    }
+    const drag = this.drag
+    if (!drag) return
+    drag.endMs = this.dragInstant(e.clientX)
+    // Live: the band is the selection, drawn in the frame's own coordinates so
+    // it lands exactly where the zoom will cut.
+    const span = geom.win.endMs - geom.win.startMs
+    const lo = Math.min(drag.startMs, drag.endMs)
+    const hi = Math.max(drag.startMs, drag.endMs)
+    drag.band.style.left = pct((lo - geom.win.startMs) / span)
+    drag.band.style.width = pct((hi - lo) / span)
+    e.preventDefault()
+  }
+
+  private readonly onDragUp = (): void => {
+    const drag = this.drag
+    this.dragOrigin = null
+    this.dragBox = null
+    this.drag = null
+    if (!drag) return
+    drag.band.remove()
+    // The click the browser fires next belongs to this gesture, not to a pin.
+    this.dragJustEnded = true
+    this.applyZoom({ startMs: drag.startMs, endMs: drag.endMs })
+  }
+
+  /**
+   * One ladder line as words: what it was, when it was up, and how long for.
+   *
+   * The DELEGATION REGISTER — the outgoing prompt and the report that came
+   * back — rides on the same `/api/v1/moment` route the beats use, asked over
+   * the interval the line spans. A session's line asks the same question of its
+   * own span and gets the conversation, which is the honest answer for a mark
+   * that means "this session was up".
+   */
+  private showAloftTip(lane: DayLane, line: LadderLine, e: MouseEvent, pin = false): void {
+    if (this.pinnedKey !== null && !pin) return
+    const chart = this.chartEl
+    if (!chart) return
+    const minutes = Math.max(1, Math.round((line.endMs - line.startMs) / MINUTE_MS))
+    const tip = this.ensureTip()
+    const key = `${lane.key}:aloft:${line.kind}:${line.startMs}:${line.row}`
+    const words = (w?: MomentWords): SlotTip => ({
+      time: `${clockTime(line.startMs)}–${clockTime(line.endMs)}`,
+      rows: [
+        {
+          kind: 'agent',
+          phrase:
+            line.kind === 'session'
+              ? 'session up'
+              : `${line.label ?? 'agent'} aloft${line.open ? ', never returned' : ''}`,
+          where: lane.label,
+          count: minutes,
+          shuttle: false,
+        },
+      ],
+      ...(w?.excerpts.length ? { detail: w.excerpts } : {}),
+      ...(w?.tools ? { tools: w.tools } : {}),
+      ...(w?.note ? { note: w.note } : {}),
+    })
+    renderTip(tip, words(this.moments.peek(key, pin)))
+    // Sources come from the minutes the line spans — the same transcripts the
+    // beats under it point at, which is what makes the delegation register
+    // available here at all.
+    const sources = dedupeSources(
+      lane.beats
+        .filter((b) => {
+          const at = (this.frame?.startMs ?? 0) + b.minute * MINUTE_MS
+          return at >= line.startMs && at < line.endMs
+        })
+        .flatMap((b) => b.sources),
+    )
+    this.moments.request(
+      key,
+      sources,
+      line.startMs,
+      line.endMs,
+      (w) => {
+        if (this.hoveredKey !== key || (this.pinnedKey === key) !== pin) return
+        renderTip(tip, words(w))
+      },
+      pin,
+    )
+    this.hoveredKey = key
+    this.pinnedKey = pin ? key : null
+    tip.classList.add('kbn-tip-open')
+    tip.classList.toggle('kbn-tip-pinned', pin)
+
+    const chartBox = chart.getBoundingClientRect()
+    const anchor = e.clientX - chartBox.left
+    const flip = anchor > chartBox.width * 0.62
+    tip.style.top = `${e.clientY - chartBox.top}px`
+    tip.classList.toggle('kbn-tip-flip', flip)
+    tip.style.left = flip ? 'auto' : `${anchor + 9}px`
+    tip.style.right = flip ? `${chartBox.width - anchor + 9}px` : 'auto'
   }
 
   private render(model: DayModel): void {
@@ -1634,6 +1968,7 @@ class DayViewImpl implements TemporalView {
     // page that has none slide against a window nothing is drawn in.
     this.frame = null
     this.nowEl = null
+    this.gridEl = null
     if (model.lanes.length === 0 && model.entries.length === 0) {
       body.append(createViewEmptyState('— an unwritten day —'))
       // A day with nothing behind it can still have something in front of it.
@@ -1656,11 +1991,16 @@ class DayViewImpl implements TemporalView {
     this.tip = null
     this.hoveredKey = null
     this.moments.cancel()
+    // Sweep a span to read it close up. The press is only ever a press here —
+    // whether it becomes a zoom or stays a pin is decided by how far the
+    // pointer travels, in `onDragMove`.
+    chart.addEventListener('mousedown', this.onDragDown)
 
     // One gridline layer behind every rail, so the hour rules run unbroken
     // down the whole stack instead of restarting per lane.
     const grid = document.createElement('div')
     grid.className = 'kbn-day-grid'
+    this.gridEl = grid
     grid.style.gridRow = `1 / span ${model.lanes.length}`
     // One line per LABELLED tick, so the rules and the hour hand under them
     // agree; the edges are skipped, where a line would just thicken the frame.
@@ -1696,21 +2036,24 @@ class DayViewImpl implements TemporalView {
 
     // Every lane's curve, then the tallest moment on the page — the one height
     // all of them are drawn against, so the rails can be read down the column.
-    const sampling = curveGrid(win.minutes)
+    // The kernel is a fraction of THIS frame, so a zoomed rail resolves finer
+    // work rather than magnifying the same mounds — see `daySigma`.
+    const sigma = daySigma(win.minutes)
+    const sampling = curveGrid(win.minutes, sigma)
     const fields = new Map<string, CurveField>()
     for (const lane of model.lanes) {
       const { samples, spines } = laneActivity(lane.beats)
-      fields.set(lane.key, curveField(samples, sampling, spines, SIGMA_DAY_MINUTES))
+      fields.set(lane.key, curveField(samples, sampling, spines, sigma))
     }
     const peak = fieldPeak([...fields.values()])
 
-    // The delegations, laid out into rows before any lane is drawn: the pitch
-    // the hairlines sit at is a property of the PAGE, like the curve's peak, so
-    // a five-deep fan-out on one lane and a two-deep one on another can be
-    // read against each other down the column.
-    const stacks = new Map<string, SpawnLine[]>()
-    for (const lane of model.lanes) stacks.set(lane.key, stackSpawns(lane.spawns, win))
-    const pitch = stackPitch(stackDepth([...stacks.values()]))
+    // The ladders, laid out into rows before any lane is drawn: the pitch the
+    // hairlines sit at is a property of the PAGE, like the curve's peak, so a
+    // four-deep fan-out on one lane and a one-deep one on another can be read
+    // against each other down the column.
+    const ladders = new Map<string, LadderLine[]>()
+    for (const lane of model.lanes) ladders.set(lane.key, ladderRows(lane.ladder, win))
+    const pitch = ladderPitch(ladderHeight([...ladders.values()]))
 
     model.lanes.forEach((lane, index) => {
       const row = String(index + 1)
@@ -1766,32 +2109,64 @@ class DayViewImpl implements TemporalView {
           buildCurveSvg(field, peak, { frameMinutes: win.minutes }),
         )
       }
-      // One line per delegation, stacked UP FROM THE BASELINE the curve stands
-      // on — row 0 on the ground, each concurrent neighbour a course above it.
-      // The delegations are what the lane's volume was built on, and a stack
-      // sitting on the same ground says so; hung from the top of the rail they
-      // floated in open paper and annotated nothing. An interval whose close was
-      // never recorded is drawn faded: its length is a stub saying one started,
-      // not a claim about how long it ran.
-      for (const line of stacks.get(lane.key) ?? []) {
+      // THE LADDER. The session's own line on the ground, each subagent a rung
+      // above it, spanning the real interval it was aloft — see `ladderRows`.
+      // Standing on the same baseline the curve stands on, the lines read as
+      // strata under the work rather than as annotation floating over it: four
+      // agents launched together is four rungs with four visibly different
+      // right-hand ends, and that is the fleet, drawn. An interval whose close
+      // was never recorded is drawn faded: its length is a stub saying one
+      // started, not a claim about how long it ran.
+      for (const line of ladders.get(lane.key) ?? []) {
         const hair = document.createElement('i')
-        hair.className = `kbn-day-spawn${line.open ? ' kbn-day-spawn-open' : ''}`
+        hair.className =
+          `kbn-day-aloft kbn-day-aloft-${line.kind}${line.open ? ' kbn-day-aloft-open' : ''}`
         hair.style.left = pct(line.start)
-        hair.style.width = pct(Math.max(0, line.end - line.start))
-        // One pixel of daylight over the rail's own ground rule, so the lowest
-        // course is a delegation and not a thickening of the baseline.
-        hair.style.bottom = `${1 + line.row * pitch}px`
+        // AN OPEN SPAN IS NOT GIVEN A WIDTH HERE. Its end is a stub the daemon
+        // chose, not a return anybody recorded, so the view declines to draw a
+        // length at all and the sheet gives it a fixed fading dash instead —
+        // see `.kbn-day-aloft-open`. Drawing the stub would be inventing the
+        // one fact the mark exists to say is missing.
+        if (!line.open) hair.style.width = pct(Math.max(0, line.end - line.start))
+        // Row 0 sits ON the lane's baseline — the floor of the filled region,
+        // the same ground the curve stands on. It used to be lifted a pixel
+        // clear of the rail's ground rule; that pixel made the session read as
+        // the first rung of the ladder rather than as the ground under it.
+        hair.style.bottom = `${line.row * pitch}px`
+        hair.addEventListener('mousemove', (e) => {
+          e.stopPropagation()
+          this.showAloftTip(lane, line, e)
+        })
+        hair.addEventListener('mouseleave', () => this.hideTip())
+        hair.addEventListener('click', (e) => {
+          e.stopPropagation()
+          this.showAloftTip(lane, line, e, true)
+        })
         rail.append(hair)
       }
 
-      rail.addEventListener('mousemove', (e) => this.showBeatTip(lane, rail, win, e))
+      rail.addEventListener('mousemove', (e) => {
+        // A drag in progress is a zoom gesture, not a hover: the slip would
+        // chase the pointer across the selection it is trying to draw.
+        if (this.drag) return
+        this.showBeatTip(lane, rail, win, e)
+      })
       rail.addEventListener('mouseleave', () => this.hideTip())
       // A click fixes the slip where the pointer already is, so what you were
       // reading stops fleeing when you move to read it. The stopPropagation is
       // load-bearing: the document listener that unpins would otherwise see
       // this very click and close what it just opened.
+      //
+      // A click that ENDED A DRAG is not a click — the browser fires one anyway
+      // after a mouseup, and pinning a tooltip on top of a freshly zoomed rail
+      // is the last thing the gesture meant. `dragJustEnded` swallows exactly
+      // that one event.
       rail.addEventListener('click', (e) => {
         e.stopPropagation()
+        if (this.dragJustEnded) {
+          this.dragJustEnded = false
+          return
+        }
         this.showBeatTip(lane, rail, win, e, true)
       })
 
@@ -1829,13 +2204,28 @@ class DayViewImpl implements TemporalView {
     legend.className = 'kbn-day-legend'
     legend.style.gridRow = String(model.lanes.length + 2)
     legend.append(
-      ...ACTIVITY_KEY_ITEMS.map(({ kind, label }) => buildKey(DAY_KEY_CLASS[kind], label)),
+      buildKey(DAY_KEY_CLASS.agent, MOUND_KEY_LABEL),
       buildKey('kbn-day-key-spine', SPINE_KEY_LABEL),
-      ...(model.lanes.some((lane) => lane.spawns.length > 0)
-        ? [buildKey('kbn-day-key-spawn', SPAWN_KEY_LABEL)]
+      ...(model.lanes.some((lane) => lane.ladder.length > 0)
+        ? [buildKey('kbn-day-key-aloft', ALOFT_KEY_LABEL)]
         : []),
       buildStateKey(),
     )
+    // The way back out of a zoom, and the only sign that you are in one. Quiet
+    // and only ever present while it has something to undo — a permanent
+    // control for a state you are usually not in is chrome.
+    if (this.zoom) {
+      const clear = document.createElement('button')
+      clear.type = 'button'
+      clear.className = 'kbn-day-zoomclear'
+      clear.textContent = `⤢ ${formatSpanMinutes(win.minutes)} — whole day`
+      clear.title = 'Back to the whole day (Esc)'
+      clear.addEventListener('click', (e) => {
+        e.stopPropagation()
+        this.applyZoom(null)
+      })
+      legend.append(clear)
+    }
     chart.append(legend)
     return chart
   }

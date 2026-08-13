@@ -75,6 +75,77 @@ defmodule ShuttleWeb.FileControllerTest do
       assert %{"error" => "path is required"} = json_response(conn, 400)
     end
 
+    test "200 carries ETag, Last-Modified, and Cache-Control validators" do
+      path = tmp_path("txt")
+      File.write!(path, "hello embed")
+      on_exit(fn -> File.rm(path) end)
+
+      conn = get(api_conn(), "/api/v1/file?path=#{URI.encode_www_form(path)}")
+
+      assert conn.status == 200
+      assert [etag] = get_resp_header(conn, "etag")
+      assert etag =~ ~r/^W\/"[0-9a-f]{32}"$/
+      assert [_last_modified] = get_resp_header(conn, "last-modified")
+      assert get_resp_header(conn, "cache-control") == ["public, max-age=300"]
+    end
+
+    test "304 when If-None-Match matches the served ETag" do
+      path = tmp_path("txt")
+      File.write!(path, "hello embed")
+      on_exit(fn -> File.rm(path) end)
+
+      first = get(api_conn(), "/api/v1/file?path=#{URI.encode_www_form(path)}")
+      [etag] = get_resp_header(first, "etag")
+
+      conn =
+        api_conn()
+        |> put_req_header("if-none-match", etag)
+        |> get("/api/v1/file?path=#{URI.encode_www_form(path)}")
+
+      assert conn.status == 304
+      assert conn.resp_body == ""
+    end
+
+    test "304 when If-Modified-Since is at or after the file's mtime" do
+      path = tmp_path("txt")
+      File.write!(path, "hello embed")
+      on_exit(fn -> File.rm(path) end)
+
+      first = get(api_conn(), "/api/v1/file?path=#{URI.encode_www_form(path)}")
+      [last_modified] = get_resp_header(first, "last-modified")
+
+      conn =
+        api_conn()
+        |> put_req_header("if-modified-since", last_modified)
+        |> get("/api/v1/file?path=#{URI.encode_www_form(path)}")
+
+      assert conn.status == 304
+    end
+
+    test "200 (not 304) when the validators are stale — a changed ETag or an earlier If-Modified-Since" do
+      path = tmp_path("txt")
+      File.write!(path, "hello embed")
+      on_exit(fn -> File.rm(path) end)
+
+      stale_etag = ~s(W/"0000000000000000000000000000000")
+
+      conn =
+        api_conn()
+        |> put_req_header("if-none-match", stale_etag)
+        |> get("/api/v1/file?path=#{URI.encode_www_form(path)}")
+
+      assert conn.status == 200
+      assert conn.resp_body == "hello embed"
+
+      conn =
+        api_conn()
+        |> put_req_header("if-modified-since", "Thu, 01 Jan 1970 00:00:00 GMT")
+        |> get("/api/v1/file?path=#{URI.encode_www_form(path)}")
+
+      assert conn.status == 200
+      assert conn.resp_body == "hello embed"
+    end
+
     test "a strict non-*/* Accept header still reaches the controller (not 406)" do
       path = tmp_path("pdf")
       File.write!(path, "%PDF-1.4 fake")

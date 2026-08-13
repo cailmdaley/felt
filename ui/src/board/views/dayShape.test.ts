@@ -24,6 +24,7 @@ import {
   buildDayModel,
   buildDayPreviews,
   buildStillAhead,
+  clampZoom,
   closureMark,
   dayTotals,
   dayWindow,
@@ -40,6 +41,7 @@ import {
   resolveDayISO,
   stepTarget,
   tickStepMinutes,
+  ZOOM_MIN_MINUTES,
   type DayEntry,
   type DayLane,
 } from './DayView.js'
@@ -352,7 +354,10 @@ describe('the drawn frame — how much of the day gets sheet', () => {
 
     const lanes = buildDayLanes(feed, [card()], WIN)
     expect(lanes).toHaveLength(1)
-    expect(lanes[0].spawns.map((s) => s.open)).toEqual([false, true])
+    // The ladder now carries the lane's own session (one 'session' interval,
+    // spanning its first bucket to its last + a minute) alongside the two
+    // joined delegations — filter to the agent kind for the spawns' own claim.
+    expect(lanes[0].ladder.filter((s) => s.kind === 'agent').map((s) => s.open)).toEqual([false, true])
   })
 
   it('a delegation never opens a lane of its own', () => {
@@ -372,6 +377,54 @@ describe('the drawn frame — how much of the day gets sheet', () => {
     }
 
     expect(buildDayLanes(feed, [card()], WIN)).toEqual([])
+  })
+})
+
+describe('clampZoom — a dragged span, made into a frame', () => {
+  it('orders a reversed drag', () => {
+    const frame = clampZoom({ startMs: at(2026, 8, 4, 12, 0), endMs: at(2026, 8, 4, 10, 0) }, WIN)
+    expect(frame.startMs).toBe(at(2026, 8, 4, 10, 0))
+    expect(frame.endMs).toBe(at(2026, 8, 4, 12, 0))
+  })
+
+  it('widens a one-minute drag to (about) the zoom minimum, around its own centre', () => {
+    // Widened symmetrically then snapped outward to whole minutes, so the
+    // result is the minimum or one minute over it, never under.
+    const frame = clampZoom({ startMs: at(2026, 8, 4, 12, 0), endMs: at(2026, 8, 4, 12, 1) }, WIN)
+    expect(frame.minutes).toBeGreaterThanOrEqual(ZOOM_MIN_MINUTES)
+    expect(frame.minutes).toBeLessThanOrEqual(ZOOM_MIN_MINUTES + 1)
+    const centre = (at(2026, 8, 4, 12, 0) + at(2026, 8, 4, 12, 1)) / 2
+    expect(frame.startMs).toBeLessThanOrEqual(centre)
+    expect(frame.endMs).toBeGreaterThanOrEqual(centre)
+  })
+
+  it('pushes a drag that overflows the rail start inboard rather than truncating it', () => {
+    // A drag that starts before 06:00 cannot open before the rail does, so the
+    // whole span survives, shifted rightward instead of clipped down to a
+    // stub narrower than what was actually dragged.
+    const frame = clampZoom({ startMs: WIN.startMs - 30 * 60_000, endMs: WIN.startMs + 30 * 60_000 }, WIN)
+    expect(frame.startMs).toBe(WIN.startMs)
+    expect(frame.minutes).toBe(60)
+  })
+
+  it('pushes a drag that overflows the rail end inboard the same way', () => {
+    const frame = clampZoom({ startMs: WIN.endMs - 30 * 60_000, endMs: WIN.endMs + 30 * 60_000 }, WIN)
+    expect(frame.endMs).toBe(WIN.endMs)
+    expect(frame.minutes).toBe(60)
+  })
+
+  it('is always inside the rail, and `minutes` always matches the drawn span', () => {
+    for (const zoom of [
+      { startMs: WIN.startMs - 500_000, endMs: WIN.startMs + 500_000 },
+      { startMs: WIN.startMs + 60_000, endMs: WIN.startMs + 90_000 },
+      { startMs: WIN.endMs - 500_000, endMs: WIN.endMs + 500_000 },
+      { startMs: WIN.startMs, endMs: WIN.endMs },
+    ]) {
+      const frame = clampZoom(zoom, WIN)
+      expect(frame.startMs).toBeGreaterThanOrEqual(WIN.startMs)
+      expect(frame.endMs).toBeLessThanOrEqual(WIN.endMs)
+      expect(frame.minutes).toBe(Math.round((frame.endMs - frame.startMs) / 60_000))
+    }
   })
 })
 

@@ -287,39 +287,102 @@ button.kbn-day-lanename:focus-visible {
    Under the curve rather than over it, for the same reason they are on the
    ground: the pigment is the wash's own cobalt stepped darker, so the lines
    stay visible through a 34% wash without a new hue entering the page. */
-.kbn-day-spawn {
+/* A LADDER, read from the ground up: the session's own line on the floor, one
+   rung per agent it sent out. Same cobalt as the curve's wash — this is the
+   same fleet drawn a second way, and a new hue would claim it was a third
+   thing. The lines take the pointer (unlike the curve, which is paint) because
+   each one is a span somebody can ask about. */
+/* ONE GRAMMAR: EVERY AGENT IS A HORIZONTAL SPAN. Nothing on this channel is
+   ever a vertical mark, because a vertical would be a second claim — a moment
+   rather than a duration — and this channel makes exactly one.
+
+   `min-width` is 5px and not 1px for that reason alone. The mark is a 1px rule
+   inside a 3px box, so at 1px wide it came out TALLER THAN IT WAS WIDE and a
+   four-second delegation read as a vertical tick sitting among horizontal
+   lines — the same object drawn in two apparent grammars, which is what made
+   the ladder unreadable. Five pixels is the floor at which the shortest real
+   span still reads as a span. */
+.kbn-day-aloft {
   position: absolute;
   height: 3px;
-  min-width: 1px;
-  pointer-events: none;
+  min-width: 5px;
+  cursor: pointer;
 }
-.kbn-day-spawn::before {
+.kbn-day-aloft::before {
   content: '';
   position: absolute;
   left: 0;
   right: 0;
   bottom: 0;
   height: 1px;
-  background: #2E4680;
+  background: #3D5BA0;
+  opacity: 0.58;
+}
+/* THE LAUNCH NIB IS GONE. It was a 1px-wide, 3px-tall vertical tick drawn at
+   the left end of every line — and it is what put vertical marks on this rail
+   at all. On a long delegation it was a small serif nobody noticed; on a short
+   one it was most of the mark, so the same channel drew horizontals for the
+   long spans and what looked like verticals for the short ones, and the honest
+   reading of the rail became "why are there two kinds of agent?". There is one
+   kind. The left end of the rule already says when it launched. */
+/* THE FLOOR — the session itself. Heavier than a rung, because everything
+   above it was launched from it, and it is the one line on the ladder that is
+   not a delegation. */
+/* THE FLOOR — the session itself, and it sits ON the lane's baseline rather
+   than a pixel over it (see the `bottom` the view sets for row 0). Everything
+   above it was launched from it, so it is the ground, and a ground rule that
+   floats is a rung. Heavier than a rung besides: it is the one line on the
+   ladder that is not a delegation. */
+.kbn-day-aloft-session::before {
+  opacity: 0.8;
+  height: 1.5px;
+}
+.kbn-day-aloft:hover::before { opacity: 1; }
+
+/* NEVER CLOSED — the agent was launched and no return was ever recorded.
+   A fixed short dash that fades out to the right, and NOT a duration: the
+   daemon's stub end is a placeholder nobody measured, and drawing it at length
+   would be inventing the one fact this mark exists to say is missing. Left end
+   at full weight (the launch IS recorded), right end fading into the paper
+   (the return is not). The width is set here rather than from the data, which
+   is the whole point — its length carries no information and must not look as
+   though it does. */
+.kbn-day-aloft-open {
+  width: 14px;
+}
+.kbn-day-aloft-open::before {
+  background: linear-gradient(90deg, #3D5BA0 0%, rgba(61, 91, 160, 0) 100%);
   opacity: 0.62;
 }
-/* The launch. One pixel wide and the mark's full height — a nib, not a bar. It
-   rises from the line rather than hanging off it, so the tick still says WHEN
-   on a stack read from the ground up. */
-.kbn-day-spawn::after {
-  content: '';
+
+/* THE DRAG. A wash over the span being swept, in the board's own gold — the
+   pigment of "now / here", which is what a live selection is. Drawn over the
+   whole stack of rails rather than inside one, because the zoom is the page's
+   and not the lane's. */
+.kbn-day-zoomband {
   position: absolute;
-  left: 0;
+  top: 0;
   bottom: 0;
-  width: 1px;
-  height: 3px;
-  background: #2E4680;
-  opacity: 0.8;
+  background: rgba(176, 137, 44, 0.16);
+  border-left: 1px solid rgba(176, 137, 44, 0.55);
+  border-right: 1px solid rgba(176, 137, 44, 0.55);
+  pointer-events: none;
+  z-index: 3;
 }
-/* Never closed. The tick still stands at full weight — the agent WAS sent, and
-   that is recorded — while the trail fades, because its length is a stub the
-   daemon chose rather than a duration anybody wrote down. */
-.kbn-day-spawn-open::before { opacity: 0.22; }
+
+/* The way back out. Sits in the legend row, in the legend's own register, and
+   exists only while there is a zoom to clear. */
+.kbn-day-zoomclear {
+  margin-left: auto;
+  padding: 0 5px;
+  border: 0;
+  border-radius: 2px;
+  background: rgba(176, 137, 44, 0.14);
+  color: #7A6F5C;
+  font: inherit;
+  cursor: pointer;
+}
+.kbn-day-zoomclear:hover { background: rgba(176, 137, 44, 0.26); }
 
 .kbn-day-axis {
   grid-column: 2;
@@ -416,17 +479,18 @@ button.kbn-day-lanename:focus-visible {
   background: var(--curve-spine);
 }
 
-/* Two stacked hairlines — the key teaches the channel's grammar (they stack,
-   from the ground up) at the same time as its pigment. The longer line is the
-   lower one, as it is on the rail: row 0 sits on the baseline. */
-.kbn-day-key-spawn {
-  width: 12px;
-  height: 5px;
+/* The ladder in miniature — the key teaches the channel's grammar (a floor,
+   and rungs above it that end where their agents returned) at the same time as
+   its pigment. The full-width bottom line is the session; the two shorter ones
+   above it are agents that were out for part of it. */
+.kbn-day-key-aloft {
+  width: 14px;
+  height: 7px;
   background:
-    linear-gradient(#2E4680, #2E4680) bottom left / 100% 1px no-repeat,
-    linear-gradient(#2E4680, #2E4680) top left / 72% 1px no-repeat,
-    linear-gradient(#2E4680, #2E4680) bottom left / 1px 100% no-repeat;
-  opacity: 0.72;
+    linear-gradient(var(--day-agent), var(--day-agent)) bottom left / 100% 1.5px no-repeat,
+    linear-gradient(var(--day-agent), var(--day-agent)) center left / 64% 1px no-repeat,
+    linear-gradient(var(--day-agent), var(--day-agent)) top left / 40% 1px no-repeat;
+  opacity: 0.8;
 }
 
 /* ── The day, by fiber ───────────────────────────────────────────────────── */
