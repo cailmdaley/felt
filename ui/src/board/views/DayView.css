@@ -248,10 +248,24 @@ button.kbn-day-lanename:focus-visible {
   white-space: nowrap;
 }
 
+/* THE LANE'S HEIGHT — 29px, half again the 19px it was.
+   Nineteen pixels was a rail sized for the old runs grammar, where a lane was
+   a row of blocks and height carried nothing. The curve made height the
+   PRIMARY channel — it is the whole of what the machines did — and nineteen
+   pixels of dynamic range meant a quiet hour and a busy one differed by a few
+   pixels, with the ladder eating the bottom half of even that.
+
+   The extra ten pixels are spent on the curve rather than shared out evenly:
+   the ladder's band grows by a quarter (`LADDER_BAND_PX`), not by half, so it
+   falls from 58% of the lane to 48% and the curve gets the difference on top
+   of its own share. The spine floor needs no change at all — it is a FRACTION
+   of the row (`SPINE_MIN_HEIGHT`), so a floored spine grows with the lane by
+   construction, which is also why it can stay untouched while Week, which
+   reads the same constant, keeps its own geometry. */
 .kbn-day-rail {
   grid-column: 2;
   position: relative;
-  height: 19px;
+  height: 29px;
 }
 /* The ground the curve stands on. At the BOTTOM rather than through the middle,
    because the curve grows from a baseline: a rule through the ink would read as

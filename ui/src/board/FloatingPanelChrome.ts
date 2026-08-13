@@ -100,6 +100,11 @@ export function attachPanelResize(
     resizingClass: string
     minWidth: number
     minHeight: number
+    /** Fires on every frame of the resize. A panel that DIVIDES a layout (the
+     *  board's docked reader) has to reflow what is beside it as the edge
+     *  moves; settling only at the end would make the divider feel detached
+     *  from the thing it divides. */
+    onMove?: () => void
     onSettle?: () => void
   },
 ): void {
@@ -146,6 +151,7 @@ export function attachPanelResize(
         overlay.style.top = `${Math.max(0, top)}px`
         overlay.style.width = `${w}px`
         overlay.style.height = `${ht}px`
+        opts.onMove?.()
       }
       const onUp = () => {
         window.removeEventListener('pointermove', onMove)

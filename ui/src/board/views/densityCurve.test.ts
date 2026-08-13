@@ -536,8 +536,8 @@ describe('ladderHeight and ladderPitch', () => {
   })
 
   it('closes the pitch up as the ladder deepens, clamped between 1 and 2.5', () => {
-    expect(ladderPitch(2)).toBe(2.5) // 11/(2-1) = 11, clamped down to the ceiling
-    expect(ladderPitch(20)).toBeLessThan(2.5)
+    expect(ladderPitch(2)).toBe(3) // 14/(2-1) = 14, clamped down to the ceiling
+    expect(ladderPitch(20)).toBeLessThan(3)
     expect(ladderPitch(20)).toBeGreaterThanOrEqual(1)
     expect(ladderPitch(200)).toBe(1) // clamped to the floor
   })

@@ -178,6 +178,9 @@ class ShelfView implements TemporalView {
    *  leaving the board and coming back can put the reader back as it was
    *  instead of making the reader re-open every tab by hand. */
   private readerWasOpen = false
+  /** The fraction of the board the docked reader has taken, or null when it is
+   *  closed or floating free. */
+  private dockSplit: number | null = null
 
   /** The card the layout must not move: the one under the pointer, or the one
    *  just dropped. Its neighbours are the ones that yield. */
@@ -197,9 +200,12 @@ class ShelfView implements TemporalView {
     this.ctx = ctx
     this.persist = loadShelfPersist()
     this.dismissed = new Set(this.persist.dismissed)
-    this.reader = new ShelfReader(() => this.ctx?.shuttleBase ?? '')
+    this.reader = new ShelfReader(
+      () => this.ctx?.shuttleBase ?? '',
+      () => this.boardRect(),
+    )
     this.reader.onChange = () => this.syncReading()
-    if (this.readerWasOpen) this.reader.reopen()
+    this.reader.onDock = (split) => this.applyDock(split)
 
     const page = createViewPage(this.title)
     page.titleRow.append(this.buildSearch(), this.buildLens(), this.buildTools())
@@ -235,8 +241,54 @@ class ShelfView implements TemporalView {
     document.addEventListener('keydown', this.onKeyDown, true)
     document.addEventListener('visibilitychange', this.onVisibility)
 
+    window.addEventListener('resize', this.onResize)
+
     this.applyPan()
     void this.load()
+    // The reader outlives the view's DOM, so a board reopened while it was
+    // open restores the split too — after the first layout, so it has a board
+    // rectangle to dock against.
+    if (this.readerWasOpen) requestAnimationFrame(() => this.reader?.reopen())
+  }
+
+  /** The canvas's rectangle on screen — what a docked reader splits. */
+  private boardRect(): { left: number; top: number; width: number; height: number } | null {
+    const vp = this.viewport
+    if (!vp) return null
+    const r = vp.getBoundingClientRect()
+    // The full width the canvas WOULD have, so the dock is measured against
+    // the board rather than against whatever the last split left behind.
+    const width = this.dockSplit === null ? r.width : r.width / (1 - this.dockSplit)
+    return { left: r.left, top: r.top, width, height: r.height }
+  }
+
+  /**
+   * Give the reader its half.
+   *
+   * The canvas narrows rather than being covered: cards reflow into the space
+   * that is left, so nothing ends up underneath the reader. That is the whole
+   * point of a split over a floating window here — a board is a spatial
+   * memory, and a panel laid over it hides exactly the thing you were trying
+   * to remember.
+   */
+  private applyDock(split: number | null): void {
+    if (this.dockSplit === split) return
+    this.dockSplit = split
+    const vp = this.viewport
+    if (!vp) return
+    vp.style.width = split === null ? '' : `${(1 - split) * 100}%`
+    // The viewport's new width changes how many columns the flow has, so the
+    // layout must follow the divider — after the browser has applied it.
+    requestAnimationFrame(() => {
+      this.reflow()
+      this.pump()
+    })
+  }
+
+  private readonly onResize = (): void => {
+    this.reader?.relayout()
+    this.reflow()
+    this.pump()
   }
 
   refresh(ctx: ViewContext): void {
@@ -247,6 +299,7 @@ class ShelfView implements TemporalView {
   unmount(): void {
     document.removeEventListener('keydown', this.onKeyDown, true)
     document.removeEventListener('visibilitychange', this.onVisibility)
+    window.removeEventListener('resize', this.onResize)
     this.viewport?.removeEventListener('pointerdown', this.onSurfacePointerDown)
     this.viewport?.removeEventListener('wheel', this.onWheel)
     this.endGesture()
@@ -255,8 +308,10 @@ class ShelfView implements TemporalView {
     this.reader = null
     if (this.pumpFrame !== null) cancelAnimationFrame(this.pumpFrame)
     if (this.sweepTimer) clearTimeout(this.sweepTimer)
+    if (this.layerTimer) clearTimeout(this.layerTimer)
     this.pumpFrame = null
     this.sweepTimer = null
+    this.layerTimer = null
     // Every body dies with the view — an orphaned iframe keeps its whole JS
     // realm alive behind a page the reader has left.
     for (const handle of this.handles.values()) this.evictBody(handle)
@@ -1299,18 +1354,24 @@ class ShelfView implements TemporalView {
    * canvas means. `metaKey` is left alone — that IS a browser zoom request.
    */
   private readonly onWheel = (e: WheelEvent): void => {
-    if (e.metaKey) return
-    if ((e.target as HTMLElement).closest('.kbn-shelf-card-focus')) return
-    e.preventDefault()
+    // Ctrl first, and before every other bail: ctrl+scroll is THE zoom
+    // gesture, so it must work over any part of the canvas — including a
+    // focused card, whose live iframe would otherwise eat it. (A trackpad
+    // pinch arrives as exactly this event and so zooms too, which is fine.)
     if (e.ctrlKey) {
+      e.preventDefault()
       this.zoomAt(e.clientX, e.clientY, Math.exp(-e.deltaY * 0.0125))
       return
     }
+    if (e.metaKey) return
+    if ((e.target as HTMLElement).closest('.kbn-shelf-card-focus')) return
+    e.preventDefault()
     this.persist.pan = {
       x: this.persist.pan.x - e.deltaX,
       y: this.persist.pan.y - e.deltaY,
     }
     this.applyPan()
+    this.holdLayer()
     this.saveSoon()
     this.pump()
   }
@@ -1340,9 +1401,33 @@ class ShelfView implements TemporalView {
     this.persist.zoom = next
     this.persist.pan = { x: cx - sx * next, y: cy - sy * next }
     this.applyZoom()
+    this.holdLayer()
     this.saveSoon()
     this.pump()
   }
+
+  /**
+   * Promote the surface to its own compositor layer for the duration of a
+   * gesture, and — importantly — LET IT GO afterwards.
+   *
+   * `will-change: transform` is what keeps a pan or zoom smooth, but it also
+   * pins the layer's raster at whatever resolution it had when it was
+   * promoted. Held permanently, that is precisely what makes a zoomed-in card
+   * blurry: the browser scales the bitmap it already had instead of drawing
+   * the content again at the new scale. Dropping the hint once the gesture
+   * settles is the re-rasterisation — the text and the framed documents come
+   * back sharp at whatever scale you left them.
+   */
+  private holdLayer(): void {
+    this.surface?.classList.add('kbn-shelf-moving')
+    if (this.layerTimer) clearTimeout(this.layerTimer)
+    this.layerTimer = setTimeout(() => {
+      this.layerTimer = null
+      this.surface?.classList.remove('kbn-shelf-moving')
+    }, 220)
+  }
+
+  private layerTimer: ReturnType<typeof setTimeout> | null = null
 
   private applyPan(): void {
     this.applyZoom()

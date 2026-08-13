@@ -30,13 +30,18 @@ import {
 } from './shelfLayout.js'
 import { relativeAge } from './ShelfView.js'
 import {
+  clampSplit,
   coerceReaderPersist,
   defaultReaderGeom,
+  dockedGeometry,
   emptyReaderPersist,
   loadReaderPersist,
   onScreen,
   READER_PERSIST_KEY,
   saveReaderPersist,
+  SPLIT_DEFAULT,
+  SPLIT_MAX,
+  SPLIT_MIN,
 } from './ShelfReader.js'
 import {
   advanceGesture,
@@ -355,10 +360,12 @@ describe('persistence', () => {
     expect(coercePersist({}).dismissed).toEqual([])
   })
 
-  it('opens at a sane zoom whatever the store says', () => {
+  it('opens at a usable zoom whatever the store says', () => {
     expect(coercePersist({ zoom: 0.9 }).zoom).toBe(0.9)
-    expect(coercePersist({ zoom: 40 }).zoom).toBe(ZOOM_MAX)
-    expect(coercePersist({ zoom: 0.001 }).zoom).toBe(ZOOM_MIN)
+    // Deep zoom is a legitimate stored state, not something to be corrected.
+    expect(coercePersist({ zoom: 12 }).zoom).toBe(12)
+    expect(coercePersist({ zoom: 1e9 }).zoom).toBe(ZOOM_MAX)
+    expect(coercePersist({ zoom: 1e-9 }).zoom).toBe(ZOOM_MIN)
     expect(coercePersist({ zoom: 'wide' }).zoom).toBe(1)
     expect(coercePersist({}).zoom).toBe(1)
   })
@@ -513,12 +520,25 @@ describe('shelfGesture — a click is not a drag', () => {
   })
 })
 
-describe('clampZoom', () => {
-  it('holds the canvas between recognisable and readable', () => {
+describe('clampZoom — a numerical guard, not a taste cap', () => {
+  it('lets the canvas scale far past a card, in both directions', () => {
+    // The zoom is a true geometric scale of one coordinate system, so zooming
+    // into a thumbnail until it is a full readable page must not hit a wall.
     expect(clampZoom(1)).toBe(1)
-    expect(clampZoom(9)).toBe(ZOOM_MAX)
-    expect(clampZoom(0.01)).toBe(ZOOM_MIN)
+    expect(clampZoom(8)).toBe(8)
+    expect(clampZoom(30)).toBe(30)
+    expect(clampZoom(0.05)).toBe(0.05)
+  })
+
+  it('refuses only the values that are not arithmetic', () => {
+    // Zero collapses every coordinate to the origin and cannot be divided by —
+    // the drag maths converts screen travel to surface travel by dividing.
+    expect(clampZoom(0)).toBe(1)
+    expect(clampZoom(-2)).toBe(1)
     expect(clampZoom(Number.NaN)).toBe(1)
+    expect(clampZoom(Number.POSITIVE_INFINITY)).toBe(1)
+    expect(clampZoom(1e12)).toBe(ZOOM_MAX)
+    expect(clampZoom(1e-12)).toBe(ZOOM_MIN)
   })
 })
 
@@ -532,10 +552,41 @@ describe('the Reader — what survives a dismissal', () => {
       ],
       active: '/w/b.png',
       geom: { left: 40, top: 20, width: 900, height: 700 },
+      docked: false,
+      split: 0.5,
     }
     saveReaderPersist(state, store)
     expect(store.getItem(READER_PERSIST_KEY)).toBeTruthy()
     expect(loadReaderPersist(store)).toEqual(state)
+  })
+
+  it('docks by default, including for a record written before the dock existed', () => {
+    expect(coerceReaderPersist({ open: [{ path: '/a' }] }).docked).toBe(true)
+    expect(coerceReaderPersist({ open: [], docked: false }).docked).toBe(false)
+    expect(coerceReaderPersist({}).split).toBe(SPLIT_DEFAULT)
+  })
+
+  it('holds the split where both halves are still usable', () => {
+    expect(clampSplit(0.5)).toBe(0.5)
+    expect(clampSplit(0.95)).toBe(SPLIT_MAX)
+    expect(clampSplit(0.01)).toBe(SPLIT_MIN)
+    expect(clampSplit(Number.NaN)).toBe(SPLIT_DEFAULT)
+    expect(coerceReaderPersist({ split: 4 }).split).toBe(SPLIT_MAX)
+  })
+
+  it('docks to the right of the BOARD, not of the window', () => {
+    // A board inset in a modal: the reader must land on the board's right
+    // edge, not the screen's, or it floats away from the canvas it splits.
+    const board = { left: 100, top: 50, width: 1000, height: 800 }
+    const geom = dockedGeometry(board, 0.5)
+    expect(geom).toEqual({ left: 600, top: 50, width: 500, height: 800 })
+    expect(geom.left + geom.width).toBe(board.left + board.width)
+  })
+
+  it('never docks itself too narrow to read in', () => {
+    const geom = dockedGeometry({ left: 0, top: 0, width: 500, height: 400 }, SPLIT_MIN)
+    expect(geom.width).toBeGreaterThanOrEqual(380)
+    expect(geom.height).toBeGreaterThanOrEqual(320)
   })
 
   it('forgets the record entirely when there is nothing left to remember', () => {

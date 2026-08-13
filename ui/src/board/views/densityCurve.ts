@@ -705,15 +705,25 @@ export function ladderHeight(lanes: readonly (readonly LadderLine[])[]): number 
   return depth
 }
 
-/** The band the ladder is allowed, in pixels, measured UP from the rail's
- *  baseline. Deliberately under half the rail's height: these lines are strata
- *  under the curve, and a ladder that climbed into it would compete with it. */
-export const LADDER_BAND_PX = 11
+/**
+ * The band the ladder is allowed, in pixels, measured UP from the rail's
+ * baseline. Deliberately under half the rail's height: these lines are strata
+ * under the curve, and a ladder that climbed into it would compete with it.
+ *
+ * GREW BY A QUARTER WHEN THE LANE GREW BY A HALF (19px → 29px, see
+ * `.kbn-day-rail`), which is the whole point of the number moving at all. The
+ * extra height was bought for the CURVE — height is the channel that says how
+ * much the machines did — so the ladder takes a smaller share of a bigger lane
+ * rather than its old share of it: 58% of the rail before, 48% now, and the
+ * curve keeps the difference on top of its own.
+ */
+export const LADDER_BAND_PX = 14
 
-/** The gap between neighbouring rungs. Two and a half pixels while the ladder
- *  is short — the pitch at which one line reads as one agent — closing up only
- *  once a fan-out is deep enough that its HEIGHT is the thing being read. */
+/** The gap between neighbouring rungs. Three pixels while the ladder is short
+ *  — the pitch at which one line reads as one agent, opened up with the taller
+ *  lane — closing only once a fan-out is deep enough that its HEIGHT is the
+ *  thing being read. */
 export function ladderPitch(height: number): number {
   if (height <= 1) return 0
-  return Math.max(1, Math.min(2.5, LADDER_BAND_PX / (height - 1)))
+  return Math.max(1, Math.min(3, LADDER_BAND_PX / (height - 1)))
 }

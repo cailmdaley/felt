@@ -49,14 +49,27 @@ export interface ShelfPersist {
   dismissed: string[]
 }
 
-/** How far the canvas may be scaled. Below the floor the cards stop being
- *  recognisable, which is the only thing the board is for; above the ceiling
- *  you are reading, and reading happens in a browser tab. */
-export const ZOOM_MIN = 0.4
-export const ZOOM_MAX = 1.5
+/**
+ * The zoom range, and it is deliberately enormous.
+ *
+ * This is a NUMERICAL GUARD, not a matter of taste. The canvas is one
+ * coordinate system and the zoom is a true geometric scale of all of it —
+ * cards, their text, their chrome, and the documents inside them — so zooming
+ * in far enough turns a 240px thumbnail into a full, readable page, and that
+ * continuity is the point: there is no threshold where the board stops being a
+ * board and becomes a viewer. Capping it at some tasteful ceiling would put a
+ * wall in the middle of that gesture.
+ *
+ * What the bounds actually prevent is arithmetic: a scale of zero collapses
+ * every coordinate to the origin and cannot be divided by (the drag maths
+ * converts screen travel to surface travel by dividing), and an unbounded
+ * scale runs into the browser's own transform limits and into float precision.
+ */
+export const ZOOM_MIN = 0.02
+export const ZOOM_MAX = 60
 
 export function clampZoom(zoom: number): number {
-  if (!Number.isFinite(zoom)) return 1
+  if (!Number.isFinite(zoom) || zoom <= 0) return 1
   return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, zoom))
 }
 

@@ -70,10 +70,52 @@ export interface ReaderPersist {
   open: TabRef[]
   active?: string
   geom?: PanelGeometry
+  /**
+   * Is the reader DOCKED to the right of the canvas (the default), or has the
+   * reader dragged it free to float?
+   *
+   * Docked is the default because a reader that opens over the canvas hides
+   * cards, and hidden cards are the board's one unforgivable failure — the
+   * whole surface is a spatial memory, and covering part of it is covering
+   * part of what you remember. Docked, the canvas reflows into the half that
+   * is left and nothing is lost, only smaller.
+   */
+  docked?: boolean
+  /** The docked width, as a FRACTION of the board's width, so the split
+   *  survives a window resize or a different display. */
+  split?: number
 }
 
 export function emptyReaderPersist(): ReaderPersist {
   return { open: [] }
+}
+
+/** How much of the board the reader takes when it docks, and the range the
+ *  divider may be dragged through. Below the floor the reader is too narrow to
+ *  read in; above the ceiling the canvas stops being a canvas. */
+export const SPLIT_DEFAULT = 0.5
+export const SPLIT_MIN = 0.2
+export const SPLIT_MAX = 0.8
+
+export function clampSplit(split: number): number {
+  if (!Number.isFinite(split)) return SPLIT_DEFAULT
+  return Math.min(SPLIT_MAX, Math.max(SPLIT_MIN, split))
+}
+
+/**
+ * Where a docked reader sits: the right `split` of the board's own rectangle,
+ * full height. Measured from the BOARD, not the window — the board lives
+ * inside a modal that need not span the screen, and a reader docked to the
+ * window's edge would float away from the canvas it is supposed to be beside.
+ */
+export function dockedGeometry(board: PanelGeometry, split: number): PanelGeometry {
+  const width = Math.max(MIN_WIDTH, Math.round(board.width * clampSplit(split)))
+  return {
+    left: Math.round(board.left + board.width - width),
+    top: board.top,
+    width,
+    height: Math.max(MIN_HEIGHT, board.height),
+  }
 }
 
 /** Coerce a parsed record into a reader state. Anything unreadable is a reader
@@ -91,6 +133,10 @@ export function coerceReaderPersist(parsed: unknown): ReaderPersist {
   else if (out.open.length > 0) out.active = out.open[out.open.length - 1].path
   const geom = coerceGeometry(rec.geom)
   if (geom) out.geom = geom
+  // Docked unless the store says otherwise: a record written before the dock
+  // existed should open in the arrangement that hides nothing.
+  out.docked = rec.docked !== false
+  out.split = clampSplit(typeof rec.split === 'number' ? rec.split : SPLIT_DEFAULT)
   return out
 }
 
@@ -191,9 +237,26 @@ export class ShelfReader {
   private views: HTMLElement | null = null
   private saveTimer: ReturnType<typeof setTimeout> | null = null
 
-  constructor(shuttleBase: () => string) {
+  /** The board's own rectangle on screen, so a docked reader can sit beside
+   *  the canvas rather than at the window's edge. */
+  private readonly boardRect: () => PanelGeometry | null
+
+  constructor(shuttleBase: () => string, boardRect: () => PanelGeometry | null = () => null) {
     this.shuttleBase = shuttleBase
+    this.boardRect = boardRect
     this.persist = loadReaderPersist()
+  }
+
+  /**
+   * Fires whenever the space the reader occupies changes: the fraction of the
+   * board it has taken, or null when it is closed or floating free. The board
+   * narrows its viewport to match, which is what makes this a SPLIT rather
+   * than a window sitting on top of the work.
+   */
+  onDock: ((split: number | null) => void) | null = null
+
+  isDocked(): boolean {
+    return this.win !== null && this.persist.docked === true
   }
 
   isOpen(): boolean {
@@ -228,7 +291,10 @@ export class ShelfReader {
   /** Dismiss the reader. The tab strip is remembered, not emptied. */
   close(): void {
     if (!this.win) return
-    this.persist.geom = readPanelGeometry(this.win)
+    // Only a floating window's rectangle is worth remembering; a docked one is
+    // recomputed from the board every time it opens.
+    if (!this.persist.docked) this.persist.geom = readPanelGeometry(this.win)
+    this.onDock?.(null)
     this.harvest()
     this.win.remove()
     this.win = null
@@ -245,7 +311,8 @@ export class ShelfReader {
     if (this.saveTimer) clearTimeout(this.saveTimer)
     this.saveTimer = null
     if (this.win) {
-      this.persist.geom = readPanelGeometry(this.win)
+      if (!this.persist.docked) this.persist.geom = readPanelGeometry(this.win)
+      this.onDock?.(null)
       this.harvest()
       this.win.remove()
     }
@@ -296,35 +363,99 @@ export class ShelfReader {
 
     win.append(bar, views)
 
-    const vw = window.innerWidth
-    const vh = window.innerHeight
-    const geom =
-      this.persist.geom && onScreen(this.persist.geom, vw, vh)
-        ? this.persist.geom
-        : defaultReaderGeom(vw, vh)
-    win.style.left = `${Math.max(0, geom.left)}px`
-    win.style.top = `${Math.max(0, geom.top)}px`
-    win.style.width = `${geom.width}px`
-    win.style.height = `${geom.height}px`
-    this.persist.geom = geom
+    this.win = win
+    win.classList.toggle('kbn-shelf-reader-docked', this.persist.docked === true)
+    this.placeWindow()
 
     const remember = (): void => {
-      if (this.win) this.persist.geom = readPanelGeometry(this.win)
+      if (this.win && !this.persist.docked) this.persist.geom = readPanelGeometry(this.win)
       this.write()
     }
-    attachPanelDrag(win, bar, { draggingClass: 'kbn-detail-dragging', onSettle: remember })
+    attachPanelDrag(win, bar, {
+      draggingClass: 'kbn-detail-dragging',
+      // Dragging the window by its bar is how you take it OFF the dock. The
+      // gesture says "I want this somewhere else", and a docked window that
+      // refused to move would be a window with a dead title bar.
+      onMoved: () => this.undock(),
+      onSettle: remember,
+    })
     attachPanelResize(win, {
       handleClassPrefix: 'kbn-detail-rh',
       resizingClass: 'kbn-detail-resizing',
       minWidth: MIN_WIDTH,
       minHeight: MIN_HEIGHT,
-      onSettle: remember,
+      // While docked, the west edge IS the divider: every frame of the resize
+      // re-reports the split so the canvas reflows under the reader's hand.
+      onMove: () => this.reportSplit(),
+      onSettle: () => {
+        this.reportSplit()
+        remember()
+      },
     })
 
-    this.win = win
     document.body.append(win)
-
+    this.reportSplit()
     this.rehydrate()
+  }
+
+  /**
+   * Put the window where it belongs: the right of the board when docked, its
+   * remembered (or default) rectangle when floating.
+   *
+   * Docked geometry is recomputed rather than remembered — the board's size is
+   * the authority, so a window resize or a move to another display re-splits
+   * correctly instead of restoring a rectangle that no longer fits anything.
+   */
+  private placeWindow(): void {
+    const win = this.win
+    if (!win) return
+    const board = this.boardRect()
+    let geom: PanelGeometry
+    if (this.persist.docked && board) {
+      geom = dockedGeometry(board, this.persist.split ?? SPLIT_DEFAULT)
+    } else {
+      const vw = window.innerWidth
+      const vh = window.innerHeight
+      geom =
+        this.persist.geom && onScreen(this.persist.geom, vw, vh)
+          ? this.persist.geom
+          : defaultReaderGeom(vw, vh)
+      this.persist.geom = geom
+    }
+    win.style.left = `${Math.max(0, geom.left)}px`
+    win.style.top = `${Math.max(0, geom.top)}px`
+    win.style.width = `${geom.width}px`
+    win.style.height = `${geom.height}px`
+  }
+
+  /** Re-dock after the board's own rectangle changed (a window resize). */
+  relayout(): void {
+    if (!this.win || !this.persist.docked) return
+    this.placeWindow()
+  }
+
+  /** Tell the board how much room the reader is taking, so it can narrow the
+   *  canvas to match. */
+  private reportSplit(): void {
+    if (!this.win || !this.persist.docked) {
+      this.onDock?.(null)
+      return
+    }
+    const board = this.boardRect()
+    if (!board || board.width <= 0) return
+    const width = this.win.offsetWidth
+    this.persist.split = clampSplit(width / board.width)
+    this.onDock?.(this.persist.split)
+  }
+
+  /** Take the reader off the dock — it floats from here, and the canvas gets
+   *  its full width back. */
+  private undock(): void {
+    if (!this.persist.docked) return
+    this.persist.docked = false
+    this.win?.classList.remove('kbn-shelf-reader-docked')
+    this.onDock?.(null)
+    this.write()
   }
 
   /** Rebuild the strip the reader was closed with. Tabs only — the active

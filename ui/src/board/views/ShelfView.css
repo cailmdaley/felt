@@ -89,6 +89,45 @@
   outline-offset: 2px;
 }
 
+/* ── The docked reader ──────────────────────────────────────────────────────
+   Opened, the reader takes the right of the board and the canvas reflows into
+   what is left (ShelfView.applyDock) — a split, not a panel laid over the
+   work, because a board is a spatial memory and covering half of it covers
+   half of what you remember.
+
+   Docked, the window sheds the affordances of a floating one: square inner
+   edge, no drop shadow falling across the canvas, and only its WEST edge
+   resizes — that edge is the divider, and the other three belong to the board.
+   Dragging the title bar takes it off the dock, at which point all of this
+   comes back. */
+.kbn-shelf-reader-docked {
+  border-radius: 0;
+  box-shadow: -1px 0 0 rgba(27, 22, 17, 0.16);
+}
+.kbn-shelf-reader-docked .kbn-detail-rh:not(.kbn-detail-rh-w) { display: none; }
+/* The divider itself: a wider grab zone than an ordinary resize edge, with a
+   hairline that inks on hover so it can be found before it is needed. */
+.kbn-shelf-reader-docked .kbn-detail-rh-w {
+  top: 0;
+  bottom: 0;
+  left: -5px;
+  width: 11px;
+  cursor: ew-resize;
+}
+.kbn-shelf-reader-docked .kbn-detail-rh-w::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 5px;
+  width: 1px;
+  background: transparent;
+  transition: background 140ms ease;
+}
+.kbn-shelf-reader-docked .kbn-detail-rh-w:hover::after {
+  background: rgba(196, 147, 51, 0.8);
+}
+
 /* ── Housekeeping controls ──────────────────────────────────────────────────
    Reset, and the count of what has been put away. Same small-caps hand as the
    lens: these are chrome, and chrome that shouts is chrome you resent. */
@@ -162,8 +201,14 @@
      from where the arithmetic says it is, by an amount that grows with the
      board. */
   transform-origin: 0 0;
-  will-change: transform;
 }
+/* Worn only while the surface is actually moving. A permanent `will-change`
+   pins the layer's raster at the resolution it was promoted with, which is
+   exactly what makes a zoomed-in card blurry — the browser rescales the bitmap
+   it already had rather than redrawing the content at the new scale. Holding
+   the hint during the gesture and dropping it after is what lets the text and
+   the framed documents come back sharp. */
+.kbn-shelf-moving { will-change: transform; }
 
 /* The still class is worn only for the frame in which the first layout lands,
    so cards appear where they belong instead of flying in from the origin. */
