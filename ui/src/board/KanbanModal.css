@@ -13,6 +13,47 @@
  */
 :root {
   --kbn-type-scale: 1.18;
+
+  /* ── THE BOARD'S PIGMENTS ──────────────────────────────────────────────
+     One meaning per colour, one colour per meaning. Declared here because the
+     rule cannot hold if each sheet keeps its own copy of a hex — which is
+     exactly how it broke: the temporal views settled on cinnabar for a message
+     of yours while the Desk and the Chronicle went on marking the same fact in
+     verdigris, and the same human/agent distinction ended up drawn three
+     different ways on three surfaces.
+
+     THE FOUR AXES, and they are orthogonal on purpose — a mark can be about an
+     actor and a time and a verdict at once, and each axis has its own pigment
+     so the three claims never have to share one:
+
+       WHO ACTED       cinnabar for you, cobalt for the machine
+       WHEN / OWED     gold — now, due, waiting on you
+       VERDICT         verdigris — tempered, and the column that awaits one
+       MACHINERY       iron gall — rules, bullets, chrome, anything muted
+
+     A hue outside these is a claim the data never made. */
+
+  /* YOU. A message you sent, a role you drive, a human actor. The spine on
+     Day and Week, the attention tick on the Chronicle, the glyph on a pin. */
+  --kbn-you: #BC4538;
+
+  /* THE MACHINE. Agent work of every kind: the density curve, the delegation
+     ladder, an agent glyph, a worker in the air. */
+  --kbn-agent: #3D5BA0;
+
+  /* NOW, AND WHAT IS OWED. The now-thread, a due date, a worker with its hand
+     up, the drag band. Gold is the board's "attend to this, at this time". */
+  --kbn-owed: #9A7B35;
+  --kbn-owed-bright: #C49333;
+
+  /* THE VERDICT — and the ONE meaning verdigris keeps. A fiber tempered, and
+     the column where finished work waits to be judged. It earns its place by
+     being orthogonal to both other axes: whether work came out well is a
+     different question from who did it or when, and no other pigment answers
+     it. Everything else that used to be verdigris — human actors, workers
+     aloft, due dates — was one of the axes above wearing the wrong colour. */
+  --kbn-tempered: #3F8278;
+  --kbn-tempered-ink: #2E6862;
 }
 
 /* EB Garamond Initials F1 / F2 — the two-layer dropcap fonts. F2 is
@@ -93,9 +134,9 @@
    and feed the timeline, but renderColumn/renderCard only ever take the three
    Now kinds, so the rules matched nothing. Restyle from scratch if a future
    surface brings them back. */
-.kbn-col-drafts .kbn-cap { color: #C49333; }                   /* ochre */
+.kbn-col-drafts .kbn-cap { color: var(--kbn-owed-bright); }       /* ochre */
 .kbn-col-inFlight .kbn-cap { color: #3D5BA0; }                 /* cobalt */
-.kbn-col-awaitingReview .kbn-cap { color: #3F8278; }           /* teal */
+.kbn-col-awaitingReview .kbn-cap { color: var(--kbn-tempered); }  /* verdigris — the verdict axis */
 
 /* Fills the host element supplied by vellum's workspace slot
    (KanbanHost in src/vellum/mount.tsx). The host gives us a fixed-
@@ -444,9 +485,12 @@
   border-radius: 50%;
   background: rgba(122, 111, 92, 0.4);
 }
+/* A role that is UP is agent work running, so it takes the agent's cobalt —
+   beside `-held` in gold (owed) and `-stale` in iron gall (machinery), the
+   three dots now read on the board's own three axes rather than on a stoplight. */
 .kbn-pin-chip-dot-live {
-  background: #3F8278;
-  box-shadow: 0 0 0 2px rgba(63, 130, 120, 0.20);
+  background: var(--kbn-agent);
+  box-shadow: 0 0 0 2px rgba(61, 91, 160, 0.20);
 }
 .kbn-pin-chip-dot-held { background: #C49333; }
 .kbn-pin-chip-dot-stale { background: rgba(122, 111, 92, 0.35); }
@@ -456,8 +500,11 @@
   font-size: calc(10px * var(--kbn-type-scale, 1));
   line-height: 1;
 }
-.kbn-pin-chip-human .kbn-pin-chip-glyph { color: #3F8278; }
-.kbn-pin-chip-agent .kbn-pin-chip-glyph { color: #3D5BA0; }
+/* A role YOU drive, against the agent's cobalt below — the same pair Day and
+   Week draw as spine-against-curve. It was verdigris, which made one fact
+   wear two colours on two pages. */
+.kbn-pin-chip-human .kbn-pin-chip-glyph { color: var(--kbn-you); }
+.kbn-pin-chip-agent .kbn-pin-chip-glyph { color: var(--kbn-agent); }
 .kbn-pin-chip-name {
   /* A notch under `.kbn-card-name` (14.5px): a parked role is the same object
      as a card, held in a quieter register. */
@@ -945,7 +992,7 @@
   flex-shrink: 0;
   text-align: center;
 }
-.kbn-cluster-item-human .kbn-cluster-item-glyph { color: #3F8278; }
+.kbn-cluster-item-human .kbn-cluster-item-glyph { color: var(--kbn-you); }
 .kbn-cluster-cold .kbn-cluster-item-glyph { opacity: 0.6; }
 .kbn-cluster-item-title {
   flex: 1;
@@ -1323,8 +1370,9 @@
   text-align: center;
   color: #C49333;
 }
+/* A human-driven role, against the agent's cobalt — the board's one pair. */
 .kbn-card-glyph-human {
-  color: #3F8278;
+  color: var(--kbn-you);
 }
 /* Plain text since the title-click → vellum shortcut retired (the whole
    card opens the fiber-detail panel); the card's own cursor applies. */
@@ -1464,7 +1512,7 @@
 }
 .kbn-action-tempered {
   background: rgba(63, 130, 120, 0.10);
-  color: #2E6862;
+  color: var(--kbn-tempered-ink);
   border-color: rgba(63, 130, 120, 0.40);
 }
 .kbn-action-tempered:hover {
@@ -1494,14 +1542,16 @@
   letter-spacing: 0.04em;
   flex-shrink: 0;
 }
+/* The base is MUTED, not verdigris. An actor line with no variant is not
+   making a verdict, and the two variants below carry the actual claim. */
 .kbn-card-actor {
-  color: #2E6862;
+  color: #7A6F5C;
 }
 .kbn-card-actor-agent {
-  color: #8C6A24;
+  color: var(--kbn-agent);
 }
 .kbn-card-actor-human {
-  color: #2E6862;
+  color: var(--kbn-you);
 }
 .kbn-card-due {
   color: #7A6F5C;
@@ -1540,8 +1590,14 @@
   font-size: calc(9.5px * var(--kbn-type-scale, 1));
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: #2E6862;
-  background: rgba(63, 130, 120, 0.10);
+  /* A WORKER IN THE AIR IS AGENT WORK, so it wears the agent's cobalt. It was
+     verdigris — which put the Day view in the position of drawing one fiber's
+     live worker as a teal pill and the very delegations that worker had aloft
+     as cobalt rungs, on the same row of the same page. The pill's ALARM states
+     below stay gold and cinnabar, because those are no longer claims about who
+     is working: they are claims about who is waited on. */
+  color: var(--kbn-agent);
+  background: rgba(61, 91, 160, 0.10);
   padding: 2px 7px;
   border-radius: 2px;
   margin-left: auto;
@@ -1556,12 +1612,12 @@
   transition: border-color 120ms ease, color 120ms ease, background 120ms ease;
 }
 .kbn-card-worker:hover {
-  color: #1E5852;
-  border-color: rgba(63, 130, 120, 0.55);
+  color: #2E4680;
+  border-color: rgba(61, 91, 160, 0.55);
 }
 .kbn-card-worker:focus { outline: none; }
 .kbn-card-worker:focus-visible {
-  outline: 1px dashed #2E6862;
+  outline: 1px dashed var(--kbn-agent);
   outline-offset: 2px;
 }
 
@@ -1610,10 +1666,12 @@
 }
 /* Hover/focus flips held → release: solid warm border, amber text, the label
    crossfade handled by toggling which child span is shown. */
+/* Held is the OWED axis (its resting ink is the slate above), so its hover
+   deepens toward gold rather than borrowing the verdict's verdigris. */
 .kbn-card-held:hover,
 .kbn-card-held:focus-visible {
-  color: #1E5852;
-  background: rgba(63, 130, 120, 0.14);
+  color: #8A5A12;
+  background: rgba(196, 147, 51, 0.14);
   border-style: solid;
   border-color: rgba(63, 130, 120, 0.55);
 }

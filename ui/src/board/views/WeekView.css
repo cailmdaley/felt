@@ -4,7 +4,9 @@
    inked (activity rasters); below it the week is hollow (obligations). The
    palette is KanbanModal.css's, borrowed rather than restated:
      iron-gall #1B1611 · muted #7A6F5C · faded #A89B83
-     ochre #C49333 · gold-deep #9A7B35 · cobalt #3D5BA0 · teal #3F8278
+     ochre #C49333 · gold-deep #9A7B35 · cobalt #3D5BA0 · verdigris #3F8278
+     Semantic pigments come from KanbanModal.css's tokens: --kbn-you
+     (cinnabar), --kbn-agent (cobalt), --kbn-owed (gold), --kbn-tempered.
    Only `--wk-ochre-deep` is new — a darkened ochre for the hollow marks, which
    must sit a shade below the gold seam without turning brown. */
 

@@ -495,7 +495,7 @@ button.kbn-day-lanename:focus-visible {
 .kbn-state-inFlight { color: #3D5BA0; }
 .kbn-state-resting { color: #7A6F5C; }
 .kbn-state-awaitingReview { color: #C49333; }
-.kbn-state-tempered { color: #3F8278; }
+.kbn-state-tempered { color: var(--kbn-tempered, #3F8278); }
 .kbn-state-composted { color: #7A6F5C; opacity: 0.6; }
 
 /* The states hang together as one key item: a narrow legend wraps between

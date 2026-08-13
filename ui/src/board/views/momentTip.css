@@ -295,9 +295,14 @@
 .kbn-tip-text ol { margin: 0; padding-left: 1.1em; }
 /* A LINK'S WORDS, WITHOUT THE LINK. Marked as one so the reader can see that
    something was linked, inert because a hover card takes no pointer and a
-   pinned one is a quotation rather than a place to navigate from. */
+   pinned one is a quotation rather than a place to navigate from.
+
+   MUTED, not cobalt. Cobalt means agent work on this board, and a link inside
+   a quotation is not agent work — it is a piece of the sentence. An inert mark
+   should not wear an actor's colour at all; the dotted rule is enough to say
+   something was linked here. */
 .kbn-tip-md-link {
-  color: var(--kbn-tip-agent);
+  color: #7A6F5C;
   text-decoration: underline;
   text-decoration-style: dotted;
   text-underline-offset: 2px;

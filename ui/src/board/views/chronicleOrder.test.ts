@@ -55,8 +55,14 @@ function card(over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard {
   }
 }
 
+/** `m` is epoch-MILLISECONDS (see `ActivityBucket`'s own doc comment in
+ *  TemporalData.ts) — NOT minutes. Dividing by 60_000 here once put every
+ *  bucket at a bogus 1970 day computed from misread units; in a negative-UTC-
+ *  offset zone that day fell BEFORE the epoch, so its noon went negative and
+ *  the `Math.max(workMs, 0)` floor in `buildFiberRow` silently zeroed it —
+ *  the two ordering tests that failed only west of Greenwich. */
 function bucket(day: string, over: Partial<ActivityBucket> = {}): ActivityBucket {
-  return { m: Math.floor(new Date(noonOf(day)).getTime() / 60_000), s: null, cwd: null, k: 'agent', n: 1, ...over }
+  return { m: new Date(noonOf(day)).getTime(), s: null, cwd: null, k: 'agent', n: 1, ...over }
 }
 
 function emptyResponse(cards: readonly KanbanCard[]): KanbanResponse {

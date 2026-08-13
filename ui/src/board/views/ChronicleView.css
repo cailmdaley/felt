@@ -9,9 +9,13 @@
    Every mark on a lifeline is positioned in px against `--chr-day-w`, so the
    whole chronicle rescales by changing one number.
 
-   Palette is KanbanModal.css's: iron-gall #1B1611, muted #7A6F5C, faded
-   #A89B83, parchment #EDE2CE, gold-leaf #9A7B35, ochre #C49333, cobalt
-   #3D5BA0, teal #3F8278. */
+   Palette is KanbanModal.css's, and the SEMANTIC pigments come from its tokens
+   rather than as hexes copied down here — `--kbn-you` (cinnabar, a message of
+   yours), `--kbn-agent` (cobalt, machine work), `--kbn-owed` (gold, now and
+   what is due), `--kbn-tempered` (verdigris, the verdict). Copying the hexes is
+   how this page drifted: its attention tick was verdigris while Day drew the
+   same fact in cinnabar. Structural inks stay literal: iron-gall #1B1611,
+   muted #7A6F5C, faded #A89B83, parchment #EDE2CE. */
 
 .chr-scroll {
   /* Fallback only — ChronicleView sizes the day column at render so that
@@ -415,7 +419,7 @@
 }
 
 .chr-face-closed { color: #4A4033; }
-.chr-face-mark-ok { color: #3F8278; }
+.chr-face-mark-ok { color: var(--kbn-tempered, #3F8278); }
 .chr-face-mark-x { color: #A89B83; }
 .chr-face-quiet {
   margin: 0;
@@ -789,7 +793,7 @@
 .chr-state-inFlight { color: #3D5BA0; }
 .chr-state-resting { color: #7A6F5C; }
 .chr-state-awaitingReview { color: #C49333; }
-.chr-state-tempered { color: #3F8278; }
+.chr-state-tempered { color: var(--kbn-tempered, #3F8278); }
 .chr-state-composted { color: #7A6F5C; opacity: 0.6; }
 
 .chr-name {
@@ -929,7 +933,7 @@ button.chr-name:hover {
   top: 50%;
   width: var(--chr-seg-w);
   margin-left: calc((var(--chr-day-w) - var(--chr-seg-w)) / 2);
-  background: #3D5BA0;
+  background: var(--kbn-agent, #3D5BA0);
   border-radius: 0.5px;
 }
 /* The ramp grew with the row, but only just: at 32px the old 2/4/7 steps read
@@ -941,10 +945,16 @@ button.chr-name:hover {
 .chr-seg-2 { height: 6px; margin-top: -3px; opacity: 0.52; }
 .chr-seg-3 { height: 10px; margin-top: -5px; opacity: 0.74; }
 
-/* A spell that asked for the human. Solid teal, hairline-slim — kept shorter
+/* A spell that asked for the human. CINNABAR, hairline-slim — kept shorter
    than the tallest segment so it reads as an overlay on the day's work rather
    than as a picket in front of it. `left` already carries the time of day, so
-   the only margin is the half-width that centers the tick ON that instant. */
+   the only margin is the half-width that centers the tick ON that instant.
+
+   IT WAS TEAL, and teal was the wrong claim. This tick and Day's spine are the
+   same fact — you spoke here — and they were drawn in different pigments on
+   two pages of one board, so a reader who had learned the rail's grammar had
+   to learn the lifeline's separately. Cinnabar is the board's attention
+   pigment; a message of yours is what it is for. See `--kbn-you`. */
 .chr-att {
   position: absolute;
   top: 50%;
@@ -952,7 +962,7 @@ button.chr-name:hover {
   height: 8px;
   margin-top: -4px;
   margin-left: -1px;
-  background: #3F8278;
+  background: var(--kbn-you, #BC4538);
 }
 
 
@@ -970,7 +980,7 @@ button.chr-name:hover {
   line-height: 1;
   pointer-events: none;
 }
-.chr-end { color: #3F8278; }
+.chr-end { color: var(--kbn-tempered, #3F8278); }
 .chr-end-compost { color: #A89B83; }
 /* The one mark that writes back: a fiber's due date is a plain frontmatter
  * field, so unlike every other mark on the row it opts back into pointer
@@ -1070,14 +1080,14 @@ button.chr-name:hover {
   display: inline-block;
   width: 2px;
   height: 8px;
-  background: #3F8278;
+  background: var(--kbn-you, #BC4538);
 }
 .chr-key-glyph {
   font-style: normal;
   font-size: calc(11px * var(--kbn-type-scale, 1));
   line-height: 1;
 }
-.chr-key-due { color: #C49333; }
+.chr-key-due { color: var(--kbn-owed-bright, #C49333); }
 .chr-key-launch { color: #3D5BA0; opacity: 0.75; }
 /* The state group: glyph and word in pairs, one line, hanging together as a
    single key item so a narrow key wraps between groups and never inside one. */
