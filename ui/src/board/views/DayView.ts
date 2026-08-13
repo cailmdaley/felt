@@ -135,6 +135,7 @@ import {
   SLOT_PHRASE,
   type DrawnKind,
   type LastExchange,
+  type MarkPick,
   type MomentSource,
   type MomentWords,
   type SlotTip,
@@ -2138,9 +2139,13 @@ class DayViewImpl implements TemporalView {
       name.type = 'button'
       name.className = 'kbn-day-lanename'
       name.textContent = lane.label
-      name.title = lane.label
-      const laneCardId = lane.cardId
-      name.addEventListener('click', () => this.ctx?.openCard(laneCardId))
+      // The name is the lane's door, same as the rail's empty paper: to the
+      // terminal while a worker is up, to the fiber once it is not.
+      name.title = `${lane.label} — open its terminal`
+      name.addEventListener('click', (e) => {
+        e.stopPropagation()
+        this.openLaneTerminal(lane)
+      })
       label.append(name)
       if (lane.hostNote) {
         const host = document.createElement('span')
@@ -2163,6 +2168,22 @@ class DayViewImpl implements TemporalView {
       const rail = document.createElement('div')
       rail.className = `kbn-day-rail${lane.stale ? ' kbn-card--stale' : ''}`
       rail.style.gridRow = row
+      // THE ROW LIGHTS AS ONE. The label and the rail are two cells of the
+      // chart's grid with a gridline layer between them, so there is no element
+      // that IS the row to hang a `:hover` on — the two are joined here instead.
+      // Without it the lane's clickability is invisible: a door with no handle.
+      const lit = (on: boolean) => {
+        label.classList.toggle('kbn-day-lane-lit', on)
+        rail.classList.toggle('kbn-day-lane-lit', on)
+      }
+      for (const el of [label, rail]) {
+        el.addEventListener('mouseenter', () => lit(true))
+        el.addEventListener('mouseleave', () => lit(false))
+      }
+      label.addEventListener('click', (e) => {
+        e.stopPropagation()
+        this.openLaneTerminal(lane)
+      })
       const field = fields.get(lane.key)
       if (field) {
         rail.append(
@@ -2227,10 +2248,27 @@ class DayViewImpl implements TemporalView {
       // after a mouseup, and pinning a tooltip on top of a freshly zoomed rail
       // is the last thing the gesture meant. `dragJustEnded` swallows exactly
       // that one event.
+      //
+      // THE RAIL CARRIES THREE GESTURES, and they settle in this order:
+      //
+      //   a drag past the threshold   → zoom      (decided in `onDragMove`)
+      //   a click ON a mark           → pin       (the tooltip's own grammar)
+      //   a click on empty paper      → terminal
+      //
+      // The middle rule is the one that keeps the existing grammar intact: if
+      // the pointer resolves to a beat — by ordinary snap or by the magnet —
+      // that click belongs to the tooltip, because the reader is pointing at
+      // something. Only where `pickMark` finds nothing at all is the click
+      // about the LANE rather than about a moment in it, and that is where the
+      // door is.
       rail.addEventListener('click', (e) => {
         e.stopPropagation()
         if (this.dragJustEnded) {
           this.dragJustEnded = false
+          return
+        }
+        if (this.beatUnder(lane, rail, win, e) === null) {
+          this.openLaneTerminal(lane)
           return
         }
         this.showBeatTip(lane, rail, win, e, true)
@@ -2310,6 +2348,28 @@ class DayViewImpl implements TemporalView {
    * {@link BEAT_SNAP_PX} — hides the tooltip rather than answering about the
    * nearest work on the row.
    */
+  /**
+   * Which mark the pointer resolves to, or null for empty paper — the one
+   * question the click handler and the hover handler must never answer
+   * differently, which is why they both ask it here.
+   */
+  private beatUnder(
+    lane: DayLane,
+    rail: HTMLElement,
+    win: DayWindow,
+    e: MouseEvent,
+  ): MarkPick | null {
+    if (lane.beats.length === 0) return null
+    const box = rail.getBoundingClientRect()
+    if (box.width <= 0 || win.minutes <= 0) return null
+    const perMinute = box.width / win.minutes
+    return pickMark(
+      lane.beats.map((b) => (b.minute + 0.5) * perMinute),
+      e.clientX - box.left,
+      BEAT_SNAP_PX,
+    )
+  }
+
   private showBeatTip(
     lane: DayLane,
     rail: HTMLElement,
@@ -2326,17 +2386,12 @@ class DayViewImpl implements TemporalView {
     if (box.width <= 0 || win.minutes <= 0) return this.hideTip(pin)
 
     const perMinute = box.width / win.minutes
-    const x = e.clientX - box.left
     // The nearest beat, or — anywhere right of the lane's last one — that last
     // beat, caught out of the empty paper. See `pickMark`. "Last" is the last
     // beat IN THE FRAME, which is what makes this follow a zoom for free: the
     // lanes are rebuilt against the drawn window, so a beat outside it is not
     // in `lane.beats` at all.
-    const pick = pickMark(
-      lane.beats.map((b) => (b.minute + 0.5) * perMinute),
-      x,
-      BEAT_SNAP_PX,
-    )
+    const pick = this.beatUnder(lane, rail, win, e)
     if (!pick) return this.hideTip(pin)
     this.markMagnet(rail, pick.magnetized ? lane.beats[pick.index] : null, perMinute)
     // Out in the dead zone the question is about the LANE, not about a minute,
@@ -2383,6 +2438,33 @@ class DayViewImpl implements TemporalView {
     tip.classList.toggle('kbn-tip-flip', flip)
     tip.style.left = flip ? 'auto' : `${anchor + 9}px`
     tip.style.right = flip ? `${chartBox.width - anchor + 9}px` : 'auto'
+  }
+
+  /**
+   * A LANE IS A WAY INTO THE WORK IT DREW — click it and you are at the
+   * terminal.
+   *
+   * Reaching a live session used to mean remembering which fiber it was,
+   * crossing to the Desk, finding the card and pressing its worker pill. But
+   * the lane is already the fiber, already labelled with its name, and already
+   * the thing you were looking at when you decided to go there. So it is the
+   * door, and it opens through exactly the pill's own route (`ctx.openWorker`),
+   * so the two surfaces cannot drift into two ways of attaching to one tmux.
+   *
+   * NO LIVE WORKER OPENS THE FIBER instead of doing nothing. A dead click is
+   * the more surprising of the two options — it reads as a broken control
+   * rather than as an absent one — and the fallback keeps the lane's meaning
+   * single and learnable: *take me to this fiber's work*, which is the terminal
+   * while one is up and the card once it is not. It is also what the lane's
+   * name already did before this, so nothing that used to work stopped.
+   */
+  private openLaneTerminal(lane: DayLane): void {
+    const ctx = this.ctx
+    if (!ctx) return
+    const card = ctx.cards.find((c) => c.id === lane.cardId)
+    const tmux = card?.runningWorker
+    if (tmux && ctx.openWorker) ctx.openWorker(tmux, card.shuttleHost)
+    else ctx.openCard(lane.cardId)
   }
 
   /**

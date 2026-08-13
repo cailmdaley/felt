@@ -128,6 +128,121 @@ export function clockTime(ms: number): string {
   return new Date(ms).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
 }
 
+// ── The words, as they were written ──────────────────────────────────────────
+//
+// A transcript is markdown. It was typed as markdown and it means what markdown
+// means, so a card showing `**the mound is too smooth**` with the asterisks
+// still in it is showing the source of the sentence rather than the sentence.
+//
+// THIS IS A SEPARATE RENDERER FROM `renderMarkdown` IN utils.ts, deliberately,
+// and the reason is the one thing that matters here: SAFETY BY CONSTRUCTION.
+// That renderer runs `marked` over text and hands the result to `innerHTML`
+// with raw HTML passing straight through — a considered risk for fiber bodies,
+// which the person reading them wrote. Transcript excerpts are a different
+// provenance: they are whatever any agent or any tool emitted, and a `<script>`
+// in a tool's output must never become a tag. So everything here is ESCAPED
+// FIRST and the markup is introduced afterwards, onto text that can no longer
+// contain a tag. There is no sanitizer to get wrong, because no unsafe string
+// is ever built.
+//
+// Inline-only is the common case (an excerpt is a line or two), but a PINNED
+// card asks the daemon for the untruncated text and gets whole reports back, so
+// the block basics have to survive: paragraphs, fenced code, and lists.
+
+/** Where a code span is parked while the rest of the inline grammar runs, so
+ *  `**` inside backticks stays two asterisks. NUL cannot occur in the escaped
+ *  text (it is stripped on the way in), which is what makes it a safe fence. */
+const CODE_SLOT = '\u0000'
+
+/** Inline markup, applied to ALREADY-ESCAPED text. */
+function inlineMarkup(escaped: string): string {
+  const spans: string[] = []
+  // Code first and parked: its content is literal by definition, and running
+  // the emphasis rules over it would rewrite the very characters it is quoting.
+  let out = escaped.replace(/`([^`]+)`/g, (_, code: string) => {
+    spans.push(`<code>${code}</code>`)
+    return `${CODE_SLOT}${spans.length - 1}${CODE_SLOT}`
+  })
+
+  // A LINK BECOMES ITS TEXT, styled but inert. The card is a quotation inside a
+  // tooltip: a live href would be a navigation target in a slip that vanishes
+  // when the pointer moves, and on the hover card it cannot even be clicked
+  // (`pointer-events: none`). The words are the content; the URL is not.
+  out = out.replace(/\[([^\]\n]+)\]\(([^)\s]*)\)/g, '<span class="kbn-tip-md-link">$1</span>')
+
+  // Bold before emphasis, or `**x**` is read as an emphasis containing a stray
+  // asterisk. Underscores are matched only at word boundaries, so `snake_case`
+  // and `__init__` survive as themselves.
+  out = out
+    .replace(/\*\*(?=\S)([\s\S]*?\S)\*\*/g, '<strong>$1</strong>')
+    .replace(/(^|[\s(])__(?=\S)([\s\S]*?\S)__(?=$|[\s).,;:!?])/g, '$1<strong>$2</strong>')
+    .replace(/\*(?=\S)([^*\n]*?\S)\*/g, '<em>$1</em>')
+    .replace(/(^|[\s(])_(?=\S)([^_\n]*?\S)_(?=$|[\s).,;:!?])/g, '$1<em>$2</em>')
+
+  return out.replace(
+    new RegExp(`${CODE_SLOT}(\\d+)${CODE_SLOT}`, 'g'),
+    (_, i: string) => spans[Number(i)] ?? '',
+  )
+}
+
+/** One block's lines, as a list, when they all open with a bullet or a number. */
+function listMarkup(lines: string[]): string | null {
+  const bullet = lines.every((l) => /^\s*[-*+]\s+\S/.test(l))
+  const ordered = !bullet && lines.every((l) => /^\s*\d+[.)]\s+\S/.test(l))
+  if (!bullet && !ordered) return null
+  const items = lines
+    .map((l) => `<li>${inlineMarkup(l.replace(/^\s*(?:[-*+]|\d+[.)])\s+/, ''))}</li>`)
+    .join('')
+  return ordered ? `<ol>${items}</ol>` : `<ul>${items}</ul>`
+}
+
+/**
+ * A transcript excerpt as HTML: markdown rendered, everything escaped first.
+ *
+ * Safe for `innerHTML` by construction — see the note above. The only tags in
+ * the output are the ones this function writes.
+ */
+export function renderExcerptMarkdown(text: string): string {
+  // NUL is stripped rather than escaped: it is the code-span fence below, and
+  // it has no meaning in a transcript.
+  const clean = text.replace(/\u0000/g, '')
+
+  const out: string[] = []
+  // Fenced code is taken whole, before anything is split on blank lines — a
+  // fence may contain them, and a report's code block is the one place where
+  // the line breaks are the content.
+  const fence = /^```[^\n]*\n([\s\S]*?)^```[ \t]*$/gm
+  let at = 0
+  const flush = (chunk: string): void => {
+    for (const block of chunk.split(/\n{2,}/)) {
+      const lines = block.split('\n').filter((l) => l.trim() !== '')
+      if (lines.length === 0) continue
+      const list = listMarkup(lines)
+      // A hard-wrapped paragraph is one paragraph: the newlines inside it are
+      // the writer's line width, not their meaning.
+      out.push(list ?? `<p>${inlineMarkup(lines.join('\n'))}</p>`)
+    }
+  }
+  for (let m = fence.exec(clean); m !== null; m = fence.exec(clean)) {
+    flush(escapeTipHtml(clean.slice(at, m.index)))
+    out.push(`<pre><code>${escapeTipHtml(m[1])}</code></pre>`)
+    at = m.index + m[0].length
+  }
+  flush(escapeTipHtml(clean.slice(at)))
+  return out.join('')
+}
+
+/** The escape every string above passes through before it is allowed near a
+ *  tag. Local rather than imported from utils.ts so this module's safety does
+ *  not depend on a helper written for a different purpose. */
+function escapeTipHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
+
 // ── Which mark the pointer is asking about ───────────────────────────────────
 
 /** Which mark a pointer resolved to, and how it got there. */
@@ -409,7 +524,10 @@ export function renderTip(host: HTMLElement, tip: SlotTip): void {
 
       const text = document.createElement('span')
       text.className = 'kbn-tip-text'
-      text.append(document.createTextNode(excerpt.text))
+      // Markdown, rendered — the transcript was written as markdown and means
+      // what markdown means. Safe for innerHTML by construction: every string
+      // is escaped before any tag is introduced. See `renderExcerptMarkdown`.
+      text.innerHTML = renderExcerptMarkdown(excerpt.text)
       line.append(text)
 
       said.append(line)
@@ -593,7 +711,7 @@ export function dedupeSources(sources: readonly (MomentSource | null)[]): Moment
   const out: MomentSource[] = []
   for (const source of sources) {
     if (!source) continue
-    const key = `${source.host ?? ''} ${source.session}`
+    const key = `${source.host ?? ''}\u0000${source.session}`
     if (seen.has(key)) continue
     seen.add(key)
     out.push(source)

@@ -11,6 +11,7 @@ import {
   dedupeSources,
   MomentLoader,
   lastExchange,
+  renderExcerptMarkdown,
   pickMark,
   renderTip,
   SLOT_NO_TEXT_NOTE,
@@ -385,6 +386,9 @@ describe('dedupeSources', () => {
 class FakeNode {
   className = ''
   textContent = ''
+  /** The excerpt text is markdown now, so the card sets HTML rather than
+   *  appending a text node — see `renderExcerptMarkdown`. */
+  innerHTML = ''
   readonly children: FakeNode[] = []
   append(...nodes: Array<FakeNode | { textContent: string }>): void {
     for (const node of nodes) this.children.push(node as FakeNode)
@@ -437,7 +441,7 @@ describe('renderTip — the excerpt cards', () => {
     expect(when.textContent).toBe(clockTime(EXCERPT_AT_MS))
 
     expect(text.className).toBe('kbn-tip-text')
-    expect(text.children[0].textContent).toBe('run the null tests')
+    expect(text.innerHTML).toBe('<p>run the null tests</p>')
   })
 
   it('carries who spoke in the line class and label — colour does the rest in CSS', () => {
@@ -494,6 +498,73 @@ describe('renderTip — the excerpt cards', () => {
     const foot = host.children.find((c) => c.className.includes('kbn-tip-note'))!
     expect(foot.className).toBe('kbn-tip-note kbn-tip-section')
     expect(foot.textContent).toBe(SLOT_NO_TEXT_NOTE)
+  })
+})
+
+describe('renderExcerptMarkdown — the transcript, as it was written', () => {
+  const md = renderExcerptMarkdown
+
+  it('renders bold, emphasis and inline code', () => {
+    expect(md('**bold**')).toBe('<p><strong>bold</strong></p>')
+    expect(md('*soft*')).toBe('<p><em>soft</em></p>')
+    expect(md('`code`')).toBe('<p><code>code</code></p>')
+    expect(md('__bold__')).toBe('<p><strong>bold</strong></p>')
+  })
+
+  it('keeps markup inside a code span literal — backticks quote, they do not format', () => {
+    expect(md('`**not bold**`')).toBe('<p><code>**not bold**</code></p>')
+  })
+
+  it('leaves snake_case and dunders alone — an underscore mid-word is not emphasis', () => {
+    expect(md('call snake_case_name now')).toBe('<p>call snake_case_name now</p>')
+  })
+
+  it('renders a link as its text, styled but inert — a slip that vanishes is no place for a navigation target', () => {
+    expect(md('see [the report](https://example.com/r)')).toBe(
+      '<p>see <span class="kbn-tip-md-link">the report</span></p>',
+    )
+  })
+
+  it('ESCAPES HTML BEFORE ANY MARKUP IS INTRODUCED, so recorded text can never become a tag', () => {
+    expect(md('<script>alert(1)</script>')).toBe(
+      '<p>&lt;script&gt;alert(1)&lt;/script&gt;</p>',
+    )
+    expect(md('<img src=x onerror="boom">')).not.toContain('<img')
+    expect(md('a & b')).toBe('<p>a &amp; b</p>')
+  })
+
+  it('escapes inside a code span too', () => {
+    expect(md('`<b>`')).toBe('<p><code>&lt;b&gt;</code></p>')
+  })
+
+  it('cannot be tricked into emitting a tag through a link target', () => {
+    expect(md('[x](javascript:alert(1))')).not.toContain('href')
+  })
+
+  it('splits paragraphs on blank lines and joins a hard-wrapped one', () => {
+    expect(md('one\ntwo\n\nthree')).toBe('<p>one\ntwo</p><p>three</p>')
+  })
+
+  it('renders bullet and numbered lists, which a pinned report brings back', () => {
+    expect(md('- a\n- b')).toBe('<ul><li>a</li><li>b</li></ul>')
+    expect(md('1. a\n2. b')).toBe('<ol><li>a</li><li>b</li></ol>')
+  })
+
+  it('takes a fenced code block whole, blank lines and all', () => {
+    expect(md('```ts\nconst a = 1\n\nconst b = 2\n```')).toBe(
+      '<pre><code>const a = 1\n\nconst b = 2\n</code></pre>',
+    )
+  })
+
+  it('keeps prose either side of a fence', () => {
+    expect(md('before\n\n```\nx\n```\n\nafter')).toBe(
+      '<p>before</p><pre><code>x\n</code></pre><p>after</p>',
+    )
+  })
+
+  it('is empty for empty text, rather than an empty paragraph', () => {
+    expect(md('')).toBe('')
+    expect(md('   \n  ')).toBe('')
   })
 })
 

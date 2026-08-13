@@ -242,6 +242,61 @@
   -webkit-line-clamp: 3;
   overflow: hidden;
 }
+/* THE RENDERED MARKDOWN inside a card. The transcript was written as markdown
+   and now reads as markdown (see `renderExcerptMarkdown`), which means these
+   tags appear here and nowhere else on the slip.
+
+   The paragraph carries NO margin of its own: a card's spacing is the card's,
+   and a `<p>` that brought its own would put a gap between the header line and
+   the first word only when the text happened to be prose. Between paragraphs is
+   the one place a gap belongs, so it goes on the sibling. */
+.kbn-tip-text > :first-child { margin-top: 0; }
+.kbn-tip-text > :last-child { margin-bottom: 0; }
+.kbn-tip-text p { margin: 0; }
+.kbn-tip-text p + p,
+.kbn-tip-text p + ul,
+.kbn-tip-text p + ol,
+.kbn-tip-text p + pre { margin-top: 5px; }
+.kbn-tip-text strong { font-weight: 600; }
+/* EMPHASIS IS ALLOWED TO BE ITALIC HERE, and only here. The ban on italics is a
+   ban on italic CHROME — labels, registers, fallback prose the interface writes
+   about itself. This is quoted content: somebody chose to emphasise this word,
+   and rendering that choice as anything else would be editing what they said. */
+.kbn-tip-text em { font-style: italic; }
+.kbn-tip-text code {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 0.88em;
+  padding: 0 2px;
+  border-radius: 2px;
+  background: rgba(122, 111, 92, 0.12);
+}
+.kbn-tip-text pre {
+  margin: 5px 0 0;
+  padding: 4px 6px;
+  border-radius: 2px;
+  background: rgba(122, 111, 92, 0.09);
+  /* A code block is the one thing in a card that may not be re-wrapped — its
+     line breaks are the content — so it scrolls inside its own box rather than
+     widening the slip. */
+  overflow-x: auto;
+}
+.kbn-tip-text pre code {
+  padding: 0;
+  background: none;
+  white-space: pre;
+}
+.kbn-tip-text ul,
+.kbn-tip-text ol { margin: 0; padding-left: 1.1em; }
+/* A LINK'S WORDS, WITHOUT THE LINK. Marked as one so the reader can see that
+   something was linked, inert because a hover card takes no pointer and a
+   pinned one is a quotation rather than a place to navigate from. */
+.kbn-tip-md-link {
+  color: var(--kbn-tip-agent);
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 2px;
+}
+
 /* Who spoke, carried by colour: your own words take the plot's cinnabar
    spine, the agent's its curve blue. A notice from neither voice gets no
    spine at all — the same quiet grey as a tool call, because nobody said it. */
