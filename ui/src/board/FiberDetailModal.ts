@@ -20,7 +20,13 @@ import { buildFileViewer, isScrollableFile } from './FileViewerPanel.js'
 import { disambiguateBasenames, normalizeSentFiles, type SentFile } from './sentFiles.js'
 import { closeTab, openTab } from './ReaderTabs.js'
 import { humanizeCron } from './KanbanRules.js'
-import { formatSpanMinutes, instantMs, isoDayLocal } from './civilDay.js'
+import {
+  civilDayToLocalDate,
+  dueCivilDay,
+  formatSpanMinutes,
+  instantMs,
+  isoDayLocal,
+} from './civilDay.js'
 import './FiberDetailModal.css'
 
 /**
@@ -1601,6 +1607,10 @@ export class FiberDetailModal {
       schedule: originalSchedule,
       tz: originalTz,
       parentId: currentParentId,
+      // The CIVIL DAY the card's `due:` names, never the raw stored value: the
+      // comparison below decides whether an edit is a real change, and
+      // `2026-10-01` vs `2026-10-01T00:00:00Z` are the same day written twice.
+      due: dueCivilDay(card.due) ?? null,
     }
 
     const livePatch = (
@@ -1609,6 +1619,7 @@ export class FiberDetailModal {
         shuttleSchedule?: string
         shuttleTz?: string
         parentId?: string | null
+        due?: string | null
       },
       onCommitted?: () => void,
     ): void => {
@@ -1760,6 +1771,136 @@ export class FiberDetailModal {
       })
     }
 
+    // ── Due ───────────────────────────────────────────────────────────────
+    // The only way to name a date the hand cannot reach. Dropping a card on a
+    // day IS the usual way to say "next Tuesday", but the drag-reveal timeline
+    // renders `KANBAN_TIMELINE_WINDOW.futureDays` (14) days ahead, so a fiber
+    // due in October is undatable from the board in August.
+    //
+    // It is also the repair for a one-way trip: dragging a card into Resting
+    // clears its `due:` on purpose (`setSurface` in KanbanModal), and undated
+    // rest is the half of Resting nothing ever surfaces again. A future date
+    // written here turns that dead rest back into a snooze — the due-drift
+    // override in `effectiveHorizon` pulls the card onto the desk when the day
+    // arrives.
+    //
+    // Built here, after `livePatch` exists, rather than up by the other
+    // sections; `metaCol` below decides where it lands on the page.
+    const dueSec = this.buildSection(card.isCycle ? 'Cycle end' : 'Due')
+
+    // A standing role is placed by cron and a resting pinned role lives on the
+    // Pinned strip — the read model never sorts either by `due:`, so a write
+    // here would be dead frontmatter. `setSurface` refuses the same planning
+    // gesture with an explanation rather than a silent no-op; refuse it in the
+    // same voice, naming the gesture that DOES work.
+    const dueRefusal =
+      card.shuttleKind === 'standing'
+        ? `“${card.name}” is a standing role — it runs on its schedule. Edit the schedule to change when it runs.`
+        : card.shuttleKind === 'pinned' && card.status === 'active'
+          ? `“${card.name}” is a pinned role — it rests on the Pinned strip. Unpin it to plan it.`
+          : null
+
+    if (dueRefusal) {
+      const refusalEl = document.createElement('div')
+      // The panel's muted small-text style; named for its first use, reused
+      // here rather than minting a class for one more line of the same voice.
+      refusalEl.className = 'kbn-detail-current-parent'
+      refusalEl.textContent = dueRefusal
+      dueSec.append(refusalEl)
+    } else {
+      // Blank is a STATE, not an absence of one — a oneshot with no due date is
+      // an ordinary card, the way a fiber with no parent is an ordinary fiber.
+      // So the section says which state it is in, in the same `↳` line the
+      // parent section uses for `top-level (no parent)`, rather than leaving the
+      // reader to infer it from an empty box. The year is spelled out because
+      // this field exists for the dates the timeline cannot reach.
+      const dueCurrentEl = document.createElement('div')
+      dueCurrentEl.className = 'kbn-detail-current-parent'
+      const paintCurrent = (due: string | null): void => {
+        const date = civilDayToLocalDate(due ?? undefined)
+        dueCurrentEl.textContent = date
+          ? `↳ ${date.toLocaleDateString(undefined, {
+              weekday: 'short', day: 'numeric', month: 'short', year: 'numeric',
+            })}`
+          : '↳ no due date'
+      }
+      paintCurrent(baseline.due)
+
+      const dueRow = document.createElement('div')
+      dueRow.className = 'kbn-detail-field-row'
+
+      const dueInput = document.createElement('input')
+      dueInput.type = 'date'
+      dueInput.className = 'kbn-detail-input'
+      dueInput.setAttribute('aria-label', card.isCycle ? 'Cycle closing date' : 'Due date')
+      // Seeded through `dueCivilDay`, NEVER `new Date(card.due)`: felt stores a
+      // civil day as UTC midnight, and the Date round trip names the day BEFORE
+      // in every negative-offset zone — the exact defect civilDay.ts exists to
+      // prevent. `dueCivilDay` hands back the bare `YYYY-MM-DD` the input wants,
+      // and that same bare day is what goes back on the wire, so the value never
+      // becomes an instant in either direction.
+      dueInput.value = dueCivilDay(card.due) ?? ''
+      dueInput.addEventListener('mousedown', (e) => e.stopPropagation())
+      dueInput.addEventListener('click', (e) => e.stopPropagation())
+
+      const clearBtn = this.buildActionBtn('Clear', 'composted')
+      clearBtn.title = card.isCycle
+        ? 'Clear the closing edge — the band runs open-ended from its start'
+        : 'Clear the due date'
+      clearBtn.disabled = baseline.due === null
+
+      const dueHint = document.createElement('div')
+      dueHint.className = 'kbn-detail-current-parent'
+
+      // What this field means for THIS card, said only where it isn't obvious:
+      // a cycle's due is an edge rather than a deadline, and a resting card's
+      // due is its return ticket — including the "no date" case, which is the
+      // trap the editor repairs.
+      const hintFor = (due: string | null): string => {
+        if (card.isCycle) {
+          return "A cycle's due is the band's closing edge, not a deadline — the Chronicle's edge drag moves it too."
+        }
+        if (card.storedHorizon !== 'stashed') return ''
+        return due === null
+          ? 'Resting with no date rests forever — nothing brings it back. A future date makes this a snooze that returns.'
+          : 'Resting until this date, then back on the desk.'
+      }
+      const paintHint = (due: string | null): void => {
+        dueHint.textContent = hintFor(due)
+        dueHint.style.display = dueHint.textContent ? '' : 'none'
+      }
+      paintHint(baseline.due)
+
+      dueRow.append(dueInput, clearBtn)
+      dueSec.append(dueCurrentEl, dueRow, dueHint)
+
+      const commitDue = (next: string | null): void => {
+        if ((next ?? '') === (baseline.due ?? '')) return
+        livePatch({ due: next }, () => {
+          baseline.due = next
+          dueInput.value = next ?? ''
+          clearBtn.disabled = next === null
+          paintCurrent(next)
+          paintHint(next)
+        })
+      }
+      // `change` rather than `input`: a native date picker fires `input` for
+      // each keystroke of a half-typed year, and 0002-10-01 is not a date
+      // anyone meant to save.
+      //
+      // EMPTYING THE FIELD IS ITSELF THE CLEAR. Deleting the date — by keyboard,
+      // or through the browser's own ✕ on the picker — commits `due: null`, the
+      // same write the button makes. The button is the visible spelling of a
+      // state the field can always reach on its own, never the only way there.
+      dueInput.addEventListener('change', () => {
+        commitDue(dueInput.value || null)
+      })
+      clearBtn.addEventListener('click', (e) => {
+        e.stopPropagation()
+        commitDue(null)
+      })
+    }
+
     if (promoteBtn) {
       promoteBtn.addEventListener('click', (e) => {
         e.stopPropagation()
@@ -1782,14 +1923,19 @@ export class FiberDetailModal {
 
     footer.append(errorEl, statusEl)
 
-    // Worker config on the left, card metadata (parent fiber) on the
+    // Worker config on the left, card metadata (due, parent fiber) on the
     // right — a shallow two-column cluster at comfortable widths, one
     // column on narrow panels (container query in FiberDetailModal.css).
     const grid = document.createElement('div')
     grid.className = 'kbn-detail-controls-grid'
     const metaCol = document.createElement('div')
     metaCol.className = 'kbn-detail-controls-grid-col'
-    metaCol.append(parentSec)
+    // Two sections stack in this column now. The grid's row-gap separates grid
+    // cells, not the sections inside one, so the column carries its own.
+    metaCol.style.display = 'flex'
+    metaCol.style.flexDirection = 'column'
+    metaCol.style.gap = '12px'
+    metaCol.append(dueSec, parentSec)
     grid.append(dispatchSec, metaCol)
 
     body.append(actionsSec, this.buildRule(), grid, footer)
@@ -2741,6 +2887,7 @@ export class FiberDetailModal {
       shuttleSchedule?: string
       shuttleTz?: string
       parentId?: string | null
+      due?: string | null
     },
     statusEl: HTMLElement,
     errorEl: HTMLElement,
@@ -2815,6 +2962,25 @@ export class FiberDetailModal {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ fiber_id: fiberId, origin, parent: changes.parentId ?? null }),
+        })
+        if (!res.ok) {
+          const errText = await res.text().catch(() => `${res.status}`)
+          throw new Error(errText || `Save failed: ${res.status}`)
+        }
+      }
+
+      // `due:` — the same door every other due write on the board knocks on:
+      // `/felt-edit`, owner-routed by `origin` (a timeline drop through
+      // `setSurface`, the Chronicle's edge drag through `writeDue`). A fiber's
+      // due has exactly one write path and this is not a second one. The key's
+      // presence is the whole protocol server-side: absent leaves the date,
+      // `null` clears it, a string sets it — so the branch tests for the key,
+      // not for a truthy value.
+      if ('due' in changes) {
+        const res = await fetch(`${this.shuttleBase}/api/v1/felt-edit`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fiber_id: fiberId, origin, due: changes.due ?? null }),
         })
         if (!res.ok) {
           const errText = await res.text().catch(() => `${res.status}`)
