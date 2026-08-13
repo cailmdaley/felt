@@ -1851,7 +1851,20 @@ function findCardById(resp: KanbanResponse | null, id: string): KanbanCard | nul
     const hit = resp.now[kind].find((c) => c.id === id)
     if (hit) return hit
   }
-  for (const list of [resp.timeline.past, resp.timeline.futureDated, resp.stash, resp.pinned]) {
+  // `anytimeSoon` belongs here for the same reason the others do: `restingCards`
+  // DRAWS it, so the human can see and grab those cards. Omitting it meant a
+  // standing role whose next launch falls past the drag strip's reach — a
+  // monthly role, most of the month — rendered in Resting but resolved to null
+  // here, and every drag on it silently no-opped. Anything drawn must be
+  // findable; the two lists are one population split by a horizon no pixel
+  // expresses.
+  for (const list of [
+    resp.timeline.past,
+    resp.timeline.futureDated,
+    resp.timeline.anytimeSoon,
+    resp.stash,
+    resp.pinned,
+  ]) {
     const hit = list.find((c) => c.id === id)
     if (hit) return hit
   }
