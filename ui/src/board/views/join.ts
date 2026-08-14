@@ -61,6 +61,20 @@ export interface BucketOrigin {
 export interface MomentSource {
   session: string
   host: string | null
+  /**
+   * This session contributed an ATTENTION minute to the mark — it is one of
+   * the transcripts a spine is drawn from.
+   *
+   * The tooltip's words are capped (a hover must not fan out over every
+   * transcript a busy slot touched), and the cap used to cut in bucket order,
+   * which is arrival order and says nothing about who spoke. A Week slot
+   * pooling four sessions could therefore draw a red spine off session three
+   * while fetching sessions one and two — a claimed human message the tooltip
+   * had no way to surface. This flag is what the cap sorts on, so the sessions
+   * behind the spines are the ones that are always asked. See
+   * {@link MomentLoader}.
+   */
+  spoke: boolean
 }
 
 /**
@@ -163,7 +177,11 @@ export function originOf(index: JoinIndex, bucket: ActivityBucket): BucketOrigin
 export function momentSource(index: JoinIndex, bucket: ActivityBucket): MomentSource | null {
   const pairing = lookupTmux(index.byTmux, bucket.host, bucket.s)
   if (!pairing?.session) return null
-  return { session: pairing.session, host: bucket.host ?? pairing.host ?? null }
+  return {
+    session: pairing.session,
+    host: bucket.host ?? pairing.host ?? null,
+    spoke: bucket.k === 'attention',
+  }
 }
 
 // ── The commit ledger ────────────────────────────────────────────────────────

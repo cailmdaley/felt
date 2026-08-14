@@ -1103,9 +1103,47 @@ describe('the raster tick knows whose minute it was', () => {
     // The bucket carries no host of its own, so the ledger's stands — which is
     // still a recorded fact about where the transcript is.
     expect(slot.sources).toEqual([
-      { session: 'sess-a', host: 'ada' },
-      { session: 'sess-b', host: 'ada' },
+      { session: 'sess-a', host: 'ada', spoke: false },
+      { session: 'sess-b', host: 'ada', spoke: false },
     ]);
+  });
+
+  it('marks the transcript a spine was drawn from, so the hover asks it first', () => {
+    // THE INVARIANT: a slot that draws a spine claims a human message, and the
+    // slip under it must be able to show that message. The slot below is the
+    // live shape that broke it — four minutes pooling three sessions, with the
+    // attention minute belonging to the one that arrived LAST. The fetch cap
+    // cut in arrival order, so the session that spoke was never asked and the
+    // slip showed the other two's tool work under a red spine.
+    const bounds = railBounds('2026-08-12');
+    const ledger = new Map([
+      ['w-1', { fiber: 'fiber/ship-it', uid: null, session: 'sess-a', host: 'ada' }],
+      ['w-2', { fiber: 'fiber/notes', uid: null, session: 'sess-b', host: 'ada' }],
+      ['w-3', { fiber: 'fiber/mirror', uid: null, session: 'sess-c', host: 'ada' }],
+    ]);
+    const index = buildJoinIndex(
+      [
+        card({ id: 'fiber/ship-it', name: 'ship it', runningWorker: 'w-1' }),
+        card({ id: 'fiber/notes', name: 'notes', runningWorker: 'w-2' }),
+        card({ id: 'fiber/mirror', name: 'mirror', runningWorker: 'w-3' }),
+      ],
+      ledger,
+    );
+    const slot = rasterSlots(
+      [
+        bucket({ m: bounds.startMs, s: 'w-1' }),
+        bucket({ m: bounds.startMs, s: 'w-2' }),
+        bucket({ m: bounds.startMs + 60_000, s: 'w-3' }),
+        bucket({ m: bounds.startMs + 120_000, s: 'w-3', k: 'attention' }),
+      ],
+      bounds,
+      bounds.endMs,
+      origin(index),
+    )[0];
+
+    expect(slot.humanMinutes).toHaveLength(1);
+    // Every spine in the slot has a transcript flagged as one that spoke.
+    expect(slot.sources.filter((s) => s.spoke).map((s) => s.session)).toEqual(['sess-c']);
   });
 
   it('has no transcript to offer for a minute the ledger never paired', () => {

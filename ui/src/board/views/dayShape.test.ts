@@ -837,8 +837,11 @@ describe('rung 0 — the session ledger', () => {
     )
     expect(lanes[0].beats.map((b) => b.minute)).toEqual([20, 24])
     expect(lanes[0].beats[0].kinds.map((k) => k.kind).sort()).toEqual(['agent', 'attention'])
+    // `spoke` is the OR over the minute's buckets: the agent bucket arrived
+    // first, but the attention bucket beside it is what a spine is drawn from,
+    // and the words fetch has to know this transcript is one that spoke.
     expect(lanes[0].beats[0].sources).toEqual([
-      { session: 'sess-work/spt3g_papers/bmodes-2d', host: null },
+      { session: 'sess-work/spt3g_papers/bmodes-2d', host: null, spoke: true },
     ])
   })
 

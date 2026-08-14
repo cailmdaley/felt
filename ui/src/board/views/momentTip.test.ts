@@ -176,7 +176,7 @@ describe('parseMoment — the tool line', () => {
 })
 
 describe('MomentLoader', () => {
-  const source = { session: 'sess-1', host: 'ada' }
+  const source = { session: 'sess-1', host: 'ada', spoke: false }
 
   const loaderOver = (results: MomentResult[]): { loader: MomentLoader; calls: number[] } => {
     const calls: number[] = []
@@ -316,7 +316,7 @@ describe('MomentLoader', () => {
 
     loader.request(
       'slot-1',
-      [{ session: 'down', host: 'kelvin' }, source],
+      [{ session: 'down', host: 'kelvin', spoke: false }, source],
       0,
       60_000,
       (w) => {
@@ -339,8 +339,8 @@ describe('MomentLoader', () => {
     loader.request(
       'slot-1',
       [
-        { session: 'a', host: 'ada' },
-        { session: 'b', host: 'bo' },
+        { session: 'a', host: 'ada', spoke: false },
+        { session: 'b', host: 'bo', spoke: false },
       ],
       0,
       60_000,
@@ -356,18 +356,135 @@ describe('MomentLoader', () => {
   })
 })
 
+describe('the spine and the words say the same thing', () => {
+  // THE BUG THIS PINS, seen live on Week: a 4-minute slot pooled four sessions,
+  // the red spine was drawn off the one that spoke, and the fetch cap — which
+  // cut in ARRIVAL order — spent itself on two that had only worked. The slip
+  // showed agent prose and a tool line under a spine claiming a human message.
+  // On a real day (2026-08-13) that was 16 of the 90 spined slots.
+  //
+  // The invariant, at the two places it can break: the session behind a spine
+  // is always fetched, and a human sentence always survives the excerpt cap.
+
+  it('asks the session that SPOKE, even when it arrived after the cap would have cut', async () => {
+    vi.useFakeTimers()
+    const asked: string[] = []
+    const loader = new MomentLoader(async (session) => {
+      asked.push(session)
+      return session === 'sess-spoke'
+        ? { host: 'ada', excerpts: [excerpt({ text: 'try the other tack' })] }
+        : { host: 'ada', excerpts: [], tools: 'Bash ×12 · Read' }
+    }, 0)
+
+    let words: MomentWords = { excerpts: [] }
+    loader.request(
+      'slot-1',
+      [
+        { session: 'busy-a', host: 'ada', spoke: false },
+        { session: 'busy-b', host: 'ada', spoke: false },
+        { session: 'busy-c', host: 'ada', spoke: false },
+        { session: 'busy-d', host: 'ada', spoke: false },
+        { session: 'sess-spoke', host: 'ada', spoke: true },
+      ],
+      0,
+      240_000,
+      (w) => {
+        words = w
+      },
+    )
+    await vi.advanceTimersByTimeAsync(10)
+
+    expect(asked).toContain('sess-spoke')
+    // The cap still holds — a hover is not allowed to fan out over the lot.
+    expect(asked.length).toBeLessThanOrEqual(4)
+    // And the words, not the tool line: a slip under a spine shows the sentence.
+    expect(words.excerpts.map((e) => e.text)).toEqual(['try the other tack'])
+    expect(words.tools).toBeUndefined()
+  })
+
+  it('keeps the human sentence when the window holds more excerpts than the slip', async () => {
+    vi.useFakeTimers()
+    // Six agent lines land first, the person types at the end of the window.
+    // Cutting in time order dropped exactly that sentence.
+    const agentLines = Array.from({ length: 6 }, (_, i) =>
+      excerpt({ at_ms: 1_000 + i, role: 'assistant', text: `agent ${i}` }),
+    )
+    const loader = new MomentLoader(async (session) => {
+      return session === 'sess-spoke'
+        ? { host: 'ada', excerpts: [excerpt({ at_ms: 200_000, text: 'stop, wrong file' })] }
+        : { host: 'ada', excerpts: agentLines }
+    }, 0)
+
+    let words: MomentWords = { excerpts: [] }
+    loader.request(
+      'slot-1',
+      [
+        { session: 'busy-a', host: 'ada', spoke: false },
+        { session: 'sess-spoke', host: 'ada', spoke: true },
+      ],
+      0,
+      240_000,
+      (w) => {
+        words = w
+      },
+    )
+    await vi.advanceTimersByTimeAsync(10)
+
+    expect(words.excerpts.map((e) => e.text)).toContain('stop, wrong file')
+    // Still a conversation to read: the survivors stay in the order they were
+    // said, with the human sentence last because that is when it was typed.
+    expect(words.excerpts).toHaveLength(6)
+    expect(words.excerpts.map((e) => e.at_ms)).toEqual(
+      [...words.excerpts.map((e) => e.at_ms)].sort((a, b) => a - b),
+    )
+  })
+
+  it('does not mistake a delegation report for a person', async () => {
+    // A subagent's report is a `user` record and nobody typed it. Reserving it
+    // over real prose would only move the lie.
+    vi.useFakeTimers()
+    const loader = new MomentLoader(async () => ({
+      host: 'ada',
+      excerpts: [
+        ...Array.from({ length: 6 }, (_, i) =>
+          excerpt({ at_ms: 1_000 + i, role: 'user', kind: 'return', text: `report ${i}` }),
+        ),
+        excerpt({ at_ms: 200_000, text: 'nice, ship it' }),
+      ],
+    }), 0)
+
+    let words: MomentWords = { excerpts: [] }
+    loader.request('slot-1', [{ session: 'a', host: 'ada', spoke: true }], 0, 240_000, (w) => {
+      words = w
+    })
+    await vi.advanceTimersByTimeAsync(10)
+
+    expect(words.excerpts.map((e) => e.text)).toContain('nice, ship it')
+  })
+})
+
 describe('dedupeSources', () => {
+  it('folds `spoke` as an OR — a session that worked and also spoke, spoke', () => {
+    expect(
+      dedupeSources([
+        { session: 'a', host: 'ada', spoke: false },
+        { session: 'a', host: 'ada', spoke: true },
+      ]),
+    ).toEqual([{ session: 'a', host: 'ada', spoke: true }])
+  })
+
+
   it('keeps one entry per session-and-host and drops the unpaired minutes', () => {
     expect(
       dedupeSources([
-        { session: 'a', host: 'ada' },
+        { session: 'a', host: 'ada', spoke: false },
         null,
-        { session: 'a', host: 'ada' },
-        { session: 'a', host: 'bo' },
+        { session: 'a', host: 'ada', spoke: false },
+        { session: 'a', host: 'bo', spoke: false },
       ]),
     ).toEqual([
-      { session: 'a', host: 'ada' },
-      { session: 'a', host: 'bo' },
+      { session: 'a', host: 'ada', spoke: false },
+      { session: 'a', host: 'bo', spoke: false },
     ])
   })
 })

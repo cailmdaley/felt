@@ -575,11 +575,60 @@ export const MOMENT_DEBOUNCE_MS = 150
 
 /** At most this many transcripts per hovered mark. A mark almost always has
  *  one session behind it; a busy slot can have several, and asking all of them
- *  would turn one hover into a fan-out. */
-const MAX_SOURCES = 2
+ *  would turn one hover into a fan-out.
+ *
+ *  The cap is a budget, not a priority: which transcripts it spends itself on
+ *  is decided by `spoke` — see {@link orderSources}. */
+const MAX_SOURCES = 4
 
 /** The tooltip holds a few lines, not a conversation. */
 const MAX_EXCERPTS = 6
+
+/**
+ * The sources a mark's words are fetched from, speakers first.
+ *
+ * THE INVARIANT THIS EXISTS FOR: a mark that draws a spine claims a human
+ * message, and the tooltip under it must be able to show that message. The
+ * spine is drawn from the attention buckets; the words come from whichever
+ * transcripts the cap let through. Cutting the list in arrival order let those
+ * two disagree — a Week slot is four minutes wide and routinely pools four
+ * sessions, so the session that spoke was often not among the ones asked, and
+ * the slip showed agent prose and tool lines under a red spine.
+ *
+ * Sorting on `spoke` makes the cap cut the silent transcripts first, so every
+ * session behind a spine is asked before any session that only worked.
+ * Stable, so arrival order still breaks ties within each group.
+ */
+export function orderSources(sources: readonly MomentSource[]): MomentSource[] {
+  return [...sources.filter((s) => s.spoke), ...sources.filter((s) => !s.spoke)]
+}
+
+/**
+ * The excerpts a slip shows, human speech first past the cap.
+ *
+ * Same invariant, one layer down. Merged excerpts were cut to
+ * {@link MAX_EXCERPTS} in time order, so a busy window could spend the whole
+ * budget on agent prose and delegation reports and drop the one sentence a
+ * person typed — again leaving a spine with nothing under it. Human prose is
+ * therefore reserved first, and the survivors are put back into time order:
+ * what is shown still reads as a conversation, it is only WHICH lines survive
+ * that the human half now wins.
+ *
+ * `user` alone is not the test. A transcript's user records also carry the
+ * delegation register (`return` — a subagent's report, a teammate message),
+ * which nobody typed; only `prose` is speech.
+ */
+export function pickExcerpts(excerpts: readonly MomentExcerpt[], cap = MAX_EXCERPTS): MomentExcerpt[] {
+  const human = (e: MomentExcerpt): boolean => e.role === 'user' && (e.kind ?? 'prose') === 'prose'
+  const inTime = [...excerpts].sort((a, b) => a.at_ms - b.at_ms)
+  if (inTime.length <= cap) return inTime
+  const kept = new Set(inTime.filter(human).slice(0, cap))
+  for (const e of inTime) {
+    if (kept.size >= cap) break
+    kept.add(e)
+  }
+  return inTime.filter((e) => kept.has(e))
+}
 
 export interface MomentWords {
   excerpts: MomentExcerpt[]
@@ -682,14 +731,11 @@ export class MomentLoader {
     full: boolean,
   ): Promise<MomentWords> {
     const results = await Promise.all(
-      sources
+      orderSources(sources)
         .slice(0, MAX_SOURCES)
         .map((source) => this.fetcher(source.session, fromMs, toMs, source.host, full)),
     )
-    const excerpts = results
-      .flatMap((result) => result.excerpts)
-      .sort((a, b) => a.at_ms - b.at_ms)
-      .slice(0, MAX_EXCERPTS)
+    const excerpts = pickExcerpts(results.flatMap((result) => result.excerpts))
     const note = results.find((result) => result.note)?.note
     // Precedence, strongest answer first: what was said, else what was done,
     // else where the words live. A note only earns the footer when there is
@@ -710,16 +756,27 @@ function fullKey(key: string): string {
 }
 
 /** The dedup a caller does before handing sources over: same session on the
- *  same host is one transcript however many buckets pointed at it. */
+ *  same host is one transcript however many buckets pointed at it.
+ *
+ *  `spoke` is the OR across the copies, not the first one's: a session that
+ *  contributed one attention minute and nine agent minutes spoke, whichever
+ *  bucket happened to arrive first. Folding it any other way would lose the
+ *  very flag the fetch cap sorts on — see {@link orderSources}. */
 export function dedupeSources(sources: readonly (MomentSource | null)[]): MomentSource[] {
-  const seen = new Set<string>()
+  const seen = new Map<string, MomentSource>()
   const out: MomentSource[] = []
   for (const source of sources) {
     if (!source) continue
     const key = `${source.host ?? ''}\u0000${source.session}`
-    if (seen.has(key)) continue
-    seen.add(key)
-    out.push(source)
+    const held = seen.get(key)
+    if (held) {
+      if (source.spoke) held.spoke = true
+      continue
+    }
+    // A copy, so the OR above never writes back into a caller's own object.
+    const folded = { ...source }
+    seen.set(key, folded)
+    out.push(folded)
   }
   return out
 }
