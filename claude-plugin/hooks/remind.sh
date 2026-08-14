@@ -10,4 +10,13 @@
 # together, so this script always runs against a matching binary.
 
 set -e
-exec felt hook pretool
+
+source "$(dirname "$0")/felt-bin.sh"
+
+# A missing or old felt binary should lose the reminder gate, not block every
+# tool call in the session.
+if felt_hook_available; then
+  exec "$FELT_BIN" hook pretool
+fi
+
+exit 0

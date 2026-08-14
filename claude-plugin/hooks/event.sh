@@ -13,4 +13,13 @@
 # together, so this script always runs against a matching binary.
 
 set -e
-exec felt hook event
+
+source "$(dirname "$0")/felt-bin.sh"
+
+# Hooks must not make every agent event fail when the optional CLI is absent
+# or predates the `hook` subcommand.
+if felt_hook_available; then
+  exec "$FELT_BIN" hook event
+fi
+
+exit 0

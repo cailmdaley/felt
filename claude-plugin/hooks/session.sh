@@ -11,13 +11,25 @@
 set -e
 set -o pipefail
 
-if command -v jq >/dev/null 2>&1; then
-  felt session | jq -Rs '{
+source "$(dirname "$0")/felt-bin.sh"
+
+if [ -n "$FELT_BIN" ] && command -v jq >/dev/null 2>&1; then
+  "$FELT_BIN" session | jq -Rs '{
     hookSpecificOutput: {
       hookEventName: "SessionStart",
       additionalContext: .
     }
   }'
-else
-  exec felt hook session
+elif felt_hook_available; then
+  exec "$FELT_BIN" hook session
 fi
+
+# Keep SessionStart non-blocking when felt is absent or too old.
+cat <<'EOF'
+{
+  "hookSpecificOutput": {
+    "hookEventName": "SessionStart",
+    "additionalContext": "# Felt Workflow Context\n\n*The installed `felt` binary is missing or too old for this hook. Add it to PATH or install it at ~/.local/bin/felt to restore active-fiber listings.*\n"
+  }
+}
+EOF

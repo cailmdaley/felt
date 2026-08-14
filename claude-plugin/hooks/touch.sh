@@ -12,4 +12,11 @@
 # together, so this script always runs against a matching binary.
 
 set -e
-exec felt hook posttool
+
+source "$(dirname "$0")/felt-bin.sh"
+
+if felt_hook_available; then
+  exec "$FELT_BIN" hook posttool
+fi
+
+exit 0
