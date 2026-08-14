@@ -29,8 +29,30 @@
 
   flex: 1 1 auto;
   min-height: 0;
-  display: flex;
-  flex-direction: column;
+
+  /* ONE GRID FOR THE WHOLE WEEK, not seven independent ones.
+   *
+   * The three columns are declared HERE and every row subscribes to them with
+   * `grid-template-columns: subgrid`, so all seven rails and the tick row are
+   * cut to the identical x-scale. That is not tidiness: the hour labels are
+   * printed ONCE, at the bottom, and read as a ruler across all seven rows. A
+   * per-row grid let each row's annotation size its own third column, so a busy
+   * Thursday's rail was ~250px narrower than an empty Sunday's and 2pm sat at a
+   * different x on almost every row — the ruler was true only for the rows with
+   * nothing to say. The diff clause made that gap large and systematic, since
+   * the days with the widest figures are exactly the days worth comparing.
+   *
+   * The annotation column is still `max-content`-sized, but now over the WHOLE
+   * week: it is as wide as the widest row needs — today's aloft count, a
+   * five-figure diffstat, a `waiting on` badge — and no wider, so a quiet week
+   * keeps its rails. A fixed width would have had to reserve the worst case
+   * always, and would still clip the badge.
+   */
+  display: grid;
+  grid-template-columns: var(--wk-gutter) minmax(0, 1fr) minmax(var(--wk-annot), max-content);
+  /* Seven equal rails, then the tick row and the key at their natural heights. */
+  grid-template-rows: repeat(7, minmax(40px, 1fr)) auto auto;
+  column-gap: 10px;
   /* The hover tooltip is parented here and positioned against this box, so it
      tracks the rails rather than the page as the sheet leans under a swipe. */
   position: relative;
@@ -99,6 +121,9 @@
   letter-spacing: 0.04em;
   color: #A89B83;
   white-space: nowrap;
+  /* The figures are re-read on every poll and mostly do not change; without
+     tabular figures a single changed digit shifts the whole line sideways. */
+  font-variant-numeric: tabular-nums;
 }
 
 /* "· in Sprint 14" — the week's place in something longer than itself. Set in
@@ -142,14 +167,13 @@
 
 .wk-row {
   display: grid;
-  /* The annot column sizes to its longest line — today's, which carries the
-     aloft count — so every row stays aligned and nothing clips. A fixed width
-     truncated "· 2 aloft" the moment a worker was up. */
-  grid-template-columns: var(--wk-gutter) minmax(0, 1fr) minmax(var(--wk-annot), max-content);
+  /* The week's columns, not this row's — see `.wk-grid`. Every row spans the
+     full track set and borrows it, which is what keeps one shared x-scale
+     under the single tick row at the bottom. */
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
   align-items: stretch;
-  column-gap: 10px;
-  flex: 1 1 0;
-  min-height: 40px;
+  min-height: 0;
   border-radius: 2px;
   /* The seam's 1.5px border must not shove today's rail sideways, so every row
      reserves the space and only today paints it. */
@@ -327,6 +351,9 @@
   letter-spacing: 0.03em;
   color: #A89B83;
   white-space: nowrap;
+  /* Same reason as `.wk-totals`: the row's figures must not jitter under a
+     poll that changed one digit of the line count. */
+  font-variant-numeric: tabular-nums;
 }
 .wk-row-today .wk-annot { color: #9A7B35; }
 /* Stale-origin rows wear the kanban's `kbn-card--stale` / `kbn-card-waiting`
@@ -348,7 +375,6 @@
 /* ── Shared tick row ──────────────────────────────────────────────────────── */
 
 .wk-tickrow {
-  flex: 0 0 auto;
   min-height: 0;
   border-color: transparent;
   background: none;
@@ -382,6 +408,9 @@
    not, because each view's marks have their own shapes and a key should teach
    the marks you are actually looking at. */
 .wk-key {
+  /* A grid item of `.wk-grid` like the rows, but it answers to none of their
+     columns — it is one right-aligned line under the whole sheet. */
+  grid-column: 1 / -1;
   display: flex;
   justify-content: flex-end;
   gap: 13px;

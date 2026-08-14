@@ -47,7 +47,10 @@ import {
   STATE_KEY_ITEMS,
   STATE_WORD,
   cardState,
+  diffClause,
   messageClause,
+  sumDiff,
+  type DiffTotal,
   type LifecycleState,
 } from './vocabulary.js'
 import { civilDayNoon, formatSpanMinutes, railBounds, shiftCivilDay } from './railTime.js'
@@ -506,6 +509,11 @@ export interface NarrationGroup {
   name: string
   count: number
   subjects: string[]
+  /** What those commits changed, as the ledger recorded it. Carried beside the
+   *  count because the two are the same fact at two grains — how many times the
+   *  fiber spoke, and how much it moved. */
+  insertions: number
+  deletions: number
 }
 
 /**
@@ -535,9 +543,53 @@ export function groupNarration(
       // times — the count already carries "many", and repeating the sentence
       // three times turns a memoir into a stutter.
       subjects: [...new Set<string>(fiber.subjects)].slice(0, 2),
+      // Trimming what is SAID must not trim what is COUNTED: the totals are the
+      // whole group's, not the two subjects that survived the slice.
+      insertions: fiber.insertions,
+      deletions: fiber.deletions,
     })
   }
   return groups.sort((a, b) => b.count - a.count || a.name.localeCompare(b.name)).slice(0, limit)
+}
+
+/**
+ * What each row's fiber changed in the rendered window, from the ledger alone.
+ *
+ * Recorded evidence only. The map carries an entry for a row only when the
+ * join actually resolved commits onto its card inside the window — a row the
+ * ledger cannot speak for is ABSENT rather than present with zeros, so the
+ * gutter can tell "nothing recorded" from "recorded no change" and print
+ * nothing at all for both without inventing a `+0 −0`. Nothing is read from a
+ * subject-line prefix, and a row with no `cardId` has no fiber to ask about.
+ */
+export function rowDiffTotals(
+  ledger: LedgerNarration,
+  rows: readonly { cardId?: string }[],
+): Map<string, DiffTotal> {
+  const out = new Map<string, DiffTotal>()
+  for (const row of rows) {
+    if (!row.cardId) continue
+    const fiber = ledger.byCard.get(row.cardId)
+    if (!fiber || fiber.commits === 0) continue
+    // `sumDiff` over the single joined fiber: the join has already folded that
+    // fiber's commits (de-duplicated by sha across hosts) into one total, so
+    // this is the same arithmetic said once rather than twice.
+    const total = sumDiff([fiber])
+    if (total.insertions === 0 && total.deletions === 0) continue
+    out.set(row.cardId, total)
+  }
+  return out
+}
+
+/** Everything the gutter's figures could read off a ledger, as one string —
+ *  so a second commit landing inside the same window still repaints. */
+function ledgerDigest(ledger: LedgerNarration | undefined): string {
+  if (!ledger) return ''
+  const parts: string[] = []
+  for (const [cardId, fiber] of ledger.byCard) {
+    parts.push(`${cardId}=${fiber.commits}/${fiber.insertions}/${fiber.deletions}`)
+  }
+  return parts.sort().join(',')
 }
 
 /** The first paragraph of a fiber body — the cycle's intention, as written. */
@@ -1129,6 +1181,16 @@ class ChronicleView implements TemporalView {
   /** The scoped span's commit trail, keyed by `id:from:to` so a re-render does
    *  not re-ask and a different span does. */
   private lookback: { key: string; groups: NarrationGroup[] } | null = null
+  /** What the ledger says each row changed across the WHOLE rendered window —
+   *  the look-back's twin at the grain of the gutter rather than an era. Keyed
+   *  by the window's own bounds, so scrolling the window open re-asks and a
+   *  response that lands after the reader has moved on cannot paint. */
+  private windowLedger: { key: string; ledger: LedgerNarration } | null = null
+  /** The window key currently in flight, so a paint mid-fetch does not re-ask. */
+  private ledgerInFlight: string | null = null
+  /** `rowDiffTotals` for the rows currently drawn — computed once per render
+   *  and read by `buildRow`, so the gutter does no joining of its own. */
+  private rowDiffs: Map<string, DiffTotal> = new Map()
   private onEsc: ((e: KeyboardEvent) => void) | null = null
   private autoScrollStep = 0
   /** Join rung 0, rebuilt each load from the session ledger. */
@@ -1196,6 +1258,8 @@ class ChronicleView implements TemporalView {
     this.scopedCycleId = null
     this.intentions.clear()
     this.lookback = null
+    this.windowLedger = null
+    this.ledgerInFlight = null
     this.stopAutoScroll()
     this.draft = null
     this.editing = false
@@ -1273,6 +1337,9 @@ class ChronicleView implements TemporalView {
     this.byTmux = buildSessionIndex(sessions.records).byTmux
     if (Object.keys(fresh).length > 0) this.activityOrigins = fresh
     this.origins = { ...(sessions.origins ?? {}), ...this.activityOrigins }
+    // The gutter's line counts want the whole drawn window, not the scoped era
+    // the look-back reads. Asked once per window rather than once per paint.
+    void this.loadWindowLedger(ctx)
     // A rebuild would tear out the half-drawn band, the naming input, or an
     // open rename under the reader's cursor. The poll's data is not worth that;
     // the next one lands 15s later and the gesture is over in seconds.
@@ -1318,6 +1385,10 @@ class ChronicleView implements TemporalView {
       // A remote falling behind (or catching up) mutes or un-mutes whole rows.
       `stale:${staleOrigins(this.origins).join(',')}`,
       `look:${this.lookback?.key ?? ''}:${this.lookback?.groups.length ?? 0}`,
+      // A ledger arrival has to repaint the gutter, and the totals themselves
+      // move within one window as the day's commits land — so the sum rides
+      // along, not just the key and the size.
+      `diff:${this.windowLedger?.key ?? ''}:${ledgerDigest(this.windowLedger?.ledger)}`,
       `intent:${this.scopedCycleId ? (this.intentions.get(this.scopedCycleId) ?? '') : ''}`,
       // hostLabel's last two rungs.
       response.feltHost,
@@ -1400,6 +1471,9 @@ class ChronicleView implements TemporalView {
       days[resolvedTodayIdx]?.iso ?? days[lastIdx]?.iso ?? '',
       this.origins,
     )
+
+    // Joined once for the page, not once per row: the gutter only looks up.
+    this.rowDiffs = this.windowLedger ? rowDiffTotals(this.windowLedger.ledger, rows) : new Map()
 
     if (rows.length === 0) {
       body.append(createViewEmptyState('— no hand has passed this way —'))
@@ -1883,7 +1957,20 @@ class ChronicleView implements TemporalView {
           const count = document.createElement('span')
           count.className = 'chr-face-count'
           count.textContent = `×${group.count}`
-          line.append(fiber, count, document.createTextNode(` ${group.subjects.join('; ')}`))
+          line.append(fiber, count)
+          // Beside the count, not after the prose: both are figures about the
+          // same commits, and the subjects are a variable-length sentence that
+          // would leave the numbers floating at a different place on every
+          // line. Kept together, the eye reads "×7 +512 −208" as one clause and
+          // then the prose. A group whose ledger recorded nothing prints none.
+          const diff = diffClause(group.insertions, group.deletions)
+          if (diff) {
+            const el = document.createElement('span')
+            el.className = 'chr-face-diff'
+            el.textContent = diff
+            line.append(el)
+          }
+          line.append(document.createTextNode(` ${group.subjects.join('; ')}`))
           memoir.append(line)
         }
         for (const card of closed) {
@@ -1949,6 +2036,50 @@ class ChronicleView implements TemporalView {
       if (cell && (cell.agent > 0 || cell.attention > 0)) return true
     }
     return false
+  }
+
+  /**
+   * The rendered window's commit ledger, for the gutter's line counts.
+   *
+   * The look-back's guards, at the window's grain: keyed by the drawn bounds so
+   * one window is asked for once (`ledgerInFlight` covers the paints that
+   * happen while the request is out), and a response is dropped unless the
+   * window it was asked for is still the window on screen — a reader who has
+   * scrolled the range open must not see the old range's totals painted in.
+   */
+  private async loadWindowLedger(ctx: ViewContext): Promise<void> {
+    const range = this.window
+    if (!range) return
+    const fromDay = range.first
+    const toDay = range.last
+    const key = `${fromDay}:${toDay}`
+    if (this.windowLedger?.key === key || this.ledgerInFlight === key) return
+    this.ledgerInFlight = key
+    const fromMs = civilDayToLocalDate(fromDay)?.getTime() ?? 0
+    const toMs = (civilDayToLocalDate(toDay)?.getTime() ?? 0) + 86_399_000
+    const generation = this.generation
+    try {
+      const [commits, sessions] = await Promise.all([ctx.commits(fromMs, toMs), ctx.sessions(0)])
+      if (generation !== this.generation || !this.body) return
+      // The window moved while we were out; this answer is about a range the
+      // reader is no longer looking at. Drop it rather than paint it. `window`
+      // is the view's own state — updated by the scroll BEFORE the next load,
+      // which is exactly the moment this response has to be told it is stale.
+      const now = this.window
+      if (!now || `${now.first}:${now.last}` !== key) return
+      this.windowLedger = {
+        key,
+        ledger: buildLedgerNarration(
+          commits.records,
+          ctx.cards,
+          buildSessionIndex(sessions.records).bySession,
+        ),
+      }
+      this.signature = ''
+      if (this.ctx) void this.load(this.ctx)
+    } finally {
+      if (this.ledgerInFlight === key) this.ledgerInFlight = null
+    }
   }
 
   private async loadLookback(
@@ -3117,6 +3248,23 @@ class ChronicleView implements TemporalView {
     span.title = `${spanDays} day${spanDays === 1 ? '' : 's'} on the chronicle`
 
     label.append(state, name, note, span)
+
+    // What the ledger says this fiber changed across the drawn window, in the
+    // span's own register and one step quieter — the day count is the row's
+    // shape, the line count is a footnote to it. A row the ledger has nothing
+    // recorded for gets NO element at all: an empty span would still take its
+    // gap and pull the gutter's other figures out of column.
+    const diff = row.cardId ? this.rowDiffs.get(row.cardId) : undefined
+    if (diff) {
+      const text = diffClause(diff.insertions, diff.deletions)
+      if (text) {
+        const el = document.createElement('span')
+        el.className = 'chr-diff'
+        el.textContent = text
+        el.title = `${diff.insertions} inserted, ${diff.deletions} deleted — commits recorded in this window`
+        label.append(el)
+      }
+    }
 
     const track = document.createElement('div')
     track.className = `chr-track${waiting ? ' chr-track-waiting' : ''}`

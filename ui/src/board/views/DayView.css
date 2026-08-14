@@ -126,6 +126,7 @@
   letter-spacing: 0.05em;
   color: #7A6F5C;
   white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 .kbn-day-stats-quiet { color: #A89B83; }
 

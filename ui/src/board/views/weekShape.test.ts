@@ -35,13 +35,14 @@ import {
   slotTip,
   summarizeSpend,
   weekCivilDays,
+  weekLedgerDiff,
   weekMondayForFocus,
   weekWindow,
 } from './WeekView.js';
 import { buildJoinIndex, originOf } from './join.js';
 import { civilDayToLocalDate, isoDayLocal, railCivilDay } from '../civilDay.js';
 import { shiftCivilDay } from './railTime.js';
-import type { ActivityBucket } from './TemporalData.js';
+import type { ActivityBucket, CommitRecord, SessionPairing } from './TemporalData.js';
 import type { KanbanCard } from '../KanbanTypes.js';
 
 const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -461,6 +462,166 @@ describe('the right-edge annotation, now the only text out there', () => {
 
   it('still reports today when it has been quiet so far', () => {
     expect(annotationFor(null, false, true, 2)).toBe('— · 2 aloft');
+  });
+
+  it('carries the day\'s line count last, when the ledger joined one', () => {
+    expect(annotationFor(spend(7), true, false, 0, { insertions: 512, deletions: 208 })).toBe(
+      '7h · full · +512 −208',
+    );
+    expect(annotationFor(spend(7), false, true, 2, { insertions: 40, deletions: 0 })).toBe(
+      '7h · full · 2 aloft · +40',
+    );
+  });
+
+  it('drops the line count entirely rather than printing `+0 −0`', () => {
+    // "The ledger recorded nothing attributable here" and "nothing changed"
+    // are the same silence — a pair of zeros would be false precision.
+    expect(annotationFor(spend(7), true, false, 0, { insertions: 0, deletions: 0 })).toBe(
+      '7h · full',
+    );
+    expect(annotationFor(spend(7), true, false, 0, null)).toBe('7h · full');
+    expect(annotationFor(spend(7), true, false, 0)).toBe('7h · full');
+  });
+});
+
+describe('the week`s line-count ledger', () => {
+  const MONDAY = '2026-08-03';
+  const DAYS = weekCivilDays(MONDAY);
+
+  /** A session ledger keyed the way `lookupSession` reads it. */
+  function sessions(
+    ...rows: { session: string; fiber: string; host?: string | null; uid?: string | null }[]
+  ): Map<string, SessionPairing> {
+    return new Map(
+      rows.map((r) => [
+        r.session,
+        { fiber: r.fiber, uid: r.uid ?? null, session: r.session, host: r.host ?? null },
+      ]),
+    );
+  }
+
+  function commit(over: Partial<CommitRecord> & { at: number; sha: string }): CommitRecord {
+    return {
+      subject: 'work: a thing',
+      repo: null,
+      files: 1,
+      insertions: 0,
+      deletions: 0,
+      session: 's-1',
+      tmux: null,
+      cwd: null,
+      host: null,
+      ...over,
+    };
+  }
+
+  const cards = [card({ id: 'fiber/board' }), card({ id: 'fiber/notes' })];
+  const ledger = sessions(
+    { session: 's-1', fiber: 'fiber/board' },
+    { session: 's-2', fiber: 'fiber/notes' },
+  );
+
+  it('puts each commit on the civil day whose RAIL holds it', () => {
+    const records = [
+      commit({ at: atLocal(DAYS[1], 10), sha: 'a', insertions: 10, deletions: 1 }),
+      // 2am Wednesday is still TUESDAY's rail — the day the work started.
+      commit({ at: atLocal(DAYS[3], 2), sha: 'b', insertions: 5, deletions: 2 }),
+      commit({ at: atLocal(DAYS[4], 15), sha: 'c', insertions: 100, deletions: 0 }),
+    ];
+    const out = weekLedgerDiff(records, cards, ledger, DAYS);
+    expect(out.byDay.get(DAYS[1])).toEqual({ insertions: 10, deletions: 1 });
+    expect(out.byDay.get(DAYS[2])).toEqual({ insertions: 5, deletions: 2 });
+    expect(out.byDay.get(DAYS[3])).toEqual({ insertions: 0, deletions: 0 });
+    expect(out.byDay.get(DAYS[4])).toEqual({ insertions: 100, deletions: 0 });
+  });
+
+  it('names every day of the week, zeroed when nothing joined', () => {
+    const out = weekLedgerDiff([], cards, ledger, DAYS);
+    expect([...out.byDay.keys()]).toEqual(DAYS);
+    for (const day of DAYS) expect(out.byDay.get(day)).toEqual({ insertions: 0, deletions: 0 });
+    expect(out.week).toEqual({ insertions: 0, deletions: 0 });
+  });
+
+  it('totals the week to exactly the sum of its days', () => {
+    const records = DAYS.map((day, i) =>
+      commit({ at: atLocal(day, 11), sha: `s${i}`, insertions: i + 1, deletions: i }),
+    );
+    const out = weekLedgerDiff(records, cards, ledger, DAYS);
+    const summed = [...out.byDay.values()].reduce(
+      (acc, d) => ({
+        insertions: acc.insertions + d.insertions,
+        deletions: acc.deletions + d.deletions,
+      }),
+      { insertions: 0, deletions: 0 },
+    );
+    expect(out.week).toEqual(summed);
+    expect(out.week).toEqual({ insertions: 28, deletions: 21 });
+  });
+
+  it('drops a commit whose session the ledger cannot resolve', () => {
+    const records = [
+      commit({ at: atLocal(DAYS[1], 10), sha: 'a', session: 'unknown', insertions: 999 }),
+      commit({ at: atLocal(DAYS[1], 11), sha: 'b', session: null, insertions: 999 }),
+      commit({ at: atLocal(DAYS[1], 12), sha: 'c', insertions: 3 }),
+    ];
+    const out = weekLedgerDiff(records, cards, ledger, DAYS);
+    expect(out.week).toEqual({ insertions: 3, deletions: 0 });
+  });
+
+  it('drops a commit whose fiber this board does not carry', () => {
+    const elsewhere = sessions({ session: 's-9', fiber: 'fiber/some-other-board' });
+    const records = [commit({ at: atLocal(DAYS[1], 10), sha: 'a', session: 's-9', insertions: 40 })];
+    expect(weekLedgerDiff(records, cards, elsewhere, DAYS).week).toEqual({
+      insertions: 0,
+      deletions: 0,
+    });
+  });
+
+  it('counts one sha once, however many hosts reported it', () => {
+    // The composite feed serves a remote's cached read alongside the local one;
+    // a sha is a sha on every host.
+    const records = [
+      commit({ at: atLocal(DAYS[2], 9), sha: 'dup', host: 'ada', insertions: 12, deletions: 4 }),
+      commit({ at: atLocal(DAYS[2], 9), sha: 'dup', host: 'bob', insertions: 12, deletions: 4 }),
+    ];
+    const out = weekLedgerDiff(records, cards, ledger, DAYS);
+    expect(out.byDay.get(DAYS[2])).toEqual({ insertions: 12, deletions: 4 });
+    expect(out.week).toEqual({ insertions: 12, deletions: 4 });
+  });
+
+  it('adds up the several fibers that shared a day', () => {
+    const records = [
+      commit({ at: atLocal(DAYS[0], 10), sha: 'a', session: 's-1', insertions: 7, deletions: 1 }),
+      commit({ at: atLocal(DAYS[0], 14), sha: 'b', session: 's-2', insertions: 3, deletions: 9 }),
+    ];
+    expect(weekLedgerDiff(records, cards, ledger, DAYS).byDay.get(DAYS[0])).toEqual({
+      insertions: 10,
+      deletions: 10,
+    });
+  });
+
+  it('has nothing to say without a session ledger', () => {
+    const records = [commit({ at: atLocal(DAYS[1], 10), sha: 'a', insertions: 40 })];
+    expect(weekLedgerDiff(records, cards, undefined, DAYS).week).toEqual({
+      insertions: 0,
+      deletions: 0,
+    });
+    expect(weekLedgerDiff(records, cards, new Map(), DAYS).week).toEqual({
+      insertions: 0,
+      deletions: 0,
+    });
+  });
+
+  it('ignores records outside the week on screen', () => {
+    const records = [
+      commit({ at: atLocal(shiftCivilDay(MONDAY, -3), 12), sha: 'before', insertions: 50 }),
+      commit({ at: atLocal(shiftCivilDay(MONDAY, 9), 12), sha: 'after', insertions: 60 }),
+      commit({ at: atLocal(DAYS[5], 12), sha: 'in', insertions: 6 }),
+    ];
+    expect(weekLedgerDiff(records, cards, ledger, DAYS).week).toEqual({
+      insertions: 6,
+      deletions: 0,
+    });
   });
 });
 

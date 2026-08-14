@@ -35,12 +35,16 @@ import {
   readCycleBand,
   retirePendingCycles,
   type PendingCycle,
+  rowDiffTotals,
   rowWaitingOn,
   type CycleCard,
   saysNothingHere,
   shuttleOrigin,
 } from './ChronicleView.js'
+import { buildLedgerNarration } from './join.js'
 import type { LedgerNarration } from './join.js'
+import { diffClause } from './vocabulary.js'
+import type { CommitRecord, SessionPairing } from './TemporalData.js'
 import { formatSpanMinutes, railBounds } from './railTime.js'
 import { buildSessionIndex, foldActiveMinutes } from './TemporalData.js'
 import type { ActivityBucket } from './TemporalData.js'
@@ -719,6 +723,34 @@ describe('composing an era’s look-back', () => {
   // by cardId, not by a `slug: ` prefix a human might have mistyped or skipped.
   const ledgerCards = [card({ id: 'a/board', name: 'Board work' }), card({ id: 'b/daemon', name: 'Daemon work' })]
 
+  /** One ledger commit. Only what the joins and the totals read is spelled out;
+   *  the rest is the shape the wire always carries. */
+  function commit(over: Partial<CommitRecord> & Pick<CommitRecord, 'sha'>): CommitRecord {
+    return {
+      at: localMs(DST_DAY, 12),
+      subject: 'a subject',
+      repo: 'felt',
+      files: 1,
+      insertions: 0,
+      deletions: 0,
+      session: 's1',
+      tmux: null,
+      cwd: null,
+      // Host-agnostic pairings, so the host-scoping rung is not what these
+      // cases are testing.
+      host: null,
+      ...over,
+    }
+  }
+
+  /** Session→fiber pairings with no host of their own, so any host's commit may
+   *  read them — the ledger's own `bySession` shape. */
+  function pairings(pairs: readonly (readonly [string, string])[]): Map<string, SessionPairing> {
+    return new Map(
+      pairs.map(([session, fiber]) => [session, { fiber, uid: null, session, host: null }]),
+    )
+  }
+
   it('gathers commits under the fiber the ledger attributed them to', () => {
     const ledger: LedgerNarration = {
       byCard: new Map([
@@ -784,6 +816,67 @@ describe('composing an era’s look-back', () => {
     const groups = groupNarration(ledger, ledgerCards)
     expect(groups[0].count).toBe(13)
     expect(groups[0].subjects).toEqual(['fold the masthead'])
+  })
+
+  // ── The gutter's line counts ───────────────────────────────────────────────
+  // `+A −D` on a fiber row is RECORDED EVIDENCE: the commits the ledger's own
+  // session→fiber pairing resolved onto that card, inside the drawn window, and
+  // nothing else. No subject-line prefix is read, and a commit the join cannot
+  // place contributes to no row's total.
+
+  it('sums a row total from the commits the join resolved onto it', () => {
+    const ledger: LedgerNarration = {
+      byCard: new Map([
+        ['a/board', { subjects: ['fold the masthead'], commits: 2, insertions: 512, deletions: 208 }],
+        ['b/daemon', { subjects: [], commits: 1, insertions: 30, deletions: 0 }],
+      ]),
+    }
+    const totals = rowDiffTotals(ledger, [{ cardId: 'a/board' }, { cardId: 'b/daemon' }])
+    expect(totals.get('a/board')).toEqual({ insertions: 512, deletions: 208 })
+    expect(totals.get('b/daemon')).toEqual({ insertions: 30, deletions: 0 })
+  })
+
+  it('gives a row with no recorded commits no clause at all', () => {
+    // ABSENT, not zero: the row prints nothing, and `+0 −0` is a false
+    // precision the gutter must never assert. A row with no card cannot be
+    // asked about at all.
+    const ledger: LedgerNarration = {
+      byCard: new Map([['a/board', { subjects: [], commits: 1, insertions: 4, deletions: 1 }]]),
+    }
+    const totals = rowDiffTotals(ledger, [{ cardId: 'a/board' }, { cardId: 'quiet/fiber' }, {}])
+    expect(totals.has('quiet/fiber')).toBe(false)
+    expect(totals.size).toBe(1)
+    expect(diffClause(0, 0)).toBe('')
+  })
+
+  it('drops a commit the ledger cannot place on this board', () => {
+    // buildLedgerNarration keeps only what a pairing resolves to a card here;
+    // an unresolvable session is evidence of nothing this page can draw.
+    const records: CommitRecord[] = [
+      commit({ sha: 'aaa', session: 's1', insertions: 10, deletions: 2 }),
+      commit({ sha: 'bbb', session: 'unknown', insertions: 900, deletions: 900 }),
+      commit({ sha: 'ccc', session: null, insertions: 900, deletions: 900 }),
+    ]
+    const ledger = buildLedgerNarration(records, ledgerCards, pairings([['s1', 'a/board']]))
+    const totals = rowDiffTotals(ledger, ledgerCards.map((c) => ({ cardId: c.id })))
+    expect(totals.get('a/board')).toEqual({ insertions: 10, deletions: 2 })
+    expect(totals.size).toBe(1)
+  })
+
+  it('counts one sha once, however many hosts served it', () => {
+    // The composite can hand back the same commit twice — a remote's cached
+    // read overlapping the local one. Counting it twice would double the lines.
+    const records: CommitRecord[] = [
+      commit({ sha: 'dup', session: 's1', insertions: 100, deletions: 40, host: 'local' }),
+      commit({ sha: 'dup', session: 's1', insertions: 100, deletions: 40, host: 'candide' }),
+      commit({ sha: 'other', session: 's1', insertions: 5, deletions: 0 }),
+    ]
+    const ledger = buildLedgerNarration(records, ledgerCards, pairings([['s1', 'a/board']]))
+    expect(ledger.byCard.get('a/board')?.commits).toBe(2)
+    expect(rowDiffTotals(ledger, [{ cardId: 'a/board' }]).get('a/board')).toEqual({
+      insertions: 105,
+      deletions: 40,
+    })
   })
 
   it('takes the intention from the first real paragraph of a body', () => {

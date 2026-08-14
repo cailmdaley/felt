@@ -21,7 +21,15 @@
   /* Fallback only — ChronicleView sizes the day column at render so that
      exactly one resting window of days fills the space beside the gutter. */
   --chr-day-w: 24px;
-  --chr-label-w: 300px;
+  /* The gutter carries the name, the host note, the day count AND the line
+     count, and the name is the row's identity — marginalia must never eat it.
+     Measured, not guessed: at 300px the widest clause in the record
+     (`+21481 −8522`, 78px) plus its 9px gap took exactly that much off every
+     name it appeared beside, so 387px is break-even and 400 leaves a margin.
+     Free on the track: `fitDayWidth` clamps the column at DAY_W_MAX_PX, and at
+     1728px the fit wants 62px for a 56px cap — 142px of slack the gutter can
+     spend before a single day column narrows. */
+  --chr-label-w: 400px;
   /* Segment width as a fraction of the column, so it tracks the fitted day
      width. Well under 1: a run of busy days has to read as a row of separate
      day-marks, not as one solid bar. */
@@ -879,6 +887,22 @@ button.chr-name:hover {
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.01em;
   color: #8A7C64;
+}
+/* The line count, at the gutter's outer edge — the same ledger column one step
+   quieter. `#A89B83` is the note's pigment, not the span's: the day count is
+   the row's own shape and reads with the lifeline, while `+A −D` is evidence
+   from the commit trail — marginalia, the second thing the eye is allowed to
+   skip. It never shrinks (`flex: 0 0 auto`), so a wide figure stays exact and
+   the give comes from the name, which already ellipsizes. */
+.chr-diff {
+  flex: 0 0 auto;
+  text-align: right;
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: calc(9px * var(--kbn-type-scale, 1));
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  color: #A89B83;
 }
 
 /* ── Following one row across a wide sheet ──────────────────────────────── */

@@ -178,3 +178,50 @@ export const ALOFT_KEY_LABEL = 'sessions and agents aloft'
 export function messageClause(sent: number, received: number): string {
   return received > 0 ? `you ${sent} · ${received} back` : `you ${sent}`
 }
+
+
+// ── Line-count accounting ────────────────────────────────────────────────────
+
+/**
+ * `+512 −208` — the diffstat convention, insertions first, and a true minus
+ * sign (U+2212) rather than a hyphen: the figure is an arithmetic quantity and
+ * the page sets it as one.
+ *
+ * Either side may be zero on its own (a pure deletion adds nothing) and each
+ * is dropped independently; both zero prints NOTHING, which is the difference
+ * between "the ledger recorded no change here" and the false precision of
+ * `+0 −0`. Every caller must treat the empty string as "print no clause".
+ *
+ * Figures stay exact at every size. A line count is a fact a reader may want
+ * to compare against `git show`, and `+1.2k` is not that fact.
+ */
+export function diffClause(insertions: number, deletions: number): string {
+  const terms: string[] = []
+  if (insertions > 0) terms.push(`+${insertions}`)
+  if (deletions > 0) terms.push(`−${deletions}`)
+  return terms.join(' ')
+}
+
+/** What one page's worth of ledger came to. */
+export interface DiffTotal {
+  insertions: number
+  deletions: number
+}
+
+/**
+ * Add up what the ledger RECORDED — nothing inferred, nothing assumed.
+ *
+ * The caller hands in only the entries the join actually resolved onto a fiber
+ * in its window; a commit the ledger cannot attribute is not this total's to
+ * count. Summing an empty run gives zeros, which {@link diffClause} then prints
+ * as nothing at all.
+ */
+export function sumDiff(entries: Iterable<DiffTotal>): DiffTotal {
+  let insertions = 0
+  let deletions = 0
+  for (const entry of entries) {
+    insertions += entry.insertions
+    deletions += entry.deletions
+  }
+  return { insertions, deletions }
+}

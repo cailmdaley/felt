@@ -26,6 +26,7 @@ import {
   buildStillAhead,
   clampZoom,
   closureMark,
+  dayModelSignature,
   dayTotals,
   dayWindow,
   defaultDayISO,
@@ -1641,6 +1642,97 @@ describe('attributing a commit by the session that made it', () => {
     const withOut = buildDayModel(DAY, activity([bucket(60, 'agent', SESSION)]), [card()], '', NOW_IN_RAIL)
     expect(withOut.entries[0].fallback).toBe(true)
     expect(withOut.entries[0].stats?.commits).toBe(0)
+  })
+
+  describe("the day's own diff total", () => {
+    // The header figure is not a fourth source — it is the same per-fiber
+    // sums buildDayEntries already computed, added across every fiber the
+    // ledger actually joined to a card on this page.
+
+    it('sums the day total over every fiber the ledger joined', () => {
+      const other = '01KVBR9A6VP2Q4R7S3T8W5XYHK'
+      const otherSession = 'b2c3d4e5-0000-4000-8000-000000000002'
+      const cards = [
+        card(),
+        card({ id: 'a/second', uid: other, name: 'Second', runningWorker: `second-${other}-shuttle` }),
+      ]
+      const model = buildDayModel(
+        DAY,
+        activity([bucket(60, 'agent', SESSION), bucket(61, 'agent', `second-${other}-shuttle`)]),
+        cards,
+        '',
+        NOW_IN_RAIL,
+        undefined,
+        undefined,
+        {
+          records: [
+            record({ sha: SHA(1), subject: 'ran the nulls', insertions: 42, deletions: 7 }),
+            record({ sha: SHA(2), subject: 'fixed the mask', insertions: 8, deletions: 0 }),
+            record({
+              sha: SHA(3),
+              subject: 'shipped it',
+              session: otherSession,
+              insertions: 100,
+              deletions: 100,
+            }),
+          ],
+          bySession: bySession(
+            [HARNESS, pairing('work/spt3g_papers/bmodes-2d')],
+            [otherSession, pairing('a/second', { session: otherSession })],
+          ),
+        },
+      )
+      expect(model.totals.insertions).toBe(150)
+      expect(model.totals.deletions).toBe(107)
+    })
+
+    it('leaves the day total absent when no ledger covers the day', () => {
+      const model = buildDayModel(DAY, activity([bucket(60, 'agent', SESSION)]), [card()], '', NOW_IN_RAIL)
+      expect(model.totals.insertions).toBeUndefined()
+      expect(model.totals.deletions).toBeUndefined()
+    })
+
+    it("does not count a commit joined to a fiber this page doesn't carry", () => {
+      // The ledger resolves the pairing to a real fiber, but that fiber's
+      // card isn't among the ones this page draws — the same "falls through"
+      // rule buildDayEntries applies per-lane applies to the header sum too.
+      const model = buildDayModel(
+        DAY,
+        activity([bucket(60, 'agent', SESSION)]),
+        [card()],
+        '',
+        NOW_IN_RAIL,
+        undefined,
+        undefined,
+        {
+          records: [record({ insertions: 42, deletions: 7 })],
+          bySession: bySession([HARNESS, pairing('not/on/this/board')]),
+        },
+      )
+      // The ledger DID cover the day — it just found nothing to attribute to
+      // a fiber this page carries, so the total is a real zero, not absence.
+      expect(model.totals.insertions).toBe(0)
+      expect(model.totals.deletions).toBe(0)
+    })
+
+    it('prints nothing in the signature term when both sides are zero', () => {
+      const model = buildDayModel(
+        DAY,
+        activity([bucket(60, 'agent', SESSION)]),
+        [card()],
+        '',
+        NOW_IN_RAIL,
+        undefined,
+        undefined,
+        {
+          records: [record({ insertions: 0, deletions: 0 })],
+          bySession: bySession([HARNESS, pairing('work/spt3g_papers/bmodes-2d')]),
+        },
+      )
+      expect(model.totals.insertions).toBe(0)
+      expect(model.totals.deletions).toBe(0)
+      expect(dayModelSignature(model)).toContain(`${DAY}\n${model.totals.messages}`)
+    })
   })
 })
 

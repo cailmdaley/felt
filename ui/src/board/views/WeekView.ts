@@ -41,7 +41,10 @@ import {
   ACTIVITY_KEY_ITEMS,
   MARK_GLYPH,
   SPINE_KEY_LABEL,
+  diffClause,
   messageClause,
+  sumDiff,
+  type DiffTotal,
   type MarkKind,
 } from './vocabulary.js'
 import {
@@ -67,11 +70,14 @@ import {
   staleOrigins,
   type ActivityBucket,
   type ActivityResult,
+  type CommitRecord,
   type SessionPairing,
   type TemporalOrigins,
 } from './TemporalData.js'
 import {
   buildJoinIndex,
+  buildLedgerNarration,
+  ledgerBetween,
   originOf,
   type BucketOrigin,
   type JoinIndex,
@@ -426,18 +432,66 @@ export function formatSpan(ms: number): string {
   return `${h}h ${m}m`
 }
 
+/** What the commit ledger came to on this week's seven rails. */
+export interface WeekLedgerDiff {
+  /** Civil day → the lines that day's attributable commits moved. Every day of
+   *  the week is present, zeroed when nothing joined. */
+  byDay: Map<string, DiffTotal>
+  /** The seven days added up — always exactly the sum of `byDay`. */
+  week: DiffTotal
+}
+
+/**
+ * How many lines each day of the week moved, by the ledger's own reckoning.
+ *
+ * ATTRIBUTABLE COMMITS ONLY. Every record passes through the same join the
+ * rasters use — `record.session` → the session ledger's pairing → a card THIS
+ * BOARD CARRIES — and a commit that fails any rung is not counted. A raw fold
+ * over the records would be a different (and dishonest) number: it would
+ * include work the board is not drawing.
+ *
+ * A day is the RAIL, 6am→6am, cut by `railBounds` — the same instants the row
+ * above the annotation is drawn from, so a 2am commit lands on the day whose
+ * work it belonged to rather than on the row below it. The rails are disjoint
+ * and cover the week, so the week total is simply their sum.
+ */
+export function weekLedgerDiff(
+  records: readonly CommitRecord[],
+  cards: readonly KanbanCard[],
+  bySession: ReadonlyMap<string, SessionPairing> | undefined,
+  days: readonly string[],
+): WeekLedgerDiff {
+  const byDay = new Map<string, DiffTotal>()
+  for (const day of days) {
+    const bounds = railBounds(day)
+    const { byCard } = buildLedgerNarration(
+      ledgerBetween(records, bounds.startMs, bounds.endMs),
+      cards,
+      bySession,
+    )
+    byDay.set(day, sumDiff(byCard.values()))
+  }
+  return { byDay, week: sumDiff(byDay.values()) }
+}
+
 /**
  * The one line of right-edge text a row carries.
  *
  * Past and today report how the day went; a future row reports nothing, because
  * nothing has happened on it yet and `—` there would read as "no activity"
  * rather than "not yet". Today alone appends the aloft count.
+ *
+ * The diffstat comes LAST, and only when the ledger joined something to this
+ * board on this day: `diffClause` prints nothing for a zero pair, and an
+ * absent term is the honest render of "the hook recorded no attributable
+ * commit here" — which is also every day before the hook existed.
  */
 export function annotationFor(
   spend: { totalMs: number; sent?: number; received?: number } | null,
   isPast: boolean,
   isToday: boolean,
   aloft: number,
+  diff: DiffTotal | null = null,
 ): string {
   if (!isPast && !isToday) return ''
   const quiet = !spend || spend.totalMs <= 0
@@ -447,6 +501,8 @@ export function annotationFor(
   // "no conversation happened", and also of a daemon that never sent the kind.
   if (!quiet && (spend.sent || spend.received)) parts.push(messageClause(spend.sent ?? 0, spend.received ?? 0))
   if (isToday && aloft > 0) parts.push(`${aloft} aloft`)
+  const lines = diff ? diffClause(diff.insertions, diff.deletions) : ''
+  if (lines) parts.push(lines)
   return parts.join(' · ')
 }
 
@@ -740,7 +796,22 @@ class WeekView implements TemporalView {
    * a 404 — simply leaves the weaker rungs to do the work.
    */
   private byTmux: ReadonlyMap<string, SessionPairing> = new Map()
+  /** The same ledger keyed the other way — harness session → fiber, which is
+   *  the half the COMMIT join reads (`lookupSession`). */
+  private bySession: ReadonlyMap<string, SessionPairing> = new Map()
   private sessionsAsked = false
+
+  /**
+   * The commit ledger over the week on screen, and the span it was asked for.
+   * The key is `<monday>:<end>` — the same shape the activity key has, and for
+   * the same reason: a past week's end never moves, so paging away and back
+   * must not be mistaken for "already served" while the records still belong
+   * to the other week.
+   */
+  private commits: readonly CommitRecord[] = []
+  private commitsKey = ''
+  private commitsFor: string | null = null
+  private commitsInFlight = false
   /** Rebuilt each paint from the cards on screen plus the ledger. */
   private origins: JoinIndex = buildJoinIndex([])
   /** The one hover tooltip, parented to the grid so it positions against the
@@ -1190,9 +1261,10 @@ class WeekView implements TemporalView {
       void ctx
         .sessions(0)
         .then((res) => {
-          const byTmux = buildSessionIndex(res.records).byTmux
-          if (byTmux.size === 0) return
+          const { byTmux, bySession } = buildSessionIndex(res.records)
+          if (byTmux.size === 0 && bySession.size === 0) return
           this.byTmux = byTmux
+          this.bySession = bySession
           // Rung 0 arriving can move a tick from a session name onto a fiber —
           // and can make it read as constitution-driven — so the rows repaint.
           this.dataGen += 1
@@ -1208,6 +1280,35 @@ class WeekView implements TemporalView {
     const monday = this.monday
     const win = weekWindow(monday, Date.now())
     if (win.days.length !== 7) return
+
+    // The COMMIT ledger over the same span the rasters cover, asked for once
+    // per week-and-cap rather than once per paint. Both guards the activity
+    // load carries apply for the same reasons: the key alone cannot say
+    // "already served" for a past week (its cap never moves), and a late answer
+    // for a week that has since been paged away is dropped rather than drawn.
+    const commitsKey = `${monday}:${win.activityToMs}`
+    const commitsServed = this.commitsKey === commitsKey && this.commitsFor === monday
+    if (win.activityToMs > win.fromMs && !commitsServed && !this.commitsInFlight) {
+      this.commitsKey = commitsKey
+      this.commitsInFlight = true
+      void ctx
+        .commits(win.fromMs, win.activityToMs)
+        .then((res) => {
+          if (this.monday !== monday) return
+          this.commits = res.records
+          this.commitsFor = monday
+          this.dataGen += 1
+          this.paint()
+        })
+        .catch(() => {
+          // Forfeit the key, not the figures: the next paint retries, and until
+          // it lands the rows simply carry no diffstat.
+          this.commitsKey = ''
+        })
+        .finally(() => {
+          this.commitsInFlight = false
+        })
+    }
 
     // The key alone is not enough to say "already served". A PAST week's
     // `activityToMs` is its own end and never moves, so paging away and back
@@ -1288,12 +1389,26 @@ class WeekView implements TemporalView {
 
     this.paintWeekLabelState()
 
+    // The week's ledger, cut to the seven rails on screen. Records for another
+    // week are ignored outright rather than trusted to fall outside the rails.
+    const ledger = weekLedgerDiff(
+      this.commitsFor === this.monday ? this.commits : [],
+      ctx.cards,
+      this.bySession,
+      this.rows.map((r) => r.day),
+    )
+
     if (this.totals) {
       const week = activity?.week
+      const lines = diffClause(ledger.week.insertions, ledger.week.deletions)
       this.totals.textContent = week
-        ? // Two currencies, one line: what the week cost a person is a number
-          // of messages, what it cost the machines is hours.
-          `${messageClause(week.sent, week.received)} · agents ${formatCoarseSpan(week.agentMs)}`
+        ? // Three currencies, one line: what the week cost a person is a number
+          // of messages, what it cost the machines is hours, and what it left
+          // behind is lines. The last is dropped when the ledger has nothing
+          // attributable to say.
+          `${messageClause(week.sent, week.received)} · agents ${formatCoarseSpan(week.agentMs)}${
+            lines ? ` · ${lines}` : ''
+          }`
         : ''
     }
 
@@ -1406,7 +1521,13 @@ class WeekView implements TemporalView {
       // running, and a count is the one thing they cannot say. Not their names
       // — a name at this size was the column we just removed.
       const spend = activity ? summarizeSpend(buckets) : null
-      row.annot.textContent = annotationFor(spend, isPast, isToday, inFlight.length)
+      row.annot.textContent = annotationFor(
+        spend,
+        isPast,
+        isToday,
+        inFlight.length,
+        ledger.byDay.get(row.day) ?? null,
+      )
       const annotText = row.annot.textContent
       if (waiting !== null) {
         const badge = document.createElement('span')

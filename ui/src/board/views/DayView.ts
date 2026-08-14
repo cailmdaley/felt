@@ -114,7 +114,9 @@ import {
   STATE_KEY_ITEMS,
   STATE_WORD,
   cardState,
+  diffClause,
   messageClause,
+  sumDiff,
   type LifecycleState,
 } from './vocabulary.js'
 import {
@@ -538,6 +540,15 @@ export interface DayTotals {
    *  the kind, which the header reads as "say nothing" rather than "nothing
    *  was said" — see `messageClause`. */
   received: number
+  /**
+   * Lines added and removed across the whole day, summed from the COMMIT
+   * LEDGER over the commits it actually joined to a fiber on this page.
+   * Absent when the day's ledger is not covered (no ledger input, not merely
+   * zero commits), which is not the same claim as a day of no change: an
+   * absent figure prints nothing rather than `+0 −0`.
+   */
+  insertions?: number
+  deletions?: number
 }
 
 /**
@@ -1115,18 +1126,9 @@ export function formatEntryStats(stats: DayEntryStats): string {
   }
   if (stats.agent > 0) parts.push(`agents ${formatSpanMinutes(stats.agent, { pad: true })}`)
   if (stats.commits > 0) parts.push(`${stats.commits} commit${stats.commits === 1 ? '' : 's'}`)
-  const diff = formatDiffClause(stats.insertions ?? 0, stats.deletions ?? 0)
+  const diff = diffClause(stats.insertions ?? 0, stats.deletions ?? 0)
   if (diff) parts.push(diff)
   return parts.join(' · ')
-}
-
-/** `+42 −7`. A true minus sign (U+2212), not a hyphen: the figure is an
- *  arithmetic quantity and the page sets it as one. */
-function formatDiffClause(insertions: number, deletions: number): string {
-  const terms: string[] = []
-  if (insertions > 0) terms.push(`+${insertions}`)
-  if (deletions > 0) terms.push(`−${deletions}`)
-  return terms.join(' ')
 }
 
 export interface DayEntry {
@@ -1308,13 +1310,21 @@ export function buildDayModel(
   const recorded = ledger
     ? buildLedgerNarration(ledgerBetween(ledger.records, win.startMs, win.endMs), cards, ledger.bySession)
     : undefined
+  const totals = dayTotals(activity, cards, win, byTmux)
+  // Only RECORDED, joined commits count toward the day's diff — no fallback
+  // to an estimate the ledger didn't actually attribute.
+  if (recorded) {
+    const diff = sumDiff(recorded.byCard.values())
+    totals.insertions = diff.insertions
+    totals.deletions = diff.deletions
+  }
   return {
     dayISO,
     window: win,
     frame,
     host: (activity.host ?? '').toLowerCase(),
     origins,
-    totals: dayTotals(activity, cards, win, byTmux),
+    totals,
     lanes,
     entries: buildDayEntries(lanes, cards, win, nowMs, recorded),
     stillAhead: buildStillAhead(cards, dayISO, win, nowMs),
@@ -1356,7 +1366,8 @@ export function dayModelSignature(model: DayModel): string {
   const frame =
     `frame:${Math.floor(model.frame.startMs / grain)}-${Math.floor(model.frame.endMs / grain)}`
   return (
-    `${model.dayISO}\n${model.totals.messages}/${model.totals.received}/${model.totals.agent}\n` +
+    `${model.dayISO}\n${model.totals.messages}/${model.totals.received}/${model.totals.agent}` +
+    `/${model.totals.insertions ?? ''}/${model.totals.deletions ?? ''}\n` +
     `${lanes}\n${entries}\n${ahead}\n${ledger}\n${frame}`
   )
 }
@@ -2080,10 +2091,12 @@ class DayViewImpl implements TemporalView {
     if (this.statsEl) {
       // The host belongs here, once: it is the same for the whole page, and a
       // lane only repeats it when it disagrees (see DayLane.hostNote).
+      const diff = diffClause(model.totals.insertions ?? 0, model.totals.deletions ?? 0)
       this.statsEl.textContent =
         (model.host ? `${model.host} · ` : '') +
         `${messageClause(model.totals.messages, model.totals.received)}` +
-        ` · agents ${formatSpanMinutes(model.totals.agent, { pad: true })}`
+        ` · agents ${formatSpanMinutes(model.totals.agent, { pad: true })}` +
+        (diff ? ` · ${diff}` : '')
       this.statsEl.classList.toggle('kbn-day-stats-quiet', model.lanes.length === 0)
     }
 
