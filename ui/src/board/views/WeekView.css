@@ -356,6 +356,17 @@
   font-variant-numeric: tabular-nums;
 }
 .wk-row-today .wk-annot { color: #9A7B35; }
+
+/* The diffstat within `.wk-totals` / `.wk-annot`, colored insertion/deletion
+   — see --kbn-diff-add / --kbn-diff-del in KanbanModal.css. The today-row
+   qualifier is repeated so this beats `.wk-row-today .wk-annot` above,
+   which is otherwise the same specificity. */
+.wk-totals .kbn-diffclause-ins,
+.wk-annot .kbn-diffclause-ins,
+.wk-row-today .wk-annot .kbn-diffclause-ins { color: var(--kbn-diff-add, #4B7A3E); }
+.wk-totals .kbn-diffclause-del,
+.wk-annot .kbn-diffclause-del,
+.wk-row-today .wk-annot .kbn-diffclause-del { color: var(--kbn-diff-del, #A84A3E); }
 /* Stale-origin rows wear the kanban's `kbn-card--stale` / `kbn-card-waiting`
    (KanbanModal.css) — same condition, same words. Only the geometry is
    re-fitted: that badge was cut for a card's own column, and here it sits

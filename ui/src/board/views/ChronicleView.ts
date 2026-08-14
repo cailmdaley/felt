@@ -47,7 +47,7 @@ import {
   STATE_KEY_ITEMS,
   STATE_WORD,
   cardState,
-  diffClause,
+  diffClauseEl,
   messageClause,
   sumDiff,
   type DiffTotal,
@@ -1963,12 +1963,10 @@ class ChronicleView implements TemporalView {
           // would leave the numbers floating at a different place on every
           // line. Kept together, the eye reads "×7 +512 −208" as one clause and
           // then the prose. A group whose ledger recorded nothing prints none.
-          const diff = diffClause(group.insertions, group.deletions)
-          if (diff) {
-            const el = document.createElement('span')
-            el.className = 'chr-face-diff'
-            el.textContent = diff
-            line.append(el)
+          const diffEl = diffClauseEl(group.insertions, group.deletions)
+          if (diffEl) {
+            diffEl.classList.add('chr-face-diff')
+            line.append(diffEl)
           }
           line.append(document.createTextNode(` ${group.subjects.join('; ')}`))
           memoir.append(line)
@@ -3256,11 +3254,9 @@ class ChronicleView implements TemporalView {
     // gap and pull the gutter's other figures out of column.
     const diff = row.cardId ? this.rowDiffs.get(row.cardId) : undefined
     if (diff) {
-      const text = diffClause(diff.insertions, diff.deletions)
-      if (text) {
-        const el = document.createElement('span')
-        el.className = 'chr-diff'
-        el.textContent = text
+      const el = diffClauseEl(diff.insertions, diff.deletions)
+      if (el) {
+        el.classList.add('chr-diff')
         el.title = `${diff.insertions} inserted, ${diff.deletions} deleted — commits recorded in this window`
         label.append(el)
       }

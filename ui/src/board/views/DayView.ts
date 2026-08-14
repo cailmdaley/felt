@@ -115,6 +115,7 @@ import {
   STATE_WORD,
   cardState,
   diffClause,
+  diffClauseEl,
   messageClause,
   sumDiff,
   type LifecycleState,
@@ -2091,12 +2092,15 @@ class DayViewImpl implements TemporalView {
     if (this.statsEl) {
       // The host belongs here, once: it is the same for the whole page, and a
       // lane only repeats it when it disagrees (see DayLane.hostNote).
-      const diff = diffClause(model.totals.insertions ?? 0, model.totals.deletions ?? 0)
-      this.statsEl.textContent =
+      const diffEl = diffClauseEl(model.totals.insertions ?? 0, model.totals.deletions ?? 0)
+      const prefix =
         (model.host ? `${model.host} · ` : '') +
         `${messageClause(model.totals.messages, model.totals.received)}` +
         ` · agents ${formatSpanMinutes(model.totals.agent, { pad: true })}` +
-        (diff ? ` · ${diff}` : '')
+        (diffEl ? ' · ' : '')
+      this.statsEl.textContent = ''
+      this.statsEl.append(document.createTextNode(prefix))
+      if (diffEl) this.statsEl.append(diffEl)
       this.statsEl.classList.toggle('kbn-day-stats-quiet', model.lanes.length === 0)
     }
 
@@ -2755,7 +2759,20 @@ class DayViewImpl implements TemporalView {
       if (statLine) {
         const stats = document.createElement('span')
         stats.className = 'kbn-day-entrystats'
-        stats.textContent = statLine
+        // The diff clause is always the last term (see formatEntryStats):
+        // strip it back off the composed string and re-append it as coloured
+        // elements rather than teaching the string builder to emit markup.
+        const diffText = entry.stats
+          ? diffClause(entry.stats.insertions ?? 0, entry.stats.deletions ?? 0)
+          : ''
+        const diffEl = entry.stats
+          ? diffClauseEl(entry.stats.insertions ?? 0, entry.stats.deletions ?? 0)
+          : null
+        if (diffEl && diffText && statLine.endsWith(diffText)) {
+          stats.append(document.createTextNode(statLine.slice(0, -diffText.length)), diffEl)
+        } else {
+          stats.textContent = statLine
+        }
         head.append(stats)
       }
       item.append(head)

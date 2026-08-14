@@ -54,6 +54,15 @@
      aloft, due dates — was one of the axes above wearing the wrong colour. */
   --kbn-tempered: #3F8278;
   --kbn-tempered-ink: #2E6862;
+
+  /* LOC ACCOUNTING — a fifth axis, orthogonal to the four above: how much a
+     change weighed has nothing to say about who made it, when, or whether it
+     was judged sound. Diffstat convention, not the board's WHO-ACTED reds —
+     cinnabar stays a claim about you specifically, and a deletion is not
+     always yours. Muted, git-diff hues rather than the bright ANSI pair, so
+     the figure sits at the same quiet register as the rest of a stat line. */
+  --kbn-diff-add: #4B7A3E;
+  --kbn-diff-del: #A84A3E;
 }
 
 /* EB Garamond Initials F1 / F2 — the two-layer dropcap fonts. F2 is

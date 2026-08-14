@@ -42,6 +42,7 @@ import {
   MARK_GLYPH,
   SPINE_KEY_LABEL,
   diffClause,
+  diffClauseEl,
   messageClause,
   sumDiff,
   type DiffTotal,
@@ -1400,16 +1401,19 @@ class WeekView implements TemporalView {
 
     if (this.totals) {
       const week = activity?.week
-      const lines = diffClause(ledger.week.insertions, ledger.week.deletions)
-      this.totals.textContent = week
-        ? // Three currencies, one line: what the week cost a person is a number
-          // of messages, what it cost the machines is hours, and what it left
-          // behind is lines. The last is dropped when the ledger has nothing
-          // attributable to say.
-          `${messageClause(week.sent, week.received)} · agents ${formatCoarseSpan(week.agentMs)}${
-            lines ? ` · ${lines}` : ''
-          }`
-        : ''
+      const diffEl = diffClauseEl(ledger.week.insertions, ledger.week.deletions)
+      this.totals.textContent = ''
+      if (week) {
+        // Three currencies, one line: what the week cost a person is a number
+        // of messages, what it cost the machines is hours, and what it left
+        // behind is lines. The last is dropped when the ledger has nothing
+        // attributable to say.
+        const prefix =
+          `${messageClause(week.sent, week.received)} · agents ${formatCoarseSpan(week.agentMs)}` +
+          (diffEl ? ' · ' : '')
+        this.totals.append(document.createTextNode(prefix))
+        if (diffEl) this.totals.append(diffEl)
+      }
     }
 
     // From `response.cycles`, NOT `ctx.cards`: a cycle is a span of time rather
@@ -1521,14 +1525,19 @@ class WeekView implements TemporalView {
       // running, and a count is the one thing they cannot say. Not their names
       // — a name at this size was the column we just removed.
       const spend = activity ? summarizeSpend(buckets) : null
-      row.annot.textContent = annotationFor(
-        spend,
-        isPast,
-        isToday,
-        inFlight.length,
-        ledger.byDay.get(row.day) ?? null,
-      )
-      const annotText = row.annot.textContent
+      const dayDiff = ledger.byDay.get(row.day) ?? null
+      const annotText = annotationFor(spend, isPast, isToday, inFlight.length, dayDiff)
+      row.annot.textContent = ''
+      const dayDiffEl = dayDiff ? diffClauseEl(dayDiff.insertions, dayDiff.deletions) : null
+      const dayDiffText = dayDiff ? diffClause(dayDiff.insertions, dayDiff.deletions) : ''
+      if (dayDiffEl && dayDiffText && annotText.endsWith(dayDiffText)) {
+        row.annot.append(
+          document.createTextNode(annotText.slice(0, -dayDiffText.length)),
+          dayDiffEl,
+        )
+      } else {
+        row.annot.textContent = annotText
+      }
       if (waiting !== null) {
         const badge = document.createElement('span')
         badge.className = 'kbn-card-waiting'

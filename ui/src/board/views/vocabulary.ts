@@ -202,6 +202,36 @@ export function diffClause(insertions: number, deletions: number): string {
   return terms.join(' ')
 }
 
+/**
+ * Same figure as {@link diffClause}, as an element rather than a string: an
+ * insertion in `--kbn-diff-add` (a muted diffstat green — new to the board's
+ * pigments, because LOC accounting is its own axis, not a repaint of WHO
+ * ACTED or the VERDICT), a deletion in `--kbn-diff-del`. Null on the same
+ * both-zero case `diffClause` renders as `''` — callers that already guard on
+ * the string form should guard on this the same way.
+ */
+export function diffClauseEl(insertions: number, deletions: number): HTMLElement | null {
+  const ins = insertions > 0 ? `+${insertions}` : ''
+  const del = deletions > 0 ? `−${deletions}` : ''
+  if (!ins && !del) return null
+  const el = document.createElement('span')
+  el.className = 'kbn-diffclause'
+  if (ins) {
+    const insEl = document.createElement('span')
+    insEl.className = 'kbn-diffclause-ins'
+    insEl.textContent = ins
+    el.append(insEl)
+  }
+  if (ins && del) el.append(document.createTextNode(' '))
+  if (del) {
+    const delEl = document.createElement('span')
+    delEl.className = 'kbn-diffclause-del'
+    delEl.textContent = del
+    el.append(delEl)
+  }
+  return el
+}
+
 /** What one page's worth of ledger came to. */
 export interface DiffTotal {
   insertions: number
