@@ -34,13 +34,30 @@ import {
   sortDatedByReturn,
   splitStashByReturn,
 } from './KanbanSurfaces.js'
-import { sessionWindow } from './FiberDetailModal.js'
+import { chromeRestartDirective, chromeRestartNeeded, sessionWindow } from './FiberDetailModal.js'
 import { isoDayLocal } from './civilDay.js'
 
 const NOW = Date.parse('2026-08-08T15:30:00Z')
 const DAY = 86_400_000
 const dayFromNow = (n: number): string => isoDayLocal(NOW + n * DAY)
 const at0 = new Date(NOW - 30 * DAY).toISOString()
+
+describe('Chrome axis changes', () => {
+  it('restarts a live worker when the setting changes', () => {
+    expect(chromeRestartNeeded({ runningWorker: 'shuttle-fiber' }, false, true)).toBe(true)
+    expect(chromeRestartNeeded({ runningWorker: 'shuttle-fiber' }, true, false)).toBe(true)
+  })
+
+  it('does not restart a dormant worker or an unchanged setting', () => {
+    expect(chromeRestartNeeded({}, false, true)).toBe(false)
+    expect(chromeRestartNeeded({ runningWorker: 'shuttle-fiber' }, true, true)).toBe(false)
+  })
+
+  it('gives the replacement worker a short Chrome-specific directive', () => {
+    expect(chromeRestartDirective(true)).toBe('This session was resumed to give you Chrome.')
+    expect(chromeRestartDirective(false)).toBe('This session was restarted with Chrome disabled.')
+  })
+})
 
 describe('effectiveHorizon — snooze is due + stashed, composed', () => {
   it('rests a stashed card whose due is still ahead', () => {

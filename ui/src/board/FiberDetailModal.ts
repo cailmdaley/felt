@@ -166,6 +166,22 @@ export function sessionWindow(
   }
 }
 
+/** A live worker must be replaced before a changed Chrome axis can take effect. */
+export function chromeRestartNeeded(
+  card: Pick<KanbanCard, 'runningWorker'>,
+  currentChrome: boolean,
+  nextChrome: boolean,
+): boolean {
+  return Boolean(card.runningWorker) && currentChrome !== nextChrome
+}
+
+/** The short directive the replacement worker sees in its opening prompt. */
+export function chromeRestartDirective(chrome: boolean): string {
+  return chrome
+    ? 'This session was resumed to give you Chrome.'
+    : 'This session was restarted with Chrome disabled.'
+}
+
 /** {@link sessionWindow} as the one mono line the detail panel shows. */
 function buildSessionWindow(card: KanbanCard): HTMLElement | null {
   const window_ = sessionWindow(card)
@@ -1215,6 +1231,7 @@ export class FiberDetailModal {
 
     const actionsRow = document.createElement('div')
     actionsRow.className = 'kbn-detail-actions-row'
+    let freshDispatchBtn: HTMLButtonElement | null = null
 
     const temperBtn = this.buildActionBtn('Temper', 'tempered')
     temperBtn.title = 'Close as tempered (human-accepted)'
@@ -1224,6 +1241,7 @@ export class FiberDetailModal {
 
     if (shuttleManaged) {
       const requeueBtn = this.buildActionBtn('New session ▸', 'primary')
+      freshDispatchBtn = requeueBtn
       requeueBtn.title =
         'Cut any open session and dispatch a fresh worker reading ## Status; outcome preserved'
 
@@ -1634,6 +1652,11 @@ export class FiberDetailModal {
     // The picker repopulates effort options + chrome availability from the
     // selected agent's registry metadata and commits on any axis change.
     if (agentSelect) {
+      let committedAxes = {
+        agent: originalAgent,
+        effort: card.shuttleEffort ?? '',
+        chrome: card.shuttleChrome ?? false,
+      }
       // For a shuttle-managed card every axis change commits via set-agent;
       // for a human card the picker only populates the base-agent select the
       // promote button reads (no block to mutate yet → no-op commit).
@@ -1646,9 +1669,32 @@ export class FiberDetailModal {
         },
         shuttleManaged
           ? (axes) => {
-              this.commitAxes(card, axes, statusEl, errorEl, () => {
+              const restartForChrome = chromeRestartNeeded(card, committedAxes.chrome, axes.chrome)
+
+              if (restartForChrome) {
+                const setting = axes.chrome ? 'with Chrome enabled' : 'with Chrome disabled'
+                const ok = window.confirm(
+                  `Would you like to restart “${card.name}” ${setting}?\n\n` +
+                    'The current session will close, and a fresh session will start with this setting.',
+                )
+                if (!ok) return false
+              }
+
+              void this.commitAxes(card, axes, statusEl, errorEl, () => {
+                committedAxes = { ...axes }
                 baseline.agent = axes.agent
+                if (restartForChrome && freshDispatchBtn) {
+                  void this.runRequeue(
+                    card,
+                    chromeRestartDirective(axes.chrome),
+                    'fresh',
+                    freshDispatchBtn,
+                    actionsErr,
+                    true,
+                  )
+                }
               })
+              return true
             }
           : () => {},
       )
@@ -2487,13 +2533,14 @@ export class FiberDetailModal {
     mode: 'fresh' | 'previous',
     btn: HTMLButtonElement,
     errorEl: HTMLElement,
+    skipCutConfirmation = false,
   ): Promise<void> {
     // A "New session" over a LIVE worker is a CUT: the daemon stamps the
     // clean-exit marker, kills the running session, and starts fresh — which
     // discards whatever in-flight context that worker was holding. Confirm
     // before doing that. A dormant card (no live worker) cuts nothing, so it's
     // silent; Resume never cuts, so it never confirms.
-    if (mode === 'fresh' && card.runningWorker) {
+    if (mode === 'fresh' && card.runningWorker && !skipCutConfirmation) {
       const working = card.runtimePhase === 'working' ? ' (actively working)' : ''
       const ok = window.confirm(
         `A worker is still running for “${card.name}”${working}.\n\n` +
@@ -2602,7 +2649,7 @@ export class FiberDetailModal {
       chromeToggle: HTMLInputElement
     },
     current: { agent: string; effort: string; chrome: boolean },
-    onCommit: (axes: { agent: string; effort: string; chrome: boolean }) => void,
+    onCommit: (axes: { agent: string; effort: string; chrome: boolean }) => boolean | void,
   ): Promise<void> {
     const { agentSelect, effortSelect, chromeToggle } = controls
     let records: AgentRecord[]
@@ -2690,12 +2737,16 @@ export class FiberDetailModal {
     syncDependents(selectedAgent() || current.agent, current.effort)
     chromeToggle.checked = current.chrome && !chromeToggle.disabled
 
-    const commit = (): void =>
-      onCommit({
+    const commit = (revertChromeTo?: boolean): void => {
+      const accepted = onCommit({
         agent: selectedAgent(),
         effort: effortSelect.value,
         chrome: chromeToggle.checked,
       })
+      if (accepted === false && revertChromeTo !== undefined) {
+        chromeToggle.checked = revertChromeTo
+      }
+    }
 
     agentSelect.addEventListener('change', () => {
       // New agent: select and persist its concrete default effort, then
@@ -2704,8 +2755,8 @@ export class FiberDetailModal {
       chromeToggle.checked = chromeToggle.checked && !chromeToggle.disabled
       commit()
     })
-    effortSelect.addEventListener('change', commit)
-    chromeToggle.addEventListener('change', commit)
+    effortSelect.addEventListener('change', () => commit())
+    chromeToggle.addEventListener('change', () => commit(!chromeToggle.checked))
   }
 
   /**
