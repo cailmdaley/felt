@@ -49,3 +49,8 @@ node_modules/
 
 # mkdocs build output
 /site/
+
+# ── Source artwork ───────────────────────────────────────────────────────
+# Masters stay on disk, out of the pack; only the small derived assets ship.
+# design/README.md says where each one is used and how to regenerate it.
+/design/*.png

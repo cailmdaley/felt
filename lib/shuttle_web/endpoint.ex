@@ -18,7 +18,7 @@ defmodule ShuttleWeb.Endpoint do
   plug Plug.Static,
     at: "/",
     from: ShuttleWeb.Assets.dist(),
-    only: ~w(assets fonts index.html paper.html favicon.ico)
+    only: ~w(assets fonts index.html paper.html favicon.ico apple-touch-icon.png)
 
   plug Plug.Parsers,
     parsers: [:urlencoded, :multipart, :json],
