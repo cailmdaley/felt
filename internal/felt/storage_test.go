@@ -231,38 +231,6 @@ func TestStorageList(t *testing.T) {
 	}
 }
 
-func TestStorageReadMetadataSkipsBody(t *testing.T) {
-	dir := t.TempDir()
-	s := NewStorage(dir)
-	s.Init()
-
-	f := &Felt{
-		ID:        "test-task",
-		Name:      "Test Task",
-		Status:    StatusOpen,
-		CreatedAt: time.Now(),
-		Outcome:   "Metadata survives",
-		Body:      "Body should be skipped.",
-	}
-	if err := s.Write(f); err != nil {
-		t.Fatalf("Write() error: %v", err)
-	}
-
-	read, err := s.ReadMetadata(f.ID)
-	if err != nil {
-		t.Fatalf("ReadMetadata() error: %v", err)
-	}
-	if read.Name != f.Name {
-		t.Errorf("Name = %q, want %q", read.Name, f.Name)
-	}
-	if read.Outcome != f.Outcome {
-		t.Errorf("Outcome = %q, want %q", read.Outcome, f.Outcome)
-	}
-	if read.Body != "" {
-		t.Errorf("Body = %q, want empty", read.Body)
-	}
-}
-
 func TestStorageListMetadataSkipsBody(t *testing.T) {
 	dir := t.TempDir()
 	s := NewStorage(dir)

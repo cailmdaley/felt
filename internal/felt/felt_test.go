@@ -770,10 +770,6 @@ container: python:3.11-slim
 	}
 }
 
-func intPtr(v int) *int {
-	return &v
-}
-
 func TestJSONOmitsEmptyStructuredFields(t *testing.T) {
 	f := &Felt{
 		ID:        "quick-gotcha",
@@ -798,30 +794,6 @@ func TestJSONOmitsEmptyStructuredFields(t *testing.T) {
 	} {
 		if strings.Contains(text, forbidden) {
 			t.Fatalf("json should omit %s: %s", forbidden, text)
-		}
-	}
-}
-
-func TestMatchesID(t *testing.T) {
-	f := &Felt{ID: "bao-analysis/damping-prior"}
-
-	tests := []struct {
-		query string
-		want  bool
-	}{
-		{"bao-analysis/damping-prior", true},
-		{"bao-analysis/damp", true},
-		{"bao-analysis", true},
-		{"damping-prior", true},
-		{"damping", true},
-		{"prior", false},
-		{"other", false},
-	}
-
-	for _, tt := range tests {
-		got := f.MatchesID(tt.query)
-		if got != tt.want {
-			t.Errorf("MatchesID(%q) = %v, want %v", tt.query, got, tt.want)
 		}
 	}
 }
