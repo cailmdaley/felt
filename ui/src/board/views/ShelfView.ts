@@ -730,12 +730,12 @@ class ShelfView implements TemporalView {
     handle.root.classList.toggle('kbn-shelf-card-stacked', depth > 1)
     handle.stackEl.hidden = depth < 2
     if (depth < 2) return
-    // By PATH, never by object identity: every poll rebuilds the file records
-    // (dedupeByPath returns fresh objects), while a card that did not change
-    // keeps the handle — and the record it was built from — it already had. An
-    // identity comparison here read −1 for every stack the reader had not just
-    // touched, and the strip counted `0/11`.
-    const at = stack.files.findIndex((f) => f.fullPath === handle.file.fullPath)
+    // The face comes from the STACK, not from the handle. Every poll rebuilds
+    // the file records (dedupeByPath returns fresh objects) while an unchanged
+    // card keeps the handle — and the record — it was built from, so looking
+    // the handle's own file up in the freshly built stack found nothing and the
+    // strip counted `0/11` on every tile the reader had not just touched.
+    const at = stack.files.indexOf(stack.face)
     handle.stackLabel.textContent = `${at + 1}/${depth}`
     handle.stackEl.title = `${depth} files from ${stack.uid} — ‹ › to leaf through them`
   }
