@@ -850,6 +850,26 @@ func TestStorageFindPrefersExactIDOverPrefix(t *testing.T) {
 	}
 }
 
+func TestParentPath(t *testing.T) {
+	tests := []struct {
+		id   string
+		want string
+	}{
+		{"", ""},
+		{"a", ""},
+		{"a/b", "a"},
+		{"a/b/c", "a/b"},
+		// Out of the fiber-ID domain, but "" is the only answer that reads as
+		// "no parent" — "/" would be a fiber ID no store can hold.
+		{"/a", ""},
+	}
+	for _, tt := range tests {
+		if got := ParentPath(tt.id); got != tt.want {
+			t.Errorf("ParentPath(%q) = %q, want %q", tt.id, got, tt.want)
+		}
+	}
+}
+
 func TestResolveAddPath(t *testing.T) {
 	tests := []struct {
 		name          string

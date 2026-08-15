@@ -155,7 +155,7 @@ var nestCmd = &cobra.Command{
 		}
 
 		targetID := path.Join(parent.ID, path.Base(child.ID))
-		if path.Dir(child.ID) == parent.ID && child.ID == targetID {
+		if felt.ParentPath(child.ID) == parent.ID && child.ID == targetID {
 			return fmt.Errorf("%s is already nested under %s", child.ID, parent.ID)
 		}
 		if err := storage.CheckAvailableID(targetID); err != nil {

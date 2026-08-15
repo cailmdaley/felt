@@ -1075,6 +1075,19 @@ func fiberIDFromRelativePath(rel string) (string, bool, bool) {
 	return filepath.ToSlash(dir), false, true
 }
 
+// ParentPath returns the parent fiber ID of id, or "" when id names a
+// top-level fiber. Fiber IDs are clean, slash-separated and relative, so a
+// rooted or empty input has no parent to speak of and degrades to "" rather
+// than to "/" — the one answer no fiber ID can be.
+func ParentPath(id string) string {
+	clean := path.Clean(filepath.ToSlash(id))
+	parent := path.Dir(clean)
+	if parent == "." || parent == "/" {
+		return ""
+	}
+	return parent
+}
+
 func disambiguateID(id string, n int) string {
 	id = filepath.ToSlash(id)
 	dir := path.Dir(id)
@@ -1130,10 +1143,7 @@ func ResolveAddPath(slug string, existingIDs []string) (resolved string, rewritt
 		if path.Base(id) != leading {
 			continue
 		}
-		parent := path.Dir(id)
-		if parent == "." {
-			parent = ""
-		}
+		parent := ParentPath(id)
 		if _, ok := seenParents[parent]; ok {
 			continue
 		}
@@ -1231,7 +1241,7 @@ func newScopedIDResolver(ids []string) *scopedIDResolver {
 		resolver.ids = append(resolver.ids, cleanID)
 		resolver.exact[cleanID] = struct{}{}
 
-		parent := parentPath(cleanID)
+		parent := ParentPath(cleanID)
 		base := path.Base(cleanID)
 		if resolver.parentBases[parent] == nil {
 			resolver.parentBases[parent] = map[string]string{}
@@ -1388,7 +1398,7 @@ func scopeChain(scopeID string) []string {
 	var scopes []string
 	for {
 		scopes = append(scopes, scopeID)
-		parent := parentPath(scopeID)
+		parent := ParentPath(scopeID)
 		if parent == "" {
 			break
 		}

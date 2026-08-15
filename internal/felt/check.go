@@ -3,7 +3,6 @@ package felt
 import (
 	"fmt"
 	"os"
-	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -299,16 +298,4 @@ func hasOutput(f *Felt, id string) bool {
 		return false
 	}
 	return f.HasDataFlowOutput(id)
-}
-
-func parentPath(id string) string {
-	clean := path.Clean(id)
-	if clean == "." {
-		return ""
-	}
-	parent := path.Dir(clean)
-	if parent == "." {
-		return ""
-	}
-	return parent
 }
