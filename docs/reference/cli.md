@@ -74,7 +74,8 @@ people.
 
 These optional verbs apply once a fiber carries a `shuttle:` block. Write verbs
 work offline, and validate before they touch disk. A few read verbs talk to the
-local daemon at `:4000`.
+local daemon at `:4000`; for what that daemon speaks directly, see the [HTTP
+API](api.md).
 
 ### Install / reshape the contract
 
