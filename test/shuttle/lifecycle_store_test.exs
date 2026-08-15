@@ -1,5 +1,6 @@
 defmodule Shuttle.LifecycleStoreTest do
   use ExUnit.Case
+  import Shuttle.Test.EnvHelpers
 
   alias Shuttle.LifecycleStore
 
@@ -568,7 +569,4 @@ defmodule Shuttle.LifecycleStoreTest do
     [_, fm, _] = File.read!(path) |> String.split("---", parts: 3)
     YamlElixir.read_from_string!(fm)
   end
-
-  defp restore_env(key, nil), do: System.delete_env(key)
-  defp restore_env(key, value), do: System.put_env(key, value)
 end

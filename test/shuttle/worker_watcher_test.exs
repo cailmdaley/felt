@@ -7,6 +7,8 @@ defmodule Shuttle.WorkerWatcherTest do
   # ── Mock Runner ──
 
   defmodule MockRunner do
+    import Shuttle.Test.TmuxSessions
+
     @behaviour Shuttle.Runner
 
     use Agent
@@ -35,12 +37,6 @@ defmodule Shuttle.WorkerWatcherTest do
     end
 
     def cmd(_, _, _), do: {"", 0}
-
-    defp tmux_session_exists?(sessions, "=" <> session), do: MapSet.member?(sessions, session)
-
-    defp tmux_session_exists?(sessions, session) do
-      Enum.any?(sessions, &(&1 == session or String.starts_with?(&1, session <> "/")))
-    end
   end
 
   # ── Flakey Runner ──
@@ -50,6 +46,8 @@ defmodule Shuttle.WorkerWatcherTest do
   # prematurely declaring the worker dead.
 
   defmodule FlakeyRunner do
+    import Shuttle.Test.TmuxSessions
+
     @behaviour Shuttle.Runner
 
     use Agent
@@ -93,12 +91,6 @@ defmodule Shuttle.WorkerWatcherTest do
     end
 
     def cmd(_, _, _), do: {"", 0}
-
-    defp tmux_session_exists?(sessions, "=" <> session), do: MapSet.member?(sessions, session)
-
-    defp tmux_session_exists?(sessions, session) do
-      Enum.any?(sessions, &(&1 == session or String.starts_with?(&1, session <> "/")))
-    end
   end
 
   # ── Setup ──

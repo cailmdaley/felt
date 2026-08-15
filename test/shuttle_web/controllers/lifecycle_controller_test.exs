@@ -1,5 +1,6 @@
 defmodule ShuttleWeb.LifecycleControllerTest do
   use ExUnit.Case
+  import Shuttle.Test.EnvHelpers
   import Plug.Conn
   import Phoenix.ConnTest
 
@@ -803,7 +804,4 @@ defmodule ShuttleWeb.LifecycleControllerTest do
 
     store
   end
-
-  defp restore_env(key, nil), do: System.delete_env(key)
-  defp restore_env(key, value), do: System.put_env(key, value)
 end

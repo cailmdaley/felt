@@ -7,6 +7,8 @@ defmodule Shuttle.DispatcherTest do
   # ── Mock Runner ──
 
   defmodule MockRunner do
+    import Shuttle.Test.TmuxSessions
+
     @behaviour Shuttle.Runner
 
     use Agent
@@ -207,12 +209,6 @@ defmodule Shuttle.DispatcherTest do
         [_, wrapper] -> String.replace(wrapper, "'\\''", "'")
         _ -> script
       end
-    end
-
-    defp tmux_session_exists?(sessions, "=" <> session), do: MapSet.member?(sessions, session)
-
-    defp tmux_session_exists?(sessions, session) do
-      Enum.any?(sessions, &(&1 == session or String.starts_with?(&1, session <> "/")))
     end
 
     defp handle_felt(["shuttle", "agents", "resolve" | rest]) do

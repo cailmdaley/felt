@@ -1,5 +1,6 @@
 defmodule Shuttle.PollerTest do
   use ExUnit.Case
+  import Shuttle.Test.EnvHelpers
 
   alias Shuttle.ActionQueries
   alias Shuttle.Poller
@@ -9,6 +10,8 @@ defmodule Shuttle.PollerTest do
   # ── Mock Runner ──
 
   defmodule MockRunner do
+    import Shuttle.Test.TmuxSessions
+
     @behaviour Shuttle.Runner
 
     use Agent
@@ -508,12 +511,6 @@ defmodule Shuttle.PollerTest do
     end
 
     defp with_resolved_agent(fiber), do: fiber
-
-    defp tmux_session_exists?(sessions, "=" <> session), do: MapSet.member?(sessions, session)
-
-    defp tmux_session_exists?(sessions, session) do
-      Enum.any?(sessions, &(&1 == session or String.starts_with?(&1, session <> "/")))
-    end
   end
 
   # ── Setup ──
@@ -670,9 +667,6 @@ defmodule Shuttle.PollerTest do
       cmd == "felt" and Enum.take(args, 1) == ["show"]
     end)
   end
-
-  defp restore_env(key, nil), do: System.delete_env(key)
-  defp restore_env(key, value), do: System.put_env(key, value)
 
   defp new_session_scripts do
     MockRunner.commands()

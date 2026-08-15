@@ -12,6 +12,7 @@ defmodule ShuttleWeb.MomentControllerTest do
   /file and /sent-files forward tests.
   """
   use ExUnit.Case, async: false
+  alias Shuttle.Test.StubGetFileClient
   import Plug.Conn
   import Phoenix.ConnTest
 
@@ -22,23 +23,6 @@ defmodule ShuttleWeb.MomentControllerTest do
   @session "a3edf873-cb1c-40ab-a891-f26f5333b320"
   @other "fef866ba-b397-4277-a01b-16fcecc2b256"
   @t0 1_762_000_000_000
-
-  # GET transport stub for the cross-host /moment forward. Mirrors the
-  # /sent-files controller test's stub.
-  defmodule StubGetFileClient do
-    use Agent
-
-    def start_link(_ \\ []),
-      do: Agent.start_link(fn -> %{response: nil, last: nil} end, name: __MODULE__)
-
-    def set_response(response), do: Agent.update(__MODULE__, &Map.put(&1, :response, response))
-    def last, do: Agent.get(__MODULE__, & &1.last)
-
-    def get_file(url, _timeout_ms) do
-      Agent.update(__MODULE__, &Map.put(&1, :last, %{url: url}))
-      Agent.get(__MODULE__, & &1.response)
-    end
-  end
 
   defp iso(ms), do: ms |> DateTime.from_unix!(:millisecond) |> DateTime.to_iso8601()
 

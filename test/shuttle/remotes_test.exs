@@ -1,5 +1,6 @@
 defmodule Shuttle.RemotesTest do
   use ExUnit.Case, async: false
+  import Shuttle.Test.EnvHelpers
 
   alias Shuttle.Remote
   alias Shuttle.Remotes
@@ -201,9 +202,6 @@ defmodule Shuttle.RemotesTest do
     on_exit(fn -> File.rm_rf(dir) end)
     dir
   end
-
-  defp restore_env(key, nil), do: System.delete_env(key)
-  defp restore_env(key, value), do: System.put_env(key, value)
 
   defp restore_app(key, nil), do: Application.delete_env(:shuttle, key)
   defp restore_app(key, value), do: Application.put_env(:shuttle, key, value)

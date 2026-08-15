@@ -4,6 +4,7 @@ defmodule ShuttleWeb.APIControllerTest do
   """
 
   use ExUnit.Case
+  import Shuttle.Test.EnvHelpers
   import Plug.Conn
   import Phoenix.ConnTest
 
@@ -15,6 +16,8 @@ defmodule ShuttleWeb.APIControllerTest do
   # ── Mock Runner ──
 
   defmodule MockRunner do
+    import Shuttle.Test.TmuxSessions
+
     @behaviour Shuttle.Runner
 
     use Agent
@@ -282,12 +285,6 @@ defmodule ShuttleWeb.APIControllerTest do
     end
 
     defp with_resolved_agent(fiber), do: fiber
-
-    defp tmux_session_exists?(sessions, "=" <> session), do: MapSet.member?(sessions, session)
-
-    defp tmux_session_exists?(sessions, session) do
-      Enum.any?(sessions, &(&1 == session or String.starts_with?(&1, session <> "/")))
-    end
   end
 
   # POST transport stub for the cross-host /transition forward test. Records the
@@ -381,9 +378,6 @@ defmodule ShuttleWeb.APIControllerTest do
       end
     end)
   end
-
-  defp restore_app_env(key, nil), do: Application.delete_env(:shuttle, key)
-  defp restore_app_env(key, value), do: Application.put_env(:shuttle, key, value)
 
   test "GET /api/v1/agents degrades to []/200 when felt's agents verb is unavailable" do
     # The registry is felt-owned now: the controller shells `felt shuttle agents
