@@ -779,6 +779,13 @@ felt/
 │
 │   # the board UI — TypeScript
 └── ui/                      kanban board; `npm run build` → ui/dist (served by :4000)
+    └── harness/             offline visual-verification harness — `npm run harness`
+                             (detail panel) / `npm run harness:board` (board chrome +
+                             temporal views) build self-contained bundles into
+                             ui/harness-dist/ and ui/harness-board-dist/, openable
+                             over `file://`. They mount the REAL components against a
+                             mocked daemon, which is the only way to look at the board
+                             from a sandbox: the live :4000 is unreachable there.
 ```
 
 `deps/` and `_build/` are Mix-managed and gitignored.
