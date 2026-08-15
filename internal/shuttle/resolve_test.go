@@ -12,7 +12,7 @@ import (
 // shuttle.resolved.agent (the poll/dispatch path). One projection, two callers.
 func TestNewResolvedAgent_MatchesResolveBlock(t *testing.T) {
 	reg := loadReg(t)
-	for _, name := range []string{"claude-opus", "claude-opus-chrome", "codex", "pi-sonnet"} {
+	for _, name := range []string{"claude-opus", "codex", "pi-sonnet"} {
 		block := &Block{Kind: "oneshot", Agent: name, Effort: "", Chrome: false}
 		viaBlock, err := ResolveBlock(block, reg, time.Now())
 		if err != nil {

@@ -15,7 +15,6 @@ func TestBuiltinRegistry_IsComplete(t *testing.T) {
 
 	want := []string{
 		"claude-sonnet", "claude-opus", "claude-haiku", "claude-fable",
-		"claude-opus-chrome",
 		"codex-sol", "codex-terra", "codex-luna", "codex", "codex-spark",
 		"pi-sonnet", "pi-gpt-5.4", "pi-gpt-5.4-mini", "pi-gpt-5-mini",
 		"pi-kimi", "pi-deepseek-pro", "pi-deepseek-flash",
@@ -58,14 +57,14 @@ func TestBuiltinRegistry_IsComplete(t *testing.T) {
 	}
 }
 
-func TestBuiltinRegistry_ChromeAliasIsReachable(t *testing.T) {
+func TestBuiltinRegistry_ChromeAxisIsReachable(t *testing.T) {
 	reg, err := LoadBuiltinAgentRegistry()
 	if err != nil {
 		t.Fatalf("LoadBuiltinAgentRegistry: %v", err)
 	}
-	base, axes, err := reg.Resolve("claude-opus-chrome", "", false)
+	base, axes, err := reg.Resolve("claude-opus", "", true)
 	if err != nil {
-		t.Fatalf("Resolve(claude-opus-chrome): %v", err)
+		t.Fatalf("Resolve(claude-opus, chrome=true): %v", err)
 	}
 	if base.ID != "claude-opus" || !axes.Chrome {
 		t.Fatalf("resolved %+v / %+v, want claude-opus with chrome", base, axes)
@@ -94,8 +93,8 @@ func TestBuiltinRegistry_WrapperDefaultsToCLI(t *testing.T) {
 // headless aliases as an internal -p test fixture) against bit-rot.
 func TestFleetFixtureParses(t *testing.T) {
 	reg := loadReg(t)
-	if len(reg.Records()) != 21 {
-		t.Fatalf("fleet fixture has %d records, want 21", len(reg.Records()))
+	if len(reg.Records()) != 20 {
+		t.Fatalf("fleet fixture has %d records, want 20", len(reg.Records()))
 	}
 	if _, ok := reg.Find("human"); ok {
 		t.Fatal("fleet fixture must not carry the removed human agent")

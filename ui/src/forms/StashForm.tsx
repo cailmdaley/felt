@@ -46,7 +46,7 @@ export interface AgentEntry {
   default_effort?: string | null
   /** Whether the harness supports `--chrome` (claude only). */
   chrome_capable?: boolean
-  /** Alias records (e.g. claude-opus-chrome) resolve to base + axes; the composing picker supersedes them. */
+  /** Alias records resolve to base + axes; the composing picker supersedes them. */
   alias_of?: string | null
 }
 

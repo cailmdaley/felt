@@ -1083,9 +1083,8 @@ defmodule Shuttle.DispatcherTest do
     assert cmd =~ ~s(-c model_reasoning_effort='xhigh')
   end
 
-  test "resolved chrome renders --chrome (claude-opus-chrome → opus + chrome)" do
-    # felt expanded the chrome alias to the claude-opus base with chrome:true;
-    # the daemon renders it.
+  test "resolved chrome renders --chrome" do
+    # felt resolved the claude-opus base with chrome:true; the daemon renders it.
     agent =
       resolved(%{
         "id" => "claude-opus",

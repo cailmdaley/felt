@@ -52,13 +52,6 @@
     "default": false
   },
   {
-    "id": "claude-opus-chrome",
-    "alias_of": "claude-opus",
-    "axes": { "chrome": true },
-    "aliases": [],
-    "default": false
-  },
-  {
     "id": "codex-sol",
     "cli": "codex",
     "wrapper": "codex",

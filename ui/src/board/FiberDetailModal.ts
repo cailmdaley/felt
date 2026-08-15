@@ -327,8 +327,7 @@ function savePersist(uid: string, state: DetailPersist): void {
  * (`effort_levels`, `default_effort`, `chrome_capable`) populates the agent
  * picker's effort options and chrome toggle without any hardcoded option list
  * in the frontend — the registry is the single source of truth. `alias_of` is
- * set on convenience records (e.g. `claude-opus-chrome`) that the base-agent
- * select filters out.
+ * set on alias records that the base-agent select filters out.
  */
 interface AgentRecord {
   id: string
@@ -2669,8 +2668,8 @@ export class FiberDetailModal {
       return
     }
 
-    // Base agents only — alias records (e.g. claude-opus-chrome) are a
-    // convenience that the composing picker supersedes; resolving one to its
+    // Base agents only — alias records are a convenience that the composing
+    // picker supersedes; resolving one to its
     // base + axes belongs to the registry, not this list.
     const base = records.filter((a) => !a.alias_of)
     agentSelect.innerHTML = ''

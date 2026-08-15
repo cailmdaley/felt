@@ -184,7 +184,7 @@ list. The maintained fleet ships built in:
 
 | Family | Built-in ids | Notes |
 |---|---|---|
-| Claude | `claude-sonnet` (registry default), `claude-opus`, `claude-fable`, `claude-haiku`, `claude-opus-chrome` | Chrome is an axis/alias, not a separate harness. |
+| Claude | `claude-sonnet` (registry default), `claude-opus`, `claude-fable`, `claude-haiku` | Chrome is an explicit axis on Claude agents, not a separate agent. |
 | Codex | `codex-sol`, `codex-terra`, `codex-luna`, `codex`, `codex-spark` | |
 | Pi | `pi-sonnet`, `pi-gpt-5.4`, `pi-gpt-5.4-mini`, `pi-gpt-5-mini`, `pi-kimi`, `pi-deepseek-pro`, `pi-deepseek-flash` | |
 
@@ -193,6 +193,7 @@ resolved agent's allowed levels) and `chrome` (Claude only, for browser work).
 
 ```bash
 felt shuttle set-agent <fiber> claude-opus --effort high
+felt shuttle set-agent <fiber> claude-opus --chrome
 felt shuttle set-model <fiber> codex          # agent-only shorthand
 ```
 

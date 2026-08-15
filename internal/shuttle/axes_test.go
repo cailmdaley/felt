@@ -8,7 +8,7 @@ import (
 
 // loadReg loads the fleet fixture — a registry wide enough to exercise every
 // axis shape (a harness with no effort axis, one that caps below claude's, a
-// chrome alias, a headless alias, an alias-of-alias base). These tests are about
+// chrome axis, a headless alias, an alias-of-alias base). These tests are about
 // axis *logic*, not about which agents felt ships, so they read a fixture rather
 // than the built-ins; trimming the shipped set must not touch them.
 func loadReg(t *testing.T) *AgentRegistry {
@@ -83,17 +83,17 @@ func TestResolve_ChromeOnNonClaudeRejected(t *testing.T) {
 	}
 }
 
-func TestResolve_ChromeAliasExpands(t *testing.T) {
+func TestResolve_ChromeAxisExpands(t *testing.T) {
 	reg := loadReg(t)
-	base, eff, err := reg.Resolve("claude-opus-chrome", "", false)
+	base, eff, err := reg.Resolve("claude-opus", "", true)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if base.ID != "claude-opus" {
-		t.Fatalf("alias base = %q, want claude-opus", base.ID)
+		t.Fatalf("base = %q, want claude-opus", base.ID)
 	}
 	if !eff.Chrome {
-		t.Fatalf("expected chrome:true from alias overlay, got %+v", eff)
+		t.Fatalf("expected chrome:true from block axis, got %+v", eff)
 	}
 }
 
@@ -148,11 +148,12 @@ func TestValidate_AxesIntegration(t *testing.T) {
 	}
 }
 
-func TestBaseIDs_ExcludesAliases(t *testing.T) {
+func TestBaseIDsIncludesChromeBase(t *testing.T) {
 	reg := loadReg(t)
 	for _, id := range reg.BaseIDs() {
-		if id == "claude-opus-chrome" {
-			t.Fatalf("BaseIDs should exclude alias claude-opus-chrome")
+		if id == "claude-opus" {
+			return
 		}
 	}
+	t.Fatal("BaseIDs omitted chrome-capable claude-opus")
 }

@@ -10,9 +10,7 @@ import (
 //
 // An agent is either a *base* agent (carries cli/wrapper/model and the axis
 // constraint metadata) or an *alias* record (carries AliasOf + Axes and nothing
-// else). An alias resolves to its base agent with the alias's Axes overlaid —
-// this is how `claude-opus-chrome` retired from an enumerated combination into
-// `claude-opus` + chrome:true without breaking fibers that still name it.
+// else). An alias resolves to its base agent with the alias's Axes overlaid.
 type AgentRecord struct {
 	ID            string `json:"id"`
 	CLI           string `json:"cli,omitempty"`
