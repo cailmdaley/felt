@@ -117,6 +117,7 @@ import {
 import {
   advanceGesture,
   beginGesture,
+  framePointToClient,
   settleGesture,
   wheelZoomFactor,
   type ShelfGesture,
@@ -178,6 +179,9 @@ interface CardHandle {
   /** The file changed under a live body; the card offers a reload rather than
    *  swapping the document out from under the reader. */
   stale: boolean
+  /** Undoes the wheel listener planted inside a same-origin frame's own
+   *  document, so the pinch a focused card swallows still zooms the board. */
+  unframeWheel: (() => void) | null
 }
 
 class ShelfView implements TemporalView {
@@ -1059,6 +1063,7 @@ class ShelfView implements TemporalView {
       distance: Number.POSITIVE_INFINITY,
       timer: null,
       stale: false,
+      unframeWheel: null,
     }
   }
 
@@ -1192,7 +1197,10 @@ class ShelfView implements TemporalView {
       // own interactivity works while nothing it contains can navigate the
       // board.
       frame.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-popups')
-      frame.addEventListener('load', settle)
+      frame.addEventListener('load', () => {
+        this.hearFrameWheel(handle, frame)
+        settle()
+      })
       frame.addEventListener('error', fail)
       frame.src = src
       handle.body = frame
@@ -1211,6 +1219,59 @@ class ShelfView implements TemporalView {
       handle.root.classList.remove('kbn-shelf-card-loading')
       handle.root.classList.add('kbn-shelf-card-stalled')
     }, budget)
+  }
+
+  /**
+   * Hear the pinch a framed document would otherwise swallow.
+   *
+   * A wheel event inside an iframe is dispatched into THAT document and never
+   * bubbles out, so once a focused card's veil is lifted the board stops
+   * hearing the zoom gesture entirely. The frames are our own daemon's bytes
+   * on our own origin (`/api/v1/file`, sandboxed `allow-same-origin`), so the
+   * fix is to listen inside them and hand the ctrl/⌘ case back to the same
+   * `zoomAt` the outer handler uses. Everything else is left alone: a plain
+   * scroll must keep scrolling the document being read.
+   *
+   * A remote board (`shuttleBase` pointing at another host) serves frames
+   * cross-origin, and reaching for `contentWindow` there throws. Those cards
+   * keep the old limit rather than the whole card failing to mount.
+   */
+  private hearFrameWheel(handle: CardHandle, frame: HTMLIFrameElement): void {
+    handle.unframeWheel?.()
+    handle.unframeWheel = null
+    if (handle.body !== frame) return
+    let win: Window | null = null
+    try {
+      win = frame.contentWindow
+      // Touching a property is what actually trips the cross-origin check.
+      void win?.document
+    } catch {
+      return
+    }
+    if (!win) return
+    const onWheel = (e: WheelEvent): void => {
+      if (!(e.ctrlKey || e.metaKey)) return
+      e.preventDefault()
+      const rect = frame.getBoundingClientRect()
+      const point = framePointToClient(
+        { x: e.clientX, y: e.clientY },
+        rect,
+        { width: frame.clientWidth, height: frame.clientHeight },
+      )
+      this.zoomAt(
+        point.x,
+        point.y,
+        wheelZoomFactor(e.deltaY, e.deltaMode, this.viewport?.clientHeight ?? 800),
+      )
+    }
+    win.addEventListener('wheel', onWheel, { passive: false })
+    handle.unframeWheel = () => {
+      try {
+        win.removeEventListener('wheel', onWheel)
+      } catch {
+        /* the realm is already gone */
+      }
+    }
   }
 
   /** Text bodies are fetched as strings, not framed: a log in an iframe is a
@@ -1263,6 +1324,8 @@ class ShelfView implements TemporalView {
     const body = handle.body
     handle.body = null
     handle.state = 'idle'
+    handle.unframeWheel?.()
+    handle.unframeWheel = null
     handle.root.classList.remove(
       'kbn-shelf-card-live',
       'kbn-shelf-card-loading',
@@ -1594,12 +1657,10 @@ class ShelfView implements TemporalView {
     // trackpad pinch arrives as this same event and so zooms too, which is
     // fine — but the two report their deltas in different UNITS, see below.)
     //
-    // One honest limit: a FOCUSED card's veil is lifted, so its live iframe
-    // owns the pointer, and a wheel event inside a frame never reaches this
-    // document at all. Zooming works everywhere else on the canvas — every
-    // unfocused card is veiled, and the veil is a parent-document element —
-    // but not while hovering the one card being read. Nothing on this side can
-    // change that; the event is simply not ours to hear.
+    // A FOCUSED card's veil is lifted, so its live iframe owns the pointer and
+    // the wheel event inside it never reaches this document. That case is not
+    // handled here and cannot be: see hearFrameWheel, which listens inside the
+    // frame and calls the same zoomAt with translated coordinates.
     if (e.ctrlKey || e.metaKey) {
       e.preventDefault()
       // Units, not magnitude: a pinch reports pixels and ctrl+scroll reports

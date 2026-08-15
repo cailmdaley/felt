@@ -56,6 +56,7 @@ import {
   settleGesture,
   travelled,
   wheelZoomFactor,
+  framePointToClient,
 } from './shelfGesture.js'
 
 const MIN = 60_000
@@ -677,6 +678,30 @@ describe('shelfGesture — a click is not a drag', () => {
       for (const bad of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
         expect(beginGesture('move', '/a', down, geom, bad).scale).toBe(1)
       }
+    })
+  })
+})
+
+describe('framePointToClient — a pinch inside a focused card', () => {
+  const layout = { width: 400, height: 300 }
+
+  it('offsets by the frame position when the board is at 100%', () => {
+    const rect = { left: 120, top: 60, width: 400, height: 300 }
+    expect(framePointToClient({ x: 10, y: 20 }, rect, layout)).toEqual({ x: 130, y: 80 })
+  })
+
+  it('scales by the board zoom, which the frame knows nothing about', () => {
+    // The surface is transformed to 2x, so the frame occupies twice its
+    // layout size on screen while still reporting its own CSS pixels.
+    const rect = { left: 100, top: 50, width: 800, height: 600 }
+    expect(framePointToClient({ x: 200, y: 150 }, rect, layout)).toEqual({ x: 500, y: 350 })
+  })
+
+  it('falls back to no scaling for a frame with no layout size yet', () => {
+    const rect = { left: 5, top: 7, width: 0, height: 0 }
+    expect(framePointToClient({ x: 3, y: 4 }, rect, { width: 0, height: 0 })).toEqual({
+      x: 8,
+      y: 11,
     })
   })
 })

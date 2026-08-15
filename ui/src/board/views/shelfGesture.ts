@@ -196,3 +196,25 @@ export function settleGesture(gesture: ShelfGesture): { placed: boolean; click: 
   const active = gesture.phase === 'active'
   return { placed: active && gesture.mode !== 'pan', click: !active }
 }
+
+/**
+ * Where a wheel event fired INSIDE a card's iframe lands on the parent page.
+ *
+ * A focused card's veil is lifted, so its live frame hears the pinch itself
+ * and the board never does — the fix is to listen inside the frame and hand
+ * the event back out. But the two documents do not share a coordinate space:
+ * the inner `clientX/Y` are in the frame's own CSS pixels, while the board's
+ * zoom is a transform on an ANCESTOR of the frame, so the rectangle the frame
+ * occupies on screen is its layout size times the current scale. Divide the
+ * two to recover that scale rather than assuming 1, or the zoom anchors
+ * somewhere the cursor is not — visibly wrong at any zoom but 100%.
+ */
+export function framePointToClient(
+  inner: { x: number; y: number },
+  rect: { left: number; top: number; width: number; height: number },
+  layout: { width: number; height: number },
+): { x: number; y: number } {
+  const sx = layout.width > 0 ? rect.width / layout.width : 1
+  const sy = layout.height > 0 ? rect.height / layout.height : 1
+  return { x: rect.left + inner.x * sx, y: rect.top + inner.y * sy }
+}
