@@ -1,6 +1,6 @@
 /**
  * Shelf — the pure parts: what the canvas is a canvas of (dedupe, kind), how
- * the lenses order it, and what survives a reload.
+ * the flow stacks and orders it, and what survives a reload.
  */
 
 import { describe, expect, it } from 'vitest'
@@ -14,6 +14,7 @@ import {
   type ShelfFile,
 } from './shelfData.js'
 import {
+  buildStacks,
   clampZoom,
   coercePersist,
   FLOW_MAX_W,
@@ -66,6 +67,20 @@ function file(path: string, minutesAgo: number, uid?: string): ShelfFile {
     timestamp: 1_700_000_000_000 - minutesAgo * MIN,
     ...(uid ? { uid } : {}),
   }
+}
+
+const METRICS = { ...SHELF_METRICS, width: 3 * (SHELF_METRICS.cardW + SHELF_METRICS.gap) }
+
+/** The surface as the view builds it: files gathered into stacks, then laid
+ *  out. Nothing on the board is laid out any other way, so nothing here is
+ *  either. */
+function lay(
+  files: readonly ShelfFile[],
+  states: Record<string, ShelfCardState> = {},
+  active?: string | null,
+  faces: Record<string, string> = {},
+): ReturnType<typeof layoutShelf> {
+  return layoutShelf(buildStacks(files, states, faces), states, METRICS, active)
 }
 
 describe('normalizeShelfFiles', () => {
@@ -150,12 +165,87 @@ describe('shelfKind / fileUrl', () => {
   })
 })
 
-describe('layoutShelf — the recency lens', () => {
-  const metrics = { ...SHELF_METRICS, width: 3 * (SHELF_METRICS.cardW + SHELF_METRICS.gap) }
+describe('buildStacks — one tile per fiber', () => {
+  it('collapses a fiber\'s sends into one stack, newest face up', () => {
+    const stacks = buildStacks(
+      [file('/r3', 3, 'shear'), file('/r1', 1, 'shear'), file('/r2', 2, 'shear')],
+      {},
+    )
+    expect(stacks).toHaveLength(1)
+    expect(stacks[0].uid).toBe('shear')
+    expect(stacks[0].files.map((f) => f.fullPath)).toEqual(['/r1', '/r2', '/r3'])
+    expect(stacks[0].face.fullPath).toBe('/r1')
+  })
+
+  it('leaves a fiberless file alone — there is nothing for it to be a stack of', () => {
+    const stacks = buildStacks([file('/n1', 1), file('/n2', 2)], {})
+    expect(stacks.map((s) => s.files.length)).toEqual([1, 1])
+    expect(stacks.every((s) => s.uid === '')).toBe(true)
+  })
+
+  it('takes a placed or starred card OUT of its stack — that is how you pull a sheet off a pile', () => {
+    const files = [file('/a', 1, 'shear'), file('/b', 2, 'shear'), file('/c', 3, 'shear')]
+    const stacks = buildStacks(files, {
+      '/a': { x: 800, y: 40, w: 300, h: 400 },
+      '/b': { starred: true },
+    })
+    expect(stacks.map((s) => s.files.map((f) => f.fullPath))).toEqual([
+      ['/a'],
+      ['/b'],
+      ['/c'],
+    ])
+  })
+
+  it('turns the reader\'s paging into which sheet is face up', () => {
+    const files = [file('/new', 1, 'shear'), file('/old', 90, 'shear')]
+    expect(buildStacks(files, {}, { shear: '/old' })[0].face.fullPath).toBe('/old')
+    // A page that has since left the window falls back to the newest rather
+    // than emptying the tile.
+    expect(buildStacks(files, {}, { shear: '/gone' })[0].face.fullPath).toBe('/new')
+  })
+
+  it('orders stacks by their newest member, wherever the reader has leafed to', () => {
+    const files = [
+      file('/s-new', 1, 'shear'),
+      file('/s-old', 900, 'shear'),
+      file('/l', 50, 'lensing'),
+    ]
+    const paged = buildStacks(files, {}, { shear: '/s-old' })
+    expect(paged.map((s) => s.uid)).toEqual(['shear', 'lensing'])
+  })
+})
+
+describe('layoutShelf — the flow', () => {
+  it('gives a stack ONE slot, however deep it is', () => {
+    // Ten files from one fiber, one from another: two tiles, side by side.
+    const many = Array.from({ length: 10 }, (_, i) => file(`/r${i}`, i + 1, 'shear'))
+    const { cards } = lay([...many, file('/other', 40, 'lensing')])
+    expect(cards).toHaveLength(2)
+    expect(cards[0].file.fullPath).toBe('/r0')
+    expect(cards[0].stack.files).toHaveLength(10)
+    expect(cards[0]).toMatchObject({ x: 0, y: 0 })
+    expect(cards[1].y).toBe(0)
+    expect(cards[1].x).toBeGreaterThan(0)
+  })
+
+  it('holds a stack still while the reader leafs through it', () => {
+    const files = [
+      file('/s-new', 1, 'shear'),
+      file('/s-old', 900, 'shear'),
+      file('/l', 50, 'lensing'),
+    ]
+    const at = (faces: Record<string, string>): { x: number; y: number } => {
+      const card = lay(files, {}, null, faces).cards.find((c) => c.stack.uid === 'shear')!
+      return { x: card.x, y: card.y }
+    }
+    // Leafed back to a much older send, the tile keeps the slot its newest
+    // member earned — otherwise paging would walk the card down the board.
+    expect(at({ shear: '/s-old' })).toEqual(at({}))
+  })
 
   it('gives recency a direction: newest at the top-left, filling right then down', () => {
     const files = [file('/a', 1), file('/b', 2), file('/c', 3), file('/d', 4)]
-    const { cards } = layoutShelf(files, 'recency', {}, metrics)
+    const { cards } = lay(files)
     expect(cards.map((c) => c.file.fullPath)).toEqual(['/a', '/b', '/c', '/d'])
     expect(cards[0]).toMatchObject({ x: 0, y: 0 })
     expect(cards[1].x).toBeGreaterThan(0)
@@ -167,7 +257,7 @@ describe('layoutShelf — the recency lens', () => {
   it('sorts a starred-but-unplaced card ahead of newer unstarred ones', () => {
     const files = [file('/a', 1), file('/b', 2), file('/old', 900)]
     const states: Record<string, ShelfCardState> = { '/old': { starred: true } }
-    const { cards } = layoutShelf(files, 'recency', states, metrics)
+    const { cards } = lay(files, states)
     expect(cards[0].file.fullPath).toBe('/old')
     expect(cards[0].starred).toBe(true)
   })
@@ -177,7 +267,7 @@ describe('layoutShelf — the recency lens', () => {
     const states: Record<string, ShelfCardState> = {
       '/pinned': { x: 900, y: 640, w: 400, h: 300, starred: true },
     }
-    const { cards } = layoutShelf(files, 'recency', states, metrics)
+    const { cards } = lay(files, states)
     const pinned = cards.find((c) => c.file.fullPath === '/pinned')!
     expect(pinned).toMatchObject({ x: 900, y: 640, w: 400, h: 300, pinned: true, starred: true })
     // The flow closes over it: /c takes the second slot, not the third.
@@ -188,20 +278,15 @@ describe('layoutShelf — the recency lens', () => {
   })
 
   it('stretches the surface to reach a card dragged past the flow', () => {
-    const { width, height } = layoutShelf(
-      [file('/a', 1)],
-      'recency',
-      { '/a': { x: 2000, y: 1500, w: 300, h: 200 } },
-      metrics,
-    )
+    const { width, height } = lay([file('/a', 1)], {
+      '/a': { x: 2000, y: 1500, w: 300, h: 200 },
+    })
     expect(width).toBeGreaterThanOrEqual(2300)
     expect(height).toBeGreaterThanOrEqual(1700)
   })
 })
 
 describe('layoutShelf — nothing overlaps', () => {
-  const metrics = { ...SHELF_METRICS, width: 3 * (SHELF_METRICS.cardW + SHELF_METRICS.gap) }
-
   /** Every pair of cards on the laid-out board, except same-fiber piles. */
   function assertLegal(cards: ReturnType<typeof layoutShelf>['cards']): void {
     for (let i = 0; i < cards.length; i++) {
@@ -223,7 +308,7 @@ describe('layoutShelf — nothing overlaps', () => {
     const states: Record<string, ShelfCardState> = {
       '/anchor': { x: anchorX, y: 0, w: SHELF_METRICS.cardW, h: SHELF_METRICS.cardH },
     }
-    const { cards } = layoutShelf(files, 'recency', states, metrics)
+    const { cards } = lay(files, states)
     assertLegal(cards)
     // The flow skipped the occupied slot and stayed ON the grid — the grid's
     // own pitch, which is the flexed card width plus the gutter, not the
@@ -236,7 +321,7 @@ describe('layoutShelf — nothing overlaps', () => {
     expect(cards.find((c) => c.file.fullPath === '/anchor')).toMatchObject({ x: anchorX, y: 0 })
   })
 
-  it('routes each fiber band around an anchor too', () => {
+  it('routes a stack around an anchor too', () => {
     const anchorX = SHELF_METRICS.cardW + SHELF_METRICS.gap
     const files = [
       file('/x1', 1, 'shear'),
@@ -246,7 +331,7 @@ describe('layoutShelf — nothing overlaps', () => {
     const states: Record<string, ShelfCardState> = {
       '/anchor': { x: anchorX, y: 0, w: SHELF_METRICS.cardW, h: SHELF_METRICS.cardH },
     }
-    assertLegal(layoutShelf(files, 'fiber', states, metrics).cards)
+    assertLegal(lay(files, states).cards)
   })
 
   it('settles two cards dropped on the same ground, the active one keeping it', () => {
@@ -255,7 +340,7 @@ describe('layoutShelf — nothing overlaps', () => {
       '/first': { x: 400, y: 300, w: 268, h: 212 },
       '/dropped': { x: 420, y: 320, w: 268, h: 212 },
     }
-    const { cards } = layoutShelf(files, 'recency', states, metrics, '/dropped')
+    const { cards } = lay(files, states, '/dropped')
     expect(cards.find((c) => c.file.fullPath === '/dropped')).toMatchObject({ x: 420, y: 320 })
     assertLegal(cards)
   })
@@ -267,7 +352,7 @@ describe('layoutShelf — nothing overlaps', () => {
       '/s2': { x: 430, y: 325, w: 268, h: 212 },
       '/l': { x: 450, y: 340, w: 268, h: 212 },
     }
-    const { cards } = layoutShelf(files, 'recency', states, metrics)
+    const { cards } = lay(files, states)
     const s1 = cards.find((c) => c.file.fullPath === '/s1')!
     const s2 = cards.find((c) => c.file.fullPath === '/s2')!
     expect(s1.x < s2.x + s2.w && s2.x < s1.x + s1.w).toBe(true) // still a pile
@@ -280,32 +365,30 @@ describe('layoutShelf — nothing overlaps', () => {
       '/star': { x: 400, y: 300, w: 268, h: 212, starred: true },
       '/other': { x: 410, y: 310, w: 268, h: 212 },
     }
-    const { cards } = layoutShelf(files, 'recency', states, metrics)
+    const { cards } = lay(files, states)
     expect(cards.find((c) => c.file.fullPath === '/star')).toMatchObject({ x: 400, y: 300 })
     assertLegal(cards)
   })
 })
 
-describe('layoutShelf — the fiber lens', () => {
-  const metrics = { ...SHELF_METRICS, width: 3 * (SHELF_METRICS.cardW + SHELF_METRICS.gap) }
-
-  it('bands the cards by fiber, most-recently-touched band first', () => {
+describe('one fiber, one tile — what the lens toggle was replaced by', () => {
+  it('turns a fiber\'s whole month into a single flow slot', () => {
+    // The reported problem, as arithmetic: three fibers that sent thirty files
+    // between them are three tiles, not thirty cards.
     const files = [
-      file('/x1', 5, 'shear'),
-      file('/y1', 60, 'lensing'),
-      file('/x2', 90, 'shear'),
+      ...Array.from({ length: 14 }, (_, i) => file(`/s${i}`, i + 1, 'shear')),
+      ...Array.from({ length: 11 }, (_, i) => file(`/l${i}`, i + 30, 'lensing')),
+      ...Array.from({ length: 5 }, (_, i) => file(`/k${i}`, i + 80, 'kinematic')),
     ]
-    const { cards, captions } = layoutShelf(files, 'fiber', {}, metrics)
-    expect(captions.map((c) => c.uid)).toEqual(['shear', 'lensing'])
-    const y = (p: string) => cards.find((c) => c.file.fullPath === p)!.y
-    expect(y('/x1')).toBe(y('/x2'))
-    expect(y('/y1')).toBeGreaterThan(y('/x1'))
+    const { cards } = lay(files)
+    expect(cards).toHaveLength(3)
+    expect(cards.map((c) => c.stack.uid)).toEqual(['shear', 'lensing', 'kinematic'])
+    expect(cards.map((c) => c.stack.files.length)).toEqual([14, 11, 5])
   })
 
-  it('captions the fiberless band for what it is, and sorts it last', () => {
-    const { captions } = layoutShelf([file('/n', 1), file('/s', 50, 'shear')], 'fiber', {}, metrics)
-    expect(captions.map((c) => c.uid)).toEqual(['shear', ''])
-    expect(captions[1].label).toBe('unattributed')
+  it('leaves a one-file fiber a plain card, with nothing under it', () => {
+    const { cards } = lay([file('/only', 1, 'shear'), file('/loose', 2)])
+    expect(cards.every((c) => c.stack.files.length === 1)).toBe(true)
   })
 })
 
@@ -322,10 +405,9 @@ function memoryStorage(): Storage {
 }
 
 describe('persistence', () => {
-  it('round-trips a lens, a pan and a placed card', () => {
+  it('round-trips a pan, a zoom and a placed card', () => {
     const store = memoryStorage()
     const state = {
-      lens: 'fiber' as const,
       pan: { x: -120, y: 40 },
       zoom: 0.75,
       cards: { '/w/r.html': { x: 10, y: 20, w: 300, h: 240, starred: true } },
@@ -352,11 +434,9 @@ describe('persistence', () => {
 
   it('keeps a star that has no geometry, and drops junk fields', () => {
     const persisted = coercePersist({
-      lens: 'sideways',
       pan: 'nowhere',
       cards: { '/a': { starred: true, w: 'wide' }, '/b': 'nope' },
     })
-    expect(persisted.lens).toBe('recency')
     expect(persisted.pan).toEqual({ x: 0, y: 0 })
     expect(persisted.cards['/a']).toEqual({ starred: true })
     expect(persisted.cards['/b']).toBeUndefined()
@@ -366,6 +446,32 @@ describe('persistence', () => {
     expect(coercePersist({ dismissed: ['/a', '/a', 7, '', '/b'] }).dismissed).toEqual(['/a', '/b'])
     expect(coercePersist({ dismissed: 'nope' }).dismissed).toEqual([])
     expect(coercePersist({}).dismissed).toEqual([])
+  })
+
+  it('opens a store written when the board still had a lens', () => {
+    // The lens is gone and its key is simply not read any more. A record from
+    // before the change must still open, with everything else intact — this is
+    // the whole migration, and it works because the coercion is field by field
+    // rather than a shape check.
+    const store = memoryStorage()
+    store.setItem(
+      SHELF_PERSIST_KEY,
+      JSON.stringify({
+        lens: 'fiber',
+        pan: { x: -40, y: 12 },
+        zoom: 0.8,
+        cards: { '/w/r.html': { x: 10, y: 20, w: 300, h: 240, starred: true } },
+        dismissed: ['/w/noisy.html'],
+      }),
+    )
+    const loaded = loadShelfPersist(store)
+    expect(loaded).toEqual({
+      pan: { x: -40, y: 12 },
+      zoom: 0.8,
+      cards: { '/w/r.html': { x: 10, y: 20, w: 300, h: 240, starred: true } },
+      dismissed: ['/w/noisy.html'],
+    })
+    expect('lens' in loaded).toBe(false)
   })
 
   it('opens at a usable zoom whatever the store says', () => {
@@ -383,7 +489,6 @@ describe('resetLayout — the furniture goes back, the judgements stay', () => {
   it('drops every placement, keeps every star, and re-centres the canvas', () => {
     const before = {
       ...emptyPersist(),
-      lens: 'fiber' as const,
       pan: { x: -800, y: -600 },
       zoom: 0.5,
       cards: {
@@ -400,7 +505,6 @@ describe('resetLayout — the furniture goes back, the judgements stay', () => {
     expect(after.pan).toEqual({ x: 0, y: 0 })
     expect(after.zoom).toBe(1)
     // A reset is about the surface, not about what is on it.
-    expect(after.lens).toBe('fiber')
     expect(after.dismissed).toEqual(['/gone'])
   })
 
@@ -410,10 +514,7 @@ describe('resetLayout — the furniture goes back, the judgements stay', () => {
       ...emptyPersist(),
       cards: { '/old-but-held': { x: 900, y: 900, w: 300, h: 400, starred: true } },
     })
-    const { cards } = layoutShelf(files, 'recency', persist.cards, {
-      ...SHELF_METRICS,
-      width: 3 * (SHELF_METRICS.cardW + SHELF_METRICS.gap),
-    })
+    const { cards } = lay(files, persist.cards)
     const held = cards.find((c) => c.file.fullPath === '/old-but-held')!
     expect(held.pinned).toBe(false)
     expect(held.starred).toBe(true)

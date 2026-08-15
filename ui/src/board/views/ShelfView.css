@@ -49,46 +49,6 @@
   cursor: pointer;
 }
 
-/* ── Lens control ───────────────────────────────────────────────────────────
-   Two words in the tab strip's own hand, so it reads as chrome rather than as
-   a control panel: the active lens is inked, the other is faded. */
-.kbn-shelf-lens {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-}
-.kbn-shelf-lens-label {
-  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
-  font-style: italic;
-  font-size: calc(12px * var(--kbn-type-scale, 1));
-  color: #A89B83;
-}
-.kbn-shelf-lens-opt {
-  appearance: none;
-  background: none;
-  border: 0;
-  border-bottom: 1px solid transparent;
-  border-radius: 0;
-  margin: 0;
-  padding: 0 1px 1px;
-  cursor: pointer;
-  font-family: var(--font-mono, 'IBM Plex Mono', monospace);
-  font-size: calc(9.5px * var(--kbn-type-scale, 1));
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: #A89B83;
-  transition: color 120ms ease, border-color 120ms ease;
-}
-.kbn-shelf-lens-opt:hover { color: #7A6F5C; }
-.kbn-shelf-lens-on {
-  color: #1B1611;
-  border-bottom-color: #C49333;
-}
-.kbn-shelf-lens-opt:focus-visible {
-  outline: 1px dashed rgba(188, 69, 56, 0.55);
-  outline-offset: 2px;
-}
-
 /* ── The docked reader ──────────────────────────────────────────────────────
    Opened, the reader takes the right of the board and the canvas reflows into
    what is left (ShelfView.applyDock) — a split, not a panel laid over the
@@ -214,24 +174,6 @@
    so cards appear where they belong instead of flying in from the origin. */
 .kbn-shelf-still .kbn-shelf-card { transition: none !important; }
 
-/* ── Fiber captions ─────────────────────────────────────────────────────────
-   In the fiber lens each band is named in small caps on a hairline, the same
-   way a column head names a lane on the Desk. */
-.kbn-shelf-caption {
-  position: absolute;
-  top: 0;
-  left: 0;
-  padding-bottom: 3px;
-  border-bottom: 0.5px solid rgba(122, 111, 92, 0.22);
-  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
-  font-variant-caps: all-small-caps;
-  font-feature-settings: "smcp", "c2sc";
-  letter-spacing: 0.08em;
-  font-size: calc(14px * var(--kbn-type-scale, 1));
-  color: #7A6F5C;
-  pointer-events: none;
-}
-
 /* ── A card ─────────────────────────────────────────────────────────────── */
 .kbn-shelf-card {
   position: absolute;
@@ -255,10 +197,23 @@
      only scales the furniture — and the live-body cap (shelfLoad) is the perf
      guard that actually matters here. */
   contain: layout style;
+  /* A card's own transform is normally a translate, which no origin affects.
+     A PROMOTED one carries a scale as well (ShelfView.syncPromotion), and that
+     scale must be about the same corner every coordinate on this surface is
+     measured from — otherwise the card would swing half its own size away from
+     where the layout put it. */
+  transform-origin: 0 0;
   border: 0.5px solid rgba(27, 22, 17, 0.18);
   border-radius: 2px;
   background: #FBF6EA;
-  box-shadow: 0 1px 2px rgba(27, 22, 17, 0.06);
+  /* The sheets under a stacked card are drawn as the card's OWN box-shadows,
+     not as child elements, because `overflow: hidden` above would clip any
+     descendant that peeked past the edge — and an element's shadow is not
+     clipped by its own overflow. Every rule that restates `box-shadow` below
+     carries `var(--kbn-sheets)` too, so a stack keeps its depth while it is
+     dragged, read, or focused. */
+  --kbn-sheets: 0 0 0 0 transparent;
+  box-shadow: var(--kbn-sheets), 0 1px 2px rgba(27, 22, 17, 0.06);
   transition:
     transform 260ms cubic-bezier(0.22, 0.61, 0.36, 1),
     width 260ms cubic-bezier(0.22, 0.61, 0.36, 1),
@@ -269,7 +224,7 @@
 }
 .kbn-shelf-card-dragging {
   transition: box-shadow 140ms ease;
-  box-shadow: 0 6px 16px rgba(27, 22, 17, 0.16);
+  box-shadow: var(--kbn-sheets), 0 6px 16px rgba(27, 22, 17, 0.16);
 }
 
 /* Held down. A star is a claim on a position, so the card wears a slightly
@@ -291,7 +246,16 @@
    attention, and enough shadow to say it is off the surface. */
 .kbn-shelf-card-focus {
   border-color: rgba(188, 69, 56, 0.55);
-  box-shadow: 0 4px 14px rgba(27, 22, 17, 0.14);
+  box-shadow: var(--kbn-sheets), 0 4px 14px rgba(27, 22, 17, 0.14);
+}
+
+/* Promoted: big enough on screen to be a page rather than a tile, so it is
+   laid out at its true size under a reciprocal scale (ShelfView.syncPromotion).
+   Its box changes on every zoom step, and a 260ms ease on that would make it
+   swim a whole rectangle behind a pinch — so the promoted card tracks the
+   camera exactly and only its ink still animates. */
+.kbn-shelf-card-promoted {
+  transition: box-shadow 140ms ease, border-color 140ms ease;
 }
 
 /* Open in the Reader. A gilt spine down the leading edge — the card is not
@@ -301,11 +265,76 @@
 .kbn-shelf-card-reading {
   box-shadow:
     inset 2px 0 0 rgba(196, 147, 51, 0.75),
+    var(--kbn-sheets),
     0 1px 2px rgba(27, 22, 17, 0.06);
 }
 .kbn-shelf-card-reading .kbn-shelf-open {
   color: #C49333;
   opacity: 1;
+}
+
+/* ── A stack ────────────────────────────────────────────────────────────────
+   One fiber's sends, as one tile. Two sheet edges peek from behind the card —
+   two, not one per file, because the count belongs in the strip where it can
+   be read, and a fan of forty edges would just be a smear. Hovering fans them
+   a little further, the way a thumb spreads a corner of a pile: the gesture is
+   the reassurance that there is something under there, and the tile's footprint
+   never changes, so nothing on the board moves in response to a hover. */
+.kbn-shelf-card-stacked {
+  --kbn-sheets:
+    4px 4px 0 -0.5px #FBF6EA,
+    4px 4px 0 0 rgba(27, 22, 17, 0.16),
+    8px 8px 0 -0.5px #FBF6EA,
+    8px 8px 0 0 rgba(27, 22, 17, 0.13);
+}
+.kbn-shelf-card-stacked:hover, .kbn-shelf-card-stacked:focus-within {
+  --kbn-sheets:
+    6px 6px 0 -0.5px #FBF6EA,
+    6px 6px 0 0 rgba(27, 22, 17, 0.18),
+    12px 12px 0 -0.5px #FBF6EA,
+    12px 12px 0 0 rgba(27, 22, 17, 0.15);
+}
+
+/* The paging strip: the card's foot, in the same chrome hand as the header.
+   Always there on a stack rather than appearing on hover, because it is the
+   one thing that says this tile is more than the page you can see. */
+.kbn-shelf-stack {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  padding: 2px 6px 3px;
+  border-top: 0.5px solid rgba(122, 111, 92, 0.22);
+  background: rgba(237, 226, 206, 0.5);
+  user-select: none;
+}
+.kbn-shelf-stack[hidden] { display: none; }
+.kbn-shelf-stack-count {
+  font-family: var(--font-mono, 'IBM Plex Mono', monospace);
+  font-size: calc(8.5px * var(--kbn-type-scale, 1));
+  letter-spacing: 0.08em;
+  color: #7A6F5C;
+  min-width: 3.5em;
+  text-align: center;
+}
+.kbn-shelf-stack-step {
+  appearance: none;
+  background: none;
+  border: 0;
+  border-radius: 0;
+  margin: 0;
+  padding: 0 3px;
+  cursor: pointer;
+  line-height: 1;
+  font-size: calc(11px * var(--kbn-type-scale, 1));
+  color: #A89B83;
+  transition: color 120ms ease;
+}
+.kbn-shelf-stack-step:hover { color: #BC4538; }
+.kbn-shelf-stack-step:focus-visible {
+  outline: 1px dashed rgba(188, 69, 56, 0.55);
+  outline-offset: 1px;
 }
 
 /* An origin that is not answering. Its cards are still the truest thing we

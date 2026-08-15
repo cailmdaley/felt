@@ -51,10 +51,33 @@
  * — the transparent sheet over each card is what gives the surface its
  * gestures back, and lifting it is exactly what "focus" means here.
  *
- * ORDER IS A LENS, NOT A SCROLL. The recency lens fills top-left to
- * bottom-right, so time has a direction on the surface; the fiber lens breaks
- * the same cards into captioned bands. Switching between them moves the
- * furniture and keeps the pinned things nailed down.
+ * ZOOM IS A CAMERA UNTIL A CARD FILLS THE SCREEN, THEN IT IS A READER.
+ * One transform on the surface scales everything — chrome, text, and the
+ * documents inside the frames alike — which is right for a wall of thumbnails
+ * and wrong for the moment you have zoomed until one report fills the viewport:
+ * a magnified 225px page is 225px of layout drawn enormous, not a page. So past
+ * a threshold ONE card is PROMOTED (see syncPromotion): its real DOM box is
+ * multiplied by the zoom and its own transform carries the reciprocal scale, so
+ * it occupies exactly the same rectangle on screen while its composite scale is
+ * 1. Its iframe's viewport is then genuinely large, and the document inside
+ * reflows and paints at native pixel size — text you can read, not text made
+ * big. No reparenting is involved, deliberately: moving an iframe between
+ * parents reloads its document, which would throw away the page mid-read.
+ *
+ * ONE ORDER, AND IT IS RECENCY. The flow fills top-left to bottom-right, so
+ * time has a direction on the surface. There is no lens toggle any more: a
+ * fiber's sends are ONE STACK — one tile, newest sheet face up — and the
+ * ‹ 2/7 › strip on its edge leafs back through the older ones IN PLACE, with
+ * nothing else on the board moving while you do it. That is what the by-fiber
+ * lens was reaching for, except a tile per fiber rather than a band per fiber,
+ * which is the difference between a board of ten things and a board of a
+ * hundred.
+ *
+ * ONLY THE FACE OF A STACK IS A CARD. The sheets underneath have no DOM and so
+ * no body, which is the perf shape of the whole arrangement: a ten-file fiber
+ * costs one iframe, not ten. Leafing to another sheet builds that one card and
+ * drops the one it replaced, so the live-body budget (shelfLoad) is spent on
+ * what is actually face up.
  */
 
 import './ShelfView.css'
@@ -76,6 +99,7 @@ import {
   type ShelfKind,
 } from './shelfData.js'
 import {
+  buildStacks,
   clampZoom,
   emptyPersist,
   FLOW_MIN_W,
@@ -87,8 +111,8 @@ import {
   SHELF_METRICS,
   type ShelfCardState,
   type ShelfLayout,
-  type ShelfLens,
   type ShelfPersist,
+  type ShelfStack,
 } from './shelfLayout.js'
 import {
   advanceGesture,
@@ -98,6 +122,7 @@ import {
   type ShelfGesture,
 } from './shelfGesture.js'
 import { packShelf, type PackCard } from './shelfPack.js'
+import { choosePromotion, type PromoteCandidate } from './shelfPromote.js'
 import { ShelfReader } from './ShelfReader.js'
 import {
   chooseEvictions,
@@ -137,6 +162,10 @@ interface CardHandle {
   host: HTMLElement
   ageEl: HTMLElement
   dismissEl: HTMLElement
+  /** The paging strip along the card's foot, shown only when this card is the
+   *  face of a stack with something under it. */
+  stackEl: HTMLElement
+  stackLabel: HTMLElement
   state: BodyState
   body: HTMLElement | null
   /** Inside the ring right now? */
@@ -163,13 +192,19 @@ class ShelfView implements TemporalView {
   private viewport: HTMLElement | null = null
   private surface: HTMLElement | null = null
   private emptyEl: HTMLElement | null = null
-  private lensEl: HTMLElement | null = null
   private searchEl: HTMLInputElement | null = null
 
   /** Everything fetched, newest first, capped at MAX_CARDS. */
   private files: ShelfFile[] = []
-  /** What the search leaves — the cards actually on the surface. */
+  /** What the search leaves — the files the surface is made of. */
   private shown: ShelfFile[] = []
+  /** Those files gathered into tiles: one per fiber, plus the loners. */
+  private stacks: ShelfStack[] = []
+  /** Which sheet of each fiber's stack is face up, for the fibers the reader
+   *  has leafed through. In memory only: a reading position is not a fact
+   *  about the work, and a board reopened tomorrow should show what is newest,
+   *  not where you happened to stop. */
+  private readonly leafed: Record<string, string> = {}
   private query = ''
   private origins: TemporalOrigins = {}
   private persist: ShelfPersist = emptyPersist()
@@ -181,6 +216,9 @@ class ShelfView implements TemporalView {
   private readonly handles = new Map<string, CardHandle>()
   private observer: IntersectionObserver | null = null
   private focused: string | null = null
+  /** The one card, if any, currently living at its true size instead of at the
+   *  camera's. See syncPromotion. */
+  private promoted: string | null = null
   private zTop = 10
   private loading = false
 
@@ -223,7 +261,7 @@ class ShelfView implements TemporalView {
     this.reader.onDock = (split) => this.applyDock(split)
 
     const page = createViewPage(this.title)
-    page.titleRow.append(this.buildSearch(), this.buildLens(), this.buildTools())
+    page.titleRow.append(this.buildSearch(), this.buildTools())
 
     this.viewport = document.createElement('div')
     this.viewport.className = 'kbn-shelf-viewport'
@@ -343,7 +381,8 @@ class ShelfView implements TemporalView {
     this.observer?.disconnect()
     this.observer = null
     this.handles.clear()
-    this.viewport = this.surface = this.emptyEl = this.lensEl = null
+    this.promoted = null
+    this.viewport = this.surface = this.emptyEl = null
     this.searchEl = null
     this.ctx = null
     this.signature = ''
@@ -385,18 +424,29 @@ class ShelfView implements TemporalView {
    * drag. New files get new cards, departed files lose theirs, and a file
    * whose bytes changed under a LIVE body is marked stale rather than
    * hot-swapped — the reader decides when the page they are reading reloads.
+   *
+   * THE CARDS ARE THE STACK FACES, not the files. Everything below a face is
+   * data on the tile above it and has no DOM at all, so a fiber that sent forty
+   * files costs one card and one body. The signature therefore covers the faces
+   * AND the depths — a new send that lands under an unchanged face still has to
+   * repaint the strip that counts it.
    */
   private syncCards(): void {
     const surface = this.surface
     if (!surface) return
 
-    const sig = this.shown.map((f) => `${f.fullPath}@${f.timestamp}`).join('')
+    this.stacks = buildStacks(this.shown, this.persist.cards, this.leafed)
+    const faces = this.stacks.map((s) => s.face)
+
+    const sig = this.stacks
+      .map((s) => `${s.face.fullPath}@${s.face.timestamp}/${s.files.length}`)
+      .join('')
     if (sig === this.signature) return
     this.signature = sig
 
     this.emptyEl?.remove()
     this.emptyEl = null
-    if (this.shown.length === 0) {
+    if (faces.length === 0) {
       for (const path of [...this.handles.keys()]) this.dropCard(path)
       this.emptyEl = createViewEmptyState(
         this.query ? '— nothing matches —' : '— nothing sent yet —',
@@ -406,12 +456,12 @@ class ShelfView implements TemporalView {
       return
     }
 
-    const wanted = new Set(this.shown.map((f) => f.fullPath))
+    const wanted = new Set(faces.map((f) => f.fullPath))
     for (const path of [...this.handles.keys()]) {
       if (!wanted.has(path)) this.dropCard(path)
     }
 
-    for (const file of this.shown) {
+    for (const file of faces) {
       const handle = this.handles.get(file.fullPath)
       if (!handle) {
         const built = this.buildCard(file)
@@ -460,6 +510,7 @@ class ShelfView implements TemporalView {
     handle.root.remove()
     this.handles.delete(path)
     if (this.focused === path) this.focused = null
+    if (this.promoted === path) this.promoted = null
   }
 
   // ── Chrome ─────────────────────────────────────────────────────────────────
@@ -530,31 +581,8 @@ class ShelfView implements TemporalView {
     this.applyQuery()
   }
 
-  /** The lens control: two words, the active one inked. Quiet on purpose —
-   *  it changes how the surface reads, not what is on it. */
-  private buildLens(): HTMLElement {
-    const wrap = document.createElement('div')
-    wrap.className = 'kbn-shelf-lens'
-    const label = document.createElement('span')
-    label.className = 'kbn-shelf-lens-label'
-    label.textContent = 'by'
-    wrap.append(label)
-    for (const lens of ['recency', 'fiber'] as ShelfLens[]) {
-      const btn = document.createElement('button')
-      btn.type = 'button'
-      btn.className = 'kbn-shelf-lens-opt'
-      btn.dataset.lens = lens
-      btn.textContent = lens
-      btn.addEventListener('click', () => this.setLens(lens))
-      wrap.append(btn)
-    }
-    this.lensEl = wrap
-    this.syncLens()
-    return wrap
-  }
-
   /**
-   * The two housekeeping controls, in the same quiet hand as the lens: put the
+   * The two housekeeping controls, in the board's quiet chrome hand: put the
    * furniture back, and a count of what has been put away.
    *
    * The hidden count is not decoration — a dismissal that cannot be seen is a
@@ -607,32 +635,37 @@ class ShelfView implements TemporalView {
     this.persist = resetLayout(this.persist)
     this.save()
     this.applyZoom()
-    // Placement changed for every card, so the signature is stale by
-    // definition; force the layout rather than waiting for the file set to
-    // change.
+    // Every hand placement is gone, so every card it had pulled out of a stack
+    // rejoins one: the tiles are rebuilt before they are placed.
+    this.syncCards()
     this.reflow()
     this.pump()
   }
 
-  private syncLens(): void {
-    for (const btn of this.lensEl?.querySelectorAll<HTMLElement>('.kbn-shelf-lens-opt') ?? []) {
-      btn.classList.toggle('kbn-shelf-lens-on', btn.dataset.lens === this.persist.lens)
-    }
-  }
-
-  private setLens(lens: ShelfLens): void {
-    if (this.persist.lens === lens) return
-    this.persist.lens = lens
-    this.save()
-    this.syncLens()
-    this.reflow()
-    this.pump()
+  /**
+   * Leaf a fiber's stack to another sheet.
+   *
+   * The tile does not move: a stack's place in the flow is its NEWEST member's
+   * age (shelfLayout), so paging back through a fiber's history leaves the
+   * board's arrangement exactly as it was and only changes what is face up.
+   *
+   * It wraps at both ends. Seven sheets in a footprint is a thing you flick
+   * through, and a strip that dead-ends at 7/7 makes you travel all the way
+   * back to see the newest again.
+   */
+  private leaf(uid: string, delta: number): void {
+    const stack = this.stacks.find((s) => s.uid === uid)
+    if (!stack || stack.files.length < 2) return
+    const at = stack.files.indexOf(stack.face)
+    const next = stack.files[(at + delta + stack.files.length) % stack.files.length]
+    this.leafed[uid] = next.fullPath
+    this.syncCards()
   }
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
   /**
-   * Position every card from the current lens.
+   * Position every card, and tell each stack how deep it is.
    *
    * `immediate` suppresses the reflow transition for the first paint — cards
    * sliding in from the origin on mount would read as an animation the data
@@ -650,8 +683,7 @@ class ShelfView implements TemporalView {
     // "safety" margin would be permanent dead canvas.
     const width = Math.max(this.viewport?.clientWidth ?? 0, FLOW_MIN_W)
     const layout = layoutShelf(
-      this.shown,
-      this.persist.lens,
+      this.stacks,
       this.persist.cards,
       { ...SHELF_METRICS, width },
       this.activeCard,
@@ -659,29 +691,20 @@ class ShelfView implements TemporalView {
 
     if (immediate) surface.classList.add('kbn-shelf-still')
 
-    for (const caption of surface.querySelectorAll('.kbn-shelf-caption')) caption.remove()
-    for (const caption of layout.captions) {
-      const el = document.createElement('div')
-      el.className = 'kbn-shelf-caption'
-      el.textContent = caption.label
-      el.style.transform = `translate(${caption.x}px, ${caption.y}px)`
-      el.style.width = `${caption.width}px`
-      surface.append(el)
-    }
-
     for (const card of layout.cards) {
       const handle = this.handles.get(card.file.fullPath)
       if (!handle) continue
-      handle.root.style.transform = `translate(${card.x}px, ${card.y}px)`
-      handle.root.style.width = `${card.w}px`
-      handle.root.style.height = `${card.h}px`
+      this.placeCard(handle, card.x, card.y)
+      this.sizeCard(handle, card.w, card.h)
       handle.root.classList.toggle('kbn-shelf-card-pinned', card.pinned)
       handle.root.classList.toggle('kbn-shelf-card-starred', card.starred)
+      this.syncStack(handle, card.stack)
     }
 
     surface.style.width = `${layout.width}px`
     surface.style.height = `${layout.height + 40}px`
     this.clampPan()
+    this.syncPromotion()
 
     if (immediate) {
       // Two frames: one for the browser to commit the positions, one for the
@@ -691,6 +714,138 @@ class ShelfView implements TemporalView {
       )
     }
     return layout
+  }
+
+  /**
+   * Dress a card as the face of its stack — or undress it when the stack has
+   * fallen to one.
+   *
+   * A stack of one is a plain card, with no strip and no sheet edges. That is
+   * the honest rendering and it also keeps the affordance meaningful: a strip
+   * on every card would be furniture, whereas a strip that appears exactly when
+   * there is something underneath is a fact about the work.
+   */
+  private syncStack(handle: CardHandle, stack: ShelfStack): void {
+    const depth = stack.files.length
+    handle.root.classList.toggle('kbn-shelf-card-stacked', depth > 1)
+    handle.stackEl.hidden = depth < 2
+    if (depth < 2) return
+    // By PATH, never by object identity: every poll rebuilds the file records
+    // (dedupeByPath returns fresh objects), while a card that did not change
+    // keeps the handle — and the record it was built from — it already had. An
+    // identity comparison here read −1 for every stack the reader had not just
+    // touched, and the strip counted `0/11`.
+    const at = stack.files.findIndex((f) => f.fullPath === handle.file.fullPath)
+    handle.stackLabel.textContent = `${at + 1}/${depth}`
+    handle.stackEl.title = `${depth} files from ${stack.uid} — ‹ › to leaf through them`
+  }
+
+  // ── Promotion: the card that is a page rather than a tile ──────────────────
+
+  /**
+   * How much bigger a card's real DOM box is than its surface geometry.
+   *
+   * 1 for every card but the promoted one, and the zoom for that one — which is
+   * exactly what cancels the surface's scale. Kept on the element as well as in
+   * this field so `readGeom` can undo it without needing the view: every other
+   * piece of the board (the layout, the collision solve, the drag maths, the
+   * persisted store) speaks SURFACE coordinates, and promotion must be
+   * invisible to all of them.
+   */
+  private inflation(path: string): number {
+    return this.promoted === path ? this.persist.zoom : 1
+  }
+
+  /** Position a card, carrying the reciprocal scale if it is promoted. The
+   *  translate is applied in the parent's (unscaled) space before the scale, so
+   *  the card's surface coordinates mean the same thing either way. */
+  private placeCard(handle: CardHandle, x: number, y: number): void {
+    const k = this.inflation(handle.file.fullPath)
+    handle.root.style.transform =
+      k === 1
+        ? `translate(${x}px, ${y}px)`
+        : `translate(${x}px, ${y}px) scale(${1 / k})`
+  }
+
+  /** Size a card in surface units; the DOM box is inflated if it is promoted,
+   *  which is the whole trick — a bigger box under a smaller scale is the same
+   *  rectangle on screen with more room inside it. */
+  private sizeCard(handle: CardHandle, w: number, h: number): void {
+    const k = this.inflation(handle.file.fullPath)
+    handle.root.dataset.inflate = String(k)
+    handle.root.style.width = `${w * k}px`
+    handle.root.style.height = `${h * k}px`
+  }
+
+  /**
+   * Decide which card, if any, is currently being READ rather than looked at,
+   * and keep its box in step with the zoom.
+   *
+   * Called after anything that moves the camera or the furniture. Cheap: a pass
+   * over the handle table doing arithmetic on styles already in hand. The
+   * decision itself is pure and lives in shelfPromote; this is only its
+   * consequences on the DOM.
+   */
+  private syncPromotion(): void {
+    const viewport = this.viewport
+    if (!viewport) return
+
+    const candidates: PromoteCandidate[] = []
+    for (const [path, handle] of this.handles) {
+      candidates.push({
+        key: path,
+        ...readGeom(handle.root),
+        reflows: handle.kind === 'page' || handle.kind === 'pdf',
+      })
+    }
+    const winner = choosePromotion(
+      candidates,
+      {
+        zoom: this.persist.zoom,
+        panX: this.persist.pan.x,
+        panY: this.persist.pan.y,
+        width: viewport.clientWidth,
+        height: viewport.clientHeight,
+      },
+      this.promoted,
+    )
+
+    const previous = this.promoted
+    if (previous === winner) {
+      // Still the same card — but the zoom may have moved under it, so its box
+      // has to be re-inflated to the new scale or it would drift out of the
+      // rectangle the camera says it occupies.
+      if (winner) this.reapply(winner)
+      return
+    }
+    this.promoted = winner
+    if (previous) {
+      const handle = this.handles.get(previous)
+      if (handle) {
+        handle.root.classList.remove('kbn-shelf-card-promoted')
+        this.reapply(previous)
+      }
+    }
+    if (winner) {
+      const handle = this.handles.get(winner)
+      if (handle) {
+        handle.root.classList.add('kbn-shelf-card-promoted')
+        handle.root.style.zIndex = String(++this.zTop)
+        this.reapply(winner)
+        // A card this big is the thing on screen; it must have its document.
+        this.ensureBody(handle)
+      }
+    }
+  }
+
+  /** Re-write a card's box and transform from the geometry it already has,
+   *  under whatever inflation now applies to it. */
+  private reapply(path: string): void {
+    const handle = this.handles.get(path)
+    if (!handle) return
+    const geom = readGeom(handle.root)
+    this.sizeCard(handle, geom.w, geom.h)
+    this.placeCard(handle, geom.x, geom.y)
   }
 
   /**
@@ -725,7 +880,7 @@ class ShelfView implements TemporalView {
       if (key === draggedPath) continue
       const handle = this.handles.get(key)
       if (!handle) continue
-      handle.root.style.transform = `translate(${rect.x}px, ${rect.y}px)`
+      this.placeCard(handle, rect.x, rect.y)
     }
   }
 
@@ -832,6 +987,36 @@ class ShelfView implements TemporalView {
     })
     host.append(veil)
 
+    // The accordion. A stack's other sheets are reachable without the tile
+    // growing, opening, or displacing anything — the strip swaps which file
+    // this card IS, so the name, the age and the document all follow it. That
+    // is why paging is cheap: one card is torn down and one is built, rather
+    // than a fiber's worth of frames being kept warm for a glance.
+    const stackEl = document.createElement('div')
+    stackEl.className = 'kbn-shelf-stack'
+    stackEl.hidden = true
+    stackEl.addEventListener('pointerdown', (e) => e.stopPropagation())
+    stackEl.addEventListener('dblclick', (e) => e.stopPropagation())
+    const stackLabel = document.createElement('span')
+    stackLabel.className = 'kbn-shelf-stack-count'
+    // The stack is ordered newest-first, so ‹ walks BACK into the fiber's
+    // history and › returns towards what just landed — the direction the
+    // numbers on the strip already run.
+    const step = (glyph: string, delta: number, label: string): HTMLElement => {
+      const btn = document.createElement('button')
+      btn.type = 'button'
+      btn.className = 'kbn-shelf-stack-step'
+      btn.textContent = glyph
+      btn.title = `${label} file from this fiber`
+      btn.setAttribute('aria-label', `${label} file from ${file.uid ?? 'this fiber'}`)
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation()
+        this.leaf(file.uid ?? '', delta)
+      })
+      return btn
+    }
+    stackEl.append(step('‹', 1, 'Older'), stackLabel, step('›', -1, 'Newer'))
+
     const grip = document.createElement('div')
     grip.className = 'kbn-shelf-grip'
     grip.title = 'Resize'
@@ -856,7 +1041,7 @@ class ShelfView implements TemporalView {
       control.addEventListener('dblclick', (e) => e.stopPropagation())
     }
 
-    root.append(head, host, grip)
+    root.append(head, host, stackEl, grip)
     return {
       file,
       kind,
@@ -865,6 +1050,8 @@ class ShelfView implements TemporalView {
       host,
       ageEl: age,
       dismissEl: dismiss,
+      stackEl,
+      stackLabel,
       state: 'idle',
       body: null,
       visible: false,
@@ -1176,6 +1363,9 @@ class ShelfView implements TemporalView {
       this.persist.cards[path] = state
     }
     this.save()
+    // A star takes a file OUT of its fiber's stack (and unstarring puts it
+    // back), so the tiles have to be rebuilt, not merely repositioned.
+    this.syncCards()
     this.reflow()
   }
 
@@ -1247,12 +1437,13 @@ class ShelfView implements TemporalView {
       this.applyPan()
       return
     }
-    const el = drag.target
-    if (gesture.mode === 'move') {
-      el.style.transform = `translate(${geometry.x}px, ${geometry.y}px)`
-    } else {
-      el.style.width = `${geometry.w}px`
-      el.style.height = `${geometry.h}px`
+    // The gesture speaks surface units throughout, so a promoted card's
+    // inflated box is applied here rather than being written raw.
+    const handle = gesture.path ? this.handles.get(gesture.path) : null
+    if (handle && gesture.mode === 'move') {
+      this.placeCard(handle, geometry.x, geometry.y)
+    } else if (handle) {
+      this.sizeCard(handle, geometry.w, geometry.h)
     }
     // A card that has moved or grown is a card that may now be standing on
     // someone. Re-solve the surface around it, this frame.
@@ -1324,6 +1515,10 @@ class ShelfView implements TemporalView {
     const state = this.persist.cards[gesture.path] ?? {}
     Object.assign(state, readGeom(target))
     this.persist.cards[gesture.path] = state
+    // Dragging a sheet off a stack is how you take one out of it: the card is
+    // placed now, so it stands alone and the fiber it came from closes up
+    // behind it with a new face.
+    this.syncCards()
     // The drop still counts as active for this one layout, so it keeps the
     // ground it landed on and its neighbours are the ones that give way.
     const layout = this.reflow()
@@ -1497,6 +1692,11 @@ class ShelfView implements TemporalView {
     this.clampPan()
     const { pan, zoom } = this.persist
     this.surface.style.transform = `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`
+    // The camera moved, so which card (if any) is large enough to be read at
+    // its true size may have changed — and a card already promoted has to be
+    // re-inflated to the new scale in the same frame, or it would lag a pinch
+    // by a rectangle.
+    this.syncPromotion()
   }
 
   /**
@@ -1614,14 +1814,18 @@ function buildFace(file: ShelfFile, kind: ShelfKind): HTMLElement {
 
 /** A card's geometry as the surface holds it — read from the inline style
  *  rather than `getBoundingClientRect`, which would be in viewport pixels and
- *  would fold in the pan. */
+ *  would fold in the pan. A PROMOTED card's box is inflated by its own
+ *  reciprocal scale (see ShelfView.syncPromotion); dividing it out here is what
+ *  keeps promotion invisible to the layout, the pack and the drag maths, all of
+ *  which speak surface units and must go on doing so. */
 function readGeom(el: HTMLElement): { x: number; y: number; w: number; h: number } {
   const match = /translate\((-?[\d.]+)px,\s*(-?[\d.]+)px\)/.exec(el.style.transform)
+  const inflate = Number(el.dataset.inflate) || 1
   return {
     x: match ? Number(match[1]) : 0,
     y: match ? Number(match[2]) : 0,
-    w: parseFloat(el.style.width) || el.offsetWidth,
-    h: parseFloat(el.style.height) || el.offsetHeight,
+    w: (parseFloat(el.style.width) || el.offsetWidth) / inflate,
+    h: (parseFloat(el.style.height) || el.offsetHeight) / inflate,
   }
 }
 

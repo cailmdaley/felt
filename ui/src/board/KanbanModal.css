@@ -764,8 +764,26 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 5px;
-  padding: 1px 2px 5px;
+  padding: 0;
 }
+/* Riding the tab strip's right end. One line, never wrapping — a second row of
+   chips would give back the vertical space this move was for — and shrinking
+   from the left, so the chips give up their own width before they push the
+   tabs. */
+.kbn-viewtabs-lens {
+  margin-left: auto;
+  min-width: 0;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  overflow: hidden;
+}
+.kbn-viewtabs-lens .kbn-lensbar {
+  flex-wrap: nowrap;
+  justify-content: flex-end;
+  min-width: 0;
+}
+.kbn-viewtabs-lens .kbn-lens-chip { flex: 0 1 auto; min-width: 0; }
 .kbn-lens-chip {
   display: flex;
   align-items: baseline;

@@ -4,12 +4,11 @@
  * The Shelf has two kinds of card and the whole module is about keeping them
  * apart:
  *
- *   FLOWED   the surface arranges it. Order is a LENS — recency or fiber —
- *            and the card's position is a consequence of that lens, so it
- *            moves when the lens changes and when new work lands.
+ *   FLOWED   the surface arranges it, newest first, left-to-right and down, so
+ *            recency has a direction on the canvas.
  *   PLACED   you arranged it. It carries an exact x/y/w/h that survives a
- *            reflow, a lens switch and a reload, because a position you chose
- *            is data and a position the layout chose is not.
+ *            reflow and a reload, because a position you chose is data and a
+ *            position the layout chose is not.
  *
  * A card becomes placed by being dragged, resized, or STARRED — a star is
  * "hold this where it is", and it captures the geometry the flow had just
@@ -17,15 +16,20 @@
  * the flow. That is why the star lives in the same record as the geometry
  * rather than in a set beside it.
  *
+ * THE FLOW IS MADE OF STACKS, NOT OF FILES. A fiber that sent ten files is one
+ * tile on the surface, ten sheets deep, its newest send face up — see
+ * buildStacks. There used to be a lens toggle here (by recency / by fiber) and
+ * it is gone: two orderings of the same hundred cards are two ways of being
+ * overwhelmed, whereas one tile per fiber is a board you can read across. The
+ * ordering the fiber lens existed for — "everything from the shear run
+ * together" — is now the shape of the tile itself.
+ *
  * Pure: no DOM, no storage side effects beyond the two localStorage helpers at
  * the bottom, which swallow their own failures the way FiberDetailModal's do.
  */
 
 import type { ShelfFile } from './shelfData.js'
 import { flowSlots, packShelf, type Rect } from './shelfPack.js'
-
-/** The lens — how flowed cards are ordered on the surface. */
-export type ShelfLens = 'recency' | 'fiber'
 
 /** One card's remembered state. Geometry present ⇒ the card is placed. */
 export interface ShelfCardState {
@@ -37,7 +41,6 @@ export interface ShelfCardState {
 }
 
 export interface ShelfPersist {
-  lens: ShelfLens
   /** The surface's pan offset, so the canvas reopens where you left it. */
   pan: { x: number; y: number }
   /** The surface's scale. 1 is native; below it the board is a map of itself. */
@@ -76,7 +79,7 @@ export function clampZoom(zoom: number): number {
 export const SHELF_PERSIST_KEY = 'shuttle:shelf'
 
 export function emptyPersist(): ShelfPersist {
-  return { lens: 'recency', pan: { x: 0, y: 0 }, zoom: 1, cards: {}, dismissed: [] }
+  return { pan: { x: 0, y: 0 }, zoom: 1, cards: {}, dismissed: [] }
 }
 
 /**
@@ -85,7 +88,7 @@ export function emptyPersist(): ShelfPersist {
  * A star is a judgement about a FILE ("this one matters"); a position is a
  * judgement about the SURFACE. Resetting the surface should not throw away the
  * first, so a starred card keeps its star and rejoins the flow — where the
- * lens sorts starred cards to the front, so it is still the first thing you
+ * order sorts starred cards to the front, so it is still the first thing you
  * see. Everything else about the arrangement goes.
  */
 export function resetLayout(persist: ShelfPersist): ShelfPersist {
@@ -109,8 +112,6 @@ export interface ShelfMetrics {
   cardW: number
   cardH: number
   gap: number
-  /** Height of a fiber caption line, in the fiber lens. */
-  captionH: number
 }
 
 /**
@@ -129,7 +130,6 @@ export const SHELF_METRICS: ShelfMetrics = {
   cardW: 225,
   cardH: Math.round(225 * A4),
   gap: 20,
-  captionH: 26,
 }
 
 /** The band a flowed card's width may be stretched or squeezed into. Below the
@@ -171,8 +171,81 @@ export function flowMetrics(
   return { columns, cardW, cardH: Math.round(cardW * A4) }
 }
 
+/**
+ * A stack: one fiber's sends, as one tile.
+ *
+ * This is the unit the surface arranges. Ten reports from `shear-run` occupy
+ * ONE flow slot with the newest of them face up, and the other nine are leafed
+ * through in place — the board's card count becomes its fiber count, which is
+ * the difference between a wall you scan and a wall you give up on.
+ *
+ * A stack is never a container you have to open to find out what is in it: the
+ * face is a real, live card (its report renders, it opens, it drags), and the
+ * depth is stated on it.
+ */
+export interface ShelfStack {
+  /** The fiber, or '' for files that named none. */
+  uid: string
+  /** Every card in the stack, newest first. */
+  files: ShelfFile[]
+  /** The sheet on top — the one file the surface actually draws. */
+  face: ShelfFile
+}
+
+/**
+ * Gather files into the tiles the surface will lay out.
+ *
+ * Three rules, and each earns its place:
+ *
+ *   A card you PLACED or STARRED stands alone. Both gestures are claims about
+ *   one file ("this one, here"), so honouring them means taking that file out
+ *   of its fiber's stack — which is also how you pull a sheet off a pile: drag
+ *   it out. The rest of the fiber closes up behind it.
+ *
+ *   A file with NO FIBER stands alone. An unattributed card has nothing to be
+ *   a stack of — the same rule shelfPack applies to piles.
+ *
+ *   Everything else stacks by fiber, newest first.
+ *
+ * `faces` is the reader's paging: fiber → the path they leafed to. It is a
+ * reading position, not a property of the work, so it is held in memory and
+ * not persisted, and a path that has since left the window falls back to the
+ * newest send rather than emptying the tile.
+ */
+export function buildStacks(
+  files: readonly ShelfFile[],
+  states: Record<string, ShelfCardState>,
+  faces: Record<string, string> = {},
+): ShelfStack[] {
+  const groups = new Map<string, ShelfFile[]>()
+  const alone: ShelfStack[] = []
+  for (const file of files) {
+    const state = states[file.fullPath]
+    const uid = file.uid ?? ''
+    if (!uid || isPlaced(state) || state?.starred === true) {
+      alone.push({ uid, files: [file], face: file })
+      continue
+    }
+    const list = groups.get(uid)
+    if (list) list.push(file)
+    else groups.set(uid, [file])
+  }
+  const stacked: ShelfStack[] = []
+  for (const [uid, group] of groups) {
+    group.sort(byNewest)
+    const chosen = group.find((f) => f.fullPath === faces[uid])
+    stacked.push({ uid, files: group, face: chosen ?? group[0] })
+  }
+  return [...stacked, ...alone].sort((a, b) => byNewest(a.files[0], b.files[0]))
+}
+
+const byNewest = (a: ShelfFile, b: ShelfFile): number =>
+  b.timestamp - a.timestamp || a.fullPath.localeCompare(b.fullPath)
+
 export interface PlacedCard {
+  /** The face — the only file of the stack the surface draws. */
   file: ShelfFile
+  stack: ShelfStack
   x: number
   y: number
   w: number
@@ -182,18 +255,8 @@ export interface PlacedCard {
   starred: boolean
 }
 
-export interface ShelfCaption {
-  /** The fiber slug, or '' for files that never named one. */
-  uid: string
-  label: string
-  x: number
-  y: number
-  width: number
-}
-
 export interface ShelfLayout {
   cards: PlacedCard[]
-  captions: ShelfCaption[]
   /** Total surface extent, so the viewport knows how far it may pan. */
   height: number
   width: number
@@ -202,11 +265,13 @@ export interface ShelfLayout {
 /**
  * Lay the shelf out.
  *
- * Flowed cards fill left-to-right, top-to-bottom, so RECENCY HAS A DIRECTION:
+ * Flowed stacks fill left-to-right, top-to-bottom, so RECENCY HAS A DIRECTION:
  * the newest thing enters at the top-left and older work migrates right and
- * down. Starred-but-unplaced cards sort ahead of the rest — a star that has
- * lost its geometry (a hand-edited store, a card that came back after being
- * cleared) still reads as "this one first" rather than silently becoming
+ * down. A stack's place in that order is its NEWEST member's — leafing back
+ * through a fiber's older sends must not make its tile crawl down the board
+ * under your hand. Starred-but-unplaced cards sort ahead of the rest — a star
+ * that has lost its geometry (a hand-edited store, a card that came back after
+ * being cleared) still reads as "this one first" rather than silently becoming
  * ordinary.
  *
  * Placed cards are drawn at their own coordinates and take no part in the
@@ -216,8 +281,7 @@ export interface ShelfLayout {
  * was for.
  */
 export function layoutShelf(
-  files: readonly ShelfFile[],
-  lens: ShelfLens,
+  stacks: readonly ShelfStack[],
   states: Record<string, ShelfCardState>,
   metrics: ShelfMetrics = SHELF_METRICS,
   /** The card under the pointer (or just released): immovable for this
@@ -225,20 +289,20 @@ export function layoutShelf(
    *  the ones that yield. */
   active?: string | null,
 ): ShelfLayout {
-  const { gap, captionH } = metrics
+  const { gap } = metrics
   // The card size is a CONSEQUENCE of the width available, not a constant:
   // `metrics.cardW` is the preferred width the column count is chosen from,
   // and the cards then flex to fill the row. See flowMetrics.
   const { columns, cardW, cardH } = flowMetrics(metrics.width, gap, metrics.cardW)
   const cards: PlacedCard[] = []
-  const captions: ShelfCaption[] = []
 
-  const flowed: ShelfFile[] = []
-  for (const file of files) {
-    const state = states[file.fullPath]
+  const flowed: ShelfStack[] = []
+  for (const stack of stacks) {
+    const state = states[stack.face.fullPath]
     if (isPlaced(state)) {
       cards.push({
-        file,
+        file: stack.face,
+        stack,
         x: num(state!.x) ?? 0,
         y: num(state!.y) ?? 0,
         w: num(state!.w) ?? cardW,
@@ -247,15 +311,14 @@ export function layoutShelf(
         starred: state!.starred === true,
       })
     } else {
-      flowed.push(file)
+      flowed.push(stack)
     }
   }
 
-  const starred = (f: ShelfFile): boolean => states[f.fullPath]?.starred === true
-  const byRecency = (a: ShelfFile, b: ShelfFile): number =>
-    (starred(b) ? 1 : 0) - (starred(a) ? 1 : 0) ||
-    b.timestamp - a.timestamp ||
-    a.fullPath.localeCompare(b.fullPath)
+  const starred = (s: ShelfStack): boolean => states[s.face.fullPath]?.starred === true
+  // The stack's own age is its NEWEST member's, whichever sheet is face up.
+  const byRecency = (a: ShelfStack, b: ShelfStack): number =>
+    (starred(b) ? 1 : 0) - (starred(a) ? 1 : 0) || byNewest(a.files[0], b.files[0])
 
   // The rects the flow must route AROUND: everything the reader placed by
   // hand. Water around stones — see shelfPack.flowSlots.
@@ -265,63 +328,16 @@ export function layoutShelf(
   const colX = (i: number): number => (i % columns) * (cardW + gap)
   const rowY = (i: number): number => Math.floor(i / columns) * (cardH + gap)
 
-  let bottom = 0
-  if (lens === 'recency') {
-    const ordered = [...flowed].sort(byRecency)
-    const slots = flowSlots(ordered.length, flowGrid, anchors)
-    ordered.forEach((file, i) => {
-      const slot = slots[i] ?? { x: colX(i), y: rowY(i), w: cardW, h: cardH }
-      cards.push({
-        file, x: slot.x, y: slot.y, w: cardW, h: cardH,
-        pinned: false, starred: starred(file),
-      })
+  const ordered = [...flowed].sort(byRecency)
+  const slots = flowSlots(ordered.length, flowGrid, anchors)
+  ordered.forEach((stack, i) => {
+    const slot = slots[i] ?? { x: colX(i), y: rowY(i), w: cardW, h: cardH }
+    cards.push({
+      file: stack.face, stack, x: slot.x, y: slot.y, w: cardW, h: cardH,
+      pinned: false, starred: starred(stack),
     })
-    bottom = slots.length ? Math.max(...slots.map((s) => s.y + cardH)) : 0
-  } else {
-    // Fiber lens: one band per fiber, bands ordered by their own most recent
-    // send, so the group you touched last is still the group at the top. The
-    // band a file with no fiber falls into sorts last and is captioned for
-    // what it is, not left unlabelled.
-    const groups = new Map<string, ShelfFile[]>()
-    for (const file of flowed) {
-      const key = file.uid ?? ''
-      const list = groups.get(key)
-      if (list) list.push(file)
-      else groups.set(key, [file])
-    }
-    const keys = [...groups.keys()].sort((a, b) => {
-      if (a === '') return 1
-      if (b === '') return -1
-      const newest = (k: string): number =>
-        Math.max(...groups.get(k)!.map((f) => f.timestamp))
-      return newest(b) - newest(a) || a.localeCompare(b)
-    })
-    let y = 0
-    for (const key of keys) {
-      const group = groups.get(key)!.sort(byRecency)
-      captions.push({
-        uid: key,
-        label: key || 'unattributed',
-        x: 0,
-        y,
-        width: metrics.width,
-      })
-      y += captionH
-      const slots = flowSlots(group.length, flowGrid, anchors, { x: 0, y })
-      group.forEach((file, i) => {
-        const slot = slots[i] ?? { x: colX(i), y: y + rowY(i), w: cardW, h: cardH }
-        cards.push({
-          file, x: slot.x, y: slot.y, w: cardW, h: cardH,
-          pinned: false, starred: starred(file),
-        })
-      })
-      // A band is as tall as its lowest card — which is lower than the plain
-      // grid would make it whenever the flow had to route around an anchor.
-      const lowest = slots.length ? Math.max(...slots.map((s) => s.y + cardH)) : y
-      y = lowest + gap * 2
-      bottom = y - gap
-    }
-  }
+  })
+  const bottom = slots.length ? Math.max(...slots.map((s) => s.y + cardH)) : 0
 
   // ── Settle ──
   // The flow already routes around the anchors, so this pass exists for the
@@ -333,7 +349,7 @@ export function layoutShelf(
   const settled = packShelf(
     cards.map((card) => ({
       key: card.file.fullPath,
-      group: card.file.uid ?? '',
+      group: card.stack.uid,
       x: card.x,
       y: card.y,
       w: card.w,
@@ -356,7 +372,7 @@ export function layoutShelf(
     width = Math.max(width, card.x + card.w)
     height = Math.max(height, card.y + card.h)
   }
-  return { cards, captions, width, height }
+  return { cards, width, height }
 }
 
 function num(value: unknown): number | null {
@@ -392,14 +408,19 @@ export function saveShelfPersist(state: ShelfPersist, storage?: Storage): void {
   }
 }
 
-/** Coerce a parsed record into a persist, field by field. Exported for the
- *  round-trip test, which is the only way to be sure a store written by an
- *  older shelf still opens. */
+/**
+ * Coerce a parsed record into a persist, field by field. Exported for the
+ * round-trip test, which is the only way to be sure a store written by an
+ * older shelf still opens.
+ *
+ * Field by field is also the whole migration story: a record written when the
+ * board still had a lens carries a `lens` key that nothing here reads, and it
+ * is dropped in passing rather than needing a version stamp to step over.
+ */
 export function coercePersist(parsed: unknown): ShelfPersist {
   const out = emptyPersist()
   if (!parsed || typeof parsed !== 'object') return out
   const rec = parsed as Record<string, unknown>
-  if (rec.lens === 'fiber' || rec.lens === 'recency') out.lens = rec.lens
   const pan = rec.pan
   if (pan && typeof pan === 'object') {
     const p = pan as Record<string, unknown>

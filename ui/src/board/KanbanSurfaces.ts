@@ -244,8 +244,9 @@ export class KanbanSurfaceRenderer {
   }
 
   /**
-   * The CYCLE LENS ROW — a quiet line of chips above the columns, one per cycle
-   * that has not ended (`lensCycles`). Click one and the Desk is seen through
+   * The CYCLE LENS ROW — a quiet line of chips at the right end of the view tab
+   * strip, one per cycle that has not ended (`lensCycles`). Click one and the
+   * Desk is seen through
    * it: the cycle's members keep full strength, everything else recedes, and
    * members that were resting surface as ghosts in the column they would sit
    * in. Click it again (or its ✕) and the Desk is exactly what it was.

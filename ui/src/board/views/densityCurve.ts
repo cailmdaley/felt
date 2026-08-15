@@ -25,11 +25,12 @@
  *            rule, bullet and gridline on the page is drawn in, so the spine
  *            read as chrome standing up. A spine rises
  *            to the CURVE'S OWN HEIGHT at that minute — your message is drawn
- *            inside the work it landed in, not over the top of the row — with a
- *            floor under it ({@link spineFloor}) so a message sent while
- *            nothing was running is still a mark you can see and point at. The
- *            floor is a share of what THAT RAIL's curve reaches, so an accent
- *            can never out-top the day it annotates.
+ *            inside the work it landed in, not over the top of the row — clear
+ *            of it by {@link SPINE_ACCENT} so the tip can be found, and never
+ *            shorter than {@link SPINE_MIN_HEIGHT} so a message sent while
+ *            nothing was running is still a mark you can see and point at.
+ *            Every term is local to the spine's own minute, so an accent can
+ *            never out-top the mound it annotates.
  *
  * Human events are therefore NOT in the height field at all. They were, once,
  * along with a whole colour channel that painted their neighbourhood teal; both
@@ -175,66 +176,42 @@ export function weekSigma(spanMinutes: number): number {
 export const PEAK_FLOOR = Math.log1p(4)
 
 /**
- * The tallest a FLOORED spine may be drawn, as a fraction of the row's height.
+ * How far a spine may stand PROUD of the curve at its own minute.
  *
- * A spine reads the curve under it, and the curve is frequently zero there —
- * you write to an agent that is not running, which is how a great many
- * conversations start. At the true height that message would be a mark of zero
- * pixels: the event that matters most on the rail, invisible. So the floor,
- * chosen by looking: below about a quarter the row a 2px line reads as grit on
- * the paper, and above about a third it stops being distinguishable from a
- * spine standing in real work. 0.3 sits between.
- *
- * This is now the CEILING on the floor rather than the floor itself — see
- * {@link spineFloor}. On a rail whose curve reaches the top of the row it is
- * still exactly 0.3, which is every rail the constant was ever chosen against.
+ * A spine is a mark, not a fill: it has to be findable inside a mound it shares
+ * a column with, so it clears the curve by a little everywhere — enough that
+ * the eye catches the tip, small enough that it never reads as its own peak.
+ * 0.06 of the row is ~1.5px on a week rail: a tick, which is all it needs to be
+ * when there is a mound underneath doing the work of being seen.
  */
-export const SPINE_MIN_HEIGHT = 0.3
+export const SPINE_ACCENT = 0.06
 
 /**
- * The floor's share of what THIS RAIL's own curve reaches.
+ * The shortest any spine is ever drawn, whatever the curve did under it.
  *
- * Half: a spine standing on empty minutes may rise to half the tallest mound
- * the rail managed, and no further. Above that it stops annotating the day and
- * starts competing with it.
+ * A message sent into empty minutes — you write to an agent that is not
+ * running, which is how a great many conversations start — has no mound to rise
+ * out of, and at its true height it would be a mark of zero pixels: the event
+ * that matters most on the rail, invisible. 0.18 is ~4px on a week rail and ~5px
+ * on a day lane, and on paper carrying no other ink that is enough.
+ *
+ * ## Why the minimum is not a floor scaled to anything
+ *
+ * It used to be one end of a rail-relative floor: a spine on quiet paper rose to
+ * half of whatever the RAIL's tallest mound reached, capped at 0.3. That fixed
+ * an earlier bug (a fixed 0.3 floor out-topping a rail normalised down to 0.317)
+ * with the wrong reference point. The rail's maximum is a fact about the busiest
+ * minute of the day; a spine stands at ONE minute, and most spines do not stand
+ * at that one. So a Monday whose afternoon filled the row floored its lone 9am
+ * message at 0.3 — a tower over a 9am bump of 0.08, floating clear of the mound
+ * it was supposed to annotate. Observed on Week for both an isolated Monday
+ * morning bump and an isolated Sunday one.
+ *
+ * The reference point that makes the mark honest is the curve at the spine's own
+ * minute — see {@link spineHeights}. Bounded by that, a spine can no longer
+ * out-top its rail either, since the local height never exceeds the rail's.
  */
-export const SPINE_RAIL_SHARE = 0.5
-
-/**
- * The shortest any spine is ever drawn, whatever the rail did.
- *
- * A rail with no curve at all — a message sent into a day where nothing ran —
- * has no mound to be measured against, and the mark still has to be a mark you
- * can point at. 0.18 is ~4px on a week rail and ~5px on a day lane: smaller
- * than the old fixed floor, and on a rail carrying no other ink, enough.
- */
-export const SPINE_MIN_HEIGHT_ABS = 0.18
-
-/**
- * How tall a spine standing on no curve is drawn, given how tall this rail's
- * curve gets — a share of the rail's own maximum, clamped into
- * [{@link SPINE_MIN_HEIGHT_ABS}, {@link SPINE_MIN_HEIGHT}].
- *
- * ## Why the floor could not stay a constant
- *
- * Every other mark on a rail is scaled by the PAGE's peak ({@link fieldPeak}):
- * a Tuesday whose busiest moment is a third of Friday's draws at a third the
- * height, which is the whole reason the rails are stacked. The floor alone was
- * invariant to that scaling — so on a rail normalised down to 0.3 of the row,
- * a fixed 0.3 floor made every quiet-minute message exactly as tall as the
- * busiest thing that happened all day. Measured on a real week (2026-08-01, a
- * quiet Saturday in a week holding a twelve-thousand-event Friday): the rail's
- * tallest mound reached 0.317 of the row and its one spine stood at 0.300.
- * The accent had become the mark.
- *
- * Week feels it first because its seven rails span a much wider range of volume
- * than one day's lanes do, but the flaw was never Week's — it is the same
- * arithmetic in both views, and it is fixed once, here.
- */
-export function spineFloor(railMax: number): number {
-  const share = SPINE_RAIL_SHARE * Math.max(0, railMax)
-  return Math.min(SPINE_MIN_HEIGHT, Math.max(SPINE_MIN_HEIGHT_ABS, share))
-}
+export const SPINE_MIN_HEIGHT = 0.18
 
 /** Kernels are evaluated out to this many sigmas and cut. Beyond 4σ a Gaussian
  *  contributes under 0.04% and only costs time. */
@@ -392,10 +369,14 @@ export function fieldPeak(fields: readonly CurveField[]): number {
 
 /**
  * How tall each spine is drawn, as a fraction of the row — the curve's own
- * height at that minute, floored at {@link spineFloor} of this rail.
+ * height AT THAT MINUTE plus {@link SPINE_ACCENT}, never shorter than
+ * {@link SPINE_MIN_HEIGHT} and never taller than the row.
  *
- * The floor is read from the RAIL and not from a constant, so a spine is an
- * accent on the day it annotates rather than a fixed tower over it.
+ * Everything a spine's height is allowed to know is local to its own minute.
+ * The mound it stands in sets it; the accent lifts its tip clear of that mound
+ * so it can be found; the minimum catches the case of no mound at all. Nothing
+ * about the rest of the rail enters, which is what keeps a lone morning message
+ * from being sized for an afternoon it had nothing to do with.
  *
  * Reading the FIELD rather than the drawn path: the path is cut into runs and
  * is simply absent over a quiet stretch, and a spine there still needs a
@@ -409,13 +390,10 @@ export function fieldPeak(fields: readonly CurveField[]): number {
 export function spineHeights(field: CurveField, peak: number): number[] {
   const scale = peak > 0 ? peak : 1
   const last = field.grid.count - 1
-  let railMax = 0
-  for (const h of field.height) if (h > railMax) railMax = h
-  const floor = spineFloor(Math.min(1, railMax / scale))
   return field.spines.map((minute) => {
     const i = Math.min(last, Math.max(0, Math.round(minute / field.grid.step)))
-    const h = Math.min(1, (field.height[i] ?? 0) / scale)
-    return Math.max(floor, h)
+    const h = (field.height[i] ?? 0) / scale
+    return Math.min(1, Math.max(SPINE_MIN_HEIGHT, h + SPINE_ACCENT))
   })
 }
 

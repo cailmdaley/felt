@@ -140,6 +140,15 @@ export class KanbanModal {
   /** The view tab strip — persistent chrome, built once in assembleChrome. */
   private tabsEl: HTMLDivElement | null = null
   /**
+   * Right-hand end of the tab strip, where the cycle lens chips live. The lens
+   * row used to be a band of its own between the tabs and the columns — a whole
+   * horizontal rule of vertical space spent on chrome that is usually empty.
+   * The tabs never fill their row, so the chips ride in the space already
+   * there. Refilled by `render` (the chips carry live member counts); hidden
+   * off the Desk by `syncViewChrome`, since a lens is a Desk posture.
+   */
+  private lensSlotEl: HTMLDivElement | null = null
+  /**
    * Wrapper around the four Desk surfaces (ribbon + Now + Pinned + Stash).
    * `display: contents` in CSS, so it adds a toggle handle WITHOUT adding a
    * layout box — the sections keep participating in `.kbn-body`'s flex column
@@ -431,6 +440,13 @@ export class KanbanModal {
       tab.addEventListener('click', () => this.setView(spec.id))
       strip.append(tab)
     }
+
+    // The lens slot closes the row on the right (`margin-left: auto`). Empty
+    // until a render finds live cycles — and empty it takes no space, so the
+    // strip is exactly the tab row it was.
+    this.lensSlotEl = document.createElement('div')
+    this.lensSlotEl.className = 'kbn-viewtabs-lens'
+    strip.append(this.lensSlotEl)
     return strip
   }
 
@@ -530,6 +546,9 @@ export class KanbanModal {
     // Leaving the Desk mid-drag takes the horizon with it.
     if (!onDesk) this.syncDragHorizon(false)
     if (this.deskEl) this.deskEl.style.display = onDesk ? '' : 'none'
+    // The chips ride in the tab strip, which every view shares — but the lens
+    // they engage only means anything on the Desk.
+    if (this.lensSlotEl) this.lensSlotEl.style.display = onDesk ? '' : 'none'
     if (this.viewHostEl) this.viewHostEl.style.display = onDesk ? 'none' : ''
     for (const tab of this.tabsEl?.querySelectorAll<HTMLElement>('.kbn-viewtab') ?? []) {
       const selected = tab.dataset.view === this.activeViewId
@@ -688,6 +707,7 @@ export class KanbanModal {
     this.liveEl = null
     this.bannerEl = null
     this.tabsEl = null
+    this.lensSlotEl = null
     this.deskEl = null
     this.viewHostEl = null
     this.activeView = null
@@ -1499,7 +1519,10 @@ export class KanbanModal {
       this.lensCycleId,
       (cycleId) => this.setLensCycle(cycleId),
     )
-    if (lensBar) this.deskEl.append(lensBar)
+    if (this.lensSlotEl) {
+      this.lensSlotEl.innerHTML = ''
+      if (lensBar) this.lensSlotEl.append(lensBar)
+    }
 
     this.deskEl.append(this.surfaces.renderNowSection(now, staleness, lens))
     // The Pinned strip always renders (a permanent park/drop target) — see

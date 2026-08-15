@@ -13,8 +13,8 @@ import {
   DAY_KERNELS_PER_AXIS,
   DAY_SIGMA_FLOOR_MINUTES,
   PEAK_FLOOR,
+  SPINE_ACCENT,
   SPINE_MIN_HEIGHT,
-  SPINE_MIN_HEIGHT_ABS,
   WEEK_KERNELS_PER_AXIS,
   WEEK_SIGMA_FLOOR_MINUTES,
   curveField,
@@ -28,7 +28,6 @@ import {
   ladderPitch,
   ladderRows,
   smear,
-  spineFloor,
   spineHeights,
   spineWidths,
   weekSigma,
@@ -292,74 +291,82 @@ describe('spineHeights — your message, drawn inside the work it landed in', ()
     const grid = curveGrid(60, sigma)
     const alone = curveField([], grid, [25], sigma)
     const loud = curveField([{ minute: 40, human: 0, agent: 400 }], grid, [], sigma)
-    expect(spineHeights(alone, fieldPeak([alone, loud]))).toEqual([SPINE_MIN_HEIGHT_ABS])
+    expect(spineHeights(alone, fieldPeak([alone, loud]))).toEqual([SPINE_MIN_HEIGHT])
   })
 
-  it('never lets a floored spine out-top the rail it stands on', () => {
-    // THE WEEK BUG. Seven rails share one peak, so a quiet Saturday beside a
-    // twelve-thousand-event Friday draws its whole day at a third of the row —
-    // while a fixed floor kept every quiet-minute message at 0.3, exactly as
-    // tall as the busiest thing that happened all day. The accent became the
-    // mark. Measured against the real week of 2026-08-01: railMax 0.317,
-    // spine 0.300.
-    const sigma = daySigma(120)
-    const grid = curveGrid(120, sigma)
-    // A quiet rail: a small mound at minute 20, a message at minute 90 with no
-    // curve under it at all.
-    const quiet = curveField([{ minute: 20, human: 0, agent: 3 }], grid, [90], sigma)
-    const loud = curveField([{ minute: 60, human: 0, agent: 4000 }], grid, [], sigma)
-    const peak = fieldPeak([quiet, loud])
-    const railMax = Math.max(...quiet.height) / peak
-    const [spine] = spineHeights(quiet, peak)
+  it('never out-tops the small mound it stands in, however busy the rest of the rail', () => {
+    // THE WEEK BUG, second cut. The floor used to be sized from the RAIL's
+    // tallest mound — so a day whose afternoon filled the row floored its lone
+    // morning message at 0.3, a tower floating clear of a 9am bump of 0.08.
+    // Every term is local now: a spine on a small bump clears that bump by the
+    // accent and no more.
+    const sigma = daySigma(600)
+    const grid = curveGrid(600, sigma)
+    const field = curveField(
+      [
+        { minute: 60, human: 1, agent: 3 }, // the small morning bump
+        { minute: 400, human: 0, agent: 4000 }, // the afternoon that fills the row
+      ],
+      grid,
+      [60],
+      sigma,
+    )
+    const peak = fieldPeak([field])
+    const local = field.height[Math.round(60 / grid.step)] / peak
+    const [spine] = spineHeights(field, peak)
 
-    expect(railMax).toBeLessThan(SPINE_MIN_HEIGHT)
-    // The floored spine is an accent on the rail, not a tower over it.
-    expect(spine).toBeLessThanOrEqual(SPINE_MIN_HEIGHT)
-    expect(spine).toBeGreaterThanOrEqual(SPINE_MIN_HEIGHT_ABS)
+    expect(Math.max(...field.height) / peak).toBe(1) // the rail does reach the top
+    expect(local).toBeLessThan(SPINE_MIN_HEIGHT) // the bump under the spine does not
+    expect(spine).toBeLessThanOrEqual(Math.max(SPINE_MIN_HEIGHT, local + SPINE_ACCENT))
   })
 
-  it('leaves a rail that reaches the top of the row at the floor it was tuned to', () => {
-    // The other half of the guarantee: the constant was chosen by looking at
-    // busy rails, and on a busy rail nothing may move.
+  it('bounds every spine by its own local curve plus the accent', () => {
+    // The invariant, stated once over a whole rail of mixed heights: a spine is
+    // its mound plus a tick, or the bare minimum where there is no mound. It is
+    // never anything else, and in particular never floor-driven past its mound.
+    const sigma = daySigma(720)
+    const grid = curveGrid(720, sigma)
+    const samples = [
+      { minute: 30, human: 0, agent: 1 },
+      { minute: 200, human: 0, agent: 40 },
+      { minute: 500, human: 0, agent: 2000 },
+    ]
+    const spines = [30, 120, 200, 350, 500, 700]
+    const field = curveField(samples, grid, spines, sigma)
+    const peak = fieldPeak([field])
+    const heights = spineHeights(field, peak)
+    heights.forEach((h, i) => {
+      const local = field.height[Math.round(field.spines[i] / grid.step)] / peak
+      expect(h).toBeCloseTo(Math.min(1, Math.max(SPINE_MIN_HEIGHT, local + SPINE_ACCENT)), 10)
+      expect(h).toBeLessThanOrEqual(Math.max(SPINE_MIN_HEIGHT, local + SPINE_ACCENT))
+    })
+  })
+
+  it('stands proud of a mound it shares a column with, so the tip can be found', () => {
     const sigma = daySigma(60)
     const grid = curveGrid(60, sigma)
-    const field = curveField([{ minute: 30, human: 0, agent: 400 }], grid, [5], sigma)
-    const peak = fieldPeak([field])
-    expect(Math.max(...field.height) / peak).toBe(1)
-    expect(spineHeights(field, peak)).toEqual([SPINE_MIN_HEIGHT])
+    const field = curveField([{ minute: 30, human: 1, agent: 40 }], grid, [30], sigma)
+    // Measured against a page whose peak is elsewhere, so the local height has
+    // room to be exceeded rather than clamped at the top of the row.
+    const peak = fieldPeak([field]) * 2
+    const local = field.height[Math.round(30 / grid.step)] / peak
+    expect(spineHeights(field, peak)[0]).toBeCloseTo(local + SPINE_ACCENT, 10)
+  })
+
+  it('draws a message on empty paper at the minimum, whatever the rail did', () => {
+    // The rail no longer enters at all: a busy rail and a quiet one floor an
+    // unaccompanied message identically.
+    const sigma = daySigma(60)
+    const grid = curveGrid(60, sigma)
+    const busy = curveField([{ minute: 30, human: 0, agent: 400 }], grid, [5], sigma)
+    const quiet = curveField([{ minute: 30, human: 0, agent: 2 }], grid, [5], sigma)
+    const peak = fieldPeak([busy, quiet])
+    expect(spineHeights(busy, peak)).toEqual([SPINE_MIN_HEIGHT])
+    expect(spineHeights(quiet, peak)).toEqual([SPINE_MIN_HEIGHT])
   })
 })
 
-describe('spineFloor — the floor is a property of the rail, not a constant', () => {
-  it('is the tuned floor for a rail whose curve fills the row', () => {
-    expect(spineFloor(1)).toBe(SPINE_MIN_HEIGHT)
-  })
-
-  it('is the absolute minimum for a rail with no curve at all', () => {
-    expect(spineFloor(0)).toBe(SPINE_MIN_HEIGHT_ABS)
-  })
-
-  it('is half the rail between the two clamps', () => {
-    expect(spineFloor(0.5)).toBeCloseTo(0.25, 10)
-    expect(spineFloor(0.45)).toBeCloseTo(0.225, 10)
-  })
-
-  it('never rises above the tuned floor, however tall the rail', () => {
-    expect(spineFloor(0.8)).toBe(SPINE_MIN_HEIGHT)
-    expect(spineFloor(4)).toBe(SPINE_MIN_HEIGHT)
-  })
-
-  it('never falls below the absolute minimum, however flat the rail', () => {
-    expect(spineFloor(0.01)).toBe(SPINE_MIN_HEIGHT_ABS)
-    expect(spineFloor(-1)).toBe(SPINE_MIN_HEIGHT_ABS)
-  })
-
-  it('rises with the rail — a busier day floors its spines higher', () => {
-    const heights = [0, 0.2, 0.4, 0.6, 0.8, 1].map(spineFloor)
-    for (let i = 1; i < heights.length; i += 1) {
-      expect(heights[i]).toBeGreaterThanOrEqual(heights[i - 1])
-    }
-  })
+describe('spineHeights — the clamps', () => {
 
   it('never exceeds the full row, however suppressed the peak it is measured against', () => {
     const sigma = daySigma(20)
