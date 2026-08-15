@@ -464,10 +464,7 @@ defmodule ShuttleWeb.APIControllerTest do
       post(
         api_conn(),
         "/api/v1/dispatch",
-        Jason.encode!(%{
-          "fiber_id" => "tests/api-dispatch",
-          "notify_on_exit" => true
-        })
+        Jason.encode!(%{"fiber_id" => "tests/api-dispatch"})
       )
 
     assert conn.status == 200
@@ -475,8 +472,6 @@ defmodule ShuttleWeb.APIControllerTest do
     assert body["dispatched"] == true
     assert body["fiber_id"] == "tests/api-dispatch"
     assert body["tmux_session"] == Dispatcher.session_name("tests/api-dispatch")
-    assert body["notify_on_exit"] == true
-    assert body["channel_topic"] == "shuttle:worker:tests/api-dispatch"
   end
 
   test "dispatch returns 409 for already running fiber" do
