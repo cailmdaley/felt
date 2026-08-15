@@ -3228,14 +3228,13 @@ defmodule Shuttle.PollerTest do
     end)
   end
 
-  test "ad-hoc dispatch refuses an awaiting standing role only when NOT forced" do
-    # Awaiting is felt-native (slice 5): status:closed + untempered. The awaiting
-    # gate exists to stop the *autonomous poller* (non-forced ad_hoc) from
-    # re-firing a role pending a human verdict. A forced ad_hoc dispatch is the
-    # human's explicit "go" from the board (New session / Resume / drag) — it IS
-    # the verdict, so it bypasses the gate and spawns (re-arming the doc on the
-    # way; the re-arm itself is exercised in dispatch_integration_test against a
-    # real felt home). The completed timestamp comes from closed-at.
+  test "ad-hoc dispatch of an awaiting standing role spawns" do
+    # Awaiting is felt-native (slice 5): status:closed + untempered. Every
+    # explicit dispatch carries `force` (the controller folds `force or ad_hoc`;
+    # Shuttle.Transition passes both), and force IS the human's "go" from the
+    # board (New session / Resume / drag) — so an awaiting role spawns, re-arming
+    # the doc on the way (the re-arm itself is exercised in
+    # dispatch_integration_test against a real felt home).
     fiber_id = "tests/standing-awaiting-refuses-adhoc"
 
     fiber =
@@ -3267,16 +3266,11 @@ defmodule Shuttle.PollerTest do
         felt_stores: [MockRunner.felt_root()]
       )
 
-    # Non-forced ad_hoc (the poller's own path) is still refused with the
-    # awaiting marker, and never spawns.
-    assert {:error, {:awaiting_review, "2026-05-24T10:00:00Z"}} =
-             Poller.dispatch_fiber(poller, fiber_id, ad_hoc: true)
-
     refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
              cmd == "tmux" and hd(args) == "new-session"
            end)
 
-    # Forced ad_hoc (the human board action) bypasses the gate and spawns.
+    # Forced ad_hoc (the human board action) dispatches the awaiting role.
     assert {:ok, _session} = Poller.dispatch_fiber(poller, fiber_id, force: true, ad_hoc: true)
 
     assert Enum.any?(MockRunner.commands(), fn {cmd, args} ->

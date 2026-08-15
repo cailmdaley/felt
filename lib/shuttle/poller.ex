@@ -893,9 +893,6 @@ defmodule Shuttle.Poller do
         case fetch_fiber_full(fiber_id, state) do
           {:ok, fiber} ->
             cond do
-              error = awaiting_ad_hoc_dispatch_error(fiber, state, opts) ->
-                {:reply, error, state}
-
               dispatch_eligible?(fiber, state, opts) ->
                 {new_state, result} = do_dispatch_fiber(state, fiber, opts)
                 {:reply, result, new_state}
@@ -1923,7 +1920,7 @@ defmodule Shuttle.Poller do
 
   # Eligibility for an explicit dispatch call (POST /api/v1/dispatch).
   #
-  # Three modes, in priority order:
+  # Two modes, in priority order:
   #
   #   1. `force: true` — manual human-triggered dispatch from the kanban
   #      "New session" / "Resume" buttons. Bypasses every condition except
@@ -1935,23 +1932,18 @@ defmodule Shuttle.Poller do
   #      are all overridden. Closed, composted, disabled, not-yet-due, and
   #      unvalidated fibers all dispatch on force.
   #
-  #   2. `ad_hoc: true` (without `force`) — legacy manual trigger for
-  #      standing roles that bypasses the schedule but still requires the
-  #      role to be otherwise dispatchable (enabled, active, valid, in a
-  #      scheduleable review state). Kept for callers that still rely on it.
-  #
-  #   3. Default — full `eligible?` check (status, enabled, schedule,
+  #   2. Default — full `eligible?` check (status, enabled, schedule,
   #      review state, deps, validity).
+  #
+  # There is no third `ad_hoc`-without-`force` mode: every caller that sets
+  # `ad_hoc` also sets `force` (the controller folds `force: force or ad_hoc`,
+  # `Shuttle.Transition` passes both), and the autonomous tick reaches
+  # `do_dispatch_fiber/2` directly without ever entering this call.
   defp dispatch_eligible?(fiber, state, opts) do
-    cond do
-      Keyword.get(opts, :force, false) ->
-        force_dispatch_eligible?(fiber, state)
-
-      Keyword.get(opts, :ad_hoc, false) and force_dispatchable_standing_role?(fiber, state) ->
-        dependencies_satisfied?(fiber, state)
-
-      true ->
-        eligible?(fiber, state)
+    if Keyword.get(opts, :force, false) do
+      force_dispatch_eligible?(fiber, state)
+    else
+      eligible?(fiber, state)
     end
   end
 
@@ -2007,56 +1999,6 @@ defmodule Shuttle.Poller do
 
       true ->
         {:not_eligible, :not_due_or_blocked}
-    end
-  end
-
-  # Ad-hoc dispatch (`ad_hoc: true`, no `force`) bypasses the cron schedule but
-  # still requires the role to be otherwise dispatchable. The gate is the felt
-  # document: an armed standing role is `status:
-  # active` (a closed/awaiting role is NOT ad-hoc dispatchable — its run is
-  # pending a verdict).
-  defp force_dispatchable_standing_role?(fiber, state) do
-    status = Map.get(fiber, "status", "")
-    fiber_id = Map.get(fiber, "id", "")
-    shuttle = Map.get(fiber, "shuttle")
-
-    with true <- is_map(shuttle),
-         true <- host_owned?(shuttle, state.own_host_id),
-         true <- status == "active",
-         {:ok, role} <- StandingRoles.fetch_standing_role(fiber_id, state),
-         true <- StandingRole.standing?(role),
-         true <- StandingRole.valid?(role) do
-      true
-    else
-      _ -> false
-    end
-  end
-
-  # Awaiting review is felt-native: `status: closed` + untempered. A
-  # NON-forced ad-hoc dispatch against a standing role in that state is refused
-  # with the awaiting marker so the caller surfaces "pending a verdict" rather
-  # than a flat not-eligible.
-  #
-  # `force: true` is the explicit human "go" from the board (New session /
-  # Resume / drag-to-inFlight) — it IS the verdict, so it skips this gate and
-  # `do_dispatch_fiber` re-arms the role to `status: active` as it spawns (see
-  # `force_rearm_standing_role`). The gate therefore only catches the autonomous
-  # poller's own ad-hoc path, which must never re-fire a role pending review.
-  defp awaiting_ad_hoc_dispatch_error(fiber, state, opts) do
-    if Keyword.get(opts, :ad_hoc, false) and not Keyword.get(opts, :force, false) do
-      fiber_id = Map.get(fiber, "id", "")
-      status = Map.get(fiber, "status", "")
-      tempered = Map.get(fiber, "tempered")
-
-      with true <- status == "closed" and is_nil(tempered),
-           {:ok, role} <- StandingRoles.fetch_standing_role(fiber_id, state),
-           true <- StandingRole.standing?(role) do
-        {:error, {:awaiting_review, Map.get(fiber, "closed-at")}}
-      else
-        _ -> false
-      end
-    else
-      false
     end
   end
 

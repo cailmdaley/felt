@@ -588,10 +588,7 @@ defmodule ShuttleWeb.APIControllerTest do
     # /dispatch path folds ad_hoc into force (`force: force or ad_hoc`), so an
     # explicit dispatch IS the human verdict: it bypasses the awaiting gate,
     # re-arms the doc, and spawns — instead of the old 422 that told the user to
-    # `felt shuttle accept/resume` first. (The autonomous poller, which calls
-    # dispatch_fiber in-process with ad_hoc and NOT force, is still gated — see
-    # PollerTest "ad-hoc dispatch refuses an awaiting standing role only when NOT
-    # forced".)
+    # `felt shuttle accept/resume` first.
     fiber_id = "tests/api-awaiting-refuses-adhoc"
 
     fiber =
