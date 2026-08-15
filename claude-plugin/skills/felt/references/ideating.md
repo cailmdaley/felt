@@ -147,18 +147,6 @@ This is a mirror, not a gate. If the user wants to file anyway with one dimensio
 
 ---
 
-## When to bring in /confer
-
-`/confer` routes a prompt through Codex for adversarial review. Good fits inside an ideating session:
-
-- A design choice where two plausible paths both look right and the user is stuck
-- Validating that an insight claim actually follows from its evidence
-- Pressure-testing a constitution's desired state before launching iteration
-
-Bad fits: routine decisions, the user has already committed, the dispute is stylistic, or the answer only needs three more seconds of thought. `/confer` is not a substitute for the user's taste — it is a second opinion when the first opinion is honestly unsure.
-
----
-
 ## Mapping outputs to fibers
 
 What comes out of the diamonds maps onto fibers like this:
