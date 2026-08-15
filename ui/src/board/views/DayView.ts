@@ -133,6 +133,7 @@ import {
   lastExchange,
   MomentLoader,
   pickMark,
+  placeTip,
   renderTip,
   SLOT_KIND_ORDER,
   SLOT_PHRASE,
@@ -2077,12 +2078,7 @@ class DayViewImpl implements TemporalView {
     tip.classList.toggle('kbn-tip-pinned', pin)
 
     const chartBox = chart.getBoundingClientRect()
-    const anchor = e.clientX - chartBox.left
-    const flip = anchor > chartBox.width * 0.62
-    tip.style.top = `${e.clientY - chartBox.top}px`
-    tip.classList.toggle('kbn-tip-flip', flip)
-    tip.style.left = flip ? 'auto' : `${anchor + 9}px`
-    tip.style.right = flip ? `${chartBox.width - anchor + 9}px` : 'auto'
+    placeTip(tip, chartBox, e.clientX - chartBox.left, e.clientY - chartBox.top)
   }
 
   private render(model: DayModel): void {
@@ -2540,15 +2536,10 @@ class DayViewImpl implements TemporalView {
     // is allowed to grow. See momentTip.css.
     tip.classList.toggle('kbn-tip-pinned', pin)
 
-    // Positioned against the chart, and flipped past the right edge so a late
-    // minute does not push the slip off the sheet.
+    // Positioned against the chart; the anchor is the beat's own column.
     const chartBox = chart.getBoundingClientRect()
     const anchor = box.left - chartBox.left + (beat.minute + 0.5) * perMinute
-    const flip = anchor > chartBox.width * 0.62
-    tip.style.top = `${box.top - chartBox.top}px`
-    tip.classList.toggle('kbn-tip-flip', flip)
-    tip.style.left = flip ? 'auto' : `${anchor + 9}px`
-    tip.style.right = flip ? `${chartBox.width - anchor + 9}px` : 'auto'
+    placeTip(tip, chartBox, anchor, box.top - chartBox.top)
   }
 
   /**
@@ -2645,12 +2636,7 @@ class DayViewImpl implements TemporalView {
     tip.classList.toggle('kbn-tip-pinned', pin)
 
     const chartBox = chart.getBoundingClientRect()
-    const anchor = e.clientX - chartBox.left
-    const flip = anchor > chartBox.width * 0.62
-    tip.style.top = `${e.clientY - chartBox.top}px`
-    tip.classList.toggle('kbn-tip-flip', flip)
-    tip.style.left = flip ? 'auto' : `${anchor + 9}px`
-    tip.style.right = flip ? `${chartBox.width - anchor + 9}px` : 'auto'
+    placeTip(tip, chartBox, e.clientX - chartBox.left, e.clientY - chartBox.top)
   }
 
   /**

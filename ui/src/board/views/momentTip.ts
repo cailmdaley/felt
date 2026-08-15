@@ -8,8 +8,9 @@
  * different geometry — but the same question when you point at one: *what was
  * happening here?* The answer has the same shape either way (a time span, one
  * line per pigment saying who and how much, then the words), so it is built and
- * drawn once here. The views keep only their own snapping and positioning,
- * which is the part that genuinely differs.
+ * drawn once here. The views keep only their own snapping — where the anchor
+ * falls, which is the part that genuinely differs; how the slip hangs off that
+ * anchor is `placeTip`, and is the same rule everywhere.
  *
  * ## The words
  *
@@ -565,6 +566,30 @@ export function renderTip(host: HTMLElement, tip: SlotTip): void {
     foot.textContent = tip.note
     host.append(foot)
   }
+}
+
+/** Past this much of the container's width the slip hangs off the anchor's
+ *  left instead of its right, so a late minute does not push it off the sheet. */
+const TIP_FLIP_FRACTION = 0.62
+
+/** The gap between the anchor and the near edge of the slip, either way round. */
+const TIP_GAP_PX = 9
+
+/**
+ * Hang the slip off an anchor.
+ *
+ * `box` is the container the tip is positioned within — the same element it was
+ * appended to — measured by the caller, and `anchorX`/`topPx` are already in
+ * that box's coordinates. That split is the whole point: WHERE the mark is
+ * differs per view (a pointer position, a minute fraction, a slot fraction) and
+ * stays with the view; how a slip hangs off it does not, and lives here.
+ */
+export function placeTip(tip: HTMLElement, box: DOMRect, anchorX: number, topPx: number): void {
+  const flip = anchorX > box.width * TIP_FLIP_FRACTION
+  tip.style.top = `${topPx}px`
+  tip.classList.toggle('kbn-tip-flip', flip)
+  tip.style.left = flip ? 'auto' : `${anchorX + TIP_GAP_PX}px`
+  tip.style.right = flip ? `${box.width - anchorX + TIP_GAP_PX}px` : 'auto'
 }
 
 // ── Fetching the words ───────────────────────────────────────────────────────

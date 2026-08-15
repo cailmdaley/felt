@@ -11,6 +11,7 @@ import {
   dedupeSources,
   MomentLoader,
   lastExchange,
+  placeTip,
   renderExcerptMarkdown,
   pickMark,
   renderTip,
@@ -637,6 +638,44 @@ describe('renderTip — the excerpt cards', () => {
       'Bash — run the tests',
       'Read — DayView.ts',
     ])
+  })
+})
+
+describe('placeTip — the slip hangs off the anchor, and flips before the edge', () => {
+  const box = { width: 1000, height: 300 } as DOMRect
+  const fakeTip = () => {
+    const flipped = { on: false }
+    return {
+      style: {} as Record<string, string>,
+      classList: { toggle: (_: string, on: boolean) => void (flipped.on = on) },
+      flipped,
+    }
+  }
+  const place = (anchorX: number, topPx = 40) => {
+    const tip = fakeTip()
+    placeTip(tip as unknown as HTMLElement, box, anchorX, topPx)
+    return tip
+  }
+
+  it('hangs to the right of an early anchor, with the gap between', () => {
+    const tip = place(100)
+    expect(tip.flipped.on).toBe(false)
+    expect(tip.style.left).toBe('109px')
+    expect(tip.style.right).toBe('auto')
+    expect(tip.style.top).toBe('40px')
+  })
+
+  it('flips past 62% of the box so a late mark does not push it off the sheet', () => {
+    const tip = place(700)
+    expect(tip.flipped.on).toBe(true)
+    expect(tip.style.left).toBe('auto')
+    // Measured from the box's right edge: 1000 - 700 + 9.
+    expect(tip.style.right).toBe('309px')
+  })
+
+  it('does not flip exactly on the fraction — the threshold is strictly past it', () => {
+    expect(place(620).flipped.on).toBe(false)
+    expect(place(621).flipped.on).toBe(true)
   })
 })
 
