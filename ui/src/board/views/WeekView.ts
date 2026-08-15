@@ -508,10 +508,6 @@ export function annotationFor(
   return parts.join(' · ')
 }
 
-// Re-exported for callers that historically imported it from here — the
-// definition now lives in vocabulary.ts, shared with Day and Chronicle.
-export { messageClause } from './vocabulary.js'
-
 /** `12h` · `45m` — the header's coarser hand. */
 function formatCoarseSpan(ms: number): string {
   const minutes = Math.round(ms / 60_000)
@@ -650,8 +646,6 @@ export function cyclesInWeek(
 const CYCLE_CHIP_LIMIT = 2
 
 // ── Future marks ─────────────────────────────────────────────────────────────
-
-export type { MarkKind }
 
 export interface DayMark {
   kind: MarkKind

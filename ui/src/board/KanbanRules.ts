@@ -547,12 +547,6 @@ export function nextStandingLaunch(
   }
 }
 
-export function parseDueMs(value: unknown): number | undefined {
-  if (typeof value !== 'string' || !value.trim()) return undefined;
-  const ms = Date.parse(value);
-  return Number.isFinite(ms) ? ms : undefined;
-}
-
 function normalizeHorizon(value: unknown): KanbanHorizon | undefined {
   if (typeof value !== 'string') return undefined;
   const trimmed = value.trim();
