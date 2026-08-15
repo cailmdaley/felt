@@ -234,7 +234,7 @@ place and the card lands in Awaiting review.
 ## Configuring agents
 
 `felt shuttle agents` prints the effective registry. It layers your own file
-over the 17-agent shipped default fleet. Set `$FELT_AGENTS_FILE` to choose the
+over the 16-agent shipped default fleet. Set `$FELT_AGENTS_FILE` to choose the
 path; otherwise felt reads `~/.config/felt/agents.json`.
 
 ```bash
@@ -244,9 +244,9 @@ felt shuttle agents --source user
 ```
 
 Each record names a CLI, a model, and its axis metadata (`effort_levels`,
-`default_effort`, `chrome_capable`). `share/agents.example.json` in the repo
-works every field across several harnesses — copy from it. A missing file is
-silent. A malformed file fails loudly and names the path.
+`default_effort`, `chrome_capable`). `felt shuttle agents init` seeds the file
+from the built-ins, working every field across several harnesses — edit that. A
+missing file is silent. A malformed file fails loudly and names the path.
 
 The file's `builtins` key controls the merge. `"merge"` (the default) folds your
 records over the built-ins by id, last one wins. `"restrict"` drops the built-in

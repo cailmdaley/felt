@@ -6,8 +6,7 @@ import _ "embed"
 // set every felt binary ships with, compiled in so the registry needs no
 // on-disk file at runtime. Account-specific additions and host restrictions
 // still belong in ~/.config/felt/agents.json (or $FELT_AGENTS_FILE), which
-// LoadAgentRegistry layers on top — see registry_config.go and
-// share/agents.example.json.
+// LoadAgentRegistry layers on top — see registry_config.go.
 //
 //go:embed agents.builtin.json
 var embeddedAgentJSON []byte
