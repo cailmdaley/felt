@@ -15,7 +15,9 @@
 # systemd user unit's Restart=always, or the tmux respawn loop) → verify
 # git_short_sha flipped → release the boot quarantine the restart armed.
 # Remote hosts also get ui/dist rsync'd (clusters don't build the UI; macOS is
-# the build host).
+# the build host). The operator agent registry is synced too: the board reads
+# the local registry, while owner-routed mutations resolve agents on the
+# owning host.
 #
 # The fleet is NOT written here. It comes from ~/.config/felt/remotes.json
 # ($FELT_REMOTES_FILE overrides) — the same file the daemon and `felt shuttle
@@ -29,6 +31,7 @@
 set -uo pipefail
 
 FLEET_FILE="${FELT_REMOTES_FILE:-$HOME/.config/felt/remotes.json}"
+AGENTS_FILE="${FELT_AGENTS_FILE:-$HOME/.config/felt/agents.json}"
 
 # The fleet file rendered as TSV: name, ssh destination, checkout, auth, flags.
 # jq if it is installed, python3 otherwise — the file is read on the deploy host
@@ -212,6 +215,12 @@ deploy_remote() {
     || { bad "ssh unreachable (expired cert / no ControlMaster? see AGENTS.md hosts section)"; return 1; }
   ssh $flags "$dest" "$REMOTE_PATH && cd $dir && git pull --ff-only -q && make daemon" >/dev/null \
     || { bad "pull/build failed"; return 1; }
+  if [ -f "$AGENTS_FILE" ]; then
+    ssh $flags "$dest" "mkdir -p ~/.config/felt" \
+      || { bad "could not prepare remote agent registry"; return 1; }
+    rsync -az -e "ssh $flags" "$AGENTS_FILE" "$dest:.config/felt/agents.json" \
+      || { bad "could not sync agent registry"; return 1; }
+  fi
   rsync -az -e "ssh $flags" "$REPO/ui/dist/" "$dest:$dir/ui/dist/" 2>/dev/null || true
   # Cycle: the respawn loop owns the daemon; kill the :4000 listener and it
   # restarts from the rebuilt escript (make stop targets the wrong pidfile).
