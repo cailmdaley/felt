@@ -13,7 +13,7 @@ import (
 // than the built-ins; trimming the shipped set must not touch them.
 func loadReg(t *testing.T) *AgentRegistry {
 	t.Helper()
-	reg, err := LoadAgentRegistryFromFile(filepath.Join("testdata", "agents.fleet.json"))
+	reg, err := loadAgentRegistryFromFile(filepath.Join("testdata", "agents.fleet.json"))
 	if err != nil {
 		t.Fatalf("loading fleet fixture: %v", err)
 	}
@@ -148,12 +148,12 @@ func TestValidate_AxesIntegration(t *testing.T) {
 	}
 }
 
-func TestBaseIDsIncludesChromeBase(t *testing.T) {
+func TestChromeCapableAgentIsABase(t *testing.T) {
 	reg := loadReg(t)
-	for _, id := range reg.BaseIDs() {
-		if id == "claude-opus" {
+	for _, rec := range reg.Records() {
+		if !rec.IsAlias() && rec.ID == "claude-opus" {
 			return
 		}
 	}
-	t.Fatal("BaseIDs omitted chrome-capable claude-opus")
+	t.Fatal("base records omitted chrome-capable claude-opus")
 }

@@ -206,15 +206,15 @@ func TestPrevNextBracketNow(t *testing.T) {
 // ---- Agent registry ---------------------------------------------------------
 
 func TestAgentRegistry_FindByID(t *testing.T) {
-	// Build a minimal registry via LoadAgentRegistryFromFile on a temp JSON.
+	// Build a minimal registry via loadAgentRegistryFromFile on a temp JSON.
 	dir := t.TempDir()
 	agentJSON := `[{"id":"test-agent","cli":"test","wrapper":"test","aliases":[],"default":true}]`
 	agentsPath := filepath.Join(dir, "agents.json")
 	_ = os.WriteFile(agentsPath, []byte(agentJSON), 0644)
 
-	reg, err := LoadAgentRegistryFromFile(agentsPath)
+	reg, err := loadAgentRegistryFromFile(agentsPath)
 	if err != nil {
-		t.Fatalf("LoadAgentRegistryFromFile: %v", err)
+		t.Fatalf("loadAgentRegistryFromFile: %v", err)
 	}
 	a, ok := reg.Find("test-agent")
 	if !ok {
@@ -229,7 +229,7 @@ func TestAgentRegistry_FindByAlias(t *testing.T) {
 	dir := t.TempDir()
 	agentJSON := `[{"id":"my-agent","cli":"cli","wrapper":"w","aliases":["shortname"],"default":false}]`
 	_ = os.WriteFile(filepath.Join(dir, "agents.json"), []byte(agentJSON), 0644)
-	reg, _ := LoadAgentRegistryFromFile(filepath.Join(dir, "agents.json"))
+	reg, _ := loadAgentRegistryFromFile(filepath.Join(dir, "agents.json"))
 
 	_, ok := reg.Find("shortname")
 	if !ok {
@@ -241,7 +241,7 @@ func TestValidate_UnknownAgent(t *testing.T) {
 	dir := t.TempDir()
 	agentJSON := `[{"id":"known","cli":"cli","wrapper":"w","aliases":[],"default":true}]`
 	_ = os.WriteFile(filepath.Join(dir, "agents.json"), []byte(agentJSON), 0644)
-	agents, _ := LoadAgentRegistryFromFile(filepath.Join(dir, "agents.json"))
+	agents, _ := loadAgentRegistryFromFile(filepath.Join(dir, "agents.json"))
 
 	b := &Block{Kind: "oneshot", ProjectDir: "/tmp/project", Host: "test-host", Agent: "unknown-agent"}
 	errs := Validate(b, agents)
