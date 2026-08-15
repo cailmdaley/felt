@@ -23,14 +23,14 @@
  *            addressed to somebody. Iron gall carried this before, and it was
  *            the highest-contrast ink available — but it is also the ink every
  *            rule, bullet and gridline on the page is drawn in, so the spine
- *            read as chrome standing up. A spine rises
- *            to the CURVE'S OWN HEIGHT at that minute — your message is drawn
- *            inside the work it landed in, not over the top of the row — clear
- *            of it by {@link SPINE_ACCENT} so the tip can be found, and never
- *            shorter than {@link SPINE_MIN_HEIGHT} so a message sent while
- *            nothing was running is still a mark you can see and point at.
- *            Every term is local to the spine's own minute, so an accent can
- *            never out-top the mound it annotates.
+ *            read as chrome standing up. A spine rises to the CURVE'S OWN
+ *            HEIGHT at that minute and not one pixel further — your message is
+ *            drawn inside the work it landed in, tip ON the edge of the mound,
+ *            never through it. Only where there is no mound at all does it fall
+ *            back to {@link SPINE_MIN_HEIGHT}, so a message sent while nothing
+ *            was running is still a mark you can see and point at. Every term
+ *            is local to the spine's own minute, so a spine can never out-top
+ *            the mound it annotates.
  *
  * Human events are therefore NOT in the height field at all. They were, once,
  * along with a whole colour channel that painted their neighbourhood teal; both
@@ -176,18 +176,24 @@ export function weekSigma(spanMinutes: number): number {
 export const PEAK_FLOOR = Math.log1p(4)
 
 /**
- * How far a spine may stand PROUD of the curve at its own minute.
+ * THE ACCENT IS GONE — the spine no longer stands proud of anything.
  *
- * A spine is a mark, not a fill: it has to be findable inside a mound it shares
- * a column with, so it clears the curve by a little everywhere — enough that
- * the eye catches the tip, small enough that it never reads as its own peak.
- * 0.06 of the row is ~1.5px on a week rail: a tick, which is all it needs to be
- * when there is a mound underneath doing the work of being seen.
+ * It was 0.06 of the row added to the local curve height, on the reasoning that
+ * a mark has to be findable inside the mound it shares a column with. What it
+ * actually bought was a guaranteed violation: wherever there was real ink under
+ * a spine, the spine's tip cleared the mound's own top by exactly the accent.
+ * Small, reliable, and visible the moment you zoomed a screenshot — cinnabar
+ * poking out of cobalt everywhere, which is the one thing a mark drawn INSIDE
+ * the work is not allowed to do.
+ *
+ * Findability was never the height's job anyway. The spine is cinnabar on a
+ * cobalt wash, drawn last and therefore over the top, with its own stroke width
+ * carrying the crowd channel — three ways to be found that cost no altitude.
+ * See {@link spineHeights} for the rule that replaced it.
  */
-export const SPINE_ACCENT = 0.06
 
 /**
- * The shortest any spine is ever drawn, whatever the curve did under it.
+ * The shortest a spine on EMPTY PAPER is drawn — and nowhere else.
  *
  * A message sent into empty minutes — you write to an agent that is not
  * running, which is how a great many conversations start — has no mound to rise
@@ -213,6 +219,14 @@ export const SPINE_ACCENT = 0.06
  * The reference point that makes the mark honest is the curve at the spine's own
  * minute — see {@link spineHeights}. Bounded by that, a spine can no longer
  * out-top its rail either, since the local height never exceeds the rail's.
+ *
+ * ## The minimum applies ONLY where there is no curve
+ *
+ * A floor that also lifted spines standing in shallow-but-real mounds would be
+ * the same overshoot by another route. So this number is reached only where the
+ * curve is not drawn at all ({@link QUIET} and below) — blank paper, a message
+ * into empty minutes. A spine over a mound half this tall is drawn half this
+ * tall, and reads correctly, because the mound is there to be read with it.
  */
 export const SPINE_MIN_HEIGHT = 0.18
 
@@ -391,18 +405,35 @@ export function fieldPeak(fields: readonly CurveField[]): number {
 }
 
 /**
- * How tall each spine is drawn, as a fraction of the row — the curve's own
- * height AT THAT MINUTE plus {@link SPINE_ACCENT}, never shorter than
- * `minHeight` and never taller than the row.
+ * How tall each spine is drawn, as a fraction of the row.
+ *
+ * ONE RULE, AND IT IS AN INEQUALITY: a spine never rises above the curve it
+ * stands in. Where there is a mound under the spine, the spine is drawn to
+ * EXACTLY the mound's height at that x — tip on the edge, not through it. Only
+ * where the curve is not drawn at all ({@link QUIET} and below: blank paper) does
+ * the spine fall back to `minHeight`, and that is the single case in which a
+ * spine's tip sits over nothing. In SVG terms, with y growing downward, the
+ * spine's y1 is >= the path's y at the same x, everywhere ink exists.
+ *
+ * ```
+ * h = local curve height at the spine's x, normalised
+ * spine = h > QUIET ? min(1, h) : minHeight
+ * ```
+ *
+ * The old rule added {@link SPINE_ACCENT} — a small constant lift so the tip
+ * could be found — and that made the violation universal by construction: every
+ * spine over real ink cleared its mound by the accent. Findability moved onto
+ * channels that cost no height (cinnabar over cobalt, drawn last, width as the
+ * crowd channel), and the accent is gone. The floor moved too: it now applies
+ * only on blank paper, since flooring a spine that stands in a shallow mound
+ * would re-open the same overshoot through the other term.
  *
  * `minHeight` defaults to {@link SPINE_MIN_HEIGHT} — Day's rail — because the
  * floor is the one part of this arithmetic denominated in pixels, and a row
  * fraction only converts to pixels once you know the row. Week passes
  * {@link WEEK_SPINE_MIN_HEIGHT}.
  *
- * Everything a spine's height is allowed to know is local to its own minute.
- * The mound it stands in sets it; the accent lifts its tip clear of that mound
- * so it can be found; the minimum catches the case of no mound at all. Nothing
+ * Everything a spine's height is allowed to know is local to its own x. Nothing
  * about the rest of the rail enters, which is what keeps a lone morning message
  * from being sized for an afternoon it had nothing to do with.
  *
@@ -410,10 +441,12 @@ export function fieldPeak(fields: readonly CurveField[]): number {
  * is simply absent over a quiet stretch, and a spine there still needs a
  * number. The field answers everywhere.
  *
- * The grid point is the nearest one, not an interpolation between two. At one
- * point per minute the nearest point IS the minute; at a week's coarser grid
- * the difference is a fraction of a pixel of height on a mark whose meaning is
- * its horizontal position.
+ * INTERPOLATED, not nearest-grid. The curve is drawn as a polyline through the
+ * grid points, so on a rising flank the drawn height between two points is the
+ * linear blend — and rounding to the nearer point would hand a spine the taller
+ * neighbour's height and put its tip back above the stroke. Linear interpolation
+ * IS the drawn path, so equality holds exactly, not approximately. (At Day's one
+ * point per minute the two agree anyway; Week's coarser grid is where it counts.)
  */
 export function spineHeights(
   field: CurveField,
@@ -423,9 +456,14 @@ export function spineHeights(
   const scale = peak > 0 ? peak : 1
   const last = field.grid.count - 1
   return field.spines.map((minute) => {
-    const i = Math.min(last, Math.max(0, Math.round(minute / field.grid.step)))
-    const h = (field.height[i] ?? 0) / scale
-    return Math.min(1, Math.max(minHeight, h + SPINE_ACCENT))
+    const t = Math.min(last, Math.max(0, minute / field.grid.step))
+    const lo = Math.floor(t)
+    const hi = Math.min(last, lo + 1)
+    const frac = t - lo
+    const a = (field.height[lo] ?? 0) / scale
+    const b = (field.height[hi] ?? 0) / scale
+    const h = a + (b - a) * frac
+    return h > QUIET ? Math.min(1, h) : minHeight
   })
 }
 

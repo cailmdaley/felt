@@ -4,8 +4,8 @@
  * to exercise. Every test below is checking the doctrine set out in
  * densityCurve.ts's own module comment, not just the numbers: HEIGHT is
  * log-compressed AGENT volume, compressed PER EVENT before it is smeared, and
- * SPINES are discrete marks laid over that field, drawn to its own height
- * with a floor under them.
+ * SPINES are discrete marks laid over that field, drawn to EXACTLY its own
+ * height where there is a mound, and to a floor only on blank paper.
  */
 
 import { describe, expect, it } from 'vitest'
@@ -13,7 +13,6 @@ import {
   DAY_KERNELS_PER_AXIS,
   DAY_SIGMA_FLOOR_MINUTES,
   PEAK_FLOOR,
-  SPINE_ACCENT,
   SPINE_MIN_HEIGHT,
   WEEK_SPINE_MIN_HEIGHT,
   WEEK_KERNELS_PER_AXIS,
@@ -251,6 +250,16 @@ describe('fieldPeak — a page-wide normaliser, never per-lane', () => {
   })
 })
 
+/** The curve's drawn height at a minute: the linear blend between the two grid
+ *  points bracketing it, which is what the polyline actually draws there. */
+function localAt(field: ReturnType<typeof curveField>, peak: number, minute: number): number {
+  const last = field.grid.count - 1
+  const t = Math.min(last, Math.max(0, minute / field.grid.step))
+  const lo = Math.floor(t)
+  const hi = Math.min(last, lo + 1)
+  return ((field.height[lo] ?? 0) + ((field.height[hi] ?? 0) - (field.height[lo] ?? 0)) * (t - lo)) / peak
+}
+
 describe('spineHeights — your message, drawn inside the work it landed in', () => {
   it("rises to the curve's own height where the agents were busy", () => {
     const minute = 20
@@ -262,8 +271,7 @@ describe('spineHeights — your message, drawn inside the work it landed in', ()
     // The spine stands in the tallest moment on the page, so it is the full
     // height of the row — and comfortably above the floor, which is what makes
     // this a test of the mapping rather than of the floor.
-    const i = Math.round(minute / grid.step)
-    expect(h).toBeCloseTo(field.height[i] / peak, 10)
+    expect(h).toBeCloseTo(localAt(field, peak, minute), 10)
     expect(h).toBeGreaterThan(SPINE_MIN_HEIGHT)
   })
 
@@ -296,11 +304,10 @@ describe('spineHeights — your message, drawn inside the work it landed in', ()
   })
 
   it('never out-tops the small mound it stands in, however busy the rest of the rail', () => {
-    // THE WEEK BUG, second cut. The floor used to be sized from the RAIL's
-    // tallest mound — so a day whose afternoon filled the row floored its lone
-    // morning message at 0.3, a tower floating clear of a 9am bump of 0.08.
-    // Every term is local now: a spine on a small bump clears that bump by the
-    // accent and no more.
+    // THE WEEK BUG, third cut. The floor used to be sized from the RAIL's
+    // tallest mound — a tower floating clear of a 9am bump. Then the accent
+    // lifted every spine a constant tick above its mound, which was the same
+    // violation made universal. Now: the spine IS the bump.
     const sigma = daySigma(600)
     const grid = curveGrid(600, sigma)
     const field = curveField(
@@ -313,18 +320,19 @@ describe('spineHeights — your message, drawn inside the work it landed in', ()
       sigma,
     )
     const peak = fieldPeak([field])
-    const local = field.height[Math.round(60 / grid.step)] / peak
+    const local = localAt(field, peak, 60)
     const [spine] = spineHeights(field, peak)
 
     expect(Math.max(...field.height) / peak).toBe(1) // the rail does reach the top
     expect(local).toBeLessThan(SPINE_MIN_HEIGHT) // the bump under the spine does not
-    expect(spine).toBeLessThanOrEqual(Math.max(SPINE_MIN_HEIGHT, local + SPINE_ACCENT))
+    // Not floored up to the minimum, and not lifted above the mound either.
+    expect(spine).toBeCloseTo(local, 10)
+    expect(spine).toBeLessThan(SPINE_MIN_HEIGHT)
   })
 
-  it('bounds every spine by its own local curve plus the accent', () => {
-    // The invariant, stated once over a whole rail of mixed heights: a spine is
-    // its mound plus a tick, or the bare minimum where there is no mound. It is
-    // never anything else, and in particular never floor-driven past its mound.
+  it('is exactly its own local curve height wherever there is a mound', () => {
+    // The invariant, stated once over a whole rail of mixed heights: spine top
+    // is mound top, never above it, floor only where the paper is blank.
     const sigma = daySigma(720)
     const grid = curveGrid(720, sigma)
     const samples = [
@@ -337,21 +345,27 @@ describe('spineHeights — your message, drawn inside the work it landed in', ()
     const peak = fieldPeak([field])
     const heights = spineHeights(field, peak)
     heights.forEach((h, i) => {
-      const local = field.height[Math.round(field.spines[i] / grid.step)] / peak
-      expect(h).toBeCloseTo(Math.min(1, Math.max(SPINE_MIN_HEIGHT, local + SPINE_ACCENT)), 10)
-      expect(h).toBeLessThanOrEqual(Math.max(SPINE_MIN_HEIGHT, local + SPINE_ACCENT))
+      const local = localAt(field, peak, field.spines[i])
+      if (local > 0.004) {
+        expect(h).toBeCloseTo(Math.min(1, local), 10)
+        expect(h).toBeLessThanOrEqual(Math.min(1, local) + 1e-12)
+      } else {
+        expect(h).toBe(SPINE_MIN_HEIGHT)
+      }
     })
   })
 
-  it('stands proud of a mound it shares a column with, so the tip can be found', () => {
+  it('stops at the top of the mound it shares a column with, never through it', () => {
     const sigma = daySigma(60)
     const grid = curveGrid(60, sigma)
     const field = curveField([{ minute: 30, human: 1, agent: 40 }], grid, [30], sigma)
     // Measured against a page whose peak is elsewhere, so the local height has
-    // room to be exceeded rather than clamped at the top of the row.
+    // room to be exceeded rather than clamped at the top of the row: under the
+    // old accent rule this is exactly where the overshoot showed.
     const peak = fieldPeak([field]) * 2
-    const local = field.height[Math.round(30 / grid.step)] / peak
-    expect(spineHeights(field, peak)[0]).toBeCloseTo(local + SPINE_ACCENT, 10)
+    const local = localAt(field, peak, 30)
+    expect(local).toBeLessThan(1)
+    expect(spineHeights(field, peak)[0]).toBeCloseTo(local, 10)
   })
 
   it('draws a message on empty paper at the minimum, whatever the rail did', () => {
