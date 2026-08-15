@@ -902,14 +902,6 @@ defmodule Shuttle.Poller do
         case fetch_fiber_full(fiber_id, state) do
           {:ok, fiber} ->
             cond do
-              # Human-worker fibers: the user works on them themselves;
-              # there's no actual dispatch to do. Reply success without
-              # touching state so the caller (kanban modal) closes
-              # cleanly and the card stays in inFlight.
-              human_worker?(fiber) ->
-                Logger.info("API dispatch for #{fiber_id} is human-worker; no-op")
-                {:reply, {:ok, "human"}, state}
-
               error = awaiting_ad_hoc_dispatch_error(fiber, state, opts) ->
                 {:reply, error, state}
 
@@ -1008,17 +1000,6 @@ defmodule Shuttle.Poller do
       )
 
     {:reply, result, state}
-  end
-
-  # Detects fibers that opted out of agent dispatch by setting
-  # `shuttle.agent: human`. Used by the API dispatch path to short-circuit
-  # with a friendly success and by the poller-side eligibility filter to
-  # skip human-worker fibers in the auto-dispatch loop.
-  defp human_worker?(fiber) do
-    case get_in(fiber, ["shuttle", "agent"]) do
-      "human" -> true
-      _ -> false
-    end
   end
 
   # ── Snapshot ──
@@ -1884,14 +1865,6 @@ defmodule Shuttle.Poller do
     fiber_id = Map.get(fiber, "id", "")
 
     cond do
-      # Human-worker fibers opt out of auto-dispatch entirely. The user
-      # is doing the work themselves; the kanban shows the card in
-      # inFlight via status:active, but Shuttle never tries to spawn
-      # anything. This is the sole gate that keeps human-worker fibers out
-      # of dispatch.
-      human_worker?(fiber) ->
-        false
-
       # Must target this daemon. Exactly `block.host == own_host_id`; an
       # absent host is unowned and ineligible everywhere (no wildcard, no
       # "local" default).
@@ -1998,7 +1971,6 @@ defmodule Shuttle.Poller do
 
     cond do
       not is_map(shuttle) -> false
-      human_worker?(fiber) -> false
       not host_owned?(shuttle, state.own_host_id) -> false
       true -> true
     end
@@ -2010,7 +1982,7 @@ defmodule Shuttle.Poller do
   # daemon: a force-dispatch of a `host: <remote>` fiber that reaches any daemon
   # whose `own_host_id` differs fails `host_owned?` and used to report a flat
   # `not_eligible`. The reason atoms (`:homed_elsewhere`, `:project_dir_missing`,
-  # `:disabled`, `:closed`, `:human_worker`, `:no_shuttle_block`,
+  # `:disabled`, `:closed`, `:no_shuttle_block`,
   # `:not_due_or_blocked`) are surfaced to the UI as accurate copy.
   #
   # Only called on the ineligible branch, so the eligible (dispatch-now) path is
@@ -2025,9 +1997,6 @@ defmodule Shuttle.Poller do
     cond do
       not is_map(shuttle) ->
         {:not_eligible, :no_shuttle_block}
-
-      human_worker?(fiber) ->
-        {:not_eligible, :human_worker}
 
       not host_owned?(shuttle, state.own_host_id) ->
         {:not_eligible, {:homed_elsewhere, Map.get(shuttle, "host"), state.own_host_id}}
@@ -2482,14 +2451,6 @@ defmodule Shuttle.Poller do
            user_message: Keyword.get(opts, :user_message),
            resume_mode: Keyword.get(opts, :resume_mode)
          ) do
-      {:ok, :human_no_op} ->
-        # Human-worker fibers don't need a watcher or running-state entry —
-        # the user is doing the work themselves. Return state unchanged so
-        # the kanban shows the card in inFlight (status:active) without any
-        # tmux session to watch.
-        Logger.info("Human-worker fiber #{fiber_id} accepted; no watcher started")
-        {state, {:ok, "human"}}
-
       {:ok, session} ->
         now = DateTime.utc_now()
 

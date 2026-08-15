@@ -2,15 +2,12 @@ package shuttle
 
 import (
 	"slices"
-	"strings"
 	"testing"
 )
 
-// TestBuiltinRegistry_IsGenericAndComplete pins what a stranger's felt ships
-// with. Two failure modes to guard, pulling opposite ways: the set drifting back
-// toward one operator's account tiers, and the set thinning until the tool looks
-// broken out of the box.
-func TestBuiltinRegistry_IsGenericAndComplete(t *testing.T) {
+// TestBuiltinRegistry_IsComplete pins the maintained default fleet. The point
+// is that a fresh install is useful without copying an operator's agents.json.
+func TestBuiltinRegistry_IsComplete(t *testing.T) {
 	reg, err := LoadBuiltinAgentRegistry()
 	if err != nil {
 		t.Fatalf("LoadBuiltinAgentRegistry: %v", err)
@@ -18,8 +15,10 @@ func TestBuiltinRegistry_IsGenericAndComplete(t *testing.T) {
 
 	want := []string{
 		"claude-sonnet", "claude-opus", "claude-haiku", "claude-fable",
-		"claude-sonnet-headless", "claude-opus-headless",
-		"codex", "human",
+		"claude-opus-chrome",
+		"codex-sol", "codex-terra", "codex-luna", "codex", "codex-spark",
+		"pi-sonnet", "pi-gpt-5.4", "pi-gpt-5.4-mini", "pi-gpt-5-mini",
+		"pi-kimi", "pi-deepseek-pro", "pi-deepseek-flash",
 	}
 	if got := reg.IDs(); !slices.Equal(got, want) {
 		t.Fatalf("built-in ids = %v, want %v", got, want)
@@ -29,10 +28,13 @@ func TestBuiltinRegistry_IsGenericAndComplete(t *testing.T) {
 		if a.Source != SourceBuiltin {
 			t.Fatalf("record %q has source %q, want %q", a.ID, a.Source, SourceBuiltin)
 		}
-		// A model *tier* names an account's entitlement; a harness names a CLI.
-		// Built-ins may only claim harnesses and the generic tier words.
-		if strings.Contains(a.Model, "gpt-") || strings.HasPrefix(a.ID, "pi-") {
-			t.Fatalf("record %q looks account-specific (model %q) — belongs in the user registry", a.ID, a.Model)
+	}
+	if _, ok := reg.Find("human"); ok {
+		t.Fatal("human must not be a shipped agent")
+	}
+	for _, id := range []string{"claude-sonnet-headless", "claude-opus-headless", "claude-fable-headless", "claude-haiku-headless"} {
+		if _, ok := reg.Find(id); ok {
+			t.Fatalf("%s must not be a shipped agent", id)
 		}
 	}
 
@@ -56,20 +58,17 @@ func TestBuiltinRegistry_IsGenericAndComplete(t *testing.T) {
 	}
 }
 
-// TestBuiltinRegistry_HeadlessIsReachable: headless has no shuttle:-block field,
-// so an alias record is the only way a fiber can ask for print mode. Ship the
-// aliases or the capability is gone.
-func TestBuiltinRegistry_HeadlessIsReachable(t *testing.T) {
+func TestBuiltinRegistry_ChromeAliasIsReachable(t *testing.T) {
 	reg, err := LoadBuiltinAgentRegistry()
 	if err != nil {
 		t.Fatalf("LoadBuiltinAgentRegistry: %v", err)
 	}
-	base, axes, err := reg.Resolve("claude-opus-headless", "", false)
+	base, axes, err := reg.Resolve("claude-opus-chrome", "", false)
 	if err != nil {
-		t.Fatalf("Resolve(claude-opus-headless): %v", err)
+		t.Fatalf("Resolve(claude-opus-chrome): %v", err)
 	}
-	if base.ID != "claude-opus" || !axes.Headless {
-		t.Fatalf("resolved %+v / %+v, want claude-opus with headless", base, axes)
+	if base.ID != "claude-opus" || !axes.Chrome {
+		t.Fatalf("resolved %+v / %+v, want claude-opus with chrome", base, axes)
 	}
 }
 
@@ -91,14 +90,14 @@ func TestBuiltinRegistry_WrapperDefaultsToCLI(t *testing.T) {
 	}
 }
 
-// TestFleetFixtureParses guards the axis tests' fixture (the pre-trim 22, also
-// shipped as share/agents.example.json) against bit-rot in the record format.
+// TestFleetFixtureParses guards the axis tests' fixture (which retains
+// headless aliases as an internal -p test fixture) against bit-rot.
 func TestFleetFixtureParses(t *testing.T) {
 	reg := loadReg(t)
-	if len(reg.Records()) != 22 {
-		t.Fatalf("fleet fixture has %d records, want 22", len(reg.Records()))
+	if len(reg.Records()) != 21 {
+		t.Fatalf("fleet fixture has %d records, want 21", len(reg.Records()))
 	}
-	if _, ok := reg.Find("human"); !ok {
-		t.Fatal("fleet fixture is missing the reserved human agent")
+	if _, ok := reg.Find("human"); ok {
+		t.Fatal("fleet fixture must not carry the removed human agent")
 	}
 }

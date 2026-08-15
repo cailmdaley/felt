@@ -180,13 +180,13 @@ existing block; a `oneshot` or `pinned` target drops the schedule, and passing
 ## Agent selection
 
 `felt shuttle agents` prints the effective registry — run it for your current
-list. Eight records ship built in:
+list. The maintained fleet ships built in:
 
 | Family | Built-in ids | Notes |
 |---|---|---|
-| Claude | `claude-sonnet` (registry default), `claude-opus`, `claude-fable`, `claude-haiku` | Plus `claude-sonnet-headless` and `claude-opus-headless` |
-| Codex | `codex` | |
-| `human` | `human` | A pseudo-agent. The card shows as in-flight; Shuttle never spawns anything. |
+| Claude | `claude-sonnet` (registry default), `claude-opus`, `claude-fable`, `claude-haiku`, `claude-opus-chrome` | Chrome is an axis/alias, not a separate harness. |
+| Codex | `codex-sol`, `codex-terra`, `codex-luna`, `codex`, `codex-spark` | |
+| Pi | `pi-sonnet`, `pi-gpt-5.4`, `pi-gpt-5.4-mini`, `pi-gpt-5-mini`, `pi-kimi`, `pi-deepseek-pro`, `pi-deepseek-flash` | |
 
 Two orthogonal axes layer on the base id: `effort` (validated against the
 resolved agent's allowed levels) and `chrome` (Claude only, for browser work).
@@ -197,9 +197,11 @@ felt shuttle set-model <fiber> codex          # agent-only shorthand
 ```
 
 !!! note "Add your own agents"
-    Your registry file layers over the built-ins. Run `felt shuttle agents
-    init` to seed `~/.config/felt/agents.json` (or `$FELT_AGENTS_FILE`), then
-    edit it — new ids, aliases, or replacements for built-in ones. See
+    Your registry file layers over the built-ins by default. Set
+    `builtins: "restrict"` when it should be the complete registry for one
+    host. Run `felt shuttle agents init` to seed
+    `~/.config/felt/agents.json` (or `$FELT_AGENTS_FILE`), then edit it — new
+    ids, aliases, or replacements for built-in ones. See
     [Configuring agents](installation.md#configuring-agents).
 
 ## Required gates

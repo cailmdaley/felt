@@ -9,12 +9,12 @@ import (
 	"strings"
 )
 
-// The user agent registry — how a machine gets agents the binary does not ship.
+// The user agent registry — how a machine adds to or restricts the agents the
+// binary ships.
 //
-// The embedded set (embed.go) is a generic floor: the harnesses felt knows how
-// to drive, not the model tiers any particular account has. Everything past that
-// floor — a wrapper function, a premium tier, a router-backed model — is local
-// fact, so it lives in a file:
+// The embedded set (embed.go) is the maintained default fleet. A user file is
+// still useful for local wrappers, account-specific additions, and restricting
+// a host to an explicit subset:
 //
 //	1. $FELT_AGENTS_FILE      (single path, `~` expanded)
 //	2. ~/.config/felt/agents.json
@@ -37,21 +37,15 @@ const (
 
 // Values for the user file's `builtins` field.
 const (
-	BuiltinsMerge   = "merge"
+	BuiltinsMerge    = "merge"
+	BuiltinsRestrict = "restrict"
+	// BuiltinsReplace is the legacy spelling of BuiltinsRestrict. Keep reading
+	// it so existing agents.json files do not fail after an upgrade.
 	BuiltinsReplace = "replace"
 )
 
 // agentsFileVersion is the only envelope version this felt reads.
 const agentsFileVersion = 1
-
-// reservedAgents are ids the system depends on by name, re-injected after the
-// fold if a `builtins: "replace"` user file leaves them out. `human` is the one:
-// the daemon checks `agent.id == "human"` to mean "never spawn a harness,
-// a person picks this up" (lib/shuttle/dispatcher.ex). Losing it would turn
-// every human-held fiber into a dispatch attempt.
-var reservedAgents = []AgentRecord{
-	{ID: "human", CLI: "human", Wrapper: "human", Source: SourceBuiltin},
-}
 
 // agentsFile is the user registry's canonical envelope. A bare array is also
 // accepted and read as {version: 1, builtins: "merge", agents: […]}.
@@ -131,10 +125,10 @@ func parseAgentsFile(data []byte, path string) (agentsFile, []string, error) {
 	switch file.Builtins {
 	case "":
 		file.Builtins = BuiltinsMerge
-	case BuiltinsMerge, BuiltinsReplace:
+	case BuiltinsMerge, BuiltinsRestrict, BuiltinsReplace:
 	default:
 		return agentsFile{}, nil, fmt.Errorf(
-			"parsing %s: builtins must be %q or %q, got %q", path, BuiltinsMerge, BuiltinsReplace, file.Builtins)
+			"parsing %s: builtins must be %q or %q (legacy: %q), got %q", path, BuiltinsMerge, BuiltinsRestrict, BuiltinsReplace, file.Builtins)
 	}
 	if unknown := unknownFieldWarning(data, path); unknown != "" {
 		warnings = append(warnings, unknown)
@@ -189,7 +183,7 @@ func mergeAgentLayers(builtins, user []AgentRecord, mode string) ([]AgentRecord,
 	var warnings []string
 
 	base := builtins
-	if mode == BuiltinsReplace {
+	if mode == BuiltinsRestrict || mode == BuiltinsReplace {
 		base = nil
 	}
 
@@ -229,15 +223,6 @@ func mergeAgentLayers(builtins, user []AgentRecord, mode string) ([]AgentRecord,
 		}
 		at[key] = len(merged)
 		merged = append(merged, rec)
-	}
-
-	for _, reserved := range reservedAgents {
-		key := strings.ToLower(reserved.ID)
-		if _, ok := at[key]; ok {
-			continue
-		}
-		at[key] = len(merged)
-		merged = append(merged, reserved)
 	}
 
 	for _, rec := range merged {

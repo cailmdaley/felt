@@ -213,9 +213,6 @@ defmodule ShuttleWeb.DispatchController do
   defp ineligible_detail(:closed),
     do: %{detail: "closed", message: "Fiber is closed — reopen it before dispatching."}
 
-  defp ineligible_detail(:human_worker),
-    do: %{detail: "human_worker", message: "Human-worker fiber — there is nothing to dispatch."}
-
   defp ineligible_detail(:no_shuttle_block),
     do: %{detail: "no_shuttle_block", message: "Fiber has no shuttle: block to dispatch."}
 

@@ -122,12 +122,13 @@ defmodule Shuttle.RealHarnessSmokeTest do
     end
   end
 
-  test "the registry a live felt serves keeps the reserved human id" do
+  test "the registry a live felt serves the shipped fleet without removed ids" do
     ids = Enum.map(agent_records!(), & &1["id"])
 
-    assert "human" in ids,
-           "`human` is reserved — the dispatcher checks agent.id == \"human\" to mean " <>
-             "never spawn a harness. Got: #{inspect(ids)}"
+    assert "codex-luna" in ids, "the shipped fleet should include configured Codex tiers"
+    refute "human" in ids, "human is no longer a registry agent. Got: #{inspect(ids)}"
+    refute Enum.any?(ids, &String.ends_with?(&1, "-headless")),
+           "headless is an internal -p axis, not a shipped agent. Got: #{inspect(ids)}"
   end
 
   defp idle_command(agent) do

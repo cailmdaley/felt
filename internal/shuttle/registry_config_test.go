@@ -153,41 +153,29 @@ func TestLoadAgentRegistry_MergeOverridesInPlace(t *testing.T) {
 	}
 }
 
-func TestLoadAgentRegistry_Replace(t *testing.T) {
-	writeUserRegistry(t, `{"version":1,"builtins":"replace","agents":[
-	  {"id":"only-mine","cli":"x","default":true},
-	  {"id":"human","cli":"human"}
+func TestLoadAgentRegistry_Restrict(t *testing.T) {
+	writeUserRegistry(t, `{"version":1,"builtins":"restrict","agents":[
+	  {"id":"only-mine","cli":"x","default":true}
 	]}`)
 
 	reg, err := LoadAgentRegistry()
 	if err != nil {
 		t.Fatalf("LoadAgentRegistry: %v", err)
 	}
-	if got := ids(reg); len(got) != 2 {
-		t.Fatalf("ids = %v, want only the user's two", got)
-	}
-	if find(t, reg, "human").Source != SourceUser {
-		t.Fatal("a user-declared human must stay the user's record")
+	if got := ids(reg); len(got) != 1 {
+		t.Fatalf("ids = %v, want only the user's record", got)
 	}
 }
 
-// `human` is reserved: the daemon tests agent.id == "human" to mean "never
-// spawn a harness". A replace layer that forgets it gets it back.
-func TestLoadAgentRegistry_ReplaceReinjectsHuman(t *testing.T) {
-	writeUserRegistry(t, `[{"id":"only-mine","cli":"x","default":true}]`)
-	// Bare array is a merge layer; use the envelope for replace.
+func TestLoadAgentRegistry_LegacyReplaceRestricts(t *testing.T) {
 	writeUserRegistry(t, `{"version":1,"builtins":"replace","agents":[{"id":"only-mine","cli":"x","default":true}]}`)
 
 	reg, err := LoadAgentRegistry()
 	if err != nil {
 		t.Fatalf("LoadAgentRegistry: %v", err)
 	}
-	rec := find(t, reg, "human")
-	if rec.Source != SourceBuiltin {
-		t.Fatalf("re-injected human source = %q, want builtin", rec.Source)
-	}
-	if rec.CLI != "human" {
-		t.Fatalf("re-injected human cli = %q, want human", rec.CLI)
+	if got := ids(reg); len(got) != 1 || got[0] != "only-mine" {
+		t.Fatalf("legacy replace ids = %v, want only-mine", got)
 	}
 }
 

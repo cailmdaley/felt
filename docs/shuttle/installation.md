@@ -234,7 +234,7 @@ place and the card lands in Awaiting review.
 ## Configuring agents
 
 `felt shuttle agents` prints the effective registry. It layers your own file
-over a built-in set of eight records. Set `$FELT_AGENTS_FILE` to choose the
+over the 17-agent shipped default fleet. Set `$FELT_AGENTS_FILE` to choose the
 path; otherwise felt reads `~/.config/felt/agents.json`.
 
 ```bash
@@ -249,8 +249,10 @@ works every field across several harnesses — copy from it. A missing file is
 silent. A malformed file fails loudly and names the path.
 
 The file's `builtins` key controls the merge. `"merge"` (the default) folds your
-records over the built-ins by id, last one wins. `"replace"` drops the built-in
-layer entirely; `human` stays reserved either way.
+records over the built-ins by id, last one wins. `"restrict"` drops the built-in
+layer entirely, so the file becomes the complete registry for that host.
+The old spelling `"replace"` is accepted for compatibility. There is no
+reserved `human` record.
 
 ## Configuring remotes
 
@@ -378,12 +380,11 @@ wildcard. The host id comes from `SHUTTLE_HOST`, else the file
 hostname. For the full ordered predicate list the daemon evaluates, see
 [Dispatch eligibility](lifecycle.md#dispatch-eligibility).
 
-**Every built-in agent assumes its CLI is installed.** The eight built-in
-records name `claude`, `codex`, and the `human` pseudo-agent, with
-`claude-sonnet` as the default. A record whose CLI is absent or unauthenticated
-fails at dispatch, not at install. Run `felt shuttle agents init` and cut the
-list down to what you actually have — see [Configuring
-agents](#configuring-agents).
+**Every built-in agent assumes its CLI is installed.** The shipped records cover
+the configured Claude, Codex, and Pi fleet, with `claude-sonnet` as the
+default. A record whose CLI is absent or unauthenticated fails at dispatch, not
+at install. Use `builtins: "restrict"` when a host should expose only the
+subset it can run — see [Configuring agents](#configuring-agents).
 
 **`felt shuttle tunnels` is macOS-only, and needs a fleet file first.** It
 renders launchd autossh plists from `~/.config/felt/remotes.json`, so `install`

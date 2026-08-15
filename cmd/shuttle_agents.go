@@ -50,6 +50,9 @@ The registry is the built-in set with the user registry layered on top
 record — * default, u user-provided, blank built-in — and closes with a footer
 on stderr naming what loaded from where. --source filters to one layer.
 
+The user file defaults to builtins: "merge". Set builtins: "restrict" in its
+envelope to make the listed records the complete registry for one host.
+
 --json emits the bare array the daemon's GET /api/v1/agents serves to the
 browser's agent picker, and nothing else: no footer, no warnings, either
 stream.`,

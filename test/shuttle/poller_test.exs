@@ -3458,28 +3458,6 @@ defmodule Shuttle.PollerTest do
              Poller.dispatch_fiber(poller, fiber_id, force: true)
   end
 
-  test "force-dispatch still refuses human-worker fibers" do
-    # Human-worker fibers have no machine to spawn against. Even under
-    # force, dispatch is a no-op (success without a tmux session).
-    fiber_id = "tests/human-worker-force"
-    fiber = make_fiber(fiber_id)
-    MockRunner.set_fiber(fiber_id, fiber)
-    MockRunner.set_shuttle(fiber_id, "enabled: true\nkind: oneshot\nagent: human\n")
-
-    {:ok, poller} =
-      start_poller!(
-        name: :test_poller_force_human,
-        runner: MockRunner,
-        poll_interval_ms: 60_000,
-        felt_stores: [MockRunner.felt_root()]
-      )
-
-    # Human-worker fibers short-circuit to {:ok, "human"} before the
-    # eligibility check runs (the API does not start a tmux session for
-    # them); force does not change that.
-    assert {:ok, "human"} = Poller.dispatch_fiber(poller, fiber_id, force: true)
-  end
-
   test "poller dispatches a due standing role with run context and does not hot-loop after exit" do
     # Uses new-format "kind: standing" (vs legacy "mode: standing") to test backward compat.
     fiber = make_fiber("tests/standing-due", %{"tags" => ["constitution", "standing"]})

@@ -41,25 +41,117 @@
     "cost_class": "premium"
   },
   {
-    "id": "claude-sonnet-headless",
-    "alias_of": "claude-sonnet",
-    "axes": { "headless": true }
+    "id": "claude-opus-chrome",
+    "alias_of": "claude-opus",
+    "axes": { "chrome": true }
   },
   {
-    "id": "claude-opus-headless",
-    "alias_of": "claude-opus",
-    "axes": { "headless": true }
+    "id": "codex-sol",
+    "cli": "codex",
+    "model": "gpt-5.6-sol",
+    "extra_flags": "--dangerously-bypass-approvals-and-sandbox",
+    "effort_levels": ["low", "medium", "high", "xhigh", "max", "ultra"],
+    "default_effort": "low",
+    "cost_class": "premium",
+    "aliases": ["gpt-5.6-sol"]
+  },
+  {
+    "id": "codex-terra",
+    "cli": "codex",
+    "model": "gpt-5.6-terra",
+    "extra_flags": "--dangerously-bypass-approvals-and-sandbox",
+    "effort_levels": ["low", "medium", "high", "xhigh", "max", "ultra"],
+    "default_effort": "medium",
+    "cost_class": "standard",
+    "aliases": ["gpt-5.6-terra"]
+  },
+  {
+    "id": "codex-luna",
+    "cli": "codex",
+    "model": "gpt-5.6-luna",
+    "extra_flags": "--dangerously-bypass-approvals-and-sandbox",
+    "effort_levels": ["low", "medium", "high", "xhigh", "max"],
+    "default_effort": "medium",
+    "cost_class": "economy",
+    "aliases": ["gpt-5.6-luna"]
   },
   {
     "id": "codex",
-    "cli": "codex",
-    "extra_flags": "--dangerously-bypass-approvals-and-sandbox",
-    "effort_levels": ["low", "medium", "high", "xhigh"],
-    "default_effort": "medium",
-    "cost_class": "standard"
+    "alias_of": "codex-sol"
   },
   {
-    "id": "human",
-    "cli": "human"
+    "id": "codex-spark",
+    "cli": "codex",
+    "model": "gpt-5.3-codex-spark",
+    "extra_flags": "--dangerously-bypass-approvals-and-sandbox",
+    "effort_levels": ["low", "medium", "high", "xhigh"],
+    "default_effort": "xhigh",
+    "cost_class": "standard",
+    "aliases": ["gpt-5.3-codex-spark"]
+  },
+  {
+    "id": "pi-sonnet",
+    "cli": "pi",
+    "provider": "github-copilot",
+    "model": "claude-sonnet-4.6",
+    "requires_model": true,
+    "effort_levels": ["low", "medium", "high"],
+    "default_effort": "high",
+    "cost_class": "copilot"
+  },
+  {
+    "id": "pi-gpt-5.4",
+    "cli": "pi",
+    "provider": "github-copilot",
+    "model": "gpt-5.4",
+    "requires_model": true,
+    "effort_levels": ["low", "medium", "high", "xhigh"],
+    "default_effort": "xhigh",
+    "cost_class": "copilot"
+  },
+  {
+    "id": "pi-gpt-5.4-mini",
+    "cli": "pi",
+    "provider": "github-copilot",
+    "model": "gpt-5.4-mini",
+    "requires_model": true,
+    "effort_levels": ["low", "medium", "high", "xhigh"],
+    "default_effort": "xhigh",
+    "cost_class": "copilot"
+  },
+  {
+    "id": "pi-gpt-5-mini",
+    "cli": "pi",
+    "provider": "github-copilot",
+    "model": "gpt-5-mini",
+    "requires_model": true,
+    "effort_levels": ["low", "medium", "high", "xhigh"],
+    "default_effort": "xhigh",
+    "cost_class": "copilot"
+  },
+  {
+    "id": "pi-kimi",
+    "cli": "pi",
+    "provider": "openrouter",
+    "model": "moonshotai/kimi-k2.6",
+    "requires_model": true,
+    "cost_class": "openrouter"
+  },
+  {
+    "id": "pi-deepseek-pro",
+    "cli": "pi",
+    "provider": "openrouter",
+    "model": "deepseek/deepseek-v4-pro",
+    "requires_model": true,
+    "cost_class": "openrouter"
+  },
+  {
+    "id": "pi-deepseek-flash",
+    "cli": "pi",
+    "provider": "openrouter",
+    "model": "deepseek/deepseek-v4-flash",
+    "requires_model": true,
+    "cost_class": "openrouter",
+    "aliases": ["pi"]
   }
 ]

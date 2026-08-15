@@ -75,40 +75,31 @@ defmodule Shuttle.Dispatcher do
          :ok <- validate_agent(agent),
          :ok <- check_work_dir(agent, work_dir),
          :ok <- preflight_wrapper(agent, work_dir, runner) do
-      # Human-worker no-op: when the fiber's agent is `human`, the user is
-      # working on it themselves; Shuttle has nothing to dispatch. Return a
-      # sentinel so the caller (Poller / DispatchController) can skip the
-      # watcher / running-state plumbing without surfacing it as an error.
-      if agent.id == "human" do
-        Logger.info("Human-worker dispatch for #{fiber_id} — no tmux session spawned")
-        {:ok, :human_no_op}
-      else
-        resume_intent =
-          cond do
-            Keyword.get(opts, :force_fresh, false) ->
-              :fresh
+      resume_intent =
+        cond do
+          Keyword.get(opts, :force_fresh, false) ->
+            :fresh
 
-            true ->
-              resolve_resume_intent(prompt_context, fiber_id, fiber,
-                force: force,
-                resume_mode: Keyword.get(opts, :resume_mode)
-              )
-          end
-
-        case resume_intent do
-          {:error, _} = error ->
-            error
-
-          resume_intent ->
-            create_tmux_session(fiber_id, agent, work_dir, runner, prompt_context, resume_intent,
-              felt_store: felt_store,
-              uid: uid,
-              kind: fiber_kind(fiber),
-              fiber_path: Map.get(fiber, "path"),
-              run_id: prompt_context_run_id(prompt_context),
-              user_message: Keyword.get(opts, :user_message)
+          true ->
+            resolve_resume_intent(prompt_context, fiber_id, fiber,
+              force: force,
+              resume_mode: Keyword.get(opts, :resume_mode)
             )
         end
+
+      case resume_intent do
+        {:error, _} = error ->
+          error
+
+        resume_intent ->
+          create_tmux_session(fiber_id, agent, work_dir, runner, prompt_context, resume_intent,
+            felt_store: felt_store,
+            uid: uid,
+            kind: fiber_kind(fiber),
+            fiber_path: Map.get(fiber, "path"),
+            run_id: prompt_context_run_id(prompt_context),
+            user_message: Keyword.get(opts, :user_message)
+          )
       end
     end
   end
@@ -1047,11 +1038,6 @@ defmodule Shuttle.Dispatcher do
   # the autonomous path, but a human force-dispatch (kanban Requeue, drag to
   # launch) bypasses eligibility entirely and lands straight here — so this is
   # the only place the forced path can learn it.
-  # `human` spawns nothing at all (see the no-op branch in `dispatch/2`), so it
-  # never touches the work directory and must not be refused for one that lives
-  # on another machine — a person can hold a fiber whose checkout is elsewhere.
-  defp check_work_dir(%{id: "human"}, _work_dir), do: :ok
-
   defp check_work_dir(_agent, work_dir) when is_binary(work_dir) and work_dir != "" do
     if File.dir?(work_dir) do
       :ok
@@ -1089,11 +1075,7 @@ defmodule Shuttle.Dispatcher do
   # operator installs the wrapper and the daemon goes on refusing); parking the
   # FIBER expires on its own and a force-dispatch skips it.
   #
-  # `human` never spawns a harness (see the no-op branch in `dispatch/2`), so it
-  # has no wrapper to resolve and is exempt.
   @wrapper_probe_timeout_ms 15_000
-
-  defp preflight_wrapper(%{id: "human"}, _work_dir, _runner), do: :ok
 
   defp preflight_wrapper(agent, work_dir, runner) do
     case Agents.wrapper_probe(agent) do

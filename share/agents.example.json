@@ -59,34 +59,6 @@
     "default": false
   },
   {
-    "id": "claude-sonnet-headless",
-    "alias_of": "claude-sonnet",
-    "axes": { "headless": true },
-    "aliases": [],
-    "default": false
-  },
-  {
-    "id": "claude-opus-headless",
-    "alias_of": "claude-opus",
-    "axes": { "headless": true },
-    "aliases": [],
-    "default": false
-  },
-  {
-    "id": "claude-fable-headless",
-    "alias_of": "claude-fable",
-    "axes": { "headless": true },
-    "aliases": [],
-    "default": false
-  },
-  {
-    "id": "claude-haiku-headless",
-    "alias_of": "claude-haiku",
-    "axes": { "headless": true },
-    "aliases": [],
-    "default": false
-  },
-  {
     "id": "codex-sol",
     "cli": "codex",
     "wrapper": "codex",
@@ -237,15 +209,6 @@
     "chrome_capable": false,
     "cost_class": "openrouter",
     "aliases": ["pi"],
-    "default": false
-  },
-  {
-    "id": "human",
-    "cli": "human",
-    "wrapper": "human",
-    "effort_levels": [],
-    "chrome_capable": false,
-    "aliases": [],
     "default": false
   }
 ]

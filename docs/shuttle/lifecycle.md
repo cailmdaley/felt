@@ -147,14 +147,13 @@ in this order (`eligible?/2` and `dispatch_gates_pass?/3` in
 1. It lives in a felt store the daemon polls.
 2. It carries a `shuttle:` block. That block alone defines "shuttle-managed";
    no tag predicate exists.
-3. Its agent is not `human`.
-4. `shuttle.host` equals this daemon's own host id.
-5. Felt-native `status` is `active`.
-6. No worker is already running or claimed for it.
-7. The resume-loop circuit breaker is closed.
-8. The boot quarantine is released.
-9. `shuttle.project_dir` exists on this host.
-10. Every `depends_on` target exists and is `tempered: true`.
+3. `shuttle.host` equals this daemon's own host id.
+4. Felt-native `status` is `active`.
+5. No worker is already running or claimed for it.
+6. The resume-loop circuit breaker is closed.
+7. The boot quarantine is released.
+8. `shuttle.project_dir` exists on this host.
+9. Every `depends_on` target exists and is `tempered: true`.
 
 Configured stores come from `FELT_STORES` (comma-separated) or the persisted
 registry at `~/.config/felt/stores.json`. Shuttle assumes no default store.

@@ -238,14 +238,5 @@
     "cost_class": "openrouter",
     "aliases": ["pi"],
     "default": false
-  },
-  {
-    "id": "human",
-    "cli": "human",
-    "wrapper": "human",
-    "effort_levels": [],
-    "chrome_capable": false,
-    "aliases": [],
-    "default": false
   }
 ]

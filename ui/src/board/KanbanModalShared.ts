@@ -68,8 +68,6 @@ export function dispatchIneligibleReason(body: DispatchIneligibleBody): string {
       return 'This fiber is homed on another host and can only run there.'
     case 'project_dir_missing':
       return 'The fiber\'s project_dir does not exist on the owning host.'
-    case 'human_worker':
-      return 'Human-worker fiber — there is nothing to dispatch.'
     case 'no_shuttle_block':
       return 'Fiber has no shuttle: block to dispatch.'
     case 'not_due':
