@@ -41,7 +41,6 @@ import {
   type LedgerNarration,
 } from './join.js'
 import {
-  ACTIVITY_KEY_ITEMS,
   MARK_GLYPH,
   STATE_GLYPH,
   STATE_KEY_ITEMS,
@@ -53,7 +52,7 @@ import {
   type DiffTotal,
   type LifecycleState,
 } from './vocabulary.js'
-import { civilDayNoon, formatSpanMinutes, railBounds, shiftCivilDay } from './railTime.js'
+import { civilDayNoon, formatSpanMinutes, shiftCivilDay } from './railTime.js'
 import {
   buildSessionIndex,
   foldActiveMinutes,
@@ -193,50 +192,15 @@ export interface DayCell {
   /** Summed `n` over the day's agent buckets — the density signal. */
   agent: number
   attention: number
-  /**
-   * WHERE in the rail the steering happened, as fractions of the rail's own
-   * length — one entry per SPELL, not per minute. A day's agent work is a
-   * density, so one segment per column says everything; a steering mark is an
-   * event, and an event collapsed to the column's midpoint claims a time that
-   * never happened. Two spells an evening apart are two ticks.
-   */
-  attentionAt: number[]
 }
 
-/** Minute-ms stamps folded into spells, then each spell placed at its own
- *  midpoint as a fraction of the rail `[startMs, endMs)`. ADJACENT minutes only
- *  — a 40-minute sitting is one tick, a gap of even one idle minute is two.
- *  Sorted, deduplicated, and clamped inside the column. */
-export function spellFractions(
-  minuteMs: readonly number[],
-  day: string,
-): number[] {
-  const { startMs, endMs } = railBounds(day)
-  const span = endMs - startMs
-  if (!(span > 0) || minuteMs.length === 0) return []
-  const sorted = [...new Set(minuteMs)].sort((a, b) => a - b)
-  const out: number[] = []
-  let lo = sorted[0]
-  let hi = sorted[0]
-  const flush = () => {
-    // The spell covers its last minute too, so the midpoint of [lo, hi+1min).
-    const mid = (lo + hi + MINUTE_MS) / 2
-    out.push(clamp((mid - startMs) / span, 0, 1))
-  }
-  for (const m of sorted.slice(1)) {
-    if (m - hi <= MINUTE_MS) {
-      hi = m
-      continue
-    }
-    flush()
-    lo = m
-    hi = m
-  }
-  flush()
-  return out
+/** The day's whole ink: one band, one meaning. Chronicle does not ask who was
+ *  at the keyboard — at a day per column, "work happened here" is the only
+ *  claim the scale can honestly carry, so the two kinds are summed rather
+ *  than drawn as rival channels. */
+export function dayWork(cell: DayCell): number {
+  return cell.agent + cell.attention
 }
-
-const MINUTE_MS = 60_000
 
 /**
  * Fold buckets into civil days by their LOCAL day. Never by `m / 86_400_000`:
@@ -246,32 +210,20 @@ const MINUTE_MS = 60_000
  */
 export function aggregateByCivilDay(buckets: readonly ActivityBucket[]): Map<string, DayCell> {
   const out = new Map<string, DayCell>()
-  // The minute stamps behind the steering, kept per day until the whole day is
-  // in hand — spells can only be found once the neighbours are known.
-  const stamps = new Map<string, { attention: number[] }>()
   for (const b of buckets) {
     if (!Number.isFinite(b.m)) continue
     const day = railCivilDay(b.m)
     let cell = out.get(day)
     if (!cell) {
-      cell = { agent: 0, attention: 0, attentionAt: [] }
+      cell = { agent: 0, attention: 0 }
       out.set(day, cell)
-      stamps.set(day, { attention: [] })
     }
     const n = Number.isFinite(b.n) ? Math.max(b.n, 1) : 1
-    const at = stamps.get(day)!
     if (b.k === 'agent') cell.agent += n
-    else if (b.k === 'attention') {
-      cell.attention += n
-      at.attention.push(b.m)
-    }
+    else if (b.k === 'attention') cell.attention += n
     // `notify` and `reply` fold into nothing: neither is a state of the work.
     // A reply's minute is already inked by its agent bucket, and a notify is
     // an idle nudge the board no longer draws anywhere.
-  }
-  for (const [day, cell] of out) {
-    const at = stamps.get(day)!
-    cell.attentionAt = spellFractions(at.attention, day)
   }
   return out
 }
@@ -282,10 +234,10 @@ export function aggregateByCivilDay(buckets: readonly ActivityBucket[]): Map<str
  * are looking at: fixed thresholds either saturate every segment during a
  * heavy sprint or flatten every segment during a quiet one.
  */
-export function densityStep(agent: number, peak: number): 1 | 2 | 3 {
-  if (agent <= 0) return 1
+export function densityStep(work: number, peak: number): 1 | 2 | 3 {
+  if (work <= 0) return 1
   if (peak <= 0) return 1
-  const frac = agent / peak
+  const frac = work / peak
   if (frac >= 0.55) return 3
   if (frac >= 0.20) return 2
   return 1
@@ -1021,10 +973,12 @@ export function buildRows(
   return fibers
 }
 
-/** The busiest single day across every row — the scale density steps map onto. */
-function peakDayAgent(rows: readonly ChronicleRow[]): number {
+/** The busiest single day across every row — the scale density steps map onto.
+ *  Measured in the same combined figure the band draws ({@link dayWork}), so
+ *  the normalisation and the mark can never mean two different things. */
+function peakDayWork(rows: readonly ChronicleRow[]): number {
   let peak = 0
-  for (const row of rows) for (const cell of row.days.values()) peak = Math.max(peak, cell.agent)
+  for (const row of rows) for (const cell of row.days.values()) peak = Math.max(peak, dayWork(cell))
   return peak
 }
 
@@ -1064,21 +1018,6 @@ function monthBearing(day: string, nowYear: number): string {
 /** `left` for a mark sitting in day column `idx`. */
 function colLeft(idx: number): string {
   return `calc(var(--chr-day-w) * ${idx})`
-}
-
-/** `left` for a mark `frac` of the way THROUGH day column `idx`. */
-function colLeftAt(idx: number, frac: number): string {
-  return `calc(var(--chr-day-w) * ${(idx + clamp(frac, 0, 1)).toFixed(4)})`
-}
-
-/**
- * Where a cell's event ticks go. Normally the spell midpoints the aggregation
- * found; a cell that carries a count but no stamps — a hand-built cell, an
- * older cached shape — still gets its one centered tick rather than vanishing.
- */
-function spellPositions(at: readonly number[], count: number): readonly number[] {
-  if (at.length > 0) return at
-  return count > 0 ? [0.5] : []
 }
 
 // ── The view ─────────────────────────────────────────────────────────────────
@@ -1484,7 +1423,7 @@ class ChronicleView implements TemporalView {
     const shown = hidden > 0 ? rows.slice(0, MAX_ROWS) : rows
     // The density scale is the whole record's, not the visible slice's — the
     // expander must not redraw every other row's segments.
-    const peak = peakDayAgent(rows)
+    const peak = peakDayWork(rows)
 
     const bands = this.collectBands(ctx, days, dayIndex)
     // Always at least one lane: empty, the strip is the target you draw on.
@@ -3050,9 +2989,10 @@ class ChronicleView implements TemporalView {
    * The key — a caption under the grid, in the margin, naming every mark the
    * page spends.
    *
-   * The wording for the three activity pigments is {@link ACTIVITY_KEY_ITEMS},
-   * verbatim, so a hue glossed here cannot come to mean something else on Day
-   * or Week. The GLYPHS are Chronicle's own marks in miniature, which is the
+   * The activity band is glossed in Chronicle's own words rather than from
+   * `ACTIVITY_KEY_ITEMS`: that list names channels Day and Week draw apart,
+   * and this page draws one band for both. The GLYPHS are Chronicle's own
+   * marks in miniature, which is the
    * rule the other two pages follow: a key teaches the marks you are actually
    * looking at, and Chronicle's segment is a day, not an hour.
    *
@@ -3089,10 +3029,11 @@ class ChronicleView implements TemporalView {
     const ramp = document.createElement('span')
     ramp.className = 'chr-key-ramp'
     for (const step of [1, 2, 3]) ramp.append(swatch(`chr-key-seg chr-key-seg-${step}`))
-    for (const { kind, label } of ACTIVITY_KEY_ITEMS) {
-      if (kind === 'agent') key.append(item(ramp, `${label} (busiest day in view sets the scale)`))
-      else key.append(item(swatch(`chr-key-${kind}`), label))
-    }
+    // Chronicle does NOT read from ACTIVITY_KEY_ITEMS here: Day and Week draw
+    // the agents' volume as its own channel and gloss it "agents working",
+    // while this band sums agent and steering minutes alike. One word for one
+    // mark is the rule, so the band gets the word that is true of it.
+    key.append(item(ramp, 'work happening (busiest day in view sets the scale)'))
     // Hollow marks: what is owed, ahead of today. Nothing solid is drawn there.
     key.append(item(glyph('chr-key-glyph chr-key-due', MARK_GLYPH.due), 'due'))
     key.append(item(glyph('chr-key-glyph chr-key-launch', MARK_GLYPH.launch), 'next launch'))
@@ -3276,19 +3217,16 @@ class ChronicleView implements TemporalView {
     for (const [day, cell] of row.days) {
       const idx = dayIndex.get(day)
       if (idx === undefined) continue
-      if (cell.agent > 0) {
+      // ONE BAND, not two channels. The per-spell steering ticks used to
+      // overlay this segment in cinnabar; at a day per column they were more
+      // granularity than the page could carry, and the human/agent split is
+      // not a distinction Chronicle is for. Both minutes are "work happened".
+      const work = dayWork(cell)
+      if (work > 0) {
         const seg = document.createElement('div')
-        seg.className = `chr-seg chr-seg-${densityStep(cell.agent, peak)}`
+        seg.className = `chr-seg chr-seg-${densityStep(work, peak)}`
         seg.style.left = colLeft(idx)
         track.append(seg)
-      }
-      // Steering is placed at the hour it happened, not at the column's
-      // midpoint: one tick per spell, at its own time of day.
-      for (const frac of spellPositions(cell.attentionAt, cell.attention)) {
-        const tick = document.createElement('div')
-        tick.className = 'chr-att'
-        tick.style.left = colLeftAt(idx, frac)
-        track.append(tick)
       }
     }
 

@@ -293,9 +293,11 @@ button.kbn-day-lanename:focus-visible {
    the ladder's band grows by a quarter (`LADDER_BAND_PX`), not by half, so it
    falls from 58% of the lane to 48% and the curve gets the difference on top
    of its own share. The spine floor needs no change at all — it is a FRACTION
-   of the row (`spineFloor`, capped at `SPINE_MIN_HEIGHT`), so a floored spine
-   grows with the lane by construction, which is also why it can stay untouched
-   while Week, which reads the same arithmetic, keeps its own geometry. */
+   of the row (`SPINE_MIN_HEIGHT`), so a floored spine grows with the lane by
+   construction. That growth is also why Week does NOT read the same number:
+   its rail is `1fr` rather than these 29px, and the same fraction there drew a
+   twenty-pixel floor. Week passes `WEEK_SPINE_MIN_HEIGHT` instead — the same
+   few pixels of ink, put over a taller row. */
 .kbn-day-rail {
   grid-column: 2;
   position: relative;

@@ -15,6 +15,7 @@ import {
   PEAK_FLOOR,
   SPINE_ACCENT,
   SPINE_MIN_HEIGHT,
+  WEEK_SPINE_MIN_HEIGHT,
   WEEK_KERNELS_PER_AXIS,
   WEEK_SIGMA_FLOOR_MINUTES,
   curveField,
@@ -363,6 +364,30 @@ describe('spineHeights — your message, drawn inside the work it landed in', ()
     const peak = fieldPeak([busy, quiet])
     expect(spineHeights(busy, peak)).toEqual([SPINE_MIN_HEIGHT])
     expect(spineHeights(quiet, peak)).toEqual([SPINE_MIN_HEIGHT])
+  })
+
+  it('takes the floor of the surface it is drawn on, so both draw the same ink', () => {
+    // The floor is pixels wearing a fraction: Day's rail is 29px fixed, a Week
+    // rail is `1fr` and runs three times that, so Week asks for a smaller
+    // fraction of a taller row. A spine on empty paper honours whichever it is
+    // handed; a spine standing in a mound is unaffected by either.
+    const sigma = weekSigma(24 * 60)
+    const grid = curveGrid(24 * 60, sigma)
+    const field = curveField(
+      [{ minute: 600, human: 0, agent: 200 }],
+      grid,
+      [60, 600],
+      sigma,
+    )
+    const peak = fieldPeak([field])
+    expect(WEEK_SPINE_MIN_HEIGHT).toBeLessThan(SPINE_MIN_HEIGHT)
+    expect(spineHeights(field, peak, WEEK_SPINE_MIN_HEIGHT)[0]).toBe(WEEK_SPINE_MIN_HEIGHT)
+    expect(spineHeights(field, peak)[0]).toBe(SPINE_MIN_HEIGHT)
+    // In the mound, the floor is not what is being read at all.
+    expect(spineHeights(field, peak, WEEK_SPINE_MIN_HEIGHT)[1]).toBeCloseTo(
+      spineHeights(field, peak)[1],
+      10,
+    )
   })
 })
 

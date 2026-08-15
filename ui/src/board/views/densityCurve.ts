@@ -192,8 +192,11 @@ export const SPINE_ACCENT = 0.06
  * A message sent into empty minutes — you write to an agent that is not
  * running, which is how a great many conversations start — has no mound to rise
  * out of, and at its true height it would be a mark of zero pixels: the event
- * that matters most on the rail, invisible. 0.18 is ~4px on a week rail and ~5px
- * on a day lane, and on paper carrying no other ink that is enough.
+ * that matters most on the rail, invisible. The number the eye actually cares
+ * about is PIXELS — about five of them, which on paper carrying no other ink is
+ * enough — and this is Day's fraction of Day's rail: 0.18 of 29px. Week's rail
+ * is a different height and so takes a different fraction, see
+ * {@link WEEK_SPINE_MIN_HEIGHT}.
  *
  * ## Why the minimum is not a floor scaled to anything
  *
@@ -212,6 +215,26 @@ export const SPINE_ACCENT = 0.06
  * out-top its rail either, since the local height never exceeds the rail's.
  */
 export const SPINE_MIN_HEIGHT = 0.18
+
+/**
+ * The same five pixels of ink, measured against Week's rail instead of Day's.
+ *
+ * A minimum written as a fraction of the row only means one thing if every row
+ * is the same height, and they are not: Day's lane is a fixed 29px, while a
+ * Week rail is `1fr` of whatever the window leaves — 40px at its floor and
+ * ~110px on a laptop screen. Carrying Day's 0.18 onto that rail drew the floor
+ * at twenty pixels, and a floored spine on a quiet Tuesday stood two and a half
+ * times the height of the mounds beside it: exactly the tower the local-height
+ * rule was written to abolish, arriving through the floor instead of the peak.
+ *
+ * Observed on Week for the week of Aug 10: Tuesday's isolated morning messages
+ * as 20px cinnabar ticks over 8–10px cobalt bumps, while the same messages on
+ * Day sat correctly inside their mounds.
+ *
+ * 0.07 is ~8px on a typical rail and ~3px at the rail's 40px minimum — still
+ * ink, at 2px of nib width, and no longer the tallest thing in a quiet row.
+ */
+export const WEEK_SPINE_MIN_HEIGHT = 0.07
 
 /** Kernels are evaluated out to this many sigmas and cut. Beyond 4σ a Gaussian
  *  contributes under 0.04% and only costs time. */
@@ -370,7 +393,12 @@ export function fieldPeak(fields: readonly CurveField[]): number {
 /**
  * How tall each spine is drawn, as a fraction of the row — the curve's own
  * height AT THAT MINUTE plus {@link SPINE_ACCENT}, never shorter than
- * {@link SPINE_MIN_HEIGHT} and never taller than the row.
+ * `minHeight` and never taller than the row.
+ *
+ * `minHeight` defaults to {@link SPINE_MIN_HEIGHT} — Day's rail — because the
+ * floor is the one part of this arithmetic denominated in pixels, and a row
+ * fraction only converts to pixels once you know the row. Week passes
+ * {@link WEEK_SPINE_MIN_HEIGHT}.
  *
  * Everything a spine's height is allowed to know is local to its own minute.
  * The mound it stands in sets it; the accent lifts its tip clear of that mound
@@ -387,13 +415,17 @@ export function fieldPeak(fields: readonly CurveField[]): number {
  * the difference is a fraction of a pixel of height on a mark whose meaning is
  * its horizontal position.
  */
-export function spineHeights(field: CurveField, peak: number): number[] {
+export function spineHeights(
+  field: CurveField,
+  peak: number,
+  minHeight: number = SPINE_MIN_HEIGHT,
+): number[] {
   const scale = peak > 0 ? peak : 1
   const last = field.grid.count - 1
   return field.spines.map((minute) => {
     const i = Math.min(last, Math.max(0, Math.round(minute / field.grid.step)))
     const h = (field.height[i] ?? 0) / scale
-    return Math.min(1, Math.max(SPINE_MIN_HEIGHT, h + SPINE_ACCENT))
+    return Math.min(1, Math.max(minHeight, h + SPINE_ACCENT))
   })
 }
 
@@ -411,6 +443,10 @@ export interface CurveSvgOptions {
   className?: string
   /** Minutes in the frame, for placing spines at their true position. */
   frameMinutes: number
+  /** The shortest a spine may be drawn on THIS surface, as a fraction of the
+   *  row — a pixel quantity in disguise. Defaults to Day's
+   *  {@link SPINE_MIN_HEIGHT}; Week passes {@link WEEK_SPINE_MIN_HEIGHT}. */
+  minSpineHeight?: number
 }
 
 /**
@@ -455,7 +491,7 @@ export function buildCurveSvg(
 
   const span = Math.max(1, opts.frameMinutes)
   const widths = spineWidths(field.spines)
-  const heights = spineHeights(field, peak)
+  const heights = spineHeights(field, peak, opts.minSpineHeight ?? SPINE_MIN_HEIGHT)
   field.spines.forEach((minute, i) => {
     if (minute < 0 || minute > span) return
     const x = (minute / span) * VIEW_W

@@ -54,6 +54,7 @@ import {
   curveGrid,
   fieldPeak,
   weekSigma,
+  WEEK_SPINE_MIN_HEIGHT,
   type ActivitySample,
   type CurveField,
 } from './densityCurve.js'
@@ -1509,7 +1510,12 @@ class WeekView implements TemporalView {
       row.slots = drawn?.slots ?? []
       if (drawn) {
         row.paint.append(
-          buildCurveSvg(drawn.field, peak, { frameMinutes: drawn.minutes }),
+          buildCurveSvg(drawn.field, peak, {
+            frameMinutes: drawn.minutes,
+            // A week rail is `1fr` and runs three times a day lane's height, so
+            // it takes its own fraction to draw the same few pixels of floor.
+            minSpineHeight: WEEK_SPINE_MIN_HEIGHT,
+          }),
         )
       }
       for (const mark of visible) row.paint.append(this.buildMark(mark, visible))
