@@ -27,9 +27,12 @@ shuttle:
 ---
 ```
 
-Those keys cover the whole interface. Felt validates the block's shape and
-otherwise treats it as opaque frontmatter. Remove the daemon and you still have
-a readable, greppable, version-controlled markdown file.
+Those keys cover the whole dispatch interface. Felt validates the block's shape
+and otherwise treats it as opaque frontmatter. Remove the daemon and you still
+have a readable, greppable, version-controlled markdown file.
+
+(The board reads a small calendar vocabulary outside the block — `start:`,
+`horizon:`, and the `cycle` tag. See [Cycles and eras](cycles.md).)
 
 ## The loop
 
@@ -78,10 +81,13 @@ prior transcript.
 - **tmux** — hosts the worker process and reports its liveness. Not optional.
   tmux owns the worker process; Shuttle owns only the watcher. So restarting the
   daemon leaves live workers running — the daemon re-adopts them on boot.
-- **The board** — a TypeScript kanban UI, served by the daemon at
-  `http://127.0.0.1:4000/`. It views the same fibers plus tmux liveness, and
-  holds no state of its own. Skip it if you like: the CLI covers every
-  operation.
+- **The board** — a TypeScript UI, served by the daemon at
+  `http://127.0.0.1:4000/`. A kanban desk plus four more views (Day, Week,
+  Chronicle, and a canvas of the files workers sent) over the same fibers, tmux
+  liveness, and the fleet's activity, session and commit
+  [ledgers](telemetry.md). It holds no state of its own. Skip it if you like:
+  the CLI covers every lifecycle operation. (Cycles are the one thing only the
+  board draws — see [Cycles and eras](cycles.md).)
 - **The agent registry** — maps an agent id (`claude-opus`, `codex`,
   `pi-sonnet`, …) to a CLI invocation. `felt shuttle agents` prints it.
 
@@ -103,6 +109,13 @@ that. This section lists them all; the other pages point here.
   Substitute your own store path everywhere it appears.
 - **The daemon ships no release artifact.** You build it from a checkout and you
   keep the checkout. See [Installation](installation.md).
+- **The commit ledger has no shipped writer.** The board's Chronicle narrates
+  work from `~/.shuttle/commits.jsonl`, which pairs each commit with the session
+  that made it. Nothing in this repo writes that file — a `PostToolUse` hook on
+  the maintainer's machines does, and `bootstrap.sh` wires only the event
+  stream. Without your own writer the commit strip and a cycle's "look back"
+  stay empty; there is no git-log fallback. See
+  [Telemetry](telemetry.md#the-commit-ledger).
 
 None of this blocks a single-machine adopter. It does earn Shuttle the label
 "currently fleet-oriented" rather than "general-purpose orchestrator."
@@ -110,5 +123,8 @@ None of this blocks a single-machine adopter. It does earn Shuttle the label
 ## Next
 
 - [Constitutions](constitutions.md) — how to author one.
-- [Lifecycle](lifecycle.md) — the worker loop, exit semantics, and the board.
+- [Lifecycle](lifecycle.md) — the worker loop, exit semantics, dispatch gates.
+- [The board](board.md) — the five views, and what each gesture writes.
+- [Cycles and eras](cycles.md) — naming a span of time.
+- [Telemetry and the ledgers](telemetry.md) — what the time views read.
 - [Installation](installation.md) — building the daemon from source.

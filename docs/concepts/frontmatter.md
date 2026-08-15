@@ -45,8 +45,8 @@ Set scalars from the CLI. felt reads the value as a YAML scalar, so types
 survive:
 
 ```bash
-felt edit damping-prior --set horizon=stashed --set cold=true --set n_patches=200
-felt edit damping-prior --unset horizon --unset cold
+felt edit damping-prior --set instrument=KiDS-1000 --set n_patches=200
+felt edit damping-prior --unset instrument --unset n_patches
 ```
 
 Edit structured blocks — lists, nested maps — in the file directly. `--set`
@@ -67,8 +67,26 @@ scalars one per line, structured values as YAML.
 
 One convention felt *does* understand: `inputs.from` names another fiber as a
 data-flow input. `felt show <id> --consumers` gives you the reverse edge, and
-`felt check` flags broken `from` references. That covers it. The rest of the
-block stays yours.
+`felt check` flags broken `from` references. That is all felt itself reads. The
+rest of the block stays yours.
+
+### Conventions other tools read
+
+A key felt treats as opaque can still mean something to whatever else looks at
+your fibers. These are the ones in this repo, so you recognise them if you meet
+them — and so you do not pick the same names for something else. felt validates
+none of them.
+
+| Key | Read by | Meaning |
+|---|---|---|
+| `inputs.from` | felt | A data-flow edge to another fiber |
+| tag `cycle` + `start:` / `due:` | the Shuttle board | A named span of calendar time, drawn as a band. Written by dragging in the Chronicle |
+| `horizon: stashed` | the Shuttle board | Takes a card off the Now board to Resting. A `due:` day at or past today overrides it and pulls the card back |
+| `cold:` | the Shuttle board | Cleared alongside `horizon` when a card returns to the desk |
+
+The board writes these itself, through the daemon, which shells the same `felt
+edit --set` you would type. See [Cycles and eras](../shuttle/cycles.md) and
+[The board](../shuttle/board.md#horizon).
 
 ## Ids
 
