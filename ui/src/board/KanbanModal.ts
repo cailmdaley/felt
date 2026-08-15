@@ -1003,8 +1003,16 @@ export class KanbanModal {
       horizon === 'stashed' && opts.due === undefined && dueBouncesFromResting(card.due)
     const due = dropsStaleDue ? null : opts.due
 
+    // `horizon` is a planning field, not the card's current board surface.
+    // An active oneshot can retain `horizon: stashed` while its lifecycle puts
+    // it in In flight (the live-worker override, or simply `status:active`).
+    // Compare against the surface the classifier is actually showing, or this
+    // drag returns "already in Resting" before it can stop and park the worker.
+    const actuallyOnHorizon = horizon === 'stashed'
+      ? card.status === 'open' && card.effectiveHorizon === 'stashed'
+      : card.effectiveHorizon === 'now'
     const sameHorizon =
-      card.storedHorizon === horizon && (card.cold ?? false) === (opts.cold ?? false)
+      actuallyOnHorizon && (card.cold ?? false) === (opts.cold ?? false)
     // `undefined` means "the date is not being touched", so it can never be the
     // half of the drop that makes it a real change — a preserved due leaves the
     // verdict entirely to `sameHorizon`. Re-dropping an already-resting dated

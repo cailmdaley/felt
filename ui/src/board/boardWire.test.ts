@@ -376,6 +376,34 @@ describe('setSurface → commitSurface — the due key is the whole protocol', (
     expect(Object.keys(wire.bodiesTo('/api/v1/felt-edit')[0])).not.toContain('due')
   })
 
+  it('parks an active card whose stale horizon says stashed', async () => {
+    // Lifecycle placement wins over the planning field: an active oneshot is
+    // In flight even when a previous stash left `horizon: stashed` behind.
+    // The drop must therefore stop and park it, rather than claiming it is
+    // already in Resting.
+    const c = card({
+      id: 'active-stashed-1',
+      status: 'active',
+      shuttleKind: 'oneshot',
+      runningWorker: 'tmux-active-stashed',
+      storedHorizon: 'stashed',
+      effectiveHorizon: 'stashed',
+    })
+    asPrivate(makeBoard()).setSurface(c, 'stashed', {})
+    await wire.settled()
+
+    expect(wire.writes().map((w) => w.url)).toEqual([
+      `${BASE}/api/v1/kill`,
+      `${BASE}/api/v1/transition`,
+      `${BASE}/api/v1/felt-edit`,
+    ])
+    expect(wire.bodiesTo('/api/v1/transition')[0]).toEqual({
+      fiber_id: 'active-stashed-1',
+      target: 'drafts',
+      origin: 'local',
+    })
+  })
+
   it('unsets horizon and cold on the way back to Now, touching no due', async () => {
     const c = card({ storedHorizon: 'stashed', due: asStoredUtc(dayFromNow(30)) })
     asPrivate(makeBoard()).setSurface(c, 'now', {})
