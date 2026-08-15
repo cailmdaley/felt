@@ -46,14 +46,37 @@ export interface PromoteView {
 /**
  * When a card stops being a tile and becomes a page.
  *
- * TWO thresholds, not one, and the gap between them is the whole reason this is
- * a named constant rather than an inline number: a single threshold sits
+ * THE BAR IS THE FIT POINT — cover 1, the zoom at which the card has grown to
+ * meet the viewport exactly on its tighter axis — and that is a deliberate
+ * correction of the first cut, which promoted at 0.6.
+ *
+ * Cover is measured on the card's WIDEST axis, and a card is a portrait page on
+ * a landscape screen, so the height is almost always what the maximum picks up.
+ * At 0.6 the card was three fifths of the screen's HEIGHT, which for an A4
+ * proportion is barely two fifths of its width: reading mode engaged with the
+ * page floating in the middle of a mostly empty screen. Whatever the arithmetic
+ * said, that is not "I zoomed in until the card filled the screen", which is
+ * the gesture this exists to serve.
+ *
+ * At cover 1 the promoted box is exactly
+ *   min(viewport.w, viewport.h / aspect) × min(viewport.h, viewport.w * aspect)
+ * — the page fitted to the screen, pillarboxed rather than stretched, since a
+ * portrait page cannot fill a landscape screen without either distorting it or
+ * reflowing it to proportions its author never chose. Note that this falls out
+ * of the EXISTING geometry rather than being imposed on it: the promoted card
+ * still occupies precisely the rectangle the camera would have given it, so
+ * there is no jump at the moment of promotion and the page goes on growing
+ * past it if you keep zooming. Snapping the box to the viewport instead would
+ * buy the same size at the cost of the seam this design exists to avoid.
+ *
+ * TWO thresholds, not one, and the gap between them is the whole reason these
+ * are named constants rather than inline numbers: a single threshold sits
  * exactly where a pinch is slowest and most deliberate, so the card would
  * flicker in and out of reading mode under the reader's own fingers. Promotion
  * takes the higher bar, demotion the lower.
  */
-export const PROMOTE_ON = 0.6
-export const PROMOTE_OFF = 0.45
+export const PROMOTE_ON = 1
+export const PROMOTE_OFF = 0.75
 
 /**
  * How much of a card must actually be on screen to be the one being read — as

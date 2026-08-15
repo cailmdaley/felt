@@ -74,6 +74,25 @@ describe('choosePromotion', () => {
     expect(choosePromotion([card('log', { reflows: false })], view, null)).toBeNull()
   })
 
+  it('promotes only once the page FITS the screen, pillarboxed', () => {
+    // The bug this pins: promoting at 0.6 left an A4 page filling three fifths
+    // of the height and barely two fifths of the width — reading mode with the
+    // page adrift in an empty screen. At the bar, the promoted box must be the
+    // page fitted to the viewport on its tighter axis.
+    const c = card('a')
+    const aspect = c.h / c.w
+    // The first zoom at which it promotes, found by walking up in fine steps.
+    let zoom = 0
+    for (let z = 0.1; z < 40; z += 0.0002) {
+      if (choosePromotion([c], { ...VIEW, zoom: z }, null) === 'a') { zoom = z; break }
+    }
+    expect(zoom).toBeGreaterThan(0)
+    const fitW = Math.min(VIEW.width, VIEW.height / aspect)
+    const fitH = Math.min(VIEW.height, VIEW.width * aspect)
+    expect(c.w * zoom).toBeCloseTo(fitW, 0)
+    expect(c.h * zoom).toBeCloseTo(fitH, 0)
+  })
+
   it('is a no-op before the viewport has been measured', () => {
     expect(choosePromotion([card('a')], { ...VIEW, width: 0, height: 0 }, null)).toBeNull()
   })
