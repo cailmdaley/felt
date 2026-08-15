@@ -520,8 +520,12 @@ defmodule Shuttle.Poller do
   `fiber_id`, or `{:error, :not_found}` if the fiber isn't in any host.
 
   The result is cached in the Poller's state for the daemon's lifetime.
-  Used by `GET /api/v1/fiber/:id/host` so external callers can route their
-  felt operations to the right index without re-implementing host resolution.
+
+  NOT production API: internal callers resolve through `host_for_fiber/2`
+  (or `FeltStores.host_for_fiber/2` / `RelayHelpers.host_for_fiber/1`) directly.
+  This pair is the test seam `poller_test.exs` uses to exercise the private
+  `host_for_fiber/2` fallback resolver, which needs poller state. It once
+  served `GET /api/v1/fiber/host`; that route is gone.
   """
   @spec resolve_fiber_host(String.t()) :: {:ok, String.t()} | {:error, :not_found | :timeout}
   def resolve_fiber_host(fiber_id), do: resolve_fiber_host(__MODULE__, fiber_id)

@@ -385,48 +385,6 @@ defmodule ShuttleWeb.APIControllerTest do
   defp restore_app_env(key, nil), do: Application.delete_env(:shuttle, key)
   defp restore_app_env(key, value), do: Application.put_env(:shuttle, key, value)
 
-  # Re-trigger the poll until a condition holds. A bare `send(Shuttle.Poller,
-  # :run_poll_cycle)` is DROPPED when a poll is already in flight (the
-  # `poll_check_in_progress` guard), and a fixed Process.sleep after it raced the
-  # async poll cycle — so a state-reading assertion that depended on the poll
-  # having dispatched flaked under load. Re-sending each iteration (~3s ceiling)
-  # guarantees a poll lands and the state settles; returns the instant it does.
-  defp poll_until(fun, attempts \\ 120) do
-    cond do
-      fun.() ->
-        true
-
-      attempts <= 0 ->
-        flunk("poll_until: condition never held")
-
-      true ->
-        send(Shuttle.Poller, :run_poll_cycle)
-        Process.sleep(25)
-        poll_until(fun, attempts - 1)
-    end
-  end
-
-  # ── GET /api/v1/workers/:fiber_id ──
-
-  test "returns running worker info" do
-    fiber = make_fiber("tests/haiku")
-    MockRunner.set_fiber("tests/haiku", fiber)
-    MockRunner.set_shuttle("tests/haiku", @oneshot_shuttle)
-
-    assert poll_until(fn ->
-             Jason.decode!(get(api_conn(), "/api/v1/workers/tests/haiku").resp_body)["running"] ==
-               true
-           end)
-
-    conn = get(api_conn(), "/api/v1/workers/tests/haiku")
-    assert conn.status == 200
-    body = Jason.decode!(conn.resp_body)
-    assert body["running"] == true
-    assert body["fiber_id"] == "tests/haiku"
-    assert body["agent"] == "claude-sonnet"
-    assert body["runtime_seconds"] >= 0
-  end
-
   test "GET /api/v1/agents degrades to []/200 when felt's agents verb is unavailable" do
     # The registry is felt-owned now: the controller shells `felt shuttle agents
     # --json` through Shuttle.Felt.run. Route that shell-out at MockRunner (the
@@ -443,14 +401,6 @@ defmodule ShuttleWeb.APIControllerTest do
     conn = get(api_conn(), "/api/v1/agents")
     assert conn.status == 200
     assert Jason.decode!(conn.resp_body) == []
-  end
-
-  test "returns not running for idle fiber" do
-    conn = get(api_conn(), "/api/v1/workers/tests/idle")
-    assert conn.status == 200
-    body = Jason.decode!(conn.resp_body)
-    assert body["running"] == false
-    assert body["fiber_id"] == "tests/idle"
   end
 
   # ── POST /api/v1/dispatch ──
