@@ -12,8 +12,14 @@ defmodule Shuttle.FeltStores do
   explicitly. Saving an empty list deletes the registry file.
   """
 
-  @config_env "FELT_STORES_FILE"
-  @default_config_path "~/.config/felt/stores.json"
+  alias Shuttle.PathListConfig
+
+  @spec_ %{
+    env: "FELT_STORES",
+    config_env: "FELT_STORES_FILE",
+    default_path: "~/.config/felt/stores.json",
+    json_key: "felt_stores"
+  }
 
   @type host_list :: [String.t()]
 
@@ -396,77 +402,17 @@ defmodule Shuttle.FeltStores do
   defp ulid_or_nil(_), do: nil
 
   @spec registered_hosts() :: host_list()
-  def registered_hosts do
-    path = config_path()
-
-    with true <- File.exists?(path),
-         {:ok, content} <- File.read(path),
-         {:ok, decoded} <- Jason.decode(content) do
-      case decoded do
-        %{"felt_stores" => hosts} when is_list(hosts) -> normalize(hosts)
-        hosts when is_list(hosts) -> normalize(hosts)
-        _ -> []
-      end
-    else
-      _ -> []
-    end
-  end
+  def registered_hosts, do: PathListConfig.registered(@spec_)
 
   @spec save(host_list()) :: {:ok, host_list()} | {:error, term()}
-  def save(hosts) when is_list(hosts) do
-    normalized = normalize(hosts)
-    path = config_path()
-
-    try do
-      case normalized do
-        [] ->
-          case File.rm(path) do
-            :ok -> {:ok, normalized}
-            {:error, :enoent} -> {:ok, normalized}
-            {:error, reason} -> {:error, {:file_error, reason}}
-          end
-
-        _ ->
-          File.mkdir_p!(Path.dirname(path))
-          tmp = path <> ".tmp"
-          payload = Jason.encode!(%{version: 1, felt_stores: normalized}, pretty: true) <> "\n"
-          File.write!(tmp, payload)
-          File.rename!(tmp, path)
-          {:ok, normalized}
-      end
-    rescue
-      error -> {:error, error}
-    end
-  end
+  def save(hosts) when is_list(hosts), do: PathListConfig.save(@spec_, hosts)
 
   @spec config_path() :: String.t()
-  def config_path do
-    case System.get_env(@config_env) do
-      v when is_binary(v) and v != "" -> Path.expand(v)
-      _ -> Path.expand(@default_config_path)
-    end
-  end
+  def config_path, do: PathListConfig.config_path(@spec_)
 
   @spec env_hosts() :: host_list()
-  def env_hosts do
-    case System.get_env("FELT_STORES") do
-      v when is_binary(v) and v != "" ->
-        v
-        |> String.split(",")
-        |> normalize()
-
-      _ ->
-        []
-    end
-  end
+  def env_hosts, do: PathListConfig.from_env(@spec_)
 
   @spec normalize(list()) :: host_list()
-  def normalize(hosts) do
-    hosts
-    |> Enum.filter(&is_binary/1)
-    |> Enum.map(&String.trim/1)
-    |> Enum.reject(&(&1 == ""))
-    |> Enum.map(&Path.expand/1)
-    |> Enum.uniq()
-  end
+  def normalize(hosts), do: PathListConfig.normalize(hosts)
 end
