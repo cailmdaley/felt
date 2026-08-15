@@ -24,31 +24,10 @@ type DataFlowConsumer struct {
 	SourceName string
 }
 
-// ScanCitations answers a targeted reverse-reference query directly from the
-// markdown source of truth.
-func (s *Storage) ScanCitations(targetID string) ([]Citation, error) {
-	felts, err := s.List()
-	if err != nil {
-		return nil, err
-	}
-	return CitationsFromFelts(felts, targetID), nil
-}
-
-// ScanConsumers answers a targeted reverse data-flow query directly from the
-// markdown source of truth. See ScanCitations for the performance contract.
-func (s *Storage) ScanConsumers(targetID string) ([]DataFlowConsumer, error) {
-	felts, err := s.List()
-	if err != nil {
-		return nil, err
-	}
-	return ConsumersFromFelts(felts, targetID), nil
-}
-
 // ScanRelationships answers both reverse-reference queries for a target in a
-// single markdown walk. Callers that need citations and consumers together
-// (show -d summary/full) get one List() plus one iterRefs pass instead of the
-// two the single-sided Scan* functions would cost, since iterRefs already
-// yields both edge kinds.
+// single markdown walk: one List() plus one iterRefs pass, since iterRefs
+// already yields both edge kinds. Callers needing only one side discard the
+// other — the walk cost is the same either way.
 func (s *Storage) ScanRelationships(targetID string) ([]Citation, []DataFlowConsumer, error) {
 	felts, err := s.List()
 	if err != nil {
@@ -175,25 +154,6 @@ func iterRefsResolved(felts []*Felt, resolver *scopedIDResolver, yield func(reso
 	return nil
 }
 
-func CitationsFromFelts(felts []*Felt, targetID string) []Citation {
-	ids := sortedFeltIDs(felts)
-	var citations []Citation
-	_ = iterRefs(felts, ids, func(r resolvedRef) error {
-		if r.Kind != refKindReference || r.ResolveErr != nil || r.ResolvedID != targetID {
-			return nil
-		}
-		citations = append(citations, Citation{
-			SourceID:   r.Source.ID,
-			TargetID:   r.ResolvedID,
-			Fragment:   r.Fragment,
-			SourceName: r.Source.DisplayName(),
-		})
-		return nil
-	})
-	sortCitations(citations)
-	return citations
-}
-
 func sortCitations(citations []Citation) {
 	sort.Slice(citations, func(i, j int) bool {
 		if citations[i].SourceID != citations[j].SourceID {
@@ -201,26 +161,6 @@ func sortCitations(citations []Citation) {
 		}
 		return citations[i].Fragment < citations[j].Fragment
 	})
-}
-
-func ConsumersFromFelts(felts []*Felt, targetID string) []DataFlowConsumer {
-	ids := sortedFeltIDs(felts)
-	var consumers []DataFlowConsumer
-	_ = iterRefs(felts, ids, func(r resolvedRef) error {
-		if r.Kind != refKindDataFlow || r.ResolveErr != nil || r.ResolvedID != targetID {
-			return nil
-		}
-		consumers = append(consumers, DataFlowConsumer{
-			SourceID:   r.Source.ID,
-			TargetID:   r.ResolvedID,
-			OutputID:   r.Fragment,
-			InputID:    r.InputID,
-			SourceName: r.Source.DisplayName(),
-		})
-		return nil
-	})
-	sortConsumers(consumers)
-	return consumers
 }
 
 func sortConsumers(consumers []DataFlowConsumer) {
