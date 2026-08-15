@@ -34,7 +34,7 @@ export interface ShelfResult {
   origins: TemporalOrigins
 }
 
-export const EMPTY_SHELF: ShelfResult = { files: [], origins: {} }
+const EMPTY_SHELF: ShelfResult = { files: [], origins: {} }
 
 /**
  * Coerce a composite body into shelf records.

@@ -425,7 +425,7 @@ export function dayWeight(totalMs: number): DayWeight {
 }
 
 /** `6h 20m` · `35m` · `—`. Rounded down to the minute. */
-export function formatSpan(ms: number): string {
+function formatSpan(ms: number): string {
   const minutes = Math.floor(ms / 60_000)
   if (minutes <= 0) return '—'
   const h = Math.floor(minutes / 60)
@@ -521,7 +521,7 @@ function formatCoarseSpan(ms: number): string {
 
 /** Horizontal distance one page costs. Roughly a deliberate two-finger flick;
  *  low enough to feel willing, high enough that a diagonal scroll never pages. */
-export const SWIPE_THRESHOLD_PX = 120
+const SWIPE_THRESHOLD_PX = 120
 /** Quiet time that ends a gesture. Trackpads emit wheel events in a burst with
  *  a long inertial tail, so "the gesture ended" is silence, not a distance. */
 export const SWIPE_SETTLE_MS = 200
@@ -1687,7 +1687,7 @@ function buildKeyRow(): HTMLElement {
 // ── Raster slots: the ink, and what it is willing to say ─────────────────────
 
 /** One kind's worth of one slot. */
-export interface SlotKind {
+interface SlotKind {
   kind: DrawnKind
   /** Events in the slot — the sum of the buckets' `n`. What the tooltip says. */
   count: number

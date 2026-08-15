@@ -82,7 +82,7 @@ export function wheelZoomFactor(
 export const MIN_CARD_W = 160
 export const MIN_CARD_H = 120
 
-export type GesturePhase = 'maybe' | 'active'
+type GesturePhase = 'maybe' | 'active'
 export type GestureMode = 'move' | 'resize' | 'pan'
 
 export interface Geometry {
@@ -171,7 +171,7 @@ export function advanceGesture(
 }
 
 /** Where a gesture puts its subject, given how far the pointer has come. */
-export function geometryFor(gesture: ShelfGesture, dx: number, dy: number): Geometry {
+function geometryFor(gesture: ShelfGesture, dx: number, dy: number): Geometry {
   const { origin } = gesture
   if (gesture.mode === 'resize') {
     return {

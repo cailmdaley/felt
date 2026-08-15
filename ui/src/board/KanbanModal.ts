@@ -2162,7 +2162,7 @@ export function resolveOpenTarget(
  * by the move *direction* rather than recounted off the (possibly capped)
  * array.
  */
-export function applyOptimisticTransition(
+function applyOptimisticTransition(
   resp: KanbanResponse | null,
   cardId: string,
   target: ColumnKind,
@@ -2258,7 +2258,7 @@ export function applyOptimisticTransition(
  * lifecycle column, so placing there would mean reclassifying. Returns null
  * when the card is absent.
  */
-export function applyOptimisticSurface(
+function applyOptimisticSurface(
   resp: KanbanResponse | null,
   cardId: string,
   opts: { cold?: boolean; due?: string | null } = {},
@@ -2300,7 +2300,7 @@ export function applyOptimisticSurface(
  * schedule cleared (a pinned block has none). Returns null when the card is
  * absent. The trailing refetch reconciles against the daemon's reshape.
  */
-export function applyOptimisticPin(
+function applyOptimisticPin(
   resp: KanbanResponse | null,
   cardId: string,
 ): KanbanResponse | null {

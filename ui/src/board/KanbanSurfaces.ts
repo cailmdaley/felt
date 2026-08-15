@@ -1596,7 +1596,7 @@ function cycleAimLabel(target: CycleDropTarget): string {
 /** A cycle's span as a chip says it — `Aug 12 – Aug 26`, or `Aug 12 –` for a
  *  chapter still open at its right edge. Shared by the drag horizon's drop
  *  chips and the lens row, so the two never drift apart. */
-export function cycleChipText(span: { start: string; end: string; openEnded: boolean }): string {
+function cycleChipText(span: { start: string; end: string; openEnded: boolean }): string {
   return span.openEnded
     ? `${shortDayLabel(span.start)} –`
     : `${shortDayLabel(span.start)} – ${shortDayLabel(span.end)}`

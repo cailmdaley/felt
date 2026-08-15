@@ -152,7 +152,7 @@ import './DayView.css'
 const MINUTE_MS = 60_000
 /** Breathing room the drawn frame keeps outside the day's first and last
  *  action, so the earliest mark is not flush against the sheet's edge. */
-export const FRAME_PAD_MINUTES = 15
+const FRAME_PAD_MINUTES = 15
 /** The narrowest frame Day will draw. A day holding one five-minute burst
  *  would otherwise zoom to that burst and magnify a speck into the whole
  *  sheet, which reads as a busy day rather than an almost empty one. */
@@ -568,7 +568,7 @@ export interface DayTotals {
  * Positions on the rail are untouched by this: the ticks still mark the minutes
  * the buckets name. Only the unit in the prose changed.
  */
-export function countExchange(
+function countExchange(
   buckets: readonly ActivityBucket[],
   win: DayWindow,
 ): { sent: number; received: number } {
@@ -1251,7 +1251,7 @@ export interface DayModel {
  * reports stale IS stale: the lanes are built from both files, so a host whose
  * activity is current but whose ledger is not is still a host we are waiting on.
  */
-export function mergeOrigins(
+function mergeOrigins(
   a: TemporalOrigins | undefined,
   b: TemporalOrigins | undefined,
 ): TemporalOrigins {
@@ -1525,7 +1525,7 @@ export function beatTip(
  * words, which is the same honest degradation as a transcript that was cleaned
  * up. Inventing a sentence, or silently dropping the turn, would both be worse.
  */
-export const MAGNET_LOOKBACK_MINUTES = 90
+const MAGNET_LOOKBACK_MINUTES = 90
 
 /**
  * The magnet's slip: THE LAST EXCHANGE ON THIS LANE, in the order it happened.

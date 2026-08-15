@@ -90,7 +90,7 @@ export const PROMOTE_OFF = 0.75
  * the question that was actually meant: is this card either mostly on screen,
  * or filling most of the screen?
  */
-export const PROMOTE_MIN_VISIBLE = 0.4
+const PROMOTE_MIN_VISIBLE = 0.4
 
 /**
  * The card to promote, or null.

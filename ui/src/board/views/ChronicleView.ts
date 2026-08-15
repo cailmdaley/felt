@@ -198,7 +198,7 @@ export interface DayCell {
  *  at the keyboard — at a day per column, "work happened here" is the only
  *  claim the scale can honestly carry, so the two kinds are summed rather
  *  than drawn as rival channels. */
-export function dayWork(cell: DayCell): number {
+function dayWork(cell: DayCell): number {
   return cell.agent + cell.attention
 }
 

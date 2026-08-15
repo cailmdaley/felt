@@ -242,7 +242,7 @@ export function buildStacks(
 const byNewest = (a: ShelfFile, b: ShelfFile): number =>
   b.timestamp - a.timestamp || a.fullPath.localeCompare(b.fullPath)
 
-export interface PlacedCard {
+interface PlacedCard {
   /** The face — the only file of the stack the surface draws. */
   file: ShelfFile
   stack: ShelfStack

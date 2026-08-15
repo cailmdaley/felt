@@ -295,7 +295,7 @@ export interface ExchangeMark {
 }
 
 /** One side of the last exchange — a message, and when it was sent. */
-export interface ExchangeTurn {
+interface ExchangeTurn {
   /** `attention` is yours, `reply` is the agent's. */
   kind: 'attention' | 'reply'
   atMs: number
@@ -596,7 +596,7 @@ export function placeTip(tip: HTMLElement, box: DOMRect, anchorX: number, topPx:
 
 /** Long enough that sweeping a pointer down a rail asks for nothing, short
  *  enough that stopping on a mark feels like the tooltip already knew. */
-export const MOMENT_DEBOUNCE_MS = 150
+const MOMENT_DEBOUNCE_MS = 150
 
 /** At most this many transcripts per hovered mark. A mark almost always has
  *  one session behind it; a busy slot can have several, and asking all of them
@@ -624,7 +624,7 @@ const MAX_EXCERPTS = 6
  * session behind a spine is asked before any session that only worked.
  * Stable, so arrival order still breaks ties within each group.
  */
-export function orderSources(sources: readonly MomentSource[]): MomentSource[] {
+function orderSources(sources: readonly MomentSource[]): MomentSource[] {
   return [...sources.filter((s) => s.spoke), ...sources.filter((s) => !s.spoke)]
 }
 
@@ -643,7 +643,7 @@ export function orderSources(sources: readonly MomentSource[]): MomentSource[] {
  * delegation register (`return` — a subagent's report, a teammate message),
  * which nobody typed; only `prose` is speech.
  */
-export function pickExcerpts(excerpts: readonly MomentExcerpt[], cap = MAX_EXCERPTS): MomentExcerpt[] {
+function pickExcerpts(excerpts: readonly MomentExcerpt[], cap = MAX_EXCERPTS): MomentExcerpt[] {
   const human = (e: MomentExcerpt): boolean => e.role === 'user' && (e.kind ?? 'prose') === 'prose'
   const inTime = [...excerpts].sort((a, b) => a.at_ms - b.at_ms)
   if (inTime.length <= cap) return inTime
