@@ -339,24 +339,10 @@ defmodule Shuttle.Poller do
   end
 
   @doc """
-  Returns the serve-time runtime overlay for live workers.
-
-  This is the document-feed liveness projection without the document feed: a
-  controller that has just read fresh felt rows can stamp the same `runtime`
-  payloads the poller-owned cache would have carried, even when that cache is
-  cold or intentionally bypassed.
-  """
-  @spec runtime_index(GenServer.server()) :: map()
-  def runtime_index(server \\ __MODULE__) do
-    GenServer.call(server, :runtime_index, @orchestrator_state_call_timeout_ms)
-  catch
-    :exit, _ -> %{}
-  end
-
-  @doc """
   Returns the serve-time held overlay for boot-quarantine-parked launches.
 
-  The parked-launch analog of `runtime_index/1`: keyed by fiber_id/uid so the
+  The parked-launch analog of the runtime overlay (`Snapshot.runtime_index/2`,
+  applied by `stamp_runtime/2`): keyed by fiber_id/uid so the
   owning host's per-fiber feed can stamp a `held` marker onto a card WITHOUT any
   board-side lookup of the daemon-global `pending_launch`. A parked (fresh,
   awaiting-release) launch reads as `held` on its card; released or reclassified
@@ -748,10 +734,6 @@ defmodule Shuttle.Poller do
   @impl true
   def handle_call(:snapshot, _from, state) do
     {:reply, Snapshot.build_snapshot(state), state}
-  end
-
-  def handle_call(:runtime_index, _from, state) do
-    {:reply, Snapshot.runtime_index(state.running, session_activity()), state}
   end
 
   def handle_call(:parked_index, _from, state) do
