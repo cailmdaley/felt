@@ -14,7 +14,7 @@ Neither wants the trench narrative. What you tried Tuesday and abandoned Wednesd
 
 **Not the same surface as the other two.** `outcome:` is the kanban headline and `## Status` is the next worker's handoff — mechanics, blockers, where you stopped. The report is the human's: meaning, evidence, figures. Don't restate one in the other.
 
-**Write under whatever communication or writing skill the environment offers** — load it before drafting. There may be none; that's fine.
+**Follow this reference when drafting.** It defines the report's audience, evidence, and current-state shape, so the report stays self-contained.
 
 ## Rewrite, don't append
 
