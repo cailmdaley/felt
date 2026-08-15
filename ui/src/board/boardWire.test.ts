@@ -257,7 +257,7 @@ describe('commitPin — the strip drop is two intents, said in two calls', () =>
     // have a block — which is why it holds no create branch. Pinning the
     // ABSENCE of traffic is what keeps that guard and that assumption honest
     // together: loosen one without the other and this fails.
-    const c = card({ id: 'bare-1', shuttleHost: 'candide', shuttleProjectDir: '/home/cd/dev/felt' })
+    const c = card({ id: 'bare-1', shuttleHost: 'atlas', shuttleProjectDir: '/home/user/dev/felt' })
     delete (c as { shuttleKind?: unknown }).shuttleKind
     asPrivate(makeBoard()).pinRole(c)
     await new Promise((r) => setTimeout(r, 20))

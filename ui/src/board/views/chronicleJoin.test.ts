@@ -817,7 +817,7 @@ describe('composing an era’s look-back', () => {
     // read overlapping the local one. Counting it twice would double the lines.
     const records: CommitRecord[] = [
       commit({ sha: 'dup', session: 's1', insertions: 100, deletions: 40, host: 'local' }),
-      commit({ sha: 'dup', session: 's1', insertions: 100, deletions: 40, host: 'candide' }),
+      commit({ sha: 'dup', session: 's1', insertions: 100, deletions: 40, host: 'atlas' }),
       commit({ sha: 'other', session: 's1', insertions: 5, deletions: 0 }),
     ]
     const ledger = buildLedgerNarration(records, ledgerCards, pairings([['s1', 'a/board']]))
