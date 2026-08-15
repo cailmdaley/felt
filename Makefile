@@ -85,7 +85,8 @@ else
 AGENT_SSH_AUTH_SOCK ?=
 endif
 
-.PHONY: build cli cli-install daemon test go-test mix-test js-test all start stop restart \
+.PHONY: build cli cli-install daemon test go-test mix-test js-test plugin-hooks-test \
+        all start stop restart \
         logs status clean help install install-agent uninstall-agent lint-personal
 
 help:
@@ -94,7 +95,8 @@ help:
 	@echo "  make cli         — build the felt CLI (go build .)"
 	@echo "  make cli-install — install felt CLI → $(INSTALL_DIR)"
 	@echo "  make daemon      — build the daemon escript → bin/shuttle (MIX_ENV=dev)"
-	@echo "  make test        — go test ./...  AND  mix test  AND  the ui suite"
+	@echo "  make test        — go test ./...  AND  mix test  AND  the ui suite  AND  the plugin hooks"
+	@echo "  make plugin-hooks-test — exercise claude-plugin/hooks/* with HOME and PATH sandboxed"
 	@echo "  make lint-personal — fail on maintainer host/account names in tracked source"
 	@echo "  make install     — full from-source bootstrap (CLI + daemon + ui + hook + keep-alive)"
 	@echo ""
@@ -138,7 +140,7 @@ endif
 	mix escript.build
 
 # ── test ─────────────────────────────────────────────────────────────────
-test: go-test mix-test js-test
+test: go-test mix-test js-test plugin-hooks-test
 
 go-test:
 	go test ./...
@@ -150,6 +152,12 @@ mix-test:
 # the civil-day rules are only meaningful against a real UTC offset.
 js-test:
 	cd ui && npm test
+
+# The shell shim layer the Go and Elixir suites cannot reach: hooks.json's
+# ${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT} fallback and felt-bin.sh's PATH
+# resolution for GUI-launched agents. Runs with HOME and PATH sandboxed.
+plugin-hooks-test:
+	bash scripts/test-plugin-hooks.sh
 
 # Fail if a maintainer's own host or account name has crept back into tracked
 # source. Fleet members belong in ~/.config/felt/remotes.json, not in the repo.
