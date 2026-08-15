@@ -4,8 +4,8 @@ Thank you for your interest in felt.
 
 felt is one repo with two code artifacts — the **felt CLI** (Go; the data layer,
 including the `felt shuttle <verb>` subcommands) and the **Shuttle daemon**
-(Elixir/OTP escript; the dispatcher) — plus the served kanban board **UI**
-(TypeScript). See `AGENTS.md` for the full architecture and operator guide.
+(Elixir/OTP escript; the dispatcher) — plus the served board **UI**
+(TypeScript; a kanban desk plus four temporal views). See `AGENTS.md` for the full architecture and operator guide.
 
 ## Getting started
 
@@ -19,19 +19,23 @@ make build                    # both (CLI + daemon escript)
 
 Requirements: Go 1.23+, Erlang/OTP 27+, Elixir 1.19+. Working on the felt CLI
 alone needs only Go. `tmux` matters once you touch the Shuttle daemon or its
-dispatch path — it launches each worker in a tmux session. Node 22+ is needed
-only to build the UI bundle (`cd ui && npm run build`).
+dispatch path — it launches each worker in a tmux session. Node 22+ is needed to
+build the UI bundle (`cd ui && npm run build`) and to run the board's test
+suite, so `make test` needs it too.
 
 ## Running tests
 
 ```bash
-go test ./...   # Go (felt CLI)
-mix test        # Elixir (daemon)
-make test       # both
+go test ./...        # Go (felt CLI)
+mix test             # Elixir (daemon)
+cd ui && npm test    # TypeScript (board) — runs twice, once per pinned timezone
+make test            # all three
 ```
 
 CI runs `go build`/`go test ./...`, `mix compile --warnings-as-errors` +
-`mix test`, and `npm run build` of the board on every PR.
+`mix test`, and `npm run build` of the board on every PR. Note that CI
+type-checks and builds the board bundle but does not run the board's vitest
+suite — `cd ui && npm test` is a local-only gate today.
 
 ## Invariants
 
@@ -40,7 +44,15 @@ Before opening a PR, verify:
 - `go test ./...` passes
 - `mix compile --warnings-as-errors` passes
 - `mix test` passes
-- No personal paths (`~/loom`, `/Users/...`) in tracked files
+- `cd ui && npm test` passes
+- No personal hostnames, usernames, or absolute home paths (`/Users/...`) in
+  tracked source, docs, or skills — `go test ./cmd -run
+  TestNoPersonalIdentifiersInSource` enforces the list. Fleet data belongs in
+  `~/.config/felt/remotes.json`; test files, `testdata/`, and
+  `share/agents.example.json` are exempt.
+- `~/loom` is not a personal path here: it is the deliberate running example for
+  a cross-project store (see the docs site). Leave it in place; substitute your
+  own store path when following the docs.
 - Felt owns the agent registry — the daemon reads the already-resolved record
   off felt's `shuttle.resolved.agent` JSON and shells `felt shuttle agents`; do
   not add a parallel registry in Elixir config or Go source.
