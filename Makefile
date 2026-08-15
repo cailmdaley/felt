@@ -281,7 +281,7 @@ else
 	    echo "    ~/Downloads). launchd-spawned processes are blocked from these, and"; \
 	    echo "    Full Disk Access does NOT inherit across the launchd process tree —"; \
 	    echo "    so the daemon will crash-loop or silently fail its felt-store walks."; \
-	    echo "    Fix: run from a checkout OUTSIDE these folders (canonical: ~/dev/felt)."; \
+	    echo "    Fix: run from a checkout OUTSIDE these folders (e.g. ~/src/felt)."; \
 	    echo "    Installing the agent anyway, but it will not work from here." ;; \
 	esac
 	@mkdir -p $(HOME)/Library/LaunchAgents

@@ -14,7 +14,6 @@ else
   if [ -z "$FELT_BIN" ] && [ -n "${HOME:-}" ]; then
     for candidate in \
       "$HOME/.local/bin/felt" \
-      "$HOME/loom/bin/felt" \
       "/opt/homebrew/bin/felt" \
       "/usr/local/bin/felt"; do
       if [ -x "$candidate" ]; then

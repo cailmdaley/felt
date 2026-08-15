@@ -34,8 +34,8 @@ and you keep the checkout.
 Clone the repo, then run the bootstrap. `make install` runs the same thing.
 
 ```bash
-git clone https://github.com/cailmdaley/felt ~/dev/felt
-cd ~/dev/felt
+git clone https://github.com/cailmdaley/felt ~/src/felt
+cd ~/src/felt
 ./bootstrap.sh --dry-run     # check prerequisites, print the plan, change nothing
 ./bootstrap.sh               # or: make install
 ```
@@ -161,7 +161,7 @@ lsof -ti:4000 -sTCP:LISTEN | xargs kill
 To pick up a new `shuttle-launch` itself:
 
 ```bash
-SHUTTLE_DIR=~/dev/felt ~/.local/bin/shuttle-launch
+SHUTTLE_DIR=~/src/felt ~/.local/bin/shuttle-launch
 ```
 
 ## Configuring stores
@@ -341,9 +341,9 @@ cd ui && npm ci && npm run build
 cannot read `~/Documents`, `~/Desktop`, or `~/Downloads`. Full Disk Access does
 not inherit across the launchd process tree the way it does under a terminal. A
 daemon rooted in a protected folder crash-loops or silently fails its store
-walks. `make install-agent` warns and installs anyway. Use `~/dev/felt`, or
-anything else outside those folders. The same trap catches a *store* whose real
-path sits under `~/Documents`, even when the checkout is clean.
+walks. `make install-agent` warns and installs anyway. Put the checkout anywhere
+else. The same trap catches a *store* whose real path sits under `~/Documents`,
+even when the checkout is clean.
 
 **`make restart` silently no-ops under a supervisor.** `make stop` matches the
 daemon by a relative-path pattern; launchd and systemd both launch it by
