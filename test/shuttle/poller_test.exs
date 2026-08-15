@@ -629,6 +629,42 @@ defmodule Shuttle.PollerTest do
     end
   end
 
+  # Drive exactly ONE poll cycle and return only once it has been applied.
+  #
+  # For anything the poll cycle *accumulates* (running, commands issued), a
+  # `wait_until` is fine. For what a cycle merely *observes*, it is not:
+  # `reconcile/1` resets `state.orphans` to `[]` at the top of every cycle, so
+  # an orphan reports what THIS cycle saw and is gone the moment the next one
+  # runs. A wall-clock wait that re-nudges the poller (the old idiom here)
+  # therefore races itself — the nudged cycle sees the re-dispatched fiber's
+  # live session, records no orphan, and clears the one the test was waiting
+  # for, unobservably and permanently. Assert on a cycle you bounded yourself.
+  #
+  # Bounding is two steps, and the first one belongs BEFORE the scenario is
+  # built: `settle_poller!` absorbs the cycle the poller runs 20ms after boot,
+  # which otherwise lands mid-scenario and does the reconcile itself — leaving
+  # the test's own cycle nothing to observe. Then run one cycle and wait for
+  # `poll_cycles` to tick. Callers pass a poll_interval_ms far longer than the
+  # test, so no further cycle can start behind the assertions.
+  defp settle_poller!(poller) do
+    assert wait_until(fn ->
+             state = :sys.get_state(poller)
+             state.poll_cycles > 0 and not state.poll_check_in_progress
+           end)
+
+    :ok
+  end
+
+  defp sync_poll_cycle!(poller) do
+    settle_poller!(poller)
+    before = :sys.get_state(poller).poll_cycles
+
+    send(poller, :run_poll_cycle)
+
+    assert wait_until(fn -> :sys.get_state(poller).poll_cycles > before end)
+    :ok
+  end
+
   defp felt_show_count do
     Enum.count(MockRunner.commands(), fn {cmd, args} ->
       cmd == "felt" and Enum.take(args, 1) == ["show"]
@@ -4572,10 +4608,6 @@ defmodule Shuttle.PollerTest do
            end)
   end
 
-  # The wait_until ceiling below is ~60s of sleep alone (2400 × 25ms), plus a
-  # snapshot round trip per probe — ExUnit's default 60s timeout kills the test
-  # before the margin can be used. The tag is what makes the ceiling real.
-  @tag timeout: 150_000
   test "poller clears stale running state when the tmux session disappears" do
     fiber_id = "tests/missing-running-session"
 
@@ -4587,6 +4619,10 @@ defmodule Shuttle.PollerTest do
         felt_stores: [MockRunner.felt_root()]
       )
 
+    # Absorb the boot cycle before the dead session exists, so the only cycle
+    # that can observe it is the one this test drives.
+    settle_poller!(poller)
+
     fiber = make_fiber(fiber_id)
     MockRunner.set_fiber(fiber_id, fiber)
     MockRunner.set_shuttle(fiber_id, @oneshot_shuttle)
@@ -4595,46 +4631,25 @@ defmodule Shuttle.PollerTest do
     assert session == Dispatcher.session_name(fiber_id)
 
     MockRunner.remove_tmux_session(session)
-    send(poller, :run_poll_cycle)
 
-    # The poll must clear the dead-session running entry, record it as an
-    # orphan, and recover the fiber by re-dispatching it. Whether the fiber is
-    # *currently* in `running` is a transient: the watcher for the now-dead
-    # session fires a late `{:worker_exited}` that flips it toward a retry, and
-    # the retry re-dispatches again — so "running right now" flaps on watcher
-    # timing. The stable invariants are the orphan record and that a second
-    # dispatch happened, so assert those instead of catching the flap.
-    #
-    # Ceiling 1200 (~30s), not the file's 80-attempt (~2s) norm: this assert
-    # needs the reconcile-then-redispatch round trip to land TWICE over —
-    # once implicitly (the initial manual dispatch already happened), once via
-    # the full async tick→Task→:poll_world→apply_poll_cycle→dispatch chain
-    # this test's single `send(poller, :run_poll_cycle)` triggers. On a shared,
-    # variably-loaded machine this occasionally took >10s wall-clock (not
-    # stuck — every observed run eventually resolved, just slower under a
-    # transient load spike), so the margin is generous on purpose:
-    # `wait_until` returns the instant the condition holds, so this costs
-    # nothing beyond the ~10ms round trip on the common, unloaded path.
-    # Re-nudge the poll tick while waiting: the test's poll_interval_ms is 60s,
-    # so a race lost inside the single manual tick's async chain would otherwise
-    # have no retry inside the assertion window (the CI flake this fixes).
-    assert wait_until(
-             fn ->
-               snap = Poller.snapshot(poller)
+    # One cycle does the whole job, and `sync_poll_cycle!` makes it exactly one:
+    # `reconcile` clears the dead-session running entry and records the orphan,
+    # then the same cycle's dispatch pass finds the fiber eligible again and
+    # re-dispatches it. The orphan is a per-cycle observation (see
+    # `sync_poll_cycle!`), so bounding the cycle is what makes it assertable —
+    # a second cycle would wipe it, having nothing left to observe.
+    sync_poll_cycle!(poller)
 
-               new_session_count =
-                 MockRunner.commands()
-                 |> Enum.count(fn {cmd, args} -> cmd == "tmux" and hd(args) == "new-session" end)
+    new_session_count =
+      MockRunner.commands()
+      |> Enum.count(fn {cmd, args} -> cmd == "tmux" and hd(args) == "new-session" end)
 
-               done =
-                 Enum.any?(snap.orphans, &(&1.fiber_id == fiber_id)) and new_session_count >= 2
-
-               tick = Process.put(:renudge_tick, Process.get(:renudge_tick, 0) + 1) || 0
-               if not done and rem(tick, 20) == 19, do: send(poller, :run_poll_cycle)
-               done
-             end,
-             2400
-           )
+    # Whether the fiber is *currently* in `running` is a transient: the watcher
+    # for the now-dead session fires a late `{:worker_exited}` that flips it
+    # toward a retry, and the retry re-dispatches again — so "running right now"
+    # flaps on watcher timing. The stable invariants are the orphan record and
+    # the recovery dispatch, so assert those instead of catching the flap.
+    assert new_session_count == 2
 
     snap = Poller.snapshot(poller)
 

@@ -120,6 +120,13 @@ defmodule Shuttle.Poller do
       :auto_discover_felt_stores,
       :runner,
       poll_check_in_progress: false,
+      # Monotonic count of poll cycles APPLIED (a cycle whose reads came back
+      # and were folded into state — success or logged read failure alike).
+      # Per-cycle observations (`orphans`, rebuilt from scratch by every
+      # `reconcile/1`) are only meaningful relative to the cycle that produced
+      # them, so an observer needs to know a cycle boundary was crossed rather
+      # than infer it from wall-clock. Never reset.
+      poll_cycles: 0,
       # In-memory watcher registry, keyed by intrinsic UID when known; metadata
       # carries :fiber_id as the felt address used for CLI shell-outs and public
       # API payloads. NOT persisted — tmux is the
@@ -710,6 +717,7 @@ defmodule Shuttle.Poller do
       state
       |> apply_poll_cycle(world)
       |> Map.put(:poll_check_in_progress, false)
+      |> Map.update!(:poll_cycles, &(&1 + 1))
       |> schedule_tick(state.poll_interval_ms)
 
     {:noreply, state}
@@ -721,6 +729,7 @@ defmodule Shuttle.Poller do
     state =
       state
       |> Map.put(:poll_check_in_progress, false)
+      |> Map.update!(:poll_cycles, &(&1 + 1))
       |> schedule_tick(state.poll_interval_ms)
 
     {:noreply, state}
