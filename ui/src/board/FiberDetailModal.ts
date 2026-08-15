@@ -18,7 +18,9 @@ import {
 } from './FloatingPanelChrome.js'
 import { buildFileViewer, isScrollableFile } from './FileViewerPanel.js'
 import { disambiguateBasenames, normalizeSentFiles, type SentFile } from './sentFiles.js'
+import { buildTabButton, buildViewCell } from './ReaderChrome.js'
 import { closeTab, openTab } from './ReaderTabs.js'
+import { applyZoom, zoomOnWheel, type ZoomableTab } from './ReaderZoom.js'
 import { humanizeCron } from './KanbanRules.js'
 import {
   civilDayToLocalDate,
@@ -266,25 +268,16 @@ interface DetailPersist {
  * reading offset) and `zoom` (Cmd-scroll magnification, 1 = native). The viewer
  * is built once, on first activation (`viewerBuilt`).
  */
-interface OpenFileEntry {
+interface OpenFileEntry extends ZoomableTab {
   /** The tab's identity, `file.fullPath` — named `path` so the shared
    *  tab-set arithmetic in ReaderTabs can operate on these entries. */
   path: string
   file: SentFile
   tab: HTMLElement
-  cell: HTMLElement
   scroll: number
-  zoom: number
   viewerBuilt: boolean
   /** The same-origin iframe, once built — the scroll-restore target. */
   iframe: HTMLIFrameElement | null
-  /** The element zoom is applied to: an `<img>` (sized in px, base × zoom) or
-   *  an iframe wrap (CSS `zoom`). */
-  zoomTarget: HTMLElement | null
-  /** Fit-width (px) of an image at zoom 1 — recaptured at zoom 1 so a resized
-   *  column re-fits. Base for the explicit `width = baseW × zoom` that lets an
-   *  image magnify PAST the column (a `width:100%`/`max-width` image can't). */
-  baseW: number
 }
 
 const PERSIST_PREFIX = 'shuttle:detail:'
@@ -2133,27 +2126,8 @@ export class FiberDetailModal {
   private addOpenFile(file: SentFile, card: KanbanCard, scroll: number, zoom: number): OpenFileEntry {
     this.openViewerWindow()
 
-    const tab = document.createElement('button')
-    tab.type = 'button'
-    tab.className = 'kbn-detail-tab'
-    tab.setAttribute('role', 'tab')
-    tab.title = file.fullPath
-
-    const name = document.createElement('span')
-    name.className = 'kbn-detail-tab-name'
-    name.textContent = file.basename
-
-    const closeBtn = document.createElement('button')
-    closeBtn.type = 'button'
-    closeBtn.className = 'kbn-detail-tab-close'
-    closeBtn.setAttribute('aria-label', `Close ${file.basename}`)
-    closeBtn.textContent = '✕'
-
-    tab.append(name, closeBtn)
-
-    const cell = document.createElement('div')
-    cell.className = 'kbn-detail-view-cell'
-    cell.hidden = true
+    const { tab, closeBtn } = buildTabButton(file.basename, file.fullPath)
+    const cell = buildViewCell()
 
     const entry: OpenFileEntry = {
       path: file.fullPath,
@@ -2238,69 +2212,16 @@ export class FiberDetailModal {
     // (overflow:auto) is the pan surface. Apply persisted zoom now that the
     // cell is visible — its width is the image's fit base.
     entry.zoomTarget = viewer.querySelector<HTMLElement>('img.kbn-fileview-image') ?? viewer
-    this.applyZoom(entry)
+    applyZoom(entry)
   }
 
-  /** Cmd/Ctrl + wheel over the active file zooms it, anchored on the cursor
-   *  (the point under the pointer stays put). Works for images, HTML, and PDF —
-   *  it scales the rendered viewer box and pans via the cell's scroll. A plain
-   *  wheel (no modifier) is left alone, so normal scrolling still works. */
+  /** Cmd/Ctrl + wheel over the active file zooms it, anchored on the cursor.
+   *  The gesture is `ReaderZoom`'s, shared with the Shelf's Reader; all this
+   *  side knows is which tab is under the pointer and that a zoom is worth
+   *  persisting. */
   private handleZoomWheel(e: WheelEvent): void {
-    if (!(e.metaKey || e.ctrlKey)) return
     const entry = this.openFiles.find((x) => x.file.fullPath === this.activePath)
-    if (!entry || !entry.zoomTarget) return
-    e.preventDefault()
-    const cell = entry.cell
-    const rect = cell.getBoundingClientRect()
-    const cursorX = e.clientX - rect.left
-    const cursorY = e.clientY - rect.top
-    const zOld = entry.zoom
-    const zNew = Math.min(6, Math.max(0.25, zOld * Math.exp(-e.deltaY * 0.0015)))
-    if (zNew === zOld) return
-    // Content-space point under the cursor (pre-zoom) — keep it fixed.
-    const px = (cell.scrollLeft + cursorX) / zOld
-    const py = (cell.scrollTop + cursorY) / zOld
-    entry.zoom = zNew
-    this.applyZoom(entry)
-    cell.scrollLeft = px * zNew - cursorX
-    cell.scrollTop = py * zNew - cursorY
-    this.queueScrollWrite()
-  }
-
-  /** Mirror an entry's zoom into its viewer element via the CSS `zoom`
-   *  property (Chromium): unlike `transform: scale`, `zoom` grows the element's
-   *  layout box, so the cell's `overflow:auto` gives real scrollbars to pan the
-   *  magnified file. */
-  private applyZoom(entry: OpenFileEntry): void {
-    const t = entry.zoomTarget
-    if (!t) return
-    if (t instanceof HTMLImageElement) {
-      // Image. At zoom 1: clear the inline width so CSS `width:100%` fits it to
-      // the column (and forget the base so a resize re-fits). At zoom > 1: width
-      // = fit-width × zoom in px, so it grows PAST the column and the cell pans.
-      // The fit base is the wrap's content width, captured lazily once we're
-      // past 1 (post-layout); if the cell isn't laid out yet (rehydrated zoom on
-      // open), defer a frame.
-      if (entry.zoom === 1) {
-        t.style.removeProperty('width')
-        t.style.removeProperty('max-width')
-        t.style.removeProperty('height')
-        entry.baseW = 0
-        return
-      }
-      if (!entry.baseW) {
-        const fit = t.parentElement?.clientWidth ?? 0
-        if (!fit) { requestAnimationFrame(() => this.applyZoom(entry)); return }
-        entry.baseW = fit
-      }
-      t.style.maxWidth = 'none'
-      t.style.height = 'auto'
-      t.style.width = `${Math.round(entry.baseW * entry.zoom)}px`
-    } else {
-      // Iframe wrap: CSS `zoom` magnifies the rendered content.
-      if (entry.zoom === 1) t.style.removeProperty('zoom')
-      else t.style.setProperty('zoom', String(entry.zoom))
-    }
+    if (zoomOnWheel(e, entry)) this.queueScrollWrite()
   }
 
   /** Close one open file. Switches to the nearest remaining tab if it was

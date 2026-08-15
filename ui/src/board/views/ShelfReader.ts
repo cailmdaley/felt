@@ -25,6 +25,9 @@
  *   ../ReaderTabs           the tab-set arithmetic (open/activate/close, and
  *                           the never-a-second-tab rule), shared verbatim with
  *                           FiberDetailModal's viewer.
+ *   ../ReaderChrome         the tab button and the view cell — the element tree
+ *                           the shared stylesheet is written against.
+ *   ../ReaderZoom           Cmd/Ctrl-wheel magnification, cursor-anchored.
  *   ../FileViewerPanel      `buildFileViewer` — the by-extension render
  *                           dispatch, so a file looks the same wherever the
  *                           board opens it.
@@ -58,6 +61,8 @@ import {
   type TabRef,
   type TabState,
 } from '../ReaderTabs.js'
+import { buildTabButton, buildViewCell } from '../ReaderChrome.js'
+import { applyZoom, zoomOnWheel, type ZoomableTab } from '../ReaderZoom.js'
 import type { ShelfFile } from './shelfData.js'
 
 export const READER_PERSIST_KEY = 'shuttle:shelf:reader'
@@ -213,19 +218,13 @@ export function defaultReaderGeom(vw: number, vh: number): PanelGeometry {
  * on first view, so a rehydrated strip of eight tabs costs one iframe, not
  * eight.
  */
-interface ReaderTab {
+interface ReaderTab extends ZoomableTab {
   path: string
   file: ShelfFile
   tab: HTMLElement
-  cell: HTMLElement
   scroll: number
-  zoom: number
   built: boolean
   iframe: HTMLIFrameElement | null
-  /** What zoom scales: an `<img>` (sized in px) or the iframe wrap (CSS zoom). */
-  zoomTarget: HTMLElement | null
-  /** Fit-width of an image at zoom 1, so it can magnify past the column. */
-  baseW: number
 }
 
 export class ShelfReader {
@@ -494,27 +493,8 @@ export class ShelfReader {
   }
 
   private buildTab(file: ShelfFile, scroll: number, zoom: number): ReaderTab {
-    const tabEl = document.createElement('button')
-    tabEl.type = 'button'
-    tabEl.className = 'kbn-detail-tab'
-    tabEl.setAttribute('role', 'tab')
-    tabEl.title = file.fullPath
-
-    const name = document.createElement('span')
-    name.className = 'kbn-detail-tab-name'
-    name.textContent = file.basename
-
-    const closeBtn = document.createElement('button')
-    closeBtn.type = 'button'
-    closeBtn.className = 'kbn-detail-tab-close'
-    closeBtn.setAttribute('aria-label', `Close ${file.basename}`)
-    closeBtn.textContent = '✕'
-
-    tabEl.append(name, closeBtn)
-
-    const cell = document.createElement('div')
-    cell.className = 'kbn-detail-view-cell'
-    cell.hidden = true
+    const { tab: tabEl, closeBtn } = buildTabButton(file.basename, file.fullPath)
+    const cell = buildViewCell()
 
     const entry: ReaderTab = {
       path: file.fullPath,
@@ -604,67 +584,17 @@ export class ShelfReader {
     )
     entry.cell.append(viewer)
     entry.zoomTarget = viewer.querySelector<HTMLElement>('img.kbn-fileview-image') ?? viewer
-    this.applyZoom(entry)
+    applyZoom(entry)
   }
 
   // ── Zoom ───────────────────────────────────────────────────────────────────
 
-  /** Cmd/Ctrl + wheel magnifies the file under the cursor, anchored on it. A
-   *  plain wheel is left alone, so ordinary scrolling still works. */
+  /** Cmd/Ctrl + wheel magnifies the file under the cursor, anchored on it. The
+   *  gesture is `ReaderZoom`'s, shared with the detail panel's viewer; this side
+   *  only says which tab is under the pointer, and saves if it moved. */
   private onZoomWheel(e: WheelEvent): void {
-    if (!(e.metaKey || e.ctrlKey)) return
     const entry = this.state.tabs.find((t) => t.path === this.state.active)
-    if (!entry?.zoomTarget) return
-    e.preventDefault()
-    const cell = entry.cell
-    const rect = cell.getBoundingClientRect()
-    const cursorX = e.clientX - rect.left
-    const cursorY = e.clientY - rect.top
-    const zOld = entry.zoom
-    const zNew = Math.min(6, Math.max(0.25, zOld * Math.exp(-e.deltaY * 0.0015)))
-    if (zNew === zOld) return
-    // Content-space point under the cursor (pre-zoom) — keep it fixed.
-    const px = (cell.scrollLeft + cursorX) / zOld
-    const py = (cell.scrollTop + cursorY) / zOld
-    entry.zoom = zNew
-    this.applyZoom(entry)
-    cell.scrollLeft = px * zNew - cursorX
-    cell.scrollTop = py * zNew - cursorY
-    this.writeSoon()
-  }
-
-  private applyZoom(entry: ReaderTab): void {
-    const t = entry.zoomTarget
-    if (!t) return
-    if (t instanceof HTMLImageElement) {
-      // At zoom 1: clear the inline width so CSS fits it to the column. Past
-      // 1: width = fit-width × zoom in px, so it grows beyond the column and
-      // the cell pans.
-      if (entry.zoom === 1) {
-        t.style.removeProperty('width')
-        t.style.removeProperty('max-width')
-        t.style.removeProperty('height')
-        entry.baseW = 0
-        return
-      }
-      if (!entry.baseW) {
-        const fit = t.parentElement?.clientWidth ?? 0
-        if (!fit) {
-          requestAnimationFrame(() => this.applyZoom(entry))
-          return
-        }
-        entry.baseW = fit
-      }
-      t.style.maxWidth = 'none'
-      t.style.height = 'auto'
-      t.style.width = `${Math.round(entry.baseW * entry.zoom)}px`
-    } else if (entry.zoom === 1) {
-      t.style.removeProperty('zoom')
-    } else {
-      // CSS `zoom` (not transform: scale) so the scaled box affects layout and
-      // the cell gets real scrollbars to pan the magnified file.
-      t.style.setProperty('zoom', String(entry.zoom))
-    }
+    if (zoomOnWheel(e, entry)) this.writeSoon()
   }
 
   // ── Persistence ────────────────────────────────────────────────────────────
