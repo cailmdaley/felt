@@ -3,7 +3,6 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"regexp"
 	"sort"
 	"strings"
@@ -247,16 +246,11 @@ func sortFindings(rows []identityFiberFinding) {
 }
 
 func fetchJSON(url string, dest any) error {
-	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Get(url)
+	body, err := getDaemon(url, daemonReadTimeout)
 	if err != nil {
-		return fmt.Errorf("reaching %s: %w", url, err)
+		return err
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("%s returned %d", url, resp.StatusCode)
-	}
-	if err := json.NewDecoder(resp.Body).Decode(dest); err != nil {
+	if err := json.Unmarshal(body, dest); err != nil {
 		return fmt.Errorf("decoding %s: %w", url, err)
 	}
 	return nil

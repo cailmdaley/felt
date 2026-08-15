@@ -33,17 +33,69 @@ func daemonURL() string {
 	return defaultDaemonURL
 }
 
-// lifecycleStatusError is a non-200 response from POST /api/v1/lifecycle — the
-// daemon was reached but rejected the request (a logic error, NOT a transport
-// failure). A distinct type so isLifecycleTransportError can tell "daemon down,
-// fall back to a local write" from "daemon said no, surface it."
-type lifecycleStatusError struct {
+// Timeouts for the daemon transport. Three, not one, because they bound
+// different things: a read may cross an SSH tunnel to another machine's daemon
+// (validate-identity fans out over every configured remote), a dispatch POST
+// waits on the daemon's own work, and the lifecycle POST bounds how long
+// `resume`/`accept` hang interactively before falling back to a local write.
+const (
+	daemonReadTimeout      = 15 * time.Second
+	daemonPostTimeout      = 10 * time.Second
+	daemonLifecycleTimeout = 5 * time.Second
+)
+
+// daemonStatusError is a non-2xx response — the daemon was reached but rejected
+// the request (a logic error, NOT a transport failure). A distinct type so
+// isLifecycleTransportError can tell "daemon down, fall back to a local write"
+// from "daemon said no, surface it."
+type daemonStatusError struct {
+	url    string
 	status int
 	body   string
 }
 
-func (e lifecycleStatusError) Error() string {
-	return fmt.Sprintf("daemon returned %d: %s", e.status, e.body)
+func (e daemonStatusError) Error() string {
+	return fmt.Sprintf("daemon at %s returned %d: %s", e.url, e.status, e.body)
+}
+
+// getDaemon and postDaemon are the CLI's only HTTP transport to a Shuttle
+// daemon — local or, over a tunnel, a remote one. Every daemon-facing verb goes
+// through them, so "reaching daemon at %s" reads the same everywhere and
+// isLifecycleTransportError has one error shape to recognize. Callers that want
+// JSON unmarshal the returned bytes themselves.
+func getDaemon(url string, timeout time.Duration) ([]byte, error) {
+	client := &http.Client{Timeout: timeout}
+	resp, err := client.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("reaching daemon at %s: %w", url, err)
+	}
+	defer resp.Body.Close()
+	return readDaemonResponse(url, resp)
+}
+
+func postDaemon(url string, payload []byte, timeout time.Duration) ([]byte, error) {
+	client := &http.Client{Timeout: timeout}
+	resp, err := client.Post(url, "application/json", bytes.NewReader(payload))
+	if err != nil {
+		return nil, fmt.Errorf("reaching daemon at %s: %w", url, err)
+	}
+	defer resp.Body.Close()
+	return readDaemonResponse(url, resp)
+}
+
+func readDaemonResponse(url string, resp *http.Response) ([]byte, error) {
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("reading daemon response from %s: %w", url, err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, daemonStatusError{
+			url:    url,
+			status: resp.StatusCode,
+			body:   strings.TrimSpace(string(body)),
+		}
+	}
+	return body, nil
 }
 
 // postLifecycle routes a lifecycle action (resume, accept) to the daemon, which
@@ -62,36 +114,22 @@ func postLifecycle(action string, payload map[string]any) (string, error) {
 		return "", fmt.Errorf("encoding lifecycle request: %w", err)
 	}
 
-	url := daemonURL() + "/api/v1/lifecycle"
-	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Post(url, "application/json", bytes.NewReader(body))
+	respBody, err := postDaemon(daemonURL()+"/api/v1/lifecycle", body, daemonLifecycleTimeout)
 	if err != nil {
-		return "", fmt.Errorf("reaching daemon at %s: %w", daemonURL(), err)
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("reading daemon response: %w", err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		return "", lifecycleStatusError{
-			status: resp.StatusCode,
-			body:   strings.TrimSpace(string(respBody)),
-		}
+		return "", err
 	}
 	return string(respBody), nil
 }
 
 // isLifecycleTransportError reports whether err means "daemon unreachable" (so
 // the caller should fall back to a local document write) as opposed to a
-// daemon-rejected request (a lifecycleStatusError, which must surface to the
+// daemon-rejected request (a daemonStatusError, which must surface to the
 // user).
 func isLifecycleTransportError(err error) bool {
 	if err == nil {
 		return false
 	}
-	if _, ok := err.(lifecycleStatusError); ok {
+	if _, ok := err.(daemonStatusError); ok {
 		return false
 	}
 	return strings.Contains(err.Error(), "reaching daemon") ||
