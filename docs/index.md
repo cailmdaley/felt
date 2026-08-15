@@ -57,9 +57,10 @@ and agent memory, you can stop at felt.
 **Shuttle** adds an optional orchestration layer on top. Give a fiber a
 `shuttle:` frontmatter block and it becomes a *constitution* — a spec of a
 desired state. An Elixir/OTP daemon polls the tree. It launches one tmux worker
-per eligible fiber, and serves a kanban board at `http://127.0.0.1:4000/`.
-Workers hand off to each other through the fiber, so a piece of work can span
-many sessions.
+per eligible fiber, and serves a [board](shuttle/board.md) at
+`http://127.0.0.1:4000/` — a kanban desk for steering the work, and four more
+views for seeing where the time went. Workers hand off to each other through
+the fiber, so a piece of work can span many sessions.
 
 Shuttle stays the more experimental half, and it is **currently
 fleet-oriented** — it runs the maintainer's machines every day, and parts of it

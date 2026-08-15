@@ -48,8 +48,12 @@ nav:
       - Overview: shuttle/index.md
       - Constitutions: shuttle/constitutions.md
       - Lifecycle: shuttle/lifecycle.md
+      - The board: shuttle/board.md
+      - Cycles and eras: shuttle/cycles.md
+      - Telemetry and the ledgers: shuttle/telemetry.md
       - Installation: shuttle/installation.md
   - Reference:
       - CLI: reference/cli.md
+      - Daemon HTTP API: reference/api.md
   - Contributing: https://github.com/cailmdaley/felt/blob/main/CONTRIBUTING.md
   - Architecture (AGENTS.md): https://github.com/cailmdaley/felt/blob/main/AGENTS.md
