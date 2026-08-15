@@ -3,7 +3,7 @@ set -eu
 
 REPO="${FELT_REPO:-cailmdaley/felt}"
 
-# Default: ~/.local/bin (no sudo needed). Override with FELT_INSTALL_DIR.
+# FELT_INSTALL_DIR, else /usr/local/bin when writable, else ~/.local/bin (no sudo needed).
 if [ -n "${FELT_INSTALL_DIR:-}" ]; then
   INSTALL_DIR="$FELT_INSTALL_DIR"
 elif [ -w /usr/local/bin ]; then
@@ -62,14 +62,17 @@ esac
 # Wire up agent plugins for any detected agent CLI. The plugins are core
 # to how felt feels — SessionStart and PreToolUse hooks surface active
 # fibers at session start and gate non-felt tool use until the felt skill
-# activates. They're how fibers stay visible across sessions without you
-# needing to mention them. Setup commands are idempotent (re-running them
-# refreshes registration) and the install can be cleanly reversed via
-# `felt uninstall`.
+# activates; a PostToolUse hook stamps updated-at when the agent edits a
+# fiber file directly; and an activity-event hook records harness events
+# for Shuttle, writing nothing unless ~/.shuttle exists. They're how
+# fibers stay visible across sessions without you needing to mention them.
+# Setup commands are idempotent (re-running them refreshes registration)
+# and the install can be cleanly reversed via `felt uninstall`.
 if command -v claude >/dev/null 2>&1 || command -v codex >/dev/null 2>&1; then
   echo
   echo "Wiring up felt's agent plugins:"
-  echo "  • Claude Code: marketplace + plugin + SessionStart/PreToolUse hooks"
+  echo "  • Claude Code: marketplace + plugin + SessionStart / PreToolUse / PostToolUse hooks,"
+  echo "                 plus an activity-event hook that writes nothing unless ~/.shuttle exists"
   echo "  • Codex:       marketplace + plugin + features.plugin_hooks=true"
   echo "To remove later: felt uninstall"
   echo
