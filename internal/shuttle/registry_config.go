@@ -39,9 +39,6 @@ const (
 const (
 	BuiltinsMerge    = "merge"
 	BuiltinsRestrict = "restrict"
-	// BuiltinsReplace is the legacy spelling of BuiltinsRestrict. Keep reading
-	// it so existing agents.json files do not fail after an upgrade.
-	BuiltinsReplace = "replace"
 )
 
 // agentsFileVersion is the only envelope version this felt reads.
@@ -125,10 +122,10 @@ func parseAgentsFile(data []byte, path string) (agentsFile, []string, error) {
 	switch file.Builtins {
 	case "":
 		file.Builtins = BuiltinsMerge
-	case BuiltinsMerge, BuiltinsRestrict, BuiltinsReplace:
+	case BuiltinsMerge, BuiltinsRestrict:
 	default:
 		return agentsFile{}, nil, fmt.Errorf(
-			"parsing %s: builtins must be %q or %q (legacy: %q), got %q", path, BuiltinsMerge, BuiltinsRestrict, BuiltinsReplace, file.Builtins)
+			"parsing %s: builtins must be %q or %q, got %q", path, BuiltinsMerge, BuiltinsRestrict, file.Builtins)
 	}
 	if unknown := unknownFieldWarning(data, path); unknown != "" {
 		warnings = append(warnings, unknown)
@@ -183,7 +180,7 @@ func mergeAgentLayers(builtins, user []AgentRecord, mode string) ([]AgentRecord,
 	var warnings []string
 
 	base := builtins
-	if mode == BuiltinsRestrict || mode == BuiltinsReplace {
+	if mode == BuiltinsRestrict {
 		base = nil
 	}
 

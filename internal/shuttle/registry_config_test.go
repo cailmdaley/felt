@@ -167,15 +167,11 @@ func TestLoadAgentRegistry_Restrict(t *testing.T) {
 	}
 }
 
-func TestLoadAgentRegistry_LegacyReplaceRestricts(t *testing.T) {
-	writeUserRegistry(t, `{"version":1,"builtins":"replace","agents":[{"id":"only-mine","cli":"x","default":true}]}`)
+func TestLoadAgentRegistry_RejectsLegacyReplace(t *testing.T) {
+	writeUserRegistry(t, `{"version":1,"builtins":"replace","agents":[]}`)
 
-	reg, err := LoadAgentRegistry()
-	if err != nil {
-		t.Fatalf("LoadAgentRegistry: %v", err)
-	}
-	if got := ids(reg); len(got) != 1 || got[0] != "only-mine" {
-		t.Fatalf("legacy replace ids = %v, want only-mine", got)
+	if _, err := LoadAgentRegistry(); err == nil {
+		t.Fatal("LoadAgentRegistry accepted legacy builtins=replace")
 	}
 }
 

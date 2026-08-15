@@ -251,8 +251,7 @@ silent. A malformed file fails loudly and names the path.
 The file's `builtins` key controls the merge. `"merge"` (the default) folds your
 records over the built-ins by id, last one wins. `"restrict"` drops the built-in
 layer entirely, so the file becomes the complete registry for that host.
-The old spelling `"replace"` is accepted for compatibility. There is no
-reserved `human` record.
+There is no reserved `human` record.
 
 ## Configuring remotes
 

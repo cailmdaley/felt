@@ -135,8 +135,7 @@ func (r *AgentRegistry) Warnings() []string { return r.warnings }
 // found. UserAgentsPath() reports where one would have been read from.
 func (r *AgentRegistry) UserPath() string { return r.userPath }
 
-// BuiltinsMode is the user file's `builtins` setting ("merge" or "restrict";
-// legacy files may report "replace");
+// BuiltinsMode is the user file's `builtins` setting ("merge" or "restrict").
 // "merge" when there is no user file.
 func (r *AgentRegistry) BuiltinsMode() string { return r.builtinsMode }
 

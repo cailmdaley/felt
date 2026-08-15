@@ -594,9 +594,9 @@ felt shuttle validate-identity                # UID migration/cross-city validat
   the registry as two layers — `internal/shuttle/agents.builtin.json` (embedded)
   with the user file (`$FELT_AGENTS_FILE`, else `~/.config/felt/agents.json`)
   merged over it by default. The user file can set `builtins: "restrict"` to
-  replace the shipped layer for one host; legacy `"replace"` remains readable.
-  `share/agents.example.json` is a worked example — copy it and edit it for
-  local additions or overrides. There is no reserved `human` agent; a
+  replace the shipped layer for one host. `share/agents.example.json` is a
+  worked example — copy it and edit it for local additions or overrides. There
+  is no reserved `human` agent; a
   malformed user file fails loud with its path, a missing one is silent. The
   daemon reads the already-resolved record off felt's
   `shuttle.resolved.agent` JSON and shells `felt shuttle agents [resolve]` for
