@@ -45,7 +45,7 @@ the runtime nesting lives in one engine (felt). Unlike 'handoff', it never
 touches tmux.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		f, st, _, unlock, err := resolveOwnedShuttleFiber(args[0])
+		f, st, _, unlock, err := resolveOwnedShuttleFiber(args[0], "")
 		if err != nil {
 			return err
 		}
