@@ -119,12 +119,33 @@ type eventLine struct {
 // PREFIXES, not a search. An injected prompt is a wrapper around its payload,
 // so the marker is always at the front; matching anywhere in the text would
 // demote a real message that quoted one of these.
+// Measured against the recorded history when a cinnabar spine turned out to be
+// claiming a message nobody wrote: of ~2400 unflagged prompts on this host, 935
+// were injections. The `<task-notification` / `<teammate-message` pair caught
+// most; the rest were the four groups added below, and a dispatched worker's
+// opening prompt was the single largest ongoing leak.
 var machinePromptPrefixes = []string{
 	"<task-notification",
 	"<teammate-message",
 	"Another Claude session sent a message:",
 	"[SYSTEM NOTIFICATION",
 	"<system-notification",
+	// The dispatcher's own preamble. All three variants (fiber, ad-hoc role,
+	// scheduled role — lib/shuttle/dispatcher.ex) open with this clause, so the
+	// shared head is the anchor rather than any one of the three.
+	"The orchestration system Shuttle dispatched you",
+	// A slash command expands into as many as three prompt submissions. The
+	// `<command-name>` one IS the human's act and stays attention; these two are
+	// the harness's wrappers around it, and counting them made one keystroke
+	// draw three spines.
+	"<local-command-caveat",
+	"<local-command-stdout",
+	// An interrupt is a human ACT but not a human MESSAGE: there are no words
+	// behind it for a tooltip to show, and a spine is a mark that says "you
+	// spoke here".
+	"[Request interrupted",
+	// The /loop skill's injected tick.
+	"# Autonomous loop tick",
 }
 
 // machinePrompt reports whether a prompt was injected rather than typed.

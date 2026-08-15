@@ -137,6 +137,33 @@ func TestEventMachinePrompt(t *testing.T) {
 		{"relayed teammate message", "Another Claude session sent a message: <teammate-message>hi", true},
 		{"system notification", "[SYSTEM NOTIFICATION] budget exhausted", true},
 		{"leading whitespace still matches", "\n  <task-notification> x", true},
+		// The dispatcher's opening prompt — the largest ongoing source of
+		// spines claiming a message nobody wrote. All three variants share
+		// this head; each is checked so a reworded tail cannot reopen the hole.
+		{
+			"dispatched onto a fiber",
+			`The orchestration system Shuttle dispatched you on this fiber. The constitution describes what "done" looks like`,
+			true,
+		},
+		{
+			"dispatched for an ad-hoc role run",
+			"The orchestration system Shuttle dispatched you for an ad-hoc run of this standing role — right-now work",
+			true,
+		},
+		{
+			"dispatched for a scheduled role run",
+			"The orchestration system Shuttle dispatched you for a scheduled run of this standing role.",
+			true,
+		},
+		// One keystroke, one spine: a slash command expands into up to three
+		// submissions and only the `<command-name>` one is the person's act.
+		{"slash-command caveat wrapper", "<local-command-caveat>Caveat: The messages below", true},
+		{"slash-command stdout wrapper", "<local-command-stdout>(no content)</local-command-stdout>", true},
+		{"the slash command itself is the person", "<command-name>/plugin</command-name>", false},
+		// A human act with no words behind it — nothing a tooltip could show.
+		{"interrupt marker", "[Request interrupted by user]", true},
+		{"interrupt for tool use", "[Request interrupted by user for tool use]", true},
+		{"loop tick", "# Autonomous loop tick (dynamic pacing)\n\nRun the autonomous check", true},
 		{"a person typing", "hey, can you look at the curve", false},
 		// The reason this is a prefix test and not a search: quoting one of
 		// these markers is something a person does all the time.
