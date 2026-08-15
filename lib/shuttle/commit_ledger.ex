@@ -40,8 +40,9 @@ defmodule Shuttle.CommitLedger do
   ## Coverage is partial by construction
 
   Commits made before the hook existed, or outside a harness session, are not
-  here. Readers join on `sha` and fall back to the git log — the ledger is the
-  authoritative rung, never the only one.
+  here, and there is no fallback: readers draw only what this file records,
+  joined on `sha`. A stretch of days before the hook existed has no prose rather
+  than a reconstructed one, which is the honest answer.
   """
 
   require Logger
