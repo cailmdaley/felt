@@ -18,13 +18,26 @@ var (
 	changeDir  string
 )
 
-// Version is the current version, set via ldflags.
+// Version is the current version, set via ldflags. It stays a bare semver:
+// setup.go pins the marketplace ref to it and update.go compares it for
+// equality against the upstream tag, so any decoration belongs on the display
+// string, never here.
 var Version = "dev"
 
-// SetVersionInfo sets version info from main (populated via ldflags)
+// SetVersionInfo takes the three values goreleaser injects (see .goreleaser.yml)
+// and splits them: Version keeps the bare semver for the code that computes with
+// it, while `felt --version` prints all three, so "which build is on this box"
+// has an answer on a machine that self-updates. A local build carries main.go's
+// commit/date defaults and prints the bare version instead — "dev (none, built
+// unknown)" tells nobody anything. One line either way: bootstrap.sh pipes this
+// through `head -1`.
 func SetVersionInfo(v, commit, date string) {
 	Version = v
-	rootCmd.Version = v
+	if commit == "none" || date == "unknown" {
+		rootCmd.Version = v
+		return
+	}
+	rootCmd.Version = fmt.Sprintf("%s (%s, built %s)", v, commit, date)
 }
 
 var rootCmd = &cobra.Command{
