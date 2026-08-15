@@ -47,7 +47,6 @@ defmodule Shuttle.Application do
     Application.put_env(:shuttle, :booted_at, DateTime.utc_now())
 
     children = [
-      {Phoenix.PubSub, name: Shuttle.PubSub},
       {Task.Supervisor, name: Shuttle.TaskSupervisor},
       {DynamicSupervisor, strategy: :one_for_one, name: Shuttle.WatcherSupervisor},
       # Owns the ETS table the per-session token folds are cached in. Pure
@@ -126,7 +125,6 @@ defmodule Shuttle.Application do
       Keyword.merge(existing,
         http: Keyword.merge([ip: {127, 0, 0, 1}], Keyword.put(http, :port, port)),
         adapter: Keyword.get(existing, :adapter, Bandit.PhoenixAdapter),
-        pubsub_server: Shuttle.PubSub,
         url: Keyword.get(existing, :url, host: "localhost"),
         server: Keyword.get(existing, :server, true),
         secret_key_base: secret_key_base(existing)

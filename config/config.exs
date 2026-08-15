@@ -36,8 +36,7 @@ config :shuttle,
 config :shuttle, ShuttleWeb.Endpoint,
   url: [host: "localhost"],
   adapter: Bandit.PhoenixAdapter,
-  render_errors: [formats: [json: ShuttleWeb.ErrorJSON], layout: false],
-  pubsub_server: Shuttle.PubSub
+  render_errors: [formats: [json: ShuttleWeb.ErrorJSON], layout: false]
 
 config :logger, :console,
   format: "$time $metadata[$level] $message\n",
