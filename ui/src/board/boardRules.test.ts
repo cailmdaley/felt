@@ -330,12 +330,14 @@ describe('a mirrored fiber renders as ONE card', () => {
     expect(drafts(feed)).toHaveLength(1)
   })
 
-  describe('liveness comes from the OWNING host, not the winning row', () => {
+  describe('an OWNED fiber answers only through its owner', () => {
     // The defect: a fiber owned by `kelvin` but mirrored into the laptop's
-    // git-synced store. The laptop's row wins the document (correctly — it is
-    // the copy the human edits), but only kelvin runs the tmux worker, so its
-    // `runtime` was thrown away with the losing row. The card landed In flight
-    // with no `▸ aloft` pill — no way to join a session that was running fine.
+    // git-synced store. The mirror won the card on local-first precedence, and
+    // a mirror can neither observe the tmux worker (the card landed In flight
+    // with no `▸ aloft` pill — no way to join a session running fine) nor be
+    // written to (`originId` addressed the mirror, so transitions went there).
+    // The daemon stopped serving these rows in 5669fc7; this is the board-side
+    // half of the same rule, and what protects it during a mixed-version fleet.
     const inFlight = (feed: CompositeFeed): KanbanCard[] =>
       buildKanbanResponseFromComposite(feed, { nowMs: NOW }).now.inFlight
     const owned = (origin: string, over: Partial<CompositeEntry> = {}): CompositeEntry => ({
@@ -347,7 +349,27 @@ describe('a mirrored fiber renders as ONE card', () => {
       kelvin: { kind: 'remote' as const, stale: false },
     }
 
-    it('grafts the owner row’s running worker onto the local document winner', () => {
+    it('gives the OWNER row the card — writes route by originId', () => {
+      // Ownership outranks locality: the laptop's git mirror of a kelvin-owned
+      // fiber is a copy nobody edits through the board (every write is
+      // owner-routed) and nobody can observe. Letting it win made `originId`
+      // address the mirror.
+      const feed = feedWith([owned('kelvin'), owned('laptop')], origins)
+      const cards = inFlight(feed)
+      expect(cards).toHaveLength(1)
+      expect(cards[0].originId).toBe('kelvin')
+      expect(cards[0].mirroredOrigins).toEqual(['laptop'])
+    })
+
+    it('keeps the owner row even when it is STALE — waiting beats a fresh mirror', () => {
+      const feed = feedWith([owned('kelvin'), owned('laptop')], {
+        laptop: { kind: 'local', stale: false },
+        kelvin: { kind: 'remote', stale: true },
+      })
+      expect(inFlight(feed)[0].originId).toBe('kelvin')
+    })
+
+    it('carries the owner’s worker onto the card it won', () => {
       const feed = feedWith(
         [
           owned('kelvin', {
@@ -359,13 +381,13 @@ describe('a mirrored fiber renders as ONE card', () => {
       )
       const cards = inFlight(feed)
       expect(cards).toHaveLength(1)
-      expect(cards[0].originId).toBe('laptop')
+      expect(cards[0].originId).toBe('kelvin')
       expect(cards[0].runningWorker).toBe('final-push-01K-shuttle')
       expect(cards[0].runtimePhase).toBe('attention')
       expect(cards[0].shuttleHost).toBe('kelvin')
     })
 
-    it('grafts the owner’s boot-quarantine hold too', () => {
+    it('carries the owner’s boot-quarantine hold too', () => {
       const feed = feedWith(
         [owned('kelvin', { held: true, heldSince: NOW - 60_000 }), owned('laptop')],
         origins,
@@ -375,25 +397,25 @@ describe('a mirrored fiber renders as ONE card', () => {
       expect(cards[0].heldSince).toBe(NOW - 60_000)
     })
 
-    it('shows no worker when the owner reports none, whatever a mirror says', () => {
-      // A mirror can never observe a worker, so a stray runtime on one is not
-      // evidence of liveness — the owner's silence is authoritative.
+    it('drops a NON-owner row’s liveness rather than believing it', () => {
+      // A leaked mirror row (pre-5669fc7 daemon, renamed host) claiming a
+      // worker would have the board offering to open — and to kill — a session
+      // that host does not run. If the owner is absent from the feed entirely,
+      // the card reads worker-less; that is the truth available.
       const feed = feedWith(
-        [
-          owned('kelvin'),
-          owned('laptop', { runtime: { tmuxSession: 'ghost-shuttle', phase: 'working' } }),
-        ],
+        [owned('laptop', { runtime: { tmuxSession: 'ghost-shuttle', phase: 'working' } })],
         origins,
       )
-      expect(inFlight(feed)[0].runningWorker).toBeUndefined()
+      const cards = inFlight(feed)
+      expect(cards[0].originId).toBe('laptop')
+      expect(cards[0].runningWorker).toBeUndefined()
     })
 
-    it('leaves a single-row fiber’s own liveness alone', () => {
-      const feed = feedWith(
-        [owned('kelvin', { runtime: { tmuxSession: 'solo-shuttle', phase: 'working' } })],
-        origins,
-      )
-      expect(inFlight(feed)[0].runningWorker).toBe('solo-shuttle')
+    it('leaves an OWNERLESS mirrored fiber on the old local-first rule', () => {
+      // No `shuttle.host` means no owner to defer to — a plain due-card or
+      // cycle roots equally in every store, and has no liveness to lose.
+      const feed = feedWith([mirrored('kelvin'), mirrored('laptop')], origins)
+      expect(drafts(feed)[0].originId).toBe('laptop')
     })
   })
 

@@ -138,18 +138,29 @@ export function buildKanbanResponseFromComposite(
  * The losing origin is not discarded silently: it rides on `mirroredOrigins` so
  * the card can say where else this fiber lives.
  *
- * The document and its LIVENESS come from different authorities, so they are
- * resolved separately. The precedence above answers "whose copy of the text do
- * we trust" — local-first, because that is the copy the human just edited and
- * the one git may not have pushed anywhere yet. But only ONE host can observe a
- * worker: the fiber's `shuttle.host`. A mirror's row always carries
- * `runtime: undefined` (it has no tmux session for that fiber), so letting the
- * document winner's row also decide liveness silently erases the worker of
- * every remote-owned fiber — the card lands In flight wearing no `▸ aloft`
- * pill, so there is no way to join the session it is running. Liveness is
- * therefore grafted from the owning host's row whenever that row is in the
- * feed, and the graft carries the boot-quarantine hold with it (same observer,
- * same authority).
+ * The precedence above is for fibers with NO owner — plain `due:` cards and
+ * cycles, which every store roots equally and no daemon can claim. A fiber that
+ * names a `shuttle.host` is not one of those: exactly one daemon owns it, and
+ * since `5669fc7` (`kanban_aux_admissible?` no longer waves through an
+ * elsewhere-owned fiber that happens to carry a `due:`) no other daemon serves
+ * it at all. So an owner row, when present, wins outright — ahead of local,
+ * ahead of fresh. Not a tiebreak: writes route by `originId`, and the local
+ * git mirror of an owned fiber is a copy the human cannot edit through the
+ * board (`/transition`, `/felt-edit`, `/lifecycle` are all owner-routed, so
+ * edits land on the owner's disk and arrive here only when git syncs) and
+ * cannot observe (only the owner runs the tmux session). An owner row that is
+ * STALE still wins — last-known-good plus `⌛ waiting on nibi` is the honest
+ * reading; falling back to the mirror shows a disconnected host's work as
+ * though it were fresh.
+ *
+ * That single rule replaces the liveness reconciliation this function used to
+ * do: when the owner's row is the card, its worker arrives with it. What
+ * survives is the negative half — a non-owner row that reaches us carrying a
+ * `runtime` (a pre-`5669fc7` daemon still leaking foreign rows, a renamed host)
+ * has its liveness dropped rather than believed, because the board would
+ * otherwise offer to open and to kill a session that host does not run. Once
+ * the fleet is current this whole function is a no-op for owned fibers: the
+ * feed hands us exactly one row each and there is nothing to reconcile.
  */
 export function dedupeMirroredRows(
   entries: CompositeEntry[],
@@ -159,18 +170,17 @@ export function dedupeMirroredRows(
   const isLocal = (origin: string): boolean =>
     origin === feed.host || feed.origins[origin]?.kind === 'local';
 
-  // Lower rank wins.
-  const rank = (e: CompositeEntry): number => (isLocal(e.origin) ? 0 : isStale(e.origin) ? 2 : 1);
+  const isOwner = (e: CompositeEntry): boolean =>
+    !!e.fiber.shuttleHost && e.origin === e.fiber.shuttleHost;
+
+  // Lower rank wins. Ownership outranks locality outranks freshness.
+  const rank = (e: CompositeEntry): number =>
+    isOwner(e) ? 0 : isLocal(e.origin) ? 1 : isStale(e.origin) ? 3 : 2;
 
   const winners = new Map<string, CompositeEntry>();
   const alsoOn = new Map<string, string[]>();
-  // The owning host's row per fiber — the only row that can observe a worker.
-  const ownerRow = new Map<string, CompositeEntry>();
   for (const entry of entries) {
     const key = entry.fiber.uid ?? entry.fiber.id;
-    if (entry.fiber.shuttleHost && entry.origin === entry.fiber.shuttleHost) {
-      ownerRow.set(key, entry);
-    }
     const held = winners.get(key);
     if (!held) {
       winners.set(key, entry);
@@ -191,15 +201,13 @@ export function dedupeMirroredRows(
 
   return [...winners.entries()].map(([key, entry]) => {
     const others = alsoOn.get(key);
-    const owner = ownerRow.get(key);
+    // A row that is not the owner's cannot speak for an owned fiber's liveness
+    // in either direction: it has no tmux session to report, and a `runtime` on
+    // it (an old leaky daemon, a renamed host) would invent a worker that this
+    // board would then offer to open and to kill.
     const withLiveness =
-      owner && owner !== entry
-        ? {
-            ...entry,
-            runtime: owner.runtime,
-            held: owner.held,
-            heldSince: owner.heldSince,
-          }
+      entry.fiber.shuttleHost && !isOwner(entry)
+        ? { ...entry, runtime: undefined, held: undefined, heldSince: undefined }
         : entry;
     return others && others.length > 0
       ? { ...withLiveness, mirroredOrigins: others }
@@ -458,6 +466,20 @@ function ghostColumn(card: KanbanCard): LensColumn {
   if (card.status === 'closed' && card.tempered === undefined) return 'awaitingReview';
   if (card.runningWorker || card.status === 'active') return 'inFlight';
   return 'drafts';
+}
+
+/**
+ * One composite row → one card, outside the board's surface assembly.
+ *
+ * The board builds cards in bulk from the whole feed; a fiber reached by
+ * [[wikilink]] arrives alone, from the single-fiber feed, and still needs the
+ * same card the board would have made — same fields, same shuttle block, so
+ * the panel that opens it is the same panel. Dependency satisfaction is the
+ * one thing a lone row cannot know (there is no feed to look siblings up in),
+ * so it answers the way a card with no dependencies does.
+ */
+export function cardFromCompositeEntry(entry: CompositeEntry, nowMs = Date.now()): KanbanCard {
+  return toCard(entry, new Map(), nowMs);
 }
 
 /**
