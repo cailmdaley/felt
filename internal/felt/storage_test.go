@@ -231,38 +231,6 @@ func TestStorageList(t *testing.T) {
 	}
 }
 
-func TestStorageReadMetadataSkipsBody(t *testing.T) {
-	dir := t.TempDir()
-	s := NewStorage(dir)
-	s.Init()
-
-	f := &Felt{
-		ID:        "test-task",
-		Name:      "Test Task",
-		Status:    StatusOpen,
-		CreatedAt: time.Now(),
-		Outcome:   "Metadata survives",
-		Body:      "Body should be skipped.",
-	}
-	if err := s.Write(f); err != nil {
-		t.Fatalf("Write() error: %v", err)
-	}
-
-	read, err := s.ReadMetadata(f.ID)
-	if err != nil {
-		t.Fatalf("ReadMetadata() error: %v", err)
-	}
-	if read.Name != f.Name {
-		t.Errorf("Name = %q, want %q", read.Name, f.Name)
-	}
-	if read.Outcome != f.Outcome {
-		t.Errorf("Outcome = %q, want %q", read.Outcome, f.Outcome)
-	}
-	if read.Body != "" {
-		t.Errorf("Body = %q, want empty", read.Body)
-	}
-}
-
 func TestStorageListMetadataSkipsBody(t *testing.T) {
 	dir := t.TempDir()
 	s := NewStorage(dir)
@@ -879,6 +847,26 @@ func TestStorageFindPrefersExactIDOverPrefix(t *testing.T) {
 	}
 	if found.ID != "bao-analysis" {
 		t.Fatalf("Find() = %q, want exact top-level ID", found.ID)
+	}
+}
+
+func TestParentPath(t *testing.T) {
+	tests := []struct {
+		id   string
+		want string
+	}{
+		{"", ""},
+		{"a", ""},
+		{"a/b", "a"},
+		{"a/b/c", "a/b"},
+		// Out of the fiber-ID domain, but "" is the only answer that reads as
+		// "no parent" — "/" would be a fiber ID no store can hold.
+		{"/a", ""},
+	}
+	for _, tt := range tests {
+		if got := ParentPath(tt.id); got != tt.want {
+			t.Errorf("ParentPath(%q) = %q, want %q", tt.id, got, tt.want)
+		}
 	}
 }
 

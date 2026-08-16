@@ -2,7 +2,6 @@ package shuttle
 
 import (
 	"fmt"
-	"os"
 	"strings"
 )
 
@@ -96,31 +95,6 @@ func LoadBuiltinAgentRegistry() (*AgentRegistry, error) {
 		agents[i].Source = SourceBuiltin
 	}
 	return &AgentRegistry{agents: agents, builtinsMode: BuiltinsMerge, builtinCount: len(agents)}, nil
-}
-
-// LoadAgentRegistryFromBytes parses an agents payload from raw bytes — either a
-// bare array of records or the `{"version":1,"agents":[…]}` envelope. Records
-// carry no provenance: the caller supplied the bytes.
-func LoadAgentRegistryFromBytes(data []byte) (*AgentRegistry, error) {
-	agents, err := parseAnyAgentsPayload(data, "agents.json")
-	if err != nil {
-		return nil, err
-	}
-	return &AgentRegistry{agents: agents, builtinsMode: BuiltinsMerge}, nil
-}
-
-// LoadAgentRegistryFromFile reads an agents registry from the given path,
-// bypassing the built-in layer entirely (a fixture is the whole registry).
-func LoadAgentRegistryFromFile(path string) (*AgentRegistry, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("reading %s: %w", path, err)
-	}
-	agents, err := parseAnyAgentsPayload(data, path)
-	if err != nil {
-		return nil, err
-	}
-	return &AgentRegistry{agents: agents, builtinsMode: BuiltinsMerge}, nil
 }
 
 // Warnings returns the non-fatal problems found while loading (duplicate
@@ -227,17 +201,6 @@ func (r *AgentRegistry) validateAxes(base AgentRecord, eff Axes) error {
 		return fmt.Errorf("headless (-p print mode) not supported by agent %q (claude harness only)", base.ID)
 	}
 	return nil
-}
-
-// BaseIDs returns the IDs of pickable base agents (alias records excluded).
-func (r *AgentRegistry) BaseIDs() []string {
-	var ids []string
-	for _, a := range r.agents {
-		if !a.IsAlias() {
-			ids = append(ids, a.ID)
-		}
-	}
-	return ids
 }
 
 // Records returns all agent records (for API exposure of constraint metadata).

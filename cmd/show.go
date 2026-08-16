@@ -88,14 +88,14 @@ Targeted views:
 				return outputShowBody(storage, f)
 			}
 			if showCitations {
-				citations, err := storage.ScanCitations(f.ID)
+				citations, _, err := storage.ScanRelationships(f.ID)
 				if err != nil {
 					return err
 				}
 				return outputShowSelection(citations)
 			}
 			if showConsumers {
-				consumers, err := storage.ScanConsumers(f.ID)
+				_, consumers, err := storage.ScanRelationships(f.ID)
 				if err != nil {
 					return err
 				}

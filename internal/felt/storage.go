@@ -77,11 +77,6 @@ func NewStorage(projectRoot string) *Storage {
 	}
 }
 
-// ProjectRoot returns the project directory that owns this .felt store.
-func (s *Storage) ProjectRoot() string {
-	return filepath.Dir(s.root)
-}
-
 // Init creates the .felt directory if it doesn't exist.
 func (s *Storage) Init() error {
 	if err := os.MkdirAll(s.root, 0755); err != nil {
@@ -198,11 +193,6 @@ func (s *Storage) Write(f *Felt) error {
 // Read loads a felt from disk by ID.
 func (s *Storage) Read(id string) (*Felt, error) {
 	return s.readWithMode(id, ParseFull)
-}
-
-// ReadMetadata loads just the felt metadata, skipping body parsing.
-func (s *Storage) ReadMetadata(id string) (*Felt, error) {
-	return s.readWithMode(id, ParseMetadataOnly)
 }
 
 // FindMetadataInScope returns the first felt matching the query using lexical
@@ -1085,6 +1075,19 @@ func fiberIDFromRelativePath(rel string) (string, bool, bool) {
 	return filepath.ToSlash(dir), false, true
 }
 
+// ParentPath returns the parent fiber ID of id, or "" when id names a
+// top-level fiber. Fiber IDs are clean, slash-separated and relative, so a
+// rooted or empty input has no parent to speak of and degrades to "" rather
+// than to "/" — the one answer no fiber ID can be.
+func ParentPath(id string) string {
+	clean := path.Clean(filepath.ToSlash(id))
+	parent := path.Dir(clean)
+	if parent == "." || parent == "/" {
+		return ""
+	}
+	return parent
+}
+
 func disambiguateID(id string, n int) string {
 	id = filepath.ToSlash(id)
 	dir := path.Dir(id)
@@ -1140,10 +1143,7 @@ func ResolveAddPath(slug string, existingIDs []string) (resolved string, rewritt
 		if path.Base(id) != leading {
 			continue
 		}
-		parent := path.Dir(id)
-		if parent == "." {
-			parent = ""
-		}
+		parent := ParentPath(id)
 		if _, ok := seenParents[parent]; ok {
 			continue
 		}
@@ -1241,7 +1241,7 @@ func newScopedIDResolver(ids []string) *scopedIDResolver {
 		resolver.ids = append(resolver.ids, cleanID)
 		resolver.exact[cleanID] = struct{}{}
 
-		parent := parentPath(cleanID)
+		parent := ParentPath(cleanID)
 		base := path.Base(cleanID)
 		if resolver.parentBases[parent] == nil {
 			resolver.parentBases[parent] = map[string]string{}
@@ -1269,11 +1269,6 @@ func (r *scopedIDResolver) Resolve(scopeID, query string) (string, error) {
 		return id, nil
 	}
 	return "", resolutionErr
-}
-
-func (r *scopedIDResolver) ResolveOK(scopeID, query string) (string, bool) {
-	id, ok, _ := r.resolve(scopeID, query)
-	return id, ok
 }
 
 func (r *scopedIDResolver) resolve(scopeID, query string) (string, bool, error) {
@@ -1403,7 +1398,7 @@ func scopeChain(scopeID string) []string {
 	var scopes []string
 	for {
 		scopes = append(scopes, scopeID)
-		parent := parentPath(scopeID)
+		parent := ParentPath(scopeID)
 		if parent == "" {
 			break
 		}

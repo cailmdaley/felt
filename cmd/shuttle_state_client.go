@@ -3,9 +3,6 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
-	"time"
 )
 
 // The decoded shapes of the daemon's state endpoints — the structured half of the
@@ -102,32 +99,25 @@ type CompositeState struct {
 	Remotes map[string]*RemoteSnapshot `json:"remotes"`
 }
 
-// fetchComposite calls GET /api/v1/state/composite on the local daemon and decodes
-// the response.
+// fetchComposite calls GET /api/v1/state/composite on the local daemon and
+// decodes the response. This is the surface where `felt shuttle status --all`
+// discovers the daemon is down, so it adds the how-to-fix hint the shared
+// transport has no business carrying.
 func fetchComposite() (*CompositeState, error) {
-	return fetchCompositeFrom(daemonURL() + "/api/v1/state/composite")
+	out, err := fetchCompositeFrom(daemonURL() + "/api/v1/state/composite")
+	if err != nil {
+		return nil, fmt.Errorf("%w (start the daemon with `make start` or set SHUTTLE_DAEMON_URL)", err)
+	}
+	return out, nil
 }
 
-// fetchCompositeFrom calls the given composite URL and decodes it. Returns a
-// wrapped error on transport failure or non-200 status, including the daemon URL so
-// the user knows which daemon they're trying to reach (tests point it at an
-// httptest stub).
+// fetchCompositeFrom calls the given composite URL and decodes it (tests point
+// it at an httptest stub).
 func fetchCompositeFrom(url string) (*CompositeState, error) {
-	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Get(url)
+	body, err := getDaemon(url, daemonReadTimeout)
 	if err != nil {
-		return nil, fmt.Errorf("reaching daemon at %s: %w (start the daemon with `make start` or set SHUTTLE_DAEMON_URL)", daemonURL(), err)
+		return nil, err
 	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("reading daemon response: %w", err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("daemon returned %d: %s", resp.StatusCode, string(body))
-	}
-
 	var out CompositeState
 	if err := json.Unmarshal(body, &out); err != nil {
 		return nil, fmt.Errorf("parsing daemon response: %w", err)

@@ -183,7 +183,7 @@ Use --body with query to include body search, and with --json to emit body text.
 		}
 
 		if query != "" && !lsExact && lsBody && len(bodyCandidates) > 0 {
-			filtered, err = appendBodyMatches(storage, filtered, bodyCandidates, lsRegex, re, queryLower)
+			filtered, err = scanBodyMatches(storage, filtered, bodyCandidates, re, queryLower, lsRegex)
 			if err != nil {
 				return err
 			}
@@ -430,15 +430,9 @@ func matchesQuery(f *felt.Felt, queryLower string, re *regexp.Regexp, useRegex b
 		strings.Contains(strings.ToLower(f.SearchText()), queryLower)
 }
 
-// appendBodyMatches folds candidates whose body matches the query into filtered
-// by scanning the markdown source of truth. Regex queries match by pattern;
-// plain queries match by lowercased substring (so partial words match).
-func appendBodyMatches(storage *felt.Storage, filtered, candidates []*felt.Felt, useRegex bool, re *regexp.Regexp, queryLower string) ([]*felt.Felt, error) {
-	return scanBodyMatches(storage, filtered, candidates, re, queryLower, useRegex)
-}
-
-// scanBodyMatches hydrates each candidate's body and matches by regex or
-// lowercased substring.
+// scanBodyMatches folds candidates whose body matches the query into filtered by
+// hydrating and scanning the markdown source of truth. Regex queries match by
+// pattern; plain queries match by lowercased substring (so partial words match).
 func scanBodyMatches(storage *felt.Storage, filtered, candidates []*felt.Felt, re *regexp.Regexp, queryLower string, useRegex bool) ([]*felt.Felt, error) {
 	fullCandidates, err := hydrateBodies(storage, candidates)
 	if err != nil {
@@ -541,7 +535,7 @@ func buildContainmentTree(felts []*felt.Felt) []*ContainmentNode {
 	var roots []*ContainmentNode
 	for _, f := range felts {
 		node := byID[f.ID]
-		parentID := parentPath(f.ID)
+		parentID := felt.ParentPath(f.ID)
 		if parentID != "" {
 			if parent, ok := byID[parentID]; ok {
 				parent.Children = append(parent.Children, node)
@@ -560,15 +554,6 @@ func sortContainmentNodes(nodes []*ContainmentNode) {
 	for _, n := range nodes {
 		sortContainmentNodes(n.Children)
 	}
-}
-
-// parentPath returns the parent fiber ID, or "" for top-level fibers.
-func parentPath(id string) string {
-	idx := strings.LastIndex(id, "/")
-	if idx < 0 {
-		return ""
-	}
-	return id[:idx]
 }
 
 func findContainmentNode(roots []*ContainmentNode, id string) *ContainmentNode {

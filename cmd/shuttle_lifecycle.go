@@ -24,13 +24,17 @@ import (
 // cycle) with a correct local-write fallback when it is down. Ported faithfully
 // from shuttle-ctl's cmd/shuttle/lifecycle.go.
 
-// resolveOwnedShuttleFiber is the common preamble for a lifecycle write verb: a
-// full read (body preserved for the re-serialize), a required shuttle: block,
-// and the ownership guard. Returns the fiber, its storage, the typed block, and
-// an unlock func the caller MUST defer immediately (before any other return) so
-// the fiber's cross-process lock (see internal/felt/lock.go, F4) is held for the
-// caller's entire read-modify-write cycle and released exactly once no matter
-// which return path fires.
+// resolveOwnedShuttleFiber is the common preamble for a lifecycle or config
+// write verb: a full read (body preserved for the re-serialize), a required
+// shuttle: block, and the ownership guard. Returns the fiber, its storage, the
+// typed block, and an unlock func the caller MUST defer immediately (before any
+// other return) so the fiber's cross-process lock (see internal/felt/lock.go,
+// F4) is held for the caller's entire read-modify-write cycle and released
+// exactly once no matter which return path fires.
+//
+// missingBlockHint is appended parenthetically to the no-block error: the
+// config verbs point at the create verb that would install one, the lifecycle
+// verbs pass "" and get the bare message.
 //
 // Locks BEFORE re-reading, not before the initial shuttleResolveFiber lookup:
 // resolving `query` to a fiber id can itself require scanning/reading multiple
@@ -47,7 +51,7 @@ import (
 // guard never round-tripped back to the daemon it was being shelled from.
 // Post-S1, `resolveOwnHost` (see ensureOwnedHere) is pure local state — no
 // round-trip to guard against — so every caller now takes this same path.
-func resolveOwnedShuttleFiber(query string) (*felt.Felt, *felt.Storage, *shuttle.Block, func() error, error) {
+func resolveOwnedShuttleFiber(query, missingBlockHint string) (*felt.Felt, *felt.Storage, *shuttle.Block, func() error, error) {
 	f, st, err := shuttleResolveFiber(query, true)
 	if err != nil {
 		return nil, nil, nil, nil, err
@@ -63,7 +67,10 @@ func resolveOwnedShuttleFiber(query string) (*felt.Felt, *felt.Storage, *shuttle
 	}
 	if !ok {
 		unlock()
-		return nil, nil, nil, nil, fmt.Errorf("fiber %s has no shuttle: block", query)
+		if missingBlockHint == "" {
+			return nil, nil, nil, nil, fmt.Errorf("fiber %s has no shuttle: block", query)
+		}
+		return nil, nil, nil, nil, fmt.Errorf("fiber %s has no shuttle: block (%s)", query, missingBlockHint)
 	}
 	if err := ensureOwnedHere(f, query); err != nil {
 		unlock()
@@ -107,7 +114,7 @@ Use --no-kill to stop scheduling only and let a live worker finish naturally.
 status:active is the sole dispatch gate; there is no enabled flag.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		f, st, _, unlock, err := resolveOwnedShuttleFiber(args[0])
+		f, st, _, unlock, err := resolveOwnedShuttleFiber(args[0], "")
 		if err != nil {
 			return err
 		}
@@ -171,7 +178,7 @@ armed straight to active. Refuses on a tempered/composted close — use
 'felt shuttle reopen' to requeue a finished fiber.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		f, st, block, unlock, err := resolveOwnedShuttleFiber(args[0])
+		f, st, block, unlock, err := resolveOwnedShuttleFiber(args[0], "")
 		if err != nil {
 			return err
 		}
@@ -238,7 +245,7 @@ The shuttle block stays installed; closed fibers are ignored by the daemon
 until they are reopened.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		f, st, _, unlock, err := resolveOwnedShuttleFiber(args[0])
+		f, st, _, unlock, err := resolveOwnedShuttleFiber(args[0], "")
 		if err != nil {
 			return err
 		}
@@ -289,7 +296,7 @@ With --as-draft, sets status = open instead: the card reopens as a PAUSED DRAFT
 — visible on the board, never auto-dispatched.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		f, st, _, unlock, err := resolveOwnedShuttleFiber(args[0])
+		f, st, _, unlock, err := resolveOwnedShuttleFiber(args[0], "")
 		if err != nil {
 			return err
 		}
@@ -336,7 +343,7 @@ Examples:
   printf 'First line\nSecond line\n' | felt shuttle set-outcome <fiber>`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		f, st, _, unlock, err := resolveOwnedShuttleFiber(args[0])
+		f, st, _, unlock, err := resolveOwnedShuttleFiber(args[0], "")
 		if err != nil {
 			return err
 		}
@@ -400,7 +407,7 @@ Routes to the owning daemon when reachable (a single in-process transition);
 falls back to a local document write when the daemon is down.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		f, st, block, unlock, err := resolveOwnedShuttleFiber(args[0])
+		f, st, block, unlock, err := resolveOwnedShuttleFiber(args[0], "")
 		if err != nil {
 			return err
 		}
@@ -503,7 +510,7 @@ preserved.`,
 		if err != nil {
 			return fmt.Errorf("loading agent registry: %w", err)
 		}
-		f, st, block, unlock, err := resolveShuttleFiberForConfig(args[0])
+		f, st, block, unlock, err := resolveOwnedShuttleFiber(args[0], "use 'felt shuttle repeat' to install first")
 		if err != nil {
 			return err
 		}
@@ -554,7 +561,7 @@ back to the harness default.`,
 		if err != nil {
 			return fmt.Errorf("loading agent registry: %w", err)
 		}
-		f, st, block, unlock, err := resolveShuttleFiberForConfig(args[0])
+		f, st, block, unlock, err := resolveOwnedShuttleFiber(args[0], "use 'felt shuttle repeat' to install first")
 		if err != nil {
 			return err
 		}
@@ -624,41 +631,6 @@ func axisValue(s string) any {
 	return s
 }
 
-// resolveShuttleFiberForConfig is the preamble for the config verbs
-// (set-model/set-agent): like resolveOwnedShuttleFiber but with the "install
-// first" hint on a missing block.
-func resolveShuttleFiberForConfig(query string) (*felt.Felt, *felt.Storage, *shuttle.Block, func() error, error) {
-	return resolveShuttleFiberForConfigWithHint(query, "use 'felt shuttle repeat' to install first")
-}
-
-// resolveShuttleFiberForConfigWithHint is resolveShuttleFiberForConfig with a
-// caller-chosen hint for the no-block case — reshape points at all three create
-// verbs, set-model/set-agent at repeat.
-func resolveShuttleFiberForConfigWithHint(query, hint string) (*felt.Felt, *felt.Storage, *shuttle.Block, func() error, error) {
-	f, st, err := shuttleResolveFiber(query, true)
-	if err != nil {
-		return nil, nil, nil, nil, err
-	}
-	f, unlock, err := lockAndReloadFiber(st, f)
-	if err != nil {
-		return nil, nil, nil, nil, err
-	}
-	block, ok, err := f.ShuttleBlock()
-	if err != nil {
-		unlock()
-		return nil, nil, nil, nil, err
-	}
-	if !ok {
-		unlock()
-		return nil, nil, nil, nil, fmt.Errorf("fiber %s has no shuttle: block (%s)", query, hint)
-	}
-	if err := ensureOwnedHere(f, query); err != nil {
-		unlock()
-		return nil, nil, nil, nil, err
-	}
-	return f, st, block, unlock, nil
-}
-
 // ---- reshape ---------------------------------------------------------------
 
 var (
@@ -710,7 +682,7 @@ pause / resume / close / reopen for that.`,
 		if err != nil {
 			return fmt.Errorf("loading agent registry: %w", err)
 		}
-		f, st, block, unlock, err := resolveShuttleFiberForConfigWithHint(args[0],
+		f, st, block, unlock, err := resolveOwnedShuttleFiber(args[0],
 			"use 'felt shuttle install' / 'repeat' / 'pin' to create one first")
 		if err != nil {
 			return err
@@ -817,23 +789,6 @@ func printPreservedStatus(status string) {
 	fmt.Printf("  status: %s (%s)\n", shown, note)
 }
 
-// ---- set-interactive (retired stub) ----------------------------------------
-
-var setInteractiveCmd = &cobra.Command{
-	Use:    "set-interactive <fiber> <true|false>",
-	Short:  "(retired) interactivity is no longer a dispatch mode",
-	Hidden: true,
-	Args:   cobra.ArbitraryArgs,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return fmt.Errorf(`set-interactive is retired: interactivity is no longer a dispatch mode.
-  - Per-dispatch "talk to me first" intent goes in the From User directive
-    (the kanban requeue/resume box — it rides the dispatch call as a parameter).
-  - Structural human-gates (2FA, send-in-his-voice) belong in the constitution
-    text — the worker reads Desired State / Context and waits there.
-  - To talk to any worker, finished or not, resume it from the kanban.`)
-	},
-}
-
 // ---- uninstall -------------------------------------------------------------
 
 var uninstallShuttleCmd = &cobra.Command{
@@ -897,6 +852,5 @@ func init() {
 	shuttleCmd.AddCommand(setModelCmd)
 	shuttleCmd.AddCommand(setAgentCmd)
 	shuttleCmd.AddCommand(reshapeCmd)
-	shuttleCmd.AddCommand(setInteractiveCmd)
 	shuttleCmd.AddCommand(uninstallShuttleCmd)
 }
