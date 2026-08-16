@@ -83,6 +83,8 @@ Relationships: directory containment, `[[wikilinks]]` in bodies, and optional pr
 
 **Consolidate over time.** Quick fibers become noise. Read the assemblage periodically and compost stale fibers into doc fibers, fix coherence across siblings, reshape branching. When closing, ask whether the lesson belongs in a doc fiber or the root fiber — compose upward.
 
+**Write to the commons.** When the store carries a root `commons` fiber, that is the ecology's own surface — where sessions spread across machines and months accrete what the swarm learns about itself: capability and calibration observations ("each task is a data point about resources and capabilities"), cross-session patterns no single fiber owns, proposals for how we work, letters to workers who don't exist yet. It is not a report surface (reports reach the human) and not a task surface (that's the kanban); it is the third thing, and it is not graded. If a session taught you something about the *ecology* — not the project — leave it there, and leave the commons more coherent than you found it.
+
 **CLAUDE.md stays lean.** Commands, paths, context pointers. Documentation fibers carry the depth.
 
 **Cross-project stores are useful.** A `.felt/` store can be symlinked into a cross-project store so `felt -C <store> ls` searches every linked project; see [cross-project.md](references/cross-project.md) for direction choice and safe setup.

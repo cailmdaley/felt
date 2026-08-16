@@ -33,80 +33,13 @@ Diamond 1 diverges into questions and converges on a name (*"this IS a decision 
 
 ### Diamond 2: Design → Delivery
 
-**Design (diverge).** What are the real alternatives? For each, what would make it right or wrong? Trade-offs, excluded options, edge cases. This is where the Contrarian and Simplifier stances are most useful.
+**Design (diverge).** What are the real alternatives? For each, what would make it right or wrong? Trade-offs, excluded options, edge cases. Useful pressure here: what if the opposite were true, what if the constraint is not real, what if the simplest version is already good enough.
 
 **Delivery (converge).** Commit to a default, name what was rejected and why, identify inputs/outputs if they matter, and stage the evidence. Land the result in the fiber's outcome/body and, if the project uses additional YAML fields, add them there.
 
 **Output of Diamond 2:** a fiber that carries the conclusion clearly — in prose, and optionally in whatever project-owned YAML fields are actually useful.
 
 The two diamonds are sequential but the boundary is soft. If you find yourself naming alternatives before the thing is clear, back up to the ontology convergence point. If you converge too early on "this is a decision" when it is actually a question, the Design phase will feel forced — that is the cue to re-enter Wonder.
-
----
-
-## Stances
-
-Six lightweight lenses for when the conversation needs pressure. **Default is no stance** — straight conversation. Invoke a stance when pressure would help, announce it in one sentence, drop it when it has done its work. Do not stack or pipeline them.
-
-### Socratic — *"What are you assuming?"*
-
-Question-only. Never proposes answers. Surfaces the assumptions under the user's framing.
-
-- What are you assuming is true that might not be?
-- What would make option A right vs option B? What is the actual fork?
-- If you had to write the `excluded_reason` for the option you are about to reject, what would it say?
-
-**Use in Wonder and early Design.** When the user is about to commit to a path and you want the reasons made explicit.
-
-### Ontologist — *"What IS this, really?"*
-
-Pushes on definition before mechanism. Four questions:
-
-1. **Essence** — what is the true nature, stripping away accidental properties?
-2. **Root cause or symptom** — is this the fundamental issue or a surface effect?
-3. **Prerequisites** — what must exist first for this even to make sense?
-4. **Hidden assumptions** — what implicit beliefs is the framing resting on?
-
-**Use at the Ontology convergence point.** When a word is doing heavy lifting and may mean different things in different sentences.
-
-### Contrarian — *"What if the opposite were true?"*
-
-Challenges premises, not details.
-
-- What if the choice does not actually matter for your signal?
-- What if the constraint you are designing around is not real?
-- What if the simplest version is already good enough?
-
-**Use in Design.** When the conversation is burning effort on a distinction that may not matter, or a third option (do nothing, use the default) is being ignored.
-
-### Simplifier — *"Is this complexity earning its keep?"*
-
-YAGNI, concrete first, data over code.
-
-- What can we remove without losing the core value?
-- What is the simplest version that would work?
-- Can a data structure replace this logic?
-
-**Use in Design and early Delivery.** When the design is drifting toward over-engineering or a feature list is growing without anchoring reasons.
-
-### Researcher — *"What do we actually know?"*
-
-Evidence before interpretation. Especially useful for scientific work where a claim needs to be defensible.
-
-- What does the actual source say, not what we remember?
-- What would count as evidence here? What would falsify the claim?
-- What is the most specific claim we can make with the data in hand?
-
-**Use in Delivery.** When an insight needs a defensible claim, or when the user is about to write an outcome that is stronger than the evidence supports.
-
-### Architect — *"If we started over, would we build it this way?"*
-
-Structural root cause. The question behind the question when friction keeps recurring.
-
-- Is the same problem showing up in different forms?
-- Which abstraction does not match reality?
-- What assumption was wrong from the start?
-
-**Use when a debate keeps returning.** The user is circling a decision they have already made three times and cannot stick to — the real question is probably structural, not tactical.
 
 ---
 
@@ -167,11 +100,9 @@ What comes out of the diamonds maps onto fibers like this:
 
 - **Ambiguity gates.** Do not withhold help until the user clarifies N dimensions. The self-check is a mirror, not a door.
 - **Numerical scoring.** Do not introduce 0–1 clarity scores with thresholds. The underlying signal is qualitative and the number adds false precision.
-- **Stance pipelines.** Do not run Socratic → Ontologist → Contrarian in sequence. Pick one when it helps; drop it when it has.
-- **Mandatory interview.** No prepared question list. Stances are responsive to the actual conversation.
+- **Mandatory interview.** No prepared question list; questions are responsive to the actual conversation.
 - **Surfacing the ledger too early.** A single item is not a flush. Wait for accumulation or a pause.
 - **Immutable outputs.** Nothing filed here is locked. Everything is editable; reversals are normal.
-- **Nine-minds overload.** Six stances is already generous. Add more only when a specific gap shows up, never preemptively.
 - **Interrogation without a ceiling.** Three questions is usually enough. If the user is getting irritated, stop asking and file what you have.
 - **Inventing YAML because a field exists.** Extra structure should earn its keep; otherwise let the body and outcome carry the meaning.
 - **Converging before the name is clear.** If Diamond 2 feels forced, Diamond 1 has not finished. Back up.
