@@ -1397,7 +1397,12 @@ defmodule Shuttle.Poller do
   # `owned_by_store?` against a configured store — and there is no peer daemon
   # that could also claim them, so no cross-host election is being skipped here.
   # A fiber WITH a shuttle block pinned elsewhere still fails: the aux clause
-  # widens admission for kinds that have no owner, never for work that has one.
+  # widens admission for kinds that have no owner, never for work that has one —
+  # `kanban_aux_admissible?/1` checks `shuttle.host` is absent before it looks at
+  # `due:`/`cycle` at all. That guard was missing until a git-synced loom put 15
+  # foreign-host constitutions (each carrying a `due:`) into this daemon's feed,
+  # where the board collapsed them onto the local mirror and lost both their
+  # workers and their write routing.
   defp owned_feed_entry?(%{fiber: %{"shuttle" => shuttle} = fiber}, own_host_id)
        when is_map(shuttle) and map_size(shuttle) > 0 do
     host_owned?(shuttle, own_host_id) or Shuttle.FiberDocuments.kanban_aux_admissible?(fiber)

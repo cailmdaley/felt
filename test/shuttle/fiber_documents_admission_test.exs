@@ -64,6 +64,43 @@ defmodule Shuttle.FiberDocumentsAdmissionTest do
       refute FiberDocuments.kanban_aux_admissible?("nope")
       refute FiberDocuments.kanban_aux_admissible?(nil)
     end
+
+    test "REFUSES a fiber that has an owner, however aux-shaped it looks" do
+      # The leak this closes: every daemon shares the git-synced loom store, so
+      # a constitution pinned to `nibi` sits on all five disks. Host-ownership
+      # excluded it from four of those feeds — until a `due:` let it back in
+      # through the aux clause, which exists only for kinds that HAVE no owner.
+      # On the board those mirror rows won the card (local-first) and answered
+      # for a fiber they cannot observe or write.
+      pinned = %{"due" => "2026-11-30T00:00:00Z", "shuttle" => %{"host" => "nibi"}}
+      refute FiberDocuments.kanban_aux_admissible?(pinned)
+      refute FiberDocuments.kanban_aux_admissible?(%{"tags" => ["cycle"], "shuttle" => %{"host" => "nibi"}})
+    end
+
+    test "still claims a shuttle fiber that names NO host — unowned, not elsewhere-owned" do
+      # A block without a `host:` is homeless, not foreign: no daemon can claim
+      # it, so refusing it here would erase it from every board at once.
+      assert FiberDocuments.kanban_aux_admissible?(%{
+               "due" => "2026-11-30T00:00:00Z",
+               "shuttle" => %{"kind" => "oneshot"}
+             })
+
+      assert FiberDocuments.kanban_aux_admissible?(%{
+               "due" => "2026-11-30T00:00:00Z",
+               "shuttle" => %{"host" => ""}
+             })
+    end
+  end
+
+  describe "host_pinned?/1" do
+    test "is true only for a non-empty shuttle.host" do
+      assert FiberDocuments.host_pinned?(%{"shuttle" => %{"host" => "nibi"}})
+      refute FiberDocuments.host_pinned?(%{"shuttle" => %{"host" => ""}})
+      refute FiberDocuments.host_pinned?(%{"shuttle" => %{"host" => nil}})
+      refute FiberDocuments.host_pinned?(%{"shuttle" => %{"kind" => "oneshot"}})
+      refute FiberDocuments.host_pinned?(%{"due" => "2026-11-30T00:00:00Z"})
+      refute FiberDocuments.host_pinned?("nope")
+    end
   end
 
   describe "union_by_id/2" do

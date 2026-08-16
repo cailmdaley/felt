@@ -80,10 +80,26 @@ defmodule Shuttle.FiberDocuments do
   """
   @spec kanban_aux_admissible?(map()) :: boolean()
   def kanban_aux_admissible?(fiber) when is_map(fiber) do
-    has_due?(fiber) or cycle_tagged?(fiber)
+    not host_pinned?(fiber) and (has_due?(fiber) or cycle_tagged?(fiber))
   end
 
   def kanban_aux_admissible?(_), do: false
+
+  @doc """
+  True iff the fiber's `shuttle:` block names a host — i.e. it HAS an owner,
+  whoever that owner is.
+
+  The aux clause's guard. Its whole premise is "this kind has no owner, so
+  host-ownership cannot gate it"; a `due:` on a fiber pinned to another host
+  does not make that fiber ownerless, and admitting it anyway is how a
+  remote-owned constitution ended up served by every daemon that had the
+  git-synced store on disk. On the board those rows collapsed onto the local
+  mirror, which then answered for a fiber it does not own: no worker (only the
+  owner observes tmux), and transitions POSTed with the mirror's origin.
+  """
+  @spec host_pinned?(map()) :: boolean()
+  def host_pinned?(%{"shuttle" => %{"host" => host}}), do: present?(host)
+  def host_pinned?(_), do: false
 
   defp has_due?(%{"due" => due}), do: due not in [nil, ""]
   defp has_due?(_), do: false
@@ -382,7 +398,10 @@ defmodule Shuttle.FiberDocuments do
   # Host-owned shuttle work, OR one of the host-less local kinds (`due:` cards,
   # `cycle` fibers) that `kanban_walks/0` admits. The aux kinds carry no
   # `shuttle.host:` to match against, so ownership for them is "this store
-  # roots it", which enumerating this store already established.
+  # roots it", which enumerating this store already established — and
+  # `kanban_aux_admissible?/1` enforces the host-less half of that sentence, so
+  # a due-dated fiber pinned to another host cannot ride the aux clause into
+  # this feed.
   defp owned_kanban_fiber?(fiber) do
     (shuttle_fiber?(fiber) and host_owned?(fiber)) or kanban_aux_admissible?(fiber)
   end
