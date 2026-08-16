@@ -908,10 +908,11 @@
 /* ── [[wikilinks]] ────────────────────────────────────────────────────────
    A body's reference to another fiber, which opens it as a tab in the panel
    beside the card. Quiet on purpose: a body can be dense with references, and a
-   page of underlined coloured text stops being a page. So it reads as ink — the
-   prose colour, no underline at rest — and admits it is a link only under the
-   cursor, with an iron-gall rule the same weight as a pen stroke. Nothing here
-   is web-blue.
+   page of underlined coloured text stops being a page. So the text itself stays
+   ink — the prose colour, never web-blue — and the only mark is a hairline in
+   the board's attention pigment, cinnabar. A red rule at 1px is legible as "this
+   goes somewhere" at a glance without competing with the sentence it sits in;
+   under the cursor it firms up rather than changing character.
 
    Only `.kbn-wikilink-live` carries the affordance: a reference resolved
    against the fiber index. An unresolved one never reaches CSS at all —
@@ -923,16 +924,26 @@
 }
 .kbn-detail-prose a.kbn-wikilink-live {
   cursor: pointer;
-  /* A hairline that stays out of the descenders — present enough to read as a
-     mark on the page, faint enough to disappear into the paragraph. */
-  border-bottom: 1px solid rgba(27, 22, 17, 0.16);
-  transition: border-color 120ms ease, color 120ms ease;
+  /* Cinnabar hairline — the board's attention pigment, which is the right claim
+     for a link you can follow. One pixel, offset clear of the descenders: a rule
+     under the words, not a box around them. (`--kbn-you` is declared on the
+     board root in KanbanModal.css; the hex keeps the panel honest if the prose
+     is ever rendered outside it.) */
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+  /* Two thirds strength at rest so a paragraph of references still reads as a
+     paragraph; the plain hex first for anything without color-mix. */
+  text-decoration-color: rgba(188, 69, 56, 0.66);
+  text-decoration-color: color-mix(in srgb, var(--kbn-you, #BC4538) 66%, transparent);
+  transition: text-decoration-color 120ms ease, color 120ms ease;
 }
 .kbn-detail-prose a.kbn-wikilink-live:hover,
 .kbn-detail-prose a.kbn-wikilink-live:focus-visible {
-  /* Iron gall: the ink the rest of the page is written in, darkened. */
+  /* Firmer, not louder: the same rule at full pigment, the ink darkened. */
   color: #1B1611;
-  border-bottom-color: rgba(27, 22, 17, 0.62);
+  text-decoration-color: var(--kbn-you, #BC4538);
+  text-decoration-thickness: 1.5px;
   outline: none;
 }
 
