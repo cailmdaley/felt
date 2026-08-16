@@ -14,6 +14,7 @@ import {
   attachPanelResize,
   readPanelGeometry,
   animatePanelGeometry,
+  fitPanelGeometry,
   type PanelGeometry,
 } from './FloatingPanelChrome.js'
 import { buildFileViewer, isScrollableFile } from './FileViewerPanel.js'
@@ -208,15 +209,16 @@ function buildSessionWindow(card: KanbanCard): HTMLElement | null {
   return el
 }
 
-/** A remembered geometry is usable only if it still lands on-screen (the
- *  viewport may have shrunk, or moved to a smaller display, since it was
- *  saved). Falls back to the default placement otherwise. */
-function onScreen(g: PanelGeometry): boolean {
-  return (
-    g.left < window.innerWidth - 80 &&
-    g.top < window.innerHeight - 80 &&
-    g.left > 80 - g.width &&
-    g.top > -20
+/** A remembered geometry, refitted to the window it is being restored into —
+ *  the viewport may have shrunk, or moved to a smaller display, since it was
+ *  saved. Never rejects: a clamped geometry is always usable, and clamping
+ *  keeps the panel's lower edge (and with it the page pane's scrollport) on
+ *  screen, which is what makes the whole body reachable. */
+function fitted(g: PanelGeometry): PanelGeometry {
+  return fitPanelGeometry(
+    g,
+    { width: window.innerWidth, height: window.innerHeight },
+    { width: MIN_WIDTH, height: MIN_HEIGHT },
   )
 }
 
@@ -369,6 +371,7 @@ export class FiberDetailModal {
   private overlay: HTMLElement | null = null
   private escapeHandler: ((e: KeyboardEvent) => void) | null = null
   private outsideHandler: ((e: PointerEvent) => void) | null = null
+  private resizeHandler: (() => void) | null = null
   private searchDebounce: number | null = null
   /** ResizeObservers watching full-length HTML embeds so they re-fit their
    *  height when the panel reflows their content (see autosizeEmbeds).
@@ -487,9 +490,10 @@ export class FiberDetailModal {
     // the viewer geometry for openViewerWindow to restore instead of the
     // half-and-half default.
     this.viewerGeom = persist.viewerGeom ?? null
-    if (persist.cardGeom && onScreen(persist.cardGeom)) {
-      applyGeometryTo(overlay, persist.cardGeom)
-      this.cardGeom = persist.cardGeom
+    if (persist.cardGeom) {
+      const geom = fitted(persist.cardGeom)
+      applyGeometryTo(overlay, geom)
+      this.cardGeom = geom
     }
 
     const pill = document.createElement('span')
@@ -605,9 +609,32 @@ export class FiberDetailModal {
       this.close()
     }
     document.addEventListener('pointerdown', this.outsideHandler, true)
+
+    // A window that shrinks under an open panel strands it exactly the way a
+    // geometry saved on a bigger display does — the lower edge, and the page
+    // pane's scrollport with it, ends up below the screen. Refit both windows
+    // in place so the body stays readable to its end.
+    this.resizeHandler = () => {
+      if (this.overlay) {
+        const geom = fitted(readPanelGeometry(this.overlay))
+        applyGeometryTo(this.overlay, geom)
+        this.cardGeom = geom
+        lastGeometry = geom
+      }
+      if (this.viewerWindow) {
+        this.viewerGeom = fitted(readPanelGeometry(this.viewerWindow))
+        applyGeometryTo(this.viewerWindow, this.viewerGeom)
+      }
+      this.writePersist()
+    }
+    window.addEventListener('resize', this.resizeHandler)
   }
 
   close(): void {
+    if (this.resizeHandler) {
+      window.removeEventListener('resize', this.resizeHandler)
+      this.resizeHandler = null
+    }
     if (this.escapeHandler) {
       document.removeEventListener('keydown', this.escapeHandler, true)
       this.escapeHandler = null
@@ -900,13 +927,16 @@ export class FiberDetailModal {
   private applyGeometry(overlay: HTMLElement): void {
     const vw = window.innerWidth
     const vh = window.innerHeight
-    let g = lastGeometry
-    if (g && (g.left > vw - 80 || g.top > vh - 80)) g = null
-    const width = g?.width ?? Math.min(SINGLE_COL_WIDTH, Math.round(vw * 0.92))
-    const height = g?.height ?? vh - 24
-    const left = g?.left ?? Math.round((vw - width) / 2)
-    const top = g?.top ?? Math.round((vh - height) / 2)
-    const geom = { left: Math.max(0, left), top: Math.max(0, top), width, height }
+    const width = Math.min(SINGLE_COL_WIDTH, Math.round(vw * 0.92))
+    const height = vh - 24
+    const geom = lastGeometry
+      ? fitted(lastGeometry)
+      : {
+          left: Math.max(0, Math.round((vw - width) / 2)),
+          top: Math.max(0, Math.round((vh - height) / 2)),
+          width,
+          height,
+        }
     applyGeometryTo(overlay, geom)
     // Track the intended geometry (not a mid-animation offset read) so the
     // persisted card placement is exact.
@@ -996,7 +1026,8 @@ export class FiberDetailModal {
     // half-and-half — the card glides to the left half, the viewer takes the
     // right half. Once placed, the viewer geometry is remembered (settle +
     // close) so the next open restores it instead of re-splitting.
-    if (this.viewerGeom && onScreen(this.viewerGeom)) {
+    if (this.viewerGeom) {
+      this.viewerGeom = fitted(this.viewerGeom)
       applyGeometryTo(win, this.viewerGeom)
     } else {
       const { card: cardG, viewer: viewerG } = halfAndHalf()

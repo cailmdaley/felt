@@ -17,6 +17,35 @@ export interface PanelGeometry {
   height: number
 }
 
+/**
+ * Clamp a remembered geometry to the viewport it is about to be applied in.
+ *
+ * A `position: fixed` panel taller than the window has its lower edge below
+ * the screen, and the page pane's scroll container goes with it: the reader
+ * can scroll the body to its end and still never SEE the end, because the
+ * bottom of the scrollport is off-screen. (That was the bug — a card whose
+ * geometry was saved on a taller window could only ever be read down to
+ * `viewportHeight` worth of it.) So no restored geometry is ever trusted
+ * unclamped: size fits the window first, then position slides back inside it.
+ *
+ * Pure, and takes its viewport rather than reading `window`, so the rule is
+ * testable headless.
+ */
+export function fitPanelGeometry(
+  g: PanelGeometry,
+  viewport: { width: number; height: number },
+  min: { width: number; height: number },
+): PanelGeometry {
+  const width = Math.min(g.width, Math.max(min.width, viewport.width))
+  const height = Math.min(g.height, Math.max(min.height, viewport.height))
+  return {
+    left: Math.min(Math.max(0, g.left), Math.max(0, viewport.width - width)),
+    top: Math.min(Math.max(0, g.top), Math.max(0, viewport.height - height)),
+    width,
+    height,
+  }
+}
+
 /** Class carrying the geometry transition — applied only for the duration
  *  of a programmatic move so pointer-driven drag/resize stays 1:1. */
 const GEOM_ANIM_CLASS = 'panel-geom-anim'

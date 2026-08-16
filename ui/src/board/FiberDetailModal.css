@@ -22,6 +22,10 @@
   flex-direction: column;
   min-width: 380px;
   min-height: 320px;
+  /* The geometry machinery reads offsetWidth/offsetHeight (border-box) and
+     writes style.width/height — so without this the 1px border was added back
+     on every save/restore round-trip and the panel crept 2px per open. */
+  box-sizing: border-box;
   background: #EDE2CE;
   border: 1px solid rgba(27, 22, 17, 0.16);
   border-radius: 2px;
