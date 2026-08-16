@@ -15,6 +15,7 @@ defmodule ShuttleWeb.MomentControllerTest do
   alias Shuttle.Test.StubGetFileClient
   import Plug.Conn
   import Phoenix.ConnTest
+  import Shuttle.Test.EnvHelpers
 
   alias Shuttle.Moment
 
@@ -740,15 +741,12 @@ defmodule ShuttleWeb.MomentControllerTest do
       ])
 
       on_exit(fn ->
-        restore(:write_forward_client, prior_client)
-        restore(:remotes, prior_remotes)
+        restore_app_env(:write_forward_client, prior_client)
+        restore_app_env(:remotes, prior_remotes)
       end)
 
       :ok
     end
-
-    defp restore(key, nil), do: Application.delete_env(:shuttle, key)
-    defp restore(key, value), do: Application.put_env(:shuttle, key, value)
 
     test "forwards to the named host and relays its words verbatim" do
       body =

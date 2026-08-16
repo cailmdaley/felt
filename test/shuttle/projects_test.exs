@@ -1,5 +1,6 @@
 defmodule Shuttle.ProjectsTest do
   use ExUnit.Case, async: false
+  import Shuttle.Test.EnvHelpers
 
   alias Shuttle.Projects
 
@@ -15,15 +16,12 @@ defmodule Shuttle.ProjectsTest do
 
     on_exit(fn ->
       File.rm(path)
-      restore("FELT_PROJECTS", prev_env)
-      restore("FELT_PROJECTS_FILE", prev_file)
+      restore_env("FELT_PROJECTS", prev_env)
+      restore_env("FELT_PROJECTS_FILE", prev_file)
     end)
 
     {:ok, path: path}
   end
-
-  defp restore(key, nil), do: System.delete_env(key)
-  defp restore(key, value), do: System.put_env(key, value)
 
   test "absent file resolves to []" do
     assert Projects.configured_projects() == []

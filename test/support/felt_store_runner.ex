@@ -37,7 +37,6 @@ defmodule Shuttle.Test.FeltStoreRunner do
           tmux_sessions: MapSet.new(),
           fibers: %{},
           shuttle: %{},
-          felt_ls: [],
           felt_ls_stderr_warning: false,
           felt_ls_delay_ms: 0,
           new_session_delay_ms: 0
@@ -67,7 +66,6 @@ defmodule Shuttle.Test.FeltStoreRunner do
         tmux_sessions: MapSet.new(),
         fibers: %{},
         shuttle: %{},
-        felt_ls: [],
         felt_ls_stderr_warning: false,
         felt_ls_delay_ms: 0,
         new_session_delay_ms: 0
@@ -205,11 +203,6 @@ defmodule Shuttle.Test.FeltStoreRunner do
       {:error, _} -> expanded
     end
   end
-
-  # Kept for backward compat; no longer consulted by discover_candidates
-  # (discovery now walks files for shuttle: blocks).  Still used by the
-  # mock's felt ls handler which other code paths may call.
-  def set_felt_ls(fibers), do: Agent.update(__MODULE__, &%{&1 | felt_ls: fibers})
 
   def set_felt_ls_stderr_warning(enabled),
     do: Agent.update(__MODULE__, &Map.put(&1, :felt_ls_stderr_warning, enabled))
@@ -384,7 +377,7 @@ defmodule Shuttle.Test.FeltStoreRunner do
 
         fibers =
           Agent.get(__MODULE__, fn state ->
-            entries = if state.felt_ls == [], do: Map.values(state.fibers), else: state.felt_ls
+            entries = Map.values(state.fibers)
 
             if show_all do
               entries

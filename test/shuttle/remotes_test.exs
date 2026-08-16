@@ -19,8 +19,8 @@ defmodule Shuttle.RemotesTest do
 
     on_exit(fn ->
       restore_env("FELT_REMOTES_FILE", prev_file)
-      restore_app(:remotes, prev_env)
-      restore_app(:launchd_label_prefix, prev_prefix)
+      restore_app_env(:remotes, prev_env)
+      restore_app_env(:launchd_label_prefix, prev_prefix)
     end)
 
     :ok
@@ -203,6 +203,4 @@ defmodule Shuttle.RemotesTest do
     dir
   end
 
-  defp restore_app(key, nil), do: Application.delete_env(:shuttle, key)
-  defp restore_app(key, value), do: Application.put_env(:shuttle, key, value)
 end

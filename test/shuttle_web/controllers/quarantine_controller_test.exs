@@ -10,6 +10,7 @@ defmodule ShuttleWeb.QuarantineControllerTest do
   use ExUnit.Case
   import Plug.Conn
   import Phoenix.ConnTest
+  import Shuttle.Test.EnvHelpers
 
   @endpoint ShuttleWeb.Endpoint
 
@@ -82,8 +83,8 @@ defmodule ShuttleWeb.QuarantineControllerTest do
     Application.put_env(:shuttle, :write_forward_client, StubPostClient)
 
     on_exit(fn ->
-      restore(:remotes, previous_remotes)
-      restore(:write_forward_client, previous_client)
+      restore_app_env(:remotes, previous_remotes)
+      restore_app_env(:write_forward_client, previous_client)
     end)
 
     conn = post(api_conn(), "/api/v1/quarantine/release", Jason.encode!(%{origin: "candide"}))
@@ -93,9 +94,6 @@ defmodule ShuttleWeb.QuarantineControllerTest do
     assert last.url == "http://localhost:4001/api/v1/quarantine/release"
     assert Jason.decode!(last.body) == %{}
   end
-
-  defp restore(key, nil), do: Application.delete_env(:shuttle, key)
-  defp restore(key, value), do: Application.put_env(:shuttle, key, value)
 
   defp api_conn do
     build_conn()
