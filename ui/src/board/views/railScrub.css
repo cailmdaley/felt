@@ -1,0 +1,62 @@
+/* THE SCRUB BAR. Verdigris, full height of whatever it was parented to, and
+   the strongest vertical mark on the sheet while it is up — a pinned moment is
+   the one thing on a moving page that has been held still, and the reader must
+   never have to work out which minute the open panel belongs to.
+
+   The element is a GRAB ZONE with a hairline inside it. The mark wants to be
+   1.5px wide and a 1.5px drag target is a game of aim, so the box is eleven
+   pixels of transparent paper and the ink sits centred in it. */
+.kbn-scrub {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 11px;
+  margin-left: -5.5px;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: ew-resize;
+  pointer-events: auto;
+  z-index: 4;
+}
+
+.kbn-scrub-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1.5px;
+  margin-left: -0.75px;
+  background: var(--kbn-tempered, #3F8278);
+  /* A breath of the same pigment either side, so the bar reads as a considered
+     mark rather than a 1px artefact — the same halo the now-thread wears in
+     gold, at the same weight. */
+  box-shadow: 0 0 0 2px rgba(63, 130, 120, 0.14);
+}
+
+/* Held, or focused: the mark thickens rather than changing colour. It is the
+   same bar doing the same job — what has changed is that it is now listening,
+   which is a matter of presence and not of identity. */
+.kbn-scrub:focus-visible { outline: none; }
+.kbn-scrub:focus-visible .kbn-scrub-line,
+.kbn-scrub-held .kbn-scrub-line {
+  width: 2.5px;
+  margin-left: -1.25px;
+  box-shadow: 0 0 0 3px rgba(63, 130, 120, 0.2);
+}
+
+/* A HANDLE, at the foot. Without it the bar is a rule like the hour rules and
+   the midnight seam, and nothing says it can be taken hold of. A small square
+   at the bottom edge is the least chrome that says "drag me" — it sits below
+   the ink, out of the marks it would otherwise obscure. */
+.kbn-scrub::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -1px;
+  width: 5px;
+  height: 5px;
+  margin-left: -2.5px;
+  background: var(--kbn-tempered, #3F8278);
+  border-radius: 1px;
+}

@@ -136,9 +136,12 @@ import {
   MomentLoader,
   pickMark,
   placeTip,
+  reconcileRows,
   renderTip,
+  rowCount,
   SLOT_KIND_ORDER,
   SLOT_PHRASE,
+  tipContent,
   type DrawnKind,
   type LastExchange,
   type MarkPick,
@@ -147,6 +150,7 @@ import {
   type SlotTip,
   type SlotTipRow,
 } from './momentTip.js'
+import { isPast, RailScrub } from './railScrub.js'
 import './DayView.css'
 
 // ── Shape of a day ───────────────────────────────────────────────────────────
@@ -1441,11 +1445,15 @@ function buildStateKey(): HTMLElement {
 /** The gestures, taught once. This line replaced a per-lane `title`
  *  attribute: the rail's hover already belongs to the moment tooltip, and the
  *  OS's native gray box arriving late on top of it was two voices where the
- *  legend's one suffices. */
+ *  legend's one suffices.
+ *
+ *  It names the DIVIDER rather than the two halves, because the divider is
+ *  drawn on the page: a reader who has read this line once can see, from then
+ *  on, which of the two things a click is about to do. */
 function buildGestureKey(): HTMLElement {
   const item = document.createElement('span')
   item.className = 'kbn-day-key kbn-day-key-gesture'
-  item.textContent = 'click a lane opens it · ⌥-click pins · drag zooms'
+  item.textContent = 'click in the day pins the moment (← → to scrub) · click past now opens the terminal · drag zooms'
   return item
 }
 
@@ -1495,6 +1503,7 @@ export function beatTip(
   beat: DayBeat,
   win: DayWindow,
   words?: MomentWords,
+  pinned = false,
 ): SlotTip {
   const startMs = win.startMs + beat.minute * MINUTE_MS
   const rows: SlotTipRow[] = []
@@ -1512,19 +1521,42 @@ export function beatTip(
       // which is why WEEK still names the fiber (its rows are days, and the
       // fiber is exactly what its surface cannot tell you).
       where: '',
-      count: entry.count,
+      // Only where the tally counts messages — see `rowCount`. The agent
+      // band's `n` counts harness hook events (a call's two ends, a session
+      // start, a minute filled between them) and was the source of the slip's
+      // oldest lie: "tool calls ×7" over whatever the transcript returned.
+      // What ran is counted by the tools section, which lists what it counts.
+      ...(rowCount(kind, entry.count) === undefined ? {} : { count: rowCount(kind, entry.count) }),
       // Day has no constitution stroke on its rails, so nothing here may claim
       // one: the flag exists to explain a mark's weight, and an unweighted mark
       // that wore it would be the legend lying.
       shuttle: false,
     })
   }
+  const content = tipContent(words, pinned)
   return {
     time: `${clockTime(startMs)}–${clockTime(startMs + MINUTE_MS)}`,
-    rows,
-    ...(words?.excerpts.length ? { detail: words.excerpts } : {}),
-    ...(words?.tools ? { tools: words.tools } : {}),
-    ...(words?.note ? { note: words.note } : {}),
+    rows: reconcileRows(rows, content),
+    ...content,
+  }
+}
+
+/**
+ * A minute the scrub bar landed on that holds no mark at all.
+ *
+ * Scrubbing steps by the MINUTE, not from mark to mark, so most steps on a
+ * quiet lane land here — and an empty minute is a real answer about a day, not
+ * a failure to answer. The slip says the time and says nothing happened, which
+ * is the honest report and keeps the panel from flickering out of existence
+ * every other keystroke.
+ */
+export function emptyMinuteTip(startMs: number, pinned = false): SlotTip {
+  return {
+    time: `${clockTime(startMs)}–${clockTime(startMs + MINUTE_MS)}`,
+    rows: [],
+    resolved: true,
+    pinned,
+    note: 'nothing recorded in this minute',
   }
 }
 
@@ -1553,22 +1585,28 @@ const MAGNET_LOOKBACK_MINUTES = 90
 export function magnetTip(
   exchange: LastExchange,
   words?: MomentWords,
+  pinned = false,
 ): SlotTip {
   const rows: SlotTipRow[] = exchange.turns.map((turn) => ({
     kind: turn.kind,
     phrase: SLOT_PHRASE[turn.kind],
     where: clockTime(turn.atMs),
-    count: 1,
     shuttle: false,
   }))
   if (exchange.toolsAfter) {
     rows.push({
       kind: 'agent',
-      // "since" rather than "at": the count spans every minute after the last
+      // "since" rather than "at": the span covers every minute after the last
       // word, and pointing it at one instant would understate it.
       phrase: SLOT_PHRASE.agent,
       where: `since ${clockTime(exchange.turns[exchange.turns.length - 1]?.atMs ?? exchange.toolsAfter.atMs)}`,
-      count: exchange.toolsAfter.count,
+      // MINUTES, IN WORDS, NOT A `×N`. This row used to print the summed
+      // bucket tally as a count, which read as "this many tool calls" and was
+      // a sum of harness events — and, being a lane-wide sum, could never have
+      // been listed under it in any case. How LONG it has been working since
+      // it last spoke is the fact the magnet is actually reporting, and a
+      // minute count with its unit attached promises nothing it cannot show.
+      note: `${exchange.toolsAfter.minutes} min`,
       shuttle: false,
     })
   }
@@ -1577,12 +1615,11 @@ export function magnetTip(
   // the surface cannot show. The lane's name is not here for the reason it is
   // not on the rows: it is already on this row, to the left.
   const last = exchange.toolsAfter?.atMs ?? exchange.turns[exchange.turns.length - 1]?.atMs
+  const content = tipContent(words, pinned)
   return {
     time: last === undefined ? '' : `last at ${clockTime(last)}`,
-    rows,
-    ...(words?.excerpts.length ? { detail: words.excerpts } : {}),
-    ...(words?.tools ? { tools: words.tools } : {}),
-    ...(words?.note ? { note: words.note } : {}),
+    rows: reconcileRows(rows, content),
+    ...content,
   }
 }
 
@@ -1615,6 +1652,28 @@ class DayViewImpl implements TemporalView {
   /** The lane-minute a CLICK fixed the tooltip to, if any. While this is set
    *  the pointer no longer moves or closes the slip — see {@link showBeatTip}. */
   private pinnedKey: string | null = null
+  /** Every lane's rail, by key — what a scrub needs to redraw a slip for a
+   *  minute nobody is pointing at. Rebuilt with the chart. */
+  private railByLane = new Map<string, { lane: DayLane; rail: HTMLElement }>()
+  /**
+   * The pinned moment's bar, and the keyboard that walks it.
+   *
+   * The geometry is handed over rather than reached for: the bar hangs in the
+   * GRIDLINE layer, which is the one element spanning exactly the rail column
+   * and exactly the stack of lanes — so a full-height mark is a percentage
+   * across it, and the same box maps a drag's x back to an instant.
+   */
+  private readonly scrub = new RailScrub({
+    frame: () => this.frame,
+    rail: () => {
+      const grid = this.gridEl
+      if (!grid) return null
+      const box = grid.getBoundingClientRect()
+      return { host: grid, left: box.left, width: box.width }
+    },
+    stepMs: MINUTE_MS,
+    onMove: (target) => this.showPinnedMinute(target.laneKey, target.atMs),
+  })
   private moments = new MomentLoader((session, fromMs, toMs, host, full) =>
     this.ctx
       ? this.ctx.moment(session, fromMs, toMs, host, full)
@@ -1695,9 +1754,15 @@ class DayViewImpl implements TemporalView {
   }
 
   private readonly onKeyDown = (e: KeyboardEvent): void => {
+    if (keystrokeIsSpokenFor()) return
+    // THE BAR GETS FIRST REFUSAL ON THE ARROWS. While a moment is pinned, left
+    // and right mean "a minute earlier / later" — the reason the bar exists —
+    // and paging the whole view to yesterday under a reader who is scrubbing
+    // would throw away the thing they were reading. It declines every key it
+    // does not use, so nothing else here is shadowed.
+    if (this.scrub.handleKey(e)) return
     if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight' && e.key !== 't') return
     if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return
-    if (keystrokeIsSpokenFor()) return
     e.preventDefault()
     // `t` for today — the same binding WeekView carries, so one key means
     // "back to now" wherever you are in the temporal views.
@@ -1778,6 +1843,8 @@ class DayViewImpl implements TemporalView {
     document.removeEventListener('click', this.onDocClick)
     document.removeEventListener('mousemove', this.onDragMove)
     document.removeEventListener('mouseup', this.onDragUp)
+    this.scrub.dispose()
+    this.railByLane.clear()
     this.pinnedKey = null
     this.zoom = null
     this.lastLoad = null
@@ -2045,21 +2112,27 @@ class DayViewImpl implements TemporalView {
     const minutes = Math.max(1, Math.round((line.endMs - line.startMs) / MINUTE_MS))
     const tip = this.ensureTip()
     const key = `${lane.key}:aloft:${line.kind}:${line.startMs}:${line.row}`
-    const words = (w?: MomentWords): SlotTip => ({
-      time: `${clockTime(line.startMs)}–${clockTime(line.endMs)}`,
-      rows: [
-        {
-          kind: 'agent',
-          phrase: aloftPhrase(line),
-          where: '',
-          count: minutes,
-          shuttle: false,
-        },
-      ],
-      ...(w?.excerpts.length ? { detail: w.excerpts } : {}),
-      ...(w?.tools ? { tools: w.tools } : {}),
-      ...(w?.note ? { note: w.note } : {}),
-    })
+    const words = (w?: MomentWords): SlotTip => {
+      const content = tipContent(w, pin)
+      return {
+        time: `${clockTime(line.startMs)}–${clockTime(line.endMs)}`,
+        rows: reconcileRows(
+          [
+            {
+              kind: 'agent',
+              phrase: aloftPhrase(line),
+              where: '',
+              // How long it was up — a duration, so it says "min" rather than
+              // wearing a `×N` that would read as a count of the lines below.
+              note: `${minutes} min`,
+              shuttle: false,
+            },
+          ],
+          content,
+        ),
+        ...content,
+      }
+    }
     // Sources come from the minutes the line spans — the same transcripts the
     // beats under it point at, which is what makes the delegation register
     // available here at all.
@@ -2072,6 +2145,10 @@ class DayViewImpl implements TemporalView {
         .flatMap((b) => b.sources),
     )
     this.openMoment(tip, key, pin, sources, line.startMs, line.endMs, words)
+    // A rung is an interval, and the bar marks where it BEGAN — the instant the
+    // delegation went out, which is the one point on the rung a reader can act
+    // on. Stepping from there walks the span it covers.
+    if (pin) this.scrub.pin({ laneKey: lane.key, atMs: line.startMs })
 
     const chartBox = chart.getBoundingClientRect()
     placeTip(tip, chartBox, e.clientX - chartBox.left, e.clientY - chartBox.top)
@@ -2132,6 +2209,7 @@ class DayViewImpl implements TemporalView {
     // whether it becomes a zoom or stays a pin is decided by how far the
     // pointer travels, in `onDragMove`.
     chart.addEventListener('mousedown', this.onDragDown)
+    this.railByLane.clear()
 
     // One gridline layer behind every rail, so the hour rules run unbroken
     // down the whole stack instead of restarting per lane.
@@ -2335,6 +2413,7 @@ class DayViewImpl implements TemporalView {
         rail.append(hair)
       }
 
+      this.railByLane.set(lane.key, { lane, rail })
       rail.addEventListener('mousemove', (e) => {
         // A drag in progress is a zoom gesture, not a hover: the slip would
         // chase the pointer across the selection it is trying to draw.
@@ -2361,36 +2440,44 @@ class DayViewImpl implements TemporalView {
       // THE RAIL CARRIES THREE GESTURES, and they settle in this order:
       //
       //   a drag past the threshold   → zoom      (decided in `onDragMove`)
-      //   Alt- or Cmd-click           → pin the moment under the pointer
-      //   a plain click               → the terminal
+      //   Alt- or Cmd-click           → pin, wherever the pointer is
+      //   a click LEFT of the now-thread  → pin the moment under the pointer
+      //   a click RIGHT of it             → the terminal
       //
-      // ## Why the plain click is the door and not the pin
+      // ## Why the divider decides
       //
-      // It was the other way round for exactly one round of use, on the rule
-      // "a click on a mark pins, a click on empty paper opens" — and empty
-      // paper turned out not to exist. Measured against a real day, on the
+      // This was a flat rule twice, and both flat rules were wrong for the
+      // same reason: the two halves of a lane are not the same surface.
+      //
+      // Pinning-everywhere failed first. Measured against a real day, on the
       // busiest lane of the page (291 inked minutes over a 435-minute frame,
       // 2.3px to the minute) a 9px snap plus the magnet's claim on everything
       // right of the last mark left 14% of the lane's width opening the
-      // terminal. Tightening the snap to 3px and dropping the magnet's claim
-      // took quiet lanes to 95% and that lane to 26%: at two pixels per minute
-      // EVERY pixel is genuinely within three of a beat, so no hitbox tight
-      // enough to be fair is tight enough to be reachable. The heaviest lane
-      // is also the one that sorts first and the one you most want to attach
-      // to, so the gesture was least available exactly where it was most
-      // wanted.
+      // terminal — at two pixels per minute EVERY pixel is within three of a
+      // beat, so no hitbox tight enough to be fair is tight enough to be
+      // reachable, and the door was least available on exactly the lane you
+      // most want to attach to.
       //
-      // So the surface belongs to the door, and pinning takes the modifier.
-      // The trade is cheap because HOVER ALREADY DOES THE READING — the slip
-      // opens on hover, follows the pointer, and the magnet answers the whole
-      // dead zone. Pinning only exists so the slip will hold still while you
-      // move onto it to scroll a long excerpt, which is a deliberate act and
-      // can afford a deliberate key.
-      // The promise the title makes is checked against the fleet, not assumed.
-      // A lane whose worker has landed opens the FIBER, and saying so is the
-      // difference between a fallback and a control that looks broken — the
-      // first report of this feature was "clicking a lane does nothing", from
-      // a board on which nothing was aloft at all.
+      // Opening-everywhere replaced it and cost the other half: the part of
+      // the rail that is DENSE with answers — every inked minute of the day —
+      // could only be held still through a modifier, and a reader who wants to
+      // stop the slip fleeing and walk through a busy afternoon had to know a
+      // key to do it.
+      //
+      // The gold thread already divides the lane into exactly those two
+      // regions, visibly, on every page that has a now at all. Left of it is
+      // the day that happened: covered in marks, every pixel of it an answer,
+      // and a click there means "hold still, I am reading this" — which raises
+      // the scrub bar and hands over the arrow keys. Right of it is paper the
+      // day has not reached; nothing happened there and nothing can be pinned,
+      // so the only sensible meaning left is the door. Neither half has to
+      // give anything up, and the boundary is drawn on the page rather than
+      // memorised.
+      //
+      // A day with no now on it (any past day) is entirely the first case, and
+      // the lane's LABEL keeps the door open unconditionally — which it always
+      // did, and is why nothing that used to work stopped.
+      //
       // No `title` here, deliberately: the rail already owns a rich hover
       // surface (the moment tooltip), and a native tooltip layered on top of
       // it after the OS delay is a second, uglier voice saying less. The
@@ -2402,7 +2489,7 @@ class DayViewImpl implements TemporalView {
           this.dragJustEnded = false
           return
         }
-        if (e.altKey || e.metaKey) {
+        if (e.altKey || e.metaKey || this.clickIsPast(rail, win, e)) {
           this.showBeatTip(lane, rail, win, e, true)
           return
         }
@@ -2506,6 +2593,71 @@ class DayViewImpl implements TemporalView {
     )
   }
 
+  /**
+   * Is the pointer standing in the part of the day that has HAPPENED?
+   *
+   * The one question the click rule turns on — see the rail's click handler.
+   * Read off the frame rather than off the now-thread's DOM, because a frame
+   * that contains no now draws no thread and must still answer: a past day is
+   * all past, and a day drawn entirely ahead of now is all future.
+   */
+  private clickIsPast(rail: HTMLElement, win: DayWindow, e: MouseEvent): boolean {
+    const box = rail.getBoundingClientRect()
+    if (box.width <= 0) return true
+    const at = win.startMs + ((e.clientX - box.left) / box.width) * (win.endMs - win.startMs)
+    return isPast(at, Date.now())
+  }
+
+  /**
+   * Redraw the pinned slip for a minute the SCRUB walked to.
+   *
+   * The bar steps by the minute, so most steps on a quiet lane land where no
+   * mark is — and that is an answer about the day, not a failure to answer.
+   * The slip says the clock time and says nothing was recorded, and the panel
+   * stays where it is: a reader walking an afternoon must not have the thing
+   * they are reading blink out of existence between two marks.
+   */
+  private showPinnedMinute(laneKey: string, atMs: number): void {
+    const held = this.railByLane.get(laneKey)
+    const win = this.frame
+    const chart = this.chartEl
+    if (!held || !win || !chart) return
+    const minute = Math.floor((atMs - win.startMs) / MINUTE_MS)
+    const beat = held.lane.beats.find((b) => b.minute === minute)
+    const tip = this.ensureTip()
+    const startMs = win.startMs + minute * MINUTE_MS
+
+    if (!beat) {
+      // No fetch: there is no session behind a minute with no bucket, so there
+      // is nothing to ask and nobody to ask it of.
+      this.moments.cancel()
+      this.hoveredKey = null
+      this.pinnedKey = `${laneKey}:${minute}`
+      renderTip(tip, emptyMinuteTip(startMs, true))
+      tip.classList.add('kbn-tip-open', 'kbn-tip-pinned')
+    } else {
+      this.openMoment(
+        tip,
+        `${laneKey}:${beat.minute}`,
+        true,
+        beat.sources,
+        startMs,
+        startMs + MINUTE_MS,
+        (words) => beatTip(beat, win, words, true),
+      )
+    }
+
+    const chartBox = chart.getBoundingClientRect()
+    const railBox = held.rail.getBoundingClientRect()
+    const perMinute = railBox.width / win.minutes
+    placeTip(
+      tip,
+      chartBox,
+      railBox.left - chartBox.left + (minute + 0.5) * perMinute,
+      railBox.top - chartBox.top,
+    )
+  }
+
   private showBeatTip(
     lane: DayLane,
     rail: HTMLElement,
@@ -2541,8 +2693,12 @@ class DayViewImpl implements TemporalView {
     // A pin asks again for the UNTRUNCATED words — the daemon does the cutting,
     // so the pinned slip cannot show the rest of a sentence it was never sent.
     this.openMoment(tip, key, pin, beat.sources, startMs, startMs + MINUTE_MS, (words) =>
-      beatTip(beat, win, words),
+      beatTip(beat, win, words, pin),
     )
+    // The bar goes up at the minute the slip is about, and takes the keyboard
+    // with it. From here the reader walks the day with the arrows rather than
+    // hunting the next two-pixel mark with the pointer.
+    if (pin) this.scrub.pin({ laneKey: lane.key, atMs: startMs })
 
     // Positioned against the chart; the anchor is the beat's own column.
     const chartBox = chart.getBoundingClientRect()
@@ -2626,7 +2782,14 @@ class DayViewImpl implements TemporalView {
     // lane, and every pixel of the dead zone must reuse it rather than mint a
     // fresh cache entry and a fresh fetch on every mouse move.
     const key = `${lane.key}:magnet`
-    this.openMoment(tip, key, pin, sources, fromMs, toMs, (words) => magnetTip(exchange, words))
+    this.openMoment(tip, key, pin, sources, fromMs, toMs, (words) =>
+      magnetTip(exchange, words, pin),
+    )
+    // Pinned out in the dead zone, the bar stands on the lane's LAST mark —
+    // the moment the slip is actually reporting — rather than under the
+    // pointer, which is out in paper where nothing happened. Stepping from
+    // there walks back into the day, which is the only direction there is.
+    if (pin) this.scrub.pin({ laneKey: lane.key, atMs: at(lastBeat) })
 
     const chartBox = chart.getBoundingClientRect()
     placeTip(tip, chartBox, e.clientX - chartBox.left, e.clientY - chartBox.top)
@@ -2726,6 +2889,7 @@ class DayViewImpl implements TemporalView {
     if (this.pinnedKey !== null && !force) return
     const wasPinned = this.pinnedKey !== null
     this.pinnedKey = null
+    this.scrub.clear()
     this.clearMagnets()
     this.tip?.classList.remove('kbn-tip-open', 'kbn-tip-pinned')
     this.hoveredKey = null

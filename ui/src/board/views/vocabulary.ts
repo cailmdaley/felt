@@ -155,8 +155,21 @@ export const ACTIVITY_KEY_ITEMS: Array<{ kind: DrawnKind; label: string }> = [
  */
 export const SPINE_KEY_LABEL = 'you'
 
-/** The curve's height: the machines' volume, minute by minute. */
-export const MOUND_KEY_LABEL = 'agent tool calls'
+/**
+ * The curve's height: the machines' volume, minute by minute.
+ *
+ * IT WAS "agent tool calls", AND THAT WAS NOT WHAT THE MOUND MEASURES. The
+ * curve is weighted by the activity plane's per-minute `n`, which counts
+ * harness HOOK EVENTS — a tool call's two ends are two of them, a session start
+ * is one, and a minute filled in between a long call's ends is one regardless.
+ * Naming the wash after tool calls made the legend a claim the ink could not
+ * support, and the same wrong noun was on the hover slip beside a list of the
+ * actual calls, where the two could be read against each other and seen to
+ * disagree. The wash says the agent was busy and how heavily; what it RAN is
+ * the slip's tool section, which counts what it lists. Week's key has said
+ * `agents working` all along; this is Day's, agreeing.
+ */
+export const MOUND_KEY_LABEL = 'agents working'
 
 /** The third mark, and the only one about a SPAN rather than a moment: the
  *  session's line on the ground and one rung per agent it sent out, each

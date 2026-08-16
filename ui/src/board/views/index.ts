@@ -29,6 +29,7 @@ export {
 } from './ViewRegistry.js'
 export {
   createTemporalFetchers,
+  parseMoment,
   type ActivityBucket,
   type ActivityResult,
   type CommitRecord,
