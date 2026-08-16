@@ -3491,7 +3491,10 @@ defmodule Shuttle.PollerTest do
     script = new_session_scripts() |> List.last() |> File.read!()
     assert script =~ "Fiber: #{fiber_id}"
     refute script =~ "--resume"
-    refute script =~ "old-session-id"
+    # Fresh means a new transcript, not amnesia: the prompt may NAME the
+    # predecessor's session (the lineage line, 3ffc8dc) — what it must never
+    # do is resume it.
+    assert script =~ "Previous session: old-session-id"
   end
 
   test "poller releases claim when worker exits and fiber is closed" do
