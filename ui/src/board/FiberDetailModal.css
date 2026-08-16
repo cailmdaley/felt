@@ -905,6 +905,44 @@
 }
 .kbn-detail-prose a:hover { color: var(--porch-cinnabar, #B5453A); }
 
+/* ── [[wikilinks]] ────────────────────────────────────────────────────────
+   A body's reference to another fiber, which opens it as the next card in the
+   chain. Quiet on purpose: a body can be dense with references, and a page of
+   underlined coloured text stops being a page. So it reads as ink — the prose
+   colour, no underline at rest — and admits it is a link only under the
+   cursor, with an iron-gall rule the same weight as a pen stroke. Nothing here
+   is web-blue.
+
+   Only `.kbn-wikilink-live` carries the affordance: a reference resolved
+   against the fiber index. An unresolved one never reaches CSS at all —
+   installWikilinks puts it back to literal `[[…]]` text. */
+.kbn-detail-prose a.kbn-wikilink {
+  color: inherit;
+  text-decoration: none;
+  cursor: text;
+}
+.kbn-detail-prose a.kbn-wikilink-live {
+  cursor: pointer;
+  /* A hairline that stays out of the descenders — present enough to read as a
+     mark on the page, faint enough to disappear into the paragraph. */
+  border-bottom: 1px solid rgba(27, 22, 17, 0.16);
+  transition: border-color 120ms ease, color 120ms ease;
+}
+.kbn-detail-prose a.kbn-wikilink-live:hover,
+.kbn-detail-prose a.kbn-wikilink-live:focus-visible {
+  /* Iron gall: the ink the rest of the page is written in, darkened. */
+  color: #1B1611;
+  border-bottom-color: rgba(27, 22, 17, 0.62);
+  outline: none;
+}
+
+/* A linked card — one opened by following a wikilink — wears a thin verdigris
+   spine on its left edge: the side it was opened FROM, so a chain reads as a
+   run of pages hinged to the one before it. */
+.kbn-detail-overlay.kbn-detail-linked {
+  border-left: 2px solid var(--porch-verdigris, #2f7d6f);
+}
+
 .kbn-detail-prose code.md-inline-code {
   font-family: var(--font-mono, 'IBM Plex Mono', monospace);
   font-size: 0.86em;

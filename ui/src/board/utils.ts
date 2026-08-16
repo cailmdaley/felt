@@ -72,6 +72,67 @@ marked.use({
 })
 
 /**
+ * `[[wikilink]]` — a fiber body's reference to another fiber.
+ *
+ * Rendered as an anchor carrying the raw target, NOT as resolved-or-not: this
+ * is pure string work with no fiber index in hand, and the index arrives async.
+ * The anchor is inert and unstyled until `installWikilinks` (wikilinks.ts)
+ * resolves it against the daemon's index — one that resolves becomes a live
+ * link, one that doesn't is restored to the literal `[[…]]` text it was
+ * written as. `data-wikilink-raw` is what makes that restoration exact.
+ *
+ * `[[target|label]]` shows the label; a bare `[[target]]` shows the target.
+ * Nothing here is a fiber-id rule — the resolver owns that.
+ *
+ * OPT-IN, via `wikilinks: true`. Only a surface that will run the resolver may
+ * render anchors: everywhere else — a card's outcome on the board grid, a Day
+ * prose block — a `[[…]]` renders as the literal text it always did. A surface
+ * that stripped the brackets without ever resolving anything would be claiming
+ * a reference is a link when nothing there can open it.
+ */
+const WIKILINK_RE = /^\[\[([^[\]|]+?)(?:\|([^[\]]+?))?\]\]/
+
+/** Set for the duration of one `renderMarkdown` call (synchronous, so this is
+ *  simply how a per-call option reaches marked's global extension table). */
+let wikilinksEnabled = false
+
+interface WikilinkToken {
+  type: 'wikilink'
+  raw: string
+  target: string
+  label: string
+}
+
+marked.use({
+  extensions: [{
+    name: 'wikilink',
+    level: 'inline',
+    start(src: string) {
+      const i = src.indexOf('[[')
+      return i < 0 ? undefined : i
+    },
+    tokenizer(src: string) {
+      const m = WIKILINK_RE.exec(src)
+      if (!m) return undefined
+      return {
+        type: 'wikilink',
+        raw: m[0],
+        target: m[1].trim(),
+        label: (m[2] ?? m[1]).trim(),
+      } as WikilinkToken
+    },
+    renderer(token) {
+      const t = token as unknown as WikilinkToken
+      if (!wikilinksEnabled) return escapeHtml(t.raw)
+      return (
+        `<a class="kbn-wikilink" data-fiber="${escapeAttr(t.target)}"` +
+        ` data-wikilink-raw="${escapeAttr(t.raw)}">${escapeHtml(t.label)}</a>`
+      )
+    },
+  }],
+})
+
+/**
  * Escape HTML to prevent XSS.
  *
  * Pure string work, deliberately — this used to round-trip through
@@ -119,6 +180,12 @@ interface RenderMarkdownOptions {
    * an alternate candidate the host probes; see `installBodyFileLinks`.
    */
   projectDir?: string
+  /**
+   * Render `[[wikilinks]]` as anchors the caller will resolve with
+   * `installWikilinks`. Off by default — see the extension above: a surface
+   * that cannot open a reference must not dress one up as a link.
+   */
+  wikilinks?: boolean
 }
 
 /**
@@ -126,6 +193,7 @@ interface RenderMarkdownOptions {
  * Relative image paths resolve through the Shuttle /file route when basePath is provided.
  */
 export function renderMarkdown(text: string, opts?: RenderMarkdownOptions): string {
+  wikilinksEnabled = opts?.wikilinks === true
   try {
     // Use a per-call renderer to handle image path resolution
     if (opts?.basePath) {
@@ -185,6 +253,8 @@ export function renderMarkdown(text: string, opts?: RenderMarkdownOptions): stri
   } catch (e) {
     console.error('Markdown render error:', e)
     return escapeHtml(text)
+  } finally {
+    wikilinksEnabled = false
   }
 }
 
