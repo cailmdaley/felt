@@ -17,9 +17,18 @@ import {
   attachPanelResize,
   readPanelGeometry,
   animatePanelGeometry,
-  fitPanelGeometry,
+  applyPanelGeometry as applyGeometryTo,
+  bringPanelToFront as bringToFront,
+  fittedGeometry as fitted,
+  halfAndHalf,
+  inSomeOpenPanel,
+  isTopPanel,
+  registerPanel,
+  unregisterPanel,
+  PANEL_MIN,
   type PanelGeometry,
 } from './FloatingPanelChrome.js'
+import { LinkedFiberPanel } from './LinkedFiberPanel.js'
 import { buildFileViewer, isScrollableFile } from './FileViewerPanel.js'
 import { disambiguateBasenames, normalizeSentFiles, type SentFile } from './sentFiles.js'
 import { buildTabButton, buildViewCell } from './ReaderChrome.js'
@@ -42,58 +51,18 @@ import './FiberDetailModal.css'
  */
 let lastGeometry: { left: number; top: number; width: number; height: number } | null = null
 
-const MIN_WIDTH = 380
-const MIN_HEIGHT = 320
+const MIN_WIDTH = PANEL_MIN.width
+const MIN_HEIGHT = PANEL_MIN.height
 
 /** Single-column reading width. The card panel opens here and keeps it — the
  *  file viewer is now its own floating window, so the card never grows.
  *  Mirrors the old default (≤950 / 92vw). */
 const SINGLE_COL_WIDTH = 950
 
-/**
- * Shared z-order stack for the two coexisting floating windows (the card panel
- * and the file viewer). Clicking either raises it above the other: a
- * `pointerdown` on a window bumps the counter and stamps the window's
- * `z-index`, so the last-touched window wins. Seeded above the vellum scrim
- * (9999) the way the panel's base CSS `z-index` was.
- */
-let panelZ = 10000
-function bringToFront(el: HTMLElement): void {
-  el.style.zIndex = String(++panelZ)
-}
-
-/**
- * Every card panel currently on screen, in open order — the primary card and
- * the chain of [[wikilink]]-opened cards beside it.
- *
- * Two behaviours need the whole chain rather than one panel's own overlay.
- * Click-away close: a click on the card next door is not a click "outside the
- * card", or following a wikilink would close the card you followed it from.
- * Escape: it closes the DEEPEST card, so a chain unwinds one card per press
- * instead of vanishing at once.
- */
-const openPanels: HTMLElement[] = []
-
-function registerPanel(el: HTMLElement): void {
-  openPanels.push(el)
-}
-function unregisterPanel(el: HTMLElement): void {
-  const i = openPanels.indexOf(el)
-  if (i >= 0) openPanels.splice(i, 1)
-}
-function inSomeOpenPanel(node: Node | null): boolean {
-  return node !== null && openPanels.some((p) => p.contains(node))
-}
-
-/** Gutter between a card and the card a wikilink opens beside it. */
-const CHAIN_GUTTER = 10
-
-function applyGeometryTo(el: HTMLElement, g: PanelGeometry): void {
-  el.style.left = `${Math.max(0, g.left)}px`
-  el.style.top = `${Math.max(0, g.top)}px`
-  el.style.width = `${g.width}px`
-  el.style.height = `${g.height}px`
-}
+// The z-order stack, the open-window registry and the geometry helpers all
+// live in FloatingPanelChrome now: three windows share them (the card, the file
+// viewer, and the panel that holds followed wikilinks), and a registry that
+// only one module could see was what made the third one awkward to add.
 
 /** Wall-clock time of an INSTANT, in the reader's zone. `dispatched_at` and
  *  `handed_off_at` are real points on the timeline, not civil days — a run
@@ -236,34 +205,6 @@ function buildSessionWindow(card: KanbanCard): HTMLElement | null {
     el.append(mark)
   }
   return el
-}
-
-/** A remembered geometry, refitted to the window it is being restored into —
- *  the viewport may have shrunk, or moved to a smaller display, since it was
- *  saved. Never rejects: a clamped geometry is always usable, and clamping
- *  keeps the panel's lower edge (and with it the page pane's scrollport) on
- *  screen, which is what makes the whole body reachable. */
-function fitted(g: PanelGeometry): PanelGeometry {
-  return fitPanelGeometry(
-    g,
-    { width: window.innerWidth, height: window.innerHeight },
-    { width: MIN_WIDTH, height: MIN_HEIGHT },
-  )
-}
-
-/** The half-and-half default arrangement: the card fills the left half of the
- *  viewport, the file viewer the right half, with a shared gutter. */
-function halfAndHalf(): { card: PanelGeometry; viewer: PanelGeometry } {
-  const vw = window.innerWidth
-  const vh = window.innerHeight
-  const gutter = 12
-  const half = Math.floor((vw - 3 * gutter) / 2)
-  const top = gutter
-  const height = vh - 2 * gutter
-  return {
-    card: { left: gutter, top, width: half, height },
-    viewer: { left: 2 * gutter + half, top, width: half, height },
-  }
 }
 
 /**
@@ -468,65 +409,75 @@ export class FiberDetailModal {
   private scrollWriteTimer: number | null = null
 
   /**
-   * A LINKED card — one opened by following a [[wikilink]] out of another
-   * card's body, rather than by clicking a card on the board. Same panel, same
-   * chrome, three differences, all of them following from "this is a reference
-   * you followed, not a fiber you went to work on":
+   * A LINKED card — one reached by following a [[wikilink]] out of a body,
+   * rather than by clicking a card on the board. It lives as a TAB in the
+   * {@link LinkedFiberPanel} beside the origin card, never as a window of its
+   * own, and differs from an origin card in exactly the ways that follow from
+   * "this is a reference you followed, not a fiber you went to work on":
    *
    *   · its actions dropdown appears only if the fiber actually carries a
    *     shuttle block — a plain note has nothing to dispatch, and offering
    *     Temper/Compost/New session on it is noise; a real constitution keeps
    *     its actions;
-   *   · it does not close on a click elsewhere, and it neither writes the
-   *     session's default placement nor persists its own geometry — its
-   *     placement belongs to the chain that opened it, not to the card;
-   *   · closing it closes the cards it opened in turn.
+   *   · it has no frame of its own: no geometry, no drag, no resize, no
+   *     click-away, and it never writes the session's default placement or its
+   *     own persisted arrangement — the panel it sits in owns all of that;
+   *   · it closes with its tab.
    */
   private readonly linked: boolean
-  /** Cards opened FROM this one by wikilink, in open order. Closed with it. */
-  private chain: FiberDetailModal[] = []
-  /** The card this one was opened from, for a linked card — the way back up
-   *  the chain when the whole run has to slide to make room. */
-  private opener: FiberDetailModal | null = null
+  /** The element a linked card renders into — its tab's cell. Null for a card
+   *  opened from the board, which builds its own floating window. */
+  private readonly host: HTMLElement | null
+  /** Ask the panel to close this card's tab (the header ×, for a linked card). */
+  private readonly onCloseRequest: (() => void) | null
+  /**
+   * The one panel this card's followed references open into, created on the
+   * first link followed and dying with its last tab. An origin card owns it; a
+   * linked card is given its owner's, so a reference followed from a TAB lands
+   * as another tab in the same panel rather than starting a second one.
+   */
+  private linkPanel: LinkedFiberPanel | null = null
 
   constructor(
     shuttleBase: string,
     onSaved: () => void,
     onTransition?: (card: KanbanCard, target: ColumnKind) => void,
     onOpenWorker?: (tmuxSessionName: string, shuttleHost?: string) => void,
-    opts?: { linked?: boolean },
+    opts?: {
+      linked?: boolean
+      host?: HTMLElement
+      panel?: LinkedFiberPanel
+      onCloseRequest?: () => void
+    },
   ) {
     this.shuttleBase = shuttleBase
     this.onSaved = onSaved
     this.onTransition = onTransition ?? (() => {})
     this.onOpenWorker = onOpenWorker
-    this.linked = opts?.linked === true
+    this.linked = opts?.linked === true || opts?.host !== undefined
+    this.host = opts?.host ?? null
+    this.linkPanel = opts?.panel ?? null
+    this.onCloseRequest = opts?.onCloseRequest ?? null
   }
 
   /**
    * @param card the card the user clicked
-   * @param at   explicit placement — the chain's, for a linked card; omitted
-   *             for a card opened from the board, which places itself.
    */
-  open(card: KanbanCard, at?: PanelGeometry): void {
+  open(card: KanbanCard): void {
     // Tear down any existing open panel first (rapid re-click).
     this.close()
 
     // ── Panel root ──────────────────────────────────────────────────────────
     // Non-modal floating panel (see class docstring). role="dialog" without
-    // aria-modal: the board behind stays in the a11y tree on purpose.
+    // aria-modal: the board behind stays in the a11y tree on purpose. A HOSTED
+    // card is not a window at all — it fills the tab cell it was given, and the
+    // panel around it owns the frame.
     const overlay = document.createElement('div')
     overlay.className = 'kbn-detail-overlay'
-    if (this.linked) overlay.classList.add('kbn-detail-linked')
-    overlay.setAttribute('role', 'dialog')
+    if (this.host) overlay.classList.add('kbn-detail-tabbed')
+    overlay.setAttribute('role', this.host ? 'tabpanel' : 'dialog')
     overlay.setAttribute('aria-label', `Fiber: ${card.name}`)
-    if (at) {
-      const geom = fitted(at)
-      applyGeometryTo(overlay, geom)
-      this.cardGeom = geom
-    } else {
-      this.applyGeometry(overlay)
-    }
+    if (!this.host) this.applyGeometry(overlay)
 
     // ── Header (drag handle) ────────────────────────────────────────────────
     const header = document.createElement('div')
@@ -552,7 +503,7 @@ export class FiberDetailModal {
     // the viewer geometry for openViewerWindow to restore instead of the
     // half-and-half default.
     this.viewerGeom = persist.viewerGeom ?? null
-    if (persist.cardGeom && !at) {
+    if (persist.cardGeom && !this.host) {
       const geom = fitted(persist.cardGeom)
       applyGeometryTo(overlay, geom)
       this.cardGeom = geom
@@ -584,7 +535,11 @@ export class FiberDetailModal {
     closeBtn.className = 'kbn-detail-close'
     closeBtn.setAttribute('aria-label', 'Close fiber detail')
     closeBtn.textContent = '×'
-    closeBtn.addEventListener('click', () => this.close())
+    // A tabbed card's × closes ITS TAB — the panel takes the card down with it,
+    // so the close travels through the panel rather than around it.
+    closeBtn.addEventListener('click', () =>
+      this.onCloseRequest ? this.onCloseRequest() : this.close(),
+    )
 
     // ID breadcrumb under the title — plain identification text; the title
     // above carries the click-to-vellum affordance.
@@ -597,7 +552,9 @@ export class FiberDetailModal {
     titleStack.append(title, idEl)
     if (aloftPill) header.append(titleStack, aloftPill, pill, closeBtn)
     else header.append(titleStack, pill, closeBtn)
-    this.attachDrag(overlay, header)
+    // The header is a drag handle only for a window. In a tab it is just the
+    // card's title strip — the panel's own bar is what moves.
+    if (!this.host) this.attachDrag(overlay, header)
 
     // ── Controls dropdown ───────────────────────────────────────────────────
     // One cluster, directly under the title, collapsed by default. Expanded
@@ -639,14 +596,20 @@ export class FiberDetailModal {
     // so the card keeps its own size and never grows.
     if (controls) overlay.append(header, controls, launcher, page)
     else overlay.append(header, launcher, page)
-    this.attachResizeHandles(overlay)
-    // Clicking anywhere on the card raises it above the viewer window. Capture
-    // phase so a click on an inner control still bumps z-order first.
-    overlay.addEventListener('pointerdown', () => bringToFront(overlay), true)
-    bringToFront(overlay)
-    document.body.append(overlay)
+    if (this.host) {
+      // A tab's card: no frame of its own, no z-order, no registration — it is
+      // inside the panel's window, which carries all three for it.
+      this.host.append(overlay)
+    } else {
+      this.attachResizeHandles(overlay)
+      // Clicking anywhere on the card raises it above the viewer window. Capture
+      // phase so a click on an inner control still bumps z-order first.
+      overlay.addEventListener('pointerdown', () => bringToFront(overlay), true)
+      bringToFront(overlay)
+      document.body.append(overlay)
+      registerPanel(overlay)
+    }
     this.overlay = overlay
-    registerPanel(overlay)
 
     // Rehydrate the viewer window from persisted state, once the launcher's
     // trail is known. The launcher fetch resolves it async; rehydration that
@@ -655,16 +618,20 @@ export class FiberDetailModal {
 
     // Escape to close the panel. When the parent-fiber dropdown is open and
     // focus is inside it, yield to the dropdown's own keydown listener so it
-    // can close just the dropdown (not the whole panel).
-    this.escapeHandler = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return
-      if (document.activeElement?.closest('.kbn-detail-parent-dropdown')) return
-      // A wikilink chain unwinds one card per press, deepest first — Escape
-      // should retrace the path you walked, not erase it.
-      if (openPanels[openPanels.length - 1] !== overlay) return
-      this.close()
+    // can close just the dropdown (not the whole panel). A tabbed card has no
+    // Escape of its own — the panel closes the tab being read.
+    if (!this.host) {
+      this.escapeHandler = (e: KeyboardEvent) => {
+        if (e.key !== 'Escape') return
+        if (document.activeElement?.closest('.kbn-detail-parent-dropdown')) return
+        // The wikilink panel, opened after the card, takes Escape first — a
+        // reading unwinds one followed reference per press before the card it
+        // was read from closes.
+        if (!isTopPanel(overlay)) return
+        this.close()
+      }
+      document.addEventListener('keydown', this.escapeHandler, true)
     }
-    document.addEventListener('keydown', this.escapeHandler, true)
 
     // Click-away closes the panel. pointerdown (not click) so the gesture
     // that opened the panel — whose pointerdown happened before this
@@ -678,8 +645,8 @@ export class FiberDetailModal {
     if (!this.linked) {
       this.outsideHandler = (e: PointerEvent) => {
         const target = e.target as Node | null
-        // Any card in the wikilink chain counts as inside — clicking the card
-        // next door is navigation within one reading, not leaving it.
+        // The panel holding followed references counts as inside — clicking the
+        // fiber you walked to is navigation within one reading, not leaving it.
         if (inSomeOpenPanel(target)) return
         // The file-viewer window is a sibling floating window, not "outside" the
         // card in the user's mental model — clicking it focuses it (raises it),
@@ -696,7 +663,7 @@ export class FiberDetailModal {
     // pane's scrollport with it, ends up below the screen. Refit both windows
     // in place so the body stays readable to its end.
     this.resizeHandler = () => {
-      if (this.overlay) {
+      if (this.overlay && !this.host) {
         const geom = fitted(readPanelGeometry(this.overlay))
         applyGeometryTo(this.overlay, geom)
         this.cardGeom = geom
@@ -712,10 +679,15 @@ export class FiberDetailModal {
   }
 
   close(): void {
-    // Closing a card closes the cards it opened by wikilink — the chain is one
-    // reading, and leaving its tail floating orphans cards with nothing behind
-    // them. Deepest first, so each unwinds cleanly.
-    for (const linked of this.chain.splice(0).reverse()) linked.close()
+    // An origin card closing takes its followed references with it: the panel
+    // is that card's reading, and leaving it open would strand tabs behind a
+    // card that no longer exists. A TAB'S card owns no panel (it was handed its
+    // owner's), so this only ever fires on the card that made it.
+    if (!this.host) {
+      const panel = this.linkPanel
+      this.linkPanel = null
+      panel?.close()
+    }
     if (this.resizeHandler) {
       window.removeEventListener('resize', this.resizeHandler)
       this.resizeHandler = null
@@ -746,7 +718,7 @@ export class FiberDetailModal {
     // a pair bound to one card. (closeViewerWindow nulls the viewer refs.)
     this.viewerWindow?.remove()
     this.viewerWindow = null
-    if (this.overlay) unregisterPanel(this.overlay)
+    if (this.overlay && !this.host) unregisterPanel(this.overlay)
     this.overlay?.remove()
     this.overlay = null
     // Viewer state is durable (localStorage) — clear only the live DOM refs so
@@ -757,12 +729,6 @@ export class FiberDetailModal {
     this.activePath = null
     this.rightCol = null
     this.tabStrip = null
-    // Last: the card has left the screen, so the chain it belonged to can close
-    // up behind it — and, if it was the last linked card, give the reader back
-    // the card geometry they had before the row opened.
-    const opener = this.opener
-    this.opener = null
-    opener?.dropFromChain(this)
   }
 
   /**
@@ -920,35 +886,67 @@ export class FiberDetailModal {
   }
 
   /**
-   * Open a wikilink's fiber as the next card in the chain.
+   * Follow a reference: the fiber it names opens as a TAB in the one panel
+   * beside the origin card.
    *
-   * The fiber arrives from the single-fiber feed rather than the board's, so
-   * fibers the board never shows — a closed note, a decision, an idea — open
-   * exactly like the ones it does. A fiber the daemon cannot serve opens
-   * nothing at all and says so on the card that asked: better a toast than a
-   * card with no fiber in it.
+   * Every followed link in a reading lands in the same panel — a link clicked
+   * in a tab included, because a linked card is handed its owner's panel rather
+   * than making one. So a reading is two panes however far it is walked: the
+   * card you started from, and the references you followed, tabbed.
    *
-   * Placement: to the RIGHT of this card, same size, so a chain of references
-   * reads left-to-right in the order you followed it. The card panel opens
-   * near-full-width by default, so there is rarely room for a second one at
-   * that size; rather than immediately stacking cards on top of each other,
-   * the whole chain slides LEFT to make what room the screen has, and the new
-   * card takes the strip that opens up. Only once the run is against the left
-   * edge does `fitted` bring the newest card back on screen over its
-   * predecessor — overlapping windows raised by a click, the grammar the file
-   * viewer already uses.
+   * Routing (`linkedTabs.routeWikilink`) settles the two cases that need no
+   * fetch at all: a link back to the origin card raises that card, and a link
+   * to a fiber already open focuses its tab. The panel does the rest.
    */
-  private async openLinkedFiber(fiberId: string): Promise<void> {
-    const opener = this.overlay
-    if (!opener) return
-    // Following the same link twice raises the card it already opened rather
-    // than stacking a duplicate on top of it.
-    const already = this.chain.find((c) => c.card?.id === fiberId)
-    if (already?.overlay) {
-      bringToFront(already.overlay)
-      return
-    }
+  private openLinkedFiber(fiberId: string): void {
+    this.linkPanelForReading()?.open(fiberId)
+  }
 
+  /**
+   * The panel this card's followed references belong in — its owner's if this
+   * card IS a tab, otherwise its own, created on the first link followed.
+   */
+  private linkPanelForReading(): LinkedFiberPanel | null {
+    if (this.linkPanel) return this.linkPanel
+    if (this.host) return null // a tab always receives its owner's panel
+    const overlay = this.overlay
+    if (!overlay) return null
+    const panel: LinkedFiberPanel = new LinkedFiberPanel({
+      originFiberId: () => this.card?.id ?? null,
+      focusOrigin: () => bringToFront(overlay),
+      placeOrigin: (g) => {
+        // The card glides to the left half the way it does when the file viewer
+        // opens — same arrangement, so a reading and a deliverable split the
+        // screen the same way.
+        animatePanelGeometry(overlay, g)
+        lastGeometry = g
+        this.cardGeom = g
+        this.writePersist()
+      },
+      mount: (id, host, requestClose) => this.mountLinkedCard(panel, id, host, requestClose),
+      onClosed: () => {
+        this.linkPanel = null
+      },
+    })
+    this.linkPanel = panel
+    return panel
+  }
+
+  /**
+   * Build one followed fiber's card inside its tab cell.
+   *
+   * The fiber arrives from the SINGLE-fiber feed rather than the board's, so
+   * fibers the board never shows — a closed note, a decision, an idea — open
+   * exactly like the ones it does. A fiber the daemon cannot serve mounts
+   * nothing and says so: the panel withdraws the tab it opened, and better a
+   * toast than a tab with no fiber in it.
+   */
+  private async mountLinkedCard(
+    panel: LinkedFiberPanel,
+    fiberId: string,
+    host: HTMLElement,
+    requestClose: () => void,
+  ): Promise<{ label: string; close: () => void } | null> {
     let card: KanbanCard | null = null
     try {
       const idPath = fiberId.split('/').map(encodeURIComponent).join('/')
@@ -962,108 +960,17 @@ export class FiberDetailModal {
     }
     if (!card) {
       showToast(`Couldn’t open ${fiberId}`, 'error')
-      return
+      return null
     }
-    if (this.overlay !== opener) return
-
-    const root = this.chainRoot()
-    if (root.chain.length === 0 && root.overlay) {
-      // Remember where the card sat before the chain rearranged the screen, so
-      // closing the last linked card gives the reader their card back.
-      root.preChainGeom = readPanelGeometry(root.overlay)
-    }
-    const panel = new FiberDetailModal(
+    const tabbed = new FiberDetailModal(
       this.shuttleBase,
       this.onSaved,
       this.onTransition,
       this.onOpenWorker,
-      { linked: true },
+      { host, panel, onCloseRequest: requestClose },
     )
-    // Opened at the opener's own place, then immediately laid out with the rest
-    // of the chain — so it animates INTO the row rather than appearing beside a
-    // card that then jumps. The chain link is made AFTER the open: `open()`
-    // tears the panel down first, and teardown is what leaves a chain.
-    panel.open(card, readPanelGeometry(opener))
-    panel.opener = this
-    this.chain.push(panel)
-    root.layoutChain()
-  }
-
-  /** The root of the wikilink chain this card belongs to. */
-  private chainRoot(): FiberDetailModal {
-    return this.opener ? this.opener.chainRoot() : this
-  }
-
-  /** Every card in this chain, in the order they were opened — which is the
-   *  order they read in, left to right. */
-  private chainPanels(): FiberDetailModal[] {
-    return [this, ...this.chain.flatMap((c) => c.chainPanels())]
-  }
-
-  /** The root's own geometry from before the chain rearranged the screen. */
-  private preChainGeom: PanelGeometry | null = null
-
-  /**
-   * Lay the chain out as one row of cards across the screen.
-   *
-   * A card panel opens near-full-width, so a second card cannot simply sit
-   * beside it — the row has to make room. It does the way the file viewer
-   * already does when a file opens: the cards glide into an even split. Each
-   * card takes `(screen − gutters) / n`, and while that stays above the panel
-   * minimum the row is a clean set of columns with nothing hidden.
-   *
-   * Past that width the row cannot be a row any more, and rather than pile the
-   * newest card exactly on top of its opener (which reads as nothing having
-   * happened) it FANS: every card holds the minimum width and the step between
-   * them shrinks, so each one still shows its title strip and a click brings it
-   * forward. One formula covers both — the step is `(screen − width)/(n−1)`,
-   * which is exactly `width + gutter` while the split fits.
-   *
-   * Collapsing back to a single card restores the geometry the reader had
-   * before the chain opened.
-   */
-  private layoutChain(): void {
-    const panels = this.chainPanels().filter((p) => p.overlay !== null)
-    if (panels.length === 0) return
-    const root = panels[0]
-    if (!root.overlay) return
-
-    if (panels.length === 1) {
-      if (root.preChainGeom) {
-        animatePanelGeometry(root.overlay, fitted(root.preChainGeom))
-        root.cardGeom = fitted(root.preChainGeom)
-        root.preChainGeom = null
-      }
-      return
-    }
-
-    const base = root.preChainGeom ?? readPanelGeometry(root.overlay)
-    const vw = window.innerWidth
-    const n = panels.length
-    const width = Math.max(
-      MIN_WIDTH,
-      Math.floor((vw - CHAIN_GUTTER * (n - 1)) / n),
-    )
-    const step = (vw - width) / (n - 1)
-    panels.forEach((p, i) => {
-      if (!p.overlay) return
-      const geom = fitted({
-        left: Math.round(i * step),
-        top: base.top,
-        width,
-        height: base.height,
-      })
-      animatePanelGeometry(p.overlay, geom)
-      p.cardGeom = geom
-    })
-  }
-
-  /** A linked card closing leaves the chain — the row closes up behind it. */
-  private dropFromChain(panel: FiberDetailModal): void {
-    const i = this.chain.indexOf(panel)
-    if (i < 0) return
-    this.chain.splice(i, 1)
-    this.chainRoot().layoutChain()
+    tabbed.open(card)
+    return { label: card.name || fiberId, close: () => tabbed.close() }
   }
 
   /**
@@ -1296,10 +1203,14 @@ export class FiberDetailModal {
       this.viewerGeom = fitted(this.viewerGeom)
       applyGeometryTo(win, this.viewerGeom)
     } else {
-      const { card: cardG, viewer: viewerG } = halfAndHalf()
-      animatePanelGeometry(card, cardG)
-      lastGeometry = cardG
-      this.cardGeom = cardG
+      const { card: cardG, other: viewerG } = halfAndHalf()
+      // A TABBED card has no frame to move — it fills its cell inside the
+      // wikilink panel, so only the viewer takes its half.
+      if (!this.host) {
+        animatePanelGeometry(card, cardG)
+        lastGeometry = cardG
+        this.cardGeom = cardG
+      }
       applyGeometryTo(win, viewerG)
       this.viewerGeom = viewerG
     }

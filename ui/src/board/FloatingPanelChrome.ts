@@ -17,6 +17,78 @@ export interface PanelGeometry {
   height: number
 }
 
+/** The smallest a floating panel may be: below this the header stops being
+ *  usable. Shared, because every window in the set is the same frame. */
+export const PANEL_MIN = { width: 380, height: 320 }
+
+export function applyPanelGeometry(el: HTMLElement, g: PanelGeometry): void {
+  el.style.left = `${Math.max(0, g.left)}px`
+  el.style.top = `${Math.max(0, g.top)}px`
+  el.style.width = `${g.width}px`
+  el.style.height = `${g.height}px`
+}
+
+/** A geometry refitted to the window it is about to be applied in. */
+export function fittedGeometry(g: PanelGeometry): PanelGeometry {
+  return fitPanelGeometry(g, { width: window.innerWidth, height: window.innerHeight }, PANEL_MIN)
+}
+
+/**
+ * The half-and-half arrangement: the card takes the left half of the viewport,
+ * the panel beside it the right half, with a shared gutter. Used when a second
+ * window opens — the file viewer, and the panel that holds followed wikilinks.
+ */
+export function halfAndHalf(): { card: PanelGeometry; other: PanelGeometry } {
+  const vw = window.innerWidth
+  const vh = window.innerHeight
+  const gutter = 12
+  const half = Math.floor((vw - 3 * gutter) / 2)
+  const top = gutter
+  const height = vh - 2 * gutter
+  return {
+    card: { left: gutter, top, width: half, height },
+    other: { left: 2 * gutter + half, top, width: half, height },
+  }
+}
+
+/**
+ * The shared z-order stack for every floating window on the board — the card
+ * panel, the file viewer, the wikilink panel. Clicking one raises it above the
+ * others: a `pointerdown` bumps the counter and stamps the window's `z-index`,
+ * so the last-touched window wins. Seeded above the vellum scrim (9999), which
+ * is where the panel's base CSS `z-index` sits.
+ */
+let panelZ = 10000
+export function bringPanelToFront(el: HTMLElement): void {
+  el.style.zIndex = String(++panelZ)
+}
+
+/**
+ * Every floating window currently on screen, in open order.
+ *
+ * Two behaviours need the whole set rather than one window's own element.
+ * Click-away close: a click on the panel next door is not a click "outside the
+ * card", or following a wikilink would close the card you followed it from.
+ * Escape: it acts on the LAST-OPENED window, so a reading unwinds in the order
+ * it was built up rather than vanishing at once.
+ */
+const openPanels: HTMLElement[] = []
+
+export function registerPanel(el: HTMLElement): void {
+  openPanels.push(el)
+}
+export function unregisterPanel(el: HTMLElement): void {
+  const i = openPanels.indexOf(el)
+  if (i >= 0) openPanels.splice(i, 1)
+}
+export function inSomeOpenPanel(node: Node | null): boolean {
+  return node !== null && openPanels.some((p) => p.contains(node))
+}
+/** Is this the newest window on screen — the one Escape should act on? */
+export function isTopPanel(el: HTMLElement): boolean {
+  return openPanels[openPanels.length - 1] === el
+}
+
 /**
  * Clamp a remembered geometry to the viewport it is about to be applied in.
  *

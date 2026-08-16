@@ -906,10 +906,10 @@
 .kbn-detail-prose a:hover { color: var(--porch-cinnabar, #B5453A); }
 
 /* ── [[wikilinks]] ────────────────────────────────────────────────────────
-   A body's reference to another fiber, which opens it as the next card in the
-   chain. Quiet on purpose: a body can be dense with references, and a page of
-   underlined coloured text stops being a page. So it reads as ink — the prose
-   colour, no underline at rest — and admits it is a link only under the
+   A body's reference to another fiber, which opens it as a tab in the panel
+   beside the card. Quiet on purpose: a body can be dense with references, and a
+   page of underlined coloured text stops being a page. So it reads as ink — the
+   prose colour, no underline at rest — and admits it is a link only under the
    cursor, with an iron-gall rule the same weight as a pen stroke. Nothing here
    is web-blue.
 
@@ -936,11 +936,34 @@
   outline: none;
 }
 
-/* A linked card — one opened by following a wikilink — wears a thin verdigris
-   spine on its left edge: the side it was opened FROM, so a chain reads as a
-   run of pages hinged to the one before it. */
-.kbn-detail-overlay.kbn-detail-linked {
-  border-left: 2px solid var(--porch-verdigris, #2f7d6f);
+/* ── The wikilink panel ───────────────────────────────────────────────────
+   Every followed reference lands as a tab in ONE window beside the origin
+   card — the sent-file viewer's frame and tab strip exactly, holding fibers
+   instead of files. What differs is only what a cell contains: a whole fiber
+   card, which brings its own frame chrome, so the card inside is stripped of
+   the window it no longer is. */
+.kbn-detail-overlay.kbn-linkview-window .kbn-detail-view-cell {
+  /* The card inside scrolls its own page pane; a second scrollport around it
+     would give the reader two bars for one column. */
+  overflow: hidden;
+}
+/* A card mounted in a tab: no frame, no shadow, no corner — it IS the cell. */
+.kbn-detail-overlay.kbn-detail-tabbed {
+  position: static;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  background: var(--porch-rag, #FFFDF6);
+  background-image: none;
+  cursor: default;
+}
+.kbn-detail-overlay.kbn-detail-tabbed .kbn-detail-header {
+  /* The header is the card's title strip now, not a drag handle. */
+  cursor: default;
 }
 
 .kbn-detail-prose code.md-inline-code {
