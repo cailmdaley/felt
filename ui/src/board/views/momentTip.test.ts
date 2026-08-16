@@ -468,6 +468,46 @@ describe('the spine and the words say the same thing', () => {
     expect(words.excerpts.map((e) => e.text)).toEqual(['try the other tack'])
   })
 
+  it('PINNED asks every source, not just the hover budget — a pin may not drop a session with nothing on the slip to say so', async () => {
+    // Same shape as the cap test above, but with `full: true`: a busy slot
+    // pooling five sessions is routine on Week (a 4-minute slot), and the
+    // hover's 4-source budget exists to keep a SWEEP cheap. A pin is a
+    // deliberate request to see everything, and the daemon's own caps
+    // (`@full_cap` / `@full_tool_lines_cap` in moment.ex) are the backstop for
+    // that — the client must not cut the source list on top of them, because a
+    // dropped source here has no total to disagree with and the slip would
+    // simply show less than it claims to hold.
+    vi.useFakeTimers()
+    const asked: string[] = []
+    const loader = new MomentLoader(async (session, _fromMs, _toMs, _host, full) => {
+      asked.push(session)
+      expect(full).toBe(true)
+      return { host: 'ada', excerpts: [excerpt({ text: `from ${session}` })] }
+    }, 0)
+
+    let words: MomentWords = { excerpts: [], excerptTotal: 0, toolLines: [], toolTotal: 0 }
+    loader.request(
+      'slot-1',
+      [
+        { session: 'busy-a', host: 'ada', spoke: false },
+        { session: 'busy-b', host: 'ada', spoke: false },
+        { session: 'busy-c', host: 'ada', spoke: false },
+        { session: 'busy-d', host: 'ada', spoke: false },
+        { session: 'busy-e', host: 'ada', spoke: false },
+      ],
+      0,
+      240_000,
+      (w) => {
+        words = w
+      },
+      true,
+    )
+    await vi.advanceTimersByTimeAsync(10)
+
+    expect(asked).toHaveLength(5)
+    expect(words.excerpts).toHaveLength(5)
+  })
+
   it('keeps the human sentence when the window holds more excerpts than the slip', async () => {
     vi.useFakeTimers()
     // Six agent lines land first, the person types at the end of the window.

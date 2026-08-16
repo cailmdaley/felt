@@ -864,12 +864,17 @@ export function placeTip(tip: HTMLElement, box: DOMRect, anchorX: number, topPx:
  *  enough that stopping on a mark feels like the tooltip already knew. */
 const MOMENT_DEBOUNCE_MS = 150
 
-/** At most this many transcripts per hovered mark. A mark almost always has
- *  one session behind it; a busy slot can have several, and asking all of them
- *  would turn one hover into a fan-out.
+/** At most this many transcripts per hovered mark — a HOVER bound only. A mark
+ *  almost always has one session behind it; a busy slot can have several, and
+ *  asking all of them on every sweep would turn one hover into a fan-out.
  *
  *  The cap is a budget, not a priority: which transcripts it spends itself on
- *  is decided by `spoke` — see {@link orderSources}. */
+ *  is decided by `spoke` — see {@link orderSources}. PINNED IS EXEMPT: a pin
+ *  is a deliberate request to see everything, and a slip that silently asked
+ *  only four of a busy slot's sessions would drop the rest with no "showing X
+ *  of Y" to say so — the totals below are summed only over what was asked,
+ *  so a source dropped here is a source the slip never even admits missing.
+ *  See {@link MomentLoader.load}. */
 const MAX_SOURCES = 4
 
 /** The tooltip holds a few lines, not a conversation. */
@@ -1042,9 +1047,15 @@ export class MomentLoader {
     toMs: number,
     full: boolean,
   ): Promise<MomentWords> {
+    // The budget applies to a HOVER's sweep only. A pin is a reader asking to
+    // see everything this slot holds, and the daemon's own caps (`@full_cap`,
+    // `@full_tool_lines_cap` in moment.ex) are the backstop for that — cutting
+    // the source list here as well would drop whole sessions with nothing on
+    // the slip to say so, which is the truncation this module exists to make
+    // impossible.
+    const ordered = orderSources(sources)
     const results = await Promise.all(
-      orderSources(sources)
-        .slice(0, MAX_SOURCES)
+      (full ? ordered : ordered.slice(0, MAX_SOURCES))
         .map((source) => this.fetcher(source.session, fromMs, toMs, source.host, full)),
     )
     const merged = results.flatMap((result) => result.excerpts)
