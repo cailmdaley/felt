@@ -22,6 +22,19 @@ defmodule Shuttle.Application do
 
   use Application
 
+  # Optional children, in start order. Each is gated by an app-config flag that
+  # defaults to on; config/test.exs turns most of them off so the suite drives
+  # them explicitly. Note that :start_waiting_tracker and
+  # :start_remote_temporal_registry have no prod config entry at all — they ride
+  # the inline `true` default. The endpoint is deliberately NOT in this list.
+  @optional_children [
+    {:start_remote_registry, Shuttle.RemoteRegistry},
+    {:start_remote_fiber_registry, Shuttle.RemoteFiberRegistry},
+    {:start_remote_temporal_registry, Shuttle.RemoteTemporalRegistry},
+    {:start_waiting_tracker, Shuttle.WaitingTracker},
+    {:start_poller, Shuttle.Poller}
+  ]
+
   @impl true
   def start(_type, _args) do
     # In escript mode, Mix compile-time config (config/dev.exs) is not loaded
@@ -47,7 +60,6 @@ defmodule Shuttle.Application do
     Application.put_env(:shuttle, :booted_at, DateTime.utc_now())
 
     children = [
-      {Phoenix.PubSub, name: Shuttle.PubSub},
       {Task.Supervisor, name: Shuttle.TaskSupervisor},
       {DynamicSupervisor, strategy: :one_for_one, name: Shuttle.WatcherSupervisor},
       # Owns the ETS table the per-session token folds are cached in. Pure
@@ -55,45 +67,15 @@ defmodule Shuttle.Application do
       Shuttle.TokenSpend
     ]
 
-    children =
-      if Application.get_env(:shuttle, :start_remote_registry, true) do
-        children ++ [Shuttle.RemoteRegistry]
-      else
-        children
-      end
-
-    children =
-      if Application.get_env(:shuttle, :start_remote_fiber_registry, true) do
-        children ++ [Shuttle.RemoteFiberRegistry]
-      else
-        children
-      end
-
-    children =
-      if Application.get_env(:shuttle, :start_remote_temporal_registry, true) do
-        children ++ [Shuttle.RemoteTemporalRegistry]
-      else
-        children
-      end
-
-    children =
-      if Application.get_env(:shuttle, :start_waiting_tracker, true) do
-        children ++ [Shuttle.WaitingTracker]
-      else
-        children
-      end
-
-    children =
-      if Application.get_env(:shuttle, :start_poller, true) do
-        children ++ [Shuttle.Poller]
-      else
-        children
-      end
+    optional =
+      for {flag, mod} <- @optional_children,
+          Application.get_env(:shuttle, flag, true),
+          do: mod
 
     # The endpoint is unconditional and last. The test env keeps it from
     # listening with `server: false` (config/test.exs), not by omitting the
     # child — the Phoenix.ConnTest modules need it in the tree.
-    children = children ++ [ShuttleWeb.Endpoint]
+    children = children ++ optional ++ [ShuttleWeb.Endpoint]
 
     Supervisor.start_link(children, strategy: :one_for_one, name: Shuttle.Supervisor)
   end
@@ -126,7 +108,6 @@ defmodule Shuttle.Application do
       Keyword.merge(existing,
         http: Keyword.merge([ip: {127, 0, 0, 1}], Keyword.put(http, :port, port)),
         adapter: Keyword.get(existing, :adapter, Bandit.PhoenixAdapter),
-        pubsub_server: Shuttle.PubSub,
         url: Keyword.get(existing, :url, host: "localhost"),
         server: Keyword.get(existing, :server, true),
         secret_key_base: secret_key_base(existing)

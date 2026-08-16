@@ -12,6 +12,8 @@ defmodule ShuttleWeb.SentFilesControllerTest do
   /file forward tests.
   """
   use ExUnit.Case
+  alias Shuttle.Test.StubGetFileClient
+  import Shuttle.Test.EnvHelpers
   import Plug.Conn
   import Phoenix.ConnTest
 
@@ -20,24 +22,6 @@ defmodule ShuttleWeb.SentFilesControllerTest do
   @match_ulid "01KTS261GJMMRDRHS2QDMEFV3K"
   @other_ulid "01KTCA2CY6X6P126ZMBK9686SH"
   @session_only_uid "0883ade1-08e0-4457-94c6-7ac12137eb0f"
-
-  # GET transport stub for the cross-host /sent-files forward — records the last
-  # url and replays a scripted `get_file/2`, so the forward leg runs without a
-  # real tunnel. Mirrors the /file controller test's stub.
-  defmodule StubGetFileClient do
-    use Agent
-
-    def start_link(_ \\ []),
-      do: Agent.start_link(fn -> %{response: nil, last: nil} end, name: __MODULE__)
-
-    def set_response(response), do: Agent.update(__MODULE__, &Map.put(&1, :response, response))
-    def last, do: Agent.get(__MODULE__, & &1.last)
-
-    def get_file(url, _timeout_ms) do
-      Agent.update(__MODULE__, &Map.put(&1, :last, %{url: url}))
-      Agent.get(__MODULE__, & &1.response)
-    end
-  end
 
   # A fixture events.jsonl line. Defaults mirror a real SendUserFile pre_tool_use
   # event; pass overrides to drop fields or change the tool/session.
@@ -440,9 +424,6 @@ defmodule ShuttleWeb.SentFilesControllerTest do
       restore_app_env(:write_forward_client, previous_client)
     end)
   end
-
-  defp restore_app_env(key, nil), do: Application.delete_env(:shuttle, key)
-  defp restore_app_env(key, value), do: Application.put_env(:shuttle, key, value)
 
   defp api_conn do
     build_conn()

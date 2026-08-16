@@ -1,5 +1,6 @@
 defmodule ShuttleWeb.ClaimControllerTest do
   use ExUnit.Case
+  import Shuttle.Test.EnvHelpers
   import Phoenix.ConnTest
   import Plug.Conn
 
@@ -84,9 +85,6 @@ defmodule ShuttleWeb.ClaimControllerTest do
     assert forwarded["fiber_id"] == "tests/x"
     assert forwarded["tmux_session"] == "capture-x"
   end
-
-  defp restore_app_env(key, nil), do: Application.delete_env(:shuttle, key)
-  defp restore_app_env(key, value), do: Application.put_env(:shuttle, key, value)
 
   defp api_conn do
     build_conn() |> put_req_header("content-type", "application/json")

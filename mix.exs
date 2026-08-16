@@ -7,10 +7,17 @@ defmodule Shuttle.MixProject do
       version: "0.1.0",
       elixir: "~> 1.19",
       start_permanent: Mix.env() == :prod,
+      elixirc_paths: elixirc_paths(Mix.env()),
       escript: escript(),
       deps: deps()
     ]
   end
+
+  # test/support holds helpers shared across test files (stubs, env
+  # save/restore). Compiled only under MIX_ENV=test, so nothing there can
+  # reach the escript.
+  defp elixirc_paths(:test), do: ["lib", "test/support"]
+  defp elixirc_paths(_), do: ["lib"]
 
   def application do
     [

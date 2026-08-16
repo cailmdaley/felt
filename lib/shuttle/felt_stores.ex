@@ -12,8 +12,14 @@ defmodule Shuttle.FeltStores do
   explicitly. Saving an empty list deletes the registry file.
   """
 
-  @config_env "FELT_STORES_FILE"
-  @default_config_path "~/.config/felt/stores.json"
+  alias Shuttle.PathListConfig
+
+  @spec_ %{
+    env: "FELT_STORES",
+    config_env: "FELT_STORES_FILE",
+    default_path: "~/.config/felt/stores.json",
+    json_key: "felt_stores"
+  }
 
   @type host_list :: [String.t()]
 
@@ -67,7 +73,8 @@ defmodule Shuttle.FeltStores do
   `~/loom/.felt/science/group/project -> .../code/project/.felt` — is
   physically rooted *outside* the store it is linked into. The poller enumerates
   a fiber only from the store where its felt `path` physically roots
-  (`run_shuttle_listing/2`'s `store_felt_realpath` prefix check), so the loom
+  (the poller's `run_shuttle_listing/2` builds its prefix from
+  `store_felt_realpath/1` below), so the loom
   store correctly drops those fibers — and they vanish from the kanban unless the
   project root is *also* a configured store. Following the symlink here makes
   configuring just `~/loom` sufficient: the project root is auto-discovered, no
@@ -102,6 +109,25 @@ defmodule Shuttle.FeltStores do
     # preserved); `uniq_by` then keeps the real-directory store per realpath.
     |> Enum.sort_by(&felt_symlink?/1)
     |> Enum.uniq_by(&store_felt_realpath/1)
+  end
+
+  @doc """
+  Realpath of `<host>/.felt`, resolving symlinks along the path so the ownership
+  prefix matches felt's symlink-resolved `path`. See `Shuttle.Realpath`.
+
+  This is the prefix both ownership checks build on — this module's
+  `host_for_fiber/2` and the poller's `run_shuttle_listing/2` — so they must
+  canonicalize identically or a store enumerates fibers the other drops.
+  Falls back to the expanded path when resolution fails.
+  """
+  @spec store_felt_realpath(String.t()) :: String.t()
+  def store_felt_realpath(host) do
+    felt_dir = host |> Path.join(".felt") |> Path.expand()
+
+    case Shuttle.Realpath.resolve(felt_dir) do
+      {:ok, resolved} -> resolved
+      {:error, _} -> felt_dir
+    end
   end
 
   # True when `<store>/.felt` is itself a symlink rather than a real directory.
@@ -342,15 +368,6 @@ defmodule Shuttle.FeltStores do
     end
   end
 
-  defp store_felt_realpath(host) do
-    felt_dir = host |> Path.join(".felt") |> Path.expand()
-
-    case Shuttle.Realpath.resolve(felt_dir) do
-      {:ok, resolved} -> resolved
-      {:error, _} -> felt_dir
-    end
-  end
-
   defp felt_show_json(host, identifier) do
     # Never fold stderr into stdout: felt prints "no felt found matching …" to
     # stderr and JSON to stdout. A miss exits non-zero with empty stdout.
@@ -396,77 +413,17 @@ defmodule Shuttle.FeltStores do
   defp ulid_or_nil(_), do: nil
 
   @spec registered_hosts() :: host_list()
-  def registered_hosts do
-    path = config_path()
-
-    with true <- File.exists?(path),
-         {:ok, content} <- File.read(path),
-         {:ok, decoded} <- Jason.decode(content) do
-      case decoded do
-        %{"felt_stores" => hosts} when is_list(hosts) -> normalize(hosts)
-        hosts when is_list(hosts) -> normalize(hosts)
-        _ -> []
-      end
-    else
-      _ -> []
-    end
-  end
+  def registered_hosts, do: PathListConfig.registered(@spec_)
 
   @spec save(host_list()) :: {:ok, host_list()} | {:error, term()}
-  def save(hosts) when is_list(hosts) do
-    normalized = normalize(hosts)
-    path = config_path()
-
-    try do
-      case normalized do
-        [] ->
-          case File.rm(path) do
-            :ok -> {:ok, normalized}
-            {:error, :enoent} -> {:ok, normalized}
-            {:error, reason} -> {:error, {:file_error, reason}}
-          end
-
-        _ ->
-          File.mkdir_p!(Path.dirname(path))
-          tmp = path <> ".tmp"
-          payload = Jason.encode!(%{version: 1, felt_stores: normalized}, pretty: true) <> "\n"
-          File.write!(tmp, payload)
-          File.rename!(tmp, path)
-          {:ok, normalized}
-      end
-    rescue
-      error -> {:error, error}
-    end
-  end
+  def save(hosts) when is_list(hosts), do: PathListConfig.save(@spec_, hosts)
 
   @spec config_path() :: String.t()
-  def config_path do
-    case System.get_env(@config_env) do
-      v when is_binary(v) and v != "" -> Path.expand(v)
-      _ -> Path.expand(@default_config_path)
-    end
-  end
+  def config_path, do: PathListConfig.config_path(@spec_)
 
   @spec env_hosts() :: host_list()
-  def env_hosts do
-    case System.get_env("FELT_STORES") do
-      v when is_binary(v) and v != "" ->
-        v
-        |> String.split(",")
-        |> normalize()
-
-      _ ->
-        []
-    end
-  end
+  def env_hosts, do: PathListConfig.from_env(@spec_)
 
   @spec normalize(list()) :: host_list()
-  def normalize(hosts) do
-    hosts
-    |> Enum.filter(&is_binary/1)
-    |> Enum.map(&String.trim/1)
-    |> Enum.reject(&(&1 == ""))
-    |> Enum.map(&Path.expand/1)
-    |> Enum.uniq()
-  end
+  def normalize(hosts), do: PathListConfig.normalize(hosts)
 end

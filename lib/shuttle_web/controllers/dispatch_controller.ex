@@ -2,15 +2,14 @@ defmodule ShuttleWeb.DispatchController do
   @moduledoc """
   Agent-API endpoint: POST /api/v1/dispatch
 
-  Dispatches a worker. Two callers:
+  The single force/ad-hoc dispatch surface: the kanban's drag-to-inFlight
+  launch, the detail modal's requeue / "New session", and `felt shuttle
+  dispatch` (cmd/shuttle_daemon_verbs.go) all land here.
 
-    * the `confer` pattern — Worker A asks Shuttle to dispatch Worker B and
-      subscribes to `shuttle:worker:<fiber_id>` for exit notification. No
-      `origin`, so it always runs locally (the channel is on this daemon).
-    * the kanban's requeue verb — re-dispatch a remote-owned card. It carries
-      the `origin` the composite board stamped, so `Shuttle.OriginRouter`
-      forwards to the owning daemon's identical `/dispatch` (origin stripped),
-      where the worker must run, and relays the response verbatim.
+    * a request carrying `origin` — a remote-owned card — is forwarded by
+      `Shuttle.OriginRouter` to the owning daemon's identical `/dispatch`
+      (origin stripped), where the worker must run, and the response is relayed
+      verbatim.
 
   STORE 3 — the kanban requeue carries the user's directive (`user_message`) and
   continuation mode (`resume_mode ∈ {"previous", "fresh"}` or absent) inline in
@@ -41,7 +40,6 @@ defmodule ShuttleWeb.DispatchController do
 
   defp create_local(conn, params) do
     fiber_id = Map.get(params, "fiber_id")
-    notify_on_exit = Map.get(params, "notify_on_exit", false)
     force = truthy?(Map.get(params, "force", false))
     ad_hoc = truthy?(Map.get(params, "ad_hoc", false))
 
@@ -51,7 +49,6 @@ defmodule ShuttleWeb.DispatchController do
       |> json(%{error: "fiber_id is required"})
     else
       case Shuttle.Poller.dispatch_fiber(fiber_id,
-             notify_on_exit: notify_on_exit,
              force: force or ad_hoc,
              ad_hoc: ad_hoc,
              # STORE 3: the directive + continuation mode ride the dispatch.
@@ -67,9 +64,7 @@ defmodule ShuttleWeb.DispatchController do
           json(conn, %{
             dispatched: true,
             fiber_id: fiber_id,
-            tmux_session: session,
-            notify_on_exit: notify_on_exit,
-            channel_topic: "shuttle:worker:#{fiber_id}"
+            tmux_session: session
           })
 
         {:error, :already_running} ->
@@ -91,18 +86,6 @@ defmodule ShuttleWeb.DispatchController do
               ineligible_detail(detail)
             )
           )
-
-        {:error, {:awaiting_review, completed_at}} ->
-          conn
-          |> put_status(422)
-          |> json(%{
-            dispatched: false,
-            reason: "awaiting_review",
-            fiber_id: fiber_id,
-            completed_at: completed_at,
-            message:
-              "This role is awaiting review#{review_detail(completed_at)}. Accept first with `felt shuttle accept #{fiber_id}`, or use `felt shuttle resume #{fiber_id}` to continue the same run."
-          })
 
         {:error, reopen} when reopen in [:reopen_unavailable, :reopen_failed] ->
           conn
@@ -227,9 +210,4 @@ defmodule ShuttleWeb.DispatchController do
 
   defp describe_host(value) when is_binary(value) and value != "", do: value
   defp describe_host(_), do: "(unset)"
-
-  defp review_detail(completed_at) when is_binary(completed_at) and completed_at != "",
-    do: " (completed #{completed_at})"
-
-  defp review_detail(_), do: ""
 end

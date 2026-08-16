@@ -47,7 +47,6 @@ defmodule Shuttle.RemoteRegistry do
   alias Shuttle.RegistryCommon
   alias Shuttle.Runner
 
-  @pubsub_topic "shuttle:remotes"
   @default_failure_threshold 3
   @default_trip_threshold 3
   @default_bounce_wait_ms 5_000
@@ -333,7 +332,6 @@ defmodule Shuttle.RemoteRegistry do
   def handle_info({:tick, _token}, state) do
     state = poll_all(state)
     state = RegistryCommon.schedule_tick(state, state.tick_interval_ms)
-    broadcast(state)
     {:noreply, state}
   end
 
@@ -954,18 +952,6 @@ defmodule Shuttle.RemoteRegistry do
       last_action: recovery.last_action,
       next_retry_at: recovery.next_retry_at
     }
-  end
-
-  defp broadcast(%State{} = state) do
-    if Process.whereis(Shuttle.PubSub) do
-      Phoenix.PubSub.broadcast(
-        Shuttle.PubSub,
-        @pubsub_topic,
-        {:remote_snapshots, build_snapshots_view(state)}
-      )
-    end
-
-    :ok
   end
 
   # ── Config normalization ──

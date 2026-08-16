@@ -1,5 +1,6 @@
 defmodule ShuttleWeb.CaptureControllerTest do
   use ExUnit.Case
+  import Shuttle.Test.EnvHelpers
   import Phoenix.ConnTest
   import Plug.Conn
 
@@ -96,9 +97,6 @@ defmodule ShuttleWeb.CaptureControllerTest do
     assert forwarded["prompt"] == "an idea"
     assert forwarded["project_dir"] == "/candide/project"
   end
-
-  defp restore_app_env(key, nil), do: Application.delete_env(:shuttle, key)
-  defp restore_app_env(key, value), do: Application.put_env(:shuttle, key, value)
 
   defp api_conn do
     build_conn() |> put_req_header("content-type", "application/json")

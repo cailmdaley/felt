@@ -25,7 +25,7 @@ defmodule ShuttleWeb.CommitsController do
   use Phoenix.Controller, formats: [:json]
 
   import ShuttleWeb.RelayHelpers,
-    only: [integer_param: 3, json_with_validator: 3, file_token: 1]
+    only: [integer_param: 3, json_with_validator: 3, file_token: 1, bad_param: 2]
 
   alias Shuttle.{CommitLedger, Poller}
   alias ShuttleWeb.TemporalComposite, as: Composite
@@ -70,7 +70,7 @@ defmodule ShuttleWeb.CommitsController do
          |> Enum.map(&Composite.stamp(&1, own))) ++
           Enum.flat_map(entries, fn {name, entry} ->
             entry.commits
-            |> Composite.in_window(:at, since_ms, until_ms || max_ms())
+            |> Composite.in_window(:at, since_ms, until_ms)
             |> Enum.map(&Composite.stamp(&1, name))
           end)
 
@@ -82,13 +82,5 @@ defmodule ShuttleWeb.CommitsController do
     else
       {:error, {:bad_param, key}} -> bad_param(conn, key)
     end
-  end
-
-  # `in_window/4` is inclusive on both sides and an absent `until_ms` is
-  # open-ended, so the upper bound becomes "any time a record could carry".
-  defp max_ms, do: 253_402_300_799_000
-
-  defp bad_param(conn, key) do
-    conn |> put_status(400) |> json(%{error: "#{key} must be an integer (epoch ms)"})
   end
 end

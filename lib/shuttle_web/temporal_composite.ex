@@ -83,14 +83,21 @@ defmodule ShuttleWeb.TemporalComposite do
   end
 
   @doc """
-  Keep the items whose `key` timestamp falls in the inclusive window. Items with
-  no readable timestamp are kept.
+  Keep the items whose `key` timestamp falls in the window.
+
+  The window is inclusive on both sides, and a `nil` upper bound is
+  open-ended — the same encoding `Shuttle.CommitLedger.parse_line/3` uses for
+  the local half of the same request, so a controller that has no upper bound
+  passes `nil` rather than a far-future sentinel.
+
+  An item with no readable timestamp is kept: the feed cannot say when it
+  happened, and dropping it would silently lose the record.
   """
   def in_window(items, key, from_ms, to_ms) do
     Enum.filter(items, fn item ->
       case item_ms(item, key) do
         nil -> true
-        ms -> ms >= from_ms and ms <= to_ms
+        ms -> ms >= from_ms and (is_nil(to_ms) or ms <= to_ms)
       end
     end)
   end

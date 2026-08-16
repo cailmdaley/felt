@@ -1,5 +1,7 @@
 defmodule ShuttleWeb.FiberDocumentsControllerTest do
   use ExUnit.Case
+  alias Shuttle.Test.StubGetFileClient
+  import Shuttle.Test.EnvHelpers
   import Phoenix.ConnTest
   import Plug.Conn
 
@@ -19,24 +21,6 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
 
     @impl true
     def get(url, _timeout_ms), do: Agent.get(__MODULE__, &Map.get(&1, url, {:error, :not_set}))
-  end
-
-  # GET transport stub for the owner-routed `show` forward (forward_get →
-  # get_file). Records the URL it was asked to fetch and replays a scripted
-  # response, so the cross-host body read runs without a real tunnel.
-  defmodule StubGetFileClient do
-    use Agent
-
-    def start_link(_ \\ []),
-      do: Agent.start_link(fn -> %{response: nil, last: nil} end, name: __MODULE__)
-
-    def set_response(response), do: Agent.update(__MODULE__, &Map.put(&1, :response, response))
-    def last, do: Agent.get(__MODULE__, & &1.last)
-
-    def get_file(url, _timeout_ms) do
-      Agent.update(__MODULE__, &Map.put(&1, :last, %{url: url}))
-      Agent.get(__MODULE__, & &1.response)
-    end
   end
 
   setup do
@@ -1221,9 +1205,6 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
     end)
   end
 
-  defp restore_app_env(key, nil), do: Application.delete_env(:shuttle, key)
-  defp restore_app_env(key, value), do: Application.put_env(:shuttle, key, value)
-
   # Start a Poller under its default name (so the controller's calls reach it),
   # or reuse a running one — returning the original state to restore on exit.
   defp start_or_reuse_poller(store) do
@@ -1338,7 +1319,4 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
     |> put_req_header("content-type", "application/json")
     |> put_req_header("accept", "application/json")
   end
-
-  defp restore_env(key, nil), do: System.delete_env(key)
-  defp restore_env(key, value), do: System.put_env(key, value)
 end

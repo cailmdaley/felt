@@ -159,6 +159,20 @@ defmodule ShuttleWeb.RelayHelpers do
   def epoch_ms_message(key), do: "#{key} is required and must be an integer (epoch ms)"
 
   @doc """
+  The 400 sentence for an OPTIONAL epoch-millisecond bound — no "is required".
+
+  Kept next to `epoch_ms_message/1` so the one word between them is visible at
+  the definition site: `/activity`'s bounds must be present, while the temporal
+  feeds' `since_ms`/`until_ms` default to an open window and only have to parse.
+  """
+  def optional_epoch_ms_message(key), do: "#{key} must be an integer (epoch ms)"
+
+  @doc "Render `{:bad_param, key}` from `integer_param/3` as a 400."
+  def bad_param(conn, key) do
+    conn |> Plug.Conn.put_status(400) |> Phoenix.Controller.json(%{error: optional_epoch_ms_message(key)})
+  end
+
+  @doc """
   Serve a JSON body behind a **weak validator**, so a hub polling this endpoint
   over an SSH tunnel pays a header exchange instead of a full transfer whenever
   nothing has changed.

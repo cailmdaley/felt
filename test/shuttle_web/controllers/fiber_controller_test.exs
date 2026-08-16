@@ -1,5 +1,6 @@
 defmodule ShuttleWeb.FiberControllerTest do
   use ExUnit.Case
+  import Shuttle.Test.EnvHelpers
   import Phoenix.ConnTest
   import Plug.Conn
 
@@ -320,10 +321,4 @@ defmodule ShuttleWeb.FiberControllerTest do
     # The carried path resolves back to the expected store-relative location.
     assert File.exists?(Path.join([root, ".felt"] ++ segments))
   end
-
-  defp restore_env(key, nil), do: System.delete_env(key)
-  defp restore_env(key, value), do: System.put_env(key, value)
-
-  defp restore_app_env(key, nil), do: Application.delete_env(:shuttle, key)
-  defp restore_app_env(key, value), do: Application.put_env(:shuttle, key, value)
 end

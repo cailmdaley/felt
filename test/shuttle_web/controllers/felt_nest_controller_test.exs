@@ -1,5 +1,6 @@
 defmodule ShuttleWeb.FeltNestControllerTest do
   use ExUnit.Case
+  import Shuttle.Test.EnvHelpers
   import Plug.Conn
   import Phoenix.ConnTest
 
@@ -98,9 +99,6 @@ defmodule ShuttleWeb.FeltNestControllerTest do
     assert forwarded["parent"] == "tests/parent"
   end
 
-  defp restore_app_env(key, nil), do: Application.delete_env(:shuttle, key)
-  defp restore_app_env(key, value), do: Application.put_env(:shuttle, key, value)
-
   defp api_conn do
     build_conn()
     |> put_req_header("content-type", "application/json")
@@ -165,7 +163,4 @@ defmodule ShuttleWeb.FeltNestControllerTest do
 
     {store, args_file}
   end
-
-  defp restore_env(key, nil), do: System.delete_env(key)
-  defp restore_env(key, value), do: System.put_env(key, value)
 end

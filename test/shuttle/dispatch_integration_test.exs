@@ -30,6 +30,8 @@ defmodule Shuttle.DispatchIntegrationTest do
   # Named Agent so it can be injected as a module reference into Dispatcher.
 
   defmodule IntegrationRunner do
+    import Shuttle.Test.TmuxSessions
+
     @behaviour Shuttle.Runner
 
     use Agent
@@ -97,12 +99,6 @@ defmodule Shuttle.DispatchIntegrationTest do
     def cmd(cmd, args, _opts) do
       Agent.update(__MODULE__, fn s -> %{s | commands: s.commands ++ [{cmd, args}]} end)
       {"", 0}
-    end
-
-    defp tmux_session_exists?(sessions, "=" <> session), do: MapSet.member?(sessions, session)
-
-    defp tmux_session_exists?(sessions, session) do
-      Enum.any?(sessions, &(&1 == session or String.starts_with?(&1, session <> "/")))
     end
   end
 

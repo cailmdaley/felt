@@ -39,12 +39,11 @@ defmodule Shuttle.Continuation do
   `set-agent`'s `agent` field, never a runtime key) — so the dual-read was a
   pure ambiguity surface: a STALE flat key left over from before the cutover
   could shadow a since-written-but-since-cleared nested one, or simply mask
-  the fact that a fiber was never lifted. `Shuttle.Poller`'s boot-time scan
-  (`scan_flat_runtime_fibers_once/2`) logs any fiber still carrying ONLY flat
-  keys with no nested counterpart; such a fiber now reads as having no
-  continuation state (the existing safe-default: absent `dispatched_at` treats
-  as fresh) rather than silently resurrecting a possibly-stale flat value.
-  `felt shuttle migrate-runtime <fiber>` lifts it into the nested form.
+  the fact that a fiber was never lifted. A fiber carrying only flat keys
+  reads as having no continuation state (the existing safe-default: absent
+  `dispatched_at` treats as fresh) rather than silently resurrecting a
+  possibly-stale flat value; `felt shuttle migrate-runtime <fiber>` lifts it
+  into the nested form.
 
   ## Continuation decision
 
@@ -114,34 +113,6 @@ defmodule Shuttle.Continuation do
       uuid when is_binary(uuid) and uuid != "" -> uuid
       _ -> nil
     end
-  end
-
-  @runtime_keys ~w(dispatched_at session_uuid handed_off_at run_id)
-
-  @doc """
-  Boot-scan primitive: legacy flat runtime keys present on `fiber`'s
-  `shuttle:` block whose nested `shuttle.runtime.<key>` counterpart is
-  ABSENT — a fiber never lifted by `felt shuttle migrate-runtime`, which now
-  reads as having no continuation state at all (the readers above no longer
-  fall back to flat). Returns `[]` when there is nothing to flag (already
-  nested, or never had runtime state).
-  """
-  @spec flat_only_runtime_keys(map()) :: [String.t()]
-  def flat_only_runtime_keys(fiber) do
-    shuttle = shuttle_block(fiber)
-
-    runtime =
-      case Map.get(shuttle, "runtime") do
-        m when is_map(m) -> m
-        _ -> %{}
-      end
-
-    Enum.filter(@runtime_keys, fn key ->
-      case Map.get(shuttle, key) do
-        v when is_binary(v) and v != "" -> not Map.has_key?(runtime, key)
-        _ -> false
-      end
-    end)
   end
 
   @doc """

@@ -29,7 +29,6 @@ defmodule Shuttle.Poller do
   require Logger
 
   alias Shuttle.{
-    Continuation,
     Dispatcher,
     LifecycleStore,
     StandingRole,
@@ -291,16 +290,7 @@ defmodule Shuttle.Poller do
       # listing that omits a fiber is deletion evidence). Safe because these
       # rows only nominate candidates — `Dispatcher.dispatch` re-fetches the
       # fiber and re-verifies status before any launch.
-      last_known_listings: %{},
-      # Has the one-shot flat-runtime-key boot scan run yet? Flips true
-      # after the FIRST `apply_poll_cycle/2` (the earliest point candidates —
-      # already-fetched, no extra felt shell-out — are available). Logs any
-      # fiber still carrying ONLY legacy flat `shuttle.<key>` runtime fields
-      # (no nested `shuttle.runtime.<key>` counterpart) — exactly the fibers
-      # `Shuttle.Continuation`'s reader no longer falls back to now that the
-      # nested-OR-flat shim is gone, so they'd silently read as having no
-      # continuation state. `felt shuttle migrate-runtime` lifts them.
-      flat_runtime_scan_done: false
+      last_known_listings: %{}
     ]
   end
 
@@ -339,24 +329,10 @@ defmodule Shuttle.Poller do
   end
 
   @doc """
-  Returns the serve-time runtime overlay for live workers.
-
-  This is the document-feed liveness projection without the document feed: a
-  controller that has just read fresh felt rows can stamp the same `runtime`
-  payloads the poller-owned cache would have carried, even when that cache is
-  cold or intentionally bypassed.
-  """
-  @spec runtime_index(GenServer.server()) :: map()
-  def runtime_index(server \\ __MODULE__) do
-    GenServer.call(server, :runtime_index, @orchestrator_state_call_timeout_ms)
-  catch
-    :exit, _ -> %{}
-  end
-
-  @doc """
   Returns the serve-time held overlay for boot-quarantine-parked launches.
 
-  The parked-launch analog of `runtime_index/1`: keyed by fiber_id/uid so the
+  The parked-launch analog of the runtime overlay (`Snapshot.runtime_index/2`,
+  applied by `stamp_runtime/2`): keyed by fiber_id/uid so the
   owning host's per-fiber feed can stamp a `held` marker onto a card WITHOUT any
   board-side lookup of the daemon-global `pending_launch`. A parked (fresh,
   awaiting-release) launch reads as `held` on its card; released or reclassified
@@ -534,8 +510,12 @@ defmodule Shuttle.Poller do
   `fiber_id`, or `{:error, :not_found}` if the fiber isn't in any host.
 
   The result is cached in the Poller's state for the daemon's lifetime.
-  Used by `GET /api/v1/fiber/:id/host` so external callers can route their
-  felt operations to the right index without re-implementing host resolution.
+
+  NOT production API: internal callers resolve through `host_for_fiber/2`
+  (or `FeltStores.host_for_fiber/2` / `RelayHelpers.host_for_fiber/1`) directly.
+  This pair is the test seam `poller_test.exs` uses to exercise the private
+  `host_for_fiber/2` fallback resolver, which needs poller state. It once
+  served `GET /api/v1/fiber/host`; that route is gone.
   """
   @spec resolve_fiber_host(String.t()) :: {:ok, String.t()} | {:error, :not_found | :timeout}
   def resolve_fiber_host(fiber_id), do: resolve_fiber_host(__MODULE__, fiber_id)
@@ -750,10 +730,6 @@ defmodule Shuttle.Poller do
     {:reply, Snapshot.build_snapshot(state), state}
   end
 
-  def handle_call(:runtime_index, _from, state) do
-    {:reply, Snapshot.runtime_index(state.running, session_activity()), state}
-  end
-
   def handle_call(:parked_index, _from, state) do
     {:reply, Snapshot.parked_index(state.parked_launches), state}
   end
@@ -911,9 +887,6 @@ defmodule Shuttle.Poller do
         case fetch_fiber_full(fiber_id, state) do
           {:ok, fiber} ->
             cond do
-              error = awaiting_ad_hoc_dispatch_error(fiber, state, opts) ->
-                {:reply, error, state}
-
               dispatch_eligible?(fiber, state, opts) ->
                 {new_state, result} = do_dispatch_fiber(state, fiber, opts)
                 {:reply, result, new_state}
@@ -1220,7 +1193,6 @@ defmodule Shuttle.Poller do
     refreshed_at =
       if listings_ok?, do: DateTime.utc_now(), else: state.document_cache_refreshed_at
 
-    state = scan_flat_runtime_fibers_once(state, candidates)
     state = reconcile(%{state | felt_stores: felt_stores})
 
     standing_roles = StandingRoles.standing_roles_from_candidates(candidates, state)
@@ -1637,7 +1609,7 @@ defmodule Shuttle.Poller do
     case run_felt_ls_for_shuttle(host, state) do
       {:ok, output} ->
         with {:ok, fibers} when is_list(fibers) <- Jason.decode(output) do
-          owned_prefix = store_felt_realpath(host) <> "/"
+          owned_prefix = Shuttle.FeltStores.store_felt_realpath(host) <> "/"
 
           # Per-row isolation: felt itself skips-and-warns unparseable fibers
           # (warning on stderr, valid JSON of the rest on stdout, exit 0), so a
@@ -1731,17 +1703,6 @@ defmodule Shuttle.Poller do
         )
 
         run_felt(host, state.runner, ["ls", "--json"])
-    end
-  end
-
-  # Realpath of `<host>/.felt`, resolving symlinks along the path so the
-  # ownership prefix matches felt's symlink-resolved `path`. See Shuttle.Realpath.
-  defp store_felt_realpath(host) do
-    felt_dir = host |> Path.join(".felt") |> Path.expand()
-
-    case Shuttle.Realpath.resolve(felt_dir) do
-      {:ok, resolved} -> resolved
-      {:error, _} -> felt_dir
     end
   end
 
@@ -1941,7 +1902,7 @@ defmodule Shuttle.Poller do
 
   # Eligibility for an explicit dispatch call (POST /api/v1/dispatch).
   #
-  # Three modes, in priority order:
+  # Two modes, in priority order:
   #
   #   1. `force: true` — manual human-triggered dispatch from the kanban
   #      "New session" / "Resume" buttons. Bypasses every condition except
@@ -1953,23 +1914,18 @@ defmodule Shuttle.Poller do
   #      are all overridden. Closed, composted, disabled, not-yet-due, and
   #      unvalidated fibers all dispatch on force.
   #
-  #   2. `ad_hoc: true` (without `force`) — legacy manual trigger for
-  #      standing roles that bypasses the schedule but still requires the
-  #      role to be otherwise dispatchable (enabled, active, valid, in a
-  #      scheduleable review state). Kept for callers that still rely on it.
-  #
-  #   3. Default — full `eligible?` check (status, enabled, schedule,
+  #   2. Default — full `eligible?` check (status, enabled, schedule,
   #      review state, deps, validity).
+  #
+  # There is no third `ad_hoc`-without-`force` mode: every caller that sets
+  # `ad_hoc` also sets `force` (the controller folds `force: force or ad_hoc`,
+  # `Shuttle.Transition` passes both), and the autonomous tick reaches
+  # `do_dispatch_fiber/2` directly without ever entering this call.
   defp dispatch_eligible?(fiber, state, opts) do
-    cond do
-      Keyword.get(opts, :force, false) ->
-        force_dispatch_eligible?(fiber, state)
-
-      Keyword.get(opts, :ad_hoc, false) and force_dispatchable_standing_role?(fiber, state) ->
-        dependencies_satisfied?(fiber, state)
-
-      true ->
-        eligible?(fiber, state)
+    if Keyword.get(opts, :force, false) do
+      force_dispatch_eligible?(fiber, state)
+    else
+      eligible?(fiber, state)
     end
   end
 
@@ -2025,56 +1981,6 @@ defmodule Shuttle.Poller do
 
       true ->
         {:not_eligible, :not_due_or_blocked}
-    end
-  end
-
-  # Ad-hoc dispatch (`ad_hoc: true`, no `force`) bypasses the cron schedule but
-  # still requires the role to be otherwise dispatchable. The gate is the felt
-  # document: an armed standing role is `status:
-  # active` (a closed/awaiting role is NOT ad-hoc dispatchable — its run is
-  # pending a verdict).
-  defp force_dispatchable_standing_role?(fiber, state) do
-    status = Map.get(fiber, "status", "")
-    fiber_id = Map.get(fiber, "id", "")
-    shuttle = Map.get(fiber, "shuttle")
-
-    with true <- is_map(shuttle),
-         true <- host_owned?(shuttle, state.own_host_id),
-         true <- status == "active",
-         {:ok, role} <- StandingRoles.fetch_standing_role(fiber_id, state),
-         true <- StandingRole.standing?(role),
-         true <- StandingRole.valid?(role) do
-      true
-    else
-      _ -> false
-    end
-  end
-
-  # Awaiting review is felt-native: `status: closed` + untempered. A
-  # NON-forced ad-hoc dispatch against a standing role in that state is refused
-  # with the awaiting marker so the caller surfaces "pending a verdict" rather
-  # than a flat not-eligible.
-  #
-  # `force: true` is the explicit human "go" from the board (New session /
-  # Resume / drag-to-inFlight) — it IS the verdict, so it skips this gate and
-  # `do_dispatch_fiber` re-arms the role to `status: active` as it spawns (see
-  # `force_rearm_standing_role`). The gate therefore only catches the autonomous
-  # poller's own ad-hoc path, which must never re-fire a role pending review.
-  defp awaiting_ad_hoc_dispatch_error(fiber, state, opts) do
-    if Keyword.get(opts, :ad_hoc, false) and not Keyword.get(opts, :force, false) do
-      fiber_id = Map.get(fiber, "id", "")
-      status = Map.get(fiber, "status", "")
-      tempered = Map.get(fiber, "tempered")
-
-      with true <- status == "closed" and is_nil(tempered),
-           {:ok, role} <- StandingRoles.fetch_standing_role(fiber_id, state),
-           true <- StandingRole.standing?(role) do
-        {:error, {:awaiting_review, Map.get(fiber, "closed-at")}}
-      else
-        _ -> false
-      end
-    else
-      false
     end
   end
 
@@ -2717,35 +2623,6 @@ defmodule Shuttle.Poller do
       end
 
     %{state | dispatch_failures: Map.put(state.dispatch_failures, runtime_key, entry)}
-  end
-
-  # One-shot, first-poll-cycle scan for fibers still carrying ONLY legacy
-  # flat runtime keys (no nested shuttle.runtime.<key> counterpart) — the
-  # exact fibers `Shuttle.Continuation`'s reader stopped falling back to when
-  # the nested-OR-flat shim was deleted. Rides the already-fetched `candidates`
-  # list (no extra felt shell-out) so it costs nothing beyond one Enum.each.
-  # Loud, not silent: a straggler now silently reads as "no continuation
-  # state" (safe-default fresh, per Continuation's moduledoc) rather than
-  # erroring, so without this log an un-migrated fiber's degraded resume
-  # behavior would go unnoticed. `felt shuttle migrate-runtime <fiber>` lifts
-  # it. Runs once per daemon lifetime — the situation doesn't change poll to
-  # poll unless an operator lifts fibers, which is worth a fresh boot to
-  # re-confirm, not a per-cycle re-scan.
-  defp scan_flat_runtime_fibers_once(%State{flat_runtime_scan_done: true} = state, _candidates),
-    do: state
-
-  defp scan_flat_runtime_fibers_once(%State{} = state, candidates) do
-    for fiber <- candidates,
-        flat_keys = Continuation.flat_only_runtime_keys(fiber),
-        flat_keys != [] do
-      Logger.warning(
-        "#{fiber_address(fiber)} carries ONLY legacy flat runtime key(s) #{inspect(flat_keys)} " <>
-          "with no nested shuttle.runtime counterpart — it will read as having no continuation " <>
-          "state (safe-default fresh) until lifted. Run: felt shuttle migrate-runtime #{fiber_address(fiber)}"
-      )
-    end
-
-    %{state | flat_runtime_scan_done: true}
   end
 
   # ── Reconciliation ──

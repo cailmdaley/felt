@@ -4,6 +4,7 @@ defmodule ShuttleWeb.APIControllerTest do
   """
 
   use ExUnit.Case
+  import Shuttle.Test.EnvHelpers
   import Plug.Conn
   import Phoenix.ConnTest
 
@@ -11,284 +12,7 @@ defmodule ShuttleWeb.APIControllerTest do
 
   alias Shuttle.Poller
   alias Shuttle.Dispatcher
-
-  # ── Mock Runner ──
-
-  defmodule MockRunner do
-    @behaviour Shuttle.Runner
-
-    use Agent
-
-    def start_link(_ \\ []) do
-      # Each MockRunner gets its own throwaway store root under a unique temp
-      # dir rather than the shared global `/tmp/.felt` — on a shared box, a
-      # concurrent user's `/tmp/.felt` (or its own leftover state) must never
-      # be read from or `rm -rf`'d by this suite.
-      root =
-        Path.join(System.tmp_dir!(), "shuttle-api-mock-#{System.unique_integer([:positive])}")
-
-      File.mkdir_p!(Path.join(root, ".felt"))
-
-      Agent.start_link(
-        fn ->
-          %{
-            felt_root: root,
-            commands: [],
-            tmux_sessions: MapSet.new(),
-            fibers: %{},
-            shuttle: %{},
-            felt_ls: [],
-            new_session_delay_ms: 0
-          }
-        end,
-        name: __MODULE__
-      )
-    end
-
-    # The store root (the directory containing `.felt/`) this run's MockRunner
-    # writes fiber files under — pass this to `felt_stores:` / `FELT_STORES`
-    # instead of the old hardcoded `/tmp`.
-    def felt_root, do: Agent.get(__MODULE__, & &1.felt_root)
-
-    # `<felt_root>/.felt` — replaces the old hardcoded `/tmp/.felt`.
-    def felt_dir, do: Path.join(felt_root(), ".felt")
-
-    def reset do
-      # Remove any fiber files written by set_shuttle so tests start clean.
-      File.rm_rf(felt_dir())
-      File.mkdir_p!(felt_dir())
-
-      Agent.update(__MODULE__, fn state ->
-        %{
-          felt_root: state.felt_root,
-          commands: [],
-          tmux_sessions: MapSet.new(),
-          fibers: %{},
-          shuttle: %{},
-          felt_ls: [],
-          new_session_delay_ms: 0
-        }
-      end)
-    end
-
-    # Carry a felt-style absolute `path` so the poller's store-ownership check
-    # (which reads felt's `path`) sees the fiber as rooted in `/tmp`. Mirrors
-    # real felt, which now emits `path` on every listed/shown fiber.
-    def set_fiber(id, fiber) do
-      # Computed OUTSIDE the Agent.update closure: felt_dir/0 itself calls
-      # back into this same Agent, and a GenServer can't call itself from
-      # inside its own callback (deadlocks as "process attempted to call
-      # itself"). Only used as a fallback, so the eager call is harmless when
-      # an existing/explicit path already wins below.
-      fallback_path = synth_path(felt_dir(), id)
-
-      Agent.update(__MODULE__, fn state ->
-        existing_path = get_in(state.fibers, [id, "path"])
-        path = Map.get(fiber, "path") || existing_path || fallback_path
-        put_in(state.fibers[id], Map.put(fiber, "path", path))
-      end)
-    end
-
-    defp synth_path(dir, id) do
-      leaf = id |> String.split("/") |> List.last()
-      # Resolve with the SAME resolver the poller uses for store ownership, so
-      # the carried path agrees on every OS (macOS /tmp → /private/tmp; Linux
-      # /tmp stays /tmp). A hardcoded rewrite passed only on macOS.
-      path = Path.expand(Path.join([dir, id, "#{leaf}.md"]))
-
-      case Shuttle.Realpath.resolve(path) do
-        {:ok, resolved} -> resolved
-        {:error, _} -> path
-      end
-    end
-
-    # Write a real .md file carrying the given shuttle: block and felt status so
-    # that walk_shuttle_fibers (the file-walk discovery path) can find it.
-    def set_shuttle(id, yaml, status \\ "active") do
-      # Post-cutover every installed block carries an explicit host: equal to
-      # the owning daemon's own_host_id (strict eligibility, no nil-wildcard).
-      # Stamp the test daemon's identity ("test-host", from SHUTTLE_HOST in
-      # config/test.exs) when the YAML omits host:, so generic dispatch tests
-      # stay eligible. Host-specific tests pass an explicit host: line.
-      yaml =
-        if Regex.match?(~r/^\s*host\s*:/m, yaml),
-          do: yaml,
-          else: String.trim_trailing(yaml) <> "\nhost: test-host\n"
-
-      dir = felt_dir()
-      segments = String.split(id, "/")
-      basename = List.last(segments)
-      dir_path = Path.join([dir | segments] ++ ["#{basename}.md"])
-      File.mkdir_p!(Path.dirname(dir_path))
-      indented = yaml |> String.trim() |> String.split("\n") |> Enum.map_join("\n", &("  " <> &1))
-      File.write!(dir_path, "---\nstatus: #{status}\nshuttle:\n#{indented}\n---\nbody\n")
-
-      shuttle_block =
-        case YamlElixir.read_from_string(yaml) do
-          {:ok, data} when is_map(data) -> data
-          _ -> %{}
-        end
-
-      carried_path = synth_path(dir, id)
-
-      Agent.update(__MODULE__, fn state ->
-        fiber =
-          state.fibers
-          |> Map.get(id, %{
-            "id" => id,
-            "name" => id,
-            "created_at" => "2026-04-28T00:00:00Z",
-            "tags" => ["constitution"]
-          })
-          |> Map.put("status", status)
-          |> Map.put("shuttle", shuttle_block)
-          |> Map.put("path", carried_path)
-
-        state
-        |> put_in([:shuttle, id], yaml)
-        |> put_in([:fibers, id], fiber)
-      end)
-    end
-
-    # Kept for backward compat; discovery now walks files for shuttle: blocks.
-    def set_felt_ls(fibers), do: Agent.update(__MODULE__, &%{&1 | felt_ls: fibers})
-
-    def add_tmux_session(session),
-      do: Agent.update(__MODULE__, &%{&1 | tmux_sessions: MapSet.put(&1.tmux_sessions, session)})
-
-    def remove_tmux_session(session),
-      do:
-        Agent.update(__MODULE__, &%{&1 | tmux_sessions: MapSet.delete(&1.tmux_sessions, session)})
-
-    def set_new_session_delay(ms),
-      do: Agent.update(__MODULE__, &Map.put(&1, :new_session_delay_ms, ms))
-
-    def commands, do: Agent.get(__MODULE__, & &1.commands)
-
-    @impl true
-    def cmd(command, args, _opts) do
-      Agent.update(__MODULE__, fn state ->
-        %{state | commands: state.commands ++ [{command, args}]}
-      end)
-
-      full_args = Enum.join(args, " ")
-
-      cond do
-        # S2 boot-time contract handshake (`Shuttle.Poller.init/1`). Always
-        # matches — these tests don't exercise S2, they exercise the API
-        # surface with a Poller that must actually dispatch.
-        command == "felt" and match?(["shuttle", "contract"], args) ->
-          {"2", 0}
-
-        command == "felt" and String.contains?(full_args, "ls") ->
-          show_all =
-            case Enum.find_index(args, &(&1 in ["-s", "--status"])) do
-              nil -> false
-              idx -> Enum.at(args, idx + 1) == "all"
-            end
-
-          fibers =
-            Agent.get(__MODULE__, fn state ->
-              entries = if state.felt_ls == [], do: Map.values(state.fibers), else: state.felt_ls
-
-              if show_all do
-                entries
-              else
-                Enum.filter(entries, fn fiber ->
-                  Map.get(fiber, "status") in ["open", "active"]
-                end)
-              end
-            end)
-
-          {Jason.encode!(Enum.map(fibers, &with_resolved_agent/1)), 0}
-
-        command == "felt" and String.contains?(full_args, "show") and
-            String.contains?(full_args, "--field shuttle") ->
-          fiber_id = extract_fiber_id(args)
-          shuttle = Agent.get(__MODULE__, & &1.shuttle)
-          {Map.get(shuttle, fiber_id, ""), 0}
-
-        command == "felt" and String.contains?(full_args, "show") ->
-          fiber_id = extract_fiber_id(args)
-          fibers = Agent.get(__MODULE__, & &1.fibers)
-
-          case Map.get(fibers, fiber_id) do
-            nil -> {"fiber not found", 1}
-            fiber -> {Jason.encode!(with_resolved_agent(fiber)), 0}
-          end
-
-        command == "tmux" and hd(args) == "has-session" ->
-          session = Enum.at(args, 2)
-          sessions = Agent.get(__MODULE__, & &1.tmux_sessions)
-
-          if tmux_session_exists?(sessions, session) do
-            {"", 0}
-          else
-            {"can't find session", 1}
-          end
-
-        command == "tmux" and hd(args) == "new-session" ->
-          session = Enum.at(args, 3)
-          add_tmux_session(session)
-          delay_ms = Agent.get(__MODULE__, &Map.get(&1, :new_session_delay_ms, 0))
-          if delay_ms > 0, do: Process.sleep(delay_ms)
-          {"", 0}
-
-        command == "tmux" and hd(args) == "kill-session" ->
-          session = Enum.at(args, 2)
-          remove_tmux_session(session)
-          {"", 0}
-
-        command == "tmux" and hd(args) == "ls" ->
-          sessions = Agent.get(__MODULE__, & &1.tmux_sessions)
-          output = sessions |> MapSet.to_list() |> Enum.join("\n")
-          {output, 0}
-
-        true ->
-          {"", 0}
-      end
-    end
-
-    defp extract_fiber_id(args) do
-      args
-      |> Enum.reject(&(&1 in ["show", "--json", "--field", "shuttle"]))
-      |> List.first("")
-    end
-
-    # Real felt inlines a resolved `shuttle.resolved.agent` on every fiber with a
-    # shuttle facet (felt show -j); the daemon reads that record and no longer
-    # resolves names itself, so the mock synthesizes it from the block's `agent`
-    # name (default claude-sonnet). Only the rendering keys matter here.
-    @resolved_agents %{
-      "claude-sonnet" => %{
-        "id" => "claude-sonnet",
-        "cli" => "claude",
-        "wrapper" => "claude",
-        "model" => "sonnet"
-      },
-      "claude-opus" => %{
-        "id" => "claude-opus",
-        "cli" => "claude",
-        "wrapper" => "claude",
-        "model" => "opus"
-      }
-    }
-
-    defp with_resolved_agent(%{"shuttle" => shuttle} = fiber) when is_map(shuttle) do
-      name = Map.get(shuttle, "agent") || "claude-sonnet"
-      record = Map.get(@resolved_agents, name, @resolved_agents["claude-sonnet"])
-      resolved = Map.merge(Map.get(shuttle, "resolved") || %{}, %{"agent" => record})
-      %{fiber | "shuttle" => Map.put(shuttle, "resolved", resolved)}
-    end
-
-    defp with_resolved_agent(fiber), do: fiber
-
-    defp tmux_session_exists?(sessions, "=" <> session), do: MapSet.member?(sessions, session)
-
-    defp tmux_session_exists?(sessions, session) do
-      Enum.any?(sessions, &(&1 == session or String.starts_with?(&1, session <> "/")))
-    end
-  end
+  alias Shuttle.Test.FeltStoreRunner, as: MockRunner
 
   # POST transport stub for the cross-host /transition forward test. Records the
   # last (url, body) it was asked to POST and replays a scripted response, so the
@@ -382,51 +106,6 @@ defmodule ShuttleWeb.APIControllerTest do
     end)
   end
 
-  defp restore_app_env(key, nil), do: Application.delete_env(:shuttle, key)
-  defp restore_app_env(key, value), do: Application.put_env(:shuttle, key, value)
-
-  # Re-trigger the poll until a condition holds. A bare `send(Shuttle.Poller,
-  # :run_poll_cycle)` is DROPPED when a poll is already in flight (the
-  # `poll_check_in_progress` guard), and a fixed Process.sleep after it raced the
-  # async poll cycle — so a state-reading assertion that depended on the poll
-  # having dispatched flaked under load. Re-sending each iteration (~3s ceiling)
-  # guarantees a poll lands and the state settles; returns the instant it does.
-  defp poll_until(fun, attempts \\ 120) do
-    cond do
-      fun.() ->
-        true
-
-      attempts <= 0 ->
-        flunk("poll_until: condition never held")
-
-      true ->
-        send(Shuttle.Poller, :run_poll_cycle)
-        Process.sleep(25)
-        poll_until(fun, attempts - 1)
-    end
-  end
-
-  # ── GET /api/v1/workers/:fiber_id ──
-
-  test "returns running worker info" do
-    fiber = make_fiber("tests/haiku")
-    MockRunner.set_fiber("tests/haiku", fiber)
-    MockRunner.set_shuttle("tests/haiku", @oneshot_shuttle)
-
-    assert poll_until(fn ->
-             Jason.decode!(get(api_conn(), "/api/v1/workers/tests/haiku").resp_body)["running"] ==
-               true
-           end)
-
-    conn = get(api_conn(), "/api/v1/workers/tests/haiku")
-    assert conn.status == 200
-    body = Jason.decode!(conn.resp_body)
-    assert body["running"] == true
-    assert body["fiber_id"] == "tests/haiku"
-    assert body["agent"] == "claude-sonnet"
-    assert body["runtime_seconds"] >= 0
-  end
-
   test "GET /api/v1/agents degrades to []/200 when felt's agents verb is unavailable" do
     # The registry is felt-owned now: the controller shells `felt shuttle agents
     # --json` through Shuttle.Felt.run. Route that shell-out at MockRunner (the
@@ -445,14 +124,6 @@ defmodule ShuttleWeb.APIControllerTest do
     assert Jason.decode!(conn.resp_body) == []
   end
 
-  test "returns not running for idle fiber" do
-    conn = get(api_conn(), "/api/v1/workers/tests/idle")
-    assert conn.status == 200
-    body = Jason.decode!(conn.resp_body)
-    assert body["running"] == false
-    assert body["fiber_id"] == "tests/idle"
-  end
-
   # ── POST /api/v1/dispatch ──
 
   test "dispatches a fiber via API" do
@@ -464,10 +135,7 @@ defmodule ShuttleWeb.APIControllerTest do
       post(
         api_conn(),
         "/api/v1/dispatch",
-        Jason.encode!(%{
-          "fiber_id" => "tests/api-dispatch",
-          "notify_on_exit" => true
-        })
+        Jason.encode!(%{"fiber_id" => "tests/api-dispatch"})
       )
 
     assert conn.status == 200
@@ -475,8 +143,6 @@ defmodule ShuttleWeb.APIControllerTest do
     assert body["dispatched"] == true
     assert body["fiber_id"] == "tests/api-dispatch"
     assert body["tmux_session"] == Dispatcher.session_name("tests/api-dispatch")
-    assert body["notify_on_exit"] == true
-    assert body["channel_topic"] == "shuttle:worker:tests/api-dispatch"
   end
 
   test "dispatch returns 409 for already running fiber" do
@@ -588,10 +254,7 @@ defmodule ShuttleWeb.APIControllerTest do
     # /dispatch path folds ad_hoc into force (`force: force or ad_hoc`), so an
     # explicit dispatch IS the human verdict: it bypasses the awaiting gate,
     # re-arms the doc, and spawns — instead of the old 422 that told the user to
-    # `felt shuttle accept/resume` first. (The autonomous poller, which calls
-    # dispatch_fiber in-process with ad_hoc and NOT force, is still gated — see
-    # PollerTest "ad-hoc dispatch refuses an awaiting standing role only when NOT
-    # forced".)
+    # `felt shuttle accept/resume` first.
     fiber_id = "tests/api-awaiting-refuses-adhoc"
 
     fiber =

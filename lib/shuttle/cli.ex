@@ -24,7 +24,10 @@ defmodule Shuttle.CLI do
   `start` performs the same HTTP check first and refuses to start a second daemon
   unless `--force` is passed. This prevents the duplicate-daemon footgun where
   `bin/shuttle start &` from a terminal that later closes leaves a launchd-orphan
-  competing with the dev.sh-managed daemon.
+  competing with the dev.sh-managed daemon. There is no `stop` subcommand: an
+  unsupervised daemon is stopped with `make stop`, and a supervised one is cycled
+  through its supervisor (`launchctl kickstart -k`, `systemctl --user restart`),
+  which would win against anything this escript killed anyway.
   """
 
   alias Shuttle.Dispatcher
@@ -69,8 +72,10 @@ defmodule Shuttle.CLI do
 
             IO.puts(
               :stderr,
-              "Daemon already running at localhost:#{port}. " <>
-                "Use `bin/shuttle stop` first, or pass --force to launch anyway."
+              "Daemon already running at localhost:#{port}. Stop it with `make stop` — " <>
+                "or, if a keep-alive supervisor owns it, `launchctl kickstart -k " <>
+                "gui/$UID/io.shuttle.daemon` (macOS) / `systemctl --user restart " <>
+                "shuttle-daemon.service` (Linux). Pass --force to launch anyway."
             )
 
             System.halt(1)

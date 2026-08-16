@@ -14,7 +14,6 @@ defmodule ShuttleWeb.Router do
   scope "/api/v1", ShuttleWeb do
     pipe_through(:api)
 
-    get("/workers/*fiber_id", WorkerController, :show)
     post("/dispatch", DispatchController, :create)
     # Write-and-claim: register an externally-spawned live tmux session as a
     # fiber's running worker (capture sessions claim themselves here).
@@ -47,7 +46,6 @@ defmodule ShuttleWeb.Router do
     get("/agents", AgentsController, :show)
     get("/version", VersionController, :show)
     post("/fiber/create", FiberController, :create)
-    get("/fiber/host", FiberHostController, :show)
     # Bake an astra.yaml to MyST mdast (owner-routed): the ASTRA paper render's
     # backend. Shells out to priv/mystra/bake.mjs on the owning host. JSON-native,
     # so it lives in the :api pipeline (unlike /file, which serves raw bytes).

@@ -22,7 +22,7 @@ defmodule ShuttleWeb.SentFilesController do
 
   use Phoenix.Controller, formats: [:json]
   import ShuttleWeb.RelayHelpers,
-    only: [relay_bytes: 2, integer_param: 3, json_with_validator: 3, file_token: 1]
+    only: [relay_bytes: 2, integer_param: 3, json_with_validator: 3, file_token: 1, bad_param: 2]
 
   alias Shuttle.{OriginRouter, Poller, SentFiles, WaitingTracker}
   alias ShuttleWeb.TemporalComposite, as: Composite
@@ -85,7 +85,7 @@ defmodule ShuttleWeb.SentFilesController do
          |> Enum.map(&Composite.stamp(&1, own))) ++
           Enum.flat_map(entries, fn {name, entry} ->
             entry.sent_files
-            |> Composite.in_window(:timestamp, since_ms, max_ms())
+            |> Composite.in_window(:timestamp, since_ms, nil)
             |> Enum.map(&Composite.stamp(&1, name))
           end)
 
@@ -97,13 +97,5 @@ defmodule ShuttleWeb.SentFilesController do
     else
       {:error, {:bad_param, key}} -> bad_param(conn, key)
     end
-  end
-
-  # `in_window/4` is inclusive on both sides and this endpoint has no upper
-  # bound param, so it becomes "any time an entry could carry".
-  defp max_ms, do: 253_402_300_799_000
-
-  defp bad_param(conn, key) do
-    conn |> put_status(400) |> json(%{error: "#{key} must be an integer (epoch ms)"})
   end
 end

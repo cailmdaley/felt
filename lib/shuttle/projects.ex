@@ -25,8 +25,14 @@ defmodule Shuttle.Projects do
   `/api/v1/felt-stores` (`origins.<host>.projects`).
   """
 
-  @config_env "FELT_PROJECTS_FILE"
-  @default_config_path "~/.config/felt/projects.json"
+  alias Shuttle.PathListConfig
+
+  @spec_ %{
+    env: "FELT_PROJECTS",
+    config_env: "FELT_PROJECTS_FILE",
+    default_path: "~/.config/felt/projects.json",
+    json_key: "projects"
+  }
 
   @type project_list :: [String.t()]
 
@@ -37,84 +43,29 @@ defmodule Shuttle.Projects do
   `~/.config/felt/projects.json`. Empty everywhere → `[]`.
   """
   @spec configured_projects() :: project_list()
-  def configured_projects do
-    case env_projects() do
-      [_ | _] = projects -> projects
-      [] -> registered_projects()
-    end
-  end
+  def configured_projects, do: PathListConfig.configured(@spec_)
 
   @spec registered_projects() :: project_list()
-  def registered_projects do
-    path = config_path()
-
-    with true <- File.exists?(path),
-         {:ok, content} <- File.read(path),
-         {:ok, decoded} <- Jason.decode(content) do
-      case decoded do
-        %{"projects" => projects} when is_list(projects) -> normalize(projects)
-        projects when is_list(projects) -> normalize(projects)
-        _ -> []
-      end
-    else
-      _ -> []
-    end
-  end
+  def registered_projects, do: PathListConfig.registered(@spec_)
 
   @doc """
   Persist the curated project list, atomically. An empty list deletes the file.
   Returns `{:ok, normalized}` or `{:error, reason}`.
+
+  No production caller today — the file is hand-edited per host, and the only
+  write endpoint (`POST /api/v1/felt-stores`) writes stores, not projects. Kept
+  as the round-trip companion to the reader, and pinned by `projects_test.exs`
+  as this module's conformance check on the shared contract.
   """
   @spec save(project_list()) :: {:ok, project_list()} | {:error, term()}
-  def save(projects) when is_list(projects) do
-    normalized = normalize(projects)
-    path = config_path()
-
-    try do
-      case normalized do
-        [] ->
-          case File.rm(path) do
-            :ok -> {:ok, normalized}
-            {:error, :enoent} -> {:ok, normalized}
-            {:error, reason} -> {:error, {:file_error, reason}}
-          end
-
-        _ ->
-          File.mkdir_p!(Path.dirname(path))
-          tmp = path <> ".tmp"
-          payload = Jason.encode!(%{version: 1, projects: normalized}, pretty: true) <> "\n"
-          File.write!(tmp, payload)
-          File.rename!(tmp, path)
-          {:ok, normalized}
-      end
-    rescue
-      error -> {:error, error}
-    end
-  end
+  def save(projects) when is_list(projects), do: PathListConfig.save(@spec_, projects)
 
   @spec config_path() :: String.t()
-  def config_path do
-    case System.get_env(@config_env) do
-      v when is_binary(v) and v != "" -> Path.expand(v)
-      _ -> Path.expand(@default_config_path)
-    end
-  end
+  def config_path, do: PathListConfig.config_path(@spec_)
 
   @spec env_projects() :: project_list()
-  def env_projects do
-    case System.get_env("FELT_PROJECTS") do
-      v when is_binary(v) and v != "" -> v |> String.split(",") |> normalize()
-      _ -> []
-    end
-  end
+  def env_projects, do: PathListConfig.from_env(@spec_)
 
   @spec normalize(list()) :: project_list()
-  def normalize(projects) do
-    projects
-    |> Enum.filter(&is_binary/1)
-    |> Enum.map(&String.trim/1)
-    |> Enum.reject(&(&1 == ""))
-    |> Enum.map(&Path.expand/1)
-    |> Enum.uniq()
-  end
+  def normalize(projects), do: PathListConfig.normalize(projects)
 end

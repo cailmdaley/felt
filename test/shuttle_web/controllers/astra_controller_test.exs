@@ -8,6 +8,8 @@ defmodule ShuttleWeb.AstraControllerTest do
   built MySTRA + the iris example checkout + `node` are present (skipped in CI).
   """
   use ExUnit.Case
+  alias Shuttle.Test.StubGetFileClient
+  import Shuttle.Test.EnvHelpers
   import Plug.Conn
   import Phoenix.ConnTest
 
@@ -17,21 +19,6 @@ defmodule ShuttleWeb.AstraControllerTest do
   @iris_dir Path.expand(
               Path.join([__DIR__, "..", "..", "..", "..", "LightconeResearch", "ASTRA", "examples", "iris"])
             )
-
-  defmodule StubGetFileClient do
-    use Agent
-
-    def start_link(_ \\ []),
-      do: Agent.start_link(fn -> %{response: nil, last: nil} end, name: __MODULE__)
-
-    def set_response(response), do: Agent.update(__MODULE__, &Map.put(&1, :response, response))
-    def last, do: Agent.get(__MODULE__, & &1.last)
-
-    def get_file(url, _timeout_ms) do
-      Agent.update(__MODULE__, &Map.put(&1, :last, %{url: url}))
-      Agent.get(__MODULE__, & &1.response)
-    end
-  end
 
   describe "local validation" do
     test "400 when path is missing" do
@@ -124,9 +111,6 @@ defmodule ShuttleWeb.AstraControllerTest do
       restore_app_env(:write_forward_client, previous_client)
     end)
   end
-
-  defp restore_app_env(key, nil), do: Application.delete_env(:shuttle, key)
-  defp restore_app_env(key, value), do: Application.put_env(:shuttle, key, value)
 
   defp tmp_dir,
     do: Path.join(System.tmp_dir!(), "shuttle_astra_ctrl_#{System.unique_integer([:positive])}")

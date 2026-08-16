@@ -96,6 +96,35 @@ defmodule ShuttleWeb.TemporalCompositeTest do
     %{dir: dir, events: events, sessions: sessions}
   end
 
+  describe "in_window/4 — the window semantics every composite filters remotes by" do
+    alias ShuttleWeb.TemporalComposite, as: Composite
+
+    test "a nil upper bound is open-ended, matching CommitLedger's local half" do
+      items = [%{at: @t0}, %{at: @t0 + @day}, %{at: @t0 - 1}]
+
+      assert Composite.in_window(items, :at, @t0, nil) == [%{at: @t0}, %{at: @t0 + @day}]
+    end
+
+    test "both bounds are inclusive" do
+      items = [%{at: @t0}, %{at: @t0 + @minute}, %{at: @t0 + 2 * @minute}]
+
+      assert Composite.in_window(items, :at, @t0, @t0 + 2 * @minute) == items
+      assert Composite.in_window(items, :at, @t0 + @minute, @t0 + @minute) ==
+               [%{at: @t0 + @minute}]
+    end
+
+    test "an item with no readable timestamp is kept, not silently dropped" do
+      items = [%{at: @t0 - @day}, %{other: "no stamp"}, %{at: nil}]
+
+      assert Composite.in_window(items, :at, @t0, @t0 + @day) == [%{other: "no stamp"}, %{at: nil}]
+    end
+
+    test "string keys read the same as atom keys" do
+      assert Composite.in_window([%{"at" => @t0 - @day}], :at, @t0, nil) == []
+      assert Composite.in_window([%{"at" => @t0}], :at, @t0, nil) == [%{"at" => @t0}]
+    end
+  end
+
   describe "GET /api/v1/activity/composite" do
     test "merges local and remote buckets, each stamped with its host" do
       with_data_files(
