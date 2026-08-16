@@ -96,20 +96,20 @@ type eventHookInput struct {
 // by cmd/testdata/events_golden.jsonl, which the Elixir readers parse in
 // test/shuttle/events_parity_test.exs — change either side and that test fails.
 type eventLine struct {
-	ID          string          `json:"id"`
-	Timestamp   int64           `json:"timestamp"`
-	Type        string          `json:"type"`
-	SessionID   string          `json:"sessionId"`
-	CWD         string          `json:"cwd"`
-	TmuxSession string          `json:"tmuxSession"`
-	Harness     string          `json:"harness"`
-	OriginName  string          `json:"originName"`
+	ID          string `json:"id"`
+	Timestamp   int64  `json:"timestamp"`
+	Type        string `json:"type"`
+	SessionID   string `json:"sessionId"`
+	CWD         string `json:"cwd"`
+	TmuxSession string `json:"tmuxSession"`
+	Harness     string `json:"harness"`
+	OriginName  string `json:"originName"`
 	// Machine marks a prompt the harness injected rather than one a person
 	// typed — see machinePrompt. Omitted when false, so an ordinary event's
 	// line is byte-identical to what it has always been.
-	Machine     bool            `json:"machine,omitempty"`
-	Tool        string          `json:"tool,omitempty"`
-	ToolInput   json.RawMessage `json:"toolInput,omitempty"`
+	Machine   bool            `json:"machine,omitempty"`
+	Tool      string          `json:"tool,omitempty"`
+	ToolInput json.RawMessage `json:"toolInput,omitempty"`
 }
 
 // machinePromptPrefixes are the wrappers the harness puts around a prompt it
