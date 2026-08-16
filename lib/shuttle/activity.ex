@@ -141,7 +141,7 @@ defmodule Shuttle.Activity do
   one interval per **delegation**: a `pre_tool_use` on `Agent` / `Task` /
   `Workflow` opens it, the matching `post_tool_use` closes it. These do not
   touch the buckets at all — they travel beside them as `spawns`, each
-  `%{s:, cwd:, tool:, start_ms:, end_ms:, open:}`, carrying the same
+  `%{s:, cwd:, tool:, start_ms:, end_ms:, open:, label:, agents:}`, carrying the same
   `{tmuxSession, cwd}` identity a bucket does so a view joins them through the
   same ledger.
 
@@ -163,6 +163,64 @@ defmodule Shuttle.Activity do
   collect.
 
   Intervals are clipped to the window and only those overlapping it are served.
+
+  ## Workflows: the one delegation whose events lie about it
+
+  A `Workflow` call fans out tens or hundreds of agents, and **none of them
+  emit a hook event**. The tool returns to its caller within seconds of launch,
+  so the stream records a pre/post pair a heartbeat apart — a stub — while the
+  fleet works for an hour under a rail that shows nothing. Of the three spawn
+  tools this is the only one whose own events are actively misleading: an
+  `Agent` that returns no `post` is drawn short because nobody said otherwise,
+  but a `Workflow` is drawn short because its `post` *said so*, and the `post`
+  was about the launch, not the work.
+
+  Two things are recovered, from two places:
+
+    * **The name**, from the event itself. A workflow's `toolInput.script`
+      opens `export const meta = {\\n  name: '<name>', …`, so the name is a
+      regex away — the one fact about the workflow that the caller knew and
+      wrote down. It becomes the interval's `label`.
+    * **The extent and the size**, from disk. The claude-code harness keeps a
+      directory per workflow under
+      `~/.claude/projects/<munged-cwd>/<sessionId>/subagents/workflows/wf_*`,
+      holding one `agent-*.meta.json` per agent it spawned and one
+      `agent-*.jsonl` transcript each. Counting the metas gives `agents`;
+      the newest transcript mtime gives the moment the fleet last did
+      anything, which is the interval's real end.
+
+  ### Which `wf_*` directory belongs to which spawn
+
+  A session can launch several workflows, so the directories must be matched to
+  the spawns rather than assumed. The rule is **nearest launch, within two
+  minutes**:
+
+  a directory's launch instant is the *earliest* `agent-*.meta.json` mtime (the
+  first agent it spawned), and a directory is claimed by the spawn whose
+  `start_ms` it sits closest to, at most two minutes away, each directory
+  claimed at most once. Measured on this host's stream, the gap between a
+  `Workflow` pre_tool_use and its first meta file is ~3 seconds across every
+  workflow on record; two minutes is slack against a slow launch, not a guess.
+
+  Order alone would be simpler — the k-th spawn takes the k-th directory — but
+  it breaks the moment a window clips the session's first workflow out, which
+  is the ordinary case for any window narrower than a session. Proximity does
+  not care what the window contains.
+
+  A matched interval is redrawn as a **closed** one at its true extent, unless
+  the fleet moved within the last three minutes, in which case it is still
+  aloft and stays open. Both are honest in a way the stub never was.
+
+  ### Enrichment is strictly additive
+
+  Remote hosts, other harnesses, and a cleaned `~/.claude` all resolve no
+  directory, and every failure — missing dir, unreadable dir, no meta files,
+  a stat that races a delete — falls back to exactly the interval the events
+  alone described. The reads are one `File.ls` plus one `stat` per file in the
+  matched directories, done once per `{sessionId, cwd}` group per request; the
+  new `label` and `agents` keys are added to the wire shape and nothing is
+  renamed, so a client that has never heard of workflows reads what it always
+  read.
 
   ## Which files, and why the rotated one is conditional
 
@@ -227,6 +285,21 @@ defmodule Shuttle.Activity do
   @open_spawn_minutes 5
   @open_spawn_ms @open_spawn_minutes * @minute_ms
 
+  # The workflow name, out of the script the caller handed the tool. Anchored on
+  # the `export const meta = {` header rather than hunting a bare `name:`, which
+  # any phase or agent definition deeper in the script also carries.
+  @workflow_name_re ~r/export const meta\s*=\s*\{\s*name:\s*['"]([^'"\n]+)['"]/
+
+  # How far a `wf_*` directory's launch may sit from a spawn's start and still
+  # be the same workflow. Measured gap on this host: ~3 s, every time. See the
+  # moduledoc's matching rule.
+  @workflow_match_slack_ms 120_000
+
+  # A fleet that moved this recently is still flying. Generous, because the
+  # signal is a transcript mtime at one-second granularity and a stage boundary
+  # can be quiet for a while.
+  @workflow_live_ms 180_000
+
   @typedoc "One aggregated bucket, in the wire shape the endpoint serves."
   @type bucket :: %{
           m: integer(),
@@ -241,6 +314,11 @@ defmodule Shuttle.Activity do
   so a view joins it through the same ledger; `open` marks an interval whose
   close was never recorded and whose length is therefore a stub rather than a
   duration.
+
+  `label` names the delegation when anything named it — today only a workflow,
+  out of its own script — and `agents` counts the agents it spawned when its
+  directory was found on disk. Both are `nil` the rest of the time, and a
+  consumer that ignores them reads the interval exactly as it always did.
   """
   @type spawn_span :: %{
           s: String.t() | nil,
@@ -248,7 +326,9 @@ defmodule Shuttle.Activity do
           tool: String.t(),
           start_ms: integer(),
           end_ms: integer(),
-          open: boolean()
+          open: boolean(),
+          label: String.t() | nil,
+          agents: pos_integer() | nil
         }
 
   @doc """
@@ -260,8 +340,10 @@ defmodule Shuttle.Activity do
   `{:error, :range_too_wide}` past #{@max_range_days} days. A missing events
   file is not an error — it yields empty lists.
 
-  Opts (for tests): `:events_file`, the live stream path; its rotated sibling
-  is that path plus `.1`, exactly as the writer names it.
+  Opts (for tests): `:events_file`, the live stream path (its rotated sibling
+  is that path plus `.1`, exactly as the writer names it), and
+  `:claude_projects_dir`, the root under which workflow directories are looked
+  for — `~/.claude/projects` in production.
   """
   @spec window(integer(), integer(), keyword()) ::
           {:ok, %{buckets: [bucket()], spawns: [spawn_span()]}}
@@ -315,7 +397,7 @@ defmodule Shuttle.Activity do
     live
     |> files_to_scan(from_ms)
     |> Enum.reduce(new_acc(), &tally_file(&1, from_ms, to_ms, &2))
-    |> emit(from_ms, to_ms)
+    |> emit(from_ms, to_ms, opts)
   end
 
   # `tally` counts buckets; `spells` remembers which identities sit inside an
@@ -463,9 +545,14 @@ defmodule Shuttle.Activity do
   defp track_spawn(acc, "pre_tool_use", event, ts) do
     with sid when is_binary(sid) <- presence(event["sessionId"]),
          tool when tool in @spawn_tools <- event["tool"] do
-      identity = {presence(event["tmuxSession"]), presence(event["cwd"])}
-      open = Map.get(acc.aloft, sid, []) ++ [{ts, identity, tool}]
-      %{acc | aloft: Map.put(acc.aloft, sid, open)}
+      entry = %{
+        start_ms: ts,
+        identity: {presence(event["tmuxSession"]), presence(event["cwd"])},
+        tool: tool,
+        label: spawn_label(event)
+      }
+
+      %{acc | aloft: Map.put(acc.aloft, sid, Map.get(acc.aloft, sid, []) ++ [entry])}
     else
       _ -> acc
     end
@@ -474,11 +561,11 @@ defmodule Shuttle.Activity do
   defp track_spawn(acc, "post_tool_use", event, ts) do
     with sid when is_binary(sid) <- presence(event["sessionId"]),
          tool when tool in @spawn_tools <- event["tool"],
-         [{start_ts, identity, _tool} | rest] <- Map.get(acc.aloft, sid, []) do
+         [entry | rest] <- Map.get(acc.aloft, sid, []) do
       %{
         acc
         | aloft: Map.put(acc.aloft, sid, rest),
-          spans: [span(start_ts, min(ts, start_ts + @max_spawn_ms), identity, tool, false) | acc.spans]
+          spans: [span(entry, min(ts, entry.start_ms + @max_spawn_ms), sid, false) | acc.spans]
       }
     else
       _ -> acc
@@ -494,8 +581,8 @@ defmodule Shuttle.Activity do
 
       sid ->
         closed =
-          for {start_ts, identity, tool} <- Map.get(acc.aloft, sid, []),
-              do: span(start_ts, min(ts, start_ts + @max_spawn_ms), identity, tool, false)
+          for entry <- Map.get(acc.aloft, sid, []),
+              do: span(entry, min(ts, entry.start_ms + @max_spawn_ms), sid, false)
 
         %{acc | aloft: Map.delete(acc.aloft, sid), spans: closed ++ acc.spans}
     end
@@ -503,14 +590,34 @@ defmodule Shuttle.Activity do
 
   defp track_spawn(acc, _type, _event, _ts), do: acc
 
-  defp span(start_ms, end_ms, {session, cwd}, tool, open?) do
+  # The workflow's own name for itself. Only a `Workflow` carries a script, so
+  # every other tool's label is `nil` — the absence is the fact that nobody
+  # named that delegation, not a lookup that failed.
+  defp spawn_label(%{"tool" => "Workflow", "toolInput" => %{"script" => script}})
+       when is_binary(script) do
+    case Regex.run(@workflow_name_re, script, capture: :all_but_first) do
+      [name] -> presence(String.trim(name))
+      _ -> nil
+    end
+  end
+
+  defp spawn_label(_event), do: nil
+
+  # `sid` rides along only so far as `emit_spans/4`, which needs it to find the
+  # workflow's directory and strips it before the interval goes on the wire.
+  defp span(entry, end_ms, sid, open?) do
+    {session, cwd} = entry.identity
+
     %{
       s: session,
       cwd: cwd,
-      tool: tool,
-      start_ms: start_ms,
-      end_ms: max(end_ms, start_ms),
-      open: open?
+      tool: entry.tool,
+      start_ms: entry.start_ms,
+      end_ms: max(end_ms, entry.start_ms),
+      open: open?,
+      label: entry.label,
+      agents: nil,
+      sid: sid
     }
   end
 
@@ -579,27 +686,191 @@ defmodule Shuttle.Activity do
   # Sorted so a polling client can diff two responses positionally. `nil` is an
   # atom and atoms precede binaries in Erlang term order, so unattributed
   # buckets lead their minute — arbitrary, but stable.
-  defp emit(%{tally: tally} = acc, from_ms, to_ms) do
+  defp emit(%{tally: tally} = acc, from_ms, to_ms, opts) do
     buckets =
       tally
       |> Enum.map(fn {{m, s, cwd, k}, n} -> %{m: m, s: s, cwd: cwd, k: k, n: n} end)
       |> Enum.sort_by(&{&1.m, &1.s, &1.cwd, &1.k})
 
-    %{buckets: buckets, spawns: emit_spans(acc, from_ms, to_ms)}
+    %{buckets: buckets, spawns: emit_spans(acc, from_ms, to_ms, opts)}
   end
 
   # The closed intervals plus a stub for each delegation still aloft at the end
   # of the scan, all clipped to the window and sorted so a polling client can
   # diff two responses positionally.
-  defp emit_spans(%{spans: spans, aloft: aloft}, from_ms, to_ms) do
+  #
+  # ENRICHMENT COMES BEFORE THE CLIP, and before the window filter: a workflow
+  # whose events both land outside the window can still have been running
+  # through the whole of it, and it is the enriched extent — not the stub the
+  # events describe — that decides whether it overlaps at all.
+  defp emit_spans(%{spans: spans, aloft: aloft}, from_ms, to_ms, opts) do
     stubs =
-      for {_sid, open} <- aloft,
-          {start_ts, identity, tool} <- open,
-          do: span(start_ts, start_ts + @open_spawn_ms, identity, tool, true)
+      for {sid, open} <- aloft,
+          entry <- open,
+          do: span(entry, entry.start_ms + @open_spawn_ms, sid, true)
 
     (spans ++ stubs)
+    |> enrich_workflows(opts)
     |> Enum.filter(&(&1.start_ms <= to_ms and &1.end_ms >= from_ms))
     |> Enum.map(&%{&1 | start_ms: max(&1.start_ms, from_ms), end_ms: min(&1.end_ms, to_ms)})
+    |> Enum.map(&Map.delete(&1, :sid))
     |> Enum.sort_by(&{&1.start_ms, &1.end_ms, &1.s, &1.cwd})
   end
+
+  # ── What a workflow's own directory knows ──────────────────────────────────
+  #
+  # See the moduledoc: a workflow's event pair describes its launch, not its
+  # work, so the extent and the fleet size are read off disk. Everything here
+  # is best-effort by construction — the fallback is the interval the caller
+  # already handed us, and every branch that cannot resolve something returns
+  # exactly that.
+
+  defp enrich_workflows(spans, opts) do
+    case Enum.split_with(spans, &(workflow_key(&1) != nil)) do
+      {[], _} ->
+        spans
+
+      {workflows, plain} ->
+        root = Keyword.get(opts, :claude_projects_dir, default_projects_dir())
+        now = System.system_time(:millisecond)
+
+        enriched =
+          workflows
+          |> Enum.group_by(&workflow_key/1)
+          |> Enum.flat_map(fn {{sid, cwd}, group} ->
+            match_workflows(Enum.sort_by(group, & &1.start_ms), workflow_dirs(root, sid, cwd), now)
+          end)
+
+        enriched ++ plain
+    end
+  end
+
+  # Only a `Workflow` that knows both which session launched it and from where
+  # can be looked up; anything else travels as it always did.
+  defp workflow_key(%{tool: "Workflow", sid: sid, cwd: cwd})
+       when is_binary(sid) and is_binary(cwd),
+       do: {sid, cwd}
+
+  defp workflow_key(_span), do: nil
+
+  # Nearest launch wins, within the slack, and a directory is claimed once. The
+  # spawns arrive start-sorted, so an earlier spawn gets first refusal on a
+  # directory two of them could plausibly claim — which is the right tiebreak
+  # when two workflows launched inside the same slack window.
+  defp match_workflows(spans, [], _now), do: spans
+
+  defp match_workflows(spans, dirs, now) do
+    {enriched, _left} =
+      Enum.map_reduce(spans, dirs, fn span, available ->
+        case nearest_workflow_dir(span.start_ms, available) do
+          nil -> {span, available}
+          wf -> {apply_workflow(span, wf, now), List.delete(available, wf)}
+        end
+      end)
+
+    enriched
+  end
+
+  defp nearest_workflow_dir(start_ms, dirs) do
+    dirs
+    |> Enum.filter(&(abs(&1.launch_ms - start_ms) <= @workflow_match_slack_ms))
+    |> case do
+      [] -> nil
+      near -> Enum.min_by(near, &abs(&1.launch_ms - start_ms))
+    end
+  end
+
+  # The interval the fleet actually occupied. `max` against the recorded end so
+  # enrichment can only ever lengthen an interval, and `min` against now so a
+  # clock skew on a transcript cannot draw a rung into the future. `open` is
+  # re-decided from the fleet's own last movement: a workflow that finished an
+  # hour ago is a closed interval of its true length, which is the whole repair.
+  defp apply_workflow(span, %{agents: agents, last_ms: nil}, _now),
+    do: %{span | agents: agents}
+
+  defp apply_workflow(span, %{agents: agents, last_ms: last_ms}, now) do
+    %{
+      span
+      | agents: agents,
+        end_ms: max(span.end_ms, min(last_ms, now)),
+        open: now - last_ms <= @workflow_live_ms
+    }
+  end
+
+  # Every `wf_*` under the session's workflow directory, read once.
+  defp workflow_dirs(root, sid, cwd) do
+    case workflows_path(root, sid, cwd) do
+      nil ->
+        []
+
+      path ->
+        case File.ls(path) do
+          {:ok, names} ->
+            names
+            |> Enum.filter(&String.starts_with?(&1, "wf_"))
+            |> Enum.flat_map(&read_workflow_dir(Path.join(path, &1)))
+
+          _ ->
+            []
+        end
+    end
+  rescue
+    error ->
+      Logger.debug("activity: workflow lookup failed for #{sid} — #{Exception.message(error)}")
+      []
+  end
+
+  # The munged cwd first — one `File.dir?` and no scan — and a wildcard over the
+  # session id second. The munge is the harness's own naming (every `/` in the
+  # path becomes `-`), but it also folds characters this code has no business
+  # guessing at (`@` and `.` are mangled too, in ways that vary), and the
+  # session id is unique across every project. So the fast path is the guess
+  # and the slow path is the truth, and the slow path costs one readdir of a
+  # directory with one entry per project.
+  defp workflows_path(root, sid, cwd) do
+    munged = Path.join([root, String.replace(cwd, "/", "-"), sid, "subagents", "workflows"])
+
+    if File.dir?(munged) do
+      munged
+    else
+      root
+      |> Path.join(Path.join(["*", sid, "subagents", "workflows"]))
+      |> Path.wildcard()
+      |> List.first()
+    end
+  end
+
+  # One directory's three facts: when its first agent was written (its launch,
+  # and the thing spawns are matched against), when its newest transcript last
+  # moved (the fleet's last breath), and how many agents it holds. A directory
+  # with no meta files has no launch instant and so cannot be matched to
+  # anything — it is dropped rather than guessed at.
+  defp read_workflow_dir(path) do
+    with {:ok, names} <- File.ls(path),
+         metas = Enum.filter(names, &(String.starts_with?(&1, "agent-") and String.ends_with?(&1, ".meta.json"))),
+         [_ | _] <- metas,
+         [_ | _] = launches <- mtimes(path, metas) do
+      transcripts =
+        Enum.filter(names, &(String.starts_with?(&1, "agent-") and String.ends_with?(&1, ".jsonl")))
+
+      last =
+        case mtimes(path, transcripts) do
+          [] -> nil
+          stamps -> Enum.max(stamps)
+        end
+
+      [%{launch_ms: Enum.min(launches), last_ms: last, agents: length(metas)}]
+    else
+      _ -> []
+    end
+  end
+
+  defp mtimes(dir, names) do
+    for name <- names,
+        {:ok, %File.Stat{mtime: mtime}} <- [File.stat(Path.join(dir, name), time: :posix)],
+        do: mtime * 1_000
+  end
+
+  defp default_projects_dir,
+    do: Path.join([System.user_home() || ".", ".claude", "projects"])
 end

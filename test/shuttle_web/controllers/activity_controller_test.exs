@@ -67,8 +67,10 @@ defmodule ShuttleWeb.ActivityControllerTest do
     buckets
   end
 
-  defp spawns!(path, from_ms, to_ms) do
-    {:ok, %{spawns: spawns}} = Shuttle.Activity.window(from_ms, to_ms, events_file: path)
+  defp spawns!(path, from_ms, to_ms, opts \\ []) do
+    {:ok, %{spawns: spawns}} =
+      Shuttle.Activity.window(from_ms, to_ms, [events_file: path] ++ opts)
+
     spawns
   end
 
@@ -97,7 +99,12 @@ defmodule ShuttleWeb.ActivityControllerTest do
                  tool: "Agent",
                  start_ms: @t0 + 1_000,
                  end_ms: @t0 + 8 * @minute,
-                 open: false
+                 open: false,
+                 # Nothing named this delegation and nothing counted it: only a
+                 # workflow carries either, and both keys travel as `nil` so the
+                 # wire shape is one shape rather than two.
+                 label: nil,
+                 agents: nil
                }
              ]
     end
@@ -197,6 +204,171 @@ defmodule ShuttleWeb.ActivityControllerTest do
 
       assert Enum.map(buckets!(path, @t0, @t0 + 60 * @minute), & &1.k) ==
                ["agent", "agent", "agent", "agent"]
+    end
+  end
+
+  describe "Shuttle.Activity.window/3 — workflows, named and measured" do
+    # A workflow's own launch script, as the tool received it. The name is the
+    # first thing in the meta block and the only place the caller wrote it down.
+    defp workflow_event(ts, name, overrides \\ %{}) do
+      script = """
+      export const meta = {
+        name: '#{name}',
+        description: 'a fan-out',
+        phases: [{ title: 'sweep' }],
+      }
+      """
+
+      spawn_event(
+        "pre_tool_use",
+        "Workflow",
+        ts,
+        Map.merge(%{"toolInput" => %{"script" => script}}, overrides)
+      )
+    end
+
+    # A tmp stand-in for `~/.claude/projects`, cleaned up with the test.
+    defp tmp_projects do
+      root =
+        Path.join(System.tmp_dir!(), "shuttle_projects_#{System.unique_integer([:positive])}")
+
+      File.mkdir_p!(root)
+      on_exit(fn -> File.rm_rf(root) end)
+      root
+    end
+
+    # One `wf_*` directory as the harness leaves it: `agents` meta files stamped
+    # at the launch second, and one transcript each stamped at the fleet's last
+    # movement. Those two mtimes are the whole of what the reader consults.
+    defp write_workflow_dir(root, cwd, wf, opts) do
+      dir =
+        Path.join([root, String.replace(cwd, "/", "-"), "sess-1", "subagents", "workflows", wf])
+
+      File.mkdir_p!(dir)
+
+      for i <- 1..opts[:agents] do
+        meta = Path.join(dir, "agent-#{i}.meta.json")
+        File.write!(meta, "{}")
+        File.touch!(meta, opts[:launch_s])
+
+        log = Path.join(dir, "agent-#{i}.jsonl")
+        File.write!(log, "{}\n")
+        File.touch!(log, opts[:last_s])
+      end
+
+      dir
+    end
+
+    test "reads the workflow's name out of the script it was launched with" do
+      path = write_fixture([workflow_event(@t0 + 1_000, "felt-cleanup-audit")])
+
+      assert [%{tool: "Workflow", label: "felt-cleanup-audit"}] =
+               spawns!(path, @t0, @t0 + 60 * @minute, claude_projects_dir: tmp_projects())
+    end
+
+    test "a script with no meta block names nothing, and the interval survives" do
+      path =
+        write_fixture([
+          spawn_event("pre_tool_use", "Workflow", @t0 + 1_000, %{
+            "toolInput" => %{"truncated" => true}
+          })
+        ])
+
+      assert [%{tool: "Workflow", label: nil, agents: nil}] =
+               spawns!(path, @t0, @t0 + 60 * @minute, claude_projects_dir: tmp_projects())
+    end
+
+    test "counts the fleet and redraws the interval at the extent its transcripts show" do
+      root = tmp_projects()
+
+      write_workflow_dir(root, @cwd, "wf_abc",
+        agents: 12,
+        launch_s: div(@t0, 1_000) + 3,
+        last_s: div(@t0, 1_000) + 56 * 60
+      )
+
+      path = write_fixture([workflow_event(@t0 + 1_000, "felt-cleanup-audit")])
+
+      # The events alone would have drawn a five-minute stub, still open. The
+      # directory says twelve agents worked for fifty-six minutes and stopped.
+      assert [span] = spawns!(path, @t0, @t0 + 120 * @minute, claude_projects_dir: root)
+      assert span.agents == 12
+      assert span.end_ms == @t0 + 56 * @minute
+      assert span.open == false
+    end
+
+    test "a fleet that moved a minute ago is still aloft" do
+      now = System.system_time(:millisecond)
+      start_ms = now - 60 * @minute
+      root = tmp_projects()
+
+      write_workflow_dir(root, @cwd, "wf_live",
+        agents: 3,
+        launch_s: div(start_ms, 1_000) + 2,
+        last_s: div(now, 1_000) - 60
+      )
+
+      path = write_fixture([workflow_event(start_ms, "still-going")])
+
+      assert [%{agents: 3, open: true}] =
+               spawns!(path, start_ms - @minute, now, claude_projects_dir: root)
+    end
+
+    test "matches each of a session's workflows to the directory launched with it" do
+      root = tmp_projects()
+
+      write_workflow_dir(root, @cwd, "wf_second",
+        agents: 31,
+        launch_s: div(@t0, 1_000) + 40 * 60 + 2,
+        last_s: div(@t0, 1_000) + 55 * 60
+      )
+
+      write_workflow_dir(root, @cwd, "wf_first",
+        agents: 122,
+        launch_s: div(@t0, 1_000) + 3,
+        last_s: div(@t0, 1_000) + 30 * 60
+      )
+
+      path =
+        write_fixture([
+          workflow_event(@t0 + 1_000, "felt-cleanup-audit"),
+          workflow_event(@t0 + 40 * @minute, "cleanup-review")
+        ])
+
+      # Proximity, not readdir order — `wf_second` is listed first above and
+      # still belongs to the later spawn.
+      assert [first, second] = spawns!(path, @t0, @t0 + 120 * @minute, claude_projects_dir: root)
+      assert {first.label, first.agents} == {"felt-cleanup-audit", 122}
+      assert {second.label, second.agents} == {"cleanup-review", 31}
+    end
+
+    test "a directory whose launch is nowhere near the spawn is not claimed" do
+      root = tmp_projects()
+
+      write_workflow_dir(root, @cwd, "wf_yesterday",
+        agents: 9,
+        launch_s: div(@t0, 1_000) - 24 * 60 * 60,
+        last_s: div(@t0, 1_000) - 23 * 60 * 60
+      )
+
+      path = write_fixture([workflow_event(@t0 + 1_000, "unrelated")])
+
+      assert [%{agents: nil, open: true, end_ms: end_ms}] =
+               spawns!(path, @t0, @t0 + 120 * @minute, claude_projects_dir: root)
+
+      # Unenriched is unchanged: the five-minute stub, exactly as before.
+      assert end_ms == @t0 + 1_000 + 5 * @minute
+    end
+
+    test "no directory at all is today's behaviour, unchanged" do
+      path = write_fixture([workflow_event(@t0 + 1_000, "on-some-other-host")])
+
+      assert [%{label: "on-some-other-host", agents: nil, open: true, end_ms: end_ms}] =
+               spawns!(path, @t0, @t0 + 60 * @minute,
+                 claude_projects_dir: Path.join(System.tmp_dir!(), "shuttle_no_such_projects")
+               )
+
+      assert end_ms == @t0 + 1_000 + 5 * @minute
     end
   end
 
