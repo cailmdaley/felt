@@ -24,7 +24,7 @@ var showCmd = &cobra.Command{
 
 Detail levels control progressive disclosure:
   name     Name and tags only
-  compact  Metadata, outcome, and additional YAML field keys
+  compact  Metadata, outcome, body size, and additional YAML field keys
   summary  Compact + lede paragraph + citations/consumers
   full     Everything (default)
 
@@ -69,7 +69,14 @@ Targeted views:
 		scopeID := resolveCommandScope(root)
 
 		if selectorCount == 0 && !jsonOutput && (detail == DepthName || detail == DepthCompact) {
-			f, err := storage.FindMetadataInScope(scopeID, args[0])
+			// Both levels skip the relationship scan and the body-ref graph.
+			// Compact still reads the body — it reports the body's line count —
+			// but that is one extra file read, not a walk.
+			find := storage.FindMetadataInScope
+			if detail == DepthCompact {
+				find = storage.FindInScope
+			}
+			f, err := find(scopeID, args[0])
 			if err != nil {
 				return err
 			}

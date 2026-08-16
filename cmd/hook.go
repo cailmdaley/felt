@@ -510,6 +510,15 @@ var postToolEditTools = map[string]struct{}{
 	"Edit": {}, "Write": {}, "MultiEdit": {},
 }
 
+// postToolTouchInterval is how fresh a fiber's recency anchor has to be for the
+// PostToolUse stamp to be skipped. Rewriting the file behind the agent's back is
+// not free: the harness reports "hook modified the file after your edit" on
+// every fiber edit, and a chained edit that was composed against the pre-stamp
+// bytes can go stale. Recency is consumed at session-start ranking granularity
+// (see sessionStaleAge, in days), so an anchor already within the hour is
+// exact enough — one stamp per fiber per hour buys back the quiet.
+const postToolTouchInterval = time.Hour
+
 // runPostToolHook stamps the durable recency anchor (updated-at) on the fiber
 // whose file an agent just edited directly. Every path is a silent pass: a
 // PostToolUse hook must never fail the tool call, and losing one stamp is
@@ -542,7 +551,13 @@ func runPostToolHook(stdin *os.File) error {
 		// non-fiber dir, half-written file, etc.) — leave it alone.
 		return nil
 	}
-	f.Touch(time.Now())
+	now := time.Now()
+	// Anchor, not just updated-at: a fiber `felt add` created minutes ago is
+	// already as recent as a stamp would make it.
+	if anchor := f.RecencyAnchor(); !anchor.IsZero() && now.Sub(anchor) < postToolTouchInterval {
+		return nil
+	}
+	f.Touch(now)
 	if err := storage.Write(f); err != nil {
 		return nil
 	}

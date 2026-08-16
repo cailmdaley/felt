@@ -22,14 +22,14 @@ Every command accepts these global flags:
 | `felt init` | Create or repair the local `.felt/` directory and support files |
 | `felt add <slug> <name>` | Create a new fiber (`-b` body, `-o` outcome, `-s` status, `-t` tag, `-D` due, `--top-level`) |
 | `felt edit <id>` | Modify a fiber's native metadata (`--name`, `-o`, `-s`, `-t`/`--untag`, `-b` body, `-D`, `--set`/`--unset` for opaque scalars) |
-| `felt show <id>` | Show a fiber at a given detail level (`-d name\|compact\|summary\|full`; `--body`, `--citations`, `--consumers`, `--field <name>`) |
+| `felt show <id>` | Show a fiber at a given detail level (`-d name\|compact\|summary\|full`; compact and summary report the body's line count; `--body`, `--citations`, `--consumers`, `--field <name>`) |
 | `felt rm <id>` | Permanently delete a fiber |
 
 ## Search and reading
 
 | Command | Purpose |
 |---|---|
-| `felt ls [query]` | List and search fibers (`-t` tag, `-s` status, `-n` recent N, `-r` regex, `-e` exact, `--body`, `--has-field`, `--json-field`; matches under a matching ancestor collapse into it, `-v` expands) |
+| `felt ls [query]` | List and search fibers (`-t` tag, `-s` status, `-n` recent N, `-r` regex, `-e` exact, `--body`, `--has-field`, `--json-field`; a query or tag filter searches every status but closed, counting closed matches in a trailing hint; matches under a matching ancestor collapse into it, `-v` expands) |
 | `felt session` | Print the SessionStart context as plain text |
 | `felt tree [id]` | Show the containment tree (`-L`/`--depth` caps depth; elided branches show how much is below) |
 

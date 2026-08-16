@@ -707,6 +707,50 @@ func TestPostToolHookStampsCompanionEdit(t *testing.T) {
 	}
 }
 
+// Restamping rewrites the file behind the agent's back — the harness reports it
+// on every edit, and a chained edit composed against the pre-stamp bytes can go
+// stale. An anchor that is already fresh buys nothing, so the hook leaves the
+// file alone — whether the freshness comes from a recent stamp or from a fiber
+// that was only just created.
+func TestPostToolHookSkipsFreshAnchor(t *testing.T) {
+	dir := t.TempDir()
+	storage := felt.NewStorage(dir)
+	if err := storage.Init(); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	old := mustParseTime(t, "2026-04-10T09:00:00Z")
+	stamped := time.Now().Add(-5 * time.Minute)
+	if err := storage.Write(&felt.Felt{ID: "alpha", Name: "Alpha", CreatedAt: old, UpdatedAt: &stamped}); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	if err := storage.Write(&felt.Felt{ID: "beta", Name: "Beta", CreatedAt: time.Now().Add(-time.Minute)}); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	before, err := storage.Read("alpha")
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+
+	runPostToolWithInput(t, postEditInput("Edit", storage.Path("alpha")))
+	runPostToolWithInput(t, postEditInput("Edit", storage.Path("beta")))
+
+	after, err := storage.Read("alpha")
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if after.UpdatedAt == nil || !after.UpdatedAt.Equal(*before.UpdatedAt) {
+		t.Fatalf("fresh stamp was rewritten: got %v, want %v", after.UpdatedAt, before.UpdatedAt)
+	}
+
+	fresh, err := storage.Read("beta")
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if fresh.UpdatedAt != nil {
+		t.Fatalf("just-created fiber was stamped: %v", fresh.UpdatedAt)
+	}
+}
+
 func TestPostToolHookIgnoresNonEditAndNonFelt(t *testing.T) {
 	dir := t.TempDir()
 	storage := felt.NewStorage(dir)

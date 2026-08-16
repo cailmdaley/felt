@@ -29,8 +29,10 @@ var lsCmd = &cobra.Command{
 	Short: "List and search felts",
 	Long: `Lists felts, showing open and active by default.
 
-When any filter is active (-t, query, -n), all statuses are shown
-automatically. Use -s to override: open, active, closed, or all.
+A filter (-t, query, --has-field) widens the search to every status except
+closed; closed matches are counted in a trailing hint instead of printed.
+-n shows all statuses, closed included — it ranks by closed-at. Use -s to
+override: open, active, closed, or all.
 
 Use -t to filter by tag (AND logic, prefix matching with trailing colon):
   -t rule:                    matches any rule:* tag
@@ -102,6 +104,14 @@ list every match flat. --json is always uncollapsed.`,
 		if !statusExplicit && hasFilters {
 			effectiveStatus = "all"
 		}
+
+		// A search widens past open+active so untracked fibers can match, but a
+		// store accumulates far more closed work than live work and the closed
+		// matches bury the live ones. They're counted and offered instead of
+		// printed. -n is exempt: it sorts by closed-at precisely to surface
+		// what was recently finished.
+		suppressClosed := !statusExplicit && lsRecent == 0 &&
+			(query != "" || len(lsTags) > 0 || len(hasFields) > 0)
 
 		// Filter
 		var exactMatches []*felt.Felt
@@ -250,6 +260,17 @@ list every match flat. --json is always uncollapsed.`,
 			return outputJSON(filtered)
 		}
 
+		// Closed suppression is a human-output concern only: --json is the wire
+		// the daemon poll, the hook, and the board read, and they expect every
+		// status they asked for. Dropping closed happens after the JSON branch
+		// has already returned, and before the collapse — so a collapsed
+		// ancestor's descendant count counts only lines that would have printed.
+		var closedSuppressed int
+		if suppressClosed {
+			filtered, closedSuppressed = partitionOutClosed(filtered)
+			exactMatches, _ = partitionOutClosed(exactMatches)
+		}
+
 		// Containment collapse: a query that matches a directory fiber also
 		// matches every descendant by slug, which buries the one hit worth
 		// seeing under its whole subtree. Show the ancestor with a count.
@@ -269,6 +290,10 @@ list every match flat. --json is always uncollapsed.`,
 			for _, f := range shown {
 				fmt.Print(formatFeltTwoLine(f, collapsed[f.ID]))
 			}
+		}
+
+		if closedSuppressed > 0 {
+			fmt.Printf("\n(+%d closed — add -s closed)\n", closedSuppressed)
 		}
 
 		// Show count of hidden fibers when the default filter is active
@@ -341,6 +366,21 @@ func collapseByContainment(matches []*felt.Felt, exact []*felt.Felt) ([]*felt.Fe
 		shown = append(shown, f)
 	}
 	return shown, collapsed
+}
+
+// partitionOutClosed returns the non-closed matches (order preserved) and the
+// number of closed ones dropped.
+func partitionOutClosed(matches []*felt.Felt) ([]*felt.Felt, int) {
+	kept := make([]*felt.Felt, 0, len(matches))
+	dropped := 0
+	for _, f := range matches {
+		if f.Status == felt.StatusClosed {
+			dropped++
+			continue
+		}
+		kept = append(kept, f)
+	}
+	return kept, dropped
 }
 
 func splitListFlag(values []string) []string {

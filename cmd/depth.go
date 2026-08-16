@@ -72,6 +72,7 @@ func renderCompact(f *felt.Felt) string {
 	if f.Outcome != "" {
 		fmt.Fprintf(&sb, "Outcome:  %s\n", f.Outcome)
 	}
+	writeBodySize(&sb, f)
 	writeExtraFieldKeys(&sb, f)
 	return sb.String()
 }
@@ -88,6 +89,7 @@ func renderSummary(f *felt.Felt, g *Graph, citations []felt.Citation, consumers 
 	writeBodyRefs(&sb, f, g)
 	writeCitations(&sb, citations)
 	writeConsumers(&sb, consumers)
+	writeBodySize(&sb, f)
 	writeExtraFieldKeys(&sb, f)
 	if f.Body != "" {
 		lede := extractLede(f.Body)
@@ -120,6 +122,27 @@ func renderFull(f *felt.Felt, g *Graph, citations []felt.Citation, consumers []f
 		fmt.Fprintf(&sb, "\n%s\n", f.Body)
 	}
 	return sb.String()
+}
+
+// writeBodySize reports how many lines of body the fiber carries, so a reader
+// at compact or summary depth can decide whether `--body` (or a full read) is
+// worth paying for before paying for it. Omitted when there is no body.
+func writeBodySize(sb *strings.Builder, f *felt.Felt) {
+	n := bodyLineCount(f.Body)
+	if n == 0 {
+		return
+	}
+	fmt.Fprintf(sb, "Body:     %d %s\n", n, pluralize(n, "line", "lines"))
+}
+
+// bodyLineCount counts the body's lines, ignoring the trailing newline the
+// markdown file always ends with.
+func bodyLineCount(body string) int {
+	trimmed := strings.TrimRight(body, "\n")
+	if trimmed == "" {
+		return 0
+	}
+	return strings.Count(trimmed, "\n") + 1
 }
 
 func writeExtraFieldKeys(sb *strings.Builder, f *felt.Felt) {

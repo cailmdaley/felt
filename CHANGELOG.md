@@ -151,8 +151,24 @@ is folded in here rather than into a separate Unreleased section.
   match flat. `--json` is unchanged — always the full, uncollapsed set.
 - `felt tree -L <depth>` caps how deep the tree is drawn, marking each elided
   branch with the number of fibers below it.
+- `felt show -d compact` and `-d summary` report the body's line count
+  (`Body:     214 lines`), so a reader can decide whether the full body is
+  worth paying for before paying for it.
 
 ### Changed
+
+- **A search no longer prints closed fibers.** A query, `-t`, or `--has-field`
+  still widens past the open+active default so untracked fibers can match, but
+  closed matches are counted in a trailing `(+N closed — add -s closed)` hint
+  instead of burying the live ones. `-s closed` / `-s all` restore them, `-n`
+  is exempt (it ranks by closed-at), and `--json` is untouched — the daemon
+  poll, the hook, and the board still receive every status.
+- **The PostToolUse recency stamp is rate-limited to once an hour per fiber.**
+  Stamping `updated-at` on every direct fiber edit rewrote the file behind the
+  agent's back, which the harness reports on each edit and which can stale a
+  chained edit. A recency anchor (`updated-at`, else `created-at`) newer than
+  an hour is already exact enough for session-start ranking, so the hook leaves
+  the file alone.
 
 - **The configured fleet ships by default.** The built-in registry is the
   full Claude / Codex / Pi set rather than a generic starter, so a fresh

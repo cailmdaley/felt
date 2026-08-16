@@ -33,12 +33,12 @@ Understanding crystallized. Accrete:
 
 Search and read:
     felt ls                                        # tracked (open and active)
-    felt ls "query" [-t tag] [-s closed] [-v]     # substring over name, outcome, YAML, slug; any filter widens to all statuses; matches under a matching ancestor collapse into it, -v expands
+    felt ls "query" [-t tag] [-s closed] [-v]     # substring over name, outcome, YAML, slug; widens to every status but closed (a trailing hint counts those); matches under a matching ancestor collapse into it, -v expands
     felt ls --body "query"                         # adds body search — plain substring; use -r --body for regex
     felt session                                   # SessionStart context as plain text
     felt tree [<id>] [-L depth]                    # containment hierarchy; -L caps depth (1 = direct children)
     felt show <id>                                 # full
-    felt show <id> -d compact | -d summary         # metadata/outcome/extra keys | + lede + back-refs
+    felt show <id> -d compact | -d summary         # metadata/outcome/body size/extra keys | + lede + back-refs
     felt show <id> --body                          # body with start line
     felt show <id> --citations|--consumers         # narrative back-refs | data-flow consumers
     felt show <id> --field <key>                   # one raw frontmatter key, shell-friendly

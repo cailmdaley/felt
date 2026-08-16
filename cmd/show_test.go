@@ -142,6 +142,51 @@ func TestShowCompactRendersOutcomeAndFieldKeys(t *testing.T) {
 	}
 }
 
+// Compact and summary report the body's size so a reader can decide whether a
+// full read is worth paying for before paying for it.
+func TestShowReportsBodySize(t *testing.T) {
+	dir := t.TempDir()
+	storage := felt.NewStorage(dir)
+	if err := storage.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+	created := mustParseTime(t, "2026-04-10T09:00:00Z")
+	if err := storage.Write(&felt.Felt{
+		ID:        "with-body",
+		Name:      "With body",
+		CreatedAt: created,
+		Body:      "# With body\n\nFirst paragraph.\n\nSecond paragraph.\n",
+	}); err != nil {
+		t.Fatalf("Write() error: %v", err)
+	}
+	if err := storage.Write(&felt.Felt{ID: "no-body", Name: "No body", CreatedAt: created}); err != nil {
+		t.Fatalf("Write() error: %v", err)
+	}
+
+	reset := saveShowGlobals()
+	defer reset()
+
+	for _, detail := range []string{"compact", "summary"} {
+		saveShowGlobals()
+		out, err := runCommand(t, dir, "show", "with-body", "-d", detail)
+		if err != nil {
+			t.Fatalf("show -d %s: %v\n%s", detail, err, out)
+		}
+		if !strings.Contains(out, "Body:     5 lines") {
+			t.Fatalf("show -d %s missing body size:\n%s", detail, out)
+		}
+
+		saveShowGlobals()
+		out, err = runCommand(t, dir, "show", "no-body", "-d", detail)
+		if err != nil {
+			t.Fatalf("show -d %s: %v\n%s", detail, err, out)
+		}
+		if strings.Contains(out, "Body:") {
+			t.Fatalf("show -d %s should omit body size when there is no body:\n%s", detail, out)
+		}
+	}
+}
+
 func TestShowDefaultRendersBody(t *testing.T) {
 	dir := t.TempDir()
 	storage := felt.NewStorage(dir)

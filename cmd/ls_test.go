@@ -285,6 +285,139 @@ func TestLsCollapseKeepsExactMatch(t *testing.T) {
 	}
 }
 
+// A search widens past open+active so untracked fibers can match, but closed
+// matches are counted rather than printed — a store holds far more finished
+// work than live work.
+func TestLsQueryHidesClosedBehindHint(t *testing.T) {
+	dir := t.TempDir()
+	storage := felt.NewStorage(dir)
+	if err := storage.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+	created := mustParseTime(t, "2026-04-10T09:00:00Z")
+	closedAt := mustParseTime(t, "2026-04-11T09:00:00Z")
+	for _, fiber := range []*felt.Felt{
+		{ID: "shear-live", Name: "Shear live", Status: felt.StatusOpen, CreatedAt: created},
+		{ID: "shear-untracked", Name: "Shear untracked", CreatedAt: created},
+		{ID: "shear-done", Name: "Shear done", Status: felt.StatusClosed, CreatedAt: created, ClosedAt: &closedAt},
+		{ID: "shear-also-done", Name: "Shear also done", Status: felt.StatusClosed, CreatedAt: created, ClosedAt: &closedAt},
+	} {
+		if err := storage.Write(fiber); err != nil {
+			t.Fatalf("Write(%s) error: %v", fiber.ID, err)
+		}
+	}
+
+	reset := saveLsGlobals()
+	defer reset()
+
+	out, err := runCommand(t, dir, "ls", "shear")
+	if err != nil {
+		t.Fatalf("ls shear: %v\n%s", err, out)
+	}
+	// Untracked fibers still match — the widening that a filter triggers is
+	// unchanged apart from closed.
+	for _, want := range []string{"shear-live", "shear-untracked"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("ls shear dropped %s:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "shear-done") || strings.Contains(out, "shear-also-done") {
+		t.Fatalf("closed matches printed:\n%s", out)
+	}
+	if !strings.Contains(out, "(+2 closed — add -s closed)") {
+		t.Fatalf("missing closed hint:\n%s", out)
+	}
+
+	// Re-arm: cobra's per-flag Changed state must not leak between invocations.
+	saveLsGlobals()
+
+	out, err = runCommand(t, dir, "ls", "-s", "closed", "shear")
+	if err != nil {
+		t.Fatalf("ls -s closed shear: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "shear-done") {
+		t.Fatalf("-s closed did not restore closed matches:\n%s", out)
+	}
+	if strings.Contains(out, "add -s closed") {
+		t.Fatalf("explicit -s should not print the hint:\n%s", out)
+	}
+
+	saveLsGlobals()
+
+	out, err = runCommand(t, dir, "ls", "-s", "all", "shear")
+	if err != nil {
+		t.Fatalf("ls -s all shear: %v\n%s", err, out)
+	}
+	for _, want := range []string{"shear-live", "shear-untracked", "shear-done", "shear-also-done"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("-s all dropped %s:\n%s", want, out)
+		}
+	}
+
+	// -n ranks by closed-at: it exists to surface recently finished work, so it
+	// keeps the old all-statuses behavior.
+	saveLsGlobals()
+
+	out, err = runCommand(t, dir, "ls", "-n", "10")
+	if err != nil {
+		t.Fatalf("ls -n 10: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "shear-done") {
+		t.Fatalf("-n suppressed closed:\n%s", out)
+	}
+
+	// --json is the wire the daemon poll, the hook, and the board read: it must
+	// still carry every status the filter widened to.
+	saveLsGlobals()
+
+	out, err = runCommand(t, dir, "ls", "-j", "shear")
+	if err != nil {
+		t.Fatalf("ls -j shear: %v\n%s", err, out)
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal([]byte(out), &rows); err != nil {
+		t.Fatalf("unmarshal: %v\n%s", err, out)
+	}
+	if len(rows) != 4 {
+		t.Fatalf("--json dropped closed rows: got %d, want 4\n%s", len(rows), out)
+	}
+}
+
+// Closed suppression runs before the containment collapse, so a collapsed
+// ancestor's count describes lines that would actually have printed.
+func TestLsCollapseCountExcludesSuppressedClosed(t *testing.T) {
+	dir := t.TempDir()
+	storage := felt.NewStorage(dir)
+	if err := storage.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+	created := mustParseTime(t, "2026-04-10T09:00:00Z")
+	closedAt := mustParseTime(t, "2026-04-11T09:00:00Z")
+	for _, fiber := range []*felt.Felt{
+		{ID: "portolan/swarm", Name: "Swarm", Status: felt.StatusOpen, CreatedAt: created},
+		{ID: "portolan/swarm/hex-grid", Name: "Hex grid", Status: felt.StatusOpen, CreatedAt: created},
+		{ID: "portolan/swarm/tiling", Name: "Tiling", Status: felt.StatusClosed, CreatedAt: created, ClosedAt: &closedAt},
+	} {
+		if err := storage.Write(fiber); err != nil {
+			t.Fatalf("Write(%s) error: %v", fiber.ID, err)
+		}
+	}
+
+	reset := saveLsGlobals()
+	defer reset()
+
+	out, err := runCommand(t, dir, "ls", "swarm")
+	if err != nil {
+		t.Fatalf("ls swarm: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "(+1 matching descendant; -v to expand)") {
+		t.Fatalf("collapse count should exclude the suppressed closed descendant:\n%s", out)
+	}
+	if !strings.Contains(out, "(+1 closed — add -s closed)") {
+		t.Fatalf("missing closed hint:\n%s", out)
+	}
+}
+
 func TestTreeDepthLimit(t *testing.T) {
 	dir := t.TempDir()
 	storage := felt.NewStorage(dir)
