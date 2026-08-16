@@ -1413,20 +1413,34 @@ const DAY_KEY_CLASS: Record<DrawnKind, string> = {
 /** One entry in the key: the mark itself, in miniature, then what it means. */
 function buildKey(glyphClass: string, text: string): HTMLElement {
   const item = document.createElement('span')
-  item.className = 'kbn-day-key'
+  item.className = 'kbn-view-key-item kbn-day-key'
   const glyph = document.createElement('i')
   glyph.className = `kbn-day-keyglyph ${glyphClass}`
   item.append(glyph, document.createTextNode(text))
   return item
 }
 
-/** The state group in Day's key: every glyph and its word, one line. The
- *  pigments are the lane gutter's own, so the key cannot drift from the marks
- *  it explains. */
-function buildStateKey(): HTMLElement {
+/**
+ * The state group in Day's key: a glyph and its word for each state THIS PAGE
+ * ACTUALLY DREW, in the life-order of a fiber.
+ *
+ * It used to print all six unconditionally, which made the key a glossary of
+ * the Desk's vocabulary rather than a reading of this sheet: on a normal day
+ * four of the six words named glyphs that appear nowhere on the page, and the
+ * reader is left hunting the rails for a ✗ that was never inked. A key must
+ * only teach the marks its own page draws — the same rule the aloft entry
+ * already followed — so the caller hands in the states in the gutter and
+ * nothing else is glossed.
+ *
+ * The pigments are the lane gutter's own, so the key cannot drift from the
+ * marks it explains.
+ */
+function buildStateKey(present: ReadonlySet<LifecycleState>): HTMLElement | null {
+  const states = STATE_KEY_ITEMS.filter((state) => present.has(state))
+  if (states.length === 0) return null
   const item = document.createElement('span')
-  item.className = 'kbn-day-key kbn-day-key-states'
-  for (const state of STATE_KEY_ITEMS) {
+  item.className = 'kbn-view-key-item kbn-day-key kbn-day-key-states'
+  for (const state of states) {
     const pair = document.createElement('span')
     pair.className = 'kbn-day-key-state'
     const glyph = document.createElement('i')
@@ -1444,7 +1458,7 @@ function buildStateKey(): HTMLElement {
  *  legend's one suffices. */
 function buildGestureKey(): HTMLElement {
   const item = document.createElement('span')
-  item.className = 'kbn-day-key kbn-day-key-gesture'
+  item.className = 'kbn-view-key-item kbn-day-key kbn-day-key-gesture'
   item.textContent = 'click a lane opens it · ⌥-click pins · drag zooms'
   return item
 }
@@ -1712,9 +1726,6 @@ class DayViewImpl implements TemporalView {
 
     const page = createViewPage(this.title)
 
-    const head = document.createElement('div')
-    head.className = 'kbn-day-head'
-
     // The date is a quiet way up a zoom level: it hands the week the day you
     // are looking at, so Week opens around it rather than on the current week.
     this.headingEl = document.createElement('button')
@@ -1738,7 +1749,7 @@ class DayViewImpl implements TemporalView {
     this.todayEl.addEventListener('click', () => this.ctx?.setFocusDate(null))
 
     const dateRow = document.createElement('div')
-    dateRow.className = 'kbn-day-daterow'
+    dateRow.className = 'kbn-view-nav kbn-day-daterow'
     dateRow.append(
       this.buildChevron('‹', 'Previous day', -1),
       this.headingEl,
@@ -1746,12 +1757,16 @@ class DayViewImpl implements TemporalView {
       this.todayEl,
     )
 
+    // What the day cost, in the middle of the head rather than under the date.
+    // It is a line the page states about itself, not a control — and the
+    // scaffold's centre slot is out of flow, so stating it costs Day's head no
+    // height and Day, Week and Chronicle all wear the same one-line head.
     this.statsEl = document.createElement('div')
-    this.statsEl.className = 'kbn-day-stats'
+    this.statsEl.className = 'kbn-view-headfigures kbn-day-stats'
     this.statsEl.textContent = ''
 
-    head.append(dateRow, this.statsEl)
-    page.titleRow.append(head)
+    page.titleCenter.append(this.statsEl)
+    page.titleRow.append(dateRow)
 
     this.bodyEl = page.body
     this.root = page.root
@@ -1859,7 +1874,7 @@ class DayViewImpl implements TemporalView {
   private buildChevron(glyph: string, label: string, delta: number): HTMLButtonElement {
     const button = document.createElement('button')
     button.type = 'button'
-    button.className = 'kbn-day-chev'
+    button.className = 'kbn-view-chev kbn-day-chev'
     button.textContent = glyph
     button.title = label
     button.setAttribute('aria-label', label)
@@ -2228,20 +2243,29 @@ class DayViewImpl implements TemporalView {
         this.openLaneTerminal(lane)
       })
       label.append(name)
-      if (lane.hostNote) {
+      // The host is named ONCE. A stale lane's waiting badge already reads
+      // "waiting on basalt-login-02", so the plain host note beside it said the
+      // same word twice and — between them — overran the label column, clipping
+      // both against the sheet's left edge.
+      const staleBadge = lane.stale && !!lane.host
+      if (lane.hostNote && !staleBadge) {
         const host = document.createElement('span')
         host.className = 'kbn-day-lanehost'
         host.textContent = lane.hostNote
         host.title = `ran on ${lane.hostNote}`
         label.append(host)
       }
-      if (lane.stale && lane.host) {
-        // Same badge and the same words the Desk puts on a stale card. The
-        // rail still draws underneath it: those minutes happened, and what is
-        // shown is that origin's last-good read, not a guess.
+      if (staleBadge) {
+        // The Desk's own waiting badge, but SAID SHORT: the gutter is a fixed
+        // 232px shared with the lane's name, and "⌛ waiting on basalt-login-02"
+        // spent nearly all of it, leaving the name as "Ru…". The hourglass is
+        // the claim and the host is the only new fact; the sentence lives in
+        // the title, where there is room for it.
+        // The rail still draws underneath it: those minutes happened, and what
+        // is shown is that origin's last-good read, not a guess.
         const waiting = document.createElement('span')
         waiting.className = 'kbn-card-waiting kbn-day-lanewaiting'
-        waiting.textContent = `⌛ waiting on ${lane.host}`
+        waiting.textContent = `⌛ ${lane.host}`
         waiting.title = `${lane.host} is unreachable — this rail is its last-known read`
         label.append(waiting)
       }
@@ -2434,21 +2458,30 @@ class DayViewImpl implements TemporalView {
     // whose pigments mean nothing — "I don't know what the blue, red and green
     // are" is a fair complaint about a grammar that is never stated. So it is
     // stated, once, in the margin under the rails it explains: a caption, not
-    // a legend box, and only on a page that actually drew the marks.
+    // a legend box, and CENTRED on them, because a caption belongs under the
+    // middle of the plate it captions rather than shoved against its right
+    // edge.
+    //
+    // EVERY ENTRY IS CONDITIONAL, without exception: the ladder entry appears
+    // only where a ladder was drawn, and the states are exactly the states in
+    // the gutter (see `buildStateKey`). A key is a reading of this page, not a
+    // glossary of the board's whole vocabulary — anything it names that the
+    // reader cannot find is a mark they will go looking for and not find.
     //
     // The GLYPHS are each view's own marks in miniature, which is why they are
     // shapes rather than uniform swatches — the key teaches the height
     // hierarchy (wash, then block, then tick) at the same time.
     const legend = document.createElement('div')
-    legend.className = 'kbn-day-legend'
+    legend.className = 'kbn-view-key kbn-day-legend'
     legend.style.gridRow = String(model.lanes.length + 2)
+    const stateKey = buildStateKey(new Set(model.lanes.map((lane) => lane.state)))
     legend.append(
       buildKey(DAY_KEY_CLASS.agent, MOUND_KEY_LABEL),
       buildKey('kbn-day-key-spine', SPINE_KEY_LABEL),
       ...(model.lanes.some((lane) => lane.ladder.length > 0)
         ? [buildKey('kbn-day-key-aloft', ALOFT_KEY_LABEL)]
         : []),
-      buildStateKey(),
+      ...(stateKey ? [stateKey] : []),
       buildGestureKey(),
     )
     // The way back out of a zoom, and the only sign that you are in one. Quiet

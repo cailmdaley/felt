@@ -899,6 +899,7 @@ class WeekView implements TemporalView {
     const page = createViewPage(this.title)
     this.page = page
     page.titleRow.append(this.buildHead())
+    page.titleCenter.append(this.buildHeadFigures())
     host.append(page.root)
     document.addEventListener('keydown', this.onKeyDown)
     document.addEventListener('keydown', this.onEscape, true)
@@ -946,12 +947,22 @@ class WeekView implements TemporalView {
 
   // ── Head ───────────────────────────────────────────────────────────────────
 
+  /**
+   * The right end of the head: what week this is, and the way to another one.
+   *
+   * SAME SHAPE AS DAY'S. The paging cluster sits hard against the right edge on
+   * both pages, and the period's figures sit in the scaffold's centre slot on
+   * both — so the eye finds the same thing in the same place whichever temporal
+   * view it is on. The week's cycles keep the head because they name the week
+   * rather than measure it, and they sit inboard of the nav so the nav stays
+   * where Day's date is.
+   */
   private buildHead(): HTMLElement {
     const head = document.createElement('div')
     head.className = 'wk-head'
 
     const nav = document.createElement('div')
-    nav.className = 'wk-nav'
+    nav.className = 'kbn-view-nav wk-nav'
 
     const prev = navButton('‹', 'Previous week (←)', () => this.goWeek(-1))
     const next = navButton('›', 'Next week (→)', () => this.goWeek(1))
@@ -964,18 +975,23 @@ class WeekView implements TemporalView {
 
     nav.append(prev, label, next)
 
-    const totals = document.createElement('div')
-    totals.className = 'wk-totals'
-    this.totals = totals
-
     // Which cycle(s) this week falls inside — the week's place in something
     // longer than itself, in the marginal hand rather than the technical one.
     const cycles = document.createElement('div')
     cycles.className = 'wk-cycles'
     this.cycles = cycles
 
-    head.append(nav, totals, cycles)
+    head.append(cycles, nav)
     return head
+  }
+
+  /** What the week cost — the centre of the head, exactly where Day puts the
+   *  same sentence about a day. Out of flow there, so it cannot grow the row. */
+  private buildHeadFigures(): HTMLElement {
+    const totals = document.createElement('div')
+    totals.className = 'kbn-view-headfigures wk-totals'
+    this.totals = totals
+    return totals
   }
 
   /**
@@ -1567,7 +1583,10 @@ class WeekView implements TemporalView {
     host.textContent = ''
     if (cycles.length === 0) return
 
-    host.append(document.createTextNode('· in '))
+    // No leading '·': the separator was joining this clause to the totals that
+    // used to sit beside it, and the totals now live in the head's centre. A
+    // dot with nothing on its left is a fragment of a sentence.
+    host.append(document.createTextNode('in '))
     cycles.slice(0, CYCLE_CHIP_LIMIT).forEach((card, i) => {
       if (i > 0) host.append(document.createTextNode(', '))
       const chip = document.createElement('button')
@@ -1609,7 +1628,7 @@ class WeekView implements TemporalView {
 function navButton(glyph: string, title: string, onClick: () => void): HTMLElement {
   const el = document.createElement('button')
   el.type = 'button'
-  el.className = 'wk-navbtn'
+  el.className = 'kbn-view-chev wk-navbtn'
   el.textContent = glyph
   el.title = title
   el.setAttribute('aria-label', title)
@@ -1655,10 +1674,10 @@ function buildTickRow(): HTMLElement {
  */
 function buildKeyRow(): HTMLElement {
   const key = document.createElement('div')
-  key.className = 'wk-key'
+  key.className = 'kbn-view-key wk-key'
   for (const { kind, label } of ACTIVITY_KEY_ITEMS) {
     const item = document.createElement('span')
-    item.className = 'wk-key-item'
+    item.className = 'kbn-view-key-item wk-key-item'
     const glyph = document.createElement('span')
     glyph.className = `wk-key-glyph wk-key-${kind}`
     item.append(glyph, document.createTextNode(label))
@@ -1669,7 +1688,7 @@ function buildKeyRow(): HTMLElement {
   // rather than the wash. Kept out of ACTIVITY_KEY_ITEMS because that list is
   // about the curve's pigment, and a spine is not a pigment.
   const item = document.createElement('span')
-  item.className = 'wk-key-item'
+  item.className = 'kbn-view-key-item wk-key-item'
   const glyph = document.createElement('span')
   glyph.className = 'wk-key-glyph wk-key-spine'
   item.append(glyph, document.createTextNode(SPINE_KEY_LABEL))

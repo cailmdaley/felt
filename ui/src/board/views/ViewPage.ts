@@ -6,6 +6,13 @@
  * and may hang controls off `titleRow`; the scaffold owns the rest, so every
  * page sits at the same optical margin and wears the same head. Styles live
  * in ./views.css.
+ *
+ * THE HEAD IS ONE LINE HIGH ON EVERY PAGE. A view with something to say beyond
+ * its navigation used to say it on a second row, which made that view's head
+ * taller than its siblings' — and paging between Day and Week jogged the whole
+ * sheet down and up again. So the scaffold offers a third slot, `titleCenter`,
+ * held in the optical middle of the row and taken out of flow, so what it
+ * carries can never add height. Marginalia go there; controls stay on the ends.
  */
 
 import { appendCappedText } from '../KanbanSurfaces.js'
@@ -17,6 +24,14 @@ export interface ViewPage {
   body: HTMLElement
   /** The title row, for a view that wants to hang controls off its right edge. */
   titleRow: HTMLElement
+  /**
+   * The middle of the title row — centred on the sheet and OUT OF FLOW, so
+   * whatever is put here costs the head no height and moves neither end. For a
+   * line the page is stating, not a control the reader operates: nothing in
+   * here can grow the row, and a long line truncates rather than colliding
+   * with its neighbours.
+   */
+  titleCenter: HTMLElement
 }
 
 /**
@@ -36,13 +51,16 @@ export function createViewPage(title: string): ViewPage {
   const heading = document.createElement('h2')
   heading.className = 'kbn-view-title'
   appendCappedText(heading, title)
-  titleRow.append(heading)
+  const titleCenter = document.createElement('div')
+  titleCenter.className = 'kbn-view-titlecenter'
+
+  titleRow.append(heading, titleCenter)
 
   const body = document.createElement('div')
   body.className = 'kbn-view-body'
 
   root.append(titleRow, body)
-  return { root, body, titleRow }
+  return { root, body, titleRow, titleCenter }
 }
 
 /**
