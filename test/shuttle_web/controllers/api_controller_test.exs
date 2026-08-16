@@ -486,12 +486,15 @@ defmodule ShuttleWeb.APIControllerTest do
     Application.put_env(:shuttle, :remotes, [%{name: "cineca", url: "http://localhost:4002"}])
     Application.put_env(:shuttle, :write_forward_client, StubPostClient)
 
-    start_supervised!(
-      {Shuttle.RemoteFiberRegistry,
-       remotes: [%Shuttle.Remote{name: "cineca", url: "http://localhost:4002"}],
-       client: StubPostClient,
-       auto_poll: false}
-    )
+    start_supervised!({
+      Shuttle.RemoteFiberRegistry,
+      # No disk persistence: this stub feed must not reach the real
+      # `~/.shuttle/remote-fibers` store and outlive the test.
+      remotes: [%Shuttle.Remote{name: "cineca", url: "http://localhost:4002"}],
+      client: StubPostClient,
+      auto_poll: false,
+      store_dir: nil
+    })
 
     on_exit(fn ->
       restore_app_env(:remotes, previous_remotes)

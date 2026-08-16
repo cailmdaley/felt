@@ -218,12 +218,15 @@ defmodule ShuttleWeb.FeltEditControllerTest do
     start_supervised!({FeltEditForwardClient, forward_response})
     start_supervised!(FeltEditFeedClient)
 
-    start_supervised!(
-      {Shuttle.RemoteFiberRegistry,
-       remotes: [%{name: "candide", url: "http://localhost:4001"}],
-       client: FeltEditFeedClient,
-       auto_poll: false}
-    )
+    start_supervised!({
+      Shuttle.RemoteFiberRegistry,
+      # No disk persistence: this stub feed must not reach the real
+      # `~/.shuttle/remote-fibers` store and outlive the test.
+      remotes: [%{name: "candide", url: "http://localhost:4001"}],
+      client: FeltEditFeedClient,
+      auto_poll: false,
+      store_dir: nil
+    })
 
     previous_remotes = Application.get_env(:shuttle, :remotes)
     previous_client = Application.get_env(:shuttle, :write_forward_client)
@@ -381,5 +384,4 @@ defmodule ShuttleWeb.FeltEditControllerTest do
     assert conn.status == 200
     assert File.read!(args_file) =~ "--body\n\n"
   end
-
 end

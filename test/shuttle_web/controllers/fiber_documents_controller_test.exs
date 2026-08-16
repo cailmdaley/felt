@@ -926,7 +926,10 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
     # Start the registry under its DEFAULT name so the controller's feeds/0
     # call (which targets Shuttle.RemoteFiberRegistry) sees it.
     start_supervised!(
-      {RemoteFiberRegistry, remotes: [remote], client: StubFiberClient, auto_poll: false}
+      # store_dir: nil — this stub feed must not reach the real
+      # `~/.shuttle/remote-fibers` store and outlive the test.
+      {RemoteFiberRegistry,
+       remotes: [remote], client: StubFiberClient, auto_poll: false, store_dir: nil}
     )
 
     :ok = RemoteFiberRegistry.refresh_now()
@@ -1179,6 +1182,7 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
       # started as an `origin=` request or a local self-route) so the owner's
       # own local read never bounces this back a second hop.
       last = StubGetFileClient.last()
+
       assert URI.parse(last.url).path ==
                "/api/v1/fibers/science/cmbx/explorations/analysis-advance"
 
@@ -1334,7 +1338,9 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
       )
 
       no_block = get(api_conn(), "/api/v1/fibers/tests/no-shuttle?body=true")
-      assert %{"fibers" => [%{"fiber" => %{"body" => "Body one."}}]} = json_response(no_block, 200)
+
+      assert %{"fibers" => [%{"fiber" => %{"body" => "Body one."}}]} =
+               json_response(no_block, 200)
 
       no_host = get(api_conn(), "/api/v1/fibers/tests/host-less-shuttle?body=true")
       assert %{"fibers" => [%{"fiber" => %{"body" => "Body two."}}]} = json_response(no_host, 200)

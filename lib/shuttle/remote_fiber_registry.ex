@@ -35,12 +35,50 @@ defmodule Shuttle.RemoteFiberRegistry do
   its own workers' tmux liveness at serve time, so there is exactly one observer
   per fiber and no cross-observer disagreement to produce a column bounce.
 
+  ## Disk persistence
+
+  Since a fiber that names a `host` is served ONLY by that host's daemon, a
+  remote-owned card reaches this board through this cache and nowhere else — the
+  file is on every machine's loom, but only the owner is allowed to speak for
+  it. Memory-only caching therefore meant two real holes: a daemon restart
+  during an outage made every remote-owned card *vanish* rather than read
+  "waiting on <host>", and every boot had a warming gap where remote columns
+  blinked out.
+
+  So each remote's feed is written as JSON under
+  `$SHUTTLE_DATA_DIR/remote-fibers/<name>.json` on every success and read back at
+  `init`, exactly as `Shuttle.RemoteTemporalRegistry` does for the temporal
+  feeds. Two deliberate differences from that sibling:
+
+    * **Restored rows are stale by construction.** Temporal restores
+      `last_polled_at` and lets time do the work — at its ~30s cadence a
+      restored entry is essentially always past the grace window. This
+      registry's window is `stale_multiplier × poll_interval` (~10s at the
+      defaults), so a quick daemon bounce would serve restored rows as *fresh*.
+      An entry read from disk is last-known-good, not observed, so it carries
+      `restored?: true`, which forces `stale?/2` regardless of the clock, and
+      only a live success clears it. `last_polled_at` is restored unfaked, so
+      the board still reports "last seen at T" truthfully.
+
+    * **Only a warm success is written.** A cold empty 200 keeps last-good
+      fibers but adopts the cold feed's etag; persisting that pair would let a
+      restart restore warm rows behind a cold etag, whose first conditional
+      fetch 304s and would then mark those rows fresh. Writing only on results
+      that advance `last_polled_at` (a warm 200 and a 304) keeps the invariant
+      that a persisted etag always describes the persisted rows.
+
+  A live 200 replaces the restored rows wholesale, so disk can never resurrect a
+  fiber the owner has since dropped, closed, or reassigned. Read or write
+  failures are warm-start misses, never crashes and never a wipe of good
+  in-memory data.
+
   ## Test injection
 
   Like `RemoteRegistry`, the HTTP transport is the `Shuttle.RemoteRegistry.Client`
   behaviour so tests substitute a deterministic stub. Tests start the registry
   with `auto_poll: false` and drive it synchronously with `refresh_now/1`, which
-  fetches inline (no `Task`) so the stub's response is observable on return.
+  fetches inline (no `Task`) so the stub's response is observable on return, and
+  point `:store_dir` at a tmp dir.
   """
 
   use GenServer
@@ -62,6 +100,7 @@ defmodule Shuttle.RemoteFiberRegistry do
       :tick_interval_ms,
       :request_timeout_ms,
       :remotes_token,
+      :store_dir,
       reload_from_file?: false,
       feeds: %{},
       # ref => remote name, for the in-flight fetch guard
@@ -87,12 +126,28 @@ defmodule Shuttle.RemoteFiberRegistry do
       (a loaded remote's healthy `/fibers` latency is ~7-8s).
     * `:auto_poll` — schedule the background tick. Defaults to `true`; tests set
       `false` and drive deterministically with `refresh_now/1`.
+    * `:store_dir` — directory the per-remote JSON caches live in. Defaults to
+      `$SHUTTLE_DATA_DIR/remote-fibers` (`~/.shuttle/remote-fibers`); `nil`
+      disables persistence entirely.
     * `:name` — GenServer name. Defaults to `__MODULE__`.
   """
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
     name = Keyword.get(opts, :name, __MODULE__)
     GenServer.start_link(__MODULE__, opts, name: name)
+  end
+
+  @doc """
+  The default on-disk home for the per-remote feed caches, honoring the same env
+  the rest of the daemon's host-local state does.
+  """
+  @spec default_store_dir() :: String.t()
+  def default_store_dir do
+    Path.join(
+      System.get_env("SHUTTLE_DATA_DIR") ||
+        Path.join(System.user_home!() || "/root", ".shuttle"),
+      "remote-fibers"
+    )
   end
 
   @doc """
@@ -177,6 +232,8 @@ defmodule Shuttle.RemoteFiberRegistry do
   @impl true
   def init(opts) do
     remotes = RegistryCommon.configured_remotes(opts)
+    store_dir = Keyword.get(opts, :store_dir, default_store_dir())
+    persisted = load_all(store_dir)
 
     state = %State{
       remotes: remotes,
@@ -188,7 +245,11 @@ defmodule Shuttle.RemoteFiberRegistry do
       task_supervisor: Keyword.get(opts, :task_supervisor, Shuttle.TaskSupervisor),
       tick_interval_ms: Keyword.get(opts, :tick_interval_ms, @default_tick_interval_ms),
       request_timeout_ms: Keyword.get(opts, :request_timeout_ms, @default_request_timeout_ms),
-      feeds: Map.new(remotes, fn remote -> {remote.name, initial_entry(remote)} end)
+      store_dir: store_dir,
+      feeds:
+        Map.new(remotes, fn remote ->
+          {remote.name, restore(Map.get(persisted, safe_name(remote.name)), remote)}
+        end)
     }
 
     auto_poll = Keyword.get(opts, :auto_poll, true)
@@ -221,7 +282,7 @@ defmodule Shuttle.RemoteFiberRegistry do
       Enum.reduce(state.remotes, state.feeds, fn remote, acc ->
         entry = Map.get(acc, remote.name, initial_entry(remote))
         result = fetch_fibers(remote, state.client, state.request_timeout_ms, entry[:etag])
-        Map.put(acc, remote.name, apply_result(entry, result, now))
+        Map.put(acc, remote.name, apply_and_persist(state, remote.name, entry, result, now))
       end)
 
     {:reply, :ok, %{state | feeds: feeds}}
@@ -233,8 +294,8 @@ defmodule Shuttle.RemoteFiberRegistry do
         now = DateTime.utc_now()
         entry = Map.get(state.feeds, remote.name, initial_entry(remote))
         result = fetch_fibers(remote, state.client, state.request_timeout_ms, entry[:etag])
-        feeds = Map.put(state.feeds, remote.name, apply_result(entry, result, now))
-        {:reply, :ok, %{state | feeds: feeds}}
+        updated = apply_and_persist(state, remote.name, entry, result, now)
+        {:reply, :ok, %{state | feeds: Map.put(state.feeds, remote.name, updated)}}
 
       nil ->
         {:reply, {:error, :not_configured}, state}
@@ -349,8 +410,8 @@ defmodule Shuttle.RemoteFiberRegistry do
 
       {_name, tasks} ->
         entry = Map.get(state.feeds, name, initial_entry_for(state, name))
-        feeds = Map.put(state.feeds, name, apply_result(entry, result, DateTime.utc_now()))
-        %{state | tasks: tasks, feeds: feeds}
+        updated = apply_and_persist(state, name, entry, result, DateTime.utc_now())
+        %{state | tasks: tasks, feeds: Map.put(state.feeds, name, updated)}
     end
   end
 
@@ -442,6 +503,10 @@ defmodule Shuttle.RemoteFiberRegistry do
       # the board renders "stale as of T" instead of "down".
       etag: nil,
       cache: nil,
+      # True while `fibers` came off disk rather than off the wire: the rows are
+      # last-known-good, so they are stale until a live poll succeeds no matter
+      # what the clock says.
+      restored?: false,
       remote: remote
     }
   end
@@ -458,7 +523,8 @@ defmodule Shuttle.RemoteFiberRegistry do
           last_attempt_at: nil,
           last_error: nil,
           etag: nil,
-          cache: nil
+          cache: nil,
+          restored?: false
         }
     end
   end
@@ -471,13 +537,18 @@ defmodule Shuttle.RemoteFiberRegistry do
   # 304 Not Modified: the feed is unchanged. Keep last-good fibers and etag,
   # refresh the cache metadata from the header (so `refreshed_at`/`state` track),
   # and advance the success timestamps so staleness clears.
+  #
+  # A 304 also settles a restored entry: only a warm success is ever written to
+  # disk, so a matching etag means the owner's feed still equals the rows we
+  # restored — they are now observed, not merely remembered.
   defp apply_result(entry, {:ok, {:not_modified, cache}}, now) do
     %{
       entry
       | cache: cache || entry.cache,
         last_polled_at: now,
         last_attempt_at: now,
-        last_error: nil
+        last_error: nil,
+        restored?: false
     }
   end
 
@@ -486,11 +557,15 @@ defmodule Shuttle.RemoteFiberRegistry do
   # regression the deleted live fallback used to avoid. Keep last-good fibers,
   # refresh etag/cache, clear the error, but do NOT advance `last_polled_at`:
   # staleness stays honest (time-since-last-WARM-success) until a warm feed
-  # arrives.
+  # arrives. `restored?` is left alone for the same reason: a cold feed has not
+  # confirmed the rows we restored, so they stay flagged as remembered.
   defp apply_result(entry, {:ok, {[], etag, %{"state" => "cold"} = cache}}, now) do
     %{entry | etag: etag, cache: cache, last_attempt_at: now, last_error: nil}
   end
 
+  # A warm 200 REPLACES the rows wholesale — restored or not — so nothing on
+  # disk can resurrect a fiber the owner has since dropped, closed, or handed to
+  # another host.
   defp apply_result(entry, {:ok, {fibers, etag, cache}}, now) do
     %{
       entry
@@ -499,7 +574,8 @@ defmodule Shuttle.RemoteFiberRegistry do
         cache: cache,
         last_polled_at: now,
         last_attempt_at: now,
-        last_error: nil
+        last_error: nil,
+        restored?: false
     }
   end
 
@@ -554,6 +630,14 @@ defmodule Shuttle.RemoteFiberRegistry do
   # letting time accrue. This is the hysteresis: a success flips `stale?` to
   # false INSTANTLY (fast recovery), while a failure only slowly ages toward the
   # alarm.
+  #
+  # One clause comes before the clock: rows read off disk at boot are
+  # last-known-good, never observed, so they are stale until a live poll lands
+  # however recently the file was written. That is what makes the board say
+  # "waiting on <host>" over a restored column instead of implying it just
+  # checked.
+  defp stale?(%{restored?: true}, _now), do: true
+
   defp stale?(%{remote: %Remote{} = remote, last_polled_at: last}, now) do
     Remote.stale?(remote, last, now)
   end
@@ -562,4 +646,125 @@ defmodule Shuttle.RemoteFiberRegistry do
   # fallback): an unknown/unconfigured remote can't be time-checked, so treat as
   # stale.
   defp stale?(_entry, _now), do: true
+
+  # ── Disk persistence ──
+  #
+  # One JSON file per remote, written atomically (tmp + rename) so a crash
+  # mid-write cannot leave a half-file that poisons the next boot. Same shape of
+  # discipline as `Shuttle.RemoteTemporalRegistry`: every read and every write is
+  # best-effort, and a failure at either end is a warm-start miss, never a crash
+  # and never a wipe of good in-memory data.
+  #
+  # The `:remote` struct is deliberately NOT persisted: it is fleet config, and
+  # config is authoritative at boot. Restoring a month-old port would be exactly
+  # the bug this avoids.
+
+  # Only a result that advanced `last_polled_at` is worth remembering — see the
+  # moduledoc on why a cold 200's etag must never reach disk — and a failed poll
+  # has nothing new to say, so the file keeps the last warm truth.
+  defp apply_and_persist(%State{} = state, name, entry, result, now) do
+    updated = apply_result(entry, result, now)
+
+    if updated.last_polled_at != entry.last_polled_at do
+      persist(state.store_dir, name, updated)
+    end
+
+    updated
+  end
+
+  defp persist(nil, _name, _entry), do: :ok
+
+  defp persist(dir, name, entry) do
+    File.mkdir_p!(dir)
+    path = Path.join(dir, "#{safe_name(name)}.json")
+    tmp = path <> ".tmp"
+    File.write!(tmp, Jason.encode!(encode_entry(entry)))
+    File.rename!(tmp, path)
+    :ok
+  rescue
+    error ->
+      Logger.debug("RemoteFiberRegistry: persist for #{name} failed — #{inspect(error)}")
+      :ok
+  end
+
+  # A remote name is a routing key and a hostname, but it reaches a path here,
+  # so anything that is not a plain filename character is flattened.
+  defp safe_name(name), do: String.replace(name, ~r/[^A-Za-z0-9_.-]/, "_")
+
+  defp encode_entry(entry) do
+    %{
+      "fibers" => entry.fibers,
+      "etag" => entry.etag,
+      "cache" => entry.cache,
+      "last_polled_at" => encode_dt(entry.last_polled_at)
+    }
+  end
+
+  defp encode_dt(%DateTime{} = dt), do: DateTime.to_iso8601(dt)
+  defp encode_dt(_), do: nil
+
+  defp load_all(nil), do: %{}
+
+  defp load_all(dir) do
+    case File.ls(dir) do
+      {:ok, files} ->
+        files
+        |> Enum.filter(&String.ends_with?(&1, ".json"))
+        |> Map.new(fn file -> {Path.rootname(file), load_file(Path.join(dir, file))} end)
+
+      _ ->
+        %{}
+    end
+  end
+
+  defp load_file(path) do
+    with {:ok, raw} <- File.read(path),
+         {:ok, %{} = decoded} <- Jason.decode(raw) do
+      decoded
+    else
+      _ -> nil
+    end
+  end
+
+  # A restored entry carries its rows, its etag (so the first poll can 304
+  # against the very feed it remembers), the owner's last cache block, and the
+  # instant of the poll that produced them — unfaked, so the board reports "last
+  # seen at T". `restored?` keeps it stale until a live poll lands, and
+  # `last_attempt_at` stays nil so that poll goes out on the first tick.
+  defp restore(nil, remote), do: initial_entry(remote)
+
+  defp restore(%{} = persisted, remote) do
+    case list_or_nil(persisted["fibers"]) do
+      nil ->
+        initial_entry(remote)
+
+      fibers ->
+        %{
+          initial_entry(remote)
+          | fibers: fibers,
+            etag: string_or_nil(persisted["etag"]),
+            cache: map_or_nil(persisted["cache"]),
+            last_polled_at: decode_dt(persisted["last_polled_at"]),
+            restored?: true
+        }
+    end
+  end
+
+  defp list_or_nil(value) when is_list(value), do: value
+  defp list_or_nil(_), do: nil
+
+  defp string_or_nil(value) when is_binary(value), do: value
+  defp string_or_nil(_), do: nil
+
+  defp map_or_nil(%{} = value), do: value
+  defp map_or_nil(_), do: nil
+
+  defp decode_dt(value) when is_binary(value) do
+    case DateTime.from_iso8601(value) do
+      {:ok, dt, _offset} -> dt
+      _ -> nil
+    end
+  end
+
+  defp decode_dt(_), do: nil
 end

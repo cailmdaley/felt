@@ -70,7 +70,14 @@ defmodule Shuttle.RemoteFiberRegistryTest do
   setup do
     start_supervised!(MockClient)
     MockClient.reset()
-    :ok
+
+    # Every registry gets its own on-disk store: the default would be the real
+    # `~/.shuttle/remote-fibers`, and a suite must not write there — nor read a
+    # developer's live cache into a test's feeds.
+    dir = Path.join(System.tmp_dir!(), "rfr-store-#{System.unique_integer([:positive])}")
+    on_exit(fn -> File.rm_rf(dir) end)
+
+    {:ok, dir: dir}
   end
 
   defp candide(opts \\ []) do
@@ -131,13 +138,17 @@ defmodule Shuttle.RemoteFiberRegistryTest do
   end
 
   describe "fetch + cache" do
-    test "caches a successful feed and exposes its fibers, fresh" do
+    test "caches a successful feed and exposes its fibers, fresh", %{dir: dir} do
       MockClient.set(Remote.fibers_url(candide()), {:ok, feed_body([sample_fiber("foo")])})
 
       pid =
         start_supervised!(
           {RemoteFiberRegistry,
-           name: :reg_happy, remotes: [candide()], client: MockClient, auto_poll: false}
+           name: :reg_happy,
+           remotes: [candide()],
+           client: MockClient,
+           auto_poll: false,
+           store_dir: dir}
         )
 
       :ok = RemoteFiberRegistry.refresh_now(pid)
@@ -151,14 +162,18 @@ defmodule Shuttle.RemoteFiberRegistryTest do
                entry.fibers
     end
 
-    test "refresh updates a single remote feed immediately" do
+    test "refresh updates a single remote feed immediately", %{dir: dir} do
       url = Remote.fibers_url(candide())
       MockClient.set(url, {:ok, feed_body([sample_fiber("before")])})
 
       pid =
         start_supervised!(
           {RemoteFiberRegistry,
-           name: :reg_single_refresh, remotes: [candide()], client: MockClient, auto_poll: false}
+           name: :reg_single_refresh,
+           remotes: [candide()],
+           client: MockClient,
+           auto_poll: false,
+           store_dir: dir}
         )
 
       :ok = RemoteFiberRegistry.refresh_now(pid)
@@ -174,7 +189,9 @@ defmodule Shuttle.RemoteFiberRegistryTest do
                RemoteFiberRegistry.feeds(pid)
     end
 
-    test "a SINGLE failed poll after a success does not flip stale, keeps last-good fibers" do
+    test "a SINGLE failed poll after a success does not flip stale, keeps last-good fibers", %{
+      dir: dir
+    } do
       url = Remote.fibers_url(candide())
       MockClient.set(url, {:ok, feed_body([sample_fiber("foo")])})
 
@@ -188,7 +205,8 @@ defmodule Shuttle.RemoteFiberRegistryTest do
            name: :reg_blip,
            remotes: [candide(poll_interval_ms: 60_000)],
            client: MockClient,
-           auto_poll: false}
+           auto_poll: false,
+           store_dir: dir}
         )
 
       :ok = RemoteFiberRegistry.refresh_now(pid)
@@ -205,14 +223,18 @@ defmodule Shuttle.RemoteFiberRegistryTest do
       assert [%{"fiber" => %{"id" => "foo"}}] = entry.fibers
     end
 
-    test "malformed JSON on a never-succeeded feed reads stale (nil last-success)" do
+    test "malformed JSON on a never-succeeded feed reads stale (nil last-success)", %{dir: dir} do
       url = Remote.fibers_url(candide())
       MockClient.set(url, {:ok, "{not json"})
 
       pid =
         start_supervised!(
           {RemoteFiberRegistry,
-           name: :reg_garbage, remotes: [candide()], client: MockClient, auto_poll: false}
+           name: :reg_garbage,
+           remotes: [candide()],
+           client: MockClient,
+           auto_poll: false,
+           store_dir: dir}
         )
 
       :ok = RemoteFiberRegistry.refresh_now(pid)
@@ -221,14 +243,18 @@ defmodule Shuttle.RemoteFiberRegistryTest do
                RemoteFiberRegistry.feeds(pid)
     end
 
-    test "a well-formed envelope without a fibers key yields zero fibers, fresh" do
+    test "a well-formed envelope without a fibers key yields zero fibers, fresh", %{dir: dir} do
       url = Remote.fibers_url(candide())
       MockClient.set(url, {:ok, Jason.encode!(%{"host" => "candide", "error" => "felt_busy"})})
 
       pid =
         start_supervised!(
           {RemoteFiberRegistry,
-           name: :reg_empty, remotes: [candide()], client: MockClient, auto_poll: false}
+           name: :reg_empty,
+           remotes: [candide()],
+           client: MockClient,
+           auto_poll: false,
+           store_dir: dir}
         )
 
       :ok = RemoteFiberRegistry.refresh_now(pid)
@@ -238,7 +264,9 @@ defmodule Shuttle.RemoteFiberRegistryTest do
   end
 
   describe "conditional fetch (etag / 304)" do
-    test "a 304 keeps last-good fibers and advances last_polled_at (clears staleness)" do
+    test "a 304 keeps last-good fibers and advances last_polled_at (clears staleness)", %{
+      dir: dir
+    } do
       # Generous poll_interval so freshness is stable across the assertions; the
       # point is that the 304 SUCCEEDS (keeps fibers, advances the success clock),
       # not the time-based staleness edge (covered elsewhere).
@@ -249,7 +277,7 @@ defmodule Shuttle.RemoteFiberRegistryTest do
       pid =
         start_supervised!(
           {RemoteFiberRegistry,
-           name: :reg_304, remotes: [remote], client: MockClient, auto_poll: false}
+           name: :reg_304, remotes: [remote], client: MockClient, auto_poll: false, store_dir: dir}
         )
 
       # First fetch: 200, stores the feed AND the etag.
@@ -273,14 +301,18 @@ defmodule Shuttle.RemoteFiberRegistryTest do
       assert DateTime.compare(second.last_polled_at, t1) == :gt
     end
 
-    test "a changed body busts the etag and delivers the new feed (200)" do
+    test "a changed body busts the etag and delivers the new feed (200)", %{dir: dir} do
       url = Remote.fibers_url(candide())
       MockClient.set(url, {:ok, feed_body([sample_fiber("before")])})
 
       pid =
         start_supervised!(
           {RemoteFiberRegistry,
-           name: :reg_etag_change, remotes: [candide()], client: MockClient, auto_poll: false}
+           name: :reg_etag_change,
+           remotes: [candide()],
+           client: MockClient,
+           auto_poll: false,
+           store_dir: dir}
         )
 
       :ok = RemoteFiberRegistry.refresh_now(pid)
@@ -297,7 +329,7 @@ defmodule Shuttle.RemoteFiberRegistryTest do
                RemoteFiberRegistry.feeds(pid)
     end
 
-    test "a 304 refreshes cache metadata from the x-shuttle-cache header (no freeze)" do
+    test "a 304 refreshes cache metadata from the x-shuttle-cache header (no freeze)", %{dir: dir} do
       remote = candide(poll_interval_ms: 60_000)
       url = Remote.fibers_url(remote)
 
@@ -314,7 +346,11 @@ defmodule Shuttle.RemoteFiberRegistryTest do
       pid =
         start_supervised!(
           {RemoteFiberRegistry,
-           name: :reg_304_cache, remotes: [remote], client: MockClient, auto_poll: false}
+           name: :reg_304_cache,
+           remotes: [remote],
+           client: MockClient,
+           auto_poll: false,
+           store_dir: dir}
         )
 
       :ok = RemoteFiberRegistry.refresh_now(pid)
@@ -334,7 +370,9 @@ defmodule Shuttle.RemoteFiberRegistryTest do
       assert [%{"fiber" => %{"id" => "foo"}}] = entry.fibers
     end
 
-    test "a cold empty 200 keeps last-good fibers and does NOT advance last_polled_at" do
+    test "a cold empty 200 keeps last-good fibers and does NOT advance last_polled_at", %{
+      dir: dir
+    } do
       remote = candide(poll_interval_ms: 60_000)
       url = Remote.fibers_url(remote)
 
@@ -350,7 +388,11 @@ defmodule Shuttle.RemoteFiberRegistryTest do
       pid =
         start_supervised!(
           {RemoteFiberRegistry,
-           name: :reg_cold_keep, remotes: [remote], client: MockClient, auto_poll: false}
+           name: :reg_cold_keep,
+           remotes: [remote],
+           client: MockClient,
+           auto_poll: false,
+           store_dir: dir}
         )
 
       :ok = RemoteFiberRegistry.refresh_now(pid)
@@ -376,7 +418,7 @@ defmodule Shuttle.RemoteFiberRegistryTest do
       assert second.cache["state"] == "cold"
     end
 
-    test "carries the server's cache staleness metadata into the feed" do
+    test "carries the server's cache staleness metadata into the feed", %{dir: dir} do
       url = Remote.fibers_url(candide())
 
       body =
@@ -391,7 +433,11 @@ defmodule Shuttle.RemoteFiberRegistryTest do
       pid =
         start_supervised!(
           {RemoteFiberRegistry,
-           name: :reg_cache_meta, remotes: [candide()], client: MockClient, auto_poll: false}
+           name: :reg_cache_meta,
+           remotes: [candide()],
+           client: MockClient,
+           auto_poll: false,
+           store_dir: dir}
         )
 
       :ok = RemoteFiberRegistry.refresh_now(pid)
@@ -402,7 +448,7 @@ defmodule Shuttle.RemoteFiberRegistryTest do
   end
 
   describe "background tick (async Task path)" do
-    test "auto-poll populates the feed via the supervised Task, not inline" do
+    test "auto-poll populates the feed via the supervised Task, not inline", %{dir: dir} do
       MockClient.set(Remote.fibers_url(candide()), {:ok, feed_body([sample_fiber("foo")])})
 
       # auto_poll: true exercises the real production path: the tick spawns a
@@ -421,7 +467,8 @@ defmodule Shuttle.RemoteFiberRegistryTest do
            remotes: [candide(poll_interval_ms: 60_000)],
            client: MockClient,
            tick_interval_ms: 5,
-           auto_poll: true}
+           auto_poll: true,
+           store_dir: dir}
         )
 
       entry = wait_for_feed(pid, "candide")
@@ -431,14 +478,18 @@ defmodule Shuttle.RemoteFiberRegistryTest do
   end
 
   describe "staleness over time" do
-    test "a feed older than stale_multiplier × poll_interval reads stale" do
+    test "a feed older than stale_multiplier × poll_interval reads stale", %{dir: dir} do
       remote = candide(poll_interval_ms: 1, stale_multiplier: 1)
       MockClient.set(Remote.fibers_url(remote), {:ok, feed_body([sample_fiber("foo")])})
 
       pid =
         start_supervised!(
           {RemoteFiberRegistry,
-           name: :reg_time_stale, remotes: [remote], client: MockClient, auto_poll: false}
+           name: :reg_time_stale,
+           remotes: [remote],
+           client: MockClient,
+           auto_poll: false,
+           store_dir: dir}
         )
 
       :ok = RemoteFiberRegistry.refresh_now(pid)
@@ -448,7 +499,9 @@ defmodule Shuttle.RemoteFiberRegistryTest do
       assert %{"candide" => %{stale: true}} = RemoteFiberRegistry.feeds(pid)
     end
 
-    test "sustained failure past the grace window DOES go stale, keeping last-good fibers" do
+    test "sustained failure past the grace window DOES go stale, keeping last-good fibers", %{
+      dir: dir
+    } do
       # Tiny threshold (1ms × 1) so the grace elapses within the test. A success
       # stamps last_polled_at; a subsequent failure leaves it untouched; once
       # real time exceeds the threshold the feed reads stale — the slow alarm.
@@ -459,7 +512,11 @@ defmodule Shuttle.RemoteFiberRegistryTest do
       pid =
         start_supervised!(
           {RemoteFiberRegistry,
-           name: :reg_sustained_fail, remotes: [remote], client: MockClient, auto_poll: false}
+           name: :reg_sustained_fail,
+           remotes: [remote],
+           client: MockClient,
+           auto_poll: false,
+           store_dir: dir}
         )
 
       :ok = RemoteFiberRegistry.refresh_now(pid)
@@ -476,7 +533,7 @@ defmodule Shuttle.RemoteFiberRegistryTest do
       assert [%{"fiber" => %{"id" => "foo"}}] = entry.fibers
     end
 
-    test "a fresh success clears staleness immediately (fast recovery)" do
+    test "a fresh success clears staleness immediately (fast recovery)", %{dir: dir} do
       remote = candide(poll_interval_ms: 1, stale_multiplier: 1)
       url = Remote.fibers_url(remote)
       MockClient.set(url, {:ok, feed_body([sample_fiber("foo")])})
@@ -484,7 +541,11 @@ defmodule Shuttle.RemoteFiberRegistryTest do
       pid =
         start_supervised!(
           {RemoteFiberRegistry,
-           name: :reg_fast_recover, remotes: [remote], client: MockClient, auto_poll: false}
+           name: :reg_fast_recover,
+           remotes: [remote],
+           client: MockClient,
+           auto_poll: false,
+           store_dir: dir}
         )
 
       :ok = RemoteFiberRegistry.refresh_now(pid)
@@ -500,7 +561,7 @@ defmodule Shuttle.RemoteFiberRegistryTest do
                RemoteFiberRegistry.feeds(pid)
     end
 
-    test "a never-polled feed (nil last-success) is stale" do
+    test "a never-polled feed (nil last-success) is stale", %{dir: dir} do
       # No refresh_now, no auto_poll: last_polled_at stays nil, so the feed is
       # stale from birth via Remote.stale?/3's nil clause.
       MockClient.set(Remote.fibers_url(candide()), {:ok, feed_body([sample_fiber("foo")])})
@@ -508,7 +569,11 @@ defmodule Shuttle.RemoteFiberRegistryTest do
       pid =
         start_supervised!(
           {RemoteFiberRegistry,
-           name: :reg_never_polled, remotes: [candide()], client: MockClient, auto_poll: false}
+           name: :reg_never_polled,
+           remotes: [candide()],
+           client: MockClient,
+           auto_poll: false,
+           store_dir: dir}
         )
 
       assert %{"candide" => %{stale: true, fibers: []}} = RemoteFiberRegistry.feeds(pid)
@@ -544,7 +609,7 @@ defmodule Shuttle.RemoteFiberRegistryTest do
     defp write_fleet(path, entries),
       do: File.write!(path, Jason.encode!(%{"version" => 1, "remotes" => entries}))
 
-    test "an added remote joins the board and a removed one leaves it", %{path: path} do
+    test "an added remote joins the board and a removed one leaves it", %{dir: dir, path: path} do
       write_fleet(path, [%{"name" => "candide", "port" => 4001}])
 
       MockClient.set(
@@ -554,7 +619,8 @@ defmodule Shuttle.RemoteFiberRegistryTest do
 
       pid =
         start_supervised!(
-          {RemoteFiberRegistry, name: :rfr_fleet, client: MockClient, auto_poll: false}
+          {RemoteFiberRegistry,
+           name: :rfr_fleet, client: MockClient, auto_poll: false, store_dir: dir}
         )
 
       :ok = RemoteFiberRegistry.refresh_now(pid)
@@ -584,14 +650,18 @@ defmodule Shuttle.RemoteFiberRegistryTest do
       assert Map.keys(RemoteFiberRegistry.feeds(pid)) == ["cineca"]
     end
 
-    test "an explicit :remotes opt pins the list against the file", %{path: path} do
+    test "an explicit :remotes opt pins the list against the file", %{dir: dir, path: path} do
       write_fleet(path, [%{"name" => "from-file", "port" => 4001}])
       MockClient.set(Remote.fibers_url(candide()), {:ok, feed_body([sample_fiber("a")])})
 
       pid =
         start_supervised!(
           {RemoteFiberRegistry,
-           name: :rfr_fleet_pinned, remotes: [candide()], client: MockClient, auto_poll: false}
+           name: :rfr_fleet_pinned,
+           remotes: [candide()],
+           client: MockClient,
+           auto_poll: false,
+           store_dir: dir}
         )
 
       write_fleet(path, [
@@ -601,6 +671,239 @@ defmodule Shuttle.RemoteFiberRegistryTest do
 
       :ok = RemoteFiberRegistry.refresh_now(pid)
       assert Map.keys(RemoteFiberRegistry.feeds(pid)) == ["candide"]
+    end
+  end
+
+  # ── Disk persistence ──
+  #
+  # A remote-owned fiber reaches this board through this cache and nowhere else,
+  # so the cache has to outlive the process: without it, a daemon restart while
+  # a host is unreachable makes that host's cards vanish instead of reading
+  # "waiting on <host>".
+
+  describe "disk persistence" do
+    # A fresh GenServer over the same store_dir — the restart under test. Each
+    # start needs its own supervisor child id as well as its own name.
+    defp boot(dir, opts) do
+      id = :"rfr_disk_#{System.unique_integer([:positive])}"
+
+      start_supervised!(
+        {RemoteFiberRegistry,
+         Keyword.merge(
+           [
+             name: id,
+             remotes: [candide(poll_interval_ms: 60_000)],
+             client: MockClient,
+             auto_poll: false,
+             store_dir: dir
+           ],
+           opts
+         )},
+        id: id
+      )
+
+      id
+    end
+
+    defp store_path(dir, name \\ "candide"), do: Path.join(dir, "#{name}.json")
+
+    test "a successful poll writes the remote's feed to disk", %{dir: dir} do
+      MockClient.set(Remote.fibers_url(candide()), {:ok, feed_body([sample_fiber("foo")])})
+
+      reg = boot(dir, [])
+      :ok = RemoteFiberRegistry.refresh_now(reg)
+
+      assert {:ok, raw} = File.read(store_path(dir))
+
+      assert %{"fibers" => [%{"fiber" => %{"id" => "foo"}}], "last_polled_at" => at} =
+               Jason.decode!(raw)
+
+      assert {:ok, %DateTime{}, _} = DateTime.from_iso8601(at)
+    end
+
+    test "a restart serves the persisted rows, and they read STALE until a live poll", %{dir: dir} do
+      MockClient.set(Remote.fibers_url(candide()), {:ok, feed_body([sample_fiber("foo")])})
+
+      first = boot(dir, [])
+      :ok = RemoteFiberRegistry.refresh_now(first)
+      assert %{"candide" => %{stale: false}} = RemoteFiberRegistry.feeds(first)
+      stop_supervised!(first)
+
+      # The new daemon has never spoken to candide. Its rows are last-known-good,
+      # so the board shows them — flagged stale, which is what renders
+      # "⌛ waiting on candide" rather than implying a fresh observation. The
+      # 60s poll_interval means the CLOCK would call this feed fresh; only the
+      # restored flag keeps it honest.
+      second = boot(dir, [])
+      assert %{"candide" => restored} = RemoteFiberRegistry.feeds(second)
+      assert [%{"fiber" => %{"id" => "foo"}}] = restored.fibers
+      assert restored.stale == true
+      assert restored.last_error == nil
+      # `last_polled_at` is restored unfaked, so "last seen at T" is true.
+      assert %DateTime{} = restored.last_polled_at
+
+      # An unreachable owner leaves the restored rows exactly as they are.
+      MockClient.set(Remote.fibers_url(candide()), {:error, :econnrefused})
+      :ok = RemoteFiberRegistry.refresh_now(second)
+      assert %{"candide" => still} = RemoteFiberRegistry.feeds(second)
+      assert [%{"fiber" => %{"id" => "foo"}}] = still.fibers
+      assert still.stale == true
+
+      # The host comes back: one live success and the feed is fresh again.
+      MockClient.set(Remote.fibers_url(candide()), {:ok, feed_body([sample_fiber("foo")])})
+      :ok = RemoteFiberRegistry.refresh_now(second)
+      assert %{"candide" => %{stale: false}} = RemoteFiberRegistry.feeds(second)
+    end
+
+    test "a live poll REPLACES restored rows — disk never resurrects a dropped fiber", %{dir: dir} do
+      url = Remote.fibers_url(candide())
+      MockClient.set(url, {:ok, feed_body([sample_fiber("kept"), sample_fiber("dropped")])})
+
+      first = boot(dir, [])
+      :ok = RemoteFiberRegistry.refresh_now(first)
+      stop_supervised!(first)
+
+      second = boot(dir, [])
+      assert %{"candide" => %{fibers: [_, _]}} = RemoteFiberRegistry.feeds(second)
+
+      # The owner has since closed "dropped". Its smaller feed wins outright.
+      MockClient.set(url, {:ok, feed_body([sample_fiber("kept")])})
+      :ok = RemoteFiberRegistry.refresh_now(second)
+
+      assert %{"candide" => %{stale: false, fibers: [%{"fiber" => %{"id" => "kept"}}]}} =
+               RemoteFiberRegistry.feeds(second)
+
+      # And the file was rewritten, so the next restart cannot bring it back.
+      stop_supervised!(second)
+      third = boot(dir, [])
+
+      assert %{"candide" => %{fibers: [%{"fiber" => %{"id" => "kept"}}]}} =
+               RemoteFiberRegistry.feeds(third)
+    end
+
+    test "a 304 against a restored etag confirms the rows (fresh, no refetch)", %{dir: dir} do
+      MockClient.set(Remote.fibers_url(candide()), {:ok, feed_body([sample_fiber("foo")])})
+
+      first = boot(dir, [])
+      :ok = RemoteFiberRegistry.refresh_now(first)
+      stop_supervised!(first)
+
+      # The etag rides to disk with the rows it describes, so the restarted
+      # daemon's first conditional fetch 304s — and a 304 means the owner's feed
+      # still equals what we restored, which settles it as observed.
+      second = boot(dir, [])
+      assert %{"candide" => %{stale: true}} = RemoteFiberRegistry.feeds(second)
+
+      :ok = RemoteFiberRegistry.refresh_now(second)
+
+      assert %{"candide" => %{stale: false, fibers: [%{"fiber" => %{"id" => "foo"}}]}} =
+               RemoteFiberRegistry.feeds(second)
+    end
+
+    test "a cold empty 200 is not written, so a restart keeps the last WARM rows", %{dir: dir} do
+      url = Remote.fibers_url(candide())
+      MockClient.set(url, {:ok, feed_body([sample_fiber("foo")])})
+
+      first = boot(dir, [])
+      :ok = RemoteFiberRegistry.refresh_now(first)
+
+      # The owner restarts and serves a cold empty feed. In memory the rows are
+      # kept; on disk nothing moves — persisting the cold etag beside warm rows
+      # would let the restart's first 304 declare remembered rows fresh.
+      MockClient.set(
+        url,
+        {:ok,
+         Jason.encode!(%{"host" => "candide", "fibers" => [], "cache" => %{"state" => "cold"}})}
+      )
+
+      :ok = RemoteFiberRegistry.refresh_now(first)
+      stop_supervised!(first)
+
+      second = boot(dir, [])
+      assert %{"candide" => entry} = RemoteFiberRegistry.feeds(second)
+      assert [%{"fiber" => %{"id" => "foo"}}] = entry.fibers
+      assert entry.stale == true
+
+      # And this is why the cold etag must stay off disk: the owner is STILL
+      # cold, so the restarted daemon's first fetch must be a 200 of the cold
+      # feed (rows kept, still remembered) — not a 304 against a cold etag, which
+      # would have declared the remembered rows freshly observed.
+      :ok = RemoteFiberRegistry.refresh_now(second)
+      assert %{"candide" => after_cold} = RemoteFiberRegistry.feeds(second)
+      assert [%{"fiber" => %{"id" => "foo"}}] = after_cold.fibers
+      assert after_cold.stale == true
+
+      # The owner warms up: the live rows land and the feed is fresh.
+      MockClient.set(url, {:ok, feed_body([sample_fiber("foo")])})
+      :ok = RemoteFiberRegistry.refresh_now(second)
+      assert %{"candide" => %{stale: false}} = RemoteFiberRegistry.feeds(second)
+    end
+
+    test "a corrupt file is a warm-start miss, not a crash", %{dir: dir} do
+      File.mkdir_p!(dir)
+      File.write!(store_path(dir), "{not json")
+      MockClient.set(Remote.fibers_url(candide()), {:ok, feed_body([sample_fiber("foo")])})
+
+      reg = boot(dir, [])
+      assert %{"candide" => %{fibers: [], stale: true}} = RemoteFiberRegistry.feeds(reg)
+
+      # The registry is otherwise untouched: the next poll works and rewrites it.
+      :ok = RemoteFiberRegistry.refresh_now(reg)
+      assert %{"candide" => %{stale: false, fibers: [_]}} = RemoteFiberRegistry.feeds(reg)
+      assert %{"fibers" => [_]} = Jason.decode!(File.read!(store_path(dir)))
+    end
+
+    test "a well-formed file without a fibers list restores nothing", %{dir: dir} do
+      File.mkdir_p!(dir)
+
+      File.write!(
+        store_path(dir),
+        Jason.encode!(%{"etag" => ~s("x"), "last_polled_at" => "nope"})
+      )
+
+      MockClient.set(Remote.fibers_url(candide()), {:ok, feed_body([sample_fiber("foo")])})
+
+      reg = boot(dir, [])
+
+      assert %{"candide" => %{fibers: [], stale: true, last_polled_at: nil}} =
+               RemoteFiberRegistry.feeds(reg)
+    end
+
+    test "a missing store dir is a warm-start miss", %{dir: dir} do
+      MockClient.set(Remote.fibers_url(candide()), {:ok, feed_body([sample_fiber("foo")])})
+
+      reg = boot(Path.join(dir, "never-created"), [])
+      assert %{"candide" => %{fibers: []}} = RemoteFiberRegistry.feeds(reg)
+      :ok = RemoteFiberRegistry.refresh_now(reg)
+      assert %{"candide" => %{stale: false, fibers: [_]}} = RemoteFiberRegistry.feeds(reg)
+    end
+
+    test "a failed write neither crashes the registry nor loses in-memory feeds", %{dir: dir} do
+      # The store dir's parent is a regular FILE, so mkdir_p! cannot succeed and
+      # every persist raises — which the registry must swallow.
+      File.mkdir_p!(dir)
+      blocker = Path.join(dir, "blocker")
+      File.write!(blocker, "not a directory")
+
+      MockClient.set(Remote.fibers_url(candide()), {:ok, feed_body([sample_fiber("foo")])})
+
+      reg = boot(Path.join(blocker, "store"), [])
+      :ok = RemoteFiberRegistry.refresh_now(reg)
+
+      assert %{"candide" => entry} = RemoteFiberRegistry.feeds(reg)
+      assert entry.stale == false
+      assert [%{"fiber" => %{"id" => "foo"}}] = entry.fibers
+      assert Process.alive?(Process.whereis(reg))
+    end
+
+    test "persistence is off when store_dir is nil", %{dir: dir} do
+      MockClient.set(Remote.fibers_url(candide()), {:ok, feed_body([sample_fiber("foo")])})
+
+      reg = boot(dir, store_dir: nil)
+      :ok = RemoteFiberRegistry.refresh_now(reg)
+
+      assert %{"candide" => %{fibers: [_]}} = RemoteFiberRegistry.feeds(reg)
+      refute File.exists?(store_path(dir))
     end
   end
 end
