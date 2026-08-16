@@ -66,31 +66,24 @@
 
 /* ── Head ─────────────────────────────────────────────────────────────────── */
 
+/* The right end of the shared `.kbn-view-titlerow`: the week's cycles, then the
+   paging cluster hard against the edge — where Day's date sits, on a head the
+   same height. The week's FIGURES are not here: they are in the scaffold's
+   centre slot (`.kbn-view-titlecenter`, views.css), same as Day's. */
 .wk-head {
   display: flex;
   align-items: baseline;
   gap: 18px;
+  min-width: 0;
 }
 
+/* `.kbn-view-nav` carries the shape; Week only closes the gap a little, its
+   name between the chevrons being marginal-sized rather than a heading. The
+   chevrons themselves are `.kbn-view-chev` — one control, one weight, one
+   focus ring, across both temporal views. */
 .wk-nav {
-  display: flex;
-  align-items: baseline;
   gap: 6px;
 }
-
-.wk-navbtn {
-  appearance: none;
-  border: none;
-  background: none;
-  cursor: pointer;
-  padding: 0 3px;
-  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
-  font-size: calc(19px * var(--kbn-type-scale, 1));
-  line-height: 1;
-  color: #7A6F5C;
-  transition: color 120ms ease;
-}
-.wk-navbtn:hover { color: #1B1611; }
 
 /* The week's own name, in the italic hand the marginalia use — this is the
    view speaking, not a control. It becomes a control only when you have
@@ -115,21 +108,14 @@
   border-bottom-color: rgba(154, 123, 53, 0.45);
 }
 
-.wk-totals {
-  font-family: var(--font-mono, 'IBM Plex Mono', monospace);
-  font-size: calc(10px * var(--kbn-type-scale, 1));
-  letter-spacing: 0.04em;
-  color: #A89B83;
-  white-space: nowrap;
-  /* The figures are re-read on every poll and mostly do not change; without
-     tabular figures a single changed digit shifts the whole line sideways. */
-  font-variant-numeric: tabular-nums;
-}
+/* The week's cost is `.kbn-view-headfigures` (views.css) — hand, size, colour
+   and tabular figures all shared with Day's. Week adds nothing; the class
+   survives only as the hook the diffstat colours below hang on. */
 
-/* "· in Sprint 14" — the week's place in something longer than itself. Set in
-   the marginal italic rather than the totals' mono: a cycle is a name someone
-   chose, not a measurement. Shares the head line with the totals, so it stays
-   on one row and truncates rather than wrapping the header. */
+/* "in Sprint 14" — the week's place in something longer than itself. Set in
+   the marginal italic rather than the head figures' mono: a cycle is a name
+   someone chose, not a measurement. Sits inboard of the paging cluster at the
+   head's right end, and truncates rather than wrapping the header. */
 .wk-cycles {
   --wk-ochre-deep: #A57D2B;
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
@@ -412,38 +398,30 @@
 
 /* ── The key ──────────────────────────────────────────────────────────────── */
 
-/* A caption, not a legend box: it sits in the margin under the axis, inside the
-   grid so it cannot drift from the rails it explains. Italic serif rather than
-   the mono of the tick labels immediately above — a caption should not read as
-   another row of them. Wording is shared verbatim with DayView; the GLYPHS are
-   not, because each view's marks have their own shapes and a key should teach
-   the marks you are actually looking at. */
+/* The caption block and its items are `.kbn-view-key` / `.kbn-view-key-item`
+   (views.css) — the same object Day closes its rails with, written once. Wording
+   is shared verbatim too; only the GLYPHS below are Week's, because each view's
+   marks have their own shapes and a key should teach the marks you are actually
+   looking at.
+
+   Week adds only where it sits: the RAIL COLUMN of `.wk-grid`, centred in it —
+   the same column the hour ticks are printed in, and the same anchor Day's
+   legend uses. It spanned the whole sheet and pushed hard right, which put the
+   caption under the annotation column instead of under the rails it explains,
+   a hundred-odd pixels from the ink it names. */
 .wk-key {
-  /* A grid item of `.wk-grid` like the rows, but it answers to none of their
-     columns — it is one right-aligned line under the whole sheet. */
-  grid-column: 1 / -1;
-  display: flex;
-  justify-content: flex-end;
-  gap: 13px;
+  grid-column: 2;
+  justify-self: center;
   padding-top: 3px;
-  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
-  font-style: italic;
-  font-size: calc(11px * var(--kbn-type-scale, 1));
-  color: #7A6F5C;
-}
-.wk-key-item {
-  display: inline-flex;
-  align-items: flex-end;
-  gap: 5px;
 }
 /* The curve's pigment. It fades out to its left, the only way a static swatch
    can say "and every weight down to none of it". */
 .wk-key-glyph {
   display: inline-block;
+  flex: 0 0 auto;
   width: 13px;
   height: 6px;
   border-radius: 0.5px;
-  margin-bottom: 1px;
 }
 .wk-key-agent { background: linear-gradient(90deg, rgba(61, 91, 160, 0.12), var(--wk-agent)); }
 /* The spine, at its own weight: 2px of cinnabar, the one mark in this key

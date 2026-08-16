@@ -41,6 +41,51 @@
   padding-bottom: 6px;
   border-bottom: 0.5px solid rgba(122, 111, 92, 0.22);
   margin-bottom: 10px;
+  /* The anchor for `.kbn-view-titlecenter` below, and the thing it measures
+     itself against: the centre slot leaves the flow only while the row is wide
+     enough to hold all three parts without them meeting. */
+  position: relative;
+  container-type: inline-size;
+}
+
+/* THE MIDDLE OF THE HEAD, and the reason every view's head is the same height.
+   Out of flow on purpose: a page that has a line to state about itself states
+   it here, and no matter how long that line is the row stays exactly as tall as
+   the illuminated title. (Day's totals lived under its date and made Day's head
+   16px taller than Week's and Chronicle's, so switching views nudged the whole
+   sheet.) Centred on the SHEET rather than between its neighbours, so the line
+   holds still while the ends change width; capped and clipped so it truncates
+   before it can ever reach them.
+
+   `bottom` matches the row's own padding, which lands the slot's box on the
+   title's box bottom — the two sit on one baseline without being flex siblings.
+   Inert to the pointer: a statement, not a control. */
+.kbn-view-titlecenter {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}
+/* A page with nothing to say in the middle costs nothing: Chronicle and the
+   Shelf never fill this, and an empty flex item would still take a share of a
+   `space-between` row and shift what those pages DO hang off their ends. */
+.kbn-view-titlecenter:empty { display: none; }
+
+/* TRUE CENTRING IS A LUXURY OF A WIDE ROW, and it is bought by leaving the
+   flow — which means nothing stops the slot from sliding under its neighbours
+   once they grow toward it. So it only leaves the flow while the row can afford
+   it. Narrower than this, the slot stays a flex item and `space-between` sets
+   it between the two ends: no longer on the sheet's midline, but never on top
+   of the date either, and still one line high. */
+@container (min-width: 1080px) {
+  .kbn-view-titlecenter {
+    position: absolute;
+    left: 50%;
+    bottom: 6px;
+    transform: translateX(-50%);
+    max-width: 42%;
+  }
 }
 
 /* Same hand as `.kbn-col-title` — EB Garamond small caps carrying the layered
@@ -65,11 +110,90 @@
   line-height: 0.82;
 }
 
+/* ── The head's shared furniture ─────────────────────────────────────────────
+   Day and Week wear the same head — a period's NAME between two chevrons on the
+   right, the period's FIGURES in the centre — and it used to be written twice,
+   in two files, at two sizes and two greys. Two spellings of one control is how
+   a board grows a dialect: the chevrons had different weights, and only one of
+   them had a focus ring. The shape lives here now; each view keeps only what is
+   genuinely its own (the size and hand of the name it steps through). */
+
+/* ‹ name › — the cluster that pages a period. Baseline-aligned, because the
+   name is type and the chevrons are marks beside it. */
+.kbn-view-nav {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+/* A chevron. Faded until approached, then ink — the board's quiet affordance,
+   no box and no fill. */
+.kbn-view-chev {
+  appearance: none;
+  border: 0;
+  background: none;
+  padding: 0 2px;
+  cursor: pointer;
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-size: calc(20px * var(--kbn-type-scale, 1));
+  line-height: 1;
+  color: #A89B83;
+  transition: color 90ms ease-out;
+}
+.kbn-view-chev:hover { color: #1B1611; }
+.kbn-view-chev:focus-visible {
+  outline: 1px dashed rgba(27, 22, 17, 0.45);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* What the period cost — messages, agent hours, lines. The head's mono
+   register, and TABULAR: the line is re-read on every poll and mostly does not
+   change, so without fixed-width figures one changed digit slides the whole
+   line, which is twice as visible on a mark centred in the head. */
+.kbn-view-headfigures {
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: calc(9.5px * var(--kbn-type-scale, 1));
+  letter-spacing: 0.05em;
+  color: #7A6F5C;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
 .kbn-view-body {
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
   flex-direction: column;
+}
+
+/* ── The key ─────────────────────────────────────────────────────────────────
+   Day and Week both close their rails with a caption naming the marks above it,
+   and the caption is the same object on both pages: an italic-serif line of
+   marginalia, CENTRED on the plate it captions rather than pushed against its
+   right edge, where it read as something left over. Only the GLYPHS differ per
+   view — each page's own marks in miniature — so only they stay in the view
+   sheets; the block and its items are written once, here.
+
+   Wraps rather than clips on a narrow board, and every item is `nowrap`, so a
+   break can only land between glosses and never inside one. */
+.kbn-view-key {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 5px 13px;
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-style: italic;
+  font-size: calc(11px * var(--kbn-type-scale, 1));
+  line-height: 1;
+  color: #7A6F5C;
+}
+.kbn-view-key-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
 }
 
 /* Empty page — `.kbn-empty`'s marginal line, centered in the sheet rather

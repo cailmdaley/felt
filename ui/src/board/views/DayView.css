@@ -27,19 +27,18 @@
 
 /* ── Head: the date, its chevrons, and the day's two totals ──────────────── */
 
-/* Hangs off the right edge of the shared `.kbn-view-titlerow`, so the
-   illuminated "Day" keeps the left and the date keeps the eye. */
-.kbn-day-head {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 1px;
-  min-width: 0;
-}
+/* ONE LINE, LIKE EVERY OTHER PAGE'S HEAD. The date and its chevrons hang off
+   the right edge of the shared `.kbn-view-titlerow` — the illuminated "Day"
+   keeps the left, the date keeps the eye — and the day's totals sit in the
+   scaffold's out-of-flow centre slot (`.kbn-view-titlecenter`, views.css).
+   They used to stack UNDER the date, which cost Day's head 16px that Week's and
+   Chronicle's did not spend, so paging between the temporal views jogged the
+   sheet. The three heads are now the same height by construction.
 
+   `.kbn-view-nav` (views.css) carries the paging cluster's shape; Day only
+   opens the gap a hair, because the name between its chevrons is the page's
+   largest type. */
 .kbn-day-daterow {
-  display: flex;
-  align-items: baseline;
   gap: 9px;
 }
 
@@ -56,7 +55,10 @@
   font-style: italic;
   font-weight: 400;
   font-size: calc(25px * var(--kbn-type-scale, 1));
-  line-height: 1.05;
+  /* Flush 1.0, not 1.05: the head is one line, so the leading buys nothing and
+     the extra 1.25px was the last of Day's height advantage over Week and
+     Chronicle. */
+  line-height: 1;
   letter-spacing: 0.005em;
   color: #1B1611;
   white-space: nowrap;
@@ -73,24 +75,8 @@
   border-radius: 2px;
 }
 
-.kbn-day-chev {
-  appearance: none;
-  border: 0;
-  background: none;
-  padding: 0 2px;
-  cursor: pointer;
-  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
-  font-size: calc(21px * var(--kbn-type-scale, 1));
-  line-height: 1;
-  color: #A89B83;
-  transition: color 90ms ease-out;
-}
-.kbn-day-chev:hover { color: #1B1611; }
-.kbn-day-chev:focus-visible {
-  outline: 1px dashed rgba(27, 22, 17, 0.45);
-  outline-offset: 2px;
-  border-radius: 2px;
-}
+/* The chevrons are `.kbn-view-chev` (views.css) — the same control Week pages
+   its weeks with, written once. Day adds nothing to it. */
 
 /* Back to today. Absent — not merely disabled — while today is what you are
    looking at: a control that would do nothing is worse than no control. Gold,
@@ -120,14 +106,8 @@
   border-radius: 2px;
 }
 
-.kbn-day-stats {
-  font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: calc(9.5px * var(--kbn-type-scale, 1));
-  letter-spacing: 0.05em;
-  color: #7A6F5C;
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
-}
+/* The day's cost — `.kbn-view-headfigures` (views.css) sets the hand; Day only
+   says what a day with no ink in it looks like. */
 .kbn-day-stats-quiet { color: #A89B83; }
 
 /* The diffstat within a stats line, colored insertion/deletion — see
@@ -498,7 +478,6 @@ button.kbn-day-lanename:focus-visible {
 /* The way back out. Sits in the legend row, in the legend's own register, and
    exists only while there is a zoom to clear. */
 .kbn-day-zoomclear {
-  margin-left: auto;
   padding: 0 5px;
   border: 0;
   border-radius: 2px;
@@ -531,22 +510,14 @@ button.kbn-day-lanename:focus-visible {
 .kbn-day-tick-first { transform: translateX(0); }
 .kbn-day-tick-last { transform: translateX(-100%); }
 
-/* The key — a marginal gloss under the rails, right-aligned so it sits out of
-   the way of the reading. Italic serif rather than mono: the mono hand belongs
-   to the tick labels directly above it, and a caption should not be mistaken
-   for another row of them. */
+/* The key is `.kbn-view-key` (views.css), which Week wears too. Day's sheet
+   adds only where it sits: in the rail column of the chart grid and centred on
+   it, so the caption is under the middle of the plate it captions rather than
+   shoved against its right edge, where it read as something left over. */
 .kbn-day-legend {
   grid-column: 2;
-  justify-self: end;
-  display: flex;
-  align-items: center;
-  gap: 13px;
-  margin-top: 5px;
-  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
-  font-style: italic;
-  font-size: calc(11px * var(--kbn-type-scale, 1));
-  line-height: 1;
-  color: #7A6F5C;
+  justify-self: center;
+  margin-top: 6px;
 }
 /* The lifecycle glyph, before a lane's name and again in the key. Marginalia:
    a size below the name, pigments already on the page. One set of rules serves
@@ -568,21 +539,22 @@ button.kbn-day-lanename:focus-visible {
 
 /* The states hang together as one key item: a narrow legend wraps between
    groups, never inside one. */
-.kbn-day-key-states {
+.kbn-day-key.kbn-day-key-states {
   gap: 9px;
 }
+
 .kbn-day-key-state {
   display: inline-flex;
   align-items: center;
   gap: 3px;
 }
 
-.kbn-day-key {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  white-space: nowrap;
-}
+/* The gestures are the one entry that glosses no mark — it tells you what your
+   hands can do, not what the ink means. A step further back into the paper than
+   the key proper, so the caption reads as a key with a footnote rather than as
+   a run of equal claims. */
+.kbn-day-key-gesture { color: #A89B83; }
+
 /* The swatch. It fades to nothing at its left edge, which is the one honest
    way a static block can say "and every weight down to none of it". */
 .kbn-day-keyglyph {
