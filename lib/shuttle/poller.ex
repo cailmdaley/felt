@@ -1620,7 +1620,7 @@ defmodule Shuttle.Poller do
     case run_felt_ls_for_shuttle(host, state) do
       {:ok, output} ->
         with {:ok, fibers} when is_list(fibers) <- Jason.decode(output) do
-          owned_prefix = store_felt_realpath(host) <> "/"
+          owned_prefix = Shuttle.FeltStores.store_felt_realpath(host) <> "/"
 
           # Per-row isolation: felt itself skips-and-warns unparseable fibers
           # (warning on stderr, valid JSON of the rest on stdout, exit 0), so a
@@ -1714,17 +1714,6 @@ defmodule Shuttle.Poller do
         )
 
         run_felt(host, state.runner, ["ls", "--json"])
-    end
-  end
-
-  # Realpath of `<host>/.felt`, resolving symlinks along the path so the
-  # ownership prefix matches felt's symlink-resolved `path`. See Shuttle.Realpath.
-  defp store_felt_realpath(host) do
-    felt_dir = host |> Path.join(".felt") |> Path.expand()
-
-    case Shuttle.Realpath.resolve(felt_dir) do
-      {:ok, resolved} -> resolved
-      {:error, _} -> felt_dir
     end
   end
 

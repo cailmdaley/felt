@@ -73,7 +73,8 @@ defmodule Shuttle.FeltStores do
   `~/loom/.felt/science/group/project -> .../code/project/.felt` — is
   physically rooted *outside* the store it is linked into. The poller enumerates
   a fiber only from the store where its felt `path` physically roots
-  (`run_shuttle_listing/2`'s `store_felt_realpath` prefix check), so the loom
+  (the poller's `run_shuttle_listing/2` builds its prefix from
+  `store_felt_realpath/1` below), so the loom
   store correctly drops those fibers — and they vanish from the kanban unless the
   project root is *also* a configured store. Following the symlink here makes
   configuring just `~/loom` sufficient: the project root is auto-discovered, no
@@ -108,6 +109,25 @@ defmodule Shuttle.FeltStores do
     # preserved); `uniq_by` then keeps the real-directory store per realpath.
     |> Enum.sort_by(&felt_symlink?/1)
     |> Enum.uniq_by(&store_felt_realpath/1)
+  end
+
+  @doc """
+  Realpath of `<host>/.felt`, resolving symlinks along the path so the ownership
+  prefix matches felt's symlink-resolved `path`. See `Shuttle.Realpath`.
+
+  This is the prefix both ownership checks build on — this module's
+  `host_for_fiber/2` and the poller's `run_shuttle_listing/2` — so they must
+  canonicalize identically or a store enumerates fibers the other drops.
+  Falls back to the expanded path when resolution fails.
+  """
+  @spec store_felt_realpath(String.t()) :: String.t()
+  def store_felt_realpath(host) do
+    felt_dir = host |> Path.join(".felt") |> Path.expand()
+
+    case Shuttle.Realpath.resolve(felt_dir) do
+      {:ok, resolved} -> resolved
+      {:error, _} -> felt_dir
+    end
   end
 
   # True when `<store>/.felt` is itself a symlink rather than a real directory.
@@ -345,15 +365,6 @@ defmodule Shuttle.FeltStores do
     case felt_show_json(owner, identifier) do
       {:ok, %{"path" => _} = fiber} -> fiber
       _ -> fallback
-    end
-  end
-
-  defp store_felt_realpath(host) do
-    felt_dir = host |> Path.join(".felt") |> Path.expand()
-
-    case Shuttle.Realpath.resolve(felt_dir) do
-      {:ok, resolved} -> resolved
-      {:error, _} -> felt_dir
     end
   end
 

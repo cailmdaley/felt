@@ -8,9 +8,10 @@ defmodule Shuttle.Realpath do
   falls back to `Path.expand`. `@max_symlink_hops` bounds the resolution so a
   symlink loop returns `{:error, :symlink_loop}` rather than spinning.
 
-  Self-contained on purpose (no OS `realpath` shell-out, no cross-module
-  dependency) so both the poller's ownership-prefix derivation and felt-store
-  resolution share one canonical implementation with identical edge-case
+  Self-contained on purpose: no OS `realpath` shell-out, no cross-module
+  dependency. `Shuttle.FeltStores.store_felt_realpath/1` is the one wrapper
+  built on it — both store resolution and the poller's ownership-prefix
+  derivation go through that wrapper, so they share identical edge-case
   behavior.
   """
 
