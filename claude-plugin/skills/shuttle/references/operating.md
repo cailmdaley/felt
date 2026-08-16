@@ -63,6 +63,25 @@ Column membership derives from felt `status` + `tempered` + `shuttle.kind` + tmu
 
 The drag-to-tempered gesture is **kind-aware**: on a standing role awaiting review it invokes `felt shuttle accept` (re-arms the role, `next_due` recomputed from cron); on a pinned role awaiting review it also invokes accept, which **re-parks it to the strip** (`status: open`, verdict cleared) — dragging the card back to the strip/drafts is the same accept; on a oneshot it sets `tempered: true` (terminus). Same gesture, kind-aware semantics — the classifier reads `shuttle.kind`.
 
+## Gestures by card state
+
+**Two interaction modes** route to different verbs even for the same card. **Drag-and-drop** is "advance the card's state" intent: drag-to-tempered = "I'm done, accept"; drag-to-drafts = "park it"; drag-to-inFlight on a dormant role = "fire it now." **Modal buttons** (Resume, New session) are "I'm NOT done — give me another worker on this same run": they preserve outcome and don't advance the cycle.
+
+| Card state | Interaction | Verb fired | Effect |
+|---|---|---|---|
+| standing, **awaiting** (status:closed + untempered) | drag → tempered or inFlight | `felt shuttle accept` | Re-arms (`status: active`; next occurrence computed `cron.next(now)`). Outcome cleared. |
+| standing, **awaiting** | modal **Resume** | `felt shuttle resume` + dispatch (resume_mode=previous) | Re-arms; continues the prior session with the user's directive (session id from `shuttle.runtime.session_uuid`). Outcome preserved. |
+| standing, **awaiting** | modal **New session** | `felt shuttle resume` + dispatch (resume_mode=fresh) | Re-arms; brand-new session on the same fiber. Outcome preserved. |
+| standing, **armed** (status:active) | drag → inFlight | `felt shuttle dispatch --ad-hoc` | Manual ad-hoc run, synthetic `adhoc-*` id; schedule untouched. |
+| standing, **draft** (status:open) | drag → inFlight | `felt shuttle reopen` | Arms it; daemon picks up the schedule next poll. |
+| any, **running worker** | (any) | dispatch returns `already_running` | Card promotes to inFlight; attach via tmux. |
+| any | drag → drafts | `felt shuttle pause` | `status: open` + kills the live worker. Schedule preserved. |
+| oneshot, **awaiting** | drag → tempered / composted | `felt shuttle close --tempered=true/false` | Terminus / discarded. |
+
+**Outcome-clearing rule.** Only `felt shuttle accept` clears the outcome — the cycle-advance verb, and a fresh outcome is the right precondition for the next run. Resume and New session preserve it because the run is *not* finalized.
+
+**Ghost workers.** If `state.running` shows a fiber with no live tmux session, eligibility blocks re-dispatch; `felt shuttle dispatch <fiber>` triggers a `reconcile_running_fiber` pass that clears stale entries. And **daemon restarts never end worker sessions** — tmux owns the worker process, the daemon only watches it; bouncing the daemon cycles the watcher and re-adopts live sessions on boot.
+
 ## Lifecycle verbs
 
 The daemon picks up any of these on its next poll:

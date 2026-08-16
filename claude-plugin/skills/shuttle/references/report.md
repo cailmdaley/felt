@@ -80,6 +80,6 @@ Inline at write time — read the PNG, base64 it, write the tag. If a plot is to
 
 ## Mechanics
 
-Start from [report-template.html](report-template.html) — a battle-tested palette and set of classes, not a content model to fill in. Render the report with an explicit `:::{embed} report.html` line in the fiber body, placed where the reader should meet it (usually the top).
+Start from [report-template.html](../assets/report-template.html) — a battle-tested palette and set of classes, not a content model to fill in. Render the report with an explicit `:::{embed} report.html` line in the fiber body, placed where the reader should meet it (usually the top).
 
 The test before handoff: **give the report to someone who has never seen this fiber and ask what they'd do next.** If they have to reconstruct the present by diffing paragraphs, rewrite it.
