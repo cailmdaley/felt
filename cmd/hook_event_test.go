@@ -164,6 +164,10 @@ func TestEventMachinePrompt(t *testing.T) {
 		{"interrupt marker", "[Request interrupted by user]", true},
 		{"interrupt for tool use", "[Request interrupted by user for tool use]", true},
 		{"loop tick", "# Autonomous loop tick (dynamic pacing)\n\nRun the autonomous check", true},
+		// The dispatcher's other two injected openings — same module as the
+		// dispatch preamble above, same defect if missed.
+		{"resumed worker's wake-up prompt", "Shuttle resumed your previous session on this fiber. Skills and conventions", true},
+		{"capture session framing", "Shuttle capture session. The user had an idea and spoke it", true},
 		{"a person typing", "hey, can you look at the curve", false},
 		// The reason this is a prefix test and not a search: quoting one of
 		// these markers is something a person does all the time.

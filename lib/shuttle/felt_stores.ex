@@ -58,12 +58,7 @@ defmodule Shuttle.FeltStores do
   for daemon polling/resolution, where symlinked substores must be expanded.
   """
   @spec configured_base_hosts() :: host_list()
-  def configured_base_hosts do
-    case env_hosts() do
-      [_ | _] = hosts -> hosts
-      [] -> registered_hosts()
-    end
-  end
+  def configured_base_hosts, do: PathListConfig.configured(@spec_)
 
   @doc """
   Expand a store list with the project roots of any **symlinked substores**

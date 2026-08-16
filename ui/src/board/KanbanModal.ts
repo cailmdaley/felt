@@ -113,7 +113,7 @@ interface KanbanModalOptions {
   temporalFetchers?: TemporalFetchers
 }
 
-/** The Desk's own hotkey. The other three come from the view registry, so a
+/** The Desk's own hotkey. The other four come from the view registry, so a
  *  view names its own key and nothing here has to agree with it twice. */
 const DESK_HOTKEY = '1'
 

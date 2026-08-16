@@ -106,7 +106,10 @@ type CompositeState struct {
 func fetchComposite() (*CompositeState, error) {
 	out, err := fetchCompositeFrom(daemonURL() + "/api/v1/state/composite")
 	if err != nil {
-		return nil, fmt.Errorf("%w (start the daemon with `make start` or set SHUTTLE_DAEMON_URL)", err)
+		if isLifecycleTransportError(err) {
+			return nil, fmt.Errorf("%w (start the daemon with `make start` or set SHUTTLE_DAEMON_URL)", err)
+		}
+		return nil, err
 	}
 	return out, nil
 }
