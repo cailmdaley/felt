@@ -66,6 +66,13 @@ func init() {
 // authoritative one) or when argument resolution fails outright (cwd/store
 // ambiguity — the pre-existing fallback). Paths are compared through
 // EvalSymlinks because loom stores reach fibers through symlinked .felt trees.
+//
+// Belt against fuzzy resolution: felt's resolver slug/suffix-matches, so an
+// argument can land on a fiber the caller didn't mean (the dispatch prompt's
+// global-id fallback is the realistic trigger). A DIFFERENT-fiber result is
+// honored only when the argument names it exactly (id or UID); a fuzzy match
+// that disagrees with the env is treated as ambiguity and the env wins — the
+// pre-fix behavior, which at worst stamps the caller's own fiber.
 func resolveHandoffPath(fiber string) (string, bool, error) {
 	envPath := os.Getenv("SHUTTLE_FIBER_PATH")
 	f, _, err := shuttleResolveFiber(fiber, false)
@@ -81,19 +88,33 @@ func resolveHandoffPath(fiber string) (string, bool, error) {
 	if samePath(envPath, f.Path) {
 		return envPath, true, nil
 	}
-	return f.Path, false, nil
+	if fiber == f.ID || fiber == f.UID {
+		return f.Path, false, nil
+	}
+	return envPath, true, nil
 }
 
-// samePath reports whether two paths name the same file, resolving symlinks so a
-// store path and its loom-symlinked alias compare equal. Falls back to string
-// equality when resolution fails (e.g. a not-yet-existing path).
+// samePath reports whether two paths name the same file, absolutizing and
+// resolving symlinks so a store path and its loom-symlinked alias compare
+// equal. Falls back to string equality when resolution fails (e.g. a
+// not-yet-existing path) — a bias toward "different", which errs on the safe
+// side: stamping the named file without the self-kill, never a false
+// clean-exit.
 func samePath(a, b string) bool {
-	ra, errA := filepath.EvalSymlinks(a)
-	rb, errB := filepath.EvalSymlinks(b)
+	ra, errA := canonicalPath(a)
+	rb, errB := canonicalPath(b)
 	if errA != nil || errB != nil {
 		return a == b
 	}
 	return ra == rb
+}
+
+func canonicalPath(p string) (string, error) {
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return "", err
+	}
+	return filepath.EvalSymlinks(abs)
 }
 
 // stampHandedOff sets shuttle.runtime.handed_off_at = <now RFC3339 UTC> in the

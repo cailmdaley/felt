@@ -160,3 +160,45 @@ func TestResolveHandoffPath_ExplicitArgBeatsAmbientEnv(t *testing.T) {
 		t.Fatalf("fallback: path=%q self=%v, want env path self=true", path, self)
 	}
 }
+
+// TestResolveHandoffPath_FuzzyAndNoStoreFallbacks pins the reviewer-flagged
+// edges: (a) a fuzzy resolution that disagrees with SHUTTLE_FIBER_PATH is
+// ambiguity — env wins, self=true (never silently stamp a suffix-matched
+// stranger and suppress the self-kill); (b) a cwd with no .felt store at all —
+// the daemon-worker reality when project_dir isn't a felt repo — falls back to
+// the env path, self=true.
+func TestResolveHandoffPath_FuzzyAndNoStoreFallbacks(t *testing.T) {
+	dir, storage := newShuttleStore(t)
+	seedShuttleRole(t, storage, "own", felt.StatusActive, oneshot(), nil)
+	seedShuttleRole(t, storage, "parent/nested-card", felt.StatusActive, oneshot(), nil)
+	t.Setenv("SHUTTLE_FIBER_PATH", storage.Path("own"))
+
+	t.Chdir(dir)
+	// "nested-card" fuzzily resolves to parent/nested-card but is not its exact
+	// id — ambiguity, env wins.
+	path, self, err := resolveHandoffPath("nested-card")
+	if err != nil {
+		t.Fatalf("resolveHandoffPath(nested-card): %v", err)
+	}
+	if path != storage.Path("own") || !self {
+		t.Fatalf("fuzzy mismatch: path=%q self=%v, want env path %q self=true", path, self, storage.Path("own"))
+	}
+	// The exact nested id is honored as a sibling handoff.
+	path, self, err = resolveHandoffPath("parent/nested-card")
+	if err != nil {
+		t.Fatalf("resolveHandoffPath(parent/nested-card): %v", err)
+	}
+	if !samePath(path, storage.Path("parent/nested-card")) || self {
+		t.Fatalf("exact nested id: path=%q self=%v, want sibling path self=false", path, self)
+	}
+
+	// No felt store in cwd at all: resolution errors, env fallback, self=true.
+	t.Chdir(t.TempDir())
+	path, self, err = resolveHandoffPath("parent/nested-card")
+	if err != nil {
+		t.Fatalf("resolveHandoffPath outside store: %v", err)
+	}
+	if path != storage.Path("own") || !self {
+		t.Fatalf("no-store fallback: path=%q self=%v, want env path self=true", path, self)
+	}
+}
