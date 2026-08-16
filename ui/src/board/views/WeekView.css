@@ -90,7 +90,7 @@
    wandered off the current week, and says so with a faint gold rule. */
 /* The week's name wears the same type as Day's date — one size for the head's
    right-hand identity across the two views, so paging between them swaps the
-   words and nothing else (Cail's ask). It keeps its second life as the
+   words and nothing else (one size was the ask). It keeps its second life as the
    back-to-this-week control; the away-state gold below carries that. */
 .wk-weeklabel {
   appearance: none;

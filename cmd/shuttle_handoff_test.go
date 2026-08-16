@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"os"
 	"sync"
 	"testing"
 
@@ -117,6 +118,21 @@ func TestStampHandedOff_ConcurrentWithStorageRMW(t *testing.T) {
 }
 
 // TestResolveHandoffPath_ExplicitArgBeatsAmbientEnv pins the fix for the
+// chdir is t.Chdir for the go.mod toolchain (1.23): testing.T.Chdir arrived in
+// Go 1.24, and a test that compiles only on newer local toolchains is a CI
+// break waiting to happen (it did).
+func chdir(t *testing.T, dir string) {
+	t.Helper()
+	prev, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("chdir %s: %v", dir, err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(prev) })
+}
+
 // live-fire near-miss: a daemon-launched worker (SHUTTLE_FIBER_PATH in env)
 // running `felt shuttle handoff <other-fiber>` must stamp the fiber it NAMED,
 // not its own — and must not be treated as exiting (self=false gates the tmux
@@ -126,7 +142,7 @@ func TestResolveHandoffPath_ExplicitArgBeatsAmbientEnv(t *testing.T) {
 	dir, storage := newShuttleStore(t)
 	seedShuttleRole(t, storage, "own", felt.StatusActive, oneshot(), nil)
 	seedShuttleRole(t, storage, "sibling", felt.StatusActive, oneshot(), nil)
-	t.Chdir(dir)
+	chdir(t, dir)
 	t.Setenv("SHUTTLE_FIBER_PATH", storage.Path("own"))
 
 	// Explicit different fiber: the argument wins, caller is not exiting.
@@ -173,7 +189,7 @@ func TestResolveHandoffPath_FuzzyAndNoStoreFallbacks(t *testing.T) {
 	seedShuttleRole(t, storage, "parent/nested-card", felt.StatusActive, oneshot(), nil)
 	t.Setenv("SHUTTLE_FIBER_PATH", storage.Path("own"))
 
-	t.Chdir(dir)
+	chdir(t, dir)
 	// "nested-card" fuzzily resolves to parent/nested-card but is not its exact
 	// id — ambiguity, env wins.
 	path, self, err := resolveHandoffPath("nested-card")
@@ -193,7 +209,7 @@ func TestResolveHandoffPath_FuzzyAndNoStoreFallbacks(t *testing.T) {
 	}
 
 	// No felt store in cwd at all: resolution errors, env fallback, self=true.
-	t.Chdir(t.TempDir())
+	chdir(t, t.TempDir())
 	path, self, err = resolveHandoffPath("parent/nested-card")
 	if err != nil {
 		t.Fatalf("resolveHandoffPath outside store: %v", err)

@@ -149,7 +149,7 @@ export function buildKanbanResponseFromComposite(
  * board (`/transition`, `/felt-edit`, `/lifecycle` are all owner-routed, so
  * edits land on the owner's disk and arrive here only when git syncs) and
  * cannot observe (only the owner runs the tmux session). An owner row that is
- * STALE still wins — last-known-good plus `⌛ waiting on nibi` is the honest
+ * STALE still wins — last-known-good plus `⌛ waiting on basalt-login-02` is the honest
  * reading; falling back to the mirror shows a disconnected host's work as
  * though it were fresh.
  *
