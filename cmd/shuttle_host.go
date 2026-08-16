@@ -65,7 +65,7 @@ var osHostname = os.Hostname
 // so both the CLI and the daemon read the same file by default.
 func hostConfigFilePath() string {
 	if v := strings.TrimSpace(os.Getenv("SHUTTLE_HOST_FILE")); v != "" {
-		if expanded, err := homedirExpand(v); err == nil {
+		if expanded, err := expandUserPath(v); err == nil {
 			return expanded
 		}
 		return v
@@ -75,22 +75,6 @@ func hostConfigFilePath() string {
 		return ".shuttle/host"
 	}
 	return home + "/.shuttle/host"
-}
-
-// homedirExpand expands a leading "~" (or "~/...") in path to the user's home
-// directory, matching Elixir's Path.expand behavior for SHUTTLE_HOST_FILE.
-func homedirExpand(path string) (string, error) {
-	if path != "~" && !strings.HasPrefix(path, "~/") {
-		return path, nil
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	if path == "~" {
-		return home, nil
-	}
-	return home + path[1:], nil
 }
 
 // hostConfigFileValue returns the trimmed FIRST line of the host config file,

@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -94,19 +93,7 @@ func resolveProjectDirFlag(raw string) (string, error) {
 	if strings.TrimSpace(raw) == "" {
 		return "", fmt.Errorf("--project-dir is required")
 	}
-	expanded := os.ExpandEnv(raw)
-	if expanded == "~" || strings.HasPrefix(expanded, "~/") {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", fmt.Errorf("resolving ~ in project dir: %w", err)
-		}
-		if expanded == "~" {
-			expanded = home
-		} else {
-			expanded = filepath.Join(home, expanded[2:])
-		}
-	}
-	abs, err := filepath.Abs(expanded)
+	abs, err := expandUserPath(os.ExpandEnv(raw))
 	if err != nil {
 		return "", fmt.Errorf("resolving project dir %q: %w", raw, err)
 	}
