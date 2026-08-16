@@ -27,6 +27,24 @@ jobs:
       - name: Integration Test
         run: go test -tags integration ./cmd/ -run TestIntegration -v
 
+      # Deliberately in the go job, not elixir: that one installs felt to
+      # /usr/local/bin, which felt-bin.sh's candidate loop finds — the
+      # felt-absent fallback assertion would silently test the wrong branch.
+      - name: Plugin hook tests
+        run: bash scripts/test-plugin-hooks.sh
+
+      # The two plugin manifests ship as one plugin; .goreleaser.yml refuses to
+      # release when they disagree. Catch the drift at PR time instead.
+      - name: Plugin manifests agree on version
+        run: |
+          claude=$(jq -r .version claude-plugin/.claude-plugin/plugin.json)
+          codex=$(jq -r .version claude-plugin/.codex-plugin/plugin.json)
+          if [ "$claude" != "$codex" ]; then
+            echo "plugin manifest version drift: claude=$claude codex=$codex" >&2
+            exit 1
+          fi
+          echo "both manifests at $claude"
+
   elixir:
     name: Elixir (daemon — mix compile + mix test)
     runs-on: ubuntu-latest

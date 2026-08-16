@@ -1,8 +1,7 @@
-# Pin the agent registry for the whole suite. Dispatch tests exercise
-# harness-specific paths (pi, codex) whose agents live in the example
-# registry, not the generic builtins; without this pin the suite would
-# depend on whatever ~/.config/felt/agents.json the developer has.
-System.put_env("FELT_AGENTS_FILE", Path.expand("../share/agents.example.json", __DIR__))
+# Pin the agent registry for the whole suite: keep it off whatever
+# ~/.config/felt/agents.json the developer has. The fixture carries the same
+# records as the built-in layer, so the effective registry is the shipped one.
+System.put_env("FELT_AGENTS_FILE", Path.expand("fixtures/agents.json", __DIR__))
 
 # Pin the remote fleet the same way: an absent file means no remotes and all
 # defaults. Without this pin, any developer whose ~/.config/felt/remotes.json

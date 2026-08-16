@@ -49,3 +49,25 @@ node_modules/
 
 # mkdocs build output
 /site/
+
+# ── Source artwork ───────────────────────────────────────────────────────
+# Masters stay on disk, out of the pack; only the small derived assets ship.
+# design/README.md says where each one is used and how to regenerate it.
+/design/*.png
+
+# ── Agent harness state ──────────────────────────────────────────────────
+# Claude Code writes these into any checkout it works in. Untracked by nature
+# and worthless to anyone else — worktrees/ alone was 74MB of stale second
+# copies of this repo. Ignoring them here rather than in .git/info/exclude
+# means a fresh clone is covered too. (The tracked `.claude/skills/` files sit
+# beside these and are deliberately NOT matched.)
+**/.claude/worktrees/
+**/.claude/checkpoints/
+**/.claude/mailbox/
+**/.claude/routines/.state/
+**/.claude/scheduled_tasks.json
+**/.claude/scheduled_tasks.lock
+**/.claude/agent-registry.json
+**/.claude/agent-memory-local
+**/.claude/first-run
+**/.claude/assistant-daemon-state.json

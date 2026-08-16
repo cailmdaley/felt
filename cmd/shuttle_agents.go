@@ -155,8 +155,8 @@ var shuttleAgentsInitCmd = &cobra.Command{
 	Long: `Seed the user agent registry with the built-in records, then edit it.
 
 Writes $FELT_AGENTS_FILE (else ~/.config/felt/agents.json), or --path. Refuses
-to overwrite an existing file without --force. share/agents.example.json in the
-felt repo is a fuller worked example — every field, several harnesses.`,
+to overwrite an existing file without --force. The seeded file works every
+field across several harnesses — edit it in place.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		path := agentsInitPath

@@ -39,9 +39,9 @@ var allowedIdentifierContexts = []string{
 }
 
 // allowedFiles are tracked files whose whole point is to carry example content.
-var allowedFiles = map[string]bool{
-	"share/agents.example.json": true,
-}
+// Empty today: scannedPath already keeps test/ and testdata/ out of the walk,
+// so example payloads need no per-file exemption. Kept for the next one.
+var allowedFiles = map[string]bool{}
 
 func TestNoPersonalIdentifiersInSource(t *testing.T) {
 	root := repoRoot(t)
