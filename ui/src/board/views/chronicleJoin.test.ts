@@ -23,7 +23,11 @@ import {
   attributeActivity,
   assignCycleLanes,
   buildCycleBands,
-  densityStep,
+  spellHeight,
+  spellsByCivilDay,
+  SPELL_GAP_MS,
+  SPELL_MIN_H,
+  SPELL_MAX_H,
   eraName,
   fiberBodyOf,
   fiberDocUrl,
@@ -840,17 +844,53 @@ describe('composing an era’s look-back', () => {
   })
 })
 
-describe('density steps', () => {
-  it('maps to three steps against the window peak', () => {
-    expect(densityStep(100, 100)).toBe(3)
-    expect(densityStep(60, 100)).toBe(3)
-    expect(densityStep(30, 100)).toBe(2)
-    expect(densityStep(5, 100)).toBe(1)
+describe('spell heights', () => {
+  it('log-scales between the floor and the ceiling', () => {
+    expect(spellHeight(100, 100)).toBe(SPELL_MAX_H)
+    const mid = spellHeight(10, 100)
+    expect(mid).toBeGreaterThan(SPELL_MIN_H)
+    expect(mid).toBeLessThan(SPELL_MAX_H)
+    // Log, not linear: a tenth of the peak sits well above a tenth of the ramp.
+    expect(mid - SPELL_MIN_H).toBeGreaterThan((SPELL_MAX_H - SPELL_MIN_H) * 0.3)
   })
 
-  it('never divides by an empty window', () => {
-    expect(densityStep(0, 0)).toBe(1)
-    expect(densityStep(3, 0)).toBe(1)
+  it('never divides by an empty window, never exceeds the ceiling', () => {
+    expect(spellHeight(0, 0)).toBe(SPELL_MIN_H)
+    expect(spellHeight(3, 0)).toBe(SPELL_MIN_H)
+    expect(spellHeight(500, 100)).toBe(SPELL_MAX_H)
+  })
+})
+
+describe('spells by civil day', () => {
+  const MIN = 60_000
+  const base = Date.UTC(2026, 5, 10, 9, 0) // mid-morning, DST-quiet
+  const b = (m: number, k: 'agent' | 'attention' | 'notify' = 'agent', n = 1) =>
+    bucket(m, { k, n })
+
+  it('merges minutes within the gap into one spell, splits across it', () => {
+    const spells = [...spellsByCivilDay([
+      b(base), b(base + MIN), b(base + 2 * MIN),
+      b(base + 3 * MIN + SPELL_GAP_MS + MIN), // past the gap → new spell
+    ]).values()][0]
+    expect(spells).toHaveLength(2)
+    expect(spells[0].minutes).toBe(3)
+    expect(spells[0].endMs - spells[0].startMs).toBe(3 * MIN)
+    expect(spells[1].minutes).toBe(1)
+  })
+
+  it('a shared minute grows work but not the clock', () => {
+    const spells = [...spellsByCivilDay([
+      b(base, 'agent', 2), b(base, 'attention', 1),
+    ]).values()][0]
+    expect(spells).toHaveLength(1)
+    expect(spells[0].minutes).toBe(1)
+    expect(spells[0].work).toBe(3)
+    expect(spells[0].endMs - spells[0].startMs).toBe(MIN)
+  })
+
+  it('notify minutes fold into nothing, like the day cells', () => {
+    expect(spellsByCivilDay([b(base, 'notify')]).size).toBe(0)
+    expect(spellsByCivilDay([bucket(Number.NaN)]).size).toBe(0)
   })
 })
 

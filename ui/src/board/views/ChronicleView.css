@@ -11,11 +11,12 @@
 
    Palette is KanbanModal.css's, and the SEMANTIC pigments come from its tokens
    rather than as hexes copied down here — `--kbn-owed` (gold, now and what is
-   due) and `--kbn-tempered` (verdigris), which this page spends TWICE and on
-   purpose: on the verdict mark, and on the day band, whose claim is no longer
-   "the machine was here" but "work happened", agent and human alike. Copying
-   the hexes is how this page drifted before. Structural inks stay literal: iron-gall #1B1611,
-   muted #7A6F5C, faded #A89B83, parchment #EDE2CE. */
+   due), `--kbn-tempered` (verdigris, the verdict mark), and `--kbn-agent`
+   (cobalt, the work spells — the same blue Day's wash and Week's spines
+   speak, so the temporal views agree about what blue means; the spell still
+   sums agent and human minutes into one "work happened" claim). Copying the
+   hexes is how this page drifted before. Structural inks stay literal:
+   iron-gall #1B1611, muted #7A6F5C, faded #A89B83, parchment #EDE2CE. */
 
 .chr-scroll {
   /* Fallback only — ChronicleView sizes the day column at render so that
@@ -30,10 +31,6 @@
      1728px the fit wants 62px for a 56px cap — 142px of slack the gutter can
      spend before a single day column narrows. */
   --chr-label-w: 400px;
-  /* Segment width as a fraction of the column, so it tracks the fitted day
-     width. Well under 1: a run of busy days has to read as a row of separate
-     day-marks, not as one solid bar. */
-  --chr-seg-w: calc(var(--chr-day-w) * 0.58);
   /* A reading measure, not a packing measure. At 20px the gutter was a list of
      names with no air between them and the lifelines fused into a hatch; at 32
      each row is a line of a page — the name has room to be read, and the ink
@@ -952,33 +949,21 @@ button.chr-name:hover {
   background: rgba(27, 22, 17, 0.26);
   border-radius: 1px;
 }
-/* One day's WORK — agent minutes and your own, summed. Three steps of height and opacity — texture on the
-   line, not a bar chart above it. The mark is narrower than its column and
-   centered in it, so a busy fortnight reads as fourteen days rather than as
-   one continuous bar. */
+/* A SPELL of work — a contiguous period of use, drawn where inside the day it
+   sat. Left edge and width are the clock (6am→6am across the column); height
+   is the spell's work, log-scaled between 4px and 24px by the TS side
+   (spellHeight), so geometry lives inline and only pigment lives here.
+   COBALT — the board's one ink for work being done, the same family Day's
+   wash and Week's spines speak — so the three temporal views agree about what
+   blue means. Chronicle still sums agent and steering minutes into one claim;
+   at strip scale the tooltip's clock, not a second color, carries the rest. */
 .chr-seg {
   position: absolute;
   top: 50%;
-  width: var(--chr-seg-w);
-  margin-left: calc((var(--chr-day-w) - var(--chr-seg-w)) / 2);
-  /* VERDIGRIS, and deliberately the same token the closed verdict is drawn
-     in. The band no longer means "the machine was here" — Chronicle sums
-     agent and steering minutes into one claim, "work happened on this day" —
-     so cobalt's machine-work meaning would now be a lie. `--kbn-tempered` is
-     the board's pigment for work that has been done; a verdict mark and a
-     day's ink are different marks in different places, and reusing the
-     pigment is the shared meaning, not a collision. */
-  background: var(--kbn-tempered, #3F8278);
-  border-radius: 0.5px;
+  background: var(--kbn-agent, #3D5BA0);
+  opacity: 0.55;
+  border-radius: 1px;
 }
-/* The ramp grew with the row, but only just: at 32px the old 2/4/7 steps read
-   as three shades of the same hairline, while a ramp scaled to the row would
-   have turned a page of lifelines into a page of bar charts. 3/6/10 keeps the
-   ink lane about a third of the row — the marks still float in the row's air,
-   and the three steps are now separable at a glance. */
-.chr-seg-1 { height: 3px; margin-top: -1.5px; opacity: 0.30; }
-.chr-seg-2 { height: 6px; margin-top: -3px; opacity: 0.52; }
-.chr-seg-3 { height: 10px; margin-top: -5px; opacity: 0.74; }
 
 /* `.chr-att` — a cinnabar tick per steering spell — is GONE, with the second
    channel it belonged to. At a day per column it was granularity the page
@@ -1068,9 +1053,9 @@ button.chr-name:hover {
   white-space: nowrap;
 }
 
-/* Each glyph is Chronicle's own mark in miniature. The ramp is three segments
-   at the three density steps, so the key teaches "taller means busier" and the
-   relative scale in the same breath. */
+/* Each glyph is Chronicle's own mark in miniature. The ramp is three spells
+   at three heights on the log scale, so the key teaches "taller means busier"
+   and the relative scale in the same breath. */
 .chr-key-life {
   display: inline-block;
   width: 22px;
@@ -1082,19 +1067,21 @@ button.chr-name:hover {
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  height: 10px;
+  /* Tall enough for the ramp's 24px ceiling without stretching the key row. */
+  height: 24px;
 }
 .chr-key-seg {
   display: inline-block;
-  width: 3px;
-  background: var(--kbn-tempered, #3F8278);
-  border-radius: 0.5px;
+  background: var(--kbn-agent, #3D5BA0);
+  opacity: 0.55;
+  border-radius: 1px;
 }
-/* Verbatim the row's ramp — a key that taught a scale the page does not draw
-   would be worse than no key. */
-.chr-key-seg-1 { height: 3px; opacity: 0.30; }
-.chr-key-seg-2 { height: 6px; opacity: 0.52; }
-.chr-key-seg-3 { height: 10px; opacity: 0.74; }
+/* The row's own floor, middle and ceiling (spellHeight's 4→24px log ramp) —
+   a key that taught a scale the page does not draw would be worse than no
+   key. Widths vary too: a spell's width is its span of the day. */
+.chr-key-seg-1 { width: 3px; height: 4px; }
+.chr-key-seg-2 { width: 6px; height: 12px; }
+.chr-key-seg-3 { width: 9px; height: 24px; }
 .chr-key-glyph {
   font-style: normal;
   font-size: calc(11px * var(--kbn-type-scale, 1));

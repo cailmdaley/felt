@@ -194,14 +194,6 @@ export interface DayCell {
   attention: number
 }
 
-/** The day's whole ink: one band, one meaning. Chronicle does not ask who was
- *  at the keyboard — at a day per column, "work happened here" is the only
- *  claim the scale can honestly carry, so the two kinds are summed rather
- *  than drawn as rival channels. */
-function dayWork(cell: DayCell): number {
-  return cell.agent + cell.attention
-}
-
 /**
  * Fold buckets into civil days by their LOCAL day. Never by `m / 86_400_000`:
  * a fixed-ms floor is a UTC day, which is the wrong day for half of every
@@ -229,18 +221,109 @@ export function aggregateByCivilDay(buckets: readonly ActivityBucket[]): Map<str
 }
 
 /**
- * Density in three steps, relative to the busiest day anywhere in the window.
- * Relative rather than absolute because "busy" is a property of the week you
- * are looking at: fixed thresholds either saturate every segment during a
- * heavy sprint or flatten every segment during a quiet one.
+ * A contiguous run of worked minutes inside one rail day — the strip the
+ * chronicle actually draws. Two buckets more than {@link SPELL_GAP_MS} apart
+ * start separate spells, so a morning of steering and an evening agent run
+ * read as two periods of use with air between them, not one day-long claim.
+ * A spell does not ask who was at the keyboard — both kinds of minute are
+ * one claim, "work happened here".
  */
-export function densityStep(work: number, peak: number): 1 | 2 | 3 {
-  if (work <= 0) return 1
-  if (peak <= 0) return 1
-  const frac = work / peak
-  if (frac >= 0.55) return 3
-  if (frac >= 0.20) return 2
-  return 1
+export interface DaySpell {
+  /** First active minute, epoch ms. */
+  startMs: number
+  /** One past the last active minute, epoch ms. */
+  endMs: number
+  /** Summed `n` across the spell's buckets — the height signal. */
+  work: number
+  /** Distinct active minutes — the tooltip's honest figure. */
+  minutes: number
+}
+
+/** Two active minutes this far apart still belong to one period of use.
+ *  45 minutes: a coffee, a meeting — the sitting resumes; anything longer
+ *  reads as coming back to the work rather than staying at it. */
+export const SPELL_GAP_MS = 45 * 60_000
+
+const MINUTE_MS = 60_000
+
+/**
+ * Fold buckets into per-rail-day SPELLS — where inside the day the work sat,
+ * not just that the day was worked. Same rail-day discipline as
+ * {@link aggregateByCivilDay}, same two kinds folded into one claim.
+ */
+export function spellsByCivilDay(buckets: readonly ActivityBucket[]): Map<string, DaySpell[]> {
+  const byDay = new Map<string, ActivityBucket[]>()
+  for (const b of buckets) {
+    if (!Number.isFinite(b.m)) continue
+    if (b.k !== 'agent' && b.k !== 'attention') continue
+    const day = railCivilDay(b.m)
+    const list = byDay.get(day)
+    if (list) list.push(b)
+    else byDay.set(day, [b])
+  }
+  const out = new Map<string, DaySpell[]>()
+  for (const [day, list] of byDay) {
+    list.sort((a, b) => a.m - b.m)
+    const spells: DaySpell[] = []
+    for (const b of list) {
+      const n = Number.isFinite(b.n) ? Math.max(b.n, 1) : 1
+      const last = spells[spells.length - 1]
+      if (last && b.m - last.endMs <= SPELL_GAP_MS) {
+        // Same minute twice (an agent bucket and an attention bucket share
+        // `m`) grows the work but not the clock.
+        if (b.m + MINUTE_MS > last.endMs) {
+          last.minutes += 1
+          last.endMs = b.m + MINUTE_MS
+        }
+        last.work += n
+      } else {
+        spells.push({ startMs: b.m, endMs: b.m + MINUTE_MS, work: n, minutes: 1 })
+      }
+    }
+    out.set(day, spells)
+  }
+  return out
+}
+
+/** The strip's height floor and ceiling. The floor is thick enough that the
+ *  faintest spell is still a mark, not a hairline; the ceiling stops short of
+ *  `--chr-row-h` (32px) so the busiest spell still floats in the row's air
+ *  rather than fencing it. */
+export const SPELL_MIN_H = 4
+export const SPELL_MAX_H = 24
+
+/**
+ * A spell's height in px: log-scaled between floor and ceiling, relative to
+ * the busiest spell anywhere in the window. Log rather than linear because
+ * spell work is heavy-tailed — one 400-minute fan-out afternoon would
+ * otherwise flatten every ordinary sitting onto the floor. Relative rather
+ * than absolute because "busy" is a property of the window you are looking at.
+ */
+export function spellHeight(work: number, peak: number): number {
+  if (work <= 0 || peak <= 0) return SPELL_MIN_H
+  const frac = Math.min(Math.log1p(work) / Math.log1p(peak), 1)
+  return SPELL_MIN_H + (SPELL_MAX_H - SPELL_MIN_H) * frac
+}
+
+/**
+ * Where inside its rail day an instant sits, 0..1. The rail opens at 6am of
+ * the day it is named for ({@link RAIL_START_HOUR}), so 6am → 0 and the next
+ * 6am → 1. A DST rail is 23 or 25 wall-clock hours; the fraction drifts a few
+ * percent that night and nothing downstream cares at half-a-day-column scale.
+ */
+function railFrac(ms: number, day: string): number {
+  const noon = civilDayNoon(day)?.getTime()
+  if (noon === undefined) return 0
+  const start = noon - 6 * 3_600_000
+  return clamp((ms - start) / DAY_MS_CONST, 0, 1)
+}
+
+const DAY_MS_CONST = 86_400_000
+
+/** `07:42` in the browser's zone — the tooltip's clock. */
+function hhmm(ms: number): string {
+  const d = new Date(ms)
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
 // ── Cycles ───────────────────────────────────────────────────────────────────
@@ -606,6 +689,8 @@ export interface ChronicleRow {
   state: LifecycleState
   cardId?: string
   days: Map<string, DayCell>
+  /** The same days as sub-day spells — where inside each day the work sat. */
+  spells: Map<string, DaySpell[]>
   /** Inclusive day-column range the solid lifeline covers. Never past today. */
   startIdx: number
   endIdx: number
@@ -798,6 +883,7 @@ function buildFiberRow(
   origins: TemporalOrigins,
 ): ChronicleRow {
   const days = aggregateByCivilDay(buckets)
+  const spells = spellsByCivilDay(buckets)
   const { startIdx, endIdx, closeIdx, closed } = lifelineExtent(
     card,
     days.keys(),
@@ -850,6 +936,7 @@ function buildFiberRow(
     cardId: card.id,
     originId: card.originId,
     days,
+    spells,
     startIdx,
     endIdx,
     closeIdx,
@@ -973,12 +1060,15 @@ export function buildRows(
   return fibers
 }
 
-/** The busiest single day across every row — the scale density steps map onto.
- *  Measured in the same combined figure the band draws ({@link dayWork}), so
- *  the normalisation and the mark can never mean two different things. */
-function peakDayWork(rows: readonly ChronicleRow[]): number {
+/** The busiest single SPELL across every row — the scale {@link spellHeight}
+ *  maps onto. Measured in the same figure the strip draws (a spell's summed
+ *  work), so the normalisation and the mark can never mean two different
+ *  things. */
+function peakSpellWork(rows: readonly ChronicleRow[]): number {
   let peak = 0
-  for (const row of rows) for (const cell of row.days.values()) peak = Math.max(peak, dayWork(cell))
+  for (const row of rows)
+    for (const spells of row.spells.values())
+      for (const sp of spells) peak = Math.max(peak, sp.work)
   return peak
 }
 
@@ -1423,7 +1513,7 @@ class ChronicleView implements TemporalView {
     const shown = hidden > 0 ? rows.slice(0, MAX_ROWS) : rows
     // The density scale is the whole record's, not the visible slice's — the
     // expander must not redraw every other row's segments.
-    const peak = peakDayWork(rows)
+    const peak = peakSpellWork(rows)
 
     const bands = this.collectBands(ctx, days, dayIndex)
     // Always at least one lane: empty, the strip is the target you draw on.
@@ -3024,16 +3114,17 @@ class ChronicleView implements TemporalView {
 
     // Length first: it is the page's largest claim and the one nobody guesses.
     key.append(item(swatch('chr-key-life'), 'row spans first to last day'))
-    // The pigments, in the shared words, with a density ramp that says
-    // the steps are relative to the busiest day in view.
+    // The pigments, in the shared words, with a ramp that teaches both axes
+    // at once: a strip's PLACE is when in the day the work sat, its HEIGHT is
+    // how much happened there (log-scaled to the busiest spell in view).
     const ramp = document.createElement('span')
     ramp.className = 'chr-key-ramp'
     for (const step of [1, 2, 3]) ramp.append(swatch(`chr-key-seg chr-key-seg-${step}`))
     // Chronicle does NOT read from ACTIVITY_KEY_ITEMS here: Day and Week draw
     // the agents' volume as its own channel and gloss it "agents working",
-    // while this band sums agent and steering minutes alike. One word for one
-    // mark is the rule, so the band gets the word that is true of it.
-    key.append(item(ramp, 'work happening (busiest day in view sets the scale)'))
+    // while this strip sums agent and steering minutes alike. One word for one
+    // mark is the rule, so the strip gets the word that is true of it.
+    key.append(item(ramp, 'periods of use (taller = busier; busiest spell in view sets the scale)'))
     // Hollow marks: what is owed, ahead of today. Nothing solid is drawn there.
     key.append(item(glyph('chr-key-glyph chr-key-due', MARK_GLYPH.due), 'due'))
     key.append(item(glyph('chr-key-glyph chr-key-launch', MARK_GLYPH.launch), 'next launch'))
@@ -3214,18 +3305,27 @@ class ChronicleView implements TemporalView {
     life.style.width = `calc(var(--chr-day-w) * ${row.endIdx - row.startIdx + 1})`
     track.append(life)
 
-    for (const [day, cell] of row.days) {
+    // ONE CHANNEL, but with a clock in it. Each strip is a SPELL — a
+    // contiguous period of use, drawn where inside the day it actually sat —
+    // so a morning sitting and an evening fan-out read as two marks with air
+    // between them. Height is the spell's work, log-scaled to the busiest
+    // spell in view; the human/agent split is still not a distinction
+    // Chronicle draws — both kinds of minute are "work happened".
+    for (const [day, spells] of row.spells) {
       const idx = dayIndex.get(day)
       if (idx === undefined) continue
-      // ONE BAND, not two channels. The per-spell steering ticks used to
-      // overlay this segment in cinnabar; at a day per column they were more
-      // granularity than the page could carry, and the human/agent split is
-      // not a distinction Chronicle is for. Both minutes are "work happened".
-      const work = dayWork(cell)
-      if (work > 0) {
+      for (const sp of spells) {
+        const f0 = railFrac(sp.startMs, day)
+        const f1 = railFrac(sp.endMs, day)
+        const h = spellHeight(sp.work, peak)
         const seg = document.createElement('div')
-        seg.className = `chr-seg chr-seg-${densityStep(work, peak)}`
-        seg.style.left = colLeft(idx)
+        seg.className = 'chr-seg'
+        seg.style.left = `calc(var(--chr-day-w) * ${idx + f0})`
+        // The floor width keeps a lone minute visible as a tick, not dust.
+        seg.style.width = `max(2px, calc(var(--chr-day-w) * ${f1 - f0}))`
+        seg.style.height = `${h}px`
+        seg.style.marginTop = `${-h / 2}px`
+        seg.title = `${hhmm(sp.startMs)}–${hhmm(sp.endMs)} · ${sp.minutes} active min`
         track.append(seg)
       }
     }
