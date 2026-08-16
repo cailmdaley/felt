@@ -675,6 +675,12 @@ All prompt variants share this shape (`compose_prompt/3` in dispatcher.ex):
    do, how the practice loads. Per-prompt, not boilerplate. Goes first
    because in causal attention every downstream token sees the prefix.
 2. **`Fiber: <id>`** (and `Run: <run-id>` for standing) — identity lines.
+   Fresh dispatches also carry **`Previous session: <uuid> (<harness>)`**
+   when the fiber has one — the predecessor's transcript pointer, read from
+   the session ledger (`SessionLedger.latest_for_uid/2`, fallback: the
+   runtime marker) *before* this dispatch stamps its own. Resume prompts
+   never carry it (the resumed worker IS the previous session); the shuttle
+   skill's `references/transcripts.md` carries the read recipes.
 3. **`Felt store: <path>`** — the worker's absolute anchor. When
    `prompt_fiber_id`'s work_dir-local translation safe-fails, the id above
    is global and doesn't resolve from cwd; the store line makes the

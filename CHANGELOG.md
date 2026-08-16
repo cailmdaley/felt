@@ -72,6 +72,17 @@ is folded in here rather than into a separate Unreleased section.
   handshake. The daemon refuses fresh launches when the CLI and the daemon
   disagree, so a stale binary cannot dispatch.
 
+#### Session lineage in dispatch prompts
+
+- Fresh dispatch prompts (oneshot and standing) carry a
+  `Previous session: <uuid> (<harness>)` line naming the predecessor's
+  on-disk transcript, read from the session ledger
+  (`SessionLedger.latest_for_uid/2`; fallback: the runtime marker) before
+  the new dispatch stamps its own. The shuttle skill's new
+  `references/transcripts.md` carries validated jq recipes for reading a
+  transcript surgically from its UUID — tails, keyword search, thinking —
+  for both claude-code and codex formats.
+
 #### The board grows a memory
 
 - **Five views, not one.** The board is a hotkey row over five full pages:
