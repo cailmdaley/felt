@@ -75,16 +75,6 @@
     "alias_of": "codex-sol"
   },
   {
-    "id": "codex-spark",
-    "cli": "codex",
-    "model": "gpt-5.3-codex-spark",
-    "extra_flags": "--dangerously-bypass-approvals-and-sandbox",
-    "effort_levels": ["low", "medium", "high", "xhigh"],
-    "default_effort": "xhigh",
-    "cost_class": "standard",
-    "aliases": ["gpt-5.3-codex-spark"]
-  },
-  {
     "id": "pi-sonnet",
     "cli": "pi",
     "provider": "github-copilot",
@@ -92,36 +82,6 @@
     "requires_model": true,
     "effort_levels": ["low", "medium", "high"],
     "default_effort": "high",
-    "cost_class": "copilot"
-  },
-  {
-    "id": "pi-gpt-5.4",
-    "cli": "pi",
-    "provider": "github-copilot",
-    "model": "gpt-5.4",
-    "requires_model": true,
-    "effort_levels": ["low", "medium", "high", "xhigh"],
-    "default_effort": "xhigh",
-    "cost_class": "copilot"
-  },
-  {
-    "id": "pi-gpt-5.4-mini",
-    "cli": "pi",
-    "provider": "github-copilot",
-    "model": "gpt-5.4-mini",
-    "requires_model": true,
-    "effort_levels": ["low", "medium", "high", "xhigh"],
-    "default_effort": "xhigh",
-    "cost_class": "copilot"
-  },
-  {
-    "id": "pi-gpt-5-mini",
-    "cli": "pi",
-    "provider": "github-copilot",
-    "model": "gpt-5-mini",
-    "requires_model": true,
-    "effort_levels": ["low", "medium", "high", "xhigh"],
-    "default_effort": "xhigh",
     "cost_class": "copilot"
   },
   {

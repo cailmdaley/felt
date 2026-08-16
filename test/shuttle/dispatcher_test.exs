@@ -358,7 +358,7 @@ defmodule Shuttle.DispatcherTest do
     # work like ordinary chat completion.
     assert prompt =~ "Exit Contract"
     assert prompt =~ "kill $PPID"
-    assert prompt =~ "A normal chat final response is not a worker exit"
+    assert prompt =~ "a normal chat final response is not a worker exit"
     refute prompt =~ "Exit before context is half-full"
 
     # A oneshot must be told to write the clean-handoff marker before exit — it's
@@ -988,18 +988,18 @@ defmodule Shuttle.DispatcherTest do
     assert cmd =~ "'hello world'"
   end
 
-  test "build_command for codex spark selects the spark model" do
+  test "build_command for codex luna selects the luna model" do
     agent =
       resolved(%{
-        "id" => "codex-spark",
+        "id" => "codex-luna",
         "cli" => "codex",
         "wrapper" => "codex",
-        "model" => "gpt-5.3-codex-spark"
+        "model" => "gpt-5.6-luna"
       })
 
     cmd = Agents.build_command(agent, "hello world")
     assert cmd =~ "codex"
-    assert cmd =~ "--model 'gpt-5.3-codex-spark'"
+    assert cmd =~ "--model 'gpt-5.6-luna'"
     assert cmd =~ "'hello world'"
     refute cmd =~ "<<<"
   end
@@ -1059,15 +1059,15 @@ defmodule Shuttle.DispatcherTest do
   test "pi renders effort as :level suffix on the model" do
     agent =
       resolved(%{
-        "id" => "pi-gpt-5.4",
+        "id" => "pi-kimi",
         "cli" => "pi",
         "wrapper" => "pi",
-        "model" => "gpt-5.4",
+        "model" => "moonshotai/kimi-k2.6",
         "effort" => "high"
       })
 
     cmd = Agents.build_command(agent, "hi")
-    assert cmd =~ "--model 'gpt-5.4:high'"
+    assert cmd =~ "--model 'moonshotai/kimi-k2.6:high'"
     refute cmd =~ "--effort"
   end
 
@@ -1453,7 +1453,7 @@ defmodule Shuttle.DispatcherTest do
     assert prompt =~ "already loaded in your transcript"
     assert prompt =~ "Exit Contract"
     assert prompt =~ "kill $PPID"
-    assert prompt =~ "A normal chat final response is not a worker exit"
+    assert prompt =~ "a normal chat final response is not a worker exit"
 
     # Resume prompt deliberately omits the fresh-dispatch orientation —
     # skills, conventions, and the constitution are already in scope.

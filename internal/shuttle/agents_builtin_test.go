@@ -15,8 +15,8 @@ func TestBuiltinRegistry_IsComplete(t *testing.T) {
 
 	want := []string{
 		"claude-sonnet", "claude-opus", "claude-haiku", "claude-fable",
-		"codex-sol", "codex-terra", "codex-luna", "codex", "codex-spark",
-		"pi-sonnet", "pi-gpt-5.4", "pi-gpt-5.4-mini", "pi-gpt-5-mini",
+		"codex-sol", "codex-terra", "codex-luna", "codex",
+		"pi-sonnet",
 		"pi-kimi", "pi-deepseek-pro", "pi-deepseek-flash",
 	}
 	if got := reg.IDs(); !slices.Equal(got, want) {
@@ -93,8 +93,8 @@ func TestBuiltinRegistry_WrapperDefaultsToCLI(t *testing.T) {
 // headless aliases as an internal -p test fixture) against bit-rot.
 func TestFleetFixtureParses(t *testing.T) {
 	reg := loadReg(t)
-	if len(reg.Records()) != 20 {
-		t.Fatalf("fleet fixture has %d records, want 20", len(reg.Records()))
+	if len(reg.Records()) != 16 {
+		t.Fatalf("fleet fixture has %d records, want 16", len(reg.Records()))
 	}
 	if _, ok := reg.Find("human"); ok {
 		t.Fatal("fleet fixture must not carry the removed human agent")

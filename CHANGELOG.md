@@ -27,8 +27,8 @@ is folded in here rather than into a separate Unreleased section.
 - The agent registry now layers `~/.config/felt/agents.json` (or
   `$FELT_AGENTS_FILE`) over the shipped fleet: `claude-sonnet` (the
   default), `claude-opus`, `claude-haiku`, `claude-fable`; `codex-sol`,
-  `codex-terra`, `codex-luna`, `codex`, `codex-spark`; `pi-sonnet`,
-  `pi-gpt-5.4`, `pi-gpt-5.4-mini`, `pi-gpt-5-mini`, `pi-kimi`,
+  `codex-terra`, `codex-luna`, `codex`; `pi-sonnet`,
+  `pi-kimi`,
   `pi-deepseek-pro`, `pi-deepseek-flash`. There is no reserved `human`
   record and no headless aliases. `builtins: "merge"` (default) folds by
   id, last wins wholesale; `"restrict"` drops the builtin layer, so the

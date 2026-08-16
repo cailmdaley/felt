@@ -54,6 +54,7 @@ Felt ships a small built-in registry. It covers the Claude CLI, the Codex CLI, a
 | `claude-sonnet` | Lighter-weight dispatches where Opus is overkill — routine general/frontend work. This is also the bare fallback when a fiber names no agent. |
 | `claude-haiku` | Cheap and fast. Easy, repetitive, or low-stakes tasks. |
 | `codex` | Hard well-defined implementation — gritty refactors, tight algorithmic problems, work that wants the codex CLI's harness (sandbox, head-down focus). |
+| `codex-luna` | The price-performance outlier: roughly a tenth of the comparable Claude tiers (luna high outperforms sonnet high; luna max is comparable to opus low). The default for cheap or high-volume dispatches where the codex harness fits. |
 | `human` | The step no agent should take. Parks the card for a person. |
 
 `claude-sonnet-headless` and `claude-opus-headless` are aliases that pin the headless axis. All claude agents dispatch with `--permission-mode auto`.
