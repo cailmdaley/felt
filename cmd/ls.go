@@ -20,6 +20,7 @@ var (
 	lsRegex      bool
 	lsHasFields  []string
 	lsJSONFields []string
+	lsVerbose    bool
 	treeDepth    int
 )
 
@@ -41,7 +42,11 @@ Optional query searches name, outcome, additional YAML field text, and fiber id 
   felt ls -r "rule:.*data"    regex search (also applied to fiber id)
   felt ls -e "exact-slug"     exact name or exact id match
 
-Use --body with query to include body search, and with --json to emit body text.`,
+Use --body with query to include body search, and with --json to emit body text.
+
+Query results collapse by containment: a match whose ancestor also matches is
+folded into that ancestor, which carries a count of what it swallowed. Use -v to
+list every match flat. --json is always uncollapsed.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		root, err := resolveProjectRoot()
@@ -245,15 +250,24 @@ Use --body with query to include body search, and with --json to emit body text.
 			return outputJSON(filtered)
 		}
 
-		if len(filtered) == 0 {
+		// Containment collapse: a query that matches a directory fiber also
+		// matches every descendant by slug, which buries the one hit worth
+		// seeing under its whole subtree. Show the ancestor with a count.
+		shown := filtered
+		var collapsed map[string]int
+		if query != "" && !lsVerbose {
+			shown, collapsed = collapseByContainment(filtered, exactMatches)
+		}
+
+		if len(shown) == 0 {
 			if query != "" {
 				fmt.Printf("No felts matching %q\n", query)
 			} else {
 				fmt.Println("No felts found")
 			}
 		} else {
-			for _, f := range filtered {
-				fmt.Print(formatFeltTwoLine(f))
+			for _, f := range shown {
+				fmt.Print(formatFeltTwoLine(f, collapsed[f.ID]))
 			}
 		}
 
@@ -279,6 +293,54 @@ func init() {
 	lsCmd.Flags().BoolVarP(&lsRegex, "regex", "r", false, "Treat query as regular expression")
 	lsCmd.Flags().StringArrayVar(&lsHasFields, "has-field", nil, "Filter to fibers with this top-level frontmatter/JSON field (repeatable or comma-separated)")
 	lsCmd.Flags().StringArrayVar(&lsJSONFields, "json-field", nil, "With --json, emit only this top-level field (repeatable or comma-separated)")
+	lsCmd.Flags().BoolVarP(&lsVerbose, "verbose", "v", false, "List every match flat, without collapsing matches under a matching ancestor")
+}
+
+// collapseByContainment folds matches that live under another match into their
+// shallowest matching ancestor. Because `felt ls` searches the slug, a query
+// naming a directory fiber matches its entire subtree; without this a one-fiber
+// question comes back as a hundred lines. Returns the fibers to print (in the
+// order given) and a per-ancestor count of what it swallowed.
+//
+// Exact matches are never suppressed — they're the most likely target of the
+// query, and they sort first for exactly that reason.
+func collapseByContainment(matches []*felt.Felt, exact []*felt.Felt) ([]*felt.Felt, map[string]int) {
+	matched := make(map[string]bool, len(matches))
+	for _, f := range matches {
+		matched[f.ID] = true
+	}
+	pinned := make(map[string]bool, len(exact))
+	for _, f := range exact {
+		pinned[f.ID] = true
+	}
+
+	// shallowestMatchingAncestor is the fiber a suppressed match is counted
+	// against: the topmost match on its ancestor chain, which by construction
+	// has no match above it and so is itself shown.
+	shallowest := func(id string) string {
+		found := ""
+		for parent := felt.ParentPath(id); parent != ""; parent = felt.ParentPath(parent) {
+			if matched[parent] {
+				found = parent
+			}
+		}
+		return found
+	}
+
+	shown := make([]*felt.Felt, 0, len(matches))
+	collapsed := make(map[string]int)
+	for _, f := range matches {
+		if pinned[f.ID] {
+			shown = append(shown, f)
+			continue
+		}
+		if ancestor := shallowest(f.ID); ancestor != "" {
+			collapsed[ancestor]++
+			continue
+		}
+		shown = append(shown, f)
+	}
+	return shown, collapsed
 }
 
 func splitListFlag(values []string) []string {
@@ -477,8 +539,11 @@ type ContainmentNode struct {
 var treeCmd = &cobra.Command{
 	Use:   "tree [id]",
 	Short: "Show containment tree",
-	Long:  `Shows the containment tree (filesystem nesting) for fibers.`,
-	Args:  cobra.MaximumNArgs(1),
+	Long: `Shows the containment tree (filesystem nesting) for fibers.
+
+Use -L/--depth to cap how deep the tree is drawn; elided branches are marked
+with the count of what lies below them. --json is always the full tree.`,
+	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		root, err := resolveProjectRoot()
 		if err != nil {
@@ -586,11 +651,16 @@ func treeDisplayID(id string) string {
 	return ".../" + id[idx+1:]
 }
 
-func printContainmentNode(node *ContainmentNode, prefix string, last bool, depth int) {
-	if treeDepth > 0 && depth > treeDepth {
-		return
+// countDescendants returns the total number of nodes below node.
+func countDescendants(node *ContainmentNode) int {
+	n := 0
+	for _, child := range node.Children {
+		n += 1 + countDescendants(child)
 	}
+	return n
+}
 
+func printContainmentNode(node *ContainmentNode, prefix string, last bool, depth int) {
 	connector := "├── "
 	if last {
 		connector = "└── "
@@ -610,6 +680,15 @@ func printContainmentNode(node *ContainmentNode, prefix string, last bool, depth
 		childPrefix = prefix + "│   "
 	}
 
+	// At the depth limit the subtree is elided; say how much was left out so
+	// the truncation is visible rather than silent.
+	if treeDepth > 0 && depth+1 > treeDepth {
+		if hidden := countDescendants(node); hidden > 0 {
+			fmt.Printf("%s└── … (%d more below)\n", childPrefix, hidden)
+		}
+		return
+	}
+
 	for i, child := range node.Children {
 		printContainmentNode(child, childPrefix, i == len(node.Children)-1, depth+1)
 	}
@@ -617,5 +696,5 @@ func printContainmentNode(node *ContainmentNode, prefix string, last bool, depth
 
 func init() {
 	rootCmd.AddCommand(treeCmd)
-	treeCmd.Flags().IntVar(&treeDepth, "depth", 0, "Maximum nesting depth to display (0 = unlimited)")
+	treeCmd.Flags().IntVarP(&treeDepth, "depth", "L", 0, "Maximum nesting depth to display (1 = direct children only; 0 = unlimited)")
 }

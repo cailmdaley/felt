@@ -29,9 +29,9 @@ Every command accepts these global flags:
 
 | Command | Purpose |
 |---|---|
-| `felt ls [query]` | List and search fibers (`-t` tag, `-s` status, `-n` recent N, `-r` regex, `-e` exact, `--body`, `--has-field`, `--json-field`) |
+| `felt ls [query]` | List and search fibers (`-t` tag, `-s` status, `-n` recent N, `-r` regex, `-e` exact, `--body`, `--has-field`, `--json-field`; matches under a matching ancestor collapse into it, `-v` expands) |
 | `felt session` | Print the SessionStart context as plain text |
-| `felt tree [id]` | Show the containment tree (`--depth`) |
+| `felt tree [id]` | Show the containment tree (`-L`/`--depth` caps depth; elided branches show how much is below) |
 
 ## Structure
 

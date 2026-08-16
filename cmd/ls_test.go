@@ -182,6 +182,158 @@ func TestLsJSONReportPath(t *testing.T) {
 	}
 }
 
+// A query naming a directory fiber matches its whole subtree by slug. The
+// ancestor stands in for its descendants with a count; -v restores the flat
+// listing; --json stays uncollapsed for the daemon and hook consumers.
+func TestLsCollapsesMatchesUnderMatchingAncestor(t *testing.T) {
+	dir := t.TempDir()
+	storage := felt.NewStorage(dir)
+	if err := storage.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+	created := mustParseTime(t, "2026-04-10T09:00:00Z")
+	for _, fiber := range []*felt.Felt{
+		{ID: "portolan/swarm", Name: "Swarm", CreatedAt: created},
+		{ID: "portolan/swarm/hex-grid", Name: "Hex grid", CreatedAt: created},
+		{ID: "portolan/swarm/hex-grid/tiling", Name: "Tiling", CreatedAt: created},
+		{ID: "elsewhere/swarm-notes", Name: "Swarm notes", CreatedAt: created},
+	} {
+		if err := storage.Write(fiber); err != nil {
+			t.Fatalf("Write(%s) error: %v", fiber.ID, err)
+		}
+	}
+
+	reset := saveLsGlobals()
+	defer reset()
+
+	out, err := runCommand(t, dir, "ls", "swarm")
+	if err != nil {
+		t.Fatalf("ls swarm: %v\n%s", err, out)
+	}
+	if strings.Contains(out, "hex-grid") {
+		t.Fatalf("descendants not collapsed:\n%s", out)
+	}
+	if !strings.Contains(out, "(+2 matching descendants; -v to expand)") {
+		t.Fatalf("missing collapse annotation:\n%s", out)
+	}
+	// A match whose ancestors don't match is listed as before.
+	if !strings.Contains(out, "elsewhere/swarm-notes") {
+		t.Fatalf("unrelated match dropped:\n%s", out)
+	}
+
+	// Re-arm: cobra's per-flag Changed state must not leak between invocations.
+	saveLsGlobals()
+
+	out, err = runCommand(t, dir, "ls", "-v", "swarm")
+	if err != nil {
+		t.Fatalf("ls -v swarm: %v\n%s", err, out)
+	}
+	for _, want := range []string{"portolan/swarm", "portolan/swarm/hex-grid", "portolan/swarm/hex-grid/tiling", "elsewhere/swarm-notes"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("-v dropped %s:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "matching descendants") {
+		t.Fatalf("-v should not annotate:\n%s", out)
+	}
+
+	saveLsGlobals()
+
+	out, err = runCommand(t, dir, "ls", "-j", "swarm")
+	if err != nil {
+		t.Fatalf("ls -j swarm: %v\n%s", err, out)
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal([]byte(out), &rows); err != nil {
+		t.Fatalf("unmarshal: %v\n%s", err, out)
+	}
+	if len(rows) != 4 {
+		t.Fatalf("--json collapsed results: got %d rows, want 4\n%s", len(rows), out)
+	}
+}
+
+// An exact match is the likeliest target of the query, so it survives collapse
+// even when an ancestor also matches.
+func TestLsCollapseKeepsExactMatch(t *testing.T) {
+	dir := t.TempDir()
+	storage := felt.NewStorage(dir)
+	if err := storage.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+	created := mustParseTime(t, "2026-04-10T09:00:00Z")
+	for _, fiber := range []*felt.Felt{
+		{ID: "swarm-tools", Name: "Swarm tools", CreatedAt: created},
+		{ID: "swarm-tools/swarm", Name: "Swarm", CreatedAt: created},
+	} {
+		if err := storage.Write(fiber); err != nil {
+			t.Fatalf("Write(%s) error: %v", fiber.ID, err)
+		}
+	}
+
+	reset := saveLsGlobals()
+	defer reset()
+
+	out, err := runCommand(t, dir, "ls", "swarm")
+	if err != nil {
+		t.Fatalf("ls swarm: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "swarm-tools/swarm") {
+		t.Fatalf("exact match suppressed by collapse:\n%s", out)
+	}
+	if strings.Contains(out, "matching descendant") {
+		t.Fatalf("exact match should not be counted as collapsed:\n%s", out)
+	}
+}
+
+func TestTreeDepthLimit(t *testing.T) {
+	dir := t.TempDir()
+	storage := felt.NewStorage(dir)
+	if err := storage.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+	created := mustParseTime(t, "2026-04-10T09:00:00Z")
+	for _, fiber := range []*felt.Felt{
+		{ID: "project", Name: "Project", CreatedAt: created},
+		{ID: "project/alpha", Name: "Alpha", CreatedAt: created},
+		{ID: "project/alpha/deep", Name: "Deep", CreatedAt: created},
+		{ID: "project/alpha/deep/deeper", Name: "Deeper", CreatedAt: created},
+	} {
+		if err := storage.Write(fiber); err != nil {
+			t.Fatalf("Write(%s) error: %v", fiber.ID, err)
+		}
+	}
+
+	reset := saveLsGlobals()
+	defer reset()
+
+	out, err := runCommand(t, dir, "tree", "-L", "1")
+	if err != nil {
+		t.Fatalf("tree -L 1: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "alpha") {
+		t.Fatalf("tree -L 1 dropped direct child:\n%s", out)
+	}
+	if strings.Contains(out, "deeper") {
+		t.Fatalf("tree -L 1 showed depth 2:\n%s", out)
+	}
+	if !strings.Contains(out, "… (2 more below)") {
+		t.Fatalf("missing elision indicator:\n%s", out)
+	}
+
+	saveLsGlobals()
+
+	full, err := runCommand(t, dir, "tree")
+	if err != nil {
+		t.Fatalf("tree: %v\n%s", err, full)
+	}
+	if !strings.Contains(full, "deeper") {
+		t.Fatalf("unflagged tree truncated:\n%s", full)
+	}
+	if strings.Contains(full, "more below") {
+		t.Fatalf("unflagged tree showed elision indicator:\n%s", full)
+	}
+}
+
 func saveLsGlobals() func() {
 	prevStatus := lsStatus
 	prevTags := lsTags
@@ -191,7 +343,9 @@ func saveLsGlobals() func() {
 	prevRegex := lsRegex
 	prevHasFields := lsHasFields
 	prevJSONFields := lsJSONFields
+	prevVerbose := lsVerbose
 	prevJSON := jsonOutput
+	prevTreeDepth := treeDepth
 
 	lsStatus = ""
 	lsTags = nil
@@ -201,16 +355,21 @@ func saveLsGlobals() func() {
 	lsRegex = false
 	lsHasFields = nil
 	lsJSONFields = nil
+	lsVerbose = false
 	jsonOutput = false
+	treeDepth = 0
 
 	// Reset cobra's per-flag Changed bookkeeping. Without this, a prior test
 	// that passed e.g. `-s active` leaves Changed("status") == true, and
 	// subsequent tests inspecting `cmd.Flags().Changed("status")` see stale
 	// state even though the underlying string variable was reset above.
-	for _, name := range []string{"status", "tag", "recent", "body", "exact", "regex", "has-field", "json-field", "json"} {
+	for _, name := range []string{"status", "tag", "recent", "body", "exact", "regex", "has-field", "json-field", "json", "verbose"} {
 		if f := lsCmd.Flags().Lookup(name); f != nil {
 			f.Changed = false
 		}
+	}
+	if f := treeCmd.Flags().Lookup("depth"); f != nil {
+		f.Changed = false
 	}
 
 	return func() {
@@ -222,6 +381,8 @@ func saveLsGlobals() func() {
 		lsRegex = prevRegex
 		lsHasFields = prevHasFields
 		lsJSONFields = prevJSONFields
+		lsVerbose = prevVerbose
 		jsonOutput = prevJSON
+		treeDepth = prevTreeDepth
 	}
 }

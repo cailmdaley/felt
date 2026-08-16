@@ -146,6 +146,11 @@ is folded in here rather than into a separate Unreleased section.
   in place, so most "rebuild it" cases no longer need an uninstall.
 - Fiber JSON carries the fiber's physical path, including in narrow field
   projections.
+- `felt ls <query>` collapses matches that sit under a matching ancestor into
+  that ancestor, which carries a count of what it swallowed; `-v` lists every
+  match flat. `--json` is unchanged — always the full, uncollapsed set.
+- `felt tree -L <depth>` caps how deep the tree is drawn, marking each elided
+  branch with the number of fibers below it.
 
 ### Changed
 
