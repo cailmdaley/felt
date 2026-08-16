@@ -223,11 +223,17 @@ func TestIntegration(t *testing.T) {
 	if !strings.Contains(out, "completed successfully") {
 		t.Fatalf("edit close: expected outcome, got: %s", out)
 	}
+	// Closed matches are counted, not printed (a525090) — a bare ls answers
+	// with the trailing closed-count hint; -s closed prints the fiber itself.
 	out = mustFelt(t, dir, "ls", "completed successfully")
-	if !strings.Contains(out, fiberID) {
-		t.Fatalf("ls query should match outcome text from metadata, got: %s", out)
+	if !strings.Contains(out, "closed") {
+		t.Fatalf("ls query should hint at the closed match, got: %s", out)
 	}
-	out = mustFelt(t, dir, "ls", "-r", "completed\\s+successfully")
+	out = mustFelt(t, dir, "ls", "-s", "closed", "completed successfully")
+	if !strings.Contains(out, fiberID) {
+		t.Fatalf("ls -s closed should print the closed match, got: %s", out)
+	}
+	out = mustFelt(t, dir, "ls", "-s", "closed", "-r", "completed\\s+successfully")
 	if !strings.Contains(out, fiberID) {
 		t.Fatalf("ls regex query should match outcome text from metadata, got: %s", out)
 	}
@@ -407,7 +413,9 @@ container: python:3.11-slim
 		t.Fatalf("write structured fixture: %v", err)
 	}
 
-	out = mustFelt(t, dir, "ls", "BAO")
+	// The fixture is status: closed, and closed matches are counted rather
+	// than printed (a525090); -s all + -v prints every match flat.
+	out = mustFelt(t, dir, "ls", "-v", "-s", "all", "BAO")
 	if !strings.Contains(out, "bao-analysis/damping-prior") {
 		t.Fatalf("ls should match structured frontmatter fields, got: %s", out)
 	}
