@@ -262,6 +262,26 @@ defmodule Shuttle.SessionLedgerTest do
                SessionLedger.latest_for_uid(uid, path: path)
     end
 
+    test "finds a match in the rotated sibling when the live file has none", %{path: path} do
+      uid = "01KTS261GJMMRDRHS2QDMEFV3K"
+
+      rotated_line =
+        Jason.encode!(%{
+          "fiber" => "work/paper/edits",
+          "uid" => uid,
+          "session" => "dddddddd-0000-0000-0000-000000000004",
+          "harness" => "codex",
+          "at" => 500,
+          "kind" => "dispatch"
+        })
+
+      File.write!(path <> ".1", rotated_line <> "\n")
+      File.write!(path, "")
+
+      assert %{"session" => "dddddddd-0000-0000-0000-000000000004"} =
+               SessionLedger.latest_for_uid(uid, path: path)
+    end
+
     test "nil for an unknown uid, a blank uid, or nil", %{path: path} do
       assert SessionLedger.latest_for_uid("01KTS261GJMMRDRHS2QDMEFVZZ", path: path) == nil
       assert SessionLedger.latest_for_uid("", path: path) == nil

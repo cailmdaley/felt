@@ -394,6 +394,14 @@ defmodule Shuttle.DispatcherTest do
     # Resume prompts never carry it — the resumed worker IS the previous session.
     refute Dispatcher.render_resume_prompt("tests/haiku", previous_session: prev) =~
              "Previous session:"
+
+    # Standing runs carry it too — last run's session is real lineage.
+    standing =
+      Dispatcher.render_standing_run_prompt("tests/haiku", "2026-08-16T06:00",
+        previous_session: prev
+      )
+
+    assert standing =~ "Previous session: 0883ade1-08e0-4457-94c6-7ac12137eb0f (claude-code)"
   end
 
   test "render_prompt for a pinned role carries the three-case unified-lifecycle contract" do

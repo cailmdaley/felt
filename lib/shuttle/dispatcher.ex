@@ -1280,8 +1280,18 @@ defmodule Shuttle.Dispatcher do
         # resume succeeds — the fiber self-heals. `||` keeps the resume failure
         # non-fatal under `set -e`; harness-agnostic (no knowledge of where any CLI
         # stores transcripts — the run itself reports success or failure).
+        # The fallback prompt must NOT carry the lineage line: the "previous"
+        # session here is the very session_id the fallback relaunches under —
+        # and the fallback only fires because its transcript is GONE, so the
+        # line would send the worker hunting for a file that does not exist.
         fallback_command =
-          fresh_fallback_command(agent, fiber_id, session_id, prompt_context, prompt_opts)
+          fresh_fallback_command(
+            agent,
+            fiber_id,
+            session_id,
+            prompt_context,
+            Keyword.delete(prompt_opts, :previous_session)
+          )
 
         command = "#{resume_command} || #{fallback_command}"
 
@@ -1320,6 +1330,7 @@ defmodule Shuttle.Dispatcher do
                 run_id: Keyword.get(opts, :run_id),
                 tmux: session,
                 harness: Shuttle.SessionLedger.harness_for_cli(agent.cli),
+                uid: Keyword.get(opts, :uid),
                 ledger_kind: :resume
               )
             end
@@ -1353,6 +1364,7 @@ defmodule Shuttle.Dispatcher do
                 run_id: Keyword.get(opts, :run_id),
                 tmux: session,
                 harness: Shuttle.SessionLedger.harness_for_cli(agent.cli),
+                uid: Keyword.get(opts, :uid),
                 ledger_kind: :dispatch
               )
             end
@@ -1533,6 +1545,10 @@ defmodule Shuttle.Dispatcher do
   defp append_session_ledger(fiber_id, uuid, opts) do
     Shuttle.SessionLedger.record(
       fiber: fiber_id,
+      # Explicit, not tmux-inferred: a fiber with no uid yields a plain
+      # `<leaf>-shuttle` tmux name, and an inferred-nil uid line would be
+      # invisible to latest_for_uid forever (the claim path already passes it).
+      uid: Keyword.get(opts, :uid),
       session: uuid,
       tmux: Keyword.get(opts, :tmux),
       harness: Keyword.get(opts, :harness),

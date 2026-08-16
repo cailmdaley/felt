@@ -50,7 +50,7 @@ jq -r 'select(.type=="response_item" and .payload.type=="reasoning") | .payload.
 jq -r 'select(.type=="response_item" and .payload.type=="message") | .payload.content | map(.text // empty) | join("\n")' $F | rg -i -C2 "<keyword>"
 
 # overview
-jq -rs '"\(length) lines, \(first.timestamp) → \(last.timestamp)"' $F
+jq -rs '[.[]|select(.timestamp)] | "\(length) lines, \(first.timestamp) → \(last.timestamp)"' $F
 ```
 
 ## Gotchas

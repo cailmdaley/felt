@@ -237,15 +237,38 @@ defmodule Shuttle.SessionLedger do
   def latest_for_uid(uid, opts \\ [])
 
   def latest_for_uid(uid, opts) when is_binary(uid) and uid != "" do
-    0
-    |> read_since(opts)
-    |> Enum.filter(fn record ->
-      record["uid"] == uid and is_binary(record["session"]) and record["session"] != ""
-    end)
-    |> List.last()
+    path = Keyword.get(opts, :path, default_path())
+
+    # This sits on the dispatch path (Poller GenServer), so no
+    # decode-everything-and-sort: scan newest-first — live file before its
+    # rotated sibling, lines back-to-front (append-only, so file order is time
+    # order) — with a substring prefilter so only candidate lines are decoded.
+    [path, path <> @rotated_suffix]
+    |> Enum.filter(&File.regular?/1)
+    |> Enum.find_value(fn file -> newest_match_in(file, uid) end)
   end
 
   def latest_for_uid(_uid, _opts), do: nil
+
+  defp newest_match_in(file, uid) do
+    file
+    |> File.read!()
+    |> String.split("\n", trim: true)
+    |> Enum.reverse()
+    |> Enum.find_value(fn line ->
+      with true <- String.contains?(line, uid),
+           {:ok, %{"uid" => ^uid, "session" => session} = record} <- Jason.decode(line),
+           true <- is_binary(session) and session != "" do
+        record
+      else
+        _ -> nil
+      end
+    end)
+  rescue
+    # Vanished or unreadable between the check and the read — a rotation
+    # racing this scan. Fall through to the next file.
+    _ -> nil
+  end
 
   defp stream_records(path, since_ms) do
     path
