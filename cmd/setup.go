@@ -58,8 +58,11 @@ var setupClaudeCmd = &cobra.Command{
 	Long: `Install the felt plugin for Claude Code.
 
 Registers the felt plugin marketplace and installs the felt plugin from
-it. The plugin bundles the felt skill plus SessionStart and
-PreToolUse hooks. Idempotent — re-running is safe.
+it. The plugin bundles the felt skill plus four hooks: SessionStart and
+PreToolUse surface active fibers and gate non-felt tool use, PostToolUse
+stamps updated-at on a directly edited fiber, and an activity-event hook
+records harness events for Shuttle (writing nothing unless ~/.shuttle
+exists). Idempotent — re-running is safe.
 
 By default, registers ` + marketplaceRepo + ` directly from GitHub —
 Claude Code clones the marketplace itself, so no local checkout is

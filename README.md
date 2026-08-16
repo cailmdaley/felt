@@ -78,8 +78,14 @@ felt setup claude                                    # install the Claude Code p
 The same repo ships **Shuttle**, an optional orchestration layer. Add a `shuttle:` block to a
 fiber's frontmatter to turn it into a *constitution* — a spec of a desired state. An Elixir/OTP
 daemon polls your felt stores. It launches one tmux worker per eligible constitution, and serves a
-kanban board at `http://127.0.0.1:4000/` for watching and steering them. Workers stay attachable.
+board at `http://127.0.0.1:4000/` for watching and steering them. Workers stay attachable.
 Each one rewrites the fiber's `outcome` and `## Status` on exit, so the next worker lands warm.
+
+The board is five views behind a hotkey row. A kanban desk is the first; beside it, Day, Week and
+Chronicle fold a per-minute activity record — joined to fibers through recorded sessions and
+commits — into where the time actually went, and a fifth lays out every file a worker sent as a
+canvas of rendered pages. Details:
+[The board](https://cailmdaley.github.io/felt/shuttle/board/).
 
 Configure Shuttle from your home directory. `~/.config/felt/agents.json` layers your agents over the
 built-in set (`felt shuttle agents init` seeds it). `~/.config/felt/remotes.json` lists the remote

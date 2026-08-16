@@ -4,17 +4,16 @@ All notable changes to felt are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
-
-(nothing yet)
-
-## [1.1.0] — 2026-07-30
+## [1.1.0] — unreleased
 
 This is the largest change in the project's history. Two things happened.
 Shuttle — the Elixir orchestration daemon and its board UI — moved into
 this repository and behind the `felt` binary. And felt went back to pure
 markdown: the SQLite index and the history log are gone, and identity and
 recency now live in the frontmatter.
+
+The version was stamped 2026-07-30 and has not been cut; work landing since
+is folded in here rather than into a separate Unreleased section.
 
 > **Note.** The daemon and UI are not release artifacts — only the Go binary
 > ships. Homebrew users get the `felt shuttle` verb tree, but the daemon-HTTP
@@ -26,13 +25,17 @@ recency now live in the frontmatter.
 #### User-level configuration
 
 - The agent registry now layers `~/.config/felt/agents.json` (or
-  `$FELT_AGENTS_FILE`) over a small generic builtin set (`claude-sonnet`,
-  `claude-opus`, `claude-haiku`, `claude-fable`, `codex`, `human`, plus
-  headless aliases). `builtins: "merge"` (default) folds by id, last wins
-  wholesale; `"replace"` drops the builtin layer (`human` stays reserved).
-  A fuller example ships as `share/agents.example.json`; `felt shuttle
-  agents` shows each record's provenance. A malformed file fails loud with
-  its path; a missing file is silent.
+  `$FELT_AGENTS_FILE`) over the shipped fleet: `claude-sonnet` (the
+  default), `claude-opus`, `claude-haiku`, `claude-fable`; `codex-sol`,
+  `codex-terra`, `codex-luna`, `codex`, `codex-spark`; `pi-sonnet`,
+  `pi-gpt-5.4`, `pi-gpt-5.4-mini`, `pi-gpt-5-mini`, `pi-kimi`,
+  `pi-deepseek-pro`, `pi-deepseek-flash`. There is no reserved `human`
+  record and no headless aliases. `builtins: "merge"` (default) folds by
+  id, last wins wholesale; `"restrict"` drops the builtin layer, so the
+  file becomes the whole registry for that host. A fuller example ships as
+  `share/agents.example.json`; `felt shuttle agents` shows each record's
+  provenance. A malformed file fails loud with its path; a missing file is
+  silent.
 - Remote daemons live in `~/.config/felt/remotes.json`, managed by
   `felt shuttle remotes list|add|rm|path` and read at runtime by both the
   CLI (tunnels, `status --remote`) and the daemon. `config/dev.exs`
@@ -69,6 +72,49 @@ recency now live in the frontmatter.
   handshake. The daemon refuses fresh launches when the CLI and the daemon
   disagree, so a stale binary cannot dispatch.
 
+#### The board grows a memory
+
+- **Five views, not one.** The board is a hotkey row over five full pages:
+  Desk (the kanban), Day (fibers as lanes over a 6am→6am axis), Week (past
+  days as ink rasters), Chronicle (multi-day lifelines across calendar
+  days), and Board (every file a worker sent, rendered on a canvas). The
+  first four share one temporal cursor and a two-pigment grammar — solid
+  for human steering, wash for agent work. `?view=day|week|chronicle|shelf`
+  deep-links one.
+- **The session ledger.** `~/.shuttle/sessions.jsonl`, written by the
+  daemon at dispatch / claim / resume, records which fiber each harness
+  session belonged to. It replaces inferring the pairing from a tmux
+  session name, an inference that vanished when the session ended. Served
+  as `GET /api/v1/sessions` with a `/composite` sibling.
+- **Minute-bucketed activity telemetry.** `GET /api/v1/activity` folds the
+  event stream into per-minute buckets keyed by `{minute, tmux session,
+  cwd, kind}`, collapsing the eight hook types into attention / notify /
+  agent. `GET /api/v1/moment` returns the words a session spoke inside a
+  window, read from its transcript.
+- **The commit ledger and LOC accounting.** `~/.shuttle/commits.jsonl`
+  pairs each commit with the session that made it, carrying subject, repo
+  and `--shortstat` counts, so the Chronicle narrates work and counts lines
+  without parsing a fiber name out of a subject line. A `PostToolUse` hook
+  writes it; **no such hook ships in this repo**, so the file stays absent
+  on a stock install and the narration stays empty — there is no git-log
+  fallback.
+- **Cycles.** A fiber tagged `cycle` with `start:` and `due:` names a span
+  of calendar time, drawn as a band over the Chronicle's day grid.
+  Membership is derived, never assigned — a fiber belongs by its `due:`, by
+  being in flight during the span, or by having been worked inside it.
+  Drag across days to draw one, or press `+` to speak one.
+- **Token spend.** `GET /api/v1/spend` joins the session ledger to
+  transcript usage for per-session and per-fiber rollups. Neither join
+  estimates: an unreadable transcript reports `found: false` with zeroed
+  counters and still counts as a session.
+- **Snooze on a drag horizon.** Dragging a card reveals a row of upcoming
+  days plus a chip per upcoming cycle. A drop writes `due:` +
+  `horizon: stashed`; the card returns to the desk on its due day.
+- Every temporal feed is host-scoped with a `/composite` sibling that fans
+  in each remote's cached read and reports per-origin freshness, so one
+  board shows the whole fleet and a disconnected host grays out instead of
+  drawing an empty day.
+
 #### Identity and recency in the files
 
 - Fibers carry an intrinsic ULID `id`. `felt backfill-ids` mints ids for
@@ -85,11 +131,24 @@ recency now live in the frontmatter.
 - `felt edit --set key=value` / `--unset key` writes and removes opaque
   top-level scalar frontmatter that felt does not parse natively.
 - `felt check` flags fibers with a blank `name`.
+- `felt shuttle reshape <fiber> [kind]` changes a block's kind or schedule
+  in place, so most "rebuild it" cases no longer need an uninstall.
 - Fiber JSON carries the fiber's physical path, including in narrow field
   projections.
 
 ### Changed
 
+- **The configured fleet ships by default.** The built-in registry is the
+  full Claude / Codex / Pi set rather than a generic starter, so a fresh
+  install resolves the agent ids the docs name.
+- **The board admits two kinds of row and nothing else**: a fiber carrying
+  a `shuttle:` block, and a cycle. A bare `due:` is a date, not a
+  commitment the board can act on, so such a fiber is promoted rather than
+  shown. The `soon` horizon and its timeline exile went with the change — a
+  future `due:` alone never moves a card now.
+- **Nothing on the temporal views is attributed by guessing.** Commit and
+  session attribution reads the ledgers only; no `slug:` prefix parsing, no
+  directory-name matching, no fallbacks.
 - **`felt ls --body` is plain substring matching**, with `--body -r` for
   regex. It was FTS5 whole-word matching. Scripts that relied on word
   boundaries will now get more hits. This is a silent behavior change —
@@ -136,6 +195,12 @@ recency now live in the frontmatter.
 
 ### Removed
 
+- The legacy agent-registry mode. `builtins: "replace"` is gone; a file
+  still carrying it now fails loudly rather than silently doing something
+  else. Use `"restrict"`.
+- The `claude-opus-chrome` convenience alias. Chrome stays an explicit axis
+  on Claude agents (`felt shuttle set-agent … --chrome`), and
+  `chrome_capable` remains a record field — only the alias agent is gone.
 - The SQLite index cache (`.felt/index.db`) and the `felt index sync`
   command. felt is now pure markdown: citations, reverse data-flow
   consumers, and body search are computed from the markdown tree on
@@ -178,6 +243,18 @@ recency now live in the frontmatter.
 - Force-dispatch reopens a closed fiber authoritatively, not on a
   best-effort basis.
 - CI: several tests assumed macOS and failed on Linux.
+- Plugin hooks survive a GUI `PATH`, and the Codex hook root falls back
+  correctly — a session launched outside a shell no longer loses them.
+- A draft installed with `felt shuttle install --disabled` keeps the
+  working directory it was given.
+- Dispatch preflights the agent wrapper, so a missing CLI fails loudly at
+  launch instead of producing a dead worker.
+- A Linux host can be the hub, not only a worker, and `bootstrap.sh` exits
+  0 on a successful Linux run.
+- Resting cards keep the date they were given, and an active card with a
+  stale resting horizon is parked rather than left half-placed.
+- The temporal fetch memo no longer outlives the poll, so views update
+  within one tick.
 
 #### Fleet operability
 

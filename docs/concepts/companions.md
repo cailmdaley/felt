@@ -85,3 +85,31 @@ Shuttle workers follow a shape for these reports — current state, standing
 findings, open questions, pointers to depth — rewritten whole each session,
 never appended. See
 [Optional: report.html](../shuttle/constitutions.md#optional-reporthtml).
+
+## Sent files (Shuttle only)
+
+A Shuttle worker can also push a file at you directly, with `SendUserFile`.
+`felt hook event` records that push on the host's event stream
+(`~/.shuttle/events.jsonl`), and the board surfaces it two ways: a per-card
+sent-files trail in the fiber viewer, and the [Board
+canvas](../shuttle/board.md#board-what-the-work-produced), where every send from
+the last month renders as a card.
+
+The two channels overlap — the file a worker sends is very often its own
+`report.html`, a companion. What differs is durability.
+
+| | Companion | Send |
+|---|---|---|
+| What it is | a file in the fiber directory | an event record pointing at a path |
+| Travels with | `nest`, `unnest`, git, sync | nothing — it stays on the machine that ran the worker |
+| Lifetime | as long as the fiber | as long as the live `events.jsonl`; a trail that rolled over is gone |
+| Scope | any machine that has the fiber | that host, capped at 50 entries per card |
+
+Sending a file does not put it in the fiber, and putting a file in the fiber
+does not surface it on the board.
+
+!!! note "Needs `~/.shuttle`"
+    `felt hook event` refuses to create its own directory, so a felt-only
+    install grows no event stream and every trail stays empty. See [The event
+    stream and the
+    ledgers](../shuttle/installation.md#the-event-stream-and-the-ledgers).

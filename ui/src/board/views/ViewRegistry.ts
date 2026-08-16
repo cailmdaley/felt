@@ -228,7 +228,7 @@ export function viewFallbackKind(state: {
 
 // ── Hotkey guard ─────────────────────────────────────────────────────────────
 //
-// Three surfaces run bare-key hotkeys — the chassis's 1-4 view switch, and Day
+// Three surfaces run bare-key hotkeys — the chassis's 1-5 view switch, and Day
 // and Week's own paging keys — and all three must agree on when a keystroke is
 // NOT theirs. They had three hand-copied predicates; these are the shared ones,
 // so the next dialog added to the app is covered everywhere at once.
@@ -269,7 +269,7 @@ export function isBlockingDialog(
  * `[data-state="open"]` is Radix's stamp (Stash/Capture went through
  * `AppDialog`). `[aria-modal="true"]` catches every OTHER modal dialog — the
  * hand-rolled `StashForm` sets `role="dialog" aria-modal="true"` and NO
- * data-state, which is exactly the gap that let `1`-`4` switch views out from
+ * data-state, which is exactly the gap that let `1`-`5` switch views out from
  * under an open form. Matching on aria rather than on a library's attribute
  * means the next hand-rolled dialog is covered without a code change here.
  */

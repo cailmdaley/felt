@@ -54,7 +54,7 @@ Six steps run in order.
 5. **Event stream.** Runs `felt setup claude` and `felt setup codex` against
    this checkout, so the plugin hooks match the binary. Then it pipes a probe
    payload through `felt hook event` and checks the line it writes. See
-   [The event stream](#the-event-stream).
+   [The event stream](#eventsjsonl).
 6. **Keep-alive.** macOS: a launchd LaunchAgent. Linux: a systemd user unit,
    falling back to a tmux respawn loop where there is no systemd user session.
 
@@ -234,8 +234,9 @@ place and the card lands in Awaiting review.
 ## Configuring agents
 
 `felt shuttle agents` prints the effective registry. It layers your own file
-over the 17-agent shipped default fleet. Set `$FELT_AGENTS_FILE` to choose the
-path; otherwise felt reads `~/.config/felt/agents.json`.
+over the shipped default fleet (enumerated in
+[Constitutions](constitutions.md#agent-selection)). Set `$FELT_AGENTS_FILE` to
+choose the path; otherwise felt reads `~/.config/felt/agents.json`.
 
 ```bash
 felt shuttle agents init      # seed the user file from the built-ins
@@ -281,7 +282,14 @@ its ssh needs a live human credential — push-2FA or a short-lived certificate 
 and `bin/shuttle-deploy --handshake` will bootstrap a `ControlMaster` for it
 instead of failing.
 
-## The event stream
+## The event stream and the ledgers
+
+Three append-only JSONL files sit in the daemon's state directory, all resolved
+against `$SHUTTLE_DATA_DIR` (default `~/.shuttle`). They are what the board's
+time views read; [Telemetry and the ledgers](telemetry.md) covers what each one
+is for.
+
+### `events.jsonl`
 
 The daemon ranks in-flight workers by idle time and renders each card's
 sent-files trail. Both read one host-local file, `~/.shuttle/events.jsonl`.
@@ -300,6 +308,22 @@ by hand:
 echo '{"hook_event_name":"SessionStart"}' | SHUTTLE_EVENTS_FILE=/tmp/e.jsonl felt hook event
 ```
 
+### `sessions.jsonl`
+
+Which fiber each harness session belonged to. **The daemon writes it itself**,
+at dispatch, claim and resume — there is nothing to install. Override the path
+with `SHUTTLE_SESSIONS_FILE`.
+
+### `commits.jsonl`
+
+Which session made each commit. A `PostToolUse` hook writes it, at the one
+moment the pairing is certain — and **no such hook ships with felt**. On a
+stock install this file never appears, so the Chronicle's commit narration and
+a cycle's look back stay empty. Nothing else on the board is affected, and
+there is no git-log fallback. Override the path with `SHUTTLE_COMMITS_FILE`;
+see [The commit ledger](telemetry.md#the-commit-ledger) for the line format if
+you want to grow one.
+
 ## Verify
 
 ```bash
@@ -309,7 +333,7 @@ make logs                                      # tail the daemon log
 make status                                    # ps + a snapshot summary
 ```
 
-Open <http://127.0.0.1:4000/> in your browser for the kanban board.
+Open <http://127.0.0.1:4000/> in your browser for [the board](board.md).
 
 The daemon binds `127.0.0.1:4000` and nothing else. It stays loopback-only by
 construction. It carries no auth layer, because nothing off the machine can
@@ -397,8 +421,8 @@ general name.
 refuses to create its own directory, so a felt-only install records nothing.
 Degradation is graceful — the board still serves — but the activity ranking and
 the sent-files trail stay empty. Bootstrap step 3 creates the directory, so a
-bootstrapped host is already enabled. See [The event
-stream](#the-event-stream).
+bootstrapped host is already enabled. See [The event stream and the
+ledgers](#the-event-stream-and-the-ledgers).
 
 ## License
 

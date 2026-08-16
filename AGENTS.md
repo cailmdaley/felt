@@ -8,8 +8,10 @@ One repo, one checkout, three artifacts:
 - **Shuttle daemon** (Elixir/OTP escript → `bin/shuttle`) — the **dispatcher**.
   Polls the felt tree, launches one tmux worker per eligible fiber, exposes a
   `:4000` snapshot/control API and owns a per-worker watcher.
-- **the board UI** (TypeScript, `ui/`) — the **surface**. A kanban board over
-  the felt tree, served by the daemon at `http://127.0.0.1:4000/`.
+- **the board UI** (TypeScript, `ui/`) — the **surface**. Five full-page views
+  over the felt tree and the fleet's session/commit ledgers (Desk kanban, Day,
+  Week, Chronicle, and the Board canvas of sent work), served by the daemon at
+  `http://127.0.0.1:4000/`.
 
 Felt owns the data model; Shuttle owns the network and the surface. The Elixir
 daemon is the production dispatcher.
@@ -50,9 +52,12 @@ schema. Citations/consumers (for `felt show`) and body search (`felt ls --body`,
 plain substring; `--body -r` for regex) are all computed from the markdown tree
 on demand. The markdown *is* the store — there is no derived state on disk.
 
-**Editing.** `felt edit` owns native metadata only: name, status, tags, due,
-body, outcome. For non-native frontmatter, read then edit the markdown file
-directly.
+**Editing.** `felt edit` owns native metadata with dedicated flags: name,
+status, tags, due, body, outcome. Non-native top-level scalars go through
+`--set key=value` (YAML-typed, repeatable) and `--unset key`; felt refuses
+native keys there and refuses to scalar-clobber an existing structured value.
+*Writing* structured frontmatter (lists, nested maps) is still a direct file
+edit — `--unset` will remove one.
 
 **The `shuttle:` block is non-native frontmatter felt owns the *shape* of.**
 Felt validates and stamps the `shuttle:` block (the `felt shuttle <verb>` Go
@@ -174,7 +179,7 @@ make build        # BOTH: felt CLI (go build .) + daemon escript
 make cli          # felt CLI only → ./felt
 make cli-install  # felt CLI → ~/.local/bin (go install .)
 make daemon       # daemon escript only → bin/shuttle (MIX_ENV=dev)
-make test         # go test ./...  AND  mix test
+make test         # go test ./...  +  mix test  +  the board's vitest suite
 make restart      # daemon (rebuild escript) + stop + start  [load-bearing dev loop]
 make all          # restart
 make start        # nohup detached; logs → $(LOG) (macOS ~/Library/Logs/shuttle.log, Linux ~/.shuttle/shuttle.log)
@@ -222,8 +227,8 @@ shell-started via `make start`.)
   curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh | sh
   ```
 
-  This is `install.sh`; installs to `~/.local/bin` (or `/usr/local/bin` if
-  writable; override with `FELT_INSTALL_DIR`). Also Homebrew
+  This is `install.sh`; installs to `/usr/local/bin` if writable, else
+  `~/.local/bin`; override with `FELT_INSTALL_DIR`. Also Homebrew
   (`brew install cailmdaley/tap/felt`) or `go install github.com/cailmdaley/felt@latest`.
 
 - **(b) Dev / multi-host from-source bootstrap** — stands up the **entire** local
@@ -383,8 +388,11 @@ views as **join rung 0** — the structural pairing that replaces an inference.
   `git commit` — because the pairing is only knowable inside the session's own
   process tree. The daemon is a reader only. Coverage is therefore partial:
   commits made before the hook, outside a session, or on a host whose events
-  come from the `felt hook event` writer instead are absent, and readers fall
-  back to the git log, deduping on `sha`.
+  come from the `felt hook event` writer instead are absent — and there is **no
+  fallback**. Only recorded, joined commits are ever drawn, so a day before the
+  hook has no prose rather than a guessed one. Note too that the writer ships
+  outside this repo, so a public adopter's commit ledger stays empty until they
+  write their own.
 
 Both are served host-scoped (`/api/v1/sessions`, `/api/v1/commits`) with a
 cross-host `/composite` sibling fed by `Shuttle.RemoteTemporalRegistry`.
@@ -483,8 +491,9 @@ just comes back). To force one more cascade before that: `bin/shuttle reset
 <remote>` or `POST /api/v1/remotes/:name/reset` — one reset buys exactly one
 cascade, and it 409s if the breaker isn't currently tripped.
 
-**The daemon serves its own web UI at `http://127.0.0.1:4000/`** — the kanban
-board, Stash/Capture, and the fiber/file viewer, served as the static `ui/dist`
+**The daemon serves its own web UI at `http://127.0.0.1:4000/`** — the Desk
+kanban with Stash/Capture and the fiber/file viewer, plus the Day, Week,
+Chronicle and Board views on hotkeys 2-5, served as the static `ui/dist`
 bundle by the same process as the `:4000` API (`Plug.Static` + `SpaController`).
 To pull it up locally: `make start`, then open the root URL in a browser. A fresh
 checkout that hasn't built the bundle gets a 404 with the hint
@@ -514,7 +523,9 @@ how the shed-history merge broke *all* launches: it deleted `POST /api/v1/felt-h
 but the stale `dist` still posted the directive there as the first step of New
 Session, so the launch 404'd before it ever dispatched. If a fresh
 `npm run build` exits 194 with *zero* output, that's not a type error — it's a
-corrupted `node_modules` (circular `.bin` symlinks); `npm ci` fixes it.
+corrupted `node_modules` (circular `.bin` symlinks); `npm ci` fixes it. A route
+change is also a docs event: `docs/reference/api.md` tabulates the surface and
+nothing in CI checks it against the router, so update it in the same commit.
 
 **`GET /api/v1/astra` is a maintainer-only integration.** It is owner-routed and
 shells out to `priv/mystra/bake.mjs`, which needs `node` plus a built MySTRA
@@ -526,7 +537,8 @@ them fails `/astra` cleanly; the board and fibers are unaffected.
 built here (`cmd/shuttle*.go` + `internal/shuttle/`); the **daemon escript**
 (`bin/shuttle`, from `lib/`); and the **UI bundle** (`ui/dist`, from `ui/`).
 Editing `lib/*.ex` needs `make restart`; editing the Go CLI needs `make cli` (or
-`make cli-install`); editing the UI needs `cd ui && npm run build` + rsync.
+`make cli-install`); editing the UI needs `cd ui && npm test` (CI never runs it)
+plus `npm run build` + rsync.
 
 **`bin/shuttle` is an escript** — it bundles BEAM bytecode at build time and
 loads it at boot. A restart without `make daemon` is a no-op for picking up
@@ -778,7 +790,8 @@ felt/
 ├── test/                    Mix test suite
 │
 │   # the board UI — TypeScript
-└── ui/                      kanban board; `npm run build` → ui/dist (served by :4000)
+└── ui/                      the board UI; `npm run build` → ui/dist (served by :4000)
+    ├── src/board/views/     the four registered views (day · week · chronicle · shelf) + ViewRegistry contract
     └── harness/             offline visual-verification harness — `npm run harness`
                              (detail panel) / `npm run harness:board` (board chrome +
                              temporal views) build self-contained bundles into
@@ -793,15 +806,24 @@ felt/
 ## Tests
 
 ```bash
-make test                  # go test ./...  AND  mix test
+make test                  # go test ./...  +  mix test  +  the board suite
 go test ./...              # Go (felt CLI)
 mix test                   # full Elixir suite
 mix test --only focus      # tagged subset
+cd ui && npm test          # the board suite; runs vitest TWICE, under two
+                           # pinned TZs (America/Los_Angeles, Europe/Paris)
 
 # Opt-in real harness smoke. Opens real Claude/Codex/Pi CLIs in tmux,
 # sends no prompt, captures the idle pane, then kills the smoke sessions.
 SHUTTLE_REAL_HARNESS_SMOKE=1 mix test --only integration test/shuttle/real_harness_smoke_test.exs
 ```
+
+**The board suite runs twice on purpose, and CI does not run it at all.** The
+second pinned offset is where the civil-day logic breaks, so a hand-run `npx
+vitest run` can go green on a change `make test` would fail. CI type-checks and
+builds the bundle (`npm run build`) but never invokes vitest — `cd ui && npm
+test` is a local-only gate, which makes it the easiest one to skip and the one
+worth not skipping.
 
 The real harness smoke is deliberately outside ordinary `mix test`. It uses
 tmux session names like `shuttle-harness-smoke-<harness>-<unique>`, records

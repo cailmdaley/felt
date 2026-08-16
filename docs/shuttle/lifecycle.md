@@ -89,54 +89,28 @@ start fresh.
 
 ## The board
 
-The daemon serves a kanban board at `http://127.0.0.1:4000/`. It views the same
-fibers, plus live tmux liveness. The browser computes column membership with
-`classifyFiber` (`ui/src/board/KanbanRules.ts`). That function decides
-membership alone.
+The daemon serves a board at `http://127.0.0.1:4000/`: one page, five full-page
+views behind a hotkey row.
 
-Evaluated in order:
+| Key | View | What it answers |
+|---|---|---|
+| `1` | **Desk** | What needs doing, and what is running right now — the kanban |
+| `2` | **Day** | Where today's hours went, fiber by fiber |
+| `3` | **Week** | Which days had work in them |
+| `4` | **Chronicle** | What a stretch of weeks was about, under a strip of cycle bands |
+| `5` | **Board** | What the work produced — every file a worker sent, rendered on a canvas |
 
-| Column | Condition |
-|---|---|
-| Tempered | `closed` + `tempered: true` |
-| Composted | `closed` + `tempered: false` |
-| Awaiting review | `closed`, `tempered` absent |
-| In flight | live tmux worker with a shuttle block — liveness wins over everything below |
-| Pinned | resting `kind: pinned` (`open` or `active`) |
-| Drafts | no shuttle block |
-| Scheduled | `active` + `kind: standing` — placed on the timeline at next launch |
-| In flight | `active`, other kinds |
-| Drafts | `open` |
+The first four run from the tightest window outward, so the strip reads as a
+zoom, and they share one temporal cursor: page Day back to Tuesday, press `3`,
+and Week opens on the week containing Tuesday. The fifth is not a time window
+at all, which is why it sits after the zoom.
 
-The classifier reads only `status`, `tempered`, `kind`, and tmux liveness.
-Neither the daemon nor the board reads tags.
+The board holds no state of its own. It views the same fibers the daemon polls,
+plus tmux liveness and the host-local [ledgers](telemetry.md).
 
-Beyond the columns the board offers a pinned strip, a timeline for scheduled
-roles, a fiber and file viewer, Stash and Capture dialogs, Attach (opens the
-worker's tmux session in kitty specifically — a non-kitty user gets nothing),
-and a requeue/resume dialog with a directive box.
-
-Attach is terminal lock-in, not platform lock-in: it drives kitty's
-remote-control CLI, and kitty runs on Linux and macOS alike. The only
-mac-specific part is the `osascript` call that raises the kitty window, and
-that is already a no-op elsewhere. `tmux attach -t shuttle-<fiber-id>` reaches
-any worker on any platform.
-
-Two gestures carry different meanings. **Drag-and-drop** advances the card's
-state. **Modal buttons** give you another worker on the same run.
-Drag-to-tempered acts by kind: on a standing role it accepts and re-arms, on a
-pinned role it accepts and re-parks to the strip, on a oneshot it writes the
-terminus. Only `accept` clears the outcome.
-
-!!! note "The board is optional, and built separately"
-    The repo does not ship the bundle. Build it with `cd ui && npm ci && npx
-    vite build`, which writes `ui/dist`. (`npm run build` adds a typecheck that
-    fails on a fresh clone — see
-    [Sharp edges](installation.md#sharp-edges).) `make all` rebuilds only the
-    daemon escript. Without the bundle the root URL 404s with a hint, and the
-    API stays fully usable. If you change any `/api/v1/*` route, rebuild the
-    bundle — a stale bundle against a changed route table fails silently as a
-    404.
+[The board](board.md) covers all five in depth — column and horizon rules, the
+snooze gesture, Attach, the two-pigment activity grammar, and how to build the
+bundle.
 
 ## Dispatch eligibility
 
@@ -201,9 +175,13 @@ bin/shuttle reset <remote>    # reset a remote's circuit breaker
 bin/shuttle version
 ```
 
-The daemon also exposes everything the board uses over HTTP under
-`/api/v1` — `state`, `fibers`, `dispatch`, `claim`, `capture`, `transition`,
-`kill`, `attach`, `agents`, `version`, and the manual gate releases.
+The daemon also speaks HTTP under `/api/v1`, in four groups: a **write plane**
+(`dispatch`, `transition`, `kill`, `lifecycle`, `felt-edit`, …), a **read
+plane** (`fibers`, `agents`, `felt-stores`, …), a **temporal read plane** the
+board's time views live on (`activity`, `sessions`, `commits`, `moment`,
+`sent-files`, each with a `/composite` sibling that fans in the fleet), and
+**operator routes** (`state`, `version`, the manual gate releases). The [API
+reference](../reference/api.md) tabulates them.
 
 ```bash
 curl -s http://127.0.0.1:4000/api/v1/agents | jq
