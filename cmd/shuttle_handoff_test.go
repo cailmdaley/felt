@@ -115,3 +115,48 @@ func TestStampHandedOff_ConcurrentWithStorageRMW(t *testing.T) {
 		t.Fatalf("counters.run_id = %d, want %d — lost update(s) under concurrent handoff/mark-runtime writes", n, iterations)
 	}
 }
+
+// TestResolveHandoffPath_ExplicitArgBeatsAmbientEnv pins the fix for the
+// live-fire near-miss: a daemon-launched worker (SHUTTLE_FIBER_PATH in env)
+// running `felt shuttle handoff <other-fiber>` must stamp the fiber it NAMED,
+// not its own — and must not be treated as exiting (self=false gates the tmux
+// self-kill). Self-handoff and the resolution-failure fallback keep the old
+// env-authoritative behavior.
+func TestResolveHandoffPath_ExplicitArgBeatsAmbientEnv(t *testing.T) {
+	dir, storage := newShuttleStore(t)
+	seedShuttleRole(t, storage, "own", felt.StatusActive, oneshot(), nil)
+	seedShuttleRole(t, storage, "sibling", felt.StatusActive, oneshot(), nil)
+	t.Chdir(dir)
+	t.Setenv("SHUTTLE_FIBER_PATH", storage.Path("own"))
+
+	// Explicit different fiber: the argument wins, caller is not exiting.
+	path, self, err := resolveHandoffPath("sibling")
+	if err != nil {
+		t.Fatalf("resolveHandoffPath(sibling): %v", err)
+	}
+	if !samePath(path, storage.Path("sibling")) {
+		t.Fatalf("path = %q, want sibling's %q — ambient SHUTTLE_FIBER_PATH overrode the explicit argument", path, storage.Path("sibling"))
+	}
+	if self {
+		t.Fatal("self = true for a sibling handoff — would kill the caller's own tmux session")
+	}
+
+	// Self-handoff: env path is authoritative, self=true.
+	path, self, err = resolveHandoffPath("own")
+	if err != nil {
+		t.Fatalf("resolveHandoffPath(own): %v", err)
+	}
+	if path != storage.Path("own") || !self {
+		t.Fatalf("self-handoff: path=%q self=%v, want env path %q self=true", path, self, storage.Path("own"))
+	}
+
+	// Resolution failure: falls back to the env path (the pre-existing
+	// daemon-worker behavior), still self.
+	path, self, err = resolveHandoffPath("no-such-fiber")
+	if err != nil {
+		t.Fatalf("resolveHandoffPath(no-such-fiber): %v", err)
+	}
+	if path != storage.Path("own") || !self {
+		t.Fatalf("fallback: path=%q self=%v, want env path self=true", path, self)
+	}
+}

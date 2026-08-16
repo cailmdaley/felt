@@ -28,7 +28,7 @@ resolved); outside a daemon-launched worker the <fiber> argument is resolved
 instead.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		path, err := resolveHandoffPath(args[0])
+		path, self, err := resolveHandoffPath(args[0])
 		if err != nil {
 			return err
 		}
@@ -37,9 +37,13 @@ instead.`,
 			return err
 		}
 		fmt.Printf("handed off: %s (handed_off_at=%s)\n", path, at)
-		// Final act: end our own tmux session (no-op outside tmux). The field is
-		// already durably on disk, so the kill loses nothing.
-		endOwnTmuxSession()
+		// Final act — but ONLY when handing off our own fiber: end our own tmux
+		// session (no-op outside tmux). The field is already durably on disk, so
+		// the kill loses nothing. A worker stamping a DIFFERENT fiber (e.g. a
+		// dead sibling worker's) stays alive.
+		if self {
+			endOwnTmuxSession()
+		}
 		return nil
 	},
 }
@@ -48,20 +52,48 @@ func init() {
 	shuttleCmd.AddCommand(shuttleHandoffCmd)
 }
 
-// resolveHandoffPath returns the fiber `.md` the worker should stamp. The daemon
-// exports SHUTTLE_FIBER_PATH at dispatch — the path it already resolved — so the
-// worker writes the same file the daemon reads on the next poll, with no store
-// resolution and no ambiguity. Falls back to resolving the <fiber> argument (a
-// manual/test invocation outside a daemon-launched worker).
-func resolveHandoffPath(fiber string) (string, error) {
-	if path := os.Getenv("SHUTTLE_FIBER_PATH"); path != "" {
-		return path, nil
-	}
+// resolveHandoffPath returns the fiber `.md` the worker should stamp, plus
+// whether that fiber is the worker's OWN (which gates the tmux self-kill). The
+// daemon exports SHUTTLE_FIBER_PATH at dispatch — the path it already resolved —
+// so a worker handing off its own fiber writes the same file the daemon reads on
+// the next poll, with no store resolution and no ambiguity.
+//
+// The explicit <fiber> argument beats the ambient env: when the argument names a
+// DIFFERENT fiber than SHUTTLE_FIBER_PATH (a worker stamping a sibling — e.g.
+// cleaning up after a dead worker on another card), the argument wins and the
+// caller is NOT treated as exiting. The env path is used when the argument
+// resolves to the same fiber (the normal self-handoff, where the env path is the
+// authoritative one) or when argument resolution fails outright (cwd/store
+// ambiguity — the pre-existing fallback). Paths are compared through
+// EvalSymlinks because loom stores reach fibers through symlinked .felt trees.
+func resolveHandoffPath(fiber string) (string, bool, error) {
+	envPath := os.Getenv("SHUTTLE_FIBER_PATH")
 	f, _, err := shuttleResolveFiber(fiber, false)
 	if err != nil {
-		return "", fmt.Errorf("resolving fiber %q (SHUTTLE_FIBER_PATH unset): %w", fiber, err)
+		if envPath != "" {
+			return envPath, true, nil
+		}
+		return "", false, fmt.Errorf("resolving fiber %q (SHUTTLE_FIBER_PATH unset): %w", fiber, err)
 	}
-	return f.Path, nil
+	if envPath == "" {
+		return f.Path, true, nil
+	}
+	if samePath(envPath, f.Path) {
+		return envPath, true, nil
+	}
+	return f.Path, false, nil
+}
+
+// samePath reports whether two paths name the same file, resolving symlinks so a
+// store path and its loom-symlinked alias compare equal. Falls back to string
+// equality when resolution fails (e.g. a not-yet-existing path).
+func samePath(a, b string) bool {
+	ra, errA := filepath.EvalSymlinks(a)
+	rb, errB := filepath.EvalSymlinks(b)
+	if errA != nil || errB != nil {
+		return a == b
+	}
+	return ra == rb
 }
 
 // stampHandedOff sets shuttle.runtime.handed_off_at = <now RFC3339 UTC> in the
