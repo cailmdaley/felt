@@ -38,10 +38,6 @@ const NOW_COLUMN_ORDER: NowColumnKind[] = ['drafts', 'inFlight', 'awaitingReview
 // day" stays a day you can picture; past that you write a `due:`.
 const DRAG_HORIZON_DAYS = 14
 
-// The Pinned band wraps its launcher chips to at most this many rows; extra
-// roles page behind a "+N more" affordance rather than scrolling.
-const PINNED_MAX_ROWS = 2
-
 /**
  * Daemon runtime phases that earn a chip on an In-flight card.
  *
@@ -187,9 +183,6 @@ export class KanbanSurfaceRenderer {
   private edgeScrollFrame: number | null = null
   private edgeScrollVelocity = 0
   private edgeScrollTarget: HTMLElement | null = null
-  /** Current page of the Pinned band when its chips overflow two rows.
-   *  Cycled by the "+N more" pager; survives poll re-renders. */
-  private pinnedPage = 0
   /** The horizon's aim readout — the fixed spot that names, in words, the
    *  target under the cursor. Rebuilt with the horizon on every drag. */
   private aimReadoutEl: HTMLElement | null = null
@@ -332,13 +325,17 @@ export class KanbanSurfaceRenderer {
    *  schedule-less `kind:pinned` roles the poller never auto-fires; you
    *  dispatch one by dragging it onto the Now In-flight column (the chips are
    *  draggable and `findCardColumn` returns 'pinned' so the drag routes through
-   *  `transition(card,'inFlight')`). Chips are stable-ordered by fiber path and
-   *  wrap to at most PINNED_MAX_ROWS rows in the available width; extra roles
-   *  page behind a "+N more" affordance rather than scrolling (measured after
-   *  layout in installPinnedPagination). ALWAYS rendered — even with zero parked
-   *  roles — because the band IS the drop target for parking a role, so hiding
-   *  it when empty made parking impossible exactly when nothing was parked. The
-   *  empty state shrinks to a slim "drag a role here" hint.
+   *  `transition(card,'inFlight')`). Chips are stable-ordered by fiber path so
+   *  the launcher band holds still, and EVERY ONE OF THEM RENDERS — the band
+   *  used to cap itself to two rows and page the rest behind a "+N more"
+   *  cycler, which is a click tax on a launcher whose whole point is muscle
+   *  memory: a role you reach for daily should not sometimes be on page 2. The
+   *  band simply grows: it wraps to as many rows as the pinned set needs, and
+   *  the row cap is on the person doing the pinning, not on the strip. ALWAYS
+   *  rendered — even with zero parked roles — because the band IS the drop
+   *  target for parking a role, so hiding it when empty made parking
+   *  impossible exactly when nothing was parked. The empty state shrinks to a
+   *  slim "drag a role here" hint.
    */
   renderPinnedSection(
     pinned: KanbanCard[],
@@ -366,64 +363,11 @@ export class KanbanSurfaceRenderer {
       // the same place every visit. The read model's most-recently-used order
       // would shuffle chips out from under the user's hand.
       const ordered = [...pinned].sort((a, b) => a.id.localeCompare(b.id))
-      const chips = ordered.map((card) => this.renderPinnedChip(card, staleness[card.originId]))
-      for (const chip of chips) row.append(chip)
-      // Wrapping + "+N more" paging is a post-layout measurement (chip widths
-      // aren't known until the band is in the DOM), so defer to a rAF once the
-      // section has been attached by the modal's render pass.
-      window.requestAnimationFrame(() => this.installPinnedPagination(row, chips))
+      for (const card of ordered) row.append(this.renderPinnedChip(card, staleness[card.originId]))
     }
     section.append(row)
     this.installPinnedDropHandlers(section)
     return section
-  }
-
-  /**
-   * Cap the Pinned band to PINNED_MAX_ROWS rows and page the overflow. Chips
-   * wrap naturally; we measure their row ranks (by offsetTop), keep the chips
-   * that fall in the first two rows for the current page, hide the rest, and —
-   * when there's overflow — append a "+N more" pager that cycles pages in place.
-   * Re-runnable and idempotent: it first reveals every chip and drops any prior
-   * pager so each measurement starts from the full set.
-   */
-  private installPinnedPagination(row: HTMLElement, chips: HTMLElement[]): void {
-    if (chips.length === 0) return
-    row.querySelector('.kbn-pin-more')?.remove()
-    for (const chip of chips) chip.style.display = ''
-    if (row.clientWidth === 0) return // not laid out yet; a later render retries
-
-    // Row rank of each chip from its vertical offset (chips on the same visual
-    // row share an offsetTop). perPageBase = how many fit in the first two rows.
-    const tops = chips.map((c) => c.offsetTop)
-    const distinctTops = [...new Set(tops)].sort((a, b) => a - b)
-    if (distinctTops.length <= PINNED_MAX_ROWS) {
-      this.pinnedPage = 0
-      return // everything fits; no paging needed
-    }
-    const rowTopCutoff = distinctTops[PINNED_MAX_ROWS] // first row that overflows
-    // Reserve one slot for the pager so it always sits within the two rows.
-    const perPage = Math.max(1, tops.filter((t) => t < rowTopCutoff).length - 1)
-    const totalPages = Math.ceil(chips.length / perPage)
-    this.pinnedPage = Math.min(this.pinnedPage, totalPages - 1)
-
-    const start = this.pinnedPage * perPage
-    const end = start + perPage
-    chips.forEach((chip, i) => {
-      chip.style.display = i >= start && i < end ? '' : 'none'
-    })
-    const remaining = chips.length - end
-    const more = document.createElement('button')
-    more.type = 'button'
-    more.className = 'kbn-tl-pager kbn-pin-more'
-    more.textContent = remaining > 0 ? `+${remaining} more` : `↺ ${totalPages}`
-    more.title = `${chips.length} pinned roles — page ${this.pinnedPage + 1}/${totalPages}. Click to cycle.`
-    more.setAttribute('aria-label', `Show more pinned roles (page ${this.pinnedPage + 1} of ${totalPages})`)
-    more.addEventListener('click', (e) => {
-      e.stopPropagation()
-      this.pinnedPage = (this.pinnedPage + 1) % totalPages
-      this.installPinnedPagination(row, chips)
-    })
-    row.append(more)
   }
 
   /**

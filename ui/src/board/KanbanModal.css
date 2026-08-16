@@ -435,11 +435,10 @@
   padding-right: 10px;
   border-right: 1px solid rgba(196, 147, 51, 0.32);
 }
-/* Dense wrap — chips fill the available width and wrap to at most two rows;
-   overflow pages behind "+N more" (installPinnedPagination), no scrollbar.
-   Stable left-to-right order (chips sorted by fiber path) so muscle memory
-   works. `overflow: hidden` clips the one-frame flash of all chips before the
-   post-layout measurement hides the paged-out ones. */
+/* Dense wrap — chips fill the available width and wrap to as many rows as the
+   pinned set needs; no cap, no scrollbar, no pager. Stable left-to-right order
+   (chips sorted by fiber path) so muscle memory works — a launcher's whole
+   point is that a role sits in the same place every visit. */
 .kbn-pinned-row {
   display: flex;
   flex-wrap: wrap;
@@ -448,7 +447,6 @@
   gap: 6px;
   min-width: 0;
   flex: 1 1 auto;
-  overflow: hidden;
   padding: 1px 0;
 }
 /* Launcher chip: dot · glyph · name · agent/host hint. Wears `.kbn-card`'s
@@ -840,9 +838,10 @@
 }
 .kbn-card--lens-ghost:hover { opacity: 1; }
 
-/* Pager chip — reused by the Pinned band's "+N more" overflow control
-   (.kbn-pin-more). A slim gold-leaf pill that reads as a manuscript catchword
-   rather than a UI scrollbar; click cycles pages. */
+/* Pager chip — the resting-cluster overflow control (.kbn-cluster-more). A
+   slim gold-leaf pill that reads as a manuscript catchword rather than a UI
+   scrollbar; click cycles pages. (The Pinned band's own pager, .kbn-pin-more,
+   is gone — that band now always shows every pinned role.) */
 .kbn-tl-pager {
   align-self: start;
   justify-self: start;

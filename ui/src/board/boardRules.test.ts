@@ -7,7 +7,7 @@
 // written as a literal date: a hardcoded `2026-08-12` would name a different
 // day either side of the Atlantic and the test would only be checking one.
 
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   classifyFiber,
   cycleMembership,
@@ -30,6 +30,7 @@ import {
   findCardById,
   formatLaunchDay,
   humanizeIdleAge,
+  KanbanSurfaceRenderer,
   phasePillLabel,
   sortDatedByReturn,
   splitStashByReturn,
@@ -624,6 +625,120 @@ describe('Resting clusters split when they overflow', () => {
       const clusters = sortDatedByReturn(clusterStashCards(withinCluster))
       expect(clusters[0].cards.map((c) => c.id)).toEqual(['proj/b', 'proj/a'])
     })
+  })
+})
+
+describe('renderPinnedSection — the launcher band never pages', () => {
+  // THE BUG THIS PINS: the band used to cap itself to two rows and hide the
+  // rest of a busy pinned set behind a "+N more" cycler. A launcher's whole
+  // point is muscle memory — a role should sit in the same place every visit
+  // — and a click tax to reach page 2 broke exactly that. The row cap is now
+  // on the person doing the pinning, not on the strip: every pinned role
+  // renders, however many rows that takes.
+  //
+  // No jsdom in this repo, so a minimal fake element stands in — just enough
+  // of the DOM surface (className/classList, append, querySelector[All]) for
+  // `renderPinnedSection` and `renderPinnedChip` to run and be inspected.
+  class FakeEl {
+    readonly tagName: string
+    private _className = ''
+    readonly children: FakeEl[] = []
+    readonly dataset: Record<string, string> = {}
+    readonly style: Record<string, string> = {}
+    textContent = ''
+    title = ''
+    draggable = false
+
+    constructor(tagName: string) {
+      this.tagName = tagName
+    }
+
+    get className(): string {
+      return this._className
+    }
+    set className(value: string) {
+      this._className = value
+    }
+
+    readonly classList = {
+      add: (...names: string[]): void => {
+        const set = new Set(this._className.split(' ').filter(Boolean))
+        for (const n of names) set.add(n)
+        this._className = [...set].join(' ')
+      },
+      remove: (...names: string[]): void => {
+        const set = new Set(this._className.split(' ').filter(Boolean))
+        for (const n of names) set.delete(n)
+        this._className = [...set].join(' ')
+      },
+      contains: (name: string): boolean => this._className.split(' ').includes(name),
+    }
+
+    setAttribute(): void {}
+    addEventListener(): void {}
+    append(...nodes: FakeEl[]): void {
+      this.children.push(...nodes)
+    }
+
+    private matches(selector: string): boolean {
+      return selector.startsWith('.') ? this.classList.contains(selector.slice(1)) : this.tagName === selector
+    }
+    querySelectorAll(selector: string): FakeEl[] {
+      const out: FakeEl[] = []
+      const walk = (el: FakeEl): void => {
+        for (const child of el.children) {
+          if (child.matches(selector)) out.push(child)
+          walk(child)
+        }
+      }
+      walk(this)
+      return out
+    }
+    querySelector(selector: string): FakeEl | null {
+      return this.querySelectorAll(selector)[0] ?? null
+    }
+  }
+
+  afterEach(() => vi.unstubAllGlobals())
+
+  const renderer = (): KanbanSurfaceRenderer => {
+    vi.stubGlobal('document', { createElement: (tag: string) => new FakeEl(tag) })
+    return new KanbanSurfaceRenderer({
+      getDragSourceId: () => null,
+      setDragSourceId: () => {},
+      getLastResponse: () => null,
+      stopDragAutoScroll: () => {},
+      transition: () => {},
+      setSurface: () => {},
+      pin: () => {},
+      openDetail: () => {},
+      onRefresh: () => {},
+    })
+  }
+
+  const pinnedCard = (id: string): KanbanCard => ({
+    id,
+    name: id.split('/').pop() ?? id,
+    path: `.felt/${id}.md`,
+    originId: 'local',
+    status: 'active',
+    createdAt: new Date(NOW).toISOString(),
+    dependsOnSatisfied: true,
+    effectiveHorizon: 'now',
+    drifted: false,
+    isCycle: false,
+    cycleStart: null,
+    shuttleKind: 'pinned',
+  })
+
+  it('renders every pinned chip — no pager, however many roles', () => {
+    const cards = Array.from({ length: 14 }, (_, i) => pinnedCard(`roles/role-${i}`))
+    const section = renderer().renderPinnedSection(cards, {})
+    const row = section.querySelector('.kbn-pinned-row')
+    expect(row).not.toBeNull()
+    expect(row!.querySelectorAll('.kbn-pin-chip')).toHaveLength(14)
+    expect(row!.querySelector('.kbn-pin-more')).toBeNull()
+    expect(section.querySelector('.kbn-tl-pager')).toBeNull()
   })
 })
 

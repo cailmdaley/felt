@@ -336,6 +336,38 @@ const STANDING: MockFiber[] = [
 ]
 
 /**
+ * PINNED — resting `kind:pinned` umbrella roles, parked on the Desk's launcher
+ * band. Enough of them to overflow the old two-row cap several times over: the
+ * band used to page anything past that behind a "+N more" cycler, which is
+ * exactly the affordance a launcher must not have (a role you reach for daily
+ * should not sometimes be on page 2). None carry a `uid` — the band never
+ * joins a pinned chip to the activity plane, only the temporal views do.
+ */
+const PINNED: MockFiber[] = [
+  'null-suite/quick launch',
+  'euclid triage',
+  'photo-z recalibrate',
+  'covariance rebuild',
+  'jackknife sweep',
+  'systematics scan',
+  'arxiv digest',
+  'ledger sweep',
+  'registry audit',
+  'lensing xcorr',
+  'shear pipeline',
+  'b-modes null check',
+  'cluster richness',
+  'mask audit',
+].map((name, i) => ({
+  id: `roles/pinned-${i}`,
+  name,
+  status: 'active',
+  outcome: `Launcher role: ${name}.`,
+  tags: ['pinned'],
+  shuttle: shuttleBlock('pinned'),
+}))
+
+/**
  * CYCLES — `cycle`-tagged fibers, each a named span of time. They are drawn as
  * bands behind the work by the temporal views and appear on NO desk surface:
  * `classifyFiber` routes a cycle to `response.cycles` and nowhere else, so the
@@ -434,6 +466,7 @@ const MOCK_FEED = {
     ...AWAITING.map(fiber),
     ...RESTING.map(fiber),
     ...STANDING.map(fiber),
+    ...PINNED.map(fiber),
     ...CYCLES.map(fiber),
     // The SAME fiber served by two daemons — a git-synced store is served by
     // every host that has it on disk. The board must render ONE card (the
