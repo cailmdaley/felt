@@ -40,7 +40,7 @@ defmodule ShuttleWeb.SpendController do
 
   use Phoenix.Controller, formats: [:json]
 
-  import ShuttleWeb.RelayHelpers, only: [integer_param: 3]
+  import ShuttleWeb.RelayHelpers, only: [integer_param: 3, bad_param: 2]
 
   alias Shuttle.{Poller, SessionLedger, TokenSpend}
   alias ShuttleWeb.TemporalComposite, as: Composite
@@ -77,7 +77,7 @@ defmodule ShuttleWeb.SpendController do
           Enum.flat_map(entries, fn {name, entry} ->
             entry
             |> Map.get(:spend, [])
-            |> Composite.in_window(:at, since_ms, max_ms())
+            |> Composite.in_window(:at, since_ms, nil)
             |> Enum.map(&Composite.stamp(&1, name))
           end)
 
@@ -170,11 +170,5 @@ defmodule ShuttleWeb.SpendController do
       n when is_integer(n) -> n
       _ -> 0
     end
-  end
-
-  defp max_ms, do: 253_402_300_799_000
-
-  defp bad_param(conn, key) do
-    conn |> put_status(400) |> json(%{error: "#{key} must be an integer (epoch ms)"})
   end
 end

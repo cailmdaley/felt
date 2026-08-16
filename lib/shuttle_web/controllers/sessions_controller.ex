@@ -26,15 +26,15 @@ defmodule ShuttleWeb.SessionsController do
   use Phoenix.Controller, formats: [:json]
 
   import ShuttleWeb.RelayHelpers,
-    only: [integer_param: 3, json_with_validator: 3, file_token: 1]
+    only: [integer_param: 3, json_with_validator: 3, file_token: 1, bad_param: 2]
 
   alias Shuttle.{Poller, SessionLedger}
   alias ShuttleWeb.TemporalComposite, as: Composite
 
   # Absent means "the whole ledger", so the bound defaults to 0 rather than
   # 400ing the way the required `/activity` bounds do. That is also why the 400
-  # copy is this endpoint's own: `epoch_ms_message/1` says "is required", and
-  # `since_ms` is not.
+  # renders through `bad_param/2` and not `epoch_ms_message/1`: the latter says
+  # "is required", and `since_ms` is not.
   def show(conn, params) do
     case integer_param(params, "since_ms", default: 0) do
       {:ok, since_ms} ->
@@ -71,7 +71,7 @@ defmodule ShuttleWeb.SessionsController do
         records =
           (SessionLedger.read_since(since_ms) ++
              Enum.flat_map(entries, fn {_name, entry} ->
-               Composite.in_window(entry.sessions, :at, since_ms, max_ms())
+               Composite.in_window(entry.sessions, :at, since_ms, nil)
              end))
           |> Enum.sort_by(&(Composite.item_ms(&1, :at) || 0))
 
@@ -84,13 +84,5 @@ defmodule ShuttleWeb.SessionsController do
       {:error, {:bad_param, key}} ->
         bad_param(conn, key)
     end
-  end
-
-  # `in_window/4` is inclusive on both sides and this endpoint is open-ended, so
-  # the upper bound is "any time a record could carry".
-  defp max_ms, do: 253_402_300_799_000
-
-  defp bad_param(conn, key) do
-    conn |> put_status(400) |> json(%{error: "#{key} must be an integer (epoch ms)"})
   end
 end
