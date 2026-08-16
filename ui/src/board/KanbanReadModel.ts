@@ -476,10 +476,14 @@ function ghostColumn(card: KanbanCard): LensColumn {
  * same card the board would have made — same fields, same shuttle block, so
  * the panel that opens it is the same panel. Dependency satisfaction is the
  * one thing a lone row cannot know (there is no feed to look siblings up in),
- * so it answers the way a card with no dependencies does.
+ * so it answers the way a card with no dependencies does — UNSATISFIED is a
+ * claim, and `blocked on: …` is what the panel prints from it, so ignorance
+ * must not be able to make it. `toCard` resolves against an empty map, where
+ * every dependency reads as unmet; this restores the "nothing known against
+ * it" answer.
  */
 export function cardFromCompositeEntry(entry: CompositeEntry, nowMs = Date.now()): KanbanCard {
-  return toCard(entry, new Map(), nowMs);
+  return { ...toCard(entry, new Map(), nowMs), dependsOnSatisfied: true };
 }
 
 /**

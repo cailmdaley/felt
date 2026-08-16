@@ -146,29 +146,41 @@ defmodule ShuttleWeb.FiberDocumentsController do
   stripped) over the SSH tunnel and relays the JSON verbatim. This is the ONLY
   correct source for a remote constitution's body — git-mirror replication is
   incidental and must never be relied on for availability.
+
+  **A caller that names no origin does not get the mirror.** Not every caller
+  holds one: a `[[wikilink]]` opens a fiber the board never carded, so it has no
+  composite row to read an origin off. Rather than serve this host's git copy of
+  work another daemon owns — the same mistake the feed made until `5669fc7`, and
+  worse here because the panel then routes its saves by the origin this envelope
+  reports — the local lookup reads the copy it has, sees `shuttle.host` naming
+  someone else, and forwards there. The answer therefore always comes from the
+  owner, whoever asked and however little they knew.
+
+  The forward carries `routed=1`, which suppresses a second self-route on the
+  far side. One hop, always: two daemons whose git copies disagree about `host:`
+  cannot bounce a request between them.
   """
   def show(conn, %{"id" => id_segments} = params) do
     id = id_segments |> List.wrap() |> Enum.join("/")
     with_body? = Map.get(params, "body") in ["1", "true", true]
+    routed? = Map.get(params, "routed") in ["1", "true", true]
 
     case OriginRouter.route(Map.get(params, "origin")) do
       {:remote, remote} ->
-        relay_bytes(
-          conn,
-          OriginRouter.forward_get(remote, fibers_show_path(id), %{
-            "body" => to_string(with_body?)
-          })
-        )
+        relay_bytes(conn, forward_show(remote, id, with_body?))
 
       :local ->
-        show_local(conn, id, with_body?)
+        show_local(conn, id, with_body?, routed?)
     end
   end
 
-  defp show_local(conn, id, with_body?) do
+  defp show_local(conn, id, with_body?, routed?) do
     case Shuttle.FiberDocuments.get(id, with_body: with_body?) do
       {:ok, body} ->
-        json(conn, body)
+        case owning_remote(body, routed?) do
+          nil -> json(conn, body)
+          remote -> relay_bytes(conn, forward_show(remote, id, with_body?))
+        end
 
       {:error, errors} ->
         conn
@@ -176,6 +188,47 @@ defmodule ShuttleWeb.FiberDocumentsController do
         |> json(%{error: "felt_show_failed", stores: errors})
     end
   end
+
+  defp forward_show(remote, id, with_body?) do
+    OriginRouter.forward_get(remote, fibers_show_path(id), %{
+      "body" => to_string(with_body?),
+      "routed" => "1"
+    })
+  end
+
+  # The remote that owns the fiber we just read locally, or nil to answer here.
+  #
+  # nil covers every case where this daemon IS the right answer: an already-
+  # routed request, a fiber we own, an ownerless one, a miss, and a `host:`
+  # naming no configured remote (`OriginRouter.route/1`'s documented degrade —
+  # an orphaned host is better served by the mirror than by nothing, since no
+  # daemon in the fleet claims it).
+  defp owning_remote(_body, true), do: nil
+
+  defp owning_remote(%{fibers: [entry | _]}, _routed?), do: entry_owner(entry)
+  defp owning_remote(%{"fibers" => [entry | _]}, _routed?), do: entry_owner(entry)
+  defp owning_remote(_body, _routed?), do: nil
+
+  defp entry_owner(entry) do
+    host =
+      entry
+      |> fetch_either(:fiber, "fiber")
+      |> fetch_either(:shuttle, "shuttle")
+      |> fetch_either(:host, "host")
+
+    with true <- is_binary(host) and host != "",
+         false <- host == Shuttle.Poller.own_host_id(),
+         {:remote, remote} <- OriginRouter.route(host) do
+      remote
+    else
+      _ -> nil
+    end
+  end
+
+  defp fetch_either(map, atom_key, string_key) when is_map(map),
+    do: Map.get(map, atom_key) || Map.get(map, string_key)
+
+  defp fetch_either(_, _, _), do: nil
 
   # Rebuild the owning daemon's `/api/v1/fibers/:id` path, encoding each id
   # segment so the remote's wildcard splat reconstructs the same canonical id.

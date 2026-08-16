@@ -1174,9 +1174,18 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
       assert conn.status == 200
       assert %{"fibers" => [%{"fiber" => %{"body" => "REMOTE BODY"}}]} = json_response(conn, 200)
 
-      # origin stripped; id re-encoded onto the owner's identical path; body=true preserved.
-      assert StubGetFileClient.last().url ==
-               "http://localhost:4002/api/v1/fibers/science/cmbx/explorations/analysis-advance?body=true"
+      # origin stripped; id re-encoded onto the owner's identical path; body=true
+      # preserved; routed=1 added (every forward carries it now, whether it
+      # started as an `origin=` request or a local self-route) so the owner's
+      # own local read never bounces this back a second hop.
+      last = StubGetFileClient.last()
+      assert URI.parse(last.url).path ==
+               "/api/v1/fibers/science/cmbx/explorations/analysis-advance"
+
+      assert URI.parse(last.url).query |> URI.decode_query() == %{
+               "body" => "true",
+               "routed" => "1"
+             }
     end
 
     test "relays the remote status verbatim and 502s on tunnel failure" do
@@ -1187,6 +1196,184 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
 
       assert conn.status == 502
       assert %{"error" => _} = json_response(conn, 502)
+    end
+
+    test "a local git mirror of a remote-owned fiber is not served — no origin param still forwards to the owner",
+         %{store: store} do
+      # A `[[wikilink]]` opens a fiber the board never carded, so the panel has
+      # no composite row to read an origin off and the request arrives with no
+      # `origin` at all. Serving this daemon's git copy here would repeat the
+      # feed's `5669fc7` mistake, worse: the panel then routes its SAVES by the
+      # origin this envelope reports. The local read must see `shuttle.host`
+      # naming cineca and forward there instead of answering from what it has
+      # on disk.
+      write_fiber!(store, "science/cmbx/pinned", """
+      ---
+      name: Pinned to cineca
+      status: active
+      shuttle:
+        host: cineca
+      ---
+
+      LOCAL MIRROR — must never be served.
+      """)
+
+      stub_forward(
+        "cineca",
+        "http://localhost:4002",
+        {:ok, 200, "application/json; charset=utf-8",
+         ~s({"fibers":[{"fiber":{"id":"science/cmbx/pinned","body":"REMOTE BODY"}}]})}
+      )
+
+      conn = get(api_conn(), "/api/v1/fibers/science%2Fcmbx%2Fpinned?body=true")
+
+      assert conn.status == 200
+      assert %{"fibers" => [%{"fiber" => %{"body" => "REMOTE BODY"}}]} = json_response(conn, 200)
+
+      last = StubGetFileClient.last()
+      assert last, "the local hit never forwarded to the owning remote"
+      assert URI.parse(last.url).path == "/api/v1/fibers/science/cmbx/pinned"
+
+      # order-insensitive: OriginRouter builds this query from a map.
+      assert URI.parse(last.url).query |> URI.decode_query() == %{
+               "body" => "true",
+               "routed" => "1"
+             }
+    end
+
+    test "routed=1 stops the forwarded request from bouncing back to the owner a second time",
+         %{store: store} do
+      # Two daemons whose git copies disagree about `host:` must not bounce a
+      # request between them forever. The owner's own local read carries
+      # `routed=1` on the way in (stamped by the forward above) and must answer
+      # from ITS local copy without re-deriving an owner and forwarding again.
+      write_fiber!(store, "science/cmbx/pinned-routed", """
+      ---
+      name: Pinned to cineca
+      status: active
+      shuttle:
+        host: cineca
+      ---
+
+      LOCAL MIRROR.
+      """)
+
+      stub_forward(
+        "cineca",
+        "http://localhost:4002",
+        {:ok, 200, "application/json; charset=utf-8", ~s({"fibers":[]})}
+      )
+
+      conn =
+        get(api_conn(), "/api/v1/fibers/science%2Fcmbx%2Fpinned-routed?body=true&routed=1")
+
+      assert conn.status == 200
+
+      assert %{"fibers" => [%{"fiber" => %{"name" => "Pinned to cineca", "body" => body}}]} =
+               json_response(conn, 200)
+
+      assert body =~ "LOCAL MIRROR"
+      assert StubGetFileClient.last() == nil, "routed=1 must not trigger a second hop"
+    end
+
+    test "a fiber this daemon owns is served from the local mirror, never forwarded to itself",
+         %{store: store} do
+      write_fiber!(store, "tests/self-owned", """
+      ---
+      name: Self owned
+      status: active
+      shuttle:
+        host: test-host
+      ---
+
+      Body text.
+      """)
+
+      # A configured remote in play at all (cineca) must not matter: the
+      # `shuttle.host` here IS this daemon's own id, so `entry_owner/1` must
+      # bail out before ever consulting `OriginRouter.route/1`.
+      stub_forward(
+        "cineca",
+        "http://localhost:4002",
+        {:ok, 200, "application/json; charset=utf-8", ~s({"fibers":[]})}
+      )
+
+      conn = get(api_conn(), "/api/v1/fibers/tests/self-owned?body=true")
+
+      assert conn.status == 200
+      assert %{"fibers" => [%{"fiber" => %{"body" => "Body text."}}]} = json_response(conn, 200)
+      assert StubGetFileClient.last() == nil
+    end
+
+    test "an ownerless fiber — no shuttle block, or a shuttle block with no host: — is served locally",
+         %{store: store} do
+      write_fiber!(store, "tests/no-shuttle", """
+      ---
+      name: No shuttle block
+      status: active
+      ---
+
+      Body one.
+      """)
+
+      write_fiber!(store, "tests/host-less-shuttle", """
+      ---
+      name: Host-less shuttle block
+      status: active
+      shuttle:
+        kind: oneshot
+      ---
+
+      Body two.
+      """)
+
+      stub_forward(
+        "cineca",
+        "http://localhost:4002",
+        {:ok, 200, "application/json; charset=utf-8", ~s({"fibers":[]})}
+      )
+
+      no_block = get(api_conn(), "/api/v1/fibers/tests/no-shuttle?body=true")
+      assert %{"fibers" => [%{"fiber" => %{"body" => "Body one."}}]} = json_response(no_block, 200)
+
+      no_host = get(api_conn(), "/api/v1/fibers/tests/host-less-shuttle?body=true")
+      assert %{"fibers" => [%{"fiber" => %{"body" => "Body two."}}]} = json_response(no_host, 200)
+
+      assert StubGetFileClient.last() == nil
+    end
+
+    test "a shuttle.host naming no configured remote degrades to the local mirror rather than a dead end",
+         %{store: store} do
+      # `OriginRouter.route/1`'s documented degrade: an orphaned host (renamed
+      # or dropped from `:remotes` since this fiber was pinned) is better
+      # served by the mirror than by nothing, since no daemon in the fleet
+      # claims it.
+      write_fiber!(store, "tests/orphan-host", """
+      ---
+      name: Orphaned host pin
+      status: active
+      shuttle:
+        host: c03
+      ---
+
+      Only copy anyone has.
+      """)
+
+      stub_forward(
+        "cineca",
+        "http://localhost:4002",
+        {:ok, 200, "application/json; charset=utf-8", ~s({"fibers":[]})}
+      )
+
+      conn = get(api_conn(), "/api/v1/fibers/tests/orphan-host?body=true")
+
+      assert conn.status == 200
+
+      assert %{"fibers" => [%{"fiber" => %{"body" => "Only copy anyone has."}}]} =
+               json_response(conn, 200)
+
+      assert StubGetFileClient.last() == nil,
+             "an unconfigured host: pin should never attempt a forward"
     end
   end
 
