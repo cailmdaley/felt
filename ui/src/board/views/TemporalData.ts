@@ -294,9 +294,27 @@ export interface MomentExcerpt {
 export interface MomentResult {
   host: string
   excerpts: MomentExcerpt[]
-  /** What ran in a minute that said nothing — `"Bash ×2 · Read"`. The daemon
-   *  sends it ONLY when `excerpts` is empty, so it is a fallback by
-   *  construction and never competes with real words. */
+  /**
+   * How many messages the window held, before `excerpts` was cut to the
+   * daemon's cap. Never smaller than `excerpts.length`.
+   *
+   * THE COUNT IS WHAT MAKES THE CUT SAYABLE. A slip shown six of fourteen
+   * messages can only be honest about it if it knows there were fourteen —
+   * without this it either states a number from somewhere else (the activity
+   * plane's per-minute event tally, which counts something different) or says
+   * nothing and lets six look like all of them. Absent from a daemon older
+   * than the field, which is read as "the list is all there was".
+   */
+  excerptCount?: number
+  /** One line per tool call (`"Bash — run the tests"`), oldest first, cut to
+   *  the daemon's cap for this fetch — six on a hover, all of them on a pin. */
+  toolLines?: string[]
+  /** How many calls the window held, before `toolLines` was cut. The number a
+   *  `×N` beside that list is allowed to say, and the only one. */
+  toolCount?: number
+  /** What ran, in the older single-string form — `"Bash ×2 · Read"`, or one
+   *  call per line. Superseded by `toolLines`/`toolCount` and read only from a
+   *  daemon that sends no `tool_lines`. */
   tools?: string
   /** Set when the words exist but not on the daemon that answered — a remote
    *  that is unreachable says where they live rather than pretending they are
@@ -602,7 +620,31 @@ export function parseMoment(body: unknown, fallback: MomentResult): MomentResult
   }
   const note = text(body.note)
   const tools = text(body.tools)
-  return { host, excerpts, ...(note ? { note } : {}), ...(tools ? { tools } : {}) }
+  // The per-call lines, and the two totals. Each is optional on the wire and
+  // absent from a daemon that predates them — never defaulted to zero, which
+  // would be a claim that nothing ran rather than an admission that nobody
+  // said. A total below the list it counts is a daemon disagreeing with
+  // itself; the list wins, because the list is the thing that is actually here.
+  const toolLines = Array.isArray(body.tool_lines)
+    ? body.tool_lines.filter((line): line is string => typeof line === 'string')
+    : undefined
+  const toolCount = total(body.tool_count, toolLines?.length ?? 0)
+  const excerptCount = total(body.excerpt_count, excerpts.length)
+  return {
+    host,
+    excerpts,
+    ...(excerptCount === undefined ? {} : { excerptCount }),
+    ...(toolLines ? { toolLines } : {}),
+    ...(toolCount === undefined ? {} : { toolCount }),
+    ...(note ? { note } : {}),
+    ...(tools ? { tools } : {}),
+  }
+}
+
+/** A wire total, never allowed below the list it is a total OF. */
+function total(value: unknown, atLeast: number): number | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined
+  return Math.max(Math.floor(value), atLeast)
 }
 
 const BUCKET_KINDS = new Set<ActivityBucket['k']>(['attention', 'notify', 'agent', 'reply'])

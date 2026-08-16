@@ -1388,8 +1388,10 @@ describe('what a hovered slot is willing to say', () => {
       bucket({ m: at, k: 'attention' }),
     ]));
     expect(tip.rows.map((r) => r.kind)).toEqual(['attention', 'agent']);
-    expect(tip.rows.map((r) => r.phrase)).toEqual(['you', 'tool call']);
-    expect(tip.rows.find((r) => r.kind === 'agent')?.count).toBe(4);
+    expect(tip.rows.map((r) => r.phrase)).toEqual(['you', 'agent working']);
+    // The agent row carries no ×N: its `n` tallies harness hook events, not a
+    // count of anything the slip could ever list. `rowCount` refuses it.
+    expect(tip.rows.find((r) => r.kind === 'agent')?.count).toBeUndefined();
   });
 
   it('says nothing at all about a notify — it is not a drawn state', () => {
@@ -1413,27 +1415,36 @@ describe('what a hovered slot is willing to say', () => {
     const slot = slotOf([bucket({ m: bounds.startMs })]);
     // No transcript yet — and while none has come back, the card carries no
     // words and says nothing about not having them.
-    expect(slotTip(slot).detail).toBeUndefined();
+    expect(slotTip(slot).said).toBeUndefined();
     expect(slotTip(slot).note).toBeUndefined();
 
-    // What `/api/v1/moment` recovered, carried through verbatim.
+    // What `/api/v1/moment` recovered, carried through verbatim — plus the
+    // totals `MomentWords` now always carries, never below the list itself.
     const words = {
       excerpts: [{ at_ms: bounds.startMs, role: 'user' as const, text: 'refactor the fold' }],
+      excerptTotal: 1,
+      toolLines: [],
+      toolTotal: 0,
     };
-    expect(slotTip(slot, words).detail).toEqual(words.excerpts);
+    expect(slotTip(slot, words).said).toEqual({ items: words.excerpts, total: 1 });
 
     // A remote that could not be read says where the words live instead.
-    expect(slotTip(slot, { excerpts: [], note: 'words live on kelvin' }).note).toBe(
-      'words live on kelvin',
-    );
+    expect(
+      slotTip(slot, { excerpts: [], excerptTotal: 0, toolLines: [], toolTotal: 0, note: 'words live on kelvin' }).note,
+    ).toBe('words live on kelvin');
   });
 
   it('carries the tool line for a slot that worked without speaking', () => {
     const slot = slotOf([bucket({ m: bounds.startMs })]);
-    const tip = slotTip(slot, { excerpts: [], tools: 'Bash ×2 · Read' });
-    expect(tip.tools).toBe('Bash ×2 · Read');
+    // The legacy single-string form, from a daemon with no per-call lines —
+    // `toolsText` now, so it can never be confused with the counted `tools`
+    // section a per-call daemon sends.
+    const tip = slotTip(slot, {
+      excerpts: [], excerptTotal: 0, toolLines: [], toolTotal: 0, toolsText: 'Bash ×2 · Read',
+    });
+    expect(tip.toolsText).toBe('Bash ×2 · Read');
     // It is not speech and must never be dressed as any.
-    expect(tip.detail).toBeUndefined();
+    expect(tip.said).toBeUndefined();
   });
 
   it('carries the constitution flag onto the tooltip line it belongs to', () => {

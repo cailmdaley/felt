@@ -91,14 +91,18 @@ import {
   MomentLoader,
   pickMark,
   placeTip,
+  reconcileRows,
   renderTip,
+  rowCount,
   SLOT_KIND_ORDER,
   SLOT_PHRASE,
+  tipContent,
   type DrawnKind,
   type MomentWords,
   type SlotTip,
   type SlotTipRow,
 } from './momentTip.js'
+import { RailScrub } from './railScrub.js'
 
 // Re-exported because the tooltip vocabulary was Week's before it was shared,
 // and callers (and tests) that learned it here keep working.
@@ -655,6 +659,18 @@ export interface DayMark {
   fraction: number
   label: string
   cardId: string
+  /**
+   * The INSTANT the mark stands for, when there is one.
+   *
+   * Only a launch has one. A due carries a civil day and no time of day at
+   * all, and the mid-morning position it is drawn at is a DRAWING CONVENTION
+   * (see `MID_MORNING_HOUR`) — reporting "10:00" off that fraction would be
+   * the slip inventing a deadline out of the layout. So the two kinds carry
+   * different fields and the slip says different things about them.
+   */
+  atMs?: number
+  /** The civil day owed, for a due or a snooze. */
+  dueDay?: string
 }
 
 /**
@@ -694,6 +710,7 @@ export function marksForDay(cards: KanbanCard[], day: string, bounds: RailBounds
         fraction: railFraction(launch, bounds),
         label: card.name,
         cardId: card.id,
+        atMs: launch,
       })
       continue
     }
@@ -705,6 +722,7 @@ export function marksForDay(cards: KanbanCard[], day: string, bounds: RailBounds
         fraction: midMorningFraction(day, bounds),
         label: card.name,
         cardId: card.id,
+        dueDay: day,
       })
     }
   }
@@ -828,6 +846,27 @@ class WeekView implements TemporalView {
   )
 
   /**
+   * The pinned moment's bar — the same one Day raises, from the same module.
+   *
+   * The lane key is the CIVIL DAY, because on Week a lane is a day: the bar
+   * stands in that row's own rail, walks that row's own 6am→6am window, and
+   * steps by the raster slot, which is the finest mark this view has. A step of
+   * one minute here would move the bar a fifth of a pixel and change nothing
+   * the reader can see.
+   */
+  private readonly scrub = new RailScrub({
+    frame: (day) => (this.rows.some((r) => r.day === day) ? railBounds(day) : null),
+    rail: (day) => {
+      const row = this.rows.find((r) => r.day === day)
+      if (!row) return null
+      const box = row.rail.getBoundingClientRect()
+      return { host: row.rail, left: box.left, width: box.width }
+    },
+    stepMs: RASTER_SLOT_MS,
+    onMove: (target) => this.showPinnedSlot(target.laneKey, target.atMs),
+  })
+
+  /**
    * ‹ › paging, and `t` for today — the same binding DayView carries, so one
    * key means "back to now" wherever you are in the temporal views.
    *
@@ -852,10 +891,14 @@ class WeekView implements TemporalView {
   }
 
   private readonly onKeyDown = (e: KeyboardEvent): void => {
-    if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return
-    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight' && e.key !== 't') return
     if (!this.page?.root.isConnected) return
     if (keystrokeIsSpokenFor()) return
+    // The bar takes the arrows while it is up — see DayView's copy of this
+    // handoff and `RailScrub.handleKey`. Paging the week under a reader who is
+    // scrubbing Tuesday is the one thing the two bindings must not both do.
+    if (this.scrub.handleKey(e)) return
+    if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight' && e.key !== 't') return
     e.preventDefault()
     if (e.key === 't') this.goToday()
     else this.goWeek(e.key === 'ArrowLeft' ? -1 : 1)
@@ -925,6 +968,7 @@ class WeekView implements TemporalView {
     document.removeEventListener('keydown', this.onKeyDown)
     document.removeEventListener('keydown', this.onEscape, true)
     document.removeEventListener('click', this.onDocClick)
+    this.scrub.dispose()
     this.pinnedKey = null
     this.page?.body.removeEventListener('wheel', this.onWheel)
     if (this.swipeSettleTimer !== null) clearTimeout(this.swipeSettleTimer)
@@ -1036,6 +1080,8 @@ class WeekView implements TemporalView {
     // tooltips until the next click or Escape. Day releases the pin the same
     // way when its window moves.
     this.pinnedKey = null
+    // The bar was standing in a rail that is about to be discarded.
+    this.scrub.clear()
     this.hoveredKey = null
     this.tip = null
     this.moments.cancel()
@@ -1187,7 +1233,7 @@ class WeekView implements TemporalView {
     const slot = row.slots[pick.index]
     const tip = this.ensureTip()
     const key = `${row.day}:${slot.index}`
-    renderTip(tip, slotTip(slot, this.moments.peek(key, pin)))
+    renderTip(tip, slotTip(slot, this.moments.peek(key, pin), pin))
     // The words arrive late or not at all; the tooltip is already correct
     // without them, and redraws in place when they land. A pin asks again for
     // the UNTRUNCATED words — the daemon does the cutting, so the pinned slip
@@ -1202,12 +1248,16 @@ class WeekView implements TemporalView {
         // tooltip that has since been pinned would paint the cut text back over
         // the full text.
         if (this.hoveredKey !== key || (this.pinnedKey === key) !== pin) return
-        renderTip(tip, slotTip(slot, words))
+        renderTip(tip, slotTip(slot, words, pin))
       },
       pin,
     )
     this.hoveredKey = key
     this.pinnedKey = pin ? key : null
+    // The bar goes up in this row's own rail, at the slot the slip is about,
+    // and takes the arrows: from here the week is walked slot by slot rather
+    // than by chasing four-minute ticks with the pointer.
+    if (pin) this.scrub.pin({ laneKey: row.day, atMs: slot.startMs })
     tip.classList.add('kbn-tip-open')
     // Pinned, the slip stops being a passing annotation and becomes something
     // you read: it takes the pointer (so a long transcript can be scrolled) and
@@ -1218,6 +1268,86 @@ class WeekView implements TemporalView {
     const box = grid.getBoundingClientRect()
     const anchor = rail.left - box.left + slot.fraction * rail.width
     placeTip(tip, box, anchor, rail.top - box.top)
+  }
+
+  /**
+   * Redraw the pinned slip for a slot the SCRUB walked to.
+   *
+   * The bar steps by the slot, and a row's `slots` list holds only the INKED
+   * ones — so most steps across a quiet Tuesday land on nothing. That is an
+   * answer about the week rather than a failure to answer: the panel holds its
+   * place and reports an empty span, instead of blinking out between marks.
+   */
+  private showPinnedSlot(day: string, atMs: number): void {
+    const row = this.rows.find((r) => r.day === day)
+    const grid = this.grid
+    if (!row || !grid) return
+    const bounds = railBounds(day)
+    const index = Math.floor((atMs - bounds.startMs) / RASTER_SLOT_MS)
+    const startMs = bounds.startMs + index * RASTER_SLOT_MS
+    const slot = row.slots.find((s) => s.index === index)
+    const tip = this.ensureTip()
+
+    if (!slot) {
+      // Nothing to ask: a slot with no ink names no session.
+      this.moments.cancel()
+      this.hoveredKey = null
+      this.pinnedKey = `${day}:${index}`
+      renderTip(tip, {
+        time: `${clockTime(startMs)}–${clockTime(startMs + RASTER_SLOT_MS)}`,
+        rows: [],
+        resolved: true,
+        pinned: true,
+        note: 'nothing recorded in this span',
+      })
+      tip.classList.add('kbn-tip-open', 'kbn-tip-pinned')
+    } else {
+      const key = `${day}:${slot.index}`
+      renderTip(tip, slotTip(slot, this.moments.peek(key, true), true))
+      this.moments.request(
+        key,
+        slot.sources,
+        slot.startMs,
+        slot.endMs,
+        (words) => {
+          if (this.pinnedKey !== key) return
+          renderTip(tip, slotTip(slot, words, true))
+        },
+        true,
+      )
+      this.hoveredKey = key
+      this.pinnedKey = key
+      tip.classList.add('kbn-tip-open', 'kbn-tip-pinned')
+    }
+
+    const box = grid.getBoundingClientRect()
+    const rail = row.rail.getBoundingClientRect()
+    const fraction = (startMs - bounds.startMs) / (bounds.endMs - bounds.startMs)
+    placeTip(tip, box, rail.left - box.left + fraction * rail.width, rail.top - box.top)
+  }
+
+  /**
+   * The slip for a hollow mark — an obligation, hovered.
+   *
+   * Anchored to the GLYPH rather than to the pointer, because the glyph is a
+   * fixed 13px target the reader deliberately went to: a slip that then floats
+   * wherever the mouse happened to stop reads as belonging to the paper rather
+   * than to the mark. A pinned slip is left alone, the same as every other
+   * hover on this page.
+   */
+  private showMarkTip(mark: DayMark, el: HTMLElement): void {
+    if (this.pinnedKey !== null) return
+    const grid = this.grid
+    if (!grid) return
+    this.moments.cancel()
+    this.hoveredKey = null
+    const tip = this.ensureTip()
+    renderTip(tip, markTip(mark, this.ctx?.cards.find((c) => c.id === mark.cardId)))
+    tip.classList.add('kbn-tip-open')
+    tip.classList.remove('kbn-tip-pinned')
+    const box = grid.getBoundingClientRect()
+    const glyph = el.getBoundingClientRect()
+    placeTip(tip, box, glyph.left - box.left + glyph.width / 2, glyph.top - box.top)
   }
 
   private ensureTip(): HTMLElement {
@@ -1235,6 +1365,7 @@ class WeekView implements TemporalView {
   private hideTip(force = false): void {
     if (this.pinnedKey !== null && !force) return
     this.pinnedKey = null
+    this.scrub.clear()
     for (const row of this.rows) this.markMagnet(row, null, 0)
     this.tip?.classList.remove('kbn-tip-open', 'kbn-tip-pinned')
     this.hoveredKey = null
@@ -1621,12 +1752,18 @@ class WeekView implements TemporalView {
     el.type = 'button'
     el.className = `wk-mark wk-mark-${mark.kind}`
     el.textContent = mark.glyph
-    el.title = mark.label
+    // NO `title`. It said the fiber's name — the one fact the reader already
+    // had — in a grey box the browser drew, after a delay nobody chose, in a
+    // typeface belonging to no part of this page. The slip below says more,
+    // immediately, in the board's own hand. See `markTip`.
+    el.setAttribute('aria-label', mark.label)
     // Several obligations at the same position (every `due` sits at 10am) fan
     // out sideways rather than stacking into an illegible single glyph.
     const peers = all.filter((m) => m.fraction === mark.fraction)
     const offset = peers.indexOf(mark)
     el.style.left = `calc(${mark.fraction * 100}% + ${offset * 13}px)`
+    el.addEventListener('mouseenter', () => this.showMarkTip(mark, el))
+    el.addEventListener('mouseleave', () => this.hideTip())
     el.addEventListener('click', () => this.ctx?.openCard(mark.cardId))
     return el
   }
@@ -1840,7 +1977,7 @@ export function rasterSlots(
  * `words` are what `/api/v1/moment` recovered for the slot, when anything was;
  * with none the renderer draws the honest note instead.
  */
-export function slotTip(slot: RasterSlot, words?: MomentWords): SlotTip {
+export function slotTip(slot: RasterSlot, words?: MomentWords, pinned = false): SlotTip {
   const rows: SlotTipRow[] = []
   for (const kind of SLOT_KIND_ORDER) {
     const entry = slot.kinds.find((k) => k.kind === kind)
@@ -1849,16 +1986,84 @@ export function slotTip(slot: RasterSlot, words?: MomentWords): SlotTip {
       kind,
       phrase: SLOT_PHRASE[kind],
       where: entry.where.join(' · '),
-      count: entry.count,
+      // The bucket tally may be printed only where it counts messages — see
+      // `rowCount`. The agent band's own `n` counts harness hook events and is
+      // not a count of anything this slip can show, so it is not printed.
+      ...(rowCount(kind, entry.count) === undefined ? {} : { count: rowCount(kind, entry.count) }),
       shuttle: entry.shuttle,
     })
   }
+  const content = tipContent(words, pinned)
   return {
     time: `${clockTime(slot.startMs)}–${clockTime(slot.endMs)}`,
-    rows,
-    ...(words?.excerpts.length ? { detail: words.excerpts } : {}),
-    ...(words?.tools ? { tools: words.tools } : {}),
-    ...(words?.note ? { note: words.note } : {}),
+    rows: reconcileRows(rows, content),
+    ...content,
+  }
+}
+
+/** What the three hollow glyphs claim, said in words. The mark is the claim;
+ *  this is the same claim for a reader who has not learned the glyph yet. */
+const MARK_PHRASE: Record<MarkKind, string> = {
+  due: 'due',
+  launch: 'launches',
+  snooze: 'stashed, due',
+}
+
+/** `Tue 4 Aug` — a civil day, named. Short enough to sit on a slip's head
+ *  line, unambiguous enough that nobody has to count rows to find the day. */
+function markDay(dayISO: string): string {
+  const date = civilDayToLocalDate(dayISO)
+  return date
+    ? date.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })
+    : dayISO
+}
+
+/**
+ * A hollow mark as words — the week's obligations, which are the one thing on
+ * this page that has not happened yet.
+ *
+ * IT REPLACES A NATIVE `title`, and the replacement is the point twice over.
+ * The browser's own tooltip arrives after a delay nobody chose, in a grey box
+ * that belongs to no design, and it carried the fiber's NAME and nothing else —
+ * which is the one fact the reader was already looking at when they went to
+ * point at it. The slip arrives immediately, in the page's own hand, and says
+ * the things the surface genuinely cannot: WHEN, and what kind of commitment
+ * this is.
+ *
+ * EVERY FACT IS READ, NEVER DERIVED. A due has a civil day and no time of day,
+ * so the slip names the day and stops — the mid-morning position the glyph is
+ * drawn at is a layout convention, and reporting a clock time off it would be
+ * inventing a deadline. A launch has a real instant and gets one. A field the
+ * card does not carry contributes no row at all.
+ */
+export function markTip(mark: DayMark, card: KanbanCard | undefined): SlotTip {
+  const facts: { label: string; value: string }[] = []
+  const when =
+    mark.atMs !== undefined
+      ? `${MARK_PHRASE[mark.kind]} ${markDay(railCivilDay(mark.atMs))} · ${clockTime(mark.atMs)}`
+      : mark.dueDay
+        ? `${MARK_PHRASE[mark.kind]} ${markDay(mark.dueDay)}`
+        : MARK_PHRASE[mark.kind]
+
+  // The shuttle block, when there is one — what would run, where, and on whose
+  // schedule. A fiber with no block carries none of these and the slip simply
+  // says less, which is the true amount.
+  if (card?.shuttleKind) facts.push({ label: 'kind', value: card.shuttleKind })
+  if (card?.shuttleSchedule) facts.push({ label: 'every', value: card.shuttleSchedule })
+  if (card?.shuttleAgent) facts.push({ label: 'agent', value: card.shuttleAgent })
+  if (card?.shuttleHost) facts.push({ label: 'host', value: card.shuttleHost })
+  if (card?.status) facts.push({ label: 'column', value: card.status })
+
+  return {
+    title: mark.label,
+    time: when,
+    rows: [],
+    ...(facts.length > 0 ? { facts } : {}),
+    tone: 'owed',
+    // Nothing was fetched and nothing will be: an obligation has no transcript,
+    // because it has not happened. Saying so keeps the row reconciler from
+    // waiting on words that are not coming.
+    resolved: true,
   }
 }
 

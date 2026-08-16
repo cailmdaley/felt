@@ -24,20 +24,25 @@
  * true statement whenever the words are not recovered, and it must never be
  * replaced by an invented sentence.
  *
- * Between the two sits a third answer. A minute of pure tool work said nothing
- * — but the transcript knows WHAT IT DID, and `/api/v1/moment` returns that as
- * `tools` whenever it has no words to return. So the footer has a precedence:
- * the words, else the tools, else the note. The tools text is drawn in a
- * monospaced, dimmed register precisely because it is not speech; the note
- * now appears only when there were neither words nor tools.
+ * Between the two sits a third answer. A minute of tool work may have said
+ * nothing — but the transcript knows WHAT IT DID, and `/api/v1/moment` returns
+ * the calls one per line beside whatever was said. Both are drawn, always; the
+ * calls in a monospaced, dimmed register precisely because they are not speech.
+ * The note appears only when there was nothing else at all.
  *
- * `tools` itself carries one of two shapes, distinguished only by whether it
- * contains a newline — the daemon decides which, this module just draws
- * whichever arrives. Few enough calls (six or fewer) and it is one call per
- * line, oldest first (`"Bash — run the tests"`); more than that and it is the
- * old single-line aggregate (`"Bash ×2 · Read"`). Either way it is drawn as
- * lines in `.kbn-tip-tools`, never split into a synthetic per-call list here
- * — the daemon already decided how many lines this minute is worth.
+ * ## The one rule this module exists to enforce
+ *
+ * A SLIP MAY NEVER CLAIM MORE THAN IT SHOWS. Every count on it counts the
+ * items directly beneath it, every cut list says it was cut and how much of it
+ * is here, and every register word that names a message is either followed by
+ * that message or annotated with the reason it is not. The failure this
+ * replaces was structural rather than accidental: the ×N came from the
+ * activity plane (a tally of harness hook events for that minute) and the list
+ * came from the transcript (the actual tool calls, capped), and the two had no
+ * reason on earth to agree — "tool calls ×7" over two lines, "×14" over six,
+ * "×12" over none, "agent" over silence. See {@link SlotTipRow.count},
+ * {@link TipSection} and {@link reconcileRows}: no builder can now assemble a
+ * slip that disagrees with itself, because none of them assembles one by hand.
  *
  * ## Fetch discipline
  *
@@ -73,13 +78,51 @@ export type { MomentSource }
  */
 export type DrawnKind = Exclude<ActivityBucket['k'], 'notify'>
 
-/** What each raster kind means when a person hovers it — the second person,
- *  because a tooltip is answering "what was I doing here?". Shares its claims
- *  with `ACTIVITY_KEY_ITEMS`; the wording is closer in. */
+/**
+ * What each raster kind means when a person hovers it — the second person,
+ * because a tooltip is answering "what was I doing here?".
+ *
+ * EVERY PHRASE HERE IS A COMPLETE CLAIM ON ITS OWN. Two of them used to be
+ * nouns waiting for a number ("tool call", "agent"), and both were false in
+ * the same way: the number they took was the activity plane's per-minute
+ * EVENT tally, which counts harness hooks — a `pre_tool_use` and its
+ * `post_tool_use` are two, a `session_start` is one, a minute filled in
+ * between a long call's two ends is one — and never counted tool calls. So
+ * "tool calls ×7" was a count of something else entirely, printed above
+ * however many calls the transcript happened to return.
+ *
+ * The kinds now say what the recorded mark actually witnesses: a minute the
+ * agent was working in, a minute it finished a turn in, a minute you spoke in.
+ * Quantities that a reader can go and check live on the sections below, which
+ * count what they list. See {@link SlotTipRow.count}.
+ */
 export const SLOT_PHRASE: Record<DrawnKind, string> = {
   attention: 'you',
-  agent: 'tool call',
-  reply: 'agent',
+  agent: 'agent working',
+  reply: 'agent replied',
+}
+
+/**
+ * Which kinds' ×N is a count of MESSAGES, and therefore of things the slip can
+ * show.
+ *
+ * `attention` buckets count `user_prompt_submit` events and `reply` buckets
+ * count `stop` events — one prompt and one finished turn apiece, each of which
+ * is an excerpt the transcript holds. Those counts are joinable, so they may be
+ * printed. `agent` is the residue of every other hook and counts nothing a
+ * reader could ever be shown.
+ */
+const MESSAGE_KINDS = new Set<DrawnKind>(['attention', 'reply'])
+
+/**
+ * The ×N a row of this kind may print, or undefined for none.
+ *
+ * ONE FUNCTION, SO THE RULE CANNOT BE FORGOTTEN IN ONE VIEW AND KEPT IN
+ * ANOTHER. Day and Week both build rows out of bucket kinds; both used to hand
+ * every kind's `n` straight to the renderer.
+ */
+export function rowCount(kind: DrawnKind, n: number): number | undefined {
+  return MESSAGE_KINDS.has(kind) && n > 1 ? n : undefined
 }
 
 /** Strongest signal first — a human steering, then the agent work underneath
@@ -92,29 +135,90 @@ export interface SlotTipRow {
   kind: DrawnKind
   phrase: string
   where: string
-  count: number
+  /**
+   * Rendered `×N` — AND ONLY EVER A COUNT OF THINGS THIS SLIP CAN PRODUCE.
+   *
+   * That is the whole discipline of this module. A `×N` reads as a promise
+   * that N of something are here; when the number came from one place and the
+   * list from another, the slip could say "×14" over six lines, or over none,
+   * and be lying in a way no reader could diagnose. Any other quantity — a
+   * span of minutes, a count of hook events — is prose and belongs in
+   * {@link SlotTipRow.note}, where it names its own unit and promises nothing.
+   */
+  count?: number
+  /** A muted qualifier after the phrase: `27 min`, `no text recorded`. Prose,
+   *  so it may say anything true; never a bare number. */
+  note?: string
   shuttle: boolean
 }
 
+/**
+ * A list, and how many there were.
+ *
+ * `total` is never below `items.length` and is the ONLY number allowed beside
+ * this list. When they differ the renderer says so in as many words — "showing
+ * 6 of 34" — rather than letting six items sit under a claim of thirty-four.
+ */
+export interface TipSection<T> {
+  items: T[]
+  total: number
+}
+
 export interface SlotTip {
+  /**
+   * What this slip is ABOUT, when the surface cannot say — a fiber's name over
+   * a hollow mark, which stands alone on blank paper with no lane label beside
+   * it. The activity marks never carry one: their lane is labelled a few
+   * centimetres to the left and has been the whole time the pointer travelled
+   * there, and restating it would spend the head line on the one thing the
+   * reader can already see.
+   */
+  title?: string
   /** `14:32–14:36`, the hovered span. */
   time: string
   rows: SlotTipRow[]
-  /** The recovered words, when `/api/v1/moment` found any. Absent means the
-   *  renderer falls through to {@link SlotTip.tools}, and then to
-   *  the tools, and then to nothing at all. */
-  detail?: MomentExcerpt[]
-  /** What the minute DID when it said nothing — one call per line
-   *  (`"Bash — run the tests"`) when there were few enough to list, else the
-   *  aggregate (`"Bash ×2 · Read"`) as a single line; the two are told apart
-   *  by whether a `\n` is present. Drawn in place of the words, in a register
-   *  that is visibly not speech: nobody said this, and a tooltip that let it
-   *  read as a quote would be inventing one. */
-  tools?: string
+  /**
+   * WHAT IS KNOWN, plainly — a ledger of label/value pairs read straight off a
+   * card. The obligation marks' whole content: they report a commitment rather
+   * than a stretch of recorded work, so there is nothing to count and nothing
+   * to quote, only facts somebody wrote down. Every value here is a field that
+   * exists; a field that is absent contributes no row, because "agent: —" is
+   * an answer nobody gave.
+   */
+  facts?: { label: string; value: string }[]
+  /**
+   * The register the slip is drawn in. `owed` is the hollow gold of a thing
+   * scheduled and not yet done — the pigment its mark already wears on the
+   * rail, so the slip and the glyph that summoned it are visibly one thought.
+   * Absent is the ordinary parchment slip of recorded work.
+   */
+  tone?: 'owed'
+  /** The recovered words, with the number that were there to recover. */
+  said?: TipSection<MomentExcerpt>
+  /** What the window DID: one line per tool call (`"Bash — run the tests"`),
+   *  with the true call count beside it. Drawn alongside the words rather than
+   *  instead of them — a minute that spoke and also ran forty calls is two
+   *  facts — and in a register that is visibly not speech: nobody said this,
+   *  and a slip that let it read as a quote would be inventing a quote. */
+  tools?: TipSection<string>
+  /** The older single-string tool report, from a daemon that sends no
+   *  `tool_lines`. Drawn as lines, claiming NOTHING about how many there were —
+   *  which is exactly what such a daemon can support. */
+  toolsText?: string
   /** Where the words live when they could not be read from here — a remote
    *  daemon that is down. Shown instead of the note, because "gone" and
    *  "elsewhere" are different answers. */
   note?: string
+  /**
+   * The transcript has answered (possibly with nothing). Until it has, the
+   * slip states only what the marks recorded and volunteers no absence: "no
+   * text recorded" while the fetch is still in flight would be a claim the
+   * slip cannot yet make.
+   */
+  resolved?: boolean
+  /** Pinned: every section is showing everything it has, so none of them
+   *  invites a pin. */
+  pinned?: boolean
 }
 
 /** `14:32` in the browser's zone. */
@@ -308,8 +412,18 @@ export interface LastExchange {
    * only one side ever spoke.
    */
   turns: ExchangeTurn[]
-  /** Tool calls that landed after the last of those turns, if any. */
-  toolsAfter: { atMs: number; count: number } | null
+  /**
+   * Agent work that landed after the last of those turns, if any: when it last
+   * happened, how many EVENTS were recorded, and — the number a slip may
+   * actually show a reader — how many MINUTES it spans.
+   *
+   * `count` is kept because it is what the activity plane recorded, and
+   * dropping a recorded fact to fix a rendering is the wrong repair. But it is
+   * a tally of harness hooks, not of tool calls, and no list of seven things
+   * exists to put under a "×7"; `minutes` is a duration, says its own unit, and
+   * is the honest form of "it has been busy since". See `magnetTip`.
+   */
+  toolsAfter: { atMs: number; count: number; minutes: number } | null
 }
 
 /**
@@ -360,14 +474,19 @@ export function lastExchange(marks: readonly ExchangeMark[]): LastExchange {
   const after = turns.length > 0 ? turns[turns.length - 1].atMs : -Infinity
   let atMs = -Infinity
   let count = 0
+  let minutes = 0
   for (const mark of marks) {
     if (mark.atMs <= after) continue
     const tools = mark.kinds.find((k) => k.kind === 'agent')?.count ?? 0
     if (tools <= 0) continue
     count += tools
+    // One mark is one minute on both rails that call this, so the marks
+    // themselves are the duration — no arithmetic on the timestamps, which
+    // would have to guess at a grain this function is not told.
+    minutes += 1
     if (mark.atMs > atMs) atMs = mark.atMs
   }
-  return { turns, toolsAfter: count > 0 ? { atMs, count } : null }
+  return { turns, toolsAfter: count > 0 ? { atMs, count, minutes } : null }
 }
 
 export function pickMark(
@@ -422,6 +541,96 @@ const DELEGATION_LABEL: Record<'spawn' | 'return', string> = {
   return: '← return',
 }
 
+// ── The content contract ─────────────────────────────────────────────────────
+//
+// EVERY VIEW'S SLIP IS ASSEMBLED THROUGH THESE TWO FUNCTIONS, and that is the
+// point. The slip has two kinds of statement on it — what the ACTIVITY PLANE
+// recorded (the rows: a minute somebody spoke in, a minute an agent worked in)
+// and what the TRANSCRIPT returned (the sections: the words, the calls) — and
+// every inconsistency this module has ever shown was one of those two speaking
+// for the other. A count taken from the marks, printed over a list taken from
+// the transcript. A register word naming a message the words never contained.
+//
+// So: the rows may only print a number that counts something the sections can
+// produce, and the sections carry their own totals and say when they are cut.
+// A builder that wants a slip calls `tipContent` for the sections and
+// `reconcileRows` for the rows, and cannot get this wrong by hand.
+
+/** The sections of a slip, from whatever the loader recovered. */
+export function tipContent(
+  words: MomentWords | undefined,
+  pinned = false,
+): Pick<SlotTip, 'said' | 'tools' | 'toolsText' | 'note' | 'resolved' | 'pinned'> {
+  return {
+    ...(words?.excerpts.length
+      ? { said: { items: words.excerpts, total: Math.max(words.excerptTotal, words.excerpts.length) } }
+      : {}),
+    ...(words?.toolLines.length
+      ? { tools: { items: words.toolLines, total: Math.max(words.toolTotal, words.toolLines.length) } }
+      : {}),
+    // Only from a daemon with no per-call lines to send. Never both: two
+    // renderings of the same calls, one of them uncounted, is the ambiguity
+    // this whole shape exists to remove.
+    ...(!words?.toolLines.length && words?.toolsText ? { toolsText: words.toolsText } : {}),
+    ...(words?.note ? { note: words.note } : {}),
+    resolved: words !== undefined,
+    pinned,
+  }
+}
+
+/**
+ * The rows, reconciled with what actually came back.
+ *
+ * NO LABEL WITHOUT ITS CONTENT. A row reading "agent replied" names a message,
+ * and a slip that shows the row and not the message has told the reader a word
+ * and withheld the thing the word was for. It cannot always be helped — the
+ * session may be unpaired, the transcript cleaned up, the harness one that
+ * writes no transcript we can read — but it can always be SAID. So once the
+ * fetch has answered, a row whose message is not among the excerpts gains the
+ * true statement in its place: `agent replied · no text recorded`.
+ *
+ * Before the fetch answers, nothing is added. "No text recorded" about a
+ * request still in flight is not honesty, it is a guess that happens to be
+ * wrong for a few hundred milliseconds.
+ */
+export function reconcileRows(
+  rows: readonly SlotTipRow[],
+  content: Pick<SlotTip, 'said' | 'resolved'>,
+): SlotTipRow[] {
+  if (!content.resolved) return [...rows]
+  const heard = new Set<DrawnKind>()
+  for (const excerpt of content.said?.items ?? []) {
+    // Only PROSE answers for a row: the delegation registers are an agent
+    // talking to another agent, and neither half is the reply this lane's
+    // `stop` event recorded.
+    if ((excerpt.kind ?? 'prose') !== 'prose') continue
+    if (excerpt.role === 'user') heard.add('attention')
+    if (excerpt.role === 'assistant') heard.add('reply')
+  }
+  return rows.map((row) =>
+    MESSAGE_KINDS.has(row.kind) && !heard.has(row.kind)
+      ? { ...row, note: row.note ?? 'no text recorded' }
+      : row,
+  )
+}
+
+/** How a cut section announces itself. `showing 6 of 34 tool calls` — the two
+ *  numbers side by side, because the gap between them is the fact. */
+function sectionHead(section: TipSection<unknown>, noun: string, pinned: boolean): string | null {
+  if (section.total > section.items.length) {
+    return `showing ${section.items.length} of ${section.total} ${noun}` +
+      (pinned ? '' : ' · click to pin for all')
+  }
+  return section.items.length > 1 ? `${noun} ×${section.total}` : null
+}
+
+function sectionHeadEl(text: string): HTMLElement {
+  const el = document.createElement('div')
+  el.className = 'kbn-tip-sechead'
+  el.textContent = text
+  return el
+}
+
 /**
  * Draw one tooltip. Rebuilt rather than patched — it is one small subtree, and
  * a hover that moves between marks must never show a stale half of the last
@@ -432,11 +641,41 @@ const DELEGATION_LABEL: Record<'spawn' | 'return', string> = {
  */
 export function renderTip(host: HTMLElement, tip: SlotTip): void {
   host.textContent = ''
+  // The register rides on the slip, not on the caller: two views draw hollow
+  // marks and both must summon the same gold.
+  host.classList.toggle('kbn-tip-owed', tip.tone === 'owed')
 
-  const when = document.createElement('div')
-  when.className = 'kbn-tip-time'
-  when.textContent = tip.time
-  host.append(when)
+  if (tip.title) {
+    const title = document.createElement('div')
+    title.className = 'kbn-tip-title'
+    title.textContent = tip.title
+    host.append(title)
+  }
+
+  if (tip.time) {
+    const when = document.createElement('div')
+    when.className = 'kbn-tip-time'
+    when.textContent = tip.time
+    host.append(when)
+  }
+
+  if (tip.facts && tip.facts.length > 0) {
+    const facts = document.createElement('div')
+    facts.className = 'kbn-tip-facts'
+    for (const fact of tip.facts) {
+      const row = document.createElement('div')
+      row.className = 'kbn-tip-fact'
+      const label = document.createElement('span')
+      label.className = 'kbn-tip-factlabel'
+      label.textContent = fact.label
+      const value = document.createElement('span')
+      value.className = 'kbn-tip-factvalue'
+      value.textContent = fact.value
+      row.append(label, value)
+      facts.append(row)
+    }
+    host.append(facts)
+  }
 
   for (const row of tip.rows) {
     const line = document.createElement('div')
@@ -463,20 +702,31 @@ export function renderTip(host: HTMLElement, tip: SlotTip): void {
     }
 
     // A count of 1 is what a single event looks like; printing "×1" would make
-    // every ordinary minute look like it had been measured.
-    if (row.count > 1) {
+    // every ordinary minute look like it had been measured. `rowCount` has
+    // already refused every count that was not a count of messages.
+    if (row.count !== undefined && row.count > 1) {
       const count = document.createElement('span')
       count.className = 'kbn-tip-count'
       count.textContent = `×${row.count}`
       line.append(count)
     }
+    // The qualifier: a span, a unit, or the admission that the message this
+    // row names was not recovered. See `reconcileRows`.
+    if (row.note) {
+      const note = document.createElement('span')
+      note.className = 'kbn-tip-rownote'
+      note.textContent = row.note
+      line.append(note)
+    }
     host.append(line)
   }
 
-  if (tip.detail && tip.detail.length > 0) {
+  if (tip.said && tip.said.items.length > 0) {
     const said = document.createElement('div')
     said.className = 'kbn-tip-said kbn-tip-section'
-    for (const excerpt of tip.detail) {
+    const head = sectionHead(tip.said, 'messages', tip.pinned ?? false)
+    if (head) said.append(sectionHeadEl(head))
+    for (const excerpt of tip.said.items) {
       // A missing kind is prose — that is what every excerpt was before the
       // registers existed, and an older daemon still says it that way.
       const delegated = excerpt.kind === 'spawn' || excerpt.kind === 'return'
@@ -536,13 +786,29 @@ export function renderTip(host: HTMLElement, tip: SlotTip): void {
   // minute and the card has room for both — the daemon sends both now (see
   // `Shuttle.Moment`), and this draws both.
   //
-  // `tools` is one line (the aggregate) or several (one call per line); a
-  // `\n` split renders either the same way; a lone line never gains an empty
-  // sibling because a string with no `\n` splits to a one-element array.
-  if (tip.tools) {
+  // The head is where the honesty lives: `tool calls ×5` when all five are
+  // below it, `showing 6 of 34 tool calls · click to pin for all` when they
+  // are not. There is no third case, because the section carries its own
+  // total and cannot be handed somebody else's.
+  if (tip.tools && tip.tools.items.length > 0) {
     const tools = document.createElement('div')
     tools.className = 'kbn-tip-tools kbn-tip-section'
-    for (const line of tip.tools.split('\n')) {
+    const head = sectionHead(tip.tools, 'tool calls', tip.pinned ?? false)
+    if (head) tools.append(sectionHeadEl(head))
+    for (const line of tip.tools.items) {
+      const row = document.createElement('div')
+      row.className = 'kbn-tip-tools-line'
+      row.textContent = line
+      tools.append(row)
+    }
+    host.append(tools)
+  } else if (tip.toolsText) {
+    // An older daemon's single string — the aggregate, or its own per-call
+    // lines. Drawn with NO head, because nothing here knows how many calls it
+    // stands for and inventing a number is the bug, not the fix.
+    const tools = document.createElement('div')
+    tools.className = 'kbn-tip-tools kbn-tip-section'
+    for (const line of tip.toolsText.split('\n')) {
       const row = document.createElement('div')
       row.className = 'kbn-tip-tools-line'
       row.textContent = line
@@ -609,6 +875,10 @@ const MAX_SOURCES = 4
 /** The tooltip holds a few lines, not a conversation. */
 const MAX_EXCERPTS = 6
 
+/** A PINNED slip is a conversation — a panel you scroll, not a glance. The
+ *  bound survives only so a pathological window cannot become the DOM. */
+const MAX_EXCERPTS_PINNED = 200
+
 /**
  * The sources a mark's words are fetched from, speakers first.
  *
@@ -655,10 +925,27 @@ function pickExcerpts(excerpts: readonly MomentExcerpt[], cap = MAX_EXCERPTS): M
   return inTime.filter((e) => kept.has(e))
 }
 
+/**
+ * What the loader recovered for one mark — the lists, AND how many there were
+ * to recover.
+ *
+ * THE TOTALS ARE NOT DECORATION. Three separate caps sit between a transcript
+ * and this object: the daemon's own (6 excerpts, 6 tool lines on a hover),
+ * {@link MAX_SOURCES} on how many transcripts a mark may ask, and
+ * {@link pickExcerpts} on the merged result. Every one of them is invisible in
+ * the lists alone. Carrying the totals is what lets the slip say "showing 6 of
+ * 34" instead of quietly presenting six as all there was.
+ */
 export interface MomentWords {
   excerpts: MomentExcerpt[]
-  /** The tool line for a wordless mark. See {@link SlotTip.tools}. */
-  tools?: string
+  /** Messages in the window before any cap — never below `excerpts.length`. */
+  excerptTotal: number
+  /** One line per tool call, oldest first, cut to this fetch's cap. */
+  toolLines: string[]
+  /** Calls in the window before that cut. */
+  toolTotal: number
+  /** The older daemon's single tool string, when it sent no lines. */
+  toolsText?: string
   /** Set when a source could not be read from here — "words live on <host>". */
   note?: string
 }
@@ -760,16 +1047,37 @@ export class MomentLoader {
         .slice(0, MAX_SOURCES)
         .map((source) => this.fetcher(source.session, fromMs, toMs, source.host, full)),
     )
-    const excerpts = pickExcerpts(results.flatMap((result) => result.excerpts))
+    const merged = results.flatMap((result) => result.excerpts)
+    const excerpts = pickExcerpts(merged, full ? MAX_EXCERPTS_PINNED : MAX_EXCERPTS)
     const note = results.find((result) => result.note)?.note
-    // Precedence, strongest answer first: what was said, else what was done,
-    // else where the words live. A note only earns the footer when there is
-    // nothing to show instead — if one host answered and another is down, the
-    // words that ARE here are the better answer.
-    if (excerpts.length > 0) return { excerpts }
-    const tools = results.find((result) => result.tools)?.tools
-    if (tools) return { excerpts, tools }
-    return { ...(note ? { note } : {}), excerpts }
+
+    // EVERYTHING TRAVELS, ALWAYS. This used to be a precedence — words, else
+    // tools, else the note — and the first branch was the bug: a minute that
+    // said anything at all dropped its tool report on the floor, client-side,
+    // after the daemon had gone to the trouble of sending both. That is why
+    // the calls sometimes appeared under a hover and sometimes did not, with
+    // nothing about the minute to explain which. The renderer draws whichever
+    // of them exist; deciding for it was never this function's business.
+    //
+    // The note is the one thing that stays conditional, because it is a
+    // statement about ABSENCE: with words in hand from one host, "words live
+    // on <other host>" is no longer the answer to anything.
+    const empty = excerpts.length === 0
+    const toolLines = results.flatMap((result) => result.toolLines ?? [])
+    const legacy = toolLines.length === 0 ? results.find((r) => r.tools)?.tools : undefined
+    return {
+      excerpts,
+      excerptTotal: Math.max(
+        excerpts.length,
+        // A result with no count is from a daemon that predates the field; its
+        // own list is the best total available for it.
+        results.reduce((sum, r) => sum + (r.excerptCount ?? r.excerpts.length), 0),
+      ),
+      toolLines,
+      toolTotal: results.reduce((sum, r) => sum + (r.toolCount ?? r.toolLines?.length ?? 0), 0),
+      ...(legacy ? { toolsText: legacy } : {}),
+      ...(empty && note ? { note } : {}),
+    }
   }
 }
 

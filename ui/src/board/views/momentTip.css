@@ -64,8 +64,17 @@
    deeper, so which of the two states you are in is legible at a glance. */
 .kbn-tip-pinned {
   pointer-events: auto;
-  max-width: 460px;
-  max-height: min(52vh, 460px);
+  /* A READING PANEL, not a tooltip that grew. The measure is the wider of the
+     two because a pinned slip carries whole turns and whole tool listings —
+     thirty-four calls under a minute of fan-out is ordinary — and a column
+     narrow enough for a glance turns each of those lines into two.
+
+     The height is the lane area's, near enough: 60vh is what a chart of rails
+     occupies on this page, so the panel is bounded by the sheet it hangs over
+     rather than by what fits in a glance. Past that it scrolls, which is the
+     whole reason it takes the pointer. */
+  max-width: 560px;
+  max-height: 60vh;
   overflow-y: auto;
   overscroll-behavior: contain;
   border-color: rgba(122, 111, 92, 0.66);
@@ -164,6 +173,95 @@
   font-family: var(--font-mono, 'IBM Plex Mono', monospace);
   font-size: calc(9px * var(--kbn-type-scale, 1));
   color: #A89B83;
+}
+
+/* THE SLIP'S SUBJECT — a fiber's name, over a mark that stands alone on blank
+   paper with no lane label beside it. Serif and full-size: it is the sentence
+   the rest of the slip is about, not apparatus. */
+.kbn-tip-title {
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-size: calc(12.5px * var(--kbn-type-scale, 1));
+  line-height: 1.25;
+  color: #2A231A;
+  margin-bottom: 2px;
+}
+
+/* THE OWED REGISTER — a slip about something SCHEDULED rather than recorded.
+   Gold, because gold is this board's pigment for an obligation, and hollow
+   gold is what the mark on the rail is already drawn in: the slip and the glyph
+   that summoned it read as one hand. Only the accents move; the parchment
+   ground stays, because it is still a slip of the same day-book. */
+.kbn-tip-owed .kbn-tip-title { color: #7C6220; }
+.kbn-tip-owed { border-color: rgba(154, 123, 53, 0.45); }
+
+/* WHAT IS KNOWN, as a small ledger: the label in the marginalia register, the
+   value in the text's. A fact with no value never reaches here — `markTip`
+   contributes no row for a field nobody filled in, because an em-dash beside a
+   label is a claim that somebody looked and found nothing. */
+.kbn-tip-facts {
+  margin-top: 3px;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 1px 7px;
+  font-size: calc(11px * var(--kbn-type-scale, 1));
+  line-height: 1.35;
+}
+.kbn-tip-fact {
+  display: contents;
+}
+.kbn-tip-factlabel {
+  font-family: var(--font-mono, 'IBM Plex Mono', monospace);
+  font-size: calc(8.5px * var(--kbn-type-scale, 1));
+  letter-spacing: 0.03em;
+  color: #A89B83;
+  white-space: nowrap;
+  /* Baseline-aligned with the serif value beside it: the label is smaller, and
+     without this the two halves of one fact sit on two different lines of an
+     invisible ruling. */
+  align-self: baseline;
+}
+.kbn-tip-factvalue {
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  color: #2A231A;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* THE ROW'S QUALIFIER — `27 min`, `no text recorded`. Prose in the marginalia
+   register, deliberately not monospaced and deliberately not right-aligned
+   like the count: it is a remark about the row it follows, not a measurement in
+   a column. It sits in italic because that is how a hand annotates its own
+   ledger — and because a reader must never mistake "no text recorded" for a
+   thing somebody said. */
+.kbn-tip-rownote {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-style: italic;
+  font-size: calc(10.5px * var(--kbn-type-scale, 1));
+  color: #A89B83;
+}
+
+/* WHAT THIS SECTION CLAIMS, above what it shows — `tool calls ×12`, or
+   `showing 6 of 34 tool calls · click to pin for all`.
+
+   The head is the whole honesty mechanism made visible. It is small and muted
+   because it is apparatus rather than content, but it is never absent when the
+   list beneath it is cut: a reader shown six of thirty-four things must be able
+   to see that, and to see what to do about it. */
+.kbn-tip-sechead {
+  margin-bottom: 3px;
+  font-family: var(--font-mono, 'IBM Plex Mono', monospace);
+  font-size: calc(8.5px * var(--kbn-type-scale, 1));
+  letter-spacing: 0.03em;
+  color: #A89B83;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Every section below the summary rows — the note, the words, the tools —

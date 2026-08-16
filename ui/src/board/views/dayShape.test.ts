@@ -1799,12 +1799,18 @@ describe('the Day card never repeats what the lane already says', () => {
     for (const row of tip.rows) expect(row.where).toBe('')
   })
 
-  it('still says which pigment and how many — dropping the name costs the row nothing else', () => {
+  it('still says which pigment — dropping the name costs the row nothing else, and an agent row carries no ×N', () => {
+    // `count: 9` was WRONG BY DESIGN: an agent bucket's `n` tallies harness
+    // hook events (a call's two ends, a session start, a filled-in minute),
+    // never a count of tool calls — `rowCount` now refuses it outright, and
+    // the true count lives only on the tools SECTION, which lists what it
+    // counts.
     const tip = beatTip(
       { minute: 10, kinds: [{ kind: 'agent', count: 9 }], sources: [] },
       WIN,
     )
-    expect(tip.rows[0]).toMatchObject({ kind: 'agent', phrase: 'tool call', count: 9 })
+    expect(tip.rows[0]).toMatchObject({ kind: 'agent', phrase: 'agent working' })
+    expect(tip.rows[0].count).toBeUndefined()
   })
 
   it("heads the magnet with WHEN, which the surface cannot show, and not with the lane's name", () => {
@@ -1820,12 +1826,17 @@ describe('the Day card never repeats what the lane already says', () => {
     for (const row of tip.rows) expect(row.where).toMatch(/^\d/)
   })
 
-  it('carries the trailing tool calls as their own row, counted and dated from the last word', () => {
+  it('carries the trailing tool calls as their own row, dated from the last word and reported in MINUTES — not the harness event tally', () => {
+    // `toolsAfter.count` is a sum of harness hook events across every minute
+    // since the last word, never a count of tool calls a list could back up —
+    // so the row may not print it as a ×N. `minutes` is the honest form: a
+    // duration, in its own unit, promising nothing it cannot show.
     const tip = magnetTip({
       turns: [{ kind: 'reply', atMs: at(2026, 8, 4, 14, 31) }],
-      toolsAfter: { atMs: at(2026, 8, 4, 15, 47), count: 63 },
+      toolsAfter: { atMs: at(2026, 8, 4, 15, 47), count: 63, minutes: 76 },
     })
-    expect(tip.rows[1]).toMatchObject({ kind: 'agent', phrase: 'tool call', count: 63 })
+    expect(tip.rows[1]).toMatchObject({ kind: 'agent', phrase: 'agent working', note: '76 min' })
+    expect(tip.rows[1].count).toBeUndefined()
     expect(tip.rows[1].where).toMatch(/^since /)
   })
 })

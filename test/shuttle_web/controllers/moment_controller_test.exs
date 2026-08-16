@@ -567,13 +567,40 @@ defmodule ShuttleWeb.MomentControllerTest do
       assert tools =~ "Bash"
     end
 
-    test "an empty window, and an unknown session, are silent in both fields" do
+    test "an empty window, and an unknown session, are silent in every field" do
       root = tool_tree()
-      assert Moment.moment(@session, @t0 + 100_000, @t0 + 200_000, root: root) ==
-               %{excerpts: [], tools: nil}
+      empty = %{excerpts: [], excerpt_count: 0, tools: nil, tool_lines: [], tool_count: 0}
 
-      assert Moment.moment("../../*", @t0, @t0 + 10_000, root: root) ==
-               %{excerpts: [], tools: nil}
+      assert Moment.moment(@session, @t0 + 100_000, @t0 + 200_000, root: root) == empty
+      assert Moment.moment("../../*", @t0, @t0 + 10_000, root: root) == empty
+    end
+
+    # THE CLAIM AND THE LIST COME FROM ONE PASS. `tool_count` is what a `×N`
+    # beside the listing is allowed to say, and `tool_lines` is what that N
+    # refers to — cut on a hover, whole on a pin, and the difference is
+    # legible from the response alone rather than inferred.
+    test "the counts say how much was cut, and a full read cuts nothing" do
+      root =
+        write_tree([
+          {"-Users-cail-felt", @session,
+           [
+             assistant(
+               @t0 + 1_000,
+               for i <- 1..9 do
+                 %{"type" => "tool_use", "name" => "Bash", "input" => %{"command" => "step #{i}"}}
+               end
+             )
+           ]}
+        ])
+
+      brief = Moment.moment(@session, @t0, @t0 + 10_000, root: root)
+      assert brief.tool_count == 9
+      assert length(brief.tool_lines) == 6
+      assert hd(brief.tool_lines) =~ "Bash"
+
+      full = Moment.moment(@session, @t0, @t0 + 10_000, root: root, full: true)
+      assert full.tool_count == 9
+      assert length(full.tool_lines) == 9
     end
 
     test "the endpoint carries the tools field whether or not there are words" do

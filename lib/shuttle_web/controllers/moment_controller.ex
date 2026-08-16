@@ -12,7 +12,16 @@ defmodule ShuttleWeb.MomentController do
   has stopped glancing and started reading. Truncation is server-side, so no
   amount of CSS recovers a sentence the ordinary fetch already cut.
 
-  A `"tools"` field carries what RAN in the window: one call per line
+  `"tool_lines"` carries what RAN in the window, one call per line
+  (`["Bash — run the tests", "Read — moment.ex"]`), and `"tool_count"` says how
+  many calls there were before that list was cut. `"excerpt_count"` does the
+  same for the words. The counts exist so a client can never claim more than it
+  shows: with them it says "showing 6 of 34" and offers the pin (`full=1`) that
+  returns all thirty-four; without them it was reduced to printing a number
+  from somewhere else entirely beside whatever fraction arrived.
+
+  A `"tools"` field carries the same calls in the older single-string form —
+  one call per line
   (`"Bash — run the tests\nRead — moment.ex"`) when there are few enough
   calls to read that way, else the one-line aggregate (`"Bash ×2 · Read"`) —
   see `Shuttle.Moment`'s moduledoc for the threshold. It rides alongside the
@@ -63,11 +72,21 @@ defmodule ShuttleWeb.MomentController do
 
   # `nil` target = read here. Anything else is a configured remote to forward to.
   defp serve(conn, session, from_ms, to_ms, nil, full?) do
-    %{excerpts: excerpts, tools: tools} =
-      Moment.moment(session, from_ms, to_ms, max_chars: Moment.max_chars(full?))
+    moment = Moment.moment(session, from_ms, to_ms, full: full?)
 
-    body = %{host: Poller.own_host_id(), excerpts: excerpts}
-    json(conn, if(tools, do: Map.put(body, :tools, tools), else: body))
+    # THE COUNTS RIDE WITH THE ITEMS, UNCONDITIONALLY. They are what lets the
+    # reader be told "showing 6 of 34" rather than shown six lines under a
+    # claim of thirty-four; a client that only sometimes learns the total is a
+    # client that sometimes has to guess, which is the failure this pair fixes.
+    body = %{
+      host: Poller.own_host_id(),
+      excerpts: moment.excerpts,
+      excerpt_count: moment.excerpt_count,
+      tool_lines: moment.tool_lines,
+      tool_count: moment.tool_count
+    }
+
+    json(conn, if(moment.tools, do: Map.put(body, :tools, moment.tools), else: body))
   end
 
   defp serve(conn, session, from_ms, to_ms, %Remote{} = remote, full?) do

@@ -13,11 +13,14 @@ import {
   lastExchange,
   placeTip,
   renderExcerptMarkdown,
+  reconcileRows,
+  rowCount,
   pickMark,
   renderTip,
   SLOT_PHRASE,
   type MomentWords,
   type SlotTip,
+  type SlotTipRow,
 } from './momentTip.js'
 
 /**
@@ -108,6 +111,24 @@ describe('parseMoment', () => {
   it('falls back whole on a body that is not a moment', () => {
     expect(parseMoment('nope', empty)).toBe(empty)
     expect(parseMoment({ host: 'ada' }, empty).excerpts).toEqual([])
+  })
+
+  it('never lets a wire total sit below the list it is a total of', () => {
+    // A daemon disagreeing with itself — an `excerpt_count` under-reporting the
+    // excerpts it actually sent, a `tool_count` of zero over three real lines —
+    // loses to the list, because the list is the thing that is actually here.
+    const result = parseMoment(
+      {
+        host: 'ada',
+        excerpts: [excerpt(), excerpt({ text: 'second' })],
+        excerpt_count: 1,
+        tool_lines: ['Bash — a', 'Bash — b', 'Bash — c'],
+        tool_count: 0,
+      },
+      empty,
+    )
+    expect(result.excerptCount).toBe(2)
+    expect(result.toolCount).toBe(3)
   })
 })
 
@@ -286,7 +307,11 @@ describe('MomentLoader', () => {
     expect(loader.peek('slot-1')).toBeUndefined()
   })
 
-  it('falls back to the tools of a wordless mark, and never over real words', async () => {
+  it('falls back to the legacy tool string of a wordless mark, and carries it ALONGSIDE real words too', async () => {
+    // "Never over real words" was the OLD rule — a precedence that dropped the
+    // tool report client-side the moment a minute had anything to say. That
+    // precedence is gone (see the loader's `load` and the module doc): a
+    // minute that spoke and also ran calls is two facts, and both travel.
     vi.useFakeTimers()
     const { loader } = loaderOver([
       { host: 'ada', excerpts: [], tools: 'Bash ×2 · Read' },
@@ -296,17 +321,48 @@ describe('MomentLoader', () => {
 
     loader.request('slot-1', [source], 0, 60_000, (words) => seen.push(words))
     await vi.advanceTimersByTimeAsync(200)
-    expect(seen[0]).toEqual({ excerpts: [], tools: 'Bash ×2 · Read' })
+    expect(seen[0]).toEqual({
+      excerpts: [],
+      excerptTotal: 0,
+      toolLines: [],
+      toolTotal: 0,
+      toolsText: 'Bash ×2 · Read',
+    })
 
-    // The second answer has words. The daemon should not have sent tools with
-    // them, but if anything ever does, the words are what the tooltip shows.
+    // The second answer has words AND a legacy tool string — both are shown.
     loader.request('slot-2', [source], 60_000, 120_000, (words) => seen.push(words))
     await vi.advanceTimersByTimeAsync(200)
-    expect(seen[1].tools).toBeUndefined()
+    expect(seen[1].toolsText).toBe('Bash')
     expect(seen[1].excerpts).toHaveLength(1)
   })
 
-  it('prefers the tools of a wordless mark to a note about a host that is down', async () => {
+  it('carries the excerpts AND the tool lines from one answer — the old code dropped the tools whenever there were words', async () => {
+    // The precedence bug this pins: a minute that said anything at all used to
+    // lose its tool report on the floor, client-side, after the daemon had
+    // gone to the trouble of sending both.
+    vi.useFakeTimers()
+    const loader = new MomentLoader(async () => ({
+      host: 'ada',
+      excerpts: [excerpt({ text: 'on it' })],
+      toolLines: ['Bash — run the tests', 'Read — momentTip.ts'],
+      toolCount: 2,
+    }), 150)
+    let words: MomentWords | undefined
+
+    loader.request('slot-1', [source], 0, 60_000, (w) => {
+      words = w
+    })
+    await vi.advanceTimersByTimeAsync(200)
+    expect(words?.excerpts.map((e) => e.text)).toEqual(['on it'])
+    expect(words?.toolLines).toEqual(['Bash — run the tests', 'Read — momentTip.ts'])
+    expect(words?.toolTotal).toBe(2)
+  })
+
+  it('carries the tools of a wordless mark ALONGSIDE a note about a host that is down — the note is about missing WORDS, not missing tools', async () => {
+    // The old precedence made tools and the note mutually exclusive. The note
+    // now stays conditional only on whether EXCERPTS came back — see the
+    // `empty` guard in `load` — so a wordless slot with tools from one host
+    // and a note about another host's absence shows both.
     vi.useFakeTimers()
     const loader = new MomentLoader(async (session) => {
       return session === 'down'
@@ -325,7 +381,14 @@ describe('MomentLoader', () => {
       },
     )
     await vi.advanceTimersByTimeAsync(200)
-    expect(words).toEqual({ excerpts: [], tools: 'Edit · Bash' })
+    expect(words).toEqual({
+      excerpts: [],
+      excerptTotal: 0,
+      toolLines: [],
+      toolTotal: 0,
+      toolsText: 'Edit · Bash',
+      note: 'words live on kelvin',
+    })
   })
 
   it('merges several sources in time order and keeps a note only when nothing was read', async () => {
@@ -336,7 +399,7 @@ describe('MomentLoader', () => {
         : { host: 'bo', excerpts: [], note: 'words live on bo' }
     }, 0)
 
-    let words: MomentWords = { excerpts: [] }
+    let words: MomentWords = { excerpts: [], excerptTotal: 0, toolLines: [], toolTotal: 0 }
     loader.request(
       'slot-1',
       [
@@ -377,7 +440,7 @@ describe('the spine and the words say the same thing', () => {
         : { host: 'ada', excerpts: [], tools: 'Bash ×12 · Read' }
     }, 0)
 
-    let words: MomentWords = { excerpts: [] }
+    let words: MomentWords = { excerpts: [], excerptTotal: 0, toolLines: [], toolTotal: 0 }
     loader.request(
       'slot-1',
       [
@@ -398,9 +461,11 @@ describe('the spine and the words say the same thing', () => {
     expect(asked).toContain('sess-spoke')
     // The cap still holds — a hover is not allowed to fan out over the lot.
     expect(asked.length).toBeLessThanOrEqual(4)
-    // And the words, not the tool line: a slip under a spine shows the sentence.
+    // And the words are there, not swallowed by the tool line: a slip under a
+    // spine shows the sentence. (The busy sessions' legacy tool string still
+    // rides along too — see "carries the tools … ALONGSIDE" above — but the
+    // spine's own promise is about the excerpt, which is what this pins.)
     expect(words.excerpts.map((e) => e.text)).toEqual(['try the other tack'])
-    expect(words.tools).toBeUndefined()
   })
 
   it('keeps the human sentence when the window holds more excerpts than the slip', async () => {
@@ -416,7 +481,7 @@ describe('the spine and the words say the same thing', () => {
         : { host: 'ada', excerpts: agentLines }
     }, 0)
 
-    let words: MomentWords = { excerpts: [] }
+    let words: MomentWords = { excerpts: [], excerptTotal: 0, toolLines: [], toolTotal: 0 }
     loader.request(
       'slot-1',
       [
@@ -454,7 +519,7 @@ describe('the spine and the words say the same thing', () => {
       ],
     }), 0)
 
-    let words: MomentWords = { excerpts: [] }
+    let words: MomentWords = { excerpts: [], excerptTotal: 0, toolLines: [], toolTotal: 0 }
     loader.request('slot-1', [{ session: 'a', host: 'ada', spoke: true }], 0, 240_000, (w) => {
       words = w
     })
@@ -490,6 +555,59 @@ describe('dedupeSources', () => {
   })
 })
 
+describe('rowCount — the ×N a row of this kind is allowed to print', () => {
+  it('refuses agent a count of any size — its n tallies harness hook events, not messages the slip can show', () => {
+    expect(rowCount('agent', 1)).toBeUndefined()
+    expect(rowCount('agent', 7)).toBeUndefined()
+    expect(rowCount('agent', 14)).toBeUndefined()
+  })
+
+  it('allows attention and reply a count, because their n tallies a message the transcript can join', () => {
+    expect(rowCount('attention', 3)).toBe(3)
+    expect(rowCount('reply', 2)).toBe(2)
+  })
+
+  it('refuses a count of one on either — "×1" would dress up an ordinary single message as measured', () => {
+    expect(rowCount('attention', 1)).toBeUndefined()
+    expect(rowCount('reply', 1)).toBeUndefined()
+  })
+})
+
+describe('reconcileRows — the honest gap between a register word and its message', () => {
+  const replyRow = (): SlotTipRow => ({ kind: 'reply', phrase: 'agent replied', where: '', shuttle: false })
+  const attentionRow = (): SlotTipRow => ({ kind: 'attention', phrase: 'you', where: '', shuttle: false })
+
+  it('adds nothing before the transcript has answered — "no text recorded" about a fetch still in flight would be a guess', () => {
+    expect(reconcileRows([replyRow()], { resolved: false })).toEqual([replyRow()])
+    expect(reconcileRows([replyRow()], {})).toEqual([replyRow()])
+  })
+
+  it('marks a reply row "no text recorded" once resolved with no assistant prose among the excerpts', () => {
+    const out = reconcileRows([replyRow()], { resolved: true, said: { items: [], total: 0 } })
+    expect(out[0].note).toBe('no text recorded')
+  })
+
+  it('leaves the row alone once its own message IS among the excerpts', () => {
+    const said = { items: [{ at_ms: 0, role: 'assistant' as const, text: 'done' }], total: 1 }
+    expect(reconcileRows([replyRow()], { resolved: true, said })[0].note).toBeUndefined()
+    const spoken = { items: [{ at_ms: 0, role: 'user' as const, text: 'go' }], total: 1 }
+    expect(reconcileRows([attentionRow()], { resolved: true, said: spoken })[0].note).toBeUndefined()
+  })
+
+  it('does not credit a delegation report to the reply row — only prose answers the `stop` event a reply row records', () => {
+    const said = {
+      items: [{ at_ms: 0, role: 'assistant' as const, text: 'go look', kind: 'spawn' as const }],
+      total: 1,
+    }
+    expect(reconcileRows([replyRow()], { resolved: true, said })[0].note).toBe('no text recorded')
+  })
+
+  it('leaves an agent row alone either way — it names no message for the gap to be honest about', () => {
+    const row: SlotTipRow = { kind: 'agent', phrase: 'agent working', where: '', shuttle: false }
+    expect(reconcileRows([row], { resolved: true, said: { items: [], total: 0 } })).toEqual([row])
+  })
+})
+
 // ── `renderTip`'s markup ────────────────────────────────────────────────────
 //
 // This suite runs in node with no DOM, as every UI suite in this package
@@ -502,6 +620,16 @@ describe('dedupeSources', () => {
 class FakeNode {
   className = ''
   textContent = ''
+  /** The register class the slip sets on its own host — `kbn-tip-owed` for an
+   *  obligation. Modelled rather than stubbed away because it is the one thing
+   *  `renderTip` writes OUTSIDE the subtree it rebuilds. */
+  readonly classes = new Set<string>()
+  readonly classList = {
+    toggle: (name: string, on: boolean): void => {
+      if (on) this.classes.add(name)
+      else this.classes.delete(name)
+    },
+  }
   /** The excerpt text is markdown now, so the card sets HTML rather than
    *  appending a text node — see `renderExcerptMarkdown`. */
   innerHTML = ''
@@ -529,8 +657,13 @@ const baseExcerpt = (over: Partial<MomentExcerpt>): MomentExcerpt => ({
 describe('renderTip — the excerpt cards', () => {
   afterEach(() => vi.unstubAllGlobals())
 
-  it('renamed the tool-call register and kept short labels for the rest', () => {
-    expect(SLOT_PHRASE).toEqual({ attention: 'you', agent: 'tool call', reply: 'agent' })
+  it('names each kind as a complete claim on its own — no noun waiting for a ×N that never joined it', () => {
+    // `agent` used to be a bare noun ('tool call') printed above a ×N that came
+    // from the activity plane's per-minute EVENT tally — a `pre_tool_use` and
+    // its `post_tool_use` count as two, so the number was never a count of
+    // calls at all. `reply` used to say only 'agent', losing the fact that a
+    // turn had FINISHED. Both now say what the mark actually witnesses.
+    expect(SLOT_PHRASE).toEqual({ attention: 'you', agent: 'agent working', reply: 'agent replied' })
   })
 
   it('puts label and timestamp on one header line, above the words — never mixed in with them', () => {
@@ -539,7 +672,7 @@ describe('renderTip — the excerpt cards', () => {
     const tip: SlotTip = {
       time: '14:32–14:36',
       rows: [],
-      detail: [baseExcerpt({})],
+      said: { items: [baseExcerpt({})], total: 1 },
     }
 
     renderTip(host as unknown as HTMLElement, tip)
@@ -581,7 +714,9 @@ describe('renderTip — the excerpt cards', () => {
 
     for (const [detail, expectedClass, expectedLabel] of cases) {
       const host = new FakeNode()
-      renderTip(host as unknown as HTMLElement, { time: '', rows: [], detail })
+      renderTip(host as unknown as HTMLElement, {
+        time: '', rows: [], said: { items: detail, total: detail.length },
+      })
       const said = host.children.find((c) => c.className.includes('kbn-tip-said'))!
       const line = said.children[0]
       const head = line.children[0]
@@ -596,7 +731,9 @@ describe('renderTip — the excerpt cards', () => {
     const detail = [
       baseExcerpt({ kind: 'spawn', name: 'chart-hand', text: 'go and look' }),
     ]
-    renderTip(host as unknown as HTMLElement, { time: '', rows: [], detail })
+    renderTip(host as unknown as HTMLElement, {
+      time: '', rows: [], said: { items: detail, total: detail.length },
+    })
 
     const said = host.children.find((c) => c.className.includes('kbn-tip-said'))!
     const head = said.children[0].children[0]
@@ -624,20 +761,70 @@ describe('renderTip — the excerpt cards', () => {
     expect(foot.textContent).toBe('words live on basalt-login-02')
   })
 
-  it('draws the tools ALONGSIDE the words, not instead of them', () => {
+  it('draws the tools ALONGSIDE the words, not instead of them — the legacy string form, with no head', () => {
     vi.stubGlobal('document', fakeDocument())
     const host = new FakeNode()
     renderTip(host as unknown as HTMLElement, {
       time: '', rows: [],
-      detail: [baseExcerpt({ role: 'assistant', text: 'on it' })],
-      tools: 'Bash — run the tests\nRead — DayView.ts',
+      said: { items: [baseExcerpt({ role: 'assistant', text: 'on it' })], total: 1 },
+      // `toolsText` is the OLDER single-string form, from a daemon that sends
+      // no `tool_lines` — drawn with no head because nothing here knows how
+      // many calls it stands for.
+      toolsText: 'Bash — run the tests\nRead — DayView.ts',
     })
     expect(host.children.find((c) => c.className.includes('kbn-tip-said'))).toBeDefined()
     const tools = host.children.find((c) => c.className.includes('kbn-tip-tools'))!
+    expect(tools.children.find((c) => c.className === 'kbn-tip-sechead')).toBeUndefined()
     expect(tools.children.map((r) => r.textContent)).toEqual([
       'Bash — run the tests',
       'Read — DayView.ts',
     ])
+  })
+
+  it('heads a complete tools section with its own ×N, and says nothing over a single call', () => {
+    vi.stubGlobal('document', fakeDocument())
+    const many = new FakeNode()
+    renderTip(many as unknown as HTMLElement, {
+      time: '', rows: [],
+      tools: { items: ['Bash — a', 'Read — b'], total: 2 },
+    })
+    const manyTools = many.children.find((c) => c.className.includes('kbn-tip-tools'))!
+    expect(manyTools.children[0].className).toBe('kbn-tip-sechead')
+    expect(manyTools.children[0].textContent).toBe('tool calls ×2')
+
+    const one = new FakeNode()
+    renderTip(one as unknown as HTMLElement, {
+      time: '', rows: [],
+      tools: { items: ['Bash — a'], total: 1 },
+    })
+    const oneTools = one.children.find((c) => c.className.includes('kbn-tip-tools'))!
+    expect(oneTools.children.find((c) => c.className === 'kbn-tip-sechead')).toBeUndefined()
+  })
+
+  it('says "showing K of N" when a section is cut, and drops the pin invitation once pinned', () => {
+    // A cut section must be honest about the gap — "showing 6 of 34" rather than
+    // letting six items sit under a claim of thirty-four — and a PINNED slip,
+    // where every section already shows everything it has, must not go on
+    // inviting a pin for more.
+    vi.stubGlobal('document', fakeDocument())
+    const unpinned = new FakeNode()
+    renderTip(unpinned as unknown as HTMLElement, {
+      time: '', rows: [],
+      tools: { items: ['a', 'b', 'c', 'd', 'e', 'f'], total: 34 },
+    })
+    const unpinnedHead = unpinned.children
+      .find((c) => c.className.includes('kbn-tip-tools'))!.children[0]
+    expect(unpinnedHead.textContent).toBe('showing 6 of 34 tool calls · click to pin for all')
+
+    const pinned = new FakeNode()
+    renderTip(pinned as unknown as HTMLElement, {
+      time: '', rows: [],
+      tools: { items: ['a', 'b', 'c', 'd', 'e', 'f'], total: 34 },
+      pinned: true,
+    })
+    const pinnedHead = pinned.children
+      .find((c) => c.className.includes('kbn-tip-tools'))!.children[0]
+    expect(pinnedHead.textContent).toBe('showing 6 of 34 tool calls')
   })
 })
 
@@ -777,12 +964,15 @@ describe('lastExchange — the order is the content', () => {
     expect(lastExchange([mark(5, { attention: 3 })]).turns.map((t) => t.kind)).toEqual(['attention'])
   })
 
-  it('counts tool calls that landed AFTER the last word, summed across every minute since', () => {
+  it('counts tool calls that landed AFTER the last word, summed across every minute since — and how many MINUTES that span, its own honest unit', () => {
     const { toolsAfter } = lastExchange([
       mark(10, { attention: 1 }), mark(11, { reply: 1 }),
       mark(12, { agent: 4 }), mark(15, { agent: 6 }),
     ])
-    expect(toolsAfter).toEqual({ atMs: 15 * M, count: 10 })
+    // count (10) is a tally of harness hook events, kept because it is what
+    // the activity plane recorded; minutes (2) is the figure a slip may
+    // actually print — two marks, each one minute, since the last word.
+    expect(toolsAfter).toEqual({ atMs: 15 * M, count: 10, minutes: 2 })
   })
 
   it('reports no trailing calls when the words were the last thing to happen', () => {
@@ -792,7 +982,7 @@ describe('lastExchange — the order is the content', () => {
   it('reports a lane that only ever worked as tool calls and no turns at all', () => {
     const out = lastExchange([mark(3, { agent: 2 }), mark(7, { agent: 5 })])
     expect(out.turns).toEqual([])
-    expect(out.toolsAfter).toEqual({ atMs: 7 * M, count: 7 })
+    expect(out.toolsAfter).toEqual({ atMs: 7 * M, count: 7, minutes: 2 })
   })
 
   it('ignores a kind recorded with a zero count rather than treating it as a turn', () => {

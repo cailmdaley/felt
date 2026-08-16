@@ -29,6 +29,7 @@
  * so the output directory is self-sufficient — nothing to copy in by hand.
  */
 import { KanbanModal } from '../src/board/KanbanModal.js'
+import { parseMoment } from '../src/board/views/index.js'
 import type {
   ActivityBucket,
   ActivityResult,
@@ -916,8 +917,123 @@ const MOCK_ORIGINS: TemporalOrigins = {
   },
 }
 
+/**
+ * `GET /api/v1/moment` — the words and the calls behind a mark.
+ *
+ * The harness had none of this until the slip started COUNTING what it shows.
+ * Without a moment fetcher every hover fell through to an empty result, so the
+ * offline board could exercise the rows and nothing below them — which is
+ * exactly the half of the slip where the claim and the list have to agree.
+ *
+ * Seeded off the window's first minute, so the same mark answers identically
+ * on every load. Three shapes, deliberately, because they are the three the
+ * contract has to survive:
+ *
+ *   A FAN-OUT — thirty-odd calls in one minute, far past the six a hover may
+ *   list. This is the case the whole redesign exists for: the slip must say
+ *   "showing 6 of 34" and the pin must then produce all thirty-four.
+ *
+ *   A MINUTE THAT SPOKE AND ALSO WORKED — prose and calls together, which the
+ *   client used to render as prose alone, having dropped the calls on the floor
+ *   after the daemon sent both.
+ *
+ *   A MINUTE THAT RECORDED A REPLY AND HAS NO WORDS FOR IT — the `reply` bucket
+ *   without an assistant excerpt, which is what "agent" over silence looked
+ *   like. It must now read `agent replied · no text recorded`.
+ */
+const MOCK_TOOLS = ['Bash', 'Read', 'Edit', 'Grep', 'Write', 'Glob', 'Agent']
+const MOCK_HINTS = [
+  'run the activity tests',
+  'git status --short',
+  'DayView.ts',
+  'momentTip.ts',
+  'kbn-tip-sechead',
+  'moment.ex',
+  'railScrub.ts',
+]
+
+/**
+ * ONE ANSWER PER MARK, CUT TWO WAYS.
+ *
+ * The `full` flag may only decide how much of a window is RETURNED, never what
+ * happened in it. An earlier draft of this mock generated its excerpts inside
+ * the `full` branch, so a hover claiming "1 of 6 messages" was answered by a
+ * pin with a single one — a disagreement invented by the harness, in exactly
+ * the register the redesign exists to eliminate, and indistinguishable from a
+ * real one on screen. Everything a mark says is therefore built once, off the
+ * mark alone, and the two fetches differ only in where they slice it.
+ */
+function mockWindow(session: string, fromMs: number) {
+  const minute = Math.floor(fromMs / BUCKET_MS)
+  const rng = seeded(minute ^ seedFromString(session))
+  const roll = rng()
+
+  // The call count. One mark in six is a fan-out — the case the pinned panel
+  // exists for; the rest are ordinary handfuls, and one in five did no tool
+  // work at all.
+  const toolCount =
+    roll < 0.17 ? 18 + Math.floor(rng() * 40) : roll < 0.8 ? 1 + Math.floor(rng() * 6) : 0
+  const lines: string[] = []
+  for (let i = 0; i < toolCount; i += 1) {
+    const tool = MOCK_TOOLS[Math.floor(rng() * MOCK_TOOLS.length)]
+    // A call with no description is ordinary and must stay drawable: a bare
+    // tool name is a real line, not a broken one.
+    lines.push(rng() < 0.72 ? `${tool} — ${MOCK_HINTS[Math.floor(rng() * MOCK_HINTS.length)]}` : tool)
+  }
+
+  const excerpts: Array<{ at_ms: number; role: string; text: string; kind: string }> = []
+  const spoke = rng()
+  if (spoke < 0.45) {
+    excerpts.push({
+      at_ms: fromMs + 4_000,
+      role: 'user',
+      text: 'take another pass at the **b-mode** null suite — the jackknife is still wide',
+      kind: 'prose',
+    })
+  }
+  // Deliberately independent of the `reply` bucket: a recorded turn whose words
+  // were not recovered is an ordinary state, and the slip has to say so —
+  // `agent replied · no text recorded` — rather than showing a bare label.
+  if (spoke > 0.3) {
+    const count = 1 + Math.floor(rng() * 11)
+    for (let i = 0; i < count; i += 1) {
+      excerpts.push({
+        at_ms: fromMs + 9_000 + i * 900,
+        role: 'assistant',
+        text:
+          `Rebuilt the null suite and re-ran it. The jackknife width is down to ` +
+          `\`1.4σ\`, which is inside the band we agreed. Details in the report; ` +
+          `the remaining scatter is the ${MOCK_HINTS[i % MOCK_HINTS.length]} pass.`,
+        kind: 'prose',
+      })
+    }
+  }
+  return { excerpts, lines, toolCount }
+}
+
+function mockMoment(session: string, fromMs: number, host?: string | null, full?: boolean) {
+  // A remote that cannot be read from here says WHERE the words are. The mock
+  // feed's foreign host is stale by construction, so this path is reachable
+  // offline — it is the one answer a slip must never mistake for "none".
+  if (host === FOREIGN_HOST) {
+    return { host: FOREIGN_HOST, excerpts: [], note: `words live on ${FOREIGN_HOST}` }
+  }
+  const { excerpts, lines, toolCount } = mockWindow(session, fromMs)
+  return {
+    host: LOCAL_HOST,
+    // The daemon cuts server-side; a hover gets a handful, a pin gets the lot.
+    // The COUNTS are of the window, never of the cut.
+    excerpts: excerpts.slice(0, full ? 200 : 6),
+    excerpt_count: excerpts.length,
+    tool_lines: lines.slice(0, full ? 400 : 6),
+    tool_count: toolCount,
+  }
+}
+
 const MOCK_TEMPORAL: TemporalFetchers = {
   activity: (fromMs, toMs) => Promise.resolve(mockActivity(fromMs, toMs)),
+  moment: (session, fromMs, _toMs, host, full) =>
+    Promise.resolve(parseMoment(mockMoment(session, fromMs, host, full), { host: LOCAL_HOST, excerpts: [] })),
   // Oldest first, and filtered by the bound, exactly as the daemon serves it.
   sessions: (sinceMs) =>
     Promise.resolve({
