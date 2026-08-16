@@ -89,6 +89,14 @@ defmodule Shuttle.Moment do
   a separate field and not a synthetic excerpt: nobody said this, and the UI
   must be able to draw it in a register that is visibly not speech.
 
+  `:tools` is now the LEGACY of that pair. Beside it travel `:tool_lines` (the
+  per-call form, always, capped rather than replaced) and `:tool_count` (how
+  many calls there actually were). The aggregate exists because a hover cannot
+  hold forty lines; the count exists because a client that is shown six of
+  forty must be able to SAY six of forty, and then offer the rest. Same for the
+  words: `:excerpt_count` is the number in the window, `:excerpts` the ones
+  that fit.
+
   IT TRAVELS ALONGSIDE THE WORDS, always. It was once withheld whenever a
   window held prose, on the reasoning that the words are the better answer and
   a client should never have to choose between them. But a minute that spoke
@@ -124,6 +132,17 @@ defmodule Shuttle.Moment do
   @cap 6
   @max_chars 280
 
+  # What a PINNED read is allowed to return. A hover is a glance and gets the
+  # handful above; a pin is somebody reading, and the panel it opens is
+  # scrollable — so the bound here exists only to keep a pathological minute
+  # (a fan-out reporting two hundred times) from becoming the response.
+  #
+  # THE TWO CAPS ARE THE WHOLE REASON THE COUNTS TRAVEL. A cut the client
+  # cannot see is a client that says "×14" over six lines; a cut it can see is
+  # a client that says "showing 6 of 14" and offers the pin that shows all
+  # fourteen. See `moment/4`'s `:excerpt_count` and `:tool_count`.
+  @full_cap 200
+
   # What an excerpt is cut to when the caller asks for the FULL text — a pinned
   # tooltip, which the reader is no longer glancing at but reading. Still a
   # bound and not "no bound at all": the caller is a browser tooltip and a
@@ -140,6 +159,13 @@ defmodule Shuttle.Moment do
   # Above this many calls, the per-call listing gives way to the aggregate —
   # a hover has room for a handful of lines, not a transcript.
   @tool_calls_cap 6
+
+  # How many per-call lines `:tool_lines` carries. The hover gets a PREVIEW of
+  # the same length the aggregate used to replace, and the pin gets the lot:
+  # thirty-four calls in a minute is an ordinary fan-out and every one of them
+  # must be reachable, because the count beside them says how many there are.
+  @tool_lines_cap 6
+  @full_tool_lines_cap 400
 
   # Tools whose input carries a human-written one-liner — or, failing that, an
   # argument that reads as one anywhere it appears (Bash's command). Everything
@@ -254,33 +280,62 @@ defmodule Shuttle.Moment do
   end
 
   @doc """
-  Everything the transcript can say about the window: the words AND a report of
-  the tools that ran. `:tools` is one call per line (`"Bash — run the tests"`)
-  when there are few enough to read that way, else the one-line aggregate
-  (`"Bash ×2 · Read"`) — see the moduledoc.
+  Everything the transcript can say about the window: the words, the tools that
+  ran, and — the part that keeps a client honest — HOW MANY OF EACH THERE WERE.
 
-  Both travel together. `:tools` was once withheld whenever there were words;
-  it is not, because a minute that spoke and also ran forty calls is two facts
-  and a reader wants both.
+  Five keys:
 
-  Same guarantees as `excerpts/4`: never raises, absence is `%{excerpts: [],
-  tools: nil}`.
+    * `:excerpts` — up to `:cap` messages, oldest first, each cut to
+      `:max_chars`.
+    * `:excerpt_count` — how many were in the window before that cut.
+    * `:tool_lines` — one line per call (`"Bash — run the tests"`), oldest
+      first, up to the line cap.
+    * `:tool_count` — how many calls were in the window before that cap.
+    * `:tools` — the legacy single string, per-call lines joined by `"\\n"` when
+      there were few enough, else the aggregate (`"Bash ×2 · Read"`). Kept for
+      clients written before the counts existed; the two new keys say the same
+      thing without making the reader infer a cut from a truncation.
+
+  A COUNT WITHOUT ITS ITEMS IS THE BUG THIS SHAPE EXISTS TO PREVENT. The board's
+  slip used to print the activity plane's own per-minute event tally beside
+  whatever fraction of the transcript survived these caps, and the two numbers
+  had no reason to agree — "tool calls ×14" over six lines, or over none.
+  Counting and listing here, from one pass over one file, makes them the same
+  fact reported twice.
+
+  `full: true` opens both caps to their pinned bounds (#{@full_cap} excerpts,
+  #{@full_tool_lines_cap} tool lines) and relaxes `:max_chars` — the read a
+  pinned, scrollable panel makes. Explicit `:cap`, `:max_chars` and
+  `:tool_lines_cap` still win, for tests.
+
+  Same guarantees as `excerpts/4`: never raises, absence is the empty shape.
   """
   @spec moment(String.t(), integer(), integer(), keyword()) ::
-          %{excerpts: [excerpt()], tools: String.t() | nil}
+          %{
+            excerpts: [excerpt()],
+            excerpt_count: non_neg_integer(),
+            tools: String.t() | nil,
+            tool_lines: [String.t()],
+            tool_count: non_neg_integer()
+          }
   def moment(session, from_ms, to_ms, opts \\ [])
 
   def moment(session, from_ms, to_ms, opts)
       when is_binary(session) and is_integer(from_ms) and is_integer(to_ms) do
-    cap = Keyword.get(opts, :cap, @cap)
-    max_chars = Keyword.get(opts, :max_chars, @max_chars)
+    full? = Keyword.get(opts, :full, false)
+    cap = Keyword.get(opts, :cap, if(full?, do: @full_cap, else: @cap))
+    max_chars = Keyword.get(opts, :max_chars, max_chars(full?))
+
+    lines_cap =
+      Keyword.get(opts, :tool_lines_cap, if(full?, do: @full_tool_lines_cap, else: @tool_lines_cap))
 
     case transcript_path(session, opts) do
       nil ->
-        %{excerpts: [], tools: nil}
+        empty_moment()
 
       path ->
         {excerpts, tools} = stream_window(path, from_ms, to_ms, max_chars)
+        calls = Enum.reverse(tools)
 
         # BOTH, ALWAYS. `tools` used to be withheld whenever there were words,
         # on the reasoning that the words are the better answer and a client
@@ -291,12 +346,31 @@ defmodule Shuttle.Moment do
         # already collected either way, so this costs nothing but the field.
         %{
           excerpts: excerpts |> Enum.sort_by(& &1.at_ms) |> Enum.take(cap),
-          tools: tools_line(Enum.reverse(tools))
+          excerpt_count: length(excerpts),
+          tools: tools_line(calls),
+          tool_lines: call_preview(calls, lines_cap),
+          tool_count: length(calls)
         }
     end
   end
 
-  def moment(_session, _from_ms, _to_ms, _opts), do: %{excerpts: [], tools: nil}
+  def moment(_session, _from_ms, _to_ms, _opts), do: empty_moment()
+
+  defp empty_moment do
+    %{excerpts: [], excerpt_count: 0, tools: nil, tool_lines: [], tool_count: 0}
+  end
+
+  # The per-call listing, always in the per-call form and always capped rather
+  # than replaced. `call_lines/1` refuses past `@tool_calls_cap` because the
+  # LEGACY field has to choose between two forms; this one does not — the count
+  # travels beside it, so a cut list is a preview and says so.
+  defp call_preview(calls, cap) do
+    calls
+    |> Enum.take(cap)
+    |> Enum.map(fn {name, _footer_hint, line_hint} ->
+      if line_hint, do: name <> " — " <> line_hint, else: name
+    end)
+  end
 
   @doc """
   The tool line for a window's `tool_use` calls, oldest first, or `nil` for
