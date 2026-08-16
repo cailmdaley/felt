@@ -405,6 +405,62 @@ button.kbn-day-lanename:focus-visible {
   opacity: 0.62;
 }
 
+/* STILL FLYING — a workflow whose extent was MEASURED (off its fleet's own
+   transcripts) and whose fleet moved a moment ago. Not the dash above: that one
+   fades because its length is unknown, and this one's length is known to the
+   minute. So it is drawn at full length, at full weight, and only the last few
+   pixels give way — the mark for "this far, and continuing", which is a
+   different sentence from "one started here". */
+.kbn-day-aloft-flying::before {
+  background: linear-gradient(
+    90deg,
+    #3D5BA0 0%,
+    #3D5BA0 calc(100% - 7px),
+    rgba(61, 91, 160, 0.12) 100%
+  );
+}
+
+/* THE FLEET'S SIZE, on the rung that stands for it. A workflow draws as one
+   rung however many agents flew under it, and the ladder's channel for quantity
+   — height — is already spent saying how many things were aloft AT ONCE. So the
+   number is written, and it is the only text this rail carries.
+
+   Deliberately smaller and quieter than anything else on the sheet: the same
+   cobalt as the rung, at a weight that reads as part of the line rather than as
+   a label stuck onto it. No box, no fill, no pill — the board's restraint is
+   that a number is a number. It sits just past the rung's right end and hangs a
+   pixel below the rule, so the digits sit ON the line's baseline the way the
+   rung's own ink does.
+
+   The view writes it only where it will land on paper (see `ladderCountRoom`);
+   everywhere else the rung's title and the hover carry the same number, because
+   digits laid over two hairlines are worse than digits you have to ask for. */
+.kbn-day-aloft-count {
+  position: absolute;
+  left: 100%;
+  bottom: -2px;
+  margin-left: 3px;
+  font-size: calc(8px * var(--kbn-type-scale, 1));
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  color: #3D5BA0;
+  opacity: 0.92;
+  white-space: nowrap;
+  pointer-events: none;
+  /* A HALO OF PAPER, because the count lands where the work was. The clearance
+     test keeps the digits off neighbouring RUNGS, but the curve is drawn on the
+     same rail and a workflow's right-hand end is, by construction, a place
+     something was happening — so the number often sits inside a mound's fill.
+     Two pixels of the sheet's own cream around each glyph is what lets it read
+     over the wash without a box or a plate under it. */
+  text-shadow:
+    0 0 2px #FBF6E9,
+    0 0 2px #FBF6E9,
+    0 0 3px #FBF6E9;
+}
+.kbn-day-aloft:hover .kbn-day-aloft-count { opacity: 1; }
+
 /* THE MAGNET'S MARK. Out in the blank paper right of a lane's last activity,
    the rail catches the pointer and reports that last moment (see `pickMark`).
    This is the mark saying which moment that is — without it the slip appears

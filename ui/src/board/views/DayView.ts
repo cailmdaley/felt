@@ -83,10 +83,12 @@ import {
 } from './TemporalData.js'
 import {
   buildCurveSvg,
+  aloftPhrase,
   curveField,
   curveGrid,
   daySigma,
   fieldPeak,
+  ladderCountRoom,
   ladderHeight,
   ladderPitch,
   ladderRows,
@@ -813,7 +815,13 @@ export function buildDayLanes(
       end_ms: span.end_ms,
       open: span.open,
       kind: 'agent',
-      ...(span.tool ? { label: span.tool } : {}),
+      // The label is the delegation's OWN name and nothing else — a workflow
+      // has one, an Agent does not. The tool travels beside it rather than
+      // standing in for it, so the words can say "workflow felt-cleanup-audit"
+      // and "Agent" out of the same two fields.
+      ...(span.label ? { label: span.label } : {}),
+      ...(span.tool ? { tool: span.tool } : {}),
+      ...(span.agents ? { agents: span.agents } : {}),
     })
   }
 
@@ -1446,6 +1454,12 @@ function buildGestureKey(): HTMLElement {
  *  enough that the marks are hoverable rather than a game of aim. */
 const BEAT_SNAP_PX = 9
 
+/** The width a `×122` claims to the right of the rung it belongs to — four
+ *  digits of 6px type plus the gap that keeps it off the rung's own end. The
+ *  clearance test is in fractions of the frame, so this is the numerator the
+ *  render converts once per page. */
+const COUNT_LABEL_PX = 26
+
 /** Where a lane's click lands: the worker's terminal, or the fiber itself. */
 export type LaneOpenTarget =
   | { kind: 'worker'; tmux: string; host?: string }
@@ -2036,10 +2050,7 @@ class DayViewImpl implements TemporalView {
       rows: [
         {
           kind: 'agent',
-          phrase:
-            line.kind === 'session'
-              ? 'session up'
-              : `${line.label ?? 'agent'} aloft${line.open ? ', never returned' : ''}`,
+          phrase: aloftPhrase(line),
           where: '',
           count: minutes,
           shuttle: false,
@@ -2180,6 +2191,11 @@ class DayViewImpl implements TemporalView {
     const ladders = new Map<string, LadderLine[]>()
     for (const lane of model.lanes) ladders.set(lane.key, ladderRows(lane.ladder, win))
     const pitch = ladderPitch(ladderHeight([...ladders.values()]))
+    // The room a `×122` needs, in the fractions the layout speaks. Measured off
+    // the chart when it has been laid out and guessed at a plausible width when
+    // it has not — the guess only ever decides whether ONE label is drawn on a
+    // first paint, and the rung's title says the same thing either way.
+    const countRoom = COUNT_LABEL_PX / Math.max(320, this.chartEl?.clientWidth || 900)
 
     model.lanes.forEach((lane, index) => {
       const row = String(index + 1)
@@ -2263,22 +2279,50 @@ class DayViewImpl implements TemporalView {
       // right-hand ends, and that is the fleet, drawn. An interval whose close
       // was never recorded is drawn faded: its length is a stub saying one
       // started, not a claim about how long it ran.
-      for (const line of ladders.get(lane.key) ?? []) {
-        const hair = document.createElement('i')
-        hair.className =
-          `kbn-day-aloft kbn-day-aloft-${line.kind}${line.open ? ' kbn-day-aloft-open' : ''}`
-        hair.style.left = pct(line.start)
+      const ladder = ladders.get(lane.key) ?? []
+      for (const line of ladder) {
         // AN OPEN SPAN IS NOT GIVEN A WIDTH HERE. Its end is a stub the daemon
         // chose, not a return anybody recorded, so the view declines to draw a
         // length at all and the sheet gives it a fixed fading dash instead —
         // see `.kbn-day-aloft-open`. Drawing the stub would be inventing the
         // one fact the mark exists to say is missing.
-        if (!line.open) hair.style.width = pct(Math.max(0, line.end - line.start))
+        //
+        // A MEASURED SPAN IS NOT A STUB, HOWEVER IT ENDS. A workflow's extent
+        // is read off its fleet's own transcripts, so `open` on one of those
+        // means "and it is still going" rather than "and nobody knows" — the
+        // length is a measurement either way, and it is drawn. That is the
+        // whole repair: an hour of fan-out used to draw as a 14px dash.
+        const stub = line.open && !line.agents
+        const flying = line.open && !stub
+        const hair = document.createElement('i')
+        hair.className =
+          `kbn-day-aloft kbn-day-aloft-${line.kind}` +
+          `${stub ? ' kbn-day-aloft-open' : ''}${flying ? ' kbn-day-aloft-flying' : ''}`
+        hair.style.left = pct(line.start)
+        if (!stub) hair.style.width = pct(Math.max(0, line.end - line.start))
         // Row 0 sits ON the lane's baseline — the floor of the filled region,
         // the same ground the curve stands on. It used to be lifted a pixel
         // clear of the rail's ground rule; that pixel made the session read as
         // the first rung of the ladder rather than as the ground under it.
         hair.style.bottom = `${line.row * pitch}px`
+        // A FLEET, WRITTEN ON ITS OWN RUNG. One rung stands for 122 agents as
+        // readily as for one, and the ladder's other channel for quantity —
+        // height — is spent on concurrency. So a workflow says its size in
+        // words, `×122` at the rung's right-hand end, in the ladder's own ink.
+        //
+        // The title carries the count unconditionally; the text only where
+        // there is paper to write it on. See `ladderCountRoom` — at a three
+        // pixel pitch, type written over a busy stretch of ladder is two
+        // hairlines through the digits and nobody can read either.
+        if (line.agents) {
+          hair.title = aloftPhrase(line)
+          if (ladderCountRoom(ladder, line, countRoom)) {
+            const count = document.createElement('b')
+            count.className = 'kbn-day-aloft-count'
+            count.textContent = `×${line.agents}`
+            hair.append(count)
+          }
+        }
         hair.addEventListener('mousemove', (e) => {
           e.stopPropagation()
           this.showAloftTip(lane, line, e)

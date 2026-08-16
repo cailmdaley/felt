@@ -591,6 +591,80 @@ function hourShape(hour: number): { spans: number; minLen: number; maxLen: numbe
  * the machine has not done yet, and a rail that fills past the current minute
  * reads as a rendering bug.
  */
+/**
+ * The window's DELEGATIONS — the `spawns` list the ladder draws as rungs.
+ *
+ * Fixed, not generated: the buckets are a texture and want a generator, but a
+ * delegation is a specific claim about a specific fan-out, and the cases worth
+ * having on screen are the ones the layout has to survive rather than a
+ * plausible average. Four of them, each here for a reason:
+ *
+ *   A WORKFLOW AT SCALE — 117 agents over the better part of an hour, which is
+ *   the case this channel was rebuilt for. Its rung used to draw as a
+ *   fourteen-pixel dash, because a workflow's tool call returns seconds after
+ *   it fans out and the events knew nothing else about it.
+ *
+ *   A SECOND, SMALLER WORKFLOW on another lane, so two counts are on the sheet
+ *   at once and can be read against each other down the column.
+ *
+ *   A PLAIN AGENT overlapping the big one, because a rung with no count beside
+ *   a rung with one is the comparison that says what the count MEANS — and
+ *   because the overlap forces a second row, which is what puts a neighbour
+ *   over the label and exercises the clearance test that suppresses it.
+ *
+ *   ONE STILL FLYING, ending at now: a measured extent that has not finished,
+ *   which is a different mark from a delegation nobody saw return.
+ */
+function mockSpawns(fromMs: number, toMs: number): ActivityResult['spawns'] {
+  const endMs = Math.min(toMs, now)
+  const ago = (minutes: number) => endMs - minutes * BUCKET_MS
+  const refine = { s: sessionFor('loom/email/morning-post/refine', ULID.refine), cwd: '/home/ada/loom' }
+  const triage = { s: sessionFor('work/euclid/euclid-github/triage', ULID.triage), cwd: '/home/ada/work/euclid' }
+
+  return [
+    {
+      ...refine,
+      tool: 'Workflow',
+      label: 'felt-cleanup-audit',
+      agents: 117,
+      start_ms: ago(300),
+      end_ms: ago(244),
+      open: false,
+      host: LOCAL_HOST,
+    },
+    {
+      ...refine,
+      tool: 'Agent',
+      label: null,
+      agents: null,
+      start_ms: ago(288),
+      end_ms: ago(261),
+      open: false,
+      host: LOCAL_HOST,
+    },
+    {
+      ...triage,
+      tool: 'Workflow',
+      label: 'board-day-ladder',
+      agents: 9,
+      start_ms: ago(170),
+      end_ms: ago(148),
+      open: false,
+      host: LOCAL_HOST,
+    },
+    {
+      ...refine,
+      tool: 'Workflow',
+      label: 'wide-sweep',
+      agents: 34,
+      start_ms: ago(41),
+      end_ms: endMs,
+      open: true,
+      host: LOCAL_HOST,
+    },
+  ].filter((span) => span.start_ms <= toMs && span.end_ms >= fromMs)
+}
+
 function mockActivity(fromMs: number, toMs: number): ActivityResult {
   // Keyed exactly as the daemon keys them — {minute, session, cwd, kind} — so
   // two spans by the same actor overlapping one minute MERGE into a single
@@ -654,6 +728,7 @@ function mockActivity(fromMs: number, toMs: number): ActivityResult {
     from_ms: fromMs,
     to_ms: toMs,
     buckets,
+    spawns: mockSpawns(fromMs, toMs),
     // The remote's cache covers the trailing day only, and it has not answered
     // in an hour. Both are ordinary states, not errors: its lanes keep their
     // last-good ink in the stale register, and thin out before the window it

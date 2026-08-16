@@ -79,6 +79,14 @@ interface SpawnSpan {
   end_ms: number
   open: boolean
   host?: string | null
+  /** What the delegation called itself — today only a workflow, out of its own
+   *  launch script. Null for an Agent or a Task, which nobody names. */
+  label?: string | null
+  /** How many agents a workflow spawned, counted off its own directory on the
+   *  host that ran it. Null when that directory could not be read — a remote
+   *  host, another harness, a cleaned disk — which is a fact about the LOOKUP
+   *  and never a claim that the workflow was empty. */
+  agents?: number | null
 }
 
 export interface ActivityResult {
@@ -660,6 +668,14 @@ function parseSpawns(value: unknown, host: string): SpawnSpan[] {
       start_ms: startMs,
       end_ms: endMs,
       open: entry.open === true,
+      label: text(entry.label),
+      // A count that is not a positive whole number is not a fleet size. It is
+      // dropped rather than rounded: "unknown" is a state this field already
+      // has, and it is the honest one for a value nobody can read.
+      agents:
+        typeof entry.agents === 'number' && Number.isInteger(entry.agents) && entry.agents > 0
+          ? entry.agents
+          : null,
       // Same rule the buckets follow: the composite stamps each item, the
       // single-host route stamps only the response.
       host: text(entry.host) ?? (host || null),

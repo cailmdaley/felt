@@ -17,6 +17,7 @@ import {
   WEEK_SPINE_MIN_HEIGHT,
   WEEK_KERNELS_PER_AXIS,
   WEEK_SIGMA_FLOOR_MINUTES,
+  aloftPhrase,
   curveField,
   curveGrid,
   curveRuns,
@@ -24,6 +25,7 @@ import {
   edgePath,
   fieldPeak,
   kernelSigma,
+  ladderCountRoom,
   ladderHeight,
   ladderPitch,
   ladderRows,
@@ -33,6 +35,7 @@ import {
   weekSigma,
   type ActivitySample,
   type LadderInterval,
+  type LadderLine,
 } from './densityCurve.js'
 
 describe('kernelSigma / daySigma / weekSigma — the kernel is a fraction of the axis', () => {
@@ -629,6 +632,34 @@ describe('ladderRows — sessions are the floor, agents are the rungs above it',
     expect(line.label).toBeUndefined()
   })
 
+  it("carries a workflow's tool and fleet size through, and draws it at its measured extent", () => {
+    const [line] = ladderRows(
+      [
+        {
+          start_ms: 10_000,
+          end_ms: 66_000,
+          open: false,
+          kind: 'agent',
+          label: 'felt-cleanup-audit',
+          tool: 'Workflow',
+          agents: 122,
+        },
+      ],
+      frame,
+    )
+    expect(line.tool).toBe('Workflow')
+    expect(line.agents).toBe(122)
+    // The extent is the interval it was handed — enrichment happens upstream,
+    // and the layout's job is to not lose it.
+    expect([line.start, line.end]).toEqual([0.1, 0.66])
+  })
+
+  it('omits the fleet size when nobody counted one', () => {
+    const [line] = ladderRows([agent(0, 5_000, false, 'Agent')], frame)
+    expect(line.agents).toBeUndefined()
+    expect(line.tool).toBeUndefined()
+  })
+
   it('is empty for no spans', () => {
     expect(ladderRows([], frame)).toEqual([])
   })
@@ -655,5 +686,91 @@ describe('ladderHeight and ladderPitch', () => {
     expect(ladderPitch(20)).toBeLessThan(3)
     expect(ladderPitch(20)).toBeGreaterThanOrEqual(1)
     expect(ladderPitch(200)).toBe(1) // clamped to the floor
+  })
+})
+
+describe('aloftPhrase — a rung, said in words', () => {
+  const line = (over: Partial<LadderLine> = {}): LadderLine => ({
+    start: 0,
+    end: 1,
+    row: 1,
+    kind: 'agent',
+    open: false,
+    startMs: 0,
+    endMs: 60_000,
+    ...over,
+  })
+
+  it('says what a session line is without dressing it up', () => {
+    expect(aloftPhrase(line({ kind: 'session', label: 'morning-post-01K-shuttle' }))).toBe(
+      'session up',
+    )
+  })
+
+  it('names a plain delegation by its tool, as it always has', () => {
+    expect(aloftPhrase(line({ tool: 'Agent' }))).toBe('Agent aloft')
+    expect(aloftPhrase(line({ tool: 'Agent', open: true }))).toBe('Agent aloft, never returned')
+  })
+
+  it('gives a workflow its own name and its fleet size', () => {
+    expect(aloftPhrase(line({ tool: 'Workflow', label: 'felt-cleanup-audit', agents: 122 }))).toBe(
+      'workflow felt-cleanup-audit · 122 agents aloft',
+    )
+  })
+
+  it('counts one agent in the singular, and an unnamed workflow is still a workflow', () => {
+    expect(aloftPhrase(line({ tool: 'Workflow', agents: 1 }))).toBe('workflow · 1 agent aloft')
+  })
+
+  it('reads an open workflow as flying rather than as lost, because its length was measured', () => {
+    // The two meanings of `open`. Without a fleet count the length is a stub
+    // and the honest reading is that nobody saw it come back; with one, the
+    // extent came off the fleet's transcripts and open means it moved a moment
+    // ago.
+    expect(aloftPhrase(line({ tool: 'Workflow', label: 'wide-sweep', agents: 40, open: true }))).toBe(
+      'workflow wide-sweep · 40 agents aloft, still flying',
+    )
+    expect(aloftPhrase(line({ tool: 'Workflow', label: 'wide-sweep', open: true }))).toBe(
+      'workflow wide-sweep aloft, never returned',
+    )
+  })
+})
+
+describe('ladderCountRoom — where a count may be written', () => {
+  const at = (row: number, start: number, end: number): LadderLine => ({
+    start,
+    end,
+    row,
+    kind: 'agent',
+    open: false,
+    startMs: start,
+    endMs: end,
+  })
+
+  it('writes on clear paper', () => {
+    const rung = at(1, 0.1, 0.4)
+    expect(ladderCountRoom([rung], rung, 0.03)).toBe(true)
+  })
+
+  it('holds off when a rung overhead would run through the digits', () => {
+    const rung = at(1, 0.1, 0.4)
+    const overhead = at(2, 0.35, 0.6)
+    expect(ladderCountRoom([rung, overhead], rung, 0.03)).toBe(false)
+  })
+
+  it('holds off when its own row continues just past its end', () => {
+    const rung = at(1, 0.1, 0.4)
+    const next = at(1, 0.41, 0.6)
+    expect(ladderCountRoom([rung, next], rung, 0.03)).toBe(false)
+  })
+
+  it('ignores a rung far enough overhead that the type never reaches it', () => {
+    const rung = at(1, 0.1, 0.4)
+    expect(ladderCountRoom([rung, at(9, 0.35, 0.6)], rung, 0.03)).toBe(true)
+  })
+
+  it('ignores what sits below, and what ended before it did', () => {
+    const rung = at(3, 0.1, 0.4)
+    expect(ladderCountRoom([rung, at(0, 0.35, 0.6), at(4, 0.0, 0.2)], rung, 0.03)).toBe(true)
   })
 })

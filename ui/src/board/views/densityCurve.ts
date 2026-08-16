@@ -728,6 +728,13 @@ export interface LadderInterval {
   /** For the hover — the agent's name, the session's id. Never drawn as text
    *  on the rail; the rail is hairlines and the words are in the tip. */
   label?: string
+  /** Which delegation tool opened it, when one did. A rung is not just a rung:
+   *  a `Workflow` is a fleet and an `Agent` is one worker, and the words have
+   *  to be able to tell a reader which they are looking at. */
+  tool?: string
+  /** How many agents flew under this one rung. Only a workflow has one, and
+   *  only when its own directory could be read — see the wire type. */
+  agents?: number
 }
 
 /** One ladder line ready to draw: horizontal extent as fractions of the frame,
@@ -742,6 +749,8 @@ export interface LadderLine {
   /** Its close was never recorded — the length is a stub, not a duration. */
   open: boolean
   label?: string
+  tool?: string
+  agents?: number
   /** The real instants, kept for the tooltip: a fraction of a frame is what the
    *  ink needs and a clock time is what a person needs. */
   startMs: number
@@ -789,6 +798,8 @@ export function ladderRows(
         kind: s.kind,
         open: s.open,
         ...(s.label ? { label: s.label } : {}),
+        ...(s.tool ? { tool: s.tool } : {}),
+        ...(s.agents ? { agents: s.agents } : {}),
         startMs: s.start_ms,
         endMs: s.end_ms,
       })
@@ -835,4 +846,68 @@ const LADDER_BAND_PX = 14
 export function ladderPitch(height: number): number {
   if (height <= 1) return 0
   return Math.max(1, Math.min(3, LADDER_BAND_PX / (height - 1)))
+}
+
+/**
+ * One ladder line, said in words.
+ *
+ * A rung used to be able to say only what tool opened it, because that was all
+ * the stream knew. A WORKFLOW knows more about itself: the name its author gave
+ * it, and how many agents flew under the single rung it is drawn as. Both belong
+ * in the reading, because a rung standing for 122 agents and a rung standing for
+ * one are the same ink and mean wildly different things.
+ *
+ * `open` reads two ways, and the fleet count is what tells them apart. Without
+ * one, an open interval is a delegation whose close nobody recorded — the
+ * length is a stub and the honest words are that it never came back. With one,
+ * the extent was measured off the fleet's own transcripts and `open` means it
+ * moved a moment ago: it is still flying, which is news rather than a gap.
+ */
+export function aloftPhrase(
+  line: Pick<LadderLine, 'kind' | 'open'> & { label?: string; tool?: string; agents?: number },
+): string {
+  if (line.kind === 'session') return 'session up'
+  const what =
+    line.tool === 'Workflow'
+      ? `workflow${line.label ? ` ${line.label}` : ''}`
+      : (line.label ?? line.tool ?? 'agent')
+  const fleet = line.agents ? ` · ${line.agents} agent${line.agents === 1 ? '' : 's'}` : ''
+  const ending = line.open ? (line.agents ? ', still flying' : ', never returned') : ''
+  return `${what}${fleet} aloft${ending}`
+}
+
+/** How many rows above its own a count label reaches. The type is around 7px
+ *  and the pitch bottoms out at 3, so a label written on one rung covers the
+ *  two over it — three is the guard, with a row to spare. */
+const COUNT_ROWS = 3
+
+/**
+ * Is there clear paper to the right of `line` to write its count in?
+ *
+ * The ladder has no text on it and never has: the rungs sit one to three pixels
+ * apart, which is a pitch that says "these are lines, count them" and leaves no
+ * room to say anything else. A count label is the first thing written there, so
+ * it is written only where it lands on paper — nothing on `line`'s own row to
+ * its right, and nothing on the rows the type reaches up into, within `room` of
+ * its end.
+ *
+ * `room` is a fraction of the frame, because that is what the layout speaks; the
+ * caller converts its pixel budget once. Where there is no room the label is
+ * simply not drawn, and the rung's title and the hover carry the count instead
+ * — a number half-written over a hairline is worse than a number you have to
+ * ask for.
+ */
+export function ladderCountRoom(
+  lines: readonly LadderLine[],
+  line: LadderLine,
+  room: number,
+): boolean {
+  return !lines.some(
+    (other) =>
+      other !== line &&
+      other.row >= line.row &&
+      other.row - line.row <= COUNT_ROWS &&
+      other.start <= line.end + room &&
+      other.end >= line.end,
+  )
 }

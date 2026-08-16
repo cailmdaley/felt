@@ -364,6 +364,33 @@ describe('the drawn frame — how much of the day gets sheet', () => {
     expect(lanes[0].ladder.filter((s) => s.kind === 'agent').map((s) => s.open)).toEqual([false, true])
   })
 
+  it("carries a workflow's name, fleet size, and measured extent onto the rung", () => {
+    const feed = {
+      ...activity(bucketsAt(240, 480)),
+      spawns: [
+        {
+          s: SESSION,
+          cwd: null,
+          tool: 'Workflow',
+          start_ms: WIN.startMs + 240 * 60_000,
+          // The daemon has already replaced the launch-instant stub with the
+          // extent the fleet's own transcripts show — 56 minutes, not seconds.
+          end_ms: WIN.startMs + 296 * 60_000,
+          open: false,
+          host: null,
+          label: 'felt-cleanup-audit',
+          agents: 122,
+        },
+      ],
+    }
+
+    const [rung] = buildDayLanes(feed, [card()], WIN)[0].ladder.filter((s) => s.kind === 'agent')
+    expect(rung.label).toBe('felt-cleanup-audit')
+    expect(rung.tool).toBe('Workflow')
+    expect(rung.agents).toBe(122)
+    expect(rung.end_ms - rung.start_ms).toBe(56 * 60_000)
+  })
+
   it('a delegation never opens a lane of its own', () => {
     const feed = {
       ...activity([]),
