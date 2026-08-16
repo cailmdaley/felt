@@ -32,10 +32,10 @@ is folded in here rather than into a separate Unreleased section.
   `pi-deepseek-pro`, `pi-deepseek-flash`. There is no reserved `human`
   record and no headless aliases. `builtins: "merge"` (default) folds by
   id, last wins wholesale; `"restrict"` drops the builtin layer, so the
-  file becomes the whole registry for that host. A fuller example ships as
-  `share/agents.example.json`; `felt shuttle agents` shows each record's
-  provenance. A malformed file fails loud with its path; a missing file is
-  silent.
+  file becomes the whole registry for that host. `felt shuttle agents init`
+  seeds the user file from the built-ins; `felt shuttle agents` shows each
+  record's provenance. A malformed file fails loud with its path; a missing
+  file is silent.
 - Remote daemons live in `~/.config/felt/remotes.json`, managed by
   `felt shuttle remotes list|add|rm|path` and read at runtime by both the
   CLI (tunnels, `status --remote`) and the daemon. `config/dev.exs`

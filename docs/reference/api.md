@@ -61,24 +61,29 @@ controller ran.
 
 ## Temporal read plane
 
-The feeds behind the board's time views. All host-scoped, all with a `/composite`
-fan-in sibling. See [Telemetry and the ledgers](../shuttle/telemetry.md) for what
-writes the files underneath.
+The feeds behind the board's time views. The five host-scoped feeds each have a
+`/composite` fan-in sibling; `/sent-files` and `/moment` are the two exceptions,
+noted below the table, and neither has one. See
+[Telemetry and the ledgers](../shuttle/telemetry.md) for what writes the files
+underneath.
 
 | Route | Reads | Serves |
 |---|---|---|
-| `GET /activity` | `events.jsonl` | Per-minute activity buckets |
+| `GET /activity` | `events.jsonl` | Per-minute activity buckets (`agent` and `reply` overlap — see Telemetry) |
 | `GET /sessions` | `sessions.jsonl` | Which fiber each harness session belonged to |
 | `GET /commits` | `commits.jsonl` | Which session made each commit, with `--shortstat` counts |
 | `GET /sent-files/all` | `events.jsonl` | Every `SendUserFile` push on this host |
-| `GET /sent-files` | owner-routed | One fiber's sent-files trail, capped at 50 |
+| `GET /sent-files` | `events.jsonl` | One fiber's sent-files trail, capped at 50 |
 | `GET /spend` | ledger + transcripts | Per-session and per-fiber token rollups |
 | `GET /moment` | the harness transcript | The words a session spoke inside a window |
 
-`/moment` is host-*routed* rather than host-scoped: pass `host` to name the
-machine that ran the session, or omit it and the daemon consults its own session
-ledger. `/spend` has no board consumer today — the time views count minutes from
-activity buckets, not tokens.
+`/sent-files` is owner-routed like `/file` — one fiber's trail is read on the
+host that owns the fiber; `/sent-files/all` is the host-scoped feed with the
+composite. `/moment` is host-*routed* rather than host-scoped: pass `host` to
+name the machine that ran the session, or omit it and the daemon consults its
+own session ledger. A transcript is one machine's file, not a feed to merge, so
+there is deliberately no `/moment/composite`. `/spend` has no board consumer
+today — the time views count minutes from activity buckets, not tokens.
 
 ## Operator routes
 

@@ -167,8 +167,8 @@ the hub, not on the remote.
 worker's tmux session in kitty via kitty's remote-control CLI, and kitty runs on
 Linux. What is mac-specific is only the `osascript` call that raises the kitty
 window, and that is already a no-op off macOS (`activate/1` in
-`lib/shuttle/kitty.ex`). A non-kitty user gets nothing on either OS; `tmux
-attach -t shuttle-<id>` always works.
+`lib/shuttle/kitty.ex`). A non-kitty user gets nothing on either OS; `felt
+shuttle attach <fiber>` always works.
 
 Windows is unsupported.
 
@@ -179,7 +179,7 @@ make build        # BOTH: felt CLI (go build .) + daemon escript
 make cli          # felt CLI only → ./felt
 make cli-install  # felt CLI → ~/.local/bin (go install .)
 make daemon       # daemon escript only → bin/shuttle (MIX_ENV=dev)
-make test         # go test ./...  +  mix test  +  the board's vitest suite
+make test         # go test ./...  +  mix test  +  the board's vitest suite  +  the plugin hooks
 make restart      # daemon (rebuild escript) + stop + start  [load-bearing dev loop]
 make all          # restart
 make start        # nohup detached; logs → $(LOG) (macOS ~/Library/Logs/shuttle.log, Linux ~/.shuttle/shuttle.log)
@@ -206,7 +206,7 @@ edits — a restart without `make daemon` is a no-op for picking up edits.
 out.** A worker (including the Shuttle session reading this) runs in its own tmux
 session; the daemon only *watches* it (tmux owns the worker process — see
 "Deploying is ALWAYS safe" below). Bouncing the daemon cycles the watcher and
-rebinds `:4000`; every `shuttle-<id>` tmux session keeps running untouched and is
+rebinds `:4000`; every `<leaf>-<uid>-shuttle` tmux session keeps running untouched and is
 re-adopted on boot. So an in-session worker can deploy its own fix and restart the
 daemon freely — never hold a restart because "there's a live session."
 
@@ -421,7 +421,7 @@ target; without one it is skipped.
 Rebuilding and restarting the daemon (`make all`, cycling `:4000`, reloading the
 LaunchAgent, the respawn loop) does **not** kill running jobs: **tmux owns the
 worker process, Shuttle only owns the watcher** (the load-bearing invariant
-below). A restart cycles the watcher and rebinds the API; the `shuttle-<id>`
+below). A restart cycles the watcher and rebinds the API; the `<leaf>-<uid>-shuttle`
 tmux sessions keep running untouched and the daemon re-adopts them on boot. So
 deploy freely whenever there's a fix to ship — never hold back, gate it behind
 "there are workers running," or frame a deploy as risky. The costs are the
@@ -582,7 +582,7 @@ felt shuttle validate-identity                # UID migration/cross-city validat
 ## Critical invariants
 
 - **tmux owns the worker process; Shuttle owns the watcher.** Workers stay
-  attachable via `tmux attach -t shuttle-<fiber-id>`. Supervise watchers,
+  attachable via `felt shuttle attach <fiber>`. Supervise watchers,
   not workers.
 - **Felt is the data layer; the daemon shells out to the felt CLI.** Don't
   import felt internals into the daemon.
@@ -659,7 +659,7 @@ felt shuttle validate-identity                # UID migration/cross-city validat
   and no legacy Shuttle-named registry authority. `POST
   /api/v1/felt-stores` rewrites the persisted file.
 - **Dispatcher** (`lib/shuttle/dispatcher.ex`) resolves the agent, spawns
-  the `shuttle-<fiber-id>` tmux session.
+  the `<leaf>-<uid>-shuttle` tmux session.
 - **Standing roles** — `shuttle.kind: standing` with a cron `schedule:`.
   Scheduled runs dispatch only when `next_due_at` is due AND `review.state`
   is `scheduled` or `accepted`. Manual dispatch is ad-hoc (`adhoc-...`
@@ -807,12 +807,13 @@ felt/
 ## Tests
 
 ```bash
-make test                  # go test ./...  +  mix test  +  the board suite
+make test                  # go test ./... + mix test + the board suite + the plugin hooks
 go test ./...              # Go (felt CLI)
 mix test                   # full Elixir suite
 mix test --only focus      # tagged subset
 cd ui && npm test          # the board suite; runs vitest TWICE, under two
                            # pinned TZs (America/Los_Angeles, Europe/Paris)
+bash scripts/test-plugin-hooks.sh  # the shell hook shims, HOME and PATH sandboxed
 
 # Opt-in real harness smoke. Opens real Claude/Codex/Pi CLIs in tmux,
 # sends no prompt, captures the idle pane, then kills the smoke sessions.

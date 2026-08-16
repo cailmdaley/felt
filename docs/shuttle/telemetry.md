@@ -27,15 +27,23 @@ event; `Shuttle.Activity` folds those lines into a **per-minute histogram** —
 one bucket per `{minute, tmux session, cwd, kind}` — which is what the time
 views draw.
 
-The eight hook types collapse into three kinds:
+The eight hook types collapse into three kinds, plus one facet laid over them:
 
-- **attention** — a human typed (`UserPromptSubmit`), unless the harness stamped
-  the prompt `machine: true`, meaning it injected the prompt and nobody was
-  present. The recorder makes that call; the daemon never sniffs prompt text to
-  guess.
+- **attention** — a human typed (`UserPromptSubmit`), unless the event carries
+  `machine: true`, meaning the harness injected that prompt and nobody was
+  present. The recorder makes that call — `felt hook event` prefix-matches the
+  prompt text against `machinePromptPrefixes` (cmd/hook_event.go), where a new
+  harness's wrapper is taught by adding its prefix. The daemon never sniffs
+  prompt text to guess.
 - **notify** — the agent asked for a human, at the onset of the ask.
 - **agent** — everything else. Any hook type invented later lands here rather
   than disappearing.
+- **reply** — a *facet*, not a fourth slice: a `stop` hook (one finished agent
+  turn) emits both an `agent` bucket and a `reply` bucket for the same minute.
+  It is what makes a conversation countable in messages — the `9 back` in the
+  Week view's `you 14 · 9 back`. **Summing `n` across every bucket therefore
+  counts each finished turn twice**; fold `agent` for effort, `reply` for
+  message counts, never both.
 
 The same stream feeds the in-flight idle ranking on the Desk and the
 [sent-files trail](../concepts/companions.md#sent-files-shuttle-only) behind the
@@ -115,9 +123,11 @@ already enabled — a felt-only install is not.
 
 ## The endpoints
 
-Each is host-scoped and has a `/composite` sibling that merges every configured
-remote's cached feed, reporting per-origin freshness so a disconnected host
-grays out rather than silently drawing an empty day.
+All but `/moment` are host-scoped with a `/composite` sibling that merges every
+configured remote's cached feed, reporting per-origin freshness so a disconnected
+host grays out rather than silently drawing an empty day. `/moment` has no
+composite: a transcript is one file on one machine, so the request names that
+machine with `host` and the serving daemon forwards it.
 
 | Route | Reads | Serves |
 |---|---|---|

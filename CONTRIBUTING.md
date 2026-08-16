@@ -26,16 +26,18 @@ suite, so `make test` needs it too.
 ## Running tests
 
 ```bash
-go test ./...        # Go (felt CLI)
-mix test             # Elixir (daemon)
-cd ui && npm test    # TypeScript (board) — runs twice, once per pinned timezone
-make test            # all three
+go test ./...                       # Go (felt CLI)
+mix test                            # Elixir (daemon)
+cd ui && npm test                   # TypeScript (board) — runs twice, once per pinned timezone
+bash scripts/test-plugin-hooks.sh   # shell hook shims (claude-plugin/hooks/*)
+make test                           # all four
 ```
 
-CI runs `go build`/`go test ./...`, `mix compile --warnings-as-errors` +
-`mix test`, and `npm run build` of the board on every PR. Note that CI
-type-checks and builds the board bundle but does not run the board's vitest
-suite — `cd ui && npm test` is a local-only gate today.
+CI runs `go build`/`go test ./...`, `scripts/test-plugin-hooks.sh`, a check
+that the two plugin manifests agree on version, `mix compile
+--warnings-as-errors` + `mix test`, and `npm run build` of the board on every
+PR. Note that CI type-checks and builds the board bundle but does not run the
+board's vitest suite — `cd ui && npm test` is a local-only gate today.
 
 ## Invariants
 
@@ -45,11 +47,11 @@ Before opening a PR, verify:
 - `mix compile --warnings-as-errors` passes
 - `mix test` passes
 - `cd ui && npm test` passes
+- `bash scripts/test-plugin-hooks.sh` passes
 - No personal hostnames, usernames, or absolute home paths (`/Users/...`) in
   tracked source, docs, or skills — `go test ./cmd -run
   TestNoPersonalIdentifiersInSource` enforces the list. Fleet data belongs in
-  `~/.config/felt/remotes.json`; test files, `testdata/`, and
-  `share/agents.example.json` are exempt.
+  `~/.config/felt/remotes.json`; test files and `testdata/` are exempt.
 - `~/loom` is not a personal path here: it is the deliberate running example for
   a cross-project store (see the docs site). Leave it in place; substitute your
   own store path when following the docs.

@@ -106,7 +106,7 @@ gets nothing from the button.
 That is terminal lock-in, not platform lock-in: it drives kitty's
 remote-control CLI, and kitty runs on Linux and macOS alike. The only
 mac-specific part is the `osascript` call that raises the kitty window, and
-that is already a no-op elsewhere. `tmux attach -t shuttle-<fiber-id>` reaches
+that is already a no-op elsewhere. `felt shuttle attach <fiber>` reaches
 any worker on any platform.
 
 ## Day, Week, Chronicle — where the time went

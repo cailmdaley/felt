@@ -245,9 +245,9 @@ felt shuttle agents --source user
 ```
 
 Each record names a CLI, a model, and its axis metadata (`effort_levels`,
-`default_effort`, `chrome_capable`). `share/agents.example.json` in the repo
-works every field across several harnesses — copy from it. A missing file is
-silent. A malformed file fails loudly and names the path.
+`default_effort`, `chrome_capable`). `felt shuttle agents init` seeds the file
+from the built-ins, working every field across several harnesses — edit that. A
+missing file is silent. A malformed file fails loudly and names the path.
 
 The file's `builtins` key controls the merge. `"merge"` (the default) folds your
 records over the built-ins by id, last one wins. `"restrict"` drops the built-in
@@ -307,6 +307,16 @@ by hand:
 ```bash
 echo '{"hook_event_name":"SessionStart"}' | SHUTTLE_EVENTS_FILE=/tmp/e.jsonl felt hook event
 ```
+
+The live file rotates once it passes `SHUTTLE_EVENTS_MAX_BYTES` (64 MiB): it is
+renamed to `events.jsonl.1` and a fresh stream starts. A reader whose window
+reaches back past the last rotation reads the sibling too, but only when the
+sibling's mtime is at or after the window's start — rotation is a rename with no
+writes after it, so that mtime is the newest line the file can hold, and an
+earlier one proves the window cannot overlap it. Only `events.jsonl.1` is kept;
+an older rotation is overwritten. A `toolInput` over 8 KiB is trimmed to its
+file paths plus `truncated: true`, so a `Write` of a large file does not park
+the whole body in the stream.
 
 ### `sessions.jsonl`
 
