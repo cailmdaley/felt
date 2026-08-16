@@ -1807,6 +1807,11 @@ export class KanbanModal {
    * authority. No-op for a card with no live worker. Best-effort: a failed kill
    * banners but never blocks the column write (a surviving worker is the
    * pre-existing behavior, not a new failure).
+   *
+   * Routed by `shuttleHost`, not `originId`: the worker runs on the fiber's
+   * OWNING host, while `originId` names whichever mirror of a git-synced store
+   * won the document (usually this laptop). Only the owner can
+   * `tmux kill-session` it, so a mirror-routed kill is a silent no-op.
    */
   private async killWorkerIfRunning(card: KanbanCard): Promise<void> {
     if (!card.runningWorker) return
@@ -1814,7 +1819,7 @@ export class KanbanModal {
       const res = await fetch(this.killUrl(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fiber_id: card.id, origin: card.originId }),
+        body: JSON.stringify({ fiber_id: card.id, origin: card.shuttleHost ?? card.originId }),
       })
       if (!res.ok) {
         this.showBanner(`Couldn't stop the worker for “${card.name}”: ${await errorMessageFromResponse(res, 'kill failed')}`, 'error')

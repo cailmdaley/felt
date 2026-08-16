@@ -137,6 +137,19 @@ export function buildKanbanResponseFromComposite(
  *
  * The losing origin is not discarded silently: it rides on `mirroredOrigins` so
  * the card can say where else this fiber lives.
+ *
+ * The document and its LIVENESS come from different authorities, so they are
+ * resolved separately. The precedence above answers "whose copy of the text do
+ * we trust" — local-first, because that is the copy the human just edited and
+ * the one git may not have pushed anywhere yet. But only ONE host can observe a
+ * worker: the fiber's `shuttle.host`. A mirror's row always carries
+ * `runtime: undefined` (it has no tmux session for that fiber), so letting the
+ * document winner's row also decide liveness silently erases the worker of
+ * every remote-owned fiber — the card lands In flight wearing no `▸ aloft`
+ * pill, so there is no way to join the session it is running. Liveness is
+ * therefore grafted from the owning host's row whenever that row is in the
+ * feed, and the graft carries the boot-quarantine hold with it (same observer,
+ * same authority).
  */
 export function dedupeMirroredRows(
   entries: CompositeEntry[],
@@ -151,8 +164,13 @@ export function dedupeMirroredRows(
 
   const winners = new Map<string, CompositeEntry>();
   const alsoOn = new Map<string, string[]>();
+  // The owning host's row per fiber — the only row that can observe a worker.
+  const ownerRow = new Map<string, CompositeEntry>();
   for (const entry of entries) {
     const key = entry.fiber.uid ?? entry.fiber.id;
+    if (entry.fiber.shuttleHost && entry.origin === entry.fiber.shuttleHost) {
+      ownerRow.set(key, entry);
+    }
     const held = winners.get(key);
     if (!held) {
       winners.set(key, entry);
@@ -173,7 +191,19 @@ export function dedupeMirroredRows(
 
   return [...winners.entries()].map(([key, entry]) => {
     const others = alsoOn.get(key);
-    return others && others.length > 0 ? { ...entry, mirroredOrigins: others } : entry;
+    const owner = ownerRow.get(key);
+    const withLiveness =
+      owner && owner !== entry
+        ? {
+            ...entry,
+            runtime: owner.runtime,
+            held: owner.held,
+            heldSince: owner.heldSince,
+          }
+        : entry;
+    return others && others.length > 0
+      ? { ...withLiveness, mirroredOrigins: others }
+      : withLiveness;
   });
 }
 

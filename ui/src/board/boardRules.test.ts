@@ -329,6 +329,73 @@ describe('a mirrored fiber renders as ONE card', () => {
     expect(drafts(feed)).toHaveLength(1)
   })
 
+  describe('liveness comes from the OWNING host, not the winning row', () => {
+    // The defect: a fiber owned by `kelvin` but mirrored into the laptop's
+    // git-synced store. The laptop's row wins the document (correctly — it is
+    // the copy the human edits), but only kelvin runs the tmux worker, so its
+    // `runtime` was thrown away with the losing row. The card landed In flight
+    // with no `▸ aloft` pill — no way to join a session that was running fine.
+    const inFlight = (feed: CompositeFeed): KanbanCard[] =>
+      buildKanbanResponseFromComposite(feed, { nowMs: NOW }).now.inFlight
+    const owned = (origin: string, over: Partial<CompositeEntry> = {}): CompositeEntry => ({
+      ...mirrored(origin, { status: 'active', shuttleHost: 'kelvin' }),
+      ...over,
+    })
+    const origins = {
+      laptop: { kind: 'local' as const, stale: false },
+      kelvin: { kind: 'remote' as const, stale: false },
+    }
+
+    it('grafts the owner row’s running worker onto the local document winner', () => {
+      const feed = feedWith(
+        [
+          owned('kelvin', {
+            runtime: { tmuxSession: 'final-push-01K-shuttle', phase: 'attention', lastActivityAt: NOW },
+          }),
+          owned('laptop'),
+        ],
+        origins,
+      )
+      const cards = inFlight(feed)
+      expect(cards).toHaveLength(1)
+      expect(cards[0].originId).toBe('laptop')
+      expect(cards[0].runningWorker).toBe('final-push-01K-shuttle')
+      expect(cards[0].runtimePhase).toBe('attention')
+      expect(cards[0].shuttleHost).toBe('kelvin')
+    })
+
+    it('grafts the owner’s boot-quarantine hold too', () => {
+      const feed = feedWith(
+        [owned('kelvin', { held: true, heldSince: NOW - 60_000 }), owned('laptop')],
+        origins,
+      )
+      const cards = inFlight(feed)
+      expect(cards[0].held).toBe(true)
+      expect(cards[0].heldSince).toBe(NOW - 60_000)
+    })
+
+    it('shows no worker when the owner reports none, whatever a mirror says', () => {
+      // A mirror can never observe a worker, so a stray runtime on one is not
+      // evidence of liveness — the owner's silence is authoritative.
+      const feed = feedWith(
+        [
+          owned('kelvin'),
+          owned('laptop', { runtime: { tmuxSession: 'ghost-shuttle', phase: 'working' } }),
+        ],
+        origins,
+      )
+      expect(inFlight(feed)[0].runningWorker).toBeUndefined()
+    })
+
+    it('leaves a single-row fiber’s own liveness alone', () => {
+      const feed = feedWith(
+        [owned('kelvin', { runtime: { tmuxSession: 'solo-shuttle', phase: 'working' } })],
+        origins,
+      )
+      expect(inFlight(feed)[0].runningWorker).toBe('solo-shuttle')
+    })
+  })
+
   it('never merges two genuinely different fibers', () => {
     const feed = feedWith(
       [
