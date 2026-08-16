@@ -88,17 +88,22 @@
 /* The week's own name, in the italic hand the marginalia use — this is the
    view speaking, not a control. It becomes a control only when you have
    wandered off the current week, and says so with a faint gold rule. */
+/* The week's name wears the same type as Day's date — one size for the head's
+   right-hand identity across the two views, so paging between them swaps the
+   words and nothing else (Cail's ask). It keeps its second life as the
+   back-to-this-week control; the away-state gold below carries that. */
 .wk-weeklabel {
   appearance: none;
   border: none;
   background: none;
-  padding: 0 2px 1px;
+  padding: 0 1px;
   cursor: default;
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
   font-style: italic;
-  font-size: calc(17px * var(--kbn-type-scale, 1));
+  font-weight: 400;
+  font-size: calc(25px * var(--kbn-type-scale, 1));
   line-height: 1;
-  letter-spacing: 0.01em;
+  letter-spacing: 0.005em;
   color: #1B1611;
   border-bottom: 1px solid transparent;
 }
