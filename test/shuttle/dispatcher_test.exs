@@ -370,6 +370,32 @@ defmodule Shuttle.DispatcherTest do
     refute prompt =~ "felt history append"
   end
 
+  test "render_prompt carries the previous-session lineage line only when one exists" do
+    prev = %{uuid: "0883ade1-08e0-4457-94c6-7ac12137eb0f", harness: "claude-code"}
+
+    with_lineage = Dispatcher.render_prompt("tests/haiku", previous_session: prev)
+
+    assert with_lineage =~
+             "Previous session: 0883ade1-08e0-4457-94c6-7ac12137eb0f (claude-code)"
+
+    assert with_lineage =~ "transcript recipes"
+
+    # Ledger-less fallback carries no harness label — no "()" litter.
+    unlabeled =
+      Dispatcher.render_prompt("tests/haiku",
+        previous_session: %{uuid: "0883ade1-08e0-4457-94c6-7ac12137eb0f", harness: nil}
+      )
+
+    assert unlabeled =~ "Previous session: 0883ade1-08e0-4457-94c6-7ac12137eb0f —"
+
+    # First dispatch: no line at all.
+    refute Dispatcher.render_prompt("tests/haiku") =~ "Previous session:"
+
+    # Resume prompts never carry it — the resumed worker IS the previous session.
+    refute Dispatcher.render_resume_prompt("tests/haiku", previous_session: prev) =~
+             "Previous session:"
+  end
+
   test "render_prompt for a pinned role carries the three-case unified-lifecycle contract" do
     # A pinned role is an interactive interface, but under the unified lifecycle
     # its exit contract has three cases: (a) while a human drives, stay alive at

@@ -226,6 +226,49 @@ defmodule Shuttle.SessionLedgerTest do
     end
   end
 
+  describe "latest_for_uid/2" do
+    test "returns the newest session-bearing line for the fiber's uid", %{path: path} do
+      uid = "01KTS261GJMMRDRHS2QDMEFV3K"
+
+      for {session, at} <- [
+            {"aaaaaaaa-0000-0000-0000-000000000001", 1_000},
+            {"bbbbbbbb-0000-0000-0000-000000000002", 2_000}
+          ] do
+        SessionLedger.record(
+          path: path,
+          fiber: "work/paper/edits",
+          uid: uid,
+          session: session,
+          harness: "claude-code",
+          host: "dapmcw68",
+          at: at,
+          kind: :dispatch
+        )
+      end
+
+      # A different fiber's newer line must not shadow ours.
+      SessionLedger.record(
+        path: path,
+        fiber: "other/fiber",
+        uid: "01KTS261GJMMRDRHS2QDMEFVXX",
+        session: "cccccccc-0000-0000-0000-000000000003",
+        harness: "codex",
+        host: "dapmcw68",
+        at: 3_000,
+        kind: :dispatch
+      )
+
+      assert %{"session" => "bbbbbbbb-0000-0000-0000-000000000002", "harness" => "claude-code"} =
+               SessionLedger.latest_for_uid(uid, path: path)
+    end
+
+    test "nil for an unknown uid, a blank uid, or nil", %{path: path} do
+      assert SessionLedger.latest_for_uid("01KTS261GJMMRDRHS2QDMEFVZZ", path: path) == nil
+      assert SessionLedger.latest_for_uid("", path: path) == nil
+      assert SessionLedger.latest_for_uid(nil, path: path) == nil
+    end
+  end
+
   describe "harness_for_cli/1" do
     test "maps the registry's cli to the harness name, and refuses to guess" do
       assert SessionLedger.harness_for_cli("claude") == "claude-code"

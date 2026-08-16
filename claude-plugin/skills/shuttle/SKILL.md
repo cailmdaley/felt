@@ -34,6 +34,7 @@ The human's surfaces: the **board** (served by the daemon at `:4000`) is a pure 
 | A dispatched worker | This file, top to bottom. |
 | Authoring a constitution | [references/authoring.md](references/authoring.md) — `felt add` → spec → `felt shuttle install`, drafts vs dispatch, agent selection, human-in-the-loop gates. |
 | Operating / debugging the system | [references/operating.md](references/operating.md) — lifecycle verbs, kanban columns, card-missing triage, remote hosts, uninstall. |
+| Reading a predecessor's transcript | [references/transcripts.md](references/transcripts.md) — locate a session's JSONL from its UUID (claude-code + codex), validated jq recipes for tails, search, thinking. |
 | Touching a standing role | [references/standing-roles.md](references/standing-roles.md) — cron lifecycle, run ids, exit handoff, accept semantics. |
 | Writing a fiber's `report.html` | [references/report.md](references/report.md) — audience, current-state doctrine, working open questions, self-containment, figure claims. |
 
@@ -72,7 +73,7 @@ If `felt show` can't find the fiber, don't grope — go straight to `-C <felt-st
 1. **Survey.** The survey is where you internalize **why** before the **what** — not a checklist, a world-model. Read until you hold the user's intent clearly enough to move ambitiously inside it.
 
    - Read the constitution fresh (see "Finding your fiber"). If `report.html` exists, read it too.
-   - Read the previous session's handoff: the `## Status` block.
+   - Read the previous session's handoff: the `## Status` block. When the dispatch prompt names a `Previous session:` and the handoff leaves you wanting the texture — where exactly it stopped, what it tried, its in-flight thinking — read that transcript surgically per [references/transcripts.md](references/transcripts.md).
    - Check `git log` for what's already happened in the fiber's directory and the surrounding code.
    - Skim sub-fibers (decisions, findings, gotchas, staged plans). If a sibling finding lays out a staged plan, follow it rather than re-deriving scope.
    - Follow claims about the system back to the code that grounds them. The constitution is your contract; the code is the ground truth.

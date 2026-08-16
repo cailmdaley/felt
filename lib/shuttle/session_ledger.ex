@@ -222,6 +222,31 @@ defmodule Shuttle.SessionLedger do
 
   def host_for_session(_session, _opts), do: nil
 
+  @doc """
+  The newest ledger line carrying a session UUID for `uid` (the fiber's ULID —
+  stable across renames, unlike the path-shaped fiber id) — or `nil` when this
+  host has never recorded a session for it.
+
+  The lineage rung the dispatch prompt stands on: at fresh dispatch this is the
+  PREVIOUS worker's session — its UUID names the on-disk transcript, its
+  `harness` says which CLI's store to look in.
+
+  Opts (for tests): `:path`.
+  """
+  @spec latest_for_uid(String.t() | nil, keyword()) :: record() | nil
+  def latest_for_uid(uid, opts \\ [])
+
+  def latest_for_uid(uid, opts) when is_binary(uid) and uid != "" do
+    0
+    |> read_since(opts)
+    |> Enum.filter(fn record ->
+      record["uid"] == uid and is_binary(record["session"]) and record["session"] != ""
+    end)
+    |> List.last()
+  end
+
+  def latest_for_uid(_uid, _opts), do: nil
+
   defp stream_records(path, since_ms) do
     path
     |> File.stream!()

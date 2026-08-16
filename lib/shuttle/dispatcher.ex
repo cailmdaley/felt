@@ -98,7 +98,8 @@ defmodule Shuttle.Dispatcher do
             kind: fiber_kind(fiber),
             fiber_path: Map.get(fiber, "path"),
             run_id: prompt_context_run_id(prompt_context),
-            user_message: Keyword.get(opts, :user_message)
+            user_message: Keyword.get(opts, :user_message),
+            previous_session: previous_session_info(fiber, uid)
           )
       end
     end
@@ -280,7 +281,36 @@ defmodule Shuttle.Dispatcher do
     Fiber: #{prompt_fiber_id}
     """
 
-    compose_prompt(header, fiber_id, opts)
+    compose_prompt(header <> render_previous_session_line(opts), fiber_id, opts)
+  end
+
+  @doc """
+  Renders the lineage line for fresh dispatch prompts: the previous worker's
+  session UUID (and harness, when the ledger knows it). Returns "" when the
+  fiber has no prior session on this host.
+
+  Why it's in the prompt at all: the `## Status` handoff is the previous
+  worker's *summary*; the transcript is the previous worker's *actual last
+  turns* — searches run, dead ends hit, thinking left mid-flight. The UUID
+  names that transcript on disk, and the shuttle skill's transcript recipes
+  turn it into surgical reads. Resume prompts never carry it (a resumed
+  worker IS the previous session), and a fiber's first dispatch has none.
+  """
+  @spec render_previous_session_line(keyword()) :: String.t()
+  def render_previous_session_line(opts) do
+    case Keyword.get(opts, :previous_session) do
+      %{uuid: uuid} = prev when is_binary(uuid) and uuid != "" ->
+        harness =
+          case Map.get(prev, :harness) do
+            h when is_binary(h) and h != "" -> " (#{h})"
+            _ -> ""
+          end
+
+        "Previous session: #{uuid}#{harness} — its transcript is on disk; the shuttle skill's transcript recipes read its tail or search it surgically.\n"
+
+      _ ->
+        ""
+    end
   end
 
   @doc """
@@ -394,6 +424,8 @@ defmodule Shuttle.Dispatcher do
     Fiber: #{prompt_fiber_id}
     Run:   #{run_id}
     """
+
+    header = header <> render_previous_session_line(opts)
 
     # A standing run is definitionally standing — declare it here so the exit
     # contract is right regardless of how the caller threaded opts. The handoff
@@ -1188,6 +1220,25 @@ defmodule Shuttle.Dispatcher do
   # The standing run id carried in the prompt context tuple, stamped into the
   # `shuttle.run_id` field at dispatch. nil for a plain oneshot/constitution
   # dispatch.
+  # The previous worker's session, for the prompt's lineage line. The session
+  # ledger is authoritative (UUID + harness, newest line for the fiber's uid);
+  # the runtime marker is the fallback for fibers whose sessions predate the
+  # ledger (UUID only — better an unlabeled pointer than none). Read BEFORE
+  # this dispatch appends its own line / stamps its own marker, so the value
+  # is genuinely the predecessor's.
+  defp previous_session_info(fiber, uid) do
+    case Shuttle.SessionLedger.latest_for_uid(uid) do
+      %{"session" => session} = record ->
+        %{uuid: session, harness: record["harness"]}
+
+      nil ->
+        case Shuttle.Continuation.resumable_session_id(fiber) do
+          nil -> nil
+          uuid -> %{uuid: uuid, harness: nil}
+        end
+    end
+  end
+
   defp prompt_context_run_id({:standing_run, run_id}), do: run_id
   defp prompt_context_run_id({:standing_run, run_id, _}), do: run_id
   defp prompt_context_run_id(_), do: nil
