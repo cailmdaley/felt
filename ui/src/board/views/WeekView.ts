@@ -90,6 +90,7 @@ import {
   dedupeSources,
   MomentLoader,
   pickMark,
+  placeTip,
   renderTip,
   SLOT_KIND_ORDER,
   SLOT_PHRASE,
@@ -424,7 +425,7 @@ export function dayWeight(totalMs: number): DayWeight {
 }
 
 /** `6h 20m` · `35m` · `—`. Rounded down to the minute. */
-export function formatSpan(ms: number): string {
+function formatSpan(ms: number): string {
   const minutes = Math.floor(ms / 60_000)
   if (minutes <= 0) return '—'
   const h = Math.floor(minutes / 60)
@@ -508,10 +509,6 @@ export function annotationFor(
   return parts.join(' · ')
 }
 
-// Re-exported for callers that historically imported it from here — the
-// definition now lives in vocabulary.ts, shared with Day and Chronicle.
-export { messageClause } from './vocabulary.js'
-
 /** `12h` · `45m` — the header's coarser hand. */
 function formatCoarseSpan(ms: number): string {
   const minutes = Math.round(ms / 60_000)
@@ -524,7 +521,7 @@ function formatCoarseSpan(ms: number): string {
 
 /** Horizontal distance one page costs. Roughly a deliberate two-finger flick;
  *  low enough to feel willing, high enough that a diagonal scroll never pages. */
-export const SWIPE_THRESHOLD_PX = 120
+const SWIPE_THRESHOLD_PX = 120
 /** Quiet time that ends a gesture. Trackpads emit wheel events in a burst with
  *  a long inertial tail, so "the gesture ended" is silence, not a distance. */
 export const SWIPE_SETTLE_MS = 200
@@ -650,8 +647,6 @@ export function cyclesInWeek(
 const CYCLE_CHIP_LIMIT = 2
 
 // ── Future marks ─────────────────────────────────────────────────────────────
-
-export type { MarkKind }
 
 export interface DayMark {
   kind: MarkKind
@@ -1194,15 +1189,10 @@ class WeekView implements TemporalView {
     // is allowed to grow. See momentTip.css.
     tip.classList.toggle('kbn-tip-pinned', pin)
 
-    // Positioned against the grid, and flipped at the right edge so a slot late
-    // in the day does not push the tooltip off the sheet.
+    // Positioned against the grid; the anchor is the slot's own tick.
     const box = grid.getBoundingClientRect()
     const anchor = rail.left - box.left + slot.fraction * rail.width
-    const top = rail.top - box.top
-    tip.style.top = `${top}px`
-    tip.classList.toggle('kbn-tip-flip', anchor > box.width * 0.62)
-    tip.style.left = anchor > box.width * 0.62 ? 'auto' : `${anchor + 9}px`
-    tip.style.right = anchor > box.width * 0.62 ? `${box.width - anchor + 9}px` : 'auto'
+    placeTip(tip, box, anchor, rail.top - box.top)
   }
 
   private ensureTip(): HTMLElement {
@@ -1697,7 +1687,7 @@ function buildKeyRow(): HTMLElement {
 // ── Raster slots: the ink, and what it is willing to say ─────────────────────
 
 /** One kind's worth of one slot. */
-export interface SlotKind {
+interface SlotKind {
   kind: DrawnKind
   /** Events in the slot — the sum of the buckets' `n`. What the tooltip says. */
   count: number

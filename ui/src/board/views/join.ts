@@ -95,7 +95,7 @@ export interface JoinIndex {
 /** A card is shuttle-backed iff it has a `shuttle:` block, which is exactly
  *  what `shuttleKind` is present for (KanbanTypes). Not `shuttleAgent`, which
  *  a block may omit. */
-export function isShuttleBacked(card: KanbanCard | undefined): boolean {
+function isShuttleBacked(card: KanbanCard | undefined): boolean {
   return card?.shuttleKind !== undefined
 }
 
@@ -147,7 +147,7 @@ export function joinBucket(index: JoinIndex, bucket: Pick<ActivityBucket, 's' | 
  * a bucket's minute and a commit's attribution — so neither can drift from the
  * other about which fiber a session belongs to.
  */
-export function cardForPairing(index: JoinIndex, pairing: SessionPairing): KanbanCard | null {
+function cardForPairing(index: JoinIndex, pairing: SessionPairing): KanbanCard | null {
   const byFiber = index.byId.get(pairing.fiber)
   if (byFiber) return byFiber
   const uid = pairing.uid?.trim().toUpperCase()
@@ -193,7 +193,7 @@ export function momentSource(index: JoinIndex, bucket: ActivityBucket): MomentSo
 // can be mistyped, omitted, or shared by two fibers.
 
 /** What the ledger says one fiber did in the window. */
-export interface LedgerFiber {
+interface LedgerFiber {
   /** Subjects with the `slug: ` prefix removed — the prose an entry sets. A
    *  wordless commit contributes none, so this can be shorter than `commits`. */
   subjects: string[]

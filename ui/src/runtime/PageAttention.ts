@@ -1,8 +1,8 @@
 export type PageAttentionState = 'hidden' | 'visible-unfocused' | 'active'
 
-export const MIN_UNFOCUSED_POLL_INTERVAL_MS = 60_000
+const MIN_UNFOCUSED_POLL_INTERVAL_MS = 60_000
 
-export function getPageAttention(): PageAttentionState {
+function getPageAttention(): PageAttentionState {
   if (document.hidden) return 'hidden'
   if (typeof document.hasFocus === 'function' && !document.hasFocus()) {
     return 'visible-unfocused'
@@ -10,7 +10,7 @@ export function getPageAttention(): PageAttentionState {
   return 'active'
 }
 
-export function nextVisiblePollIntervalMs(activeIntervalMs: number): number {
+function nextVisiblePollIntervalMs(activeIntervalMs: number): number {
   return Math.max(activeIntervalMs * 2, MIN_UNFOCUSED_POLL_INTERVAL_MS)
 }
 

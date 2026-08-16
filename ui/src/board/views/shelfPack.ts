@@ -47,7 +47,7 @@ export interface Rect {
 }
 
 /** Who yields to whom. */
-export type PinRank = 'hard' | 'soft'
+type PinRank = 'hard' | 'soft'
 
 /** One card, as the packer sees it. */
 export interface PackCard extends Rect {

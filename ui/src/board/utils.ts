@@ -194,7 +194,7 @@ export function renderMarkdown(text: string, opts?: RenderMarkdownOptions): stri
  * quoted attribute. Escaping the quote too makes the result safe inside
  * `attr="…"`.
  */
-export function escapeAttr(text: string): string {
+function escapeAttr(text: string): string {
   return escapeHtml(text).replace(/"/g, '&quot;')
 }
 

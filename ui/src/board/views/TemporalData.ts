@@ -71,7 +71,7 @@ export interface ActivityBucket {
  * marks an interval whose close was never recorded: the daemon draws those as
  * a short stub, and its length is a mark that one STARTED, not a duration.
  */
-export interface SpawnSpan {
+interface SpawnSpan {
   s: string | null
   cwd: string | null
   tool: string
@@ -264,7 +264,7 @@ export interface SessionPairing {
 
 /** Which REGISTER an excerpt belongs to: the conversation's own voices, a
  *  delegation going out, or its report coming back. */
-export type MomentKind = 'prose' | 'spawn' | 'return'
+type MomentKind = 'prose' | 'spawn' | 'return'
 
 /**
  * One excerpt from a harness transcript: what was said, when, and in which
@@ -320,7 +320,7 @@ export interface SessionIndex {
  *  burst of identical fetches within one render pass (many lanes, one
  *  window), not to outlive the poll — a TTL above the poll cadence made
  *  the views feel dead (new activity took up to ~75s to appear). */
-export const TEMPORAL_TTL_MS = 10_000
+const TEMPORAL_TTL_MS = 10_000
 
 /** The pair of fetchers a {@link import('./ViewRegistry.js').ViewContext}
  *  exposes to views. KanbanModal builds one per board; the harness injects a
@@ -642,7 +642,7 @@ function parseActivity(body: unknown, fallback: ActivityResult): ActivityResult 
  * repaired: half an interval is not a shorter delegation, it is not one. An
  * inverted pair is dropped for the same reason.
  */
-export function parseSpawns(value: unknown, host: string): SpawnSpan[] {
+function parseSpawns(value: unknown, host: string): SpawnSpan[] {
   if (!Array.isArray(value)) return []
   const out: SpawnSpan[] = []
   for (const entry of value) {
@@ -770,7 +770,7 @@ const SHA_RE = /^[0-9a-f]{40}$/
 
 /** A 40-hex sha, lower-cased, or null. Anything else is not an identity, and a
  *  half-sha would let two different commits dedupe against each other. */
-export function normalizeSha(value: unknown): string | null {
+function normalizeSha(value: unknown): string | null {
   const raw = text(value)?.toLowerCase()
   return raw && SHA_RE.test(raw) ? raw : null
 }

@@ -133,6 +133,7 @@ import {
   lastExchange,
   MomentLoader,
   pickMark,
+  placeTip,
   renderTip,
   SLOT_KIND_ORDER,
   SLOT_PHRASE,
@@ -151,7 +152,7 @@ import './DayView.css'
 const MINUTE_MS = 60_000
 /** Breathing room the drawn frame keeps outside the day's first and last
  *  action, so the earliest mark is not flush against the sheet's edge. */
-export const FRAME_PAD_MINUTES = 15
+const FRAME_PAD_MINUTES = 15
 /** The narrowest frame Day will draw. A day holding one five-minute burst
  *  would otherwise zoom to that burst and magnify a speck into the whole
  *  sheet, which reads as a busy day rather than an almost empty one. */
@@ -567,7 +568,7 @@ export interface DayTotals {
  * Positions on the rail are untouched by this: the ticks still mark the minutes
  * the buckets name. Only the unit in the prose changed.
  */
-export function countExchange(
+function countExchange(
   buckets: readonly ActivityBucket[],
   win: DayWindow,
 ): { sent: number; received: number } {
@@ -1250,7 +1251,7 @@ export interface DayModel {
  * reports stale IS stale: the lanes are built from both files, so a host whose
  * activity is current but whose ledger is not is still a host we are waiting on.
  */
-export function mergeOrigins(
+function mergeOrigins(
   a: TemporalOrigins | undefined,
   b: TemporalOrigins | undefined,
 ): TemporalOrigins {
@@ -1524,7 +1525,7 @@ export function beatTip(
  * words, which is the same honest degradation as a transcript that was cleaned
  * up. Inventing a sentence, or silently dropping the turn, would both be worse.
  */
-export const MAGNET_LOOKBACK_MINUTES = 90
+const MAGNET_LOOKBACK_MINUTES = 90
 
 /**
  * The magnet's slip: THE LAST EXCHANGE ON THIS LANE, in the order it happened.
@@ -2048,7 +2049,6 @@ class DayViewImpl implements TemporalView {
       ...(w?.tools ? { tools: w.tools } : {}),
       ...(w?.note ? { note: w.note } : {}),
     })
-    renderTip(tip, words(this.moments.peek(key, pin)))
     // Sources come from the minutes the line spans — the same transcripts the
     // beats under it point at, which is what makes the delegation register
     // available here at all.
@@ -2060,29 +2060,10 @@ class DayViewImpl implements TemporalView {
         })
         .flatMap((b) => b.sources),
     )
-    this.moments.request(
-      key,
-      sources,
-      line.startMs,
-      line.endMs,
-      (w) => {
-        if (this.hoveredKey !== key || (this.pinnedKey === key) !== pin) return
-        renderTip(tip, words(w))
-      },
-      pin,
-    )
-    this.hoveredKey = key
-    this.pinnedKey = pin ? key : null
-    tip.classList.add('kbn-tip-open')
-    tip.classList.toggle('kbn-tip-pinned', pin)
+    this.openMoment(tip, key, pin, sources, line.startMs, line.endMs, words)
 
     const chartBox = chart.getBoundingClientRect()
-    const anchor = e.clientX - chartBox.left
-    const flip = anchor > chartBox.width * 0.62
-    tip.style.top = `${e.clientY - chartBox.top}px`
-    tip.classList.toggle('kbn-tip-flip', flip)
-    tip.style.left = flip ? 'auto' : `${anchor + 9}px`
-    tip.style.right = flip ? `${chartBox.width - anchor + 9}px` : 'auto'
+    placeTip(tip, chartBox, e.clientX - chartBox.left, e.clientY - chartBox.top)
   }
 
   private render(model: DayModel): void {
@@ -2513,42 +2494,16 @@ class DayViewImpl implements TemporalView {
     const startMs = win.startMs + beat.minute * MINUTE_MS
     const tip = this.ensureTip()
     const key = `${lane.key}:${beat.minute}`
-    renderTip(tip, beatTip(beat, win, this.moments.peek(key, pin)))
-    // The words arrive late or not at all; the tooltip is already correct
-    // without them, and redraws in place when they land. A pin asks again for
-    // the UNTRUNCATED words — the daemon does the cutting, so the pinned slip
-    // cannot show the rest of a sentence it was never sent.
-    this.moments.request(
-      key,
-      beat.sources,
-      startMs,
-      startMs + MINUTE_MS,
-      (words) => {
-        // Guard the pin state as well as the mark: a hover answer landing on a
-        // tooltip that has since been pinned would paint the cut text back over
-        // the full text.
-        if (this.hoveredKey !== key || (this.pinnedKey === key) !== pin) return
-        renderTip(tip, beatTip(beat, win, words))
-      },
-      pin,
+    // A pin asks again for the UNTRUNCATED words — the daemon does the cutting,
+    // so the pinned slip cannot show the rest of a sentence it was never sent.
+    this.openMoment(tip, key, pin, beat.sources, startMs, startMs + MINUTE_MS, (words) =>
+      beatTip(beat, win, words),
     )
-    this.hoveredKey = key
-    this.pinnedKey = pin ? key : null
-    tip.classList.add('kbn-tip-open')
-    // Pinned, the slip stops being a passing annotation and becomes something
-    // you read: it takes the pointer (so a long transcript can be scrolled) and
-    // is allowed to grow. See momentTip.css.
-    tip.classList.toggle('kbn-tip-pinned', pin)
 
-    // Positioned against the chart, and flipped past the right edge so a late
-    // minute does not push the slip off the sheet.
+    // Positioned against the chart; the anchor is the beat's own column.
     const chartBox = chart.getBoundingClientRect()
     const anchor = box.left - chartBox.left + (beat.minute + 0.5) * perMinute
-    const flip = anchor > chartBox.width * 0.62
-    tip.style.top = `${box.top - chartBox.top}px`
-    tip.classList.toggle('kbn-tip-flip', flip)
-    tip.style.left = flip ? 'auto' : `${anchor + 9}px`
-    tip.style.right = flip ? `${chartBox.width - anchor + 9}px` : 'auto'
+    placeTip(tip, chartBox, anchor, box.top - chartBox.top)
   }
 
   /**
@@ -2627,30 +2582,10 @@ class DayViewImpl implements TemporalView {
     // lane, and every pixel of the dead zone must reuse it rather than mint a
     // fresh cache entry and a fresh fetch on every mouse move.
     const key = `${lane.key}:magnet`
-    renderTip(tip, magnetTip(exchange, this.moments.peek(key, pin)))
-    this.moments.request(
-      key,
-      sources,
-      fromMs,
-      toMs,
-      (words) => {
-        if (this.hoveredKey !== key || (this.pinnedKey === key) !== pin) return
-        renderTip(tip, magnetTip(exchange, words))
-      },
-      pin,
-    )
-    this.hoveredKey = key
-    this.pinnedKey = pin ? key : null
-    tip.classList.add('kbn-tip-open')
-    tip.classList.toggle('kbn-tip-pinned', pin)
+    this.openMoment(tip, key, pin, sources, fromMs, toMs, (words) => magnetTip(exchange, words))
 
     const chartBox = chart.getBoundingClientRect()
-    const anchor = e.clientX - chartBox.left
-    const flip = anchor > chartBox.width * 0.62
-    tip.style.top = `${e.clientY - chartBox.top}px`
-    tip.classList.toggle('kbn-tip-flip', flip)
-    tip.style.left = flip ? 'auto' : `${anchor + 9}px`
-    tip.style.right = flip ? `${chartBox.width - anchor + 9}px` : 'auto'
+    placeTip(tip, chartBox, e.clientX - chartBox.left, e.clientY - chartBox.top)
   }
 
   /**
@@ -2690,6 +2625,54 @@ class DayViewImpl implements TemporalView {
     this.chartEl?.append(tip)
     this.tip = tip
     return tip
+  }
+
+  /**
+   * OPEN A SLIP OVER A SPAN, AND THEN GO AND ASK IT WHAT WAS SAID.
+   *
+   * Every hover in this view has the same two-beat shape, and only `build`
+   * differs: draw the answer that is already known from the recorded marks,
+   * then ask `/api/v1/moment` for the words and redraw in place when they
+   * land. The tooltip is correct before the network answers and stays correct
+   * if it never does.
+   *
+   * The guard is why this must be one function rather than three: a late answer
+   * belongs to the mark that asked for it, so it is dropped if the pointer has
+   * moved on OR if the pin state has changed underneath it — a hover's cut text
+   * painting back over a pinned slip's full text is the bug it exists to stop.
+   *
+   * The state is written AFTER the request, which is only safe because
+   * `MomentLoader.request` never calls back synchronously (it debounces, or
+   * resolves a promise, or returns having nothing to ask). Keep it that way.
+   */
+  private openMoment(
+    tip: HTMLElement,
+    key: string,
+    pin: boolean,
+    sources: readonly MomentSource[],
+    fromMs: number,
+    toMs: number,
+    build: (words?: MomentWords) => SlotTip,
+  ): void {
+    renderTip(tip, build(this.moments.peek(key, pin)))
+    this.moments.request(
+      key,
+      sources,
+      fromMs,
+      toMs,
+      (words) => {
+        if (this.hoveredKey !== key || (this.pinnedKey === key) !== pin) return
+        renderTip(tip, build(words))
+      },
+      pin,
+    )
+    this.hoveredKey = key
+    this.pinnedKey = pin ? key : null
+    tip.classList.add('kbn-tip-open')
+    // Pinned, the slip stops being a passing annotation and becomes something
+    // you read: it takes the pointer (so a long transcript can be scrolled) and
+    // is allowed to grow. See momentTip.css.
+    tip.classList.toggle('kbn-tip-pinned', pin)
   }
 
   /** Close the slip. A pinned one ignores this — the pointer wandering off is

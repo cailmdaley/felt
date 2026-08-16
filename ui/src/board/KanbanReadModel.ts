@@ -346,11 +346,11 @@ export function isSleepingOnSchedule(card: KanbanCard): boolean {
 }
 
 /** The Desk columns a lensed member can appear in. */
-export type LensColumn = 'drafts' | 'inFlight' | 'awaitingReview';
+type LensColumn = 'drafts' | 'inFlight' | 'awaitingReview';
 
 /** A member the lens has to CONJURE: it belongs to the cycle but is not on any
  *  Desk column right now (resting, or snoozed until a day inside the span). */
-export interface CycleLensGhost {
+interface CycleLensGhost {
   card: KanbanCard;
   /** The column the card would sit in if it were on the desk. */
   column: LensColumn;

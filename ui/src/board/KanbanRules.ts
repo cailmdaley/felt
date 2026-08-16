@@ -13,7 +13,7 @@ import { civilDayToLocalDate, dueCivilDay, isoDayLocal } from './civilDay.js';
 // there is no separate scheduled surface, because a `due:` is a date a card
 // wears, never a place it goes. (The old `soon` exiled every future-dated card
 // to a permanent timeline strip; the strip is gone, so `soon` meant invisible.)
-export const KANBAN_HORIZONS = ['now', 'stashed'] as const;
+const KANBAN_HORIZONS = ['now', 'stashed'] as const;
 export type KanbanHorizon = typeof KANBAN_HORIZONS[number];
 const HORIZON_SET = new Set<string>(KANBAN_HORIZONS);
 
@@ -545,12 +545,6 @@ export function nextStandingLaunch(
   } catch {
     return undefined;
   }
-}
-
-export function parseDueMs(value: unknown): number | undefined {
-  if (typeof value !== 'string' || !value.trim()) return undefined;
-  const ms = Date.parse(value);
-  return Number.isFinite(ms) ? ms : undefined;
 }
 
 function normalizeHorizon(value: unknown): KanbanHorizon | undefined {

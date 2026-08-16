@@ -8,8 +8,9 @@
  * different geometry — but the same question when you point at one: *what was
  * happening here?* The answer has the same shape either way (a time span, one
  * line per pigment saying who and how much, then the words), so it is built and
- * drawn once here. The views keep only their own snapping and positioning,
- * which is the part that genuinely differs.
+ * drawn once here. The views keep only their own snapping — where the anchor
+ * falls, which is the part that genuinely differs; how the slip hangs off that
+ * anchor is `placeTip`, and is the same rule everywhere.
  *
  * ## The words
  *
@@ -294,7 +295,7 @@ export interface ExchangeMark {
 }
 
 /** One side of the last exchange — a message, and when it was sent. */
-export interface ExchangeTurn {
+interface ExchangeTurn {
   /** `attention` is yours, `reply` is the agent's. */
   kind: 'attention' | 'reply'
   atMs: number
@@ -567,11 +568,35 @@ export function renderTip(host: HTMLElement, tip: SlotTip): void {
   }
 }
 
+/** Past this much of the container's width the slip hangs off the anchor's
+ *  left instead of its right, so a late minute does not push it off the sheet. */
+const TIP_FLIP_FRACTION = 0.62
+
+/** The gap between the anchor and the near edge of the slip, either way round. */
+const TIP_GAP_PX = 9
+
+/**
+ * Hang the slip off an anchor.
+ *
+ * `box` is the container the tip is positioned within — the same element it was
+ * appended to — measured by the caller, and `anchorX`/`topPx` are already in
+ * that box's coordinates. That split is the whole point: WHERE the mark is
+ * differs per view (a pointer position, a minute fraction, a slot fraction) and
+ * stays with the view; how a slip hangs off it does not, and lives here.
+ */
+export function placeTip(tip: HTMLElement, box: DOMRect, anchorX: number, topPx: number): void {
+  const flip = anchorX > box.width * TIP_FLIP_FRACTION
+  tip.style.top = `${topPx}px`
+  tip.classList.toggle('kbn-tip-flip', flip)
+  tip.style.left = flip ? 'auto' : `${anchorX + TIP_GAP_PX}px`
+  tip.style.right = flip ? `${box.width - anchorX + TIP_GAP_PX}px` : 'auto'
+}
+
 // ── Fetching the words ───────────────────────────────────────────────────────
 
 /** Long enough that sweeping a pointer down a rail asks for nothing, short
  *  enough that stopping on a mark feels like the tooltip already knew. */
-export const MOMENT_DEBOUNCE_MS = 150
+const MOMENT_DEBOUNCE_MS = 150
 
 /** At most this many transcripts per hovered mark. A mark almost always has
  *  one session behind it; a busy slot can have several, and asking all of them
@@ -599,7 +624,7 @@ const MAX_EXCERPTS = 6
  * session behind a spine is asked before any session that only worked.
  * Stable, so arrival order still breaks ties within each group.
  */
-export function orderSources(sources: readonly MomentSource[]): MomentSource[] {
+function orderSources(sources: readonly MomentSource[]): MomentSource[] {
   return [...sources.filter((s) => s.spoke), ...sources.filter((s) => !s.spoke)]
 }
 
@@ -618,7 +643,7 @@ export function orderSources(sources: readonly MomentSource[]): MomentSource[] {
  * delegation register (`return` — a subagent's report, a teammate message),
  * which nobody typed; only `prose` is speech.
  */
-export function pickExcerpts(excerpts: readonly MomentExcerpt[], cap = MAX_EXCERPTS): MomentExcerpt[] {
+function pickExcerpts(excerpts: readonly MomentExcerpt[], cap = MAX_EXCERPTS): MomentExcerpt[] {
   const human = (e: MomentExcerpt): boolean => e.role === 'user' && (e.kind ?? 'prose') === 'prose'
   const inTime = [...excerpts].sort((a, b) => a.at_ms - b.at_ms)
   if (inTime.length <= cap) return inTime

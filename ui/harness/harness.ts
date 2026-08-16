@@ -6,8 +6,9 @@
  * ECONNREFUSED). So the board can't be verified against the running daemon.
  * This harness builds a single self-contained IIFE bundle that mounts the real
  * FiberDetailModal with MOCKED daemon responses, openable via `file://` and
- * screenshot-able with agent-browser. Build: `npx vite build -c
- * vite.harness.config.ts`; open the emitted harness-dist/index.html via file://.
+ * screenshot-able with agent-browser. Build: `npm run harness`; open the emitted
+ * harness-dist/index.html via file://. (AGENTS.md's ui/ tree entry names both
+ * harnesses, so this is findable without already knowing it is here.)
  *
  * Two interception layers:
  *  1. `window.fetch` is stubbed for every daemon route the components touch

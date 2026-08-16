@@ -58,7 +58,7 @@
  * now; a lone pigment with nothing to be compared against needs only to clear
  * contrast on paper, which this does.
  */
-export const CURVE_AGENT = '#3D5BA0'
+const CURVE_AGENT = '#3D5BA0'
 
 // ── The parameters ───────────────────────────────────────────────────────────
 
@@ -604,7 +604,7 @@ export function edgePath(runs: readonly CurvePoint[][]): string {
 }
 
 /** The wash beneath it: each run closed down to the baseline and back. */
-export function areaPath(runs: readonly CurvePoint[][]): string {
+function areaPath(runs: readonly CurvePoint[][]): string {
   return runs
     .map((run) => {
       const first = run[0]
@@ -716,7 +716,7 @@ export function spineWidths(spines: readonly number[]): number[] {
 
 /** What a ladder line IS — the two things drawn differently, because they are
  *  two different claims. */
-export type LadderKind = 'session' | 'agent'
+type LadderKind = 'session' | 'agent'
 
 /** The interval as the ladder needs it: two instants, what it was, and whether
  *  anybody recorded its close. */
@@ -826,7 +826,7 @@ export function ladderHeight(lanes: readonly (readonly LadderLine[])[]): number 
  * rather than its old share of it: 58% of the rail before, 48% now, and the
  * curve keeps the difference on top of its own.
  */
-export const LADDER_BAND_PX = 14
+const LADDER_BAND_PX = 14
 
 /** The gap between neighbouring rungs. Three pixels while the ladder is short
  *  — the pitch at which one line reads as one agent, opened up with the taller

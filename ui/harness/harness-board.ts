@@ -24,7 +24,7 @@
  * exercised against is the shape they really receive.
  *
  * Distinct from harness/harness.ts (slice C), which mounts FiberDetailModal.
- * Build: `npx vite build -c vite.harness-board.config.ts`; open the emitted
+ * Build: `npm run harness:board`; open the emitted
  * harness-board-dist/index.html via file://. The page ships with the bundle,
  * so the output directory is self-sufficient — nothing to copy in by hand.
  */

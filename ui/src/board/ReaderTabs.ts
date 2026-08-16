@@ -22,7 +22,9 @@
  * a genuine miss, which is exactly the dedupe rule expressed as control flow.
  *
  * No DOM, no storage — `coerceTabRefs` is the one concession to persistence,
- * and it only reads a parsed record.
+ * and it only reads a parsed record. That holds even though the two callers
+ * turned out to build the same tab tree after all: it lives next door in
+ * `ReaderChrome`, where a module that touches elements belongs.
  */
 
 /** The one thing a tab must have: the file it stands for. */

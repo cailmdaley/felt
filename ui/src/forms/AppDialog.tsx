@@ -10,7 +10,7 @@
 import * as Dialog from '@radix-ui/react-dialog'
 import type { ReactNode } from 'react'
 
-export const appDialogOverlayStyles: React.CSSProperties = {
+const appDialogOverlayStyles: React.CSSProperties = {
   position: 'fixed',
   inset: 0,
   background: 'rgba(20, 16, 12, 0.42)',
@@ -18,7 +18,7 @@ export const appDialogOverlayStyles: React.CSSProperties = {
   zIndex: 10000,
 }
 
-export const appDialogContentStyles: React.CSSProperties = {
+const appDialogContentStyles: React.CSSProperties = {
   position: 'fixed',
   top: '50%',
   left: '50%',

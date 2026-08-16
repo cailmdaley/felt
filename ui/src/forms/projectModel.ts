@@ -52,7 +52,7 @@ import { parseCompositeFeed } from '../board/KanbanComposite.js'
  */
 export const shuttleOrigin = (originId: string): string => originId.replace(/^remote-/, '')
 
-export interface ProjectEntry {
+interface ProjectEntry {
   /** Stable key: `${originId}:${path}`. */
   id: string
   /** Display name — the project_dir basename. */
@@ -82,7 +82,7 @@ export interface ProjectModel {
   activityById: Record<string, number>
 }
 
-export interface StoreRegistryOrigin {
+interface StoreRegistryOrigin {
   kind?: 'local' | 'remote' | string
   stale?: boolean
   felt_stores?: string[]
@@ -95,7 +95,7 @@ export interface StoreRegistryOrigin {
   last_error?: string
 }
 
-export interface StoreRegistry {
+interface StoreRegistry {
   host?: string
   origins?: Record<string, StoreRegistryOrigin>
 }

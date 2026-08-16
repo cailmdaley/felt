@@ -40,7 +40,7 @@
 
 import { mapFeltJsonToFiber, type Fiber } from './KanbanFiber.js';
 
-export interface CompositeRuntime {
+interface CompositeRuntime {
   /** Owner-served tmux session name for a live worker on this fiber. */
   tmuxSession: string;
   /** Owner-served activity category for a tracked LIVE worker — one of:

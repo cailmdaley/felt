@@ -83,7 +83,7 @@
    lifts the clamp on the WORDS (above), which is what anybody pins for; a
    summary row and a tool-call listing are a ledger either way, and a ledger
    whose rows re-flow when you click it is a different document. */
-/* Flipped when the mark sits late in the day — the view swaps left for right,
+/* Flipped when the mark sits late in the day — `placeTip` swaps left for right,
    this only moves the origin the box grows from. */
 .kbn-tip-flip { text-align: left; }
 
