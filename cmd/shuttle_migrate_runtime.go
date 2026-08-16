@@ -38,7 +38,13 @@ present wins (the flat one is the older write and is dropped). Idempotent.
 Scoped to fibers this host owns (shuttle.host == own host) — nesting a fiber a
 not-yet-flipped remote owns and syncing it would blind that remote's flat-only
 daemon. Use --dir to point at a store, --host to target a different owner, and
---dry-run to print the plan without writing.`,
+--dry-run to print the plan without writing.
+
+A legacy one-time migration, retained deliberately as a fallback: every writer
+in the fleet emits nested keys, so a flat-only fiber can only surface from a
+store that has been offline since the cutover (an old checkout, an unpushed
+tree, a backup). The daemon no longer scans for them; this is the remedy if one
+turns up.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ownHost, err := resolveOwnHost(migrateRuntimeHost)

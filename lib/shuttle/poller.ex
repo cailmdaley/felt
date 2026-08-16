@@ -29,7 +29,6 @@ defmodule Shuttle.Poller do
   require Logger
 
   alias Shuttle.{
-    Continuation,
     Dispatcher,
     LifecycleStore,
     StandingRole,
@@ -291,16 +290,7 @@ defmodule Shuttle.Poller do
       # listing that omits a fiber is deletion evidence). Safe because these
       # rows only nominate candidates — `Dispatcher.dispatch` re-fetches the
       # fiber and re-verifies status before any launch.
-      last_known_listings: %{},
-      # Has the one-shot flat-runtime-key boot scan run yet? Flips true
-      # after the FIRST `apply_poll_cycle/2` (the earliest point candidates —
-      # already-fetched, no extra felt shell-out — are available). Logs any
-      # fiber still carrying ONLY legacy flat `shuttle.<key>` runtime fields
-      # (no nested `shuttle.runtime.<key>` counterpart) — exactly the fibers
-      # `Shuttle.Continuation`'s reader no longer falls back to now that the
-      # nested-OR-flat shim is gone, so they'd silently read as having no
-      # continuation state. `felt shuttle migrate-runtime` lifts them.
-      flat_runtime_scan_done: false
+      last_known_listings: %{}
     ]
   end
 
@@ -1203,7 +1193,6 @@ defmodule Shuttle.Poller do
     refreshed_at =
       if listings_ok?, do: DateTime.utc_now(), else: state.document_cache_refreshed_at
 
-    state = scan_flat_runtime_fibers_once(state, candidates)
     state = reconcile(%{state | felt_stores: felt_stores})
 
     standing_roles = StandingRoles.standing_roles_from_candidates(candidates, state)
@@ -2634,35 +2623,6 @@ defmodule Shuttle.Poller do
       end
 
     %{state | dispatch_failures: Map.put(state.dispatch_failures, runtime_key, entry)}
-  end
-
-  # One-shot, first-poll-cycle scan for fibers still carrying ONLY legacy
-  # flat runtime keys (no nested shuttle.runtime.<key> counterpart) — the
-  # exact fibers `Shuttle.Continuation`'s reader stopped falling back to when
-  # the nested-OR-flat shim was deleted. Rides the already-fetched `candidates`
-  # list (no extra felt shell-out) so it costs nothing beyond one Enum.each.
-  # Loud, not silent: a straggler now silently reads as "no continuation
-  # state" (safe-default fresh, per Continuation's moduledoc) rather than
-  # erroring, so without this log an un-migrated fiber's degraded resume
-  # behavior would go unnoticed. `felt shuttle migrate-runtime <fiber>` lifts
-  # it. Runs once per daemon lifetime — the situation doesn't change poll to
-  # poll unless an operator lifts fibers, which is worth a fresh boot to
-  # re-confirm, not a per-cycle re-scan.
-  defp scan_flat_runtime_fibers_once(%State{flat_runtime_scan_done: true} = state, _candidates),
-    do: state
-
-  defp scan_flat_runtime_fibers_once(%State{} = state, candidates) do
-    for fiber <- candidates,
-        flat_keys = Continuation.flat_only_runtime_keys(fiber),
-        flat_keys != [] do
-      Logger.warning(
-        "#{fiber_address(fiber)} carries ONLY legacy flat runtime key(s) #{inspect(flat_keys)} " <>
-          "with no nested shuttle.runtime counterpart — it will read as having no continuation " <>
-          "state (safe-default fresh) until lifted. Run: felt shuttle migrate-runtime #{fiber_address(fiber)}"
-      )
-    end
-
-    %{state | flat_runtime_scan_done: true}
   end
 
   # ── Reconciliation ──
