@@ -121,6 +121,16 @@
    the marginal italic rather than the head figures' mono: a cycle is a name
    someone chose, not a measurement. Sits inboard of the paging cluster at the
    head's right end, and truncates rather than wrapping the header. */
+/* The head's centre: figures and cycles as ONE centred group, so nothing on
+   the line leans. Baseline-aligned — the figures are mono, the cycles italic
+   serif, and a shared baseline is what makes two hands read as one sentence. */
+.wk-headcenter {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  min-width: 0;
+}
+
 .wk-cycles {
   --wk-ochre-deep: #A57D2B;
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);

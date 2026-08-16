@@ -975,23 +975,32 @@ class WeekView implements TemporalView {
 
     nav.append(prev, label, next)
 
+    head.append(nav)
+    return head
+  }
+
+  /** What the week cost, and where it sits in something longer than itself —
+   *  ONE centred group. The figures and the cycles clause used to live apart
+   *  (centre slot vs. inboard-of-nav), which read as off-kilter: a centred
+   *  thing and a right-leaning thing fighting over the same line. Both now
+   *  ride the scaffold's centre slot, figures first, cycles in the marginal
+   *  hand beside them. Out of flow there, so neither can grow the row. */
+  private buildHeadFigures(): HTMLElement {
+    const group = document.createElement('div')
+    group.className = 'wk-headcenter'
+
+    const totals = document.createElement('div')
+    totals.className = 'kbn-view-headfigures wk-totals'
+    this.totals = totals
+
     // Which cycle(s) this week falls inside — the week's place in something
     // longer than itself, in the marginal hand rather than the technical one.
     const cycles = document.createElement('div')
     cycles.className = 'wk-cycles'
     this.cycles = cycles
 
-    head.append(cycles, nav)
-    return head
-  }
-
-  /** What the week cost — the centre of the head, exactly where Day puts the
-   *  same sentence about a day. Out of flow there, so it cannot grow the row. */
-  private buildHeadFigures(): HTMLElement {
-    const totals = document.createElement('div')
-    totals.className = 'kbn-view-headfigures wk-totals'
-    this.totals = totals
-    return totals
+    group.append(totals, cycles)
+    return group
   }
 
   /**
