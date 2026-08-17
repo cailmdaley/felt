@@ -7,26 +7,21 @@ import (
 	"testing"
 )
 
-// TestCodexRegistrationSource pins the codex marketplace-registration fix:
-// codex (≤0.133) rejects a local directory path in `plugin marketplace add`,
-// so a local --source must register the GitHub ref instead (the local plugin
-// content still reaches codex via the plugin cache). Git refs pass through with
-// the #→@ adaptation codex expects.
-func TestCodexRegistrationSource(t *testing.T) {
-	old := Version
-	Version = "dev" // → defaultMarketplaceRef() == marketplaceRepo
-	defer func() { Version = old }()
-
+// TestCodexMarketplaceSource pins the one translation felt does at the Codex
+// boundary: the two CLIs spell a pinned ref differently (`#tag` vs `@tag`) and
+// defaultMarketplaceRef() emits Claude's form. Local paths pass through — Codex
+// accepts a directory marketplace directly.
+func TestCodexMarketplaceSource(t *testing.T) {
 	cases := []struct{ in, want string }{
-		{"/home/cdaley/code/felt", "cailmdaley/felt"},          // local abs path → GitHub ref
-		{"~/code/felt", "cailmdaley/felt"},                     // local ~ path → GitHub ref
-		{"./felt", "cailmdaley/felt"},                          // local rel path → GitHub ref
+		{"/home/cdaley/code/felt", "/home/cdaley/code/felt"},   // local abs path → unchanged
+		{"~/code/felt", "~/code/felt"},                         // local ~ path → unchanged
+		{"./felt", "./felt"},                                   // local rel path → unchanged
 		{"cailmdaley/felt", "cailmdaley/felt"},                 // bare repo ref → unchanged
 		{"cailmdaley/felt#v1.0.14", "cailmdaley/felt@v1.0.14"}, // git ref → #→@
 	}
 	for _, tc := range cases {
-		if got := codexRegistrationSource(tc.in); got != tc.want {
-			t.Errorf("codexRegistrationSource(%q) = %q, want %q", tc.in, got, tc.want)
+		if got := codexMarketplaceSource(tc.in); got != tc.want {
+			t.Errorf("codexMarketplaceSource(%q) = %q, want %q", tc.in, got, tc.want)
 		}
 	}
 }

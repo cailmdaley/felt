@@ -157,6 +157,18 @@ is folded in here rather than into a separate Unreleased section.
 
 ### Changed
 
+- **`felt setup codex` installs through Codex's own plugin commands.** Setup
+  now runs `codex plugin marketplace add` followed by `codex plugin add`, and
+  Codex materializes the plugin cache and writes its own
+  `[plugins."felt@cailmdaley-felt"] enabled = true`. felt no longer edits
+  `~/.codex/config.toml`, mirrors the plugin directory into Codex's cache by
+  hand, or substitutes a GitHub ref when you pass a local `--source` — Codex
+  accepts a directory marketplace directly, so local-checkout development
+  installs the checkout itself. `--uninstall` runs `codex plugin remove` and
+  `codex plugin marketplace remove`. Advancing a pinned tag on upgrade keeps
+  working: because Codex binds a marketplace name to one source, setup drops
+  and re-adds the registration when the ref moves. Requires a Codex with the
+  native `plugin add` verb (verified on codex-cli 0.147.0).
 - **A search no longer prints closed fibers.** A query, `-t`, or `--has-field`
   still widens past the open+active default so untracked fibers can match, but
   closed matches are counted in a trailing `(+N closed — add -s closed)` hint
@@ -227,6 +239,10 @@ is folded in here rather than into a separate Unreleased section.
 
 ### Removed
 
+- The `features.plugin_hooks = true` write in `felt setup codex`. Codex runs
+  plugin hooks without it. Note that Codex gates hooks on its own review
+  instead: your next interactive session asks you to trust felt's hooks, and
+  until you accept, the skills load but the hooks stay dormant.
 - The legacy agent-registry mode. `builtins: "replace"` is gone; a file
   still carrying it now fails loudly rather than silently doing something
   else. Use `"restrict"`.

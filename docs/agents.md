@@ -36,7 +36,7 @@ claude plugin install felt@cailmdaley-felt
 
 # Codex
 codex plugin marketplace add cailmdaley/felt[@v<tag>]
-# then config.toml: features.plugin_hooks = true, plugins."felt@cailmdaley-felt".enabled = true
+codex plugin add felt@cailmdaley-felt
 ```
 
 Neither needs a local checkout — the CLI clones the marketplace straight from
@@ -47,6 +47,15 @@ binary that installed it.
 Both commands are idempotent, so re-running is safe. Both take `--uninstall` to
 remove what they installed. `felt uninstall` clears both harnesses at once, and
 serves as the general inverse.
+
+!!! note "Codex asks you to trust the hooks"
+
+    Codex reviews a plugin's hooks before it will run them. Your next
+    interactive Codex session shows a review screen for felt's; accept it once
+    and the setting persists. Until you do, the skills load but the hooks stay
+    dormant — no `SessionStart` fiber context, and nothing recorded for
+    Shuttle's activity stream. A headless `codex exec` session can't show the
+    prompt, so trust felt's hooks from an interactive session first.
 
 `install.sh` (the curl installer) runs both commands automatically for whichever
 CLI it finds on `PATH`, with no opt-out flag — see
