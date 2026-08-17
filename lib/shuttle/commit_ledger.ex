@@ -27,9 +27,13 @@ defmodule Shuttle.CommitLedger do
 
   ## The writer is the hook
 
-  Unlike the session ledger, the daemon does not write this file — `loom/hooks/
-  shuttle-hook.sh` does, on `PostToolUse` for a Bash call that ran a
-  `git commit`. The daemon is a *reader*, so everything here is read-side: the
+  Unlike the session ledger, the daemon does not write this file — `felt hook
+  commit` does (cmd/hook_commit.go, wired as the plugin's `commit.sh`), on
+  `PostToolUse` for a Bash call that ran a `git commit`. The writer emits the
+  fields below in this order, and this module is the contract they answer to:
+  a line is a commit when `at` is an integer and `sha` a non-empty string.
+
+  The daemon is a *reader*, so everything here is read-side: the
   same tolerant parse, the same rotated-sibling streaming, the same "a
   malformed line is skipped, never raised".
 

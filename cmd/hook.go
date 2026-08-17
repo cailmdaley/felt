@@ -112,6 +112,7 @@ func init() {
 	hookCmd.AddCommand(hookPreToolCmd)
 	hookCmd.AddCommand(hookPostToolCmd)
 	hookCmd.AddCommand(hookEventCmd)
+	hookCmd.AddCommand(hookCommitCmd)
 }
 
 // ----------------------------------------------------------------------------
