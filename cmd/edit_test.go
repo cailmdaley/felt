@@ -120,7 +120,7 @@ func TestEditBodyOverwriteDetection(t *testing.T) {
 
 // TestEditSetUnsetExtraScalars covers the generic opaque-scalar writer that the
 // cross-host kanban horizon path shells: --set is YAML-typed (so cold=true is a
-// real boolean in the JSON Portolan reads), --unset removes, and a full
+// real boolean in the JSON the board UI reads), --unset removes, and a full
 // horizon round-trip set→unset leaves the frontmatter clean.
 func TestEditSetUnsetExtraScalars(t *testing.T) {
 	dir := t.TempDir()
@@ -150,7 +150,7 @@ func TestEditSetUnsetExtraScalars(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Read: %v", err)
 	}
-	// Type fidelity is the contract: Portolan reads `typeof cold === 'boolean'`.
+	// Type fidelity is the contract: the board UI reads `typeof cold === 'boolean'`.
 	encoded, err := json.Marshal(f)
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)

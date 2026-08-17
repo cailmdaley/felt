@@ -70,7 +70,7 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
 
     # report_path is `dirname(felt.path)/report.html` — felt's carried path is
     # symlink-canonicalized (on macOS the tmp store's /var → /private/var), and
-    # Portolan serves it as an absolute path, so assert against that realpath.
+    # the panel serves it as an absolute path, so assert against that realpath.
     # `dir` is that same canonicalized directory: the base the panel resolves a
     # relative `:::{embed}` / image against, emitted for every fiber.
     report = real_report_path(store, "tests/document")

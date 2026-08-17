@@ -3,7 +3,7 @@ package cmd
 import "strings"
 
 // splitTags splits comma-separated tag input into individual tags.
-// "claim, tapestry:foo" -> ["claim", "tapestry:foo"]
+// "claim, urgent" -> ["claim", "urgent"]
 func splitTags(input string) []string {
 	parts := strings.Split(input, ",")
 	var tags []string

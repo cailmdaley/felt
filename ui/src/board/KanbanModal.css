@@ -69,7 +69,7 @@
    the character body; F1 is the flourish overlay (vine + cartouche)
    drawn on top at low opacity. Pattern adapted from
    cailmdaley.github.io's science-ai.astro and vellum's .illuminated
-   class. Served from portolan's public/fonts/. */
+   class. Files live in ui/public/fonts/, served by the daemon at /fonts/. */
 @font-face {
   font-family: 'EBGI F1';
   src: url('/fonts/EBGaramond-InitialsF1.otf') format('opentype');

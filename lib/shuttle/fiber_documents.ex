@@ -5,7 +5,7 @@ defmodule Shuttle.FiberDocuments do
   Shuttle owns runtime state, but felt remains the document reader. This module
   shells out to `felt ls` for each configured store and returns the raw felt JSON
   entry plus enough path metadata for remote clients to render and mutate cards
-  without relying on Portolan's WebSocket fiber-tree snapshots.
+  from a single JSON read, with no fiber-tree WebSocket needed.
   """
 
   alias Shuttle.FeltStores
@@ -168,10 +168,10 @@ defmodule Shuttle.FiberDocuments do
 
   @doc """
   Resolve a SINGLE fiber by its canonical id without dragging in the whole
-  store. This is the per-fiber dual of `list/1`: Portolan resolves a remote
-  fiber's content/owner (kanban card → vellum view) through this instead of
-  fetching every fiber and linear-scanning, collapsing a ~3.5MB cross-tunnel
-  transfer to one fiber.
+  store. This is the per-fiber dual of `list/1`: the board UI resolves a
+  remote fiber's content/owner (kanban card → vellum view) through this
+  instead of fetching every fiber and linear-scanning, collapsing a ~3.5MB
+  cross-tunnel transfer to one fiber.
 
   Two-tier lookup:
 
@@ -186,7 +186,7 @@ defmodule Shuttle.FiberDocuments do
       only fires for the handful of symlinked-out projects.
 
   Returns the same `{:ok, %{host, felt_stores, fibers: […]}}` envelope as
-  `list/1` with zero or one fiber, so Portolan reuses the same response parser.
+  `list/1` with zero or one fiber, so the client reuses the same response parser.
   A missing fiber is `{:ok, …, fibers: []}` (not an error); a felt failure
   during the scan fallback surfaces as `{:error, errors}`.
   """
@@ -426,12 +426,12 @@ defmodule Shuttle.FiberDocuments do
   defp entry_for(store, %{"id" => id} = fiber, report_mode) when is_binary(id) and id != "" do
     # Three values, all read from felt, none reverse-derived or guessed by Shuttle:
     #
-    #   * The wire `path` is the SERVED-store-relative address Portolan opens the
-    #     file by (`felt_store` + `path`). Portolan's `loomRelativeWirePath`
-    #     depends on this served-relative shape, so it stays served-relative —
-    #     but it is now READ from felt's carried `path` (its leaf shape) joined
-    #     under felt's traversal `id` prefix, never guessed from `entry_point`.
-    #     See `served_wire_path/1`.
+    #   * The wire `path` is the SERVED-store-relative address the client opens
+    #     the file by (`felt_store` + `path`) — the composite-feed parser
+    #     requires both and skips a row missing either, so it stays
+    #     served-relative. It is READ from felt's carried `path` (its leaf
+    #     shape) joined under felt's traversal `id` prefix, never guessed from
+    #     `entry_point`. See `served_wire_path/1`.
     #
     #   * The card's `slug`/canonical id is the REALPATH store-relative slug
     #     (`review-ngmix`, where the bytes physically root), read from felt's
@@ -461,7 +461,7 @@ defmodule Shuttle.FiberDocuments do
     # sibling. Emitted unconditionally (not gated on report.html existing) so
     # relative artifacts render for every local fiber, not only reported ones.
     # felt's `path` is symlink-canonicalized and already absolute — the exact
-    # form `/file` reads by and Portolan serves over /project-file/<origin><abs>.
+    # form `/file` reads by.
     case fiber_dir(fiber) do
       {:ok, dir} ->
         entry = Map.put(entry, :dir, dir)
@@ -511,7 +511,7 @@ defmodule Shuttle.FiberDocuments do
   defp put_slug(%{"id" => id} = fiber, id), do: fiber
   defp put_slug(fiber, slug), do: Map.put(fiber, "slug", slug)
 
-  # Served-store-relative wire path, the address Portolan opens the file by
+  # Served-store-relative wire path, the address the client opens the file by
   # (`felt_store` + `path`). The PREFIX comes from felt's traversal `id` (which
   # carries the served-store prefix a symlink-traversed fiber's realpath drops);
   # the LEAF SHAPE — flat `<leaf>.md` vs dir-contained `<leaf>/<leaf>.md` — comes

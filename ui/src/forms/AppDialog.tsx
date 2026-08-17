@@ -2,9 +2,8 @@
  * AppDialog — a thin Radix Dialog wrapper for the Stash/Capture islands.
  *
  * Gives focus trap, escape-to-close, accessible labelling, scroll lock, and
- * portal-to-body for free. Ported from Portolan's `src/ui/AppDialog.tsx`;
- * the standalone UI has no competing modal stack, so the z-index just needs
- * to clear the board (kept at the original 10000/10001 for headroom).
+ * portal-to-body for free. The standalone UI has no competing modal stack,
+ * so the z-index just needs to clear the board (10000/10001 for headroom).
  */
 
 import * as Dialog from '@radix-ui/react-dialog'

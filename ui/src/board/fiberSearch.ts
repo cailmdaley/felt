@@ -1,9 +1,8 @@
 // Client-side parent-picker search over the Shuttle daemon's fiber index.
 //
-// Replaces Portolan's retired `/kanban/fiber-search` endpoint: the caller
-// fetches `GET :4000/api/v1/fibers` once (ids + names, a few hundred rows)
-// and filters per keystroke with `filterParentCandidates` — the same rule
-// the backend used, ported verbatim.
+// The caller fetches `GET :4000/api/v1/fibers` once (ids + names, a few
+// hundred rows) and filters per keystroke with `filterParentCandidates`, so
+// there's no per-keystroke round trip to the daemon.
 
 export interface FiberSearchResult {
   id: string

@@ -7,10 +7,9 @@ import 'katex/dist/katex.min.css'
 // often a hard-wrapped paragraph stored as a `|-` block scalar — so a soft
 // newline must fold to a space, not a `<br>`. With `breaks:true` a wrapped
 // outcome (e.g. science/cmbx's) rendered as a ragged wall of forced line
-// breaks; CommonMark folding matches the vellum/PretextProse render the
-// Portolan web-app shows, which is the parity target. Intentional breaks
-// still work via GFM (two trailing spaces / backslash); blank lines still
-// separate paragraphs.
+// breaks; CommonMark folding matches the vellum/PretextProse render, which is
+// the parity target. Intentional breaks still work via GFM (two trailing
+// spaces / backslash); blank lines still separate paragraphs.
 marked.setOptions({
   gfm: true,        // GitHub Flavored Markdown
 })
@@ -337,10 +336,9 @@ function encodePathParam(abs: string): string {
 /**
  * Build the URL a sent deliverable's *raw bytes* resolve to through the
  * daemon's owner-routed file route (`GET /api/v1/file?path=<ABSOLUTE>&origin=`).
- * This is the single repoint away from Portolan's retired `:4004`
- * `/project-file/…?standalone=1`: the daemon streams html/pdf/image/audio/text
- * with the right Content-Type, and HTML served as `text/html` is natively
- * iframe-scrollable — no `standalone` height-handshake. `origin` is appended
+ * The daemon streams html/pdf/image/audio/text with the right Content-Type,
+ * and HTML served as `text/html` is natively iframe-scrollable — no
+ * `standalone` height-handshake. `origin` is appended
  * only for a remote-owned file, mirroring the route's local-when-absent
  * contract. `base` is the shuttle daemon base (`:4000`), '' for a same-origin
  * (daemon-served) bundle.

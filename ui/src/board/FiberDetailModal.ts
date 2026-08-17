@@ -2941,9 +2941,8 @@ export class FiberDetailModal {
   /**
    * Fetch the daemon's full fiber index once per panel-open (`GET
    * /api/v1/fibers`, ids + names only). The parent picker filters it
-   * client-side per keystroke — the index is a few hundred rows, so this
-   * replaces the retired Portolan `/kanban/fiber-search` round trip per
-   * keystroke with one fetch and pure filtering.
+   * client-side per keystroke — the index is a few hundred rows, so one
+   * fetch plus pure filtering replaces a per-keystroke round trip.
    */
   private loadFiberIndex(): Promise<Array<{ id: string; name: string }>> {
     this.fiberIndex ??= fetchFiberIndex(this.shuttleBase).catch((err: unknown) => {

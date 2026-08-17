@@ -9,7 +9,7 @@ defmodule ShuttleWeb.FeltEditController do
   tunnel (origin stripped, so the owner edits its own loom mirror), and its
   response is relayed verbatim. Single-writer at the document holds — the owner
   daemon is the lone writer of a fiber it owns, and `felt edit` is the single
-  felt-native writer (the same CLI Portolan shells for local cards).
+  felt-native writer.
 
   `POST /api/v1/felt-edit` body: `{ "fiber_id": "...", "origin": "...",
   "add": [...], "remove": [...], "set": {"key": scalar, ...}, "unset": [...],

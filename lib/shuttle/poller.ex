@@ -155,7 +155,7 @@ defmodule Shuttle.Poller do
       # falls through to felt, never to a uid→slug runtime translation.
       uid_slug_index: %{},
       # %{uid_or_fiber_id => %{modified_at: String.t() | nil, entry: map()}} —
-      # daemon-local document cache for the Portolan kanban feed. The poll task
+      # daemon-local document cache for the kanban feed. The poll task
       # diffs the cheap shuttle projection's modified_at against this cache and
       # runs full `felt show --json` only for cold or changed fibers.
       document_cache: %{},
@@ -3192,8 +3192,8 @@ defmodule Shuttle.Poller do
       # run_felt already wraps a non-zero exit in a descriptive
       # `felt -C <host> show <id> failed: <stderr>` string. A common case here
       # is a felt-store path that doesn't exist on THIS host — e.g. a foreign
-      # absolute path (`/path/to/store` on another machine) that another
-      # machine's portolan registered. Surfacing the path + stderr instead of a bare reason is what
+      # absolute path (`/path/to/store` on another machine) that lives only in
+      # that host's own `FELT_STORES`/registry config. Surfacing the path + stderr instead of a bare reason is what
       # turns the old undiagnosable blank 500 into an actionable error. See
       # `gotcha-remote-daemon-foreign-felt-store-path`.
       {:error, reason} ->
@@ -3271,8 +3271,8 @@ defmodule Shuttle.Poller do
   # finds no index), which previously bubbled up as a BLANK `{:error, ""}` →
   # an undiagnosable 500 at the HTTP boundary. Including the host
   # path names the actual fault — typically a felt-store path that doesn't
-  # exist on this machine (a foreign absolute path registered by another
-  # host's portolan).
+  # exist on this machine (a foreign absolute path registered only in another
+  # host's own `FELT_STORES`/registry config).
   # No configured store to route through (empty registry) — fail soft rather than
   # crash the `is_binary(host)` clause with a FunctionClauseError.
   defp run_felt(nil, _runner, _args), do: {:error, :no_felt_store}

@@ -2,8 +2,8 @@ defmodule Shuttle.Actions do
   @moduledoc """
   Classifies Shuttle-owned lifecycle actions for external views.
 
-  Portolan owns gestures and layout; Shuttle owns what those gestures mean for
-  a fiber's dispatch lifecycle. This module is the small vocabulary bridge
+  The board UI owns gestures and layout; Shuttle owns what those gestures mean
+  for a fiber's dispatch lifecycle. This module is the small vocabulary bridge
   between the two.
   """
 

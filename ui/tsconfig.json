@@ -12,9 +12,8 @@
 
     "skipLibCheck": true,
 
-    /* Bundler mode — mirrors Portolan, the source of the ported board.
-       `.js` import specifiers resolve to their `.ts` siblings under Vite
-       and bundler module resolution. */
+    /* Bundler mode: `.js` import specifiers resolve to their `.ts` siblings
+       under Vite and bundler module resolution. */
     "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,

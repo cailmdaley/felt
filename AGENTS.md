@@ -109,44 +109,29 @@ plugin.json` and `.codex-plugin/plugin.json` in sync with the binary tag, then
 to build a release whose manifests don't match the tag, so a forgotten bump
 can't ship.
 
-## Direction — the merge is done; OTP daemon deliberately kept
+## Architecture stance
 
-The merge that earlier notes framed as a goal is the achieved state:
-
-- **One CLI surface.** Every caller speaks `felt shuttle <verb>`; the standalone
-  `shuttle-ctl` Go shim is retired (Stage A).
-- **One repo, one checkout.** felt and Shuttle live in one source tree, building
-  three artifacts from it (Stage B). Portolan is retired —
-  Shuttle is self-contained, with its own browser UI and launch story, and
-  assumes no Portolan process is running.
-- **The `shuttle:` block is in felt's surface.** The contract that used to be
-  validated on both sides (a Go `pkg/schema` *and* the Elixir daemon) now lives
-  once, in felt's Go code. `pkg/schema` is gone. Continuation state
+- **One CLI surface.** Every caller speaks `felt shuttle <verb>`.
+- **One repo, one checkout, three artifacts.** felt and Shuttle live in one
+  source tree, building the felt CLI, the daemon escript, and the board UI from
+  it. Shuttle is self-contained, with its own browser UI and launch story,
+  assuming no external dispatcher process.
+- **The `shuttle:` block is in felt's surface.** The contract lives once, in
+  felt's Go code, and the Elixir daemon reads it. Continuation state
   (`session_uuid` / `dispatched_at` / `handed_off_at`) lives entirely in the
   `shuttle:` block.
+- **felt owns the data model; Shuttle owns the network and the surface** — the
+  two are one package, not two that shell to each other.
 
-**The Elixir/OTP daemon is deliberately retained.** Dispatch, the per-worker
-watcher, and the `:4000` API are where OTP earns its keep, and the daemon is the
-production dispatcher. A Go rewrite collapsing everything into a single binary is
-a possible **Stage C** — a deferred, must-earn-itself idea, *not* planned now.
-The standing design stance: felt owns the data model; Shuttle owns the network
-and the surface; the two are one package, not two that shell to each other.
+**The Elixir/OTP daemon is the production dispatcher.** Dispatch, the
+per-worker watcher, and the `:4000` API are where OTP earns its keep. A Go
+rewrite collapsing everything into a single binary is a deferred, must-earn-
+itself idea, not planned now.
 
-**felt history is gone.** The daemon detects clean worker exits via the
-`shuttle.runtime.handed_off_at` frontmatter field — not a felt-history event. The
-editorial chain felt-history used to carry now lives in the constitution body's
+**Continuity across dispatches lives in frontmatter and git, not an event log.**
+The daemon detects clean worker exits via the `shuttle.runtime.handed_off_at`
+frontmatter field. The editorial chain lives in the constitution body's
 `## Status` block plus the git log of the fiber.
-
-### Portolan provenance
-
-Portolan is retired; Shuttle does not depend on it. Remaining `grep -ri portolan`
-hits are historical provenance comments — they explain *why* a shape exists
-("ported from Portolan's …") and age out as the code they describe is rewritten.
-A few conceptual carry-overs (the UI's pinning reconstruction in
-`projectModel.ts`; client-side `kind`/`priority`/
-`isRoot` defaults in `KanbanFiber.ts`; gate/transition semantics in
-`transition.ex` / `actions.ex`) are Portolan assumptions that unwind as the UI
-simplifies — no runtime dependency.
 
 ## Build + lifecycle
 

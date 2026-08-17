@@ -80,7 +80,8 @@ export interface Fiber {
    * the round trip. */
   shuttleProjectDir?: string;
   /** `shuttle.host` — the daemon that owns this fiber's dispatch. Drives strict
-   * daemon affinity and Portolan's owner routing. */
+   * daemon affinity and owner-routed writes (`Shuttle.OriginRouter` on the
+   * daemon). */
   shuttleHost?: string;
   parentId?: string | null; // parent fiber id (derived from slug path); null for top-level
   /** Canonical absolute path to a sibling `report.html`, set from a feed row's
@@ -103,7 +104,7 @@ export interface Fiber {
  * re-parsing YAML.
  *
  * `kind` and `priority` are not part of felt's serialized model — they're
- * Portolan conventions felt does not interpret. We default them so downstream
+ * UI-side conventions felt does not interpret. We default them so downstream
  * consumers see a uniform shape regardless of source.
  */
 export function mapFeltJsonToFiber(item: unknown): Fiber | null {
@@ -211,7 +212,8 @@ export function mapFeltJsonToFiber(item: unknown): Fiber | null {
     }
   }
 
-  // entry_point (felt) → isRoot (Portolan). Felt only emits this when true.
+  // entry_point (felt) → isRoot (this client's Fiber type). Felt only emits
+  // this when true.
   const isRoot = !!f.entry_point;
   const parentId = isRoot
     ? null
@@ -219,7 +221,7 @@ export function mapFeltJsonToFiber(item: unknown): Fiber | null {
       ? id.slice(0, id.lastIndexOf('/'))
       : null;
 
-  // kind / priority are Portolan conventions felt does not interpret.
+  // kind / priority are UI-side conventions felt does not interpret.
   const kind = typeof f.kind === 'string' && f.kind ? f.kind : 'task';
   const priorityRaw = f.priority;
   const priority =

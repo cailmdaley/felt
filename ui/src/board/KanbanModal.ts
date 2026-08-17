@@ -80,8 +80,8 @@ import {
 interface KanbanModalOptions {
   /**
    * Called when the user clicks a card's running-worker indicator. The host
-   * resolves the tmux session name to a portolan session id and focuses that
-   * kitty tab. No-op when the running tmux session isn't tracked by portolan.
+   * POSTs the tmux session name to the daemon's `/api/v1/attach`, which
+   * raises the matching kitty tab. No-op when there's no running worker.
    */
   onOpenWorker?: (tmuxSessionName: string, shuttleHost?: string) => void
   /**

@@ -9,13 +9,11 @@
  * promote to dispatch via the board) or a standing role arrives armed and
  * scheduled (`status: active`).
  *
- * ── The translation layer (vs Portolan's retired :4004) ─────────────────────
- * Portolan's `:4004` server took `{originId, cityPath, title, parentSlug, …}`,
- * derived the slug and assembled the `shuttle:` block server-side. Shuttle's
- * endpoint instead expects `{id, name, frontmatter:{shuttle:{…}}}` with a
- * pre-computed id and pre-built block — and it derives its felt root from
+ * ── Building the id client-side ─────────────────────────────────────────────
+ * Shuttle's endpoint expects `{id, name, frontmatter:{shuttle:{…}}}` with a
+ * pre-computed id and pre-built block, and it derives its felt root from
  * `shuttle.project_dir`. Because a project's `.felt` is a loom *substore*
- * symlink (`…/portolan/.felt → loom/.felt/ai-futures/portolan`), `felt -C
+ * symlink (`…/<project>/.felt → loom/.felt/<…>/<project>`), `felt -C
  * <project_dir> add <id> --top-level` expects `id` *relative to that substore*.
  * So this form speaks project-relative ids natively: the parent picker is
  * scoped to the selected project and strips its `loomPrefix`, and `submit`
@@ -118,8 +116,8 @@ function previewSlug(title: string): string {
   return slugStem(title) || 'stash-…'
 }
 
-/** The shuttle block, assembled client-side — mirrors Portolan's
- *  `buildInitialShuttleBlock` (lean: only true/non-empty fields ride). */
+/** The shuttle block, assembled client-side (lean: only true/non-empty
+ *  fields ride). */
 function buildShuttleBlock(input: {
   agent: string
   effort: string
@@ -955,8 +953,8 @@ export function StashForm({
 
 /**
  * Inject the StashForm's CSS once. Idempotent — safe to call on every open.
- * Ported verbatim from Portolan; the trailing `.stash-trigger` note refers to
- * the kanban header button the board already renders.
+ * The trailing `.stash-trigger` note refers to the kanban header button the
+ * board already renders.
  */
 export function injectStashFormStyles(): void {
   if (typeof document === 'undefined') return

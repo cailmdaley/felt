@@ -1,8 +1,8 @@
 defmodule ShuttleWeb.CORSTest do
   @moduledoc """
-  Tests that the Shuttle HTTP API serves CORS headers so the portolan kanban
-  (running on localhost:3000 or the Vite dev server on localhost:5173) can POST
-  to the daemon (127.0.0.1:4000) directly from the browser.
+  Tests that the Shuttle HTTP API serves CORS headers so the board UI dev
+  server (Vite on localhost:5173, or the legacy localhost:3000 fallback) can
+  POST to the daemon (127.0.0.1:4000) directly from the browser.
 
   Covers:
   - OPTIONS preflight returns 204 + correct Access-Control-* headers.

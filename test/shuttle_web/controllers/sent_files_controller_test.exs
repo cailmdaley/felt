@@ -7,7 +7,7 @@ defmodule ShuttleWeb.SentFilesControllerTest do
   covering matching (tmux-ULID *and* sessionId), dedup-keeping-newest,
   newest-first sort, ULID extraction, and the skipping of non-SendUserFile /
   malformed lines. The controller's local branch reads that fixture via
-  `$PORTOLAN_EVENTS_FILE`; the remote branch reuses the shared
+  `$SHUTTLE_EVENTS_FILE`; the remote branch reuses the shared
   `Shuttle.OriginRouter.forward_get/4` with a stubbed transport, mirroring the
   /file forward tests.
   """

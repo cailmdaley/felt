@@ -781,7 +781,7 @@ defmodule Shuttle.DispatcherTest do
   test "dispatch with force: true on a closed fiber shells out to felt shuttle reopen" do
     # The kanban Resume button on an awaitingReview / closed card flows here
     # with force=true. Without the reopen step, the worker spawns but the
-    # YAML stays closed and Portolan's classifyFiber keeps the card pinned
+    # YAML stays closed and `classifyFiber` keeps the card pinned
     # in its prior column — see KanbanModal.runRequeue's comment about why
     # this side-effect is daemon-owned. The contract: force-dispatch on a
     # not-already-clean fiber issues `felt shuttle reopen <fiber>` before
@@ -1535,7 +1535,7 @@ defmodule Shuttle.DispatcherTest do
 
     assert script =~ "tmux list-clients -t 'haiku-shuttle'"
     # Filter out tmux's control-mode clients (Portolan's wterm preview
-    # uses `tmux -C attach -r` and would otherwise satisfy the wait
+    # used `tmux -C attach -r` and would otherwise have satisfied the wait
     # without a real human terminal attached).
     assert script =~ "client_control_mode"
     assert script =~ "grep -qx '0'"

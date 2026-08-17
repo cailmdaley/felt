@@ -134,7 +134,7 @@ defmodule ShuttleWeb.FiberDocumentsController do
   `GET /api/v1/fibers/:id` — resolve one fiber by canonical id. The id is a
   wildcard splat so nested ids (`ai-futures/portolan/foo`) arrive as path
   segments; rejoin with `/`. Returns the same envelope shape as `index/2` with
-  zero or one fiber, so Portolan reuses the list-response parser. A missing
+  zero or one fiber, so the client reuses the list-response parser. A missing
   fiber is a 200 with `fibers: []`, not a 404 — the caller treats an empty list
   as "not here", same as scanning the full list would.
 
