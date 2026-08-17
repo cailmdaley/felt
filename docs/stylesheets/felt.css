@@ -1,0 +1,513 @@
+/* Pigment & Parchment — the felt documentation theme.
+ *
+ * felt has three surfaces a human looks at: a fiber's report.html, the
+ * Shuttle board, and these docs. The first two already agree; this file is
+ * how the third joins them, so the docs read as the same product rather
+ * than as a Material site that happens to describe one.
+ *
+ * The palette is not invented here. It is lifted verbatim from
+ * `claude-plugin/skills/shuttle/assets/report-template.html:50-64` (the
+ * :root block every report carries), and the board's pigment semantics come
+ * from `ui/src/board/KanbanModal.css:14-66`, which names one meaning per
+ * colour:
+ *
+ *   cinnabar   you, the human actor — and here, the accent
+ *   cobalt     the machine, and by extension a note/aside
+ *   ochre      now, and what is owed — a warning
+ *   verdigris  a verdict, tempered — a tip that has been judged sound
+ *   iron gall  machinery: rules, chrome, anything muted
+ *
+ * A hue outside that set would be a claim the identity never made, so this
+ * file adds none. Everything below either maps a felt token onto one of
+ * Material's CSS custom properties, or recolours a Material component that
+ * hardcodes a hex and therefore cannot be reached through a variable.
+ *
+ * Two things the report has that the docs deliberately do not:
+ *   - the warm/cool radial wash and parchment-tooth noise on the board's
+ *     ground. Gradients read as decoration across a hundred pages of prose.
+ *   - the EB Garamond Initials dropcaps. They need two font files fetched
+ *     over the wire; a GitHub Pages docs site makes no external requests.
+ *
+ * Fonts are named, never fetched. EB Garamond and IBM Plex Mono render for
+ * anyone who has them installed (Cail, and anyone running the board); every
+ * other reader lands on Georgia and a system mono, which is the same
+ * fallback the report template takes.
+ */
+
+/* ══ LIGHT — ink on parchment ══════════════════════════════════════════ */
+
+:root,
+[data-md-color-scheme="default"] {
+  /* The report's tokens, unchanged. */
+  --felt-paper: #ede2ce;          /* --parchment */
+  --felt-surface: #fbf6e9;        /* --rag: code, tables, anything raised */
+  --felt-chrome: #e5d9c0;         /* header and footer: parchment, a shade down */
+  --felt-chrome-deep: #ddcfb2;
+  --felt-ink: #1b1611;
+  --felt-ink-muted: #665c4b;      /* secondary prose: nav, toc, blockquote */
+  --felt-ink-quiet: #7a6f5c;      /* --ink-muted: captions, icons, chrome */
+  --felt-rule: #c5b89e;
+  --felt-cinnabar: #bc4538;       /* the accent, and the only one */
+  --felt-cinnabar-link: #aa3a2e;  /* the same pigment, deepened to clear AA as body text */
+  --felt-cinnabar-wash: rgba(188, 69, 56, 0.1);   /* --cinnabar-faint */
+  --felt-cobalt: #3d5ba0;
+  --felt-cobalt-wash: rgba(61, 91, 160, 0.1);
+  --felt-teal: #2e6862;           /* --kbn-tempered-ink: verdigris, at reading weight */
+  --felt-teal-wash: rgba(63, 130, 120, 0.12);
+  --felt-ochre: #9a7b35;          /* --kbn-owed */
+  --felt-ochre-ink: #7e6428;      /* ochre where it has to be read, not just seen */
+  --felt-ochre-wash: rgba(196, 147, 51, 0.12);
+
+  /* ── Material: ground and ink ── */
+  --md-hue: 32deg;
+  --md-default-bg-color: var(--felt-paper);
+  --md-default-bg-color--light: rgba(237, 226, 206, 0.7);
+  --md-default-bg-color--lighter: rgba(237, 226, 206, 0.45);
+  --md-default-bg-color--lightest: rgba(251, 246, 233, 0.6);
+  --md-default-fg-color: var(--felt-ink);
+  --md-default-fg-color--light: var(--felt-ink-muted);
+  --md-default-fg-color--lighter: var(--felt-ink-quiet);
+  --md-default-fg-color--lightest: rgba(27, 22, 17, 0.11);
+
+  /* ── Material: chrome. The header is paper too, a shade down and ruled
+     off — a cinnabar band would spend the accent on furniture. ── */
+  --md-primary-fg-color: var(--felt-chrome);
+  --md-primary-fg-color--light: var(--felt-paper);
+  --md-primary-fg-color--dark: var(--felt-chrome-deep);
+  --md-primary-bg-color: var(--felt-ink);
+  --md-primary-bg-color--light: var(--felt-ink-muted);
+
+  --md-accent-fg-color: var(--felt-cinnabar);
+  --md-accent-fg-color--transparent: var(--felt-cinnabar-wash);
+  --md-accent-bg-color: var(--felt-surface);
+  --md-accent-bg-color--light: var(--felt-paper);
+
+  --md-footer-bg-color: var(--felt-chrome);
+  --md-footer-bg-color--dark: var(--felt-chrome-deep);
+  --md-footer-fg-color: var(--felt-ink);
+  --md-footer-fg-color--light: var(--felt-ink-muted);
+  --md-footer-fg-color--lighter: var(--felt-ink-quiet);
+
+  /* ── Material: typeset ── */
+  --md-typeset-color: var(--felt-ink);
+  --md-typeset-a-color: var(--felt-cinnabar-link);
+  --md-typeset-mark-color: var(--felt-ochre-wash);
+  --md-typeset-del-color: rgba(168, 74, 62, 0.16);   /* --kbn-diff-del */
+  --md-typeset-ins-color: rgba(75, 122, 62, 0.16);   /* --kbn-diff-add */
+  --md-typeset-table-color: var(--felt-rule);
+  --md-typeset-table-color--light: rgba(197, 184, 158, 0.28);
+  --md-typeset-kbd-color: var(--felt-surface);
+  --md-typeset-kbd-accent-color: var(--felt-paper);
+  --md-typeset-kbd-border-color: var(--felt-rule);
+
+  --md-admonition-fg-color: var(--felt-ink);
+  --md-admonition-bg-color: var(--felt-paper);
+
+  /* ── Material: code. Stock highlighting puts magenta, violet and purple
+     on the page; on a warm ground that is a third look, not this one. The
+     tokens below are the board's pigments and nothing else. ── */
+  --md-code-bg-color: var(--felt-surface);
+  --md-code-bg-color--light: rgba(251, 246, 233, 0.9);
+  --md-code-bg-color--lighter: rgba(251, 246, 233, 0.54);
+  --md-code-fg-color: var(--felt-ink);
+  --md-code-hl-color: var(--felt-cinnabar);
+  --md-code-hl-color--light: var(--felt-cinnabar-wash);
+  --md-code-hl-keyword-color: var(--felt-cobalt);
+  --md-code-hl-constant-color: var(--felt-cobalt);
+  --md-code-hl-function-color: var(--felt-cinnabar-link);
+  --md-code-hl-special-color: var(--felt-cinnabar-link);
+  --md-code-hl-string-color: var(--felt-teal);
+  --md-code-hl-number-color: var(--felt-ochre-ink);
+  --md-code-hl-name-color: var(--md-code-fg-color);
+  --md-code-hl-comment-color: var(--felt-ink-quiet);
+  --md-code-hl-operator-color: var(--felt-ink-muted);
+  --md-code-hl-punctuation-color: var(--felt-ink-muted);
+  --md-code-hl-generic-color: var(--felt-ink-muted);
+  --md-code-hl-variable-color: var(--felt-ink-muted);
+}
+
+/* ══ DARK — parchment on ink ═══════════════════════════════════════════
+   The same material, turned over: the page becomes the ink itself, the
+   type becomes the parchment. Cinnabar cannot survive the swap unchanged
+   (#bc4538 on #1b1611 is 3.5:1), so it lifts; iron-gall muted becomes the
+   board's own chrome tone, #a89b83. --md-hue is warmed to 32° because
+   Material derives several slate values from it and would otherwise leak
+   blue into anything this file does not name. */
+
+[data-md-color-scheme="slate"] {
+  --felt-paper: #1b1611;          /* --ink, now the ground */
+  --felt-surface: #2a231b;
+  --felt-chrome: #151009;
+  --felt-chrome-deep: #100c08;
+  --felt-ink: #e3d8c2;            /* parchment, a shade off full */
+  --felt-ink-muted: #a89b83;      /* the board's chrome tone */
+  --felt-ink-quiet: #8b8069;
+  --felt-rule: #443c31;
+  --felt-cinnabar: #db7a66;
+  --felt-cinnabar-link: #db7a66;
+  --felt-cinnabar-wash: rgba(219, 122, 102, 0.14);
+  --felt-cobalt: #8aa6de;
+  --felt-cobalt-wash: rgba(138, 166, 222, 0.13);
+  --felt-teal: #6fb3a6;
+  --felt-teal-wash: rgba(111, 179, 166, 0.13);
+  --felt-ochre: #c49333;
+  --felt-ochre-ink: #c49333;
+  --felt-ochre-wash: rgba(196, 147, 51, 0.16);
+
+  --md-hue: 32deg;
+  --md-default-bg-color: var(--felt-paper);
+  --md-default-bg-color--light: rgba(27, 22, 17, 0.7);
+  --md-default-bg-color--lighter: rgba(27, 22, 17, 0.4);
+  --md-default-bg-color--lightest: rgba(42, 35, 27, 0.7);
+  --md-default-fg-color: var(--felt-ink);
+  --md-default-fg-color--light: var(--felt-ink-muted);
+  --md-default-fg-color--lighter: var(--felt-ink-quiet);
+  --md-default-fg-color--lightest: rgba(227, 216, 194, 0.12);
+
+  --md-primary-fg-color: var(--felt-chrome);
+  --md-primary-fg-color--light: var(--felt-surface);
+  --md-primary-fg-color--dark: var(--felt-chrome-deep);
+  --md-primary-bg-color: var(--felt-ink);
+  --md-primary-bg-color--light: var(--felt-ink-muted);
+
+  --md-accent-fg-color: var(--felt-cinnabar);
+  --md-accent-fg-color--transparent: var(--felt-cinnabar-wash);
+  --md-accent-bg-color: var(--felt-surface);
+  --md-accent-bg-color--light: var(--felt-paper);
+
+  --md-footer-bg-color: var(--felt-chrome);
+  --md-footer-bg-color--dark: var(--felt-chrome-deep);
+  --md-footer-fg-color: var(--felt-ink);
+  --md-footer-fg-color--light: var(--felt-ink-muted);
+  --md-footer-fg-color--lighter: var(--felt-ink-quiet);
+
+  --md-typeset-color: var(--felt-ink);
+  --md-typeset-a-color: var(--felt-cinnabar-link);
+  --md-typeset-mark-color: var(--felt-ochre-wash);
+  --md-typeset-del-color: rgba(168, 74, 62, 0.28);
+  --md-typeset-ins-color: rgba(75, 122, 62, 0.28);
+  --md-typeset-table-color: var(--felt-rule);
+  --md-typeset-table-color--light: rgba(68, 60, 49, 0.5);
+  --md-typeset-kbd-color: var(--felt-surface);
+  --md-typeset-kbd-accent-color: var(--felt-chrome);
+  --md-typeset-kbd-border-color: var(--felt-rule);
+
+  --md-admonition-fg-color: var(--felt-ink);
+  --md-admonition-bg-color: var(--felt-paper);
+
+  --md-code-bg-color: var(--felt-surface);
+  --md-code-bg-color--light: rgba(42, 35, 27, 0.9);
+  --md-code-bg-color--lighter: rgba(42, 35, 27, 0.54);
+  --md-code-fg-color: var(--felt-ink);
+  --md-code-hl-color: var(--felt-cinnabar);
+  --md-code-hl-color--light: var(--felt-cinnabar-wash);
+  --md-code-hl-keyword-color: var(--felt-cobalt);
+  --md-code-hl-constant-color: var(--felt-cobalt);
+  --md-code-hl-function-color: var(--felt-cinnabar-link);
+  --md-code-hl-special-color: var(--felt-cinnabar-link);
+  --md-code-hl-string-color: var(--felt-teal);
+  --md-code-hl-number-color: var(--felt-ochre-ink);
+  --md-code-hl-name-color: var(--md-code-fg-color);
+  --md-code-hl-comment-color: var(--felt-ink-quiet);
+  --md-code-hl-operator-color: var(--felt-ink-muted);
+  --md-code-hl-punctuation-color: var(--felt-ink-muted);
+  --md-code-hl-generic-color: var(--felt-ink-muted);
+  --md-code-hl-variable-color: var(--felt-ink-muted);
+}
+
+/* ══ TYPE ══════════════════════════════════════════════════════════════
+   Material composes its family as `var(--md-text-font,_), -apple-system,
+   …, sans-serif`, so naming the two fonts here is enough — Georgia catches
+   every reader without EB Garamond, and the sans tail never fires. */
+
+:root {
+  --md-text-font: "EB Garamond", Georgia;
+  --md-code-font: "IBM Plex Mono", "JetBrains Mono", ui-monospace;
+}
+
+/* JetBrains Mono ligates `--` into a single long dash. On a page whose job
+   is to be retyped into a shell, a flag that reads `—version` is a bug, so
+   the coding ligatures are switched off for any reader who has them. */
+.md-typeset code,
+.md-typeset kbd,
+.md-typeset pre,
+.md-search__input,
+.md-nav__link code {
+  font-feature-settings: "kern", "liga" 0, "calt" 0;
+  font-variant-ligatures: none;
+}
+
+/* Material's .8rem is tuned for Roboto; a garalde at the same size sets
+   noticeably smaller. One step up, nothing else in the rhythm moved. */
+.md-typeset {
+  font-size: 0.85rem;
+  line-height: 1.55;
+}
+
+/* The report's hierarchy: italic for the two heading levels that name a
+   section, upright for the ones that name a claim. */
+.md-typeset h1 {
+  color: var(--felt-ink);
+  font-style: italic;
+  font-weight: 500;
+  letter-spacing: normal;
+}
+
+.md-typeset h2 {
+  font-style: italic;
+  font-weight: 500;
+  letter-spacing: normal;
+}
+
+.md-typeset h3,
+.md-typeset h4,
+.md-typeset h5,
+.md-typeset h6 {
+  font-weight: 600;
+  letter-spacing: normal;
+}
+
+.md-typeset h5,
+.md-typeset h6 {
+  color: var(--felt-ink);
+  text-transform: none;
+}
+
+/* The permalink is machinery — iron gall until you reach for it. */
+.md-typeset .headerlink {
+  color: var(--md-default-fg-color--lightest);
+}
+
+.md-typeset h1:hover .headerlink,
+.md-typeset h2:hover .headerlink,
+.md-typeset h3:hover .headerlink,
+.md-typeset h4:hover .headerlink,
+.md-typeset .headerlink:focus,
+.md-typeset :target > .headerlink {
+  color: var(--felt-cinnabar);
+}
+
+/* A followed reference is underlined in cinnabar, faintly. */
+.md-typeset a {
+  text-decoration: underline;
+  text-decoration-color: var(--felt-cinnabar-wash);
+  text-underline-offset: 0.15em;
+  text-decoration-thickness: 0.06em;
+}
+
+.md-typeset a:hover,
+.md-typeset a:focus {
+  text-decoration-color: var(--felt-cinnabar);
+}
+
+/* Navigation, table-of-contents and footer links are wayfinding, not
+   prose — they carry their state in colour, so no rule under them. */
+.md-nav a,
+.md-footer a,
+.md-typeset .md-button,
+.md-typeset a.headerlink {
+  text-decoration: none;
+}
+
+/* ══ CHROME ════════════════════════════════════════════════════════════ */
+
+/* Paper does not float. The header separates by a hairline rule, the way
+   the report separates its sections, rather than by a drop shadow. */
+.md-header,
+.md-header--shadow {
+  border-bottom: 1px solid var(--felt-rule);
+  box-shadow: none;
+}
+
+.md-footer-meta {
+  border-top: 1px solid var(--felt-rule);
+}
+
+/* A nav section head is the report's `.section-mark`: mono, tracked out,
+   uppercase, small — a label for the block beneath it. */
+.md-nav--secondary .md-nav__title,
+.md-nav__item--section > .md-nav__link {
+  color: var(--felt-ink-quiet);
+  font-family: var(--md-code-font-family);
+  font-size: 0.58rem;
+  font-weight: 400;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+.md-nav__link--active,
+.md-nav__link--active code {
+  color: var(--felt-cinnabar-link);
+}
+
+/* The search field is a card set into the header, not a dark well punched
+   through it — Material's stock `#00000042` reads as a smudge on paper. */
+.md-search__form {
+  background-color: var(--felt-surface);
+  border: 1px solid var(--felt-rule);
+  box-shadow: none;
+  color: var(--felt-ink);
+}
+
+.md-search__form:hover {
+  background-color: var(--felt-paper);
+}
+
+.md-search__input::placeholder {
+  color: var(--felt-ink-quiet);
+}
+
+/* Material veils the page behind an open search with a neutral black. Ink,
+   so the veil is the same substance as the type. Scoped to the breakpoint
+   where the overlay is a scrim — below it the overlay is the page ground
+   itself, scaling up into a full-screen takeover, and must stay that. */
+@media screen and (min-width: 60em) {
+  .md-search__overlay {
+    background-color: rgba(27, 22, 17, 0.55);
+  }
+}
+
+[data-md-toggle="search"]:checked ~ .md-header .md-search__form {
+  background-color: var(--felt-surface);
+}
+
+/* ══ RULES, QUOTES, TABLES ═════════════════════════════════════════════ */
+
+.md-typeset hr {
+  border-bottom: 1px solid var(--felt-rule);
+}
+
+/* Ochre on the left edge, italic inside — the report's blockquote. */
+.md-typeset blockquote {
+  border-left: 2px solid var(--felt-ochre);
+  color: var(--felt-ink-muted);
+  font-style: italic;
+}
+
+.md-typeset table:not([class]) {
+  border: 1px solid var(--felt-rule);
+  border-radius: 2px;
+  font-size: 0.7rem;
+}
+
+.md-typeset table:not([class]) th {
+  background-color: var(--felt-surface);
+  border-bottom: 1px solid var(--felt-rule);
+  color: var(--felt-ink);
+  font-weight: 600;
+}
+
+.md-typeset table:not([class]) td {
+  border-top: 1px solid var(--md-typeset-table-color--light);
+}
+
+.md-typeset table:not([class]) tbody tr:hover {
+  background-color: var(--md-typeset-table-color--light);
+}
+
+/* ══ CODE ══════════════════════════════════════════════════════════════ */
+
+/* A block is a raised leaf: rag ground, ruled edge — the same treatment
+   the report gives a figure. */
+.md-typeset pre > code,
+.md-typeset .highlighttable {
+  border: 1px solid var(--felt-rule);
+  border-radius: 2px;
+}
+
+.md-typeset .highlighttable pre > code {
+  border: none;
+}
+
+/* Inline code keeps the report's gilt tint rather than the block's rag, so
+   a name in running prose stays part of the sentence. */
+.md-typeset :not(pre) > code {
+  background-color: var(--felt-ochre-wash);
+  border-radius: 2px;
+  color: var(--felt-ink);
+  font-size: 0.85em;
+}
+
+.md-typeset a > code,
+.md-nav a code {
+  background-color: var(--felt-ochre-wash);
+  color: inherit;
+}
+
+.md-typeset .linenos,
+.md-typeset .linenodiv pre {
+  color: var(--felt-ink-quiet);
+}
+
+/* ══ ADMONITIONS ═══════════════════════════════════════════════════════
+   Material hardcodes a hex per type, so each family is re-pigmented here
+   through one pair of variables. The mapping is the board's, not a new
+   one: cobalt is the machine speaking, ochre is what is owed your
+   attention, verdigris is a judgement already made, cinnabar is you —
+   which is where the accent belongs, on the notes that stop you. */
+
+.md-typeset .admonition,
+.md-typeset details {
+  --felt-adm: var(--felt-ink-quiet);
+  --felt-adm-wash: rgba(122, 111, 92, 0.12);
+  border-radius: 2px;
+  box-shadow: none;
+  font-size: 0.72rem;
+}
+
+.md-typeset .note,
+.md-typeset .info,
+.md-typeset .abstract,
+.md-typeset .question {
+  --felt-adm: var(--felt-cobalt);
+  --felt-adm-wash: var(--felt-cobalt-wash);
+}
+
+.md-typeset .tip,
+.md-typeset .success,
+.md-typeset .example {
+  --felt-adm: var(--felt-teal);
+  --felt-adm-wash: var(--felt-teal-wash);
+}
+
+.md-typeset .warning,
+.md-typeset .quote {
+  --felt-adm: var(--felt-ochre);
+  --felt-adm-wash: var(--felt-ochre-wash);
+}
+
+.md-typeset .danger,
+.md-typeset .failure,
+.md-typeset .bug {
+  --felt-adm: var(--felt-cinnabar);
+  --felt-adm-wash: var(--felt-cinnabar-wash);
+}
+
+/* `[class]` only exists to match the specificity of Material's own
+   `.md-typeset .admonition.note`; this file loads after it, so equal
+   weight wins. */
+.md-typeset .admonition[class],
+.md-typeset details[class] {
+  border-color: var(--felt-adm);
+}
+
+.md-typeset .admonition[class]:focus-within,
+.md-typeset details[class]:focus-within {
+  box-shadow: 0 0 0 0.15rem var(--felt-adm-wash);
+}
+
+.md-typeset .admonition[class] > .admonition-title,
+.md-typeset details[class] > summary {
+  background-color: var(--felt-adm-wash);
+  font-weight: 600;
+}
+
+.md-typeset .admonition[class] > .admonition-title::before,
+.md-typeset details[class] > summary::before {
+  background-color: var(--felt-adm);
+}
+
+.md-typeset .admonition[class] > .admonition-title::after,
+.md-typeset details[class] > summary::after {
+  color: var(--felt-adm);
+}

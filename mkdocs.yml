@@ -4,14 +4,23 @@ repo_url: https://github.com/cailmdaley/felt
 
 theme:
   name: material
+  # Stock Material pulls Roboto from fonts.googleapis.com. docs/stylesheets/felt.css
+  # names its own stacks (EB Garamond / IBM Plex Mono, falling back to Georgia and a
+  # system mono), so the fetch would buy nothing and the site ships with no external
+  # requests at all.
+  font: false
   palette:
     - media: "(prefers-color-scheme: light)"
       scheme: default
+      primary: custom
+      accent: custom
       toggle:
         icon: material/brightness-7
         name: Switch to dark mode
     - media: "(prefers-color-scheme: dark)"
       scheme: slate
+      primary: custom
+      accent: custom
       toggle:
         icon: material/brightness-4
         name: Switch to light mode
@@ -19,6 +28,9 @@ theme:
     - navigation.sections
     - navigation.footer
     - content.code.copy
+
+extra_css:
+  - stylesheets/felt.css
 
 validation:
   links:
