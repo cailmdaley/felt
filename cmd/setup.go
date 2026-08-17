@@ -490,17 +490,28 @@ func claudeMDSnippet() string {
 		"Follow the data: curious, not confirmatory.\n"
 }
 
-// feltCodexInstalled returns true when this machine has either the plugin
-// enabled in ~/.codex/config.toml or legacy direct entries in
-// ~/.codex/hooks.json from pre-1.0.8 installs. Used by `felt update` and
-// the brew post-install to decide whether to refresh Codex setup alongside
-// the Claude plugin — `felt setup codex` is idempotent and re-canonicalizes
-// state in either case.
+// feltCodexInstalled returns true when this machine carries any felt wiring
+// for Codex: the plugin enabled in ~/.codex/config.toml, felt's marketplace
+// registered there, or legacy direct entries in ~/.codex/hooks.json. Used by
+// `felt update` and the brew post-install to decide whether to refresh Codex
+// setup alongside the Claude plugin, and by `felt uninstall` to decide whether
+// there is anything to remove — `felt setup codex` is idempotent and
+// re-canonicalizes state in every case.
 func feltCodexInstalled() bool {
 	cfg, err := readCodexConfig()
 	if err == nil {
 		if plugins, ok := cfg["plugins"].(map[string]interface{}); ok {
 			if _, has := plugins[codexPluginRef]; has {
+				return true
+			}
+		}
+		// A registered marketplace without an installed plugin is a partial
+		// setup — an install that got the marketplace registered and then
+		// failed. Counting it keeps `felt uninstall` from reporting nothing
+		// to remove while felt's registration is still there, and lets the
+		// next `felt update` finish the job.
+		if markets, ok := cfg["marketplaces"].(map[string]interface{}); ok {
+			if _, has := markets[marketplaceName]; has {
 				return true
 			}
 		}
