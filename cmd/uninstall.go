@@ -46,7 +46,7 @@ func runFeltUninstall() {
 		fmt.Println()
 	}
 
-	if feltCodexInstalled() {
+	if feltCodexWiringPresent() {
 		fmt.Println("Removing Codex plugin...")
 		if err := uninstallCodexPlugin(); err != nil {
 			fmt.Printf("warning: %v\n", err)

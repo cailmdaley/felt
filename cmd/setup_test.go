@@ -26,10 +26,11 @@ func TestCodexMarketplaceSource(t *testing.T) {
 }
 
 // TestCodexMarketplaceConflict guards the discriminator that decides whether
-// repointCodexMarketplace may unregister felt's marketplace. Only the
-// name-bound-to-another-source refusal earns that; anything else must leave a
-// working registration alone, so a false positive here loses a user's install
-// on a network blip. The first case is codex 0.147.0's message verbatim.
+// repointCodexMarketplace may unregister felt's marketplace. Only a refusal
+// naming *felt's own* marketplace earns that; anything else must leave a working
+// registration alone, so a false positive here loses a user's install on a
+// network blip or on a conflict about an unrelated marketplace. The first case
+// is codex 0.147.0's message verbatim.
 func TestCodexMarketplaceConflict(t *testing.T) {
 	conflicts := []string{
 		"Error: marketplace 'cailmdaley-felt' is already added from a different source; remove it before adding this source\n",
@@ -42,6 +43,9 @@ func TestCodexMarketplaceConflict(t *testing.T) {
 
 	benign := []string{
 		"",
+		// A collision on somebody else's marketplace is not licence to
+		// unregister ours.
+		"Error: marketplace 'otherplace' is already added from a different source; remove it before adding this source\n",
 		"Error: git checkout v9.9.9 failed: pathspec 'v9.9.9' did not match any file(s) known to git\n",
 		"Error: failed to fetch https://github.com/cailmdaley/felt.git: could not resolve host\n",
 		"error: unrecognized subcommand 'add'\n",

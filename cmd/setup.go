@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -490,13 +491,12 @@ func claudeMDSnippet() string {
 		"Follow the data: curious, not confirmatory.\n"
 }
 
-// feltCodexInstalled returns true when this machine carries any felt wiring
-// for Codex: the plugin enabled in ~/.codex/config.toml, felt's marketplace
-// registered there, or legacy direct entries in ~/.codex/hooks.json. Used by
-// `felt update` and the brew post-install to decide whether to refresh Codex
-// setup alongside the Claude plugin, and by `felt uninstall` to decide whether
-// there is anything to remove — `felt setup codex` is idempotent and
-// re-canonicalizes state in every case.
+// feltCodexInstalled returns true when the felt plugin is installed for Codex:
+// the plugin entry in ~/.codex/config.toml, or legacy direct entries in
+// ~/.codex/hooks.json. Used by `felt update` and the brew post-install to
+// decide whether to refresh Codex setup alongside the Claude plugin, so it
+// deliberately does not count a bare marketplace registration — reinstalling a
+// plugin the user removed is worse than leaving a stray registration.
 func feltCodexInstalled() bool {
 	cfg, err := readCodexConfig()
 	if err == nil {
@@ -505,18 +505,34 @@ func feltCodexInstalled() bool {
 				return true
 			}
 		}
-		// A registered marketplace without an installed plugin is a partial
-		// setup — an install that got the marketplace registered and then
-		// failed. Counting it keeps `felt uninstall` from reporting nothing
-		// to remove while felt's registration is still there, and lets the
-		// next `felt update` finish the job.
-		if markets, ok := cfg["marketplaces"].(map[string]interface{}); ok {
-			if _, has := markets[marketplaceName]; has {
-				return true
-			}
-		}
 	}
 	return feltCodexLegacyHooksInstalled()
+}
+
+// feltCodexWiringPresent returns true when anything felt put in Codex's config
+// is still there — the installed plugin, or felt's marketplace registration on
+// its own. Used by `felt uninstall`, which asks "is there anything of ours to
+// remove?" rather than "is the plugin installed?".
+//
+// The two questions need different answers because their config states are
+// identical. A registration without a plugin is either an install that failed
+// between the two verbs or a user who ran `codex plugin remove`, which leaves
+// the marketplace behind. Uninstall should clean up either; refresh must not
+// reinstall the second one, so it keeps the narrower test above.
+func feltCodexWiringPresent() bool {
+	if feltCodexInstalled() {
+		return true
+	}
+	cfg, err := readCodexConfig()
+	if err != nil {
+		return false
+	}
+	markets, ok := cfg["marketplaces"].(map[string]interface{})
+	if !ok {
+		return false
+	}
+	_, has := markets[marketplaceName]
+	return has
 }
 
 // feltCodexLegacyHooksInstalled returns true when ~/.codex/hooks.json has any
@@ -698,6 +714,7 @@ func repointCodexMarketplace(codexSource string) error {
 		return fmt.Errorf("registering codex marketplace %s: %w\n%s", codexSource, err, strings.TrimSpace(out))
 	}
 
+	fmt.Printf("Repointing marketplace %s → %s\n", marketplaceName, codexSource)
 	if _, rmErr := runCodexCLIQuiet("plugin", "marketplace", "remove", marketplaceName); rmErr != nil {
 		return fmt.Errorf("repointing codex marketplace %s: %w\n%s", codexSource, err, strings.TrimSpace(out))
 	}
@@ -713,13 +730,15 @@ func repointCodexMarketplace(codexSource string) error {
 	return nil
 }
 
-// codexMarketplaceConflict reports whether codex refused an add because the
-// name is already bound to a different source — the one failure repointing
-// fixes. Matching on codex's message is a soft dependency, and it fails in the
+// codexMarketplaceConflict reports whether codex refused an add because
+// *felt's* marketplace name is already bound to a different source — the one
+// failure repointing fixes. The name matters: codex names the colliding
+// marketplace, and a collision on someone else's is not licence to unregister
+// ours. Matching on codex's message is a soft dependency, and it fails in the
 // safe direction: if the wording changes, a repoint that would have worked
 // surfaces as an error instead of silently unregistering the marketplace.
 func codexMarketplaceConflict(out string) bool {
-	return strings.Contains(out, "already added from a different source")
+	return strings.Contains(out, "marketplace '"+marketplaceName+"' is already added from a different source")
 }
 
 // runCodexCLI invokes the codex CLI, piping stdio through to the caller.
@@ -836,31 +855,47 @@ func pruneLegacyCodexSkills() int {
 	return removed
 }
 
-// reportCodexRemoval echoes what codex said about a removal. On failure that
-// is usually "not configured or installed" — the end state uninstall wanted —
-// so it prints as a note rather than framing codex's own message as an error.
-func reportCodexRemoval(out string, err error) {
+// reportCodexRemoval echoes what codex said about a removal and reports whether
+// it actually failed. Nothing-to-remove is the end state uninstall wanted, so it
+// prints as a note; anything else is returned, because a removal that didn't
+// happen must not be announced as one. `codex plugin remove` exits 0 on an
+// absent plugin, so only `marketplace remove` reaches the benign branch.
+func reportCodexRemoval(out string, err error) error {
 	text := strings.TrimSpace(out)
-	if text == "" {
-		return
+	message := strings.TrimPrefix(text, "Error: ")
+	if err == nil {
+		if text != "" {
+			fmt.Println(text)
+		}
+		return nil
 	}
-	if err != nil {
-		fmt.Printf("· %s\n", strings.TrimPrefix(text, "Error: "))
-		return
+	if strings.Contains(text, "is not configured or installed") {
+		if message != "" {
+			fmt.Printf("· %s\n", message)
+		}
+		return nil
 	}
-	fmt.Println(text)
+	if message == "" {
+		return err
+	}
+	return fmt.Errorf("%s", message)
 }
 
 // uninstallCodexPlugin removes the plugin and its marketplace through Codex's
 // own commands, then prunes any leftover hooks.json / agents-skills entries.
 func uninstallCodexPlugin() error {
+	var failures []error
 	if _, err := exec.LookPath("codex"); err == nil {
 		// `plugin remove` drops both the config.toml entry and the cached
 		// plugin directory; `marketplace remove` unregisters the source.
-		// Neither is fatal — nothing to remove is the same end state, and a
-		// half-installed machine should still get its legacy wiring pruned.
-		reportCodexRemoval(runCodexCLIQuiet("plugin", "remove", codexPluginRef))
-		reportCodexRemoval(runCodexCLIQuiet("plugin", "marketplace", "remove", marketplaceName))
+		// A failure here doesn't stop the legacy pruning below, but it is
+		// carried to the end so uninstall doesn't claim to have finished.
+		if err := reportCodexRemoval(runCodexCLIQuiet("plugin", "remove", codexPluginRef)); err != nil {
+			failures = append(failures, fmt.Errorf("removing plugin %s: %w", codexPluginRef, err))
+		}
+		if err := reportCodexRemoval(runCodexCLIQuiet("plugin", "marketplace", "remove", marketplaceName)); err != nil {
+			failures = append(failures, fmt.Errorf("removing marketplace %s: %w", marketplaceName, err))
+		}
 	} else {
 		fmt.Println("codex CLI not found in PATH — skipping plugin removal.")
 		fmt.Println("Rerun `felt setup codex --uninstall` with codex installed to finish.")
@@ -871,6 +906,10 @@ func uninstallCodexPlugin() error {
 	}
 	if removed := pruneLegacyCodexSkills(); removed > 0 {
 		fmt.Printf("✓ Removed %d legacy ~/.agents/skills symlinks\n", removed)
+	}
+
+	if len(failures) > 0 {
+		return errors.Join(failures...)
 	}
 
 	fmt.Println()
