@@ -134,7 +134,7 @@ untouched by any of this.
 | `felt shuttle remotes add <name>` | Add or replace a remote (`--port`, `--ssh`, `--remote-port`, `--display`, `--checkout`, `--multiplex`) |
 | `felt shuttle remotes rm <name>` | Remove a remote |
 | `felt shuttle remotes path` | Print the fleet file path (`~/.config/felt/remotes.json`) |
-| `felt shuttle tunnels install [name ...]` | Write (and optionally bootstrap) launchd autossh tunnels for the named remotes, or all enabled remotes if none are given (`--plist-dir`, `--log-dir`, `--autossh-path`, `--write-only`); macOS only |
+| `felt shuttle tunnels install [name ...]` | Write (and optionally bootstrap) autossh tunnels for the named remotes, or all enabled remotes if none are given (`--unit-dir`, `--log-dir`, `--autossh-path`, `--write-only`). launchd on macOS, systemd user units on Linux |
 | `felt shuttle validate-identity` | Check federated fiber UID invariants across daemon feeds (`--daemon-url`, repeatable, to check other hosts) |
 | `felt shuttle contract` | Print the daemon-facing CLI contract version (used at daemon boot to detect a stale CLI) |
 | `felt shuttle mark-runtime <fiber>` | Stamp `shuttle.runtime` continuation fields (`--dispatched-at`, `--session`, `--run-id`, `--handed-off-at`; at least one required); daemon-facing, not for manual use |

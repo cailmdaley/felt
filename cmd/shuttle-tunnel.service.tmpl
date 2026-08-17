@@ -1,0 +1,85 @@
+# Shuttle tunnel systemd **user** unit — the Linux analog of
+# cmd/shuttle-tunnel.plist.tmpl, and the sibling of the daemon's own
+# share/io.shuttle.daemon.service.template. `felt shuttle tunnels install`
+# renders one per remote into ~/.config/systemd/user/shuttle-tunnel-<name>.service;
+# the template itself is not a loadable unit until it has been through that.
+#
+# A *user* unit, not a system one: the tunnel authenticates as you, through
+# your ssh agent, onto a local port only you consume. Nothing here wants root.
+#
+# LINGERING. A systemd user manager starts at your first login and stops at
+# your last logout, which would take the fleet's tunnels down with the ssh
+# session that installed them. `loginctl enable-linger <user>` keeps the
+# manager (and so the tunnels) alive across logout and starts them at boot.
+# `felt shuttle tunnels install` prints the command; it is the one manual step,
+# for the same reason the daemon's install leaves it manual.
+#
+# PATH is baked in at install time, like the daemon's unit and for a sharper
+# reason: systemd --user inherits almost nothing, and autossh execs `ssh` BY
+# NAME off PATH. An absolute autossh under a bare environment can still fail to
+# find the ssh it exists to supervise, and a tunnel that cannot start is a
+# remote that silently never appears on the board.
+
+[Unit]
+Description=Shuttle tunnel to {{ .SSHHost }} (127.0.0.1:{{ .LocalPort }} -> :{{ .RemotePort }})
+Documentation=https://cailmdaley.github.io/felt/shuttle/
+# launchd's KeepAlive retries forever. systemd's default start-rate limiter
+# instead parks a unit in `failed` after 5 restarts and stops trying — so a
+# host that is merely unreachable at breakfast would stay disconnected all day.
+# Disable the limiter; RestartSec below carries the throttle.
+#
+# launchd's KeepAlive/NetworkState has no user-unit analog (network-online.target
+# belongs to the system manager and is not orderable from a user one), so on
+# Linux waiting for the network IS the restart loop.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+WorkingDirectory={{ .Home }}
+{{- if .Multiplex }}
+# 2FA hosts (tunnel.multiplex): the tunnel can only ride a human-authenticated
+# ControlMaster socket — a headless job can never answer keyboard-interactive,
+# and plain `ssh -S <sock>` silently falls back to a FRESH connection when the
+# socket is absent (denial spam, then a clean exit that Restart=on-failure
+# leaves parked). So: supervise with a shell loop that gates every attempt on
+# `ssh -O check` — socket dead → poll every 30s, quiet; socket alive → run the
+# forward (BatchMode=yes so a race can never degrade into interactive auth).
+# Master dies → ssh exits → back to polling. The next approved human login
+# revives the tunnel on its own, within 30s.
+#
+# `%%C` (doubled): systemd expands `%`-specifiers in ExecStart before /bin/sh
+# ever sees the line, and a bare `%C` would reach ssh as the unit's cache
+# directory instead of ssh's own ControlPath connection hash.
+ExecStart=/bin/sh -c 'while :; do if ssh -O check {{ .SSHHost }} 2>/dev/null; then ssh -N -S {{ .Home }}/.ssh/ctl/%%C -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o ControlMaster=no -o ExitOnForwardFailure=yes -o BatchMode=yes -L {{ .LocalPort }}:localhost:{{ .RemotePort }} {{ .SSHHost }}; fi; sleep 30; done'
+{{- else }}
+ExecStart={{ .AutoSSHPath }}{{ if not .HoldCommand }} -N{{ end }} -M 0 -S none -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o ControlMaster=no -o ExitOnForwardFailure=yes{{ if .SSHAuthSock }} -o IdentityAgent={{ .SSHAuthSock }}{{ end }} -L {{ .LocalPort }}:localhost:{{ .RemotePort }} {{ .SSHHost }}{{ if .HoldCommand }} '{{ .HoldCommand }}'{{ end }}
+{{- end }}
+
+# AUTOSSH_GATETIME=0: never treat a short-lived first connection as a fatal
+# start failure, so a tunnel to a host that is still booting keeps retrying.
+Environment="AUTOSSH_GATETIME=0"
+{{- if .Path }}
+# The user's PATH at install time (see header).
+Environment="PATH={{ .Path }}"
+{{- end }}
+{{- if .SSHAuthSock }}
+# The ssh-agent holding the keys this tunnel authenticates with. Dropped from
+# the rendered unit when the value is empty — on Linux the agent socket has no
+# canonical path, and an empty setting is worse than none.
+Environment="SSH_AUTH_SOCK={{ .SSHAuthSock }}"
+{{- end }}
+
+# The launchd analog: KeepAlive with SuccessfulExit=false. A clean exit is the
+# job saying it was asked to stop; a crash or a dropped link is not.
+Restart=on-failure
+RestartSec=10
+
+# systemd does not create the parent directory for append:; `felt shuttle
+# tunnels install` mkdir -p's it. append: needs systemd >= 240. Like the plist's
+# StandardOutPath, this file is never rotated — one tunnel's log grows slowly,
+# and truncating it out from under a running autossh would cost more than it saves.
+StandardOutput=append:{{ .LogPath }}
+StandardError=append:{{ .LogPath }}
+
+[Install]
+WantedBy=default.target

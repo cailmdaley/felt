@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strings"
 
@@ -50,15 +49,21 @@ const (
 
 // remoteTunnel is the per-remote tunnel policy.
 type remoteTunnel struct {
-	// Manager: "launchd" (install a plist) or "none" (the remote is reachable
-	// without a locally-managed tunnel). Defaults to launchd on darwin, none
-	// elsewhere.
+	// Manager: "launchd" or "systemd" (this host supervises the tunnel) or
+	// "none" (the remote is reachable without a locally-managed tunnel).
+	// Defaults to the hub's own supervisor — launchd on darwin, systemd on
+	// linux — and to none anywhere else. The two managed values are
+	// interchangeable to `felt shuttle tunnels install`: which supervisor
+	// renders is the HUB's business, so a fleet file written on a Mac installs
+	// unchanged on a Linux hub.
 	Manager string `json:"manager,omitempty"`
 	// Multiplex: ride an existing ControlMaster socket instead of opening
 	// independent connections — the only viable transport for a host behind
 	// interactive 2FA. See the plist template for the full argument.
 	Multiplex bool `json:"multiplex,omitempty"`
-	// Label: full override of the generated launchd label.
+	// Label: full override of the generated job name — the launchd label on
+	// macOS, and the systemd unit name (given a .service suffix if it lacks
+	// one) on Linux.
 	Label string `json:"label,omitempty"`
 }
 
@@ -128,6 +133,28 @@ func (r remoteSpec) label(prefix string) string {
 		prefix = defaultLaunchdLabelPrefix
 	}
 	return fmt.Sprintf("%s.shuttle-tunnel-%s", prefix, r.Name)
+}
+
+// unitName is the systemd user unit for this remote's tunnel — the Linux analog
+// of label(). No reverse-DNS prefix: a unit name is a file name, and the
+// daemon's own unit is shuttle-daemon.service, so a tunnel is
+// shuttle-tunnel-<name>.service and one naming rule covers both. An explicit
+// tunnel.label still wins, gaining the suffix systemd requires.
+func (r remoteSpec) unitName() string {
+	if opts := r.tunnelOpts(); opts.Label != "" {
+		if strings.HasSuffix(opts.Label, ".service") {
+			return opts.Label
+		}
+		return opts.Label + ".service"
+	}
+	return fmt.Sprintf("shuttle-tunnel-%s.service", r.Name)
+}
+
+// managedTunnel reports whether the fleet hands this remote's tunnel to a
+// supervisor on this host. Both supervisor names count: the fleet file says
+// that the tunnel is managed, and the hub decides with what.
+func managedTunnel(manager string) bool {
+	return manager == "launchd" || manager == "systemd"
 }
 
 // feltRemotesPath is the canonical fleet file location for reads AND writes:
@@ -284,12 +311,23 @@ func normalizeRemotes(doc *remotesFile) error {
 	return nil
 }
 
-// defaultTunnelManager: a Mac hub manages its tunnels with launchd; anywhere
-// else there is no launchd, so a remote is assumed already reachable and the
-// recovery cascade goes straight to the ssh check.
+// defaultTunnelManager: a hub manages its tunnels with whatever supervisor it
+// has — launchd on macOS, systemd --user on Linux. Anywhere else there is
+// neither, so a remote with no explicit policy is assumed already reachable and
+// the daemon's recovery cascade goes straight to the ssh check.
+//
+// The Elixir reader (Shuttle.Remote.default_tunnel_manager/0) splits the same
+// question differently on purpose, and the two are not drifting: this value
+// decides what the Go installer WRITES, while the daemon's decides what its
+// recovery cascade BOUNCES — and the cascade only knows `launchctl kickstart`,
+// so on Linux it reads a managed tunnel as unbounceable and advances to the ssh
+// check instead.
 func defaultTunnelManager() string {
-	if runtime.GOOS == "darwin" {
+	switch hostGOOS {
+	case "darwin":
 		return "launchd"
+	case "linux":
+		return "systemd"
 	}
 	return "none"
 }

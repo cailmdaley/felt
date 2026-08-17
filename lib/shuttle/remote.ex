@@ -68,10 +68,14 @@ defmodule Shuttle.Remote do
       one origin is how a mis-stamped origin silently degrades to `:local`.
     * `url` — `http://127.0.0.1:<port>`
     * `remote_port` — 4000 (the daemon port on the far side of the tunnel)
-    * `tunnel.manager` — `:launchd` on darwin, `:none` elsewhere (the same rule
-      `cmd/shuttle_remotes.go` applies, so the installer and the daemon agree).
-      `:none` skips the tunnel bounce in the recovery cascade and goes straight
-      to the ssh check
+    * `tunnel.manager` — `:launchd` on darwin, `:none` elsewhere. This answers
+      the daemon's question, which is what the recovery cascade can BOUNCE, and
+      the cascade only knows `launchctl kickstart`; `:none` skips the bounce and
+      goes straight to the ssh check. The Go installer's `defaultTunnelManager()`
+      answers a different question — which supervisor a hub INSTALLS with — and
+      so says `systemd` on Linux. A Linux hub therefore installs its tunnels as
+      systemd units and the daemon reaches its remotes over the ssh check when
+      one of them goes quiet
     * `enabled` — true
     * `poll_interval_ms` — 5_000
     * `request_timeout_ms` — 2_000
@@ -137,14 +141,19 @@ defmodule Shuttle.Remote do
   defp tunnel_manager(:launchd), do: :launchd
   defp tunnel_manager("none"), do: :none
   defp tunnel_manager(:none), do: :none
+  # Anything else — notably `"systemd"`, which a Linux hub's fleet file carries —
+  # falls through to the host rule, and that lands right on both platforms: a Mac
+  # reading a systemd-marked remote installed it as a plist and CAN kickstart it,
+  # while a Linux host has no launchctl to shell and belongs on the ssh check.
   defp tunnel_manager(_), do: default_tunnel_manager()
 
-  # Mirrors `defaultTunnelManager()` in cmd/shuttle_remotes.go. A Mac hub manages
-  # its tunnels with launchd; anywhere else there is no launchd, so a remote with
-  # no explicit policy is assumed already reachable and the recovery cascade goes
-  # straight to the ssh check instead of shelling a `launchctl` that cannot exist.
-  # The two readers must agree: the Go installer decides which plists to write
-  # from this same rule.
+  # This decides what the recovery cascade can BOUNCE, which is a launchd job or
+  # nothing: `bounce_tunnel/3` shells `launchctl kickstart`. So a Mac hub's
+  # remotes are `:launchd`, and everywhere else a remote with no explicit policy
+  # goes straight to the ssh check instead of shelling a `launchctl` that cannot
+  # exist. `defaultTunnelManager()` in cmd/shuttle_remotes.go answers the
+  # neighbouring question — which supervisor the hub INSTALLS the tunnel with —
+  # and so says `systemd` where this says `:none`.
   #
   # Note the struct's own `:tunnel` default stays `:launchd` — a hand-built
   # `%Remote{}` (tests, literal config) is an explicit statement, not a parse.

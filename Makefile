@@ -18,8 +18,9 @@
 # board. Where they differ the target branches on `uname -s`: the durable
 # keep-alive is a launchd LaunchAgent on macOS and a systemd user unit on
 # Linux, and the daemon log lands in ~/Library/Logs on macOS, ~/.shuttle on
-# Linux. Multi-host tunnel management (`felt shuttle tunnels`) is macOS-only —
-# it manages launchd autossh jobs.
+# Linux. Multi-host tunnel management (`felt shuttle tunnels`) splits the same
+# way: the autossh jobs it installs are launchd LaunchAgents on macOS and
+# systemd --user units on Linux, so either platform can be the fleet's hub.
 #
 # On Linux hosts without a Go toolchain, `make all` / `make daemon`
 # build only the escript automatically (no Go on PATH -> no CLI rebuild). On a

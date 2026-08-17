@@ -91,7 +91,8 @@ Configure Shuttle from your home directory. `~/.config/felt/agents.json` layers 
 built-in set (`felt shuttle agents init` seeds it). `~/.config/felt/remotes.json` lists the remote
 daemons a hub aggregates (`felt shuttle remotes add`). Linux and macOS both run a single host —
 daemon, board, and workers — with the keep-alive installed as a systemd user unit or a launchd
-LaunchAgent. Multi-host tunnel management (`felt shuttle tunnels`) is macOS-only. The daemon ships
+LaunchAgent. Multi-host tunnel management (`felt shuttle tunnels`) installs the hub's autossh jobs
+under whichever of the two the hub runs. The daemon ships
 as a checkout you build, not a release binary. felt works without the daemon.
 Full list:
 [Honest scoping](https://cailmdaley.github.io/felt/shuttle/#honest-scoping).

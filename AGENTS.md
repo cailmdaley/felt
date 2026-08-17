@@ -143,10 +143,15 @@ launchd LaunchAgent on macOS, a systemd user unit on Linux (`make
 install-agent` picks the branch from `uname -s`) — and so does the log path,
 but the daemon, the CLI, and the bundle are the same artifacts.
 
-**Multi-host tunnel management is macOS-only.** `felt shuttle tunnels install`
-writes launchd autossh jobs, so it refuses on any other platform. A Linux host
-can still be a *remote* that a Mac hub aggregates: the tunnel is installed on
-the hub, not on the remote.
+**Either platform can be the fleet's hub.** `felt shuttle tunnels install`
+writes the hub's autossh jobs as launchd LaunchAgents on macOS and systemd
+`--user` units on Linux, picking the branch the way `make install-agent` does.
+A Linux host with no systemd user session (an HPC login node usually has none)
+gets a refusal naming `--write-only`, not units nothing would start. Either way
+the tunnel is installed on the hub, not on the remote. One asymmetry remains:
+the daemon's recovery cascade bounces a stalled tunnel with `launchctl
+kickstart`, so on a Linux hub a quiet remote skips the bounce and advances to
+the cascade's ssh check.
 
 **`kitty` attach is terminal lock-in, not platform lock-in.** Attach opens the
 worker's tmux session in kitty via kitty's remote-control CLI, and kitty runs on
@@ -232,7 +237,7 @@ shell-started via `make start`.)
   systemd user session).
   `go` is a bootstrap prerequisite. Flags include `--skip-ui` / `--build-ui` (UI
   defaults to build on macOS, skip on Linux), `--skip-hook`, `--with-tunnels`
-  (also installs the SSH tunnels on the macOS hub). bootstrap.sh branches by host
+  (also installs the hub's SSH tunnels). bootstrap.sh branches by host
   type and is honest about missing prerequisites.
 
 ### Where the checkout lives — outside `~/Documents` on macOS

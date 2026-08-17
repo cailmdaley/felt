@@ -28,7 +28,7 @@
 #   ./bootstrap.sh --build-ui      force the ui/dist build (default when Node is on PATH)
 #   ./bootstrap.sh --skip-hook     don't touch the event-stream step
 #   ./bootstrap.sh --skip-cli      don't (re)build/install the felt CLI (it's already on PATH)
-#   ./bootstrap.sh --with-tunnels  also (re)install the autossh tunnels to remotes (macOS hub)
+#   ./bootstrap.sh --with-tunnels  also (re)install the autossh tunnels to remotes (hub-side)
 #   ./bootstrap.sh -h | --help     this help
 
 set -uo pipefail
@@ -316,15 +316,14 @@ else
   fi
 fi
 
-# ── optional: remote tunnels (macOS hub) ─────────────────────────────────────
+# ── optional: remote tunnels (hub-side) ──────────────────────────────────────
+# `felt shuttle tunnels install` picks the host's own supervisor — launchd
+# LaunchAgents on macOS, systemd --user units on Linux — and refuses on a Linux
+# host with no user session rather than writing units nothing would start.
 if [ "$WITH_TUNNELS" = 1 ]; then
   step "Remote tunnels"
-  if [ "$OS" != Darwin ]; then
-    warn "tunnels are installed on the macOS hub only; skipping on $OS."
-  else
-    felt shuttle tunnels install && ok "autossh tunnels (re)installed." \
-      || warn "felt shuttle tunnels install failed (configure remotes first)."
-  fi
+  felt shuttle tunnels install && ok "autossh tunnels (re)installed." \
+    || warn "felt shuttle tunnels install failed (configure remotes first)."
 fi
 
 # ── footer ───────────────────────────────────────────────────────────────
@@ -333,10 +332,10 @@ note "verify:   curl -s http://127.0.0.1:4000/api/v1/version"
 note "board:    http://127.0.0.1:4000/"
 note "logs:     make logs"
 note "workers:  felt shuttle ps"
-# The trailing guard must not decide the script's exit code (a false test on
-# Linux would make a fully successful bootstrap exit 1 — caught by the
-# clean-container acceptance run).
-if [ "$WITH_TUNNELS" = 0 ] && [ "$OS" = Darwin ]; then
+# The trailing guard must not decide the script's exit code: a false test here
+# would make a fully successful bootstrap exit 1, so the explicit `exit 0`
+# below closes it out (caught by the clean-container acceptance run).
+if [ "$WITH_TUNNELS" = 0 ]; then
   note "remotes:  ./bootstrap.sh --with-tunnels  (or: felt shuttle tunnels install)"
 fi
 exit 0
