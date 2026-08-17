@@ -512,22 +512,22 @@ function cssLength(value?: string): string | undefined {
  */
 export function showToast(message: string, type: 'success' | 'error' = 'success', duration = 3000): void {
   // Remove existing toasts
-  const existing = document.querySelector('.portolan-toast')
+  const existing = document.querySelector('.shuttle-toast')
   if (existing) existing.remove()
 
   const toast = document.createElement('div')
-  toast.className = 'portolan-toast'
+  toast.className = 'shuttle-toast'
   toast.innerHTML = `
     <span class="toast-icon">${type === 'success' ? '✓' : '✕'}</span>
     <span class="toast-message">${escapeHtml(message)}</span>
   `
 
   // Inject styles if not present
-  if (!document.getElementById('portolan-toast-styles')) {
+  if (!document.getElementById('shuttle-toast-styles')) {
     const style = document.createElement('style')
-    style.id = 'portolan-toast-styles'
+    style.id = 'shuttle-toast-styles'
     style.textContent = `
-      .portolan-toast {
+      .shuttle-toast {
         position: fixed;
         bottom: 24px;
         left: 50%;
@@ -546,15 +546,15 @@ export function showToast(message: string, type: 'success' | 'error' = 'success'
         opacity: 0;
         animation: toast-in 0.3s ease forwards;
       }
-      .portolan-toast.toast-out {
+      .shuttle-toast.toast-out {
         animation: toast-out 0.3s ease forwards;
       }
-      .portolan-toast .toast-icon {
+      .shuttle-toast .toast-icon {
         font-size: 16px;
         font-weight: bold;
       }
-      .portolan-toast.success .toast-icon { color: #c9a959; }
-      .portolan-toast.error .toast-icon { color: #d9534f; }
+      .shuttle-toast.success .toast-icon { color: #c9a959; }
+      .shuttle-toast.error .toast-icon { color: #d9534f; }
       @keyframes toast-in {
         from { opacity: 0; transform: translateX(-50%) translateY(100px); }
         to { opacity: 1; transform: translateX(-50%) translateY(0); }
