@@ -77,10 +77,11 @@ per eligible fiber, and serves a [board](shuttle/board.md) at
 views for seeing where the time went. Workers hand off to each other through
 the fiber, so a piece of work can span many sessions.
 
-Shuttle stays the more experimental half, and it is **currently
-fleet-oriented** — it runs the maintainer's machines every day, and parts of it
-still say so. See [Honest scoping](shuttle/index.md#honest-scoping) for the full
-list. Ignore Shuttle and felt behaves the same.
+Shuttle stays the more experimental half, and it runs the author's machines
+every day. One rough edge is left: the daemon builds from a checkout rather
+than installing from a release, so it needs Elixir and Node where the CLI needs
+nothing. See [Honest scoping](shuttle/index.md#honest-scoping). Ignore Shuttle
+and felt behaves the same.
 
 ## Where to go next
 

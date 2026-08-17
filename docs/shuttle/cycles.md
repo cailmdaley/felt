@@ -85,8 +85,9 @@ one in the file, and everything below is the board's shorthand for that.
   to tomorrow when the cycle is already running — "rest until tomorrow, later
   this cycle."
 
-!!! note "The look back needs a commit ledger"
-    The era memoir is composed from `~/.shuttle/commits.jsonl`, and no shipped
-    hook writes that file. Without your own writer the band still draws, the
-    membership still resolves, and the look back reads *the era left no trail*.
+!!! note "The look back reads the commit ledger"
+    The era memoir is composed from `~/.shuttle/commits.jsonl`, which the felt
+    plugin's `PostToolUse` hook writes. Commits made outside an agent session
+    leave no trail, so an era worked entirely by hand reads *the era left no
+    trail* — the band still draws and the membership still resolves.
     See [Telemetry and the ledgers](telemetry.md#the-commit-ledger).

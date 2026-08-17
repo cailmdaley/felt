@@ -9,7 +9,7 @@ append-only JSONL files in the daemon's state directory.
 |---|---|---|
 | `~/.shuttle/events.jsonl` | `felt hook event`, from your agent harness (the coding-agent CLI you're running — Claude Code, Codex, …) | one line per harness hook event |
 | `~/.shuttle/sessions.jsonl` | the daemon, at dispatch / claim / resume | one line per session: which fiber it belonged to |
-| `~/.shuttle/commits.jsonl` | a `PostToolUse` hook **that does not ship with felt** | one line per commit: sha, subject, repo, `--shortstat` counts, and the session that made it |
+| `~/.shuttle/commits.jsonl` | the plugin's `PostToolUse` hook on `Bash` (`felt hook commit`) | one line per commit: sha, subject, repo, `--shortstat` counts, and the session that made it |
 
 All three resolve against `$SHUTTLE_DATA_DIR` (default `~/.shuttle`), and each
 has its own override: `SHUTTLE_EVENTS_FILE`, `SHUTTLE_SESSIONS_FILE`,
@@ -85,18 +85,17 @@ outside Shuttle is invisible there.
 what retired parsing a fiber name out of a commit subject line, and it is what
 lets the Chronicle narrate a stretch of days in prose and count lines changed.
 
-**No writer ships in this repository.** The pairing is only knowable inside the
-session's own process tree, where the daemon is not — so a `PostToolUse` hook
-writes it, on a Bash call that ran a `git commit`. The maintainer's hook lives
-outside this repo, `bootstrap.sh` wires only the event stream, and
-`claude-plugin/hooks/hooks.json` registers no commit hook. On a stock felt
-install this file never appears.
+The pairing is only knowable inside the session's own process tree, where the
+daemon is not — so the plugin writes it from a `PostToolUse` hook on `Bash`,
+whenever the command ran a `git commit`. `felt hook commit` reads the commit
+back, dedupes against the tail of the ledger, and appends one line. Installing
+the plugin (`felt setup claude`, `felt setup codex`) is all it takes.
 
-The consequence is bounded and quiet: the commit strip is empty, the
-Chronicle's per-fiber prose does not appear, and a
-[cycle](cycles.md)'s look back reads *the era left no trail*. There is no git
-log fallback — only recorded, joined commits count. Everything else on the
-board is unaffected.
+The file stays absent on a host with no `~/.shuttle` — a felt user who does not
+run Shuttle acquires nothing. There it is written, the commit strip fills, the
+Chronicle narrates per fiber, and a [cycle](cycles.md)'s look back has a trail
+to read. There is no git log fallback: only recorded, joined commits count, so
+commits made outside an agent session do not appear.
 
 To grow one yourself, append a line per commit with at least:
 

@@ -93,8 +93,9 @@ daemons a hub aggregates (`felt shuttle remotes add`). Linux and macOS both run 
 daemon, board, and workers — with the keep-alive installed as a systemd user unit or a launchd
 LaunchAgent. Multi-host tunnel management (`felt shuttle tunnels`) installs the hub's autossh jobs
 under whichever of the two the hub runs. The daemon ships
-as a checkout you build, not a release binary. felt works without the daemon.
-Full list:
+as a checkout you build, not a release binary — the one rough edge left, and the
+reason the daemon needs Elixir and Node where the CLI needs nothing. felt works
+without the daemon. See
 [Honest scoping](https://cailmdaley.github.io/felt/shuttle/#honest-scoping).
 
 ## Documentation

@@ -96,32 +96,18 @@ prior transcript.
 
 ## Honest scoping
 
-Shuttle runs the maintainer's machines every day, and parts of it still show
-that. This section lists them all; the other pages point here.
+One thing is still missing, and the other pages point here for it.
 
-- **Multi-host aggregation needs a macOS hub.** `felt shuttle tunnels install`
-  writes launchd autossh jobs and refuses on any other platform. Single-host
-  use — the daemon, the board, and workers on one machine — is supported on
-  Linux and macOS alike, each with its own keep-alive (a systemd user unit or a
-  launchd LaunchAgent). A Linux machine can be a *remote* a Mac hub aggregates;
-  the tunnel lives on the hub.
-- **macOS gets the most use.** The TCC workarounds and the tunnel plists are
-  macOS-first, and the maintainer's own hub is a Mac.
-- **Several examples name the maintainer's store.** Docs use `~/loom`, a
-  [cross-project store](../concepts/cross-project.md), as the running example.
-  Substitute your own store path everywhere it appears.
-- **The daemon ships no release artifact.** You build it from a checkout and you
-  keep the checkout. See [Installation](installation.md).
-- **The commit ledger has no shipped writer.** The board's Chronicle narrates
-  work from `~/.shuttle/commits.jsonl`, which pairs each commit with the session
-  that made it. Nothing in this repo writes that file — a `PostToolUse` hook on
-  the maintainer's machines does, and `bootstrap.sh` wires only the event
-  stream. Without your own writer the commit strip and a cycle's "look back"
-  stay empty; there is no git-log fallback. See
-  [Telemetry](telemetry.md#the-commit-ledger).
+**The daemon ships no release artifact.** You build it from a checkout, with
+Elixir and a Node toolchain on the machine, and you keep the checkout. The
+`felt` CLI installs from a release tarball; the daemon does not yet. See
+[Installation](installation.md).
 
-None of this blocks a single-machine adopter. It does earn Shuttle the label
-"currently fleet-oriented" rather than "general-purpose orchestrator."
+Everything else that used to sit in this list is closed. A Linux machine can be
+a hub as well as a remote — `felt shuttle tunnels install` writes systemd user
+units there and launchd jobs on macOS. The commit ledger has a shipped writer,
+so the Chronicle narrates without a hand-installed hook. The examples name no
+particular store.
 
 ## Next
 
