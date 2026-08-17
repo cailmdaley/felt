@@ -49,14 +49,7 @@ markdown_extensions:
 nav:
   - Home: index.md
   - Getting Started: getting-started.md
-  - Concepts:
-      - Fibers: concepts/fibers.md
-      - Organizing: concepts/organizing.md
-      - Frontmatter: concepts/frontmatter.md
-      - Companions: concepts/companions.md
-      - Cross-Project: concepts/cross-project.md
-  - Agents & Plugin: agents.md
-  - Shuttle — the orchestration layer:
+  - Shuttle orchestration:
       - Overview: shuttle/index.md
       - Installation: shuttle/installation.md
       - Constitutions: shuttle/constitutions.md
@@ -64,6 +57,13 @@ nav:
       - The board: shuttle/board.md
       - Cycles and eras: shuttle/cycles.md
       - Telemetry and the ledgers: shuttle/telemetry.md
+  - Concepts:
+      - Fibers: concepts/fibers.md
+      - Organizing: concepts/organizing.md
+      - Frontmatter: concepts/frontmatter.md
+      - Companions: concepts/companions.md
+      - Cross-Project: concepts/cross-project.md
+  - Agents & Plugin: agents.md
   - Reference:
       - CLI: reference/cli.md
       - Daemon HTTP API: reference/api.md

@@ -94,7 +94,7 @@ and felt behaves the same.
 | Attach plots, PDFs, and HTML reports to a fiber | [Companion files](concepts/companions.md) |
 | Search across every project at once | [Cross-project stores](concepts/cross-project.md) |
 | Wire up Claude Code or Codex | [Agent integration](agents.md) |
-| See the orchestration layer | [Shuttle](shuttle/index.md) |
+| See Shuttle orchestration | [Shuttle](shuttle/index.md) |
 | Look up a command | [CLI reference](reference/cli.md) |
 
 ## License
