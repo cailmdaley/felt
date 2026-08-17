@@ -34,9 +34,9 @@ func defaultMarketplaceRef() string {
 }
 
 // claudeMarketplaceClonePath is the directory Claude Code clones a
-// GitHub-sourced marketplace into. `felt setup codex` reads from here as
-// a fallback when no --source / $FELT_PLUGIN_DIR is given, so a fresh
-// install can wire up Codex hooks without a local felt checkout.
+// GitHub-sourced marketplace into. `felt setup skills` reads from here as a
+// fallback when no --source / $FELT_PLUGIN_DIR is given, so linking skills
+// works after `felt setup claude` without a local checkout.
 func claudeMarketplaceClonePath() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -200,7 +200,7 @@ Resolution order for --source:
 func init() {
 	setupClaudeCmd.Flags().Bool("uninstall", false, "Remove felt plugin from Claude Code")
 	setupClaudeCmd.Flags().String("source", "", "Path to felt repo checkout or plugin directory")
-	setupCodexCmd.Flags().Bool("uninstall", false, "Remove felt hooks from Codex")
+	setupCodexCmd.Flags().Bool("uninstall", false, "Remove felt plugin from Codex")
 	setupCodexCmd.Flags().String("source", "", "Path to felt repo checkout or plugin directory")
 	setupSkillsCmd.Flags().String("target", "", "Target directory (default: ~/.claude/skills)")
 	setupSkillsCmd.Flags().String("source", "", "Path to felt repo checkout or plugin directory")
@@ -218,9 +218,8 @@ func hasMarketplaceManifest(dir string) bool {
 }
 
 // findPluginDir returns the plugin directory derived from the marketplace
-// root: <repo-root>/claude-plugin/. Used by `setup codex` and `setup skills`,
-// which need to read skill directories or pass absolute paths to Codex hook
-// configuration.
+// root: <repo-root>/claude-plugin/. Used by `setup skills`, which reads the
+// skill directories out of it.
 func findPluginDir(source string) (string, error) {
 	root, err := findMarketplaceRoot(source)
 	if err != nil {
@@ -229,23 +228,13 @@ func findPluginDir(source string) (string, error) {
 	return filepath.Join(root, "claude-plugin"), nil
 }
 
-// findPluginDirIfAvailable is the best-effort variant used by Codex setup:
-// Codex's marketplace registration is still authoritative, but current local
-// marketplaces do not materialize plugin cache contents by themselves. When a
-// checkout or Claude marketplace clone is available, we mirror it into Codex's
-// installed-plugin cache layout.
-func findPluginDirIfAvailable(source string) (string, bool) {
-	pluginDir, err := findPluginDir(source)
-	return pluginDir, err == nil
-}
-
 // findMarketplaceRoot resolves the directory to register as a Claude Code
 // plugin marketplace. The directory must contain
 // .claude-plugin/marketplace.json (the felt repo root, by convention).
 //
 // Resolution order: explicit --source arg, $FELT_PLUGIN_DIR, then the
 // already-installed Claude Code marketplace clone at
-// ~/.claude/plugins/marketplaces/<marketplaceName>/ (so `felt setup codex`
+// ~/.claude/plugins/marketplaces/<marketplaceName>/ (so `felt setup skills`
 // works after `felt setup claude` without a separate local checkout).
 func findMarketplaceRoot(source string) (string, error) {
 	if source != "" {
@@ -581,18 +570,20 @@ func hooksReferenceFelt(hooks map[string]interface{}, event, basename string) bo
 	return false
 }
 
-// refreshCodexSetupIfInstalled re-runs the Codex plugin wiring when felt's
-// Codex setup is detected — the plugin enabled in ~/.codex/config.toml, or a
-// legacy hooks.json from a pre-1.0.8 install. Used by `felt update` so a binary
-// that just landed also refreshes Codex's view of the plugin directory. Silent
-// no-op when Codex setup isn't installed.
-func refreshCodexSetupIfInstalled() {
+// refreshCodexSetupIfInstalled reinstalls the Codex plugin from marketplaceRef
+// when felt's Codex setup is detected — the plugin enabled in
+// ~/.codex/config.toml, or a legacy hooks.json from an install that predates
+// the plugin. Used by `felt update` so the plugin follows the binary. Takes the
+// ref rather than deriving one, so an update from a local checkout keeps Codex
+// on that checkout instead of quietly repointing it at GitHub. Silent no-op
+// when Codex setup isn't installed.
+func refreshCodexSetupIfInstalled(marketplaceRef string) {
 	if !feltCodexInstalled() {
 		return
 	}
 	fmt.Println()
 	fmt.Println("Refreshing Codex plugin...")
-	if err := installCodexPluginViaCLI(defaultMarketplaceRef()); err != nil {
+	if err := installCodexPluginViaCLI(marketplaceRef); err != nil {
 		fmt.Printf("Codex refresh failed: %v\n", err)
 		fmt.Println("Rerun `felt setup codex` to retry.")
 	}
@@ -644,9 +635,7 @@ func installCodexPluginViaCLI(marketplaceSource string) error {
 		return fmt.Errorf("codex CLI not found in PATH; install Codex first: %w", err)
 	}
 
-	codexSource := codexMarketplaceSource(marketplaceSource)
-	fmt.Printf("Adding Codex marketplace: %s\n", codexSource)
-	if err := repointCodexMarketplace(codexSource); err != nil {
+	if err := repointCodexMarketplace(codexMarketplaceSource(marketplaceSource)); err != nil {
 		return err
 	}
 
@@ -681,18 +670,25 @@ func installCodexPluginViaCLI(marketplaceSource string) error {
 // repointCodexMarketplace registers codexSource under felt's marketplace name.
 // Codex binds a marketplace name to exactly one source, so adding the same name
 // at a different ref — what a binary upgrade needs — fails until the old
-// registration is dropped. The plain add goes first so a same-ref call stays a
-// no-op and a real failure (no network, bad ref) leaves a working registration
-// in place.
+// registration is dropped.
+//
+// Dropping it is only ever done in response to that specific refusal. Every
+// other failure — no network, a tag that isn't published yet, a codex too old
+// for the verb — returns with the existing registration untouched, because
+// unregistering felt on the way to failing to register it is strictly worse
+// than doing nothing.
 func repointCodexMarketplace(codexSource string) error {
 	out, err := runCodexCLIQuiet("plugin", "marketplace", "add", codexSource)
 	if err == nil {
 		fmt.Print(out)
 		return nil
 	}
+	if !codexMarketplaceConflict(out) {
+		return fmt.Errorf("registering codex marketplace %s: %w\n%s", codexSource, err, strings.TrimSpace(out))
+	}
 
 	if _, rmErr := runCodexCLIQuiet("plugin", "marketplace", "remove", marketplaceName); rmErr != nil {
-		return fmt.Errorf("registering codex marketplace %s: %w\n%s", codexSource, err, strings.TrimSpace(out))
+		return fmt.Errorf("repointing codex marketplace %s: %w\n%s", codexSource, err, strings.TrimSpace(out))
 	}
 
 	retryOut, retryErr := runCodexCLIQuiet("plugin", "marketplace", "add", codexSource)
@@ -704,6 +700,15 @@ func repointCodexMarketplace(codexSource string) error {
 	}
 	fmt.Print(retryOut)
 	return nil
+}
+
+// codexMarketplaceConflict reports whether codex refused an add because the
+// name is already bound to a different source — the one failure repointing
+// fixes. Matching on codex's message is a soft dependency, and it fails in the
+// safe direction: if the wording changes, a repoint that would have worked
+// surfaces as an error instead of silently unregistering the marketplace.
+func codexMarketplaceConflict(out string) bool {
+	return strings.Contains(out, "already added from a different source")
 }
 
 // runCodexCLI invokes the codex CLI, piping stdio through to the caller.

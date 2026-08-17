@@ -73,7 +73,7 @@ if command -v claude >/dev/null 2>&1 || command -v codex >/dev/null 2>&1; then
   echo "Wiring up felt's agent plugins:"
   echo "  • Claude Code: marketplace + plugin + SessionStart / PreToolUse / PostToolUse hooks,"
   echo "                 plus an activity-event hook that writes nothing unless ~/.shuttle exists"
-  echo "  • Codex:       marketplace + plugin + features.plugin_hooks=true"
+  echo "  • Codex:       marketplace + plugin (Codex asks you to trust the hooks on first run)"
   echo "To remove later: felt uninstall"
   echo
 fi

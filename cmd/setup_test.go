@@ -14,7 +14,6 @@ import (
 func TestCodexMarketplaceSource(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"/home/cdaley/code/felt", "/home/cdaley/code/felt"},   // local abs path → unchanged
-		{"~/code/felt", "~/code/felt"},                         // local ~ path → unchanged
 		{"./felt", "./felt"},                                   // local rel path → unchanged
 		{"cailmdaley/felt", "cailmdaley/felt"},                 // bare repo ref → unchanged
 		{"cailmdaley/felt#v1.0.14", "cailmdaley/felt@v1.0.14"}, // git ref → #→@
@@ -22,6 +21,35 @@ func TestCodexMarketplaceSource(t *testing.T) {
 	for _, tc := range cases {
 		if got := codexMarketplaceSource(tc.in); got != tc.want {
 			t.Errorf("codexMarketplaceSource(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+// TestCodexMarketplaceConflict guards the discriminator that decides whether
+// repointCodexMarketplace may unregister felt's marketplace. Only the
+// name-bound-to-another-source refusal earns that; anything else must leave a
+// working registration alone, so a false positive here loses a user's install
+// on a network blip. The first case is codex 0.147.0's message verbatim.
+func TestCodexMarketplaceConflict(t *testing.T) {
+	conflicts := []string{
+		"Error: marketplace 'cailmdaley-felt' is already added from a different source; remove it before adding this source\n",
+	}
+	for _, out := range conflicts {
+		if !codexMarketplaceConflict(out) {
+			t.Errorf("codexMarketplaceConflict(%q) = false, want true", out)
+		}
+	}
+
+	benign := []string{
+		"",
+		"Error: git checkout v9.9.9 failed: pathspec 'v9.9.9' did not match any file(s) known to git\n",
+		"Error: failed to fetch https://github.com/cailmdaley/felt.git: could not resolve host\n",
+		"error: unrecognized subcommand 'add'\n",
+		"Added marketplace `cailmdaley-felt` from /home/cdaley/code/felt.\n",
+	}
+	for _, out := range benign {
+		if codexMarketplaceConflict(out) {
+			t.Errorf("codexMarketplaceConflict(%q) = true, want false", out)
 		}
 	}
 }

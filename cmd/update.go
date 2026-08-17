@@ -114,12 +114,12 @@ with the binary.`,
 }
 
 // refreshPluginAfterUpdate keeps both agent integrations in lockstep with the
-// binary that just landed: the Claude Code plugin (hooks, skills) via the
-// marketplace, and Codex's ~/.codex/hooks.json wiring if it was previously
-// installed via `felt setup codex`. Failures are surfaced as one-line
-// warnings rather than errored — the binary update has already succeeded
-// and shouldn't be undone because a downstream integration step couldn't
-// run (e.g. claude CLI missing, network blip on marketplace fetch).
+// binary that just landed, pointing each at the same marketplaceRef so an
+// update from a local checkout doesn't leave one harness on the checkout and
+// the other on GitHub. Failures are surfaced as one-line warnings rather than
+// errored — the binary update has already succeeded and shouldn't be undone
+// because a downstream integration step couldn't run (e.g. claude CLI missing,
+// network blip on marketplace fetch).
 func refreshPluginAfterUpdate(marketplaceRef string) {
 	if _, err := exec.LookPath("claude"); err != nil {
 		fmt.Println("Plugin refresh skipped: claude CLI not on PATH (run `felt setup claude` once it is).")
@@ -131,7 +131,7 @@ func refreshPluginAfterUpdate(marketplaceRef string) {
 			fmt.Println("Rerun `felt setup claude` to retry.")
 		}
 	}
-	refreshCodexSetupIfInstalled()
+	refreshCodexSetupIfInstalled(marketplaceRef)
 }
 
 func latestVersion() (string, error) {
