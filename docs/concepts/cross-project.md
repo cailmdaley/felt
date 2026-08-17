@@ -14,7 +14,7 @@ A filesystem symlink joins the two. Same bytes, two paths.
 guessing which repo it was in.
 
 ```bash
-felt -C ~/loom ls "jackknife covariance"
+felt -C ~/store ls "jackknife covariance"
 felt ls "jackknife covariance"          # scoped to the current project
 ```
 
@@ -29,10 +29,10 @@ you that.
 You pay one filesystem indirection.
 
 !!! note "Name your cross-project store whatever you like"
-    felt's own docs and skills use `~/loom` for the maintainer's cross-project
-    store. It sits as a private directory on their machines; felt neither ships
-    it nor expects it. Yours can live anywhere and be called anything. Only the
-    symlink and the `-C` flag do the work.
+    You can call your cross-project store `loom`, for example — felt neither
+    ships that name nor expects it. Yours can live anywhere and be called
+    anything; the rest of this page uses `~/store` as a neutral stand-in. Only
+    the symlink and the `-C` flag do the work.
 
 ## The `-C` flag
 
@@ -40,9 +40,9 @@ You pay one filesystem indirection.
 applies globally, so it works with every verb:
 
 ```bash
-felt -C ~/loom ls "query"
-felt -C ~/loom tree
-felt -C ~/loom show some-project/a-fiber
+felt -C ~/store ls "query"
+felt -C ~/store tree
+felt -C ~/store show some-project/a-fiber
 ```
 
 That covers the read side of cross-store work. You point felt at a different
@@ -56,8 +56,8 @@ points at them. Both directions work.
 ### Cross-project store as canonical
 
 ```
-~/loom/.felt/<project-name>/     ← real files
-<project-path>/.felt/            ← symlink → ~/loom/.felt/<project-name>/
+~/store/.felt/<project-name>/    ← real files
+<project-path>/.felt/            ← symlink → ~/store/.felt/<project-name>/
 ```
 
 Take this in the typical case. You back up one git repo, and `felt` from inside
@@ -67,7 +67,7 @@ any project sees its own fibers normally, because the symlink is transparent.
 
 ```
 <project-path>/.felt/            ← real files
-~/loom/.felt/<project-name>/     ← symlink → <project-path>/.felt/
+~/store/.felt/<project-name>/    ← symlink → <project-path>/.felt/
 ```
 
 Use this when the project has a sync constraint that wants the bytes inside its
@@ -90,7 +90,7 @@ silently replaces it (existing symlink). Either way fibers can vanish.
 ```bash
 # 1. Check both ends for existing content.
 ls <project-path>/.felt/
-ls ~/loom/.felt/<project-name>/
+ls ~/store/.felt/<project-name>/
 
 # 2. If both have content, merge by hand BEFORE linking. Inspect every name
 #    collision. Decide which fiber is the keeper. Copy the non-overlapping
@@ -100,7 +100,7 @@ ls ~/loom/.felt/<project-name>/
 mv <project-path>/.felt <project-path>/.felt.pre-link
 
 # 4. Create the symlink (direction per the choice above).
-ln -s ~/loom/.felt/<project-name>/ <project-path>/.felt
+ln -s ~/store/.felt/<project-name>/ <project-path>/.felt
 
 # 5. Verify from the project side.
 felt ls

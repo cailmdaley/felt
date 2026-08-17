@@ -3,6 +3,15 @@
 **felt tracks the durable trail that builds up around work, from the command
 line.**
 
+!!! warning "A personal experiment, evolving fast"
+
+    felt is a personal experiment in agentic working practices, and it will keep
+    evolving with the state of the field. It moves fast, it is shaped by one
+    person's daily use, and it makes no promise of backwards compatibility —
+    expect commands, formats and defaults to change between versions. Your
+    fibers are plain markdown in your own git repository, so the trail survives
+    whatever felt does next. That is the guarantee on offer.
+
 Each entry — a *fiber* — lives in its own directory under `.felt/`. The
 directory holds a `<slug>.md` file with YAML frontmatter and a plain markdown
 body. File a fiber for a task, a decision, a question, a finding, a spec, or a
