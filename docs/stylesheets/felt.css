@@ -127,20 +127,62 @@
 }
 
 /* ══ DARK — parchment on ink ═══════════════════════════════════════════
-   The same material, turned over: the page becomes the ink itself, the
-   type becomes the parchment. Cinnabar cannot survive the swap unchanged
-   (#bc4538 on #1b1611 is 3.5:1), so it lifts; iron-gall muted becomes the
-   board's own chrome tone, #a89b83. --md-hue is warmed to 32° because
-   Material derives several slate values from it and would otherwise leak
-   blue into anything this file does not name. */
+ *
+ * READ THIS BEFORE CHANGING A VALUE HERE. The light scheme above is
+ * transcribed; this one is authored. The Shuttle board has no dark mode
+ * and no theme toggle — Pigment & Parchment is a single fixed cream
+ * palette — so there is no upstream to copy and no hex below can be
+ * checked against a source file. Material ships the toggle regardless, so
+ * a reader will land here; the job is a companion that is recognisably
+ * the same product at dark luminance, not an inversion of the light one.
+ *
+ * The rule every pigment follows: HOLD HUE AND SATURATION, MOVE ONLY
+ * LIGHTNESS. Measured against the report template's originals —
+ *
+ *     cinnabar   #bc4538 → #db7a66    hue +4°   sat +8    light +15
+ *     cobalt     #3d5ba0 → #8aa6de    hue -2°   sat +11   light +27
+ *     verdigris  #3f8278 → #6fb3a6    hue -3°   sat -4    light +19
+ *     ochre      #c49333 → unchanged — it already sits high enough
+ *
+ * — so these are the same four pigments under different light, not four
+ * new ones. Cinnabar has to move: #bc4538 on #1b1611 is 3.5:1, unusable
+ * for a link.
+ *
+ * Three more calls that are judgement, not derivation:
+ *
+ *   THE GROUND IS A PALETTE MEMBER, not a dark grey. #1b1611 is the
+ *   report's own --ink. Every neutral below is then mixed to stay in the
+ *   parchment/ink hue band (30–41°), so the page is warm the way the
+ *   light one is warm.
+ *
+ *   RAISED IS STILL LIGHTER. In the light scheme a code block (--rag)
+ *   sits above the parchment; here #2a231b sits above the ink, by the
+ *   same 1.16:1 step Material's own slate uses. A mechanical inversion
+ *   would have pushed raised surfaces *down*; the physical claim — a
+ *   surface nearer the light catches more of it — does not flip.
+ *
+ *   TEXT IS #e3d8c2, NOT FULL PARCHMENT. #ede2ce on ink measures 14:1,
+ *   the same as ink on parchment, but the two are not equivalent to read:
+ *   a bright figure on a dark ground glares over a long page in a way the
+ *   reverse does not. Pulled back one shade to 12.7:1.
+ *
+ * Washes run at 0.13–0.16 against the light scheme's 0.10–0.12, because a
+ * tint of the same alpha reads weaker over a dark ground. --md-hue is
+ * warmed to 32° because Material derives several slate values from it and
+ * would otherwise leak blue into anything this file does not name. */
 
 [data-md-color-scheme="slate"] {
-  --felt-paper: #1b1611;          /* --ink, now the ground */
+  /* Sourced — these three exist upstream and are used unchanged. */
+  --felt-paper: #1b1611;          /* the report's --ink, promoted to ground */
+  --felt-ink-muted: #a89b83;      /* the board's own chrome rest tone */
+  --felt-ochre: #c49333;          /* the report's --ochre, already dark-ready */
+  --felt-ochre-ink: #c49333;
+
+  /* Authored — no upstream counterpart. See the note above for the rule. */
   --felt-surface: #2a231b;
   --felt-chrome: #151009;
   --felt-chrome-deep: #100c08;
-  --felt-ink: #e3d8c2;            /* parchment, a shade off full */
-  --felt-ink-muted: #a89b83;      /* the board's chrome tone */
+  --felt-ink: #e3d8c2;
   --felt-ink-quiet: #8b8069;
   --felt-rule: #443c31;
   --felt-cinnabar: #db7a66;
@@ -150,8 +192,6 @@
   --felt-cobalt-wash: rgba(138, 166, 222, 0.13);
   --felt-teal: #6fb3a6;
   --felt-teal-wash: rgba(111, 179, 166, 0.13);
-  --felt-ochre: #c49333;
-  --felt-ochre-ink: #c49333;
   --felt-ochre-wash: rgba(196, 147, 51, 0.16);
 
   --md-hue: 32deg;
