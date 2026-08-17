@@ -127,8 +127,6 @@ tracks how the thinking moved.
 - slug collisions between bare and nested fiber forms
 - multiple bare `.md` files at the `.felt/` root
 - fibers with a blank `name`
-- orphaned pins — a fiber claiming a pinned role with no `shuttle:` block
-  (warning)
 
 ```bash
 felt check

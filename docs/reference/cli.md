@@ -44,7 +44,7 @@ Every command accepts these global flags:
 
 | Command | Purpose |
 |---|---|
-| `felt check` | Lint fibers: broken wikilinks, broken `inputs.from` refs, legacy keys, slug collisions, orphaned pins |
+| `felt check` | Lint fibers: broken wikilinks, broken `inputs.from` refs, legacy keys, slug collisions |
 | `felt migrate` | Normalize legacy storage into the current model (`--dir`, `--dry-run`) |
 | `felt backfill-ids` | Assign ULID ids to fibers missing one (`--dir`, `--dry-run`) |
 
