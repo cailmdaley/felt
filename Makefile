@@ -4,12 +4,13 @@
 #   - felt         (Go binary)      — the CLI (`felt …`, incl. `felt shuttle <verb>`).
 #                                     `make cli` builds it; `make cli-install` installs
 #                                     it to ~/.local/bin.
-#   - bin/shuttle  (Elixir escript) — the dispatcher daemon. Loads BEAMs at boot, so
+#   - bin/rel      (Elixir Mix release) — the dispatcher daemon, launched through the
+#     tracked bin/shuttle shim. The release loads its BEAMs at boot, so
 #                                     `make restart` rebuilds + bounces it (the
 #                                     load-bearing daemon dev target).
 #
 # `make build` builds both. `make install` runs the full from-source bootstrap
-# (bootstrap.sh): build+install the CLI, build the daemon escript, place ui/dist,
+# (bootstrap.sh): build+install the CLI, build the daemon release, place ui/dist,
 # register the loom hook, install the keep-alive. The Elixir daemon embeds no
 # agent registry — it reads the already-resolved record off felt's
 # `shuttle.resolved.agent` JSON and shells `felt shuttle agents [resolve]`.
@@ -23,7 +24,7 @@
 # systemd --user units on Linux, so either platform can be the fleet's hub.
 #
 # On Linux hosts without a Go toolchain, `make all` / `make daemon`
-# build only the escript automatically (no Go on PATH -> no CLI rebuild). On a
+# build only the daemon release automatically (no Go on PATH -> no CLI rebuild). On a
 # host that DOES have Go, daemon rebuilds the CLI first to keep the two in
 # lockstep; pass SKIP_CLI=1 to force-skip that and build against whatever felt
 # is already on PATH (this is what bootstrap.sh --skip-cli does). `make build`
@@ -43,13 +44,12 @@ LOG := $(HOME)/Library/Logs/shuttle.log
 else
 LOG := $(HOME)/.shuttle/shuttle.log
 endif
-# Match both the local `bin/shuttle ... -extra bin/shuttle start` shape and
-# remote respawn-loop `./bin/shuttle ... -extra ./bin/shuttle start` shape.
-# `[b]in` prevents pgrep from matching its own shell command.
-# `[^ ]*` (not `\S`) — macOS pgrep uses basic regex and treats `\S` as a
-# literal, so it never matches and stop/start/status all silently miss the
-# daemon.
-PIDPATTERN := [b]in/shuttle -B .* -extra [^ ]*bin/shuttle start
+# The daemon is a Mix release: its beam process boots with an absolute
+# `-boot <release>/releases/<vsn>/start` argument, and the release lives at
+# bin/rel in a checkout (or a tarball root elsewhere). Matching the release's
+# boot script identifies the daemon beam without matching the bin/shuttle shim
+# (a short-lived /bin/sh) or pgrep's own shell command (`[r]el`).
+PIDPATTERN := [b]in/rel/releases/.*/start
 AGENT_LABEL := io.shuttle.daemon
 AGENT_PLIST := $(HOME)/Library/LaunchAgents/$(AGENT_LABEL).plist
 # The Linux analog: a systemd *user* unit. Named for the tmux session the
@@ -92,17 +92,17 @@ endif
 
 help:
 	@echo "felt + shuttle (one repo, two artifacts):"
-	@echo "  make build       — build BOTH: felt CLI + daemon escript"
+	@echo "  make build       — build BOTH: felt CLI + daemon release"
 	@echo "  make cli         — build the felt CLI (go build .)"
 	@echo "  make cli-install — install felt CLI → $(INSTALL_DIR)"
-	@echo "  make daemon      — build the daemon escript → bin/shuttle (MIX_ENV=dev)"
+	@echo "  make daemon      — build the daemon release → bin/rel (MIX_ENV=prod)"
 	@echo "  make test        — go test ./...  AND  mix test  AND  the ui suite  AND  the plugin hooks"
 	@echo "  make plugin-hooks-test — exercise claude-plugin/hooks/* with HOME and PATH sandboxed"
 	@echo "  make lint-personal — fail on maintainer host/account names in tracked source"
 	@echo "  make install     — full from-source bootstrap (CLI + daemon + ui + hook + keep-alive)"
 	@echo ""
 	@echo "daemon lifecycle:"
-	@echo "  make restart     — daemon (rebuild escript) + stop + start  [load-bearing]"
+	@echo "  make restart     — daemon (rebuild release) + stop + start  [load-bearing]"
 	@echo "  make all         — restart"
 	@echo "  make start       — start daemon detached (logs → $(LOG))"
 	@echo "  make stop        — SIGTERM the running daemon"
@@ -122,12 +122,12 @@ cli:
 cli-install:
 	GOBIN=$(INSTALL_DIR) go install .
 
-# daemon refreshes the felt CLI first when Go is on PATH: the escript shells
+# daemon refreshes the felt CLI first when Go is on PATH: the daemon shells
 # the felt CLI for its writes (reopen --host, mark-runtime, …), so the two
 # artifacts must never skew — a daemon built against an older installed CLI
 # silently breaks daemon-shelled commands (unknown flags exit 1 mid-dispatch).
 # SKIP_CLI=1 forces that rebuild off (bootstrap.sh --skip-cli passes it) so
-# daemon builds only the escript, trusting whatever felt is already on PATH.
+# daemon builds only the release, trusting whatever felt is already on PATH.
 # With no Go toolchain the rebuild is skipped automatically either way.
 daemon:
 ifeq ($(SKIP_CLI),1)
@@ -138,7 +138,7 @@ else
 	@command -v felt >/dev/null 2>&1 || { echo "felt not found on PATH and no Go toolchain to build it — install felt first."; exit 1; }
 endif
 	mix shuttle.gen_version
-	mix escript.build
+	MIX_ENV=prod mix release shuttled --overwrite --path bin/rel
 
 # ── test ─────────────────────────────────────────────────────────────────
 test: go-test mix-test js-test plugin-hooks-test
@@ -173,7 +173,7 @@ start:
 	@# Readiness is binding :4000, not a fixed wait. Two boot paths converge here:
 	@#   - nohup dev launch: we spawn bin/shuttle ourselves.
 	@#   - launchd KeepAlive: `make stop` killed the daemon and launchd is already
-	@#     respawning the freshly-built escript, so a daemon is (re)appearing on
+	@#     respawning the freshly-built release, so a daemon is (re)appearing on
 	@#     its own — launching our own would just collide on :4000.
 	@# So: if one's already running (launchd respawn / never down), adopt it and
 	@# wait for :4000; otherwise nohup-launch. Either way poll /api/v1/version up
@@ -214,12 +214,12 @@ stop:
 	  echo "shuttle not running"; \
 	fi
 
-# Rebuild the escript (NOT the Go CLI) then bounce — the fast daemon dev loop,
+# Rebuild the daemon release (NOT the Go CLI) then bounce — the fast daemon dev loop,
 # safe on a host with no Go toolchain.
 restart: daemon stop start
 
 # ── One-command bootstrap ─────────────────────────────────────────────────
-# The full fresh-machine install: prerequisites → felt CLI → daemon escript →
+# The full fresh-machine install: prerequisites → felt CLI → daemon release →
 # ui/dist → loom hook → keep-alive (launchd on macOS / systemd user unit on
 # Linux). bootstrap.sh holds the host-branching logic; this is
 # the entry point. Pass flags through:  make install ARGS="--dry-run"
@@ -231,7 +231,7 @@ install:
 # daemon on crash, start it at login/boot. One target, two supervisors —
 # `uname -s` picks the branch, and the two templates in share/ carry the same
 # environment capture (PATH, FELT_STORES, SSH_AUTH_SOCK) for the same reasons.
-# The escript is built first so the supervisor has a binary to run. On Linux
+# The release is built first so the supervisor has a daemon to run. On Linux
 # the systemd-availability probe runs BEFORE anything is stopped — `make stop`
 # is invoked from inside the recipe only after the probe passes, so a
 # no-systemd host fails loudly without having killed a daemon it can no
@@ -330,4 +330,5 @@ status:
 
 clean:
 	rm -rf _build
-	rm -f Elixir.*.beam bin/shuttle felt felt-linux
+	rm -rf bin/rel
+	rm -f Elixir.*.beam felt felt-linux

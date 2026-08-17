@@ -209,7 +209,7 @@ defmodule Shuttle.RemoteRegistry do
   immediately — one manual reset buys exactly one cascade.
 
   Operators reach this through `shuttle reset <remote>` (see
-  `Shuttle.CLI`), which POSTs `/api/v1/remotes/:name/reset`
+  the `bin/shuttle` shim), which POSTs `/api/v1/remotes/:name/reset`
   (`ShuttleWeb.RemoteController`) on the running daemon — the daemon is
   an escript, so there is no console to call this from directly.
 

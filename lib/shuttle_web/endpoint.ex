@@ -17,7 +17,10 @@ defmodule ShuttleWeb.Endpoint do
   # API stays fully usable.
   plug Plug.Static,
     at: "/",
-    from: ShuttleWeb.Assets.dist(),
+    # MFA form: resolved per request, so the bundle location is a RUNTIME
+    # decision (env override / release priv / checkout — see ShuttleWeb.Assets)
+    # rather than a path baked at compile time on the build machine.
+    from: {ShuttleWeb.Assets, :dist, []},
     only: ~w(assets fonts index.html paper.html favicon.ico apple-touch-icon.png)
 
   plug Plug.Parsers,

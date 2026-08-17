@@ -1,0 +1,139 @@
+#!/bin/sh
+# bin/shuttle — the Shuttle daemon's front door.
+#
+# Historically this file was the built escript itself. The daemon now ships as
+# a Mix release (an ERTS-bundled directory: bin/rel in a checkout, the tarball
+# root in a fetched install) whose launcher is `shuttled`. This tracked shim
+# keeps the verb surface every caller already speaks — launchd/systemd
+# templates, shuttle-launch, the Makefile all run `bin/shuttle start [--force]`
+# — and answers the read verbs over the daemon's HTTP API, which is where the
+# old escript's bare-BEAM implementations of them already pointed.
+#
+# Exit codes kept from the escript contract:
+#   snapshot/status exit 2 when the daemon is down (callers distinguish
+#   "daemon down" from "request failed").
+set -eu
+
+SELF_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+
+# The release launcher: beside us in a release tree (tarball layout, where this
+# shim was copied in by the :copy_cli_shim release step), or under bin/rel in a
+# checkout (where `make daemon` assembles the release).
+if [ -x "$SELF_DIR/shuttled" ]; then
+  LAUNCHER="$SELF_DIR/shuttled"
+elif [ -x "$SELF_DIR/rel/bin/shuttled" ]; then
+  LAUNCHER="$SELF_DIR/rel/bin/shuttled"
+else
+  LAUNCHER=""
+fi
+
+PORT="${SHUTTLE_PORT:-4000}"
+BASE="http://127.0.0.1:$PORT"
+
+need_launcher() {
+  if [ -z "$LAUNCHER" ]; then
+    echo "no daemon release found — build it with \`make daemon\` (checkout) or reinstall the release tarball" >&2
+    exit 1
+  fi
+}
+
+api_get() { curl -fsS --max-time 5 "$BASE$1"; }
+
+api_post() {
+  path="$1"
+  body="${2:-}"
+  if [ -n "$body" ]; then
+    curl -fsS --max-time 10 -X POST -H "Content-Type: application/json" -d "$body" "$BASE$path"
+  else
+    curl -fsS --max-time 10 -X POST "$BASE$path"
+  fi
+}
+
+CMD="${1:-}"
+[ $# -gt 0 ] && shift
+
+case "$CMD" in
+  start)
+    need_launcher
+    if [ "${1:-}" != "--force" ] && api_get /api/v1/state >/dev/null 2>&1; then
+      echo "Daemon already running at localhost:$PORT. Stop it with \`make stop\` — or, if a" >&2
+      echo "keep-alive supervisor owns it, \`launchctl kickstart -k gui/\$UID/io.shuttle.daemon\`" >&2
+      echo "(macOS) / \`systemctl --user restart shuttle-daemon.service\` (Linux)." >&2
+      echo "Pass --force to launch anyway." >&2
+      exit 1
+    fi
+    # Foreground, app started, SIGTERM handled gracefully by the BEAM —
+    # exactly what nohup, launchd, systemd, and the respawn loop all want.
+    exec "$LAUNCHER" start
+    ;;
+
+  snapshot)
+    api_get /api/v1/state || { echo "(daemon down at localhost:$PORT)" >&2; exit 2; }
+    echo
+    ;;
+
+  status)
+    api_get /api/v1/state || { echo "(daemon down at localhost:$PORT)" >&2; exit 2; }
+    echo
+    ;;
+
+  release)
+    if api_post /api/v1/quarantine/release >/dev/null; then
+      echo "quarantine released — parked launches will dispatch on the next tick"
+    else
+      echo "release failed: daemon unreachable or poller not running" >&2
+      exit 1
+    fi
+    ;;
+
+  reset)
+    REMOTE="${1:-}"
+    [ -n "$REMOTE" ] || { echo "Usage: shuttle reset <remote>" >&2; exit 1; }
+    if api_post "/api/v1/remotes/$REMOTE/reset" >/dev/null; then
+      echo "circuit breaker reset for $REMOTE — recovery cascade re-running"
+    else
+      echo "reset failed: unknown remote, breaker not tripped, or daemon unreachable" >&2
+      exit 1
+    fi
+    ;;
+
+  dispatch)
+    FIBER="${1:-}"
+    [ -n "$FIBER" ] || { echo "Usage: shuttle dispatch <fiber-id>" >&2; exit 1; }
+    # Dispatch goes through the running daemon (same as `felt shuttle
+    # dispatch`). The escript-era daemonless in-process dispatch is gone:
+    # start the daemon first.
+    if api_post /api/v1/dispatch "{\"fiber_id\":\"$FIBER\"}"; then
+      echo
+    else
+      echo "dispatch failed: daemon unreachable at localhost:$PORT (start it first)" >&2
+      exit 1
+    fi
+    ;;
+
+  version)
+    # Prefer the live daemon's build stamp; fall back to the release's own
+    # version when no daemon is up.
+    if api_get /api/v1/version 2>/dev/null; then
+      echo
+    else
+      need_launcher
+      exec "$LAUNCHER" version
+    fi
+    ;;
+
+  *)
+    echo "Usage: shuttle <command>"
+    echo ""
+    echo "Commands:"
+    echo "  start                Start the daemon (refuses if already running)"
+    echo "  start --force        Start even if another daemon is detected"
+    echo "  snapshot             Print JSON snapshot of current state"
+    echo "  status               Same JSON (human rendering: felt shuttle ps)"
+    echo "  dispatch <fiber-id>  Ask the running daemon to dispatch a fiber"
+    echo "  release              Release the boot quarantine"
+    echo "  reset <remote>       Reset a remote's tripped circuit breaker"
+    echo "  version              Print the daemon's build stamp"
+    exit 1
+    ;;
+esac

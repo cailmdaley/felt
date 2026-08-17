@@ -34,8 +34,10 @@ nanobanana-output/
 erl_crash.dump
 *.ez
 shuttle-*.tar
-# Built daemon escript + its generated version module
-/bin/shuttle
+# Built daemon release + its generated version module
+# (bin/shuttle itself is the TRACKED shell shim that fronts the release)
+/bin/rel/
+/priv/ui/
 /lib/shuttle/build_info.ex
 
 # ── Shuttle UI (offline verification harness build output) ───────────────

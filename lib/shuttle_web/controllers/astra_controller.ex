@@ -32,12 +32,14 @@ defmodule ShuttleWeb.AstraController do
   require Logger
   alias Shuttle.OriginRouter
 
-  # Resolved ONCE at compile time, mirroring `ShuttleWeb.Assets`: the escript is
-  # rebuilt on every host from a same-path checkout, so the `__DIR__`-derived
-  # path points at that host's `priv/mystra/bake.mjs` regardless of the daemon's
-  # runtime cwd. `SHUTTLE_BAKE_SCRIPT` overrides at build time.
-  @bake_script (System.get_env("SHUTTLE_BAKE_SCRIPT") ||
-                  Path.expand(Path.join([__DIR__, "..", "..", "..", "priv", "mystra", "bake.mjs"])))
+  # Resolved at RUNTIME, mirroring `ShuttleWeb.Assets`: `priv/mystra` is
+  # tracked source, so it ships inside the release's own priv dir and
+  # `Application.app_dir/2` finds it in a checkout build and a fetched release
+  # alike. `SHUTTLE_BAKE_SCRIPT` overrides in the daemon's environment.
+  defp bake_script do
+    System.get_env("SHUTTLE_BAKE_SCRIPT") ||
+      Application.app_dir(:shuttle, "priv/mystra/bake.mjs")
+  end
 
   def show(conn, %{"path" => path} = params) when is_binary(path) and path != "" do
     case OriginRouter.route(Map.get(params, "origin")) do
@@ -70,7 +72,7 @@ defmodule ShuttleWeb.AstraController do
   end
 
   defp run_bake(conn, path, universe) do
-    args = [@bake_script, path] ++ if universe in [nil, ""], do: [], else: [universe]
+    args = [bake_script(), path] ++ if universe in [nil, ""], do: [], else: [universe]
 
     case bake_cmd(args) do
       {out, 0} ->

@@ -30,3 +30,84 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
+  # The Shuttle daemon: one ERTS-bundled Mix release per platform, built on
+  # NATIVE runners (a release bundles whichever OTP built it, and BEAM bytecode
+  # + ERTS must match the platform they run on), each boot-tested on the
+  # platform it targets, then attached to the release goreleaser just created.
+  daemon:
+    needs: goreleaser
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact: shuttle_Linux_x86_64.tar.gz
+          - os: ubuntu-24.04-arm
+            artifact: shuttle_Linux_arm64.tar.gz
+          - os: macos-13
+            artifact: shuttle_Darwin_x86_64.tar.gz
+          - os: macos-14
+            artifact: shuttle_Darwin_arm64.tar.gz
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Elixir
+        uses: erlef/setup-beam@v1
+        with:
+          # Keep in lockstep with ci.yml: the release ships this OTP.
+          otp-version: "28"
+          elixir-version: "1.19"
+
+      - name: Set up Node (UI bundle)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # The daemon shells `felt` at runtime; the boot test below runs a real
+      # poller tick, so give it a real CLI.
+      - name: Set up Go (felt CLI for the boot test)
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build the UI bundle into priv/
+        run: |
+          cd ui
+          npm ci
+          npm run build
+          mkdir -p ../priv/ui
+          cp -R dist ../priv/ui/dist
+
+      - name: Assemble the release
+        run: |
+          mix deps.get --only prod
+          MIX_ENV=prod mix shuttle.gen_version
+          MIX_ENV=prod mix release shuttled --path out/shuttle
+
+      - name: Boot-test the artifact
+        run: |
+          go install .
+          export PATH="$(go env GOPATH)/bin:$PATH"
+          mkdir -p /tmp/boot-store/.felt
+          export SHUTTLE_PORT=4390 SHUTTLE_HOST=ci-boot-test FELT_STORES=/tmp/boot-store
+          out/shuttle/bin/shuttle start --force >/tmp/daemon.log 2>&1 &
+          DAEMON_PID=$!
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:4390/api/v1/version; then break; fi
+            sleep 1
+            if [ "$i" = 60 ]; then echo "daemon never bound"; cat /tmp/daemon.log; exit 1; fi
+          done
+          # The artifact must serve the UI bundle it shipped with.
+          curl -fsS -o /dev/null http://127.0.0.1:4390/index.html
+          # And the shim's HTTP verbs must answer.
+          SHUTTLE_PORT=4390 out/shuttle/bin/shuttle snapshot >/dev/null
+          kill "$DAEMON_PID"
+
+      - name: Attach the tarball to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tar -C out -czf "${{ matrix.artifact }}" shuttle
+          gh release upload "${GITHUB_REF_NAME}" "${{ matrix.artifact }}" --clobber

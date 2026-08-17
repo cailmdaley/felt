@@ -8,7 +8,7 @@ defmodule Shuttle.MixProject do
       elixir: "~> 1.19",
       start_permanent: Mix.env() == :prod,
       elixirc_paths: elixirc_paths(Mix.env()),
-      escript: escript(),
+      releases: releases(),
       deps: deps()
     ]
   end
@@ -22,22 +22,37 @@ defmodule Shuttle.MixProject do
   def application do
     [
       mod: {Shuttle.Application, []},
-      extra_applications: [:logger]
+      # :inets — FileController's If-Modified-Since parsing calls
+      # :httpd_util.convert_request_date/1; without the app in the release the
+      # module is absent and the first conditional GET crashes.
+      extra_applications: [:logger, :inets]
     ]
   end
 
-  defp escript do
+  # The daemon ships as a Mix release: an ERTS-bundled directory tree, built
+  # per-platform in CI (`shuttle_<Os>_<arch>.tar.gz`) and by `make daemon`
+  # locally (→ bin/rel). The release launcher is `bin/shuttled`; the stable
+  # front door is the tracked `bin/shuttle` shim, copied into every release by
+  # the :copy_cli_shim step so tarball and checkout expose the same verbs.
+  # A release always starts the OTP application — the old escript's
+  # bare-BEAM read verbs live in the shim as HTTP calls to the daemon.
+  defp releases do
     [
-      main_module: Shuttle.CLI,
-      name: "shuttle",
-      path: "bin/shuttle",
-      # Don't auto-start the Shuttle OTP application on escript boot.
-      # Only `bin/shuttle start` explicitly calls Application.ensure_all_started(:shuttle).
-      # Read subcommands (status, snapshot) query the running daemon over HTTP
-      # and fall back to direct filesystem/tmux reads — no Poller, no orphan
-      # adoption, no leaked BEAMs.
-      app: nil
+      shuttled: [
+        applications: [shuttle: :permanent],
+        include_executables_for: [:unix],
+        strip_beams: true,
+        steps: [:assemble, &copy_cli_shim/1]
+      ]
     ]
+  end
+
+  defp copy_cli_shim(release) do
+    src = Path.expand("bin/shuttle", __DIR__)
+    dst = Path.join([release.path, "bin", "shuttle"])
+    File.cp!(src, dst)
+    File.chmod!(dst, 0o755)
+    release
   end
 
   defp deps do

@@ -1,48 +1,23 @@
 defmodule ShuttleTest do
   use ExUnit.Case
 
-  import ExUnit.CaptureIO
-
   test "version returns semantic version" do
     assert Shuttle.version() == "0.1.0"
   end
 
-  test "status output includes standing role cycle state" do
-    output =
-      capture_io(fn ->
-        Shuttle.CLI.print_status(%{
-          host: "test-host",
-          poll_at: 1_777_650_000_000,
-          eligible: [],
-          retrying: [],
-          standing_roles: [
-            %{
-              fiber_id: "life/email-triage",
-              state: "review",
-              next_due_at: nil,
-              validation_errors: []
-            },
-            %{
-              fiber_id: "life/invalid-role",
-              state: "scheduled",
-              next_due_at: 1_777_736_400_000,
-              validation_errors: ["accepted_run_id must match run_id in accepted review state"]
-            }
-          ]
-        })
-      end)
+  test "daemon_port reads SHUTTLE_PORT, defaulting to 4000" do
+    # config/test.exs does not set SHUTTLE_PORT, so the default is observable.
+    assert Shuttle.daemon_port() == 4000
 
-    assert output =~ "Standing roles (2):"
-    assert output =~ "life/email-triage — review"
-    assert output =~ "life/invalid-role — scheduled"
-    assert output =~ "next due: 2026-05-02T15:40:00.000Z"
-    assert output =~ "validation: accepted_run_id must match run_id in accepted review state"
+    System.put_env("SHUTTLE_PORT", "4321")
+    on_exit(fn -> System.delete_env("SHUTTLE_PORT") end)
+    assert Shuttle.daemon_port() == 4321
   end
 
   # `configure_endpoint/0` is the daemon's RUNTIME config layer. It matters
-  # because `mix escript.build` bakes evaluated compile-time config into the
-  # artifact — so the port, the server flag, and the signing key must be
-  # decidable on the machine that runs the escript, not the one that built it.
+  # because a release bakes evaluated compile-time config into the artifact —
+  # so the port, the server flag, and the signing key must be decidable on the
+  # machine that runs the daemon, not the one that built it.
   describe "Shuttle.Application.configure_endpoint/0" do
     setup do
       previous = Application.get_env(:shuttle, ShuttleWeb.Endpoint)

@@ -977,7 +977,7 @@ defmodule Shuttle.Poller do
         agent: Keyword.get(opts, :agent),
         effort: Keyword.get(opts, :effort),
         chrome: Keyword.get(opts, :chrome) == true,
-        port: Shuttle.CLI.daemon_port(),
+        port: Shuttle.daemon_port(),
         host: state.own_host_id
       )
 

@@ -55,7 +55,6 @@ DATA="$WORK/data"
 DAEMON_LOG="$WORK/daemon.log"
 AGENTS_FILE="$WORK/agents.json"     # temp user agent registry (holds the fake agent)
 FAKE_CLAUDE="$BIN/fake-claude"
-DAEMON="$WORK/shuttle"
 FELT_BIN=$(command -v "$FELT" || true)
 # The worker's handoff verb is `felt shuttle handoff` (the standalone shuttle-ctl
 # shim is retired). CTL is the verb prefix the fake worker appends `handoff` to.
@@ -116,7 +115,7 @@ fi
 FAKE
 chmod +x "$FAKE_CLAUDE"
 
-# ── 3. Register the fake agent, build the escript ────────────────────────────
+# ── 3. Register the fake agent, build the daemon release ─────────────────────
 # One USER-layer record in a temp registry. Exporting FELT_AGENTS_FILE covers
 # every felt in this run — the ones this script calls and the ones the daemon
 # shells — and shadows the operator's own registry, so the gate is reproducible
@@ -145,14 +144,15 @@ export FELT_AGENTS_FILE="$AGENTS_FILE"
   exit 2
 }
 
-info "building daemon escript (port comes from SHUTTLE_PORT at run time)"
-# No config patching. config/dev.exs no longer decides the port —
-# Shuttle.Application.configure_endpoint/0 reads SHUTTLE_PORT at boot, so the
-# private port is passed to the daemon in step 5 like any other runtime value.
-# This script therefore patches no tracked file at all.
-( cd "$REPO" && mix escript.build >/dev/null 2>&1 ) || { echo "escript build failed"; exit 2; }
-cp "$REPO/bin/shuttle" "$DAEMON"
-rm -f "$REPO/bin/shuttle"          # don't leave a test-contaminated binary behind
+info "building daemon release (port comes from SHUTTLE_PORT at run time)"
+# No config patching. Shuttle.Application.configure_endpoint/0 reads
+# SHUTTLE_PORT at boot, so the private port is passed to the daemon in step 5
+# like any other runtime value. The release is built in place (bin/rel) and
+# run through the tracked bin/shuttle shim — nothing test-specific is baked
+# into the artifact, so nothing needs cleaning up afterwards.
+( cd "$REPO" && MIX_ENV=prod mix release shuttled --overwrite --path bin/rel >/dev/null 2>&1 ) \
+  || { echo "release build failed"; exit 2; }
+DAEMON="$REPO/bin/shuttle"
 
 # ── 4. Create the temp store + two probe fibers ──────────────────────────────
 make_fiber() {  # make_fiber <slug> <mode>

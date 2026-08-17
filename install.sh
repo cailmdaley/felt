@@ -59,6 +59,27 @@ case ":${PATH}:" in
   *) echo "Add ${INSTALL_DIR} to your PATH:  export PATH=\"${INSTALL_DIR}:\$PATH\"" ;;
 esac
 
+# ── Shuttle daemon (opt-in) ────────────────────────────────────────────────
+# SHUTTLE=1 also installs the Shuttle daemon: an ERTS-bundled Mix release
+# fetched from the same GitHub release — no Erlang, Elixir, or Node needed.
+# It lands in $SHUTTLE_HOME (default ~/.local/share/shuttle); the daemon's
+# front door is $SHUTTLE_HOME/bin/shuttle. Runtime prerequisites: tmux + felt.
+if [ "${SHUTTLE:-0}" = "1" ]; then
+  SHUTTLE_HOME="${SHUTTLE_HOME:-${HOME}/.local/share/shuttle}"
+  DAEMON_ASSET="shuttle_${ARCHIVE_OS}_${ARCHIVE_ARCH}.tar.gz"
+  DAEMON_URL="https://github.com/${REPO}/releases/download/${TAG}/${DAEMON_ASSET}"
+
+  echo "Installing Shuttle daemon ${TAG} to ${SHUTTLE_HOME}..."
+  curl -fsSL "$DAEMON_URL" | tar xz -C "$TMPDIR"
+  rm -rf "$SHUTTLE_HOME"
+  mkdir -p "$(dirname "$SHUTTLE_HOME")"
+  mv "$TMPDIR/shuttle" "$SHUTTLE_HOME"
+
+  echo "Shuttle daemon installed."
+  echo "  Start it:   FELT_STORES=<your-store> ${SHUTTLE_HOME}/bin/shuttle start"
+  echo "  Keep-alive: see https://cailmdaley.github.io/felt/shuttle/installation/"
+fi
+
 # Wire up agent plugins for any detected agent CLI. The plugins are core
 # to how felt feels — SessionStart and PreToolUse hooks surface active
 # fibers at session start and gate non-felt tool use until the felt skill

@@ -54,7 +54,9 @@ jobs:
       - name: Set up Elixir
         uses: erlef/setup-beam@v1
         with:
-          otp-version: "27"
+          # Pinned to match the release build matrix (release.yml): a release
+          # bundles whichever OTP built it, so CI must test what ships.
+          otp-version: "28"
           elixir-version: "1.19"
 
       # The daemon shells out to `felt` for store walks; build it from THIS

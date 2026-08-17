@@ -11,7 +11,7 @@
 #
 #   1. prerequisites   — honest check (go, elixir/OTP, node, tmux; jq optional)
 #   2. felt CLI        — go install . → ~/.local/bin/felt (the daemon shells to it)
-#   3. daemon escript  — mix deps.get + escript build → bin/shuttle
+#   3. daemon release  — mix deps.get + mix release → bin/rel (fronted by bin/shuttle)
 #   4. ui/dist         — the served kanban board (built with npm; rsync'd to hosts without Node)
 #   5. event stream    — the plugin hook (`felt hook event`) the daemon reads
 #   6. keep-alive      — launchd LaunchAgent (macOS) / systemd user unit (Linux),
@@ -100,10 +100,8 @@ if [ "$SKIP_CLI" = 0 ]; then
   require "go"        go      "needed to build the felt CLI (the daemon shells out to it)." \
           "install Go 1.23+ (brew install go / asdf)."
 fi
-require "elixir/mix"  mix     "needed to build the daemon escript." \
-        "install Erlang/OTP 27+ and Elixir 1.19+ (brew install elixir / asdf)."
-require "escript"     escript "the daemon is an escript; needs Erlang/OTP on PATH." \
-        "comes with Erlang/OTP."
+require "elixir/mix"  mix     "needed to build the daemon release." \
+        "install Erlang/OTP 28+ and Elixir 1.19+ (brew install elixir / asdf)."
 require "tmux"        tmux    "workers run in tmux, as does the Linux respawn-loop keep-alive." \
         "brew install tmux  /  apt install tmux."
 if [ "$SKIP_CLI" = 1 ]; then
@@ -144,7 +142,7 @@ cli_desc() {
 if [ "$DRY_RUN" = 1 ]; then
   step "Plan (dry-run — nothing will change)"
   note "2. felt CLI : $(cli_desc)"
-  note "3. daemon   : mix deps.get && make daemon → bin/shuttle"
+  note "3. daemon   : mix deps.get && make daemon → bin/rel (fronted by bin/shuttle)"
   note "4. ui/dist  : $(ui_desc)"
   note "5. events   : $([ "$SKIP_HOOK" = 1 ] && echo SKIP || echo 'felt setup claude/codex (plugin hooks) + probe felt hook event')"
   note "6. keepalive: $(keepalive_desc)"
@@ -178,10 +176,10 @@ else
   esac
 fi
 
-# ── 3. daemon escript ──────────────────────────────────────────────────────
-step "Build the daemon escript"
+# ── 3. daemon release ──────────────────────────────────────────────────────
+step "Build the daemon release"
 ( cd "$REPO" && mix deps.get ) || die "mix deps.get failed."
-make -C "$REPO" daemon SKIP_CLI="$SKIP_CLI" || die "escript build failed."
+make -C "$REPO" daemon SKIP_CLI="$SKIP_CLI" || die "daemon release build failed."
 ok "bin/shuttle built."
 
 # Record the bootstrapped checkout in ~/.shuttle (alongside the daemon's other
@@ -265,7 +263,7 @@ fi
 start_respawn_loop() {
   if tmux has-session -t shuttle-daemon 2>/dev/null; then
     ok "respawn loop already running (tmux session 'shuttle-daemon')."
-    note "to cycle to the freshly-built escript, kill the :4000 listener — the loop respawns it:"
+    note "to cycle to the freshly-built release, kill the :4000 listener — the loop respawns it:"
     note "  lsof -ti:4000 -sTCP:LISTEN | xargs kill"
     note "to also pick up a new shuttle-launch: SHUTTLE_DIR='$REPO' ~/.local/bin/shuttle-launch"
   else

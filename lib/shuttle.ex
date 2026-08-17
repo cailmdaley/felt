@@ -13,6 +13,21 @@ defmodule Shuttle do
   """
   @spec version() :: String.t()
   def version, do: "0.1.0"
+
+  @doc """
+  The port the local daemon's HTTP surface binds (and is reached on).
+
+  `SHUTTLE_PORT` else 4000 — the same resolution
+  `Shuttle.Application.configure_endpoint/0` uses to bind, read from the
+  environment so it is answerable before (or without) the endpoint config.
+  """
+  @spec daemon_port() :: pos_integer()
+  def daemon_port do
+    case System.get_env("SHUTTLE_PORT") do
+      value when is_binary(value) and value != "" -> String.to_integer(value)
+      _ -> 4000
+    end
+  end
 end
 
 defmodule Shuttle.Application do
