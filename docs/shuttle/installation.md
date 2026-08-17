@@ -11,10 +11,16 @@ and you keep the checkout.
     names each one you will actually trip over.
 
     **Platform:** Linux and macOS both support single-host use — the daemon,
-    the board, and workers on one machine, with a real keep-alive on either.
-    Multi-host tunnel management (`felt shuttle tunnels`) is macOS-only, since
-    it manages launchd autossh jobs. macOS gets the most use. Windows is
-    unsupported.
+    the board, and workers on one machine, with a real keep-alive (a
+    supervisor that restarts the daemon if it crashes — more on this below)
+    on either. Multi-host tunnel management (`felt shuttle tunnels`) is
+    macOS-only, since it manages launchd autossh jobs. macOS gets the most
+    use. Windows is unsupported.
+
+This page gets you from a clone to a worker running on the board. The
+[Keep-alive](#keep-alive) internals, store/agent/remote configuration, and the
+event stream come after — read them once the daemon is up and you want to
+understand what it's doing.
 
 ## Prerequisites
 
@@ -22,7 +28,7 @@ and you keep the checkout.
 | --- | --- | --- |
 | `go` 1.23+ | yes | Builds the `felt` CLI. The daemon shells out to `felt` for every store walk. |
 | `elixir` 1.19+ / OTP 27 | yes | `mix.exs` declares `elixir: "~> 1.19"`. CI builds on OTP 27. |
-| `escript` | yes | The daemon runs *as* an escript. It ships with Erlang/OTP. |
+| `escript` | yes | The daemon runs *as* an escript — a self-contained executable script format built into Erlang/OTP. It ships with Erlang/OTP, so nothing extra to install. |
 | `tmux` | yes | Every worker runs in a tmux session. On a Linux host without systemd, the daemon's own keep-alive is a tmux loop too. |
 | `node` 22+ / `npm` | only for the board | Builds the kanban bundle into `ui/dist`. |
 | `jq` | optional | `session.sh` uses it to pretty-print the SessionStart envelope. Without it the hook falls back to `felt hook session`. |
@@ -53,13 +59,80 @@ Six steps run in order.
    PATH, skipped otherwise — rsync it from a host that has Node instead.
 5. **Event stream.** Runs `felt setup claude` and `felt setup codex` against
    this checkout, so the plugin hooks match the binary. Then it pipes a probe
-   payload through `felt hook event` and checks the line it writes. See
-   [The event stream](#eventsjsonl).
-6. **Keep-alive.** macOS: a launchd LaunchAgent. Linux: a systemd user unit,
-   falling back to a tmux respawn loop where there is no systemd user session.
+   payload through `felt hook event` and checks the line it writes. Details in
+   [The event stream and the ledgers](#the-event-stream-and-the-ledgers).
+6. **Keep-alive.** Installs a supervisor — the OS service manager that starts
+   the daemon at login and restarts it if it dies: a launchd LaunchAgent on
+   macOS, a systemd user unit on Linux (or a tmux respawn loop where there is
+   no systemd user session). Details in [Keep-alive](#keep-alive).
 
 Useful flags: `--dry-run`, `--skip-ui`, `--build-ui`, `--skip-hook`,
 `--skip-cli`, `--with-tunnels`.
+
+## Verify
+
+```bash
+curl -s http://127.0.0.1:4000/api/v1/version   # daemon answers
+felt shuttle ps                                # running workers
+make logs                                      # tail the daemon log
+make status                                    # ps + a snapshot summary
+```
+
+Open <http://127.0.0.1:4000/> in your browser for [the board](board.md).
+
+The daemon binds `127.0.0.1:4000` and nothing else. It stays loopback-only by
+construction. It carries no auth layer, because nothing off the machine can
+reach it.
+
+## From an empty board to a first dispatch
+
+With the daemon up, here is the fastest path from nothing to a worker running.
+
+Register the current directory as a felt store, if `FELT_STORES` does not
+already cover it:
+
+```bash
+curl -s -X POST http://127.0.0.1:4000/api/v1/felt-stores \
+  -H 'Content-Type: application/json' \
+  -d '{"felt_stores": ["'"$PWD"'"]}'
+```
+
+Add a fiber and give it a `constitution` tag — tags gate nothing, but they
+make the fiber findable as one:
+
+```bash
+felt add pipeline/first-pass "Rewrite the covariance loader" -t constitution
+```
+
+Open `.felt/pipeline/first-pass/first-pass.md` and write the spec: a
+heading-less lede, then a `## Desired State` section stating what "done" looks
+like in checkable terms. See [Writing a
+constitution](constitutions.md#2-write-the-spec) for the shape.
+
+Install the `shuttle:` block. This is what turns the fiber into something the
+daemon will pick up:
+
+```bash
+felt shuttle install pipeline/first-pass --project-dir "$PWD" --model claude-sonnet
+```
+
+Open <http://127.0.0.1:4000/> — the fiber shows up as a card, armed. The
+daemon polls every 30 seconds by default, so the card moves to in-flight on
+its own; `felt shuttle dispatch pipeline/first-pass` skips the wait. `felt
+shuttle ps` lists the live tmux session, and `felt shuttle attach
+pipeline/first-pass` drops you into it.
+
+When the worker hands off, the fiber's `outcome` and `## Status` rewrite in
+place and the card lands in Awaiting review.
+
+!!! note "First dispatch not starting?"
+    Every restart arms a boot quarantine that holds new work until you run
+    `bin/shuttle release` — see the first entry in [Sharp
+    edges](#sharp-edges) if your card sits armed with nothing happening.
+
+That's the whole path from clone to a worker on the board. Everything below is
+what the daemon is doing underneath, and the configuration knobs for a setup
+beyond one machine.
 
 ## Keep-alive
 
@@ -190,47 +263,6 @@ The registry file takes this canonical shape. A bare JSON array also works.
 `POST /api/v1/felt-stores` rewrites the file, and the board's store picker uses
 that endpoint. A store path must contain a `.felt/` directory.
 
-## From an empty board to a first dispatch
-
-With the daemon up and a store registered, here is the fastest path from
-nothing to a worker running.
-
-Add the store, if `FELT_STORES` does not already cover it:
-
-```bash
-curl -s -X POST http://127.0.0.1:4000/api/v1/felt-stores \
-  -H 'Content-Type: application/json' \
-  -d '{"felt_stores": ["'"$PWD"'"]}'
-```
-
-Add a fiber and give it a `constitution` tag — tags gate nothing, but they
-make the fiber findable as one:
-
-```bash
-felt add pipeline/first-pass "Rewrite the covariance loader" -t constitution
-```
-
-Open `.felt/pipeline/first-pass/first-pass.md` and write the spec: a
-heading-less lede, then a `## Desired State` section stating what "done" looks
-like in checkable terms. See [Writing a
-constitution](constitutions.md#2-write-the-spec) for the shape.
-
-Install the `shuttle:` block. This is what turns the fiber into something the
-daemon will pick up:
-
-```bash
-felt shuttle install pipeline/first-pass --project-dir "$PWD" --model claude-sonnet
-```
-
-Open <http://127.0.0.1:4000/> — the fiber shows up as a card, armed. The
-daemon polls every 30 seconds by default, so the card moves to in-flight on
-its own; `felt shuttle dispatch pipeline/first-pass` skips the wait. `felt
-shuttle ps` lists the live tmux session, and `felt shuttle attach
-pipeline/first-pass` drops you into it.
-
-When the worker hands off, the fiber's `outcome` and `## Status` rewrite in
-place and the card lands in Awaiting review.
-
 ## Configuring agents
 
 `felt shuttle agents` prints the effective registry. It layers your own file
@@ -268,10 +300,11 @@ felt shuttle remotes rm hub-a
 ```
 
 `list` reports parse errors, duplicate names, and port collisions. `--multiplex`
-rides an existing `ControlMaster` socket, which is what a 2FA host needs. A
-`launchd_label_prefix` key in the file names the launchd labels
-`felt shuttle tunnels install` writes. Single-machine use needs none of this: an
-absent file means no remotes.
+rides an existing `ControlMaster` socket — SSH's connection-sharing feature,
+which keeps one authenticated connection open for later commands to reuse —
+which is what a 2FA host needs. A `launchd_label_prefix` key in the file names
+the launchd labels `felt shuttle tunnels install` writes. Single-machine use
+needs none of this: an absent file means no remotes.
 
 `bin/shuttle-deploy` reads the same file, so the fleet is described once. Give
 a remote a `checkout` (its repo path) to make it a deploy target — a remote
@@ -334,24 +367,37 @@ there is no git-log fallback. Override the path with `SHUTTLE_COMMITS_FILE`;
 see [The commit ledger](telemetry.md#the-commit-ledger) for the line format if
 you want to grow one.
 
-## Verify
-
-```bash
-curl -s http://127.0.0.1:4000/api/v1/version   # daemon answers
-felt shuttle ps                                # running workers
-make logs                                      # tail the daemon log
-make status                                    # ps + a snapshot summary
-```
-
-Open <http://127.0.0.1:4000/> in your browser for [the board](board.md).
-
-The daemon binds `127.0.0.1:4000` and nothing else. It stays loopback-only by
-construction. It carries no auth layer, because nothing off the machine can
-reach it.
-
 ## Sharp edges
 
 Roughly in the order a new installer hits them.
+
+**Every restart arms a boot quarantine.** On every (re)start the daemon parks
+each dispatchable candidate it has never observed running into `pending_launch`.
+Nothing *fresh* launches until a human runs `bin/shuttle release`. (Work the
+daemon did observe alive — adopted at boot, or dispatched since — keeps
+redispatching, because that counts as continuation. See
+[Boot quarantine](lifecycle.md#boot-quarantine) for why.) The quarantine guards
+your token budget. It also explains why your first worker never starts while
+nothing appears to be wrong.
+
+```bash
+bin/shuttle release
+```
+
+**A worker needs `project_dir`, `host`, and `active`.** You set these three
+gates by hand on the fiber's `shuttle:` block. All three fail quietly, by simply
+not dispatching. `host` is strict: absent or empty leaves the fiber unowned and
+ineligible on *every* daemon. Shuttle offers no `"local"` default and no
+wildcard. The host id comes from `SHUTTLE_HOST`, else the file
+`~/.shuttle/host` (override the path with `SHUTTLE_HOST_FILE`), else the system
+hostname. For the full ordered predicate list the daemon evaluates, see
+[Dispatch eligibility](lifecycle.md#dispatch-eligibility).
+
+**Every built-in agent assumes its CLI is installed.** The shipped records cover
+the configured Claude, Codex, and Pi fleet, with `claude-sonnet` as the
+default. A record whose CLI is absent or unauthenticated fails at dispatch, not
+at install. Use `builtins: "restrict"` when a host should expose only the
+subset it can run — see [Configuring agents](#configuring-agents).
 
 **`make daemon` refreshes the felt CLI when Go is available.** The daemon
 shells the felt CLI for its writes, so a stale installed CLI can break
@@ -390,34 +436,6 @@ systemctl --user restart shuttle-daemon                 # Linux
 ```
 
 `make restart` works only when you started the daemon with `make start`.
-
-**Every restart arms a boot quarantine.** On every (re)start the daemon parks
-each dispatchable candidate it has never observed running into `pending_launch`.
-Nothing *fresh* launches until a human runs `bin/shuttle release`. (Work the
-daemon did observe alive — adopted at boot, or dispatched since — keeps
-redispatching, because that counts as continuation. See
-[Boot quarantine](lifecycle.md#boot-quarantine) for why.) The quarantine guards
-your token budget. It also explains why your first worker never starts while
-nothing appears to be wrong.
-
-```bash
-bin/shuttle release
-```
-
-**A worker needs `project_dir`, `host`, and `active`.** You set these three
-gates by hand on the fiber's `shuttle:` block. All three fail quietly, by simply
-not dispatching. `host` is strict: absent or empty leaves the fiber unowned and
-ineligible on *every* daemon. Shuttle offers no `"local"` default and no
-wildcard. The host id comes from `SHUTTLE_HOST`, else the file
-`~/.shuttle/host` (override the path with `SHUTTLE_HOST_FILE`), else the system
-hostname. For the full ordered predicate list the daemon evaluates, see
-[Dispatch eligibility](lifecycle.md#dispatch-eligibility).
-
-**Every built-in agent assumes its CLI is installed.** The shipped records cover
-the configured Claude, Codex, and Pi fleet, with `claude-sonnet` as the
-default. A record whose CLI is absent or unauthenticated fails at dispatch, not
-at install. Use `builtins: "restrict"` when a host should expose only the
-subset it can run — see [Configuring agents](#configuring-agents).
 
 **`felt shuttle tunnels` is macOS-only, and needs a fleet file first.** It
 renders launchd autossh plists from `~/.config/felt/remotes.json`, so `install`

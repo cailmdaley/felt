@@ -76,9 +76,10 @@ one in the file, and everything below is the board's shorthand for that.
 - **Speak one** with `+`: dictate the intention, and the cycle starts today and
   runs open-ended.
 - **Rename** by double-clicking the name; **respan** by dragging an edge.
-- **Click the band** for the era face — span, intention, derived figures, and
-  *the look back*, a memoir composed from the commit trail. **Inscribe this
-  review** writes that memoir back into the cycle fiber's body.
+- **Click the band** to open the cycle's own page — the board calls this the
+  **era face**: span, intention, derived figures, and *the look back*, a
+  memoir composed from the commit trail. **Inscribe this review** writes that
+  memoir back into the cycle fiber's body.
 - **Snooze into one**: while dragging a card, the drag horizon offers a chip per
   upcoming cycle. Dropping on it sets `due:` to that cycle's start day, clamped
   to tomorrow when the cycle is already running — "rest until tomorrow, later

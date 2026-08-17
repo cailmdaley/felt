@@ -139,15 +139,16 @@ as `blocked`. A healthy run or a force-dispatch clears it.
 
 ## Boot quarantine
 
-An overloaded machine once crashed the daemon repeatedly. Each restart's first
-poll dispatched every armed, workerless fiber it could see: eight token-burning
-launches in four minutes, several of them redundant.
-
-So: **a daemon restart is not dispatch authority.** On every start, the daemon
+**A daemon restart is not dispatch authority.** On every start, the daemon
 parks every candidate it has never observed running into `pending_launch` and
 dispatches nothing fresh. Work it *did* observe alive under its own uptime —
 adopted at boot, or dispatched since — resumes normally. That counts as
 continuation, not a fresh launch.
+
+The guard exists because a daemon that restarts repeatedly (an overloaded
+machine crash-looping, for example) would otherwise treat every restart as
+license to relaunch every armed, workerless fiber it can see — a burst of
+redundant, token-burning launches on each crash.
 
 Release is manual. No timeout, no self-clearing.
 
@@ -179,8 +180,8 @@ The daemon also speaks HTTP under `/api/v1`, in four groups: a **write plane**
 (`dispatch`, `transition`, `kill`, `lifecycle`, `felt-edit`, …), a **read
 plane** (`fibers`, `agents`, `felt-stores`, …), a **temporal read plane** the
 board's time views live on (`activity`, `sessions`, `commits`, `spend`,
-`sent-files/all`, each with a `/composite` sibling that fans in the fleet, plus
-`moment`, which is aimed at one host), and
+`sent-files/all`, each with a `/composite` sibling that fans in every host a
+hub aggregates — the fleet — plus `moment`, which is aimed at one host), and
 **operator routes** (`state`, `version`, the manual gate releases). The [API
 reference](../reference/api.md) tabulates them.
 
@@ -200,7 +201,7 @@ earns its keep in four cases:
 
 Never uninstall to end a worker session. Use `felt shuttle handoff`.
 
-## Card missing?
+## Diagnosing a missing card
 
 Most "my card isn't showing" reduces to "no block installed yet." Check in this
 order: is the fiber in a store the daemon polls, does `felt shuttle status` show

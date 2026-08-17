@@ -13,6 +13,12 @@ felt computes back-references, reverse consumers, and body search from the
 markdown on demand. So the store stays readable, greppable, diffable, and
 yours.
 
+Install it in one line — [Getting started](getting-started.md) walks the rest:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh | sh
+```
+
 ```bash
 felt add covariance-estimation "Covariance estimation" -s open
 felt edit covariance-estimation -s closed \

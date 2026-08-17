@@ -157,9 +157,10 @@ pages is the work, and you find the one you want by recognising it.
   with its own tab strip, because Shuttle runs as a dock web-app where every
   `window.open` would otherwise become a separate window.
 
-The feed is `/api/v1/sent-files/all` (with a `/composite` sibling for the whole
-fleet), which reads the host's event stream. A host with no event stream shows
-an empty canvas — see [Telemetry](telemetry.md).
+The feed is `/api/v1/sent-files/all` (with a `/composite` sibling that fans in
+every host a hub aggregates — the **fleet**), which reads the host's event
+stream. A host with no event stream shows an empty canvas — see
+[Telemetry](telemetry.md).
 
 ## The board is optional, and built separately
 
@@ -178,4 +179,4 @@ usable. If you change any `/api/v1/*` route, rebuild the bundle — a stale
 bundle against a changed route table fails silently as a 404.
 
 A card that never appears at all is usually a dispatch question rather than a
-board question — see [Card missing?](lifecycle.md#card-missing).
+board question — see [Diagnosing a missing card](lifecycle.md#diagnosing-a-missing-card).

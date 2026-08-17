@@ -81,7 +81,7 @@ API](api.md).
 
 | Command | Purpose |
 |---|---|
-| `felt shuttle install <fiber>` | Install as a one-shot dispatch role (`--project-dir` required, `-m` agent, `--host`, `--disabled`) |
+| `felt shuttle install <fiber>` | Install as a one-shot dispatch role (`--project-dir` required unless `--disabled`, `-m` agent, `--host`, `--disabled`) |
 | `felt shuttle pin <fiber>` | Install as a pinned, schedule-less perennial role (`--project-dir` required, `-m`, `--host`) |
 | `felt shuttle repeat <fiber>` | Install as a standing (cron-scheduled) role (`-s/--schedule` and `--project-dir` required, `-z/--tz`, `-m`, `--host`) |
 | `felt shuttle reshape <fiber> [kind]` | Change an existing block's `kind` and/or a standing role's schedule (`-s/--schedule`, `-z/--tz`) |
@@ -117,7 +117,7 @@ untouched by any of this.
 
 | Command | Purpose |
 |---|---|
-| `felt shuttle status [fiber]` | One line per shuttle-managed fiber (`--all`, `--remote <name>`, `--include-orphans`); with a fiber, a detailed single-fiber report including the daemon's dispatch assessment |
+| `felt shuttle status [fiber]` | One line per shuttle-managed fiber (`--all`, `--remote <name>` — mutually exclusive, `--include-orphans`); with a fiber, a detailed single-fiber report including the daemon's dispatch assessment |
 | `felt shuttle ps` | Live tmux worker sessions only |
 | `felt shuttle snapshot` | Print the local daemon's state snapshot |
 | `felt shuttle dispatch <fiber>` | Ask the local daemon to dispatch a fiber now (`--ad-hoc`) |
@@ -134,10 +134,10 @@ untouched by any of this.
 | `felt shuttle remotes add <name>` | Add or replace a remote (`--port`, `--ssh`, `--remote-port`, `--display`, `--checkout`, `--multiplex`) |
 | `felt shuttle remotes rm <name>` | Remove a remote |
 | `felt shuttle remotes path` | Print the fleet file path (`~/.config/felt/remotes.json`) |
-| `felt shuttle tunnels install [remote]` | Write (and optionally bootstrap) launchd autossh tunnels for the remotes in the fleet file |
-| `felt shuttle validate-identity` | Check federated fiber UID invariants across daemon feeds |
+| `felt shuttle tunnels install [name ...]` | Write (and optionally bootstrap) launchd autossh tunnels for the named remotes, or all enabled remotes if none are given (`--plist-dir`, `--log-dir`, `--autossh-path`, `--write-only`); macOS only |
+| `felt shuttle validate-identity` | Check federated fiber UID invariants across daemon feeds (`--daemon-url`, repeatable, to check other hosts) |
 | `felt shuttle contract` | Print the daemon-facing CLI contract version (used at daemon boot to detect a stale CLI) |
-| `felt shuttle mark-runtime <fiber>` | Stamp `shuttle.runtime` continuation fields; daemon-facing, not for manual use |
+| `felt shuttle mark-runtime <fiber>` | Stamp `shuttle.runtime` continuation fields (`--dispatched-at`, `--session`, `--run-id`, `--handed-off-at`; at least one required); daemon-facing, not for manual use |
 | `felt shuttle migrate-runtime` | Lift flat legacy runtime keys into the nested `shuttle.runtime` block (`--dir`, `--host`, `--dry-run`) |
 
 !!! note

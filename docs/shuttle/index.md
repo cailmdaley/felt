@@ -76,16 +76,19 @@ prior transcript.
 
 ## The pieces
 
-- **The daemon** — an Elixir/OTP escript at `bin/shuttle`. One process, bound to
-  `127.0.0.1:4000`. It polls, dispatches, and serves an HTTP API.
+- **The daemon** — an Elixir/OTP escript (a self-contained compiled executable)
+  at `bin/shuttle`. One process, bound to `127.0.0.1:4000`. It polls,
+  dispatches, and serves an HTTP API.
 - **tmux** — hosts the worker process and reports its liveness. Not optional.
   tmux owns the worker process; Shuttle owns only the watcher. So restarting the
   daemon leaves live workers running — the daemon re-adopts them on boot.
 - **The board** — a TypeScript UI, served by the daemon at
   `http://127.0.0.1:4000/`. A kanban desk plus four more views (Day, Week,
   Chronicle, and a canvas of the files workers sent) over the same fibers, tmux
-  liveness, and the fleet's activity, session and commit
-  [ledgers](telemetry.md). It holds no state of its own. Skip it if you like:
+  liveness, and the activity, session and commit [ledgers](telemetry.md) for
+  every host it can reach (the **fleet** — one or more daemons working
+  together, aggregated at a hub; see [Honest scoping](#honest-scoping) below).
+  It holds no state of its own. Skip it if you like:
   the CLI covers every lifecycle operation. (Cycles are the one thing only the
   board draws — see [Cycles and eras](cycles.md).)
 - **The agent registry** — maps an agent id (`claude-opus`, `codex`,

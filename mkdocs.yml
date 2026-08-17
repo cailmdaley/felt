@@ -16,6 +16,7 @@ theme:
         icon: material/brightness-4
         name: Switch to light mode
   features:
+    - navigation.tabs
     - navigation.sections
     - navigation.footer
     - content.code.copy
@@ -46,12 +47,12 @@ nav:
   - Agents & Plugin: agents.md
   - Shuttle — the orchestration layer:
       - Overview: shuttle/index.md
+      - Installation: shuttle/installation.md
       - Constitutions: shuttle/constitutions.md
       - Lifecycle: shuttle/lifecycle.md
       - The board: shuttle/board.md
       - Cycles and eras: shuttle/cycles.md
       - Telemetry and the ledgers: shuttle/telemetry.md
-      - Installation: shuttle/installation.md
   - Reference:
       - CLI: reference/cli.md
       - Daemon HTTP API: reference/api.md

@@ -7,7 +7,7 @@ append-only JSONL files in the daemon's state directory.
 
 | File | Written by | Carries |
 |---|---|---|
-| `~/.shuttle/events.jsonl` | `felt hook event`, from your agent harness | one line per harness hook event |
+| `~/.shuttle/events.jsonl` | `felt hook event`, from your agent harness (the coding-agent CLI you're running — Claude Code, Codex, …) | one line per harness hook event |
 | `~/.shuttle/sessions.jsonl` | the daemon, at dispatch / claim / resume | one line per session: which fiber it belonged to |
 | `~/.shuttle/commits.jsonl` | a `PostToolUse` hook **that does not ship with felt** | one line per commit: sha, subject, repo, `--shortstat` counts, and the session that made it |
 
@@ -18,7 +18,8 @@ has its own override: `SHUTTLE_EVENTS_FILE`, `SHUTTLE_SESSIONS_FILE`,
 They are host-local by design. Every file records what happened on the machine
 that wrote it, and a hub reads a remote's copy over the tunnel rather than
 syncing it — which is why every temporal endpoint is host-scoped with a
-`/composite` sibling that fans the fleet in.
+`/composite` sibling that fans in every host the hub aggregates (the
+**fleet**).
 
 ## The event stream
 
