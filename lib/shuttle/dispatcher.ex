@@ -281,7 +281,7 @@ defmodule Shuttle.Dispatcher do
     Fiber: #{prompt_fiber_id}
     """
 
-    compose_prompt(header <> render_previous_session_line(opts), fiber_id, opts)
+    compose_prompt(header, fiber_id, opts)
   end
 
   @doc """
@@ -306,7 +306,7 @@ defmodule Shuttle.Dispatcher do
             _ -> ""
           end
 
-        "Previous session: #{uuid}#{harness} — its transcript is on disk; the shuttle skill's transcript recipes read its tail or search it surgically.\n"
+        "Previous session: #{uuid}#{harness}\n"
 
       _ ->
         ""
@@ -335,7 +335,8 @@ defmodule Shuttle.Dispatcher do
     Fiber: #{prompt_fiber_id}
     """
 
-    compose_prompt(header, fiber_id, opts)
+    # A resumed worker IS the previous session — no lineage pointer to itself.
+    compose_prompt(header, fiber_id, Keyword.delete(opts, :previous_session))
   end
 
   @doc """
@@ -425,8 +426,6 @@ defmodule Shuttle.Dispatcher do
     Run:   #{run_id}
     """
 
-    header = header <> render_previous_session_line(opts)
-
     # A standing run is definitionally standing — declare it here so the exit
     # contract is right regardless of how the caller threaded opts. The handoff
     # marker is inert for standing (runs always dispatch fresh); the daemon
@@ -496,6 +495,15 @@ defmodule Shuttle.Dispatcher do
 
         _ ->
           String.trim(header)
+      end
+
+    # Lineage sits UNDER the store line: the fiber and the store are what a
+    # worker needs to read its constitution, and the previous session is a
+    # pointer it only follows once oriented.
+    header =
+      case render_previous_session_line(opts) do
+        "" -> header
+        line -> header <> "\n" <> String.trim_trailing(line)
       end
 
     # Order: header, exit contract, user message block. The exit contract is
@@ -568,7 +576,7 @@ defmodule Shuttle.Dispatcher do
     render_block(
       "Exit Contract",
       nil,
-      "This is an autonomous Shuttle worker — a normal chat final response is not a worker exit. At a clean checkpoint, after updating the fiber (outcome, findings, commits), rewrite the constitution's `## Status` in prose — the handoff the next session lands on, rewritten, never a session log — then your FINAL action is `felt shuttle handoff <fiber-id>`: it stamps the clean-exit marker and ends your session (no separate `kill $PPID`). Without the marker the daemon assumes a dirty death and resumes your transcript instead of dispatching fresh. Exception: if the directive or constitution asks you to wait for a human, or the state of the work makes human input the clear next move (taste calls open, feedback mid-loop), stay alive at that checkpoint instead — do not hand off. The shuttle skill's exit semantics carry the rest."
+      "This is an autonomous Shuttle worker — a normal chat final response is not a worker exit. At a clean checkpoint, after updating the fiber (outcome, findings, commits), rewrite the constitution's `## Status` in prose — the handoff the next session lands on, rewritten, never a session log — then your FINAL action is `felt shuttle handoff <fiber-id>`: it marks the session complete and closes it. That mark is what tells the daemon you finished at a checkpoint, so the next worker starts fresh from your `## Status` instead of resuming this transcript mid-thought. Exception: if the directive or constitution asks you to wait for a human, or the state of the work makes human input the clear next move (taste calls open, feedback mid-loop), stay alive at that checkpoint instead — do not hand off. The shuttle skill's exit semantics carry the rest."
     )
   end
 

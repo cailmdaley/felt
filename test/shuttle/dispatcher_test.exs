@@ -357,7 +357,7 @@ defmodule Shuttle.DispatcherTest do
     # contract must be prompt-local so resumed workers do not treat Shuttle
     # work like ordinary chat completion.
     assert prompt =~ "Exit Contract"
-    assert prompt =~ "kill $PPID"
+    assert prompt =~ "felt shuttle handoff"
     assert prompt =~ "a normal chat final response is not a worker exit"
     refute prompt =~ "Exit before context is half-full"
 
@@ -378,7 +378,10 @@ defmodule Shuttle.DispatcherTest do
     assert with_lineage =~
              "Previous session: 0883ade1-08e0-4457-94c6-7ac12137eb0f (claude-code)"
 
-    assert with_lineage =~ "transcript recipes"
+    # Lineage sits UNDER the store line — fiber, store, then the pointer to
+    # what came before.
+    assert :binary.match(with_lineage, "Felt store:") |> elem(0) <
+             :binary.match(with_lineage, "Previous session:") |> elem(0)
 
     # Ledger-less fallback carries no harness label — no "()" litter.
     unlabeled =
@@ -386,7 +389,7 @@ defmodule Shuttle.DispatcherTest do
         previous_session: %{uuid: "0883ade1-08e0-4457-94c6-7ac12137eb0f", harness: nil}
       )
 
-    assert unlabeled =~ "Previous session: 0883ade1-08e0-4457-94c6-7ac12137eb0f —"
+    assert unlabeled =~ "Previous session: 0883ade1-08e0-4457-94c6-7ac12137eb0f\n"
 
     # First dispatch: no line at all.
     refute Dispatcher.render_prompt("tests/haiku") =~ "Previous session:"
@@ -1307,7 +1310,7 @@ defmodule Shuttle.DispatcherTest do
     # The run-specific frontmatter handoff remains in the skill; the generic
     # autonomous-worker exit contract is prompt-local.
     assert prompt =~ "Exit Contract"
-    assert prompt =~ "kill $PPID"
+    assert prompt =~ "felt shuttle handoff"
     refute prompt =~ "review.state: awaiting"
     refute prompt =~ "felt history append"
   end
@@ -1452,7 +1455,7 @@ defmodule Shuttle.DispatcherTest do
     assert prompt =~ "Fiber: tests/haiku"
     assert prompt =~ "already loaded in your transcript"
     assert prompt =~ "Exit Contract"
-    assert prompt =~ "kill $PPID"
+    assert prompt =~ "felt shuttle handoff"
     assert prompt =~ "a normal chat final response is not a worker exit"
 
     # Resume prompt deliberately omits the fresh-dispatch orientation —
@@ -1589,7 +1592,7 @@ defmodule Shuttle.DispatcherTest do
     assert prompt =~ ~s("tmux_session": "capture-ab12cd34")
     assert prompt =~ ~s("session_uuid": "uuid-cap-1")
     # Worker exit contract present (capture sessions become ordinary workers).
-    assert prompt =~ "kill $PPID"
+    assert prompt =~ "felt shuttle handoff"
   end
 
   test "capture spawns a non-shuttle-suffixed session with the prompt in the run script" do
