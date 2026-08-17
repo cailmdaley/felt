@@ -35,6 +35,13 @@ Four surfaces: a **Timeline** ribbon of scheduled launches, the **Now** board
 of cards that need something, a **Pinned** strip of perennial roles, and
 **Resting**, where snoozed work waits.
 
+![The Desk: Drafts, In Flight and Awaiting Review columns, each card carrying a
+fiber's title, path, latest outcome and the agent assigned to it, with the
+Pinned strip and Resting shelf below.](../assets/board-desk.jpg)
+
+*A card's body is its `outcome` — the line the worker rewrote when it last
+stopped. Several are blurred here; they are ordinary fiber text.*
+
 Where a card lands is two independent decisions: which column it belongs to,
 and which horizon it sits on.
 
@@ -122,6 +129,14 @@ absent.
   future rows are hollow.
 - **Chronicle** draws fibers as multi-day lifelines across calendar days, under
   a strip of [cycle](cycles.md) bands.
+
+![The Week view: seven day rows over a 6am-to-6am axis, each showing a filled
+curve where agents were working and red ticks where the human was steering,
+with per-day totals in the right margin.](../assets/board-week.jpg)
+
+*Week, reading two clocks at once: the filled curve is agents working, the red
+ticks are you. A day's marginalia gives its total, whether it ran full or half,
+and the lines changed. The era label runs across the header.*
 
 **Two pigments, and no third.** Every raster spends exactly two: solid for
 human steering, wash for agent work. There is no "attention called" state — an
