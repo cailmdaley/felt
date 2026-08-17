@@ -96,23 +96,46 @@ felt edit covariance-estimation \
     sentences, open `.felt/covariance-estimation/covariance-estimation.md` in
     your editor and write there. felt reads it back on the next command.
 
-## Add a child and nest it
+## Add a child
 
-Work grows sub-questions. Give them their own fibers:
+Work grows sub-questions. Give them their own fibers, under the fiber they
+belong to:
 
 ```bash
-felt add jackknife-patches "Jackknife patch count" -s active
-felt nest jackknife-patches covariance-estimation
+felt add covariance-estimation/jackknife-patches "Jackknife patch count" -s active
 ```
 
 ```
-Nested jackknife-patches under covariance-estimation as covariance-estimation/jackknife-patches
+covariance-estimation/jackknife-patches
 ```
 
-`felt nest <child> <parent>` moves the whole subtree on disk and rewrites the
-addresses that point at it. The directory tree carries containment on its own,
-so no parent field can drift. `felt unnest <child>` promotes it back to the top
-level.
+You rarely have to type the whole path. When the first segment of a slug names
+a fiber that already exists, felt puts the new one under it:
+
+```bash
+felt add jackknife-patches/binning "Binning choice"
+```
+
+```
+Resolved jackknife-patches/binning under covariance-estimation/jackknife-patches/binning
+covariance-estimation/jackknife-patches/binning
+```
+
+If the leading segment matches fibers in more than one subtree, felt stops and
+lists the candidates rather than guessing. `--top-level` forces a root fiber
+when you want one despite a matching name.
+
+Structure that was right when you filed it often stops being right later, so
+containment is movable:
+
+```bash
+felt nest jackknife-patches covariance-estimation   # move under a new parent
+felt unnest jackknife-patches                       # promote back to the top
+```
+
+`felt nest` moves the whole subtree on disk and rewrites the addresses that
+point at it. The directory tree carries containment on its own, so no parent
+field can drift.
 
 ## Look at the store
 
@@ -207,6 +230,13 @@ recently touched fibers, a gate that nudges the agent to load the felt skill
 before it starts editing, and the `felt` and `shuttle` skills themselves. The
 agent then reads and writes the same store you do. See
 [Agent integration](agents.md).
+
+**See the store in a browser.** felt ships with [Shuttle](shuttle/index.md), an
+optional daemon whose [board](shuttle/board.md) serves your fibers at
+`localhost:4000` — cards you can read, edit and rearrange, `[[wikilinks]]` you
+can follow, embedded plots and reports rendered in place, and views of where
+your time actually went. Shuttle also runs agents autonomously against fibers,
+but the board is worth having on its own.
 
 **Keep reading.** [Fibers](concepts/fibers.md) covers the data model in full,
 and [Organizing](concepts/organizing.md) covers the judgment calls — when a
