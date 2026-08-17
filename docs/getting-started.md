@@ -60,13 +60,8 @@ cd ~/dev/my-project
 felt init
 ```
 
-`felt init` creates or repairs `.felt/` and writes two support files: a
-`myst.yml` so the store can render as a site, and a `.gitignore` for felt's
+`felt init` creates or repairs `.felt/` and writes a `.gitignore` for felt's
 per-fiber write locks. Run it again any time — it is idempotent.
-
-Rendering the site needs [`mystmd`](https://mystmd.org/), a separate tool felt
-does not install. `npm install -g mystmd`, then `myst start` from the store
-root.
 
 Commit `.felt/` to your repository. The trail is worth versioning.
 

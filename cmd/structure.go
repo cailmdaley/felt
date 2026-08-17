@@ -29,7 +29,7 @@ This migration pass:
 - strips leading MyST anchor lines like (slug)= from fiber bodies
 
 Each migrated flat fiber lands at <slug>/<slug>.md, and any inputs.from
-references to migrated hex IDs are rewritten, and myst.yml is ensured.
+references to migrated hex IDs are rewritten.
 
 A single bare .md at .felt/ root is the entry-point fiber and is preserved —
 only multiple bare files are treated as orphaned legacy and migrated.`,

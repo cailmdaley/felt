@@ -71,7 +71,6 @@ Each fiber owns a directory for a reason. Companion files — plots, PDFs, a
 
 ```
 .felt/
-├── myst.yml
 ├── .gitignore
 ├── project.md                      ← entry-point fiber (bare, at root)
 └── bao-analysis/
@@ -100,10 +99,8 @@ cd my-project
 felt init
 ```
 
-`felt init` creates or repairs `.felt/` and writes two support files:
-
-- `myst.yml` — a MyST project config, so the store renders as a site.
-- `.gitignore` — ignores `*.md.lock`, felt's per-fiber write locks.
+`felt init` creates or repairs `.felt/` and writes a `.gitignore` that ignores
+`*.md.lock`, felt's per-fiber write locks.
 
 Re-running it is safe. It leaves existing files alone.
 
@@ -126,7 +123,7 @@ tracks how the thinking moved.
 - broken `inputs.from` data-flow references
 - legacy `title` frontmatter keys
 - legacy `depends-on` frontmatter keys
-- legacy MyST body anchors
+- legacy body anchors
 - slug collisions between bare and nested fiber forms
 - multiple bare `.md` files at the `.felt/` root
 - fibers with a blank `name`
@@ -150,8 +147,7 @@ felt check --json
 - flat `.felt/<slug>.md` files become `<slug>/<slug>.md`
 - `title` frontmatter becomes `name`
 - inert `depends-on` keys are dropped
-- leading MyST anchors like `(slug)=` are stripped from bodies
-- `myst.yml` is ensured
+- leading anchor lines like `(slug)=` are stripped from bodies
 
 Look before you leap:
 

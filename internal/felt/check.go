@@ -99,7 +99,7 @@ func CheckStructure(s *Storage) ([]CheckIssue, error) {
 			}
 			continue
 		}
-		if name == MystConfigName || !strings.HasSuffix(name, FileExt) {
+		if name == LegacyMystConfigName || !strings.HasSuffix(name, FileExt) {
 			continue
 		}
 		slug := strings.TrimSuffix(name, FileExt)

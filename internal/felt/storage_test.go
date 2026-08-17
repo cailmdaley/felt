@@ -33,15 +33,8 @@ func TestStorageInit(t *testing.T) {
 	if !s.Exists() {
 		t.Error("Exists() should be true after Init()")
 	}
-	data, err := os.ReadFile(filepath.Join(s.root, MystConfigName))
-	if err != nil {
-		t.Fatalf("reading myst.yml: %v", err)
-	}
-	if string(data) != defaultMystConfig {
-		t.Fatalf("myst.yml = %q, want default config", string(data))
-	}
-	if !strings.Contains(string(data), "valid-page-frontmatter") {
-		t.Fatalf("myst.yml missing frontmatter suppression: %q", string(data))
+	if _, err := os.Stat(filepath.Join(s.root, LegacyMystConfigName)); !os.IsNotExist(err) {
+		t.Fatalf("Init() must not create %s; felt is not a MyST project", LegacyMystConfigName)
 	}
 	gitignoreData, err := os.ReadFile(filepath.Join(s.root, GitignoreName))
 	if err != nil {
@@ -60,7 +53,7 @@ func TestStorageInit(t *testing.T) {
 	}
 }
 
-func TestStorageInitCreatesMystConfigInExistingDirectory(t *testing.T) {
+func TestStorageInitCreatesGitignoreInExistingDirectory(t *testing.T) {
 	dir := t.TempDir()
 	feltDir := filepath.Join(dir, DirName)
 	if err := os.MkdirAll(feltDir, 0755); err != nil {
@@ -72,9 +65,6 @@ func TestStorageInitCreatesMystConfigInExistingDirectory(t *testing.T) {
 		t.Fatalf("Init() error: %v", err)
 	}
 
-	if _, err := os.Stat(filepath.Join(feltDir, MystConfigName)); err != nil {
-		t.Fatalf("myst.yml should be created in existing .felt/: %v", err)
-	}
 	if _, err := os.Stat(filepath.Join(feltDir, GitignoreName)); err != nil {
 		t.Fatalf(".gitignore should be created in existing .felt/: %v", err)
 	}

@@ -13,7 +13,7 @@ felt migrate --dry-run    # preview — check flat-file moves, title renames, an
 felt migrate              # big bang — no backwards compatibility
 ```
 
-The tool strips hex suffixes, creates `slug/slug.md` directories, rewrites `inputs.from` references that still point at migrated hex IDs, renames frontmatter `title:` to `name:`, and strips leading MyST anchor lines like `(slug)=` from fiber bodies.
+The tool strips hex suffixes, creates `slug/slug.md` directories, rewrites `inputs.from` references that still point at migrated hex IDs, renames frontmatter `title:` to `name:`, and strips leading anchor lines like `(slug)=` from fiber bodies.
 
 ### 2. Validate
 
@@ -64,11 +64,11 @@ felt session | head -20       # verify session context works
 
 **Project renames create slug mismatches.** If fibers were filed under a project's old name, the slugs keep that prefix after migration. CLAUDE.md references that assumed the current project name won't match. Use `felt ls -s all <keyword>` to find actual slugs.
 
-**`myst.yml` stays in `.felt/` root.** It's not a fiber — the migration doesn't touch it, and the reader should skip it (it's a file, not a directory).
+**A stray `myst.yml` in `.felt/` root is inert.** Older felt versions wrote one; felt no longer creates it and the readers skip it. Delete it if you like.
 
 **Each felt store migrates independently.** If you have multiple stores (e.g., one per project plus a cross-project store), run `felt migrate` in each. Stores have separate namespaces and may have different collision patterns.
 
-**Consumers see all directories.** After migration, `.felt/` contains only directories (plus `myst.yml`). Code that filtered for `*.md` files now needs to filter for directories containing `slug/slug.md`. Empty directories or directories without matching `.md` files should be silently skipped.
+**Consumers see all directories.** After migration, `.felt/` contains only directories. Code that filtered for `*.md` files now needs to filter for directories containing `slug/slug.md`. Empty directories or directories without matching `.md` files should be silently skipped.
 
 ---
 
