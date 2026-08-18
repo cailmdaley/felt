@@ -176,8 +176,13 @@ defmodule ShuttleWeb.FiberController do
     # Creating a fiber must not be able to take the board down. See
     # `Shuttle.RawFS`.
     case Shuttle.RawFS.mkdir_p(root) do
-      :ok -> :ok
-      {:error, reason} -> raise File.Error, reason: reason, action: "make directory", path: root
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        # `File.mkdir_p!/1`'s own wording, so the operator sees the message they
+        # always saw — "make directory" alone is what `File.mkdir!/1` says.
+        raise File.Error, reason: reason, action: "make directory (with -p)", path: root
     end
 
     case Shuttle.Felt.run(["init"], cd: root) do

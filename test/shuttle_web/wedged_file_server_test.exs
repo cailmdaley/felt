@@ -49,10 +49,16 @@ defmodule ShuttleWeb.WedgedFileServerTest do
     # status is recorded rather than asserted — a checkout with no built UI
     # bundle answers 404 here, and the property under test is that whatever the
     # answer is, it still arrives while the file server is out.
+    # Pinned to a real HTTP status, not just bound: `get/2` answers
+    # `{:error, :timeout}` when nothing comes back, and a bare `{status, _}`
+    # binding would happily match that in BOTH calls — the test would go green
+    # on a board that never answered at all. A checkout with no built UI bundle
+    # answers 404 here, which is still an answer.
     assert {index_status, _} = get(ctx.port, "/")
+    assert index_status in [200, 404]
     assert {200, _} = get(ctx.port, "/api/v1/file?path=#{URI.encode_www_form(ctx.served)}")
 
-    blocker = spawn(fn -> File.read(ctx.fifo) end)
+    _blocker = spawn(fn -> File.read(ctx.fifo) end)
 
     # Opening the FIFO lets the parked `open(2)` return. READ-WRITE on purpose:
     # an open-for-write with no reader blocks exactly as the reader does, so a
@@ -74,7 +80,8 @@ defmodule ShuttleWeb.WedgedFileServerTest do
 
     # The board's own page: `Plug.Static` and Bandit's `send_file` are both raw,
     # and `ShuttleWeb.SpaController`'s index check is raw, so the whole path is.
-    assert {^index_status, _} = get(ctx.port, "/")
+    assert {^index_status, body} = get(ctx.port, "/")
+    assert byte_size(body) > 0
 
     # A companion file on a HEALTHY store, which the wedged one must not take
     # down with it.

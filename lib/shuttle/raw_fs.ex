@@ -96,16 +96,24 @@ defmodule Shuttle.RawFS do
   `File.write/2` without the file server.
   """
   @spec write(Path.t(), iodata()) :: :ok | {:error, :file.posix()}
-  def write(path, contents), do: :prim_file.write_file(binary(path), contents)
+  def write(path, contents) do
+    # Flattened HERE, not handed to `:prim_file` as iodata, because
+    # `:prim_file.write_file/2` opens (and therefore truncates) before it
+    # validates: bad iodata leaves an emptied file where `File.write/2` returns
+    # `{:error, :badarg}` with the file untouched. The copy is the price of that
+    # ordering.
+    :prim_file.write_file(binary(path), IO.iodata_to_binary(contents))
+  end
 
   @doc """
   `File.mkdir_p/1` without the file server — creates missing parents, `:ok` when
   the directory already exists.
 
-  One divergence, in the case that means "your store path is a regular file":
-  `File.mkdir_p/1` reports it as `:enotdir` and this reports `:eexist`. Both are
-  errors and both raise at the bang call sites, so nothing branches on the
-  difference.
+  One divergence, in the two cases that mean "the path you named is not a
+  directory and never will be" — a regular file, or a dangling symlink:
+  `File.mkdir_p/1` reports `:enotdir` where this reports `:eexist`. Both refuse,
+  which is what callers act on, but an operator reading the message sees "file
+  already exists" rather than "not a directory".
   """
   @spec mkdir_p(Path.t()) :: :ok | {:error, :file.posix()}
   def mkdir_p(path), do: path |> binary() |> do_mkdir_p()

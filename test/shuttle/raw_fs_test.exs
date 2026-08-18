@@ -48,6 +48,22 @@ defmodule Shuttle.RawFSTest do
       assert raw == cooked
     end
 
+    test "a path that is not valid UTF-8 answers with an error, never a raise", %{dir: dir} do
+      # `String.to_charlist/1` raises `UnicodeConversionError` on a latin-1
+      # filename — reachable on Linux, not on APFS, which is why this asserts on
+      # the SHAPE of the answer rather than on a fixture. `Shuttle.FiberDoc`
+      # reads paths that come from felt's JSON, on the Poller process, and a
+      # raise there is a crashed GenServer where `File.*` would have returned a
+      # readable error.
+      undecodable = Path.join(dir, <<255, 254>>)
+
+      assert {:error, _} = RawFS.read(undecodable)
+      assert {:error, _} = RawFS.ls(undecodable)
+      assert {:error, _} = RawFS.stat(undecodable)
+      assert {:error, _} = RawFS.read_link(undecodable)
+      assert RawFS.exists?(undecodable) == false
+    end
+
     test "read and read_link match File", %{dir: dir} do
       assert RawFS.read(Path.join(dir, "file.txt")) == File.read(Path.join(dir, "file.txt"))
       assert RawFS.read(Path.join(dir, "nope")) == File.read(Path.join(dir, "nope"))

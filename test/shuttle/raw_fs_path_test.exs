@@ -48,6 +48,19 @@ defmodule Shuttle.RawFSPathTest do
     end
   end
 
+  # `:os.find_executable/1` normalizes the path it returns — the duplicate
+  # separators a hand-edited or shell-composed `PATH` carries are collapsed. So
+  # must this, or the two disagree on a string that names the same file, which
+  # is the kind of divergence that only shows up in a log or an equality check.
+  test "a PATH entry with duplicate separators returns the normalized path", ctx do
+    dir = Path.dirname(Path.expand(ctx.tool))
+    System.put_env("PATH", dir <> "//")
+
+    assert RawFS.find_executable("tool") == System.find_executable("tool")
+    assert RawFS.find_executable("tool") != nil
+    refute RawFS.find_executable("tool") =~ "//"
+  end
+
   # POSIX and `:os.find_executable/1` both read an EMPTY `PATH` element as the
   # current directory (`os.erl` rewrites `[]` to `"."`), so `PATH=":/usr/bin"`
   # searches the cwd first. Splitting `PATH` with `trim: true` would drop it and
