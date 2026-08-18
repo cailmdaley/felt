@@ -711,7 +711,18 @@ defmodule ShuttleWeb.APIControllerTest do
     MockRunner.set_shuttle("tests/state", @oneshot_shuttle)
 
     send(Shuttle.Poller, :run_poll_cycle)
-    Process.sleep(100)
+
+    # Poll for the outcome rather than sleeping a fixed 100ms for it. The cycle
+    # has to discover the fiber, decide it is eligible, launch a worker and
+    # register it running before this endpoint can show the row — comfortably
+    # under 100ms on an idle machine, and not reliably so under a full-suite
+    # load, where this test failed about one run in five.
+    assert wait_until(fn ->
+             match?(
+               [%{fiber_id: "tests/state"} | _],
+               Shuttle.Poller.snapshot(Shuttle.Poller)[:eligible]
+             )
+           end)
 
     conn = get(api_conn(), "/api/v1/state")
     assert conn.status == 200
@@ -890,4 +901,14 @@ defmodule ShuttleWeb.APIControllerTest do
       assert String.starts_with?(body["git_sha"], body["git_short_sha"])
     end
   end
+  # Poll to a deadline instead of sleeping a guess. Returns false on timeout so
+  # the caller's `assert` names the test that timed out.
+  defp wait_until(fun, remaining_ms \\ 3_000) do
+    cond do
+      fun.() -> true
+      remaining_ms <= 0 -> false
+      true -> (Process.sleep(20); wait_until(fun, remaining_ms - 20))
+    end
+  end
+
 end
