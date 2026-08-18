@@ -115,18 +115,21 @@ defmodule Shuttle.RawFS do
   Spawning the port is unaffected — `Port.open({:spawn_executable, …})` with an
   absolute path answers normally through a wedged file server, which is why
   resolving the path raw is the whole fix.
+
+  Parity includes the surprising case: `:os.find_executable/1` joins a RELATIVE
+  name onto each `PATH` entry whether or not it contains a slash, so
+  `"./bin/tool"` resolves against `PATH`, not against the current directory, and
+  normally comes back `nil`. An earlier version of this function expanded such a
+  name against the daemon's cwd instead — more permissive than the thing it
+  replaces, which in a command name that comes from an agent registry means
+  executing a binary the stock resolver would have refused to find.
   """
   @spec find_executable(binary()) :: binary() | nil
   def find_executable(command) when is_binary(command) do
-    cond do
-      Path.type(command) != :relative ->
-        if executable?(command), do: command
-
-      String.contains?(command, "/") ->
-        if executable?(command), do: Path.expand(command)
-
-      true ->
-        System.get_env("PATH", "") |> String.split(":", trim: true) |> first_executable(command)
+    if Path.type(command) == :relative do
+      System.get_env("PATH", "") |> String.split(":", trim: true) |> first_executable(command)
+    else
+      if executable?(command), do: command
     end
   end
 

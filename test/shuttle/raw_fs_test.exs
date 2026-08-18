@@ -63,6 +63,18 @@ defmodule Shuttle.RawFSTest do
       end
     end
 
+    # `:os.find_executable/1` joins a relative name onto each PATH entry even
+    # when it contains a slash — it does NOT resolve against the current
+    # directory. Diverging here would make the daemon run binaries the stock
+    # resolver refuses to find, which matters because command names can come
+    # from the agent registry.
+    test "find_executable treats a relative path the way :os.find_executable does" do
+      for command <- ["bin/felt", "./bin/felt", "../felt/bin/felt", "sub/dir/tool"] do
+        assert RawFS.find_executable(command) == System.find_executable(command),
+               "disagreed on #{command}"
+      end
+    end
+
     test "find_executable handles an explicit path the way System.cmd would" do
       assert RawFS.find_executable("/bin/sh") == "/bin/sh"
       assert RawFS.find_executable("/bin/definitely-not-here") == nil
