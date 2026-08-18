@@ -108,7 +108,10 @@ func TestIntegration(t *testing.T) {
 		t.Fatalf("init: remove .gitignore: %v", err)
 	}
 	out := mustFelt(t, dir, "init")
-	if !strings.Contains(out, "Ensured .felt/ support files") {
+	// A repair run reports idempotently ("already present", support files
+	// checked); only a fresh init announces a store was created. The two
+	// messages are the point of the distinction, so pin the repair one.
+	if !strings.Contains(out, "already present") {
 		t.Fatalf("init: expected repair confirmation, got: %s", out)
 	}
 	if _, err := os.Stat(filepath.Join(dir, ".felt", ".gitignore")); err != nil {
@@ -670,7 +673,11 @@ Needs body.
 	if !strings.Contains(out, "unknown command") {
 		t.Fatalf("tag with extra args should be unknown, got: %s", out)
 	}
-	for _, retired := range []string{"untag", "link", "unlink", "comment", "upstream", "downstream", "graph", "ready", "find", "prime", "path"} {
+	// "find" is deliberately absent: it was retired with the dependency-graph
+	// verbs and later re-introduced with an unrelated meaning — search the
+	// enclosing store rather than this view. Its behaviour is covered by the
+	// find tests; asserting it is unknown here is what made this list wrong.
+	for _, retired := range []string{"untag", "link", "unlink", "comment", "upstream", "downstream", "graph", "ready", "prime", "path"} {
 		out, err = felt(dir, retired)
 		if err == nil {
 			t.Fatalf("%s should be removed from the public CLI, got: %s", retired, out)
