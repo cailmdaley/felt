@@ -798,14 +798,14 @@ off — or keep it out of iCloud.
 macOS asks for consent the first time a process reaches into iCloud Drive, and
 the daemon's first poll after you name such a store is what raises it. Until
 someone clicks, that store cannot be read: discovery times out, the log reports
-carrying zero fibers for it, and its fibers are missing from the board. The API
-stays up and answers in milliseconds throughout — a stalled store costs you
-freshness, not availability — and the log names the store and says what usually
+carrying zero fibers for it, and its fibers are missing from the board. The
+board stays up and answers in milliseconds throughout — its own page, the API,
+and reads of files on your other stores — because a stalled store costs you
+freshness, not availability, and the log names the store and says what usually
 causes a walk that slow. Answer the prompt and the store fills in on its own;
-warm, the same walk is instant.
- So after pointing the daemon at a
-store in iCloud or any other location macOS guards, go find the prompt before
-you judge a half-empty board. The prompt is usually behind another window.
+warm, the same walk is instant. So after pointing the daemon at a store in
+iCloud or any other location macOS guards, go find the prompt before you judge a
+half-empty board. The prompt is usually behind another window.
 
 **`make restart` silently no-ops under a supervisor.** `make stop` matches the
 daemon by a relative-path pattern; launchd and systemd both launch it by

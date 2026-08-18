@@ -405,7 +405,14 @@ reaches, rather than the boundary being negotiated flag by flag.
   holds its single-flight lock until the scanner answers *or dies* rather than
   expiring it on a timer: re-probing a store nobody has clicked through
   accumulates parked walks, and the tenth one wedges the VM. A scan already
-  out longer than the caller's patience is no longer waited on at all.
+  out longer than the caller's patience is no longer waited on at all. The poll
+  cycle's own probe of each store — one `lstat` and one `ls` of `<store>/.felt`,
+  every tick — went raw with them, along with the fiber reads and the one
+  autonomous fiber write the poll cycle makes; a single unconverted call on a
+  stalled path re-wedges the file server for the whole daemon, so the property
+  is only as strong as its weakest call site. A test now asserts it over a real
+  socket: with the file server genuinely wedged, the board's page and a file
+  read on a healthy store both still answer.
 - The standing-role reconciler self-heals inverted markers instead of
   re-closing live work. Dead pinned roles park rather than relaunching in a
   loop.
