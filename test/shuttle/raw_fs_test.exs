@@ -56,6 +56,20 @@ defmodule Shuttle.RawFSTest do
       assert {:error, _} = RawFS.read_link(Path.join(dir, "file.txt"))
     end
 
+    test "write and rename land the same bytes File would", %{dir: dir} do
+      source = Path.join(dir, "written.txt")
+      assert RawFS.write(source, ["one\n", "two\n"]) == :ok
+      assert File.read!(source) == "one\ntwo\n"
+
+      destination = Path.join(dir, "renamed.txt")
+      assert RawFS.rename(source, destination) == :ok
+      assert File.read!(destination) == "one\ntwo\n"
+      refute File.exists?(source)
+
+      assert {:error, :enoent} = RawFS.write(Path.join(dir, "no/such/dir/f.txt"), "x")
+      assert {:error, :enoent} = RawFS.rename(source, destination)
+    end
+
     test "find_executable matches System.find_executable, hits and misses alike" do
       for command <- ["sh", "ls", "env", "definitely-not-installed-#{System.unique_integer()}"] do
         assert RawFS.find_executable(command) == System.find_executable(command),

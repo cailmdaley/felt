@@ -21,7 +21,7 @@ defmodule Shuttle.FiberDoc do
   vanished from the kanban). Writes are atomic (tmp + rename).
   """
 
-  alias Shuttle.{FeltStores, FrontmatterEdit}
+  alias Shuttle.{FeltStores, FrontmatterEdit, RawFS}
 
   @doc """
   Read a fiber by id, returning `{:ok, path, raw_fm, frontmatter, body}`.
@@ -55,7 +55,7 @@ defmodule Shuttle.FiberDoc do
     # every tick, lifecycle transitions). A plain `File.read/1` on a stalled
     # store would hold the shared OTP file server, wedging every filesystem call
     # in the VM — see `Shuttle.RawFS`.
-    with {:ok, text} <- Shuttle.RawFS.read(path),
+    with {:ok, text} <- RawFS.read(path),
          {:ok, frontmatter_yaml, body} <- split_frontmatter(text),
          {:ok, frontmatter} <- parse_frontmatter(frontmatter_yaml, path) do
       {:ok, path, frontmatter_yaml, frontmatter, body}
@@ -114,9 +114,32 @@ defmodule Shuttle.FiberDoc do
   def write!(path, raw_fm, body, ops) do
     new_fm = raw_fm |> FrontmatterEdit.apply(ops) |> ensure_single_trailing_newline()
     tmp = path <> ".tmp"
-    File.write!(tmp, ["---\n", new_fm, "---", body, ensure_trailing_newline(body)])
-    File.rename!(tmp, path)
-    :ok
+    payload = ["---\n", new_fm, "---", body, ensure_trailing_newline(body)]
+
+    # Raw (`Shuttle.RawFS`), and for the same reason `read_path/1` is: this
+    # writes a fiber file inside a felt store, from the `Shuttle.Poller`
+    # process, on the autonomous path — standing-role reconciliation marks a
+    # dead role awaiting from the tick itself, no human involved. A `File.write!`
+    # that blocks on a stalled store would hold the shared OTP file server and
+    # take every filesystem call in the VM with it.
+    case RawFS.write(tmp, payload) do
+      :ok -> rename!(tmp, path)
+      {:error, reason} -> raise File.Error, reason: reason, action: "write to file", path: tmp
+    end
+  end
+
+  defp rename!(source, destination) do
+    case RawFS.rename(source, destination) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        raise File.RenameError,
+          reason: reason,
+          action: "rename",
+          source: source,
+          destination: destination
+    end
   end
 
   defp resolve_path(fiber_id) do

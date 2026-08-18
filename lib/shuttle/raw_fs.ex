@@ -39,7 +39,12 @@ defmodule Shuttle.RawFS do
 
   Only the calls this daemon makes on stall-exposed paths are wrapped. Code
   reading its own installation, or a path under `~/.shuttle`, has no reason to
-  prefer these over `File.*`.
+  prefer these over `File.*` — but note that the protection is only as good as
+  its weakest call site: ONE `File.*` on a stalled path re-wedges the file
+  server for everybody, and most of the daemon's read endpoints (`/activity`,
+  `/sessions`, `/spend`, `/commits`, `/sent-files`) read daemon-owned files
+  through `File.*` and stop answering when that happens. They are not the leak;
+  they are what a leak costs.
   """
 
   @type stat :: %{
@@ -86,6 +91,20 @@ defmodule Shuttle.RawFS do
   @doc "`File.read/1` without the file server."
   @spec read(Path.t()) :: {:ok, binary()} | {:error, :file.posix()}
   def read(path), do: :prim_file.read_file(charlist(path))
+
+  @doc """
+  `File.write/2` without the file server.
+  """
+  @spec write(Path.t(), iodata()) :: :ok | {:error, :file.posix()}
+  def write(path, contents),
+    do: :prim_file.write_file(charlist(path), IO.iodata_to_binary(contents))
+
+  @doc """
+  `File.rename/2` without the file server.
+  """
+  @spec rename(Path.t(), Path.t()) :: :ok | {:error, :file.posix()}
+  def rename(source, destination),
+    do: :prim_file.rename(charlist(source), charlist(destination))
 
   @doc """
   `:file.read_link/1` without the file server — the symlink's target, verbatim.
