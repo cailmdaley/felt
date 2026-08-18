@@ -399,6 +399,31 @@ defmodule Shuttle.FeltStoresTest do
       Process.sleep(200)
       refute Enum.any?(FeltStores.configured_hosts(), &same_dir?(&1, project))
     end
+
+    test "a refused probe costs the caller nothing, rather than its whole deadline" do
+      loom = tmp_dir()
+      File.mkdir_p!(Path.join(loom, ".felt"))
+      System.put_env("FELT_STORES", loom)
+
+      # Cold cache and a spent budget: nothing was started for this base and
+      # nothing is going to arrive, so there is nothing to wait FOR. Waiting
+      # anyway is what a wedged store used to cost every read at boot — the
+      # deadline, on every request, for as long as the dialog went unanswered.
+      :persistent_term.erase({Shuttle.FeltStores, :expanded_hosts})
+      :persistent_term.erase({Shuttle.FeltStores, :expansion_scan})
+
+      parked = for _ <- 1..3, do: spawn(fn -> Process.sleep(:infinity) end)
+      on_exit(fn -> Enum.each(parked, &Process.exit(&1, :kill)) end)
+      :persistent_term.put({Shuttle.FeltStores, :expansion_scan_pids}, parked)
+      on_exit(fn -> :persistent_term.erase({Shuttle.FeltStores, :expansion_scan_pids}) end)
+
+      Application.put_env(:shuttle, :store_scan_wait_ms, 2_000)
+
+      {elapsed_us, hosts} = :timer.tc(&FeltStores.configured_hosts/0)
+
+      assert hosts == [Path.expand(loom)]
+      assert div(elapsed_us, 1000) < 100
+    end
   end
 
   # One blocked `File.*` call anywhere in the VM stops EVERY `File.*` call in the

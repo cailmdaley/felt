@@ -111,17 +111,26 @@ defmodule Shuttle.FeltStores do
         expanded
 
       _ ->
-        start_expansion_scan(base)
-
-        # A scan for this base that has ALREADY been out longer than the wait is
-        # not going to reward waiting for it again — that is a caller paying the
-        # full deadline on every read for as long as a store stays wedged, which
-        # is the availability this module exists to protect. Serve the base now.
-        if scan_overdue?(base),
-          do: unexpanded(base),
-          else: await_expansion(base, now + scan_wait_ms()) || unexpanded(base)
+        if worth_waiting?(start_expansion_scan(base), base),
+          do: await_expansion(base, now + scan_wait_ms()) || unexpanded(base),
+          else: unexpanded(base)
     end
   end
+
+  # A cold caller waits out the deadline only when there is a scan that could
+  # plausibly answer within it. Two ways there is not:
+  #
+  #   * `:refused` — the parked-scan budget is spent, so nothing was started and
+  #     nothing is going to arrive. Waiting here would charge every read the full
+  #     deadline for as long as the stall lasts, which is the availability this
+  #     module exists to protect.
+  #   * a scan for this base that has ALREADY been out longer than the wait. It
+  #     may still land, but not within a window it has visibly overrun.
+  #
+  # Either way the answer is the same as the answer after waiting: the
+  # unexpanded base, self-healing the moment a scan lands.
+  defp worth_waiting?(:refused, _base), do: false
+  defp worth_waiting?(_started_or_in_flight, base), do: not scan_overdue?(base)
 
   # Poll the cache rather than await a task reference: the scan's result is
   # installed by whoever runs it, so a caller that gives up waiting costs
@@ -186,10 +195,11 @@ defmodule Shuttle.FeltStores do
   # through. That is harmless — both write the same answer — and cheaper than
   # serializing every caller through a process that a wedged walk could itself
   # block, which is the failure mode being defended against.
+  @spec start_expansion_scan([String.t()]) :: :started | :in_flight | :refused
   defp start_expansion_scan(base) do
     case :persistent_term.get(@scan_lock_key, nil) do
       {^base, _started, pid} ->
-        if Process.alive?(pid), do: :ok, else: arm_expansion_scan(base)
+        if Process.alive?(pid), do: :in_flight, else: arm_expansion_scan(base)
 
       _ ->
         arm_expansion_scan(base)
@@ -207,7 +217,7 @@ defmodule Shuttle.FeltStores do
           "of the parked scans returns."
       )
 
-      :ok
+      :refused
     else
       spawn_expansion_scan(base, parked)
     end
@@ -221,7 +231,7 @@ defmodule Shuttle.FeltStores do
       {:ok, pid} ->
         hold_scan_lock(base, pid)
         :persistent_term.put(@scan_pids_key, [pid | parked])
-        :ok
+        :started
 
       _ ->
         run_expansion_scan_inline(base)
@@ -233,6 +243,7 @@ defmodule Shuttle.FeltStores do
   defp run_expansion_scan_inline(base) do
     hold_scan_lock(base, self())
     run_expansion_scan(base)
+    :started
   end
 
   defp hold_scan_lock(base, pid) do
