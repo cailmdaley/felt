@@ -120,6 +120,120 @@ func TestResolveOwnHost_DaemonDown_HostFileOnly(t *testing.T) {
 	}
 }
 
+// TestResolveOwnHost_HostnameNormalized locks in the shared normalization of
+// the OS-hostname tier: lowercased and truncated at the first ".". This is the
+// half of the split-identity bug that lived in Go — os.Hostname() reported
+// "Studio-Air.home" where the daemon's :inet.gethostname() reported the
+// short name, so the CLI stamped a host the daemon would never match.
+func TestResolveOwnHost_HostnameNormalized(t *testing.T) {
+	t.Setenv("SHUTTLE_HOST", "")
+	t.Setenv("SHUTTLE_HOST_FILE", filepath.Join(t.TempDir(), "host"))
+
+	prev := osHostname
+	osHostname = func() (string, error) { return "  Studio-Air.home  ", nil }
+	t.Cleanup(func() { osHostname = prev })
+
+	got, err := resolveOwnHost("")
+	if err != nil {
+		t.Fatalf("resolveOwnHost: %v", err)
+	}
+	if got != "studio-air" {
+		t.Fatalf("expected normalized short name, got %q", got)
+	}
+}
+
+// TestResolveOwnHost_HostnameSeedsFile is the fix's core invariant: the OS
+// hostname is consulted ONCE, then written to the host-config file so every
+// later resolve — on either side of the CLI/daemon split — reads a value that
+// cannot drift with DHCP or with which runtime asks.
+func TestResolveOwnHost_HostnameSeedsFile(t *testing.T) {
+	t.Setenv("SHUTTLE_HOST", "")
+	path := filepath.Join(t.TempDir(), "host")
+	t.Setenv("SHUTTLE_HOST_FILE", path)
+
+	prev := osHostname
+	osHostname = func() (string, error) { return "Studio-Air.home", nil }
+	t.Cleanup(func() { osHostname = prev })
+
+	if got, err := resolveOwnHost(""); err != nil || got != "studio-air" {
+		t.Fatalf("first resolve: got %q err %v", got, err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("host file should have been seeded: %v", err)
+	}
+	if strings.TrimSpace(string(data)) != "studio-air" {
+		t.Fatalf("seeded contents: %q", string(data))
+	}
+
+	// Second resolve must come from the file, not the hostname syscall.
+	osHostname = func() (string, error) { return "renamed-by-dhcp.local", nil }
+	if got, err := resolveOwnHost(""); err != nil || got != "studio-air" {
+		t.Fatalf("second resolve should read the seeded file: got %q err %v", got, err)
+	}
+}
+
+// TestResolveOwnHost_SeedNeverCreatesDirectory: the seed writes into a parent
+// that already exists and never creates one. The existence of ~/.shuttle is
+// the gate that decides whether this machine keeps an event stream and a commit
+// ledger (shuttleSink), and resolveOwnHost runs inside `felt hook event`
+// upstream of that gate — so an mkdir here would turn a felt-only machine into
+// a shuttle host on its first hook.
+func TestResolveOwnHost_SeedNeverCreatesDirectory(t *testing.T) {
+	t.Setenv("SHUTTLE_HOST", "")
+	dir := filepath.Join(t.TempDir(), "dot-shuttle")
+	t.Setenv("SHUTTLE_HOST_FILE", filepath.Join(dir, "host"))
+
+	prev := osHostname
+	osHostname = func() (string, error) { return "Studio-Air.home", nil }
+	t.Cleanup(func() { osHostname = prev })
+
+	if got, err := resolveOwnHost(""); err != nil || got != "studio-air" {
+		t.Fatalf("resolve must still succeed without seeding: got %q err %v", got, err)
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("seed must not create the state directory (stat err: %v)", err)
+	}
+}
+
+// TestResolveOwnHost_EnvDoesNotSeed: SHUTTLE_HOST is the explicit override and
+// the test seam, not an identity to make durable. Seeding from it would let a
+// one-off `SHUTTLE_HOST=x felt ...` permanently rename the machine.
+func TestResolveOwnHost_EnvDoesNotSeed(t *testing.T) {
+	t.Setenv("SHUTTLE_HOST", "envhost")
+	path := filepath.Join(t.TempDir(), "host")
+	t.Setenv("SHUTTLE_HOST_FILE", path)
+
+	if got, err := resolveOwnHost(""); err != nil || got != "envhost" {
+		t.Fatalf("env tier: got %q err %v", got, err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("SHUTTLE_HOST must not seed the host file (stat err: %v)", err)
+	}
+}
+
+// TestResolveOwnHost_UnwritableSeedStillResolves: the seed is best-effort. A
+// read-only home (a container, a locked-down machine) must still get a working
+// identity, just an ephemeral one.
+func TestResolveOwnHost_UnwritableSeedStillResolves(t *testing.T) {
+	t.Setenv("SHUTTLE_HOST", "")
+	// A path whose parent is a FILE: MkdirAll and WriteFile both fail.
+	blocker := filepath.Join(t.TempDir(), "not-a-dir")
+	if err := os.WriteFile(blocker, []byte("x"), 0o644); err != nil {
+		t.Fatalf("writing blocker: %v", err)
+	}
+	t.Setenv("SHUTTLE_HOST_FILE", filepath.Join(blocker, "host"))
+
+	prev := osHostname
+	osHostname = func() (string, error) { return "Somewhere.Local", nil }
+	t.Cleanup(func() { osHostname = prev })
+
+	if got, err := resolveOwnHost(""); err != nil || got != "somewhere" {
+		t.Fatalf("unwritable seed must not break resolution: got %q err %v", got, err)
+	}
+}
+
 func TestEnsureOwnedHere(t *testing.T) {
 	withOwnHost(t, "macbook")
 
@@ -145,6 +259,37 @@ func TestEnsureOwnedHere(t *testing.T) {
 	if err := ensureOwnedHere(shuttleFeltWithBlock(t, nil), "f"); err != nil {
 		t.Fatalf("pure note (no block) should pass: %v", err)
 	}
+}
+
+// TestOwnerMismatchNamesItsSource: the mismatch message tells the user where
+// this machine's name came from so its advice — "if both names are THIS
+// machine, edit that source" — points at something editing which changes the
+// answer. Naming the host file while $SHUTTLE_HOST overrides it sends them to
+// change a value nothing reads.
+func TestOwnerMismatchNamesItsSource(t *testing.T) {
+	fiber := func() *felt.Felt {
+		return shuttleFeltWithBlock(t, map[string]any{"kind": "oneshot", "host": "cineca"})
+	}
+
+	t.Run("file tier names the file", func(t *testing.T) {
+		withOwnHost(t, "macbook")
+		msg := ensureOwnedHere(fiber(), "f").Error()
+		if !strings.Contains(msg, hostConfigFilePath()) {
+			t.Fatalf("file-sourced identity should name the file: %s", msg)
+		}
+	})
+
+	t.Run("env tier names the env var", func(t *testing.T) {
+		withOwnHost(t, "macbook")
+		t.Setenv("SHUTTLE_HOST", "laptop")
+		msg := ensureOwnedHere(fiber(), "f").Error()
+		if !strings.Contains(msg, "$SHUTTLE_HOST") {
+			t.Fatalf("env-sourced identity should name the env var: %s", msg)
+		}
+		if strings.Contains(msg, hostConfigFilePath()) {
+			t.Fatalf("env-sourced identity must not blame the overridden file: %s", msg)
+		}
+	})
 }
 
 // TestEnsureOwnedHere_UnresolvableIdentityFailsLoud is the S3 lock-in: when a

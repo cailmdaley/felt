@@ -199,9 +199,9 @@ Resolution order for --source:
 }
 
 func init() {
-	setupClaudeCmd.Flags().Bool("uninstall", false, "Remove felt plugin from Claude Code")
+	setupClaudeCmd.Flags().Bool("uninstall", false, "Remove felt plugin and marketplace from Claude Code")
 	setupClaudeCmd.Flags().String("source", "", "Path to felt repo checkout or plugin directory")
-	setupCodexCmd.Flags().Bool("uninstall", false, "Remove felt plugin from Codex")
+	setupCodexCmd.Flags().Bool("uninstall", false, "Remove felt plugin and marketplace from Codex")
 	setupCodexCmd.Flags().String("source", "", "Path to felt repo checkout or plugin directory")
 	setupSkillsCmd.Flags().String("target", "", "Target directory (default: ~/.claude/skills)")
 	setupSkillsCmd.Flags().String("source", "", "Path to felt repo checkout or plugin directory")
@@ -320,10 +320,12 @@ func installPluginViaCLI(repoRoot string) error {
 
 	pluginRef := "felt@" + marketplaceName
 	// Ask whether the PLUGIN is installed, not whether its marketplace is
-	// registered: `felt setup claude --uninstall` leaves the marketplace
-	// behind on purpose, so a marketplace-based check sends the next setup
-	// down the update path for a plugin that isn't there — and `claude
-	// plugin update` hard-fails on a missing plugin.
+	// registered. The two come apart whenever registration succeeds and the
+	// install after it does not — this function's own first step, a hand-run
+	// `claude plugin marketplace add`, or a `plugin uninstall` that failed
+	// partway. A marketplace-based check would send those cases down the
+	// update path for a plugin that isn't there, and `claude plugin update`
+	// hard-fails on a missing plugin.
 	installed := isPluginInstalled(pluginRef)
 
 	if err := runClaudeCLI("plugin", "marketplace", "add", repoRoot); err != nil {
@@ -406,8 +408,22 @@ func marketplaceEntry(name string) (claudeMarketplaceEntry, bool) {
 	return claudeMarketplaceEntry{}, false
 }
 
-// uninstallPlugin removes the felt plugin via the Claude Code CLI. Leaves
-// the marketplace registered (cheap to keep; harmless if never used again).
+// uninstallPlugin removes the felt plugin AND its marketplace registration via
+// the Claude Code CLI.
+//
+// Removing the marketplace is the deliberate call, and it rests on two facts.
+// First, cailmdaley-felt declares exactly one plugin — felt (see
+// .claude-plugin/marketplace.json). It is not a shared source that other
+// plugins hang off, so leaving it registered leaves an entry in the user's
+// ~/.claude/settings.json that names felt and serves nothing. Second, the
+// Codex side has always removed its marketplace (see uninstallCodexPlugin), so
+// keeping the Claude one meant `felt uninstall` was the inverse of `felt setup
+// codex` but not of `felt setup claude` — one command, two different
+// definitions of "removed". Reinstall is marginally slower for the re-clone;
+// that is the whole cost, and it buys an uninstall that means what it says.
+//
+// The plugin goes first: `marketplace remove` on a source with an installed
+// plugin is not something to rely on succeeding.
 func uninstallPlugin() error {
 	if _, err := exec.LookPath("claude"); err != nil {
 		return fmt.Errorf("claude CLI not found in PATH: %w", err)
@@ -418,9 +434,63 @@ func uninstallPlugin() error {
 		return fmt.Errorf("uninstalling %s: %w", pluginRef, err)
 	}
 
+	// Skills linked by `felt setup skills` point into the marketplace clone
+	// that `marketplace remove` deletes. Unlink them first, or uninstall
+	// leaves dangling symlinks in ~/.claude/skills — worse residue than the
+	// registration we came to clean up.
+	for _, name := range pruneMarketplaceSkillLinks() {
+		fmt.Printf("Unlinked skill: %s\n", name)
+	}
+
+	if err := runClaudeCLI("plugin", "marketplace", "remove", marketplaceName); err != nil {
+		return fmt.Errorf("removing marketplace %s: %w", marketplaceName, err)
+	}
+
 	fmt.Println()
 	fmt.Println("Restart Claude Code for changes to take effect.")
 	return nil
+}
+
+// pruneMarketplaceSkillLinks removes symlinks in ~/.claude/skills that point
+// into the felt marketplace clone — the inverse of `felt setup skills` for its
+// default target. Returns the skill names it unlinked.
+//
+// Deliberately narrow: only symlinks, and only ones resolving inside the clone
+// directory about to be deleted. A skill linked from a local checkout via
+// --source keeps working after uninstall (its target still exists), so it is
+// left alone; so is anything that is a real directory. A non-default --target
+// is not tracked anywhere, so we cannot reach it — best-effort by design, and
+// silent when there is nothing to do.
+func pruneMarketplaceSkillLinks() []string {
+	clone := claudeMarketplaceClonePath()
+	if clone == "" {
+		return nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	skillsDir := filepath.Join(home, ".claude", "skills")
+	entries, err := os.ReadDir(skillsDir)
+	if err != nil {
+		return nil
+	}
+
+	var pruned []string
+	for _, entry := range entries {
+		path := filepath.Join(skillsDir, entry.Name())
+		target, err := os.Readlink(path)
+		if err != nil {
+			continue // not a symlink; not ours to touch
+		}
+		if !strings.HasPrefix(target, clone+string(filepath.Separator)) {
+			continue
+		}
+		if err := os.Remove(path); err == nil {
+			pruned = append(pruned, entry.Name())
+		}
+	}
+	return pruned
 }
 
 // runClaudeCLI invokes the claude CLI, piping stdout/stderr through to the

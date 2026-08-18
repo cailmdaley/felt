@@ -1,9 +1,15 @@
 # Shuttle daemon systemd **user** unit — the Linux analog of
-# share/io.shuttle.daemon.plist.template. Generated from this template by
-# `make install-agent` on Linux (placeholders __SHUTTLE_DIR__ / __LOG__ /
-# __FELT_STORES__ / __PATH__ / __SSH_AUTH_SOCK__ are filled in), installed to
-# ~/.config/systemd/user/shuttle-daemon.service. Do not enable this template
-# directly — it isn't a valid unit until installed.
+# share/io.shuttle.daemon.plist.template. Rendered from a template at install
+# time by `shuttle install-agent` (in a checkout, `make install-agent` is a
+# wrapper over the same command and the same template), which fills in
+# __SHUTTLE_DIR__ / __LOG__ / __FELT_STORES__ / __PATH__ / __SSH_AUTH_SOCK__
+# and writes the result to ~/.config/systemd/user/shuttle-daemon.service. The
+# unrendered template is not a valid unit — don't enable it directly.
+#
+# __SHUTTLE_DIR__ is whatever directory holds bin/shuttle — the unpacked
+# release for a downloaded tarball, the repository root for a checkout. There
+# is no TCC on Linux, so unlike the macOS LaunchAgent it may live anywhere,
+# including under ~/Documents.
 #
 # A *user* unit, not a system one: the daemon runs as you, reads your felt
 # stores, writes your ~/.shuttle, and shells out to your `felt`. Nothing here
@@ -12,21 +18,18 @@
 # LINGERING. A systemd user manager normally starts at your first login and
 # stops at your last logout, which would take the daemon down with your ssh
 # session. `loginctl enable-linger <user>` keeps the manager (and so the
-# daemon) alive across logout and starts it at boot. `make install-agent`
-# prints the command; it is the one manual step, because enabling linger for
-# another user's account needs privileges this install does not assume.
+# daemon) alive across logout and starts it at boot. install-agent prints the
+# command; it is the one manual step, because enabling linger for another
+# user's account needs privileges this install does not assume.
 #
-# PATH is captured from a login shell at install time, for the same reason the
-# macOS plist does it: the unit's environment is not your login environment.
-# systemd --user inherits almost nothing. Boot survives that — the daemon is an
-# ERTS-bundled Mix release and needs no OTP toolchain on PATH — but at runtime
-# it shells out to `felt` (~/.local/bin) for every store walk, and a PATH
-# without `felt` yields `:enoent` -> 500 on /api/v1/fibers/composite (board
-# loads, kanban does not). Capturing the real login PATH once, at install, is
-# deterministic and needs no hand-maintained list.
-#
-# There is no TCC on Linux, so — unlike the macOS LaunchAgent — the checkout
-# may live anywhere, including under ~/Documents.
+# PATH is captured at install time, for the same reason the macOS plist does
+# it: the unit's environment is not your login environment, and systemd --user
+# inherits almost nothing. Boot survives that — the daemon is an ERTS-bundled
+# Mix release and needs no OTP toolchain on PATH — but at runtime it shells out
+# to `felt` for every store walk, and a PATH without `felt` yields `:enoent` ->
+# 500 on /api/v1/fibers/composite (board loads, kanban does not). The capture
+# runs a login shell in a scrubbed environment, so the installing session's own
+# PATH can't leak in; `--path` overrides it.
 
 [Unit]
 Description=Shuttle daemon (felt fiber dispatcher)
@@ -52,10 +55,10 @@ Environment=PATH=__PATH__
 # Absent by default (the daemon binds 4000); set only to supervise a second
 # instance beside the real one. The renderer drops this line when empty.
 Environment=SHUTTLE_PORT=__PORT__
-# FELT_STORES scopes the daemon's felt polling. felt re-discovers each
-# project's substores by following the symlinks under a store's .felt/, so an
-# aggregate store is usually the only entry you need. Filled in from
-# AGENT_FELT_STORES.
+# FELT_STORES scopes the daemon's felt polling to the stores named at install
+# time (`--felt-stores`). felt re-discovers each project's substores by
+# following the symlinks under a store's .felt/, so a single aggregate store is
+# usually the only entry you need.
 Environment=FELT_STORES=__FELT_STORES__
 # SSH_AUTH_SOCK points at the ssh-agent that holds your remote credentials, so
 # the daemon's own remote feed and the Attach path can authenticate. Dropped
@@ -67,8 +70,8 @@ Environment=SSH_AUTH_SOCK=__SSH_AUTH_SOCK__
 Restart=always
 RestartSec=10
 
-# systemd does not create the parent directory for append:; `make
-# install-agent` mkdir -p's it. append: needs systemd >= 240.
+# systemd does not create the parent directory for append:; install-agent
+# mkdir -p's it. append: needs systemd >= 240.
 StandardOutput=append:__LOG__
 StandardError=append:__LOG__
 

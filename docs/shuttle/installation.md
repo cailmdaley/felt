@@ -157,6 +157,28 @@ mkdir -p ~/notes && cd ~/notes && felt init
     installing and every store you name — and warns on stderr about any path
     under one of the three, but it installs anyway, so read what it prints.
 
+!!! note "Already using felt on this machine?"
+    Then step 3 is the step that decides what the board shows. The daemon polls
+    exactly the stores you name and assumes nothing else — so a machine that
+    already holds fibers, pointed at a fresh `~/notes`, gets a daemon running
+    perfectly and a board that is perfectly empty. Nothing warns you, because
+    nothing is wrong: you asked for this.
+
+    Two ways to bring the existing stores in. Pass them all to
+    `--felt-stores` as one comma-separated list, or — better past the first
+    couple — join them by symlink into a single **cross-project store** and
+    name only that. felt re-discovers a store's symlinked substores, so the
+    aggregate is the one entry the daemon needs, and adding a project later
+    means adding a symlink rather than editing the daemon's configuration.
+
+    Which end holds the real bytes is a real decision, not a formality. A
+    project with its own git remote, or one inside iCloud Drive or Dropbox,
+    keeps its bytes where they are and gets a symlink *into* the aggregate;
+    an ordinary repo you control the sync for can go the other way.
+    [Cross-project stores](../concepts/cross-project.md) walks both
+    directions, and the merge-before-you-link procedure that keeps the fibers
+    on the losing side from vanishing.
+
 **3. Hand the daemon to launchd.**
 
 ```bash
@@ -186,14 +208,6 @@ To undo it:
 That unloads the job and deletes the plist, which stops the running daemon too.
 Nothing else goes: the release, your store, and the daemon's state in
 `~/.shuttle` all survive, and `install-agent` puts the job back.
-
-!!! note "One more line, for the board's activity views"
-    ```bash
-    mkdir -p ~/.shuttle
-    ```
-    The plugin's event hook writes there only if the directory already exists,
-    so without it the board's activity ranking and sent-files trail stay empty
-    while everything else works. See [Sharp edges](#sharp-edges).
 
 ### Release candidates
 
@@ -714,6 +728,20 @@ wildcard. The host id comes from `SHUTTLE_HOST`, else the file
 hostname. For the full ordered predicate list the daemon evaluates, see
 [Dispatch eligibility](lifecycle.md#dispatch-eligibility).
 
+**`~/.shuttle/host` is the machine's name, and it is a file for a reason.** The
+system hostname is consulted exactly once: the first CLI command or daemon boot
+that needs an identity and finds none normalizes it (lowercased, cut at the
+first `.`) and writes it to `~/.shuttle/host`; everything afterwards reads the
+file. That fixes a name that would otherwise drift — DHCP renames a laptop
+mid-session, and the CLI and the daemon read the hostname through different
+runtimes that disagree about the DNS suffix. A drifted name is silent: fibers
+armed under one spelling are invisible to a daemon calling itself the other. To
+give a host a friendlier name, edit that file and restart the daemon. The file
+changes what *new* stamps say, not what old ones already say, so also set
+`host:` on any already-armed fiber to the new name — editing the block by hand
+is safe now that both the CLI and the daemon read their own identity from the
+same file.
+
 **Every built-in agent assumes its CLI is installed.** The shipped records cover
 the configured Claude, Codex, and Pi fleet, with `claude-sonnet` as the
 default. A record whose CLI is absent or unauthenticated fails at dispatch, not
@@ -750,6 +778,32 @@ as well as a real install — and then installs anyway, so the warning is the
 whole protection. Put both somewhere else: `~/dev/felt` for a checkout,
 `~/notes` or `~/loom` for a store, or anything outside the three folders.
 
+That turns the symlink direction into a correctness constraint rather than a
+matter of taste. A project on your Desktop can still be daemon-visible — but
+only if its bytes are canonical *outside* the protected folder: the store lives
+in, say, `~/loom`, and the Desktop holds a symlink pointing into it. The other
+direction leaves the real files where launchd cannot read them, and the daemon
+follows the symlink into the same silence.
+
+**A store in iCloud Drive is readable — until it is evicted.** `~/Library/Mobile
+Documents/…` is not one of the TCC-protected folders, so a store there works.
+But *Optimize Mac Storage* evicts the contents of files iCloud decides you are
+not using, leaving the names in place and the bytes on the server, and the
+symptom is the TCC symptom exactly: the daemon discovers the store, reads little
+or nothing out of it, and the board loads quiet and empty. Keep a store you
+dispatch from pinned locally — *Keep Downloaded* on the folder, or the setting
+off — or keep it out of iCloud.
+
+**The first walk of a guarded store can stall every endpoint.** macOS asks for
+consent the first time a process reaches into iCloud Drive, and the daemon's
+first poll after you name such a store is what raises the dialog. Until someone
+answers it, the walk blocks and every API request queues behind it — discovery
+times out, the log reports carrying zero fibers, and responses arrive tens of
+seconds late or not at all. That is the dialog waiting, usually behind another
+window, not the daemon failing. Answer it and the board fills; warm, the same
+walk is instant. So after pointing the daemon at a store in iCloud or any other
+location macOS guards, go find the prompt before you judge an empty board.
+
 **`make restart` silently no-ops under a supervisor.** `make stop` matches the
 daemon by a relative-path pattern; launchd and systemd both launch it by
 absolute path. So once the agent is installed, `make restart` rebuilds the
@@ -772,9 +826,12 @@ renders the units for you to supervise yourself.
 **The event stream stays empty until `~/.shuttle` exists.** `felt hook event`
 refuses to create its own directory, so a felt-only install records nothing.
 Degradation is graceful — the board still serves — but the activity ranking and
-the sent-files trail stay empty. Bootstrap step 3 creates the directory, so a
-host built from a checkout is already enabled; after a fetched install, run
-`mkdir -p ~/.shuttle` yourself. See [The event stream and the
+the sent-files trail stay empty. Both daemon installs create the directory:
+`bootstrap.sh` for a checkout, and `install.sh` under `SHUTTLE=1` for a fetched
+release (it writes `~/.shuttle/repo` there too). So a host with the daemon on it
+is already enabled. The gap is a felt-only install — no `SHUTTLE=1`, no
+checkout — where nothing has made the directory yet: run `mkdir -p ~/.shuttle`
+yourself. See [The event stream and the
 ledgers](#the-event-stream-and-the-ledgers).
 
 ## License

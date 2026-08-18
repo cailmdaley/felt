@@ -157,6 +157,239 @@ stop_daemon() {
   kill -9 "$_pid" 2>/dev/null || true
 }
 
+# The PATH baked into the supervisor, captured at install time. launchd and
+# systemd --user both hand the daemon a near-empty environment, and sourcing
+# the profile at runtime does not reconstruct the login PATH from `env -i`.
+# Booting needs nothing (the release bundles ERTS) but every store walk shells
+# out to `felt`, and a PATH without it yields :enoent -> 500 on the composite
+# API. So capture the login PATH once, here.
+#
+# `env -i` is the load-bearing part. A plain `bash -lc` PREPENDS to the PATH it
+# inherits, so an install run from inside an agent session (for Shuttle, the
+# common case) bakes that session's ephemeral entries into the supervisor
+# forever — version-pinned plugin caches for a version since uninstalled,
+# per-session directories that won't exist tomorrow. Scrubbing the environment
+# makes the profile build PATH from scratch, which is the thing we actually
+# want to reconstruct.
+#
+# `-i` as well as `-l`, and the user's own $SHELL rather than bash: between
+# them these cover where people really put PATH edits. A macOS zsh user's
+# homebrew line is typically in ~/.zprofile (login) while ~/.local/bin — where
+# `felt` installs — is added from ~/.zshrc (interactive); capture only one of
+# the two and the baked PATH silently drops half of what the daemon needs.
+# stdin is closed so an rc file that reads it gets EOF instead of hanging; the
+# value is fenced with a sentinel and must still look like a path, so a chatty
+# profile's banner can't be mistaken for a PATH. Each fallback below is one
+# step less faithful than the one before it.
+#
+# Duplicates are collapsed (profiles that re-run compose long repetitive
+# PATHs); non-existent directories are LEFT IN, deliberately — ~/go/bin and
+# friends are routinely on PATH before anything creates them, and a supervisor
+# that quietly disagrees with the login shell about what's searchable is worse
+# than a couple of dead entries.
+#
+# Whatever comes back, `felt`'s own directory is added afterwards if the
+# capture missed it (see felt_dir_into_path) — every branch below is allowed to
+# be imperfect because that one is not.
+capture_login_path() {
+  # Only a POSIX-ish $SHELL is trusted to run the snippet: fish and friends
+  # would happily execute something, and print a space-joined list.
+  case "${SHELL:-}" in
+    */bash|*/zsh|*/sh|*/dash|*/ksh|*/ksh93|*/mksh) _sh="$SHELL" ;;
+    *) _sh=/bin/bash ;;
+  esac
+  [ -x "$_sh" ] || _sh=/bin/bash
+  _p=$(capture_login_path_with "$_sh" -lic)
+  [ -n "$_p" ] || _p=$(capture_login_path_with "$_sh" -lc)
+  [ -n "$_p" ] || _p=$(capture_login_path_with /bin/bash -lc)
+  [ -n "$_p" ] || _p="$PATH"
+  printf '%s' "$_p" | awk -F: '{
+    out = ""
+    for (i = 1; i <= NF; i++)
+      if ($i != "" && !seen[$i]++) out = out (out == "" ? "" : ":") $i
+    print out
+  }'
+}
+
+# Seconds any one capture attempt may take before it is killed. A cold zsh with
+# a heavy prompt and a version manager is 2-4s, so this is generous; it exists
+# for the rc file that blocks forever, not for the slow one.
+CAPTURE_TIMEOUT=10
+
+# One attempt: run <shell> <flag> under a scrubbed environment, bounded, and
+# print the fenced PATH it reported (empty if it reported none).
+#
+# The environment is scrubbed but not hostile, and the difference matters:
+#
+#   TERM  a REAL terminal, never `dumb`. `[[ $TERM == dumb ]] && return` near
+#         the top of ~/.zshrc is a widespread dotfile pattern, and it returns
+#         BEFORE the PATH edits while ~/.zprofile still yields a plausible
+#         PATH — so `dumb` produces a value that looks right and is missing
+#         ~/.local/bin: silently wrong, which is worse than emptily wrong.
+#   TMUX  a non-empty dummy, so an rc that auto-execs tmux takes its
+#         already-inside-tmux branch instead of replacing our shell (a real
+#         TERM makes that auto-exec likelier, so the two go together).
+#   DISABLE_AUTO_UPDATE / HOMEBREW_NO_AUTO_UPDATE
+#         keep the frameworks' network work off an install's critical path.
+#
+# The bound is hand-rolled because macOS ships no `timeout`, and `perl -e
+# alarm` is not a foundation to build on (Apple has signalled perl's removal).
+# POSIX `wait` on a background pid is specified everywhere, so: start the
+# shell, start a watchdog that SIGKILLs it, wait for whichever finishes first.
+#
+# The output goes to a FILE, not a pipe, and that is the load-bearing part.
+# Killing the shell does not unblock a `$( )` around it: command substitution
+# reads until EOF, and a backgrounded `git fetch` the rc file spawned inherits
+# the write end and holds it open long after its parent is gone. A file has no
+# such handle to wait on. (The grandchildren do survive the kill — portably
+# killing a process group from `sh` is not worth the blast radius — but they
+# no longer hold the install hostage.)
+#
+# A tripped bound is announced. The hang this prevents is invisible: with
+# output captured, an rc file that prompts on /dev/tty — oh-my-zsh's updater
+# has historically done exactly that — freezes the install with a blank
+# screen. And a user whose baked PATH came back thin should learn why now,
+# not from a 500 three days later.
+capture_login_path_with() { # <shell> <flags>
+  _out=$(mktemp "${TMPDIR:-/tmp}/shuttle-path.XXXXXX" 2>/dev/null) || return 0
+  env -i HOME="$HOME" USER="$(id -un)" SHELL="$1" \
+    TERM=xterm-256color TMUX=shuttle-capture \
+    DISABLE_AUTO_UPDATE=true HOMEBREW_NO_AUTO_UPDATE=1 \
+    "$1" "$2" 'printf "\n__SHUTTLE_PATH__%s\n" "$PATH"' \
+    </dev/null >"$_out" 2>/dev/null &
+  _pid=$!
+  # The watchdog polls rather than sleeping through the whole bound, so it can
+  # notice a capture that already finished and retire itself — nobody has to
+  # kill it. That matters twice over: a shell blocked in a foreground `sleep`
+  # defers the SIGTERM aimed at it until that sleep returns (so killing it does
+  # not end it promptly), and a killed background job earns a "Terminated"
+  # line on the installer's stderr for its trouble.
+  #
+  # Its stdout must also go nowhere near ours: this function is called inside
+  # `$( )`, and a background subshell holding the write end of that
+  # substitution pipe keeps the CALLER blocked for the full bound even when the
+  # capture returned instantly — the same hazard, one level up, that the temp
+  # file solves for the shell itself.
+  (
+    _i=0
+    while [ "$_i" -lt "$CAPTURE_TIMEOUT" ]; do
+      kill -0 "$_pid" 2>/dev/null || exit 0
+      sleep 1
+      _i=$((_i + 1))
+    done
+    kill -9 "$_pid" 2>/dev/null
+  ) >/dev/null 2>&1 &
+  # `|| _rc=$?` is not optional under `set -eu`: a shell killed by the watchdog
+  # exits non-zero, and an unguarded `wait` would take the whole install down.
+  _rc=0
+  wait "$_pid" || _rc=$?
+  # 128+SIGKILL: the watchdog fired, not the shell's own failure.
+  if [ "$_rc" -eq 137 ]; then
+    echo "note: \`$1 $2\` did not finish within ${CAPTURE_TIMEOUT}s while capturing your login PATH — giving up on it." >&2
+    echo "      (a login/rc file that blocks, prompts, or waits on the network; the baked PATH may be thin.)" >&2
+  fi
+  sed -n 's/^__SHUTTLE_PATH__//p' "$_out" | tail -1 | grep '/' || true
+  rm -f "$_out"
+}
+
+# felt's directory, appended to $AGENT_PATH_V when the captured PATH lacks it.
+#
+# This is the one entry the daemon cannot do without: every store walk shells
+# out to `felt`, and a PATH without it yields :enoent -> 500 on the composite
+# API — a board that loads and then shows nothing, with the cause three layers
+# down. Nothing above is guaranteed to find it (a bounded, scrubbed, guessed-at
+# login shell is a reconstruction), and we are standing right next to the
+# answer: whatever `felt` this install run is using.
+#
+# It also names a shape worth fixing upstream rather than patching here:
+# install.sh knows exactly where it put the binary, discards that, and
+# install-agent reconstructs it by ventriloquizing the user's shell. Two
+# components deriving one fact independently is the pattern this release is
+# retiring elsewhere (the host identity below is the same story); passing the
+# install directory through would let this function become a check instead of a
+# repair.
+#
+# A missing `felt` entirely is the loud case: nothing to append, and the
+# install is heading straight for that 500.
+felt_dir_into_path() {
+  _felt=$(command -v felt 2>/dev/null || true)
+  if [ -z "$_felt" ]; then
+    echo "⚠️  no \`felt\` on this PATH, so none could be baked into the supervisor." >&2
+    echo "    The daemon shells out to felt for every store walk: without it the board" >&2
+    echo "    loads and /api/v1/fibers/composite answers 500 (:enoent), with nothing" >&2
+    echo "    in the log that names felt." >&2
+    echo "    Fix: install felt, then re-run install-agent (or pass --path)." >&2
+    return 0
+  fi
+  _feltdir=$(dirname -- "$_felt")
+  case ":$AGENT_PATH_V:" in
+    *":$_feltdir:"*) return 0 ;;
+  esac
+  # The PATH we are about to bake does not contain the directory `felt` is
+  # actually running from — so it is truncated, whatever produced it.
+  echo "note: the PATH for the supervisor is missing $_feltdir, where this run's \`felt\` lives —" >&2
+  echo "      appending it (your login shell reported a PATH that does not match your own)." >&2
+  if [ -n "$AGENT_PATH_V" ]; then
+    AGENT_PATH_V="$AGENT_PATH_V:$_feltdir"
+  else
+    AGENT_PATH_V="$_feltdir"
+  fi
+}
+
+# The machine's canonical identity, written once at install time.
+#
+# `~/.shuttle/host` is what the CLI and the daemon both read to answer "which
+# host am I?" — the OS hostname is consulted only to seed it, because the two
+# runtimes normalize it differently (Erlang gives the short name, Go keeps the
+# DNS domain) and DHCP rewrites it on some networks. Under the strict dispatch
+# predicate (block.host == own_host_id) either kind of drift silently unhomes
+# every fiber the CLI armed.
+#
+# The seeding is otherwise done by whichever side reaches the fallback first,
+# which leaves one asymmetry: a daemon started with SHUTTLE_HOST exported (the
+# ssh-alias case) resolves from the env var and never writes the file, so a CLI
+# shell without that export falls back to the hostname and disagrees. Install
+# time is where that closes — the daemon we are about to supervise is the one
+# whose identity this is.
+#
+# An existing non-empty file always wins: it may hold a friendly name someone
+# chose deliberately, and re-deciding it here would rename the machine out from
+# under every fiber already homed to it. Normalization matches the other two
+# implementations exactly (trim, lowercase, cut at the first "."); an explicit
+# SHUTTLE_HOST is taken as-is, as both readers take it.
+#
+# Creating ~/.shuttle here is correct: install-agent is a shuttle command
+# setting up shuttle's own state. (The felt CLI must NOT do the same — creating
+# that directory is what switches on the event stream.)
+seed_host_identity() {
+  _hostfile="${SHUTTLE_HOST_FILE:-$HOME/.shuttle/host}"
+  # First non-empty line, trimmed — the same read both other implementations do.
+  _cur=$(sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' "$_hostfile" 2>/dev/null \
+    | sed -n '/./{p;q;}' || true)
+  if [ -n "$_cur" ]; then
+    echo "host identity → $_cur   ($_hostfile)"
+    return 0
+  fi
+  # Trimmed, not stripped: both readers take SHUTTLE_HOST as-is apart from the
+  # surrounding whitespace, so squeezing out an interior space would invent a
+  # name neither of them would ever resolve to.
+  _id=$(printf '%s' "${SHUTTLE_HOST-}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+  if [ -n "$_id" ]; then
+    _why="from \$SHUTTLE_HOST"
+  else
+    _id=$( (hostname 2>/dev/null || uname -n) | tr '[:upper:]' '[:lower:]' | cut -d. -f1 | tr -d '[:space:]')
+    _why="from this machine's hostname"
+  fi
+  if [ -z "$_id" ]; then
+    echo "⚠️  could not determine a host identity (no \$SHUTTLE_HOST, no hostname);" >&2
+    echo "    write one to $_hostfile or the daemon will dispatch nothing." >&2
+    return 0
+  fi
+  mkdir -p "$(dirname -- "$_hostfile")"
+  printf '%s\n' "$_id" > "$_hostfile"
+  echo "host identity → $_id   (seeded $_why into $_hostfile)"
+}
+
 install_agent() {
   AGENT_OS=$(uname -s)
   AGENT_PRINT=0
@@ -223,12 +456,10 @@ install_agent() {
 
   [ -n "$AGENT_LOG_V" ] || AGENT_LOG_V="$AGENT_LOG_DEFAULT"
   [ "$AGENT_SSH_SET" = 1 ] || AGENT_SSH_V="$AGENT_SSH_DEFAULT"
-  # Captured from a LOGIN shell, at install time. launchd and systemd --user
-  # both hand the daemon a near-empty environment, and sourcing the profile at
-  # runtime does not reconstruct the login PATH from `env -i`. Booting needs
-  # nothing (the release bundles ERTS) but every store walk shells out to
-  # `felt`, and a PATH without it yields :enoent -> 500 on the composite API.
-  [ -n "$AGENT_PATH_V" ] || AGENT_PATH_V=$(/bin/bash -lc 'echo $PATH')
+  [ -n "$AGENT_PATH_V" ] || AGENT_PATH_V=$(capture_login_path)
+  # Applied to a --path the caller supplied too: an explicit PATH copied from
+  # somewhere stale fails in exactly the same way a truncated capture does.
+  felt_dir_into_path
 
   # Warned in BOTH modes, on stderr: a reader previewing with --print is
   # exactly the reader who should see it, and stderr keeps the rendered file
@@ -273,6 +504,12 @@ install_agent() {
   # A supervisor with no daemon to run is worse than none.
   need_launcher
 
+  # Before the job exists, so the daemon it starts reads a file that is already
+  # there rather than seeding one from a hostname the CLI may normalize
+  # differently. --print returned above: previewing a file must not name the
+  # machine.
+  seed_host_identity
+
   mkdir -p "$(dirname -- "$AGENT_LOG_V")"
 
   if [ "$AGENT_OS" = Darwin ]; then
@@ -282,6 +519,7 @@ install_agent() {
     launchctl unload "$AGENT_PLIST" 2>/dev/null || true
     launchctl load "$AGENT_PLIST"
     echo "loaded $AGENT_LABEL → daemon will keep-alive + start at login"
+    echo "board → http://127.0.0.1:${AGENT_PORT_V:-4000}/"
     echo "logs → $AGENT_LOG_V   (launchctl list | grep shuttle  to inspect)"
   else
     # Probe BEFORE stopping anything. Plenty of Linux hosts have no user
@@ -307,6 +545,7 @@ install_agent() {
     systemctl --user daemon-reload
     systemctl --user enable --now "$AGENT_UNIT_NAME"
     echo "enabled $AGENT_UNIT_NAME → daemon restarts on crash + starts at login"
+    echo "board → http://127.0.0.1:${AGENT_PORT_V:-4000}/"
     echo "logs → $AGENT_LOG_V   (systemctl --user status $AGENT_UNIT_NAME  to inspect)"
     echo "run 'loginctl enable-linger $(id -un)' so it survives logout and starts at boot"
   fi

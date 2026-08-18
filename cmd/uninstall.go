@@ -7,19 +7,23 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// uninstallCmd is the inverse of `felt setup`: removes the felt plugin from
-// Claude Code and Codex (whichever are installed and have felt wired up).
-// Doesn't touch the felt binary itself — removal of that depends on how it
-// was installed (brew, curl, go install), so we just print the relevant
-// hint instead of guessing.
+// uninstallCmd is the inverse of `felt setup`: removes the felt plugin and the
+// marketplace it came from, for Claude Code and Codex both (whichever are
+// installed and have felt wired up). Doesn't touch the felt binary itself —
+// removal of that depends on how it was installed (brew, curl, go install), so
+// we just print the relevant hint instead of guessing.
 var uninstallCmd = &cobra.Command{
 	Use:   "uninstall",
 	Short: "Remove the felt agent plugins (Claude Code, Codex)",
 	Long: `Remove the felt plugin from Claude Code and Codex.
 
-The inverse of ` + "`felt setup claude`" + ` and ` + "`felt setup codex`" + `. Idempotent:
-running it when no plugins are installed is a no-op. Leaves the felt
-binary in place — to remove that:
+The inverse of ` + "`felt setup claude`" + ` and ` + "`felt setup codex`" + `: for each agent
+it removes the felt plugin and unregisters the ` + marketplaceName + `
+marketplace. For Claude Code it also unlinks any skills ` + "`felt setup skills`" + `
+linked out of that marketplace's clone, since removing the marketplace
+deletes what they point at; Codex skills are not linked that way and are
+left alone. Idempotent: running it when no plugins are installed is a
+no-op. Leaves the felt binary in place — to remove that:
 
   brew uninstall felt        # if installed via brew
   rm $(which felt)           # if installed via curl or go install`,
@@ -38,7 +42,7 @@ func runFeltUninstall() {
 	removedAnything := false
 
 	if _, err := exec.LookPath("claude"); err == nil && isMarketplaceRegistered(marketplaceName) {
-		fmt.Println("Removing Claude Code plugin...")
+		fmt.Println("Removing Claude Code plugin and marketplace...")
 		if err := uninstallPlugin(); err != nil {
 			fmt.Printf("warning: %v\n", err)
 		}
@@ -47,7 +51,7 @@ func runFeltUninstall() {
 	}
 
 	if feltCodexWiringPresent() {
-		fmt.Println("Removing Codex plugin...")
+		fmt.Println("Removing Codex plugin and marketplace...")
 		if err := uninstallCodexPlugin(); err != nil {
 			fmt.Printf("warning: %v\n", err)
 		}

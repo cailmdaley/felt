@@ -1,37 +1,45 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  Shuttle daemon LaunchAgent. Generated from this template by
-  `make install-agent` (placeholders __SHUTTLE_DIR__ / __LOG__ / __FELT_STORES__
-  are filled in). Do not load this template directly — it isn't a valid plist
-  until installed.
+  Shuttle daemon LaunchAgent, rendered from a template at install time by
+  `shuttle install-agent` (in a checkout, `make install-agent` is a wrapper
+  over the same command and the same template). The placeholders
+  __SHUTTLE_DIR__ / __LOG__ / __FELT_STORES__ / __PATH__ / __SSH_AUTH_SOCK__
+  are filled in then; the unrendered template is not a valid plist, so don't
+  load it directly.
 
-  PATH: launchd starts with a near-empty environment, and the daemon shells out
-  to `felt` (in ~/.local/bin) for every store walk — a PATH missing felt yields
-  `:enoent` → 500 on /api/v1/fibers/composite. Boot itself no longer needs
-  anything: the daemon is an ERTS-bundled Mix release, so there is no
-  `#!/usr/bin/env escript` shebang hunting for escript/erl (which, under
-  launchd's bare env, used to exit 127). That narrows the requirement to `felt`;
-  it does not remove it. A login shell (`bash -lc`) does NOT fix what's left:
-  under launchd's bare env the user profile doesn't reconstruct the login PATH
-  (its setup isn't self-sufficient from `env -i`). So instead `make
-  install-agent` CAPTURES the real login PATH at install time (`bash -lc 'echo
-  $PATH'`, run from the user's environment) and bakes it into __PATH__ below —
-  deterministic at runtime, and the user's actual PATH rather than a
-  hand-maintained list. `exec` replaces the shell with the daemon so
-  launchd's KeepAlive supervises it directly; `start --force` skips the
-  already-running guard so a restart never refuses.
+  __SHUTTLE_DIR__ is whatever directory holds bin/shuttle — the unpacked
+  release for a downloaded tarball, the repository root for a checkout.
+  `exec` replaces the shell with the daemon so launchd's KeepAlive supervises
+  it directly, and `start --force` skips the already-running guard so a
+  restart never refuses.
 
-  Run from OUTSIDE ~/Documents (canonical checkout: ~/dev/shuttle). macOS TCC
-  blocks launchd-spawned processes from ~/Documents / ~/Desktop / ~/Downloads,
-  and Full Disk Access does NOT inherit across launchd's process tree the way it
-  does under a terminal app — so a daemon rooted in a protected folder would
-  crash-loop (or silently fail store walks) unless you grant FDA to every binary
-  in the tree (beam.smp, felt, …). Living outside Documents sidesteps TCC
-  entirely: zero grants, survives erlang upgrades. `make install-agent` warns if
-  $PWD is protected. (Earlier this template used `-c` + no-exec + an FDA grant on
-  /bin/bash to keep bash as the responsible process; that umbrella does not
-  actually inherit under launchd — relocating out of Documents is the fix.)
+  PATH. launchd starts with a near-empty environment, and the daemon shells out
+  to `felt` for every store walk — a PATH missing `felt` yields `:enoent` → 500
+  on /api/v1/fibers/composite: the board loads, the kanban does not. Boot
+  itself no longer needs anything, since the daemon is an ERTS-bundled Mix
+  release with no `#!/usr/bin/env escript` shebang hunting for escript/erl
+  (which, under launchd's bare env, used to exit 127). That narrows the
+  requirement to `felt`; it does not remove it. Running a login shell at
+  runtime does NOT fix what's left: starting from launchd's bare env, the user
+  profile doesn't reconstruct the login PATH (its setup isn't self-sufficient
+  from `env -i`). So install-agent CAPTURES the login PATH once, at install
+  time, from a login shell run in a scrubbed environment — scrubbed so the
+  installing session's own PATH can't leak in — and bakes it into __PATH__
+  below. Deterministic at runtime, and the user's real PATH rather than a
+  hand-maintained list. `--path` overrides it.
+
+  Keep BOTH the shuttle directory and the felt stores outside ~/Documents,
+  ~/Desktop and ~/Downloads. macOS TCC blocks launchd-spawned processes from
+  those folders, and Full Disk Access does NOT inherit across launchd's process
+  tree the way it does under a terminal app — so a daemon rooted in a protected
+  folder crash-loops, and stores in one are silently walked as empty, unless
+  you grant FDA to every binary in the tree (beam.smp, felt, …). Staying
+  outside them sidesteps TCC entirely: zero grants, survives erlang upgrades.
+  install-agent warns about either path. (Earlier this template used `-c` +
+  no-exec + an FDA grant on /bin/bash to keep bash as the responsible process;
+  that umbrella does not actually inherit under launchd — relocating out of the
+  protected folders is the fix.)
 -->
 <plist version="1.0">
 <dict>
@@ -60,13 +68,13 @@
         <key>SHUTTLE_PORT</key>
         <string>__PORT__</string>
         <!--
-          FELT_STORES scopes the daemon's felt polling to the aggregate store
-          (~/loom, outside ~/Documents), which aggregates every project's fibers
-          under prefixed ids and re-discovers each project's substores by following
-          the symlinks under its .felt/. Keeps the daemon off TCC-protected paths.
-          (Set in launchd env, not the login profile, since it's our scoping —
-          the login shell inherits it across the `-l`.) Filled in by
-          `make install-agent` (placeholder __FELT_STORES__).
+          FELT_STORES scopes the daemon's felt polling to the stores named at
+          install time (`--felt-stores`). felt re-discovers each project's
+          substores by following the symlinks under a store's .felt/, so a
+          single aggregate store is usually the only entry you need. Keep them
+          outside the TCC-protected folders (see header). (Set in launchd's
+          environment rather than the login profile, since the scoping is ours
+          — a login shell inherits it across the `-l`.)
         -->
         <key>FELT_STORES</key>
         <string>__FELT_STORES__</string>
@@ -79,8 +87,8 @@
           (`step ssh login …`, see AGENTS.md) — are invisible to it. Without
           this, every fresh ssh the daemon makes to such a host fails auth: its own
           remote feed/tunnel can't connect, and a kanban Attach tab (which
-          inherits this very SSH_AUTH_SOCK) opens and instantly dies. Filled in
-          by `make install-agent` (placeholder __SSH_AUTH_SOCK__).
+          inherits this very SSH_AUTH_SOCK) opens and instantly dies. Override
+          with `--ssh-auth-sock` if your socket lives elsewhere.
         -->
         <key>SSH_AUTH_SOCK</key>
         <string>__SSH_AUTH_SOCK__</string>

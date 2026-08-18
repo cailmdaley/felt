@@ -236,6 +236,34 @@ func TestEventWriteGate(t *testing.T) {
 	}
 }
 
+// TestEventHookSeedsNothingWithoutStateDir pins the gate against the one path
+// that can reach around it: renderEventLine resolves this machine's identity
+// (for origin_name) BEFORE eventsSink consults the gate, and that resolution's
+// last tier seeds ~/.shuttle/host. If the seed created its parent, one hook
+// event on a felt-only machine would produce ~/.shuttle — and with it, from the
+// next event on, a live stream nobody opted into.
+func TestEventHookSeedsNothingWithoutStateDir(t *testing.T) {
+	home := isolateEvents(t)
+	// Undo the identity pin: this test needs the hostname tier, the only one
+	// that writes.
+	t.Setenv("SHUTTLE_HOST", "")
+	t.Setenv("SHUTTLE_HOST_FILE", "")
+
+	writeEvent(t, map[string]any{"hook_event_name": "Stop", "session_id": "s1"})
+
+	entries, err := os.ReadDir(home)
+	if err != nil {
+		t.Fatalf("read fake home: %v", err)
+	}
+	if len(entries) != 0 {
+		names := make([]string, 0, len(entries))
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Fatalf("hook created %v in a HOME with no ~/.shuttle; it must create nothing", names)
+	}
+}
+
 // TestEventExplicitFileOverridesGate: SHUTTLE_EVENTS_FILE is explicit intent,
 // so it creates its parent rather than declining to write. This is also what
 // makes the bootstrap probe and these tests possible on a bare host.

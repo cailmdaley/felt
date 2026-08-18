@@ -15,10 +15,12 @@ recency now live in the frontmatter.
 The version was stamped 2026-07-30 and has not been cut; work landing since
 is folded in here rather than into a separate Unreleased section.
 
-> **Note.** The daemon and UI are not release artifacts — only the Go binary
-> ships. Homebrew users get the `felt shuttle` verb tree, but the daemon-HTTP
-> verbs need a daemon you build from source (see the docs site). The daemon
-> path is macOS-primary and rough on Linux.
+> **Note.** The daemon now ships too. Every tagged release attaches
+> `shuttle_<Os>_<arch>.tar.gz` for macOS and Linux, arm64 and x86_64, each an
+> ERTS-bundled Mix release built and boot-tested on its own native runner —
+> so a machine with neither Erlang nor Node can install a working daemon.
+> `tmux` and `felt` itself remain prerequisites. The daemon path is
+> macOS-primary and still rougher on Linux.
 
 ### Added
 
@@ -328,6 +330,19 @@ reaches, rather than the boundary being negotiated flag by flag.
   backfills what is already true.
 - Ownership resolution fails loudly when it cannot resolve its own host,
   instead of quietly attributing work to the wrong one.
+- A machine's identity is now fixed the first time it is needed. The CLI and
+  the daemon each fell back to the OS hostname, which is not one value: Go
+  keeps the DNS suffix where Erlang strips it, and DHCP rewrites it outright.
+  A Mac that called itself `studio-air.home` to the CLI and
+  `studio-macbook-air` to the daemon armed fibers no daemon would ever
+  dispatch, silently. The hostname is now normalized (lowercased, cut at the
+  first `.`) and written to `~/.shuttle/host` on first use, so both sides read
+  one durable name. The mismatch error also stopped calling the CLI a daemon
+  and now points at whichever source actually decided the identity. If your
+  machine's hostname carried uppercase or a DNS suffix, normalization changes
+  what it resolves to — check the `host:` on fibers armed before this release
+  and update any that still hold the old raw name, or they will sit
+  undispatched. `felt check` now warns when it finds one.
 - The standing-role reconciler self-heals inverted markers instead of
   re-closing live work. Dead pinned roles park rather than relaunching in a
   loop.

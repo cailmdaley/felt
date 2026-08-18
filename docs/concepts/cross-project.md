@@ -133,3 +133,19 @@ If the link genuinely matters:
 
 Otherwise treat the warning as informational. Do not "fix" it by inventing a
 stub fiber.
+
+## If the shuttle daemon runs on this machine
+
+The daemon polls the stores it is given and assumes none. Point it at a fresh
+store on a machine where your fibers already live in other stores, and you get a
+healthy daemon serving an empty board — no error, because nothing is wrong.
+
+An aggregate store is the tidy answer: felt re-discovers a store's symlinked
+substores, so naming the aggregate reaches every project linked into it, and a
+new project joins by symlink rather than by reconfiguring the daemon. See
+[Installing the shuttle daemon](../shuttle/installation.md#set-up-a-supervised-daemon-on-macos)
+for where the store list is set, and its [Sharp
+edges](../shuttle/installation.md#sharp-edges) for the macOS constraints that
+decide the direction: launchd cannot read `~/Documents`, `~/Desktop` or
+`~/Downloads` at all, which means a project in one of those can only be
+daemon-visible if its bytes are canonical elsewhere.

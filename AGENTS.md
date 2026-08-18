@@ -694,10 +694,11 @@ felt shuttle validate-identity                # UID migration/cross-city validat
   `agent:` field resolves against the registry. Default agent is
   `claude-sonnet`.
 - **`shuttle.host` field drives daemon affinity — strictly.** A daemon
-  dispatches a block iff `block.host == own_host_id` (its `SHUTTLE_HOST` or
-  `:inet.gethostname()`). There is no `"local"` default and no `nil`
-  wildcard: an absent or empty `host:` is unowned and ineligible on *every*
-  daemon. `felt shuttle install`/`repeat` stamp `host` by default so blocks
+  dispatches a block iff `block.host == own_host_id` (`SHUTTLE_HOST`, else
+  `~/.shuttle/host`, else the normalized OS hostname, seeded into that file so
+  the CLI and the daemon cannot drift apart). There is no `"local"` default and
+  no `nil` wildcard: an absent or empty `host:` is unowned and ineligible on
+  *every* daemon. `felt shuttle install`/`repeat` stamp `host` by default so blocks
   are born owned. The same predicate gates the orphan-resurrection path, so
   a remote restart can't re-grab another host's fiber.
 - **`shuttle.project_dir` is required for armed installs.** `felt shuttle

@@ -143,3 +143,80 @@ func runCommand(t *testing.T, dir string, args ...string) (string, error) {
 
 	return buf.String(), runErr
 }
+
+// TestCheckCommandCountsUnparseableFiberFirst pins the fix for a store where a
+// fiber had been invisible for three weeks. Its `outcome:` was a bare unquoted
+// scalar containing a colon-space, which YAML reads as a nested mapping; the
+// file stopped parsing, the listing walk skipped it with a stderr warning, and
+// `felt check` — the command whose whole job is finding problems — did not
+// count it. A fiber can drop out of the assemblage entirely; check must say so,
+// first, and fail.
+func TestCheckCommandCountsUnparseableFiberFirst(t *testing.T) {
+	dir := t.TempDir()
+	storage := felt.NewStorage(dir)
+	if err := storage.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	// A second, lesser problem: a broken body reference. It must still be
+	// reported — and must come after the fiber that no longer exists.
+	linker := &felt.Felt{ID: "linker", Name: "Linker", Body: "See [[nowhere]]."}
+	if err := storage.Write(linker); err != nil {
+		t.Fatalf("Write() error: %v", err)
+	}
+
+	brokenPath := filepath.Join(dir, ".felt", "venue", "venue.md")
+	if err := os.MkdirAll(filepath.Dir(brokenPath), 0755); err != nil {
+		t.Fatalf("mkdir venue: %v", err)
+	}
+	broken := `---
+name: Venue
+created-at: 2026-04-10T10:00:00Z
+outcome: booked 8/1: deposit paid
+---
+
+Body.
+`
+	if err := os.WriteFile(brokenPath, []byte(broken), 0644); err != nil {
+		t.Fatalf("write venue fiber: %v", err)
+	}
+
+	// The fiber really is invisible to the rest of felt — the premise of the
+	// whole check.
+	felts, err := storage.List()
+	if err != nil {
+		t.Fatalf("List() error: %v", err)
+	}
+	for _, f := range felts {
+		if f.ID == "venue" {
+			t.Fatal("expected the malformed fiber to be absent from List()")
+		}
+	}
+
+	output, err := runCommand(t, dir, "check")
+	if err == nil {
+		t.Fatalf("felt check succeeded despite an unparseable fiber:\n%s", output)
+	}
+	if !strings.Contains(err.Error(), "2 error(s)") {
+		t.Fatalf("unparseable fiber not counted as an error: %v\n%s", err, output)
+	}
+
+	unparseable := strings.Index(output, "unparseable")
+	if unparseable < 0 {
+		t.Fatalf("check does not report the unparseable fiber:\n%s", output)
+	}
+	// The walk resolves symlinks (macOS /var → /private/var).
+	resolvedPath, err := filepath.EvalSymlinks(brokenPath)
+	if err != nil {
+		t.Fatalf("EvalSymlinks: %v", err)
+	}
+	if !strings.Contains(output, resolvedPath) {
+		t.Fatalf("check does not name the unparseable fiber's path:\n%s", output)
+	}
+	if !strings.Contains(output, "mapping values are not allowed") {
+		t.Fatalf("check does not carry the parse error:\n%s", output)
+	}
+	if broken := strings.Index(output, "broken body reference"); broken < 0 || broken < unparseable {
+		t.Fatalf("unparseable fiber must be reported before cosmetic issues:\n%s", output)
+	}
+}

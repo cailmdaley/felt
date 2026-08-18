@@ -288,3 +288,63 @@ func hasOutput(f *Felt, id string) bool {
 	}
 	return f.HasDataFlowOutput(id)
 }
+
+// CheckParseability reports fibers that exist on disk but cannot be read into
+// the assemblage — almost always malformed YAML frontmatter (an unquoted
+// scalar containing ": " is the classic: YAML reads it as a nested mapping and
+// the whole file stops parsing).
+//
+// This is the one failure the rest of the walk deliberately swallows.
+// Storage.listWithMode warns on stderr and skips, which is right for `ls` and
+// `show` — one broken file must not take down every other fiber — but it means
+// a fiber can drop out of the store entirely and stay dropped. felt's own
+// write path quotes correctly, so these files come from agents hand-editing
+// frontmatter, which is the documented workflow for multi-line outcomes;
+// nothing else validates that editing afterwards. `check` is where the
+// swallowed failure gets a voice, and it outranks every other issue: a broken
+// wikilink is cosmetic next to a fiber that has silently ceased to exist.
+func CheckParseability(s *Storage) ([]CheckIssue, error) {
+	files, err := s.listFiberFiles()
+	if err != nil {
+		return nil, err
+	}
+
+	var issues []CheckIssue
+	for _, file := range files {
+		if _, err := s.readPathWithMode(file.path, file.id, ParseFull); err != nil {
+			// An iCloud-dataless file is not malformed — the bytes simply
+			// aren't here yet. Same symptom (invisible fiber), different fix,
+			// and it isn't the store's fault, so it lands as a warning.
+			if isEvictedFileError(err) {
+				issues = append(issues, CheckIssue{
+					Level:   CheckLevelWarning,
+					FiberID: file.id,
+					Path:    file.path,
+					Message: "not materialized (iCloud) — run `brctl download` or open it in Files to hydrate",
+				})
+				continue
+			}
+			issues = append(issues, CheckIssue{
+				Level:   CheckLevelError,
+				FiberID: file.id,
+				Path:    file.path,
+				Message: fmt.Sprintf("unparseable, so invisible to every felt command until it is fixed: %s", parseFailureDetail(file.path, err)),
+			})
+		}
+	}
+
+	sort.Slice(issues, func(i, j int) bool {
+		if issues[i].FiberID != issues[j].FiberID {
+			return issues[i].FiberID < issues[j].FiberID
+		}
+		return issues[i].Message < issues[j].Message
+	})
+	return issues, nil
+}
+
+// parseFailureDetail strips the "reading file <path>: " wrapper Storage adds to
+// I/O failures, since CheckIssue already carries the path — repeating it once
+// per issue buries the part the reader needs (the YAML line and reason).
+func parseFailureDetail(path string, err error) string {
+	return strings.TrimPrefix(err.Error(), fmt.Sprintf("reading file %s: ", path))
+}

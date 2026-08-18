@@ -23,6 +23,17 @@ config :shuttle,
 # `own_host_id:` opts to `Poller.start_link`.
 System.put_env("SHUTTLE_HOST", "test-host")
 
+# Fence the test run away from the developer's real ~/.shuttle/host. The
+# hostname tier of `resolve_own_host_id/0` SEEDS that file, and the host tests
+# clear SHUTTLE_HOST to exercise the lower tiers — so without a pinned path a
+# resolve from any concurrent `async: true` test could rewrite this machine's
+# canonical identity. Individual tests still override this with their own temp
+# path; this only has to be somewhere harmless.
+System.put_env(
+  "SHUTTLE_HOST_FILE",
+  Path.join(System.tmp_dir!(), "shuttle-test-host-#{System.unique_integer([:positive])}")
+)
+
 config :shuttle, ShuttleWeb.Endpoint,
   http: [ip: {127, 0, 0, 1}, port: 4002],
   secret_key_base: "testsecretkeybasetestsecretkeybasetestsecretkeybasetestsecretkeybase",

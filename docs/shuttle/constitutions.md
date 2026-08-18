@@ -219,7 +219,8 @@ list the daemon evaluates.
   inside a synced folder can raise a permission prompt nobody can grant.
 - **`host`** — the owning daemon's host id. A daemon dispatches a block if and
   only if `block.host` equals its own id (`SHUTTLE_HOST`, else the file
-  `~/.shuttle/host`, else the system hostname). shuttle offers no `"local"`
+  `~/.shuttle/host`, else the system hostname — consulted once and then
+  written to that file, so the name cannot drift). shuttle offers no `"local"`
   default and no wildcard. An absent host leaves the fiber unowned and
   ineligible on every daemon. `install`, `repeat`, and `pin` stamp it by
   default.

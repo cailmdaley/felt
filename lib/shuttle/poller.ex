@@ -2077,7 +2077,7 @@ defmodule Shuttle.Poller do
   #      and the test seam — `config/test.exs` pins it via `System.put_env/2`,
   #      and the daemon's tmux respawn loop can export it.
   #
-  #   2. `~/.shuttle/host` file (first non-empty line), if present. The durable
+  #   2. `~/.shuttle/host` file (its trimmed first line), if present. The durable
   #      per-host canonical identity: unlike the env var it survives every
   #      daemon launch path (`make start`, a bare `bin/shuttle start`, a
   #      respawn outside the loop), so the daemon *derives* its friendly name
@@ -2085,8 +2085,27 @@ defmodule Shuttle.Poller do
   #      depending on an operator remembering to export it. Override the path
   #      with `SHUTTLE_HOST_FILE`.
   #
-  #   3. `:inet.gethostname()` — short OS hostname. Two separately-deployed
-  #      daemons get distinct ids automatically; no per-machine config needed.
+  #   3. `:inet.gethostname()`, normalized and then WRITTEN BACK to the host
+  #      file. Two separately-deployed daemons get distinct ids automatically;
+  #      no per-machine config needed.
+  #
+  # Tiers 1-3 are the same chain the Go CLI walks (cmd/shuttle_host.go), but
+  # mirroring the chain was not enough on its own. The first two tiers are
+  # stable values two processes can agree on; the OS hostname is neither. It
+  # varies across runtimes — `:inet.gethostname/0` reports the short name while
+  # Go's `os.Hostname()` keeps the DNS domain, so the same Mac is
+  # "studio-macbook-air" here and "studio-air.home" there — and it varies
+  # across time, because DHCP rewrites it on some networks. Under the strict
+  # dispatch predicate (`block.host == own_host_id`) either kind of drift
+  # silently unhomes every fiber the CLI armed: this daemon sees a host it
+  # isn't, dispatches nothing, and reports nothing wrong.
+  #
+  # So the OS hostname is consulted once per machine and then retired: it is
+  # normalized identically on both sides (trimmed, downcased, truncated at the
+  # first ".") and seeded into the host file, which every later resolve on
+  # either side reads instead. Whoever reaches the fallback first fixes the
+  # name; agreement is the point, not which name won. Seeding is best-effort —
+  # a read-only home still resolves, just without the durability.
   #
   # No `Application.get_env(:shuttle, :host)` step and no `"local"` default:
   # an absent `host:` is unowned everywhere, never silently grabbed.
@@ -2105,9 +2124,9 @@ defmodule Shuttle.Poller do
             name
 
           _ ->
-            case :inet.gethostname() do
-              {:ok, name} when name != [] ->
-                to_string(name)
+            case os_hostname_normalized() do
+              name when is_binary(name) and name != "" ->
+                seed_host_config_file(name)
 
               other ->
                 raise "Shuttle.Poller could not resolve own_host_id: " <>
@@ -2118,8 +2137,66 @@ defmodule Shuttle.Poller do
     end
   end
 
-  # First non-empty line of the `~/.shuttle/host` canonical-identity file,
-  # or nil when the file is absent/empty/unreadable.
+  # `:inet.gethostname/0` put through `normalize_hostname/1`, or the raw
+  # error tuple when the syscall fails (so the caller can report it verbatim).
+  @spec os_hostname_normalized() :: String.t() | term()
+  defp os_hostname_normalized do
+    case :inet.gethostname() do
+      {:ok, name} when name != [] -> name |> to_string() |> normalize_hostname()
+      other -> other
+    end
+  end
+
+  # Reduces a raw OS hostname to the canonical short form both sides agree on:
+  # trimmed, downcased, and cut at the first "." so "Studio-Air.home" and
+  # "studio-air" are the same machine. Matches `normalizeHostname` in
+  # cmd/shuttle_host.go; the two must not drift.
+  @spec normalize_hostname(String.t()) :: String.t()
+  defp normalize_hostname(raw) do
+    raw
+    |> String.trim()
+    |> String.split(".", parts: 2)
+    |> List.first()
+    |> to_string()
+    |> String.trim()
+    |> String.downcase()
+  end
+
+  # Persists a hostname-derived identity to the host file so it stops being
+  # derived, then returns it unchanged. Reached only from
+  # `resolve_own_host_id/0`'s last tier — `SHUTTLE_HOST` unset and the file
+  # absent or blank — so it never overwrites an explicit choice. Best-effort by
+  # design: a failed write (read-only home, a container with no writable
+  # `$HOME`) leaves the caller with the in-memory value rather than crashing
+  # the daemon at boot.
+  @spec seed_host_config_file(String.t()) :: String.t()
+  defp seed_host_config_file("" = name), do: name
+
+  #
+  # Writes only into a parent directory that ALREADY exists, and never creates
+  # one. The existence of `~/.shuttle` is the gate that distinguishes a shuttle
+  # host from a machine that installed felt for fibers alone (the same gate the
+  # event stream and commit ledger use), and the Go CLI resolves this identity
+  # inside `felt hook event` — before that gate is consulted. An `mkdir_p` here
+  # would switch a felt-only machine's event stream on. Declining to seed costs
+  # nothing; breaking the gate does.
+  defp seed_host_config_file(name) do
+    path = host_config_file()
+
+    if File.dir?(Path.dirname(path)) do
+      File.write(path, name <> "\n")
+    end
+
+    name
+  end
+
+  # Trimmed FIRST line of the `~/.shuttle/host` canonical-identity file, or nil
+  # when the file is absent/unreadable or that line is blank. First-line-only
+  # (not first non-empty line) to match `hostConfigFileValue` in
+  # cmd/shuttle_host.go exactly — any divergence recreates the split identity
+  # this file exists to prevent. This is the tier
+  # `resolve_own_host_id/0` seeds on first fallback, so after one resolve on a
+  # fresh machine it is the tier that answers.
   @spec host_config_file_value() :: String.t() | nil
   defp host_config_file_value do
     path = host_config_file()

@@ -337,3 +337,101 @@ func TestRelationshipsDropForeignCitations(t *testing.T) {
 		t.Fatalf("citations = %+v, want only the local reference from notes/here", citations)
 	}
 }
+
+func TestCheckParseabilityReportsMalformedFrontmatterAsError(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStorage(dir)
+	if err := s.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	// The failure from the field: an unquoted scalar carrying a colon-space,
+	// which YAML reads as a nested mapping.
+	content := `---
+name: Venue
+created-at: 2026-04-10T10:00:00Z
+outcome: booked 8/1: deposit paid
+---
+
+Body.
+`
+	path := filepath.Join(dir, DirName, "venue", "venue.md")
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatalf("mkdir venue: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatalf("write venue fiber: %v", err)
+	}
+
+	issues, err := CheckParseability(s)
+	if err != nil {
+		t.Fatalf("CheckParseability() error: %v", err)
+	}
+	if len(issues) != 1 {
+		t.Fatalf("issues = %+v, want exactly one", issues)
+	}
+	if issues[0].Level != CheckLevelError {
+		t.Fatalf("level = %q, want %q — an invisible fiber is not a warning", issues[0].Level, CheckLevelError)
+	}
+	if issues[0].FiberID != "venue" {
+		t.Fatalf("fiber id = %q, want %q", issues[0].FiberID, "venue")
+	}
+	// The walk resolves symlinks (macOS /var → /private/var), so compare
+	// against the resolved form.
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		t.Fatalf("EvalSymlinks: %v", err)
+	}
+	if issues[0].Path != resolved {
+		t.Fatalf("path = %q, want %q", issues[0].Path, resolved)
+	}
+	if !strings.Contains(issues[0].Message, "mapping values are not allowed") {
+		t.Fatalf("message = %q, want the YAML parse error", issues[0].Message)
+	}
+	// The path belongs in Path, not doubled into the message.
+	if strings.Contains(issues[0].Message, resolved) {
+		t.Fatalf("message repeats the path: %q", issues[0].Message)
+	}
+}
+
+func TestCheckParseabilityQuietOnHealthyStore(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStorage(dir)
+	if err := s.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+	if err := s.Write(&Felt{ID: "fiber-a", Name: "Fiber A"}); err != nil {
+		t.Fatalf("Write() error: %v", err)
+	}
+
+	issues, err := CheckParseability(s)
+	if err != nil {
+		t.Fatalf("CheckParseability() error: %v", err)
+	}
+	if len(issues) != 0 {
+		t.Fatalf("issues = %+v, want none", issues)
+	}
+}
+
+// TestCheckParseabilitySurvivesFeltWrittenColonOutcomes guards the boundary
+// this check sits on: felt's own write path quotes correctly, so a colon-space
+// outcome written through the CLI must NOT be reported. Only hand-edited
+// frontmatter can land here.
+func TestCheckParseabilitySurvivesFeltWrittenColonOutcomes(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStorage(dir)
+	if err := s.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+	if err := s.Write(&Felt{ID: "venue", Name: "Venue", Outcome: "booked 8/1: deposit paid"}); err != nil {
+		t.Fatalf("Write() error: %v", err)
+	}
+
+	issues, err := CheckParseability(s)
+	if err != nil {
+		t.Fatalf("CheckParseability() error: %v", err)
+	}
+	if len(issues) != 0 {
+		t.Fatalf("issues = %+v, want none — felt's own writes must round-trip", issues)
+	}
+}

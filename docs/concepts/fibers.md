@@ -127,6 +127,9 @@ tracks how the thinking moved.
 - slug collisions between bare and nested fiber forms
 - multiple bare `.md` files at the `.felt/` root
 - fibers with a blank `name`
+- a shuttle `host:` that is this machine under a pre-normalization name
+  (differing only by case or a DNS suffix), which the daemon's exact-match
+  dispatch would silently skip
 
 ```bash
 felt check

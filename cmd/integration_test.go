@@ -22,6 +22,16 @@ func TestMain(m *testing.M) {
 	}
 	defer os.RemoveAll(tmp)
 
+	// Fence the whole integration binary away from the developer's real
+	// ~/.shuttle/host, the same way cmd/shuttle_host_testmain_test.go fences
+	// the unit binary. These tests exec the real felt with inherited env and a
+	// real $HOME, and resolveOwnHost's last tier seeds the host file — so any
+	// write verb, install, or hook reached from here would otherwise rename the
+	// machine's canonical identity from a test run.
+	if err := os.Setenv("SHUTTLE_HOST_FILE", filepath.Join(tmp, "host")); err != nil {
+		panic(err)
+	}
+
 	binaryPath = filepath.Join(tmp, "felt")
 	buildCmd := exec.Command("go", "build", "-o", binaryPath, ".")
 	buildCmd.Dir = filepath.Join(filepath.Dir(tmp), "..", "..")

@@ -13,7 +13,7 @@ import (
 // accepts a directory marketplace directly.
 func TestCodexMarketplaceSource(t *testing.T) {
 	cases := []struct{ in, want string }{
-		{"/home/cdaley/code/felt", "/home/cdaley/code/felt"},   // local abs path → unchanged
+		{"/home/dev/code/felt", "/home/dev/code/felt"},         // local abs path → unchanged
 		{"./felt", "./felt"},                                   // local rel path → unchanged
 		{"cailmdaley/felt", "cailmdaley/felt"},                 // bare repo ref → unchanged
 		{"cailmdaley/felt#v1.0.14", "cailmdaley/felt@v1.0.14"}, // git ref → #→@
@@ -49,7 +49,7 @@ func TestCodexMarketplaceConflict(t *testing.T) {
 		"Error: git checkout v9.9.9 failed: pathspec 'v9.9.9' did not match any file(s) known to git\n",
 		"Error: failed to fetch https://github.com/cailmdaley/felt.git: could not resolve host\n",
 		"error: unrecognized subcommand 'add'\n",
-		"Added marketplace `cailmdaley-felt` from /home/cdaley/code/felt.\n",
+		"Added marketplace `cailmdaley-felt` from /home/dev/code/felt.\n",
 	}
 	for _, out := range benign {
 		if codexMarketplaceConflict(out) {
@@ -149,8 +149,7 @@ func TestFindPluginDir_EnvVar(t *testing.T) {
 // `plugin list --json` with listJSON, and answers `plugin marketplace list
 // --json` with the felt marketplace already registered — the state every
 // caller of installPluginViaCLI is really in, since setup registers the
-// marketplace on first run and uninstall never removes it. Returns a func
-// reading the log.
+// marketplace before it installs anything. Returns a func reading the log.
 func fakeClaudeOnPath(t *testing.T, listJSON string) func() string {
 	t.Helper()
 	dir := t.TempDir()
@@ -178,17 +177,18 @@ func fakeClaudeOnPath(t *testing.T, listJSON string) func() string {
 }
 
 // TestInstallPluginViaCLI_OpFollowsPluginNotMarketplace pins the fix for a
-// setup that could not recover from its own uninstall. `felt setup claude
-// --uninstall` leaves the marketplace registered on purpose, so choosing
-// install-vs-update by marketplace registration sent the next setup to
-// `claude plugin update` — which hard-fails on a plugin that isn't installed.
-// The op must follow whether the PLUGIN is installed.
+// setup that could not recover from a registered-but-not-installed state — a
+// marketplace add that succeeded followed by an install that didn't, or a
+// hand-run `claude plugin marketplace add`. Choosing install-vs-update by
+// marketplace registration sent the next setup to `claude plugin update`,
+// which hard-fails on a plugin that isn't installed. The op must follow
+// whether the PLUGIN is installed.
 func TestInstallPluginViaCLI_OpFollowsPluginNotMarketplace(t *testing.T) {
 	pluginRef := "felt@" + marketplaceName
 
 	t.Run("plugin absent → install", func(t *testing.T) {
-		// A registered marketplace with no felt plugin: exactly the state
-		// `felt setup claude --uninstall` leaves behind.
+		// A registered marketplace with no felt plugin: the state an install
+		// that failed after `marketplace add` leaves behind.
 		calls := fakeClaudeOnPath(t, `[{"id":"other@somewhere"}]`)
 		if err := installPluginViaCLI("/tmp/felt-repo"); err != nil {
 			t.Fatalf("install: %v", err)
@@ -219,4 +219,62 @@ func TestInstallPluginViaCLI_OpFollowsPluginNotMarketplace(t *testing.T) {
 			t.Errorf("expected `plugin install`, got calls:\n%s", got)
 		}
 	})
+}
+
+// TestUninstallPluginRemovesMarketplaceAndSkillLinks pins the C decision:
+// `felt uninstall` used to remove the Claude plugin and leave cailmdaley-felt
+// registered in ~/.claude/settings.json, so it was the inverse of `felt setup
+// codex` (which has always removed its marketplace) but not of `felt setup
+// claude`. The marketplace declares exactly one plugin, so nothing else is
+// hanging off it — and the skills `felt setup skills` linked out of its clone
+// have to be unlinked first, or removing the clone leaves dangling symlinks.
+func TestUninstallPluginRemovesMarketplaceAndSkillLinks(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	calls := fakeClaudeOnPath(t, `[{"id":"felt@`+marketplaceName+`"}]`)
+
+	// A skill linked from the marketplace clone (goes), one linked from a
+	// local checkout (stays — its target survives uninstall), and a real
+	// directory (never ours to touch).
+	cloneSkills := filepath.Join(home, ".claude", "plugins", "marketplaces", marketplaceName, "claude-plugin", "skills", "felt")
+	checkoutSkill := filepath.Join(home, "src", "felt", "claude-plugin", "skills", "shuttle")
+	skillsDir := filepath.Join(home, ".claude", "skills")
+	for _, d := range []string{cloneSkills, checkoutSkill, skillsDir, filepath.Join(skillsDir, "unrelated")} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(cloneSkills, filepath.Join(skillsDir, "felt")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(checkoutSkill, filepath.Join(skillsDir, "shuttle")); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := uninstallPlugin(); err != nil {
+		t.Fatalf("uninstallPlugin: %v", err)
+	}
+
+	got := calls()
+	uninstall := strings.Index(got, "plugin uninstall felt@"+marketplaceName)
+	removeMarket := strings.Index(got, "plugin marketplace remove "+marketplaceName)
+	if uninstall < 0 {
+		t.Errorf("expected `plugin uninstall`, got calls:\n%s", got)
+	}
+	if removeMarket < 0 {
+		t.Errorf("expected `plugin marketplace remove`, got calls:\n%s", got)
+	}
+	if uninstall >= 0 && removeMarket >= 0 && removeMarket < uninstall {
+		t.Errorf("marketplace removed before the plugin it hosts:\n%s", got)
+	}
+
+	if _, err := os.Lstat(filepath.Join(skillsDir, "felt")); !os.IsNotExist(err) {
+		t.Errorf("skill linked from the marketplace clone survived uninstall: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(skillsDir, "shuttle")); err != nil {
+		t.Errorf("skill linked from a local checkout was removed: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(skillsDir, "unrelated")); err != nil {
+		t.Errorf("unrelated skill directory was removed: %v", err)
+	}
 }
