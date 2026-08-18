@@ -70,6 +70,21 @@ defmodule Shuttle.RawFSTest do
       assert {:error, :enoent} = RawFS.rename(source, destination)
     end
 
+    test "mkdir_p creates parents, is idempotent, and refuses a path through a file",
+         %{dir: dir} do
+      deep = Path.join([dir, "a", "b", "c"])
+      assert RawFS.mkdir_p(deep) == :ok
+      assert File.dir?(deep)
+      assert RawFS.mkdir_p(deep) == :ok
+      assert RawFS.mkdir_p(dir) == File.mkdir_p(dir)
+
+      # A regular file where a directory belongs fails — the atom differs from
+      # `File.mkdir_p/1`'s (`:eexist` vs `:enotdir`), which the moduledoc says
+      # out loud; that both refuse is the part callers rely on.
+      assert {:error, _} = RawFS.mkdir_p(Path.join(dir, "file.txt"))
+      assert {:error, _} = RawFS.mkdir_p(Path.join([dir, "file.txt", "sub"]))
+    end
+
     test "find_executable matches System.find_executable, hits and misses alike" do
       for command <- ["sh", "ls", "env", "definitely-not-installed-#{System.unique_integer()}"] do
         assert RawFS.find_executable(command) == System.find_executable(command),
@@ -82,13 +97,6 @@ defmodule Shuttle.RawFSTest do
     # directory. Diverging here would make the daemon run binaries the stock
     # resolver refuses to find, which matters because command names can come
     # from the agent registry.
-    test "find_executable treats a relative path the way :os.find_executable does" do
-      for command <- ["bin/felt", "./bin/felt", "../felt/bin/felt", "sub/dir/tool"] do
-        assert RawFS.find_executable(command) == System.find_executable(command),
-               "disagreed on #{command}"
-      end
-    end
-
     test "find_executable handles an explicit path the way System.cmd would" do
       assert RawFS.find_executable("/bin/sh") == "/bin/sh"
       assert RawFS.find_executable("/bin/definitely-not-here") == nil

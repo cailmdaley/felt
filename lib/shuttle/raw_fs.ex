@@ -62,7 +62,7 @@ defmodule Shuttle.RawFS do
   """
   @spec ls(Path.t()) :: {:ok, [binary()]} | {:error, :file.posix()}
   def ls(path) do
-    case :prim_file.list_dir(charlist(path)) do
+    case :prim_file.list_dir(binary(path)) do
       {:ok, names} -> {:ok, Enum.map(names, &List.to_string/1)}
       {:error, reason} -> {:error, reason}
     end
@@ -90,28 +90,65 @@ defmodule Shuttle.RawFS do
 
   @doc "`File.read/1` without the file server."
   @spec read(Path.t()) :: {:ok, binary()} | {:error, :file.posix()}
-  def read(path), do: :prim_file.read_file(charlist(path))
+  def read(path), do: :prim_file.read_file(binary(path))
 
   @doc """
   `File.write/2` without the file server.
   """
   @spec write(Path.t(), iodata()) :: :ok | {:error, :file.posix()}
-  def write(path, contents),
-    do: :prim_file.write_file(charlist(path), IO.iodata_to_binary(contents))
+  def write(path, contents), do: :prim_file.write_file(binary(path), contents)
+
+  @doc """
+  `File.mkdir_p/1` without the file server — creates missing parents, `:ok` when
+  the directory already exists.
+
+  One divergence, in the case that means "your store path is a regular file":
+  `File.mkdir_p/1` reports it as `:enotdir` and this reports `:eexist`. Both are
+  errors and both raise at the bang call sites, so nothing branches on the
+  difference.
+  """
+  @spec mkdir_p(Path.t()) :: :ok | {:error, :file.posix()}
+  def mkdir_p(path), do: path |> binary() |> do_mkdir_p()
+
+  # `File.mkdir_p/1`'s own algorithm, transcribed onto `:prim_file`: exists-first,
+  # then create the parent, then create this one and treat `:eexist` on a
+  # directory as success. Transcribed rather than reinvented so the error atoms
+  # match — a component that is a regular file has to fail the way the caller's
+  # rescue clauses already expect it to.
+  defp do_mkdir_p("/"), do: :ok
+
+  defp do_mkdir_p(path) do
+    if dir?(path) do
+      :ok
+    else
+      parent = Path.dirname(path)
+
+      if parent == path do
+        {:error, :einval}
+      else
+        _ = do_mkdir_p(parent)
+
+        case :prim_file.make_dir(path) do
+          {:error, :eexist} = error -> if dir?(path), do: :ok, else: error
+          other -> other
+        end
+      end
+    end
+  end
 
   @doc """
   `File.rename/2` without the file server.
   """
   @spec rename(Path.t(), Path.t()) :: :ok | {:error, :file.posix()}
   def rename(source, destination),
-    do: :prim_file.rename(charlist(source), charlist(destination))
+    do: :prim_file.rename(binary(source), binary(destination))
 
   @doc """
   `:file.read_link/1` without the file server — the symlink's target, verbatim.
   """
   @spec read_link(Path.t()) :: {:ok, binary()} | {:error, :file.posix()}
   def read_link(path) do
-    case :prim_file.read_link(charlist(path)) do
+    case :prim_file.read_link(binary(path)) do
       {:ok, target} -> {:ok, List.to_string(target)}
       {:error, reason} -> {:error, reason}
     end
@@ -146,15 +183,33 @@ defmodule Shuttle.RawFS do
   @spec find_executable(binary()) :: binary() | nil
   def find_executable(command) when is_binary(command) do
     if Path.type(command) == :relative do
-      System.get_env("PATH", "") |> String.split(":", trim: true) |> first_executable(command)
+      System.get_env("PATH", "") |> path_entries() |> first_executable(command)
     else
       if executable?(command), do: command
     end
   end
 
+  # An EMPTY `PATH` element means the current directory, both in POSIX and in
+  # `:os.find_executable/1` (`os.erl` rewrites `[]` to `"."`), so `PATH=":/usr/bin"`
+  # searches the cwd first. Splitting with `trim: true` would silently drop it and
+  # make this resolver stricter than the one it replaces — which fails to find
+  # `felt` where the stock one finds it.
+  defp path_entries(path) do
+    path
+    |> String.split(":")
+    |> Enum.map(fn
+      "" -> "."
+      dir -> dir
+    end)
+  end
+
+  # `:filename.join/2` rather than `Path.join/2`: it collapses the repeated and
+  # trailing separators a hand-edited `PATH` carries, so the returned string is
+  # the one `:os.find_executable/1` would have returned rather than merely a path
+  # to the same file.
   defp first_executable(dirs, command) do
     Enum.find_value(dirs, fn dir ->
-      candidate = Path.join(dir, command)
+      candidate = :filename.join(dir, command)
       if executable?(candidate), do: candidate
     end)
   end
@@ -181,5 +236,12 @@ defmodule Shuttle.RawFS do
 
   defp to_stat({:error, reason}), do: {:error, reason}
 
-  defp charlist(path), do: path |> IO.chardata_to_string() |> String.to_charlist()
+  # Paths go to `:prim_file` as BINARIES, never charlists. `String.to_charlist/1`
+  # raises `UnicodeConversionError` on a name that is not valid UTF-8 — a latin-1
+  # filename on Linux — where `File.*` returns an error tuple and lets the caller
+  # decide. These functions are drop-in replacements, so they must fail the way
+  # the thing they replace fails: `Shuttle.FiberDoc.read_path/1` runs on the
+  # Poller process over paths that come from felt's JSON, and a raise there is a
+  # crashed GenServer rather than a logged read error.
+  defp binary(path), do: IO.chardata_to_string(path)
 end
