@@ -125,7 +125,11 @@ defmodule ShuttleWeb.FiberController do
       not is_binary(Map.get(shuttle, "project_dir")) or Map.get(shuttle, "project_dir") == "" ->
         {:error, "shuttle.project_dir is required when status: active"}
 
-      not File.dir?(Path.expand(Map.fetch!(shuttle, "project_dir"))) ->
+      # Bounded: `project_dir` is caller-supplied and routinely a synced folder,
+      # where a first reach on macOS raises a consent dialog and an unbounded
+      # stat waits on a human. A dir we cannot confirm is refused, not accepted —
+      # the caller retries once the path answers.
+      not Shuttle.BoundedIO.dir?(Path.expand(Map.fetch!(shuttle, "project_dir"))) ->
         {:error, "shuttle.project_dir does not exist on this host"}
 
       true ->
