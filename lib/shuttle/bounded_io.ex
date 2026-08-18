@@ -2,28 +2,36 @@ defmodule Shuttle.BoundedIO do
   @moduledoc """
   Run a blocking filesystem call with a deadline, in someone else's process.
 
-  Elixir's `File.*` functions have no timeout. That is fine against a local
-  disk and wrong against the paths this daemon is routinely pointed at: a
-  `project_dir` or a felt store inside iCloud Drive or `~/Library/CloudStorage`
-  is behind macOS's TCC layer, and the first reach into one raises a consent
-  dialog that blocks the calling process until a human clicks it. A bare
-  `File.dir?/1` on such a path, evaluated on the `Shuttle.Poller` process, stops
-  the daemon answering anything — every board read is a `GenServer.call` into
-  that same mailbox.
+  Filesystem calls have no timeout. That is fine against a local disk and wrong
+  against the paths this daemon is routinely pointed at: a `project_dir` or a
+  felt store inside iCloud Drive or `~/Library/CloudStorage` is behind macOS's
+  TCC layer, and the first reach into one raises a consent dialog that blocks
+  the calling process until a human clicks it. A bare `File.dir?/1` on such a
+  path, evaluated on the `Shuttle.Poller` process, stops the daemon answering
+  anything — every board read is a `GenServer.call` into that same mailbox.
 
   `run/3` moves the call onto a throwaway task and gives the caller a deadline.
   Past it the caller gets `default` and carries on.
+
+  **The task must do its filesystem work raw** — `Shuttle.RawFS`, not `File.*`.
+  A `File.*` call from inside the task still executes on the shared OTP file
+  server, so the deadline would release this caller while every other filesystem
+  call in the VM queued behind the same wedged probe: isolation in name only.
+  `dir?/2` below is raw for that reason.
 
   ## What this does and does not buy
 
   It bounds the **caller**, not the operating system. A task parked in a
   blocking filesystem call cannot be killed out of it — `exit(:kill)` is
   recorded but the process only dies once the kernel returns — and while it
-  waits it holds one of the VM's async I/O threads. So an abandoned task is
-  genuinely abandoned: `run/3` does not try to shut it down, it demonitors and
-  walks away. Call this at the same cadence you would have made the bare call
-  at, never in a retry loop: the point is that a stalled path degrades one
-  decision, not that the daemon can poll a stalled path for free.
+  waits it holds one of the VM's ten dirty IO schedulers. So an abandoned task
+  is genuinely abandoned: `run/3` does not try to shut it down, it demonitors
+  and walks away, and the scheduler it is sitting on stays occupied until the
+  kernel returns. Call this at the same cadence you would have made the bare
+  call at, never in a retry loop: ten simultaneously parked probes is the whole
+  budget, and the tenth wedges every filesystem call in the VM (measured — see
+  `Shuttle.RawFS`). The point is that a stalled path degrades one decision, not
+  that the daemon can poll a stalled path for free.
 
   The default is therefore the answer to "what should we believe while the
   world is not answering?" — for an availability check, `false`: we cannot see
@@ -93,16 +101,16 @@ defmodule Shuttle.BoundedIO do
   end
 
   @doc """
-  `File.dir?/1` under a deadline. Returns `false` when the path does not answer
-  in time — "we cannot see it" and "it is not there" lead to the same decision
+  `Shuttle.RawFS.dir?/1` under a deadline. Returns `false` when the path does
+  not answer in time — "we cannot see it" and "it is not there" lead to the same decision
   here, and both are safer than dispatching a worker into a directory we could
   not confirm.
   """
   @spec dir?(Path.t(), non_neg_integer()) :: boolean()
   def dir?(path, timeout_ms \\ @default_timeout_ms) do
-    run(fn -> File.dir?(path) end, timeout_ms,
+    run(fn -> Shuttle.RawFS.dir?(path) end, timeout_ms,
       default: false,
-      label: "File.dir?(#{path})"
+      label: "dir?(#{path})"
     )
   end
 end

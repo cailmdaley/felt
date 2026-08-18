@@ -65,7 +65,7 @@ defmodule ShuttleWeb.AstraController do
       not Shuttle.BoundedIO.dir?(path) ->
         conn |> put_status(404) |> json(%{error: "project dir not found"})
 
-      not File.regular?(Path.join(path, "astra.yaml")) ->
+      not Shuttle.RawFS.regular?(Path.join(path, "astra.yaml")) ->
         conn |> put_status(404) |> json(%{error: "no astra.yaml in project dir"})
 
       true ->
