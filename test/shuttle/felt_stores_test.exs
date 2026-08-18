@@ -2,6 +2,7 @@ defmodule Shuttle.FeltStoresTest do
   use ExUnit.Case, async: false
 
   alias Shuttle.FeltStores
+  alias Shuttle.FeltStores.ScanRoster
 
   setup do
     prev = System.get_env("FELT_STORES")
@@ -285,7 +286,7 @@ defmodule Shuttle.FeltStoresTest do
     setup do
       on_exit(fn ->
         Application.delete_env(:shuttle, :store_scan_wait_ms)
-        :persistent_term.erase({Shuttle.FeltStores, :expansion_scans})
+        :ets.delete_all_objects(:shuttle_felt_store_scans)
       end)
 
       :ok
@@ -331,10 +332,7 @@ defmodule Shuttle.FeltStoresTest do
       parked = spawn(fn -> Process.sleep(:infinity) end)
       on_exit(fn -> Process.exit(parked, :kill) end)
 
-      :persistent_term.put(
-        {Shuttle.FeltStores, :expansion_scans},
-        [{parked, FeltStores.configured_base_hosts(), System.monotonic_time(:millisecond)}]
-      )
+      assert :ok = ScanRoster.claim(FeltStores.configured_base_hosts(), parked, 99)
 
       Application.put_env(:shuttle, :store_scan_wait_ms, 50)
 
@@ -388,10 +386,8 @@ defmodule Shuttle.FeltStoresTest do
       parked = for _ <- 1..3, do: spawn(fn -> Process.sleep(:infinity) end)
       on_exit(fn -> Enum.each(parked, &Process.exit(&1, :kill)) end)
 
-      now = System.monotonic_time(:millisecond)
-      roster = for {pid, i} <- Enum.with_index(parked), do: {pid, ["/other/store#{i}"], now}
-      :persistent_term.put({Shuttle.FeltStores, :expansion_scans}, roster)
-      on_exit(fn -> :persistent_term.erase({Shuttle.FeltStores, :expansion_scans}) end)
+      for {pid, i} <- Enum.with_index(parked),
+          do: assert(:ok = ScanRoster.claim(["/other/store#{i}"], pid, 99))
 
       Application.put_env(:shuttle, :store_scan_wait_ms, 100)
 
@@ -420,14 +416,11 @@ defmodule Shuttle.FeltStoresTest do
       scanners = for _ <- 1..4, do: spawn(fn -> Process.sleep(:infinity) end)
       on_exit(fn -> Enum.each(scanners, &Process.exit(&1, :kill)) end)
       [mine | others] = scanners
-      now = System.monotonic_time(:millisecond)
 
-      roster =
-        [{mine, FeltStores.configured_base_hosts(), now}] ++
-          for({pid, i} <- Enum.with_index(others), do: {pid, ["/other/store#{i}"], now})
+      assert :ok = ScanRoster.claim(FeltStores.configured_base_hosts(), mine, 99)
 
-      :persistent_term.put({Shuttle.FeltStores, :expansion_scans}, roster)
-      on_exit(fn -> :persistent_term.erase({Shuttle.FeltStores, :expansion_scans}) end)
+      for {pid, i} <- Enum.with_index(others),
+          do: assert(:ok = ScanRoster.claim(["/other/store#{i}"], pid, 99))
 
       Application.put_env(:shuttle, :store_scan_wait_ms, 300)
 
@@ -435,6 +428,54 @@ defmodule Shuttle.FeltStoresTest do
 
       assert hosts == [Path.expand(loom)]
       assert div(elapsed_us, 1000) >= 300
+    end
+
+    test "a burst of readers on one store list starts exactly one scan" do
+      loom = tmp_dir()
+      felt = Path.join(loom, ".felt")
+      File.mkdir_p!(felt)
+      # Enough directories that the walk takes long enough for the burst to
+      # overlap it — the failure being pinned is a race, so the window has to be
+      # wide enough to lose.
+      for i <- 1..300, do: File.mkdir_p!(Path.join([felt, "fiber-#{i}", "sub"]))
+      System.put_env("FELT_STORES", loom)
+      :persistent_term.erase({Shuttle.FeltStores, :expanded_hosts})
+
+      # Twenty readers at once is a board load, not a synthetic burst: every tab
+      # switch fires several API calls, and each one reaches `configured_hosts/0`.
+      # Claiming a scan therefore has to be ATOMIC — a read-modify-write over a
+      # shared list decides from a stale read, and every reader spawns its own
+      # walk. On a store parked behind a consent dialog that is twenty blocked
+      # calls against the VM's ten dirty IO schedulers: the dead node this whole
+      # design exists to avoid.
+      # Released from a barrier rather than spawned in a loop: spawning twenty
+      # tasks takes long enough that the first walk can finish before the last
+      # task starts, which would let a broken claim pass.
+      me = self()
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          readers =
+            for _ <- 1..20 do
+              Task.async(fn ->
+                send(me, {:ready, self()})
+
+                receive do
+                  :go -> FeltStores.configured_hosts()
+                end
+              end)
+            end
+
+          for _ <- readers, do: assert_receive({:ready, _}, 2_000)
+          for reader <- readers, do: send(reader.pid, :go)
+          Task.await_many(readers, 5_000)
+
+          # Let a late-finishing scan log before the capture stops.
+          Process.sleep(200)
+        end)
+
+      scans = log |> String.split("felt-store scan took") |> length() |> Kernel.-(1)
+      assert scans == 1, "expected one scan for one store list, saw #{scans}"
     end
 
     test "a refused probe costs the caller nothing, rather than its whole deadline" do
@@ -451,10 +492,8 @@ defmodule Shuttle.FeltStoresTest do
       parked = for _ <- 1..3, do: spawn(fn -> Process.sleep(:infinity) end)
       on_exit(fn -> Enum.each(parked, &Process.exit(&1, :kill)) end)
 
-      now = System.monotonic_time(:millisecond)
-      roster = for {pid, i} <- Enum.with_index(parked), do: {pid, ["/other/store#{i}"], now}
-      :persistent_term.put({Shuttle.FeltStores, :expansion_scans}, roster)
-      on_exit(fn -> :persistent_term.erase({Shuttle.FeltStores, :expansion_scans}) end)
+      for {pid, i} <- Enum.with_index(parked),
+          do: assert(:ok = ScanRoster.claim(["/other/store#{i}"], pid, 99))
 
       Application.put_env(:shuttle, :store_scan_wait_ms, 2_000)
 
