@@ -85,8 +85,9 @@ defmodule Shuttle.FeltStores do
       deadline the *unexpanded* base list is served: correct, just missing
       symlinked substores, and self-healing the moment the scan lands.
 
-  The scan is single-flight (`@scan_lock_key`), so a stalled store yields one
-  blocked task rather than one per request.
+  The scan is single-flight *per base*, so a stalled store yields one blocked
+  task rather than one per request — while a caller whose store list differs
+  can still get its own scan started rather than waiting out the stall.
   """
   @spec configured_hosts() :: host_list()
   def configured_hosts do
