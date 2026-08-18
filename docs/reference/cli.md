@@ -30,6 +30,7 @@ Every command accepts these global flags:
 | Command | Purpose |
 |---|---|
 | `felt ls [query]` | List and search fibers (`-t` tag, `-s` status, `-n` recent N, `-r` regex, `-e` exact, `--body`, `--has-field`, `--json-field`; a query or tag filter searches every status but closed, counting closed matches in a trailing hint; matches under a matching ancestor collapse into it, `-v` expands) |
+| `felt find [query]` | Search the whole store, not just this view — local hits first under their local ids, then the rest of the enclosing store under a separator naming it, each by its full id there (those ids work as arguments to `show`, `edit`, `rm`, `shuttle`). Takes `ls`'s matching and filters (`-t`, `-s`, `-r`, `-e`, `--body`, `-v`, `--limit`, `-j`) |
 | `felt session` | Print the SessionStart context as plain text |
 | `felt tree [id]` | Show the containment tree (`-L`/`--depth` caps depth; elided branches show how much is below) |
 
