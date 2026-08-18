@@ -63,8 +63,17 @@ the daemon beside it:
 curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh | SHUTTLE=1 sh
 ```
 
-The daemon lands in `~/.local/share/shuttle` — override with `SHUTTLE_HOME` —
-and its front door is `$SHUTTLE_HOME/bin/shuttle`:
+!!! warning "Environment variables go after the pipe"
+    `SHUTTLE=1` sets the environment of `sh`, which is what reads the script.
+    Written the other way round — `SHUTTLE=1 curl … | sh` — it sets `curl`'s
+    environment instead, the script never sees it, and you get a CLI install
+    and no daemon, reported as success. The same holds for `FELT_VERSION` and
+    `SHUTTLE_HOME`.
+
+The CLI lands where it always does: `/usr/local/bin` if that is writable, else
+`~/.local/bin`, overridable with `FELT_INSTALL_DIR`. The daemon lands in
+`~/.local/share/shuttle` — override with `SHUTTLE_HOME` — and its front door is
+`$SHUTTLE_HOME/bin/shuttle`:
 
 ```bash
 FELT_STORES=~/dev/myproject ~/.local/share/shuttle/bin/shuttle start
@@ -75,12 +84,12 @@ covers handing it to a supervisor.
 
 What you downloaded is a Mix release: the daemon's compiled modules, the Erlang
 runtime they run on, and the board bundle, in one directory tree. It reads
-nothing from the host's toolchain, which is why this path asks for no Elixir.
-The bundled runtime is also what makes the tarball platform-specific — compiled
-BEAM modules and the runtime itself both target one OS, architecture and OTP
-version — so CI builds each tarball on a native runner instead of
-cross-compiling one. Four ship with every release:
-`shuttle_{Linux,Darwin}_{x86_64,arm64}.tar.gz`.
+nothing from the host's toolchain, which is why this path asks for no Elixir
+and no Node. The bundled runtime is also what makes the tarball
+platform-specific — compiled BEAM modules and the runtime itself both target
+one OS, architecture and OTP version — so CI builds each tarball on a native
+runner instead of cross-compiling one, and boot-tests it there before attaching
+it. The matrix covers four: `shuttle_{Linux,Darwin}_{x86_64,arm64}.tar.gz`.
 
 Upgrade by running the same command again. It deletes `$SHUTTLE_HOME` and
 unpacks the new tarball in its place, so keep nothing of your own in there. The
@@ -90,6 +99,45 @@ What the tarball does not carry is the repo's operator surface: the `make`
 targets, the keep-alive templates `make install-agent` renders, and
 `bin/shuttle-deploy`. You can still supervise a fetched daemon — see
 [Keep-alive](#keep-alive) for what a job needs — but you write the job yourself.
+
+### Release candidates
+
+A tag with a prerelease segment — `v1.1.0-rc.1` — publishes as a GitHub
+*prerelease*: the same build, the same assets, flagged. Nothing routes to it.
+The install script and `felt update` both resolve a version through GitHub's
+`releases/latest` API, and that endpoint answers with the newest release that is
+*not* a prerelease, so a candidate is invisible to both. The Homebrew tap skips
+prereleases for the same reason from the other side: a tap has no channel
+concept, so bumping the formula would hand every `brew upgrade felt` user a
+candidate.
+
+Pinning `FELT_VERSION` is the way in. It skips the `releases/latest` lookup and
+fetches that exact tag — the CLI and the daemon together, both stamped with it:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh \
+  | FELT_VERSION=1.1.0-rc.1 SHUTTLE=1 sh
+```
+
+Both variables sit after the pipe, for the reason above, and this is the case
+where getting it wrong hurts most: an install that silently drops
+`FELT_VERSION` hands you the latest stable while reporting success. The tag is
+accepted with or without its leading `v`. If it publishes no daemon tarball for
+your platform, the install fails naming the tag and the asset it looked for
+rather than leaving a bare `curl` error.
+
+A fetched daemon reports the tag it was built from, so you can check what you
+are actually running:
+
+```bash
+curl -s http://127.0.0.1:4000/api/v1/version    # mix_vsn is the release tag
+```
+
+To leave a candidate behind, `felt update` takes the CLI back to the latest
+stable: it compares your version against `releases/latest` and swaps whenever
+the two differ, so a candidate reads as out of date and updates *downward*. The
+daemon has no self-update — run the install line again without `FELT_VERSION`
+and the stable tarball replaces `$SHUTTLE_HOME`.
 
 ## Build from a checkout
 

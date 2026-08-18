@@ -108,9 +108,26 @@ if [ "${SHUTTLE:-0}" = "1" ]; then
   mkdir -p "$(dirname "$SHUTTLE_HOME")"
   mv "$TMPDIR/shuttle" "$SHUTTLE_HOME"
 
+  # Remote revival over SSH runs `$HOME/.local/bin/shuttle-launch` verbatim
+  # (lib/shuttle/remote_registry.ex) — a hardcoded path only bootstrap.sh used
+  # to populate. Without this, a fetched host is supervisable locally but a hub
+  # cannot bring it back after a death, which is the one recovery step that has
+  # no human in it.
+  if [ -x "${SHUTTLE_HOME}/bin/shuttle-launch" ]; then
+    mkdir -p "${HOME}/.local/bin"
+    cp "${SHUTTLE_HOME}/bin/shuttle-launch" "${HOME}/.local/bin/shuttle-launch"
+    chmod +x "${HOME}/.local/bin/shuttle-launch"
+  fi
+
   echo "Shuttle daemon ${TAG} installed."
   echo "  Start it:   FELT_STORES=<your-store> ${SHUTTLE_HOME}/bin/shuttle start"
-  echo "  Keep-alive: see https://cailmdaley.github.io/felt/shuttle/installation/"
+  # The tarball carries its own supervisor templates (share/) and the shim
+  # renders + loads them, so a fetched install can survive a logout without a
+  # checkout or a Makefile. Name the command here: it is the only place this
+  # installer's user learns the verb exists.
+  echo "  Keep-alive: ${SHUTTLE_HOME}/bin/shuttle install-agent --felt-stores <your-store>"
+  echo "              (launchd on macOS, systemd --user on Linux; see"
+  echo "               https://cailmdaley.github.io/felt/shuttle/installation/)"
 fi
 
 # Wire up agent plugins for any detected agent CLI. The plugins are core

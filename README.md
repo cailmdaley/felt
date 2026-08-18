@@ -100,9 +100,14 @@ The daemon installs the way the CLI does:
 curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh | SHUTTLE=1 sh
 ```
 
-The build it fetches bundles its own Erlang runtime, so running the daemon needs no Erlang,
-Elixir or Node — only tmux and `felt` on `PATH`. Building from a checkout stays the path for
-changing daemon code and for the fleet. felt works without the daemon either way. See
+Note where `SHUTTLE=1` sits — after the pipe, on `sh`. In front of `curl` it sets curl's
+environment, the script never sees it, and you get the CLI and no daemon.
+
+What lands in `~/.local/share/shuttle` is a prebuilt daemon for your platform, carrying its own
+Erlang runtime and the board bundle, so running the daemon needs no Erlang, Elixir or Node — only
+tmux and `felt` on `PATH`. `FELT_VERSION` pins an exact tag, which is the only way to install a
+release candidate: prereleases stay invisible to the plain line. Building from a checkout stays the
+path for changing daemon code and for the fleet. felt works without the daemon either way. See
 [Installation](https://cailmdaley.github.io/felt/shuttle/installation/) and
 [Honest scoping](https://cailmdaley.github.io/felt/shuttle/#honest-scoping).
 

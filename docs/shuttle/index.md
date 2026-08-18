@@ -111,12 +111,13 @@ rebuilds on every host in the fleet file, and rsyncs `ui/dist` out from the
 machine you run it on, because a cluster login node is not expected to have
 Node. Each of those hosts is a checkout.
 
-Everything else that used to sit in this list is closed. The daemon now ships a
-release artifact per platform, so running it needs no Erlang, Elixir or Node. A
-Linux machine can be a hub as well as a remote — `felt shuttle tunnels install`
-writes systemd user units there and launchd jobs on macOS. The commit ledger
-has a shipped writer, so the Chronicle narrates without a hand-installed hook.
-The examples name no particular store.
+Everything else that used to sit in this list is closed. The release pipeline
+builds a daemon tarball per platform — Linux and macOS, x86_64 and arm64 — each
+carrying its own Erlang runtime and the board bundle, so running the daemon
+needs no Erlang, Elixir or Node. A Linux machine can be a hub as well as a
+remote — `felt shuttle tunnels install` writes systemd user units there and
+launchd jobs on macOS. The commit ledger has a shipped writer, so the Chronicle
+narrates without a hand-installed hook. The examples name no particular store.
 
 ## Next
 

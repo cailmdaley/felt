@@ -239,6 +239,13 @@ curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh | S
 FELT_STORES=$PWD ~/.local/share/shuttle/bin/shuttle start
 ```
 
+`SHUTTLE=1` goes after the pipe, where it sets the environment of `sh`. In front
+of `curl` it sets curl's, the script never sees it, and you get the CLI again
+and no daemon. What the script unpacks into `~/.local/share/shuttle` is a
+prebuilt daemon carrying its own Erlang runtime and the board bundle, so this
+adds no toolchain to your machine — it wants `tmux` and the `felt` you just
+installed, and nothing else.
+
 [Installing the Shuttle daemon](shuttle/installation.md) covers the rest,
 including how to keep it running.
 

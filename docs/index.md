@@ -78,10 +78,17 @@ views for seeing where the time went. Workers hand off to each other through
 the fiber, so a piece of work can span many sessions.
 
 Shuttle stays the more experimental half, and it runs the author's machines
-every day. The daemon installs the way the CLI does — `SHUTTLE=1` on the
-install script above fetches a build that bundles its own Erlang runtime, so
-the host needs no toolchain to run it. What is still rough is operating it: see
-[Honest scoping](shuttle/index.md#honest-scoping). Ignore Shuttle and felt
+every day. The daemon installs the way the CLI does:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh | SHUTTLE=1 sh
+```
+
+That fetches a prebuilt daemon for your platform, carrying its own Erlang
+runtime and the board bundle, so the host needs no toolchain to run it. (The
+variable goes after the pipe, on `sh`. In front of `curl` it sets curl's
+environment and the script never sees it.) What is still rough is operating it:
+see [Honest scoping](shuttle/index.md#honest-scoping). Ignore Shuttle and felt
 behaves the same.
 
 ## Where to go next

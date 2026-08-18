@@ -45,7 +45,11 @@ jobs:
             artifact: shuttle_Linux_x86_64.tar.gz
           - os: ubuntu-24.04-arm
             artifact: shuttle_Linux_arm64.tar.gz
-          - os: macos-13
+          # Intel macOS is macos-15-intel now. macos-13 was retired: a job
+          # targeting it does not fail, it queues forever against a label with
+          # no runners (observed on v1.1.0-rc.1 — 50 minutes, no runner, while
+          # every other platform finished in about a minute).
+          - os: macos-15-intel
             artifact: shuttle_Darwin_x86_64.tar.gz
           - os: macos-14
             artifact: shuttle_Darwin_arm64.tar.gz

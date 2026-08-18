@@ -48,7 +48,7 @@ defmodule Shuttle.MixProject do
   # per-platform in CI (`shuttle_<Os>_<arch>.tar.gz`) and by `make daemon`
   # locally (→ bin/rel). The release launcher is `bin/shuttled`; the stable
   # front door is the tracked `bin/shuttle` shim, copied into every release by
-  # the :copy_cli_shim step so tarball and checkout expose the same verbs.
+  # the :copy_support_files step so tarball and checkout expose the same verbs.
   # A release always starts the OTP application — the old escript's
   # bare-BEAM read verbs live in the shim as HTTP calls to the daemon.
   defp releases do
@@ -57,16 +57,43 @@ defmodule Shuttle.MixProject do
         applications: [shuttle: :permanent],
         include_executables_for: [:unix],
         strip_beams: true,
-        steps: [:assemble, &copy_cli_shim/1]
+        steps: [:assemble, &copy_support_files/1]
       ]
     ]
   end
 
-  defp copy_cli_shim(release) do
-    src = Path.expand("bin/shuttle", __DIR__)
-    dst = Path.join([release.path, "bin", "shuttle"])
-    File.cp!(src, dst)
-    File.chmod!(dst, 0o755)
+  # Everything a release needs that Mix does not put there itself. Three
+  # tracked files, copied — never forked — so a fetched tarball and a checkout
+  # answer the same verbs from the same source:
+  #
+  #   bin/shuttle        the front-door shim (start / snapshot / install-agent …)
+  #   bin/shuttle-launch the tmux respawn loop, the only durable keep-alive on
+  #                      a host with no systemd user session (an HPC login
+  #                      node); `shuttle install-agent` points at it when the
+  #                      systemd probe fails, and it resolves its root from its
+  #                      own directory, so it works unmodified in a release tree
+  #   share/*.template   the launchd plist / systemd unit that
+  #                      `shuttle install-agent` renders
+  #
+  # Not `:overlays`: overlays copy the *contents* of a directory to the release
+  # root, so shipping share/ that way would either flatten the templates into
+  # the root or require a second copy of them under rel/overlays/share — two
+  # files to keep in sync, which is exactly what a supervisor template must
+  # never be.
+  defp copy_support_files(release) do
+    for name <- ["shuttle", "shuttle-launch"] do
+      dst = Path.join([release.path, "bin", name])
+      File.cp!(Path.expand("bin/#{name}", __DIR__), dst)
+      File.chmod!(dst, 0o755)
+    end
+
+    share = Path.join(release.path, "share")
+    File.mkdir_p!(share)
+
+    for src <- Path.wildcard(Path.expand("share/*.template", __DIR__)) do
+      File.cp!(src, Path.join(share, Path.basename(src)))
+    end
+
     release
   end
 

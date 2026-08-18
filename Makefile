@@ -50,43 +50,23 @@ endif
 # boot script identifies the daemon beam without matching the bin/shuttle shim
 # (a short-lived /bin/sh) or pgrep's own shell command (`[r]el`).
 PIDPATTERN := [b]in/rel/releases/.*/start
-AGENT_LABEL := io.shuttle.daemon
-AGENT_PLIST := $(HOME)/Library/LaunchAgents/$(AGENT_LABEL).plist
-# The Linux analog: a systemd *user* unit. Named for the tmux session the
-# respawn loop uses, so one name means "the supervised daemon" on either path.
-AGENT_UNIT_NAME := shuttle-daemon.service
-AGENT_UNIT_DIR := $(HOME)/.config/systemd/user
-AGENT_UNIT := $(AGENT_UNIT_DIR)/$(AGENT_UNIT_NAME)
-# Felt stores the supervised daemon polls. No default: pass your own, e.g.
-#   make install-agent AGENT_FELT_STORES=~/my-store,/some/other
-# Prefer stores outside ~/Documents / ~/Desktop / ~/Downloads so the agent
-# touches no TCC-protected path and needs no Full Disk Access.
+# Keep-alive knobs, all optional and all owned by `bin/shuttle install-agent`
+# — the labels, unit/plist paths, the login-shell PATH capture and the per-OS
+# ssh-agent default live there so a fetched tarball (no Makefile) installs the
+# same supervisor these targets do. Set one here only to override the shim.
+#
+# AGENT_FELT_STORES — comma-separated felt stores the supervised daemon polls.
+#   Required; the shim refuses to install a daemon that polls nothing.
+#     make install-agent AGENT_FELT_STORES=~/my-store,/some/other
+#   Prefer stores outside ~/Documents / ~/Desktop / ~/Downloads so the agent
+#   touches no TCC-protected path and needs no Full Disk Access.
+# AGENT_PATH — the PATH baked into the supervisor. Empty (the default) means
+#   the shim captures the real login PATH at install time.
+# AGENT_SSH_AUTH_SOCK — the persistent ssh-agent socket to bake in. Passed
+#   through ONLY when you define it (even to empty), so the shim's per-OS
+#   default stands otherwise: ~/.ssh/agent.sock on macOS, empty on Linux.
 AGENT_FELT_STORES ?=
-# The daemon's PATH, captured from a login shell at install time so it carries
-# ~/.local/bin (felt) and whatever else the user's real environment has. The
-# release bundles its own ERTS, so booting needs nothing on PATH — but every
-# store walk shells out to `felt`, and launchd's own env is too bare to hold it.
-# Sourcing the profile at runtime under launchd doesn't reconstruct it either.
-# This is the user's real PATH, frozen.
-AGENT_PATH ?= $(shell /bin/bash -lc 'echo $$PATH')
-# The user's PERSISTENT ssh-agent socket. launchd hands the daemon a bare
-# per-session Keychain agent that only holds the default key, so remote creds
-# added to the real agent — e.g. a remote host's step-ca SSH cert — are invisible
-# and fresh ssh to that host fails (dead remote feed; Attach tabs that open and die).
-# ~/.ssh/agent.sock is the stable login-agent path on macOS; override if yours
-# differs. Linux has no canonical path, and the ambient $SSH_AUTH_SOCK isn't a
-# usable default either — it's a per-session socket under /tmp/ssh-*/, dead
-# the moment this login session ends, which defeats enable-linger (the daemon
-# would outlive the socket it was pointed at). So Linux defaults to empty,
-# which drops the setting from the rendered unit rather than baking in a
-# socket that's already dead by the time it matters. Set AGENT_SSH_AUTH_SOCK
-# explicitly for a persistent socket — e.g. gpg-agent's ssh support, or a
-# systemd ssh-agent unit.
-ifeq ($(UNAME_S),Darwin)
-AGENT_SSH_AUTH_SOCK ?= $(HOME)/.ssh/agent.sock
-else
-AGENT_SSH_AUTH_SOCK ?=
-endif
+AGENT_PATH ?=
 
 .PHONY: build cli cli-install daemon test go-test mix-test js-test plugin-hooks-test \
         all start stop restart \
@@ -238,93 +218,34 @@ install:
 
 # ── Durable launch (launchd on macOS / systemd user unit on Linux) ────────
 # Shuttle's own keep-alive, independent of any other process: restart the
-# daemon on crash, start it at login/boot. One target, two supervisors —
-# `uname -s` picks the branch, and the two templates in share/ carry the same
-# environment capture (PATH, FELT_STORES, SSH_AUTH_SOCK) for the same reasons.
-# The release is built first so the supervisor has a daemon to run. On Linux
-# the systemd-availability probe runs BEFORE anything is stopped — `make stop`
-# is invoked from inside the recipe only after the probe passes, so a
-# no-systemd host fails loudly without having killed a daemon it can no
-# longer hand off to a supervisor (`stop` is deliberately NOT a prerequisite;
-# prerequisites run before the recipe body, which would stop the daemon even
-# when the probe is about to reject the host). On macOS `stop` stays a
-# prerequisite — always safe there, since a launchd keep-alive is what handles
-# the "no durable supervisor" case.
-ifeq ($(UNAME_S),Darwin)
-install-agent: daemon stop
-else
+# daemon on crash, start it at login/boot.
+#
+# The implementation lives in `bin/shuttle install-agent`, not here, because a
+# fetched tarball has no Makefile and still has to be able to install a
+# supervisor. The shim renders the same two templates in share/ (which ship
+# inside the release too — see mix.exs's :copy_support_files), resolves
+# __SHUTTLE_DIR__ from its own location rather than $(CURDIR), and owns the
+# per-OS branching, the systemd probe, the tmux-loop retirement and the stop.
+# These targets are a build step plus a pass-through of the AGENT_* knobs, so
+# the checkout workflow (bootstrap.sh calls `make install-agent`) is unchanged
+# and there is exactly one renderer.
+#
+# AGENT_LOG is passed rather than left to the shim's (identical) per-OS
+# default, so `make logs` and the installed supervisor can never disagree.
+#
+# The release is built first so the supervisor has a daemon to run; `stop` is
+# NOT a prerequisite, because on Linux the shim probes for systemd before
+# killing anything — a no-systemd host must fail loudly with its daemon still
+# running.
 install-agent: daemon
-endif
-	@test -n "$(AGENT_FELT_STORES)" || { \
-	  echo "AGENT_FELT_STORES is required (comma-separated felt stores the daemon polls):"; \
-	  echo "  make install-agent AGENT_FELT_STORES=~/my-store"; \
-	  exit 1; }
-	@mkdir -p $(dir $(LOG))
-ifneq ($(UNAME_S),Darwin)
-	@# systemd --user is the Linux durable surface, but plenty of Linux hosts
-	@# don't have one — an HPC login node often has no user manager reachable
-	@# over ssh, and a container may have no systemd at all. Probe BEFORE
-	@# stopping anything: say so and point at the two working alternatives
-	@# rather than writing a unit nothing will read, or killing a daemon the
-	@# host has no supervisor to bring back.
-	@systemctl --user show-environment >/dev/null 2>&1 || { \
-	  echo "no systemd user session here (systemctl --user is unavailable or not reachable)."; \
-	  echo "Durable alternative — the tmux respawn loop bootstrap.sh installs:"; \
-	  echo "  SHUTTLE_DIR=$(CURDIR) bin/shuttle-launch"; \
-	  echo "Or run the daemon without a supervisor:"; \
-	  echo "  make start        # nohup, logs → $(LOG)"; \
-	  exit 1; }
-	@# The respawn loop and the unit would both bind :4000. The loop wins any
-	@# race (it restarts what `make stop` killed), so retire it before handing
-	@# the daemon to systemd. Sequential, matching bin/shuttle-launch's own
-	@# legacy-socket sweep. `make stop` runs here, after the probe passed, so
-	@# the daemon is only ever killed once we know systemd can take it back.
-	@tmux -S $(HOME)/.shuttle/tmux.sock kill-session -t shuttle-daemon 2>/dev/null || true
-	@tmux kill-session -t shuttle-daemon 2>/dev/null || true
-	@$(MAKE) --no-print-directory stop
-	@mkdir -p $(AGENT_UNIT_DIR)
-	@sed -e 's#__SHUTTLE_DIR__#$(CURDIR)#g' -e 's#__LOG__#$(LOG)#g' \
-	  -e 's#__FELT_STORES__#$(AGENT_FELT_STORES)#g' -e 's#__PATH__#$(AGENT_PATH)#g' \
-	  -e 's#__SSH_AUTH_SOCK__#$(AGENT_SSH_AUTH_SOCK)#g' \
-	  share/io.shuttle.daemon.service.template \
-	  | sed -e '/^Environment=SSH_AUTH_SOCK=$$/d' > $(AGENT_UNIT)
-	@systemctl --user daemon-reload
-	@systemctl --user enable --now $(AGENT_UNIT_NAME)
-	@echo "enabled $(AGENT_UNIT_NAME) → daemon restarts on crash + starts at login"
-	@echo "logs → $(LOG)   (systemctl --user status $(AGENT_UNIT_NAME)  to inspect)"
-	@echo "run 'loginctl enable-linger $$(id -un)' so it survives logout and starts at boot"
-else
-	@case "$(CURDIR)" in \
-	  $(HOME)/Documents/*|$(HOME)/Desktop/*|$(HOME)/Downloads/*) \
-	    echo "⚠️  $(CURDIR) is under a TCC-protected folder (~/Documents, ~/Desktop,"; \
-	    echo "    ~/Downloads). launchd-spawned processes are blocked from these, and"; \
-	    echo "    Full Disk Access does NOT inherit across the launchd process tree —"; \
-	    echo "    so the daemon will crash-loop or silently fail its felt-store walks."; \
-	    echo "    Fix: run from a checkout OUTSIDE these folders (e.g. ~/src/felt)."; \
-	    echo "    Installing the agent anyway, but it will not work from here." ;; \
-	esac
-	@mkdir -p $(HOME)/Library/LaunchAgents
-	@sed -e 's#__SHUTTLE_DIR__#$(CURDIR)#g' -e 's#__LOG__#$(LOG)#g' \
-	  -e 's#__FELT_STORES__#$(AGENT_FELT_STORES)#g' -e 's#__PATH__#$(AGENT_PATH)#g' \
-	  -e 's#__SSH_AUTH_SOCK__#$(AGENT_SSH_AUTH_SOCK)#g' \
-	  share/io.shuttle.daemon.plist.template > $(AGENT_PLIST)
-	@launchctl unload $(AGENT_PLIST) 2>/dev/null || true
-	@launchctl load $(AGENT_PLIST)
-	@echo "loaded $(AGENT_LABEL) → daemon will keep-alive + start at login"
-	@echo "logs → $(LOG)   (launchctl list | grep shuttle  to inspect)"
-endif
+	@AGENT_FELT_STORES='$(AGENT_FELT_STORES)' \
+	 AGENT_PATH='$(AGENT_PATH)' \
+	 AGENT_LOG='$(LOG)' \
+	 $(if $(filter undefined,$(origin AGENT_SSH_AUTH_SOCK)),,AGENT_SSH_AUTH_SOCK='$(AGENT_SSH_AUTH_SOCK)') \
+	 bin/shuttle install-agent
 
 uninstall-agent:
-ifneq ($(UNAME_S),Darwin)
-	@systemctl --user disable --now $(AGENT_UNIT_NAME) 2>/dev/null || true
-	@rm -f $(AGENT_UNIT)
-	@systemctl --user daemon-reload 2>/dev/null || true
-	@echo "disabled + removed $(AGENT_UNIT_NAME)"
-else
-	@launchctl unload $(AGENT_PLIST) 2>/dev/null || true
-	@rm -f $(AGENT_PLIST)
-	@echo "unloaded + removed $(AGENT_LABEL)"
-endif
+	@bin/shuttle uninstall-agent
 
 logs:
 	@tail -f $(LOG)
