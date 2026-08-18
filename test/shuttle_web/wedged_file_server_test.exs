@@ -54,14 +54,18 @@ defmodule ShuttleWeb.WedgedFileServerTest do
 
     blocker = spawn(fn -> File.read(ctx.fifo) end)
 
-    # Opening the FIFO for writing lets the parked `open(2)` return. Only ever
-    # while the reader is still parked: an open-for-write with no reader blocks
-    # identically, so an unconditional cleanup would hang the suite.
+    # Opening the FIFO lets the parked `open(2)` return. READ-WRITE on purpose:
+    # an open-for-write with no reader blocks exactly as the reader does, so a
+    # cleanup guarded by `Process.alive?(blocker)` would be a race — the blocker
+    # outlives its own release by a few hundred microseconds, and losing that
+    # race parks the on_exit runner in a raw `open(2)` for the rest of the suite,
+    # skipping every later callback. Read-write never blocks, so release can be
+    # unconditional and idempotent.
     release = fn ->
-      with {:ok, io} <- :file.open(ctx.fifo, [:write, :raw]), do: :file.close(io)
+      with {:ok, io} <- :file.open(ctx.fifo, [:read, :write, :raw]), do: :file.close(io)
     end
 
-    on_exit(fn -> if Process.alive?(blocker), do: release.() end)
+    on_exit(release)
 
     # The negative control, and the proof the wedge took.
     wedged = Task.async(fn -> File.dir?("/tmp") end)

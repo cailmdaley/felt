@@ -169,7 +169,16 @@ defmodule ShuttleWeb.FiberController do
   # `init` ignores `-C` for placement and writes `.felt/` at its working
   # directory, so we drive it with `cd:` rather than `-C`.
   defp ensure_felt_repo(root) do
-    File.mkdir_p!(root)
+    # Raw (`Shuttle.RawFS`) here and in the read/write pair below: `root` is a
+    # felt store or a `project_dir`, the one kind of path that stalls, and a
+    # `File.*` call that blocks on it holds the shared OTP file server — taking
+    # every filesystem call in the daemon with it, on healthy stores included.
+    # Creating a fiber must not be able to take the board down. See
+    # `Shuttle.RawFS`.
+    case Shuttle.RawFS.mkdir_p(root) do
+      :ok -> :ok
+      {:error, reason} -> raise File.Error, reason: reason, action: "make directory", path: root
+    end
 
     case Shuttle.Felt.run(["init"], cd: root) do
       {:ok, _output} -> :ok
@@ -251,7 +260,7 @@ defmodule ShuttleWeb.FiberController do
     if extra == %{} do
       :ok
     else
-      case File.read(path) do
+      case Shuttle.RawFS.read(path) do
         {:ok, content} -> splice(path, content, extra)
         {:error, reason} -> {:error, "reading created fiber: #{:file.format_error(reason)}"}
       end
@@ -273,8 +282,8 @@ defmodule ShuttleWeb.FiberController do
   defp atomic_write(path, payload) do
     tmp = path <> ".tmp"
 
-    with :ok <- File.write(tmp, payload),
-         :ok <- File.rename(tmp, path) do
+    with :ok <- Shuttle.RawFS.write(tmp, payload),
+         :ok <- Shuttle.RawFS.rename(tmp, path) do
       :ok
     else
       {:error, reason} -> {:error, "writing fiber: #{:file.format_error(reason)}"}
