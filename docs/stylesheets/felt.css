@@ -284,19 +284,27 @@
   line-height: 1.55;
 }
 
-/* The report's hierarchy: italic for the two heading levels that name a
-   section, upright for the ones that name a claim. */
+/* The report's hierarchy: small caps for the two heading levels that name a
+   section, upright for the ones that name a claim. font-variant-caps (not
+   text-transform: uppercase) keeps the leading letter at full cap height and
+   only reshapes the rest — EB Garamond carries true small-cap glyphs (the
+   `smcp` OpenType feature) where the reader has it installed; elsewhere the
+   browser synthesizes them, so the fallback is a difference of polish, not
+   of legibility. The wider tracking is small caps' own rhythm requirement —
+   without it, the tighter cap-height glyphs read as cramped. */
 .md-typeset h1 {
   color: var(--felt-ink);
-  font-style: italic;
+  font-style: normal;
+  font-variant-caps: small-caps;
   font-weight: 500;
-  letter-spacing: normal;
+  letter-spacing: 0.02em;
 }
 
 .md-typeset h2 {
-  font-style: italic;
+  font-style: normal;
+  font-variant-caps: small-caps;
   font-weight: 500;
-  letter-spacing: normal;
+  letter-spacing: 0.02em;
 }
 
 .md-typeset h3,
