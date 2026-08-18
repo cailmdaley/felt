@@ -20,11 +20,15 @@ if [ -n "$FELT_BIN" ] && command -v jq >/dev/null 2>&1; then
       additionalContext: .
     }
   }'
+  exit 0
 elif felt_hook_available; then
   exec "$FELT_BIN" hook session
 fi
 
-# Keep SessionStart non-blocking when felt is absent or too old.
+# Keep SessionStart non-blocking when felt is absent or too old. Reached only
+# by falling out of the branches above — the `exit 0` and the `exec` are what
+# make that true, and without the first one every healthy session printed this
+# apology underneath its own context.
 cat <<'EOF'
 {
   "hookSpecificOutput": {

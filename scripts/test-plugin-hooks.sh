@@ -65,5 +65,32 @@ session_present="$("${felt_present_env[@]}" FELT_TEST_ARGS="$session_args" \
 grep -qE '^(hook )?session$' "$session_args"
 ! grep -q 'missing or too old' <<<"$session_present"
 
+# ── phase 3: felt AND jq present ─────────────────────────────────────────
+#
+# The route above runs without jq on PATH, so it always took the `elif` — and
+# that branch ends in `exec`, which cannot fall through no matter what follows
+# it. The jq route is the one that has to return to the script, and for months
+# it did: every healthy session printed the real context and then the
+# "missing or too old" apology underneath it. So stub jq (the envelope's shape
+# is not what is under test here) and assert ONE envelope, not merely the
+# absence of the fallback.
+mkdir -p "$tmp_dir/bin"
+cat > "$tmp_dir/bin/jq" <<'EOF'
+#!/bin/bash
+cat >/dev/null
+printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"stub"}}\n'
+EOF
+chmod +x "$tmp_dir/bin/jq"
+
+jq_env=(env -i HOME="$tmp_dir/home" PATH="$tmp_dir/bin:/usr/bin:/bin" FELT_BIN=)
+session_jq="$("${jq_env[@]}" FELT_TEST_ARGS="$tmp_dir/session-args-jq" \
+  "$hooks/session.sh" </dev/null)"
+if [ "$(grep -c hookEventName <<<"$session_jq")" != 1 ]; then
+  echo "session.sh emitted more than one SessionStart envelope:" >&2
+  printf '%s\n' "$session_jq" >&2
+  exit 1
+fi
+! grep -q 'missing or too old' <<<"$session_jq"
+
 grep -q '\${CLAUDE_PLUGIN_ROOT:-\$PLUGIN_ROOT}' "$hooks/hooks.json"
 echo "plugin hook tests passed"
