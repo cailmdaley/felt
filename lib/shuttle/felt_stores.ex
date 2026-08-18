@@ -28,6 +28,7 @@ defmodule Shuttle.FeltStores do
   @expanded_cache_key {__MODULE__, :expanded_hosts}
   @scan_lock_key {__MODULE__, :expansion_scan}
   @scan_report_key {__MODULE__, :expansion_scan_report}
+  @scan_pids_key {__MODULE__, :expansion_scan_pids}
   @expanded_cache_ttl_ms 30_000
 
   # How long a cold caller — one with no expansion cached for the CURRENT base
@@ -40,12 +41,15 @@ defmodule Shuttle.FeltStores do
   # stall it exists to bound, where the thing being waited on is a person.
   @scan_wait_ms 2_000
 
-  # A scan that has not reported back within this window is presumed wedged
-  # rather than merely slow, and the next caller is allowed to start another.
-  # Long on purpose: a wedged scan is parked in a blocking filesystem call and
-  # holds one of the VM's async I/O threads until the kernel releases it, so
-  # re-arming often is how a stalled store turns into a stalled node.
-  @scan_lock_ttl_ms 60_000
+  # How many store scans may be parked in a blocking filesystem call at once.
+  # This is a budget, not a tuning knob: a scan that never returns holds one of
+  # the VM's dirty IO schedulers until the kernel releases it, there are ten of
+  # them, and the tenth simultaneously blocked call wedges every filesystem
+  # operation in the VM (measured — see `Shuttle.RawFS`). Re-issuing a probe
+  # that has not come back is therefore how a stalled store turns into a stalled
+  # node, on a timer. Three leaves headroom for the rest of the daemon's raw
+  # I/O; past it, callers serve the unexpanded base and wait for the world.
+  @max_parked_scans 3
 
   # A scan slower than this is reported by name, at :warning, with what usually
   # causes it. Set above a healthy real store (~1.1 s, measured) with room to
@@ -60,8 +64,8 @@ defmodule Shuttle.FeltStores do
   and normally does no filesystem work at all.** That bound is load-bearing, not
   hygiene: `configured_hosts/0` is on the request path of most read endpoints
   (`/api/v1/fibers/composite`, `/api/v1/felt-stores`) as well as every poll, and
-  the expansion it caches is a raw `File.ls`/`File.lstat`/`File.dir?` walk of
-  each store's `.felt/`. Those calls have no timeout. Reach into a store macOS
+  the expansion it caches is a full `Shuttle.RawFS` walk of each store's
+  `.felt/`. Those calls have no timeout. Reach into a store macOS
   guards — iCloud Drive, `~/Library/CloudStorage` — and the first walk raises a
   consent dialog that blocks the calling process *for as long as the dialog goes
   unanswered*, which is human time, not machine time. Serving that walk inline
@@ -85,9 +89,13 @@ defmodule Shuttle.FeltStores do
       deadline the *unexpanded* base list is served: correct, just missing
       symlinked substores, and self-healing the moment the scan lands.
 
-  The scan is single-flight *per base*, so a stalled store yields one blocked
-  task rather than one per request — while a caller whose store list differs
-  can still get its own scan started rather than waiting out the stall.
+  The scan is single-flight *per base* and the lock is held until the scanner
+  answers or dies, so a stalled store yields exactly one parked task however
+  many requests arrive — while a caller whose store list differs can still get
+  its own scan started rather than waiting out the stall. At most
+  #{@max_parked_scans} scans may be parked at once; past that, callers serve the
+  base list and nobody issues another probe into a filesystem that is not
+  answering.
   """
   @spec configured_hosts() :: host_list()
   def configured_hosts do
@@ -104,7 +112,14 @@ defmodule Shuttle.FeltStores do
 
       _ ->
         start_expansion_scan(base)
-        await_expansion(base, now + scan_wait_ms()) || unexpanded(base)
+
+        # A scan for this base that has ALREADY been out longer than the wait is
+        # not going to reward waiting for it again — that is a caller paying the
+        # full deadline on every read for as long as a store stays wedged, which
+        # is the availability this module exists to protect. Serve the base now.
+        if scan_overdue?(base),
+          do: unexpanded(base),
+          else: await_expansion(base, now + scan_wait_ms()) || unexpanded(base)
     end
   end
 
@@ -152,41 +167,97 @@ defmodule Shuttle.FeltStores do
   # not answering.
   defp unexpanded(base), do: base |> Enum.map(&Path.expand/1) |> Enum.uniq()
 
-  # Single-flight, and single-flight *per base*: at most one scan of a given
-  # store list in flight per `@scan_lock_ttl_ms`. The lock carries the base it
-  # was taken for, so a caller whose base differs STEALS it and scans anyway —
-  # otherwise a store wedged on a consent dialog would starve every later
-  # configuration change for the length of the TTL, including one that added a
-  # perfectly healthy store.
+  # Single-flight, and single-flight *per base*: one scan of a given store list
+  # at a time. The lock carries the base it was taken for, so a caller whose
+  # base differs STEALS it and scans anyway — otherwise a store wedged on a
+  # consent dialog would starve every later configuration change, including one
+  # that added a perfectly healthy store.
+  #
+  # The lock is held until the scanning process ANSWERS OR DIES — liveness, not
+  # a timer. A timer was the earlier design and it is the wrong instrument here:
+  # a wedged walk is not slow, it is waiting on a human, so expiring the lock
+  # every 60 s just issues a second probe that parks next to the first. Ten
+  # parked probes wedge every filesystem call in the VM, so a timer turns one
+  # unanswered consent dialog into a dead node in ten minutes. Liveness gets the
+  # crash case right too — a killed scanner releases its lock immediately, where
+  # a timer would have made every caller wait out the TTL.
   #
   # The check is not atomic across processes, so a burst can race two scans
   # through. That is harmless — both write the same answer — and cheaper than
   # serializing every caller through a process that a wedged walk could itself
   # block, which is the failure mode being defended against.
   defp start_expansion_scan(base) do
-    now = System.monotonic_time(:millisecond)
-
     case :persistent_term.get(@scan_lock_key, nil) do
-      {^base, started} when now - started < @scan_lock_ttl_ms ->
-        :ok
+      {^base, _started, pid} ->
+        if Process.alive?(pid), do: :ok, else: arm_expansion_scan(base)
 
       _ ->
-        :persistent_term.put(@scan_lock_key, {base, now})
+        arm_expansion_scan(base)
+    end
+  end
 
-        spawn_expansion_scan(base)
+  defp arm_expansion_scan(base) do
+    parked = live_scans()
+
+    if length(parked) >= @max_parked_scans do
+      Logger.warning(
+        "#{length(parked)} felt-store scans are still parked in the filesystem; not starting " <>
+          "another for #{Enum.join(base, ", ")}. On macOS this is a consent dialog waiting on " <>
+          "a human — look behind your other windows. Store lists stay as they were until one " <>
+          "of the parked scans returns."
+      )
+
+      :ok
+    else
+      spawn_expansion_scan(base, parked)
     end
   end
 
   # No task supervisor — a unit test with the app not started, a supervisor
   # mid-restart — falls back to today's inline behaviour rather than never
   # scanning at all. The caller blocks, exactly as it always did.
-  defp spawn_expansion_scan(base) do
+  defp spawn_expansion_scan(base, parked) do
     case Task.Supervisor.start_child(Shuttle.TaskSupervisor, fn -> run_expansion_scan(base) end) do
-      {:ok, _pid} -> :ok
-      _ -> run_expansion_scan(base)
+      {:ok, pid} ->
+        hold_scan_lock(base, pid)
+        :persistent_term.put(@scan_pids_key, [pid | parked])
+        :ok
+
+      _ ->
+        run_expansion_scan_inline(base)
     end
   catch
-    :exit, _ -> run_expansion_scan(base)
+    :exit, _ -> run_expansion_scan_inline(base)
+  end
+
+  defp run_expansion_scan_inline(base) do
+    hold_scan_lock(base, self())
+    run_expansion_scan(base)
+  end
+
+  defp hold_scan_lock(base, pid) do
+    :persistent_term.put(@scan_lock_key, {base, System.monotonic_time(:millisecond), pid})
+  end
+
+  # The scanners still running. Pruned by liveness on every read, which is what
+  # makes the budget self-healing: a scanner that died without releasing (killed
+  # supervisor, brutal shutdown) stops counting the moment anyone looks.
+  defp live_scans do
+    @scan_pids_key
+    |> :persistent_term.get([])
+    |> Enum.filter(&Process.alive?/1)
+  end
+
+  # True when a live scan for this base has been out longer than a caller is
+  # willing to wait — so waiting for it again would just spend the deadline.
+  defp scan_overdue?(base) do
+    case :persistent_term.get(@scan_lock_key, nil) do
+      {^base, started, pid} ->
+        Process.alive?(pid) and System.monotonic_time(:millisecond) - started >= scan_wait_ms()
+
+      _ ->
+        false
+    end
   end
 
   defp run_expansion_scan(base) do
@@ -195,13 +266,27 @@ defmodule Shuttle.FeltStores do
     :persistent_term.put(@scan_report_key, %{scanned_ms: div(scanned_us, 1000), stores: timings})
     log_scan(div(scanned_us, 1000), timings)
   after
-    # Release only a lock we still hold: a later caller with a different base may
-    # have stolen it while we were out, and erasing theirs would just permit a
-    # redundant rescan.
+    release_scan_lock(base)
+  end
+
+  # Release only a lock we still hold: a later caller with a different base may
+  # have stolen it while we were out, and erasing theirs would just permit a
+  # redundant rescan. Leaving the parked-scan list is separate and
+  # unconditional — this process is no longer parked whoever holds the lock.
+  defp release_scan_lock(base) do
     case :persistent_term.get(@scan_lock_key, nil) do
-      {^base, _started} -> :persistent_term.erase(@scan_lock_key)
+      {^base, _started, _pid} -> :persistent_term.erase(@scan_lock_key)
       _ -> :ok
     end
+
+    me = self()
+    parked = :persistent_term.get(@scan_pids_key, [])
+    remaining = Enum.reject(parked, &(&1 == me or not Process.alive?(&1)))
+
+    # `:persistent_term.put/2` is a global operation; skip it when the list is
+    # already what we would write, which is the common case on a healthy box
+    # where the scanner that just finished was the only one listed.
+    if remaining != parked, do: :persistent_term.put(@scan_pids_key, remaining), else: :ok
   end
 
   @doc """
@@ -222,11 +307,8 @@ defmodule Shuttle.FeltStores do
   @spec scan_in_flight?() :: boolean()
   def scan_in_flight? do
     case :persistent_term.get(@scan_lock_key, nil) do
-      {_base, started} ->
-        System.monotonic_time(:millisecond) - started < @scan_lock_ttl_ms
-
-      _ ->
-        false
+      {_base, _started, pid} -> Process.alive?(pid)
+      _ -> false
     end
   end
 
@@ -368,8 +450,8 @@ defmodule Shuttle.FeltStores do
   # Such a store is skipped by the poller's enumerator, so it must lose a dedup
   # tie to a real-directory store sharing the same `.felt/` realpath.
   defp felt_symlink?(store) do
-    case File.lstat(Path.join(Path.expand(store), ".felt")) do
-      {:ok, %File.Stat{type: :symlink}} -> true
+    case Shuttle.RawFS.lstat(Path.join(Path.expand(store), ".felt")) do
+      {:ok, %{type: :symlink}} -> true
       _ -> false
     end
   end
@@ -393,18 +475,18 @@ defmodule Shuttle.FeltStores do
   defp walk_substore_roots(_dir, _store_real, depth) when depth > @max_substore_scan_depth, do: []
 
   defp walk_substore_roots(dir, store_real, depth) do
-    case File.ls(dir) do
+    case Shuttle.RawFS.ls(dir) do
       {:ok, entries} ->
         Enum.flat_map(entries, fn entry ->
           path = Path.join(dir, entry)
 
-          case File.lstat(path) do
+          case Shuttle.RawFS.lstat(path) do
             # A symlink: a substore link iff it resolves to an external real
             # `.felt` directory. Detected here, never descended.
-            {:ok, %File.Stat{type: :symlink}} ->
+            {:ok, %{type: :symlink}} ->
               with {:ok, real} <- Shuttle.Realpath.resolve(path),
                    ".felt" <- Path.basename(real),
-                   true <- File.dir?(real),
+                   true <- Shuttle.RawFS.dir?(real),
                    false <- inside?(real, store_real) do
                 [Path.dirname(real)]
               else
@@ -412,7 +494,7 @@ defmodule Shuttle.FeltStores do
               end
 
             # A real subdirectory: recurse to reach nested mount points.
-            {:ok, %File.Stat{type: :directory}} ->
+            {:ok, %{type: :directory}} ->
               walk_substore_roots(path, store_real, depth + 1)
 
             _ ->
