@@ -1079,7 +1079,17 @@ defmodule Shuttle.Dispatcher do
   # launch) bypasses eligibility entirely and lands straight here — so this is
   # the only place the forced path can learn it.
   defp check_work_dir(_agent, work_dir) when is_binary(work_dir) and work_dir != "" do
-    if File.dir?(work_dir) do
+    # Bounded and raw (`Shuttle.BoundedIO`, which probes through
+    # `Shuttle.RawFS`): a `project_dir` is operator-supplied — routinely iCloud
+    # Drive or a network mount — and `Dispatcher.dispatch/2` is called from
+    # `handle_call` on the `Shuttle.Poller` process, so a bare `File.dir?/1`
+    # that blocks stops the daemon dispatching anything AND holds the shared OTP
+    # file server while it waits. The Poller's own two probes of this same path
+    # (`project_dir_available?/1`, `fiber_work_dir/3`) are bounded for exactly
+    # this reason; a third unbounded one on the forced path was the way around
+    # them. A probe that does not answer refuses the dispatch — the same
+    # decision "the directory is missing" gets, and the safer one.
+    if Shuttle.BoundedIO.dir?(work_dir) do
       :ok
     else
       dispatch_refused(

@@ -50,7 +50,12 @@ defmodule Shuttle.FiberDoc do
   @spec read_path(String.t()) ::
           {:ok, String.t(), String.t(), map(), String.t()} | {:error, String.t()}
   def read_path(path) when is_binary(path) do
-    with {:ok, text} <- File.read(path),
+    # Raw (`Shuttle.RawFS`): `path` is a fiber file inside a felt store, and
+    # this runs on the `Shuttle.Poller` process (standing-role reconciliation on
+    # every tick, lifecycle transitions). A plain `File.read/1` on a stalled
+    # store would hold the shared OTP file server, wedging every filesystem call
+    # in the VM — see `Shuttle.RawFS`.
+    with {:ok, text} <- Shuttle.RawFS.read(path),
          {:ok, frontmatter_yaml, body} <- split_frontmatter(text),
          {:ok, frontmatter} <- parse_frontmatter(frontmatter_yaml, path) do
       {:ok, path, frontmatter_yaml, frontmatter, body}

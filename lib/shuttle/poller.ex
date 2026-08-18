@@ -1650,14 +1650,22 @@ defmodule Shuttle.Poller do
   # match enforced, now read from felt rather than reverse-derived. A store
   # whose own `.felt/` is a symlink owns nothing here: the target store
   # enumerates it canonically.
+  #
+  # Probed with `Shuttle.RawFS`, not `File.*`: `host` is a configured store
+  # root, which is exactly the path that stalls. A plain `File.lstat/1` here is
+  # a call into the shared OTP file server, and one store parked on a macOS
+  # consent dialog would hold that server for as long as the dialog goes
+  # unanswered — blocking every filesystem call in the VM, on healthy stores and
+  # daemon-owned files alike. Being inside the poll Task buys nothing; the
+  # blocking work happens in the process everybody shares. See `Shuttle.RawFS`.
   defp list_shuttle_fibers(host, state) do
     felt_dir = Path.join(host, ".felt")
 
-    case File.lstat(felt_dir) do
-      {:ok, %File.Stat{type: :symlink}} ->
+    case Shuttle.RawFS.lstat(felt_dir) do
+      {:ok, %{type: :symlink}} ->
         {:ok, []}
 
-      {:ok, %File.Stat{type: :directory}} ->
+      {:ok, %{type: :directory}} ->
         # An empty store has nothing to enumerate; skip the felt shell-out so a
         # store with no fibers costs nothing (and so a daemon polling an empty
         # configured store doesn't shell felt every tick).
@@ -1672,8 +1680,10 @@ defmodule Shuttle.Poller do
     end
   end
 
+  # Raw for the same reason as `list_shuttle_fibers/2` above: `dir` is a store's
+  # own `.felt/`.
   defp empty_dir?(dir) do
-    case File.ls(dir) do
+    case Shuttle.RawFS.ls(dir) do
       {:ok, entries} -> entries == []
       _ -> true
     end

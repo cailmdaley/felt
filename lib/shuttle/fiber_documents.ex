@@ -488,8 +488,11 @@ defmodule Shuttle.FiberDocuments do
   #     rendering.
   #
   #   * `:stat` — the single-fiber `felt show` path, which does not yet carry the
-  #     native field, so we fall back to a `File.exists?` on the sibling. One
+  #     native field, so we fall back to an existence check on the sibling. One
   #     stat for one fiber is fine; the list path must never take this branch.
+  #     Raw (`Shuttle.RawFS`): `dir` is inside a felt store, so a `File.exists?`
+  #     here would be a call into the shared OTP file server on the one kind of
+  #     path that stalls — see `Shuttle.RawFS`.
   defp report_present?(fiber, _dir, :field) do
     case Map.get(fiber, "report_path") do
       value when is_binary(value) and value != "" -> true
@@ -500,7 +503,7 @@ defmodule Shuttle.FiberDocuments do
   defp report_present?(fiber, dir, :stat) do
     case Map.get(fiber, "report_path") do
       value when is_binary(value) and value != "" -> true
-      _ -> File.exists?(Path.join(dir, "report.html"))
+      _ -> Shuttle.RawFS.exists?(Path.join(dir, "report.html"))
     end
   end
 
