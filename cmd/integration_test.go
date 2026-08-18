@@ -16,6 +16,21 @@ var binaryPath string
 var repoRoot string
 
 func TestMain(m *testing.M) {
+	// A test that re-execs THIS binary as a helper child (TestEventHookHelperProcess,
+	// spawned 50-wide by TestEventConcurrentAppends) must not drag the build with it.
+	// There is one TestMain per test binary, and under the integration tag it is this
+	// one — so every child inherited a `go build` of the whole CLI. Fifty concurrent
+	// compiles is not a test, it is a fork bomb: it took a 10-core laptop to a load
+	// average of 316 and made the local daemon answer in 6.7 seconds. The child needs
+	// no binary (it exercises the hook in-process), so give it none.
+	//
+	// The env var is TestEventConcurrentAppends' own (cmd/hook_event_test.go, a
+	// different package in the same binary, so the name cannot be shared as a const —
+	// keep them in step by hand).
+	if os.Getenv("FELT_EVENT_HELPER") == "1" {
+		os.Exit(m.Run())
+	}
+
 	tmp, err := os.MkdirTemp("", "felt-integration-*")
 	if err != nil {
 		panic(err)

@@ -611,6 +611,12 @@ func TestEventConcurrentAppends(t *testing.T) {
 // TestEventHookHelperProcess is the child half of TestEventConcurrentAppends:
 // a real `felt hook event` invocation, reached by re-execing the test binary
 // so no build step is needed. It is inert unless FELT_EVENT_HELPER is set.
+//
+// "No build step" is a property of this binary's TestMain, not of re-exec, and
+// the integration build tag once broke it: that TestMain compiles the CLI, so
+// each of the 50 children compiled it again. cmd/integration_test.go now
+// returns early when it sees FELT_EVENT_HELPER — if this variable is ever
+// renamed, rename it there too.
 func TestEventHookHelperProcess(t *testing.T) {
 	if os.Getenv("FELT_EVENT_HELPER") != "1" {
 		return
