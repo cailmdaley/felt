@@ -2016,7 +2016,13 @@ defmodule Shuttle.Poller do
   # (enabled blocks must carry one), not re-litigated at every poll.
   defp project_dir_available?(shuttle) when is_map(shuttle) do
     case Map.get(shuttle, "project_dir") do
-      dir when is_binary(dir) and dir != "" -> File.dir?(Path.expand(dir))
+      # Bounded: this stat runs on the Poller process, and `project_dir` is
+      # operator-supplied — routinely a path in iCloud Drive or
+      # `~/Library/CloudStorage`, where the first reach raises a macOS consent
+      # dialog that blocks until a human answers it. Unbounded, one such fiber
+      # stops the daemon answering the board at all. Not-answered reads as
+      # not-available: the fiber simply does not dispatch this tick.
+      dir when is_binary(dir) and dir != "" -> Shuttle.BoundedIO.dir?(Path.expand(dir))
       _ -> true
     end
   end
@@ -2308,7 +2314,10 @@ defmodule Shuttle.Poller do
     with shuttle when is_map(shuttle) <- Map.get(fiber, "shuttle"),
          dir when is_binary(dir) and dir != "" <- Map.get(shuttle, "project_dir"),
          expanded = Path.expand(dir),
-         true <- File.dir?(expanded) do
+         # Bounded for the same reason as `project_dir_available?/1` — this runs
+         # on the Poller process at dispatch. A dir we cannot confirm falls back
+         # to the felt store, which is what an absent one already did.
+         true <- Shuttle.BoundedIO.dir?(expanded) do
       expanded
     else
       _ -> fallback_host
