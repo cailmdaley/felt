@@ -18,10 +18,6 @@ const (
 // ValidDepths lists all valid depth values.
 var ValidDepths = []string{DepthName, DepthCompact, DepthSummary, DepthFull}
 
-// refTitleMaxLen caps how many chars of a referenced fiber's title are shown
-// in the Refs/Cited-by/Consumed-by parentheticals before truncation.
-const refTitleMaxLen = 30
-
 // validateDepth checks if a depth value is valid.
 func validateDepth(d string) error {
 	for _, v := range ValidDepths {
@@ -178,10 +174,7 @@ func writeCitations(sb *strings.Builder, citations []felt.Citation) {
 		if citation.Fragment != "" {
 			ref += "#" + citation.Fragment
 		}
-		if strings.TrimSpace(citation.SourceName) != "" {
-			ref += " (" + truncateTitle(citation.SourceName, refTitleMaxLen) + ")"
-		}
-		parts = append(parts, ref)
+		parts = appendUniqueRef(parts, ref)
 	}
 	fmt.Fprintf(sb, "Cited by: %s\n", strings.Join(parts, ", "))
 }
@@ -196,13 +189,10 @@ func writeConsumers(sb *strings.Builder, consumers []felt.DataFlowConsumer) {
 		if consumer.InputID != "" {
 			ref += "#" + consumer.InputID
 		}
-		if strings.TrimSpace(consumer.SourceName) != "" {
-			ref += " (" + truncateTitle(consumer.SourceName, refTitleMaxLen) + ")"
-		}
 		if consumer.OutputID != "" {
 			ref = consumer.OutputID + " \u2192 " + ref
 		}
-		parts = append(parts, ref)
+		parts = appendUniqueRef(parts, ref)
 	}
 	fmt.Fprintf(sb, "Consumed by: %s\n", strings.Join(parts, ", "))
 }
@@ -226,38 +216,39 @@ func writeBodyRefs(sb *strings.Builder, f *felt.Felt, g *Graph) {
 		}
 	}
 	for _, ref := range refs {
+		// A scoped wikilink (`[[sibling]]`) is printed as the ID it resolves
+		// to, so every entry on the line is something `felt show` accepts.
+		target := ref.Target
 		if g != nil {
 			if resolved, err := felt.ResolveScopedID(ids, f.ID, ref.Target); err == nil {
-				if node, ok := g.Nodes[resolved]; ok {
-					label := resolved
-					if ref.Fragment != "" {
-						label += "#" + ref.Fragment
-					}
-					parts = append(parts, fmt.Sprintf("%s (%s)", label, truncateTitle(node.DisplayName(), refTitleMaxLen)))
-					continue
+				if _, ok := g.Nodes[resolved]; ok {
+					target = resolved
 				}
 			}
 		}
 		if ref.Fragment != "" {
-			parts = append(parts, ref.String())
-			continue
+			target += "#" + ref.Fragment
 		}
-		parts = append(parts, ref.Target)
-		if g != nil {
-			if node, ok := g.Nodes[ref.Target]; ok {
-				parts[len(parts)-1] = fmt.Sprintf("%s (%s)", ref.Target, truncateTitle(node.DisplayName(), refTitleMaxLen))
-				continue
-			}
-		}
+		parts = appendUniqueRef(parts, target)
 	}
 	fmt.Fprintf(sb, "Refs:     %s\n", strings.Join(parts, ", "))
 }
 
-func truncateTitle(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
+// appendUniqueRef adds an ID to a reference line, skipping one already on it.
+//
+// These lines are ADDRESSES — each entry is something to hand back to `felt
+// show` — so a fiber cited three times in a body says nothing more than one
+// cited once, and the repeat only costs the reader a scan. Names are
+// deliberately absent for the same reason: a line of twenty IDs each trailing
+// a truncated title wraps into a paragraph, and the truncation is exactly
+// where the title stops being informative.
+func appendUniqueRef(parts []string, ref string) []string {
+	for _, seen := range parts {
+		if seen == ref {
+			return parts
+		}
 	}
-	return s[:maxLen-1] + "\u2026"
+	return append(parts, ref)
 }
 
 // extractLede extracts the first substantive paragraph from a body.

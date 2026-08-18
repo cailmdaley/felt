@@ -310,8 +310,32 @@ func TestRenderFullResolvesScopedBodyRefs(t *testing.T) {
 		child.ID:   child,
 	}}
 	out := renderFelt(current, graph, DepthFull, nil, nil)
-	if !strings.Contains(out, "Refs:     project/question (Question), project/analysis/method#step-a (Method)") {
+	if !strings.Contains(out, "Refs:     project/question, project/analysis/method#step-a") {
 		t.Fatalf("renderFelt() scoped refs mismatch:\n%s", out)
+	}
+}
+
+func TestRenderFullDedupesRepeatedBodyRefs(t *testing.T) {
+	// A fiber mentioned three times in a body is one address, printed once —
+	// the line is a list of things to hand back to `felt show`, not a count of
+	// mentions.
+	parent := &felt.Felt{ID: "project", Name: "Project", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")}
+	current := &felt.Felt{
+		ID:        "project/analysis",
+		Name:      "Analysis",
+		CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z"),
+		Body:      "[[question]] leads to [[question]], and again [[project/question]].",
+	}
+	sibling := &felt.Felt{ID: "project/question", Name: "Question", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")}
+
+	graph := &Graph{Nodes: map[string]*felt.Felt{
+		parent.ID:  parent,
+		current.ID: current,
+		sibling.ID: sibling,
+	}}
+	out := renderFelt(current, graph, DepthFull, nil, nil)
+	if !strings.Contains(out, "Refs:     project/question\n") {
+		t.Fatalf("renderFelt() should print a repeated ref once:\n%s", out)
 	}
 }
 
@@ -337,7 +361,7 @@ func TestShowIncludesCitations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("show with citations: %v\n%s", err, out)
 	}
-	if !strings.Contains(out, "Cited by: project/analysis (Analysis)") {
+	if !strings.Contains(out, "Cited by: project/analysis") {
 		t.Fatalf("show missing citations:\n%s", out)
 	}
 }
@@ -365,7 +389,7 @@ func TestShowIncludesConsumers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("show with consumers: %v\n%s", err, out)
 	}
-	if !strings.Contains(out, "Consumed by: posterior → project/analysis#catalog (Analysis)") {
+	if !strings.Contains(out, "Consumed by: posterior → project/analysis#catalog") {
 		t.Fatalf("show missing consumers:\n%s", out)
 	}
 }
@@ -531,7 +555,7 @@ func TestShowFullAnnotatesBodyRefsWithoutStoreWalk(t *testing.T) {
 	if err != nil {
 		t.Fatalf("show should not walk unrelated malformed fibers: %v\n%s", err, out)
 	}
-	if !strings.Contains(out, "Refs:     project/question (Question), project/analysis/sub/method (Method), missing") {
+	if !strings.Contains(out, "Refs:     project/question, project/analysis/sub/method, missing") {
 		t.Fatalf("show refs mismatch:\n%s", out)
 	}
 }
