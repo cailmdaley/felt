@@ -534,7 +534,14 @@ defmodule Shuttle.RemoteFiberRegistryTest do
     end
 
     test "a fresh success clears staleness immediately (fast recovery)", %{dir: dir} do
-      remote = candide(poll_interval_ms: 1, stale_multiplier: 1)
+      # 50ms, not 1ms. The freshness window here is
+      # `poll_interval_ms × stale_multiplier`, and the assertion below must land
+      # INSIDE it — with a 1ms window the `feeds/1` round trip after the
+      # recovery poll routinely spent longer than the window it was checking, so
+      # the entry aged back to stale before it could be read and the test failed
+      # about five runs in six. 50ms is still far below any human-visible
+      # staleness and comfortably above a GenServer call.
+      remote = candide(poll_interval_ms: 50, stale_multiplier: 1)
       url = Remote.fibers_url(remote)
       MockClient.set(url, {:ok, feed_body([sample_fiber("foo")])})
 
@@ -549,8 +556,8 @@ defmodule Shuttle.RemoteFiberRegistryTest do
         )
 
       :ok = RemoteFiberRegistry.refresh_now(pid)
-      # Age past the 1ms threshold so the feed reads stale.
-      Process.sleep(10)
+      # Age past the threshold so the feed reads stale.
+      Process.sleep(80)
       assert %{"candide" => %{stale: true}} = RemoteFiberRegistry.feeds(pid)
 
       # A single fresh success flips stale → false instantly (no grace to re-earn).
