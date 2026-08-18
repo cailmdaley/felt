@@ -35,7 +35,7 @@ Search and read:
     felt ls                                        # tracked (open and active) IN THIS VIEW
     felt ls "query" [-t tag] [-s closed] [-v]     # filters this view's listing: substring over name, outcome, YAML, slug; widens to every status but closed (a trailing hint counts those); matches under a matching ancestor collapse into it, -v expands
     felt ls --body "query"                         # adds body search — plain substring; use -r --body for regex
-    felt find "query" [-t tag] [-s closed] [-v]   # searches the WHOLE store: local hits, then the rest of the loom by full id (outer block capped at 20; -n 0 for all)
+    felt find "query" [-t tag] [-s closed] [-v]   # searches the WHOLE store: local hits, then the rest of the loom by full id (outer block capped at 20; --limit 0 for all; -j emits one merged array, uncapped, each entry naming its `store`)
     felt session                                   # SessionStart context as plain text
     felt tree [<id>] [-L depth]                    # containment hierarchy; -L caps depth (1 = direct children)
     felt show <id>                                 # full

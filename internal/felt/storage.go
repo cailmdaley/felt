@@ -67,11 +67,18 @@ var ErrExternalReference = errors.New("lives in the enclosing felt store")
 // ExternalReference is the resolution failure ErrExternalReference names,
 // carrying enough to act on: the query as typed, the id it has in the
 // enclosing store, and where that store is.
+// Inferred distinguishes the two ways a query reaches out there. False means
+// the query named the fiber's path exactly, from the enclosing store's root —
+// someone deliberately wrote the full outer id, and there is nothing to
+// remark on. True means the enclosing store's own resolver INFERRED the
+// target by its scope, suffix, and basename rules; that is the case that can
+// quietly outrank a local rescue, and the only one worth reporting.
 type ExternalReference struct {
 	Query      string
 	ID         string
 	Root       string // the enclosing .felt directory
 	ProjectDir string // its project root — what `felt -C` takes
+	Inferred   bool
 }
 
 func (e *ExternalReference) Error() string {
@@ -312,8 +319,8 @@ func (x *ExternalRefs) Lookup(scopeID, query string) (string, bool) {
 // err builds the resolution failure for an external target: the sentinel, the
 // query, and the id it has out there — everything a caller needs to act on
 // the fiber where it lives.
-func (x *ExternalRefs) err(query, id string) error {
-	return &ExternalReference{Query: query, ID: id, Root: x.root, ProjectDir: x.ProjectDir()}
+func (x *ExternalRefs) err(query, id string, inferred bool) error {
+	return &ExternalReference{Query: query, ID: id, Root: x.root, ProjectDir: x.ProjectDir(), Inferred: inferred}
 }
 
 type fiberFile struct {
@@ -346,6 +353,10 @@ func NewStorage(projectRoot string) *Storage {
 		root: filepath.Join(projectRoot, DirName),
 	}
 }
+
+// Root is this store's `.felt` directory — the path that identifies the store
+// a fiber was found in, which a cross-store result has to name.
+func (s *Storage) Root() string { return s.root }
 
 // Init creates the .felt directory if it doesn't exist.
 func (s *Storage) Init() error {
@@ -1603,17 +1614,16 @@ func (r *scopedIDResolver) resolve(scopeID, query string) (string, bool, error) 
 	//
 	// The two rescues overlap, and this order resolves the overlap in the
 	// enclosing store's favour. A stale local path whose slug is unique here
-	// AND which the enclosing store happens to resolve — by its own suffix and
-	// basename rules, over a far larger id set — is now reported as external
-	// instead of being repaired into the local fiber. The reader loses that
-	// repair, and `felt check` stays silent about the loss, since external
-	// hits are not issues. The trade is deliberate: a wrong redirect sends a
-	// reader one command away (`felt -C ...`), while the misresolution it
-	// replaces silently answered with the wrong fiber — and `felt rm` and
-	// `felt nest` act on that answer. No link in the loom fires this case
-	// today; if one does, it shows up as a link that stops resolving here.
-	if id, ok := r.externalHit(scopeID, query); ok {
-		return "", false, r.external.err(query, id)
+	// AND which the enclosing store INFERS — by its own suffix and basename
+	// rules, over a far larger id set — is reported as external instead of
+	// being repaired into the local fiber. The reader loses that repair, so
+	// `felt check` reports it: an info issue naming both candidates, emitted
+	// on the inferred branch only (see checkRelationshipIntegrity). The trade
+	// is deliberate: a wrong redirect sends a reader one command away
+	// (`felt -C ...`), while the misresolution it replaces silently answered
+	// with the wrong fiber — and `felt rm` and `felt nest` act on that answer.
+	if id, inferred, ok := r.externalHit(scopeID, query); ok {
+		return "", false, r.external.err(query, id, inferred)
 	}
 
 	// Last resort: the query's final segment names exactly one fiber. This is
@@ -1647,14 +1657,18 @@ func (r *scopedIDResolver) resolve(scopeID, query string) (string, bool, error) 
 // `felt show portolan/debug` resolved or did not according to an accident of
 // this store's naming. A partial foreign path now resolves either way, at the
 // cost of one walk of the enclosing store's id list, memoized, only on a miss.
-func (r *scopedIDResolver) externalHit(scopeID, query string) (string, bool) {
+// It reports which of the two answered: an exact path stat is not inferred,
+// the resolver walk is. Only the second can outrank a local rescue the reader
+// was relying on, so only the second is worth remarking on (see check).
+func (r *scopedIDResolver) externalHit(scopeID, query string) (id string, inferred, ok bool) {
 	if r.external == nil {
-		return "", false
+		return "", false, false
 	}
 	if id, ok := r.external.LookupPath(query); ok {
-		return id, true
+		return id, false, true
 	}
-	return r.external.Lookup(scopeID, query)
+	id, ok = r.external.Lookup(scopeID, query)
+	return id, ok, ok
 }
 
 // resolveInStore is resolution against this store alone: exact id, then the

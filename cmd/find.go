@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -51,7 +52,12 @@ active, closed, or all.
 Matches collapse by containment — a hit whose ancestor also matched is folded
 into that ancestor, which carries a count of what it swallowed; -v lists every
 match flat. The outer block is capped at 20 entries, with an exact count of
-the remainder; -n sets another cap, or 0 for all of them.`,
+the remainder; --limit sets another cap, or 0 for all of them.
+
+-j/--json emits one merged array, each fiber in the coordinates it was found
+in and carrying the "store" that holds it. Being a wire, it is uncapped and
+unsuppressed by default: every status the filter asked for, every match — pass
+--limit explicitly to cap the outer half.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		root, err := resolveProjectRoot()
@@ -76,9 +82,17 @@ the remainder; -n sets another cap, or 0 for all of them.`,
 		if err != nil {
 			return err
 		}
-		suppressClosed := !statusExplicit
+		// --json is a wire: it carries every status the filter asked for and
+		// every match found, so machine consumers never have to guess what a
+		// human-facing trim removed.
+		suppressClosed := !statusExplicit && !jsonOutput
 
-		felts, err := storage.ListMetadata()
+		var felts []*felt.Felt
+		if jsonOutput {
+			felts, err = storage.ListMetadataWithModTime()
+		} else {
+			felts, err = storage.ListMetadata()
+		}
 		if err != nil {
 			return err
 		}
@@ -92,6 +106,29 @@ the remainder; -n sets another cap, or 0 for all of them.`,
 			return err
 		}
 		closedSuppressed += outerClosed
+
+		if jsonOutput {
+			outer := limitOuter(outerShown, cmd.Flags().Changed("limit"))
+			hits := make([]findHit, 0, len(shown)+len(outer))
+			for _, f := range shown {
+				hits = append(hits, findHit{Felt: f, Store: storage.Root()})
+			}
+			for _, f := range outer {
+				hits = append(hits, findHit{Felt: f, Store: outerRoot})
+			}
+			// --body hydrates only the fibers it had to read to match, so
+			// without it the bodies present are an accident of the search.
+			// Emit all of them or none.
+			if !findBody {
+				for _, hit := range hits {
+					hit.Body = ""
+				}
+			}
+			if err := attachShuttleResolution(feltsOf(hits)...); err != nil {
+				return err
+			}
+			return outputJSON(hits)
+		}
 
 		if len(shown) == 0 && len(outerShown) == 0 {
 			if query != "" {
@@ -108,17 +145,19 @@ the remainder; -n sets another cap, or 0 for all of them.`,
 			if len(shown) > 0 {
 				fmt.Println()
 			}
-			fmt.Printf("── elsewhere in %s ──\n", outerRoot)
-			limit := findLimit
-			printed := outerShown
-			if limit > 0 && len(printed) > limit {
-				printed = printed[:limit]
+			// With no local hits the block introduces nothing, so it names
+			// the store plainly rather than pointing "elsewhere" from nowhere.
+			if len(shown) > 0 {
+				fmt.Printf("── elsewhere in %s ──\n", outerRoot)
+			} else {
+				fmt.Printf("── in %s ──\n", outerRoot)
 			}
+			printed := limitOuter(outerShown, true)
 			for _, f := range printed {
 				fmt.Print(formatFeltTwoLine(f, outerCollapsed[f.ID]))
 			}
 			if remainder := len(outerShown) - len(printed); remainder > 0 {
-				fmt.Printf("… %d more — refine the query or pass -n 0\n", remainder)
+				fmt.Printf("… %d more — refine the query or pass --limit 0\n", remainder)
 			}
 		}
 
@@ -127,6 +166,53 @@ the remainder; -n sets another cap, or 0 for all of them.`,
 		}
 		return nil
 	},
+}
+
+// findHit is one fiber in --json, carrying the store that holds it alongside
+// the fiber's own fields. A merged array of these is the whole answer: local
+// hits under their local ids, outer hits under their full outer ids, and
+// `store` saying which coordinates each is in.
+type findHit struct {
+	*felt.Felt
+	Store string
+}
+
+// MarshalJSON splices `store` into the fiber's own JSON. Felt marshals itself
+// (field order, omitempty, the shuttle facet), so embedding alone would let
+// that method swallow the wrapper and drop the field entirely.
+func (h findHit) MarshalJSON() ([]byte, error) {
+	data, err := json.Marshal(h.Felt)
+	if err != nil {
+		return nil, err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return nil, err
+	}
+	store, err := json.Marshal(h.Store)
+	if err != nil {
+		return nil, err
+	}
+	fields["store"] = store
+	return json.Marshal(fields)
+}
+
+func feltsOf(hits []findHit) []*felt.Felt {
+	felts := make([]*felt.Felt, 0, len(hits))
+	for _, hit := range hits {
+		felts = append(felts, hit.Felt)
+	}
+	return felts
+}
+
+// limitOuter trims the outer block to --limit. apply is false for a wire that
+// was not explicitly capped: a human reads the first screen, a machine wants
+// the whole answer.
+func limitOuter(outer []*felt.Felt, apply bool) []*felt.Felt {
+	if !apply || findLimit <= 0 || len(outer) <= findLimit {
+		return outer
+	}
+	return outer[:findLimit]
 }
 
 // findOuterHits runs the same predicate against the enclosing store, minus
@@ -169,5 +255,7 @@ func init() {
 	findCmd.Flags().BoolVarP(&findRegex, "regex", "r", false, "Treat query as regular expression")
 	findCmd.Flags().StringArrayVar(&findHasFields, "has-field", nil, "Filter to fibers with this top-level frontmatter field (repeatable or comma-separated)")
 	findCmd.Flags().BoolVarP(&findVerbose, "verbose", "v", false, "List every match flat, without collapsing matches under a matching ancestor")
-	findCmd.Flags().IntVarP(&findLimit, "limit", "n", findOuterCap, "Cap on entries printed from the enclosing store (0 = no cap)")
+	// Long-only on purpose: ls's -n is --recent, and one letter meaning two
+	// different things across two sibling search verbs is a trap.
+	findCmd.Flags().IntVar(&findLimit, "limit", findOuterCap, "Cap on entries printed from the enclosing store (0 = no cap)")
 }

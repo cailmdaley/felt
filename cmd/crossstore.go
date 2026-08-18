@@ -15,14 +15,17 @@ import (
 // there is not refused — the command runs against the enclosing store, on the
 // fiber where it actually lives, and says so in its output.
 //
-// The safety of that rests on where these refs come from. Only an id the
-// ENCLOSING store resolved unambiguously arrives here: the basename rescue —
-// the "your path went stale, but the slug is unique" guess — never crosses
-// the boundary, because the external probe sits above it and a hit there
-// returns before the guess runs (see scopedIDResolver.resolve). There is no
-// path by which felt guesses at a fiber and then deletes or moves it. Keep it
-// that way: anything that widens what counts as an external hit also widens
-// what `rm` will delete.
+// What arrives here is exactly what the enclosing store itself would resolve
+// the query to, no more and no less. THIS store's basename rescue — the "your
+// path went stale, but the slug is unique" guess — never crosses the boundary:
+// the external probe sits above it and a hit there returns before the guess
+// runs (see scopedIDResolver.resolve). But the enclosing store's own resolver
+// does run, rescue included, so `felt rm portolan` from in here reaches
+// whatever `felt -C ~/loom rm portolan` would reach. That is the model working
+// as designed — one store, addressed from a view — and it means a fuzzy id is
+// as fuzzy here as it is there, no more forgiving and no more dangerous.
+// Anything that widens what counts as an external hit widens what `rm`
+// deletes; widen it only as far as the enclosing store's own answer.
 
 // fiberRef is a resolved command argument: which store holds the fiber, and
 // the id it has THERE. For a local fiber that is the store the user is

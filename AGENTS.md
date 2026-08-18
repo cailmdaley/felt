@@ -89,7 +89,8 @@ The verb contract, in one line each:
   `felt find` and the store it would search.
 - **`felt find` searches the store.** Local hits first, the rest of the
   enclosing store under a separator naming it, each by its full id there,
-  capped with an exact remainder count.
+  capped with an exact remainder count (`--limit`). `-j` merges both halves
+  into one array, each entry naming its `store`.
 - **An id reaches anywhere.** `show`, `edit`, `rm`, `nest`, `tree`, and every
   `felt shuttle` verb act on the fiber the id names, in the store that holds it.
 

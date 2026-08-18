@@ -34,19 +34,30 @@ func (s *Storage) ScanRelationships(targetID string) ([]Citation, []DataFlowCons
 	if err != nil {
 		return nil, nil, err
 	}
-	citations, consumers, err := RelationshipsFromFelts(felts, targetID, s.ExternalRefs())
+	return RelationshipsFromFelts(felts, targetID, s.ExternalRefs())
+}
+
+// ScanRelationshipsAcrossStore is ScanRelationships plus the enclosing store's
+// backlinks, labelled by their full outer ids.
+//
+// A view narrows what is listed, not what points at you, and in a substore the
+// fibers most likely to cite this one live in the rest of the loom. But the
+// answer costs a walk of every body out there — five thousand fibers, most of
+// a second — so it is not what the default `felt show` pays for on its way to
+// printing a fiber. Only the verbs whose whole subject IS the backlinks
+// (`--citations`, `--consumers`) ask for this; `-d summary`'s back-ref block
+// stays view-local, like the listing it sits in.
+func (s *Storage) ScanRelationshipsAcrossStore(targetID string) ([]Citation, []DataFlowConsumer, error) {
+	citations, consumers, err := s.ScanRelationships(targetID)
 	if err != nil {
 		return nil, nil, err
 	}
-
-	// A view narrows what is listed, not what points at you. In a substore the
-	// fibers most likely to cite this one live in the rest of the loom, and a
-	// back-reference block that cannot see them is answering a question nobody
-	// asked. So scan the enclosing store too, from ITS root, and label the hits
-	// by their full outer ids. Not a hot path — one walk, on an explicit ask.
 	outerCitations, outerConsumers, err := s.outerRelationships(targetID)
 	if err != nil {
 		return nil, nil, err
+	}
+	if len(outerCitations) == 0 && len(outerConsumers) == 0 {
+		return citations, consumers, nil
 	}
 	citations = append(citations, outerCitations...)
 	consumers = append(consumers, outerConsumers...)

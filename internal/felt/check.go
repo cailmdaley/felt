@@ -209,11 +209,14 @@ func checkRelationshipIntegrity(felts []*Felt, external *ExternalRefs) []CheckIs
 	_ = iterRefsResolved(felts, resolver, func(r resolvedRef) error {
 		// A reference that resolves to a fiber in the enclosing store is not
 		// broken — this store simply cannot see it. Silence, not an issue,
-		// EXCEPT where the external hit shadowed a local basename rescue: the
-		// reader loses a repair that used to fire, and that loss should be
-		// visible rather than silent.
+		// EXCEPT where an INFERRED external hit shadowed a local basename
+		// rescue: the reader loses a repair that used to fire, and that loss
+		// should be visible rather than silent. A link written out in full
+		// from the enclosing store's root is not that case — it is someone
+		// naming the fiber they meant, and it gets the same silence a healthy
+		// local link gets, local twin or no.
 		if errors.Is(r.ResolveErr, ErrExternalReference) {
-			if ref, ok := AsExternalReference(r.ResolveErr); ok {
+			if ref, ok := AsExternalReference(r.ResolveErr); ok && ref.Inferred {
 				if local := resolver.byBase[path.Base(cleanLookupQuery(r.RawTarget))]; len(local) == 1 {
 					issues = append(issues, CheckIssue{
 						Level:   CheckLevelInfo,

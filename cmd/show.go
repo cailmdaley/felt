@@ -107,14 +107,14 @@ Targeted views:
 				return outputShowBody(storage, f)
 			}
 			if showCitations {
-				citations, _, err := storage.ScanRelationships(f.ID)
+				citations, _, err := storage.ScanRelationshipsAcrossStore(f.ID)
 				if err != nil {
 					return err
 				}
 				return outputShowSelection(citations)
 			}
 			if showConsumers {
-				_, consumers, err := storage.ScanRelationships(f.ID)
+				_, consumers, err := storage.ScanRelationshipsAcrossStore(f.ID)
 				if err != nil {
 					return err
 				}

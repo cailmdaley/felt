@@ -149,7 +149,11 @@ reaches, rather than the boundary being negotiated flag by flag.
   full id there — ids that work as arguments right where you are. It takes
   ls's search-shaped flags (`-t`, `--body`, `-r`, `-e`, `--has-field`, `-s`,
   `-v`). The outer block is capped at 20 entries and closes with an exact
-  count of the remainder; `-n` sets another cap, `-n 0` lifts it.
+  count of the remainder; `--limit` sets another cap, `--limit 0` lifts it.
+  (Long-only: ls's `-n` is `--recent`, and one letter meaning two things
+  across two sibling search verbs is a trap.) `-j` emits one merged array,
+  each fiber in the coordinates it was found in and carrying the `store` that
+  holds it — uncapped and unsuppressed unless `--limit` is passed explicitly.
 - **`felt ls` is always view-local.** Every flag filters this store's own
   listing and nothing else, so it stays fast. It no longer widens into the
   enclosing store when a filter is present, and `--local` is gone with the
@@ -166,10 +170,15 @@ reaches, rather than the boundary being negotiated flag by flag.
   silent.
 - **`felt show --citations` / `--consumers`** additionally scan the enclosing
   store, so backlinks written from elsewhere in the loom appear under their
-  full outer ids.
-- **`felt check` reports the shadowed-rescue case** at info level: where a ref
-  resolves into the enclosing store AND a local basename rescue would have
-  fired, both candidates are named instead of the loss being silent.
+  full outer ids. Only those two selectors pay for it: the default `felt show`
+  and `-d summary`'s back-ref block stay view-local, since the outer scan
+  reads every body in the store.
+- **`felt check` reports the shadowed-rescue case** at info level: where the
+  enclosing store INFERS a ref's target — by its own scope and suffix rules,
+  not from a path written out in full — AND a local basename rescue would
+  have fired, both candidates are named instead of the loss being silent. A
+  link written as a full outer id is someone naming the fiber they meant, and
+  stays silent.
 
 #### Smaller CLI additions
 

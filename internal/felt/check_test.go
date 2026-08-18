@@ -286,16 +286,33 @@ func TestCheckSkipsEnclosingStoreReferences(t *testing.T) {
 		t.Fatalf("issue = %q, want the genuinely broken reference", errorIssues[0].Message)
 	}
 
-	// [[ai-futures/portolan/debug]] resolves external AND has a local basename
-	// twin (`debug`), so the external hit shadowed a rescue that used to fire.
-	// That is a silent loss, and check names both candidates rather than
-	// staying quiet about it.
-	if len(infoIssues) != 1 {
-		t.Fatalf("want one shadowed-rescue info issue, got %v", issues)
+	// [[ai-futures/portolan/debug]] names the fiber's path exactly, from the
+	// enclosing store's root — someone wrote the id they meant. The local
+	// `debug` twin does not make that remarkable, so check stays silent.
+	if len(infoIssues) != 0 {
+		t.Fatalf("a fully-qualified outer link should be silent, got %v", infoIssues)
 	}
-	for _, want := range []string{"ai-futures/portolan/debug", "debug", "shadow"} {
-		if !strings.Contains(infoIssues[0].Message, want) {
-			t.Fatalf("info issue = %q, want it to name %q", infoIssues[0].Message, want)
+}
+
+// TestCheckReportsShadowedBasenameRescue: when the enclosing store INFERS the
+// target — its own scope/suffix/basename rules, not a path written out in
+// full — and a local basename rescue would otherwise have fired, the reader
+// loses a repair. Check names both candidates rather than losing it silently.
+func TestCheckReportsShadowedBasenameRescue(t *testing.T) {
+	_, subProj := newSubstoreFixture(t)
+	external := NewStorage(subProj).ExternalRefs()
+
+	issues := Check([]*Felt{
+		{ID: "debug", Name: "Debug"},
+		{ID: "notes/runbook", Name: "Runbook", Body: "Partial: [[portolan/debug]]."},
+	}, external)
+
+	if len(issues) != 1 || issues[0].Level != CheckLevelInfo {
+		t.Fatalf("want one info issue, got %v", issues)
+	}
+	for _, want := range []string{"ai-futures/portolan/debug", "shadow", "debug"} {
+		if !strings.Contains(issues[0].Message, want) {
+			t.Fatalf("info issue = %q, want it to name %q", issues[0].Message, want)
 		}
 	}
 }

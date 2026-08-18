@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -84,7 +85,7 @@ func TestFindAcceptsSearchShapedFilters(t *testing.T) {
 			if err != nil {
 				t.Fatalf("find %v: %v\n%s", filter, err, out)
 			}
-			if !strings.Contains(out, "── elsewhere in ") {
+			if !strings.Contains(out, "── in ") {
 				t.Fatalf("filter %v did not reach the enclosing store:\n%s", filter, out)
 			}
 		})
@@ -111,19 +112,19 @@ func TestFindCapsTheOuterBlock(t *testing.T) {
 	if strings.Count(out, "swarm-") < findOuterCap {
 		t.Fatalf("find printed fewer than the cap:\n%s", out)
 	}
-	if !strings.Contains(out, "… 5 more — refine the query or pass -n 0") {
+	if !strings.Contains(out, "… 5 more — refine the query or pass --limit 0") {
 		t.Fatalf("missing exact remainder line:\n%s", out)
 	}
 
-	uncapped, err := runCommand(t, subProj, "find", "swarm-", "-n", "0")
+	uncapped, err := runCommand(t, subProj, "find", "swarm-", "--limit", "0")
 	if err != nil {
-		t.Fatalf("find -n 0: %v\n%s", err, uncapped)
+		t.Fatalf("find --limit 0: %v\n%s", err, uncapped)
 	}
 	if strings.Contains(uncapped, "more — refine the query") {
-		t.Fatalf("-n 0 still capped:\n%s", uncapped)
+		t.Fatalf("--limit 0 still capped:\n%s", uncapped)
 	}
 	if !strings.Contains(uncapped, "swarm-24") {
-		t.Fatalf("-n 0 lost the tail:\n%s", uncapped)
+		t.Fatalf("--limit 0 lost the tail:\n%s", uncapped)
 	}
 }
 
@@ -200,5 +201,78 @@ func TestFindClosedHintCountsBothStores(t *testing.T) {
 	}
 	if !strings.Contains(closed, "retired-debug") {
 		t.Fatalf("-s closed did not surface it:\n%s", closed)
+	}
+}
+
+// TestFindJSONIsOneMergedArray: -j is a wire. One array, each fiber in the
+// coordinates it was printed in, each naming the store that holds it — and
+// uncapped, because a machine consumer wants the whole answer.
+func TestFindJSONIsOneMergedArray(t *testing.T) {
+	loomProj, subProj := newCrossStoreFixture(t)
+	loom := felt.NewStorage(loomProj)
+	for i := 0; i < 25; i++ {
+		writeFixtureFelt(t, loom, fmt.Sprintf("debug-%02d", i), fmt.Sprintf("Debug %d", i))
+	}
+	defer saveFindGlobals()()
+
+	out, err := runCommand(t, subProj, "find", "debug", "--json")
+	if err != nil {
+		t.Fatalf("find --json: %v\n%s", err, out)
+	}
+	var hits []struct {
+		ID    string `json:"id"`
+		Store string `json:"store"`
+	}
+	if err := json.Unmarshal([]byte(out), &hits); err != nil {
+		t.Fatalf("find --json did not emit JSON: %v\n%s", err, out)
+	}
+	if len(hits) < 26 {
+		t.Fatalf("--json should be uncapped, got %d entries", len(hits))
+	}
+
+	byID := map[string]string{}
+	for _, hit := range hits {
+		byID[hit.ID] = hit.Store
+	}
+	localRoot := felt.NewStorage(subProj).Root()
+	if got := byID["debug"]; got != localRoot {
+		t.Fatalf("local hit store = %q, want %q", got, localRoot)
+	}
+	if got := byID["ai-futures/portolan/debug"]; got != loomRoot(t, subProj) {
+		t.Fatalf("outer hit store = %q, want the enclosing root", got)
+	}
+	if _, ok := byID["ai-futures/felt/debug"]; ok {
+		t.Fatalf("--json repeats a local fiber under its outer id: %v", byID)
+	}
+
+	// An explicit --limit still caps the outer half, for a consumer that asks.
+	capped, err := runCommand(t, subProj, "find", "debug", "--json", "--limit", "3")
+	if err != nil {
+		t.Fatalf("find --json --limit 3: %v\n%s", err, capped)
+	}
+	var cappedHits []struct{}
+	if err := json.Unmarshal([]byte(capped), &cappedHits); err != nil {
+		t.Fatalf("capped --json: %v\n%s", err, capped)
+	}
+	if len(cappedHits) >= len(hits) {
+		t.Fatalf("--limit 3 did not cap the wire: %d vs %d", len(cappedHits), len(hits))
+	}
+}
+
+// TestFindWithoutLocalHitsNamesTheStorePlainly: "elsewhere" reads as a
+// contrast with something above it. With no local hits there is nothing above.
+func TestFindWithoutLocalHitsNamesTheStorePlainly(t *testing.T) {
+	_, subProj := newCrossStoreFixture(t)
+	defer saveFindGlobals()()
+
+	out, err := runCommand(t, subProj, "find", "commons")
+	if err != nil {
+		t.Fatalf("find commons: %v\n%s", err, out)
+	}
+	if strings.Contains(out, "elsewhere") {
+		t.Fatalf("no local hits, so nothing to be elsewhere from:\n%s", out)
+	}
+	if !strings.Contains(out, "── in "+loomRoot(t, subProj)+" ──") {
+		t.Fatalf("missing the plain store banner:\n%s", out)
 	}
 }
