@@ -1,10 +1,10 @@
 #!/bin/sh
-# install.sh — install the felt CLI (and optionally the Shuttle daemon).
+# install.sh — install the felt CLI (and optionally the shuttle daemon).
 #
 #   FELT_REPO         source repo (default cailmdaley/felt)
 #   FELT_INSTALL_DIR  where the felt binary lands
 #   FELT_VERSION      install this exact tag instead of the latest release
-#   SHUTTLE=1         also install the Shuttle daemon
+#   SHUTTLE=1         also install the shuttle daemon
 #   SHUTTLE_HOME      where the daemon lands (default ~/.local/share/shuttle)
 set -eu
 
@@ -93,15 +93,15 @@ case ":${PATH}:" in
   *) echo "Add ${INSTALL_DIR} to your PATH:  export PATH=\"${INSTALL_DIR}:\$PATH\"" ;;
 esac
 
-# ── Shuttle daemon (opt-in) ────────────────────────────────────────────────
-# SHUTTLE=1 also installs the Shuttle daemon: an ERTS-bundled Mix release
+# ── shuttle daemon (opt-in) ────────────────────────────────────────────────
+# SHUTTLE=1 also installs the shuttle daemon: an ERTS-bundled Mix release
 # fetched from the same GitHub release — no Erlang, Elixir, or Node needed.
 # It lands in $SHUTTLE_HOME (default ~/.local/share/shuttle); the daemon's
 # front door is $SHUTTLE_HOME/bin/shuttle. Runtime prerequisites: tmux + felt.
 if [ "${SHUTTLE:-0}" = "1" ]; then
   SHUTTLE_HOME="${SHUTTLE_HOME:-${HOME}/.local/share/shuttle}"
 
-  echo "Installing Shuttle daemon ${TAG} to ${SHUTTLE_HOME}..."
+  echo "Installing shuttle daemon ${TAG} to ${SHUTTLE_HOME}..."
   download_asset "shuttle_${ARCHIVE_OS}_${ARCHIVE_ARCH}.tar.gz" "$TMPDIR/shuttle.tar.gz"
   tar xzf "$TMPDIR/shuttle.tar.gz" -C "$TMPDIR"
   rm -rf "$SHUTTLE_HOME"
@@ -140,7 +140,7 @@ if [ "${SHUTTLE:-0}" = "1" ]; then
   # rather install successfully than block on a package manager.
   if ! command -v tmux >/dev/null 2>&1; then
     echo
-    echo "⚠️  tmux is not installed. Shuttle runs every worker inside a tmux"
+    echo "⚠️  tmux is not installed. shuttle runs every worker inside a tmux"
     echo "    session, so without it the daemon starts and shows a board but"
     echo "    cannot dispatch any work."
     case "$OS" in
@@ -150,7 +150,7 @@ if [ "${SHUTTLE:-0}" = "1" ]; then
     echo
   fi
 
-  echo "Shuttle daemon ${TAG} installed."
+  echo "shuttle daemon ${TAG} installed."
   echo "  Start it:   FELT_STORES=<your-store> ${SHUTTLE_HOME}/bin/shuttle start"
   # The tarball carries its own supervisor templates (share/) and the shim
   # renders + loads them, so a fetched install can survive a logout without a
@@ -166,7 +166,7 @@ fi
 # fibers at session start and gate non-felt tool use until the felt skill
 # activates; a PostToolUse hook stamps updated-at when the agent edits a
 # fiber file directly; and an activity-event hook records harness events
-# for Shuttle, writing nothing unless ~/.shuttle exists. They're how
+# for shuttle, writing nothing unless ~/.shuttle exists. They're how
 # fibers stay visible across sessions without you needing to mention them.
 # Setup commands are idempotent (re-running them refreshes registration)
 # and the install can be cleanly reversed via `felt uninstall`.
