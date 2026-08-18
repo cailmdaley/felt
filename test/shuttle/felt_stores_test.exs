@@ -313,22 +313,31 @@ defmodule Shuttle.FeltStoresTest do
 
     test "a scan that never returns does not hold the caller past the deadline" do
       loom = tmp_dir()
+      project = tmp_dir()
       File.mkdir_p!(Path.join(loom, ".felt"))
+      File.mkdir_p!(Path.join(project, ".felt"))
+      File.ln_s!(Path.join(project, ".felt"), Path.join([loom, ".felt", "shapepipe"]))
       System.put_env("FELT_STORES", loom)
 
-      # Claim the single-flight lock and never release it: from `configured_hosts/0`'s
-      # side this is indistinguishable from a walk parked in the kernel waiting on a
-      # consent dialog — no scan will run, and no result will ever arrive.
+      # Claim the single-flight lock FOR THIS EXACT BASE and never release it:
+      # from `configured_hosts/0`'s side this is indistinguishable from a walk
+      # parked in the kernel waiting on a consent dialog — no scan will run, and
+      # no result will ever arrive. It must be *this* base, because a caller with
+      # a different one is entitled to steal the lock and scan anyway (see
+      # `start_expansion_scan/1`), which would make this test pass vacuously.
       :persistent_term.put(
         {Shuttle.FeltStores, :expansion_scan},
-        System.monotonic_time(:millisecond)
+        {FeltStores.configured_base_hosts(), System.monotonic_time(:millisecond)}
       )
 
       Application.put_env(:shuttle, :store_scan_wait_ms, 50)
 
       {elapsed_us, hosts} = :timer.tc(&FeltStores.configured_hosts/0)
 
+      # The substore is genuinely absent, which is what proves no scan ran: a
+      # scan would have discovered `project` through the symlink.
       assert hosts == [Path.expand(loom)]
+      refute Enum.any?(hosts, &same_dir?(&1, project))
       assert div(elapsed_us, 1000) < 1_000
     end
   end

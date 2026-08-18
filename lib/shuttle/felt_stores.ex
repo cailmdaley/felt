@@ -112,12 +112,22 @@ defmodule Shuttle.FeltStores do
   # nothing and a caller that never existed still gets the scan done. Waiting on
   # a message would tie the result to one process's mailbox and lose it when a
   # request process dies at its own timeout.
+  #
+  # Re-arming the scan on every pass is the subtle half. The single-flight lock
+  # is held per SCAN, not per base, so a caller whose base is cold can find the
+  # lock held by a routine rescan of the PREVIOUS base — its own scan then never
+  # starts, and without this it would sit out the whole deadline waiting for a
+  # result nobody was computing, on a perfectly healthy filesystem. (Found as a
+  # test flake, which is what that failure mode looks like from outside: change
+  # `FELT_STORES` while a rescan is in flight and the next read is unexpanded.)
   defp await_expansion(base, deadline) do
     case :persistent_term.get(@expanded_cache_key, :none) do
       {^base, expanded, _} ->
         expanded
 
       _ ->
+        start_expansion_scan(base)
+
         if System.monotonic_time(:millisecond) >= deadline do
           Logger.warning(
             "felt-store scan still running after #{scan_wait_ms()}ms; serving the unexpanded " <>
@@ -141,19 +151,26 @@ defmodule Shuttle.FeltStores do
   # not answering.
   defp unexpanded(base), do: base |> Enum.map(&Path.expand/1) |> Enum.uniq()
 
-  # Single-flight: at most one scan in flight per `@scan_lock_ttl_ms`. The check
-  # is not atomic across processes, so a burst can race two scans through — that
-  # is harmless (both write the same answer) and cheaper than serializing every
-  # caller through a process that a wedged walk could itself block.
+  # Single-flight, and single-flight *per base*: at most one scan of a given
+  # store list in flight per `@scan_lock_ttl_ms`. The lock carries the base it
+  # was taken for, so a caller whose base differs STEALS it and scans anyway —
+  # otherwise a store wedged on a consent dialog would starve every later
+  # configuration change for the length of the TTL, including one that added a
+  # perfectly healthy store.
+  #
+  # The check is not atomic across processes, so a burst can race two scans
+  # through. That is harmless — both write the same answer — and cheaper than
+  # serializing every caller through a process that a wedged walk could itself
+  # block, which is the failure mode being defended against.
   defp start_expansion_scan(base) do
     now = System.monotonic_time(:millisecond)
 
     case :persistent_term.get(@scan_lock_key, nil) do
-      started when is_integer(started) and now - started < @scan_lock_ttl_ms ->
+      {^base, started} when now - started < @scan_lock_ttl_ms ->
         :ok
 
       _ ->
-        :persistent_term.put(@scan_lock_key, now)
+        :persistent_term.put(@scan_lock_key, {base, now})
 
         spawn_expansion_scan(base)
     end
@@ -177,7 +194,13 @@ defmodule Shuttle.FeltStores do
     :persistent_term.put(@scan_report_key, %{scanned_ms: div(scanned_us, 1000), stores: timings})
     log_scan(div(scanned_us, 1000), timings)
   after
-    :persistent_term.erase(@scan_lock_key)
+    # Release only a lock we still hold: a later caller with a different base may
+    # have stolen it while we were out, and erasing theirs would just permit a
+    # redundant rescan.
+    case :persistent_term.get(@scan_lock_key, nil) do
+      {^base, _started} -> :persistent_term.erase(@scan_lock_key)
+      _ -> :ok
+    end
   end
 
   @doc """
@@ -198,7 +221,7 @@ defmodule Shuttle.FeltStores do
   @spec scan_in_flight?() :: boolean()
   def scan_in_flight? do
     case :persistent_term.get(@scan_lock_key, nil) do
-      started when is_integer(started) ->
+      {_base, started} ->
         System.monotonic_time(:millisecond) - started < @scan_lock_ttl_ms
 
       _ ->
