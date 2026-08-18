@@ -285,7 +285,7 @@ defmodule Shuttle.FeltStoresTest do
     setup do
       on_exit(fn ->
         Application.delete_env(:shuttle, :store_scan_wait_ms)
-        :persistent_term.erase({Shuttle.FeltStores, :expansion_scan})
+        :persistent_term.erase({Shuttle.FeltStores, :expansion_scans})
       end)
 
       :ok
@@ -322,18 +322,18 @@ defmodule Shuttle.FeltStoresTest do
       File.ln_s!(Path.join(project, ".felt"), Path.join([loom, ".felt", "shapepipe"]))
       System.put_env("FELT_STORES", loom)
 
-      # Claim the single-flight lock FOR THIS EXACT BASE and never release it:
+      # Put a scan of THIS EXACT BASE on the roster and never let it finish:
       # from `configured_hosts/0`'s side this is indistinguishable from a walk
       # parked in the kernel waiting on a consent dialog — no scan will run, and
       # no result will ever arrive. It must be *this* base, because a caller with
-      # a different one is entitled to steal the lock and scan anyway (see
+      # a different one is entitled to start its own scan (see
       # `start_expansion_scan/1`), which would make this test pass vacuously.
       parked = spawn(fn -> Process.sleep(:infinity) end)
       on_exit(fn -> Process.exit(parked, :kill) end)
 
       :persistent_term.put(
-        {Shuttle.FeltStores, :expansion_scan},
-        {FeltStores.configured_base_hosts(), System.monotonic_time(:millisecond), parked}
+        {Shuttle.FeltStores, :expansion_scans},
+        [{parked, FeltStores.configured_base_hosts(), System.monotonic_time(:millisecond)}]
       )
 
       Application.put_env(:shuttle, :store_scan_wait_ms, 50)
@@ -359,8 +359,11 @@ defmodule Shuttle.FeltStoresTest do
       # settles into within a minute. Waiting again would spend the whole
       # deadline on every read for as long as the dialog goes unanswered.
       :persistent_term.put(
-        {Shuttle.FeltStores, :expansion_scan},
-        {FeltStores.configured_base_hosts(), System.monotonic_time(:millisecond) - 10_000, parked}
+        {Shuttle.FeltStores, :expansion_scans},
+        [
+          {parked, FeltStores.configured_base_hosts(),
+           System.monotonic_time(:millisecond) - 10_000}
+        ]
       )
 
       Application.put_env(:shuttle, :store_scan_wait_ms, 500)
@@ -384,8 +387,11 @@ defmodule Shuttle.FeltStoresTest do
       # schedulers), so a fourth base does not get a fourth probe.
       parked = for _ <- 1..3, do: spawn(fn -> Process.sleep(:infinity) end)
       on_exit(fn -> Enum.each(parked, &Process.exit(&1, :kill)) end)
-      :persistent_term.put({Shuttle.FeltStores, :expansion_scan_pids}, parked)
-      on_exit(fn -> :persistent_term.erase({Shuttle.FeltStores, :expansion_scan_pids}) end)
+
+      now = System.monotonic_time(:millisecond)
+      roster = for {pid, i} <- Enum.with_index(parked), do: {pid, ["/other/store#{i}"], now}
+      :persistent_term.put({Shuttle.FeltStores, :expansion_scans}, roster)
+      on_exit(fn -> :persistent_term.erase({Shuttle.FeltStores, :expansion_scans}) end)
 
       Application.put_env(:shuttle, :store_scan_wait_ms, 100)
 
@@ -400,6 +406,37 @@ defmodule Shuttle.FeltStoresTest do
       refute Enum.any?(FeltStores.configured_hosts(), &same_dir?(&1, project))
     end
 
+    test "a live scan of MY base is waited for even when the budget is spent" do
+      loom = tmp_dir()
+      File.mkdir_p!(Path.join(loom, ".felt"))
+      System.put_env("FELT_STORES", loom)
+      :persistent_term.erase({Shuttle.FeltStores, :expanded_hosts})
+
+      # The budget is spent by three scans of OTHER bases, and a fourth scan —
+      # of this caller's base — is genuinely in flight and recent. The budget
+      # must not be what this caller consults: the answer it is waiting for is
+      # already being computed, so serving the unexpanded base immediately would
+      # be staleness bought for nothing.
+      scanners = for _ <- 1..4, do: spawn(fn -> Process.sleep(:infinity) end)
+      on_exit(fn -> Enum.each(scanners, &Process.exit(&1, :kill)) end)
+      [mine | others] = scanners
+      now = System.monotonic_time(:millisecond)
+
+      roster =
+        [{mine, FeltStores.configured_base_hosts(), now}] ++
+          for({pid, i} <- Enum.with_index(others), do: {pid, ["/other/store#{i}"], now})
+
+      :persistent_term.put({Shuttle.FeltStores, :expansion_scans}, roster)
+      on_exit(fn -> :persistent_term.erase({Shuttle.FeltStores, :expansion_scans}) end)
+
+      Application.put_env(:shuttle, :store_scan_wait_ms, 300)
+
+      {elapsed_us, hosts} = :timer.tc(&FeltStores.configured_hosts/0)
+
+      assert hosts == [Path.expand(loom)]
+      assert div(elapsed_us, 1000) >= 300
+    end
+
     test "a refused probe costs the caller nothing, rather than its whole deadline" do
       loom = tmp_dir()
       File.mkdir_p!(Path.join(loom, ".felt"))
@@ -410,12 +447,14 @@ defmodule Shuttle.FeltStoresTest do
       # anyway is what a wedged store used to cost every read at boot — the
       # deadline, on every request, for as long as the dialog went unanswered.
       :persistent_term.erase({Shuttle.FeltStores, :expanded_hosts})
-      :persistent_term.erase({Shuttle.FeltStores, :expansion_scan})
 
       parked = for _ <- 1..3, do: spawn(fn -> Process.sleep(:infinity) end)
       on_exit(fn -> Enum.each(parked, &Process.exit(&1, :kill)) end)
-      :persistent_term.put({Shuttle.FeltStores, :expansion_scan_pids}, parked)
-      on_exit(fn -> :persistent_term.erase({Shuttle.FeltStores, :expansion_scan_pids}) end)
+
+      now = System.monotonic_time(:millisecond)
+      roster = for {pid, i} <- Enum.with_index(parked), do: {pid, ["/other/store#{i}"], now}
+      :persistent_term.put({Shuttle.FeltStores, :expansion_scans}, roster)
+      on_exit(fn -> :persistent_term.erase({Shuttle.FeltStores, :expansion_scans}) end)
 
       Application.put_env(:shuttle, :store_scan_wait_ms, 2_000)
 

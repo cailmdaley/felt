@@ -26,9 +26,8 @@ defmodule Shuttle.FeltStores do
   @type host_list :: [String.t()]
 
   @expanded_cache_key {__MODULE__, :expanded_hosts}
-  @scan_lock_key {__MODULE__, :expansion_scan}
   @scan_report_key {__MODULE__, :expansion_scan_report}
-  @scan_pids_key {__MODULE__, :expansion_scan_pids}
+  @scan_roster_key {__MODULE__, :expansion_scans}
   @expanded_cache_ttl_ms 30_000
 
   # How long a cold caller — one with no expansion cached for the CURRENT base
@@ -89,12 +88,12 @@ defmodule Shuttle.FeltStores do
       deadline the *unexpanded* base list is served: correct, just missing
       symlinked substores, and self-healing the moment the scan lands.
 
-  The scan is single-flight *per base* and the lock is held until the scanner
+  The scan is single-flight *per base*, and a scan stays on the roster until it
   answers or dies, so a stalled store yields exactly one parked task however
   many requests arrive — while a caller whose store list differs can still get
   its own scan started rather than waiting out the stall. At most
-  #{@max_parked_scans} scans may be parked at once; past that, callers serve the
-  base list and nobody issues another probe into a filesystem that is not
+  #{@max_parked_scans} scans may be in flight at once; past that, callers serve
+  the base list and nobody issues another probe into a filesystem that is not
   answering.
   """
   @spec configured_hosts() :: host_list()
@@ -120,10 +119,11 @@ defmodule Shuttle.FeltStores do
   # A cold caller waits out the deadline only when there is a scan that could
   # plausibly answer within it. Two ways there is not:
   #
-  #   * `:refused` — the parked-scan budget is spent, so nothing was started and
-  #     nothing is going to arrive. Waiting here would charge every read the full
-  #     deadline for as long as the stall lasts, which is the availability this
-  #     module exists to protect.
+  #   * `:refused` — the parked-scan budget is spent. A scan for THIS base would
+  #     have been reported `:in_flight` before the budget was ever consulted, so
+  #     `:refused` means nothing is running for it and nothing is going to
+  #     arrive. Waiting would charge every read the full deadline for as long as
+  #     the stall lasts, which is the availability this module exists to protect.
   #   * a scan for this base that has ALREADY been out longer than the wait. It
   #     may still land, but not within a window it has visibly overrun.
   #
@@ -138,13 +138,13 @@ defmodule Shuttle.FeltStores do
   # a message would tie the result to one process's mailbox and lose it when a
   # request process dies at its own timeout.
   #
-  # Re-arming the scan on every pass is the subtle half. The single-flight lock
-  # is held per SCAN, not per base, so a caller whose base is cold can find the
-  # lock held by a routine rescan of the PREVIOUS base — its own scan then never
-  # starts, and without this it would sit out the whole deadline waiting for a
-  # result nobody was computing, on a perfectly healthy filesystem. (Found as a
-  # test flake, which is what that failure mode looks like from outside: change
-  # `FELT_STORES` while a rescan is in flight and the next read is unexpanded.)
+  # Re-arming on every pass is the subtle half, and it is cheap: the roster is
+  # per base, so this is a no-op while our own scan is alive and starts a
+  # replacement the moment one dies without writing an answer. Without it a
+  # caller could sit out the whole deadline waiting on a result nobody was
+  # computing. (Found as a test flake, which is what that failure mode looks
+  # like from outside: change `FELT_STORES` while a rescan is in flight and the
+  # next read is unexpanded.)
   defp await_expansion(base, deadline) do
     case :persistent_term.get(@expanded_cache_key, :none) do
       {^base, expanded, _} ->
@@ -176,20 +176,25 @@ defmodule Shuttle.FeltStores do
   # not answering.
   defp unexpanded(base), do: base |> Enum.map(&Path.expand/1) |> Enum.uniq()
 
-  # Single-flight, and single-flight *per base*: one scan of a given store list
-  # at a time. The lock carries the base it was taken for, so a caller whose
-  # base differs STEALS it and scans anyway — otherwise a store wedged on a
-  # consent dialog would starve every later configuration change, including one
-  # that added a perfectly healthy store.
+  # The roster of scans currently in flight — `{pid, base, started_ms}` each, in
+  # `:persistent_term`. It is the ONLY record of who is scanning what: single
+  # flight, the parked budget, "is one running", and "has this one overrun" are
+  # all questions about this list, so they cannot disagree with each other.
   #
-  # The lock is held until the scanning process ANSWERS OR DIES — liveness, not
-  # a timer. A timer was the earlier design and it is the wrong instrument here:
-  # a wedged walk is not slow, it is waiting on a human, so expiring the lock
-  # every 60 s just issues a second probe that parks next to the first. Ten
-  # parked probes wedge every filesystem call in the VM, so a timer turns one
-  # unanswered consent dialog into a dead node in ten minutes. Liveness gets the
-  # crash case right too — a killed scanner releases its lock immediately, where
-  # a timer would have made every caller wait out the TTL.
+  # Single-flight is *per base*: a caller whose base is already being scanned
+  # waits for that scan, and a caller with a DIFFERENT base starts its own
+  # rather than waiting — otherwise a store wedged on a consent dialog would
+  # starve every later configuration change, including one that added a
+  # perfectly healthy store.
+  #
+  # Membership ends when the scanner ANSWERS OR DIES — liveness, not a timer. A
+  # timer was the earlier design and it is the wrong instrument here: a wedged
+  # walk is not slow, it is waiting on a human, so expiring the entry every 60 s
+  # just issues a second probe that parks next to the first. Ten parked probes
+  # wedge every filesystem call in the VM, so a timer turns one unanswered
+  # consent dialog into a dead node in ten minutes. Liveness gets the crash case
+  # right too — a killed scanner leaves the roster immediately, where a timer
+  # would have made every caller wait out the TTL.
   #
   # The check is not atomic across processes, so a burst can race two scans
   # through. That is harmless — both write the same answer — and cheaper than
@@ -197,21 +202,18 @@ defmodule Shuttle.FeltStores do
   # block, which is the failure mode being defended against.
   @spec start_expansion_scan([String.t()]) :: :started | :in_flight | :refused
   defp start_expansion_scan(base) do
-    case :persistent_term.get(@scan_lock_key, nil) do
-      {^base, _started, pid} ->
-        if Process.alive?(pid), do: :in_flight, else: arm_expansion_scan(base)
-
-      _ ->
-        arm_expansion_scan(base)
+    case scan_for(base) do
+      nil -> arm_expansion_scan(base)
+      _entry -> :in_flight
     end
   end
 
   defp arm_expansion_scan(base) do
-    parked = live_scans()
+    running = live_scans()
 
-    if length(parked) >= @max_parked_scans do
+    if length(running) >= @max_parked_scans do
       Logger.warning(
-        "#{length(parked)} felt-store scans are still parked in the filesystem; not starting " <>
+        "#{length(running)} felt-store scans are still parked in the filesystem; not starting " <>
           "another for #{Enum.join(base, ", ")}. On macOS this is a consent dialog waiting on " <>
           "a human — look behind your other windows. Store lists stay as they were until one " <>
           "of the parked scans returns."
@@ -219,85 +221,88 @@ defmodule Shuttle.FeltStores do
 
       :refused
     else
-      spawn_expansion_scan(base, parked)
+      spawn_expansion_scan(base, running)
     end
   end
 
   # No task supervisor — a unit test with the app not started, a supervisor
   # mid-restart — falls back to today's inline behaviour rather than never
   # scanning at all. The caller blocks, exactly as it always did.
-  defp spawn_expansion_scan(base, parked) do
+  defp spawn_expansion_scan(base, running) do
     case Task.Supervisor.start_child(Shuttle.TaskSupervisor, fn -> run_expansion_scan(base) end) do
       {:ok, pid} ->
-        hold_scan_lock(base, pid)
-        :persistent_term.put(@scan_pids_key, [pid | parked])
+        enroll_scan(pid, base, running)
         :started
 
       _ ->
-        run_expansion_scan_inline(base)
+        run_expansion_scan_inline(base, running)
     end
   catch
-    :exit, _ -> run_expansion_scan_inline(base)
+    :exit, _ -> run_expansion_scan_inline(base, running)
   end
 
-  defp run_expansion_scan_inline(base) do
-    hold_scan_lock(base, self())
+  # Ran here and now, so by the time the caller reads the answer it is already
+  # in the cache — `await_expansion/2` checks the cache before the deadline and
+  # returns on its first pass.
+  defp run_expansion_scan_inline(base, running) do
+    enroll_scan(self(), base, running)
     run_expansion_scan(base)
     :started
   end
 
-  defp hold_scan_lock(base, pid) do
-    :persistent_term.put(@scan_lock_key, {base, System.monotonic_time(:millisecond), pid})
+  defp enroll_scan(pid, base, running) do
+    entry = {pid, base, System.monotonic_time(:millisecond)}
+    :persistent_term.put(@scan_roster_key, [entry | running])
   end
 
-  # The scanners still running. Pruned by liveness on every read, which is what
-  # makes the budget self-healing: a scanner that died without releasing (killed
+  # The scans still running. Pruned by liveness on every read, which is what
+  # makes the budget self-healing: a scanner that died without leaving (killed
   # supervisor, brutal shutdown) stops counting the moment anyone looks.
   defp live_scans do
-    @scan_pids_key
+    @scan_roster_key
     |> :persistent_term.get([])
-    |> Enum.filter(&Process.alive?/1)
+    |> Enum.filter(fn {pid, _base, _started} -> Process.alive?(pid) end)
   end
 
-  # True when a live scan for this base has been out longer than a caller is
+  # The live scan of exactly this base, newest first, or nil.
+  defp scan_for(base) do
+    Enum.find(live_scans(), fn {_pid, scanned_base, _started} -> scanned_base == base end)
+  end
+
+  # True when the live scan for this base has been out longer than a caller is
   # willing to wait — so waiting for it again would just spend the deadline.
   defp scan_overdue?(base) do
-    case :persistent_term.get(@scan_lock_key, nil) do
-      {^base, started, pid} ->
-        Process.alive?(pid) and System.monotonic_time(:millisecond) - started >= scan_wait_ms()
-
-      _ ->
-        false
+    case scan_for(base) do
+      {_pid, _base, started} -> System.monotonic_time(:millisecond) - started >= scan_wait_ms()
+      nil -> false
     end
   end
 
   defp run_expansion_scan(base) do
     {scanned_us, {expanded, timings}} = :timer.tc(fn -> expand_with_timings(base) end)
-    :persistent_term.put(@expanded_cache_key, {base, expanded, System.monotonic_time(:millisecond)})
+
+    :persistent_term.put(
+      @expanded_cache_key,
+      {base, expanded, System.monotonic_time(:millisecond)}
+    )
+
     :persistent_term.put(@scan_report_key, %{scanned_ms: div(scanned_us, 1000), stores: timings})
     log_scan(div(scanned_us, 1000), timings)
   after
-    release_scan_lock(base)
+    leave_scan_roster()
   end
 
-  # Release only a lock we still hold: a later caller with a different base may
-  # have stolen it while we were out, and erasing theirs would just permit a
-  # redundant rescan. Leaving the parked-scan list is separate and
-  # unconditional — this process is no longer parked whoever holds the lock.
-  defp release_scan_lock(base) do
-    case :persistent_term.get(@scan_lock_key, nil) do
-      {^base, _started, _pid} -> :persistent_term.erase(@scan_lock_key)
-      _ -> :ok
-    end
-
+  defp leave_scan_roster do
     me = self()
-    parked = :persistent_term.get(@scan_pids_key, [])
-    remaining = Enum.reject(parked, &(&1 == me or not Process.alive?(&1)))
+    roster = :persistent_term.get(@scan_roster_key, [])
+
+    remaining =
+      Enum.reject(roster, fn {pid, _base, _started} -> pid == me or not Process.alive?(pid) end)
 
     # `:persistent_term.put/2` is a global operation; skip it when the list is
     # already what we would write, which is the common case on a healthy box
     # where the scanner that just finished was the only one listed.
-    if remaining != parked, do: :persistent_term.put(@scan_pids_key, remaining), else: :ok
+    if remaining != roster, do: :persistent_term.put(@scan_roster_key, remaining), else: :ok
   end
 
   @doc """
@@ -316,12 +321,7 @@ defmodule Shuttle.FeltStores do
   stale, and on macOS a consent dialog may be waiting on a human.
   """
   @spec scan_in_flight?() :: boolean()
-  def scan_in_flight? do
-    case :persistent_term.get(@scan_lock_key, nil) do
-      {_base, _started, pid} -> Process.alive?(pid)
-      _ -> false
-    end
-  end
+  def scan_in_flight?, do: live_scans() != []
 
   # Name the slow store, not just the slow scan: "which one" is the first thing
   # an operator staring at a stalled board needs, and on macOS it is also the
