@@ -60,6 +60,16 @@ defmodule Shuttle.BoundedIO do
         # Deliberately not `Task.shutdown/2`: it would wait on a process that
         # cannot leave a blocking filesystem call, reintroducing the very stall
         # this function exists to bound.
+        #
+        # Abandoning is clean, not merely tolerable, and the reason is worth
+        # knowing: a `Task`'s ref is a *process alias* (OTP 24+), and the task
+        # replies by sending to that alias. `demonitor/2` deactivates the alias,
+        # so a reply that arrives minutes later — when the path finally answers
+        # — is dropped by the runtime and never reaches this mailbox at all.
+        # Verified empirically, not assumed: with the demonitor removed, the
+        # late `{ref, value}` does land. `:flush` handles the `:DOWN`. So the
+        # `Shuttle.Poller` process picks up no stray messages from a probe it
+        # gave up on. (`bounded_io_test.exs` pins this.)
         Process.demonitor(task.ref, [:flush])
 
         Logger.warning(
@@ -71,9 +81,14 @@ defmodule Shuttle.BoundedIO do
         default
     end
   catch
-    # No task supervisor (a unit test with the app not started, a supervisor
-    # mid-restart): make the call inline rather than not at all. The caller
-    # blocks, exactly as it did before this function existed.
+    # The only exit reachable here is `async_nolink/2` failing to start the
+    # child — no task supervisor (a unit test with the app not started, a
+    # supervisor mid-restart). An abnormally-exiting TASK does not land here:
+    # `async_nolink` does not link, so `Task.yield/2` reports that as
+    # `{:exit, reason}` and the clause above handles it. So this means "we could
+    # not get a process to do the work in", and the honest fallback is to make
+    # the call inline rather than not at all. The caller blocks, exactly as it
+    # did before this function existed.
     :exit, _ -> fun.()
   end
 
