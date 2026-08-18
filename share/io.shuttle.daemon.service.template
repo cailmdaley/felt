@@ -18,12 +18,12 @@
 #
 # PATH is captured from a login shell at install time, for the same reason the
 # macOS plist does it: the unit's environment is not your login environment.
-# systemd --user inherits almost nothing, so the `#!/usr/bin/env escript`
-# shebang would not find escript/erl and the daemon would not find `felt` in
-# ~/.local/bin at runtime — and a PATH without `felt` yields `:enoent` -> 500
-# on /api/v1/fibers/composite (board loads, kanban does not). Capturing the
-# real login PATH once, at install, is deterministic and needs no
-# hand-maintained list.
+# systemd --user inherits almost nothing. Boot survives that — the daemon is an
+# ERTS-bundled Mix release and needs no OTP toolchain on PATH — but at runtime
+# it shells out to `felt` (~/.local/bin) for every store walk, and a PATH
+# without `felt` yields `:enoent` -> 500 on /api/v1/fibers/composite (board
+# loads, kanban does not). Capturing the real login PATH once, at install, is
+# deterministic and needs no hand-maintained list.
 #
 # There is no TCC on Linux, so — unlike the macOS LaunchAgent — the checkout
 # may live anywhere, including under ~/Documents.

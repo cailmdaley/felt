@@ -4,7 +4,7 @@ Thank you for your interest in felt.
 
 felt is one repo with two code artifacts — the **felt CLI** (Go; the data layer,
 including the `felt shuttle <verb>` subcommands) and the **Shuttle daemon**
-(Elixir/OTP escript; the dispatcher) — plus the served board **UI**
+(Elixir/OTP Mix release; the dispatcher) — plus the served board **UI**
 (TypeScript; a kanban desk plus four temporal views). See `AGENTS.md` for the full architecture and operator guide.
 
 ## Getting started
@@ -14,10 +14,10 @@ git clone https://github.com/cailmdaley/felt
 cd felt
 go build .                    # the felt CLI
 mix deps.get && mix compile   # the daemon
-make build                    # both (CLI + daemon escript)
+make build                    # both (CLI + daemon release)
 ```
 
-Requirements: Go 1.23+, Erlang/OTP 27+, Elixir 1.19+. Working on the felt CLI
+Requirements: Go 1.23+, Erlang/OTP 28+, Elixir 1.19+. Working on the felt CLI
 alone needs only Go. `tmux` matters once you touch the Shuttle daemon or its
 dispatch path — it launches each worker in a tmux session. Node 22+ is needed to
 build the UI bundle (`cd ui && npm run build`) and to run the board's test

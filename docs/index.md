@@ -78,10 +78,11 @@ views for seeing where the time went. Workers hand off to each other through
 the fiber, so a piece of work can span many sessions.
 
 Shuttle stays the more experimental half, and it runs the author's machines
-every day. One rough edge is left: the daemon builds from a checkout rather
-than installing from a release, so it needs Elixir and Node where the CLI needs
-nothing. See [Honest scoping](shuttle/index.md#honest-scoping). Ignore Shuttle
-and felt behaves the same.
+every day. The daemon installs the way the CLI does — `SHUTTLE=1` on the
+install script above fetches a build that bundles its own Erlang runtime, so
+the host needs no toolchain to run it. What is still rough is operating it: see
+[Honest scoping](shuttle/index.md#honest-scoping). Ignore Shuttle and felt
+behaves the same.
 
 ## Where to go next
 

@@ -5,7 +5,8 @@ One repo, one checkout, three artifacts:
 - **felt CLI** (Go) — the **data layer**. A directory-based markdown fiber
   tracker / agent memory, and the home of the `felt shuttle <verb>`
   subcommands. Built here.
-- **Shuttle daemon** (Elixir/OTP escript → `bin/shuttle`) — the **dispatcher**.
+- **Shuttle daemon** (Elixir/OTP Mix release, launched through the tracked
+  `bin/shuttle` shim) — the **dispatcher**.
   Polls the felt tree, launches one tmux worker per eligible fiber, exposes a
   `:4000` snapshot/control API and owns a per-worker watcher.
 - **the board UI** (TypeScript, `ui/`) — the **surface**. Five full-page views
@@ -113,7 +114,7 @@ can't ship.
 
 - **One CLI surface.** Every caller speaks `felt shuttle <verb>`.
 - **One repo, one checkout, three artifacts.** felt and Shuttle live in one
-  source tree, building the felt CLI, the daemon escript, and the board UI from
+  source tree, building the felt CLI, the daemon release, and the board UI from
   it. Shuttle is self-contained, with its own browser UI and launch story,
   assuming no external dispatcher process.
 - **The `shuttle:` block is in felt's surface.** The contract lives once, in
@@ -165,12 +166,12 @@ Windows is unsupported.
 ### What builds what
 
 ```
-make build        # BOTH: felt CLI (go build .) + daemon escript
+make build        # BOTH: felt CLI (go build .) + daemon release
 make cli          # felt CLI only → ./felt
 make cli-install  # felt CLI → ~/.local/bin (go install .)
-make daemon       # daemon escript only → bin/shuttle (MIX_ENV=dev)
+make daemon       # daemon release only → bin/rel (MIX_ENV=prod)
 make test         # go test ./...  +  mix test  +  the board's vitest suite  +  the plugin hooks
-make restart      # daemon (rebuild escript) + stop + start  [load-bearing dev loop]
+make restart      # daemon (rebuild release) + stop + start  [load-bearing dev loop]
 make all          # restart
 make start        # nohup detached; logs → $(LOG) (macOS ~/Library/Logs/shuttle.log, Linux ~/.shuttle/shuttle.log)
 make stop         # SIGTERM with 5s grace
@@ -185,12 +186,13 @@ make install-agent / uninstall-agent   # durable keep-alive: launchd (macOS) / s
 first when Go is present, to keep the CLI and daemon in lockstep. **On a host
 with no Go toolchain — typically a Linux server where you only run the
 daemon — that rebuild is skipped automatically** and they build only the
-escript, against whatever `felt` is already installed. Pass `SKIP_CLI=1` to
+release, against whatever `felt` is already installed. Pass `SKIP_CLI=1` to
 force the same skip on a host that does have Go.
 
-The escript loads its BEAMs at boot, so editing Elixir source has zero effect on
-a running daemon until you restart. **`make restart` always** for daemon source
-edits — a restart without `make daemon` is a no-op for picking up edits.
+A release runs the compiled BEAMs under `bin/rel`, so editing Elixir source has
+zero effect on a running daemon until you rebuild AND restart. **`make restart`
+always** for daemon source edits — a restart without `make daemon` is a no-op
+for picking up edits.
 
 **Restarting the daemon does NOT end your session — common misconception, closed
 out.** A worker (including the Shuttle session reading this) runs in its own tmux
@@ -204,22 +206,29 @@ daemon freely — never hold a restart because "there's a live session."
 After `make install-agent`, the daemon runs under launchd (`io.shuttle.daemon`)
 with an *absolute* `bin/shuttle` path. `make stop`'s `PIDPATTERN` only matches a
 relative-path shell launch, so against the launchd daemon `make restart` rebuilds
-the escript but its stop/start no-ops (start then hits "already running"). Bounce
+the release but its stop/start no-ops (start then hits "already running"). Bounce
 it with **`launchctl kickstart -k gui/$(id -u)/io.shuttle.daemon`** — KeepAlive
-respawns the rebuilt escript. (`make restart` is right only when the daemon was
+respawns the rebuilt release. (`make restart` is right only when the daemon was
 shell-started via `make start`.)
 
 ### Two install paths
 
-- **(a) Public end-user CLI install** — downloads a release binary:
+- **(a) Public end-user CLI (and, opt-in, daemon) install** — downloads release
+  artifacts, no Elixir/Erlang/Node toolchain required:
 
   ```bash
   curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh | sh
+  SHUTTLE=1 curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh | sh
   ```
 
-  This is `install.sh`; installs to `/usr/local/bin` if writable, else
-  `~/.local/bin`; override with `FELT_INSTALL_DIR`. Also Homebrew
+  This is `install.sh`; installs the felt CLI to `/usr/local/bin` if writable,
+  else `~/.local/bin`; override with `FELT_INSTALL_DIR`. Also Homebrew
   (`brew install cailmdaley/tap/felt`) or `go install github.com/cailmdaley/felt@latest`.
+  `SHUTTLE=1` additionally fetches the ERTS-bundled daemon release tarball
+  (`shuttle_<Os>_<arch>.tar.gz`, same GitHub release) to `$SHUTTLE_HOME`
+  (default `~/.local/share/shuttle`); its front door is
+  `$SHUTTLE_HOME/bin/shuttle`. Runtime prerequisites for this path: tmux and
+  felt — no Erlang, Elixir, or Node.
 
 - **(b) Dev / multi-host from-source bootstrap** — stands up the **entire** local
   surface:
@@ -230,7 +239,7 @@ shell-started via `make start`.)
   make install              # same, via the Makefile (flags: make install ARGS="--dry-run")
   ```
 
-  Builds+installs the felt CLI, builds the daemon escript, places `ui/dist`,
+  Builds+installs the felt CLI, builds the daemon release, places `ui/dist`,
   registers the plugin event hook (`felt hook event`) and probes it, installs
   the keep-alive (launchd LaunchAgent on macOS / a systemd user unit on Linux,
   falling back to the `shuttle-daemon` tmux respawn loop where there is no
@@ -269,15 +278,15 @@ launchd-spawned processes from `~/Documents`, `~/Desktop`, and `~/Downloads`, an
 app *takes responsibility* for its children, so everything you launch from a
 shell shares the terminal's grant; launchd has no such umbrella, and FDA doesn't
 even cross an `exec` to a differently-signed binary). So a launchd daemon whose
-escript/`ui/dist`/felt stores sit under `~/Documents` either crash-loops
-(`getcwd: Operation not permitted`, `escript: Failed to open file`) or silently
-fails to walk stores — and the fix would be granting FDA to *each* binary in the
-tree (`beam.smp`, `felt`, …), which is fragile (the erlang path is
-version-pinned) and exactly the per-binary grind to avoid.
+release/`ui/dist`/felt stores sit under `~/Documents` either crash-loops
+(`getcwd: Operation not permitted`, the release's boot script failing to open a
+file) or silently fails to walk stores — and the fix would be granting FDA to
+*each* binary in the tree (`beam.smp`, `felt`, …), which is fragile (the erlang
+path is version-pinned) and exactly the per-binary grind to avoid.
 
 The clean setup:
 
-- **The repo lives outside Documents.** The escript and `ui/dist` are then
+- **The repo lives outside Documents.** The release and `ui/dist` are then
   readable by launchd with no grant.
 - **`AGENT_FELT_STORES` scopes felt polling** (a Makefile variable, baked into
   the plist as `FELT_STORES`). Point it at an aggregate store outside the
@@ -289,11 +298,12 @@ The clean setup:
   discovered but may be unreadable to the launchd daemon until that project root
   also moves out of Documents.
 - **`PATH` is captured from a login shell at install time** (`AGENT_PATH` in the
-  Makefile, baked into the plist). launchd's own env is too bare to find
-  `escript` (Homebrew) at boot or `felt` (`~/.local/bin`) at runtime — and a
-  login shell *at runtime* (`bash -lc`) does NOT fix it, because under launchd's
-  bare env the profile doesn't reconstruct PATH (exit 127, escript unfound). A
-  PATH missing `felt` specifically yields `:enoent` → **500 on
+  Makefile, baked into the plist). launchd's own env is too bare to find `felt`
+  (`~/.local/bin`) at runtime — the release itself needs nothing off PATH to
+  boot (it bundles its own ERTS), but the daemon shells `felt` for its writes
+  — and a login shell *at runtime* (`bash -lc`) does NOT fix it, because under
+  launchd's bare env the profile doesn't reconstruct PATH (exit 127, `felt`
+  unfound). That specifically yields `:enoent` → **500 on
   `/api/v1/fibers/composite`** (the kanban load), with the board fine otherwise.
   Capturing the real login PATH once, at install, is deterministic and needs no
   hand-maintained list.
@@ -441,9 +451,12 @@ model choice); even then, surface the alternatives in the fiber and keep moving
 rather than treating the deploy *mechanics* as the gate.
 
 **Deploying to a remote host:** push to your git remote first, then build on the
-host — don't copy an escript built elsewhere, as BEAM bytecode format varies
-across OTP versions and the binary will crash on startup on a host with a
-different OTP. The respawn loop is driven by `~/.local/bin/shuttle-launch` — a
+host. A release bundles its own ERTS, so a tarball built for the same OS/arch
+*would* run elsewhere — but a checkout host still builds on-host via
+`make daemon`, both because that's the fleet's normal deploy path and because
+BEAM bytecode format varies across OTP versions, so a release built under a
+different OTP than the one on the target host will crash on startup. The
+respawn loop is driven by `~/.local/bin/shuttle-launch` — a
 copy of the tracked `bin/shuttle-launch` that `bootstrap.sh` installs (repo
 resolved via `SHUTTLE_DIR` or the script's own location; the loop backs off
 exponentially on fast daemon exits, 2s→300s).
@@ -455,17 +468,17 @@ ssh <host> "cd <checkout> && git pull && make daemon"
 After a remote deploy, verify both `/api/v1/version` and one behavior-shaped
 payload. A new `git_short_sha` only proves `BuildInfo` was rebuilt; if the live
 payload still has old semantics, run `make clean && make daemon`, then let the
-respawn loop restart the daemon from the clean escript.
+respawn loop restart the daemon from the clean release.
 
 **A supervised daemon is not yours to cycle with `make stop`/`make all`.** Under
 systemd, use `systemctl --user restart shuttle-daemon`. Where `shuttle-launch
 --loop` runs in tmux session `shuttle-daemon` instead,
 that loop owns the live daemon. `make stop`/`make all` target the
 pidfile that `make start` writes, which is *not* the respawn-spawned daemon, so
-they can build a fresh `bin/shuttle` yet leave the old binary serving `:4000`. To
-actually cycle to the new binary, **kill the `:4000` listener directly**
+they can build a fresh release yet leave the old one serving `:4000`. To
+actually cycle to the new release, **kill the `:4000` listener directly**
 (`lsof -ti:4000 -sTCP:LISTEN | xargs kill`) — the respawn loop restarts it from
-the rebuilt escript. Confirm `git_short_sha` flipped; if not, the old process is
+the rebuilt release. Confirm `git_short_sha` flipped; if not, the old process is
 still bound. **A host with large felt stores can take minutes to start** — it
 walks every store and adopts orphan sessions before binding `:4000`; wait it
 out, don't assume a crash.
@@ -490,7 +503,7 @@ checkout that hasn't built the bundle gets a 404 with the hint
 `cd ui && npm run build`; the API stays usable regardless.
 
 **The UI bundle is shipped, not built on-host.** `make all` rebuilds only the
-Elixir escript — it does *not* build `ui/dist`. The bundle is host-independent
+Elixir release — it does *not* build `ui/dist`. The bundle is host-independent
 static output, so the lean path is **build `ui/dist` on a host that has the
 Node toolchain and `rsync` it to the rest**:
 
@@ -504,7 +517,7 @@ present at build time, so a remote serving the shipped `dist` needs no Node
 toolchain at runtime.
 
 **A daemon route change is a bundle-rebuild event.** `make all` rebuilds the
-escript and rebinds `:4000` but never touches `ui/dist`, and nothing checks that
+release and rebinds `:4000` but never touches `ui/dist`, and nothing checks that
 the shipped bundle and the daemon's route table still agree. So any change to the
 `/api/v1/*` shape (add/remove/rename a route) MUST be paired with a `cd ui && npm
 run build` + rsync to every host — the browser always runs the *local* bundle, and
@@ -524,20 +537,35 @@ them fails `/astra` cleanly; the board and fibers are unaffected.
 
 **The repo builds three things.** The **felt CLI** (Go: `main.go`, `cmd/`,
 `internal/`) — including the `felt shuttle <verb>` subcommands, which ARE Go code
-built here (`cmd/shuttle*.go` + `internal/shuttle/`); the **daemon escript**
-(`bin/shuttle`, from `lib/`); and the **UI bundle** (`ui/dist`, from `ui/`).
+built here (`cmd/shuttle*.go` + `internal/shuttle/`); the **daemon release**
+(`bin/rel`, from `lib/`, launched through the tracked `bin/shuttle` shim); and
+the **UI bundle** (`ui/dist`, from `ui/`).
 Editing `lib/*.ex` needs `make restart`; editing the Go CLI needs `make cli` (or
 `make cli-install`); editing the UI needs `cd ui && npm test` (CI never runs it)
 plus `npm run build` + rsync.
 
-**`bin/shuttle` is an escript** — it bundles BEAM bytecode at build time and
-loads it at boot. A restart without `make daemon` is a no-op for picking up
-source edits. `make restart` always.
+**`bin/rel` is a Mix release** — an ERTS-bundled directory built by
+`MIX_ENV=prod mix release shuttled --overwrite --path bin/rel`, launched via
+`bin/rel/bin/shuttled`. A restart without `make daemon` is a no-op for picking
+up source edits. `make restart` always.
 
-If `mix escript.build` warns about "redefining module Shuttle.X" with the
-"current version loaded from Elixir.Shuttle.X.beam" hint, run `make clean`
-first — stray `.beam` files at the project root shadow the real ones. They
-should never be committed.
+**The release loads modules lazily, and that keeps one escript-era hazard
+alive.** Mix releases run in `:interactive` code-loading mode (verified:
+`bin/rel/bin/shuttled eval 'IO.inspect(:code.get_mode())'` → `:interactive`;
+nothing in `vm.args` sets `-mode embedded`). So modules load from
+`bin/rel/lib/*/ebin` on first reference, exactly as the escript loaded them
+from its own file — and rebuilding under a running daemon can still let a
+not-yet-referenced module (`Shuttle.BuildInfo`) load from the NEW build while
+the long-booted Poller keeps running the OLD code. That is why deploy
+verification checks `booted_at` as well as `git_short_sha`: a sha alone can be
+told by a stale daemon, a boot time cannot. `bin/shuttle` itself is a tracked POSIX shell shim, not a build
+artifact — it execs the release launcher for `start` and speaks HTTP to the
+running daemon for the read verbs (snapshot, status, dispatch, release, reset,
+version).
+
+If `mix release` warns about a stale build shadowing a fresh one, run
+`make clean` first — stray `.beam` files at the project root shadow the real
+ones. They should never be committed.
 
 ## Quick start — operating without rebuilding
 
@@ -776,7 +804,8 @@ felt/
 │
 │   # Shuttle daemon — Elixir/OTP (the dispatcher)
 ├── mix.exs  mix.lock
-├── bin/shuttle              the daemon escript (built artifact)
+├── bin/shuttle              tracked shell shim, the daemon's front door
+├── bin/rel/                 the built daemon release (bin/rel/bin/shuttled), gitignored
 ├── lib/                     Elixir source
 │   ├── shuttle/poller.ex      discover + eligibility + retry queue
 │   ├── shuttle/dispatcher.ex  agent resolution, tmux launch

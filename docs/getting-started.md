@@ -231,7 +231,16 @@ optional daemon whose [board](shuttle/board.md) serves your fibers at
 `localhost:4000` — cards you can read, edit and rearrange, `[[wikilinks]]` you
 can follow, embedded plots and reports rendered in place, and views of where
 your time actually went. Shuttle also runs agents autonomously against fibers,
-but the board is worth having on its own.
+but the board is worth having on its own. Re-run the install script with
+`SHUTTLE=1` to add the daemon, then point it at this store:
+
+```bash
+SHUTTLE=1 curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh | sh
+FELT_STORES=$PWD ~/.local/share/shuttle/bin/shuttle start
+```
+
+[Installing the Shuttle daemon](shuttle/installation.md) covers the rest,
+including how to keep it running.
 
 **Keep reading.** [Fibers](concepts/fibers.md) covers the data model in full,
 and [Organizing](concepts/organizing.md) covers the judgment calls — when a

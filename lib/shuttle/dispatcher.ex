@@ -1897,7 +1897,7 @@ defmodule Shuttle.Dispatcher do
     set -e
     trap 'rm -f "$0"' EXIT
 
-    #{fiber_key_block}#{wait_for_client_block}
+    #{erts_scrub_block()}#{fiber_key_block}#{wait_for_client_block}
     echo ""
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo "Shuttle worker — #{display_fiber_id} — agent=#{agent_id} — $(date '+%H:%M:%S')"
@@ -1909,6 +1909,41 @@ defmodule Shuttle.Dispatcher do
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo "Shuttle worker exited (agent=#{agent_id})"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    """
+  end
+
+  # Scrub the daemon's OWN Erlang runtime out of the worker's environment.
+  #
+  # The daemon is a Mix release with a bundled ERTS, and `erl` exports ROOTDIR,
+  # BINDIR, PROGNAME and EMU into the BEAM's environment — which every tmux
+  # worker then inherits. Under the escript those pointed at the host's
+  # Erlang install and were harmless. Under a release they point INTO
+  # `bin/rel`, whose ERTS ships no `mix`, no `start.boot` for anything but the
+  # daemon, and no full OTP lib tree. A worker that runs `mix`, `elixir`,
+  # `erl`, `iex` or `escript` then dies with
+  # `cannot get bootfile .../bin/rel/bin/start.boot` — which is exactly how
+  # this was found: a worker dispatched onto this very repo could not build it.
+  #
+  # `bash -l` does not fix it: the login profile PREPENDS to the inherited
+  # PATH, so the release's erts bin keeps shadowing the real toolchain, and
+  # ROOTDIR survives untouched regardless of PATH order.
+  #
+  # So the worker's script drops the four exported vars and filters the
+  # release's own directories out of PATH before anything else runs. A worker
+  # with no Erlang on PATH is correct — it sees whatever the host installs,
+  # the same as before the daemon shipped its own.
+  defp erts_scrub_block do
+    ~S"""
+    unset ROOTDIR BINDIR PROGNAME EMU ESCRIPT_NAME
+    if [ -n "${RELEASE_ROOT:-}" ]; then
+      PATH=$(printf '%s' "$PATH" | tr ':' '\n' \
+        | grep -vF "$RELEASE_ROOT/erts" | grep -vF "$RELEASE_ROOT/bin" \
+        | paste -sd: -)
+      export PATH
+    fi
+    unset RELEASE_ROOT RELEASE_SYS_CONFIG RELEASE_TMP RELEASE_VSN RELEASE_NAME \
+          RELEASE_NODE RELEASE_COOKIE RELEASE_MODE RELEASE_BOOT_SCRIPT \
+          RELEASE_BOOT_SCRIPT_CLEAN RELEASE_DISTRIBUTION RELEASE_PROG RELEASE_COMMAND
     """
   end
 

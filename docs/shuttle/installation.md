@@ -1,41 +1,97 @@
 # Installing the Shuttle daemon
 
-The `felt` CLI installs cleanly from a release binary. The Shuttle daemon ships
-no release artifact, no package, and no container. You build it from a checkout
-and you keep the checkout.
+The daemon runs one of two ways, and the choice is about what you want on the
+machine.
+
+- **Fetch the release.** A prebuilt daemon for your platform, carrying its own
+  Erlang runtime and the board bundle inside it. One command, no toolchain, no
+  checkout.
+- **Build from a checkout.** `bootstrap.sh` builds the felt CLI and the daemon
+  from source, places the board bundle, and installs a keep-alive. This is the
+  fleet path — what the deploy script updates, and what you want if you are
+  changing daemon code.
+
+Either way the daemon needs `tmux` and the `felt` CLI at runtime: workers run in
+tmux sessions, and the daemon shells out to `felt` for every store walk and
+every write.
 
 !!! warning "This path is currently fleet-oriented"
     Shuttle runs on one person's machines: a macOS hub and a few HPC login
-    nodes. Several defaults still point at private things — see
+    nodes, and it is still shaped around that — see
     [Honest scoping](index.md#honest-scoping). [Sharp edges](#sharp-edges) below
-    names each one you will actually trip over.
+    names each rough patch you will actually trip over.
 
     **Platform:** Linux and macOS both support single-host use — the daemon,
     the board, and workers on one machine, with a real keep-alive (a
     supervisor that restarts the daemon if it crashes — more on this below)
-    on either. Multi-host tunnel management (`felt shuttle tunnels`) is
-    macOS-only, since it manages launchd autossh jobs. macOS gets the most
-    use. Windows is unsupported.
+    on either. Multi-host tunnel management (`felt shuttle tunnels`) installs
+    launchd jobs on macOS and systemd user units on Linux, so a hub can be
+    either. macOS gets the most use. Windows is unsupported.
 
-This page gets you from a clone to a worker running on the board. The
+This page gets you from nothing to a worker running on the board. The
 [Keep-alive](#keep-alive) internals, store/agent/remote configuration, and the
 event stream come after — read them once the daemon is up and you want to
 understand what it's doing.
 
 ## Prerequisites
 
+At runtime, whichever path you take:
+
 | Tool | Required | Purpose |
 | --- | --- | --- |
-| `go` 1.23+ | yes | Builds the `felt` CLI. The daemon shells out to `felt` for every store walk. |
-| `elixir` 1.19+ / OTP 27 | yes | `mix.exs` declares `elixir: "~> 1.19"`. CI builds on OTP 27. |
-| `escript` | yes | The daemon runs *as* an escript — a self-contained executable script format built into Erlang/OTP. It ships with Erlang/OTP, so nothing extra to install. |
+| `felt` | yes | The daemon shells out to the CLI for every store walk and every write, so `felt` must be on the daemon's `PATH`. |
 | `tmux` | yes | Every worker runs in a tmux session. On a Linux host without systemd, the daemon's own keep-alive is a tmux loop too. |
-| `node` 22+ / `npm` | only for the board | Builds the kanban bundle into `ui/dist`. |
 | `jq` | optional | `session.sh` uses it to pretty-print the SessionStart envelope. Without it the hook falls back to `felt hook session`. |
+
+Building from a checkout adds a toolchain, none of which the fetched daemon
+needs:
+
+| Tool | Required | Purpose |
+| --- | --- | --- |
+| `go` 1.23+ | yes | Builds the `felt` CLI from the same checkout, so the CLI and the daemon never skew. |
+| `elixir` 1.19+ / OTP 28 | yes | `mix.exs` declares `elixir: "~> 1.19"`. CI builds on OTP 28, and a release runs the OTP that built it. |
+| `node` 22+ / `npm` | only for the board | Builds the kanban bundle into `ui/dist`. A fetched daemon ships the bundle already built. |
 
 `bootstrap.sh` checks all of these and names what is missing.
 
-## Bootstrap
+## Fetch the release
+
+`SHUTTLE=1` on the felt install script installs the CLI as usual, then unpacks
+the daemon beside it:
+
+```bash
+SHUTTLE=1 curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh | sh
+```
+
+The daemon lands in `~/.local/share/shuttle` — override with `SHUTTLE_HOME` —
+and its front door is `$SHUTTLE_HOME/bin/shuttle`:
+
+```bash
+FELT_STORES=~/dev/myproject ~/.local/share/shuttle/bin/shuttle start
+```
+
+That runs in the foreground and stops on `Ctrl-C`. [Keep-alive](#keep-alive)
+covers handing it to a supervisor.
+
+What you downloaded is a Mix release: the daemon's compiled modules, the Erlang
+runtime they run on, and the board bundle, in one directory tree. It reads
+nothing from the host's toolchain, which is why this path asks for no Elixir.
+The bundled runtime is also what makes the tarball platform-specific — compiled
+BEAM modules and the runtime itself both target one OS, architecture and OTP
+version — so CI builds each tarball on a native runner instead of
+cross-compiling one. Four ship with every release:
+`shuttle_{Linux,Darwin}_{x86_64,arm64}.tar.gz`.
+
+Upgrade by running the same command again. It deletes `$SHUTTLE_HOME` and
+unpacks the new tarball in its place, so keep nothing of your own in there. The
+daemon's state lives in `~/.shuttle` and survives.
+
+What the tarball does not carry is the repo's operator surface: the `make`
+targets, the keep-alive templates `make install-agent` renders, and
+`bin/shuttle-deploy`. You can still supervise a fetched daemon — see
+[Keep-alive](#keep-alive) for what a job needs — but you write the job yourself.
+
+## Build from a checkout
 
 Clone the repo, then run the bootstrap. `make install` runs the same thing.
 
@@ -52,9 +108,10 @@ Six steps run in order.
    the run before anything is built.
 2. **`felt` CLI.** `GOBIN=~/.local/bin go install .` from *this* checkout — not
    the release binary. The daemon shells the CLI, so the two must never skew.
-3. **Daemon escript.** `mix deps.get`, then `make daemon` → `bin/shuttle`. The
-   step records the checkout path in `~/.shuttle/repo`, so remote revival over
-   SSH can find it without an environment.
+3. **Daemon release.** `mix deps.get`, then `make daemon`, which assembles the
+   release into `bin/rel` and leaves `bin/shuttle` — a tracked shell shim — as
+   the front door. The step records the checkout path in `~/.shuttle/repo`, so
+   remote revival over SSH can find it without an environment.
 4. **`ui/dist`.** The served board bundle. Built by default when Node is on
    PATH, skipped otherwise — rsync it from a host that has Node instead.
 5. **Event stream.** Runs `felt setup claude` and `felt setup codex` against
@@ -69,6 +126,10 @@ Six steps run in order.
 Useful flags: `--dry-run`, `--skip-ui`, `--build-ui`, `--skip-hook`,
 `--skip-cli`, `--with-tunnels`.
 
+Editing daemon source means rebuilding: the release runs the compiled modules
+under `bin/rel`, so a restart alone picks up nothing. `make restart` rebuilds
+and bounces in one step.
+
 ## Verify
 
 ```bash
@@ -77,6 +138,10 @@ felt shuttle ps                                # running workers
 make logs                                      # tail the daemon log
 make status                                    # ps + a snapshot summary
 ```
+
+The two `make` targets belong to a checkout. A fetched daemon started in the
+foreground logs to your terminal; under a supervisor, it logs wherever you
+pointed the job's output.
 
 Open <http://127.0.0.1:4000/> in your browser for [the board](board.md).
 
@@ -128,10 +193,11 @@ place and the card lands in Awaiting review.
 !!! note "First dispatch not starting?"
     Every restart arms a boot quarantine that holds new work until you run
     `bin/shuttle release` — see the first entry in [Sharp
-    edges](#sharp-edges) if your card sits armed with nothing happening.
+    edges](#sharp-edges) if your card sits armed with nothing happening. From a
+    fetched install the same shim sits at `$SHUTTLE_HOME/bin/shuttle`.
 
-That's the whole path from clone to a worker on the board. Everything below is
-what the daemon is doing underneath, and the configuration knobs for a setup
+That's the whole path from install to a worker on the board. Everything below
+is what the daemon is doing underneath, and the configuration knobs for a setup
 beyond one machine.
 
 ## Keep-alive
@@ -140,6 +206,11 @@ beyond one machine.
 arms render a template from `share/` and bake in the same three environment
 values, for the same reason: neither supervisor hands the daemon your login
 environment.
+
+The target lives in the checkout, and the templates it renders point at the
+checkout's `bin/shuttle`. To supervise a fetched daemon, write the job yourself
+against `$SHUTTLE_HOME/bin/shuttle start --force` — the two sections below say
+what the environment has to carry, which is the part that is easy to get wrong.
 
 ### macOS (launchd)
 
@@ -153,12 +224,13 @@ crash.
 exists because the obvious approach failed:
 
 - **`PATH`** — captured from `bash -lc 'echo $PATH'` *at install time*.
-  launchd's own environment is nearly empty: the `#!/usr/bin/env escript`
-  shebang cannot find `escript`, and the daemon cannot find `felt`. Sourcing the
-  login profile at runtime does not fix it, because the profile is not
-  self-sufficient from a bare environment. So the plist freezes the real login
-  `PATH`. A `PATH` without `felt` on it gives you a daemon that boots, serves
-  the board, and returns 500 on `/api/v1/fibers/composite`.
+  launchd's own environment is nearly empty, and the daemon cannot find `felt`
+  in it. (The daemon itself needs nothing off `PATH` to boot — it carries its
+  own Erlang runtime — but it shells `felt` for every store walk and every
+  write.) Sourcing the login profile at runtime does not fix it, because the
+  profile is not self-sufficient from a bare environment. So the plist freezes
+  the real login `PATH`. A `PATH` without `felt` on it gives you a daemon that
+  boots, serves the board, and returns 500 on `/api/v1/fibers/composite`.
 - **`FELT_STORES`** — the stores the daemon polls, comma-separated. There is no
   default: `make install-agent AGENT_FELT_STORES=~/myproject` is required, and
   the target refuses without it. felt re-discovers a store's symlinked
@@ -199,7 +271,7 @@ Day-to-day:
 
 ```bash
 systemctl --user status shuttle-daemon     # is it up
-systemctl --user restart shuttle-daemon    # cycle onto a freshly built escript
+systemctl --user restart shuttle-daemon    # cycle onto a freshly built release
 journalctl --user -u shuttle-daemon        # unit-level events
 make logs                                  # the daemon's own log
 ```
@@ -224,7 +296,7 @@ daemon that exits within 60 seconds doubles the sleep, from 2s up to a 300s cap.
 One that survives 60 seconds resets it. This exists because a wedged login node
 once drove a fixed 2-second loop to roughly 35,000 restarts.
 
-To cycle onto a freshly built escript, kill the listener and let the loop
+To cycle onto a freshly built release, kill the listener and let the loop
 respawn it:
 
 ```bash
@@ -359,13 +431,15 @@ with `SHUTTLE_SESSIONS_FILE`.
 
 ### `commits.jsonl`
 
-Which session made each commit. A `PostToolUse` hook writes it, at the one
-moment the pairing is certain — and **no such hook ships with felt**. On a
-stock install this file never appears, so the Chronicle's commit narration and
-a cycle's look back stay empty. Nothing else on the board is affected, and
-there is no git-log fallback. Override the path with `SHUTTLE_COMMITS_FILE`;
-see [The commit ledger](telemetry.md#the-commit-ledger) for the line format if
-you want to grow one.
+Which session made each commit. The plugin writes it from a `PostToolUse` hook
+on `Bash`, at the one moment the pairing is certain: `felt hook commit` reads
+the commit back whenever the command ran a `git commit`, and appends a line.
+Installing the plugin (`felt setup claude`, `felt setup codex` — bootstrap
+step 5) is all it takes. Like the event stream it writes only when `~/.shuttle`
+already exists, so a felt user who does not run Shuttle acquires nothing. There
+is no git-log fallback, so commits made outside an agent session never appear.
+Override the path with `SHUTTLE_COMMITS_FILE`; see [The commit
+ledger](telemetry.md#the-commit-ledger) for the line format.
 
 ## Sharp edges
 
@@ -403,9 +477,9 @@ subset it can run — see [Configuring agents](#configuring-agents).
 shells the felt CLI for its writes, so a stale installed CLI can break
 daemon-shelled commands mid-dispatch — `make daemon` rebuilds it first whenever
 Go is on PATH. On a host with no Go toolchain, `make daemon` builds only the
-escript, against whatever `felt` is already installed there. `bootstrap.sh
---skip-cli` passes `SKIP_CLI=1` through to `make daemon`, so it skips the CLI
-rebuild too, even on a host that has Go.
+daemon release, against whatever `felt` is already installed there.
+`bootstrap.sh --skip-cli` passes `SKIP_CLI=1` through to `make daemon`, so it
+skips the CLI rebuild too, even on a host that has Go.
 
 **The UI build needs no private checkout.** `npm run build` runs `tsc --noEmit
 && vite build`. The `src/paper` entry imports `@lightcone/renderer`, a private
@@ -428,7 +502,7 @@ path sits under `~/Documents`, even when the checkout is clean.
 **`make restart` silently no-ops under a supervisor.** `make stop` matches the
 daemon by a relative-path pattern; launchd and systemd both launch it by
 absolute path. So after `make install-agent`, `make restart` rebuilds the
-escript, stops nothing, and reports "already running." Bounce it properly:
+release, stops nothing, and reports "already running." Bounce it properly:
 
 ```bash
 launchctl kickstart -k gui/$(id -u)/io.shuttle.daemon   # macOS
@@ -437,24 +511,24 @@ systemctl --user restart shuttle-daemon                 # Linux
 
 `make restart` works only when you started the daemon with `make start`.
 
-**`felt shuttle tunnels` is macOS-only, and needs a fleet file first.** It
-renders launchd autossh plists from `~/.config/felt/remotes.json`, so `install`
-refuses outright on Linux — multi-host aggregation runs from a Mac hub, though
-the remotes it aggregates can be any platform. With no remotes configured it has
-nothing to write, and `bootstrap.sh --with-tunnels` does nothing useful.
-`bin/shuttle-deploy` still targets the maintainer's host layout despite its
-general name.
+**`felt shuttle tunnels` needs a fleet file first.** It renders autossh jobs
+from `~/.config/felt/remotes.json` — launchd plists on macOS, systemd user units
+on Linux. With no remotes configured it has nothing to write, and `bootstrap.sh
+--with-tunnels` does nothing useful. A Linux host with no systemd user session
+cannot start a unit, so `install` says so and writes nothing; `--write-only`
+renders the units for you to supervise yourself.
 
 **The event stream stays empty until `~/.shuttle` exists.** `felt hook event`
 refuses to create its own directory, so a felt-only install records nothing.
 Degradation is graceful — the board still serves — but the activity ranking and
 the sent-files trail stay empty. Bootstrap step 3 creates the directory, so a
-bootstrapped host is already enabled. See [The event stream and the
+host built from a checkout is already enabled; after a fetched install, run
+`mkdir -p ~/.shuttle` yourself. See [The event stream and the
 ledgers](#the-event-stream-and-the-ledgers).
 
 ## License
 
-The felt CLI and the board UI carry the MIT license. The daemon you just built
-(`lib/`) contains code derived from OpenAI's Symphony under the Apache License
+The felt CLI and the board UI carry the MIT license. The daemon (`lib/`)
+contains code derived from OpenAI's Symphony under the Apache License
 2.0, preserved in
 [`NOTICE`](https://github.com/cailmdaley/felt/blob/main/NOTICE).

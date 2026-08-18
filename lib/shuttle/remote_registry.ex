@@ -210,8 +210,9 @@ defmodule Shuttle.RemoteRegistry do
 
   Operators reach this through `shuttle reset <remote>` (see
   the `bin/shuttle` shim), which POSTs `/api/v1/remotes/:name/reset`
-  (`ShuttleWeb.RemoteController`) on the running daemon — the daemon is
-  an escript, so there is no console to call this from directly.
+  (`ShuttleWeb.RemoteController`) on the running daemon — the release runs
+  with RELEASE_DISTRIBUTION=none (rel/env.sh.eex), so there is no remote
+  console to call this from directly.
 
   Returns `{:error, :not_tripped}` when the remote isn't tripped and
   `{:error, :unknown_remote}` when the name isn't configured.

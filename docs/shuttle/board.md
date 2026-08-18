@@ -177,17 +177,25 @@ every host a hub aggregates — the **fleet**), which reads the host's event
 stream. A host with no event stream shows an empty canvas — see
 [Telemetry](telemetry.md).
 
-## The board is optional, and built separately
+## The board is optional, and the bundle is its own artifact
 
-The repo does not ship the bundle. Build it with:
+A fetched daemon already has it: CI builds the bundle and copies it into the
+release's own `priv/`, so a downloaded daemon serves the board with no Node
+anywhere in sight.
+
+A checkout serves `ui/dist` from the checkout, and the repo does not ship that.
+Build it with:
 
 ```bash
 cd ui && npm ci && npm run build
 ```
 
-which writes `ui/dist`. A fresh clone builds it fine — no private checkout
-needed (see [Sharp edges](installation.md#sharp-edges)). `make all` rebuilds
-only the daemon escript.
+A fresh clone builds it fine — no private checkout needed (see [Sharp
+edges](installation.md#sharp-edges)). `make all` rebuilds only the daemon
+release, never the bundle.
+
+`SHUTTLE_UI_DIST` overrides both, pointing the daemon at any built bundle on
+disk.
 
 Without the bundle the root URL 404s with a hint, and the API stays fully
 usable. If you change any `/api/v1/*` route, rebuild the bundle — a stale

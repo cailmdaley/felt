@@ -160,12 +160,15 @@ A human force-dispatch bypasses the quarantine without clearing it.
 
 ## CLI verbs
 
-Two binaries, cleanly split. `felt shuttle` serves agents: it runs offline,
+Two commands, cleanly split. `felt shuttle` serves agents: it runs offline,
 validates the schema, and writes to disk. The
 [CLI reference](../reference/cli.md#felt-shuttle-dispatch-layer) tabulates every
 verb and flag.
 
-`bin/shuttle` drives daemon lifecycle, and lives only in the checkout:
+`bin/shuttle` drives daemon lifecycle. It is a shell shim around the daemon
+release: `start` launches it, and every verb below asks the running daemon over
+HTTP, so each one needs a daemon up. A checkout has the shim at `bin/shuttle`,
+a fetched install at `$SHUTTLE_HOME/bin/shuttle`.
 
 ```bash
 bin/shuttle status

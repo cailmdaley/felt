@@ -15,7 +15,7 @@ defmodule Shuttle.MixProject do
 
   # test/support holds helpers shared across test files (stubs, env
   # save/restore). Compiled only under MIX_ENV=test, so nothing there can
-  # reach the escript.
+  # reach the release.
   defp elixirc_paths(:test), do: ["lib", "test/support"]
   defp elixirc_paths(_), do: ["lib"]
 
@@ -59,10 +59,13 @@ defmodule Shuttle.MixProject do
     [
       {:jason, "~> 1.4"},
       {:yaml_elixir, "~> 2.12"},
-      # tz (compile-time IANA DB) over tzdata: tzdata's runtime data dir
-      # resolves to a path *under* the bin/shuttle escript file (:enotdir),
-      # which crashes the daemon on boot. tz bakes the data into modules —
-      # no runtime data dir, safe in an escript. See finding-self-defeating-loop.
+      # tz (compile-time IANA DB) over tzdata. Forced by the escript era:
+      # tzdata's runtime data dir resolved to a path *under* the bin/shuttle
+      # escript file (:enotdir), crashing the daemon on boot — see
+      # finding-self-defeating-loop. A release has a real priv dir, so that
+      # particular crash is history; tz stays right anyway, because the DB is
+      # baked into modules and there is no runtime data dir to ship, write, or
+      # refresh.
       {:tz, "~> 0.28"},
       {:phoenix, "~> 1.7"},
       {:bandit, "~> 1.0"},

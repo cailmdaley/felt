@@ -52,23 +52,27 @@ defmodule Shuttle.Application do
 
   @impl true
   def start(_type, _args) do
-    # In escript mode, Mix compile-time config (config/dev.exs) is not loaded
-    # into the application environment automatically — and what IS baked in was
-    # evaluated on the build machine. Resolve the endpoint's binding, server
-    # flag, and signing key here, at runtime.
+    # A release bakes its compile-time config (config/prod.exs) into
+    # releases/*/sys.config, EVALUATED on the build machine — so anything
+    # decided there travels with the artifact to every host it lands on.
+    # Resolve the endpoint's binding, server flag, and signing key here, at
+    # runtime.
     configure_endpoint()
 
-    # Same escript-config gap applies to the time zone database: the
-    # `config :elixir, :time_zone_database` line in config/config.exs is not
-    # loaded in the daemon escript, so DateTime.shift_zone/2 (cron scheduling)
-    # would fall back to the UTC-only DB. Set it explicitly at runtime; this is
-    # the load-bearing wiring for `tz` in the escript daemon.
+    # The time zone database, set again at runtime. In the escript era this
+    # call was the only thing setting it — escript boot loaded no compile-time
+    # config, so `config :elixir, :time_zone_database` (config/config.exs) never
+    # arrived and DateTime.shift_zone/2 (cron scheduling) fell back to the
+    # UTC-only DB. A release does carry that key in its sys.config, so the
+    # config path now works too; the call stays because it costs nothing and
+    # keeps `tz` wired on every boot path, config-loading or not.
     Calendar.put_time_zone_database(Tz.TimeZoneDatabase)
 
     # Boot stamp for /api/v1/version's `booted_at`. Load-bearing for deploy
-    # verification: the escript loads modules LAZILY from the file on disk, so
-    # a not-yet-referenced module (Shuttle.BuildInfo) can load from a freshly
-    # deployed escript while the long-booted Poller keeps running old code —
+    # verification: the release boots :interactive (nothing sets `-mode
+    # embedded`), so modules load LAZILY from bin/rel/lib/*/ebin — a
+    # not-yet-referenced module (Shuttle.BuildInfo) can load out of a freshly
+    # rebuilt release while the long-booted Poller keeps running old code —
     # the compile-time git_sha then reports the NEW build from an OLD daemon.
     # Boot time can't lie that way: a deploy is only verified when git_sha
     # matches AND booted_at is newer than the deploy started.
@@ -97,17 +101,18 @@ defmodule Shuttle.Application do
 
   # Resolve everything the HTTP endpoint needs to bind, at RUNTIME.
   #
-  # `mix escript.build` bakes the EVALUATED compile-time config into the
-  # artifact, so a value decided in config/dev.exs travels to every host that
-  # escript is copied to. Anything machine-specific therefore has to be decided
-  # here instead — this function is the daemon's runtime config layer, and it
-  # always runs.
+  # A release bakes the EVALUATED compile-time config into the artifact
+  # (config/prod.exs → releases/*/sys.config), so a value decided in a config
+  # file travels to every host the tarball is unpacked on. Anything
+  # machine-specific therefore has to be decided here instead — this function
+  # is the daemon's runtime config layer, and it always runs.
   #
-  # It used to early-return whenever `:server` was already set. Since
-  # config/dev.exs sets `server: true`, that made the whole body dead in every
-  # escript build (and SHUTTLE_PORT dead with it). Each value now falls back
-  # individually, so an explicitly-configured one still wins — config/test.exs's
-  # `server: false` and port 4002 survive untouched.
+  # It used to early-return whenever `:server` was already set. Since the
+  # daemon's own config (config/dev.exs then, config/prod.exs now) sets
+  # `server: true`, that made the whole body dead in every daemon build (and
+  # SHUTTLE_PORT dead with it). Each value now falls back individually, so an
+  # explicitly-configured one still wins — config/test.exs's `server: false`
+  # and port 4002 survive untouched.
   @doc false
   def configure_endpoint do
     existing = Application.get_env(:shuttle, ShuttleWeb.Endpoint, [])

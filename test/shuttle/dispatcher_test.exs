@@ -1465,6 +1465,31 @@ defmodule Shuttle.DispatcherTest do
 
   # ── Resume-warning dismiss in run script ──
 
+  # The daemon is a Mix release with a bundled ERTS, and `erl` exports
+  # ROOTDIR/BINDIR/PROGNAME/EMU plus its own erts on PATH into the BEAM's
+  # environment — which every tmux worker inherits. A worker that then runs
+  # mix/elixir/erl dies with "cannot get bootfile .../bin/rel/bin/start.boot".
+  # See finding-release-erts-leaks-into-workers: a worker dispatched onto this
+  # very repo could not build it.
+  test "build_run_script scrubs the daemon's own release ERTS from the worker env" do
+    script = Dispatcher.build_run_script("tests/haiku", "claude <<< 'hi'", "claude-sonnet")
+
+    # The vars `erl` itself exports.
+    assert script =~ "unset ROOTDIR BINDIR PROGNAME EMU ESCRIPT_NAME"
+    # The release's own directories filtered out of PATH.
+    assert script =~ ~s|grep -vF "$RELEASE_ROOT/erts"|
+    assert script =~ ~s|grep -vF "$RELEASE_ROOT/bin"|
+    assert script =~ "unset RELEASE_ROOT"
+
+    # It must run BEFORE the harness command, or the damage is already done.
+    [scrub_at, command_at] =
+      Enum.map(["unset ROOTDIR BINDIR PROGNAME EMU", "claude <<< 'hi'"], fn needle ->
+        :binary.match(script, needle) |> elem(0)
+      end)
+
+    assert scrub_at < command_at
+  end
+
   test "build_run_script with dismiss_resume_warning embeds backgrounded send-keys" do
     script =
       Dispatcher.build_run_script("tests/haiku", "claude --resume 'abc'", "claude-sonnet",

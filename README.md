@@ -92,10 +92,18 @@ built-in set (`felt shuttle agents init` seeds it). `~/.config/felt/remotes.json
 daemons a hub aggregates (`felt shuttle remotes add`). Linux and macOS both run a single host —
 daemon, board, and workers — with the keep-alive installed as a systemd user unit or a launchd
 LaunchAgent. Multi-host tunnel management (`felt shuttle tunnels`) installs the hub's autossh jobs
-under whichever of the two the hub runs. The daemon ships
-as a checkout you build, not a release binary — the one rough edge left, and the
-reason the daemon needs Elixir and Node where the CLI needs nothing. felt works
-without the daemon. See
+under whichever of the two the hub runs.
+
+The daemon installs the way the CLI does:
+
+```bash
+SHUTTLE=1 curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh | sh
+```
+
+The build it fetches bundles its own Erlang runtime, so running the daemon needs no Erlang,
+Elixir or Node — only tmux and `felt` on `PATH`. Building from a checkout stays the path for
+changing daemon code and for the fleet. felt works without the daemon either way. See
+[Installation](https://cailmdaley.github.io/felt/shuttle/installation/) and
 [Honest scoping](https://cailmdaley.github.io/felt/shuttle/#honest-scoping).
 
 ## Documentation

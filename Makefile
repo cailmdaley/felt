@@ -63,9 +63,11 @@ AGENT_UNIT := $(AGENT_UNIT_DIR)/$(AGENT_UNIT_NAME)
 # touches no TCC-protected path and needs no Full Disk Access.
 AGENT_FELT_STORES ?=
 # The daemon's PATH, captured from a login shell at install time so it carries
-# Homebrew (escript/erl) and ~/.local/bin (felt), etc. — launchd's own env is
-# too bare, and sourcing the profile at runtime under launchd doesn't
-# reconstruct it. This is the user's real PATH, frozen.
+# ~/.local/bin (felt) and whatever else the user's real environment has. The
+# release bundles its own ERTS, so booting needs nothing on PATH — but every
+# store walk shells out to `felt`, and launchd's own env is too bare to hold it.
+# Sourcing the profile at runtime under launchd doesn't reconstruct it either.
+# This is the user's real PATH, frozen.
 AGENT_PATH ?= $(shell /bin/bash -lc 'echo $$PATH')
 # The user's PERSISTENT ssh-agent socket. launchd hands the daemon a bare
 # per-session Keychain agent that only holds the default key, so remote creds

@@ -1,8 +1,11 @@
 import Config
 
-# NOTE: escript boot does NOT load this compile-time config (see
-# Shuttle.Application.start/2, which also sets the DB at runtime). This line
-# covers Mix/test contexts; the runtime call covers the daemon escript.
+# NOTE: `Shuttle.Application.start/2` sets this again at runtime. That was
+# mandatory in the escript era — escript boot loaded no compile-time config, so
+# this line never reached the daemon at all. A release bakes the key into
+# releases/*/sys.config, so both paths now land on the same DB: this line covers
+# Mix/test contexts and the release, the runtime call covers every boot
+# regardless.
 config :elixir, :time_zone_database, Tz.TimeZoneDatabase
 
 config :shuttle,

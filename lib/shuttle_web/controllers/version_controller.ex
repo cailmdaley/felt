@@ -2,8 +2,8 @@ defmodule ShuttleWeb.VersionController do
   @moduledoc """
   Agent-API endpoint: GET /api/v1/version
 
-  Returns the daemon binary's compile-time build stamp so consumers can detect
-  stale escripts after a schema-touching source update, plus (S2) the
+  Returns the daemon's compile-time build stamp so consumers can detect a
+  stale daemon release after a schema-touching source update, plus (S2) the
   daemon-shelled CLI contract level: what this daemon EXPECTS
   (`Shuttle.Contract.expected_level/0`) versus what it PROBED at boot from the
   CLI (`felt shuttle contract`, cached in the Poller's `contract_check`
@@ -21,11 +21,12 @@ defmodule ShuttleWeb.VersionController do
       git_sha: git_sha,
       git_short_sha: short_sha(git_sha),
       built_at: build_info(:built_at),
-      # Runtime boot stamp (Shuttle.start/2), NOT compile-time: the escript
-      # loads modules lazily from the file on disk, so git_sha alone can
-      # report a fresh build out of a stale, long-booted daemon (BuildInfo
-      # first referenced after the escript was replaced). Deploy verifiers
-      # must check both: sha matches AND booted_at postdates the deploy.
+      # Runtime boot stamp (Shuttle.Application.start/2), NOT compile-time: the
+      # release boots :interactive (nothing sets `-mode embedded`), so modules
+      # load lazily from bin/rel/lib/*/ebin — git_sha alone can report a fresh
+      # build out of a stale, long-booted daemon (BuildInfo first referenced
+      # after a rebuild swapped the beams under it). Deploy verifiers must
+      # check both: sha matches AND booted_at postdates the deploy.
       booted_at: booted_at(),
       mix_vsn: Shuttle.version(),
       contract: contract_check()

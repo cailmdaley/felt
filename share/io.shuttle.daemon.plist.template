@@ -6,17 +6,19 @@
   are filled in). Do not load this template directly — it isn't a valid plist
   until installed.
 
-  PATH: launchd starts with a near-empty environment, but the daemon needs the
-  full user PATH at two moments — at boot the `#!/usr/bin/env escript` shebang
-  must find escript/erl (Homebrew), and at runtime it shells out to `felt` (in
-  ~/.local/bin) for every store walk. A PATH missing felt yields `:enoent` → 500
-  on /api/v1/fibers/composite. A login shell (`bash -lc`) does NOT fix this:
-  under launchd's bare env the user profile doesn't add Homebrew (its PATH setup
-  isn't self-sufficient from `env -i`), so escript stays unfound → exit 127. So
-  instead `make install-agent` CAPTURES the real login PATH at install time
-  (`bash -lc 'echo $PATH'`, run from the user's environment) and bakes it into
-  __PATH__ below — deterministic at runtime, and the user's actual PATH rather
-  than a hand-maintained list. `exec` replaces the shell with the daemon so
+  PATH: launchd starts with a near-empty environment, and the daemon shells out
+  to `felt` (in ~/.local/bin) for every store walk — a PATH missing felt yields
+  `:enoent` → 500 on /api/v1/fibers/composite. Boot itself no longer needs
+  anything: the daemon is an ERTS-bundled Mix release, so there is no
+  `#!/usr/bin/env escript` shebang hunting for escript/erl (which, under
+  launchd's bare env, used to exit 127). That narrows the requirement to `felt`;
+  it does not remove it. A login shell (`bash -lc`) does NOT fix what's left:
+  under launchd's bare env the user profile doesn't reconstruct the login PATH
+  (its setup isn't self-sufficient from `env -i`). So instead `make
+  install-agent` CAPTURES the real login PATH at install time (`bash -lc 'echo
+  $PATH'`, run from the user's environment) and bakes it into __PATH__ below —
+  deterministic at runtime, and the user's actual PATH rather than a
+  hand-maintained list. `exec` replaces the shell with the daemon so
   launchd's KeepAlive supervises it directly; `start --force` skips the
   already-running guard so a restart never refuses.
 

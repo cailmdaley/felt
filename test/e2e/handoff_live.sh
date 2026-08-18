@@ -58,7 +58,22 @@ FAKE_CLAUDE="$BIN/fake-claude"
 FELT_BIN=$(command -v "$FELT" || true)
 # The worker's handoff verb is `felt shuttle handoff` (the standalone shuttle-ctl
 # shim is retired). CTL is the verb prefix the fake worker appends `handoff` to.
-CTL=("$FELT" shuttle)
+#
+# ABSOLUTE path, deliberately. The fake worker runs inside a tmux session the
+# DAEMON spawned, and a tmux session inherits the tmux SERVER's environment —
+# not this script's. Where that server predates the current login (the normal
+# case on a workstation with tmux already running), its PATH can lack
+# ~/.local/bin, a bare `felt` resolves to nothing, and the handoff dies 127.
+#
+# NOT interpolated into the fake worker as an array. This heredoc is unquoted,
+# so bash expands parameters but performs no word splitting inside it:
+# `"${CTL[@]}"` renders as ONE double-quoted token, `"<path> shuttle"`, and the
+# worker then tries to exec a binary literally named `felt shuttle` (ENOENT).
+# That silently broke this gate — the worker exited, its tmux session ended,
+# and "no handed_off_at" looked exactly like the regression under test. The
+# worker interpolates "${FELT_BIN}" and writes `shuttle handoff` as literal
+# script text instead.
+CTL=("${FELT_BIN:-$FELT}" shuttle)
 
 FAIL=0
 DAEMON_PID=""
@@ -108,7 +123,12 @@ MODE=\$(cat "\$DIR/mode" 2>/dev/null || echo clean)
 # the daemon's async dispatch-stamp lands first (matches production ordering).
 sleep 1
 if [ "\$MODE" = clean ]; then
-  "${CTL[@]}" handoff probe   # SHUTTLE_FIBER_PATH wins; the arg is ignored
+  # Loud on failure. A silently-failing handoff is indistinguishable from a
+  # worker that exited without stamping — the tmux session ends either way —
+  # so it would masquerade as the very regression this gate exists to catch.
+  if ! "${FELT_BIN}" shuttle handoff probe >>"\$DIR/handoff.log" 2>&1; then
+    echo "HANDOFF FAILED (exit \$?)" >> "\$DIR/handoff.log"
+  fi
 else
   sleep 600              # stay alive to be killed mid-thought
 fi
@@ -199,8 +219,14 @@ pass "daemon bound :$PORT"
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 sh_field() {  # sh_field <fiber-id> <key>
+  # Dispatch stamps live in the shuttle.runtime sub-block (session_uuid,
+  # dispatched_at, handed_off_at); fall back to the top level for the
+  # structural keys (kind, host, agent).
   "$FELT" -C "$STORE" show "$1" -j 2>/dev/null \
-    | python3 -c "import sys,json;print(json.load(sys.stdin).get('shuttle',{}).get('$2',''))" 2>/dev/null
+    | python3 -c "
+import sys, json
+s = json.load(sys.stdin).get('shuttle', {})
+print(s.get('runtime', {}).get('$2', s.get('$2', '')))" 2>/dev/null
 }
 dispatch() {  # dispatch <fiber-id> → echoes tmux_session
   curl -s -X POST "http://127.0.0.1:$PORT/api/v1/dispatch" \
@@ -240,7 +266,15 @@ U1=$(sh_field e2e/probe-clean session_uuid); D1=$(sh_field e2e/probe-clean dispa
 wait_until 20 "worker stamps handed_off_at (#1)" has_handoff e2e/probe-clean || true
 wait_until 20 "worker ends its own tmux session (#1)" no_session "$S1" || true
 H1=$(sh_field e2e/probe-clean handed_off_at)
-[ -n "$H1" ] && pass "worker stamped handed_off_at=$H1 (real felt shuttle handoff, daemon-exported path)" || fail "handed_off_at never stamped"
+if [ -n "$H1" ]; then
+  pass "worker stamped handed_off_at=$H1 (real felt shuttle handoff, daemon-exported path)"
+else
+  fail "handed_off_at never stamped"
+  # The worker logs the handoff's own stderr here. If it is a 127, the tmux
+  # server handed the worker a PATH without felt on it; if it is a felt error,
+  # read it directly. Empty means the worker never reached the handoff at all.
+  info "worker handoff log: $(cat "$STORE/.felt/e2e/probe-clean/handoff.log" 2>/dev/null || echo '(no log written)')"
+fi
 no_session "$S1" && pass "endOwnTmuxSession killed $S1" || fail "tmux session survived handoff"
 python3 - "$D1" "$H1" <<'PY' && pass "handed_off_at >= dispatched_at → decision domain is FRESH" || fail "handoff not after dispatch"
 import sys, re

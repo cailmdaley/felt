@@ -76,9 +76,9 @@ prior transcript.
 
 ## The pieces
 
-- **The daemon** — an Elixir/OTP escript (a self-contained compiled executable)
-  at `bin/shuttle`. One process, bound to `127.0.0.1:4000`. It polls,
-  dispatches, and serves an HTTP API.
+- **The daemon** — an Elixir/OTP release that bundles its own Erlang runtime,
+  started through the `bin/shuttle` shim. One process, bound to
+  `127.0.0.1:4000`. It polls, dispatches, and serves an HTTP API.
 - **tmux** — hosts the worker process and reports its liveness. Not optional.
   tmux owns the worker process; Shuttle owns only the watcher. So restarting the
   daemon leaves live workers running — the daemon re-adopts them on boot.
@@ -96,18 +96,27 @@ prior transcript.
 
 ## Honest scoping
 
-One thing is still missing, and the other pages point here for it.
+Two things are still rough, and the other pages point here for them. Both are
+about operating the daemon rather than running it.
 
-**The daemon ships no release artifact.** You build it from a checkout, with
-Elixir and a Node toolchain on the machine, and you keep the checkout. The
-`felt` CLI installs from a release tarball; the daemon does not yet. See
-[Installation](installation.md).
+**A fetched daemon comes without its supervisor.** The release tarball carries
+the daemon, its Erlang runtime and the board bundle — but not the repo's
+operator surface. `make install-agent` renders the launchd and systemd
+templates from a checkout, so a fetched install either runs
+`$SHUTTLE_HOME/bin/shuttle start` in the foreground or goes under a job you
+write yourself. See [Installation](installation.md).
 
-Everything else that used to sit in this list is closed. A Linux machine can be
-a hub as well as a remote — `felt shuttle tunnels install` writes systemd user
-units there and launchd jobs on macOS. The commit ledger has a shipped writer,
-so the Chronicle narrates without a hand-installed hook. The examples name no
-particular store.
+**Deploy assumes a hub that builds the board.** `bin/shuttle-deploy` pulls and
+rebuilds on every host in the fleet file, and rsyncs `ui/dist` out from the
+machine you run it on, because a cluster login node is not expected to have
+Node. Each of those hosts is a checkout.
+
+Everything else that used to sit in this list is closed. The daemon now ships a
+release artifact per platform, so running it needs no Erlang, Elixir or Node. A
+Linux machine can be a hub as well as a remote — `felt shuttle tunnels install`
+writes systemd user units there and launchd jobs on macOS. The commit ledger
+has a shipped writer, so the Chronicle narrates without a hand-installed hook.
+The examples name no particular store.
 
 ## Next
 
@@ -116,4 +125,5 @@ particular store.
 - [The board](board.md) — the five views, and what each gesture writes.
 - [Cycles and eras](cycles.md) — naming a span of time.
 - [Telemetry and the ledgers](telemetry.md) — what the time views read.
-- [Installation](installation.md) — building the daemon from source.
+- [Installation](installation.md) — fetching or building the daemon, and
+  operating it.
