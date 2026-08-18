@@ -134,38 +134,44 @@ var nestCmd = &cobra.Command{
 
 		storage := felt.NewStorage(root)
 		scopeID := resolveCommandScope(root)
-		felts, err := storage.ListMetadata()
-		if err != nil {
-			return err
-		}
 
-		child, err := felt.FindByScopeIn(felts, scopeID, args[0], storage.ExternalRefs())
+		childRef, err := resolveFiberRef(storage, scopeID, args[0])
 		if err != nil {
 			return err
 		}
-		parent, err := felt.FindByScopeIn(felts, scopeID, args[1], storage.ExternalRefs())
+		parentRef, err := resolveFiberRef(storage, scopeID, args[1])
 		if err != nil {
 			return err
 		}
-		if child.ID == parent.ID {
+		// When either side lives outside this view the whole move runs in the
+		// enclosing store, with the local side rewritten into its outer
+		// coordinates: it is one namespace and one git repo, so moving a
+		// fiber across a project boundary inside it is an ordinary move.
+		store, childID, parentID, crossed := liftPair(storage, childRef, parentRef)
+
+		if childID == parentID {
 			return fmt.Errorf("child and parent must be different fibers")
 		}
-		if strings.HasPrefix(parent.ID, child.ID+"/") {
-			return fmt.Errorf("cannot nest %s under descendant %s", child.ID, parent.ID)
+		if strings.HasPrefix(parentID, childID+"/") {
+			return fmt.Errorf("cannot nest %s under descendant %s", childID, parentID)
 		}
 
-		targetID := path.Join(parent.ID, path.Base(child.ID))
-		if felt.ParentPath(child.ID) == parent.ID && child.ID == targetID {
-			return fmt.Errorf("%s is already nested under %s", child.ID, parent.ID)
+		targetID := path.Join(parentID, path.Base(childID))
+		if felt.ParentPath(childID) == parentID && childID == targetID {
+			return fmt.Errorf("%s is already nested under %s", childID, parentID)
 		}
-		if err := storage.CheckAvailableID(targetID); err != nil {
+		if err := store.CheckAvailableID(targetID); err != nil {
 			return err
 		}
-		if err := storage.MoveSubtree(child.ID, targetID); err != nil {
+		if err := store.MoveSubtree(childID, targetID); err != nil {
 			return err
 		}
 
-		fmt.Printf("Nested %s under %s as %s\n", child.ID, parent.ID, targetID)
+		location := ""
+		if crossed {
+			location = fmt.Sprintf(" (in %s)", storage.ExternalRefs().Root())
+		}
+		fmt.Printf("Nested %s under %s as %s%s\n", childID, parentID, targetID, location)
 		return nil
 	},
 }
@@ -183,28 +189,26 @@ var unnestCmd = &cobra.Command{
 
 		storage := felt.NewStorage(root)
 		scopeID := resolveCommandScope(root)
-		felts, err := storage.ListMetadata()
+
+		child, err := resolveFiberRef(storage, scopeID, args[0])
 		if err != nil {
 			return err
 		}
-
-		child, err := felt.FindByScopeIn(felts, scopeID, args[0], storage.ExternalRefs())
-		if err != nil {
-			return err
-		}
-		if !strings.Contains(child.ID, "/") {
-			return fmt.Errorf("%s is already top-level", child.ID)
+		if !strings.Contains(child.id, "/") {
+			return fmt.Errorf("%s is already top-level", child.id)
 		}
 
-		targetID := path.Base(child.ID)
-		if err := storage.CheckAvailableID(targetID); err != nil {
+		// Top level means top level of the store that holds it: promoting an
+		// external fiber lands it at the enclosing store's root, not in here.
+		targetID := path.Base(child.id)
+		if err := child.storage.CheckAvailableID(targetID); err != nil {
 			return err
 		}
-		if err := storage.MoveSubtree(child.ID, targetID); err != nil {
+		if err := child.storage.MoveSubtree(child.id, targetID); err != nil {
 			return err
 		}
 
-		fmt.Printf("Promoted %s to %s\n", child.ID, targetID)
+		fmt.Printf("Promoted %s to %s%s\n", child.id, targetID, child.location())
 		return nil
 	},
 }

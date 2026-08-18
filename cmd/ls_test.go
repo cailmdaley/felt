@@ -477,6 +477,7 @@ func saveLsGlobals() func() {
 	prevHasFields := lsHasFields
 	prevJSONFields := lsJSONFields
 	prevVerbose := lsVerbose
+	prevLocal := lsLocal
 	prevJSON := jsonOutput
 	prevTreeDepth := treeDepth
 
@@ -489,6 +490,7 @@ func saveLsGlobals() func() {
 	lsHasFields = nil
 	lsJSONFields = nil
 	lsVerbose = false
+	lsLocal = false
 	jsonOutput = false
 	treeDepth = 0
 
@@ -496,7 +498,7 @@ func saveLsGlobals() func() {
 	// that passed e.g. `-s active` leaves Changed("status") == true, and
 	// subsequent tests inspecting `cmd.Flags().Changed("status")` see stale
 	// state even though the underlying string variable was reset above.
-	for _, name := range []string{"status", "tag", "recent", "body", "exact", "regex", "has-field", "json-field", "json", "verbose"} {
+	for _, name := range []string{"status", "tag", "recent", "body", "exact", "regex", "has-field", "json-field", "json", "verbose", "local"} {
 		if f := lsCmd.Flags().Lookup(name); f != nil {
 			f.Changed = false
 		}
@@ -515,6 +517,7 @@ func saveLsGlobals() func() {
 		lsHasFields = prevHasFields
 		lsJSONFields = prevJSONFields
 		lsVerbose = prevVerbose
+		lsLocal = prevLocal
 		jsonOutput = prevJSON
 		treeDepth = prevTreeDepth
 	}

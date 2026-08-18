@@ -48,11 +48,13 @@ keys have dedicated flags; use those.`,
 
 		storage := felt.NewStorage(root)
 		scopeID := resolveCommandScope(root)
-		target, err := storage.FindMetadataInScope(scopeID, args[0])
+		// A fiber in the enclosing store is edited where it lives.
+		target, err := resolveFiberRef(storage, scopeID, args[0])
 		if err != nil {
 			return err
 		}
-		f, err := storage.Read(target.ID)
+		storage = target.storage
+		f, err := storage.Read(target.id)
 		if err != nil {
 			return err
 		}
@@ -158,11 +160,11 @@ keys have dedicated flags; use those.`,
 
 		switch {
 		case bodyCleared:
-			fmt.Printf("Updated %s (body cleared; previous content removed)\n", f.ID)
+			fmt.Printf("Updated %s%s (body cleared; previous content removed)\n", f.ID, target.location())
 		case bodyOverwritten:
-			fmt.Printf("Updated %s (body overwritten)\n", f.ID)
+			fmt.Printf("Updated %s%s (body overwritten)\n", f.ID, target.location())
 		default:
-			fmt.Printf("Updated %s\n", f.ID)
+			fmt.Printf("Updated %s%s\n", f.ID, target.location())
 		}
 		return nil
 	},

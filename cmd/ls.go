@@ -21,6 +21,7 @@ var (
 	lsHasFields  []string
 	lsJSONFields []string
 	lsVerbose    bool
+	lsLocal      bool
 	treeDepth    int
 )
 
@@ -45,6 +46,15 @@ Optional query searches name, outcome, additional YAML field text, and fiber id 
   felt ls -e "exact-slug"     exact name or exact id match
 
 Use --body with query to include body search, and with --json to emit body text.
+
+In a project store mounted inside a larger one, ANY filter — a query, -t, -s,
+--has-field, -n, alone or combined — makes this a search, and a search reaches
+into the enclosing store: local hits print first, then the rest of the store under a separator
+naming it, each by its full id there — and those ids work as arguments here
+(felt show, edit, rm act on the fiber where it lives). A completely bare felt ls
+is the listing — what am I working on here — and stays local; --local keeps a
+search local too, and --json is always local, being a per-store wire for the
+daemon and the board.
 
 Query results collapse by containment: a match whose ancestor also matches is
 folded into that ancestor, which carries a count of what it swallowed. Use -v to
@@ -114,88 +124,18 @@ list every match flat. --json is always uncollapsed.`,
 			(query != "" || len(lsTags) > 0 || len(hasFields) > 0)
 
 		// Filter
-		var exactMatches []*felt.Felt
-		var filtered []*felt.Felt
-		var bodyCandidates []*felt.Felt
-		for _, f := range felts {
-			// Status gate
-			if effectiveStatus == "all" {
-				// No filtering, include everything
-			} else if effectiveStatus != "" {
-				// Specific status: must match
-				if f.Status != effectiveStatus {
-					continue
-				}
-			} else {
-				// Default: open+active, must have status
-				if !f.HasStatus() {
-					continue
-				}
-				if f.Status != felt.StatusOpen && f.Status != felt.StatusActive {
-					continue
-				}
-			}
-
-			// Tag filter: must have ALL specified tags (AND logic, prefix supported)
-			if len(lsTags) > 0 {
-				hasAll := true
-				for _, tag := range lsTags {
-					if !f.HasTag(tag) {
-						hasAll = false
-						break
-					}
-				}
-				if !hasAll {
-					continue
-				}
-			}
-
-			if len(hasFields) > 0 {
-				hasAll := true
-				for _, field := range hasFields {
-					if !feltHasField(f, field) {
-						hasAll = false
-						break
-					}
-				}
-				if !hasAll {
-					continue
-				}
-			}
-
-			// Text search (if query provided)
-			if query != "" {
-				nameLower := strings.ToLower(f.DisplayName())
-				idLower := strings.ToLower(f.ID)
-
-				// Exact match: name, full id, or id basename (sorted first; regex excluded)
-				basenameLower := strings.ToLower(path.Base(f.ID))
-				if !lsRegex && (nameLower == queryLower || idLower == queryLower || basenameLower == queryLower) {
-					exactMatches = append(exactMatches, f)
-					continue
-				}
-
-				// If --exact, skip partial matches
-				if lsExact {
-					continue
-				}
-
-				// Substring or regex match against name, SearchText, and id
-				if matchesQuery(f, queryLower, re, lsRegex) {
-					filtered = append(filtered, f)
-					continue
-				}
-
-				if lsBody {
-					bodyCandidates = append(bodyCandidates, f)
-					continue
-				}
-
-				continue // no match
-			}
-
-			filtered = append(filtered, f)
+		search := lsSearch{
+			query:           query,
+			queryLower:      queryLower,
+			re:              re,
+			effectiveStatus: effectiveStatus,
+			hasFields:       hasFields,
+			// Any filter at all makes this a search rather than a listing —
+			// `felt ls -t bug` asks the same question as `felt ls bug`, and it
+			// would be incoherent for one to widen and the other not.
+			searching: hasFilters || statusExplicit,
 		}
+		exactMatches, filtered, bodyCandidates := search.apply(felts)
 
 		if query != "" && !lsExact && lsBody && len(bodyCandidates) > 0 {
 			filtered, err = scanBodyMatches(storage, filtered, bodyCandidates, re, queryLower, lsRegex)
@@ -280,7 +220,18 @@ list every match flat. --json is always uncollapsed.`,
 			shown, collapsed = collapseByContainment(filtered, exactMatches)
 		}
 
-		if len(shown) == 0 {
+		// A SEARCH also searches the enclosing store; a bare listing does not.
+		// The two are different questions: `felt ls` asks what am I working on
+		// here, `felt ls <query>` (or -t, or --has-field) asks where is this —
+		// and the second is answered badly by a store that can only see its
+		// own corner of the loom.
+		outer, outerClosed, err := lsOuterHits(storage, search, suppressClosed)
+		if err != nil {
+			return err
+		}
+		closedSuppressed += outerClosed
+
+		if len(shown) == 0 && len(outer.shown) == 0 {
 			if query != "" {
 				fmt.Printf("No felts matching %q\n", query)
 			} else {
@@ -289,6 +240,15 @@ list every match flat. --json is always uncollapsed.`,
 		} else {
 			for _, f := range shown {
 				fmt.Print(formatFeltTwoLine(f, collapsed[f.ID]))
+			}
+		}
+		if len(outer.shown) > 0 {
+			if len(shown) > 0 {
+				fmt.Println()
+			}
+			fmt.Printf("── elsewhere in %s ──\n", outer.root)
+			for _, f := range outer.shown {
+				fmt.Print(formatFeltTwoLine(f, outer.collapsed[f.ID]))
 			}
 		}
 
@@ -318,7 +278,176 @@ func init() {
 	lsCmd.Flags().BoolVarP(&lsRegex, "regex", "r", false, "Treat query as regular expression")
 	lsCmd.Flags().StringArrayVar(&lsHasFields, "has-field", nil, "Filter to fibers with this top-level frontmatter/JSON field (repeatable or comma-separated)")
 	lsCmd.Flags().StringArrayVar(&lsJSONFields, "json-field", nil, "With --json, emit only this top-level field (repeatable or comma-separated)")
+	lsCmd.Flags().BoolVar(&lsLocal, "local", false, "Keep a search inside this store, without widening to the enclosing one")
 	lsCmd.Flags().BoolVarP(&lsVerbose, "verbose", "v", false, "List every match flat, without collapsing matches under a matching ancestor")
+}
+
+// lsOuterResult is the enclosing store's half of a search: what to print,
+// what each printed line swallowed by containment, and where it came from.
+type lsOuterResult struct {
+	shown     []*felt.Felt
+	collapsed map[string]int
+	root      string
+}
+
+// lsOuterHits runs the same search against the enclosing store.
+//
+// A substore is a lens, and a lens should narrow what is LISTED, never what
+// can be FOUND: asking `felt ls kanban` from a project and silently missing
+// every fiber in the rest of the loom is the search failing at its one job.
+// So a query pays for the wider walk; a bare listing (query == "") never
+// reaches here and stays as fast as it was.
+//
+// This store's own subtree is excluded: those fibers are already in the local
+// block, and printing them twice under two different ids is worse than not
+// printing them at all.
+func lsOuterHits(storage *felt.Storage, search lsSearch, suppressClosed bool) (lsOuterResult, int, error) {
+	// The search gate comes first: a bare listing does not even ask whether
+	// this store is mounted inside another one. --local is the escape hatch
+	// for someone who wants the narrow answer from a search; there is no
+	// --all, because widening is the default and that is the point.
+	if !search.searching || lsLocal {
+		return lsOuterResult{}, 0, nil
+	}
+	external := storage.ExternalRefs()
+	if external == nil {
+		return lsOuterResult{}, 0, nil
+	}
+	outerStorage := felt.NewStorage(external.ProjectDir())
+	felts, err := outerStorage.ListMetadata()
+	if err != nil {
+		return lsOuterResult{}, 0, err
+	}
+
+	prefix := external.Prefix()
+	outside := make([]*felt.Felt, 0, len(felts))
+	for _, f := range felts {
+		if f.ID == prefix || strings.HasPrefix(f.ID, prefix+"/") {
+			continue
+		}
+		outside = append(outside, f)
+	}
+
+	exactMatches, filtered, bodyCandidates := search.apply(outside)
+	if search.query != "" && !lsExact && lsBody && len(bodyCandidates) > 0 {
+		filtered, err = scanBodyMatches(outerStorage, filtered, bodyCandidates, search.re, search.queryLower, lsRegex)
+		if err != nil {
+			return lsOuterResult{}, 0, err
+		}
+	}
+	matches := append(exactMatches, filtered...)
+
+	closed := 0
+	if suppressClosed {
+		matches, closed = partitionOutClosed(matches)
+		exactMatches, _ = partitionOutClosed(exactMatches)
+	}
+
+	shown := matches
+	var collapsed map[string]int
+	if !lsVerbose {
+		shown, collapsed = collapseByContainment(matches, exactMatches)
+	}
+	return lsOuterResult{shown: shown, collapsed: collapsed, root: external.Root()}, closed, nil
+}
+
+// lsSearch is one compiled `felt ls` query: the flags and the regex, applied
+// by apply() to a slice of fibers. It exists so the same predicate runs over
+// this store's fibers and over the enclosing store's — a search that misses
+// half the loom because of where the user is standing is not a search.
+type lsSearch struct {
+	query           string
+	queryLower      string
+	re              *regexp.Regexp
+	effectiveStatus string
+	hasFields       []string
+	searching       bool
+}
+
+// apply splits felts into exact matches (printed first), ordinary matches,
+// and — with --body — the fibers whose body still has to be read.
+func (search lsSearch) apply(felts []*felt.Felt) (exactMatches, filtered, bodyCandidates []*felt.Felt) {
+	query, queryLower, re, effectiveStatus, hasFields := search.query, search.queryLower, search.re, search.effectiveStatus, search.hasFields
+	for _, f := range felts {
+		// Status gate
+		if effectiveStatus == "all" {
+			// No filtering, include everything
+		} else if effectiveStatus != "" {
+			// Specific status: must match
+			if f.Status != effectiveStatus {
+				continue
+			}
+		} else {
+			// Default: open+active, must have status
+			if !f.HasStatus() {
+				continue
+			}
+			if f.Status != felt.StatusOpen && f.Status != felt.StatusActive {
+				continue
+			}
+		}
+
+		// Tag filter: must have ALL specified tags (AND logic, prefix supported)
+		if len(lsTags) > 0 {
+			hasAll := true
+			for _, tag := range lsTags {
+				if !f.HasTag(tag) {
+					hasAll = false
+					break
+				}
+			}
+			if !hasAll {
+				continue
+			}
+		}
+
+		if len(hasFields) > 0 {
+			hasAll := true
+			for _, field := range hasFields {
+				if !feltHasField(f, field) {
+					hasAll = false
+					break
+				}
+			}
+			if !hasAll {
+				continue
+			}
+		}
+
+		// Text search (if query provided)
+		if query != "" {
+			nameLower := strings.ToLower(f.DisplayName())
+			idLower := strings.ToLower(f.ID)
+
+			// Exact match: name, full id, or id basename (sorted first; regex excluded)
+			basenameLower := strings.ToLower(path.Base(f.ID))
+			if !lsRegex && (nameLower == queryLower || idLower == queryLower || basenameLower == queryLower) {
+				exactMatches = append(exactMatches, f)
+				continue
+			}
+
+			// If --exact, skip partial matches
+			if lsExact {
+				continue
+			}
+
+			// Substring or regex match against name, SearchText, and id
+			if matchesQuery(f, queryLower, re, lsRegex) {
+				filtered = append(filtered, f)
+				continue
+			}
+
+			if lsBody {
+				bodyCandidates = append(bodyCandidates, f)
+				continue
+			}
+
+			continue // no match
+		}
+
+		filtered = append(filtered, f)
+	}
+	return exactMatches, filtered, bodyCandidates
 }
 
 // collapseByContainment folds matches that live under another match into their
@@ -604,15 +733,28 @@ with the count of what lies below them. --json is always the full tree.`,
 		// Build containment tree from IDs
 		roots := buildContainmentTree(felts)
 
-		// If a specific ID given, find its subtree
+		// If a specific ID given, find its subtree. An id that names a fiber
+		// in the enclosing store draws that store's tree instead — the fiber
+		// is real, it just is not in this view.
 		if len(args) == 1 {
-			f, err := felt.FindByPrefixIn(felts, args[0], storage.ExternalRefs())
+			target, err := resolveFiberRef(storage, "", args[0])
 			if err != nil {
 				return err
 			}
-			node := findContainmentNode(roots, f.ID)
+			if target.elsewhere {
+				if jsonOutput {
+					felts, err = target.storage.ListMetadataWithModTime()
+				} else {
+					felts, err = target.storage.ListMetadata()
+				}
+				if err != nil {
+					return err
+				}
+				roots = buildContainmentTree(felts)
+			}
+			node := findContainmentNode(roots, target.id)
 			if node == nil {
-				return fmt.Errorf("fiber %s not found in tree", f.ID)
+				return fmt.Errorf("fiber %s not found in tree", target.id)
 			}
 			roots = []*ContainmentNode{node}
 		}

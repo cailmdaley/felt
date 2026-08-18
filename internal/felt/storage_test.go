@@ -2053,12 +2053,9 @@ func TestResolveScopedIDRefusesEnclosingStorePath(t *testing.T) {
 		t.Fatalf("error %v should name the enclosing store %q", err, external.Root())
 	}
 
-	// A bare slug that names a fiber in the enclosing store and nothing here
-	// resolves the same way — but only under explainMisses, the mode `felt
-	// check` runs in. A plain lookup would fail either way, so it does not pay
-	// for the outer walk (see TestExternalProbeStaysOffWhenItCannotMatter).
-	resolver := newScopedIDResolverIn(ids, external).explainMisses()
-	if _, err := resolver.Resolve("notes/runbook", "commons"); !errors.Is(err, ErrExternalReference) {
+	// A bare slug that names a top-level fiber out there resolves the same
+	// way, off the cheap stat (see TestExternalPathLookupNeedsNoWalk).
+	if _, err := ResolveScopedIDIn(ids, "notes/runbook", "commons", external); !errors.Is(err, ErrExternalReference) {
 		t.Fatalf("[[commons]] error = %v, want ErrExternalReference", err)
 	}
 }
@@ -2082,12 +2079,46 @@ func TestExternalProbeStaysOffWhenItCannotMatter(t *testing.T) {
 		t.Fatalf("enclosing store was walked for a query the probe cannot help")
 	}
 
-	// A local same-slug fiber makes the fallback live — now the probe runs.
+	// A fully-qualified foreign id is answered by the cheap stat — the shape
+	// commands rely on, so it must not cost a walk either.
 	if _, err := ResolveScopedIDIn(ids, "notes/runbook", "ai-futures/portolan/debug", external); !errors.Is(err, ErrExternalReference) {
 		t.Fatalf("error = %v, want ErrExternalReference", err)
 	}
+	if external.resolver != nil {
+		t.Fatalf("enclosing store was walked for an id its literal path already answered")
+	}
+
+	// A PARTIAL path resolves only by the enclosing store's own slug rules,
+	// and a live basename fallback makes the verdict matter — so here the
+	// walk is both necessary and paid for.
+	if _, err := ResolveScopedIDIn(ids, "notes/runbook", "portolan/debug", external); !errors.Is(err, ErrExternalReference) {
+		t.Fatalf("partial-path error = %v, want ErrExternalReference", err)
+	}
 	if external.resolver == nil {
-		t.Fatalf("enclosing store should have been walked once the fallback was live")
+		t.Fatalf("enclosing store should have been walked for a partial path")
+	}
+}
+
+// TestExternalPathLookupNeedsNoWalk pins the cheap half on its own: a bare
+// foreign slug that exists at the enclosing store's root is found by a stat,
+// with no local same-slug fiber to make the gate open. Without this,
+// `felt rm <foreign-slug>` would report "no felt found" for a fiber that is
+// plainly there.
+func TestExternalPathLookupNeedsNoWalk(t *testing.T) {
+	_, subProj := newSubstoreFixture(t)
+	external := NewStorage(subProj).ExternalRefs()
+	ids := []string{"debug", "notes/runbook"}
+
+	_, err := ResolveScopedIDIn(ids, "", "commons", external)
+	if !errors.Is(err, ErrExternalReference) {
+		t.Fatalf("error = %v, want ErrExternalReference", err)
+	}
+	if external.resolver != nil {
+		t.Fatalf("enclosing store was walked for an id its literal path already answered")
+	}
+	ref, _ := AsExternalReference(err)
+	if ref.ID != "commons" {
+		t.Fatalf("ExternalReference.ID = %q, want %q", ref.ID, "commons")
 	}
 }
 
@@ -2211,13 +2242,27 @@ func TestResolveScopedIDEnclosingHitInsideOwnPrefixIsLocal(t *testing.T) {
 func TestStorageLookupsKnowTheEnclosingStore(t *testing.T) {
 	_, subProj := newSubstoreFixture(t)
 	storage := NewStorage(subProj)
+	external := storage.ExternalRefs()
 
 	_, err := storage.FindInScope("", "ai-futures/portolan/debug")
 	if !errors.Is(err, ErrExternalReference) {
 		t.Fatalf("FindInScope() error = %v, want ErrExternalReference", err)
 	}
-	if !strings.Contains(err.Error(), "felt -C ") {
-		t.Fatalf("error %v should suggest reopening the enclosing store", err)
+	// The failure carries what a command needs to act on the fiber where it
+	// lives — the id out there and the store that holds it — and suggests no
+	// command of its own: this package does not know which verb was typed.
+	ref, ok := AsExternalReference(err)
+	if !ok {
+		t.Fatalf("error %v does not carry ExternalReference detail", err)
+	}
+	if ref.ID != "ai-futures/portolan/debug" {
+		t.Fatalf("ExternalReference.ID = %q, want the id in the enclosing store", ref.ID)
+	}
+	if ref.Root != external.Root() || ref.ProjectDir != external.ProjectDir() {
+		t.Fatalf("ExternalReference location = %q/%q, want %q/%q", ref.Root, ref.ProjectDir, external.Root(), external.ProjectDir())
+	}
+	if strings.Contains(err.Error(), "felt -C") || strings.Contains(err.Error(), "try ") {
+		t.Fatalf("error %v should not suggest a command", err)
 	}
 
 	f, err := storage.FindInScope("", "ai-futures/felt/notes/runbook")

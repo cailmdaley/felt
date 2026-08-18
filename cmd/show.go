@@ -68,6 +68,18 @@ Targeted views:
 		storage := felt.NewStorage(root)
 		scopeID := resolveCommandScope(root)
 
+		// An id that names a fiber in the enclosing store is shown from
+		// there: everything below runs against the store that holds it, with
+		// the fiber addressed by its id in that store's coordinates.
+		target, err := resolveFiberRef(storage, scopeID, args[0])
+		if err != nil {
+			return err
+		}
+		query := args[0]
+		if target.elsewhere {
+			storage, scopeID, query = target.storage, "", target.id
+		}
+
 		if selectorCount == 0 && !jsonOutput && (detail == DepthName || detail == DepthCompact) {
 			// Both levels skip the relationship scan and the body-ref graph.
 			// Compact still reads the body — it reports the body's line count —
@@ -76,7 +88,7 @@ Targeted views:
 			if detail == DepthCompact {
 				find = storage.FindInScope
 			}
-			f, err := find(scopeID, args[0])
+			f, err := find(scopeID, query)
 			if err != nil {
 				return err
 			}
@@ -86,7 +98,7 @@ Targeted views:
 
 		// Targeted views: full single-file read, optionally structured output.
 		if selectorCount > 0 || jsonOutput {
-			f, err := storage.FindInScope(scopeID, args[0])
+			f, err := storage.FindInScope(scopeID, query)
 			if err != nil {
 				return err
 			}
@@ -119,7 +131,7 @@ Targeted views:
 			}
 		}
 
-		f, err := storage.FindInScope(scopeID, args[0])
+		f, err := storage.FindInScope(scopeID, query)
 		if err != nil {
 			return err
 		}

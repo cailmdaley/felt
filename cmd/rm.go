@@ -20,17 +20,15 @@ var rmCmd = &cobra.Command{
 
 		storage := felt.NewStorage(root)
 		scopeID := resolveCommandScope(root)
-		felts, err := storage.ListMetadata()
+
+		// An id that names a fiber in the enclosing store is deleted there,
+		// and the output says where — a cross-store deletion is never silent.
+		target, err := resolveFiberRef(storage, scopeID, args[0])
 		if err != nil {
 			return err
 		}
 
-		f, err := felt.FindByScopeIn(felts, scopeID, args[0], storage.ExternalRefs())
-		if err != nil {
-			return err
-		}
-
-		if err := storage.Delete(f.ID); err != nil {
+		if err := target.storage.Delete(target.id); err != nil {
 			return err
 		}
 
@@ -38,7 +36,7 @@ var rmCmd = &cobra.Command{
 		// removed fiber is observable as absence. Git history of .felt/
 		// captures the deletion if archaeology is needed.
 
-		fmt.Printf("Deleted %s\n", f.ID)
+		fmt.Printf("Deleted %s%s\n", target.id, target.location())
 		return nil
 	},
 }

@@ -53,10 +53,42 @@ type enclosingStore struct {
 
 // ErrExternalReference reports a query that names a real fiber in the
 // ENCLOSING store rather than this one. It is a resolution failure — the
-// fiber is not in this view — but a distinguishable one: the link is healthy,
-// the view is narrow. Callers that lint links (`felt check`) stay quiet on
-// it; callers that resolve user input turn it into "look over there".
-var ErrExternalReference = errors.New("fiber lives in the enclosing felt store")
+// fiber is not in this VIEW — but a distinguishable one, and what callers do
+// with it differs: `felt check` stays quiet (the link is healthy, the view is
+// narrow), while a command acting on user input reaches across and operates
+// on the fiber where it lives.
+//
+// The sentinel exists to stop the basename rescue from stealing foreign paths
+// and to tell check "not broken". It is not a fence around the enclosing
+// store, and the error text deliberately suggests no command: the caller
+// knows which verb the user typed, this package does not.
+var ErrExternalReference = errors.New("lives in the enclosing felt store")
+
+// ExternalReference is the resolution failure ErrExternalReference names,
+// carrying enough to act on: the query as typed, the id it has in the
+// enclosing store, and where that store is.
+type ExternalReference struct {
+	Query      string
+	ID         string
+	Root       string // the enclosing .felt directory
+	ProjectDir string // its project root — what `felt -C` takes
+}
+
+func (e *ExternalReference) Error() string {
+	return fmt.Sprintf("%q %s as %s (%s)", e.Query, ErrExternalReference, e.ID, e.Root)
+}
+
+func (e *ExternalReference) Unwrap() error { return ErrExternalReference }
+
+// AsExternalReference extracts the external-reference detail from an error,
+// for a caller that wants to act on the fiber rather than report the failure.
+func AsExternalReference(err error) (*ExternalReference, bool) {
+	var ref *ExternalReference
+	if errors.As(err, &ref) {
+		return ref, true
+	}
+	return nil, false
+}
 
 // EnclosingStore reports the store this one is mounted inside, if any.
 //
@@ -82,7 +114,7 @@ func (s *Storage) EnclosingStore() (root string, prefix string, ok bool) {
 					return
 				}
 				s.enclosing = enclosingStore{root: dir, prefix: filepath.ToSlash(rel), ok: true}
-				s.external = &ExternalRefs{root: dir, prefix: s.enclosing.prefix, cache: map[string]bool{}}
+				s.external = &ExternalRefs{root: dir, prefix: s.enclosing.prefix, cache: map[string]string{}}
 				return
 			}
 			if parent := filepath.Dir(dir); parent == dir {
@@ -146,7 +178,7 @@ type ExternalRefs struct {
 	resolver *scopedIDResolver
 
 	mu    sync.Mutex
-	cache map[string]bool
+	cache map[string]string // query -> its id out there, "" for "not out there"
 }
 
 // Root is the enclosing `.felt/` directory.
@@ -186,7 +218,40 @@ func (x *ExternalRefs) Localize(query string) (string, bool) {
 	return rest, true
 }
 
-// Resolves reports whether the enclosing store resolves query — from the
+// LookupPath is the cheap half of the external check: query names a fiber in
+// the enclosing store when `<root>/<query>/<slug>.md` is there — the canonical
+// on-disk shape of a fiber. Two syscalls, memoized, no walk, which is why it
+// runs on every miss rather than behind the probe gate.
+//
+// It answers only for ids written out in full from the enclosing store's root.
+// Partial paths and bare slugs that live deeper are the walk's business.
+func (x *ExternalRefs) LookupPath(query string) (string, bool) {
+	if x == nil || query == "" || strings.HasPrefix(query, "/") || strings.HasPrefix(query, "..") {
+		return "", false
+	}
+	if query == x.prefix || strings.HasPrefix(query, x.prefix+"/") {
+		return "", false
+	}
+	key := "path\x00" + query
+	x.mu.Lock()
+	id, seen := x.cache[key]
+	x.mu.Unlock()
+	if seen {
+		return id, id != ""
+	}
+
+	id = ""
+	file := filepath.Join(x.root, filepath.FromSlash(query), path.Base(query)+FileExt)
+	if info, err := os.Stat(file); err == nil && !info.IsDir() {
+		id = query
+	}
+	x.mu.Lock()
+	x.cache[key] = id
+	x.mu.Unlock()
+	return id, id != ""
+}
+
+// Lookup reports whether the enclosing store resolves query — from the
 // position this store's scope occupies out there — to a fiber outside this
 // store's own subtree.
 //
@@ -205,16 +270,16 @@ func (x *ExternalRefs) Localize(query string) (string, bool) {
 // The enclosing store's id list is walked once, lazily: nothing here runs
 // until a query has already failed to resolve locally, so a top-level store
 // or a substore with clean links never pays for it.
-func (x *ExternalRefs) Resolves(scopeID, query string) bool {
+func (x *ExternalRefs) Lookup(scopeID, query string) (string, bool) {
 	if x == nil || query == "" {
-		return false
+		return "", false
 	}
 	key := scopeID + "\x00" + query
 	x.mu.Lock()
 	found, seen := x.cache[key]
 	x.mu.Unlock()
 	if seen {
-		return found
+		return found, found != ""
 	}
 
 	x.once.Do(func() {
@@ -234,19 +299,21 @@ func (x *ExternalRefs) Resolves(scopeID, query string) bool {
 	// The citing fiber sits at <prefix>/<scopeID> in the outer namespace;
 	// resolving from there is the same lexical walk the enclosing store runs.
 	id, err := x.resolver.Resolve(path.Join(x.prefix, scopeID), query)
-	found = err == nil && id != x.prefix && !strings.HasPrefix(id, x.prefix+"/")
+	if err != nil || id == x.prefix || strings.HasPrefix(id, x.prefix+"/") {
+		id = ""
+	}
 
 	x.mu.Lock()
-	x.cache[key] = found
+	x.cache[key] = id
 	x.mu.Unlock()
-	return found
+	return id, id != ""
 }
 
-// err builds the resolution failure for an external target: the sentinel,
-// the query, and where to go looking for it.
-func (x *ExternalRefs) err(query string) error {
-	return fmt.Errorf("%q %w %s — try `felt -C %s show %s`",
-		query, ErrExternalReference, x.root, x.ProjectDir(), query)
+// err builds the resolution failure for an external target: the sentinel, the
+// query, and the id it has out there — everything a caller needs to act on
+// the fiber where it lives.
+func (x *ExternalRefs) err(query, id string) error {
+	return &ExternalReference{Query: query, ID: id, Root: x.root, ProjectDir: x.ProjectDir()}
 }
 
 type fiberFile struct {
@@ -1558,8 +1625,8 @@ func (r *scopedIDResolver) resolve(scopeID, query string) (string, bool, error) 
 	// replaces silently answered with the wrong fiber — and `felt rm` and
 	// `felt nest` act on that answer. No link in the loom fires this case
 	// today; if one does, it shows up as a link that stops resolving here.
-	if r.probeExternal(query) && r.external.Resolves(scopeID, query) {
-		return "", false, r.external.err(query)
+	if id, ok := r.externalHit(scopeID, query); ok {
+		return "", false, r.external.err(query, id)
 	}
 
 	// Last resort: the query's final segment names exactly one fiber. This is
@@ -1576,19 +1643,33 @@ func (r *scopedIDResolver) resolve(scopeID, query string) (string, bool, error) 
 	return "", false, fmt.Errorf("no felt found matching %q", query)
 }
 
-// probeExternal reports whether asking the enclosing store about this query is
-// worth the walk it costs. For a lookup the answer can only change the outcome
-// when the basename fallback is about to fire — otherwise resolution fails
-// either way, and the only difference is the wording of the error. `felt check`
-// wants that wording (see explainMisses) and asks for it explicitly.
-func (r *scopedIDResolver) probeExternal(query string) bool {
+// externalHit asks the enclosing store about a query this store could not
+// answer, in two steps of very different cost.
+//
+// The cheap step is a stat: does the query name a fiber at exactly that path
+// out there? That is how a foreign id is normally written — it is what
+// `felt ls` prints and what a user copies — so the common case costs two
+// syscalls and always runs. Commands depend on it: it is what lets
+// `felt rm ai-futures/portolan/debug` reach the fiber it names.
+//
+// The expensive step walks the enclosing store's whole id list, so that the
+// slug and suffix rules that resolve `[[gotcha-…]]` from the loom resolve it
+// from in here too. That one is gated: for a lookup it can only change the
+// outcome when the basename fallback is about to fire (otherwise resolution
+// fails either way and only the error wording differs), and `felt check` —
+// which needs a verdict on every failing ref — asks for it explicitly through
+// explainMisses.
+func (r *scopedIDResolver) externalHit(scopeID, query string) (string, bool) {
 	if r.external == nil {
-		return false
+		return "", false
 	}
-	if r.explain {
-		return true
+	if id, ok := r.external.LookupPath(query); ok {
+		return id, true
 	}
-	return len(r.byBase[path.Base(query)]) == 1
+	if !r.explain && len(r.byBase[path.Base(query)]) != 1 {
+		return "", false
+	}
+	return r.external.Lookup(scopeID, query)
 }
 
 // resolveInStore is resolution against this store alone: exact id, then the
