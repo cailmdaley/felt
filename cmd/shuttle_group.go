@@ -66,21 +66,34 @@ func init() {
 // context (-C or a cwd felt repo), matching the daemon's invocation (it always
 // passes --felt-store). The from-anywhere address verbs (session-name, attach)
 // use shuttleAddressFiber instead, which defaults to the configured loom stores.
+//
+// An id that names a fiber in the enclosing store is not refused: shuttle
+// verbs cross the view boundary on the same terms rm and edit do — the
+// operation runs in the store that holds the fiber, and the returned ref's
+// location() suffix says where, so a cross-store write is never silent.
 func shuttleResolveFiber(query string, full bool) (*felt.Felt, *felt.Storage, error) {
+	f, st, _, err := shuttleResolveFiberRef(query, full)
+	return f, st, err
+}
+
+func shuttleResolveFiberRef(query string, full bool) (*felt.Felt, *felt.Storage, fiberRef, error) {
 	root, err := resolveProjectRoot()
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fiberRef{}, err
 	}
 	st := felt.NewStorage(root)
-	scope := resolveCommandScope(root)
+	ref, err := resolveFiberRef(st, resolveCommandScope(root), query)
+	if err != nil {
+		return nil, nil, fiberRef{}, err
+	}
 	var f *felt.Felt
 	if full {
-		f, err = st.FindInScope(scope, query)
+		f, err = ref.storage.FindInScope("", ref.id)
 	} else {
-		f, err = st.FindMetadataInScope(scope, query)
+		f, err = ref.storage.FindMetadataInScope("", ref.id)
 	}
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fiberRef{}, err
 	}
-	return f, st, nil
+	return f, ref.storage, ref, nil
 }

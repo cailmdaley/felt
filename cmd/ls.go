@@ -21,14 +21,18 @@ var (
 	lsHasFields  []string
 	lsJSONFields []string
 	lsVerbose    bool
-	lsLocal      bool
 	treeDepth    int
 )
 
 var lsCmd = &cobra.Command{
 	Use:   "ls [query]",
 	Short: "List and search felts",
-	Long: `Lists felts, showing open and active by default.
+	Long: `Lists felts in THIS view, showing open and active by default.
+
+felt ls lists the view; felt find searches the store. In a project store
+mounted inside a larger one, ls never leaves the view — every flag below
+filters this store's own listing, and stays fast. Use felt find to search the
+whole enclosing store.
 
 A filter (-t, query, --has-field) widens the search to every status except
 closed; closed matches are counted in a trailing hint instead of printed.
@@ -46,15 +50,6 @@ Optional query searches name, outcome, additional YAML field text, and fiber id 
   felt ls -e "exact-slug"     exact name or exact id match
 
 Use --body with query to include body search, and with --json to emit body text.
-
-In a project store mounted inside a larger one, ANY filter — a query, -t, -s,
---has-field, -n, alone or combined — makes this a search, and a search reaches
-into the enclosing store: local hits print first, then the rest of the store under a separator
-naming it, each by its full id there — and those ids work as arguments here
-(felt show, edit, rm act on the fiber where it lives). A completely bare felt ls
-is the listing — what am I working on here — and stays local; --local keeps a
-search local too, and --json is always local, being a per-store wire for the
-daemon and the board.
 
 Query results collapse by containment: a match whose ancestor also matches is
 folded into that ancestor, which carries a count of what it swallowed. Use -v to
@@ -77,16 +72,6 @@ list every match flat. --json is always uncollapsed.`,
 			return fmt.Errorf("--json-field requires --json")
 		}
 
-		// Compile regex if needed
-		var re *regexp.Regexp
-		if lsRegex && query != "" {
-			re, err = regexp.Compile("(?i)" + query)
-			if err != nil {
-				return fmt.Errorf("invalid regex: %w", err)
-			}
-		}
-
-		queryLower := strings.ToLower(query)
 		var felts []*felt.Felt
 		frontmatterFields, canPrefilterFrontmatter := frontmatterPrefilterFields(hasFields)
 		if jsonOutput {
@@ -110,10 +95,6 @@ list every match flat. --json is always uncollapsed.`,
 		// widen to all statuses. Bare `felt ls` stays open+active (actionable view).
 		statusExplicit := cmd.Flags().Changed("status")
 		hasFilters := len(lsTags) > 0 || len(hasFields) > 0 || query != "" || lsRecent > 0
-		effectiveStatus := lsStatus
-		if !statusExplicit && hasFilters {
-			effectiveStatus = "all"
-		}
 
 		// A search widens past open+active so untracked fibers can match, but a
 		// store accumulates far more closed work than live work and the closed
@@ -123,22 +104,15 @@ list every match flat. --json is always uncollapsed.`,
 		suppressClosed := !statusExplicit && lsRecent == 0 &&
 			(query != "" || len(lsTags) > 0 || len(hasFields) > 0)
 
-		// Filter
-		search := lsSearch{
-			query:           query,
-			queryLower:      queryLower,
-			re:              re,
-			effectiveStatus: effectiveStatus,
-			hasFields:       hasFields,
-			// Any filter at all makes this a search rather than a listing —
-			// `felt ls -t bug` asks the same question as `felt ls bug`, and it
-			// would be incoherent for one to widen and the other not.
-			searching: hasFilters || statusExplicit,
+		search, err := compileSearch(query, lsStatus, !statusExplicit && hasFilters,
+			lsTags, hasFields, lsExact, lsRegex, lsBody, lsVerbose)
+		if err != nil {
+			return err
 		}
 		exactMatches, filtered, bodyCandidates := search.apply(felts)
 
 		if query != "" && !lsExact && lsBody && len(bodyCandidates) > 0 {
-			filtered, err = scanBodyMatches(storage, filtered, bodyCandidates, re, queryLower, lsRegex)
+			filtered, err = scanBodyMatches(storage, filtered, bodyCandidates, search.re, search.queryLower, lsRegex)
 			if err != nil {
 				return err
 			}
@@ -220,18 +194,7 @@ list every match flat. --json is always uncollapsed.`,
 			shown, collapsed = collapseByContainment(filtered, exactMatches)
 		}
 
-		// A SEARCH also searches the enclosing store; a bare listing does not.
-		// The two are different questions: `felt ls` asks what am I working on
-		// here, `felt ls <query>` (or -t, or --has-field) asks where is this —
-		// and the second is answered badly by a store that can only see its
-		// own corner of the loom.
-		outer, outerClosed, err := lsOuterHits(storage, search, suppressClosed)
-		if err != nil {
-			return err
-		}
-		closedSuppressed += outerClosed
-
-		if len(shown) == 0 && len(outer.shown) == 0 {
+		if len(shown) == 0 {
 			if query != "" {
 				fmt.Printf("No felts matching %q\n", query)
 			} else {
@@ -240,15 +203,6 @@ list every match flat. --json is always uncollapsed.`,
 		} else {
 			for _, f := range shown {
 				fmt.Print(formatFeltTwoLine(f, collapsed[f.ID]))
-			}
-		}
-		if len(outer.shown) > 0 {
-			if len(shown) > 0 {
-				fmt.Println()
-			}
-			fmt.Printf("── elsewhere in %s ──\n", outer.root)
-			for _, f := range outer.shown {
-				fmt.Print(formatFeltTwoLine(f, outer.collapsed[f.ID]))
 			}
 		}
 
@@ -261,6 +215,17 @@ list every match flat. --json is always uncollapsed.`,
 			hidden := len(felts) - len(filtered)
 			if hidden > 0 {
 				fmt.Printf("\n(%d more — use -s all to see everything)\n", hidden)
+			}
+		}
+
+		// A filtered ls in a substore answers a narrower question than the one
+		// that was probably asked: this view's fibers, not the store's. Say so
+		// once, and name the verb that does search the store. A bare listing
+		// is the question it looks like and needs no note. The check is one
+		// memoized symlink-eval and an ancestor walk — no outer ids are read.
+		if (hasFilters || statusExplicit) && !jsonOutput {
+			if outerRoot, _, ok := storage.EnclosingStore(); ok {
+				fmt.Printf("\n(view-local — `felt find` searches the whole store at %s)\n", outerRoot)
 			}
 		}
 
@@ -278,96 +243,85 @@ func init() {
 	lsCmd.Flags().BoolVarP(&lsRegex, "regex", "r", false, "Treat query as regular expression")
 	lsCmd.Flags().StringArrayVar(&lsHasFields, "has-field", nil, "Filter to fibers with this top-level frontmatter/JSON field (repeatable or comma-separated)")
 	lsCmd.Flags().StringArrayVar(&lsJSONFields, "json-field", nil, "With --json, emit only this top-level field (repeatable or comma-separated)")
-	lsCmd.Flags().BoolVar(&lsLocal, "local", false, "Keep a search inside this store, without widening to the enclosing one")
 	lsCmd.Flags().BoolVarP(&lsVerbose, "verbose", "v", false, "List every match flat, without collapsing matches under a matching ancestor")
 }
 
-// lsOuterResult is the enclosing store's half of a search: what to print,
-// what each printed line swallowed by containment, and where it came from.
-type lsOuterResult struct {
-	shown     []*felt.Felt
-	collapsed map[string]int
-	root      string
-}
-
-// lsOuterHits runs the same search against the enclosing store.
-//
-// A substore is a lens, and a lens should narrow what is LISTED, never what
-// can be FOUND: asking `felt ls kanban` from a project and silently missing
-// every fiber in the rest of the loom is the search failing at its one job.
-// So a query pays for the wider walk; a bare listing (query == "") never
-// reaches here and stays as fast as it was.
-//
-// This store's own subtree is excluded: those fibers are already in the local
-// block, and printing them twice under two different ids is worse than not
-// printing them at all.
-func lsOuterHits(storage *felt.Storage, search lsSearch, suppressClosed bool) (lsOuterResult, int, error) {
-	// The search gate comes first: a bare listing does not even ask whether
-	// this store is mounted inside another one. --local is the escape hatch
-	// for someone who wants the narrow answer from a search; there is no
-	// --all, because widening is the default and that is the point.
-	if !search.searching || lsLocal {
-		return lsOuterResult{}, 0, nil
-	}
-	external := storage.ExternalRefs()
-	if external == nil {
-		return lsOuterResult{}, 0, nil
-	}
-	outerStorage := felt.NewStorage(external.ProjectDir())
-	felts, err := outerStorage.ListMetadata()
-	if err != nil {
-		return lsOuterResult{}, 0, err
-	}
-
-	prefix := external.Prefix()
-	outside := make([]*felt.Felt, 0, len(felts))
-	for _, f := range felts {
-		if f.ID == prefix || strings.HasPrefix(f.ID, prefix+"/") {
-			continue
-		}
-		outside = append(outside, f)
-	}
-
-	exactMatches, filtered, bodyCandidates := search.apply(outside)
-	if search.query != "" && !lsExact && lsBody && len(bodyCandidates) > 0 {
-		filtered, err = scanBodyMatches(outerStorage, filtered, bodyCandidates, search.re, search.queryLower, lsRegex)
-		if err != nil {
-			return lsOuterResult{}, 0, err
-		}
-	}
-	matches := append(exactMatches, filtered...)
-
-	closed := 0
-	if suppressClosed {
-		matches, closed = partitionOutClosed(matches)
-		exactMatches, _ = partitionOutClosed(exactMatches)
-	}
-
-	shown := matches
-	var collapsed map[string]int
-	if !lsVerbose {
-		shown, collapsed = collapseByContainment(matches, exactMatches)
-	}
-	return lsOuterResult{shown: shown, collapsed: collapsed, root: external.Root()}, closed, nil
-}
-
-// lsSearch is one compiled `felt ls` query: the flags and the regex, applied
-// by apply() to a slice of fibers. It exists so the same predicate runs over
-// this store's fibers and over the enclosing store's — a search that misses
-// half the loom because of where the user is standing is not a search.
+// lsSearch is one compiled query: the flags and the regex, applied by apply()
+// to a slice of fibers. It exists so the same predicate runs over this store's
+// fibers (`felt ls`) and over the enclosing store's (`felt find`).
 type lsSearch struct {
 	query           string
 	queryLower      string
 	re              *regexp.Regexp
 	effectiveStatus string
 	hasFields       []string
-	searching       bool
+	tags            []string
+	exact           bool
+	regex           bool
+	body            bool
+	verbose         bool
+}
+
+// compile builds the predicate from one invocation's flag values. Both ls and
+// find call it, so the two verbs cannot drift in what a query means.
+// widen asks for the every-status-but-closed reading a filter implies; the
+// caller decides, because ls counts -n as a filter and find has no -n.
+func compileSearch(query string, status string, widen bool, tags, hasFields []string, exact, regex, body, verbose bool) (lsSearch, error) {
+	var re *regexp.Regexp
+	if regex && query != "" {
+		compiled, err := regexp.Compile("(?i)" + query)
+		if err != nil {
+			return lsSearch{}, fmt.Errorf("invalid regex: %w", err)
+		}
+		re = compiled
+	}
+	effectiveStatus := status
+	if widen {
+		effectiveStatus = "all"
+	}
+	return lsSearch{
+		query:           query,
+		queryLower:      strings.ToLower(query),
+		re:              re,
+		effectiveStatus: effectiveStatus,
+		hasFields:       hasFields,
+		tags:            tags,
+		exact:           exact,
+		regex:           regex,
+		body:            body,
+		verbose:         verbose,
+	}, nil
+}
+
+// run applies the search to one store's fibers and returns what to print:
+// exact matches first, containment-collapsed, with the closed matches
+// partitioned out when the caller asks. It is the whole body of a search over
+// a store, so ls and find print the same shape from the same code.
+func (search lsSearch) run(storage *felt.Storage, felts []*felt.Felt, suppressClosed bool) (shown []*felt.Felt, collapsedCounts map[string]int, closed int, err error) {
+	exactMatches, filtered, bodyCandidates := search.apply(felts)
+	if search.query != "" && !search.exact && search.body && len(bodyCandidates) > 0 {
+		filtered, err = scanBodyMatches(storage, filtered, bodyCandidates, search.re, search.queryLower, search.regex)
+		if err != nil {
+			return nil, nil, 0, err
+		}
+	}
+	matches := append(exactMatches, filtered...)
+	if suppressClosed {
+		matches, closed = partitionOutClosed(matches)
+		exactMatches, _ = partitionOutClosed(exactMatches)
+	}
+	shown = matches
+	if !search.verbose {
+		shown, collapsedCounts = collapseByContainment(matches, exactMatches)
+	}
+	return shown, collapsedCounts, closed, nil
 }
 
 // apply splits felts into exact matches (printed first), ordinary matches,
 // and — with --body — the fibers whose body still has to be read.
 func (search lsSearch) apply(felts []*felt.Felt) (exactMatches, filtered, bodyCandidates []*felt.Felt) {
 	query, queryLower, re, effectiveStatus, hasFields := search.query, search.queryLower, search.re, search.effectiveStatus, search.hasFields
+	tags, exact, regex, body := search.tags, search.exact, search.regex, search.body
 	for _, f := range felts {
 		// Status gate
 		if effectiveStatus == "all" {
@@ -388,9 +342,9 @@ func (search lsSearch) apply(felts []*felt.Felt) (exactMatches, filtered, bodyCa
 		}
 
 		// Tag filter: must have ALL specified tags (AND logic, prefix supported)
-		if len(lsTags) > 0 {
+		if len(tags) > 0 {
 			hasAll := true
-			for _, tag := range lsTags {
+			for _, tag := range tags {
 				if !f.HasTag(tag) {
 					hasAll = false
 					break
@@ -421,23 +375,23 @@ func (search lsSearch) apply(felts []*felt.Felt) (exactMatches, filtered, bodyCa
 
 			// Exact match: name, full id, or id basename (sorted first; regex excluded)
 			basenameLower := strings.ToLower(path.Base(f.ID))
-			if !lsRegex && (nameLower == queryLower || idLower == queryLower || basenameLower == queryLower) {
+			if !regex && (nameLower == queryLower || idLower == queryLower || basenameLower == queryLower) {
 				exactMatches = append(exactMatches, f)
 				continue
 			}
 
 			// If --exact, skip partial matches
-			if lsExact {
+			if exact {
 				continue
 			}
 
 			// Substring or regex match against name, SearchText, and id
-			if matchesQuery(f, queryLower, re, lsRegex) {
+			if matchesQuery(f, queryLower, re, regex) {
 				filtered = append(filtered, f)
 				continue
 			}
 
-			if lsBody {
+			if body {
 				bodyCandidates = append(bodyCandidates, f)
 				continue
 			}

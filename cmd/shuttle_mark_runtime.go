@@ -45,7 +45,7 @@ the runtime nesting lives in one engine (felt). Unlike 'handoff', it never
 touches tmux.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		f, st, _, unlock, err := resolveOwnedShuttleFiber(args[0], "")
+		f, st, _, ref, unlock, err := resolveOwnedShuttleFiber(args[0], "")
 		if err != nil {
 			return err
 		}
@@ -75,7 +75,7 @@ touches tmux.`,
 		if err := st.Write(f); err != nil {
 			return fmt.Errorf("writing fiber: %w", err)
 		}
-		fmt.Printf("marked runtime for %s\n", args[0])
+		fmt.Printf("marked runtime for %s%s\n", args[0], ref.location())
 		return nil
 	},
 }

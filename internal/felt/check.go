@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -12,6 +13,7 @@ import (
 const (
 	CheckLevelError   = "error"
 	CheckLevelWarning = "warning"
+	CheckLevelInfo    = "info"
 )
 
 type CheckIssue struct {
@@ -203,14 +205,24 @@ func checkRelationshipIntegrity(felts []*Felt, external *ExternalRefs) []CheckIs
 	sort.Strings(ids)
 
 	var issues []CheckIssue
-	// explainMisses: check is the one caller that needs a verdict on EVERY
-	// failing ref, since a foreign link with no local same-slug fiber has to
-	// be recognised as external rather than reported broken.
-	resolver := newScopedIDResolverIn(ids, external).explainMisses()
+	resolver := newScopedIDResolverIn(ids, external)
 	_ = iterRefsResolved(felts, resolver, func(r resolvedRef) error {
 		// A reference that resolves to a fiber in the enclosing store is not
-		// broken — this store simply cannot see it. Silence, not an issue.
+		// broken — this store simply cannot see it. Silence, not an issue,
+		// EXCEPT where the external hit shadowed a local basename rescue: the
+		// reader loses a repair that used to fire, and that loss should be
+		// visible rather than silent.
 		if errors.Is(r.ResolveErr, ErrExternalReference) {
+			if ref, ok := AsExternalReference(r.ResolveErr); ok {
+				if local := resolver.byBase[path.Base(cleanLookupQuery(r.RawTarget))]; len(local) == 1 {
+					issues = append(issues, CheckIssue{
+						Level:   CheckLevelInfo,
+						FiberID: r.Source.ID,
+						Path:    "body",
+						Message: fmt.Sprintf("reference %q resolves to %s in the enclosing store, shadowing a local basename rescue to %s", r.Label, ref.ID, local[0]),
+					})
+				}
+			}
 			return nil
 		}
 		if r.Kind == refKindReference {

@@ -51,32 +51,36 @@ import (
 // guard never round-tripped back to the daemon it was being shelled from.
 // Post-S1, `resolveOwnHost` (see ensureOwnedHere) is pure local state — no
 // round-trip to guard against — so every caller now takes this same path.
-func resolveOwnedShuttleFiber(query, missingBlockHint string) (*felt.Felt, *felt.Storage, *shuttle.Block, func() error, error) {
-	f, st, err := shuttleResolveFiber(query, true)
+//
+// The returned ref carries where the fiber turned out to live: a shuttle verb
+// crosses the view boundary like rm and edit do, and every verb appends
+// ref.location() to its headline so a cross-store write is never silent.
+func resolveOwnedShuttleFiber(query, missingBlockHint string) (*felt.Felt, *felt.Storage, *shuttle.Block, fiberRef, func() error, error) {
+	f, st, ref, err := shuttleResolveFiberRef(query, true)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, fiberRef{}, nil, err
 	}
 	f, unlock, err := lockAndReloadFiber(st, f)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, fiberRef{}, nil, err
 	}
 	block, ok, err := f.ShuttleBlock()
 	if err != nil {
 		unlock()
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, fiberRef{}, nil, err
 	}
 	if !ok {
 		unlock()
 		if missingBlockHint == "" {
-			return nil, nil, nil, nil, fmt.Errorf("fiber %s has no shuttle: block", query)
+			return nil, nil, nil, fiberRef{}, nil, fmt.Errorf("fiber %s has no shuttle: block", query)
 		}
-		return nil, nil, nil, nil, fmt.Errorf("fiber %s has no shuttle: block (%s)", query, missingBlockHint)
+		return nil, nil, nil, fiberRef{}, nil, fmt.Errorf("fiber %s has no shuttle: block (%s)", query, missingBlockHint)
 	}
 	if err := ensureOwnedHere(f, query); err != nil {
 		unlock()
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, fiberRef{}, nil, err
 	}
-	return f, st, block, unlock, nil
+	return f, st, block, ref, unlock, nil
 }
 
 // lockAndReloadFiber acquires f.ID's cross-process advisory lock (F4,
@@ -114,7 +118,7 @@ Use --no-kill to stop scheduling only and let a live worker finish naturally.
 status:active is the sole dispatch gate; there is no enabled flag.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		f, st, _, unlock, err := resolveOwnedShuttleFiber(args[0], "")
+		f, st, _, ref, unlock, err := resolveOwnedShuttleFiber(args[0], "")
 		if err != nil {
 			return err
 		}
@@ -129,7 +133,7 @@ status:active is the sole dispatch gate; there is no enabled flag.`,
 		if err := st.Write(f); err != nil {
 			return fmt.Errorf("writing fiber: %w", err)
 		}
-		fmt.Printf("paused %s (status: open; schedule preserved)\n", args[0])
+		fmt.Printf("paused %s%s (status: open; schedule preserved)\n", args[0], ref.location())
 		if statusBefore != felt.StatusOpen {
 			fmt.Printf("  status: %s → open\n", shuttleNonEmpty(statusBefore, "(missing)"))
 		}
@@ -178,7 +182,7 @@ armed straight to active. Refuses on a tempered/composted close — use
 'felt shuttle reopen' to requeue a finished fiber.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		f, st, block, unlock, err := resolveOwnedShuttleFiber(args[0], "")
+		f, st, block, ref, unlock, err := resolveOwnedShuttleFiber(args[0], "")
 		if err != nil {
 			return err
 		}
@@ -203,7 +207,7 @@ armed straight to active. Refuses on a tempered/composted close — use
 			if err := st.Write(f); err != nil {
 				return fmt.Errorf("writing fiber: %w", err)
 			}
-			fmt.Printf("resumed %s (standing role; re-queued for immediate dispatch)\n", args[0])
+			fmt.Printf("resumed %s%s (standing role; re-queued for immediate dispatch)\n", args[0], ref.location())
 			return nil
 		}
 
@@ -215,7 +219,7 @@ armed straight to active. Refuses on a tempered/composted close — use
 		if err := st.Write(f); err != nil {
 			return fmt.Errorf("writing fiber: %w", err)
 		}
-		fmt.Printf("resumed %s (status: active)\n", args[0])
+		fmt.Printf("resumed %s%s (status: active)\n", args[0], ref.location())
 		if statusBefore != felt.StatusActive {
 			if statusBefore == "" {
 				fmt.Println("  status: active (set; was missing)")
@@ -245,7 +249,7 @@ The shuttle block stays installed; closed fibers are ignored by the daemon
 until they are reopened.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		f, st, _, unlock, err := resolveOwnedShuttleFiber(args[0], "")
+		f, st, _, ref, unlock, err := resolveOwnedShuttleFiber(args[0], "")
 		if err != nil {
 			return err
 		}
@@ -269,7 +273,7 @@ until they are reopened.`,
 			return fmt.Errorf("writing fiber: %w", err)
 		}
 
-		fmt.Printf("closed %s\n", args[0])
+		fmt.Printf("closed %s%s\n", args[0], ref.location())
 		switch {
 		case tempered == nil:
 			fmt.Println("  tempered: cleared (awaiting review)")
@@ -296,7 +300,7 @@ With --as-draft, sets status = open instead: the card reopens as a PAUSED DRAFT
 — visible on the board, never auto-dispatched.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		f, st, _, unlock, err := resolveOwnedShuttleFiber(args[0], "")
+		f, st, _, ref, unlock, err := resolveOwnedShuttleFiber(args[0], "")
 		if err != nil {
 			return err
 		}
@@ -316,7 +320,7 @@ With --as-draft, sets status = open instead: the card reopens as a PAUSED DRAFT
 			return fmt.Errorf("writing fiber: %w", err)
 		}
 
-		fmt.Printf("reopened %s (status: %s)\n", args[0], status)
+		fmt.Printf("reopened %s%s (status: %s)\n", args[0], ref.location(), status)
 		if statusBefore == "" {
 			fmt.Printf("  status: %s (set; was missing)\n", status)
 		} else if statusBefore != status {
@@ -343,7 +347,7 @@ Examples:
   printf 'First line\nSecond line\n' | felt shuttle set-outcome <fiber>`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		f, st, _, unlock, err := resolveOwnedShuttleFiber(args[0], "")
+		f, st, _, ref, unlock, err := resolveOwnedShuttleFiber(args[0], "")
 		if err != nil {
 			return err
 		}
@@ -359,7 +363,7 @@ Examples:
 			return fmt.Errorf("writing fiber: %w", err)
 		}
 
-		fmt.Printf("set outcome for %s\n", args[0])
+		fmt.Printf("set outcome for %s%s\n", args[0], ref.location())
 		return nil
 	},
 }
@@ -407,7 +411,7 @@ Routes to the owning daemon when reachable (a single in-process transition);
 falls back to a local document write when the daemon is down.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		f, st, block, unlock, err := resolveOwnedShuttleFiber(args[0], "")
+		f, st, block, ref, unlock, err := resolveOwnedShuttleFiber(args[0], "")
 		if err != nil {
 			return err
 		}
@@ -442,7 +446,7 @@ falls back to a local document write when the daemon is down.`,
 			if err := st.Write(f); err != nil {
 				return fmt.Errorf("writing fiber: %w", err)
 			}
-			fmt.Printf("accepted pinned role %s (re-parked to the strip: status: open)\n", args[0])
+			fmt.Printf("accepted pinned role %s%s (re-parked to the strip: status: open)\n", args[0], ref.location())
 			return nil
 		}
 
@@ -490,7 +494,7 @@ falls back to a local document write when the daemon is down.`,
 		if err := st.Write(f); err != nil {
 			return fmt.Errorf("writing fiber: %w", err)
 		}
-		fmt.Printf("accepted run for %s\n  next due: %s\n", args[0], computedNext.Format(time.RFC3339))
+		fmt.Printf("accepted run for %s%s\n  next due: %s\n", args[0], ref.location(), computedNext.Format(time.RFC3339))
 		return nil
 	},
 }
@@ -510,7 +514,7 @@ preserved.`,
 		if err != nil {
 			return fmt.Errorf("loading agent registry: %w", err)
 		}
-		f, st, block, unlock, err := resolveOwnedShuttleFiber(args[0], "use 'felt shuttle repeat' to install first")
+		f, st, block, ref, unlock, err := resolveOwnedShuttleFiber(args[0], "use 'felt shuttle repeat' to install first")
 		if err != nil {
 			return err
 		}
@@ -531,7 +535,7 @@ preserved.`,
 			return fmt.Errorf("writing fiber: %w", err)
 		}
 
-		fmt.Printf("set agent for %s → %s\n", args[0], agentID)
+		fmt.Printf("set agent for %s%s → %s\n", args[0], ref.location(), agentID)
 		return nil
 	},
 }
@@ -561,7 +565,7 @@ back to the harness default.`,
 		if err != nil {
 			return fmt.Errorf("loading agent registry: %w", err)
 		}
-		f, st, block, unlock, err := resolveOwnedShuttleFiber(args[0], "use 'felt shuttle repeat' to install first")
+		f, st, block, ref, unlock, err := resolveOwnedShuttleFiber(args[0], "use 'felt shuttle repeat' to install first")
 		if err != nil {
 			return err
 		}
@@ -610,7 +614,7 @@ back to the harness default.`,
 			return fmt.Errorf("writing fiber: %w", err)
 		}
 
-		fmt.Printf("set agent for %s → %s", args[0], shuttleNonEmpty(agentID, "(default)"))
+		fmt.Printf("set agent for %s%s → %s", args[0], ref.location(), shuttleNonEmpty(agentID, "(default)"))
 		if effort != "" {
 			fmt.Printf(" effort=%s", effort)
 		}
@@ -682,7 +686,7 @@ pause / resume / close / reopen for that.`,
 		if err != nil {
 			return fmt.Errorf("loading agent registry: %w", err)
 		}
-		f, st, block, unlock, err := resolveOwnedShuttleFiber(args[0],
+		f, st, block, ref, unlock, err := resolveOwnedShuttleFiber(args[0],
 			"use 'felt shuttle install' / 'repeat' / 'pin' to create one first")
 		if err != nil {
 			return err
@@ -756,9 +760,9 @@ pause / resume / close / reopen for that.`,
 		}
 
 		if block.Kind == kind {
-			fmt.Printf("reshaped %s (kind: %s, unchanged)\n", args[0], kind)
+			fmt.Printf("reshaped %s%s (kind: %s, unchanged)\n", args[0], ref.location(), kind)
 		} else {
-			fmt.Printf("reshaped %s (kind: %s → %s)\n", args[0], shuttleNonEmpty(block.Kind, "(unset)"), kind)
+			fmt.Printf("reshaped %s%s (kind: %s → %s)\n", args[0], ref.location(), shuttleNonEmpty(block.Kind, "(unset)"), kind)
 		}
 		if candidate.Schedule != nil {
 			fmt.Printf("  schedule: %s (%s)\n", candidate.Schedule.Expr, candidate.Schedule.TZ)
@@ -798,7 +802,7 @@ var uninstallShuttleCmd = &cobra.Command{
 daemon will no longer dispatch it. The felt status and tags are not changed.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		f, st, err := shuttleResolveFiber(args[0], true)
+		f, st, ref, err := shuttleResolveFiberRef(args[0], true)
 		if err != nil {
 			return err
 		}
@@ -820,7 +824,7 @@ daemon will no longer dispatch it. The felt status and tags are not changed.`,
 		if err := st.Write(f); err != nil {
 			return fmt.Errorf("removing shuttle block: %w", err)
 		}
-		fmt.Printf("uninstalled %s (shuttle: block removed)\n", args[0])
+		fmt.Printf("uninstalled %s%s (shuttle: block removed)\n", args[0], ref.location())
 		return nil
 	},
 }

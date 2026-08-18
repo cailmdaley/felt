@@ -1515,7 +1515,6 @@ func ResolveScopedIDIn(ids []string, scopeID, query string, external *ExternalRe
 
 type scopedIDResolver struct {
 	external     *ExternalRefs
-	explain      bool
 	ids          []string
 	exact        map[string]struct{}
 	parentBases  map[string]map[string]string
@@ -1574,18 +1573,6 @@ func (r *scopedIDResolver) Resolve(scopeID, query string) (string, error) {
 		return id, nil
 	}
 	return "", resolutionErr
-}
-
-// explainMisses turns on the enclosing-store probe for every failing query,
-// not just the ones the basename fallback would otherwise rescue. `felt check`
-// needs it — a foreign link with no local twin has to be recognised as
-// external rather than reported broken — and nothing else does: for a plain
-// lookup the probe cannot change the answer unless the fallback is about to
-// fire, and it costs a walk of the whole enclosing store. Returns r so it
-// composes with the constructor.
-func (r *scopedIDResolver) explainMisses() *scopedIDResolver {
-	r.explain = true
-	return r
 }
 
 func (r *scopedIDResolver) resolve(scopeID, query string) (string, bool, error) {
@@ -1654,20 +1641,18 @@ func (r *scopedIDResolver) resolve(scopeID, query string) (string, bool, error) 
 //
 // The expensive step walks the enclosing store's whole id list, so that the
 // slug and suffix rules that resolve `[[gotcha-…]]` from the loom resolve it
-// from in here too. That one is gated: for a lookup it can only change the
-// outcome when the basename fallback is about to fire (otherwise resolution
-// fails either way and only the error wording differs), and `felt check` —
-// which needs a verdict on every failing ref — asks for it explicitly through
-// explainMisses.
+// from in here too. It runs on every local miss — ungated. It used to be
+// gated on the basename fallback being about to fire, which made the answer
+// depend on whether the query's slug happened to collide with a local one:
+// `felt show portolan/debug` resolved or did not according to an accident of
+// this store's naming. A partial foreign path now resolves either way, at the
+// cost of one walk of the enclosing store's id list, memoized, only on a miss.
 func (r *scopedIDResolver) externalHit(scopeID, query string) (string, bool) {
 	if r.external == nil {
 		return "", false
 	}
 	if id, ok := r.external.LookupPath(query); ok {
 		return id, true
-	}
-	if !r.explain && len(r.byBase[path.Base(query)]) != 1 {
-		return "", false
 	}
 	return r.external.Lookup(scopeID, query)
 }

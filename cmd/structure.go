@@ -147,7 +147,7 @@ var nestCmd = &cobra.Command{
 		// enclosing store, with the local side rewritten into its outer
 		// coordinates: it is one namespace and one git repo, so moving a
 		// fiber across a project boundary inside it is an ordinary move.
-		store, childID, parentID, crossed := liftPair(storage, childRef, parentRef)
+		store, childID, parentID, where := liftPair(storage, childRef, parentRef)
 
 		if childID == parentID {
 			return fmt.Errorf("child and parent must be different fibers")
@@ -167,11 +167,7 @@ var nestCmd = &cobra.Command{
 			return err
 		}
 
-		location := ""
-		if crossed {
-			location = fmt.Sprintf(" (in %s)", storage.ExternalRefs().Root())
-		}
-		fmt.Printf("Nested %s under %s as %s%s\n", childID, parentID, targetID, location)
+		fmt.Printf("Nested %s under %s as %s%s\n", childID, parentID, targetID, where.location())
 		return nil
 	},
 }

@@ -271,19 +271,39 @@ func TestCheckSkipsEnclosingStoreReferences(t *testing.T) {
 		},
 	}, external)
 
-	if len(issues) != 1 {
-		t.Fatalf("Check() produced %d issues, want 1: %v", len(issues), issues)
+	var errorIssues, infoIssues []CheckIssue
+	for _, issue := range issues {
+		if issue.Level == CheckLevelError {
+			errorIssues = append(errorIssues, issue)
+		} else if issue.Level == CheckLevelInfo {
+			infoIssues = append(infoIssues, issue)
+		}
 	}
-	if !strings.Contains(issues[0].Message, "nowhere-at-all") {
-		t.Fatalf("issue = %q, want the genuinely broken reference", issues[0].Message)
+	if len(errorIssues) != 1 {
+		t.Fatalf("Check() produced %d errors, want 1: %v", len(errorIssues), issues)
+	}
+	if !strings.Contains(errorIssues[0].Message, "nowhere-at-all") {
+		t.Fatalf("issue = %q, want the genuinely broken reference", errorIssues[0].Message)
+	}
+
+	// [[ai-futures/portolan/debug]] resolves external AND has a local basename
+	// twin (`debug`), so the external hit shadowed a rescue that used to fire.
+	// That is a silent loss, and check names both candidates rather than
+	// staying quiet about it.
+	if len(infoIssues) != 1 {
+		t.Fatalf("want one shadowed-rescue info issue, got %v", issues)
+	}
+	for _, want := range []string{"ai-futures/portolan/debug", "debug", "shadow"} {
+		if !strings.Contains(infoIssues[0].Message, want) {
+			t.Fatalf("info issue = %q, want it to name %q", infoIssues[0].Message, want)
+		}
 	}
 }
 
-// TestRelationshipsDropForeignCitationsWithoutExplainMode: citations run
-// without explainMisses (they only care about hits), and the narrow probe
-// gate has to be enough for them — a foreign link whose slug matches a local
-// fiber is exactly the case the gate keeps live.
-func TestRelationshipsDropForeignCitationsWithoutExplainMode(t *testing.T) {
+// TestRelationshipsDropForeignCitations: a link that resolves out into the
+// enclosing store is not a citation of the local same-slug fiber. Only the
+// genuinely local reference counts.
+func TestRelationshipsDropForeignCitations(t *testing.T) {
 	_, subProj := newSubstoreFixture(t)
 	external := NewStorage(subProj).ExternalRefs()
 

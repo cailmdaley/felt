@@ -73,16 +73,21 @@ func resolveFiberRef(storage *felt.Storage, scopeID, arg string) (fiberRef, erro
 // external the whole operation runs in the enclosing store, with the local
 // side translated into outer coordinates (`debug` becomes
 // `ai-futures/felt/debug`). When both sides are local nothing moves.
-func liftPair(storage *felt.Storage, a, b fiberRef) (*felt.Storage, string, string, bool) {
+// It returns the store the operation runs in, the two ids in that store's
+// coordinates, and a ref describing WHERE that is — so the caller reports the
+// crossing with the same location() suffix every other cross-store verb uses.
+func liftPair(storage *felt.Storage, a, b fiberRef) (*felt.Storage, string, string, fiberRef) {
 	if !a.elsewhere && !b.elsewhere {
-		return storage, a.id, b.id, false
+		return storage, a.id, b.id, fiberRef{storage: storage}
 	}
-	prefix := storage.ExternalRefs().Prefix()
+	external := storage.ExternalRefs()
+	prefix := external.Prefix()
 	outer := a.storage
 	if !a.elsewhere {
 		outer = b.storage
 	}
-	return outer, liftID(a, prefix), liftID(b, prefix), true
+	where := fiberRef{storage: outer, elsewhere: true, root: external.Root()}
+	return outer, liftID(a, prefix), liftID(b, prefix), where
 }
 
 // liftID renders a ref's id in the enclosing store's coordinates.

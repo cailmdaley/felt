@@ -1,6 +1,7 @@
 package felt
 
 import (
+	"path"
 	"sort"
 	"strings"
 )
@@ -33,7 +34,81 @@ func (s *Storage) ScanRelationships(targetID string) ([]Citation, []DataFlowCons
 	if err != nil {
 		return nil, nil, err
 	}
-	return RelationshipsFromFelts(felts, targetID, s.ExternalRefs())
+	citations, consumers, err := RelationshipsFromFelts(felts, targetID, s.ExternalRefs())
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// A view narrows what is listed, not what points at you. In a substore the
+	// fibers most likely to cite this one live in the rest of the loom, and a
+	// back-reference block that cannot see them is answering a question nobody
+	// asked. So scan the enclosing store too, from ITS root, and label the hits
+	// by their full outer ids. Not a hot path — one walk, on an explicit ask.
+	outerCitations, outerConsumers, err := s.outerRelationships(targetID)
+	if err != nil {
+		return nil, nil, err
+	}
+	citations = append(citations, outerCitations...)
+	consumers = append(consumers, outerConsumers...)
+	sortCitations(citations)
+	sortConsumers(consumers)
+	return citations, consumers, nil
+}
+
+// outerRelationships collects back-references from the enclosing store,
+// excluding this store's own subtree — those were already scanned locally, and
+// reporting them twice under two spellings is worse than not reporting them.
+// The target is addressed in outer coordinates, which is how links out there
+// resolve to it.
+func (s *Storage) outerRelationships(targetID string) ([]Citation, []DataFlowConsumer, error) {
+	external := s.ExternalRefs()
+	if external == nil {
+		return nil, nil, nil
+	}
+	prefix := external.Prefix()
+	outer := &Storage{root: external.root}
+	felts, err := outer.List()
+	if err != nil {
+		return nil, nil, err
+	}
+	outside := make([]*Felt, 0, len(felts))
+	for _, f := range felts {
+		if f.ID == prefix || strings.HasPrefix(f.ID, prefix+"/") {
+			continue
+		}
+		outside = append(outside, f)
+	}
+	// The resolver needs every outer id, including this store's own, so a link
+	// out there still resolves to the target; only the SOURCES are narrowed.
+	ids := sortedFeltIDs(felts)
+	outerTarget := path.Join(prefix, targetID)
+
+	var citations []Citation
+	var consumers []DataFlowConsumer
+	_ = iterRefsResolved(outside, newScopedIDResolverIn(ids, nil), func(r resolvedRef) error {
+		if r.ResolveErr != nil || r.ResolvedID != outerTarget {
+			return nil
+		}
+		switch r.Kind {
+		case refKindReference:
+			citations = append(citations, Citation{
+				SourceID:   r.Source.ID,
+				TargetID:   targetID,
+				Fragment:   r.Fragment,
+				SourceName: r.Source.DisplayName(),
+			})
+		case refKindDataFlow:
+			consumers = append(consumers, DataFlowConsumer{
+				SourceID:   r.Source.ID,
+				TargetID:   targetID,
+				OutputID:   r.Fragment,
+				InputID:    r.InputID,
+				SourceName: r.Source.DisplayName(),
+			})
+		}
+		return nil
+	})
+	return citations, consumers, nil
 }
 
 // RelationshipsFromFelts collects citations and consumers for targetID in one

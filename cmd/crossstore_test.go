@@ -173,84 +173,40 @@ func TestUnnestAcrossBoundaryPromotesInEnclosingStore(t *testing.T) {
 	}
 }
 
-// TestLsQueryWidensToEnclosingStore: search is the command whose whole job is
-// finding things, so a query crosses the boundary — local hits first, the rest
-// under a separator naming the store, each by its full id there. This store's
-// own subtree is excluded from the outer block: it is already printed above.
-func TestLsQueryWidensToEnclosingStore(t *testing.T) {
+// TestLsStaysInTheView: ls lists the view. A query narrows that listing; it
+// does not become a search of the store — that is what `felt find` is for, and
+// a filtered ls in a substore says so on a trailer line.
+func TestLsStaysInTheView(t *testing.T) {
 	_, subProj := newCrossStoreFixture(t)
 	defer saveLsGlobals()()
-	defer saveShowGlobals()()
 
 	out, err := runCommand(t, subProj, "ls", "debug")
 	if err != nil {
 		t.Fatalf("ls query: %v\n%s", err, out)
 	}
-	root := loomRoot(t, subProj)
-	if !strings.Contains(out, "── elsewhere in "+root+" ──") {
-		t.Fatalf("ls output missing the enclosing-store separator:\n%s", out)
+	if strings.Contains(out, "elsewhere in") || strings.Contains(out, "ai-futures/portolan") {
+		t.Fatalf("ls reached the enclosing store:\n%s", out)
 	}
-	if !strings.Contains(out, "ai-futures/portolan/debug") {
-		t.Fatalf("ls output missing the outer hit:\n%s", out)
+	if !strings.Contains(out, "debug") {
+		t.Fatalf("ls lost the local hit:\n%s", out)
 	}
-	if strings.Contains(out, "ai-futures/felt/debug") {
-		t.Fatalf("ls output repeats a local fiber in the outer block:\n%s", out)
-	}
-	local := strings.Index(out, " debug\n")
-	if local == -1 || local > strings.Index(out, "── elsewhere") {
-		t.Fatalf("local hits should print before the outer block:\n%s", out)
-	}
-
-	// The outer id printed there is directly actionable from right here.
-	showOut, err := runCommand(t, subProj, "show", "ai-futures/portolan/debug", "--detail", "name")
-	if err != nil {
-		t.Fatalf("show on an id from the outer block: %v\n%s", err, showOut)
-	}
-	if !strings.Contains(showOut, "Portolan debug") {
-		t.Fatalf("show output = %q", showOut)
+	if !strings.Contains(out, "`felt find` searches the whole store at "+loomRoot(t, subProj)) {
+		t.Fatalf("filtered ls in a substore should point at find:\n%s", out)
 	}
 }
 
-// TestLsAnyFilterWidens: what makes an invocation a search is that it carries
-// a filter at all — `felt ls -t bug` asks the same question as `felt ls bug`,
-// and it would be incoherent for one to widen and the other not.
-func TestLsAnyFilterWidens(t *testing.T) {
-	for _, filter := range [][]string{
-		{"-t", "decision"},
-		{"-s", "all"},
-		{"-s", "open"},
-		{"--body", "Charted"},
-	} {
-		t.Run(strings.Join(filter, " "), func(t *testing.T) {
-			_, subProj := newCrossStoreFixture(t)
-			defer saveLsGlobals()()
-
-			out, err := runCommand(t, subProj, append([]string{"ls"}, filter...)...)
-			if err != nil {
-				t.Fatalf("ls %v: %v\n%s", filter, err, out)
-			}
-			if !strings.Contains(out, "── elsewhere in ") {
-				t.Fatalf("filter %v did not reach the enclosing store:\n%s", filter, out)
-			}
-		})
-	}
-}
-
-// TestLsLocalKeepsASearchNarrow: --local is the escape hatch for someone who
-// wants the narrow answer. There is no --all: widening is the default.
-func TestLsLocalKeepsASearchNarrow(t *testing.T) {
+// TestLsFilterTrailerIsTextOnly: --json is the wire the daemon and the board
+// read; a human-facing hint has no place in it.
+func TestLsFilterTrailerIsTextOnly(t *testing.T) {
 	_, subProj := newCrossStoreFixture(t)
 	defer saveLsGlobals()()
 
-	out, err := runCommand(t, subProj, "ls", "--local", "debug")
+	out, err := runCommand(t, subProj, "ls", "debug", "--json")
 	if err != nil {
-		t.Fatalf("ls --local: %v\n%s", err, out)
+		t.Fatalf("ls --json: %v\n%s", err, out)
 	}
-	if strings.Contains(out, "elsewhere in") || strings.Contains(out, "ai-futures/portolan") {
-		t.Fatalf("--local still widened:\n%s", out)
-	}
-	if !strings.Contains(out, "debug") {
-		t.Fatalf("--local lost the local hit:\n%s", out)
+	if strings.Contains(out, "view-local") {
+		t.Fatalf("--json carried the trailer:\n%s", out)
 	}
 }
 
@@ -272,5 +228,60 @@ func TestLsBareStaysLocal(t *testing.T) {
 	}
 	if !strings.Contains(out, "debug") {
 		t.Fatalf("bare ls lost the local fibers:\n%s", out)
+	}
+}
+
+// TestPartialForeignPathResolvesRegardless: the enclosing-store probe used to
+// be gated on the local basename rescue being about to fire, so whether
+// `felt show portolan/debug` resolved depended on an accident of local naming —
+// a local `debug` made it work, two of them made it fail. The gate is gone;
+// resolution reaches the enclosing store on every local miss.
+func TestPartialForeignPathResolvesRegardless(t *testing.T) {
+	loomProj, subProj := newCrossStoreFixture(t)
+	defer saveShowGlobals()()
+
+	// A second local `debug` twin: under the old gate this ambiguity switched
+	// the probe off and the foreign path stopped resolving.
+	writeFixtureFelt(t, felt.NewStorage(subProj), "notes/debug", "Another local debug")
+
+	out, err := runCommand(t, subProj, "show", "portolan/debug", "--detail", "name")
+	if err != nil {
+		t.Fatalf("partial foreign path did not resolve: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "Portolan debug") {
+		t.Fatalf("show output = %q, want the fiber from the enclosing store", out)
+	}
+	if _, err := felt.NewStorage(loomProj).Read("ai-futures/portolan/debug"); err != nil {
+		t.Fatalf("fixture fiber missing: %v", err)
+	}
+}
+
+// TestShuttleVerbsCrossTheBoundary: a shuttle verb acts on the fiber the user
+// named, where it lives, and says where — the same contract rm and edit keep.
+func TestShuttleVerbsCrossTheBoundary(t *testing.T) {
+	loomProj, subProj := newCrossStoreFixture(t)
+	defer saveShuttleGlobals()()
+
+	loom := felt.NewStorage(loomProj)
+	seedShuttleRole(t, loom, "ai-futures/portolan/debug", felt.StatusActive, oneshot(), nil)
+	withStubbedTmux(t, map[string]bool{})
+
+	out, err := runCommand(t, subProj, "shuttle", "pause", "ai-futures/portolan/debug")
+	if err != nil {
+		t.Fatalf("shuttle pause across the boundary: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "(in "+loomRoot(t, subProj)+")") {
+		t.Fatalf("shuttle pause output = %q, want the enclosing store named", out)
+	}
+	if got := mustRead(t, loom, "ai-futures/portolan/debug").Status; got != felt.StatusOpen {
+		t.Fatalf("outer fiber status = %q, want open", got)
+	}
+	if got := mustRead(t, felt.NewStorage(subProj), "debug").Status; got != felt.StatusOpen {
+		// The local same-slug fiber is seeded open; assert it was untouched by
+		// checking it still carries no shuttle block.
+		t.Fatalf("local twin status = %q", got)
+	}
+	if mustRead(t, felt.NewStorage(subProj), "debug").HasShuttleFacet() {
+		t.Fatalf("the local same-slug fiber was acted on")
 	}
 }
