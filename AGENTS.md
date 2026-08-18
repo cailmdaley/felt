@@ -66,16 +66,43 @@ subcommands in `cmd/` + `internal/shuttle/`); the Elixir daemon reads it. This
 is the merge end-state — the contract lives in one place (felt) rather than
 being validated on both sides.
 
+### Stores and views
+
+A **store** is a `.felt/` directory and everything under it — one namespace,
+one git repo. A **view** (or substore) is a project whose `.felt` is a *symlink*
+into a subdirectory of a larger store: this repo's `.felt` points into
+`~/loom/.felt/ai-futures/felt`. The loom is the store; the project is a lens on
+it. A lens narrows what is *listed*, never what can be *found* or *reached*.
+
+An **id** is resolved against the local store first, then — on a miss — against
+the enclosing store, which resolves it by its own scope and suffix rules from
+this view's position out there. A hit is reported as external and the command
+runs where the fiber lives, appending `(in <root>)` so a cross-store write is
+never silent. The one thing that never crosses is the **basename rescue** (the
+"your path went stale but the slug is unique" guess): the external probe sits
+above it, so felt never guesses at a fiber and then deletes or moves it.
+
+The verb contract, in one line each:
+
+- **`felt ls` lists the view.** Every flag filters this store's own listing.
+  Fast, local, always — in a substore a filtered ls closes with a line naming
+  `felt find` and the store it would search.
+- **`felt find` searches the store.** Local hits first, the rest of the
+  enclosing store under a separator naming it, each by its full id there,
+  capped with an exact remainder count.
+- **An id reaches anywhere.** `show`, `edit`, `rm`, `nest`, `tree`, and every
+  `felt shuttle` verb act on the fiber the id names, in the store that holds it.
+
 ### felt command surface
 
 ```bash
 # Core
 felt init                         felt add <slug> <name> [flags]
 felt edit <id> [flags]            felt show <id> [-d level]
-felt ls [query]                   felt check
-felt tree                         felt nest|unnest <id>
-felt migrate [--dry-run]          felt rm <id>
-felt session
+felt ls [query]                   felt find <query>
+felt tree                         felt check
+felt nest|unnest <id>             felt rm <id>
+felt migrate [--dry-run]          felt session
 felt backfill-ids [--dry-run]     # owner-only intrinsic id migration
 felt setup claude|codex|skills    felt update
 ```

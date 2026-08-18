@@ -137,6 +137,40 @@ is folded in here rather than into a separate Unreleased section.
 - Session context lists five active-or-open fibers with a recency
   timestamp on each entry.
 
+#### Stores and views: verbs carry scope
+
+A project whose `.felt` symlinks into a larger store (a loom) is a *view* on
+that store, not a fence around it — and each verb now says plainly how far it
+reaches, rather than the boundary being negotiated flag by flag.
+
+- **`felt find <query>`** is the new verb whose job is finding: it always
+  searches the whole enclosing store. Local hits print first under their local
+  ids, then the rest of the store under a separator naming it, each by its
+  full id there — ids that work as arguments right where you are. It takes
+  ls's search-shaped flags (`-t`, `--body`, `-r`, `-e`, `--has-field`, `-s`,
+  `-v`). The outer block is capped at 20 entries and closes with an exact
+  count of the remainder; `-n` sets another cap, `-n 0` lifts it.
+- **`felt ls` is always view-local.** Every flag filters this store's own
+  listing and nothing else, so it stays fast. It no longer widens into the
+  enclosing store when a filter is present, and `--local` is gone with the
+  behavior it opted out of. In a substore, a filtered ls closes with one line
+  naming `felt find` and the store it would search (text output only —
+  `--json` is unchanged).
+- **An id reaches anywhere.** Resolution now consults the enclosing store on
+  every local miss, where before the probe was gated on the local basename
+  rescue being about to fire — which made `felt show portolan/debug` resolve
+  or not according to whether its slug happened to collide with a local one.
+  Costs one walk of the outer id list, memoized, only on a miss.
+- **`felt shuttle <verb>` crosses the boundary** like `rm` and `edit` already
+  did, appending `(in <root>)` to its headline so a cross-store write is never
+  silent.
+- **`felt show --citations` / `--consumers`** additionally scan the enclosing
+  store, so backlinks written from elsewhere in the loom appear under their
+  full outer ids.
+- **`felt check` reports the shadowed-rescue case** at info level: where a ref
+  resolves into the enclosing store AND a local basename rescue would have
+  fired, both candidates are named instead of the loss being silent.
+
 #### Smaller CLI additions
 
 - `felt edit --set key=value` / `--unset key` writes and removes opaque

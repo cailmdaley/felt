@@ -674,38 +674,31 @@ with the count of what lies below them. --json is always the full tree.`,
 		}
 
 		storage := felt.NewStorage(root)
+
+		// Resolve the argument before listing anything: an id that names a
+		// fiber in the enclosing store draws THAT store's tree — the fiber is
+		// real, it just is not in this view — so the ref decides which store
+		// gets walked, and the walk happens exactly once either way.
+		target := fiberRef{storage: storage}
+		if len(args) == 1 {
+			target, err = resolveFiberRef(storage, "", args[0])
+			if err != nil {
+				return err
+			}
+		}
+
 		var felts []*felt.Felt
 		if jsonOutput {
-			felts, err = storage.ListMetadataWithModTime()
+			felts, err = target.storage.ListMetadataWithModTime()
 		} else {
-			felts, err = storage.ListMetadata()
+			felts, err = target.storage.ListMetadata()
 		}
 		if err != nil {
 			return err
 		}
 
-		// Build containment tree from IDs
 		roots := buildContainmentTree(felts)
-
-		// If a specific ID given, find its subtree. An id that names a fiber
-		// in the enclosing store draws that store's tree instead — the fiber
-		// is real, it just is not in this view.
 		if len(args) == 1 {
-			target, err := resolveFiberRef(storage, "", args[0])
-			if err != nil {
-				return err
-			}
-			if target.elsewhere {
-				if jsonOutput {
-					felts, err = target.storage.ListMetadataWithModTime()
-				} else {
-					felts, err = target.storage.ListMetadata()
-				}
-				if err != nil {
-					return err
-				}
-				roots = buildContainmentTree(felts)
-			}
 			node := findContainmentNode(roots, target.id)
 			if node == nil {
 				return fmt.Errorf("fiber %s not found in tree", target.id)

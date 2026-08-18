@@ -32,9 +32,10 @@ Understanding crystallized. Accrete:
     Read then Edit .felt/<path>/<slug>.md          # body + non-native frontmatter
 
 Search and read:
-    felt ls                                        # tracked (open and active)
-    felt ls "query" [-t tag] [-s closed] [-v]     # substring over name, outcome, YAML, slug; widens to every status but closed (a trailing hint counts those); matches under a matching ancestor collapse into it, -v expands
+    felt ls                                        # tracked (open and active) IN THIS VIEW
+    felt ls "query" [-t tag] [-s closed] [-v]     # filters this view's listing: substring over name, outcome, YAML, slug; widens to every status but closed (a trailing hint counts those); matches under a matching ancestor collapse into it, -v expands
     felt ls --body "query"                         # adds body search — plain substring; use -r --body for regex
+    felt find "query" [-t tag] [-s closed] [-v]   # searches the WHOLE store: local hits, then the rest of the loom by full id (outer block capped at 20; -n 0 for all)
     felt session                                   # SessionStart context as plain text
     felt tree [<id>] [-L depth]                    # containment hierarchy; -L caps depth (1 = direct children)
     felt show <id>                                 # full
@@ -58,6 +59,8 @@ Maintain:
 Statuses: · untracked, ○ open, ◐ active, ● closed
 Detail: name < compact < summary < full. Summary adds the lede (first paragraph of the body; write it to stand alone).
 Relationships: directory containment, `[[wikilinks]]` in bodies, and optional project-owned data-flow conventions. Nested IDs use paths (bao-analysis/damping-prior).
+
+Stores and views: a project whose `.felt` symlinks into the loom is a *view* on that store, not a fence around it. `felt ls` lists the view; `felt find` searches the whole store; an id reaches anywhere — `show`, `edit`, `rm`, `nest`, `felt shuttle <verb>` all act on the fiber where it lives and say `(in <root>)` when that is elsewhere. So: looking for something you know is in the loom somewhere, use `find`; asking what am I working on here, use `ls`.
 
 **Outcomes longer than a sentence:** edit `.felt/<path>/<slug>.md` directly using a `|-` block scalar (`outcome: |-`). `felt edit -o "…"` shell-escapes quotes and mangles multiline content; block scalar takes content literally so paragraphs, lists, and image embeds round-trip cleanly.
 
