@@ -126,7 +126,9 @@ in this order (`eligible?/2` and `dispatch_gates_pass?/3` in
 5. No worker is already running or claimed for it.
 6. The resume-loop circuit breaker is closed.
 7. The boot quarantine is released.
-8. `shuttle.project_dir` exists on this host.
+8. `shuttle.project_dir` exists on this host — checked last, and under a
+   deadline, so a path that does not answer (a synced folder holding a macOS
+   permission prompt) delays this fiber rather than the whole daemon.
 9. Every `depends_on` target exists and is `tempered: true`.
 
 Configured stores come from `FELT_STORES` (comma-separated) or the persisted

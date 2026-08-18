@@ -372,6 +372,24 @@ reaches, rather than the boundary being negotiated flag by flag.
   what it resolves to — check the `host:` on fibers armed before this release
   and update any that still hold the old raw name, or they will sit
   undispatched. `felt check` now warns when it finds one.
+- A store the daemon cannot walk no longer takes the board down with it. The
+  symlink-substore expansion behind the store list is a raw filesystem walk
+  with no timeout, and it used to run in whichever process asked — including
+  the request processes serving `/api/v1/fibers/composite` and
+  `/api/v1/felt-stores`. Point the daemon at a store macOS guards (iCloud
+  Drive, `~/Library/CloudStorage`) and the first walk raises a consent dialog;
+  until someone clicks it, every endpoint queued behind it. On the first
+  install by someone other than the author that meant responses at 17, 27 and
+  32 seconds and one 503 at 95 — which is simply how long the dialog sat
+  unanswered behind another window. The walk now runs in a background task and
+  reads answer from cache: a store that cannot be walked degrades the
+  *freshness* of the store list, never the *availability* of the endpoint
+  reading it. The same bound covers the two `project_dir` stats the poller
+  makes on its own process, and the post-mutation document re-read now defers
+  its reply rather than holding the poller's mailbox for the length of a
+  `felt show`. A slow walk also says so: the log names the store holding
+  things up and what usually causes it, and the daemon snapshot and
+  `/api/v1/felt-stores` carry the same scan report.
 - The standing-role reconciler self-heals inverted markers instead of
   re-closing live work. Dead pinned roles park rather than relaunching in a
   loop.

@@ -794,15 +794,17 @@ or nothing out of it, and the board loads quiet and empty. Keep a store you
 dispatch from pinned locally — *Keep Downloaded* on the folder, or the setting
 off — or keep it out of iCloud.
 
-**The first walk of a guarded store can stall every endpoint.** macOS asks for
-consent the first time a process reaches into iCloud Drive, and the daemon's
-first poll after you name such a store is what raises the dialog. Until someone
-answers it, the walk blocks and every API request queues behind it — discovery
-times out, the log reports carrying zero fibers, and responses arrive tens of
-seconds late or not at all. That is the dialog waiting, usually behind another
-window, not the daemon failing. Answer it and the board fills; warm, the same
-walk is instant. So after pointing the daemon at a store in iCloud or any other
-location macOS guards, go find the prompt before you judge an empty board.
+**The first walk of a guarded store waits on a dialog, not on the daemon.**
+macOS asks for consent the first time a process reaches into iCloud Drive, and
+the daemon's first poll after you name such a store is what raises it. Until
+someone clicks, that store cannot be read: discovery times out, the log reports
+carrying zero fibers for it, and its fibers are missing from the board. The
+board itself stays up and answers in milliseconds throughout — a stalled store
+costs you freshness, not availability — and the log names the store and says
+what usually causes a walk that slow. Answer the prompt and the store fills in
+on its own; warm, the same walk is instant. So after pointing the daemon at a
+store in iCloud or any other location macOS guards, go find the prompt before
+you judge a half-empty board. The prompt is usually behind another window.
 
 **`make restart` silently no-ops under a supervisor.** `make stop` matches the
 daemon by a relative-path pattern; launchd and systemd both launch it by
