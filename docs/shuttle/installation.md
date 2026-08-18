@@ -373,7 +373,7 @@ holds `bin/shuttle`: the checkout root in a checkout, the unpacked release root
 in a tarball. So the two paths install byte-identical jobs, and `make
 install-agent` is a checkout convenience rather than a separate mechanism.
 
-The install fixes four values into the job:
+The install fixes these values into the job:
 
 | Flag | Environment variable | Default |
 | --- | --- | --- |
@@ -381,10 +381,32 @@ The install fixes four values into the job:
 | `--path <PATH>` | `AGENT_PATH` | the login shell's `PATH`, captured at install time |
 | `--log <file>` | `AGENT_LOG` | `~/Library/Logs/shuttle.log` (macOS), `~/.shuttle/shuttle.log` (Linux) |
 | `--ssh-auth-sock <path>` | `AGENT_SSH_AUTH_SOCK` | `~/.ssh/agent.sock` (macOS), empty (Linux) |
+| `--label <name>` | `AGENT_LABEL` | `io.shuttle.daemon` |
+| `--port <n>` | `AGENT_PORT` | unset — the daemon binds 4000 |
 
-Three of them become environment variables in the rendered job, because neither
-supervisor hands the daemon your login environment; the fourth says where the
-daemon's output goes. A flag beats its environment variable, and `make
+`--label` and `--port` exist for one purpose: supervising a **second** instance
+beside the one you already run. The label names both the launchd job and the
+systemd unit, so leaving it at the default on a machine that already has a
+supervised daemon replaces that daemon rather than adding one. Give the second
+instance both a label and a port, or the two fight over 4000:
+
+```bash
+shuttle install-agent --label io.shuttle.daemon-test --port 4394 \
+  --felt-stores ~/test-store
+```
+
+`uninstall-agent` takes the same `--label`, and needs it — without one it looks
+for the default job and removes nothing.
+
+Two more flags render without installing: `--print` (also `--dry-run`) writes
+the job to stdout and changes nothing, and `--os Darwin|Linux` renders the other
+platform's file for inspection. `--os` is rejected outside `--print`, so an
+install can never take a branch this host cannot run. Warnings go to stderr, so
+`--print > somewhere.plist` still gives you a clean file.
+
+Most become environment variables in the rendered job, because neither
+supervisor hands the daemon your login environment; `--log` says where the
+daemon's output goes, and `--label` names the job itself. A flag beats its environment variable, and `make
 install-agent` passes the `AGENT_*` variables straight through, which is why the
 checkout form spells them that way.
 
