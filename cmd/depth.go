@@ -29,16 +29,16 @@ func validateDepth(d string) error {
 }
 
 // renderFelt renders a felt at the given depth level.
-func renderFelt(f *felt.Felt, g *Graph, depth string, citations []felt.Citation, consumers []felt.DataFlowConsumer) string {
+func renderFelt(f *felt.Felt, g *Graph, depth string, citations []felt.Citation, consumers []felt.DataFlowConsumer, external *felt.ExternalRefs) string {
 	switch depth {
 	case DepthName:
 		return renderName(f)
 	case DepthCompact:
 		return renderCompact(f)
 	case DepthSummary:
-		return renderSummary(f, g, citations, consumers)
+		return renderSummary(f, g, citations, consumers, external)
 	default:
-		return renderFull(f, g, citations, consumers)
+		return renderFull(f, g, citations, consumers, external)
 	}
 }
 
@@ -73,7 +73,7 @@ func renderCompact(f *felt.Felt) string {
 	return sb.String()
 }
 
-func renderSummary(f *felt.Felt, g *Graph, citations []felt.Citation, consumers []felt.DataFlowConsumer) string {
+func renderSummary(f *felt.Felt, g *Graph, citations []felt.Citation, consumers []felt.DataFlowConsumer, external *felt.ExternalRefs) string {
 	var sb strings.Builder
 	writeHeader(&sb, f)
 	if f.Due != nil {
@@ -82,7 +82,7 @@ func renderSummary(f *felt.Felt, g *Graph, citations []felt.Citation, consumers 
 	if f.Outcome != "" {
 		fmt.Fprintf(&sb, "Outcome:  %s\n", f.Outcome)
 	}
-	writeBodyRefs(&sb, f, g)
+	writeBodyRefs(&sb, f, g, external)
 	writeCitations(&sb, citations)
 	writeConsumers(&sb, consumers)
 	writeBodySize(&sb, f)
@@ -97,10 +97,10 @@ func renderSummary(f *felt.Felt, g *Graph, citations []felt.Citation, consumers 
 	return sb.String()
 }
 
-func renderFull(f *felt.Felt, g *Graph, citations []felt.Citation, consumers []felt.DataFlowConsumer) string {
+func renderFull(f *felt.Felt, g *Graph, citations []felt.Citation, consumers []felt.DataFlowConsumer, external *felt.ExternalRefs) string {
 	var sb strings.Builder
 	writeHeader(&sb, f)
-	writeBodyRefs(&sb, f, g)
+	writeBodyRefs(&sb, f, g, external)
 	writeCitations(&sb, citations)
 	writeConsumers(&sb, consumers)
 	if f.Due != nil {
@@ -199,7 +199,7 @@ func writeConsumers(sb *strings.Builder, consumers []felt.DataFlowConsumer) {
 
 // writeBodyRefs extracts markdown and wikilinks from the body and renders them
 // as a "Refs:" line, annotating which ones resolve to known fibers.
-func writeBodyRefs(sb *strings.Builder, f *felt.Felt, g *Graph) {
+func writeBodyRefs(sb *strings.Builder, f *felt.Felt, g *Graph, external *felt.ExternalRefs) {
 	if f.Body == "" {
 		return
 	}
@@ -220,7 +220,7 @@ func writeBodyRefs(sb *strings.Builder, f *felt.Felt, g *Graph) {
 		// to, so every entry on the line is something `felt show` accepts.
 		target := ref.Target
 		if g != nil {
-			if resolved, err := felt.ResolveScopedID(ids, f.ID, ref.Target); err == nil {
+			if resolved, err := felt.ResolveScopedIDIn(ids, f.ID, ref.Target, external); err == nil {
 				if _, ok := g.Nodes[resolved]; ok {
 					target = resolved
 				}

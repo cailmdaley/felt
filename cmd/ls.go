@@ -606,7 +606,7 @@ with the count of what lies below them. --json is always the full tree.`,
 
 		// If a specific ID given, find its subtree
 		if len(args) == 1 {
-			f, err := felt.FindByPrefix(felts, args[0])
+			f, err := felt.FindByPrefixIn(felts, args[0], storage.ExternalRefs())
 			if err != nil {
 				return err
 			}

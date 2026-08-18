@@ -309,7 +309,7 @@ func TestRenderFullResolvesScopedBodyRefs(t *testing.T) {
 		sibling.ID: sibling,
 		child.ID:   child,
 	}}
-	out := renderFelt(current, graph, DepthFull, nil, nil)
+	out := renderFelt(current, graph, DepthFull, nil, nil, nil)
 	if !strings.Contains(out, "Refs:     project/question, project/analysis/method#step-a") {
 		t.Fatalf("renderFelt() scoped refs mismatch:\n%s", out)
 	}
@@ -333,7 +333,7 @@ func TestRenderFullDedupesRepeatedBodyRefs(t *testing.T) {
 		current.ID: current,
 		sibling.ID: sibling,
 	}}
-	out := renderFelt(current, graph, DepthFull, nil, nil)
+	out := renderFelt(current, graph, DepthFull, nil, nil, nil)
 	if !strings.Contains(out, "Refs:     project/question\n") {
 		t.Fatalf("renderFelt() should print a repeated ref once:\n%s", out)
 	}

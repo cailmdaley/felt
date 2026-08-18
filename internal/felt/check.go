@@ -1,6 +1,7 @@
 package felt
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -30,9 +31,13 @@ func (i CheckIssue) String() string {
 
 // Check inspects fibers for substrate problems in the relationship model:
 // broken narrative/data-flow references plus repository layout/legacy issues.
-func Check(felts []*Felt) []CheckIssue {
+//
+// external comes from Storage.ExternalRefs and is nil for a top-level store.
+// It is what keeps a link into the enclosing store — healthy, just outside
+// this view — from being reported as broken.
+func Check(felts []*Felt, external *ExternalRefs) []CheckIssue {
 	issues := checkNativeMetadata(felts)
-	issues = append(issues, checkRelationshipIntegrity(felts)...)
+	issues = append(issues, checkRelationshipIntegrity(felts, external)...)
 
 	sort.Slice(issues, func(i, j int) bool {
 		if issues[i].FiberID != issues[j].FiberID {
@@ -188,7 +193,7 @@ func CheckLegacyFormat(s *Storage) ([]CheckIssue, error) {
 	return issues, nil
 }
 
-func checkRelationshipIntegrity(felts []*Felt) []CheckIssue {
+func checkRelationshipIntegrity(felts []*Felt, external *ExternalRefs) []CheckIssue {
 	ids := make([]string, 0, len(felts))
 	byID := make(map[string]*Felt, len(felts))
 	for _, f := range felts {
@@ -198,7 +203,16 @@ func checkRelationshipIntegrity(felts []*Felt) []CheckIssue {
 	sort.Strings(ids)
 
 	var issues []CheckIssue
-	_ = iterRefs(felts, ids, func(r resolvedRef) error {
+	// explainMisses: check is the one caller that needs a verdict on EVERY
+	// failing ref, since a foreign link with no local same-slug fiber has to
+	// be recognised as external rather than reported broken.
+	resolver := newScopedIDResolverIn(ids, external).explainMisses()
+	_ = iterRefsResolved(felts, resolver, func(r resolvedRef) error {
+		// A reference that resolves to a fiber in the enclosing store is not
+		// broken — this store simply cannot see it. Silence, not an issue.
+		if errors.Is(r.ResolveErr, ErrExternalReference) {
+			return nil
+		}
 		if r.Kind == refKindReference {
 			path := "body"
 			if r.ResolveErr != nil {

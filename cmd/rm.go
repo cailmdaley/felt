@@ -25,7 +25,7 @@ var rmCmd = &cobra.Command{
 			return err
 		}
 
-		f, err := felt.FindByScope(felts, scopeID, args[0])
+		f, err := felt.FindByScopeIn(felts, scopeID, args[0], storage.ExternalRefs())
 		if err != nil {
 			return err
 		}

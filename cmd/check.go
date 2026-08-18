@@ -34,7 +34,7 @@ Current checks cover:
 			return err
 		}
 
-		issues := felt.Check(felts)
+		issues := felt.Check(felts, storage.ExternalRefs())
 		structureIssues, err := felt.CheckStructure(storage)
 		if err != nil {
 			return err

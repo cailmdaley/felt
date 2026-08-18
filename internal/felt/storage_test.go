@@ -1,6 +1,7 @@
 package felt
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -1950,5 +1951,280 @@ func TestStorageListSymlinkedFeltDirIntoOuter(t *testing.T) {
 		if strings.Contains(id, "..") || strings.Contains(id, ".felt") {
 			t.Errorf("outer view id %q contains traversal/internal-path leak", id)
 		}
+	}
+}
+
+// newSubstoreFixture builds the substore shape the loom uses: an enclosing
+// `.felt/` whose subdirectory `ai-futures/felt` holds another store's
+// content, reached through a project whose `.felt` is a symlink to it.
+// Returns the enclosing store's project dir and the substore's project dir.
+func newSubstoreFixture(t *testing.T) (loomProj, subProj string) {
+	t.Helper()
+	tmp := t.TempDir()
+
+	loomProj = filepath.Join(tmp, "loom")
+	loom := NewStorage(loomProj)
+	if err := loom.Init(); err != nil {
+		t.Fatalf("loom init: %v", err)
+	}
+	// Fibers that live elsewhere in the enclosing store.
+	for _, id := range []string{"commons", "ai-futures/portolan/debug"} {
+		dir := filepath.Join(loom.root, filepath.FromSlash(id))
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatalf("mkdir %s: %v", id, err)
+		}
+		file := filepath.Join(dir, filepath.Base(id)+FileExt)
+		if err := os.WriteFile(file, []byte("---\nname: "+filepath.Base(id)+"\n---\n"), 0644); err != nil {
+			t.Fatalf("write %s: %v", id, err)
+		}
+	}
+
+	// The substore's content lives inside the enclosing store, under the
+	// prefix; the project reaches it through a symlinked .felt.
+	content := filepath.Join(loom.root, "ai-futures", "felt")
+	if err := os.MkdirAll(content, 0755); err != nil {
+		t.Fatalf("mkdir substore content: %v", err)
+	}
+	// Local fibers, which the enclosing store also sees — under the prefix.
+	for _, id := range []string{"debug", "notes/runbook"} {
+		dir := filepath.Join(content, filepath.FromSlash(id))
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatalf("mkdir %s: %v", id, err)
+		}
+		file := filepath.Join(dir, filepath.Base(id)+FileExt)
+		if err := os.WriteFile(file, []byte("---\nname: "+filepath.Base(id)+"\n---\n"), 0644); err != nil {
+			t.Fatalf("write %s: %v", id, err)
+		}
+	}
+	subProj = filepath.Join(tmp, "project")
+	if err := os.MkdirAll(subProj, 0755); err != nil {
+		t.Fatalf("mkdir project: %v", err)
+	}
+	if err := os.Symlink(content, filepath.Join(subProj, DirName)); err != nil {
+		t.Fatalf("symlink substore: %v", err)
+	}
+	return loomProj, subProj
+}
+
+func TestEnclosingStoreReportsMountPoint(t *testing.T) {
+	loomProj, subProj := newSubstoreFixture(t)
+
+	root, prefix, ok := NewStorage(subProj).EnclosingStore()
+	if !ok {
+		t.Fatalf("EnclosingStore() ok = false, want true for a mounted substore")
+	}
+	wantRoot, err := filepath.EvalSymlinks(filepath.Join(loomProj, DirName))
+	if err != nil {
+		t.Fatalf("EvalSymlinks: %v", err)
+	}
+	if root != wantRoot {
+		t.Fatalf("EnclosingStore() root = %q, want %q", root, wantRoot)
+	}
+	if prefix != "ai-futures/felt" {
+		t.Fatalf("EnclosingStore() prefix = %q, want %q", prefix, "ai-futures/felt")
+	}
+
+	// The enclosing store itself is enclosed by nothing.
+	if _, _, ok := NewStorage(loomProj).EnclosingStore(); ok {
+		t.Fatalf("EnclosingStore() ok = true for a top-level store")
+	}
+}
+
+// TestResolveScopedIDRefusesEnclosingStorePath is the misresolution this whole
+// mechanism exists to stop: from inside the substore, a link written out in
+// full to a fiber in another project's tree used to be rescued by the
+// basename fallback into the local fiber of the same slug.
+func TestResolveScopedIDRefusesEnclosingStorePath(t *testing.T) {
+	_, subProj := newSubstoreFixture(t)
+	external := NewStorage(subProj).ExternalRefs()
+	if external == nil {
+		t.Fatalf("ExternalRefs() = nil for a mounted substore")
+	}
+	ids := []string{"debug", "notes/runbook"}
+
+	got, err := ResolveScopedIDIn(ids, "notes/runbook", "ai-futures/portolan/debug", external)
+	if err == nil {
+		t.Fatalf("resolved foreign path to %q; want an external-reference failure", got)
+	}
+	if !errors.Is(err, ErrExternalReference) {
+		t.Fatalf("error = %v, want ErrExternalReference", err)
+	}
+	if !strings.Contains(err.Error(), external.Root()) {
+		t.Fatalf("error %v should name the enclosing store %q", err, external.Root())
+	}
+
+	// A bare slug that names a fiber in the enclosing store and nothing here
+	// resolves the same way — but only under explainMisses, the mode `felt
+	// check` runs in. A plain lookup would fail either way, so it does not pay
+	// for the outer walk (see TestExternalProbeStaysOffWhenItCannotMatter).
+	resolver := newScopedIDResolverIn(ids, external).explainMisses()
+	if _, err := resolver.Resolve("notes/runbook", "commons"); !errors.Is(err, ErrExternalReference) {
+		t.Fatalf("[[commons]] error = %v, want ErrExternalReference", err)
+	}
+}
+
+// TestExternalProbeStaysOffWhenItCannotMatter guards the daemon's cross-store
+// lookup path: `felt show <id> -j` is run against store after store until one
+// hits, so a MISS is the common case and must not walk the enclosing store.
+// The probe can only change a lookup's outcome when the basename fallback is
+// about to fire; otherwise it is a slow way to reword an error.
+func TestExternalProbeStaysOffWhenItCannotMatter(t *testing.T) {
+	_, subProj := newSubstoreFixture(t)
+	external := NewStorage(subProj).ExternalRefs()
+	ids := []string{"debug", "notes/runbook"}
+
+	// No local fiber named `commons`, so nothing to rescue and nothing to
+	// refuse: an ordinary miss, and the outer id list is never listed.
+	if _, err := ResolveScopedIDIn(ids, "notes/runbook", "commons", external); err == nil {
+		t.Fatalf("expected a resolution failure for a query with no local candidate")
+	}
+	if external.resolver != nil {
+		t.Fatalf("enclosing store was walked for a query the probe cannot help")
+	}
+
+	// A local same-slug fiber makes the fallback live — now the probe runs.
+	if _, err := ResolveScopedIDIn(ids, "notes/runbook", "ai-futures/portolan/debug", external); !errors.Is(err, ErrExternalReference) {
+		t.Fatalf("error = %v, want ErrExternalReference", err)
+	}
+	if external.resolver == nil {
+		t.Fatalf("enclosing store should have been walked once the fallback was live")
+	}
+}
+
+// TestFindByScopeInRefusesForeignID is the destructive path: `felt rm`,
+// `felt nest` and `felt unnest` resolve through the slice lookup, and a
+// foreign id must not land on the local fiber of the same slug there either.
+func TestFindByScopeInRefusesForeignID(t *testing.T) {
+	_, subProj := newSubstoreFixture(t)
+	external := NewStorage(subProj).ExternalRefs()
+	felts := []*Felt{{ID: "debug", Name: "Debug"}, {ID: "notes/runbook", Name: "Runbook"}}
+
+	if f, err := FindByScopeIn(felts, "", "ai-futures/portolan/debug", external); !errors.Is(err, ErrExternalReference) {
+		got := "nil"
+		if f != nil {
+			got = f.ID
+		}
+		t.Fatalf("FindByScopeIn() = %s, %v; want ErrExternalReference", got, err)
+	}
+	if f, err := FindByPrefixIn(felts, "notes/runbook", external); err != nil || f.ID != "notes/runbook" {
+		t.Fatalf("FindByPrefixIn() = %v, %v; want the local fiber", f, err)
+	}
+}
+
+// TestResolveScopedIDLocalIDUnderOwnPrefixKeepsItsAddress: a local fiber whose
+// id genuinely begins with this store's prefix must stay addressable by its
+// real spelling — prefix stripping is a fallback, not a rewrite.
+func TestResolveScopedIDLocalIDUnderOwnPrefixKeepsItsAddress(t *testing.T) {
+	_, subProj := newSubstoreFixture(t)
+	external := NewStorage(subProj).ExternalRefs()
+	ids := []string{"debug", "ai-futures/felt/debug"}
+
+	got, err := ResolveScopedIDIn(ids, "", "ai-futures/felt/debug", external)
+	if err != nil {
+		t.Fatalf("ResolveScopedIDIn() error: %v", err)
+	}
+	if got != "ai-futures/felt/debug" {
+		t.Fatalf("ResolveScopedIDIn() = %q, want the exact local id", got)
+	}
+
+	// And a miss under the prefix reports the query as the caller typed it.
+	_, err = ResolveScopedIDIn(ids, "", "ai-futures/felt/nope", external)
+	if err == nil || !strings.Contains(err.Error(), "ai-futures/felt/nope") {
+		t.Fatalf("error = %v, want the original query in the message", err)
+	}
+}
+
+func TestResolveScopedIDUnknownPathIsOrdinaryMiss(t *testing.T) {
+	_, subProj := newSubstoreFixture(t)
+	external := NewStorage(subProj).ExternalRefs()
+	ids := []string{"debug", "notes/runbook"}
+
+	_, err := ResolveScopedIDIn(ids, "notes/runbook", "somewhere/else/gone", external)
+	if err == nil {
+		t.Fatalf("expected a resolution failure for a path that exists nowhere")
+	}
+	if errors.Is(err, ErrExternalReference) {
+		t.Fatalf("error = %v, want an ordinary miss, not ErrExternalReference", err)
+	}
+	if !strings.Contains(err.Error(), "no felt found") {
+		t.Fatalf("error = %v, want a no-felt-found message", err)
+	}
+}
+
+// TestResolveScopedIDStalePathRescueSurvives: the external check must not
+// swallow the case it sits next to — a link whose path went stale after a
+// `felt nest` but whose slug is still unique in this store.
+func TestResolveScopedIDStalePathRescueSurvives(t *testing.T) {
+	_, subProj := newSubstoreFixture(t)
+	external := NewStorage(subProj).ExternalRefs()
+	ids := []string{"debug", "notes/runbook"}
+
+	got, err := ResolveScopedIDIn(ids, "debug", "old/place/runbook", external)
+	if err != nil {
+		t.Fatalf("ResolveScopedIDIn() error: %v (stale path with a unique slug should still resolve)", err)
+	}
+	if got != "notes/runbook" {
+		t.Fatalf("ResolveScopedIDIn() = %q, want %q", got, "notes/runbook")
+	}
+}
+
+// TestResolveScopedIDLocalizesOwnPrefix: a link spelled from the enclosing
+// store's namespace but pointing back into this store is local. The target
+// exists in the enclosing store too (it is the same file), so the prefix
+// strip has to happen before the external check.
+func TestResolveScopedIDLocalizesOwnPrefix(t *testing.T) {
+	_, subProj := newSubstoreFixture(t)
+	storage := NewStorage(subProj)
+	external := storage.ExternalRefs()
+	ids := []string{"debug", "notes/runbook"}
+
+	got, err := ResolveScopedIDIn(ids, "notes/runbook", "ai-futures/felt/debug", external)
+	if err != nil {
+		t.Fatalf("ResolveScopedIDIn() error: %v (own-prefix link should resolve locally)", err)
+	}
+	if got != "debug" {
+		t.Fatalf("ResolveScopedIDIn() = %q, want %q", got, "debug")
+	}
+}
+
+// TestResolveScopedIDEnclosingHitInsideOwnPrefixIsLocal: the enclosing store
+// can reach this store's own fibers, so a hit under our prefix must not be
+// called external — it falls through to the local fallbacks.
+func TestResolveScopedIDEnclosingHitInsideOwnPrefixIsLocal(t *testing.T) {
+	_, subProj := newSubstoreFixture(t)
+	external := NewStorage(subProj).ExternalRefs()
+	ids := []string{"debug", "notes/runbook"}
+
+	got, err := ResolveScopedIDIn(ids, "debug", "stale/path/notes/runbook", external)
+	if err != nil {
+		t.Fatalf("ResolveScopedIDIn() error: %v (a local fiber must not read as external)", err)
+	}
+	if got != "notes/runbook" {
+		t.Fatalf("ResolveScopedIDIn() = %q, want %q", got, "notes/runbook")
+	}
+}
+
+// TestStorageLookupsKnowTheEnclosingStore covers the user-typed path: from
+// inside the substore, `felt show <foreign/path>` must say "lives elsewhere"
+// rather than quietly showing the local fiber of the same slug, while a link
+// spelled with this store's own prefix still opens the local fiber.
+func TestStorageLookupsKnowTheEnclosingStore(t *testing.T) {
+	_, subProj := newSubstoreFixture(t)
+	storage := NewStorage(subProj)
+
+	_, err := storage.FindInScope("", "ai-futures/portolan/debug")
+	if !errors.Is(err, ErrExternalReference) {
+		t.Fatalf("FindInScope() error = %v, want ErrExternalReference", err)
+	}
+	if !strings.Contains(err.Error(), "felt -C ") {
+		t.Fatalf("error %v should suggest reopening the enclosing store", err)
+	}
+
+	f, err := storage.FindInScope("", "ai-futures/felt/notes/runbook")
+	if err != nil {
+		t.Fatalf("FindInScope() own-prefix error: %v", err)
+	}
+	if f.ID != "notes/runbook" {
+		t.Fatalf("FindInScope() = %q, want %q", f.ID, "notes/runbook")
 	}
 }

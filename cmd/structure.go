@@ -139,11 +139,11 @@ var nestCmd = &cobra.Command{
 			return err
 		}
 
-		child, err := felt.FindByScope(felts, scopeID, args[0])
+		child, err := felt.FindByScopeIn(felts, scopeID, args[0], storage.ExternalRefs())
 		if err != nil {
 			return err
 		}
-		parent, err := felt.FindByScope(felts, scopeID, args[1])
+		parent, err := felt.FindByScopeIn(felts, scopeID, args[1], storage.ExternalRefs())
 		if err != nil {
 			return err
 		}
@@ -188,7 +188,7 @@ var unnestCmd = &cobra.Command{
 			return err
 		}
 
-		child, err := felt.FindByScope(felts, scopeID, args[0])
+		child, err := felt.FindByScopeIn(felts, scopeID, args[0], storage.ExternalRefs())
 		if err != nil {
 			return err
 		}

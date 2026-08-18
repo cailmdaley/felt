@@ -19,7 +19,7 @@ func TestCheckBrokenBodyReference(t *testing.T) {
 		ID:   "fiber-a",
 		Name: "Fiber A",
 		Body: "See [[missing]].",
-	}})
+	}}, nil)
 
 	if len(issues) != 1 {
 		t.Fatalf("Check() produced %d issues, want 1", len(issues))
@@ -33,7 +33,7 @@ func TestCheckBrokenBodyReference(t *testing.T) {
 }
 
 func TestCheckEmptyName(t *testing.T) {
-	issues := Check([]*Felt{{ID: "blank-name", Name: "  "}})
+	issues := Check([]*Felt{{ID: "blank-name", Name: "  "}}, nil)
 
 	if len(issues) != 1 {
 		t.Fatalf("Check() produced %d issues, want 1", len(issues))
@@ -55,7 +55,7 @@ func TestCheckBrokenBodyReferenceFragmentAgainstOpaqueFrontmatter(t *testing.T) 
 	issues := Check([]*Felt{
 		{ID: "fiber-a", Name: "Fiber A", Body: "See [[fiber-b#missing-element]]."},
 		target,
-	})
+	}, nil)
 
 	if len(issues) != 1 {
 		t.Fatalf("Check() produced %d issues, want 1", len(issues))
@@ -75,7 +75,7 @@ func TestCheckBrokenDataFlowReference(t *testing.T) {
 		"from": "missing.output",
 	}})
 
-	issues := Check([]*Felt{fiber})
+	issues := Check([]*Felt{fiber}, nil)
 	if len(issues) != 1 {
 		t.Fatalf("Check() produced %d issues, want 1", len(issues))
 	}
@@ -96,7 +96,7 @@ func TestCheckBrokenDataFlowOutputReference(t *testing.T) {
 	producer := &Felt{ID: "fiber-b", Name: "Fiber B"}
 	mustExtra(t, producer, "outputs", []map[string]any{{"id": "present-output"}})
 
-	issues := Check([]*Felt{consumer, producer})
+	issues := Check([]*Felt{consumer, producer}, nil)
 	if len(issues) != 1 {
 		t.Fatalf("Check() produced %d issues, want 1", len(issues))
 	}
@@ -252,5 +252,51 @@ func TestCheckStructureCleanRepo(t *testing.T) {
 	}
 	if len(issues) != 0 {
 		t.Fatalf("issues = %+v, want none", issues)
+	}
+}
+
+// TestCheckSkipsEnclosingStoreReferences: from inside a substore, a wikilink
+// to a fiber elsewhere in the enclosing store is healthy — this view just
+// cannot see it — while a link to nothing anywhere is still an error.
+func TestCheckSkipsEnclosingStoreReferences(t *testing.T) {
+	_, subProj := newSubstoreFixture(t)
+	external := NewStorage(subProj).ExternalRefs()
+
+	issues := Check([]*Felt{
+		{ID: "debug", Name: "Debug"},
+		{
+			ID:   "notes/runbook",
+			Name: "Runbook",
+			Body: "Elsewhere: [[ai-futures/portolan/debug]] and [[commons]]. Here: [[debug]]. Gone: [[nowhere-at-all]].",
+		},
+	}, external)
+
+	if len(issues) != 1 {
+		t.Fatalf("Check() produced %d issues, want 1: %v", len(issues), issues)
+	}
+	if !strings.Contains(issues[0].Message, "nowhere-at-all") {
+		t.Fatalf("issue = %q, want the genuinely broken reference", issues[0].Message)
+	}
+}
+
+// TestRelationshipsDropForeignCitationsWithoutExplainMode: citations run
+// without explainMisses (they only care about hits), and the narrow probe
+// gate has to be enough for them — a foreign link whose slug matches a local
+// fiber is exactly the case the gate keeps live.
+func TestRelationshipsDropForeignCitationsWithoutExplainMode(t *testing.T) {
+	_, subProj := newSubstoreFixture(t)
+	external := NewStorage(subProj).ExternalRefs()
+
+	felts := []*Felt{
+		{ID: "debug", Name: "Debug"},
+		{ID: "notes/runbook", Name: "Runbook", Body: "Elsewhere: [[ai-futures/portolan/debug]]."},
+		{ID: "notes/here", Name: "Here", Body: "Local: [[debug]]."},
+	}
+	citations, _, err := RelationshipsFromFelts(felts, "debug", external)
+	if err != nil {
+		t.Fatalf("RelationshipsFromFelts() error: %v", err)
+	}
+	if len(citations) != 1 || citations[0].SourceID != "notes/here" {
+		t.Fatalf("citations = %+v, want only the local reference from notes/here", citations)
 	}
 }

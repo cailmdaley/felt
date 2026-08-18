@@ -80,7 +80,7 @@ Targeted views:
 			if err != nil {
 				return err
 			}
-			fmt.Print(renderFelt(f, nil, detail, nil, nil))
+			fmt.Print(renderFelt(f, nil, detail, nil, nil, storage.ExternalRefs()))
 			return nil
 		}
 
@@ -137,7 +137,7 @@ Targeted views:
 			}
 		}
 
-		fmt.Print(renderFelt(f, graph, detail, citations, consumers))
+		fmt.Print(renderFelt(f, graph, detail, citations, consumers, storage.ExternalRefs()))
 		return nil
 	},
 }

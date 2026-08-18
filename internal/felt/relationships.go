@@ -33,16 +33,16 @@ func (s *Storage) ScanRelationships(targetID string) ([]Citation, []DataFlowCons
 	if err != nil {
 		return nil, nil, err
 	}
-	return RelationshipsFromFelts(felts, targetID)
+	return RelationshipsFromFelts(felts, targetID, s.ExternalRefs())
 }
 
 // RelationshipsFromFelts collects citations and consumers for targetID in one
 // iterRefs pass, dispatching each yielded ref to the matching accumulator.
-func RelationshipsFromFelts(felts []*Felt, targetID string) ([]Citation, []DataFlowConsumer, error) {
+func RelationshipsFromFelts(felts []*Felt, targetID string, external *ExternalRefs) ([]Citation, []DataFlowConsumer, error) {
 	ids := sortedFeltIDs(felts)
 	var citations []Citation
 	var consumers []DataFlowConsumer
-	_ = iterRefs(felts, ids, func(r resolvedRef) error {
+	_ = iterRefs(felts, ids, external, func(r resolvedRef) error {
 		if r.ResolveErr != nil || r.ResolvedID != targetID {
 			return nil
 		}
@@ -104,8 +104,8 @@ type resolvedRef struct {
 //
 // The resolver is built once for the whole walk rather than per-ref, since
 // newScopedIDResolver rebuilds maps + sorts over every id.
-func iterRefs(felts []*Felt, ids []string, yield func(resolvedRef) error) error {
-	return iterRefsResolved(felts, newScopedIDResolver(ids), yield)
+func iterRefs(felts []*Felt, ids []string, external *ExternalRefs, yield func(resolvedRef) error) error {
+	return iterRefsResolved(felts, newScopedIDResolverIn(ids, external), yield)
 }
 
 // iterRefsResolved is iterRefs against a prebuilt resolver, so a caller that
