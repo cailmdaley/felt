@@ -133,7 +133,8 @@ defmodule Shuttle.Poller.Snapshot do
             %DateTime{} = dt -> DateTime.to_iso8601(dt)
             _ -> nil
           end
-        )
+        ),
+      discovery: discovery(state, now)
     }
 
     # No separate per-fiber runtime index. The runtime store and the
@@ -143,6 +144,38 @@ defmodule Shuttle.Poller.Snapshot do
     # `schedule` it already reads off the owner-only feed. There is nothing left
     # for a `:runtime` overlay to add.
     snap
+  end
+
+  # What discovery is doing right now, and what it cost last time. The daemon
+  # reads its world through two filesystem walks it does not control the speed
+  # of — the per-store `felt ls` (this poll cycle) and the symlink-substore scan
+  # (`Shuttle.FeltStores`) — and either can stall indefinitely on a path macOS
+  # guards, where the thing being waited on is a consent dialog and a human.
+  # Both stalls now degrade freshness rather than availability, which makes them
+  # SILENT: the board keeps serving, from a world that has stopped advancing.
+  # This block is how it stops being silent — an in-flight walk reports how long
+  # it has been out, and the last store scan reports its cost per store, so a
+  # viewer can say which store is holding things up.
+  defp discovery(%State{} = state, now) do
+    %{
+      "in_flight" => state.poll_check_in_progress,
+      "in_flight_ms" =>
+        case state.poll_in_flight_since do
+          %DateTime{} = since -> DateTime.diff(now, since, :millisecond)
+          _ -> nil
+        end,
+      "store_scan_in_flight" => Shuttle.FeltStores.scan_in_flight?(),
+      "store_scan_ms" =>
+        case Shuttle.FeltStores.last_scan_report() do
+          %{scanned_ms: ms} -> ms
+          _ -> nil
+        end,
+      "store_scan_by_store" =>
+        case Shuttle.FeltStores.last_scan_report() do
+          %{stores: stores} -> stores
+          _ -> %{}
+        end
+    }
   end
 
   @spec build_full_state(State.t()) :: map()

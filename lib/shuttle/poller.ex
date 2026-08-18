@@ -119,6 +119,12 @@ defmodule Shuttle.Poller do
       :auto_discover_felt_stores,
       :runner,
       poll_check_in_progress: false,
+      # When the in-flight poll's read task started, or nil. Paired with
+      # `poll_check_in_progress` purely so the snapshot can say HOW LONG
+      # discovery has been out — the difference between "a walk is running" and
+      # "a walk has been running for ninety seconds" is the difference between
+      # a busy daemon and a consent dialog waiting on a human.
+      poll_in_flight_since: nil,
       # Monotonic count of poll cycles APPLIED (a cycle whose reads came back
       # and were folded into state — success or logged read failure alike).
       # Per-cycle observations (`orphans`, rebuilt from scratch by every
@@ -684,7 +690,7 @@ defmodule Shuttle.Poller do
         send(parent, {:poll_world, poll_reads(state)})
       end)
 
-    {:noreply, %{state | poll_check_in_progress: true}}
+    {:noreply, %{state | poll_check_in_progress: true, poll_in_flight_since: DateTime.utc_now()}}
   end
 
   # The poll Task finished its reads. Apply the world it observed to the
@@ -697,6 +703,7 @@ defmodule Shuttle.Poller do
       state
       |> apply_poll_cycle(world)
       |> Map.put(:poll_check_in_progress, false)
+      |> Map.put(:poll_in_flight_since, nil)
       |> Map.update!(:poll_cycles, &(&1 + 1))
       |> schedule_tick(state.poll_interval_ms)
 
@@ -709,9 +716,19 @@ defmodule Shuttle.Poller do
     state =
       state
       |> Map.put(:poll_check_in_progress, false)
+      |> Map.put(:poll_in_flight_since, nil)
       |> Map.update!(:poll_cycles, &(&1 + 1))
       |> schedule_tick(state.poll_interval_ms)
 
+    {:noreply, state}
+  end
+
+  # A deferred `{:refresh_document, …}` read came back. Apply it to the state as
+  # it is NOW — a poll cycle or another refresh may have landed while the task
+  # was shelling felt — then release the caller that has been waiting on it.
+  def handle_info({:document_read, fiber_id, from, result}, state) do
+    state = apply_document_read(state, fiber_id, result)
+    GenServer.reply(from, :ok)
     {:noreply, state}
   end
 
@@ -776,11 +793,44 @@ defmodule Shuttle.Poller do
     {:reply, {:ok, Shuttle.FiberDocuments.envelope(stores, entries, cache_meta)}, state}
   end
 
-  def handle_call({:refresh_document, fiber_id}, _from, state) do
+  def handle_call({:refresh_document, fiber_id}, from, state) do
     # A cold cache means no poll has populated it yet; the first poll will read
     # disk fresh, so there is nothing to patch. Once warm, re-read this one fiber.
+    #
+    # The re-read is a `felt show` per store — bounded at 60s by the runner, but
+    # 60s is an eternity to a board whose every read is a call into this
+    # mailbox, and this handler runs on the post-mutation path a human just
+    # triggered from the kanban. So the shell-out goes to a task and the reply
+    # is DEFERRED (`{:noreply, …}` now, `GenServer.reply/2` when the read lands):
+    # the caller still waits for the refresh to finish, so the ordering the seam
+    # exists for is unchanged, while the mailbox keeps draining behind it.
+    #
+    # The task returns plain data and never a `%State{}` — installing it is
+    # `handle_info({:document_read, …})`'s job on the live state, so the
+    # single-writer guarantee holds and a poll that landed meanwhile is merged,
+    # not clobbered.
     if state.document_cache_ready do
-      {:reply, :ok, refresh_document_entry(state, fiber_id)}
+      parent = self()
+      stores = state.felt_stores
+
+      read = fn ->
+        result =
+          try do
+            Shuttle.FiberDocuments.get(fiber_id, felt_stores: stores)
+          catch
+            kind, reason -> {:error, {kind, reason}}
+          end
+
+        send(parent, {:document_read, fiber_id, from, result})
+      end
+
+      # No task supervisor (a unit test with the app not started, a supervisor
+      # mid-restart): fall back to reading inline and replying now, rather than
+      # leaving the caller waiting on a task that was never spawned.
+      case start_supervised_task(read) do
+        :ok -> {:noreply, state}
+        :unavailable -> {:reply, :ok, refresh_document_entry(state, fiber_id)}
+      end
     else
       {:reply, :ok, state}
     end
@@ -1533,14 +1583,33 @@ defmodule Shuttle.Poller do
   # different key are dropped first so a re-key can't leave a duplicate card. The
   # mtime is carried so the next poll's `reusable_document_cache_entry?` reuses
   # this fresh read instead of re-shelling felt.
+  defp start_supervised_task(fun) do
+    case Task.Supervisor.start_child(Shuttle.TaskSupervisor, fun) do
+      {:ok, _pid} -> :ok
+      _ -> :unavailable
+    end
+  catch
+    :exit, _ -> :unavailable
+  end
+
+  # The synchronous form, for the claim path — already a write that shells out,
+  # and its caller needs the patched state in hand to keep building on it.
   defp refresh_document_entry(%State{} = state, fiber_id) do
+    apply_document_read(
+      state,
+      fiber_id,
+      Shuttle.FiberDocuments.get(fiber_id, felt_stores: state.felt_stores)
+    )
+  end
+
+  defp apply_document_read(%State{} = state, fiber_id, result) do
     without_fiber =
       :maps.filter(
         fn _key, %{entry: entry} -> get_in(entry, [:fiber, "id"]) != fiber_id end,
         state.document_cache
       )
 
-    case Shuttle.FiberDocuments.get(fiber_id, felt_stores: state.felt_stores) do
+    case result do
       {:ok, %{fibers: [entry | _]}} ->
         fiber = Map.get(entry, :fiber, %{})
         key = Shuttle.Poller.DocumentCache.cache_key(fiber)
