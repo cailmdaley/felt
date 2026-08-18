@@ -57,8 +57,9 @@ shuttle:
   host: testhost
   project_dir: /tmp
   agent: claude-opus
-  session_uuid: $SESSION_UUID
-  dispatched_at: $DISPATCHED_AT
+  runtime:
+    session_uuid: $SESSION_UUID
+    dispatched_at: $DISPATCHED_AT
 custom_field: must-survive
 ---
 
@@ -70,7 +71,17 @@ Prose with a [[wikilink]] and special chars: é, "quotes", \$dollar.
 EOF
 
 body_of() { awk 'f==2{print} /^---[[:space:]]*$/{f++}' "$1"; }
-sh_field() { printf '%s' "$1" | python3 -c "import sys,json;print(json.load(sys.stdin).get('shuttle',{}).get('$2',''))"; }
+# Dispatch stamps live in the shuttle.runtime sub-block (session_uuid,
+# dispatched_at, handed_off_at); fall back to the top level for the structural
+# keys (kind, host, agent). Same lookup as handoff_live.sh — when the stamps
+# moved into `runtime:` this gate kept reading the old shape and went quietly
+# red on a writer that was working correctly.
+sh_field() {
+  printf '%s' "$1" | python3 -c "
+import sys, json
+s = json.load(sys.stdin).get('shuttle', {})
+print(s.get('runtime', {}).get('$2', s.get('$2', '')))"
+}
 
 body_before=$(body_of "$MD")
 
