@@ -88,18 +88,21 @@ func TestIntegration(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, ".felt")); err != nil {
 		t.Fatal("init: .felt directory not created")
 	}
-	if _, err := os.Stat(filepath.Join(dir, ".felt", "myst.yml")); err != nil {
-		t.Fatal("init: myst.yml not created")
+	// .gitignore is the support file init ships (myst.yml generation is gone —
+	// the board is the viewer now). Removing it and re-running init is what
+	// proves the repair path below.
+	if _, err := os.Stat(filepath.Join(dir, ".felt", ".gitignore")); err != nil {
+		t.Fatal("init: .gitignore not created")
 	}
-	if err := os.Remove(filepath.Join(dir, ".felt", "myst.yml")); err != nil {
-		t.Fatalf("init: remove myst.yml: %v", err)
+	if err := os.Remove(filepath.Join(dir, ".felt", ".gitignore")); err != nil {
+		t.Fatalf("init: remove .gitignore: %v", err)
 	}
 	out := mustFelt(t, dir, "init")
 	if !strings.Contains(out, "Ensured .felt/ support files") {
 		t.Fatalf("init: expected repair confirmation, got: %s", out)
 	}
-	if _, err := os.Stat(filepath.Join(dir, ".felt", "myst.yml")); err != nil {
-		t.Fatal("init: myst.yml not recreated")
+	if _, err := os.Stat(filepath.Join(dir, ".felt", ".gitignore")); err != nil {
+		t.Fatal("init: .gitignore not recreated")
 	}
 
 	// add — returns the fiber ID (positional arg is now the slug)
@@ -555,8 +558,8 @@ Session body.
 	if !strings.Contains(out, "Migrated 2 flat fibers, 1 legacy title fields, 1 legacy depends-on keys, 1 legacy MyST anchors") {
 		t.Fatalf("migrate: expected summary, got: %s", out)
 	}
-	if _, err := os.Stat(filepath.Join(migrateDir, ".felt", "myst.yml")); err != nil {
-		t.Fatalf("migrate: expected myst.yml, got: %v", err)
+	if _, err := os.Stat(filepath.Join(migrateDir, ".felt", ".gitignore")); err != nil {
+		t.Fatalf("migrate: expected .gitignore, got: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(migrateDir, ".felt", "legacy-child", "legacy-child.md")); err != nil {
 		t.Fatalf("migrate: expected migrated child, got: %v", err)
