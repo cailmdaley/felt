@@ -12,6 +12,8 @@ defmodule Shuttle.FeltStores do
   explicitly. Saving an empty list deletes the registry file.
   """
 
+  require Logger
+
   alias Shuttle.PathListConfig
 
   @spec_ %{
@@ -24,30 +26,201 @@ defmodule Shuttle.FeltStores do
   @type host_list :: [String.t()]
 
   @expanded_cache_key {__MODULE__, :expanded_hosts}
+  @scan_lock_key {__MODULE__, :expansion_scan}
+  @scan_report_key {__MODULE__, :expansion_scan_report}
   @expanded_cache_ttl_ms 30_000
 
+  # How long a cold caller — one with no expansion cached for the CURRENT base
+  # list — waits for the background scan before giving up and serving the
+  # unexpanded base. Generous against a healthy filesystem (a raw rescan costs
+  # ~20 ms on a many-store host, so this is 50x headroom) and short against a
+  # wedged one, which is the whole point: see `configured_hosts/0`.
+  @scan_wait_ms 1_000
+
+  # A scan that has not reported back within this window is presumed wedged
+  # rather than merely slow, and the next caller is allowed to start another.
+  # Long on purpose: a wedged scan is parked in a blocking filesystem call and
+  # holds one of the VM's async I/O threads until the kernel releases it, so
+  # re-arming often is how a stalled store turns into a stalled node.
+  @scan_lock_ttl_ms 60_000
+
+  # A store whose walk takes longer than this is reported by name, at :warning,
+  # with what usually causes it. Two orders of magnitude above a warm walk.
+  @slow_scan_warn_ms 2_000
+
+  @doc """
+  The configured store list, expanded with any symlinked substores.
+
+  **This call never blocks on the filesystem for longer than #{@scan_wait_ms} ms,
+  and normally does no filesystem work at all.** That bound is load-bearing, not
+  hygiene: `configured_hosts/0` is on the request path of most read endpoints
+  (`/api/v1/fibers/composite`, `/api/v1/felt-stores`) as well as every poll, and
+  the expansion it caches is a raw `File.ls`/`File.lstat`/`File.dir?` walk of
+  each store's `.felt/`. Those calls have no timeout. Reach into a store macOS
+  guards — iCloud Drive, `~/Library/CloudStorage` — and the first walk raises a
+  consent dialog that blocks the calling process *for as long as the dialog goes
+  unanswered*, which is human time, not machine time. Serving that walk inline
+  is how an unanswered dialog behind another window took the whole API down for
+  95 seconds on a first install (see the constitution
+  `professional-open-source/idea-discovery-off-the-poller-process`).
+
+  So the walk runs in a background task and reads consult a `:persistent_term`
+  cache:
+
+    * **Fresh** (cached for this base, within the #{@expanded_cache_ttl_ms} ms
+      TTL) — returned as-is. No filesystem, no spawn.
+    * **Stale** (cached for this base, past the TTL) — the stale list is
+      returned *immediately* and a rescan is kicked off behind it. A store that
+      cannot be walked degrades the freshness of the store list, never the
+      availability of the endpoint reading it.
+    * **Cold** (nothing cached for this base — first call, or the operator just
+      changed `FELT_STORES`) — a rescan is kicked off and we wait up to
+      #{@scan_wait_ms} ms for it, so a healthy filesystem still behaves
+      synchronously and callers see substores on the first call. Past that
+      deadline the *unexpanded* base list is served: correct, just missing
+      symlinked substores, and self-healing the moment the scan lands.
+
+  The scan is single-flight (`@scan_lock_key`), so a stalled store yields one
+  blocked task rather than one per request.
+  """
   @spec configured_hosts() :: host_list()
   def configured_hosts do
     base = configured_base_hosts()
     now = System.monotonic_time(:millisecond)
 
-    # Cache the symlink-following expansion by base config with a short TTL: the
-    # store set + symlink topology change rarely, but `configured_hosts/0` is hot
-    # (every poll, every fiber resolve), and a raw rescan costs ~20 ms on a
-    # many-store host. Recompute on a config change (base differs) or once the TTL
-    # lapses (so a newly-added substore symlink is picked up within 30 s without a
-    # restart). The expansion only does filesystem reads, so a stale entry is at
-    # worst 30 s out of date — never wrong, just late.
     case :persistent_term.get(@expanded_cache_key, :none) do
       {^base, expanded, cached_at} when now - cached_at < @expanded_cache_ttl_ms ->
         expanded
 
-      _ ->
-        expanded = expand_with_symlinked_substores(base)
-        :persistent_term.put(@expanded_cache_key, {base, expanded, now})
+      {^base, expanded, _stale_at} ->
+        start_expansion_scan(base)
         expanded
+
+      _ ->
+        start_expansion_scan(base)
+        await_expansion(base, now + scan_wait_ms()) || unexpanded(base)
     end
   end
+
+  # Poll the cache rather than await a task reference: the scan's result is
+  # installed by whoever runs it, so a caller that gives up waiting costs
+  # nothing and a caller that never existed still gets the scan done. Waiting on
+  # a message would tie the result to one process's mailbox and lose it when a
+  # request process dies at its own timeout.
+  defp await_expansion(base, deadline) do
+    case :persistent_term.get(@expanded_cache_key, :none) do
+      {^base, expanded, _} ->
+        expanded
+
+      _ ->
+        if System.monotonic_time(:millisecond) >= deadline do
+          Logger.warning(
+            "felt-store scan still running after #{scan_wait_ms()}ms; serving the unexpanded " <>
+              "store list (#{Enum.join(base, ", ")}). On macOS this is usually a consent " <>
+              "dialog waiting on a human — look behind your other windows. Symlinked " <>
+              "substores stay hidden until the scan finishes."
+          )
+
+          nil
+        else
+          Process.sleep(10)
+          await_expansion(base, deadline)
+        end
+    end
+  end
+
+  # The safe fallback: every configured store, expanded to an absolute path, with
+  # no symlink resolution at all. Deliberately does NOT dedup by
+  # `store_felt_realpath/1` the way a real expansion does — that is itself
+  # filesystem work, and this branch exists precisely because the filesystem is
+  # not answering.
+  defp unexpanded(base), do: base |> Enum.map(&Path.expand/1) |> Enum.uniq()
+
+  # Single-flight: at most one scan in flight per `@scan_lock_ttl_ms`. The check
+  # is not atomic across processes, so a burst can race two scans through — that
+  # is harmless (both write the same answer) and cheaper than serializing every
+  # caller through a process that a wedged walk could itself block.
+  defp start_expansion_scan(base) do
+    now = System.monotonic_time(:millisecond)
+
+    case :persistent_term.get(@scan_lock_key, nil) do
+      started when is_integer(started) and now - started < @scan_lock_ttl_ms ->
+        :ok
+
+      _ ->
+        :persistent_term.put(@scan_lock_key, now)
+
+        spawn_expansion_scan(base)
+    end
+  end
+
+  # No task supervisor — a unit test with the app not started, a supervisor
+  # mid-restart — falls back to today's inline behaviour rather than never
+  # scanning at all. The caller blocks, exactly as it always did.
+  defp spawn_expansion_scan(base) do
+    case Task.Supervisor.start_child(Shuttle.TaskSupervisor, fn -> run_expansion_scan(base) end) do
+      {:ok, _pid} -> :ok
+      _ -> run_expansion_scan(base)
+    end
+  catch
+    :exit, _ -> run_expansion_scan(base)
+  end
+
+  defp run_expansion_scan(base) do
+    {scanned_us, {expanded, timings}} = :timer.tc(fn -> expand_with_timings(base) end)
+    :persistent_term.put(@expanded_cache_key, {base, expanded, System.monotonic_time(:millisecond)})
+    :persistent_term.put(@scan_report_key, %{scanned_ms: div(scanned_us, 1000), stores: timings})
+    log_scan(div(scanned_us, 1000), timings)
+  after
+    :persistent_term.erase(@scan_lock_key)
+  end
+
+  @doc """
+  What the last completed store scan cost, per store, in milliseconds.
+
+  `%{scanned_ms: integer, stores: %{store => ms}}`, or `nil` before the first
+  scan completes. Read by `/api/v1/felt-stores` so a store that is slow — or
+  currently unreadable — is a visible fact about the world rather than a line in
+  a log nobody is tailing.
+  """
+  @spec last_scan_report() :: %{scanned_ms: non_neg_integer(), stores: map()} | nil
+  def last_scan_report, do: :persistent_term.get(@scan_report_key, nil)
+
+  @doc """
+  True while a store scan is in flight — i.e. the store list on offer may be
+  stale, and on macOS a consent dialog may be waiting on a human.
+  """
+  @spec scan_in_flight?() :: boolean()
+  def scan_in_flight? do
+    case :persistent_term.get(@scan_lock_key, nil) do
+      started when is_integer(started) ->
+        System.monotonic_time(:millisecond) - started < @scan_lock_ttl_ms
+
+      _ ->
+        false
+    end
+  end
+
+  # Name the slow store, not just the slow scan: "which one" is the first thing
+  # an operator staring at a stalled board needs, and on macOS it is also the
+  # answer — the store in the file provider is the one holding the dialog.
+  defp log_scan(total_ms, timings) when total_ms >= @slow_scan_warn_ms do
+    slowest =
+      timings
+      |> Enum.sort_by(&(-elem(&1, 1)))
+      |> Enum.take(3)
+      |> Enum.map_join(", ", fn {store, ms} -> "#{store} #{ms}ms" end)
+
+    Logger.warning(
+      "felt-store scan took #{total_ms}ms (slowest: #{slowest}). A walk this slow is almost " <>
+        "always a macOS consent dialog on an iCloud/CloudStorage store — look behind your " <>
+        "other windows — or a store evicted by Optimize Mac Storage."
+    )
+  end
+
+  defp log_scan(total_ms, _timings), do: Logger.debug("felt-store scan took #{total_ms}ms")
+
+  defp scan_wait_ms, do: Application.get_env(:shuttle, :store_scan_wait_ms, @scan_wait_ms)
 
   @doc """
   The configured store list before symlink-substore expansion.
@@ -89,10 +262,28 @@ defmodule Shuttle.FeltStores do
   """
   @spec expand_with_symlinked_substores(host_list()) :: host_list()
   def expand_with_symlinked_substores(stores) do
-    discovered = Enum.flat_map(stores, &symlinked_substore_roots/1)
+    {expanded, _timings} = expand_with_timings(stores)
+    expanded
+  end
 
-    (stores ++ discovered)
-    |> Enum.map(&Path.expand/1)
+  # The expansion, with every store's filesystem cost attributed to it. Both
+  # phases touch the disk and either can be the slow one: the substore walk
+  # reaches into `<store>/.felt/`, and the dedup below `lstat`s and realpaths
+  # each candidate — including the substore roots the walk just discovered,
+  # which is exactly where a store in a macOS file provider sits. Timing only
+  # the walk would blame the wrong store.
+  @spec expand_with_timings(host_list()) :: {host_list(), %{String.t() => non_neg_integer()}}
+  defp expand_with_timings(stores) do
+    walked =
+      Enum.map(stores, fn store ->
+        {us, roots} = :timer.tc(fn -> symlinked_substore_roots(store) end)
+        {store, div(us, 1000), roots}
+      end)
+
+    candidates =
+      (stores ++ Enum.flat_map(walked, fn {_store, _ms, roots} -> roots end))
+      |> Enum.map(&Path.expand/1)
+
     # When two stores share a `.felt/` realpath — a project root whose `.felt/` is
     # a real directory AND a parent (or sibling) whose own `.felt/` is a symlink
     # into it — keep the REAL-directory store. The poller's `list_shuttle_fibers/2`
@@ -102,8 +293,27 @@ defmodule Shuttle.FeltStores do
     # fibers would vanish from dispatch and the kanban. Stable-sort real-`.felt`
     # stores ahead of symlink ones (Elixir's sort is stable, so order is otherwise
     # preserved); `uniq_by` then keeps the real-directory store per realpath.
-    |> Enum.sort_by(&felt_symlink?/1)
-    |> Enum.uniq_by(&store_felt_realpath/1)
+    keyed =
+      Enum.map(candidates, fn store ->
+        {us, key} = :timer.tc(fn -> {felt_symlink?(store), store_felt_realpath(store)} end)
+        {store, div(us, 1000), key}
+      end)
+
+    expanded =
+      keyed
+      |> Enum.sort_by(fn {_store, _ms, {symlink?, _real}} -> symlink? end)
+      |> Enum.uniq_by(fn {_store, _ms, {_symlink?, real}} -> real end)
+      |> Enum.map(fn {store, _ms, _key} -> store end)
+
+    timings =
+      Enum.reduce(
+        Enum.map(walked, fn {s, ms, _} -> {s, ms} end) ++
+          Enum.map(keyed, fn {s, ms, _} -> {s, ms} end),
+        %{},
+        fn {store, ms}, acc -> Map.update(acc, store, ms, &(&1 + ms)) end
+      )
+
+    {expanded, timings}
   end
 
   @doc """

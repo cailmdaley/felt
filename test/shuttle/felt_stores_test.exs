@@ -275,6 +275,64 @@ defmodule Shuttle.FeltStoresTest do
     end
   end
 
+  # The property the board's availability rests on: `configured_hosts/0` is on the
+  # request path of the read endpoints, and its expansion is a raw filesystem walk
+  # with no timeout. A store macOS guards (iCloud, CloudStorage) raises a consent
+  # dialog on the first walk and blocks the walker until a human answers it — human
+  # time, not machine time. So the walk runs behind a deadline: past it, callers get
+  # the unexpanded base list and the endpoint stays up.
+  describe "a stalled store scan degrades freshness, never availability" do
+    setup do
+      on_exit(fn ->
+        Application.delete_env(:shuttle, :store_scan_wait_ms)
+        :persistent_term.erase({Shuttle.FeltStores, :expansion_scan})
+      end)
+
+      :ok
+    end
+
+    test "a cold caller past the deadline gets the unexpanded base, then self-heals" do
+      loom = tmp_dir()
+      project = tmp_dir()
+      File.mkdir_p!(Path.join(loom, ".felt"))
+      File.mkdir_p!(Path.join(project, ".felt"))
+      File.ln_s!(Path.join(project, ".felt"), Path.join([loom, ".felt", "shapepipe"]))
+      System.put_env("FELT_STORES", loom)
+
+      # No patience at all: the caller cannot wait for even a healthy scan, which
+      # is what a wedged one looks like from here.
+      Application.put_env(:shuttle, :store_scan_wait_ms, 0)
+
+      assert FeltStores.configured_hosts() == [Path.expand(loom)]
+
+      # The scan it kicked off still lands, so the substore appears on its own —
+      # the degradation is a lag, not a lost store.
+      Application.delete_env(:shuttle, :store_scan_wait_ms)
+      assert eventually(fn -> Enum.any?(FeltStores.configured_hosts(), &same_dir?(&1, project)) end)
+    end
+
+    test "a scan that never returns does not hold the caller past the deadline" do
+      loom = tmp_dir()
+      File.mkdir_p!(Path.join(loom, ".felt"))
+      System.put_env("FELT_STORES", loom)
+
+      # Claim the single-flight lock and never release it: from `configured_hosts/0`'s
+      # side this is indistinguishable from a walk parked in the kernel waiting on a
+      # consent dialog — no scan will run, and no result will ever arrive.
+      :persistent_term.put(
+        {Shuttle.FeltStores, :expansion_scan},
+        System.monotonic_time(:millisecond)
+      )
+
+      Application.put_env(:shuttle, :store_scan_wait_ms, 50)
+
+      {elapsed_us, hosts} = :timer.tc(&FeltStores.configured_hosts/0)
+
+      assert hosts == [Path.expand(loom)]
+      assert div(elapsed_us, 1000) < 1_000
+    end
+  end
+
   describe "timeout is world-unknown, never absence" do
     # A wedged felt (runner :timeout) must surface as {:error, :timeout}, not
     # {:error, :not_found}: consumers treat :not_found as authoritative absence
@@ -336,6 +394,16 @@ defmodule Shuttle.FeltStoresTest do
 
     File.write!(path, "---\n#{id_field}name: #{leaf}\n---\n\nBody.\n")
     path
+  end
+
+  # Poll rather than sleep a fixed span: the background scan lands in milliseconds
+  # on a healthy filesystem, and a fixed sleep is either flaky or slow.
+  defp eventually(fun, remaining_ms \\ 2_000) do
+    cond do
+      fun.() -> true
+      remaining_ms <= 0 -> false
+      true -> (Process.sleep(20); eventually(fun, remaining_ms - 20))
+    end
   end
 
   defp tmp_dir do
