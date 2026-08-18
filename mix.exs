@@ -1,10 +1,25 @@
 defmodule Shuttle.MixProject do
   use Mix.Project
 
+  # The daemon's version lives here and nowhere else. The release workflow
+  # stamps the pushed tag (SHUTTLE_VERSION=1.1.0-rc.1); a plain checkout —
+  # `make daemon`, `mix test`, no env set at all — falls back to the literal,
+  # so the developer path needs no ceremony. A leading "v" is tolerated
+  # because the tag carries one and forgetting to strip it shouldn't fail the
+  # build with an opaque SemVer error.
+  #
+  # Runtime readers must NOT come back here: a Mix release has no Mix. They
+  # read `Shuttle.version/0`, which reads the .app file Mix generates FROM
+  # this value — same source, available in a release.
+  @version (case System.get_env("SHUTTLE_VERSION") do
+              v when is_binary(v) and v != "" -> String.trim_leading(v, "v")
+              _ -> "0.1.0"
+            end)
+
   def project do
     [
       app: :shuttle,
-      version: "0.1.0",
+      version: @version,
       elixir: "~> 1.19",
       start_permanent: Mix.env() == :prod,
       elixirc_paths: elixirc_paths(Mix.env()),

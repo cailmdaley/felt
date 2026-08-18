@@ -36,6 +36,17 @@ archives:
       - goos: windows
         format: zip
 
+# A tag carrying a prerelease segment (v1.1.0-rc.1) is published as a GitHub
+# *prerelease*. That single flag is what makes release candidates safe: both
+# install.sh and `felt update` resolve versions through GitHub's
+# `releases/latest` API, and that endpoint returns the newest non-prerelease,
+# non-draft release — an RC is invisible to it. GitHub also refuses to mark a
+# prerelease as the repo's latest, so no `make_latest` override is needed.
+# Without this block `prerelease` defaults to false and an RC would ship to
+# everyone as a normal release.
+release:
+  prerelease: auto
+
 changelog:
   sort: asc
   filters:
@@ -43,10 +54,13 @@ changelog:
       - "^docs:"
       - "^test:"
 
-# Homebrew tap publishing is only for releases cut from the public
+# Homebrew tap publishing is only for FINAL releases cut from the public
 # cailmdaley/felt repo. Releases cut from LightconeResearch/felt must not
 # publish to the public tap; skip the brews stage entirely when the release
-# isn't originating from the public repo.
+# isn't originating from the public repo. Prereleases must not publish either:
+# the tap has no channel concept, so a formula bump would hand every
+# `brew upgrade felt` user a release candidate — the exact thing marking the
+# GitHub release a prerelease is there to prevent.
 brews:
   - repository:
       owner: cailmdaley
@@ -85,4 +99,8 @@ brews:
       if codex_installed && which("codex")
         system "#{bin}/felt", "setup", "codex"
       end
-    skip_upload: '{{ if ne .Env.GITHUB_REPOSITORY "cailmdaley/felt" }}true{{ else }}false{{ end }}'
+    # Snapshot first, deliberately: Go's `or` short-circuits, so a local
+    # `goreleaser --snapshot` never reaches .Env.GITHUB_REPOSITORY (an unset
+    # key there is a hard template error). .Prerelease is the tag's suffix —
+    # "rc.1" for v1.1.0-rc.1, empty for v1.1.0.
+    skip_upload: '{{ if or .IsSnapshot (ne .Prerelease "") (ne .Env.GITHUB_REPOSITORY "cailmdaley/felt") }}true{{ else }}false{{ end }}'

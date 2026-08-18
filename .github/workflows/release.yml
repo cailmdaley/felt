@@ -80,10 +80,26 @@ jobs:
           mkdir -p ../priv/ui
           cp -R dist ../priv/ui/dist
 
+      # SHUTTLE_VERSION stamps the tag into mix.exs's `version:`, which Mix
+      # bakes into the app spec inside the artifact — that is what
+      # `Shuttle.version/0` and `/api/v1/version`'s `mix_vsn` report. Without
+      # it every release would claim the mix.exs fallback. The leading "v" is
+      # stripped here because a tag is not a SemVer string.
       - name: Assemble the release
         run: |
+          export SHUTTLE_VERSION="${GITHUB_REF_NAME#v}"
           mix deps.get --only prod
           MIX_ENV=prod mix shuttle.gen_version
+          # compile.app --force is load-bearing, not belt-and-braces. Mix
+          # regenerates the .app file only when mix.exs is NEWER than it — an
+          # env var changing the version leaves both mtimes untouched, so a
+          # warm _build silently keeps the previous vsn. A fresh checkout has
+          # no _build and gets it right by luck; the day anyone caches _build
+          # to speed this job up, every release would ship the fallback
+          # version instead of the tag. Force it after compile (before, and
+          # the .app would record an empty module list).
+          MIX_ENV=prod mix compile
+          MIX_ENV=prod mix compile.app --force
           MIX_ENV=prod mix release shuttled --path out/shuttle
 
       - name: Boot-test the artifact
@@ -99,6 +115,15 @@ jobs:
             sleep 1
             if [ "$i" = 60 ]; then echo "daemon never bound"; cat /tmp/daemon.log; exit 1; fi
           done
+          # The artifact must report the tag it was stamped with. Only a built
+          # release can show this — mix.exs's fallback compiles fine either
+          # way, so a broken stamp is silent until someone reads mix_vsn.
+          VSN="${GITHUB_REF_NAME#v}"
+          if ! curl -fsS http://127.0.0.1:4390/api/v1/version | grep -Eq "\"mix_vsn\": *\"${VSN}\""; then
+            echo "daemon reports the wrong mix_vsn (expected ${VSN}):"
+            curl -fsS http://127.0.0.1:4390/api/v1/version
+            exit 1
+          fi
           # The artifact must serve the UI bundle it shipped with.
           curl -fsS -o /dev/null http://127.0.0.1:4390/index.html
           # And the shim's HTTP verbs must answer.

@@ -110,6 +110,15 @@ plugin.json` and `.codex-plugin/plugin.json` in sync with the binary tag, then
 to build a release whose manifests don't match the tag, so a forgotten bump
 can't ship.
 
+Release candidates: `scripts/release.sh 1.1.0-rc.1` — any `X.Y.Z-<suffix>`
+version cuts a prerelease. Three things then keep it away from everyone who
+didn't ask for it, and all three key off the `-` in the tag: goreleaser marks
+the GitHub release `prerelease: auto`; `install.sh` and `felt update` resolve
+through the `releases/latest` API, which skips prereleases; and the Homebrew
+tap's `skip_upload` is true for any prerelease, so `brew upgrade felt` never
+sees it. The only way in is pinning `FELT_VERSION` (below). The daemon tarballs
+attach to the RC release the same way, stamped with the RC version.
+
 ## Architecture stance
 
 - **One CLI surface.** Every caller speaks `felt shuttle <verb>`.
@@ -218,8 +227,21 @@ shell-started via `make start`.)
 
   ```bash
   curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh | sh
-  SHUTTLE=1 curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh | sh
+  curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh | SHUTTLE=1 sh
   ```
+
+  `FELT_VERSION` pins an exact tag (with or without the leading `v`) and skips
+  the `releases/latest` lookup — the only supported way to install a release
+  candidate, for both the CLI and the `SHUTTLE=1` daemon:
+
+  ```bash
+  curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh | FELT_VERSION=1.1.0-rc.1 SHUTTLE=1 sh
+  ```
+
+  Note where the variables sit: **after** the pipe, on `sh`. `VAR=1 curl … | sh`
+  puts them in `curl`'s environment, not the script's, so they are silently
+  ignored — and a pinned install that silently ignores `FELT_VERSION` hands the
+  tester the latest stable instead of the RC.
 
   This is `install.sh`; installs the felt CLI to `/usr/local/bin` if writable,
   else `~/.local/bin`; override with `FELT_INSTALL_DIR`. Also Homebrew

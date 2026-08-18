@@ -235,7 +235,7 @@ but the board is worth having on its own. Re-run the install script with
 `SHUTTLE=1` to add the daemon, then point it at this store:
 
 ```bash
-SHUTTLE=1 curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh | SHUTTLE=1 sh
 FELT_STORES=$PWD ~/.local/share/shuttle/bin/shuttle start
 ```
 

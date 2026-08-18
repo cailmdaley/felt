@@ -1,4 +1,11 @@
 #!/bin/sh
+# install.sh — install the felt CLI (and optionally the Shuttle daemon).
+#
+#   FELT_REPO         source repo (default cailmdaley/felt)
+#   FELT_INSTALL_DIR  where the felt binary lands
+#   FELT_VERSION      install this exact tag instead of the latest release
+#   SHUTTLE=1         also install the Shuttle daemon
+#   SHUTTLE_HOME      where the daemon lands (default ~/.local/share/shuttle)
 set -eu
 
 REPO="${FELT_REPO:-cailmdaley/felt}"
@@ -29,15 +36,41 @@ case "$ARCH" in
   *)       echo "Unsupported architecture: $ARCH" >&2; exit 1 ;;
 esac
 
-# Get latest release tag
-TAG="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" | grep '"tag_name"' | cut -d'"' -f4)"
-if [ -z "$TAG" ]; then
-  echo "Failed to fetch latest release" >&2
-  exit 1
+# Resolve the tag to install.
+#
+# FELT_VERSION pins an exact tag and skips the releases/latest lookup
+# entirely. That lookup returns only the newest non-prerelease release, so
+# pinning is the ONLY way to install a release candidate — by design: an RC
+# must never reach someone who just ran the install line. Both `1.1.0-rc.1`
+# and `v1.1.0-rc.1` are accepted; the tag itself carries the `v`.
+if [ -n "${FELT_VERSION:-}" ]; then
+  case "$FELT_VERSION" in
+    v*) TAG="$FELT_VERSION" ;;
+    *)  TAG="v${FELT_VERSION}" ;;
+  esac
+  echo "FELT_VERSION is set: installing pinned release ${TAG} (not the latest)."
+else
+  TAG="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" | grep '"tag_name"' | cut -d'"' -f4)"
+  if [ -z "$TAG" ]; then
+    echo "Failed to fetch latest release of ${REPO}" >&2
+    exit 1
+  fi
 fi
 
-ASSET="felt_${ARCHIVE_OS}_${ARCHIVE_ARCH}.tar.gz"
-URL="https://github.com/${REPO}/releases/download/${TAG}/${ASSET}"
+# Fetch one release asset, or fail naming the tag and asset that were missing.
+# Pinned installs land here most often — a typo'd or unpublished tag is the
+# expected failure — so the message has to say which tag it tried rather than
+# leaving a bare "curl: (22)" or a tar EOF error.
+download_asset() {
+  _url="https://github.com/${REPO}/releases/download/${TAG}/$1"
+  if ! curl -fsSL "$_url" -o "$2"; then
+    echo "Failed to download $1 for ${TAG}." >&2
+    echo "  ${_url}" >&2
+    echo "Check that the tag exists and publishes that asset:" >&2
+    echo "  https://github.com/${REPO}/releases/tag/${TAG}" >&2
+    exit 1
+  fi
+}
 
 echo "Installing felt ${TAG} (${OS}/${ARCH})..."
 
@@ -45,7 +78,8 @@ echo "Installing felt ${TAG} (${OS}/${ARCH})..."
 TMPDIR="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR"' EXIT
 
-curl -fsSL "$URL" | tar xz -C "$TMPDIR"
+download_asset "felt_${ARCHIVE_OS}_${ARCHIVE_ARCH}.tar.gz" "$TMPDIR/felt.tar.gz"
+tar xzf "$TMPDIR/felt.tar.gz" -C "$TMPDIR"
 
 # Install
 mkdir -p "$INSTALL_DIR"
@@ -66,16 +100,15 @@ esac
 # front door is $SHUTTLE_HOME/bin/shuttle. Runtime prerequisites: tmux + felt.
 if [ "${SHUTTLE:-0}" = "1" ]; then
   SHUTTLE_HOME="${SHUTTLE_HOME:-${HOME}/.local/share/shuttle}"
-  DAEMON_ASSET="shuttle_${ARCHIVE_OS}_${ARCHIVE_ARCH}.tar.gz"
-  DAEMON_URL="https://github.com/${REPO}/releases/download/${TAG}/${DAEMON_ASSET}"
 
   echo "Installing Shuttle daemon ${TAG} to ${SHUTTLE_HOME}..."
-  curl -fsSL "$DAEMON_URL" | tar xz -C "$TMPDIR"
+  download_asset "shuttle_${ARCHIVE_OS}_${ARCHIVE_ARCH}.tar.gz" "$TMPDIR/shuttle.tar.gz"
+  tar xzf "$TMPDIR/shuttle.tar.gz" -C "$TMPDIR"
   rm -rf "$SHUTTLE_HOME"
   mkdir -p "$(dirname "$SHUTTLE_HOME")"
   mv "$TMPDIR/shuttle" "$SHUTTLE_HOME"
 
-  echo "Shuttle daemon installed."
+  echo "Shuttle daemon ${TAG} installed."
   echo "  Start it:   FELT_STORES=<your-store> ${SHUTTLE_HOME}/bin/shuttle start"
   echo "  Keep-alive: see https://cailmdaley.github.io/felt/shuttle/installation/"
 fi

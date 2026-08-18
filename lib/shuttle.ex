@@ -9,10 +9,25 @@ defmodule Shuttle do
   """
 
   @doc """
-  Returns the current version.
+  The daemon's version — reported as `mix_vsn` by `GET /api/v1/version`.
+
+  Single-sourced from `mix.exs`'s `version:`, which CI stamps with the release
+  tag. Read from the OTP application spec, not from `Mix.Project`: a Mix
+  release ships no Mix, so `Mix.Project.config/0` would raise in the artifact
+  this function exists to identify. The `.app` file is generated from that same
+  `version:` and travels inside the release, so the app spec is the one place
+  the value is readable everywhere the daemon runs.
   """
   @spec version() :: String.t()
-  def version, do: "0.1.0"
+  def version do
+    case Application.spec(:shuttle, :vsn) do
+      vsn when is_list(vsn) -> List.to_string(vsn)
+      # Only reachable if the :shuttle app isn't loaded — it always is under a
+      # release, `mix test`, and `mix run`. Better an honest "unknown" than a
+      # crash in the endpoint that reports build identity.
+      _ -> "unknown"
+    end
+  end
 
   @doc """
   The port the local daemon's HTTP surface binds (and is reached on).

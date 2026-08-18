@@ -1,8 +1,13 @@
 defmodule ShuttleTest do
   use ExUnit.Case
 
-  test "version returns semantic version" do
-    assert Shuttle.version() == "0.1.0"
+  # The version has ONE source, mix.exs's `version:` (which CI stamps with the
+  # release tag). This asserts the agreement that makes that true: what the
+  # daemon reports at runtime, read out of the app spec, is what the Mix
+  # project declared at build time.
+  test "version is the mix project version, read from the app spec" do
+    assert Shuttle.version() == Mix.Project.config()[:version]
+    assert Shuttle.version() =~ ~r/^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/
   end
 
   test "daemon_port reads SHUTTLE_PORT, defaulting to 4000" do

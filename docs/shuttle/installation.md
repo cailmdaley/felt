@@ -60,7 +60,7 @@ needs:
 the daemon beside it:
 
 ```bash
-SHUTTLE=1 curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh | SHUTTLE=1 sh
 ```
 
 The daemon lands in `~/.local/share/shuttle` — override with `SHUTTLE_HOME` —

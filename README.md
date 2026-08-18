@@ -97,7 +97,7 @@ under whichever of the two the hub runs.
 The daemon installs the way the CLI does:
 
 ```bash
-SHUTTLE=1 curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh | SHUTTLE=1 sh
 ```
 
 The build it fetches bundles its own Erlang runtime, so running the daemon needs no Erlang,

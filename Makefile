@@ -140,6 +140,14 @@ else
 	@command -v felt >/dev/null 2>&1 || { echo "felt not found on PATH and no Go toolchain to build it — install felt first."; exit 1; }
 endif
 	mix shuttle.gen_version
+	@# Regenerate the .app spec before assembling. Mix rewrites it only when
+	@# mix.exs is NEWER than the existing spec, and mix.exs now takes its
+	@# version from $$SHUTTLE_VERSION — an env change touches no mtime. So a
+	@# build that once stamped a release tag would keep reporting that tag from
+	@# every later plain `make daemon` (verified: it does). --force makes the
+	@# local path match what release.yml does for the same reason.
+	MIX_ENV=prod mix compile
+	MIX_ENV=prod mix compile.app --force
 	MIX_ENV=prod mix release shuttled --overwrite --path bin/rel
 
 # ── test ─────────────────────────────────────────────────────────────────
