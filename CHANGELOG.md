@@ -199,6 +199,22 @@ reaches, rather than the boundary being negotiated flag by flag.
 - `felt show -d compact` and `-d summary` report the body's line count
   (`Body:     214 lines`), so a reader can decide whether the full body is
   worth paying for before paying for it.
+- `felt check` counts a fiber it cannot parse as an error and reports it
+  first. Malformed frontmatter — an unquoted outcome containing `: ` is the
+  classic — used to be a stderr warning nothing counted, so a fiber could drop
+  out of the assemblage entirely while `check` called four cosmetic things
+  errors. It also names a fiber whose bytes iCloud has evicted, which produces
+  the same symptom for a different reason.
+- `felt init` says what it created and where, with an absolute path and the
+  next two commands, instead of "Ensured .felt/ support files" — idempotency
+  vocabulary at the one moment a fresh store most needs confirming.
+- `felt uninstall` removes the marketplace it registered, not just the plugin,
+  and its help says which parts of `setup` each agent's uninstall actually
+  reverses. Claude's side previously left the registration behind while
+  Codex's removed it: one command, two definitions of "removed".
+- `shuttle install-agent` prints the board URL — the reason the daemon exists
+  went unnamed by the command that starts it — and seeds `~/.shuttle/host` so
+  the machine's identity is fixed before its first daemon boots.
 
 ### Changed
 
@@ -330,6 +346,19 @@ reaches, rather than the boundary being negotiated flag by flag.
   backfills what is already true.
 - Ownership resolution fails loudly when it cannot resolve its own host,
   instead of quietly attributing work to the wrong one.
+- The PATH baked into the supervisor is captured from a scrubbed environment
+  and backstopped by `felt`'s own directory. A login shell prepends to the
+  PATH it inherits, so an `install-agent` run from inside a coding-agent
+  session — for shuttle, the common case — used to bake that session's
+  ephemeral entries into launchd forever. Each capture attempt is now bounded
+  by a watchdog, and whatever it produces, the directory the running `felt`
+  came from is appended if missing (its absence is what yields `:enoent` →
+  500 on the composite API).
+- The generated launchd plist and systemd unit stop describing a checkout.
+  Their headers explained the file as something `make install-agent` wrote in
+  `~/dev/shuttle`, which is not true of a release tarball — the install path
+  the docs recommend — and the `FELT_STORES` comment described the
+  maintainer's own store as though it were a fact about the reader's.
 - A machine's identity is now fixed the first time it is needed. The CLI and
   the daemon each fell back to the OS hostname, which is not one value: Go
   keeps the DNS suffix where Erlang strips it, and DHCP rewrites it outright.
