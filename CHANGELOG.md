@@ -410,9 +410,10 @@ reaches, rather than the boundary being negotiated flag by flag.
   every tick — went raw with them, along with the fiber reads and the one
   autonomous fiber write the poll cycle makes; a single unconverted call on a
   stalled path re-wedges the file server for the whole daemon, so the property
-  is only as strong as its weakest call site. A test now asserts it over a real
-  socket: with the file server genuinely wedged, the board's page and a file
-  read on a healthy store both still answer.
+  is only as strong as its weakest call site — so the fiber-create endpoint,
+  which writes into a store, went raw too. A test now asserts the property over
+  a real socket: with the file server genuinely wedged, the board's page and a
+  file read on a healthy store both still answer.
 - The standing-role reconciler self-heals inverted markers instead of
   re-closing live work. Dead pinned roles park rather than relaunching in a
   loop.
