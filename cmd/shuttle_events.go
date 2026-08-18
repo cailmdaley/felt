@@ -68,7 +68,7 @@ func commitsFilePath() (path string, explicit bool) {
 //
 // The gate is the daemon's own state directory: write only when the file's
 // parent already exists, and never create it. That directory is created by
-// bootstrap.sh (and by every daemon that has ever run here), so a Shuttle host
+// bootstrap.sh (and by every daemon that has ever run here), so a shuttle host
 // is enabled with no configuration — while someone who installed felt for
 // fibers alone gets one os.Stat, no file, and no surprise directory.
 //

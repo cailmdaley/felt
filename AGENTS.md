@@ -1,11 +1,11 @@
-# felt + Shuttle — Contributor & Operator Notes
+# felt + shuttle — Contributor & Operator Notes
 
 One repo, one checkout, three artifacts:
 
 - **felt CLI** (Go) — the **data layer**. A directory-based markdown fiber
   tracker / agent memory, and the home of the `felt shuttle <verb>`
   subcommands. Built here.
-- **Shuttle daemon** (Elixir/OTP Mix release, launched through the tracked
+- **shuttle daemon** (Elixir/OTP Mix release, launched through the tracked
   `bin/shuttle` shim) — the **dispatcher**.
   Polls the felt tree, launches one tmux worker per eligible fiber, exposes a
   `:4000` snapshot/control API and owns a per-worker watcher.
@@ -14,7 +14,7 @@ One repo, one checkout, three artifacts:
   Week, Chronicle, and the Board canvas of sent work), served by the daemon at
   `http://127.0.0.1:4000/`.
 
-Felt owns the data model; Shuttle owns the network and the surface. The Elixir
+felt owns the data model; shuttle owns the network and the surface. The Elixir
 daemon is the production dispatcher.
 
 ## felt CLI — the data layer
@@ -61,7 +61,7 @@ native keys there and refuses to scalar-clobber an existing structured value.
 edit — `--unset` will remove one.
 
 **The `shuttle:` block is non-native frontmatter felt owns the *shape* of.**
-Felt validates and stamps the `shuttle:` block (the `felt shuttle <verb>` Go
+felt validates and stamps the `shuttle:` block (the `felt shuttle <verb>` Go
 subcommands in `cmd/` + `internal/shuttle/`); the Elixir daemon reads it. This
 is the merge end-state — the contract lives in one place (felt) rather than
 being validated on both sides.
@@ -150,15 +150,15 @@ attach to the RC release the same way, stamped with the RC version.
 ## Architecture stance
 
 - **One CLI surface.** Every caller speaks `felt shuttle <verb>`.
-- **One repo, one checkout, three artifacts.** felt and Shuttle live in one
+- **One repo, one checkout, three artifacts.** felt and shuttle live in one
   source tree, building the felt CLI, the daemon release, and the board UI from
-  it. Shuttle is self-contained, with its own browser UI and launch story,
+  it. shuttle is self-contained, with its own browser UI and launch story,
   assuming no external dispatcher process.
 - **The `shuttle:` block is in felt's surface.** The contract lives once, in
   felt's Go code, and the Elixir daemon reads it. Continuation state
   (`session_uuid` / `dispatched_at` / `handed_off_at`) lives entirely in the
   `shuttle:` block.
-- **felt owns the data model; Shuttle owns the network and the surface** — the
+- **felt owns the data model; shuttle owns the network and the surface** — the
   two are one package, not two that shell to each other.
 
 **The Elixir/OTP daemon is the production dispatcher.** Dispatch, the
@@ -232,7 +232,7 @@ always** for daemon source edits — a restart without `make daemon` is a no-op
 for picking up edits.
 
 **Restarting the daemon does NOT end your session — common misconception, closed
-out.** A worker (including the Shuttle session reading this) runs in its own tmux
+out.** A worker (including the shuttle session reading this) runs in its own tmux
 session; the daemon only *watches* it (tmux owns the worker process — see
 "Deploying is ALWAYS safe" below). Bouncing the daemon cycles the watcher and
 rebinds `:4000`; every `<leaf>-<uid>-shuttle` tmux session keeps running untouched and is
@@ -317,7 +317,7 @@ the daemon your login environment.
 
 #### macOS — the LaunchAgent
 
-Shuttle's macOS durable surface is a **launchd LaunchAgent**
+shuttle's macOS durable surface is a **launchd LaunchAgent**
 (`share/io.shuttle.daemon.plist.template` → `~/Library/LaunchAgents/io.shuttle.daemon.plist`),
 installed by `make install-agent`: `KeepAlive` restarts the daemon on crash,
 `RunAtLoad` starts it at login. Independent of any other process.
@@ -392,7 +392,7 @@ fragile and per-binary; relocating out of Documents is the supported fix.
 
 ### Owning the event stream — `felt hook event`
 
-Shuttle derives per-session activity (`WaitingTracker`) and the sent-files trail
+shuttle derives per-session activity (`WaitingTracker`) and the sent-files trail
 (`SentFiles`) from its OWN agent hook-event stream. `felt hook event`
 (`cmd/hook_event.go`) appends one JSON line per hook event to
 `$SHUTTLE_EVENTS_FILE` (default `~/.shuttle/events.jsonl`, dir
@@ -454,7 +454,7 @@ authenticates is your ssh config's business — but note that an ssh alias needi
 a live credential (a short-lived certificate, a 2FA-backed ControlMaster) fails
 *instantly* with `Permission denied` once that credential lapses, and the
 symptom looks like a dead host: the kanban **Attach** button opens a terminal
-that flashes and dies. Refresh the credential before concluding Shuttle is
+that flashes and dies. Refresh the credential before concluding shuttle is
 broken.
 
 **The deploy ritual per host** is: push → on the host, pull → `make daemon` →
@@ -470,7 +470,7 @@ target; without one it is skipped.
 **Deploying is ALWAYS safe — local or remote — and is never a blocker.**
 Rebuilding and restarting the daemon (`make all`, cycling `:4000`, reloading the
 LaunchAgent, the respawn loop) does **not** kill running jobs: **tmux owns the
-worker process, Shuttle only owns the watcher** (the load-bearing invariant
+worker process, shuttle only owns the watcher** (the load-bearing invariant
 below). A restart cycles the watcher and rebinds the API; the `<leaf>-<uid>-shuttle`
 tmux sessions keep running untouched and the daemon re-adopts them on boot. So
 deploy freely whenever there's a fix to ship — never hold back, gate it behind
@@ -649,10 +649,10 @@ felt shuttle validate-identity                # UID migration/cross-city validat
 
 ## Critical invariants
 
-- **tmux owns the worker process; Shuttle owns the watcher.** Workers stay
+- **tmux owns the worker process; shuttle owns the watcher.** Workers stay
   attachable via `felt shuttle attach <fiber>`. Supervise watchers,
   not workers.
-- **Felt is the data layer; the daemon shells out to the felt CLI.** Don't
+- **felt is the data layer; the daemon shells out to the felt CLI.** Don't
   import felt internals into the daemon.
 - **Remote content comes from the owning daemon over the tunnel — NEVER from
   git sync.** A fiber is owned by exactly one host; only that host's daemon can
@@ -670,7 +670,7 @@ felt shuttle validate-identity                # UID migration/cross-city validat
   mirror", because the read was attempted locally instead of being owner-routed.
   New endpoints that surface a fiber's host-local content MUST route through
   `OriginRouter`, not assume the bytes are reachable on this host.
-- **Agent records live in one source of truth: felt's registry.** Felt resolves
+- **Agent records live in one source of truth: felt's registry.** felt resolves
   the registry as two layers — `internal/shuttle/agents.builtin.json` (embedded)
   with the user file (`$FELT_AGENTS_FILE`, else `~/.config/felt/agents.json`)
   merged over it by default. The user file can set `builtins: "restrict"` to
@@ -724,7 +724,7 @@ felt shuttle validate-identity                # UID migration/cross-city validat
   already running/claimed (see `eligible?/2` in poller.ex).
 - **Configured stores** come from `FELT_STORES` (comma-separated env var) →
   persisted `~/.config/felt/stores.json`. There is no implicit default store
-  and no legacy Shuttle-named registry authority. `POST
+  and no legacy shuttle-named registry authority. `POST
   /api/v1/felt-stores` rewrites the persisted file.
 - **Dispatcher** (`lib/shuttle/dispatcher.ex`) resolves the agent, spawns
   the `<leaf>-<uid>-shuttle` tmux session.
@@ -739,7 +739,7 @@ felt shuttle validate-identity                # UID migration/cross-city validat
 
 All prompt variants share this shape (`compose_prompt/3` in dispatcher.ex):
 
-1. **Orientation paragraph** — what Shuttle is, what the worker is here to
+1. **Orientation paragraph** — what shuttle is, what the worker is here to
    do, how the practice loads. Per-prompt, not boilerplate. Goes first
    because in causal attention every downstream token sees the prefix.
 2. **`Fiber: <id>`** (and `Run: <run-id>` for standing) — identity lines.
@@ -852,7 +852,7 @@ felt/
 ├── claude-plugin/           plugin payload for Claude Code + Codex
 ├── scripts/release.sh       bumps plugin manifests + commits + tags
 │
-│   # Shuttle daemon — Elixir/OTP (the dispatcher)
+│   # shuttle daemon — Elixir/OTP (the dispatcher)
 ├── mix.exs  mix.lock
 ├── bin/shuttle              tracked shell shim, the daemon's front door
 ├── bin/rel/                 the built daemon release (bin/rel/bin/shuttled), gitignored
@@ -909,7 +909,7 @@ are not available in `bash -l`.
 
 ## License
 
-The repo is **MIT** (the felt CLI + UI). The Shuttle
+The repo is **MIT** (the felt CLI + UI). The shuttle
 daemon (`lib/`) contains code derived from OpenAI's Symphony under the **Apache
 License 2.0**, preserved in `NOTICE` and `LICENSE-APACHE`.
 

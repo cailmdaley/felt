@@ -106,7 +106,7 @@ where they belong, or drop the ones that were never earning their keep.
 ## Outcomes teach
 
 The `outcome` field states the conclusion in one line. `felt show` displays it
-at every detail level from `compact` up, and it headlines a Shuttle kanban
+at every detail level from `compact` up, and it headlines a shuttle kanban
 card. Readers meet this sentence most often, so write it well.
 
 An outcome that says "done" has failed. Say what was learned, decided, or

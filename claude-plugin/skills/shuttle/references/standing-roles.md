@@ -1,6 +1,6 @@
 # Standing Roles
 
-A standing role is an **installed responsibility** — a cron-scheduled fiber that the daemon dispatches recurrently. One fiber, one durable concern, one place the user looks. Email triage. Daily PR survey. Weekly inbox catch-up. The pattern: the human writes the constitution once; Shuttle dispatches a worker on the schedule; each run writes its work product into `outcome` and exits to awaiting-review; the human accepts; the cycle repeats.
+A standing role is an **installed responsibility** — a cron-scheduled fiber that the daemon dispatches recurrently. One fiber, one durable concern, one place the user looks. Email triage. Daily PR survey. Weekly inbox catch-up. The pattern: the human writes the constitution once; shuttle dispatches a worker on the schedule; each run writes its work product into `outcome` and exits to awaiting-review; the human accepts; the cycle repeats.
 
 This reference covers what is *specific* to standing roles: the cyclic state machine, run identity, resume-vs-fresh, the exit handoff, and the constitution shape. Board gestures, columns, and the verb table are shared across kinds and live in [operating.md](operating.md) — read its "Gestures by card state" section alongside this one.
 

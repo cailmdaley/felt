@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// The :4000 daemon HTTP client — the felt CLI's window onto the running Shuttle
+// The :4000 daemon HTTP client — the felt CLI's window onto the running shuttle
 // daemon. Most `felt shuttle` verbs are pure local-frontmatter writes, but a few
 // need the daemon: host identity (so a freshly installed block is born owned with
 // the host the poller will compare against), and the soft lifecycle hop for
@@ -23,7 +23,7 @@ import (
 
 const defaultDaemonURL = "http://127.0.0.1:4000"
 
-// daemonURL is the local Shuttle daemon's base URL. No CLI flag by design — the
+// daemonURL is the local shuttle daemon's base URL. No CLI flag by design — the
 // daemon is a per-machine service. SHUTTLE_DAEMON_URL overrides it (tests point
 // it at an httptest stub).
 func daemonURL() string {
@@ -58,7 +58,7 @@ func (e daemonStatusError) Error() string {
 	return fmt.Sprintf("daemon at %s returned %d: %s", e.url, e.status, e.body)
 }
 
-// getDaemon and postDaemon are the CLI's only HTTP transport to a Shuttle
+// getDaemon and postDaemon are the CLI's only HTTP transport to a shuttle
 // daemon — local or, over a tunnel, a remote one. Every daemon-facing verb goes
 // through them, so "reaching daemon at %s" reads the same everywhere and
 // isLifecycleTransportError has one error shape to recognize. Callers that want

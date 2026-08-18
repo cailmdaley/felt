@@ -107,12 +107,12 @@ to change kind or schedule, `set-model`/`set-agent` to change the agent, or
 `uninstall` to start over.
 
 You can also write the block by hand while drafting. `install` adds schema
-validation, which makes it the canonical path. Felt reports a hand-written block
+validation, which makes it the canonical path. felt reports a hand-written block
 with no `status` as undispatchable, and install will not auto-arm it.
 
 ## The three kinds
 
-Felt validates `shuttle.kind` (`internal/shuttle/schema.go`).
+felt validates `shuttle.kind` (`internal/shuttle/schema.go`).
 
 ### `oneshot`
 
@@ -133,7 +133,7 @@ felt shuttle repeat <fiber> \
   --schedule "0 9 * * 1-5" --tz Europe/Paris --project-dir "$PWD"
 ```
 
-Shuttle computes due-ness from the cron expression against now, and stores
+shuttle computes due-ness from the cron expression against now, and stores
 nothing. So no dispatch can silently consume a slot. The
 `active → closed → active` document transition records that an occurrence ran.
 
@@ -219,7 +219,7 @@ list the daemon evaluates.
   inside a synced folder can raise a permission prompt nobody can grant.
 - **`host`** — the owning daemon's host id. A daemon dispatches a block if and
   only if `block.host` equals its own id (`SHUTTLE_HOST`, else the file
-  `~/.shuttle/host`, else the system hostname). Shuttle offers no `"local"`
+  `~/.shuttle/host`, else the system hostname). shuttle offers no `"local"`
   default and no wildcard. An absent host leaves the fiber unowned and
   ineligible on every daemon. `install`, `repeat`, and `pin` stamp it by
   default.
@@ -231,7 +231,7 @@ the daemon polls, and its `depends_on` targets must all be `tempered: true`.
 
 ## Human in the loop
 
-Every dispatch runs autonomously; Shuttle offers no interactive mode. When work
+Every dispatch runs autonomously; shuttle offers no interactive mode. When work
 needs a human, that expectation rides one of two channels.
 
 **Per-dispatch.** The board's requeue/resume dialog carries a free-text "From

@@ -49,7 +49,7 @@ markdown_extensions:
 nav:
   - Home: index.md
   - Getting Started: getting-started.md
-  - Shuttle orchestration:
+  - shuttle orchestration:
       - Overview: shuttle/index.md
       - Installation: shuttle/installation.md
       - Constitutions: shuttle/constitutions.md

@@ -43,8 +43,8 @@ The renderer dispatches by file extension:
 | everything else, `.pdf` and `.html` included | fixed-height iframe |
 
 !!! note "Who does the rendering"
-    The Shuttle board's fiber viewer understands the `:::{embed}` directive —
-    see [the Shuttle layer](../shuttle/index.md). The `felt` CLI itself treats
+    The shuttle board's fiber viewer understands the `:::{embed}` directive —
+    see [the shuttle layer](../shuttle/index.md). The `felt` CLI itself treats
     the directive as ordinary body text. A plain markdown viewer or an Obsidian
     vault shows it as a literal block. Use it where the board (or your own
     renderer) reads it.
@@ -81,14 +81,14 @@ depth in one self-contained file. Keep it self-contained — base64 the images �
 so the report renders wherever the fiber is opened, including on a different
 machine.
 
-Shuttle workers follow a shape for these reports — current state, standing
+shuttle workers follow a shape for these reports — current state, standing
 findings, open questions, pointers to depth — rewritten whole each session,
 never appended. See
 [Optional: report.html](../shuttle/constitutions.md#optional-reporthtml).
 
-## Sent files (Shuttle only)
+## Sent files (shuttle only)
 
-A Shuttle worker can also push a file at you directly, with `SendUserFile`.
+A shuttle worker can also push a file at you directly, with `SendUserFile`.
 `felt hook event` records that push on the host's event stream
 (`~/.shuttle/events.jsonl`), and the board surfaces it two ways: a per-card
 sent-files trail in the fiber viewer, and the [Board

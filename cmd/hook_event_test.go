@@ -216,7 +216,7 @@ func TestEventMachinePrompt(t *testing.T) {
 
 // TestEventWriteGate: with no explicit path, the daemon's state directory is
 // the opt-in. Absent, the hook writes nothing AND creates nothing — a felt
-// user who never runs Shuttle gets no surprise ~/.shuttle.
+// user who never runs shuttle gets no surprise ~/.shuttle.
 func TestEventWriteGate(t *testing.T) {
 	home := isolateEvents(t)
 

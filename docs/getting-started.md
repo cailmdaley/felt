@@ -226,11 +226,11 @@ before it starts editing, and the `felt` and `shuttle` skills themselves. The
 agent then reads and writes the same store you do. See
 [Agent integration](agents.md).
 
-**See the store in a browser.** felt ships with [Shuttle](shuttle/index.md), an
+**See the store in a browser.** felt ships with [shuttle](shuttle/index.md), an
 optional daemon whose [board](shuttle/board.md) serves your fibers at
 `localhost:4000` — cards you can read, edit and rearrange, `[[wikilinks]]` you
 can follow, embedded plots and reports rendered in place, and views of where
-your time actually went. Shuttle also runs agents autonomously against fibers,
+your time actually went. shuttle also runs agents autonomously against fibers,
 but the board is worth having on its own. Re-run the install script with
 `SHUTTLE=1` to add the daemon, then point it at this store:
 
@@ -246,7 +246,7 @@ prebuilt daemon carrying its own Erlang runtime and the board bundle, so this
 adds no toolchain to your machine — it wants `tmux` and the `felt` you just
 installed, and nothing else.
 
-[Installing the Shuttle daemon](shuttle/installation.md) covers the rest,
+[Installing the shuttle daemon](shuttle/installation.md) covers the rest,
 including how to keep it running.
 
 **Keep reading.** [Fibers](concepts/fibers.md) covers the data model in full,

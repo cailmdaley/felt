@@ -73,9 +73,9 @@ felt ls -s all "jackknife"                           # search names, outcomes, f
 felt setup claude                                    # install the Claude Code plugin
 ```
 
-## Shuttle
+## shuttle
 
-The same repo ships **Shuttle**, an optional orchestration layer. Add a `shuttle:` block to a
+The same repo ships **shuttle**, an optional orchestration layer. Add a `shuttle:` block to a
 fiber's frontmatter to turn it into a *constitution* — a spec of a desired state. An Elixir/OTP
 daemon polls your felt stores. It launches one tmux worker per eligible constitution, and serves a
 board at `http://127.0.0.1:4000/` for watching and steering them. Workers stay attachable.
@@ -87,7 +87,7 @@ commits — into where the time actually went, and a fifth lays out every file a
 canvas of rendered pages. Details:
 [The board](https://cailmdaley.github.io/felt/shuttle/board/).
 
-Configure Shuttle from your home directory. `~/.config/felt/agents.json` layers your agents over the
+Configure shuttle from your home directory. `~/.config/felt/agents.json` layers your agents over the
 built-in set (`felt shuttle agents init` seeds it). `~/.config/felt/remotes.json` lists the remote
 daemons a hub aggregates (`felt shuttle remotes add`). Linux and macOS both run a single host —
 daemon, board, and workers — with the keep-alive installed as a systemd user unit or a launchd
@@ -119,7 +119,7 @@ Everything deeper lives at **<https://cailmdaley.github.io/felt/>**:
 - the full command reference and flags
 - agent integration — one plugin for Claude Code and Codex, its hooks and bundled skills
 - Obsidian compatibility — open a `.felt/` directory directly as an Obsidian vault
-- the Shuttle layer — constitutions, dispatch, the board, the HTTP API
+- the shuttle layer — constitutions, dispatch, the board, the HTTP API
 - installing and operating the daemon, including its sharp edges
 
 ## Contributing
@@ -130,6 +130,6 @@ welcome.
 
 ## License
 
-The felt CLI and the board UI are under the [MIT License](LICENSE). The Shuttle daemon (`lib/`)
+The felt CLI and the board UI are under the [MIT License](LICENSE). The shuttle daemon (`lib/`)
 contains code derived from OpenAI's Symphony under the [Apache License 2.0](LICENSE-APACHE),
 preserved in [`NOTICE`](NOTICE).

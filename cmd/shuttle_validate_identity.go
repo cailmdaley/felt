@@ -79,7 +79,7 @@ type daemonFiberRow struct {
 var validateIdentityCmd = &cobra.Command{
 	Use:   "validate-identity",
 	Short: "Validate federated fiber UID readiness across daemon feeds",
-	Long: `Queries the Shuttle daemon document surface and checks the
+	Long: `Queries the shuttle daemon document surface and checks the
 intrinsic-identity migration invariants:
 
   - /api/v1/fibers rows carry ULID uid values

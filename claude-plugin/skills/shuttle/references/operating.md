@@ -1,4 +1,4 @@
-# Operating Shuttle
+# Operating shuttle
 
 Lifecycle verbs, kanban semantics, and the triage paths for "why isn't my card doing what I expect."
 
@@ -23,7 +23,7 @@ Two kinds of row, and nothing else (`shouldIncludeInKanban` in `ui/src/board/Kan
 
 The board at `:4000` is five hotkey-switchable tabs — four windows over the same fibers and sessions, plus the Board, which is a different kind of surface. **Desk** is the kanban (below). **Day** lays fibers as lanes over a 6am→6am axis, with the rail zoomed to first-action→now rather than the full 24 hours. **Week** rows past days as ink rasters, today's row carries a gold seam, future rows are hollow. **Chronicle** draws fibers as multi-day lifelines across calendar days, under a strip of cycle bands.
 
-**Board** (hotkey `5`; `shelf` internally — the id, the storage keys and the module names all say shelf, and `?view=shelf` deep-links it) is not a window over time at all. It is the fleet's sent work on a canvas: everything a worker pushed with `SendUserFile` in the last month (`/api/v1/sent-files/all/composite`), each file a card that renders its own contents. A card is two layers — the FACE (name, fiber, age, kind) is synchronous and is the card's resting state, never a skeleton; the BODY (iframe, image, page) mounts when the card nears the viewport and is evicted when the board carries more live bodies than it can afford (`shelfLoad`, 16 live with hysteretic cutback). CARDS ARE HANDLES, NEVER FACTORIES: every gesture rearranges the canvas, nothing on a card makes another card. Nothing overlaps except a pile, which is one fiber's work gathered by the fiber lens. Reading happens in the Reader — the ↗ sends a file to one overlay window with its own tab strip, because Shuttle runs as a Safari dock web-app where every `window.open` would otherwise become a separate window.
+**Board** (hotkey `5`; `shelf` internally — the id, the storage keys and the module names all say shelf, and `?view=shelf` deep-links it) is not a window over time at all. It is the fleet's sent work on a canvas: everything a worker pushed with `SendUserFile` in the last month (`/api/v1/sent-files/all/composite`), each file a card that renders its own contents. A card is two layers — the FACE (name, fiber, age, kind) is synchronous and is the card's resting state, never a skeleton; the BODY (iframe, image, page) mounts when the card nears the viewport and is evicted when the board carries more live bodies than it can afford (`shelfLoad`, 16 live with hysteretic cutback). CARDS ARE HANDLES, NEVER FACTORIES: every gesture rearranges the canvas, nothing on a card makes another card. Nothing overlaps except a pile, which is one fiber's work gathered by the fiber lens. Reading happens in the Reader — the ↗ sends a file to one overlay window with its own tab strip, because shuttle runs as a Safari dock web-app where every `window.open` would otherwise become a separate window.
 
 **Two-state activity grammar.** Every raster spends exactly two pigments: solid for human steering, wash for agent work. There is no third "attention called" state — an idle nudge is not a state of the work, and an agent blocked on you reads as the **gap** on a live lane, which no pigment improves on. Effort is counted in the unit each side actually spends: human effort in messages sent and received (`you 14 · 9 back`), agent effort in minutes. Hover any mark for the actual words — transcript excerpts fetched from `/api/v1/moment`.
 
@@ -57,7 +57,7 @@ Column membership derives from felt `status` + `tempered` + `shuttle.kind` + tmu
 - **Scheduled**: an armed standing role between firings (`status: active`, no live worker) — it fires on its own cron, so it sits on the timeline at its next launch rather than in the Now lane.
 - **Pinned**: a resting `kind: pinned` role — the strip of perennial interfaces. A human starts it (Resume / strip → In-flight); once running it joins the unified lifecycle: a worker that deliberately hands off is relaunched fresh next tick (a long autonomous arc), a dirty death or idle exit parks it back to the strip, and a close-out lands in Awaiting review.
 - **In flight**: a live tmux worker (any kind), or an armed oneshot (`status: active` — even when blocked by deps; it flies when the dep clears).
-- **Awaiting review**: `status: closed`, `tempered` absent. Worker exited; Shuttle ignores it pending human verdict.
+- **Awaiting review**: `status: closed`, `tempered` absent. Worker exited; shuttle ignores it pending human verdict.
 - **Tempered**: `status: closed`, `tempered: true`. Human-accepted (oneshot terminus).
 - **Composted**: `status: closed`, `tempered: false`. Human-rejected (mooted, superseded). The block is preserved as historical record.
 

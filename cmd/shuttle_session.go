@@ -46,7 +46,7 @@ func shuttleAddressFiber(query string) (*felt.Felt, error) {
 var sessionNameCmd = &cobra.Command{
 	Use:   "session-name <fiber>",
 	Short: "Print the canonical tmux session name for a fiber",
-	Long: `Resolves the fiber and prints the tmux session name Shuttle uses for its
+	Long: `Resolves the fiber and prints the tmux session name shuttle uses for its
 worker (<leaf>-<uid>-shuttle, or the legacy <leaf>-shuttle when the fiber has no
 intrinsic uid).`,
 	Args: cobra.ExactArgs(1),
@@ -73,7 +73,7 @@ intrinsic uid).`,
 var attachCmd = &cobra.Command{
 	Use:   "attach <fiber>",
 	Short: "Attach to a running worker's tmux session",
-	Long: `Resolves the fiber to Shuttle's canonical tmux session name and execs
+	Long: `Resolves the fiber to shuttle's canonical tmux session name and execs
 'tmux attach'. A worker may be live under either the uid-keyed or the legacy
 leaf-only name; attach picks whichever exists, preferring the canonical form.
 Exits with a clear error if no session is live.`,

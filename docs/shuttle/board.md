@@ -168,7 +168,7 @@ column.*
 
 Everything on these pages is joined through the ledgers. A minute or a commit
 that does not resolve to a fiber the board carries is not drawn at all, so work
-started outside Shuttle is invisible here — and nothing is ever attributed by
+started outside shuttle is invisible here — and nothing is ever attributed by
 reading a `slug:` prefix out of a commit subject or a directory name.
 
 ## Board — what the work produced
@@ -189,7 +189,7 @@ pages is the work, and you find the one you want by recognising it.
 - **Nothing overlaps, except a pile** — one fiber's work gathered by the fiber
   lens.
 - **Reading happens in the Reader.** The ↗ sends a file to one overlay window
-  with its own tab strip, because Shuttle runs as a dock web-app where every
+  with its own tab strip, because shuttle runs as a dock web-app where every
   `window.open` would otherwise become a separate window.
 
 The feed is `/api/v1/sent-files/all` (with a `/composite` sibling that fans in

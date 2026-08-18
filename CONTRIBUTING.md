@@ -3,7 +3,7 @@
 Thank you for your interest in felt.
 
 felt is one repo with two code artifacts — the **felt CLI** (Go; the data layer,
-including the `felt shuttle <verb>` subcommands) and the **Shuttle daemon**
+including the `felt shuttle <verb>` subcommands) and the **shuttle daemon**
 (Elixir/OTP Mix release; the dispatcher) — plus the served board **UI**
 (TypeScript; a kanban desk plus four temporal views). See `AGENTS.md` for the full architecture and operator guide.
 
@@ -18,7 +18,7 @@ make build                    # both (CLI + daemon release)
 ```
 
 Requirements: Go 1.23+, Erlang/OTP 28+, Elixir 1.19+. Working on the felt CLI
-alone needs only Go. `tmux` matters once you touch the Shuttle daemon or its
+alone needs only Go. `tmux` matters once you touch the shuttle daemon or its
 dispatch path — it launches each worker in a tmux session. Node 22+ is needed to
 build the UI bundle (`cd ui && npm run build`) and to run the board's test
 suite, so `make test` needs it too.
@@ -55,7 +55,7 @@ Before opening a PR, verify:
 - `~/loom` is not a personal path here: it is the deliberate running example for
   a cross-project store (see the docs site). Leave it in place; substitute your
   own store path when following the docs.
-- Felt owns the agent registry — the daemon reads the already-resolved record
+- felt owns the agent registry — the daemon reads the already-resolved record
   off felt's `shuttle.resolved.agent` JSON and shells `felt shuttle agents`; do
   not add a parallel registry in Elixir config or Go source.
 
@@ -68,7 +68,7 @@ belong in a fork or a `Shuttle.WorkSource` adapter once that abstraction lands.
 
 ## Opening issues
 
-- **Bugs:** include steps to reproduce. For a Shuttle/daemon bug, also include
+- **Bugs:** include steps to reproduce. For a shuttle/daemon bug, also include
   the output of `bin/shuttle snapshot`; a felt-CLI-only bug report doesn't need
   it.
 - **Features:** describe the problem, not just the solution. A concrete
@@ -77,6 +77,6 @@ belong in a fork or a `Shuttle.WorkSource` adapter once that abstraction lands.
 ## License
 
 By contributing, you agree that your contributions are licensed under the
-repository's MIT license. Note that the Shuttle daemon (`lib/`) contains code
+repository's MIT license. Note that the shuttle daemon (`lib/`) contains code
 derived from OpenAI's Symphony under the Apache License 2.0, preserved in
 `NOTICE` and `LICENSE-APACHE`.

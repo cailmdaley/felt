@@ -54,7 +54,7 @@ serves as the general inverse.
     interactive Codex session shows a review screen for felt's; accept it once
     and the setting persists. Until you do, the skills load but the hooks stay
     dormant — no `SessionStart` fiber context, and nothing recorded for
-    Shuttle's activity stream. A headless `codex exec` session can't show the
+    shuttle's activity stream. A headless `codex exec` session can't show the
     prompt, so trust felt's hooks from an interactive session first.
 
 `install.sh` (the curl installer) runs both commands automatically for whichever
@@ -82,7 +82,7 @@ hooks.
   bodies, additional YAML fields, session mining, maintenance passes.
 - **shuttle** — the dispatch practice: authoring constitutions, worker
   dispatch, operating the board. Only relevant once you're using the
-  optional [Shuttle](shuttle/index.md) layer.
+  optional [shuttle](shuttle/index.md) layer.
 
 Skills activate the way any Claude Code / Codex skill does — by the harness
 matching the user's request against the skill's description. `felt setup
@@ -96,7 +96,7 @@ plugin.
 | `session.sh` | `SessionStart` | Wraps `felt session`'s plain-text context (active + recently-touched fibers) in the harness's `additionalContext` envelope |
 | `remind.sh` | `PreToolUse` | Gates the first non-skill tool call in a felt-enabled project until the felt skill has activated this session; a pass-through everywhere else |
 | `touch.sh` | `PostToolUse` (Edit/Write/MultiEdit) | Stamps a fiber's `updated-at` when the agent edits its markdown file directly, so hand-edits count toward recency the same as `felt edit` does |
-| `event.sh` | `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `Stop`, `SubagentStop`, `Notification`, `SessionEnd` | Appends one JSON line per event to the Shuttle event stream (`~/.shuttle/events.jsonl`), which the daemon reads for activity ranking and the sent-files trail; writes nothing unless `~/.shuttle` exists |
+| `event.sh` | `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `Stop`, `SubagentStop`, `Notification`, `SessionEnd` | Appends one JSON line per event to the shuttle event stream (`~/.shuttle/events.jsonl`), which the daemon reads for activity ranking and the sent-files trail; writes nothing unless `~/.shuttle` exists |
 
 The logic lives in the binary, not the script. `remind.sh`, `touch.sh`, and
 `event.sh` each shim a single line over `felt hook pretool`, `felt hook

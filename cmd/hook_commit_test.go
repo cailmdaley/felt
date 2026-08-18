@@ -283,7 +283,7 @@ func TestCommitDedupe(t *testing.T) {
 
 // TestCommitWriteGate: with no explicit path, the daemon's state directory is
 // the opt-in. Absent, the hook writes nothing AND creates nothing — a felt user
-// who never runs Shuttle gets no surprise ~/.shuttle.
+// who never runs shuttle gets no surprise ~/.shuttle.
 func TestCommitWriteGate(t *testing.T) {
 	home := isolateCommits(t)
 	repo := gitRepo(t, "gated")

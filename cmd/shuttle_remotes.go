@@ -11,7 +11,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// The remote-daemon fleet: which other Shuttle daemons this host knows about,
+// The remote-daemon fleet: which other shuttle daemons this host knows about,
 // what local port each one's SSH tunnel lands on, and how to reach them.
 //
 // This is the Go half of a two-reader contract. `Shuttle.Remotes` (Elixir) reads
@@ -31,7 +31,7 @@ import (
 // a second grammar in two languages would always be a lossy subset.
 
 const (
-	// defaultRemoteDaemonPort is the port a Shuttle daemon binds on its OWN
+	// defaultRemoteDaemonPort is the port a shuttle daemon binds on its OWN
 	// host. The tunnel forwards <local port> → localhost:<remote_port> there.
 	defaultRemoteDaemonPort = 4000
 
@@ -388,8 +388,8 @@ var (
 
 var remotesCmd = &cobra.Command{
 	Use:   "remotes",
-	Short: "Inspect and edit the remote Shuttle daemon fleet",
-	Long: `The fleet file lists the other Shuttle daemons this host aggregates:
+	Short: "Inspect and edit the remote shuttle daemon fleet",
+	Long: `The fleet file lists the other shuttle daemons this host aggregates:
 one name, one local tunnel port, and how to reach each.
 
 The daemon reads the same file directly — this command edits and validates it,

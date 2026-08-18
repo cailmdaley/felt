@@ -68,7 +68,7 @@ people.
 | `felt hook session` | Emit the SessionStart `additionalContext` envelope |
 | `felt hook pretool` | PreToolUse gate: deny non-felt tool calls until the felt skill activates |
 | `felt hook posttool` | PostToolUse: stamp `updated-at` when an agent edits a fiber file directly |
-| `felt hook event` | Append one harness hook event to the host-local Shuttle activity stream (`~/.shuttle/events.jsonl`) |
+| `felt hook event` | Append one harness hook event to the host-local shuttle activity stream (`~/.shuttle/events.jsonl`) |
 
 ## `felt shuttle` (dispatch layer)
 
@@ -143,5 +143,5 @@ untouched by any of this.
 !!! note
     `felt shuttle remotes`, `tunnels`, `validate-identity`, `mark-runtime`, and
     `migrate-runtime` serve daemon and fleet plumbing. An adopter running
-    Shuttle solo will not need them — see
+    shuttle solo will not need them — see
     [Honest scoping](../shuttle/index.md#honest-scoping).

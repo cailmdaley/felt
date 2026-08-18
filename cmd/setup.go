@@ -61,7 +61,7 @@ Registers the felt plugin marketplace and installs the felt plugin from
 it. The plugin bundles the felt skill plus four hooks: SessionStart and
 PreToolUse surface active fibers and gate non-felt tool use, PostToolUse
 stamps updated-at on a directly edited fiber, and an activity-event hook
-records harness events for Shuttle (writing nothing unless ~/.shuttle
+records harness events for shuttle (writing nothing unless ~/.shuttle
 exists). Idempotent — re-running is safe.
 
 By default, registers ` + marketplaceRepo + ` directly from GitHub —
@@ -111,7 +111,7 @@ var setupCodexCmd = &cobra.Command{
 
 Registers the felt plugin marketplace and installs the felt plugin from
 it. The plugin bundles the felt and shuttle skills plus the hooks that
-surface active fibers and record harness activity for Shuttle.
+surface active fibers and record harness activity for shuttle.
 Idempotent — re-running is safe.
 
 By default, registers ` + marketplaceRepo + ` directly from GitHub.

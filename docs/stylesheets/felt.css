@@ -1,7 +1,7 @@
 /* Pigment & Parchment — the felt documentation theme.
  *
  * felt has three surfaces a human looks at: a fiber's report.html, the
- * Shuttle board, and these docs. The first two already agree; this file is
+ * shuttle board, and these docs. The first two already agree; this file is
  * how the third joins them, so the docs read as the same product rather
  * than as a Material site that happens to describe one.
  *
@@ -129,7 +129,7 @@
 /* ══ DARK — parchment on ink ═══════════════════════════════════════════
  *
  * READ THIS BEFORE CHANGING A VALUE HERE. The light scheme above is
- * transcribed; this one is authored. The Shuttle board has no dark mode
+ * transcribed; this one is authored. The shuttle board has no dark mode
  * and no theme toggle — Pigment & Parchment is a single fixed cream
  * palette — so there is no upstream to copy and no hex below can be
  * checked against a source file. Material ships the toggle regardless, so

@@ -2,28 +2,28 @@
 name: shuttle
 description: >
   Use this skill in any of these situations.
-  **Worker dispatch:** the first user message says Shuttle dispatched,
+  **Worker dispatch:** the first user message says shuttle dispatched,
   resumed, or spawned you ("The orchestration system Shuttle dispatched
   you on this fiber", "Shuttle capture session", …) — you're the worker
   realizing that fiber.
   **Authoring:** the user mentions a **constitution** (writing, drafting,
   "stash this as a constitution", "shuttle this", "let's shuttle <X>"), or
-  names a **Shuttle agent** by registry id (`claude-opus`, `claude-fable`,
+  names a **shuttle agent** by registry id (`claude-opus`, `claude-fable`,
   `codex`, `claude-sonnet`, … — `felt shuttle agents` lists them) in a context
   that implies dispatch. The phrase **"shuttle [with] <model-name>"** is
   the canonical author trigger.
-  **Operator questions:** the user asks about Shuttle itself, the kanban
+  **Operator questions:** the user asks about shuttle itself, the kanban
   board, why a card is or isn't appearing, agent selection, or how to
   prepare work for autonomous follow-through.
 ---
 
-# Shuttle
+# shuttle
 
-**Activate the `felt` skill too if it isn't already active.** Shuttle operates *on* fibers — every move below (read the constitution, update outcome, file findings) goes through felt.
+**Activate the `felt` skill too if it isn't already active.** shuttle operates *on* fibers — every move below (read the constitution, update outcome, file findings) goes through felt.
 
 **The doctrine: anything that needs to be done gets a shuttle block.** The board — Desk *and* Chronicle — admits exactly two kinds of row: fibers carrying a `shuttle:` block, and cycle fibers. A task-shaped fiber without a block is invisible to the board by design; a bare `due:` is a date, not a commitment the board can act on (no constitution to dispatch, no lifecycle verb that takes it), so such a fiber gets *promoted* — install the block — rather than shown. Installing a block on an `open` fiber costs nothing: it makes a Drafts card and dispatches nothing until you launch it. So the move for a to-do is always the same — make it a shuttled thing.
 
-Shuttle turns fibers into autonomous work. A fiber carrying a `shuttle:` block is a **constitution** — a spec whose body describes a desired state, not a plan. The daemon polls the fiber tree and keeps one tmux **worker** per eligible fiber (carries the block, felt `status: active`). A worker drives toward the desired state, exits at a clean checkpoint with a handoff, and the daemon dispatches fresh workers while the gap remains — work commonly spans sessions. Realization is asymptotic, not a checklist emptied; the constitution itself is amended as the world changes.
+shuttle turns fibers into autonomous work. A fiber carrying a `shuttle:` block is a **constitution** — a spec whose body describes a desired state, not a plan. The daemon polls the fiber tree and keeps one tmux **worker** per eligible fiber (carries the block, felt `status: active`). A worker drives toward the desired state, exits at a clean checkpoint with a handoff, and the daemon dispatches fresh workers while the gap remains — work commonly spans sessions. Realization is asymptotic, not a checklist emptied; the constitution itself is amended as the world changes.
 
 The human's surfaces: the **board** (served by the daemon at `:4000`) is a pure view, with five hotkey-switchable tabs — **Desk** (the kanban, described below), **Day** (fiber lanes over a 6am→6am axis, one lane per fiber with two clocks — solid marks where you were steering, wash where an agent was working), **Week** (past days as rows of ink rasters, today marked by a gold seam, future rows hollow), **Chronicle** (fibers as multi-day lifelines across calendar days, with **cycles/eras** as named bands over the top — drag across days to draw one), and — sharing the surface's name — the **Board** tab (every artifact a worker pushed with `SendUserFile` in the last month, each file rendered as a card on a canvas rather than listed as a filename; the ↗ opens it in the Reader overlay). The first four view fibers and sessions; the Board views sent files. Use Desk to stash ideas, launch dispatches, steer workers, review what comes back; use Day/Week/Chronicle to see where time actually went; use the Board tab to find what came back by recognising it. The **agent registry** (`felt shuttle agents`) maps a fiber's `shuttle.agent` to the CLI + model each dispatch runs. The daemon ships with felt; the operator guide lives at <https://cailmdaley.github.io/felt/> (AGENTS.md in the felt repo, for contributors).
 
@@ -103,7 +103,7 @@ The `## Status` block plus the constitution recovers most of a warm world-model 
 
 **Pointers, not snapshots.** If you learn something stable, update the constitution — the lede, Desired State, or the earned section where it belongs.
 
-**Prefer doing the work.** You have authority. Trust the constitution, don't ask permission, and don't avoid ambitious moves just because they span sessions — Shuttle redispatches. When the work involves a load-bearing model choice or a capability-removing pivot, surface alternatives in the artifact rather than withholding the work to ask: a "considered alternatives" note in the body or outcome beats filing a question fiber and exiting. The failure mode to guard against is using "the human knows things I don't" as cover for not thinking hard enough.
+**Prefer doing the work.** You have authority. Trust the constitution, don't ask permission, and don't avoid ambitious moves just because they span sessions — shuttle redispatches. When the work involves a load-bearing model choice or a capability-removing pivot, surface alternatives in the artifact rather than withholding the work to ask: a "considered alternatives" note in the body or outcome beats filing a question fiber and exiting. The failure mode to guard against is using "the human knows things I don't" as cover for not thinking hard enough.
 
 **Questions go where they'll be seen.** In `outcome:` (kanban card) or `## Status` (the next reader's landing) — open `-t question` fibers sediment unanswered.
 

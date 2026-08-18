@@ -52,7 +52,7 @@ daemon starts a fresh worker next tick, and it lands on your `## Status`.
 
 ### Closing parks the work
 
-Shuttle obeys the vocabulary literally. Know which word does what.
+shuttle obeys the vocabulary literally. Know which word does what.
 
 | You say | The worker does | Next |
 |---|---|---|
@@ -122,7 +122,7 @@ in this order (`eligible?/2` and `dispatch_gates_pass?/3` in
 2. It carries a `shuttle:` block. That block alone defines "shuttle-managed";
    no tag predicate exists.
 3. `shuttle.host` equals this daemon's own host id.
-4. Felt-native `status` is `active`.
+4. felt-native `status` is `active`.
 5. No worker is already running or claimed for it.
 6. The resume-loop circuit breaker is closed.
 7. The boot quarantine is released.
@@ -130,7 +130,7 @@ in this order (`eligible?/2` and `dispatch_gates_pass?/3` in
 9. Every `depends_on` target exists and is `tempered: true`.
 
 Configured stores come from `FELT_STORES` (comma-separated) or the persisted
-registry at `~/.config/felt/stores.json`. Shuttle assumes no default store.
+registry at `~/.config/felt/stores.json`. shuttle assumes no default store.
 
 **The circuit breaker** (7) exists because a worker that dies on startup would
 otherwise be relaunched forever. Five consecutive worker deaths, each under 90

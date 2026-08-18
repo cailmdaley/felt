@@ -1,6 +1,6 @@
 # Constitution
 
-Drafting a constitution — a fiber spec describing a desired state for autonomous iteration. This is the ideating process (see SKILL.md and `ideating.md`) applied to a specific artifact type: a living document that an iteration runner re-reads with fresh context until the work is done. The usual runner is Shuttle, felt's own dispatch layer (the shuttle skill carries that practice); the constitution itself is just a tagged fiber, and any runner can work from it.
+Drafting a constitution — a fiber spec describing a desired state for autonomous iteration. This is the ideating process (see SKILL.md and `ideating.md`) applied to a specific artifact type: a living document that an iteration runner re-reads with fresh context until the work is done. The usual runner is shuttle, felt's own dispatch layer (the shuttle skill carries that practice); the constitution itself is just a tagged fiber, and any runner can work from it.
 
 ---
 
@@ -63,7 +63,7 @@ Repeat until it feels solid. It does not have to be complete; live uncertainties
 
 ### 4. Launch
 
-When approved, hand the fiber to its runner. The usual one is **Shuttle**: `felt shuttle install <fiber> --project-dir "$PWD"` writes the `shuttle:` block and the daemon dispatches workers against it (see the shuttle skill's authoring reference for drafts-vs-dispatch and agent selection). In-session subagents/workflows cover within-session iteration.
+When approved, hand the fiber to its runner. The usual one is **shuttle**: `felt shuttle install <fiber> --project-dir "$PWD"` writes the `shuttle:` block and the daemon dispatches workers against it (see the shuttle skill's authoring reference for drafts-vs-dispatch and agent selection). In-session subagents/workflows cover within-session iteration.
 
 The constitution fiber stays editable while iteration runs. Successive iterations re-read it each cycle, so refinements between iterations are normal.
 

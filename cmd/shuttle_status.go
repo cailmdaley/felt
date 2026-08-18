@@ -80,7 +80,7 @@ the CLI just renders that response. Rows from a remote carry an "origin" column;
 stale remotes (the registry hasn't heard back recently) are flagged "[stale]".
 
 Other flags:
-  --include-orphans  also list live Shuttle tmux sessions that no longer map to a
+  --include-orphans  also list live shuttle tmux sessions that no longer map to a
                      shuttle: facet (rare; useful after manual cleanup).
   --json             emit an array of objects instead.`,
 	Args: cobra.MaximumNArgs(1),
@@ -167,7 +167,7 @@ Other flags:
 var psCmd = &cobra.Command{
 	Use:   "ps",
 	Short: "Live tmux worker sessions",
-	Long:  "Prints one line per live Shuttle tmux worker session (and the fiber it owns, when resolvable).",
+	Long:  "Prints one line per live shuttle tmux worker session (and the fiber it owns, when resolvable).",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		live := liveTmuxSessions()
@@ -492,7 +492,7 @@ func shuttleTruncateID(s string, n int) string {
 
 func registerShuttleStatusFlags() {
 	statusCmd.Flags().BoolVar(&statusIncludeOrphans, "include-orphans", false,
-		"Also list live Shuttle tmux sessions with no matching shuttle: facet")
+		"Also list live shuttle tmux sessions with no matching shuttle: facet")
 	statusCmd.Flags().BoolVar(&statusAll, "all", false,
 		"Show local plus all configured remotes (queries daemon /api/v1/state/composite)")
 	statusCmd.Flags().StringVar(&statusRemote, "remote", "",

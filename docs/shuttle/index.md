@@ -1,7 +1,7 @@
-# Shuttle
+# shuttle
 
-Shuttle dispatches coding agents against felt fibers. Felt keeps those fibers as
-markdown files in a directory. Shuttle adds one optional frontmatter block, plus
+shuttle dispatches coding agents against felt fibers. felt keeps those fibers as
+markdown files in a directory. shuttle adds one optional frontmatter block, plus
 a daemon that acts on it.
 
 Nothing else about felt changes. Leave the block out and the fiber stays a plain
@@ -9,7 +9,7 @@ note. Add the block and the daemon can hand the fiber to a coding agent as a
 **constitution**.
 
 !!! note "You can skip this whole section"
-    Felt works without Shuttle. The CLI runs as a Go binary over a markdown
+    felt works without shuttle. The CLI runs as a Go binary over a markdown
     tree. If you want a notes-and-tasks store, stop at
     [Concepts](../concepts/fibers.md) — you lose nothing.
 
@@ -27,7 +27,7 @@ shuttle:
 ---
 ```
 
-Those keys cover the whole dispatch interface. Felt validates the block's shape
+Those keys cover the whole dispatch interface. felt validates the block's shape
 and otherwise treats it as opaque frontmatter. Remove the daemon and you still
 have a readable, greppable, version-controlled markdown file.
 
@@ -80,7 +80,7 @@ prior transcript.
   started through the `bin/shuttle` shim. One process, bound to
   `127.0.0.1:4000`. It polls, dispatches, and serves an HTTP API.
 - **tmux** — hosts the worker process and reports its liveness. Not optional.
-  tmux owns the worker process; Shuttle owns only the watcher. So restarting the
+  tmux owns the worker process; shuttle owns only the watcher. So restarting the
   daemon leaves live workers running — the daemon re-adopts them on boot.
 - **The board** — a TypeScript UI, served by the daemon at
   `http://127.0.0.1:4000/`. A kanban desk plus four more views (Day, Week,

@@ -19,7 +19,7 @@ import (
 // `felt hook event` — the host-local activity stream
 // ----------------------------------------------------------------------------
 //
-// Appends one JSONL line per harness hook event to the stream the Shuttle
+// Appends one JSONL line per harness hook event to the stream the shuttle
 // daemon tails (see cmd/shuttle_events.go for the path and the write gate).
 // Two readers consume it, and only these fields:
 //
@@ -40,7 +40,7 @@ var hookEventCmd = &cobra.Command{
 	Short: "Record one harness hook event on the host-local activity stream",
 	Long: `Reads any hook payload from stdin and appends one JSON line to the
 host-local event stream (SHUTTLE_EVENTS_FILE, else $SHUTTLE_DATA_DIR/events.jsonl,
-else ~/.shuttle/events.jsonl). The Shuttle daemon tails that stream to rank
+else ~/.shuttle/events.jsonl). The shuttle daemon tails that stream to rank
 in-flight workers by idle time and to render the sent-files trail on each card.
 
 Writes only when the stream's parent directory already exists — the daemon's

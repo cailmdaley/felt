@@ -1,6 +1,6 @@
 # Daemon HTTP API
 
-The Shuttle daemon binds `127.0.0.1:4000` and serves its whole surface under
+The shuttle daemon binds `127.0.0.1:4000` and serves its whole surface under
 `/api/v1`. This page is the route inventory.
 
 !!! warning "An operator surface, not a stability contract"

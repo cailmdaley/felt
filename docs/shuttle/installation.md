@@ -1,4 +1,4 @@
-# Installing the Shuttle daemon
+# Installing the shuttle daemon
 
 The daemon runs one of two ways, and the choice is about what you want on the
 machine.
@@ -16,7 +16,7 @@ tmux sessions, and the daemon shells out to `felt` for every store walk and
 every write.
 
 !!! warning "This path is currently fleet-oriented"
-    Shuttle runs on one person's machines: a macOS hub and a few HPC login
+    shuttle runs on one person's machines: a macOS hub and a few HPC login
     nodes, and it is still shaped around that — see
     [Honest scoping](index.md#honest-scoping). [Sharp edges](#sharp-edges) below
     names each rough patch you will actually trip over.
@@ -564,7 +564,7 @@ The daemon polls felt stores. It resolves them in this order:
 2. `~/.config/felt/stores.json` — the persisted registry (override the path with
    `FELT_STORES_FILE`).
 
-**Shuttle assumes no default store.** An unset variable and an absent registry
+**shuttle assumes no default store.** An unset variable and an absent registry
 resolve to an empty list. The daemon then polls nothing: it boots, binds
 `:4000`, serves an empty board, and dispatches nothing. `install-agent` requires
 `--felt-stores` precisely so a supervised daemon never boots into that state by
@@ -683,7 +683,7 @@ on `Bash`, at the one moment the pairing is certain: `felt hook commit` reads
 the commit back whenever the command ran a `git commit`, and appends a line.
 Installing the plugin (`felt setup claude`, `felt setup codex` — bootstrap
 step 5) is all it takes. Like the event stream it writes only when `~/.shuttle`
-already exists, so a felt user who does not run Shuttle acquires nothing. There
+already exists, so a felt user who does not run shuttle acquires nothing. There
 is no git-log fallback, so commits made outside an agent session never appear.
 Override the path with `SHUTTLE_COMMITS_FILE`; see [The commit
 ledger](telemetry.md#the-commit-ledger) for the line format.
@@ -708,7 +708,7 @@ bin/shuttle release
 **A worker needs `project_dir`, `host`, and `active`.** You set these three
 gates by hand on the fiber's `shuttle:` block. All three fail quietly, by simply
 not dispatching. `host` is strict: absent or empty leaves the fiber unowned and
-ineligible on *every* daemon. Shuttle offers no `"local"` default and no
+ineligible on *every* daemon. shuttle offers no `"local"` default and no
 wildcard. The host id comes from `SHUTTLE_HOST`, else the file
 `~/.shuttle/host` (override the path with `SHUTTLE_HOST_FILE`), else the system
 hostname. For the full ordered predicate list the daemon evaluates, see

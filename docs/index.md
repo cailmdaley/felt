@@ -59,7 +59,7 @@ Metadata stays small on purpose. Everything except `name` is optional. `status`
 is opt-in. felt preserves any frontmatter key it does not own, so downstream
 tools can layer their own schema without felt claiming it.
 
-## felt and Shuttle
+## felt and shuttle
 
 This repository builds two things.
 
@@ -69,7 +69,7 @@ update` and `felt setup` reach the network, and they fetch from GitHub on
 demand; the store itself never leaves your disk. If you want a fiber tracker
 and agent memory, you can stop at felt.
 
-**Shuttle** adds an optional orchestration layer on top. Give a fiber a
+**shuttle** adds an optional orchestration layer on top. Give a fiber a
 `shuttle:` frontmatter block and it becomes a *constitution* — a spec of a
 desired state. An Elixir/OTP daemon polls the tree. It launches one tmux worker
 per eligible fiber, and serves a [board](shuttle/board.md) at
@@ -77,7 +77,7 @@ per eligible fiber, and serves a [board](shuttle/board.md) at
 views for seeing where the time went. Workers hand off to each other through
 the fiber, so a piece of work can span many sessions.
 
-Shuttle stays the more experimental half, and it runs the author's machines
+shuttle stays the more experimental half, and it runs the author's machines
 every day. The daemon installs the way the CLI does:
 
 ```bash
@@ -88,7 +88,7 @@ That fetches a prebuilt daemon for your platform, carrying its own Erlang
 runtime and the board bundle, so the host needs no toolchain to run it. (The
 variable goes after the pipe, on `sh`. In front of `curl` it sets curl's
 environment and the script never sees it.) What is still rough is operating it:
-see [Honest scoping](shuttle/index.md#honest-scoping). Ignore Shuttle and felt
+see [Honest scoping](shuttle/index.md#honest-scoping). Ignore shuttle and felt
 behaves the same.
 
 ## Where to go next
@@ -102,13 +102,13 @@ behaves the same.
 | Attach plots, PDFs, and HTML reports to a fiber | [Companion files](concepts/companions.md) |
 | Search across every project at once | [Cross-project stores](concepts/cross-project.md) |
 | Wire up Claude Code or Codex | [Agent integration](agents.md) |
-| See Shuttle orchestration | [Shuttle](shuttle/index.md) |
+| See shuttle orchestration | [shuttle](shuttle/index.md) |
 | Look up a command | [CLI reference](reference/cli.md) |
 
 ## License
 
 The felt CLI and the board UI ship under the
-[MIT License](https://github.com/cailmdaley/felt/blob/main/LICENSE). The Shuttle
+[MIT License](https://github.com/cailmdaley/felt/blob/main/LICENSE). The shuttle
 daemon (`lib/`) contains code derived from OpenAI's Symphony under the
 [Apache License 2.0](https://github.com/cailmdaley/felt/blob/main/LICENSE-APACHE),
 preserved in [`NOTICE`](https://github.com/cailmdaley/felt/blob/main/NOTICE).

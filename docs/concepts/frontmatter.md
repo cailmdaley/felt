@@ -80,9 +80,9 @@ none of them.
 | Key | Read by | Meaning |
 |---|---|---|
 | `inputs.from` | felt | A data-flow edge to another fiber |
-| tag `cycle` + `start:` / `due:` | the Shuttle board | A named span of calendar time, drawn as a band. Written by dragging in the Chronicle |
-| `horizon: stashed` | the Shuttle board | Takes a card off the Now board to Resting. A `due:` day at or past today overrides it and pulls the card back |
-| `cold: true` | the Shuttle board | Marks a stashed card *held open*: its Resting cluster renders dimmer, wears a `held open` tag, and sorts below the warm clusters. Cleared alongside `horizon` when the card returns to the desk |
+| tag `cycle` + `start:` / `due:` | the shuttle board | A named span of calendar time, drawn as a band. Written by dragging in the Chronicle |
+| `horizon: stashed` | the shuttle board | Takes a card off the Now board to Resting. A `due:` day at or past today overrides it and pulls the card back |
+| `cold: true` | the shuttle board | Marks a stashed card *held open*: its Resting cluster renders dimmer, wears a `held open` tag, and sorts below the warm clusters. Cleared alongside `horizon` when the card returns to the desk |
 
 The board writes these itself, through the daemon, which shells the same `felt
 edit --set` you would type. See [Cycles and eras](../shuttle/cycles.md) and

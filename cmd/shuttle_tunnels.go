@@ -14,7 +14,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// felt shuttle tunnels — hub-side operator tooling that maps the remote Shuttle
+// felt shuttle tunnels — hub-side operator tooling that maps the remote shuttle
 // daemons onto local ports via supervised autossh tunnels (so the daemon's
 // owner-routing can reach a remote's :4000 over an SSH LocalForward). It is the
 // typed setup command for the cross-host network; the running daemon owns the
@@ -110,8 +110,8 @@ type tunnelSupervisor struct {
 
 var tunnelsCmd = &cobra.Command{
 	Use:   "tunnels",
-	Short: "Install supervised autossh tunnels for Shuttle remotes",
-	Long: `Manage the hub-side autossh tunnels that map remote Shuttle daemons
+	Short: "Install supervised autossh tunnels for shuttle remotes",
+	Long: `Manage the hub-side autossh tunnels that map remote shuttle daemons
 onto local ports. The generated jobs go to the host's own supervisor: launchd
 LaunchAgents in ~/Library/LaunchAgents on macOS, systemd --user units in
 ~/.config/systemd/user on Linux. Single-host use needs no tunnels at all.
@@ -130,7 +130,7 @@ Examples:
 
 var tunnelsInstallCmd = &cobra.Command{
 	Use:   "install [name ...]",
-	Short: "Write and optionally start the supervisor jobs for Shuttle tunnels",
+	Short: "Write and optionally start the supervisor jobs for shuttle tunnels",
 	Args:  cobra.ArbitraryArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return installTunnels(args)

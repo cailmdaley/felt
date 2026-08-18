@@ -77,7 +77,7 @@ association structural, and the line outlives the session.
 
 Everything on the time views is joined through it. A minute that does not
 resolve to a fiber the board carries is not drawn at all, so work started
-outside Shuttle is invisible there.
+outside shuttle is invisible there.
 
 ## The commit ledger
 
@@ -92,7 +92,7 @@ back, dedupes against the tail of the ledger, and appends one line. Installing
 the plugin (`felt setup claude`, `felt setup codex`) is all it takes.
 
 The file stays absent on a host with no `~/.shuttle` — a felt user who does not
-run Shuttle acquires nothing. There it is written, the commit strip fills, the
+run shuttle acquires nothing. There it is written, the commit strip fills, the
 Chronicle narrates per fiber, and a [cycle](cycles.md)'s look back has a trail
 to read. There is no git log fallback: only recorded, joined commits count, so
 commits made outside an agent session do not appear.

@@ -47,7 +47,7 @@ var shuttleContractCmd = &cobra.Command{
 	Use:   "contract",
 	Short: "Print the daemon-shelled CLI contract level (daemon-facing)",
 	Long: `Prints ShuttleContractLevel — a bare integer, nothing else, exit 0 — the
-version of the flag/output surface the Shuttle daemon depends on when it shells
+version of the flag/output surface the shuttle daemon depends on when it shells
 mark-runtime, reopen, and the other lifecycle verbs. The daemon shells this at
 Poller.init and compares it to its own baked expectation, so a stale CLI
 installed alongside a newer daemon (or vice versa) is caught once at boot
