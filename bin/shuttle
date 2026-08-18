@@ -63,15 +63,26 @@ api_post() {
 # to keep in sync.
 ROOT=$(dirname -- "$SELF_DIR")
 
-AGENT_LABEL=io.shuttle.daemon
-AGENT_PLIST="$HOME/Library/LaunchAgents/$AGENT_LABEL.plist"
+# The supervisor's identity, overridable with --label so a SECOND instance can
+# be supervised beside the real one. That is what makes this path testable on a
+# machine already running a daemon, rather than only renderable — a second
+# instance also needs its own --port, or the two fight over 4000.
+AGENT_LABEL="${AGENT_LABEL:-io.shuttle.daemon}"
 # The Linux analog: a systemd *user* unit (the daemon runs as you, reads your
 # stores, writes your ~/.shuttle — nothing here wants root). Named for the tmux
 # session the respawn loop uses, so one name means "the supervised daemon" on
 # either path.
-AGENT_UNIT_NAME=shuttle-daemon.service
 AGENT_UNIT_DIR="$HOME/.config/systemd/user"
-AGENT_UNIT="$AGENT_UNIT_DIR/$AGENT_UNIT_NAME"
+# Recomputed whenever --label changes, since the label names both files.
+agent_paths() {
+  AGENT_PLIST="$HOME/Library/LaunchAgents/$AGENT_LABEL.plist"
+  case "$AGENT_LABEL" in
+    io.shuttle.daemon) AGENT_UNIT_NAME=shuttle-daemon.service ;;
+    *)                 AGENT_UNIT_NAME="${AGENT_LABEL##*.}.service" ;;
+  esac
+  AGENT_UNIT="$AGENT_UNIT_DIR/$AGENT_UNIT_NAME"
+}
+agent_paths
 
 # The substituted values are user paths and a whole $PATH. sed's `s#…#…#`
 # treats #, & and \ specially in the replacement, so escape them; every other
@@ -113,12 +124,16 @@ agent_os_defaults() {
 
 render_agent() {
   sed -e "s#__SHUTTLE_DIR__#$(sed_escape "$ROOT")#g" \
+      -e "s#__LABEL__#$(sed_escape "$AGENT_LABEL")#g" \
+      -e "s#__PORT__#$(sed_escape "$AGENT_PORT_V")#g" \
       -e "s#__LOG__#$(sed_escape "$AGENT_LOG_V")#g" \
       -e "s#__FELT_STORES__#$(sed_escape "$AGENT_STORES_V")#g" \
       -e "s#__PATH__#$(sed_escape "$AGENT_PATH_V")#g" \
       -e "s#__SSH_AUTH_SOCK__#$(sed_escape "$AGENT_SSH_V")#g" \
       "$AGENT_TEMPLATE" \
-    | sed -e '/^Environment=SSH_AUTH_SOCK=$/d'
+    | sed -e '/^Environment=SSH_AUTH_SOCK=$/d' \
+          -e '/^Environment=SHUTTLE_PORT=$/d' \
+          -e '/<key>SHUTTLE_PORT<\/key>/{N;/<string><\/string>/d;}'
 }
 
 # Retire a daemon started by hand before handing :4000 to the supervisor —
@@ -145,6 +160,7 @@ stop_daemon() {
 install_agent() {
   AGENT_OS=$(uname -s)
   AGENT_PRINT=0
+  AGENT_PORT_V="${AGENT_PORT-}"
   AGENT_STORES_V="${AGENT_FELT_STORES-}"
   AGENT_PATH_V="${AGENT_PATH-}"
   AGENT_LOG_V="${AGENT_LOG-}"
@@ -169,6 +185,10 @@ install_agent() {
       --path=*) AGENT_PATH_V="${1#*=}"; shift ;;
       --log) AGENT_LOG_V="${2-}"; shift 2 ;;
       --log=*) AGENT_LOG_V="${1#*=}"; shift ;;
+      --label) AGENT_LABEL="${2-}"; agent_paths; shift 2 ;;
+      --label=*) AGENT_LABEL="${1#*=}"; agent_paths; shift ;;
+      --port) AGENT_PORT_V="${2-}"; shift 2 ;;
+      --port=*) AGENT_PORT_V="${1#*=}"; shift ;;
       --print|--dry-run) AGENT_PRINT=1; shift ;;
       --os) AGENT_OS_FORCED="${2-}"; shift 2 ;;
       --os=*) AGENT_OS_FORCED="${1#*=}"; shift ;;
@@ -210,6 +230,41 @@ install_agent() {
   # `felt`, and a PATH without it yields :enoent -> 500 on the composite API.
   [ -n "$AGENT_PATH_V" ] || AGENT_PATH_V=$(/bin/bash -lc 'echo $PATH')
 
+  # Warned in BOTH modes, on stderr: a reader previewing with --print is
+  # exactly the reader who should see it, and stderr keeps the rendered file
+  # clean for `--print > somewhere`.
+  if [ "$AGENT_OS" = Darwin ]; then
+  # TCC blocks launchd-spawned processes from ~/Documents, ~/Desktop and
+  # ~/Downloads, and Full Disk Access does NOT inherit across the launchd
+  # process tree. This bites in two independent places: where the RELEASE
+  # lives (the daemon cannot start) and where the STORES live (the daemon
+  # starts fine and silently walks nothing — a loaded board with no fibers
+  # and no error, which is the harder one to diagnose).
+  tcc_warn() { # tcc_warn <path> <what-breaks>
+    case "$1" in
+      "$HOME"/Documents/*|"$HOME"/Desktop/*|"$HOME"/Downloads/*)
+        echo "⚠️  $1" >&2
+        echo "    is under a TCC-protected folder (~/Documents, ~/Desktop, ~/Downloads)." >&2
+        echo "    launchd cannot read there and Full Disk Access does not inherit, so" >&2
+        echo "    $2" >&2
+        echo "    Fix: move it outside those folders (e.g. ~/felt or ~/dev)." >&2
+        ;;
+    esac
+  }
+  tcc_warn "$ROOT" "the daemon will crash-loop on start."
+  # Stores are a comma-separated list; check each one.
+  _rest="$AGENT_STORES_V"
+  while [ -n "$_rest" ]; do
+    case "$_rest" in
+      *,*) _one="${_rest%%,*}"; _rest="${_rest#*,}" ;;
+      *)   _one="$_rest"; _rest="" ;;
+    esac
+    # Expand a leading ~ so the comparison sees a real path.
+    case "$_one" in "~/"*) _one="$HOME/${_one#~/}" ;; esac
+    tcc_warn "$_one" "the daemon will start but walk no fibers — an empty board, no error."
+  done
+  fi
+
   if [ "$AGENT_PRINT" = 1 ]; then
     render_agent
     return 0
@@ -221,16 +276,6 @@ install_agent() {
   mkdir -p "$(dirname -- "$AGENT_LOG_V")"
 
   if [ "$AGENT_OS" = Darwin ]; then
-    case "$ROOT" in
-      "$HOME"/Documents/*|"$HOME"/Desktop/*|"$HOME"/Downloads/*)
-        echo "⚠️  $ROOT is under a TCC-protected folder (~/Documents, ~/Desktop,"
-        echo "    ~/Downloads). launchd-spawned processes are blocked from these, and"
-        echo "    Full Disk Access does NOT inherit across the launchd process tree —"
-        echo "    so the daemon will crash-loop or silently fail its felt-store walks."
-        echo "    Fix: install OUTSIDE these folders (e.g. ~/dev/felt)."
-        echo "    Installing the agent anyway, but it will not work from here."
-        ;;
-    esac
     stop_daemon
     mkdir -p "$HOME/Library/LaunchAgents"
     render_agent > "$AGENT_PLIST"
@@ -268,6 +313,14 @@ install_agent() {
 }
 
 uninstall_agent() {
+  # --label must match whatever install-agent used, or this removes nothing.
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --label) AGENT_LABEL="${2-}"; agent_paths; shift 2 ;;
+      --label=*) AGENT_LABEL="${1#*=}"; agent_paths; shift ;;
+      *) echo "shuttle uninstall-agent: unknown option $1" >&2; exit 1 ;;
+    esac
+  done
   if [ "$(uname -s)" = Darwin ]; then
     launchctl unload "$AGENT_PLIST" 2>/dev/null || true
     rm -f "$AGENT_PLIST"
@@ -352,7 +405,7 @@ case "$CMD" in
     ;;
 
   uninstall-agent)
-    uninstall_agent
+    uninstall_agent "$@"
     ;;
 
   version)

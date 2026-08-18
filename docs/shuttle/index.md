@@ -96,15 +96,8 @@ prior transcript.
 
 ## Honest scoping
 
-Two things are still rough, and the other pages point here for them. Both are
-about operating the daemon rather than running it.
-
-**A fetched daemon comes without its supervisor.** The release tarball carries
-the daemon, its Erlang runtime and the board bundle — but not the repo's
-operator surface. `make install-agent` renders the launchd and systemd
-templates from a checkout, so a fetched install either runs
-`$SHUTTLE_HOME/bin/shuttle start` in the foreground or goes under a job you
-write yourself. See [Installation](installation.md).
+One thing is still rough, and the other pages point here for it. It is about
+operating a fleet rather than running the daemon.
 
 **Deploy assumes a hub that builds the board.** `bin/shuttle-deploy` pulls and
 rebuilds on every host in the fleet file, and rsyncs `ui/dist` out from the
@@ -114,10 +107,14 @@ Node. Each of those hosts is a checkout.
 Everything else that used to sit in this list is closed. The release pipeline
 builds a daemon tarball per platform — Linux and macOS, x86_64 and arm64 — each
 carrying its own Erlang runtime and the board bundle, so running the daemon
-needs no Erlang, Elixir or Node. A Linux machine can be a hub as well as a
-remote — `felt shuttle tunnels install` writes systemd user units there and
-launchd jobs on macOS. The commit ledger has a shipped writer, so the Chronicle
-narrates without a hand-installed hook. The examples name no particular store.
+needs no Erlang, Elixir or Node. That tarball also carries its own keep-alive:
+`shuttle install-agent` renders the launchd plist or the systemd user unit from
+templates inside the release, so a fetched daemon supervises itself with no
+checkout and no `make` (see [Installation](installation.md#keep-alive)). A Linux
+machine can be a hub as well as a remote — `felt shuttle tunnels install` writes
+systemd user units there and launchd jobs on macOS. The commit ledger has a
+shipped writer, so the Chronicle narrates without a hand-installed hook. The
+examples name no particular store.
 
 ## Next
 

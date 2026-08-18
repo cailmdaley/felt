@@ -119,6 +119,37 @@ if [ "${SHUTTLE:-0}" = "1" ]; then
     chmod +x "${HOME}/.local/bin/shuttle-launch"
   fi
 
+  # ~/.shuttle holds the daemon's own state, and two things need it to exist:
+  #
+  #   repo  — shuttle-launch resolves what to launch from $SHUTTLE_DIR, else
+  #           this file, else its own parent directory. Revived over SSH it has
+  #           no environment, and its parent here is ~/.local — which holds no
+  #           bin/shuttle — so without this file a fetched host cannot be
+  #           revived by its hub at all. bootstrap.sh writes it for checkouts;
+  #           this is the fetched equivalent.
+  #   dir    — the plugin's activity-event hook writes events only when the
+  #           directory already exists, so the board's activity views stay
+  #           empty until something creates it.
+  mkdir -p "${HOME}/.shuttle"
+  printf '%s\n' "${SHUTTLE_HOME}" > "${HOME}/.shuttle/repo"
+
+  # tmux is not optional and not bundled: workers run inside tmux sessions, so
+  # without it the daemon boots, serves the board, and silently dispatches
+  # nothing. macOS ships no tmux, so on a fresh Mac this is the default state.
+  # Warn rather than fail — the daemon is still useful read-only, and we would
+  # rather install successfully than block on a package manager.
+  if ! command -v tmux >/dev/null 2>&1; then
+    echo
+    echo "⚠️  tmux is not installed. Shuttle runs every worker inside a tmux"
+    echo "    session, so without it the daemon starts and shows a board but"
+    echo "    cannot dispatch any work."
+    case "$OS" in
+      Darwin) echo "    Install it:  brew install tmux" ;;
+      Linux)  echo "    Install it:  apt install tmux   (or your package manager)" ;;
+    esac
+    echo
+  fi
+
   echo "Shuttle daemon ${TAG} installed."
   echo "  Start it:   FELT_STORES=<your-store> ${SHUTTLE_HOME}/bin/shuttle start"
   # The tarball carries its own supervisor templates (share/) and the shim

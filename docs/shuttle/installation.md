@@ -4,12 +4,12 @@ The daemon runs one of two ways, and the choice is about what you want on the
 machine.
 
 - **Fetch the release.** A prebuilt daemon for your platform, carrying its own
-  Erlang runtime and the board bundle inside it. One command, no toolchain, no
-  checkout.
+  Erlang runtime, the board bundle, and its keep-alive supervisor inside it. One
+  command, no toolchain, no checkout.
 - **Build from a checkout.** `bootstrap.sh` builds the felt CLI and the daemon
-  from source, places the board bundle, and installs a keep-alive. This is the
-  fleet path — what the deploy script updates, and what you want if you are
-  changing daemon code.
+  from source, places the board bundle, and installs the same keep-alive. This
+  is the fleet path — what the deploy script updates, and what you want if you
+  are changing daemon code.
 
 Either way the daemon needs `tmux` and the `felt` CLI at runtime: workers run in
 tmux sessions, and the daemon shells out to `felt` for every store walk and
@@ -79,8 +79,11 @@ The CLI lands where it always does: `/usr/local/bin` if that is writable, else
 FELT_STORES=~/dev/myproject ~/.local/share/shuttle/bin/shuttle start
 ```
 
-That runs in the foreground and stops on `Ctrl-C`. [Keep-alive](#keep-alive)
-covers handing it to a supervisor.
+That runs in the foreground and stops on `Ctrl-C`. To have the daemon start at
+login and come back after a crash, hand it to the supervisor that ships in the
+same tarball — `shuttle install-agent`, walked through step by step for macOS in
+[Set up a supervised daemon on macOS](#set-up-a-supervised-daemon-on-macos) and
+covered in full under [Keep-alive](#keep-alive).
 
 What you downloaded is a Mix release: the daemon's compiled modules, the Erlang
 runtime they run on, and the board bundle, in one directory tree. It reads
@@ -95,10 +98,102 @@ Upgrade by running the same command again. It deletes `$SHUTTLE_HOME` and
 unpacks the new tarball in its place, so keep nothing of your own in there. The
 daemon's state lives in `~/.shuttle` and survives.
 
-What the tarball does not carry is the repo's operator surface: the `make`
-targets, the keep-alive templates `make install-agent` renders, and
-`bin/shuttle-deploy`. You can still supervise a fetched daemon — see
-[Keep-alive](#keep-alive) for what a job needs — but you write the job yourself.
+The tarball carries what the daemon needs to run *and* to keep running. Under
+its root sit `bin/`, `erts-*/`, `lib/`, `releases/` and `share/`. Two of those
+matter here: `share/` holds both supervisor templates — the launchd plist and
+the systemd unit — and `bin/` holds the `shuttle` shim that renders them,
+alongside `shuttle-launch`, the tmux respawn loop for hosts with no supervisor
+at all. So a fetched install supervises itself, from the same files a checkout
+uses, through [`shuttle install-agent`](#keep-alive).
+
+What the tarball leaves behind is the repo's *development* surface: the `make`
+targets and `bin/shuttle-deploy`. A fetched host runs a daemon and keeps it
+alive; it cannot build one, and it cannot deploy to a fleet.
+
+### Set up a supervised daemon on macOS
+
+This is the whole sequence on a Mac — from nothing to a daemon that starts at
+login and restarts itself when it dies. No checkout, no toolchain. Run the steps
+in order — step 3 refuses to install anything without the store you make in
+step 2.
+
+**1. Install the CLI and the daemon.**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh \
+  | SHUTTLE=1 sh
+```
+
+`SHUTTLE=1` goes *after* the pipe, for the reason in the warning above: in front
+of `curl` it sets the wrong process's environment, and you get a felt CLI with
+no daemon, reported as success.
+
+A fresh Mac ships no `tmux`, and the installer says so when it finds none. Every
+worker runs inside a tmux session, so a daemon without it serves a board and
+dispatches nothing:
+
+```bash
+brew install tmux
+```
+
+**2. Create a felt store — and keep it out of `~/Documents`.**
+
+The daemon polls felt stores, and it assumes none — it polls exactly the ones
+you name in step 3, which is why the store comes first. Make one somewhere
+launchd is allowed to read:
+
+```bash
+mkdir -p ~/notes && cd ~/notes && felt init
+```
+
+!!! warning "Not `~/Documents`, `~/Desktop`, or `~/Downloads`"
+    macOS blocks launchd-started processes from those three folders, and
+    granting Full Disk Access does not rescue you — the grant does not inherit
+    down the launchd process tree the way it does under a terminal. A store in
+    one of them is *discovered and unreadable*: the daemon starts, the board
+    loads, the board shows nothing, and no error appears anywhere. Anywhere else
+    in your home directory works — `~/notes`, `~/dev`, `~/loom`. The same rule
+    covers the daemon itself. `install-agent` checks both — the release it is
+    installing and every store you name — and warns on stderr about any path
+    under one of the three, but it installs anyway, so read what it prints.
+
+**3. Hand the daemon to launchd.**
+
+```bash
+~/.local/share/shuttle/bin/shuttle install-agent --felt-stores ~/notes
+```
+
+That writes `~/Library/LaunchAgents/io.shuttle.daemon.plist` and loads it. The
+daemon comes up immediately, comes back at every login, and restarts on crash.
+For several stores, pass one comma-separated list.
+
+**4. Check it, and know how to undo it.**
+
+```bash
+launchctl list | grep shuttle                   # the job is loaded
+curl -s http://127.0.0.1:4000/api/v1/version    # the daemon answers
+tail -f ~/Library/Logs/shuttle.log              # what it is doing
+```
+
+Then open <http://127.0.0.1:4000/> for [the board](board.md).
+
+To undo it:
+
+```bash
+~/.local/share/shuttle/bin/shuttle uninstall-agent
+```
+
+That unloads the job and deletes the plist, which stops the running daemon too.
+Nothing else goes: the release, your store, and the daemon's state in
+`~/.shuttle` all survive, and `install-agent` puts the job back.
+
+!!! note "One more line, for the board's activity views"
+    ```bash
+    mkdir -p ~/.shuttle
+    ```
+    The plugin's event hook writes there only if the directory already exists,
+    so without it the board's activity ranking and sent-files trail stay empty
+    while everything else works. See [Sharp edges](#sharp-edges).
 
 ### Release candidates
 
@@ -187,9 +282,11 @@ make logs                                      # tail the daemon log
 make status                                    # ps + a snapshot summary
 ```
 
-The two `make` targets belong to a checkout. A fetched daemon started in the
-foreground logs to your terminal; under a supervisor, it logs wherever you
-pointed the job's output.
+The two `make` targets belong to a checkout. From a fetched install, ask the
+shim directly — `~/.local/share/shuttle/bin/shuttle status` — and tail the log
+where the supervisor put it: `~/Library/Logs/shuttle.log` on macOS,
+`~/.shuttle/shuttle.log` on Linux, or wherever `--log` pointed it. A daemon you
+started in the foreground logs to your terminal instead.
 
 Open <http://127.0.0.1:4000/> in your browser for [the board](board.md).
 
@@ -250,26 +347,76 @@ beyond one machine.
 
 ## Keep-alive
 
-`make install-agent` installs the supervisor, branching on `uname -s`. Both
-arms render a template from `share/` and bake in the same three environment
-values, for the same reason: neither supervisor hands the daemon your login
-environment.
+A supervisor is what turns "the daemon is running" into "the daemon runs": it
+starts the daemon at login and restarts it when it dies. `shuttle install-agent`
+installs one, branching on `uname -s` — a launchd LaunchAgent on macOS, a
+systemd `--user` unit on Linux — and points you at the tmux respawn loop on a
+Linux host that has no user-level systemd.
 
-The target lives in the checkout, and the templates it renders point at the
-checkout's `bin/shuttle`. To supervise a fetched daemon, write the job yourself
-against `$SHUTTLE_HOME/bin/shuttle start --force` — the two sections below say
-what the environment has to carry, which is the part that is easy to get wrong.
+The verb is the same wherever the daemon came from:
+
+```bash
+# fetched install
+~/.local/share/shuttle/bin/shuttle install-agent --felt-stores ~/notes
+
+# checkout — builds the release first, then calls the same verb
+make install-agent AGENT_FELT_STORES=~/dev/myproject
+```
+
+Neither front door is on your `PATH`; the rest of this section writes `shuttle`
+for whichever one you have.
+
+Both arms render a template from `share/`, which ships in the tarball and is
+tracked in the repo — the same two files, never forked. The templates' one
+placeholder for a location, `__SHUTTLE_DIR__`, resolves to whatever directory
+holds `bin/shuttle`: the checkout root in a checkout, the unpacked release root
+in a tarball. So the two paths install byte-identical jobs, and `make
+install-agent` is a checkout convenience rather than a separate mechanism.
+
+The install fixes four values into the job:
+
+| Flag | Environment variable | Default |
+| --- | --- | --- |
+| `--felt-stores <list>` | `AGENT_FELT_STORES` | none — **required** |
+| `--path <PATH>` | `AGENT_PATH` | the login shell's `PATH`, captured at install time |
+| `--log <file>` | `AGENT_LOG` | `~/Library/Logs/shuttle.log` (macOS), `~/.shuttle/shuttle.log` (Linux) |
+| `--ssh-auth-sock <path>` | `AGENT_SSH_AUTH_SOCK` | `~/.ssh/agent.sock` (macOS), empty (Linux) |
+
+Three of them become environment variables in the rendered job, because neither
+supervisor hands the daemon your login environment; the fourth says where the
+daemon's output goes. A flag beats its environment variable, and `make
+install-agent` passes the `AGENT_*` variables straight through, which is why the
+checkout form spells them that way.
+
+`--felt-stores` has no default on purpose. A daemon that polls nothing boots
+clean, binds `:4000`, serves an empty board and dispatches nothing — a failure
+that looks like success — so `install-agent` refuses rather than installing one.
+
+To see the job before installing it:
+
+```bash
+shuttle install-agent --felt-stores ~/notes --print
+shuttle install-agent --felt-stores ~/notes --print --os Linux
+```
+
+`--print` (or `--dry-run`) renders to stdout and changes nothing. `--os` renders
+the other platform's file for inspection, and it is accepted *only* alongside
+`--print`, so an install can never take a branch this host cannot run.
+
+`shuttle uninstall-agent` reverses the install on either platform, and `make
+uninstall-agent` calls the same verb.
 
 ### macOS (launchd)
 
-Step 6 calls `make install-agent`, which renders
-`share/io.shuttle.daemon.plist.template` into
-`~/Library/LaunchAgents/io.shuttle.daemon.plist` and loads it. The agent sets
-`RunAtLoad` and `KeepAlive`, so the daemon starts at login and restarts on
-crash.
+`install-agent` renders `share/io.shuttle.daemon.plist.template` into
+`~/Library/LaunchAgents/io.shuttle.daemon.plist` and loads it (bootstrap step 6
+does this through `make install-agent`). The agent sets `RunAtLoad` and
+`KeepAlive`, so the daemon starts at login and restarts on crash. A daemon you
+had started by hand is stopped first — the job starts its own, and two would
+fight over `:4000`.
 
-`make install-agent` bakes three environment variables into the plist. Each one
-exists because the obvious approach failed:
+Three environment variables go into the plist. Each one exists because the
+obvious approach failed:
 
 - **`PATH`** — captured from `bash -lc 'echo $PATH'` *at install time*.
   launchd's own environment is nearly empty, and the daemon cannot find `felt`
@@ -279,22 +426,25 @@ exists because the obvious approach failed:
   profile is not self-sufficient from a bare environment. So the plist freezes
   the real login `PATH`. A `PATH` without `felt` on it gives you a daemon that
   boots, serves the board, and returns 500 on `/api/v1/fibers/composite`.
-- **`FELT_STORES`** — the stores the daemon polls, comma-separated. There is no
-  default: `make install-agent AGENT_FELT_STORES=~/myproject` is required, and
-  the target refuses without it. felt re-discovers a store's symlinked
-  substores, so one [cross-project store](../concepts/cross-project.md) is
-  usually the only entry you need.
-- **`SSH_AUTH_SOCK`** — `~/.ssh/agent.sock` on macOS, the persistent login agent. launchd
+- **`FELT_STORES`** — the stores the daemon polls, comma-separated, from
+  `--felt-stores`. felt re-discovers a store's symlinked substores, so one
+  [cross-project store](../concepts/cross-project.md) is usually the only entry
+  you need.
+- **`SSH_AUTH_SOCK`** — `~/.ssh/agent.sock`, the persistent login agent. launchd
   hands the daemon a bare per-session Keychain agent that holds only the default
-  key, which breaks every SSH the daemon makes to a remote host. Override with
-  `AGENT_SSH_AUTH_SOCK` if your socket lives elsewhere.
+  key, which breaks every SSH the daemon makes to a remote host. Point
+  `--ssh-auth-sock` elsewhere if your socket lives elsewhere.
 
-Logs go to `~/Library/Logs/shuttle.log` (`make logs` tails it). Remove the agent
-with `make uninstall-agent`.
+Logs go to `~/Library/Logs/shuttle.log` (`make logs` tails it from a checkout).
+Remove the agent with `shuttle uninstall-agent`.
+
+launchd cannot read `~/Documents`, `~/Desktop` or `~/Downloads`, and that limit
+binds your *stores* as much as the daemon's own directory —
+see [Sharp edges](#sharp-edges).
 
 ### Linux (systemd user unit)
 
-`make install-agent` renders `share/io.shuttle.daemon.service.template` into
+`install-agent` renders `share/io.shuttle.daemon.service.template` into
 `~/.config/systemd/user/shuttle-daemon.service`, then runs `systemctl --user
 enable --now`. `Restart=always` with `RestartSec=10` is the KeepAlive analog;
 `WantedBy=default.target` starts the daemon at login. It bakes in the same
@@ -311,9 +461,9 @@ loginctl enable-linger $(id -un)
 
 Run that once. A systemd user manager normally stops at your last logout, which
 would take the daemon down with your ssh session; lingering keeps it alive
-across logout and starts it at boot. `make install-agent` prints the command
-but does not run it, because enabling linger needs privileges the install does
-not assume.
+across logout and starts it at boot. `install-agent` prints the command but does
+not run it, because enabling linger needs privileges the install does not
+assume.
 
 Day-to-day:
 
@@ -321,23 +471,44 @@ Day-to-day:
 systemctl --user status shuttle-daemon     # is it up
 systemctl --user restart shuttle-daemon    # cycle onto a freshly built release
 journalctl --user -u shuttle-daemon        # unit-level events
-make logs                                  # the daemon's own log
+tail -f ~/.shuttle/shuttle.log             # the daemon's own log (make logs, in a checkout)
 ```
 
 Logs go to `~/.shuttle/shuttle.log` on Linux — beside the daemon's other state,
 and the same file `make start` and the respawn loop write, so `make logs` finds
-it whichever path is running. Remove the unit with `make uninstall-agent`.
+it whichever path is running. Remove the unit with `shuttle uninstall-agent`.
 
-`make install-agent` kills the tmux respawn loop first; both would bind `:4000`.
+`install-agent` kills the tmux respawn loop first; both would bind `:4000`.
 
 ### Linux without systemd (tmux respawn loop)
 
-Plenty of Linux hosts have no systemd user session — an HPC login node
-typically does not, and neither does a bare container. `make install-agent`
-says so and refuses there. Bootstrap detects the same thing and falls back:
-it copies `bin/shuttle-launch` to `~/.local/bin` and starts a tmux session named
-`shuttle-daemon` running a respawn loop. (It installs `shuttle-launch` on every
-Linux host either way, because remote revival invokes it over SSH.)
+Plenty of Linux hosts have no systemd user session — an HPC login node typically
+does not, and neither does a bare container. `install-agent` probes for one
+*before* it stops anything, and when the probe fails it refuses and prints the
+respawn loop's command line instead of writing a unit nothing will read.
+
+That loop is `bin/shuttle-launch`, and it ships in the tarball as well as the
+repo. Both installers also place a copy at `~/.local/bin/shuttle-launch`:
+`bootstrap.sh` on a checkout, `install.sh` on a fetched install. That exact path
+is what a hub runs over SSH to revive a dead remote daemon, so it exists on
+every Linux host whether or not you drive it yourself. On a host with no systemd
+user session, bootstrap goes one step further and starts a tmux session named
+`shuttle-daemon` running the loop.
+
+Start it yourself by pointing it at the daemon's directory:
+
+```bash
+SHUTTLE_DIR=~/.local/share/shuttle ~/.local/bin/shuttle-launch   # fetched
+SHUTTLE_DIR=~/dev/felt ~/.local/bin/shuttle-launch               # checkout
+```
+
+Run the same command after an upgrade to pick up a new `shuttle-launch`: it
+kills the tmux session and recreates it from the refreshed script.
+
+Unlike `install-agent`, the loop bakes nothing in — it hands the daemon the
+environment you start it in. Give it stores through `FELT_STORES`, or persist
+them once in `~/.config/felt/stores.json` (see [Configuring
+stores](#configuring-stores)).
 
 The loop runs `./bin/shuttle start --force` and backs off exponentially. A
 daemon that exits within 60 seconds doubles the sleep, from 2s up to a 300s cap.
@@ -351,11 +522,17 @@ respawn it:
 lsof -ti:4000 -sTCP:LISTEN | xargs kill
 ```
 
-To pick up a new `shuttle-launch` itself:
+!!! warning "Remote revival needs `~/.shuttle/repo` on a fetched host"
+    A hub revives a dead remote by running `~/.local/bin/shuttle-launch` over
+    SSH with no environment. The script then resolves the daemon's directory
+    from `$SHUTTLE_DIR`, else the state file `~/.shuttle/repo`, else its own
+    parent directory — and only `bootstrap.sh` writes that state file. After a
+    fetched install, write it yourself or revival exits without starting
+    anything:
 
-```bash
-SHUTTLE_DIR=~/dev/felt ~/.local/bin/shuttle-launch
-```
+    ```bash
+    mkdir -p ~/.shuttle && echo ~/.local/share/shuttle > ~/.shuttle/repo
+    ```
 
 ## Configuring stores
 
@@ -367,9 +544,9 @@ The daemon polls felt stores. It resolves them in this order:
 
 **Shuttle assumes no default store.** An unset variable and an absent registry
 resolve to an empty list. The daemon then polls nothing: it boots, binds
-`:4000`, serves an empty board, and dispatches nothing. `make install-agent`
-requires `AGENT_FELT_STORES` precisely so a supervised daemon never boots into
-that state by accident.
+`:4000`, serves an empty board, and dispatches nothing. `install-agent` requires
+`--felt-stores` precisely so a supervised daemon never boots into that state by
+accident.
 
 The registry file takes this canonical shape. A bare JSON array also works.
 
@@ -539,17 +716,21 @@ when the real package isn't resolvable. A fresh clone builds `ui/dist` fine:
 cd ui && npm ci && npm run build
 ```
 
-**macOS TCC: keep the checkout out of `~/Documents`.** launchd-spawned processes
-cannot read `~/Documents`, `~/Desktop`, or `~/Downloads`. Full Disk Access does
-not inherit across the launchd process tree the way it does under a terminal. A
-daemon rooted in a protected folder crash-loops or silently fails its store
-walks. `make install-agent` warns and installs anyway. Use `~/dev/felt`, or
-anything else outside those folders. The same trap catches a *store* whose real
-path sits under `~/Documents`, even when the checkout is clean.
+**macOS TCC: keep the daemon *and its stores* out of `~/Documents`.**
+launchd-started processes cannot read `~/Documents`, `~/Desktop`, or
+`~/Downloads`. Full Disk Access does not inherit across the launchd process tree
+the way it does under a terminal, so granting it buys nothing. A daemon rooted
+in a protected folder crash-loops on start. A *store* under one is the quieter
+failure: the daemon starts fine, finds the store, reads nothing out of it, and
+the board loads with no fibers and no error. `install-agent` warns on stderr
+about either — the release root and each `--felt-stores` entry, under `--print`
+as well as a real install — and then installs anyway, so the warning is the
+whole protection. Put both somewhere else: `~/dev/felt` for a checkout,
+`~/notes` or `~/loom` for a store, or anything outside the three folders.
 
 **`make restart` silently no-ops under a supervisor.** `make stop` matches the
 daemon by a relative-path pattern; launchd and systemd both launch it by
-absolute path. So after `make install-agent`, `make restart` rebuilds the
+absolute path. So once the agent is installed, `make restart` rebuilds the
 release, stops nothing, and reports "already running." Bounce it properly:
 
 ```bash

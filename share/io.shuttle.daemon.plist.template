@@ -36,7 +36,7 @@
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>io.shuttle.daemon</string>
+    <string>__LABEL__</string>
 
     <key>ProgramArguments</key>
     <array>
@@ -50,6 +50,15 @@
         <!-- The user's real login PATH, captured at install time (see header). -->
         <key>PATH</key>
         <string>__PATH__</string>
+        <!--
+          SHUTTLE_PORT is normally absent (the daemon binds 4000). It exists so a
+          SECOND, non-default instance can be supervised beside the real one —
+          which is what makes the keep-alive path testable on a machine that is
+          already running a daemon, instead of only renderable. The renderer
+          drops this pair when no port is given.
+        -->
+        <key>SHUTTLE_PORT</key>
+        <string>__PORT__</string>
         <!--
           FELT_STORES scopes the daemon's felt polling to the aggregate store
           (~/loom, outside ~/Documents), which aggregates every project's fibers

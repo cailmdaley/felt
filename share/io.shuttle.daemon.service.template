@@ -49,6 +49,9 @@ ExecStart=__SHUTTLE_DIR__/bin/shuttle start --force
 
 # The user's real login PATH, captured at install time (see header).
 Environment=PATH=__PATH__
+# Absent by default (the daemon binds 4000); set only to supervise a second
+# instance beside the real one. The renderer drops this line when empty.
+Environment=SHUTTLE_PORT=__PORT__
 # FELT_STORES scopes the daemon's felt polling. felt re-discovers each
 # project's substores by following the symlinks under a store's .felt/, so an
 # aggregate store is usually the only entry you need. Filled in from
