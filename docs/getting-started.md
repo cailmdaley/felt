@@ -155,6 +155,17 @@ felt ls -s all               # everything tracked, closed included
 felt ls --body "patches"     # search bodies too
 ```
 
+`felt ls` lists the view you are standing in. When this project's `.felt` is
+mounted inside a larger store — a loom that aggregates several projects —
+`felt find` searches the whole thing, printing local hits first and the rest of
+the store under a separator that names it. The ids it prints from out there
+work as arguments: `felt show`, `edit`, and `shuttle` all act on the fiber
+where it actually lives.
+
+```bash
+felt find "jackknife"        # the same search, across every linked project
+```
+
 `felt tree` shows containment:
 
 ```

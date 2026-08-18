@@ -70,6 +70,7 @@ felt edit covariance-estimation -s closed -o "jackknife — 10x faster, <2% bias
 felt show covariance-estimation                      # body, metadata, back-references
 felt tree                                            # containment hierarchy
 felt ls -s all "jackknife"                           # search names, outcomes, frontmatter
+felt find "jackknife"                                # the same search, across the whole store
 felt setup claude                                    # install the Claude Code plugin
 ```
 
