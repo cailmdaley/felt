@@ -41,6 +41,21 @@ export interface PromoteView {
   panY: number
   width: number
   height: number
+  /**
+   * Where the reader is looking, in SURFACE coordinates — the point the last
+   * pinch was anchored on, which is the point that stays still while the
+   * canvas grows underneath it.
+   *
+   * It is kept in surface units rather than screen ones deliberately: a pan
+   * carries it along with the content, so the page you pinched on stays the
+   * page you are reading until you leave it, instead of being handed to
+   * whatever card happens to slide under a fixed screen position.
+   *
+   * Omitted (the camera has never been zoomed) means "no opinion": the
+   * decision then falls back to the biggest card on screen.
+   */
+  focusX?: number
+  focusY?: number
 }
 
 /**
@@ -92,13 +107,39 @@ export const PROMOTE_OFF = 0.75
  */
 const PROMOTE_MIN_VISIBLE = 0.4
 
+/** Does this card lie under the point the reader is zooming on? */
+function holdsFocus(card: PromoteCandidate, view: PromoteView): boolean {
+  const { focusX, focusY } = view
+  if (focusX === undefined || focusY === undefined) return false
+  return (
+    focusX >= card.x && focusX <= card.x + card.w &&
+    focusY >= card.y && focusY <= card.y + card.h
+  )
+}
+
 /**
  * The card to promote, or null.
  *
  * ONE at a time, always. Two would be two documents laid out at full size for
  * no gain — and past the threshold there is by definition no room on screen for
- * a second. The winner is the largest qualifying card, measured by how much of
- * the viewport it covers on its widest axis.
+ * a second.
+ *
+ * THE READER'S FINGER DECIDES, and that is the correction of the first cut,
+ * which promoted the card with the largest cover. Cover was the wrong question
+ * twice over. Cards on this board are all the same size until somebody resizes
+ * one, so at the moment of promotion the card being zoomed on and its
+ * neighbours cover the viewport by exactly the same fraction — a tie, settled
+ * by whichever came first in the map. The board reproduced it every time: zoom
+ * into a card and a DIFFERENT card, usually the next one over, took the screen
+ * instead. And where the tie broke honestly it broke wrong anyway, handing the
+ * page to a bigger card the reader had merely zoomed PAST.
+ *
+ * So the pool is the card under the pinch, when there is one — and that
+ * includes cards that cannot be promoted at all. Pinching on a PNG promotes
+ * nothing, rather than promoting the report beside it: a card under the finger
+ * is an answer, even when the answer is "not a page". Only a pinch anchored on
+ * bare surface falls back to the whole board, where the largest card is the
+ * best guess available.
  *
  * `current` is what is promoted now, and it is what makes the hysteresis work:
  * the incumbent is judged against the lower bar, everyone else against the
@@ -110,9 +151,12 @@ export function choosePromotion(
   current: string | null,
 ): string | null {
   if (view.width <= 0 || view.height <= 0 || view.zoom <= 0) return null
+  // A pile can put several cards under one point; they all stay in the running.
+  const held = candidates.filter((card) => holdsFocus(card, view))
+  const pool = held.length > 0 ? held : candidates
   let winner: string | null = null
   let best = 0
-  for (const card of candidates) {
+  for (const card of pool) {
     if (!card.reflows) continue
     const w = card.w * view.zoom
     const h = card.h * view.zoom

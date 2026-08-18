@@ -55,6 +55,41 @@ describe('choosePromotion', () => {
     expect(chosen).toBe('big')
   })
 
+  // At this zoom a default 200x280 card covers the viewport's height exactly
+  // (280 * 2.9 / 800 = 1.015) — the moment promotion is decided, and the moment
+  // a neighbour on the same pitch is still a third of the way onto the screen.
+  const AT_FIT = 2.9
+
+  it('promotes the card under the pinch, not its identical neighbour', () => {
+    // The bug as reported: zoom into a card and the next one over takes the
+    // screen. Two same-size cards cover the viewport by exactly the same
+    // fraction, so cover alone is a coin flip decided by map order.
+    const view = { ...VIEW, zoom: AT_FIT }
+    const cards = [card('left'), card('right', { x: 220 })]
+    expect(choosePromotion(cards, { ...view, focusX: 300, focusY: 140 }, null)).toBe('right')
+    expect(choosePromotion(cards, { ...view, focusX: 100, focusY: 140 }, null)).toBe('left')
+  })
+
+  it('promotes nothing when the pinch lands on a card that cannot reflow', () => {
+    // A PNG under the finger is an answer — "not a page" — and it must not be
+    // read as "no opinion", which would hand the screen to the report beside it.
+    const view = { ...VIEW, zoom: AT_FIT, focusX: 100, focusY: 140 }
+    const cards = [card('shot', { reflows: false }), card('report', { x: 220 })]
+    expect(choosePromotion(cards, view, null)).toBeNull()
+  })
+
+  it('falls back to the largest card when the pinch lands on bare surface', () => {
+    // (100, 500) is below both cards — the reader pinched the gap, so the board
+    // has only the old question to go on.
+    const view = { ...VIEW, zoom: AT_FIT, focusX: 100, focusY: 500 }
+    const chosen = choosePromotion(
+      [card('small'), card('big', { x: 200, w: 260, h: 360 })],
+      view,
+      null,
+    )
+    expect(chosen).toBe('big')
+  })
+
   it('ignores a card that is mostly panned off screen', () => {
     const view = { ...VIEW, zoom: 4, panX: -700 }
     expect(choosePromotion([card('a')], view, null)).toBeNull()

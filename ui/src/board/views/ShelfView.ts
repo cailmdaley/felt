@@ -223,6 +223,10 @@ class ShelfView implements TemporalView {
   /** The one card, if any, currently living at its true size instead of at the
    *  camera's. See syncPromotion. */
   private promoted: string | null = null
+  /** The point the last pinch was anchored on, in SURFACE coordinates — what
+   *  syncPromotion reads to know which card the reader is zooming INTO. Null
+   *  until the camera is first zoomed; see PromoteView.focusX. */
+  private zoomAnchor: { x: number; y: number } | null = null
   private zTop = 10
   private loading = false
 
@@ -810,6 +814,8 @@ class ShelfView implements TemporalView {
         panY: this.persist.pan.y,
         width: viewport.clientWidth,
         height: viewport.clientHeight,
+        focusX: this.zoomAnchor?.x,
+        focusY: this.zoomAnchor?.y,
       },
       this.promoted,
     )
@@ -1712,6 +1718,9 @@ class ShelfView implements TemporalView {
     const sy = (cy - this.persist.pan.y) / zoom
     this.persist.zoom = next
     this.persist.pan = { x: cx - sx * next, y: cy - sy * next }
+    // The still point of the gesture, kept in surface units so a later pan
+    // carries it with the content rather than leaving it on a screen position.
+    this.zoomAnchor = { x: sx, y: sy }
     this.applyZoom()
     this.holdLayer()
     this.saveSoon()
