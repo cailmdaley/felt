@@ -32,10 +32,13 @@ defmodule Shuttle.FeltStores do
 
   # How long a cold caller — one with no expansion cached for the CURRENT base
   # list — waits for the background scan before giving up and serving the
-  # unexpanded base. Generous against a healthy filesystem (a raw rescan costs
-  # ~20 ms on a many-store host, so this is 50x headroom) and short against a
-  # wedged one, which is the whole point: see `configured_hosts/0`.
-  @scan_wait_ms 1_000
+  # unexpanded base. Calibrated against a real store rather than a guess: the
+  # author's own `~/loom` (one store, a deep tree, several symlinked substores)
+  # scans in ~1.1 s warm, which is also what the old inline expansion charged
+  # some unlucky request every 30 s. So this is a small multiple of a HEALTHY
+  # walk, not a latency target — and still two orders of magnitude below the
+  # stall it exists to bound, where the thing being waited on is a person.
+  @scan_wait_ms 2_000
 
   # A scan that has not reported back within this window is presumed wedged
   # rather than merely slow, and the next caller is allowed to start another.
@@ -44,9 +47,11 @@ defmodule Shuttle.FeltStores do
   # re-arming often is how a stalled store turns into a stalled node.
   @scan_lock_ttl_ms 60_000
 
-  # A store whose walk takes longer than this is reported by name, at :warning,
-  # with what usually causes it. Two orders of magnitude above a warm walk.
-  @slow_scan_warn_ms 2_000
+  # A scan slower than this is reported by name, at :warning, with what usually
+  # causes it. Set above a healthy real store (~1.1 s, measured) with room to
+  # spare, so this fires for trouble rather than for size: the stall it is
+  # hunting runs to tens of seconds.
+  @slow_scan_warn_ms 5_000
 
   @doc """
   The configured store list, expanded with any symlinked substores.
