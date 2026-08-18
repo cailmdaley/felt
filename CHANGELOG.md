@@ -390,6 +390,22 @@ reaches, rather than the boundary being negotiated flag by flag.
   `felt show`. A slow walk also says so: the log names the store holding
   things up and what usually causes it, and the daemon snapshot and
   `/api/v1/felt-stores` carry the same scan report.
+- …and the layer under that: the daemon's filesystem calls no longer go
+  through the OTP file server. `File.ls/1`, `File.dir?/1`, `File.stat/1` and
+  friends are client calls into `:file_server_2`, a single process shared by
+  the whole VM, so one call parked on an unanswered consent dialog blocked
+  *every* filesystem call in the daemon — including the ones inside the
+  background task that was supposed to contain it, and including
+  `System.find_executable/1`, which is how the daemon locates `felt` and
+  `tmux` before every shell-out. The store walk, path realpathing, the bounded
+  `project_dir` probe, executable resolution and the file-serving read
+  endpoints now use `Shuttle.RawFS`, which bypasses the file server. Those
+  calls are dispatched to the VM's dirty IO schedulers instead — ten of them,
+  so a parked probe is cheap but not free, which is why the store scan now
+  holds its single-flight lock until the scanner answers *or dies* rather than
+  expiring it on a timer: re-probing a store nobody has clicked through
+  accumulates parked walks, and the tenth one wedges the VM. A scan already
+  out longer than the caller's patience is no longer waited on at all.
 - The standing-role reconciler self-heals inverted markers instead of
   re-closing live work. Dead pinned roles park rather than relaunching in a
   loop.
