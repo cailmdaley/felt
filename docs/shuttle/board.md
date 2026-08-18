@@ -130,6 +130,15 @@ absent.
 - **Chronicle** draws fibers as multi-day lifelines across calendar days, under
   a strip of [cycle](cycles.md) bands.
 
+![The Day view: one fiber per lane across a day's axis, each lane's filled
+curve showing agent work and red ticks showing where the human weighed in,
+above a two-column "The day, by fiber" digest of per-fiber outcomes, several
+blurred.](../assets/board-day.jpg)
+
+*The day at lane resolution: one lane per fiber rather than one row per day.
+The digest below turns every peak in the rail into the outcome text that
+produced it.*
+
 ![The Week view: seven day rows over a 6am-to-6am axis, each showing a filled
 curve where agents were working and red ticks where the human was steering,
 with per-day totals in the right margin.](../assets/board-week.jpg)
@@ -145,6 +154,17 @@ idle nudge is not a state of the work, and an agent blocked on you reads as the
 unit each side actually spends: human effort in messages (`you 14 · 9 back`),
 agent effort in minutes. Hover any mark for the actual words, fetched as
 transcript excerpts from `/api/v1/moment`.
+
+![The Chronicle view: dozens of fibers as horizontal lifelines running from
+first day to last across a calendar of weeks, tick marks marking periods of
+use, a status glyph on each row, and a header strip of named eras such as "the
+temporal-ui push" and "recovery week"; a few rows are
+blurred.](../assets/board-chronicle.jpg)
+
+*Chronicle trades the raster for a timeline: no fill, just marks on a line
+per fiber, so decades of fibers stack without drowning each other. The era
+strip is the same [cycle](cycles.md) data that fences the Desk's Cycles
+column.*
 
 Everything on these pages is joined through the ledgers. A minute or a commit
 that does not resolve to a fiber the board carries is not drawn at all, so work
