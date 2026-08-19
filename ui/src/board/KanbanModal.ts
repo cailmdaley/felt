@@ -55,6 +55,7 @@ import {
   nextStandingLaunch,
   restingUntil,
 } from './KanbanRules.js'
+import type { QueueRewrite } from './KanbanRules.js'
 import { sameCivilDue } from './civilDay.js'
 import { shouldRunVisiblePoll } from '../runtime/PageAttention'
 import {
@@ -258,6 +259,7 @@ export class KanbanModal {
       setSurface: (card, horizon, opts) => this.setSurface(card, horizon, opts),
       pin: (card) => this.pinRole(card),
       stack: (card, tailId) => this.stackBehind(card, tailId),
+      reorderQueue: (writes) => this.reorderQueue(writes),
       openDetail: (card) => this.detailModal?.open(card),
       openWorker: this.openWorkerAfterGesture,
       releaseQuarantine: (host) => this.releaseQuarantine(host),
@@ -1005,6 +1007,53 @@ export class KanbanModal {
       this.showBanner(`Couldn't queue “${card.name}” behind “${tailName}”: ${msg}`, 'error')
       this.announce(`Sequence edit failed: ${msg}`)
     }
+    await this.fetchAndRender()
+  }
+
+  /**
+   * Commit a reordered queue — the peek list's drag-a-row gesture.
+   *
+   * The order is not stored anywhere, so there is nothing to write called
+   * "position": a reorder is a handful of `depends_on:` edges changing, and
+   * `reorderQueueWrites` has already reduced the gesture to the MINIMAL set of
+   * them. Cards whose predecessor did not change are not written, so a reorder
+   * does not bump `modified_at` on work nobody moved.
+   *
+   * The writes go out one at a time and the board refetches once at the end.
+   * There is no optimistic render for the same reason the stack drop has none:
+   * the queue's shape is derived from the documents, and guessing it here
+   * would be re-deriving the read model inside the writer. A failure mid-way
+   * leaves the chain partly rewired, which the refetch then shows honestly —
+   * the alternative (a rollback the daemon cannot transact) would be a
+   * fiction.
+   */
+  private async reorderQueue(writes: QueueRewrite[]): Promise<void> {
+    let moved = 0
+    for (const write of writes) {
+      const card = findCardById(this.lastResponse, write.fiberId)
+      try {
+        const res = await fetch(this.horizonUrl(), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            fiber_id: write.fiberId,
+            origin: card?.originId,
+            set: { depends_on: write.newDep },
+          }),
+        })
+        if (!res.ok) throw new Error(await errorMessageFromResponse(res, 'Sequence edit failed'))
+        moved += 1
+      } catch (err: unknown) {
+        const msg = (err as { message?: string })?.message ?? String(err)
+        this.showBanner(
+          `Couldn't reorder the queue — “${card?.name ?? write.fiberId}” did not move: ${msg}`,
+          'error',
+        )
+        this.announce(`Queue reorder failed: ${msg}`)
+        break
+      }
+    }
+    if (moved === writes.length) this.announce('Queue reordered.')
     await this.fetchAndRender()
   }
 

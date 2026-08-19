@@ -793,11 +793,102 @@ export function stackClaimsDrop(
   return verdict !== null && verdict.ok && inHotZone;
 }
 
+/** One card's `depends_on:` as a reorder would leave it. */
+export interface QueueRewrite {
+  fiberId: string;
+  /** The card this one now comes after — the head for the first position, the
+   *  member above it otherwise. */
+  newDep: string;
+}
+
+/**
+ * Rewire a queue after a row is dragged to a new position.
+ *
+ * The queue is a CHAIN, and the chain is stored as one `depends_on:` per
+ * member pointing at whoever comes before it: the head for position one, the
+ * member above for the rest. So "move row 3 to the top" is not a stored order
+ * anyone can write — it is a handful of edges that change, and this function
+ * says exactly which. Everything else in the queue keeps the predecessor it
+ * had and is not touched, which matters: a write per member would rewrite
+ * frontmatter (and bump `modified_at`) on cards the human did not move.
+ *
+ * `from` and `to` are both indices into `queue` — `to` is the position the row
+ * ENDS UP at, the ordinary array-move reading, so moving 0→2 in [a,b,c] gives
+ * [b,c,a]. Out-of-range or equal indices are a no-op, and a queue of fewer
+ * than two members has no reorder to make.
+ */
+export function reorderQueueWrites(
+  headId: string,
+  queue: readonly string[],
+  from: number,
+  to: number,
+): QueueRewrite[] {
+  if (queue.length < 2) return [];
+  if (!Number.isInteger(from) || !Number.isInteger(to)) return [];
+  if (from < 0 || from >= queue.length) return [];
+  if (to < 0 || to >= queue.length) return [];
+  if (from === to) return [];
+
+  const next = [...queue];
+  const [moved] = next.splice(from, 1);
+  next.splice(to, 0, moved);
+
+  const predecessorBefore = (id: string): string => {
+    const i = queue.indexOf(id);
+    return i <= 0 ? headId : queue[i - 1];
+  };
+
+  const writes: QueueRewrite[] = [];
+  next.forEach((id, i) => {
+    const newDep = i === 0 ? headId : next[i - 1];
+    if (newDep !== predecessorBefore(id)) writes.push({ fiberId: id, newDep });
+  });
+  return writes;
+}
+
+/**
+ * Turn an INSERTION POINT into the final index `reorderQueueWrites` wants.
+ *
+ * The gesture aims at a gap — "put it between rows 2 and 3" — which is a
+ * position in the list BEFORE the row leaves it. Once the row is lifted out,
+ * every gap below it shifts up by one. Keeping that arithmetic here (rather
+ * than in the drop handler) is what lets the drop handler stay three lines and
+ * lets the off-by-one be tested.
+ *
+ * `insertAt` runs 0..length inclusive: 0 is above the first row, `length` is
+ * below the last.
+ */
+export function queueDropIndex(from: number, insertAt: number): number {
+  return insertAt > from ? insertAt - 1 : insertAt;
+}
+
+/**
+ * Is this card's work ACCEPTED — the one state that ends a queue?
+ *
+ * `tempered: true` is the only verdict that satisfies a dependency, so it is
+ * the only state a card cannot be queued behind: the dep would be met the
+ * instant it was written and the card would never wait at all. Everything else
+ * — open, active, awaiting review, even COMPOSTED — leaves a dependency
+ * genuinely unsatisfied, and a stack behind it means exactly what it says.
+ *
+ * `status: closed` is deliberately NOT the test. It covers awaiting review
+ * (live work waiting on a human) and composted alike, and refusing those was
+ * over-restriction: it made a draft dragged onto an awaiting-review card fall
+ * through to the column and get transitioned instead.
+ */
+export function isAccepted(card: Pick<StackCandidate, 'tempered'>): boolean {
+  return card.tempered === true;
+}
+
 /** What the stack gesture needs to know about a card to rule on a drop.
  *  `KanbanCard` satisfies it. */
 export interface StackCandidate {
   id: string;
   status: string;
+  /** The human's verdict, when there is one: `true` tempered, `false`
+   *  composted, absent means no verdict yet (open, active, or awaiting
+   *  review). This — not `status` — is what settles a card. */
+  tempered?: boolean;
   shuttleKind?: string;
   isCycle?: boolean;
   dependsOn?: readonly string[];
@@ -833,6 +924,7 @@ export function stackDropVerdict(
   source: StackCandidate,
   target: StackCandidate,
   dependents: ReadonlyMap<string, readonly string[]>,
+  lookup?: (id: string) => StackCandidate | undefined,
 ): StackVerdict {
   if (source.id === target.id) return { ok: false, reason: 'a card cannot wait on itself' };
   if (source.isCycle || target.isCycle) {
@@ -841,7 +933,12 @@ export function stackDropVerdict(
   if (source.dependsOnShape === 'list') {
     return { ok: false, reason: 'its depends_on was written by hand — edit it there' };
   }
-  if (source.status === 'closed') return { ok: false, reason: 'it is already closed' };
+  // NOTE what is NOT refused here: the source's lifecycle state. Any card may
+  // be queued behind another. An awaiting-review or composted source means "if
+  // this reopens, it reopens behind that one" — and while it stays closed the
+  // gate exempts it anyway (`depGated` never rests a closed card), so the edge
+  // is simply inert until the day it becomes true. The one refusal this
+  // gesture makes about lifecycle is about the TAIL, below.
   if (source.shuttleKind === 'standing') {
     return { ok: false, reason: 'a standing role runs on its schedule' };
   }
@@ -854,6 +951,16 @@ export function stackDropVerdict(
   // and `S.depends_on = X` closes S←X←S, gating both forever with no gesture
   // that undoes it. Nothing about T said so.
   const tail = chainTail(target.id, dependents);
+  // THE ONE LIFECYCLE REFUSAL, and it is about the TAIL — the card the edge
+  // actually points at, not the one the cursor happened to be over. A tempered
+  // tail would promise nothing: `dependsOnSatisfied` reads true the moment the
+  // edge is written, so the card would never wait. Composted is not refused —
+  // a dep on composted work is still unsatisfied, so the stack means what it
+  // says.
+  const tailCard = tail === target.id ? target : lookup?.(tail);
+  if (tailCard && isAccepted(tailCard)) {
+    return { ok: false, reason: 'that one is already tempered — there is nothing left to wait for' };
+  }
   if (stackWouldCycle(source.id, tail, dependents)) {
     return { ok: false, reason: 'that would make a loop' };
   }

@@ -20,7 +20,9 @@ import {
   inStackHotZone,
   isCycleFiber,
   lensCycles,
+  queueDropIndex,
   queuedBehind,
+  reorderQueueWrites,
   restingUntil,
   stackClaimsDrop,
   stackDropVerdict,
@@ -42,6 +44,7 @@ import {
   phasePillLabel,
   sortDatedByReturn,
   splitStashByReturn,
+  unsettledDependents,
 } from './KanbanSurfaces.js'
 import { chromeRestartDirective, chromeRestartNeeded, sessionWindow } from './FiberDetailModal.js'
 import { isoDayLocal } from './civilDay.js'
@@ -1669,7 +1672,8 @@ describe('chains, tails and the drop that authors them', () => {
   })
 
   it('refuses the sources a sequence position would be dead frontmatter on', () => {
-    expect(stackDropVerdict(card('d', { status: 'closed' }), card('a'), chain).ok).toBe(false)
+    // A CLOSED source is not among them: see 'who may be stacked, and behind
+    // what' — only a tempered TAIL is refused on lifecycle grounds.
     expect(stackDropVerdict(card('d', { shuttleKind: 'standing' }), card('a'), chain).ok).toBe(false)
     expect(stackDropVerdict(card('d', { shuttleKind: 'pinned' }), card('a'), chain).ok).toBe(false)
     expect(stackDropVerdict(card('d', { isCycle: true }), card('a'), chain).ok).toBe(false)
@@ -1690,6 +1694,162 @@ describe('chains, tails and the drop that authors them', () => {
 
   it('refuses a drop that would rewrite the edge the card already has', () => {
     expect(stackDropVerdict(card('c', { dependsOn: ['b'] }), card('b'), chain).ok).toBe(false)
+  })
+})
+
+/** A minimal card, for tests that care only about ids, status and deps. */
+const queueCard = (id: string, over: Partial<KanbanCard> = {}): KanbanCard => ({
+  id,
+  name: id,
+  path: `.felt/${id}.md`,
+  originId: 'local',
+  status: 'open',
+  createdAt: at0,
+  dependsOnSatisfied: true,
+  effectiveHorizon: 'now',
+  drifted: false,
+  isCycle: false,
+  cycleStart: null,
+  ...over,
+})
+
+/** A board response holding exactly these cards: open ones on Drafts, closed
+ *  ones on the past lane. Enough for the graph builders, which read every list
+ *  `boardCards` collects. */
+const queueResp = (...cards: KanbanCard[]): KanbanResponse => ({
+  feltHost: 'here',
+  now: { drafts: cards.filter((c) => c.status === 'open'), inFlight: [], awaitingReview: [] },
+  timeline: { past: cards.filter((c) => c.status === 'closed'), futureDated: [] },
+  stash: [],
+  pinned: [],
+  cycles: [],
+  totals: { drafts: 0, inFlight: 0, awaitingReview: 0, past: 0, futureDated: 0, stash: 0, pinned: 0 },
+  temperedTotal: 0,
+  staleness: {},
+  generatedAt: NOW,
+})
+
+describe('who may be stacked, and behind what', () => {
+  // ONE lifecycle refusal, and it is TEMPERED — the only verdict that
+  // satisfies a dependency, and so the only state that cannot hold a card
+  // behind it. Everything else may be stacked on and stacked behind.
+  // Refusing on `closed` was over-restriction, and it did something
+  // startling: a draft dragged onto an awaiting-review card fell through to
+  // the column and got transitioned to awaiting review itself.
+  const edges = (...pairs: [string, string[]][]): Map<string, string[]> =>
+    buildDependents(pairs.map(([id, dependsOn]) => ({ id, dependsOn })))
+  const c = (id: string, over: Partial<StackCandidate> = {}): StackCandidate =>
+    ({ id, status: 'open', ...over })
+  const awaiting = (id: string): StackCandidate => c(id, { status: 'closed' })
+  const temperedCard = (id: string): StackCandidate =>
+    c(id, { status: 'closed', tempered: true })
+  const compostedCard = (id: string): StackCandidate =>
+    c(id, { status: 'closed', tempered: false })
+  const none = new Map<string, string[]>()
+
+  it('stacks a draft behind an AWAITING-REVIEW card', () => {
+    expect(stackDropVerdict(c('d'), awaiting('a'), none)).toEqual({ ok: true, tail: 'a' })
+  })
+
+  it('refuses a TEMPERED target — the dep would be satisfied the moment it is written', () => {
+    expect(stackDropVerdict(c('d'), temperedCard('a'), none).ok).toBe(false)
+  })
+
+  it('ALLOWS a composted target — a dep on abandoned work is still unsatisfied', () => {
+    expect(stackDropVerdict(c('d'), compostedCard('a'), none)).toEqual({ ok: true, tail: 'a' })
+  })
+
+  it('lets an AWAITING-REVIEW card be the source — it queues for when it reopens', () => {
+    expect(stackDropVerdict(awaiting('d'), c('a'), none)).toEqual({ ok: true, tail: 'a' })
+  })
+
+  it('does not care what the SOURCE lifecycle is — any card may be queued', () => {
+    expect(stackDropVerdict(temperedCard('d'), c('a'), none)).toEqual({ ok: true, tail: 'a' })
+    expect(stackDropVerdict(compostedCard('d'), c('a'), none)).toEqual({ ok: true, tail: 'a' })
+  })
+
+  it('appends BEHIND an awaiting-review tail rather than skipping it', () => {
+    // a ← b, and b is awaiting review. Dropping d onto a must land behind b.
+    const chain = edges(['a', []], ['b', ['a']])
+    const lookup = (id: string): StackCandidate | undefined =>
+      id === 'b' ? awaiting('b') : undefined
+    expect(stackDropVerdict(c('d'), c('a'), chain, lookup)).toEqual({ ok: true, tail: 'b' })
+  })
+
+  it('refuses a TEMPERED tail reached through the chain', () => {
+    const chain = edges(['a', []], ['b', ['a']])
+    const lookup = (id: string): StackCandidate | undefined =>
+      id === 'b' ? temperedCard('b') : undefined
+    expect(stackDropVerdict(c('d'), c('a'), chain, lookup).ok).toBe(false)
+  })
+
+  it('still catches a loop that runs through an awaiting-review member', () => {
+    const chain = edges(['a', []], ['b', ['a']])
+    expect(stackDropVerdict(awaiting('b'), c('a'), chain).ok).toBe(false)
+  })
+
+  it('keeps the two graphs apart: the chip ignores closed cards, the chain does not', () => {
+    const resp = queueResp(
+      queueCard('a'),
+      queueCard('b', { status: 'closed', closedAt: at0, dependsOn: ['a'] }),
+    )
+    expect(queuedBehind('a', liveDependents(resp))).toEqual([])
+    expect(chainTail('a', unsettledDependents(resp))).toBe('b')
+  })
+
+  it('drops a TEMPERED member from the chain graph — an accepted card ends the queue', () => {
+    const resp = queueResp(
+      queueCard('a'),
+      queueCard('b', { status: 'closed', tempered: true, closedAt: at0, dependsOn: ['a'] }),
+      queueCard('x', { status: 'closed', tempered: false, closedAt: at0, dependsOn: ['a'] }),
+    )
+    // `b` is gone from the graph; the composted `x` is still a chain member.
+    expect(chainTail('a', unsettledDependents(resp))).toBe('x')
+  })
+})
+
+describe('reordering the queue rewires the chain', () => {
+  // The queue is stored as one `depends_on:` per member pointing at whoever
+  // comes before it. "Move row 3 to the top" is therefore not a position
+  // anyone can write — it is a handful of edges, and only the ones that
+  // actually changed should be written.
+  it('moves a middle member to the front, rewiring only what moved', () => {
+    // head ← a ← b ← c becomes head ← b ← a ← c. Every one of the three has a
+    // new predecessor (c's was b, and is now a), so all three are written —
+    // "minimal" means "changed", not "few".
+    expect(reorderQueueWrites('head', ['a', 'b', 'c'], 1, 0)).toEqual([
+      { fiberId: 'b', newDep: 'head' },
+      { fiberId: 'a', newDep: 'b' },
+      { fiberId: 'c', newDep: 'a' },
+    ])
+  })
+
+  it('moves the front member to the back', () => {
+    // head ← a ← b ← c becomes head ← b ← c ← a. `c` keeps its predecessor
+    // `b` and is NOT written — that is the minimality that matters.
+    expect(reorderQueueWrites('head', ['a', 'b', 'c'], 0, 2)).toEqual([
+      { fiberId: 'b', newDep: 'head' },
+      { fiberId: 'a', newDep: 'c' },
+    ])
+  })
+
+  it('writes NOTHING for a move that changes no predecessor', () => {
+    expect(reorderQueueWrites('head', ['a', 'b', 'c'], 1, 1)).toEqual([])
+    expect(reorderQueueWrites('head', ['a', 'b', 'c'], -1, 0)).toEqual([])
+    expect(reorderQueueWrites('head', ['a', 'b', 'c'], 0, 9)).toEqual([])
+  })
+
+  it('has no reorder to make in a queue of one', () => {
+    expect(reorderQueueWrites('head', ['a'], 0, 0)).toEqual([])
+    expect(reorderQueueWrites('head', [], 0, 0)).toEqual([])
+  })
+
+  it('turns the gap the human aimed at into the index the rewiring wants', () => {
+    // Dropping row 0 into the gap below row 2 (insertAt 3) lands it at index 2
+    // once it has been lifted out; gaps above the row are unaffected.
+    expect(queueDropIndex(0, 3)).toBe(2)
+    expect(queueDropIndex(2, 0)).toBe(0)
+    expect(queueDropIndex(1, 1)).toBe(1)
   })
 })
 
@@ -1736,51 +1896,20 @@ describe('a card claims a drop only when it really is a stack', () => {
 })
 
 describe('the queue counts only work that is actually held', () => {
-  const cardOf = (id: string, over: Partial<KanbanCard> = {}): KanbanCard => ({
-    id,
-    name: id,
-    path: `.felt/${id}.md`,
-    originId: 'local',
-    status: 'open',
-    createdAt: at0,
-    dependsOnSatisfied: true,
-    effectiveHorizon: 'now',
-    drifted: false,
-    isCycle: false,
-    cycleStart: null,
-    ...over,
-  })
-  const respOf = (...cards: KanbanCard[]): KanbanResponse => ({
-    feltHost: 'here',
-    now: {
-      drafts: cards.filter((c) => c.status === 'open'),
-      inFlight: [],
-      awaitingReview: [],
-    },
-    timeline: { past: cards.filter((c) => c.status === 'closed'), futureDated: [] },
-    stash: [],
-    pinned: [],
-    cycles: [],
-    totals: { drafts: 0, inFlight: 0, awaitingReview: 0, past: 0, futureDated: 0, stash: 0, pinned: 0 },
-    temperedTotal: 0,
-    staleness: {},
-    generatedAt: NOW,
-  })
-
   it('shows nothing behind a head whose followers are all tempered', () => {
-    const resp = respOf(
-      cardOf('a'),
-      cardOf('b', { status: 'closed', tempered: true, closedAt: at0, dependsOn: ['a'] }),
-      cardOf('c', { status: 'closed', tempered: false, closedAt: at0, dependsOn: ['a'] }),
+    const resp = queueResp(
+      queueCard('a'),
+      queueCard('b', { status: 'closed', tempered: true, closedAt: at0, dependsOn: ['a'] }),
+      queueCard('c', { status: 'closed', tempered: false, closedAt: at0, dependsOn: ['a'] }),
     )
     expect(queuedBehind('a', liveDependents(resp))).toEqual([])
   })
 
   it('still counts the followers that are genuinely waiting', () => {
-    const resp = respOf(
-      cardOf('a'),
-      cardOf('b', { status: 'closed', tempered: true, closedAt: at0, dependsOn: ['a'] }),
-      cardOf('d', { dependsOn: ['a'] }),
+    const resp = queueResp(
+      queueCard('a'),
+      queueCard('b', { status: 'closed', tempered: true, closedAt: at0, dependsOn: ['a'] }),
+      queueCard('d', { dependsOn: ['a'] }),
     )
     expect(queuedBehind('a', liveDependents(resp))).toEqual(['d'])
   })

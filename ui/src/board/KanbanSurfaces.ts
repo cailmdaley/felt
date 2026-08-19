@@ -19,13 +19,21 @@ import {
   buildDependents,
   humanizeCron,
   inStackHotZone,
+  isAccepted,
   lensCycles,
+  queueDropIndex,
   queuedBehind,
+  reorderQueueWrites,
   stackClaimsDrop,
   stackDropVerdict,
   upcomingCycleDropTargets,
 } from './KanbanRules.js'
-import type { CycleDropTarget, CycleLensChip, StackVerdict } from './KanbanRules.js'
+import type {
+  CycleDropTarget,
+  CycleLensChip,
+  QueueRewrite,
+  StackVerdict,
+} from './KanbanRules.js'
 import { deriveCycleLens, isSleepingOnSchedule } from './KanbanReadModel.js'
 import type { CycleLens } from './KanbanReadModel.js'
 
@@ -46,6 +54,11 @@ const NOW_COLUMN_ORDER: NowColumnKind[] = ['drafts', 'inFlight', 'awaitingReview
 // list is partitioned by it. Two weeks is as far ahead as "put this down on a
 // day" stays a day you can picture; past that you write a `due:`.
 const DRAG_HORIZON_DAYS = 14
+
+/** The dataTransfer type a peek-list row drag carries. Its own MIME type on
+ *  purpose: no other drop target on the board reads it, so a row in flight
+ *  cannot be mistaken for a card being moved. */
+const QUEUE_ROW_MIME = 'application/x-queue-row'
 
 /**
  * Daemon runtime phases that earn a chip on an In-flight card.
@@ -155,6 +168,10 @@ interface KanbanSurfaceRendererOptions {
    *  drop. The renderer has already ruled the drop legal (`stackDropVerdict`)
    *  and resolved the chain tail. */
   stack?: (card: KanbanCard, tailId: string) => void | Promise<void>
+  /** Commit a reordered queue — one `depends_on:` write per card whose
+   *  predecessor actually changed (`reorderQueueWrites`). Omit to render the
+   *  peek list read-only. */
+  reorderQueue?: (writes: QueueRewrite[]) => void | Promise<void>
   openDetail: (card: KanbanCard) => void
   openWorker?: (tmuxSessionName: string, shuttleHost?: string) => void
   /** Release the boot quarantine on a card's owning host — the `⏹︎ held` →
@@ -185,6 +202,7 @@ export class KanbanSurfaceRenderer {
   ) => void | Promise<void>
   private readonly pin: (card: KanbanCard) => void | Promise<void>
   private readonly stack?: (card: KanbanCard, tailId: string) => void | Promise<void>
+  private readonly reorderQueue?: (writes: QueueRewrite[]) => void | Promise<void>
   private readonly openDetail: (card: KanbanCard) => void
   private readonly openWorker?: (tmuxSessionName: string, shuttleHost?: string) => void
   private readonly releaseQuarantine?: (shuttleHost?: string) => void | Promise<void>
@@ -209,8 +227,14 @@ export class KanbanSurfaceRenderer {
   /** Reverse dependency edges for the response currently on screen, built once
    *  per response rather than once per card. Keyed by the response object
    *  itself, so a new poll rebuilds and a re-render does not. */
+  /** The peek row currently being dragged, and which list it belongs to — the
+   *  queue reorder's entire drag state. Deliberately NOT `dragSourceId`: see
+   *  `installQueueRowDrag`. */
+  private queueDrag: { list: HTMLElement; from: number } | null = null
   private dependentsFor: KanbanResponse | null = null
   private dependentsMap: Map<string, string[]> = new Map()
+  private chainDependentsFor: KanbanResponse | null = null
+  private chainDependentsMap: Map<string, string[]> = new Map()
 
   constructor(options: KanbanSurfaceRendererOptions) {
     this.getDragSourceId = options.getDragSourceId
@@ -221,6 +245,7 @@ export class KanbanSurfaceRenderer {
     this.setSurface = options.setSurface
     this.pin = options.pin
     this.stack = options.stack
+    this.reorderQueue = options.reorderQueue
     this.openDetail = options.openDetail
     this.openWorker = options.openWorker
     this.releaseQuarantine = options.releaseQuarantine
@@ -1403,8 +1428,8 @@ export class KanbanSurfaceRenderer {
   }
 
   /**
-   * Reverse dependency edges over every card the board is holding — who is
-   * queued behind whom. Rebuilt only when the response object changes.
+   * Reverse edges over the cards actually WAITING — what "+N queued" counts.
+   * Rebuilt only when the response object changes.
    */
   private dependents(): Map<string, string[]> {
     const resp = this.getLastResponse()
@@ -1412,6 +1437,27 @@ export class KanbanSurfaceRenderer {
     this.dependentsFor = resp
     this.dependentsMap = liveDependents(resp)
     return this.dependentsMap
+  }
+
+  /**
+   * Reverse edges over every card that is not SETTLED — the graph the stack
+   * gesture reasons over.
+   *
+   * A different question from the chip's, and so a different graph. The chip
+   * asks "what work is this holding up?", and a closed follower is not being
+   * held up by anything (the gate exempts it). But a DROP has to find the real
+   * end of the chain, and a chain whose last member sits in awaiting review
+   * still ends there — resolving the tail off the chip's graph would skip that
+   * member and quietly queue the new card beside it instead of behind it. The
+   * cycle check reads this graph for the same reason: a loop through a closed
+   * card is still a loop.
+   */
+  private chainDependents(): Map<string, string[]> {
+    const resp = this.getLastResponse()
+    if (resp === this.chainDependentsFor) return this.chainDependentsMap
+    this.chainDependentsFor = resp
+    this.chainDependentsMap = unsettledDependents(resp)
+    return this.chainDependentsMap
   }
 
   /**
@@ -1445,11 +1491,29 @@ export class KanbanSurfaceRenderer {
     const list = document.createElement('ol')
     list.className = 'kbn-card-queued-list'
     list.hidden = true
-    for (const name of names) {
-      const li = document.createElement('li')
-      li.textContent = name
-      list.append(li)
+    // REORDERABLE only when the whole chain is scalar-shaped. Every row a
+    // reorder touches gets its `depends_on:` rewritten, so one hand-written
+    // list anywhere in the queue takes the affordance away from all of them —
+    // the same rule the stack drop follows, and for the same reason: a fan-in
+    // someone assembled by hand carries intent no drag can reconstruct. The
+    // rows simply are not draggable; there is nothing to explain because
+    // nothing was refused.
+    const members = queued.map((id) => findCardById(resp, id))
+    const reorderable =
+      !!this.reorderQueue &&
+      queued.length > 1 &&
+      members.every((m) => m?.dependsOnShape === 'scalar')
+    if (reorderable) {
+      list.classList.add('kbn-card-queued-list--reorderable')
+      chip.title = `${chip.title}. Drag a row to reorder the queue.`
     }
+    names.forEach((name, i) => {
+      const li = document.createElement('li')
+      li.className = 'kbn-card-queued-row'
+      li.textContent = name
+      if (reorderable) this.installQueueRowDrag(li, list, card.id, queued, i)
+      list.append(li)
+    })
     chip.addEventListener('click', (e) => {
       e.stopPropagation()
       list.hidden = !list.hidden
@@ -1460,16 +1524,93 @@ export class KanbanSurfaceRenderer {
   }
 
   /**
+   * Drag one row of the peek list to a new position in the queue.
+   *
+   * SELF-CONTAINED, by construction. The row carries its own dataTransfer type
+   * — never `text/x-fiber-id` — and never touches `dragSourceId`, which is the
+   * flag every other drop target on the board arms from. So a row in flight
+   * finds the columns, the sections, the day cells and the stack targets all
+   * inert: each of them returns early on a null drag source, none of them
+   * calls `preventDefault`, and a release anywhere outside this list does
+   * nothing at all. That is the whole isolation mechanism, and it is why the
+   * row must not reuse the card's drag channel however convenient it looks.
+   *
+   * `dragstart` also stops propagation: the row lives inside a `draggable`
+   * card, and letting the event bubble would have the card announce ITSELF as
+   * the thing being dragged.
+   */
+  private installQueueRowDrag(
+    row: HTMLElement,
+    list: HTMLElement,
+    headId: string,
+    queue: readonly string[],
+    index: number,
+  ): void {
+    row.draggable = true
+    row.dataset.queueIndex = String(index)
+    const clearMarks = (): void => {
+      for (const el of list.querySelectorAll('.kbn-queue-drop-before, .kbn-queue-drop-after')) {
+        el.classList.remove('kbn-queue-drop-before', 'kbn-queue-drop-after')
+      }
+    }
+    row.addEventListener('dragstart', (e) => {
+      e.stopPropagation()
+      this.queueDrag = { list, from: index }
+      row.classList.add('kbn-queue-row-dragging')
+      if (e.dataTransfer) {
+        e.dataTransfer.effectAllowed = 'move'
+        // Our own MIME type. Nothing else on the board reads it, and nothing
+        // this drag carries can be mistaken for a fiber being moved.
+        e.dataTransfer.setData(QUEUE_ROW_MIME, String(index))
+      }
+    })
+    row.addEventListener('dragend', (e) => {
+      e.stopPropagation()
+      row.classList.remove('kbn-queue-row-dragging')
+      this.queueDrag = null
+      clearMarks()
+    })
+    // Where the row would land: above or below this one, by which half of it
+    // the cursor is in. The gap is what the human is aiming at, so the gap is
+    // what gets the indicator.
+    const insertionFor = (e: DragEvent): number => {
+      const r = row.getBoundingClientRect()
+      return e.clientY < r.top + r.height / 2 ? index : index + 1
+    }
+    row.addEventListener('dragover', (e) => {
+      const drag = this.queueDrag
+      if (!drag || drag.list !== list) return
+      e.preventDefault()
+      e.stopPropagation()
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
+      clearMarks()
+      const insertAt = insertionFor(e)
+      row.classList.add(insertAt === index ? 'kbn-queue-drop-before' : 'kbn-queue-drop-after')
+    })
+    row.addEventListener('drop', (e) => {
+      const drag = this.queueDrag
+      if (!drag || drag.list !== list) return
+      e.preventDefault()
+      e.stopPropagation()
+      const to = queueDropIndex(drag.from, insertionFor(e))
+      this.queueDrag = null
+      clearMarks()
+      const writes = reorderQueueWrites(headId, queue, drag.from, to)
+      if (writes.length === 0) return
+      void this.reorderQueue?.(writes)
+    })
+  }
+
+  /**
    * Make a card a STACK TARGET: dropping another card on it means "this one
    * goes after that one".
    *
-   * The handler claims the event (`stopPropagation`) whenever the drop is a
-   * legal stack, so a card-onto-card gesture inside a column reads as sequence
-   * rather than falling through to the column's lifecycle transition. An
-   * ILLEGAL stack is claimed too — a refused drop must say why (a flash plus a
-   * banner), never quietly do a different thing than the one you aimed at.
-   * With no drag in progress, or no `stack` wired, nothing is intercepted and
-   * the column keeps every gesture it had.
+   * The card claims the event only for a DELIBERATE, legal stack — an ok
+   * verdict released in its hot zone (`stackClaimsDrop`). Anything else is
+   * left entirely alone: no `preventDefault`, no `stopPropagation`, no
+   * highlight, so the column's own handler runs on the bubble and every
+   * lifecycle drag that worked before sequences existed still works when
+   * released over a card.
    */
   private installStackTarget(el: HTMLElement, target: KanbanCard): void {
     if (!this.stack) return
@@ -1478,7 +1619,9 @@ export class KanbanSurfaceRenderer {
       if (!sourceId || sourceId === target.id) return null
       const source = findCardById(this.getLastResponse(), sourceId)
       if (!source) return null
-      return stackDropVerdict(source, target, this.dependents())
+      return stackDropVerdict(source, target, this.chainDependents(), (id) =>
+        findCardById(this.getLastResponse(), id) ?? undefined,
+      )
     }
     const claims = (e: DragEvent): boolean =>
       stackClaimsDrop(
@@ -2016,6 +2159,20 @@ export function boardCards(resp: KanbanResponse | null): KanbanCard[] {
  */
 export function liveDependents(resp: KanbanResponse | null): Map<string, string[]> {
   return buildDependents(boardCards(resp).filter((c) => c.status !== 'closed'))
+}
+
+/**
+ * The reverse dependency graph the STACK GESTURE reasons over: every card that
+ * has not been ACCEPTED.
+ *
+ * Wider than `liveDependents` by the closed-but-unaccepted cards — awaiting
+ * review and composted — and the difference is the point (see
+ * `chainDependents`). Only a tempered card leaves the graph: it is the one
+ * state that satisfies a dependency, so it is the one state that genuinely
+ * ends a chain.
+ */
+export function unsettledDependents(resp: KanbanResponse | null): Map<string, string[]> {
+  return buildDependents(boardCards(resp).filter((c) => !isAccepted(c)))
 }
 
 export function findCardById(resp: KanbanResponse | null, id: string): KanbanCard | null {

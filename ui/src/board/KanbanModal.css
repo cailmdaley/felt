@@ -1642,6 +1642,25 @@
   border-radius: 2px;
 }
 .kbn-card-queued-list li { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* A reorderable queue: the rows are the order, so they say they can be moved.
+   `grab` and a hairline gutter are the whole affordance — a peek list is a
+   thing you read first and rearrange second, and a handle per row would make
+   the reading worse to advertise the rarer gesture. */
+.kbn-card-queued-list--reorderable .kbn-card-queued-row {
+  cursor: grab;
+  padding-left: 4px;
+  border-left: 1px solid transparent;
+}
+.kbn-card-queued-list--reorderable .kbn-card-queued-row:hover {
+  border-left-color: rgba(107, 78, 113, 0.45);
+  background: rgba(107, 78, 113, 0.08);
+}
+.kbn-card-queued-row.kbn-queue-row-dragging { opacity: 0.45; cursor: grabbing; }
+/* The insertion point, drawn in the gap the row will land in — a line, not a
+   filled target, because what is being chosen is a POSITION BETWEEN rows and
+   highlighting a row would name the wrong thing. */
+.kbn-queue-drop-before { box-shadow: inset 0 2px 0 -1px rgba(107, 78, 113, 0.85); }
+.kbn-queue-drop-after { box-shadow: inset 0 -2px 0 -1px rgba(107, 78, 113, 0.85); }
 /* Card-onto-card drag: the card's HOT ZONE is armed as a stack target. Plum
    rather than the ochre of a column/section drop, because the gesture writes a
    different kind of thing — a relation between two cards, not a move of one.
