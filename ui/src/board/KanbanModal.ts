@@ -212,7 +212,11 @@ export class KanbanModal {
   private set dragSourceId(value: string | null) {
     this._dragSourceId = value
     if (this.body) this.body.classList.toggle('kbn-dragging', value !== null)
-    this.syncDragHorizon(value !== null)
+    // `isDragging()`, not `value !== null`: a peek row's drag opens the same
+    // strip and must not be closed by a card drag ending.
+    // `surfaces` is optional-chained only for order: this setter is reachable
+    // from the renderer's own callback, which cannot run before it exists.
+    this.syncDragHorizon(value !== null || (this.surfaces?.isDragging() ?? false))
   }
   private dragAutoScrollFrame: number | null = null
   private dragAutoScrollVelocity = 0
@@ -277,6 +281,10 @@ export class KanbanModal {
       openDetail: (card) => this.detailModal?.open(card),
       openWorker: this.openWorkerAfterGesture,
       releaseQuarantine: (host) => this.releaseQuarantine(host),
+      // A peek row's drag never touches `dragSourceId`, so this is how the
+      // horizon hears about it — the strip has to be there for a row too, now
+      // that a row can be put down on a day.
+      onDragActivity: () => this.syncDragHorizon(this.surfaces.isDragging()),
       // The masthead dissolved; its three actions now live in the column heads
       // (Drafts → Stash, In flight → New idea, Awaiting review → Refresh).
       onStashClick: this.onStashClick,
@@ -1175,7 +1183,7 @@ export class KanbanModal {
   private async unqueueRow(
     fiberId: string,
     splice: QueueRewrite[],
-    drop: { column?: ColumnKind; horizon?: HorizonKind },
+    drop: { column?: ColumnKind; horizon?: HorizonKind; due?: string | null },
   ): Promise<void> {
     const card = findCardById(this.lastResponse, fiberId)
     if (!card) return
@@ -1246,11 +1254,13 @@ export class KanbanModal {
         return
       }
       if (drop.horizon !== undefined) {
-        // Dropped back into Resting: out of the queue, but still put down. The
+        // Dropped on a surface: out of the queue, but still put down. The
         // horizon write is what keeps it there — without it, an ungated card
         // would walk straight back onto the desk and the drop would read as
-        // ignored.
-        this.setSurface(released, drop.horizon)
+        // ignored. `due` is the day-cell / cycle-chip half of the same
+        // sentence: undefined from a plain section drop (leave the date alone),
+        // a date from a day, null from today (onto the desk, now).
+        this.setSurface(released, drop.horizon, { due: drop.due })
         return
       }
       await this.fetchAndRender()

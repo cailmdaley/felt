@@ -631,7 +631,7 @@
   border-radius: 3px;
 }
 /* Cells share the width and only scroll when they cannot fit — a wide board
-   gets generous targets, a narrow one keeps all fourteen days reachable (with
+   gets generous targets, a narrow one keeps all three weeks reachable (with
    the drag edge-scroll in installEdgeScroll). */
 .kbn-draghorizon-row {
   display: flex;
@@ -721,33 +721,6 @@
    Desk's cycle lens row: a chip that names a cycle wears the same clothes
    wherever it stands. Only the plate around them differs. */
 
-/* Chapter chips — the upcoming cycles, offered after the last day cell. The
-   vocabulary is the Chronicle band's verbatim (ochre tint, hairline edge,
-   italic serif), because a chip here and a band there are the same cycle. They
-   size to their own name (`flex: 0 0 auto`) rather than sharing the days'
-   stretch: a chapter is one target, not a slice of the calendar. */
-.kbn-draghorizon-cycle {
-  flex: 0 0 auto;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 1px;
-  max-width: 190px;
-  margin: 3px 4px;
-  padding: 0 8px;
-  border: 0.5px solid rgba(154, 123, 53, 0.42);
-  border-radius: 7px;
-  background: rgba(196, 147, 51, 0.16);
-  overflow: hidden;
-}
-/* The seam between the calendar and the chapters — days run out here. */
-.kbn-draghorizon-cycle-first {
-  margin-left: 10px;
-  border-left: 1px solid rgba(122, 111, 92, 0.45);
-}
-/* A cycle already underway is dimmer: it is a legal target, but it means
-   "later this chapter", not "the chapter after this one". */
-.kbn-draghorizon-cycle-running { background: rgba(196, 147, 51, 0.09); }
 .kbn-cyclechip-name {
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
   font-style: italic;
@@ -768,15 +741,6 @@
   color: #A89B83;
   white-space: nowrap;
 }
-/* Same loud step as a day cell, in the chip's own clothes: filled ochre, solid
-   edge, and a small lift so it reads through a ghost passing over it. */
-.kbn-draghorizon-cycle.kbn-timeline-dropcol-active {
-  background: rgba(196, 147, 51, 0.5);
-  border-color: #9A7B35;
-  transform: scale(1.05);
-}
-.kbn-draghorizon-cycle.kbn-timeline-dropcol-active .kbn-cyclechip-name { color: #4A3C1C; }
-.kbn-draghorizon-cycle.kbn-timeline-dropcol-active .kbn-cyclechip-span { color: #6E5A2E; }
 
 /* ── The cycle lens row ──────────────────────────────────────────────────────
    A quiet line above the columns: one chip per live chapter. It is chrome that
@@ -842,6 +806,19 @@
   font-size: calc(9px * var(--kbn-type-scale, 1));
   color: #6E5A2E;
 }
+/* ARMED: a lens chip under the cursor mid-drag. The chapter chips used to live
+   on the drag horizon and wear this; they are gone from the strip, and the
+   always-visible row inherits the language verbatim — same loud step as a day
+   cell, in the chip's own clothes: filled ochre, solid edge, and a small lift
+   so it reads through a ghost passing over it. */
+.kbn-lens-chip.kbn-timeline-dropcol-active {
+  background: rgba(196, 147, 51, 0.5);
+  border-color: #9A7B35;
+  transform: scale(1.05);
+}
+.kbn-lens-chip.kbn-timeline-dropcol-active .kbn-cyclechip-name { color: #4A3C1C; }
+.kbn-lens-chip.kbn-timeline-dropcol-active .kbn-cyclechip-span { color: #6E5A2E; }
+.kbn-lens-chip.kbn-timeline-dropcol-active .kbn-lens-chip-count { color: #4A3C1C; }
 
 /* What the lens does to the columns. A receded card is DIMMED, never hidden and
    never disabled — it still takes clicks and still drags, because the lens is a

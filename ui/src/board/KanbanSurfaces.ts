@@ -61,9 +61,15 @@ const NOW_COLUMN_ORDER: NowColumnKind[] = ['drafts', 'inFlight', 'awaitingReview
 
 // How many days forward the drag-reveal horizon offers as drop targets. It is
 // the WIDTH OF A GESTURE SURFACE and nothing else — no card is filed by it, no
-// list is partitioned by it. Two weeks is as far ahead as "put this down on a
-// day" stays a day you can picture; past that you write a `due:`.
-const DRAG_HORIZON_DAYS = 14
+// list is partitioned by it.
+//
+// THREE WEEKS, not two: the chapter chips used to sit at the right end of this
+// strip and eat a third of it, and they now live on the Desk's own always-
+// visible cycle row (`renderCycleLensBar`), which is a live drop target for the
+// length of a drag. The freed width goes back to the calendar, which is what a
+// day strip is for. Three weeks is still inside "a day you can picture"; past
+// that you write a `due:`.
+const DRAG_HORIZON_DAYS = 21
 
 /** The dataTransfer type a peek-list row drag carries. Its own MIME type on
  *  purpose: no other drop target on the board reads it, so a row in flight
@@ -188,7 +194,7 @@ interface KanbanSurfaceRendererOptions {
   unqueueRow?: (
     fiberId: string,
     splice: QueueRewrite[],
-    drop: { column?: ColumnKind; horizon?: HorizonKind },
+    drop: { column?: ColumnKind; horizon?: HorizonKind; due?: string | null },
   ) => void | Promise<void>
   openDetail: (card: KanbanCard) => void
   openWorker?: (tmuxSessionName: string, shuttleHost?: string) => void
@@ -205,6 +211,12 @@ interface KanbanSurfaceRendererOptions {
   /** Re-fetch the board — the Awaiting review head's `↻` action. Always wired
    *  (refresh is never read-only). */
   onRefresh: () => void
+  /** Called whenever a drag this renderer owns starts or ends. The card channel
+   *  is the modal's own (`dragSourceId` is its field), but a PEEK ROW's drag
+   *  lives entirely in here — and the drag horizon has to open for it too, now
+   *  that a row can be dropped on a day. One notification, and the modal
+   *  re-reads `isDragging()`. */
+  onDragActivity?: () => void
 }
 
 export class KanbanSurfaceRenderer {
@@ -224,7 +236,7 @@ export class KanbanSurfaceRenderer {
   private readonly unqueueRow?: (
     fiberId: string,
     splice: QueueRewrite[],
-    drop: { column?: ColumnKind; horizon?: HorizonKind },
+    drop: { column?: ColumnKind; horizon?: HorizonKind; due?: string | null },
   ) => void | Promise<void>
   private readonly openDetail: (card: KanbanCard) => void
   private readonly openWorker?: (tmuxSessionName: string, shuttleHost?: string) => void
@@ -232,6 +244,7 @@ export class KanbanSurfaceRenderer {
   private readonly onStashClick?: () => void
   private readonly onNewIdeaClick?: () => void
   private readonly onRefresh: () => void
+  private readonly onDragActivity?: () => void
   /** Horizontal edge-scroll for the drag horizon. Lets a held card push
    *  against the strip's left/right edge to reach off-screen days. Separate
    *  from the body's vertical drag scroll so the two can run concurrently. */
@@ -289,6 +302,7 @@ export class KanbanSurfaceRenderer {
     this.onStashClick = options.onStashClick
     this.onNewIdeaClick = options.onNewIdeaClick
     this.onRefresh = options.onRefresh
+    this.onDragActivity = options.onDragActivity
   }
 
   /** Render the Now surface: section header + 3-column board. `lens`, when a
@@ -336,6 +350,16 @@ export class KanbanSurfaceRenderer {
    * because a chip here, a chip on the horizon, and a band on the Chronicle are
    * all the same object.
    *
+   * AND EACH CHIP IS A DROP TARGET while a drag is in flight — a card or a peek
+   * list row, the same as a day cell on the strip. That is why the strip has no
+   * chapter chips of its own any more: there was one row of chapters on screen
+   * already, and drawing a second one under the tabs the moment you picked
+   * something up was the board saying the same thing twice. `dropDay` (from
+   * `upcomingCycleDropTargets`) is what a drop here writes — a chip is a day
+   * cell you happen to know by name. A cycle with no `start:` is a deadline
+   * rather than a span, so it has no day to offer and simply refuses, silently
+   * and without claiming the event.
+   *
    * Returns null when there are no live cycles — an empty row would be a line
    * of chrome explaining that you have no chapters.
    */
@@ -348,13 +372,23 @@ export class KanbanSurfaceRenderer {
     const chips = lensCycles(resp?.cycles ?? [], nowMs)
     if (chips.length === 0) return null
 
+    const drops = new Map(
+      upcomingCycleDropTargets(resp?.cycles ?? [], nowMs).map((t) => [t.id, t]),
+    )
+
     const bar = document.createElement('div')
     bar.className = 'kbn-lensbar'
     bar.setAttribute('role', 'region')
-    bar.setAttribute('aria-label', 'Cycles — click one to see the desk through it')
+    bar.setAttribute('aria-label', 'Cycles — click one to see the desk through it, or drop a card on it')
     for (const chip of chips) {
       const count = deriveCycleLens(resp, chip.id, nowMs)?.count ?? 0
-      bar.append(this.renderLensChip(chip, count, chip.id === activeId, onToggle))
+      const el = this.renderLensChip(chip, count, chip.id === activeId, onToggle)
+      const target = drops.get(chip.id)
+      if (target) {
+        this.installTimelineDayDropHandlers(el, target.dropDay, cycleAimLabel(target))
+        el.title = `${el.title} Or drop something here to rest it until ${shortDayLabel(target.dropDay)}.`
+      }
+      bar.append(el)
     }
     return bar
   }
@@ -579,18 +613,15 @@ export class KanbanSurfaceRenderer {
    *
    * Cells flex to fill the width and scroll (with drag edge-scroll) only when
    * they cannot: a wide board gets generous targets, a narrow one keeps all
-   * fourteen reachable.
+   * three weeks reachable.
    *
-   * Past the last day sit the CHAPTER CHIPS: the upcoming cycles, each a drop
-   * target for its own opening day (`upcomingCycleDropTargets` in KanbanRules
-   * decides which cycles qualify and which day each one means). They are the
-   * same drop machinery as a day cell — a chip is a day cell wearing the band's
-   * clothes — because "next sprint" is a date you happen to know by name. With
-   * no upcoming cycles the strip is exactly what it was: days and nothing else.
+   * DAYS ONLY. The chapter chips used to sit past the last day cell, which put
+   * a second copy of the cycle row on screen every time a drag started — the
+   * Desk already shows those chips at the top right, all the time. They are
+   * drop targets THERE now (`renderCycleLensBar`), so "next sprint" is still a
+   * date you can aim at, and the calendar gets the whole strip.
    */
   renderDragHorizon(): HTMLElement {
-    const cycles = upcomingCycleDropTargets(this.getLastResponse()?.cycles ?? [])
-
     const outer = document.createElement('div')
     outer.className = 'kbn-draghorizon-inner'
 
@@ -598,9 +629,7 @@ export class KanbanSurfaceRenderer {
     wrap.className = 'kbn-draghorizon-wrap'
     wrap.dataset.draghorizonWrap = '1'
     wrap.setAttribute('role', 'region')
-    wrap.setAttribute('aria-label', cycles.length > 0
-      ? 'Drop a card on a day, or on a cycle, to schedule or snooze it'
-      : 'Drop a card on a day to schedule or snooze it')
+    wrap.setAttribute('aria-label', 'Drop a card on a day to schedule or snooze it')
 
     const row = document.createElement('div')
     row.className = 'kbn-draghorizon-row'
@@ -615,12 +644,6 @@ export class KanbanSurfaceRenderer {
       cell.dataset.timelineDayIso = day.iso
       this.installTimelineDayDropHandlers(cell, day.iso, dayAimLabel(day), cell)
       row.append(cell)
-    }
-
-    for (const [index, target] of cycles.entries()) {
-      const chip = buildCycleChip(target, index === 0)
-      this.installTimelineDayDropHandlers(chip, target.dropDay, cycleAimLabel(target))
-      row.append(chip)
     }
 
     wrap.append(row)
@@ -758,6 +781,14 @@ export class KanbanSurfaceRenderer {
    *  queue row can reach an off-screen part of the board exactly as a card can.
    *  (A row drag deliberately never sets `dragSourceId`; see
    *  `installQueueRowDrag`.) */
+  /** The one write path for `queueDrag`, so the drag horizon opens and closes
+   *  with a row exactly as it does with a card. */
+  private setQueueDrag(drag: KanbanSurfaceRenderer['queueDrag']): void {
+    const was = this.queueDrag !== null
+    this.queueDrag = drag
+    if (was !== (drag !== null)) this.onDragActivity?.()
+  }
+
   isDragging(): boolean {
     return this.getDragSourceId() !== null || this.queueDrag !== null
   }
@@ -919,6 +950,22 @@ export class KanbanSurfaceRenderer {
     })
   }
 
+  /**
+   * Make an element mean the civil day `iso` for a drop — a day cell on the
+   * drag horizon, or a cycle chip standing in for its opening day.
+   *
+   * It answers TWO drags with one meaning. A card lands here and gets the date.
+   * A PEEK-LIST ROW lands here and gets the same date, with the unqueue
+   * composed in front of it (`handleQueueRowDropOut`): the row leaves its
+   * chain, the chain closes over the gap, and then the day says what it always
+   * says. Dragging a row out is "not behind that one — then", and "then" is
+   * exactly what this surface is for, so the row had no business being unable
+   * to reach it.
+   *
+   * NOTHING IS CLAIMED THAT IS NOT TAKEN: with no drag in flight, or a past
+   * day, or an id this board cannot resolve, the handlers return before
+   * `preventDefault` and the event goes on to whatever is underneath.
+   */
   private installTimelineDayDropHandlers(
     dropCol: HTMLElement,
     iso: string,
@@ -930,15 +977,27 @@ export class KanbanSurfaceRenderer {
       if (iso < today) return false
       return !!findCardById(this.getLastResponse(), id)
     }
+    /** The id this drop would act on — the card being dragged, or the fiber the
+     *  peek row stands for. Null when nothing eligible is in flight. */
+    const heldId = (): string | null => {
+      const row = this.queueDrag
+      if (row) return isDropEligible(row.fiberId) ? row.fiberId : null
+      const dragSourceId = this.getDragSourceId()
+      if (!dragSourceId) return null
+      return isDropEligible(dragSourceId) ? dragSourceId : null
+    }
     const setActive = (active: boolean): void => {
       dropCol.classList.toggle('kbn-timeline-dropcol-active', active)
       axisCell?.classList.toggle('kbn-timeline-day-drop-active', active)
       if (aimLabel) this.setAim(dropCol, active ? aimLabel : null)
     }
+    /** What this day means for `id`, as the drop payload both paths share. */
+    const dayMeaning = (id: string): { horizon: HorizonKind; due: string | null } =>
+      iso === isoDay(new Date())
+        ? { horizon: 'now', due: null }
+        : { horizon: dayDropHorizon(this.getLastResponse(), id), due: iso }
     dropCol.addEventListener('dragover', (e) => {
-      const dragSourceId = this.getDragSourceId()
-      if (!dragSourceId) return
-      if (!isDropEligible(dragSourceId)) return
+      if (heldId() === null) return
       e.preventDefault()
       e.stopPropagation()
       if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
@@ -948,6 +1007,18 @@ export class KanbanSurfaceRenderer {
       setActive(false)
     })
     dropCol.addEventListener('drop', (e) => {
+      // A row in flight is answered first: it never arms `dragSourceId`, so the
+      // card path below would find nothing to move and the release would fall
+      // through to the surface underneath.
+      const row = this.queueDrag
+      if (row) {
+        if (!isDropEligible(row.fiberId)) return
+        e.preventDefault()
+        e.stopPropagation()
+        setActive(false)
+        this.handleQueueRowDropOut(dayMeaning(row.fiberId))
+        return
+      }
       e.preventDefault()
       e.stopPropagation()
       const fiberId = e.dataTransfer?.getData('text/x-fiber-id') || this.getDragSourceId()
@@ -958,12 +1029,8 @@ export class KanbanSurfaceRenderer {
       if (!isDropEligible(fiberId)) return
       const card = findCardById(this.getLastResponse(), fiberId)
       if (!card) return
-      const today = isoDay(new Date())
-      if (iso === today) {
-        void this.setSurface(card, 'now', { due: null })
-      } else {
-        void this.setSurface(card, dayDropHorizon(this.getLastResponse(), card.id), { due: iso })
-      }
+      const { horizon, due } = dayMeaning(card.id)
+      void this.setSurface(card, horizon, { due })
     })
   }
 
@@ -1764,7 +1831,7 @@ export class KanbanSurfaceRenderer {
     }
     row.addEventListener('dragstart', (e) => {
       e.stopPropagation()
-      this.queueDrag = { list, from: index, fiberId: queue[index], headId, queue }
+      this.setQueueDrag({ list, from: index, fiberId: queue[index], headId, queue })
       row.classList.add('kbn-queue-row-dragging')
       if (e.dataTransfer) {
         e.dataTransfer.effectAllowed = 'move'
@@ -1776,7 +1843,7 @@ export class KanbanSurfaceRenderer {
     row.addEventListener('dragend', (e) => {
       e.stopPropagation()
       row.classList.remove('kbn-queue-row-dragging')
-      this.queueDrag = null
+      this.setQueueDrag(null)
       clearMarks()
     })
     // Where the row would land: above or below this one, by which half of it
@@ -1803,7 +1870,7 @@ export class KanbanSurfaceRenderer {
       e.preventDefault()
       e.stopPropagation()
       const to = queueDropIndex(drag.from, insertionFor(e))
-      this.queueDrag = null
+      this.setQueueDrag(null)
       clearMarks()
       const writes = reorderQueueWrites(headId, queue, drag.from, to)
       if (writes.length === 0) return
@@ -1824,10 +1891,12 @@ export class KanbanSurfaceRenderer {
    * Returns true when it handled the drop, so a caller can skip its ordinary
    * path. A drop with no row in flight returns false and changes nothing.
    */
-  private handleQueueRowDropOut(drop: { column?: ColumnKind; horizon?: HorizonKind }): boolean {
+  private handleQueueRowDropOut(
+    drop: { column?: ColumnKind; horizon?: HorizonKind; due?: string | null },
+  ): boolean {
     const drag = this.queueDrag
     if (!drag || !this.unqueueRow) return false
-    this.queueDrag = null
+    this.setQueueDrag(null)
     this.stopDragAutoScroll()
     void this.unqueueRow(
       drag.fiberId,
@@ -2231,39 +2300,6 @@ function cycleChipText(span: { start: string; end: string; openEnded: boolean })
   return span.openEnded
     ? `${shortDayLabel(span.start)} –`
     : `${shortDayLabel(span.start)} – ${shortDayLabel(span.end)}`
-}
-
-/**
- * One cycle as a drop target on the drag horizon: its name over its span, in
- * the Chronicle band's ochre — the same annotation register, so a chip on the
- * strip and a band on the page read as the same object.
- *
- * `leading` draws the seam between the day cells and the chapters. It is a
- * class on the first chip rather than a separate divider node, because a
- * divider would be one more thing a drag can be over and nothing can be
- * dropped on.
- */
-function buildCycleChip(target: CycleDropTarget, leading: boolean): HTMLElement {
-  const el = document.createElement('div')
-  el.className = 'kbn-timeline-dropcol kbn-draghorizon-cycle'
-  if (leading) el.classList.add('kbn-draghorizon-cycle-first')
-  if (target.running) el.classList.add('kbn-draghorizon-cycle-running')
-  el.dataset.cycleId = target.id
-  el.dataset.timelineDayIso = target.dropDay
-
-  const name = document.createElement('span')
-  name.className = 'kbn-cyclechip-name'
-  name.textContent = target.name
-
-  const span = document.createElement('span')
-  span.className = 'kbn-cyclechip-span'
-  span.textContent = cycleChipText(target)
-
-  el.append(name, span)
-  el.title = target.running
-    ? `${target.name} is already running — drop here to rest until tomorrow (${shortDayLabel(target.dropDay)}), later this cycle.`
-    : `Drop here to rest until ${target.name} opens on ${shortDayLabel(target.dropDay)}.`
-  return el
 }
 
 /**
