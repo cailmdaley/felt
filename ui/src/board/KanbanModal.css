@@ -984,6 +984,14 @@
 .kbn-cluster-item {
   display: flex;
   align-items: baseline;
+  /* WRAPS, so the queued-peek list can take a line of its own. Without this the
+     `<ol>` was a nowrap flex child of a 232px row: it computed to 503px, laid
+     out ON TOP of the item's own title, and every one of its rows was painted
+     behind that span — unhittable. A press on a "row" therefore landed on the
+     cluster item, whose own draggable armed the CARD drag, and dragging a
+     queued line moved the head fiber instead. (The desk card's meta row already
+     wrapped, which is why the same list worked there and only there.) */
+  flex-wrap: wrap;
   gap: 6px;
   padding: 3px 2px;
   font-family: var(--font-serif, 'EB Garamond', serif);
@@ -1633,8 +1641,12 @@
 }
 .kbn-card-queued:hover { background: rgba(107, 78, 113, 0.18); }
 .kbn-card-queued-list {
-  /* Full row: the peek drops below the meta line instead of wedging into it. */
+  /* Full row: the peek drops below the meta line instead of wedging into it.
+     `max-width` keeps it inside a narrow host (a Resting cluster item is much
+     narrower than a desk card) rather than overflowing across its siblings. */
   flex-basis: 100%;
+  max-width: 100%;
+  min-width: 0;
   list-style: decimal inside;
   margin: 3px 0 0;
   padding: 4px 6px;

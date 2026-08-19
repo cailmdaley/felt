@@ -10,6 +10,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   buildDependents,
+  cardDragArms,
   chainTail,
   classifyFiber,
   cycleMembership,
@@ -2096,5 +2097,28 @@ describe('taking a row out of the queue closes the chain', () => {
     expect(unqueueRowWrites('head', queue, -1)).toEqual([])
     expect(unqueueRowWrites('head', queue, 3)).toEqual([])
     expect(unqueueRowWrites('head', [], 0)).toEqual([])
+  })
+})
+
+describe('a row drag and a card drag can never both be in flight', () => {
+  // The regression this pins: on the Resting surface the peek list overflowed
+  // its cluster item and painted its rows BEHIND the item's own title, so a
+  // press aimed at a queued line landed on the item — whose draggable armed the
+  // CARD drag. Dragging a purple line then moved the fiber it hangs off, which
+  // is the opposite of what the gesture says. The layout is fixed; this is the
+  // rule that keeps the mix-up impossible even if the layout drifts again.
+  it('arms an ordinary card drag', () => {
+    expect(cardDragArms({ rowDragInFlight: false, startedInsidePeekList: false })).toBe(true)
+  })
+
+  it('refuses while a peek-list row is already being dragged', () => {
+    expect(cardDragArms({ rowDragInFlight: true, startedInsidePeekList: false })).toBe(false)
+  })
+
+  it('refuses a gesture that began anywhere inside a peek list', () => {
+    // Its rows handle their own drags; the chip and the padding are near-misses
+    // on a row, and a near-miss must do nothing rather than move the head.
+    expect(cardDragArms({ rowDragInFlight: false, startedInsidePeekList: true })).toBe(false)
+    expect(cardDragArms({ rowDragInFlight: true, startedInsidePeekList: true })).toBe(false)
   })
 })

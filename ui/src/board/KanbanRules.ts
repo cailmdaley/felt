@@ -867,6 +867,30 @@ export function stackZoneOffered(cardHeight: number, visibleHeight: number): boo
  *  a sliver at the fold, not a target. */
 export const MIN_STACK_ZONE_PX = 44;
 
+/**
+ * May a CARD drag arm, given where the gesture began?
+ *
+ * The invariant this enforces: a peek-list row drag and a card drag can never
+ * both be in flight. Every drop target on the board — sections, columns, day
+ * cells, other cards — decides what to do by asking for the card drag's source,
+ * so if a row drag could also arm that source, one gesture would be read as two
+ * and the board would move a fiber nobody dragged. That is not a thing to be
+ * careful about at each site; it has to be impossible at the one place a card
+ * drag can start.
+ *
+ * Both refusals are about origin, not intent:
+ *   • a row drag is already in flight — whatever this is, it is not a new card;
+ *   • the gesture began inside a peek list — its rows, its chip, its padding.
+ *     The rows handle their own drags; anything else in there is a near-miss on
+ *     a row, and a near-miss must do nothing rather than move the head fiber.
+ */
+export function cardDragArms(opts: {
+  rowDragInFlight: boolean;
+  startedInsidePeekList: boolean;
+}): boolean {
+  return !opts.rowDragInFlight && !opts.startedInsidePeekList;
+}
+
 /** How long the pointer must rest on a card before the card arms as a stack
  *  target. Long enough that crossing a card en route to a column never arms
  *  it, short enough to feel like the card answered you. */

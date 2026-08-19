@@ -17,6 +17,7 @@ import type {
 import { isAgentCard } from './KanbanModalShared.js'
 import {
   buildDependents,
+  cardDragArms,
   humanizeCron,
   inStackHotZone,
   intersectRects,
@@ -1636,6 +1637,24 @@ export class KanbanSurfaceRenderer {
       !!this.reorderQueue &&
       queued.length > 1 &&
       members.every((m) => m?.dependsOnShape === 'scalar')
+    // THE LIST IS ITS OWN DRAG BOUNDARY.
+    //
+    // `dragstart` fires on the nearest DRAGGABLE ANCESTOR of the pressed
+    // element, not on the element pressed — so a press on this list's padding
+    // used to resolve straight past it to the card (or Resting cluster item)
+    // hosting it, and arm a drag of the HEAD fiber. Marking the list draggable
+    // makes it that ancestor: a press on a row still resolves to the row (it is
+    // nearer), and a press on anything else in here resolves to the list, whose
+    // dragstart cancels outright. A near-miss on a queued line does nothing,
+    // which is the only acceptable outcome — the alternative was moving the
+    // fiber the human was reading.
+    list.draggable = true
+    list.addEventListener('dragstart', (e) => {
+      if (e.target === list) {
+        e.preventDefault()
+        e.stopPropagation()
+      }
+    })
     if (reorderable) {
       list.classList.add('kbn-card-queued-list--reorderable')
       chip.title = `${chip.title}. Drag a row to reorder the queue.`
@@ -1910,6 +1929,27 @@ export class KanbanSurfaceRenderer {
 
   private installDraggable(el: HTMLElement, card: KanbanCard, includePlainText: boolean): void {
     el.addEventListener('dragstart', (e) => {
+      // A DRAG THAT BEGAN INSIDE THE QUEUED-PEEK LIST IS NEVER THIS CARD'S.
+      //
+      // The rows stop propagation, so in the ordinary case this listener never
+      // sees their dragstart at all. This guard is for the case that actually
+      // bit: a press that lands on the list's padding, its chip, or — as
+      // happened when the list overflowed a Resting cluster item — on the host
+      // itself while the human was aiming at a row. Arming the card there means
+      // "drag one purple line, move the fiber it hangs off", which is the
+      // opposite of what the gesture says. Refuse the drag outright rather than
+      // starting the wrong one: `preventDefault` in dragstart cancels it, and a
+      // gesture that does nothing is recoverable in a way that a gesture that
+      // moved the wrong fiber is not.
+      const from = e.target as HTMLElement | null
+      const arms = cardDragArms({
+        rowDragInFlight: this.queueDrag !== null,
+        startedInsidePeekList: !!from?.closest?.('.kbn-card-queued-list'),
+      })
+      if (!arms) {
+        e.preventDefault()
+        return
+      }
       this.setDragSourceId(card.id)
       el.classList.add('kbn-card-dragging')
       if (e.dataTransfer) {
