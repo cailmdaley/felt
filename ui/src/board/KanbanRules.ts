@@ -760,7 +760,37 @@ export function stackWouldCycle(
  * band is the column's, exactly as it was before sequences existed. The zone
  * is also what the plum highlight tracks, so the promise and the behavior are
  * the same rectangle.
+ *
+ * `rect` must be the card's VISIBLE rectangle, not its layout box — see
+ * `intersectRects`. A card half-scrolled out of a column still offers a zone,
+ * in the middle of the half you can see.
  */
+export interface ZoneRect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * The part of `a` that `b` actually shows — or null when `b` hides it entirely.
+ *
+ * The board's columns scroll (`.kbn-col-list` is `overflow-y: auto`), so a
+ * card's box and the part of the card a cursor can reach are DIFFERENT
+ * RECTANGLES, and the hot zone has to be computed on the second one. Computed
+ * on the first, the bottom card of a full column has its middle band below the
+ * fold: the zone is real, it just cannot be pointed at, and the card reads as
+ * inert while every card above it highlights. That was the bug.
+ */
+export function intersectRects(a: ZoneRect, b: ZoneRect): ZoneRect | null {
+  const left = Math.max(a.left, b.left);
+  const top = Math.max(a.top, b.top);
+  const right = Math.min(a.left + a.width, b.left + b.width);
+  const bottom = Math.min(a.top + a.height, b.top + b.height);
+  if (right <= left || bottom <= top) return null;
+  return { left, top, width: right - left, height: bottom - top };
+}
+
 export function inStackHotZone(
   rect: { left: number; top: number; width: number; height: number },
   point: { x: number; y: number },

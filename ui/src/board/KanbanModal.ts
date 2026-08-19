@@ -366,7 +366,11 @@ export class KanbanModal {
     this.body.className = 'kbn-body'
     this.body.addEventListener('wheel', (e) => this.handleBodyWheel(e), { passive: false })
     this.body.addEventListener('scroll', () => this.updateBodyScrollAffordance(), { passive: true })
-    this.body.addEventListener('dragover', (e) => this.handleBodyDragOver(e))
+    // CAPTURE phase: a card claiming a stack, and a peek row mid-reorder, both
+    // stop propagation, and in the bubble phase that would starve the board's
+    // auto-scroll at exactly the moment the human is reaching for something
+    // off-screen.
+    this.body.addEventListener('dragover', (e) => this.handleBodyDragOver(e), true)
     this.body.addEventListener('dragleave', (e) => this.handleBodyDragLeave(e))
     this.body.addEventListener('drop', () => this.stopDragAutoScroll())
 
@@ -2108,7 +2112,10 @@ export class KanbanModal {
   }
 
   private handleBodyDragOver(e: DragEvent): void {
-    if (!this.body || !this.dragSourceId || this.body.classList.contains('kbn-body-zoomed')) return
+    // `isDragging()` rather than `dragSourceId`: a peek-list row deliberately
+    // never arms the card drag channel, and it still has to be able to reach
+    // an off-screen part of the board.
+    if (!this.body || !this.surfaces.isDragging() || this.body.classList.contains('kbn-body-zoomed')) return
     if (this.body.scrollHeight <= this.body.clientHeight) return
 
     const rect = this.body.getBoundingClientRect()
@@ -2141,7 +2148,7 @@ export class KanbanModal {
     if (this.dragAutoScrollFrame !== null) return
 
     const tick = (): void => {
-      if (!this.body || !this.dragSourceId || this.dragAutoScrollVelocity === 0) {
+      if (!this.body || !this.surfaces.isDragging() || this.dragAutoScrollVelocity === 0) {
         this.stopDragAutoScroll()
         return
       }

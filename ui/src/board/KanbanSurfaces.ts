@@ -19,6 +19,7 @@ import {
   buildDependents,
   humanizeCron,
   inStackHotZone,
+  intersectRects,
   isAccepted,
   lensCycles,
   queueDropIndex,
@@ -33,6 +34,7 @@ import type {
   CycleLensChip,
   QueueRewrite,
   StackVerdict,
+  ZoneRect,
 } from './KanbanRules.js'
 import { deriveCycleLens, isSleepingOnSchedule } from './KanbanReadModel.js'
 import type { CycleLens } from './KanbanReadModel.js'
@@ -215,6 +217,13 @@ export class KanbanSurfaceRenderer {
   private edgeScrollFrame: number | null = null
   private edgeScrollVelocity = 0
   private edgeScrollTarget: HTMLElement | null = null
+  /** Vertical twin of the above, for the columns. Separate fields rather than
+   *  a second axis on the same three, because the two run against DIFFERENT
+   *  elements — the horizon strip scrolls sideways while a column scrolls
+   *  down — and can be live at the same time. */
+  private vScrollFrame: number | null = null
+  private vScrollVelocity = 0
+  private vScrollTarget: HTMLElement | null = null
   /** The horizon's aim readout — the fixed spot that names, in words, the
    *  target under the cursor. Rebuilt with the horizon on every drag. */
   private aimReadoutEl: HTMLElement | null = null
@@ -698,14 +707,101 @@ export class KanbanSurfaceRenderer {
     return nodes
   }
 
-  /** Halt the horizon's edge-scroll rAF. Called on drop, on drag-leave, and by
-   *  the modal on unmount so the tick can't outlive the board. */
+  /** Halt both edge-scroll rAFs — the horizon's horizontal one and the
+   *  columns' vertical one. Called on drop, on drag-leave, and by the modal on
+   *  unmount so no tick outlives the board. */
   stopEdgeScroll(): void {
     this.edgeScrollVelocity = 0
     this.edgeScrollTarget = null
-    if (this.edgeScrollFrame === null) return
-    window.cancelAnimationFrame(this.edgeScrollFrame)
-    this.edgeScrollFrame = null
+    if (this.edgeScrollFrame !== null) {
+      window.cancelAnimationFrame(this.edgeScrollFrame)
+      this.edgeScrollFrame = null
+    }
+    this.vScrollVelocity = 0
+    this.vScrollTarget = null
+    if (this.vScrollFrame !== null) {
+      window.cancelAnimationFrame(this.vScrollFrame)
+      this.vScrollFrame = null
+    }
+  }
+
+  /** True while ANY drag this renderer owns is in flight — a card or a peek-list
+   *  row. The edge-scrolls and the modal's body scroll both key off this, so a
+   *  queue row can reach an off-screen part of the board exactly as a card can.
+   *  (A row drag deliberately never sets `dragSourceId`; see
+   *  `installQueueRowDrag`.) */
+  isDragging(): boolean {
+    return this.getDragSourceId() !== null || this.queueDrag !== null
+  }
+
+  /**
+   * Vertical drag edge-scroll for a scrollable region — hold a card near a
+   * column's top or bottom edge and the column scrolls under it.
+   *
+   * The columns scroll independently of the board body, so the body's own
+   * auto-scroll cannot reach a card at the bottom of a full column: you could
+   * see the card, but never get to it while holding something. (That is also
+   * half of why one card looked like it refused every drop — the other half
+   * was the hot zone being measured on the clipped box; see `visibleRectOf`.)
+   *
+   * Registered in the CAPTURE phase on purpose. A card that claims a stack and
+   * a peek row mid-reorder both call `stopPropagation`, and in the bubble
+   * phase that would silently starve the scroll exactly when the human is
+   * hovering something — the moment they most need to reach further.
+   */
+  private installVerticalEdgeScroll(el: HTMLElement): void {
+    const EDGE_PX = 72
+    const MAX_STEP_PX = 26
+    el.addEventListener(
+      'dragover',
+      (e: DragEvent) => {
+        if (!this.isDragging()) return
+        if (el.scrollHeight <= el.clientHeight) return
+        const r = el.getBoundingClientRect()
+        const topPressure = Math.max(0, EDGE_PX - (e.clientY - r.top))
+        const bottomPressure = Math.max(0, EDGE_PX - (r.bottom - e.clientY))
+        const direction = bottomPressure > 0 ? 1 : topPressure > 0 ? -1 : 0
+        const pressure = Math.max(topPressure, bottomPressure) / EDGE_PX
+        this.vScrollVelocity =
+          direction === 0
+            ? 0
+            : direction * Math.max(6, Math.round(Math.pow(pressure, 1.35) * MAX_STEP_PX))
+        if (this.vScrollVelocity === 0) {
+          this.stopVerticalScroll()
+          return
+        }
+        this.vScrollTarget = el
+        this.startVerticalScroll()
+      },
+      true,
+    )
+    el.addEventListener('dragleave', (e: DragEvent) => {
+      if (e.relatedTarget && el.contains(e.relatedTarget as Node)) return
+      this.stopVerticalScroll()
+    })
+    el.addEventListener('drop', () => this.stopVerticalScroll())
+  }
+
+  private startVerticalScroll(): void {
+    if (this.vScrollFrame !== null) return
+    const tick = (): void => {
+      const target = this.vScrollTarget
+      if (!target || !this.isDragging() || this.vScrollVelocity === 0) {
+        this.stopVerticalScroll()
+        return
+      }
+      target.scrollTop += this.vScrollVelocity
+      this.vScrollFrame = window.requestAnimationFrame(tick)
+    }
+    this.vScrollFrame = window.requestAnimationFrame(tick)
+  }
+
+  private stopVerticalScroll(): void {
+    this.vScrollVelocity = 0
+    this.vScrollTarget = null
+    if (this.vScrollFrame === null) return
+    window.cancelAnimationFrame(this.vScrollFrame)
+    this.vScrollFrame = null
   }
 
   /** Edge-scroll the drag horizon when a drag approaches its left or right
@@ -1070,6 +1166,7 @@ export class KanbanSurfaceRenderer {
     const list = document.createElement('div')
     list.className = 'kbn-col-list'
     list.setAttribute('role', 'list')
+    this.installVerticalEdgeScroll(list)
 
     if (cards.length === 0 && ghosts.length === 0) {
       const empty = document.createElement('div')
@@ -1623,11 +1720,16 @@ export class KanbanSurfaceRenderer {
         findCardById(this.getLastResponse(), id) ?? undefined,
       )
     }
-    const claims = (e: DragEvent): boolean =>
-      stackClaimsDrop(
+    const claims = (e: DragEvent): boolean => {
+      // The VISIBLE rectangle, not the layout box: a card clipped by its
+      // scrolling column keeps a usable hot zone in the part you can see. See
+      // `visibleRectOf`.
+      const rect = visibleRectOf(el)
+      return stackClaimsDrop(
         verdictFor(),
-        inStackHotZone(el.getBoundingClientRect(), { x: e.clientX, y: e.clientY }),
+        rect !== null && inStackHotZone(rect, { x: e.clientX, y: e.clientY }),
       )
+    }
     const clear = (): void => el.classList.remove('kbn-card-stack-target')
     el.addEventListener('dragover', (e) => {
       // Not claiming means not touching: no preventDefault, no
@@ -2127,6 +2229,35 @@ export function findCardColumn(resp: KanbanResponse | null, id: string): ColumnK
  * card that can be found must also be able to appear in a chain, or "+N
  * queued" would count differently from what the peek can name.
  */
+/**
+ * The part of an element a cursor can actually reach: its box, clipped by every
+ * scrolling ancestor and by the viewport.
+ *
+ * The board's columns are `overflow-y: auto`, so a card near the bottom of a
+ * full column is partly — sometimes mostly — outside the box that shows it.
+ * Any geometry the drag reads off `getBoundingClientRect()` alone is therefore
+ * geometry about a rectangle the human cannot point at, which is exactly how
+ * one card ends up looking inert while its neighbours light up.
+ *
+ * Returns null when the element is scrolled entirely out of view — there is no
+ * point on it to hit, and callers should treat that as "not over it".
+ */
+export function visibleRectOf(el: HTMLElement): ZoneRect | null {
+  let rect: ZoneRect | null = el.getBoundingClientRect()
+  for (let node = el.parentElement; node && rect; node = node.parentElement) {
+    const overflow = window.getComputedStyle(node)
+    if (overflow.overflowX === 'visible' && overflow.overflowY === 'visible') continue
+    rect = intersectRects(rect, node.getBoundingClientRect())
+  }
+  if (!rect) return null
+  return intersectRects(rect, {
+    left: 0,
+    top: 0,
+    width: window.innerWidth,
+    height: window.innerHeight,
+  })
+}
+
 export function boardCards(resp: KanbanResponse | null): KanbanCard[] {
   if (!resp) return []
   const seen = new Set<string>()

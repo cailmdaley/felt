@@ -18,6 +18,7 @@ import {
   effectiveHorizon,
   humanizeCron,
   inStackHotZone,
+  intersectRects,
   isCycleFiber,
   lensCycles,
   queueDropIndex,
@@ -1850,6 +1851,99 @@ describe('reordering the queue rewires the chain', () => {
     expect(queueDropIndex(0, 3)).toBe(2)
     expect(queueDropIndex(2, 0)).toBe(0)
     expect(queueDropIndex(1, 1)).toBe(1)
+  })
+})
+
+describe('a card the board could see but never hit', () => {
+  // The live report: one card in Awaiting review — closed with no verdict,
+  // horizon:stashed, a past due, owned by a foreign host (candide) whose
+  // origin reads stale, rendering bottommost in its column — never showed the
+  // plum hot zone, while every card above it did.
+  //
+  // This reproduces its exact shape and walks the whole decision. Every
+  // field-based gate passes, which is the point of keeping the test: the card
+  // was never refused, it was UNREACHABLE — the hot zone was measured on its
+  // layout box while the scrolling column showed only its top edge.
+  const feed: CompositeFeed = {
+    host: 'dapmcw68',
+    entries: [
+      {
+        origin: 'local',
+        feltStore: '/store',
+        path: '.felt/draft.md',
+        fiber: {
+          id: 'local/draft', name: 'A local draft', status: 'open', kind: 'task', priority: 2,
+          createdAt: at0, hasShuttleBlock: true, shuttleKind: 'oneshot',
+        },
+      },
+      {
+        origin: 'remote-candide',
+        feltStore: '/candide/store',
+        path: '.felt/smokescreen.md',
+        fiber: {
+          id: 'smokescreen/replan', uid: '01KX6YH5ZYRQRN1Y7CZA7VR9DE',
+          name: 'Execute the Smokescreen-fork replan', status: 'closed',
+          kind: 'task', priority: 2, createdAt: at0, closedAt: at0,
+          horizon: 'stashed', due: dayFromNow(-2),
+          hasShuttleBlock: true, shuttleKind: 'oneshot', shuttleHost: 'candide',
+        },
+      },
+    ],
+    origins: {
+      local: { kind: 'local', stale: false, fiberCount: 1 },
+      'remote-candide': { kind: 'remote', stale: true, fiberCount: 1 },
+    },
+  }
+
+  it('lands on Awaiting review despite the stashed horizon and the past due', () => {
+    const resp = buildKanbanResponseFromComposite(feed, { nowMs: NOW })
+    expect(resp.now.awaitingReview.map((c) => c.id)).toEqual(['smokescreen/replan'])
+    expect(resp.stash).toEqual([])
+  })
+
+  it('is findable, stale origin and foreign host and all', () => {
+    const resp = buildKanbanResponseFromComposite(feed, { nowMs: NOW })
+    expect(findCardById(resp, 'smokescreen/replan')?.shuttleHost).toBe('candide')
+    expect(resp.staleness['remote-candide'].status).toBe('stale')
+  })
+
+  it('is a LEGAL stack target — no gate refuses it', () => {
+    const resp = buildKanbanResponseFromComposite(feed, { nowMs: NOW })
+    const target = findCardById(resp, 'smokescreen/replan')!
+    const source = findCardById(resp, 'local/draft')!
+    expect(
+      stackDropVerdict(source, target, unsettledDependents(resp), (id) =>
+        findCardById(resp, id) ?? undefined),
+    ).toEqual({ ok: true, tail: 'smokescreen/replan' })
+  })
+})
+
+describe('the hot zone is measured on what you can SEE', () => {
+  const card = { left: 0, top: 100, width: 200, height: 200 }
+
+  it('intersects a box with what its scroller shows', () => {
+    // The column shows only the card's top 40px.
+    expect(intersectRects(card, { left: 0, top: 0, width: 200, height: 140 }))
+      .toEqual({ left: 0, top: 100, width: 200, height: 40 })
+  })
+
+  it('returns null for a box scrolled entirely out of view', () => {
+    expect(intersectRects(card, { left: 0, top: 0, width: 200, height: 100 })).toBeNull()
+    expect(intersectRects(card, { left: 400, top: 100, width: 200, height: 200 })).toBeNull()
+  })
+
+  it('keeps a usable zone in the sliver a clipped card still shows', () => {
+    // Measured on the full box, the middle band is 160..240 — entirely below
+    // the fold at 140, so no reachable point is in the zone. Measured on the
+    // visible strip, the zone is the middle of 100..140 and can be hit.
+    const visible = intersectRects(card, { left: 0, top: 0, width: 200, height: 140 })!
+    expect(inStackHotZone(card, { x: 100, y: 120 })).toBe(false)
+    expect(inStackHotZone(visible, { x: 100, y: 120 })).toBe(true)
+  })
+
+  it('still refuses a point outside the visible strip', () => {
+    const visible = intersectRects(card, { left: 0, top: 0, width: 200, height: 140 })!
+    expect(inStackHotZone(visible, { x: 100, y: 200 })).toBe(false)
   })
 })
 
