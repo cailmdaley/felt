@@ -1645,6 +1645,10 @@
   border-radius: 2px;
 }
 .kbn-card-queued-list li { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Each row is a way into the fiber it names — often the only one on the desk,
+   since a queued fiber is resting behind this card. Say so with the pointer. */
+.kbn-card-queued-row { cursor: pointer; }
+.kbn-card-queued-row:hover { text-decoration: underline; text-underline-offset: 2px; }
 /* A reorderable queue: the rows are the order, so they say they can be moved.
    `grab` and a hairline gutter are the whole affordance — a peek list is a
    thing you read first and rearrange second, and a handle per row would make
@@ -1673,6 +1677,15 @@
 .kbn-card-stack-target {
   box-shadow: inset 0 0 0 2px rgba(107, 78, 113, 0.55);
   background: rgba(107, 78, 113, 0.08);
+}
+/* THE CARD THE EDGE ACTUALLY POINTS AT. A drop queues behind the chain's tail,
+   which after a few stacks is not the card under the cursor — so the tail says
+   so itself, dashed rather than solid: this is where you are landing, not what
+   you are pointing at. (The aim readout names it in words at the same time.) */
+.kbn-card-stack-tail {
+  box-shadow: inset 0 0 0 2px rgba(107, 78, 113, 0.30);
+  outline: 1px dashed rgba(107, 78, 113, 0.65);
+  outline-offset: 2px;
 }
 /* Running-worker pill — sits inline in the meta row, right-justified
    before the date stamp. Mirrors the proportions of .kbn-review-meta-btn

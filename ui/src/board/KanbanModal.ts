@@ -260,6 +260,7 @@ export class KanbanModal {
       pin: (card) => this.pinRole(card),
       stack: (card, tailId) => this.stackBehind(card, tailId),
       reorderQueue: (writes) => this.reorderQueue(writes),
+      unqueueRow: (fiberId, splice, drop) => this.unqueueRow(fiberId, splice, drop),
       openDetail: (card) => this.detailModal?.open(card),
       openWorker: this.openWorkerAfterGesture,
       releaseQuarantine: (host) => this.releaseQuarantine(host),
@@ -827,7 +828,23 @@ export class KanbanModal {
     const optimistic = applyOptimisticTransition(this.lastResponse, card.id, target)
     if (optimistic) this.applyResponse(optimistic)
 
-    void this.commitTransition(card, target, needSurfaceShift)
+    // LEAVING RESTING MEANS LEAVING THE QUEUE. A dep-gated card dragged to a
+    // working column is a person saying "not this one — this one now", and the
+    // gate is derived from `depends_on:`, so a lifecycle verb alone cannot lift
+    // it: the card would land in Drafts and be re-rested by the very next poll.
+    // ("It goes there for a second and pops back.") So the gesture carries the
+    // unstack with it, as one more write alongside the transition.
+    //
+    // Not on a VERDICT (Temper / Compost): a closed card is exempt from the
+    // gate anyway, so nothing would pop back, and erasing the edge would delete
+    // the record of what this work was waiting for at the moment it finished.
+    const unstacks =
+      card.depGated === true &&
+      card.dependsOnShape !== 'list' &&
+      target !== 'tempered' &&
+      target !== 'composted'
+
+    void this.commitTransition(card, target, needSurfaceShift, unstacks)
   }
 
   /**
@@ -845,8 +862,26 @@ export class KanbanModal {
     card: KanbanCard,
     target: ColumnKind,
     needSurfaceShift: boolean,
+    unstacks = false,
   ): Promise<void> {
     try {
+      // The unstack rides FIRST, before the lifecycle verb: the gate is what
+      // would pull the card back, so clearing it is what makes the rest of the
+      // gesture stick. See the `unstacks` note in `transition`.
+      if (unstacks) {
+        const res = await fetch(this.horizonUrl(), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            fiber_id: card.id,
+            origin: card.originId,
+            unset: ['depends_on'],
+          }),
+        })
+        if (!res.ok) throw new Error(await errorMessageFromResponse(res, 'Unstack failed'))
+        this.announce(`“${card.name}” is out of the queue.`)
+      }
+
       if (needSurfaceShift) {
         // Same write policy as commitSurface's `now`: clear horizon/cold and
         // (for a Drafts drop) the `due:` — "park on the desk" means no
@@ -1059,6 +1094,87 @@ export class KanbanModal {
     }
     if (moved === writes.length) this.announce('Queue reordered.')
     await this.fetchAndRender()
+  }
+
+  /**
+   * Take a fiber out of a queue by dragging its row off the peek list.
+   *
+   * The same sentence as dragging a gated card out of Resting, so it gets the
+   * same answer — the edge that holds it goes — plus the one thing a card drag
+   * never has to consider: the row was a POSITION, and somebody may have been
+   * standing behind it. `splice` (from `unqueueRowWrites`) hands that successor
+   * to the departing row's predecessor, so the chain closes rather than
+   * stranding its tail behind a card that no longer waits for anything.
+   *
+   * The drop's own meaning is then applied on top, through the ordinary paths:
+   * a column transitions, `now` surfaces, `stashed` keeps it at rest. The card
+   * handed to those paths is a copy with the gate already cleared, so
+   * `transition`'s own unstack does not fire a second, redundant write.
+   */
+  private async unqueueRow(
+    fiberId: string,
+    splice: QueueRewrite[],
+    drop: { column?: ColumnKind; horizon?: HorizonKind },
+  ): Promise<void> {
+    const card = findCardById(this.lastResponse, fiberId)
+    if (!card) return
+    if (card.dependsOnShape === 'list') {
+      this.showBanner(
+        `“${card.name}” waits on a hand-written depends_on list — open it and edit the list to release it.`,
+        'info',
+      )
+      return
+    }
+    try {
+      // The row's own edge first, then the repair. In that order the queue is
+      // never observed with two members claiming the same position.
+      await this.postFeltEdit({ fiber_id: fiberId, origin: card.originId, unset: ['depends_on'] })
+      for (const w of splice) {
+        const successor = findCardById(this.lastResponse, w.fiberId)
+        await this.postFeltEdit({
+          fiber_id: w.fiberId,
+          origin: successor?.originId,
+          set: { depends_on: w.newDep },
+        })
+      }
+      this.announce(`“${card.name}” is out of the queue.`)
+    } catch (err: unknown) {
+      const msg = (err as { message?: string })?.message ?? String(err)
+      this.showBanner(`Couldn't take “${card.name}” out of the queue: ${msg}`, 'error')
+      await this.fetchAndRender()
+      return
+    }
+    const released: KanbanCard = {
+      ...card,
+      depGated: false,
+      dependsOn: undefined,
+      dependsOnShape: undefined,
+    }
+    if (drop.column) {
+      this.transition(released, drop.column)
+      return
+    }
+    if (drop.horizon !== undefined) {
+      // Dropped back into Resting: out of the queue, but still put down. The
+      // horizon write is what keeps it there — without it, an ungated card
+      // would walk straight back onto the desk and the drop would read as
+      // ignored.
+      this.setSurface(released, drop.horizon)
+      return
+    }
+    await this.fetchAndRender()
+  }
+
+  /** POST one frontmatter edit, owner-routed by `origin`, throwing the
+   *  daemon's own message on failure. The shared half of every sequence
+   *  write. */
+  private async postFeltEdit(payload: Record<string, unknown>): Promise<void> {
+    const res = await fetch(this.horizonUrl(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    if (!res.ok) throw new Error(await errorMessageFromResponse(res, 'Sequence edit failed'))
   }
 
   /**

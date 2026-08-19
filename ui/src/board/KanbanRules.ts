@@ -811,17 +811,66 @@ export function inStackHotZone(
  * Does the card claim this drag event, or does it fall through to the column?
  *
  * The whole discriminator, in one pure function, because it is the rule that
- * keeps every pre-existing gesture working: a card claims ONLY a legal stack
- * released in its hot zone. A refused stack claims nothing — no interception,
- * no banner, no flash — it simply is not a stack, and the column handles the
- * drop it always handled.
+ * keeps every pre-existing gesture working. A refused stack claims nothing —
+ * no interception, no banner, no flash — it simply is not a stack, and the
+ * column handles the drop it always handled.
+ *
+ * A legal stack claims on either of two signals, and the second one exists
+ * because the first turned out to be a moving target:
+ *
+ *   • THE HOT ZONE — the pointer is near the card's middle. Fast, and the
+ *     original rule.
+ *   • DWELL — the pointer has rested anywhere on the card for a beat. Aiming
+ *     at a band is only easy if the band holds still, and on this board it does
+ *     not: picking a card up materializes the drag horizon, which pushes the
+ *     whole desk down some 60px, so the middle you aimed at before lifting is
+ *     not the middle any more. A card near the bottom of a scrolling column
+ *     gets it twice over — the same shift pushes it further under the fold, and
+ *     its visible strip (which is what the zone is measured on) shrinks with
+ *     it. That is how one card came to look permanently inert while its
+ *     neighbours lit up.
+ *
+ * Dwell is the honest reading of the gesture anyway: a drag that CROSSES a card
+ * on its way to a column is moving, and a drag that STOPS on a card is aiming
+ * at it. Nothing about a pass-through arms, so the lifecycle drops keep every
+ * gesture they had.
  */
 export function stackClaimsDrop(
   verdict: StackVerdict | null,
   inHotZone: boolean,
+  dwelled = false,
 ): boolean {
-  return verdict !== null && verdict.ok && inHotZone;
+  if (verdict === null || !verdict.ok) return false;
+  return inHotZone || dwelled;
 }
+
+/**
+ * Is enough of this card on screen for its hot zone to be offered at all?
+ *
+ * A card at the fold of a scrolling column can show a 20px sliver, and the
+ * zone is measured on what you can see — so the sliver becomes a hair-trigger
+ * stack target sitting exactly where people aim when they mean "drop this at
+ * the bottom of the column". That is how a stack gets authored by accident.
+ *
+ * A card has to be SUBSTANTIALLY present to be aimed at: at least two fifths of
+ * itself, and at least a comfortable finger's worth of pixels. Below that the
+ * card offers no zone and the drop belongs to the column, which is what the
+ * human meant. Dwell still works — resting on a sliver for a beat is a
+ * deliberate act in a way that passing over it is not.
+ */
+export function stackZoneOffered(cardHeight: number, visibleHeight: number): boolean {
+  if (visibleHeight <= 0 || cardHeight <= 0) return false;
+  return visibleHeight >= Math.max(cardHeight * 0.4, MIN_STACK_ZONE_PX);
+}
+
+/** The smallest visible strip that may carry a hot zone. Under this a card is
+ *  a sliver at the fold, not a target. */
+export const MIN_STACK_ZONE_PX = 44;
+
+/** How long the pointer must rest on a card before the card arms as a stack
+ *  target. Long enough that crossing a card en route to a column never arms
+ *  it, short enough to feel like the card answered you. */
+export const STACK_DWELL_MS = 350;
 
 /** One card's `depends_on:` as a reorder would leave it. */
 export interface QueueRewrite {
@@ -874,6 +923,32 @@ export function reorderQueueWrites(
     if (newDep !== predecessorBefore(id)) writes.push({ fiberId: id, newDep });
   });
   return writes;
+}
+
+/**
+ * SPLICE a member out of the queue: the chain closes over the gap.
+ *
+ * Dragging a row off the list is "this one is not in the queue any more", and
+ * a queue with a hole in it is not a queue — whoever was behind the departing
+ * member has to be handed to whoever was in front of it, or the rest of the
+ * chain is orphaned behind a card that no longer waits for anything.
+ *
+ * Exactly one edge changes (the successor's), so this returns at most one
+ * write. The departing row's own `depends_on` is NOT in the result: clearing
+ * it is the gesture itself, not part of repairing the chain, and keeping the
+ * two separate is what lets the caller apply the drop's own meaning — a
+ * column, a surface — on top.
+ */
+export function unqueueRowWrites(
+  headId: string,
+  queue: readonly string[],
+  index: number,
+): QueueRewrite[] {
+  if (!Number.isInteger(index) || index < 0 || index >= queue.length) return [];
+  const successor = queue[index + 1];
+  if (successor === undefined) return [];
+  const predecessor = index === 0 ? headId : queue[index - 1];
+  return [{ fiberId: successor, newDep: predecessor }];
 }
 
 /**

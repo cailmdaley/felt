@@ -25,6 +25,8 @@ import {
   queuedBehind,
   reorderQueueWrites,
   restingUntil,
+  stackZoneOffered,
+  unqueueRowWrites,
   stackClaimsDrop,
   stackDropVerdict,
   upcomingCycleDropTargets,
@@ -2006,5 +2008,93 @@ describe('the queue counts only work that is actually held', () => {
       queueCard('d', { dependsOn: ['a'] }),
     )
     expect(queuedBehind('a', liveDependents(resp))).toEqual(['d'])
+  })
+})
+
+describe('a card must be substantially on screen to be aimed at', () => {
+  // The accidental-stack report: a card at the fold of a scrolling column shows
+  // a 20px sliver, and the hot zone — measured on what you can SEE — turned
+  // that sliver into a hair-trigger stack target sitting exactly where people
+  // aim when they mean "drop this at the bottom of the column".
+  it('offers no zone on a sliver, however tall the card really is', () => {
+    expect(stackZoneOffered(186, 20)).toBe(false)
+    expect(stackZoneOffered(186, 26)).toBe(false)
+    expect(stackZoneOffered(186, 40)).toBe(false)
+  })
+
+  it('offers a zone once enough of the card is showing', () => {
+    expect(stackZoneOffered(186, 98)).toBe(true)
+    expect(stackZoneOffered(186, 186)).toBe(true)
+  })
+
+  it('scales with the card, so a SHORT card is not held to a tall one’s bar', () => {
+    // Two fifths of a short card is under the pixel floor, so the floor wins.
+    expect(stackZoneOffered(60, 30)).toBe(false)
+    expect(stackZoneOffered(60, 50)).toBe(true)
+    // …and for a tall card the fraction is what bites, not the floor.
+    expect(stackZoneOffered(400, 60)).toBe(false)
+  })
+
+  it('offers nothing for a card with no visible height at all', () => {
+    expect(stackZoneOffered(186, 0)).toBe(false)
+    expect(stackZoneOffered(0, 0)).toBe(false)
+  })
+})
+
+describe('dwell arms a card the zone cannot', () => {
+  const ok = { ok: true, tail: 'a' } as const
+  const no = { ok: false, reason: 'nope' } as const
+
+  it('arms on dwell even when the pointer is nowhere near the zone', () => {
+    // The board shifts ~60px the moment a card is picked up (the drag horizon
+    // materializes), so the middle you aimed at is not the middle any more.
+    // Resting on the card says what aiming could not.
+    expect(stackClaimsDrop(ok, false, true)).toBe(true)
+  })
+
+  it('still arms immediately in the zone, without waiting', () => {
+    expect(stackClaimsDrop(ok, true, false)).toBe(true)
+  })
+
+  it('never arms a refused stack, dwell or no dwell', () => {
+    expect(stackClaimsDrop(no, false, true)).toBe(false)
+    expect(stackClaimsDrop(no, true, true)).toBe(false)
+    expect(stackClaimsDrop(null, false, true)).toBe(false)
+  })
+
+  it('does not arm a card merely passed over', () => {
+    expect(stackClaimsDrop(ok, false, false)).toBe(false)
+  })
+})
+
+describe('taking a row out of the queue closes the chain', () => {
+  // head ← a ← b ← c. Drag `b`'s row onto the board: b leaves, and c — which
+  // was behind b — is handed to a. Without that, c waits forever on a card
+  // that no longer waits for anything.
+  const queue = ['a', 'b', 'c']
+
+  it('rewires the successor to the departing row’s predecessor', () => {
+    expect(unqueueRowWrites('head', queue, 1)).toEqual([{ fiberId: 'c', newDep: 'a' }])
+  })
+
+  it('hands the successor to the HEAD when the first row leaves', () => {
+    expect(unqueueRowWrites('head', queue, 0)).toEqual([{ fiberId: 'b', newDep: 'head' }])
+  })
+
+  it('writes nothing when the LAST row leaves — nobody was behind it', () => {
+    expect(unqueueRowWrites('head', queue, 2)).toEqual([])
+    expect(unqueueRowWrites('head', ['only'], 0)).toEqual([])
+  })
+
+  it('never writes the departing row itself — clearing it is the gesture', () => {
+    for (const i of [0, 1, 2]) {
+      expect(unqueueRowWrites('head', queue, i).map((w) => w.fiberId)).not.toContain(queue[i])
+    }
+  })
+
+  it('ignores an index that names no row', () => {
+    expect(unqueueRowWrites('head', queue, -1)).toEqual([])
+    expect(unqueueRowWrites('head', queue, 3)).toEqual([])
+    expect(unqueueRowWrites('head', [], 0)).toEqual([])
   })
 })
