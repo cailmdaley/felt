@@ -71,25 +71,9 @@ defmodule ShuttleWeb.FeltStoresController do
       # The curated picker-project list (Stash/Capture cities), separate from the
       # TCC-scoped poll-store list above. Absent/empty → the forms fall back to
       # store-registry + current-cards derivation, so this is purely additive.
-      projects: Projects.configured_projects(),
-      # What the last symlink-substore scan cost, per store, plus whether one is
-      # running right now. The expansion is a raw filesystem walk that can stall
-      # indefinitely on a path macOS guards; it now degrades quietly rather than
-      # blocking this endpoint, which is exactly why the fact needs saying out
-      # loud somewhere. `scanned_ms` absent means no scan has completed yet.
-      store_scan: store_scan()
+      projects: Projects.configured_projects()
     }
     |> Map.put(:host, host)
-  end
-
-  defp store_scan do
-    case FeltStores.last_scan_report() do
-      %{scanned_ms: ms, stores: stores} ->
-        %{in_flight: FeltStores.scan_in_flight?(), scanned_ms: ms, by_store: stores}
-
-      _ ->
-        %{in_flight: FeltStores.scan_in_flight?()}
-    end
   end
 
   defp remote_origin(%Remote{} = remote) do

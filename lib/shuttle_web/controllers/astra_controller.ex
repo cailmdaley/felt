@@ -60,12 +60,10 @@ defmodule ShuttleWeb.AstraController do
       Path.type(path) != :absolute ->
         conn |> put_status(400) |> json(%{error: "path must be absolute"})
 
-      # Bounded — see `Shuttle.BoundedIO`: the paper view polls this, and the
-      # path is caller-supplied.
-      not Shuttle.BoundedIO.dir?(path) ->
+      not File.dir?(path) ->
         conn |> put_status(404) |> json(%{error: "project dir not found"})
 
-      not Shuttle.RawFS.regular?(Path.join(path, "astra.yaml")) ->
+      not File.regular?(Path.join(path, "astra.yaml")) ->
         conn |> put_status(404) |> json(%{error: "no astra.yaml in project dir"})
 
       true ->

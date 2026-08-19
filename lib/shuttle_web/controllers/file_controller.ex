@@ -67,12 +67,8 @@ defmodule ShuttleWeb.FileController do
         conn |> put_status(400) |> json(%{error: "path must be absolute"})
 
       true ->
-        # Raw (`Shuttle.RawFS`): this endpoint serves companion files out of a
-        # felt store, and a plain `File.stat/2` is a call into the shared OTP
-        # file server — where ONE store wedged on a macOS consent dialog blocks
-        # every file read the daemon serves, including files on healthy stores.
-        case Shuttle.RawFS.stat(path) do
-          {:ok, %{type: :regular, mtime: mtime, size: size}} ->
+        case File.stat(path, time: :posix) do
+          {:ok, %File.Stat{type: :regular, mtime: mtime, size: size}} ->
             serve_with_validators(conn, path, mtime, size)
 
           _ ->

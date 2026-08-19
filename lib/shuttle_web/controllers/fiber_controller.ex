@@ -125,11 +125,7 @@ defmodule ShuttleWeb.FiberController do
       not is_binary(Map.get(shuttle, "project_dir")) or Map.get(shuttle, "project_dir") == "" ->
         {:error, "shuttle.project_dir is required when status: active"}
 
-      # Bounded: `project_dir` is caller-supplied and routinely a synced folder,
-      # where a first reach on macOS raises a consent dialog and an unbounded
-      # stat waits on a human. A dir we cannot confirm is refused, not accepted —
-      # the caller retries once the path answers.
-      not Shuttle.BoundedIO.dir?(Path.expand(Map.fetch!(shuttle, "project_dir"))) ->
+      not File.dir?(Path.expand(Map.fetch!(shuttle, "project_dir"))) ->
         {:error, "shuttle.project_dir does not exist on this host"}
 
       true ->
@@ -169,21 +165,7 @@ defmodule ShuttleWeb.FiberController do
   # `init` ignores `-C` for placement and writes `.felt/` at its working
   # directory, so we drive it with `cd:` rather than `-C`.
   defp ensure_felt_repo(root) do
-    # Raw (`Shuttle.RawFS`) here and in the read/write pair below: `root` is a
-    # felt store or a `project_dir`, the one kind of path that stalls, and a
-    # `File.*` call that blocks on it holds the shared OTP file server — taking
-    # every filesystem call in the daemon with it, on healthy stores included.
-    # Creating a fiber must not be able to take the board down. See
-    # `Shuttle.RawFS`.
-    case Shuttle.RawFS.mkdir_p(root) do
-      :ok ->
-        :ok
-
-      {:error, reason} ->
-        # `File.mkdir_p!/1`'s own wording, so the operator sees the message they
-        # always saw — "make directory" alone is what `File.mkdir!/1` says.
-        raise File.Error, reason: reason, action: "make directory (with -p)", path: root
-    end
+    File.mkdir_p!(root)
 
     case Shuttle.Felt.run(["init"], cd: root) do
       {:ok, _output} -> :ok
@@ -265,7 +247,7 @@ defmodule ShuttleWeb.FiberController do
     if extra == %{} do
       :ok
     else
-      case Shuttle.RawFS.read(path) do
+      case File.read(path) do
         {:ok, content} -> splice(path, content, extra)
         {:error, reason} -> {:error, "reading created fiber: #{:file.format_error(reason)}"}
       end
@@ -287,8 +269,8 @@ defmodule ShuttleWeb.FiberController do
   defp atomic_write(path, payload) do
     tmp = path <> ".tmp"
 
-    with :ok <- Shuttle.RawFS.write(tmp, payload),
-         :ok <- Shuttle.RawFS.rename(tmp, path) do
+    with :ok <- File.write(tmp, payload),
+         :ok <- File.rename(tmp, path) do
       :ok
     else
       {:error, reason} -> {:error, "writing fiber: #{:file.format_error(reason)}"}

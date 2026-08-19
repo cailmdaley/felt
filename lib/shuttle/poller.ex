@@ -119,12 +119,6 @@ defmodule Shuttle.Poller do
       :auto_discover_felt_stores,
       :runner,
       poll_check_in_progress: false,
-      # When the in-flight poll's read task started, or nil. Paired with
-      # `poll_check_in_progress` purely so the snapshot can say HOW LONG
-      # discovery has been out — the difference between "a walk is running" and
-      # "a walk has been running for ninety seconds" is the difference between
-      # a busy daemon and a consent dialog waiting on a human.
-      poll_in_flight_since: nil,
       # Monotonic count of poll cycles APPLIED (a cycle whose reads came back
       # and were folded into state — success or logged read failure alike).
       # Per-cycle observations (`orphans`, rebuilt from scratch by every
@@ -570,7 +564,7 @@ defmodule Shuttle.Poller do
     {felt_stores, auto_discover} =
       case Keyword.fetch(opts, :felt_stores) do
         {:ok, hosts} -> {hosts, false}
-        :error -> {default_felt_stores(), true}
+        :error -> {Shuttle.FeltStores.configured_hosts(), true}
       end
 
     runner = Keyword.get(opts, :runner, Shuttle.Runner.Default)
@@ -690,7 +684,7 @@ defmodule Shuttle.Poller do
         send(parent, {:poll_world, poll_reads(state)})
       end)
 
-    {:noreply, %{state | poll_check_in_progress: true, poll_in_flight_since: DateTime.utc_now()}}
+    {:noreply, %{state | poll_check_in_progress: true}}
   end
 
   # The poll Task finished its reads. Apply the world it observed to the
@@ -703,7 +697,6 @@ defmodule Shuttle.Poller do
       state
       |> apply_poll_cycle(world)
       |> Map.put(:poll_check_in_progress, false)
-      |> Map.put(:poll_in_flight_since, nil)
       |> Map.update!(:poll_cycles, &(&1 + 1))
       |> schedule_tick(state.poll_interval_ms)
 
@@ -716,19 +709,9 @@ defmodule Shuttle.Poller do
     state =
       state
       |> Map.put(:poll_check_in_progress, false)
-      |> Map.put(:poll_in_flight_since, nil)
       |> Map.update!(:poll_cycles, &(&1 + 1))
       |> schedule_tick(state.poll_interval_ms)
 
-    {:noreply, state}
-  end
-
-  # A deferred `{:refresh_document, …}` read came back. Apply it to the state as
-  # it is NOW — a poll cycle or another refresh may have landed while the task
-  # was shelling felt — then release the caller that has been waiting on it.
-  def handle_info({:document_read, fiber_id, from, result}, state) do
-    state = apply_document_read(state, fiber_id, result)
-    GenServer.reply(from, :ok)
     {:noreply, state}
   end
 
@@ -793,44 +776,11 @@ defmodule Shuttle.Poller do
     {:reply, {:ok, Shuttle.FiberDocuments.envelope(stores, entries, cache_meta)}, state}
   end
 
-  def handle_call({:refresh_document, fiber_id}, from, state) do
+  def handle_call({:refresh_document, fiber_id}, _from, state) do
     # A cold cache means no poll has populated it yet; the first poll will read
     # disk fresh, so there is nothing to patch. Once warm, re-read this one fiber.
-    #
-    # The re-read is a `felt show` per store — bounded at 60s by the runner, but
-    # 60s is an eternity to a board whose every read is a call into this
-    # mailbox, and this handler runs on the post-mutation path a human just
-    # triggered from the kanban. So the shell-out goes to a task and the reply
-    # is DEFERRED (`{:noreply, …}` now, `GenServer.reply/2` when the read lands):
-    # the caller still waits for the refresh to finish, so the ordering the seam
-    # exists for is unchanged, while the mailbox keeps draining behind it.
-    #
-    # The task returns plain data and never a `%State{}` — installing it is
-    # `handle_info({:document_read, …})`'s job on the live state, so the
-    # single-writer guarantee holds and a poll that landed meanwhile is merged,
-    # not clobbered.
     if state.document_cache_ready do
-      parent = self()
-      stores = state.felt_stores
-
-      read = fn ->
-        result =
-          try do
-            Shuttle.FiberDocuments.get(fiber_id, felt_stores: stores)
-          catch
-            kind, reason -> {:error, {kind, reason}}
-          end
-
-        send(parent, {:document_read, fiber_id, from, result})
-      end
-
-      # No task supervisor (a unit test with the app not started, a supervisor
-      # mid-restart): fall back to reading inline and replying now, rather than
-      # leaving the caller waiting on a task that was never spawned.
-      case start_supervised_task(read) do
-        :ok -> {:noreply, state}
-        :unavailable -> {:reply, :ok, refresh_document_entry(state, fiber_id)}
-      end
+      {:reply, :ok, refresh_document_entry(state, fiber_id)}
     else
       {:reply, :ok, state}
     end
@@ -1583,33 +1533,14 @@ defmodule Shuttle.Poller do
   # different key are dropped first so a re-key can't leave a duplicate card. The
   # mtime is carried so the next poll's `reusable_document_cache_entry?` reuses
   # this fresh read instead of re-shelling felt.
-  defp start_supervised_task(fun) do
-    case Task.Supervisor.start_child(Shuttle.TaskSupervisor, fun) do
-      {:ok, _pid} -> :ok
-      _ -> :unavailable
-    end
-  catch
-    :exit, _ -> :unavailable
-  end
-
-  # The synchronous form, for the claim path — already a write that shells out,
-  # and its caller needs the patched state in hand to keep building on it.
   defp refresh_document_entry(%State{} = state, fiber_id) do
-    apply_document_read(
-      state,
-      fiber_id,
-      Shuttle.FiberDocuments.get(fiber_id, felt_stores: state.felt_stores)
-    )
-  end
-
-  defp apply_document_read(%State{} = state, fiber_id, result) do
     without_fiber =
       :maps.filter(
         fn _key, %{entry: entry} -> get_in(entry, [:fiber, "id"]) != fiber_id end,
         state.document_cache
       )
 
-    case result do
+    case Shuttle.FiberDocuments.get(fiber_id, felt_stores: state.felt_stores) do
       {:ok, %{fibers: [entry | _]}} ->
         fiber = Map.get(entry, :fiber, %{})
         key = Shuttle.Poller.DocumentCache.cache_key(fiber)
@@ -1650,22 +1581,14 @@ defmodule Shuttle.Poller do
   # match enforced, now read from felt rather than reverse-derived. A store
   # whose own `.felt/` is a symlink owns nothing here: the target store
   # enumerates it canonically.
-  #
-  # Probed with `Shuttle.RawFS`, not `File.*`: `host` is a configured store
-  # root, which is exactly the path that stalls. A plain `File.lstat/1` here is
-  # a call into the shared OTP file server, and one store parked on a macOS
-  # consent dialog would hold that server for as long as the dialog goes
-  # unanswered — blocking every filesystem call in the VM, on healthy stores and
-  # daemon-owned files alike. Being inside the poll Task buys nothing; the
-  # blocking work happens in the process everybody shares. See `Shuttle.RawFS`.
   defp list_shuttle_fibers(host, state) do
     felt_dir = Path.join(host, ".felt")
 
-    case Shuttle.RawFS.lstat(felt_dir) do
-      {:ok, %{type: :symlink}} ->
+    case File.lstat(felt_dir) do
+      {:ok, %File.Stat{type: :symlink}} ->
         {:ok, []}
 
-      {:ok, %{type: :directory}} ->
+      {:ok, %File.Stat{type: :directory}} ->
         # An empty store has nothing to enumerate; skip the felt shell-out so a
         # store with no fibers costs nothing (and so a daemon polling an empty
         # configured store doesn't shell felt every tick).
@@ -1680,10 +1603,8 @@ defmodule Shuttle.Poller do
     end
   end
 
-  # Raw for the same reason as `list_shuttle_fibers/2` above: `dir` is a store's
-  # own `.felt/`.
   defp empty_dir?(dir) do
-    case Shuttle.RawFS.ls(dir) do
+    case File.ls(dir) do
       {:ok, entries} -> entries == []
       _ -> true
     end
@@ -2095,13 +2016,7 @@ defmodule Shuttle.Poller do
   # (enabled blocks must carry one), not re-litigated at every poll.
   defp project_dir_available?(shuttle) when is_map(shuttle) do
     case Map.get(shuttle, "project_dir") do
-      # Bounded: this stat runs on the Poller process, and `project_dir` is
-      # operator-supplied — routinely a path in iCloud Drive or
-      # `~/Library/CloudStorage`, where the first reach raises a macOS consent
-      # dialog that blocks until a human answers it. Unbounded, one such fiber
-      # stops the daemon answering the board at all. Not-answered reads as
-      # not-available: the fiber simply does not dispatch this tick.
-      dir when is_binary(dir) and dir != "" -> Shuttle.BoundedIO.dir?(Path.expand(dir))
+      dir when is_binary(dir) and dir != "" -> File.dir?(Path.expand(dir))
       _ -> true
     end
   end
@@ -2393,10 +2308,7 @@ defmodule Shuttle.Poller do
     with shuttle when is_map(shuttle) <- Map.get(fiber, "shuttle"),
          dir when is_binary(dir) and dir != "" <- Map.get(shuttle, "project_dir"),
          expanded = Path.expand(dir),
-         # Bounded for the same reason as `project_dir_available?/1` — this runs
-         # on the Poller process at dispatch. A dir we cannot confirm falls back
-         # to the felt store, which is what an absent one already did.
-         true <- Shuttle.BoundedIO.dir?(expanded) do
+         true <- File.dir?(expanded) do
       expanded
     else
       _ -> fallback_host
@@ -3536,26 +3448,16 @@ defmodule Shuttle.Poller do
 
   def runtime_seconds(_, _), do: 0
 
-  # Returns the configured felt stores list.
-  #
-  # Resolution order lives in `Shuttle.FeltStores`: `FELT_STORES` env → persisted
-  # registry `~/.config/felt/stores.json` (else `[]`).
-  #
-  # This is the default-fallback only; explicit :felt_stores opts in start_link
-  # take precedence via init/1 (and disable the per-poll refresh in that case).
-  defp default_felt_stores do
-    Shuttle.FeltStores.configured_hosts()
-  end
-
-  # Re-reads the configured host list and updates state.felt_stores if the list
-  # changed. Called from discover_candidates/1 each poll cycle so persisted
-  # host registration or env changes are picked up without a daemon restart.
-  # No-op when the caller passed an explicit :felt_stores opt
-  # (state.auto_discover_felt_stores == false).
+  # Re-reads the configured host list each poll cycle, so registry or env changes
+  # are picked up without a daemon restart. Runs inside the poll Task, which is
+  # why the symlinked-substore walk belongs here too: `refresh_expanded_hosts/0`
+  # re-walks it on its own multi-minute cadence and publishes the result, leaving
+  # `configured_hosts/0` a pure cache read for the board's request path. No-op
+  # when the caller passed an explicit :felt_stores opt.
   defp refresh_felt_stores(%{auto_discover_felt_stores: false} = state), do: state
 
   defp refresh_felt_stores(%{felt_stores: current} = state) do
-    fresh = default_felt_stores()
+    fresh = Shuttle.FeltStores.refresh_expanded_hosts()
 
     if fresh == current do
       state

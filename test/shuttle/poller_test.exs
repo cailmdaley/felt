@@ -659,62 +659,6 @@ defmodule Shuttle.PollerTest do
     end)
   end
 
-  # The failed-listing test above covers a walk that RETURNS, by failing. This
-  # one covers the walk that has not returned at all — the shape the first
-  # first-contact install met, where a macOS consent dialog sat unanswered
-  # behind another window and the store walk simply stopped for 95 seconds. The
-  # property is availability, not freshness: while discovery is in flight, for
-  # however long, a read answers immediately from the last world that landed.
-  test "a poll cycle still in flight does not delay a read of the last known world" do
-    uid = "01JZ000000000000000000WEDG"
-
-    fiber =
-      make_fiber("tests/wedged-walk", %{
-        "uid" => uid,
-        "modified_at" => "2026-06-06T03:00:00Z"
-      })
-
-    MockRunner.set_fiber("tests/wedged-walk", fiber)
-    MockRunner.set_shuttle("tests/wedged-walk", @oneshot_shuttle)
-
-    {:ok, poller} =
-      start_poller!(
-        name: :test_poller_wedged_walk,
-        runner: MockRunner,
-        poll_interval_ms: 60_000,
-        max_concurrent_workers: 0,
-        felt_stores: [MockRunner.felt_root()]
-      )
-
-    assert wait_until(fn ->
-             get_in(Poller.snapshot(poller), [:document_cache, "entries"]) == 1
-           end)
-
-    # The next walk wedges: `felt ls` will not answer for 5 seconds, an eternity
-    # next to the reads the board makes every 5 seconds.
-    MockRunner.set_felt_ls_delay(5_000)
-    send(poller, :run_poll_cycle)
-
-    # Give the cycle a moment to actually be in flight before measuring, so this
-    # is a read DURING the walk rather than one that beat it to the mailbox.
-    Process.sleep(100)
-    discovery = Poller.snapshot(poller)[:discovery]
-    assert discovery["in_flight"] == true
-    assert discovery["in_flight_ms"] >= 0
-
-    {elapsed_us, result} = :timer.tc(fn -> Poller.cached_fiber_documents(poller) end)
-
-    assert {:ok, body} = result
-    assert [%{fiber: %{"id" => ^uid, "slug" => "tests/wedged-walk"}}] = body.fibers
-
-    # Milliseconds, not seconds: the reply is a pure read of GenServer state and
-    # the walk is off that process entirely. A generous ceiling — the failure
-    # this guards is 5 seconds, not 50 milliseconds.
-    assert div(elapsed_us, 1000) < 500
-
-    MockRunner.set_felt_ls_delay(0)
-  end
-
   test "seam patch survives a poll built from a pre-mutation snapshot (prefer-newer merge)" do
     uid = "01JZ0000000000000000000SEA"
 

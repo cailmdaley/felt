@@ -45,15 +45,7 @@ defmodule Shuttle.Runner do
       # `ErlangError :enoent` when it's missing; map that documented failure
       # mode to exit 127 (the shell's "command not found") so PATH problems
       # degrade like any other failed command instead of crashing the caller.
-      #
-      # Resolved raw (`Shuttle.RawFS`, not `System.find_executable/1`) because
-      # this runs on the `Shuttle.Poller` process on every dispatch: the stock
-      # resolver stats each PATH entry through the shared OTP file server, so a
-      # single felt store wedged on a macOS consent dialog would stop the daemon
-      # shelling `felt` or `tmux` at all. Spawning the port with the resolved
-      # absolute path is unaffected by that wedge — resolution was the whole
-      # exposure.
-      case Shuttle.RawFS.find_executable(command) do
+      case System.find_executable(command) do
         nil -> {"#{command}: command not found", 127}
         executable -> run_bounded(executable, command, args, opts, timeout_ms)
       end

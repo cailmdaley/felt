@@ -4,11 +4,8 @@ defmodule Shuttle.Realpath do
 
   Resolves a path to its physical location, following symlinks along every
   segment so that an ownership prefix matches felt's symlink-resolved `path`.
-  Each segment is probed with `Shuttle.RawFS.read_link/1` — raw on purpose: a
-  bare `:file.read_link/1` is a call into the shared OTP file server, where one
-  store wedged on a macOS consent dialog blocks every path resolution in the VM
-  (see `Shuttle.RawFS`). A segment that isn't a symlink falls back to
-  `Path.expand`. `@max_symlink_hops` bounds the resolution so a
+  Each segment is probed with `:file.read_link`; a segment that isn't a symlink
+  falls back to `Path.expand`. `@max_symlink_hops` bounds the resolution so a
   symlink loop returns `{:error, :symlink_loop}` rather than spinning.
 
   Self-contained on purpose: no OS `realpath` shell-out, no cross-module
@@ -43,8 +40,9 @@ defmodule Shuttle.Realpath do
   defp resolve_segments(current, [segment | rest], hops) do
     candidate = Path.join(current, segment)
 
-    case Shuttle.RawFS.read_link(candidate) do
-      {:ok, target_path} ->
+    case :file.read_link(String.to_charlist(candidate)) do
+      {:ok, target} ->
+        target_path = List.to_string(target)
 
         expanded_target =
           case Path.type(target_path) do

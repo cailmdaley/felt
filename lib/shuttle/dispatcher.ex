@@ -1079,47 +1079,16 @@ defmodule Shuttle.Dispatcher do
   # launch) bypasses eligibility entirely and lands straight here — so this is
   # the only place the forced path can learn it.
   defp check_work_dir(_agent, work_dir) when is_binary(work_dir) and work_dir != "" do
-    # Bounded and raw (`Shuttle.BoundedIO`, which probes through
-    # `Shuttle.RawFS`): a `project_dir` is operator-supplied — routinely iCloud
-    # Drive or a network mount — and `Dispatcher.dispatch/2` is called from
-    # `handle_call` on the `Shuttle.Poller` process, so a bare `File.dir?/1`
-    # that blocks stops the daemon dispatching anything AND holds the shared OTP
-    # file server while it waits. The Poller's own two probes of this same path
-    # (`project_dir_available?/1`, `fiber_work_dir/3`) are bounded for exactly
-    # this reason; a third unbounded one on the forced path was the way around
-    # them.
-    #
-    # The probe answers `:unknown` rather than `false` on expiry, so the refusal
-    # can say which thing happened. Same refusal tag either way — the decision is
-    # identical and every consumer of it stays as it was — but the two messages
-    # send the operator to different places, one to the fiber's `project_dir` and
-    # the other to the consent dialog behind their windows. Telling someone their
-    # checkout is on another machine when the truth is an unanswered dialog costs
-    # more than the extra clause.
-    case Shuttle.BoundedIO.run(fn -> Shuttle.RawFS.dir?(work_dir) end, 500,
-           default: :unknown,
-           label: "dir?(#{work_dir})"
-         ) do
-      true ->
-        :ok
-
-      :unknown ->
-        dispatch_refused(
-          :work_dir_missing,
-          "work directory #{work_dir} did not answer in time, so this host cannot confirm the " <>
-            "worker could start there. On macOS this is usually a permission dialog waiting on " <>
-            "a human for an iCloud or CloudStorage path — look behind your other windows, then " <>
-            "dispatch again."
-        )
-
-      false ->
-        dispatch_refused(
-          :work_dir_missing,
-          "work directory #{work_dir} is not a directory on this host, so neither the worker's " <>
-            "tmux session nor its harness could start there. The fiber's `project_dir` most " <>
-            "likely names a checkout that lives on another machine — dispatch it from that host, " <>
-            "or correct `project_dir` in the fiber's `shuttle:` block."
-        )
+    if File.dir?(work_dir) do
+      :ok
+    else
+      dispatch_refused(
+        :work_dir_missing,
+        "work directory #{work_dir} is not a directory on this host, so neither the worker's " <>
+          "tmux session nor its harness could start there. The fiber's `project_dir` most " <>
+          "likely names a checkout that lives on another machine — dispatch it from that host, " <>
+          "or correct `project_dir` in the fiber's `shuttle:` block."
+      )
     end
   end
 

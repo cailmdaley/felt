@@ -50,9 +50,7 @@ defmodule ShuttleWeb.CaptureController do
       not present?(project_dir) ->
         conn |> put_status(400) |> json(%{error: "project_dir is required"})
 
-      # Bounded — see `Shuttle.BoundedIO`: a caller-supplied path in a synced
-      # folder must not park this request on a macOS consent dialog.
-      not Shuttle.BoundedIO.dir?(project_dir) ->
+      not File.dir?(project_dir) ->
         conn
         |> put_status(422)
         |> json(%{spawned: false, reason: "project_dir_missing", project_dir: project_dir})

@@ -98,12 +98,7 @@ defmodule Shuttle.Application do
       {DynamicSupervisor, strategy: :one_for_one, name: Shuttle.WatcherSupervisor},
       # Owns the ETS table the per-session token folds are cached in. Pure
       # cache: a restart costs one re-read per session, never a wrong number.
-      Shuttle.TokenSpend,
-      # Owns the ETS table felt-store scans are claimed in. Bookkeeping only —
-      # it never touches the filesystem, and nobody ever sends it a message, so
-      # a wedged store cannot queue behind it. A restart forgets in-flight
-      # claims, which costs at most one redundant walk.
-      Shuttle.FeltStores.ScanRoster
+      Shuttle.TokenSpend
     ]
 
     optional =

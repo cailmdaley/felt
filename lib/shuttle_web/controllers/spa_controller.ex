@@ -15,10 +15,7 @@ defmodule ShuttleWeb.SpaController do
   def index(conn, _params) do
     index_path = Path.join(ShuttleWeb.Assets.dist(), "index.html")
 
-    # Raw (`Shuttle.RawFS`): `Plug.Static` already reads through `:prim_file`,
-    # so this one check was the only thing standing between a wedged felt store
-    # and a board that will not load at all. See `Shuttle.RawFS`.
-    if Shuttle.RawFS.regular?(index_path) do
+    if File.regular?(index_path) do
       conn
       |> put_resp_content_type("text/html")
       |> send_file(200, index_path)

@@ -372,48 +372,15 @@ reaches, rather than the boundary being negotiated flag by flag.
   what it resolves to — check the `host:` on fibers armed before this release
   and update any that still hold the old raw name, or they will sit
   undispatched. `felt check` now warns when it finds one.
-- A store the daemon cannot walk no longer takes the board down with it. The
-  symlink-substore expansion behind the store list is a raw filesystem walk
-  with no timeout, and it used to run in whichever process asked — including
-  the request processes serving `/api/v1/fibers/composite` and
-  `/api/v1/felt-stores`. Point the daemon at a store macOS guards (iCloud
-  Drive, `~/Library/CloudStorage`) and the first walk raises a consent dialog;
-  until someone clicks it, every endpoint queued behind it. On the first
-  install by someone other than the author that meant responses at 17, 27 and
-  32 seconds and one 503 at 95 — which is simply how long the dialog sat
-  unanswered behind another window. The walk now runs in a background task and
-  reads answer from cache: a store that cannot be walked degrades the
-  *freshness* of the store list, never the *availability* of the endpoint
-  reading it. The same bound covers the two `project_dir` stats the poller
-  makes on its own process, and the post-mutation document re-read now defers
-  its reply rather than holding the poller's mailbox for the length of a
-  `felt show`. A slow walk also says so: the log names the store holding
-  things up and what usually causes it, and the daemon snapshot and
-  `/api/v1/felt-stores` carry the same scan report.
-- …and the layer under that: the daemon's filesystem calls no longer go
-  through the OTP file server. `File.ls/1`, `File.dir?/1`, `File.stat/1` and
-  friends are client calls into `:file_server_2`, a single process shared by
-  the whole VM, so one call parked on an unanswered consent dialog blocked
-  *every* filesystem call in the daemon — including the ones inside the
-  background task that was supposed to contain it, and including
-  `System.find_executable/1`, which is how the daemon locates `felt` and
-  `tmux` before every shell-out. The store walk, path realpathing, the bounded
-  `project_dir` probe, executable resolution and the file-serving read
-  endpoints now use `Shuttle.RawFS`, which bypasses the file server. Those
-  calls are dispatched to the VM's dirty IO schedulers instead — ten of them,
-  so a parked probe is cheap but not free, which is why the store scan now
-  holds its single-flight lock until the scanner answers *or dies* rather than
-  expiring it on a timer: re-probing a store nobody has clicked through
-  accumulates parked walks, and the tenth one wedges the VM. A scan already
-  out longer than the caller's patience is no longer waited on at all. The poll
-  cycle's own probe of each store — one `lstat` and one `ls` of `<store>/.felt`,
-  every tick — went raw with them, along with the fiber reads and the one
-  autonomous fiber write the poll cycle makes; a single unconverted call on a
-  stalled path re-wedges the file server for the whole daemon, so the property
-  is only as strong as its weakest call site — so the fiber-create endpoint,
-  which writes into a store, went raw too. A test now asserts the property over
-  a real socket: with the file server genuinely wedged, the board's page and a
-  file read on a healthy store both still answer.
+- The board no longer pays for store discovery on the request path. The store
+  list is expanded by walking each store's `.felt/` for symlinked substores —
+  about a second on a large store — and that walk used to run inline, on
+  whichever request arrived after a 30-second cache lapsed. The poll cycle now
+  owns it: the walk runs in the Task the poller already spawns, refreshed every
+  few minutes, and `configured_hosts/0` is a cache read for everyone else. A
+  changed `FELT_STORES` or store registry still takes effect on the next call,
+  and a newly linked substore is still discovered without a restart — just on
+  the poller's clock rather than a request's.
 - The standing-role reconciler self-heals inverted markers instead of
   re-closing live work. Dead pinned roles park rather than relaunching in a
   loop.

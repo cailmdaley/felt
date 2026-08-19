@@ -2,7 +2,6 @@ defmodule Shuttle.FeltStoresTest do
   use ExUnit.Case, async: false
 
   alias Shuttle.FeltStores
-  alias Shuttle.FeltStores.ScanRoster
 
   setup do
     prev = System.get_env("FELT_STORES")
@@ -209,6 +208,32 @@ defmodule Shuttle.FeltStoresTest do
       assert hosts == [Path.expand(loom)]
     end
 
+    # Freshness is the POLLER's job: `configured_hosts/0` only reads the
+    # published expansion (so no board request ever pays for the walk), and
+    # `refresh_expanded_hosts/0` — called from the poll Task — is what re-walks.
+    test "the read path serves the cache; the poller's refresh republishes" do
+      loom = tmp_dir()
+      project = tmp_dir()
+      File.mkdir_p!(Path.join(loom, ".felt"))
+      File.mkdir_p!(Path.join(project, ".felt"))
+      link = Path.join([loom, ".felt", "shapepipe"])
+      File.ln_s!(Path.join(project, ".felt"), link)
+      System.put_env("FELT_STORES", loom)
+
+      assert length(FeltStores.configured_hosts()) == 2
+      File.rm!(link)
+      # Still 2: the read path did not touch the filesystem.
+      assert length(FeltStores.configured_hosts()) == 2
+
+      # Age the published entry past the refresh cadence, as the clock would.
+      key = {FeltStores, :expanded_hosts}
+      {base, expanded, walked_at} = :persistent_term.get(key)
+      :persistent_term.put(key, {base, expanded, walked_at - 600_000})
+
+      assert FeltStores.refresh_expanded_hosts() == [Path.expand(loom)]
+      assert FeltStores.configured_hosts() == [Path.expand(loom)]
+    end
+
     test "skips a dangling substore symlink" do
       loom = tmp_dir()
       File.mkdir_p!(Path.join(loom, ".felt"))
@@ -276,298 +301,6 @@ defmodule Shuttle.FeltStoresTest do
     end
   end
 
-  # The property the board's availability rests on: `configured_hosts/0` is on the
-  # request path of the read endpoints, and its expansion is a raw filesystem walk
-  # with no timeout. A store macOS guards (iCloud, CloudStorage) raises a consent
-  # dialog on the first walk and blocks the walker until a human answers it — human
-  # time, not machine time. So the walk runs behind a deadline: past it, callers get
-  # the unexpanded base list and the endpoint stays up.
-  describe "a stalled store scan degrades freshness, never availability" do
-    setup do
-      on_exit(fn ->
-        Application.delete_env(:shuttle, :store_scan_wait_ms)
-        :ets.delete_all_objects(:shuttle_felt_store_scans)
-      end)
-
-      :ok
-    end
-
-    test "a cold caller past the deadline gets the unexpanded base, then self-heals" do
-      loom = tmp_dir()
-      project = tmp_dir()
-      File.mkdir_p!(Path.join(loom, ".felt"))
-      File.mkdir_p!(Path.join(project, ".felt"))
-      File.ln_s!(Path.join(project, ".felt"), Path.join([loom, ".felt", "shapepipe"]))
-      System.put_env("FELT_STORES", loom)
-
-      # No patience at all: the caller cannot wait for even a healthy scan, which
-      # is what a wedged one looks like from here.
-      Application.put_env(:shuttle, :store_scan_wait_ms, 0)
-
-      assert FeltStores.configured_hosts() == [Path.expand(loom)]
-
-      # The scan it kicked off still lands, so the substore appears on its own —
-      # the degradation is a lag, not a lost store.
-      Application.delete_env(:shuttle, :store_scan_wait_ms)
-
-      assert eventually(fn ->
-               Enum.any?(FeltStores.configured_hosts(), &same_dir?(&1, project))
-             end)
-    end
-
-    test "a scan that never returns does not hold the caller past the deadline" do
-      loom = tmp_dir()
-      project = tmp_dir()
-      File.mkdir_p!(Path.join(loom, ".felt"))
-      File.mkdir_p!(Path.join(project, ".felt"))
-      File.ln_s!(Path.join(project, ".felt"), Path.join([loom, ".felt", "shapepipe"]))
-      System.put_env("FELT_STORES", loom)
-
-      # Put a scan of THIS EXACT BASE on the roster and never let it finish:
-      # from `configured_hosts/0`'s side this is indistinguishable from a walk
-      # parked in the kernel waiting on a consent dialog — no scan will run, and
-      # no result will ever arrive. It must be *this* base, because a caller with
-      # a different one is entitled to start its own scan (see
-      # `start_expansion_scan/1`), which would make this test pass vacuously.
-      parked = spawn(fn -> Process.sleep(:infinity) end)
-      on_exit(fn -> Process.exit(parked, :kill) end)
-
-      assert :ok = ScanRoster.claim(FeltStores.configured_base_hosts(), parked, 99)
-
-      Application.put_env(:shuttle, :store_scan_wait_ms, 50)
-
-      {elapsed_us, hosts} = :timer.tc(&FeltStores.configured_hosts/0)
-
-      # The substore is genuinely absent, which is what proves no scan ran: a
-      # scan would have discovered `project` through the symlink.
-      assert hosts == [Path.expand(loom)]
-      refute Enum.any?(hosts, &same_dir?(&1, project))
-      assert div(elapsed_us, 1000) < 1_000
-    end
-
-    test "a scan already out longer than the wait costs the next caller nothing" do
-      loom = tmp_dir()
-      File.mkdir_p!(Path.join(loom, ".felt"))
-      System.put_env("FELT_STORES", loom)
-
-      parked = spawn(fn -> Process.sleep(:infinity) end)
-      on_exit(fn -> Process.exit(parked, :kill) end)
-
-      # Parked since well before the deadline — the situation a wedged store
-      # settles into within a minute. Waiting again would spend the whole
-      # deadline on every read for as long as the dialog goes unanswered.
-      :persistent_term.put(
-        {Shuttle.FeltStores, :expansion_scans},
-        [
-          {parked, FeltStores.configured_base_hosts(),
-           System.monotonic_time(:millisecond) - 10_000}
-        ]
-      )
-
-      Application.put_env(:shuttle, :store_scan_wait_ms, 500)
-
-      {elapsed_us, hosts} = :timer.tc(&FeltStores.configured_hosts/0)
-
-      assert hosts == [Path.expand(loom)]
-      assert div(elapsed_us, 1000) < 100
-    end
-
-    test "the parked-scan budget stops the daemon probing a filesystem that is not answering" do
-      loom = tmp_dir()
-      project = tmp_dir()
-      File.mkdir_p!(Path.join(loom, ".felt"))
-      File.mkdir_p!(Path.join(project, ".felt"))
-      File.ln_s!(Path.join(project, ".felt"), Path.join([loom, ".felt", "shapepipe"]))
-      System.put_env("FELT_STORES", loom)
-
-      # Three scanners parked in the kernel, none of them ours: the budget is
-      # global because the resource it protects is (the VM's dirty IO
-      # schedulers), so a fourth base does not get a fourth probe.
-      parked = for _ <- 1..3, do: spawn(fn -> Process.sleep(:infinity) end)
-      on_exit(fn -> Enum.each(parked, &Process.exit(&1, :kill)) end)
-
-      for {pid, i} <- Enum.with_index(parked),
-          do: assert(:ok = ScanRoster.claim(["/other/store#{i}"], pid, 99))
-
-      Application.put_env(:shuttle, :store_scan_wait_ms, 100)
-
-      assert ExUnit.CaptureLog.capture_log(fn ->
-               assert FeltStores.configured_hosts() == [Path.expand(loom)]
-             end) =~ "still parked"
-
-      # No probe was issued, so the substore stays undiscovered — as opposed to
-      # the deadline case above, where the scan lands a moment later.
-      Application.delete_env(:shuttle, :store_scan_wait_ms)
-      Process.sleep(200)
-      refute Enum.any?(FeltStores.configured_hosts(), &same_dir?(&1, project))
-    end
-
-    test "a live scan of MY base is waited for even when the budget is spent" do
-      loom = tmp_dir()
-      File.mkdir_p!(Path.join(loom, ".felt"))
-      System.put_env("FELT_STORES", loom)
-      :persistent_term.erase({Shuttle.FeltStores, :expanded_hosts})
-
-      # The budget is spent by three scans of OTHER bases, and a fourth scan —
-      # of this caller's base — is genuinely in flight and recent. The budget
-      # must not be what this caller consults: the answer it is waiting for is
-      # already being computed, so serving the unexpanded base immediately would
-      # be staleness bought for nothing.
-      scanners = for _ <- 1..4, do: spawn(fn -> Process.sleep(:infinity) end)
-      on_exit(fn -> Enum.each(scanners, &Process.exit(&1, :kill)) end)
-      [mine | others] = scanners
-
-      assert :ok = ScanRoster.claim(FeltStores.configured_base_hosts(), mine, 99)
-
-      for {pid, i} <- Enum.with_index(others),
-          do: assert(:ok = ScanRoster.claim(["/other/store#{i}"], pid, 99))
-
-      Application.put_env(:shuttle, :store_scan_wait_ms, 300)
-
-      {elapsed_us, hosts} = :timer.tc(&FeltStores.configured_hosts/0)
-
-      assert hosts == [Path.expand(loom)]
-      assert div(elapsed_us, 1000) >= 300
-    end
-
-    test "a burst of readers on one store list starts exactly one scan" do
-      loom = tmp_dir()
-      felt = Path.join(loom, ".felt")
-      File.mkdir_p!(felt)
-      # Enough directories that the walk takes long enough for the burst to
-      # overlap it — the failure being pinned is a race, so the window has to be
-      # wide enough to lose.
-      for i <- 1..300, do: File.mkdir_p!(Path.join([felt, "fiber-#{i}", "sub"]))
-      System.put_env("FELT_STORES", loom)
-      :persistent_term.erase({Shuttle.FeltStores, :expanded_hosts})
-
-      # Twenty readers at once is a board load, not a synthetic burst: every tab
-      # switch fires several API calls, and each one reaches `configured_hosts/0`.
-      # Claiming a scan therefore has to be ATOMIC — a read-modify-write over a
-      # shared list decides from a stale read, and every reader spawns its own
-      # walk. On a store parked behind a consent dialog that is twenty blocked
-      # calls against the VM's ten dirty IO schedulers: the dead node this whole
-      # design exists to avoid.
-      # Released from a barrier rather than spawned in a loop: spawning twenty
-      # tasks takes long enough that the first walk can finish before the last
-      # task starts, which would let a broken claim pass.
-      me = self()
-
-      log =
-        ExUnit.CaptureLog.capture_log(fn ->
-          readers =
-            for _ <- 1..20 do
-              Task.async(fn ->
-                send(me, {:ready, self()})
-
-                receive do
-                  :go -> FeltStores.configured_hosts()
-                end
-              end)
-            end
-
-          for _ <- readers, do: assert_receive({:ready, _}, 2_000)
-          for reader <- readers, do: send(reader.pid, :go)
-          Task.await_many(readers, 5_000)
-
-          # Let a late-finishing scan log before the capture stops.
-          Process.sleep(200)
-        end)
-
-      scans = log |> String.split("felt-store scan took") |> length() |> Kernel.-(1)
-      assert scans == 1, "expected one scan for one store list, saw #{scans}"
-    end
-
-    test "a refused probe costs the caller nothing, rather than its whole deadline" do
-      loom = tmp_dir()
-      File.mkdir_p!(Path.join(loom, ".felt"))
-      System.put_env("FELT_STORES", loom)
-
-      # Cold cache and a spent budget: nothing was started for this base and
-      # nothing is going to arrive, so there is nothing to wait FOR. Waiting
-      # anyway is what a wedged store used to cost every read at boot — the
-      # deadline, on every request, for as long as the dialog went unanswered.
-      :persistent_term.erase({Shuttle.FeltStores, :expanded_hosts})
-
-      parked = for _ <- 1..3, do: spawn(fn -> Process.sleep(:infinity) end)
-      on_exit(fn -> Enum.each(parked, &Process.exit(&1, :kill)) end)
-
-      for {pid, i} <- Enum.with_index(parked),
-          do: assert(:ok = ScanRoster.claim(["/other/store#{i}"], pid, 99))
-
-      Application.put_env(:shuttle, :store_scan_wait_ms, 2_000)
-
-      {elapsed_us, hosts} = :timer.tc(&FeltStores.configured_hosts/0)
-
-      assert hosts == [Path.expand(loom)]
-      assert div(elapsed_us, 1000) < 100
-    end
-  end
-
-  # One blocked `File.*` call anywhere in the VM stops EVERY `File.*` call in the
-  # VM: they are all client calls into `:file_server_2`, a single GenServer, and
-  # the blocked one executes inside it. So "run the slow walk in a task" is not
-  # isolation on its own — the task blocks the process everybody shares. The
-  # walk, path resolution and the bounded probe all go through `Shuttle.RawFS`
-  # for that reason, and this is the test that says so.
-  #
-  # A writer-less FIFO is a faithful stand-in for the macOS consent dialog that
-  # motivated all of this: `open(2)` blocks in the kernel until somebody shows
-  # up. The wedge is released at the end of the test rather than left to expire.
-  describe "a wedged OTP file server does not take the store list with it" do
-    @tag :capture_log
-    test "configured_hosts, realpath and the bounded probe all still answer" do
-      dir = tmp_dir()
-      fifo = Path.join(dir, "consent-dialog")
-      {_, 0} = System.cmd("mkfifo", [fifo])
-
-      loom = tmp_dir()
-      File.mkdir_p!(Path.join(loom, ".felt"))
-      System.put_env("FELT_STORES", loom)
-      # Warm the cache before wedging: this asserts about serving reads while the
-      # world is not answering, not about scanning while it is not answering.
-      FeltStores.configured_hosts()
-
-      blocker = spawn(fn -> File.read(fifo) end)
-      blocker_down = Process.monitor(blocker)
-
-      # Opening the FIFO for writing lets the parked `open(2)` return, which
-      # releases the file server. Only ever do this while the reader is still
-      # parked: an open-for-write with no reader blocks in exactly the same way,
-      # and an unconditional cleanup callback would hang the suite instead of
-      # the test. So on_exit is the failure path, and the test releases its own
-      # wedge on the way out.
-      release = fn -> with {:ok, io} <- :file.open(fifo, [:write, :raw]), do: :file.close(io) end
-      on_exit(fn -> if Process.alive?(blocker), do: release.() end)
-
-      # The negative control, and the proof the wedge took: a plain `File.dir?`
-      # cannot answer while the file server is out.
-      wedged = Task.async(fn -> File.dir?("/tmp") end)
-      assert Task.yield(wedged, 500) == nil
-      Task.shutdown(wedged, :brutal_kill)
-      assert Process.alive?(blocker)
-
-      answers = fn fun ->
-        task = Task.async(fun)
-        result = Task.yield(task, 1_000)
-        Task.shutdown(task, :brutal_kill)
-        result
-      end
-
-      assert {:ok, true} = answers.(fn -> Shuttle.RawFS.dir?(loom) end)
-      assert {:ok, [_ | _]} = answers.(fn -> FeltStores.configured_hosts() end)
-      assert {:ok, {:ok, _}} = answers.(fn -> Shuttle.Realpath.resolve(loom) end)
-      assert {:ok, true} = answers.(fn -> Shuttle.BoundedIO.dir?(loom) end)
-      assert {:ok, path} = answers.(fn -> Shuttle.RawFS.find_executable("sh") end)
-      assert is_binary(path)
-
-      release.()
-      assert_receive {:DOWN, ^blocker_down, :process, ^blocker, _}, 2_000
-      # And the file server is itself again.
-      assert File.dir?("/tmp")
-    end
-  end
-
   describe "timeout is world-unknown, never absence" do
     # A wedged felt (runner :timeout) must surface as {:error, :timeout}, not
     # {:error, :not_found}: consumers treat :not_found as authoritative absence
@@ -629,22 +362,6 @@ defmodule Shuttle.FeltStoresTest do
 
     File.write!(path, "---\n#{id_field}name: #{leaf}\n---\n\nBody.\n")
     path
-  end
-
-  # Poll rather than sleep a fixed span: the background scan lands in milliseconds
-  # on a healthy filesystem, and a fixed sleep is either flaky or slow.
-  defp eventually(fun, remaining_ms \\ 2_000) do
-    cond do
-      fun.() ->
-        true
-
-      remaining_ms <= 0 ->
-        false
-
-      true ->
-        Process.sleep(20)
-        eventually(fun, remaining_ms - 20)
-    end
   end
 
   defp tmp_dir do

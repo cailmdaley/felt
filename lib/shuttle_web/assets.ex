@@ -27,7 +27,7 @@ defmodule ShuttleWeb.Assets do
 
   defp priv_dist do
     path = Application.app_dir(:shuttle, "priv/ui/dist")
-    if Shuttle.RawFS.dir?(path), do: path
+    if File.dir?(path), do: path
   rescue
     # :code.priv_dir fails in contexts where the app is not loaded (rare —
     # compile-time evaluation of other modules); fall through to the checkout.

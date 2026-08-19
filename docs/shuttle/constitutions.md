@@ -215,11 +215,8 @@ list the daemon evaluates.
 - **`project_dir`** — the worker's working directory on the target host.
   `install` and `repeat` require it (install allows omitting it only with
   `--disabled`). The daemon also checks that the directory exists. It runs that
-  gate last, because that gate alone touches the filesystem, and it runs it
-  under a deadline: on macOS a stat inside a synced folder can raise a
-  permission prompt nobody can grant, and a directory that does not answer is
-  treated as one that is not there — the fiber waits for the next tick rather
-  than the daemon waiting for the dialog.
+  gate last, because that gate alone touches the filesystem. On macOS a stat
+  inside a synced folder can raise a permission prompt nobody can grant.
 - **`host`** — the owning daemon's host id. A daemon dispatches a block if and
   only if `block.host` equals its own id (`SHUTTLE_HOST`, else the file
   `~/.shuttle/host`, else the system hostname — consulted once and then

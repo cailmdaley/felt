@@ -223,10 +223,8 @@ defmodule ShuttleWeb.RelayHelpers do
   never written the file 304s forever, correctly.
   """
   def file_token(path) when is_binary(path) do
-    # Raw for the same reason as `ShuttleWeb.FileController` — see
-    # `Shuttle.RawFS`.
-    case Shuttle.RawFS.stat(path) do
-      {:ok, %{type: :regular, mtime: mtime, size: size}} -> {mtime, size}
+    case File.stat(path, time: :posix) do
+      {:ok, %File.Stat{type: :regular, mtime: mtime, size: size}} -> {mtime, size}
       _ -> nil
     end
   end

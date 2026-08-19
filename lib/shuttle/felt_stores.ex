@@ -12,10 +12,6 @@ defmodule Shuttle.FeltStores do
   explicitly. Saving an empty list deletes the registry file.
   """
 
-  require Logger
-
-  alias Shuttle.FeltStores.ScanRoster
-
   alias Shuttle.PathListConfig
 
   @spec_ %{
@@ -28,288 +24,50 @@ defmodule Shuttle.FeltStores do
   @type host_list :: [String.t()]
 
   @expanded_cache_key {__MODULE__, :expanded_hosts}
-  @scan_report_key {__MODULE__, :expansion_scan_report}
-  @expanded_cache_ttl_ms 30_000
-
-  # How long a cold caller — one with no expansion cached for the CURRENT base
-  # list — waits for the background scan before giving up and serving the
-  # unexpanded base. Calibrated against a real store rather than a guess: the
-  # author's own `~/loom` (one store, a deep tree, several symlinked substores)
-  # scans in ~1.1 s warm, which is also what the old inline expansion charged
-  # some unlucky request every 30 s. So this is a small multiple of a HEALTHY
-  # walk, not a latency target — and still two orders of magnitude below the
-  # stall it exists to bound, where the thing being waited on is a person.
-  @scan_wait_ms 2_000
-
-  # How many store scans may be parked in a blocking filesystem call at once.
-  # This is a budget, not a tuning knob: a scan that never returns holds one of
-  # the VM's dirty IO schedulers until the kernel releases it, there are ten of
-  # them, and the tenth simultaneously blocked call wedges every filesystem
-  # operation in the VM (measured — see `Shuttle.RawFS`). Re-issuing a probe
-  # that has not come back is therefore how a stalled store turns into a stalled
-  # node, on a timer. Three leaves headroom for the rest of the daemon's raw
-  # I/O; past it, callers serve the unexpanded base and wait for the world.
-  @max_parked_scans 3
-
-  # A scan slower than this is reported by name, at :warning, with what usually
-  # causes it. Set above a healthy real store (~1.1 s, measured) with room to
-  # spare, so this fires for trouble rather than for size: the stall it is
-  # hunting runs to tens of seconds.
-  @slow_scan_warn_ms 5_000
+  # How stale the poller lets the expansion get before re-walking it. The
+  # symlink topology changes about monthly and the walk costs ~1 s on a large
+  # store, so minutes of lag are free — and no request ever pays for it.
+  @expansion_refresh_ms 300_000
 
   @doc """
-  The configured store list, expanded with any symlinked substores.
+  The configured stores, expanded with symlinked substores.
 
-  **This call never blocks on the filesystem for longer than #{@scan_wait_ms} ms,
-  and normally does no filesystem work at all.** That bound is load-bearing, not
-  hygiene: `configured_hosts/0` is on the request path of most read endpoints
-  (`/api/v1/fibers/composite`, `/api/v1/felt-stores`) as well as every poll, and
-  the expansion it caches is a full `Shuttle.RawFS` walk of each store's
-  `.felt/`. Those calls have no timeout. Reach into a store macOS
-  guards — iCloud Drive, `~/Library/CloudStorage` — and the first walk raises a
-  consent dialog that blocks the calling process *for as long as the dialog goes
-  unanswered*, which is human time, not machine time. Serving that walk inline
-  is how an unanswered dialog behind another window took the whole API down for
-  95 seconds on a first install (see the constitution
-  `professional-open-source/idea-discovery-off-the-poller-process`).
-
-  So the walk runs in a background task and reads consult a `:persistent_term`
-  cache:
-
-    * **Fresh** (cached for this base, within the #{@expanded_cache_ttl_ms} ms
-      TTL) — returned as-is. No filesystem, no spawn.
-    * **Stale** (cached for this base, past the TTL) — the stale list is
-      returned *immediately* and a rescan is kicked off behind it. A store that
-      cannot be walked degrades the freshness of the store list, never the
-      availability of the endpoint reading it.
-    * **Cold** (nothing cached for this base — first call, or the operator just
-      changed `FELT_STORES`) — a rescan is kicked off and we wait up to
-      #{@scan_wait_ms} ms for it, so a healthy filesystem still behaves
-      synchronously and callers see substores on the first call. Past that
-      deadline the *unexpanded* base list is served: correct, just missing
-      symlinked substores, and self-healing the moment the scan lands.
-
-  The scan is single-flight *per base*, and a scan stays on the roster until it
-  answers or dies, so a stalled store yields exactly one parked task however
-  many requests arrive — while a caller whose store list differs can still get
-  its own scan started rather than waiting out the stall. At most
-  #{@max_parked_scans} scans may be in flight at once; past that, callers serve
-  the base list and nobody issues another probe into a filesystem that is not
-  answering.
+  A cache read — the walk runs in the poll cycle's Task
+  (`refresh_expanded_hosts/0`), never on a request process. The exception is a
+  cold start: the first call for a given base list, which includes a
+  just-changed `FELT_STORES`/registry, so a config change takes effect at once.
   """
   @spec configured_hosts() :: host_list()
-  def configured_hosts do
+  def configured_hosts, do: cached_expansion(:infinity)
+
+  @doc """
+  Re-walk the stores for symlinked substores and publish the result for
+  `configured_hosts/0` to read.
+
+  The poller calls this from its poll Task, so the cost lands off-process on a
+  cadence the daemon owns; within `@expansion_refresh_ms` of the last walk it is
+  itself just a cache read.
+  """
+  @spec refresh_expanded_hosts() :: host_list()
+  def refresh_expanded_hosts, do: cached_expansion(@expansion_refresh_ms)
+
+  # Cached by base list, so a config change never serves the old expansion.
+  # `:infinity` sorts above every integer, so the read path takes the cached
+  # branch whenever an entry for this base exists.
+  defp cached_expansion(max_age_ms) do
     base = configured_base_hosts()
     now = System.monotonic_time(:millisecond)
 
     case :persistent_term.get(@expanded_cache_key, :none) do
-      {^base, expanded, cached_at} when now - cached_at < @expanded_cache_ttl_ms ->
-        expanded
-
-      {^base, expanded, _stale_at} ->
-        start_expansion_scan(base)
+      {^base, expanded, walked_at} when now - walked_at < max_age_ms ->
         expanded
 
       _ ->
-        if worth_waiting?(start_expansion_scan(base), base),
-          do: await_expansion(base, now + scan_wait_ms()) || unexpanded(base),
-          else: unexpanded(base)
-    end
-  end
-
-  # A cold caller waits out the deadline only when there is a scan that could
-  # plausibly answer within it. Two ways there is not:
-  #
-  #   * `:refused` — the parked-scan budget is spent. A scan for THIS base would
-  #     have been reported `:in_flight` before the budget was ever consulted, so
-  #     `:refused` means nothing is running for it and nothing is going to
-  #     arrive. Waiting would charge every read the full deadline for as long as
-  #     the stall lasts, which is the availability this module exists to protect.
-  #   * a scan for this base that has ALREADY been out longer than the wait. It
-  #     may still land, but not within a window it has visibly overrun.
-  #
-  # Either way the answer is the same as the answer after waiting: the
-  # unexpanded base, self-healing the moment a scan lands.
-  defp worth_waiting?(:refused, _base), do: false
-  defp worth_waiting?(_started_or_in_flight, base), do: not scan_overdue?(base)
-
-  # Poll the cache rather than await a task reference: the scan's result is
-  # installed by whoever runs it, so a caller that gives up waiting costs
-  # nothing and a caller that never existed still gets the scan done. Waiting on
-  # a message would tie the result to one process's mailbox and lose it when a
-  # request process dies at its own timeout.
-  #
-  # Re-arming on every pass is the subtle half, and it is cheap: the roster is
-  # per base, so this is a no-op while our own scan is alive and starts a
-  # replacement the moment one dies without writing an answer. Without it a
-  # caller could sit out the whole deadline waiting on a result nobody was
-  # computing. (Found as a test flake, which is what that failure mode looks
-  # like from outside: change `FELT_STORES` while a rescan is in flight and the
-  # next read is unexpanded.)
-  defp await_expansion(base, deadline) do
-    case :persistent_term.get(@expanded_cache_key, :none) do
-      {^base, expanded, _} ->
+        expanded = expand_with_symlinked_substores(base)
+        :persistent_term.put(@expanded_cache_key, {base, expanded, now})
         expanded
-
-      _ ->
-        start_expansion_scan(base)
-
-        if System.monotonic_time(:millisecond) >= deadline do
-          Logger.warning(
-            "felt-store scan still running after #{scan_wait_ms()}ms; serving the unexpanded " <>
-              "store list (#{Enum.join(base, ", ")}). On macOS this is usually a consent " <>
-              "dialog waiting on a human — look behind your other windows. Symlinked " <>
-              "substores stay hidden until the scan finishes."
-          )
-
-          nil
-        else
-          Process.sleep(10)
-          await_expansion(base, deadline)
-        end
     end
   end
-
-  # The safe fallback: every configured store, expanded to an absolute path, with
-  # no symlink resolution at all. Deliberately does NOT dedup by
-  # `store_felt_realpath/1` the way a real expansion does — that is itself
-  # filesystem work, and this branch exists precisely because the filesystem is
-  # not answering.
-  defp unexpanded(base), do: base |> Enum.map(&Path.expand/1) |> Enum.uniq()
-
-  # Who is scanning what lives in `Shuttle.FeltStores.ScanRoster` — an ETS set
-  # keyed by the store list, because claiming has to be ATOMIC. It used to be a
-  # read-modify-write over a list in `:persistent_term`, and that decides from a
-  # stale read: measured, twenty simultaneous `configured_hosts/0` calls on one
-  # store list started twenty scans while the roster listed one. On a wedged
-  # store that is twenty parked walks against ten dirty IO schedulers.
-  #
-  # Single-flight is *per store list*: a caller whose list is already being
-  # scanned waits for that scan, and a caller with a DIFFERENT list starts its
-  # own rather than waiting — otherwise a store wedged on a consent dialog would
-  # starve every later configuration change, including one that added a
-  # perfectly healthy store.
-  #
-  # A claim ends when the scanner ANSWERS OR DIES — liveness, not a timer. A
-  # timer was the earlier design and it is the wrong instrument here: a wedged
-  # walk is not slow, it is waiting on a human, so expiring the claim every 60 s
-  # just issues a second probe that parks next to the first. Ten parked probes
-  # wedge every filesystem call in the VM, so a timer turns one unanswered
-  # consent dialog into a dead node in ten minutes. Liveness gets the crash case
-  # right too — a killed scanner's claim is dropped by the next caller that
-  # looks, where a timer would have made everyone wait out the TTL.
-  @spec start_expansion_scan([String.t()]) :: :started | :in_flight | :refused
-  defp start_expansion_scan(base) do
-    case ScanRoster.claim(base, self(), @max_parked_scans) do
-      :ok ->
-        spawn_expansion_scan(base)
-
-      {:error, :in_flight} ->
-        :in_flight
-
-      {:error, :budget} ->
-        Logger.warning(
-          "#{length(ScanRoster.live())} felt-store scans are still parked in the filesystem; " <>
-            "not starting another for #{Enum.join(base, ", ")}. On macOS this is a consent " <>
-            "dialog waiting on a human — look behind your other windows. Store lists stay as " <>
-            "they were until one of the parked scans returns."
-        )
-
-        :refused
-
-      # No roster (a unit test with the app not started): scan without
-      # bookkeeping rather than not at all. Nothing is claimed, so nothing has
-      # to be released.
-      {:error, :unavailable} ->
-        run_expansion_scan(base, :unclaimed)
-        :started
-    end
-  end
-
-  # No task supervisor — a unit test with the app not started, a supervisor
-  # mid-restart — falls back to scanning inline rather than never scanning at
-  # all. The caller blocks, exactly as it always did, and by the time it reads
-  # the answer the scan has already written it: `await_expansion/2` checks the
-  # cache before the deadline and returns on its first pass.
-  defp spawn_expansion_scan(base) do
-    case Task.Supervisor.start_child(Shuttle.TaskSupervisor, fn ->
-           run_expansion_scan(base, :claimed)
-         end) do
-      {:ok, pid} ->
-        ScanRoster.adopt(base, pid)
-        :started
-
-      _ ->
-        run_expansion_scan(base, :claimed)
-        :started
-    end
-  catch
-    :exit, _ ->
-      run_expansion_scan(base, :claimed)
-      :started
-  end
-
-  # True when the live scan of this store list has been out longer than a caller
-  # is willing to wait — so waiting for it again would just spend the deadline.
-  defp scan_overdue?(base) do
-    case ScanRoster.find(base) do
-      {_base, _pid, started} -> System.monotonic_time(:millisecond) - started >= scan_wait_ms()
-      nil -> false
-    end
-  end
-
-  defp run_expansion_scan(base, claim) do
-    {scanned_us, {expanded, timings}} = :timer.tc(fn -> expand_with_timings(base) end)
-
-    :persistent_term.put(
-      @expanded_cache_key,
-      {base, expanded, System.monotonic_time(:millisecond)}
-    )
-
-    :persistent_term.put(@scan_report_key, %{scanned_ms: div(scanned_us, 1000), stores: timings})
-    log_scan(div(scanned_us, 1000), timings)
-  after
-    if claim == :claimed, do: ScanRoster.release(base)
-  end
-
-  @doc """
-  What the last completed store scan cost, per store, in milliseconds.
-
-  `%{scanned_ms: integer, stores: %{store => ms}}`, or `nil` before the first
-  scan completes. Read by `/api/v1/felt-stores` so a store that is slow — or
-  currently unreadable — is a visible fact about the world rather than a line in
-  a log nobody is tailing.
-  """
-  @spec last_scan_report() :: %{scanned_ms: non_neg_integer(), stores: map()} | nil
-  def last_scan_report, do: :persistent_term.get(@scan_report_key, nil)
-
-  @doc """
-  True while a store scan is in flight — i.e. the store list on offer may be
-  stale, and on macOS a consent dialog may be waiting on a human.
-  """
-  @spec scan_in_flight?() :: boolean()
-  def scan_in_flight?, do: ScanRoster.live() != []
-
-  # Name the slow store, not just the slow scan: "which one" is the first thing
-  # an operator staring at a stalled board needs, and on macOS it is also the
-  # answer — the store in the file provider is the one holding the dialog.
-  defp log_scan(total_ms, timings) when total_ms >= @slow_scan_warn_ms do
-    slowest =
-      timings
-      |> Enum.sort_by(&(-elem(&1, 1)))
-      |> Enum.take(3)
-      |> Enum.map_join(", ", fn {store, ms} -> "#{store} #{ms}ms" end)
-
-    Logger.warning(
-      "felt-store scan took #{total_ms}ms (slowest: #{slowest}). A walk this slow is almost " <>
-        "always a macOS consent dialog on an iCloud/CloudStorage store — look behind your " <>
-        "other windows — or a store evicted by Optimize Mac Storage."
-    )
-  end
-
-  defp log_scan(total_ms, _timings), do: Logger.debug("felt-store scan took #{total_ms}ms")
-
-  defp scan_wait_ms, do: Application.get_env(:shuttle, :store_scan_wait_ms, @scan_wait_ms)
 
   @doc """
   The configured store list before symlink-substore expansion.
@@ -326,83 +84,29 @@ defmodule Shuttle.FeltStores do
   Expand a store list with the project roots of any **symlinked substores**
   reachable from each store's `.felt/`.
 
-  A project-canonical substore — say
-  `~/loom/.felt/science/group/project -> .../code/project/.felt` — is
-  physically rooted *outside* the store it is linked into. The poller enumerates
-  a fiber only from the store where its felt `path` physically roots
-  (the poller's `run_shuttle_listing/2` builds its prefix from
-  `store_felt_realpath/1` below), so the loom
-  store correctly drops those fibers — and they vanish from the kanban unless the
-  project root is *also* a configured store. Following the symlink here makes
-  configuring just `~/loom` sufficient: the project root is auto-discovered, no
-  per-substore config.
-
-  For each store, scan `<store>/.felt/` **recursively** for symlinks resolving to
-  an external real `.felt/` directory and add its parent (the project root). The
-  scan must recurse, not just read the top level: a store can mount substores deep
-  in its tree mirror (`science/group/project`), so a shallow scan finds nothing and
-  the substore silently vanishes from dispatch. Dedup is by
-  `store_felt_realpath/1` — the same canonicalization the ownership check uses —
-  so a store reached two ways (configured explicitly *and* discovered, or via two
-  path spellings of the same real dir) is listed once. That dedup is load-bearing:
-  two stores with the same `.felt` realpath would enumerate the same fibers and
-  reintroduce the dispatch race the physical-rooting rule exists to prevent.
-  Dangling symlinks and links resolving back inside the linking store are skipped.
+  A project-canonical substore — `~/loom/.felt/science/group/project ->
+  .../code/project/.felt` — is physically rooted *outside* the store it is
+  linked into, and the poller enumerates a fiber only from the store where it
+  physically roots. Following the link makes configuring just `~/loom`
+  sufficient: the project root is auto-discovered, no per-substore config. The
+  scan recurses (substores nest as `science/group/project`, so a shallow scan
+  would silently drop them), and dedup is by `store_felt_realpath/1` — the same
+  canonicalization the ownership check uses — so a store reached two ways is
+  listed once and no two stores enumerate the same fibers. Dangling symlinks and
+  links resolving back inside the linking store are skipped.
   """
   @spec expand_with_symlinked_substores(host_list()) :: host_list()
   def expand_with_symlinked_substores(stores) do
-    {expanded, _timings} = expand_with_timings(stores)
-    expanded
-  end
+    discovered = Enum.flat_map(stores, &symlinked_substore_roots/1)
 
-  # The expansion, with every store's filesystem cost attributed to it. Both
-  # phases touch the disk and either can be the slow one: the substore walk
-  # reaches into `<store>/.felt/`, and the dedup below `lstat`s and realpaths
-  # each candidate — including the substore roots the walk just discovered,
-  # which is exactly where a store in a macOS file provider sits. Timing only
-  # the walk would blame the wrong store.
-  @spec expand_with_timings(host_list()) :: {host_list(), %{String.t() => non_neg_integer()}}
-  defp expand_with_timings(stores) do
-    walked =
-      Enum.map(stores, fn store ->
-        {us, roots} = :timer.tc(fn -> symlinked_substore_roots(store) end)
-        {store, div(us, 1000), roots}
-      end)
-
-    candidates =
-      (stores ++ Enum.flat_map(walked, fn {_store, _ms, roots} -> roots end))
-      |> Enum.map(&Path.expand/1)
-
-    # When two stores share a `.felt/` realpath — a project root whose `.felt/` is
-    # a real directory AND a parent (or sibling) whose own `.felt/` is a symlink
-    # into it — keep the REAL-directory store. The poller's `list_shuttle_fibers/2`
-    # returns `{:ok, []}` for any store whose `.felt/` is a symlink (it owns
-    # nothing; the physical root is meant to enumerate). So if the dedup kept the
-    # symlink store, that realpath would be enumerated by no store at all and its
-    # fibers would vanish from dispatch and the kanban. Stable-sort real-`.felt`
-    # stores ahead of symlink ones (Elixir's sort is stable, so order is otherwise
-    # preserved); `uniq_by` then keeps the real-directory store per realpath.
-    keyed =
-      Enum.map(candidates, fn store ->
-        {us, key} = :timer.tc(fn -> {felt_symlink?(store), store_felt_realpath(store)} end)
-        {store, div(us, 1000), key}
-      end)
-
-    expanded =
-      keyed
-      |> Enum.sort_by(fn {_store, _ms, {symlink?, _real}} -> symlink? end)
-      |> Enum.uniq_by(fn {_store, _ms, {_symlink?, real}} -> real end)
-      |> Enum.map(fn {store, _ms, _key} -> store end)
-
-    timings =
-      Enum.reduce(
-        Enum.map(walked, fn {s, ms, _} -> {s, ms} end) ++
-          Enum.map(keyed, fn {s, ms, _} -> {s, ms} end),
-        %{},
-        fn {store, ms}, acc -> Map.update(acc, store, ms, &(&1 + ms)) end
-      )
-
-    {expanded, timings}
+    (stores ++ discovered)
+    |> Enum.map(&Path.expand/1)
+    # When two stores share a `.felt/` realpath, keep the REAL-directory store:
+    # `list_shuttle_fibers/2` returns `{:ok, []}` for a store whose `.felt/` is a
+    # symlink, so keeping that one would drop the realpath from dispatch (and the
+    # kanban) entirely. The sort is stable, so it only moves symlink stores last.
+    |> Enum.sort_by(&felt_symlink?/1)
+    |> Enum.uniq_by(&store_felt_realpath/1)
   end
 
   @doc """
@@ -428,8 +132,8 @@ defmodule Shuttle.FeltStores do
   # Such a store is skipped by the poller's enumerator, so it must lose a dedup
   # tie to a real-directory store sharing the same `.felt/` realpath.
   defp felt_symlink?(store) do
-    case Shuttle.RawFS.lstat(Path.join(Path.expand(store), ".felt")) do
-      {:ok, %{type: :symlink}} -> true
+    case File.lstat(Path.join(Path.expand(store), ".felt")) do
+      {:ok, %File.Stat{type: :symlink}} -> true
       _ -> false
     end
   end
@@ -447,24 +151,24 @@ defmodule Shuttle.FeltStores do
 
   # Real directory trees are finite (no symlink-following), so the recursion
   # terminates on its own; the depth cap is a guard against a pathologically deep
-  # tree slowing the 30s-cached expansion, not a correctness boundary.
+  # tree slowing the periodic expansion, not a correctness boundary.
   @max_substore_scan_depth 16
 
   defp walk_substore_roots(_dir, _store_real, depth) when depth > @max_substore_scan_depth, do: []
 
   defp walk_substore_roots(dir, store_real, depth) do
-    case Shuttle.RawFS.ls(dir) do
+    case File.ls(dir) do
       {:ok, entries} ->
         Enum.flat_map(entries, fn entry ->
           path = Path.join(dir, entry)
 
-          case Shuttle.RawFS.lstat(path) do
+          case File.lstat(path) do
             # A symlink: a substore link iff it resolves to an external real
             # `.felt` directory. Detected here, never descended.
-            {:ok, %{type: :symlink}} ->
+            {:ok, %File.Stat{type: :symlink}} ->
               with {:ok, real} <- Shuttle.Realpath.resolve(path),
                    ".felt" <- Path.basename(real),
-                   true <- Shuttle.RawFS.dir?(real),
+                   true <- File.dir?(real),
                    false <- inside?(real, store_real) do
                 [Path.dirname(real)]
               else
@@ -472,7 +176,7 @@ defmodule Shuttle.FeltStores do
               end
 
             # A real subdirectory: recurse to reach nested mount points.
-            {:ok, %{type: :directory}} ->
+            {:ok, %File.Stat{type: :directory}} ->
               walk_substore_roots(path, store_real, depth + 1)
 
             _ ->
