@@ -564,21 +564,46 @@
    day axis comes back for exactly as long as a card is in the air.
 
    Height, not display, is what animates: a zero-height overflow-hidden band
-   that grows to one row. `display:none` can't be transitioned, and the small
-   downward nudge of the board is a useful signal that the drop surface arrived.
-   Emptied on close (see syncDragHorizon), so it costs nothing at rest. */
+   that grows to one row. `display:none` can't be transitioned.
+   Emptied on close (see syncDragHorizon), so it costs nothing at rest.
+
+   THE STRIP MUST NOT MOVE THE BOARD. It appears at `dragstart` — after the
+   press, after the human has aimed — so any layout space it takes is stolen
+   from under a cursor that is already committed: the card you lifted slides
+   ~61px down and the pixel you aimed at belongs to something else. (That is
+   the shift `stackClaimsDrop`'s dwell rule in KanbanRules was written to
+   survive.) So the strip lives OUT OF FLOW: the host is a permanent
+   zero-height anchor in the body's flex column — holding the strip's place
+   under the tab strip — and the inner band is absolutely positioned against
+   it, growing downward OVER the top of the Now board. Nothing below reflows,
+   at any scroll position, in any column. It floats: opaque ground and a soft
+   shadow, so the column heads it covers for the length of the drag read as
+   behind it rather than mixed into it. */
 .kbn-draghorizon {
   flex: 0 0 auto;
   height: 0;
-  overflow: hidden;
-  transition: height 130ms cubic-bezier(0.22, 0.61, 0.36, 1);
-}
-.kbn-draghorizon-open {
-  height: calc(51px * var(--kbn-type-scale, 1));
+  position: relative;
+  /* Above the desk it hangs over — sections are positioned but z-index:auto. */
+  z-index: 5;
 }
 .kbn-draghorizon-inner {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 0;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
+  transition: height 130ms cubic-bezier(0.22, 0.61, 0.36, 1);
+  /* Opaque, because it hangs over the board rather than sitting in the column
+     of it. The parchment ground is `.kbn-modal`'s own. */
+  background: #EDE2CE;
+  border-radius: 3px;
+  box-shadow: 0 6px 14px rgba(27, 22, 17, 0.14);
+}
+.kbn-draghorizon-open .kbn-draghorizon-inner {
+  height: calc(51px * var(--kbn-type-scale, 1));
 }
 /* The aim readout — a fixed line under the strip naming the target under the
    cursor. It holds its height whether or not it has words, so the strip does

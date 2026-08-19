@@ -161,10 +161,12 @@ export class KanbanModal {
   private deskEl: HTMLDivElement | null = null
   /**
    * Host for the drag-reveal horizon — the slim row of future days that stands
-   * in for the retired Timeline ribbon. Empty and zero-height at rest; filled
-   * and expanded for exactly as long as a card is in the air. It sits OUTSIDE
-   * `deskEl` so a board re-render (a poll landing mid-drag) can't tear the drop
-   * target out from under the cursor.
+   * in for the retired Timeline ribbon. Empty at rest; filled for exactly as
+   * long as a card is in the air. It sits OUTSIDE `deskEl` so a board re-render
+   * (a poll landing mid-drag) can't tear the drop target out from under the
+   * cursor — and it is permanently zero-height, the band inside it hanging
+   * out of flow over the Now board, so raising it never moves the desk under a
+   * cursor that has already aimed (see the CSS block for the full argument).
    */
   private dragHorizonEl: HTMLDivElement | null = null
   /** Full-width slot the active temporal view mounts into. Hidden on Desk. */
@@ -540,6 +542,10 @@ export class KanbanModal {
     if (wanted) {
       host.innerHTML = ''
       host.append(this.surfaces.renderDragHorizon())
+      // The band is built at height 0 and grown by the class. A style flush
+      // between the two gives the transition a starting height to animate FROM
+      // — without it the browser sees one computed style and the strip snaps.
+      void host.offsetHeight
       host.classList.add('kbn-draghorizon-open')
       return
     }
