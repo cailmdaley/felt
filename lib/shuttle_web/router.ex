@@ -57,16 +57,15 @@ defmodule ShuttleWeb.Router do
     get("/astra", AstraController, :show)
     get("/felt-stores", FeltStoresController, :show)
     post("/felt-stores", FeltStoresController, :create)
-    # The "+ Add project…" pair behind the Stash/Capture project pickers: walk
-    # the owning host's directories, then register the picked one as a
-    # picker-project (initializing its `.felt/` when it isn't a store yet).
-    # Both owner-routed, since only the owning daemon sees its own filesystem.
-    get("/browse", BrowseController, :show)
+    # Register a directory as a picker-project on the host that owns it,
+    # initializing its `.felt/` when it isn't a store yet. Owner-routed, since
+    # only the owning daemon sees its own filesystem.
     post("/projects", ProjectsController, :create)
-    # Native-first sibling of /browse: raises the owning host's own folder
+    # Native half of "+ Add project…": raises the owning host's own folder
     # dialog (Finder/zenity/kdialog) and answers with the chosen path. Blocks
-    # for as long as the human takes; /browse remains the fallback for remote
-    # origins and hosts with no dialog.
+    # for as long as the human takes. Only ever called for the LOCAL host — on
+    # a remote (or a host with no dialog) the UI asks for the absolute path
+    # instead and posts it straight to /projects.
     post("/choose-folder", ChooseFolderController, :create)
     # Pure-manual release of the boot quarantine: a restarted daemon parks
     # fresh autonomous launches (restart is not dispatch authority) until a

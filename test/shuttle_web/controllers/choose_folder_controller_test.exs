@@ -65,7 +65,7 @@ defmodule ShuttleWeb.ChooseFolderControllerTest do
   end
 
   describe "availability" do
-    test "no mechanism → 501, so the UI can fall back to /browse" do
+    test "no mechanism → 501, so the UI can fall back to a typed path" do
       conn = post_choose()
 
       assert conn.status == 501

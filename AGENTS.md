@@ -732,22 +732,35 @@ felt shuttle validate-identity                # UID migration/cross-city validat
   question: which checkouts a human can file INTO from the Stash/Capture forms.
   Kept out of the poll list on purpose, so polling never walks TCC-protected
   paths. Served at `origins.<host>.projects` of `GET /api/v1/felt-stores`. The
-  file is hand-editable, but no longer hand-edit-only: both forms share one
-  combobox (`ui/src/forms/ProjectPicker.tsx`; Capture's native `<select>` is
-  gone, since a `<select>` cannot carry a row that acts as a button) whose
-  FIRST row is "Add a new project…", over `POST /api/v1/projects`
-  (`{"path": …}` — initializes `<path>/.felt` when absent, exactly as `felt
-  init` does, then appends the path; idempotent). Choosing the folder is
-  **native-first**: `POST /api/v1/choose-folder` raises the owning host's own
-  dialog (`Shuttle.FolderPicker` — Finder via `osascript`, else zenity, else
-  kdialog) and answers `{ok: true, path}`, `{ok: false, cancelled: true}` on a
-  dismissal, or 501 when the host has none. It blocks until the human answers
-  (bounded at five minutes). `GET /api/v1/browse` — the owner-routed
-  subdirectory listing behind `DirectoryPicker` — is the automatic fallback for
-  remote origins (their dialog would open on a desktop nobody is at) and for
-  hosts with no dialog; the UI picks between them from the
-  `native_folder_picker` flag on each origin of `GET /api/v1/felt-stores`. All
-  three endpoints are owner-routed.
+  file is hand-editable, but no longer hand-edit-only. Both forms show the
+  destination as **host then project** (`ui/src/forms/ProjectPicker.tsx` —
+  `HostPicker`, a plain `<select>`, beside the project combobox; Capture's
+  native project `<select>` is gone, since a `<select>` cannot carry a row that
+  acts as a button). The host list is the origins of `GET
+  /api/v1/felt-stores`, derived in `projectModel.ts` (`deriveHosts`) alongside
+  the projects so the two can't disagree; it defaults to the LOCAL origin, and
+  the project list is `projectsForHost` of the selection — one host's projects,
+  no host suffix on the rows. The project dropdown is portalled to `<body>` at
+  `position: fixed` because both hosts clip it (Stash's card is `overflow:
+  hidden`, Capture's Radix content `overflow: auto`).
+
+  The project combobox's FIRST row is "Add a new project…", over `POST
+  /api/v1/projects` (`{"path": …, "origin": …}` — initializes `<path>/.felt`
+  when absent, exactly as `felt init` does, then appends the path; idempotent).
+  With the host already settled, that has exactly two shapes: on the **local**
+  host with a dialog, `POST /api/v1/choose-folder` raises the host's own
+  (`Shuttle.FolderPicker` — Finder via `osascript`, else zenity, else kdialog)
+  and answers `{ok: true, path}`, `{ok: false, cancelled: true}` on a
+  dismissal, or 501 when the host has none; it blocks until the human answers
+  (bounded at five minutes). On any **remote** host (whose dialog would open on
+  a desktop nobody is at) or a local daemon with no dialog, the add row instead
+  asks for the absolute path on that host and posts it straight to
+  `/api/v1/projects`, showing the owning daemon's own 400 ("not a directory:
+  …") inline. The UI picks between the two from the `native_folder_picker` flag
+  on each origin of `GET /api/v1/felt-stores`. Both endpoints are owner-routed.
+  (There was a third shape — an in-browser directory browser over `GET
+  /api/v1/browse`. It is gone: once the host is chosen up front, walking a
+  remote filesystem a click at a time bought nothing a pasted path doesn't.)
 - **Dispatcher** (`lib/shuttle/dispatcher.ex`) resolves the agent, spawns
   the `<leaf>-<uid>-shuttle` tmux session.
 - **Standing roles** — `shuttle.kind: standing` with a cron `schedule:`.

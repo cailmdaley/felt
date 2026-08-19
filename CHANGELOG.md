@@ -45,24 +45,36 @@ is folded in here rather than into a separate Unreleased section.
   tunnel label prefix is configurable via `launchd_label_prefix`. Shared
   fixtures keep the Go and Elixir readers in agreement, and a hygiene test
   fails on personal hostnames in `config/`, `lib/`, `cmd/`, `share/`.
-- Projects can be added from the board. Both forms now share one project
-  combobox — Capture's native `<select>` is gone — and its first row is "Add a
-  new project…"; picking a folder registers it and selects it on the spot. The
-  combobox filters as you type and answers to the keyboard the way the parent
-  picker beside it does: arrows walk the rows, Enter commits, Escape closes the
-  list and nothing else. A folder that isn't a felt
-  store yet gets one, created exactly as `felt init` creates it. The chooser is
-  the operating system's own: `POST /api/v1/choose-folder` raises Finder on
-  macOS (`osascript`, activated so the dialog comes to the front), zenity or
-  kdialog on Linux, and hands back the chosen path; dismissing it does nothing
-  at all, quietly. A host with no dialog — and any remote origin, whose dialog
-  would open on a desktop nobody is sitting at — falls back automatically to
-  the in-browser directory browser, `GET /api/v1/browse?path=…`
-  (subdirectories only, felt stores marked, defaults to home). Registration is
-  `POST /api/v1/projects` (`{"path": …}`, idempotent) either way, and all three
-  endpoints are owner-routed. `~/.config/felt/projects.json` stays hand-editable; it is
-  no longer the only way in, and a host with an empty list can now bootstrap
-  its first project from the form itself.
+- Projects can be added from the board, and the destination now reads as two
+  controls: **host on the left, project on the right**. The host list is the
+  daemon's own origins and starts on the machine you are sitting at, so the
+  project list beside it is short, unambiguous, and needs no host suffix —
+  and "Add a new project…" has an obvious destination before you click it.
+  Changing the host re-points the project at that host's most recent one. The
+  project control is one combobox both forms share — Capture's native
+  `<select>` is gone — whose first row is "Add a new project…"; it filters as
+  you type and answers to the keyboard the way the parent picker beside it
+  does: arrows walk the rows, Enter commits, Escape closes the list and nothing
+  else. Its dropdown floats over the card instead of stretching it: it used to
+  grow the form and strand its own last rows below the edge, unreachable.
+  A folder that isn't a felt store yet gets one, created exactly as `felt init`
+  creates it. On your own machine the chooser is the operating system's own:
+  `POST /api/v1/choose-folder` raises Finder on macOS (`osascript`, activated
+  so the dialog comes to the front), zenity or kdialog on Linux, and hands back
+  the chosen path; dismissing it does nothing at all, quietly. On a remote host
+  — whose dialog would open on a desktop nobody is sitting at — or a machine
+  with no dialog, the add row asks for the absolute path over there and shows
+  that daemon's own answer ("not a directory: …") inline if it's wrong.
+  Registration is `POST /api/v1/projects` (`{"path": …, "origin": …}`,
+  idempotent) either way, and both endpoints are owner-routed.
+  `~/.config/felt/projects.json` stays hand-editable; it is no longer the only
+  way in, and a host with an empty list can now bootstrap its first project
+  from the form itself.
+- Removed the in-browser directory browser (`GET /api/v1/browse`) and the
+  `DirectoryPicker` it fed. Choosing the host up front is what made it
+  redundant: walking a remote filesystem a click at a time bought nothing that
+  pasting the path doesn't, and the create endpoint already answers with the
+  reason when the path isn't there.
 - `felt hook event` writes the Shuttle activity stream (one JSONL line per
   harness event), registered through the plugin on seven events for both
   Claude Code and Codex. It writes only when the events file's parent

@@ -15,9 +15,10 @@
  * registered project: a local origin writes/spawns here, a remote origin
  * forwards to its owning daemon.
  *
- * The store payload also says whether this daemon can raise a native folder
- * dialog (`native_folder_picker`); that flag rides into both forms and decides
- * whether "+ Add project…" asks the OS or opens the in-browser browser.
+ * The store payload also carries the origin list both forms' HOST picker
+ * offers, and whether each daemon can raise a native folder dialog
+ * (`native_folder_picker`); that flag decides whether "+ Add project…" asks the
+ * OS or asks the human to type the path on the selected host.
  */
 
 import { createRoot, type Root } from 'react-dom/client'
@@ -25,7 +26,6 @@ import { parseCompositeFeed } from '../board/KanbanComposite.js'
 import { deriveProjects, type ProjectModel } from './projectModel'
 import { StashForm, injectStashFormStyles, type StashProject } from './StashForm'
 import { CaptureForm, type CaptureProject } from './CaptureForm'
-import { injectDirectoryPickerStyles } from './DirectoryPicker'
 import { injectProjectPickerStyles } from './ProjectPicker'
 
 export interface OpenFormOptions {
@@ -112,6 +112,7 @@ export async function openStash(opts: OpenFormOptions): Promise<void> {
   ensureRoot().render(
     <StashForm
       availableCities={projects}
+      availableHosts={feed.model.hosts}
       cityActivityById={feed.model.activityById}
       tagSuggestions={feed.tags}
       shuttleBase={opts.shuttleBase}
@@ -127,9 +128,8 @@ export async function openStash(opts: OpenFormOptions): Promise<void> {
 }
 
 export async function openCapture(opts: OpenFormOptions): Promise<void> {
-  // Capture styles its own chrome inline, so the two shared pickers' sheets
-  // have to be injected here (Stash gets them via injectStashFormStyles).
-  injectDirectoryPickerStyles()
+  // Capture styles its own chrome inline, so the shared pickers' sheet has to
+  // be injected here (Stash gets it via injectStashFormStyles).
   injectProjectPickerStyles()
   let feed: LoadedFeed
   try {
@@ -145,6 +145,7 @@ export async function openCapture(opts: OpenFormOptions): Promise<void> {
   ensureRoot().render(
     <CaptureForm
       availableCities={projects}
+      availableHosts={feed.model.hosts}
       cityActivityById={feed.model.activityById}
       shuttleBase={opts.shuttleBase}
       onProjectAdded={() => refreshProjects(opts.shuttleBase)}

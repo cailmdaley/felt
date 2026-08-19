@@ -24,8 +24,13 @@ import { useEffect, useRef, useState } from 'react'
 import { AppDialog } from './AppDialog'
 import type { AgentEntry } from './StashForm'
 import { shuttleOrigin } from './projectModel'
-import { DirectoryPicker } from './DirectoryPicker'
-import { ProjectPicker } from './ProjectPicker'
+import {
+  AddProjectPath,
+  HostPicker,
+  ProjectPicker,
+  projectsForHost,
+  type PickerHost,
+} from './ProjectPicker'
 import { useAddProject } from './useAddProject'
 
 /**
@@ -49,6 +54,15 @@ const FALLBACK_AGENTS: AgentEntry[] = [
 const CAPTURE_DEFAULT_AGENT = 'claude-opus'
 const CAPTURE_DEFAULT_EFFORT = 'xhigh'
 
+/** Stand-in when the caller passed no host list (an old island, or a degraded
+ *  registry fetch): one local host — exactly the pre-split behaviour. */
+const FALLBACK_HOST: PickerHost = {
+  id: 'local',
+  label: 'local',
+  isLocal: true,
+  nativeFolderPicker: false,
+}
+
 /** A destination project, as Capture consumes it (Stash's `StashProject`
  *  minus `loomPrefix`, which only parent-nesting needs). */
 export interface CaptureProject {
@@ -64,12 +78,17 @@ export interface CaptureFormProps {
   cityPath?: string | null
   /** All connected projects; each carries its own originId + path. */
   availableCities?: CaptureProject[]
+  /** Every host the picker can point at — the store registry's origins. The
+   *  host control is the left half of the pair; the project list is whatever
+   *  the selected host owns. */
+  availableHosts?: PickerHost[]
   /** Register a new project directory and hand back the refreshed project set
    *  (the island re-derives it from the daemon). Absent → no add-project row. */
   onProjectAdded?: (path: string) => Promise<CaptureProject[]>
-  /** The local daemon can raise its own OS folder dialog. True → the add row on a
-   *  local origin opens Finder/zenity instead of the in-browser
-   *  DirectoryPicker (which stays the automatic fallback). */
+  /** The local daemon can raise its own OS folder dialog. True → the add row on
+   *  the local host opens Finder/zenity; every other case asks for the absolute
+   *  path on the selected host. Redundant with `availableHosts`' local entry,
+   *  and the fallback when no host list came through. */
   nativeFolderPicker?: boolean
   /** Unix-ms of most recent activity per project id — recency ranking for the
    *  default selection and picker order. */
@@ -93,6 +112,7 @@ interface CaptureResponse {
 export function CaptureForm({
   cityPath,
   availableCities = [],
+  availableHosts = [],
   cityActivityById = {},
   onProjectAdded,
   nativeFolderPicker = false,
@@ -124,13 +144,21 @@ export function CaptureForm({
     if (recencyDelta !== 0) return recencyDelta
     return (a.name ?? a.id).localeCompare(b.name ?? b.id, undefined, { sensitivity: 'base' })
   })
-  const [selectedCityId, setSelectedCityId] = useState<string | null>(() => {
-    if (cityPath) {
-      const match = availableCities.find((c) => c.path === cityPath)
-      if (match) return match.id
-    }
-    return sortedCities[0]?.id ?? null
-  })
+  // Host first: the local daemon's own, unless the caller scoped the form to a
+  // project that lives elsewhere. Defaulting to recency would land on whichever
+  // remote was busiest, and "add a project" would then quietly mean "over
+  // there" — the thing this split exists to prevent.
+  const hosts: PickerHost[] = availableHosts.length > 0 ? availableHosts : [FALLBACK_HOST]
+  const scopedCity = cityPath ? availableCities.find((c) => c.path === cityPath) ?? null : null
+  const [selectedHostId, setSelectedHostId] = useState<string>(
+    () => scopedCity?.originId ?? hosts.find((h) => h.isLocal)?.id ?? hosts[0].id,
+  )
+  const [selectedCityId, setSelectedCityId] = useState<string | null>(
+    () => scopedCity?.id ?? projectsForHost(sortedCities, scopedCity?.originId ?? hosts.find((h) => h.isLocal)?.id ?? hosts[0].id)[0]?.id ?? null,
+  )
+  const hostCities = projectsForHost(sortedCities, selectedHostId)
+  const selectedHost = hosts.find((h) => h.id === selectedHostId) ?? hosts[0]
+
 
   // Autofocus the yap — it's the whole point of the dialog.
   useEffect(() => {
@@ -169,21 +197,34 @@ export function CaptureForm({
     if (!(rec?.chrome_capable ?? false)) setChrome(false)
   }
 
-  const selectedCity = cities.find((c) => c.id === selectedCityId) ?? null
+  const selectedCity = hostCities.find((c) => c.id === selectedCityId) ?? null
 
-  // The add-project row — native OS dialog when the daemon has one and the origin is
-  // local, DirectoryPicker overlay otherwise (see useAddProject).
+  // The add-project row — native OS dialog on a local host that has one, the
+  // absolute-path row everywhere else (see useAddProject).
   const addProject = useAddProject<CaptureProject>({
     shuttleBase,
-    nativeFolderPicker,
-    origin: selectedCity?.originId ?? 'local',
+    nativeFolderPicker: selectedHost.isLocal
+      ? selectedHost.nativeFolderPicker || nativeFolderPicker
+      : false,
+    isLocalHost: selectedHost.isLocal,
+    origin: selectedHostId,
     onProjectAdded,
     onAdded: (next, path) => {
       setCities(next)
-      const added = next.find((c) => c.path === path)
+      const added = next.find((c) => c.path === path && c.originId === selectedHostId)
       if (added) setSelectedCityId(added.id)
     },
   })
+
+  // Changing the host re-points the project at that host's most recent one — a
+  // selection belonging to the previous host would submit to the wrong machine,
+  // and null would silently block submit. Any open path row belongs to the old
+  // host, so it goes too.
+  const handleHostChange = (id: string): void => {
+    setSelectedHostId(id)
+    setSelectedCityId(projectsForHost(sortedCities, id)[0]?.id ?? null)
+    addProject.closePath()
+  }
 
   const submit = async (): Promise<void> => {
     if (submitting) return
@@ -267,30 +308,27 @@ export function CaptureForm({
             padding: '8px 10px',
           }}
         />
-        {addProject.browseOpen && onProjectAdded && (
-          <DirectoryPicker
-            shuttleBase={shuttleBase}
-            origin={selectedCity?.originId ?? 'local'}
-            initialPath={addProject.browsePath}
-            onCancel={addProject.closeBrowse}
-            onAdded={addProject.finish}
-          />
-        )}
         <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
-          {/* Project picker — the same combobox Stash uses. A native <select>
+          {/* Host, then project — the same pair Stash uses. A native <select>
               can't carry the "Add a new project…" row (a magic <option> reads
-              as a project and breaks keyboard selection), so both forms share
-              ProjectPicker instead. */}
+              as a project and breaks keyboard selection), so the project half
+              is the shared ProjectPicker combobox. */}
           {(cities.length > 0 || onProjectAdded) && (
-            <div style={{ flex: '2 1 12rem', display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
-              <span className="capture-label" style={labelStyle}>Project</span>
-              <ProjectPicker
-                projects={sortedCities}
-                selectedId={selectedCityId}
-                onSelect={setSelectedCityId}
-                onAddProject={onProjectAdded ? addProject.begin : undefined}
-              />
-            </div>
+            <>
+              <div style={{ flex: '1 1 8rem', display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+                <span className="capture-label" style={labelStyle}>Host</span>
+                <HostPicker hosts={hosts} selectedId={selectedHostId} onSelect={handleHostChange} />
+              </div>
+              <div style={{ flex: '2 1 12rem', display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+                <span className="capture-label" style={labelStyle}>Project</span>
+                <ProjectPicker
+                  projects={hostCities}
+                  selectedId={selectedCityId}
+                  onSelect={setSelectedCityId}
+                  onAddProject={onProjectAdded ? addProject.begin : undefined}
+                />
+              </div>
+            </>
           )}
           <label style={{ flex: '1 1 8rem', display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
             <span className="capture-label" style={labelStyle}>Agent</span>
@@ -324,6 +362,15 @@ export function CaptureForm({
             </select>
           </label>
         </div>
+        {addProject.pathOpen && onProjectAdded && (
+          <AddProjectPath
+            hostLabel={selectedHost.label}
+            busy={addProject.busy}
+            error={addProject.pathError}
+            onSubmit={addProject.submitPath}
+            onCancel={addProject.closePath}
+          />
+        )}
         <label
           className="capture-chrome"
           style={{

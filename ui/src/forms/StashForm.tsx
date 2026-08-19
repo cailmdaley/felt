@@ -26,8 +26,14 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
-import { DirectoryPicker, injectDirectoryPickerStyles } from './DirectoryPicker'
-import { ProjectPicker, injectProjectPickerStyles } from './ProjectPicker'
+import {
+  AddProjectPath,
+  HostPicker,
+  ProjectPicker,
+  injectProjectPickerStyles,
+  projectsForHost,
+  type PickerHost,
+} from './ProjectPicker'
 import { useAddProject } from './useAddProject'
 import { fetchFiberIndex, filterParentCandidates, type FiberSearchResult } from '../board/fiberSearch'
 import { shuttleOrigin } from './projectModel'
@@ -70,6 +76,10 @@ export interface StashFormProps {
   cityPath?: string | null
   /** Connected projects (the island supplies the local-only set for create). */
   availableCities?: StashProject[]
+  /** Every host the picker can point at — the store registry's origins. The
+   *  host control is the left half of the pair; the project list is whatever
+   *  the selected host owns. */
+  availableHosts?: PickerHost[]
   /** Optional activity timestamps per project id, for the recency sort. */
   cityActivityById?: Record<string, number>
   /** Optional default parent slug (project-relative). Empty = top-level. */
@@ -85,11 +95,21 @@ export interface StashFormProps {
    *  "+ Add project…" row. */
   onProjectAdded?: (path: string) => Promise<StashProject[]>
   /** The local daemon can raise its own OS folder dialog. True → "+ Add
-   *  project…" on a local origin opens Finder/zenity instead of the in-browser
-   *  DirectoryPicker (which stays the automatic fallback). */
+   *  project…" on the local host opens Finder/zenity; every other case asks for
+   *  the absolute path on the selected host. Redundant with `availableHosts`'
+   *  local entry, and the fallback when no host list came through. */
   nativeFolderPicker?: boolean
   /** Called on Esc / cancel / backdrop click. */
   onCancel: () => void
+}
+
+/** Stand-in when the caller passed no host list (an old island, or a degraded
+ *  registry fetch): one local host — exactly the pre-split behaviour. */
+const FALLBACK_HOST: PickerHost = {
+  id: 'local',
+  label: 'local',
+  isLocal: true,
+  nativeFolderPicker: false,
 }
 
 interface CreateFiberResponse {
@@ -336,6 +356,7 @@ function ParentPicker({ value, onChange, scopePrefix, shuttleBase }: ParentPicke
 export function StashForm({
   cityPath,
   availableCities = [],
+  availableHosts = [],
   cityActivityById = {},
   defaultParentSlug,
   tagSuggestions,
@@ -365,20 +386,26 @@ export function StashForm({
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // Project picker. Default selection: project matching `cityPath` →
+  // Host, then project. The host defaults to the local daemon's own unless the
+  // caller scoped the form to a project living elsewhere: ranking hosts by
+  // recency would point a fresh form at whichever remote was busiest, and "+
+  // Add project…" would then mean "on that remote", which is the confusion the
+  // split exists to remove.
+  const hosts: PickerHost[] = availableHosts.length > 0 ? availableHosts : [FALLBACK_HOST]
+  const scopedCity = cityPath ? availableCities.find((c) => c.path === cityPath) ?? null : null
+  const defaultHostId = scopedCity?.originId ?? hosts.find((h) => h.isLocal)?.id ?? hosts[0].id
+  const [selectedHostId, setSelectedHostId] = useState<string>(defaultHostId)
+
+  // Project default within that host: `cityPath`'s project →
   // most-recently-active → first alphabetically → null (only when empty).
   const [selectedCityId, setSelectedCityId] = useState<string | null>(() => {
-    if (cityPath) {
-      const match = availableCities.find((c) => c.path === cityPath)
-      if (match) return match.id
-    }
-    if (availableCities.length === 0) return null
-    const ranked = [...availableCities].sort((a, b) => {
+    if (scopedCity) return scopedCity.id
+    const ranked = projectsForHost(availableCities, defaultHostId).sort((a, b) => {
       const recencyDelta = (cityActivityById[b.id] ?? 0) - (cityActivityById[a.id] ?? 0)
       if (recencyDelta !== 0) return recencyDelta
       return (a.name ?? a.id).localeCompare(b.name ?? b.id, undefined, { sensitivity: 'base' })
     })
-    return ranked[0].id
+    return ranked[0]?.id ?? null
   })
   // The live project set: seeded from the island's derivation, then replaced
   // wholesale when "+ Add project…" registers a directory (the island re-derives
@@ -415,22 +442,37 @@ export function StashForm({
     if (recencyDelta !== 0) return recencyDelta
     return (a.name ?? a.id).localeCompare(b.name ?? b.id, undefined, { sensitivity: 'base' })
   })
+  const hostCities = projectsForHost(sortedCities, selectedHostId)
+  const selectedHost = hosts.find((h) => h.id === selectedHostId) ?? hosts[0]
   const selectedCity =
-    selectedCityId !== null ? cities.find((c) => c.id === selectedCityId) ?? null : null
+    selectedCityId !== null ? hostCities.find((c) => c.id === selectedCityId) ?? null : null
 
-  // "+ Add project…" — native OS dialog when the daemon has one and the origin
-  // is local, DirectoryPicker overlay otherwise (see useAddProject).
+  // "+ Add project…" — native OS dialog on a local host that has one, the
+  // absolute-path row everywhere else (see useAddProject).
   const addProject = useAddProject<StashProject>({
     shuttleBase,
-    nativeFolderPicker,
-    origin: selectedCity?.originId ?? 'local',
+    nativeFolderPicker: selectedHost.isLocal
+      ? selectedHost.nativeFolderPicker || nativeFolderPicker
+      : false,
+    isLocalHost: selectedHost.isLocal,
+    origin: selectedHostId,
     onProjectAdded,
     onAdded: (next, path) => {
       setCities(next)
-      const added = next.find((c) => c.path === path)
+      const added = next.find((c) => c.path === path && c.originId === selectedHostId)
       if (added) setSelectedCityId(added.id)
     },
   })
+
+  // Changing the host re-points the project at that host's most recent one — a
+  // selection belonging to the previous host would create on the wrong machine,
+  // and null would silently block submit. Any open path row belongs to the old
+  // host, so it goes too.
+  const handleHostChange = (id: string): void => {
+    setSelectedHostId(id)
+    setSelectedCityId(projectsForHost(sortedCities, id)[0]?.id ?? null)
+    addProject.closePath()
+  }
 
   const allSuggestions = tagSuggestions ?? []
   const tagInputLower = tagInput.trim().toLowerCase()
@@ -599,16 +641,6 @@ export function StashForm({
           <span className="stash-header-rule" aria-hidden="true" />
         </div>
 
-        {addProject.browseOpen && onProjectAdded && (
-          <DirectoryPicker
-            shuttleBase={shuttleBase}
-            origin={selectedCity?.originId ?? 'local'}
-            initialPath={addProject.browsePath}
-            onCancel={addProject.closeBrowse}
-            onAdded={addProject.finish}
-          />
-        )}
-
         <div className="stash-body">
           {/* ── Section: WHERE — project + parent fiber ── */}
           <section className="stash-section">
@@ -616,21 +648,31 @@ export function StashForm({
               <span className="stash-section-label">Where</span>
               <span className="stash-section-rule" aria-hidden="true" />
             </div>
-            <div className="stash-row stash-row-2">
-              {/* Project picker */}
+            <div className="stash-row stash-row-3">
+              {/* Host, then project */}
               {/* Rendered even with no projects, as long as there is a way to
                   add one: the picker's first row, "Add a new project…", is how
                   a host with an empty list bootstraps its first. */}
               {(cities.length > 0 || onProjectAdded) && (
-                <div className="stash-field">
-                  <span className="stash-label">Project</span>
-                  <ProjectPicker
-                    projects={sortedCities}
-                    selectedId={selectedCityId}
-                    onSelect={setSelectedCityId}
-                    onAddProject={onProjectAdded ? addProject.begin : undefined}
-                  />
-                </div>
+                <>
+                  <div className="stash-field stash-field-host">
+                    <span className="stash-label">Host</span>
+                    <HostPicker
+                      hosts={hosts}
+                      selectedId={selectedHostId}
+                      onSelect={handleHostChange}
+                    />
+                  </div>
+                  <div className="stash-field">
+                    <span className="stash-label">Project</span>
+                    <ProjectPicker
+                      projects={hostCities}
+                      selectedId={selectedCityId}
+                      onSelect={setSelectedCityId}
+                      onAddProject={onProjectAdded ? addProject.begin : undefined}
+                    />
+                  </div>
+                </>
               )}
 
               {/* Parent fiber */}
@@ -646,6 +688,15 @@ export function StashForm({
                 />
               </label>
             </div>
+            {addProject.pathOpen && onProjectAdded && (
+              <AddProjectPath
+                hostLabel={selectedHost.label}
+                busy={addProject.busy}
+                error={addProject.pathError}
+                onSubmit={addProject.submitPath}
+                onCancel={addProject.closePath}
+              />
+            )}
             {parentValidation && (
               <div className="stash-hint stash-hint-warn">{parentValidation}</div>
             )}
@@ -956,7 +1007,7 @@ export function injectStashFormStyles(): void {
     }
     .stash-card {
       width: 100%;
-      max-width: 760px;
+      max-width: 880px;
       max-height: calc(100vh - 80px);
       background: #F4F0E8;
       background-image:
@@ -1069,6 +1120,12 @@ export function injectStashFormStyles(): void {
     .stash-row-2 {
       grid-template-columns: 1fr 1fr;
     }
+    /* Host · project · parent fiber. The host is a short closed list, so it
+       gets the narrow column; the card widened to 880px to hold all three
+       without squeezing the project names. */
+    .stash-row-3 {
+      grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.4fr) minmax(0, 1.4fr);
+    }
     .stash-row-schedule {
       grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
       margin-top: 2px;
@@ -1078,6 +1135,7 @@ export function injectStashFormStyles(): void {
     }
     @media (max-width: 600px) {
       .stash-row-2,
+      .stash-row-3,
       .stash-row-dispatch,
       .stash-row-schedule {
         grid-template-columns: 1fr;
@@ -1514,6 +1572,5 @@ export function injectStashFormStyles(): void {
   document.head.appendChild(style)
   // The shared directory picker rides along: both forms that open it are opened
   // through this same injection point (Stash directly, Capture via mountForms).
-  injectDirectoryPickerStyles()
   injectProjectPickerStyles()
 }

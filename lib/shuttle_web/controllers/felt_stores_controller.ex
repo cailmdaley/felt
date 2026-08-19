@@ -7,9 +7,10 @@ defmodule ShuttleWeb.FeltStoresController do
   persisted file so the daemon has no configured stores unless `FELT_STORES` is
   set.
 
-  Each origin also carries `native_folder_picker` — true when that host can
-  raise an OS folder dialog (`POST /api/v1/choose-folder`), which is how the
-  board decides between the native picker and the in-browser `/browse` fallback.
+  The origin map is also what the Stash/Capture forms' HOST picker offers, and
+  each origin carries `native_folder_picker` — true when that host can raise an
+  OS folder dialog (`POST /api/v1/choose-folder`), which is how the board
+  decides between the native picker and asking for a typed absolute path.
 
   POST body: %{"felt_stores" => [string]}
 

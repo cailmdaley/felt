@@ -2,11 +2,11 @@ defmodule Shuttle.FolderPicker do
   @moduledoc """
   The host's native folder-chooser dialog: "which mechanism, if any" and "run it".
 
-  The Stash/Capture pickers' "+ Add project…" used to mean walking the daemon's
-  filesystem inside the browser (`GET /api/v1/browse`). On a host that has a
-  desktop, the OS already ships a folder chooser the human knows how to drive —
-  Finder's, GTK's, KDE's — so the board raises *that* instead and keeps the
-  in-browser browser as the fallback (remote origins, headless hosts).
+  On a host that has a desktop, the OS already ships a folder chooser the human
+  knows how to drive — Finder's, GTK's, KDE's — so the Stash/Capture pickers'
+  "+ Add project…" raises *that*. A host with no dialog (a remote, whose desktop
+  nobody is sitting at; a headless local daemon) gets a typed absolute path
+  instead.
 
   Three mechanisms, probed in order and never more than one per platform:
 
@@ -19,8 +19,8 @@ defmodule Shuttle.FolderPicker do
     * `:kdialog` — Linux/KDE, `--getexistingdirectory`.
 
   `mechanism/0` answers `nil` when none of them is on PATH (or the platform has
-  no dialog at all), which is what lets the UI decide between native and browse
-  *before* the human clicks. Force it in tests with
+  no dialog at all), which is what lets the UI decide between the dialog and the
+  path field *before* the human clicks. Force it in tests with
   `config :shuttle, :folder_picker_mechanism, :osascript | :zenity | :kdialog | :none`.
 
   ## Timeout
@@ -102,7 +102,7 @@ defmodule Shuttle.FolderPicker do
   defp interpret({_output, :timeout}), do: {:error, :timeout}
   # 127 is `Shuttle.Runner`'s "not on PATH" — `mechanism/0` just said it was, so
   # the binary vanished mid-flight. Not a cancellation: report it as absence and
-  # let the UI fall back to /browse.
+  # let the UI fall back to a typed path.
   defp interpret({_output, 127}), do: {:error, :unavailable}
   defp interpret({_output, _status}), do: :cancelled
 

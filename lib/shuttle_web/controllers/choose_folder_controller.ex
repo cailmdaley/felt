@@ -2,23 +2,23 @@ defmodule ShuttleWeb.ChooseFolderController do
   @moduledoc """
   Raise the owning host's native folder dialog: `POST /api/v1/choose-folder`.
 
-  The native-first half of the pickers' "+ Add project…". `GET /api/v1/browse`
-  reimplemented a folder chooser inside the browser; this asks the OS for the
+  The native half of the pickers' "+ Add project…". This asks the OS for the
   one it already has (`Shuttle.FolderPicker` — Finder via `osascript`, zenity,
-  kdialog). The board calls it for a LOCAL origin whose daemon reports a native
-  picker, hands the returned path straight to `POST /api/v1/projects`, and falls
-  back to the in-browser browser otherwise.
+  kdialog). The board calls it for the LOCAL host when that daemon reports a
+  native picker, and hands the returned path straight to
+  `POST /api/v1/projects`; otherwise it asks the human to type the absolute
+  path on the selected host.
 
   Lives apart from `ProjectsController` on purpose: registering a path is a
   write to the picker list, whereas this writes nothing at all — it borrows the
   host's screen for as long as a human takes to answer, and its interesting
   outcomes (cancelled, no mechanism) are not the registration contract's.
 
-  **Owner-routed via `Shuttle.OriginRouter`**, like `/browse` and `/projects` —
-  only the owning daemon can drive its own host's display. Routing a remote
-  origin here therefore raises the dialog on *that machine's* desktop, where
-  nobody is standing; the UI never sends one, and keeps the browse fallback for
-  remotes for exactly this reason.
+  **Owner-routed via `Shuttle.OriginRouter`**, like `/projects` — only the
+  owning daemon can drive its own host's display. Routing a remote origin here
+  would therefore raise the dialog on *that machine's* desktop, where nobody is
+  standing; the UI never sends one, and asks for a typed path on a remote host
+  for exactly this reason.
 
   The request blocks until the human answers (bounded at five minutes inside
   `FolderPicker`), so a caller wants a long client timeout.

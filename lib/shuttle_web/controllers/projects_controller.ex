@@ -5,8 +5,10 @@ defmodule ShuttleWeb.ProjectsController do
 
   The write half of the UI's "+ Add project…" affordance, and the first
   production caller of `Shuttle.Projects.save/1`. Until now the Stash/Capture
-  city set could only grow by hand-editing `~/.config/felt/projects.json`; the
-  directory picker (`GET /api/v1/browse`) plus this endpoint close that loop.
+  city set could only grow by hand-editing `~/.config/felt/projects.json`; this
+  endpoint closes that loop, taking either a path the host's own folder dialog
+  returned (`POST /api/v1/choose-folder`) or one the human typed for a host
+  that has no dialog to raise.
 
   Registering does two things, in order:
 

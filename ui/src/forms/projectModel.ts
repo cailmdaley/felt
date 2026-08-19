@@ -73,16 +73,35 @@ interface ProjectEntry {
   lastActivity: number
 }
 
+/** A host the pickers can point at — one origin of the store registry, whether
+ *  or not it currently owns any projects (an empty host still needs to be
+ *  reachable in the picker: that is where its first project gets added). */
+export interface HostEntry {
+  /** `'local'` for the daemon's own host, else the bare remote name. Matches
+   *  the projects' `originId` as the forms consume them. */
+  id: string
+  /** How the host reads — a remote's `display`, else its bare name. */
+  label: string
+  isLocal: boolean
+  /** This host can raise its own OS folder dialog. False for every remote:
+   *  a dialog there would open on a desktop nobody is sitting at. */
+  nativeFolderPicker: boolean
+  /** The daemon could not reach this remote on the last poll. */
+  stale: boolean
+}
+
 export interface ProjectModel {
   /** The local daemon's own host id. */
   host: string
+  /** Every origin the pickers can point at, local first. */
+  hosts: HostEntry[]
   /** Every distinct project across all origins, recency-ranked. */
   projects: ProjectEntry[]
   /** `{projectId: lastActivity}` — feeds the forms' city-picker recency sort. */
   activityById: Record<string, number>
   /** The LOCAL daemon reports a native folder dialog. Only the local origin's
    *  flag matters here: a remote's dialog would open on a desktop nobody is
-   *  sitting at, so remote origins always take the browse fallback. */
+   *  sitting at, so remote hosts always fall through to typing the path. */
   nativeFolderPicker: boolean
 }
 
@@ -98,8 +117,10 @@ interface StoreRegistryOrigin {
   projects?: string[]
   /** This host can raise its own OS folder dialog (`POST /api/v1/choose-folder`).
    *  Decides, before the human clicks "+ Add project…", whether the form asks
-   *  the OS or opens the in-browser DirectoryPicker. */
+   *  the OS or asks the human to type the path. */
   native_folder_picker?: boolean
+  /** Presentation label a remote carries for itself. */
+  display?: string
   last_error?: string
 }
 
@@ -189,6 +210,7 @@ export function deriveProjects(feedBody: unknown, registryBody?: unknown): Proje
     for (const p of registryProjects) activityById[p.id] = p.lastActivity
     return {
       host: registry.host || feed.host,
+      hosts: deriveHosts(registry, feed.host, feed.origins),
       projects: registryProjects,
       activityById,
       nativeFolderPicker: nativePicker(registry, feed.host),
@@ -227,16 +249,89 @@ export function deriveProjects(feedBody: unknown, registryBody?: unknown): Proje
 
   return {
     host: feed.host,
+    hosts: deriveHosts(registry, feed.host, feed.origins),
     projects,
     activityById,
     nativeFolderPicker: nativePicker(registry, feed.host),
   }
 }
 
+/**
+ * The host list the pickers offer, from the same store registry the projects
+ * come from — so the two can never disagree about which origins exist.
+ *
+ * The local origin is normalized to the id `'local'` (matching how `toProjects`
+ * rewrites a local project's `originId`) and sorted first, because that is
+ * where the picker defaults: a fresh form should point at the machine the human
+ * is sitting at, never at whichever remote happened to be busiest.
+ *
+ * A registry that names no origins at all (an old or degraded daemon) still
+ * yields the local host, so the forms always have something to point at.
+ */
+export function deriveHosts(
+  registry: StoreRegistry,
+  feedHost: string,
+  feedOrigins: Record<string, { kind: 'local' | 'remote'; stale?: boolean }>,
+): HostEntry[] {
+  const localId = registry.host || feedHost
+  const ids = new Set([...Object.keys(registry.origins ?? {}), ...Object.keys(feedOrigins)])
+  const hosts: HostEntry[] = []
+  const seen = new Set<string>()
+  let sawLocal = false
+
+  for (const id of ids) {
+    if (seen.has(id)) continue
+    const origin = registry.origins?.[id]
+    const feedOrigin = feedOrigins[id]
+    const isLocal =
+      id === localId || origin?.kind === 'local' || feedOrigin?.kind === 'local' || id === feedHost
+    if (isLocal) {
+      // Two ids can both look local (a registry host that disagrees with the
+      // feed's); they collapse to the one `'local'` entry the projects use.
+      if (sawLocal) continue
+      sawLocal = true
+      seen.add('local')
+      hosts.push({
+        id: 'local',
+        label: id || 'local',
+        isLocal: true,
+        nativeFolderPicker: nativePicker(registry, feedHost),
+        stale: false,
+      })
+    } else {
+      seen.add(id)
+      hosts.push({
+        id,
+        label: origin?.display || id,
+        isLocal: false,
+        // Never native: the dialog would open on that host's own desktop.
+        nativeFolderPicker: false,
+        stale: origin?.stale === true || feedOrigin?.stale === true,
+      })
+    }
+  }
+
+  if (!sawLocal) {
+    hosts.push({
+      id: 'local',
+      label: localId || 'local',
+      isLocal: true,
+      nativeFolderPicker: nativePicker(registry, feedHost),
+      stale: false,
+    })
+  }
+
+  hosts.sort((a, b) =>
+    Number(b.isLocal) - Number(a.isLocal) ||
+    a.label.localeCompare(b.label, undefined, { sensitivity: 'base' }),
+  )
+  return hosts
+}
+
 /** The local origin's `native_folder_picker`, found by host id or, failing
  *  that, by `kind: 'local'` — the registry names its own host, but a degraded
  *  body may not. Absent → false: no flag means an older daemon with no
- *  `/api/v1/choose-folder`, and browse is the safe read. */
+ *  `/api/v1/choose-folder`, and typing the path is the safe read. */
 function nativePicker(registry: StoreRegistry, feedHost: string): boolean {
   const origins = registry.origins ?? {}
   const local =
@@ -263,6 +358,7 @@ function parseStoreRegistry(body: unknown): StoreRegistry {
         felt_stores: feltStores,
         projects: stringArray(rec.projects),
         native_folder_picker: rec.native_folder_picker === true,
+        display: typeof rec.display === 'string' ? rec.display : undefined,
         last_error: typeof rec.last_error === 'string' ? rec.last_error : undefined,
       }
     }
