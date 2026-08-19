@@ -199,7 +199,9 @@ export function HostPicker({
       {hosts.map((h) => (
         <option key={h.id} value={h.id}>
           {h.label}
-          {h.isLocal ? ' (this machine)' : ''}
+          {/* "· local", not "(this machine)": at a quarter of the card the
+              longer suffix truncated the hostname itself away. */}
+          {h.isLocal ? ' · local' : ''}
         </option>
       ))}
     </select>

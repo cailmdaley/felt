@@ -18,6 +18,15 @@
  *
  * Built on AppDialog (Radix) — focus trap, Esc, portal, scroll lock for free.
  * Cmd/Ctrl+Enter submits.
+ *
+ * **One sheet, one grid.** Everything inside the card is styled by
+ * `injectCaptureFormStyles` (below), not by inline objects. That is what keeps
+ * the yap, the four-control row and the footer on a single alignment grid:
+ * every block is a full-width child of `.capture-form`, and all four selects
+ * share one `.capture-select` rule, so their boxes are identical by
+ * construction rather than by two style sources agreeing. The type scale is
+ * Stash's — 19px title, 15px controls, 11px labels — with the yap itself at
+ * 17px, since it is the one field the whole dialog exists for.
  */
 
 import { useEffect, useRef, useState } from 'react'
@@ -28,6 +37,7 @@ import {
   AddProjectPath,
   HostPicker,
   ProjectPicker,
+  injectProjectPickerStyles,
   projectsForHost,
   type PickerHost,
 } from './ProjectPicker'
@@ -283,7 +293,7 @@ export function CaptureForm({
         if (!next) onCancel()
       }}
       title="New idea"
-      description="Speak it — a background session crystallizes the yap into a card."
+      eyebrow="shuttle · capture"
     >
       <div className="capture-form" onKeyDown={handleKeyDown}>
         <textarea
@@ -293,54 +303,45 @@ export function CaptureForm({
           onChange={(e) => setPrompt(e.target.value)}
           placeholder="Speak the idea — a session will write the card"
           rows={6}
-          style={{
-            width: '100%',
-            boxSizing: 'border-box',
-            resize: 'vertical',
-            minHeight: '7rem',
-            fontFamily: "var(--font-main, 'EB Garamond', serif)",
-            fontSize: '15px',
-            lineHeight: 1.45,
-            color: '#2E2A26',
-            background: '#FFFFFF',
-            border: '1px solid rgba(46, 42, 38, 0.20)',
-            borderRadius: '3px',
-            padding: '8px 10px',
-          }}
         />
-        {/* Host · project · agent · effort — four native selects, four equal
-            columns. `flex: 1 1 0` with `min-width: 0` is what makes them equal
-            regardless of the longest option text; the 7rem basis in the wrap
-            breakpoint keeps the small-screen collapse. */}
-        <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
+        {/* Host · project · agent · effort — four equal grid columns rather
+            than flex children, so the last column's right edge is the
+            container's right edge exactly, and a narrow card breaks 2×2
+            instead of stranding one control on its own row. */}
+        <div className="capture-controls">
           {/* Host, then project — the same pair Stash uses. The project half is
               a native <select> too: its "Add a new project…" entry is a
               sentinel option, restored on change, so it never becomes a
               selected state (see ProjectPicker). */}
           {(cities.length > 0 || onProjectAdded) && (
             <>
-              <div style={{ flex: '1 1 7rem', minWidth: 0, display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
-                <span className="capture-label" style={labelStyle}>Host</span>
-                <HostPicker hosts={hosts} selectedId={selectedHostId} onSelect={handleHostChange} />
+              <div className="capture-field">
+                <span className="capture-label">Host</span>
+                <HostPicker
+                  hosts={hosts}
+                  selectedId={selectedHostId}
+                  onSelect={handleHostChange}
+                  className="capture-select"
+                />
               </div>
-              <div style={{ flex: '1 1 7rem', minWidth: 0, display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
-                <span className="capture-label" style={labelStyle}>Project</span>
+              <div className="capture-field">
+                <span className="capture-label">Project</span>
                 <ProjectPicker
                   projects={hostCities}
                   selectedId={selectedCityId}
                   onSelect={setSelectedCityId}
                   onAddProject={onProjectAdded ? addProject.begin : undefined}
+                  className="capture-select"
                 />
               </div>
             </>
           )}
-          <label style={{ flex: '1 1 7rem', minWidth: 0, display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
-            <span className="capture-label" style={labelStyle}>Agent</span>
+          <label className="capture-field">
+            <span className="capture-label">Agent</span>
             <select
-              className="capture-agent"
+              className="capture-select capture-agent"
               value={agent}
               onChange={(e) => handleAgentChange(e.target.value)}
-              style={selectStyle}
             >
               {agents.map((a) => (
                 <option key={a.id} value={a.id}>
@@ -349,14 +350,13 @@ export function CaptureForm({
               ))}
             </select>
           </label>
-          <label style={{ flex: '1 1 7rem', minWidth: 0, display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
-            <span className="capture-label" style={labelStyle}>Effort</span>
+          <label className="capture-field">
+            <span className="capture-label">Effort</span>
             <select
-              className="capture-effort"
+              className="capture-select capture-effort"
               value={effectiveEffort}
               onChange={(e) => setEffort(e.target.value)}
               disabled={effortLevels.length === 0}
-              style={{ ...selectStyle, opacity: effortLevels.length === 0 ? 0.5 : 1 }}
             >
               {effortLevels.map((lvl) => (
                 <option key={lvl} value={lvl}>
@@ -376,72 +376,42 @@ export function CaptureForm({
           />
         )}
         <label
-          className="capture-chrome"
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '0.5rem',
-            fontSize: '13px',
-            color: '#2E2A26',
-            cursor: chromeCapable ? 'pointer' : 'not-allowed',
-            opacity: chromeCapable ? 1 : 0.45,
-            userSelect: 'none',
-          }}
+          className={`capture-chrome${chromeCapable ? '' : ' capture-chrome-off'}`}
         >
           <input
             type="checkbox"
             checked={chrome}
             disabled={!chromeCapable}
             onChange={(e) => setChrome(e.target.checked)}
-            style={{ accentColor: '#3D5BA0', margin: 0 }}
           />
-          <code style={{ fontSize: '12px' }}>--chrome</code>
-          <span style={{ fontStyle: 'italic', fontSize: '12px', color: '#7A7068' }}>
+          <code>--chrome</code>
+          <span className="capture-chrome-hint">
             {chromeCapable ? 'browser automation mode' : 'claude harness only'}
           </span>
         </label>
         {error && (
-          <div
-            className="capture-error"
-            role="alert"
-            style={{
-              padding: '6px 10px',
-              background: 'rgba(178, 78, 60, 0.12)',
-              border: '1px solid rgba(178, 78, 60, 0.5)',
-              color: '#8B3A28',
-              fontSize: '13px',
-              borderRadius: '2px',
-            }}
-          >
+          <div className="capture-error" role="alert">
             {error}
           </div>
         )}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.3rem' }}>
-          <span style={{ fontSize: '11px', color: '#7A7068' }}>
-            <kbd>Esc</kbd> cancel · <kbd>⌘↵</kbd> spawn
+        <div className="capture-foot">
+          <span className="capture-foot-hint">
+            <kbd>Esc</kbd> cancel <span className="capture-foot-dot">·</span> <kbd>⌘↵</kbd> spawn
           </span>
-          <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <div className="capture-buttons">
             <button
               type="button"
-              className="capture-cancel"
+              className="capture-btn capture-cancel"
               onClick={onCancel}
               disabled={submitting}
-              style={btnStyle}
             >
               Cancel
             </button>
             <button
               type="button"
-              className="capture-submit"
+              className="capture-btn capture-submit"
               onClick={() => void submit()}
               disabled={submitting || !prompt.trim()}
-              style={{
-                ...btnStyle,
-                background: '#3D5BA0', // muted cobalt — matches the ✶ trigger + In Flight accent
-                color: '#FFFFFF',
-                borderColor: '#2C4378',
-                opacity: submitting || !prompt.trim() ? 0.5 : 1,
-              }}
             >
               {submitting ? 'Spawning…' : 'Spawn'}
             </button>
@@ -452,33 +422,222 @@ export function CaptureForm({
   )
 }
 
-const labelStyle: React.CSSProperties = {
-  fontSize: '11px',
-  fontWeight: 600,
-  letterSpacing: '0.08em',
-  textTransform: 'uppercase',
-  color: '#5C544D',
-}
-
-const selectStyle: React.CSSProperties = {
-  fontFamily: "var(--font-main, 'EB Garamond', serif)",
-  fontSize: '14px',
-  color: '#2E2A26',
-  background: '#FFFFFF',
-  border: '1px solid rgba(46, 42, 38, 0.20)',
-  borderRadius: '3px',
-  padding: '5px 8px',
-  width: '100%',
-  boxSizing: 'border-box',
-}
-
-const btnStyle: React.CSSProperties = {
-  fontFamily: "var(--font-main, 'EB Garamond', serif)",
-  fontSize: '14px',
-  padding: '6px 16px',
-  borderRadius: '3px',
-  border: '1px solid rgba(46, 42, 38, 0.20)',
-  background: 'transparent',
-  color: '#5C544D',
-  cursor: 'pointer',
+/**
+ * Inject the Capture dialog's CSS once — idempotent by element id, the same
+ * pattern as `injectStashFormStyles`. The shared pickers' sheet rides along,
+ * because `AddProjectPath` still draws from it.
+ *
+ * Every measurable value the alignment depends on lives here and nowhere else:
+ * `.capture-form`'s children are all full-width blocks on one column, and the
+ * four controls share `.capture-select`, so equal boxes are a property of the
+ * markup rather than a coincidence between two style sources.
+ */
+export function injectCaptureFormStyles(): void {
+  if (typeof document === 'undefined') return
+  if (document.getElementById('capture-form-styles')) return
+  const style = document.createElement('style')
+  style.id = 'capture-form-styles'
+  style.textContent = `
+    .capture-form {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      font-family: var(--font-main, 'EB Garamond', serif);
+      color: #2E2A26;
+    }
+    .capture-form > * {
+      box-sizing: border-box;
+    }
+    /* The yap. 17px because this is the dialog's one piece of prose — the
+       controls beneath it read at 15px, the labels at 11px. */
+    .capture-yap {
+      width: 100%;
+      box-sizing: border-box;
+      resize: vertical;
+      min-height: 8.5rem;
+      font-family: var(--font-main, 'EB Garamond', serif);
+      font-size: 17px;
+      line-height: 1.5;
+      color: #2E2A26;
+      background: #FFFFFF;
+      border: 1px solid rgba(46, 42, 38, 0.20);
+      border-radius: 3px;
+      padding: 10px 12px;
+      transition: border-color 120ms ease-out, box-shadow 120ms ease-out;
+    }
+    .capture-yap::placeholder {
+      color: #9A8E80;
+      font-style: italic;
+    }
+    .capture-yap:focus {
+      outline: none;
+      border-color: #7C93C8;
+      box-shadow: 0 0 0 2px rgba(61, 91, 160, 0.16);
+    }
+    .capture-controls {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+    }
+    @media (max-width: 640px) {
+      .capture-controls {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+    .capture-field {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      min-width: 0;
+    }
+    .capture-label {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #5C544D;
+      line-height: 1;
+    }
+    /* One rule for all four controls. Custom chevron (so the four boxes are
+       identical rather than at the mercy of native select metrics) and
+       border-box sizing, so each column's control fills its track exactly. */
+    .capture-select {
+      width: 100%;
+      box-sizing: border-box;
+      appearance: none;
+      -webkit-appearance: none;
+      font-family: var(--font-main, 'EB Garamond', serif);
+      font-size: 15px;
+      line-height: 1.3;
+      color: #2E2A26;
+      background-color: #FFFFFF;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%237A7068'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 10px center;
+      border: 1px solid rgba(46, 42, 38, 0.20);
+      border-radius: 3px;
+      padding: 7px 28px 7px 9px;
+      cursor: pointer;
+      transition: border-color 120ms ease-out, box-shadow 120ms ease-out;
+    }
+    .capture-select:focus {
+      outline: none;
+      border-color: #C49333;
+      box-shadow: 0 0 0 2px rgba(154, 123, 53, 0.18);
+    }
+    .capture-select:disabled {
+      opacity: 0.5;
+      cursor: default;
+    }
+    .capture-chrome {
+      display: inline-flex;
+      align-items: center;
+      align-self: flex-start;
+      gap: 8px;
+      font-size: 13px;
+      color: #2E2A26;
+      cursor: pointer;
+      user-select: none;
+    }
+    .capture-chrome-off {
+      cursor: not-allowed;
+      opacity: 0.45;
+    }
+    .capture-chrome input[type="checkbox"] {
+      width: 14px;
+      height: 14px;
+      margin: 0;
+      accent-color: #3D5BA0;
+      cursor: inherit;
+    }
+    .capture-chrome code {
+      font-family: var(--font-mono, 'JetBrains Mono', monospace);
+      font-size: 12px;
+      background: rgba(46, 42, 38, 0.06);
+      padding: 1px 5px;
+      border-radius: 2px;
+      color: #2C4378;
+    }
+    .capture-chrome-hint {
+      font-style: italic;
+      font-size: 12px;
+      color: #7A7068;
+    }
+    .capture-error {
+      padding: 8px 10px;
+      background: rgba(178, 78, 60, 0.12);
+      border: 1px solid rgba(178, 78, 60, 0.5);
+      color: #8B3A28;
+      font-size: 13px;
+      border-radius: 2px;
+    }
+    /* The footer sits below a hairline, the way Stash's does below its body. */
+    .capture-foot {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-top: 2px;
+      padding-top: 13px;
+      border-top: 1px solid rgba(46, 42, 38, 0.10);
+    }
+    .capture-foot-hint {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 11px;
+      color: #7A7068;
+    }
+    .capture-foot-dot {
+      color: #B5A998;
+    }
+    .capture-foot-hint kbd {
+      font-family: var(--font-mono, 'JetBrains Mono', monospace);
+      font-size: 10px;
+      background: rgba(46, 42, 38, 0.10);
+      padding: 1px 5px;
+      border-radius: 2px;
+      border: 1px solid rgba(46, 42, 38, 0.16);
+      color: #4C453F;
+    }
+    .capture-buttons {
+      display: flex;
+      gap: 8px;
+    }
+    .capture-btn {
+      font-family: var(--font-main, 'EB Garamond', serif);
+      font-size: 15px;
+      letter-spacing: 0.01em;
+      padding: 6px 18px;
+      border-radius: 3px;
+      border: 1px solid transparent;
+      cursor: pointer;
+      transition: background 120ms ease-out, border-color 120ms ease-out;
+    }
+    .capture-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .capture-cancel {
+      background: transparent;
+      color: #7A7068;
+      border-color: rgba(46, 42, 38, 0.20);
+    }
+    .capture-cancel:hover:not(:disabled) {
+      background: rgba(46, 42, 38, 0.06);
+      color: #2E2A26;
+    }
+    /* Muted cobalt — matches the ✶ trigger and the In Flight lane accent. */
+    .capture-submit {
+      background: #3D5BA0;
+      color: #FFFFFF;
+      border-color: #2C4378;
+      box-shadow: 0 1px 0 rgba(255, 252, 245, 0.22) inset;
+    }
+    .capture-submit:hover:not(:disabled) {
+      background: #35508F;
+    }
+  `
+  document.head.appendChild(style)
+  injectProjectPickerStyles()
 }

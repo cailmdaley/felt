@@ -25,8 +25,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { parseCompositeFeed } from '../board/KanbanComposite.js'
 import { deriveProjects, type ProjectModel } from './projectModel'
 import { StashForm, injectStashFormStyles, type StashProject } from './StashForm'
-import { CaptureForm, type CaptureProject } from './CaptureForm'
-import { injectProjectPickerStyles } from './ProjectPicker'
+import { CaptureForm, injectCaptureFormStyles, type CaptureProject } from './CaptureForm'
 
 export interface OpenFormOptions {
   /** Shuttle daemon base — `''` (relative) in the standalone bundle. */
@@ -128,9 +127,9 @@ export async function openStash(opts: OpenFormOptions): Promise<void> {
 }
 
 export async function openCapture(opts: OpenFormOptions): Promise<void> {
-  // Capture styles its own chrome inline, so the shared pickers' sheet has to
-  // be injected here (Stash gets it via injectStashFormStyles).
-  injectProjectPickerStyles()
+  // Capture has its own sheet now (which pulls the shared pickers' in), the
+  // same shape as Stash's injection point.
+  injectCaptureFormStyles()
   let feed: LoadedFeed
   try {
     feed = await loadFeed(opts.shuttleBase)
