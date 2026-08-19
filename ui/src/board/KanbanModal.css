@@ -1710,6 +1710,11 @@
   padding-left: 4px;
   border-left: 1px dotted rgba(107, 78, 113, 0.5);
 }
+/* A member that is in the chain but no longer waiting its turn: closed without
+   a verdict (awaiting review) or composted. It still counts — the drop gesture
+   ends the chain there — so it is shown, dimmer, saying which it is. */
+.kbn-card-queued-row--settled { opacity: 0.62; }
+.kbn-card-queued-note { font-style: italic; opacity: 0.85; }
 .kbn-card-queued-row.kbn-queue-row-dragging { opacity: 0.45; cursor: grabbing; }
 /* The insertion point, drawn in the gap the row will land in — a line, not a
    filled target, because what is being chosen is a POSITION BETWEEN rows and

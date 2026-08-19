@@ -1094,6 +1094,51 @@ export function isAccepted(card: Pick<StackCandidate, 'tempered'>): boolean {
   return card.tempered === true;
 }
 
+/** A queue member that is closed but not accepted: still in the chain, no
+ *  longer waiting for its turn. `null` means an ordinary waiting member. */
+export type QueueMemberNote = 'awaiting review' | 'composted';
+
+/**
+ * How does a queue member sit — waiting its turn, or closed without a verdict?
+ *
+ * The peek list counts every UNTEMPERED follower, because that is the graph the
+ * drop gesture reasons over: a card in awaiting review still occupies its place
+ * in the chain, still ends it, and still refuses a second card dropped onto its
+ * head. Counting only the live ones made that queue INVISIBLE — an unexplained
+ * refusal over a card wearing no chip at all. So the closed members are shown,
+ * and shown as what they are rather than as work still waiting.
+ */
+export function queueMemberNote(
+  member: Pick<StackCandidate, 'status' | 'tempered'>,
+): QueueMemberNote | null {
+  if (member.status !== 'closed') return null;
+  return member.tempered === false ? 'composted' : 'awaiting review';
+}
+
+/**
+ * What the "+N queued" chip reads for a queue holding these members.
+ *
+ * N is always the WHOLE chain — the closed members are queued behind this card
+ * in every sense the gesture cares about, and a count that skipped them would
+ * disagree with the refusal you get for dropping onto the same card. When the
+ * queue is MIXED, a second clause says how many are no longer waiting, named
+ * by what they actually are; when they are all one thing, the clause carries no
+ * number, because the N in front of it already did.
+ */
+export function queuedChipLabel(notes: readonly (QueueMemberNote | null)[]): string {
+  const total = notes.length;
+  const settled = notes.filter((n) => n !== null) as QueueMemberNote[];
+  if (settled.length === 0) return `+${total} queued`;
+  const kind = settled.every((n) => n === 'composted')
+    ? 'composted'
+    : settled.every((n) => n === 'awaiting review')
+      ? 'in review'
+      : 'closed';
+  return settled.length === total
+    ? `+${total} queued · ${kind}`
+    : `+${total} queued · ${settled.length} ${kind}`;
+}
+
 /** What the stack gesture needs to know about a card to rule on a drop.
  *  `KanbanCard` satisfies it. */
 export interface StackCandidate {
@@ -1112,7 +1157,12 @@ export interface StackCandidate {
 /** The gesture's ruling: where the dropped card attaches, or why it may not. */
 export type StackVerdict =
   | { ok: true; tail: string }
-  | { ok: false; reason: string };
+  | { ok: false; reason: string; code?: StackRefusal };
+
+/** Machine-readable refusals, for the cases the SURFACE has something to say
+ *  about mid-drag. Only the ones a hover can honestly narrate get a code; the
+ *  rest live in `reason` alone. */
+export type StackRefusal = 'alreadyQueued';
 
 /**
  * Rule on "put this card behind that one" — the drag of one card onto another.
@@ -1175,11 +1225,23 @@ export function stackDropVerdict(
   if (tailCard && isAccepted(tailCard)) {
     return { ok: false, reason: 'that one is already tempered — there is nothing left to wait for' };
   }
+  // ALREADY BEHIND IT — the honest refusal, and the one worth SAYING.
+  //
+  // Two shapes of the same fact: the source sits somewhere in the chain behind
+  // the target (so the tail is the source itself, or the source is one of the
+  // members between), or it holds exactly the edge this drop would write. Both
+  // used to fall through to "that would make a loop", which is true of the
+  // mechanics and useless to the human: a card that is ALREADY where you are
+  // trying to put it is not a loop, it is a no-op. The `code` lets the surface
+  // name it during the drag without the refusal claiming the event.
+  if (tail === source.id || queuedBehind(target.id, dependents).includes(source.id)) {
+    return { ok: false, code: 'alreadyQueued', reason: 'it is already queued behind this one' };
+  }
   if (stackWouldCycle(source.id, tail, dependents)) {
     return { ok: false, reason: 'that would make a loop' };
   }
   if ((source.dependsOn ?? []).length === 1 && source.dependsOn?.[0] === tail) {
-    return { ok: false, reason: 'it is already queued behind that' };
+    return { ok: false, code: 'alreadyQueued', reason: 'it is already queued behind that' };
   }
   return { ok: true, tail };
 }

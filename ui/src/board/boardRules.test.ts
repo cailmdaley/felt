@@ -11,6 +11,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   buildDependents,
   cardDragArms,
+  queueMemberNote,
   queueRowGesture,
   chainTail,
   classifyFiber,
@@ -25,6 +26,7 @@ import {
   lensCycles,
   queueDropIndex,
   queuedBehind,
+  queuedChipLabel,
   reorderQueueWrites,
   restingUntil,
   stackZoneOffered,
@@ -45,7 +47,6 @@ import {
   formatLaunchDay,
   humanizeIdleAge,
   KanbanSurfaceRenderer,
-  liveDependents,
   phasePillLabel,
   sortDatedByReturn,
   splitStashByReturn,
@@ -1698,7 +1699,26 @@ describe('chains, tails and the drop that authors them', () => {
   })
 
   it('refuses a drop that would rewrite the edge the card already has', () => {
-    expect(stackDropVerdict(card('c', { dependsOn: ['b'] }), card('b'), chain).ok).toBe(false)
+    const v = stackDropVerdict(card('c', { dependsOn: ['b'] }), card('b'), chain)
+    expect(v.ok).toBe(false)
+    // CODED, so the hover can say it: this is a no-op, not a loop.
+    expect(v.ok === false && v.code).toBe('alreadyQueued')
+  })
+
+  it('names the ALREADY-QUEUED refusal instead of calling it a loop', () => {
+    // The live shape: 'b' waits on 'a', so dropping 'b' onto 'a' resolves the
+    // tail to 'b' itself. Mechanically a self-edge; to the human, a card that
+    // is already exactly where they are trying to put it.
+    const v = stackDropVerdict(card('b', { dependsOn: ['a'] }), card('a'), chain)
+    expect(v).toEqual({
+      ok: false,
+      code: 'alreadyQueued',
+      reason: 'it is already queued behind this one',
+    })
+    // Deeper in the chain, too: 'c' waits on 'b' waits on 'a'.
+    const deep = stackDropVerdict(card('c', { dependsOn: ['b'] }), card('a'), chain)
+    expect(deep.ok === false && deep.code).toBe('alreadyQueued')
+    // And a genuine loop is still a genuine loop (see the fan-in above).
   })
 })
 
@@ -1788,17 +1808,19 @@ describe('who may be stacked, and behind what', () => {
     expect(stackDropVerdict(c('d'), c('a'), chain, lookup).ok).toBe(false)
   })
 
-  it('still catches a loop that runs through an awaiting-review member', () => {
+  it('still refuses a source already queued behind, through an awaiting-review member', () => {
     const chain = edges(['a', []], ['b', ['a']])
     expect(stackDropVerdict(awaiting('b'), c('a'), chain).ok).toBe(false)
   })
 
-  it('keeps the two graphs apart: the chip ignores closed cards, the chain does not', () => {
+  it('keeps a closed-but-unaccepted follower IN the graph — chip and chain alike', () => {
     const resp = queueResp(
       queueCard('a'),
       queueCard('b', { status: 'closed', closedAt: at0, dependsOn: ['a'] }),
     )
-    expect(queuedBehind('a', liveDependents(resp))).toEqual([])
+    // The live gap this replaced: the chain saw 'b' (so a drop onto 'a'
+    // refused) while the chip did not (so 'a' wore nothing). One graph now.
+    expect(queuedBehind('a', unsettledDependents(resp))).toEqual(['b'])
     expect(chainTail('a', unsettledDependents(resp))).toBe('b')
   })
 
@@ -1993,23 +2015,43 @@ describe('a card claims a drop only when it really is a stack', () => {
   })
 })
 
-describe('the queue counts only work that is actually held', () => {
-  it('shows nothing behind a head whose followers are all tempered', () => {
+describe('the queue counts every follower a dependency still holds', () => {
+  it('drops the TEMPERED follower and keeps the composted one', () => {
     const resp = queueResp(
       queueCard('a'),
       queueCard('b', { status: 'closed', tempered: true, closedAt: at0, dependsOn: ['a'] }),
       queueCard('c', { status: 'closed', tempered: false, closedAt: at0, dependsOn: ['a'] }),
     )
-    expect(queuedBehind('a', liveDependents(resp))).toEqual([])
+    // 'b' is accepted, so nothing waits on it any more; 'c' is composted, and a
+    // dep on composted work is still unsatisfied.
+    expect(queuedBehind('a', unsettledDependents(resp))).toEqual(['c'])
   })
 
-  it('still counts the followers that are genuinely waiting', () => {
+  it('counts the waiting and the awaiting-review followers together', () => {
     const resp = queueResp(
       queueCard('a'),
       queueCard('b', { status: 'closed', tempered: true, closedAt: at0, dependsOn: ['a'] }),
       queueCard('d', { dependsOn: ['a'] }),
+      queueCard('e', { status: 'closed', closedAt: at0, dependsOn: ['a'] }),
     )
-    expect(queuedBehind('a', liveDependents(resp))).toEqual(['d'])
+    expect(queuedBehind('a', unsettledDependents(resp))).toEqual(['d', 'e'])
+  })
+
+  it('names each member by how it sits, and the chip says the mix', () => {
+    const waiting = queueCard('d')
+    const review = queueCard('e', { status: 'closed', closedAt: at0 })
+    const composted = queueCard('f', { status: 'closed', tempered: false, closedAt: at0 })
+    expect(queueMemberNote(waiting)).toBe(null)
+    expect(queueMemberNote(review)).toBe('awaiting review')
+    expect(queueMemberNote(composted)).toBe('composted')
+
+    expect(queuedChipLabel([null, null])).toBe('+2 queued')
+    // The live gap's shape: one follower, closed, awaiting review.
+    expect(queuedChipLabel(['awaiting review'])).toBe('+1 queued · in review')
+    expect(queuedChipLabel([null, 'awaiting review'])).toBe('+2 queued · 1 in review')
+    expect(queuedChipLabel([null, 'composted'])).toBe('+2 queued · 1 composted')
+    expect(queuedChipLabel([null, 'composted', 'awaiting review'])).toBe('+3 queued · 2 closed')
+    expect(queuedChipLabel(['composted', 'composted'])).toBe('+2 queued · composted')
   })
 })
 

@@ -26,8 +26,10 @@ import {
   stackZoneOffered,
   lensCycles,
   queueDropIndex,
+  queueMemberNote,
   queueRowGesture,
   queuedBehind,
+  queuedChipLabel,
   reorderQueueWrites,
   stackClaimsDrop,
   unqueueRowWrites,
@@ -267,8 +269,6 @@ export class KanbanSurfaceRenderer {
     headId: string
     queue: readonly string[]
   } | null = null
-  private dependentsFor: KanbanResponse | null = null
-  private dependentsMap: Map<string, string[]> = new Map()
   private chainDependentsFor: KanbanResponse | null = null
   private chainDependentsMap: Map<string, string[]> = new Map()
 
@@ -1564,29 +1564,14 @@ export class KanbanSurfaceRenderer {
   }
 
   /**
-   * Reverse edges over the cards actually WAITING — what "+N queued" counts.
-   * Rebuilt only when the response object changes.
-   */
-  private dependents(): Map<string, string[]> {
-    const resp = this.getLastResponse()
-    if (resp === this.dependentsFor) return this.dependentsMap
-    this.dependentsFor = resp
-    this.dependentsMap = liveDependents(resp)
-    return this.dependentsMap
-  }
-
-  /**
    * Reverse edges over every card that is not SETTLED — the graph the stack
-   * gesture reasons over.
+   * gesture AND the "+N queued" chip both reason over.
    *
-   * A different question from the chip's, and so a different graph. The chip
-   * asks "what work is this holding up?", and a closed follower is not being
-   * held up by anything (the gate exempts it). But a DROP has to find the real
-   * end of the chain, and a chain whose last member sits in awaiting review
-   * still ends there — resolving the tail off the chip's graph would skip that
-   * member and quietly queue the new card beside it instead of behind it. The
-   * cycle check reads this graph for the same reason: a loop through a closed
-   * card is still a loop.
+   * A DROP has to find the real end of the chain, and a chain whose last member
+   * sits in awaiting review still ends there. The cycle check reads it for the
+   * same reason: a loop through a closed card is still a loop. And the chip
+   * reads it because the alternative — a narrower graph — had the board refuse
+   * a drop for a queue it was not drawing.
    */
   private chainDependents(): Map<string, string[]> {
     const resp = this.getLastResponse()
@@ -1607,22 +1592,32 @@ export class KanbanSurfaceRenderer {
    * leaving the board to do it would lose the thing you were comparing it to.
    */
   private renderQueuedChip(card: KanbanCard, host: HTMLElement): void {
-    const queued = queuedBehind(card.id, this.dependents())
+    // THE SAME GRAPH THE GESTURE READS. A follower in awaiting review is still
+    // in the chain — it is what a drop resolves the tail to, and what makes a
+    // second drop refuse — so a chip that counted only the live ones described
+    // a queue nobody else believed in. See `queueMemberNote`.
+    const queued = queuedBehind(card.id, this.chainDependents())
     if (queued.length === 0) return
 
     const resp = this.getLastResponse()
     const names = queued.map((id) => findCardById(resp, id)?.name ?? id)
+    const notes = queued.map((id) => {
+      const member = findCardById(resp, id)
+      return member ? queueMemberNote(member) : null
+    })
 
     const chip = document.createElement('button')
     chip.type = 'button'
     chip.className = 'kbn-card-queued'
-    chip.textContent = `+${queued.length} queued`
+    chip.textContent = queuedChipLabel(notes)
     chip.setAttribute('aria-expanded', 'false')
     chip.setAttribute(
       'aria-label',
       `${queued.length} card${queued.length === 1 ? '' : 's'} queued behind ${card.name} — show them`,
     )
-    chip.title = `Waiting on this one, in order: ${names.join(' → ')}`
+    chip.title = `Waiting on this one, in order: ${names
+      .map((name, i) => (notes[i] ? `${name} (${notes[i]})` : name))
+      .join(' → ')}`
 
     const list = document.createElement('ol')
     list.className = 'kbn-card-queued-list'
@@ -1687,10 +1682,20 @@ export class KanbanSurfaceRenderer {
       const li = document.createElement('li')
       li.className = 'kbn-card-queued-row'
       li.textContent = name
+      const note = notes[i]
+      if (note) {
+        // A closed member reads dimmer and says which closed state it is in —
+        // it is in the queue, but it is not what the queue is waiting on next.
+        li.classList.add('kbn-card-queued-row--settled')
+        const suffix = document.createElement('span')
+        suffix.className = 'kbn-card-queued-note'
+        suffix.textContent = ` · ${note}`
+        li.append(suffix)
+      }
       const gesture = gestureFor(members[i])
       // The row SAYS what its drag can do — or, when it has none, why. A row
       // that silently refuses to move reads as a broken board.
-      li.title = `Open “${name}”. ${gesture.hint}`
+      li.title = `Open “${name}”${note ? ` (${note})` : ''}. ${gesture.hint}`
       // A ROW IS THE FIBER IT NAMES. Without this the click bubbles to the
       // card the list hangs off and opens the HEAD — you click "Euclid
       // timetracker", you get the card you were reading. The row is the only
@@ -1894,7 +1899,33 @@ export class KanbanSurfaceRenderer {
         tailEl?.classList.add('kbn-card-stack-tail')
       }
     }
+    // A REFUSAL THAT SAYS SO — and says it without claiming anything.
+    //
+    // The one refusal a human reads as a broken board is the silent one over a
+    // card the dragged fiber is ALREADY queued behind: nothing highlights,
+    // nothing moves, and nothing explains. So the target borrows its own
+    // `title` for the duration of the drag. That is the whole intervention:
+    // no preventDefault, no dropEffect, no class — the column's handler still
+    // owns the event exactly as before.
+    let heldTitle: string | null = null
+    const sayRefusal = (text: string | null): void => {
+      if (text === null) {
+        if (heldTitle !== null) {
+          el.title = heldTitle === '' ? '' : heldTitle
+          if (heldTitle === '') el.removeAttribute('title')
+          heldTitle = null
+        }
+        return
+      }
+      if (heldTitle === null) {
+        heldTitle = el.getAttribute('title') ?? ''
+        document.addEventListener('dragend', clearRefusal, { once: true })
+      }
+      el.title = text
+    }
+    const clearRefusal = (): void => sayRefusal(null)
     const clear = (): void => {
+      sayRefusal(null)
       if (dwellTimer !== null) {
         window.clearTimeout(dwellTimer)
         dwellTimer = null
@@ -1928,6 +1959,11 @@ export class KanbanSurfaceRenderer {
       // fold of a scrolling column is where people aim when they mean "the
       // bottom of this column", and that drop belongs to the column.
       if (verdict?.ok && aim.offered) startDwell()
+      sayRefusal(
+        verdict && !verdict.ok && verdict.code === 'alreadyQueued' && aim.offered
+          ? 'already queued behind this'
+          : null,
+      )
       // Not claiming means not touching: no preventDefault, no
       // stopPropagation, no highlight. The column's own dragover then runs on
       // the bubble and the drop lands where it always did.
@@ -2496,28 +2532,19 @@ export function boardCards(resp: KanbanResponse | null): KanbanCard[] {
 }
 
 /**
- * The reverse dependency graph the board reasons with — built over the LIVE
- * cards only.
+ * THE reverse dependency graph — the one graph the board reasons over: every
+ * card that has not been ACCEPTED.
  *
- * A CLOSED follower is not queued behind anything: its work is over. Counting
- * it would have a head card announce "+2 queued" for two runs that finished
- * last week, and would let a chain tail resolve onto a closed card that no new
- * dependency should ever attach to. Tempered is exactly the state that RELEASES
- * a follower, so a released follower must leave the graph with it.
- */
-export function liveDependents(resp: KanbanResponse | null): Map<string, string[]> {
-  return buildDependents(boardCards(resp).filter((c) => c.status !== 'closed'))
-}
-
-/**
- * The reverse dependency graph the STACK GESTURE reasons over: every card that
- * has not been ACCEPTED.
+ * There were two of these once: a narrower one over live cards for the "+N
+ * queued" chip, and this one for the stack gesture. The split was wrong. A
+ * follower in awaiting review is still in the chain — it is what a drop
+ * resolves the tail to, and what makes a second drop refuse — so a chip built
+ * on the narrower graph showed NOTHING over a card whose queue the gesture
+ * could plainly see, and the refusal that followed had no visible cause. One
+ * graph, and the closed members are shown as what they are (`queueMemberNote`).
  *
- * Wider than `liveDependents` by the closed-but-unaccepted cards — awaiting
- * review and composted — and the difference is the point (see
- * `chainDependents`). Only a tempered card leaves the graph: it is the one
- * state that satisfies a dependency, so it is the one state that genuinely
- * ends a chain.
+ * Only a TEMPERED card leaves: it is the one state that satisfies a dependency,
+ * so it is the one state that genuinely ends a chain.
  */
 export function unsettledDependents(resp: KanbanResponse | null): Map<string, string[]> {
   return buildDependents(boardCards(resp).filter((c) => !isAccepted(c)))
