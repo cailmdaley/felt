@@ -1327,6 +1327,16 @@ export class KanbanModal {
       void this.unstack(card)
       return
     }
+    // A gated CLOSED card re-dropped into Resting is already exactly where it
+    // asked to be — the gate put it there, not a stash. Letting it through
+    // would run `commitSurface`'s park-as-draft, REOPENING work that is only
+    // waiting for a verdict: the drop would silently undo the close. Nothing to
+    // do, so say so.
+    if (horizon === 'stashed' && card.depGated === true && card.status === 'closed') {
+      this.showBanner(`“${card.name}” is already resting — it is queued behind other work.`, 'info')
+      this.announce(`${card.name} is already resting, queued behind other work.`)
+      return
+    }
     // A standing role is placed on the timeline by its schedule
     // (`nextStandingLaunch`), not by hand — a horizon/due write here is
     // silently ignored by the read model and just leaves dead frontmatter.

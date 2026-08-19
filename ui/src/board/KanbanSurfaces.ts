@@ -1092,9 +1092,16 @@ export class KanbanSurfaceRenderer {
       // IS the queued mark (Cail's call); the words live on hover.
       const blocking = card.dependsOnBlocking ?? card.dependsOn ?? []
       const names = blocking.map((id) => findCardById(this.getLastResponse(), id)?.name ?? id)
+      // A gated card that is CLOSED-but-unjudged is resting for two reasons at
+      // once — it wants a verdict, and it is not its turn — and a row that named
+      // only the second would read as work still to do. So the hover says both,
+      // in the order they'll matter: what it is, then what it waits on.
+      const state = card.status === 'closed' ? 'awaiting review · ' : ''
       el.title =
-        `${card.name} — after ${names.join(', ')}. ` +
-        'Returns to the desk when that is tempered; drag it up to Now to unstack it.'
+        `${card.name} — ${state}after ${names.join(', ')}. ` +
+        (card.status === 'closed'
+          ? 'Returns to Awaiting review when that is tempered; drag it up to Now to unstack it.'
+          : 'Returns to the desk when that is tempered; drag it up to Now to unstack it.')
       this.renderQueuedChip(card, el)
     } else if (sleeping) {
       const returns = card.nextLaunchAt ? formatLaunchDay(card.nextLaunchAt) : null

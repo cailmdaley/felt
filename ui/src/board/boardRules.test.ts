@@ -1535,10 +1535,41 @@ describe('the sequence gate', () => {
     expect(resp.stash).toHaveLength(0)
   })
 
-  it('never rests a CLOSED card — a pending verdict is not a queue position', () => {
+  it('RESTS an awaiting-review card whose dep has not tempered — the queue hides it from the board', () => {
     const resp = board(step('a'), step('b', { status: 'closed', closedAt: at0, dependsOn: ['a'] }))
+    expect(resp.now.awaitingReview).toHaveLength(0)
+    expect(resp.stash.map((c) => c.id)).toEqual(['b'])
+    expect(resp.stash[0].depGated).toBe(true)
+    expect(resp.stash[0].status).toBe('closed')
+    expect(resp.stash[0].dependsOnBlocking).toEqual(['a'])
+  })
+
+  it('an awaiting-review card returns to Awaiting review the moment its dep tempers', () => {
+    const resp = board(
+      step('a', { status: 'closed', tempered: true, closedAt: at0 }),
+      step('b', { status: 'closed', closedAt: at0, dependsOn: ['a'] }),
+    )
     expect(resp.now.awaitingReview.map((c) => c.id)).toEqual(['b'])
     expect(resp.stash).toHaveLength(0)
+    expect(resp.now.awaitingReview[0].depGated).toBeFalsy()
+  })
+
+  it('never rests a card that already has a VERDICT — tempered and composted are history', () => {
+    const resp = board(
+      step('a'),
+      step('t', { status: 'closed', tempered: true, closedAt: at0, dependsOn: ['a'] }),
+      step('c', { status: 'closed', tempered: false, closedAt: at0, dependsOn: ['a'] }),
+    )
+    expect(resp.stash).toHaveLength(0)
+    expect(resp.timeline.past.map((c) => c.id).sort()).toEqual(['c', 't'])
+  })
+
+  it('never rests an awaiting-review card with a LIVE WORKER', () => {
+    const feed = seqFeed(step('a'), step('b', { status: 'closed', closedAt: at0, dependsOn: ['a'] }))
+    feed.entries[1].runtime = { tmuxSession: 'shuttle-b' }
+    const resp = buildKanbanResponseFromComposite(feed, { nowMs: NOW })
+    expect(resp.stash).toHaveLength(0)
+    expect([...resp.now.inFlight, ...resp.now.awaitingReview].map((c) => c.id)).toContain('b')
   })
 
   it('FAILS OPEN on a dep id nothing resolves to, and says so on the card', () => {
@@ -1564,7 +1595,7 @@ describe('the sequence gate', () => {
       NOW,
     )
     expect(card.dependsOnSatisfied).toBe(true)
-    expect(card.depGated).toBe(false)
+    expect(card.depGated).toBeFalsy()
     expect(card.dependsOnUnresolved).toBeUndefined()
   })
 
@@ -1612,14 +1643,18 @@ describe('the sequence gate', () => {
     expect(released.now.drafts.map((c) => c.id)).toEqual(['b'])
   })
 
-  it('does not print "blocked on:" on a closed card — a verdict is not a dependency', () => {
-    // Awaiting review waits on a HUMAN. The gate exempts closed cards, so an
-    // unsatisfied dep can still ride on one; the card must not claim to be
-    // blocked by it.
-    const resp = board(step('a'), step('b', { status: 'closed', closedAt: at0, dependsOn: ['a'] }))
-    const card = resp.now.awaitingReview[0]
+  it('a JUDGED card keeps its unsatisfied dep on the record without being held by it', () => {
+    // A verdict ends the card's claim on attention, so the gate lets go even
+    // though the edge is still unsatisfied — the record of what this work was
+    // waiting on when it finished survives, inert.
+    const resp = board(
+      step('a'),
+      step('b', { status: 'closed', tempered: false, closedAt: at0, dependsOn: ['a'] }),
+    )
+    const card = resp.timeline.past.find((c) => c.id === 'b')!
     expect(card.dependsOnSatisfied).toBe(false)
-    expect(card.status).toBe('closed')
+    expect(card.depGated).toBeFalsy()
+    expect(resp.stash).toHaveLength(0)
   })
 
   it('reads a SCALAR depends_on and remembers the shape the gesture may rewrite', () => {

@@ -608,21 +608,31 @@ export interface DepGateCandidate {
   status: string;
   dependsOnSatisfied: boolean;
   runningWorker?: string;
+  /** The human's verdict, when there is one. Only a VERDICT exempts a card
+   *  from the gate — `status:closed` on its own does not. */
+  tempered?: boolean;
 }
 
 /**
  * Does the dependency gate hold this card off the desk?
  *
- * Three exemptions, and each is a case where resting would LIE about the
- * card:
+ * Two exemptions, and each is a case where resting would LIE about the card:
  *   • satisfied deps (or none)  → nothing to wait for.
- *   • a closed card             → its lifecycle is over; a verdict pending in
- *                                 Awaiting review is not "waiting on a dep",
- *                                 and a tempered/composted card is history.
+ *   • a VERDICT already given   → tempered or composted is history, not an
+ *                                 attention claim. Resting it would file a
+ *                                 finished thing under "waiting its turn".
  *   • a LIVE worker             → the thing is happening right now. Whatever
  *                                 the frontmatter says, hiding a running
  *                                 worker in Resting is the board disagreeing
  *                                 with reality.
+ *
+ * NOT exempt, though it is `status:closed`: an AWAITING-REVIEW card — closed,
+ * no verdict yet — with an unsatisfied dep. A review that cannot usefully
+ * happen until the work ahead of it lands is exactly the thing queuing exists
+ * to take off the desk; leaving it in the Awaiting review column while its own
+ * head advertises it as "+1 queued" is the board saying both at once. It rests,
+ * and returns to Awaiting review by itself the moment the dep tempers — the
+ * same derivation, answering differently, with nothing stored.
  *
  * Everything else — a draft, an armed oneshot, a scheduled role — rests until
  * the dep tempers. This composes with `effectiveHorizon` by ADDITION, never by
@@ -631,7 +641,7 @@ export interface DepGateCandidate {
  */
 export function depGated(card: DepGateCandidate): boolean {
   if (card.dependsOnSatisfied) return false;
-  if (card.status === 'closed') return false;
+  if (card.tempered !== undefined) return false;
   if (card.runningWorker) return false;
   return true;
 }
@@ -1199,10 +1209,11 @@ export function stackDropVerdict(
   }
   // NOTE what is NOT refused here: the source's lifecycle state. Any card may
   // be queued behind another. An awaiting-review or composted source means "if
-  // this reopens, it reopens behind that one" — and while it stays closed the
-  // gate exempts it anyway (`depGated` never rests a closed card), so the edge
-  // is simply inert until the day it becomes true. The one refusal this
-  // gesture makes about lifecycle is about the TAIL, below.
+  // this reopens, it reopens behind that one". A composted source is inert
+  // until that day (`depGated` exempts a card that already has a verdict); an
+  // awaiting-review one rests immediately, which is the point — the review
+  // waits for the work ahead of it. The one refusal this gesture makes about
+  // lifecycle is about the TAIL, below.
   if (source.shuttleKind === 'standing') {
     return { ok: false, reason: 'a standing role runs on its schedule' };
   }

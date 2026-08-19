@@ -277,11 +277,21 @@ function assembleSurfaces(
       runningWorker: !!card.runningWorker,
       dependsOnSatisfied: card.dependsOnSatisfied,
     });
-    // The gate covers the three WORKING columns and nothing else. Closed
-    // columns are history or a pending verdict (`depGated` refuses them
-    // anyway); `pinned` is a strip, not a queue — an umbrella role waits for a
-    // human to launch it, never for a dep; `cycles` are calendar bands.
-    if ((column === 'drafts' || column === 'scheduled' || column === 'inFlight') && depGated(card)) {
+    // The gate covers every column where the card is still an ATTENTION CLAIM:
+    // the three working columns plus `awaitingReview` — closed but unjudged, and
+    // a review queued behind work that has not landed is precisely what queuing
+    // exists to take off the desk. It returns to Awaiting review by itself when
+    // the dep tempers. `tempered`/`composted` are history (`depGated` refuses a
+    // card that already carries a verdict); `pinned` is a strip, not a queue —
+    // an umbrella role waits for a human to launch it, never for a dep;
+    // `cycles` are calendar bands.
+    if (
+      (column === 'drafts' ||
+        column === 'scheduled' ||
+        column === 'inFlight' ||
+        column === 'awaitingReview') &&
+      depGated(card)
+    ) {
       depGatedCards.push({ ...card, depGated: true });
       continue;
     }
@@ -341,8 +351,9 @@ function assembleSurfaces(
   const nowDrafts: KanbanCard[] = [];
   for (const card of drafts) routeOpenCardByPlanningSurface(card, nowDrafts, stash);
 
-  // Awaiting-review cards are closed and pending a human verdict — unconditionally
-  // actionable, so they stay in the Now awaitingReview column. They must NOT be
+  // Awaiting-review cards are closed and pending a human verdict — actionable
+  // unless the sequence gate diverted them above, so they stay in the Now
+  // awaitingReview column. They must NOT be
   // routed through the open-card planning router: a stale `horizon` left over from
   // when the card was an active stashed draft (planning horizon is an open-card
   // concept) would otherwise re-route a just-closed card onto the stash surface,
