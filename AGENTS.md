@@ -734,17 +734,26 @@ felt shuttle validate-identity                # UID migration/cross-city validat
   paths. Served at `origins.<host>.projects` of `GET /api/v1/felt-stores`. The
   file is hand-editable, but no longer hand-edit-only. Both forms show the
   destination as **host then project** (`ui/src/forms/ProjectPicker.tsx` —
-  `HostPicker`, a plain `<select>`, beside the project combobox; Capture's
-  native project `<select>` is gone, since a `<select>` cannot carry a row that
-  acts as a button). The host list is the origins of `GET
+  `HostPicker` and `ProjectPicker`, both plain `<select>`s, sized to match the
+  agent and effort selects beside them). The host list is the origins of `GET
   /api/v1/felt-stores`, derived in `projectModel.ts` (`deriveHosts`) alongside
   the projects so the two can't disagree; it defaults to the LOCAL origin, and
   the project list is `projectsForHost` of the selection — one host's projects,
-  no host suffix on the rows. The project dropdown is portalled to `<body>` at
-  `position: fixed` because both hosts clip it (Stash's card is `overflow:
-  hidden`, Capture's Radix content `overflow: auto`).
+  no host suffix on the rows.
 
-  The project combobox's FIRST row is "Add a new project…", over `POST
+  The project half was briefly a bespoke filtering combobox, on the belief that
+  a `<select>` could not carry a row acting as a button. It can, and the
+  combobox's floating list — portalled into `<body>`, which is the PARENT of
+  the forms' React root — never saw a click, because React 18 delegates at the
+  root container the portalled nodes bubble past. The magic option is safe
+  because it is a sentinel, not a state: `interpretProjectChange` maps its
+  value to `{kind: 'add'}`, so `onChange` runs the add flow and restores the
+  previous selection (controlled `value` untouched, plus a direct write back to
+  the DOM node), and it sits alone in a leading `<optgroup>` so it never reads
+  as a project. The placeholder shown when nothing is selected is `disabled`,
+  so type-ahead and arrows cannot land there either.
+
+  The project select's FIRST option is "Add a new project…", over `POST
   /api/v1/projects` (`{"path": …, "origin": …}` — initializes `<path>/.felt`
   when absent, exactly as `felt init` does, then appends the path; idempotent).
   With the host already settled, that has exactly two shapes: on the **local**

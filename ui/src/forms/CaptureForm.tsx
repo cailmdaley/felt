@@ -308,18 +308,22 @@ export function CaptureForm({
             padding: '8px 10px',
           }}
         />
+        {/* Host · project · agent · effort — four native selects, four equal
+            columns. `flex: 1 1 0` with `min-width: 0` is what makes them equal
+            regardless of the longest option text; the 7rem basis in the wrap
+            breakpoint keeps the small-screen collapse. */}
         <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
-          {/* Host, then project — the same pair Stash uses. A native <select>
-              can't carry the "Add a new project…" row (a magic <option> reads
-              as a project and breaks keyboard selection), so the project half
-              is the shared ProjectPicker combobox. */}
+          {/* Host, then project — the same pair Stash uses. The project half is
+              a native <select> too: its "Add a new project…" entry is a
+              sentinel option, restored on change, so it never becomes a
+              selected state (see ProjectPicker). */}
           {(cities.length > 0 || onProjectAdded) && (
             <>
-              <div style={{ flex: '1 1 8rem', display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+              <div style={{ flex: '1 1 7rem', minWidth: 0, display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
                 <span className="capture-label" style={labelStyle}>Host</span>
                 <HostPicker hosts={hosts} selectedId={selectedHostId} onSelect={handleHostChange} />
               </div>
-              <div style={{ flex: '2 1 12rem', display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+              <div style={{ flex: '1 1 7rem', minWidth: 0, display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
                 <span className="capture-label" style={labelStyle}>Project</span>
                 <ProjectPicker
                   projects={hostCities}
@@ -330,7 +334,7 @@ export function CaptureForm({
               </div>
             </>
           )}
-          <label style={{ flex: '1 1 8rem', display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+          <label style={{ flex: '1 1 7rem', minWidth: 0, display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
             <span className="capture-label" style={labelStyle}>Agent</span>
             <select
               className="capture-agent"
@@ -345,7 +349,7 @@ export function CaptureForm({
               ))}
             </select>
           </label>
-          <label style={{ flex: '1 1 6rem', display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+          <label style={{ flex: '1 1 7rem', minWidth: 0, display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
             <span className="capture-label" style={labelStyle}>Effort</span>
             <select
               className="capture-effort"

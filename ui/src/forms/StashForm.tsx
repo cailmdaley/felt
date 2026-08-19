@@ -651,16 +651,18 @@ export function StashForm({
             <div className="stash-row stash-row-3">
               {/* Host, then project */}
               {/* Rendered even with no projects, as long as there is a way to
-                  add one: the picker's first row, "Add a new project…", is how
-                  a host with an empty list bootstraps its first. */}
+                  add one: the project select's first option, "Add a new
+                  project…", is how a host with an empty list bootstraps its
+                  first. */}
               {(cities.length > 0 || onProjectAdded) && (
                 <>
-                  <div className="stash-field stash-field-host">
+                  <div className="stash-field">
                     <span className="stash-label">Host</span>
                     <HostPicker
                       hosts={hosts}
                       selectedId={selectedHostId}
                       onSelect={handleHostChange}
+                      className="stash-select"
                     />
                   </div>
                   <div className="stash-field">
@@ -670,6 +672,7 @@ export function StashForm({
                       selectedId={selectedCityId}
                       onSelect={setSelectedCityId}
                       onAddProject={onProjectAdded ? addProject.begin : undefined}
+                      className="stash-select"
                     />
                   </div>
                 </>
@@ -1120,11 +1123,12 @@ export function injectStashFormStyles(): void {
     .stash-row-2 {
       grid-template-columns: 1fr 1fr;
     }
-    /* Host · project · parent fiber. The host is a short closed list, so it
-       gets the narrow column; the card widened to 880px to hold all three
-       without squeezing the project names. */
+    /* Host · project · parent fiber, in equal columns. Host and project are
+       both native selects now, and a select sized to its content would make
+       the row read as three unrelated widths; equal thirds of the 880px card
+       hold the project names without squeezing. */
     .stash-row-3 {
-      grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.4fr) minmax(0, 1.4fr);
+      grid-template-columns: repeat(3, minmax(0, 1fr));
     }
     .stash-row-schedule {
       grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);

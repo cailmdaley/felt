@@ -50,13 +50,14 @@ is folded in here rather than into a separate Unreleased section.
   daemon's own origins and starts on the machine you are sitting at, so the
   project list beside it is short, unambiguous, and needs no host suffix —
   and "Add a new project…" has an obvious destination before you click it.
-  Changing the host re-points the project at that host's most recent one. The
-  project control is one combobox both forms share — Capture's native
-  `<select>` is gone — whose first row is "Add a new project…"; it filters as
-  you type and answers to the keyboard the way the parent picker beside it
-  does: arrows walk the rows, Enter commits, Escape closes the list and nothing
-  else. Its dropdown floats over the card instead of stretching it: it used to
-  grow the form and strand its own last rows below the edge, unreachable.
+  Changing the host re-points the project at that host's most recent one. Both
+  controls are plain `<select>`s, the same as the agent and effort beside them
+  and the same width — the project half was briefly a bespoke combobox, whose
+  floating list portalled past the React root and so ignored the mouse
+  entirely. "Add a new project…" is its FIRST option, alone in its own group so
+  it reads apart from the projects; it is a sentinel, never a selection —
+  choosing it starts the add flow and puts the field straight back on the
+  project it was showing, however you reached it (mouse, arrows, type-ahead).
   A folder that isn't a felt store yet gets one, created exactly as `felt init`
   creates it. On your own machine the chooser is the operating system's own:
   `POST /api/v1/choose-folder` raises Finder on macOS (`osascript`, activated
