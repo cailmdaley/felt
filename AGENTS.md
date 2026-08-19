@@ -17,6 +17,18 @@ One repo, one checkout, three artifacts:
 felt owns the data model; shuttle owns the network and the surface. The Elixir
 daemon is the production dispatcher.
 
+**The one invariant to hold before anything else — it binds you, the agent
+operating on the store, not just the code: a fiber's owning host is its only
+read and write path, and git sync is never the answer.** Every fiber is owned
+by exactly one host; cross-host reads and writes are owner-routed over the
+daemon socket (`Shuttle.OriginRouter`). To hand-edit a fiber another host
+owns, POST the local daemon's `/api/v1/felt-edit` (it routes by owner) —
+never `felt edit` against the local checkout, never a loom `git pull`/`push`
+to "sync state". A git mirror that happens to hold a remote fiber's files is
+incidental; any fix, feature, or diagnosis that leans on it is wrong by
+construction. When a cross-host behavior seems to need git, the model is
+being misread — see "Critical invariants" below before acting.
+
 ## felt CLI — the data layer
 
 Markdown fiber tracker. Directory-based markdown fibers with YAML frontmatter,
