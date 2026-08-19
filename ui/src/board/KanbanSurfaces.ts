@@ -26,6 +26,7 @@ import {
   stackZoneOffered,
   lensCycles,
   queueDropIndex,
+  queueRowGesture,
   queuedBehind,
   reorderQueueWrites,
   stackClaimsDrop,
@@ -37,6 +38,7 @@ import type {
   CycleDropTarget,
   CycleLensChip,
   QueueRewrite,
+  QueueRowGesture,
   StackVerdict,
   ZoneRect,
 } from './KanbanRules.js'
@@ -1625,18 +1627,22 @@ export class KanbanSurfaceRenderer {
     const list = document.createElement('ol')
     list.className = 'kbn-card-queued-list'
     list.hidden = true
-    // REORDERABLE only when the whole chain is scalar-shaped. Every row a
-    // reorder touches gets its `depends_on:` rewritten, so one hand-written
-    // list anywhere in the queue takes the affordance away from all of them —
-    // the same rule the stack drop follows, and for the same reason: a fan-in
-    // someone assembled by hand carries intent no drag can reconstruct. The
-    // rows simply are not draggable; there is nothing to explain because
-    // nothing was refused.
+    // Each row asks for itself. `chainAllScalar` is the only chain-wide fact in
+    // play, and it gates REORDER alone — taking a row out is a fact about that
+    // row's own fiber, so it stays offered even in a queue of one and even when
+    // some other member of the chain was assembled by hand. See
+    // `queueRowGesture` for why nothing about the head card is an input.
     const members = queued.map((id) => findCardById(resp, id))
-    const reorderable =
-      !!this.reorderQueue &&
-      queued.length > 1 &&
-      members.every((m) => m?.dependsOnShape === 'scalar')
+    const chainAllScalar = members.every((m) => m?.dependsOnShape === 'scalar')
+    const gestureFor = (m: KanbanCard | null | undefined): QueueRowGesture =>
+      queueRowGesture({
+        shape: m?.dependsOnShape,
+        queueLength: queued.length,
+        chainAllScalar,
+        canReorder: !!this.reorderQueue,
+        canUnqueue: !!this.unqueueRow,
+      })
+    const reorderable = members.some((m) => gestureFor(m).reorderable)
     // THE LIST IS ITS OWN DRAG BOUNDARY.
     //
     // `dragstart` fires on the nearest DRAGGABLE ANCESTOR of the pressed
@@ -1655,6 +1661,24 @@ export class KanbanSurfaceRenderer {
         e.stopPropagation()
       }
     })
+    // ...AND ITS OWN DROP BOUNDARY, for the same reason. A row released inside
+    // its own list is aiming at a gap between rows; when the chain is not
+    // reorderable there is no gap to aim at, and without this the release would
+    // bubble to the column under the list and be read as "take it out of the
+    // queue" — an unqueue nobody asked for, from a gesture that never left home.
+    // Rows that DO reorder stop these events themselves, so only near-misses
+    // reach here, and a near-miss inside the list does nothing.
+    list.addEventListener('dragover', (e) => {
+      if (this.queueDrag?.list !== list) return
+      e.preventDefault()
+      e.stopPropagation()
+      if (e.dataTransfer) e.dataTransfer.dropEffect = reorderable ? 'move' : 'none'
+    })
+    list.addEventListener('drop', (e) => {
+      if (this.queueDrag?.list !== list) return
+      e.preventDefault()
+      e.stopPropagation()
+    })
     if (reorderable) {
       list.classList.add('kbn-card-queued-list--reorderable')
       chip.title = `${chip.title}. Drag a row to reorder the queue.`
@@ -1663,7 +1687,10 @@ export class KanbanSurfaceRenderer {
       const li = document.createElement('li')
       li.className = 'kbn-card-queued-row'
       li.textContent = name
-      li.title = `Open “${name}”`
+      const gesture = gestureFor(members[i])
+      // The row SAYS what its drag can do — or, when it has none, why. A row
+      // that silently refuses to move reads as a broken board.
+      li.title = `Open “${name}”. ${gesture.hint}`
       // A ROW IS THE FIBER IT NAMES. Without this the click bubbles to the
       // card the list hangs off and opens the HEAD — you click "Euclid
       // timetracker", you get the card you were reading. The row is the only
@@ -1674,7 +1701,10 @@ export class KanbanSurfaceRenderer {
         e.stopPropagation()
         if (member) this.openDetail(member)
       })
-      if (reorderable) this.installQueueRowDrag(li, list, card.id, queued, i)
+      if (!gesture.draggable) li.classList.add('kbn-card-queued-row--fixed')
+      if (gesture.draggable) {
+        this.installQueueRowDrag(li, list, card.id, queued, i, gesture.reorderable)
+      }
       list.append(li)
     })
     chip.addEventListener('click', (e) => {
@@ -1708,6 +1738,10 @@ export class KanbanSurfaceRenderer {
     headId: string,
     queue: readonly string[],
     index: number,
+    /** May this row also be dropped back into its own list to reorder it? A
+     *  row that can only leave still drags — it just has nowhere to land in
+     *  here, and the list swallows the release (see its own drop handler). */
+    reorderable: boolean,
   ): void {
     row.draggable = true
     row.dataset.queueIndex = String(index)
@@ -1740,6 +1774,7 @@ export class KanbanSurfaceRenderer {
       const r = row.getBoundingClientRect()
       return e.clientY < r.top + r.height / 2 ? index : index + 1
     }
+    if (!reorderable) return
     row.addEventListener('dragover', (e) => {
       const drag = this.queueDrag
       if (!drag || drag.list !== list) return

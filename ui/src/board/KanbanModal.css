@@ -1686,18 +1686,29 @@
    since a queued fiber is resting behind this card. Say so with the pointer. */
 .kbn-card-queued-row { cursor: pointer; }
 .kbn-card-queued-row:hover { text-decoration: underline; text-underline-offset: 2px; }
-/* A reorderable queue: the rows are the order, so they say they can be moved.
-   `grab` and a hairline gutter are the whole affordance — a peek list is a
-   thing you read first and rearrange second, and a handle per row would make
-   the reading worse to advertise the rarer gesture. */
-.kbn-card-queued-list--reorderable .kbn-card-queued-row {
+/* A row that can be picked up says so, PER ROW — keyed off `draggable`, which
+   is the same bit the drag machinery reads, so the affordance cannot drift
+   from the permission. (It used to hang off the list, which meant a queue was
+   grabbable all-or-nothing.) `grab` and a hairline gutter are the whole
+   affordance: a peek list is a thing you read first and rearrange second, and
+   a handle per row would make the reading worse to advertise the rarer
+   gesture. */
+.kbn-card-queued-row[draggable='true'] {
   cursor: grab;
   padding-left: 4px;
   border-left: 1px solid transparent;
 }
-.kbn-card-queued-list--reorderable .kbn-card-queued-row:hover {
+.kbn-card-queued-row[draggable='true']:hover {
   border-left-color: rgba(107, 78, 113, 0.45);
   background: rgba(107, 78, 113, 0.08);
+}
+/* A row held by a hand-written `depends_on:` list. Still a link into its fiber
+   — it just cannot be moved from here, and its `title` says why. Dotted, so
+   the difference is visible at rest rather than discovered by pulling on it. */
+.kbn-card-queued-row--fixed {
+  cursor: pointer;
+  padding-left: 4px;
+  border-left: 1px dotted rgba(107, 78, 113, 0.5);
 }
 .kbn-card-queued-row.kbn-queue-row-dragging { opacity: 0.45; cursor: grabbing; }
 /* The insertion point, drawn in the gap the row will land in — a line, not a

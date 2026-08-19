@@ -11,6 +11,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   buildDependents,
   cardDragArms,
+  queueRowGesture,
   chainTail,
   classifyFiber,
   cycleMembership,
@@ -2120,5 +2121,84 @@ describe('a row drag and a card drag can never both be in flight', () => {
     // on a row, and a near-miss must do nothing rather than move the head.
     expect(cardDragArms({ rowDragInFlight: false, startedInsidePeekList: true })).toBe(false)
     expect(cardDragArms({ rowDragInFlight: true, startedInsidePeekList: true })).toBe(false)
+  })
+})
+
+describe('a queued row asks only about itself', () => {
+  // The regression this pins: taking a row OUT of a queue used to be gated on
+  // the queue being REORDERABLE, which is a much narrower permission — it
+  // wanted two or more members and every member of the chain scalar-shaped. So
+  // a head card with exactly one card queued behind it had no draggable rows at
+  // all, and one hand-written `depends_on:` anywhere in a chain froze every
+  // other row in it. The rows simply did not move, and said nothing about why.
+  const base = {
+    shape: 'scalar' as const,
+    queueLength: 3,
+    chainAllScalar: true,
+    canReorder: true,
+    canUnqueue: true,
+  }
+
+  it('offers both gestures on an ordinary scalar chain', () => {
+    const g = queueRowGesture(base)
+    expect(g.draggable).toBe(true)
+    expect(g.reorderable).toBe(true)
+    expect(g.hint).toMatch(/reorder/i)
+  })
+
+  it('still drags the only row in a queue of one', () => {
+    // Nothing to reorder against, but "take it out" is untouched by that.
+    const g = queueRowGesture({ ...base, queueLength: 1 })
+    expect(g.draggable).toBe(true)
+    expect(g.reorderable).toBe(false)
+    expect(g.hint).toMatch(/out of the queue/i)
+  })
+
+  it('still drags a scalar row in a chain someone hand-wrote elsewhere', () => {
+    // The chain cannot be REORDERED — that would rewrite the hand-written
+    // member — but this row's own edge is ours to clear.
+    const g = queueRowGesture({ ...base, chainAllScalar: false })
+    expect(g.draggable).toBe(true)
+    expect(g.reorderable).toBe(false)
+  })
+
+  it('refuses only the row whose OWN depends_on is a list, and says why', () => {
+    const g = queueRowGesture({ ...base, shape: 'list' })
+    expect(g.draggable).toBe(false)
+    expect(g.reorderable).toBe(false)
+    // A silent refusal reads as a broken board; the row has to say it.
+    expect(g.hint).toMatch(/hand-written depends_on/i)
+  })
+
+  it('drags a row whose shape is not yet known', () => {
+    // Unqueueing only ever UNSETS the row's own key, so an absent shape is no
+    // reason to withhold the gesture.
+    expect(queueRowGesture({ ...base, shape: undefined }).draggable).toBe(true)
+  })
+
+  it('takes no view on the head card, its column, or whose daemon owns it', () => {
+    // The signature is the proof: there is no parameter to pass any of it in.
+    // A remote-owned row drags like any other — `/felt-edit` forwards the write
+    // to the owning daemon — and an owner that is genuinely dead fails that
+    // forward and is reported then, by name.
+    expect(Object.keys(base).sort()).toEqual([
+      'canReorder',
+      'canUnqueue',
+      'chainAllScalar',
+      'queueLength',
+      'shape',
+    ])
+  })
+
+  it('goes inert, with a reason, when no sequence handler is wired', () => {
+    const g = queueRowGesture({ ...base, canReorder: false, canUnqueue: false })
+    expect(g.draggable).toBe(false)
+    expect(g.hint).toMatch(/read-only/i)
+  })
+
+  it('still drags when only the unqueue handler is wired', () => {
+    const g = queueRowGesture({ ...base, canReorder: false })
+    expect(g.draggable).toBe(true)
+    expect(g.reorderable).toBe(false)
   })
 })

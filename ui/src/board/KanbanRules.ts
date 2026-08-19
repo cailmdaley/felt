@@ -891,6 +891,91 @@ export function cardDragArms(opts: {
   return !opts.rowDragInFlight && !opts.startedInsidePeekList;
 }
 
+/** What a peek-list row's drag can do, and what to say on hover about it. */
+export interface QueueRowGesture {
+  /** May this row be picked up at all? */
+  draggable: boolean;
+  /** May it be dropped back into its own list to change the queue's order?
+   *  A strictly narrower permission than `draggable`. */
+  reorderable: boolean;
+  /** `title` text for the row — what the drag will do, or why there isn't one.
+   *  A row that cannot be dragged has to SAY so; a silent refusal reads as a
+   *  broken board, and the human tries again harder. */
+  hint: string;
+}
+
+/**
+ * May one row of a "+N queued" peek list be dragged, and where to?
+ *
+ * TWO PERMISSIONS, not one, and conflating them is what broke this:
+ *
+ *   • TAKE IT OUT of the queue (drop on a column, a section, Resting). This
+ *     clears exactly one `depends_on:` — the row's own — plus at most one
+ *     repair edge on its successor. So it is a fact about THE ROW'S OWN FIBER
+ *     and nothing else.
+ *   • REORDER it within the list. This rewrites the `depends_on:` of every
+ *     member the move steps over, so one hand-written list anywhere in the
+ *     chain takes the affordance away from the whole chain — the same rule the
+ *     stack drop follows, for the same reason: a fan-in someone assembled by
+ *     hand carries intent no drag can reconstruct.
+ *
+ * The narrower one used to gate the wider one, which meant a queue of ONE — or
+ * a queue with a single hand-written member anywhere in it — had no draggable
+ * rows at all, and the row that was perfectly free to leave simply did not
+ * move. Hence the signature: the row's own shape decides `draggable`, the
+ * chain's shape decides `reorderable`.
+ *
+ * NOTHING ABOUT THE HEAD CARD IS AN INPUT. Not its column, not its state, not
+ * whose daemon serves it. That is deliberate and it is why they are absent
+ * here rather than merely unused: a row is the fiber it names, and where the
+ * card it happens to hang off is sitting is not a fact about that fiber.
+ *
+ * Neither is ORIGIN. A remote-owned fiber drags like any other: `/felt-edit`
+ * routes the write to the owning daemon over the socket and refreshes the
+ * registry afterwards, so the board does not need to know who owns what to
+ * offer the gesture. An owner that is genuinely dead fails the forward, and
+ * THAT is reported when it happens — a real error naming a real host beats a
+ * pre-emptive refusal that guesses.
+ */
+export function queueRowGesture(opts: {
+  /** The ROW's own `depends_on:` shape. */
+  shape?: 'scalar' | 'list';
+  /** Members in the queue, the head excluded. */
+  queueLength: number;
+  /** Is every member of the chain scalar-shaped? */
+  chainAllScalar: boolean;
+  /** Is a reorder handler wired at all? */
+  canReorder: boolean;
+  /** Is an unqueue handler wired at all? */
+  canUnqueue: boolean;
+}): QueueRowGesture {
+  // A hand-written `depends_on:` LIST is the one honest refusal. Dropping the
+  // row would have to guess which of several edges the human meant to cut, and
+  // the list is the record of a decision no gesture can re-make.
+  if (opts.shape === 'list') {
+    return {
+      draggable: false,
+      reorderable: false,
+      hint: 'Waits on a hand-written depends_on: list — open it and edit that list to move it.',
+    };
+  }
+  const reorderable = opts.canReorder && opts.queueLength > 1 && opts.chainAllScalar;
+  if (!opts.canUnqueue && !reorderable) {
+    return {
+      draggable: false,
+      reorderable: false,
+      hint: 'This board is read-only for sequences right now.',
+    };
+  }
+  return {
+    draggable: true,
+    reorderable,
+    hint: reorderable
+      ? 'Drag to reorder the queue, or out to a column or Resting to take it out.'
+      : 'Drag it out to a column or Resting to take it out of the queue.',
+  };
+}
+
 /** How long the pointer must rest on a card before the card arms as a stack
  *  target. Long enough that crossing a card en route to a column never arms
  *  it, short enough to feel like the card answered you. */

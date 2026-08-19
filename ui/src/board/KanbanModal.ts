@@ -222,6 +222,17 @@ export class KanbanModal {
   private pollTimer: number | null = null
   private readonly pollIntervalMs = 15_000
   private lastFetchStartedAt: number | null = null
+  /**
+   * How many multi-write gestures are still landing.
+   *
+   * A COUNTER, not a flag: a gesture routinely nests (a queue row dropped on a
+   * column brackets its own writes and then hands off to `commitTransition`,
+   * which brackets its own), and the outer bracket releases the moment it hands
+   * off — so a flag would clear while the dispatch it delegated is still in
+   * flight, which is exactly the window the guard exists for. Only the poll
+   * reads it; the gesture's own refetch is a direct call and always runs.
+   */
+  private gestureDepth = 0
   /** Intermediate fiber-detail modal — one instance, re-used across opens. */
   private detailModal: FiberDetailModal | null = null
   private readonly surfaces: KanbanSurfaceRenderer
@@ -767,7 +778,28 @@ export class KanbanModal {
    * take precedence: the gesture lands the card where the user dropped
    * it AND fires the action that column means.
    */
-  private transition(card: KanbanCard, target: ColumnKind): void {
+  private transition(
+    card: KanbanCard,
+    target: ColumnKind,
+    /**
+     * For a gesture that has ALREADY painted its destination and is now
+     * delegating the lifecycle half here (the peek-list row dropped on a
+     * column). Two things have to be said, and both are about the same trap:
+     *
+     *  • `basis` — the response as it was BEFORE that paint. Every question
+     *    this method asks ("which column is it in now?", "does it need parking
+     *    on the desk?") is a question about where the card came FROM, and
+     *    `this.lastResponse` no longer knows: it already shows the card at its
+     *    destination. Asked against it, `fromKind === target` and the whole
+     *    transition early-returns with "already in In flight" — the write never
+     *    goes out and the optimistic card sits there as a lie.
+     *  • `skipOptimistic` — don't paint it a second time. Not merely redundant:
+     *    a second `applyOptimisticTransition` would lift the card from its NEW
+     *    surface and re-place it, and re-derive nothing useful.
+     */
+    opts: { basis?: KanbanResponse | null; skipOptimistic?: boolean } = {},
+  ): void {
+    const basis = opts.basis !== undefined ? opts.basis : this.lastResponse
     // A verdict on a card with a LIVE worker kills that worker (commitTransition
     // → killWorkerIfRunning), and it did so silently — one click on Compost and
     // a running session was gone, while "New session", which destroys less,
@@ -793,7 +825,7 @@ export class KanbanModal {
     // `idea` tag, `tempered`, standing-role review state, etc. — anything
     // the local rule misses (or drifts from the server) silently no-ops the
     // drag with a snap-back.
-    const fromKind = findCardColumn(this.lastResponse, card.id)
+    const fromKind = findCardColumn(basis, card.id)
     if (fromKind === target) {
       // Dropped back onto the column it already lives in — a no-op, but say so
       // rather than letting the drag feel ignored.
@@ -807,7 +839,7 @@ export class KanbanModal {
     // promote to Now (the "park on desk" half of the gesture), then fall
     // through to the lifecycle verb (the "act on it" half) — never early-return.
     const isNowColumn = target === 'drafts' || target === 'inFlight' || target === 'awaitingReview'
-    const resp = this.lastResponse
+    const resp = basis
     const onTimelineOrStash = !!resp && [
       ...resp.timeline.futureDated,
       ...resp.stash,
@@ -831,8 +863,10 @@ export class KanbanModal {
     // closedAt) self-corrects within one refetch. The slow part — a daemon
     // round-trip, a worker spawn for inFlight — no longer blocks the card
     // from moving.
-    const optimistic = applyOptimisticTransition(this.lastResponse, card.id, target)
-    if (optimistic) this.applyResponse(optimistic)
+    if (!opts.skipOptimistic) {
+      const optimistic = applyOptimisticTransition(basis, card.id, target)
+      if (optimistic) this.applyResponse(optimistic)
+    }
 
     // LEAVING RESTING MEANS LEAVING THE QUEUE. A dep-gated card dragged to a
     // working column is a person saying "not this one — this one now", and the
@@ -870,6 +904,11 @@ export class KanbanModal {
     needSurfaceShift: boolean,
     unstacks = false,
   ): Promise<void> {
+    // Held across the writes AND the trailing reconcile: the launch half can
+    // take seconds, and until the daemon has actually dispatched, the honest
+    // server answer is "this card is a draft" — true, and not what was asked
+    // for. The poll stays out until the refetch below settles it.
+    this.gestureDepth += 1
     try {
       // The unstack rides FIRST, before the lifecycle verb: the gate is what
       // would pull the card back, so clearing it is what makes the rest of the
@@ -929,9 +968,13 @@ export class KanbanModal {
       this.showBanner(`Couldn't move “${card.name}” to ${COLUMN_TITLES[target]}: ${msg}`, 'error')
       this.announce(`Move failed: ${msg}`)
     }
-    // Always refetch — server is the source of truth. Reconciles (or reverts)
-    // the optimistic placement.
-    await this.fetchAndRender()
+    try {
+      // Always refetch — server is the source of truth. Reconciles (or reverts)
+      // the optimistic placement.
+      await this.fetchAndRender()
+    } finally {
+      this.gestureDepth -= 1
+    }
   }
 
   /**
@@ -1116,6 +1159,18 @@ export class KanbanModal {
    * a column transitions, `now` surfaces, `stashed` keeps it at rest. The card
    * handed to those paths is a copy with the gate already cleared, so
    * `transition`'s own unstack does not fire a second, redundant write.
+   *
+   * THE DESTINATION IS PAINTED FIRST, BEFORE ANY WRITE. This gesture is three
+   * or four round trips deep — clear the row's edge, repair the successor's,
+   * transition, dispatch — and every stopping point between them is a state
+   * that is true of the store and false of what the human asked for. Left to
+   * render, they render: the card reached In flight, popped back to Drafts,
+   * and then launched, which is the board narrating its own plumbing. So the
+   * first frame after the drop is the ANSWER (gate cleared, card in the column
+   * it was dropped on), the writes run underneath it, and `gestureDepth` keeps
+   * the poll from painting anything in between. The reconcile at the end still
+   * owns the truth: a write that fails snaps the card back with a banner
+   * saying so, which is the one intermediate state worth seeing.
    */
   private async unqueueRow(
     fiberId: string,
@@ -1131,44 +1186,77 @@ export class KanbanModal {
       )
       return
     }
+    // The board as it stands BEFORE the optimistic paint. `transition` needs it
+    // to know where the card came from; see its `basis` parameter.
+    const before = this.lastResponse
+    this.gestureDepth += 1
     try {
-      // The row's own edge first, then the repair. In that order the queue is
-      // never observed with two members claiming the same position.
-      await this.postFeltEdit({ fiber_id: fiberId, origin: card.originId, unset: ['depends_on'] })
-      for (const w of splice) {
-        const successor = findCardById(this.lastResponse, w.fiberId)
-        await this.postFeltEdit({
-          fiber_id: w.fiberId,
-          origin: successor?.originId,
-          set: { depends_on: w.newDep },
-        })
+      const ungated = clearQueueGate(before, fiberId)
+      const painted = drop.column
+        ? (applyOptimisticTransition(ungated, fiberId, drop.column) ?? ungated)
+        : ungated
+      if (painted) this.applyResponse(painted)
+
+      try {
+        // The row's own edge first, then the repair. In that order the queue is
+        // never observed with two members claiming the same position.
+        await this.postFeltEdit({ fiber_id: fiberId, origin: card.originId, unset: ['depends_on'] })
+        for (const w of splice) {
+          const successor = findCardById(before, w.fiberId)
+          // The successor inherits the departing row's predecessor — but only
+          // if its `depends_on:` is a scalar we may rewrite. A hand-written
+          // LIST there is somebody's fan-in, and closing our gap by clobbering
+          // it would delete a decision to tidy up a chain. Leave it standing
+          // and say so: the row still leaves, the tail just keeps waiting on
+          // what it was told to wait on.
+          if (successor?.dependsOnShape === 'list') {
+            this.showBanner(
+              `“${card.name}” is out of the queue. “${successor.name}” waits on a hand-written depends_on list, so it was left as it is — edit that list if it should move up.`,
+              'info',
+            )
+            continue
+          }
+          await this.postFeltEdit({
+            fiber_id: w.fiberId,
+            origin: successor?.originId,
+            set: { depends_on: w.newDep },
+          })
+        }
+        this.announce(`“${card.name}” is out of the queue.`)
+      } catch (err: unknown) {
+        const msg = (err as { message?: string })?.message ?? String(err)
+        // Names the daemon's own message, which for an owner this desk cannot
+        // reach is the forward failing by name. That is the honest moment to
+        // report it — the gesture was offered, attempted, and refused by the
+        // machine that owns the file, not withheld on a guess about who owns
+        // what.
+        this.showBanner(`Couldn't take “${card.name}” out of the queue: ${msg}`, 'error')
+        await this.fetchAndRender()
+        return
       }
-      this.announce(`“${card.name}” is out of the queue.`)
-    } catch (err: unknown) {
-      const msg = (err as { message?: string })?.message ?? String(err)
-      this.showBanner(`Couldn't take “${card.name}” out of the queue: ${msg}`, 'error')
+      const released: KanbanCard = {
+        ...card,
+        depGated: false,
+        dependsOn: undefined,
+        dependsOnShape: undefined,
+      }
+      if (drop.column) {
+        // Already painted, and `before` is where the card actually came from.
+        this.transition(released, drop.column, { basis: before, skipOptimistic: true })
+        return
+      }
+      if (drop.horizon !== undefined) {
+        // Dropped back into Resting: out of the queue, but still put down. The
+        // horizon write is what keeps it there — without it, an ungated card
+        // would walk straight back onto the desk and the drop would read as
+        // ignored.
+        this.setSurface(released, drop.horizon)
+        return
+      }
       await this.fetchAndRender()
-      return
+    } finally {
+      this.gestureDepth -= 1
     }
-    const released: KanbanCard = {
-      ...card,
-      depGated: false,
-      dependsOn: undefined,
-      dependsOnShape: undefined,
-    }
-    if (drop.column) {
-      this.transition(released, drop.column)
-      return
-    }
-    if (drop.horizon !== undefined) {
-      // Dropped back into Resting: out of the queue, but still put down. The
-      // horizon write is what keeps it there — without it, an ungated card
-      // would walk straight back onto the desk and the drop would read as
-      // ignored.
-      this.setSurface(released, drop.horizon)
-      return
-    }
-    await this.fetchAndRender()
   }
 
   /** POST one frontmatter edit, owner-routed by `origin`, throwing the
@@ -2118,7 +2206,20 @@ export class KanbanModal {
       // stranding the drag horizon open across the top of the page. The drag is
       // seconds long and every drop refetches on landing, so nothing goes stale
       // for waiting.
-      if (this.dragSourceId !== null) return
+      //
+      // `isDragging()` rather than `dragSourceId`: a peek-list row drag
+      // deliberately never sets that field (it is the isolation mechanism that
+      // keeps a row from being read as a card), so the poll used to run right
+      // through a row drag — the one drag whose source node is guaranteed to be
+      // rebuilt, because the head card re-renders its own peek list.
+      if (this.surfaces.isDragging()) return
+      // AND NOT WHILE A GESTURE IS STILL LANDING. A drop that takes several
+      // writes — unqueue, then transition, then dispatch — passes through
+      // intermediate states that are true of the store and false of what the
+      // human asked for. A poll landing in that window paints one of them: the
+      // card reached In flight, popped back to Drafts, then launched. The
+      // gesture owns the board until its own refetch reconciles.
+      if (this.gestureDepth > 0) return
       // Hidden tabs stop polling; visible but unfocused tiled windows slow
       // down to the shared page-attention cadence.
       if (!shouldRunVisiblePoll(this.lastFetchStartedAt, Date.now(), this.pollIntervalMs)) return
@@ -2353,6 +2454,56 @@ function liftCardFromSurfaces(resp: KanbanResponse, cardId: string): {
     stash: drop(resp.stash),
     card,
   }
+}
+
+/**
+ * Optimistically release one card from its queue: the gate fields go, on
+ * whichever surface holds it. Returns a fresh response (the input is never
+ * mutated), or null when the card is absent.
+ *
+ * This is the half of "take it out of the queue" the OTHER optimistic
+ * relocators cannot express. They move a card between surfaces; the gate is a
+ * property of the card itself, and it is what the head's "+N queued" list is
+ * built from — so until it clears, the row the human just dragged is still
+ * sitting in the peek list they dragged it out of, and the card is still
+ * wearing the plum gated glyph. Clearing it first is what makes the very first
+ * frame after the drop agree with the gesture.
+ *
+ * Deliberately does NOT touch anyone else's `depends_on:`. The successor's
+ * repair edge is a real write with a real failure mode, and guessing it here
+ * would put a chain shape on screen that no document says yet.
+ */
+export function clearQueueGate(
+  resp: KanbanResponse | null,
+  cardId: string,
+): KanbanResponse | null {
+  if (!resp) return null
+  const { card, now, pinned, timeline, stash } = liftCardFromSurfaces(resp, cardId)
+  if (!card) return null
+  const released: KanbanCard = {
+    ...card,
+    depGated: false,
+    dependsOn: undefined,
+    dependsOnBlocking: undefined,
+    dependsOnShape: undefined,
+  }
+  const restore = (list: KanbanCard[], original: KanbanCard[]): KanbanCard[] =>
+    list === original ? list : [...list, released]
+  return withSurfaces(resp, {
+    now: {
+      drafts: restore(now.drafts, resp.now.drafts),
+      inFlight: restore(now.inFlight, resp.now.inFlight),
+      awaitingReview: restore(now.awaitingReview, resp.now.awaitingReview),
+    },
+    pinned: restore(pinned, resp.pinned),
+    timeline: {
+      ...timeline,
+      past: restore(timeline.past, resp.timeline.past),
+      futureDated: restore(timeline.futureDated, resp.timeline.futureDated),
+    },
+    stash: restore(stash, resp.stash),
+    temperedTotal: resp.temperedTotal,
+  })
 }
 
 /**
