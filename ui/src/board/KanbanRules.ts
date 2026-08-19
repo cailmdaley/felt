@@ -547,6 +547,322 @@ export function nextStandingLaunch(
   }
 }
 
+// ─── SEQUENCE GATING ──────────────────────────────────────────────────────
+//
+// `depends_on:` is a project-owned frontmatter field (felt does not interpret
+// it), and it says one thing: this card is the NEXT one, behind that one. The
+// board reads it as a sequence — a chain of cards where only the head is on
+// the desk and the rest wait their turn in Resting.
+//
+// Every rule below is a pure derivation over the feed. Nothing about a gate is
+// stored: when the dep tempers, the card returns to its natural column on the
+// very next poll because the derivation now answers differently. There is no
+// "ungate" write, no state to reconcile, and no way for the board to disagree
+// with the documents.
+
+/** What a dependency edge points at, as far as the gate is concerned. Only
+ *  `tempered` unlocks — the same rung `toCard` has always read. */
+export interface DepTarget {
+  tempered?: boolean;
+}
+
+/** How one card's `depends_on:` list resolved against the feed. */
+export interface DependencyResolution {
+  /** True when nothing KNOWN stands in the way. FAIL-OPEN: a dep id the feed
+   *  cannot resolve does not block — see `unresolved`. */
+  satisfied: boolean;
+  /** Deps that resolved to a real fiber that is not tempered yet. These are
+   *  the ones actually holding the card back. */
+  blocking: string[];
+  /** Dep ids nothing in the feed answers to — a typo, a fiber from a store
+   *  this board cannot see, or a rename. They are NOT treated as blocking:
+   *  hiding a card behind an id that resolves to nothing is how work
+   *  disappears with no way to find it. The card stays where it is and wears a
+   *  warning instead. (`felt check` is the place that scolds about it.) */
+  unresolved: string[];
+}
+
+/**
+ * Resolve a card's `depends_on:` against a lookup over the whole feed.
+ *
+ * `lookup` rather than a map so a caller can resolve by uid as well as by id
+ * without this module knowing how the feed is indexed.
+ */
+export function resolveDependencies(
+  dependsOn: readonly string[] | undefined,
+  lookup: (id: string) => DepTarget | undefined,
+): DependencyResolution {
+  const blocking: string[] = [];
+  const unresolved: string[] = [];
+  for (const id of dependsOn ?? []) {
+    const target = lookup(id);
+    if (target === undefined) unresolved.push(id);
+    else if (target.tempered !== true) blocking.push(id);
+  }
+  return { satisfied: blocking.length === 0, blocking, unresolved };
+}
+
+/** The shape the gate reads off a card. Structural, so the rules module keeps
+ *  owning no view types; `KanbanCard` satisfies it. */
+export interface DepGateCandidate {
+  status: string;
+  dependsOnSatisfied: boolean;
+  runningWorker?: string;
+}
+
+/**
+ * Does the dependency gate hold this card off the desk?
+ *
+ * Three exemptions, and each is a case where resting would LIE about the
+ * card:
+ *   • satisfied deps (or none)  → nothing to wait for.
+ *   • a closed card             → its lifecycle is over; a verdict pending in
+ *                                 Awaiting review is not "waiting on a dep",
+ *                                 and a tempered/composted card is history.
+ *   • a LIVE worker             → the thing is happening right now. Whatever
+ *                                 the frontmatter says, hiding a running
+ *                                 worker in Resting is the board disagreeing
+ *                                 with reality.
+ *
+ * Everything else — a draft, an armed oneshot, a scheduled role — rests until
+ * the dep tempers. This composes with `effectiveHorizon` by ADDITION, never by
+ * override: an explicitly stashed card rests because it was put down, a gated
+ * card rests because it is not its turn, and a card that is both rests once.
+ */
+export function depGated(card: DepGateCandidate): boolean {
+  if (card.dependsOnSatisfied) return false;
+  if (card.status === 'closed') return false;
+  if (card.runningWorker) return false;
+  return true;
+}
+
+/** A node in the dependency graph, as the reverse-edge builder needs it. */
+export interface DepEdgeNode {
+  id: string;
+  dependsOn?: readonly string[];
+}
+
+/**
+ * Reverse the dependency edges: id → the cards that name it in `depends_on:`.
+ *
+ * Forward edges are what the documents store ("I come after that one"); every
+ * question the board asks is the other direction ("what is queued behind me?"),
+ * so the reversal happens once, over the whole collection, and the chain
+ * walkers below read it. Dependents are sorted by id so a chain reads the same
+ * way on every poll — an order that reshuffles is an order nobody can aim at.
+ */
+export function buildDependents(nodes: readonly DepEdgeNode[]): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  for (const node of nodes) {
+    for (const dep of node.dependsOn ?? []) {
+      const list = out.get(dep);
+      if (list) list.push(node.id);
+      else out.set(dep, [node.id]);
+    }
+  }
+  for (const list of out.values()) list.sort();
+  return out;
+}
+
+/**
+ * Everything queued behind a card, transitively, in chain order.
+ *
+ * Breadth-first from the head, so the list reads the way the work will happen:
+ * the card that goes next first, then what goes after that. A `seen` set makes
+ * a cycle in hand-written frontmatter finite rather than fatal — the board
+ * draws what it can and moves on; `felt check` is where a cycle gets named.
+ * The head itself is never in the result.
+ */
+export function queuedBehind(
+  headId: string,
+  dependents: ReadonlyMap<string, readonly string[]>,
+): string[] {
+  const seen = new Set<string>([headId]);
+  const out: string[] = [];
+  let frontier = [...(dependents.get(headId) ?? [])];
+  while (frontier.length > 0) {
+    const next: string[] = [];
+    for (const id of frontier) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+      out.push(id);
+      next.push(...(dependents.get(id) ?? []));
+    }
+    frontier = next;
+  }
+  return out;
+}
+
+/**
+ * The END of the chain a card heads — where a newly-stacked card attaches.
+ *
+ * Dropping onto a card means "after this work", and if that card already has
+ * work queued behind it, "after" means after ALL of it. So the drop resolves
+ * to the DEEPEST node reachable through the reverse edges, and the new card
+ * depends on that one: A←B←C plus a dropped D becomes A←B←C←D, a queue rather
+ * than a fan-out nobody asked for.
+ *
+ * A fan-in that a human hand-wrote (two cards both depending on A) has no
+ * single tail; the deepest-then-first-in-chain-order rule picks one
+ * deterministically rather than refusing the gesture. Returns the head itself
+ * when nothing is queued behind it.
+ */
+export function chainTail(
+  headId: string,
+  dependents: ReadonlyMap<string, readonly string[]>,
+): string {
+  const seen = new Set<string>([headId]);
+  let tail = headId;
+  let frontier = [...(dependents.get(headId) ?? [])];
+  while (frontier.length > 0) {
+    const next: string[] = [];
+    let deepest: string | null = null;
+    for (const id of frontier) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+      if (deepest === null) deepest = id;
+      next.push(...(dependents.get(id) ?? []));
+    }
+    if (deepest !== null) tail = deepest;
+    frontier = next;
+  }
+  return tail;
+}
+
+/**
+ * Would stacking `sourceId` behind `targetId` close a loop?
+ *
+ * True when the target is the source itself, or is already somewhere in the
+ * queue behind the source — dropping a card onto its own descendant. The
+ * gesture refuses rather than writing frontmatter that would gate both cards
+ * forever with no way out but a text editor.
+ */
+export function stackWouldCycle(
+  sourceId: string,
+  targetId: string,
+  dependents: ReadonlyMap<string, readonly string[]>,
+): boolean {
+  if (sourceId === targetId) return true;
+  return queuedBehind(sourceId, dependents).includes(targetId);
+}
+
+/**
+ * The card's own hot zone for a stack drop — the inner fraction of its box.
+ *
+ * A card is a drop target for TWO different gestures: the column under it
+ * takes lifecycle drops (drag to In flight to dispatch, to Drafts to reopen),
+ * and the card itself takes sequence drops. Whichever claims the event wins,
+ * so a card that claimed every drop landing on it would silently eat the
+ * lifecycle gestures — a draft dropped on the In-flight column would stack
+ * instead of dispatch, which is a different thing than the one you aimed at.
+ *
+ * So the card claims only a DELIBERATE hit: release near its middle. The outer
+ * band is the column's, exactly as it was before sequences existed. The zone
+ * is also what the plum highlight tracks, so the promise and the behavior are
+ * the same rectangle.
+ */
+export function inStackHotZone(
+  rect: { left: number; top: number; width: number; height: number },
+  point: { x: number; y: number },
+  fraction = 0.6,
+): boolean {
+  if (rect.width <= 0 || rect.height <= 0) return false;
+  const marginX = (rect.width * (1 - fraction)) / 2;
+  const marginY = (rect.height * (1 - fraction)) / 2;
+  return (
+    point.x >= rect.left + marginX &&
+    point.x <= rect.left + rect.width - marginX &&
+    point.y >= rect.top + marginY &&
+    point.y <= rect.top + rect.height - marginY
+  );
+}
+
+/**
+ * Does the card claim this drag event, or does it fall through to the column?
+ *
+ * The whole discriminator, in one pure function, because it is the rule that
+ * keeps every pre-existing gesture working: a card claims ONLY a legal stack
+ * released in its hot zone. A refused stack claims nothing — no interception,
+ * no banner, no flash — it simply is not a stack, and the column handles the
+ * drop it always handled.
+ */
+export function stackClaimsDrop(
+  verdict: StackVerdict | null,
+  inHotZone: boolean,
+): boolean {
+  return verdict !== null && verdict.ok && inHotZone;
+}
+
+/** What the stack gesture needs to know about a card to rule on a drop.
+ *  `KanbanCard` satisfies it. */
+export interface StackCandidate {
+  id: string;
+  status: string;
+  shuttleKind?: string;
+  isCycle?: boolean;
+  dependsOn?: readonly string[];
+  dependsOnShape?: 'scalar' | 'list';
+}
+
+/** The gesture's ruling: where the dropped card attaches, or why it may not. */
+export type StackVerdict =
+  | { ok: true; tail: string }
+  | { ok: false; reason: string };
+
+/**
+ * Rule on "put this card behind that one" — the drag of one card onto another.
+ *
+ * The gesture writes exactly one scalar `depends_on:`, so it declines every
+ * case where one edge is not the whole truth:
+ *
+ *   • a hand-written LIST on the source — a fan-in someone assembled on
+ *     purpose; a drag cannot know which of those edges it was meant to replace.
+ *   • a CYCLE fiber on either end — a band of time is not a queue position.
+ *   • a closed source — its work is over; queueing it behind something would
+ *     be scheduling the past.
+ *   • a standing or pinned source — those run on a cron or from the strip, and
+ *     a dep would be dead frontmatter the dispatcher does not read (the same
+ *     ground as `setSurface`'s standing/pinned guards).
+ *   • a LOOP — the target already sits somewhere behind the source. Writing it
+ *     would gate both cards forever with no gesture that undoes it.
+ *
+ * On success the attach point is the chain's TAIL, not the card under the
+ * cursor: you aimed at a queue, and joining a queue means joining the end.
+ */
+export function stackDropVerdict(
+  source: StackCandidate,
+  target: StackCandidate,
+  dependents: ReadonlyMap<string, readonly string[]>,
+): StackVerdict {
+  if (source.id === target.id) return { ok: false, reason: 'a card cannot wait on itself' };
+  if (source.isCycle || target.isCycle) {
+    return { ok: false, reason: 'a cycle is a span of time, not a step in a queue' };
+  }
+  if (source.dependsOnShape === 'list') {
+    return { ok: false, reason: 'its depends_on was written by hand — edit it there' };
+  }
+  if (source.status === 'closed') return { ok: false, reason: 'it is already closed' };
+  if (source.shuttleKind === 'standing') {
+    return { ok: false, reason: 'a standing role runs on its schedule' };
+  }
+  if (source.shuttleKind === 'pinned') {
+    return { ok: false, reason: 'a pinned role waits on the strip, not in a queue' };
+  }
+  // The cycle test runs against the TAIL, because the tail is what the edge is
+  // actually written to. Testing the card under the cursor passes a real loop:
+  // with X waiting on both T and S, dropping S onto T resolves the tail to X —
+  // and `S.depends_on = X` closes S←X←S, gating both forever with no gesture
+  // that undoes it. Nothing about T said so.
+  const tail = chainTail(target.id, dependents);
+  if (stackWouldCycle(source.id, tail, dependents)) {
+    return { ok: false, reason: 'that would make a loop' };
+  }
+  if ((source.dependsOn ?? []).length === 1 && source.dependsOn?.[0] === tail) {
+    return { ok: false, reason: 'it is already queued behind that' };
+  }
+  return { ok: true, tail };
+}
+
 function normalizeHorizon(value: unknown): KanbanHorizon | undefined {
   if (typeof value !== 'string') return undefined;
   const trimmed = value.trim();

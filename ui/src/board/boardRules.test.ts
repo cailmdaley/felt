@@ -9,28 +9,36 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  buildDependents,
+  chainTail,
   classifyFiber,
   cycleMembership,
   cycleSpan,
   dueBouncesFromResting,
   effectiveHorizon,
   humanizeCron,
+  inStackHotZone,
   isCycleFiber,
   lensCycles,
+  queuedBehind,
   restingUntil,
+  stackClaimsDrop,
+  stackDropVerdict,
   upcomingCycleDropTargets,
 } from './KanbanRules.js'
-import type { CycleDropCandidate } from './KanbanRules.js'
+import type { CycleDropCandidate, StackCandidate } from './KanbanRules.js'
 import type { Fiber } from './KanbanFiber.js'
+import { mapFeltJsonToFiber } from './KanbanFiber.js'
 import type { CompositeEntry, CompositeFeed } from './KanbanComposite.js'
 import type { KanbanCard, KanbanResponse } from './KanbanTypes.js'
-import { buildKanbanResponseFromComposite, deriveCycleLens, isSleepingOnSchedule, restingCards } from './KanbanReadModel.js'
+import { buildKanbanResponseFromComposite, cardFromCompositeEntry, deriveCycleLens, isSleepingOnSchedule, restingCards } from './KanbanReadModel.js'
 import {
   clusterStashCards,
   findCardById,
   formatLaunchDay,
   humanizeIdleAge,
   KanbanSurfaceRenderer,
+  liveDependents,
   phasePillLabel,
   sortDatedByReturn,
   splitStashByReturn,
@@ -1443,5 +1451,337 @@ describe('Resting holds standing roles asleep between runs', () => {
     // two-list split rendered in Resting and then failed to resolve.
     const resp = boardOf([role({ shuttleSchedule: { expr: '0 9 1 1 *', tz: 'UTC' } })])
     expect(findCardById(resp, 'finances/cc-bills-monthly')?.id).toBe('finances/cc-bills-monthly')
+  })
+})
+
+// ─── SEQUENCE GATING ──────────────────────────────────────────────────────
+//
+// `depends_on:` read as a queue: the head is on the desk, everything behind it
+// rests until the head is tempered. Every rule here is a pure derivation, so
+// each test states a feed and reads a surface — there is no gate to set and
+// none to clear.
+
+describe('the sequence gate', () => {
+  const seqFeed = (...fibers: Fiber[]): CompositeFeed => ({
+    host: 'here',
+    entries: fibers.map((fiber) => ({
+      origin: 'here',
+      feltStore: '/store',
+      path: `.felt/${fiber.id}.md`,
+      fiber,
+    })),
+    origins: { here: { kind: 'local', stale: false, fiberCount: fibers.length } },
+  })
+  const step = (id: string, over: Partial<Fiber> = {}): Fiber => ({
+    id,
+    name: id,
+    status: 'open',
+    kind: 'task',
+    priority: 2,
+    createdAt: at0,
+    hasShuttleBlock: true,
+    shuttleKind: 'oneshot',
+    ...over,
+  })
+  const board = (...fibers: Fiber[]): KanbanResponse =>
+    buildKanbanResponseFromComposite(seqFeed(...fibers), { nowMs: NOW })
+
+  it('rests a card whose dependency is not tempered yet', () => {
+    const resp = board(step('a'), step('b', { dependsOn: ['a'] }))
+    expect(resp.now.drafts.map((c) => c.id)).toEqual(['a'])
+    expect(resp.stash.map((c) => c.id)).toEqual(['b'])
+    expect(resp.stash[0].depGated).toBe(true)
+    expect(resp.stash[0].dependsOnBlocking).toEqual(['a'])
+  })
+
+  it('releases the card the moment the dependency tempers — no stored state', () => {
+    const resp = board(
+      step('a', { status: 'closed', tempered: true, closedAt: at0 }),
+      step('b', { dependsOn: ['a'] }),
+    )
+    expect(resp.now.drafts.map((c) => c.id)).toEqual(['b'])
+    expect(resp.stash).toHaveLength(0)
+    expect(resp.now.drafts[0].depGated).toBeFalsy()
+  })
+
+  it('a COMPOSTED dependency still gates — only tempering is a verdict that unlocks', () => {
+    const resp = board(
+      step('a', { status: 'closed', tempered: false, closedAt: at0 }),
+      step('b', { dependsOn: ['a'] }),
+    )
+    expect(resp.stash.map((c) => c.id)).toEqual(['b'])
+  })
+
+  it('gates an armed oneshot the same way it gates a draft', () => {
+    const resp = board(step('a'), step('b', { status: 'active', dependsOn: ['a'] }))
+    expect(resp.now.inFlight).toHaveLength(0)
+    expect(resp.stash.map((c) => c.id)).toEqual(['b'])
+  })
+
+  it('never rests a card with a LIVE WORKER, whatever its deps say', () => {
+    const feed = seqFeed(step('a'), step('b', { status: 'active', dependsOn: ['a'] }))
+    feed.entries[1].runtime = { tmuxSession: 'shuttle-b' }
+    const resp = buildKanbanResponseFromComposite(feed, { nowMs: NOW })
+    expect(resp.now.inFlight.map((c) => c.id)).toEqual(['b'])
+    expect(resp.stash).toHaveLength(0)
+  })
+
+  it('never rests a CLOSED card — a pending verdict is not a queue position', () => {
+    const resp = board(step('a'), step('b', { status: 'closed', closedAt: at0, dependsOn: ['a'] }))
+    expect(resp.now.awaitingReview.map((c) => c.id)).toEqual(['b'])
+    expect(resp.stash).toHaveLength(0)
+  })
+
+  it('FAILS OPEN on a dep id nothing resolves to, and says so on the card', () => {
+    const resp = board(step('b', { dependsOn: ['typo/nope'] }))
+    expect(resp.now.drafts.map((c) => c.id)).toEqual(['b'])
+    expect(resp.stash).toHaveLength(0)
+    expect(resp.now.drafts[0].dependsOnUnresolved).toEqual(['typo/nope'])
+    expect(resp.now.drafts[0].dependsOnSatisfied).toBe(true)
+  })
+
+  it('gates on the resolvable dep even when a second one dangles', () => {
+    const resp = board(step('a'), step('b', { dependsOn: ['a', 'typo/nope'] }))
+    expect(resp.stash.map((c) => c.id)).toEqual(['b'])
+    expect(resp.stash[0].dependsOnBlocking).toEqual(['a'])
+    expect(resp.stash[0].dependsOnUnresolved).toEqual(['typo/nope'])
+  })
+
+  it('fails open on the LONE-CARD path, where there is no feed to resolve against', () => {
+    // `cardFromCompositeEntry` resolves against an empty map: every dep is
+    // unresolved there, and an unresolved dep must never hide a card.
+    const card = cardFromCompositeEntry(
+      { origin: 'here', feltStore: '/store', path: '.felt/b.md', fiber: step('b', { dependsOn: ['a'] }) },
+      NOW,
+    )
+    expect(card.dependsOnSatisfied).toBe(true)
+    expect(card.depGated).toBe(false)
+    expect(card.dependsOnUnresolved).toBeUndefined()
+  })
+
+  it('composes with horizon:stashed — a card that is both rests exactly once', () => {
+    const resp = board(step('a'), step('b', { dependsOn: ['a'], horizon: 'stashed' }))
+    expect(resp.stash.map((c) => c.id)).toEqual(['b'])
+    expect(resp.stash[0].effectiveHorizon).toBe('stashed')
+    expect(resp.stash[0].depGated).toBe(true)
+  })
+
+  it('an explicit stash still rests once its dep tempers — the two reasons are independent', () => {
+    const resp = board(
+      step('a', { status: 'closed', tempered: true, closedAt: at0 }),
+      step('b', { dependsOn: ['a'], horizon: 'stashed' }),
+    )
+    expect(resp.stash.map((c) => c.id)).toEqual(['b'])
+    expect(resp.stash[0].depGated).toBeFalsy()
+  })
+
+  it('a due: that has arrived does NOT lift the gate — a date cannot temper work', () => {
+    const resp = board(step('a'), step('b', { dependsOn: ['a'], due: dayFromNow(-1) }))
+    expect(resp.stash.map((c) => c.id)).toEqual(['b'])
+  })
+
+  it('keeps a gated card FINDABLE, so its drag out of Resting is not a no-op', () => {
+    const resp = board(step('a'), step('b', { dependsOn: ['a'] }))
+    expect(findCardById(resp, 'b')?.depGated).toBe(true)
+  })
+
+  it('resolves a dep written as a UID, where the poller and the checker resolve one', () => {
+    // The UI used to index by path id alone, so `depends_on: <ulid>` read as
+    // unresolved — fail-open, so the card sat cheerfully on the desk with a
+    // spurious warning while the daemon silently refused to launch it. The two
+    // sides must agree about what a dependency IS before they can agree about
+    // whether it is met.
+    const uid = '01KTCA2D1FGAJNHX5WKQ34BSZF'
+    const gated = board(step('a', { uid }), step('b', { dependsOn: [uid] }))
+    expect(gated.stash.map((c) => c.id)).toEqual(['b'])
+    expect(gated.stash[0].dependsOnUnresolved).toBeUndefined()
+
+    const released = board(
+      step('a', { uid, status: 'closed', tempered: true, closedAt: at0 }),
+      step('b', { dependsOn: [uid.toLowerCase()] }),
+    )
+    expect(released.now.drafts.map((c) => c.id)).toEqual(['b'])
+  })
+
+  it('does not print "blocked on:" on a closed card — a verdict is not a dependency', () => {
+    // Awaiting review waits on a HUMAN. The gate exempts closed cards, so an
+    // unsatisfied dep can still ride on one; the card must not claim to be
+    // blocked by it.
+    const resp = board(step('a'), step('b', { status: 'closed', closedAt: at0, dependsOn: ['a'] }))
+    const card = resp.now.awaitingReview[0]
+    expect(card.dependsOnSatisfied).toBe(false)
+    expect(card.status).toBe('closed')
+  })
+
+  it('reads a SCALAR depends_on and remembers the shape the gesture may rewrite', () => {
+    expect(mapFeltJsonToFiber({ id: 'b', name: 'b', status: 'open', depends_on: 'a' }))
+      .toMatchObject({ dependsOn: ['a'], dependsOnShape: 'scalar' })
+    expect(mapFeltJsonToFiber({ id: 'b', name: 'b', status: 'open', depends_on: [{ id: 'a' }] }))
+      .toMatchObject({ dependsOn: ['a'], dependsOnShape: 'list' })
+    expect(mapFeltJsonToFiber({ id: 'b', name: 'b', status: 'open' })?.dependsOnShape)
+      .toBeUndefined()
+  })
+})
+
+describe('chains, tails and the drop that authors them', () => {
+  const edges = (...pairs: [string, string[]][]): Map<string, string[]> =>
+    buildDependents(pairs.map(([id, dependsOn]) => ({ id, dependsOn })))
+  // A←B←C: B waits on A, C waits on B.
+  const chain = edges(['a', []], ['b', ['a']], ['c', ['b']])
+  const card = (id: string, over: Partial<StackCandidate> = {}): StackCandidate =>
+    ({ id, status: 'open', ...over })
+
+  it('reverses the forward edges, deterministically ordered', () => {
+    const fanOut = edges(['a', []], ['z', ['a']], ['b', ['a']])
+    expect(fanOut.get('a')).toEqual(['b', 'z'])
+  })
+
+  it('counts the WHOLE chain behind a head, in chain order', () => {
+    expect(queuedBehind('a', chain)).toEqual(['b', 'c'])
+    expect(queuedBehind('b', chain)).toEqual(['c'])
+    expect(queuedBehind('c', chain)).toEqual([])
+  })
+
+  it('resolves the tail transitively, so a drop APPENDS instead of forking', () => {
+    expect(chainTail('a', chain)).toBe('c')
+    expect(chainTail('c', chain)).toBe('c')
+    expect(chainTail('lonely', chain)).toBe('lonely')
+  })
+
+  it('survives a cycle in hand-written frontmatter rather than hanging on it', () => {
+    const loop = edges(['a', ['b']], ['b', ['a']])
+    expect(queuedBehind('a', loop)).toEqual(['b'])
+    expect(chainTail('a', loop)).toBe('b')
+  })
+
+  it('stacks a dropped card onto the chain TAIL, not the card under the cursor', () => {
+    expect(stackDropVerdict(card('d'), card('a'), chain)).toEqual({ ok: true, tail: 'c' })
+  })
+
+  it('refuses a drop that would close a loop', () => {
+    expect(stackDropVerdict(card('a'), card('c'), chain).ok).toBe(false)
+    expect(stackDropVerdict(card('a'), card('a'), chain).ok).toBe(false)
+  })
+
+  it('refuses to rewrite a hand-written depends_on LIST', () => {
+    expect(stackDropVerdict(card('d', { dependsOnShape: 'list' }), card('a'), chain).ok).toBe(false)
+    expect(stackDropVerdict(card('d', { dependsOnShape: 'scalar' }), card('a'), chain).ok).toBe(true)
+  })
+
+  it('refuses the sources a sequence position would be dead frontmatter on', () => {
+    expect(stackDropVerdict(card('d', { status: 'closed' }), card('a'), chain).ok).toBe(false)
+    expect(stackDropVerdict(card('d', { shuttleKind: 'standing' }), card('a'), chain).ok).toBe(false)
+    expect(stackDropVerdict(card('d', { shuttleKind: 'pinned' }), card('a'), chain).ok).toBe(false)
+    expect(stackDropVerdict(card('d', { isCycle: true }), card('a'), chain).ok).toBe(false)
+    expect(stackDropVerdict(card('d'), card('a', { isCycle: true }), chain).ok).toBe(false)
+  })
+
+  it('refuses the FAN-IN loop, because the edge is written to the TAIL', () => {
+    // X waits on both T and S. Dropping S onto T resolves the tail to X, so
+    // the edge would be S → X — and X already waits on S. Nothing about T
+    // said so, which is why the cycle test has to run against the tail.
+    const fanIn = edges(['t', []], ['s', []], ['x', ['t', 's']])
+    expect(chainTail('t', fanIn)).toBe('x')
+    expect(stackDropVerdict(card('s'), card('t'), fanIn)).toEqual({
+      ok: false,
+      reason: 'that would make a loop',
+    })
+  })
+
+  it('refuses a drop that would rewrite the edge the card already has', () => {
+    expect(stackDropVerdict(card('c', { dependsOn: ['b'] }), card('b'), chain).ok).toBe(false)
+  })
+})
+
+describe('a card claims a drop only when it really is a stack', () => {
+  // The invariant this protects: every lifecycle drag that worked before
+  // sequences existed still works when released over a card. A card that
+  // claimed every drop landing on it would turn "drag to In flight" into
+  // "stack behind that one" — a different thing than the one you aimed at.
+  //
+  // The claim decision is tested as the pure function it was extracted into.
+  // The board's own test harness stubs `document` with a fake element whose
+  // `addEventListener` is a no-op (there is no jsdom in this suite), so a true
+  // event-propagation test is not available here.
+  const rect = { left: 0, top: 0, width: 100, height: 100 }
+  const ok = { ok: true, tail: 'a' } as const
+  const no = { ok: false, reason: 'nope' } as const
+
+  it('marks the inner zone and only the inner zone', () => {
+    // 60% of a 100x100 box: the inner square from 20 to 80 on both axes.
+    expect(inStackHotZone(rect, { x: 50, y: 50 })).toBe(true)
+    expect(inStackHotZone(rect, { x: 25, y: 75 })).toBe(true)
+    expect(inStackHotZone(rect, { x: 15, y: 50 })).toBe(false)
+    expect(inStackHotZone(rect, { x: 50, y: 95 })).toBe(false)
+    expect(inStackHotZone(rect, { x: 0, y: 0 })).toBe(false)
+    expect(inStackHotZone({ left: 0, top: 0, width: 0, height: 0 }, { x: 0, y: 0 })).toBe(false)
+  })
+
+  it('claims a legal stack released in the hot zone', () => {
+    expect(stackClaimsDrop(ok, true)).toBe(true)
+  })
+
+  it('lets a legal stack released on the OUTER band fall through to the column', () => {
+    expect(stackClaimsDrop(ok, false)).toBe(false)
+  })
+
+  it('NEVER claims a refused stack — the column keeps the gesture it always had', () => {
+    expect(stackClaimsDrop(no, true)).toBe(false)
+    expect(stackClaimsDrop(no, false)).toBe(false)
+  })
+
+  it('claims nothing when there is no verdict to make', () => {
+    expect(stackClaimsDrop(null, true)).toBe(false)
+  })
+})
+
+describe('the queue counts only work that is actually held', () => {
+  const cardOf = (id: string, over: Partial<KanbanCard> = {}): KanbanCard => ({
+    id,
+    name: id,
+    path: `.felt/${id}.md`,
+    originId: 'local',
+    status: 'open',
+    createdAt: at0,
+    dependsOnSatisfied: true,
+    effectiveHorizon: 'now',
+    drifted: false,
+    isCycle: false,
+    cycleStart: null,
+    ...over,
+  })
+  const respOf = (...cards: KanbanCard[]): KanbanResponse => ({
+    feltHost: 'here',
+    now: {
+      drafts: cards.filter((c) => c.status === 'open'),
+      inFlight: [],
+      awaitingReview: [],
+    },
+    timeline: { past: cards.filter((c) => c.status === 'closed'), futureDated: [] },
+    stash: [],
+    pinned: [],
+    cycles: [],
+    totals: { drafts: 0, inFlight: 0, awaitingReview: 0, past: 0, futureDated: 0, stash: 0, pinned: 0 },
+    temperedTotal: 0,
+    staleness: {},
+    generatedAt: NOW,
+  })
+
+  it('shows nothing behind a head whose followers are all tempered', () => {
+    const resp = respOf(
+      cardOf('a'),
+      cardOf('b', { status: 'closed', tempered: true, closedAt: at0, dependsOn: ['a'] }),
+      cardOf('c', { status: 'closed', tempered: false, closedAt: at0, dependsOn: ['a'] }),
+    )
+    expect(queuedBehind('a', liveDependents(resp))).toEqual([])
+  })
+
+  it('still counts the followers that are genuinely waiting', () => {
+    const resp = respOf(
+      cardOf('a'),
+      cardOf('b', { status: 'closed', tempered: true, closedAt: at0, dependsOn: ['a'] }),
+      cardOf('d', { dependsOn: ['a'] }),
+    )
+    expect(queuedBehind('a', liveDependents(resp))).toEqual(['d'])
   })
 })

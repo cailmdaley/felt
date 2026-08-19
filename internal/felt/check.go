@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -40,6 +42,7 @@ func (i CheckIssue) String() string {
 func Check(felts []*Felt, external *ExternalRefs) []CheckIssue {
 	issues := checkNativeMetadata(felts)
 	issues = append(issues, checkRelationshipIntegrity(felts, external)...)
+	issues = append(issues, checkDependsOn(felts, external)...)
 
 	sort.Slice(issues, func(i, j int) bool {
 		if issues[i].FiberID != issues[j].FiberID {
@@ -271,6 +274,142 @@ func checkRelationshipIntegrity(felts []*Felt, external *ExternalRefs) []CheckIs
 		return nil
 	})
 	return issues
+}
+
+// checkDependsOn validates the project-owned `depends_on` frontmatter field:
+// every fiber id it names must resolve to a fiber in the store (or, quietly,
+// into the enclosing store — same rule as body/data-flow references), and
+// every entry must have one of the shapes ALL THREE readers accept — this
+// checker, the Elixir poller (lib/shuttle/poller.ex normalize_deps/1 +
+// dep_id/1) and the board's TS parser (ui/src/board/KanbanFiber.ts):
+//
+//	depends_on: some/fiber      a bare scalar id
+//	depends_on: [a, b]          a list of ids
+//	depends_on: [{id: a}]       a list of {id: <fiber-id>} maps
+//
+// and nothing else. An empty `depends_on:` (null) is absence, not a
+// dependency. Anything outside the grammar is reported as malformed rather
+// than silently ignored, since the poller would treat it as an unsatisfiable
+// dependency and the fiber would never dispatch.
+func checkDependsOn(felts []*Felt, external *ExternalRefs) []CheckIssue {
+	ids := make([]string, 0, len(felts))
+	byUID := make(map[string]*Felt, len(felts))
+	for _, f := range felts {
+		ids = append(ids, f.ID)
+		if f.UID != "" {
+			byUID[strings.ToLower(f.UID)] = f
+		}
+	}
+	resolver := newScopedIDResolverIn(ids, external)
+
+	var issues []CheckIssue
+	for _, f := range felts {
+		node := extraFieldNode(f.ExtraFields, "depends_on")
+		if node == nil {
+			continue
+		}
+		refs, malformed := dependsOnEntries(node)
+		for _, m := range malformed {
+			issues = append(issues, CheckIssue{
+				Level:   CheckLevelError,
+				FiberID: f.ID,
+				Path:    "frontmatter.depends_on",
+				Message: fmt.Sprintf("malformed depends_on entry: %s", m),
+			})
+		}
+		for _, ref := range refs {
+			if dependsOnRefResolves(resolver, byUID, f.ID, ref) {
+				continue
+			}
+			issues = append(issues, CheckIssue{
+				Level:   CheckLevelError,
+				FiberID: f.ID,
+				Path:    "frontmatter.depends_on",
+				Message: fmt.Sprintf("dangling depends_on reference %q", ref),
+			})
+		}
+	}
+	return issues
+}
+
+// dependsOnEntries extracts candidate fiber-id strings from a depends_on
+// node, per the grammar on checkDependsOn: a bare string scalar, or a
+// sequence whose items are each a bare string scalar or a mapping with a
+// string "id" key. Null is absence. Anything else — a non-string scalar, a
+// TOP-LEVEL mapping, a sequence item that is neither a scalar nor an "id"
+// mapping, a mapping entry missing "id" or with a non-string "id" — is
+// reported back as malformed instead of silently dropped.
+func dependsOnEntries(node *yaml.Node) (refs []string, malformed []string) {
+	switch node.Kind {
+	case yaml.ScalarNode:
+		if node.Tag == "!!null" {
+			// `depends_on:` with nothing after it is ABSENCE, not a
+			// dependency — a blank line is not a claim about ordering. Both
+			// other readers agree: the poller normalizes nil to no deps and
+			// the board's parser ignores it, so complaining here would be the
+			// checker inventing a rule of its own.
+			return nil, nil
+		}
+		if node.Tag == "!!str" {
+			refs = append(refs, node.Value)
+		} else {
+			malformed = append(malformed, fmt.Sprintf("depends_on must be a fiber id, id list, or {id: ...} entries, got %q", node.Value))
+		}
+	case yaml.SequenceNode:
+		for i, item := range node.Content {
+			if item == nil {
+				continue
+			}
+			switch item.Kind {
+			case yaml.ScalarNode:
+				if item.Tag == "!!str" {
+					refs = append(refs, item.Value)
+				} else {
+					malformed = append(malformed, fmt.Sprintf("entry %d is not a fiber id: %q", i, item.Value))
+				}
+			case yaml.MappingNode:
+				idNode := mappingValueNode(item, "id")
+				if idNode == nil || idNode.Kind != yaml.ScalarNode || idNode.Tag != "!!str" || strings.TrimSpace(idNode.Value) == "" {
+					malformed = append(malformed, fmt.Sprintf("entry %d has no string \"id\" key", i))
+					continue
+				}
+				refs = append(refs, idNode.Value)
+			default:
+				malformed = append(malformed, fmt.Sprintf("entry %d is neither a fiber id nor an {id: ...} mapping", i))
+			}
+		}
+	// NOTE the shape that is NOT here: a TOP-LEVEL `depends_on: {id: …}`. It
+	// looks reasonable and no reader honors it — the board's parser ignores a
+	// bare mapping, and the poller iterates it as {key, value} tuples that
+	// `dep_id/1` answers nil for, so the fiber is gated forever with nothing
+	// on screen to say why. Blessing it here was the checker promising a
+	// contract the runtime does not keep; it is malformed, and the default
+	// branch says so.
+	default:
+		malformed = append(malformed, "depends_on must be a fiber id, id list, or {id: ...} entries")
+	}
+	return refs, malformed
+}
+
+// dependsOnRefResolves reports whether ref names a fiber this store (or its
+// enclosing store) can see. It reuses the same scoped-id resolution `felt
+// show` and body-reference checking use — path ids, slugs, and basename
+// rescue all apply — plus an exact-UID fallback for the ULID-shaped id form,
+// since depends_on may name a fiber by its intrinsic uid rather than its
+// path/slug.
+func dependsOnRefResolves(resolver *scopedIDResolver, byUID map[string]*Felt, scopeID, ref string) bool {
+	if _, ok, err := resolver.resolve(scopeID, ref); ok && err == nil {
+		return true
+	} else if errors.Is(err, ErrExternalReference) {
+		// Same silence as a body reference resolving into the enclosing
+		// store: not visible here, but not broken.
+		return true
+	}
+	if LooksLikeUID(ref) {
+		_, ok := byUID[strings.ToLower(ref)]
+		return ok
+	}
+	return false
 }
 
 func hasFrontmatterElement(f *Felt, id string) bool {

@@ -42,7 +42,29 @@ export interface KanbanCard {
   modifiedAt?: string
   tempered?: boolean
   dependsOn?: string[]
+  /**
+   * True when nothing KNOWN blocks this card — every dep resolved and tempered,
+   * or there are no deps. Fail-open: a dep id the feed cannot resolve does not
+   * make this false (see `dependsOnUnresolved`).
+   */
   dependsOnSatisfied: boolean
+  /** How `depends_on:` was written — `scalar` (one bare id) or `list`. The
+   *  drag gestures author and clear scalars only. */
+  dependsOnShape?: 'scalar' | 'list'
+  /** Resolved deps that are not tempered yet — what the card is actually
+   *  waiting on, and what the "waiting on:" line names. */
+  dependsOnBlocking?: string[]
+  /** Dep ids nothing in the feed answers to. The card is NOT hidden for these
+   *  (fail-open); it wears a warning badge so the dangling reference is
+   *  visible rather than silently load-bearing. */
+  dependsOnUnresolved?: string[]
+  /**
+   * True when the dependency gate is what puts this card in Resting — it has
+   * unfinished work ahead of it and no live worker. Derived fresh on every
+   * poll from the feed (`depGated`), never stored: when the dep tempers the
+   * card is simply not gated any more and returns to its own column.
+   */
+  depGated?: boolean
   /** When set, a Shuttle worker is currently running for this fiber. */
   runningWorker?: string
   /**

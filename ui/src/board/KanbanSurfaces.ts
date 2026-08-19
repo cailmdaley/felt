@@ -15,8 +15,17 @@ import type {
   KanbanResponse,
 } from './KanbanTypes.js'
 import { isAgentCard } from './KanbanModalShared.js'
-import { humanizeCron, lensCycles, upcomingCycleDropTargets } from './KanbanRules.js'
-import type { CycleDropTarget, CycleLensChip } from './KanbanRules.js'
+import {
+  buildDependents,
+  humanizeCron,
+  inStackHotZone,
+  lensCycles,
+  queuedBehind,
+  stackClaimsDrop,
+  stackDropVerdict,
+  upcomingCycleDropTargets,
+} from './KanbanRules.js'
+import type { CycleDropTarget, CycleLensChip, StackVerdict } from './KanbanRules.js'
 import { deriveCycleLens, isSleepingOnSchedule } from './KanbanReadModel.js'
 import type { CycleLens } from './KanbanReadModel.js'
 
@@ -142,6 +151,10 @@ interface KanbanSurfaceRendererOptions {
   /** Reshape a fiber to a resting `kind:pinned` role — the drag-onto-the-
    *  Pinned-strip gesture. The off-the-shelf twin of `setSurface`/`transition`. */
   pin: (card: KanbanCard) => void | Promise<void>
+  /** Author a sequence edge — `card.depends_on = tailId`, the card-onto-card
+   *  drop. The renderer has already ruled the drop legal (`stackDropVerdict`)
+   *  and resolved the chain tail. */
+  stack?: (card: KanbanCard, tailId: string) => void | Promise<void>
   openDetail: (card: KanbanCard) => void
   openWorker?: (tmuxSessionName: string, shuttleHost?: string) => void
   /** Release the boot quarantine on a card's owning host — the `⏹︎ held` →
@@ -171,6 +184,7 @@ export class KanbanSurfaceRenderer {
     opts?: { cold?: boolean; due?: string | null },
   ) => void | Promise<void>
   private readonly pin: (card: KanbanCard) => void | Promise<void>
+  private readonly stack?: (card: KanbanCard, tailId: string) => void | Promise<void>
   private readonly openDetail: (card: KanbanCard) => void
   private readonly openWorker?: (tmuxSessionName: string, shuttleHost?: string) => void
   private readonly releaseQuarantine?: (shuttleHost?: string) => void | Promise<void>
@@ -192,6 +206,11 @@ export class KanbanSurfaceRenderer {
   /** The offscreen node handed to `setDragImage`, kept only until the drag
    *  ends (the browser needs it alive for the snapshot, not after). */
   private dragGhostEl: HTMLElement | null = null
+  /** Reverse dependency edges for the response currently on screen, built once
+   *  per response rather than once per card. Keyed by the response object
+   *  itself, so a new poll rebuilds and a re-render does not. */
+  private dependentsFor: KanbanResponse | null = null
+  private dependentsMap: Map<string, string[]> = new Map()
 
   constructor(options: KanbanSurfaceRendererOptions) {
     this.getDragSourceId = options.getDragSourceId
@@ -201,6 +220,7 @@ export class KanbanSurfaceRenderer {
     this.transition = options.transition
     this.setSurface = options.setSurface
     this.pin = options.pin
+    this.stack = options.stack
     this.openDetail = options.openDetail
     this.openWorker = options.openWorker
     this.releaseQuarantine = options.releaseQuarantine
@@ -884,6 +904,7 @@ export class KanbanSurfaceRenderer {
     el.setAttribute('aria-label', card.name)
 
     if (!isStale) this.installDraggable(el, card, false)
+    this.installStackTarget(el, card)
 
     const glyph = document.createElement('span')
     glyph.className = 'kbn-cluster-item-glyph'
@@ -903,7 +924,25 @@ export class KanbanSurfaceRenderer {
     // The day comes from `nextLaunchAt`, the cron's next occurrence (an INSTANT,
     // so it is formatted from the instant, not read as a civil day). A role
     // whose schedule will not parse simply shows no chip rather than a lie.
-    if (sleeping) {
+    // GATED BY SEQUENCE — it is here because it is not its turn, and that
+    // outranks the other two ways of coming back: this card returns when the
+    // work ahead of it is tempered, not on a day. The chip names what it is
+    // behind, so Resting never holds a card whose reason for being there is
+    // invisible. (Checked first: a gated card may also carry a `due:`, and
+    // "wakes Tuesday" would be a promise the gate does not make.)
+    if (card.depGated) {
+      const blocking = card.dependsOnBlocking ?? card.dependsOn ?? []
+      const names = blocking.map((id) => findCardById(this.getLastResponse(), id)?.name ?? id)
+      const chip = document.createElement('span')
+      chip.className = 'kbn-cluster-item-wakes kbn-cluster-item-gated'
+      chip.textContent = names.length === 1 ? `after ${names[0]}` : `after ${names.length} others`
+      chip.title =
+        `Waiting on ${names.join(', ')} — it returns to the desk when that is tempered. ` +
+        'Drag it up to Now to unstack it.'
+      el.append(chip)
+      el.title = `${card.name} — after ${names.join(', ')}`
+      this.renderQueuedChip(card, el)
+    } else if (sleeping) {
       const returns = card.nextLaunchAt ? formatLaunchDay(card.nextLaunchAt) : null
       const schedule = humanizeCron(card.shuttleSchedule) ?? card.shuttleSchedule
       const chip = document.createElement('span')
@@ -1121,6 +1160,10 @@ export class KanbanSurfaceRenderer {
     }
 
     if (!isStale) this.installDraggable(el, card, true)
+    // A card is also a DROP TARGET: dropping another card on it stacks that
+    // one behind this one. Installed even on a stale card — the sequence write
+    // is against the DROPPED card's owner, not this one's.
+    this.installStackTarget(el, card)
 
     const headerRow = document.createElement('div')
     headerRow.className = 'kbn-card-header'
@@ -1310,13 +1353,37 @@ export class KanbanSurfaceRenderer {
       })
       meta.append(w)
     }
+    // "+N queued" — this card heads a sequence. It sits in the meta row with
+    // the other chips, because that is what it is: a fact about the card, and
+    // one you read alongside its date and its actor.
+    this.renderQueuedChip(card, meta)
     el.append(meta)
 
-    if (kind === 'inFlight' && !card.dependsOnSatisfied) {
+    // A card still on a working column while unsatisfied is an ARMED oneshot
+    // waiting on the dispatcher's dep check (the gate rests the rest), so it
+    // says what it is waiting for. Named from `dependsOnBlocking`, not the raw
+    // list, so a dep that is already tempered is not reported as holding it.
+    // Never on a CLOSED card: an awaiting-review card is waiting on a human,
+    // not on a dependency, and a tempered one is history. Only a card still on
+    // a working column — an armed oneshot the gate left in place — is blocked.
+    if (!card.dependsOnSatisfied && card.status !== 'closed') {
       const block = document.createElement('div')
       block.className = 'kbn-card-blocked'
-      block.textContent = `blocked on: ${(card.dependsOn ?? []).join(', ')}`
+      block.textContent = `blocked on: ${(card.dependsOnBlocking ?? card.dependsOn ?? []).join(', ')}`
       el.append(block)
+    }
+
+    // A dep id that resolves to nothing. It does NOT gate (fail open), so the
+    // only way it can be seen is to say so on the card — otherwise a typo
+    // reads as a satisfied dependency and the sequence silently isn't one.
+    if (card.dependsOnUnresolved?.length) {
+      const warn = document.createElement('div')
+      warn.className = 'kbn-card-depwarn'
+      warn.textContent = `unresolved dep: ${card.dependsOnUnresolved.join(', ')}`
+      warn.title =
+        'This id matches no fiber the board can see, so it is not holding the card back. ' +
+        'Fix the reference or remove it — `felt check` names it too.'
+      el.append(warn)
     }
 
     if (isStale) {
@@ -1337,6 +1404,125 @@ export class KanbanSurfaceRenderer {
     })
 
     return el
+  }
+
+  /**
+   * Reverse dependency edges over every card the board is holding — who is
+   * queued behind whom. Rebuilt only when the response object changes.
+   */
+  private dependents(): Map<string, string[]> {
+    const resp = this.getLastResponse()
+    if (resp === this.dependentsFor) return this.dependentsMap
+    this.dependentsFor = resp
+    this.dependentsMap = liveDependents(resp)
+    return this.dependentsMap
+  }
+
+  /**
+   * The "+N queued" affordance: the head of a chain says how much is waiting
+   * behind it, and clicking it reveals the names in chain order, in place.
+   *
+   * N is the WHOLE chain, not the immediate dependents — "3 queued" on a card
+   * that has one card behind it which has two behind that is the honest count
+   * of work this card is holding up. The reveal is a list of names, not a
+   * modal: you are checking what is behind the card you are looking at, and
+   * leaving the board to do it would lose the thing you were comparing it to.
+   */
+  private renderQueuedChip(card: KanbanCard, host: HTMLElement): void {
+    const queued = queuedBehind(card.id, this.dependents())
+    if (queued.length === 0) return
+
+    const resp = this.getLastResponse()
+    const names = queued.map((id) => findCardById(resp, id)?.name ?? id)
+
+    const chip = document.createElement('button')
+    chip.type = 'button'
+    chip.className = 'kbn-card-queued'
+    chip.textContent = `+${queued.length} queued`
+    chip.setAttribute('aria-expanded', 'false')
+    chip.setAttribute(
+      'aria-label',
+      `${queued.length} card${queued.length === 1 ? '' : 's'} queued behind ${card.name} — show them`,
+    )
+    chip.title = `Waiting on this one, in order: ${names.join(' → ')}`
+
+    const list = document.createElement('ol')
+    list.className = 'kbn-card-queued-list'
+    list.hidden = true
+    for (const name of names) {
+      const li = document.createElement('li')
+      li.textContent = name
+      list.append(li)
+    }
+    chip.addEventListener('click', (e) => {
+      e.stopPropagation()
+      list.hidden = !list.hidden
+      chip.setAttribute('aria-expanded', String(!list.hidden))
+    })
+    host.append(chip)
+    host.append(list)
+  }
+
+  /**
+   * Make a card a STACK TARGET: dropping another card on it means "this one
+   * goes after that one".
+   *
+   * The handler claims the event (`stopPropagation`) whenever the drop is a
+   * legal stack, so a card-onto-card gesture inside a column reads as sequence
+   * rather than falling through to the column's lifecycle transition. An
+   * ILLEGAL stack is claimed too — a refused drop must say why (a flash plus a
+   * banner), never quietly do a different thing than the one you aimed at.
+   * With no drag in progress, or no `stack` wired, nothing is intercepted and
+   * the column keeps every gesture it had.
+   */
+  private installStackTarget(el: HTMLElement, target: KanbanCard): void {
+    if (!this.stack) return
+    const verdictFor = (): StackVerdict | null => {
+      const sourceId = this.getDragSourceId()
+      if (!sourceId || sourceId === target.id) return null
+      const source = findCardById(this.getLastResponse(), sourceId)
+      if (!source) return null
+      return stackDropVerdict(source, target, this.dependents())
+    }
+    const claims = (e: DragEvent): boolean =>
+      stackClaimsDrop(
+        verdictFor(),
+        inStackHotZone(el.getBoundingClientRect(), { x: e.clientX, y: e.clientY }),
+      )
+    const clear = (): void => el.classList.remove('kbn-card-stack-target')
+    el.addEventListener('dragover', (e) => {
+      // Not claiming means not touching: no preventDefault, no
+      // stopPropagation, no highlight. The column's own dragover then runs on
+      // the bubble and the drop lands where it always did.
+      if (!claims(e)) {
+        clear()
+        return
+      }
+      e.preventDefault()
+      e.stopPropagation()
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
+      el.classList.add('kbn-card-stack-target')
+    })
+    el.addEventListener('dragleave', (e) => {
+      if (e.relatedTarget && el.contains(e.relatedTarget as Node)) return
+      clear()
+    })
+    el.addEventListener('drop', (e) => {
+      const verdict = verdictFor()
+      if (!claims(e)) {
+        clear()
+        return
+      }
+      e.preventDefault()
+      e.stopPropagation()
+      const sourceId = this.getDragSourceId()
+      clear()
+      this.setDragSourceId(null)
+      this.stopDragAutoScroll()
+      const source = sourceId ? findCardById(this.getLastResponse(), sourceId) : null
+      if (!source || !verdict?.ok) return
+      void this.stack?.(source, verdict.tail)
+    })
   }
 
   private installDraggable(el: HTMLElement, card: KanbanCard, includePlainText: boolean): void {
@@ -1794,6 +1980,46 @@ export function findCardColumn(resp: KanbanResponse | null, id: string): ColumnK
     if (c.id === id) return c.tempered === false ? 'composted' : 'tempered'
   }
   return null
+}
+
+/**
+ * Every card the response holds, once each — the collection the dependency
+ * graph is built over. Deliberately the same lists `findCardById` searches: a
+ * card that can be found must also be able to appear in a chain, or "+N
+ * queued" would count differently from what the peek can name.
+ */
+export function boardCards(resp: KanbanResponse | null): KanbanCard[] {
+  if (!resp) return []
+  const seen = new Set<string>()
+  const out: KanbanCard[] = []
+  for (const list of [
+    ...NOW_COLUMN_ORDER.map((kind) => resp.now[kind]),
+    resp.timeline.past,
+    resp.timeline.futureDated,
+    resp.stash,
+    resp.pinned,
+  ]) {
+    for (const card of list) {
+      if (seen.has(card.id)) continue
+      seen.add(card.id)
+      out.push(card)
+    }
+  }
+  return out
+}
+
+/**
+ * The reverse dependency graph the board reasons with — built over the LIVE
+ * cards only.
+ *
+ * A CLOSED follower is not queued behind anything: its work is over. Counting
+ * it would have a head card announce "+2 queued" for two runs that finished
+ * last week, and would let a chain tail resolve onto a closed card that no new
+ * dependency should ever attach to. Tempered is exactly the state that RELEASES
+ * a follower, so a released follower must leave the graph with it.
+ */
+export function liveDependents(resp: KanbanResponse | null): Map<string, string[]> {
+  return buildDependents(boardCards(resp).filter((c) => c.status !== 'closed'))
 }
 
 export function findCardById(resp: KanbanResponse | null, id: string): KanbanCard | null {

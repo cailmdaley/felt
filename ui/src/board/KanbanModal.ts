@@ -47,7 +47,7 @@ import type {
   KanbanResponse,
 } from './KanbanTypes.js'
 import { dispatchIneligibleReason, errorMessageFromResponse } from './KanbanModalShared.js'
-import { COLUMN_TITLES, KanbanSurfaceRenderer, SURFACE_TITLE, findCardColumn, formatDue } from './KanbanSurfaces.js'
+import { COLUMN_TITLES, KanbanSurfaceRenderer, SURFACE_TITLE, findCardById, findCardColumn, formatDue } from './KanbanSurfaces.js'
 import { parseCompositeFeed } from './KanbanComposite.js'
 import { buildKanbanResponseFromComposite, deriveCycleLens, restingCards } from './KanbanReadModel.js'
 import {
@@ -257,6 +257,7 @@ export class KanbanModal {
       transition: (card, target) => this.transition(card, target),
       setSurface: (card, horizon, opts) => this.setSurface(card, horizon, opts),
       pin: (card) => this.pinRole(card),
+      stack: (card, tailId) => this.stackBehind(card, tailId),
       openDetail: (card) => this.detailModal?.open(card),
       openWorker: this.openWorkerAfterGesture,
       releaseQuarantine: (host) => this.releaseQuarantine(host),
@@ -969,11 +970,100 @@ export class KanbanModal {
    * Callers can still pass an explicit `due` to override either way: a day
    * (the date-column snooze) or `null` to clear on purpose.
    */
+  /**
+   * "This one goes after that one" — the card-onto-card drop, persisted as a
+   * scalar `depends_on:` on the DROPPED card.
+   *
+   * One write, one field, and nothing else: the gate is a pure derivation, so
+   * writing the edge is the whole gesture. The board does not move the card
+   * itself — the next render derives Resting from the new frontmatter, which
+   * is the same path a hand-edited `depends_on:` takes. No optimistic
+   * placement for that reason: an optimism that guessed the routing would be
+   * re-deriving the read model in the writer.
+   *
+   * `tailId` is the END of the target's chain (`stackDropVerdict`), so
+   * dropping onto a card that already has work queued behind it appends to the
+   * queue rather than forking it.
+   */
+  private async stackBehind(card: KanbanCard, tailId: string): Promise<void> {
+    const tail = findCardById(this.lastResponse, tailId)
+    const tailName = tail?.name ?? tailId
+    try {
+      const res = await fetch(this.horizonUrl(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fiber_id: card.id,
+          origin: card.originId,
+          set: { depends_on: tailId },
+        }),
+      })
+      if (!res.ok) throw new Error(await errorMessageFromResponse(res, 'Sequence edit failed'))
+      this.announce(`“${card.name}” now waits on “${tailName}”; it rests until that is tempered.`)
+    } catch (err: unknown) {
+      const msg = (err as { message?: string })?.message ?? String(err)
+      this.showBanner(`Couldn't queue “${card.name}” behind “${tailName}”: ${msg}`, 'error')
+      this.announce(`Sequence edit failed: ${msg}`)
+    }
+    await this.fetchAndRender()
+  }
+
+  /**
+   * The un-stack: drag a dep-gated card out of Resting and onto Now.
+   *
+   * Clearing the field IS the gesture — there is no "gate override" to store,
+   * so the only way to take a card out of a queue is to say it is not in one.
+   * When the card was ALSO explicitly stashed, the same write clears that too:
+   * the human dragged it to the desk, and leaving half the reasons it was
+   * resting in place would bounce it straight back on the next poll.
+   *
+   * Refuses a LIST-shaped `depends_on:` rather than collapsing it — the same
+   * rule the stack drop follows, from the other direction.
+   */
+  private async unstack(card: KanbanCard): Promise<void> {
+    if (card.dependsOnShape === 'list') {
+      this.showBanner(
+        `“${card.name}” waits on a hand-written depends_on list — open it and edit the list to release it.`,
+        'info',
+      )
+      this.announce(`${card.name} has a hand-written depends_on list; edit it there.`)
+      return
+    }
+    // One write: the sequence edge, plus the stash it may also be carrying.
+    const unset = card.storedHorizon === 'stashed'
+      ? ['depends_on', 'horizon', 'cold']
+      : ['depends_on']
+    try {
+      const res = await fetch(this.horizonUrl(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fiber_id: card.id, origin: card.originId, unset }),
+      })
+      if (!res.ok) throw new Error(await errorMessageFromResponse(res, 'Sequence edit failed'))
+      this.announce(`“${card.name}” is out of the queue and back on the desk.`)
+    } catch (err: unknown) {
+      const msg = (err as { message?: string })?.message ?? String(err)
+      this.showBanner(`Couldn't take “${card.name}” out of the queue: ${msg}`, 'error')
+      this.announce(`Sequence edit failed: ${msg}`)
+    }
+    await this.fetchAndRender()
+  }
+
   private setSurface(
     card: KanbanCard,
     horizon: HorizonKind,
     opts: { cold?: boolean; due?: string | null } = {},
   ): void {
+    // A dep-gated card dragged up to Now is asking to LEAVE THE QUEUE, not to
+    // have its horizon cleared: the gate is derived from `depends_on:` and no
+    // horizon write can lift it, so the plain surface edit would commit and
+    // the card would sit back down in Resting one poll later — the drag
+    // reading as ignored, which is the dissonance the board must never
+    // produce. `unstack` writes the field that actually holds it.
+    if (horizon === 'now' && card.depGated === true) {
+      void this.unstack(card)
+      return
+    }
     // A standing role is placed on the timeline by its schedule
     // (`nextStandingLaunch`), not by hand — a horizon/due write here is
     // silently ignored by the read model and just leaves dead frontmatter.

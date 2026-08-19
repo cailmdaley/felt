@@ -435,3 +435,108 @@ func TestCheckParseabilitySurvivesFeltWrittenColonOutcomes(t *testing.T) {
 		t.Fatalf("issues = %+v, want none — felt's own writes must round-trip", issues)
 	}
 }
+
+func TestCheckDependsOnScalarRefOK(t *testing.T) {
+	dependent := &Felt{ID: "fiber-a", Name: "Fiber A"}
+	mustExtra(t, dependent, "depends_on", "fiber-b")
+
+	issues := Check([]*Felt{dependent, {ID: "fiber-b", Name: "Fiber B"}}, nil)
+	if len(issues) != 0 {
+		t.Fatalf("Check() issues = %+v, want none", issues)
+	}
+}
+
+func TestCheckDependsOnListRefOK(t *testing.T) {
+	dependent := &Felt{ID: "fiber-a", Name: "Fiber A"}
+	mustExtra(t, dependent, "depends_on", []string{"fiber-b", "fiber-c"})
+
+	issues := Check([]*Felt{
+		dependent,
+		{ID: "fiber-b", Name: "Fiber B"},
+		{ID: "fiber-c", Name: "Fiber C"},
+	}, nil)
+	if len(issues) != 0 {
+		t.Fatalf("Check() issues = %+v, want none", issues)
+	}
+}
+
+func TestCheckDependsOnMapEntryOK(t *testing.T) {
+	dependent := &Felt{ID: "fiber-a", Name: "Fiber A"}
+	mustExtra(t, dependent, "depends_on", []map[string]any{{"id": "fiber-b"}})
+
+	issues := Check([]*Felt{dependent, {ID: "fiber-b", Name: "Fiber B"}}, nil)
+	if len(issues) != 0 {
+		t.Fatalf("Check() issues = %+v, want none", issues)
+	}
+}
+
+func TestCheckDependsOnDanglingRef(t *testing.T) {
+	dependent := &Felt{ID: "fiber-a", Name: "Fiber A"}
+	mustExtra(t, dependent, "depends_on", "missing-fiber")
+
+	issues := Check([]*Felt{dependent}, nil)
+	if len(issues) != 1 {
+		t.Fatalf("Check() issues = %+v, want 1", issues)
+	}
+	if issues[0].Path != "frontmatter.depends_on" {
+		t.Fatalf("issue path = %q, want frontmatter.depends_on", issues[0].Path)
+	}
+	if !strings.Contains(issues[0].Message, `dangling depends_on reference "missing-fiber"`) {
+		t.Fatalf("issue message = %q, want dangling depends_on reference", issues[0].Message)
+	}
+}
+
+func TestCheckDependsOnMalformedEntry(t *testing.T) {
+	dependent := &Felt{ID: "fiber-a", Name: "Fiber A"}
+	mustExtra(t, dependent, "depends_on", []map[string]any{{"not-id": "fiber-b"}})
+
+	issues := Check([]*Felt{dependent, {ID: "fiber-b", Name: "Fiber B"}}, nil)
+	if len(issues) != 1 {
+		t.Fatalf("Check() issues = %+v, want 1", issues)
+	}
+	if issues[0].Path != "frontmatter.depends_on" {
+		t.Fatalf("issue path = %q, want frontmatter.depends_on", issues[0].Path)
+	}
+	if !strings.Contains(issues[0].Message, "malformed depends_on entry") {
+		t.Fatalf("issue message = %q, want malformed depends_on entry", issues[0].Message)
+	}
+}
+
+// A TOP-LEVEL `depends_on: {id: …}` is malformed, however reasonable it looks.
+// No reader honors it: the board's parser ignores a bare mapping and the
+// poller iterates it as {key, value} tuples its dep_id/1 answers nil for, so
+// the fiber is gated forever with nothing on screen to say why. The checker is
+// the only place that can say so — it must not bless a shape the runtime
+// refuses.
+func TestCheckDependsOnTopLevelMapIsMalformed(t *testing.T) {
+	dependent := &Felt{ID: "fiber-a", Name: "Fiber A"}
+	mustExtra(t, dependent, "depends_on", map[string]any{"id": "fiber-b"})
+
+	issues := Check([]*Felt{dependent, {ID: "fiber-b", Name: "Fiber B"}}, nil)
+	if len(issues) != 1 {
+		t.Fatalf("Check() issues = %+v, want 1", issues)
+	}
+	if !strings.Contains(issues[0].Message, "malformed depends_on entry") {
+		t.Fatalf("issue message = %q, want malformed depends_on entry", issues[0].Message)
+	}
+}
+
+// `depends_on:` with nothing after it is ABSENCE. The poller normalizes nil to
+// "no dependencies" and the board ignores it, so a checker complaint here
+// would be a rule only the checker believes in — and one that fires on a line
+// someone left behind after clearing a dependency, which is exactly the moment
+// they were being tidy.
+func TestCheckDependsOnNullIsAbsent(t *testing.T) {
+	// Parsed from real frontmatter rather than built with SetExtraField: the
+	// bug is about the yaml NODE a bare `depends_on:` produces (a !!null
+	// scalar), and only the parse path produces one.
+	dependent, err := Parse("fiber-a", []byte("---\nname: Fiber A\nstatus: open\ndepends_on:\n---\n"))
+	if err != nil {
+		t.Fatalf("Parse() error: %v", err)
+	}
+
+	issues := Check([]*Felt{dependent}, nil)
+	if len(issues) != 0 {
+		t.Fatalf("Check() issues = %+v, want none — an empty depends_on is not a dependency", issues)
+	}
+}

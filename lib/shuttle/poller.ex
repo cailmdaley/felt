@@ -2322,25 +2322,57 @@ defmodule Shuttle.Poller do
   # each dep's `tempered` flag.
   @doc false
   def dependencies_satisfied?(fiber, state) when is_map(fiber) do
-    deps = Map.get(fiber, "depends_on", [])
+    case normalize_deps(Map.get(fiber, "depends_on")) do
+      # Not one of the three shapes the field has (see `normalize_deps`). The
+      # fiber declared a dependency this code cannot read, and reading it as
+      # "no dependencies" would dispatch work the human said comes second.
+      # Unsatisfiable is the safe answer; `felt check` is what says so out loud.
+      :malformed ->
+        false
 
-    if deps == [] or is_nil(deps) do
-      true
-    else
-      Enum.all?(deps, fn dep ->
-        case dep_id(dep) do
-          nil ->
-            false
+      [] ->
+        true
 
-          dep_id ->
-            case fetch_fiber_full(dep_id, state) do
-              {:ok, dep} -> Map.get(dep, "tempered", false) == true
-              {:error, _} -> false
-            end
-        end
-      end)
+      deps ->
+        Enum.all?(deps, fn dep ->
+          case dep_id(dep) do
+            nil ->
+              false
+
+            dep_id ->
+              case fetch_fiber_full(dep_id, state) do
+                {:ok, dep} -> Map.get(dep, "tempered", false) == true
+                {:error, _} -> false
+              end
+          end
+        end)
     end
   end
+
+  # THE `depends_on` GRAMMAR, and the only place this side reads it.
+  #
+  # Three shapes, and exactly three — the same three `felt check`
+  # (internal/felt/check.go) and the board's TS parser accept:
+  #
+  #   depends_on: some/fiber          a bare scalar. What the board's
+  #                                   drag-to-stack gesture writes, via
+  #                                   `felt edit --set depends_on=<id>`.
+  #   depends_on: [a, b]              a list of ids.
+  #   depends_on: [{id: a}]           a list of {id: …} maps (felt's own
+  #                                   serialization of a fiber reference).
+  #
+  # `nil` — an explicit `depends_on:` with nothing after it — is ABSENCE, not a
+  # dependency; a blank line is not a claim about ordering.
+  #
+  # This normalization is the CRASH FIX, not a nicety: the poller reached
+  # `Enum.all?/2` with whatever the field held, so the scalar form (which the
+  # board now writes on a drag) raised Protocol.UndefinedError on the live
+  # Poller GenServer every tick, outside the rescue that wraps `poll_reads/1`.
+  # One gesture on the board could take the daemon's clock down.
+  defp normalize_deps(nil), do: []
+  defp normalize_deps(dep) when is_binary(dep), do: [dep]
+  defp normalize_deps(deps) when is_list(deps), do: deps
+  defp normalize_deps(_), do: :malformed
 
   defp dep_id(dep) when is_binary(dep), do: dep
   defp dep_id(%{"id" => id}) when is_binary(id), do: id

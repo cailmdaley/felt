@@ -3387,6 +3387,65 @@ defmodule Shuttle.PollerTest do
     end)
   end
 
+  # THE SCALAR FORM — `depends_on: tests/dep`, with no list around it. This is
+  # what the board's drag-to-stack gesture writes (`felt edit --set
+  # depends_on=<id>` stores a string), and it used to reach `Enum.all?/2` as a
+  # binary and raise Protocol.UndefinedError on this GenServer every tick, in a
+  # call path outside the rescue that wraps poll_reads/1. So these two tests
+  # assert dispatch behavior AND, by asking the poller for a snapshot
+  # afterwards, that it is still alive to answer.
+  test "poller gates on a SCALAR depends_on without falling over" do
+    dep = make_fiber("tests/dep", %{"tempered" => false, "tags" => []})
+    fiber = make_fiber("tests/dependent", %{"depends_on" => "tests/dep"})
+
+    MockRunner.set_fiber("tests/dependent", fiber)
+    MockRunner.set_fiber("tests/dep", dep)
+    MockRunner.set_shuttle("tests/dependent", @oneshot_shuttle)
+
+    {:ok, poller} =
+      start_poller!(
+        name: :test_poller_scalar_dep,
+        runner: MockRunner,
+        poll_interval_ms: 60_000,
+        felt_stores: [MockRunner.felt_root()]
+      )
+
+    send(poller, :run_poll_cycle)
+    Process.sleep(50)
+
+    refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
+             cmd == "tmux" and hd(args) == "new-session"
+           end)
+
+    # Still answering: the tick did not take the process down.
+    assert is_map(Poller.snapshot(poller))
+  end
+
+  test "poller dispatches on a SCALAR depends_on once it is tempered" do
+    dep = make_fiber("tests/dep", %{"tempered" => true})
+    fiber = make_fiber("tests/dependent", %{"depends_on" => "tests/dep"})
+
+    MockRunner.set_fiber("tests/dependent", fiber)
+    MockRunner.set_fiber("tests/dep", dep)
+    MockRunner.set_shuttle("tests/dependent", @oneshot_shuttle)
+
+    {:ok, poller} =
+      start_poller!(
+        name: :test_poller_scalar_dep_tempered,
+        runner: MockRunner,
+        poll_interval_ms: 60_000,
+        felt_stores: [MockRunner.felt_root()]
+      )
+
+    send(poller, :run_poll_cycle)
+
+    assert_eventually(fn ->
+      assert Enum.any?(MockRunner.commands(), fn {cmd, args} ->
+               cmd == "tmux" and hd(args) == "new-session"
+             end)
+    end)
+  end
+
   test "poller does not double-dispatch" do
     fiber = make_fiber("tests/haiku-dedup")
     MockRunner.set_fiber("tests/haiku-dedup", fiber)
