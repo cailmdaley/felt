@@ -64,6 +64,14 @@ nav:
       - Companions: concepts/companions.md
       - Cross-Project: concepts/cross-project.md
   - Agents & Plugin: agents.md
+  - Development:
+      - Architecture: dev/architecture.md
+      - Building and deploying: dev/build-and-deploy.md
+      - Dispatch internals: dev/dispatch.md
+      - Operating the daemon: dev/operating.md
+      - Event stream and ledgers: dev/event-stream.md
+      - Releasing: dev/releasing.md
+      - Codebase layout and tests: dev/layout.md
   - Reference:
       - CLI: reference/cli.md
       - Daemon HTTP API: reference/api.md
