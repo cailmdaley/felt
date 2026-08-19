@@ -1208,17 +1208,17 @@ export class KanbanSurfaceRenderer {
       const due = document.createElement('span')
       due.className = 'kbn-card-due'
       due.textContent = `due ${formatDue(card.due)}`
-      due.title = card.due
+      // Drift used to be its own yellow ↑ chip; the due date is what drifted
+      // the card, so the due chip carries the story on hover instead.
+      due.title = card.drifted
+        ? `${card.due} — promoted from ${card.storedHorizon ?? 'unset'} by due date`
+        : card.due
       meta.append(due)
     }
 
-    if (card.drifted) {
-      const drift = document.createElement('span')
-      drift.className = 'kbn-card-drift'
-      drift.textContent = '↑'
-      drift.title = `Promoted from ${card.storedHorizon ?? 'unset'} by due date`
-      meta.append(drift)
-    }
+    // "+N queued" — this card heads a sequence. It sits here with the other
+    // facts about the card (actor, due), left of the right-aligned actions.
+    this.renderQueuedChip(card, meta)
 
     if ((kind === 'drafts' || kind === 'awaitingReview' || kind === 'inFlight') && !isStale) {
       const reviewMetaActions = document.createElement('div')
@@ -1353,10 +1353,6 @@ export class KanbanSurfaceRenderer {
       })
       meta.append(w)
     }
-    // "+N queued" — this card heads a sequence. It sits in the meta row with
-    // the other chips, because that is what it is: a fact about the card, and
-    // one you read alongside its date and its actor.
-    this.renderQueuedChip(card, meta)
     el.append(meta)
 
     // A card still on a working column while unsatisfied is an ARMED oneshot

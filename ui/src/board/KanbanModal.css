@@ -1566,8 +1566,7 @@
   border-style: dashed;
 }
 .kbn-card-actor,
-.kbn-card-due,
-.kbn-card-drift {
+.kbn-card-due {
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
   font-size: calc(10px * var(--kbn-type-scale, 1));
   letter-spacing: 0.04em;
@@ -1590,18 +1589,6 @@
   border: 1px solid rgba(27, 22, 17, 0.10);
   border-radius: 2px;
   padding: 1px 5px;
-}
-.kbn-card-drift {
-  color: #C49333;
-  background: rgba(196, 147, 51, 0.12);
-  border: 1px solid rgba(196, 147, 51, 0.28);
-  border-radius: 50%;
-  width: calc(17px * var(--kbn-type-scale, 1));
-  height: calc(17px * var(--kbn-type-scale, 1));
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  line-height: 1;
 }
 .kbn-card-blocked {
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
@@ -1643,6 +1630,8 @@
 }
 .kbn-card-queued:hover { background: rgba(107, 78, 113, 0.18); }
 .kbn-card-queued-list {
+  /* Full row: the peek drops below the meta line instead of wedging into it. */
+  flex-basis: 100%;
   list-style: decimal inside;
   margin: 3px 0 0;
   padding: 4px 6px;

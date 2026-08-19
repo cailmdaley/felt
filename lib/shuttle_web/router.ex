@@ -52,6 +52,12 @@ defmodule ShuttleWeb.Router do
     get("/astra", AstraController, :show)
     get("/felt-stores", FeltStoresController, :show)
     post("/felt-stores", FeltStoresController, :create)
+    # The "+ Add project…" pair behind the Stash/Capture project pickers: walk
+    # the owning host's directories, then register the picked one as a
+    # picker-project (initializing its `.felt/` when it isn't a store yet).
+    # Both owner-routed, since only the owning daemon sees its own filesystem.
+    get("/browse", BrowseController, :show)
+    post("/projects", ProjectsController, :create)
     # Pure-manual release of the boot quarantine: a restarted daemon parks
     # fresh autonomous launches (restart is not dispatch authority) until a
     # human posts here; dirty-death resumes were never withheld.
