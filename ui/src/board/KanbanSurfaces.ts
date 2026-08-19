@@ -1029,6 +1029,7 @@ export class KanbanSurfaceRenderer {
 
     const glyph = document.createElement('span')
     glyph.className = 'kbn-cluster-item-glyph'
+    if (card.depGated) glyph.classList.add('kbn-cluster-item-glyph-gated')
     glyph.textContent = isAgentCard(card) ? '◐' : '✓'
     const title = document.createElement('span')
     title.className = 'kbn-cluster-item-title'
@@ -1052,16 +1053,13 @@ export class KanbanSurfaceRenderer {
     // invisible. (Checked first: a gated card may also carry a `due:`, and
     // "wakes Tuesday" would be a promise the gate does not make.)
     if (card.depGated) {
+      // No text chip — long names overflowed the cluster row. The plum glyph
+      // IS the queued mark (Cail's call); the words live on hover.
       const blocking = card.dependsOnBlocking ?? card.dependsOn ?? []
       const names = blocking.map((id) => findCardById(this.getLastResponse(), id)?.name ?? id)
-      const chip = document.createElement('span')
-      chip.className = 'kbn-cluster-item-wakes kbn-cluster-item-gated'
-      chip.textContent = names.length === 1 ? `after ${names[0]}` : `after ${names.length} others`
-      chip.title =
-        `Waiting on ${names.join(', ')} — it returns to the desk when that is tempered. ` +
-        'Drag it up to Now to unstack it.'
-      el.append(chip)
-      el.title = `${card.name} — after ${names.join(', ')}`
+      el.title =
+        `${card.name} — after ${names.join(', ')}. ` +
+        'Returns to the desk when that is tempered; drag it up to Now to unstack it.'
       this.renderQueuedChip(card, el)
     } else if (sleeping) {
       const returns = card.nextLaunchAt ? formatLaunchDay(card.nextLaunchAt) : null
