@@ -80,6 +80,10 @@ export interface ProjectModel {
   projects: ProjectEntry[]
   /** `{projectId: lastActivity}` — feeds the forms' city-picker recency sort. */
   activityById: Record<string, number>
+  /** The LOCAL daemon reports a native folder dialog. Only the local origin's
+   *  flag matters here: a remote's dialog would open on a desktop nobody is
+   *  sitting at, so remote origins always take the browse fallback. */
+  nativeFolderPicker: boolean
 }
 
 interface StoreRegistryOrigin {
@@ -92,6 +96,10 @@ interface StoreRegistryOrigin {
    *  derivation. Absent → fall back to that derivation, so an uncurated host is
    *  unchanged. Separate from `felt_stores`, which stays TCC-scoped for polling. */
   projects?: string[]
+  /** This host can raise its own OS folder dialog (`POST /api/v1/choose-folder`).
+   *  Decides, before the human clicks "+ Add project…", whether the form asks
+   *  the OS or opens the in-browser DirectoryPicker. */
+  native_folder_picker?: boolean
   last_error?: string
 }
 
@@ -179,7 +187,12 @@ export function deriveProjects(feedBody: unknown, registryBody?: unknown): Proje
   if (registryProjects.length > 0) {
     const activityById: Record<string, number> = {}
     for (const p of registryProjects) activityById[p.id] = p.lastActivity
-    return { host: registry.host || feed.host, projects: registryProjects, activityById }
+    return {
+      host: registry.host || feed.host,
+      projects: registryProjects,
+      activityById,
+      nativeFolderPicker: nativePicker(registry, feed.host),
+    }
   }
 
   const norm = (p: string): string => p.replace(/\/+$/, '')
@@ -212,7 +225,25 @@ export function deriveProjects(feedBody: unknown, registryBody?: unknown): Proje
   const activityById: Record<string, number> = {}
   for (const p of projects) activityById[p.id] = p.lastActivity
 
-  return { host: feed.host, projects, activityById }
+  return {
+    host: feed.host,
+    projects,
+    activityById,
+    nativeFolderPicker: nativePicker(registry, feed.host),
+  }
+}
+
+/** The local origin's `native_folder_picker`, found by host id or, failing
+ *  that, by `kind: 'local'` — the registry names its own host, but a degraded
+ *  body may not. Absent → false: no flag means an older daemon with no
+ *  `/api/v1/choose-folder`, and browse is the safe read. */
+function nativePicker(registry: StoreRegistry, feedHost: string): boolean {
+  const origins = registry.origins ?? {}
+  const local =
+    origins[registry.host ?? ''] ??
+    origins[feedHost] ??
+    Object.values(origins).find((o) => o.kind === 'local')
+  return local?.native_folder_picker === true
 }
 
 function parseStoreRegistry(body: unknown): StoreRegistry {
@@ -231,6 +262,7 @@ function parseStoreRegistry(body: unknown): StoreRegistry {
         stale: rec.stale === true,
         felt_stores: feltStores,
         projects: stringArray(rec.projects),
+        native_folder_picker: rec.native_folder_picker === true,
         last_error: typeof rec.last_error === 'string' ? rec.last_error : undefined,
       }
     }

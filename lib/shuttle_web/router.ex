@@ -43,6 +43,11 @@ defmodule ShuttleWeb.Router do
     post("/lifecycle", LifecycleController, :create)
     post("/felt-edit", FeltEditController, :create)
     post("/felt-nest", FeltNestController, :create)
+    # Body search across the record, for the Chronicle's search bar. The board
+    # matches names and ids client-side off the feed it already holds; only the
+    # BODY of every constitution needs the daemon, which is what this shells
+    # `felt ls --body --has-field shuttle -s all` for. Local stores only.
+    get("/search", SearchController, :show)
     get("/agents", AgentsController, :show)
     get("/version", VersionController, :show)
     post("/fiber/create", FiberController, :create)
@@ -58,6 +63,11 @@ defmodule ShuttleWeb.Router do
     # Both owner-routed, since only the owning daemon sees its own filesystem.
     get("/browse", BrowseController, :show)
     post("/projects", ProjectsController, :create)
+    # Native-first sibling of /browse: raises the owning host's own folder
+    # dialog (Finder/zenity/kdialog) and answers with the chosen path. Blocks
+    # for as long as the human takes; /browse remains the fallback for remote
+    # origins and hosts with no dialog.
+    post("/choose-folder", ChooseFolderController, :create)
     # Pure-manual release of the boot quarantine: a restarted daemon parks
     # fresh autonomous launches (restart is not dispatch authority) until a
     # human posts here; dirty-death resumes were never withheld.

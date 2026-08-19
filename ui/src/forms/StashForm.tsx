@@ -26,6 +26,9 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
+import { DirectoryPicker, injectDirectoryPickerStyles } from './DirectoryPicker'
+import { ProjectPicker, injectProjectPickerStyles } from './ProjectPicker'
+import { useAddProject } from './useAddProject'
 import { fetchFiberIndex, filterParentCandidates, type FiberSearchResult } from '../board/fiberSearch'
 import { shuttleOrigin } from './projectModel'
 
@@ -77,6 +80,14 @@ export interface StashFormProps {
   shuttleBase?: string
   /** Called after a successful save with the new fiber id. */
   onCreated: (fiberId: string) => void
+  /** Register a new project directory and hand back the refreshed project set
+   *  (the island re-derives it from the daemon). Absent → the picker offers no
+   *  "+ Add project…" row. */
+  onProjectAdded?: (path: string) => Promise<StashProject[]>
+  /** The local daemon can raise its own OS folder dialog. True → "+ Add
+   *  project…" on a local origin opens Finder/zenity instead of the in-browser
+   *  DirectoryPicker (which stays the automatic fallback). */
+  nativeFolderPicker?: boolean
   /** Called on Esc / cancel / backdrop click. */
   onCancel: () => void
 }
@@ -330,6 +341,8 @@ export function StashForm({
   tagSuggestions,
   shuttleBase = '',
   onCreated,
+  onProjectAdded,
+  nativeFolderPicker = false,
   onCancel,
 }: StashFormProps): JSX.Element {
   // Core stash fields
@@ -367,11 +380,12 @@ export function StashForm({
     })
     return ranked[0].id
   })
-  const [cityPickerOpen, setCityPickerOpen] = useState(false)
-  const [cityFilter, setCityFilter] = useState('')
+  // The live project set: seeded from the island's derivation, then replaced
+  // wholesale when "+ Add project…" registers a directory (the island re-derives
+  // through `deriveProjects`, so shape stays single-sourced there).
+  const [cities, setCities] = useState<StashProject[]>(availableCities)
 
   const titleRef = useRef<HTMLInputElement | null>(null)
-  const cityPickerRef = useRef<HTMLDivElement | null>(null)
 
   // Autofocus the title on first paint.
   useEffect(() => {
@@ -396,38 +410,27 @@ export function StashForm({
     return () => { cancelled = true }
   }, [shuttleBase])
 
-  // Close the project dropdown on outside click.
-  useEffect(() => {
-    if (!cityPickerOpen) return
-    const handleDown = (e: MouseEvent): void => {
-      const root = cityPickerRef.current
-      if (root && !root.contains(e.target as Node)) {
-        setCityPickerOpen(false)
-        setCityFilter('')
-      }
-    }
-    document.addEventListener('mousedown', handleDown)
-    return () => document.removeEventListener('mousedown', handleDown)
-  }, [cityPickerOpen])
-
-  const sortedCities = [...availableCities].sort((a, b) => {
+  const sortedCities = [...cities].sort((a, b) => {
     const recencyDelta = (cityActivityById[b.id] ?? 0) - (cityActivityById[a.id] ?? 0)
     if (recencyDelta !== 0) return recencyDelta
     return (a.name ?? a.id).localeCompare(b.name ?? b.id, undefined, { sensitivity: 'base' })
   })
-  const cityFilterLower = cityFilter.trim().toLowerCase()
-  const filteredCities = cityFilterLower
-    ? sortedCities.filter((c) =>
-        (c.name ?? c.id).toLowerCase().includes(cityFilterLower) ||
-        c.originId.toLowerCase().includes(cityFilterLower),
-      )
-    : sortedCities
-
   const selectedCity =
-    selectedCityId !== null ? availableCities.find((c) => c.id === selectedCityId) ?? null : null
-  const selectedCityLabel = selectedCity
-    ? `${selectedCity.name ?? selectedCity.id}${selectedCity.originId === 'local' ? '' : ` · ${selectedCity.originId}`}`
-    : ''
+    selectedCityId !== null ? cities.find((c) => c.id === selectedCityId) ?? null : null
+
+  // "+ Add project…" — native OS dialog when the daemon has one and the origin
+  // is local, DirectoryPicker overlay otherwise (see useAddProject).
+  const addProject = useAddProject<StashProject>({
+    shuttleBase,
+    nativeFolderPicker,
+    origin: selectedCity?.originId ?? 'local',
+    onProjectAdded,
+    onAdded: (next, path) => {
+      setCities(next)
+      const added = next.find((c) => c.path === path)
+      if (added) setSelectedCityId(added.id)
+    },
+  })
 
   const allSuggestions = tagSuggestions ?? []
   const tagInputLower = tagInput.trim().toLowerCase()
@@ -596,6 +599,16 @@ export function StashForm({
           <span className="stash-header-rule" aria-hidden="true" />
         </div>
 
+        {addProject.browseOpen && onProjectAdded && (
+          <DirectoryPicker
+            shuttleBase={shuttleBase}
+            origin={selectedCity?.originId ?? 'local'}
+            initialPath={addProject.browsePath}
+            onCancel={addProject.closeBrowse}
+            onAdded={addProject.finish}
+          />
+        )}
+
         <div className="stash-body">
           {/* ── Section: WHERE — project + parent fiber ── */}
           <section className="stash-section">
@@ -605,55 +618,18 @@ export function StashForm({
             </div>
             <div className="stash-row stash-row-2">
               {/* Project picker */}
-              {availableCities.length > 0 && (
+              {/* Rendered even with no projects, as long as there is a way to
+                  add one: the picker's first row, "Add a new project…", is how
+                  a host with an empty list bootstraps its first. */}
+              {(cities.length > 0 || onProjectAdded) && (
                 <div className="stash-field">
                   <span className="stash-label">Project</span>
-                  <div className="stash-city-picker" ref={cityPickerRef}>
-                    <input
-                      type="text"
-                      className="stash-input"
-                      value={cityPickerOpen ? cityFilter : selectedCityLabel}
-                      onFocus={() => setCityPickerOpen(true)}
-                      onClick={() => setCityPickerOpen(true)}
-                      onChange={(e) => setCityFilter(e.target.value)}
-                      readOnly={!cityPickerOpen}
-                      placeholder="search projects…"
-                      aria-haspopup="listbox"
-                      aria-expanded={cityPickerOpen}
-                    />
-                    {cityPickerOpen && (
-                      <div className="stash-city-list" role="listbox">
-                        {filteredCities.map((c) => (
-                          <button
-                            key={`${c.originId}:${c.id}`}
-                            type="button"
-                            className={
-                              selectedCityId === c.id
-                                ? 'stash-city-option stash-city-option-active'
-                                : 'stash-city-option'
-                            }
-                            role="option"
-                            aria-selected={selectedCityId === c.id}
-                            onClick={() => {
-                              setSelectedCityId(c.id)
-                              setCityPickerOpen(false)
-                              setCityFilter('')
-                            }}
-                          >
-                            <span>{c.name ?? c.id}</span>
-                            <span className="stash-city-meta">
-                              {c.originId === 'local' ? c.path : `${c.originId} · ${c.path}`}
-                            </span>
-                          </button>
-                        ))}
-                        {filteredCities.length === 0 && cityFilterLower && (
-                          <div className="stash-city-empty">
-                            No project matches "{cityFilter}".
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
+                  <ProjectPicker
+                    projects={sortedCities}
+                    selectedId={selectedCityId}
+                    onSelect={setSelectedCityId}
+                    onAddProject={onProjectAdded ? addProject.begin : undefined}
+                  />
                 </div>
               )}
 
@@ -1360,63 +1336,6 @@ export function injectStashFormStyles(): void {
       font-style: italic;
       cursor: default;
     }
-    .stash-city-picker {
-      position: relative;
-    }
-    .stash-city-list {
-      position: absolute;
-      top: calc(100% + 4px);
-      left: 0;
-      right: 0;
-      z-index: 10;
-      max-height: 240px;
-      overflow-y: auto;
-      background: #FFFFFF;
-      border: 1px solid rgba(46, 42, 38, 0.18);
-      border-radius: 3px;
-      box-shadow: 0 8px 18px rgba(46, 42, 38, 0.18);
-      padding: 4px;
-      display: flex;
-      flex-direction: column;
-      gap: 1px;
-    }
-    .stash-city-option {
-      display: flex;
-      flex-direction: column;
-      align-items: flex-start;
-      gap: 2px;
-      padding: 7px 10px;
-      background: transparent;
-      border: 1px solid transparent;
-      border-radius: 2px;
-      font-family: var(--font-main, 'EB Garamond', serif);
-      font-size: 14px;
-      color: #2E2A26;
-      text-align: left;
-      cursor: pointer;
-      transition: background 100ms ease-out;
-    }
-    .stash-city-option:hover,
-    .stash-city-option:focus-visible {
-      background: rgba(154, 123, 53, 0.14);
-      outline: none;
-    }
-    .stash-city-option-active {
-      background: rgba(154, 123, 53, 0.22);
-      border-color: rgba(154, 123, 53, 0.48);
-    }
-    .stash-city-meta {
-      font-family: var(--font-mono, 'JetBrains Mono', monospace);
-      font-size: 10.5px;
-      color: #7A7068;
-      letter-spacing: 0.02em;
-    }
-    .stash-city-empty {
-      padding: 8px 10px;
-      font-size: 12px;
-      color: #7A7068;
-      font-style: italic;
-    }
     .stash-segmented {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -1593,4 +1512,8 @@ export function injectStashFormStyles(): void {
     }
   `
   document.head.appendChild(style)
+  // The shared directory picker rides along: both forms that open it are opened
+  // through this same injection point (Stash directly, Capture via mountForms).
+  injectDirectoryPickerStyles()
+  injectProjectPickerStyles()
 }

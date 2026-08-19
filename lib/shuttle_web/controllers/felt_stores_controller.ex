@@ -7,6 +7,10 @@ defmodule ShuttleWeb.FeltStoresController do
   persisted file so the daemon has no configured stores unless `FELT_STORES` is
   set.
 
+  Each origin also carries `native_folder_picker` — true when that host can
+  raise an OS folder dialog (`POST /api/v1/choose-folder`), which is how the
+  board decides between the native picker and the in-browser `/browse` fallback.
+
   POST body: %{"felt_stores" => [string]}
 
   Returns:
@@ -17,7 +21,7 @@ defmodule ShuttleWeb.FeltStoresController do
 
   use Phoenix.Controller, formats: [:json]
 
-  alias Shuttle.{FeltStores, OriginRouter, Poller, Projects, RegistryCommon, Remote}
+  alias Shuttle.{FeltStores, FolderPicker, OriginRouter, Poller, Projects, RegistryCommon, Remote}
 
   @remote_timeout_ms 8_000
 
@@ -71,7 +75,13 @@ defmodule ShuttleWeb.FeltStoresController do
       # The curated picker-project list (Stash/Capture cities), separate from the
       # TCC-scoped poll-store list above. Absent/empty → the forms fall back to
       # store-registry + current-cards derivation, so this is purely additive.
-      projects: Projects.configured_projects()
+      projects: Projects.configured_projects(),
+      # Whether this host can raise its own OS folder dialog
+      # (`POST /api/v1/choose-folder`). The pickers' "+ Add project…" needs to
+      # know BEFORE the human clicks which affordance to offer, and the origin
+      # payload is already the one thing both forms load; a remote's flag rides
+      # in on its relayed origin, describing that remote's desktop, not ours.
+      native_folder_picker: FolderPicker.available?()
     }
     |> Map.put(:host, host)
   end

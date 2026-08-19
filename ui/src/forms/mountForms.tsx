@@ -14,13 +14,19 @@
  * Both create endpoints are owner-routed now, so both forms get every
  * registered project: a local origin writes/spawns here, a remote origin
  * forwards to its owning daemon.
+ *
+ * The store payload also says whether this daemon can raise a native folder
+ * dialog (`native_folder_picker`); that flag rides into both forms and decides
+ * whether "+ Add project…" asks the OS or opens the in-browser browser.
  */
 
 import { createRoot, type Root } from 'react-dom/client'
 import { parseCompositeFeed } from '../board/KanbanComposite.js'
 import { deriveProjects, type ProjectModel } from './projectModel'
 import { StashForm, injectStashFormStyles, type StashProject } from './StashForm'
-import { CaptureForm } from './CaptureForm'
+import { CaptureForm, type CaptureProject } from './CaptureForm'
+import { injectDirectoryPickerStyles } from './DirectoryPicker'
+import { injectProjectPickerStyles } from './ProjectPicker'
 
 export interface OpenFormOptions {
   /** Shuttle daemon base — `''` (relative) in the standalone bundle. */
@@ -66,6 +72,30 @@ async function loadFeed(shuttleBase: string): Promise<LoadedFeed> {
   return { model, tags: [...tagSet].sort() }
 }
 
+/** The project set both forms consume, in the shape they consume it. Stash's
+ *  extra `loomPrefix` rides along harmlessly for Capture. */
+function toProjects(model: ProjectModel): StashProject[] {
+  return model.projects.map((p) => ({
+    id: p.id,
+    name: p.name,
+    path: p.path,
+    originId: p.isLocal ? 'local' : p.originId,
+    loomPrefix: p.loomPrefix,
+  }))
+}
+
+/**
+ * Re-derive the project set after a directory was registered through
+ * `POST /api/v1/projects`. Deliberately a full reload rather than trusting the
+ * POST response's `projects`: `deriveProjects` stays the one place a project's
+ * shape (origin, loomPrefix, felt store) is decided, and the added path is a
+ * bare string until it has been through it.
+ */
+async function refreshProjects(shuttleBase: string): Promise<StashProject[]> {
+  const feed = await loadFeed(shuttleBase)
+  return toProjects(feed.model)
+}
+
 export async function openStash(opts: OpenFormOptions): Promise<void> {
   injectStashFormStyles()
   let feed: LoadedFeed
@@ -77,13 +107,7 @@ export async function openStash(opts: OpenFormOptions): Promise<void> {
   }
   // Create is owner-routed — offer every project; local origin writes here,
   // remote origins forward to their owning daemon.
-  const projects: StashProject[] = feed.model.projects.map((p) => ({
-    id: p.id,
-    name: p.name,
-    path: p.path,
-    originId: p.isLocal ? 'local' : p.originId,
-    loomPrefix: p.loomPrefix,
-  }))
+  const projects: StashProject[] = toProjects(feed.model)
 
   ensureRoot().render(
     <StashForm
@@ -91,6 +115,8 @@ export async function openStash(opts: OpenFormOptions): Promise<void> {
       cityActivityById={feed.model.activityById}
       tagSuggestions={feed.tags}
       shuttleBase={opts.shuttleBase}
+      onProjectAdded={() => refreshProjects(opts.shuttleBase)}
+      nativeFolderPicker={feed.model.nativeFolderPicker}
       onCancel={close}
       onCreated={(id) => {
         close()
@@ -101,6 +127,10 @@ export async function openStash(opts: OpenFormOptions): Promise<void> {
 }
 
 export async function openCapture(opts: OpenFormOptions): Promise<void> {
+  // Capture styles its own chrome inline, so the two shared pickers' sheets
+  // have to be injected here (Stash gets them via injectStashFormStyles).
+  injectDirectoryPickerStyles()
+  injectProjectPickerStyles()
   let feed: LoadedFeed
   try {
     feed = await loadFeed(opts.shuttleBase)
@@ -110,18 +140,15 @@ export async function openCapture(opts: OpenFormOptions): Promise<void> {
   }
   // Capture is owner-routed — offer every project; local origin routes local,
   // remote origins forward to their owning daemon.
-  const projects = feed.model.projects.map((p) => ({
-    id: p.id,
-    name: p.name,
-    path: p.path,
-    originId: p.isLocal ? 'local' : p.originId,
-  }))
+  const projects: CaptureProject[] = toProjects(feed.model)
 
   ensureRoot().render(
     <CaptureForm
       availableCities={projects}
       cityActivityById={feed.model.activityById}
       shuttleBase={opts.shuttleBase}
+      onProjectAdded={() => refreshProjects(opts.shuttleBase)}
+      nativeFolderPicker={feed.model.nativeFolderPicker}
       onCancel={close}
       onSpawned={(session) => {
         close()

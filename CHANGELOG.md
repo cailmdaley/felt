@@ -45,6 +45,24 @@ is folded in here rather than into a separate Unreleased section.
   tunnel label prefix is configurable via `launchd_label_prefix`. Shared
   fixtures keep the Go and Elixir readers in agreement, and a hygiene test
   fails on personal hostnames in `config/`, `lib/`, `cmd/`, `share/`.
+- Projects can be added from the board. Both forms now share one project
+  combobox — Capture's native `<select>` is gone — and its first row is "Add a
+  new project…"; picking a folder registers it and selects it on the spot. The
+  combobox filters as you type and answers to the keyboard the way the parent
+  picker beside it does: arrows walk the rows, Enter commits, Escape closes the
+  list and nothing else. A folder that isn't a felt
+  store yet gets one, created exactly as `felt init` creates it. The chooser is
+  the operating system's own: `POST /api/v1/choose-folder` raises Finder on
+  macOS (`osascript`, activated so the dialog comes to the front), zenity or
+  kdialog on Linux, and hands back the chosen path; dismissing it does nothing
+  at all, quietly. A host with no dialog — and any remote origin, whose dialog
+  would open on a desktop nobody is sitting at — falls back automatically to
+  the in-browser directory browser, `GET /api/v1/browse?path=…`
+  (subdirectories only, felt stores marked, defaults to home). Registration is
+  `POST /api/v1/projects` (`{"path": …}`, idempotent) either way, and all three
+  endpoints are owner-routed. `~/.config/felt/projects.json` stays hand-editable; it is
+  no longer the only way in, and a host with an empty list can now bootstrap
+  its first project from the form itself.
 - `felt hook event` writes the Shuttle activity stream (one JSONL line per
   harness event), registered through the plugin on seven events for both
   Claude Code and Codex. It writes only when the events file's parent

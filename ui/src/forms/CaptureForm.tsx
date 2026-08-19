@@ -24,6 +24,9 @@ import { useEffect, useRef, useState } from 'react'
 import { AppDialog } from './AppDialog'
 import type { AgentEntry } from './StashForm'
 import { shuttleOrigin } from './projectModel'
+import { DirectoryPicker } from './DirectoryPicker'
+import { ProjectPicker } from './ProjectPicker'
+import { useAddProject } from './useAddProject'
 
 /**
  * Fallback when the registry fetch fails — keeps the dialog usable offline.
@@ -46,17 +49,28 @@ const FALLBACK_AGENTS: AgentEntry[] = [
 const CAPTURE_DEFAULT_AGENT = 'claude-opus'
 const CAPTURE_DEFAULT_EFFORT = 'xhigh'
 
+/** A destination project, as Capture consumes it (Stash's `StashProject`
+ *  minus `loomPrefix`, which only parent-nesting needs). */
+export interface CaptureProject {
+  id: string
+  name?: string
+  path: string
+  originId: string
+}
+
 export interface CaptureFormProps {
   /** Default destination: a project path (matched against `availableCities` by
    *  path). Null = fall through to activity ranking. */
   cityPath?: string | null
   /** All connected projects; each carries its own originId + path. */
-  availableCities?: Array<{
-    id: string
-    name?: string
-    path: string
-    originId: string
-  }>
+  availableCities?: CaptureProject[]
+  /** Register a new project directory and hand back the refreshed project set
+   *  (the island re-derives it from the daemon). Absent → no add-project row. */
+  onProjectAdded?: (path: string) => Promise<CaptureProject[]>
+  /** The local daemon can raise its own OS folder dialog. True → the add row on a
+   *  local origin opens Finder/zenity instead of the in-browser
+   *  DirectoryPicker (which stays the automatic fallback). */
+  nativeFolderPicker?: boolean
   /** Unix-ms of most recent activity per project id — recency ranking for the
    *  default selection and picker order. */
   cityActivityById?: Record<string, number>
@@ -80,6 +94,8 @@ export function CaptureForm({
   cityPath,
   availableCities = [],
   cityActivityById = {},
+  onProjectAdded,
+  nativeFolderPicker = false,
   onSpawned,
   onCancel,
   shuttleBase = '',
@@ -97,10 +113,13 @@ export function CaptureForm({
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
+  // Live project set: seeded from the island's derivation, replaced wholesale
+  // when the directory picker registers one (the island re-derives it).
+  const [cities, setCities] = useState<CaptureProject[]>(availableCities)
 
   // Same default-selection priority as StashForm: scoped project by path →
   // most-recently-active → alphabetical → null (picker hidden).
-  const sortedCities = [...availableCities].sort((a, b) => {
+  const sortedCities = [...cities].sort((a, b) => {
     const recencyDelta = (cityActivityById[b.id] ?? 0) - (cityActivityById[a.id] ?? 0)
     if (recencyDelta !== 0) return recencyDelta
     return (a.name ?? a.id).localeCompare(b.name ?? b.id, undefined, { sensitivity: 'base' })
@@ -150,7 +169,21 @@ export function CaptureForm({
     if (!(rec?.chrome_capable ?? false)) setChrome(false)
   }
 
-  const selectedCity = availableCities.find((c) => c.id === selectedCityId) ?? null
+  const selectedCity = cities.find((c) => c.id === selectedCityId) ?? null
+
+  // The add-project row — native OS dialog when the daemon has one and the origin is
+  // local, DirectoryPicker overlay otherwise (see useAddProject).
+  const addProject = useAddProject<CaptureProject>({
+    shuttleBase,
+    nativeFolderPicker,
+    origin: selectedCity?.originId ?? 'local',
+    onProjectAdded,
+    onAdded: (next, path) => {
+      setCities(next)
+      const added = next.find((c) => c.path === path)
+      if (added) setSelectedCityId(added.id)
+    },
+  })
 
   const submit = async (): Promise<void> => {
     if (submitting) return
@@ -234,23 +267,30 @@ export function CaptureForm({
             padding: '8px 10px',
           }}
         />
+        {addProject.browseOpen && onProjectAdded && (
+          <DirectoryPicker
+            shuttleBase={shuttleBase}
+            origin={selectedCity?.originId ?? 'local'}
+            initialPath={addProject.browsePath}
+            onCancel={addProject.closeBrowse}
+            onAdded={addProject.finish}
+          />
+        )}
         <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
-          {availableCities.length > 0 && (
-            <label style={{ flex: '2 1 12rem', display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+          {/* Project picker — the same combobox Stash uses. A native <select>
+              can't carry the "Add a new project…" row (a magic <option> reads
+              as a project and breaks keyboard selection), so both forms share
+              ProjectPicker instead. */}
+          {(cities.length > 0 || onProjectAdded) && (
+            <div style={{ flex: '2 1 12rem', display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
               <span className="capture-label" style={labelStyle}>Project</span>
-              <select
-                className="capture-city"
-                value={selectedCityId ?? ''}
-                onChange={(e) => setSelectedCityId(e.target.value || null)}
-                style={selectStyle}
-              >
-                {sortedCities.map((c) => (
-                  <option key={`${c.originId}:${c.id}`} value={c.id}>
-                    {(c.name ?? c.id) + (c.originId === 'local' ? '' : ` · ${shuttleOrigin(c.originId)}`)}
-                  </option>
-                ))}
-              </select>
-            </label>
+              <ProjectPicker
+                projects={sortedCities}
+                selectedId={selectedCityId}
+                onSelect={setSelectedCityId}
+                onAddProject={onProjectAdded ? addProject.begin : undefined}
+              />
+            </div>
           )}
           <label style={{ flex: '1 1 8rem', display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
             <span className="capture-label" style={labelStyle}>Agent</span>

@@ -727,6 +727,27 @@ felt shuttle validate-identity                # UID migration/cross-city validat
   persisted `~/.config/felt/stores.json`. There is no implicit default store
   and no legacy shuttle-named registry authority. `POST
   /api/v1/felt-stores` rewrites the persisted file.
+- **Picker projects** are a separate list — `FELT_PROJECTS` → persisted
+  `~/.config/felt/projects.json` (`Shuttle.Projects`) — and answer a different
+  question: which checkouts a human can file INTO from the Stash/Capture forms.
+  Kept out of the poll list on purpose, so polling never walks TCC-protected
+  paths. Served at `origins.<host>.projects` of `GET /api/v1/felt-stores`. The
+  file is hand-editable, but no longer hand-edit-only: both forms share one
+  combobox (`ui/src/forms/ProjectPicker.tsx`; Capture's native `<select>` is
+  gone, since a `<select>` cannot carry a row that acts as a button) whose
+  FIRST row is "Add a new project…", over `POST /api/v1/projects`
+  (`{"path": …}` — initializes `<path>/.felt` when absent, exactly as `felt
+  init` does, then appends the path; idempotent). Choosing the folder is
+  **native-first**: `POST /api/v1/choose-folder` raises the owning host's own
+  dialog (`Shuttle.FolderPicker` — Finder via `osascript`, else zenity, else
+  kdialog) and answers `{ok: true, path}`, `{ok: false, cancelled: true}` on a
+  dismissal, or 501 when the host has none. It blocks until the human answers
+  (bounded at five minutes). `GET /api/v1/browse` — the owner-routed
+  subdirectory listing behind `DirectoryPicker` — is the automatic fallback for
+  remote origins (their dialog would open on a desktop nobody is at) and for
+  hosts with no dialog; the UI picks between them from the
+  `native_folder_picker` flag on each origin of `GET /api/v1/felt-stores`. All
+  three endpoints are owner-routed.
 - **Dispatcher** (`lib/shuttle/dispatcher.ex`) resolves the agent, spawns
   the `<leaf>-<uid>-shuttle` tmux session.
 - **Standing roles** — `shuttle.kind: standing` with a cron `schedule:`.
