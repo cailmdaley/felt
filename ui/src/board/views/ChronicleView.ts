@@ -79,6 +79,12 @@ import {
   windowOf,
   type DayRange,
 } from './chronicleWindow.js'
+import {
+  fetchRecordHits,
+  localHits,
+  mergeHits,
+  type SearchHit,
+} from './chronicleSearch.js'
 import { cycleSpan } from '../KanbanRules.js'
 import { restingCards } from '../KanbanReadModel.js'
 import './ChronicleView.css'
@@ -100,13 +106,28 @@ const VISIBLE_PAST_DAYS = 14
 const VISIBLE_FUTURE_DAYS = 7
 const VISIBLE_DAYS = VISIBLE_PAST_DAYS + VISIBLE_FUTURE_DAYS + 1
 
+/**
+ * How long the hand must rest before the record is searched.
+ *
+ * The local half (names, ids) never waits — it is a filter over memory. This
+ * governs only the daemon's body search, which is a `felt ls --body` per store:
+ * ~0.6s on the live loom, cheap enough to run per pause and far too expensive
+ * to run per keystroke.
+ */
+const SEARCH_DEBOUNCE_MS = 250
+
 /** Bounds on the fitted day width, so a very narrow or very wide board still
  *  gets columns a day numeral fits in and marks read at. */
 const DAY_W_MIN_PX = 16
 const DAY_W_MAX_PX = 56
 
-/** Rows drawn before the "+N more" expander takes over. */
-const MAX_ROWS = 40
+// NO ROW CAP. The page used to draw 40 rows and hide the rest behind a
+// "+N more" click, which was a display default rather than a budget: a row is
+// a label and a track plus one segment per day it was worked, and the drawn
+// window holds ~90 rows today against ~415 shuttle fibers in the whole record —
+// a few thousand elements at the extreme of scrolling back a year, which is
+// nothing a grid struggles with. The chronicle IS the record; asking to see all
+// of it should not be a gesture. It scrolls.
 /**
  * Where today sits across the day area on the first render. This is the same
  * statement as the visible split — 14 past of 22 visible days IS 65% — so the
@@ -1126,7 +1147,6 @@ class ChronicleView implements TemporalView {
    *  so a slow fetch can never overwrite a newer render. */
   private generation = 0
   private signature = ''
-  private expanded = false
   private didAnchor = false
   /** The sticky month bearing in the corner cell, and what it currently says.
    *  Held so a scroll can repaint one word without touching the grid. */
@@ -1233,6 +1253,24 @@ class ChronicleView implements TemporalView {
   private activityOrigins: TemporalOrigins = {}
   private origins: TemporalOrigins = {}
 
+  // ── Search ────────────────────────────────────────────────────────────────
+  /** The head's search box, while mounted. */
+  private searchBox: { input: HTMLInputElement; list: HTMLElement } | null = null
+  /** What is typed, trimmed. The local half re-filters on it every keystroke. */
+  private searchQuery = ''
+  /** The daemon's body-search answer, and the query it answers — held together
+   *  so a reply that lands after the hand moved on is never shown for the
+   *  wrong words. */
+  private recordHits: readonly SearchHit[] = []
+  private recordHitsFor = ''
+  private searchTimer: number | null = null
+  /** Bumps per record search, so only the newest reply may paint. */
+  private searchSeq = 0
+  /** The fiber the reader jumped to. Its lifeline stays lit until another jump
+   *  or a cleared search — the record is long, and a highlight that faded
+   *  would leave you back where you started. */
+  private foundId: string | null = null
+
   mount(host: HTMLElement, ctx: ViewContext): void {
     const page = createViewPage(this.title)
     this.root = page.root
@@ -1246,14 +1284,12 @@ class ChronicleView implements TemporalView {
     this.didAnchor = false
     this.anchoredOn = null
     this.dayWidthPx = 0
-    // The registry holds ONE instance of this view for the life of the page, so
-    // every field here outlives the mount that set it. "Show me the other 40
-    // rows" is a decision about one visit, not a preference — leaving it set
-    // meant a board opened tomorrow still had yesterday's list unrolled, with
-    // no expander visible to explain why.
-    this.expanded = false
     this.monthEl = null
     this.monthText = ''
+    // The head's right end. `titleRow` is `space-between` with an out-of-flow
+    // centre, so a third child lands at the right margin without any of the
+    // three moving the others.
+    page.titleRow.append(this.buildSearch(ctx))
     host.append(page.root)
 
     // Refit the columns when the board changes width. Only the CSS variable
@@ -1305,6 +1341,17 @@ class ChronicleView implements TemporalView {
     this.monthText = ''
     this.resizeObserver?.disconnect()
     this.resizeObserver = null
+    // A search is a question about one visit, like the era scope above it: the
+    // box goes with the head that held it, and a pending debounce must not fire
+    // into a torn-down view.
+    if (this.searchTimer !== null) window.clearTimeout(this.searchTimer)
+    this.searchTimer = null
+    this.searchSeq += 1
+    this.searchBox = null
+    this.searchQuery = ''
+    this.recordHits = []
+    this.recordHitsFor = ''
+    this.foundId = null
     this.root?.remove()
     this.root = null
     this.body = null
@@ -1314,6 +1361,213 @@ class ChronicleView implements TemporalView {
     this.didAnchor = false
     this.anchoredOn = null
     this.dayWidthPx = 0
+  }
+
+  // ── Search ────────────────────────────────────────────────────────────────
+
+  /**
+   * The head's search box: one input, and a list of hits under it.
+   *
+   * TWO CLOCKS, ONE LIST — see ./chronicleSearch.ts for the whole of that
+   * argument. Names and ids come from the cards this page is already holding
+   * and re-filter on the keystroke; bodies come from the daemon, debounced,
+   * and are merged into the same list when they land. Nothing about the list
+   * jumps as the second half arrives: the merge sorts on one rank scale, so
+   * the instant answers keep their places and the body hits fall in around
+   * them.
+   */
+  private buildSearch(mountCtx: ViewContext): HTMLElement {
+    // Every handler below reads `this.ctx`, never the context this box was
+    // built with: the view is mounted once and refreshed on every poll, so a
+    // closure over the mount-time context would search yesterday's cards.
+    const current = (): ViewContext => this.ctx ?? mountCtx
+
+    const box = document.createElement('div')
+    box.className = 'chr-search'
+
+    const input = document.createElement('input')
+    input.type = 'search'
+    input.className = 'chr-search-input'
+    input.placeholder = 'search the record'
+    input.setAttribute('aria-label', 'Search every constitution, body text included')
+
+    const list = document.createElement('div')
+    list.className = 'chr-search-hits'
+    list.setAttribute('role', 'listbox')
+
+    box.append(input, list)
+    this.searchBox = { input, list }
+
+    input.addEventListener('input', () => {
+      this.searchQuery = input.value.trim()
+      // The local half is free, so it repaints on the keystroke; the record
+      // half is a shell-out, so it waits for the hand to stop.
+      this.paintHits(current())
+      this.scheduleRecordSearch(current())
+    })
+    input.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape') return
+      // The board closes itself on Escape and the era scope leaves on it;
+      // abandoning a search comes before both.
+      e.stopPropagation()
+      this.clearSearch(current())
+      input.blur()
+    })
+    // Focus decides whether the list is showing, EXCEPT while the pointer is
+    // going down on a hit — mousedown fires before blur, and without this the
+    // list would close out from under the click that was choosing from it.
+    list.addEventListener('mousedown', (e) => e.preventDefault())
+    input.addEventListener('focus', () => box.classList.add('chr-search-open'))
+    input.addEventListener('blur', () => box.classList.remove('chr-search-open'))
+
+    return box
+  }
+
+  /** Debounced record (body) search. One in flight at a time; only the newest
+   *  reply may paint, so a slow store cannot overwrite a later answer. */
+  private scheduleRecordSearch(ctx: ViewContext): void {
+    if (this.searchTimer !== null) window.clearTimeout(this.searchTimer)
+    const query = this.searchQuery
+    if (query.length < 2) {
+      // One letter matches most of the record and costs a full walk to say so.
+      this.recordHits = []
+      this.recordHitsFor = ''
+      return
+    }
+    const seq = (this.searchSeq += 1)
+    this.searchTimer = window.setTimeout(() => {
+      this.searchTimer = null
+      void fetchRecordHits(ctx.shuttleBase, query)
+        .then((hits) => {
+          if (seq !== this.searchSeq || this.searchQuery !== query) return
+          this.recordHits = hits
+          this.recordHitsFor = query
+          this.paintHits(ctx)
+        })
+        .catch(() => {
+          // The daemon could not answer. The local half already has, and a
+          // list that silently keeps working on names beats an error where
+          // the answers were.
+        })
+    }, SEARCH_DEBOUNCE_MS)
+  }
+
+  private clearSearch(ctx: ViewContext): void {
+    this.searchQuery = ''
+    this.recordHits = []
+    this.recordHitsFor = ''
+    if (this.searchTimer !== null) window.clearTimeout(this.searchTimer)
+    this.searchTimer = null
+    this.searchSeq += 1
+    if (this.searchBox) this.searchBox.input.value = ''
+    this.setFound(null)
+    this.paintHits(ctx)
+  }
+
+  /** Draw the merged list. Pure logic lives in ./chronicleSearch.ts; this is
+   *  the DOM around it. */
+  private paintHits(ctx: ViewContext): void {
+    const box = this.searchBox
+    if (!box) return
+    box.list.replaceChildren()
+    if (!this.searchQuery) return
+
+    const boardIds = new Set(ctx.cards.map((c) => c.id))
+    const record = this.recordHitsFor === this.searchQuery ? this.recordHits : []
+    const hits = mergeHits(localHits(ctx.cards, this.searchQuery), record, boardIds)
+
+    if (hits.length === 0) {
+      const none = document.createElement('div')
+      none.className = 'chr-search-none'
+      none.textContent =
+        this.recordHitsFor === this.searchQuery ? 'nothing in the record' : 'searching the record…'
+      box.list.append(none)
+      return
+    }
+
+    for (const hit of hits) box.list.append(this.buildHit(hit, ctx))
+  }
+
+  private buildHit(hit: SearchHit, ctx: ViewContext): HTMLElement {
+    const el = document.createElement('button')
+    el.type = 'button'
+    el.className = `chr-hit${hit.onBoard ? '' : ' chr-hit-off'}`
+    el.setAttribute('role', 'option')
+
+    const name = document.createElement('span')
+    name.className = 'chr-hit-name'
+    name.textContent = hit.name
+
+    const id = document.createElement('span')
+    id.className = 'chr-hit-id'
+    id.textContent = hit.id
+
+    el.append(name, id)
+
+    // WHY this row is in the list. An excerpt when the words were in the body
+    // or the outcome — that is the whole point of asking the daemon — and
+    // otherwise nothing, because "matched on its name" is visible above.
+    if (hit.excerpt) {
+      const why = document.createElement('span')
+      why.className = 'chr-hit-why'
+      why.textContent = hit.excerpt
+      el.append(why)
+    }
+
+    el.title = hit.onBoard
+      ? `${hit.id} — jump to its lifeline`
+      : `${hit.id} — in the record, not on this board`
+    el.addEventListener('click', () => this.jumpTo(hit, ctx))
+    return el
+  }
+
+  /**
+   * What a hit does when you pick it.
+   *
+   * A fiber the page is DRAWING is jumped to: its lifeline is lit and scrolled
+   * into view, which is the chronicle's own answer to "where is this in the
+   * record". A fiber the page holds as a card but has no row for (closed long
+   * before the drawn window, most often) opens its card overlay instead — the
+   * same affordance a row's name click uses, and the only one that can show a
+   * fiber that is not on screen. A hit the board has never heard of can do
+   * neither, and says so rather than clicking dead.
+   */
+  private jumpTo(hit: SearchHit, ctx: ViewContext): void {
+    this.setFound(hit.id)
+    if (this.scrollToFound()) return
+    if (ctx.cards.some((c) => c.id === hit.id)) ctx.openCard(hit.id)
+  }
+
+  /** Light the found row, and unlight whatever was lit. Survives a re-render
+   *  because `render` calls back into it once the new grid is built. */
+  private setFound(id: string | null): void {
+    this.foundId = id
+    this.paintFound()
+  }
+
+  private paintFound(): void {
+    const scroller = this.scroller
+    if (!scroller) return
+    for (const el of scroller.querySelectorAll('.chr-found')) el.classList.remove('chr-found')
+    if (this.foundId === null) return
+    for (const el of this.rowElements(this.foundId)) el.classList.add('chr-found')
+  }
+
+  /** True iff there was a row to scroll to. */
+  private scrollToFound(): boolean {
+    if (this.foundId === null) return false
+    const [first] = this.rowElements(this.foundId)
+    if (!first) return false
+    // Vertical only: the horizontal position is the reader's place in TIME, and
+    // taking it away to centre a row would answer a question nobody asked.
+    first.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' })
+    return true
+  }
+
+  private rowElements(cardId: string): HTMLElement[] {
+    const scroller = this.scroller
+    if (!scroller) return []
+    return [...scroller.querySelectorAll<HTMLElement>(`[data-fiber="${CSS.escape(cardId)}"]`)]
   }
 
   /** One window fetch, then a signature check, then at most one DOM rebuild. */
@@ -1405,7 +1659,6 @@ class ChronicleView implements TemporalView {
       days[0].iso,
       String(buckets.length),
       String(latest),
-      this.expanded ? 'x' : 'c',
       // The cursor is in here so a move made in another view re-anchors this
       // page's scroll on arrival, rather than being skipped as "no change".
       ctx.focusDate ?? '',
@@ -1509,16 +1762,13 @@ class ChronicleView implements TemporalView {
       return
     }
 
-    const hidden = this.expanded ? 0 : Math.max(0, rows.length - MAX_ROWS)
-    const shown = hidden > 0 ? rows.slice(0, MAX_ROWS) : rows
-    // The density scale is the whole record's, not the visible slice's — the
-    // expander must not redraw every other row's segments.
+    const shown = rows
     const peak = peakSpellWork(rows)
 
     const bands = this.collectBands(ctx, days, dayIndex)
     // Always at least one lane: empty, the strip is the target you draw on.
     const laneCount = Math.max(1, ...bands.map((b) => b.lane + 1))
-    const bodyRows = shown.length + (hidden > 0 ? 1 : 0)
+    const bodyRows = shown.length
 
     const scroller = document.createElement('div')
     scroller.className = 'chr-scroll'
@@ -1545,7 +1795,6 @@ class ChronicleView implements TemporalView {
       }
       grid.append(...parts)
     }
-    if (hidden > 0) grid.append(this.buildExpander(hidden, r++))
     // Appended LAST so it paints over the bands and the lifelines: today is one
     // unbroken line down the page, not a line that stops at whatever happens to
     // overlap it. Same stacking level as the tracks, so DOM order decides — and
@@ -1575,6 +1824,8 @@ class ChronicleView implements TemporalView {
     scroller.addEventListener('scroll', this.onScroll, { passive: true })
     this.fitDayWidth()
     this.bearMonth()
+    // The grid is new; the jump the reader made is not. Re-light it.
+    this.paintFound()
 
     // The cursor decides where the page opens. Null means today — re-resolved
     // against the clock every render, never frozen at the day we first saw. A
@@ -3263,6 +3514,9 @@ class ChronicleView implements TemporalView {
       ;(name as HTMLButtonElement).type = 'button'
       name.addEventListener('click', () => ctx.openCard(cardId))
     }
+    // The handle the search jumps by. On BOTH halves of the row, so lighting a
+    // hit lights the whole line rather than only its gutter.
+    if (row.cardId) label.dataset.fiber = row.cardId
 
     const note = document.createElement('span')
     // The note's slot already names the owning host, so the waiting badge
@@ -3296,6 +3550,7 @@ class ChronicleView implements TemporalView {
 
     const track = document.createElement('div')
     track.className = `chr-track${waiting ? ' chr-track-waiting' : ''}`
+    if (row.cardId) track.dataset.fiber = row.cardId
     track.style.gridColumn = `2 / span ${days.length}`
     track.style.gridRow = gridRow
 
@@ -3373,24 +3628,6 @@ class ChronicleView implements TemporalView {
     }
 
     return [label, track]
-  }
-
-  /** Lives in the label gutter, not across the whole row: the gutter is the one
-   *  column with an opaque sticky backing, so a full-width expander would let
-   *  the day washes show through where a row label normally covers them. */
-  private buildExpander(hidden: number, r: number): HTMLElement {
-    const btn = document.createElement('button')
-    btn.type = 'button'
-    btn.className = 'chr-more'
-    btn.style.gridColumn = '1'
-    btn.style.gridRow = String(r + 2)
-    btn.textContent = `+${hidden} more`
-    btn.addEventListener('click', () => {
-      this.expanded = true
-      this.signature = ''
-      if (this.ctx) void this.load(this.ctx)
-    })
-    return btn
   }
 
   /**

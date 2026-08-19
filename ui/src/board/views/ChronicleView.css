@@ -1000,32 +1000,6 @@ button.chr-name:hover {
 .chr-mark-dragging { cursor: grabbing; opacity: 0.85; }
 .chr-launch { color: #3D5BA0; font-size: calc(12.5px * var(--kbn-type-scale, 1)); opacity: 0.75; }
 
-/* ── The rest of the record ─────────────────────────────────────────────── */
-
-.chr-more {
-  position: sticky;
-  left: 0;
-  z-index: 3;
-  width: 100%;
-  text-align: left;
-  padding: 0 13px 0 4px;
-  background: #EDE2CE;
-  border: 0;
-  border-right: 0.5px solid rgba(122, 111, 92, 0.30);
-  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
-  font-style: italic;
-  font-size: calc(12px * var(--kbn-type-scale, 1));
-  line-height: var(--chr-row-h);
-  color: #7A6F5C;
-  cursor: pointer;
-}
-.chr-more:hover {
-  color: #1B1611;
-  text-decoration: underline;
-  text-decoration-thickness: 0.5px;
-  text-underline-offset: 2px;
-}
-
 /* ── The key ────────────────────────────────────────────────────────────── */
 
 /* A caption under the grid, not a legend box — the same marginal italic serif
@@ -1112,4 +1086,136 @@ button.chr-name:hover {
 .chr-face-memoir {
   max-height: 27vh;
   overflow-y: auto;
+}
+
+/* ── Searching the record ───────────────────────────────────────────────── */
+
+/* The head's right end. A rule under a line of text rather than a boxed field:
+   the page is a chronicle, and its one control should read as a margin note you
+   can type in, not as a form. The hit list hangs off it, which is why the box
+   is the positioning context. */
+.chr-search {
+  position: relative;
+  flex: 0 0 auto;
+  align-self: center;
+}
+
+.chr-search-input {
+  width: 190px;
+  padding: 2px 4px;
+  border: 0;
+  border-bottom: 0.5px solid rgba(122, 111, 92, 0.42);
+  background: transparent;
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-style: italic;
+  font-size: calc(13px * var(--kbn-type-scale, 1));
+  color: #1B1611;
+  outline: none;
+  /* Wider once you are in it — the query gets room without the head ever
+     changing height. */
+  transition: width 160ms ease-out, border-color 160ms ease-out;
+}
+.chr-search-input:focus {
+  width: 260px;
+  border-bottom-color: #9A7B35;
+}
+.chr-search-input::placeholder { color: #A89B83; }
+/* WebKit's own clear affordance is a grey circle in a parchment margin. */
+.chr-search-input::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
+
+/* The hits. Absolute, so opening the list never reflows the head or the grid
+   under it, and above everything the page positions (the sticky gutter sits at
+   z 3, the cycle inputs at 6). */
+.chr-search-hits {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 20;
+  width: 380px;
+  max-height: 46vh;
+  overflow-y: auto;
+  background: rgba(255, 251, 237, 0.99);
+  border: 0.5px solid rgba(122, 111, 92, 0.34);
+  border-radius: 3px;
+  box-shadow: 0 3px 10px rgba(27, 22, 17, 0.14);
+}
+/* Nothing typed, nothing found, nothing focused: no panel at all. `:empty`
+   carries the first two; the focus rule carries the third, so a list left open
+   behind a click elsewhere folds away. */
+.chr-search-hits:empty { display: none; }
+.chr-search:not(.chr-search-open) .chr-search-hits { display: none; }
+
+.chr-search-none {
+  padding: 8px 10px;
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-style: italic;
+  font-size: calc(12px * var(--kbn-type-scale, 1));
+  color: #A89B83;
+}
+
+/* One hit is three lines at most: the name, its address, and — when the words
+   were found in the body or the outcome — the passage they were found in. */
+.chr-hit {
+  display: block;
+  width: 100%;
+  padding: 6px 10px;
+  border: 0;
+  border-bottom: 0.5px solid rgba(122, 111, 92, 0.16);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.chr-hit:last-child { border-bottom: 0; }
+.chr-hit:hover { background: rgba(196, 147, 51, 0.12); }
+
+.chr-hit-name {
+  display: block;
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-size: calc(13px * var(--kbn-type-scale, 1));
+  color: #1B1611;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chr-hit-id {
+  display: block;
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: calc(9.5px * var(--kbn-type-scale, 1));
+  color: #A89B83;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The passage. Two lines, clamped — an excerpt that grows into a paragraph
+   turns the list into a document. */
+.chr-hit-why {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin-top: 2px;
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-style: italic;
+  font-size: calc(11.5px * var(--kbn-type-scale, 1));
+  line-height: 1.35;
+  color: #7A6F5C;
+}
+
+/* IN THE RECORD, NOT ON THIS BOARD. Still listed — it is an honest answer to
+   the question asked — but quieter, because the click cannot take you to a
+   lifeline that is not drawn. */
+.chr-hit-off .chr-hit-name { color: #7A6F5C; }
+.chr-hit-off { cursor: default; }
+
+/* THE JUMP LANDS HERE. Gold, the page's own "this is the one" pigment (it is
+   what `due` and the cycle bands are inked in), and it STAYS: the record is
+   long, and a highlight that faded after a beat would leave the reader exactly
+   where they were before they searched. Cleared by the next jump, or by
+   clearing the search. */
+.chr-found.chr-label {
+  background: rgba(196, 147, 51, 0.20);
+  box-shadow: inset 2px 0 0 #C49333;
+}
+.chr-found.chr-track {
+  background: rgba(196, 147, 51, 0.10);
 }
