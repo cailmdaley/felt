@@ -1455,8 +1455,15 @@ export class KanbanSurfaceRenderer {
     // facts about the card (actor, due), left of the right-aligned actions.
     this.renderQueuedChip(card, meta)
 
+    // Built here (it reads `kind`/`card` in scope with everything above), but
+    // NOT appended yet — its `margin-left: auto` claims all space remaining
+    // at the point it lands in `meta`, so anything appended after it (the
+    // phase badge, the held pill, the worker pill) has nowhere left to sit
+    // and wraps to a second line. Appending it last — after every other
+    // meta chip has staked its width — is what keeps a single row.
+    let reviewMetaActions: HTMLDivElement | undefined
     if ((kind === 'drafts' || kind === 'awaitingReview' || kind === 'inFlight') && !isStale) {
-      const reviewMetaActions = document.createElement('div')
+      reviewMetaActions = document.createElement('div')
       reviewMetaActions.className = 'kbn-card-review-meta-actions'
 
       const temperMetaBtn = document.createElement('button')
@@ -1480,7 +1487,6 @@ export class KanbanSurfaceRenderer {
       })
 
       reviewMetaActions.append(temperMetaBtn, compostMetaBtn)
-      meta.append(reviewMetaActions)
     }
 
     // A phase badge and a live-worker pill exclude each other. The worker-less
@@ -1588,6 +1594,7 @@ export class KanbanSurfaceRenderer {
       })
       meta.append(w)
     }
+    if (reviewMetaActions) meta.append(reviewMetaActions)
     el.append(meta)
 
     // A card still on a working column while unsatisfied is an ARMED oneshot
