@@ -6,9 +6,10 @@ defmodule Shuttle.Moment do
   activity marks. A mark says *that* something happened; it cannot say *what*.
   The transcript can. Claude Code writes one JSONL file per session under
   `~/.claude/projects/<cwd-slug>/<session-uuid>.jsonl`, one line per
-  conversation record, each stamped with an ISO-8601 `timestamp`. Given a
+  conversation record, each stamped with an ISO-8601 `timestamp` — and pi
+  writes the same kind of thing under `~/.pi/agent/sessions/`. Given a
   session UUID and a minute window, this module returns the handful of messages
-  that fell inside it.
+  that fell inside it, whichever harness wrote them.
 
   ## What counts as a word
 
@@ -112,8 +113,19 @@ defmodule Shuttle.Moment do
   skipped. A missing directory, a missing transcript, or an unreadable file
   yields `[]`. Nothing here raises, because the caller is a hover.
 
-  Other harnesses (codex, pi) write elsewhere in other shapes; they are out of
-  scope and yield `[]`.
+  Codex still writes elsewhere in yet another shape and yields `[]`.
+
+  ## Two harnesses, one reader
+
+  Pi's transcript differs from claude's in envelope, not in kind: turns nest
+  under `"message"` with a `role` of `user`/`assistant`/`toolResult`, tool
+  calls are `toolCall` blocks with lowercase names, and a tool result is a
+  turn of its own rather than a block inside a user record. Rather than fork
+  the reading logic, pi records are NORMALIZED into the claude shape at decode
+  time — `normalize_record/1` recognizes the pi envelope by shape (claude
+  never uses it), so no path sniffing, and everything downstream — prose,
+  delegation register, tool listing — runs harness-agnostic. A pi minute reads
+  like a claude one because by the time it is read, it is one.
 
   ## Bounds
 
@@ -177,14 +189,15 @@ defmodule Shuttle.Moment do
   # basename) or a search pattern. Folded into the aggregate's single footer
   # hint this would be noise; one line to itself, it is the useful part of
   # the call.
-  @path_hint_tools ~w(Read Edit Write NotebookEdit)
+  @path_hint_tools ~w(Read Edit Write NotebookEdit Multiedit)
   @pattern_hint_tools ~w(Grep Glob)
 
   # The tools whose call is a DELEGATION — a unit of work handed to an agent of
   # its own — rather than an action taken here. What makes them their own
   # register is that both ends are legible: the prompt going out and the report
   # coming back are the two sentences that say what that stretch of time was.
-  @spawn_tools ~w(Agent Task Workflow)
+  # ("Subagent" is pi's delegate tool after name normalization.)
+  @spawn_tools ~w(Agent Task Workflow Subagent)
 
   # A delegation excerpt's ordinary cut. Shorter than prose because a prompt is
   # a briefing and a report is a document: the first two lines identify it, and
@@ -461,17 +474,34 @@ defmodule Shuttle.Moment do
   The transcript file for `session`, or `nil` when no harness on this host
   wrote one. Public because "are there words here at all?" is a question worth
   asking without reading them.
+
+  Each harness root is globbed in turn — claude-code first, then pi — and the
+  first regular-file hit wins. Pi leads its basenames with an ISO stamp, so
+  its glob carries a second `*`; the session id is UUID-validated before any
+  of this, so it remains the only caller-supplied pattern component.
   """
   @spec transcript_path(String.t(), keyword()) :: String.t() | nil
   def transcript_path(session, opts \\ []) when is_binary(session) do
     if Regex.match?(@uuid, session) do
-      root = Keyword.get(opts, :root, projects_root())
-
-      root
-      |> Path.join("*/#{session}.jsonl")
-      |> Path.wildcard()
+      [Path.join(claude_root(opts), "*/#{session}.jsonl"), Path.join(pi_root(opts), "*/*#{session}.jsonl")]
+      |> Enum.flat_map(&Path.wildcard/1)
       |> Enum.find(&File.regular?/1)
     end
+  end
+
+  defp claude_root(opts), do: Keyword.get(opts, :root, projects_root())
+
+  defp pi_root(opts), do: Keyword.get(opts, :pi_root, pi_sessions_root())
+
+  @doc """
+  The pi sessions root — `$SHUTTLE_PI_SESSIONS_DIR`, else
+  `~/.pi/agent/sessions`. The env override exists for tests, mirroring
+  `projects_root/0`; nothing in production sets it.
+  """
+  @spec pi_sessions_root() :: String.t()
+  def pi_sessions_root do
+    System.get_env("SHUTTLE_PI_SESSIONS_DIR") ||
+      Path.join([System.user_home!() || "/root", ".pi", "agent", "sessions"])
   end
 
   # One pass, three harvests: the excerpts, the tool calls behind them, and the
@@ -517,14 +547,63 @@ defmodule Shuttle.Moment do
   end
 
   defp decode_record(line) do
-    with {:ok, record} <- Jason.decode(line),
-         true <- is_map(record),
+    with {:ok, raw} <- Jason.decode(line),
+         true <- is_map(raw),
+         {:ok, record} <- normalize_record(raw),
          {:ok, at_ms} <- at_ms(record) do
       {:ok, Map.put(record, :at_ms, at_ms)}
     else
       _ -> :skip
     end
   end
+
+  # The one place the harness shapes meet. A pi record announces itself by its
+  # envelope — `"type": "message"` with the turn nested under `"message"`, a
+  # shape claude never uses — so translation needs no path sniffing; claude
+  # records pass through untouched.
+  defp normalize_record(%{"type" => "message", "message" => %{"role" => role} = msg} = raw)
+       when role in ~w(user assistant toolResult) do
+    {:ok,
+     %{
+       "type" => if(role == "toolResult", do: "user", else: role),
+       "timestamp" => raw["timestamp"],
+       "message" => %{"content" => pi_content(role, msg)}
+     }}
+  end
+
+  defp normalize_record(raw), do: {:ok, raw}
+
+  # A pi turn's content, in claude's block vocabulary. Assistant `toolCall`
+  # blocks become `tool_use` (lowercase name capitalized, so a pi minute reads
+  # like a claude one); a `toolResult` turn — a record of its own in pi, where
+  # claude nests the result inside a user record — becomes a user record
+  # carrying one `tool_result` block keyed the way `result_mark/4` looks it up.
+  defp pi_content("assistant", %{"content" => blocks}) when is_list(blocks) do
+    Enum.map(blocks, fn
+      %{"type" => "toolCall", "id" => id, "name" => name} = block when is_binary(name) ->
+        %{
+          "type" => "tool_use",
+          "id" => id,
+          "name" => String.capitalize(name),
+          "input" => block["arguments"] || %{}
+        }
+
+      block ->
+        block
+    end)
+  end
+
+  defp pi_content("assistant", content), do: content
+
+  defp pi_content("user", %{"content" => content}), do: content
+
+  defp pi_content("user", _), do: []
+
+  defp pi_content("toolResult", %{"toolCallId" => id, "content" => blocks}) do
+    [%{"type" => "tool_result", "tool_use_id" => id, "content" => from_content(blocks)}]
+  end
+
+  defp pi_content("toolResult", _), do: []
 
   # A record's excerpts: its delegation, if it is one end of one, else its
   # prose. Never both — a record that spawned an agent said nothing else worth
@@ -570,12 +649,12 @@ defmodule Shuttle.Moment do
   defp note_spawns(spawns, _record), do: spawns
 
   # Who was sent. `name` is the teammate's own — the same string its report
-  # comes back under — so it is preferred; `subagent_type` names the role when
-  # nobody named the agent; `description` is the caller's own summary of the
-  # errand and is the last resort.
+  # comes back under — so it is preferred; `subagent_type` (claude) and
+  # `agent` (pi) name the role when nobody named the agent; `description` is
+  # the caller's own summary of the errand and is the last resort.
   defp spawn_name(input) do
     agent_name(input["name"]) || agent_name(input["subagent_type"]) ||
-      agent_name(input["description"])
+      agent_name(input["agent"]) || agent_name(input["description"])
   end
 
   defp delegation(%{"type" => "assistant", "message" => %{"content" => blocks}} = record, max, _s)
@@ -583,7 +662,7 @@ defmodule Shuttle.Moment do
     Enum.flat_map(blocks, fn
       %{"type" => "tool_use", "name" => tool, "input" => input} when is_map(input) ->
         if tool in @spawn_tools,
-          do: mark(record, "assistant", "spawn", spawn_name(input), input["prompt"], max),
+          do: mark(record, "assistant", "spawn", spawn_name(input), input["prompt"] || input["task"], max),
           else: []
 
       _block ->
@@ -764,7 +843,16 @@ defmodule Shuttle.Moment do
 
   defp call_hint(name, input), do: hint(name, input) || path_hint(name, input)
 
+  # Claude names the file argument `file_path`; pi names it `path`.
   defp path_hint(name, %{"file_path" => path})
+       when name in @path_hint_tools and is_binary(path) do
+    case trim(Path.basename(path), @tool_hint_chars) do
+      {:ok, base} -> base
+      _ -> nil
+    end
+  end
+
+  defp path_hint(name, %{"path" => path})
        when name in @path_hint_tools and is_binary(path) do
     case trim(Path.basename(path), @tool_hint_chars) do
       {:ok, base} -> base

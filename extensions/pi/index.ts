@@ -214,8 +214,28 @@ export default function feltExtension(pi: ExtensionAPI) {
 
 	pi.on("tool_result", async (event, ctx) => {
 		const input = event.input as any;
+		const sid = sessionId(ctx);
 
-		// Recency stamping for direct fiber edits (posttool).
+		// Every tool's return closes the interval its PreToolUse opened — the
+		// activity stream pairs pre/post per session to fill the minutes a long
+		// call actually ran, and a harness that only reports half the pair draws
+		// holes where work happened. Bash additionally feeds the commit ledger;
+		// direct fiber edits additionally get their recency stamp.
+		emit("PostToolUse", { tool_name: event.toolName, tool_input: input ?? {} }, ctx);
+
+		if (event.toolName === "bash") {
+			runHook(
+				["commit"],
+				{
+					hook_event_name: "PostToolUse",
+					session_id: sid,
+					cwd: ctx.cwd,
+					tool_name: "Bash",
+					tool_input: { command: String(input?.command ?? "") },
+				},
+			);
+		}
+
 		if (["edit", "write", "multiedit"].includes(event.toolName.toLowerCase())) {
 			runHook(
 				["posttool"],
@@ -227,18 +247,6 @@ export default function feltExtension(pi: ExtensionAPI) {
 			);
 		}
 
-		// Commit ledger for Bash calls.
-		if (event.toolName === "bash") {
-			const payload = {
-				hook_event_name: "PostToolUse",
-				session_id: sessionId(ctx),
-				cwd: ctx.cwd,
-				tool_name: "Bash",
-				tool_input: { command: String(input?.command ?? "") },
-			};
-			runHook(["commit"], payload);
-			emit("PostToolUse", { tool_name: "Bash", tool_input: input ?? {} }, ctx);
-		}
 		return undefined;
 	});
 

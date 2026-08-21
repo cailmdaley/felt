@@ -4,11 +4,14 @@ defmodule Shuttle.TokenSpend do
 
   Claude Code stamps every assistant message with a `usage` block — the four
   counters the API bills on (`input_tokens`, `output_tokens`,
-  `cache_creation_input_tokens`, `cache_read_input_tokens`). The transcript
-  therefore already holds the answer to "what did this session spend"; nothing
-  has to be inferred, modelled, or priced. This module folds one session's
-  transcript into one bounded observation, and `Shuttle.SessionLedger` supplies
-  the fiber the session belonged to, so the same fold rolls up per fiber.
+  `cache_creation_input_tokens`, `cache_read_input_tokens`) — and pi does the
+  same under its own names (`input`, `output`, `cacheRead`, `cacheWrite`). The
+  transcript therefore already holds the answer to "what did this session
+  spend"; nothing has to be inferred, modelled, or priced. This module folds
+  one session's transcript into one bounded observation, and
+  `Shuttle.SessionLedger` supplies the fiber the session belonged to, so the
+  same fold rolls up per fiber. The two harness shapes meet (and are
+  translated) in `usage_of/1`; the fold below never heard of a harness.
 
   ## Collection never depends on inference
 
@@ -213,13 +216,36 @@ defmodule Shuttle.TokenSpend do
 
   defp absorb(line, {acc, seen} = unchanged) do
     with {:ok, record} <- Jason.decode(line),
-         %{"message" => %{"usage" => usage} = message} when is_map(usage) <- record,
-         false <- counted?(message["id"], seen) do
-      {add(acc, usage, message["model"], at_ms(record)), remember(seen, message["id"])}
+         {:ok, input, output, cache_r, cache_w, id, model, at_ms} <- usage_of(record),
+         false <- counted?(id, seen) do
+      {add(acc, input, output, cache_r, cache_w, model, at_ms), remember(seen, id)}
     else
       _ -> unchanged
     end
   end
+
+  # The one place the harness shapes meet. Claude stamps every assistant
+  # record with `message.usage` in API counter names and dedups on
+  # `message.id` (one record per content block — see the double-count trap).
+  # Pi nests the turn under `"message"` with its own counter names
+  # (`cacheRead`, `cacheWrite`), one record per turn with `responseId` as the
+  # identity. Both normalize here into `{usage-in-claude-keys, id, model,
+  # at_ms}`, so the fold below never heard of a harness.
+  defp usage_of(%{"type" => "message", "message" => %{"role" => "assistant"} = msg} = record) do
+    usage = msg["usage"] || %{}
+
+    {:ok, count(usage, "input"), count(usage, "output"), count(usage, "cacheRead"),
+     count(usage, "cacheWrite"), msg["responseId"], msg["model"], at_ms(record)}
+  end
+
+  defp usage_of(%{"message" => %{"usage" => usage} = message} = record) when is_map(usage) do
+    {:ok, count(usage, "input_tokens"), count(usage, "output_tokens"),
+     count(usage, "cache_read_input_tokens"), count(usage, "cache_creation_input_tokens"),
+     message["id"], message["model"], at_ms(record)}
+  end
+
+  defp usage_of(_), do: :skip
+
 
   defp counted?(id, seen) when is_binary(id), do: MapSet.member?(seen, id)
   defp counted?(_id, _seen), do: false
@@ -227,12 +253,12 @@ defmodule Shuttle.TokenSpend do
   defp remember(seen, id) when is_binary(id), do: MapSet.put(seen, id)
   defp remember(seen, _id), do: seen
 
-  defp add(acc, usage, model, at_ms) do
+  defp add(acc, input, output, cache_read, cache_write, model, at_ms) do
     counts = %{
-      input: count(usage, "input_tokens"),
-      output: count(usage, "output_tokens"),
-      cache_read: count(usage, "cache_read_input_tokens"),
-      cache_write: count(usage, "cache_creation_input_tokens")
+      input: input,
+      output: output,
+      cache_read: cache_read,
+      cache_write: cache_write
     }
 
     %{

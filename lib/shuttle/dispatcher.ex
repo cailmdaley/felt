@@ -1254,6 +1254,7 @@ defmodule Shuttle.Dispatcher do
   # Dispatch: fresh worker (new session) or resume previous.
   # `resume_intent` is `:fresh | {:previous, session_id}` from check_resume_intent/3.
   defp create_tmux_session(fiber_id, agent, work_dir, runner, prompt_context, resume_intent, opts) do
+    resume_intent = effective_resume_intent(resume_intent, agent, opts)
     session = session_name(fiber_id, Keyword.get(opts, :uid))
     felt_store = Keyword.get(opts, :felt_store, default_felt_store())
     worker_fiber_id = prompt_fiber_id(fiber_id, work_dir, runner)
@@ -1424,6 +1425,29 @@ defmodule Shuttle.Dispatcher do
         {command, :none}
     end
   end
+
+  # A resume is only meaningful WITHIN one harness: `pi --session <uuid>`
+  # cannot open a claude-code transcript and vice versa. When the ledger knows
+  # which harness recorded the target session and it is not the one being
+  # dispatched (an agent switch on the fiber — the pi-package fiber moving from
+  # a claude worker to a pi one), start fresh instead. The fallback `||`
+  # already made this self-heal one wasted launch later; refusing up front
+  # costs nothing and doesn't burn the launch. An UNKNOWN harness (older ledger
+  # lines, or a marker with no ledger line) still tries the resume — the
+  # fallback covers it, and declining a maybe-working resume would be worse.
+  @doc false
+  def effective_resume_intent({:previous, _session_id} = intent, agent, opts) do
+    prev_harness = opts |> Keyword.get(:previous_session) |> case do
+      %{harness: harness} when is_binary(harness) and harness != "" -> harness
+      _ -> nil
+    end
+
+    if prev_harness && prev_harness != Shuttle.SessionLedger.harness_for_cli(agent.cli),
+      do: :fresh,
+      else: intent
+  end
+
+  def effective_resume_intent(intent, _agent, _opts), do: intent
 
   # Spawn a tmux session from a run-script string.
   defp spawn_tmux(session, work_dir, run_script, runner) do
@@ -1623,6 +1647,19 @@ defmodule Shuttle.Dispatcher do
     end
   end
 
+  @doc false
+  # Pi's encoded-cwd directory: the absolute path with every "/" replaced by
+  # "-", bracketed by "--" — e.g. /home/user/loom → --home-user-loom--. The
+  # LEADING slash becomes a dash too, so the munge of /a/b starts with three
+  # dashes before the bracket is added; trimming it first is what keeps the
+  # encoding two-dash-fronted like pi's own directories. Public for tests,
+  # same as `codex_session_dirs/0` — this encoding was once wrong in exactly
+  # that leading slash, and every pi dispatch's session capture timed out.
+  def pi_sessions_dir(work_dir) do
+    encoded = "--" <> (work_dir |> String.trim_leading("/") |> String.replace("/", "-")) <> "--"
+    Path.join([pi_sessions_root(), encoded])
+  end
+
   defp find_session_file("codex", work_dir, fiber_id, dispatched_after) do
     paths =
       codex_session_dirs()
@@ -1649,20 +1686,23 @@ defmodule Shuttle.Dispatcher do
     end
   end
 
-  defp find_session_file("pi", work_dir, _fiber_id, _dispatched_after) do
-    home = System.user_home!()
-    # Pi's encoded-cwd: absolute path with "/" replaced by "-", bracketed by "--".
-    # e.g. /home/user/loom → --home-user-loom--
-    encoded = "--" <> String.replace(work_dir, "/", "-") <> "--"
-    dir = Path.join([home, ".pi", "agent", "sessions", encoded])
+  defp find_session_file("pi", work_dir, fiber_id, dispatched_after) do
+    dir = pi_sessions_dir(work_dir)
 
     case File.ls(dir) do
       {:ok, files} ->
-        sorted = Enum.sort(files)
-
-        case List.last(sorted) do
-          nil -> {:error, :not_found}
-          file -> {:ok, Path.join(dir, file)}
+        # Newest-first by filename — pi leads each basename with an ISO stamp,
+        # so descending name order is descending time, within a day and across
+        # them. The first transcript that matches cwd, recency, AND content is
+        # this dispatch's session; a bare newest-file pick would steal another
+        # worker's session whenever two pi workers share a cwd.
+        files
+        |> Enum.sort(:desc)
+        |> Enum.map(&Path.join(dir, &1))
+        |> Enum.find({:error, :not_found}, &pi_session_matches?(&1, work_dir, fiber_id, dispatched_after))
+        |> case do
+          {:error, :not_found} = miss -> miss
+          path -> {:ok, path}
         end
 
       {:error, reason} ->
@@ -1670,8 +1710,29 @@ defmodule Shuttle.Dispatcher do
     end
   end
 
+
   defp find_session_file(_cli, _work_dir, _fiber_id, _dispatched_after),
     do: {:error, :unsupported}
+
+  # The pi analog of `codex_session_matches?/4`: the transcript's session
+  # header names its cwd and start time, and the dispatch prompt's fiber line
+  # only appears once the first message lands (~1s after the header), so the
+  # whole file is searched — the retry loop above re-reads until it matches.
+  defp pi_session_matches?(path, work_dir, fiber_id, dispatched_after) do
+    with {:ok, content} <- File.read(path),
+         [first_line | _] <- String.split(content, "\n", parts: 2),
+         {:ok, event} <- Jason.decode(first_line),
+         "session" <- Map.get(event, "type"),
+         cwd when is_binary(cwd) <- Map.get(event, "cwd"),
+         timestamp when is_binary(timestamp) <- Map.get(event, "timestamp"),
+         {:ok, started_at, _} <- DateTime.from_iso8601(timestamp) do
+      Path.expand(cwd) == Path.expand(work_dir) and
+        DateTime.compare(started_at, DateTime.add(dispatched_after, -5, :second)) != :lt and
+        String.contains?(content, "Fiber: #{fiber_id}")
+    else
+      _ -> false
+    end
+  end
 
   # Codex files a rollout under the LOCAL civil day, not the UTC one. Verified
   # on disk: ~/.codex/sessions/2026/07/22/rollout-2026-07-22T17-41-02-*.jsonl
@@ -1709,6 +1770,13 @@ defmodule Shuttle.Dispatcher do
     case System.get_env("SHUTTLE_CODEX_SESSIONS_DIR") do
       dir when is_binary(dir) and dir != "" -> dir
       _ -> Path.join([System.user_home!(), ".codex", "sessions"])
+    end
+  end
+
+  defp pi_sessions_root do
+    case System.get_env("SHUTTLE_PI_SESSIONS_DIR") do
+      dir when is_binary(dir) and dir != "" -> dir
+      _ -> Path.join([System.user_home!(), ".pi", "agent", "sessions"])
     end
   end
 
@@ -1758,7 +1826,7 @@ defmodule Shuttle.Dispatcher do
 
   defp read_uuid_from_jsonl("pi", path, work_dir) do
     with {:ok, content} <- File.read(path),
-         first_line <- content |> String.split("\n") |> List.first(""),
+         first_line <- content |> String.split("\n", parts: 2) |> List.first(""),
          {:ok, event} <- Jason.decode(first_line),
          "session" <- Map.get(event, "type"),
          uuid when is_binary(uuid) and uuid != "" <- Map.get(event, "id"),

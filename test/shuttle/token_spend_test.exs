@@ -201,4 +201,64 @@ defmodule Shuttle.TokenSpendTest do
       assert TokenSpend.total([]).sessions == 0
     end
   end
+  describe "pi transcripts (the second harness)" do
+    setup do
+      root = Path.join(System.tmp_dir!(), "spend-pi-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(Path.join(root, "--Users-someone-project--"))
+      on_exit(fn -> File.rm_rf(root) end)
+
+      path =
+        Path.join([root, "--Users-someone-project--", "2026-08-21T18-19-21-052Z_#{@session}.jsonl"])
+
+      {:ok, root: root, path: path}
+    end
+
+    # Pi nests the turn under "message", names its counters its own way, and
+    # writes one record per turn (identity: responseId).
+    defp pi_assistant(response_id, at, overrides \\ %{}) do
+      usage =
+        Map.merge(%{"input" => 3, "output" => 50, "cacheRead" => 700, "cacheWrite" => 200}, overrides)
+
+      %{
+        "type" => "message",
+        "timestamp" => at,
+        "message" => %{
+          "role" => "assistant",
+          "responseId" => response_id,
+          "model" => "stealth/ox-alpha",
+          "usage" => usage
+        }
+      }
+    end
+
+    defp pi_spend(root), do: TokenSpend.for_session(@session, root: root, pi_root: root, cache: false)
+
+    test "folds pi's counters into the same observation", %{root: root, path: path} do
+      write!(path, [
+        pi_assistant("resp_a", "2026-08-21T18:20:00.000Z"),
+        pi_assistant("resp_b", "2026-08-21T18:25:00.000Z")
+      ])
+
+      result = pi_spend(root)
+
+      assert result.found
+      assert result.input == 6
+      assert result.output == 100
+      assert result.cache_read == 1_400
+      assert result.cache_write == 400
+      assert result.messages == 2
+      assert result.models == %{"stealth/ox-alpha" => %{input: 6, output: 100, cache_read: 1_400, cache_write: 400, messages: 2}}
+    end
+
+    test "a responseId repeated across records counts once", %{root: root, path: path} do
+      write!(path, for(_ <- 1..3, do: pi_assistant("resp_a", "2026-08-21T18:20:00.000Z")))
+
+      assert pi_spend(root).messages == 1
+    end
+
+    test "a claude root miss with no pi file is found: false, not an error", %{root: root} do
+      refute pi_spend(root).found
+    end
+  end
+
 end

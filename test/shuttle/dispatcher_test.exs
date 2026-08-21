@@ -1537,6 +1537,42 @@ defmodule Shuttle.DispatcherTest do
     refute script =~ "send-keys"
   end
 
+  describe "pi session capture" do
+    # The encoding was once wrong in the leading slash — /a/b munged to
+    # ---a-b-- (three dashes) where pi writes --a-b-- — and every pi dispatch's
+    # session-UUID capture timed out, so no ledger line, no resume, and no
+    # day-view attribution for any pi worker. This is that bug's tombstone.
+    test "pi_sessions_dir encodes the cwd the way pi does" do
+      assert Dispatcher.pi_sessions_dir("/home/user/loom") =~ "--home-user-loom--"
+      refute Dispatcher.pi_sessions_dir("/home/user/loom") =~ "---"
+
+      assert Dispatcher.pi_sessions_dir("/Users/cd280747/dev/felt") =~
+               "--Users-cd280747-dev-felt--"
+    end
+
+    @prev %{uuid: "11111111-2222-3333-4444-555555555555", harness: "claude-code"}
+
+    test "a pi dispatch refuses to resume a claude-code session" do
+      agent = %{id: "w", cli: "pi", wrapper: "pi"}
+
+      assert Dispatcher.effective_resume_intent({:previous, @prev.uuid}, agent,
+               previous_session: @prev
+             ) == :fresh
+    end
+
+    test "same-harness resume stands, and an unknown harness still tries" do
+      claude = %{id: "w", cli: "claude", wrapper: "claude"}
+      pi = %{id: "w", cli: "pi", wrapper: "pi"}
+
+      intent = {:previous, @prev.uuid}
+
+      assert Dispatcher.effective_resume_intent(intent, claude, previous_session: @prev) == intent
+
+      assert Dispatcher.effective_resume_intent(intent, pi, previous_session: %{uuid: @prev.uuid, harness: nil}) ==
+               intent
+    end
+  end
+
   test "build_run_script can show a project-local fiber handle in the worker banner" do
     script =
       Dispatcher.build_run_script(

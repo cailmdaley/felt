@@ -634,6 +634,141 @@ defmodule ShuttleWeb.MomentControllerTest do
     end
   end
 
+  describe "Shuttle.Moment — pi transcripts (the second harness)" do
+    # The claude root is pinned absent in every lookup below: the fixture
+    # session ids are real-shaped and the claude glob runs first, so an
+    # unpinned root lets a same-uuid transcript in the real ~/.claude tree
+    # shadow the fixture.
+    @absent_root "/nope/not/here"
+
+    # A pi-shaped tree: <pi_root>/<encoded-cwd>/<ISO-stamp>_<uuid>.jsonl.
+    defp write_pi_tree(files) do
+      root =
+        Path.join(System.tmp_dir!(), "shuttle_moment_pi_#{System.unique_integer([:positive])}")
+
+      Enum.each(files, fn {slug, session, records} ->
+        dir = Path.join(root, slug)
+        File.mkdir_p!(dir)
+
+        body =
+          records
+          |> Enum.map(fn
+            line when is_binary(line) -> line
+            record -> Jason.encode!(record)
+          end)
+          |> Enum.join("\n")
+
+        File.write!(Path.join(dir, "2026-08-21T18-19-21-052Z_#{session}.jsonl"), body <> "\n")
+      end)
+
+      on_exit(fn -> File.rm_rf(root) end)
+      root
+    end
+
+    defp pi_user(ms, text),
+      do: %{
+        "type" => "message",
+        "timestamp" => iso(ms),
+        "message" => %{"role" => "user", "content" => [%{"type" => "text", "text" => text}]}
+      }
+
+    defp pi_assistant(ms, blocks),
+      do: %{
+        "type" => "message",
+        "timestamp" => iso(ms),
+        "message" => %{"role" => "assistant", "content" => blocks}
+      }
+
+    defp pi_tool_call(id, name, args),
+      do: %{"type" => "toolCall", "id" => id, "name" => name, "arguments" => args}
+
+    defp pi_tool_result(ms, id, name, text),
+      do: %{
+        "type" => "message",
+        "timestamp" => iso(ms),
+        "message" => %{
+          "role" => "toolResult",
+          "toolCallId" => id,
+          "toolName" => name,
+          "content" => [%{"type" => "text", "text" => text}]
+        }
+      }
+
+    defp pi_tree do
+      write_pi_tree([
+        {"--Users-cail-french--", @session,
+         [
+           # Non-conversation lines: skipped, none by none.
+           %{"type" => "session", "version" => 3, "id" => @session, "timestamp" => iso(@t0), "cwd" => "/users/cail/french"},
+           %{"type" => "model_change", "id" => "mc1", "timestamp" => iso(@t0), "provider" => "p", "modelId" => "m"},
+           %{"type" => "custom_message", "customType" => "felt-context", "timestamp" => iso(@t0), "content" => "# Felt Workflow Context"},
+           # The conversation.
+           pi_user(@t0 + 1_000, "hi french class! pasting some vocab"),
+           pi_assistant(@t0 + 2_000, [
+             %{"type" => "thinking", "thinking" => "let me consider"},
+             %{"type" => "text", "text" => "Bien sûr — here are the definitions."}
+           ]),
+           # Tool call and result: activity, not words.
+           pi_assistant(@t0 + 3_000, [pi_tool_call("c1", "bash", %{"command" => "git status --short"})]),
+           pi_tool_result(@t0 + 3_500, "c1", "bash", "ok"),
+           # After the window.
+           pi_user(@t0 + 600_000, "much later")
+         ]}
+      ])
+    end
+
+    test "recovers the conversation and skips the machinery" do
+      root = pi_tree()
+      assert Enum.map(Moment.excerpts(@session, @t0, @t0 + 10_000, root: @absent_root, pi_root: root), &{&1.role, &1.text}) == [
+               {"user", "hi french class! pasting some vocab"},
+               {"assistant", "Bien sûr — here are the definitions."}
+             ]
+    end
+
+    test "transcript_path finds a pi transcript the claude root does not have" do
+      root = pi_tree()
+
+      assert Moment.transcript_path(@session, root: "/nope/not/here", pi_root: root) =~
+               "#{@session}.jsonl"
+
+      assert Moment.transcript_path("11111111-2222-3333-4444-555555555555",
+               root: "/nope/not/here",
+               pi_root: root
+             ) == nil
+    end
+
+    test "tool calls read like claude's — capitalized name, its own words" do
+      root = pi_tree()
+
+      assert %{tool_lines: lines, tool_count: 1} =
+               Moment.moment(@session, @t0, @t0 + 10_000, root: @absent_root, pi_root: root)
+
+      assert lines == ["Bash — git status --short"]
+    end
+
+    test "a subagent call and its toolResult form the delegation register" do
+      root =
+        write_pi_tree([
+          {"--Users-cail-french--", @session,
+           [
+             pi_assistant(@t0 + 1_000, [
+               pi_tool_call("c2", "subagent", %{"agent" => "reviewer", "task" => "Read the diff and report findings."})
+             ]),
+             pi_user(@t0 + 2_000, "a human turn between the two ends"),
+             pi_tool_result(@t0 + 3_000, "c2", "subagent", "Found two issues, both minor.")
+           ]}
+        ])
+
+      excerpts = Moment.excerpts(@session, @t0, @t0 + 10_000, root: @absent_root, pi_root: root)
+
+      assert Enum.map(excerpts, &{&1.kind, &1.name, &1.text}) == [
+               {"spawn", "reviewer", "Read the diff and report findings."},
+               {"prose", nil, "a human turn between the two ends"},
+               {"return", "reviewer", "Found two issues, both minor."}
+             ]
+    end
+  end
+
   describe "GET /api/v1/moment (local)" do
     setup do
       root = default_tree()
