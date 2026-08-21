@@ -1442,7 +1442,7 @@ export class KanbanSurfaceRenderer {
     if (card.due) {
       const due = document.createElement('span')
       due.className = 'kbn-card-due'
-      due.textContent = `due ${formatDue(card.due)}`
+      due.textContent = formatDue(card.due)
       // Drift used to be its own yellow ↑ chip; the due date is what drifted
       // the card, so the due chip carries the story on hover instead.
       due.title = card.drifted
