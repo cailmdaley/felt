@@ -60,12 +60,16 @@ function resolveFelt(): string | null {
 }
 
 /** Fire-and-forget hook spawn. The binary's contract is print-nothing/
- * exit-0-on-every-path; ours is never-fail-the-tool-call. */
+ * exit-0-on-every-path; ours is never-fail-the-tool-call. Generous timeout:
+ * on cluster stores (Lustre home, thousands of fibers) even one-line hook
+ * work can sit in I/O wait well past a desktop's notion of slow — nibi's
+ * measured ~6s warm, worse cold — and a killed hook is a lost activity
+ * line, not a recovered failure. */
 function runHook(args: string[], payload: unknown): void {
 	const bin = resolveFelt();
 	if (!bin) return;
 	try {
-		const child = execFile(bin, ["hook", ...args], { timeout: 10_000 }, () => {});
+		const child = execFile(bin, ["hook", ...args], { timeout: 30_000 }, () => {});
 		child.stdin?.end(JSON.stringify(payload));
 		child.on("error", () => {});
 	} catch {
@@ -73,10 +77,16 @@ function runHook(args: string[], payload: unknown): void {
 	}
 }
 
-/** Awaited variant for the one call whose output we need (`felt session`). */
+/** Awaited variant for the one call whose output we need (`felt session`).
+ * The bound must clear a SLOW STORE, not a fast one: session context scans
+ * every tracked fiber, and on a Lustre-backed 5k-fiber loom that is seconds
+ * of pure I/O wait (measured 6.5s warm on nibi against 0.7s on a local SSD,
+ * worse cold). A timeout here does not fail loudly — it silently returns ""
+ * and the session starts with no context — so the number has to be safe by
+ * construction rather than tuned to this host. */
 function runSession(bin: string): Promise<string> {
 	return new Promise((resolve) => {
-		execFile(bin, ["session"], { timeout: 10_000, maxBuffer: 1 << 20 }, (err, stdout) => {
+		execFile(bin, ["session"], { timeout: 60_000, maxBuffer: 4 << 20 }, (err, stdout) => {
 			resolve(err ? "" : stdout.toString());
 		});
 	});
