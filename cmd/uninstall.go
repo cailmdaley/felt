@@ -64,7 +64,7 @@ func runFeltUninstall() {
 
 	if _, err := exec.LookPath("pi"); err == nil && piPackageInstalled() {
 		fmt.Println("Removing pi package...")
-		if err := runPiCLI("remove", "git:"+marketplaceRepo); err != nil {
+		if err := runPiCLI("remove", "git:github.com/"+marketplaceRepo); err != nil {
 			fmt.Printf("warning: %v\n", err)
 		}
 		removedAnything = true

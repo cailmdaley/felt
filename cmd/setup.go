@@ -188,14 +188,14 @@ Use --uninstall to remove.`,
 		uninstall, _ := cmd.Flags().GetBool("uninstall")
 
 		if uninstall {
-			return runPiCLI("remove", "git:"+marketplaceRepo)
+			return runPiCLI("remove", "git:github.com/"+marketplaceRepo)
 		}
 
 		ref := marketplaceRepo
 		if Version != "" && Version != "dev" {
 			ref += "@v" + Version
 		}
-		if err := runPiCLI("install", "git:"+ref); err != nil {
+		if err := runPiCLI("install", "git:github.com/"+ref); err != nil {
 			return err
 		}
 		fmt.Println()
