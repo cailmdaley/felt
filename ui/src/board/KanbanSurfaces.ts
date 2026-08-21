@@ -98,7 +98,7 @@ const RUNTIME_PHASE_BADGES: Record<string, { label: string; title: string }> = {
   // The manicule (U+261E) followed by the U+FE0E text variation selector forces
   // a serif text glyph, not a color emoji — paired with `font-variant-emoji:
   // text` and the EB Garamond stack in CSS.
-  attention: { label: '☞︎ needs you now', title: 'The worker raised its hand (Notification) — it needs you now. Open it to respond.' },
+  attention: { label: '☞︎ needs you', title: 'The worker raised its hand (Notification) — it needs you. Open it to respond.' },
   waiting: { label: '⏸ waiting', title: 'The worker is paused at a prompt waiting for human input — open it to respond.' },
   retrying: { label: '⟳ retrying', title: 'Dispatch failed — daemon is retrying with backoff. No live worker right now.' },
   due: { label: '◴ due', title: 'Scheduled tick elapsed — awaiting dispatch.' },
@@ -1580,7 +1580,7 @@ export class KanbanSurfaceRenderer {
         w.className = `kbn-card-worker kbn-card-worker-${card.runtimePhase}`
         w.textContent = phasePillLabel(card.runtimePhase, card.lastActivityAt)
         if (card.runtimePhase === 'attention') {
-          w.setAttribute('aria-label', `Worker needs you now — open terminal: ${tmuxName}`)
+          w.setAttribute('aria-label', `Worker needs you — open terminal: ${tmuxName}`)
           w.title = `Worker raised its hand${age ? ` ${age} ago` : ''} — click to open ${tmuxName} in kitty`
         } else {
           w.setAttribute('aria-label', `Worker waiting for you — open terminal: ${tmuxName}`)

@@ -44,7 +44,7 @@ interface CompositeRuntime {
   /** Owner-served tmux session name for a live worker on this fiber. */
   tmuxSession: string;
   /** Owner-served activity category for a tracked LIVE worker — one of:
-   *   `"attention"` (last hook event is a Notification — "needs you now",
+   *   `"attention"` (last hook event is a Notification — "needs you",
    *     sorts top), `"waiting"` (last event is stop/subagent_stop — the worker
    *     has paused; "waiting for you" once idle ≥60s), `"working"` (last event
    *     is a tool/prompt/session event — busy, sinks to the bottom, no chip).

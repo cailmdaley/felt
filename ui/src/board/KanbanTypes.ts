@@ -73,7 +73,7 @@ export interface KanbanCard {
    *   • LIVE-worker activity category (when `runningWorker` is set):
    *     `working` (busy mid-tool — sinks to the bottom, no chip), `waiting`
    *     (paused at a stop — "waiting for you" once idle ≥60s), `attention`
-   *     (raised its hand via the Notification hook — "needs you now", sorts
+   *     (raised its hand via the Notification hook — "needs you", sorts
    *     top). Computed at serve time from the activity tracker's last hook
    *     event for the session.
    *   • Worker-LESS lifecycle phase (when `runningWorker` is absent):

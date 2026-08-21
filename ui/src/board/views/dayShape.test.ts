@@ -1201,7 +1201,7 @@ describe('the live chip', () => {
   it('lets attention take over at once — a raised hand is not a state to age', () => {
     const chip = laneChip(worker({ runtimePhase: 'attention', lastActivityAt: NOW_IN_RAIL - 5_000 }), NOW_IN_RAIL)
     expect(chip?.variant).toBe('attention')
-    expect(chip?.label).toBe('☞︎ needs you now')
+    expect(chip?.label).toBe('☞︎ needs you')
   })
 
   it('holds `waiting` back for a minute, then shows how long it has stood there', () => {
