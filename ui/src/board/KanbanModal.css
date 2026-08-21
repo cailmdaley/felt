@@ -1531,6 +1531,28 @@
   margin-top: 2px;
   flex-wrap: wrap;
 }
+/* Divides whatever room the left-flowing chips (actor/due/queued) left
+   behind. One spacer alone pushes the next chip flush right (the old
+   margin-left:auto behavior); a spacer on BOTH sides of a chip centers it
+   in that room instead — see the placement logic in KanbanSurfaces.ts. */
+.kbn-card-meta-spacer {
+  flex: 1 1 0%;
+}
+/* One height for every small chip/button that can appear in the meta row —
+   due, +N queued, Temper/Compost, the phase badge, the held pill, the
+   worker pill — so swapping between them (a worker landing, a review
+   finishing) never makes the row's own height twitch. */
+.kbn-card-due,
+.kbn-card-queued,
+.kbn-card-review-meta-actions .kbn-review-meta-btn,
+.kbn-card-phase,
+.kbn-card-held,
+.kbn-card-worker {
+  box-sizing: border-box;
+  height: 19px;
+  display: inline-flex;
+  align-items: center;
+}
 .kbn-action {
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
   font-size: calc(10.5px * var(--kbn-type-scale, 1));
@@ -1736,7 +1758,6 @@
   background: rgba(61, 91, 160, 0.10);
   padding: 2px 6px;
   border-radius: 2px;
-  margin-left: auto;
   animation: kbn-pulse 2s ease-in-out infinite;
   /* Button reset */
   border: 1px solid transparent;
@@ -1769,7 +1790,6 @@
   background: rgba(154, 123, 53, 0.12);
   padding: 2px 7px;
   border-radius: 2px;
-  margin-left: auto;
   white-space: nowrap;
   flex-shrink: 0;
 }
@@ -1794,7 +1814,6 @@
   border: 1px dashed rgba(90, 105, 140, 0.45);
   padding: 1px 6px;
   border-radius: 2px;
-  margin-left: auto;
   white-space: nowrap;
   flex-shrink: 0;
   cursor: pointer;
@@ -1965,15 +1984,14 @@
 .kbn-error-retry:disabled { opacity: 0.6; cursor: default; }
 .kbn-error-retry:focus-visible { outline: 1px dashed #9A7B35; outline-offset: 2px; }
 
-/* Temper / Compost inline in the meta row (awaiting-review cards only).
-   Inherit .kbn-action base chrome; margin-left:auto pushes the whole group
-   to the right end of the row. */
+/* Temper / Compost inline in the meta row. Centered — a `.kbn-card-meta-spacer`
+   on each side (JS) divides whatever room the left-flowing chips left behind
+   into two equal halves, so this group sits in the middle of that room. */
 .kbn-card-review-meta-actions {
   display: flex;
   gap: 4px;
   align-items: center;
   flex-shrink: 0;
-  margin-left: auto;
 }
 .kbn-review-meta-btn {
   font-size: calc(9.5px * var(--kbn-type-scale, 1));

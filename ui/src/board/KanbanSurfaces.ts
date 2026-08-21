@@ -1456,11 +1456,10 @@ export class KanbanSurfaceRenderer {
     this.renderQueuedChip(card, meta)
 
     // Built here (it reads `kind`/`card` in scope with everything above), but
-    // NOT appended yet — its `margin-left: auto` claims all space remaining
-    // at the point it lands in `meta`, so anything appended after it (the
-    // phase badge, the held pill, the worker pill) has nowhere left to sit
-    // and wraps to a second line. Appending it last — after every other
-    // meta chip has staked its width — is what keeps a single row.
+    // NOT appended directly — it's a CENTER-region chip, placed by the
+    // spacer logic below rather than by its own DOM position. The phase
+    // badge / held pill / worker pill are the RIGHT region, built further
+    // down and collected into `rightChip` for the same reason.
     let reviewMetaActions: HTMLDivElement | undefined
     if ((kind === 'drafts' || kind === 'awaitingReview' || kind === 'inFlight') && !isStale) {
       reviewMetaActions = document.createElement('div')
@@ -1514,13 +1513,18 @@ export class KanbanSurfaceRenderer {
       card.runtimePhase &&
       RUNTIME_PHASE_BADGES[card.runtimePhase] &&
       !card.runningWorker
+    // The RIGHT region: at most one of phase badge / held pill / worker pill
+    // is ever live at once (they're mutually exclusive states), collected
+    // here rather than appended immediately so the spacer logic at the
+    // bottom can place it — same reasoning as `reviewMetaActions` above.
+    let rightChip: HTMLElement | undefined
     if (showPhase && card.runtimePhase) {
       const { title } = RUNTIME_PHASE_BADGES[card.runtimePhase]
       const phase = document.createElement('span')
       phase.className = `kbn-card-phase kbn-card-phase-${card.runtimePhase}`
       phase.textContent = phasePillLabel(card.runtimePhase, card.lastActivityAt)
       phase.title = title
-      meta.append(phase)
+      rightChip = phase
     }
     // Boot-quarantine hold: a genuinely-fresh launch the owning daemon is
     // withholding after a restart. Reads as "held, awaiting release" — distinct
@@ -1560,7 +1564,7 @@ export class KanbanSurfaceRenderer {
           heldEl.disabled = false
         })
       })
-      meta.append(heldEl)
+      rightChip = heldEl
     }
     if (card.runningWorker) {
       const tmuxName = card.runningWorker
@@ -1592,9 +1596,36 @@ export class KanbanSurfaceRenderer {
         e.stopPropagation()
         this.openWorker?.(tmuxName, card.shuttleHost)
       })
-      meta.append(w)
+      rightChip = w
     }
-    if (reviewMetaActions) meta.append(reviewMetaActions)
+
+    // Place the CENTER (Temper/Compost) and RIGHT (phase/held/worker) regions
+    // with flex spacers rather than per-chip `margin-left: auto` — auto
+    // margins on two different chips fight over the same free space and
+    // (worse) stop meaning what their name says the moment a third thing
+    // is added to the row. A spacer BEFORE center and AFTER center divides
+    // whatever room the left-flowing chips (actor/due/queued) left behind
+    // into two equal halves, so center actually sits in the middle of that
+    // room rather than flush against whichever side claims it first; the
+    // right chip then lands flush against the row's own right edge, same as
+    // it always has.
+    if (reviewMetaActions || rightChip) {
+      if (reviewMetaActions) {
+        const before = document.createElement('div')
+        before.className = 'kbn-card-meta-spacer'
+        const after = document.createElement('div')
+        after.className = 'kbn-card-meta-spacer'
+        meta.append(before, reviewMetaActions, after)
+      }
+      if (rightChip) {
+        if (!reviewMetaActions) {
+          const spacer = document.createElement('div')
+          spacer.className = 'kbn-card-meta-spacer'
+          meta.append(spacer)
+        }
+        meta.append(rightChip)
+      }
+    }
     el.append(meta)
 
     // A card still on a working column while unsatisfied is an ARMED oneshot
