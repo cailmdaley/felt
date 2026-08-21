@@ -1156,7 +1156,7 @@ export class KanbanSurfaceRenderer {
     // "wakes Tuesday" would be a promise the gate does not make.)
     if (card.depGated) {
       // No text chip — long names overflowed the cluster row. The plum glyph
-      // IS the queued mark (Cail's call); the words live on hover.
+      // IS the queued mark (a taste call, signed off); the words live on hover.
       const blocking = card.dependsOnBlocking ?? card.dependsOn ?? []
       const names = blocking.map((id) => findCardById(this.getLastResponse(), id)?.name ?? id)
       // A gated card that is CLOSED-but-unjudged is resting for two reasons at

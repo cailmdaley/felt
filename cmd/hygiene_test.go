@@ -61,8 +61,7 @@ func TestNoPersonalIdentifiersInSource(t *testing.T) {
 		if rel == "" || allowedFiles[rel] || !scannedPath(rel) {
 			continue
 		}
-		base := filepath.Base(rel)
-		if strings.HasSuffix(base, "_test.go") || strings.HasSuffix(base, "_test.exs") {
+		if isTestFile(rel) {
 			continue
 		}
 		// testdata/ is Go's canonical fixture directory — test material by
@@ -89,6 +88,19 @@ func TestNoPersonalIdentifiersInSource(t *testing.T) {
 		t.Fatalf("personal identifiers in tracked source (put fleet data in ~/.config/felt/remotes.json, keep prose generic):\n  %s",
 			strings.Join(offenders, "\n  "))
 	}
+}
+
+// isTestFile reports whether rel is a test fixture by each language's
+// convention: Go and Elixir use a _test suffix, the vitest/Jest families a
+// .test/.spec infix before the extension.
+func isTestFile(rel string) bool {
+	base := filepath.Base(rel)
+	for _, suffix := range []string{"_test.go", "_test.exs"} {
+		if strings.HasSuffix(base, suffix) {
+			return true
+		}
+	}
+	return strings.Contains(base, ".test.") || strings.Contains(base, ".spec.")
 }
 
 // scannedPath reports whether a repo-relative path is in the hygiene-scanned
