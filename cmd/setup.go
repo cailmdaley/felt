@@ -188,7 +188,14 @@ Use --uninstall to remove.`,
 		uninstall, _ := cmd.Flags().GetBool("uninstall")
 
 		if uninstall {
-			return runPiCLI("remove", "git:github.com/"+marketplaceRepo)
+			// Remove whatever source is actually registered — a dev-checkout
+			// install is invisible to the old hardcoded git spec. Fall back to
+			// the git default so the remove attempt matches the install default.
+			installed := piFeltPackageSource()
+			if installed == "" {
+				installed = "git:github.com/" + marketplaceRepo
+			}
+			return runPiCLI("remove", installed)
 		}
 
 		return installPiPackageViaCLI(piPackageSource(defaultMarketplaceRef()))

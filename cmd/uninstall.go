@@ -119,10 +119,13 @@ func piFeltPackageSource() string {
 }
 
 // isFeltPackageDir reports whether dir holds a package.json named felt.
-// Relative entries are tried as recorded, then home-relative.
+// Entries are tried as recorded, then home-relative; a literal ~ prefix is
+// expanded against home in case pi recorded it unexpanded.
 func isFeltPackageDir(home, dir string) bool {
 	candidates := []string{dir}
-	if !filepath.IsAbs(dir) {
+	if strings.HasPrefix(dir, "~") {
+		candidates = append(candidates, filepath.Join(home, strings.TrimPrefix(dir, "~")))
+	} else if !filepath.IsAbs(dir) {
 		candidates = append(candidates, filepath.Join(home, dir))
 	}
 	for _, candidate := range candidates {

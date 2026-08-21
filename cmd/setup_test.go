@@ -150,6 +150,93 @@ func TestPiFeltPackageSource(t *testing.T) {
 			t.Errorf("piFeltPackageSource() = %q, want \"\"", got)
 		}
 	})
+
+	t.Run("malformed settings → empty", func(t *testing.T) {
+		home := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(home, ".pi", "agent"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(home, ".pi", "agent", "settings.json"), []byte("{not json"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("HOME", home)
+		if got := piFeltPackageSource(); got != "" {
+			t.Errorf("piFeltPackageSource() = %q, want \"\"", got)
+		}
+	})
+
+	t.Run("tilde entry expanded against home", func(t *testing.T) {
+		home := t.TempDir()
+		scaffoldFeltCheckout(t, filepath.Join(home, "dev", "felt"))
+		writePiSettings(t, home, []string{"~/dev/felt"})
+		t.Setenv("HOME", home)
+		if got := piFeltPackageSource(); got != "~/dev/felt" {
+			t.Errorf("piFeltPackageSource() = %q, want %q", got, "~/dev/felt")
+		}
+	})
+}
+
+// TestInstallPiPackageViaCLI_SourceSwap pins the remove-before-install
+// orchestration end to end: flipping samePiSourceLocation's negation would
+// otherwise pass every pure-comparator test while duplicating felt in pi's
+// settings. fakePiOnPath is the pi-side mirror of fakeClaudeOnPath.
+func TestInstallPiPackageViaCLI_SourceSwap(t *testing.T) {
+	const gitSpec = "git:github.com/cailmdaley/felt"
+
+	// fakePiOnPath puts a stub `pi` at the front of PATH for the duration of
+	// the test, logging every invocation — the pi-side mirror of
+	// fakeClaudeOnPath. Returns a func reading the log.
+	fakePiOnPath := func(t *testing.T) func() string {
+		dir := t.TempDir()
+		log := filepath.Join(dir, "calls.log")
+		script := "#!/bin/sh\necho \"$@\" >> " + log + "\nexit 0\n"
+		if err := os.WriteFile(filepath.Join(dir, "pi"), []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+		return func() string {
+			b, _ := os.ReadFile(log)
+			return string(b)
+		}
+	}
+
+	t.Run("orchestrator swaps a differing source before install", func(t *testing.T) {
+		// Pins installPiPackageViaCLI's remove-before-install flow end to end:
+		// flipping samePiSourceLocation's negation would otherwise pass every
+		// pure-comparator test while duplicating felt in pi's settings.
+		home := t.TempDir()
+		checkout := filepath.Join(home, "dev", "felt")
+		scaffoldFeltCheckout(t, checkout)
+		writePiSettings(t, home, []string{"npm:pi-subagents", checkout})
+		t.Setenv("HOME", home)
+		calls := fakePiOnPath(t)
+
+		if err := installPiPackageViaCLI(gitSpec); err != nil {
+			t.Fatalf("install: %v", err)
+		}
+		got := calls()
+		remove := strings.Index(got, "remove "+checkout)
+		install := strings.Index(got, "install "+gitSpec)
+		if remove < 0 || install < 0 {
+			t.Errorf("expected remove of %q then install, got calls:\n%s", checkout, got)
+		} else if install < remove {
+			t.Errorf("installed before removing the old source:\n%s", got)
+		}
+	})
+
+	t.Run("same-source reinstall removes nothing", func(t *testing.T) {
+		home := t.TempDir()
+		writePiSettings(t, home, []string{gitSpec})
+		t.Setenv("HOME", home)
+		calls := fakePiOnPath(t)
+
+		if err := installPiPackageViaCLI(gitSpec + "@v1.2.3"); err != nil {
+			t.Fatalf("install: %v", err)
+		}
+		if got := calls(); strings.Contains(got, "remove") {
+			t.Errorf("tag bump should replace in place, got a remove:\n%s", got)
+		}
+	})
 }
 
 // TestCodexMarketplaceSource pins the one translation felt does at the Codex

@@ -203,8 +203,10 @@ export default function feltExtension(pi: ExtensionAPI) {
 		const sid = sessionId(ctx);
 
 		// Reading is how pi activates skills — reads are always allowed, and a
-		// read of the felt SKILL.md is the activation itself.
-		if (event.toolName === "read") {
+		// read of the felt SKILL.md is the activation itself. Case-insensitive
+		// like the tool_result branch: pi's names are lowercase today, by
+		// convention rather than contract.
+		if (event.toolName.toLowerCase() === "read") {
 			const p = String((event.input as any)?.path ?? "");
 			// The bare "SKILL.md" match is deliberate looseness: a relative read
 			// of any SKILL.md (shuttle's included) means the model is already
