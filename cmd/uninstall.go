@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -62,13 +63,15 @@ func runFeltUninstall() {
 		fmt.Println()
 	}
 
-	if _, err := exec.LookPath("pi"); err == nil && piPackageInstalled() {
-		fmt.Println("Removing pi package...")
-		if err := runPiCLI("remove", "git:github.com/"+marketplaceRepo); err != nil {
-			fmt.Printf("warning: %v\n", err)
+	if _, err := exec.LookPath("pi"); err == nil {
+		if installed := piFeltPackageSource(); installed != "" {
+			fmt.Println("Removing pi package...")
+			if err := runPiCLI("remove", installed); err != nil {
+				fmt.Printf("warning: %v\n", err)
+			}
+			removedAnything = true
+			fmt.Println()
 		}
-		removedAnything = true
-		fmt.Println()
 	}
 
 	if !removedAnything {
@@ -81,16 +84,58 @@ func runFeltUninstall() {
 	fmt.Println("  rm $(which felt)           # if installed via curl or go install")
 }
 
-// piPackageInstalled returns true when pi's settings reference the felt git
-// package. Settings live in ~/.pi/agent/settings.json under "packages".
-func piPackageInstalled() bool {
+// piFeltPackageSource returns the source spec of the felt package registered
+// in pi's settings (~/.pi/agent/settings.json under "packages"), or "" when
+// pi has none. Matching is structural: the git: entry for marketplaceRepo at
+// any tag, or any local path whose package.json names felt — so a dev
+// checkout at an arbitrary path is recognized. A substring probe over
+// "owner/repo" would miss local installs entirely: refresh would no-op and
+// uninstall would leave the package loaded.
+func piFeltPackageSource() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return false
+		return ""
 	}
 	data, err := os.ReadFile(filepath.Join(home, ".pi", "agent", "settings.json"))
 	if err != nil {
-		return false
+		return ""
 	}
-	return strings.Contains(string(data), marketplaceRepo)
+	var settings struct {
+		Packages []string `json:"packages"`
+	}
+	if json.Unmarshal(data, &settings) != nil {
+		return ""
+	}
+	gitBase := "git:github.com/" + marketplaceRepo
+	for _, src := range settings.Packages {
+		if src == gitBase || strings.HasPrefix(src, gitBase+"@") {
+			return src
+		}
+		if !strings.Contains(src, ":") && isFeltPackageDir(home, src) {
+			return src
+		}
+	}
+	return ""
+}
+
+// isFeltPackageDir reports whether dir holds a package.json named felt.
+// Relative entries are tried as recorded, then home-relative.
+func isFeltPackageDir(home, dir string) bool {
+	candidates := []string{dir}
+	if !filepath.IsAbs(dir) {
+		candidates = append(candidates, filepath.Join(home, dir))
+	}
+	for _, candidate := range candidates {
+		data, err := os.ReadFile(filepath.Join(candidate, "package.json"))
+		if err != nil {
+			continue
+		}
+		var pkg struct {
+			Name string `json:"name"`
+		}
+		if json.Unmarshal(data, &pkg) == nil && pkg.Name == "felt" {
+			return true
+		}
+	}
+	return false
 }

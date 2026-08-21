@@ -559,15 +559,15 @@ func piPackageSource(source string) string {
 
 // installPiPackageViaCLI installs or refreshes the felt pi package at `spec`.
 // pi matches an installed package by source kind and location (git host/path,
-// npm name, resolved local path), so swapping a git install for a local
-// checkout — what a dev-source `felt update` does — would otherwise leave both
-// entries in settings, loading the same skills and extension twice. Drop the
-// git registration first in that one case; every other reinstall replaces its
-// own entry in place.
+// npm name, resolved local path), so installing at a new kind or location
+// while an old entry remains would load the same skills and extension twice.
+// Drop any felt entry registered elsewhere first — git→local (what a
+// dev-source `felt update` does) and local→git alike; same-source reinstalls
+// (including a tag bump) replace their own entry in place.
 func installPiPackageViaCLI(spec string) error {
-	if isLocalPath(spec) && piPackageInstalled() {
-		if err := runPiCLI("remove", "git:github.com/"+marketplaceRepo); err != nil {
-			return fmt.Errorf("removing git-sourced felt package before local install: %w", err)
+	if installed := piFeltPackageSource(); installed != "" && !samePiSourceLocation(installed, spec) {
+		if err := runPiCLI("remove", installed); err != nil {
+			return fmt.Errorf("removing %q before installing %q: %w", installed, spec, err)
 		}
 	}
 	if err := runPiCLI("install", spec); err != nil {
@@ -578,13 +578,26 @@ func installPiPackageViaCLI(spec string) error {
 	return nil
 }
 
+// samePiSourceLocation compares two package specs by location: git entries
+// match host+repo regardless of tag (a tag bump replaces its own entry in
+// place), everything else compares literally.
+func samePiSourceLocation(a, b string) bool {
+	loc := func(s string) string {
+		if base, _, ok := strings.Cut(s, "@"); ok && strings.HasPrefix(s, "git:") {
+			return base
+		}
+		return s
+	}
+	return loc(a) == loc(b)
+}
+
 // refreshPiSetupIfInstalled reinstalls the felt pi package when pi has it —
 // the pi side of the lockstep contract refreshCodexSetupIfInstalled carries
 // for Codex, so `felt update` moves the package to the ref matching the binary
 // that just landed. Silent no-op when pi isn't installed or has no felt
 // package (a bare `pi install` of some other checkout isn't ours to move).
 func refreshPiSetupIfInstalled(marketplaceRef string) {
-	if _, err := exec.LookPath("pi"); err != nil || !piPackageInstalled() {
+	if _, err := exec.LookPath("pi"); err != nil || piFeltPackageSource() == "" {
 		return
 	}
 	fmt.Println()

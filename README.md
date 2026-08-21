@@ -58,7 +58,7 @@ go install github.com/cailmdaley/felt@latest                                    
 
 The install script needs only `curl` and `tar`. It supports macOS and Linux on x86_64 and arm64.
 It installs to `/usr/local/bin` if writable, else `~/.local/bin`; override with `FELT_INSTALL_DIR`.
-If `claude` or `codex` is on your `PATH`, it also registers the felt plugin for them. Later,
+If `claude`, `codex`, or `pi` is on your `PATH`, it also registers the felt plugin for them. Later,
 `felt update` refreshes both the binary and the plugin wiring.
 
 ## Quickstart

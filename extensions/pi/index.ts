@@ -206,6 +206,9 @@ export default function feltExtension(pi: ExtensionAPI) {
 		// read of the felt SKILL.md is the activation itself.
 		if (event.toolName === "read") {
 			const p = String((event.input as any)?.path ?? "");
+			// The bare "SKILL.md" match is deliberate looseness: a relative read
+			// of any SKILL.md (shuttle's included) means the model is already
+			// working inside the skill tree, so the gate has done its job.
 			if (p.endsWith(feltSkillSuffix) || p === "SKILL.md") openGate(sid);
 			return undefined;
 		}
@@ -233,7 +236,7 @@ export default function feltExtension(pi: ExtensionAPI) {
 		// direct fiber edits additionally get their recency stamp.
 		emit("PostToolUse", { tool_name: event.toolName, tool_input: input ?? {} }, ctx);
 
-		if (event.toolName === "bash") {
+		if (event.toolName.toLowerCase() === "bash") {
 			runHook(
 				["commit"],
 				{
@@ -266,5 +269,10 @@ export default function feltExtension(pi: ExtensionAPI) {
 
 	pi.on("session_shutdown", async (_event, ctx) => {
 		emit("SessionEnd", {}, ctx);
+		try {
+			fs.rmSync(flagPath(sessionId(ctx)), { force: true });
+		} catch {
+			/* tmpdir residue is the OS's problem, not the session's */
+		}
 	});
 }

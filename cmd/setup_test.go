@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,6 +23,133 @@ func TestPiPackageSource(t *testing.T) {
 			t.Errorf("piPackageSource(%q) = %q, want %q", tc.in, got, tc.want)
 		}
 	}
+}
+
+// TestSamePiSourceLocation pins the swap discriminator: git entries match on
+// host+repo regardless of tag (a tag bump replaces in place, no removal),
+// while a kind or location change (git↔local, two checkouts) counts as
+// different — the old entry must be dropped first or pi loads felt twice.
+func TestSamePiSourceLocation(t *testing.T) {
+	same := [][2]string{
+		{"git:github.com/cailmdaley/felt", "git:github.com/cailmdaley/felt"},
+		{"git:github.com/cailmdaley/felt", "git:github.com/cailmdaley/felt@v1.0.14"}, // tag bump
+		{"/home/dev/code/felt", "/home/dev/code/felt"},
+	}
+	for _, pair := range same {
+		if !samePiSourceLocation(pair[0], pair[1]) {
+			t.Errorf("samePiSourceLocation(%q, %q) = false, want true", pair[0], pair[1])
+		}
+	}
+	diff := [][2]string{
+		{"git:github.com/cailmdaley/felt", "/home/dev/code/felt"}, // git→local (dev-source update)
+		{"/home/dev/code/felt", "git:github.com/cailmdaley/felt"}, // local→git (tagged release)
+		{"/home/dev/code/felt", "/home/dev/other-felt"},           // two dev checkouts
+	}
+	for _, pair := range diff {
+		if samePiSourceLocation(pair[0], pair[1]) {
+			t.Errorf("samePiSourceLocation(%q, %q) = true, want false", pair[0], pair[1])
+		}
+	}
+}
+
+// writePiSettings writes a ~/.pi/agent/settings.json under home with the given
+// packages array.
+func writePiSettings(t *testing.T, home string, packages []string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(home, ".pi", "agent"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	pkgs, _ := json.Marshal(packages)
+	settings := `{"packages":` + string(pkgs) + `}`
+	if err := os.WriteFile(filepath.Join(home, ".pi", "agent", "settings.json"), []byte(settings), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// scaffoldFeltCheckout makes a directory holding a package.json named felt —
+// what pi sees at the path of a local/dev install.
+func scaffoldFeltCheckout(t *testing.T, dir string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "package.json"), []byte(`{"name":"felt","private":true}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestPiFeltPackageSource pins structural detection of the installed felt
+// package: the git entry at any tag, and a local checkout recognized by its
+// package.json name rather than its path. The substring probe this replaced
+// was blind to local installs — refresh no-op'd and uninstall left residue —
+// so the local cases here are the regression.
+func TestPiFeltPackageSource(t *testing.T) {
+	const noRef = "git:github.com/cailmdaley/felt"
+
+	t.Run("absent settings → empty", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		if got := piFeltPackageSource(); got != "" {
+			t.Errorf("piFeltPackageSource() = %q, want \"\"", got)
+		}
+	})
+
+	t.Run("no felt package → empty", func(t *testing.T) {
+		home := t.TempDir()
+		writePiSettings(t, home, []string{"npm:pi-subagents", "/home/dev/unrelated"})
+		t.Setenv("HOME", home)
+		if got := piFeltPackageSource(); got != "" {
+			t.Errorf("piFeltPackageSource() = %q, want \"\"", got)
+		}
+	})
+
+	for _, tc := range []struct{ name, entry, want string }{
+		{"git bare", noRef, noRef},
+		{"git tagged", noRef + "@v1.0.14", noRef + "@v1.0.14"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			writePiSettings(t, home, []string{"npm:pi-subagents", tc.entry})
+			t.Setenv("HOME", home)
+			if got := piFeltPackageSource(); got != tc.want {
+				t.Errorf("piFeltPackageSource() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+
+	t.Run("local checkout by package name", func(t *testing.T) {
+		home := t.TempDir()
+		checkout := filepath.Join(home, "dev", "felt")
+		scaffoldFeltCheckout(t, checkout)
+		writePiSettings(t, home, []string{checkout})
+		t.Setenv("HOME", home)
+		if got := piFeltPackageSource(); got != checkout {
+			t.Errorf("piFeltPackageSource() = %q, want %q", got, checkout)
+		}
+	})
+
+	t.Run("home-relative local entry", func(t *testing.T) {
+		home := t.TempDir()
+		scaffoldFeltCheckout(t, filepath.Join(home, "dev", "felt"))
+		writePiSettings(t, home, []string{"dev/felt"})
+		t.Setenv("HOME", home)
+		if got := piFeltPackageSource(); got != "dev/felt" {
+			t.Errorf("piFeltPackageSource() = %q, want %q", got, "dev/felt")
+		}
+	})
+
+	t.Run("local dir without felt package.json → empty", func(t *testing.T) {
+		home := t.TempDir()
+		other := filepath.Join(home, "dev", "other")
+		scaffoldFeltCheckout(t, other)
+		if err := os.WriteFile(filepath.Join(other, "package.json"), []byte(`{"name":"other"}`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		writePiSettings(t, home, []string{other})
+		t.Setenv("HOME", home)
+		if got := piFeltPackageSource(); got != "" {
+			t.Errorf("piFeltPackageSource() = %q, want \"\"", got)
+		}
+	})
 }
 
 // TestCodexMarketplaceSource pins the one translation felt does at the Codex
