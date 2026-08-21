@@ -170,12 +170,14 @@ fi
 # fibers stay visible across sessions without you needing to mention them.
 # Setup commands are idempotent (re-running them refreshes registration)
 # and the install can be cleanly reversed via `felt uninstall`.
-if command -v claude >/dev/null 2>&1 || command -v codex >/dev/null 2>&1; then
+if command -v claude >/dev/null 2>&1 || command -v codex >/dev/null 2>&1 || command -v pi >/dev/null 2>&1; then
   echo
   echo "Wiring up felt's agent plugins:"
   echo "  • Claude Code: marketplace + plugin + SessionStart / PreToolUse / PostToolUse hooks,"
   echo "                 plus an activity-event hook that writes nothing unless ~/.shuttle exists"
   echo "  • Codex:       marketplace + plugin (Codex asks you to trust the hooks on first run)"
+  echo "  • pi:          package with the shared skills + an extension providing the"
+  echo "                 same context injection, activation gate, and activity stream"
   echo "To remove later: felt uninstall"
   echo
 fi
@@ -189,4 +191,10 @@ if command -v codex >/dev/null 2>&1; then
   echo "Setting up Codex plugin..."
   "${INSTALL_DIR}/felt" setup codex || \
     echo "  (Codex setup failed; run 'felt setup codex' manually)"
+fi
+if command -v pi >/dev/null 2>&1; then
+  echo
+  echo "Setting up pi package..."
+  "${INSTALL_DIR}/felt" setup pi || \
+    echo "  (pi setup failed; run 'felt setup pi' manually)"
 fi

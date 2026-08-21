@@ -191,16 +191,7 @@ Use --uninstall to remove.`,
 			return runPiCLI("remove", "git:github.com/"+marketplaceRepo)
 		}
 
-		ref := marketplaceRepo
-		if Version != "" && Version != "dev" {
-			ref += "@v" + Version
-		}
-		if err := runPiCLI("install", "git:github.com/"+ref); err != nil {
-			return err
-		}
-		fmt.Println()
-		fmt.Println("Restart any running pi sessions (or run /reload) so the skills and extension load.")
-		return nil
+		return installPiPackageViaCLI(piPackageSource(defaultMarketplaceRef()))
 	},
 }
 
@@ -549,6 +540,59 @@ func runPiCLI(args ...string) error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
+}
+
+// piPackageSource converts a Claude-flavored marketplace ref (`owner/repo` or
+// `owner/repo#v<tag>`) or a local checkout path into the package spec pi
+// accepts: git sources need the full github.com host, local paths pass
+// through untouched.
+func piPackageSource(source string) string {
+	if isLocalPath(source) {
+		return source
+	}
+	ref := marketplaceRepo
+	if tag, ok := strings.CutPrefix(source, marketplaceRepo+"#v"); ok {
+		ref += "@v" + tag
+	}
+	return "git:github.com/" + ref
+}
+
+// installPiPackageViaCLI installs or refreshes the felt pi package at `spec`.
+// pi matches an installed package by source kind and location (git host/path,
+// npm name, resolved local path), so swapping a git install for a local
+// checkout — what a dev-source `felt update` does — would otherwise leave both
+// entries in settings, loading the same skills and extension twice. Drop the
+// git registration first in that one case; every other reinstall replaces its
+// own entry in place.
+func installPiPackageViaCLI(spec string) error {
+	if isLocalPath(spec) && piPackageInstalled() {
+		if err := runPiCLI("remove", "git:github.com/"+marketplaceRepo); err != nil {
+			return fmt.Errorf("removing git-sourced felt package before local install: %w", err)
+		}
+	}
+	if err := runPiCLI("install", spec); err != nil {
+		return err
+	}
+	fmt.Println()
+	fmt.Println("Restart any running pi sessions (or run /reload) so the skills and extension load.")
+	return nil
+}
+
+// refreshPiSetupIfInstalled reinstalls the felt pi package when pi has it —
+// the pi side of the lockstep contract refreshCodexSetupIfInstalled carries
+// for Codex, so `felt update` moves the package to the ref matching the binary
+// that just landed. Silent no-op when pi isn't installed or has no felt
+// package (a bare `pi install` of some other checkout isn't ours to move).
+func refreshPiSetupIfInstalled(marketplaceRef string) {
+	if _, err := exec.LookPath("pi"); err != nil || !piPackageInstalled() {
+		return
+	}
+	fmt.Println()
+	fmt.Println("Refreshing pi package...")
+	if err := installPiPackageViaCLI(piPackageSource(marketplaceRef)); err != nil {
+		fmt.Printf("pi refresh failed: %v\n", err)
+		fmt.Println("Rerun `felt setup pi` to retry.")
+	}
 }
 
 // linkSkillsFromPlugin symlinks each skill in <pluginDir>/skills/ into targetDir.

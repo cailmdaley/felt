@@ -33,7 +33,7 @@ If installed from source (via a dev source marker), pulls and rebuilds
 from the source checkout. Otherwise downloads the latest GitHub release.
 
 After the binary is updated, where the relevant CLI is present, the
-Claude Code plugin (and Codex wiring, if previously installed) is
+Claude Code plugin (and Codex / pi wiring, if previously installed) is
 refreshed in the same step so that hooks and skills stay in lockstep
 with the binary.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -132,6 +132,7 @@ func refreshPluginAfterUpdate(marketplaceRef string) {
 		}
 	}
 	refreshCodexSetupIfInstalled(marketplaceRef)
+	refreshPiSetupIfInstalled(marketplaceRef)
 }
 
 func latestVersion() (string, error) {

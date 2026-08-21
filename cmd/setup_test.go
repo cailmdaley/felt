@@ -7,6 +7,23 @@ import (
 	"testing"
 )
 
+// TestPiPackageSource pins the pi-side translation: pi's git shorthand needs
+// the full github.com host, and a pinned Claude ref (`#v<tag>`) becomes pi's
+// `@v<tag>`. Local paths pass through — pi installs a directory in place.
+func TestPiPackageSource(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"/home/dev/code/felt", "/home/dev/code/felt"},                        // local abs path → unchanged
+		{"./felt", "./felt"},                                                  // local rel path → unchanged
+		{"cailmdaley/felt", "git:github.com/cailmdaley/felt"},                 // bare repo ref → git shorthand
+		{"cailmdaley/felt#v1.0.14", "git:github.com/cailmdaley/felt@v1.0.14"}, // pinned ref → host + @tag
+	}
+	for _, tc := range cases {
+		if got := piPackageSource(tc.in); got != tc.want {
+			t.Errorf("piPackageSource(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
 // TestCodexMarketplaceSource pins the one translation felt does at the Codex
 // boundary: the two CLIs spell a pinned ref differently (`#tag` vs `@tag`) and
 // defaultMarketplaceRef() emits Claude's form. Local paths pass through — Codex
