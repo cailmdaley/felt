@@ -228,10 +228,10 @@ covariance-estimation --citations` finds this fiber pointing at it.
 **Wire up your coding agent.** If the install script did not already do it:
 
 ```bash
-felt setup claude    # or: felt setup codex
+felt setup claude    # or: felt setup codex, or: felt setup pi
 ```
 
-This installs the felt plugin: a SessionStart hook that lists active and
+This installs the felt integration: a session-start context that lists active and
 recently touched fibers, a gate that nudges the agent to load the felt skill
 before it starts editing, and the `felt` and `shuttle` skills themselves. The
 agent then reads and writes the same store you do. See

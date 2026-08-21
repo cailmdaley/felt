@@ -25,8 +25,9 @@ on demand. Your markdown holds everything, so felt adds no authoring burden and 
 of your repo.
 
 felt gives AI coding agents persistent memory, as much as it gives you one. It ships one plugin that
-installs into both Claude Code and Codex. The plugin bundles the **felt** and **shuttle** skills, and
-makes `.felt/` the thing an agent reaches for between sessions.
+installs into both Claude Code and Codex, and a pi package that installs into pi. Both bundle the
+**felt** and **shuttle** skills from one shared source tree, and
+make `.felt/` the thing an agent reaches for between sessions.
 
 A fiber on disk, at `.felt/covariance-estimation/covariance-estimation.md`:
 
@@ -72,6 +73,8 @@ felt tree                                            # containment hierarchy
 felt ls -s all "jackknife"                           # search names, outcomes, frontmatter
 felt find "jackknife"                                # the same search, across the whole store
 felt setup claude                                    # install the Claude Code plugin
+felt setup codex                                     # install the Codex plugin
+felt setup pi                                        # install the pi package
 ```
 
 ## shuttle
@@ -118,7 +121,7 @@ Everything deeper lives at **<https://cailmdaley.github.io/felt/>**:
 
 - concepts — fibers, stores, nesting, wikilinks, outcomes, frontmatter ownership
 - the full command reference and flags
-- agent integration — one plugin for Claude Code and Codex, its hooks and bundled skills
+- agent integration — one plugin for Claude Code and Codex, one pi package, shared skills and hook-equivalent behavior
 - Obsidian compatibility — open a `.felt/` directory directly as an Obsidian vault
 - the shuttle layer — constitutions, dispatch, the board, the HTTP API
 - installing and operating the daemon, including its sharp edges

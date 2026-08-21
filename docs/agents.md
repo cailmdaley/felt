@@ -25,9 +25,10 @@ have `felt` on `PATH`, the hooks fail quietly.
 ```bash
 felt setup claude    # Claude Code
 felt setup codex     # Codex
+felt setup pi        # pi (@earendil-works/pi-coding-agent)
 ```
 
-Both wrap the official plugin-marketplace flow:
+The first two wrap the official plugin-marketplace flow:
 
 ```bash
 # Claude Code
@@ -39,13 +40,19 @@ codex plugin marketplace add cailmdaley/felt[@v<tag>]
 codex plugin add felt@cailmdaley-felt
 ```
 
-Neither needs a local checkout — the CLI clones the marketplace straight from
-GitHub. A tagged `felt` binary pins the plugin to the matching tag; a `dev`
-build tracks the default branch, so the plugin content always matches the
+`felt setup pi` wraps pi's package manager:
+
+```bash
+pi install git:github.com/cailmdaley/felt[@v<tag>]
+```
+
+None of them need a local checkout — the CLI clones straight from
+GitHub. A tagged `felt` binary pins the integration to the matching tag; a `dev`
+build tracks the default branch, so the installed content always matches the
 binary that installed it.
 
-Both commands are idempotent, so re-running is safe. Both take `--uninstall` to
-remove what they installed. `felt uninstall` clears both harnesses at once, and
+All three commands are idempotent, so re-running is safe. All take `--uninstall` to
+remove what they installed. `felt uninstall` clears the harnesses at once, and
 serves as the general inverse.
 
 !!! note "Codex asks you to trust the hooks"
@@ -73,8 +80,10 @@ content without the hooks.
 
 ## Plugin contents
 
-One plugin directory serves both harnesses. It bundles two skills and four
-hooks.
+One plugin directory serves Claude Code and Codex; one package manifest serves
+pi (the repo-root `package.json`, whose `pi` key points at the same skill tree
+and at `extensions/pi/`). Both bundle the same two skills; hooks on Claude/Codex
+correspond to extension events on pi.
 
 ### Skills
 
@@ -84,12 +93,12 @@ hooks.
   dispatch, operating the board. Only relevant once you're using the
   optional [shuttle](shuttle/index.md) layer.
 
-Skills activate the way any Claude Code / Codex skill does — by the harness
+Skills activate the way any Claude Code / Codex / pi skill does — by the harness
 matching the user's request against the skill's description. `felt setup
 skills` (above) links these into your skills directory independent of the
 plugin.
 
-### Hooks
+### Hooks (Claude Code, Codex)
 
 | Hook | Event | Effect |
 |---|---|---|
@@ -103,6 +112,24 @@ The logic lives in the binary, not the script. `remind.sh`, `touch.sh`, and
 posttool`, and `felt hook event`.
 `session.sh` wraps `felt session` with a `jq -Rs` pipeline, and falls back to
 `felt hook session` when `jq` is absent.
+
+### Extension events (pi)
+
+On pi the same behavior comes from `extensions/pi/index.ts`, loaded via the
+package manifest. The division of labor is identical — the binary owns the
+logic, the adapter owns the plumbing:
+
+| pi event | Effect |
+|---|---|
+| `session_start` | Emits the session-start event for shuttle's activity stream |
+| `before_agent_start` | Injects `felt session`'s context once per session (pi has no SessionStart context envelope); emits the prompt-submit event |
+| `tool_call` | The activation gate: in a felt-enabled project, blocks tools until the model reads the felt SKILL.md or runs `/skill:felt` — pi activates skills by reading, not by a Skill tool, so the gate lives in the extension rather than the binary |
+| `tool_result` (edit/write) | Recency stamping via `felt hook posttool` |
+| `tool_result` (bash) | Commit ledger via `felt hook commit`; post-tool-use event |
+| `agent_end`, `session_shutdown` | Stop / session-end events for the activity stream |
+
+No pi equivalent exists for SubagentStop and Notification events; the activity
+stream simply carries fewer line types from pi sessions.
 
 !!! note
     **Updating the binary updates hook behavior.** `felt update` (and

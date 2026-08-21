@@ -165,6 +165,45 @@ Use --uninstall to remove.`,
 	},
 }
 
+var setupPiCmd = &cobra.Command{
+	Use:   "pi",
+	Short: "Install the felt package for pi via the pi package manager",
+	Long: `Install the felt integration for pi (@earendil-works/pi-coding-agent).
+
+Installs the felt pi package — the shared felt and shuttle skills plus a pi
+extension that injects session context, enforces the skill-activation gate,
+and records harness activity for shuttle. Idempotent — re-running is safe.
+
+By default, installs ` + marketplaceRepo + ` directly from GitHub — pi clones
+the repo itself, so no local checkout is required. Tagged felt binaries pin
+the package to the matching tag (e.g. git:github.com/cailmdaley/felt@v1.0.0);
+` + "`dev`" + ` builds track the default branch.
+
+Wraps the official pi CLI:
+
+    pi install git:github.com/cailmdaley/felt[@v<tag>]
+
+Use --uninstall to remove.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		uninstall, _ := cmd.Flags().GetBool("uninstall")
+
+		if uninstall {
+			return runPiCLI("remove", "git:"+marketplaceRepo)
+		}
+
+		ref := marketplaceRepo
+		if Version != "" && Version != "dev" {
+			ref += "@v" + Version
+		}
+		if err := runPiCLI("install", "git:"+ref); err != nil {
+			return err
+		}
+		fmt.Println()
+		fmt.Println("Restart any running pi sessions (or run /reload) so the skills and extension load.")
+		return nil
+	},
+}
+
 var setupSkillsCmd = &cobra.Command{
 	Use:   "skills",
 	Short: "Link felt skills to a target directory",
@@ -203,10 +242,12 @@ func init() {
 	setupClaudeCmd.Flags().String("source", "", "Path to felt repo checkout or plugin directory")
 	setupCodexCmd.Flags().Bool("uninstall", false, "Remove felt plugin and marketplace from Codex")
 	setupCodexCmd.Flags().String("source", "", "Path to felt repo checkout or plugin directory")
+	setupPiCmd.Flags().Bool("uninstall", false, "Remove the felt pi package")
 	setupSkillsCmd.Flags().String("target", "", "Target directory (default: ~/.claude/skills)")
 	setupSkillsCmd.Flags().String("source", "", "Path to felt repo checkout or plugin directory")
 	setupCmd.AddCommand(setupClaudeCmd)
 	setupCmd.AddCommand(setupCodexCmd)
+	setupCmd.AddCommand(setupPiCmd)
 	setupCmd.AddCommand(setupSkillsCmd)
 	rootCmd.AddCommand(setupCmd)
 }
@@ -497,6 +538,14 @@ func pruneMarketplaceSkillLinks() []string {
 // caller so the user sees the same status output Claude Code prints natively.
 func runClaudeCLI(args ...string) error {
 	cmd := exec.Command("claude", args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+// runPiCLI wraps the official pi CLI the same way runClaudeCLI does.
+func runPiCLI(args ...string) error {
+	cmd := exec.Command("pi", args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
