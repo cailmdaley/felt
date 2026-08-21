@@ -372,6 +372,7 @@ func TestHookPreToolGate(t *testing.T) {
 	t.Setenv("HOME", home)
 	claudeTranscript := filepath.Join(home, ".claude", "projects", "x", "log.jsonl")
 	codexTranscript := filepath.Join(t.TempDir(), "codex.jsonl")
+	piTranscript := filepath.Join(home, ".pi", "agent", "sessions", "-Users-x", "log.jsonl")
 
 	cases := []struct {
 		name      string
@@ -443,6 +444,17 @@ func TestHookPreToolGate(t *testing.T) {
 			},
 			expectOut: false,
 			flagFor:   "s4",
+		},
+		{
+			name: "pi transcript path marks and passes (gate lives in the pi extension)",
+			input: preToolInput{
+				SessionID:      "s6",
+				ToolName:       "Bash",
+				CWD:            feltDir,
+				TranscriptPath: piTranscript,
+			},
+			expectOut: false,
+			flagFor:   "s6",
 		},
 		{
 			name: "no .felt at cwd: pass silently",
