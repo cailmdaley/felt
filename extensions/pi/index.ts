@@ -245,7 +245,9 @@ export default function feltExtension(pi: ExtensionAPI) {
 					hook_event_name: "PostToolUse",
 					session_id: sid,
 					cwd: ctx.cwd,
-					tool_name: "Bash",
+					// Raw harness name; the binary matches tools
+					// case-insensitively at its boundary.
+					tool_name: event.toolName,
 					tool_input: { command: String(input?.command ?? "") },
 				},
 			);

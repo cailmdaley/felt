@@ -719,6 +719,30 @@ func TestPostToolHookStampsCompanionEdit(t *testing.T) {
 	}
 }
 
+// pi names its tools lowercase ("edit", "write"); the stamp must survive the
+// casing difference rather than silently no-op for a whole harness.
+func TestPostToolHookStampsLowercaseToolName(t *testing.T) {
+	dir := t.TempDir()
+	storage := felt.NewStorage(dir)
+	if err := storage.Init(); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	created := mustParseTime(t, "2026-04-10T09:00:00Z")
+	if err := storage.Write(&felt.Felt{ID: "alpha", Name: "Alpha", CreatedAt: created}); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	runPostToolWithInput(t, postEditInput("edit", storage.Path("alpha")))
+
+	f, err := storage.Read("alpha")
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if f.UpdatedAt == nil || !f.UpdatedAt.After(created) {
+		t.Fatalf("lowercase tool name did not stamp updated-at: %v", f.UpdatedAt)
+	}
+}
+
 // Restamping rewrites the file behind the agent's back — the harness reports it
 // on every edit, and a chained edit composed against the pre-stamp bytes can go
 // stale. An anchor that is already fresh buys nothing, so the hook leaves the

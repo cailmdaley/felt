@@ -131,9 +131,10 @@ func runCommitHook(stdin io.Reader) error {
 	}
 	// The plugin's hooks.json matcher already narrows to PostToolUse on Bash,
 	// but we re-check so the binary is correct under a harness that fires the
-	// hook more widely. PreToolUse in particular must not record: the commit
-	// has not happened yet, and HEAD is still the previous session's.
-	if input.HookEventName != "PostToolUse" || input.ToolName != "Bash" {
+	// hook more widely or names its tools with different casing (pi: "bash").
+	// PreToolUse in particular must not record: the commit has not happened
+	// yet, and HEAD is still the previous session's.
+	if !strings.EqualFold(input.HookEventName, "PostToolUse") || !strings.EqualFold(input.ToolName, "Bash") {
 		return nil
 	}
 	if !gitCommitPattern.MatchString(input.ToolInput.Command) {

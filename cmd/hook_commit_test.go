@@ -198,6 +198,14 @@ func TestCommitRecordingCases(t *testing.T) {
 		want    int
 	}{
 		{name: "a plain commit", command: `git commit -m "subject"`, want: 1},
+		{
+			// pi names its tools lowercase; the ledger must not depend on the
+			// adapter remembering to re-capitalize.
+			name:    "pi-shaped lowercase tool name",
+			command: "git commit -m x",
+			mutate:  func(p map[string]any) { p["tool_name"] = "bash" },
+			want:    1,
+		},
 		{name: "committed from another directory", command: "git -C /some/repo commit -m x", want: 1},
 		{name: "commit behind a cd", command: "cd /tmp/repo && git commit --amend --no-edit", want: 1},
 		{name: "commit with a global option", command: "git --no-pager commit -m x", want: 1},

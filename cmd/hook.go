@@ -508,11 +508,14 @@ type postToolInput struct {
 }
 
 // postToolEditTools are the file-mutating tools whose edits should advance a
-// fiber's recency. The plugin's hooks.json matcher already narrows to these,
-// but we re-check so the binary is correct even under a harness (e.g. Codex)
-// that fires PostToolUse without honoring the matcher.
+// fiber's recency, keyed lowercase and matched case-insensitively: harnesses
+// disagree on casing (pi names its tools "edit"/"write", Claude Code
+// "Edit"/"Write") and a silent case mismatch is a lost stamp. The plugin's
+// hooks.json matcher already narrows to these, but we re-check so the binary
+// is correct even under a harness (e.g. Codex) that fires PostToolUse without
+// honoring the matcher.
 var postToolEditTools = map[string]struct{}{
-	"Edit": {}, "Write": {}, "MultiEdit": {},
+	"edit": {}, "write": {}, "multiedit": {},
 }
 
 // postToolTouchInterval is how fresh a fiber's recency anchor has to be for the
@@ -534,7 +537,7 @@ func runPostToolHook(stdin *os.File) error {
 	if err := json.NewDecoder(stdin).Decode(&input); err != nil {
 		return nil
 	}
-	if _, ok := postToolEditTools[input.ToolName]; !ok {
+	if _, ok := postToolEditTools[strings.ToLower(input.ToolName)]; !ok {
 		return nil
 	}
 	fp := strings.TrimSpace(input.ToolInput.FilePath)
