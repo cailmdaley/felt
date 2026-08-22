@@ -116,6 +116,29 @@ is folded in here rather than into a separate Unreleased section.
   transcript surgically from its UUID — tails, keyword search, thinking —
   for both claude-code and codex formats.
 
+#### The pi package
+
+- felt ships as a pi package from the same source tree: the root
+  `package.json` manifest serves the shared skill tree
+  (`claude-plugin/skills`) plus a pi extension (`extensions/pi`), so
+  `pi install git:github.com/cailmdaley/felt` yields the full integration —
+  skills, session-start context, activity stream, commit ledger — with no
+  forked prose. The extension adapts the same binary hooks to pi's
+  in-process events; the one piece it cannot delegate is the activation
+  gate, because pi activates skills by *reading* SKILL.md rather than
+  calling a Skill tool, so the deny decision lives where the read is
+  visible. A missing or old `felt` binary degrades to a warning — context
+  injection and ledger entries are lost, never the session.
+- `felt setup pi [--uninstall]` registers and removes the package,
+  detecting the source structurally (a git entry at any tag, or any
+  local/`~/`-prefixed path whose `package.json` names felt) and swapping
+  git↔local in both directions. `felt update` refreshes the pi package
+  lockstep with the binary, like the Codex plugin.
+- The temporal views read pi sessions the way they read Claude's: the
+  moment hover recovers words, tool calls, and delegation from a pi
+  transcript, token spend folds pi's usage counters, and pi dispatches
+  land in the session ledger so their minutes attribute to the fiber.
+
 #### The board grows a memory
 
 - **Five views, not one.** The board is a hotkey row over five full pages:
@@ -366,6 +389,18 @@ reaches, rather than the boundary being negotiated flag by flag.
   native-frontmatter field list) were collapsed to single sources of truth.
 
 ### Fixed
+
+- Tool-name matching in the binary hooks is case-insensitive. pi names its
+  tools lowercase (`edit`, `bash`) while the posttool recency stamp and the
+  commit ledger checked capitalized names only — so direct fiber edits from
+  pi sessions silently never stamped `updated-at`, and the commit path only
+  worked because the pi adapter re-capitalized on the binary's behalf. The
+  harness boundary is where casing differences belong; the pi extension now
+  passes raw tool names through.
+- An unmatched pi `toolCall` block (one missing its `id` or carrying a
+  non-binary `name`) is now logged where it drops instead of vanishing
+  silently from the moment hover — harness drift made visible rather than
+  quiet.
 
 - A per-fiber `flock` serializes every CLI read-modify-write verb. Two
   concurrent writers no longer race a fiber's frontmatter. The lock files
