@@ -1,4 +1,6 @@
 defmodule Shuttle.Moment do
+  require Logger
+
   @moduledoc """
   The words behind a minute — real excerpts recovered from a harness transcript.
 
@@ -587,6 +589,13 @@ defmodule Shuttle.Moment do
           "name" => String.capitalize(name),
           "input" => block["arguments"] || %{}
         }
+
+      # A toolCall block that lost its id or name would otherwise fall through
+      # the catch-all unchanged, fail every downstream tool_use match, and
+      # vanish from the minute — harness drift made visible instead of quiet.
+      %{"type" => "toolCall"} = block ->
+        Logger.debug("shuttle moment: unmatched pi toolCall block: #{inspect(block)}")
+        block
 
       block ->
         block
