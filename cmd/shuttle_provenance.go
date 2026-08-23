@@ -194,6 +194,12 @@ func resolveProvenanceRows(query string, records []SessionProvenance) (string, [
 	if uid == "" {
 		return "", nil, addressed, fmt.Errorf("no fiber UID found for %q", query)
 	}
+	return uid, filterProvenanceRows(uid, records), addressed, nil
+}
+
+// filterProvenanceRows selects and dedupes the ledger rows for one intrinsic
+// UID, folding dispatch/resume duplicates into ordered lifecycle events.
+func filterProvenanceRows(uid string, records []SessionProvenance) []SessionProvenance {
 	seen := map[string]bool{}
 	rows := make([]SessionProvenance, 0)
 	for _, row := range records {
@@ -217,7 +223,7 @@ func resolveProvenanceRows(query string, records []SessionProvenance) (string, [
 	for i := range rows {
 		sort.SliceStable(rows[i].Events, func(a, b int) bool { return rows[i].Events[a].At < rows[i].Events[b].At })
 	}
-	return uid, rows, addressed, nil
+	return rows
 }
 
 func compositeFiberUID(query string) string {
@@ -375,10 +381,22 @@ func commitSession(sha string) (string, error) {
 		return "", fmt.Errorf("parsing commit ledger: %w", err)
 	}
 	needle := strings.ToLower(sha)
+	matches := map[string]string{}
 	for _, row := range response.Records {
 		if strings.HasPrefix(strings.ToLower(row.SHA), needle) && row.Session != "" {
-			return row.Session, nil
+			matches[strings.ToLower(row.SHA)] = row.Session
 		}
+	}
+	if len(matches) > 1 {
+		shas := make([]string, 0, len(matches))
+		for s := range matches {
+			shas = append(shas, s[:12])
+		}
+		sort.Strings(shas)
+		return "", fmt.Errorf("commit prefix %s is ambiguous in the commit ledger (%s); use a longer prefix", sha, strings.Join(shas, ", "))
+	}
+	for _, session := range matches {
+		return session, nil
 	}
 	return "", fmt.Errorf("commit %s is not recorded in the commit ledger (commits before the hook existed, or outside a harness session, are not covered)", sha)
 }
@@ -497,6 +515,11 @@ func materializeFiberTranscripts(fiber, uid string, rows []SessionProvenance, di
 		switch row.Transcript.Availability {
 		case "available_local":
 			item.LocalPath = transcriptPathForReceipt(row.Transcript)
+			if item.LocalPath == "" {
+				// Mirror the transcript command's guard: local-without-a-path
+				// must read as an error, never as a silent absence.
+				item.Error = "available_local but daemon returned no native path"
+			}
 		case "available_remote":
 			path, err := fetchRemoteTranscript(row.Transcript)
 			if err != nil {
@@ -576,12 +599,27 @@ and availability.`,
 			owner = &sessionOwner{Query: query, Session: query, Fiber: fiber, UID: uid}
 			query = fiber
 		}
+		var uid string
+		var rows []SessionProvenance
+		var addressed *felt.Felt
 		if owner != nil {
 			owner.Status, owner.Tempered = fiberDisposition(owner.UID)
+			if owner.UID != "" {
+				// The ledger already told us the intrinsic UID; filter on it
+				// directly rather than round-tripping through the fiber path,
+				// which could resolve a different (renamed/reused/empty) fiber.
+				uid = owner.UID
+				rows = filterProvenanceRows(uid, ledger.Records)
+				if query == "" {
+					query = uid
+				}
+			}
 		}
-		uid, rows, addressed, err := resolveProvenanceRows(query, ledger.Records)
-		if err != nil {
-			return err
+		if uid == "" {
+			uid, rows, addressed, err = resolveProvenanceRows(query, ledger.Records)
+			if err != nil {
+				return err
+			}
 		}
 		rows = addIdentityPending(query, uid, rows, addressed)
 		if compositeFiberRuntimePending(query) {
@@ -902,7 +940,7 @@ func runTranscriptJSON(receipt TranscriptReceipt) error {
 func init() {
 	shuttleSessionsCmd.Flags().StringVar(&sessionsCommitSHA, "commit", "", "reverse lookup: resolve a commit SHA (prefix accepted) to its owning fiber via the commit ledger")
 	shuttleSessionsCmd.Flags().BoolVar(&sessionsMaterialize, "materialize", false, "resolve every available transcript to an ordinary local file and write manifest.json")
-	shuttleSessionsCmd.Flags().StringVar(&sessionsDir, "dir", "", "directory for the materialized manifest (default: the felt transcript cache, keyed by fiber UID)")
+	shuttleSessionsCmd.Flags().StringVar(&sessionsDir, "dir", "", "directory for the materialized manifest.json (default: the felt transcript cache, keyed by fiber UID); remote transcript copies always land in the shared felt cache")
 	shuttleCmd.AddCommand(shuttleSessionsCmd)
 	shuttleCmd.AddCommand(shuttleTranscriptCmd)
 }

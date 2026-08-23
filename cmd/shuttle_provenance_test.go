@@ -430,3 +430,91 @@ func TestShuttleSessions_MaterializeWritesManifestAndTranscripts(t *testing.T) {
 		t.Fatalf("materialized transcript bytes changed: %q", got)
 	}
 }
+
+func TestShuttleSessions_ReverseLookupKeysOnLedgerUIDNotPath(t *testing.T) {
+	defer saveShuttleGlobals()()
+	defer resetSessionsFlags()()
+	// Fiber-less ledger rows: path round-tripping would match the first
+	// fiber-less row (01OTHER); keying on the ledger's own UID must not.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case sessionsCompositePath:
+			_, _ = w.Write([]byte(`{"records":[
+              {"uid":"01OTHER","session":"aaaaaaaa-0000-4000-8000-000000000000","host":"h","harness":"codex","kind":"dispatch","at":1,"transcript":{"availability":"transcript_missing"}},
+              {"uid":"01UID","session":"` + provenanceSession + `","host":"h","harness":"codex","kind":"dispatch","at":2,"transcript":{"availability":"transcript_missing"}}
+            ]}`))
+		case "/api/v1/fibers/composite":
+			_, _ = w.Write([]byte(`{"fibers":[]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("SHUTTLE_DAEMON_URL", server.URL)
+	out, err := runCommand(t, t.TempDir(), "shuttle", "sessions", provenanceSession, "--json")
+	if err != nil {
+		t.Fatalf("reverse lookup: %v\n%s", err, out)
+	}
+	var result struct {
+		Owner    sessionOwner        `json:"owner"`
+		Sessions []SessionProvenance `json:"sessions"`
+	}
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Owner.UID != "01UID" {
+		t.Fatalf("owner = %#v", result.Owner)
+	}
+	if len(result.Sessions) != 1 || result.Sessions[0].UID != "01UID" || result.Sessions[0].Session != provenanceSession {
+		t.Fatalf("listed a different fiber's sessions: %#v", result.Sessions)
+	}
+}
+
+func TestShuttleSessions_AmbiguousCommitPrefixErrors(t *testing.T) {
+	defer saveShuttleGlobals()()
+	defer resetSessionsFlags()()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/commits/composite" {
+			_, _ = w.Write([]byte(`{"records":[
+              {"sha":"79def80aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","session":"s1"},
+              {"sha":"79def80bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","session":"s2"}
+            ]}`))
+			return
+		}
+		if r.URL.Path == sessionsCompositePath {
+			_, _ = w.Write([]byte(`{"records":[]}`))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+	t.Setenv("SHUTTLE_DAEMON_URL", server.URL)
+	_, err := runCommand(t, t.TempDir(), "shuttle", "sessions", "--commit", "79def80")
+	if err == nil || !strings.Contains(err.Error(), "ambiguous") {
+		t.Fatalf("want ambiguous-prefix error, got %v", err)
+	}
+}
+
+func TestMaterialize_LocalWithoutPathIsAnErrorNotAbsence(t *testing.T) {
+	rows := []SessionProvenance{{
+		Session:    provenanceSession,
+		Transcript: TranscriptReceipt{Availability: "available_local"},
+	}}
+	dir := t.TempDir()
+	path, err := materializeFiberTranscripts("f", "01UID", rows, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest transcriptManifest
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	item := manifest.Sessions[0]
+	if item.Error == "" || item.LocalPath != "" || item.Availability != "available_local" {
+		t.Fatalf("pathless local transcript must carry an explicit error: %#v", item)
+	}
+}
