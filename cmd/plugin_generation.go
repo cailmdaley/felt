@@ -203,7 +203,7 @@ func pluginPayloadDigest(root string) (string, error) {
 		// Prefix match: a SIGKILL between the marker's temp-file creation and
 		// its rename can strand a `.felt-generation-*` temp file in the same
 		// tree; neither it nor the marker belongs to the described payload.
-		if strings.HasPrefix(filepath.Base(path), ".felt-generation") {
+		if base := filepath.Base(path); base == pluginGenerationMarkerName || strings.HasPrefix(base, ".felt-generation-") {
 			return nil
 		}
 		rel, err := filepath.Rel(root, path)

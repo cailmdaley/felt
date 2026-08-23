@@ -484,6 +484,10 @@ func stagePluginCandidate(source, executable string) (string, error) {
 			return "", fmt.Errorf("staging %s: %w", name, err)
 		}
 	}
+	if err := syncTreeDirs(candidate); err != nil {
+		os.RemoveAll(candidate)
+		return "", fmt.Errorf("syncing staged plugin: %w", err)
+	}
 	if err := validatePluginCandidate(candidate, executable); err != nil {
 		os.RemoveAll(candidate)
 		return "", fmt.Errorf("validating staged plugin: %w", err)
@@ -597,6 +601,8 @@ func rollbackPluginPromotion(runtimeDir, candidate string, hadOld bool, cause er
 		if err := os.Rename(previous, current); err != nil {
 			return fmt.Errorf("%w; restoring last known-good plugin: %v", cause, err)
 		}
+		// Best-effort: a rollback has no better move on sync failure, so the
+		// restored current carries weaker durability than a forward promotion.
 		_ = syncParentDir(current)
 	}
 	_ = os.Remove(filepath.Join(runtimeDir, pluginJournalName))
@@ -825,10 +831,17 @@ func syncParentDir(path string) error {
 		return err
 	}
 	defer dir.Close()
-	if err := dir.Sync(); err != nil && !errors.Is(err, syscall.EINVAL) && !errors.Is(err, syscall.ENOTSUP) {
+	if err := dir.Sync(); err != nil && !tolerableSyncError(err) {
 		return fmt.Errorf("syncing directory %s: %w", filepath.Dir(path), err)
 	}
 	return nil
+}
+
+// tolerableSyncError reports fsync refusals from filesystems that simply do
+// not support it. ENOTSUP and EOPNOTSUPP are the same errno on Linux but
+// distinct on Darwin, so both are listed.
+func tolerableSyncError(err error) bool {
+	return errors.Is(err, syscall.EINVAL) || errors.Is(err, syscall.ENOTSUP) || errors.Is(err, syscall.EOPNOTSUPP)
 }
 
 func copyTree(source, destination string) error {
@@ -871,10 +884,33 @@ func copyTree(source, destination string) error {
 		if copyErr != nil {
 			return copyErr
 		}
-		if syncErr != nil && !errors.Is(syncErr, syscall.EINVAL) && !errors.Is(syncErr, syscall.ENOTSUP) {
+		if syncErr != nil && !tolerableSyncError(syncErr) {
 			return syncErr
 		}
 		return closeErr
+	})
+}
+
+// copyTree copies data; durability of the copied tree's directory entries is
+// separate — syncTreeDirs walks the destination and fsyncs each directory so
+// a durable marker can never describe payload files whose entries were lost.
+func syncTreeDirs(root string) error {
+	return filepath.Walk(root, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if !info.IsDir() {
+			return nil
+		}
+		dir, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer dir.Close()
+		if err := dir.Sync(); err != nil && !tolerableSyncError(err) {
+			return fmt.Errorf("syncing directory %s: %w", path, err)
+		}
+		return nil
 	})
 }
 

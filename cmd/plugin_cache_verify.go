@@ -35,7 +35,13 @@ func verifyClaudeLoadedGeneration(current string) error {
 			continue
 		}
 		if !plugin.Enabled {
-			return fmt.Errorf("verifying Claude cache: plugin list reports %s installed but not enabled", ref)
+			// Enabled-ness is a user preference stored in settings.json that
+			// survives uninstall+install; refusing here would make setup
+			// permanently impossible for a deliberately disabled plugin, and
+			// silently flipping the preference would be worse. Verify the
+			// materialized bytes, and say loudly that nothing loads until the
+			// user re-enables.
+			fmt.Printf("⚠ %s is installed but disabled; the verified plugin will not load until you run `claude plugin enable %s`\n", ref, ref)
 		}
 		if plugin.InstallPath == "" {
 			return fmt.Errorf("verifying Claude cache: plugin list reports %s without an install path", ref)
@@ -67,7 +73,9 @@ func verifyCodexLoadedGeneration(current string) error {
 			continue
 		}
 		if !plugin.Enabled {
-			return fmt.Errorf("verifying Codex cache: plugin list reports %s installed but not enabled", codexPluginRef)
+			// Same call as the Claude path: a disable is user preference, not
+			// a materialization failure; verify the bytes and surface the gap.
+			fmt.Printf("⚠ %s is installed but disabled; the verified plugin will not load until you re-enable it in Codex\n", codexPluginRef)
 		}
 		if plugin.Source.Path == "" {
 			return fmt.Errorf("verifying Codex cache: plugin list reports %s without a cache path", codexPluginRef)

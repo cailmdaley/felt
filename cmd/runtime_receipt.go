@@ -655,7 +655,7 @@ func collectGenerationReceipt(bundles []ReceiptBundle, felt ReceiptComponent) Re
 		if loadedErr != nil {
 			check.Status, check.Repair = receiptPartial, loadedErr.Error()
 			receipt.Harnesses = append(receipt.Harnesses, check)
-			return generationReceiptWithHarnesses(receipt, receiptPartial, check.Repair)
+			return generationReceiptWithHarnesses(receipt, receiptPartial, joinReceiptRepairs(check.Repair, buildSkew))
 		}
 		if loadedPresent {
 			check.Generation = &loaded
@@ -664,18 +664,18 @@ func collectGenerationReceipt(bundles []ReceiptBundle, felt ReceiptComponent) Re
 		receipt.Harnesses = append(receipt.Harnesses, check)
 
 		if activePresent && !loadedPresent {
-			return generationReceiptWithHarnesses(receipt, receiptPartial,
-				fmt.Sprintf("%s's loaded plugin at %s has no %s marker; rerun `felt setup %s`", bundle.Harness, bundle.Path, pluginGenerationMarkerName, bundle.Harness))
+			return generationReceiptWithHarnesses(receipt, receiptPartial, joinReceiptRepairs(
+				fmt.Sprintf("%s's loaded plugin at %s has no %s marker; rerun `felt setup %s`", bundle.Harness, bundle.Path, pluginGenerationMarkerName, bundle.Harness), buildSkew))
 		}
 		if !activePresent && loadedPresent {
-			return generationReceiptWithHarnesses(receipt, receiptPartial,
-				fmt.Sprintf("the promoted source at %s has no %s marker while %s is loaded; rerun `felt setup %s`", activeRoot, pluginGenerationMarkerName, bundle.Harness, bundle.Harness))
+			return generationReceiptWithHarnesses(receipt, receiptPartial, joinReceiptRepairs(
+				fmt.Sprintf("the promoted source at %s has no %s marker while %s is loaded; rerun `felt setup %s`", activeRoot, pluginGenerationMarkerName, bundle.Harness, bundle.Harness), buildSkew))
 		}
 		if activePresent && loadedPresent {
 			if status, repair := comparePluginGenerations(active, loaded); status != receiptHealthy {
 				check.Status, check.Repair = status, repair
 				receipt.Harnesses[len(receipt.Harnesses)-1] = check
-				return generationReceiptWithHarnesses(receipt, status, repair)
+				return generationReceiptWithHarnesses(receipt, status, joinReceiptRepairs(repair, buildSkew))
 			}
 		}
 	}
@@ -704,6 +704,16 @@ func collectGenerationReceipt(bundles []ReceiptBundle, felt ReceiptComponent) Re
 func feltBuildMatchesVersion(feltBuild, version string) bool {
 	fields := strings.Fields(feltBuild)
 	return len(fields) > 0 && fields[0] == version
+}
+
+// joinReceiptRepairs concatenates two repair lines so a harness-level failure
+// does not silently drop a concurrent felt_build skew (the receipt carries a
+// single Repair string).
+func joinReceiptRepairs(primary, secondary string) string {
+	if secondary == "" {
+		return primary
+	}
+	return primary + "; also: " + secondary
 }
 
 func generationReceiptWithHarnesses(receipt ReceiptGenerationReceipt, status receiptStatus, repair string) ReceiptGenerationReceipt {

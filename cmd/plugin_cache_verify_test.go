@@ -72,6 +72,10 @@ func TestClaudeSetupRecoversStaleUpdateCacheViaReinstall(t *testing.T) {
 	if err := installPluginViaCLI(f.remote); err != nil {
 		t.Fatalf("baseline remote Claude setup: %v", err)
 	}
+	baseline, err := os.ReadFile(f.nativeLog)
+	if err != nil {
+		t.Fatal(err)
+	}
 	f.setGeneration(t, "refreshed")
 	t.Setenv("FAKE_NATIVE_TAMPER", "stale-update")
 	if err := installPluginViaCLI(f.remote + "#refreshed"); err != nil {
@@ -84,8 +88,11 @@ func TestClaudeSetupRecoversStaleUpdateCacheViaReinstall(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(log), "plugin uninstall") || !strings.Contains(string(log), "plugin install") {
-		t.Fatalf("convergence did not go through uninstall+install:\n%s", log)
+	// Only the second setup's log lines count: the baseline already logged a
+	// plain install, so an unscoped assertion would pass without any fallback.
+	delta := strings.TrimPrefix(string(log), string(baseline))
+	if !strings.Contains(delta, "plugin uninstall") || !strings.Contains(delta, "plugin install") {
+		t.Fatalf("convergence did not go through uninstall+install:\n%s", delta)
 	}
 }
 
