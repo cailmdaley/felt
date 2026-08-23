@@ -40,6 +40,10 @@ defmodule Shuttle.Poller do
   alias Shuttle.Poller.StandingRoles
 
   @default_poll_interval_ms 30_000
+  # A stuck felt/SSH read must not permanently stop reconciliation. The
+  # watchdog reaps the tracked read task before advancing the poller's clock;
+  # the per-cycle token makes a result already queued at that boundary inert.
+  @default_poll_stall_timeout_ms 300_000
   @default_max_concurrent_workers 10
   @default_heartbeat_interval_ms 5_000
   # THE boot-quarantine default: a freshly (re)started daemon parks every
@@ -108,6 +112,10 @@ defmodule Shuttle.Poller do
       :heartbeat_interval_ms,
       :tick_timer_ref,
       :tick_token,
+      :stall_timeout_ms,
+      :poll_stall_timer_ref,
+      :poll_token,
+      :poll_task_pid,
       # List of felt store directories, in resolution-priority order.
       :felt_stores,
       # Machine identity used by shuttle.host dispatch affinity.
@@ -119,6 +127,8 @@ defmodule Shuttle.Poller do
       :auto_discover_felt_stores,
       :runner,
       poll_check_in_progress: false,
+      poll_stalls: 0,
+      last_poll_stalled_at: nil,
       # Monotonic count of poll cycles APPLIED (a cycle whose reads came back
       # and were folded into state — success or logged read failure alike).
       # Per-cycle observations (`orphans`, rebuilt from scratch by every
@@ -603,6 +613,20 @@ defmodule Shuttle.Poller do
       own_host_id: own_host_id,
       auto_discover_felt_stores: auto_discover,
       runner: runner,
+      stall_timeout_ms:
+        Keyword.get(
+          opts,
+          :stall_timeout_ms,
+          Keyword.get(
+            opts,
+            :poll_stall_timeout_ms,
+            Application.get_env(
+              :shuttle,
+              :poll_stall_timeout_ms,
+              Application.get_env(:shuttle, :stall_timeout_ms, @default_poll_stall_timeout_ms)
+            )
+          )
+        ),
       # Restart is not dispatch authority: quarantine every autonomous
       # dispatch until a human releases the hold (see the State field
       # comment). Opt wins over app config so tests can exercise the
@@ -649,6 +673,7 @@ defmodule Shuttle.Poller do
   # `handle_worker_exit`/`remove_running` do per-entry, just for all of them
   # at once on the way out.
   def terminate(_reason, %State{} = state) do
+    stop_poll_task(state.poll_task_pid)
     Enum.each(state.running, fn {_runtime_key, meta} -> stop_watcher(meta) end)
     :ok
   end
@@ -672,6 +697,7 @@ defmodule Shuttle.Poller do
 
   def handle_info(:run_poll_cycle, state) do
     parent = self()
+    poll_token = make_ref()
 
     # The Task does only the slow, READ-ONLY work (felt-store walk + remote
     # SSH discovery) and returns plain data — never a `%State{}`, never a
@@ -679,12 +705,24 @@ defmodule Shuttle.Poller do
     # thread preserves daemon responsiveness; making it pure means there is
     # only one mutable state (the GenServer's), so there is nothing to merge
     # when the Task completes. See `poll_reads/1` and `apply_poll_cycle/2`.
-    {:ok, _pid} =
-      Task.start_link(fn ->
-        send(parent, {:poll_world, poll_reads(state)})
-      end)
+    case start_poll_task(parent, poll_token, state) do
+      {:ok, task_pid} ->
+        stall_timer_ref =
+          Process.send_after(self(), {:poll_stalled, poll_token}, state.stall_timeout_ms)
 
-    {:noreply, %{state | poll_check_in_progress: true}}
+        {:noreply,
+         %{
+           state
+           | poll_check_in_progress: true,
+             poll_token: poll_token,
+             poll_task_pid: task_pid,
+             poll_stall_timer_ref: stall_timer_ref
+         }}
+
+      {:error, reason} ->
+        Logger.error("Could not start poll task: #{inspect(reason)}")
+        {:noreply, schedule_tick(state, state.poll_interval_ms)}
+    end
   end
 
   # The poll Task finished its reads. Apply the world it observed to the
@@ -692,28 +730,69 @@ defmodule Shuttle.Poller do
   # :dispatch, a :worker_exited retry, a :retry firing) is already reflected
   # and is simply respected by the re-validating apply, never clobbered by a
   # stale snapshot.
-  def handle_info({:poll_world, {:ok, world}}, state) do
+  def handle_info(
+        {:poll_world, poll_token, {:ok, world}},
+        %{poll_check_in_progress: true, poll_token: poll_token} = state
+      ) do
     state =
       state
+      |> cancel_poll_stall_timer()
       |> apply_poll_cycle(world)
       |> Map.put(:poll_check_in_progress, false)
+      |> Map.put(:poll_token, nil)
+      |> Map.put(:poll_task_pid, nil)
       |> Map.update!(:poll_cycles, &(&1 + 1))
       |> schedule_tick(state.poll_interval_ms)
 
     {:noreply, state}
   end
 
-  def handle_info({:poll_world, {:error, reason}}, state) do
+  def handle_info(
+        {:poll_world, poll_token, {:error, reason}},
+        %{poll_check_in_progress: true, poll_token: poll_token} = state
+      ) do
     Logger.error("Poll cycle failed: #{reason}")
 
     state =
       state
+      |> cancel_poll_stall_timer()
       |> Map.put(:poll_check_in_progress, false)
+      |> Map.put(:poll_token, nil)
+      |> Map.put(:poll_task_pid, nil)
       |> Map.update!(:poll_cycles, &(&1 + 1))
       |> schedule_tick(state.poll_interval_ms)
 
     {:noreply, state}
   end
+
+  # A slow read no longer owns the poller's clock forever. Reap its supervised,
+  # unlinked task first, then advance with a fresh token. The token fence below
+  # still matters for a result that crossed the mailbox boundary at the same
+  # instant as the watchdog.
+  def handle_info(
+        {:poll_stalled, poll_token},
+        %{poll_check_in_progress: true, poll_token: poll_token} = state
+      ) do
+    Logger.error("Poll cycle stalled after #{state.stall_timeout_ms}ms; advancing poller")
+
+    state =
+      state
+      |> stop_poll_task()
+      |> Map.put(:poll_check_in_progress, false)
+      |> Map.put(:poll_token, nil)
+      |> Map.put(:poll_stall_timer_ref, nil)
+      |> Map.update!(:poll_stalls, &(&1 + 1))
+      |> Map.put(:last_poll_stalled_at, DateTime.utc_now())
+      |> schedule_tick(state.poll_interval_ms)
+
+    {:noreply, state}
+  end
+
+  # Replies from an abandoned cycle (including a timer or task message racing
+  # the next cycle) are inert. Matching the token is the single-flight fence;
+  # without it, a late world could overwrite current state and re-arm the tick.
+  def handle_info({:poll_world, _poll_token, _result}, state), do: {:noreply, state}
+  def handle_info({:poll_stalled, _poll_token}, state), do: {:noreply, state}
 
   def handle_info({:worker_exited, fiber_id, reason, session_alive?}, state) do
     state = handle_worker_exit(state, fiber_id, reason, session_alive?)
@@ -727,7 +806,7 @@ defmodule Shuttle.Poller do
 
   @impl true
   def handle_call(:snapshot, _from, state) do
-    {:reply, Snapshot.build_snapshot(state), state}
+    {:reply, add_poll_health(Snapshot.build_snapshot(state), state), state}
   end
 
   def handle_call(:parked_index, _from, state) do
@@ -934,7 +1013,7 @@ defmodule Shuttle.Poller do
   end
 
   def handle_call(:orchestrator_state, _from, state) do
-    {:reply, Snapshot.build_full_state(state), state}
+    {:reply, add_poll_health(Snapshot.build_full_state(state), state), state}
   end
 
   def handle_call({:resolve_fiber_host, fiber_id}, _from, state) do
@@ -3463,6 +3542,51 @@ defmodule Shuttle.Poller do
       | tick_timer_ref: timer_ref,
         tick_token: tick_token
     }
+  end
+
+  defp cancel_poll_stall_timer(%State{poll_stall_timer_ref: timer_ref} = state)
+       when is_reference(timer_ref) do
+    Process.cancel_timer(timer_ref)
+    %{state | poll_stall_timer_ref: nil}
+  end
+
+  defp cancel_poll_stall_timer(%State{} = state), do: state
+
+  # Poll reads are supervised but intentionally not linked to this GenServer:
+  # the watchdog must be able to kill one wedged read without taking the
+  # Poller down with it. There is still only one tracked task at a time, and
+  # both the watchdog and terminate/2 reap it.
+  defp start_poll_task(parent, poll_token, %State{} = state) do
+    Task.Supervisor.start_child(Shuttle.TaskSupervisor, fn ->
+      send(parent, {:poll_world, poll_token, poll_reads(state)})
+    end)
+  catch
+    :exit, reason -> {:error, reason}
+  end
+
+  defp stop_poll_task(nil), do: :ok
+
+  defp stop_poll_task(task_pid) when is_pid(task_pid) do
+    if Process.alive?(task_pid), do: Process.exit(task_pid, :kill)
+    :ok
+  end
+
+  defp stop_poll_task(%State{} = state) do
+    stop_poll_task(state.poll_task_pid)
+    %{state | poll_task_pid: nil}
+  end
+
+  defp add_poll_health(snapshot, %State{} = state) do
+    Map.put(snapshot, :poll_health, %{
+      state: if(state.poll_check_in_progress, do: "reading", else: "idle"),
+      stall_timeout_ms: state.stall_timeout_ms,
+      stalls: state.poll_stalls,
+      last_stalled_at:
+        case state.last_poll_stalled_at do
+          %DateTime{} = at -> DateTime.to_iso8601(at)
+          _ -> nil
+        end
+    })
   end
 
   defp schedule_poll_cycle do

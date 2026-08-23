@@ -1373,6 +1373,118 @@ defmodule Shuttle.PollerTest do
     assert System.monotonic_time(:millisecond) - started_at_ms < 100
   end
 
+  test "a completed poll cycle cancels its stall watchdog" do
+    {:ok, poller} =
+      start_poller!(
+        name: :test_poller_stall_watchdog_completion,
+        runner: MockRunner,
+        poll_interval_ms: 60_000,
+        stall_timeout_ms: 30,
+        felt_stores: [MockRunner.felt_root()]
+      )
+
+    settle_poller!(poller)
+    state = :sys.get_state(poller)
+    assert state.poll_check_in_progress == false
+    assert state.poll_token == nil
+    assert state.poll_task_pid == nil
+    assert state.poll_stall_timer_ref == nil
+
+    assert Poller.snapshot(poller).poll_health == %{
+             state: "idle",
+             stall_timeout_ms: 30,
+             stalls: 0,
+             last_stalled_at: nil
+           }
+
+    cycles = state.poll_cycles
+    Process.sleep(60)
+    assert :sys.get_state(poller).poll_cycles == cycles
+  end
+
+  test "repeated stalled reads advance the poller and supersede late replies" do
+    fiber = make_fiber("tests/stalled-read")
+    MockRunner.set_fiber("tests/stalled-read", fiber)
+    MockRunner.set_shuttle("tests/stalled-read", @oneshot_shuttle)
+    MockRunner.set_felt_ls_delay(200)
+
+    {:ok, poller} =
+      start_poller!(
+        name: :test_poller_stall_watchdog_repeated,
+        runner: MockRunner,
+        poll_interval_ms: 20,
+        stall_timeout_ms: 30,
+        felt_stores: [MockRunner.felt_root()]
+      )
+
+    assert wait_until(fn -> is_pid(:sys.get_state(poller).poll_task_pid) end)
+
+    first_task = :sys.get_state(poller).poll_task_pid
+
+    assert wait_until(fn ->
+             state = :sys.get_state(poller)
+
+             state.poll_stalls >= 1 and is_pid(state.poll_task_pid) and
+               state.poll_task_pid != first_task
+           end)
+
+    assert wait_until(fn -> not Process.alive?(first_task) end)
+
+    second_task = :sys.get_state(poller).poll_task_pid
+
+    assert wait_until(fn ->
+             state = :sys.get_state(poller)
+
+             state.poll_stalls >= 2 and is_pid(state.poll_task_pid) and
+               state.poll_task_pid != second_task
+           end)
+
+    assert wait_until(fn -> not Process.alive?(second_task) end)
+
+    health = Poller.snapshot(poller).poll_health
+    assert health.stalls >= 2
+    assert is_binary(health.last_stalled_at)
+
+    # Capture a live cycle token, let its watchdog supersede it, then inject
+    # the abandoned task's shape. The current cycle remains authoritative.
+    old_token = :sys.get_state(poller).poll_token
+
+    assert wait_until(fn ->
+             state = :sys.get_state(poller)
+             is_pid(state.poll_task_pid) and state.poll_token != old_token
+           end)
+
+    current_token = :sys.get_state(poller).poll_token
+    send(poller, {:poll_world, old_token, {:error, :late_abandoned_cycle}})
+    _ = Poller.snapshot(poller)
+    assert :sys.get_state(poller).poll_token == current_token
+  end
+
+  test "poller supervision shuts down an in-flight read with its owner" do
+    fiber = make_fiber("tests/shutdown-stalled-read")
+    MockRunner.set_fiber("tests/shutdown-stalled-read", fiber)
+    MockRunner.set_shuttle("tests/shutdown-stalled-read", @oneshot_shuttle)
+    MockRunner.set_felt_ls_delay(1_000)
+
+    {:ok, poller} =
+      start_poller!(
+        name: :test_poller_stall_watchdog_shutdown,
+        runner: MockRunner,
+        poll_interval_ms: 60_000,
+        stall_timeout_ms: 10_000,
+        felt_stores: [MockRunner.felt_root()]
+      )
+
+    assert wait_until(fn -> is_pid(:sys.get_state(poller).poll_task_pid) end)
+
+    task_pid = :sys.get_state(poller).poll_task_pid
+    monitor = Process.monitor(poller)
+    Process.exit(poller, :shutdown)
+
+    assert_receive {:DOWN, ^monitor, :process, ^poller, :shutdown}, 1_000
+    assert wait_until(fn -> not Process.alive?(task_pid) end)
+  end
+
   test "poller skips closed fibers" do
     fiber = make_fiber("tests/closed", %{"status" => "closed"})
     MockRunner.set_fiber("tests/closed", fiber)
