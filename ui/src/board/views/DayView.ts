@@ -2322,10 +2322,10 @@ class DayViewImpl implements TemporalView {
       name.type = 'button'
       name.className = 'kbn-day-lanename'
       name.textContent = lane.label
-      // The name is the constitution's door. The rail keeps the separate
-      // work-reading gesture: its future half opens the terminal, while the
-      // lane name always opens the fiber itself.
-      name.title = `${lane.label} — open the constitution`
+      // The name is the fiber's door. The rail keeps the separate work-reading
+      // gesture: its future half opens the terminal, while the lane name
+      // always opens the fiber itself.
+      name.title = `${lane.label} — open the fiber`
       name.addEventListener('click', (e) => {
         e.stopPropagation()
         this.ctx?.openCard(lane.cardId)

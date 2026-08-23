@@ -1225,13 +1225,14 @@ func uninstallCodexPlugin() error {
 	return nil
 }
 
-// pruneFeltHooks removes any hook entries under `event` whose inner command
-// references the felt plugin's hook script for the given basename (e.g.
-// "session.sh"). Matches on the path suffix `<plugin>/hooks/<basename>` so
-// stale hooks from prior installs at different paths are caught regardless of
-// where the plugin lived. Returns the command strings that were removed, so
-// callers can tell "already installed" from "updated" when the same path is
-// being re-added.
+// pruneFeltHooks removes commands under `event` whose command references the
+// felt plugin's hook script for the given basename (e.g. "session.sh").
+// Matches on the path suffix `<plugin>/hooks/<basename>` so stale hooks from
+// prior installs at different paths are caught regardless of where the plugin
+// lived. A Claude hook group may contain several commands; remove only Felt's
+// command and preserve the rest of the group. Returns the command strings that
+// were removed, so callers can tell "already installed" from "updated" when
+// the same path is being re-added.
 func pruneFeltHooks(hooks map[string]interface{}, event, basename string) []string {
 	eventHooks, ok := hooks[event].([]interface{})
 	if !ok {
@@ -1253,26 +1254,27 @@ func pruneFeltHooks(hooks map[string]interface{}, event, basename string) []stri
 			filtered = append(filtered, hook)
 			continue
 		}
-		// Drop the entire hook entry if any of its inner commands looks like
-		// a felt hook. Codex hook entries always carry exactly one command in
-		// our installs; this is conservative for hand-edited configs too —
-		// if you've co-located another script under the same entry we'll
-		// take it with the felt one, which is unlikely in practice.
-		var feltCmd string
+		remaining := make([]interface{}, 0, len(cmds))
+		removedFromGroup := false
 		for _, cmd := range cmds {
 			cmdMap, ok := cmd.(map[string]interface{})
 			if !ok {
+				remaining = append(remaining, cmd)
 				continue
 			}
 			cmdStr, _ := cmdMap["command"].(string)
 			if strings.Contains(cmdStr, suffix) {
-				feltCmd = cmdStr
-				break
+				removed = append(removed, cmdStr)
+				removedFromGroup = true
+				continue
 			}
+			remaining = append(remaining, cmd)
 		}
-		if feltCmd != "" {
-			removed = append(removed, feltCmd)
+		if removedFromGroup && len(remaining) == 0 {
 			continue
+		}
+		if removedFromGroup {
+			hookMap["hooks"] = remaining
 		}
 		filtered = append(filtered, hook)
 	}

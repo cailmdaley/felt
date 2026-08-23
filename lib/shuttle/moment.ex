@@ -542,7 +542,7 @@ defmodule Shuttle.Moment do
     {excerpts, tools, _spawns, _codex_self} =
       path
       |> File.stream!()
-      |> Enum.reduce({[], [], %{}, nil}, fn line, {excerpts, tools, spawns, codex_self} ->
+      |> Enum.reduce({[], [], %{}, "/root"}, fn line, {excerpts, tools, spawns, codex_self} ->
         case decode_record(line) do
           {:ok, record} ->
             codex_self = Map.get(record, "codex_self") || codex_self
@@ -614,17 +614,40 @@ defmodule Shuttle.Moment do
     end
   end
 
-  # Codex names the root agent `/root` and teammate sessions
-  # `/root/<agent_nickname>`. This is the stable identity used by native
-  # `agent_message` routing; it is not derived from the message body.
+  # Codex names the root agent `/root` and child sessions by their
+  # `agent_path` (for example `/root/reviewer`). Older records may only carry
+  # `agent_nickname`, which is a fallback. This is the stable identity used by
+  # native `agent_message` routing; it is not derived from the message body.
   defp normalize_record(%{"type" => "session_meta", "payload" => payload} = raw)
        when is_map(payload) do
-    nickname = payload["agent_nickname"]
-    self = if is_binary(nickname) and nickname != "", do: "/root/#{nickname}", else: "/root"
-    {:ok, Map.put(raw, "codex_self", self)}
+    self = codex_agent_path(payload)
+
+    if self, do: {:ok, Map.put(raw, "codex_self", self)}, else: {:ok, raw}
   end
 
   defp normalize_record(raw), do: {:ok, raw}
+
+  defp codex_agent_path(payload) do
+    case present_string(payload["agent_path"]) do
+      nil ->
+        case present_string(payload["agent_nickname"]) do
+          nil -> nil
+          nickname -> "/root/#{nickname}"
+        end
+
+      path ->
+        path
+    end
+  end
+
+  defp present_string(value) when is_binary(value) do
+    case String.trim(value) do
+      "" -> nil
+      value -> value
+    end
+  end
+
+  defp present_string(_), do: nil
 
   # Codex's developer messages are injected context, not words spoken by the
   # user. Keep them in the canonical shape with the same `isMeta` marker Claude

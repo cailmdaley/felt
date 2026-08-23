@@ -1017,6 +1017,52 @@ defmodule ShuttleWeb.MomentControllerTest do
                {"return", "reviewer", "real peer report"}
              ]
     end
+
+    test "uses a child rollout's agent_path for native peer returns" do
+      root =
+        write_codex_tree([
+          %{
+            "type" => "session_meta",
+            "timestamp" => iso(@t0),
+            "payload" => %{
+              "agent_nickname" => "reviewer",
+              "agent_path" => "/root/review_task",
+              "thread_source" => "subagent"
+            }
+          },
+          codex_item(@t0 + 1_000, %{
+            "type" => "agent_message",
+            "author" => "reviewer",
+            "recipient" => "/root/review_task",
+            "content" => [codex_text("input_text", "child report")]
+          }),
+          # A later neutral metadata record must not reset the child identity
+          # to /root while reading a compacted or inherited rollout.
+          %{
+            "type" => "session_meta",
+            "timestamp" => iso(@t0 + 2_000),
+            "payload" => %{"agent_nickname" => nil, "agent_path" => nil}
+          },
+          codex_item(@t0 + 3_000, %{
+            "type" => "agent_message",
+            "author" => "reviewer",
+            "recipient" => "/root/review_task",
+            "content" => [codex_text("input_text", "child report after metadata")]
+          })
+        ])
+
+      assert Enum.map(
+               Moment.excerpts(@session, @t0, @t0 + 10_000,
+                 root: @absent_root,
+                 pi_root: @absent_root,
+                 codex_root: root
+               ),
+               &{&1.kind, &1.name, &1.text}
+             ) == [
+               {"return", "reviewer", "child report"},
+               {"return", "reviewer", "child report after metadata"}
+             ]
+    end
   end
 
   describe "GET /api/v1/moment (local)" do

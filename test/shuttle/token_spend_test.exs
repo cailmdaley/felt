@@ -453,5 +453,34 @@ defmodule Shuttle.TokenSpendTest do
                }
              }
     end
+
+    test "withholds model attribution when cumulative snapshots go backwards", %{
+      root: root,
+      path: path
+    } do
+      write!(path, [
+        codex_turn_context("gpt-5.6-luna"),
+        codex_token_count("2026-08-23T18:20:00.000Z"),
+        # A reset or truncation makes the intervening deltas unknowable. The
+        # latest total is still the session's spend, but no model can honestly
+        # be assigned the clamped-away negative delta.
+        codex_token_count("2026-08-23T18:20:01.000Z", %{
+          "input_tokens" => 19,
+          "cached_input_tokens" => 4,
+          "cache_write_input_tokens" => 2,
+          "output_tokens" => 4,
+          "reasoning_output_tokens" => 1,
+          "total_tokens" => 23
+        })
+      ])
+
+      result = codex_spend(root)
+
+      assert result.input == 15
+      assert result.output == 4
+      assert result.cache_read == 4
+      assert result.cache_write == 2
+      assert result.models == %{}
+    end
   end
 end

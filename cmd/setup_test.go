@@ -420,9 +420,14 @@ func TestPruneLegacyClaudeHooks(t *testing.T) {
 		"model": "sonnet",
 		"hooks": map[string]interface{}{
 			"PostToolUse": []interface{}{
-				map[string]interface{}{"hooks": []interface{}{map[string]interface{}{
-					"type": "command", "command": "/Users/cail/loom/hooks/shuttle-hook.sh",
-				}}},
+				map[string]interface{}{"hooks": []interface{}{
+					map[string]interface{}{
+						"type": "command", "command": "/Users/cail/loom/hooks/shuttle-hook.sh",
+					},
+					map[string]interface{}{
+						"type": "command", "command": "/Users/cail/bin/keep-me.sh",
+					},
+				}},
 				map[string]interface{}{"hooks": []interface{}{map[string]interface{}{
 					"type": "command", "command": "/repo/claude-plugin/hooks/event.sh",
 				}}},
@@ -463,8 +468,14 @@ func TestPruneLegacyClaudeHooks(t *testing.T) {
 		t.Fatalf("legacy-only SessionStart entry survived: %#v", hooks["SessionStart"])
 	}
 	post := hooks["PostToolUse"].([]interface{})
-	if len(post) != 1 {
+	if len(post) != 2 {
 		t.Fatalf("unrelated PostToolUse entry was removed: %#v", post)
+	}
+	if len(post) == 2 {
+		first := post[0].(map[string]interface{})["hooks"].([]interface{})
+		if len(first) != 1 || first[0].(map[string]interface{})["command"] != "/Users/cail/bin/keep-me.sh" {
+			t.Fatalf("unrelated command in a shared hook group was removed: %#v", first)
+		}
 	}
 }
 
