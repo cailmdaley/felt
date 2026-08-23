@@ -2313,12 +2313,13 @@ class DayViewImpl implements TemporalView {
       name.type = 'button'
       name.className = 'kbn-day-lanename'
       name.textContent = lane.label
-      // The name is the lane's door, same as the rail: to the terminal while a
-      // worker is up, to the fiber once it is not.
-      name.title = `${lane.label} — open ${this.laneIsAloft(lane) ? 'its terminal' : 'the fiber'}`
+      // The name is the constitution's door. The rail keeps the separate
+      // work-reading gesture: its future half opens the terminal, while the
+      // lane name always opens the fiber itself.
+      name.title = `${lane.label} — open the constitution`
       name.addEventListener('click', (e) => {
         e.stopPropagation()
-        this.openLaneTerminal(lane)
+        this.ctx?.openCard(lane.cardId)
       })
       label.append(name)
       // The host is named ONCE. A stale lane's waiting badge already reads
@@ -2740,39 +2741,16 @@ class DayViewImpl implements TemporalView {
   }
 
   /**
-   * A LANE IS A WAY INTO THE WORK IT DREW — click it and you are at the
-   * terminal.
-   *
-   * Reaching a live session used to mean remembering which fiber it was,
-   * crossing to the Desk, finding the card and pressing its worker pill. But
-   * the lane is already the fiber, already labelled with its name, and already
-   * the thing you were looking at when you decided to go there. So it is the
-   * door, and it opens through exactly the pill's own route (`ctx.openWorker`),
-   * so the two surfaces cannot drift into two ways of attaching to one tmux.
-   *
-   * NO LIVE WORKER OPENS THE FIBER instead of doing nothing. A dead click is
-   * the more surprising of the two options — it reads as a broken control
-   * rather than as an absent one — and the fallback keeps the lane's meaning
-   * single and learnable: *take me to this fiber's work*, which is the terminal
-   * while one is up and the card once it is not. It is also what the lane's
-   * name already did before this, so nothing that used to work stopped.
-   */
-  /**
-   * WHERE A LANE'S CLICK GOES. Pure, and exported, because this is the branch
+   * WHERE A RAIL CLICK GOES. Pure, and exported, because this is the branch
    * that decides whether the gesture reaches a terminal at all — the one place
    * the feature can silently do nothing, and therefore the one place worth
    * pinning down without a browser.
    *
    * A card with a live worker AND a host that can attach goes to the terminal.
    * Everything else goes to the fiber: no worker in the air, or a board mounted
-   * without an attach handler (the offline harness). Never neither.
+   * without an attach handler (the offline harness). The lane name itself
+   * always opens the fiber and does not use this rail-specific choice.
    */
-  /** Is a worker in the air for this lane right now — the question both the
-   *  rail's title and the lane name's ask before promising a terminal. */
-  private laneIsAloft(lane: DayLane): boolean {
-    return this.ctx?.cards.some((c) => c.id === lane.cardId && Boolean(c.runningWorker)) ?? false
-  }
-
   private openLaneTerminal(lane: DayLane): void {
     const ctx = this.ctx
     if (!ctx) return
