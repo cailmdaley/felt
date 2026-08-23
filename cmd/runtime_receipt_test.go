@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -257,5 +258,89 @@ trusted_hash = "sha256:two"
 	}
 	if codexHooksTrusted() {
 		t.Fatal("one missing trust entry was reported fully trusted")
+	}
+}
+
+func TestCollectGenerationReceiptRejectsPendingPromotion(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	runtimeDir := filepath.Join(home, ".felt", pluginRuntimeDirName)
+	if err := os.MkdirAll(runtimeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(runtimeDir, pluginJournalName), []byte(`{"phase":"swapped"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got := collectGenerationReceipt(nil)
+	if got.Status != receiptPartial {
+		t.Fatalf("pending promotion receipt = %#v, want partial", got)
+	}
+	if !strings.Contains(got.Repair, "pending plugin promotion") {
+		t.Fatalf("pending promotion repair = %q, want actionable journal repair", got.Repair)
+	}
+	status, _ := combineReceiptStatus(receiptHealthy, []ReceiptBundle{{Status: receiptHealthy}}, receiptHealthy, receiptHealthy, got.Status)
+	if status == receiptHealthy {
+		t.Fatal("pending promotion was allowed to produce a healthy overall receipt")
+	}
+}
+
+func TestCollectGenerationReceiptRejectsSameVersionDifferentDigest(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	runtimeDir := filepath.Join(home, ".felt", pluginRuntimeDirName)
+	activeRoot := filepath.Join(runtimeDir, pluginCurrentName, "claude-plugin")
+	loadedRoot := filepath.Join(home, "loaded", "felt")
+	for _, root := range []string{activeRoot, loadedRoot} {
+		if err := os.MkdirAll(root, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(root, ".claude-plugin"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, ".claude-plugin", "plugin.json"), []byte(`{"name":"felt","version":"1.2.3"}`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "payload.txt"), []byte("same payload\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	active := pluginGenerationIdentity{
+		Schema: 1, SourceKind: "github", Source: marketplaceRepo,
+		RequestedRef: "main", ResolvedCommit: strings.Repeat("a", 40),
+		PluginVersion: "1.2.3", FeltBuild: "1.2.3 (build-a)",
+	}
+	digest, err := pluginPayloadDigest(activeRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	active.PayloadSHA256 = digest
+	if err := os.WriteFile(filepath.Join(loadedRoot, "payload.txt"), []byte("different payload\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded := active
+	loaded.PayloadSHA256, err = pluginPayloadDigest(loadedRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeMarker := func(root string, identity pluginGenerationIdentity) {
+		t.Helper()
+		data, err := json.Marshal(identity)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, pluginGenerationMarkerName), data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeMarker(activeRoot, active)
+	writeMarker(loadedRoot, loaded)
+
+	got := collectGenerationReceipt([]ReceiptBundle{{Harness: "codex", Path: loadedRoot, Enabled: true, Status: receiptHealthy}})
+	if got.Status != receiptMismatch {
+		t.Fatalf("generation disagreement receipt = %#v, want mismatch", got)
+	}
+	if !strings.Contains(got.Repair, "payload digest") || !strings.Contains(got.Repair, "setup") {
+		t.Fatalf("generation disagreement repair = %q, want digest and setup guidance", got.Repair)
 	}
 }
