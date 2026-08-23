@@ -27,9 +27,19 @@ const (
 )
 
 type pluginPromotionJournal struct {
-	Candidate string `json:"candidate"`
-	Phase     string `json:"phase"` // prepared, swapped, committed
-	HadOld    bool   `json:"had_old"`
+	Candidate string              `json:"candidate"`
+	Phase     string              `json:"phase"` // prepared, swapped, committed
+	HadOld    bool                `json:"had_old"`
+	Native    *pluginNativeIntent `json:"native,omitempty"`
+}
+
+// pluginNativeIntent is the activation state that existed before a
+// filesystem promotion began. It is deliberately persisted in the journal:
+// a process can die after a native CLI has mutated its cache/config, before it
+// gets a chance to run the in-process rollback callback.
+type pluginNativeIntent struct {
+	Claude *claudeInstallationState `json:"claude,omitempty"`
+	Codex  *codexInstallationState  `json:"codex,omitempty"`
 }
 
 type marketplaceManifest struct {
@@ -60,12 +70,14 @@ type codexInstallationState struct {
 }
 
 func captureClaudeInstallation() claudeInstallationState {
-	entry, configured := marketplaceEntry(marketplaceName)
-	return claudeInstallationState{
-		Marketplace: entry,
-		Configured:  configured,
-		Installed:   isPluginInstalled("felt@" + marketplaceName),
+	// Native capture must describe the filesystem generation that will remain
+	// active. Recovery is intentionally first: a kill during native activation
+	// can leave the candidate in current while the journal still points at the
+	// last known-good previous copy.
+	if !recoverPluginRuntimeBeforeNativeCapture() {
+		return claudeInstallationState{}
 	}
+	return captureClaudeInstallationRaw()
 }
 
 func claudeMarketplaceSource(entry claudeMarketplaceEntry) string {
@@ -119,11 +131,26 @@ func restoreClaudeInstallation(state claudeInstallationState) error {
 }
 
 func captureCodexInstallation() codexInstallationState {
+	if !recoverPluginRuntimeBeforeNativeCapture() {
+		return codexInstallationState{}
+	}
 	if _, err := exec.LookPath("codex"); err != nil {
 		return codexInstallationState{}
 	}
 	source, configured := codexMarketplaceState()
 	return codexInstallationState{Source: source, Configured: configured, Installed: codexPluginInstalled()}
+}
+
+func recoverPluginRuntimeBeforeNativeCapture() bool {
+	runtimeDir, err := pluginRuntimeDir()
+	if err != nil {
+		return false
+	}
+	// The caller with a full setup operation will surface this error when it
+	// reaches staging. Capture functions cannot return an error without
+	// changing their long-standing API, so they only provide the ordering
+	// guarantee here.
+	return recoverPluginPromotion(runtimeDir) == nil
 }
 
 func codexMarketplaceState() (string, bool) {
@@ -466,10 +493,14 @@ func stagePluginCandidate(source, executable string) (string, error) {
 // promotePluginCandidate atomically swaps current/previous around an
 // installer operation. A journal makes both rename gaps recoverable after a
 // kill or power loss; only a committed promotion discards the previous copy.
-func promotePluginCandidate(candidate string, install func(string) error, restore func() error) error {
+func promotePluginCandidate(candidate string, install func(string) error, restore func() error, intents ...*pluginNativeIntent) error {
 	runtimeDir := filepath.Dir(candidate)
 	if err := recoverPluginPromotion(runtimeDir); err != nil {
 		return err
+	}
+	var native *pluginNativeIntent
+	if len(intents) > 0 {
+		native = intents[0]
 	}
 	current := filepath.Join(runtimeDir, pluginCurrentName)
 	previous := filepath.Join(runtimeDir, pluginPreviousName)
@@ -479,7 +510,7 @@ func promotePluginCandidate(candidate string, install func(string) error, restor
 	if oldErr != nil && !os.IsNotExist(oldErr) {
 		return fmt.Errorf("checking current plugin: %w", oldErr)
 	}
-	if err := writePluginJournal(journal, pluginPromotionJournal{Candidate: candidate, Phase: "prepared", HadOld: hadOld}); err != nil {
+	if err := writePluginJournal(journal, pluginPromotionJournal{Candidate: candidate, Phase: "prepared", HadOld: hadOld, Native: native}); err != nil {
 		return err
 	}
 	if hadOld {
@@ -487,7 +518,7 @@ func promotePluginCandidate(candidate string, install func(string) error, restor
 			return fmt.Errorf("parking last known-good plugin: %w", err)
 		}
 	}
-	if err := writePluginJournal(journal, pluginPromotionJournal{Candidate: candidate, Phase: "swapped", HadOld: hadOld}); err != nil {
+	if err := writePluginJournal(journal, pluginPromotionJournal{Candidate: candidate, Phase: "swapped", HadOld: hadOld, Native: native}); err != nil {
 		return rollbackPluginPromotion(runtimeDir, candidate, hadOld, err)
 	}
 	if err := os.Rename(candidate, current); err != nil {
@@ -499,18 +530,24 @@ func promotePluginCandidate(candidate string, install func(string) error, restor
 		rollbackErr := rollbackPluginPromotion(runtimeDir, current, hadOld, cause)
 		if restore != nil {
 			if restoreErr := restore(); restoreErr != nil {
+				_ = writePluginJournal(journal, pluginPromotionJournal{Candidate: current, Phase: "pending_reconciliation", HadOld: hadOld, Native: native})
 				rollbackErr = fmt.Errorf("%w; restoring native installation: %v", rollbackErr, restoreErr)
 			}
+		} else if native != nil {
+			_ = writePluginJournal(journal, pluginPromotionJournal{Candidate: current, Phase: "pending_reconciliation", HadOld: hadOld, Native: native})
 		}
 		return rollbackErr
 	}
-	if err := writePluginJournal(journal, pluginPromotionJournal{Candidate: current, Phase: "committed", HadOld: hadOld}); err != nil {
+	if err := writePluginJournal(journal, pluginPromotionJournal{Candidate: current, Phase: "committed", HadOld: hadOld, Native: native}); err != nil {
 		cause := fmt.Errorf("recording committed plugin promotion: %w; last known-good preserved", err)
 		rollbackErr := rollbackPluginPromotion(runtimeDir, current, hadOld, cause)
 		if restore != nil {
 			if restoreErr := restore(); restoreErr != nil {
+				_ = writePluginJournal(journal, pluginPromotionJournal{Candidate: current, Phase: "pending_reconciliation", HadOld: hadOld, Native: native})
 				rollbackErr = fmt.Errorf("%w; restoring native installation: %v", rollbackErr, restoreErr)
 			}
+		} else if native != nil {
+			_ = writePluginJournal(journal, pluginPromotionJournal{Candidate: current, Phase: "pending_reconciliation", HadOld: hadOld, Native: native})
 		}
 		return rollbackErr
 	}
@@ -519,6 +556,19 @@ func promotePluginCandidate(candidate string, install func(string) error, restor
 	}
 	_ = os.Remove(journal)
 	return nil
+}
+
+func capturePluginNativeIntent() *pluginNativeIntent {
+	intent := &pluginNativeIntent{}
+	if _, err := exec.LookPath("claude"); err == nil {
+		state := captureClaudeInstallation()
+		intent.Claude = &state
+	}
+	if _, err := exec.LookPath("codex"); err == nil {
+		state := captureCodexInstallation()
+		intent.Codex = &state
+	}
+	return intent
 }
 
 func rollbackPluginPromotion(runtimeDir, candidate string, hadOld bool, cause error) error {
@@ -586,11 +636,113 @@ func recoverPluginPromotion(runtimeDir string) error {
 	} else {
 		_ = os.RemoveAll(current)
 	}
+	// Filesystem recovery deliberately precedes native reconciliation. The
+	// native CLIs must be pointed at the restored current generation, never at
+	// a candidate that happened to be active when the process was killed.
+	if journal.Native != nil {
+		if err := reconcilePluginNativeIntent(current, journal.Native); err != nil {
+			// Keep the journal as a retry token. In particular, an acquisition
+			// failure immediately after recovery must not erase the intent needed
+			// by the next setup attempt.
+			journal.Phase = "pending_reconciliation"
+			_ = writePluginJournal(journalPath, journal)
+			return fmt.Errorf("reconciling native plugin installation: %w", err)
+		}
+	}
 	if journal.Candidate != "" && journal.Candidate != current {
 		_ = os.RemoveAll(journal.Candidate)
 	}
 	_ = os.Remove(journalPath)
 	return nil
+}
+
+func reconcilePluginNativeIntent(current string, intent *pluginNativeIntent) error {
+	if intent.Claude != nil {
+		if err := reconcileClaudeInstallation(*intent.Claude, current); err != nil {
+			return err
+		}
+	}
+	if intent.Codex != nil {
+		if err := reconcileCodexInstallation(*intent.Codex, current); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func reconcileClaudeInstallation(intent claudeInstallationState, current string) error {
+	if _, err := exec.LookPath("claude"); err != nil {
+		return fmt.Errorf("claude CLI unavailable: %w", err)
+	}
+	pluginRef := "felt@" + marketplaceName
+	if !intent.Configured {
+		_, _ = exec.Command("claude", "plugin", "uninstall", pluginRef).Output()
+		if err := runClaudeCLI("plugin", "marketplace", "remove", marketplaceName); err != nil {
+			return fmt.Errorf("removing Claude marketplace: %w", err)
+		}
+	} else {
+		if err := installClaudePluginAtSource(current); err != nil {
+			return fmt.Errorf("reinstalling Claude from restored current: %w", err)
+		}
+		if !intent.Installed {
+			if err := runClaudeCLI("plugin", "uninstall", pluginRef); err != nil {
+				return fmt.Errorf("restoring absent Claude plugin: %w", err)
+			}
+		}
+	}
+	state := captureClaudeInstallationRaw()
+	if state.Configured != intent.Configured || state.Installed != intent.Installed {
+		return fmt.Errorf("Claude native state did not reconcile (configured=%t installed=%t, want configured=%t installed=%t)", state.Configured, state.Installed, intent.Configured, intent.Installed)
+	}
+	if intent.Configured && !samePluginSource(claudeMarketplaceSource(state.Marketplace), current) {
+		return fmt.Errorf("Claude marketplace source %q does not point at restored current %q", claudeMarketplaceSource(state.Marketplace), current)
+	}
+	return nil
+}
+
+func reconcileCodexInstallation(intent codexInstallationState, current string) error {
+	if _, err := exec.LookPath("codex"); err != nil {
+		return fmt.Errorf("codex CLI unavailable: %w", err)
+	}
+	if !intent.Configured {
+		_, _ = runCodexCLIQuiet("plugin", "remove", codexPluginRef)
+		out, err := runCodexCLIQuiet("plugin", "marketplace", "remove", marketplaceName)
+		if err := reportCodexRemoval(out, err); err != nil {
+			return fmt.Errorf("removing Codex marketplace: %w", err)
+		}
+	} else {
+		if err := installCodexPluginAtSource(current); err != nil {
+			return fmt.Errorf("reinstalling Codex from restored current: %w", err)
+		}
+		if !intent.Installed {
+			if _, err := runCodexCLIQuiet("plugin", "remove", codexPluginRef); err != nil {
+				return fmt.Errorf("restoring absent Codex plugin: %w", err)
+			}
+		}
+	}
+	source, configured := codexMarketplaceState()
+	installed := codexPluginInstalled()
+	if configured != intent.Configured || installed != intent.Installed {
+		return fmt.Errorf("Codex native state did not reconcile (configured=%t installed=%t, want configured=%t installed=%t)", configured, installed, intent.Configured, intent.Installed)
+	}
+	if intent.Configured && !samePluginSource(source, current) {
+		return fmt.Errorf("Codex marketplace source %q does not point at restored current %q", source, current)
+	}
+	return nil
+}
+
+func captureClaudeInstallationRaw() claudeInstallationState {
+	entry, configured := marketplaceEntry(marketplaceName)
+	return claudeInstallationState{Marketplace: entry, Configured: configured, Installed: isPluginInstalled("felt@" + marketplaceName)}
+}
+
+func samePluginSource(a, b string) bool {
+	if a == b {
+		return true
+	}
+	aa, aerr := filepath.Abs(a)
+	bb, berr := filepath.Abs(b)
+	return aerr == nil && berr == nil && filepath.Clean(aa) == filepath.Clean(bb)
 }
 
 func writePluginJournal(path string, journal pluginPromotionJournal) error {
@@ -681,6 +833,16 @@ func withStagedPluginCandidate(source string, install func(string) error) error 
 }
 
 func withStagedPluginCandidateWithRestore(source string, install func(string) error, restore func() error) error {
+	// Recover before remote acquisition as well as before local staging. This
+	// makes a retry after an interrupted native phase deterministic even when
+	// the retry's acquisition itself fails.
+	runtimeDir, err := pluginRuntimeDir()
+	if err != nil {
+		return err
+	}
+	if err := recoverPluginPromotion(runtimeDir); err != nil {
+		return err
+	}
 	if !isLocalPath(source) {
 		executable, err := currentFeltExecutable()
 		if err != nil {
@@ -698,7 +860,7 @@ func withStagedPluginCandidateWithRestore(source string, install func(string) er
 		if err != nil {
 			return err
 		}
-		return promotePluginCandidate(candidate, install, restore)
+		return promotePluginCandidate(candidate, install, restore, capturePluginNativeIntent())
 	}
 	if !hasMarketplaceManifest(source) {
 		return fmt.Errorf("local plugin source %q has no marketplace manifest", source)
@@ -711,7 +873,7 @@ func withStagedPluginCandidateWithRestore(source string, install func(string) er
 	if err != nil {
 		return err
 	}
-	return promotePluginCandidate(candidate, install, restore)
+	return promotePluginCandidate(candidate, install, restore, capturePluginNativeIntent())
 }
 
 // remoteMarketplaceRef is the small subset of GitHub's ref syntax accepted by

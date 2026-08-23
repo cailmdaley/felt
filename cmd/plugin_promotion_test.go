@@ -335,6 +335,118 @@ func TestRecoverPluginPromotionPrefersLastKnownGoodAfterInterruption(t *testing.
 	}
 }
 
+func TestRecoverPluginPromotionRestoresFilesystemBeforeNativeReconciliation(t *testing.T) {
+	f := newRemoteSetupFixture(t, "claude")
+	runtimeDir := filepath.Join(f.home, ".felt", pluginRuntimeDirName)
+	current := filepath.Join(runtimeDir, pluginCurrentName)
+	previous := filepath.Join(runtimeDir, pluginPreviousName)
+	if err := os.MkdirAll(filepath.Join(current, "claude-plugin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(previous, "claude-plugin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(current, "generation.txt"), []byte("candidate"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(previous, "generation.txt"), []byte("good"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Native state has already been mutated to the interrupted candidate.
+	if err := os.WriteFile(filepath.Join(f.stateDir, "source"), []byte(current), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(f.stateDir, "installed"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	intent := &claudeInstallationState{Marketplace: claudeMarketplaceEntry{Path: previous}, Configured: true, Installed: true}
+	if err := writePluginJournal(filepath.Join(runtimeDir, pluginJournalName), pluginPromotionJournal{
+		Candidate: current,
+		Phase:     "swapped",
+		HadOld:    true,
+		Native:    &pluginNativeIntent{Claude: intent},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := recoverPluginPromotion(runtimeDir); err != nil {
+		t.Fatalf("recovery: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(current, "generation.txt"))
+	if err != nil || string(data) != "good" {
+		t.Fatalf("recovered generation = %q (%v), want good", data, err)
+	}
+	source, err := os.ReadFile(filepath.Join(f.stateDir, "source"))
+	if err != nil || strings.TrimSpace(string(source)) != current {
+		t.Fatalf("native source = %q (%v), want restored current %q", source, err, current)
+	}
+	if _, err := os.Stat(filepath.Join(runtimeDir, pluginJournalName)); !os.IsNotExist(err) {
+		t.Fatalf("successful native reconciliation left journal: %v", err)
+	}
+}
+
+func TestInterruptedPromotionRecoveryPrecedesAcquisitionFailureAndRetry(t *testing.T) {
+	f := newRemoteSetupFixture(t, "claude")
+	runtimeDir := filepath.Join(f.home, ".felt", pluginRuntimeDirName)
+	current := filepath.Join(runtimeDir, pluginCurrentName)
+	previous := filepath.Join(runtimeDir, pluginPreviousName)
+	if err := os.MkdirAll(current, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(previous, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(current, "generation"), []byte("candidate"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(previous, "generation"), []byte("good"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(f.stateDir, "source"), []byte(current), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(f.stateDir, "installed"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writePluginJournal(filepath.Join(runtimeDir, pluginJournalName), pluginPromotionJournal{
+		Candidate: current,
+		Phase:     "swapped",
+		HadOld:    true,
+		Native:    &pluginNativeIntent{Claude: &claudeInstallationState{Configured: true, Installed: true}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	root := testRepoRoot(t)
+	installFakeGitForPluginAcquisition(t, root)
+	t.Setenv("FELT_BIN", testContractExecutable(t, "2"))
+	t.Setenv("FELT_TEST_GIT_FAIL", "1")
+	err := withStagedPluginCandidateWithRestore("cailmdaley/felt@missing", func(string) error {
+		t.Fatal("native installer called after acquisition failure")
+		return nil
+	}, nil)
+	if err == nil || !strings.Contains(err.Error(), "acquiring remote marketplace") {
+		t.Fatalf("first retry error = %v, want acquisition failure after recovery", err)
+	}
+	if _, err := os.Stat(filepath.Join(runtimeDir, pluginJournalName)); !os.IsNotExist(err) {
+		t.Fatalf("recovered journal remained after successful native reconciliation: %v", err)
+	}
+	if got, readErr := os.ReadFile(filepath.Join(current, "generation")); readErr != nil || string(got) != "good" {
+		t.Fatalf("filesystem after acquisition failure = %q (%v), want good", got, readErr)
+	}
+
+	t.Setenv("FELT_TEST_GIT_FAIL", "0")
+	called := false
+	if err := withStagedPluginCandidateWithRestore("cailmdaley/felt@missing", func(active string) error {
+		called = true
+		return validatePluginCandidate(active, "")
+	}, nil); err != nil {
+		t.Fatalf("retry after acquisition failure: %v", err)
+	}
+	if !called {
+		t.Fatal("native installer was not called on retry")
+	}
+}
+
 func TestParseRemoteMarketplaceRef(t *testing.T) {
 	tests := []struct {
 		name       string
