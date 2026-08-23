@@ -50,7 +50,10 @@ None of them need a local checkout. Felt acquires GitHub sources into a
 disposable checkout, validates the complete plugin payload, promotes one local
 generation, and then asks the harness CLI to install it. A tagged `felt` binary
 pins acquisition to the matching tag; a `dev` build tracks the default branch,
-so the installed content always matches the binary that installed it.
+and every promoted payload records its resolved commit and content digest. An
+interrupted native activation is reconciled from the last known-good promoted
+generation before setup continues; `felt setup receipt --json` rejects pending
+or mismatched source/cache generations.
 
 All three commands are idempotent, so re-running is safe. All take `--uninstall` to
 remove what they installed. `felt uninstall` clears the harnesses at once, and

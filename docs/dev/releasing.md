@@ -28,7 +28,18 @@ contract must all validate before the native CLI sees the candidate. Native
 harness CLIs receive only the stable promoted `current` path and remain the
 sole writers of their caches and configuration. If native installation reports
 failure, setup restores both the last known-good staged generation and the
-harness's previous marketplace/plugin state.
+harness's previous marketplace/plugin state. The journal also records native
+activation intent: after an interruption, the next setup restores `current`
+first, reinstalls each affected harness from that path, verifies the restored
+state, and retains the journal until reconciliation succeeds.
+
+Every promoted plugin carries `.felt-generation.json` inside the payload the
+harness copies. It binds the canonical local or GitHub source, requested ref,
+resolved commit, plugin version, felt build identity, and a deterministic
+payload digest. A same-version payload change is therefore a different
+generation. The receipt recomputes the digest in both `current` and the loaded
+harness cache and reports pending journals, missing markers, or identity
+disagreement as unhealthy with a setup command to repair it.
 
 Use `felt setup validate --source <checkout>` as the non-mutating candidate
 gate. Use `felt setup receipt --json` after installation to report the bundle

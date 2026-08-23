@@ -66,9 +66,12 @@ felt setup validate --source <checkout>    # non-mutating complete local candida
 Local paths and remote GitHub refs for Claude/Codex setup are validated, staged,
 and promoted as one recoverable local generation before the native harness CLI
 activates them. Remote acquisition is disposable; the harness still owns its
-cache and configuration. Diagnose from `setup receipt`, which queries the
-harness CLIs; an incidental cache directory is not proof that a bundle is
-loaded.
+cache and configuration. Interrupted native activation is reconciled from the
+restored last-known-good generation before setup continues. Each promoted
+payload carries source/ref/commit/build/digest identity into the harness cache;
+`setup receipt` queries the harness CLIs, recomputes both payload digests, and
+rejects a pending journal or identity disagreement. An incidental cache
+directory is not proof that a bundle is loaded.
 
 Statuses: · untracked, ○ open, ◐ active, ● closed
 Detail: name < compact < summary < full. Summary adds the lede (first paragraph of the body; write it to stand alone).

@@ -29,7 +29,9 @@ The human's surfaces: the **board** (served by the daemon at `:4000`) is a pure 
 
 For runtime truth, `felt setup receipt --json` reports the harness bundles
 actually loaded, resolved felt executable, hook compatibility, and the live
-daemon's expected/observed contract. Daemon snapshots also carry
+daemon's expected/observed contract. It also rejects interrupted promotions or
+source/cache generation disagreement using the identity marker copied into
+each harness cache. Daemon snapshots also carry
 `poll_health`; a stalled world read is reaped at its configured bound, late
 results are rejected, and reconciliation continues. Rising `stalls` identifies
 a degraded input without mistaking the responsive daemon for a healthy read.
