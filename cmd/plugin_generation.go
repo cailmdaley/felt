@@ -200,7 +200,10 @@ func pluginPayloadDigest(root string) (string, error) {
 		if !info.Mode().IsRegular() {
 			return fmt.Errorf("unsupported plugin payload entry %q", path)
 		}
-		if filepath.Base(path) == pluginGenerationMarkerName {
+		// Prefix match: a SIGKILL between the marker's temp-file creation and
+		// its rename can strand a `.felt-generation-*` temp file in the same
+		// tree; neither it nor the marker belongs to the described payload.
+		if strings.HasPrefix(filepath.Base(path), ".felt-generation") {
 			return nil
 		}
 		rel, err := filepath.Rel(root, path)

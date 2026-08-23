@@ -63,6 +63,32 @@ func TestClaudeSetupRefusesCommitOnUnverifiedNativeCache(t *testing.T) {
 	}
 }
 
+// TestClaudeSetupRecoversStaleUpdateCacheViaReinstall proves the ordinary
+// dev-loop case is not bricked: `claude plugin update` on an unchanged
+// version legitimately keeps the old versioned cache, and setup converges by
+// falling back to uninstall+install — which re-copies — before verifying.
+func TestClaudeSetupRecoversStaleUpdateCacheViaReinstall(t *testing.T) {
+	f := newRemoteSetupFixture(t, "claude")
+	if err := installPluginViaCLI(f.remote); err != nil {
+		t.Fatalf("baseline remote Claude setup: %v", err)
+	}
+	f.setGeneration(t, "refreshed")
+	t.Setenv("FAKE_NATIVE_TAMPER", "stale-update")
+	if err := installPluginViaCLI(f.remote + "#refreshed"); err != nil {
+		t.Fatalf("stale-update promotion did not converge via reinstall: %v", err)
+	}
+	if got := f.currentGeneration(t); got != "refreshed" {
+		t.Fatalf("post-reinstall generation = %q, want refreshed", got)
+	}
+	log, err := os.ReadFile(f.nativeLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(log), "plugin uninstall") || !strings.Contains(string(log), "plugin install") {
+		t.Fatalf("convergence did not go through uninstall+install:\n%s", log)
+	}
+}
+
 func TestCodexSetupRefusesCommitOnUnverifiedNativeCache(t *testing.T) {
 	f := newRemoteSetupFixture(t, "codex")
 	if err := installCodexPluginViaCLI(f.remote); err != nil {

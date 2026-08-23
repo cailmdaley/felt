@@ -115,13 +115,23 @@ source_file="$FAKE_NATIVE_STATE/source"
 installed_file="$FAKE_NATIVE_STATE/installed"
 # materialize_cache mimics the real CLI: a successful install copies the
 # registered source's plugin payload into a private cache, and plugin list
-# reports that cache path. Tamper modes let tests exercise a lying zero exit.
+# reports that cache path. Tamper modes let tests exercise a lying zero exit;
+# stale-update mirrors the real CLI's documented behavior where update on an
+# unchanged version keeps the old cache but a fresh install re-copies.
 materialize_cache() {
+  verb="${1:-install}"
   cache="$FAKE_NATIVE_STATE/cache"
   src=$(cat "$source_file")
   case "${FAKE_NATIVE_TAMPER:-}" in
     stale)
       if [ ! -d "$cache" ]; then
+        mkdir -p "$cache"
+        cp -R "$src/claude-plugin/." "$cache/"
+      fi
+      ;;
+    stale-update)
+      if [ "$verb" = install ] || [ ! -d "$cache" ]; then
+        rm -rf "$cache"
         mkdir -p "$cache"
         cp -R "$src/claude-plugin/." "$cache/"
       fi
@@ -148,7 +158,7 @@ if [ "$1" = plugin ] && [ "$2" = marketplace ] && [ "$3" = list ]; then
 fi
 if [ "$1" = plugin ] && [ "$2" = list ]; then
   if [ -f "$installed_file" ]; then
-    printf '[{"id":"felt@cailmdaley-felt","installPath":"%s"}]\n' "$FAKE_NATIVE_STATE/cache"
+    printf '[{"id":"felt@cailmdaley-felt","enabled":true,"installPath":"%s"}]\n' "$FAKE_NATIVE_STATE/cache"
   else
     printf '%s\n' '[]'
   fi
@@ -174,7 +184,7 @@ if [ "$1" = plugin ] && { [ "$2" = install ] || [ "$2" = update ]; }; then
     exit 92
   fi
   : > "$installed_file"
-  materialize_cache
+  materialize_cache "$2"
   exit 0
 fi
 if [ "$1" = plugin ] && [ "$2" = uninstall ]; then
@@ -221,7 +231,7 @@ if [ "$1" = plugin ] && [ "$2" = marketplace ] && [ "$3" = list ]; then
 fi
 if [ "$1" = plugin ] && [ "$2" = list ]; then
   if [ -f "$installed_file" ]; then
-    printf '{"installed":[{"pluginId":"felt@cailmdaley-felt","source":{"path":"%s"}}]}\n' "$FAKE_NATIVE_STATE/cache"
+    printf '{"installed":[{"pluginId":"felt@cailmdaley-felt","enabled":true,"source":{"path":"%s"}}]}\n' "$FAKE_NATIVE_STATE/cache"
   else
     printf '%s\n' '{"installed":[]}'
   fi

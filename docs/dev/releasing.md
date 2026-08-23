@@ -32,9 +32,12 @@ harness's previous marketplace/plugin state. A zero exit status alone never
 commits a promotion: before the journal records `committed` and `previous` is
 discarded, setup reads the cache path each native CLI reports as loaded
 (`plugin list --json`), recomputes its payload digest, and requires it to
-carry the promoted generation marker. A stale, altered, or marker-less cache
-is a rejected candidate — the filesystem rolls back and the prior native
-state is restored. The journal also records native
+carry the promoted generation marker. A failed verify first gets one forced
+reinstall (uninstall+install / remove+add), because `plugin update` on an
+unchanged manifest version legitimately keeps the old versioned cache; a
+cache that still cannot prove the promoted generation after that is a
+rejected candidate — the filesystem rolls back and the prior native state is
+restored. The journal also records native
 activation intent: after an interruption, the next setup restores `current`
 first, reinstalls each affected harness from that path, verifies the restored
 state, and retains the journal until reconciliation succeeds.

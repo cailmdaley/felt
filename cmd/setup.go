@@ -429,8 +429,19 @@ func installClaudePluginAtSource(repoRoot string) error {
 	// The CLI's zero exit is not trusted as proof of materialization: the
 	// promotion only commits (and discards `previous`) after the cache Claude
 	// reports as loaded carries the promoted generation marker and digest.
+	// `plugin update` on an unchanged manifest version can legitimately leave
+	// the old versioned cache directory in place, so a failed verify gets one
+	// uninstall+install retry — which forces a fresh cache copy — before the
+	// promotion is refused. The same retry converges interrupted-promotion
+	// reconciliation, whose reinstall also lands here.
 	if err := verifyClaudeLoadedGeneration(repoRoot); err != nil {
-		return err
+		_, _ = exec.Command("claude", "plugin", "uninstall", pluginRef).Output()
+		if installErr := runClaudeCLI("plugin", "install", pluginRef); installErr != nil {
+			return fmt.Errorf("reinstalling %s after unverified cache (%v): %w", pluginRef, err, installErr)
+		}
+		if err := verifyClaudeLoadedGeneration(repoRoot); err != nil {
+			return err
+		}
 	}
 	if removed := pruneLegacyClaudeHooks(); removed > 0 {
 		fmt.Printf("✓ Removed %d legacy Claude hook entries (now served via plugin)\n", removed)
@@ -937,8 +948,16 @@ func installCodexPluginAtSource(marketplaceSource string) error {
 
 	// Same trust boundary as the Claude path: a promotion may only commit
 	// after Codex's reported cache proves it holds the promoted generation.
+	// A failed verify gets one remove+add retry to force a fresh cache before
+	// the promotion is refused.
 	if err := verifyCodexLoadedGeneration(marketplaceSource); err != nil {
-		return err
+		_, _ = runCodexCLIQuiet("plugin", "remove", codexPluginRef)
+		if addErr := runCodexCLI("plugin", "add", codexPluginRef); addErr != nil {
+			return fmt.Errorf("reinstalling %s after unverified cache (%v): %w", codexPluginRef, err, addErr)
+		}
+		if err := verifyCodexLoadedGeneration(marketplaceSource); err != nil {
+			return err
+		}
 	}
 
 	// Direct ~/.codex/hooks.json entries would fire the same hooks a second

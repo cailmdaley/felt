@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 
 	internalfelt "github.com/cailmdaley/felt/internal/felt"
 )
@@ -517,12 +518,21 @@ func promotePluginCandidate(candidate string, install func(string) error, restor
 		if err := os.Rename(current, previous); err != nil {
 			return fmt.Errorf("parking last known-good plugin: %w", err)
 		}
+		// Each rename is made durable before the journal advances past it:
+		// a journal phase that reached disk ahead of the rename it describes
+		// would make recovery destroy the wrong copy.
+		if err := syncParentDir(current); err != nil {
+			return rollbackPluginPromotion(runtimeDir, candidate, hadOld, fmt.Errorf("parking last known-good plugin: %w", err))
+		}
 	}
 	if err := writePluginJournal(journal, pluginPromotionJournal{Candidate: candidate, Phase: "swapped", HadOld: hadOld, Native: native}); err != nil {
 		return rollbackPluginPromotion(runtimeDir, candidate, hadOld, err)
 	}
 	if err := os.Rename(candidate, current); err != nil {
 		return rollbackPluginPromotion(runtimeDir, candidate, hadOld, fmt.Errorf("promoting plugin candidate: %w", err))
+	}
+	if err := syncParentDir(current); err != nil {
+		return rollbackPluginPromotion(runtimeDir, current, hadOld, fmt.Errorf("promoting plugin candidate: %w", err))
 	}
 
 	if err := install(current); err != nil {
@@ -587,6 +597,7 @@ func rollbackPluginPromotion(runtimeDir, candidate string, hadOld bool, cause er
 		if err := os.Rename(previous, current); err != nil {
 			return fmt.Errorf("%w; restoring last known-good plugin: %v", cause, err)
 		}
+		_ = syncParentDir(current)
 	}
 	_ = os.Remove(filepath.Join(runtimeDir, pluginJournalName))
 	return cause
@@ -636,6 +647,7 @@ func recoverPluginPromotion(runtimeDir string) error {
 			if err := os.Rename(previous, current); err != nil {
 				return fmt.Errorf("recovering last known-good plugin: %w", err)
 			}
+			_ = syncParentDir(current)
 		}
 	} else {
 		_ = os.RemoveAll(current)
@@ -803,14 +815,17 @@ func writePluginJournal(path string, journal pluginPromotionJournal) error {
 
 // syncParentDir fsyncs the directory containing path so a just-completed
 // rename (or removal) survives power loss on filesystems that require an
-// explicit directory sync.
+// explicit directory sync. Filesystems that cannot sync a directory
+// (ENOTSUP/EINVAL — some network and FUSE mounts) are tolerated: they never
+// offered the durability the sync buys, and refusing to install there would
+// trade a narrower crash window for a setup that cannot run at all.
 func syncParentDir(path string) error {
 	dir, err := os.Open(filepath.Dir(path))
 	if err != nil {
 		return err
 	}
 	defer dir.Close()
-	if err := dir.Sync(); err != nil {
+	if err := dir.Sync(); err != nil && !errors.Is(err, syscall.EINVAL) && !errors.Is(err, syscall.ENOTSUP) {
 		return fmt.Errorf("syncing directory %s: %w", filepath.Dir(path), err)
 	}
 	return nil
@@ -845,9 +860,19 @@ func copyTree(source, destination string) error {
 			return err
 		}
 		_, copyErr := io.Copy(out, in)
+		// The payload must be as durable as the marker that describes it: a
+		// power loss that keeps a synced marker but truncates payload bytes
+		// would otherwise present a valid-looking generation over garbage.
+		var syncErr error
+		if copyErr == nil {
+			syncErr = out.Sync()
+		}
 		closeErr := out.Close()
 		if copyErr != nil {
 			return copyErr
+		}
+		if syncErr != nil && !errors.Is(syncErr, syscall.EINVAL) && !errors.Is(syncErr, syscall.ENOTSUP) {
+			return syncErr
 		}
 		return closeErr
 	})

@@ -34,6 +34,9 @@ func verifyClaudeLoadedGeneration(current string) error {
 		if plugin.PluginID != ref && plugin.ID != ref {
 			continue
 		}
+		if !plugin.Enabled {
+			return fmt.Errorf("verifying Claude cache: plugin list reports %s installed but not enabled", ref)
+		}
 		if plugin.InstallPath == "" {
 			return fmt.Errorf("verifying Claude cache: plugin list reports %s without an install path", ref)
 		}
@@ -62,6 +65,9 @@ func verifyCodexLoadedGeneration(current string) error {
 	for _, plugin := range document.Installed {
 		if plugin.PluginID != codexPluginRef && plugin.ID != codexPluginRef {
 			continue
+		}
+		if !plugin.Enabled {
+			return fmt.Errorf("verifying Codex cache: plugin list reports %s installed but not enabled", codexPluginRef)
 		}
 		if plugin.Source.Path == "" {
 			return fmt.Errorf("verifying Codex cache: plugin list reports %s without a cache path", codexPluginRef)

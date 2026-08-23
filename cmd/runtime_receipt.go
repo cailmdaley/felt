@@ -631,15 +631,15 @@ func collectGenerationReceipt(bundles []ReceiptBundle, felt ReceiptComponent) Re
 	if activeErr != nil {
 		return ReceiptGenerationReceipt{Status: receiptPartial, ActivePath: activeRoot, Repair: activeErr.Error()}
 	}
+	// The marker's felt_build must describe the executable this receipt is
+	// diagnosing, not merely agree with a copy of itself in a harness cache.
+	// The mismatch is recorded but returned only after the harness loop so a
+	// build-skewed receipt still carries its per-harness diagnostics.
+	buildSkew := ""
 	if activePresent {
 		receipt.Active = &active
-		// The marker's felt_build must describe the executable this receipt is
-		// diagnosing, not merely agree with a copy of itself in a harness
-		// cache. Compare against the resolved executable's reported version so
-		// a promotion sealed by another felt build cannot read as healthy.
 		if felt.Version != "" && !feltBuildMatchesVersion(active.FeltBuild, felt.Version) {
-			return generationReceiptWithHarnesses(receipt, receiptMismatch,
-				fmt.Sprintf("the promoted generation was sealed by felt %q but the resolved executable %s reports %q; rerun the matching felt setup command with that felt", active.FeltBuild, felt.Path, felt.Version))
+			buildSkew = fmt.Sprintf("the promoted generation was sealed by felt %q but the resolved executable %s reports %q; rerun the matching felt setup command with that felt", active.FeltBuild, felt.Path, felt.Version)
 		}
 	}
 
@@ -678,6 +678,9 @@ func collectGenerationReceipt(bundles []ReceiptBundle, felt ReceiptComponent) Re
 				return generationReceiptWithHarnesses(receipt, status, repair)
 			}
 		}
+	}
+	if buildSkew != "" {
+		return generationReceiptWithHarnesses(receipt, receiptMismatch, buildSkew)
 	}
 	if anyMarker && !activePresent {
 		return generationReceiptWithHarnesses(receipt, receiptPartial,
