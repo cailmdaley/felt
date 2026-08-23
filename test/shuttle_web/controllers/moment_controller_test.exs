@@ -27,7 +27,8 @@ defmodule ShuttleWeb.MomentControllerTest do
 
   defp iso(ms), do: ms |> DateTime.from_unix!(:millisecond) |> DateTime.to_iso8601()
 
-  defp user(ms, text), do: %{"type" => "user", "timestamp" => iso(ms), "message" => %{"content" => text}}
+  defp user(ms, text),
+    do: %{"type" => "user", "timestamp" => iso(ms), "message" => %{"content" => text}}
 
   defp assistant(ms, blocks),
     do: %{"type" => "assistant", "timestamp" => iso(ms), "message" => %{"content" => blocks}}
@@ -205,7 +206,10 @@ defmodule ShuttleWeb.MomentControllerTest do
                spawn_block("tu_1", "Task", %{"subagent_type" => "Explore", "prompt" => "look"})
              ]),
              assistant(@t0 + 2_000, [
-               spawn_block("tu_2", "Workflow", %{"description" => "Sweep the views", "prompt" => "go"})
+               spawn_block("tu_2", "Workflow", %{
+                 "description" => "Sweep the views",
+                 "prompt" => "go"
+               })
              ])
            ]}
         ])
@@ -255,7 +259,9 @@ defmodule ShuttleWeb.MomentControllerTest do
         write_tree([
           {"-slug", @session,
            [
-             assistant(@t0, [spawn_block("tu_1", "Agent", %{"name" => "chart-hand", "prompt" => "go"})]),
+             assistant(@t0, [
+               spawn_block("tu_1", "Agent", %{"name" => "chart-hand", "prompt" => "go"})
+             ]),
              result(@t0 + 60_000, "tu_1", "done, and here is what I found")
            ]}
         ])
@@ -269,7 +275,9 @@ defmodule ShuttleWeb.MomentControllerTest do
         write_tree([
           {"-slug", @session,
            [
-             assistant(@t0, [spawn_block("tu_1", "Agent", %{"name" => "chart-hand", "prompt" => "go"})]),
+             assistant(@t0, [
+               spawn_block("tu_1", "Agent", %{"name" => "chart-hand", "prompt" => "go"})
+             ]),
              result(
                @t0 + 1_000,
                "tu_1",
@@ -330,7 +338,8 @@ defmodule ShuttleWeb.MomentControllerTest do
           {"-slug", @session,
            [
              Map.put(user(@t0 + 1_000, "the subagent's own prompt"), "isSidechain", true),
-             Map.put(assistant(@t0 + 2_000, [%{"type" => "text", "text" => "its own reply"}]),
+             Map.put(
+               assistant(@t0 + 2_000, [%{"type" => "text", "text" => "its own reply"}]),
                "isSidechain",
                true
              ),
@@ -349,7 +358,11 @@ defmodule ShuttleWeb.MomentControllerTest do
       root =
         write_tree([
           {"-slug", @session,
-           [assistant(@t0 + 1_000, [spawn_block("tu_1", "Agent", %{"name" => "x", "prompt" => long})])]}
+           [
+             assistant(@t0 + 1_000, [
+               spawn_block("tu_1", "Agent", %{"name" => "x", "prompt" => long})
+             ])
+           ]}
         ])
 
       assert [brief] = Moment.excerpts(@session, @t0, @t0 + 10_000, root: root)
@@ -374,8 +387,14 @@ defmodule ShuttleWeb.MomentControllerTest do
 
   describe "Shuttle.Moment.tool_summary/1 (the wordless minute's answer)" do
     test "names the tools in order, deduped with counts" do
-      assert Moment.tool_summary([{"Bash", nil}, {"Read", nil}, {"Bash", nil}, {"Read", nil},
-               {"Read", nil}, {"Edit", nil}]) == "Bash ×2 · Read ×3 · Edit"
+      assert Moment.tool_summary([
+               {"Bash", nil},
+               {"Read", nil},
+               {"Bash", nil},
+               {"Read", nil},
+               {"Read", nil},
+               {"Edit", nil}
+             ]) == "Bash ×2 · Read ×3 · Edit"
     end
 
     test "no calls means no line" do
@@ -523,7 +542,11 @@ defmodule ShuttleWeb.MomentControllerTest do
            [
              assistant(@t0 + 1_000, [
                %{"type" => "tool_use", "name" => "Bash", "input" => %{"command" => "make test"}},
-               %{"type" => "tool_use", "name" => "Bash", "input" => %{"command" => "make daemon"}},
+               %{
+                 "type" => "tool_use",
+                 "name" => "Bash",
+                 "input" => %{"command" => "make daemon"}
+               },
                %{"type" => "tool_use", "name" => "Bash", "input" => %{"command" => "ls"}},
                %{"type" => "tool_use", "name" => "Read", "input" => %{"file_path" => "/a.ex"}},
                %{"type" => "tool_use", "name" => "Read", "input" => %{"file_path" => "/b.ex"}},
@@ -699,9 +722,26 @@ defmodule ShuttleWeb.MomentControllerTest do
         {"--Users-cail-french--", @session,
          [
            # Non-conversation lines: skipped, none by none.
-           %{"type" => "session", "version" => 3, "id" => @session, "timestamp" => iso(@t0), "cwd" => "/users/cail/french"},
-           %{"type" => "model_change", "id" => "mc1", "timestamp" => iso(@t0), "provider" => "p", "modelId" => "m"},
-           %{"type" => "custom_message", "customType" => "felt-context", "timestamp" => iso(@t0), "content" => "# Felt Workflow Context"},
+           %{
+             "type" => "session",
+             "version" => 3,
+             "id" => @session,
+             "timestamp" => iso(@t0),
+             "cwd" => "/users/cail/french"
+           },
+           %{
+             "type" => "model_change",
+             "id" => "mc1",
+             "timestamp" => iso(@t0),
+             "provider" => "p",
+             "modelId" => "m"
+           },
+           %{
+             "type" => "custom_message",
+             "customType" => "felt-context",
+             "timestamp" => iso(@t0),
+             "content" => "# Felt Workflow Context"
+           },
            # The conversation.
            pi_user(@t0 + 1_000, "hi french class! pasting some vocab"),
            pi_assistant(@t0 + 2_000, [
@@ -709,7 +749,9 @@ defmodule ShuttleWeb.MomentControllerTest do
              %{"type" => "text", "text" => "Bien sûr — here are the definitions."}
            ]),
            # Tool call and result: activity, not words.
-           pi_assistant(@t0 + 3_000, [pi_tool_call("c1", "bash", %{"command" => "git status --short"})]),
+           pi_assistant(@t0 + 3_000, [
+             pi_tool_call("c1", "bash", %{"command" => "git status --short"})
+           ]),
            pi_tool_result(@t0 + 3_500, "c1", "bash", "ok"),
            # After the window.
            pi_user(@t0 + 600_000, "much later")
@@ -719,7 +761,11 @@ defmodule ShuttleWeb.MomentControllerTest do
 
     test "recovers the conversation and skips the machinery" do
       root = pi_tree()
-      assert Enum.map(Moment.excerpts(@session, @t0, @t0 + 10_000, root: @absent_root, pi_root: root), &{&1.role, &1.text}) == [
+
+      assert Enum.map(
+               Moment.excerpts(@session, @t0, @t0 + 10_000, root: @absent_root, pi_root: root),
+               &{&1.role, &1.text}
+             ) == [
                {"user", "hi french class! pasting some vocab"},
                {"assistant", "Bien sûr — here are the definitions."}
              ]
@@ -752,7 +798,10 @@ defmodule ShuttleWeb.MomentControllerTest do
           {"--Users-cail-french--", @session,
            [
              pi_assistant(@t0 + 1_000, [
-               pi_tool_call("c2", "subagent", %{"agent" => "reviewer", "task" => "Read the diff and report findings."})
+               pi_tool_call("c2", "subagent", %{
+                 "agent" => "reviewer",
+                 "task" => "Read the diff and report findings."
+               })
              ]),
              pi_user(@t0 + 2_000, "a human turn between the two ends"),
              pi_tool_result(@t0 + 3_000, "c2", "subagent", "Found two issues, both minor.")
@@ -766,6 +815,131 @@ defmodule ShuttleWeb.MomentControllerTest do
                {"prose", nil, "a human turn between the two ends"},
                {"return", "reviewer", "Found two issues, both minor."}
              ]
+    end
+  end
+
+  describe "Shuttle.Moment — Codex rollouts (the third harness)" do
+    @absent_root "/nope/not/here"
+
+    defp write_codex_tree(records) do
+      root =
+        Path.join(System.tmp_dir!(), "shuttle_moment_codex_#{System.unique_integer([:positive])}")
+
+      date = Shuttle.HarnessPaths.local_today()
+
+      dir =
+        Path.join([
+          root,
+          "#{date.year}",
+          String.pad_leading("#{date.month}", 2, "0"),
+          String.pad_leading("#{date.day}", 2, "0")
+        ])
+
+      File.mkdir_p!(dir)
+
+      body =
+        records
+        |> Enum.map(fn
+          line when is_binary(line) -> line
+          record -> Jason.encode!(record)
+        end)
+        |> Enum.join("\n")
+
+      File.write!(
+        Path.join(dir, "rollout-2026-08-23T18-19-21-052Z-#{@session}.jsonl"),
+        body <> "\n"
+      )
+
+      on_exit(fn -> File.rm_rf(root) end)
+      root
+    end
+
+    defp codex_item(ms, payload),
+      do: %{"type" => "response_item", "timestamp" => iso(ms), "payload" => payload}
+
+    defp codex_message(ms, role, blocks),
+      do: codex_item(ms, %{"type" => "message", "role" => role, "content" => blocks})
+
+    defp codex_text(type, text), do: %{"type" => type, "text" => text}
+
+    defp codex_custom_call(ms, id, name, input),
+      do:
+        codex_item(ms, %{
+          "type" => "custom_tool_call",
+          "call_id" => id,
+          "name" => name,
+          "input" => input
+        })
+
+    defp codex_function_call(ms, id, name, arguments),
+      do:
+        codex_item(ms, %{
+          "type" => "function_call",
+          "call_id" => id,
+          "name" => name,
+          "arguments" => Jason.encode!(arguments)
+        })
+
+    defp codex_tool_output(ms, id, output),
+      do:
+        codex_item(ms, %{"type" => "custom_tool_call_output", "call_id" => id, "output" => output})
+
+    test "finds a Codex rollout in its local date fan-out" do
+      root = write_codex_tree([])
+
+      assert Moment.transcript_path(@session,
+               root: @absent_root,
+               pi_root: @absent_root,
+               codex_root: root
+             ) =~
+               "#{@session}.jsonl"
+
+      assert Moment.transcript_path("11111111-2222-3333-4444-555555555555",
+               root: @absent_root,
+               pi_root: @absent_root,
+               codex_root: root
+             ) == nil
+    end
+
+    test "normalizes words, tools, delegation and peer returns into the shared reader" do
+      root =
+        write_codex_tree([
+          codex_message(@t0 + 1_000, "user", [codex_text("input_text", "hello codex")]),
+          codex_message(@t0 + 1_500, "developer", [codex_text("input_text", "injected context")]),
+          codex_message(@t0 + 2_000, "assistant", [codex_text("output_text", "I can help.")]),
+          codex_custom_call(@t0 + 3_000, "exec-1", "exec", "git status --short"),
+          codex_tool_output(@t0 + 3_500, "exec-1", [codex_text("input_text", "ok")]),
+          codex_function_call(@t0 + 4_000, "spawn-1", "spawn_agent", %{
+            "task_name" => "reviewer",
+            "message" => "gAAAA-encrypted-prompt"
+          }),
+          codex_tool_output(@t0 + 5_000, "spawn-1", [codex_text("input_text", "review complete")]),
+          codex_item(@t0 + 6_000, %{
+            "type" => "agent_message",
+            "author" => "reviewer",
+            "recipient" => "codex-luna",
+            "content" => [codex_text("input_text", "peer report")]
+          }),
+          codex_item(@t0 + 7_000, %{"type" => "reasoning", "summary" => []})
+        ])
+
+      moment =
+        Moment.moment(@session, @t0, @t0 + 10_000,
+          root: @absent_root,
+          pi_root: @absent_root,
+          codex_root: root
+        )
+
+      assert Enum.map(moment.excerpts, &{&1.kind, &1.name, &1.text}) == [
+               {"prose", nil, "hello codex"},
+               {"prose", nil, "I can help."},
+               {"spawn", "reviewer", "reviewer"},
+               {"return", "reviewer", "review complete"},
+               {"return", "reviewer", "peer report"}
+             ]
+
+      assert moment.tool_lines == ["Bash — git status --short", "Subagent"]
+      assert moment.tool_count == 2
     end
   end
 

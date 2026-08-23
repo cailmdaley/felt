@@ -1437,10 +1437,13 @@ defmodule Shuttle.Dispatcher do
   # fallback covers it, and declining a maybe-working resume would be worse.
   @doc false
   def effective_resume_intent({:previous, _session_id} = intent, agent, opts) do
-    prev_harness = opts |> Keyword.get(:previous_session) |> case do
-      %{harness: harness} when is_binary(harness) and harness != "" -> harness
-      _ -> nil
-    end
+    prev_harness =
+      opts
+      |> Keyword.get(:previous_session)
+      |> case do
+        %{harness: harness} when is_binary(harness) and harness != "" -> harness
+        _ -> nil
+      end
 
     if prev_harness && prev_harness != Shuttle.SessionLedger.harness_for_cli(agent.cli),
       do: :fresh,
@@ -1656,8 +1659,7 @@ defmodule Shuttle.Dispatcher do
   # same as `codex_session_dirs/0` — this encoding was once wrong in exactly
   # that leading slash, and every pi dispatch's session capture timed out.
   def pi_sessions_dir(work_dir) do
-    encoded = "--" <> (work_dir |> String.trim_leading("/") |> String.replace("/", "-")) <> "--"
-    Path.join([pi_sessions_root(), encoded])
+    Shuttle.HarnessPaths.pi_sessions_dir(work_dir)
   end
 
   defp find_session_file("codex", work_dir, fiber_id, dispatched_after) do
@@ -1699,7 +1701,10 @@ defmodule Shuttle.Dispatcher do
         files
         |> Enum.sort(:desc)
         |> Enum.map(&Path.join(dir, &1))
-        |> Enum.find({:error, :not_found}, &pi_session_matches?(&1, work_dir, fiber_id, dispatched_after))
+        |> Enum.find(
+          {:error, :not_found},
+          &pi_session_matches?(&1, work_dir, fiber_id, dispatched_after)
+        )
         |> case do
           {:error, :not_found} = miss -> miss
           path -> {:ok, path}
@@ -1709,7 +1714,6 @@ defmodule Shuttle.Dispatcher do
         {:error, reason}
     end
   end
-
 
   defp find_session_file(_cli, _work_dir, _fiber_id, _dispatched_after),
     do: {:error, :unsupported}
@@ -1753,39 +1757,16 @@ defmodule Shuttle.Dispatcher do
   #
   # `SHUTTLE_CODEX_SESSIONS_DIR` overrides the ROOT (the `~/.codex/sessions`
   # equivalent); the YYYY/MM/DD fan-out below applies to it too.
-  @codex_session_day_offsets [1, 0, -1]
-
   @doc false
   def codex_session_dirs do
-    root = codex_sessions_root()
-    today = local_today()
-
-    Enum.map(@codex_session_day_offsets, fn offset ->
-      date = Date.add(today, offset)
-      Path.join([root, "#{date.year}", pad2(date.month), pad2(date.day)])
-    end)
-  end
-
-  defp codex_sessions_root do
-    case System.get_env("SHUTTLE_CODEX_SESSIONS_DIR") do
-      dir when is_binary(dir) and dir != "" -> dir
-      _ -> Path.join([System.user_home!(), ".codex", "sessions"])
-    end
-  end
-
-  defp pi_sessions_root do
-    case System.get_env("SHUTTLE_PI_SESSIONS_DIR") do
-      dir when is_binary(dir) and dir != "" -> dir
-      _ -> Path.join([System.user_home!(), ".pi", "agent", "sessions"])
-    end
+    Shuttle.HarnessPaths.codex_session_dirs()
   end
 
   # The local civil day, read from the OS zone via `:calendar.local_time/0`.
   # Needs no TZ variable in the daemon's environment and no time-zone database.
   @doc false
   def local_today do
-    {{year, month, day}, _time} = :calendar.local_time()
-    Date.new!(year, month, day)
+    Shuttle.HarnessPaths.local_today()
   end
 
   defp codex_session_matches?(path, work_dir, fiber_id, dispatched_after) do
@@ -1843,9 +1824,6 @@ defmodule Shuttle.Dispatcher do
 
   defp read_uuid_from_jsonl(_cli, path, _work_dir),
     do: {:error, "unsupported harness for #{path}"}
-
-  defp pad2(n) when n < 10, do: "0#{n}"
-  defp pad2(n), do: "#{n}"
 
   # Generates a random UUID v4 using Erlang's :crypto module.
   # Sets version bits (byte 6 top nibble = 0100) and variant bits

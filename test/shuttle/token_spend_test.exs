@@ -2,10 +2,10 @@ defmodule Shuttle.TokenSpendTest do
   @moduledoc """
   The fold from a transcript to a session's spend.
 
-  Every fixture here mirrors a shape a real Claude Code transcript writes: the
-  four usage counters on `message.usage`, one record per content block sharing
-  a `message.id`, sidechain records for subagent turns, and the junk lines any
-  file another program owns will eventually contain.
+  Fixtures cover Claude Code's four `message.usage` counters, pi's equivalent
+  envelope, Codex's cumulative token snapshots, one record per content block
+  sharing a `message.id`, sidechain records for subagent turns, and the junk
+  lines any file another program owns will eventually contain.
   """
   use ExUnit.Case, async: false
 
@@ -201,6 +201,7 @@ defmodule Shuttle.TokenSpendTest do
       assert TokenSpend.total([]).sessions == 0
     end
   end
+
   describe "pi transcripts (the second harness)" do
     setup do
       root = Path.join(System.tmp_dir!(), "spend-pi-#{System.unique_integer([:positive])}")
@@ -208,7 +209,11 @@ defmodule Shuttle.TokenSpendTest do
       on_exit(fn -> File.rm_rf(root) end)
 
       path =
-        Path.join([root, "--Users-someone-project--", "2026-08-21T18-19-21-052Z_#{@session}.jsonl"])
+        Path.join([
+          root,
+          "--Users-someone-project--",
+          "2026-08-21T18-19-21-052Z_#{@session}.jsonl"
+        ])
 
       {:ok, root: root, path: path}
     end
@@ -217,7 +222,10 @@ defmodule Shuttle.TokenSpendTest do
     # writes one record per turn (identity: responseId).
     defp pi_assistant(response_id, at, overrides \\ %{}) do
       usage =
-        Map.merge(%{"input" => 3, "output" => 50, "cacheRead" => 700, "cacheWrite" => 200}, overrides)
+        Map.merge(
+          %{"input" => 3, "output" => 50, "cacheRead" => 700, "cacheWrite" => 200},
+          overrides
+        )
 
       %{
         "type" => "message",
@@ -231,7 +239,8 @@ defmodule Shuttle.TokenSpendTest do
       }
     end
 
-    defp pi_spend(root), do: TokenSpend.for_session(@session, root: root, pi_root: root, cache: false)
+    defp pi_spend(root),
+      do: TokenSpend.for_session(@session, root: root, pi_root: root, cache: false)
 
     test "folds pi's counters into the same observation", %{root: root, path: path} do
       write!(path, [
@@ -247,7 +256,16 @@ defmodule Shuttle.TokenSpendTest do
       assert result.cache_read == 1_400
       assert result.cache_write == 400
       assert result.messages == 2
-      assert result.models == %{"stealth/ox-alpha" => %{input: 6, output: 100, cache_read: 1_400, cache_write: 400, messages: 2}}
+
+      assert result.models == %{
+               "stealth/ox-alpha" => %{
+                 input: 6,
+                 output: 100,
+                 cache_read: 1_400,
+                 cache_write: 400,
+                 messages: 2
+               }
+             }
     end
 
     test "a responseId repeated across records counts once", %{root: root, path: path} do
@@ -261,4 +279,129 @@ defmodule Shuttle.TokenSpendTest do
     end
   end
 
+  describe "Codex rollouts (the third harness)" do
+    setup do
+      root = Path.join(System.tmp_dir!(), "spend-codex-#{System.unique_integer([:positive])}")
+      date = Shuttle.HarnessPaths.local_today()
+
+      dir =
+        Path.join([
+          root,
+          "#{date.year}",
+          String.pad_leading("#{date.month}", 2, "0"),
+          String.pad_leading("#{date.day}", 2, "0")
+        ])
+
+      File.mkdir_p!(dir)
+      path = Path.join(dir, "rollout-2026-08-23T18-19-21-052Z-#{@session}.jsonl")
+      on_exit(fn -> File.rm_rf(root) end)
+      {:ok, root: root, path: path}
+    end
+
+    defp codex_turn_context(model),
+      do: %{"type" => "turn_context", "payload" => %{"model" => model}}
+
+    defp codex_message(id, at),
+      do: %{
+        "type" => "response_item",
+        "timestamp" => at,
+        "payload" => %{"type" => "message", "role" => "assistant", "id" => id, "content" => []}
+      }
+
+    defp codex_token_count(at, overrides \\ %{}) do
+      usage =
+        Map.merge(
+          %{
+            "input_tokens" => 20,
+            "cached_input_tokens" => 5,
+            "cache_write_input_tokens" => 2,
+            "output_tokens" => 3,
+            "reasoning_output_tokens" => 1,
+            "total_tokens" => 25
+          },
+          overrides
+        )
+
+      %{
+        "type" => "event_msg",
+        "timestamp" => at,
+        "payload" => %{"type" => "token_count", "info" => %{"total_token_usage" => usage}}
+      }
+    end
+
+    defp codex_spend(root),
+      do:
+        TokenSpend.for_session(@session,
+          root: "/nope/not/here",
+          pi_root: "/nope/not/here",
+          codex_root: root,
+          cache: false
+        )
+
+    test "uses the latest cumulative token snapshot once", %{root: root, path: path} do
+      write!(path, [
+        codex_turn_context("gpt-5.6-luna"),
+        codex_token_count("2026-08-23T18:20:00.000Z"),
+        codex_message("turn-1", "2026-08-23T18:20:01.000Z"),
+        codex_token_count("2026-08-23T18:20:02.000Z", %{
+          "input_tokens" => 42,
+          "cached_input_tokens" => 12,
+          "cache_write_input_tokens" => 4,
+          "output_tokens" => 7,
+          "reasoning_output_tokens" => 2,
+          "total_tokens" => 49
+        }),
+        # A repeated final snapshot is normal when the harness flushes the
+        # stream; it must not change the answer.
+        codex_token_count("2026-08-23T18:20:03.000Z", %{
+          "input_tokens" => 42,
+          "cached_input_tokens" => 12,
+          "cache_write_input_tokens" => 4,
+          "output_tokens" => 7,
+          "reasoning_output_tokens" => 2,
+          "total_tokens" => 49
+        })
+      ])
+
+      result = codex_spend(root)
+
+      assert result.found
+      assert result.input == 30
+      assert result.output == 7
+      assert result.cache_read == 12
+      assert result.cache_write == 4
+      assert result.messages == 1
+
+      assert result.first_at_ms ==
+               DateTime.from_iso8601("2026-08-23T18:20:00.000Z")
+               |> elem(1)
+               |> DateTime.to_unix(:millisecond)
+
+      assert result.last_at_ms ==
+               DateTime.from_iso8601("2026-08-23T18:20:03.000Z")
+               |> elem(1)
+               |> DateTime.to_unix(:millisecond)
+
+      assert result.models == %{
+               "gpt-5.6-luna" => %{
+                 input: 30,
+                 output: 7,
+                 cache_read: 12,
+                 cache_write: 4,
+                 messages: 1
+               }
+             }
+    end
+
+    test "does not invent a per-model split after a model switch", %{root: root, path: path} do
+      write!(path, [
+        codex_turn_context("gpt-5.6-luna"),
+        codex_token_count("2026-08-23T18:20:00.000Z"),
+        codex_turn_context("gpt-5.6-luna-mini"),
+        codex_token_count("2026-08-23T18:20:01.000Z", %{"input_tokens" => 31})
+      ])
+
+      assert codex_spend(root).models == %{}
+    end
+  end
 end

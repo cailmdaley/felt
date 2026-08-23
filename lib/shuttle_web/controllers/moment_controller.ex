@@ -29,9 +29,9 @@ defmodule ShuttleWeb.MomentController do
   calls is two facts, and a client that could count the calls but never name
   them was the cost of withholding it. Absent only when nothing ran.
 
-  `Shuttle.Moment` does the reading (a Claude Code transcript under
-  `~/.claude/projects`); this controller parses the window, decides whose disk
-  the words are on, and stamps the host.
+  `Shuttle.Moment` does the reading (Claude Code, pi, or Codex transcripts);
+  this controller parses the window, decides whose disk the words are on, and
+  stamps the host.
 
   **Host-routed, like `/file` is owner-routed — but the owner here is a host,
   not a fiber.** A transcript lives on the machine that ran the session, so:

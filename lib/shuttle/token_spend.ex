@@ -6,12 +6,16 @@ defmodule Shuttle.TokenSpend do
   counters the API bills on (`input_tokens`, `output_tokens`,
   `cache_creation_input_tokens`, `cache_read_input_tokens`) — and pi does the
   same under its own names (`input`, `output`, `cacheRead`, `cacheWrite`). The
-  transcript therefore already holds the answer to "what did this session
-  spend"; nothing has to be inferred, modelled, or priced. This module folds
-  one session's transcript into one bounded observation, and
+  Codex rollout instead emits cumulative `event_msg/token_count` snapshots;
+  those are read as snapshots, never summed. The transcript therefore already
+  holds the answer to "what did this session spend"; nothing has to be
+  inferred, modelled, or priced. This module folds one session's transcript
+  into one bounded observation, and
   `Shuttle.SessionLedger` supplies the fiber the session belonged to, so the
-  same fold rolls up per fiber. The two harness shapes meet (and are
-  translated) in `usage_of/1`; the fold below never heard of a harness.
+  same fold rolls up per fiber. The Claude and pi shapes meet (and are
+  translated) in `usage_of/1`; the Codex snapshot is folded separately because
+  its cumulative semantics are different, and the rest of the fold never
+  needs to know which harness wrote the file.
 
   ## Collection never depends on inference
 
@@ -81,10 +85,11 @@ defmodule Shuttle.TokenSpend do
   The spend for `session`, from cache when the transcript has not changed.
 
   Returns a zeroed observation with `found: false` for an unknown session, a
-  non-UUID string, a harness that writes no Claude Code transcript, or a file
-  that vanished mid-read. Never raises.
+  non-UUID string, a harness transcript with no usage records, or a file that
+  vanished mid-read. Never raises.
 
-  Opts (for tests): `:root` (transcript root), `:cache` (false to bypass).
+  Opts (for tests): `:root`, `:pi_root`, `:codex_root` (transcript roots),
+  `:cache` (false to bypass).
   """
   @spec for_session(String.t() | nil, keyword()) :: spend()
   def for_session(session, opts \\ [])
@@ -202,10 +207,16 @@ defmodule Shuttle.TokenSpend do
   # ── The fold ──
 
   defp fold(session, path) do
-    path
-    |> File.stream!()
-    |> Enum.reduce({%{empty(session) | found: true}, MapSet.new()}, &absorb/2)
-    |> elem(0)
+    {spend, _seen, codex} =
+      path
+      |> File.stream!()
+      |> Enum.reduce(
+        {%{empty(session) | found: true}, MapSet.new(), codex_state()},
+        &absorb/2
+      )
+
+    spend
+    |> add_codex(codex)
   rescue
     # Vanished, unreadable, or rewritten mid-read. An unreadable transcript is
     # an absence, not a failure: the endpoint reports it and stays 200.
@@ -214,17 +225,29 @@ defmodule Shuttle.TokenSpend do
       empty(session)
   end
 
-  defp absorb(line, {acc, seen} = unchanged) do
-    with {:ok, record} <- Jason.decode(line),
-         {:ok, input, output, cache_r, cache_w, id, model, at_ms} <- usage_of(record),
-         false <- counted?(id, seen) do
-      {add(acc, input, output, cache_r, cache_w, model, at_ms), remember(seen, id)}
-    else
-      _ -> unchanged
+  defp absorb(line, {acc, seen, codex} = unchanged) do
+    case Jason.decode(line) do
+      {:ok, record} ->
+        codex = absorb_codex(codex, record)
+
+        case usage_of(record) do
+          {:ok, input, output, cache_r, cache_w, id, model, at_ms} ->
+            if counted?(id, seen) do
+              {acc, seen, codex}
+            else
+              {add(acc, input, output, cache_r, cache_w, model, at_ms), remember(seen, id), codex}
+            end
+
+          :skip ->
+            {acc, seen, codex}
+        end
+
+      _ ->
+        unchanged
     end
   end
 
-  # The one place the harness shapes meet. Claude stamps every assistant
+  # The one place the Claude and pi shapes meet. Claude stamps every assistant
   # record with `message.usage` in API counter names and dedups on
   # `message.id` (one record per content block — see the double-count trap).
   # Pi nests the turn under `"message"` with its own counter names
@@ -246,6 +269,121 @@ defmodule Shuttle.TokenSpend do
 
   defp usage_of(_), do: :skip
 
+  # Codex emits a running total after each turn. Keep the latest total and
+  # count assistant message items separately; summing every snapshot would turn
+  # a session's spend into the sum of all its prefixes. Model breakdowns are
+  # only reported when one model is named for the whole file: a cumulative
+  # total cannot honestly be divided between models after a switch.
+  defp codex_state do
+    %{
+      snapshot: nil,
+      models: MapSet.new(),
+      messages: 0,
+      message_ids: MapSet.new(),
+      first_at_ms: nil,
+      last_at_ms: nil
+    }
+  end
+
+  defp absorb_codex(state, %{"type" => "turn_context", "payload" => %{"model" => model}})
+       when is_binary(model) do
+    %{state | models: MapSet.put(state.models, model)}
+  end
+
+  defp absorb_codex(state, %{
+         "type" => "response_item",
+         "payload" => %{"type" => "message", "role" => "assistant", "id" => id}
+       })
+       when is_binary(id) do
+    if MapSet.member?(state.message_ids, id) do
+      state
+    else
+      %{state | messages: state.messages + 1, message_ids: MapSet.put(state.message_ids, id)}
+    end
+  end
+
+  defp absorb_codex(state, %{
+         "type" => "response_item",
+         "payload" => %{"type" => "message", "role" => "assistant"}
+       }) do
+    %{state | messages: state.messages + 1}
+  end
+
+  defp absorb_codex(
+         state,
+         %{
+           "type" => "event_msg",
+           "payload" => %{
+             "type" => "token_count",
+             "info" => %{"total_token_usage" => usage}
+           }
+         } = record
+       )
+       when is_map(usage) do
+    at_ms = at_ms(record)
+
+    %{
+      state
+      | snapshot: usage,
+        first_at_ms: min_ms(state.first_at_ms, at_ms),
+        last_at_ms: max_ms(state.last_at_ms, at_ms)
+    }
+  end
+
+  defp absorb_codex(state, _record), do: state
+
+  defp add_codex(acc, %{snapshot: nil}), do: acc
+
+  defp add_codex(acc, state) do
+    counts = %{
+      # Codex's `input_tokens` includes the cached prefix. Keep the same
+      # orthogonal axes Claude exposes: uncached input, cache read, cache
+      # write, and output. Reasoning output is already part of `output_tokens`;
+      # adding it again would double-count the response.
+      input:
+        max(
+          count(state.snapshot, "input_tokens") - count(state.snapshot, "cached_input_tokens"),
+          0
+        ),
+      output: count(state.snapshot, "output_tokens"),
+      cache_read: count(state.snapshot, "cached_input_tokens"),
+      cache_write: count(state.snapshot, "cache_write_input_tokens")
+    }
+
+    models =
+      case MapSet.to_list(state.models) do
+        [model] -> merge_model(acc.models, model, counts, state.messages)
+        _ -> acc.models
+      end
+
+    %{
+      acc
+      | input: acc.input + counts.input,
+        output: acc.output + counts.output,
+        cache_read: acc.cache_read + counts.cache_read,
+        cache_write: acc.cache_write + counts.cache_write,
+        messages: acc.messages + state.messages,
+        first_at_ms: min_ms(acc.first_at_ms, state.first_at_ms),
+        last_at_ms: max_ms(acc.last_at_ms, state.last_at_ms),
+        models: models
+    }
+  end
+
+  defp merge_model(models, model, counts, messages) when is_binary(model) do
+    model_counts = Map.put(counts, :messages, messages)
+
+    Map.update(models, model, model_counts, fn prior ->
+      %{
+        input: prior.input + model_counts.input,
+        output: prior.output + model_counts.output,
+        cache_read: prior.cache_read + model_counts.cache_read,
+        cache_write: prior.cache_write + model_counts.cache_write,
+        messages: prior.messages + model_counts.messages
+      }
+    end)
+  end
+
+  defp merge_model(models, _model, _counts, _messages), do: models
 
   defp counted?(id, seen) when is_binary(id), do: MapSet.member?(seen, id)
   defp counted?(_id, _seen), do: false

@@ -8,10 +8,11 @@ defmodule Shuttle.Moment do
   activity marks. A mark says *that* something happened; it cannot say *what*.
   The transcript can. Claude Code writes one JSONL file per session under
   `~/.claude/projects/<cwd-slug>/<session-uuid>.jsonl`, one line per
-  conversation record, each stamped with an ISO-8601 `timestamp` — and pi
-  writes the same kind of thing under `~/.pi/agent/sessions/`. Given a
-  session UUID and a minute window, this module returns the handful of messages
-  that fell inside it, whichever harness wrote them.
+  conversation record, each stamped with an ISO-8601 `timestamp`; pi writes a
+  different envelope under `~/.pi/agent/sessions/`; and Codex files rollouts
+  under `~/.codex/sessions/YYYY/MM/DD/`. Given a session UUID and a minute
+  window, this module returns the handful of messages that fell inside it,
+  whichever harness wrote them.
 
   ## What counts as a word
 
@@ -115,11 +116,9 @@ defmodule Shuttle.Moment do
   skipped. A missing directory, a missing transcript, or an unreadable file
   yields `[]`. Nothing here raises, because the caller is a hover.
 
-  Codex still writes elsewhere in yet another shape and yields `[]`.
+  ## Three harnesses, one reader
 
-  ## Two harnesses, one reader
-
-  Pi's transcript differs from claude's in envelope, not in kind: turns nest
+  Pi's transcript differs from Claude's in envelope, not in kind: turns nest
   under `"message"` with a `role` of `user`/`assistant`/`toolResult`, tool
   calls are `toolCall` blocks with lowercase names, and a tool result is a
   turn of its own rather than a block inside a user record. Rather than fork
@@ -127,17 +126,25 @@ defmodule Shuttle.Moment do
   time — `normalize_record/1` recognizes the pi envelope by shape (claude
   never uses it), so no path sniffing, and everything downstream — prose,
   delegation register, tool listing — runs harness-agnostic. A pi minute reads
-  like a claude one because by the time it is read, it is one.
+  like a Claude one because by the time it is read, it is one.
+
+  Codex's rollout is a stream of `response_item` envelopes. Conversation
+  messages carry `input_text`/`output_text` blocks, shell calls arrive as
+  `custom_tool_call` or `function_call`, and their results carry the matching
+  call id. Those records are translated into the same canonical shape. The
+  Codex `exec` tool is named `Bash` because that is the operation it performs;
+  other tool names remain visible rather than being guessed into Claude's
+  vocabulary. Developer messages, reasoning, and runtime bookkeeping are
+  excluded as machine context.
 
   ## Bounds
 
   `@max_window_ms` (2 h) caps the window, `@cap` (6) the excerpts, `@max_chars`
   (280) each excerpt's text, `@tool_calls_cap` (6) the per-call tool listing
-  before it steps back to the aggregate. Lookup is a single `Path.wildcard/1`
-  over
-  `<root>/*/<uuid>.jsonl` — a glob one level deep, never a walk — and the
-  session id is validated as UUID-shaped first, so no caller-supplied pattern
-  reaches the filesystem.
+  before it steps back to the aggregate. Lookup is a small set of bounded
+  `Path.wildcard/1` patterns over the three harness roots — never a recursive
+  walk — and the session id is validated as UUID-shaped first, so no
+  caller-supplied pattern reaches the filesystem.
   """
 
   require Logger
@@ -239,13 +246,12 @@ defmodule Shuttle.Moment do
   @doc """
   The transcript root — `$SHUTTLE_CLAUDE_PROJECTS_DIR`, else
   `~/.claude/projects`. The env override exists so a test can point at a
-  fixture tree; nothing in production sets it.
+  fixture tree; nothing in production sets it. `Shuttle.HarnessPaths` owns
+  this layout alongside the pi and Codex roots, so the dispatcher and the
+  temporal reader cannot quietly disagree about where a session lives.
   """
   @spec projects_root() :: String.t()
-  def projects_root do
-    System.get_env("SHUTTLE_CLAUDE_PROJECTS_DIR") ||
-      Path.join([System.user_home!() || "/root", ".claude", "projects"])
-  end
+  def projects_root, do: Shuttle.HarnessPaths.claude_projects_root()
 
   @doc """
   Validate a window without reading anything, so a controller can refuse a bad
@@ -284,10 +290,10 @@ defmodule Shuttle.Moment do
   window `from_ms..to_ms`, oldest first.
 
   Never raises and never signals absence as an error: an unknown session, a
-  harness that is not Claude Code, and a transcript with nothing in the window
-  all return `[]`.
+  unknown harness, and a transcript with nothing in the window all return `[]`.
 
-  Opts (for tests): `:root` (transcript root), `:cap`, `:max_chars`.
+  Opts (for tests): `:root` (Claude transcript root), `:pi_root`, `:codex_root`,
+  `:cap`, `:max_chars`.
   """
   @spec excerpts(String.t(), integer(), integer(), keyword()) :: [excerpt()]
   def excerpts(session, from_ms, to_ms, opts \\ []) do
@@ -342,7 +348,11 @@ defmodule Shuttle.Moment do
     max_chars = Keyword.get(opts, :max_chars, max_chars(full?))
 
     lines_cap =
-      Keyword.get(opts, :tool_lines_cap, if(full?, do: @full_tool_lines_cap, else: @tool_lines_cap))
+      Keyword.get(
+        opts,
+        :tool_lines_cap,
+        if(full?, do: @full_tool_lines_cap, else: @tool_lines_cap)
+      )
 
     case transcript_path(session, opts) do
       nil ->
@@ -477,23 +487,35 @@ defmodule Shuttle.Moment do
   wrote one. Public because "are there words here at all?" is a question worth
   asking without reading them.
 
-  Each harness root is globbed in turn — claude-code first, then pi — and the
-  first regular-file hit wins. Pi leads its basenames with an ISO stamp, so
-  its glob carries a second `*`; the session id is UUID-validated before any
-  of this, so it remains the only caller-supplied pattern component.
+  Each harness root is globbed in turn — Claude Code first, then pi, then Codex
+  — and the first regular-file hit wins. Pi leads its basenames with an ISO
+  stamp, while Codex fans out by local civil date; the session id is
+  UUID-validated before any of this, so it remains the only caller-supplied
+  pattern component.
   """
   @spec transcript_path(String.t(), keyword()) :: String.t() | nil
   def transcript_path(session, opts \\ []) when is_binary(session) do
     if Regex.match?(@uuid, session) do
-      [Path.join(claude_root(opts), "*/#{session}.jsonl"), Path.join(pi_root(opts), "*/*#{session}.jsonl")]
+      [
+        Path.join(claude_root(opts), "*/#{session}.jsonl"),
+        Path.join(pi_root(opts), "*/*#{session}.jsonl"),
+        codex_paths(session, opts)
+      ]
+      |> List.flatten()
       |> Enum.flat_map(&Path.wildcard/1)
       |> Enum.find(&File.regular?/1)
     end
   end
 
-  defp claude_root(opts), do: Keyword.get(opts, :root, projects_root())
+  defp claude_root(opts), do: Shuttle.HarnessPaths.claude_projects_root(opts)
 
-  defp pi_root(opts), do: Keyword.get(opts, :pi_root, pi_sessions_root())
+  defp pi_root(opts), do: Shuttle.HarnessPaths.pi_sessions_root(opts)
+
+  defp codex_paths(session, opts) do
+    opts
+    |> Shuttle.HarnessPaths.codex_session_dirs()
+    |> Enum.map(&Path.join(&1, "rollout-*#{session}.jsonl"))
+  end
 
   @doc """
   The pi sessions root — `$SHUTTLE_PI_SESSIONS_DIR`, else
@@ -502,8 +524,7 @@ defmodule Shuttle.Moment do
   """
   @spec pi_sessions_root() :: String.t()
   def pi_sessions_root do
-    System.get_env("SHUTTLE_PI_SESSIONS_DIR") ||
-      Path.join([System.user_home!() || "/root", ".pi", "agent", "sessions"])
+    Shuttle.HarnessPaths.pi_sessions_root()
   end
 
   # One pass, three harvests: the excerpts, the tool calls behind them, and the
@@ -561,8 +582,10 @@ defmodule Shuttle.Moment do
 
   # The one place the harness shapes meet. A pi record announces itself by its
   # envelope — `"type": "message"` with the turn nested under `"message"`, a
-  # shape claude never uses — so translation needs no path sniffing; claude
-  # records pass through untouched.
+  # shape Claude never uses. A Codex record announces itself by the outer
+  # `response_item` envelope and its payload type. Both are translated here;
+  # everything downstream — prose, delegation register, tool listing — runs
+  # on one canonical vocabulary.
   defp normalize_record(%{"type" => "message", "message" => %{"role" => role} = msg} = raw)
        when role in ~w(user assistant toolResult) do
     {:ok,
@@ -573,7 +596,127 @@ defmodule Shuttle.Moment do
      }}
   end
 
+  defp normalize_record(%{"type" => "response_item", "payload" => payload} = raw)
+       when is_map(payload) do
+    case payload["type"] do
+      "message" -> codex_message(raw, payload)
+      "custom_tool_call" -> codex_tool_call(raw, payload)
+      "function_call" -> codex_tool_call(raw, payload)
+      "custom_tool_call_output" -> codex_tool_result(raw, payload)
+      "function_call_output" -> codex_tool_result(raw, payload)
+      "agent_message" -> codex_agent_message(raw, payload)
+      _ -> {:ok, raw}
+    end
+  end
+
   defp normalize_record(raw), do: {:ok, raw}
+
+  # Codex's developer messages are injected context, not words spoken by the
+  # user. Keep them in the canonical shape with the same `isMeta` marker Claude
+  # uses, so the ordinary role/text filter makes the same decision for both.
+  defp codex_message(raw, %{"role" => role} = payload)
+       when role in ~w(user assistant developer) do
+    record = %{
+      "type" => if(role == "developer", do: "user", else: role),
+      "timestamp" => raw["timestamp"],
+      "message" => %{"content" => codex_content(payload["content"])}
+    }
+
+    if role == "developer", do: {:ok, Map.put(record, "isMeta", true)}, else: {:ok, record}
+  end
+
+  defp codex_message(_raw, _payload), do: {:ok, %{"type" => "codex_machine"}}
+
+  defp codex_tool_call(raw, %{"call_id" => id, "name" => name} = payload)
+       when is_binary(id) and is_binary(name) do
+    {:ok,
+     %{
+       "type" => "assistant",
+       "timestamp" => raw["timestamp"],
+       "message" => %{
+         "content" => [
+           %{
+             "type" => "tool_use",
+             "id" => id,
+             "name" => codex_tool_name(name),
+             "input" => codex_tool_input(name, payload["input"] || payload["arguments"])
+           }
+         ]
+       }
+     }}
+  end
+
+  defp codex_tool_call(_raw, _payload), do: {:ok, %{"type" => "codex_machine"}}
+
+  defp codex_tool_result(raw, %{"call_id" => id} = payload) when is_binary(id) do
+    {:ok,
+     %{
+       "type" => "user",
+       "timestamp" => raw["timestamp"],
+       "message" => %{
+         "content" => [
+           %{
+             "type" => "tool_result",
+             "tool_use_id" => id,
+             "content" => from_content(codex_content(payload["output"]))
+           }
+         ]
+       }
+     }}
+  end
+
+  defp codex_tool_result(_raw, _payload), do: {:ok, %{"type" => "codex_machine"}}
+
+  # Native Codex peer messages are the closest equivalent to Claude's
+  # `<teammate-message>` return envelope. Keep the author and body in a small
+  # private canonical record; `delegation/3` turns it into the same return
+  # register without manufacturing XML or treating it as ordinary prose.
+  defp codex_agent_message(raw, payload) do
+    {:ok,
+     %{
+       "type" => "codex_agent_message",
+       "timestamp" => raw["timestamp"],
+       "name" => agent_name(payload["author"]),
+       "content" => from_content(codex_content(payload["content"]))
+     }}
+  end
+
+  defp codex_content(content) when is_binary(content),
+    do: [%{"type" => "text", "text" => content}]
+
+  defp codex_content(blocks) when is_list(blocks) do
+    Enum.flat_map(blocks, fn
+      %{"type" => type, "text" => text}
+      when type in ~w(input_text output_text text) and is_binary(text) ->
+        [%{"type" => "text", "text" => text}]
+
+      _block ->
+        []
+    end)
+  end
+
+  defp codex_content(_), do: []
+
+  # `exec` is semantically the same shell operation Claude calls `Bash`; the
+  # remaining native coordination names stay visible, just rendered readably.
+  defp codex_tool_name("exec"), do: "Bash"
+  defp codex_tool_name("spawn_agent"), do: "Subagent"
+
+  defp codex_tool_name(name) do
+    name |> String.split("_") |> Enum.map_join(" ", &String.capitalize/1)
+  end
+
+  defp codex_tool_input("exec", input) when is_binary(input), do: %{"command" => input}
+  defp codex_tool_input(_name, input) when is_map(input), do: input
+
+  defp codex_tool_input(_name, input) when is_binary(input) do
+    case Jason.decode(input) do
+      {:ok, decoded} when is_map(decoded) -> decoded
+      _ -> %{"arguments" => input}
+    end
+  end
+
+  defp codex_tool_input(_name, _input), do: %{}
 
   # A pi turn's content, in claude's block vocabulary. Assistant `toolCall`
   # blocks become `tool_use` (lowercase name capitalized, so a pi minute reads
@@ -658,12 +801,14 @@ defmodule Shuttle.Moment do
   defp note_spawns(spawns, _record), do: spawns
 
   # Who was sent. `name` is the teammate's own — the same string its report
-  # comes back under — so it is preferred; `subagent_type` (claude) and
+  # comes back under — so it is preferred; `task_name` is Codex's safe native
+  # label (its full spawn message is encrypted); `subagent_type` (Claude) and
   # `agent` (pi) name the role when nobody named the agent; `description` is
   # the caller's own summary of the errand and is the last resort.
   defp spawn_name(input) do
     agent_name(input["name"]) || agent_name(input["subagent_type"]) ||
-      agent_name(input["agent"]) || agent_name(input["description"])
+      agent_name(input["agent"]) || agent_name(input["task_name"]) ||
+      agent_name(input["description"])
   end
 
   defp delegation(%{"type" => "assistant", "message" => %{"content" => blocks}} = record, max, _s)
@@ -671,7 +816,15 @@ defmodule Shuttle.Moment do
     Enum.flat_map(blocks, fn
       %{"type" => "tool_use", "name" => tool, "input" => input} when is_map(input) ->
         if tool in @spawn_tools,
-          do: mark(record, "assistant", "spawn", spawn_name(input), input["prompt"] || input["task"], max),
+          do:
+            mark(
+              record,
+              "assistant",
+              "spawn",
+              spawn_name(input),
+              input["prompt"] || input["task"] || input["description"] || input["task_name"],
+              max
+            ),
           else: []
 
       _block ->
@@ -680,8 +833,20 @@ defmodule Shuttle.Moment do
     |> recognized()
   end
 
-  defp delegation(%{"type" => "user", "message" => %{"content" => content}} = record, max, spawns),
-    do: returns(record, content, max, spawns)
+  defp delegation(
+         %{"type" => "codex_agent_message", "content" => content, "name" => name} = record,
+         max,
+         _spawns
+       )
+       when is_binary(content),
+       do: mark(record, "user", "return", name, content, max)
+
+  defp delegation(
+         %{"type" => "user", "message" => %{"content" => content}} = record,
+         max,
+         spawns
+       ),
+       do: returns(record, content, max, spawns)
 
   defp delegation(%{"type" => "user", "content" => content} = record, max, _spawns)
        when is_binary(content),
@@ -749,8 +914,8 @@ defmodule Shuttle.Moment do
   defp report(record, name, text, max) when is_binary(text) do
     if String.contains?(text, @internal_result) or
          String.starts_with?(String.trim_leading(text), @idle_report),
-      do: [],
-      else: mark(record, "user", "return", name, text, max)
+       do: [],
+       else: mark(record, "user", "return", name, text, max)
   end
 
   defp report(_record, _name, _text, _max), do: []
