@@ -274,6 +274,30 @@ button.kbn-day-lanename:focus-visible {
   position: relative;
   height: 29px;
 }
+/* THE LANE'S LIVE CHIP — pinned to the timeline's left edge, immediately to
+   the right of the fiber's name, floating over whatever the rail has drawn
+   there. Absolute rather than in the label's flex row because the gutter is a
+   fixed width shared with the name, and a chip in it spent the name's room.
+
+   It OVERLAPS the kernels under it on purpose. Those first minutes are the
+   oldest thing on a live lane and the least likely to be what you came to
+   read; a worker with its hand up is the newest. The paper backing is what
+   keeps the words legible over ink without erasing the mark beneath — the
+   curve still shows through at its edges, so nothing is claimed to be absent.
+   `pointer-events: auto` is explicit: the rail beneath owns hover for the
+   whole of its width, and the chip has to win over it to stay clickable. */
+.kbn-day-lanechip {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 3;
+  pointer-events: auto;
+  max-width: 100%;
+  white-space: nowrap;
+  box-shadow: 0 0 0 2px rgba(247, 244, 236, 0.75);
+}
+
 /* The ground the curve stands on. At the BOTTOM rather than through the middle,
    because the curve grows from a baseline: a rule through the ink would read as
    a zero line with negative values under it. An hour with nothing in it still

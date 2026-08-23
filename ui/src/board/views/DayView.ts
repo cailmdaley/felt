@@ -2310,14 +2310,6 @@ class DayViewImpl implements TemporalView {
       state.setAttribute('role', 'img')
       label.append(state)
 
-      // The timeline row gets the same live worker signal as the prose row
-      // below it. Ordinary aloft work stays implicit; only a raised hand or a
-      // settled wait deserves a second mark beside the constitution's name.
-      const workerChip = chipByCardId.get(lane.cardId)
-      if (workerChip && workerChip.variant !== 'aloft') {
-        label.append(this.buildChip(workerChip, lane.cardId))
-      }
-
       const name = document.createElement('button')
       name.type = 'button'
       name.className = 'kbn-day-lanename'
@@ -2445,6 +2437,25 @@ class DayViewImpl implements TemporalView {
           this.showAloftTip(lane, line, e, true)
         })
         rail.append(hair)
+      }
+
+      // THE LIVE SIGNAL RIDES THE RAIL, NOT THE GUTTER. The label column is a
+      // fixed 232px shared with the fiber's name, and a chip in it took the
+      // name's room — so it sits at the timeline's own left edge instead,
+      // reading as the thing immediately to the right of the title. It is
+      // allowed to cover whatever kernel lies under it: a worker asking for a
+      // hand outranks the first minutes of its own curve, and those minutes
+      // are still there when the worker moves on. Only a raised hand or a
+      // settled wait earns the mark; ordinary aloft work stays quiet.
+      const workerChip = chipByCardId.get(lane.cardId)
+      if (workerChip && workerChip.variant !== 'aloft') {
+        const chipEl = this.buildChip(workerChip, lane.cardId)
+        chipEl.classList.add('kbn-day-lanechip')
+        // The rail's own tooltip machinery reads every mousemove over the rail;
+        // over the chip that would draw a beat slip for a minute the pointer is
+        // not really asking about.
+        chipEl.addEventListener('mousemove', (e) => e.stopPropagation())
+        rail.append(chipEl)
       }
 
       this.railByLane.set(lane.key, { lane, rail })
