@@ -129,6 +129,23 @@ defmodule Shuttle.DispatchIntegrationTest do
     System.delete_env("SHUTTLE_SESSIONS_FILE")
 
     on_exit(fn ->
+      # The session-UUID capture runs as a supervised background task and can
+      # still be backfilling (fiber marker, session ledger) when the test's
+      # assertion is already satisfied — a straggler writing into host/data_dir
+      # makes the recursive deletes below race a recreate ("file already
+      # exists"). This suite is async: false, so every child here is ours:
+      # kill and await them before sweeping.
+      for pid <- Task.Supervisor.children(Shuttle.TaskSupervisor) do
+        ref = Process.monitor(pid)
+        Process.exit(pid, :kill)
+
+        receive do
+          {:DOWN, ^ref, :process, _, _} -> :ok
+        after
+          1_000 -> :ok
+        end
+      end
+
       File.rm_rf!(host)
 
       if prev_data_dir,

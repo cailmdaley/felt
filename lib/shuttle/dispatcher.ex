@@ -1520,8 +1520,10 @@ defmodule Shuttle.Dispatcher do
     # in a background task. `dispatched_at` is already on disk, so the card can
     # honestly report `identity_pending` while a cold harness starts; the
     # elapsed-time deadline above leaves ordinary startup latency room without
-    # letting a failed capture task live forever.
-    Task.start(fn ->
+    # letting a failed capture task live forever. Supervised (not bare
+    # Task.start) so tests can enumerate and kill stragglers before tearing
+    # down the tmp dirs the backfill writes into.
+    Task.Supervisor.start_child(Shuttle.TaskSupervisor, fn ->
       deadline = System.monotonic_time(:millisecond) + @session_capture_timeout_ms
 
       case capture_session_uuid(cli, work_dir, capture_fiber_id, dispatched_after, deadline) do
