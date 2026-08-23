@@ -183,18 +183,9 @@
   cursor: pointer;
 }
 
-/* THE LANE IS A DOOR, and this is its handle.
-
-   Clicking a lane attaches to its worker's terminal (see `openLaneTerminal`),
-   which is only useful if you can tell that it will. The row lights on hover —
-   both cells together, joined in the view because the grid gives them no common
-   ancestor — at a weight that says "this responds" without competing with a
-   rail whose whole business is fine marks on pale paper.
-
-   The rail keeps `cursor: pointer` over its whole width even though a click
-   there may pin a tooltip rather than open anything: both are things the click
-   does, and a cursor that changed halfway across the lane would be advertising
-   a boundary the reader cannot see. */
+/* The name opens the constitution; the rest of the lane remains the rail's
+   work-reading surface. The row lights on hover — both cells together, joined
+   here because the grid gives them no common ancestor. */
 .kbn-day-rail { cursor: pointer; }
 .kbn-day-lane-lit {
   background: rgba(122, 111, 92, 0.055);

@@ -2290,6 +2290,7 @@ class DayViewImpl implements TemporalView {
     // first paint, and the rung's title says the same thing either way.
     const countRoom = COUNT_LABEL_PX / Math.max(320, this.chartEl?.clientWidth || 900)
 
+    const chipByCardId = new Map(model.entries.map((entry) => [entry.cardId, entry.chip]))
     model.lanes.forEach((lane, index) => {
       const row = String(index + 1)
 
@@ -2308,6 +2309,14 @@ class DayViewImpl implements TemporalView {
       state.setAttribute('aria-label', STATE_WORD[lane.state])
       state.setAttribute('role', 'img')
       label.append(state)
+
+      // The timeline row gets the same live worker signal as the prose row
+      // below it. Ordinary aloft work stays implicit; only a raised hand or a
+      // settled wait deserves a second mark beside the constitution's name.
+      const workerChip = chipByCardId.get(lane.cardId)
+      if (workerChip && workerChip.variant !== 'aloft') {
+        label.append(this.buildChip(workerChip, lane.cardId))
+      }
 
       const name = document.createElement('button')
       name.type = 'button'
