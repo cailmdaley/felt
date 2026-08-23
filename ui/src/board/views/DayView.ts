@@ -2453,7 +2453,11 @@ class DayViewImpl implements TemporalView {
         chipEl.classList.add('kbn-day-lanechip')
         // The rail's own tooltip machinery reads every mousemove over the rail;
         // over the chip that would draw a beat slip for a minute the pointer is
-        // not really asking about.
+        // not really asking about. Swallowing the move is only half of it — the
+        // chip is a DESCENDANT of the rail, so crossing onto it fires no
+        // `mouseleave` there, and the slip would hang open on whatever minute
+        // the pointer last crossed. Entering the chip closes it explicitly.
+        chipEl.addEventListener('mouseenter', () => this.hideTip())
         chipEl.addEventListener('mousemove', (e) => e.stopPropagation())
         rail.append(chipEl)
       }

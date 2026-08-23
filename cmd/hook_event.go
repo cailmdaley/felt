@@ -23,8 +23,10 @@ import (
 // daemon tails (see cmd/shuttle_events.go for the path and the write gate).
 // Two readers consume it, and only these fields:
 //
-//   - lib/shuttle/waiting_tracker.ex — `type`, `tmuxSession`, `timestamp`;
-//     last-event-wins per session, so duplicate lines are idempotent.
+//   - lib/shuttle/waiting_tracker.ex — `type`, `tmuxSession`, `timestamp`,
+//     plus the two fields that say whether an idle-looking session is really
+//     waiting on a HUMAN: `notificationKind` and `backgroundTasks`.
+//     Last-event-wins per session, so duplicate lines are idempotent.
 //   - lib/shuttle/sent_files.ex — `tool == "SendUserFile"`, `toolInput.files`,
 //     `sessionId`, `cwd`, `timestamp`, `tmuxSession`; deduped by path.
 //
@@ -83,13 +85,25 @@ var (
 )
 
 type eventHookInput struct {
-	HookEventName  string          `json:"hook_event_name"`
-	SessionID      string          `json:"session_id"`
-	CWD            string          `json:"cwd"`
-	TranscriptPath string          `json:"transcript_path"`
-	ToolName       string          `json:"tool_name"`
-	Prompt         string          `json:"prompt"`
-	ToolInput      json.RawMessage `json:"tool_input"`
+	HookEventName  string `json:"hook_event_name"`
+	SessionID      string `json:"session_id"`
+	CWD            string `json:"cwd"`
+	TranscriptPath string `json:"transcript_path"`
+	ToolName       string `json:"tool_name"`
+	Prompt         string `json:"prompt"`
+	// Notification's own discriminator: `idle_prompt`, `permission_prompt`,
+	// `elicitation_dialog`, … The harness says WHY it is notifying, and only
+	// `idle_prompt` means "nobody has typed in a while" rather than "I am
+	// blocked on you".
+	NotificationType string `json:"notification_type"`
+	// Stop's and SubagentStop's own account of what they are leaving running:
+	// the harness's whole background-task registry, not only detached Bash. A
+	// turn that ends with finite work outstanding is not idle — it is waiting
+	// on itself. Held RAW and counted tolerantly: this is the only
+	// shape-constrained field on the payload, and a harness that reshapes it
+	// must not take every `stop` line off the stream with it.
+	BackgroundTasks json.RawMessage `json:"background_tasks"`
+	ToolInput       json.RawMessage `json:"tool_input"`
 }
 
 // eventLine is the wire shape, in wire order. Field set and names are pinned
@@ -107,9 +121,18 @@ type eventLine struct {
 	// Machine marks a prompt the harness injected rather than one a person
 	// typed — see machinePrompt. Omitted when false, so an ordinary event's
 	// line is byte-identical to what it has always been.
-	Machine   bool            `json:"machine,omitempty"`
-	Tool      string          `json:"tool,omitempty"`
-	ToolInput json.RawMessage `json:"toolInput,omitempty"`
+	Machine bool `json:"machine,omitempty"`
+	// NotificationKind carries the harness's `notification_type` through. The
+	// idle timeout and a permission request arrive as the same event `type`,
+	// and this is the only thing that tells them apart.
+	NotificationKind string `json:"notificationKind,omitempty"`
+	// BackgroundTasks is how much FINITE work a `stop` or `subagent_stop` left
+	// running — see countBackgroundTasks for what does not count. Zero is the
+	// overwhelmingly common case and is omitted, so an ordinary line is
+	// byte-identical to what it has always been.
+	BackgroundTasks int             `json:"backgroundTasks,omitempty"`
+	Tool            string          `json:"tool,omitempty"`
+	ToolInput       json.RawMessage `json:"toolInput,omitempty"`
 }
 
 // machinePromptPrefixes are the wrappers the harness puts around a prompt it
@@ -171,6 +194,52 @@ func machinePrompt(prompt string) bool {
 	return false
 }
 
+// endlessTaskTypes are the registry kinds that are ALIVE BY DESIGN for as long
+// as the session is: an MCP or WebSocket monitor, an in-process teammate, a
+// backgrounded remote agent. They are running in the same sense a socket is
+// open, and counting them would pin every such session as "busy" for its whole
+// life — which is the one failure this whole signal must not cause.
+//
+// An EXCLUDE list rather than an include list: an unrecognized kind is far more
+// likely to be finite work (a shell, a task, a workflow) than another endless
+// subscription, and counting it wrongly costs a few quiet minutes where missing
+// it costs the false "needs you" this exists to fix.
+var endlessTaskTypes = map[string]bool{
+	"monitor_mcp":         true,
+	"monitor_ws":          true,
+	"in_process_teammate": true,
+	"remote_agent":        true,
+	"dream":               true,
+	"auto_mode_scan":      true,
+}
+
+// countBackgroundTasks counts the finite work a turn is leaving running.
+//
+// TOLERANT BY CONSTRUCTION. The payload is held raw and every unexpected shape
+// — an object instead of an array, a bare count, an entry that is not an object
+// — yields zero rather than an error, because the caller's error path drops the
+// WHOLE LINE. A harness that reshapes this key would otherwise take every
+// `stop` off the stream, and a stream with no stops reads as a fleet that never
+// finishes a turn.
+func countBackgroundTasks(raw json.RawMessage) int {
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return 0
+	}
+	var entries []struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(raw, &entries); err != nil {
+		return 0
+	}
+	n := 0
+	for _, e := range entries {
+		if !endlessTaskTypes[e.Type] {
+			n++
+		}
+	}
+	return n
+}
+
 // runEventHook decodes the payload, renders the line, and appends it. Every
 // failure — unparseable stdin, unknown event name, disabled stream, unwritable
 // file — returns nil without output.
@@ -221,6 +290,12 @@ func renderEventLine(stdin io.Reader) (string, bool) {
 	}
 	if eventType == "user_prompt_submit" && machinePrompt(input.Prompt) {
 		line.Machine = true
+	}
+	if eventType == "notification" {
+		line.NotificationKind = input.NotificationType
+	}
+	if eventType == "stop" || eventType == "subagent_stop" {
+		line.BackgroundTasks = countBackgroundTasks(input.BackgroundTasks)
 	}
 	if input.ToolName != "" {
 		line.Tool = input.ToolName

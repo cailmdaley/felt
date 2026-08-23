@@ -651,13 +651,16 @@ type goldenEvent struct {
 
 // goldenEvents is the recorded session the parity fixture replays: a Claude
 // worker that sends two files, writes a large file, and stops; a Codex worker
-// that ends blocked on a human; and a subagent that finishes.
+// that ends blocked on a human; a Claude worker that stops with two detached
+// shells still running and is then hit by the idle timer; and a subagent that
+// finishes.
 //
 // The Elixir side asserts the phases and the sent-files trail these produce
 // (test/shuttle/events_parity_test.exs). Keep the two in step.
 func goldenEvents(home string) []goldenEvent {
 	const workerA = "depersonalize-01KVC1N5XMAAMYXDAGR4V6QA9G-shuttle"
 	const workerB = "codex-01KVC1N5XMAAMYXDAGR4V6QAAA-shuttle"
+	const workerC = "background-01KVC1N5XMAAMYXDAGR4V6QABB-shuttle"
 	claudeTranscript := filepath.Join(home, ".claude", "projects", "felt", "t.jsonl")
 
 	return []goldenEvent{
@@ -707,11 +710,116 @@ func goldenEvents(home string) []goldenEvent {
 		{workerB, map[string]any{
 			"hook_event_name": "Notification", "session_id": "sess-b", "cwd": "/repo/felt",
 		}},
+		// Worker C: a turn that ENDS WITH DETACHED WORK STILL RUNNING, then the
+		// harness's own idle timer firing over it. Neither event means a human
+		// is needed, and the two fields that say so — `background_tasks` on the
+		// stop, `notification_type` on the notification — are what
+		// WaitingTracker reads to keep it out of the attention column.
+		{workerC, map[string]any{
+			"hook_event_name": "Stop", "session_id": "sess-d",
+			"cwd": "/repo/felt", "transcript_path": claudeTranscript,
+			// Two shells and a monitor: the monitor is alive for the session's
+			// whole life and must not count, so this stop reports two.
+			"background_tasks": []map[string]any{
+				{"id": "bc0hgilwx", "type": "local_bash", "status": "running"},
+				{"id": "bczpx3urx", "type": "local_bash", "status": "running"},
+				{"id": "m1", "type": "monitor_ws", "status": "running"},
+			},
+		}},
+		{workerC, map[string]any{
+			"hook_event_name": "Notification", "session_id": "sess-d",
+			"cwd": "/repo/felt", "transcript_path": claudeTranscript,
+			"notification_type": "idle_prompt",
+			"message":           "Claude is waiting for your input",
+		}},
 		// A subagent finishing in its own (untracked) session.
 		{"", map[string]any{
 			"hook_event_name": "SubagentStop", "session_id": "sess-c",
 			"cwd": "/repo/felt", "transcript_path": claudeTranscript,
 		}},
+	}
+}
+
+// TestBackgroundTaskCount: the count is FINITE work only, and every shape the
+// harness could send that we did not expect must yield a line, not a dropped
+// event. A `stop` that fails to record is worse than a wrong count — a session
+// whose stops vanish never reads as idle at all.
+func TestBackgroundTaskCount(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		tasks any
+		want  float64
+	}{
+		{"two shells", []map[string]any{{"type": "local_bash"}, {"type": "local_bash"}}, 2},
+		{"a monitor does not count", []map[string]any{{"type": "monitor_mcp"}}, 0},
+		{"a teammate does not count", []map[string]any{{"type": "in_process_teammate"}}, 0},
+		{"finite work beside an endless subscription",
+			[]map[string]any{{"type": "monitor_ws"}, {"type": "local_agent"}}, 1},
+		{"an unknown kind counts", []map[string]any{{"type": "something_new"}}, 1},
+		{"an entry with no type counts", []map[string]any{{"id": "x"}}, 1},
+		{"empty", []map[string]any{}, 0},
+		{"a reshaped payload counts nothing rather than dropping the line",
+			map[string]any{"bc0hgilwx": "running"}, 0},
+		{"a bare count counts nothing rather than dropping the line", 3, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			isolateEvents(t)
+			path := filepath.Join(t.TempDir(), "events.jsonl")
+			t.Setenv("SHUTTLE_EVENTS_FILE", path)
+
+			lines := record(t, path, map[string]any{
+				"hook_event_name": "Stop", "session_id": "s1", "background_tasks": tc.tasks,
+			})
+			got, present := lines[0]["backgroundTasks"]
+			if tc.want == 0 {
+				if present {
+					t.Fatalf("backgroundTasks = %v, want omitted", got)
+				}
+				return
+			}
+			if got != tc.want {
+				t.Fatalf("backgroundTasks = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestSubagentStopCarriesBackgroundTasks: SubagentStop carries the same field,
+// and a worker whose last event is its subagent finishing is exactly the case
+// the count exists to cover.
+func TestSubagentStopCarriesBackgroundTasks(t *testing.T) {
+	isolateEvents(t)
+	path := filepath.Join(t.TempDir(), "events.jsonl")
+	t.Setenv("SHUTTLE_EVENTS_FILE", path)
+
+	lines := record(t, path, map[string]any{
+		"hook_event_name": "SubagentStop", "session_id": "s1",
+		"background_tasks": []map[string]any{{"type": "local_bash"}},
+	})
+	if lines[0]["backgroundTasks"] != float64(1) {
+		t.Fatalf("backgroundTasks = %v, want 1", lines[0]["backgroundTasks"])
+	}
+}
+
+// TestNotificationKindRecorded: the harness's own discriminator, passed
+// through. Without it the idle timer and a permission request are one event.
+func TestNotificationKindRecorded(t *testing.T) {
+	isolateEvents(t)
+	path := filepath.Join(t.TempDir(), "events.jsonl")
+	t.Setenv("SHUTTLE_EVENTS_FILE", path)
+
+	lines := record(t, path, map[string]any{
+		"hook_event_name": "Notification", "session_id": "s1",
+		"notification_type": "permission_prompt",
+	})
+	if lines[0]["notificationKind"] != "permission_prompt" {
+		t.Fatalf("notificationKind = %v", lines[0]["notificationKind"])
+	}
+
+	// A harness that names nothing leaves the field off entirely.
+	bare := record(t, path, map[string]any{"hook_event_name": "Notification", "session_id": "s2"})
+	if _, present := bare[1]["notificationKind"]; present {
+		t.Fatalf("notificationKind present on an unnamed notification")
 	}
 }
 

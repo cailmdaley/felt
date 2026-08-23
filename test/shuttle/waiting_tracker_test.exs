@@ -113,6 +113,111 @@ defmodule Shuttle.WaitingTrackerTest do
     assert wait_until(fn -> phase(name, "foo-01J-shuttle") == "attention" end)
   end
 
+  # ── Waiting on itself, not on you ────────────────────────────────────────
+
+  # Extra fields the harness volunteers on a line (`backgroundTasks` on a stop,
+  # `notificationKind` on a notification).
+  defp append_ev(events, type, session, extra) do
+    line =
+      Jason.encode!(Map.merge(%{type: type, tmuxSession: session, timestamp: @base}, extra))
+
+    File.write!(events, line <> "\n", [:append])
+  end
+
+  test "a stop that leaves detached shells running reads as \"working\"",
+       %{events: events} do
+    name = start(events)
+    append_ev(events, "stop", "foo-01J-shuttle", %{backgroundTasks: 2})
+    assert wait_until(fn -> phase(name, "foo-01J-shuttle") == "working" end)
+  end
+
+  test "the idle timer over outstanding background work does not raise a hand",
+       %{events: events} do
+    name = start(events)
+    append_ev(events, "stop", "foo-01J-shuttle", %{backgroundTasks: 1})
+    assert wait_until(fn -> phase(name, "foo-01J-shuttle") == "working" end)
+
+    # The count is carried onto the notification, which knows nothing about the
+    # shells on its own.
+    append_ev(events, "notification", "foo-01J-shuttle", %{notificationKind: "idle_prompt"})
+    Process.sleep(30)
+    assert phase(name, "foo-01J-shuttle") == "working"
+  end
+
+  test "a permission prompt is attention even over running background work",
+       %{events: events} do
+    name = start(events)
+    append_ev(events, "stop", "foo-01J-shuttle", %{backgroundTasks: 2})
+    assert wait_until(fn -> phase(name, "foo-01J-shuttle") == "working" end)
+
+    append_ev(events, "notification", "foo-01J-shuttle", %{notificationKind: "permission_prompt"})
+    assert wait_until(fn -> phase(name, "foo-01J-shuttle") == "attention" end)
+  end
+
+  test "resuming the session clears the outstanding count", %{events: events} do
+    name = start(events)
+    append_ev(events, "stop", "foo-01J-shuttle", %{backgroundTasks: 1})
+    assert wait_until(fn -> phase(name, "foo-01J-shuttle") == "working" end)
+
+    # A prompt arrived (the shell reporting back, or a human). Whatever is still
+    # running, the NEXT stop says so; until then nothing is outstanding.
+    append(events, "user_prompt_submit", "foo-01J-shuttle")
+    append(events, "stop", "foo-01J-shuttle")
+    assert wait_until(fn -> phase(name, "foo-01J-shuttle") == "waiting" end)
+  end
+
+  test "a subagent stop states the count too", %{events: events} do
+    name = start(events)
+    # The worker's own subagent finishing is a last event like any other, and
+    # the shells it leaves behind are the same shells.
+    append_ev(events, "subagent_stop", "foo-01J-shuttle", %{backgroundTasks: 1})
+    assert wait_until(fn -> phase(name, "foo-01J-shuttle") == "working" end)
+  end
+
+  test "a subagent stop can also clear a carried-forward count", %{events: events} do
+    name = start(events)
+    append_ev(events, "stop", "foo-01J-shuttle", %{backgroundTasks: 2})
+    assert wait_until(fn -> phase(name, "foo-01J-shuttle") == "working" end)
+
+    append_ev(events, "subagent_stop", "foo-01J-shuttle", %{backgroundTasks: 0})
+    assert wait_until(fn -> phase(name, "foo-01J-shuttle") == "waiting" end)
+  end
+
+  test "the suppression expires: an endless task cannot silence a worker forever",
+       %{events: events} do
+    name = start(events)
+
+    # A shell that never returns — a dev server, a tail. An hour later the
+    # session has been quiet with nothing to show, and the board says so rather
+    # than keeping the worker invisible.
+    append_ev(events, "stop", "foo-01J-shuttle", %{
+      backgroundTasks: 1,
+      timestamp: @base - 61 * 60 * 1_000
+    })
+
+    assert wait_until(fn -> phase(name, "foo-01J-shuttle") == "waiting" end)
+  end
+
+  test "a long build inside the bound stays quiet", %{events: events} do
+    name = start(events)
+
+    append_ev(events, "stop", "foo-01J-shuttle", %{
+      backgroundTasks: 1,
+      timestamp: @base - 30 * 60 * 1_000
+    })
+
+    assert wait_until(fn -> phase(name, "foo-01J-shuttle") == "working" end)
+  end
+
+  test "a harness that names neither field behaves exactly as before",
+       %{events: events} do
+    name = start(events)
+    append(events, "stop", "foo-01J-shuttle")
+    assert wait_until(fn -> phase(name, "foo-01J-shuttle") == "waiting" end)
+    append(events, "notification", "foo-01J-shuttle")
+    assert wait_until(fn -> phase(name, "foo-01J-shuttle") == "attention" end)
+  end
+
   # ── Real last_event_at, not poll wall-clock (pins the fake-timestamp fix) ──
 
   test "last_event_at is the event's own timestamp, not the ingest clock",

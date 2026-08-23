@@ -34,15 +34,59 @@ defmodule Shuttle.WaitingTracker do
   `session_activity/1` resolves each stored record to `%{last_event_at, phase}`,
   where `phase` is the category of the last event type:
 
-    * `notification` → `"attention"` (the agent blocked on a human — idle
-      prompt, permission, MCP elicitation).
+    * `notification` → `"attention"` (the agent blocked on a human —
+      permission, MCP elicitation), EXCEPT the idle timeout over outstanding
+      background work; see "Waiting on itself" below.
     * `stop` / `subagent_stop` → `"waiting"` (a turn or subagent finished;
-      the agent is idle, waiting on the next input).
+      the agent is idle, waiting on the next input) — again except over
+      outstanding background work.
     * anything else — `pre_tool_use`, `post_tool_use`, `user_prompt_submit`,
       `session_start`, … → `"working"`. This is the **long-tool guard**: a
       worker mid-tool (last event `pre_tool_use`, no following stop) is
       `"working"` no matter how long ago that event fired, so it sorts to the
       bottom of the in-flight column rather than masquerading as idle.
+
+  ## Waiting on itself, not on you
+
+  A session that ends its turn with detached shells still running (`Bash` with
+  `run_in_background`) is idle in the harness's sense and NOT idle in the sense
+  the board cares about: nobody needs to do anything, the work is running. Left
+  alone it read as `"waiting"`, and a minute later Claude Code's idle timer
+  fired a `notification` and it read as `"attention"` — the board asking for a
+  hand on a worker that was watching its own build.
+
+  Two fields the harness volunteers settle it, so nothing here is inferred:
+
+    * `stop` and `subagent_stop` carry `background_tasks` — what the turn is
+      leaving running, minus the kinds that are alive for the session's whole
+      life (see `countBackgroundTasks` in `cmd/hook_event.go`). The count is
+      remembered on the session (`bg`) and carried forward until the session is
+      resumed by a prompt or restarted, at which point it is zero again and the
+      next stop restamps the truth.
+    * `notification` carries `notification_type`. Only `idle_prompt` means
+      "nobody has typed in a while"; `permission_prompt` and the elicitation
+      kinds mean the agent is genuinely blocked ON A HUMAN and stay
+      `"attention"` no matter what else is running.
+
+  So an idle-looking session with `bg > 0` categorizes as `"working"` — which is
+  exactly what it is. A harness that sends neither field (Codex, and any line
+  written before this) behaves precisely as before: `bg` is zero and an
+  unnamed notification is attention.
+
+  ### The suppression is BOUNDED, and that is the point
+
+  Nothing decrements `bg` when a task finishes: finite work triggers a follow-up
+  turn whose stop restates the count, which is the ordinary path. The task that
+  never returns — a dev server, a tail, a shell nobody killed — has no such
+  path, and left unbounded it would silence its worker forever. That is a worse
+  failure than the one this fixes: a false "needs you" is noise a person
+  dismisses, a false "nothing to see" is a worker nobody ever looks at again.
+
+  So the suppression expires. Past `@bg_suppress_ms` of silence the session is
+  categorized as if `bg` were zero — it has been quiet a long time with nothing
+  to show for it, and the board should say so rather than keep vouching for work
+  it can no longer confirm is happening. The bound is generous (an hour) because
+  a long build is precisely what this is for.
 
   Idle gating lives on the client, not here: the daemon reports the category
   and the real timestamp, and the client computes idle (`clientNow -
@@ -72,6 +116,9 @@ defmodule Shuttle.WaitingTracker do
   require Logger
 
   @poll_interval_ms 1_000
+  # How long a remembered background-task count may keep a session out of the
+  # attention column. See "The suppression is BOUNDED" above.
+  @bg_suppress_ms 60 * 60 * 1_000
   @max_age_ms 48 * 60 * 60 * 1_000
 
   defmodule State do
@@ -170,21 +217,36 @@ defmodule Shuttle.WaitingTracker do
 
   @impl true
   def handle_call(:session_activity, _from, state) do
+    now = now_ms(state)
+
     result =
-      Map.new(state.sessions, fn {session, %{type: type, at: at}} ->
-        {session, %{last_event_at: at, phase: category(type)}}
+      Map.new(state.sessions, fn {session, %{type: type, at: at} = rec} ->
+        bg = if now - at >= @bg_suppress_ms, do: 0, else: Map.get(rec, :bg, 0)
+        {session, %{last_event_at: at, phase: category(type, Map.get(rec, :kind, ""), bg)}}
       end)
 
     {:reply, result, state}
   end
 
-  # The phase category of the most-recent event type. The catch-all is the
-  # long-tool guard: anything that isn't an explicit idle/escalation signal
-  # (pre_tool_use, post_tool_use, user_prompt_submit, session_start, …) is
-  # "working", so a mid-tool worker sinks to the bottom regardless of wall-clock.
-  defp category("notification"), do: "attention"
-  defp category(type) when type in ["stop", "subagent_stop"], do: "waiting"
-  defp category(_), do: "working"
+  # The phase category of the most-recent event type, read against the two
+  # facts the harness volunteers: which notification this is, and how much
+  # detached work the last `stop` left running.
+  #
+  # The catch-all is the long-tool guard: anything that isn't an explicit
+  # idle/escalation signal (pre_tool_use, post_tool_use, user_prompt_submit,
+  # session_start, …) is "working", so a mid-tool worker sinks to the bottom
+  # regardless of wall-clock.
+  #
+  # A session with background shells in flight is working by the same logic one
+  # foreground tool call away: the difference between the two is only where the
+  # harness parked the process, and nobody is being asked for anything either
+  # way. A permission prompt or an elicitation is the exception that proves it —
+  # there the human IS the blocker, running shells or not.
+  defp category("notification", "idle_prompt", bg) when bg > 0, do: "working"
+  defp category("notification", _kind, _bg), do: "attention"
+  defp category(type, _kind, bg) when type in ["stop", "subagent_stop"] and bg > 0, do: "working"
+  defp category(type, _kind, _bg) when type in ["stop", "subagent_stop"], do: "waiting"
+  defp category(_type, _kind, _bg), do: "working"
 
   @impl true
   def handle_info(:poll, state) do
@@ -270,7 +332,12 @@ defmodule Shuttle.WaitingTracker do
               _ -> now
             end
 
-          Map.put(sessions, session, %{type: type, at: at})
+          Map.put(sessions, session, %{
+            type: type,
+            at: at,
+            kind: notification_kind(ev),
+            bg: background_tasks(type, ev, Map.get(sessions, session))
+          })
         else
           sessions
         end
@@ -279,6 +346,31 @@ defmodule Shuttle.WaitingTracker do
         sessions
     end
   end
+
+  defp notification_kind(%{"notificationKind" => kind}) when is_binary(kind), do: kind
+  defp notification_kind(_), do: ""
+
+  # How much detached work this session is leaving behind, as of this event.
+  #
+  # A stop of either kind STATES it. A prompt or a session start CLEARS it — the session has
+  # been resumed or restarted, and whatever it is now leaving running the next
+  # `stop` will say. Everything else CARRIES IT FORWARD, because the notable
+  # case is exactly the one where nothing further is recorded: the idle
+  # `notification` that arrives a minute after the stop and, on its own, knows
+  # nothing about the shells the stop was waiting on.
+  defp background_tasks(type, ev, _prev) when type in ["stop", "subagent_stop"] do
+    case Map.get(ev, "backgroundTasks") do
+      n when is_integer(n) and n > 0 -> n
+      _ -> 0
+    end
+  end
+
+  defp background_tasks(type, _ev, _prev)
+       when type in ["user_prompt_submit", "session_start", "session_end"],
+       do: 0
+
+  defp background_tasks(_type, _ev, %{bg: bg}) when is_integer(bg), do: bg
+  defp background_tasks(_type, _ev, _prev), do: 0
 
   defp prune_old(sessions, now) do
     cutoff = now - @max_age_ms

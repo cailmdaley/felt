@@ -31,6 +31,42 @@ parent); `SHUTTLE_EVENTS=off` disables recording. The live file rotates to
 8 KiB is trimmed to its file paths plus `truncated: true` — otherwise every
 `Write` parks a whole file body in the stream.
 
+### The two fields that keep a busy worker out of the attention column
+
+Every hook line carries `type`, `sessionId`, `tmuxSession`, `timestamp`, and the
+harness/origin ids. Two more are written only where the harness volunteers them,
+and both exist so `WaitingTracker` can tell "this session is blocked on a human"
+from "this session is watching its own shells":
+
+- **`notificationKind`** — Claude Code's `notification_type` passed straight
+  through. `idle_prompt` is the ~60s "nobody has typed" timer; `permission_prompt`
+  and the `elicitation_*` kinds mean the agent really is blocked on a person.
+  Absent on Codex and on any line written before this existed, in which case a
+  notification is attention, exactly as it always was.
+- **`backgroundTasks`** — how much FINITE work a `Stop` or `SubagentStop`
+  reports still running. The harness sends its whole background-task registry,
+  which includes kinds that are alive by design for the session's whole life
+  (`monitor_mcp`, `monitor_ws`, `in_process_teammate`, `remote_agent`, …); those
+  are excluded by `countBackgroundTasks`, or a session holding one MCP monitor
+  would read as permanently busy. Omitted when zero. The payload is decoded
+  tolerantly — an unexpected shape counts zero rather than failing the line,
+  because the writer's error path drops the whole event and a stream with no
+  stops reads as a fleet that never finishes a turn.
+
+`WaitingTracker` remembers the count on the session and carries it forward until
+a prompt or a session start clears it, because the idle `notification` that
+arrives a minute after the stop knows nothing about those shells on its own. A
+session sitting on `bg > 0` categorizes as `working`, not `waiting` or
+`attention` — nobody is being asked for anything. A permission prompt overrides
+that: the human is the blocker there, running shells or not.
+
+**The suppression expires after an hour.** Nothing decrements the count when a
+task finishes — finite work triggers a follow-up turn whose stop restates it,
+which is the ordinary path. A task that never returns has no such path, and left
+unbounded it would silence its worker forever: a false "needs you" is noise a
+person dismisses, a false "nothing to see" is a worker nobody looks at again.
+Past the bound the session categorizes as if the count were zero.
+
 `cmd/testdata/events_golden.jsonl` is the cross-language contract: written
 byte-for-byte by `cmd/hook_event_test.go`, parsed by both Elixir readers in
 `test/shuttle/events_parity_test.exs`. Each host's daemon tails its own host's

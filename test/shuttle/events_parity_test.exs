@@ -19,14 +19,16 @@ defmodule Shuttle.EventsParityTest do
   alias Shuttle.WaitingTracker
 
   # The fixture records: worker A (Claude) sending two files, writing a large
-  # file, then stopping; worker B (Codex) ending blocked on a human; and a
-  # subagent stopping outside any tmux session.
+  # file, then stopping; worker B (Codex) ending blocked on a human; worker C
+  # stopping with two detached shells still running and then being hit by the
+  # harness's idle timer; and a subagent stopping outside any tmux session.
   @golden Path.expand("../../cmd/testdata/events_golden.jsonl", __DIR__)
   @worker_a "depersonalize-01KVC1N5XMAAMYXDAGR4V6QA9G-shuttle"
   @worker_b "codex-01KVC1N5XMAAMYXDAGR4V6QAAA-shuttle"
+  @worker_c "background-01KVC1N5XMAAMYXDAGR4V6QABB-shuttle"
   @uid_a "01KVC1N5XMAAMYXDAGR4V6QA9G"
   # Just after the last event in the fixture, so nothing prunes as stale.
-  @now 1_753_900_010_000
+  @now 1_753_900_012_000
 
   setup do
     assert File.regular?(@golden),
@@ -58,9 +60,15 @@ defmodule Shuttle.EventsParityTest do
       # outranks A in the feed.
       assert %{phase: "attention", last_event_at: 1_753_900_008_000} = activity[@worker_b]
 
+      # Worker C's last event is an idle-timeout `notification` — but its stop
+      # left two detached shells running, so nobody is being asked for
+      # anything. It reads as working, not as a raised hand.
+      assert %{phase: "working", last_event_at: 1_753_900_010_000} = activity[@worker_c]
+
       # The subagent line carries no tmux session, so it tracks nothing. Only
       # `*-shuttle` sessions are worker sessions.
-      assert Map.keys(activity) |> Enum.sort() == Enum.sort([@worker_a, @worker_b])
+      assert Map.keys(activity) |> Enum.sort() ==
+               Enum.sort([@worker_a, @worker_b, @worker_c])
     end
   end
 
@@ -97,7 +105,7 @@ defmodule Shuttle.EventsParityTest do
         |> String.split("\n", trim: true)
         |> Enum.map(&Jason.decode!/1)
 
-      assert length(lines) == 10
+      assert length(lines) == 12
 
       for line <- lines do
         assert is_binary(line["id"])
