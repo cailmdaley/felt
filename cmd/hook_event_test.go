@@ -718,12 +718,9 @@ func goldenEvents(home string) []goldenEvent {
 		{workerC, map[string]any{
 			"hook_event_name": "Stop", "session_id": "sess-d",
 			"cwd": "/repo/felt", "transcript_path": claudeTranscript,
-			// Two shells and a monitor: the monitor is alive for the session's
-			// whole life and must not count, so this stop reports two.
 			"background_tasks": []map[string]any{
 				{"id": "bc0hgilwx", "type": "local_bash", "status": "running"},
 				{"id": "bczpx3urx", "type": "local_bash", "status": "running"},
-				{"id": "m1", "type": "monitor_ws", "status": "running"},
 			},
 		}},
 		{workerC, map[string]any{
@@ -740,10 +737,10 @@ func goldenEvents(home string) []goldenEvent {
 	}
 }
 
-// TestBackgroundTaskCount: the count is FINITE work only, and every shape the
-// harness could send that we did not expect must yield a line, not a dropped
-// event. A `stop` that fails to record is worse than a wrong count — a session
-// whose stops vanish never reads as idle at all.
+// TestBackgroundTaskCount: every shape the harness could send that we did not
+// expect must yield a line, not a dropped event. A `stop` that fails to record
+// is worse than a wrong count — a session whose stops vanish never reads as
+// idle at all.
 func TestBackgroundTaskCount(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
@@ -751,11 +748,8 @@ func TestBackgroundTaskCount(t *testing.T) {
 		want  float64
 	}{
 		{"two shells", []map[string]any{{"type": "local_bash"}, {"type": "local_bash"}}, 2},
-		{"a monitor does not count", []map[string]any{{"type": "monitor_mcp"}}, 0},
-		{"a teammate does not count", []map[string]any{{"type": "in_process_teammate"}}, 0},
-		{"finite work beside an endless subscription",
-			[]map[string]any{{"type": "monitor_ws"}, {"type": "local_agent"}}, 1},
-		{"an unknown kind counts", []map[string]any{{"type": "something_new"}}, 1},
+		{"every running kind counts; the reader's bound limits a long-lived one",
+			[]map[string]any{{"type": "monitor_ws"}, {"type": "local_agent"}}, 2},
 		{"an entry with no type counts", []map[string]any{{"id": "x"}}, 1},
 		{"empty", []map[string]any{}, 0},
 		{"a reshaped payload counts nothing rather than dropping the line",

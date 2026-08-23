@@ -58,11 +58,9 @@ defmodule Shuttle.WaitingTracker do
   Two fields the harness volunteers settle it, so nothing here is inferred:
 
     * `stop` and `subagent_stop` carry `background_tasks` — what the turn is
-      leaving running, minus the kinds that are alive for the session's whole
-      life (see `countBackgroundTasks` in `cmd/hook_event.go`). The count is
-      remembered on the session (`bg`) and carried forward until the session is
-      resumed by a prompt or restarted, at which point it is zero again and the
-      next stop restamps the truth.
+      leaving running. The count is remembered on the session (`bg`) and
+      carried forward until the session is resumed by a prompt or restarted, at
+      which point it is zero again and the next stop restamps the truth.
     * `notification` carries `notification_type`. Only `idle_prompt` means
       "nobody has typed in a while"; `permission_prompt` and the elicitation
       kinds mean the agent is genuinely blocked ON A HUMAN and stay
@@ -75,14 +73,16 @@ defmodule Shuttle.WaitingTracker do
 
   ### The suppression is BOUNDED, and that is the point
 
-  Nothing decrements `bg` when a task finishes: finite work triggers a follow-up
-  turn whose stop restates the count, which is the ordinary path. The task that
+  Nothing decrements `bg` when a task finishes: work that ends triggers a
+  follow-up turn whose stop restates the count, which is the ordinary path. The task that
   never returns — a dev server, a tail, a shell nobody killed — has no such
   path, and left unbounded it would silence its worker forever. That is a worse
   failure than the one this fixes: a false "needs you" is noise a person
   dismisses, a false "nothing to see" is a worker nobody ever looks at again.
 
-  So the suppression expires. Past `@bg_suppress_ms` of silence the session is
+  So the suppression expires — and that bound is doing all of the safety work,
+  which is why the writer does not also try to guess which task kinds are
+  long-lived. Past `@bg_suppress_ms` of silence the session is
   categorized as if `bg` were zero — it has been quiet a long time with nothing
   to show for it, and the board should say so rather than keep vouching for work
   it can no longer confirm is happening. The bound is generous (an hour) because

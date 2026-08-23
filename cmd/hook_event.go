@@ -98,8 +98,8 @@ type eventHookInput struct {
 	NotificationType string `json:"notification_type"`
 	// Stop's and SubagentStop's own account of what they are leaving running:
 	// the harness's whole background-task registry, not only detached Bash. A
-	// turn that ends with finite work outstanding is not idle — it is waiting
-	// on itself. Held RAW and counted tolerantly: this is the only
+	// turn that ends with work outstanding is not idle — it is waiting on
+	// itself. Held RAW and counted tolerantly: this is the only
 	// shape-constrained field on the payload, and a harness that reshapes it
 	// must not take every `stop` line off the stream with it.
 	BackgroundTasks json.RawMessage `json:"background_tasks"`
@@ -126,8 +126,8 @@ type eventLine struct {
 	// idle timeout and a permission request arrive as the same event `type`,
 	// and this is the only thing that tells them apart.
 	NotificationKind string `json:"notificationKind,omitempty"`
-	// BackgroundTasks is how much FINITE work a `stop` or `subagent_stop` left
-	// running — see countBackgroundTasks for what does not count. Zero is the
+	// BackgroundTasks is how much work a `stop` or `subagent_stop` left
+	// running — see countBackgroundTasks. Zero is the
 	// overwhelmingly common case and is omitted, so an ordinary line is
 	// byte-identical to what it has always been.
 	BackgroundTasks int             `json:"backgroundTasks,omitempty"`
@@ -194,50 +194,29 @@ func machinePrompt(prompt string) bool {
 	return false
 }
 
-// endlessTaskTypes are the registry kinds that are ALIVE BY DESIGN for as long
-// as the session is: an MCP or WebSocket monitor, an in-process teammate, a
-// backgrounded remote agent. They are running in the same sense a socket is
-// open, and counting them would pin every such session as "busy" for its whole
-// life — which is the one failure this whole signal must not cause.
+// countBackgroundTasks counts what a turn is leaving running. The harness has
+// already filtered the registry to entries that are running or pending, so the
+// length is the answer — including the kinds that are alive by design for the
+// session's whole life (an MCP monitor, an in-process teammate). Those ARE
+// something the session is waiting on, and the reader's own bound is what keeps
+// a long-lived one from silencing a lane; a list of harness-internal type names
+// here would drift with every kind Claude Code adds, for no coverage the bound
+// does not already give.
 //
-// An EXCLUDE list rather than an include list: an unrecognized kind is far more
-// likely to be finite work (a shell, a task, a workflow) than another endless
-// subscription, and counting it wrongly costs a few quiet minutes where missing
-// it costs the false "needs you" this exists to fix.
-var endlessTaskTypes = map[string]bool{
-	"monitor_mcp":         true,
-	"monitor_ws":          true,
-	"in_process_teammate": true,
-	"remote_agent":        true,
-	"dream":               true,
-	"auto_mode_scan":      true,
-}
-
-// countBackgroundTasks counts the finite work a turn is leaving running.
-//
-// TOLERANT BY CONSTRUCTION. The payload is held raw and every unexpected shape
-// — an object instead of an array, a bare count, an entry that is not an object
-// — yields zero rather than an error, because the caller's error path drops the
-// WHOLE LINE. A harness that reshapes this key would otherwise take every
-// `stop` off the stream, and a stream with no stops reads as a fleet that never
-// finishes a turn.
+// TOLERANT BY CONSTRUCTION. Every unexpected shape — an object instead of an
+// array, a bare count, an entry that is not an object — yields zero rather than
+// an error, because the caller's error path drops the WHOLE LINE. A harness
+// that reshapes this key would otherwise take every `stop` off the stream, and
+// a stream with no stops reads as a fleet that never finishes a turn.
 func countBackgroundTasks(raw json.RawMessage) int {
 	if len(bytes.TrimSpace(raw)) == 0 {
 		return 0
 	}
-	var entries []struct {
-		Type string `json:"type"`
-	}
+	var entries []json.RawMessage
 	if err := json.Unmarshal(raw, &entries); err != nil {
 		return 0
 	}
-	n := 0
-	for _, e := range entries {
-		if !endlessTaskTypes[e.Type] {
-			n++
-		}
-	}
-	return n
+	return len(entries)
 }
 
 // runEventHook decodes the payload, renders the line, and appends it. Every

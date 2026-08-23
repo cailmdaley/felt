@@ -43,15 +43,15 @@ from "this session is watching its own shells":
   and the `elicitation_*` kinds mean the agent really is blocked on a person.
   Absent on Codex and on any line written before this existed, in which case a
   notification is attention, exactly as it always was.
-- **`backgroundTasks`** — how much FINITE work a `Stop` or `SubagentStop`
-  reports still running. The harness sends its whole background-task registry,
-  which includes kinds that are alive by design for the session's whole life
-  (`monitor_mcp`, `monitor_ws`, `in_process_teammate`, `remote_agent`, …); those
-  are excluded by `countBackgroundTasks`, or a session holding one MCP monitor
-  would read as permanently busy. Omitted when zero. The payload is decoded
-  tolerantly — an unexpected shape counts zero rather than failing the line,
-  because the writer's error path drops the whole event and a stream with no
-  stops reads as a fleet that never finishes a turn.
+- **`backgroundTasks`** — how much work a `Stop` or `SubagentStop` reports
+  still running. The harness sends its whole background-task registry, already
+  filtered to running and pending entries, and every kind counts: an MCP
+  monitor or an in-process teammate IS something the session is waiting on, and
+  the hour bound below is what keeps a long-lived one from silencing a lane.
+  Omitted when zero. The payload is decoded tolerantly — an unexpected shape
+  counts zero rather than failing the line, because the writer's error path
+  drops the whole event and a stream with no stops reads as a fleet that never
+  finishes a turn.
 
 `WaitingTracker` remembers the count on the session and carries it forward until
 a prompt or a session start clears it, because the idle `notification` that
@@ -60,10 +60,11 @@ session sitting on `bg > 0` categorizes as `working`, not `waiting` or
 `attention` — nobody is being asked for anything. A permission prompt overrides
 that: the human is the blocker there, running shells or not.
 
-**The suppression expires after an hour.** Nothing decrements the count when a
-task finishes — finite work triggers a follow-up turn whose stop restates it,
-which is the ordinary path. A task that never returns has no such path, and left
-unbounded it would silence its worker forever: a false "needs you" is noise a
+**The suppression expires after an hour, and that bound is the whole safety
+story.** Nothing decrements the count when a task finishes — work that ends
+triggers a follow-up turn whose stop restates it, which is the ordinary path. A
+task that never returns has no such path, and left unbounded it would silence
+its worker forever: a false "needs you" is noise a
 person dismisses, a false "nothing to see" is a worker nobody looks at again.
 Past the bound the session categorizes as if the count were zero.
 
