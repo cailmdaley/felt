@@ -146,7 +146,11 @@ defmodule Shuttle.DispatchIntegrationTest do
         end
       end
 
-      File.rm_rf!(host)
+      # The backfill shells the real felt CLI as an OS process; killing the
+      # BEAM task above cannot stop a felt already mid-write, and a recreate
+      # during a recursive delete raises "file already exists". Retry the
+      # sweep — the straggler finishes within milliseconds.
+      rm_rf_retry(host)
 
       if prev_data_dir,
         do: System.put_env("SHUTTLE_DATA_DIR", prev_data_dir),
@@ -154,10 +158,25 @@ defmodule Shuttle.DispatchIntegrationTest do
 
       if prev_sessions_file, do: System.put_env("SHUTTLE_SESSIONS_FILE", prev_sessions_file)
 
-      File.rm_rf!(data_dir)
+      rm_rf_retry(data_dir)
     end)
 
     {:ok, host: host}
+  end
+
+  # rm_rf with retries: tolerates a concurrent writer briefly recreating
+  # entries mid-delete (raises only if the dir still cannot be removed after
+  # the writer has had ample time to finish).
+  defp rm_rf_retry(path, attempts \\ 10)
+
+  defp rm_rf_retry(path, 1), do: File.rm_rf!(path)
+
+  defp rm_rf_retry(path, attempts) do
+    File.rm_rf!(path)
+  rescue
+    File.Error ->
+      Process.sleep(100)
+      rm_rf_retry(path, attempts - 1)
   end
 
   # Every session-ledger line this test's dispatches recorded, oldest first.
