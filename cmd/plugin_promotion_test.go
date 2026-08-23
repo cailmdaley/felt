@@ -497,6 +497,10 @@ func installFakeGitForPluginAcquisition(t *testing.T, source string) string {
 last=""
 for arg do last="$arg"; done
 printf '%s\n' "$*" >> "$FELT_TEST_GIT_LOG"
+if [ "$1" = "-C" ] && [ "$3" = "rev-parse" ]; then
+  printf '%s\n' 0123456789012345678901234567890123456789
+  exit 0
+fi
 if [ "$FELT_TEST_GIT_FAIL" = "1" ]; then
   echo "synthetic git acquisition failure" >&2
   exit 17
@@ -553,8 +557,15 @@ func TestRemoteMarketplaceAcquisitionStagesAndPromotesRepeatably(t *testing.T) {
 		t.Fatal(err)
 	}
 	lines := strings.Split(strings.TrimSpace(string(log)), "\n")
-	if len(lines) != 2 || !strings.Contains(lines[0], "--branch=v1.2.3 -- https://github.com/cailmdaley/felt.git") {
-		t.Fatalf("git acquisition log = %q, want two pinned clones", string(log))
+	if len(lines) != 4 || !strings.Contains(lines[0], "--branch=v1.2.3 -- https://github.com/cailmdaley/felt.git") || !strings.Contains(lines[1], "rev-parse --verify HEAD^{commit}") {
+		t.Fatalf("git acquisition log = %q, want two pinned clones and resolved commits", string(log))
+	}
+	identity, err := validatePluginGeneration(filepath.Join(runtimeDir, pluginCurrentName, "claude-plugin"))
+	if err != nil {
+		t.Fatalf("promoted remote generation: %v", err)
+	}
+	if identity.SourceKind != "github" || identity.Source != marketplaceRepo || identity.RequestedRef != "v1.2.3" || identity.ResolvedCommit != "0123456789012345678901234567890123456789" {
+		t.Fatalf("remote identity = %#v", identity)
 	}
 }
 

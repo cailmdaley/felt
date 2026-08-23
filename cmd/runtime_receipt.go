@@ -606,10 +606,9 @@ func receiptJSONValue(raw json.RawMessage) any {
 }
 
 // collectGenerationReceipt compares the marker in the active promoted
-// source with every enabled harness cache.  A missing marker is tolerated for
-// an entirely legacy installation, but once either side has one, both sides
-// must be present and agree.  This keeps older installs diagnosable while
-// making new interrupted or stale promotions impossible to report healthy.
+// source with every enabled harness cache. Legacy installs without markers are
+// reported as partial and repaired by rerunning setup; once either side has a
+// marker, both sides must be present, internally valid, and agree.
 func collectGenerationReceipt(bundles []ReceiptBundle) ReceiptGenerationReceipt {
 	receipt := ReceiptGenerationReceipt{Status: receiptHealthy}
 	runtimeDir, err := pluginRuntimeDir()

@@ -860,6 +860,15 @@ func withStagedPluginCandidateWithRestore(source string, install func(string) er
 		if err != nil {
 			return err
 		}
+		identity, err := remotePluginGeneration(source, checkout, candidate)
+		if err != nil {
+			_ = os.RemoveAll(candidate)
+			return err
+		}
+		if err := sealPluginGeneration(candidate, identity); err != nil {
+			_ = os.RemoveAll(candidate)
+			return err
+		}
 		return promotePluginCandidate(candidate, install, restore, capturePluginNativeIntent())
 	}
 	if !hasMarketplaceManifest(source) {
@@ -871,6 +880,15 @@ func withStagedPluginCandidateWithRestore(source string, install func(string) er
 	}
 	candidate, err := stagePluginCandidate(source, executable)
 	if err != nil {
+		return err
+	}
+	identity, err := localPluginGeneration(source, candidate)
+	if err != nil {
+		_ = os.RemoveAll(candidate)
+		return err
+	}
+	if err := sealPluginGeneration(candidate, identity); err != nil {
+		_ = os.RemoveAll(candidate)
 		return err
 	}
 	return promotePluginCandidate(candidate, install, restore, capturePluginNativeIntent())

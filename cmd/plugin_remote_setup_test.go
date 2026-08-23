@@ -54,6 +54,10 @@ exit 1
 	writeExecutable(t, filepath.Join(f.bin, "git"), `#!/bin/sh
 set -eu
 printf '%s\n' "$*" >> "$FAKE_GIT_LOG"
+if [ "$1" = "-C" ] && [ "$3" = "rev-parse" ]; then
+  printf '%s\n' 0123456789012345678901234567890123456789
+  exit 0
+fi
 is_clone=0
 destination=""
 for arg in "$@"; do
