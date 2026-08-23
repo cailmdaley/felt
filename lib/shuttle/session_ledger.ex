@@ -223,6 +223,26 @@ defmodule Shuttle.SessionLedger do
   def host_for_session(_session, _opts), do: nil
 
   @doc """
+  The newest ledger line carrying `session`, or `nil` when this host has never
+  recorded that session. Unlike `host_for_session/2`, this preserves the
+  harness and fiber fields needed by a provenance receipt.
+
+  Opts (for tests): `:path`.
+  """
+  @spec latest_for_session(String.t() | nil, keyword()) :: record() | nil
+  def latest_for_session(session, opts \\ [])
+
+  def latest_for_session(session, opts) when is_binary(session) and session != "" do
+    path = Keyword.get(opts, :path, default_path())
+
+    [path, path <> @rotated_suffix]
+    |> Enum.filter(&File.regular?/1)
+    |> Enum.find_value(&newest_session_match(&1, session))
+  end
+
+  def latest_for_session(_session, _opts), do: nil
+
+  @doc """
   The newest ledger line carrying a session UUID for `uid` (the fiber's ULID —
   stable across renames, unlike the path-shaped fiber id) — or `nil` when this
   host has never recorded a session for it.
@@ -267,6 +287,23 @@ defmodule Shuttle.SessionLedger do
   rescue
     # Vanished or unreadable between the check and the read — a rotation
     # racing this scan. Fall through to the next file.
+    _ -> nil
+  end
+
+  defp newest_session_match(file, session) do
+    file
+    |> File.read!()
+    |> String.split("\n", trim: true)
+    |> Enum.reverse()
+    |> Enum.find_value(fn line ->
+      with true <- String.contains?(line, session),
+           {:ok, %{"session" => ^session} = record} <- Jason.decode(line) do
+        record
+      else
+        _ -> nil
+      end
+    end)
+  rescue
     _ -> nil
   end
 

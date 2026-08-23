@@ -289,6 +289,36 @@ defmodule Shuttle.SessionLedgerTest do
     end
   end
 
+  describe "latest_for_session/2" do
+    test "returns the newest pairing for a session, including its harness and host", %{path: path} do
+      for {at, host} <- [{1_000, "dapmcw68"}, {2_000, "candide"}] do
+        SessionLedger.record(
+          path: path,
+          fiber: "work/paper/edits",
+          session: "0883ade1-08e0-4457-94c6-7ac12137eb0f",
+          harness: "codex",
+          host: host,
+          at: at,
+          kind: :dispatch
+        )
+      end
+
+      assert %{"host" => "candide", "harness" => "codex"} =
+               SessionLedger.latest_for_session(
+                 "0883ade1-08e0-4457-94c6-7ac12137eb0f",
+                 path: path
+               )
+    end
+
+    test "returns nil for an unknown or blank session", %{path: path} do
+      assert SessionLedger.latest_for_session("0883ade1-08e0-4457-94c6-7ac12137eb0f", path: path) ==
+               nil
+
+      assert SessionLedger.latest_for_session("", path: path) == nil
+      assert SessionLedger.latest_for_session(nil, path: path) == nil
+    end
+  end
+
   describe "harness_for_cli/1" do
     test "maps the registry's cli to the harness name, and refuses to guess" do
       assert SessionLedger.harness_for_cli("claude") == "claude-code"

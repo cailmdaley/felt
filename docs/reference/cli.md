@@ -124,6 +124,8 @@ untouched by any of this.
 | `felt shuttle ps` | Live tmux worker sessions only |
 | `felt shuttle snapshot` | Print the local daemon's state snapshot |
 | `felt shuttle dispatch <fiber>` | Ask the local daemon to dispatch a fiber now (`--ad-hoc`) |
+| `felt shuttle sessions <fiber>` | Discover the fiber's composite Shuttle session ledger by UID, including historical paths, lifecycle events, hosts, harnesses, staleness, and transcript availability (`--json` for a manifest) |
+| `felt shuttle transcript <session-id>` | Print the native transcript path when local, or verify and materialize an exact remote copy in the managed cache; inspect it with the harness's ordinary `jq`/`rg` recipes (`--json` for metadata and paths) |
 | `felt shuttle agents [resolve <agent>]` | List (or resolve) the effective agent registry (`--source builtin\|user`) |
 | `felt shuttle agents init` | Seed `~/.config/felt/agents.json` from the built-ins (`--path`, `--force`) |
 | `felt shuttle attach <fiber>` | Attach to a running worker's tmux session |

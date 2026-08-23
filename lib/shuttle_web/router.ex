@@ -116,6 +116,9 @@ defmodule ShuttleWeb.Router do
     # transcript lives on the machine that ran the session, named by `host` or
     # by this host's session ledger.
     get("/moment", MomentController, :show)
+    # Native transcript provenance: JSON receipt, with host routing selected
+    # from the session ledger or an explicit `host` query parameter.
+    get("/transcript", TranscriptController, :show)
   end
 
   # File/asset bytes by absolute path (owner-routed). Unlocks `:::{embed}` +
@@ -129,6 +132,9 @@ defmodule ShuttleWeb.Router do
   # renders its error bodies as JSON directly, so it needs no format negotiation.
   scope "/api/v1", ShuttleWeb do
     get("/file", FileController, :show)
+    # Exact native JSONL bytes. Kept outside the JSON pipeline like `/file` so
+    # arbitrary harness bytes are relayed without content negotiation.
+    get("/transcript/raw", TranscriptController, :raw)
   end
 
   # The served frontend's bare-root document. Static assets are served by

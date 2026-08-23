@@ -13,6 +13,14 @@ defmodule Shuttle.Dispatcher do
   alias Shuttle.Agents
   import Bitwise
 
+  # Codex and pi mint their own session UUIDs after the process starts. A cold
+  # harness can spend tens of seconds loading before it writes the transcript
+  # header (a live Codex dispatch on 2026-08-23 took 28 s), so an attempt count
+  # is not a meaningful bound: each scan gets slower as the day directory
+  # grows. Bound the asynchronous reconciliation by elapsed time instead.
+  @session_capture_timeout_ms 120_000
+  @session_capture_poll_ms 250
+
   @type dispatch_result ::
           {:ok, String.t()}
           | {:error, :not_found}
@@ -1509,12 +1517,14 @@ defmodule Shuttle.Dispatcher do
     record_dispatch_session(fiber_id, nil, runner, opts)
 
     # Fire-and-forget: capture the session UUID from the harness's JSONL file
-    # in a background task. The race window (50 ms × 20 attempts = ~1 s) is
-    # short enough that the kanban card will show "Resume previous" by the
-    # next manual refresh. Losing this race no longer costs the dispatch
-    # boundary itself — `dispatched_at` is already on disk above.
+    # in a background task. `dispatched_at` is already on disk, so the card can
+    # honestly report `identity_pending` while a cold harness starts; the
+    # elapsed-time deadline above leaves ordinary startup latency room without
+    # letting a failed capture task live forever.
     Task.start(fn ->
-      case capture_session_uuid(cli, work_dir, capture_fiber_id, dispatched_after, 100) do
+      deadline = System.monotonic_time(:millisecond) + @session_capture_timeout_ms
+
+      case capture_session_uuid(cli, work_dir, capture_fiber_id, dispatched_after, deadline) do
         {:ok, uuid} ->
           backfill_session_uuid(fiber_id, uuid, runner, opts)
 
@@ -1621,7 +1631,7 @@ defmodule Shuttle.Dispatcher do
   end
 
   # Poll for the session UUID written by codex/pi to their respective session
-  # JSONL files. Tries `attempts` times with 50 ms between each.
+  # JSONL files until the elapsed-time deadline.
   #
   # Disk layouts:
   #   codex: ~/.codex/sessions/YYYY/MM/DD/rollout-<iso>-<uuid>.jsonl
@@ -1634,19 +1644,19 @@ defmodule Shuttle.Dispatcher do
   # thread from the same project while Shuttle dispatches a worker. Require
   # the transcript to be new enough for this dispatch and to contain Shuttle's
   # fiber prompt before accepting its UUID.
-  defp capture_session_uuid(_cli, _work_dir, _fiber_id, _dispatched_after, 0) do
-    {:error, "timed out waiting for session file"}
-  end
+  defp capture_session_uuid(cli, work_dir, fiber_id, dispatched_after, deadline) do
+    if System.monotonic_time(:millisecond) >= deadline do
+      {:error, "timed out waiting for session file"}
+    else
+      :timer.sleep(@session_capture_poll_ms)
 
-  defp capture_session_uuid(cli, work_dir, fiber_id, dispatched_after, attempts) do
-    :timer.sleep(50)
+      case find_session_file(cli, work_dir, fiber_id, dispatched_after) do
+        {:ok, path} ->
+          read_uuid_from_jsonl(cli, path, work_dir)
 
-    case find_session_file(cli, work_dir, fiber_id, dispatched_after) do
-      {:ok, path} ->
-        read_uuid_from_jsonl(cli, path, work_dir)
-
-      {:error, _} ->
-        capture_session_uuid(cli, work_dir, fiber_id, dispatched_after, attempts - 1)
+        {:error, _} ->
+          capture_session_uuid(cli, work_dir, fiber_id, dispatched_after, deadline)
+      end
     end
   end
 

@@ -53,11 +53,22 @@ is not enough.
 | `GET /agents` | local | The effective agent registry (shells `felt shuttle agents --json`) |
 | `GET /felt-stores` | fleet-aggregating | The registered store list, this host's and each remote's |
 | `GET /file` | owner-routed | Raw bytes by absolute path — what makes `:::{embed}` and relative images work for a remote-owned fiber |
+| `GET /transcript` | host-routed | Availability receipt for a native session transcript, including its authoritative path and digest |
+| `GET /transcript/raw` | host-routed | Exact native JSONL bytes for a session — no parsing or normalization |
 | `GET /astra` | owner-routed | Bake an `astra.yaml` to MyST mdast. **Maintainer-only**: needs `node` plus a built MySTRA checkout beside the repo on the owning host |
 
 `/file` sits outside the JSON pipeline on purpose: it returns arbitrary content
 types, so a strict `Accept: application/pdf` would otherwise 406 before the
 controller ran.
+
+`/transcript` accepts `session=<uuid>` and an optional `host=<name>`. Its JSON
+receipt carries `availability` (`available_local`, `available_remote`,
+`transcript_missing`, `host_unreachable`, or the fleet-level
+`identity_pending` state), `host`, `harness`, `source_path`, `byte_count`, and
+`sha256`. `/transcript/raw` serves the authoritative JSONL bytes unchanged and
+adds `X-Transcript-Byte-Count` and `X-Transcript-SHA256` headers. Agents should
+use ordinary `jq`/`rg` recipes on that file; Shuttle deliberately does not
+define a transcript reader or search language.
 
 ## Temporal read plane
 
