@@ -2,17 +2,32 @@
 
 The dispatch prompt's `Previous session: <uuid> (<harness>)` line names the prior worker's on-disk transcript. The `## Status` handoff is that worker's *summary*; the transcript is its *actual last turns* — searches run, dead ends hit, thinking left mid-flight. Read it surgically when the handoff leaves you wanting the texture: never dump the whole file into context (sessions run to hundreds of thousands of tokens), and prefer `## Status` when it already answers the question.
 
-Deeper lineage: the host's session ledger (`~/.shuttle/sessions.jsonl`, one JSON line per session with `fiber`, `uid`, `session`, `harness`, `at`) lists *every* session a fiber has had — `rg <fiber-uid> ~/.shuttle/sessions.jsonl` walks back past the immediate predecessor.
+## Provenance: fiber ↔ session ↔ commit ↔ transcript
 
-## Locating the file from a UUID
+`felt shuttle` owns the lineage; you never grep raw ledgers or guess harness paths.
 
 ```bash
-# claude-code: per-project dirs under ~/.claude/projects/ (cwd munged: / and . → -)
-ls ~/.claude/projects/*/<uuid>.jsonl
+# fiber → every session it has had (host, harness, transcript availability)
+felt shuttle sessions <fiber-id>
 
-# codex: date-tree filenames carry the uuid
-find ~/.codex/sessions -name "*<uuid>*"
+# reverse: session UUID or commit → owning fiber + disposition, then its sessions
+felt shuttle sessions <session-uuid>
+felt shuttle sessions --commit <sha>
+
+# session → transcript as an ordinary local file
+# (native path when local; verified managed-cache copy when the session ran on another host)
+F=$(felt shuttle transcript <session-uuid>)
+
+# fiber-wide: resolve all available transcripts + write manifest.json
+# (session, host, harness, lifecycle events, source path, sha256, availability per entry)
+felt shuttle sessions <fiber-id> --materialize --dir <d>
 ```
+
+Availability is explicit and honest — `identity_pending`, `available_local`, `available_remote`, `host_unreachable`, `transcript_missing` are distinct; an unreachable host is never reported as absence. `--json` gives the structured rows (transcript details under `.transcript`).
+
+Shuttle-mediated lineage (dispatch, resume, claim) is structural in the ledger. Harness-native subagent spawns are *not* — recover those by exact phrase search over resolved transcripts: `felt shuttle transcript` (or `--materialize`), then `rg` the shared phrase with the recipes below.
+
+Once you have the file path, everything below is ordinary `jq`/`rg` — there is deliberately no shuttle-side tail/search/excerpt mini-language.
 
 ## claude-code recipes
 

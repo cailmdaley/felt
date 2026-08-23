@@ -43,7 +43,7 @@ a degraded input without mistaking the responsive daemon for a healthy read.
 | A dispatched worker | This file, top to bottom. |
 | Authoring a constitution | [references/authoring.md](references/authoring.md) — `felt add` → spec → `felt shuttle install`, drafts vs dispatch, agent selection, human-in-the-loop gates. |
 | Operating / debugging the system | [references/operating.md](references/operating.md) — lifecycle verbs, kanban columns, card-missing triage, remote hosts, uninstall. |
-| Reading a predecessor's transcript | [references/transcripts.md](references/transcripts.md) — locate a session's JSONL from its UUID (claude-code + codex), validated jq recipes for tails, search, thinking. |
+| Reading a predecessor's transcript, or tracing provenance | [references/transcripts.md](references/transcripts.md) — `felt shuttle sessions`/`transcript` (fiber ↔ session ↔ commit lineage, cross-host materialization, honest availability), validated jq recipes for tails, search, thinking (claude-code + codex). |
 | Touching a standing role | [references/standing-roles.md](references/standing-roles.md) — cron lifecycle, run ids, exit handoff, accept semantics. |
 | Writing a fiber's `report.html` | [references/report.md](references/report.md) — audience, current-state doctrine, working open questions, self-containment, figure claims. |
 
