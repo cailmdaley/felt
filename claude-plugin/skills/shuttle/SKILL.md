@@ -27,6 +27,13 @@ shuttle turns fibers into autonomous work. A fiber carrying a `shuttle:` block i
 
 The human's surfaces: the **board** (served by the daemon at `:4000`) is a pure view, with five hotkey-switchable tabs — **Desk** (the kanban, described below), **Day** (fiber lanes over a 6am→6am axis, one lane per fiber with two clocks — solid marks where you were steering, wash where an agent was working), **Week** (past days as rows of ink rasters, today marked by a gold seam, future rows hollow), **Chronicle** (fibers as multi-day lifelines across calendar days, with **cycles/eras** as named bands over the top — drag across days to draw one), and — sharing the surface's name — the **Board** tab (every artifact a worker pushed with `SendUserFile` in the last month, each file rendered as a card on a canvas rather than listed as a filename; the ↗ opens it in the Reader overlay). The first four view fibers and sessions; the Board views sent files. Use Desk to stash ideas, launch dispatches, steer workers, review what comes back; use Day/Week/Chronicle to see where time actually went; use the Board tab to find what came back by recognising it. The **agent registry** (`felt shuttle agents`) maps a fiber's `shuttle.agent` to the CLI + model each dispatch runs. The daemon ships with felt; the operator guide lives at <https://cailmdaley.github.io/felt/> (AGENTS.md in the felt repo, for contributors).
 
+For runtime truth, `felt setup receipt --json` reports the harness bundles
+actually loaded, resolved felt executable, hook compatibility, and the live
+daemon's expected/observed contract. Daemon snapshots also carry
+`poll_health`; a stalled world read is reaped at its configured bound, late
+results are rejected, and reconciliation continues. Rising `stalls` identifies
+a degraded input without mistaking the responsive daemon for a healthy read.
+
 ## Reading by role
 
 | You are | Read |

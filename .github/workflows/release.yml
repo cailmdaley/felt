@@ -128,6 +128,9 @@ jobs:
             curl -fsS http://127.0.0.1:4390/api/v1/version
             exit 1
           fi
+          # A bound daemon is still unhealthy if it loaded a stale felt CLI.
+          curl -fsS http://127.0.0.1:4390/api/v1/version |
+            jq -e '.contract.ok == true and .contract.expected == .contract.observed' >/dev/null
           # The artifact must serve the UI bundle it shipped with.
           curl -fsS -o /dev/null http://127.0.0.1:4390/index.html
           # And the shim's HTTP verbs must answer.

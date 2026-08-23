@@ -56,6 +56,18 @@ Maintain:
     felt migrate [--dry-run]                       # normalize legacy layout
 ```
 
+Runtime and installation truth:
+
+```
+felt setup receipt --json                  # actually loaded bundles, felt binary, hooks, daemon contract
+felt setup validate --source <checkout>    # non-mutating complete local candidate check
+```
+
+Local Claude/Codex setup sources are validated, staged, and promoted as a
+recoverable generation before the native harness CLI activates them. Diagnose
+from `setup receipt`, which queries the harness CLIs; an incidental cache
+directory is not proof that a bundle is loaded.
+
 Statuses: · untracked, ○ open, ◐ active, ● closed
 Detail: name < compact < summary < full. Summary adds the lede (first paragraph of the body; write it to stand alone).
 Relationships: directory containment, `[[wikilinks]]` in bodies, and optional project-owned data-flow conventions. Nested IDs use paths (bao-analysis/damping-prior).

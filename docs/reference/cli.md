@@ -55,7 +55,9 @@ Every command accepts these global flags:
 |---|---|
 | `felt setup claude` | Install the felt plugin for Claude Code (`--source`, `--uninstall`) |
 | `felt setup codex` | Install the felt plugin for Codex (`--source`, `--uninstall`) |
+| `felt setup receipt` | Report the executable, actually loaded harness bundles, hooks, and live daemon contract (`--json` for the machine-readable receipt) |
 | `felt setup skills` | Link felt skills into a target directory (`--source`, `--target`, default `~/.claude/skills`) |
+| `felt setup validate --source <checkout>` | Non-mutating validation of a complete local plugin candidate (`--executable` overrides the felt binary probed for contract compatibility) |
 | `felt uninstall` | Remove the felt plugin from Claude Code and Codex (inverse of `setup claude`/`setup codex`) |
 | `felt update` | Update felt to the latest version, refreshing plugin wiring too |
 

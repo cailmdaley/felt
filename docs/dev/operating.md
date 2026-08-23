@@ -28,6 +28,7 @@ felt shuttle handoff <fiber>                     # worker's clean-exit ritual: s
 felt shuttle snapshot
 felt shuttle abort / attach <fiber>
 felt shuttle validate-identity                # UID migration/cross-city validation
+felt setup receipt --json                     # loaded plugins/skills/hooks/binary + daemon contract
 ```
 
 ## Inspecting state
@@ -42,6 +43,7 @@ tmux ls | grep '^shuttle-'               # live workers
 curl -s http://127.0.0.1:4000/api/v1/agents | jq
 curl -s http://127.0.0.1:4000/api/v1/state | jq
 curl -s http://127.0.0.1:4000/api/v1/state/composite | jq
+felt setup receipt --json | jq
 felt shuttle validate-identity                # checks :4000/:4001/:4002/:4003 by default
 ```
 
@@ -80,15 +82,12 @@ drag-to-launch), which bypasses eligibility. After either refusal the daemon
 parks that fiber for 5 minutes rather than re-probing a login shell every tick;
 a force-dispatch skips the wait.
 
-**Kanban stuck on "Loading…" / `/api/v1/state` returns
-`{"error":"poller_unavailable", ..., "{:timeout, {GenServer, :call, [Shuttle.Poller, …, 1500]}}"}`
-right after a fresh daemon start.** The poller serves its *last* snapshot, but on
-a cold boot there is none yet, so the snapshot call starves behind the first full
-walk until it completes — and the **first tick on a fresh machine is cold**: empty
-OS file cache and every configured store walked back-to-back. Observed once at
-**~106s** (`Sent 200 in 106275ms` in `shuttle.log`). It is a one-time tax: once
-warm, all stores poll in well under a second and the board loads. If this
-becomes recurring, inspect the canonical registry at
-`~/.config/felt/stores.json`: a store path with **no `.felt/` dir** ("not in a
-felt repository") errors every tick and should be dropped. Remote timeouts
-(`ssh_check_failed`, `:4001 econnrefused`) are separate noise.
+Every snapshot carries `poll_health`: `state` is `reading` or `idle`,
+`stall_timeout_ms` is the configured watchdog bound (300 seconds by default),
+and `stalls` plus `last_stalled_at` show whether a world read was reaped. Slow
+store and remote discovery run in one supervised, unlinked task while the
+poller continues serving its cached state. At the bound the task is killed, a
+new cycle is scheduled, and any late token from the abandoned read is ignored.
+Repeatedly increasing `stalls` means the daemon is alive but an input remains
+wedged; inspect `~/.config/felt/stores.json` and remote tunnel health rather
+than restarting the daemon to clear the symptom.

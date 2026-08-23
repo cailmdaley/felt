@@ -4,6 +4,9 @@ before:
   hooks:
     - go mod tidy
     - go generate ./...
+    # The marketplace, both harness manifests, skills, executable hooks, and
+    # felt↔Shuttle contract must be one valid candidate before publishing.
+    - go run . setup validate --source .
     # Guard: refuse to release if the plugin manifests haven't been
     # bumped to the tag's version. Claude Code and Codex both compare
     # plugin.json version when running `plugin update`; shipping a

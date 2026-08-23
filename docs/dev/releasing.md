@@ -7,7 +7,9 @@ only the manifest at the plugin root differs (`.claude-plugin/` and
 `.claude-plugin/marketplace.json` registers the plugin for both.
 
 - `felt setup claude` registers the `cailmdaley/felt` marketplace and installs
-  the plugin; `felt setup codex` symlinks skills and configures Codex hooks.
+  the plugin through Claude's native CLI; `felt setup codex` does the same
+  through Codex's native marketplace and plugin commands. Neither installer
+  hand-writes harness configuration.
 - The plugin bundles the `felt` and `shuttle` skills, a SessionStart hook (lists active +
   recently touched fibers), and a PreToolUse deny gate (`cmd/hook.go`).
   **Updating the binary updates hook behavior** — the plugin only needs
@@ -16,12 +18,29 @@ only the manifest at the plugin root differs (`.claude-plugin/` and
   refreshes each integration; the Homebrew formula's `post_install` does the
   same on `brew upgrade felt`.
 
+For a local `--source`, setup validates and copies the complete marketplace
+payload into `~/.felt/plugin-runtime/`, then promotes it under a cross-process
+lock with a crash journal. Both manifests must describe the same version; the
+two skills, hook manifest, executable hook files, and running felt executable's
+Shuttle contract must all validate before the native CLI sees the candidate.
+If native installation fails, setup restores both the last known-good staged
+generation and the harness's previous marketplace/plugin state. Remote GitHub
+refs remain acquired by the native harness CLI, so they receive executable
+contract preflight and rollback-on-reported-failure, but not felt's local
+whole-payload prevalidation.
+
+Use `felt setup validate --source <checkout>` as the non-mutating candidate
+gate. Use `felt setup receipt --json` after installation to report the bundle
+the harness CLIs actually load, the resolved felt binary, hooks, and the live
+daemon contract; incidental cache directories are not authoritative evidence.
+
 Release: `scripts/release.sh <version>` bumps `claude-plugin/.claude-plugin/
 plugin.json` and `.codex-plugin/plugin.json` in sync with the binary tag, then
 `git push origin main v<version>` triggers the goreleaser workflow (darwin/linux
-× amd64/arm64; auto-pushes the Homebrew formula). A `before`-hook guard refuses
-to build a release whose manifests don't match the tag, so a forgotten bump
-can't ship.
+× amd64/arm64; auto-pushes the Homebrew formula). Before packaging, GoReleaser
+runs the complete candidate validator and separately refuses manifests that do
+not match the tag. The daemon artifact boot test also requires the structured
+CLI/daemon contract receipt to be healthy.
 
 Release candidates: `scripts/release.sh 1.1.0-rc.1` — any `X.Y.Z-<suffix>`
 version cuts a prerelease. Three things then keep it away from everyone who

@@ -21,6 +21,9 @@ jobs:
       - name: Build
         run: go build -v ./...
 
+      - name: Validate complete plugin candidate
+        run: go run . setup validate --source .
+
       - name: Test
         run: go test -v ./...
 
