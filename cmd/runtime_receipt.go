@@ -163,7 +163,7 @@ func collectRuntimeReceipt() RuntimeReceipt {
 	r.Bundles = append(r.Bundles, collectClaudeBundle()...)
 	r.Hooks = collectHookReceipt(r.Bundles)
 	r.Daemon = collectDaemonReceipt()
-	r.Generation = collectGenerationReceipt(r.Bundles)
+	r.Generation = collectGenerationReceipt(r.Bundles, r.Felt)
 	r.Status, r.Repair = combineReceiptStatus(r.Felt.Status, r.Bundles, r.Hooks.Status, r.Daemon.Status, r.Generation.Status)
 	if r.Generation.Status != receiptHealthy && r.Generation.Status == r.Status {
 		r.Repair = r.Generation.Repair
@@ -609,7 +609,7 @@ func receiptJSONValue(raw json.RawMessage) any {
 // source with every enabled harness cache. Legacy installs without markers are
 // reported as partial and repaired by rerunning setup; once either side has a
 // marker, both sides must be present, internally valid, and agree.
-func collectGenerationReceipt(bundles []ReceiptBundle) ReceiptGenerationReceipt {
+func collectGenerationReceipt(bundles []ReceiptBundle, felt ReceiptComponent) ReceiptGenerationReceipt {
 	receipt := ReceiptGenerationReceipt{Status: receiptHealthy}
 	runtimeDir, err := pluginRuntimeDir()
 	if err != nil {
@@ -633,6 +633,14 @@ func collectGenerationReceipt(bundles []ReceiptBundle) ReceiptGenerationReceipt 
 	}
 	if activePresent {
 		receipt.Active = &active
+		// The marker's felt_build must describe the executable this receipt is
+		// diagnosing, not merely agree with a copy of itself in a harness
+		// cache. Compare against the resolved executable's reported version so
+		// a promotion sealed by another felt build cannot read as healthy.
+		if felt.Version != "" && !feltBuildMatchesVersion(active.FeltBuild, felt.Version) {
+			return generationReceiptWithHarnesses(receipt, receiptMismatch,
+				fmt.Sprintf("the promoted generation was sealed by felt %q but the resolved executable %s reports %q; rerun the matching felt setup command with that felt", active.FeltBuild, felt.Path, felt.Version))
+		}
 	}
 
 	anyMarker := activePresent
@@ -684,6 +692,15 @@ func collectGenerationReceipt(bundles []ReceiptBundle) ReceiptGenerationReceipt 
 			fmt.Sprintf("the promoted runtime has %s but no enabled harness reports it loaded; rerun the matching felt setup command", pluginGenerationMarkerName))
 	}
 	return receipt
+}
+
+// feltBuildMatchesVersion compares a generation marker's felt_build against
+// the version string the resolved executable prints. The marker may carry
+// trailing build metadata ("1.2.3 (abcdef)"), so only the leading version
+// field is bound; `--version` output reduces to that same field.
+func feltBuildMatchesVersion(feltBuild, version string) bool {
+	fields := strings.Fields(feltBuild)
+	return len(fields) > 0 && fields[0] == version
 }
 
 func generationReceiptWithHarnesses(receipt ReceiptGenerationReceipt, status receiptStatus, repair string) ReceiptGenerationReceipt {

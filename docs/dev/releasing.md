@@ -28,7 +28,13 @@ contract must all validate before the native CLI sees the candidate. Native
 harness CLIs receive only the stable promoted `current` path and remain the
 sole writers of their caches and configuration. If native installation reports
 failure, setup restores both the last known-good staged generation and the
-harness's previous marketplace/plugin state. The journal also records native
+harness's previous marketplace/plugin state. A zero exit status alone never
+commits a promotion: before the journal records `committed` and `previous` is
+discarded, setup reads the cache path each native CLI reports as loaded
+(`plugin list --json`), recomputes its payload digest, and requires it to
+carry the promoted generation marker. A stale, altered, or marker-less cache
+is a rejected candidate — the filesystem rolls back and the prior native
+state is restored. The journal also records native
 activation intent: after an interruption, the next setup restores `current`
 first, reinstalls each affected harness from that path, verifies the restored
 state, and retains the journal until reconciliation succeeds.
@@ -39,7 +45,12 @@ resolved commit, plugin version, felt build identity, and a deterministic
 payload digest. A same-version payload change is therefore a different
 generation. The receipt recomputes the digest in both `current` and the loaded
 harness cache and reports pending journals, missing markers, or identity
-disagreement as unhealthy with a setup command to repair it.
+disagreement as unhealthy with a setup command to repair it. The receipt also
+binds the marker's felt build to the resolved executable it is diagnosing: a
+promotion sealed by a different felt build reports mismatch even when source
+and caches agree with each other. Marker and journal writes are fsynced and
+renamed with a parent-directory sync, so the recovery guarantees hold across
+power loss, not only process death.
 
 Use `felt setup validate --source <checkout>` as the non-mutating candidate
 gate. Use `felt setup receipt --json` after installation to report the bundle

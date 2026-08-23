@@ -272,7 +272,7 @@ func TestCollectGenerationReceiptRejectsPendingPromotion(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got := collectGenerationReceipt(nil)
+	got := collectGenerationReceipt(nil, ReceiptComponent{})
 	if got.Status != receiptPartial {
 		t.Fatalf("pending promotion receipt = %#v, want partial", got)
 	}
@@ -336,11 +336,56 @@ func TestCollectGenerationReceiptRejectsSameVersionDifferentDigest(t *testing.T)
 	writeMarker(activeRoot, active)
 	writeMarker(loadedRoot, loaded)
 
-	got := collectGenerationReceipt([]ReceiptBundle{{Harness: "codex", Path: loadedRoot, Enabled: true, Status: receiptHealthy}})
+	got := collectGenerationReceipt([]ReceiptBundle{{Harness: "codex", Path: loadedRoot, Enabled: true, Status: receiptHealthy}}, ReceiptComponent{})
 	if got.Status != receiptMismatch {
 		t.Fatalf("generation disagreement receipt = %#v, want mismatch", got)
 	}
 	if !strings.Contains(got.Repair, "payload digest") || !strings.Contains(got.Repair, "setup") {
 		t.Fatalf("generation disagreement repair = %q, want digest and setup guidance", got.Repair)
+	}
+}
+
+func TestCollectGenerationReceiptBindsFeltBuildToResolvedExecutable(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	runtimeDir := filepath.Join(home, ".felt", pluginRuntimeDirName)
+	activeRoot := filepath.Join(runtimeDir, pluginCurrentName, "claude-plugin")
+	if err := os.MkdirAll(filepath.Join(activeRoot, ".claude-plugin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(activeRoot, ".claude-plugin", "plugin.json"), []byte(`{"name":"felt","version":"1.2.3"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	identity := pluginGenerationIdentity{
+		Schema: 1, SourceKind: "local", Source: "/src",
+		PluginVersion: "1.2.3", FeltBuild: "1.2.3",
+	}
+	digest, err := pluginPayloadDigest(activeRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity.PayloadSHA256 = digest
+	data, err := json.Marshal(identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(activeRoot, pluginGenerationMarkerName), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// The same marker read by an executable of another build must not read as
+	// healthy: felt_build is bound to the executable the receipt resolved.
+	got := collectGenerationReceipt(nil, ReceiptComponent{Path: "/resolved/felt", Version: "9.9.9"})
+	if got.Status != receiptMismatch {
+		t.Fatalf("felt_build skew receipt = %#v, want mismatch", got)
+	}
+	if !strings.Contains(got.Repair, "sealed by felt") || !strings.Contains(got.Repair, "9.9.9") {
+		t.Fatalf("felt_build skew repair = %q, want executable binding guidance", got.Repair)
+	}
+
+	// A matching executable is not a mismatch.
+	got = collectGenerationReceipt(nil, ReceiptComponent{Path: "/resolved/felt", Version: "1.2.3"})
+	if got.Status == receiptMismatch {
+		t.Fatalf("matching felt_build reported mismatch: %#v", got)
 	}
 }

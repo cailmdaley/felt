@@ -113,6 +113,30 @@ set -eu
 printf '%s\n' "$*" >> "$FAKE_NATIVE_LOG"
 source_file="$FAKE_NATIVE_STATE/source"
 installed_file="$FAKE_NATIVE_STATE/installed"
+# materialize_cache mimics the real CLI: a successful install copies the
+# registered source's plugin payload into a private cache, and plugin list
+# reports that cache path. Tamper modes let tests exercise a lying zero exit.
+materialize_cache() {
+  cache="$FAKE_NATIVE_STATE/cache"
+  src=$(cat "$source_file")
+  case "${FAKE_NATIVE_TAMPER:-}" in
+    stale)
+      if [ ! -d "$cache" ]; then
+        mkdir -p "$cache"
+        cp -R "$src/claude-plugin/." "$cache/"
+      fi
+      ;;
+    *)
+      rm -rf "$cache"
+      mkdir -p "$cache"
+      cp -R "$src/claude-plugin/." "$cache/"
+      case "${FAKE_NATIVE_TAMPER:-}" in
+        alter) printf 'tampered\n' >> "$cache/skills/felt/SKILL.md";;
+        missing-marker) rm -f "$cache/.felt-generation.json";;
+      esac
+      ;;
+  esac
+}
 if [ "$1" = plugin ] && [ "$2" = marketplace ] && [ "$3" = list ]; then
   if [ -f "$source_file" ]; then
     source=$(cat "$source_file")
@@ -124,7 +148,7 @@ if [ "$1" = plugin ] && [ "$2" = marketplace ] && [ "$3" = list ]; then
 fi
 if [ "$1" = plugin ] && [ "$2" = list ]; then
   if [ -f "$installed_file" ]; then
-    printf '%s\n' '[{"id":"felt@cailmdaley-felt"}]'
+    printf '[{"id":"felt@cailmdaley-felt","installPath":"%s"}]\n' "$FAKE_NATIVE_STATE/cache"
   else
     printf '%s\n' '[]'
   fi
@@ -150,6 +174,7 @@ if [ "$1" = plugin ] && { [ "$2" = install ] || [ "$2" = update ]; }; then
     exit 92
   fi
   : > "$installed_file"
+  materialize_cache
   exit 0
 fi
 if [ "$1" = plugin ] && [ "$2" = uninstall ]; then
@@ -164,6 +189,27 @@ set -eu
 printf '%s\n' "$*" >> "$FAKE_NATIVE_LOG"
 source_file="$FAKE_NATIVE_STATE/source"
 installed_file="$FAKE_NATIVE_STATE/installed"
+materialize_cache() {
+  cache="$FAKE_NATIVE_STATE/cache"
+  src=$(cat "$source_file")
+  case "${FAKE_NATIVE_TAMPER:-}" in
+    stale)
+      if [ ! -d "$cache" ]; then
+        mkdir -p "$cache"
+        cp -R "$src/claude-plugin/." "$cache/"
+      fi
+      ;;
+    *)
+      rm -rf "$cache"
+      mkdir -p "$cache"
+      cp -R "$src/claude-plugin/." "$cache/"
+      case "${FAKE_NATIVE_TAMPER:-}" in
+        alter) printf 'tampered\n' >> "$cache/skills/felt/SKILL.md";;
+        missing-marker) rm -f "$cache/.felt-generation.json";;
+      esac
+      ;;
+  esac
+}
 if [ "$1" = plugin ] && [ "$2" = marketplace ] && [ "$3" = list ]; then
   if [ -f "$source_file" ]; then
     source=$(cat "$source_file")
@@ -175,7 +221,7 @@ if [ "$1" = plugin ] && [ "$2" = marketplace ] && [ "$3" = list ]; then
 fi
 if [ "$1" = plugin ] && [ "$2" = list ]; then
   if [ -f "$installed_file" ]; then
-    printf '%s\n' '{"installed":[{"pluginId":"felt@cailmdaley-felt"}]}'
+    printf '{"installed":[{"pluginId":"felt@cailmdaley-felt","source":{"path":"%s"}}]}\n' "$FAKE_NATIVE_STATE/cache"
   else
     printf '%s\n' '{"installed":[]}'
   fi
@@ -197,6 +243,7 @@ if [ "$1" = plugin ] && [ "$2" = add ]; then
     exit 92
   fi
   : > "$installed_file"
+  materialize_cache
   exit 0
 fi
 if [ "$1" = plugin ] && [ "$2" = remove ]; then

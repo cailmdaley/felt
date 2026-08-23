@@ -97,8 +97,35 @@ func writePluginGeneration(candidate string, identity pluginGenerationIdentity) 
 	}
 	data = append(data, '\n')
 	path := filepath.Join(candidate, "claude-plugin", pluginGenerationMarkerName)
-	if err := os.WriteFile(path, data, 0o644); err != nil {
+	// The marker is what recovery and the receipt trust after a crash, so its
+	// write must be atomic and durable: fsynced temp file, rename, then a
+	// parent-directory sync to make the rename itself survive power loss.
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".felt-generation-*")
+	if err != nil {
 		return fmt.Errorf("writing plugin generation marker: %w", err)
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+	if err := tmp.Chmod(0o644); err != nil {
+		tmp.Close()
+		return fmt.Errorf("writing plugin generation marker: %w", err)
+	}
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return fmt.Errorf("writing plugin generation marker: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return fmt.Errorf("writing plugin generation marker: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("writing plugin generation marker: %w", err)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return fmt.Errorf("committing plugin generation marker: %w", err)
+	}
+	if err := syncParentDir(path); err != nil {
+		return fmt.Errorf("committing plugin generation marker: %w", err)
 	}
 	return nil
 }

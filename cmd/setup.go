@@ -426,6 +426,12 @@ func installClaudePluginAtSource(repoRoot string) error {
 	if err := runClaudeCLI("plugin", op, pluginRef); err != nil {
 		return fmt.Errorf("%s %s: %w", gerund, pluginRef, err)
 	}
+	// The CLI's zero exit is not trusted as proof of materialization: the
+	// promotion only commits (and discards `previous`) after the cache Claude
+	// reports as loaded carries the promoted generation marker and digest.
+	if err := verifyClaudeLoadedGeneration(repoRoot); err != nil {
+		return err
+	}
 	if removed := pruneLegacyClaudeHooks(); removed > 0 {
 		fmt.Printf("✓ Removed %d legacy Claude hook entries (now served via plugin)\n", removed)
 	}
@@ -927,6 +933,12 @@ func installCodexPluginAtSource(marketplaceSource string) error {
 			"  felt installs through Codex's native plugin commands, verified on\n"+
 			"  codex-cli 0.147.0. Upgrade Codex if `codex plugin add` is unknown.",
 			codexPluginRef, err)
+	}
+
+	// Same trust boundary as the Claude path: a promotion may only commit
+	// after Codex's reported cache proves it holds the promoted generation.
+	if err := verifyCodexLoadedGeneration(marketplaceSource); err != nil {
+		return err
 	}
 
 	// Direct ~/.codex/hooks.json entries would fire the same hooks a second

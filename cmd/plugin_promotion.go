@@ -555,6 +555,10 @@ func promotePluginCandidate(candidate string, install func(string) error, restor
 		_ = os.RemoveAll(previous)
 	}
 	_ = os.Remove(journal)
+	// Best-effort: a journal removal lost to power loss is safe (recovery
+	// treats a committed journal as cleanup), but making it durable avoids
+	// the spurious pending-promotion receipt until the next setup runs.
+	_ = syncParentDir(journal)
 	return nil
 }
 
@@ -787,6 +791,27 @@ func writePluginJournal(path string, journal pluginPromotionJournal) error {
 	}
 	if err := os.Rename(tmpName, path); err != nil {
 		return fmt.Errorf("committing plugin journal: %w", err)
+	}
+	// The file itself was fsynced before the rename; syncing the parent
+	// directory makes the rename durable, which the recovery path's power-loss
+	// guarantee depends on.
+	if err := syncParentDir(path); err != nil {
+		return fmt.Errorf("committing plugin journal: %w", err)
+	}
+	return nil
+}
+
+// syncParentDir fsyncs the directory containing path so a just-completed
+// rename (or removal) survives power loss on filesystems that require an
+// explicit directory sync.
+func syncParentDir(path string) error {
+	dir, err := os.Open(filepath.Dir(path))
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	if err := dir.Sync(); err != nil {
+		return fmt.Errorf("syncing directory %s: %w", filepath.Dir(path), err)
 	}
 	return nil
 }

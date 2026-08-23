@@ -68,10 +68,13 @@ and promoted as one recoverable local generation before the native harness CLI
 activates them. Remote acquisition is disposable; the harness still owns its
 cache and configuration. Interrupted native activation is reconciled from the
 restored last-known-good generation before setup continues. Each promoted
-payload carries source/ref/commit/build/digest identity into the harness cache;
-`setup receipt` queries the harness CLIs, recomputes both payload digests, and
-rejects a pending journal or identity disagreement. An incidental cache
-directory is not proof that a bundle is loaded.
+payload carries source/ref/commit/build/digest identity into the harness cache,
+and a promotion only commits after the cache the native CLI reports as loaded
+proves it holds that generation — a zero exit status alone is rolled back.
+`setup receipt` queries the harness CLIs, recomputes both payload digests,
+binds the marker's felt build to the resolved executable, and rejects a
+pending journal or identity disagreement. An incidental cache directory is
+not proof that a bundle is loaded.
 
 Statuses: · untracked, ○ open, ◐ active, ● closed
 Detail: name < compact < summary < full. Summary adds the lede (first paragraph of the body; write it to stand alone).
