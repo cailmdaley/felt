@@ -384,6 +384,37 @@ func TestRecoverPluginPromotionRestoresFilesystemBeforeNativeReconciliation(t *t
 	}
 }
 
+func TestRecoverInitialClaudePromotionDoesNotRemoveAlreadyAbsentMarketplace(t *testing.T) {
+	f := newRemoteSetupFixture(t, "claude")
+	t.Setenv("FAKE_CLAUDE_FAIL_ABSENT_REMOVE", "1")
+	runtimeDir := filepath.Join(f.home, ".felt", pluginRuntimeDirName)
+	current := filepath.Join(runtimeDir, pluginCurrentName)
+	if err := os.MkdirAll(current, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := writePluginJournal(filepath.Join(runtimeDir, pluginJournalName), pluginPromotionJournal{
+		Candidate: current,
+		Phase:     "swapped",
+		HadOld:    false,
+		Native:    &pluginNativeIntent{Claude: &claudeInstallationState{}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := recoverPluginPromotion(runtimeDir); err != nil {
+		t.Fatalf("already-absent recovery: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(runtimeDir, pluginJournalName)); !os.IsNotExist(err) {
+		t.Fatalf("already-absent recovery left journal: %v", err)
+	}
+	log, err := os.ReadFile(f.nativeLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(log), "marketplace remove") {
+		t.Fatalf("recovery tried to remove an already absent marketplace:\n%s", log)
+	}
+}
+
 func TestInterruptedPromotionRecoveryPrecedesAcquisitionFailureAndRetry(t *testing.T) {
 	f := newRemoteSetupFixture(t, "claude")
 	runtimeDir := filepath.Join(f.home, ".felt", pluginRuntimeDirName)

@@ -136,6 +136,10 @@ if [ "$1" = plugin ] && [ "$2" = marketplace ] && [ "$3" = add ]; then
   exit 0
 fi
 if [ "$1" = plugin ] && [ "$2" = marketplace ] && [ "$3" = remove ]; then
+  if [ "${FAKE_CLAUDE_FAIL_ABSENT_REMOVE:-0}" = 1 ] && [ ! -f "$source_file" ]; then
+    echo 'marketplace is not configured' >&2
+    exit 93
+  fi
   rm -f "$source_file"
   exit 0
 fi

@@ -674,6 +674,13 @@ func reconcileClaudeInstallation(intent claudeInstallationState, current string)
 	if _, err := exec.LookPath("claude"); err != nil {
 		return fmt.Errorf("claude CLI unavailable: %w", err)
 	}
+	// Recovery is retried until it succeeds. If the process died before the
+	// native CLI changed anything, the desired absent state is already true;
+	// do not turn an idempotent recovery into a permanent pending journal by
+	// asking Claude to remove a marketplace which does not exist.
+	if state := captureClaudeInstallationRaw(); claudeInstallationMatches(state, intent, current) {
+		return nil
+	}
 	pluginRef := "felt@" + marketplaceName
 	if !intent.Configured {
 		_, _ = exec.Command("claude", "plugin", "uninstall", pluginRef).Output()
@@ -698,6 +705,13 @@ func reconcileClaudeInstallation(intent claudeInstallationState, current string)
 		return fmt.Errorf("Claude marketplace source %q does not point at restored current %q", claudeMarketplaceSource(state.Marketplace), current)
 	}
 	return nil
+}
+
+func claudeInstallationMatches(state, intent claudeInstallationState, current string) bool {
+	if state.Configured != intent.Configured || state.Installed != intent.Installed {
+		return false
+	}
+	return !intent.Configured || samePluginSource(claudeMarketplaceSource(state.Marketplace), current)
 }
 
 func reconcileCodexInstallation(intent codexInstallationState, current string) error {
