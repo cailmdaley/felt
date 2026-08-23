@@ -235,6 +235,39 @@ Resolution order for --source:
 	},
 }
 
+var setupValidateCmd = &cobra.Command{
+	Use:   "validate",
+	Short: "Validate a complete local plugin candidate",
+	Long: `Validate a local felt checkout before promoting it to an agent plugin.
+
+This checks both Claude and Codex manifests, the shared skills and executable
+hooks, and the felt↔Shuttle contract reported by the selected executable. It
+does not change the installed plugin or cache, so release and CI gates can use
+it safely.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		source, _ := cmd.Flags().GetString("source")
+		if source == "" {
+			return errors.New("setup validate requires --source <felt checkout>")
+		}
+		root, err := findMarketplaceRoot(source)
+		if err != nil {
+			return err
+		}
+		executable, _ := cmd.Flags().GetString("executable")
+		if executable == "" {
+			executable, err = currentFeltExecutable()
+			if err != nil {
+				return err
+			}
+		}
+		if err := validatePluginCandidate(root, executable); err != nil {
+			return err
+		}
+		fmt.Printf("Plugin candidate valid: %s (contract %d)\n", root, ShuttleContractLevel)
+		return nil
+	},
+}
+
 func init() {
 	setupClaudeCmd.Flags().Bool("uninstall", false, "Remove felt plugin and marketplace from Claude Code")
 	setupClaudeCmd.Flags().String("source", "", "Path to felt repo checkout or plugin directory")
@@ -243,10 +276,13 @@ func init() {
 	setupPiCmd.Flags().Bool("uninstall", false, "Remove the felt pi package")
 	setupSkillsCmd.Flags().String("target", "", "Target directory (default: ~/.claude/skills)")
 	setupSkillsCmd.Flags().String("source", "", "Path to felt repo checkout or plugin directory")
+	setupValidateCmd.Flags().String("source", "", "Path to felt repo checkout or plugin directory")
+	setupValidateCmd.Flags().String("executable", "", "felt executable to probe (default: running felt)")
 	setupCmd.AddCommand(setupClaudeCmd)
 	setupCmd.AddCommand(setupCodexCmd)
 	setupCmd.AddCommand(setupPiCmd)
 	setupCmd.AddCommand(setupSkillsCmd)
+	setupCmd.AddCommand(setupValidateCmd)
 	rootCmd.AddCommand(setupCmd)
 }
 
@@ -356,6 +392,18 @@ func installPluginViaCLI(repoRoot string) error {
 	if _, err := exec.LookPath("claude"); err != nil {
 		return fmt.Errorf("claude CLI not found in PATH; install Claude Code first: %w", err)
 	}
+	return withPluginPromotionLock(func() error {
+		previous := captureClaudeInstallation()
+		return withStagedPluginCandidateWithRestore(repoRoot, installClaudePluginAtSource, func() error {
+			return restoreClaudeInstallation(previous)
+		})
+	})
+}
+
+func installClaudePluginAtSource(repoRoot string) error {
+	if _, err := exec.LookPath("claude"); err != nil {
+		return fmt.Errorf("claude CLI not found in PATH; install Claude Code first: %w", err)
+	}
 
 	pluginRef := "felt@" + marketplaceName
 	// Ask whether the PLUGIN is installed, not whether its marketplace is
@@ -422,9 +470,11 @@ func isPluginInstalled(ref string) bool {
 // claudeMarketplaceEntry mirrors the structured `claude plugin marketplace
 // list --json` output. Only the fields we read are decoded.
 type claudeMarketplaceEntry struct {
-	Name   string `json:"name"`
-	Source string `json:"source"` // "directory" or "git"
-	Path   string `json:"path"`   // local path for directory sources
+	Name            string `json:"name"`
+	Source          string `json:"source"`
+	Path            string `json:"path"`
+	Repo            string `json:"repo"`
+	InstallLocation string `json:"installLocation"`
 }
 
 // marketplaceEntry looks up an entry by name in the claude CLI's registered
@@ -844,6 +894,18 @@ func installCodexPluginViaCLI(marketplaceSource string) error {
 	if _, err := exec.LookPath("codex"); err != nil {
 		return fmt.Errorf("codex CLI not found in PATH; install Codex first: %w", err)
 	}
+	return withPluginPromotionLock(func() error {
+		previous := captureCodexInstallation()
+		return withStagedPluginCandidateWithRestore(marketplaceSource, installCodexPluginAtSource, func() error {
+			return restoreCodexInstallation(previous)
+		})
+	})
+}
+
+func installCodexPluginAtSource(marketplaceSource string) error {
+	if _, err := exec.LookPath("codex"); err != nil {
+		return fmt.Errorf("codex CLI not found in PATH; install Codex first: %w", err)
+	}
 
 	if err := repointCodexMarketplace(codexMarketplaceSource(marketplaceSource)); err != nil {
 		return err
@@ -896,6 +958,7 @@ func repointCodexMarketplace(codexSource string) error {
 	if !codexMarketplaceConflict(out) {
 		return fmt.Errorf("registering codex marketplace %s: %w\n%s", codexSource, err, strings.TrimSpace(out))
 	}
+	previousSource, hadPrevious := codexMarketplaceState()
 
 	fmt.Printf("Repointing marketplace %s → %s\n", marketplaceName, codexSource)
 	if _, rmErr := runCodexCLIQuiet("plugin", "marketplace", "remove", marketplaceName); rmErr != nil {
@@ -904,6 +967,15 @@ func repointCodexMarketplace(codexSource string) error {
 
 	retryOut, retryErr := runCodexCLIQuiet("plugin", "marketplace", "add", codexSource)
 	if retryErr != nil {
+		if hadPrevious && previousSource != "" {
+			// Re-register the prior source before returning. A failed repoint is
+			// not allowed to strand the user's working marketplace on a missing
+			// source; the outer promotion transaction will restore the cache too.
+			if restoreOut, restoreErr := runCodexCLIQuiet("plugin", "marketplace", "add", previousSource); restoreErr != nil {
+				return fmt.Errorf("re-registering codex marketplace %s: %w\n%s\n  restoring previous source %s also failed: %v\n%s",
+					codexSource, retryErr, strings.TrimSpace(retryOut), previousSource, restoreErr, strings.TrimSpace(restoreOut))
+			}
+		}
 		return fmt.Errorf("re-registering codex marketplace %s: %w\n%s\n"+
 			"  The previous registration was removed to repoint it; rerun\n"+
 			"  `felt setup codex` once the cause is fixed.",
