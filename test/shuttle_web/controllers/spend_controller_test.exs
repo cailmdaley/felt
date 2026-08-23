@@ -116,6 +116,26 @@ defmodule ShuttleWeb.SpendControllerTest do
     assert fiber["messages"] == 2
   end
 
+  test "the fiber rollup counts a resumed session's lifetime spend once", ctx do
+    ledger!(ctx.ledger, [
+      record(@s1, "work/paper", @t0),
+      Map.put(record(@s1, "work/paper", @t0 + 10), "kind", "resume"),
+      record(@s2, "work/paper", @t0 + 20)
+    ])
+
+    transcript!(ctx.projects, @s1, [{"msg_a", 100}])
+    transcript!(ctx.projects, @s2, [{"msg_b", 7}])
+
+    body = json_response(get(api_conn(), "/api/v1/spend"), 200)
+
+    assert length(body["sessions"]) == 3
+    assert [fiber] = body["fibers"]
+    assert fiber["sessions"] == 2
+    assert fiber["measured"] == 2
+    assert fiber["output"] == 107
+    assert fiber["messages"] == 2
+  end
+
   test "a missing transcript is a zeroed row with found: false, still counted", ctx do
     ledger!(ctx.ledger, [record(@s1, "work/paper"), record(@s2, "work/paper")])
     transcript!(ctx.projects, @s1, [{"msg_a", 100}])

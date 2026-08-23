@@ -384,6 +384,10 @@ func TestFindPluginDir_EnvVar(t *testing.T) {
 // marketplace before it installs anything. Returns a func reading the log.
 func fakeClaudeOnPath(t *testing.T, listJSON string) func() string {
 	t.Helper()
+	// installPluginViaCLI also performs the legacy Claude-hook migration. Keep
+	// these CLI orchestration tests hermetic rather than letting that migration
+	// inspect the developer's real ~/.claude/settings.json.
+	t.Setenv("HOME", t.TempDir())
 	dir := t.TempDir()
 	log := filepath.Join(dir, "calls.log")
 	marketplaceJSON := `[{"name":"` + marketplaceName + `","source":"directory","path":"/tmp/felt-repo"}]`
@@ -405,6 +409,66 @@ func fakeClaudeOnPath(t *testing.T, listJSON string) func() string {
 			return ""
 		}
 		return string(b)
+	}
+}
+
+func TestPruneLegacyClaudeHooks(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	settingsDir := filepath.Join(home, ".claude")
+	if err := os.MkdirAll(settingsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	settings := map[string]interface{}{
+		"model": "sonnet",
+		"hooks": map[string]interface{}{
+			"PostToolUse": []interface{}{
+				map[string]interface{}{"hooks": []interface{}{map[string]interface{}{
+					"type": "command", "command": "/Users/cail/loom/hooks/shuttle-hook.sh",
+				}}},
+				map[string]interface{}{"hooks": []interface{}{map[string]interface{}{
+					"type": "command", "command": "/repo/claude-plugin/hooks/event.sh",
+				}}},
+			},
+			"SessionStart": []interface{}{
+				map[string]interface{}{"hooks": []interface{}{map[string]interface{}{
+					"type": "command", "command": "/Users/cail/loom/hooks/shuttle-hook.sh",
+				}}},
+			},
+		},
+	}
+	data, err := json.Marshal(settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	settingsPath := filepath.Join(settingsDir, "settings.json")
+	if err := os.WriteFile(settingsPath, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := pruneLegacyClaudeHooks(); got != 2 {
+		t.Fatalf("pruneLegacyClaudeHooks() = %d, want 2", got)
+	}
+
+	var cleaned map[string]interface{}
+	cleanedData, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(cleanedData, &cleaned); err != nil {
+		t.Fatal(err)
+	}
+	if cleaned["model"] != "sonnet" {
+		t.Fatalf("unrelated settings changed: %#v", cleaned["model"])
+	}
+	hooks := cleaned["hooks"].(map[string]interface{})
+	if _, ok := hooks["SessionStart"]; ok {
+		t.Fatalf("legacy-only SessionStart entry survived: %#v", hooks["SessionStart"])
+	}
+	post := hooks["PostToolUse"].([]interface{})
+	if len(post) != 1 {
+		t.Fatalf("unrelated PostToolUse entry was removed: %#v", post)
 	}
 }
 

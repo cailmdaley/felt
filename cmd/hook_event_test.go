@@ -374,9 +374,9 @@ func TestEventFilePathNormalization(t *testing.T) {
 	}
 }
 
-// TestEventToolInputPresence: `toolInput` tracks the TOOL's presence, not the
-// input's — a tool event with no tool_input records null, matching jq's
-// `.tool_input // null`. A non-tool event carries neither key.
+// TestEventToolInputPresence: PreToolUse carries the one shared copy of a
+// tool's payload, while PostToolUse carries the tool name that closes activity
+// without duplicating paths/content. A non-tool event carries neither key.
 func TestEventToolInputPresence(t *testing.T) {
 	isolateEvents(t)
 	path := filepath.Join(t.TempDir(), "events.jsonl")
@@ -388,6 +388,20 @@ func TestEventToolInputPresence(t *testing.T) {
 	v, present := lines[0]["toolInput"]
 	if !present || v != nil {
 		t.Fatalf("toolInput = %v (present=%v), want present and null", v, present)
+	}
+
+	if err := os.Remove(path); err != nil {
+		t.Fatalf("reset: %v", err)
+	}
+	lines = record(t, path, map[string]any{
+		"hook_event_name": "PostToolUse", "session_id": "s1", "tool_name": "Bash",
+		"tool_input": map[string]any{"command": "echo secret"},
+	})
+	if lines[0]["tool"] != "Bash" {
+		t.Fatalf("post tool name = %v, want Bash", lines[0]["tool"])
+	}
+	if _, present := lines[0]["toolInput"]; present {
+		t.Fatalf("post tool duplicated toolInput: %v", lines[0]["toolInput"])
 	}
 
 	if err := os.Remove(path); err != nil {

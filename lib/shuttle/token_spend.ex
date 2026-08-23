@@ -271,15 +271,19 @@ defmodule Shuttle.TokenSpend do
 
   # Codex emits a running total after each turn. Keep the latest total and
   # count assistant message items separately; summing every snapshot would turn
-  # a session's spend into the sum of all its prefixes. Model breakdowns are
-  # only reported when one model is named for the whole file: a cumulative
-  # total cannot honestly be divided between models after a switch.
+  # a session's spend into the sum of all its prefixes. The snapshots also keep
+  # the active turn model, so a model breakdown can be recovered from positive
+  # deltas when the observed counters add back to the final total. If a rollout
+  # changes counters non-monotonically or has an unlabelled snapshot, the
+  # breakdown is withheld rather than assigning a cumulative total by guess.
   defp codex_state do
     %{
       snapshot: nil,
-      models: MapSet.new(),
+      snapshots: [],
+      active_model: nil,
       messages: 0,
       message_ids: MapSet.new(),
+      messages_by_model: %{},
       first_at_ms: nil,
       last_at_ms: nil
     }
@@ -287,7 +291,7 @@ defmodule Shuttle.TokenSpend do
 
   defp absorb_codex(state, %{"type" => "turn_context", "payload" => %{"model" => model}})
        when is_binary(model) do
-    %{state | models: MapSet.put(state.models, model)}
+    %{state | active_model: model}
   end
 
   defp absorb_codex(state, %{
@@ -298,7 +302,12 @@ defmodule Shuttle.TokenSpend do
     if MapSet.member?(state.message_ids, id) do
       state
     else
-      %{state | messages: state.messages + 1, message_ids: MapSet.put(state.message_ids, id)}
+      %{
+        state
+        | messages: state.messages + 1,
+          message_ids: MapSet.put(state.message_ids, id),
+          messages_by_model: bump_message_model(state.messages_by_model, state.active_model)
+      }
     end
   end
 
@@ -306,7 +315,11 @@ defmodule Shuttle.TokenSpend do
          "type" => "response_item",
          "payload" => %{"type" => "message", "role" => "assistant"}
        }) do
-    %{state | messages: state.messages + 1}
+    %{
+      state
+      | messages: state.messages + 1,
+        messages_by_model: bump_message_model(state.messages_by_model, state.active_model)
+    }
   end
 
   defp absorb_codex(
@@ -325,6 +338,7 @@ defmodule Shuttle.TokenSpend do
     %{
       state
       | snapshot: usage,
+        snapshots: [%{usage: usage, model: state.active_model} | state.snapshots],
         first_at_ms: min_ms(state.first_at_ms, at_ms),
         last_at_ms: max_ms(state.last_at_ms, at_ms)
     }
@@ -335,26 +349,12 @@ defmodule Shuttle.TokenSpend do
   defp add_codex(acc, %{snapshot: nil}), do: acc
 
   defp add_codex(acc, state) do
-    counts = %{
-      # Codex's `input_tokens` includes the cached prefix. Keep the same
-      # orthogonal axes Claude exposes: uncached input, cache read, cache
-      # write, and output. Reasoning output is already part of `output_tokens`;
-      # adding it again would double-count the response.
-      input:
-        max(
-          count(state.snapshot, "input_tokens") - count(state.snapshot, "cached_input_tokens"),
-          0
-        ),
-      output: count(state.snapshot, "output_tokens"),
-      cache_read: count(state.snapshot, "cached_input_tokens"),
-      cache_write: count(state.snapshot, "cache_write_input_tokens")
-    }
-
-    models =
-      case MapSet.to_list(state.models) do
-        [model] -> merge_model(acc.models, model, counts, state.messages)
-        _ -> acc.models
-      end
+    # Codex's `input_tokens` includes the cached prefix. Keep the same
+    # orthogonal axes Claude exposes: uncached input, cache read, cache write,
+    # and output. Reasoning output is already part of `output_tokens`; adding
+    # it again would double-count the response.
+    counts = codex_spend_counts(codex_raw_counts(state.snapshot))
+    models = merge_codex_models(acc.models, state)
 
     %{
       acc
@@ -368,6 +368,119 @@ defmodule Shuttle.TokenSpend do
         models: models
     }
   end
+
+  # A cumulative snapshot is only attributable when every snapshot carries the
+  # active model and the non-negative deltas reconstruct the final observation.
+  # This is intentionally stricter than "the file mentioned two models": a
+  # model name alone does not say which part of a running total it produced.
+  defp merge_codex_models(models, %{snapshots: snapshots} = state) do
+    snapshots = Enum.reverse(snapshots)
+
+    {by_model, _previous, complete?} =
+      Enum.reduce(snapshots, {%{}, blank_codex_raw_counts(), true}, fn snapshot,
+                                                                       {by_model, previous,
+                                                                        complete?} ->
+        current = codex_raw_counts(snapshot.usage)
+        delta = codex_delta(current, previous)
+        counts = codex_spend_counts(delta)
+        model = snapshot.model
+        messages = Map.get(state.messages_by_model, model, 0)
+
+        {
+          merge_codex_model(by_model, model, counts, messages),
+          current,
+          complete? and is_binary(model)
+        }
+      end)
+
+    expected = codex_spend_counts(codex_raw_counts(state.snapshot))
+
+    if complete? and codex_model_totals(by_model) == expected and
+         map_size(by_model) > 0 and
+         Enum.all?(Map.keys(state.messages_by_model), &Map.has_key?(by_model, &1)) and
+         Enum.sum(Map.values(state.messages_by_model)) == state.messages do
+      merge_codex_messages(by_model, state.messages_by_model)
+    else
+      models
+    end
+  end
+
+  defp merge_codex_models(models, _state), do: models
+
+  defp merge_codex_model(models, model, counts, messages) when is_binary(model) do
+    if positive_counts?(counts) or messages > 0 do
+      merge_model(models, model, counts, messages)
+    else
+      models
+    end
+  end
+
+  defp merge_codex_model(models, _model, _counts, _messages), do: models
+
+  defp merge_codex_messages(models, messages_by_model) do
+    Enum.reduce(messages_by_model, models, fn {model, messages}, acc ->
+      if messages > 0 do
+        Map.update!(acc, model, &Map.put(&1, :messages, messages))
+      else
+        acc
+      end
+    end)
+  end
+
+  defp codex_model_totals(models) do
+    Enum.reduce(models, %{input: 0, output: 0, cache_read: 0, cache_write: 0}, fn {
+                                                                                    _model,
+                                                                                    counts
+                                                                                  },
+                                                                                  acc ->
+      %{
+        input: acc.input + counts.input,
+        output: acc.output + counts.output,
+        cache_read: acc.cache_read + counts.cache_read,
+        cache_write: acc.cache_write + counts.cache_write
+      }
+    end)
+  end
+
+  defp codex_raw_counts(usage) do
+    %{
+      input_tokens: count(usage, "input_tokens"),
+      cached_input_tokens: count(usage, "cached_input_tokens"),
+      cache_write_input_tokens: count(usage, "cache_write_input_tokens"),
+      output_tokens: count(usage, "output_tokens")
+    }
+  end
+
+  defp blank_codex_raw_counts do
+    %{
+      input_tokens: 0,
+      cached_input_tokens: 0,
+      cache_write_input_tokens: 0,
+      output_tokens: 0
+    }
+  end
+
+  defp codex_delta(current, previous) do
+    Map.new(current, fn {key, value} -> {key, max(value - Map.get(previous, key, 0), 0)} end)
+  end
+
+  defp codex_spend_counts(raw) do
+    %{
+      input: max(raw.input_tokens - raw.cached_input_tokens, 0),
+      output: raw.output_tokens,
+      cache_read: raw.cached_input_tokens,
+      cache_write: raw.cache_write_input_tokens
+    }
+  end
+
+  defp positive_counts?(counts) do
+    counts.input > 0 or counts.output > 0 or counts.cache_read > 0 or counts.cache_write > 0
+  end
+
+  defp bump_message_model(messages, model) when is_binary(model),
+    do: Map.update(messages, model, 1, &(&1 + 1))
+
+  defp bump_message_model(messages, _model), do: messages
 
   defp merge_model(models, model, counts, messages) when is_binary(model) do
     model_counts = Map.put(counts, :messages, messages)

@@ -20,7 +20,9 @@ defmodule ShuttleWeb.SpendController do
   recorded. Neither step estimates: a session whose transcript this host cannot
   read is listed with `found: false` and zeroed counters, and still counts as
   one session in its fiber's rollup, so "3 sessions, 2 measured" is legible
-  rather than silently averaged away.
+  rather than silently averaged away. The rollup deduplicates repeated ledger
+  rows for the same session: dispatch/resume records are provenance events,
+  while a transcript's spend is a lifetime observation and must be added once.
 
   Sessions with no ledger row — an interactive terminal that never claimed a
   fiber — are out of scope by construction: this endpoint walks the ledger, so
@@ -139,13 +141,33 @@ defmodule ShuttleWeb.SpendController do
     |> Enum.group_by(&field(&1, :fiber))
     |> Enum.reject(fn {fiber, _rows} -> is_nil(fiber) end)
     |> Enum.map(fn {fiber, rows} ->
-      rows
+      spend_rows = unique_session_rows(rows)
+
+      spend_rows
       |> Enum.map(&as_spend/1)
       |> TokenSpend.total()
       |> Map.put(:fiber, fiber)
-      |> Map.put(:measured, Enum.count(rows, &(field(&1, :found) == true)))
+      |> Map.put(:measured, Enum.count(spend_rows, &(field(&1, :found) == true)))
     end)
     |> Enum.sort_by(&(-(&1.input + &1.output + &1.cache_read + &1.cache_write)))
+  end
+
+  # A session can have several structural ledger rows (dispatch, claim, and
+  # resume). Each row points at the same append-only transcript, so summing
+  # them would multiply lifetime spend by the number of times the worker was
+  # observed. Keep every row in the session feed for provenance, but count one
+  # spend observation per session in the fiber rollup. Malformed rows without a
+  # session remain distinct rather than collapsing into one invented session.
+  defp unique_session_rows(rows) do
+    rows
+    |> Enum.with_index()
+    |> Enum.uniq_by(fn {row, index} ->
+      case field(row, :session) do
+        session when is_binary(session) and session != "" -> {:session, session}
+        _ -> {:row, index}
+      end
+    end)
+    |> Enum.map(&elem(&1, 0))
   end
 
   defp as_spend(row) do

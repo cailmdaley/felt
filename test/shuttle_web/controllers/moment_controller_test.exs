@@ -821,11 +821,12 @@ defmodule ShuttleWeb.MomentControllerTest do
   describe "Shuttle.Moment — Codex rollouts (the third harness)" do
     @absent_root "/nope/not/here"
 
-    defp write_codex_tree(records) do
+    defp write_codex_tree(records),
+      do: write_codex_tree_at(records, Shuttle.HarnessPaths.local_today())
+
+    defp write_codex_tree_at(records, date) do
       root =
         Path.join(System.tmp_dir!(), "shuttle_moment_codex_#{System.unique_integer([:positive])}")
-
-      date = Shuttle.HarnessPaths.local_today()
 
       dir =
         Path.join([
@@ -901,13 +902,44 @@ defmodule ShuttleWeb.MomentControllerTest do
              ) == nil
     end
 
+    test "finds a historical Codex rollout outside the capture date fan-out" do
+      root =
+        write_codex_tree_at(
+          [codex_message(@t0 + 1_000, "user", [codex_text("input_text", "old codex turn")])],
+          Date.add(Shuttle.HarnessPaths.local_today(), -7)
+        )
+
+      assert Moment.transcript_path(@session,
+               root: @absent_root,
+               pi_root: @absent_root,
+               codex_root: root
+             ) =~ "#{@session}.jsonl"
+
+      assert [%{text: "old codex turn"}] =
+               Moment.excerpts(@session, @t0, @t0 + 10_000,
+                 root: @absent_root,
+                 pi_root: @absent_root,
+                 codex_root: root
+               )
+    end
+
     test "normalizes words, tools, delegation and peer returns into the shared reader" do
       root =
         write_codex_tree([
+          %{
+            "type" => "session_meta",
+            "timestamp" => iso(@t0),
+            "payload" => %{"agent_nickname" => nil}
+          },
           codex_message(@t0 + 1_000, "user", [codex_text("input_text", "hello codex")]),
           codex_message(@t0 + 1_500, "developer", [codex_text("input_text", "injected context")]),
           codex_message(@t0 + 2_000, "assistant", [codex_text("output_text", "I can help.")]),
-          codex_custom_call(@t0 + 3_000, "exec-1", "exec", "git status --short"),
+          codex_custom_call(
+            @t0 + 3_000,
+            "exec-1",
+            "exec",
+            "const result = await tools.exec_command({cmd: \"git status --short\"});"
+          ),
           codex_tool_output(@t0 + 3_500, "exec-1", [codex_text("input_text", "ok")]),
           codex_function_call(@t0 + 4_000, "spawn-1", "spawn_agent", %{
             "task_name" => "reviewer",
@@ -917,8 +949,14 @@ defmodule ShuttleWeb.MomentControllerTest do
           codex_item(@t0 + 6_000, %{
             "type" => "agent_message",
             "author" => "reviewer",
-            "recipient" => "codex-luna",
+            "recipient" => "/root",
             "content" => [codex_text("input_text", "peer report")]
+          }),
+          codex_item(@t0 + 6_500, %{
+            "type" => "agent_message",
+            "author" => "/root",
+            "recipient" => "/root/reviewer",
+            "content" => [codex_text("input_text", "outgoing coordination")]
           }),
           codex_item(@t0 + 7_000, %{"type" => "reasoning", "summary" => []})
         ])
@@ -938,8 +976,46 @@ defmodule ShuttleWeb.MomentControllerTest do
                {"return", "reviewer", "peer report"}
              ]
 
-      assert moment.tool_lines == ["Bash — git status --short", "Subagent"]
+      assert moment.tool_lines == ["Exec", "Subagent"]
       assert moment.tool_count == 2
+    end
+
+    test "does not turn a spawn launch receipt into a peer report" do
+      root =
+        write_codex_tree([
+          %{
+            "type" => "session_meta",
+            "timestamp" => iso(@t0),
+            "payload" => %{"agent_nickname" => nil}
+          },
+          codex_function_call(@t0 + 1_000, "spawn-1", "spawn_agent", %{
+            "task_name" => "reviewer",
+            "message" => "gAAAA-encrypted-prompt"
+          }),
+          codex_tool_output(
+            @t0 + 2_000,
+            "spawn-1",
+            Jason.encode!(%{"task_name" => "/root/reviewer"})
+          ),
+          codex_item(@t0 + 3_000, %{
+            "type" => "agent_message",
+            "author" => "reviewer",
+            "recipient" => "/root",
+            "content" => [codex_text("input_text", "real peer report")]
+          })
+        ])
+
+      assert Enum.map(
+               Moment.excerpts(@session, @t0, @t0 + 10_000,
+                 root: @absent_root,
+                 pi_root: @absent_root,
+                 codex_root: root
+               ),
+               &{&1.kind, &1.name, &1.text}
+             ) == [
+               {"spawn", "reviewer", "reviewer"},
+               {"return", "reviewer", "real peer report"}
+             ]
     end
   end
 

@@ -426,6 +426,9 @@ func installClaudePluginAtSource(repoRoot string) error {
 	if err := runClaudeCLI("plugin", op, pluginRef); err != nil {
 		return fmt.Errorf("%s %s: %w", gerund, pluginRef, err)
 	}
+	if removed := pruneLegacyClaudeHooks(); removed > 0 {
+		fmt.Printf("✓ Removed %d legacy Claude hook entries (now served via plugin)\n", removed)
+	}
 
 	fmt.Println()
 	fmt.Println("Restart Claude Code for changes to take effect.")
@@ -857,6 +860,14 @@ func codexHooksPath() (string, error) {
 	return filepath.Join(home, ".codex", "hooks.json"), nil
 }
 
+func claudeSettingsPath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("getting home directory: %w", err)
+	}
+	return filepath.Join(home, ".claude", "settings.json"), nil
+}
+
 // codexPluginRef is the plugin identifier used in `~/.codex/config.toml`'s
 // `[plugins."<ref>"]` block. Matches the marketplace name declared in the
 // repo's marketplace.json so `claude` and `codex` see the same plugin.
@@ -1079,6 +1090,48 @@ func pruneLegacyCodexHooks() int {
 		return 0
 	}
 	if err := os.WriteFile(hooksPath, out, 0644); err != nil {
+		return 0
+	}
+	return removed
+}
+
+// pruneLegacyClaudeHooks removes the old loom-level shuttle hook from Claude's
+// settings after the plugin has taken over. The legacy hook and the plugin both
+// write the same event stream; leaving both installed would make every event
+// (especially PostToolUse) appear twice. Match only the known legacy basename,
+// preserve every unrelated Claude hook, and leave the file untouched when it
+// is absent or contains no legacy entry.
+func pruneLegacyClaudeHooks() int {
+	settingsPath, err := claudeSettingsPath()
+	if err != nil {
+		return 0
+	}
+	data, err := os.ReadFile(settingsPath)
+	if err != nil {
+		return 0
+	}
+	var settings map[string]interface{}
+	if err := json.Unmarshal(data, &settings); err != nil {
+		return 0
+	}
+	hooks, ok := settings["hooks"].(map[string]interface{})
+	if !ok {
+		return 0
+	}
+
+	removed := 0
+	for event := range hooks {
+		removed += len(pruneFeltHooks(hooks, event, "shuttle-hook.sh"))
+	}
+	if removed == 0 {
+		return 0
+	}
+
+	out, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return 0
+	}
+	if err := os.WriteFile(settingsPath, out, 0o644); err != nil {
 		return 0
 	}
 	return removed

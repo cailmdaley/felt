@@ -393,15 +393,65 @@ defmodule Shuttle.TokenSpendTest do
              }
     end
 
-    test "does not invent a per-model split after a model switch", %{root: root, path: path} do
+    test "finds a historical Codex rollout outside the capture date fan-out", %{root: root} do
+      date = Date.add(Shuttle.HarnessPaths.local_today(), -7)
+
+      dir =
+        Path.join([
+          root,
+          "#{date.year}",
+          String.pad_leading("#{date.month}", 2, "0"),
+          String.pad_leading("#{date.day}", 2, "0")
+        ])
+
+      File.mkdir_p!(dir)
+
+      path = Path.join(dir, "rollout-old-#{@session}.jsonl")
+
+      write!(path, [
+        codex_turn_context("gpt-5.6-luna"),
+        codex_token_count("2026-08-16T18:20:00.000Z")
+      ])
+
+      result = codex_spend(root)
+
+      assert result.found
+      assert result.input == 15
+      assert result.output == 3
+    end
+
+    test "attributes cumulative deltas to the active model after a model switch", %{
+      root: root,
+      path: path
+    } do
       write!(path, [
         codex_turn_context("gpt-5.6-luna"),
         codex_token_count("2026-08-23T18:20:00.000Z"),
+        codex_message("turn-1", "2026-08-23T18:20:00.500Z"),
         codex_turn_context("gpt-5.6-luna-mini"),
-        codex_token_count("2026-08-23T18:20:01.000Z", %{"input_tokens" => 31})
+        codex_message("turn-2", "2026-08-23T18:20:00.750Z"),
+        codex_token_count("2026-08-23T18:20:01.000Z", %{
+          "input_tokens" => 31,
+          "output_tokens" => 7
+        })
       ])
 
-      assert codex_spend(root).models == %{}
+      assert codex_spend(root).models == %{
+               "gpt-5.6-luna" => %{
+                 input: 15,
+                 output: 3,
+                 cache_read: 5,
+                 cache_write: 2,
+                 messages: 1
+               },
+               "gpt-5.6-luna-mini" => %{
+                 input: 11,
+                 output: 4,
+                 cache_read: 0,
+                 cache_write: 0,
+                 messages: 1
+               }
+             }
     end
   end
 end

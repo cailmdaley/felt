@@ -224,7 +224,13 @@ func renderEventLine(stdin io.Reader) (string, bool) {
 	}
 	if input.ToolName != "" {
 		line.Tool = input.ToolName
-		line.ToolInput = normalizeToolInput(input.ToolInput)
+		// PreToolUse is the event's one copy of the payload. PostToolUse still
+		// carries the tool name (which closes activity spans), but repeating the
+		// whole input doubles sensitive paths/content in the shared stream and
+		// makes a cross-harness event count look like two tool observations.
+		if eventType != "post_tool_use" {
+			line.ToolInput = normalizeToolInput(input.ToolInput)
+		}
 	}
 
 	encoded, err := encodeEventLine(line)

@@ -129,22 +129,24 @@ defmodule Shuttle.Moment do
   like a Claude one because by the time it is read, it is one.
 
   Codex's rollout is a stream of `response_item` envelopes. Conversation
-  messages carry `input_text`/`output_text` blocks, shell calls arrive as
+  messages carry `input_text`/`output_text` blocks, tool calls arrive as
   `custom_tool_call` or `function_call`, and their results carry the matching
   call id. Those records are translated into the same canonical shape. The
-  Codex `exec` tool is named `Bash` because that is the operation it performs;
-  other tool names remain visible rather than being guessed into Claude's
-  vocabulary. Developer messages, reasoning, and runtime bookkeeping are
-  excluded as machine context.
+  native `exec` operation stays named `Exec`: its payload is usually
+  orchestration source (`tools.exec_command(...)`), not a trustworthy shell
+  command to copy into a hover. Other tool names remain visible rather than
+  being guessed into Claude's vocabulary. Developer messages, reasoning, and
+  runtime bookkeeping are excluded as machine context.
 
   ## Bounds
 
   `@max_window_ms` (2 h) caps the window, `@cap` (6) the excerpts, `@max_chars`
   (280) each excerpt's text, `@tool_calls_cap` (6) the per-call tool listing
-  before it steps back to the aggregate. Lookup is a small set of bounded
-  `Path.wildcard/1` patterns over the three harness roots — never a recursive
-  walk — and the session id is validated as UUID-shaped first, so no
-  caller-supplied pattern reaches the filesystem.
+  before it steps back to the aggregate. Claude and pi use bounded
+  `Path.wildcard/1` patterns; Codex uses one UUID-validated date-tree glob so
+  an old Day/Week session remains readable without a recursive filesystem
+  walk. The session id is validated as UUID-shaped first, so no caller-supplied
+  pattern reaches the filesystem.
   """
 
   require Logger
@@ -512,9 +514,7 @@ defmodule Shuttle.Moment do
   defp pi_root(opts), do: Shuttle.HarnessPaths.pi_sessions_root(opts)
 
   defp codex_paths(session, opts) do
-    opts
-    |> Shuttle.HarnessPaths.codex_session_dirs()
-    |> Enum.map(&Path.join(&1, "rollout-*#{session}.jsonl"))
+    [Shuttle.HarnessPaths.codex_session_glob(session, opts)]
   end
 
   @doc """
@@ -529,7 +529,9 @@ defmodule Shuttle.Moment do
 
   # One pass, three harvests: the excerpts, the tool calls behind them, and the
   # spawn ids seen so far. Tools accumulate reversed — `tool_summary/1` is given
-  # them oldest-first.
+  # them oldest-first. Codex also carries the root/teammate identity in
+  # `session_meta`; it lets us distinguish a peer's incoming message from the
+  # parent sending one out without guessing from its prose.
   #
   # Spawn ids are collected from EVERY decoded line, in window or not. A
   # delegation's report can land an hour after the call that made it, and the
@@ -537,26 +539,29 @@ defmodule Shuttle.Moment do
   # map built only from in-window lines would leave most returns anonymous.
   # This costs nothing — the whole file is decoded either way.
   defp stream_window(path, from_ms, to_ms, max_chars) do
-    {excerpts, tools, _spawns} =
+    {excerpts, tools, _spawns, _codex_self} =
       path
       |> File.stream!()
-      |> Enum.reduce({[], [], %{}}, fn line, {excerpts, tools, spawns} ->
+      |> Enum.reduce({[], [], %{}, nil}, fn line, {excerpts, tools, spawns, codex_self} ->
         case decode_record(line) do
           {:ok, record} ->
+            codex_self = Map.get(record, "codex_self") || codex_self
+            record = Map.put(record, :codex_self, codex_self)
             spawns = note_spawns(spawns, record)
 
             if record.at_ms >= from_ms and record.at_ms <= to_ms do
               {
                 excerpt_for(record, max_chars, spawns) ++ excerpts,
                 Enum.reverse(tool_calls(record)) ++ tools,
-                spawns
+                spawns,
+                codex_self
               }
             else
-              {excerpts, tools, spawns}
+              {excerpts, tools, spawns, codex_self}
             end
 
           :skip ->
-            {excerpts, tools, spawns}
+            {excerpts, tools, spawns, codex_self}
         end
       end)
 
@@ -607,6 +612,16 @@ defmodule Shuttle.Moment do
       "agent_message" -> codex_agent_message(raw, payload)
       _ -> {:ok, raw}
     end
+  end
+
+  # Codex names the root agent `/root` and teammate sessions
+  # `/root/<agent_nickname>`. This is the stable identity used by native
+  # `agent_message` routing; it is not derived from the message body.
+  defp normalize_record(%{"type" => "session_meta", "payload" => payload} = raw)
+       when is_map(payload) do
+    nickname = payload["agent_nickname"]
+    self = if is_binary(nickname) and nickname != "", do: "/root/#{nickname}", else: "/root"
+    {:ok, Map.put(raw, "codex_self", self)}
   end
 
   defp normalize_record(raw), do: {:ok, raw}
@@ -677,6 +692,8 @@ defmodule Shuttle.Moment do
        "type" => "codex_agent_message",
        "timestamp" => raw["timestamp"],
        "name" => agent_name(payload["author"]),
+       "author" => payload["author"],
+       "recipient" => payload["recipient"],
        "content" => from_content(codex_content(payload["content"]))
      }}
   end
@@ -697,16 +714,21 @@ defmodule Shuttle.Moment do
 
   defp codex_content(_), do: []
 
-  # `exec` is semantically the same shell operation Claude calls `Bash`; the
-  # remaining native coordination names stay visible, just rendered readably.
-  defp codex_tool_name("exec"), do: "Bash"
+  # Keep Codex's orchestration operation distinct from Claude's `Bash`: the
+  # payload is generated harness source, not a shell command we can safely
+  # summarize. The remaining native coordination names stay visible, just
+  # rendered readably.
+  defp codex_tool_name("exec"), do: "Exec"
   defp codex_tool_name("spawn_agent"), do: "Subagent"
 
   defp codex_tool_name(name) do
     name |> String.split("_") |> Enum.map_join(" ", &String.capitalize/1)
   end
 
-  defp codex_tool_input("exec", input) when is_binary(input), do: %{"command" => input}
+  # Codex's exec payload is usually orchestration source for the harness
+  # (tools.exec_command(...)), not a shell command. Keep the call visible
+  # under its native name without copying generated source into a hover hint.
+  defp codex_tool_input("exec", _input), do: %{}
   defp codex_tool_input(_name, input) when is_map(input), do: input
 
   defp codex_tool_input(_name, input) when is_binary(input) do
@@ -834,12 +856,24 @@ defmodule Shuttle.Moment do
   end
 
   defp delegation(
-         %{"type" => "codex_agent_message", "content" => content, "name" => name} = record,
+         %{
+           "type" => "codex_agent_message",
+           "content" => content,
+           "name" => name,
+           "recipient" => recipient,
+           codex_self: self
+         } = record,
          max,
          _spawns
        )
-       when is_binary(content),
+       when is_binary(content) and is_binary(recipient) and recipient == self,
        do: mark(record, "user", "return", name, content, max)
+
+  # An outgoing native message is already represented by the parent tool call;
+  # it is not a peer return. If identity metadata is absent, suppressing the
+  # record is the honest fallback rather than presenting directionless machine
+  # traffic as something the other agent said to us.
+  defp delegation(%{"type" => "codex_agent_message"}, _max, _spawns), do: []
 
   defp delegation(
          %{"type" => "user", "message" => %{"content" => content}} = record,
@@ -913,12 +947,25 @@ defmodule Shuttle.Moment do
   # drawing them would put a line on the rail for nothing having been said.
   defp report(record, name, text, max) when is_binary(text) do
     if String.contains?(text, @internal_result) or
-         String.starts_with?(String.trim_leading(text), @idle_report),
+         String.starts_with?(String.trim_leading(text), @idle_report) or
+         codex_launch_receipt?(text),
        do: [],
        else: mark(record, "user", "return", name, text, max)
   end
 
   defp report(_record, _name, _text, _max), do: []
+
+  # Codex returns a small JSON receipt for an asynchronous `spawn_agent` call:
+  # `{"task_name":"/root/reviewer"}`. It is not the worker's report. The
+  # native peer `agent_message` that follows is the readable return, so keep
+  # this machine-only shape out of the delegation rail while still allowing
+  # arbitrary human-readable JSON reports through.
+  defp codex_launch_receipt?(text) do
+    case Jason.decode(String.trim(text)) do
+      {:ok, %{"task_name" => task_name}} when is_binary(task_name) -> true
+      _ -> false
+    end
+  end
 
   defp mark(record, role, kind, name, text, max) do
     case trim(text || "", delegation_chars(max)) do
