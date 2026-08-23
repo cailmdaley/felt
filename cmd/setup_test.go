@@ -384,10 +384,6 @@ func TestFindPluginDir_EnvVar(t *testing.T) {
 // marketplace before it installs anything. Returns a func reading the log.
 func fakeClaudeOnPath(t *testing.T, listJSON string) func() string {
 	t.Helper()
-	// installPluginViaCLI also performs the legacy Claude-hook migration. Keep
-	// these CLI orchestration tests hermetic rather than letting that migration
-	// inspect the developer's real ~/.claude/settings.json.
-	t.Setenv("HOME", t.TempDir())
 	dir := t.TempDir()
 	log := filepath.Join(dir, "calls.log")
 	marketplaceJSON := `[{"name":"` + marketplaceName + `","source":"directory","path":"/tmp/felt-repo"}]`
@@ -480,6 +476,10 @@ func TestPruneLegacyClaudeHooks(t *testing.T) {
 // which hard-fails on a plugin that isn't installed. The op must follow
 // whether the PLUGIN is installed.
 func TestInstallPluginViaCLI_OpFollowsPluginNotMarketplace(t *testing.T) {
+	// installPluginViaCLI also performs the legacy Claude-hook migration. Keep
+	// these CLI orchestration tests hermetic rather than letting that migration
+	// inspect the developer's real ~/.claude/settings.json.
+	t.Setenv("HOME", t.TempDir())
 	pluginRef := "felt@" + marketplaceName
 
 	t.Run("plugin absent → install", func(t *testing.T) {
