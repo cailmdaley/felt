@@ -291,3 +291,142 @@ func TestApplyOriginFreshnessDoesNotChangeAvailability(t *testing.T) {
 		t.Fatalf("origin freshness and transcript availability were conflated: %#v", got[0])
 	}
 }
+
+func resetSessionsFlags() func() {
+	return func() {
+		sessionsCommitSHA, sessionsMaterialize, sessionsDir = "", false, ""
+	}
+}
+
+// One daemon fake serving all four composite/transcript surfaces, so reverse
+// lookup and materialization can be exercised end to end.
+func provenanceDaemon(t *testing.T, transcriptBody []byte) *httptest.Server {
+	t.Helper()
+	digest := sha256.Sum256(transcriptBody)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case sessionsCompositePath:
+			_, _ = w.Write([]byte(`{"records":[
+              {"fiber":"old/name","uid":"01UID","session":"` + provenanceSession + `","host":"candide","harness":"codex","kind":"dispatch","at":1},
+              {"fiber":"new/name","uid":"01UID","session":"` + provenanceSession + `","host":"candide","harness":"codex","kind":"resume","at":2}
+            ]}`))
+		case "/api/v1/commits/composite":
+			_, _ = w.Write([]byte(`{"records":[{"sha":"79def80abc123","session":"` + provenanceSession + `","kind":"commit","at":5}]}`))
+		case "/api/v1/fibers/composite":
+			_, _ = w.Write([]byte(`{"fibers":[{"fiber":{"id":"01UID","slug":"new/name","status":"closed","tempered":true}}]}`))
+		case transcriptPath:
+			_, _ = w.Write([]byte(`{"session":"` + provenanceSession + `","availability":"available_remote","host":"candide","harness":"codex","source_path":"/remote/codex.jsonl","byte_count":` + strconv.Itoa(len(transcriptBody)) + `,"sha256":"` + hex.EncodeToString(digest[:]) + `"}`))
+		case "/api/v1/transcript/raw":
+			w.Header().Set("X-Transcript-Byte-Count", strconv.Itoa(len(transcriptBody)))
+			w.Header().Set("X-Transcript-SHA256", hex.EncodeToString(digest[:]))
+			_, _ = w.Write(transcriptBody)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	return server
+}
+
+func TestShuttleSessions_ReverseLookupBySessionUUID(t *testing.T) {
+	defer saveShuttleGlobals()()
+	defer resetSessionsFlags()()
+	server := provenanceDaemon(t, []byte("x\n"))
+	t.Setenv("SHUTTLE_DAEMON_URL", server.URL)
+	out, err := runCommand(t, t.TempDir(), "shuttle", "sessions", provenanceSession, "--json")
+	if err != nil {
+		t.Fatalf("reverse lookup: %v\n%s", err, out)
+	}
+	var result struct {
+		Owner    sessionOwner        `json:"owner"`
+		Sessions []SessionProvenance `json:"sessions"`
+	}
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		t.Fatalf("decode: %v\n%s", err, out)
+	}
+	if result.Owner.Fiber != "new/name" || result.Owner.UID != "01UID" {
+		t.Fatalf("owner = %#v, want most-recent fiber new/name", result.Owner)
+	}
+	if result.Owner.Status != "closed" || !result.Owner.Tempered {
+		t.Fatalf("disposition not resolved: %#v", result.Owner)
+	}
+	if len(result.Sessions) != 1 || len(result.Sessions[0].Events) != 2 {
+		t.Fatalf("owning fiber's session rows missing: %#v", result.Sessions)
+	}
+}
+
+func TestShuttleSessions_ReverseLookupByCommit(t *testing.T) {
+	defer saveShuttleGlobals()()
+	defer resetSessionsFlags()()
+	server := provenanceDaemon(t, []byte("x\n"))
+	t.Setenv("SHUTTLE_DAEMON_URL", server.URL)
+	out, err := runCommand(t, t.TempDir(), "shuttle", "sessions", "--commit", "79def80", "--json")
+	if err != nil {
+		t.Fatalf("commit lookup: %v\n%s", err, out)
+	}
+	var result struct {
+		Owner sessionOwner `json:"owner"`
+	}
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Owner.Session != provenanceSession || result.Owner.Fiber != "new/name" {
+		t.Fatalf("commit did not resolve through the ledgers: %#v", result.Owner)
+	}
+}
+
+func TestShuttleSessions_UnrecordedCommitIsHonest(t *testing.T) {
+	defer saveShuttleGlobals()()
+	defer resetSessionsFlags()()
+	server := provenanceDaemon(t, []byte("x\n"))
+	t.Setenv("SHUTTLE_DAEMON_URL", server.URL)
+	_, err := runCommand(t, t.TempDir(), "shuttle", "sessions", "--commit", "deadbeef")
+	if err == nil || !strings.Contains(err.Error(), "not recorded") {
+		t.Fatalf("want honest not-recorded error, got %v", err)
+	}
+}
+
+func TestShuttleSessions_MaterializeWritesManifestAndTranscripts(t *testing.T) {
+	defer saveShuttleGlobals()()
+	defer resetSessionsFlags()()
+	body := []byte("{\"type\":\"response_item\"}\n")
+	server := provenanceDaemon(t, body)
+	t.Setenv("SHUTTLE_DAEMON_URL", server.URL)
+	t.Setenv("FELT_TRANSCRIPT_CACHE_DIR", t.TempDir())
+	dir := t.TempDir()
+	out, err := runCommand(t, t.TempDir(), "shuttle", "sessions", "new/name", "--materialize", "--dir", dir, "--json")
+	if err != nil {
+		t.Fatalf("materialize: %v\n%s", err, out)
+	}
+	var result struct {
+		Manifest string `json:"manifest"`
+	}
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Manifest != filepath.Join(dir, "manifest.json") {
+		t.Fatalf("manifest path = %q", result.Manifest)
+	}
+	raw, err := os.ReadFile(result.Manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest transcriptManifest
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	if manifest.Fiber != "new/name" || manifest.UID != "01UID" || len(manifest.Sessions) != 1 {
+		t.Fatalf("manifest = %#v", manifest)
+	}
+	item := manifest.Sessions[0]
+	if item.Availability != "available_remote" || item.LocalPath == "" || len(item.Events) != 2 {
+		t.Fatalf("manifest item incomplete: %#v", item)
+	}
+	got, err := os.ReadFile(item.LocalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(body) {
+		t.Fatalf("materialized transcript bytes changed: %q", got)
+	}
+}

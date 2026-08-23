@@ -343,25 +343,248 @@ func applyOriginFreshness(rows []SessionProvenance, origins map[string]any) []Se
 	return rows
 }
 
+// sessionOwner is the reverse-lookup result: from a session UUID or commit SHA
+// back to the owning fiber and its disposition, drawn from the ledgers and the
+// composite fiber feed — never from raw transcript text.
+type sessionOwner struct {
+	Query    string `json:"query"`
+	Commit   string `json:"commit,omitempty"`
+	Session  string `json:"session,omitempty"`
+	Fiber    string `json:"fiber"`
+	UID      string `json:"uid"`
+	Status   string `json:"status,omitempty"`
+	Tempered bool   `json:"tempered,omitempty"`
+}
+
+// commitSession joins a commit SHA (prefix accepted) to its recorded session
+// through the composite commit ledger. "Not recorded" is the honest answer for
+// commits made before the hook existed or outside a harness session — it is a
+// coverage boundary, not proof the commit has no session.
+func commitSession(sha string) (string, error) {
+	body, err := getDaemon(daemonURL()+"/api/v1/commits/composite", daemonReadTimeout)
+	if err != nil {
+		return "", err
+	}
+	var response struct {
+		Records []struct {
+			SHA     string `json:"sha"`
+			Session string `json:"session"`
+		} `json:"records"`
+	}
+	if err := json.Unmarshal(body, &response); err != nil {
+		return "", fmt.Errorf("parsing commit ledger: %w", err)
+	}
+	needle := strings.ToLower(sha)
+	for _, row := range response.Records {
+		if strings.HasPrefix(strings.ToLower(row.SHA), needle) && row.Session != "" {
+			return row.Session, nil
+		}
+	}
+	return "", fmt.Errorf("commit %s is not recorded in the commit ledger (commits before the hook existed, or outside a harness session, are not covered)", sha)
+}
+
+// sessionOwningFiber finds the ledger rows for a session UUID and returns the
+// most recent fiber path plus the intrinsic UID.
+func sessionOwningFiber(records []SessionProvenance, session string) (string, string, error) {
+	fiber, uid := "", ""
+	var at int64 = -1
+	for _, row := range records {
+		if row.Session != session {
+			continue
+		}
+		if row.At >= at {
+			at = row.At
+			if row.fiber() != "" {
+				fiber = row.fiber()
+			}
+			if row.UID != "" {
+				uid = row.UID
+			}
+		}
+	}
+	if fiber == "" && uid == "" {
+		return "", "", fmt.Errorf("session %s is not recorded in the session ledger (sessions before the ledger existed, or never paired with a fiber, are not covered)", session)
+	}
+	return fiber, uid, nil
+}
+
+// fiberDisposition reads status and the human verdict from the composite fiber
+// feed. Absence of the fiber (e.g. deleted) leaves both zero-valued.
+func fiberDisposition(uid string) (string, bool) {
+	body, err := getDaemon(daemonURL()+"/api/v1/fibers/composite", daemonReadTimeout)
+	if err != nil {
+		return "", false
+	}
+	var response struct {
+		Fibers []struct {
+			Fiber map[string]any `json:"fiber"`
+		} `json:"fibers"`
+	}
+	if json.Unmarshal(body, &response) != nil {
+		return "", false
+	}
+	for _, row := range response.Fibers {
+		id, _ := row.Fiber["id"].(string)
+		rowUID, _ := row.Fiber["uid"].(string)
+		if rowUID == "" {
+			rowUID = id
+		}
+		if rowUID != uid {
+			continue
+		}
+		status, _ := row.Fiber["status"].(string)
+		tempered, _ := row.Fiber["tempered"].(bool)
+		return status, tempered
+	}
+	return "", false
+}
+
+// transcriptManifest is the small local manifest written beside materialized
+// transcripts: enough for an agent to pick a file and know its provenance
+// without another daemon round-trip.
+type transcriptManifest struct {
+	Fiber    string                   `json:"fiber"`
+	UID      string                   `json:"uid"`
+	Sessions []transcriptManifestItem `json:"sessions"`
+}
+
+type transcriptManifestItem struct {
+	Session      string         `json:"session"`
+	Host         string         `json:"host,omitempty"`
+	Harness      string         `json:"harness,omitempty"`
+	Availability string         `json:"availability"`
+	SourcePath   string         `json:"source_path,omitempty"`
+	LocalPath    string         `json:"local_path,omitempty"`
+	ByteCount    int64          `json:"byte_count,omitempty"`
+	SHA256       string         `json:"sha256,omitempty"`
+	Events       []SessionEvent `json:"events,omitempty"`
+	Error        string         `json:"error,omitempty"`
+}
+
+// materializeFiberTranscripts resolves every available transcript to an
+// ordinary local file (native path when local, verified cache copy when
+// remote) and writes manifest.json into dir. Unavailable sessions stay in the
+// manifest with their explicit availability — unavailable is never absent.
+func materializeFiberTranscripts(fiber, uid string, rows []SessionProvenance, dir string) (string, error) {
+	if dir == "" {
+		cache, err := transcriptCacheDir()
+		if err != nil {
+			return "", err
+		}
+		dir = filepath.Join(cache, "fibers", uid)
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", fmt.Errorf("creating manifest directory: %w", err)
+	}
+	manifest := transcriptManifest{Fiber: fiber, UID: uid}
+	for _, row := range rows {
+		item := transcriptManifestItem{
+			Session:      row.Session,
+			Host:         row.Transcript.Host,
+			Harness:      row.Transcript.Harness,
+			Availability: row.Transcript.Availability,
+			SourcePath:   transcriptPathForReceipt(row.Transcript),
+			ByteCount:    row.Transcript.ByteCount,
+			SHA256:       row.Transcript.SHA256,
+			Events:       row.Events,
+		}
+		if item.Host == "" {
+			item.Host = row.Host
+		}
+		if item.Harness == "" {
+			item.Harness = row.Harness
+		}
+		switch row.Transcript.Availability {
+		case "available_local":
+			item.LocalPath = transcriptPathForReceipt(row.Transcript)
+		case "available_remote":
+			path, err := fetchRemoteTranscript(row.Transcript)
+			if err != nil {
+				// A failed transfer is a distinct condition from an
+				// unreachable host: keep the availability, record why the
+				// local copy is missing.
+				item.Error = err.Error()
+			} else {
+				item.LocalPath = path
+			}
+		}
+		manifest.Sessions = append(manifest.Sessions, item)
+	}
+	payload, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	path := filepath.Join(dir, "manifest.json")
+	if err := os.WriteFile(path, append(payload, '\n'), 0o600); err != nil {
+		return "", fmt.Errorf("writing manifest: %w", err)
+	}
+	return path, nil
+}
+
+var (
+	sessionsCommitSHA   string
+	sessionsMaterialize bool
+	sessionsDir         string
+)
+
 var shuttleSessionsCmd = &cobra.Command{
-	Use:   "sessions <fiber>",
+	Use:   "sessions <fiber|session-uuid>",
 	Short: "Discover Shuttle sessions and transcript availability for a fiber",
 	Long: `Reads Shuttle's composite session ledger and reports the sessions that
 belong to a fiber UID, including historical fiber paths, host, harness, and explicit transcript
 availability. It does not read or search transcript content; use the native
-harness jq/rg recipes on the path returned by 'felt shuttle transcript'.`,
-	Args: cobra.ExactArgs(1),
+harness jq/rg recipes on the path returned by 'felt shuttle transcript'.
+
+Reverse lookup: pass a session UUID instead of a fiber, or --commit <sha>, to
+resolve the owning fiber and its disposition from the ledgers, then list that
+fiber's sessions.
+
+--materialize resolves every available transcript to an ordinary local file
+(native path locally, verified cache copy for remote hosts) and writes a
+manifest.json carrying session, host, harness, lineage events, source path,
+and availability.`,
+	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if len(args) == 0 && sessionsCommitSHA == "" {
+			return fmt.Errorf("expected a fiber, a session UUID, or --commit <sha>")
+		}
 		ledger, err := fetchSessionLedger()
 		if err != nil {
 			return err
 		}
-		uid, rows, addressed, err := resolveProvenanceRows(args[0], ledger.Records)
+		query := ""
+		if len(args) == 1 {
+			query = args[0]
+		}
+		var owner *sessionOwner
+		if sessionsCommitSHA != "" {
+			session, err := commitSession(sessionsCommitSHA)
+			if err != nil {
+				return err
+			}
+			fiber, uid, err := sessionOwningFiber(ledger.Records, session)
+			if err != nil {
+				return err
+			}
+			owner = &sessionOwner{Query: query, Commit: sessionsCommitSHA, Session: session, Fiber: fiber, UID: uid}
+			query = fiber
+		} else if sessionUUIDPattern.MatchString(query) {
+			fiber, uid, err := sessionOwningFiber(ledger.Records, query)
+			if err != nil {
+				return err
+			}
+			owner = &sessionOwner{Query: query, Session: query, Fiber: fiber, UID: uid}
+			query = fiber
+		}
+		if owner != nil {
+			owner.Status, owner.Tempered = fiberDisposition(owner.UID)
+		}
+		uid, rows, addressed, err := resolveProvenanceRows(query, ledger.Records)
 		if err != nil {
 			return err
 		}
-		rows = addIdentityPending(args[0], uid, rows, addressed)
-		if compositeFiberRuntimePending(args[0]) {
+		rows = addIdentityPending(query, uid, rows, addressed)
+		if compositeFiberRuntimePending(query) {
 			pending := true
 			for _, row := range rows {
 				if row.Kind == "identity_pending" {
@@ -370,7 +593,7 @@ harness jq/rg recipes on the path returned by 'felt shuttle transcript'.`,
 				}
 			}
 			if pending {
-				rows = append(rows, SessionProvenance{Fiber: args[0], UID: uid, Kind: "identity_pending", Transcript: TranscriptReceipt{Availability: "identity_pending"}})
+				rows = append(rows, SessionProvenance{Fiber: query, UID: uid, Kind: "identity_pending", Transcript: TranscriptReceipt{Availability: "identity_pending"}})
 			}
 		}
 		rows = applyOriginFreshness(rows, ledger.Origins)
@@ -383,11 +606,38 @@ harness jq/rg recipes on the path returned by 'felt shuttle transcript'.`,
 			}
 			return rows[i].Session < rows[j].Session
 		})
+		manifestPath := ""
+		if sessionsMaterialize {
+			manifestPath, err = materializeFiberTranscripts(query, uid, rows, sessionsDir)
+			if err != nil {
+				return err
+			}
+		}
 		if jsonOutput {
+			if owner != nil || manifestPath != "" {
+				return outputJSON(map[string]any{
+					"owner":    owner,
+					"manifest": manifestPath,
+					"sessions": rows,
+				})
+			}
 			return outputJSON(rows)
 		}
+		if owner != nil {
+			disposition := owner.Status
+			if disposition == "" {
+				disposition = "unknown"
+			}
+			if owner.Tempered {
+				disposition += " (tempered)"
+			}
+			fmt.Printf("owner: %s  uid: %s  disposition: %s\n", owner.Fiber, owner.UID, disposition)
+		}
+		if manifestPath != "" {
+			fmt.Printf("manifest: %s\n", manifestPath)
+		}
 		if len(rows) == 0 {
-			fmt.Printf("no recorded Shuttle sessions for %s\n", args[0])
+			fmt.Printf("no recorded Shuttle sessions for %s\n", query)
 			return nil
 		}
 		fmt.Printf("%-38s %-16s %-16s %-14s %-18s %s\n", "SESSION", "HOST", "HARNESS", "KIND", "AVAILABILITY", "FIBER")
@@ -650,6 +900,9 @@ func runTranscriptJSON(receipt TranscriptReceipt) error {
 }
 
 func init() {
+	shuttleSessionsCmd.Flags().StringVar(&sessionsCommitSHA, "commit", "", "reverse lookup: resolve a commit SHA (prefix accepted) to its owning fiber via the commit ledger")
+	shuttleSessionsCmd.Flags().BoolVar(&sessionsMaterialize, "materialize", false, "resolve every available transcript to an ordinary local file and write manifest.json")
+	shuttleSessionsCmd.Flags().StringVar(&sessionsDir, "dir", "", "directory for the materialized manifest (default: the felt transcript cache, keyed by fiber UID)")
 	shuttleCmd.AddCommand(shuttleSessionsCmd)
 	shuttleCmd.AddCommand(shuttleTranscriptCmd)
 }
