@@ -46,10 +46,11 @@ codex plugin add felt@cailmdaley-felt
 pi install git:github.com/cailmdaley/felt[@v<tag>]
 ```
 
-None of them need a local checkout — the CLI clones straight from
-GitHub. A tagged `felt` binary pins the integration to the matching tag; a `dev`
-build tracks the default branch, so the installed content always matches the
-binary that installed it.
+None of them need a local checkout. Felt acquires GitHub sources into a
+disposable checkout, validates the complete plugin payload, promotes one local
+generation, and then asks the harness CLI to install it. A tagged `felt` binary
+pins acquisition to the matching tag; a `dev` build tracks the default branch,
+so the installed content always matches the binary that installed it.
 
 All three commands are idempotent, so re-running is safe. All take `--uninstall` to
 remove what they installed. `felt uninstall` clears the harnesses at once, and

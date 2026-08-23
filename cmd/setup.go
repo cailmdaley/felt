@@ -34,10 +34,9 @@ func defaultMarketplaceRef() string {
 	return marketplaceRepo + "#v" + Version
 }
 
-// claudeMarketplaceClonePath is the directory Claude Code clones a
-// GitHub-sourced marketplace into. `felt setup skills` reads from here as a
-// fallback when no --source / $FELT_PLUGIN_DIR is given, so linking skills
-// works after `felt setup claude` without a local checkout.
+// claudeMarketplaceClonePath is the legacy directory Claude Code used for a
+// GitHub-sourced marketplace. It remains a fallback for installations made by
+// older felt versions; current setup promotes a validated local runtime first.
 func claudeMarketplaceClonePath() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -64,11 +63,12 @@ stamps updated-at on a directly edited fiber, and an activity-event hook
 records harness events for shuttle (writing nothing unless ~/.shuttle
 exists). Idempotent — re-running is safe.
 
-By default, registers ` + marketplaceRepo + ` directly from GitHub —
-Claude Code clones the marketplace itself, so no local checkout is
-required (brew or curl installs work). Tagged felt binaries pin the
-plugin to the matching tag (e.g. ` + marketplaceRepo + `#v1.0.0); ` + "`dev`" + `
-builds track the default branch.
+By default, acquires ` + marketplaceRepo + ` from GitHub into a disposable
+checkout, validates and promotes the complete payload, then registers the
+promoted local generation with Claude Code. No local checkout is required
+(brew or curl installs work). Tagged felt binaries pin the plugin to the
+matching tag (e.g. ` + marketplaceRepo + `#v1.0.0); ` + "`dev`" + ` builds
+track the default branch.
 
 Wraps the official Claude Code CLI:
 
@@ -114,8 +114,10 @@ it. The plugin bundles the felt and shuttle skills plus the hooks that
 surface active fibers and record harness activity for shuttle.
 Idempotent — re-running is safe.
 
-By default, registers ` + marketplaceRepo + ` directly from GitHub.
-Tagged felt binaries pin the plugin to the matching tag.
+By default, acquires ` + marketplaceRepo + ` from GitHub, validates and
+promotes the complete payload, then registers that local generation through
+Codex's native plugin commands. Tagged felt binaries pin acquisition to the
+matching tag.
 
 Wraps the official Codex CLI (Codex's @ref syntax — Claude uses #ref):
 
@@ -308,10 +310,8 @@ func findPluginDir(source string) (string, error) {
 // plugin marketplace. The directory must contain
 // .claude-plugin/marketplace.json (the felt repo root, by convention).
 //
-// Resolution order: explicit --source arg, $FELT_PLUGIN_DIR, then the
-// already-installed Claude Code marketplace clone at
-// ~/.claude/plugins/marketplaces/<marketplaceName>/ (so `felt setup skills`
-// works after `felt setup claude` without a separate local checkout).
+// Resolution order: explicit --source arg, $FELT_PLUGIN_DIR, the registered
+// directory marketplace, then the legacy Claude Code clone path.
 func findMarketplaceRoot(source string) (string, error) {
 	if source != "" {
 		if hasMarketplaceManifest(source) {
@@ -371,7 +371,7 @@ func findMarketplaceRoot(source string) (string, error) {
 	}
 
 	return "", fmt.Errorf("could not find felt plugin source\n" +
-		"  Run `felt setup claude` first (clones the marketplace from GitHub),\n" +
+		"  Run `felt setup claude` first (acquires and promotes the marketplace),\n" +
 		"  or pass --source <checkout> for local development,\n" +
 		"  or set $FELT_PLUGIN_DIR pointing at <repo>/claude-plugin/")
 }

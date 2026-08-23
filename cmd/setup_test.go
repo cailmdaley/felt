@@ -486,7 +486,7 @@ func TestInstallPluginViaCLI_OpFollowsPluginNotMarketplace(t *testing.T) {
 		// A registered marketplace with no felt plugin: the state an install
 		// that failed after `marketplace add` leaves behind.
 		calls := fakeClaudeOnPath(t, `[{"id":"other@somewhere"}]`)
-		if err := installPluginViaCLI("/tmp/felt-repo"); err != nil {
+		if err := installClaudePluginAtSource("/tmp/felt-repo"); err != nil {
 			t.Fatalf("install: %v", err)
 		}
 		if got := calls(); !strings.Contains(got, "plugin install "+pluginRef) {
@@ -496,7 +496,7 @@ func TestInstallPluginViaCLI_OpFollowsPluginNotMarketplace(t *testing.T) {
 
 	t.Run("plugin present → update", func(t *testing.T) {
 		calls := fakeClaudeOnPath(t, `[{"id":"`+pluginRef+`"}]`)
-		if err := installPluginViaCLI("/tmp/felt-repo"); err != nil {
+		if err := installClaudePluginAtSource("/tmp/felt-repo"); err != nil {
 			t.Fatalf("install: %v", err)
 		}
 		if got := calls(); !strings.Contains(got, "plugin update "+pluginRef) {
@@ -508,7 +508,7 @@ func TestInstallPluginViaCLI_OpFollowsPluginNotMarketplace(t *testing.T) {
 		// Install is the safe guess: installing an installed plugin is a
 		// no-op, updating a missing one is an error.
 		calls := fakeClaudeOnPath(t, `not json`)
-		if err := installPluginViaCLI("/tmp/felt-repo"); err != nil {
+		if err := installClaudePluginAtSource("/tmp/felt-repo"); err != nil {
 			t.Fatalf("install: %v", err)
 		}
 		if got := calls(); !strings.Contains(got, "plugin install "+pluginRef) {

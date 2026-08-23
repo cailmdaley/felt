@@ -182,6 +182,36 @@ func TestStagePluginCandidateCopiesOnlyValidatedPayload(t *testing.T) {
 	}
 }
 
+func TestCopyTreeRejectsSymlinkPayload(t *testing.T) {
+	source := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "outside")
+	if err := os.WriteFile(outside, []byte("not part of the candidate"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(source, "escape")); err != nil {
+		t.Fatal(err)
+	}
+	err := copyTree(source, filepath.Join(t.TempDir(), "candidate"))
+	if err == nil || !strings.Contains(err.Error(), "may not contain symlink") {
+		t.Fatalf("copyTree symlink error = %v, want explicit refusal", err)
+	}
+}
+
+func TestLocalPluginSourceWithoutManifestIsRejectedBeforeInstall(t *testing.T) {
+	t.Setenv("FELT_BIN", testContractExecutable(t, "2"))
+	called := false
+	err := withStagedPluginCandidate(t.TempDir(), func(string) error {
+		called = true
+		return nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "has no marketplace manifest") {
+		t.Fatalf("invalid local source error = %v, want manifest refusal", err)
+	}
+	if called {
+		t.Fatal("native installer was called for an unvalidated local source")
+	}
+}
+
 func TestPromotePluginCandidateRollsBackOnInstallerFailure(t *testing.T) {
 	runtimeDir := t.TempDir()
 	current := filepath.Join(runtimeDir, pluginCurrentName)
@@ -302,5 +332,151 @@ func TestRecoverPluginPromotionPrefersLastKnownGoodAfterInterruption(t *testing.
 	}
 	if _, err := os.Stat(filepath.Join(runtimeDir, pluginJournalName)); !os.IsNotExist(err) {
 		t.Fatalf("journal remained after recovery: %v", err)
+	}
+}
+
+func TestParseRemoteMarketplaceRef(t *testing.T) {
+	tests := []struct {
+		name       string
+		input      string
+		repository string
+		ref        string
+		wantErr    bool
+	}{
+		{name: "bare", input: "cailmdaley/felt", repository: "cailmdaley/felt"},
+		{name: "claude tag", input: "cailmdaley/felt#v1.2.3", repository: "cailmdaley/felt", ref: "v1.2.3"},
+		{name: "codex tag", input: "cailmdaley/felt@v1.2.3", repository: "cailmdaley/felt", ref: "v1.2.3"},
+		{name: "branch", input: "cailmdaley/felt#release/next", repository: "cailmdaley/felt", ref: "release/next"},
+		{name: "empty", input: "", wantErr: true},
+		{name: "missing owner", input: "felt#main", wantErr: true},
+		{name: "empty revision", input: "cailmdaley/felt@", wantErr: true},
+		{name: "third path component", input: "cailmdaley/felt/plugins", wantErr: true},
+		{name: "wrong repository", input: "someone/felt#main", wantErr: true},
+		{name: "URL spelling", input: "https://github.com/cailmdaley/felt#main", wantErr: true},
+		{name: "surrounding whitespace", input: " cailmdaley/felt#main", wantErr: true},
+		{name: "multiple separators", input: "cailmdaley/felt#main@other", wantErr: true},
+		{name: "traversal revision", input: "cailmdaley/felt#release/../main", wantErr: true},
+		{name: "option revision", input: "cailmdaley/felt#--upload-pack=bad", wantErr: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := parseRemoteMarketplaceRef(test.input)
+			if test.wantErr {
+				if err == nil {
+					t.Fatalf("parseRemoteMarketplaceRef(%q) succeeded, want error", test.input)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parseRemoteMarketplaceRef(%q): %v", test.input, err)
+			}
+			if got.repository != test.repository || got.ref != test.ref {
+				t.Fatalf("parsed ref = %#v, want repository=%q ref=%q", got, test.repository, test.ref)
+			}
+		})
+	}
+}
+
+func installFakeGitForPluginAcquisition(t *testing.T, source string) string {
+	t.Helper()
+	dir := t.TempDir()
+	git := filepath.Join(dir, "git")
+	script := `#!/bin/sh
+last=""
+for arg do last="$arg"; done
+printf '%s\n' "$*" >> "$FELT_TEST_GIT_LOG"
+if [ "$FELT_TEST_GIT_FAIL" = "1" ]; then
+  echo "synthetic git acquisition failure" >&2
+  exit 17
+fi
+mkdir -p "$last"
+cp -R "$FELT_TEST_GIT_SOURCE"/.claude-plugin "$last"/
+cp -R "$FELT_TEST_GIT_SOURCE"/claude-plugin "$last"/
+`
+	if err := os.WriteFile(git, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FELT_TEST_GIT_SOURCE", source)
+	t.Setenv("FELT_TEST_GIT_LOG", filepath.Join(dir, "git.log"))
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return dir
+}
+
+func TestRemoteMarketplaceAcquisitionStagesAndPromotesRepeatably(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	root := testRepoRoot(t)
+	installFakeGitForPluginAcquisition(t, root)
+	t.Setenv("FELT_BIN", testContractExecutable(t, "2"))
+
+	var seen []string
+	install := func(active string) error {
+		seen = append(seen, active)
+		if !filepath.IsAbs(active) || filepath.Base(active) != pluginCurrentName {
+			t.Fatalf("native installer received non-current path %q", active)
+		}
+		if err := validatePluginCandidate(active, ""); err != nil {
+			t.Fatalf("native installer received unvalidated candidate: %v", err)
+		}
+		return nil
+	}
+	for i := 0; i < 2; i++ {
+		if err := withStagedPluginCandidateWithRestore("cailmdaley/felt#v1.2.3", install, nil); err != nil {
+			t.Fatalf("remote promotion %d: %v", i+1, err)
+		}
+	}
+	if len(seen) != 2 || seen[0] != seen[1] {
+		t.Fatalf("native installer paths = %#v, want two uses of current", seen)
+	}
+	runtimeDir := filepath.Join(home, ".felt", pluginRuntimeDirName)
+	entries, err := filepath.Glob(filepath.Join(runtimeDir, pluginAcquirePrefix+"*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("temporary acquisition checkout was not cleaned up: %v", entries)
+	}
+	log, err := os.ReadFile(os.Getenv("FELT_TEST_GIT_LOG"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(log)), "\n")
+	if len(lines) != 2 || !strings.Contains(lines[0], "--branch=v1.2.3 -- https://github.com/cailmdaley/felt.git") {
+		t.Fatalf("git acquisition log = %q, want two pinned clones", string(log))
+	}
+}
+
+func TestRemoteMarketplaceAcquisitionFailureCleansUpAndDoesNotInstall(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	runtimeDir := filepath.Join(home, ".felt", pluginRuntimeDirName)
+	stale := filepath.Join(runtimeDir, pluginAcquirePrefix+"interrupted")
+	if err := os.MkdirAll(stale, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(stale, "partial"), []byte("crash debris"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	root := testRepoRoot(t)
+	installFakeGitForPluginAcquisition(t, root)
+	t.Setenv("FELT_TEST_GIT_FAIL", "1")
+	t.Setenv("FELT_BIN", testContractExecutable(t, "2"))
+	called := false
+	err := withStagedPluginCandidateWithRestore("cailmdaley/felt@missing", func(string) error {
+		called = true
+		return nil
+	}, nil)
+	if err == nil || !strings.Contains(err.Error(), "acquiring remote marketplace") || !strings.Contains(err.Error(), "synthetic git acquisition failure") {
+		t.Fatalf("acquisition error = %v, want reported git failure", err)
+	}
+	if called {
+		t.Fatal("native installer was called after acquisition failure")
+	}
+	entries, readErr := filepath.Glob(filepath.Join(runtimeDir, pluginAcquirePrefix+"*"))
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("failed acquisition left temporary checkout: %v", entries)
 	}
 }

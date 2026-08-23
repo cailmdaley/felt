@@ -63,10 +63,12 @@ felt setup receipt --json                  # actually loaded bundles, felt binar
 felt setup validate --source <checkout>    # non-mutating complete local candidate check
 ```
 
-Local Claude/Codex setup sources are validated, staged, and promoted as a
-recoverable generation before the native harness CLI activates them. Diagnose
-from `setup receipt`, which queries the harness CLIs; an incidental cache
-directory is not proof that a bundle is loaded.
+Local paths and remote GitHub refs for Claude/Codex setup are validated, staged,
+and promoted as one recoverable local generation before the native harness CLI
+activates them. Remote acquisition is disposable; the harness still owns its
+cache and configuration. Diagnose from `setup receipt`, which queries the
+harness CLIs; an incidental cache directory is not proof that a bundle is
+loaded.
 
 Statuses: · untracked, ○ open, ◐ active, ● closed
 Detail: name < compact < summary < full. Summary adds the lede (first paragraph of the body; write it to stand alone).

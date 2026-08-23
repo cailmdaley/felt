@@ -23,6 +23,7 @@ const (
 	pluginCurrentName    = "current"
 	pluginPreviousName   = "previous"
 	pluginJournalName    = "promotion.json"
+	pluginAcquirePrefix  = ".acquire-"
 )
 
 type pluginPromotionJournal struct {
@@ -638,11 +639,7 @@ func copyTree(source, destination string) error {
 			return os.MkdirAll(target, info.Mode().Perm())
 		}
 		if info.Mode()&os.ModeSymlink != 0 {
-			link, err := os.Readlink(path)
-			if err != nil {
-				return err
-			}
-			return os.Symlink(link, target)
+			return fmt.Errorf("plugin payload may not contain symlink %q", rel)
 		}
 		if !info.Mode().IsRegular() {
 			return fmt.Errorf("unsupported plugin payload entry %q", rel)
@@ -676,18 +673,15 @@ func currentFeltExecutable() (string, error) {
 	return path, nil
 }
 
-// withStagedPluginCandidate extends the existing CLI installers. Remote refs
-// remain owned by the native CLI; local checkouts use the transactional source
-// path so setup and update share exactly one promotion implementation.
+// withStagedPluginCandidate makes every setup source enter the same validated
+// transaction. Remote refs are acquired ephemerally; native harness CLIs see
+// only the promoted local generation and continue to own their caches/config.
 func withStagedPluginCandidate(source string, install func(string) error) error {
 	return withStagedPluginCandidateWithRestore(source, install, nil)
 }
 
 func withStagedPluginCandidateWithRestore(source string, install func(string) error, restore func() error) error {
 	if !isLocalPath(source) {
-		// Remote refs are fetched by the native CLI, so felt cannot pre-copy the
-		// payload. Still probe the executable contract and restore the native
-		// registration if the CLI mutates it before reporting a failure.
 		executable, err := currentFeltExecutable()
 		if err != nil {
 			return err
@@ -695,19 +689,19 @@ func withStagedPluginCandidateWithRestore(source string, install func(string) er
 		if err := validateFeltExecutable(executable); err != nil {
 			return err
 		}
-		err = install(source)
-		if err != nil && restore != nil {
-			if restoreErr := restore(); restoreErr != nil {
-				return fmt.Errorf("%w; restoring native installation: %v", err, restoreErr)
-			}
+		checkout, cleanup, err := acquireRemoteMarketplace(source)
+		if err != nil {
+			return err
 		}
-		return err
+		defer cleanup()
+		candidate, err := stagePluginCandidate(checkout, executable)
+		if err != nil {
+			return err
+		}
+		return promotePluginCandidate(candidate, install, restore)
 	}
 	if !hasMarketplaceManifest(source) {
-		// Preserve the existing CLI error for a path that is only meaningful to
-		// a test double or an older marketplace implementation; a real local
-		// checkout with a manifest takes the staged path below.
-		return install(source)
+		return fmt.Errorf("local plugin source %q has no marketplace manifest", source)
 	}
 	executable, err := currentFeltExecutable()
 	if err != nil {
@@ -718,4 +712,111 @@ func withStagedPluginCandidateWithRestore(source string, install func(string) er
 		return err
 	}
 	return promotePluginCandidate(candidate, install, restore)
+}
+
+// remoteMarketplaceRef is the small subset of GitHub's ref syntax accepted by
+// the native marketplace CLIs. Claude spells a pinned ref owner/repo#ref;
+// Codex spells it owner/repo@ref. We acquire both forms ourselves so neither
+// CLI gets to create an unvalidated persistent checkout.
+type remoteMarketplaceRef struct {
+	repository string
+	ref        string
+}
+
+func parseRemoteMarketplaceRef(source string) (remoteMarketplaceRef, error) {
+	if source == "" {
+		return remoteMarketplaceRef{}, errors.New("empty remote marketplace ref")
+	}
+	if strings.TrimSpace(source) != source {
+		return remoteMarketplaceRef{}, fmt.Errorf("remote marketplace ref %q has surrounding whitespace", source)
+	}
+
+	value := source
+	ref := ""
+	separatorFound := false
+	if i := strings.IndexByte(value, '#'); i >= 0 {
+		if strings.Contains(value[i+1:], "#") || strings.Contains(value[i+1:], "@") {
+			return remoteMarketplaceRef{}, fmt.Errorf("remote marketplace ref %q has multiple revision separators", source)
+		}
+		separatorFound = true
+		ref = value[i+1:]
+		value = value[:i]
+	} else if i := strings.LastIndexByte(value, '@'); i >= 0 {
+		separatorFound = true
+		ref = value[i+1:]
+		value = value[:i]
+	}
+	if ref == "" && separatorFound {
+		return remoteMarketplaceRef{}, fmt.Errorf("remote marketplace ref %q has an empty revision", source)
+	}
+	if value != marketplaceRepo {
+		return remoteMarketplaceRef{}, fmt.Errorf("unsupported GitHub marketplace %q (want %s[#ref] or %s@ref)", value, marketplaceRepo, marketplaceRepo)
+	}
+	if !validGitRevision(ref) {
+		return remoteMarketplaceRef{}, fmt.Errorf("unsupported GitHub revision in marketplace ref %q", source)
+	}
+	return remoteMarketplaceRef{repository: value, ref: ref}, nil
+}
+
+func validGitRevision(ref string) bool {
+	if ref == "" {
+		return true
+	}
+	if strings.HasPrefix(ref, ".") || strings.HasPrefix(ref, "-") || strings.HasPrefix(ref, "/") ||
+		strings.HasSuffix(ref, ".") || strings.HasSuffix(ref, "/") || strings.HasSuffix(ref, ".lock") {
+		return false
+	}
+	return !strings.ContainsAny(ref, " \t\r\n\\~^:?*[") &&
+		!strings.Contains(ref, "..") && !strings.Contains(ref, "//") && !strings.Contains(ref, "@{")
+}
+
+// acquireRemoteMarketplace uses git only as an ephemeral acquisition
+// mechanism. Acquisitions live under the locked runtime directory so a later
+// setup can reap debris left by SIGKILL or power loss. Their contents are
+// copied into the validated Felt candidate before any native installer runs.
+func acquireRemoteMarketplace(source string) (string, func(), error) {
+	ref, err := parseRemoteMarketplaceRef(source)
+	if err != nil {
+		return "", func() {}, err
+	}
+	runtimeDir, err := pluginRuntimeDir()
+	if err != nil {
+		return "", func() {}, err
+	}
+	if err := os.MkdirAll(runtimeDir, 0o755); err != nil {
+		return "", func() {}, fmt.Errorf("creating plugin runtime directory: %w", err)
+	}
+	stale, err := filepath.Glob(filepath.Join(runtimeDir, pluginAcquirePrefix+"*"))
+	if err != nil {
+		return "", func() {}, fmt.Errorf("finding stale marketplace acquisitions: %w", err)
+	}
+	for _, path := range stale {
+		if err := os.RemoveAll(path); err != nil {
+			return "", func() {}, fmt.Errorf("removing stale marketplace acquisition %q: %w", path, err)
+		}
+	}
+	parent, err := os.MkdirTemp(runtimeDir, pluginAcquirePrefix)
+	if err != nil {
+		return "", func() {}, fmt.Errorf("creating temporary marketplace checkout: %w", err)
+	}
+	cleanup := func() { _ = os.RemoveAll(parent) }
+	args := []string{"clone", "--depth", "1"}
+	if ref.ref != "" {
+		args = append(args, "--branch="+ref.ref)
+	}
+	args = append(args, "--", "https://github.com/"+ref.repository+".git", parent)
+	output, err := exec.Command("git", args...).CombinedOutput()
+	if err != nil {
+		cleanup()
+		message := strings.TrimSpace(string(output))
+		if message != "" {
+			return "", func() {}, fmt.Errorf("acquiring remote marketplace %q: %w: %s", source, err, message)
+		}
+		return "", func() {}, fmt.Errorf("acquiring remote marketplace %q: %w", source, err)
+	}
+	if !hasMarketplaceManifest(parent) {
+		cleanup()
+		return "", func() {}, fmt.Errorf("acquired remote marketplace %q has no marketplace manifest", source)
+	}
+	return parent, cleanup, nil
 }

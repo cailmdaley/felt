@@ -18,16 +18,17 @@ only the manifest at the plugin root differs (`.claude-plugin/` and
   refreshes each integration; the Homebrew formula's `post_install` does the
   same on `brew upgrade felt`.
 
-For a local `--source`, setup validates and copies the complete marketplace
-payload into `~/.felt/plugin-runtime/`, then promotes it under a cross-process
-lock with a crash journal. Both manifests must describe the same version; the
-two skills, hook manifest, executable hook files, and running felt executable's
-Shuttle contract must all validate before the native CLI sees the candidate.
-If native installation fails, setup restores both the last known-good staged
-generation and the harness's previous marketplace/plugin state. Remote GitHub
-refs remain acquired by the native harness CLI, so they receive executable
-contract preflight and rollback-on-reported-failure, but not felt's local
-whole-payload prevalidation.
+Every Claude/Codex setup source enters the same transaction. Remote GitHub refs
+are first acquired into a disposable checkout; local `--source` paths enter
+directly. Setup validates and copies only the complete marketplace payload into
+`~/.felt/plugin-runtime/`, then promotes it under a cross-process lock with a
+crash journal. Both manifests must describe the same version; the two skills,
+hook manifest, executable hook files, and running felt executable's Shuttle
+contract must all validate before the native CLI sees the candidate. Native
+harness CLIs receive only the stable promoted `current` path and remain the
+sole writers of their caches and configuration. If native installation reports
+failure, setup restores both the last known-good staged generation and the
+harness's previous marketplace/plugin state.
 
 Use `felt setup validate --source <checkout>` as the non-mutating candidate
 gate. Use `felt setup receipt --json` after installation to report the bundle
