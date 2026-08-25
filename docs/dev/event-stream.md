@@ -80,7 +80,14 @@ views as **join rung 0** — the structural pairing that replaces an inference.
 
 - `~/.shuttle/sessions.jsonl` (`lib/shuttle/session_ledger.ex`) pairs a fiber
   with the harness session dispatched against it. **The daemon writes it**, at
-  dispatch / claim / resume.
+  dispatch / claim / resume — plus one `handoff` line written by the exiting
+  worker's own `felt shuttle handoff` (`cmd/shuttle_handoff.go`, best-effort,
+  under the same `~/.shuttle` gate as the other Go-side writers). The
+  frontmatter's `handed_off_at` only ever describes the LATEST run, so the
+  ledger line is the only per-session record of who exited cleanly and who died
+  mid-thought; `felt shuttle sessions` reads it as the `EXIT` column. The
+  handoff line carries no harness or tmux — the reader folds it onto its
+  session's dispatch row.
 - `~/.shuttle/commits.jsonl` (`lib/shuttle/commit_ledger.ex`) pairs a commit
   with the session that made it: one line per commit carrying `sha`, `subject`,
   `repo`, the `--shortstat` counts, and `session` / `tmux` / `cwd`. It replaces

@@ -25,6 +25,22 @@ defmodule Shuttle.TranscriptTest do
     assert {:ok, ^path} = Transcript.bytes(@session, root: root)
   end
 
+  # The end of a session, as the filesystem saw it — the receipt's only
+  # temporal field, and what `felt shuttle sessions` prints as END.
+  test "carries the transcript's last-write instant in unix milliseconds", %{root: root} do
+    path = Path.join([root, "-Users-cail-french", "#{@session}.jsonl"])
+    File.write!(path, "native bytes\n")
+
+    assert %{modified_at: modified_at} = Transcript.resolve(@session, root: root)
+    assert is_integer(modified_at)
+    assert_in_delta modified_at, System.system_time(:millisecond), 60_000
+
+    File.rm!(path)
+
+    assert %{availability: :transcript_missing, modified_at: nil} =
+             Transcript.resolve(@session, root: root)
+  end
+
   test "reports a valid but unknown UUID as transcript_missing", %{root: root} do
     assert %{availability: :transcript_missing, source_path: nil} =
              Transcript.resolve(@session, root: root, ledger_path: Path.join(root, "ledger"))

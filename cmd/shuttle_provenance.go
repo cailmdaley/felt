@@ -47,6 +47,10 @@ type TranscriptReceipt struct {
 	SHA256       string `json:"sha256,omitempty"`
 	ByteCount    int64  `json:"byte_count,omitempty"`
 	Size         int64  `json:"size,omitempty"`
+	// ModifiedAt is the transcript file's last write, unix milliseconds — the
+	// end of the session as the filesystem saw it. Absent for a transcript
+	// this daemon cannot stat (missing, or a host that did not answer).
+	ModifiedAt int64 `json:"modified_at,omitempty"`
 }
 
 // SessionProvenance mirrors the composite session ledger while leaving the
@@ -67,6 +71,60 @@ type SessionProvenance struct {
 	Stale      bool              `json:"stale,omitempty"`
 	Events     []SessionEvent    `json:"events,omitempty"`
 	Transcript TranscriptReceipt `json:"transcript,omitempty"`
+	// Derived at output time from the events and the transcript receipt, so a
+	// --json consumer reads the same temporal picture the table shows. Zero
+	// means unrecorded, never "did not happen".
+	StartedAt   int64 `json:"started_at,omitempty"`
+	EndedAt     int64 `json:"ended_at,omitempty"`
+	HandedOffAt int64 `json:"handed_off_at,omitempty"`
+}
+
+// The temporal reading of a row, derived rather than stored: the ledger knows
+// when a session began and whether it ended deliberately; the transcript file
+// knows when the last word was written. Nothing here guesses — a zero is an
+// honest "the ledger and the filesystem did not say".
+
+// startedAt is the first recorded moment for the session (its dispatch, claim,
+// or — for a row whose earlier lines rotated out — whatever is left).
+func (s SessionProvenance) startedAt() int64 {
+	first := s.At
+	for _, event := range s.Events {
+		if event.At != 0 && (first == 0 || event.At < first) {
+			first = event.At
+		}
+	}
+	return first
+}
+
+// handedOffAt is the clean-exit moment `felt shuttle handoff` recorded. Zero
+// means no handoff line — the session either died mid-thought or predates the
+// handoff record, which is exactly the ambiguity worth surfacing rather than
+// resolving.
+func (s SessionProvenance) handedOffAt() int64 {
+	at := int64(0)
+	for _, event := range s.Events {
+		if event.Kind == "handoff" && event.At > at {
+			at = event.At
+		}
+	}
+	return at
+}
+
+// endedAt prefers the transcript's last write — the true end of the words —
+// and falls back to the handoff stamp when the file cannot be stat'd.
+func (s SessionProvenance) endedAt() int64 {
+	if s.Transcript.ModifiedAt != 0 {
+		return s.Transcript.ModifiedAt
+	}
+	return s.handedOffAt()
+}
+
+// byteCount tolerates the older receipt field name.
+func (s SessionProvenance) byteCount() int64 {
+	if s.Transcript.ByteCount != 0 {
+		return s.Transcript.ByteCount
+	}
+	return s.Transcript.Size
 }
 
 type SessionEvent struct {
@@ -166,6 +224,26 @@ func enrichSessionReceipt(s SessionProvenance) SessionProvenance {
 		receipt.Harness = s.Harness
 	}
 	s.Transcript = receipt
+	return localTranscriptModifiedAt(s)
+}
+
+// localTranscriptModifiedAt fills in the end-of-session instant for a
+// transcript that lives on THIS host, from this process's own stat. The daemon
+// supplies modified_at in its receipt, but an older daemon does not, and
+// available_local means the file is reachable from here — so the CLI can be
+// honest about it without waiting for a redeploy. A remote transcript is left
+// alone: its bytes are not ours to stat.
+func localTranscriptModifiedAt(s SessionProvenance) SessionProvenance {
+	if s.Transcript.ModifiedAt != 0 || s.Transcript.Availability != "available_local" {
+		return s
+	}
+	path := transcriptPathForReceipt(s.Transcript)
+	if path == "" {
+		return s
+	}
+	if info, err := os.Stat(path); err == nil {
+		s.Transcript.ModifiedAt = info.ModTime().UnixMilli()
+	}
 	return s
 }
 
@@ -200,24 +278,39 @@ func resolveProvenanceRows(query string, records []SessionProvenance) (string, [
 // filterProvenanceRows selects and dedupes the ledger rows for one intrinsic
 // UID, folding dispatch/resume duplicates into ordered lifecycle events.
 func filterProvenanceRows(uid string, records []SessionProvenance) []SessionProvenance {
-	seen := map[string]bool{}
+	return foldProvenanceRows(records, func(row SessionProvenance) bool { return row.UID == uid })
+}
+
+// foldProvenanceRows collapses the ledger's per-moment lines into one row per
+// session, keeping every moment as an ordered event.
+//
+// Dispatch/claim/resume lines are keyed by host+harness+session, the way they
+// have always been. A `handoff` line carries neither harness nor tmux — the
+// exiting worker writes only what it alone knows — so it folds onto whichever
+// row already names its session, and stands as its own row only when it has
+// none (a ledger whose dispatch line rotated away).
+func foldProvenanceRows(records []SessionProvenance, keep func(SessionProvenance) bool) []SessionProvenance {
+	index := map[string]int{}
 	rows := make([]SessionProvenance, 0)
 	for _, row := range records {
-		if row.UID != uid {
+		if keep != nil && !keep(row) {
 			continue
 		}
 		key := row.Host + "\x00" + row.Harness + "\x00" + row.Session
-		if seen[key] {
+		if row.Kind == "handoff" {
 			for i := range rows {
-				if rows[i].Host+"\x00"+rows[i].Harness+"\x00"+rows[i].Session == key {
-					rows[i].Events = append(rows[i].Events, SessionEvent{At: row.At, Kind: row.Kind, Fiber: row.fiber(), Tmux: row.Tmux})
+				if rows[i].Session == row.Session {
+					key = rows[i].Host + "\x00" + rows[i].Harness + "\x00" + rows[i].Session
 					break
 				}
 			}
+		}
+		if i, ok := index[key]; ok {
+			rows[i].Events = append(rows[i].Events, SessionEvent{At: row.At, Kind: row.Kind, Fiber: row.fiber(), Tmux: row.Tmux})
 			continue
 		}
-		seen[key] = true
 		row.Events = []SessionEvent{{At: row.At, Kind: row.Kind, Fiber: row.fiber(), Tmux: row.Tmux}}
+		index[key] = len(rows)
 		rows = append(rows, row)
 	}
 	for i := range rows {
@@ -474,6 +567,7 @@ type transcriptManifestItem struct {
 	SourcePath   string         `json:"source_path,omitempty"`
 	LocalPath    string         `json:"local_path,omitempty"`
 	ByteCount    int64          `json:"byte_count,omitempty"`
+	ModifiedAt   int64          `json:"modified_at,omitempty"`
 	SHA256       string         `json:"sha256,omitempty"`
 	Events       []SessionEvent `json:"events,omitempty"`
 	Error        string         `json:"error,omitempty"`
@@ -503,6 +597,7 @@ func materializeFiberTranscripts(fiber, uid string, rows []SessionProvenance, di
 			Availability: row.Transcript.Availability,
 			SourcePath:   transcriptPathForReceipt(row.Transcript),
 			ByteCount:    row.Transcript.ByteCount,
+			ModifiedAt:   row.Transcript.ModifiedAt,
 			SHA256:       row.Transcript.SHA256,
 			Events:       row.Events,
 		}
@@ -548,6 +643,7 @@ var (
 	sessionsCommitSHA   string
 	sessionsMaterialize bool
 	sessionsDir         string
+	sessionsRecent      int
 )
 
 var shuttleSessionsCmd = &cobra.Command{
@@ -562,18 +658,30 @@ Reverse lookup: pass a session UUID instead of a fiber, or --commit <sha>, to
 resolve the owning fiber and its disposition from the ledgers, then list that
 fiber's sessions.
 
+Each row carries its own clock: START is the first recorded moment (dispatch or
+claim), END is the transcript file's last write when this host can stat it, SIZE
+is that file's bytes, and EXIT reads "handoff" only when the worker recorded a
+clean exit — a blank EXIT is a session that died mid-thought OR one that ran
+before handoffs were recorded, and the two are deliberately not distinguished.
+
+--recent [N] ignores the fiber argument and lists the newest N sessions across
+the whole store, newest first — the "what ran last night?" view.
+
 --materialize resolves every available transcript to an ordinary local file
 (native path locally, verified cache copy for remote hosts) and writes a
 manifest.json carrying session, host, harness, lineage events, source path,
 and availability.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if len(args) == 0 && sessionsCommitSHA == "" {
-			return fmt.Errorf("expected a fiber, a session UUID, or --commit <sha>")
+		if len(args) == 0 && sessionsCommitSHA == "" && sessionsRecent == 0 {
+			return fmt.Errorf("expected a fiber, a session UUID, --commit <sha>, or --recent")
 		}
 		ledger, err := fetchSessionLedger()
 		if err != nil {
 			return err
+		}
+		if sessionsRecent > 0 {
+			return listRecentSessions(ledger, sessionsRecent)
 		}
 		query := ""
 		if len(args) == 1 {
@@ -644,6 +752,7 @@ and availability.`,
 			}
 			return rows[i].Session < rows[j].Session
 		})
+		rows = deriveSessionTimes(rows)
 		manifestPath := ""
 		if sessionsMaterialize {
 			manifestPath, err = materializeFiberTranscripts(query, uid, rows, sessionsDir)
@@ -678,16 +787,96 @@ and availability.`,
 			fmt.Printf("no recorded Shuttle sessions for %s\n", query)
 			return nil
 		}
-		fmt.Printf("%-38s %-16s %-16s %-14s %-18s %s\n", "SESSION", "HOST", "HARNESS", "KIND", "AVAILABILITY", "FIBER")
-		for _, row := range rows {
-			fiberName := row.fiber()
-			if row.Stale {
-				fiberName += " [stale]"
-			}
-			fmt.Printf("%-38s %-16s %-16s %-14s %-18s %s\n", row.Session, row.Host, row.Harness, row.Kind, row.Transcript.Availability, fiberName)
-		}
+		printSessionRows(rows)
 		return nil
 	},
+}
+
+// deriveSessionTimes fills the derived temporal fields so the table and the
+// --json payload read the same row.
+func deriveSessionTimes(rows []SessionProvenance) []SessionProvenance {
+	for i := range rows {
+		rows[i].StartedAt = rows[i].startedAt()
+		rows[i].EndedAt = rows[i].endedAt()
+		rows[i].HandedOffAt = rows[i].handedOffAt()
+	}
+	return rows
+}
+
+// listRecentSessions answers the recency question the per-fiber listing cannot:
+// which sessions ran most recently anywhere in the store. The composite ledger
+// is already one flat list of every host's lines, so this costs the same single
+// fetch — only the transcript receipts (one daemon call per row) are bounded by
+// the limit.
+func listRecentSessions(ledger *sessionLedgerResponse, limit int) error {
+	rows := foldProvenanceRows(ledger.Records, nil)
+	sort.SliceStable(rows, func(i, j int) bool {
+		if rows[i].startedAt() != rows[j].startedAt() {
+			return rows[i].startedAt() > rows[j].startedAt()
+		}
+		return rows[i].Session < rows[j].Session
+	})
+	if len(rows) > limit {
+		rows = rows[:limit]
+	}
+	rows = applyOriginFreshness(rows, ledger.Origins)
+	for i := range rows {
+		rows[i] = enrichSessionReceipt(rows[i])
+	}
+	rows = deriveSessionTimes(rows)
+	if jsonOutput {
+		return outputJSON(rows)
+	}
+	if len(rows) == 0 {
+		fmt.Println("no recorded Shuttle sessions")
+		return nil
+	}
+	printSessionRows(rows)
+	return nil
+}
+
+const sessionRowFormat = "%-38s %-12s %-12s %-10s %-12s %-12s %-8s %-8s %-18s %s\n"
+
+func printSessionRows(rows []SessionProvenance) {
+	fmt.Printf(sessionRowFormat, "SESSION", "HOST", "HARNESS", "KIND", "START", "END", "SIZE", "EXIT", "AVAILABILITY", "FIBER")
+	for _, row := range rows {
+		fiberName := row.fiber()
+		if row.Stale {
+			fiberName += " [stale]"
+		}
+		exit := ""
+		if row.HandedOffAt != 0 {
+			exit = "handoff"
+		}
+		fmt.Printf(sessionRowFormat, row.Session, row.Host, row.Harness, row.Kind,
+			formatSessionStamp(row.StartedAt), formatSessionStamp(row.EndedAt),
+			formatSessionSize(row.byteCount()), exit, row.Transcript.Availability, fiberName)
+	}
+}
+
+// formatSessionStamp renders a unix-millisecond instant in local time, minute
+// resolution — enough to answer "which session ran last night?". An unrecorded
+// instant prints blank rather than an epoch.
+func formatSessionStamp(ms int64) string {
+	if ms == 0 {
+		return ""
+	}
+	return time.UnixMilli(ms).Local().Format("01-02 15:04")
+}
+
+// formatSessionSize renders transcript bytes in the units a person reads them
+// in. A zero-byte or unstated transcript prints blank.
+func formatSessionSize(bytes int64) string {
+	switch {
+	case bytes <= 0:
+		return ""
+	case bytes < 1024:
+		return fmt.Sprintf("%dB", bytes)
+	case bytes < 1024*1024:
+		return fmt.Sprintf("%.0fK", float64(bytes)/1024)
+	default:
+		return fmt.Sprintf("%.1fM", float64(bytes)/(1024*1024))
+	}
 }
 
 func transcriptPathForReceipt(receipt TranscriptReceipt) string {
@@ -940,6 +1129,8 @@ func runTranscriptJSON(receipt TranscriptReceipt) error {
 func init() {
 	shuttleSessionsCmd.Flags().StringVar(&sessionsCommitSHA, "commit", "", "reverse lookup: resolve a commit SHA (prefix accepted) to its owning fiber via the commit ledger")
 	shuttleSessionsCmd.Flags().BoolVar(&sessionsMaterialize, "materialize", false, "resolve every available transcript to an ordinary local file and write manifest.json")
+	shuttleSessionsCmd.Flags().IntVar(&sessionsRecent, "recent", 0, "ignore the fiber argument and list the newest N sessions across the whole store (default 20 when the flag is given bare)")
+	shuttleSessionsCmd.Flags().Lookup("recent").NoOptDefVal = "20"
 	shuttleSessionsCmd.Flags().StringVar(&sessionsDir, "dir", "", "directory for the materialized manifest.json (default: the felt transcript cache, keyed by fiber UID); remote transcript copies always land in the shared felt cache")
 	shuttleCmd.AddCommand(shuttleSessionsCmd)
 	shuttleCmd.AddCommand(shuttleTranscriptCmd)

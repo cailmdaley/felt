@@ -7,8 +7,11 @@ The dispatch prompt's `Previous session: <uuid> (<harness>)` line names the prio
 `felt shuttle` owns the lineage; you never grep raw ledgers or guess harness paths.
 
 ```bash
-# fiber → every session it has had (host, harness, transcript availability)
+# fiber → every session it has had (host, harness, START/END/SIZE/EXIT, transcript availability)
 felt shuttle sessions <fiber-id>
+
+# "which session ran last night?" — newest sessions across the whole store
+felt shuttle sessions --recent        # 20 by default; --recent=50 for more
 
 # reverse: session UUID or commit → owning fiber + disposition, then its sessions
 felt shuttle sessions <session-uuid>
@@ -22,6 +25,8 @@ F=$(felt shuttle transcript <session-uuid>)
 # (session, host, harness, lifecycle events, source path, sha256, availability per entry)
 felt shuttle sessions <fiber-id> --materialize --dir <d>
 ```
+
+Each row carries its own clock. `START` is the first recorded moment (dispatch or claim); `END` is the transcript file's last write, so a still-running session simply shows a recent one; `SIZE` is that file on disk. `EXIT` reads `handoff` only when the worker recorded a clean exit through `felt shuttle handoff` — **a blank `EXIT` is a session that died mid-thought OR one that ran before handoffs were recorded**, and the two are deliberately not distinguished. Blank `END`/`SIZE` mean the transcript could not be stat'd (missing, or a host that did not answer), never that the session was empty. `--json` mirrors all of it as `started_at` / `ended_at` / `handed_off_at` (unix ms, absent when unrecorded) plus `.transcript.byte_count` / `.transcript.modified_at`.
 
 Availability is explicit and honest — `identity_pending`, `available_local`, `available_remote`, `host_unreachable`, `transcript_missing` are distinct; an unreachable host is never reported as absence. `--json` gives the structured rows (transcript details under `.transcript`).
 

@@ -38,6 +38,7 @@ func saveShuttleGlobals() func() {
 		pinModel             string
 		pinProjectDir        string
 		pinHost              string
+		sessionsRecent       int
 	}{
 		jsonOutput, statusIncludeOrphans,
 		pauseNoKill, closeTempered, reopenAsDraft, setOutcomeValue, acceptKeepOutcome, setAgentEffort, setAgentChrome,
@@ -45,6 +46,7 @@ func saveShuttleGlobals() func() {
 		installModel, installProjectDir, installHost, installDisabled,
 		repeatSchedule, repeatTZ, repeatModel, repeatProjectDir, repeatHost,
 		pinModel, pinProjectDir, pinHost,
+		sessionsRecent,
 	}
 
 	// --json is a root persistent flag bound to jsonOutput; cobra only sets it on
@@ -63,6 +65,7 @@ func saveShuttleGlobals() func() {
 	installModel, installProjectDir, installHost, installDisabled = "", "", "", false
 	repeatSchedule, repeatTZ, repeatModel, repeatProjectDir, repeatHost = "", "", "", "", ""
 	pinModel, pinProjectDir, pinHost = "", "", ""
+	sessionsRecent = 0
 
 	pauseCmd.ResetFlags()
 	closeCmd.ResetFlags()
@@ -81,6 +84,7 @@ func saveShuttleGlobals() func() {
 
 	return func() {
 		jsonOutput = prev.jsonOutput
+		sessionsRecent = prev.sessionsRecent
 		statusIncludeOrphans = prev.statusIncludeOrphans
 		pauseNoKill = prev.pauseNoKill
 		closeTempered = prev.closeTempered

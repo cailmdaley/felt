@@ -1,9 +1,12 @@
 package cmd
 
 import (
+	"encoding/json"
 	"os"
+	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/cailmdaley/felt/internal/felt"
 )
@@ -44,7 +47,7 @@ func TestStampHandedOff_ConcurrentWithStorageRMW(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for i := 0; i < iterations; i++ {
-			if _, err := stampHandedOff(path); err != nil {
+			if _, _, err := stampHandedOff(path); err != nil {
 				t.Errorf("stampHandedOff: %v", err)
 				return
 			}
@@ -146,7 +149,7 @@ func TestResolveHandoffPath_ExplicitArgBeatsAmbientEnv(t *testing.T) {
 	t.Setenv("SHUTTLE_FIBER_PATH", storage.Path("own"))
 
 	// Explicit different fiber: the argument wins, caller is not exiting.
-	path, self, err := resolveHandoffPath("sibling")
+	path, self, _, err := resolveHandoffPath("sibling")
 	if err != nil {
 		t.Fatalf("resolveHandoffPath(sibling): %v", err)
 	}
@@ -158,7 +161,7 @@ func TestResolveHandoffPath_ExplicitArgBeatsAmbientEnv(t *testing.T) {
 	}
 
 	// Self-handoff: env path is authoritative, self=true.
-	path, self, err = resolveHandoffPath("own")
+	path, self, _, err = resolveHandoffPath("own")
 	if err != nil {
 		t.Fatalf("resolveHandoffPath(own): %v", err)
 	}
@@ -168,7 +171,7 @@ func TestResolveHandoffPath_ExplicitArgBeatsAmbientEnv(t *testing.T) {
 
 	// Resolution failure: falls back to the env path (the pre-existing
 	// daemon-worker behavior), still self.
-	path, self, err = resolveHandoffPath("no-such-fiber")
+	path, self, _, err = resolveHandoffPath("no-such-fiber")
 	if err != nil {
 		t.Fatalf("resolveHandoffPath(no-such-fiber): %v", err)
 	}
@@ -192,7 +195,7 @@ func TestResolveHandoffPath_FuzzyAndNoStoreFallbacks(t *testing.T) {
 	chdir(t, dir)
 	// "nested-card" fuzzily resolves to parent/nested-card but is not its exact
 	// id — ambiguity, env wins.
-	path, self, err := resolveHandoffPath("nested-card")
+	path, self, _, err := resolveHandoffPath("nested-card")
 	if err != nil {
 		t.Fatalf("resolveHandoffPath(nested-card): %v", err)
 	}
@@ -200,7 +203,7 @@ func TestResolveHandoffPath_FuzzyAndNoStoreFallbacks(t *testing.T) {
 		t.Fatalf("fuzzy mismatch: path=%q self=%v, want env path %q self=true", path, self, storage.Path("own"))
 	}
 	// The exact nested id is honored as a sibling handoff.
-	path, self, err = resolveHandoffPath("parent/nested-card")
+	path, self, _, err = resolveHandoffPath("parent/nested-card")
 	if err != nil {
 		t.Fatalf("resolveHandoffPath(parent/nested-card): %v", err)
 	}
@@ -210,11 +213,61 @@ func TestResolveHandoffPath_FuzzyAndNoStoreFallbacks(t *testing.T) {
 
 	// No felt store in cwd at all: resolution errors, env fallback, self=true.
 	chdir(t, t.TempDir())
-	path, self, err = resolveHandoffPath("parent/nested-card")
+	path, self, _, err = resolveHandoffPath("parent/nested-card")
 	if err != nil {
 		t.Fatalf("resolveHandoffPath outside store: %v", err)
 	}
 	if path != storage.Path("own") || !self {
 		t.Fatalf("no-store fallback: path=%q self=%v, want env path self=true", path, self)
+	}
+}
+
+// The frontmatter stamp says only that the LATEST run ended cleanly; the ledger
+// line is what lets a reader tell, session by session, which worker handed off
+// and which died mid-thought. It is best-effort: no session UUID (or no
+// ~/.shuttle) records nothing rather than failing the handoff.
+func TestRecordHandoffPairing_WritesLedgerLine(t *testing.T) {
+	_, storage := newShuttleStore(t)
+	seedShuttleRole(t, storage, "f", felt.StatusActive, oneshot(), nil)
+	f := mustRead(t, storage, "f")
+	if err := f.SetShuttleRuntimeField("session_uuid", "0883ade1-0000-4000-8000-000000000001"); err != nil {
+		t.Fatalf("seeding session_uuid: %v", err)
+	}
+
+	ledger := filepath.Join(t.TempDir(), "sessions.jsonl")
+	t.Setenv("SHUTTLE_SESSIONS_FILE", ledger)
+	recordHandoffPairing(f, "work/one", "2026-08-25T01:02:03.5Z")
+
+	data, err := os.ReadFile(ledger)
+	if err != nil {
+		t.Fatalf("reading ledger: %v", err)
+	}
+	var line map[string]any
+	if err := json.Unmarshal(data, &line); err != nil {
+		t.Fatalf("decoding ledger line %q: %v", data, err)
+	}
+	if line["kind"] != "handoff" {
+		t.Errorf("expected a handoff line, got %v", line["kind"])
+	}
+	if line["session"] != "0883ade1-0000-4000-8000-000000000001" {
+		t.Errorf("the line must name the session that exited, got %v", line["session"])
+	}
+	if line["fiber"] != "work/one" {
+		t.Errorf("the line must carry the ledger's address shape, got %v", line["fiber"])
+	}
+	want := time.Date(2026, 8, 25, 1, 2, 3, 500_000_000, time.UTC).UnixMilli()
+	if at, _ := line["at"].(float64); int64(at) != want {
+		t.Errorf("at should be the handoff instant in unix ms: got %v, want %d", line["at"], want)
+	}
+
+	// A fiber that never got a session UUID has no pairing to record.
+	bare := mustRead(t, storage, "f")
+	recordHandoffPairing(bare, "work/one", "2026-08-25T01:02:04Z")
+	after, err := os.ReadFile(ledger)
+	if err != nil {
+		t.Fatalf("re-reading ledger: %v", err)
+	}
+	if len(after) != len(data) {
+		t.Errorf("a fiber with no session UUID must record nothing, ledger grew to %q", after)
 	}
 }

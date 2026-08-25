@@ -154,6 +154,7 @@ defmodule ShuttleWeb.TranscriptController do
       "harness" => nil,
       "source_path" => nil,
       "byte_count" => nil,
+      "modified_at" => nil,
       "sha256" => nil
     }
   end

@@ -20,6 +20,7 @@ defmodule Shuttle.Transcript do
           harness: String.t() | nil,
           source_path: String.t() | nil,
           byte_count: non_neg_integer() | nil,
+          modified_at: integer() | nil,
           sha256: String.t() | nil
         }
 
@@ -54,6 +55,7 @@ defmodule Shuttle.Transcript do
           harness: harness_for(path, opts),
           source_path: path,
           byte_count: byte_count(path),
+          modified_at: modified_at(path),
           sha256: sha256(path)
         }
 
@@ -65,6 +67,7 @@ defmodule Shuttle.Transcript do
           harness: ledger["harness"],
           source_path: nil,
           byte_count: nil,
+          modified_at: nil,
           sha256: nil
         }
 
@@ -76,6 +79,7 @@ defmodule Shuttle.Transcript do
           harness: nil,
           source_path: nil,
           byte_count: nil,
+          modified_at: nil,
           sha256: nil
         }
     end
@@ -114,6 +118,16 @@ defmodule Shuttle.Transcript do
     case File.stat(path) do
       {:ok, %File.Stat{size: size}} -> size
       _ -> 0
+    end
+  end
+
+  # The transcript file's last-write instant, in unix milliseconds — the only
+  # end-of-session signal available without reading the file. A session that is
+  # still running simply has a recent one.
+  defp modified_at(path) do
+    case File.stat(path, time: :posix) do
+      {:ok, %File.Stat{mtime: mtime}} when is_integer(mtime) -> mtime * 1000
+      _ -> nil
     end
   end
 

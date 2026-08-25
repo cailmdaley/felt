@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -28,14 +29,18 @@ resolved); outside a daemon-launched worker the <fiber> argument is resolved
 instead.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		path, self, err := resolveHandoffPath(args[0])
+		path, self, fiberID, err := resolveHandoffPath(args[0])
 		if err != nil {
 			return err
 		}
-		at, err := stampHandedOff(path)
+		at, f, err := stampHandedOff(path)
 		if err != nil {
 			return err
 		}
+		// The frontmatter stamp only ever describes the LATEST run; the ledger
+		// line is what lets a later reader tell which of a fiber's sessions
+		// ended cleanly and which died mid-thought.
+		recordHandoffPairing(f, fiberID, at)
 		fmt.Printf("handed off: %s (handed_off_at=%s)\n", path, at)
 		// Final act — but ONLY when handing off our own fiber: end our own tmux
 		// session (no-op outside tmux). The field is already durably on disk, so
@@ -73,25 +78,25 @@ func init() {
 // honored only when the argument names it exactly (id or UID); a fuzzy match
 // that disagrees with the env is treated as ambiguity and the env wins — the
 // pre-fix behavior, which at worst stamps the caller's own fiber.
-func resolveHandoffPath(fiber string) (string, bool, error) {
+func resolveHandoffPath(fiber string) (string, bool, string, error) {
 	envPath := os.Getenv("SHUTTLE_FIBER_PATH")
 	f, _, err := shuttleResolveFiber(fiber, false)
 	if err != nil {
 		if envPath != "" {
-			return envPath, true, nil
+			return envPath, true, "", nil
 		}
-		return "", false, fmt.Errorf("resolving fiber %q (SHUTTLE_FIBER_PATH unset): %w", fiber, err)
+		return "", false, "", fmt.Errorf("resolving fiber %q (SHUTTLE_FIBER_PATH unset): %w", fiber, err)
 	}
 	if envPath == "" {
-		return f.Path, true, nil
+		return f.Path, true, f.ID, nil
 	}
 	if samePath(envPath, f.Path) {
-		return envPath, true, nil
+		return envPath, true, f.ID, nil
 	}
 	if fiber == f.ID || fiber == f.UID {
-		return f.Path, false, nil
+		return f.Path, false, f.ID, nil
 	}
-	return envPath, true, nil
+	return envPath, true, "", nil
 }
 
 // samePath reports whether two paths name the same file, absolutizing and
@@ -135,33 +140,108 @@ func canonicalPath(p string) (string, error) {
 // daemon-shelled `mark-runtime` (the dispatch stamp, or a conclude re-arm) can
 // race the same fiber file; without the lock, whichever writes last silently
 // drops the other's field. The lock forces them to serialize instead.
-func stampHandedOff(path string) (string, error) {
+func stampHandedOff(path string) (string, *felt.Felt, error) {
 	unlock, err := felt.LockFiberFile(path)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	defer unlock()
 
 	content, err := os.ReadFile(path)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	f, err := felt.Parse(idFromPath(path), content)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	at := time.Now().UTC().Format(time.RFC3339Nano)
 	if err := f.SetShuttleRuntimeField("handed_off_at", at); err != nil {
-		return "", err
+		return "", nil, err
 	}
 	data, err := f.Marshal()
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	if err := atomicWriteFile(path, data); err != nil {
-		return "", err
+		return "", nil, err
 	}
-	return at, nil
+	return at, f, nil
+}
+
+// recordHandoffPairing appends a `handoff` line to this host's session ledger,
+// naming the session that just exited cleanly. The daemon writes the ledger's
+// dispatch/claim/resume lines; this is the fourth moment, and only the exiting
+// worker is in a position to write it.
+//
+// Best-effort throughout, exactly like the daemon's own ledger writes: a
+// missing session UUID (a fiber handed off before it was ever dispatched), no
+// ~/.shuttle, or a failed append all cost a provenance row, never the handoff
+// itself — the durable clean-exit signal is already on disk in the frontmatter.
+func recordHandoffPairing(f *felt.Felt, fiberID, at string) {
+	if f == nil {
+		return
+	}
+	session := handoffSessionUUID(f)
+	if session == "" {
+		return
+	}
+	if fiberID == "" {
+		// The store-relative id is the ledger's own address shape; the parsed
+		// file only knows its leaf stem, which would read as a different fiber.
+		fiberID = f.ID
+	}
+	path, ok := sessionsSink()
+	if !ok {
+		return
+	}
+	host, err := resolveOwnHost("")
+	if err != nil {
+		host = ""
+	}
+	stamp, err := time.Parse(time.RFC3339Nano, at)
+	if err != nil {
+		stamp = time.Now().UTC()
+	}
+	line, err := json.Marshal(map[string]any{
+		"fiber":   fiberID,
+		"uid":     f.UID,
+		"session": session,
+		"host":    host,
+		"at":      stamp.UnixMilli(),
+		"kind":    "handoff",
+	})
+	if err != nil {
+		return
+	}
+	_ = appendSessionLedgerLine(path, string(line)+"\n")
+}
+
+// handoffSessionUUID reads the daemon-stamped session UUID the ledger line
+// names. It is deliberately not modeled by shuttle.Block (runtime keys ride
+// through as raw node content), so it is read the way the rest of cmd reads
+// them. Harness and tmux are left out rather than guessed: the dispatch line
+// already carries them, and the reader folds this line onto that row by
+// session UUID.
+func handoffSessionUUID(f *felt.Felt) string {
+	if f.ExtraFields == nil {
+		return ""
+	}
+	node, ok := f.ExtraFields["shuttle"]
+	if !ok || node == nil {
+		return ""
+	}
+	var block map[string]any
+	if err := node.Decode(&block); err != nil {
+		return ""
+	}
+	session, _ := block["session_uuid"].(string)
+	if runtime, ok := block["runtime"].(map[string]any); ok {
+		if value, ok := runtime["session_uuid"].(string); ok && strings.TrimSpace(value) != "" {
+			session = value
+		}
+	}
+	return strings.TrimSpace(session)
 }
 
 // endOwnTmuxSession tears down the tmux session this process is running in — the

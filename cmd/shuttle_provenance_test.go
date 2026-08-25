@@ -518,3 +518,127 @@ func TestMaterialize_LocalWithoutPathIsAnErrorNotAbsence(t *testing.T) {
 		t.Fatalf("pathless local transcript must carry an explicit error: %#v", item)
 	}
 }
+
+// The temporal columns are the answer to "which session did the work last
+// night?": a handoff line folds onto its dispatch row rather than opening a
+// second one, the transcript's mtime becomes the end, and a session with no
+// handoff line reads as unmarked rather than as a clean exit.
+func TestShuttleSessions_TemporalColumnsAndHandoffMarker(t *testing.T) {
+	defer saveShuttleGlobals()()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != sessionsCompositePath {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte(`{"records":[
+          {"fiber":"work/one","uid":"01UID","session":"` + provenanceSession + `","host":"candide","harness":"codex","kind":"dispatch","at":1000,"transcript":{"availability":"available_local","source_path":"/local/a.jsonl","byte_count":2048,"modified_at":9000}},
+          {"fiber":"work/one","uid":"01UID","session":"` + provenanceSession + `","host":"candide","kind":"handoff","at":8000},
+          {"fiber":"work/one","uid":"01UID","session":"died","host":"candide","harness":"codex","kind":"dispatch","at":2000,"transcript":{"availability":"transcript_missing"}}
+        ]}`))
+	}))
+	defer server.Close()
+	t.Setenv("SHUTTLE_DAEMON_URL", server.URL)
+
+	out, err := runCommand(t, t.TempDir(), "shuttle", "sessions", "work/one", "--json")
+	if err != nil {
+		t.Fatalf("sessions: %v\n%s", err, out)
+	}
+	var rows []SessionProvenance
+	if err := json.Unmarshal([]byte(out), &rows); err != nil {
+		t.Fatalf("decode: %v\n%s", err, out)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("the handoff line should fold onto its session's row, got %#v", rows)
+	}
+	handed, died := rows[0], rows[1]
+	if handed.Session != provenanceSession {
+		handed, died = rows[1], rows[0]
+	}
+	if handed.StartedAt != 1000 {
+		t.Errorf("started_at should be the first recorded moment, got %d", handed.StartedAt)
+	}
+	if handed.EndedAt != 9000 {
+		t.Errorf("ended_at should prefer the transcript's last write, got %d", handed.EndedAt)
+	}
+	if handed.HandedOffAt != 8000 {
+		t.Errorf("handed_off_at should come from the ledger's handoff line, got %d", handed.HandedOffAt)
+	}
+	if died.HandedOffAt != 0 || died.EndedAt != 0 {
+		t.Errorf("a session with no handoff and no transcript must claim neither, got %#v", died)
+	}
+
+	// --json is a root persistent flag; cobra only sets it on parse, so clear it
+	// before asking the same command for its text table.
+	jsonOutput = false
+	sessionsRecent = 0
+	table, err := runCommand(t, t.TempDir(), "shuttle", "sessions", "work/one")
+	if err != nil {
+		t.Fatalf("sessions (table): %v\n%s", err, table)
+	}
+	for _, header := range []string{"START", "END", "SIZE", "EXIT"} {
+		if !strings.Contains(table, header) {
+			t.Errorf("table is missing the %s column:\n%s", header, table)
+		}
+	}
+	if strings.Count(table, "handoff") != 1 {
+		t.Errorf("exactly the handed-off row should be marked:\n%s", table)
+	}
+	if !strings.Contains(table, "2K") {
+		t.Errorf("transcript size is not shown:\n%s", table)
+	}
+}
+
+// --recent is the store-wide view: newest first, across fibers, with no fiber
+// argument to give.
+func TestShuttleSessions_RecentAcrossStore(t *testing.T) {
+	defer saveShuttleGlobals()()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != sessionsCompositePath {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte(`{"records":[
+          {"fiber":"work/old","uid":"01UID","session":"aaa","host":"candide","harness":"codex","kind":"dispatch","at":1000,"transcript":{"availability":"transcript_missing"}},
+          {"fiber":"work/new","uid":"02UID","session":"bbb","host":"cineca","harness":"claude-code","kind":"dispatch","at":5000,"transcript":{"availability":"transcript_missing"}},
+          {"fiber":"work/mid","uid":"03UID","session":"ccc","host":"candide","harness":"codex","kind":"dispatch","at":3000,"transcript":{"availability":"transcript_missing"}}
+        ]}`))
+	}))
+	defer server.Close()
+	t.Setenv("SHUTTLE_DAEMON_URL", server.URL)
+	out, err := runCommand(t, t.TempDir(), "shuttle", "sessions", "--recent=2", "--json")
+	if err != nil {
+		t.Fatalf("sessions --recent: %v\n%s", err, out)
+	}
+	var rows []SessionProvenance
+	if err := json.Unmarshal([]byte(out), &rows); err != nil {
+		t.Fatalf("decode: %v\n%s", err, out)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("--recent 2 should bound the listing, got %d rows", len(rows))
+	}
+	if rows[0].Session != "bbb" || rows[1].Session != "ccc" {
+		t.Fatalf("expected newest-first across fibers, got %s then %s", rows[0].Session, rows[1].Session)
+	}
+}
+
+// A transcript the daemon called available_local is on this host by
+// definition, so the CLI can stat it itself when the daemon's receipt predates
+// modified_at. A remote one is left alone.
+func TestLocalTranscriptModifiedAt_FillsOnlyLocalReceipts(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	if err := os.WriteFile(path, []byte("{}\n"), 0o600); err != nil {
+		t.Fatalf("writing transcript: %v", err)
+	}
+	local := localTranscriptModifiedAt(SessionProvenance{
+		Transcript: TranscriptReceipt{Availability: "available_local", SourcePath: path},
+	})
+	if local.Transcript.ModifiedAt == 0 {
+		t.Errorf("a local transcript's mtime should be filled in from this host")
+	}
+	remote := localTranscriptModifiedAt(SessionProvenance{
+		Transcript: TranscriptReceipt{Availability: "available_remote", SourcePath: path},
+	})
+	if remote.Transcript.ModifiedAt != 0 {
+		t.Errorf("a remote transcript must not be stat'd locally, got %d", remote.Transcript.ModifiedAt)
+	}
+}

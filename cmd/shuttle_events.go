@@ -23,6 +23,10 @@ const (
 	// costs nothing either reader depends on.
 	eventsDefaultMaxBytes = 64 << 20
 	eventsRotatedSuffix   = ".1"
+
+	// sessionsDefaultMaxBytes mirrors Shuttle.SessionLedger's @max_bytes: one
+	// line per session moment, not one per hook event.
+	sessionsDefaultMaxBytes = 8 << 20
 )
 
 // shuttleStatePath resolves one host-local state file the way the Elixir side
@@ -99,6 +103,19 @@ func eventsSink() (string, bool) {
 	return shuttleSink(eventsFilePath())
 }
 
+// sessionsFilePath mirrors Shuttle.SessionLedger.default_path/0 exactly. The
+// daemon writes the dispatch/claim/resume lines there; `felt shuttle handoff`
+// writes the one moment only the exiting worker knows, its clean exit.
+func sessionsFilePath() (path string, explicit bool) {
+	return shuttleStatePath("SHUTTLE_SESSIONS_FILE", "sessions.jsonl")
+}
+
+// sessionsSink resolves the session ledger path under the same gate as the
+// commit ledger: the daemon's state directory is the only switch.
+func sessionsSink() (string, bool) {
+	return shuttleSink(sessionsFilePath())
+}
+
 // commitsSink resolves the commit ledger path under the same gate. The state
 // directory is the only switch here: the ledger has no stream to silence, and
 // a host without ~/.shuttle acquires no file.
@@ -125,7 +142,17 @@ func eventsMaxBytes() int64 {
 // is a single call, which is why hook_event.go bounds the line size before
 // getting here.
 func appendEventLine(path, line string) error {
-	if info, err := os.Stat(path); err == nil && info.Size() >= eventsMaxBytes() {
+	return appendBoundedLine(path, line, eventsMaxBytes())
+}
+
+// appendSessionLedgerLine appends one pairing to ~/.shuttle/sessions.jsonl,
+// bounded the way Shuttle.SessionLedger bounds it.
+func appendSessionLedgerLine(path, line string) error {
+	return appendBoundedLine(path, line, sessionsDefaultMaxBytes)
+}
+
+func appendBoundedLine(path, line string, maxBytes int64) error {
+	if info, err := os.Stat(path); err == nil && info.Size() >= maxBytes {
 		// Best-effort: if the rename loses a race with another hook process,
 		// the loser just appends to whichever file now holds the name.
 		_ = os.Rename(path, path+eventsRotatedSuffix)
