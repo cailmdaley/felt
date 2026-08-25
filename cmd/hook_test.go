@@ -854,3 +854,49 @@ func TestFiberFromEditedPath(t *testing.T) {
 		})
 	}
 }
+
+func TestPostToolHookSkipsDuringGitOperation(t *testing.T) {
+	dir := t.TempDir()
+	storage := felt.NewStorage(dir)
+	if err := storage.Init(); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	old := mustParseTime(t, "2026-04-10T09:00:00Z")
+	if err := storage.Write(&felt.Felt{ID: "alpha", Name: "Alpha", CreatedAt: old}); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	// A repository mid-merge: the edit is conflict resolution, not authorship.
+	gitDir := filepath.Join(dir, ".git")
+	if err := os.MkdirAll(gitDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	mergeHead := filepath.Join(gitDir, "MERGE_HEAD")
+	if err := os.WriteFile(mergeHead, []byte("deadbeef\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	runPostToolWithInput(t, postEditInput("Edit", storage.Path("alpha")))
+
+	during, err := storage.Read("alpha")
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if during.UpdatedAt != nil {
+		t.Fatalf("stamped mid-merge: %v", during.UpdatedAt)
+	}
+
+	// Merge concluded — stamping resumes.
+	if err := os.Remove(mergeHead); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	runPostToolWithInput(t, postEditInput("Edit", storage.Path("alpha")))
+
+	after, err := storage.Read("alpha")
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if after.UpdatedAt == nil {
+		t.Fatal("not stamped after the merge concluded")
+	}
+}
