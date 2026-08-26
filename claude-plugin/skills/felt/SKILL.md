@@ -24,11 +24,12 @@ Proactive filing. Retroactive extraction. Consolidation over time. Coherence whe
 ```
 Something came into focus. Start:
     felt add <slug> "name" -t tag -o "one-line outcome"
+    # statusless by default. Pass -s open only if someone should do something.
 
 Understanding crystallized. Accrete:
-    felt edit <id> --status active
-    felt edit <id> --tag X
     felt edit <id> --outcome "what changed"
+    felt edit <id> --tag X
+    felt edit <id> --status active                 # only if this is now current work
     Read then Edit .felt/<path>/<slug>.md          # body + non-native frontmatter
 
 Search and read:
@@ -76,7 +77,7 @@ binds the marker's felt build to the resolved executable, and rejects a
 pending journal or identity disagreement. An incidental cache directory is
 not proof that a bundle is loaded.
 
-Statuses: · untracked, ○ open, ◐ active, ● closed
+Statuses: · none (the default — most fibers stay here)  ○ open (todo)  ◐ active (in flight)  ● closed (resolved todo). Status is opt-in: never pass `-s` on `felt add` unless someone should do something.
 Detail: name < compact < summary < full. Summary adds the lede (first paragraph of the body; write it to stand alone).
 Relationships: directory containment, `[[wikilinks]]` in bodies, and optional project-owned data-flow conventions. Nested IDs use paths (bao-analysis/damping-prior).
 
@@ -91,6 +92,8 @@ Stores and views: a project whose `.felt` symlinks into the loom is a *view* on 
 **File while working.** The moment to update a fiber is right after something crystallizes, while the user reads and the understanding still has edges.
 
 **Follow the understanding.** Don't ask permission to file. The user's corrections and opinions are the primary trigger; when the direction shifts, the fiber should shift too.
+
+**Status is opt-in.** Most fibers never get one. A finding, a decision, a recipe, a note — those exist by being filed. `open`/`active` means *someone should do something*; if nobody should, leave it statusless. Don't file empty stubs "for later" — file when the work is real. When an outcome reads complete ("landed", "CONVERGED", "decisions closed"), close in the same motion, or the fiber shouldn't have been open.
 
 **Use the substrate cleanly.** Names are concise labels — body and outcome carry the content. Nest for containment, `[[wikilinks]]` for narrative, project-owned conventions for anything more specific. Never hand-edit `created-at` / `updated-at`: felt stamps them on every write (a manual value is silently overwritten); edit only content fields.
 
@@ -124,6 +127,8 @@ Stores and views: a project whose `.felt` symlinks into the loom is a *view* on 
 | **Question answered** | What was figured out. Mechanism, cause, how. |
 | **Pattern** | Architectural insight, convention, workflow. |
 | **Finding** | What was built, measured, produced. |
+
+These land statusless (`felt add` default). Only unanswered questions and real todos get `-s open`.
 
 ### Documentation fibers
 

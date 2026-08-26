@@ -49,9 +49,9 @@ When the conversation is exploratory — no single topic, things are accumulatin
 
 | Item kind | What it looks like | Destination |
 |-----------|--------------------|-------------|
-| **Decision** | A choice between real alternatives | Decision fiber; body/outcome first, plus project-owned YAML if useful |
-| **Finding** | A claim with at least the start of evidence | Finding fiber; capture claim + evidence clearly |
-| **Sub-analysis** | "Compute X from Y" with identifiable inputs/outputs | New fiber; add YAML only if the project uses it |
+| **Decision** | A choice between real alternatives | Decision fiber, statusless; body/outcome first, plus project-owned YAML if useful |
+| **Finding** | A claim with at least the start of evidence | Finding fiber, statusless; capture claim + evidence clearly |
+| **Sub-analysis** | "Compute X from Y" with identifiable inputs/outputs | New fiber, statusless unless it is itself a todo |
 | **Question** | An open thread worth tracking, not yet answered | New fiber, `status: open` |
 | **Root-fiber change** | A pattern or gotcha that belongs in CLAUDE.md | Edit the root fiber |
 
@@ -87,11 +87,11 @@ What comes out of the diamonds maps onto fibers like this:
 | Diamond output | Fiber destination |
 |----------------|-------------------|
 | Wonder questions left open | New fiber, `status: open` |
-| Ontology convergence — "this IS a decision about X" | New or updated decision fiber |
+| Ontology convergence — "this IS a decision about X" | New or updated decision fiber, statusless |
 | Design alternatives with trade-offs | Body/outcome text, or project-owned YAML when that project uses it |
 | Delivery — the commit | Outcome + body that make the choice legible |
-| Finding at end of Delivery | Finding fiber with claim + evidence |
-| Sub-analysis scope | New fiber describing inputs, outputs, and method |
+| Finding at end of Delivery | Finding fiber, statusless, with claim + evidence |
+| Sub-analysis scope | New fiber describing inputs, outputs, and method — statusless unless the sub-analysis is itself a todo |
 | Process-level lesson that generalizes | Edit to root fiber / CLAUDE.md |
 
 ---

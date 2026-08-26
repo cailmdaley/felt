@@ -24,7 +24,7 @@ Surface a "by the way" note only when cleanup needs judgment, has real blast rad
 
 ### Open And Active Mean Todo
 
-`open` and `active` are action states. They do not mean "important", "reference", "canonical", or "worth remembering".
+`open` and `active` are action states. They do not mean "important", "reference", "canonical", or "worth remembering". The creation-time rule lives in the main skill: **status is opt-in**. Gardening is what happens when that rule was skipped — findings filed as todos, empty standup stubs, outcomes that already read complete on an open fiber.
 
 - Use `active` for current attention.
 - Use `open` for a real unresolved todo/question.
