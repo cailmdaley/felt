@@ -11,10 +11,10 @@
 
 **[Documentation](https://cailmdaley.github.io/felt/)**
 
-felt keeps the durable trail that builds up around work — and, when you want it, keeps that work
-moving while you're away. One repo ships two pieces on one substrate:
+felt keeps the durable trail that builds up around work. Shuttle keeps that work moving while
+you're away. This repo ships both:
 
-**felt** is the substrate. You record each entry as a *fiber*: a directory under `.felt/`, holding
+**felt** is the memory. Every entry is a *fiber*: a directory under `.felt/`, holding
 a `<slug>.md` file with YAML frontmatter and a plain-markdown body. A fiber can carry a task, a
 decision, a research claim, a question, or a spec. The directory tree gives hierarchy;
 `[[wikilinks]]` in bodies give narrative cross-references. Native metadata stays small — `name`,
@@ -23,8 +23,8 @@ top-level YAML key opaquely, so another tool can own its own schema without felt
 
 felt computes back-references, reverse data-flow consumers, and body search from the markdown tree
 on demand. Your markdown holds everything, so felt adds no authoring burden and diffs like the rest
-of your repo. It also gives AI coding agents persistent memory, as much as it gives you one: one
-plugin installs into both Claude Code and Codex, and a pi package installs into pi. Both bundle the
+of your repo. It gives AI coding agents the same memory it gives you: one plugin installs into both
+Claude Code and Codex, and a pi package installs into pi. Both bundle the
 **felt** and **shuttle** skills from one shared source tree, and make `.felt/` the thing an agent
 reaches for between sessions.
 
