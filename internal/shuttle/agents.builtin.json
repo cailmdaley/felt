@@ -82,6 +82,16 @@
     "cost_class": "copilot"
   },
   {
+    "id": "pi-openai-luna",
+    "cli": "pi",
+    "provider": "openai-codex",
+    "model": "gpt-5.6-luna",
+    "requires_model": true,
+    "effort_levels": ["low", "medium", "high", "max"],
+    "default_effort": "max",
+    "cost_class": "economy"
+  },
+  {
     "id": "pi-grok",
     "cli": "pi",
     "provider": "github-copilot",

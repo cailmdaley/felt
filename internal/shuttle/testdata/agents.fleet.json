@@ -133,6 +133,20 @@
     "default": false
   },
   {
+    "id": "pi-openai-luna",
+    "cli": "pi",
+    "wrapper": "pi",
+    "provider": "openai-codex",
+    "model": "gpt-5.6-luna",
+    "requires_model": true,
+    "effort_levels": ["low", "medium", "high", "max"],
+    "default_effort": "max",
+    "chrome_capable": false,
+    "cost_class": "economy",
+    "aliases": [],
+    "default": false
+  },
+  {
     "id": "pi-grok",
     "cli": "pi",
     "wrapper": "pi",
