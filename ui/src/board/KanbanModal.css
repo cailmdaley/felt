@@ -1711,8 +1711,19 @@
 }
 /* A member that is in the chain but no longer waiting its turn: closed without
    a verdict (awaiting review) or composted. It still counts — the drop gesture
-   ends the chain there — so it is shown, dimmer, saying which it is. */
+   ends the chain there — so it is shown, dimmer, saying which it is.
+
+   The chip above says only how many; the STATE is carried here, in pigment. A
+   row awaiting review takes verdigris — the same colour the Awaiting-review
+   column's cap wears, so "there is a verdict waiting in this queue" reads the
+   same wherever it appears. Composted rows stay plum and just recede: they are
+   in the chain, and nothing is being asked of you. */
 .kbn-card-queued-row--settled { opacity: 0.62; }
+.kbn-card-queued-row--review {
+  color: var(--kbn-tempered-ink);
+  opacity: 0.9;
+}
+.kbn-card-queued-row--review .kbn-card-queued-note { color: var(--kbn-tempered); }
 .kbn-card-queued-note { font-style: italic; opacity: 0.85; }
 .kbn-card-queued-row.kbn-queue-row-dragging { opacity: 0.45; cursor: grabbing; }
 /* The insertion point, drawn in the gap the row will land in — a line, not a

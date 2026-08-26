@@ -2072,7 +2072,7 @@ describe('the queue counts every follower a dependency still holds', () => {
     expect(queuedBehind('a', unsettledDependents(resp))).toEqual(['d', 'e'])
   })
 
-  it('names each member by how it sits, and the chip says the mix', () => {
+  it('names each member by how it sits; the chip only counts', () => {
     const waiting = queueCard('d')
     const review = queueCard('e', { status: 'closed', closedAt: at0 })
     const composted = queueCard('f', { status: 'closed', tempered: false, closedAt: at0 })
@@ -2080,13 +2080,10 @@ describe('the queue counts every follower a dependency still holds', () => {
     expect(queueMemberNote(review)).toBe('awaiting review')
     expect(queueMemberNote(composted)).toBe('composted')
 
-    expect(queuedChipLabel([null, null])).toBe('+2 queued')
-    // The live gap's shape: one follower, closed, awaiting review.
-    expect(queuedChipLabel(['awaiting review'])).toBe('+1 queued · in review')
-    expect(queuedChipLabel([null, 'awaiting review'])).toBe('+2 queued · 1 in review')
-    expect(queuedChipLabel([null, 'composted'])).toBe('+2 queued · 1 composted')
-    expect(queuedChipLabel([null, 'composted', 'awaiting review'])).toBe('+3 queued · 2 closed')
-    expect(queuedChipLabel(['composted', 'composted'])).toBe('+2 queued · composted')
+    // The chip counts, and only counts — how each member sits is the peek
+    // list's job, per row, so the desk stays readable at a glance.
+    expect(queuedChipLabel(2)).toBe('+2 queued')
+    expect(queuedChipLabel(1)).toBe('+1 queued')
   })
 })
 

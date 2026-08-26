@@ -1721,7 +1721,7 @@ export class KanbanSurfaceRenderer {
     const chip = document.createElement('button')
     chip.type = 'button'
     chip.className = 'kbn-card-queued'
-    chip.textContent = queuedChipLabel(notes)
+    chip.textContent = queuedChipLabel(queued.length)
     chip.setAttribute('aria-expanded', 'false')
     chip.setAttribute(
       'aria-label',
@@ -1798,7 +1798,15 @@ export class KanbanSurfaceRenderer {
       if (note) {
         // A closed member reads dimmer and says which closed state it is in —
         // it is in the queue, but it is not what the queue is waiting on next.
+        // It also wears the state's OWN pigment: verdigris for awaiting review,
+        // the board's verdict colour, so the thing the chip no longer counts is
+        // findable at a glance the moment the list is open.
         li.classList.add('kbn-card-queued-row--settled')
+        li.classList.add(
+          note === 'awaiting review'
+            ? 'kbn-card-queued-row--review'
+            : 'kbn-card-queued-row--composted',
+        )
         const suffix = document.createElement('span')
         suffix.className = 'kbn-card-queued-note'
         suffix.textContent = ` · ${note}`
