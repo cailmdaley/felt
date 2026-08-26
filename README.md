@@ -11,7 +11,7 @@
 
 **[Documentation](https://cailmdaley.github.io/felt/)**
 
-**felt** is a work journal made of markdown files, with a CLI. Each entry is a *fiber*: a
+**felt** is a work journal made of markdown files, with a CLI. Each entry is a "fiber": a
 directory under `.felt/` holding one markdown file — YAML frontmatter (`name`, `status`, `tags`,
 `outcome`, timestamps) above a free-form body. A fiber holds a task, a decision, a finding, a
 question, or a spec. Directories nest fibers into a hierarchy; `[[wikilinks]]` in bodies
@@ -19,10 +19,10 @@ cross-reference them. The `felt` command adds, edits, searches, and shows them; 
 everything, so the store diffs and versions like the rest of your repo.
 
 **shuttle** is a daemon that runs AI coding agents against those fibers. Add a `shuttle:` block to
-a fiber and it becomes a *constitution* — a description of a desired end state, not a list of
+a fiber and it becomes a "constitution" — a description of a desired end state, not a list of
 steps. The daemon launches one tmux worker per active constitution; the worker drives toward that
 state, rewrites the fiber's `outcome` and `## Status` on exit, and the next worker lands warm. A
-board at `http://127.0.0.1:4000/` shows the fleet and lets you steer it.
+localhost status board shows the fleet and lets you steer it.
 
 This repo ships both. felt works entirely on its own — record, search, and link with nothing
 running — and it gives AI agents the same memory it gives you: one plugin installs into Claude
