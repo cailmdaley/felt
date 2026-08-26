@@ -103,14 +103,6 @@
     "cost_class": "openrouter"
   },
   {
-    "id": "pi-kimi-k3",
-    "cli": "pi",
-    "provider": "openrouter",
-    "model": "moonshotai/kimi-k3",
-    "requires_model": true,
-    "cost_class": "openrouter"
-  },
-  {
     "id": "pi-deepseek-flash",
     "cli": "pi",
     "provider": "openrouter",
@@ -122,7 +114,7 @@
     "id": "pi-glm-flash",
     "cli": "pi",
     "provider": "openrouter",
-    "model": "z-ai/glm-5.3",
+    "model": "z-ai/glm-5.3-flash",
     "requires_model": true,
     "cost_class": "openrouter",
     "aliases": ["pi"]
