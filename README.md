@@ -11,23 +11,30 @@
 
 **[Documentation](https://cailmdaley.github.io/felt/)**
 
-felt keeps the durable trail that builds up around work. You record each entry as a *fiber*. Each
-fiber owns a directory under `.felt/`, holding a `<slug>.md` file with YAML frontmatter and a
-plain-markdown body. A fiber can carry a task, a decision, a research claim, a question, or a spec.
+felt keeps the durable trail that builds up around work — and, when you want it, keeps that work
+moving while you're away. One repo ships two pieces on one substrate:
 
-The directory tree gives hierarchy. `[[wikilinks]]` in bodies give narrative cross-references.
-Native metadata stays small — `name`, `status`, `tags`, timestamps, `outcome`, `due`, `description`.
-felt preserves any other top-level YAML key opaquely, so another tool can own its own schema without
-felt claiming it.
+**felt** is the substrate. You record each entry as a *fiber*: a directory under `.felt/`, holding
+a `<slug>.md` file with YAML frontmatter and a plain-markdown body. A fiber can carry a task, a
+decision, a research claim, a question, or a spec. The directory tree gives hierarchy;
+`[[wikilinks]]` in bodies give narrative cross-references. Native metadata stays small — `name`,
+`status`, `tags`, timestamps, `outcome`, `due`, `description` — and felt preserves any other
+top-level YAML key opaquely, so another tool can own its own schema without felt claiming it.
 
 felt computes back-references, reverse data-flow consumers, and body search from the markdown tree
 on demand. Your markdown holds everything, so felt adds no authoring burden and diffs like the rest
-of your repo.
+of your repo. It also gives AI coding agents persistent memory, as much as it gives you one: one
+plugin installs into both Claude Code and Codex, and a pi package installs into pi. Both bundle the
+**felt** and **shuttle** skills from one shared source tree, and make `.felt/` the thing an agent
+reaches for between sessions.
 
-felt gives AI coding agents persistent memory, as much as it gives you one. It ships one plugin that
-installs into both Claude Code and Codex, and a pi package that installs into pi. Both bundle the
-**felt** and **shuttle** skills from one shared source tree, and
-make `.felt/` the thing an agent reaches for between sessions.
+**shuttle** is the orchestrator, and strictly optional. Add a `shuttle:` block to a fiber's
+frontmatter and it becomes a *constitution*: a spec of a desired state rather than a list of steps.
+An Elixir/OTP daemon polls your felt stores, launches one tmux worker per eligible constitution,
+and serves a board at `http://127.0.0.1:4000/` for watching and steering them. Workers stay
+attachable, and each rewrites its fiber's `outcome` and `## Status` on exit, so the next worker
+lands warm. felt works entirely on its own — record, search, and link with nothing running. Adopt
+shuttle when you want work dispatched, not just recorded.
 
 A fiber on disk, at `.felt/covariance-estimation/covariance-estimation.md`:
 
@@ -78,12 +85,6 @@ felt setup pi                                        # install the pi package
 ```
 
 ## shuttle
-
-The same repo ships **shuttle**, an optional orchestration layer. Add a `shuttle:` block to a
-fiber's frontmatter to turn it into a *constitution* — a spec of a desired state. An Elixir/OTP
-daemon polls your felt stores. It launches one tmux worker per eligible constitution, and serves a
-board at `http://127.0.0.1:4000/` for watching and steering them. Workers stay attachable.
-Each one rewrites the fiber's `outcome` and `## Status` on exit, so the next worker lands warm.
 
 The board is five views behind a hotkey row. A kanban desk is the first; beside it, Day, Week and
 Chronicle fold a per-minute activity record — joined to fibers through recorded sessions and
