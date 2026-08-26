@@ -67,7 +67,7 @@
     "model": "gpt-5.6-luna",
     "extra_flags": "--dangerously-bypass-approvals-and-sandbox",
     "effort_levels": ["low", "medium", "high", "xhigh", "max"],
-    "default_effort": "medium",
+    "default_effort": "max",
     "cost_class": "economy",
     "aliases": ["gpt-5.6-luna"]
   },
@@ -76,6 +76,26 @@
     "cli": "pi",
     "provider": "github-copilot",
     "model": "gpt-5.6-luna",
+    "requires_model": true,
+    "effort_levels": ["low", "medium", "high", "max"],
+    "default_effort": "max",
+    "cost_class": "copilot"
+  },
+  {
+    "id": "pi-grok",
+    "cli": "pi",
+    "provider": "github-copilot",
+    "model": "grok-4.6",
+    "requires_model": true,
+    "effort_levels": ["low", "medium", "high"],
+    "default_effort": "high",
+    "cost_class": "copilot"
+  },
+  {
+    "id": "pi-gemini-flash",
+    "cli": "pi",
+    "provider": "github-copilot",
+    "model": "gemini-3.7-flash",
     "requires_model": true,
     "effort_levels": ["low", "medium", "high"],
     "default_effort": "high",

@@ -186,7 +186,7 @@ list. The maintained fleet ships built in:
 |---|---|---|
 | Claude | `claude-opus` (registry default), `claude-opus`, `claude-fable`, `claude-haiku` | Browser access ("chrome") is an explicit axis on Claude agents, not a separate agent. |
 | Codex | `codex-sol`, `codex-terra`, `codex-luna` | |
-| Pi | `pi-luna`, `pi-kimi`, `pi-deepseek-flash`, `pi-glm-flash` | |
+| Pi | `pi-luna`, `pi-grok`, `pi-gemini-flash`, `pi-kimi`, `pi-deepseek-flash`, `pi-glm-flash` | |
 
 Two orthogonal axes layer on the base id: `effort` (validated against the
 resolved agent's allowed levels) and `chrome` (Claude only, for browser work).

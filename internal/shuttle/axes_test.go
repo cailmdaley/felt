@@ -48,8 +48,8 @@ func TestResolve_ClaudeEffortValid(t *testing.T) {
 
 func TestResolve_EffortOutOfRange(t *testing.T) {
 	reg := loadReg(t)
-	// Copilot Luna caps at high; xhigh must be rejected.
-	_, _, err := reg.Resolve("pi-luna", "xhigh", false)
+	// Copilot Grok caps at high; xhigh must be rejected.
+	_, _, err := reg.Resolve("pi-grok", "xhigh", false)
 	if err == nil || !strings.Contains(err.Error(), "not allowed") {
 		t.Fatalf("expected effort-out-of-range error, got: %v", err)
 	}
@@ -61,8 +61,8 @@ func TestResolve_PiDefaultEffort(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if eff.Effort != "high" {
-		t.Fatalf("pi-luna default effort = %q, want high", eff.Effort)
+	if eff.Effort != "max" {
+		t.Fatalf("pi-luna default effort = %q, want max", eff.Effort)
 	}
 }
 
