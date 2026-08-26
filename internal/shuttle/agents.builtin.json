@@ -8,7 +8,7 @@
     "default_effort": "low",
     "chrome_capable": true,
     "cost_class": "standard",
-    "default": true
+    "default": false
   },
   {
     "id": "claude-opus",
@@ -16,9 +16,10 @@
     "model": "opus",
     "extra_flags": "--permission-mode auto",
     "effort_levels": ["low", "medium", "high", "xhigh", "max"],
-    "default_effort": "xhigh",
+    "default_effort": "medium",
     "chrome_capable": true,
-    "cost_class": "premium"
+    "cost_class": "premium",
+    "default": true
   },
   {
     "id": "claude-haiku",
@@ -69,20 +70,6 @@
     "default_effort": "medium",
     "cost_class": "economy",
     "aliases": ["gpt-5.6-luna"]
-  },
-  {
-    "id": "codex",
-    "alias_of": "codex-sol"
-  },
-  {
-    "id": "pi-sonnet",
-    "cli": "pi",
-    "provider": "github-copilot",
-    "model": "claude-sonnet-5",
-    "requires_model": true,
-    "effort_levels": ["low", "medium", "high"],
-    "default_effort": "high",
-    "cost_class": "copilot"
   },
   {
     "id": "pi-luna",

@@ -98,7 +98,7 @@ func TestShuttleAgents_MarksUserRecords(t *testing.T) {
 	if !strings.Contains(stdout, "u mine") {
 		t.Fatalf("user records should carry the `u` marker:\n%s", stdout)
 	}
-	if !strings.Contains(stdout, "* claude-sonnet") {
+	if !strings.Contains(stdout, "* claude-opus") {
 		t.Fatalf("the default should carry the `*` marker:\n%s", stdout)
 	}
 }

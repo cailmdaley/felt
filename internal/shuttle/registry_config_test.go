@@ -50,8 +50,8 @@ func TestLoadAgentRegistry_NoUserFile(t *testing.T) {
 		}
 	}
 	def, err := reg.Default()
-	if err != nil || def.ID != "claude-sonnet" {
-		t.Fatalf("Default = %+v, %v; want claude-sonnet", def, err)
+	if err != nil || def.ID != "claude-opus" {
+		t.Fatalf("Default = %+v, %v; want claude-opus", def, err)
 	}
 }
 

@@ -560,7 +560,7 @@ defmodule Shuttle.DispatchIntegrationTest do
     shuttle:
       enabled: true
       kind: oneshot
-      agent: codex
+      agent: codex-sol
     ---
     A codex fiber resumed from its dispatch marker.
     """)
@@ -625,7 +625,7 @@ defmodule Shuttle.DispatchIntegrationTest do
     matrix = [
       {"claude-sonnet", "claude-session-111", ["claude", "--resume 'claude-session-111'", "<<<"],
        ["codex resume", "pi "]},
-      {"codex", "codex-session-222",
+      {"codex-sol", "codex-session-222",
        ["codex", "resume 'codex-session-222'", "Shuttle resumed your previous session"],
        ["--resume", "--session"]},
       {"pi-kimi", "pi-session-333", ["pi", "--session 'pi-session-333'"],
@@ -659,7 +659,7 @@ defmodule Shuttle.DispatchIntegrationTest do
   } do
     matrix = [
       {"claude-sonnet", "claude-history-session", "--resume 'claude-history-session'"},
-      {"codex", "codex-history-session", "resume 'codex-history-session'"},
+      {"codex-sol", "codex-history-session", "resume 'codex-history-session'"},
       {"pi-kimi", "pi-history-session", "--session 'pi-history-session'"}
     ]
 
@@ -713,7 +713,7 @@ defmodule Shuttle.DispatchIntegrationTest do
       - constitution
     shuttle:
       kind: oneshot
-      agent: codex
+      agent: codex-sol
     ---
     A codex fiber whose session UUID should be captured from its own transcript.
     """)
@@ -782,7 +782,7 @@ defmodule Shuttle.DispatchIntegrationTest do
       - constitution
     shuttle:
       kind: oneshot
-      agent: codex
+      agent: codex-sol
     ---
     A codex fiber whose transcript lands after local midnight.
     """)

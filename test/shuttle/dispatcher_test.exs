@@ -1074,10 +1074,10 @@ defmodule Shuttle.DispatcherTest do
     refute cmd =~ "--effort"
   end
 
-  test "pi renders the resolved effort as the model suffix (pi-sonnet :high)" do
+  test "pi renders the resolved effort as the model suffix (pi-luna :high)" do
     agent =
       resolved(%{
-        "id" => "pi-sonnet",
+        "id" => "pi-luna",
         "cli" => "pi",
         "wrapper" => "pi",
         "model" => "claude-sonnet-4.6",

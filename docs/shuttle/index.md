@@ -92,7 +92,7 @@ prior transcript.
   the CLI covers every lifecycle operation. (Cycles are the one thing only the
   board draws — see [Cycles and eras](cycles.md).)
 - **The agent registry** — maps an agent id (`claude-opus`, `codex`,
-  `pi-sonnet`, …) to a CLI invocation. `felt shuttle agents` prints it.
+  `pi-luna`, …) to a CLI invocation. `felt shuttle agents` prints it.
 
 ## Honest scoping
 

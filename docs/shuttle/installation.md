@@ -743,7 +743,7 @@ is safe now that both the CLI and the daemon read their own identity from the
 same file.
 
 **Every built-in agent assumes its CLI is installed.** The shipped records cover
-the configured Claude, Codex, and Pi fleet, with `claude-sonnet` as the
+the configured Claude, Codex, and Pi fleet, with `claude-opus` as the
 default. A record whose CLI is absent or unauthenticated fails at dispatch, not
 at install. Use `builtins: "restrict"` when a host should expose only the
 subset it can run — see [Configuring agents](#configuring-agents).

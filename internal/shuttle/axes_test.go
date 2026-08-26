@@ -29,9 +29,9 @@ func TestResolve_BareClaudeUsesRegistryDefaultEffort(t *testing.T) {
 	if base.ID != "claude-opus" {
 		t.Fatalf("base = %q, want claude-opus", base.ID)
 	}
-	// claude-opus's registry default_effort is xhigh.
-	if eff.Effort != "xhigh" || eff.Chrome {
-		t.Fatalf("expected effort=xhigh and chrome=false, got %+v", eff)
+	// claude-opus's registry default_effort is medium.
+	if eff.Effort != "medium" || eff.Chrome {
+		t.Fatalf("expected effort=medium and chrome=false, got %+v", eff)
 	}
 }
 
@@ -48,8 +48,8 @@ func TestResolve_ClaudeEffortValid(t *testing.T) {
 
 func TestResolve_EffortOutOfRange(t *testing.T) {
 	reg := loadReg(t)
-	// Copilot Sonnet caps at high; xhigh must be rejected.
-	_, _, err := reg.Resolve("pi-sonnet", "xhigh", false)
+	// Copilot Luna caps at high; xhigh must be rejected.
+	_, _, err := reg.Resolve("pi-luna", "xhigh", false)
 	if err == nil || !strings.Contains(err.Error(), "not allowed") {
 		t.Fatalf("expected effort-out-of-range error, got: %v", err)
 	}
@@ -57,12 +57,12 @@ func TestResolve_EffortOutOfRange(t *testing.T) {
 
 func TestResolve_PiDefaultEffort(t *testing.T) {
 	reg := loadReg(t)
-	_, eff, err := reg.Resolve("pi-sonnet", "", false)
+	_, eff, err := reg.Resolve("pi-luna", "", false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if eff.Effort != "high" {
-		t.Fatalf("pi-sonnet default effort = %q, want high", eff.Effort)
+		t.Fatalf("pi-luna default effort = %q, want high", eff.Effort)
 	}
 }
 
@@ -77,7 +77,7 @@ func TestResolve_EffortUnsupported(t *testing.T) {
 
 func TestResolve_ChromeOnNonClaudeRejected(t *testing.T) {
 	reg := loadReg(t)
-	_, _, err := reg.Resolve("codex", "", true)
+	_, _, err := reg.Resolve("codex-sol", "", true)
 	if err == nil || !strings.Contains(err.Error(), "chrome not supported") {
 		t.Fatalf("expected chrome-unsupported error, got: %v", err)
 	}
@@ -136,7 +136,7 @@ func TestResolve_UnknownAgent(t *testing.T) {
 func TestValidate_AxesIntegration(t *testing.T) {
 	reg := loadReg(t)
 	// chrome on codex via the full Block validation path.
-	b := &Block{Kind: "oneshot", ProjectDir: "/tmp/p", Host: "h", Agent: "codex", Chrome: true}
+	b := &Block{Kind: "oneshot", ProjectDir: "/tmp/p", Host: "h", Agent: "codex-sol", Chrome: true}
 	errs := Validate(b, reg)
 	if len(errs) == 0 {
 		t.Fatalf("expected validation error for chrome on codex")

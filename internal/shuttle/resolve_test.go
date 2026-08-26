@@ -12,7 +12,7 @@ import (
 // shuttle.resolved.agent (the poll/dispatch path). One projection, two callers.
 func TestNewResolvedAgent_MatchesResolveBlock(t *testing.T) {
 	reg := loadReg(t)
-	for _, name := range []string{"claude-opus", "codex", "pi-sonnet"} {
+	for _, name := range []string{"claude-opus", "codex-sol", "pi-luna"} {
 		block := &Block{Kind: "oneshot", Agent: name, Effort: "", Chrome: false}
 		viaBlock, err := ResolveBlock(block, reg, time.Now())
 		if err != nil {
@@ -41,7 +41,6 @@ func TestCodexModelFamily(t *testing.T) {
 		{name: "codex-sol", model: "gpt-5.6-sol", defaultEffort: "low", maxEffort: "ultra"},
 		{name: "codex-terra", model: "gpt-5.6-terra", defaultEffort: "medium", maxEffort: "ultra"},
 		{name: "codex-luna", model: "gpt-5.6-luna", defaultEffort: "medium", maxEffort: "max"},
-		{name: "codex", model: "gpt-5.6-sol", defaultEffort: "low", maxEffort: "ultra"},
 	}
 
 	for _, tt := range tests {
@@ -82,8 +81,8 @@ func TestResolveBlock_Oneshot(t *testing.T) {
 	if res.Agent.CLI != "claude" || res.Agent.Model != "opus" {
 		t.Fatalf("resolved agent = %+v, want claude/opus", res.Agent)
 	}
-	if res.Agent.Effort != "xhigh" {
-		t.Fatalf("effort = %q, want xhigh (claude-opus default)", res.Agent.Effort)
+	if res.Agent.Effort != "medium" {
+		t.Fatalf("effort = %q, want medium (claude-opus default)", res.Agent.Effort)
 	}
 	if res.NextDue != nil {
 		t.Fatalf("oneshot should have no next_due, got %v", res.NextDue)
@@ -198,7 +197,7 @@ func TestResolveBlock_DefaultsUnnamedAgent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveBlock: %v", err)
 	}
-	if res.Agent == nil || res.Agent.ID != "claude-sonnet" {
-		t.Fatalf("unnamed agent should resolve to the registry default (claude-sonnet), got %+v", res.Agent)
+	if res.Agent == nil || res.Agent.ID != "claude-opus" {
+		t.Fatalf("unnamed agent should resolve to the registry default (claude-opus), got %+v", res.Agent)
 	}
 }
