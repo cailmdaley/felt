@@ -98,15 +98,15 @@
     "id": "pi-kimi",
     "cli": "pi",
     "provider": "openrouter",
-    "model": "moonshotai/kimi-k2.6",
+    "model": "moonshotai/kimi-latest",
     "requires_model": true,
     "cost_class": "openrouter"
   },
   {
-    "id": "pi-deepseek-pro",
+    "id": "pi-kimi-k3",
     "cli": "pi",
     "provider": "openrouter",
-    "model": "deepseek/deepseek-v4-pro",
+    "model": "moonshotai/kimi-k3",
     "requires_model": true,
     "cost_class": "openrouter"
   },
@@ -114,7 +114,15 @@
     "id": "pi-deepseek-flash",
     "cli": "pi",
     "provider": "openrouter",
-    "model": "deepseek/deepseek-v4-flash",
+    "model": "deepseek/deepseek-v4-flash-latest",
+    "requires_model": true,
+    "cost_class": "openrouter"
+  },
+  {
+    "id": "pi-glm-flash",
+    "cli": "pi",
+    "provider": "openrouter",
+    "model": "z-ai/glm-5.3",
     "requires_model": true,
     "cost_class": "openrouter",
     "aliases": ["pi"]

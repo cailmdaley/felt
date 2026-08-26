@@ -91,7 +91,7 @@ defmodule Shuttle.DispatcherTest do
       "cli" => "pi",
       "wrapper" => "pi",
       "provider" => "openrouter",
-      "model" => "deepseek/deepseek-v4-flash"
+      "model" => "deepseek/deepseek-v4-flash-latest"
     }
 
     @test_fibers %{
@@ -1014,13 +1014,13 @@ defmodule Shuttle.DispatcherTest do
         "cli" => "pi",
         "wrapper" => "pi",
         "provider" => "openrouter",
-        "model" => "moonshotai/kimi-k2.6"
+        "model" => "moonshotai/kimi-latest"
       })
 
     cmd = Agents.build_command(agent, "hello world")
     assert cmd =~ "pi"
     assert cmd =~ "--provider 'openrouter'"
-    assert cmd =~ "--model 'moonshotai/kimi-k2.6'"
+    assert cmd =~ "--model 'moonshotai/kimi-latest'"
   end
 
   # ── Axis rendering (effort × chrome × headless) per harness ──
@@ -1065,12 +1065,12 @@ defmodule Shuttle.DispatcherTest do
         "id" => "pi-kimi",
         "cli" => "pi",
         "wrapper" => "pi",
-        "model" => "moonshotai/kimi-k2.6",
+        "model" => "moonshotai/kimi-latest",
         "effort" => "high"
       })
 
     cmd = Agents.build_command(agent, "hi")
-    assert cmd =~ "--model 'moonshotai/kimi-k2.6:high'"
+    assert cmd =~ "--model 'moonshotai/kimi-latest:high'"
     refute cmd =~ "--effort"
   end
 
@@ -1270,7 +1270,7 @@ defmodule Shuttle.DispatcherTest do
         "cli" => "pi",
         "wrapper" => "pi",
         "provider" => "openrouter",
-        "model" => "moonshotai/kimi-k2.6"
+        "model" => "moonshotai/kimi-latest"
       })
 
     cmd = Agents.build_resume_command(agent, "abc-123", "ignored directive")
