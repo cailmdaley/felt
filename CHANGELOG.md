@@ -390,6 +390,12 @@ reaches, rather than the boundary being negotiated flag by flag.
 
 ### Fixed
 
+- Board Resume now delivers the typed message to a pi worker. `pi --session`
+  already takes a positional next-turn the same way a fresh `pi "…"` does;
+  the resume command had been dropping it, so the chat opened and the
+  directive never arrived. Stdin is the wrong channel here — a piped prompt
+  flips pi into print mode — so the message stays a positional arg, matching
+  fresh dispatch.
 - Tool-name matching in the binary hooks is case-insensitive. pi names its
   tools lowercase (`edit`, `bash`) while the posttool recency stamp and the
   commit ledger checked capitalized names only — so direct fiber edits from

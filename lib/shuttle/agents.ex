@@ -149,14 +149,14 @@ defmodule Shuttle.Agents do
 
   When `prompt` is non-empty (whitespace-trimmed), it is injected as the
   next user turn in the resumed session — mirroring the fresh-dispatch
-  pattern (claude reads it via `<<<` here-string; codex takes it as a
-  positional arg). Without it, resume would land the worker in a session
+  pattern (claude reads it via `<<<` here-string; codex and pi take it as
+  a positional arg). Without it, resume would land the worker in a session
   with no signal that it was deliberately woken, and the user's directive
   (the transient `user_message` dispatch parameter) would never reach it.
 
-  Pi has no inline-prompt arg on `pi --session`, so the directive is
-  dropped on pi resume today — and since `user_message` is transient (not
-  persisted), it is simply lost on that path (a known, accepted gap for pi).
+  Do not feed pi the prompt on stdin: a piped stdin switches pi from
+  interactive to print mode, so a here-string would silently change the
+  session's shape. Positional `[messages...]` is the interactive path.
 
   Extra flags (provider, model, extra_flags) are threaded through so the
   harness wrapper runs with the same configuration as the original session.
@@ -182,9 +182,10 @@ defmodule Shuttle.Agents do
         if has_prompt, do: "#{base} #{shell_escape(prompt)}", else: base
 
       "pi" ->
-        # pi --session <path|partial-uuid> — accepts UUID prefix. No inline
-        # prompt arg today, so the directive is dropped on pi resume.
-        "#{agent.wrapper} #{flags} --session #{shell_escape(session_id)}"
+        # pi --session <path|partial-uuid> [messages...] — UUID prefix is
+        # enough; the optional message is the next user turn, same as fresh.
+        base = "#{agent.wrapper} #{flags} --session #{shell_escape(session_id)}"
+        if has_prompt, do: "#{base} #{shell_escape(prompt)}", else: base
 
       _ ->
         # Unknown harness: fall back to fresh dispatch with a note.

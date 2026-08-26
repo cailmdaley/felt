@@ -1263,7 +1263,7 @@ defmodule Shuttle.DispatcherTest do
     assert String.trim_trailing(cmd) |> String.ends_with?("'abc-123'")
   end
 
-  test "build_resume_command for pi: drops prompt (no inline arg supported)" do
+  test "build_resume_command for pi with prompt: positional arg" do
     agent =
       resolved(%{
         "id" => "pi-kimi",
@@ -1273,9 +1273,27 @@ defmodule Shuttle.DispatcherTest do
         "model" => "moonshotai/kimi-latest"
       })
 
-    cmd = Agents.build_resume_command(agent, "abc-123", "ignored directive")
+    cmd = Agents.build_resume_command(agent, "abc-123", "address the typo")
     assert cmd =~ "--session 'abc-123'"
-    refute cmd =~ "ignored directive"
+    assert cmd =~ "'address the typo'"
+    # stdin would flip pi into print mode; the message must stay positional.
+    refute cmd =~ "<<<"
+  end
+
+  test "build_resume_command for pi with empty prompt: session only" do
+    agent =
+      resolved(%{
+        "id" => "pi-kimi",
+        "cli" => "pi",
+        "wrapper" => "pi",
+        "provider" => "openrouter",
+        "model" => "moonshotai/kimi-latest"
+      })
+
+    cmd = Agents.build_resume_command(agent, "abc-123", "")
+    assert cmd =~ "--session 'abc-123'"
+    assert String.trim_trailing(cmd) |> String.ends_with?("'abc-123'")
+    refute cmd =~ "<<<"
   end
 
   test "build_resume_command/2 default-arg form still works (zero-arg prompt)" do

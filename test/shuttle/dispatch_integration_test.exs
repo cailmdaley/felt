@@ -584,6 +584,50 @@ defmodule Shuttle.DispatchIntegrationTest do
     assert script =~ "Shuttle resumed your previous session"
   end
 
+  # The board Resume button posts user_message with resume_mode=previous.
+  # pi takes that as a positional next-turn, not stdin (stdin would flip it
+  # into print mode). Assert against the resume half of `resume || fresh` so
+  # a fallback that happens to carry From User cannot hide a dropped prompt.
+  test "kanban resume for a pi worker injects user_message as the next turn", %{
+    host: host
+  } do
+    write_fiber(host, "tests/kanban-pi-resume-message", """
+    ---
+    name: Kanban pi resume with message
+    status: active
+    tags:
+      - constitution
+    shuttle:
+      kind: oneshot
+      agent: pi-kimi
+    ---
+    A pi fiber resumed from the board with a directive.
+    """)
+
+    write_dispatch_marker(
+      host,
+      "tests/kanban-pi-resume-message",
+      "pi-resume-session-444"
+    )
+
+    assert {:ok, _} =
+             Dispatcher.dispatch("tests/kanban-pi-resume-message",
+               runner: IntegrationRunner,
+               felt_store: host,
+               resume_mode: "previous",
+               user_message: "Fix the resume path so this actually lands."
+             )
+
+    script = read_run_script()
+    [resume_half | _] = String.split(script, " || ", parts: 2)
+    assert resume_half =~ "pi"
+    assert resume_half =~ "--session 'pi-resume-session-444'"
+    assert resume_half =~ "Shuttle resumed your previous session"
+    assert resume_half =~ "From User"
+    assert resume_half =~ "Fix the resume path so this actually lands."
+    refute resume_half =~ "<<<"
+  end
+
   test "poller continuation resumes the dispatch marker's session on a dirty death", %{
     host: host
   } do
@@ -628,8 +672,9 @@ defmodule Shuttle.DispatchIntegrationTest do
       {"codex-sol", "codex-session-222",
        ["codex", "resume 'codex-session-222'", "Shuttle resumed your previous session"],
        ["--resume", "--session"]},
-      {"pi-kimi", "pi-session-333", ["pi", "--session 'pi-session-333'"],
-       ["--resume", "Shuttle resumed your previous session"]}
+      {"pi-kimi", "pi-session-333",
+       ["pi", "--session 'pi-session-333'", "Shuttle resumed your previous session"],
+       ["--resume", "<<<"]}
     ]
 
     for {agent, session_id, expected, forbidden} <- matrix do
