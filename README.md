@@ -65,6 +65,17 @@ It installs to `/usr/local/bin` if writable, else `~/.local/bin`; override with 
 If `claude`, `codex`, or `pi` is on your `PATH`, it also registers the felt plugin for them. Later,
 `felt update` refreshes both the binary and the plugin wiring.
 
+The shuttle daemon installs the same way, with `SHUTTLE=1`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh | SHUTTLE=1 sh
+```
+
+Note where `SHUTTLE=1` sits — after the pipe, on `sh`. In front of `curl` it sets curl's
+environment, the script never sees it, and you get the CLI and no daemon. What lands is a prebuilt
+daemon carrying its own Erlang runtime and the board bundle — running it needs only tmux and `felt`
+on `PATH`. See [Installation](https://cailmdaley.github.io/felt/shuttle/installation/).
+
 ## Quickstart
 
 ```bash
@@ -80,38 +91,6 @@ felt setup claude                                    # install the Claude Code p
 felt setup codex                                     # install the Codex plugin
 felt setup pi                                        # install the pi package
 ```
-
-## shuttle
-
-The board is five views behind a hotkey row. A kanban desk is the first; beside it, Day, Week and
-Chronicle fold a per-minute activity record — joined to fibers through recorded sessions and
-commits — into where the time actually went, and a fifth lays out every file a worker sent as a
-canvas of rendered pages. Details:
-[The board](https://cailmdaley.github.io/felt/shuttle/board/).
-
-Configure shuttle from your home directory. `~/.config/felt/agents.json` layers your agents over the
-built-in set (`felt shuttle agents init` seeds it). `~/.config/felt/remotes.json` lists the remote
-daemons a hub aggregates (`felt shuttle remotes add`). Linux and macOS both run a single host —
-daemon, board, and workers — with the keep-alive installed as a systemd user unit or a launchd
-LaunchAgent. Multi-host tunnel management (`felt shuttle tunnels`) installs the hub's autossh jobs
-under whichever of the two the hub runs.
-
-The daemon installs the way the CLI does:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh | SHUTTLE=1 sh
-```
-
-Note where `SHUTTLE=1` sits — after the pipe, on `sh`. In front of `curl` it sets curl's
-environment, the script never sees it, and you get the CLI and no daemon.
-
-What lands in `~/.local/share/shuttle` is a prebuilt daemon for your platform, carrying its own
-Erlang runtime and the board bundle, so running the daemon needs no Erlang, Elixir or Node — only
-tmux and `felt` on `PATH`. `FELT_VERSION` pins an exact tag, which is the only way to install a
-release candidate: prereleases stay invisible to the plain line. Building from a checkout stays the
-path for changing daemon code and for the fleet. felt works without the daemon either way. See
-[Installation](https://cailmdaley.github.io/felt/shuttle/installation/) and
-[Honest scoping](https://cailmdaley.github.io/felt/shuttle/#honest-scoping).
 
 ## Documentation
 
