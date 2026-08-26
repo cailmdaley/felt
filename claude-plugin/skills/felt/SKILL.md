@@ -24,12 +24,10 @@ Proactive filing. Retroactive extraction. Consolidation over time. Coherence whe
 ```
 Something came into focus. Start:
     felt add <slug> "name" -t tag -o "one-line outcome"
-    # statusless by default. Pass -s open only if someone should do something.
 
 Understanding crystallized. Accrete:
     felt edit <id> --outcome "what changed"
     felt edit <id> --tag X
-    felt edit <id> --status active                 # only if this is now current work
     Read then Edit .felt/<path>/<slug>.md          # body + non-native frontmatter
 
 Search and read:
@@ -46,7 +44,7 @@ Search and read:
     felt show <id> --field <key>                   # one raw frontmatter key, shell-friendly
 
 A thread resolved. Close:
-    felt edit <id> --status closed --outcome "what was learned"
+    felt edit <id> --outcome "what was learned" --status closed
 
 Reshape:
     felt nest <child> <parent>
