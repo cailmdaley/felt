@@ -11,30 +11,27 @@
 
 **[Documentation](https://cailmdaley.github.io/felt/)**
 
-felt keeps the durable trail that builds up around work. Shuttle keeps that work moving while
-you're away. This repo ships both:
+**felt** is a work journal made of markdown files, with a CLI. Each entry is a *fiber*: a
+directory under `.felt/` holding one markdown file — YAML frontmatter (`name`, `status`, `tags`,
+`outcome`, timestamps) above a free-form body. A fiber holds a task, a decision, a finding, a
+question, or a spec. Directories nest fibers into a hierarchy; `[[wikilinks]]` in bodies
+cross-reference them. The `felt` command adds, edits, searches, and shows them; the markdown holds
+everything, so the store diffs and versions like the rest of your repo.
 
-**felt** is the memory. Every entry is a *fiber*: a directory under `.felt/`, holding
-a `<slug>.md` file with YAML frontmatter and a plain-markdown body. A fiber can carry a task, a
-decision, a research claim, a question, or a spec. The directory tree gives hierarchy;
-`[[wikilinks]]` in bodies give narrative cross-references. Native metadata stays small — `name`,
-`status`, `tags`, timestamps, `outcome`, `due`, `description` — and felt preserves any other
-top-level YAML key opaquely, so another tool can own its own schema without felt claiming it.
+**shuttle** is a daemon that runs AI coding agents against those fibers. Add a `shuttle:` block to
+a fiber and it becomes a *constitution* — a description of a desired end state, not a list of
+steps. The daemon launches one tmux worker per active constitution; the worker drives toward that
+state, rewrites the fiber's `outcome` and `## Status` on exit, and the next worker lands warm. A
+board at `http://127.0.0.1:4000/` shows the fleet and lets you steer it.
 
-felt computes back-references, reverse data-flow consumers, and body search from the markdown tree
-on demand. Your markdown holds everything, so felt adds no authoring burden and diffs like the rest
-of your repo. It gives AI coding agents the same memory it gives you: one plugin installs into both
-Claude Code and Codex, and a pi package installs into pi. Both bundle the
-**felt** and **shuttle** skills from one shared source tree, and make `.felt/` the thing an agent
-reaches for between sessions.
+This repo ships both. felt works entirely on its own — record, search, and link with nothing
+running — and it gives AI agents the same memory it gives you: one plugin installs into Claude
+Code and Codex, and a pi package into pi. shuttle is strictly optional; adopt it when you want
+work dispatched, not just recorded.
 
-**shuttle** is the orchestrator, and strictly optional. Add a `shuttle:` block to a fiber's
-frontmatter and it becomes a *constitution*: a spec of a desired state rather than a list of steps.
-An Elixir/OTP daemon polls your felt stores, launches one tmux worker per eligible constitution,
-and serves a board at `http://127.0.0.1:4000/` for watching and steering them. Workers stay
-attachable, and each rewrites its fiber's `outcome` and `## Status` on exit, so the next worker
-lands warm. felt works entirely on its own — record, search, and link with nothing running. Adopt
-shuttle when you want work dispatched, not just recorded.
+Any other top-level YAML key in a fiber's frontmatter is preserved opaquely, so another tool can
+own its own schema without felt claiming it. Back-references, data-flow consumers, and body search
+are computed from the markdown tree on demand — nothing else to maintain.
 
 A fiber on disk, at `.felt/covariance-estimation/covariance-estimation.md`:
 
