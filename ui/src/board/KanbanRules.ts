@@ -1126,27 +1126,19 @@ export function queueMemberNote(
 }
 
 /**
- * What the "+N queued" chip reads for a queue holding these members.
+ * What the "+N queued" chip reads for a queue of this size.
  *
- * N is always the WHOLE chain — the closed members are queued behind this card
- * in every sense the gesture cares about, and a count that skipped them would
- * disagree with the refusal you get for dropping onto the same card. When the
- * queue is MIXED, a second clause says how many are no longer waiting, named
- * by what they actually are; when they are all one thing, the clause carries no
- * number, because the N in front of it already did.
+ * ONE NUMBER, and it is the WHOLE chain — the closed members are queued behind
+ * this card in every sense the gesture cares about, and a count that skipped
+ * them would disagree with the refusal you get for dropping onto the same card.
+ * The chip used to append a second clause counting the settled ones ("· 1 in
+ * review"); it made a glance at the desk do arithmetic to answer a question the
+ * glance was not asking. How each member sits is a fact about that member, so
+ * it belongs where the members are: the peek list, where every row says its own
+ * state and wears its own colour (`queueMemberNote`).
  */
-export function queuedChipLabel(notes: readonly (QueueMemberNote | null)[]): string {
-  const total = notes.length;
-  const settled = notes.filter((n) => n !== null) as QueueMemberNote[];
-  if (settled.length === 0) return `+${total} queued`;
-  const kind = settled.every((n) => n === 'composted')
-    ? 'composted'
-    : settled.every((n) => n === 'awaiting review')
-      ? 'in review'
-      : 'closed';
-  return settled.length === total
-    ? `+${total} queued · ${kind}`
-    : `+${total} queued · ${settled.length} ${kind}`;
+export function queuedChipLabel(total: number): string {
+  return `+${total} queued`;
 }
 
 /** What the stack gesture needs to know about a card to rule on a drop.

@@ -551,6 +551,14 @@ func runPostToolHook(stdin *os.File) error {
 	if !ok {
 		return nil
 	}
+	// Mid-merge, an edit to a fiber file is conflict resolution, not work on
+	// the fiber: the agent is reconciling two machines' versions, and the
+	// content it writes is often the *other* side's. Stamping there dates the
+	// fiber to now, which turns a resolved hunk into a fresh conflict on the
+	// next replayed commit — the resolver then fights its own timestamps.
+	if gitOperationInProgress(root) {
+		return nil
+	}
 
 	storage := felt.NewStorage(root)
 	f, err := storage.Read(id)
@@ -602,4 +610,58 @@ func fiberFromEditedPath(absPath string) (root, id string, ok bool) {
 		return "", "", false
 	}
 	return root, dir, true
+}
+
+// gitOperationInProgress reports whether the repository containing dir is in
+// the middle of a merge, rebase, cherry-pick, or revert. Any of those means a
+// file write is reconciliation rather than authorship. Best-effort: an
+// unreadable or absent repository reports false, so the caller behaves exactly
+// as it did before this check existed.
+func gitOperationInProgress(dir string) bool {
+	gitDir, ok := resolveGitDir(dir)
+	if !ok {
+		return false
+	}
+	for _, marker := range []string{
+		"MERGE_HEAD", "REBASE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD",
+		"rebase-merge", "rebase-apply",
+	} {
+		if _, err := os.Stat(filepath.Join(gitDir, marker)); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// resolveGitDir walks up from dir to the nearest `.git`, returning the actual
+// git directory. A `.git` file (worktree or submodule) carries a `gitdir:`
+// line pointing at the real one; a `.git` directory is itself the answer.
+func resolveGitDir(dir string) (string, bool) {
+	for {
+		candidate := filepath.Join(dir, ".git")
+		info, err := os.Stat(candidate)
+		if err == nil {
+			if info.IsDir() {
+				return candidate, true
+			}
+			data, err := os.ReadFile(candidate)
+			if err != nil {
+				return "", false
+			}
+			line := strings.TrimSpace(string(data))
+			path := strings.TrimSpace(strings.TrimPrefix(line, "gitdir:"))
+			if path == "" || path == line {
+				return "", false
+			}
+			if !filepath.IsAbs(path) {
+				path = filepath.Join(dir, path)
+			}
+			return path, true
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", false
+		}
+		dir = parent
+	}
 }

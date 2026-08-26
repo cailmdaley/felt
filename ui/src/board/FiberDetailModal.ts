@@ -6,7 +6,7 @@ import {
   renderMarkdown,
   showToast,
 } from './utils.js'
-import type { ColumnKind, KanbanCard } from './KanbanTypes.js'
+import type { ColumnKind, KanbanCard, ShuttleKind } from './KanbanTypes.js'
 import { dispatchIneligibleReason, isAgentCard } from './KanbanModalShared.js'
 import { fetchFiberIndex, filterParentCandidates, type FiberSearchResult } from './fiberSearch.js'
 import { installWikilinks } from './wikilinks.js'
@@ -1503,17 +1503,17 @@ export class FiberDetailModal {
     // keys alone and leaves agent/status/outcome where they are.
     let agentSelect: HTMLSelectElement | null = null
     const originalAgent = card.shuttleAgent ?? ''
-    // The kind editor toggles oneshot↔standing only; `pinned` is a CLI-managed
-    // kind (`shuttle pin <fiber>`), surfaced read-only via the kind chip above.
-    // Coerce it to oneshot for the editor's baseline so the toggle stays sound;
-    // an agent-only edit on a pinned card never triggers a reshape, so the
-    // baseline is never written back unless the human deliberately toggles kind.
-    const originalKind: 'oneshot' | 'standing' = card.shuttleKind === 'standing' ? 'standing' : 'oneshot'
+    // The kind editor is the full three-way: One-shot | Standing | Pinned. It
+    // used to coerce `pinned` to `oneshot` for its baseline, which made a
+    // pinned card display "One-shot" as selected and made One-shot a no-op
+    // early-return — unpinning from the panel was impossible. The card's kind
+    // is read straight through; an absent block reads as oneshot.
+    const originalKind: ShuttleKind = card.shuttleKind ?? 'oneshot'
     const originalSchedule = card.shuttleSchedule ?? ''
     const originalTz = card.shuttleTz ?? 'Europe/Paris'
 
-    let selectedKind: 'oneshot' | 'standing' = originalKind
-    /** Set on mousedown over the One-shot segment while a promotion is staged
+    let selectedKind: ShuttleKind = originalKind
+    /** Set on mousedown over a NON-standing segment while a promotion is staged
      *  but uncommitted, so the cron field's blur doesn't commit on the way out. */
     let abandoningPromotion = false
     let selectedSchedule = originalSchedule
@@ -1599,7 +1599,7 @@ export class FiberDetailModal {
     scheduleRow.className = 'kbn-detail-field-row kbn-detail-field-row-schedule'
 
     const buildKindBtn = (
-      value: 'oneshot' | 'standing',
+      value: ShuttleKind,
       label: string,
       hint: string,
     ): HTMLButtonElement => {
@@ -1649,7 +1649,12 @@ export class FiberDetailModal {
 
     const oneshotBtn = buildKindBtn('oneshot', 'One-shot', 'Single dispatch on enable')
     const standingBtn = buildKindBtn('standing', 'Standing', 'Recurring cron-scheduled role')
-    kindSegmented.append(oneshotBtn, standingBtn)
+    const pinnedBtn = buildKindBtn(
+      'pinned',
+      'Pinned',
+      'Standing interface that rests on the Pinned strip',
+    )
+    kindSegmented.append(oneshotBtn, standingBtn, pinnedBtn)
     kindRow.append(kindLabel, kindSegmented)
     kindRow.style.display = shuttleManaged ? '' : 'none'
     dispatchSec.append(kindRow)
@@ -1833,7 +1838,7 @@ export class FiberDetailModal {
 
     const livePatch = (
       changes: {
-        shuttleKind?: 'oneshot' | 'standing'
+        shuttleKind?: ShuttleKind
         shuttleSchedule?: string
         shuttleTz?: string
         parentId?: string | null
@@ -1900,9 +1905,9 @@ export class FiberDetailModal {
       )
     }
 
-    // Kind. Collapsing standing → oneshot commits on the click: it needs no
-    // information the user hasn't already given, and it throws nothing away
-    // that a re-toggle can't restore.
+    // Kind. One-shot and Pinned commit on the click: neither needs information
+    // the user hasn't already given, and neither throws anything away that a
+    // re-toggle can't restore.
     //
     // PROMOTING oneshot → standing does NOT commit. It used to, and it wrote a
     // cron the user had never seen: the button's own handler seeds `0 9 * * 1-5
@@ -1913,7 +1918,18 @@ export class FiberDetailModal {
     // cron is confirmed on blur or Enter. A card abandoned mid-toggle stays
     // oneshot on the wire, which matches the Stash form's explicit-schedule
     // ethos — a schedule is something you state, never something you're given.
-    const commitKind = (value: 'oneshot' | 'standing'): void => {
+    //
+    // PINNING FROM THE PANEL IS SHAPE-ONLY, and that is a deliberate divergence
+    // from the board's drag-onto-the-Pinned-strip gesture (`commitPin`), which
+    // kills a live worker, reshapes, and THEN pauses. The two gestures mean
+    // different things: the drag targets a SURFACE, and the Pinned strip is
+    // where things are at rest, so "come to rest" is half of what was asked.
+    // This control edits a FIELD — the human said "be a pinned role", nothing
+    // about now. So it posts the reshape alone: no kill, no pause. The read
+    // model then places the card on its own — an `active` pinned role
+    // classifies onto the strip, a running one stays In-flight via the
+    // live-worker override, a closed one stays in Awaiting review.
+    const commitKind = (value: ShuttleKind): void => {
       if (value === baseline.kind) return
       if (value === 'standing') {
         errorEl.style.display = 'none'
@@ -1921,8 +1937,8 @@ export class FiberDetailModal {
         return
       }
       statusEl.textContent = ''
-      livePatch({ shuttleKind: 'oneshot' }, () => {
-        baseline.kind = 'oneshot'
+      livePatch({ shuttleKind: value }, () => {
+        baseline.kind = value
       })
     }
     for (const btn of kindSegmented.querySelectorAll<HTMLButtonElement>('button')) {
@@ -1934,12 +1950,14 @@ export class FiberDetailModal {
       // click that meant "never mind". mousedown runs before blur, so this is
       // where the intent is knowable.
       btn.addEventListener('mousedown', () => {
-        if (btn.dataset.kind === 'oneshot' && baseline.kind !== 'standing') {
+        // Any segment that isn't Standing is a way OUT of a staged promotion —
+        // Pinned as much as One-shot.
+        if (btn.dataset.kind !== 'standing' && baseline.kind !== 'standing') {
           abandoningPromotion = true
         }
       })
       btn.addEventListener('click', () => {
-        const value = btn.dataset.kind as 'oneshot' | 'standing' | undefined
+        const value = btn.dataset.kind as ShuttleKind | undefined
         if (value) commitKind(value)
         abandoningPromotion = false
       })
@@ -3065,7 +3083,7 @@ export class FiberDetailModal {
   private async livePatch(
     card: KanbanCard,
     changes: {
-      shuttleKind?: 'oneshot' | 'standing'
+      shuttleKind?: ShuttleKind
       shuttleSchedule?: string
       shuttleTz?: string
       parentId?: string | null
@@ -3099,8 +3117,9 @@ export class FiberDetailModal {
         // A card with no block yet has nothing to reshape (the verb errors on
         // one), so it takes the create path — `install`/`repeat`, no reshape
         // flag. Current block state comes from the card.
-        const targetKind: 'oneshot' | 'standing' =
-          changes.shuttleKind ?? (card.shuttleKind === 'standing' ? 'standing' : 'oneshot')
+        // The fallback PRESERVES the card's current kind — a schedule/tz-only
+        // patch must never quietly unpin a pinned role on its way past.
+        const targetKind: ShuttleKind = changes.shuttleKind ?? card.shuttleKind ?? 'oneshot'
 
         const schedule =
           (typeof changes.shuttleSchedule === 'string' && changes.shuttleSchedule.trim()) ||
@@ -3119,9 +3138,14 @@ export class FiberDetailModal {
           await this.postLifecycle(
             targetKind === 'standing'
               ? { action: 'reshape', origin, fiber: fiberId, kind: 'standing', schedule, tz }
-              : { action: 'reshape', origin, fiber: fiberId, kind: 'oneshot' },
+              : { action: 'reshape', origin, fiber: fiberId, kind: targetKind },
           )
         } else if (targetKind === 'standing') {
+          // Below here the card has NO block yet, so there is nothing to
+          // reshape and the create verbs take over. `pinned` never reaches
+          // this arm: the kind control is hidden until the card is
+          // shuttle-managed, and pinning a block-less card is refused on the
+          // board too (`pinRole` banners "promote it first").
           await this.postLifecycle({
             action: 'repeat', origin, fiber: fiberId,
             schedule, tz, model: card.shuttleAgent, project_dir: this.projectDirFor(card),

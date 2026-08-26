@@ -475,3 +475,102 @@ describe('FiberDetailModal.livePatch — the due branch', () => {
     expect(ok).toBe(false)
   })
 })
+
+// ── The detail panel's kind editor ───────────────────────────────────────────
+//
+// The panel's Kind control is three-way — One-shot | Standing | Pinned — and
+// every one of its writes is SHAPE-ONLY. That is the deliberate divergence from
+// `commitPin` above: the drag targets a surface (the Pinned strip = at rest) and
+// therefore also kills and pauses; this control edits a field and must not.
+//
+// These pin the wire, which is where the divergence is visible. The selected-
+// segment rendering is not covered here — the suite has no DOM (see
+// bodyLinks.test.ts on why the shims were removed); the panel's own harness
+// (`npm run harness`) is where that is looked at.
+
+describe('FiberDetailModal.livePatch — the kind branch', () => {
+  const makePanel = (): FiberDetailModal => new FiberDetailModal(BASE, () => {})
+  const pinned = (over: Partial<KanbanCard> = {}): KanbanCard =>
+    card({ id: 'role-1', status: 'active', shuttleKind: 'pinned', shuttleAgent: 'claude', ...over })
+
+  it('unpins: One-shot on a pinned card posts reshape kind=oneshot', async () => {
+    // The defect this replaces: the editor coerced `pinned` to `oneshot` for its
+    // baseline, so One-shot read as already-selected and its handler early-
+    // returned. Nothing reached the wire and the role stayed pinned forever.
+    const ok = await asPrivate(makePanel()).livePatch(
+      pinned(),
+      { shuttleKind: 'oneshot' },
+      fakeEl(),
+      fakeEl(),
+    )
+
+    expect(ok).toBe(true)
+    expect(wire.writes()).toEqual([
+      {
+        url: `${BASE}/api/v1/lifecycle`,
+        method: 'POST',
+        body: { action: 'reshape', origin: 'local', fiber: 'role-1', kind: 'oneshot' },
+      },
+    ])
+  })
+
+  it('pins: exactly ONE reshape, and no pause — the panel edits a field', async () => {
+    const ok = await asPrivate(makePanel()).livePatch(
+      card({ id: 'role-2', shuttleKind: 'oneshot', shuttleAgent: 'claude' }),
+      { shuttleKind: 'pinned' },
+      fakeEl(),
+      fakeEl(),
+    )
+
+    expect(ok).toBe(true)
+    expect(wire.writes()).toEqual([
+      {
+        url: `${BASE}/api/v1/lifecycle`,
+        method: 'POST',
+        body: { action: 'reshape', origin: 'local', fiber: 'role-2', kind: 'pinned' },
+      },
+    ])
+  })
+
+  it('pins a RUNNING card without killing it — the drag kills, this does not', async () => {
+    // `commitPin` above posts /api/v1/kill first, because dropping onto the
+    // strip also means "come to rest". Saying "be pinned" in the panel says
+    // nothing about now, so the live worker runs on and the classifier keeps
+    // the card In-flight via its live-worker override.
+    await asPrivate(makePanel()).livePatch(
+      card({ id: 'role-3', shuttleKind: 'oneshot', runningWorker: 'tmux-42' }),
+      { shuttleKind: 'pinned' },
+      fakeEl(),
+      fakeEl(),
+    )
+
+    expect(wire.writes().map((w) => w.url)).toEqual([`${BASE}/api/v1/lifecycle`])
+    expect(wire.bodiesTo('/api/v1/lifecycle').map((b) => b.action)).toEqual(['reshape'])
+  })
+
+  it('a tz-only patch PRESERVES pinned — the fallback reads the card, not "oneshot"', async () => {
+    // The kind fallback used to collapse anything non-standing to `oneshot`, so
+    // any reshape that didn't name a kind silently unpinned the role.
+    await asPrivate(makePanel()).livePatch(
+      pinned(),
+      { shuttleTz: 'Europe/Paris' },
+      fakeEl(),
+      fakeEl(),
+    )
+
+    expect(wire.bodiesTo('/api/v1/lifecycle')).toEqual([
+      { action: 'reshape', origin: 'local', fiber: 'role-1', kind: 'pinned' },
+    ])
+  })
+
+  it('reports a refused reshape without swallowing it', async () => {
+    wire.fail('/api/v1/lifecycle', 422, 'no shuttle block')
+    const ok = await asPrivate(makePanel()).livePatch(
+      pinned(),
+      { shuttleKind: 'oneshot' },
+      fakeEl(),
+      fakeEl(),
+    )
+    expect(ok).toBe(false)
+  })
+})

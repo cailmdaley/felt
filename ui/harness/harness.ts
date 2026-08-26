@@ -30,6 +30,12 @@
  *   ?recency=1     — open 3, then re-activate the oldest to show it bump to top
  *   ?reload=1      — open 2 files, tear the modal down, re-instantiate +
  *                    re-open the SAME card → confirm persistence rehydrates
+ *   ?kind=pinned   — stamp a shuttle block of that kind (oneshot|standing|
+ *                    pinned) onto the card and open the Actions disclosure, so
+ *                    the Worker section's three-way Kind control is on screen.
+ *                    The selected segment must be the card's OWN kind — the
+ *                    editor used to coerce `pinned` to One-shot, which made
+ *                    unpinning from the panel impossible.
  *   ?fallback=1    — make `/api/v1/sent-files` 404 (an older daemon) and serve
  *                    a real events.jsonl blob over `/api/v1/file` → exercises
  *                    the events.jsonl FALLBACK path for a realistic LOCAL card
@@ -184,8 +190,25 @@ function makeModal(): FiberDetailModal {
   )
 }
 
+// A shuttle block, stamped on demand — the Kind control is hidden until the
+// card is shuttle-managed, so the default (block-less) card can't show it.
+const KIND_PARAM = new URLSearchParams(location.search).get('kind')
+const HARNESS_CARD: KanbanCard =
+  KIND_PARAM === 'oneshot' || KIND_PARAM === 'standing' || KIND_PARAM === 'pinned'
+    ? {
+        ...MOCK_CARD,
+        shuttleKind: KIND_PARAM,
+        shuttleAgent: 'claude-sonnet',
+        shuttleHost: 'ada-workstation',
+        shuttleProjectDir: '/home/ada/dev/felt',
+        ...(KIND_PARAM === 'standing'
+          ? { shuttleSchedule: '0 9 * * 1-5', shuttleTz: 'Europe/Paris' }
+          : {}),
+      }
+    : MOCK_CARD
+
 let modal = makeModal()
-modal.open(MOCK_CARD)
+modal.open(HARNESS_CARD)
 
 // Drive scenarios after the launcher's sent-files fetch resolves (a microtask
 // or two). A short delay lets the launcher render so click-driving works.
@@ -199,6 +222,12 @@ window.setTimeout(() => {
   const recency = params.get('recency') === '1'
   const reload = params.get('reload') === '1'
   const closeLast = params.get('close') === '1'
+
+  if (KIND_PARAM) {
+    // The Worker section lives inside the collapsed Actions disclosure.
+    document.querySelector<HTMLButtonElement>('.kbn-detail-controls-toggle')?.click()
+    return
+  }
 
   if (closeLast) {
     // Open the newest file, then close the whole viewer window via its ✕

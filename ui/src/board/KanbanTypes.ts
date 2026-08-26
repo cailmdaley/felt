@@ -2,6 +2,10 @@
 export type ColumnKind = 'drafts' | 'inFlight' | 'awaitingReview' | 'tempered' | 'composted' | 'pinned'
 export type HorizonKind = 'now' | 'stashed'
 
+/** The three shapes a shuttle block can take — the values `felt shuttle
+ *  reshape` accepts and the daemon's lifecycle controller allows. */
+export type ShuttleKind = 'oneshot' | 'standing' | 'pinned'
+
 export interface KanbanCard {
   id: string
   /** Intrinsic frontmatter ULID when present. */
@@ -161,7 +165,7 @@ export interface KanbanCard {
    * resting (`status:active`, not running) pinned fiber classifies onto the
    * Pinned strip; a running one shows live in Now via the worker override.
    */
-  shuttleKind?: 'oneshot' | 'standing' | 'pinned'
+  shuttleKind?: ShuttleKind
   /**
    * `shuttle.schedule.expr` — 5-field cron expression for standing roles.
    * Absent on one-shot fibers and on fibers without a shuttle block.
