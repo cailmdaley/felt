@@ -72,16 +72,6 @@
     "aliases": ["gpt-5.6-luna"]
   },
   {
-    "id": "pi-sonnet",
-    "cli": "pi",
-    "provider": "github-copilot",
-    "model": "claude-sonnet-5",
-    "requires_model": true,
-    "effort_levels": ["low", "medium", "high"],
-    "default_effort": "high",
-    "cost_class": "copilot"
-  },
-  {
     "id": "pi-luna",
     "cli": "pi",
     "provider": "github-copilot",
