@@ -404,6 +404,32 @@ describe('setSurface → commitSurface — the due key is the whole protocol', (
     })
   })
 
+  it('parks an open card whose stale horizon says stashed while its worker is live', async () => {
+    // MTG's exact shape: an open card can still have a live worker after a
+    // force dispatch, while its old horizon remains stashed. The worker wins
+    // the classifier, so dropping it into Resting must stop it rather than
+    // claim the card is already there.
+    const c = card({
+      id: 'open-stashed-live-1',
+      status: 'open',
+      shuttleKind: 'oneshot',
+      runningWorker: 'tmux-open-stashed-live',
+      storedHorizon: 'stashed',
+      effectiveHorizon: 'stashed',
+    })
+    asPrivate(makeBoard()).setSurface(c, 'stashed', {})
+    await new Promise((r) => setTimeout(r, 20))
+
+    expect(wire.writes().map((w) => w.url)).toEqual([
+      `${BASE}/api/v1/kill`,
+      `${BASE}/api/v1/felt-edit`,
+    ])
+    expect(wire.bodiesTo('/api/v1/kill')[0]).toEqual({
+      fiber_id: 'open-stashed-live-1',
+      origin: 'local',
+    })
+  })
+
   it('unsets horizon and cold on the way back to Now, touching no due', async () => {
     const c = card({ storedHorizon: 'stashed', due: asStoredUtc(dayFromNow(30)) })
     asPrivate(makeBoard()).setSurface(c, 'now', {})

@@ -1402,7 +1402,7 @@ export class KanbanModal {
     // Compare against the surface the classifier is actually showing, or this
     // drag returns "already in Resting" before it can stop and park the worker.
     const actuallyOnHorizon = horizon === 'stashed'
-      ? card.status === 'open' && card.effectiveHorizon === 'stashed'
+      ? !card.runningWorker && card.status === 'open' && card.effectiveHorizon === 'stashed'
       : card.effectiveHorizon === 'now'
     const sameHorizon =
       actuallyOnHorizon && (card.cold ?? false) === (opts.cold ?? false)
