@@ -57,6 +57,28 @@ func TestBuiltinRegistry_IsComplete(t *testing.T) {
 	}
 }
 
+func TestBuiltinRegistry_PiRefreshRoles(t *testing.T) {
+	reg, err := LoadBuiltinAgentRegistry()
+	if err != nil {
+		t.Fatalf("LoadBuiltinAgentRegistry: %v", err)
+	}
+
+	want := map[string]struct{ provider, model string }{
+		"pi-sonnet":      {provider: "github-copilot", model: "claude-sonnet-5"},
+		"pi-luna":        {provider: "github-copilot", model: "gpt-5.6-luna"},
+		"pi-openai-luna": {provider: "openai-codex", model: "gpt-5.6-luna"},
+	}
+	for id, expected := range want {
+		got, ok := reg.Find(id)
+		if !ok {
+			t.Fatalf("missing refreshed Pi role %q", id)
+		}
+		if got.CLI != "pi" || got.Provider != expected.provider || got.Model != expected.model {
+			t.Errorf("%s = cli=%q provider=%q model=%q, want pi/%s/%s", id, got.CLI, got.Provider, got.Model, expected.provider, expected.model)
+		}
+	}
+}
+
 func TestBuiltinRegistry_ChromeAxisIsReachable(t *testing.T) {
 	reg, err := LoadBuiltinAgentRegistry()
 	if err != nil {
