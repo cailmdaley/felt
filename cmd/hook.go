@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -73,20 +72,6 @@ func encodeHookJSON(w *os.File, v interface{}) error {
 	return enc.Encode(v)
 }
 
-var hookPreToolCmd = &cobra.Command{
-	Use:   "pretool",
-	Short: "PreToolUse gate: deny non-felt tool calls until the felt skill is activated",
-	Long: `Reads the PreToolUse payload from stdin and emits either a deny envelope
-(if the felt skill hasn't been activated this session in a felt-enabled
-project) or nothing (pass through). Outside felt-enabled projects, or in
-non-Claude sessions like Codex, this is a pass-through.`,
-	Args:         cobra.NoArgs,
-	SilenceUsage: true,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return runPreToolHook(os.Stdin, os.Stdout)
-	},
-}
-
 var hookPostToolCmd = &cobra.Command{
 	Use:   "posttool",
 	Short: "PostToolUse: stamp updated-at when an agent edits a fiber file directly",
@@ -110,7 +95,6 @@ func init() {
 	rootCmd.AddCommand(sessionCmd)
 	rootCmd.AddCommand(hookCmd)
 	hookCmd.AddCommand(hookSessionCmd)
-	hookCmd.AddCommand(hookPreToolCmd)
 	hookCmd.AddCommand(hookPostToolCmd)
 	hookCmd.AddCommand(hookEventCmd)
 	hookCmd.AddCommand(hookCommitCmd)
@@ -414,145 +398,6 @@ func pluralize(count int, singular, plural string) string {
 		return singular
 	}
 	return plural
-}
-
-// ----------------------------------------------------------------------------
-// PreToolUse gate
-// ----------------------------------------------------------------------------
-
-const preToolDenyReason = "Activate the felt skill first. You are in a felt-enabled project but haven't activated the felt skill yet. Call the Skill tool with skill: \"felt\" before proceeding with any other tools. The skill body carries the philosophy, CLI cheatsheet, and references that shape how to work — reading the SessionStart context is not the same as having the skill loaded."
-
-type preToolInput struct {
-	SessionID      string `json:"session_id"`
-	ToolName       string `json:"tool_name"`
-	CWD            string `json:"cwd"`
-	TranscriptPath string `json:"transcript_path"`
-	ToolInput      struct {
-		Skill string `json:"skill"`
-	} `json:"tool_input"`
-}
-
-// runPreToolHook implements the PreToolUse deny gate. See cmd/hook_test.go for
-// the matrix; the rules are:
-//
-//   - outside felt-enabled projects (no .felt at cwd): pass.
-//   - Skill tool activating felt: mark flag, pass.
-//   - Skill tool activating something else: pass (don't mark).
-//   - Codex (transcript_path not under ~/.claude/projects/, or empty): mark, pass.
-//   - flag already set: pass.
-//   - otherwise: emit deny envelope.
-func runPreToolHook(stdin *os.File, stdout *os.File) error {
-	var input preToolInput
-	if err := json.NewDecoder(stdin).Decode(&input); err != nil {
-		// Can't parse input: silent pass. Better to lose the gate than block.
-		return nil
-	}
-
-	if input.CWD == "" {
-		return nil
-	}
-	if _, err := os.Stat(filepath.Join(input.CWD, ".felt")); os.IsNotExist(err) {
-		return nil
-	}
-
-	flagPath := filepath.Join(os.TempDir(), "felt-reminded-"+input.SessionID)
-
-	// Skill tool: open the gate only on felt activation specifically. Without
-	// this asymmetry an agent could bypass felt by activating a sibling skill
-	// (e.g. shuttle) as its first move.
-	if input.ToolName == "Skill" {
-		s := input.ToolInput.Skill
-		if s == "felt" || s == "felt:felt" || strings.HasPrefix(s, "felt@") {
-			_ = os.WriteFile(flagPath, nil, 0644)
-		}
-		return nil
-	}
-
-	// Codex sessions: no Skill tool to activate, and the deny would deadlock
-	// the loop. harnessFor carries the transcript_path discriminator, shared
-	// with `felt hook event` so both agree on what a session is.
-	if harnessFor(input.TranscriptPath) != "claude-code" {
-		_ = os.WriteFile(flagPath, nil, 0644)
-		return nil
-	}
-
-	if _, err := os.Stat(flagPath); err == nil {
-		return nil
-	}
-
-	// Fallback: the harness can silently drop the PreToolUse invocation for
-	// one tool_use block when an assistant turn emits several in parallel
-	// (observed: Skill(felt:shuttle) + Skill(felt:felt) in one message — only
-	// the first ever reached this hook, so the flag for felt:felt was never
-	// written even though the transcript clearly shows the activation call).
-	// Before denying, check the transcript directly for a felt activation
-	// this hook missed, rather than trusting only the PreToolUse stream.
-	if transcriptHasFeltActivation(input.TranscriptPath) {
-		_ = os.WriteFile(flagPath, nil, 0644)
-		return nil
-	}
-
-	type denyInner struct {
-		HookEventName            string `json:"hookEventName"`
-		PermissionDecision       string `json:"permissionDecision"`
-		PermissionDecisionReason string `json:"permissionDecisionReason"`
-	}
-	type denyEnvelope struct {
-		HookSpecificOutput denyInner `json:"hookSpecificOutput"`
-	}
-	envelope := denyEnvelope{HookSpecificOutput: denyInner{
-		HookEventName:            "PreToolUse",
-		PermissionDecision:       "deny",
-		PermissionDecisionReason: preToolDenyReason,
-	}}
-	return encodeHookJSON(stdout, envelope)
-}
-
-// transcriptHasFeltActivation scans a Claude Code transcript (JSONL) for a
-// Skill tool_use invoking felt ("felt", "felt:felt", or "felt@..."). Used as
-// a fallback when the PreToolUse stream itself missed the activation call —
-// the transcript is the durable record, immune to a dropped hook invocation.
-func transcriptHasFeltActivation(transcriptPath string) bool {
-	if transcriptPath == "" {
-		return false
-	}
-	f, err := os.Open(transcriptPath)
-	if err != nil {
-		return false
-	}
-	defer f.Close()
-
-	type toolUseBlock struct {
-		Type  string `json:"type"`
-		Name  string `json:"name"`
-		Input struct {
-			Skill string `json:"skill"`
-		} `json:"input"`
-	}
-	type transcriptLine struct {
-		Message struct {
-			Content []toolUseBlock `json:"content"`
-		} `json:"message"`
-	}
-
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 64*1024), 10*1024*1024)
-	for scanner.Scan() {
-		var line transcriptLine
-		if err := json.Unmarshal(scanner.Bytes(), &line); err != nil {
-			continue
-		}
-		for _, block := range line.Message.Content {
-			if block.Type != "tool_use" || block.Name != "Skill" {
-				continue
-			}
-			s := block.Input.Skill
-			if s == "felt" || s == "felt:felt" || strings.HasPrefix(s, "felt@") {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 // ----------------------------------------------------------------------------

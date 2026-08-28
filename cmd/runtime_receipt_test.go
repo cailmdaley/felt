@@ -214,23 +214,23 @@ func TestHookFilesCompatibleRequiresBothBoundaryHooks(t *testing.T) {
 	if err := os.MkdirAll(hooks, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"session.sh", "remind.sh", "felt-bin.sh"} {
+	for _, name := range []string{"session.sh", "felt-bin.sh"} {
 		if err := os.WriteFile(filepath.Join(hooks, name), []byte("#!/bin/sh\n"), 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
-	manifest := `{"hooks":{"SessionStart":[{"hooks":[{"command":"${PLUGIN_ROOT}/hooks/session.sh"}]}],"PreToolUse":[{"hooks":[{"command":"${PLUGIN_ROOT}/hooks/remind.sh"}]}]}}`
+	manifest := `{"hooks":{"SessionStart":[{"hooks":[{"command":"${PLUGIN_ROOT}/hooks/session.sh"}]}],"PreToolUse":[{"hooks":[{"command":"${PLUGIN_ROOT}/hooks/event.sh"}]}]}}`
 	if err := os.WriteFile(filepath.Join(hooks, "hooks.json"), []byte(manifest), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if !hookFilesCompatible(root) {
 		t.Fatal("complete hook bundle was rejected")
 	}
-	if err := os.Remove(filepath.Join(hooks, "remind.sh")); err != nil {
+	if err := os.Remove(filepath.Join(hooks, "session.sh")); err != nil {
 		t.Fatal(err)
 	}
 	if hookFilesCompatible(root) {
-		t.Fatal("missing reminder hook was reported compatible")
+		t.Fatal("missing session hook was reported compatible")
 	}
 }
 

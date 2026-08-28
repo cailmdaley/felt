@@ -474,7 +474,7 @@ func collectHookReceipt(bundles []ReceiptBundle) ReceiptComponent {
 
 func hookFilesCompatible(pluginRoot string) bool {
 	hooks := filepath.Join(pluginRoot, "hooks")
-	for _, name := range []string{"hooks.json", "session.sh", "remind.sh", "felt-bin.sh"} {
+	for _, name := range []string{"hooks.json", "session.sh", "felt-bin.sh"} {
 		path := filepath.Join(hooks, name)
 		if _, err := os.Stat(path); err != nil {
 			return false
@@ -496,8 +496,8 @@ func hookFilesCompatible(pluginRoot string) bool {
 		return false
 	}
 	session, sessionOK := hookDoc["SessionStart"].([]any)
-	pretool, pretoolOK := hookDoc["PreToolUse"].([]any)
-	return sessionOK && pretoolOK && hookCommandPresent(session, "session.sh") && hookCommandPresent(pretool, "remind.sh")
+	_, pretoolOK := hookDoc["PreToolUse"].([]any)
+	return sessionOK && pretoolOK && hookCommandPresent(session, "session.sh")
 }
 
 func skillFilesCompatible(pluginRoot string) bool {

@@ -30,7 +30,7 @@ if [ "$felt_absent" = 1 ]; then
   grep -q 'missing or too old' <<<"$session_output"
 fi
 
-for hook in event.sh remind.sh touch.sh commit.sh; do
+for hook in event.sh touch.sh commit.sh; do
   "${minimal_env[@]}" "$hooks/$hook" </dev/null
 done
 

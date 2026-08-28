@@ -347,7 +347,7 @@ func validateHookManifest(path, pluginDir string) error {
 	if err := json.Unmarshal(data, &document); err != nil {
 		return fmt.Errorf("hooks manifest: %w", err)
 	}
-	for _, basename := range []string{"commit.sh", "event.sh", "felt-bin.sh", "remind.sh", "session.sh", "touch.sh"} {
+	for _, basename := range []string{"commit.sh", "event.sh", "felt-bin.sh", "session.sh", "touch.sh"} {
 		path := filepath.Join(pluginDir, "hooks", basename)
 		info, err := os.Stat(path)
 		if err != nil || !info.Mode().IsRegular() || info.Mode()&0o111 == 0 {
@@ -371,7 +371,7 @@ func validateHookCommands(value interface{}) error {
 					if command, ok := child.(string); ok && strings.Contains(command, "/hooks/") {
 						found = true
 						known := false
-						for _, basename := range []string{"commit.sh", "event.sh", "felt-bin.sh", "remind.sh", "session.sh", "touch.sh"} {
+						for _, basename := range []string{"commit.sh", "event.sh", "felt-bin.sh", "session.sh", "touch.sh"} {
 							if strings.Contains(command, "/hooks/"+basename) {
 								known = true
 							}

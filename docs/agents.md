@@ -107,15 +107,20 @@ plugin.
 | Hook | Event | Effect |
 |---|---|---|
 | `session.sh` | `SessionStart` | Wraps `felt session`'s plain-text context (active + recently-touched fibers) in the harness's `additionalContext` envelope |
-| `remind.sh` | `PreToolUse` | Gates the first non-skill tool call in a felt-enabled project until the felt skill has activated this session; a pass-through everywhere else |
 | `touch.sh` | `PostToolUse` (Edit/Write/MultiEdit) | Stamps a fiber's `updated-at` when the agent edits its markdown file directly, so hand-edits count toward recency the same as `felt edit` does |
 | `event.sh` | `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `Stop`, `SubagentStop`, `Notification`, `SessionEnd` | Appends one JSON line per event to the shuttle event stream (`~/.shuttle/events.jsonl`), which the daemon reads for activity ranking and the sent-files trail; writes nothing unless `~/.shuttle` exists |
 
-The logic lives in the binary, not the script. `remind.sh`, `touch.sh`, and
-`event.sh` each shim a single line over `felt hook pretool`, `felt hook
-posttool`, and `felt hook event`.
+The logic lives in the binary, not the script. `touch.sh` and `event.sh` each
+shim a single line over `felt hook posttool` and `felt hook event`.
 `session.sh` wraps `felt session` with a `jq -Rs` pipeline, and falls back to
 `felt hook session` when `jq` is absent.
+
+There used to be a `remind.sh` `PreToolUse` gate here, denying tool calls in
+a felt-enabled project until the felt skill had activated that session. It's
+gone as of 2026-08: written when models under-activated skills, it stopped
+earning its keep once that stopped being true, and its failure mode — a false
+deny when a felt activation landed as one of several parallel tool calls in
+the same turn — cost more than the reminder was worth.
 
 ### Extension events (pi)
 
