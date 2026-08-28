@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -479,6 +480,18 @@ func runPreToolHook(stdin *os.File, stdout *os.File) error {
 		return nil
 	}
 
+	// Fallback: the harness can silently drop the PreToolUse invocation for
+	// one tool_use block when an assistant turn emits several in parallel
+	// (observed: Skill(felt:shuttle) + Skill(felt:felt) in one message — only
+	// the first ever reached this hook, so the flag for felt:felt was never
+	// written even though the transcript clearly shows the activation call).
+	// Before denying, check the transcript directly for a felt activation
+	// this hook missed, rather than trusting only the PreToolUse stream.
+	if transcriptHasFeltActivation(input.TranscriptPath) {
+		_ = os.WriteFile(flagPath, nil, 0644)
+		return nil
+	}
+
 	type denyInner struct {
 		HookEventName            string `json:"hookEventName"`
 		PermissionDecision       string `json:"permissionDecision"`
@@ -493,6 +506,53 @@ func runPreToolHook(stdin *os.File, stdout *os.File) error {
 		PermissionDecisionReason: preToolDenyReason,
 	}}
 	return encodeHookJSON(stdout, envelope)
+}
+
+// transcriptHasFeltActivation scans a Claude Code transcript (JSONL) for a
+// Skill tool_use invoking felt ("felt", "felt:felt", or "felt@..."). Used as
+// a fallback when the PreToolUse stream itself missed the activation call —
+// the transcript is the durable record, immune to a dropped hook invocation.
+func transcriptHasFeltActivation(transcriptPath string) bool {
+	if transcriptPath == "" {
+		return false
+	}
+	f, err := os.Open(transcriptPath)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+
+	type toolUseBlock struct {
+		Type  string `json:"type"`
+		Name  string `json:"name"`
+		Input struct {
+			Skill string `json:"skill"`
+		} `json:"input"`
+	}
+	type transcriptLine struct {
+		Message struct {
+			Content []toolUseBlock `json:"content"`
+		} `json:"message"`
+	}
+
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), 10*1024*1024)
+	for scanner.Scan() {
+		var line transcriptLine
+		if err := json.Unmarshal(scanner.Bytes(), &line); err != nil {
+			continue
+		}
+		for _, block := range line.Message.Content {
+			if block.Type != "tool_use" || block.Name != "Skill" {
+				continue
+			}
+			s := block.Input.Skill
+			if s == "felt" || s == "felt:felt" || strings.HasPrefix(s, "felt@") {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // ----------------------------------------------------------------------------

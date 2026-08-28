@@ -543,6 +543,82 @@ func TestHookPreToolFlagPersists(t *testing.T) {
 	}
 }
 
+// TestHookPreToolTranscriptFallback covers the false-deny reproduced live on
+// 2026-08-28: an assistant turn emits Skill(felt:shuttle) and Skill(felt:felt)
+// as two parallel tool_use blocks in one message, but the harness only
+// delivers a PreToolUse invocation for the first — felt:felt's activation
+// never reaches runPreToolHook, so the flag file is never written even
+// though the transcript plainly records the activation. A later Write with
+// no other PreToolUse-visible activation must not be denied: the hook should
+// fall back to scanning the transcript itself.
+func TestHookPreToolTranscriptFallback(t *testing.T) {
+	feltDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(feltDir, ".felt"), 0755); err != nil {
+		t.Fatalf("mkdir .felt: %v", err)
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	transcriptPath := filepath.Join(home, ".claude", "projects", "x", "log.jsonl")
+	if err := os.MkdirAll(filepath.Dir(transcriptPath), 0755); err != nil {
+		t.Fatalf("mkdir transcript dir: %v", err)
+	}
+	// One assistant turn, two parallel tool_use blocks — mirrors the real
+	// transcript line shape (only the fields the scanner reads).
+	transcriptLine := `{"message":{"content":[` +
+		`{"type":"tool_use","name":"Skill","input":{"skill":"felt:shuttle"}},` +
+		`{"type":"tool_use","name":"Skill","input":{"skill":"felt:felt"}}` +
+		`]}}` + "\n"
+	if err := os.WriteFile(transcriptPath, []byte(transcriptLine), 0644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+
+	sid := "parallel-skill-fallback"
+	flagPath := filepath.Join(os.TempDir(), "felt-reminded-"+sid)
+	_ = os.Remove(flagPath)
+	t.Cleanup(func() { _ = os.Remove(flagPath) })
+
+	// No Skill PreToolUse ever reached the hook for this session (simulating
+	// the dropped invocation) — go straight to a Write and confirm the
+	// transcript fallback opens the gate instead of denying.
+	out := runPreToolWithInput(t, preToolInput{
+		SessionID:      sid,
+		ToolName:       "Write",
+		CWD:            feltDir,
+		TranscriptPath: transcriptPath,
+	})
+	if strings.TrimSpace(out) != "" {
+		t.Fatalf("Write should pass via transcript fallback, got deny: %s", out)
+	}
+	if _, err := os.Stat(flagPath); err != nil {
+		t.Fatalf("expected flag to be written by fallback: %v", err)
+	}
+
+	// Without any felt activation in the transcript at all, the deny must
+	// still fire — the fallback isn't a blanket bypass.
+	sid2 := "no-activation-in-transcript"
+	flagPath2 := filepath.Join(os.TempDir(), "felt-reminded-"+sid2)
+	_ = os.Remove(flagPath2)
+	t.Cleanup(func() { _ = os.Remove(flagPath2) })
+
+	transcriptPath2 := filepath.Join(home, ".claude", "projects", "y", "log.jsonl")
+	if err := os.MkdirAll(filepath.Dir(transcriptPath2), 0755); err != nil {
+		t.Fatalf("mkdir transcript dir 2: %v", err)
+	}
+	if err := os.WriteFile(transcriptPath2, []byte(`{"message":{"content":[{"type":"tool_use","name":"Skill","input":{"skill":"felt:shuttle"}}]}}`+"\n"), 0644); err != nil {
+		t.Fatalf("write transcript 2: %v", err)
+	}
+	out = runPreToolWithInput(t, preToolInput{
+		SessionID:      sid2,
+		ToolName:       "Write",
+		CWD:            feltDir,
+		TranscriptPath: transcriptPath2,
+	})
+	if strings.TrimSpace(out) == "" {
+		t.Fatalf("Write with no felt activation anywhere should still be denied")
+	}
+}
+
 // --- helpers ---
 
 // sessionContextFor runs `felt session` and returns the plain context text.
