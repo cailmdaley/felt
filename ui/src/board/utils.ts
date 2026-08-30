@@ -351,6 +351,31 @@ export function fileBytesUrl(base: string, fullPath: string, originId: string): 
 }
 
 /**
+ * Build the owner-routed metadata URL used to check an artifact without
+ * downloading its bytes. The daemon returns `{exists, modified_at, size}`;
+ * `cache: no-store` belongs on the request, not in this URL builder.
+ */
+export function fileInfoUrl(base: string, fullPath: string, originId: string): string {
+  const abs = fullPath.startsWith('/') ? fullPath : `/${fullPath}`
+  let url = `${base}/api/v1/file-info?path=${encodePathParam(abs)}`
+  if (originId && originId !== 'local') url += `&origin=${encodeURIComponent(originId)}`
+  return url
+}
+
+/**
+ * Make a fresh browser navigation for an artifact while preserving its source
+ * path and owner query. Replacing the prior marker keeps repeated refreshes
+ * from growing the URL forever.
+ */
+export function cacheBustUrl(url: string, nonce: number = Date.now()): string {
+  const [withoutHash, hash = ''] = url.split('#', 2)
+  const clean = withoutHash
+    .replace(/([?&])_shuttle_refresh=[^&]*/g, '$1')
+    .replace(/[?&]$/, '')
+  return `${clean}${clean.includes('?') ? '&' : '?'}_shuttle_refresh=${encodeURIComponent(String(nonce))}${hash ? `#${hash}` : ''}`
+}
+
+/**
  * Build the URL for the ASTRA paper render of an `astra.yaml`. The paper entry
  * (`paper.html`) bakes a project *dir* — the dir holding the astra.yaml — so we
  * resolve the file path, take its dirname, and pass it (owner-routed by origin)

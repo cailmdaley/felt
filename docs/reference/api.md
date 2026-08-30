@@ -53,6 +53,7 @@ is not enough.
 | `GET /agents` | local | The effective agent registry (shells `felt shuttle agents --json`) |
 | `GET /felt-stores` | fleet-aggregating | The registered store list, this host's and each remote's |
 | `GET /file` | owner-routed | Raw bytes by absolute path — what makes `:::{embed}` and relative images work for a remote-owned fiber |
+| `GET /file-info` | owner-routed | File existence, mtime, and size without downloading bytes — the live reader's change probe |
 | `GET /transcript` | host-routed | Availability receipt for a native session transcript, including its authoritative path and digest |
 | `GET /transcript/raw` | host-routed | Exact native JSONL bytes for a session — no parsing or normalization |
 | `GET /astra` | owner-routed | Bake an `astra.yaml` to MyST mdast. **Maintainer-only**: needs `node` plus a built MySTRA checkout beside the repo on the owning host |

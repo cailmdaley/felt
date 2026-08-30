@@ -56,6 +56,15 @@ export function normalizeSentFiles(raw: unknown): SentFile[] {
 }
 
 /**
+ * Stable identity for the sent-files trail. A repeated path with a newer
+ * timestamp is a new delivery, even though it remains one row after the
+ * endpoint's path deduplication.
+ */
+export function sentFilesRevision(files: readonly SentFile[]): string {
+  return JSON.stringify(files.map((file) => [file.fullPath, file.timestamp, file.sessionId ?? '']))
+}
+
+/**
  * The files this fiber sent inside one window — half-open `[startMs, endMs)`,
  * the same convention the day's rail uses, so a send at 06:00 belongs to the
  * day that opens then and not to the one that just closed. Newest-first, and

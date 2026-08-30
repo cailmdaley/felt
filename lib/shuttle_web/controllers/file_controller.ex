@@ -1,6 +1,7 @@
 defmodule ShuttleWeb.FileController do
   @moduledoc """
-  Serve file/asset bytes by absolute path: `GET /api/v1/file?path=…&origin=…`.
+  Serve file/asset bytes by absolute path: `GET /api/v1/file?path=…&origin=…`,
+  and metadata-only change probes via `GET /api/v1/file-info?path=…&origin=…`.
 
   The one genuine backend addition the standalone Shuttle UI needs. The fiber
   detail panel renders the daemon's raw markdown lean (`marked`), but a
@@ -21,8 +22,9 @@ defmodule ShuttleWeb.FileController do
   through as-is. There is deliberately no felt-store sandbox: the constitution
   wants paper builds outside any store to render, and the trust model is the
   localhost/trusted-cluster daemon the rest of the API already assumes (it shells
-  out to felt over arbitrary stores). A relative path is a 400; a missing file is
-  a 404; neither 500s the panel.
+  out to felt over arbitrary stores). A relative path is a 400; `/file` returns
+  404 for a missing file, while `/file-info` reports `exists: false`; neither
+  500s the panel.
 
   **Cache validators on the local-serve path.** The board re-mounts iframes
   pointed at this route on every panel open, which would otherwise refetch a
@@ -59,6 +61,53 @@ defmodule ShuttleWeb.FileController do
 
   def show(conn, _params) do
     conn |> put_status(400) |> json(%{error: "path is required"})
+  end
+
+  @doc """
+  Return cheap metadata for a file without reading its bytes.
+
+  The board's live reader uses this as a change probe for constitutions, inline
+  embeds, and already-open sent files. A missing path is a successful response
+  with `exists: false`, so a report that is still being written can be detected
+  when it appears without treating an expected absence as a transport error.
+  """
+  def info(conn, %{"path" => path} = params) when is_binary(path) and path != "" do
+    case OriginRouter.route(Map.get(params, "origin")) do
+      {:remote, remote} ->
+        relay_bytes(
+          conn,
+          OriginRouter.forward_get(remote, "/api/v1/file-info", %{"path" => path})
+        )
+
+      :local ->
+        serve_info(conn, path)
+    end
+  end
+
+  def info(conn, _params) do
+    conn |> put_status(400) |> json(%{error: "path is required"})
+  end
+
+  defp serve_info(conn, path) do
+    cond do
+      Path.type(path) != :absolute ->
+        conn |> put_status(400) |> json(%{error: "path must be absolute"})
+
+      true ->
+        case File.stat(path, time: :posix) do
+          {:ok, %File.Stat{type: :regular, mtime: mtime, size: size}} ->
+            info_json(conn, %{exists: true, modified_at: mtime, size: size})
+
+          _ ->
+            info_json(conn, %{exists: false})
+        end
+    end
+  end
+
+  defp info_json(conn, body) do
+    conn
+    |> put_resp_header("cache-control", "no-store")
+    |> json(body)
   end
 
   defp serve_local(conn, path) do

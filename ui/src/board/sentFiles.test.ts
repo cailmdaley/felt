@@ -4,7 +4,12 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { disambiguateBasenames, normalizeSentFiles, sentFilesInWindow } from './sentFiles.js'
+import {
+  disambiguateBasenames,
+  normalizeSentFiles,
+  sentFilesInWindow,
+  sentFilesRevision,
+} from './sentFiles.js'
 
 const at = (h: number, min = 0): number => new Date(2026, 7, 11, h, min).getTime()
 const DAY_START = at(6)
@@ -36,6 +41,15 @@ describe('normalizeSentFiles', () => {
   it('drops a record with no path, and a non-array payload', () => {
     expect(normalizeSentFiles([{ timestamp: 3 }, null, 'x'])).toEqual([])
     expect(normalizeSentFiles(undefined)).toEqual([])
+  })
+})
+
+describe('sentFilesRevision', () => {
+  it('changes when a worker sends the same path again', () => {
+    const old = normalizeSentFiles([{ fullPath: '/a/report.html', timestamp: 10 }])
+    const newer = normalizeSentFiles([{ fullPath: '/a/report.html', timestamp: 11 }])
+
+    expect(sentFilesRevision(old)).not.toBe(sentFilesRevision(newer))
   })
 })
 

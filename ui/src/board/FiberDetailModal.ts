@@ -1,6 +1,8 @@
 import {
   basename,
+  cacheBustUrl,
   fileBytesUrl,
+  fileInfoUrl,
   prepareIframeExternalLinks,
   renderEmbeds,
   renderMarkdown,
@@ -30,7 +32,12 @@ import {
 } from './FloatingPanelChrome.js'
 import { LinkedFiberPanel } from './LinkedFiberPanel.js'
 import { buildFileViewer, isScrollableFile } from './FileViewerPanel.js'
-import { disambiguateBasenames, normalizeSentFiles, type SentFile } from './sentFiles.js'
+import {
+  disambiguateBasenames,
+  normalizeSentFiles,
+  sentFilesRevision,
+  type SentFile,
+} from './sentFiles.js'
 import { buildTabButton, buildViewCell } from './ReaderChrome.js'
 import { closeTab, openTab } from './ReaderTabs.js'
 import { applyZoom, zoomOnWheel, type ZoomableTab } from './ReaderZoom.js'
@@ -252,6 +259,16 @@ interface OpenFileEntry extends ZoomableTab {
   iframe: HTMLIFrameElement | null
 }
 
+interface FiberBodyRead {
+  body: string
+  outcome: string
+  found: boolean
+  reached: boolean
+}
+
+type RefreshableArtifact = HTMLImageElement | HTMLIFrameElement | HTMLAudioElement
+
+const LIVE_REFRESH_INTERVAL_MS = 15_000
 const PERSIST_PREFIX = 'shuttle:detail:'
 
 function loadPersist(uid: string): DetailPersist {
@@ -376,8 +393,8 @@ export class FiberDetailModal {
   /** The card the panel is currently showing — every accordion action
    *  (open/close/expand/scroll) keys its persistence off `card.uid`. */
   private card: KanbanCard | null = null
-  /** The full sent-files trail (newest-first), fetched once per panel-open.
-   *  The left-column launcher renders from this. */
+  /** The full sent-files trail (newest-first), kept current while the panel is
+   *  open. The left-column launcher renders from this. */
   private sentFiles: SentFile[] = []
   /** Open files in stable open-order (the tab order — tabs don't reorder on
    *  click, browser-style). Each entry owns its tab + view cell + live
@@ -407,6 +424,25 @@ export class FiberDetailModal {
   private cardGeom: PanelGeometry | null = null
   /** Debounce handle for scroll-position persistence writes. */
   private scrollWriteTimer: number | null = null
+  /** The page and prose nodes stay stable while live content is refreshed. */
+  private bodyPage: HTMLElement | null = null
+  private proseEl: HTMLElement | null = null
+  /** The sent-files strip is refreshed in place so open tabs survive. */
+  private sentWrap: HTMLElement | null = null
+  private sentList: HTMLElement | null = null
+  /** One live poll per open card, paused while the document is hidden. */
+  private liveRefreshTimer: number | null = null
+  private liveRefreshBusy = false
+  private contentGeneration = 0
+  private bodyRequestToken = 0
+  private bodyFileRevision: string | undefined
+  private sentEventsFileRevision: string | undefined
+  private sentFilesRevision = ''
+  private readonly resourceRevisions = new Map<string, string>()
+  private refreshButton: HTMLButtonElement | null = null
+  private readonly visibilityHandler = (): void => {
+    if (!document.hidden) void this.refreshLiveContent(false)
+  }
 
   /**
    * A LINKED card — one reached by following a [[wikilink]] out of a body,
@@ -497,6 +533,15 @@ export class FiberDetailModal {
     this.openFiles = []
     this.activePath = null
     this.sentFiles = []
+    this.bodyPage = null
+    this.proseEl = null
+    this.sentWrap = null
+    this.sentList = null
+    this.bodyFileRevision = undefined
+    this.sentEventsFileRevision = undefined
+    this.sentFilesRevision = ''
+    this.resourceRevisions.clear()
+    this.refreshButton = null
     const persist = loadPersist(typeof card.uid === 'string' ? card.uid : '')
     // Restore this card's remembered window arrangement: the card to its saved
     // spot (overriding the session default applyGeometry just set), and stash
@@ -512,6 +557,18 @@ export class FiberDetailModal {
     const pill = document.createElement('span')
     pill.className = `kbn-pill kbn-pill-${card.status === 'closed' ? 'closed' : card.status === 'active' ? 'active' : 'open'}`
     pill.textContent = card.status || 'open'
+
+    const refreshBtn = document.createElement('button')
+    refreshBtn.type = 'button'
+    refreshBtn.className = 'kbn-detail-refresh'
+    refreshBtn.setAttribute('aria-label', 'Refresh fiber content')
+    refreshBtn.title = 'Refresh constitution, embedded content, and sent files'
+    refreshBtn.textContent = '↻'
+    refreshBtn.addEventListener('click', (e) => {
+      e.stopPropagation()
+      void this.refreshLiveContent(true)
+    })
+    this.refreshButton = refreshBtn
 
     // Worker aloft → the same teal ▸ aloft pill the grid card wears, same
     // class, same gesture: click opens the worker's tmux session in kitty.
@@ -550,8 +607,8 @@ export class FiberDetailModal {
     const titleStack = document.createElement('div')
     titleStack.className = 'kbn-detail-title-stack'
     titleStack.append(title, idEl)
-    if (aloftPill) header.append(titleStack, aloftPill, pill, closeBtn)
-    else header.append(titleStack, pill, closeBtn)
+    if (aloftPill) header.append(titleStack, aloftPill, pill, refreshBtn, closeBtn)
+    else header.append(titleStack, pill, refreshBtn, closeBtn)
     // The header is a drag handle only for a window. In a tab it is just the
     // card's title strip — the panel's own bar is what moves.
     if (!this.host) this.attachDrag(overlay, header)
@@ -580,6 +637,8 @@ export class FiberDetailModal {
     prose.className = 'kbn-detail-prose'
     prose.innerHTML = '<p class="kbn-detail-prose-loading">Loading…</p>'
     page.append(prose)
+    this.bodyPage = page
+    this.proseEl = prose
     void this.renderFiberBody(prose, card, overlay)
 
     // ── Sent-files launcher ──────────────────────────────────────────────────
@@ -676,9 +735,13 @@ export class FiberDetailModal {
       this.writePersist()
     }
     window.addEventListener('resize', this.resizeHandler)
+    this.startLiveRefresh()
   }
 
   close(): void {
+    this.stopLiveRefresh()
+    this.contentGeneration += 1
+    this.bodyRequestToken += 1
     // An origin card closing takes its followed references with it: the panel
     // is that card's reading, and leaving it open would strand tabs behind a
     // card that no longer exists. A TAB'S card owns no panel (it was handed its
@@ -712,8 +775,7 @@ export class FiberDetailModal {
       this.writePersist()
     }
     this.fiberIndex = null
-    for (const ro of this.embedObservers) ro.disconnect()
-    this.embedObservers = []
+    this.disconnectEmbedObservers()
     // Closing the card closes its file-viewer window too — the two windows are
     // a pair bound to one card. (closeViewerWindow nulls the viewer refs.)
     this.viewerWindow?.remove()
@@ -729,6 +791,15 @@ export class FiberDetailModal {
     this.activePath = null
     this.rightCol = null
     this.tabStrip = null
+    this.bodyPage = null
+    this.proseEl = null
+    this.sentWrap = null
+    this.sentList = null
+    this.bodyFileRevision = undefined
+    this.sentEventsFileRevision = undefined
+    this.sentFilesRevision = ''
+    this.resourceRevisions.clear()
+    this.refreshButton = null
   }
 
   /**
@@ -747,20 +818,30 @@ export class FiberDetailModal {
     prose: HTMLElement,
     card: KanbanCard,
     overlay: HTMLElement,
-  ): Promise<void> {
-    // Render the outcome (the card already carries it) IMMEDIATELY, so the
-    // panel is never blank: the daemon's body read (`?body=true`) can take
-    // several seconds under poll-load, and a bare "Loading…" reads as broken.
-    // The body then fills in below the lede, or degrades to a clear note.
-    const outcome = (card.outcome ?? '').trim()
-    const lede = outcome
-      ? `<div class="kbn-detail-lede">${renderMarkdown(outcome, { wikilinks: true })}</div>`
-      : ''
-    prose.innerHTML = lede + '<p class="kbn-detail-body-status">loading body…</p>'
+    opts: { preserveContent?: boolean } = {},
+  ): Promise<FiberBodyRead | null> {
+    const preserveContent = opts.preserveContent === true
+    const generation = this.contentGeneration
+    const requestToken = ++this.bodyRequestToken
+    const pageScroll = this.bodyPage?.scrollTop ?? 0
+
+    if (!preserveContent) {
+      // Render the outcome (the card already carries it) IMMEDIATELY, so the
+      // panel is never blank: the daemon's body read (`?body=true`) can take
+      // several seconds under poll-load, and a bare "Loading…" reads as broken.
+      // The body then fills in below the lede, or degrades to a clear note.
+      const outcome = (card.outcome ?? '').trim()
+      const lede = outcome
+        ? `<div class="kbn-detail-lede">${renderMarkdown(outcome, { wikilinks: true })}</div>`
+        : ''
+      prose.innerHTML = lede + '<p class="kbn-detail-body-status">loading body…</p>'
+    }
 
     let body = ''
+    let outcomeFromDaemon: string | undefined
     let found = false
     let reached = false
+    let timer: number | null = null
     try {
       const idPath = card.id.split('/').map(encodeURIComponent).join('/')
       // Carry the owning origin so the daemon owner-routes the read to the host
@@ -769,28 +850,48 @@ export class FiberDetailModal {
       // FROM the remote, never from a git mirror — git sync is never relied on.
       const origin = encodeURIComponent(card.originId ?? '')
       const ctrl = new AbortController()
-      const timer = window.setTimeout(() => ctrl.abort(), 25000)
+      timer = window.setTimeout(() => ctrl.abort(), 25000)
       const res = await fetch(
         `${this.shuttleBase}/api/v1/fibers/${idPath}?body=true&origin=${origin}`,
-        { signal: ctrl.signal },
+        { signal: ctrl.signal, cache: 'no-store' },
       )
-      window.clearTimeout(timer)
       if (res.ok) {
         const data = (await res.json()) as {
-          fibers?: Array<{ fiber?: { body?: string } }>
+          fibers?: Array<{ fiber?: { body?: unknown; outcome?: unknown } }>
         }
         // An empty `fibers` array means the daemon answered but the id isn't in
         // its mirror (vs. found-but-bodyless); the note below distinguishes them.
+        const fiber = data.fibers?.[0]?.fiber
         found = (data.fibers?.length ?? 0) > 0
-        body = (data.fibers?.[0]?.fiber?.body ?? '').trim()
+        body = typeof fiber?.body === 'string' ? fiber.body.trim() : ''
+        outcomeFromDaemon = typeof fiber?.outcome === 'string' ? fiber.outcome.trim() : undefined
         reached = true
       }
     } catch {
       // abort / timeout / network — `reached` stays false.
+    } finally {
+      if (timer !== null) window.clearTimeout(timer)
     }
     // The panel may have closed (or been replaced) while we awaited.
-    if (this.overlay !== overlay) return
+    if (
+      this.overlay !== overlay ||
+      generation !== this.contentGeneration ||
+      requestToken !== this.bodyRequestToken
+    ) return null
+    // A live refresh must never erase readable content because a transient
+    // tunnel failure happened. The explicit retry button remains available on
+    // the initial-load path, while the refresh control leaves the old page in
+    // place and can try again on its next tick.
+    if (!reached && preserveContent) return null
 
+    const outcome = outcomeFromDaemon ?? (card.outcome ?? '').trim()
+    const read: FiberBodyRead = { body, outcome, found, reached }
+    const lede = outcome
+      ? `<div class="kbn-detail-lede">${renderMarkdown(outcome, { wikilinks: true })}</div>`
+      : ''
+
+    this.disconnectEmbedObservers()
+    prose.classList.remove('kbn-detail-prose-empty')
     if (body) {
       // Resolve a relative `:::{embed}` / image against the fiber's own dir
       // (carried on the card from the composite feed) and route the bytes
@@ -808,15 +909,17 @@ export class FiberDetailModal {
       this.autosizeEmbeds(prose)
       this.installBodyFileLinks(prose, card)
       void this.installWikilinkNavigation(prose, overlay)
-      return
+      this.restoreBodyScroll(pageScroll, overlay, generation)
+      return read
     }
     if (!outcome && reached && found) {
       prose.classList.add('kbn-detail-prose-empty')
       prose.textContent = 'No body or outcome yet.'
-      return
+      this.restoreBodyScroll(pageScroll, overlay, generation)
+      return read
     }
     // No body. Three honest cases — remote bodies normally resolve here via the
-    // synced loom mirror, so this is "nothing to show" or "not synced", never a
+    // owning daemon, so this is "nothing to show" or "not synced", never a
     // cross-host rendering gap:
     //   reached + found      → the fiber simply has no markdown body.
     //   reached + not found  → not in this daemon's mirror (e.g. not synced yet).
@@ -834,6 +937,253 @@ export class FiberDetailModal {
         void this.renderFiberBody(prose, card, overlay)
       })
     }
+    this.restoreBodyScroll(pageScroll, overlay, generation)
+    return read
+  }
+
+  private restoreBodyScroll(scrollTop: number, overlay: HTMLElement, generation: number): void {
+    const page = this.bodyPage
+    if (!page) return
+    page.scrollTop = scrollTop
+    window.requestAnimationFrame(() => {
+      if (this.overlay === overlay && this.contentGeneration === generation) {
+        page.scrollTop = scrollTop
+      }
+    })
+  }
+
+  private disconnectEmbedObservers(): void {
+    for (const ro of this.embedObservers) ro.disconnect()
+    this.embedObservers = []
+  }
+
+  private startLiveRefresh(): void {
+    this.stopLiveRefresh()
+    this.liveRefreshTimer = window.setInterval(() => {
+      if (!document.hidden) void this.refreshLiveContent(false)
+    }, LIVE_REFRESH_INTERVAL_MS)
+    document.addEventListener('visibilitychange', this.visibilityHandler)
+  }
+
+  private stopLiveRefresh(): void {
+    if (this.liveRefreshTimer !== null) {
+      window.clearInterval(this.liveRefreshTimer)
+      this.liveRefreshTimer = null
+    }
+    if (typeof document !== 'undefined') {
+      document.removeEventListener('visibilitychange', this.visibilityHandler)
+    }
+    this.liveRefreshBusy = false
+  }
+
+  /**
+   * Keep the open reading surface current without rebuilding its windows.
+   * Metadata probes are cheap and owner-routed; bytes are fetched only when a
+   * revision changes. An explicit click skips the probes and reloads the body
+   * and every open artifact, while the automatic tick preserves the reader's
+   * scroll, zoom, and active tabs.
+   */
+  private async refreshLiveContent(force: boolean): Promise<void> {
+    const card = this.card
+    const overlay = this.overlay
+    const prose = this.proseEl
+    if (!card || !overlay || !prose || this.liveRefreshBusy) return
+
+    const generation = this.contentGeneration
+    this.liveRefreshBusy = true
+    if (force && this.refreshButton) {
+      this.refreshButton.disabled = true
+      this.refreshButton.classList.add('kbn-detail-refreshing')
+    }
+
+    let bodyRefreshFailed = false
+    try {
+      const documentPath = absoluteFiberDocumentPath(card)
+      let bodyChanged = force
+      if (documentPath) {
+        const revision = await readFileRevision(this.shuttleBase, documentPath, card.originId)
+        if (revision !== undefined) {
+          bodyChanged = force ||
+            (this.bodyFileRevision !== undefined && revision !== this.bodyFileRevision)
+          this.bodyFileRevision = revision
+        }
+      }
+
+      if (bodyChanged && this.contentGeneration === generation) {
+        bodyRefreshFailed =
+          (await this.renderFiberBody(prose, card, overlay, { preserveContent: true })) === null
+      }
+      if (this.contentGeneration !== generation || this.overlay !== overlay) return
+
+      const eventsPath = sentEventsPathFor(card)
+      let sentChanged = true
+      if (eventsPath) {
+        const revision = await readFileRevision(this.shuttleBase, eventsPath, card.originId)
+        if (revision !== undefined) {
+          sentChanged = force ||
+            revision === 'missing' ||
+            this.sentEventsFileRevision === undefined ||
+            revision !== this.sentEventsFileRevision
+          this.sentEventsFileRevision = revision
+        }
+      }
+      if (sentChanged) {
+        const files = await this.fetchSentFiles(card)
+        if (files !== null && this.contentGeneration === generation) {
+          this.applySentFiles(files, card, force)
+        }
+      }
+      await Promise.all([
+        this.refreshOpenFiles(card, force, generation),
+        this.refreshEmbeddedResources(card, force, generation),
+      ])
+
+      if (force && this.contentGeneration === generation && this.refreshButton) {
+        this.refreshButton.title = bodyRefreshFailed
+          ? 'Refresh could not load the constitution; try again'
+          : 'Fiber content is current; click to refresh again'
+      }
+    } catch {
+      // A live tick is best-effort. Keep the readable page and let the next
+      // tick or the explicit button try again rather than replacing it with an
+      // outage message.
+      bodyRefreshFailed = true
+    } finally {
+      if (this.contentGeneration === generation) {
+        this.liveRefreshBusy = false
+        if (force && this.refreshButton) {
+          this.refreshButton.disabled = false
+          this.refreshButton.classList.remove('kbn-detail-refreshing')
+        }
+      }
+    }
+  }
+
+  private async refreshOpenFiles(
+    card: KanbanCard,
+    force: boolean,
+    generation: number,
+  ): Promise<void> {
+    const entries = this.openFiles.filter((entry) => entry.viewerBuilt)
+    if (entries.length === 0) return
+    const revisions = await Promise.all(
+      entries.map((entry) => readFileRevision(this.shuttleBase, entry.path, card.originId)),
+    )
+    if (this.contentGeneration !== generation || this.overlay === null) return
+
+    entries.forEach((entry, index) => {
+      const revision = revisions[index]
+      if (revision === undefined) {
+        if (force) this.reloadOpenFile(entry)
+        return
+      }
+      const previous = this.resourceRevisions.get(`sent:${entry.path}`)
+      this.resourceRevisions.set(`sent:${entry.path}`, revision)
+      if (force || (previous !== undefined && previous !== revision)) {
+        this.reloadOpenFile(entry)
+      }
+    })
+  }
+
+  private reloadOpenFile(entry: OpenFileEntry): void {
+    const artifact = entry.cell.querySelector<RefreshableArtifact>(
+      'img.kbn-fileview-image, iframe.kbn-fileview-frame, audio',
+    )
+    const src = artifact?.getAttribute('src')
+    if (artifact && src) artifact.setAttribute('src', cacheBustUrl(src))
+  }
+
+  private async refreshEmbeddedResources(
+    card: KanbanCard,
+    force: boolean,
+    generation: number,
+  ): Promise<void> {
+    const prose = this.proseEl
+    if (!prose) return
+    const byPath = new Map<string, RefreshableArtifact[]>()
+    prose
+      .querySelectorAll<RefreshableArtifact>('img[src], iframe[src], audio[src]')
+      .forEach((artifact) => {
+        const path = artifactPath(artifact)
+        if (!path) return
+        const resources = byPath.get(path) ?? []
+        resources.push(artifact)
+        byPath.set(path, resources)
+      })
+    if (byPath.size === 0) return
+
+    const paths = [...byPath.keys()]
+    const revisions = await Promise.all(
+      paths.map((path) => readFileRevision(this.shuttleBase, path, card.originId)),
+    )
+    if (this.contentGeneration !== generation || this.overlay === null) return
+
+    paths.forEach((path, index) => {
+      const resources = byPath.get(path) ?? []
+      const revision = revisions[index]
+      if (revision === undefined) {
+        if (force) resources.forEach((artifact) => this.reloadArtifact(artifact))
+        return
+      }
+      const previous = this.resourceRevisions.get(`embed:${path}`)
+      this.resourceRevisions.set(`embed:${path}`, revision)
+      if (force || (previous !== undefined && previous !== revision)) {
+        resources.forEach((artifact) => this.reloadArtifact(artifact))
+      }
+    })
+  }
+
+  private reloadArtifact(artifact: RefreshableArtifact): void {
+    const src = artifact.getAttribute('src')
+    if (src) artifact.setAttribute('src', cacheBustUrl(src))
+  }
+
+  private applySentFiles(files: SentFile[], card: KanbanCard, force = false): void {
+    const next = disambiguateBasenames(files)
+    const previous = this.sentFiles
+    const previousByPath = new Map(previous.map((file) => [file.fullPath, file]))
+    const nextByPath = new Map(next.map((file) => [file.fullPath, file]))
+    const revision = sentFilesRevision(next)
+    const changed = force || revision !== this.sentFilesRevision
+
+    this.sentFiles = next
+    this.sentFilesRevision = revision
+    if (this.sentList && this.sentWrap && changed) {
+      this.renderLauncher(this.sentList, card)
+      this.sentWrap.classList.toggle('kbn-detail-sent-empty', next.length === 0)
+    }
+    if (!changed) {
+      this.syncLauncherActiveState()
+      return
+    }
+
+    for (const entry of this.openFiles) {
+      const latest = nextByPath.get(entry.path)
+      const prior = previousByPath.get(entry.path)
+      if (latest) {
+        entry.file = latest
+        this.updateOpenFileLabel(entry)
+      }
+      // A repeated SendUserFile can keep the same path while replacing its
+      // bytes. Drop the metadata baseline so the same refresh pass does not
+      // reload the tab twice; the next pass establishes the new baseline.
+      if (latest && (!prior || latest.timestamp !== prior.timestamp)) {
+        this.reloadOpenFile(entry)
+        this.resourceRevisions.delete(`sent:${entry.path}`)
+      }
+    }
+    this.reconcileOpenBasenames(next)
+    this.syncLauncherActiveState()
+  }
+
+  private updateOpenFileLabel(entry: OpenFileEntry): void {
+    const name = entry.tab.querySelector('.kbn-detail-tab-name')
+    if (name) name.textContent = entry.file.basename
+    entry.tab.title = entry.file.fullPath
+    entry.tab.querySelector('.kbn-detail-tab-close')?.setAttribute(
+      'aria-label',
+      `Close ${entry.file.basename}`,
+    )
   }
 
   /**
@@ -2212,9 +2562,10 @@ export class FiberDetailModal {
    * The left-column sent-files launcher. Mounts empty (hidden) and self-
    * populates from {@link fetchSentFiles}: the daemon's `/api/v1/sent-files`
    * endpoint first, falling back to parsing `events.jsonl` over `/api/v1/file`
-   * for older local daemons. Only reveals itself when the trail has entries,
-   * so cards without deliverables pay zero visual cost. Each entry is a button
-   * that opens (or re-activates) the file in the right-column accordion.
+   * for older local daemons. The live refresh loop re-renders it when a worker
+   * sends another file, while cards without deliverables pay zero visual cost.
+   * Each entry is a button that opens (or re-activates) the file in the
+   * right-column accordion.
    */
   private buildSentFilesLauncher(card: KanbanCard): HTMLElement {
     const wrap = document.createElement('div')
@@ -2228,29 +2579,15 @@ export class FiberDetailModal {
     list.className = 'kbn-detail-sent-list'
     list.setAttribute('role', 'list')
     wrap.append(heading, list)
+    this.sentWrap = wrap
+    this.sentList = list
 
     const overlayAtBuild = () => this.overlay
     void this.fetchSentFiles(card).then((files) => {
       // Panel may have closed/reopened while the fetch was in flight.
       if (!overlayAtBuild()?.contains(wrap)) return
-      // Disambiguate same-named files BEFORE anything reads the trail. Neither
-      // real data source distinguishes two files both literally named
-      // `report.html` (the endpoint and the events.jsonl parser each emit a bare
-      // path tail), so without this the launcher and accordion would show two
-      // identical `report.html` rows — defeating the whole "tell them apart"
-      // ask. The disambiguated label flows into the launcher, the accordion
-      // header, and persistence uniformly.
-      this.sentFiles = disambiguateBasenames(files)
-      // Reconcile any already-rehydrated accordion entries against the trail's
-      // (now disambiguated) basename. Rehydration fires off persisted records
-      // before the trail resolves; a legacy record (no persisted basename) or
-      // one whose disambiguated label has since changed gets corrected here so
-      // the accordion header matches the launcher rather than collapsing to the
-      // bare path tail.
-      this.reconcileOpenBasenames(this.sentFiles)
-      if (files.length === 0) return
-      this.renderLauncher(list, card)
-      wrap.classList.remove('kbn-detail-sent-empty')
+      this.applySentFiles(files ?? [], card)
+      void this.primeSentEventsRevision(card)
       // A rehydration that arrived before the trail did can now mark which
       // launcher entries are open.
       this.syncLauncherActiveState()
@@ -2542,10 +2879,11 @@ export class FiberDetailModal {
    * first (committed; deploys on the next daemon restart). If that 404s/fails
    * AND the origin is local, falls back to fetching `events.jsonl` via
    * `/api/v1/file` and parsing it client-side — local-only, because the file
-   * is ~10 MB and must never be pulled over a slow remote tunnel. The parse is
-   * one-shot per panel-open (this method runs once from the launcher build).
+   * is ~10 MB and must never be pulled over a slow remote tunnel. A `null`
+   * result means the read failed; refreshes preserve the last known trail in
+   * that case rather than making a transient outage erase the launcher.
    */
-  private async fetchSentFiles(card: KanbanCard): Promise<SentFile[]> {
+  private async fetchSentFiles(card: KanbanCard): Promise<SentFile[] | null> {
     const uid = typeof card.uid === 'string' ? card.uid.trim() : ''
     const sessionId = typeof card.sessionId === 'string' ? card.sessionId.trim() : ''
     if (!uid && !sessionId) return []
@@ -2556,7 +2894,9 @@ export class FiberDetailModal {
     if (card.originId) params.set('origin', card.originId)
     if (sessionId) params.set('sessionId', sessionId)
     try {
-      const res = await fetch(`${this.shuttleBase}/api/v1/sent-files?${params.toString()}`)
+      const res = await fetch(`${this.shuttleBase}/api/v1/sent-files?${params.toString()}`, {
+        cache: 'no-store',
+      })
       if (res.ok) {
         const data = (await res.json()) as { files?: unknown }
         if (Array.isArray(data.files)) return normalizeSentFiles(data.files)
@@ -2584,16 +2924,27 @@ export class FiberDetailModal {
     // for a remote uid simply yields `[]`. Thus the only real gate is "can we
     // derive a home to point at" — and the cost is bounded (one local read,
     // once per panel-open, primary endpoint already tried).
-    const home = homeFromDir(card.fiberDir)
-    if (!home) return []
-    const eventsPath = `${home}/.shuttle/events.jsonl`
+    const eventsPath = sentEventsPathFor(card)
+    if (!eventsPath) return []
     try {
-      const res = await fetch(fileBytesUrl(this.shuttleBase, eventsPath, 'local'))
+      const res = await fetch(fileBytesUrl(this.shuttleBase, eventsPath, 'local'), {
+        cache: 'no-store',
+      })
       if (!res.ok) return []
       const text = await res.text()
       return parseSentFilesFromEvents(text, uid, sessionId)
     } catch {
-      return []
+      return null
+    }
+  }
+
+  private async primeSentEventsRevision(card: KanbanCard): Promise<void> {
+    const path = sentEventsPathFor(card)
+    if (!path) return
+    const generation = this.contentGeneration
+    const revision = await readFileRevision(this.shuttleBase, path, card.originId)
+    if (revision !== undefined && this.contentGeneration === generation && this.card?.id === card.id) {
+      this.sentEventsFileRevision = revision
     }
   }
 
@@ -3221,6 +3572,66 @@ export class FiberDetailModal {
   }
 }
 
+/**
+ * Probe a daemon-owned file using metadata only. `undefined` means the route is
+ * unavailable or malformed; `missing` is a real revision so a file that is
+ * created after the constitution opens can be noticed on the next tick.
+ */
+async function readFileRevision(
+  shuttleBase: string,
+  path: string,
+  originId: string,
+): Promise<string | undefined> {
+  try {
+    const res = await fetch(fileInfoUrl(shuttleBase, path, originId), { cache: 'no-store' })
+    if (!res.ok) return undefined
+    const data = (await res.json()) as {
+      exists?: unknown
+      modified_at?: unknown
+      size?: unknown
+    }
+    if (data.exists !== true) return 'missing'
+    if (typeof data.modified_at !== 'number' || typeof data.size !== 'number') return undefined
+    return `present:${data.modified_at}:${data.size}`
+  } catch {
+    return undefined
+  }
+}
+
+/** The absolute markdown file represented by a composite row. */
+function absoluteFiberDocumentPath(card: KanbanCard): string | null {
+  const relative = card.path.trim()
+  if (relative.startsWith('/')) return relative
+  const store = card.feltStore?.replace(/\/+$/, '')
+  if (store && relative) {
+    const path = relative.replace(/^\.?\/?\.felt\//, '')
+    return `${store.endsWith('/.felt') ? store : `${store}/.felt`}/${path}`
+  }
+  if (card.fiberDir && relative) {
+    const leaf = relative.split('/').pop()
+    return leaf ? `${card.fiberDir.replace(/\/+$/, '')}/${leaf}` : null
+  }
+  return null
+}
+
+/** Return the artifact path behind one inline `/file` or paper iframe. */
+function artifactPath(artifact: RefreshableArtifact): string | null {
+  const src = artifact.getAttribute('src')
+  if (!src) return null
+  try {
+    const url = new URL(src, window.location.href)
+    const path = url.searchParams.get('path')
+    if (!path) return null
+    if (url.pathname.endsWith('/file')) return path
+    if (url.pathname.endsWith('/paper.html')) {
+      return `${path.replace(/\/+$/, '')}/astra.yaml`
+    }
+  } catch {
+    // An external or malformed source is not ours to refresh.
+  }
+  return null
+}
+
 /** Compact "2m / 3h / 5d ago" stamp for the sent-files launcher. A zero/absent
  *  timestamp (a rehydrated entry whose trail hasn't loaded) renders blank. */
 function relativeTime(timestamp: number): string {
@@ -3245,6 +3656,11 @@ function homeFromDir(dir: string | undefined): string | null {
   const segs = dir.split('/').filter(Boolean)
   if (segs.length < 2) return null
   return `/${segs[0]}/${segs[1]}`
+}
+
+function sentEventsPathFor(card: KanbanCard): string | null {
+  const home = homeFromDir(card.fiberDir)
+  return home ? `${home}/.shuttle/events.jsonl` : null
 }
 
 /** The ULID embedded in a tmux session name (`<slug>-<ULID>-shuttle`). */

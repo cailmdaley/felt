@@ -12,8 +12,9 @@
  *
  * Two interception layers:
  *  1. `window.fetch` is stubbed for every daemon route the components touch
- *     (fiber body, agents, the parent index, and crucially the SENT-FILES
- *     list) — so the data is mock but the DOM/CSS is the real thing.
+ *     (fiber body, agents, the parent index, sent-files list, and the cheap
+ *     file-info change probes) — so the data is mock but the DOM/CSS is the
+ *     real thing.
  *  2. The viewer's iframe/img `src` is a REAL navigation (NOT intercepted by
  *     the fetch stub). To show real file content in the accordion, a
  *     MutationObserver rewrites each `/api/v1/file?path=…` URL to a `file://`
@@ -136,6 +137,12 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   // before the generic /file pass-through; only relevant in ?fallback mode.
   if (FALLBACK_MODE && url.includes('/api/v1/file') && url.includes('events.jsonl')) {
     return new Response(FALLBACK_EVENTS_JSONL, { status: 200, headers: { 'Content-Type': 'text/plain' } })
+  }
+  // Metadata probes used by the live reader. The harness has no real daemon or
+  // files behind it, so give every fixture a stable revision; a manual refresh
+  // still exercises the cache-busting navigation path below.
+  if (url.includes('/api/v1/file-info')) {
+    return json({ exists: true, modified_at: 1, size: 1 })
   }
   // Sent files. Default: the proper endpoint (PRIMARY data path). In ?fallback
   // mode: 404 like an older daemon, forcing the events.jsonl fallback so the

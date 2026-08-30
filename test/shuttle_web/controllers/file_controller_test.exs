@@ -58,6 +58,25 @@ defmodule ShuttleWeb.FileControllerTest do
       assert %{"error" => "path is required"} = json_response(conn, 400)
     end
 
+    test "file-info returns mtime and size without reading bytes" do
+      path = tmp_path("txt")
+      File.write!(path, "hello embed")
+      on_exit(fn -> File.rm(path) end)
+
+      conn = get(api_conn(), "/api/v1/file-info?path=#{URI.encode_www_form(path)}")
+
+      assert conn.status == 200
+      assert %{"exists" => true, "modified_at" => mtime, "size" => 11} = json_response(conn, 200)
+      assert is_integer(mtime)
+    end
+
+    test "file-info returns an explicit absent revision for a missing path" do
+      conn = get(api_conn(), "/api/v1/file-info?path=#{URI.encode_www_form(tmp_path("missing"))}")
+
+      assert conn.status == 200
+      assert %{"exists" => false} = json_response(conn, 200)
+    end
+
     test "200 carries ETag, Last-Modified, and Cache-Control validators" do
       path = tmp_path("txt")
       File.write!(path, "hello embed")
@@ -146,10 +165,17 @@ defmodule ShuttleWeb.FileControllerTest do
 
   describe "remote forward" do
     test "forwards a remote-owned path to the owning daemon and relays bytes" do
-      stub_forward("candide", "http://localhost:4001", {:ok, 200, "image/png", <<137, 80, 78, 71>>})
+      stub_forward(
+        "candide",
+        "http://localhost:4001",
+        {:ok, 200, "image/png", <<137, 80, 78, 71>>}
+      )
 
       conn =
-        get(api_conn(), "/api/v1/file?path=#{URI.encode_www_form("/abs/on/candide.png")}&origin=candide")
+        get(
+          api_conn(),
+          "/api/v1/file?path=#{URI.encode_www_form("/abs/on/candide.png")}&origin=candide"
+        )
 
       assert conn.status == 200
       assert conn.resp_body == <<137, 80, 78, 71>>
@@ -158,6 +184,26 @@ defmodule ShuttleWeb.FileControllerTest do
       # origin stripped; path crosses as a query param to the owner's own /file.
       assert StubGetFileClient.last().url ==
                "http://localhost:4001/api/v1/file?path=%2Fabs%2Fon%2Fcandide.png"
+    end
+
+    test "forwards file-info to the owning daemon without downloading the file" do
+      stub_forward(
+        "candide",
+        "http://localhost:4001",
+        {:ok, 200, "application/json", ~s({"exists":true,"modified_at":7,"size":3})}
+      )
+
+      conn =
+        get(
+          api_conn(),
+          "/api/v1/file-info?path=#{URI.encode_www_form("/abs/on/candide.png")}&origin=candide"
+        )
+
+      assert conn.status == 200
+      assert json_response(conn, 200) == %{"exists" => true, "modified_at" => 7, "size" => 3}
+
+      assert StubGetFileClient.last().url ==
+               "http://localhost:4001/api/v1/file-info?path=%2Fabs%2Fon%2Fcandide.png"
     end
 
     test "relays the remote content-type VERBATIM — no doubled charset" do
@@ -173,13 +219,20 @@ defmodule ShuttleWeb.FileControllerTest do
       )
 
       conn =
-        get(api_conn(), "/api/v1/file?path=#{URI.encode_www_form("/abs/on/candide.png")}&origin=candide")
+        get(
+          api_conn(),
+          "/api/v1/file?path=#{URI.encode_www_form("/abs/on/candide.png")}&origin=candide"
+        )
 
       assert get_resp_header(conn, "content-type") == ["image/png; charset=utf-8"]
     end
 
     test "relays the remote's status verbatim (a remote 404 stays a 404)" do
-      stub_forward("candide", "http://localhost:4001", {:ok, 404, "application/json", ~s({"error":"x"})})
+      stub_forward(
+        "candide",
+        "http://localhost:4001",
+        {:ok, 404, "application/json", ~s({"error":"x"})}
+      )
 
       conn = get(api_conn(), "/api/v1/file?path=#{URI.encode_www_form("/gone")}&origin=candide")
       assert conn.status == 404
@@ -210,7 +263,11 @@ defmodule ShuttleWeb.FileControllerTest do
   end
 
   defp tmp_path(ext),
-    do: Path.join(System.tmp_dir!(), "shuttle_file_ctrl_#{System.unique_integer([:positive])}.#{ext}")
+    do:
+      Path.join(
+        System.tmp_dir!(),
+        "shuttle_file_ctrl_#{System.unique_integer([:positive])}.#{ext}"
+      )
 
   defp api_conn do
     build_conn()
