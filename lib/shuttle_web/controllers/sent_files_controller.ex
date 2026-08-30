@@ -18,6 +18,13 @@ defmodule ShuttleWeb.SentFilesController do
 
   A missing `uid` is a 400; a missing/empty events file yields `{"files": []}`,
   not a 500.
+
+  **The local leg carries a weak `ETag`** over `{uid, file_token(events.jsonl)}`,
+  so the detail panel's live poll re-reads the trail only when the events file
+  actually moved. The REMOTE leg stays unconditional: `OriginRouter.forward_get/4`
+  forwards no request headers and drops response headers, so a client's
+  `If-None-Match` never reaches the owning daemon and its `ETag` never comes
+  back.
   """
 
   use Phoenix.Controller, formats: [:json]
@@ -33,7 +40,9 @@ defmodule ShuttleWeb.SentFilesController do
         relay_bytes(conn, OriginRouter.forward_get(remote, "/api/v1/sent-files", %{"uid" => uid}))
 
       :local ->
-        json(conn, %{files: SentFiles.for_uid(uid)})
+        validator = {uid, file_token(WaitingTracker.default_events_file())}
+
+        json_with_validator(conn, validator, fn -> %{files: SentFiles.for_uid(uid)} end)
     end
   end
 

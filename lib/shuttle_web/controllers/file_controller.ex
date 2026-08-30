@@ -37,6 +37,13 @@ defmodule ShuttleWeb.FileController do
   of its own here — a future pass could thread them through
   `OriginRouter.forward_get/4`, but that widens the relay contract for every
   other owner-routed GET, not just this one.
+
+  **This is why `/file-info` exists rather than a conditional GET or a HEAD.**
+  `OriginRouter.forward_get/4` forwards no request headers and drops response
+  headers, so a cross-host `If-None-Match`/`If-Modified-Since` never reaches the
+  owning daemon and its validators never come back; and `Plug.Head` rewrites
+  HEAD to GET before routing, so a HEAD would pull the whole body over the
+  tunnel. A metadata-only JSON route is the only cheap owner-routed change probe.
   """
 
   use Phoenix.Controller, formats: [:json]
@@ -89,19 +96,10 @@ defmodule ShuttleWeb.FileController do
   end
 
   defp serve_info(conn, path) do
-    cond do
-      Path.type(path) != :absolute ->
-        conn |> put_status(400) |> json(%{error: "path must be absolute"})
-
-      true ->
-        case File.stat(path, time: :posix) do
-          {:ok, %File.Stat{type: :regular, mtime: mtime, size: size}} ->
-            info_json(conn, %{exists: true, modified_at: mtime, size: size})
-
-          _ ->
-            info_json(conn, %{exists: false})
-        end
-    end
+    with_regular_file(conn, path,
+      found: fn mtime, size -> info_json(conn, %{exists: true, modified_at: mtime, size: size}) end,
+      missing: fn -> info_json(conn, %{exists: false}) end
+    )
   end
 
   defp info_json(conn, body) do
@@ -111,18 +109,23 @@ defmodule ShuttleWeb.FileController do
   end
 
   defp serve_local(conn, path) do
-    cond do
-      Path.type(path) != :absolute ->
-        conn |> put_status(400) |> json(%{error: "path must be absolute"})
+    with_regular_file(conn, path,
+      found: fn mtime, size -> serve_with_validators(conn, path, mtime, size) end,
+      missing: fn -> conn |> put_status(404) |> json(%{error: "file not found"}) end
+    )
+  end
 
-      true ->
-        case File.stat(path, time: :posix) do
-          {:ok, %File.Stat{type: :regular, mtime: mtime, size: size}} ->
-            serve_with_validators(conn, path, mtime, size)
-
-          _ ->
-            conn |> put_status(404) |> json(%{error: "file not found"})
-        end
+  # The head both local legs share: reject a relative path, then stat it and
+  # dispatch on "is a regular file". Only what happens at each outcome differs
+  # (bytes + validators vs. a metadata JSON; 404 vs. `exists: false`).
+  defp with_regular_file(conn, path, found: found, missing: missing) do
+    if Path.type(path) != :absolute do
+      conn |> put_status(400) |> json(%{error: "path must be absolute"})
+    else
+      case File.stat(path, time: :posix) do
+        {:ok, %File.Stat{type: :regular, mtime: mtime, size: size}} -> found.(mtime, size)
+        _ -> missing.()
+      end
     end
   end
 

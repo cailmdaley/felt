@@ -131,16 +131,17 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
 
   // Fiber body
   if (url.includes('/api/v1/fibers/') && url.includes('body=true')) {
-    return json({ fibers: [{ fiber: { body: MOCK_BODY } }] })
+    return json({ fibers: [{ fiber: { body: MOCK_BODY, modified_at: '2026-08-30T18:00:00Z' } }] })
   }
   // events.jsonl over the /file route — the FALLBACK data source. Matched
   // before the generic /file pass-through; only relevant in ?fallback mode.
   if (FALLBACK_MODE && url.includes('/api/v1/file') && url.includes('events.jsonl')) {
     return new Response(FALLBACK_EVENTS_JSONL, { status: 200, headers: { 'Content-Type': 'text/plain' } })
   }
-  // Metadata probes used by the live reader. The harness has no real daemon or
-  // files behind it, so give every fixture a stable revision; a manual refresh
-  // still exercises the cache-busting navigation path below.
+  // Artifact metadata probes used by the live reader's artifact baselines. The
+  // harness has no real daemon or files behind it, so give every fixture a
+  // stable revision; the ↻ button reloads unconditionally and still exercises
+  // the cache-busting navigation path below.
   if (url.includes('/api/v1/file-info')) {
     return json({ exists: true, modified_at: 1, size: 1 })
   }
@@ -152,7 +153,10 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       ? new Response('not found', { status: 404 })
       : json({ files: MOCK_SENT_FILES })
   }
-  // Parent-picker index
+  // Parent-picker index — and the live reader's bodyless `modified_at` probe,
+  // which shares this shape. An empty `fibers` reads as "no answer", so the
+  // harness never re-renders a body on a tick; the body above is stamped with a
+  // fixed `modified_at` so the initial read still seeds a baseline.
   if (url.includes('/api/v1/fibers') && !url.includes('body=true')) return json({ fibers: [] })
   // Agent registry
   if (url.includes('/api/v1/agents')) return json([])

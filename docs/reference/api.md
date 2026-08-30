@@ -90,8 +90,10 @@ underneath.
 | `GET /moment` | the harness transcript | The words a session spoke inside a window |
 
 `/sent-files` is owner-routed like `/file` — one fiber's trail is read on the
-host that owns the fiber; `/sent-files/all` is the host-scoped feed with the
-composite. `/moment` is host-*routed* rather than host-scoped: pass `host` to
+host that owns the fiber; its LOCAL leg carries a weak `ETag` and honors
+`If-None-Match` with a 304 (the forwarded remote leg does not, because
+`OriginRouter.forward_get/4` carries no headers either way).
+`/sent-files/all` is the host-scoped feed with the composite. `/moment` is host-*routed* rather than host-scoped: pass `host` to
 name the machine that ran the session, or omit it and the daemon consults its
 own session ledger. A transcript is one machine's file, not a feed to merge, so
 there is deliberately no `/moment/composite`. `/spend` has no board consumer

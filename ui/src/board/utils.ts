@@ -367,12 +367,12 @@ export function fileInfoUrl(base: string, fullPath: string, originId: string): s
  * path and owner query. Replacing the prior marker keeps repeated refreshes
  * from growing the URL forever.
  */
+const CACHE_BUST_BASE = 'http://_cachebust.invalid'
+
 export function cacheBustUrl(url: string, nonce: number = Date.now()): string {
-  const [withoutHash, hash = ''] = url.split('#', 2)
-  const clean = withoutHash
-    .replace(/([?&])_shuttle_refresh=[^&]*/g, '$1')
-    .replace(/[?&]$/, '')
-  return `${clean}${clean.includes('?') ? '&' : '?'}_shuttle_refresh=${encodeURIComponent(String(nonce))}${hash ? `#${hash}` : ''}`
+  const u = new URL(url, CACHE_BUST_BASE)
+  u.searchParams.set('_shuttle_refresh', String(nonce))
+  return u.origin === CACHE_BUST_BASE ? u.pathname + u.search + u.hash : u.href
 }
 
 /**

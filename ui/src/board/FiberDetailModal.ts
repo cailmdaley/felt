@@ -49,6 +49,7 @@ import {
   instantMs,
   isoDayLocal,
 } from './civilDay.js'
+import { shouldRunVisiblePoll } from '../runtime/PageAttention'
 import './FiberDetailModal.css'
 
 /**
@@ -264,7 +265,16 @@ interface FiberBodyRead {
   outcome: string
   found: boolean
   reached: boolean
+  /** The fiber's `modified_at` as the daemon reported it — the body's change
+   *  revision, captured off the very read that painted the page so an edit
+   *  between open and the first tick is caught. */
+  modifiedAt: string | undefined
 }
+
+/** The unchanged sentinel {@link FiberDetailModal.fetchSentFiles} returns on a
+ *  304: distinct from `null` (the read FAILED — keep the last known trail) and
+ *  from `[]` (the trail is genuinely empty). */
+const SENT_FILES_UNCHANGED = Symbol('sent-files-unchanged')
 
 type RefreshableArtifact = HTMLImageElement | HTMLIFrameElement | HTMLAudioElement
 
@@ -430,18 +440,28 @@ export class FiberDetailModal {
   /** The sent-files strip is refreshed in place so open tabs survive. */
   private sentWrap: HTMLElement | null = null
   private sentList: HTMLElement | null = null
-  /** One live poll per open card, paused while the document is hidden. */
+  /** One live poll per open card, paused while the document is hidden and
+   *  slowed while it is visible but unfocused (see {@link shouldRunVisiblePoll}). */
   private liveRefreshTimer: number | null = null
   private liveRefreshBusy = false
-  private contentGeneration = 0
+  private liveRefreshLastRunAt: number | null = null
+  /** Guards the un-awaited initial `renderFiberBody` against a later tick's
+   *  render landing first on the SAME overlay — overlay identity can't see
+   *  that race, so the token stays. */
   private bodyRequestToken = 0
-  private bodyFileRevision: string | undefined
-  private sentEventsFileRevision: string | undefined
+  /** The fiber's last-seen `modified_at`; a change re-renders the body. */
+  private bodyRevision: string | undefined
   private sentFilesRevision = ''
+  private sentFilesEtag: string | null = null
+  /** Change baselines for artifact bytes, keyed by BARE absolute path — one
+   *  path is one file whether it is reached as an open tab, an inline embed,
+   *  or both. */
   private readonly resourceRevisions = new Map<string, string>()
-  private refreshButton: HTMLButtonElement | null = null
+  /** The ~10 MB local events.jsonl fallback (older daemons) is worth at most
+   *  one read per panel-open, never one per 15s tick. */
+  private sentFilesFallbackTried = false
   private readonly visibilityHandler = (): void => {
-    if (!document.hidden) void this.refreshLiveContent(false)
+    if (!document.hidden) void this.refreshLiveContent()
   }
 
   /**
@@ -537,11 +557,11 @@ export class FiberDetailModal {
     this.proseEl = null
     this.sentWrap = null
     this.sentList = null
-    this.bodyFileRevision = undefined
-    this.sentEventsFileRevision = undefined
+    this.bodyRevision = undefined
     this.sentFilesRevision = ''
+    this.sentFilesEtag = null
+    this.sentFilesFallbackTried = false
     this.resourceRevisions.clear()
-    this.refreshButton = null
     const persist = loadPersist(typeof card.uid === 'string' ? card.uid : '')
     // Restore this card's remembered window arrangement: the card to its saved
     // spot (overriding the session default applyGeometry just set), and stash
@@ -566,9 +586,8 @@ export class FiberDetailModal {
     refreshBtn.textContent = '↻'
     refreshBtn.addEventListener('click', (e) => {
       e.stopPropagation()
-      void this.refreshLiveContent(true)
+      void this.forceReload()
     })
-    this.refreshButton = refreshBtn
 
     // Worker aloft → the same teal ▸ aloft pill the grid card wears, same
     // class, same gesture: click opens the worker's tmux session in kitty.
@@ -740,7 +759,6 @@ export class FiberDetailModal {
 
   close(): void {
     this.stopLiveRefresh()
-    this.contentGeneration += 1
     this.bodyRequestToken += 1
     // An origin card closing takes its followed references with it: the panel
     // is that card's reading, and leaving it open would strand tabs behind a
@@ -795,11 +813,11 @@ export class FiberDetailModal {
     this.proseEl = null
     this.sentWrap = null
     this.sentList = null
-    this.bodyFileRevision = undefined
-    this.sentEventsFileRevision = undefined
+    this.bodyRevision = undefined
     this.sentFilesRevision = ''
+    this.sentFilesEtag = null
+    this.sentFilesFallbackTried = false
     this.resourceRevisions.clear()
-    this.refreshButton = null
   }
 
   /**
@@ -821,7 +839,6 @@ export class FiberDetailModal {
     opts: { preserveContent?: boolean } = {},
   ): Promise<FiberBodyRead | null> {
     const preserveContent = opts.preserveContent === true
-    const generation = this.contentGeneration
     const requestToken = ++this.bodyRequestToken
     const pageScroll = this.bodyPage?.scrollTop ?? 0
 
@@ -839,6 +856,7 @@ export class FiberDetailModal {
 
     let body = ''
     let outcomeFromDaemon: string | undefined
+    let modifiedAt: string | undefined
     let found = false
     let reached = false
     let timer: number | null = null
@@ -857,7 +875,7 @@ export class FiberDetailModal {
       )
       if (res.ok) {
         const data = (await res.json()) as {
-          fibers?: Array<{ fiber?: { body?: unknown; outcome?: unknown } }>
+          fibers?: Array<{ fiber?: { body?: unknown; outcome?: unknown; modified_at?: unknown } }>
         }
         // An empty `fibers` array means the daemon answered but the id isn't in
         // its mirror (vs. found-but-bodyless); the note below distinguishes them.
@@ -865,6 +883,7 @@ export class FiberDetailModal {
         found = (data.fibers?.length ?? 0) > 0
         body = typeof fiber?.body === 'string' ? fiber.body.trim() : ''
         outcomeFromDaemon = typeof fiber?.outcome === 'string' ? fiber.outcome.trim() : undefined
+        modifiedAt = typeof fiber?.modified_at === 'string' ? fiber.modified_at : undefined
         reached = true
       }
     } catch {
@@ -873,11 +892,7 @@ export class FiberDetailModal {
       if (timer !== null) window.clearTimeout(timer)
     }
     // The panel may have closed (or been replaced) while we awaited.
-    if (
-      this.overlay !== overlay ||
-      generation !== this.contentGeneration ||
-      requestToken !== this.bodyRequestToken
-    ) return null
+    if (this.overlay !== overlay || requestToken !== this.bodyRequestToken) return null
     // A live refresh must never erase readable content because a transient
     // tunnel failure happened. The explicit retry button remains available on
     // the initial-load path, while the refresh control leaves the old page in
@@ -885,7 +900,10 @@ export class FiberDetailModal {
     if (!reached && preserveContent) return null
 
     const outcome = outcomeFromDaemon ?? (card.outcome ?? '').trim()
-    const read: FiberBodyRead = { body, outcome, found, reached }
+    const read: FiberBodyRead = { body, outcome, found, reached, modifiedAt }
+    // Seed/advance the body's change baseline off the read that is about to
+    // paint, so the first live tick compares against what the reader sees.
+    if (reached) this.bodyRevision = modifiedAt
     const lede = outcome
       ? `<div class="kbn-detail-lede">${renderMarkdown(outcome, { wikilinks: true })}</div>`
       : ''
@@ -909,13 +927,13 @@ export class FiberDetailModal {
       this.autosizeEmbeds(prose)
       this.installBodyFileLinks(prose, card)
       void this.installWikilinkNavigation(prose, overlay)
-      this.restoreBodyScroll(pageScroll, overlay, generation)
+      this.restoreBodyScroll(pageScroll, overlay)
       return read
     }
     if (!outcome && reached && found) {
       prose.classList.add('kbn-detail-prose-empty')
       prose.textContent = 'No body or outcome yet.'
-      this.restoreBodyScroll(pageScroll, overlay, generation)
+      this.restoreBodyScroll(pageScroll, overlay)
       return read
     }
     // No body. Three honest cases — remote bodies normally resolve here via the
@@ -937,18 +955,16 @@ export class FiberDetailModal {
         void this.renderFiberBody(prose, card, overlay)
       })
     }
-    this.restoreBodyScroll(pageScroll, overlay, generation)
+    this.restoreBodyScroll(pageScroll, overlay)
     return read
   }
 
-  private restoreBodyScroll(scrollTop: number, overlay: HTMLElement, generation: number): void {
+  private restoreBodyScroll(scrollTop: number, overlay: HTMLElement): void {
     const page = this.bodyPage
     if (!page) return
     page.scrollTop = scrollTop
     window.requestAnimationFrame(() => {
-      if (this.overlay === overlay && this.contentGeneration === generation) {
-        page.scrollTop = scrollTop
-      }
+      if (this.overlay === overlay) page.scrollTop = scrollTop
     })
   }
 
@@ -959,8 +975,18 @@ export class FiberDetailModal {
 
   private startLiveRefresh(): void {
     this.stopLiveRefresh()
+    this.liveRefreshLastRunAt = null
+    // The panel keeps its OWN timer rather than riding the kanban's poll: a
+    // linked-fiber tab (`mountLinkedCard`) is mounted from the single-fiber
+    // feed and may not be a board card at all, so nothing on the board would
+    // drive it.
     this.liveRefreshTimer = window.setInterval(() => {
-      if (!document.hidden) void this.refreshLiveContent(false)
+      // Hidden tabs stop polling; visible but unfocused windows slow to the
+      // shared page-attention cadence.
+      if (!shouldRunVisiblePoll(this.liveRefreshLastRunAt, Date.now(), LIVE_REFRESH_INTERVAL_MS)) {
+        return
+      }
+      void this.refreshLiveContent()
     }, LIVE_REFRESH_INTERVAL_MS)
     document.addEventListener('visibilitychange', this.visibilityHandler)
   }
@@ -978,173 +1004,181 @@ export class FiberDetailModal {
 
   /**
    * Keep the open reading surface current without rebuilding its windows.
-   * Metadata probes are cheap and owner-routed; bytes are fetched only when a
-   * revision changes. An explicit click skips the probes and reloads the body
-   * and every open artifact, while the automatic tick preserves the reader's
-   * scroll, zoom, and active tabs.
+   *
+   * One tick: probe the fiber's `modified_at` and re-render the body if it
+   * moved, ask `/sent-files` conditionally (an `If-None-Match` 304 is the
+   * common case), then re-baseline every artifact the panel is showing. Bytes
+   * are fetched only when something actually changed, and the reader's scroll,
+   * zoom, and active tabs survive every tick.
+   *
+   * Best-effort throughout: a fiber that momentarily can't be read, or a
+   * daemon too old for a probe, leaves the readable page exactly as it is.
    */
-  private async refreshLiveContent(force: boolean): Promise<void> {
+  private async refreshLiveContent(): Promise<void> {
     const card = this.card
     const overlay = this.overlay
     const prose = this.proseEl
     if (!card || !overlay || !prose || this.liveRefreshBusy) return
 
-    const generation = this.contentGeneration
     this.liveRefreshBusy = true
-    if (force && this.refreshButton) {
-      this.refreshButton.disabled = true
-      this.refreshButton.classList.add('kbn-detail-refreshing')
-    }
-
-    let bodyRefreshFailed = false
+    this.liveRefreshLastRunAt = Date.now()
     try {
-      const documentPath = absoluteFiberDocumentPath(card)
-      let bodyChanged = force
-      if (documentPath) {
-        const revision = await readFileRevision(this.shuttleBase, documentPath, card.originId)
-        if (revision !== undefined) {
-          bodyChanged = force ||
-            (this.bodyFileRevision !== undefined && revision !== this.bodyFileRevision)
-          this.bodyFileRevision = revision
-        }
+      const revision = await this.readFiberRevision(card)
+      if (this.overlay !== overlay) return
+      if (revision !== undefined && revision !== this.bodyRevision) {
+        await this.renderFiberBody(prose, card, overlay, { preserveContent: true })
+        if (this.overlay !== overlay) return
       }
 
-      if (bodyChanged && this.contentGeneration === generation) {
-        bodyRefreshFailed =
-          (await this.renderFiberBody(prose, card, overlay, { preserveContent: true })) === null
-      }
-      if (this.contentGeneration !== generation || this.overlay !== overlay) return
+      const files = await this.fetchSentFiles(card)
+      if (this.overlay !== overlay) return
+      if (files !== null && files !== SENT_FILES_UNCHANGED) this.applySentFiles(files, card)
 
-      const eventsPath = sentEventsPathFor(card)
-      let sentChanged = true
-      if (eventsPath) {
-        const revision = await readFileRevision(this.shuttleBase, eventsPath, card.originId)
-        if (revision !== undefined) {
-          sentChanged = force ||
-            revision === 'missing' ||
-            this.sentEventsFileRevision === undefined ||
-            revision !== this.sentEventsFileRevision
-          this.sentEventsFileRevision = revision
-        }
-      }
-      if (sentChanged) {
-        const files = await this.fetchSentFiles(card)
-        if (files !== null && this.contentGeneration === generation) {
-          this.applySentFiles(files, card, force)
-        }
-      }
-      await Promise.all([
-        this.refreshOpenFiles(card, force, generation),
-        this.refreshEmbeddedResources(card, force, generation),
-      ])
-
-      if (force && this.contentGeneration === generation && this.refreshButton) {
-        this.refreshButton.title = bodyRefreshFailed
-          ? 'Refresh could not load the constitution; try again'
-          : 'Fiber content is current; click to refresh again'
-      }
+      await this.refreshArtifacts(card)
     } catch {
       // A live tick is best-effort. Keep the readable page and let the next
       // tick or the explicit button try again rather than replacing it with an
       // outage message.
-      bodyRefreshFailed = true
     } finally {
-      if (this.contentGeneration === generation) {
-        this.liveRefreshBusy = false
-        if (force && this.refreshButton) {
-          this.refreshButton.disabled = false
-          this.refreshButton.classList.remove('kbn-detail-refreshing')
-        }
-      }
+      if (this.overlay === overlay) this.liveRefreshBusy = false
     }
   }
 
-  private async refreshOpenFiles(
-    card: KanbanCard,
-    force: boolean,
-    generation: number,
-  ): Promise<void> {
-    const entries = this.openFiles.filter((entry) => entry.viewerBuilt)
-    if (entries.length === 0) return
-    const revisions = await Promise.all(
-      entries.map((entry) => readFileRevision(this.shuttleBase, entry.path, card.originId)),
-    )
-    if (this.contentGeneration !== generation || this.overlay === null) return
-
-    entries.forEach((entry, index) => {
-      const revision = revisions[index]
-      if (revision === undefined) {
-        if (force) this.reloadOpenFile(entry)
-        return
-      }
-      const previous = this.resourceRevisions.get(`sent:${entry.path}`)
-      this.resourceRevisions.set(`sent:${entry.path}`, revision)
-      if (force || (previous !== undefined && previous !== revision)) {
-        this.reloadOpenFile(entry)
-      }
-    })
-  }
-
-  private reloadOpenFile(entry: OpenFileEntry): void {
-    const artifact = entry.cell.querySelector<RefreshableArtifact>(
-      'img.kbn-fileview-image, iframe.kbn-fileview-frame, audio',
-    )
-    const src = artifact?.getAttribute('src')
-    if (artifact && src) artifact.setAttribute('src', cacheBustUrl(src))
-  }
-
-  private async refreshEmbeddedResources(
-    card: KanbanCard,
-    force: boolean,
-    generation: number,
-  ): Promise<void> {
+  /**
+   * The ↻ control: reload EVERYTHING unconditionally, no probes consulted.
+   * The reader clicked because they believe the panel is stale, so the honest
+   * answer is to refetch rather than to re-derive whether a refetch is owed —
+   * which is also why a tick already in flight does not block it.
+   */
+  private async forceReload(): Promise<void> {
+    const card = this.card
+    const overlay = this.overlay
     const prose = this.proseEl
-    if (!prose) return
+    if (!card || !overlay || !prose) return
+
+    await this.renderFiberBody(prose, card, overlay, { preserveContent: true })
+    if (this.overlay !== overlay) return
+
+    // Bypass every cache so the trail and the launcher are rebuilt from bytes —
+    // including the once-per-open events.jsonl fallback, since on an older
+    // daemon that read is the only way a click can surface a new send.
+    this.sentFilesEtag = null
+    this.sentFilesRevision = ''
+    this.sentFilesFallbackTried = false
+    const files = await this.fetchSentFiles(card)
+    if (this.overlay !== overlay) return
+    if (files !== null && files !== SENT_FILES_UNCHANGED) this.applySentFiles(files, card)
+
+    for (const [, nodes] of this.artifactNodesByPath()) {
+      nodes.forEach((node) => this.reloadArtifactNode(node))
+    }
+  }
+
+  /**
+   * The fiber's own change revision — its `modified_at`, read from the SAME
+   * owner-routed endpoint the body read uses, minus `body=true`. `undefined`
+   * means "no answer" (fiber absent from the response, or the read failed) and
+   * the caller skips rather than wiping a readable page.
+   */
+  private async readFiberRevision(card: KanbanCard): Promise<string | undefined> {
+    try {
+      const idPath = card.id.split('/').map(encodeURIComponent).join('/')
+      const origin = encodeURIComponent(card.originId ?? '')
+      const res = await fetch(
+        `${this.shuttleBase}/api/v1/fibers/${idPath}?origin=${origin}`,
+        { cache: 'no-store' },
+      )
+      if (!res.ok) return undefined
+      const data = (await res.json()) as {
+        fibers?: Array<{ fiber?: { modified_at?: unknown } }>
+      }
+      const modifiedAt = data.fibers?.[0]?.fiber?.modified_at
+      return typeof modifiedAt === 'string' ? modifiedAt : undefined
+    } catch {
+      return undefined
+    }
+  }
+
+  /**
+   * Every artifact the panel is showing, as one path → nodes map: the viewers
+   * built for open sent-file tabs and the inline `img`/`iframe`/`audio` a body
+   * renders. ONE baseline per path — the same report reached through a tab and
+   * through an embed is one file, and probing it twice under two keys is how
+   * the two views drifted apart.
+   */
+  private artifactNodesByPath(): Map<string, RefreshableArtifact[]> {
     const byPath = new Map<string, RefreshableArtifact[]>()
-    prose
-      .querySelectorAll<RefreshableArtifact>('img[src], iframe[src], audio[src]')
-      .forEach((artifact) => {
-        const path = artifactPath(artifact)
-        if (!path) return
-        const resources = byPath.get(path) ?? []
-        resources.push(artifact)
-        byPath.set(path, resources)
-      })
+    const add = (path: string | null, node: RefreshableArtifact | null): void => {
+      if (!path || !node) return
+      const nodes = byPath.get(path) ?? []
+      nodes.push(node)
+      byPath.set(path, nodes)
+    }
+
+    for (const entry of this.openFiles) {
+      if (!entry.viewerBuilt) continue
+      add(
+        entry.path,
+        entry.cell.querySelector<RefreshableArtifact>(
+          'img.kbn-fileview-image, iframe.kbn-fileview-frame, audio',
+        ),
+      )
+    }
+    this.proseEl
+      ?.querySelectorAll<RefreshableArtifact>('img[src], iframe[src], audio[src]')
+      .forEach((node) => add(artifactPath(node), node))
+
+    return byPath
+  }
+
+  /**
+   * Re-baseline every artifact path once and reload the nodes behind any that
+   * moved. A path in the sent-files trail falls back to its send timestamp
+   * when `/file-info` is unavailable (an older daemon), so a re-sent file still
+   * reloads there.
+   */
+  private async refreshArtifacts(card: KanbanCard): Promise<void> {
+    const byPath = this.artifactNodesByPath()
     if (byPath.size === 0) return
+    const overlay = this.overlay
+    const sentByPath = new Map(this.sentFiles.map((file) => [file.fullPath, file]))
 
     const paths = [...byPath.keys()]
-    const revisions = await Promise.all(
+    const stats = await Promise.all(
       paths.map((path) => readFileRevision(this.shuttleBase, path, card.originId)),
     )
-    if (this.contentGeneration !== generation || this.overlay === null) return
+    if (!overlay || this.overlay !== overlay) return
 
     paths.forEach((path, index) => {
-      const resources = byPath.get(path) ?? []
-      const revision = revisions[index]
-      if (revision === undefined) {
-        if (force) resources.forEach((artifact) => this.reloadArtifact(artifact))
-        return
-      }
-      const previous = this.resourceRevisions.get(`embed:${path}`)
-      this.resourceRevisions.set(`embed:${path}`, revision)
-      if (force || (previous !== undefined && previous !== revision)) {
-        resources.forEach((artifact) => this.reloadArtifact(artifact))
+      const sent = sentByPath.get(path)
+      const revision = stats[index] ?? (sent ? `trail:${sent.timestamp}` : undefined)
+      if (revision === undefined) return
+      const previous = this.resourceRevisions.get(path)
+      this.resourceRevisions.set(path, revision)
+      if (previous !== undefined && previous !== revision) {
+        ;(byPath.get(path) ?? []).forEach((node) => this.reloadArtifactNode(node))
       }
     })
   }
 
-  private reloadArtifact(artifact: RefreshableArtifact): void {
-    const src = artifact.getAttribute('src')
-    if (src) artifact.setAttribute('src', cacheBustUrl(src))
+  /** Make one artifact node re-navigate to the same path with a fresh marker. */
+  private reloadArtifactNode(node: RefreshableArtifact): void {
+    const src = node.getAttribute('src')
+    if (src) node.setAttribute('src', cacheBustUrl(src))
   }
 
-  private applySentFiles(files: SentFile[], card: KanbanCard, force = false): void {
+  /**
+   * Adopt a freshly read sent-files trail: relabel open tabs onto their latest
+   * record, re-render the launcher when the trail actually moved, and reconcile
+   * disambiguated basenames. It does NOT reload any bytes — `refreshArtifacts`
+   * owns that, and its `trail:` fallback covers a re-sent file on a daemon with
+   * no `/file-info`.
+   */
+  private applySentFiles(files: SentFile[], card: KanbanCard): void {
     const next = disambiguateBasenames(files)
-    const previous = this.sentFiles
-    const previousByPath = new Map(previous.map((file) => [file.fullPath, file]))
     const nextByPath = new Map(next.map((file) => [file.fullPath, file]))
     const revision = sentFilesRevision(next)
-    const changed = force || revision !== this.sentFilesRevision
+    const changed = revision !== this.sentFilesRevision
 
     this.sentFiles = next
     this.sentFilesRevision = revision
@@ -1159,17 +1193,9 @@ export class FiberDetailModal {
 
     for (const entry of this.openFiles) {
       const latest = nextByPath.get(entry.path)
-      const prior = previousByPath.get(entry.path)
       if (latest) {
         entry.file = latest
         this.updateOpenFileLabel(entry)
-      }
-      // A repeated SendUserFile can keep the same path while replacing its
-      // bytes. Drop the metadata baseline so the same refresh pass does not
-      // reload the tab twice; the next pass establishes the new baseline.
-      if (latest && (!prior || latest.timestamp !== prior.timestamp)) {
-        this.reloadOpenFile(entry)
-        this.resourceRevisions.delete(`sent:${entry.path}`)
       }
     }
     this.reconcileOpenBasenames(next)
@@ -2586,8 +2612,7 @@ export class FiberDetailModal {
     void this.fetchSentFiles(card).then((files) => {
       // Panel may have closed/reopened while the fetch was in flight.
       if (!overlayAtBuild()?.contains(wrap)) return
-      this.applySentFiles(files ?? [], card)
-      void this.primeSentEventsRevision(card)
+      if (files !== null && files !== SENT_FILES_UNCHANGED) this.applySentFiles(files, card)
       // A rehydration that arrived before the trail did can now mark which
       // launcher entries are open.
       this.syncLauncherActiveState()
@@ -2883,21 +2908,32 @@ export class FiberDetailModal {
    * result means the read failed; refreshes preserve the last known trail in
    * that case rather than making a transient outage erase the launcher.
    */
-  private async fetchSentFiles(card: KanbanCard): Promise<SentFile[] | null> {
+  private async fetchSentFiles(
+    card: KanbanCard,
+  ): Promise<SentFile[] | null | typeof SENT_FILES_UNCHANGED> {
     const uid = typeof card.uid === 'string' ? card.uid.trim() : ''
     const sessionId = typeof card.sessionId === 'string' ? card.sessionId.trim() : ''
     if (!uid && !sessionId) return []
 
     // ── Primary: the daemon endpoint ──
+    // Conditional: the local leg answers `304` from a weak ETag over the events
+    // file's {mtime,size}, which is the common case on a 15s poll. (A remote-
+    // owned fiber's leg is relayed and header-less, so it always answers 200 —
+    // see the controller's moduledoc.)
     const params = new URLSearchParams()
     if (uid) params.set('uid', uid)
     if (card.originId) params.set('origin', card.originId)
     if (sessionId) params.set('sessionId', sessionId)
     try {
+      const headers: Record<string, string> = {}
+      if (this.sentFilesEtag) headers['If-None-Match'] = this.sentFilesEtag
       const res = await fetch(`${this.shuttleBase}/api/v1/sent-files?${params.toString()}`, {
         cache: 'no-store',
+        headers,
       })
+      if (res.status === 304) return SENT_FILES_UNCHANGED
       if (res.ok) {
+        this.sentFilesEtag = res.headers.get('etag')
         const data = (await res.json()) as { files?: unknown }
         if (Array.isArray(data.files)) return normalizeSentFiles(data.files)
       }
@@ -2924,6 +2960,11 @@ export class FiberDetailModal {
     // for a remote uid simply yields `[]`. Thus the only real gate is "can we
     // derive a home to point at" — and the cost is bounded (one local read,
     // once per panel-open, primary endpoint already tried).
+    //
+    // Bounded to ONE read per panel-open: on the 15s live poll this would
+    // otherwise pull ~10 MB every tick for the whole time a card is open.
+    if (this.sentFilesFallbackTried) return SENT_FILES_UNCHANGED
+    this.sentFilesFallbackTried = true
     const eventsPath = sentEventsPathFor(card)
     if (!eventsPath) return []
     try {
@@ -2935,16 +2976,6 @@ export class FiberDetailModal {
       return parseSentFilesFromEvents(text, uid, sessionId)
     } catch {
       return null
-    }
-  }
-
-  private async primeSentEventsRevision(card: KanbanCard): Promise<void> {
-    const path = sentEventsPathFor(card)
-    if (!path) return
-    const generation = this.contentGeneration
-    const revision = await readFileRevision(this.shuttleBase, path, card.originId)
-    if (revision !== undefined && this.contentGeneration === generation && this.card?.id === card.id) {
-      this.sentEventsFileRevision = revision
     }
   }
 
@@ -3596,22 +3627,6 @@ async function readFileRevision(
   } catch {
     return undefined
   }
-}
-
-/** The absolute markdown file represented by a composite row. */
-function absoluteFiberDocumentPath(card: KanbanCard): string | null {
-  const relative = card.path.trim()
-  if (relative.startsWith('/')) return relative
-  const store = card.feltStore?.replace(/\/+$/, '')
-  if (store && relative) {
-    const path = relative.replace(/^\.?\/?\.felt\//, '')
-    return `${store.endsWith('/.felt') ? store : `${store}/.felt`}/${path}`
-  }
-  if (card.fiberDir && relative) {
-    const leaf = relative.split('/').pop()
-    return leaf ? `${card.fiberDir.replace(/\/+$/, '')}/${leaf}` : null
-  }
-  return null
 }
 
 /** Return the artifact path behind one inline `/file` or paper iframe. */

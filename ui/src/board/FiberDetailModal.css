@@ -154,17 +154,6 @@
   color: var(--porch-verdigris, #2f7d6f);
   background: rgba(47, 125, 111, 0.08);
 }
-.kbn-detail-refresh:disabled {
-  cursor: default;
-  opacity: 0.65;
-}
-.kbn-detail-refreshing {
-  animation: kbn-detail-refresh-spin 650ms ease-in-out;
-}
-@keyframes kbn-detail-refresh-spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
 .kbn-detail-close:hover {
   color: #1B1611;
   background: rgba(27, 22, 17, 0.06);

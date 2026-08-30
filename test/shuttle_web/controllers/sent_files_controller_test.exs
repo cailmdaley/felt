@@ -260,6 +260,34 @@ defmodule ShuttleWeb.SentFilesControllerTest do
                json_response(conn, 200)
     end
 
+    test "carries an ETag and 304s an unchanged trail" do
+      path = write_fixture([event(%{"toolInput" => %{"files" => ["/tmp/local.html"]}})])
+      with_events_file(path)
+
+      first = get(api_conn(), "/api/v1/sent-files?uid=#{@match_ulid}")
+      assert first.status == 200
+      [etag] = get_resp_header(first, "etag")
+      assert etag =~ ~r/^W\//
+
+      # The board's live poll re-asks every 15s; an unchanged events file must
+      # cost a 304, not a re-read of the whole trail.
+      second =
+        api_conn()
+        |> put_req_header("if-none-match", etag)
+        |> get("/api/v1/sent-files?uid=#{@match_ulid}")
+
+      assert second.status == 304
+      assert second.resp_body == ""
+
+      # A different uid is a different validator, so it must not 304.
+      other =
+        api_conn()
+        |> put_req_header("if-none-match", etag)
+        |> get("/api/v1/sent-files?uid=#{@other_ulid}")
+
+      assert other.status == 200
+    end
+
     test "200 with an empty list when the fiber has no sends" do
       path = write_fixture([event(%{})])
       with_events_file(path)

@@ -21,6 +21,16 @@ describe('live artifact URL helpers', () => {
       '/api/v1/file?path=%2Fx&_shuttle_refresh=42',
     )
   })
+
+  it('rewrites an existing marker without leaving a dangling separator', () => {
+    expect(cacheBustUrl('/x?_shuttle_refresh=1&a=2', 7)).toBe('/x?_shuttle_refresh=7&a=2')
+  })
+
+  it('preserves an absolute daemon base', () => {
+    expect(cacheBustUrl('http://d:4000/api/v1/file?path=%2Ftmp%2Fr.html', 9)).toBe(
+      'http://d:4000/api/v1/file?path=%2Ftmp%2Fr.html&_shuttle_refresh=9',
+    )
+  })
 })
 
 describe('relative links in a fiber body', () => {
