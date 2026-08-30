@@ -37,6 +37,8 @@ shuttle-*.tar
 # Built daemon release + its generated version module
 # (bin/shuttle itself is the TRACKED shell shim that fronts the release)
 /bin/rel/
+/bin/rel.next/
+/bin/rel.prev/
 /priv/ui/
 /lib/shuttle/build_info.ex
 

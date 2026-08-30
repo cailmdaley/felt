@@ -128,7 +128,17 @@ endif
 	@# local path match what release.yml does for the same reason.
 	MIX_ENV=prod mix compile
 	MIX_ENV=prod mix compile.app --force
-	MIX_ENV=prod mix release shuttled --overwrite --path bin/rel
+	@# Assemble beside the live release and swap, never in place. A running
+	@# daemon holds NIF .so files open under bin/rel/lib; on an NFS home that
+	@# turns every unlink into a .nfs* silly-rename stub, and `--overwrite`'s
+	@# rm_rf of the old lib dirs dies with "file already exists". The old tree
+	@# lives on as bin/rel.prev (the running BEAM keeps its inodes) until the
+	@# next build, by which time the cycle has retired it.
+	rm -rf bin/rel.next
+	MIX_ENV=prod mix release shuttled --overwrite --path bin/rel.next
+	rm -rf bin/rel.prev
+	@[ -d bin/rel ] && mv bin/rel bin/rel.prev || true
+	mv bin/rel.next bin/rel
 
 # ── test ─────────────────────────────────────────────────────────────────
 test: go-test mix-test js-test plugin-hooks-test
@@ -261,5 +271,5 @@ status:
 
 clean:
 	rm -rf _build
-	rm -rf bin/rel
+	rm -rf bin/rel bin/rel.next bin/rel.prev
 	rm -f Elixir.*.beam felt felt-linux
