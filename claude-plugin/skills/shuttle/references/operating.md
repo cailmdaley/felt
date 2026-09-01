@@ -111,6 +111,28 @@ felt shuttle snapshot                       # daemon's view (:4000)
 curl -s http://127.0.0.1:4000/api/v1/agents | jq    # agent registry over HTTP
 ```
 
+## Claiming a fiber into your session
+
+An interactive session can become a fiber's worker — first-class, via `POST /api/v1/claim`. The daemon registers the claiming tmux session exactly as if it had dispatched it: liveness watcher, kanban in-flight, and normal exit semantics (`felt shuttle handoff` → clean-exit stamp → fresh dispatch while `active`, or Awaiting review when `closed`). This is how capture sessions adopt the fiber they just authored, and it generalizes to any fiber a human wants to drive from a session shuttle didn't spawn: a draft they want to start on now, an Awaiting-review card being reopened interactively, or a running worker whose cache has gone cold and isn't worth reheating just to continue.
+
+```bash
+# 1. only if a worker is live: kill it and park safely (no dispatch gap)
+felt shuttle pause <fiber>
+
+# 2. claim — from inside the claiming session (requires tmux; renames the
+#    session to the canonical <leaf>-<uid>-shuttle worker name — expected)
+curl -s -X POST http://localhost:4000/api/v1/claim -H 'Content-Type: application/json' \
+  -d '{"fiber_id": "<fiber>", "tmux_session": "'"$(tmux display-message -p '#S')"'",
+       "session_uuid": "<your transcript uuid>", "agent": "<registry id>"}'
+
+# 3. arm — AFTER the claim, never before
+felt edit <fiber> --status active
+```
+
+The order is load-bearing: activating before the claim makes the fiber dispatch-eligible while the daemon can't yet see your session, and the poll loop spawns a duplicate worker in the gap. `session_uuid` is optional but wire it when you can — it writes the dispatch marker, so Resume-previous and transcript lineage work on claimed sessions too. The claim is idempotent; if the response is lost, retry with the same body. Errors are precise: `already_running` means kill/pause the live worker first, `closed` means `felt shuttle reopen` first, `session_not_found` means the tmux session name didn't resolve.
+
+From the claim on, you are the worker: the whole worker loop in SKILL.md applies, including handoff-then-exit. Killing a live worker to claim loses whatever was typed in its input buffer — capture anything visible in the pane first (`tmux capture-pane`); the transcript itself survives and stays resumable.
+
 ## Card missing?
 
 First check where the fiber was filed (a local repo `.felt/` that's not a pinned city is invisible to the global kanban), then confirm `felt shuttle status` shows the block. Most "card missing" symptoms reduce to "no block installed yet."
