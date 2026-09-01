@@ -162,6 +162,7 @@ export class GestureLayer {
   private panel: HTMLElement | null = null
   private toggleButton: HTMLButtonElement | null = null
   private toolButton: HTMLButtonElement | null = null
+  private batchButton: HTMLButtonElement | null = null
   private sendButton: HTMLButtonElement | null = null
   private statusEl: HTMLElement | null = null
   private enabled = false
@@ -249,6 +250,17 @@ export class GestureLayer {
       this.textTool = !this.textTool
       this.updateChrome()
     })
+    const batch = document.createElement('button')
+    batch.type = 'button'
+    batch.className = 'kbn-gesture-badge'
+    batch.setAttribute('aria-expanded', 'false')
+    batch.title = 'Expand gesture batch (])'
+    batch.addEventListener('click', (event) => {
+      event.stopPropagation()
+      this.batchExpanded = !this.batchExpanded
+      this.updateChrome()
+    })
+
     const send = document.createElement('button')
     send.type = 'button'
     send.className = 'kbn-gesture-send'
@@ -259,7 +271,7 @@ export class GestureLayer {
       event.stopPropagation()
       void this.send()
     })
-    chrome.append(toggle, tool, send)
+    chrome.append(toggle, tool, batch, send)
 
     const panel = document.createElement('aside')
     panel.className = 'kbn-gesture-panel'
@@ -272,6 +284,7 @@ export class GestureLayer {
     this.panel = panel
     this.toggleButton = toggle
     this.toolButton = tool
+    this.batchButton = batch
     this.sendButton = send
     this.statusEl = status
   }
@@ -325,6 +338,7 @@ export class GestureLayer {
       this.connectDocument()
       this.startPolling()
     } else {
+      this.batchExpanded = false
       this.stopPolling()
       this.cancelInteractions()
       this.clearOverlay()
@@ -344,8 +358,17 @@ export class GestureLayer {
       this.toolButton.disabled = !this.enabled
       this.toolButton.classList.toggle('kbn-gesture-tool-active', this.textTool)
     }
-    if (this.sendButton) this.sendButton.disabled = !this.enabled || this.records.length === 0 || this.sending
-    if (this.panel) this.panel.hidden = !this.enabled
+    if (this.batchButton) {
+      this.batchButton.hidden = !this.enabled
+      this.batchButton.textContent = String(this.records.length)
+      this.batchButton.setAttribute('aria-expanded', String(this.batchExpanded))
+      this.batchButton.setAttribute('aria-label', `${this.records.length} unsent gesture${this.records.length === 1 ? '' : 's'}`)
+    }
+    if (this.sendButton) {
+      this.sendButton.hidden = !this.enabled
+      this.sendButton.disabled = !this.enabled || this.records.length === 0 || this.sending
+    }
+    if (this.panel) this.panel.hidden = !this.enabled || !this.batchExpanded
     this.renderBatch()
   }
 

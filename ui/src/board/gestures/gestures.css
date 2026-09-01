@@ -31,8 +31,14 @@
   padding: 3px 6px;
   font-size: 10px;
 }
+.kbn-gesture-badge {
+  min-width: 20px;
+  padding-inline: 5px !important;
+  color: #286f64 !important;
+  font-weight: 600 !important;
+}
 .kbn-gesture-chrome button:hover,
-.kbn-gesture-tool-active {
+.kbn-gesture-tool-active { 
   background: rgba(196, 147, 51, 0.19) !important;
   border-color: rgba(154, 123, 53, 0.62) !important;
 }
