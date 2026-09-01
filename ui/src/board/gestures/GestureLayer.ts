@@ -26,6 +26,7 @@ const MIN_SIZE = 18
 const FRAME_STYLE = `
 .kbn-gesture-overlay { position: absolute; inset: 0; z-index: 2147483000; pointer-events: none; }
 .kbn-gesture-selection { position: absolute; box-sizing: border-box; border: 2px solid #2f7d6f; background: rgba(47,125,111,.08); pointer-events: none; }
+.kbn-gesture-marquee { position: absolute; box-sizing: border-box; border: 1px dashed #2f7d6f; background: rgba(47,125,111,.08); pointer-events: none; }
 .kbn-gesture-handle { position: absolute; width: 10px; height: 10px; box-sizing: border-box; padding: 0; border: 1px solid #fffdf6; border-radius: 2px; background: #2f7d6f; pointer-events: auto; cursor: nwse-resize; }
 .kbn-gesture-handle-n, .kbn-gesture-handle-s { left: 50%; transform: translateX(-50%); cursor: ns-resize; }
 .kbn-gesture-handle-e, .kbn-gesture-handle-w { top: 50%; transform: translateY(-50%); cursor: ew-resize; }
@@ -35,7 +36,7 @@ const FRAME_STYLE = `
 .kbn-gesture-handle-e, .kbn-gesture-handle-ne, .kbn-gesture-handle-se { right: -6px; }
 .kbn-gesture-handle-s, .kbn-gesture-handle-se, .kbn-gesture-handle-sw { bottom: -6px; }
 .kbn-gesture-handle-w, .kbn-gesture-handle-nw, .kbn-gesture-handle-sw { left: -6px; }
-.kbn-gesture-note { position: absolute; pointer-events: none; transform: translate(-4px, -4px); }
+.kbn-gesture-note { position: absolute; pointer-events: auto; transform: translate(-4px, -4px); }
 .kbn-gesture-note-input, .kbn-gesture-textbox { position: absolute; }
 .kbn-gesture-note::before { content: ''; display: block; width: 9px; height: 9px; border: 2px solid #9a4a35; border-radius: 50%; background: #fffdf6; box-shadow: 0 1px 4px rgba(27,22,17,.25); }
 .kbn-gesture-note-input, .kbn-gesture-textbox { pointer-events: auto; width: 210px; box-sizing: border-box; margin: 6px 0 0 9px; padding: 5px 7px; border: 1px solid #9a7b35; border-radius: 3px; background: #fffdf6; color: #2e2a26; font: 14px/1.2 sans-serif; box-shadow: 0 2px 8px rgba(27,22,17,.18); }
@@ -414,8 +415,9 @@ export class GestureLayer {
 
     this.clearPress()
     const group = this.groupContaining(target)
+    const groupMember = group?.targets.find((member) => member === target || member.contains(target))
     const press: Press = {
-      target,
+      target: groupMember ?? target,
       pointerId: event.pointerId,
       x: event.clientX,
       y: event.clientY,
@@ -429,8 +431,8 @@ export class GestureLayer {
         event.stopPropagation()
         // Holding a member is the escape hatch from a marquee selection:
         // long-press always selects that member alone.
-        this.select(target, space)
-        this.beginManipulation(target, 'move', undefined, {
+        this.select(press.target, space)
+        this.beginManipulation(press.target, 'move', undefined, {
           pointerId: press.pointerId,
           clientX: press.x,
           clientY: press.y,
@@ -469,6 +471,8 @@ export class GestureLayer {
       if (Math.hypot(event.clientX - press.x, event.clientY - press.y) >= MOVE_TOLERANCE) {
         this.clearPress()
         if (press.group) {
+          event.preventDefault()
+          event.stopPropagation()
           this.beginGroupManipulation(press.group, event)
           this.applyGroupManipulation(event)
         }
