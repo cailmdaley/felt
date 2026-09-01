@@ -581,6 +581,7 @@ export class ShelfReader {
             }
           }
         : undefined,
+      { fiberId: entry.file.uid },
     )
     entry.cell.append(viewer)
     entry.zoomTarget = viewer.querySelector<HTMLElement>('img.kbn-fileview-image') ?? viewer

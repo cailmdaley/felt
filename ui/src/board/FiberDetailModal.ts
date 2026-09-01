@@ -32,6 +32,7 @@ import {
 } from './FloatingPanelChrome.js'
 import { LinkedFiberPanel } from './LinkedFiberPanel.js'
 import { buildFileViewer, isScrollableFile } from './FileViewerPanel.js'
+import { installGestureLayer, type GestureLayer } from './gestures/GestureLayer.js'
 import {
   disambiguateBasenames,
   normalizeSentFiles,
@@ -374,6 +375,9 @@ export class FiberDetailModal {
    *  height when the panel reflows their content (see autosizeEmbeds).
    *  Disconnected on close so a re-opened panel never leaks observers. */
   private embedObservers: ResizeObserver[] = []
+  /** Gesture controllers belong to the current body DOM and are replaced when
+   * the fiber body is rerendered. Their own file reloads keep their batches. */
+  private gestureLayers: GestureLayer[] = []
   /** Shuttle daemon base (`:4000`). Every verb routes here — transition,
    *  dispatch (carrying user_message + resume_mode inline), lifecycle,
    *  felt-nest — owner-routed by the card's `originId` carried as
@@ -794,6 +798,7 @@ export class FiberDetailModal {
     }
     this.fiberIndex = null
     this.disconnectEmbedObservers()
+    this.disconnectGestureLayers()
     // Closing the card closes its file-viewer window too — the two windows are
     // a pair bound to one card. (closeViewerWindow nulls the viewer refs.)
     this.viewerWindow?.remove()
@@ -909,6 +914,7 @@ export class FiberDetailModal {
       : ''
 
     this.disconnectEmbedObservers()
+    this.disconnectGestureLayers()
     prose.classList.remove('kbn-detail-prose-empty')
     if (body) {
       // Resolve a relative `:::{embed}` / image against the fiber's own dir
@@ -925,6 +931,7 @@ export class FiberDetailModal {
       }
       prose.innerHTML = lede + renderMarkdown(renderEmbeds(body, bodyOpts), bodyOpts)
       this.autosizeEmbeds(prose)
+      this.installGestureFrames(prose, card)
       this.installBodyFileLinks(prose, card)
       void this.installWikilinkNavigation(prose, overlay)
       this.restoreBodyScroll(pageScroll, overlay)
@@ -971,6 +978,25 @@ export class FiberDetailModal {
   private disconnectEmbedObservers(): void {
     for (const ro of this.embedObservers) ro.disconnect()
     this.embedObservers = []
+  }
+
+  private disconnectGestureLayers(): void {
+    for (const layer of this.gestureLayers) layer.destroy()
+    this.gestureLayers = []
+  }
+
+  private installGestureFrames(prose: HTMLElement, card: KanbanCard): void {
+    const fiberId = card.shuttleFiberId ?? card.id
+    for (const frame of prose.querySelectorAll<HTMLIFrameElement>('iframe[data-gesture-path]')) {
+      const src = frame.getAttribute('src') ?? frame.src
+      this.gestureLayers.push(installGestureLayer(frame, {
+        shuttleBase: this.shuttleBase,
+        fiberId,
+        filePath: frame.dataset.gesturePath,
+        originId: card.originId,
+        sourceUrl: src,
+      }))
+    }
   }
 
   private startLiveRefresh(): void {
@@ -2793,6 +2819,7 @@ export class FiberDetailModal {
             }
           }
         : undefined,
+      { fiberId: card.shuttleFiberId ?? card.id },
     )
     entry.cell.append(viewer)
     // Zoom target: the <img> for images (sized in px so it magnifies PAST the

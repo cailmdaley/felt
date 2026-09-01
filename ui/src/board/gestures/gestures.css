@@ -1,0 +1,103 @@
+/* The chrome lives beside the iframe, not in the rendered artifact. */
+.kbn-gesture-host {
+  position: relative;
+}
+.kbn-gesture-chrome {
+  position: absolute;
+  top: 7px;
+  right: 8px;
+  z-index: 20;
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  padding: 3px;
+  border: 1px solid rgba(154, 123, 53, 0.34);
+  border-radius: 5px;
+  background: rgba(255, 253, 246, 0.94);
+  box-shadow: 0 2px 9px rgba(27, 22, 17, 0.16);
+  font-family: var(--font-mono, 'IBM Plex Mono', monospace);
+}
+.kbn-gesture-chrome button,
+.kbn-gesture-copy,
+.kbn-gesture-delete {
+  border: 1px solid rgba(27, 22, 17, 0.17);
+  border-radius: 3px;
+  background: transparent;
+  color: #4a443c;
+  cursor: pointer;
+  font: inherit;
+}
+.kbn-gesture-chrome button {
+  padding: 3px 6px;
+  font-size: 10px;
+}
+.kbn-gesture-chrome button:hover,
+.kbn-gesture-tool-active {
+  background: rgba(196, 147, 51, 0.19) !important;
+  border-color: rgba(154, 123, 53, 0.62) !important;
+}
+.kbn-gesture-chrome button:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+.kbn-gesture-toggle[aria-pressed="true"] {
+  color: #286f64;
+  border-color: rgba(47, 125, 111, 0.52);
+}
+.kbn-gesture-panel {
+  position: absolute;
+  top: 41px;
+  right: 8px;
+  z-index: 21;
+  width: min(330px, calc(100% - 16px));
+  max-height: min(45vh, 340px);
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid rgba(154, 123, 53, 0.34);
+  border-radius: 5px;
+  background: rgba(255, 253, 246, 0.97);
+  box-shadow: 0 4px 18px rgba(27, 22, 17, 0.18);
+  color: #4a443c;
+  font: 10px/1.35 var(--font-mono, 'IBM Plex Mono', monospace);
+}
+.kbn-gesture-status {
+  color: #777064;
+  font-size: 10px;
+}
+.kbn-gesture-panel-heading {
+  margin-top: 4px;
+  color: #9a7b35;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.kbn-gesture-group {
+  margin: 9px 0 3px;
+  color: #2f7d6f;
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.kbn-gesture-row {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  padding: 3px 0 3px 5px;
+  border-top: 1px solid rgba(27, 22, 17, 0.08);
+  overflow-wrap: anywhere;
+}
+.kbn-gesture-delete {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding: 0 4px;
+  color: #9a4a35;
+}
+.kbn-gesture-warning {
+  margin-top: 7px;
+  color: #9a4a35;
+  font-style: italic;
+}
+.kbn-gesture-copy {
+  margin-top: 8px;
+  padding: 4px 7px;
+  color: #286f64;
+}

@@ -464,7 +464,7 @@ function embedHtml(
     const purl = paperUrl(path, opts)
     if (!purl) return embedPlaceholderHtml(path, embedOpts.title)
     const height = heightCss ?? `${EMBED_ASTRA_IFRAME_HEIGHT}px`
-    return `<div class="kbn-detail-embed-frame kbn-detail-embed-astra" style="height:${height}"><iframe src="${escapeAttr(purl)}" title="${safeTitle}" loading="lazy"></iframe></div>`
+    return `<div class="kbn-detail-embed-frame kbn-detail-embed-astra" style="height:${height}"><iframe src="${escapeAttr(purl)}" title="${safeTitle}" loading="lazy" data-gesture-path="${escapeAttr(path)}"></iframe></div>`
   }
 
   if (IMAGE_EXTS.has(ext)) {
@@ -485,13 +485,13 @@ function embedHtml(
   // scrolling frame.
   if (ext === 'html' || ext === 'htm') {
     if (heightCss) {
-      return `<div class="kbn-detail-embed-frame" style="height:${heightCss}"><iframe src="${safeSrc}" title="${safeTitle}" loading="lazy"></iframe></div>`
+      return `<div class="kbn-detail-embed-frame" style="height:${heightCss}"><iframe src="${safeSrc}" title="${safeTitle}" loading="lazy" data-gesture-path="${escapeAttr(path)}"></iframe></div>`
     }
-    return `<div class="kbn-detail-embed-frame kbn-detail-embed-autosize"><iframe src="${safeSrc}" title="${safeTitle}" loading="lazy" data-autosize="1"></iframe></div>`
+    return `<div class="kbn-detail-embed-frame kbn-detail-embed-autosize"><iframe src="${safeSrc}" title="${safeTitle}" loading="lazy" data-autosize="1" data-gesture-path="${escapeAttr(path)}"></iframe></div>`
   }
 
   const height = heightCss ?? `${EMBED_DEFAULT_IFRAME_HEIGHT}px`
-  return `<div class="kbn-detail-embed-frame" style="height:${height}"><iframe src="${safeSrc}" title="${safeTitle}" loading="lazy"></iframe></div>`
+  return `<div class="kbn-detail-embed-frame" style="height:${height}"><iframe src="${safeSrc}" title="${safeTitle}" loading="lazy" data-gesture-path="${escapeAttr(path)}"></iframe></div>`
 }
 
 export function basename(path: string): string {
