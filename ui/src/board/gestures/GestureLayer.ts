@@ -18,6 +18,8 @@ import {
 
 const LONG_PRESS_MS = 300
 const MOVE_TOLERANCE = 5
+const TOGGLE_HOTKEY = 'g'
+const BATCH_HOTKEY = ']'
 const POLL_MS = 3_000
 const MIN_SIZE = 18
 
@@ -164,6 +166,7 @@ export class GestureLayer {
   private statusEl: HTMLElement | null = null
   private enabled = false
   private textTool = false
+  private batchExpanded = false
   private records: GestureRecord[] = []
   private doc: Document | null = null
   private overlay: HTMLElement | null = null
@@ -191,18 +194,23 @@ export class GestureLayer {
   private readonly onClick = (event: MouseEvent): void => this.click(event)
   private readonly onDoubleClick = (event: MouseEvent): void => this.doubleClick(event)
   private readonly onKeyDown = (event: KeyboardEvent): void => this.keyDown(event)
+  private readonly onParentKeyDown = (event: KeyboardEvent): void => {
+    if (this.parentOwnsFocus()) this.keyDown(event)
+  }
 
   constructor(frame: HTMLIFrameElement, options: GestureLayerOptions) {
     this.frame = frame
     this.options = options
     this.sourceUrl = options.sourceUrl ?? frame.getAttribute('src') ?? frame.src
     this.mountChrome()
+    document.addEventListener('keydown', this.onParentKeyDown, true)
     frame.addEventListener('load', this.onFrameLoad)
     this.connectDocument()
   }
 
   destroy(): void {
     this.disable()
+    document.removeEventListener('keydown', this.onParentKeyDown, true)
     this.frame.removeEventListener('load', this.onFrameLoad)
     this.chrome?.remove()
     this.panel?.remove()
@@ -225,7 +233,7 @@ export class GestureLayer {
     toggle.className = 'kbn-gesture-toggle'
     toggle.textContent = 'gestures'
     toggle.setAttribute('aria-pressed', 'false')
-    toggle.title = 'Turn on presentation gestures'
+    toggle.title = `G: toggle gestures on/off · ]: expand/collapse gesture batch`
     toggle.addEventListener('click', (event) => {
       event.stopPropagation()
       this.setEnabled(!this.enabled)
@@ -522,7 +530,30 @@ export class GestureLayer {
   }
 
   private keyDown(event: KeyboardEvent): void {
-    if (!this.enabled || event.key !== 'Escape') return
+    if (this.isEditableTarget(event.target)) return
+    const key = event.key.toLowerCase()
+    if (key === TOGGLE_HOTKEY) {
+      event.preventDefault()
+      event.stopPropagation()
+      this.setEnabled(!this.enabled)
+      return
+    }
+    if (!this.enabled) return
+    if (key === BATCH_HOTKEY) {
+      event.preventDefault()
+      event.stopPropagation()
+      this.batchExpanded = !this.batchExpanded
+      this.updateChrome()
+      return
+    }
+    if (key === 't') {
+      event.preventDefault()
+      event.stopPropagation()
+      this.textTool = !this.textTool
+      this.updateChrome()
+      return
+    }
+    if (event.key !== 'Escape') return
     if (this.editing) {
       event.preventDefault()
       event.stopPropagation()
@@ -532,6 +563,16 @@ export class GestureLayer {
     this.textTool = false
     this.deselect()
     this.updateChrome()
+  }
+
+  private parentOwnsFocus(): boolean {
+    const active = document.activeElement
+    return active === this.frame || Boolean(this.host?.contains(active))
+  }
+
+  private isEditableTarget(target: EventTarget | null): boolean {
+    const element = this.elementTarget(target)
+    return Boolean(element?.matches('input,textarea,select,[contenteditable="true"],.kbn-gesture-note-input,.kbn-gesture-textbox') || element?.closest('input,textarea,select,[contenteditable="true"],.kbn-gesture-note-input,.kbn-gesture-textbox'))
   }
 
   private beginManipulation(
