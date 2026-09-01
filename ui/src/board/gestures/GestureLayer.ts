@@ -866,7 +866,12 @@ export class GestureLayer {
   private finishNoteManipulation(): void {
     const move = this.noteManipulation
     this.noteManipulation = null
-    if (!move || (Math.abs(move.point.x - move.before.x) <= 2 && Math.abs(move.point.y - move.before.y) <= 2)) return
+    if (!move) return
+    if (Math.abs(move.point.x - move.before.x) <= 2 && Math.abs(move.point.y - move.before.y) <= 2) {
+      move.marker.style.left = `${move.before.x}px`
+      move.marker.style.top = `${move.before.y}px`
+      return
+    }
     this.records = this.records.map((record) => record.id === move.recordId ? { ...record, point: move.point } : record)
     this.updateChrome()
   }
