@@ -20,6 +20,7 @@ const LONG_PRESS_MS = 300
 const MOVE_TOLERANCE = 5
 const TOGGLE_HOTKEY = 'g'
 const BATCH_HOTKEY = ']'
+export const WEBKIT_FORCE_AT_FORCE_MOUSE_DOWN = 1
 const POLL_MS = 3_000
 const MIN_SIZE = 18
 
@@ -50,6 +51,7 @@ type RevealApi = {
 }
 
 type RuntimeSpace = CoordinateSpace & { root: HTMLElement; section: HTMLElement | null }
+type WebKitForceEvent = MouseEvent & { webkitForce?: number }
 
 export interface GestureLayerOptions {
   shuttleBase: string
@@ -196,6 +198,7 @@ export class GestureLayer {
   private readonly onClick = (event: MouseEvent): void => this.click(event)
   private readonly onDoubleClick = (event: MouseEvent): void => this.doubleClick(event)
   private readonly onKeyDown = (event: KeyboardEvent): void => this.keyDown(event)
+  private readonly onForce = (event: Event): void => this.force(event)
   private readonly onParentKeyDown = (event: KeyboardEvent): void => {
     if (this.parentOwnsFocus()) this.keyDown(event)
   }
@@ -314,6 +317,8 @@ export class GestureLayer {
       doc.addEventListener('click', this.onClick, true)
       doc.addEventListener('dblclick', this.onDoubleClick, true)
       doc.addEventListener('keydown', this.onKeyDown, true)
+      doc.addEventListener('webkitmouseforcewillbegin', this.onForce, true)
+      doc.addEventListener('webkitmouseforcechanged', this.onForce, true)
     } catch {
       this.doc = null
     }
@@ -329,6 +334,8 @@ export class GestureLayer {
     doc.removeEventListener('click', this.onClick, true)
     doc.removeEventListener('dblclick', this.onDoubleClick, true)
     doc.removeEventListener('keydown', this.onKeyDown, true)
+    doc.removeEventListener('webkitmouseforcewillbegin', this.onForce, true)
+    doc.removeEventListener('webkitmouseforcechanged', this.onForce, true)
     this.doc = null
   }
 
@@ -554,6 +561,21 @@ export class GestureLayer {
       const space = this.runtimeSpace()
       if (space) this.placeNote(space, event.clientX, event.clientY)
     }
+  }
+
+  private force(event: Event): void {
+    if (!this.enabled) return
+    const force = (event as WebKitForceEvent).webkitForce
+    if (typeof force !== 'number' || force < WEBKIT_FORCE_AT_FORCE_MOUSE_DOWN) return
+    const target = this.elementTarget(event.target)
+    if (!target || this.isEditableTarget(target) || target.closest('.kbn-gesture-overlay')) return
+    if (this.textTool || this.isStructural(target) || this.isEmptySpace(target)) return
+    const space = this.runtimeSpace()
+    if (!space) return
+    this.clearPress()
+    this.select(target, space)
+    event.preventDefault()
+    event.stopPropagation()
   }
 
   private keyDown(event: KeyboardEvent): void {
