@@ -15,7 +15,7 @@ import {
   type GestureRecord,
 } from './serializer.js'
 
-const LONG_PRESS_MS = 400
+const LONG_PRESS_MS = 300
 const MOVE_TOLERANCE = 5
 const POLL_MS = 3_000
 const MIN_SIZE = 18
