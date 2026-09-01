@@ -3234,7 +3234,7 @@ defmodule Shuttle.Poller do
       with {_, 0} <-
              runner.cmd("tmux", ["load-buffer", "-b", buffer, path], stderr_to_stdout: true),
            {_, 0} <-
-             runner.cmd("tmux", ["paste-buffer", "-p", "-t", "=" <> session, "-b", buffer, "-d"],
+             runner.cmd("tmux", ["paste-buffer", "-p", "-t", session <> ":", "-b", buffer, "-d"],
                stderr_to_stdout: true
              ) do
         {:ok, %{session: session, bytes: byte_size(text)}}

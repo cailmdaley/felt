@@ -915,7 +915,7 @@ defmodule ShuttleWeb.APIControllerTest do
 
     assert ["load-buffer", "-b", buffer, path] = load_args
     assert is_binary(buffer) and is_binary(path)
-    assert ["paste-buffer", "-p", "-t", "=" <> ^session, "-b", ^buffer, "-d"] = paste_args
+    assert ["paste-buffer", "-p", "-t", ^session <> ":", "-b", ^buffer, "-d"] = paste_args
   end
 
   test "inject returns 404 when neither worker session name is live" do
