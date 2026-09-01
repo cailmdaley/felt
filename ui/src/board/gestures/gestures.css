@@ -38,7 +38,7 @@
   font-weight: 600 !important;
 }
 .kbn-gesture-chrome button:hover,
-.kbn-gesture-tool-active { 
+.kbn-gesture-tool-active {
   background: rgba(196, 147, 51, 0.19) !important;
   border-color: rgba(154, 123, 53, 0.62) !important;
 }
