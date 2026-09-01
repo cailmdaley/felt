@@ -32,6 +32,7 @@ defmodule ShuttleWeb.Router do
     # Deliberately NOT owner-routed: the terminal opens on the host serving the
     # UI (where the human is), ssh-ing out for a remote worker. See Shuttle.Kitty.
     post("/attach", AttachController, :create)
+    post("/inject", InjectController, :create)
     get("/state", StateController, :show)
     get("/state/composite", StateController, :composite)
     get("/fibers", FiberDocumentsController, :index)

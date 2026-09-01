@@ -884,6 +884,55 @@ defmodule ShuttleWeb.APIControllerTest do
   # asserting that would still depend on the live verb to distinguish the two,
   # so the route's content is left to felt's own suite.
 
+  # ── POST /api/v1/inject ──
+
+  test "inject pastes a multiline block without submitting it" do
+    fiber_id = "tests/inject"
+    uid = "01KTCA2CWXBSNHETE66MXKPVE7"
+    fiber = make_fiber(fiber_id, %{"uid" => uid})
+    MockRunner.set_fiber(fiber_id, fiber)
+    session = Dispatcher.session_name(fiber_id, uid)
+    MockRunner.add_tmux_session(session)
+
+    text = "quotes: ' \"\nsecond line\n"
+
+    conn =
+      post(
+        api_conn(),
+        "/api/v1/inject",
+        Jason.encode!(%{"fiber_id" => fiber_id, "text" => text, "raise" => false})
+      )
+
+    assert conn.status == 200
+    assert Jason.decode!(conn.resp_body) == %{"session" => session, "bytes" => byte_size(text)}
+
+    tmux_commands = Enum.filter(MockRunner.commands(), &match?({"tmux", _}, &1))
+
+    assert [{"tmux", load_args}, {"tmux", paste_args} | _] =
+             Enum.drop_while(tmux_commands, fn {"tmux", [command | _]} ->
+               command != "load-buffer"
+             end)
+
+    assert ["load-buffer", "-b", buffer, path] = load_args
+    assert is_binary(buffer) and is_binary(path)
+    assert ["paste-buffer", "-p", "-t", "=" <> ^session, "-b", ^buffer, "-d"] = paste_args
+  end
+
+  test "inject returns 404 when neither worker session name is live" do
+    fiber_id = "tests/inject-missing"
+    MockRunner.set_fiber(fiber_id, make_fiber(fiber_id, %{"uid" => "01KTCA2CWXBSNHETE66MXKPVE7"}))
+
+    conn =
+      post(
+        api_conn(),
+        "/api/v1/inject",
+        Jason.encode!(%{"fiber_id" => fiber_id, "text" => "hello", "raise" => false})
+      )
+
+    assert conn.status == 404
+    assert %{"error" => _} = Jason.decode!(conn.resp_body)
+  end
+
   # ── GET /api/v1/version ──
 
   test "version returns the daemon build-info shape" do
@@ -901,6 +950,7 @@ defmodule ShuttleWeb.APIControllerTest do
       assert String.starts_with?(body["git_sha"], body["git_short_sha"])
     end
   end
+
   # Poll to a deadline instead of sleeping a guess. Returns false on timeout so
   # the caller's `assert` names the test that timed out.
   defp wait_until(fun, remaining_ms \\ 3_000) do
@@ -910,5 +960,4 @@ defmodule ShuttleWeb.APIControllerTest do
       true -> (Process.sleep(20); wait_until(fun, remaining_ms - 20))
     end
   end
-
 end

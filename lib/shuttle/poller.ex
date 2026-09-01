@@ -462,6 +462,22 @@ defmodule Shuttle.Poller do
   end
 
   @doc """
+  Paste text into a fiber's live worker session without submitting it.
+
+  The session is resolved using both the uid-keyed canonical name and the
+  legacy leaf-only name, preferring the canonical name. Text reaches tmux only
+  through a temporary file, so arbitrary multiline content never enters a
+  shell command.
+  """
+  @spec inject(String.t(), String.t()) :: {:ok, map()} | {:error, term()}
+  def inject(fiber_id, text), do: inject(__MODULE__, fiber_id, text)
+
+  @spec inject(GenServer.server(), String.t(), String.t()) :: {:ok, map()} | {:error, term()}
+  def inject(server, fiber_id, text) do
+    GenServer.call(server, {:inject, fiber_id, text}, @dispatch_call_timeout_ms)
+  end
+
+  @doc """
   Spawn-without-constitution: launch a capture session (free-text prompt, no
   pre-existing fiber) in `work_dir`. See `Shuttle.Dispatcher.capture/2`.
 
@@ -876,6 +892,29 @@ defmodule Shuttle.Poller do
     uid = running_uid(state, slug) || if(Shuttle.ULID.valid?(runtime_key), do: runtime_key)
     {state, reply} = do_claim_session(state, slug, uid, tmux_session, opts)
     {:reply, reply, state}
+  end
+
+  def handle_call({:inject, fiber_id, text}, _from, state) do
+    {runtime_key, slug} = resolve_identity(state, fiber_id)
+    uid = running_uid(state, slug) || if(Shuttle.ULID.valid?(runtime_key), do: runtime_key)
+
+    case fetch_fiber_full(slug, state) do
+      {:ok, fiber} ->
+        session =
+          live_session_for_fiber(state, slug, uid) ||
+            live_session_by_names(state, slug, Map.get(fiber, "uid"))
+
+        case session do
+          nil ->
+            {:reply, {:error, :not_found}, state}
+
+          session ->
+            {:reply, paste_into_session(state.runner, session, text), state}
+        end
+
+      {:error, _reason} ->
+        {:reply, {:error, :not_found}, state}
+    end
   end
 
   def handle_call({:kill_session, fiber_id}, _from, state) do
@@ -3177,6 +3216,35 @@ defmodule Shuttle.Poller do
   end
 
   # ── Helpers ──
+
+  defp live_session_by_names(state, fiber_id, uid) do
+    fiber_id
+    |> Dispatcher.session_names(uid)
+    |> Enum.find(&already_running_session?(state, &1))
+  end
+
+  defp paste_into_session(runner, session, text) do
+    token = System.unique_integer([:positive])
+    path = Path.join(System.tmp_dir!(), "shuttle-inject-#{token}")
+    buffer = "shuttle-inject-#{token}"
+
+    try do
+      File.write!(path, text)
+
+      with {_, 0} <-
+             runner.cmd("tmux", ["load-buffer", "-b", buffer, path], stderr_to_stdout: true),
+           {_, 0} <-
+             runner.cmd("tmux", ["paste-buffer", "-p", "-t", "=" <> session, "-b", buffer, "-d"],
+               stderr_to_stdout: true
+             ) do
+        {:ok, %{session: session, bytes: byte_size(text)}}
+      else
+        {output, status} -> {:error, {:paste_failed, output, status}}
+      end
+    after
+      File.rm(path)
+    end
+  end
 
   # Is a worker present in this tmux session? `present?` treats an inconclusive
   # `has-session` as present, so reconcile won't drop a live worker's running
