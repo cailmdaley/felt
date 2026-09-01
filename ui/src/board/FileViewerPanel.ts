@@ -102,6 +102,9 @@ export function buildFileViewer(
   iframe.className = 'kbn-fileview-frame'
   iframe.src = src
   iframe.title = basename(fullPath)
+  // Mount before installing: GestureLayer puts its frame chrome beside the
+  // iframe, so it needs the frame's parent to exist at construction time.
+  wrap.append(iframe, veil)
   // The reader owns the frame's fiber context (a sent-file record carries its
   // intrinsic uid); the gesture layer owns only the ephemeral interaction.
   installGestureLayer(iframe, {
@@ -145,7 +148,6 @@ export function buildFileViewer(
     })
     .catch(() => failed('the daemon could not be reached'))
 
-  wrap.append(iframe, veil)
   return wrap
 }
 
