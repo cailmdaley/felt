@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { serializeGestures, type GestureRecord } from './serializer.js'
+import { coalesceGestures, serializeGestures, type GestureRecord } from './serializer.js'
 
 const slide = { kind: 'slide' as const, slideIndex: '14', heading: 'Results', title: 'deck' }
 
@@ -22,6 +22,42 @@ const slide = { kind: 'slide' as const, slideIndex: '14', heading: 'Results', ti
       '  img.money-plot (Fig 4)  box 80,120 1120x560 -> 400,120 800x560\n' +
       '  note @ (200,300): "put the menu here"',
     )
+  })
+
+  it('coalesces repeated geometry against its original box', () => {
+    const first = {
+      id: 'm1', kind: 'move' as const, location: slide, fingerprint: 'img.plot', coalesceKey: 'plot',
+      beforeBox: { x: 100, y: 200, width: 400, height: 300 },
+      afterBox: { x: 140, y: 220, width: 400, height: 300 },
+    }
+    const second = {
+      ...first, id: 'm2', beforeBox: first.afterBox,
+      afterBox: { x: 160, y: 230, width: 400, height: 300 },
+    }
+    expect(coalesceGestures([first, second])).toEqual([{
+      ...first, afterBox: second.afterBox,
+    }])
+  })
+
+  it('drops geometry and text that return to their original values', () => {
+    const move: GestureRecord = {
+      id: 'm', kind: 'move', location: slide, fingerprint: 'img.plot', coalesceKey: 'plot',
+      beforeBox: { x: 100, y: 200, width: 400, height: 300 },
+      afterBox: { x: 102, y: 202, width: 400, height: 300 },
+    }
+    const text: GestureRecord = {
+      id: 't', kind: 'text', location: slide, fingerprint: 'p.caption', coalesceKey: 'caption',
+      beforeText: 'old', afterText: 'new',
+    }
+    expect(coalesceGestures([move])).toEqual([])
+    expect(coalesceGestures([text, { ...text, id: 't2', beforeText: 'new', afterText: 'old' }])).toEqual([])
+  })
+
+  it('serializes a group move with member fingerprints and a signed delta', () => {
+    expect(serializeGestures('deck.html', [{
+      id: 'g', kind: 'group', location: slide,
+      members: ['img.money-plot', 'p.caption'], delta: { x: 320, y: -40 },
+    }])).toContain('move group [img.money-plot, p.caption] by +320,-40')
   })
 
   it('truncates and quotes edited text', () => {
