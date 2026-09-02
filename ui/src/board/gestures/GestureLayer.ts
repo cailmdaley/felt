@@ -11,6 +11,7 @@ import {
   type GestureBox,
   type RectLike,
 } from './coordinates.js'
+import { planPress } from './press.js'
 import {
   coalesceGestures,
   serializeGestures,
@@ -412,44 +413,39 @@ export class GestureLayer {
     const space = this.runtimeSpace()
     if (!space) return
 
-    // A group's outline is solid to the pointer: pressing anywhere inside it,
-    // members and the gaps between them alike, grabs the whole selection.
-    const inGroup = this.groupUnderPointer(event)
-    if (inGroup) {
-      this.clearPress()
-      this.press = {
-        target: null,
-        pointerId: event.pointerId,
-        x: event.clientX,
-        y: event.clientY,
-        space: inGroup.space,
-        group: inGroup,
-        active: false,
-        timer: 0,
-      }
-      return
-    }
-
-    if (this.isEmptySpace(target)) {
+    const plan = planPress({
+      insideGroupBox: Boolean(this.groupUnderPointer(event)),
+      onEmptySpace: this.isEmptySpace(target),
+      onStructural: this.isStructural(target),
+    })
+    if (plan === 'none') return
+    if (plan === 'marquee') {
       this.beginMarquee(space, event)
       return
     }
-    if (this.isStructural(target)) return
+
+    // A group's outline is solid to the pointer: pressing anywhere inside it,
+    // members and the gaps between them alike, drags the whole selection. A
+    // long-press is still the escape hatch — it picks one element out of the
+    // group, exactly as it does anywhere else on the slide.
+    const group = plan === 'group' || plan === 'group-or-member' ? this.groupUnderPointer(event) : undefined
+    const pickable = plan === 'element' || plan === 'group-or-member' ? target : null
 
     this.clearPress()
     const press: Press = {
-      target,
+      target: pickable,
       pointerId: event.pointerId,
       x: event.clientX,
       y: event.clientY,
-      space,
+      space: group?.space ?? space,
+      group,
       active: false,
       timer: window.setTimeout(() => {
         if (this.press !== press || !this.enabled || press.active || !press.target) return
         press.active = true
         event.preventDefault()
         event.stopPropagation()
-        this.select(press.target, space)
+        this.select(press.target, press.space)
         this.beginManipulation(press.target, 'move', undefined, {
           pointerId: press.pointerId,
           clientX: press.x,
