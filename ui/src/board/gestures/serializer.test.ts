@@ -12,15 +12,15 @@ const slide = { kind: 'slide' as const, slideIndex: '14', heading: 'Results', ti
         afterBox: { x: 400, y: 120, width: 800, height: 560 },
       },
       {
-        id: 'n', kind: 'note', location: slide, point: { x: 200, y: 300 },
-        noteText: 'put the menu here',
+        id: 'n', kind: 'comment', location: slide, point: { x: 200, y: 300 },
+        commentText: 'this plot is doing too much work',
       },
     ]
     expect(serializeGestures('/tmp/talk/index.html', records)).toBe(
       '[gestures on index.html]\n' +
       'slide 14 "Results"\n' +
       '  img.money-plot (Fig 4)  box 80,120 1120x560 -> 400,120 800x560\n' +
-      '  note @ (200,300): "put the menu here"',
+      '  comment @ (200,300): "this plot is doing too much work"',
     )
   })
 
@@ -58,6 +58,28 @@ const slide = { kind: 'slide' as const, slideIndex: '14', heading: 'Results', ti
       id: 'g', kind: 'group', location: slide,
       members: ['img.money-plot', 'p.caption'], delta: { x: 320, y: -40 },
     }])).toContain('move group [img.money-plot, p.caption] by +320,-40')
+  })
+
+  it('serializes a group resize as one box change', () => {
+    expect(serializeGestures('deck.html', [{
+      id: 'g', kind: 'group', location: slide,
+      members: ['img.money-plot', 'p.caption'],
+      beforeBox: { x: 80, y: 120, width: 1120, height: 560 },
+      afterBox: { x: 80, y: 120, width: 560, height: 280 },
+    }])).toContain('resize group [img.money-plot, p.caption]  box 80,120 1120x560 -> 80,120 560x280')
+  })
+
+  it('keeps separate comments separate and follows one that is dragged', () => {
+    const first: GestureRecord = {
+      id: 'c1', kind: 'comment', location: slide, coalesceKey: 'c1',
+      point: { x: 10, y: 10 }, commentText: 'here',
+    }
+    const second: GestureRecord = { ...first, id: 'c2', coalesceKey: 'c2', commentText: 'and here' }
+    const moved: GestureRecord = { ...first, point: { x: 90, y: 40 } }
+    expect(coalesceGestures([first, second])).toHaveLength(2)
+    expect(coalesceGestures([first, second, moved])).toEqual([
+      { ...first, point: { x: 90, y: 40 } }, second,
+    ])
   })
 
   it('truncates and quotes edited text', () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { boxInSpace, pointInSpace, roundBox, scaleFromTransform, type CoordinateSpace } from './coordinates.js'
+import { boxInSpace, pointInRect, pointInSpace, roundBox, scaleFromTransform, type CoordinateSpace } from './coordinates.js'
 
 const slide: CoordinateSpace = {
   kind: 'slide', originX: 100, originY: 40, scale: 0.5,
@@ -20,6 +20,17 @@ const slide: CoordinateSpace = {
     expect(boxInSpace({ left: 30, top: 40, width: 100, height: 50 }, page, 10, 20)).toEqual({
       x: 40, y: 60, width: 100, height: 50,
     })
+  })
+
+  it('treats a group outline as solid, gaps between members included', () => {
+    const outline = { left: 100, top: 80, width: 400, height: 200 }
+    // The empty middle of the box belongs to the group, not to a new marquee.
+    expect(pointInRect(300, 180, outline)).toBe(true)
+    expect(pointInRect(100, 80, outline)).toBe(true)
+    expect(pointInRect(500, 280, outline)).toBe(true)
+    expect(pointInRect(99, 180, outline)).toBe(false)
+    expect(pointInRect(300, 281, outline)).toBe(false)
+    expect(pointInRect(99, 180, outline, 2)).toBe(true)
   })
 
   it('reads both 2d and 3d CSS matrix scales', () => {

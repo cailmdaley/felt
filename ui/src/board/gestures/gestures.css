@@ -37,10 +37,9 @@
   color: #286f64 !important;
   font-weight: 600 !important;
 }
-.kbn-gesture-chrome button:hover,
-.kbn-gesture-tool-active {
-  background: rgba(196, 147, 51, 0.19) !important;
-  border-color: rgba(154, 123, 53, 0.62) !important;
+.kbn-gesture-chrome button:hover {
+  background: rgba(196, 147, 51, 0.19);
+  border-color: rgba(154, 123, 53, 0.62);
 }
 .kbn-gesture-chrome button:disabled {
   cursor: default;

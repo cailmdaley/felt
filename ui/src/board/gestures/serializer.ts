@@ -1,6 +1,6 @@
 import type { GestureBox } from './coordinates.js'
 
-export type GestureKind = 'move' | 'resize' | 'text' | 'note' | 'new-text' | 'group'
+export type GestureKind = 'move' | 'resize' | 'text' | 'comment' | 'group'
 
 export interface GestureLocation {
   kind: 'slide' | 'page'
@@ -18,11 +18,12 @@ export interface GestureRecord {
   afterBox?: GestureBox
   beforeText?: string
   afterText?: string
-  noteText?: string
+  commentText?: string
   point?: { x: number; y: number }
   /** Stable DOM identity used to coalesce repeated touches in one session. */
   coalesceKey?: string
   members?: string[]
+  /** Group move: how far the whole selection travelled. */
   delta?: { x: number; y: number }
 }
 
@@ -30,8 +31,8 @@ const TEXT_LIMIT = 72
 const GEOMETRY_DEAD_ZONE = 2
 
 /** Coalesce repeated edits to one element while preserving the first baseline.
- * Notes and new text boxes remain separate unless a note explicitly carries
- * the identity of an existing note being repositioned. */
+ * Comments stay separate from one another; a comment only merges with itself,
+ * when it is dragged to a new spot. */
 export function coalesceGestures(records: readonly GestureRecord[]): GestureRecord[] {
   const output: Array<GestureRecord | null> = []
   const positions = new Map<string, number>()
@@ -41,8 +42,8 @@ export function coalesceGestures(records: readonly GestureRecord[]): GestureReco
     const identity = record.coalesceKey ?? record.fingerprint
     const key = category && identity
       ? `${category}|${locationKey(record.location)}|${identity}`
-      : record.kind === 'note' && record.coalesceKey
-        ? `note|${record.coalesceKey}`
+      : record.kind === 'comment' && record.coalesceKey
+        ? `comment|${record.coalesceKey}`
         : null
     if (!key) {
       output.push(record)
@@ -150,12 +151,12 @@ function recordLine(record: GestureRecord): string {
       return `resize ${name}  box ${box(record.beforeBox)} -> ${box(record.afterBox)}`
     case 'text':
       return `text ${name}: "${quote(truncate(record.beforeText ?? ''))}" -> "${quote(truncate(record.afterText ?? ''))}"`
-    case 'note':
-      return `note @ (${number(record.point?.x)},${number(record.point?.y)}): "${quote(truncate(record.noteText ?? ''))}"`
-    case 'new-text':
-      return `new text box  box ${box(record.afterBox)}: "${quote(truncate(record.afterText ?? ''))}"`
+    case 'comment':
+      return `comment @ (${number(record.point?.x)},${number(record.point?.y)}): "${quote(truncate(record.commentText ?? ''))}"`
     case 'group':
-      return `move group [${(record.members ?? []).join(', ')}] by ${signed(record.delta?.x)},${signed(record.delta?.y)}`
+      return record.delta
+        ? `move group [${(record.members ?? []).join(', ')}] by ${signed(record.delta.x)},${signed(record.delta.y)}`
+        : `resize group [${(record.members ?? []).join(', ')}]  box ${box(record.beforeBox)} -> ${box(record.afterBox)}`
   }
 }
 

@@ -3,11 +3,13 @@ import './gestures.css'
 import { cacheBustUrl, showToast } from '../utils.js'
 import {
   boxInSpace,
+  pointInRect,
   pointInSpace,
   roundBox,
   scaleFromTransform,
   type CoordinateSpace,
   type GestureBox,
+  type RectLike,
 } from './coordinates.js'
 import {
   coalesceGestures,
@@ -37,10 +39,9 @@ const FRAME_STYLE = `
 .kbn-gesture-handle-e, .kbn-gesture-handle-ne, .kbn-gesture-handle-se { right: -6px; }
 .kbn-gesture-handle-s, .kbn-gesture-handle-se, .kbn-gesture-handle-sw { bottom: -6px; }
 .kbn-gesture-handle-w, .kbn-gesture-handle-nw, .kbn-gesture-handle-sw { left: -6px; }
-.kbn-gesture-note { position: absolute; pointer-events: auto; transform: translate(-4px, -4px); }
-.kbn-gesture-note-input, .kbn-gesture-textbox { position: absolute; }
-.kbn-gesture-note::before { content: ''; display: block; width: 9px; height: 9px; border: 2px solid #9a4a35; border-radius: 50%; background: #fffdf6; box-shadow: 0 1px 4px rgba(27,22,17,.25); }
-.kbn-gesture-note-input, .kbn-gesture-textbox { pointer-events: auto; width: 210px; box-sizing: border-box; margin: 6px 0 0 9px; padding: 5px 7px; border: 1px solid #9a7b35; border-radius: 3px; background: #fffdf6; color: #2e2a26; font: 14px/1.2 sans-serif; box-shadow: 0 2px 8px rgba(27,22,17,.18); }
+.kbn-gesture-comment { position: absolute; pointer-events: auto; transform: translate(-4px, -4px); cursor: move; }
+.kbn-gesture-comment::before { content: ''; display: block; width: 9px; height: 9px; border: 2px solid #9a4a35; border-radius: 50%; background: #fffdf6; box-shadow: 0 1px 4px rgba(27,22,17,.25); }
+.kbn-gesture-comment-input { pointer-events: auto; width: 210px; box-sizing: border-box; margin: 6px 0 0 9px; padding: 5px 7px; border: 1px solid #9a7b35; border-radius: 3px; background: #fffdf6; color: #2e2a26; font: 14px/1.2 sans-serif; box-shadow: 0 2px 8px rgba(27,22,17,.18); }
 .kbn-gesture-editing { outline: 2px solid rgba(194,150,59,.7); outline-offset: 2px; }
 `
 
@@ -91,7 +92,7 @@ interface Marquee {
   active: boolean
 }
 
-interface NoteManipulation {
+interface CommentManipulation {
   marker: HTMLElement
   recordId: string
   pointerId: number
@@ -104,17 +105,33 @@ interface NoteManipulation {
 
 interface GroupManipulation {
   targets: HTMLElement[]
+  mode: 'move' | 'resize'
+  direction?: string
   pointerId: number
   x: number
   y: number
   space: RuntimeSpace
-  transforms: Map<HTMLElement, string>
+  restore: Map<HTMLElement, MemberStyle>
+  /** Member geometry at grab time, in the group's coordinate space. */
+  boxes: Map<HTMLElement, GestureBox>
+  before: GestureBox
+  after: GestureBox
   fingerprints: string[]
   delta: { x: number; y: number }
 }
 
+interface MemberStyle {
+  transform: string
+  position: string
+  width: string
+  height: string
+  maxWidth: string
+}
+
 interface Press {
-  target: HTMLElement
+  /** Null when the press began on empty space inside a group's outline: there
+   * is nothing to long-press into a single selection, only a group to drag. */
+  target: HTMLElement | null
   pointerId: number
   x: number
   y: number
@@ -164,12 +181,10 @@ export class GestureLayer {
   private chrome: HTMLElement | null = null
   private panel: HTMLElement | null = null
   private toggleButton: HTMLButtonElement | null = null
-  private toolButton: HTMLButtonElement | null = null
   private batchButton: HTMLButtonElement | null = null
   private sendButton: HTMLButtonElement | null = null
   private statusEl: HTMLElement | null = null
   private enabled = false
-  private textTool = false
   private batchExpanded = false
   private records: GestureRecord[] = []
   private doc: Document | null = null
@@ -177,7 +192,7 @@ export class GestureLayer {
   private selection: Selection | GroupSelection | null = null
   private press: Press | null = null
   private marquee: Marquee | null = null
-  private noteManipulation: NoteManipulation | null = null
+  private commentManipulation: CommentManipulation | null = null
   private manipulation: Manipulation | null = null
   private groupManipulation: GroupManipulation | null = null
   private readonly originalElements = new Map<string, OriginalElement>()
@@ -238,21 +253,11 @@ export class GestureLayer {
     toggle.className = 'kbn-gesture-toggle'
     toggle.textContent = 'gestures'
     toggle.setAttribute('aria-pressed', 'false')
-    toggle.title = `G: toggle gestures on/off · ]: expand/collapse gesture batch`
+    toggle.title = 'G: gestures on/off · long-press an element to pick it up · '
+      + 'drag to marquee-select a group · double-click empty space to leave a comment · ]: batch'
     toggle.addEventListener('click', (event) => {
       event.stopPropagation()
       this.setEnabled(!this.enabled)
-    })
-    const tool = document.createElement('button')
-    tool.type = 'button'
-    tool.className = 'kbn-gesture-tool'
-    tool.textContent = 'T'
-    tool.title = 'Place a text box on the next click'
-    tool.disabled = true
-    tool.addEventListener('click', (event) => {
-      event.stopPropagation()
-      this.textTool = !this.textTool
-      this.updateChrome()
     })
     const batch = document.createElement('button')
     batch.type = 'button'
@@ -275,7 +280,7 @@ export class GestureLayer {
       event.stopPropagation()
       void this.send()
     })
-    chrome.append(toggle, tool, batch, send)
+    chrome.append(toggle, batch, send)
 
     const panel = document.createElement('aside')
     panel.className = 'kbn-gesture-panel'
@@ -287,7 +292,6 @@ export class GestureLayer {
     this.chrome = chrome
     this.panel = panel
     this.toggleButton = toggle
-    this.toolButton = tool
     this.batchButton = batch
     this.sendButton = send
     this.statusEl = status
@@ -341,7 +345,6 @@ export class GestureLayer {
 
   private setEnabled(enabled: boolean): void {
     this.enabled = enabled
-    this.textTool = false
     if (enabled) {
       this.connectDocument()
       this.startPolling()
@@ -362,10 +365,6 @@ export class GestureLayer {
   private updateChrome(): void {
     this.toggleButton?.setAttribute('aria-pressed', String(this.enabled))
     if (this.toggleButton) this.toggleButton.textContent = this.enabled ? 'gestures on' : 'gestures'
-    if (this.toolButton) {
-      this.toolButton.disabled = !this.enabled
-      this.toolButton.classList.toggle('kbn-gesture-tool-active', this.textTool)
-    }
     if (this.batchButton) {
       this.batchButton.hidden = !this.enabled
       this.batchButton.textContent = String(this.records.length)
@@ -383,30 +382,28 @@ export class GestureLayer {
   private pointerDown(event: PointerEvent): void {
     if (!this.enabled || event.button !== 0) return
     const target = this.elementTarget(event.target)
-    if (!target || this.textTool) return
+    if (!target) return
 
     const handle = target.closest<HTMLElement>('[data-gesture-handle]')
     if (handle) {
       event.preventDefault()
       event.stopPropagation()
-      if (this.selection && 'target' in this.selection) {
-        const direction = handle.dataset.gestureHandle
-        this.beginManipulation(this.selection.target, 'resize', direction, event)
-      }
-      // Group resize is deliberately not wired: the handles remain a clear
-      // visual boundary, while moving a group is the useful operation.
+      const direction = handle.dataset.gestureHandle
+      const selection = this.selection
+      if (selection && 'target' in selection) this.beginManipulation(selection.target, 'resize', direction, event)
+      else if (selection) this.beginGroupManipulation(selection, 'resize', direction, event)
       return
     }
 
-    const note = target.closest<HTMLElement>('.kbn-gesture-note')
-    if (note && !target.matches('input,textarea,button')) {
-      const recordId = note.dataset.gestureId
-      const record = this.records.find((item) => item.id === recordId && item.kind === 'note')
+    const comment = target.closest<HTMLElement>('.kbn-gesture-comment')
+    if (comment && !target.matches('input,textarea,button')) {
+      const recordId = comment.dataset.gestureId
+      const record = this.records.find((item) => item.id === recordId && item.kind === 'comment')
       const space = this.runtimeSpace()
       if (record?.point && space) {
         event.preventDefault()
         event.stopPropagation()
-        this.beginNoteManipulation(note, record, space, event)
+        this.beginCommentManipulation(comment, record, space, event)
       }
       return
     }
@@ -414,6 +411,25 @@ export class GestureLayer {
 
     const space = this.runtimeSpace()
     if (!space) return
+
+    // A group's outline is solid to the pointer: pressing anywhere inside it,
+    // members and the gaps between them alike, grabs the whole selection.
+    const inGroup = this.groupUnderPointer(event)
+    if (inGroup) {
+      this.clearPress()
+      this.press = {
+        target: null,
+        pointerId: event.pointerId,
+        x: event.clientX,
+        y: event.clientY,
+        space: inGroup.space,
+        group: inGroup,
+        active: false,
+        timer: 0,
+      }
+      return
+    }
+
     if (this.isEmptySpace(target)) {
       this.beginMarquee(space, event)
       return
@@ -421,23 +437,18 @@ export class GestureLayer {
     if (this.isStructural(target)) return
 
     this.clearPress()
-    const group = this.groupContaining(target)
-    const groupMember = group?.targets.find((member) => member === target || member.contains(target))
     const press: Press = {
-      target: groupMember ?? target,
+      target,
       pointerId: event.pointerId,
       x: event.clientX,
       y: event.clientY,
       space,
-      group,
       active: false,
       timer: window.setTimeout(() => {
-        if (this.press !== press || !this.enabled || press.active) return
+        if (this.press !== press || !this.enabled || press.active || !press.target) return
         press.active = true
         event.preventDefault()
         event.stopPropagation()
-        // Holding a member is the escape hatch from a marquee selection:
-        // long-press always selects that member alone.
         this.select(press.target, space)
         this.beginManipulation(press.target, 'move', undefined, {
           pointerId: press.pointerId,
@@ -454,10 +465,10 @@ export class GestureLayer {
       this.updateMarquee(event)
       return
     }
-    if (this.noteManipulation?.pointerId === event.pointerId) {
+    if (this.commentManipulation?.pointerId === event.pointerId) {
       event.preventDefault()
       event.stopPropagation()
-      this.applyNoteManipulation(event)
+      this.applyCommentManipulation(event)
       return
     }
     const press = this.press
@@ -480,7 +491,9 @@ export class GestureLayer {
         if (press.group) {
           event.preventDefault()
           event.stopPropagation()
-          this.beginGroupManipulation(press.group, event)
+          this.beginGroupManipulation(press.group, 'move', undefined, {
+            pointerId: press.pointerId, clientX: press.x, clientY: press.y,
+          })
           this.applyGroupManipulation(event)
         }
       }
@@ -497,10 +510,10 @@ export class GestureLayer {
       this.suppressClick = this.finishMarquee(event)
       return
     }
-    if (this.noteManipulation?.pointerId === event.pointerId) {
+    if (this.commentManipulation?.pointerId === event.pointerId) {
       event.preventDefault()
       event.stopPropagation()
-      this.finishNoteManipulation()
+      this.finishCommentManipulation()
       this.suppressClick = true
     } else if (this.groupManipulation?.pointerId === event.pointerId) {
       event.preventDefault()
@@ -518,7 +531,7 @@ export class GestureLayer {
 
   private pointerCancel(event: PointerEvent): void {
     if (this.marquee?.pointerId === event.pointerId) this.cancelMarquee()
-    if (this.noteManipulation?.pointerId === event.pointerId) this.noteManipulation = null
+    if (this.commentManipulation?.pointerId === event.pointerId) this.commentManipulation = null
     if (this.groupManipulation?.pointerId === event.pointerId) this.groupManipulation = null
     if (this.manipulation?.pointerId === event.pointerId) this.manipulation = null
     if (this.press?.pointerId === event.pointerId) this.clearPress()
@@ -534,14 +547,7 @@ export class GestureLayer {
     }
     const target = this.elementTarget(event.target)
     if (!target || target.closest('.kbn-gesture-overlay')) return
-    if (this.textTool) {
-      event.preventDefault()
-      event.stopPropagation()
-      const space = this.runtimeSpace()
-      if (space) this.placeTextBox(space, event.clientX, event.clientY)
-      return
-    }
-    if (this.isEmptySpace(target)) this.deselect()
+    if (this.isEmptySpace(target) && !this.pointInSelection(event)) this.deselect()
   }
 
   private doubleClick(event: MouseEvent): void {
@@ -559,7 +565,7 @@ export class GestureLayer {
       event.preventDefault()
       event.stopPropagation()
       const space = this.runtimeSpace()
-      if (space) this.placeNote(space, event.clientX, event.clientY)
+      if (space) this.placeComment(space, event.clientX, event.clientY)
     }
   }
 
@@ -569,7 +575,7 @@ export class GestureLayer {
     if (typeof force !== 'number' || force < WEBKIT_FORCE_AT_FORCE_MOUSE_DOWN) return
     const target = this.elementTarget(event.target)
     if (!target || this.isEditableTarget(target) || target.closest('.kbn-gesture-overlay')) return
-    if (this.textTool || this.isStructural(target) || this.isEmptySpace(target)) return
+    if (this.isStructural(target) || this.isEmptySpace(target)) return
     const space = this.runtimeSpace()
     if (!space) return
     this.clearPress()
@@ -595,13 +601,6 @@ export class GestureLayer {
       this.updateChrome()
       return
     }
-    if (key === 't') {
-      event.preventDefault()
-      event.stopPropagation()
-      this.textTool = !this.textTool
-      this.updateChrome()
-      return
-    }
     if (event.key !== 'Escape') return
     if (this.editing) {
       event.preventDefault()
@@ -609,7 +608,6 @@ export class GestureLayer {
       this.editing.finish()
       return
     }
-    this.textTool = false
     this.deselect()
     this.updateChrome()
   }
@@ -621,7 +619,7 @@ export class GestureLayer {
 
   private isEditableTarget(target: EventTarget | null): boolean {
     const element = this.elementTarget(target)
-    return Boolean(element?.matches('input,textarea,select,[contenteditable="true"],.kbn-gesture-note-input,.kbn-gesture-textbox') || element?.closest('input,textarea,select,[contenteditable="true"],.kbn-gesture-note-input,.kbn-gesture-textbox'))
+    return Boolean(element?.matches('input,textarea,select,[contenteditable="true"],.kbn-gesture-comment-input') || element?.closest('input,textarea,select,[contenteditable="true"],.kbn-gesture-comment-input'))
   }
 
   private beginManipulation(
@@ -779,8 +777,7 @@ export class GestureLayer {
       handle.type = 'button'
       handle.className = `kbn-gesture-handle kbn-gesture-handle-${direction}`
       handle.dataset.gestureHandle = direction
-      handle.setAttribute('aria-label', `Resize group ${direction} (not available)`)
-      handle.disabled = true
+      handle.setAttribute('aria-label', `Resize group ${direction}`)
       boxEl.append(handle)
       handles.push(handle)
     }
@@ -789,22 +786,45 @@ export class GestureLayer {
     this.renderSelection()
   }
 
-  private groupContaining(target: HTMLElement): GroupSelection | undefined {
-    if (!this.selection || !('targets' in this.selection)) return undefined
-    return this.selection.targets.some((member) => member === target || member.contains(target))
-      ? this.selection
+  /** The group selection whose outline covers this pointer, if any. */
+  private groupUnderPointer(event: { clientX: number; clientY: number }): GroupSelection | undefined {
+    const selection = this.selection
+    if (!selection || 'target' in selection) return undefined
+    return pointInRect(event.clientX, event.clientY, rectLike(selection.boxEl.getBoundingClientRect()))
+      ? selection
       : undefined
   }
 
-  private beginGroupManipulation(group: GroupSelection, event: { pointerId: number; clientX: number; clientY: number }): void {
+  /** Clicks inside any selection outline keep it; only outside clicks drop it. */
+  private pointInSelection(event: { clientX: number; clientY: number }): boolean {
+    const selection = this.selection
+    if (!selection) return false
+    return pointInRect(event.clientX, event.clientY, rectLike(selection.boxEl.getBoundingClientRect()))
+  }
+
+  private beginGroupManipulation(
+    group: GroupSelection,
+    mode: 'move' | 'resize',
+    direction: string | undefined,
+    event: { pointerId: number; clientX: number; clientY: number },
+  ): void {
     this.manipulation = null
+    const before = boundingBox(group.targets, group.space, this.scrollX(), this.scrollY())
     this.groupManipulation = {
       targets: group.targets,
+      mode,
+      direction,
       pointerId: event.pointerId,
       x: event.clientX,
       y: event.clientY,
       space: group.space,
-      transforms: new Map(group.targets.map((target) => [target, target.style.transform])),
+      restore: new Map(group.targets.map((target) => [target, memberStyle(target)])),
+      boxes: new Map(group.targets.map((target) => [
+        target,
+        boxInSpace(target.getBoundingClientRect(), group.space, this.scrollX(), this.scrollY()),
+      ])),
+      before,
+      after: before,
       fingerprints: group.targets.map((target) => this.captureOriginal(target, group.space).fingerprint),
       delta: { x: 0, y: 0 },
     }
@@ -814,12 +834,32 @@ export class GestureLayer {
     const move = this.groupManipulation
     if (!move || move.pointerId !== event.pointerId) return
     const factor = move.space.kind === 'slide' ? move.space.scale : 1
-    move.delta = {
-      x: (event.clientX - move.x) / factor,
-      y: (event.clientY - move.y) / factor,
-    }
-    for (const target of move.targets) {
-      target.style.transform = [move.transforms.get(target), `translate(${move.delta.x}px, ${move.delta.y}px)`].filter(Boolean).join(' ')
+    const dx = (event.clientX - move.x) / factor
+    const dy = (event.clientY - move.y) / factor
+    if (move.mode === 'move') {
+      move.delta = { x: dx, y: dy }
+      move.after = { ...move.before, x: move.before.x + dx, y: move.before.y + dy }
+      for (const target of move.targets) {
+        const restore = move.restore.get(target)?.transform
+        target.style.transform = [restore, `translate(${dx}px, ${dy}px)`].filter(Boolean).join(' ')
+      }
+    } else {
+      move.after = resizedBox(move.before, move.direction ?? '', dx, dy)
+      const scaleX = move.before.width > 0 ? move.after.width / move.before.width : 1
+      const scaleY = move.before.height > 0 ? move.after.height / move.before.height : 1
+      // Members keep their place within the group: the box scales, and each
+      // member's offset and size scale with it.
+      for (const target of move.targets) {
+        const box = move.boxes.get(target)
+        const restore = move.restore.get(target)
+        if (!box || !restore) continue
+        const x = move.after.x + (box.x - move.before.x) * scaleX
+        const y = move.after.y + (box.y - move.before.y) * scaleY
+        target.style.transform = [restore.transform, `translate(${x - box.x}px, ${y - box.y}px)`].filter(Boolean).join(' ')
+        target.style.width = `${Math.max(MIN_SIZE, box.width * scaleX)}px`
+        target.style.height = `${Math.max(MIN_SIZE, box.height * scaleY)}px`
+        target.style.maxWidth = 'none'
+      }
     }
     this.renderSelection()
   }
@@ -827,19 +867,35 @@ export class GestureLayer {
   private finishGroupManipulation(): void {
     const move = this.groupManipulation
     this.groupManipulation = null
-    if (!move || (Math.abs(move.delta.x) <= 2 && Math.abs(move.delta.y) <= 2)) return
+    if (!move) return
+    if (move.mode === 'move') {
+      if (Math.abs(move.delta.x) <= 2 && Math.abs(move.delta.y) <= 2) return
+      this.pushRecord({
+        id: this.id(),
+        kind: 'group',
+        location: this.location(move.space),
+        members: move.fingerprints,
+        delta: move.delta,
+      })
+      return
+    }
+    const before = roundBox(move.before)
+    const after = roundBox(boundingBox(move.targets, move.space, this.scrollX(), this.scrollY()))
+    if (Math.abs(after.width - before.width) <= 2 && Math.abs(after.height - before.height) <= 2
+      && Math.abs(after.x - before.x) <= 2 && Math.abs(after.y - before.y) <= 2) return
     this.pushRecord({
       id: this.id(),
       kind: 'group',
       location: this.location(move.space),
       members: move.fingerprints,
-      delta: move.delta,
+      beforeBox: before,
+      afterBox: after,
     })
   }
 
-  private beginNoteManipulation(marker: HTMLElement, record: GestureRecord, space: RuntimeSpace, event: PointerEvent): void {
+  private beginCommentManipulation(marker: HTMLElement, record: GestureRecord, space: RuntimeSpace, event: PointerEvent): void {
     if (!record.point) return
-    this.noteManipulation = {
+    this.commentManipulation = {
       marker,
       recordId: record.id,
       pointerId: event.pointerId,
@@ -851,8 +907,8 @@ export class GestureLayer {
     }
   }
 
-  private applyNoteManipulation(event: PointerEvent): void {
-    const move = this.noteManipulation
+  private applyCommentManipulation(event: PointerEvent): void {
+    const move = this.commentManipulation
     if (!move || move.pointerId !== event.pointerId) return
     const factor = move.space.kind === 'slide' ? move.space.scale : 1
     move.point = roundPoint({
@@ -863,9 +919,9 @@ export class GestureLayer {
     move.marker.style.top = `${move.point.y}px`
   }
 
-  private finishNoteManipulation(): void {
-    const move = this.noteManipulation
-    this.noteManipulation = null
+  private finishCommentManipulation(): void {
+    const move = this.commentManipulation
+    this.commentManipulation = null
     if (!move) return
     if (Math.abs(move.point.x - move.before.x) <= 2 && Math.abs(move.point.y - move.before.y) <= 2) {
       move.marker.style.left = `${move.before.x}px`
@@ -966,21 +1022,21 @@ export class GestureLayer {
     }
   }
 
-  private placeNote(space: RuntimeSpace, clientX: number, clientY: number): void {
+  private placeComment(space: RuntimeSpace, clientX: number, clientY: number): void {
     const point = pointInSpace(clientX, clientY, space, this.scrollX(), this.scrollY())
     const overlay = this.ensureOverlay(space)
     const marker = this.doc?.createElement('div')
     if (!marker) return
     const id = this.id()
-    marker.className = 'kbn-gesture-note'
+    marker.className = 'kbn-gesture-comment'
     marker.dataset.gestureId = id
     marker.style.left = `${point.x}px`
     marker.style.top = `${point.y}px`
     const input = this.doc?.createElement('input')
     if (!input) return
     input.type = 'text'
-    input.placeholder = 'Note…'
-    input.className = 'kbn-gesture-note-input'
+    input.placeholder = 'Comment…'
+    input.className = 'kbn-gesture-comment-input'
     marker.append(input)
     overlay.append(marker)
     this.finishInlineInput(input, () => {
@@ -988,9 +1044,9 @@ export class GestureLayer {
       if (text) {
         this.pushRecord({
           id,
-          kind: 'note',
+          kind: 'comment',
           location: this.location(space),
-          noteText: text,
+          commentText: text,
           point: roundPoint(point),
           coalesceKey: id,
         })
@@ -1001,38 +1057,7 @@ export class GestureLayer {
     input.focus()
   }
 
-  private placeTextBox(space: RuntimeSpace, clientX: number, clientY: number): void {
-    this.textTool = false
-    const point = pointInSpace(clientX, clientY, space, this.scrollX(), this.scrollY())
-    const overlay = this.ensureOverlay(space)
-    const input = this.doc?.createElement('input')
-    if (!input) return
-    input.type = 'text'
-    input.placeholder = 'Text…'
-    input.className = 'kbn-gesture-textbox'
-    input.style.left = `${point.x}px`
-    input.style.top = `${point.y}px`
-    overlay.append(input)
-    this.finishInlineInput(input, () => {
-      const text = input.value.trim()
-      const afterBox = roundBox(boxInSpace(input.getBoundingClientRect(), space, this.scrollX(), this.scrollY()))
-      input.remove()
-      if (text) {
-        this.pushRecord({
-          id: this.id(),
-          kind: 'new-text',
-          location: this.location(space),
-          afterText: text,
-          afterBox,
-        })
-      }
-      this.updateChrome()
-    }, true)
-    input.focus()
-    this.updateChrome()
-  }
-
-  private finishInlineInput(input: HTMLInputElement, finish: () => void, enterCommits = false): void {
+  private finishInlineInput(input: HTMLInputElement, finish: () => void): void {
     let closed = false
     const done = (): void => {
       if (closed) return
@@ -1048,7 +1073,7 @@ export class GestureLayer {
         input.removeEventListener('blur', done)
         input.removeEventListener('keydown', onKeyDown)
         input.remove()
-      } else if (event.key === 'Enter' && enterCommits) {
+      } else if (event.key === 'Enter') {
         event.preventDefault()
         done()
       }
@@ -1078,7 +1103,7 @@ export class GestureLayer {
   private cancelInteractions(): void {
     this.clearPress()
     this.cancelMarquee()
-    this.noteManipulation = null
+    this.commentManipulation = null
     this.manipulation = null
     this.groupManipulation = null
     if (this.editing) {
@@ -1411,6 +1436,36 @@ function boundingBox(targets: HTMLElement[], space: RuntimeSpace, scrollX: numbe
   return roundBox({ x: left, y: top, width: right - left, height: bottom - top })
 }
 
+function memberStyle(target: HTMLElement): MemberStyle {
+  return {
+    transform: target.style.transform,
+    position: target.style.position,
+    width: target.style.width,
+    height: target.style.height,
+    maxWidth: target.style.maxWidth,
+  }
+}
+
+function rectLike(rect: DOMRect): RectLike {
+  return { left: rect.left, top: rect.top, width: rect.width, height: rect.height }
+}
+
+/** Grow the group box from the dragged handle, keeping the opposite edge put. */
+function resizedBox(before: GestureBox, direction: string, dx: number, dy: number): GestureBox {
+  const west = direction.includes('w')
+  const north = direction.includes('n')
+  const east = direction.includes('e')
+  const south = direction.includes('s')
+  const width = Math.max(MIN_SIZE, before.width + (west ? -dx : east ? dx : 0))
+  const height = Math.max(MIN_SIZE, before.height + (north ? -dy : south ? dy : 0))
+  return {
+    x: west ? before.x + before.width - width : before.x,
+    y: north ? before.y + before.height - height : before.y,
+    width,
+    height,
+  }
+}
+
 function roundPoint(point: { x: number; y: number }): { x: number; y: number } {
   return { x: Math.round(point.x * 10) / 10, y: Math.round(point.y * 10) / 10 }
 }
@@ -1431,9 +1486,10 @@ function shortRecord(record: GestureRecord): string {
     case 'move': return `move ${record.fingerprint ?? 'element'}  ${miniBox(record.beforeBox)} → ${miniBox(record.afterBox)}`
     case 'resize': return `resize ${record.fingerprint ?? 'element'}  ${miniBox(record.beforeBox)} → ${miniBox(record.afterBox)}`
     case 'text': return `text ${record.fingerprint ?? 'element'}: “${preview(record.beforeText)}” → “${preview(record.afterText)}”`
-    case 'note': return `note @ (${record.point?.x ?? '?'},${record.point?.y ?? '?'}): “${preview(record.noteText)}”`
-    case 'new-text': return `new text box  ${miniBox(record.afterBox)}: “${preview(record.afterText)}”`
-    case 'group': return `move group [${(record.members ?? []).join(', ')}] by ${signedMini(record.delta?.x)},${signedMini(record.delta?.y)}`
+    case 'comment': return `comment @ (${record.point?.x ?? '?'},${record.point?.y ?? '?'}): “${preview(record.commentText)}”`
+    case 'group': return record.delta
+      ? `move group [${(record.members ?? []).join(', ')}] by ${signedMini(record.delta.x)},${signedMini(record.delta.y)}`
+      : `resize group [${(record.members ?? []).join(', ')}]  ${miniBox(record.beforeBox)} → ${miniBox(record.afterBox)}`
   }
 }
 
