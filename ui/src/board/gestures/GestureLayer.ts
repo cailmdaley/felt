@@ -11,7 +11,7 @@ import {
   type GestureBox,
   type RectLike,
 } from './coordinates.js'
-import { planPress } from './press.js'
+import { CONTAINER_COVERAGE, pickTarget, planPress, type HitOutcome } from './policy.js'
 import {
   coalesceGestures,
   serializeGestures,
@@ -19,11 +19,11 @@ import {
   type GestureRecord,
 } from './serializer.js'
 
-const LONG_PRESS_MS = 300
 const MOVE_TOLERANCE = 5
+/** Things the deck drives itself — gestures never grab them. */
+const INTERACTIVE_SELECTOR = 'input,textarea,select,button,a,summary,details,video,audio,[contenteditable="true"]'
 const TOGGLE_HOTKEY = 'g'
 const BATCH_HOTKEY = ']'
-export const WEBKIT_FORCE_AT_FORCE_MOUSE_DOWN = 1
 const POLL_MS = 3_000
 const MIN_SIZE = 18
 
@@ -53,7 +53,6 @@ type RevealApi = {
 }
 
 type RuntimeSpace = CoordinateSpace & { root: HTMLElement; section: HTMLElement | null }
-type WebKitForceEvent = MouseEvent & { webkitForce?: number }
 
 export interface GestureLayerOptions {
   shuttleBase: string
@@ -129,19 +128,6 @@ interface MemberStyle {
   maxWidth: string
 }
 
-interface Press {
-  /** Null when the press began on empty space inside a group's outline: there
-   * is nothing to long-press into a single selection, only a group to drag. */
-  target: HTMLElement | null
-  pointerId: number
-  x: number
-  y: number
-  timer: number
-  active: boolean
-  space: RuntimeSpace
-  group?: GroupSelection
-}
-
 interface Manipulation {
   target: HTMLElement
   mode: 'move' | 'resize'
@@ -191,7 +177,6 @@ export class GestureLayer {
   private doc: Document | null = null
   private overlay: HTMLElement | null = null
   private selection: Selection | GroupSelection | null = null
-  private press: Press | null = null
   private marquee: Marquee | null = null
   private commentManipulation: CommentManipulation | null = null
   private manipulation: Manipulation | null = null
@@ -214,7 +199,6 @@ export class GestureLayer {
   private readonly onClick = (event: MouseEvent): void => this.click(event)
   private readonly onDoubleClick = (event: MouseEvent): void => this.doubleClick(event)
   private readonly onKeyDown = (event: KeyboardEvent): void => this.keyDown(event)
-  private readonly onForce = (event: Event): void => this.force(event)
   private readonly onParentKeyDown = (event: KeyboardEvent): void => {
     if (this.parentOwnsFocus()) this.keyDown(event)
   }
@@ -254,8 +238,8 @@ export class GestureLayer {
     toggle.className = 'kbn-gesture-toggle'
     toggle.textContent = 'gestures'
     toggle.setAttribute('aria-pressed', 'false')
-    toggle.title = 'G: gestures on/off · long-press an element to pick it up · '
-      + 'drag to marquee-select a group · double-click empty space to leave a comment · ]: batch'
+    toggle.title = 'G: gestures on/off · while on, drag an element to move it, its handles to resize · '
+      + 'drag the background to select a group · double-click the background to leave a comment · ]: batch'
     toggle.addEventListener('click', (event) => {
       event.stopPropagation()
       this.setEnabled(!this.enabled)
@@ -322,8 +306,6 @@ export class GestureLayer {
       doc.addEventListener('click', this.onClick, true)
       doc.addEventListener('dblclick', this.onDoubleClick, true)
       doc.addEventListener('keydown', this.onKeyDown, true)
-      doc.addEventListener('webkitmouseforcewillbegin', this.onForce, true)
-      doc.addEventListener('webkitmouseforcechanged', this.onForce, true)
     } catch {
       this.doc = null
     }
@@ -339,8 +321,6 @@ export class GestureLayer {
     doc.removeEventListener('click', this.onClick, true)
     doc.removeEventListener('dblclick', this.onDoubleClick, true)
     doc.removeEventListener('keydown', this.onKeyDown, true)
-    doc.removeEventListener('webkitmouseforcewillbegin', this.onForce, true)
-    doc.removeEventListener('webkitmouseforcechanged', this.onForce, true)
     this.doc = null
   }
 
@@ -413,47 +393,31 @@ export class GestureLayer {
     const space = this.runtimeSpace()
     if (!space) return
 
+    const group = this.groupUnderPointer(event)
+    const single = this.selection && 'target' in this.selection ? this.selection : null
+    const hit = this.hitTest(event, space)
+    const hitElement = hit.element
     const plan = planPress({
-      insideGroupBox: Boolean(this.groupUnderPointer(event)),
-      onEmptySpace: this.isEmptySpace(target),
-      onStructural: this.isStructural(target),
+      hit: hit.outcome,
+      insideGroupBox: Boolean(group),
+      insideSelectionBox: Boolean(single) && this.pointInSelection(event),
+      onSelection: Boolean(single && hitElement && (hitElement === single.target || single.target.contains(hitElement))),
     })
-    if (plan === 'none') return
-    if (plan === 'marquee') {
-      this.beginMarquee(space, event)
+    if (plan === 'none' || plan === 'marquee') {
+      if (plan === 'marquee') this.beginMarquee(space, event)
       return
     }
 
-    // A group's outline is solid to the pointer: pressing anywhere inside it,
-    // members and the gaps between them alike, drags the whole selection. A
-    // long-press is still the escape hatch — it picks one element out of the
-    // group, exactly as it does anywhere else on the slide.
-    const group = plan === 'group' || plan === 'group-or-member' ? this.groupUnderPointer(event) : undefined
-    const pickable = plan === 'element' || plan === 'group-or-member' ? target : null
-
-    this.clearPress()
-    const press: Press = {
-      target: pickable,
-      pointerId: event.pointerId,
-      x: event.clientX,
-      y: event.clientY,
-      space: group?.space ?? space,
-      group,
-      active: false,
-      timer: window.setTimeout(() => {
-        if (this.press !== press || !this.enabled || press.active || !press.target) return
-        press.active = true
-        event.preventDefault()
-        event.stopPropagation()
-        this.select(press.target, press.space)
-        this.beginManipulation(press.target, 'move', undefined, {
-          pointerId: press.pointerId,
-          clientX: press.x,
-          clientY: press.y,
-        })
-      }, LONG_PRESS_MS),
+    event.preventDefault()
+    event.stopPropagation()
+    if (plan === 'group' && group) {
+      this.beginGroupManipulation(group, 'move', undefined, event)
+      return
     }
-    this.press = press
+    const moving = plan === 'selection' ? single?.target ?? hitElement : hitElement
+    if (!moving) return
+    this.select(moving, space)
+    this.beginManipulation(moving, 'move', undefined, event)
   }
 
   private pointerMove(event: PointerEvent): void {
@@ -467,38 +431,17 @@ export class GestureLayer {
       this.applyCommentManipulation(event)
       return
     }
-    const press = this.press
-    if (!press) {
-      if (this.groupManipulation?.pointerId === event.pointerId) {
-        event.preventDefault()
-        event.stopPropagation()
-        this.applyGroupManipulation(event)
-      } else if (this.manipulation?.pointerId === event.pointerId) {
-        event.preventDefault()
-        event.stopPropagation()
-        this.applyManipulation(event)
-      }
+    if (this.groupManipulation?.pointerId === event.pointerId) {
+      event.preventDefault()
+      event.stopPropagation()
+      this.applyGroupManipulation(event)
       return
     }
-    if (press.pointerId !== event.pointerId) return
-    if (!press.active) {
-      if (Math.hypot(event.clientX - press.x, event.clientY - press.y) >= MOVE_TOLERANCE) {
-        this.clearPress()
-        if (press.group) {
-          event.preventDefault()
-          event.stopPropagation()
-          this.beginGroupManipulation(press.group, 'move', undefined, {
-            pointerId: press.pointerId, clientX: press.x, clientY: press.y,
-          })
-          this.applyGroupManipulation(event)
-        }
-      }
-      return
+    if (this.manipulation?.pointerId === event.pointerId) {
+      event.preventDefault()
+      event.stopPropagation()
+      this.applyManipulation(event)
     }
-    if (!this.manipulation) return
-    event.preventDefault()
-    event.stopPropagation()
-    this.applyManipulation(event)
   }
 
   private pointerUp(event: PointerEvent): void {
@@ -522,7 +465,6 @@ export class GestureLayer {
       this.finishManipulation()
       this.suppressClick = true
     }
-    if (this.press?.pointerId === event.pointerId) this.clearPress()
   }
 
   private pointerCancel(event: PointerEvent): void {
@@ -530,7 +472,6 @@ export class GestureLayer {
     if (this.commentManipulation?.pointerId === event.pointerId) this.commentManipulation = null
     if (this.groupManipulation?.pointerId === event.pointerId) this.groupManipulation = null
     if (this.manipulation?.pointerId === event.pointerId) this.manipulation = null
-    if (this.press?.pointerId === event.pointerId) this.clearPress()
   }
 
   private click(event: MouseEvent): void {
@@ -543,41 +484,33 @@ export class GestureLayer {
     }
     const target = this.elementTarget(event.target)
     if (!target || target.closest('.kbn-gesture-overlay')) return
-    if (this.isEmptySpace(target) && !this.pointInSelection(event)) this.deselect()
+    const space = this.runtimeSpace()
+    if (!space) return
+    // Clicking the background drops the selection; clicking inside it keeps it.
+    if (this.hitTest(event, space).outcome.kind !== 'empty') return
+    if (!this.pointInSelection(event)) this.deselect()
   }
 
   private doubleClick(event: MouseEvent): void {
     if (!this.enabled) return
     const target = this.elementTarget(event.target)
     if (!target || target.closest('.kbn-gesture-overlay')) return
-    const textTarget = this.textTarget(target)
-    if (textTarget) {
-      event.preventDefault()
-      event.stopPropagation()
-      this.beginTextEdit(textTarget)
-      return
-    }
-    if (this.isEmptySpace(target)) {
-      event.preventDefault()
-      event.stopPropagation()
-      const space = this.runtimeSpace()
-      if (space) this.placeComment(space, event.clientX, event.clientY)
-    }
-  }
-
-  private force(event: Event): void {
-    if (!this.enabled) return
-    const force = (event as WebKitForceEvent).webkitForce
-    if (typeof force !== 'number' || force < WEBKIT_FORCE_AT_FORCE_MOUSE_DOWN) return
-    const target = this.elementTarget(event.target)
-    if (!target || this.isEditableTarget(target) || target.closest('.kbn-gesture-overlay')) return
-    if (this.isStructural(target) || this.isEmptySpace(target)) return
     const space = this.runtimeSpace()
     if (!space) return
-    this.clearPress()
-    this.select(target, space)
+    const hit = this.hitTest(event, space)
+    if (hit.element) {
+      const textTarget = this.textTarget(hit.element)
+      if (textTarget) {
+        event.preventDefault()
+        event.stopPropagation()
+        this.beginTextEdit(textTarget)
+      }
+      return
+    }
+    if (hit.outcome.kind !== 'empty') return
     event.preventDefault()
     event.stopPropagation()
+    this.placeComment(space, event.clientX, event.clientY)
   }
 
   private keyDown(event: KeyboardEvent): void {
@@ -752,12 +685,14 @@ export class GestureLayer {
 
   private selectableElements(space: RuntimeSpace): HTMLElement[] {
     const leafTags = new Set(['img', 'video', 'canvas', 'svg', 'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'figcaption', 'blockquote', 'td', 'th', 'caption'])
+    const limit = area(space.root.getBoundingClientRect()) * CONTAINER_COVERAGE
     return [...space.root.querySelectorAll<HTMLElement>('*')].filter((element) => {
       if (element.closest('.kbn-gesture-overlay') || this.isStructural(element)) return false
-      if (element.matches('script,style,input,textarea,button,a')) return false
+      if (element.matches(`script,style,${INTERACTIVE_SELECTOR}`)) return false
       if (!leafTags.has(element.tagName.toLowerCase()) && element.children.length > 0) return false
-      const rect = element.getBoundingClientRect()
-      return rect.width > 0 && rect.height > 0
+      const box = area(element.getBoundingClientRect())
+      // A marquee is for content, not for the container the content sits in.
+      return box > 0 && box < limit
     })
   }
 
@@ -1097,7 +1032,6 @@ export class GestureLayer {
   }
 
   private cancelInteractions(): void {
-    this.clearPress()
     this.cancelMarquee()
     this.commentManipulation = null
     this.manipulation = null
@@ -1106,11 +1040,6 @@ export class GestureLayer {
       this.editing.finish()
       this.editing = null
     }
-  }
-
-  private clearPress(): void {
-    if (this.press) window.clearTimeout(this.press.timer)
-    this.press = null
   }
 
   private pushRecord(record: GestureRecord): void {
@@ -1362,15 +1291,33 @@ export class GestureLayer {
     return null
   }
 
-  private isStructural(element: HTMLElement): boolean {
-    return element === this.doc?.documentElement || element === this.doc?.body || element.matches('.reveal,.slides')
+  /** What is under the pointer, decided by `pickTarget` so the rule lives in
+   * one tested place rather than in a pile of DOM conditions. */
+  private hitTest(
+    event: { clientX: number; clientY: number },
+    space: RuntimeSpace,
+  ): { outcome: HitOutcome; element: HTMLElement | null } {
+    const doc = this.doc
+    const chain = doc?.elementsFromPoint?.(event.clientX, event.clientY) ?? []
+    const elements = [...chain].filter((node): node is HTMLElement =>
+      node.nodeType === 1 && !(node as HTMLElement).closest('.kbn-gesture-overlay'))
+    const outcome = pickTarget(
+      elements.map((element) => this.candidate(element)),
+      area(space.root.getBoundingClientRect()),
+    )
+    return { outcome, element: outcome.kind === 'element' ? elements[outcome.index] ?? null : null }
   }
 
-  private isEmptySpace(element: HTMLElement): boolean {
-    if (element === this.doc?.documentElement || element === this.doc?.body) return true
-    if (element.matches('section,.reveal,.slides')) return true
-    if (element.children.length === 0 && !(element.textContent ?? '').trim() && !element.matches('img,video,canvas,svg,input,button,a')) return true
-    return false
+  private candidate(element: HTMLElement): { area: number; structural: boolean; interactive: boolean } {
+    return {
+      area: area(element.getBoundingClientRect()),
+      structural: this.isStructural(element),
+      interactive: element.matches(INTERACTIVE_SELECTOR),
+    }
+  }
+
+  private isStructural(element: HTMLElement): boolean {
+    return element === this.doc?.documentElement || element === this.doc?.body || element.matches('.reveal,.slides')
   }
 
   private textTarget(element: HTMLElement): HTMLElement | null {
@@ -1413,6 +1360,10 @@ export class GestureLayer {
   private id(): string {
     return `gesture-${this.nextId++}`
   }
+}
+
+function area(rect: { width: number; height: number }): number {
+  return Math.max(0, rect.width) * Math.max(0, rect.height)
 }
 
 function normalizedBox(x1: number, y1: number, x2: number, y2: number): GestureBox {
