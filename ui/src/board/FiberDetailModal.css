@@ -1249,3 +1249,343 @@
 .kbn-detail-sent-file-open .kbn-detail-sent-when {
   color: #8a7a4a;
 }
+
+/* ── The head row: Actions toggle · Move ▾ ────────────────────────────────
+   The toggle keeps its own full-width tap area; Move sits beside it as a
+   small hard-edged plate. On a phone this row IS the sheet's bottom bar
+   (see the sheet block below), which is why Move lives here rather than
+   inside the cluster the toggle opens. */
+.kbn-detail-controls-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-right: 14px;
+}
+.kbn-detail-controls-head > .kbn-detail-controls-toggle {
+  flex: 1;
+  min-width: 0;
+}
+.kbn-detail-move-btn {
+  flex: 0 0 auto;
+  border: 1px solid rgba(27, 22, 17, 0.20);
+  border-radius: 1px;
+  background: rgba(255, 251, 237, 0.72);
+  padding: 3px 10px 2px;
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: calc(10px * var(--kbn-type-scale, 1));
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #4A443C;
+  cursor: pointer;
+}
+.kbn-detail-move-btn:hover {
+  border-color: rgba(154, 123, 53, 0.5);
+  color: #1B1611;
+  background: rgba(255, 251, 237, 0.98);
+}
+.kbn-detail-move-btn:focus-visible {
+  outline: 2px solid rgba(154, 123, 53, 0.6);
+  outline-offset: 1px;
+}
+
+/* ── The move menu ────────────────────────────────────────────────────────
+   A document.body child, not a panel descendant: the panel is a size
+   container, which clips even fixed-position children. Desktop is a
+   popover placed beside its button; on a phone the same list rises from
+   the bottom edge, where the thumb is. */
+.kbn-move-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 10500;
+  background: transparent;
+}
+.kbn-move-menu {
+  position: fixed;
+  z-index: 10501;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  min-width: 232px;
+  max-width: min(340px, calc(100vw - 16px));
+  max-height: min(70vh, 520px);
+  overflow-y: auto;
+  padding: 6px 0 7px;
+  background: #EDE2CE;
+  border: 1px solid rgba(27, 22, 17, 0.22);
+  border-radius: 2px;
+  font-family: var(--font-main, 'EB Garamond', serif);
+  color: #1B1611;
+  box-shadow:
+    0 1px 0 rgba(255, 251, 237, 0.6) inset,
+    0 16px 40px rgba(27, 22, 17, 0.26);
+}
+.kbn-move-heading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 14px 7px;
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: calc(9.5px * var(--kbn-type-scale, 1));
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #9A8F80;
+}
+.kbn-move-heading-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kbn-move-back {
+  flex: 0 0 auto;
+  border: none;
+  background: transparent;
+  padding: 0 4px;
+  font-size: calc(15px * var(--kbn-type-scale, 1));
+  line-height: 1;
+  color: #7A7368;
+  cursor: pointer;
+}
+.kbn-move-back:hover { color: #1B1611; }
+.kbn-move-list {
+  display: flex;
+  flex-direction: column;
+}
+.kbn-move-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  width: 100%;
+  border: none;
+  background: transparent;
+  padding: 7px 14px;
+  font-family: inherit;
+  font-size: calc(14.5px * var(--kbn-type-scale, 1));
+  line-height: 1.25;
+  color: #1B1611;
+  text-align: left;
+  cursor: pointer;
+}
+.kbn-move-item:hover,
+.kbn-move-item:focus-visible {
+  outline: none;
+  background: rgba(196, 147, 51, 0.14);
+}
+.kbn-move-item-label { font-weight: 600; }
+.kbn-move-item-hint {
+  font-size: calc(12px * var(--kbn-type-scale, 1));
+  color: #7A7368;
+  font-weight: 400;
+}
+.kbn-move-empty {
+  margin: 0;
+  padding: 4px 14px 8px;
+  font-size: calc(13.5px * var(--kbn-type-scale, 1));
+  color: #7A7368;
+}
+.kbn-move-search {
+  box-sizing: border-box;
+  margin: 0 14px 6px;
+  padding: 5px 8px;
+  border: 1px solid rgba(27, 22, 17, 0.18);
+  border-radius: 2px;
+  background: rgba(255, 251, 237, 0.75);
+  font-family: var(--font-main, 'EB Garamond', serif);
+  /* 16px so iOS does not zoom the page when this takes focus. */
+  font-size: 16px;
+  color: #1B1611;
+}
+.kbn-move-search:focus {
+  outline: none;
+  border-color: rgba(154, 123, 53, 0.55);
+}
+
+/* ── The sheet: the panel below 700px ─────────────────────────────────────
+   Not a smaller window — a different object. It fills the viewport, drops
+   its shadow and its rounded edge (there is nothing behind it to float
+   over), and re-reads its own parts: the header becomes a title bar, and
+   the Actions head row becomes the bottom bar, because a phone's controls
+   belong under the thumb rather than above the fold.
+
+   Note what is NOT here: any width or height. The sheet's geometry is
+   `inset`, and FiberDetailModal deliberately writes no inline geometry in
+   this mode — an inline `left` would outrank every rule below. */
+@media (max-width: 700px) {
+  .kbn-detail-overlay.kbn-detail-sheet {
+    inset: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px)
+           env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+    /* The window's `container-type: size` needs explicit dimensions, which a
+       sheet has none of; inline-size keeps the cluster's container queries
+       working while the height comes from `inset`. */
+    container-type: inline-size;
+  }
+
+  /* Title bar. The row stops being a drag handle, so it stops looking like
+     one, and the close grows to a real target. */
+  .kbn-detail-sheet .kbn-detail-header {
+    cursor: default;
+    touch-action: auto;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px 8px 16px;
+    border-bottom: 1px solid rgba(27, 22, 17, 0.14);
+    background: linear-gradient(rgba(255, 251, 237, 0.5), transparent);
+  }
+  .kbn-detail-sheet .kbn-detail-title {
+    font-size: calc(17px * var(--kbn-type-scale, 1));
+    /* Two lines of a long fiber name, then ellipsis — a title bar should not
+       push the page off the screen. */
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .kbn-detail-sheet .kbn-detail-close,
+  .kbn-detail-sheet .kbn-detail-refresh {
+    min-width: 44px;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: calc(20px * var(--kbn-type-scale, 1));
+  }
+  /* The status stamp is the one header ornament worth its width on a phone;
+     the id breadcrumb is not — it is already the sheet's aria-label. */
+  .kbn-detail-sheet .kbn-detail-id { display: none; }
+
+  /* The bottom bar: the controls cluster moves under the page. Ordering the
+     flex children is the whole mechanism — no second copy of the actions,
+     no sticky positioning, and the expanded cluster grows upward over the
+     page from the edge it is anchored to. */
+  .kbn-detail-sheet .kbn-detail-header { order: 0; }
+  .kbn-detail-sheet .kbn-detail-sent { order: 1; }
+  .kbn-detail-sheet .kbn-detail-page { order: 2; }
+  .kbn-detail-sheet .kbn-detail-controls {
+    order: 3;
+    border-bottom: none;
+    border-top: 1px solid rgba(27, 22, 17, 0.16);
+    background: linear-gradient(transparent, rgba(255, 251, 237, 0.45));
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  .kbn-detail-sheet .kbn-detail-controls-head {
+    padding-right: 10px;
+  }
+  .kbn-detail-sheet .kbn-detail-controls-toggle {
+    min-height: 44px;
+    align-items: center;
+    padding: 4px 12px 4px 16px;
+    font-size: calc(11px * var(--kbn-type-scale, 1));
+  }
+  .kbn-detail-sheet .kbn-detail-move-btn {
+    min-height: 40px;
+    padding: 0 14px;
+    font-size: calc(11.5px * var(--kbn-type-scale, 1));
+    border-color: rgba(154, 123, 53, 0.5);
+    color: #6B5526;
+    background: rgba(196, 147, 51, 0.12);
+  }
+  /* Expanded, the cluster takes the room it needs and scrolls; the cap is
+     dvh (not vh) so the browser chrome collapsing does not strand it. */
+  .kbn-detail-sheet .kbn-detail-controls-body {
+    max-height: 58dvh;
+    padding: 6px 16px 14px;
+  }
+  .kbn-detail-sheet .kbn-detail-actions-row {
+    gap: 8px;
+  }
+  /* Thumb-sized, and the verdicts stop being pushed to a right edge that no
+     longer exists on one wrapped column. */
+  .kbn-detail-sheet .kbn-detail-action-btn {
+    min-height: 44px;
+    flex: 1 1 auto;
+    padding: 6px 14px;
+    font-size: calc(15px * var(--kbn-type-scale, 1));
+  }
+  .kbn-detail-sheet .kbn-detail-actions-row .kbn-detail-action-tempered {
+    margin-left: 0;
+  }
+  .kbn-detail-sheet .kbn-detail-wait-btn {
+    min-height: 40px;
+    padding: 0 12px;
+    font-size: calc(11.5px * var(--kbn-type-scale, 1));
+  }
+  /* iOS zooms the page on focus for any field under 16px. Every one of them. */
+  .kbn-detail-sheet .kbn-detail-directive,
+  .kbn-detail-sheet input,
+  .kbn-detail-sheet select,
+  .kbn-detail-sheet textarea {
+    font-size: 16px;
+  }
+  /* The reader's tab strip scrolls sideways rather than wrapping into a
+     second row that eats the page. */
+  .kbn-detail-sheet .kbn-detail-tabstrip,
+  .kbn-fileview-window.kbn-detail-sheet .kbn-detail-tabstrip {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* The file viewer and the followed-reference panel are the same frame, so
+     they inherit every rule above. What is left is their own chrome: the bar
+     stops being a handle, and its ✕ becomes a real target. */
+  .kbn-fileview-window.kbn-detail-sheet .kbn-fileview-bar {
+    cursor: default;
+    touch-action: auto;
+    padding-left: 6px;
+  }
+  .kbn-fileview-window.kbn-detail-sheet .kbn-fileview-win-close {
+    min-width: 44px;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* The move menu rises from the bottom edge. Same list, different arrival. */
+  .kbn-move-scrim {
+    background: rgba(27, 22, 17, 0.34);
+  }
+  .kbn-move-menu.kbn-move-sheet {
+    top: auto;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    max-width: none;
+    max-height: 76dvh;
+    border-left: none;
+    border-right: none;
+    border-bottom: none;
+    border-radius: 6px 6px 0 0;
+    padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+    box-shadow: 0 -14px 40px rgba(27, 22, 17, 0.3);
+    animation: kbn-move-rise 180ms cubic-bezier(0.22, 0.7, 0.3, 1);
+  }
+  .kbn-move-sheet .kbn-move-heading { padding: 8px 18px 8px; }
+  .kbn-move-sheet .kbn-move-item {
+    min-height: 52px;
+    justify-content: center;
+    padding: 8px 18px;
+    font-size: calc(16.5px * var(--kbn-type-scale, 1));
+  }
+  .kbn-move-sheet .kbn-move-item + .kbn-move-item {
+    border-top: 1px solid rgba(27, 22, 17, 0.08);
+  }
+  .kbn-move-sheet .kbn-move-back { font-size: 20px; padding: 0 8px; }
+  .kbn-move-sheet .kbn-move-search { margin: 0 18px 8px; padding: 10px; }
+}
+
+@keyframes kbn-move-rise {
+  from { transform: translateY(16px); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .kbn-move-menu.kbn-move-sheet { animation: none; }
+}
+
+/* The aloft mark on a touch device: the same stamp, without the promise of a
+   terminal it cannot open. */
+.kbn-detail-aloft-static { cursor: default; }

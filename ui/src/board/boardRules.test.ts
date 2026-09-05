@@ -687,6 +687,7 @@ describe('renderPinnedSection — the launcher band never pages', () => {
     textContent = ''
     title = ''
     draggable = false
+    tabIndex = -1
 
     constructor(tagName: string) {
       this.tagName = tagName
@@ -711,6 +712,12 @@ describe('renderPinnedSection — the launcher band never pages', () => {
         this._className = [...set].join(' ')
       },
       contains: (name: string): boolean => this._className.split(' ').includes(name),
+      toggle: (name: string, force?: boolean): boolean => {
+        const on = force ?? !this.classList.contains(name)
+        if (on) this.classList.add(name)
+        else this.classList.remove(name)
+        return on
+      },
     }
 
     setAttribute(): void {}
@@ -742,6 +749,10 @@ describe('renderPinnedSection — the launcher band never pages', () => {
 
   const renderer = (): KanbanSurfaceRenderer => {
     vi.stubGlobal('document', { createElement: (tag: string) => new FakeEl(tag) })
+    // The surfaces ask the viewport two questions while building (mobile.ts:
+    // is this a phone-width layout, is the pointer a finger). There is no
+    // jsdom here, so answer both "no" — this suite is about the wide board.
+    vi.stubGlobal('window', { matchMedia: () => ({ matches: false }) })
     return new KanbanSurfaceRenderer({
       getDragSourceId: () => null,
       setDragSourceId: () => {},

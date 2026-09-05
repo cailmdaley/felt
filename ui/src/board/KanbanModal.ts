@@ -47,7 +47,9 @@ import type {
   KanbanResponse,
 } from './KanbanTypes.js'
 import { dispatchIneligibleReason, errorMessageFromResponse } from './KanbanModalShared.js'
-import { COLUMN_TITLES, KanbanSurfaceRenderer, SURFACE_TITLE, findCardById, findCardColumn, formatDue } from './KanbanSurfaces.js'
+import { COLUMN_TITLES, KanbanSurfaceRenderer, SURFACE_TITLE, boardCards, findCardById, findCardColumn, formatDue, unsettledDependents } from './KanbanSurfaces.js'
+import { moveDestinations, queueTargets } from './MoveDestinations.js'
+import type { MoveAction, MoveDestination, QueueTarget } from './MoveDestinations.js'
 import { parseCompositeFeed } from './KanbanComposite.js'
 import { buildKanbanResponseFromComposite, deriveCycleLens, restingCards } from './KanbanReadModel.js'
 import {
@@ -57,6 +59,7 @@ import {
 } from './KanbanRules.js'
 import type { QueueRewrite } from './KanbanRules.js'
 import { sameCivilDue } from './civilDay.js'
+import { isMobileViewport, onMobileChange } from './mobile.js'
 import { shouldRunVisiblePoll } from '../runtime/PageAttention'
 import {
   collectCards,
@@ -138,6 +141,9 @@ export class KanbanModal {
   private body: HTMLDivElement | null = null
   private liveEl: HTMLDivElement | null = null
   private bannerEl: HTMLDivElement | null = null
+  /** Unsubscribes the 700px-threshold watch installed in assembleChrome. */
+  private stopMobileWatch: (() => void) | null = null
+
   /** The view tab strip — persistent chrome, built once in assembleChrome. */
   private tabsEl: HTMLDivElement | null = null
   /**
@@ -266,6 +272,16 @@ export class KanbanModal {
       (card, target) => this.transition(card, target),
       // Status-pill double-click → focus the running worker's kitty tab.
       this.openWorkerAfterGesture,
+      // The move seam: the panel's "Move ▾" performs the board's own gestures
+      // rather than a second implementation of them.
+      {
+        moves: {
+          destinations: (card) => this.moveDestinationsFor(card),
+          queueTargets: (card) => this.moveQueueTargetsFor(card),
+          perform: (card, action) => this.performMove(card, action),
+          queueBehind: (card, tailId) => this.moveQueueBehind(card, tailId),
+        },
+      },
     )
     this.surfaces = new KanbanSurfaceRenderer({
       getDragSourceId: () => this.dragSourceId,
@@ -343,6 +359,8 @@ export class KanbanModal {
     this.activeView = null
     document.removeEventListener('keydown', this.handleDocumentKeyDown, true)
     window.removeEventListener('resize', this.handleResize)
+    this.stopMobileWatch?.()
+    this.stopMobileWatch = null
     if (this.resizeRaf !== null) {
       window.cancelAnimationFrame(this.resizeRaf)
       this.resizeRaf = null
@@ -425,6 +443,15 @@ export class KanbanModal {
     this.syncViewChrome()
 
     this.container.append(this.bannerEl, this.body, this.liveEl)
+
+    // Crossing 700px changes what the Desk IS, not just how it is painted: the
+    // Now triad becomes a pager with a folio strip, and the two bands grow fold
+    // affordances that only exist on a phone. Those are wired at build time, so
+    // the surfaces have to be rebuilt when the threshold is crossed — a resized
+    // window otherwise keeps desktop wiring under a mobile layout.
+    this.stopMobileWatch = onMobileChange(() => {
+      if (this.activeViewId === 'desk' && this.lastResponse) this.render(this.lastResponse)
+    })
   }
 
   // ── View switching ──────────────────────────────────────────────────────────
@@ -587,6 +614,12 @@ export class KanbanModal {
       const selected = tab.dataset.view === this.activeViewId
       tab.classList.toggle('kbn-viewtab-active', selected)
       tab.setAttribute('aria-selected', String(selected))
+      // On a phone the strip scrolls, so the tab you just chose can be off
+      // screen the moment it becomes current — a hotkey or a programmatic
+      // switchView both land there. Bring it back into the run.
+      if (selected && isMobileViewport()) {
+        tab.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' })
+      }
     }
   }
 
@@ -2425,6 +2458,81 @@ export class KanbanModal {
     const maxScrollLeft = this.body.scrollWidth - this.body.clientWidth
     this.body.classList.toggle('kbn-can-scroll-left', this.body.scrollLeft > 1)
     this.body.classList.toggle('kbn-can-scroll-right', this.body.scrollLeft < maxScrollLeft - 1)
+  }
+
+  // ── The Move menu's seam (MoveBroker) ──────────────────────────────────
+  //
+  // Drag-and-drop has no touch backend, so on a phone the desk's whole
+  // vocabulary — launch, rest, pin, queue — is unreachable. The detail
+  // panel's "Move ▾" says it in words instead. These four methods are the
+  // ONLY thing the panel is given: it never learns a column, a dependency
+  // graph or a wire protocol, and every item it performs lands in the same
+  // private gesture method the equivalent drop lands in. Nothing about the
+  // drag changes; this is a second door onto it.
+
+  /** Legal destinations for this card, ruled on where the board actually has
+   *  it (`findCardColumn`) rather than a local re-derivation. */
+  moveDestinationsFor(card: KanbanCard): MoveDestination[] {
+    return moveDestinations(card, findCardColumn(this.lastResponse, card.id))
+  }
+
+  /** Cards this one may be queued behind, from the same graph and the same
+   *  verdict the card-onto-card drop consults. */
+  moveQueueTargetsFor(card: KanbanCard): QueueTarget[] {
+    return queueTargets(card, boardCards(this.lastResponse), unsettledDependents(this.lastResponse))
+  }
+
+  /** Perform one non-queue destination. Each branch is the drop's own entry
+   *  point, so banners, optimism and reconciliation are inherited whole. */
+  performMove(card: KanbanCard, action: MoveAction): void {
+    switch (action.kind) {
+      case 'transition':
+        this.transition(card, action.target)
+        return
+      case 'surface':
+        this.setSurface(card, action.horizon)
+        return
+      case 'pin':
+        this.pinRole(card)
+        return
+      case 'unpin':
+        void this.unpinRole(card)
+        return
+      case 'unstack':
+        void this.unstack(card)
+        return
+      case 'queue':
+        // The picker owns this one — it needs a target before anything is
+        // written. `moveQueueBehind` is where it lands.
+        return
+    }
+  }
+
+  /** The chosen queue target, written as the same scalar edge the drop writes.
+   *  `tailId` is the chain's END, already resolved by `queueTargets`. */
+  moveQueueBehind(card: KanbanCard, tailId: string): void {
+    void this.stackBehind(card, tailId)
+  }
+
+  /**
+   * Off the strip: reshape a pinned role back to a one-shot so it can be
+   * planned again. The exact write the detail panel's kind segmented control
+   * makes — `reshape` rewrites the shape keys alone, leaving agent, host and
+   * project_dir where they are. The strip's only exit that is not a verdict,
+   * and the inverse of {@link commitPin}'s first call.
+   */
+  private async unpinRole(card: KanbanCard): Promise<void> {
+    try {
+      await this.postLifecycle({
+        action: 'reshape', kind: 'oneshot', fiber: card.id, origin: card.originId,
+      })
+      this.announce(`Unpinned “${card.name}”.`)
+    } catch (err: unknown) {
+      const msg = (err as { message?: string })?.message ?? String(err)
+      this.showBanner(`Couldn't unpin “${card.name}”: ${msg}`, 'error')
+      this.announce(`Unpin failed: ${msg}`)
+    }
+    await this.fetchAndRender()
   }
 
 }

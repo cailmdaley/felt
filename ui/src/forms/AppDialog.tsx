@@ -29,6 +29,88 @@ export function injectAppDialogStyles(): void {
       from { transform: translate(-50%, calc(-50% - 6px)); opacity: 0; }
       to   { transform: translate(-50%, -50%); opacity: 1; }
     }
+    /* GEOMETRY LIVES HERE, not in the inline style object beside it, for one
+       reason: an inline style cannot be answered by a media query, and below
+       700px this card stops being a centred sheet of paper and becomes the
+       whole screen. The paper — ground, border, shadow, type — stays inline;
+       only the shape a viewport can argue with is written as a rule. */
+    .app-dialog-card {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      /* 46rem holds four controls at a comfortable width without the yap's
+         measure running past a readable line. */
+      width: min(46rem, 92vw);
+      max-height: 85vh;
+      border-radius: 4px;
+      animation: app-dialog-card-in 160ms ease-out;
+    }
+    @media (max-width: 700px) {
+      .app-dialog-card {
+        top: 0;
+        left: 0;
+        transform: none;
+        width: 100%;
+        /* dvh, not vh: the mobile browser's collapsing chrome makes vh taller
+           than the screen, which puts the submit button under the fold at the
+           exact moment the keyboard is up. */
+        height: 100dvh;
+        max-height: 100dvh;
+        border: none;
+        border-radius: 0;
+        box-shadow: none;
+        animation: app-dialog-sheet-in 160ms ease-out;
+      }
+      /* Every field at 16px, because iOS zooms the page for anything smaller
+         and a zoomed page cannot be scrolled back. */
+      .app-dialog-card input,
+      .app-dialog-card select,
+      .app-dialog-card textarea {
+        font-size: 16px;
+      }
+      .app-dialog-card button {
+        min-height: 44px;
+      }
+      /* The footer belongs to the BOTTOM EDGE, two ways, because a form can
+         be shorter or taller than the screen and both must land right.
+         min-height plus margin-top:auto pushes it down when the content is
+         short (otherwise it floats mid-screen with a field of blank paper
+         under it); sticky pins it when the content scrolls, which is the
+         case that matters once the keyboard is up. */
+      .app-dialog-body > .capture-form {
+        min-height: 100%;
+      }
+      .app-dialog-body > * > .capture-foot {
+        margin-top: auto;
+        position: sticky;
+        bottom: -16px;
+        margin-left: -22px;
+        margin-right: -22px;
+        margin-bottom: -16px;
+        padding: 10px 22px calc(14px + env(safe-area-inset-bottom, 0px));
+        background: #EFEAE0;
+        border-top: 1px solid rgba(46, 42, 38, 0.10);
+      }
+      /* Esc and ⌘↵ are a keyboard's line, and a phone has neither key. */
+      .app-dialog-body > * > .capture-foot > .capture-foot-hint {
+        display: none;
+      }
+      .app-dialog-body > * > .capture-foot > .capture-buttons {
+        flex: 1;
+        gap: 10px;
+      }
+      .app-dialog-body > * > .capture-foot > .capture-buttons > .capture-btn {
+        flex: 1;
+      }
+    }
+    @keyframes app-dialog-sheet-in {
+      from { transform: translateY(10px); opacity: 0; }
+      to   { transform: none; opacity: 1; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .app-dialog-card { animation: none; }
+    }
   `
   document.head.appendChild(style)
 }
@@ -42,11 +124,8 @@ const appDialogOverlayStyles: React.CSSProperties = {
   animation: 'app-dialog-scrim-in 120ms ease-out',
 }
 
+/** The paper, and only the paper — see `.app-dialog-card` for the shape. */
 const appDialogContentStyles: React.CSSProperties = {
-  position: 'fixed',
-  top: '50%',
-  left: '50%',
-  transform: 'translate(-50%, -50%)',
   background: '#F4F0E8',
   backgroundImage:
     'linear-gradient(135deg, rgba(154, 123, 53, 0.025) 0%, transparent 60%),' +
@@ -54,20 +133,14 @@ const appDialogContentStyles: React.CSSProperties = {
   color: '#2E2A26',
   fontFamily: "var(--font-main, 'EB Garamond', serif)",
   border: '1px solid rgba(46, 42, 38, 0.22)',
-  borderRadius: '4px',
   boxShadow:
     '0 1px 0 rgba(255, 252, 245, 0.6) inset,' +
     '0 14px 36px rgba(46, 42, 38, 0.26),' +
     '0 2px 6px rgba(46, 42, 38, 0.12)',
-  // 46rem holds four controls at a comfortable width without the yap's measure
-  // running past a readable line.
-  width: 'min(46rem, 92vw)',
-  maxHeight: '85vh',
   display: 'flex',
   flexDirection: 'column',
   overflow: 'hidden',
   zIndex: 10001,
-  animation: 'app-dialog-card-in 160ms ease-out',
 }
 
 const headerStyles: React.CSSProperties = {
@@ -132,6 +205,7 @@ export function AppDialog({
       <Dialog.Portal>
         <Dialog.Overlay style={appDialogOverlayStyles} />
         <Dialog.Content
+          className="app-dialog-card"
           style={appDialogContentStyles}
           // Radix warns unless a Description is rendered or the attribute is
           // explicitly opted out of. A dialog whose own fields say what it does
@@ -193,7 +267,10 @@ export function AppDialog({
           )}
           {/* One scroll region; the child owns its own internal rhythm so the
               form's blocks are all direct siblings on one alignment grid. */}
-          <div style={{ padding: '15px 22px 16px', overflowY: 'auto', flex: '1 1 auto' }}>
+          <div
+            className="app-dialog-body"
+            style={{ padding: '15px 22px 16px', overflowY: 'auto', flex: '1 1 auto' }}
+          >
             {children}
           </div>
         </Dialog.Content>

@@ -1137,7 +1137,7 @@ export function injectStashFormStyles(): void {
     .stash-row-dispatch {
       grid-template-columns: minmax(0, 1.5fr) minmax(0, 0.8fr) minmax(0, 1.4fr);
     }
-    @media (max-width: 600px) {
+    @media (max-width: 700px) {
       .stash-row-2,
       .stash-row-3,
       .stash-row-dispatch,
@@ -1572,6 +1572,63 @@ export function injectStashFormStyles(): void {
       opacity: 0.5;
       cursor: not-allowed;
     }
+    /* ── The sheet: the form below 700px ──────────────────────────────────
+       LAST IN THE SHEET ON PURPOSE. Every rule here is a single class
+       answering another single class defined above it, so cascade order is
+       the only thing that decides — move this block up and the phone
+       silently gets the desktop's footer back. */
+    @media (max-width: 700px) {
+      /* The card stops being a card. A phone has no room to float paper over
+         anything, so the scrim's padding goes and the form takes the screen —
+         header, one scrolling body, and the footer pinned to the bottom edge,
+         which is the only place Save can be while a keyboard is up. */
+      .stash-scrim {
+        padding: 0;
+        overflow: hidden;
+        align-items: stretch;
+      }
+      .stash-card {
+        max-width: none;
+        /* dvh, not vh: mobile browser chrome collapses, and vh keeps promising
+           a taller screen than there is — which strands the footer below the
+           fold exactly when the keyboard needs it visible. */
+        height: 100dvh;
+        max-height: 100dvh;
+        border: none;
+        border-radius: 0;
+        box-shadow: none;
+        padding-bottom: env(safe-area-inset-bottom, 0px);
+      }
+      .stash-header { padding: 12px 16px 10px; }
+      .stash-body { padding: 12px 16px 16px; }
+      .stash-footer {
+        padding: 10px 16px calc(12px + env(safe-area-inset-bottom, 0px));
+        flex-wrap: wrap;
+      }
+      /* The Esc / ⌘↵ hint is a keyboard's line; a phone has neither key. */
+      .stash-hint-foot { display: none; }
+      .stash-buttons {
+        flex: 1;
+        gap: 10px;
+      }
+      .stash-btn {
+        flex: 1;
+        min-height: 44px;
+        font-size: 15px;
+      }
+      /* iOS zooms the page on focus for any field under 16px, and a zoomed
+         page cannot be scrolled back. Every field, no exceptions. */
+      .stash-input,
+      .stash-textarea,
+      .stash-tag-input,
+      .stash-select,
+      .stash-input-title {
+        font-size: 16px;
+        padding: 9px 10px;
+      }
+      .stash-select { padding-right: 30px; }
+    }
+
   `
   document.head.appendChild(style)
   // The shared directory picker rides along: both forms that open it are opened

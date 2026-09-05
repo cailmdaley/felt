@@ -33,6 +33,8 @@ import {
 import { LinkedFiberPanel } from './LinkedFiberPanel.js'
 import { buildFileViewer, isScrollableFile } from './FileViewerPanel.js'
 import { installGestureLayer, type GestureLayer } from './gestures/GestureLayer.js'
+import { isMobileViewport, coarsePointer, onMobileChange } from './mobile.js'
+import type { MoveBroker } from './MoveDestinations.js'
 import {
   disambiguateBasenames,
   normalizeSentFiles,
@@ -365,6 +367,23 @@ interface AgentRecord {
  * Lifecycle: `open(card)` mounts the panel; `close()` tears it down
  * (including the React root inside the page pane).
  */
+/**
+ * Put the desktop move popover next to its button — below by preference,
+ * flipped above when the viewport's lower edge would clip it, and slid back
+ * inside the right margin either way. `position: fixed`, because the panel is
+ * a size container and would clip a descendant popover.
+ */
+function placeMoveMenu(menu: HTMLElement, anchor: HTMLElement): void {
+  const a = anchor.getBoundingClientRect()
+  const m = menu.getBoundingClientRect()
+  const gap = 6
+  const below = a.bottom + gap
+  const top = below + m.height > window.innerHeight - 8 ? Math.max(8, a.top - gap - m.height) : below
+  const left = Math.max(8, Math.min(a.left, window.innerWidth - m.width - 8))
+  menu.style.top = `${top}px`
+  menu.style.left = `${left}px`
+}
+
 export class FiberDetailModal {
   private overlay: HTMLElement | null = null
   private escapeHandler: ((e: KeyboardEvent) => void) | null = null
@@ -497,6 +516,24 @@ export class FiberDetailModal {
    * as another tab in the same panel rather than starting a second one.
    */
   private linkPanel: LinkedFiberPanel | null = null
+  /**
+   * The board's move seam. Present when a board is behind the panel; absent in
+   * the offline harness fixture and in the wire tests, where "Move ▾" simply
+   * never appears rather than appearing and doing nothing.
+   */
+  private readonly moves: MoveBroker | null
+  /** The open move menu (a document.body child — the panel is a size container
+   *  and clips its own fixed descendants), and its teardown. */
+  private moveMenuEl: HTMLElement | null = null
+  private closeMoveMenu: (() => void) | null = null
+  /** Unsubscribe from the mobile-threshold watch, live while the panel is open.
+   *  Crossing 700px re-frames the panel between window and sheet in place. */
+  private mobileWatch: (() => void) | null = null
+  /** True while this panel holds a pushed history entry, so the phone's back
+   *  gesture closes the sheet instead of leaving the board. Cleared before the
+   *  pop it caused, so a double close never eats a second entry. */
+  private historyHeld = false
+  private popHandler: (() => void) | null = null
 
   constructor(
     shuttleBase: string,
@@ -508,6 +545,7 @@ export class FiberDetailModal {
       host?: HTMLElement
       panel?: LinkedFiberPanel
       onCloseRequest?: () => void
+      moves?: MoveBroker
     },
   ) {
     this.shuttleBase = shuttleBase
@@ -518,6 +556,7 @@ export class FiberDetailModal {
     this.host = opts?.host ?? null
     this.linkPanel = opts?.panel ?? null
     this.onCloseRequest = opts?.onCloseRequest ?? null
+    this.moves = opts?.moves ?? null
   }
 
   /**
@@ -537,7 +576,12 @@ export class FiberDetailModal {
     if (this.host) overlay.classList.add('kbn-detail-tabbed')
     overlay.setAttribute('role', this.host ? 'tabpanel' : 'dialog')
     overlay.setAttribute('aria-label', `Fiber: ${card.name}`)
-    if (!this.host) this.applyGeometry(overlay)
+    // A SHEET has no geometry. Below the mobile threshold the panel stops
+    // being a window — it fills the viewport, so every inline left/top/width/
+    // height would be a lie the CSS then has to fight. The frame is applied
+    // (or not) here, and the same decision gates drag, resize and the
+    // persisted placement below.
+    if (!this.host) this.applyFrame(overlay)
 
     // ── Header (drag handle) ────────────────────────────────────────────────
     const header = document.createElement('div')
@@ -572,7 +616,13 @@ export class FiberDetailModal {
     // the viewer geometry for openViewerWindow to restore instead of the
     // half-and-half default.
     this.viewerGeom = persist.viewerGeom ?? null
-    if (persist.cardGeom && !this.host) {
+    if (this.isSheet()) {
+      // A sheet neither applies nor earns a placement — but it must CARRY the
+      // one this card already has, or the next writePersist would stamp the
+      // previous card's geometry onto this one and the desktop would reopen
+      // the wrong window.
+      this.cardGeom = persist.cardGeom ?? null
+    } else if (persist.cardGeom && !this.host) {
       const geom = fitted(persist.cardGeom)
       applyGeometryTo(overlay, geom)
       this.cardGeom = geom
@@ -595,19 +645,32 @@ export class FiberDetailModal {
 
     // Worker aloft → the same teal ▸ aloft pill the grid card wears, same
     // class, same gesture: click opens the worker's tmux session in kitty.
-    let aloftPill: HTMLButtonElement | null = null
-    if (card.runningWorker && this.onOpenWorker) {
+    //
+    // A TERMINAL IS NOT SOMETHING A PHONE HAS. The pill's whole gesture is
+    // "focus this worker's kitty tab", which needs a native terminal on the
+    // machine the browser runs on. On a coarse pointer we keep the STATUS — a
+    // worker is aloft, and that is the first thing you open a card to learn —
+    // and drop the promise: a plain mark, not a button that would do nothing.
+    let aloftPill: HTMLElement | null = null
+    if (card.runningWorker && coarsePointer()) {
+      const mark = document.createElement('span')
+      mark.className = 'kbn-card-worker kbn-detail-aloft kbn-detail-aloft-static'
+      mark.title = `Worker aloft — ${card.runningWorker}`
+      mark.textContent = '▸ aloft'
+      aloftPill = mark
+    } else if (card.runningWorker && this.onOpenWorker) {
       const tmuxName = card.runningWorker
-      aloftPill = document.createElement('button')
-      aloftPill.type = 'button'
-      aloftPill.className = 'kbn-card-worker kbn-detail-aloft'
-      aloftPill.setAttribute('aria-label', `Open worker terminal: ${tmuxName}`)
-      aloftPill.title = `Worker aloft — click to open ${tmuxName} in kitty`
-      aloftPill.textContent = '▸ aloft'
-      aloftPill.addEventListener('click', (e) => {
+      const btn = document.createElement('button')
+      btn.type = 'button'
+      btn.className = 'kbn-card-worker kbn-detail-aloft'
+      btn.setAttribute('aria-label', `Open worker terminal: ${tmuxName}`)
+      btn.title = `Worker aloft — click to open ${tmuxName} in kitty`
+      btn.textContent = '▸ aloft'
+      btn.addEventListener('click', (e) => {
         e.stopPropagation()
         this.onOpenWorker?.(tmuxName, card.shuttleHost)
       })
+      aloftPill = btn
     }
 
     const closeBtn = document.createElement('button')
@@ -634,7 +697,9 @@ export class FiberDetailModal {
     else header.append(titleStack, pill, refreshBtn, closeBtn)
     // The header is a drag handle only for a window. In a tab it is just the
     // card's title strip — the panel's own bar is what moves.
-    if (!this.host) this.attachDrag(overlay, header)
+    // A sheet's header is a title bar, not a handle — there is nowhere to drag
+    // it to, and a pointer drag on it would fight the body's scroll.
+    if (!this.host && !this.isSheet()) this.attachDrag(overlay, header)
 
     // ── Controls dropdown ───────────────────────────────────────────────────
     // One cluster, directly under the title, collapsed by default. Expanded
@@ -683,7 +748,7 @@ export class FiberDetailModal {
       // inside the panel's window, which carries all three for it.
       this.host.append(overlay)
     } else {
-      this.attachResizeHandles(overlay)
+      if (!this.isSheet()) this.attachResizeHandles(overlay)
       // Clicking anywhere on the card raises it above the viewer window. Capture
       // phase so a click on an inner control still bumps z-order first.
       overlay.addEventListener('pointerdown', () => bringToFront(overlay), true)
@@ -705,6 +770,9 @@ export class FiberDetailModal {
     if (!this.host) {
       this.escapeHandler = (e: KeyboardEvent) => {
         if (e.key !== 'Escape') return
+        // The move menu unwinds first — the nearest thing you are inside is
+        // the thing Escape acts on, the same rule the wikilink panel follows.
+        if (this.moveMenuEl) return
         if (document.activeElement?.closest('.kbn-detail-parent-dropdown')) return
         // The wikilink panel, opened after the card, takes Escape first — a
         // reading unwinds one followed reference per press before the card it
@@ -735,6 +803,11 @@ export class FiberDetailModal {
         // it must NOT close the card. Both windows coexist; only a click truly
         // away from both closes the card (which then closes its viewer too).
         if (target instanceof Element && target.closest('.kbn-fileview-window')) return
+        // The move menu is a document.body child (the panel is a size container
+        // and would clip it), so by DOM position it is "outside" the card while
+        // being, to the reader, part of it. Clicking it must not close the card
+        // out from under the choice being made.
+        if (target instanceof Element && target.closest('.kbn-move-menu')) return
         this.close()
       }
       document.addEventListener('pointerdown', this.outsideHandler, true)
@@ -745,25 +818,69 @@ export class FiberDetailModal {
     // pane's scrollport with it, ends up below the screen. Refit both windows
     // in place so the body stays readable to its end.
     this.resizeHandler = () => {
+      if (this.overlay && !this.host && this.isSheet()) {
+        // A sheet has nothing to refit; the viewport IS its geometry.
+        return
+      }
       if (this.overlay && !this.host) {
         const geom = fitted(readPanelGeometry(this.overlay))
         applyGeometryTo(this.overlay, geom)
         this.cardGeom = geom
         if (!this.linked) lastGeometry = geom
       }
-      if (this.viewerWindow) {
+      if (this.viewerWindow && !this.viewerWindow.classList.contains('kbn-detail-sheet')) {
         this.viewerGeom = fitted(readPanelGeometry(this.viewerWindow))
         applyGeometryTo(this.viewerWindow, this.viewerGeom)
       }
       this.writePersist()
     }
     window.addEventListener('resize', this.resizeHandler)
+
+    if (!this.host) {
+      // THE PHONE'S BACK GESTURE. A full-viewport sheet reads as a page, so the
+      // swipe-back that dismisses a page must dismiss it — otherwise the one
+      // instinctive gesture on a phone leaves the board entirely. We push an
+      // entry on open and pop it on close, and `historyHeld` is cleared BEFORE
+      // either half runs, so a double close (Escape, then the pop it caused)
+      // can never eat a second entry and walk the user off the board.
+      this.historyHeld = true
+      window.history.pushState({ kbnDetail: true }, '')
+      this.popHandler = () => {
+        if (!this.historyHeld) return
+        this.historyHeld = false // the entry is already gone; don't pop again
+        this.close()
+      }
+      window.addEventListener('popstate', this.popHandler)
+
+      // Crossing 700px with the panel open re-frames it in place — window to
+      // sheet and back — rather than leaving a phone-sized window stranded
+      // mid-viewport (a rotation, or a desktop window dragged narrow).
+      this.mobileWatch = onMobileChange(() => {
+        if (!this.overlay) return
+        this.applyFrame(this.overlay)
+      })
+    }
+
     this.startLiveRefresh()
   }
 
   close(): void {
     this.stopLiveRefresh()
     this.bodyRequestToken += 1
+    this.dismissMoveMenu()
+    if (this.mobileWatch) {
+      this.mobileWatch()
+      this.mobileWatch = null
+    }
+    if (this.popHandler) {
+      window.removeEventListener('popstate', this.popHandler)
+      this.popHandler = null
+    }
+    // Give the pushed entry back, unless the pop is what closed us.
+    if (this.historyHeld) {
+      this.historyHeld = false
+      window.history.back()
+    }
     // An origin card closing takes its followed references with it: the panel
     // is that card's reading, and leaving it open would strand tabs behind a
     // card that no longer exists. A TAB'S card owns no panel (it was handed its
@@ -1369,7 +1486,7 @@ export class FiberDetailModal {
       this.onSaved,
       this.onTransition,
       this.onOpenWorker,
-      { host, panel, onCloseRequest: requestClose },
+      { host, panel, onCloseRequest: requestClose, moves: this.moves ?? undefined },
     )
     tabbed.open(card)
     return { label: card.name || fiberId, close: () => tabbed.close() }
@@ -1496,6 +1613,37 @@ export class FiberDetailModal {
    *  page wants vertical room; width stays a comfortable measure. The card
    *  panel opens at this width and keeps it (the file viewer is its own
    *  window); remembered geometry wins when it still fits the viewport. */
+  /**
+   * Is this panel a SHEET rather than a window?
+   *
+   * One question, asked in one place, because three separate behaviours turn
+   * on it — geometry, drag, resize — and a panel that is half-sheet is worse
+   * than either. A hosted (tabbed) card is never a sheet: it has no frame of
+   * its own in any viewport.
+   */
+  private isSheet(): boolean {
+    return !this.host && isMobileViewport()
+  }
+
+  /**
+   * Give the panel its frame: a window gets geometry, a sheet gets a class and
+   * nothing else. Re-runnable — crossing the mobile threshold with the panel
+   * open calls it again, and it strips the inline geometry the window left
+   * behind so the sheet's CSS `inset` is not outranked by a stale style
+   * attribute.
+   */
+  private applyFrame(overlay: HTMLElement): void {
+    if (this.isSheet()) {
+      overlay.classList.add('kbn-detail-sheet')
+      for (const prop of ['left', 'top', 'width', 'height']) {
+        overlay.style.removeProperty(prop)
+      }
+      return
+    }
+    overlay.classList.remove('kbn-detail-sheet')
+    this.applyGeometry(overlay)
+  }
+
   private applyGeometry(overlay: HTMLElement): void {
     const vw = window.innerWidth
     const vh = window.innerHeight
@@ -1601,6 +1749,22 @@ export class FiberDetailModal {
     // half-and-half — the card glides to the left half, the viewer takes the
     // right half. Once placed, the viewer geometry is remembered (settle +
     // close) so the next open restores it instead of re-splitting.
+    //
+    // ON A PHONE there are no halves. The viewer opens as its own sheet OVER
+    // the card — one full-viewport thing at a time, which is what a hand-held
+    // screen can actually show — and the card is left exactly where it was, to
+    // be read again when the viewer's ✕ takes this sheet away. No geometry is
+    // written in this mode, so the sheet's CSS `inset` is not outranked by a
+    // stale style attribute; no remembered placement is consulted or saved,
+    // because a sheet has no placement to remember.
+    if (isMobileViewport()) {
+      win.classList.add('kbn-detail-sheet')
+      win.addEventListener('pointerdown', () => bringToFront(win), true)
+      this.viewerWindow = win
+      document.body.append(win)
+      bringToFront(win)
+      return
+    }
     if (this.viewerGeom) {
       this.viewerGeom = fitted(this.viewerGeom)
       applyGeometryTo(win, this.viewerGeom)
@@ -1648,7 +1812,11 @@ export class FiberDetailModal {
   private closeViewerWindow(): void {
     // Remember where the window sat so reopening this card restores it (not the
     // half-and-half default).
-    if (this.viewerWindow) this.viewerGeom = readPanelGeometry(this.viewerWindow)
+    // A sheet has no geometry worth remembering — reading one would persist
+    // the phone's viewport as this card's desktop arrangement.
+    if (this.viewerWindow && !this.viewerWindow.classList.contains('kbn-detail-sheet')) {
+      this.viewerGeom = readPanelGeometry(this.viewerWindow)
+    }
     this.viewerWindow?.remove()
     this.viewerWindow = null
     this.rightCol = null
@@ -1772,6 +1940,19 @@ export class FiberDetailModal {
 
     toggle.append(chevron, toggleLabel, summary)
 
+    // ── Move ▾ ────────────────────────────────────────────────────────────
+    // Lives in the HEAD row, beside the Actions toggle, rather than down
+    // inside the expanded cluster. Two reasons, and the second is the whole
+    // point of the control: on a phone the head row is the sheet's bottom bar,
+    // so Move is one thumb-reach away with nothing expanded; and on any
+    // viewport moving a card is a placement, not a dispatch — it does not
+    // belong in the row where you type a directive.
+    const head = document.createElement('div')
+    head.className = 'kbn-detail-controls-head'
+    head.append(toggle)
+    const moveBtn = this.buildMoveButton(card)
+    if (moveBtn) head.append(moveBtn)
+
     const body = document.createElement('div')
     body.className = 'kbn-detail-controls-body'
     body.hidden = true
@@ -1789,7 +1970,7 @@ export class FiberDetailModal {
     // visible while collapsed, because "when did this last run, and did it
     // finish cleanly?" is the question you open a card to answer.
     const sessionWindow = buildSessionWindow(card)
-    wrap.append(toggle, ...(sessionWindow ? [sessionWindow] : []), body)
+    wrap.append(head, ...(sessionWindow ? [sessionWindow] : []), body)
     this.buildControlsBody(body, card, shuttleManaged)
     return wrap
   }
@@ -3033,6 +3214,208 @@ export class FiberDetailModal {
    * match the kanban grid's `kbn-action-*` palette (gold for primary
    * requeue/resume, teal for tempered, muted gray for composted).
    */
+  // ── Move ▾: the drag, said in words ──────────────────────────────────────
+  //
+  // Every gesture that moves a card between columns, onto the strip, into
+  // Resting or into a queue is drag-and-drop, and drag-and-drop has no touch
+  // backend. On a phone that is the entire desk vocabulary, unreachable. This
+  // menu is that vocabulary spelled out: the legality comes from
+  // `MoveDestinations`, which mirrors the drop's own guards, and each item is
+  // handed straight back to the board's existing wire calls. It earns its
+  // place on desktop too — a legal-destinations list is a thing a drag can
+  // never show you.
+
+  /** The head-row Move control, or null when there is no board behind the
+   *  panel (the harness fixture) or nothing this card can legally do. */
+  private buildMoveButton(card: KanbanCard): HTMLButtonElement | null {
+    const broker = this.moves
+    if (!broker) return null
+    if (broker.destinations(card).length === 0) return null
+    const btn = document.createElement('button')
+    btn.type = 'button'
+    btn.className = 'kbn-detail-move-btn'
+    btn.textContent = 'Move ▾'
+    btn.setAttribute('aria-haspopup', 'menu')
+    btn.setAttribute('aria-expanded', 'false')
+    btn.title = 'Move this card — the destinations a drag would accept'
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation()
+      if (this.moveMenuEl) {
+        this.dismissMoveMenu()
+        return
+      }
+      this.openMoveMenu(card, btn, broker)
+    })
+    return btn
+  }
+
+  /** The first pane: destinations. Choosing "Queue behind…" swaps the pane
+   *  rather than opening a second menu — one surface, two depths. */
+  private openMoveMenu(card: KanbanCard, anchor: HTMLElement, broker: MoveBroker): void {
+    this.dismissMoveMenu()
+    const sheet = isMobileViewport()
+
+    const scrim = document.createElement('div')
+    scrim.className = 'kbn-move-scrim'
+    const menu = document.createElement('div')
+    menu.className = sheet ? 'kbn-move-menu kbn-move-sheet' : 'kbn-move-menu'
+    menu.setAttribute('role', 'menu')
+    menu.setAttribute('aria-label', `Move ${card.name}`)
+
+    const dismiss = (): void => this.dismissMoveMenu()
+
+    const renderRoot = (): void => {
+      menu.replaceChildren()
+      menu.append(this.buildMoveHeading(card.name, null))
+      const list = document.createElement('div')
+      list.className = 'kbn-move-list'
+      for (const dest of broker.destinations(card)) {
+        list.append(this.buildMoveItem(dest.label, dest.hint, () => {
+          if (dest.action.kind === 'queue') {
+            renderQueue()
+            return
+          }
+          dismiss()
+          broker.perform(card, dest.action)
+        }))
+      }
+      menu.append(list)
+      // Focus the first item for the keyboard, but NOT on a touch sheet: the
+      // focus ring there reads as a pre-selected choice sitting under the
+      // thumb, which is the last impression a destructive-adjacent menu should
+      // give when nobody has chosen anything yet.
+      if (!sheet) menu.querySelector<HTMLElement>('.kbn-move-item')?.focus()
+    }
+
+    const renderQueue = (): void => {
+      const targets = broker.queueTargets(card)
+      menu.replaceChildren()
+      menu.append(this.buildMoveHeading('Queue behind', renderRoot))
+      if (targets.length === 0) {
+        const empty = document.createElement('p')
+        empty.className = 'kbn-move-empty'
+        // An empty list is a fact about the board, not a failure — say which.
+        empty.textContent = 'Nothing on the board can take this one behind it.'
+        menu.append(empty)
+        return
+      }
+      // A search box only once the list is long enough that scanning it costs
+      // more than typing. Below that it is chrome standing between the reader
+      // and four names.
+      const list = document.createElement('div')
+      list.className = 'kbn-move-list'
+      const draw = (filter: string): void => {
+        const q = filter.trim().toLowerCase()
+        list.replaceChildren()
+        const shown = q
+          ? targets.filter((t) => t.card.name.toLowerCase().includes(q) || t.card.id.toLowerCase().includes(q))
+          : targets
+        for (const t of shown) {
+          // The hint names the TAIL when it differs from the card you picked:
+          // joining a queue means joining its end, and the menu should not let
+          // that happen behind your back.
+          const hint = t.tail === t.card.id ? undefined : `joins the end of its queue`
+          list.append(this.buildMoveItem(t.card.name, hint, () => {
+            dismiss()
+            broker.queueBehind(card, t.tail)
+          }))
+        }
+        if (shown.length === 0) {
+          const none = document.createElement('p')
+          none.className = 'kbn-move-empty'
+          none.textContent = 'No match.'
+          list.append(none)
+        }
+      }
+      if (targets.length > 7) {
+        const search = document.createElement('input')
+        search.type = 'search'
+        search.className = 'kbn-move-search'
+        search.placeholder = 'Find a card…'
+        search.setAttribute('aria-label', 'Filter queue targets')
+        search.addEventListener('input', () => draw(search.value))
+        menu.append(search)
+      }
+      draw('')
+      menu.append(list)
+      if (!sheet) menu.querySelector<HTMLElement>('.kbn-move-search, .kbn-move-item')?.focus()
+    }
+
+    document.body.append(scrim, menu)
+    this.moveMenuEl = menu
+    anchor.setAttribute('aria-expanded', 'true')
+    renderRoot()
+    if (!sheet) placeMoveMenu(menu, anchor)
+
+    scrim.addEventListener('pointerdown', (e) => {
+      e.stopPropagation()
+      dismiss()
+    })
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== 'Escape') return
+      e.stopPropagation()
+      dismiss()
+    }
+    document.addEventListener('keydown', onKey, true)
+
+    this.closeMoveMenu = () => {
+      document.removeEventListener('keydown', onKey, true)
+      anchor.setAttribute('aria-expanded', 'false')
+      scrim.remove()
+      menu.remove()
+    }
+  }
+
+  private buildMoveHeading(text: string, onBack: (() => void) | null): HTMLElement {
+    const row = document.createElement('div')
+    row.className = 'kbn-move-heading'
+    if (onBack) {
+      const back = document.createElement('button')
+      back.type = 'button'
+      back.className = 'kbn-move-back'
+      back.setAttribute('aria-label', 'Back to destinations')
+      back.textContent = '‹'
+      back.addEventListener('click', (e) => {
+        e.stopPropagation()
+        onBack()
+      })
+      row.append(back)
+    }
+    const label = document.createElement('span')
+    label.className = 'kbn-move-heading-text'
+    label.textContent = text
+    row.append(label)
+    return row
+  }
+
+  private buildMoveItem(label: string, hint: string | undefined, onPick: () => void): HTMLElement {
+    const item = document.createElement('button')
+    item.type = 'button'
+    item.className = 'kbn-move-item'
+    item.setAttribute('role', 'menuitem')
+    const main = document.createElement('span')
+    main.className = 'kbn-move-item-label'
+    main.textContent = label
+    item.append(main)
+    if (hint) {
+      const sub = document.createElement('span')
+      sub.className = 'kbn-move-item-hint'
+      sub.textContent = hint
+      item.append(sub)
+    }
+    item.addEventListener('click', (e) => {
+      e.stopPropagation()
+      onPick()
+    })
+    return item
+  }
+
+  private dismissMoveMenu(): void {
+    this.closeMoveMenu?.()
+    this.closeMoveMenu = null
+    this.moveMenuEl = null
+  }
+
   private buildActionBtn(
     label: string,
     variant: 'primary' | 'tempered' | 'composted' | 'dispatch',

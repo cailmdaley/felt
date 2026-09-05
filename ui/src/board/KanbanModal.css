@@ -14,6 +14,12 @@
 :root {
   --kbn-type-scale: 1.18;
 
+  /* The board's one mobile threshold, written here so the stylesheet says out
+     loud what `src/board/mobile.ts` exports as MOBILE_MAX_PX. Media queries
+     cannot read a custom property, so every `@media (max-width: 700px)` below
+     is this number by hand — change one, change both. */
+  --kbn-mobile-max: 700px;
+
   /* ── THE BOARD'S PIGMENTS ──────────────────────────────────────────────
      One meaning per colour, one colour per meaning. Declared here because the
      rule cannot hold if each sheet keeps its own copy of a hex — which is
@@ -2011,4 +2017,363 @@
 }
 .kbn-review-meta-btn:hover {
   opacity: 1;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   THE DESK AT PHONE WIDTH
+   ══════════════════════════════════════════════════════════════════════════
+   One threshold, 700px, declared as `--kbn-mobile-max` at the top of this file
+   and exported as MOBILE_MAX_PX from `src/board/mobile.ts`. Above it nothing
+   here applies and the desktop board is untouched.
+
+   The move is a change of BOOK, not a change of style. Three columns side by
+   side is a desk you stand over; a phone is a codex you hold, so the Now triad
+   becomes three leaves you turn with your thumb, marked by a folio strip, and
+   the two standing bands below fold shut like gatherings you open when you
+   want them. Everything keeps the same hand — the rag sheets, the ochre
+   hairlines, the illuminated initials, the mono slugs.
+
+   `(pointer: coarse)` is asked separately and only about INTERACTION: drag has
+   no touch backend, a terminal-attach pill has nothing to open, and a finger
+   needs 44px. A narrow window on a laptop gets the layout and keeps the
+   mouse's affordances. */
+
+/* The folio strip exists in every DOM (see `buildFolioStrip`) and has a box in
+   exactly one. On the wide board the three columns are all on screen, so a row
+   naming them would label what you are already looking at. */
+.kbn-folio {
+  display: none;
+}
+
+/* Same story as the folio strip: `installBandCollapse` appends the fold mark
+   to every band head so one DOM serves both shapes, and the wide board — where
+   Pinned and Resting never fold — simply gives it no box. */
+.kbn-bandhead-fold {
+  display: none;
+}
+
+@media (max-width: 700px) {
+  /* The notch, the home indicator, and the rounded corners. The board is
+     `inset: 0` on a `border-box`, so this is padding, not margin. */
+  .kbn-modal {
+    padding:
+      env(safe-area-inset-top, 0px)
+      env(safe-area-inset-right, 0px)
+      env(safe-area-inset-bottom, 0px)
+      env(safe-area-inset-left, 0px);
+  }
+  .kbn-body {
+    padding: 4px 8px calc(12px + env(safe-area-inset-bottom, 0px));
+    gap: 8px;
+  }
+
+  /* ── View tabs: a run of pages, scrolled ───────────────────────────────
+     Five tabs plus the cycle lens will not sit in 390px, and wrapping them
+     into two rows spends the fold on chrome. So the row scrolls, and the
+     keycaps go: a hotkey glyph is an instruction you cannot follow on a
+     device with no keyboard. The lens chips give up their auto-margin and
+     simply follow the last tab — pushed to a far right edge you have to
+     scroll to, they would read as lost rather than as trailing. */
+  .kbn-viewtabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+    gap: 5px;
+    padding-bottom: 6px;
+    margin-bottom: -2px;
+  }
+  .kbn-viewtabs::-webkit-scrollbar { display: none; }
+  .kbn-viewtab {
+    flex: 0 0 auto;
+    padding: 7px 12px;
+    font-size: calc(12px * var(--kbn-type-scale, 1));
+  }
+  .kbn-viewtab-hotkey { display: none; }
+  .kbn-viewtabs-lens {
+    margin-left: 4px;
+    flex: 0 0 auto;
+    overflow: visible;
+  }
+
+  /* ── The folio strip ───────────────────────────────────────────────────
+     Three tabbed dividers on a single ochre rule. The leaf you are reading
+     rises onto the rule and breaks it — the same trick a tabbed gathering
+     plays in a bound book — while the two you are not sit flat on the desk
+     in iron gall. The illuminated initial is the segment's mark and keeps
+     the column's own pigment, so the strip is legible as the triad even
+     before you read the names. */
+  .kbn-folio {
+    --kbn-type-scale: 1;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 2px;
+    flex: 0 0 auto;
+    align-items: end;
+    border-bottom: 1px solid rgba(196, 147, 51, 0.42);
+  }
+  .kbn-folio-seg {
+    appearance: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    min-height: 46px;
+    min-width: 0;
+    padding: 5px 4px 6px;
+    margin-bottom: -1px;
+    background: none;
+    border: 1px solid transparent;
+    border-radius: 3px 3px 0 0;
+    color: #8C8271;
+    cursor: pointer;
+    font-family: inherit;
+    transition: color 140ms ease, background 140ms ease, border-color 140ms ease;
+  }
+  .kbn-folio-seg:focus-visible {
+    outline: 1px dashed rgba(188, 69, 56, 0.55);
+    outline-offset: -3px;
+  }
+  .kbn-folio-seg-active {
+    background: #F2E8D2;
+    border-color: rgba(196, 147, 51, 0.42);
+    border-bottom-color: #F2E8D2;
+    color: #1B1611;
+  }
+  .kbn-folio-name {
+    font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+    font-size: 13px;
+    line-height: 1;
+    font-variant-caps: all-small-caps;
+    font-feature-settings: "smcp", "c2sc";
+    letter-spacing: 0.05em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+  }
+  .kbn-folio-count {
+    flex: 0 0 auto;
+    font-family: var(--font-mono, 'IBM Plex Mono', monospace);
+    font-size: 10.5px;
+    color: #7A6F5C;
+  }
+  /* The mark rides at the strip's own size; the F1 flourish still reads at
+     22px, which is why the segment gets the initial and the two band heads
+     below do not. Inactive segments hold the pigment but drop back — the
+     illumination dims, it doesn't change colour. */
+  .kbn-folio-mark {
+    flex: 0 0 auto;
+    font-size: 15px;
+    line-height: 1;
+  }
+  .kbn-folio-mark .kbn-cap { vertical-align: -0.04em; }
+  .kbn-folio-seg:not(.kbn-folio-seg-active) .kbn-folio-mark { opacity: 0.5; }
+
+  /* ── The pager ─────────────────────────────────────────────────────────
+     One column per screen, snapped, with the native momentum scroll. The
+     board is the only thing on the page that scrolls sideways: `.kbn-body`
+     already clips its own overflow-x, so nothing here can make the document
+     scroll horizontally. */
+  .kbn-section-now {
+    flex: 0 0 auto;
+    min-height: 0;
+  }
+  .kbn-now-board {
+    display: flex;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+    gap: 8px;
+    /* The board sits full-bleed to the body's edges so a leaf really is a
+       page-width, then pulls its own gutter back in as scroll padding. */
+    margin: 0 -8px;
+    padding: 0 8px;
+    scroll-padding-left: 8px;
+  }
+  .kbn-now-board::-webkit-scrollbar { display: none; }
+  .kbn-now-board > .kbn-col {
+    flex: 0 0 100%;
+    scroll-snap-align: start;
+    scroll-snap-stop: always;
+    max-height: none;
+    height: 58vh;
+  }
+  .kbn-col-list {
+    padding: 7px;
+    gap: 7px;
+    touch-action: pan-x pan-y;
+  }
+
+  /* The head folds into the strip. The folio segment already names the leaf
+     in the column's own pigment and carries its count, so a head repeating
+     "DRAFTS 4" directly beneath was the same sentence twice — and floating
+     just its glyph over the leaf put it on top of the first card's title.
+     `adoptColumnActions` moves the glyph into the segment instead, and the
+     head goes entirely. */
+  .kbn-col-head { display: none; }
+  .kbn-col-list { padding-top: 8px; }
+  /* The glyph rides the active leaf's tab, at the size the rest of the strip
+     is set in. Only the leaf you are on offers its action: three across the
+     strip would turn the page marks into a toolbar. */
+  .kbn-folio-seg .kbn-col-action { display: none; }
+  .kbn-folio-seg-active .kbn-col-action {
+    display: inline-flex;
+    flex: 0 0 auto;
+    width: 22px;
+    min-width: 22px;
+    height: 22px;
+    font-size: 12px;
+    margin-left: 0;
+  }
+
+  /* ── Cards, compact ────────────────────────────────────────────────────
+     Title, path on one line, the opening line of the outcome, then agent and
+     badges in a single row. A phone card is an index entry you tap, not a
+     card you read — the detail panel is one touch away and holds the rest. */
+  .kbn-card {
+    padding: 9px 11px;
+    gap: 5px;
+    min-height: 44px;
+    touch-action: pan-x pan-y;
+    /* A full leaf holds more cards than fit its 58vh, and the default
+       `flex-shrink: 1` let the column pay for that by squeezing every card —
+       outcomes vanished and meta rows were sliced in half. The list scrolls;
+       cards keep their own height. */
+    flex-shrink: 0;
+  }
+  .kbn-card-name {
+    font-size: 14px;
+    line-height: 1.3;
+  }
+  /* One line, and it is the TAIL that matters — `…/constitutions/den-gate`
+     tells you where you are, `felt/docs/dev/…` does not. `direction: rtl` on a
+     nowrap line puts the ellipsis at the head and keeps the leaf visible; the
+     path's own slashes make it read left-to-right regardless. Generous
+     line-height because `overflow: hidden` on a single line otherwise shaves
+     the descenders off every `p`, `g` and `y` in the path. */
+  .kbn-card-id {
+    font-size: 10px;
+    line-height: 1.6;
+    word-break: normal;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    direction: rtl;
+    text-align: left;
+    margin-top: -2px;
+  }
+  /* Beats `expandOutcomesToFillSpace`, which writes `--card-line-clamp`
+     inline on the column after measuring a layout this query has already
+     replaced. One line is the whole intent here. */
+  .kbn-card-outcome {
+    font-size: 12px;
+    line-height: 1.55;
+    -webkit-line-clamp: 1 !important;
+  }
+  .kbn-card-meta {
+    flex-wrap: nowrap;
+    overflow: hidden;
+    gap: 5px;
+  }
+  .kbn-card-meta-spacer { flex: 0 1 auto; }
+
+  /* ── The two bands, folded ─────────────────────────────────────────────
+     Pinned and Resting stop being furniture beside the board and become
+     gatherings under it: a full-width head you tap, and everything else
+     shown or shut. `installBandCollapse` only wires the head on a mobile
+     viewport, which is why nothing below has a desktop twin. */
+  .kbn-section-pinned,
+  .kbn-section-stash {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0;
+    padding: 0;
+    border: 1px solid rgba(27, 22, 17, 0.10);
+    background: rgba(237, 226, 206, 0.45);
+    border-radius: 3px;
+  }
+  .kbn-section-pinned .kbn-bandhead,
+  .kbn-section-stash .kbn-bandhead {
+    flex: 0 0 auto;
+    align-items: center;
+    flex-wrap: nowrap;
+    min-height: 44px;
+    padding: 0 12px;
+    border-right: 0;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .kbn-section-pinned .kbn-bandhead:focus-visible,
+  .kbn-section-stash .kbn-bandhead:focus-visible {
+    outline: 1px dashed rgba(188, 69, 56, 0.55);
+    outline-offset: -3px;
+  }
+  /* The fold mark sits at the far right of the head — a plain ochre wedge,
+     pointing down at what it opens and lying flat when the band is shut.
+     Kept off the wide board entirely, where the bands never fold. */
+  .kbn-bandhead-fold {
+    display: block;
+    margin-left: auto;
+    flex: 0 0 auto;
+    color: rgba(196, 147, 51, 0.85);
+    font-size: 11px;
+    line-height: 1;
+    transition: transform 160ms ease;
+  }
+  .kbn-bandhead-fold::before { content: '▾'; }
+  .kbn-band-folded .kbn-bandhead-fold { transform: rotate(-90deg); }
+  .kbn-band-folded > *:not(.kbn-bandhead) { display: none; }
+  .kbn-pinned-row,
+  .kbn-cluster-grid {
+    padding: 0 8px 8px;
+  }
+  .kbn-cluster-grid { gap: 8px; }
+  /* A 44px row is tap area, not air. The cluster's own bottom padding and the
+     row's inner padding both sat UNDER that box and read as dead space at the
+     foot of every cluster, so they go — the row's own height is the spacing. */
+  .kbn-cluster { padding: 4px 8px 3px; }
+  .kbn-cluster-head { margin-bottom: 2px; padding-bottom: 2px; }
+  /* Full-width rows, thumb-sized. A launcher chip capped at 260px in a
+     three-across band becomes a stub on a phone; here each one is its own
+     line and reads as a list of roles. */
+  .kbn-pin-chip,
+  .kbn-cluster-item {
+    max-width: none;
+    width: 100%;
+    min-height: 44px;
+    box-sizing: border-box;
+    /* The row grew to a thumb; its text should ride the middle of it rather
+       than sitting on the baseline it had when the row was 20px tall. */
+    align-items: center;
+    align-content: center;
+  }
+  .kbn-cluster-item { padding: 0 4px; }
+  .kbn-pin-chip { padding: 4px 8px; }
+  .kbn-pinned-row { display: flex; flex-direction: column; align-items: stretch; }
+}
+
+/* ── Touch, wherever it happens ────────────────────────────────────────────
+   Asked about the input, not the viewport. */
+@media (pointer: coarse) {
+  /* "▸ aloft" opens a terminal emulator on the daemon's host — a gesture with
+     no meaning under a finger. The attention and waiting phases stay: those
+     are STATE ("needs you · 11h"), and the board would be lying by omission
+     without them. They just stop pretending to be buttons. */
+  .kbn-card-worker-aloft { display: none; }
+  .kbn-card-worker-attention,
+  .kbn-card-worker-waiting {
+    pointer-events: none;
+    cursor: default;
+  }
+  /* Drag is off on touch (`coarsePointer()` clears `draggable`); the grab
+     cursor and the lift-on-press would be promising a gesture that no longer
+     exists. */
+  .kbn-card,
+  .kbn-pin-chip,
+  .kbn-cluster-item { cursor: pointer; }
 }

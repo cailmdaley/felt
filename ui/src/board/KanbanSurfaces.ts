@@ -45,6 +45,14 @@ import type {
   ZoneRect,
 } from './KanbanRules.js'
 import { deriveCycleLens, isSleepingOnSchedule } from './KanbanReadModel.js'
+import { coarsePointer, isMobileViewport } from './mobile.js'
+import {
+  activeFolioIndex,
+  folioScrollTarget,
+  readBandState,
+  writeBandState,
+  type BandId,
+} from './deskMobile.js'
 import type { CycleLens } from './KanbanReadModel.js'
 
 export const COLUMN_TITLES: Record<ColumnKind, string> = {
@@ -249,6 +257,9 @@ export class KanbanSurfaceRenderer {
    *  against the strip's left/right edge to reach off-screen days. Separate
    *  from the body's vertical drag scroll so the two can run concurrently. */
   private edgeScrollFrame: number | null = null
+  /** Which leaf of the mobile Now pager the reader is on. Held across renders
+   *  so a poll-driven rebuild doesn't turn the page back to Drafts. */
+  private folioIndex = 0
   private edgeScrollVelocity = 0
   private edgeScrollTarget: HTMLElement | null = null
   /** Vertical twin of the above, for the columns. Separate fields rather than
@@ -323,13 +334,173 @@ export class KanbanSurfaceRenderer {
 
     const board = document.createElement('div')
     board.className = 'kbn-now-board'
+    const counts: number[] = []
     for (const kind of NOW_COLUMN_ORDER) {
       board.append(this.renderColumn(kind, now[kind], staleness, lens))
+      const ghosts = lens ? lens.ghosts.filter((g) => g.column === kind).length : 0
+      counts.push(now[kind].length + ghosts)
     }
 
-    section.append(board)
+    // The folio strip rides ABOVE the board in the DOM on every viewport; only
+    // the mobile media query gives it a box. Building it unconditionally keeps
+    // one DOM for both shapes, so a window dragged across 700px changes layout
+    // without a re-render.
+    const folio = this.buildFolioStrip(board, counts)
+    section.append(folio, board)
+    if (isMobileViewport()) adoptColumnActions(board, folio)
+    this.installFolioPager(board, folio)
     this.installSectionDragHandlers(section, 'now')
     return section
+  }
+
+  /**
+   * Make a band head fold its band away — mobile only.
+   *
+   * On a phone the pager already fills the screen, so Pinned and Resting stack
+   * below it and each becomes a leaf you open. On the desktop board they are
+   * standing furniture that is always shown, so nothing here applies: the head
+   * gets no interactive role, no listener and no fold mark, and the CSS that
+   * acts on `kbn-band-folded` lives entirely inside the mobile query.
+   *
+   * The class is stamped regardless of viewport so a window resized past 700px
+   * finds the band in the state its owner last left it; only the affordance is
+   * conditional.
+   */
+  private installBandCollapse(section: HTMLElement, head: HTMLElement, band: BandId): void {
+    const state = readBandState()
+    let open = state[band]
+    const paint = (): void => {
+      section.classList.toggle('kbn-band-folded', !open)
+      head.setAttribute('aria-expanded', open ? 'true' : 'false')
+    }
+    const mark = document.createElement('span')
+    mark.className = 'kbn-bandhead-fold'
+    mark.setAttribute('aria-hidden', 'true')
+    head.append(mark)
+    paint()
+    if (!isMobileViewport()) return
+    head.setAttribute('role', 'button')
+    head.tabIndex = 0
+    const toggle = (): void => {
+      open = !open
+      paint()
+      writeBandState({ ...readBandState(), [band]: open })
+    }
+    head.addEventListener('click', toggle)
+    head.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' && e.key !== ' ') return
+      e.preventDefault()
+      toggle()
+    })
+  }
+
+  /**
+   * THE FOLIO STRIP — the mobile Desk's page marks.
+   *
+   * At phone width the Now triad cannot be three columns, so it becomes three
+   * leaves you turn. The strip is how you know which leaf you are on and how
+   * you jump: one segment per column, carrying the column's own illuminated
+   * initial in the column's own pigment (ochre / cobalt / verdigris) plus its
+   * live count. The active segment is the leaf lifted off the desk — it wears
+   * `.kbn-col`'s rag ground and hairline and closes over the rule beneath the
+   * strip, the way a tabbed divider sits proud of the leaves behind it.
+   *
+   * Invisible above 700px: the three columns are all on screen there, so a
+   * strip naming them is a label for what you can already see.
+   */
+  private buildFolioStrip(board: HTMLElement, counts: number[]): HTMLElement {
+    const strip = document.createElement('div')
+    strip.className = 'kbn-folio'
+    strip.setAttribute('role', 'tablist')
+    strip.setAttribute('aria-label', 'Now — which column is showing')
+
+    NOW_COLUMN_ORDER.forEach((kind, i) => {
+      const title = COLUMN_TITLES[kind]
+      // "Awaiting review" does not fit a third of a phone and ellipsizing it
+      // to "Awaiting …" is worse than naming the leaf and letting the column
+      // head below say it in full. The accessible name stays complete.
+      const short = kind === 'awaitingReview' ? 'Awaiting' : title
+      // A div, not a button: on a phone the column's own action glyph moves
+      // into this segment (see `adoptColumnActions`), and a real <button>
+      // inside a <button> is invalid HTML that browsers un-nest on parse.
+      const seg = document.createElement('div')
+      seg.className = `kbn-folio-seg kbn-col-${kind}`
+      seg.dataset.folio = String(i)
+      seg.setAttribute('role', 'tab')
+      seg.tabIndex = -1
+      seg.setAttribute('aria-label', `${title} (${counts[i]})`)
+
+      const mark = document.createElement('span')
+      mark.className = 'kbn-folio-mark'
+      appendCappedText(mark, title.charAt(0))
+
+      const name = document.createElement('span')
+      name.className = 'kbn-folio-name'
+      name.textContent = short
+
+      const count = document.createElement('span')
+      count.className = 'kbn-folio-count'
+      count.textContent = String(counts[i])
+
+      seg.append(mark, name, count)
+      const turnTo = (): void => {
+        board.scrollTo({
+          left: folioScrollTarget(i, board.clientWidth, NOW_COLUMN_ORDER.length),
+          behavior: 'smooth',
+        })
+      }
+      seg.addEventListener('click', (e) => {
+        // The adopted action glyph lives inside this segment; pressing it is
+        // "dispatch a draft", not "turn to Drafts".
+        if ((e.target as HTMLElement).closest('.kbn-col-action')) return
+        turnTo()
+      })
+      seg.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return
+        if ((e.target as HTMLElement).closest('.kbn-col-action')) return
+        e.preventDefault()
+        turnTo()
+      })
+      strip.append(seg)
+    })
+    return strip
+  }
+
+  /**
+   * Keep the strip honest about where the pager sits, and put the pager back
+   * where it was across a re-render.
+   *
+   * The scroll offset IS the state — nothing else can stay true through a
+   * momentum fling — so the active leaf is derived from `scrollLeft` on every
+   * scroll event rather than tracked separately. `folioIndex` survives on the
+   * renderer only so a poll-driven rebuild doesn't yank the reader back to
+   * Drafts mid-read.
+   */
+  private installFolioPager(board: HTMLElement, strip: HTMLElement): void {
+    const segs = Array.from(strip.querySelectorAll<HTMLElement>('.kbn-folio-seg'))
+    const paint = (index: number): void => {
+      segs.forEach((seg, i) => {
+        const on = i === index
+        seg.classList.toggle('kbn-folio-seg-active', on)
+        seg.setAttribute('aria-selected', on ? 'true' : 'false')
+        seg.tabIndex = on ? 0 : -1
+      })
+    }
+    paint(this.folioIndex)
+    board.addEventListener('scroll', () => {
+      const index = activeFolioIndex(board.scrollLeft, board.clientWidth, segs.length)
+      if (index === this.folioIndex) return
+      this.folioIndex = index
+      paint(index)
+    }, { passive: true })
+    // Restore after layout: the section is still detached when this runs, so
+    // `clientWidth` is 0 and any scroll write would be dropped.
+    if (this.folioIndex > 0) {
+      window.requestAnimationFrame(() => {
+        if (!board.isConnected || board.clientWidth === 0) return
+        board.scrollLeft = folioScrollTarget(this.folioIndex, board.clientWidth, segs.length)
+      })
+    }
   }
 
   /**
@@ -463,7 +634,9 @@ export class KanbanSurfaceRenderer {
     section.setAttribute('role', 'region')
     section.setAttribute('aria-label', `Pinned (${pinned.length}) — drag a role here to park it; drag one to In flight to start it`)
 
-    section.append(renderBandHead('Pinned', pinned.length))
+    const pinnedHead = renderBandHead('Pinned', pinned.length)
+    section.append(pinnedHead)
+    this.installBandCollapse(section, pinnedHead, 'pinned')
 
     const row = document.createElement('div')
     row.className = 'kbn-pinned-row'
@@ -509,7 +682,7 @@ export class KanbanSurfaceRenderer {
     el.className = `kbn-pin-chip${isAgent ? ' kbn-pin-chip-agent' : ' kbn-pin-chip-human'}${isStale ? ' kbn-card--stale' : ''}`
     el.dataset.fiberId = card.id
     el.setAttribute('role', 'listitem')
-    el.draggable = !isStale
+    el.draggable = !isStale && !coarsePointer()
     el.title = card.outcome ? `${card.name} — ${card.outcome}` : card.name
     el.setAttribute('aria-label', `${card.name}${isStale ? ' — waiting on origin, drag disabled' : ''}`)
 
@@ -707,7 +880,9 @@ export class KanbanSurfaceRenderer {
     section.setAttribute('role', 'region')
     section.setAttribute('aria-label', 'Resting — deliberately paused, still visible')
 
-    section.append(renderBandHead('Resting', stash.length))
+    const restingHead = renderBandHead('Resting', stash.length)
+    section.append(restingHead)
+    this.installBandCollapse(section, restingHead, 'resting')
 
     const { undated, dated } = splitStashByReturn(stash)
     const grid = document.createElement('div')
@@ -1120,7 +1295,7 @@ export class KanbanSurfaceRenderer {
     const el = document.createElement('div')
     el.className = isAgentCard(card) ? 'kbn-cluster-item kbn-cluster-item-agent' : 'kbn-cluster-item kbn-cluster-item-human'
     if (sleeping) el.classList.add('kbn-cluster-item-standing')
-    el.draggable = !isStale
+    el.draggable = !isStale && !coarsePointer()
     el.dataset.fiberId = card.id
     el.title = card.name
     el.setAttribute('role', 'listitem')
@@ -1385,7 +1560,10 @@ export class KanbanSurfaceRenderer {
       : ''
     const lensSuffix = lensState.ghost ? ' — resting, shown for this cycle' : ''
     el.setAttribute('aria-label', `${card.name} — ${COLUMN_TITLES[kind]}${lensSuffix}${ariaSuffix}`)
-    el.draggable = !isStale
+    // Touch has no drag-and-drop backend, and a draggable card fights the
+    // finger that is trying to scroll past it. The overlays lane's Move menu
+    // is the touch path to the same transitions.
+    el.draggable = !isStale && !coarsePointer()
     el.dataset.fiberId = card.id
     // A fiber in a git-synced store is served by every daemon holding it. The
     // board shows one card (see `dedupeMirroredRows`); say on hover where else
@@ -1587,7 +1765,10 @@ export class KanbanSurfaceRenderer {
           w.title = `Worker paused on input${age ? ` ${age} ago` : ''} — click to open ${tmuxName} in kitty`
         }
       } else {
-        w.className = 'kbn-card-worker'
+        // `-aloft` is the modifier the touch layout keys off: a pill whose
+        // only job is opening a native terminal has nothing to offer a phone,
+        // while the attention/waiting phases stay as visible state.
+        w.className = 'kbn-card-worker kbn-card-worker-aloft'
         w.textContent = '▸ aloft'
         w.setAttribute('aria-label', `Open worker terminal: ${tmuxName}`)
         w.title = `Worker aloft — click to open ${tmuxName} in kitty`
@@ -1761,7 +1942,7 @@ export class KanbanSurfaceRenderer {
     // dragstart cancels outright. A near-miss on a queued line does nothing,
     // which is the only acceptable outcome — the alternative was moving the
     // fiber the human was reading.
-    list.draggable = true
+    list.draggable = !coarsePointer()
     list.addEventListener('dragstart', (e) => {
       if (e.target === list) {
         e.preventDefault()
@@ -2192,6 +2373,32 @@ export class KanbanSurfaceRenderer {
     this.dragGhostEl?.remove()
     this.dragGhostEl = null
   }
+}
+
+/**
+ * Move each column's action glyph out of its head and into its folio segment.
+ *
+ * On a phone the segment IS the column's name — same word, same illuminated
+ * initial, same count — so the head below it was saying everything twice, and
+ * the mobile stylesheet hides it. The one thing the head still owned is the
+ * per-lane action (dispatch a draft, wake a worker, refresh a verdict), and
+ * that belongs with the name rather than floating over the first card's title.
+ *
+ * Only the active segment shows its glyph (CSS): three actions across a strip
+ * that is also the page marks would read as a toolbar.
+ *
+ * Mobile only, and re-done on every render — `KanbanModal` rebuilds the Desk
+ * when the viewport crosses the threshold, so the wide board always gets a
+ * freshly built head with its action still in it.
+ */
+function adoptColumnActions(board: HTMLElement, strip: HTMLElement): void {
+  const segs = strip.querySelectorAll<HTMLElement>('.kbn-folio-seg')
+  const cols = board.querySelectorAll<HTMLElement>('.kbn-col')
+  cols.forEach((col, i) => {
+    const action = col.querySelector<HTMLElement>('.kbn-col-action')
+    const seg = segs[i]
+    if (action && seg) seg.append(action)
+  })
 }
 
 /** The head of a Desk band (Pinned, Resting) — the column head's own parts at

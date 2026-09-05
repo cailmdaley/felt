@@ -29,6 +29,7 @@
 import { buildTabButton, buildViewCell } from './ReaderChrome.js'
 import { emptyTabState, type TabState } from './ReaderTabs.js'
 import { closeLinkedTab, focusTab, insertTab, routeWikilink } from './linkedTabs.js'
+import { isMobileViewport } from './mobile.js'
 import {
   applyPanelGeometry,
   attachPanelDrag,
@@ -263,22 +264,34 @@ export class LinkedFiberPanel {
     // Placement: the reading splits the screen — the origin card takes the left
     // half, the followed references the right. Remembered within the panel's
     // life, so a reader who moves it keeps their arrangement across tabs.
-    const { card, other } = halfAndHalf()
-    this.opts.placeOrigin(card)
-    this.geom = other
-    applyPanelGeometry(win, other)
+    //
+    // A PHONE HAS NO HALVES. Below the mobile threshold the panel becomes a
+    // sheet over the card it was opened from — one full-viewport reading at a
+    // time — and the card keeps its own place underneath, to be returned to
+    // when the last followed reference is closed. No geometry is written in
+    // this mode (an inline `left` would outrank the sheet's `inset`), the
+    // origin card is not shoved aside, and there is nothing to drag or resize.
+    const sheet = isMobileViewport()
+    if (sheet) {
+      win.classList.add('kbn-detail-sheet')
+    } else {
+      const { card, other } = halfAndHalf()
+      this.opts.placeOrigin(card)
+      this.geom = other
+      applyPanelGeometry(win, other)
 
-    const remember = () => {
-      this.geom = readPanelGeometry(win)
+      const remember = () => {
+        this.geom = readPanelGeometry(win)
+      }
+      attachPanelDrag(win, bar, { draggingClass: 'kbn-detail-dragging', onSettle: remember })
+      attachPanelResize(win, {
+        handleClassPrefix: 'kbn-detail-rh',
+        resizingClass: 'kbn-detail-resizing',
+        minWidth: PANEL_MIN.width,
+        minHeight: PANEL_MIN.height,
+        onSettle: remember,
+      })
     }
-    attachPanelDrag(win, bar, { draggingClass: 'kbn-detail-dragging', onSettle: remember })
-    attachPanelResize(win, {
-      handleClassPrefix: 'kbn-detail-rh',
-      resizingClass: 'kbn-detail-resizing',
-      minWidth: PANEL_MIN.width,
-      minHeight: PANEL_MIN.height,
-      onSettle: remember,
-    })
     win.addEventListener('pointerdown', () => bringPanelToFront(win), true)
 
     // Escape closes the fiber being read, not the whole panel: a reading
@@ -299,7 +312,8 @@ export class LinkedFiberPanel {
     // A shrinking window strands a fixed panel the same way a geometry saved on
     // a bigger display does — refit in place.
     this.resizeHandler = () => {
-      if (!this.win || !this.geom) return
+      // A sheet has no geometry; the viewport is its frame.
+      if (!this.win || !this.geom || this.win.classList.contains('kbn-detail-sheet')) return
       this.geom = fittedGeometry(readPanelGeometry(this.win))
       applyPanelGeometry(this.win, this.geom)
     }
