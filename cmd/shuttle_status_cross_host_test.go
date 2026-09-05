@@ -83,7 +83,7 @@ func TestCompositeRows_All(t *testing.T) {
 			"candide": {
 				Snapshot: &Snapshot{
 					Eligible: []SnapshotEntry{{FiberID: "remote/x", Agent: "claude-sonnet", State: "running"}},
-					Retrying: []RetryEntry{{FiberID: "remote/r", Attempt: 1, Error: "boom"}},
+					Retrying: []RetryEntry{{FiberID: "remote/r"}},
 				},
 				Stale: false,
 			},

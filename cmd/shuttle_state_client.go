@@ -22,53 +22,36 @@ import (
 // transparent to the Elixir daemon.
 
 // SnapshotEntry mirrors a single row from `Shuttle.Poller.build_snapshot/1`'s
-// `eligible` list. Fields the CLI does not render today are still decoded so we can
-// surface them later without a wire-format change.
+// `eligible` list.
 type SnapshotEntry struct {
-	FiberID        string `json:"fiber_id"`
-	FeltStore      string `json:"felt_store,omitempty"`
-	TmuxSession    string `json:"tmux_session,omitempty"`
-	Agent          string `json:"agent,omitempty"`
-	State          string `json:"state,omitempty"`
-	RunID          string `json:"run_id,omitempty"`
-	StartedAt      int64  `json:"started_at,omitempty"`
-	LastActivityAt int64  `json:"last_activity_at,omitempty"`
-	RuntimeSeconds int64  `json:"runtime_seconds,omitempty"`
+	FiberID     string `json:"fiber_id"`
+	TmuxSession string `json:"tmux_session,omitempty"`
+	Agent       string `json:"agent,omitempty"`
+	State       string `json:"state,omitempty"`
 }
 
 // StandingRoleEntry mirrors `Poller.standing_role_snapshots/2` rows. Standing-role
 // entries don't carry `agent` (it lives in the fiber frontmatter only); the
 // cross-host render shows `(default)` in that column.
 type StandingRoleEntry struct {
-	FiberID    string         `json:"fiber_id"`
-	State      string         `json:"state,omitempty"`
-	RunID      string         `json:"run_id,omitempty"`
-	NextDueAt  *int64         `json:"next_due_at,omitempty"`
-	LastRunAt  *int64         `json:"last_run_at,omitempty"`
-	Schedule   map[string]any `json:"schedule,omitempty"`
-	Validation []any          `json:"validation_errors,omitempty"`
-	Extra      map[string]any `json:"-"`
+	FiberID   string `json:"fiber_id"`
+	State     string `json:"state,omitempty"`
+	NextDueAt *int64 `json:"next_due_at,omitempty"`
+	LastRunAt *int64 `json:"last_run_at,omitempty"`
 }
 
 // RetryEntry mirrors `Poller.build_snapshot/1`'s `retrying` rows.
 type RetryEntry struct {
 	FiberID string `json:"fiber_id"`
-	Attempt int    `json:"attempt,omitempty"`
-	DueInMS int64  `json:"due_in_ms,omitempty"`
-	Error   string `json:"error,omitempty"`
 }
 
 // Snapshot is the daemon's per-host runtime state (GET /api/v1/state). Used by
 // the raw snapshot passthrough and the cross-host composite render; own-host
 // identity resolution (resolveOwnHost) does not consume this type.
 type Snapshot struct {
-	PollAt        int64               `json:"poll_at,omitempty"`
-	Host          string              `json:"host,omitempty"`
-	FeltStores    []string            `json:"felt_stores,omitempty"`
 	Eligible      []SnapshotEntry     `json:"eligible,omitempty"`
 	Retrying      []RetryEntry        `json:"retrying,omitempty"`
 	StandingRoles []StandingRoleEntry `json:"standing_roles,omitempty"`
-	ClaimedCount  int                 `json:"claimed_count,omitempty"`
 }
 
 // RemoteRecovery is the laptop daemon's per-origin self-healing state. Healthy is
@@ -86,11 +69,10 @@ type RemoteRecovery struct {
 // daemon's snapshot plus freshness metadata maintained by the laptop's
 // `Shuttle.RemoteRegistry`.
 type RemoteSnapshot struct {
-	Snapshot     *Snapshot       `json:"snapshot"`
-	LastPolledAt string          `json:"last_polled_at,omitempty"`
-	Stale        bool            `json:"stale"`
-	LastError    string          `json:"last_error,omitempty"`
-	Recovery     *RemoteRecovery `json:"recovery,omitempty"`
+	Snapshot  *Snapshot       `json:"snapshot"`
+	Stale     bool            `json:"stale"`
+	LastError string          `json:"last_error,omitempty"`
+	Recovery  *RemoteRecovery `json:"recovery,omitempty"`
 }
 
 // CompositeState is the response shape of GET /api/v1/state/composite.
