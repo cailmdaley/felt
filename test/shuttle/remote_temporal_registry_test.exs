@@ -101,6 +101,7 @@ defmodule Shuttle.RemoteTemporalRegistryTest do
       "/api/v1/commits",
       {:ok, Jason.encode!(%{"records" => [@ledgered_commit]})}
     )
+
     MockClient.set("/api/v1/spend", {:ok, Jason.encode!(%{"sessions" => [@spend]})})
 
     MockClient.set(
