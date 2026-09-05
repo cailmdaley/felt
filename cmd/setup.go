@@ -564,11 +564,10 @@ func pruneMarketplaceSkillLinks() []string {
 	if clone == "" {
 		return nil
 	}
-	home, err := os.UserHomeDir()
+	skillsDir, err := homePath(".claude", "skills")
 	if err != nil {
 		return nil
 	}
-	skillsDir := filepath.Join(home, ".claude", "skills")
 	entries, err := os.ReadDir(skillsDir)
 	if err != nil {
 		return nil
@@ -781,7 +780,7 @@ func feltCodexWiringPresent() bool {
 // felt-flagged direct entries (the pre-1.0.8 wiring). Kept around so the
 // lockstep refresh path can clean those up on the next `felt update`.
 func feltCodexLegacyHooksInstalled() bool {
-	hooksPath, err := codexHooksPath()
+	hooksPath, err := homePath(".codex", "hooks.json")
 	if err != nil {
 		return false
 	}
@@ -818,20 +817,13 @@ func refreshCodexSetupIfInstalled(marketplaceRef string) {
 	}
 }
 
-func codexHooksPath() (string, error) {
+// homePath joins parts onto the user's home directory.
+func homePath(parts ...string) (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("getting home directory: %w", err)
 	}
-	return filepath.Join(home, ".codex", "hooks.json"), nil
-}
-
-func claudeSettingsPath() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("getting home directory: %w", err)
-	}
-	return filepath.Join(home, ".claude", "settings.json"), nil
+	return filepath.Join(append([]string{home}, parts...)...), nil
 }
 
 // codexPluginRef is the plugin identifier used in `~/.codex/config.toml`'s
@@ -999,19 +991,10 @@ func runCodexCLIQuiet(args ...string) (string, error) {
 	return string(out), err
 }
 
-// codexConfigPath returns ~/.codex/config.toml.
-func codexConfigPath() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("getting home directory: %w", err)
-	}
-	return filepath.Join(home, ".codex", "config.toml"), nil
-}
-
 // readCodexConfig loads ~/.codex/config.toml as a generic map. Returns an
 // empty map if the file doesn't exist.
 func readCodexConfig() (map[string]interface{}, error) {
-	path, err := codexConfigPath()
+	path, err := homePath(".codex", "config.toml")
 	if err != nil {
 		return nil, err
 	}
@@ -1035,7 +1018,7 @@ func readCodexConfig() (map[string]interface{}, error) {
 // pruneLegacyCodexHooks removes felt-flagged entries from ~/.codex/hooks.json.
 // Returns the count of pruned entries.
 func pruneLegacyCodexHooks() int {
-	hooksPath, err := codexHooksPath()
+	hooksPath, err := homePath(".codex", "hooks.json")
 	if err != nil {
 		return 0
 	}
@@ -1098,7 +1081,7 @@ func pruneHookFile(path string, prune func(hooks map[string]interface{}) int) in
 // preserve every unrelated Claude hook, and leave the file untouched when it
 // is absent or contains no legacy entry.
 func pruneLegacyClaudeHooks() int {
-	settingsPath, err := claudeSettingsPath()
+	settingsPath, err := homePath(".claude", "settings.json")
 	if err != nil {
 		return 0
 	}
@@ -1115,11 +1098,10 @@ func pruneLegacyClaudeHooks() int {
 // ~/.agents/skills/. Only removes symlinks (not directories) to avoid
 // touching anything the user installed manually.
 func pruneLegacyCodexSkills() int {
-	home, err := os.UserHomeDir()
+	dir, err := homePath(".agents", "skills")
 	if err != nil {
 		return 0
 	}
-	dir := filepath.Join(home, ".agents", "skills")
 	removed := 0
 	for _, skill := range []string{"felt", "ralph"} {
 		target := filepath.Join(dir, skill)
