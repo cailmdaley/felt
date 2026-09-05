@@ -9,6 +9,7 @@ import type { KanbanCard, KanbanResponse } from './KanbanTypes.js'
 import { surfaceTotals } from './KanbanReadModel.js'
 import { buildTimelineDays } from './KanbanSurfaces.js'
 import { civilDayToLocalDate } from './civilDay.js'
+import type { CommitRecord, SessionPairing } from './views/TemporalData.js'
 
 /**
  * A minimally-real KanbanCard: every field the type requires, with an
@@ -69,6 +70,38 @@ export function noonOf(dayISO: string): string {
   if (!d) throw new Error(`not a civil day: ${dayISO}`)
   d.setHours(12, 0, 0, 0)
   return d.toISOString()
+}
+
+/** One ledger commit. Only what the joins and the totals read is worth
+ *  overriding; the rest is the shape the wire always carries. */
+export function commit(
+  over: Partial<CommitRecord> & Pick<CommitRecord, 'sha'>,
+): CommitRecord {
+  return {
+    at: 0,
+    subject: 'work: a thing',
+    repo: null,
+    files: 1,
+    insertions: 0,
+    deletions: 0,
+    session: 's-1',
+    tmux: null,
+    cwd: null,
+    host: null,
+    ...over,
+  }
+}
+
+/** A session ledger keyed the way `lookupSession` reads it. */
+export function pairings(
+  ...rows: { session: string; fiber: string; uid?: string | null; host?: string | null }[]
+): Map<string, SessionPairing> {
+  return new Map(
+    rows.map((r) => [
+      r.session,
+      { fiber: r.fiber, uid: r.uid ?? null, session: r.session, host: r.host ?? null },
+    ]),
+  )
 }
 
 /** A civil day N days from today, by index into the fixed window. */

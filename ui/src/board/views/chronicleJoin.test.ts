@@ -54,6 +54,8 @@ import type { ActivityBucket } from './TemporalData.js'
 import type { KanbanCard } from '../KanbanTypes.js'
 import {
   card as baseCard,
+  commit as baseCommit,
+  pairings as basePairings,
   DAY_INDEX,
   noonOf,
   TODAY_IDX,
@@ -653,33 +655,15 @@ describe('composing an era’s look-back', () => {
   // by cardId, not by a `slug: ` prefix a human might have mistyped or skipped.
   const ledgerCards = [card({ id: 'a/board', name: 'Board work' }), card({ id: 'b/daemon', name: 'Daemon work' })]
 
-  /** One ledger commit. Only what the joins and the totals read is spelled out;
-   *  the rest is the shape the wire always carries. */
-  function commit(over: Partial<CommitRecord> & Pick<CommitRecord, 'sha'>): CommitRecord {
-    return {
-      at: localMs(DST_DAY, 12),
-      subject: 'a subject',
-      repo: 'felt',
-      files: 1,
-      insertions: 0,
-      deletions: 0,
-      session: 's1',
-      tmux: null,
-      cwd: null,
-      // Host-agnostic pairings, so the host-scoping rung is not what these
-      // cases are testing.
-      host: null,
-      ...over,
-    }
-  }
+  const commit = (over: Partial<CommitRecord> & Pick<CommitRecord, 'sha'>): CommitRecord =>
+    // Host-agnostic: `host` stays null (the shared default), so the
+    // host-scoping rung is not what these cases are testing.
+    baseCommit({ at: localMs(DST_DAY, 12), subject: 'a subject', repo: 'felt', session: 's1', ...over })
 
   /** Session→fiber pairings with no host of their own, so any host's commit may
    *  read them — the ledger's own `bySession` shape. */
-  function pairings(pairs: readonly (readonly [string, string])[]): Map<string, SessionPairing> {
-    return new Map(
-      pairs.map(([session, fiber]) => [session, { fiber, uid: null, session, host: null }]),
-    )
-  }
+  const pairings = (pairs: readonly (readonly [string, string])[]): Map<string, SessionPairing> =>
+    basePairings(...pairs.map(([session, fiber]) => ({ session, fiber })))
 
   it('gathers commits under the fiber the ledger attributed them to', () => {
     const ledger: LedgerNarration = {

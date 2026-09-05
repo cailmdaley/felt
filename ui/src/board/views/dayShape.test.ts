@@ -10,7 +10,7 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import type { KanbanCard } from '../KanbanTypes.js'
-import { card as baseCard } from '../testFixtures.js'
+import { card as baseCard, commit as baseCommit } from '../testFixtures.js'
 import type {
   ActivityBucket,
   ActivityResult,
@@ -777,17 +777,19 @@ describe('the join ladder', () => {
   })
 })
 
+/** A ledger pairing with no host of its own — the shape the join rungs read. */
+const pairing = (fiber: string, uid: string | null = null) => ({
+  fiber,
+  uid,
+  session: `sess-${fiber}`,
+  host: null,
+})
+
 describe('rung 0 — the session ledger', () => {
   // The ledger is a RECORD, not an inference: the daemon wrote down which
   // fiber it dispatched a session for. It goes ahead of every name-derived
   // rung because it can read a session name that carries no ULID and no
   // recognizable slug, which is the case that justifies its existence.
-  const pairing = (fiber: string, uid: string | null = null) => ({
-    fiber,
-    uid,
-    session: `sess-${fiber}`,
-    host: null,
-  })
 
   it('joins a session name that carries nothing to infer from', () => {
     // `pi-2f9c41` names no live worker on this board, so rung 1 misses.
@@ -916,12 +918,6 @@ describe('a fleet of daemons on one rail', () => {
   // daemon whose events file produced it, and the ledger is several hosts'
   // merged. So a lane's host is a fact about the minutes drawn, and a tmux
   // name means nothing without the host it ran on.
-  const pairing = (fiber: string, uid: string | null = null) => ({
-    fiber,
-    uid,
-    session: `sess-${fiber}`,
-    host: null,
-  })
 
   it('takes the lane host from the BUCKETS, not from the card', () => {
     // The card says the fiber lives here; the minutes say they were produced
@@ -1495,20 +1491,18 @@ describe('attributing a commit by the session that made it', () => {
   const bySession = (...pairs: [string, SessionPairing][]): Map<string, SessionPairing> =>
     new Map(pairs)
 
-  const record = (over: Partial<CommitRecord> = {}): CommitRecord => ({
-    at: WIN.startMs + 60_000,
-    sha: SHA(1),
-    subject: 'ran the nulls',
-    repo: '/home/ada/work',
-    files: 1,
-    insertions: 0,
-    deletions: 0,
-    session: HARNESS,
-    tmux: 'run-shuttle',
-    cwd: '/home/ada/work',
-    host: 'ada-workstation',
-    ...over,
-  })
+  const record = (over: Partial<CommitRecord> = {}): CommitRecord =>
+    baseCommit({
+      at: WIN.startMs + 60_000,
+      sha: SHA(1),
+      subject: 'ran the nulls',
+      repo: '/home/ada/work',
+      session: HARNESS,
+      tmux: 'run-shuttle',
+      cwd: '/home/ada/work',
+      host: 'ada-workstation',
+      ...over,
+    })
 
   const lanes = (): DayLane[] =>
     buildDayLanes(activity([bucket(60, 'agent', SESSION)]), [card()], WIN)

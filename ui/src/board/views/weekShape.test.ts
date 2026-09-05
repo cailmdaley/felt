@@ -41,9 +41,9 @@ import {
 import { buildJoinIndex, originOf } from './join.js';
 import { civilDayToLocalDate, isoDayLocal, railCivilDay } from '../civilDay.js';
 import { shiftCivilDay } from './railTime.js';
-import type { ActivityBucket, CommitRecord, SessionPairing } from './TemporalData.js';
+import type { ActivityBucket, CommitRecord } from './TemporalData.js';
 import type { KanbanCard } from '../KanbanTypes.js';
-import { card as baseCard } from '../testFixtures.js'
+import { card as baseCard, commit as baseCommit, pairings } from '../testFixtures.js'
 
 const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
 const HOUR = 3_600_000;
@@ -467,32 +467,10 @@ describe('the week`s line-count ledger', () => {
   const MONDAY = '2026-08-03';
   const DAYS = weekCivilDays(MONDAY);
 
-  /** A session ledger keyed the way `lookupSession` reads it. */
-  function sessions(
-    ...rows: { session: string; fiber: string; host?: string | null; uid?: string | null }[]
-  ): Map<string, SessionPairing> {
-    return new Map(
-      rows.map((r) => [
-        r.session,
-        { fiber: r.fiber, uid: r.uid ?? null, session: r.session, host: r.host ?? null },
-      ]),
-    );
-  }
+  const sessions = pairings;
 
-  function commit(over: Partial<CommitRecord> & { at: number; sha: string }): CommitRecord {
-    return {
-      subject: 'work: a thing',
-      repo: null,
-      files: 1,
-      insertions: 0,
-      deletions: 0,
-      session: 's-1',
-      tmux: null,
-      cwd: null,
-      host: null,
-      ...over,
-    };
-  }
+  const commit = (over: Partial<CommitRecord> & { at: number; sha: string }): CommitRecord =>
+    baseCommit(over);
 
   const cards = [card({ id: 'fiber/board' }), card({ id: 'fiber/notes' })];
   const ledger = sessions(
@@ -1128,13 +1106,16 @@ describe('how full a day was', () => {
   });
 });
 
+/** A minute of agent work by `w-1` — the worker the default joined card
+ *  carries, so a bucket built here is one the join index can place. */
+const bucket = (over: Partial<ActivityBucket> & { m: number }): ActivityBucket =>
+  ({ s: 'w-1', cwd: null, k: 'agent', n: 1, ...over });
+
 describe('the raster tick knows whose minute it was', () => {
   // The join itself belongs to TemporalData's own suite; here the question is
   // only what a SLOT ends up carrying, since that is what the ink and the
   // tooltip both read. Every bucket that should be DRAWN therefore names the
   // worker of a card the index carries — an unjoined bucket has no tick.
-  const bucket = (over: Partial<ActivityBucket> & { m: number }): ActivityBucket =>
-    ({ s: 'w-1', cwd: null, k: 'agent', n: 1, ...over });
 
   const noJoin = buildJoinIndex([]);
   const joined = buildJoinIndex([card({ id: 'fiber/notes', name: 'notes', runningWorker: 'w-1' })]);
@@ -1303,8 +1284,6 @@ describe('slots as the curve wants them', () => {
   // including reply), and spines at the exact attention minutes rasterSlots
   // recorded — never at a slot's centre and never at a reply.
   const bounds = railBounds('2026-08-12');
-  const bucket = (over: Partial<ActivityBucket> & { m: number }): ActivityBucket =>
-    ({ s: 'w-1', cwd: null, k: 'agent', n: 1, ...over });
   const joined = buildJoinIndex([card({ id: 'fiber/notes', name: 'notes', runningWorker: 'w-1' })]);
   const origin = (b: ActivityBucket) => originOf(joined, b);
 
@@ -1349,8 +1328,6 @@ describe('what a hovered slot is willing to say', () => {
   const bounds = railBounds('2026-08-12');
   // Every bucket names `w-1`, and the default card carries that worker: only
   // joined work reaches a slot at all.
-  const bucket = (over: Partial<ActivityBucket> & { m: number }): ActivityBucket =>
-    ({ s: 'w-1', cwd: null, k: 'agent', n: 1, ...over });
 
   const slotOf = (
     buckets: ActivityBucket[],
