@@ -614,21 +614,22 @@ export function reconcileRows(
   )
 }
 
-/** How a cut section announces itself. `showing 6 of 34 tool calls` — the two
- *  numbers side by side, because the gap between them is the fact. */
-function sectionHead(section: TipSection<unknown>, noun: string, pinned: boolean): string | null {
-  if (section.total > section.items.length) {
-    return `showing ${section.items.length} of ${section.total} ${noun}` +
-      (pinned ? '' : ' · click to pin for all')
-  }
-  return section.items.length > 1 ? `${noun} ×${section.total}` : null
+/** A div with a class and, usually, its text — the shape every node below has. */
+function el(tag: string, cls: string, text = ''): HTMLElement {
+  const node = document.createElement(tag)
+  node.className = cls
+  node.textContent = text
+  return node
 }
 
-function sectionHeadEl(text: string): HTMLElement {
-  const el = document.createElement('div')
-  el.className = 'kbn-tip-sechead'
-  el.textContent = text
-  return el
+/** How a cut section announces itself. `showing 6 of 34 tool calls` — the two
+ *  numbers side by side, because the gap between them is the fact. */
+function sectionHead(section: TipSection<unknown>, noun: string, pinned: boolean): HTMLElement | null {
+  if (section.total > section.items.length) {
+    return el('div', 'kbn-tip-sechead', `showing ${section.items.length} of ${section.total} ${noun}` +
+      (pinned ? '' : ' · click to pin for all'))
+  }
+  return section.items.length > 1 ? el('div', 'kbn-tip-sechead', `${noun} ×${section.total}`) : null
 }
 
 /**
@@ -645,129 +646,73 @@ export function renderTip(host: HTMLElement, tip: SlotTip): void {
   // marks and both must summon the same gold.
   host.classList.toggle('kbn-tip-owed', tip.tone === 'owed')
 
-  if (tip.title) {
-    const title = document.createElement('div')
-    title.className = 'kbn-tip-title'
-    title.textContent = tip.title
-    host.append(title)
-  }
-
-  if (tip.time) {
-    const when = document.createElement('div')
-    when.className = 'kbn-tip-time'
-    when.textContent = tip.time
-    host.append(when)
-  }
+  if (tip.title) host.append(el('div', 'kbn-tip-title', tip.title))
+  if (tip.time) host.append(el('div', 'kbn-tip-time', tip.time))
 
   if (tip.facts && tip.facts.length > 0) {
-    const facts = document.createElement('div')
-    facts.className = 'kbn-tip-facts'
+    const facts = el('div', 'kbn-tip-facts')
     for (const fact of tip.facts) {
-      const row = document.createElement('div')
-      row.className = 'kbn-tip-fact'
-      const label = document.createElement('span')
-      label.className = 'kbn-tip-factlabel'
-      label.textContent = fact.label
-      const value = document.createElement('span')
-      value.className = 'kbn-tip-factvalue'
-      value.textContent = fact.value
-      row.append(label, value)
+      const row = el('div', 'kbn-tip-fact')
+      row.append(
+        el('span', 'kbn-tip-factlabel', fact.label),
+        el('span', 'kbn-tip-factvalue', fact.value),
+      )
       facts.append(row)
     }
     host.append(facts)
   }
 
   for (const row of tip.rows) {
-    const line = document.createElement('div')
     // The kind rides on the row, so the register word can take its speaker's
     // colour exactly as the excerpt cards below do. One grammar for "who" on
     // the whole slip, rather than colour in the cards and grey in the summary.
-    line.className = `kbn-tip-row kbn-tip-row-${row.kind}`
-
-    const swatch = document.createElement('span')
-    swatch.className =
-      `kbn-tip-swatch kbn-tip-key-${row.kind}${row.shuttle ? ' kbn-tip-swatch-const' : ''}`
-    line.append(swatch)
-
-    const phrase = document.createElement('span')
-    phrase.className = 'kbn-tip-phrase'
-    phrase.textContent = row.phrase
-    line.append(phrase)
-
-    if (row.where) {
-      const where = document.createElement('span')
-      where.className = 'kbn-tip-where'
-      where.textContent = row.where
-      line.append(where)
-    }
-
+    const line = el('div', `kbn-tip-row kbn-tip-row-${row.kind}`)
+    line.append(el(
+      'span',
+      `kbn-tip-swatch kbn-tip-key-${row.kind}${row.shuttle ? ' kbn-tip-swatch-const' : ''}`,
+    ))
+    line.append(el('span', 'kbn-tip-phrase', row.phrase))
+    if (row.where) line.append(el('span', 'kbn-tip-where', row.where))
     // A count of 1 is what a single event looks like; printing "×1" would make
     // every ordinary minute look like it had been measured. `rowCount` has
     // already refused every count that was not a count of messages.
-    if (row.count !== undefined) {
-      const count = document.createElement('span')
-      count.className = 'kbn-tip-count'
-      count.textContent = `×${row.count}`
-      line.append(count)
-    }
+    if (row.count !== undefined) line.append(el('span', 'kbn-tip-count', `×${row.count}`))
     // The qualifier: a span, a unit, or the admission that the message this
     // row names was not recovered. See `reconcileRows`.
-    if (row.note) {
-      const note = document.createElement('span')
-      note.className = 'kbn-tip-rownote'
-      note.textContent = row.note
-      line.append(note)
-    }
+    if (row.note) line.append(el('span', 'kbn-tip-rownote', row.note))
     host.append(line)
   }
 
   if (tip.said && tip.said.items.length > 0) {
-    const said = document.createElement('div')
-    said.className = 'kbn-tip-said kbn-tip-section'
-    const head = sectionHead(tip.said, 'messages', tip.pinned ?? false)
-    if (head) said.append(sectionHeadEl(head))
+    const said = el('div', 'kbn-tip-said kbn-tip-section')
+    const sechead = sectionHead(tip.said, 'messages', tip.pinned ?? false)
+    if (sechead) said.append(sechead)
     for (const excerpt of tip.said.items) {
       // A missing kind is prose — that is what every excerpt was before the
       // registers existed, and an older daemon still says it that way.
       const delegated = excerpt.kind === 'spawn' || excerpt.kind === 'return'
-      const line = document.createElement('div')
-      line.className = delegated
+      const line = el('div', delegated
         ? `kbn-tip-line kbn-tip-deleg kbn-tip-deleg-${excerpt.kind}`
-        : `kbn-tip-line kbn-tip-line-${excerpt.role}`
+        : `kbn-tip-line kbn-tip-line-${excerpt.role}`)
 
       // The header: who + when, on one line, always. `kbn-tip-label` is
       // allowed to truncate before `kbn-tip-when` ever wraps — a reader can
       // lose a long agent name, never the clock.
-      const head = document.createElement('div')
-      head.className = 'kbn-tip-line-head'
-
-      const label = document.createElement('span')
-      label.className = 'kbn-tip-label'
-      label.textContent = delegated
+      const head = el('div', 'kbn-tip-line-head')
+      head.append(el('span', 'kbn-tip-label', delegated
         ? DELEGATION_LABEL[excerpt.kind as 'spawn' | 'return']
-        : ROLE_LABEL[excerpt.role]
-      head.append(label)
+        : ROLE_LABEL[excerpt.role]))
 
       // WHO is a separate span from the label: it is the one part of a
       // delegation header that names the other agent. A delegation with no
       // name recoverable simply carries none — the arrow already says which
       // half of the pair it is.
-      if (delegated && excerpt.name) {
-        const who = document.createElement('span')
-        who.className = 'kbn-tip-who'
-        who.textContent = excerpt.name
-        head.append(who)
-      }
+      if (delegated && excerpt.name) head.append(el('span', 'kbn-tip-who', excerpt.name))
 
-      const when = document.createElement('span')
-      when.className = 'kbn-tip-when'
-      when.textContent = clockTime(excerpt.at_ms)
-      head.append(when)
-
+      head.append(el('span', 'kbn-tip-when', clockTime(excerpt.at_ms)))
       line.append(head)
 
-      const text = document.createElement('span')
-      text.className = 'kbn-tip-text'
+      const text = el('span', 'kbn-tip-text')
       // Markdown, rendered — the transcript was written as markdown and means
       // what markdown means. Safe for innerHTML by construction: every string
       // is escaped before any tag is introduced. See `renderExcerptMarkdown`.
@@ -790,30 +735,20 @@ export function renderTip(host: HTMLElement, tip: SlotTip): void {
   // below it, `showing 6 of 34 tool calls · click to pin for all` when they
   // are not. There is no third case, because the section carries its own
   // total and cannot be handed somebody else's.
-  if (tip.tools && tip.tools.items.length > 0) {
-    const tools = document.createElement('div')
-    tools.className = 'kbn-tip-tools kbn-tip-section'
-    const head = sectionHead(tip.tools, 'tool calls', tip.pinned ?? false)
-    if (head) tools.append(sectionHeadEl(head))
-    for (const line of tip.tools.items) {
-      const row = document.createElement('div')
-      row.className = 'kbn-tip-tools-line'
-      row.textContent = line
-      tools.append(row)
-    }
-    host.append(tools)
-  } else if (tip.toolsText) {
-    // An older daemon's single string — the aggregate, or its own per-call
-    // lines. Drawn with NO head, because nothing here knows how many calls it
-    // stands for and inventing a number is the bug, not the fix.
-    const tools = document.createElement('div')
-    tools.className = 'kbn-tip-tools kbn-tip-section'
-    for (const line of tip.toolsText.split('\n')) {
-      const row = document.createElement('div')
-      row.className = 'kbn-tip-tools-line'
-      row.textContent = line
-      tools.append(row)
-    }
+  //
+  // An older daemon sends a single string instead of per-call lines, and it is
+  // drawn with NO head: nothing here knows how many calls it stands for, and
+  // inventing a number is the bug, not the fix.
+  const toolLines = tip.tools?.items.length
+    ? tip.tools.items
+    : tip.toolsText ? tip.toolsText.split('\n') : null
+  if (toolLines) {
+    const tools = el('div', 'kbn-tip-tools kbn-tip-section')
+    const sechead = tip.tools?.items.length
+      ? sectionHead(tip.tools, 'tool calls', tip.pinned ?? false)
+      : null
+    if (sechead) tools.append(sechead)
+    for (const line of toolLines) tools.append(el('div', 'kbn-tip-tools-line', line))
     host.append(tools)
   }
 
@@ -826,12 +761,7 @@ export function renderTip(host: HTMLElement, tip: SlotTip): void {
   // `note` survives because it is not a gloss: it names WHERE the words are
   // ("words live on basalt-login-02"), which is a fact about the fleet and
   // actionable — a different claim from "we have none".
-  if (tip.note) {
-    const foot = document.createElement('div')
-    foot.className = 'kbn-tip-note kbn-tip-section'
-    foot.textContent = tip.note
-    host.append(foot)
-  }
+  if (tip.note) host.append(el('div', 'kbn-tip-note kbn-tip-section', tip.note))
 }
 
 /** Past this much of the container's width the slip hangs off the anchor's
@@ -845,8 +775,7 @@ const TIP_GAP_PX = 9
  *  view rebuilt its chart out from under it. */
 export function ensureTipHost(parent: HTMLElement | null, held: HTMLElement | null): HTMLElement {
   if (held?.isConnected) return held
-  const tip = document.createElement('div')
-  tip.className = 'kbn-tip'
+  const tip = el('div', 'kbn-tip')
   parent?.append(tip)
   return tip
 }
