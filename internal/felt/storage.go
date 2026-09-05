@@ -626,13 +626,9 @@ func (s *Storage) Migrate(dryRun bool) (*MigrationResult, error) {
 		return nil, err
 	}
 
-	titleIDs, dependsOnIDs, anchorIDs, err := s.NormalizeFiberFiles(dryRun)
-	if err != nil {
+	if err := s.normalizeFiberFiles(dryRun, result); err != nil {
 		return nil, err
 	}
-	result.TitleToNameIDs = titleIDs
-	result.RemovedDependsOnIDs = dependsOnIDs
-	result.StrippedMystAnchorIDs = anchorIDs
 	return result, nil
 }
 
@@ -720,6 +716,17 @@ func (s *Storage) MigrateFlatFiles(dryRun bool) (*MigrationResult, error) {
 	for _, entry := range result.Entries {
 		idMap[entry.OldID] = entry.NewID
 	}
+	remap := func(ref string) (string, bool) {
+		targetFiber, fragment := splitDataFlowRef(ref)
+		newID, ok := idMap[targetFiber]
+		if !ok {
+			return "", false
+		}
+		if fragment == "" {
+			return newID, true
+		}
+		return newID + "." + fragment, true
+	}
 
 	for _, item := range legacy {
 		f := item.felt
@@ -728,15 +735,7 @@ func (s *Storage) MigrateFlatFiles(dryRun bool) (*MigrationResult, error) {
 			if remappedFrom, ok := remapDataFlowRef(ref, item.oldID, f.ID); ok {
 				return remappedFrom, true
 			}
-			targetFiber, fragment := splitDataFlowRef(ref)
-			newTargetID, ok := idMap[targetFiber]
-			if !ok {
-				return "", false
-			}
-			if fragment == "" {
-				return newTargetID, true
-			}
-			return newTargetID + "." + fragment, true
+			return remap(ref)
 		})
 		if err := s.Write(f); err != nil {
 			return nil, err
@@ -755,17 +754,7 @@ func (s *Storage) MigrateFlatFiles(dryRun bool) (*MigrationResult, error) {
 		return nil, fmt.Errorf("listing fibers for input rewrite: %w", err)
 	}
 	for _, f := range allFibers {
-		changed := f.RewriteDataFlowRefs(func(ref string) (string, bool) {
-			targetFiber, fragment := splitDataFlowRef(ref)
-			newID, ok := idMap[targetFiber]
-			if !ok {
-				return "", false
-			}
-			if fragment == "" {
-				return newID, true
-			}
-			return newID + "." + fragment, true
-		})
+		changed := f.RewriteDataFlowRefs(remap)
 		if changed {
 			if err := s.Write(f); err != nil {
 				return nil, fmt.Errorf("rewriting inputs in %s: %w", f.ID, err)
@@ -776,51 +765,48 @@ func (s *Storage) MigrateFlatFiles(dryRun bool) (*MigrationResult, error) {
 	return result, nil
 }
 
-// NormalizeFiberFiles rewrites legacy per-file format details in-place:
+// normalizeFiberFiles rewrites legacy per-file format details in-place:
 // frontmatter `title` -> `name`, and leading MyST anchor lines in bodies.
-func (s *Storage) NormalizeFiberFiles(dryRun bool) ([]string, []string, []string, error) {
+func (s *Storage) normalizeFiberFiles(dryRun bool, result *MigrationResult) error {
 	files, err := s.listFiberFiles()
 	if err != nil {
-		return nil, nil, nil, err
+		return err
 	}
 
-	var titleIDs []string
-	var dependsOnIDs []string
-	var anchorIDs []string
 	for _, file := range files {
 		data, err := os.ReadFile(file.path)
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("reading fiber %s: %w", file.path, err)
+			return fmt.Errorf("reading fiber %s: %w", file.path, err)
 		}
 
 		rewritten, renamedTitle, removedDependsOn, strippedAnchor, err := normalizeFiberFile(file.id, data)
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("normalize fiber %s: %w", file.path, err)
+			return fmt.Errorf("normalize fiber %s: %w", file.path, err)
 		}
 		if !renamedTitle && !removedDependsOn && !strippedAnchor {
 			continue
 		}
 		if renamedTitle {
-			titleIDs = append(titleIDs, file.id)
+			result.TitleToNameIDs = append(result.TitleToNameIDs, file.id)
 		}
 		if removedDependsOn {
-			dependsOnIDs = append(dependsOnIDs, file.id)
+			result.RemovedDependsOnIDs = append(result.RemovedDependsOnIDs, file.id)
 		}
 		if strippedAnchor {
-			anchorIDs = append(anchorIDs, file.id)
+			result.StrippedMystAnchorIDs = append(result.StrippedMystAnchorIDs, file.id)
 		}
 		if dryRun {
 			continue
 		}
 		if err := os.WriteFile(file.path, rewritten, 0644); err != nil {
-			return nil, nil, nil, fmt.Errorf("writing normalized fiber %s: %w", file.path, err)
+			return fmt.Errorf("writing normalized fiber %s: %w", file.path, err)
 		}
 	}
 
-	slices.Sort(titleIDs)
-	slices.Sort(dependsOnIDs)
-	slices.Sort(anchorIDs)
-	return titleIDs, dependsOnIDs, anchorIDs, nil
+	slices.Sort(result.TitleToNameIDs)
+	slices.Sort(result.RemovedDependsOnIDs)
+	slices.Sort(result.StrippedMystAnchorIDs)
+	return nil
 }
 
 // BackfillIntrinsicIDs assigns an intrinsic ULID to every fiber missing one.
