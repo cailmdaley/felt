@@ -4677,15 +4677,43 @@ defmodule Shuttle.PollerTest do
     dir_path
   end
 
+  # A throwaway felt store dir for the multi-host tests, swept by this test's
+  # own `on_exit` — scoped to the dir this test made, so a sweep can't take
+  # another test's store out from under it (this module is not async).
+  defp multi_host_dir(label) do
+    dir =
+      Path.join(
+        System.tmp_dir!(),
+        "shuttle-multi-host-#{label}-#{System.unique_integer([:positive])}"
+      )
+
+    File.mkdir_p!(dir)
+    on_exit(fn -> File.rm_rf(dir) end)
+    dir
+  end
+
+  # The project-cities-on-loom topology: the physical fiber is rooted in loom
+  # under ai-futures/portolan/, and the project's `.felt/` symlinks into that
+  # subdir, so the same kanban-modal.md is also reachable as
+  # project/.felt/kanban-modal/.
+  defp loom_project_symlink! do
+    loom = multi_host_dir("loom")
+    project = multi_host_dir("project")
+
+    write_fiber_file(loom, "ai-futures/portolan/kanban-modal")
+
+    File.ln_s!(
+      Path.join([loom, ".felt", "ai-futures", "portolan"]),
+      Path.join(project, ".felt")
+    )
+
+    {loom, project}
+  end
+
   test "resolve_fiber_host finds a fiber in the first configured host" do
-    host_a =
-      Path.join(System.tmp_dir!(), "shuttle-multi-host-a-#{System.unique_integer([:positive])}")
+    host_a = multi_host_dir("a")
 
-    host_b =
-      Path.join(System.tmp_dir!(), "shuttle-multi-host-b-#{System.unique_integer([:positive])}")
-
-    File.mkdir_p!(host_a)
-    File.mkdir_p!(host_b)
+    host_b = multi_host_dir("b")
 
     write_fiber_file(host_a, "tests/fiber-in-a")
 
@@ -4698,22 +4726,12 @@ defmodule Shuttle.PollerTest do
       )
 
     assert {:ok, ^host_a} = Poller.resolve_fiber_host(poller, "tests/fiber-in-a")
-  after
-    Enum.each(
-      Path.wildcard(Path.join(System.tmp_dir!(), "shuttle-multi-host-*")),
-      &File.rm_rf/1
-    )
   end
 
   test "resolve_fiber_host finds a fiber in the second configured host" do
-    host_a =
-      Path.join(System.tmp_dir!(), "shuttle-multi-host-a-#{System.unique_integer([:positive])}")
+    host_a = multi_host_dir("a")
 
-    host_b =
-      Path.join(System.tmp_dir!(), "shuttle-multi-host-b-#{System.unique_integer([:positive])}")
-
-    File.mkdir_p!(host_a)
-    File.mkdir_p!(host_b)
+    host_b = multi_host_dir("b")
 
     write_fiber_file(host_b, "tests/fiber-in-b")
 
@@ -4726,18 +4744,10 @@ defmodule Shuttle.PollerTest do
       )
 
     assert {:ok, ^host_b} = Poller.resolve_fiber_host(poller, "tests/fiber-in-b")
-  after
-    Enum.each(
-      Path.wildcard(Path.join(System.tmp_dir!(), "shuttle-multi-host-*")),
-      &File.rm_rf/1
-    )
   end
 
   test "resolve_fiber_host returns :not_found for an unknown fiber" do
-    host_a =
-      Path.join(System.tmp_dir!(), "shuttle-multi-host-a-#{System.unique_integer([:positive])}")
-
-    File.mkdir_p!(host_a)
+    host_a = multi_host_dir("a")
 
     {:ok, poller} =
       start_poller!(
@@ -4748,22 +4758,12 @@ defmodule Shuttle.PollerTest do
       )
 
     assert {:error, :not_found} = Poller.resolve_fiber_host(poller, "tests/no-such-fiber")
-  after
-    Enum.each(
-      Path.wildcard(Path.join(System.tmp_dir!(), "shuttle-multi-host-*")),
-      &File.rm_rf/1
-    )
   end
 
   test "first-configured host wins for ID collisions" do
-    host_a =
-      Path.join(System.tmp_dir!(), "shuttle-multi-host-a-#{System.unique_integer([:positive])}")
+    host_a = multi_host_dir("a")
 
-    host_b =
-      Path.join(System.tmp_dir!(), "shuttle-multi-host-b-#{System.unique_integer([:positive])}")
-
-    File.mkdir_p!(host_a)
-    File.mkdir_p!(host_b)
+    host_b = multi_host_dir("b")
 
     # Same fiber ID in both hosts
     write_fiber_file(host_a, "tests/collision-fiber")
@@ -4779,22 +4779,12 @@ defmodule Shuttle.PollerTest do
 
     # host_a is first-configured → wins
     assert {:ok, ^host_a} = Poller.resolve_fiber_host(poller, "tests/collision-fiber")
-  after
-    Enum.each(
-      Path.wildcard(Path.join(System.tmp_dir!(), "shuttle-multi-host-*")),
-      &File.rm_rf/1
-    )
   end
 
   test "bust_fiber_host_cache allows re-resolution after a fiber moves" do
-    host_a =
-      Path.join(System.tmp_dir!(), "shuttle-multi-host-a-#{System.unique_integer([:positive])}")
+    host_a = multi_host_dir("a")
 
-    host_b =
-      Path.join(System.tmp_dir!(), "shuttle-multi-host-b-#{System.unique_integer([:positive])}")
-
-    File.mkdir_p!(host_a)
-    File.mkdir_p!(host_b)
+    host_b = multi_host_dir("b")
 
     path_a = write_fiber_file(host_a, "tests/movable-fiber")
 
@@ -4819,11 +4809,6 @@ defmodule Shuttle.PollerTest do
     # After bust, re-probes the file system → host_b
     :ok = Poller.bust_fiber_host_cache(poller, "tests/movable-fiber")
     assert {:ok, ^host_b} = Poller.resolve_fiber_host(poller, "tests/movable-fiber")
-  after
-    Enum.each(
-      Path.wildcard(Path.join(System.tmp_dir!(), "shuttle-multi-host-*")),
-      &File.rm_rf/1
-    )
   end
 
   test "subdirectory symlink: loom-walks-into-project subtree skipped" do
@@ -4835,20 +4820,11 @@ defmodule Shuttle.PollerTest do
     # its loom-relative id, dispatch later runs `felt -C ~/loom show
     # ai-futures/lightcone/...` which fails (loom's index doesn't have
     # the entry) and dispatch silently never happens.
-    host_a =
-      Path.join(
-        System.tmp_dir!(),
-        "shuttle-multi-host-loom-#{System.unique_integer([:positive])}"
-      )
+    host_a = multi_host_dir("loom")
 
-    host_b =
-      Path.join(
-        System.tmp_dir!(),
-        "shuttle-multi-host-lightcone-#{System.unique_integer([:positive])}"
-      )
+    host_b = multi_host_dir("lightcone")
 
     File.mkdir_p!(Path.join(host_a, ".felt/ai-futures"))
-    File.mkdir_p!(host_b)
 
     # The real fiber file is rooted in host_b's .felt/, accessible via the
     # project-canonical id `lightcone-ui/myst-as-ast/dual-branch`.
@@ -4878,41 +4854,13 @@ defmodule Shuttle.PollerTest do
 
     refute "ai-futures/lightcone/lightcone-ui/myst-as-ast/dual-branch" in candidate_ids,
            "loom-relative symlink-aliased id leaked into eligible: #{inspect(candidate_ids)}"
-  after
-    Enum.each(
-      Path.wildcard(Path.join(System.tmp_dir!(), "shuttle-multi-host-*")),
-      &File.rm_rf/1
-    )
   end
 
   test "host with symlinked .felt/ skipped entirely" do
     # Mirrors project-cities-on-loom topology: project's `.felt/` is a
     # symlink into loom's tree. Walking the project host should skip
     # everything — loom enumerates the same files canonically.
-    loom =
-      Path.join(
-        System.tmp_dir!(),
-        "shuttle-multi-host-loom-#{System.unique_integer([:positive])}"
-      )
-
-    project =
-      Path.join(
-        System.tmp_dir!(),
-        "shuttle-multi-host-project-#{System.unique_integer([:positive])}"
-      )
-
-    File.mkdir_p!(loom)
-    File.mkdir_p!(project)
-
-    # Physical fiber rooted in loom under ai-futures/portolan/.
-    write_fiber_file(loom, "ai-futures/portolan/kanban-modal")
-
-    # Project's .felt/ symlinks into loom's ai-futures/portolan/ subdir,
-    # so the same kanban-modal.md is reachable as project/.felt/kanban-modal/.
-    File.ln_s!(
-      Path.join([loom, ".felt", "ai-futures", "portolan"]),
-      Path.join(project, ".felt")
-    )
+    {loom, project} = loom_project_symlink!()
 
     {:ok, poller} =
       start_poller!(
@@ -4930,35 +4878,10 @@ defmodule Shuttle.PollerTest do
 
     refute "kanban-modal" in candidate_ids,
            "project-symlink alias surfaced: #{inspect(candidate_ids)}"
-  after
-    Enum.each(
-      Path.wildcard(Path.join(System.tmp_dir!(), "shuttle-multi-host-*")),
-      &File.rm_rf/1
-    )
   end
 
   test "resolve_fiber_host fallback ignores symlinked project view after cache bust" do
-    loom =
-      Path.join(
-        System.tmp_dir!(),
-        "shuttle-multi-host-loom-#{System.unique_integer([:positive])}"
-      )
-
-    project =
-      Path.join(
-        System.tmp_dir!(),
-        "shuttle-multi-host-project-#{System.unique_integer([:positive])}"
-      )
-
-    File.mkdir_p!(loom)
-    File.mkdir_p!(project)
-
-    write_fiber_file(loom, "ai-futures/portolan/kanban-modal")
-
-    File.ln_s!(
-      Path.join([loom, ".felt", "ai-futures", "portolan"]),
-      Path.join(project, ".felt")
-    )
+    {loom, project} = loom_project_symlink!()
 
     {:ok, poller} =
       start_poller!(
@@ -4971,11 +4894,6 @@ defmodule Shuttle.PollerTest do
     :ok = Poller.bust_fiber_host_cache(poller, "ai-futures/portolan/kanban-modal")
 
     assert {:ok, ^loom} = Poller.resolve_fiber_host(poller, "ai-futures/portolan/kanban-modal")
-  after
-    Enum.each(
-      Path.wildcard(Path.join(System.tmp_dir!(), "shuttle-multi-host-*")),
-      &File.rm_rf/1
-    )
   end
 
   test "snapshot includes felt_stores list" do
