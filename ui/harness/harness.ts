@@ -37,14 +37,6 @@
  *                    The selected segment must be the card's OWN kind — the
  *                    editor used to coerce `pinned` to One-shot, which made
  *                    unpinning from the panel impossible.
- *   ?fallback=1    — make `/api/v1/sent-files` 404 (an older daemon) and serve
- *                    a real events.jsonl blob over `/api/v1/file` → exercises
- *                    the events.jsonl FALLBACK path for a realistic LOCAL card
- *                    (originId = a hostname, NOT the literal 'local'). This is
- *                    the path the default scenario can't reach (it mocks the
- *                    endpoint 200), so it's the only guard against the gate bug
- *                    where `originId === 'local'` short-circuited every real
- *                    local card.
  */
 import { FiberDetailModal } from '../src/board/FiberDetailModal.js'
 import type { KanbanCard } from '../src/board/KanbanTypes.js'
@@ -82,19 +74,6 @@ const MOCK_SENT_FILES = [
   { fullPath: '/home/ada/loom/.felt/ai-futures/portolan/standalone-kanban/report.html', basename: 'standalone-kanban-report.html', timestamp: Date.now() - 5 * 24 * 60 * 60_000, sessionId: '' },
 ]
 
-// A realistic events.jsonl blob for the ?fallback scenario: three SendUserFile
-// pre_tool_use events whose tmux ULID == MOCK_UID, files == the same three
-// deliverables. The parser keys off `tool`, `tmuxSession` (ULID), numeric
-// `timestamp`, and `toolInput.files` — exactly the real hook shape. The two
-// `report.html` rows share a basename, so this also exercises disambiguation on
-// the real fallback data (not just the disambiguated endpoint mock).
-const FALLBACK_EVENTS_JSONL = [
-  { tool: 'SendUserFile', tmuxSession: `morning-post-${MOCK_UID}-shuttle`, sessionId: 's1', timestamp: Date.now() - 5 * 24 * 60 * 60_000, toolInput: { files: ['/home/ada/loom/.felt/ai-futures/portolan/standalone-kanban/report.html'] } },
-  { tool: 'PreToolUse', tmuxSession: `morning-post-${MOCK_UID}-shuttle`, timestamp: Date.now() - 60_000 },
-  { tool: 'SendUserFile', tmuxSession: `morning-post-${MOCK_UID}-shuttle`, sessionId: 's1', timestamp: Date.now() - 48 * 60_000, toolInput: { files: ['/home/ada/loom/.felt/work/spectra/desi-bao-v1.png'] } },
-  { tool: 'SendUserFile', tmuxSession: `morning-post-${MOCK_UID}-shuttle`, sessionId: 's1', timestamp: Date.now() - 2 * 60_000, toolInput: { files: ['/home/ada/loom/.felt/loom/email/morning-post/report.html'] } },
-].map((e) => JSON.stringify(e)).join('\n')
-
 // Map a mock daemon path → a real fixture file:// URL for the iframe/img.
 const FIXTURE_MAP: Record<string, string> = {
   '/home/ada/loom/.felt/loom/email/morning-post/report.html': FIXTURE_REPORT,
@@ -123,7 +102,6 @@ const MOCK_CARD: KanbanCard = {
 }
 
 // ── Fetch stub: stand in for the daemon ──────────────────────────────────────
-const FALLBACK_MODE = new URLSearchParams(location.search).get('fallback') === '1'
 const realFetch = window.fetch.bind(window)
 window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
@@ -133,11 +111,6 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   if (url.includes('/api/v1/fibers/') && url.includes('body=true')) {
     return json({ fibers: [{ fiber: { body: MOCK_BODY, modified_at: '2026-08-30T18:00:00Z' } }] })
   }
-  // events.jsonl over the /file route — the FALLBACK data source. Matched
-  // before the generic /file pass-through; only relevant in ?fallback mode.
-  if (FALLBACK_MODE && url.includes('/api/v1/file') && url.includes('events.jsonl')) {
-    return new Response(FALLBACK_EVENTS_JSONL, { status: 200, headers: { 'Content-Type': 'text/plain' } })
-  }
   // Artifact metadata probes used by the live reader's artifact baselines. The
   // harness has no real daemon or files behind it, so give every fixture a
   // stable revision; the ↻ button reloads unconditionally and still exercises
@@ -145,14 +118,8 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   if (url.includes('/api/v1/file-info')) {
     return json({ exists: true, modified_at: 1, size: 1 })
   }
-  // Sent files. Default: the proper endpoint (PRIMARY data path). In ?fallback
-  // mode: 404 like an older daemon, forcing the events.jsonl fallback so the
-  // local-ness gate is actually exercised for a realistic (hostname) originId.
-  if (url.includes('/api/v1/sent-files')) {
-    return FALLBACK_MODE
-      ? new Response('not found', { status: 404 })
-      : json({ files: MOCK_SENT_FILES })
-  }
+  // Sent files — the daemon endpoint the panel reads.
+  if (url.includes('/api/v1/sent-files')) return json({ files: MOCK_SENT_FILES })
   // Parent-picker index — and the live reader's bodyless `modified_at` probe,
   // which shares this shape. An empty `fibers` reads as "no answer", so the
   // harness never re-renders a body on a tick; the body above is stamped with a

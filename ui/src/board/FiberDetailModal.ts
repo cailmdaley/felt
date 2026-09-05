@@ -482,9 +482,6 @@ export class FiberDetailModal {
    *  path is one file whether it is reached as an open tab, an inline embed,
    *  or both. */
   private readonly resourceRevisions = new Map<string, string>()
-  /** The ~10 MB local events.jsonl fallback (older daemons) is worth at most
-   *  one read per panel-open, never one per 15s tick. */
-  private sentFilesFallbackTried = false
   private readonly visibilityHandler = (): void => {
     if (!document.hidden) void this.refreshLiveContent()
   }
@@ -931,7 +928,6 @@ export class FiberDetailModal {
     this.bodyRevision = undefined
     this.sentFilesRevision = ''
     this.sentFilesEtag = null
-    this.sentFilesFallbackTried = false
     this.resourceRevisions.clear()
   }
 
@@ -1201,12 +1197,9 @@ export class FiberDetailModal {
     await this.renderFiberBody(prose, card, overlay, { preserveContent: true })
     if (this.overlay !== overlay) return
 
-    // Bypass every cache so the trail and the launcher are rebuilt from bytes —
-    // including the once-per-open events.jsonl fallback, since on an older
-    // daemon that read is the only way a click can surface a new send.
+    // Bypass every cache so the trail and the launcher are rebuilt from bytes.
     this.sentFilesEtag = null
     this.sentFilesRevision = ''
-    this.sentFilesFallbackTried = false
     const files = await this.fetchSentFiles(card)
     if (this.overlay !== overlay) return
     if (files !== null && files !== SENT_FILES_UNCHANGED) this.applySentFiles(files, card)
@@ -2809,8 +2802,7 @@ export class FiberDetailModal {
   /**
    * The left-column sent-files launcher. Mounts empty (hidden) and self-
    * populates from {@link fetchSentFiles}: the daemon's `/api/v1/sent-files`
-   * endpoint first, falling back to parsing `events.jsonl` over `/api/v1/file`
-   * for older local daemons. The live refresh loop re-renders it when a worker
+   * endpoint. The live refresh loop re-renders it when a worker
    * sends another file, while cards without deliverables pay zero visual cost.
    * Each entry is a button that opens (or re-activates) the file in the
    * right-column accordion.
@@ -3123,13 +3115,10 @@ export class FiberDetailModal {
   }
 
   /**
-   * The card's sent-files trail. Tries the daemon's `GET /api/v1/sent-files`
-   * first (committed; deploys on the next daemon restart). If that 404s/fails
-   * AND the origin is local, falls back to fetching `events.jsonl` via
-   * `/api/v1/file` and parsing it client-side — local-only, because the file
-   * is ~10 MB and must never be pulled over a slow remote tunnel. A `null`
-   * result means the read failed; refreshes preserve the last known trail in
-   * that case rather than making a transient outage erase the launcher.
+   * The card's sent-files trail, from the daemon's `GET /api/v1/sent-files`.
+   * A `null` result means the read failed; refreshes preserve the last known
+   * trail in that case rather than making a transient outage erase the
+   * launcher.
    */
   private async fetchSentFiles(
     card: KanbanCard,
@@ -3160,46 +3149,10 @@ export class FiberDetailModal {
         const data = (await res.json()) as { files?: unknown }
         if (Array.isArray(data.files)) return normalizeSentFiles(data.files)
       }
-      // A non-ok (404 on an older daemon) falls through to the fallback.
     } catch {
-      // Network error — fall through to the local events.jsonl fallback.
+      // Network error — the caller keeps the last known trail.
     }
-
-    // ── Fallback: parse the LOCAL events.jsonl over /file ──
-    // The old gate was `card.originId === 'local'`, which is NEVER true for a
-    // real local card: the composite feed stamps local rows with the daemon's
-    // own host id (`own_host_id()`, e.g. `my-laptop`) and sets the feed's top-
-    // level `host` to that same id — so a local card has `originId === feed.host`
-    // (a hostname), not the literal `'local'`. That false gate short-circuited
-    // the fallback for every real local card, so until `/api/v1/sent-files`
-    // deploys, cards showed no sent files — the exact bug this path exists to
-    // fix.
-    //
-    // `FiberDetailModal` isn't handed `feed.host`, so we can't name the local
-    // host from the card alone. We don't need to: the read below is pinned to
-    // the LOCAL daemon (`fileBytesUrl(..., 'local')` emits no `&origin=`, so the
-    // route reads this machine's file — never a remote tunnel). A remote card's
-    // sends live in the *remote* host's events.jsonl, so parsing the local log
-    // for a remote uid simply yields `[]`. Thus the only real gate is "can we
-    // derive a home to point at" — and the cost is bounded (one local read,
-    // once per panel-open, primary endpoint already tried).
-    //
-    // Bounded to ONE read per panel-open: on the 15s live poll this would
-    // otherwise pull ~10 MB every tick for the whole time a card is open.
-    if (this.sentFilesFallbackTried) return SENT_FILES_UNCHANGED
-    this.sentFilesFallbackTried = true
-    const eventsPath = sentEventsPathFor(card)
-    if (!eventsPath) return []
-    try {
-      const res = await fetch(fileBytesUrl(this.shuttleBase, eventsPath, 'local'), {
-        cache: 'no-store',
-      })
-      if (!res.ok) return []
-      const text = await res.text()
-      return parseSentFilesFromEvents(text, uid, sessionId)
-    } catch {
-      return null
-    }
+    return null
   }
 
   private buildSection(label: string): HTMLElement {
@@ -4100,81 +4053,4 @@ function relativeTime(timestamp: number): string {
   const deltaMs = Date.now() - timestamp
   if (deltaMs < 60_000) return 'just now'
   return `${humanizeIdleAge(deltaMs)} ago`
-}
-
-/**
- * Derive the user's home dir from a fiber's directory — the first two path
- * segments on macOS/Linux (`/Users/<name>` or `/home/<name>`). The
- * events.jsonl fallback reads `<home>/.shuttle/events.jsonl`. Returns
- * null for a path too shallow to carry a home (or absent).
- */
-function homeFromDir(dir: string | undefined): string | null {
-  if (!dir || !dir.startsWith('/')) return null
-  const segs = dir.split('/').filter(Boolean)
-  if (segs.length < 2) return null
-  return `/${segs[0]}/${segs[1]}`
-}
-
-function sentEventsPathFor(card: KanbanCard): string | null {
-  const home = homeFromDir(card.fiberDir)
-  return home ? `${home}/.shuttle/events.jsonl` : null
-}
-
-/** The ULID embedded in a tmux session name (`<slug>-<ULID>-shuttle`). */
-const TMUX_ULID_RE = /-([0-9A-HJKMNP-TV-Z]{26})-shuttle$/
-
-/**
- * Parse a card's sent-files trail from a raw `events.jsonl` blob (the local
- * fallback for daemons that predate `/api/v1/sent-files`). Keeps `SendUserFile`
- * pre_tool_use events whose embedded fiber ULID (from `tmuxSession`) — or
- * `sessionId` — matches the card's uid, flattens `toolInput.files`, dedupes by
- * path keeping the newest, and sorts newest-first.
- */
-function parseSentFilesFromEvents(text: string, uid: string, sessionId: string): SentFile[] {
-  const byPath = new Map<string, SentFile>()
-  for (const line of text.split('\n')) {
-    const trimmed = line.trim()
-    if (!trimmed) continue
-    let ev: {
-      tool?: string
-      tmuxSession?: string
-      sessionId?: string
-      timestamp?: number | string
-      toolInput?: { files?: unknown }
-    }
-    try {
-      ev = JSON.parse(trimmed)
-    } catch {
-      continue
-    }
-    if (ev.tool !== 'SendUserFile') continue
-
-    const tmuxUlid = typeof ev.tmuxSession === 'string'
-      ? ev.tmuxSession.match(TMUX_ULID_RE)?.[1]
-      : undefined
-    const matches =
-      (uid && (tmuxUlid === uid || ev.sessionId === uid)) ||
-      (sessionId && ev.sessionId === sessionId)
-    if (!matches) continue
-
-    const files = Array.isArray(ev.toolInput?.files) ? ev.toolInput.files : []
-    const ts = typeof ev.timestamp === 'number'
-      ? ev.timestamp
-      : typeof ev.timestamp === 'string'
-        ? Date.parse(ev.timestamp) || 0
-        : 0
-    for (const f of files) {
-      if (typeof f !== 'string' || !f) continue
-      const prev = byPath.get(f)
-      if (!prev || ts > prev.timestamp) {
-        byPath.set(f, {
-          fullPath: f,
-          basename: f.split('/').filter(Boolean).pop() ?? f,
-          timestamp: ts,
-          sessionId: typeof ev.sessionId === 'string' ? ev.sessionId : undefined,
-        })
-      }
-    }
-  }
-  return [...byPath.values()].sort((a, b) => b.timestamp - a.timestamp)
 }
