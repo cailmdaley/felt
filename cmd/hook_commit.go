@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -148,7 +147,11 @@ func runCommitHook(stdin io.Reader) error {
 	if !ok {
 		return nil
 	}
-	_ = appendCommitLine(path, line)
+	// No rollover, unlike the event stream: this is the durable record the
+	// board narrates history from, and a commit it drops is one no reader can
+	// recover. It grows by a few hundred bytes per commit, so it does not need
+	// one.
+	_ = appendLine(path, line)
 	return nil
 }
 
@@ -217,24 +220,11 @@ func renderCommitLine(input commitHookInput, ledgerPath string) (string, bool) {
 		Tmux:       nullableField(currentTmuxSession()),
 		CWD:        nullableField(input.CWD),
 	}
-	encoded, err := encodeCommitLine(line)
+	encoded, err := encodeJSONLine(line)
 	if err != nil {
 		return "", false
 	}
 	return encoded, true
-}
-
-// encodeCommitLine renders one compact, newline-terminated line with `<>&` left
-// alone (Go escapes them by default), matching the event stream: a commit
-// subject is prose, and the ledger is read by humans as often as by the board.
-func encodeCommitLine(line commitLine) (string, error) {
-	var buf bytes.Buffer
-	enc := json.NewEncoder(&buf)
-	enc.SetEscapeHTML(false)
-	if err := enc.Encode(line); err != nil {
-		return "", err
-	}
-	return buf.String(), nil
 }
 
 // sessionOrAnonymous drops the placeholder an anonymous session carries, so a
@@ -320,22 +310,4 @@ func ledgerHasSHA(path, sha string) bool {
 		}
 	}
 	return false
-}
-
-// appendCommitLine appends one line, creating the ledger if it does not exist.
-//
-// No rollover, unlike the event stream: this is the durable record the board
-// narrates history from, and a commit it drops is one no reader can recover.
-// It grows by a few hundred bytes per commit, so it does not need one. One
-// O_APPEND write per line and no lock — appends to a regular file are atomic
-// against other appenders on both Darwin and Linux when the write is a single
-// call, and a commit line is far under any pipe or page bound.
-func appendCommitLine(path, line string) error {
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0o644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	_, err = f.WriteString(line)
-	return err
 }
