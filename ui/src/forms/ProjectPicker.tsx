@@ -86,6 +86,27 @@ export function projectLabel(project: PickerProject): string {
   return project.name ?? project.id
 }
 
+/** Stand-in when the caller passed no host list (an old island, or a degraded
+ *  registry fetch): one local host — exactly the pre-split behaviour. */
+export const FALLBACK_HOST: PickerHost = {
+  id: 'local',
+  label: 'local',
+  isLocal: true,
+  nativeFolderPicker: false,
+}
+
+/** Recency first, then name — the default-selection and picker order both
+ *  forms present. */
+export function byRecency(
+  activityById: Record<string, number>,
+): <P extends { id: string; name?: string }>(a: P, b: P) => number {
+  return (a, b) => {
+    const recencyDelta = (activityById[b.id] ?? 0) - (activityById[a.id] ?? 0)
+    if (recencyDelta !== 0) return recencyDelta
+    return (a.name ?? a.id).localeCompare(b.name ?? b.id, undefined, { sensitivity: 'base' })
+  }
+}
+
 /** The projects one host owns, in the order they came in. The single place the
  *  host selection narrows the project list. */
 export function projectsForHost<P extends { originId: string }>(

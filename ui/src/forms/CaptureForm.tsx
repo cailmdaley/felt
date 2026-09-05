@@ -37,6 +37,8 @@ import {
   AddProjectPath,
   HostPicker,
   ProjectPicker,
+  FALLBACK_HOST,
+  byRecency,
   injectProjectPickerStyles,
   projectsForHost,
   type PickerHost,
@@ -64,15 +66,6 @@ const FALLBACK_AGENTS: AgentEntry[] = [
 const CAPTURE_DEFAULT_AGENT = 'claude-opus'
 const CAPTURE_DEFAULT_EFFORT = 'xhigh'
 
-/** Stand-in when the caller passed no host list (an old island, or a degraded
- *  registry fetch): one local host — exactly the pre-split behaviour. */
-const FALLBACK_HOST: PickerHost = {
-  id: 'local',
-  label: 'local',
-  isLocal: true,
-  nativeFolderPicker: false,
-}
-
 /** A destination project, as Capture consumes it (Stash's `StashProject`
  *  minus `loomPrefix`, which only parent-nesting needs). */
 export interface CaptureProject {
@@ -83,9 +76,6 @@ export interface CaptureProject {
 }
 
 export interface CaptureFormProps {
-  /** Default destination: a project path (matched against `availableCities` by
-   *  path). Null = fall through to activity ranking. */
-  cityPath?: string | null
   /** All connected projects; each carries its own originId + path. */
   availableCities?: CaptureProject[]
   /** Every host the picker can point at — the store registry's origins. The
@@ -114,13 +104,11 @@ export interface CaptureFormProps {
 interface CaptureResponse {
   spawned?: boolean
   tmux_session?: string
-  agent?: string
   reason?: string
   error?: string
 }
 
 export function CaptureForm({
-  cityPath,
   availableCities = [],
   availableHosts = [],
   cityActivityById = {},
@@ -147,24 +135,18 @@ export function CaptureForm({
   // when the directory picker registers one (the island re-derives it).
   const [cities, setCities] = useState<CaptureProject[]>(availableCities)
 
-  // Same default-selection priority as StashForm: scoped project by path →
-  // most-recently-active → alphabetical → null (picker hidden).
-  const sortedCities = [...cities].sort((a, b) => {
-    const recencyDelta = (cityActivityById[b.id] ?? 0) - (cityActivityById[a.id] ?? 0)
-    if (recencyDelta !== 0) return recencyDelta
-    return (a.name ?? a.id).localeCompare(b.name ?? b.id, undefined, { sensitivity: 'base' })
-  })
+  // Same default-selection priority as StashForm: most-recently-active →
+  // alphabetical → null (picker hidden).
+  const sortedCities = [...cities].sort(byRecency(cityActivityById))
   // Host first: the local daemon's own, unless the caller scoped the form to a
   // project that lives elsewhere. Defaulting to recency would land on whichever
   // remote was busiest, and "add a project" would then quietly mean "over
   // there" — the thing this split exists to prevent.
   const hosts: PickerHost[] = availableHosts.length > 0 ? availableHosts : [FALLBACK_HOST]
-  const scopedCity = cityPath ? availableCities.find((c) => c.path === cityPath) ?? null : null
-  const [selectedHostId, setSelectedHostId] = useState<string>(
-    () => scopedCity?.originId ?? hosts.find((h) => h.isLocal)?.id ?? hosts[0].id,
-  )
+  const defaultHostId = hosts.find((h) => h.isLocal)?.id ?? hosts[0].id
+  const [selectedHostId, setSelectedHostId] = useState<string>(defaultHostId)
   const [selectedCityId, setSelectedCityId] = useState<string | null>(
-    () => scopedCity?.id ?? projectsForHost(sortedCities, scopedCity?.originId ?? hosts.find((h) => h.isLocal)?.id ?? hosts[0].id)[0]?.id ?? null,
+    () => projectsForHost(sortedCities, defaultHostId)[0]?.id ?? null,
   )
   const hostCities = projectsForHost(sortedCities, selectedHostId)
   const selectedHost = hosts.find((h) => h.id === selectedHostId) ?? hosts[0]

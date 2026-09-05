@@ -30,6 +30,8 @@ import {
   AddProjectPath,
   HostPicker,
   ProjectPicker,
+  FALLBACK_HOST,
+  byRecency,
   injectProjectPickerStyles,
   projectsForHost,
   type PickerHost,
@@ -45,7 +47,6 @@ import { shuttleOrigin } from './projectModel'
 export interface AgentEntry {
   id: string
   model?: string
-  cli?: string
   default: boolean
   /** Harness-native effort tokens this agent accepts; empty/absent = no effort axis. */
   effort_levels?: string[]
@@ -72,8 +73,6 @@ export interface StashProject {
 }
 
 export interface StashFormProps {
-  /** Default destination project path (matched against `availableCities` by path). */
-  cityPath?: string | null
   /** Connected projects (the island supplies the local-only set for create). */
   availableCities?: StashProject[]
   /** Every host the picker can point at — the store registry's origins. The
@@ -82,8 +81,6 @@ export interface StashFormProps {
   availableHosts?: PickerHost[]
   /** Optional activity timestamps per project id, for the recency sort. */
   cityActivityById?: Record<string, number>
-  /** Optional default parent slug (project-relative). Empty = top-level. */
-  defaultParentSlug?: string | null
   /** Existing tag set for autocomplete (island-supplied, from the feed). */
   tagSuggestions?: string[]
   /** Shuttle daemon base. Defaults to `''` (relative / same-origin). */
@@ -103,18 +100,8 @@ export interface StashFormProps {
   onCancel: () => void
 }
 
-/** Stand-in when the caller passed no host list (an old island, or a degraded
- *  registry fetch): one local host — exactly the pre-split behaviour. */
-const FALLBACK_HOST: PickerHost = {
-  id: 'local',
-  label: 'local',
-  isLocal: true,
-  nativeFolderPicker: false,
-}
-
 interface CreateFiberResponse {
   id?: string
-  path?: string
   error?: string
 }
 
@@ -354,11 +341,9 @@ function ParentPicker({ value, onChange, scopePrefix, shuttleBase }: ParentPicke
 // ---------------------------------------------------------------------------
 
 export function StashForm({
-  cityPath,
   availableCities = [],
   availableHosts = [],
   cityActivityById = {},
-  defaultParentSlug,
   tagSuggestions,
   shuttleBase = '',
   onCreated,
@@ -371,7 +356,7 @@ export function StashForm({
   const [body, setBody] = useState('')
   const [tags, setTags] = useState<string[]>([])
   const [tagInput, setTagInput] = useState('')
-  const [parentSlug, setParentSlug] = useState<string>(defaultParentSlug ?? '')
+  const [parentSlug, setParentSlug] = useState<string>('')
 
   // Dispatch fields (shuttle)
   const [agents, setAgents] = useState<AgentEntry[]>([])
@@ -392,21 +377,14 @@ export function StashForm({
   // Add project…" would then mean "on that remote", which is the confusion the
   // split exists to remove.
   const hosts: PickerHost[] = availableHosts.length > 0 ? availableHosts : [FALLBACK_HOST]
-  const scopedCity = cityPath ? availableCities.find((c) => c.path === cityPath) ?? null : null
-  const defaultHostId = scopedCity?.originId ?? hosts.find((h) => h.isLocal)?.id ?? hosts[0].id
+  const defaultHostId = hosts.find((h) => h.isLocal)?.id ?? hosts[0].id
   const [selectedHostId, setSelectedHostId] = useState<string>(defaultHostId)
 
-  // Project default within that host: `cityPath`'s project →
-  // most-recently-active → first alphabetically → null (only when empty).
-  const [selectedCityId, setSelectedCityId] = useState<string | null>(() => {
-    if (scopedCity) return scopedCity.id
-    const ranked = projectsForHost(availableCities, defaultHostId).sort((a, b) => {
-      const recencyDelta = (cityActivityById[b.id] ?? 0) - (cityActivityById[a.id] ?? 0)
-      if (recencyDelta !== 0) return recencyDelta
-      return (a.name ?? a.id).localeCompare(b.name ?? b.id, undefined, { sensitivity: 'base' })
-    })
-    return ranked[0]?.id ?? null
-  })
+  // Project default within that host: most-recently-active → first
+  // alphabetically → null (only when empty).
+  const [selectedCityId, setSelectedCityId] = useState<string | null>(
+    () => projectsForHost(availableCities, defaultHostId).sort(byRecency(cityActivityById))[0]?.id ?? null,
+  )
   // The live project set: seeded from the island's derivation, then replaced
   // wholesale when "+ Add project…" registers a directory (the island re-derives
   // through `deriveProjects`, so shape stays single-sourced there).
@@ -437,11 +415,7 @@ export function StashForm({
     return () => { cancelled = true }
   }, [shuttleBase])
 
-  const sortedCities = [...cities].sort((a, b) => {
-    const recencyDelta = (cityActivityById[b.id] ?? 0) - (cityActivityById[a.id] ?? 0)
-    if (recencyDelta !== 0) return recencyDelta
-    return (a.name ?? a.id).localeCompare(b.name ?? b.id, undefined, { sensitivity: 'base' })
-  })
+  const sortedCities = [...cities].sort(byRecency(cityActivityById))
   const hostCities = projectsForHost(sortedCities, selectedHostId)
   const selectedHost = hosts.find((h) => h.id === selectedHostId) ?? hosts[0]
   const selectedCity =
@@ -1120,9 +1094,6 @@ export function injectStashFormStyles(): void {
       display: grid;
       gap: 12px;
     }
-    .stash-row-2 {
-      grid-template-columns: 1fr 1fr;
-    }
     /* Host · project · parent fiber, in equal columns. Host and project are
        both native selects now, and a select sized to its content would make
        the row read as three unrelated widths; equal thirds of the 880px card
@@ -1138,7 +1109,6 @@ export function injectStashFormStyles(): void {
       grid-template-columns: minmax(0, 1.5fr) minmax(0, 0.8fr) minmax(0, 1.4fr);
     }
     @media (max-width: 600px) {
-      .stash-row-2,
       .stash-row-3,
       .stash-row-dispatch,
       .stash-row-schedule {
