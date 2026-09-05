@@ -195,8 +195,6 @@ class ShelfView implements TemporalView {
 
   /** Everything fetched, newest first, capped at MAX_CARDS. */
   private files: ShelfFile[] = []
-  /** What the search leaves — the files the surface is made of. */
-  private shown: ShelfFile[] = []
   /** Those files gathered into tiles: one per fiber, plus the loners. */
   private stacks: ShelfStack[] = []
   /** Which sheet of each fiber's stack is face up, for the fibers the reader
@@ -247,8 +245,8 @@ class ShelfView implements TemporalView {
   /** Where every card sat when the current drag began — the arrangement the
    *  collision solve starts from on every frame. */
   private dragBase: Map<string, { x: number; y: number; w: number; h: number }> | null = null
-  /** Bodies taken down for the duration of a resize, to be put back after. */
-  private demoted: string[] = []
+  /** The body taken down for the duration of a resize, to be put back after. */
+  private demoted: string | null = null
 
   // ── Lifecycle ──────────────────────────────────────────────────────────────
 
@@ -438,7 +436,12 @@ class ShelfView implements TemporalView {
     const surface = this.surface
     if (!surface) return
 
-    this.stacks = buildStacks(this.shown, this.persist.cards, this.leafed)
+    const shown = this.files.filter(
+      (f) =>
+        matchesQuery(f, this.query) &&
+        (this.showDismissed || !this.dismissed.has(f.fullPath)),
+    )
+    this.stacks = buildStacks(shown, this.persist.cards, this.leafed)
     const faces = this.stacks.map((s) => s.face)
 
     const sig = this.stacks
@@ -449,19 +452,18 @@ class ShelfView implements TemporalView {
 
     this.emptyEl?.remove()
     this.emptyEl = null
+    const wanted = new Set(faces.map((f) => f.fullPath))
+    for (const path of [...this.handles.keys()]) {
+      if (!wanted.has(path)) this.dropCard(path)
+    }
+
     if (faces.length === 0) {
-      for (const path of [...this.handles.keys()]) this.dropCard(path)
       this.emptyEl = createViewEmptyState(
         this.query ? '— nothing matches —' : '— nothing sent yet —',
       )
       surface.append(this.emptyEl)
       this.reflow()
       return
-    }
-
-    const wanted = new Set(faces.map((f) => f.fullPath))
-    for (const path of [...this.handles.keys()]) {
-      if (!wanted.has(path)) this.dropCard(path)
     }
 
     for (const file of faces) {
@@ -552,11 +554,6 @@ class ShelfView implements TemporalView {
   }
 
   private applyQuery(): void {
-    this.shown = this.files.filter(
-      (f) =>
-        matchesQuery(f, this.query) &&
-        (this.showDismissed || !this.dismissed.has(f.fullPath)),
-    )
     this.searchEl?.classList.toggle('kbn-shelf-search-on', this.query.trim() !== '')
     this.syncCards()
   }
@@ -923,7 +920,6 @@ class ShelfView implements TemporalView {
     star.textContent = '✶'
     star.title = 'Hold this card where it is'
     star.setAttribute('aria-label', 'Star')
-    star.addEventListener('pointerdown', (e) => e.stopPropagation())
     star.addEventListener('click', (e) => {
       e.stopPropagation()
       this.toggleStar(file.fullPath)
@@ -953,7 +949,6 @@ class ShelfView implements TemporalView {
     open.title = 'Read this'
     open.href = this.ctx ? fileUrl(this.ctx.shuttleBase, file) : '#'
     open.hidden = !isRenderable(kind)
-    open.addEventListener('pointerdown', (e) => e.stopPropagation())
     open.addEventListener('click', (e) => {
       e.stopPropagation()
       e.preventDefault()
@@ -966,7 +961,6 @@ class ShelfView implements TemporalView {
     const dismiss = document.createElement('button')
     dismiss.type = 'button'
     dismiss.className = 'kbn-shelf-dismiss'
-    dismiss.addEventListener('pointerdown', (e) => e.stopPropagation())
     dismiss.addEventListener('click', (e) => {
       e.stopPropagation()
       this.toggleDismissed(file.fullPath)
@@ -1041,6 +1035,7 @@ class ShelfView implements TemporalView {
       this.read(file)
     })
     for (const control of [star, open, dismiss]) {
+      control.addEventListener('pointerdown', (e) => e.stopPropagation())
       control.addEventListener('dblclick', (e) => e.stopPropagation())
     }
 
@@ -1428,14 +1423,21 @@ class ShelfView implements TemporalView {
     if (!handle) return
     e.preventDefault()
     e.stopPropagation()
-    this.drag = {
-      gesture: beginGesture(mode, path, e, readGeom(handle.root), this.persist.zoom),
-      target: handle.root,
-    }
-    handle.root.setPointerCapture(e.pointerId)
-    handle.root.addEventListener('pointermove', this.onDragMove)
-    handle.root.addEventListener('pointerup', this.onDragEnd)
-    handle.root.addEventListener('pointercancel', this.onDragEnd)
+    this.trackDrag(
+      handle.root,
+      beginGesture(mode, path, e, readGeom(handle.root), this.persist.zoom),
+    )
+  }
+
+  /** Take the gesture on: capture the pointer to the element that will be
+   *  painted, and listen for the rest of it there. `endGesture` undoes exactly
+   *  this off `drag.target`. */
+  private trackDrag(target: HTMLElement, gesture: ShelfGesture): void {
+    this.drag = { gesture, target }
+    target.setPointerCapture(gesture.pointerId)
+    target.addEventListener('pointermove', this.onDragMove)
+    target.addEventListener('pointerup', this.onDragEnd)
+    target.addEventListener('pointercancel', this.onDragEnd)
   }
 
   /** Drag on empty canvas pans the surface — and unfocuses whatever was live,
@@ -1449,20 +1451,11 @@ class ShelfView implements TemporalView {
     const viewport = this.viewport
     if (!viewport) return
     e.preventDefault()
-    this.drag = {
-      gesture: beginGesture('pan', null, e, {
-        x: this.persist.pan.x,
-        y: this.persist.pan.y,
-        w: 0,
-        h: 0,
-      }),
-      target: viewport,
-    }
     viewport.classList.add('kbn-shelf-panning')
-    viewport.setPointerCapture(e.pointerId)
-    viewport.addEventListener('pointermove', this.onDragMove)
-    viewport.addEventListener('pointerup', this.onDragEnd)
-    viewport.addEventListener('pointercancel', this.onDragEnd)
+    this.trackDrag(
+      viewport,
+      beginGesture('pan', null, e, { x: this.persist.pan.x, y: this.persist.pan.y, w: 0, h: 0 }),
+    )
   }
 
   private readonly onDragMove = (e: PointerEvent): void => {
@@ -1521,7 +1514,7 @@ class ShelfView implements TemporalView {
       const handle = this.handles.get(gesture.path)
       if (handle && handle.state === 'live') {
         this.evictBody(handle)
-        this.demoted = [gesture.path]
+        this.demoted = gesture.path
       }
     }
   }
@@ -1597,11 +1590,9 @@ class ShelfView implements TemporalView {
     this.dragBase = null
     this.surface?.classList.remove('kbn-shelf-gesturing')
     // Whatever stepped out for a resize comes back now the size has settled.
-    for (const path of this.demoted) {
-      const handle = this.handles.get(path)
-      if (handle && handle.visible) this.mountBody(handle)
-    }
-    this.demoted = []
+    const demoted = this.demoted ? this.handles.get(this.demoted) : null
+    if (demoted?.visible) this.mountBody(demoted)
+    this.demoted = null
     const drag = this.drag
     this.drag = null
     if (!drag) return

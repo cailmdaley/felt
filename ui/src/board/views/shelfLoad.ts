@@ -32,7 +32,7 @@
 
 /** The state of a card's body. `stalled` is a load that has taken long enough
  *  that we say so and offer a retry, rather than leaving a blank rectangle. */
-export type BodyState = 'idle' | 'queued' | 'loading' | 'live' | 'stalled'
+export type BodyState = 'idle' | 'loading' | 'live' | 'stalled'
 
 export const LOAD_POLICY = {
   /** Live bodies allowed before a sweep runs. */
@@ -50,9 +50,6 @@ export const LOAD_POLICY = {
    *  where a multi-megabyte report crosses a tunnel. */
   softTimeoutLocalMs: 8_000,
   softTimeoutRemoteMs: 20_000,
-  /** The crossfade from face to body. Short enough not to be an animation,
-   *  long enough that the swap is not a flash. */
-  fadeMs: 120,
 } as const
 
 // ── Who loads next ───────────────────────────────────────────────────────────
