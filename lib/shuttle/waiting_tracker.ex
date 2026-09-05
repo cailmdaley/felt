@@ -221,8 +221,8 @@ defmodule Shuttle.WaitingTracker do
 
     result =
       Map.new(state.sessions, fn {session, %{type: type, at: at} = rec} ->
-        bg = if now - at >= @bg_suppress_ms, do: 0, else: Map.get(rec, :bg, 0)
-        {session, %{last_event_at: at, phase: category(type, Map.get(rec, :kind, ""), bg)}}
+        bg = if now - at >= @bg_suppress_ms, do: 0, else: rec.bg
+        {session, %{last_event_at: at, phase: category(type, rec.kind, bg)}}
       end)
 
     {:reply, result, state}
@@ -377,8 +377,7 @@ defmodule Shuttle.WaitingTracker do
     Map.reject(sessions, fn {_s, %{at: at}} -> at < cutoff end)
   end
 
-  defp now_ms(%State{clock: clock}) when is_function(clock, 0), do: clock.()
-  defp now_ms(%State{}), do: default_clock()
+  defp now_ms(%State{clock: clock}), do: clock.()
 
   defp default_clock, do: System.system_time(:millisecond)
 end

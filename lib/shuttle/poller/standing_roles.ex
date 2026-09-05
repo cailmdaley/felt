@@ -433,13 +433,13 @@ defmodule Shuttle.Poller.StandingRoles do
       # armed-for-the-next-occurrence, so the upcoming run is the schedule's next
       # tick, not a stored timestamp (the slice-2 cutover). Falls back to the
       # snapshot's stored value when the schedule won't parse.
-      |> put_computed_next_due(role, now)
+      |> put_computed_next_due(role)
       |> Map.put(:uid, role.uid)
     end)
   end
 
-  defp put_computed_next_due(snapshot, %StandingRole{} = role, now) do
-    case StandingRole.next_due_from_cron(role, now) do
+  defp put_computed_next_due(snapshot, %StandingRole{} = role) do
+    case StandingRole.next_due_from_cron(role) do
       %DateTime{} = next -> Map.put(snapshot, :next_due_at, DateTime.to_unix(next, :millisecond))
       _ -> snapshot
     end

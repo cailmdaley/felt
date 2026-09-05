@@ -70,9 +70,8 @@ defmodule Shuttle.Continuation do
 
   # ── readers (pure, over the polled fiber map) ────────────────────────────────
 
-  @doc "The `shuttle:` block of a polled fiber map, or `%{}` when absent."
-  @spec shuttle_block(map()) :: map()
-  def shuttle_block(fiber) when is_map(fiber) do
+  # The `shuttle:` block of a polled fiber map, or `%{}` when absent.
+  defp shuttle_block(fiber) when is_map(fiber) do
     case Map.get(fiber, "shuttle") do
       block when is_map(block) -> block
       _ -> %{}

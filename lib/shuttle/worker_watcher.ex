@@ -33,7 +33,6 @@ defmodule Shuttle.WorkerWatcher do
       `tmux has-session` are tolerated before declaring the worker dead. Protects
       against transient tmux hiccups (suspect 4 in ghost-workers bug). Default 3,
       which means a truly dead session is detected within `3 × heartbeat_interval_ms`.
-    * `:token_budget` — optional per-worker token cap.
   """
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts) do
@@ -61,10 +60,6 @@ defmodule Shuttle.WorkerWatcher do
     max_consecutive_failures =
       Keyword.get(opts, :max_consecutive_failures, @default_max_consecutive_failures)
 
-    token_budget = Keyword.get(opts, :token_budget)
-
-    now = DateTime.utc_now()
-
     state = %{
       fiber_id: fiber_id,
       session: session,
@@ -73,11 +68,7 @@ defmodule Shuttle.WorkerWatcher do
       heartbeat_interval_ms: heartbeat_interval,
       max_consecutive_failures: max_consecutive_failures,
       consecutive_failures: 0,
-      heartbeat_timer_ref: nil,
-      started_at: now,
-      last_activity_at: now,
-      tokens_used: 0,
-      token_budget: token_budget
+      heartbeat_timer_ref: nil
     }
 
     # On init, check if the session exists. `:gone` (confirmed absent) is the
@@ -101,13 +92,7 @@ defmodule Shuttle.WorkerWatcher do
       :alive ->
         ref = Process.send_after(self(), :heartbeat, state.heartbeat_interval_ms)
 
-        {:noreply,
-         %{
-           state
-           | heartbeat_timer_ref: ref,
-             last_activity_at: DateTime.utc_now(),
-             consecutive_failures: 0
-         }}
+        {:noreply, %{state | heartbeat_timer_ref: ref, consecutive_failures: 0}}
 
       # Confirmed absent — count toward death. `max_consecutive_failures` strikes
       # of `:gone` in a row (a real, persistent absence) declares the worker dead.
@@ -142,15 +127,6 @@ defmodule Shuttle.WorkerWatcher do
         ref = Process.send_after(self(), :heartbeat, state.heartbeat_interval_ms)
         {:noreply, %{state | heartbeat_timer_ref: ref}}
     end
-  end
-
-  @impl true
-  def terminate(_reason, state) do
-    if is_reference(state.heartbeat_timer_ref) do
-      Process.cancel_timer(state.heartbeat_timer_ref)
-    end
-
-    :ok
   end
 
   # ── Internal ──

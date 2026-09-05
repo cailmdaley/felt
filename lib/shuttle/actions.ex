@@ -7,16 +7,6 @@ defmodule Shuttle.Actions do
   between the two.
   """
 
-  @type action_id ::
-          :pause
-          | :reopen
-          | :reopen_draft
-          | :accept_run
-          | :dispatch_ad_hoc
-          | :close_awaiting_review
-          | :close_tempered
-          | :close_composted
-
   @transition_targets ~w(drafts inFlight queued active awaitingReview tempered composted)
 
   @spec actions_for(map(), boolean()) :: [map()]
