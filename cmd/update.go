@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"runtime"
 	"strings"
 
@@ -29,19 +28,13 @@ var updateCmd = &cobra.Command{
 	Short: "Update felt to the latest version",
 	Long: `Update felt to the latest version.
 
-If installed from source (via a dev source marker), pulls and rebuilds
-from the source checkout. Otherwise downloads the latest GitHub release.
+Downloads the latest GitHub release.
 
 After the binary is updated, where the relevant CLI is present, the
 Claude Code plugin (and Codex / pi wiring, if previously installed) is
 refreshed in the same step so that hooks and skills stay in lockstep
 with the binary.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// Check for dev source install
-		if srcPath, err := devSourcePath(); err == nil {
-			return updateFromSource(srcPath)
-		}
-
 		// Get latest release tag from GitHub
 		latest, err := latestVersion()
 		if err != nil {
@@ -159,9 +152,6 @@ func archiveOS() string {
 	case "linux":
 		return "Linux"
 	default:
-		if len(runtime.GOOS) == 0 {
-			return ""
-		}
 		return strings.ToUpper(runtime.GOOS[:1]) + runtime.GOOS[1:]
 	}
 }
@@ -174,56 +164,6 @@ func archiveArch() string {
 	default:
 		return runtime.GOARCH
 	}
-}
-
-// devSourceMarker returns the path to the dev source marker file.
-func devSourceMarker() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".felt", "dev-source")
-}
-
-// devSourcePath reads the dev source checkout path, if set.
-func devSourcePath() (string, error) {
-	data, err := os.ReadFile(devSourceMarker())
-	if err != nil {
-		return "", err
-	}
-	path := strings.TrimSpace(string(data))
-	if _, err := os.Stat(filepath.Join(path, "go.mod")); err != nil {
-		return "", fmt.Errorf("source path %s has no go.mod", path)
-	}
-	return path, nil
-}
-
-// updateFromSource pulls and rebuilds felt from a source checkout.
-func updateFromSource(srcPath string) error {
-	fmt.Printf("Dev install: updating from %s\n", srcPath)
-
-	// git pull
-	pull := exec.Command("git", "pull")
-	pull.Dir = srcPath
-	pull.Stdout = os.Stdout
-	pull.Stderr = os.Stderr
-	if err := pull.Run(); err != nil {
-		return fmt.Errorf("git pull: %w", err)
-	}
-
-	// go build
-	exe, err := os.Executable()
-	if err != nil {
-		return fmt.Errorf("locating current binary: %w", err)
-	}
-	build := exec.Command("go", "build", "-o", exe, ".")
-	build.Dir = srcPath
-	build.Stdout = os.Stdout
-	build.Stderr = os.Stderr
-	if err := build.Run(); err != nil {
-		return fmt.Errorf("go build: %w", err)
-	}
-
-	fmt.Println("Updated from source.")
-	refreshPluginAfterUpdate(srcPath)
-	return nil
 }
 
 func extractBinary(r io.Reader) ([]byte, error) {
