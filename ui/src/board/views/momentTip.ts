@@ -563,10 +563,10 @@ export function tipContent(
 ): Pick<SlotTip, 'said' | 'tools' | 'toolsText' | 'note' | 'resolved' | 'pinned'> {
   return {
     ...(words?.excerpts.length
-      ? { said: { items: words.excerpts, total: Math.max(words.excerptTotal, words.excerpts.length) } }
+      ? { said: { items: words.excerpts, total: words.excerptTotal } }
       : {}),
     ...(words?.toolLines.length
-      ? { tools: { items: words.toolLines, total: Math.max(words.toolTotal, words.toolLines.length) } }
+      ? { tools: { items: words.toolLines, total: words.toolTotal } }
       : {}),
     // Only from a daemon with no per-call lines to send. Never both: two
     // renderings of the same calls, one of them uncounted, is the ambiguity
@@ -704,7 +704,7 @@ export function renderTip(host: HTMLElement, tip: SlotTip): void {
     // A count of 1 is what a single event looks like; printing "×1" would make
     // every ordinary minute look like it had been measured. `rowCount` has
     // already refused every count that was not a count of messages.
-    if (row.count !== undefined && row.count > 1) {
+    if (row.count !== undefined) {
       const count = document.createElement('span')
       count.className = 'kbn-tip-count'
       count.textContent = `×${row.count}`
@@ -879,12 +879,12 @@ const MOMENT_DEBOUNCE_MS = 150
  *  asking all of them on every sweep would turn one hover into a fan-out.
  *
  *  The cap is a budget, not a priority: which transcripts it spends itself on
- *  is decided by `spoke` — see {@link orderSources}. PINNED IS EXEMPT: a pin
+ *  is decided by `spoke` — see `MomentLoader.load`. PINNED IS EXEMPT: a pin
  *  is a deliberate request to see everything, and a slip that silently asked
  *  only four of a busy slot's sessions would drop the rest with no "showing X
  *  of Y" to say so — the totals below are summed only over what was asked,
  *  so a source dropped here is a source the slip never even admits missing.
- *  See {@link MomentLoader.load}. */
+ *  See `MomentLoader.load`. */
 const MAX_SOURCES = 4
 
 /** The tooltip holds a few lines, not a conversation. */
@@ -893,25 +893,6 @@ const MAX_EXCERPTS = 6
 /** A PINNED slip is a conversation — a panel you scroll, not a glance. The
  *  bound survives only so a pathological window cannot become the DOM. */
 const MAX_EXCERPTS_PINNED = 200
-
-/**
- * The sources a mark's words are fetched from, speakers first.
- *
- * THE INVARIANT THIS EXISTS FOR: a mark that draws a spine claims a human
- * message, and the tooltip under it must be able to show that message. The
- * spine is drawn from the attention buckets; the words come from whichever
- * transcripts the cap let through. Cutting the list in arrival order let those
- * two disagree — a Week slot is four minutes wide and routinely pools four
- * sessions, so the session that spoke was often not among the ones asked, and
- * the slip showed agent prose and tool lines under a red spine.
- *
- * Sorting on `spoke` makes the cap cut the silent transcripts first, so every
- * session behind a spine is asked before any session that only worked.
- * Stable, so arrival order still breaks ties within each group.
- */
-function orderSources(sources: readonly MomentSource[]): MomentSource[] {
-  return [...sources.filter((s) => s.spoke), ...sources.filter((s) => !s.spoke)]
-}
 
 /**
  * The excerpts a slip shows, human speech first past the cap.
@@ -931,7 +912,6 @@ function orderSources(sources: readonly MomentSource[]): MomentSource[] {
 function pickExcerpts(excerpts: readonly MomentExcerpt[], cap: number): MomentExcerpt[] {
   const human = (e: MomentExcerpt): boolean => e.role === 'user' && (e.kind ?? 'prose') === 'prose'
   const inTime = [...excerpts].sort((a, b) => a.at_ms - b.at_ms)
-  if (inTime.length <= cap) return inTime
   const kept = new Set(inTime.filter(human).slice(0, cap))
   for (const e of inTime) {
     if (kept.size >= cap) break
@@ -1063,7 +1043,19 @@ export class MomentLoader {
     // the source list here as well would drop whole sessions with nothing on
     // the slip to say so, which is the truncation this module exists to make
     // impossible.
-    const ordered = orderSources(sources)
+    //
+    // SPEAKERS FIRST, and that is the invariant this ordering exists for:
+    // a mark that draws a spine claims a human message, and the tooltip under it
+    // must be able to show that message. The spine is drawn from the attention
+    // buckets; the words come from whichever transcripts the cap let through.
+    // Cutting the list in arrival order let those two disagree — a Week slot is
+    // four minutes wide and routinely pools four sessions, so the session that
+    // spoke was often not among the ones asked, and the slip showed agent prose
+    // and tool lines under a red spine. Sorting on `spoke` makes the cap cut the
+    // silent transcripts first, so every session behind a spine is asked before
+    // any session that only worked. Stable, so arrival order still breaks ties
+    // within each group.
+    const ordered = [...sources.filter((s) => s.spoke), ...sources.filter((s) => !s.spoke)]
     const results = await Promise.all(
       (full ? ordered : ordered.slice(0, MAX_SOURCES))
         .map((source) => this.fetcher(source.session, fromMs, toMs, source.host, full)),
@@ -1083,7 +1075,6 @@ export class MomentLoader {
     // The note is the one thing that stays conditional, because it is a
     // statement about ABSENCE: with words in hand from one host, "words live
     // on <other host>" is no longer the answer to anything.
-    const empty = excerpts.length === 0
     const toolLines = results.flatMap((result) => result.toolLines ?? [])
     const legacy = toolLines.length === 0 ? results.find((r) => r.tools)?.tools : undefined
     return {
@@ -1097,7 +1088,7 @@ export class MomentLoader {
       toolLines,
       toolTotal: results.reduce((sum, r) => sum + (r.toolCount ?? r.toolLines?.length ?? 0), 0),
       ...(legacy ? { toolsText: legacy } : {}),
-      ...(empty && note ? { note } : {}),
+      ...(excerpts.length === 0 && note ? { note } : {}),
     }
   }
 }
@@ -1115,7 +1106,7 @@ function fullKey(key: string): string {
  *  `spoke` is the OR across the copies, not the first one's: a session that
  *  contributed one attention minute and nine agent minutes spoke, whichever
  *  bucket happened to arrive first. Folding it any other way would lose the
- *  very flag the fetch cap sorts on — see {@link orderSources}. */
+ *  very flag the fetch cap sorts on — see `MomentLoader.load`. */
 export function dedupeSources(sources: readonly (MomentSource | null)[]): MomentSource[] {
   const seen = new Map<string, MomentSource>()
   const out: MomentSource[] = []
