@@ -4,6 +4,8 @@ defmodule ShuttleWeb.APIControllerTest do
   """
 
   use ExUnit.Case
+  alias Shuttle.Test.ForwardStub
+  import Shuttle.Test.ApiConn
   import Shuttle.Test.EnvHelpers
   import Plug.Conn
   import Phoenix.ConnTest
@@ -75,11 +77,6 @@ defmodule ShuttleWeb.APIControllerTest do
   # Minimal shuttle: block YAML for a oneshot fiber ready for dispatch.
   @oneshot_shuttle "enabled: true\nkind: oneshot\n"
 
-  defp api_conn do
-    build_conn()
-    |> put_req_header("accept", "application/json")
-    |> put_req_header("content-type", "application/json")
-  end
 
   defp make_fiber(id, attrs \\ %{}) do
     Map.merge(
@@ -559,20 +556,8 @@ defmodule ShuttleWeb.APIControllerTest do
   # stripped, so the owner runs its own local branch) and relays the response
   # verbatim — the same one-hop shape /transition uses, via the shared forwarder.
 
-  defp stub_forward(remote_name, remote_url, response) do
-    start_supervised!(StubPostClient)
-    StubPostClient.set_response(response)
-
-    previous_remotes = Application.get_env(:shuttle, :remotes)
-    previous_client = Application.get_env(:shuttle, :write_forward_client)
-    Application.put_env(:shuttle, :remotes, [%{name: remote_name, url: remote_url}])
-    Application.put_env(:shuttle, :write_forward_client, StubPostClient)
-
-    on_exit(fn ->
-      restore_app_env(:remotes, previous_remotes)
-      restore_app_env(:write_forward_client, previous_client)
-    end)
-  end
+  defp stub_forward(remote_name, remote_url, response),
+    do: ForwardStub.stub_forward(remote_name, remote_url, response, StubPostClient)
 
   test "felt-edit forwards a remote-owned card to the owning daemon" do
     stub_forward("candide", "http://localhost:4001", {:ok, 200, "edited"})

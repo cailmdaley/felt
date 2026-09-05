@@ -6,6 +6,7 @@ defmodule ShuttleWeb.ProjectsControllerTest do
   throwaway file so the user's real projects.json is never touched.
   """
   use ExUnit.Case
+  import Shuttle.Test.ApiConn
   import Shuttle.Test.EnvHelpers
   import Plug.Conn
   import Phoenix.ConnTest
@@ -104,9 +105,4 @@ defmodule ShuttleWeb.ProjectsControllerTest do
     Jason.decode!(conn.resp_body)
   end
 
-  defp api_conn do
-    build_conn()
-    |> put_req_header("accept", "application/json")
-    |> put_req_header("content-type", "application/json")
-  end
 end

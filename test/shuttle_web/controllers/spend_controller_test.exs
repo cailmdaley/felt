@@ -5,6 +5,7 @@ defmodule ShuttleWeb.SpendControllerTest do
   envelope, and what happens when a transcript is not on this disk.
   """
   use ExUnit.Case, async: false
+  import Shuttle.Test.ApiConn
 
   import Plug.Conn
   import Phoenix.ConnTest
@@ -77,7 +78,6 @@ defmodule ShuttleWeb.SpendControllerTest do
     File.write!(Path.join(projects, "#{session}.jsonl"), Enum.join(lines))
   end
 
-  defp api_conn, do: build_conn() |> put_req_header("accept", "application/json")
 
   test "one row per ledgered session, with its fiber and its counters", ctx do
     ledger!(ctx.ledger, [record(@s1, "work/paper")])

@@ -1,5 +1,6 @@
 defmodule ShuttleWeb.FeltStoresControllerTest do
   use ExUnit.Case
+  import Shuttle.Test.ApiConn
   import Plug.Conn
   import Phoenix.ConnTest
 
@@ -46,11 +47,6 @@ defmodule ShuttleWeb.FeltStoresControllerTest do
     :ok
   end
 
-  defp api_conn do
-    build_conn()
-    |> put_req_header("accept", "application/json")
-    |> put_req_header("content-type", "application/json")
-  end
 
   test "shows the configured base stores as the local origin" do
     path = Path.expand(System.get_env("FELT_STORES_FILE"))

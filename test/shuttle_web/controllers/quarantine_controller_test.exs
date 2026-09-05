@@ -8,6 +8,7 @@ defmodule ShuttleWeb.QuarantineControllerTest do
   no Poller answers 503 instead of crashing the request.
   """
   use ExUnit.Case
+  import Shuttle.Test.ApiConn
   import Plug.Conn
   import Phoenix.ConnTest
   import Shuttle.Test.EnvHelpers
@@ -95,9 +96,4 @@ defmodule ShuttleWeb.QuarantineControllerTest do
     assert Jason.decode!(last.body) == %{}
   end
 
-  defp api_conn do
-    build_conn()
-    |> put_req_header("content-type", "application/json")
-    |> put_req_header("accept", "application/json")
-  end
 end

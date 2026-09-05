@@ -13,7 +13,6 @@ defmodule ShuttleWeb.MomentControllerTest do
   """
   use ExUnit.Case, async: false
   alias Shuttle.Test.StubGetFileClient
-  import Plug.Conn
   import Phoenix.ConnTest
   import Shuttle.Test.EnvHelpers
 

@@ -9,6 +9,7 @@ defmodule ShuttleWeb.KillControllerTest do
   contract guard.
   """
   use ExUnit.Case
+  import Shuttle.Test.ApiConn
   import Plug.Conn
   import Phoenix.ConnTest
 
@@ -20,9 +21,4 @@ defmodule ShuttleWeb.KillControllerTest do
     assert %{"error" => _} = json_response(conn, 400)
   end
 
-  defp api_conn do
-    build_conn()
-    |> put_req_header("content-type", "application/json")
-    |> put_req_header("accept", "application/json")
-  end
 end

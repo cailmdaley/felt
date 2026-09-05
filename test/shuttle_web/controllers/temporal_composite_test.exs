@@ -8,6 +8,7 @@ defmodule ShuttleWeb.TemporalCompositeTest do
   each test states exactly what "candide" is remembered as having.
   """
   use ExUnit.Case
+  import Shuttle.Test.ApiConn
 
   import Plug.Conn
   import Phoenix.ConnTest
@@ -66,7 +67,6 @@ defmodule ShuttleWeb.TemporalCompositeTest do
 
   defp own_host, do: Shuttle.Poller.own_host_id()
 
-  defp api_conn, do: build_conn() |> put_req_header("accept", "application/json")
 
   # Point the readers at throwaway files, clearing SHUTTLE_DATA_DIR so nothing
   # can fall through to a dev machine's real ~/.shuttle.

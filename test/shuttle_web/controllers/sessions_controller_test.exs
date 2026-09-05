@@ -6,6 +6,7 @@ defmodule ShuttleWeb.SessionsControllerTest do
   `since_ms` bound, and the degradations.
   """
   use ExUnit.Case
+  import Shuttle.Test.ApiConn
   import Plug.Conn
   import Phoenix.ConnTest
 
@@ -53,7 +54,6 @@ defmodule ShuttleWeb.SessionsControllerTest do
     )
   end
 
-  defp api_conn, do: build_conn() |> put_req_header("accept", "application/json")
 
   test "200 with the host stamp and every record, oldest first", %{path: path} do
     write!(path, [

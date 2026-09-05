@@ -1,5 +1,6 @@
 defmodule ShuttleWeb.FiberControllerTest do
   use ExUnit.Case
+  import Shuttle.Test.ApiConn
   import Shuttle.Test.EnvHelpers
   import Phoenix.ConnTest
   import Plug.Conn
@@ -300,11 +301,6 @@ defmodule ShuttleWeb.FiberControllerTest do
     assert error =~ "does not match this daemon host"
   end
 
-  defp api_conn do
-    build_conn()
-    |> put_req_header("accept", "application/json")
-    |> put_req_header("content-type", "application/json")
-  end
 
   defp frontmatter(content) do
     [_, frontmatter | _] = String.split(content, "---\n", parts: 3)

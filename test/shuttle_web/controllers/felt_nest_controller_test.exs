@@ -1,5 +1,6 @@
 defmodule ShuttleWeb.FeltNestControllerTest do
   use ExUnit.Case
+  import Shuttle.Test.ApiConn
   import Shuttle.Test.EnvHelpers
   import Plug.Conn
   import Phoenix.ConnTest
@@ -99,11 +100,6 @@ defmodule ShuttleWeb.FeltNestControllerTest do
     assert forwarded["parent"] == "tests/parent"
   end
 
-  defp api_conn do
-    build_conn()
-    |> put_req_header("content-type", "application/json")
-    |> put_req_header("accept", "application/json")
-  end
 
   # A fake felt on PATH: `show <id> -j` answers FeltStores.resolve_fiber with
   # felt-shaped JSON echoing the requested id; any other invocation (the
