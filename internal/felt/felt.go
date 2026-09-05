@@ -12,7 +12,6 @@ import (
 	"sort"
 	"strings"
 	"time"
-	"unicode"
 
 	"github.com/oklog/ulid/v2"
 	"gopkg.in/yaml.v3"
@@ -261,11 +260,14 @@ func Slugify(s string) string {
 	s = stripBracketedTags(s)
 	s = strings.ToLower(s)
 
-	// Replace non-alphanumeric with hyphens
+	// Replace non-ASCII-alphanumeric with hyphens. Restricting to ASCII
+	// (rather than unicode.IsLetter/IsDigit) keeps every byte single-width,
+	// so the byte-length truncation in GenerateID/truncateAtWord can never
+	// split a multibyte rune into invalid UTF-8.
 	var result strings.Builder
 	prevHyphen := false
 	for _, r := range s {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
 			result.WriteRune(r)
 			prevHyphen = false
 		} else if !prevHyphen {
