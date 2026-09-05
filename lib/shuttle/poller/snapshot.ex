@@ -125,7 +125,7 @@ defmodule Shuttle.Poller.Snapshot do
       document_cache:
         state.document_cache_stats
         |> stringify_keys()
-        |> Map.put("state", document_cache_state(state))
+        |> Map.put("state", Poller.document_cache_state(state))
         |> Map.put("last_refresh_ms", state.document_cache_last_refresh_ms)
         |> Map.put(
           "refreshed_at",
@@ -192,8 +192,8 @@ defmodule Shuttle.Poller.Snapshot do
   match under the fiber's uid/slug/id; otherwise returns the entry unchanged.
   """
   def put_runtime(%{fiber: fiber} = entry, index) do
-    [Map.get(fiber, "uid"), Map.get(fiber, "slug"), Map.get(fiber, "id")]
-    |> Enum.find_value(fn k -> is_binary(k) and k != "" and Map.get(index, k) end)
+    fiber
+    |> index_match(index)
     |> case do
       nil -> entry
       payload -> Map.put(entry, :runtime, payload)
@@ -223,12 +223,18 @@ defmodule Shuttle.Poller.Snapshot do
   running `:runtime` overlay and from an idle-active card.
   """
   def put_held(%{fiber: fiber} = entry, index) do
-    [Map.get(fiber, "uid"), Map.get(fiber, "slug"), Map.get(fiber, "id")]
-    |> Enum.find_value(fn k -> is_binary(k) and k != "" and Map.get(index, k) end)
+    fiber
+    |> index_match(index)
     |> case do
       nil -> entry
       %{parked_at: at} -> entry |> Map.put(:held, true) |> Map.put(:held_since, at)
     end
+  end
+
+  # The first index hit under any identifier a feed entry's fiber might carry.
+  defp index_match(fiber, index) do
+    [Map.get(fiber, "uid"), Map.get(fiber, "slug"), Map.get(fiber, "id")]
+    |> Enum.find_value(fn k -> is_binary(k) and k != "" and Map.get(index, k) end)
   end
 
   # The eligible-row subset of a worker's meta, as a wire payload. Mirrors the
@@ -268,13 +274,6 @@ defmodule Shuttle.Poller.Snapshot do
   end
 
   defp stringify_keys(_), do: %{}
-
-  # "cold" before the first poll warms the cache; "partial" when the last tick
-  # served at least one store from last-known rows (a listing failure); else
-  # "fresh". Mirrors `Shuttle.Poller.document_cache_meta/1`.
-  defp document_cache_state(%{document_cache_ready: false}), do: "cold"
-  defp document_cache_state(%{document_cache_partial: true}), do: "partial"
-  defp document_cache_state(_state), do: "fresh"
 
   # Stringifies dispatch-failure reasons for the snapshot. Atoms become their
   # name (':missing_session_id' is more useful in the UI than the raw atom);

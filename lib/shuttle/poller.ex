@@ -1334,8 +1334,8 @@ defmodule Shuttle.Poller do
         # future cold period (only reachable in tests) logs once again.
         cold_feed_logged: false,
         standing_roles: standing_roles,
-        dispatch_failures: evict_stale_dispatch_failures(state.dispatch_failures, candidates),
-        resume_loop: evict_stale_resume_loop(state.resume_loop, candidates),
+        dispatch_failures: evict_stale_by_candidates(state.dispatch_failures, candidates),
+        resume_loop: evict_stale_by_candidates(state.resume_loop, candidates),
         # Fold this poll's SUCCESSFUL listings over the retained map (a failed
         # host keeps its previous rows), pruned to the current store set.
         last_known_listings:
@@ -1397,13 +1397,14 @@ defmodule Shuttle.Poller do
 
   # ── Orphan Resurrection ──
 
-  # Drops dispatch_failures entries for fibers shuttle no longer intends to
-  # dispatch — closed, paused (status not in {open, active}), shuttle block
-  # removed, or absent from the felt store entirely. Without this, the
+  # Drops dispatch_failures / resume_loop entries for fibers shuttle no longer
+  # intends to dispatch — closed, paused (status not in {open, active}), shuttle
+  # block removed, or absent from the felt store entirely. Without this, the
   # `blocked` snapshot would carry stale entries the user has no remaining
-  # handle on. Active fibers with persistent failures keep their entry
-  # across cycles so the kanban can show the failure count.
-  defp evict_stale_dispatch_failures(failures, candidates) do
+  # handle on, and a config fix or pause would not clear a paused resume loop
+  # without waiting out the cooldown. Active fibers with persistent failures
+  # keep their entry across cycles so the kanban can show the failure count.
+  defp evict_stale_by_candidates(map, candidates) do
     active_ids =
       candidates
       |> Enum.filter(fn fiber -> Map.get(fiber, "status") in ["open", "active"] end)
@@ -1412,7 +1413,7 @@ defmodule Shuttle.Poller do
 
     # Keyed by runtime key now; match the carried slug (`entry.fiber_id`)
     # against the active candidate slugs.
-    Map.filter(failures, fn {_key, entry} ->
+    Map.filter(map, fn {_key, entry} ->
       MapSet.member?(active_ids, Map.get(entry, :fiber_id))
     end)
   end
@@ -1569,9 +1570,11 @@ defmodule Shuttle.Poller do
     }
   end
 
-  defp document_cache_state(%State{document_cache_ready: false}), do: "cold"
-  defp document_cache_state(%State{document_cache_partial: true}), do: "partial"
-  defp document_cache_state(_state), do: "fresh"
+  # Also the snapshot module's source for the `document_cache.state` wire field.
+  @doc false
+  def document_cache_state(%State{document_cache_ready: false}), do: "cold"
+  def document_cache_state(%State{document_cache_partial: true}), do: "partial"
+  def document_cache_state(_state), do: "fresh"
 
   defp iso8601_or_nil(%DateTime{} = dt), do: DateTime.to_iso8601(dt)
   defp iso8601_or_nil(_), do: nil
@@ -2376,6 +2379,15 @@ defmodule Shuttle.Poller do
     end
   end
 
+  # The fiber's owning felt store, falling back to the first configured store
+  # when resolution fails (callers need *some* store to shell felt against).
+  defp owning_store(fiber_id, state) do
+    case host_for_fiber(fiber_id, state) do
+      {:ok, h} -> h
+      {:error, _} -> List.first(state.felt_stores)
+    end
+  end
+
   # Read a fiber through felt's JSON view and extract the shuttle block.
   # Felt remains the canonical reader; callers that only need shuttle-owned
   # fields route through this helper rather than reparsing frontmatter.
@@ -2417,11 +2429,7 @@ defmodule Shuttle.Poller do
   # Only the felt-store fallback resolves via `host_for_fiber/2` (cache hit on
   # the poll path — no shell).
   defp fiber_work_dir(fiber, fiber_id, state) do
-    fallback_host =
-      case host_for_fiber(fiber_id, state) do
-        {:ok, h} -> h
-        {:error, _} -> List.first(state.felt_stores)
-      end
+    fallback_host = owning_store(fiber_id, state)
 
     with shuttle when is_map(shuttle) <- Map.get(fiber, "shuttle"),
          dir when is_binary(dir) and dir != "" <- Map.get(shuttle, "project_dir"),
@@ -2576,11 +2584,7 @@ defmodule Shuttle.Poller do
         do: clear_resume_loop(state, runtime_key),
         else: state
 
-    felt_store =
-      case host_for_fiber(fiber_id, state) do
-        {:ok, h} -> h
-        {:error, _} -> List.first(state.felt_stores)
-      end
+    felt_store = owning_store(fiber_id, state)
 
     prompt_context = dispatch_prompt_context(fiber, state, opts)
 
@@ -2817,11 +2821,7 @@ defmodule Shuttle.Poller do
   # session_uuid still stamps `dispatched_at` (the run-window anchor) so a clean
   # handoff can later be compared against it.
   defp log_worker_claim(%State{} = state, fiber_id, session_uuid) do
-    felt_store =
-      case host_for_fiber(fiber_id, state) do
-        {:ok, h} -> h
-        {:error, _} -> List.first(state.felt_stores)
-      end
+    felt_store = owning_store(fiber_id, state)
 
     Shuttle.Continuation.write_dispatch(state.runner, felt_store, fiber_id, %{
       session_uuid: if(is_binary(session_uuid) and session_uuid != "", do: session_uuid)
@@ -3176,22 +3176,6 @@ defmodule Shuttle.Poller do
     end
   end
 
-  # Drops resume_loop entries for fibers shuttle no longer auto-dispatches —
-  # paused, closed, shuttle block removed, or gone — so a config fix or pause
-  # clears the paused state without waiting out the cooldown. Mirrors
-  # evict_stale_dispatch_failures; keyed by runtime key, matched on carried slug.
-  defp evict_stale_resume_loop(resume_loop, candidates) do
-    active_ids =
-      candidates
-      |> Enum.filter(fn fiber -> Map.get(fiber, "status") in ["open", "active"] end)
-      |> Enum.map(&Map.get(&1, "id", ""))
-      |> MapSet.new()
-
-    Map.filter(resume_loop, fn {_key, entry} ->
-      MapSet.member?(active_ids, Map.get(entry, :fiber_id))
-    end)
-  end
-
   # ── Retry ──
 
   defp reconcile_running_fiber(%State{} = state, fiber_id) do
@@ -3338,11 +3322,7 @@ defmodule Shuttle.Poller do
   # session reads clean (`handed_off_at >= dispatched_at` → fresh) and the next
   # poll starts fresh rather than resuming the killed transcript.
   defp cut_open_session(%State{} = state, fiber_id, runtime_key, uid) do
-    felt_store =
-      case host_for_fiber(fiber_id, state) do
-        {:ok, h} -> h
-        {:error, _} -> List.first(state.felt_stores)
-      end
+    felt_store = owning_store(fiber_id, state)
 
     # 1. Clean-exit marker — daemon-side, no worker spawned, no transcript
     #    reload. Best-effort (logged, never raised) so it can't block the cut.
@@ -3432,11 +3412,7 @@ defmodule Shuttle.Poller do
   # fiber's owning host via host_for_fiber/2 (cache → felt resolution).
   @doc false
   def fetch_fiber_full(fiber_id, state) do
-    host =
-      case host_for_fiber(fiber_id, state) do
-        {:ok, h} -> h
-        {:error, _} -> List.first(state.felt_stores)
-      end
+    host = owning_store(fiber_id, state)
 
     case run_felt(host, state.runner, ["show", fiber_id, "--json"]) do
       {:ok, output} ->
@@ -3664,8 +3640,6 @@ defmodule Shuttle.Poller do
   end
 
   @doc false
-  def runtime_seconds(nil, _), do: 0
-
   def runtime_seconds(%DateTime{} = started_at, %DateTime{} = now) do
     max(0, DateTime.diff(now, started_at, :second))
   end
