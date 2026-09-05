@@ -64,9 +64,6 @@ import './FiberDetailModal.css'
  */
 let lastGeometry: { left: number; top: number; width: number; height: number } | null = null
 
-const MIN_WIDTH = PANEL_MIN.width
-const MIN_HEIGHT = PANEL_MIN.height
-
 /** Single-column reading width. The card panel opens here and keeps it — the
  *  file viewer is now its own floating window, so the card never grows.
  *  Mirrors the old default (≤950 / 92vw). */
@@ -261,19 +258,6 @@ interface OpenFileEntry extends ZoomableTab {
   tab: HTMLElement
   scroll: number
   viewerBuilt: boolean
-  /** The same-origin iframe, once built — the scroll-restore target. */
-  iframe: HTMLIFrameElement | null
-}
-
-interface FiberBodyRead {
-  body: string
-  outcome: string
-  found: boolean
-  reached: boolean
-  /** The fiber's `modified_at` as the daemon reported it — the body's change
-   *  revision, captured off the very read that painted the page so an edit
-   *  between open and the first tick is caught. */
-  modifiedAt: string | undefined
 }
 
 /** The unchanged sentinel {@link FiberDetailModal.fetchSentFiles} returns on a
@@ -333,7 +317,6 @@ interface AgentRecord {
   effort_levels?: string[]
   default_effort?: string | null
   chrome_capable?: boolean
-  cost_class?: string | null
   alias_of?: string | null
 }
 
@@ -482,9 +465,6 @@ export class FiberDetailModal {
    *  path is one file whether it is reached as an open tab, an inline embed,
    *  or both. */
   private readonly resourceRevisions = new Map<string, string>()
-  /** The ~10 MB local events.jsonl fallback (older daemons) is worth at most
-   *  one read per panel-open, never one per 15s tick. */
-  private sentFilesFallbackTried = false
   private readonly visibilityHandler = (): void => {
     if (!document.hidden) void this.refreshLiveContent()
   }
@@ -504,10 +484,11 @@ export class FiberDetailModal {
    *     click-away, and it never writes the session's default placement or its
    *     own persisted arrangement — the panel it sits in owns all of that;
    *   · it closes with its tab.
+   *
+   * This field IS that fact: non-null iff the card is linked, holding the
+   * element it renders into (its tab's cell). Null for a card opened from the
+   * board, which builds its own floating window.
    */
-  private readonly linked: boolean
-  /** The element a linked card renders into — its tab's cell. Null for a card
-   *  opened from the board, which builds its own floating window. */
   private readonly host: HTMLElement | null
   /** Ask the panel to close this card's tab (the header ×, for a linked card). */
   private readonly onCloseRequest: (() => void) | null
@@ -524,9 +505,9 @@ export class FiberDetailModal {
    * never appears rather than appearing and doing nothing.
    */
   private readonly moves: MoveBroker | null
-  /** The open move menu (a document.body child — the panel is a size container
-   *  and clips its own fixed descendants), and its teardown. */
-  private moveMenuEl: HTMLElement | null = null
+  /** Teardown for the open move menu (a document.body child — the panel is a
+   *  size container and clips its own fixed descendants). Non-null iff a menu
+   *  is open. */
   private closeMoveMenu: (() => void) | null = null
   /** The head row's Move control, kept so a live tick can hide it when the
    *  board stops offering this card anywhere to go (and show it again when it
@@ -542,7 +523,6 @@ export class FiberDetailModal {
     onTransition?: (card: KanbanCard, target: ColumnKind) => void,
     onOpenWorker?: (tmuxSessionName: string, shuttleHost?: string) => void,
     opts?: {
-      linked?: boolean
       host?: HTMLElement
       panel?: LinkedFiberPanel
       onCloseRequest?: () => void
@@ -553,7 +533,6 @@ export class FiberDetailModal {
     this.onSaved = onSaved
     this.onTransition = onTransition ?? (() => {})
     this.onOpenWorker = onOpenWorker
-    this.linked = opts?.linked === true || opts?.host !== undefined
     this.host = opts?.host ?? null
     this.linkPanel = opts?.panel ?? null
     this.onCloseRequest = opts?.onCloseRequest ?? null
@@ -655,25 +634,24 @@ export class FiberDetailModal {
     // worker is aloft, and that is the first thing you open a card to learn —
     // and drop the promise: a plain mark, not a button that would do nothing.
     let aloftPill: HTMLElement | null = null
-    if (card.runningWorker && coarsePointer()) {
-      const mark = document.createElement('span')
-      mark.className = 'kbn-card-worker kbn-detail-aloft kbn-detail-aloft-static'
-      mark.title = `Worker aloft — ${card.runningWorker}`
-      mark.textContent = '▸ aloft'
-      aloftPill = mark
-    } else if (card.runningWorker && this.onOpenWorker) {
+    if (card.runningWorker && (coarsePointer() || this.onOpenWorker)) {
       const tmuxName = card.runningWorker
-      const btn = document.createElement('button')
-      btn.type = 'button'
-      btn.className = 'kbn-card-worker kbn-detail-aloft'
-      btn.setAttribute('aria-label', `Open worker terminal: ${tmuxName}`)
-      btn.title = `Worker aloft — click to open ${tmuxName} in kitty`
-      btn.textContent = '▸ aloft'
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation()
-        this.onOpenWorker?.(tmuxName, card.shuttleHost)
-      })
-      aloftPill = btn
+      const coarse = coarsePointer()
+      const el = document.createElement(coarse ? 'span' : 'button')
+      el.className = `kbn-card-worker kbn-detail-aloft${coarse ? ' kbn-detail-aloft-static' : ''}`
+      el.textContent = '▸ aloft'
+      if (coarse) {
+        el.title = `Worker aloft — ${tmuxName}`
+      } else {
+        ;(el as HTMLButtonElement).type = 'button'
+        el.setAttribute('aria-label', `Open worker terminal: ${tmuxName}`)
+        el.title = `Worker aloft — click to open ${tmuxName} in kitty`
+        el.addEventListener('click', (e) => {
+          e.stopPropagation()
+          this.onOpenWorker?.(tmuxName, card.shuttleHost)
+        })
+      }
+      aloftPill = el
     }
 
     const closeBtn = document.createElement('button')
@@ -696,8 +674,7 @@ export class FiberDetailModal {
     const titleStack = document.createElement('div')
     titleStack.className = 'kbn-detail-title-stack'
     titleStack.append(title, idEl)
-    if (aloftPill) header.append(titleStack, aloftPill, pill, refreshBtn, closeBtn)
-    else header.append(titleStack, pill, refreshBtn, closeBtn)
+    header.append(titleStack, ...(aloftPill ? [aloftPill] : []), pill, refreshBtn, closeBtn)
     // The header is a drag handle only for a window. In a tab it is just the
     // card's title strip — the panel's own bar is what moves.
     // A sheet's header is a title bar, not a handle — there is nowhere to drag
@@ -714,7 +691,7 @@ export class FiberDetailModal {
     // what you opened to read. A real constitution keeps its actions.
     const shuttleManaged = isAgentCard(card)
     const controls =
-      this.linked && !shuttleManaged ? null : this.buildControls(card, shuttleManaged)
+      this.host && !shuttleManaged ? null : this.buildControls(card, shuttleManaged)
 
     // ── Fiber body pane ─────────────────────────────────────────────────────
     // The fiber itself: outcome lede, then the markdown body, rendered by the
@@ -723,7 +700,7 @@ export class FiberDetailModal {
     // card is opened; a remote fiber (whose body the local daemon can't read)
     // degrades to its outcome.
     const page = document.createElement('div')
-    page.className = 'kbn-detail-page kbn-detail-page-headerless'
+    page.className = 'kbn-detail-page'
     const prose = document.createElement('article')
     prose.className = 'kbn-detail-prose'
     prose.innerHTML = '<p class="kbn-detail-prose-loading">Loading…</p>'
@@ -744,8 +721,7 @@ export class FiberDetailModal {
     // The card panel is one flex column again — header, controls, launcher,
     // body. The file viewer is a SEPARATE floating window (openViewerWindow),
     // so the card keeps its own size and never grows.
-    if (controls) overlay.append(header, controls, launcher, page)
-    else overlay.append(header, launcher, page)
+    overlay.append(header, ...(controls ? [controls] : []), launcher, page)
     if (this.host) {
       // A tab's card: no frame of its own, no z-order, no registration — it is
       // inside the panel's window, which carries all three for it.
@@ -775,7 +751,7 @@ export class FiberDetailModal {
         if (e.key !== 'Escape') return
         // The move menu unwinds first — the nearest thing you are inside is
         // the thing Escape acts on, the same rule the wikilink panel follows.
-        if (this.moveMenuEl) return
+        if (this.closeMoveMenu) return
         if (document.activeElement?.closest('.kbn-detail-parent-dropdown')) return
         // The wikilink panel, opened after the card, takes Escape first — a
         // reading unwinds one followed reference per press before the card it
@@ -795,7 +771,7 @@ export class FiberDetailModal {
     // A LINKED card has no click-away at all: it was opened by following a
     // reference, and the next thing you click is very often the card you came
     // from. It closes by its ×, by Escape, or with the card that opened it.
-    if (!this.linked) {
+    if (!this.host) {
       this.outsideHandler = (e: PointerEvent) => {
         const target = e.target as Node | null
         // The panel holding followed references counts as inside — clicking the
@@ -829,7 +805,7 @@ export class FiberDetailModal {
         const geom = fitted(readPanelGeometry(this.overlay))
         applyGeometryTo(this.overlay, geom)
         this.cardGeom = geom
-        if (!this.linked) lastGeometry = geom
+        if (!this.host) lastGeometry = geom
       }
       if (this.viewerWindow && !this.viewerWindow.classList.contains('kbn-detail-sheet')) {
         this.viewerGeom = fitted(readPanelGeometry(this.viewerWindow))
@@ -906,9 +882,7 @@ export class FiberDetailModal {
     this.disconnectGestureLayers()
     // Closing the card closes its file-viewer window too — the two windows are
     // a pair bound to one card. (closeViewerWindow nulls the viewer refs.)
-    if (this.viewerWindow) holdSheet(SHEET_VIEWER, false)
-    this.viewerWindow?.remove()
-    this.viewerWindow = null
+    this.closeViewerWindow()
     // The card's own claim goes LAST. The sheet stack is LIFO, and only its top
     // can give an entry back — releasing the card before the viewer and the
     // followed-reference panel above it would leave both stranded.
@@ -931,7 +905,6 @@ export class FiberDetailModal {
     this.bodyRevision = undefined
     this.sentFilesRevision = ''
     this.sentFilesEtag = null
-    this.sentFilesFallbackTried = false
     this.resourceRevisions.clear()
   }
 
@@ -952,7 +925,7 @@ export class FiberDetailModal {
     card: KanbanCard,
     overlay: HTMLElement,
     opts: { preserveContent?: boolean } = {},
-  ): Promise<FiberBodyRead | null> {
+  ): Promise<void> {
     const preserveContent = opts.preserveContent === true
     const requestToken = ++this.bodyRequestToken
     const pageScroll = this.bodyPage?.scrollTop ?? 0
@@ -1007,15 +980,14 @@ export class FiberDetailModal {
       if (timer !== null) window.clearTimeout(timer)
     }
     // The panel may have closed (or been replaced) while we awaited.
-    if (this.overlay !== overlay || requestToken !== this.bodyRequestToken) return null
+    if (this.overlay !== overlay || requestToken !== this.bodyRequestToken) return
     // A live refresh must never erase readable content because a transient
     // tunnel failure happened. The explicit retry button remains available on
     // the initial-load path, while the refresh control leaves the old page in
     // place and can try again on its next tick.
-    if (!reached && preserveContent) return null
+    if (!reached && preserveContent) return
 
     const outcome = outcomeFromDaemon ?? (card.outcome ?? '').trim()
-    const read: FiberBodyRead = { body, outcome, found, reached, modifiedAt }
     // Seed/advance the body's change baseline off the read that is about to
     // paint, so the first live tick compares against what the reader sees.
     if (reached) this.bodyRevision = modifiedAt
@@ -1045,13 +1017,13 @@ export class FiberDetailModal {
       this.installBodyFileLinks(prose, card)
       void this.installWikilinkNavigation(prose, overlay)
       this.restoreBodyScroll(pageScroll, overlay)
-      return read
+      return
     }
     if (!outcome && reached && found) {
       prose.classList.add('kbn-detail-prose-empty')
       prose.textContent = 'No body or outcome yet.'
       this.restoreBodyScroll(pageScroll, overlay)
-      return read
+      return
     }
     // No body. Three honest cases — remote bodies normally resolve here via the
     // owning daemon, so this is "nothing to show" or "not synced", never a
@@ -1067,13 +1039,10 @@ export class FiberDetailModal {
     prose.innerHTML = lede + `<p class="kbn-detail-prose-note">${note}</p>`
     // The outcome lede cites fibers too — a bodyless card is still navigable.
     void this.installWikilinkNavigation(prose, overlay)
-    if (note.includes('kbn-detail-body-retry')) {
-      prose.querySelector('.kbn-detail-body-retry')?.addEventListener('click', () => {
-        void this.renderFiberBody(prose, card, overlay)
-      })
-    }
+    prose.querySelector('.kbn-detail-body-retry')?.addEventListener('click', () => {
+      void this.renderFiberBody(prose, card, overlay)
+    })
     this.restoreBodyScroll(pageScroll, overlay)
-    return read
   }
 
   private restoreBodyScroll(scrollTop: number, overlay: HTMLElement): void {
@@ -1131,9 +1100,7 @@ export class FiberDetailModal {
       window.clearInterval(this.liveRefreshTimer)
       this.liveRefreshTimer = null
     }
-    if (typeof document !== 'undefined') {
-      document.removeEventListener('visibilitychange', this.visibilityHandler)
-    }
+    document.removeEventListener('visibilitychange', this.visibilityHandler)
     this.liveRefreshBusy = false
   }
 
@@ -1201,12 +1168,9 @@ export class FiberDetailModal {
     await this.renderFiberBody(prose, card, overlay, { preserveContent: true })
     if (this.overlay !== overlay) return
 
-    // Bypass every cache so the trail and the launcher are rebuilt from bytes —
-    // including the once-per-open events.jsonl fallback, since on an older
-    // daemon that read is the only way a click can surface a new send.
+    // Bypass every cache so the trail and the launcher are rebuilt from bytes.
     this.sentFilesEtag = null
     this.sentFilesRevision = ''
-    this.sentFilesFallbackTried = false
     const files = await this.fetchSentFiles(card)
     if (this.overlay !== overlay) return
     if (files !== null && files !== SENT_FILES_UNCHANGED) this.applySentFiles(files, card)
@@ -1340,7 +1304,7 @@ export class FiberDetailModal {
         this.updateOpenFileLabel(entry)
       }
     }
-    this.reconcileOpenBasenames(next)
+    if (this.openFiles.length > 0) this.writePersist()
     this.syncLauncherActiveState()
   }
 
@@ -1676,7 +1640,7 @@ export class FiberDetailModal {
     // A linked card's placement belongs to the chain that opened it — it must
     // not become where the NEXT card opened from the board appears.
     const geom = readPanelGeometry(overlay)
-    if (!this.linked) lastGeometry = geom
+    if (!this.host) lastGeometry = geom
     this.cardGeom = geom
     // Persist the card window's placement for this card so reopening restores
     // it (alongside the viewer geometry written on the viewer's settle).
@@ -1766,19 +1730,10 @@ export class FiberDetailModal {
     // written in this mode, so the sheet's CSS `inset` is not outranked by a
     // stale style attribute; no remembered placement is consulted or saved,
     // because a sheet has no placement to remember.
-    if (isMobileViewport()) {
+    const sheet = isMobileViewport()
+    if (sheet) {
       win.classList.add('kbn-detail-sheet')
-      win.addEventListener('pointerdown', () => bringToFront(win), true)
-      this.viewerWindow = win
-      document.body.append(win)
-      bringToFront(win)
-      // Its own entry, above the card's. Without one, the back gesture over an
-      // open viewer skipped straight past it and closed the card underneath —
-      // the reader loses the fiber they were reading to dismiss a file.
-      holdSheet(SHEET_VIEWER, true, () => this.closeViewerWindow())
-      return
-    }
-    if (this.viewerGeom) {
+    } else if (this.viewerGeom) {
       this.viewerGeom = fitted(this.viewerGeom)
       applyGeometryTo(win, this.viewerGeom)
     } else {
@@ -1793,30 +1748,37 @@ export class FiberDetailModal {
       applyGeometryTo(win, viewerG)
       this.viewerGeom = viewerG
     }
-    // Persist the new arrangement (half-and-half or restored) immediately.
-    this.writePersist()
-
-    const rememberViewer = () => {
-      this.viewerGeom = readPanelGeometry(win)
+    if (!sheet) {
+      // Persist the new arrangement (half-and-half or restored) immediately.
       this.writePersist()
+
+      const rememberViewer = () => {
+        this.viewerGeom = readPanelGeometry(win)
+        this.writePersist()
+      }
+      // Drag (header bar) + resize (eight edge/corner zones) — independent of
+      // the card, reusing the same chrome helpers + handle CSS. Both remember
+      // the window's new geometry for this card.
+      attachPanelDrag(win, bar, { draggingClass: 'kbn-detail-dragging', onSettle: rememberViewer })
+      attachPanelResize(win, {
+        handleClassPrefix: 'kbn-detail-rh',
+        resizingClass: 'kbn-detail-resizing',
+        minWidth: PANEL_MIN.width,
+        minHeight: PANEL_MIN.height,
+        onSettle: rememberViewer,
+      })
     }
-    // Drag (header bar) + resize (eight edge/corner zones) — independent of
-    // the card, reusing the same chrome helpers + handle CSS. Both remember the
-    // window's new geometry for this card.
-    attachPanelDrag(win, bar, { draggingClass: 'kbn-detail-dragging', onSettle: rememberViewer })
-    attachPanelResize(win, {
-      handleClassPrefix: 'kbn-detail-rh',
-      resizingClass: 'kbn-detail-resizing',
-      minWidth: MIN_WIDTH,
-      minHeight: MIN_HEIGHT,
-      onSettle: rememberViewer,
-    })
     // Clicking anywhere on the viewer raises it above the card.
     win.addEventListener('pointerdown', () => bringToFront(win), true)
 
     this.viewerWindow = win
     document.body.append(win)
     bringToFront(win)
+    // A sheet gets its own entry, above the card's. Without one, the back
+    // gesture over an open viewer skipped straight past it and closed the card
+    // underneath — the reader loses the fiber they were reading to dismiss a
+    // file.
+    if (sheet) holdSheet(SHEET_VIEWER, true, () => this.closeViewerWindow())
   }
 
   /** Tear down the file-viewer window: all tabs/cells die with it, the card
@@ -1894,8 +1856,8 @@ export class FiberDetailModal {
     attachPanelResize(overlay, {
       handleClassPrefix: 'kbn-detail-rh',
       resizingClass: 'kbn-detail-resizing',
-      minWidth: MIN_WIDTH,
-      minHeight: MIN_HEIGHT,
+      minWidth: PANEL_MIN.width,
+      minHeight: PANEL_MIN.height,
       onSettle: () => this.rememberGeometry(overlay),
     })
   }
@@ -1943,7 +1905,7 @@ export class FiberDetailModal {
       if (spoken) hovers.push(`cron: ${card.shuttleSchedule}`)
     } else if (card.shuttleKind) chips.push(card.shuttleKind)
     if (card.shuttleHost) chips.push(card.shuttleHost)
-    const projectDir = this.projectDirFor(card)
+    const projectDir = card.shuttleProjectDir
     if (projectDir) {
       // Home-relativize for the chip (~/dev/shuttle); full path on hover.
       chips.push(projectDir.replace(/^\/(?:Users|home)\/[^/]+\//, '~/'))
@@ -1995,6 +1957,14 @@ export class FiberDetailModal {
     card: KanbanCard,
     shuttleManaged: boolean,
   ): void {
+    // A drag or click inside a field is the field's own — it must not reach the
+    // header's drag or the panel's click-away.
+    const swallowDrag = (el: HTMLElement): void => {
+      for (const type of ['mousedown', 'click'] as const) {
+        el.addEventListener(type, (e) => e.stopPropagation())
+      }
+    }
+
     // ── Next dispatch (message + action buttons) ──────────────────────────
     // One canonical surface for "what happens when this fiber dispatches
     // next." The message textarea is the optional payload, carried inline on
@@ -2010,8 +1980,7 @@ export class FiberDetailModal {
     messageTa.placeholder = 'Message for the next worker (optional)…'
     messageTa.rows = 3
     messageTa.setAttribute('aria-label', 'Message for next worker')
-    messageTa.addEventListener('mousedown', (e) => e.stopPropagation())
-    messageTa.addEventListener('click', (e) => e.stopPropagation())
+    swallowDrag(messageTa)
 
     const WAIT_FOR_ME_LINE = "Wait for me before doing anything heavy — let's talk first.\n\n"
     const waitBtn = document.createElement('button')
@@ -2099,7 +2068,6 @@ export class FiberDetailModal {
     // session.id + review history); kind/schedule/tz changes go through
     // `livePatch` → the daemon's `reshape` action, which rewrites the shape
     // keys alone and leaves agent/status/outcome where they are.
-    let agentSelect: HTMLSelectElement | null = null
     const originalAgent = card.shuttleAgent ?? ''
     // The kind editor is the full three-way: One-shot | Standing | Pinned. It
     // used to coerce `pinned` to `oneshot` for its baseline, which made a
@@ -2134,7 +2102,7 @@ export class FiberDetailModal {
     agentLabel.className = 'kbn-detail-label'
     agentLabel.textContent = 'Agent'
 
-    agentSelect = document.createElement('select')
+    const agentSelect = document.createElement('select')
     agentSelect.className = 'kbn-detail-select'
 
     const loadingOpt = document.createElement('option')
@@ -2273,8 +2241,7 @@ export class FiberDetailModal {
     scheduleInput.addEventListener('input', () => {
       selectedSchedule = scheduleInput.value
     })
-    scheduleInput.addEventListener('mousedown', (e) => e.stopPropagation())
-    scheduleInput.addEventListener('click', (e) => e.stopPropagation())
+    swallowDrag(scheduleInput)
 
     const tzInput = document.createElement('input')
     tzInput.type = 'text'
@@ -2286,8 +2253,7 @@ export class FiberDetailModal {
     tzInput.addEventListener('input', () => {
       selectedTz = tzInput.value
     })
-    tzInput.addEventListener('mousedown', (e) => e.stopPropagation())
-    tzInput.addEventListener('click', (e) => e.stopPropagation())
+    swallowDrag(tzInput)
 
     scheduleRow.append(scheduleLabel, scheduleInput, tzInput)
     scheduleRow.style.display = shuttleManaged && selectedKind === 'standing' ? '' : 'none'
@@ -2335,27 +2301,31 @@ export class FiberDetailModal {
     parentInput.setAttribute('role', 'combobox')
     parentInput.setAttribute('aria-expanded', 'false')
     parentInput.setAttribute('aria-haspopup', 'listbox')
-    parentInput.addEventListener('mousedown', (e) => e.stopPropagation())
-    parentInput.addEventListener('click', (e) => e.stopPropagation())
+    swallowDrag(parentInput)
 
     const parentDropdown = document.createElement('div')
     parentDropdown.className = 'kbn-detail-parent-dropdown'
     parentDropdown.style.display = 'none'
     parentDropdown.setAttribute('role', 'listbox')
 
-    // Shared pick-handler in a closure-captured ref so the live-commit
-    // wrapper below can replace it once `livePatch` is defined — every
-    // caller (search debounce, keyboard Enter) goes through the same
-    // indirection and picks up the live-apply behavior.
-    const parentPickRef: { current: (result: FiberSearchResult) => void } = {
-      current: (result) => {
-        selectedParentId = result.id
-        parentInput.value = result.name
-        parentInput.setAttribute('aria-expanded', 'false')
-        parentDropdown.style.display = 'none'
-      },
+    // The one pick-handler every caller (search debounce, keyboard Enter,
+    // dropdown click) goes through: adopt the choice, then commit it. Its body
+    // runs only on a user pick, long after `livePatch` and `baseline` below
+    // are initialised.
+    const onPickParent = (result: FiberSearchResult): void => {
+      selectedParentId = result.id
+      parentInput.value = result.name
+      parentInput.setAttribute('aria-expanded', 'false')
+      parentDropdown.style.display = 'none'
+      const targetParentId = selectedParentId
+      if (targetParentId === baseline.parentId) return
+      livePatch({ parentId: targetParentId }, () => {
+        baseline.parentId = targetParentId
+        currentParentEl.textContent = targetParentId
+          ? `↳ ${targetParentId}`
+          : '↳ top-level (no parent)'
+      })
     }
-    const onPickParent = (result: FiberSearchResult) => parentPickRef.current(result)
 
     const openDropdown = () => {
       void this.searchParents(
@@ -2454,7 +2424,7 @@ export class FiberDetailModal {
     // `set-agent` write (preserves session history, like the old set-model).
     // The picker repopulates effort options + chrome availability from the
     // selected agent's registry metadata and commits on any axis change.
-    if (agentSelect) {
+    {
       let committedAxes = {
         agent: originalAgent,
         effort: card.shuttleEffort ?? '',
@@ -2619,20 +2589,6 @@ export class FiberDetailModal {
       }
     })
 
-    // Parent: redirect the autocomplete's pick callback into a live patch.
-    const basePickParent = parentPickRef.current
-    parentPickRef.current = (result) => {
-      basePickParent(result)
-      const targetParentId = selectedParentId
-      if (targetParentId === baseline.parentId) return
-      livePatch({ parentId: targetParentId }, () => {
-        baseline.parentId = targetParentId
-        currentParentEl.textContent = targetParentId
-          ? `↳ ${targetParentId}`
-          : '↳ top-level (no parent)'
-      })
-    }
-
     // ── Due ───────────────────────────────────────────────────────────────
     // The only way to name a date the hand cannot reach. Dropping a card on a
     // day IS the usual way to say "next Tuesday", but the drag-reveal timeline
@@ -2703,8 +2659,7 @@ export class FiberDetailModal {
       // and that same bare day is what goes back on the wire, so the value never
       // becomes an instant in either direction.
       dueInput.value = dueCivilDay(card.due) ?? ''
-      dueInput.addEventListener('mousedown', (e) => e.stopPropagation())
-      dueInput.addEventListener('click', (e) => e.stopPropagation())
+      swallowDrag(dueInput)
 
       const clearBtn = this.buildActionBtn('Clear', 'composted')
       clearBtn.title = card.isCycle
@@ -2767,7 +2722,7 @@ export class FiberDetailModal {
     if (promoteBtn) {
       promoteBtn.addEventListener('click', (e) => {
         e.stopPropagation()
-        const agent = agentSelect?.value.trim() ?? ''
+        const agent = agentSelect.value.trim()
         if (!agent) {
           promoteErr.textContent = 'Choose an agent to promote this card.'
           promoteErr.style.display = ''
@@ -2809,8 +2764,7 @@ export class FiberDetailModal {
   /**
    * The left-column sent-files launcher. Mounts empty (hidden) and self-
    * populates from {@link fetchSentFiles}: the daemon's `/api/v1/sent-files`
-   * endpoint first, falling back to parsing `events.jsonl` over `/api/v1/file`
-   * for older local daemons. The live refresh loop re-renders it when a worker
+   * endpoint. The live refresh loop re-renders it when a worker
    * sends another file, while cards without deliverables pay zero visual cost.
    * Each entry is a button that opens (or re-activates) the file in the
    * right-column accordion.
@@ -2830,10 +2784,9 @@ export class FiberDetailModal {
     this.sentWrap = wrap
     this.sentList = list
 
-    const overlayAtBuild = () => this.overlay
     void this.fetchSentFiles(card).then((files) => {
       // Panel may have closed/reopened while the fetch was in flight.
-      if (!overlayAtBuild()?.contains(wrap)) return
+      if (!this.overlay?.contains(wrap)) return
       if (files !== null && files !== SENT_FILES_UNCHANGED) this.applySentFiles(files, card)
       // A rehydration that arrived before the trail did can now mark which
       // launcher entries are open.
@@ -2882,28 +2835,6 @@ export class FiberDetailModal {
       })
   }
 
-  /**
-   * Once the trail resolves, align each open accordion entry's display label
-   * with the trail's authoritative basename (matched by full path). Without
-   * this, an entry rehydrated from a legacy persist record — or before the
-   * trail's disambiguation ran — would keep the bare path tail, producing two
-   * visually identical `report.html` headers for two genuinely distinct files.
-   */
-  private reconcileOpenBasenames(files: SentFile[]): void {
-    if (this.openFiles.length === 0) return
-    const labelByPath = new Map(files.map((f) => [f.fullPath, f.basename]))
-    for (const entry of this.openFiles) {
-      const label = labelByPath.get(entry.file.fullPath)
-      if (label && label !== entry.file.basename) {
-        entry.file.basename = label
-        const name = entry.tab.querySelector('.kbn-detail-tab-name')
-        if (name) name.textContent = label
-      }
-    }
-    // Persist the corrected labels so the next reload starts from truth.
-    this.writePersist()
-  }
-
   // ── The tabbed full-view ────────────────────────────────────────────────
 
   /**
@@ -2947,7 +2878,6 @@ export class FiberDetailModal {
       scroll,
       zoom,
       viewerBuilt: false,
-      iframe: null,
       zoomTarget: null,
       baseW: 0,
     }
@@ -2998,7 +2928,6 @@ export class FiberDetailModal {
       card.originId,
       scrollable
         ? (iframe) => {
-            entry.iframe = iframe
             // Restore the persisted reading position once the doc has loaded
             // (same-origin: served from the app's own daemon).
             try {
@@ -3069,7 +2998,7 @@ export class FiberDetailModal {
   private writePersist(): void {
     // A linked card is a stop on a path, not a workspace: it must not overwrite
     // the arrangement the reader chose for this fiber's own card.
-    if (this.linked) return
+    if (this.host) return
     const uid = typeof this.card?.uid === 'string' ? this.card.uid : ''
     if (!uid) return
     savePersist(uid, {
@@ -3123,13 +3052,10 @@ export class FiberDetailModal {
   }
 
   /**
-   * The card's sent-files trail. Tries the daemon's `GET /api/v1/sent-files`
-   * first (committed; deploys on the next daemon restart). If that 404s/fails
-   * AND the origin is local, falls back to fetching `events.jsonl` via
-   * `/api/v1/file` and parsing it client-side — local-only, because the file
-   * is ~10 MB and must never be pulled over a slow remote tunnel. A `null`
-   * result means the read failed; refreshes preserve the last known trail in
-   * that case rather than making a transient outage erase the launcher.
+   * The card's sent-files trail, from the daemon's `GET /api/v1/sent-files`.
+   * A `null` result means the read failed; refreshes preserve the last known
+   * trail in that case rather than making a transient outage erase the
+   * launcher.
    */
   private async fetchSentFiles(
     card: KanbanCard,
@@ -3160,52 +3086,15 @@ export class FiberDetailModal {
         const data = (await res.json()) as { files?: unknown }
         if (Array.isArray(data.files)) return normalizeSentFiles(data.files)
       }
-      // A non-ok (404 on an older daemon) falls through to the fallback.
     } catch {
-      // Network error — fall through to the local events.jsonl fallback.
+      // Network error — the caller keeps the last known trail.
     }
-
-    // ── Fallback: parse the LOCAL events.jsonl over /file ──
-    // The old gate was `card.originId === 'local'`, which is NEVER true for a
-    // real local card: the composite feed stamps local rows with the daemon's
-    // own host id (`own_host_id()`, e.g. `my-laptop`) and sets the feed's top-
-    // level `host` to that same id — so a local card has `originId === feed.host`
-    // (a hostname), not the literal `'local'`. That false gate short-circuited
-    // the fallback for every real local card, so until `/api/v1/sent-files`
-    // deploys, cards showed no sent files — the exact bug this path exists to
-    // fix.
-    //
-    // `FiberDetailModal` isn't handed `feed.host`, so we can't name the local
-    // host from the card alone. We don't need to: the read below is pinned to
-    // the LOCAL daemon (`fileBytesUrl(..., 'local')` emits no `&origin=`, so the
-    // route reads this machine's file — never a remote tunnel). A remote card's
-    // sends live in the *remote* host's events.jsonl, so parsing the local log
-    // for a remote uid simply yields `[]`. Thus the only real gate is "can we
-    // derive a home to point at" — and the cost is bounded (one local read,
-    // once per panel-open, primary endpoint already tried).
-    //
-    // Bounded to ONE read per panel-open: on the 15s live poll this would
-    // otherwise pull ~10 MB every tick for the whole time a card is open.
-    if (this.sentFilesFallbackTried) return SENT_FILES_UNCHANGED
-    this.sentFilesFallbackTried = true
-    const eventsPath = sentEventsPathFor(card)
-    if (!eventsPath) return []
-    try {
-      const res = await fetch(fileBytesUrl(this.shuttleBase, eventsPath, 'local'), {
-        cache: 'no-store',
-      })
-      if (!res.ok) return []
-      const text = await res.text()
-      return parseSentFilesFromEvents(text, uid, sessionId)
-    } catch {
-      return null
-    }
+    return null
   }
 
   private buildSection(label: string): HTMLElement {
     const sec = document.createElement('div')
     sec.className = 'kbn-detail-section'
-    sec.dataset.section = label.toLowerCase()
     const heading = document.createElement('div')
     heading.className = 'kbn-detail-section-heading'
     heading.textContent = label
@@ -3253,7 +3142,7 @@ export class FiberDetailModal {
     btn.title = 'Move this card — the destinations a drag would accept'
     btn.addEventListener('click', (e) => {
       e.stopPropagation()
-      if (this.moveMenuEl) {
+      if (this.closeMoveMenu) {
         this.dismissMoveMenu()
         return
       }
@@ -3355,7 +3244,6 @@ export class FiberDetailModal {
     }
 
     document.body.append(scrim, menu)
-    this.moveMenuEl = menu
     anchor.setAttribute('aria-expanded', 'true')
     renderRoot()
     if (!sheet) placeMoveMenu(menu, anchor)
@@ -3453,12 +3341,11 @@ export class FiberDetailModal {
   private dismissMoveMenu(): void {
     this.closeMoveMenu?.()
     this.closeMoveMenu = null
-    this.moveMenuEl = null
   }
 
   private buildActionBtn(
     label: string,
-    variant: 'primary' | 'tempered' | 'composted' | 'dispatch',
+    variant: 'primary' | 'tempered' | 'composted',
   ): HTMLButtonElement {
     const btn = document.createElement('button')
     btn.type = 'button'
@@ -3467,15 +3354,13 @@ export class FiberDetailModal {
     return btn
   }
 
-  /** Shuttle daemon dispatch endpoint (force/ad-hoc launches), owner-routed
-   *  by `origin`. */
-  private dispatchUrl(): string {
-    return `${this.shuttleBase}/api/v1/dispatch`
-  }
-
   /** POST one JSON body to a daemon route; the daemon answers plain text, so
    *  a !ok body is the error message verbatim. */
-  private async postJson(path: string, body: Record<string, unknown>): Promise<void> {
+  private async postJson(
+    path: string,
+    body: Record<string, unknown>,
+    label = 'Save',
+  ): Promise<void> {
     const res = await fetch(`${this.shuttleBase}${path}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -3483,20 +3368,12 @@ export class FiberDetailModal {
     })
     if (!res.ok) {
       const errText = await res.text().catch(() => `${res.status}`)
-      throw new Error(errText || `Save failed: ${res.status}`)
+      throw new Error(errText || `${label} failed: ${res.status}`)
     }
   }
 
   private async postLifecycle(body: Record<string, unknown>): Promise<void> {
     await this.postJson('/api/v1/lifecycle', body)
-  }
-
-  /** The `project_dir` for a card's shuttle install — the block's own
-   *  `project_dir` (a reshape echo). Undefined when the block carries none,
-   *  which a paused install permits; an arming install without one fails
-   *  loudly in shuttle-ctl. */
-  private projectDirFor(card: KanbanCard): string | undefined {
-    return card.shuttleProjectDir
   }
 
   /**
@@ -3543,7 +3420,8 @@ export class FiberDetailModal {
     // Single force/ad-hoc dispatch carrying the message + resume_mode inline.
     let res: Response
     try {
-      res = await fetch(this.dispatchUrl(), {
+      // Owner-routed by `origin` in the body.
+      res = await fetch(`${this.shuttleBase}/api/v1/dispatch`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -3574,7 +3452,7 @@ export class FiberDetailModal {
       if (body.tmux_session) {
         this.close()
         this.onSaved()
-        this.openWorkerForCard(card, body.tmux_session)
+        this.onOpenWorker?.(body.tmux_session, card.originId)
         return
       }
 
@@ -3598,12 +3476,8 @@ export class FiberDetailModal {
     this.close()
     this.onSaved()
     if (body.tmux_session) {
-      this.openWorkerForCard(card, body.tmux_session)
+      this.onOpenWorker?.(body.tmux_session, card.originId)
     }
-  }
-
-  private openWorkerForCard(card: KanbanCard, tmuxSessionName: string): void {
-    this.onOpenWorker?.(tmuxSessionName, card.originId)
   }
 
   private showDispatchError(
@@ -3759,36 +3633,60 @@ export class FiberDetailModal {
     onCommitted?: () => void,
   ): Promise<void> {
     if (!axes.agent) return
-    errorEl.style.display = 'none'
-    statusEl.textContent = 'Saving…'
-    statusEl.classList.remove('kbn-detail-save-status-saved')
-    statusEl.classList.add('kbn-detail-save-status-saving')
-    try {
-      await this.postLifecycle({
+    const ok = await this.withSaveStatus(statusEl, errorEl, () =>
+      this.postLifecycle({
         action: 'set-agent',
         origin: card.originId,
         fiber: card.id,
         agent: axes.agent,
         effort: axes.effort,
         chrome: axes.chrome,
-      })
+      }),
+    )
+    if (ok) onCommitted?.()
+  }
+
+  /**
+   * The save choreography every live edit shares: clear the error, show
+   * "Saving…", run the write, then either fade a "Saved" pill after a beat or
+   * surface the failure verbatim in `errorEl`. The panel stays open through
+   * every outcome — live edits don't close the inspector. Returns true on
+   * success so the caller can advance its local baseline.
+   */
+  private async withSaveStatus(
+    statusEl: HTMLElement,
+    errorEl: HTMLElement,
+    write: () => Promise<void>,
+  ): Promise<boolean> {
+    errorEl.style.display = 'none'
+    statusEl.textContent = 'Saving…'
+    statusEl.classList.remove('kbn-detail-save-status-saved')
+    statusEl.classList.add('kbn-detail-save-status-saving')
+    try {
+      await write()
+      // Refresh the kanban so the change shows up in the grid (and in any
+      // other modal that's reading the same card). The panel stays open — the
+      // user may want to keep editing.
       this.onSaved()
       statusEl.textContent = 'Saved'
       statusEl.classList.remove('kbn-detail-save-status-saving')
       statusEl.classList.add('kbn-detail-save-status-saved')
       window.setTimeout(() => {
+        // Fade the "Saved" indicator after a beat if nothing else has
+        // overwritten it in the meantime.
         if (statusEl.textContent === 'Saved') {
           statusEl.textContent = ''
           statusEl.classList.remove('kbn-detail-save-status-saved')
         }
       }, 1500)
-      onCommitted?.()
+      return true
     } catch (err: unknown) {
       const msg = (err as { message?: string })?.message ?? String(err)
       errorEl.textContent = msg
       errorEl.style.display = ''
       statusEl.textContent = ''
       statusEl.classList.remove('kbn-detail-save-status-saving')
+      return false
     }
   }
 
@@ -3880,22 +3778,14 @@ export class FiberDetailModal {
     errorEl: HTMLElement,
   ): Promise<void> {
     try {
-      const res = await fetch(`${this.shuttleBase}/api/v1/lifecycle`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'install',
-          origin: card.originId,
-          fiber: card.id,
-          model: agent,
-          project_dir: this.projectDirFor(card),
-          disabled: true,
-        }),
-      })
-      if (!res.ok) {
-        const errText = await res.text().catch(() => `${res.status}`)
-        throw new Error(errText || `Promote failed: ${res.status}`)
-      }
+      await this.postJson('/api/v1/lifecycle', {
+        action: 'install',
+        origin: card.originId,
+        fiber: card.id,
+        model: agent,
+        project_dir: card.shuttleProjectDir,
+        disabled: true,
+      }, 'Promote')
       this.close()
       this.onSaved()
     } catch (err: unknown) {
@@ -3909,12 +3799,8 @@ export class FiberDetailModal {
 
   /**
    * Apply a single-field (or coupled-field) change to the fiber's shuttle
-   * block / parent immediately on event. Updates the status pill in place:
-   * "Saving…" while the PATCH is in flight, "Saved" briefly on success,
-   * error text in `errorEl` on failure. The panel stays open through all
-   * outcomes — live edits don't close the inspector.
-   *
-   * Returns true on success so the caller can advance its local baseline.
+   * block / parent immediately on event. {@link withSaveStatus} owns the
+   * status-pill choreography and the boolean this returns.
    */
   private async livePatch(
     card: KanbanCard,
@@ -3928,124 +3814,99 @@ export class FiberDetailModal {
     statusEl: HTMLElement,
     errorEl: HTMLElement,
   ): Promise<boolean> {
-    errorEl.style.display = 'none'
-    statusEl.textContent = 'Saving…'
-    statusEl.classList.remove('kbn-detail-save-status-saved')
-    statusEl.classList.add('kbn-detail-save-status-saving')
-    try {
-      const origin = card.originId
-      const fiberId = card.id
+    return this.withSaveStatus(statusEl, errorEl, async () => {
+        const origin = card.originId
+        const fiberId = card.id
 
-      const wantsReshape =
-        changes.shuttleKind !== undefined ||
-        typeof changes.shuttleSchedule === 'string' ||
-        typeof changes.shuttleTz === 'string'
+        const wantsReshape =
+          changes.shuttleKind !== undefined ||
+          typeof changes.shuttleSchedule === 'string' ||
+          typeof changes.shuttleTz === 'string'
 
-      if (wantsReshape) {
-        // Changing the SHAPE of an existing block is its own surgical verb.
-        // `reshape` rewrites kind + schedule and nothing else — no model, no
-        // project_dir, no host, and above all no status: that is what lets a
-        // role sitting in Awaiting review (status: closed) be switched
-        // standing → oneshot, which the old create-with-`--reshape` route
-        // refused. The agent is NOT carried here; every axis change commits
-        // separately through `commitAxes` → `set-agent`.
-        //
-        // A card with no block yet has nothing to reshape (the verb errors on
-        // one), so it takes the create path — `install`/`repeat`, no reshape
-        // flag. Current block state comes from the card.
-        // The fallback PRESERVES the card's current kind — a schedule/tz-only
-        // patch must never quietly unpin a pinned role on its way past.
-        const targetKind: ShuttleKind = changes.shuttleKind ?? card.shuttleKind ?? 'oneshot'
+        if (wantsReshape) {
+          // Changing the SHAPE of an existing block is its own surgical verb.
+          // `reshape` rewrites kind + schedule and nothing else — no model, no
+          // project_dir, no host, and above all no status: that is what lets a
+          // role sitting in Awaiting review (status: closed) be switched
+          // standing → oneshot, which the old create-with-`--reshape` route
+          // refused. The agent is NOT carried here; every axis change commits
+          // separately through `commitAxes` → `set-agent`.
+          //
+          // A card with no block yet has nothing to reshape (the verb errors on
+          // one), so it takes the create path — `install`/`repeat`, no reshape
+          // flag. Current block state comes from the card.
+          // The fallback PRESERVES the card's current kind — a schedule/tz-only
+          // patch must never quietly unpin a pinned role on its way past.
+          const targetKind: ShuttleKind = changes.shuttleKind ?? card.shuttleKind ?? 'oneshot'
 
-        const schedule =
-          (typeof changes.shuttleSchedule === 'string' && changes.shuttleSchedule.trim()) ||
-          card.shuttleSchedule
-        const tz =
-          (typeof changes.shuttleTz === 'string' && changes.shuttleTz.trim()) ||
-          card.shuttleTz || 'UTC'
-        if (targetKind === 'standing' && !schedule) {
-          throw new Error('standing-kind shuttle blocks require a schedule (cron expression)')
+          const schedule =
+            (typeof changes.shuttleSchedule === 'string' && changes.shuttleSchedule.trim()) ||
+            card.shuttleSchedule
+          const tz =
+            (typeof changes.shuttleTz === 'string' && changes.shuttleTz.trim()) ||
+            card.shuttleTz || 'UTC'
+          if (targetKind === 'standing' && !schedule) {
+            throw new Error('standing-kind shuttle blocks require a schedule (cron expression)')
+          }
+
+          if (isAgentCard(card)) {
+            // A non-standing target DROPS the schedule key server-side, and
+            // sending `--schedule` alongside it is an error — so the schedule
+            // rides only when the target kind actually carries one.
+            await this.postLifecycle(
+              targetKind === 'standing'
+                ? { action: 'reshape', origin, fiber: fiberId, kind: 'standing', schedule, tz }
+                : { action: 'reshape', origin, fiber: fiberId, kind: targetKind },
+            )
+          } else if (targetKind === 'standing') {
+            // Below here the card has NO block yet, so there is nothing to
+            // reshape and the create verbs take over. `pinned` never reaches
+            // this arm: the kind control is hidden until the card is
+            // shuttle-managed, and pinning a block-less card is refused on the
+            // board too (`pinRole` banners "promote it first").
+            await this.postLifecycle({
+              action: 'repeat', origin, fiber: fiberId,
+              // Undefined when the block carries none, which a paused install
+              // permits; an arming install without one fails loudly in
+              // shuttle-ctl.
+              schedule, tz, model: card.shuttleAgent, project_dir: card.shuttleProjectDir,
+            })
+          } else {
+            await this.postLifecycle({
+              action: 'install', origin, fiber: fiberId,
+              model: card.shuttleAgent, project_dir: card.shuttleProjectDir,
+              // A paused draft must stay paused across the install (install
+              // defaults to armed; status `open` means draft).
+              disabled: card.status === 'open',
+            })
+          }
         }
 
-        if (isAgentCard(card)) {
-          // A non-standing target DROPS the schedule key server-side, and
-          // sending `--schedule` alongside it is an error — so the schedule
-          // rides only when the target kind actually carries one.
-          await this.postLifecycle(
-            targetKind === 'standing'
-              ? { action: 'reshape', origin, fiber: fiberId, kind: 'standing', schedule, tz }
-              : { action: 'reshape', origin, fiber: fiberId, kind: targetKind },
-          )
-        } else if (targetKind === 'standing') {
-          // Below here the card has NO block yet, so there is nothing to
-          // reshape and the create verbs take over. `pinned` never reaches
-          // this arm: the kind control is hidden until the card is
-          // shuttle-managed, and pinning a block-less card is refused on the
-          // board too (`pinRole` banners "promote it first").
-          await this.postLifecycle({
-            action: 'repeat', origin, fiber: fiberId,
-            schedule, tz, model: card.shuttleAgent, project_dir: this.projectDirFor(card),
+        // Reparent: the daemon's `/felt-nest` shells `felt nest`/`felt unnest`
+        // on the owning host. The grid refetch reconciles the changed id.
+        if ('parentId' in changes) {
+          await this.postJson('/api/v1/felt-nest', {
+            fiber_id: fiberId,
+            origin,
+            parent: changes.parentId ?? null,
           })
-        } else {
-          await this.postLifecycle({
-            action: 'install', origin, fiber: fiberId,
-            model: card.shuttleAgent, project_dir: this.projectDirFor(card),
-            // A paused draft must stay paused across the install (install
-            // defaults to armed; status `open` means draft).
-            disabled: card.status === 'open',
+        }
+
+        // `due:` — the same door every other due write on the board knocks on:
+        // `/felt-edit`, owner-routed by `origin` (a timeline drop through
+        // `setSurface`, the Chronicle's edge drag through `writeDue`). A fiber's
+        // due has exactly one write path and this is not a second one. The key's
+        // presence is the whole protocol server-side: absent leaves the date,
+        // `null` clears it, a string sets it — so the branch tests for the key,
+        // not for a truthy value.
+        if ('due' in changes) {
+          await this.postJson('/api/v1/felt-edit', {
+            fiber_id: fiberId,
+            origin,
+            due: changes.due ?? null,
           })
         }
-      }
-
-      // Reparent: the daemon's `/felt-nest` shells `felt nest`/`felt unnest`
-      // on the owning host. The grid refetch reconciles the changed id.
-      if ('parentId' in changes) {
-        await this.postJson('/api/v1/felt-nest', {
-          fiber_id: fiberId,
-          origin,
-          parent: changes.parentId ?? null,
-        })
-      }
-
-      // `due:` — the same door every other due write on the board knocks on:
-      // `/felt-edit`, owner-routed by `origin` (a timeline drop through
-      // `setSurface`, the Chronicle's edge drag through `writeDue`). A fiber's
-      // due has exactly one write path and this is not a second one. The key's
-      // presence is the whole protocol server-side: absent leaves the date,
-      // `null` clears it, a string sets it — so the branch tests for the key,
-      // not for a truthy value.
-      if ('due' in changes) {
-        await this.postJson('/api/v1/felt-edit', {
-          fiber_id: fiberId,
-          origin,
-          due: changes.due ?? null,
-        })
-      }
-
-      // Refresh the kanban so the change shows up in the grid (and in any
-      // other modal that's reading the same card). The detail modal stays
-      // open — the user may want to keep editing.
-      this.onSaved()
-      statusEl.textContent = 'Saved'
-      statusEl.classList.remove('kbn-detail-save-status-saving')
-      statusEl.classList.add('kbn-detail-save-status-saved')
-      window.setTimeout(() => {
-        // Fade the "Saved" indicator after a beat if nothing else has
-        // overwritten it in the meantime.
-        if (statusEl.textContent === 'Saved') {
-          statusEl.textContent = ''
-          statusEl.classList.remove('kbn-detail-save-status-saved')
-        }
-      }, 1500)
-      return true
-    } catch (err: unknown) {
-      const msg = (err as { message?: string })?.message ?? String(err)
-      errorEl.textContent = msg
-      errorEl.style.display = ''
-      statusEl.textContent = ''
-      statusEl.classList.remove('kbn-detail-save-status-saving')
-      return false
-    }
+    })
   }
 }
 
@@ -4100,81 +3961,4 @@ function relativeTime(timestamp: number): string {
   const deltaMs = Date.now() - timestamp
   if (deltaMs < 60_000) return 'just now'
   return `${humanizeIdleAge(deltaMs)} ago`
-}
-
-/**
- * Derive the user's home dir from a fiber's directory — the first two path
- * segments on macOS/Linux (`/Users/<name>` or `/home/<name>`). The
- * events.jsonl fallback reads `<home>/.shuttle/events.jsonl`. Returns
- * null for a path too shallow to carry a home (or absent).
- */
-function homeFromDir(dir: string | undefined): string | null {
-  if (!dir || !dir.startsWith('/')) return null
-  const segs = dir.split('/').filter(Boolean)
-  if (segs.length < 2) return null
-  return `/${segs[0]}/${segs[1]}`
-}
-
-function sentEventsPathFor(card: KanbanCard): string | null {
-  const home = homeFromDir(card.fiberDir)
-  return home ? `${home}/.shuttle/events.jsonl` : null
-}
-
-/** The ULID embedded in a tmux session name (`<slug>-<ULID>-shuttle`). */
-const TMUX_ULID_RE = /-([0-9A-HJKMNP-TV-Z]{26})-shuttle$/
-
-/**
- * Parse a card's sent-files trail from a raw `events.jsonl` blob (the local
- * fallback for daemons that predate `/api/v1/sent-files`). Keeps `SendUserFile`
- * pre_tool_use events whose embedded fiber ULID (from `tmuxSession`) — or
- * `sessionId` — matches the card's uid, flattens `toolInput.files`, dedupes by
- * path keeping the newest, and sorts newest-first.
- */
-function parseSentFilesFromEvents(text: string, uid: string, sessionId: string): SentFile[] {
-  const byPath = new Map<string, SentFile>()
-  for (const line of text.split('\n')) {
-    const trimmed = line.trim()
-    if (!trimmed) continue
-    let ev: {
-      tool?: string
-      tmuxSession?: string
-      sessionId?: string
-      timestamp?: number | string
-      toolInput?: { files?: unknown }
-    }
-    try {
-      ev = JSON.parse(trimmed)
-    } catch {
-      continue
-    }
-    if (ev.tool !== 'SendUserFile') continue
-
-    const tmuxUlid = typeof ev.tmuxSession === 'string'
-      ? ev.tmuxSession.match(TMUX_ULID_RE)?.[1]
-      : undefined
-    const matches =
-      (uid && (tmuxUlid === uid || ev.sessionId === uid)) ||
-      (sessionId && ev.sessionId === sessionId)
-    if (!matches) continue
-
-    const files = Array.isArray(ev.toolInput?.files) ? ev.toolInput.files : []
-    const ts = typeof ev.timestamp === 'number'
-      ? ev.timestamp
-      : typeof ev.timestamp === 'string'
-        ? Date.parse(ev.timestamp) || 0
-        : 0
-    for (const f of files) {
-      if (typeof f !== 'string' || !f) continue
-      const prev = byPath.get(f)
-      if (!prev || ts > prev.timestamp) {
-        byPath.set(f, {
-          fullPath: f,
-          basename: f.split('/').filter(Boolean).pop() ?? f,
-          timestamp: ts,
-          sessionId: typeof ev.sessionId === 'string' ? ev.sessionId : undefined,
-        })
-      }
-    }
-  }
-  return [...byPath.values()].sort((a, b) => b.timestamp - a.timestamp)
 }
