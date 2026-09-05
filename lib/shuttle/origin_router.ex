@@ -49,7 +49,7 @@ defmodule Shuttle.OriginRouter do
   `nil` / `""` / `"local"` / this daemon's own host id → `:local`. An origin
   matching a configured remote → `{:remote, remote}`. Any other (unknown)
   origin → `:local` (the endpoint's own resolution is the final arbiter — see
-  the moduledoc's Safety note), but LOUDLY now (C6): a non-empty origin that
+  the moduledoc's Safety note), but LOUDLY: a non-empty origin that
   reached here without matching local OR any configured remote is
   "remote-shaped" — the composite board only ever stamps an origin that is
   either this daemon or a name from `:remotes` — so this is either a stale
@@ -70,37 +70,28 @@ defmodule Shuttle.OriginRouter do
         :local
 
       true ->
-        case find_remote(origin, opts) do
+        # Origin routing resolves the fleet through the ONE chokepoint
+        # (`RegistryCommon.configured_remotes/1`) that the registries and the
+        # felt-stores controller also use — so a remote this daemon polls for
+        # visibility and a remote it routes writes to are guaranteed to agree,
+        # both in where the list comes from and in how it parses.
+        remotes = RegistryCommon.configured_remotes(opts)
+
+        case Enum.find(remotes, &(&1.name == origin)) do
           %Remote{} = remote ->
             {:remote, remote}
 
           nil ->
             Logger.warning(
               "OriginRouter: origin #{inspect(origin)} matches neither this daemon " <>
-                "(#{inspect(own)}) nor any configured remote (#{inspect(configured_remote_names(opts))}) " <>
+                "(#{inspect(own)}) nor any configured remote " <>
+                "(#{inspect(Enum.map(remotes, & &1.name))}) " <>
                 "— degrading to :local; the endpoint's own resolution is the final arbiter."
             )
 
             :local
         end
     end
-  end
-
-  defp configured_remote_names(opts), do: opts |> configured_remotes() |> Enum.map(& &1.name)
-
-  defp find_remote(origin, opts) do
-    opts
-    |> configured_remotes()
-    |> Enum.find(&(&1.name == origin))
-  end
-
-  # C6: origin routing resolves the fleet through the ONE chokepoint
-  # (`RegistryCommon.configured_remotes/1`) that the two registries and the
-  # felt-stores controller also use — so a remote this daemon polls for
-  # visibility and a remote it routes writes to are guaranteed to agree, both
-  # in where the list comes from and in how it parses.
-  defp configured_remotes(opts) do
-    RegistryCommon.configured_remotes(opts)
   end
 
   @doc """
@@ -115,12 +106,12 @@ defmodule Shuttle.OriginRouter do
   caller that needs to rewrite it (e.g. `Shuttle.Transition` re-stamping
   `origin`) does so on top of this.
 
-  Opts: `:client` (transport stub), `:forward_timeout_ms`.
+  Opts: `:forward_timeout_ms`.
   """
   @spec forward(Remote.t(), String.t(), map(), keyword()) ::
           {:forwarded, non_neg_integer(), String.t()} | {:error, term()}
   def forward(%Remote{} = remote, path, payload, opts \\ []) when is_map(payload) do
-    client = Keyword.get(opts, :client) || forward_client()
+    client = forward_client()
     timeout = Keyword.get(opts, :forward_timeout_ms, @default_forward_timeout_ms)
     url = remote_url(remote, path)
     body = payload |> Map.delete("origin") |> Map.delete(:origin) |> Jason.encode!()
@@ -143,12 +134,12 @@ defmodule Shuttle.OriginRouter do
   name, reason}}` on a tunnel failure. The body is binary-safe (images, PDFs),
   unlike the text-only feed `get/2`.
 
-  Opts: `:client` (transport stub), `:forward_timeout_ms`.
+  Opts: `:forward_timeout_ms`.
   """
   @spec forward_get(Remote.t(), String.t(), map(), keyword()) ::
           {:forwarded, non_neg_integer(), String.t(), binary()} | {:error, term()}
   def forward_get(%Remote{} = remote, path, query, opts \\ []) when is_map(query) do
-    client = Keyword.get(opts, :client) || forward_client()
+    client = forward_client()
     timeout = Keyword.get(opts, :forward_timeout_ms, @default_forward_timeout_ms)
     stripped = query |> Map.delete("origin") |> Map.delete(:origin)
     url = remote_url(remote, path) <> "?" <> URI.encode_query(stripped)

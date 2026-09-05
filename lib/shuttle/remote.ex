@@ -123,8 +123,6 @@ defmodule Shuttle.Remote do
   defp string_or(value, _fallback) when is_binary(value) and value != "", do: value
   defp string_or(_value, fallback), do: fallback
 
-  defp tunnel_from(nil), do: %{manager: default_tunnel_manager(), multiplex: false, label: nil}
-
   defp tunnel_from(tunnel) when is_list(tunnel), do: tunnel_from(Map.new(tunnel))
 
   defp tunnel_from(%{} = tunnel) do
@@ -186,15 +184,13 @@ defmodule Shuttle.Remote do
   @spec display_name(t()) :: String.t()
   def display_name(%__MODULE__{display: display, name: name}), do: string_or(display, name)
 
+  defp base(url), do: String.trim_trailing(url, "/")
+
   @doc """
   The full `GET /api/v1/state` URL for this remote.
   """
   @spec state_url(t()) :: String.t()
-  def state_url(%__MODULE__{url: url}) do
-    url
-    |> String.trim_trailing("/")
-    |> Kernel.<>("/api/v1/state")
-  end
+  def state_url(%__MODULE__{url: url}), do: base(url) <> "/api/v1/state"
 
   @doc """
   The full `GET /api/v1/fibers?shuttle=true` URL for this remote — the
@@ -203,11 +199,7 @@ defmodule Shuttle.Remote do
   into the unified cross-host board (`Shuttle.RemoteFiberRegistry`).
   """
   @spec fibers_url(t()) :: String.t()
-  def fibers_url(%__MODULE__{url: url}) do
-    url
-    |> String.trim_trailing("/")
-    |> Kernel.<>("/api/v1/fibers?shuttle=true")
-  end
+  def fibers_url(%__MODULE__{url: url}), do: base(url) <> "/api/v1/fibers?shuttle=true"
 
   @doc """
   The full `GET /api/v1/activity` URL for this remote, over the inclusive
@@ -222,56 +214,42 @@ defmodule Shuttle.Remote do
   end
 
   @doc """
-  The full `GET /api/v1/sessions` URL for this remote, from `since_ms`. The
-  ledger is one line per session, so the hub asks for all of it (`since_ms: 0`).
+  The full `GET /api/v1/sessions` URL for this remote. The ledger is one line
+  per session, so the hub asks for all of it (`since_ms=0`).
   """
-  @spec sessions_url(t(), integer()) :: String.t()
-  def sessions_url(%__MODULE__{url: url}, since_ms) when is_integer(since_ms) do
-    base(url) <> "/api/v1/sessions?since_ms=#{since_ms}"
-  end
+  @spec sessions_url(t()) :: String.t()
+  def sessions_url(%__MODULE__{url: url}), do: base(url) <> "/api/v1/sessions?since_ms=0"
 
   @doc """
-  The full `GET /api/v1/spend` URL for this remote, from `since_ms`. One row
-  per ledgered session, so the hub asks for the whole ledger the way it does
-  for `/sessions`; the far side caps the window at 90 days on its own.
+  The full `GET /api/v1/spend` URL for this remote. One row per ledgered
+  session, so the hub asks for the whole ledger the way it does for
+  `/sessions`; the far side caps the window at 90 days on its own.
   """
-  @spec spend_url(t(), integer()) :: String.t()
-  def spend_url(%__MODULE__{url: url}, since_ms) when is_integer(since_ms) do
-    base(url) <> "/api/v1/spend?since_ms=#{since_ms}"
-  end
+  @spec spend_url(t()) :: String.t()
+  def spend_url(%__MODULE__{url: url}), do: base(url) <> "/api/v1/spend?since_ms=0"
 
   @doc """
-  The full `GET /api/v1/commits` URL for this remote, from `since_ms`. One line
-  per commit, so the hub asks for the whole ledger the way it does for
-  `/sessions` — the window is applied when the composite serves it.
+  The full `GET /api/v1/commits` URL for this remote. One line per commit, so
+  the hub asks for the whole ledger the way it does for `/sessions` — the
+  window is applied when the composite serves it.
   """
-  @spec commits_url(t(), integer()) :: String.t()
-  def commits_url(%__MODULE__{url: url}, since_ms) when is_integer(since_ms) do
-    base(url) <> "/api/v1/commits?since_ms=#{since_ms}"
-  end
+  @spec commits_url(t()) :: String.t()
+  def commits_url(%__MODULE__{url: url}), do: base(url) <> "/api/v1/commits?since_ms=0"
 
   @doc """
-  The full `GET /api/v1/sent-files/all` URL for this remote, from `since_ms`.
-  One line per send across every fiber on that host, so the hub asks for the
-  whole stream the way it does for `/commits` — the window is applied when the
-  composite serves it.
+  The full `GET /api/v1/sent-files/all` URL for this remote. One line per send
+  across every fiber on that host, so the hub asks for the whole stream the way
+  it does for `/commits` — the window is applied when the composite serves it.
   """
-  @spec sent_files_all_url(t(), integer()) :: String.t()
-  def sent_files_all_url(%__MODULE__{url: url}, since_ms) when is_integer(since_ms) do
-    base(url) <> "/api/v1/sent-files/all?since_ms=#{since_ms}"
-  end
-
-  defp base(url), do: String.trim_trailing(url, "/")
+  @spec sent_files_all_url(t()) :: String.t()
+  def sent_files_all_url(%__MODULE__{url: url}),
+    do: base(url) <> "/api/v1/sent-files/all?since_ms=0"
 
   @doc """
   The full `GET /api/v1/felt-stores` URL for this remote.
   """
   @spec felt_stores_url(t()) :: String.t()
-  def felt_stores_url(%__MODULE__{url: url}) do
-    url
-    |> String.trim_trailing("/")
-    |> Kernel.<>("/api/v1/felt-stores")
-  end
+  def felt_stores_url(%__MODULE__{url: url}), do: base(url) <> "/api/v1/felt-stores"
 
   @doc """
   Returns `true` when `last_polled_at` is older than
