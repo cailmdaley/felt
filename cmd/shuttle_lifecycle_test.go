@@ -657,3 +657,52 @@ func TestShuttleRetiredAgent_EditPassesResumeRefuses(t *testing.T) {
 		t.Fatalf("reopen --as-draft arms nothing and must pass: %v\n%s", err, out)
 	}
 }
+
+// TestShuttleRetiredAgent_EditStatusActiveRefuses covers the second arming
+// gate the reviewer flagged: `edit --status active` on a fiber carrying a
+// shuttle: block must resolve the agent, same as resume/reopen. A plain
+// content edit (no status flip, or a flip to a non-arming status) must still
+// pass untouched.
+func TestShuttleRetiredAgent_EditStatusActiveRefuses(t *testing.T) {
+	defer saveShuttleGlobals()()
+	dir, storage := newStore(t)
+	seedShuttleRole(t, storage, "f", felt.StatusOpen, map[string]any{"kind": "oneshot", "agent": "retired-agent"}, nil)
+
+	if out, err := runCommand(t, dir, "edit", "f", "-s", "active"); err == nil {
+		t.Fatalf("edit -s active with a retired agent must refuse\n%s", out)
+	} else if !strings.Contains(err.Error()+out, "retired-agent") {
+		t.Fatalf("refusal should name the agent, got: %v\n%s", err, out)
+	}
+	if mustRead(t, storage, "f").Status != felt.StatusOpen {
+		t.Fatal("refused edit -s active must not arm the fiber")
+	}
+
+	if out, err := runCommand(t, dir, "edit", "f", "-s", "closed"); err != nil {
+		t.Fatalf("edit -s closed (non-arming) must pass even with a retired agent: %v\n%s", err, out)
+	}
+	if got := mustRead(t, storage, "f").Status; got != felt.StatusClosed {
+		t.Fatalf("status = %q, want closed", got)
+	}
+}
+
+// TestShuttleRetiredAgent_AcceptRefuses covers the offline-accept arming gate:
+// a standing role awaiting review with a retired agent must refuse rather
+// than silently re-arm.
+func TestShuttleRetiredAgent_AcceptRefuses(t *testing.T) {
+	defer saveShuttleGlobals()()
+	t.Setenv("SHUTTLE_LIFECYCLE_OFFLINE", "1")
+	dir, storage := newStore(t)
+	seedShuttleRole(t, storage, "f", felt.StatusClosed, map[string]any{
+		"kind": "standing", "agent": "retired-agent",
+		"schedule": map[string]any{"expr": "0 9 * * 1-5", "tz": "Europe/Paris"},
+	}, nil)
+
+	if out, err := runCommand(t, dir, "shuttle", "accept", "f"); err == nil {
+		t.Fatalf("accept must refuse a retired agent\n%s", out)
+	} else if !strings.Contains(err.Error()+out, "retired-agent") {
+		t.Fatalf("refusal should name the agent, got: %v\n%s", err, out)
+	}
+	if mustRead(t, storage, "f").Status != felt.StatusClosed {
+		t.Fatal("refused accept must not arm the fiber")
+	}
+}

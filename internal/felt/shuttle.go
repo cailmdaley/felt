@@ -258,9 +258,9 @@ func (f *Felt) SetShuttleConfig(block *shuttle.Block) error {
 // (kind enum, pinned-forbids-schedule, standing-requires a valid cron +
 // timezone). It deliberately does NOT resolve the agent: a content edit on a
 // fiber whose agent id has since been retired from the registry must still
-// succeed — the agent is validated where it is consumed (install, repeat, pin,
-// set-agent, resume, reopen, and the daemon's dispatch), never on a write that
-// only touches content. A no-op for a pure note (or a degenerate non-mapping
+// succeed — the agent is validated where it is consumed (install, repeat,
+// pin, set-agent, set-model, resume, reopen, accept, `edit --status active`,
+// and the daemon's dispatch), never on a write that only touches content. A no-op for a pure note (or a degenerate non-mapping
 // shuttle value), so notes pay nothing. felt's write verbs call this before
 // persisting, making felt the schema authority: a structurally invalid
 // shuttle: block fails the write loudly rather than reaching disk.

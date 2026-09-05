@@ -237,16 +237,15 @@ func resolveBlockAgent(block *shuttle.Block) error {
 	if err != nil {
 		return err
 	}
-	name := block.Agent
-	if name == "" {
-		def, err := reg.Default()
-		if err != nil {
-			return err
+	// Delegate to the same resolution shuttle.Validate performs (named agent,
+	// or registry default when unnamed, together with effort/chrome), so a
+	// bare block on a host with no configured default fails open the same
+	// way install/create already tolerate it — no separate default-resolution
+	// logic here that could diverge from Validate's.
+	for _, e := range shuttle.Validate(block, reg) {
+		if e.Field == "agent" {
+			return fmt.Errorf("cannot arm: %s (felt shuttle set-agent to pick a current one)", e.Message)
 		}
-		name = def.ID
-	}
-	if _, _, err := reg.Resolve(name, block.Effort, block.Chrome); err != nil {
-		return fmt.Errorf("cannot arm: %w (felt shuttle set-agent to pick a current one)", err)
 	}
 	return nil
 }
@@ -470,6 +469,14 @@ falls back to a local document write when the daemon is down.`,
 
 		if block.Schedule == nil {
 			return fmt.Errorf("fiber %s has no schedule", args[0])
+		}
+
+		// Gated at the CLI before either path: the daemon-routed request and
+		// the offline local write both arm the fiber (status: active), so
+		// both need a resolvable agent up front (the daemon resolves again
+		// at dispatch; that's fine, this just fails fast and offline too).
+		if err := resolveBlockAgent(block); err != nil {
+			return err
 		}
 
 		if output, err := postLifecycle("accept", map[string]any{
