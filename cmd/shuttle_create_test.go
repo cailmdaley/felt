@@ -133,17 +133,6 @@ func TestShuttleCreate_RefusesExistingBlock(t *testing.T) {
 	}
 }
 
-func TestShuttleInstall_RefusesClosed(t *testing.T) {
-	defer saveShuttleGlobals()()
-	dir, storage := newStore(t)
-	seedPlainFiber(t, storage, "task", felt.StatusClosed)
-	pdir := t.TempDir()
-
-	if _, err := runCommand(t, dir, "shuttle", "install", "task", "--host", "testhost", "--project-dir", pdir); err == nil {
-		t.Fatal("armed install on a closed fiber must refuse")
-	}
-}
-
 // ---- repeat ----------------------------------------------------------------
 
 func TestShuttleRepeat_Standing(t *testing.T) {

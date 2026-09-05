@@ -107,7 +107,7 @@ func TestStorageWriteRead(t *testing.T) {
 		CreatedAt: time.Now(),
 		Body:      "Test body content.",
 	}
-	mustExtraField(t, f, "inputs", []map[string]any{{"id": "dep_a", "from": "dep-a.output"}})
+	mustExtra(t, f, "inputs", []map[string]any{{"id": "dep_a", "from": "dep-a.output"}})
 
 	// Write
 	if err := s.Write(f); err != nil {
@@ -1089,11 +1089,11 @@ func TestStorageMoveSubtreeRewritesInputRefs(t *testing.T) {
 		CreatedAt: time.Now(),
 	}
 	child := &Felt{ID: "damping-prior", Name: "Damping Prior", CreatedAt: time.Now()}
-	mustExtraField(t, child, "inputs", []map[string]any{{"id": "analysis_input", "from": "bao-analysis.posterior"}})
+	mustExtra(t, child, "inputs", []map[string]any{{"id": "analysis_input", "from": "bao-analysis.posterior"}})
 	grandchild := &Felt{ID: "damping-prior/contour-plot", Name: "Contour Plot", CreatedAt: time.Now()}
-	mustExtraField(t, grandchild, "inputs", []map[string]any{{"id": "plot_input", "from": "damping-prior.fit"}})
+	mustExtra(t, grandchild, "inputs", []map[string]any{{"id": "plot_input", "from": "damping-prior.fit"}})
 	consumer := &Felt{ID: "consumer", Name: "Consumer", CreatedAt: time.Now()}
-	mustExtraField(t, consumer, "inputs", []map[string]any{{"id": "consumer_input", "from": "damping-prior/contour-plot.figure"}})
+	mustExtra(t, consumer, "inputs", []map[string]any{{"id": "consumer_input", "from": "damping-prior/contour-plot.figure"}})
 
 	for _, f := range []*Felt{parent, child, grandchild, consumer} {
 		if err := s.Write(f); err != nil {
@@ -1457,7 +1457,7 @@ Analysis body.
 		CreatedAt: time.Now(),
 		Body:      "(session-hub)=\n# Session hub",
 	}
-	mustExtraField(t, preExisting, "inputs", []map[string]any{{"id": "analysis_input", "from": "bao-analysis-d34db33f.posterior"}})
+	mustExtra(t, preExisting, "inputs", []map[string]any{{"id": "analysis_input", "from": "bao-analysis-d34db33f.posterior"}})
 	if err := s.Write(preExisting); err != nil {
 		t.Fatalf("write pre-existing: %v", err)
 	}

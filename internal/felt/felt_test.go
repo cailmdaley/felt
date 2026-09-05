@@ -9,13 +9,6 @@ import (
 	"time"
 )
 
-func mustExtraField(t *testing.T, f *Felt, key string, value any) {
-	t.Helper()
-	if err := f.SetExtraField(key, value); err != nil {
-		t.Fatalf("SetExtraField(%s): %v", key, err)
-	}
-}
-
 func TestNew(t *testing.T) {
 	f, err := New("test-task", "Test Task")
 	if err != nil {
@@ -388,7 +381,7 @@ func TestMarshal(t *testing.T) {
 		CreatedAt: now,
 		Body:      "Body text here.",
 	}
-	mustExtraField(t, f, "inputs", []map[string]any{{"id": "dep_1", "from": "dep-1.output"}})
+	mustExtra(t, f, "inputs", []map[string]any{{"id": "dep_1", "from": "dep-1.output"}})
 
 	data, err := f.Marshal()
 	if err != nil {
@@ -1023,7 +1016,7 @@ func TestMarshalInputRefs(t *testing.T) {
 		Status:    StatusOpen,
 		CreatedAt: time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC),
 	}
-	mustExtraField(t, f, "inputs", []map[string]any{
+	mustExtra(t, f, "inputs", []map[string]any{
 		{"id": "data_input", "from": "bare-id"},
 		{"id": "labeled_input", "from": "labeled-id.output"},
 	})

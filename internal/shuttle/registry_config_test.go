@@ -18,15 +18,12 @@ func writeUserRegistry(t *testing.T, body string) string {
 	return path
 }
 
-// ids is the registry's id list, for order-sensitive assertions.
-func ids(reg *AgentRegistry) []string { return reg.IDs() }
-
 // find fails the test when the id is absent.
 func find(t *testing.T, reg *AgentRegistry, id string) AgentRecord {
 	t.Helper()
 	rec, ok := reg.Find(id)
 	if !ok {
-		t.Fatalf("agent %q not in registry %v", id, ids(reg))
+		t.Fatalf("agent %q not in registry %v", id, reg.IDs())
 	}
 	return rec
 }
@@ -162,7 +159,7 @@ func TestLoadAgentRegistry_Restrict(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadAgentRegistry: %v", err)
 	}
-	if got := ids(reg); len(got) != 1 {
+	if got := reg.IDs(); len(got) != 1 {
 		t.Fatalf("ids = %v, want only the user's record", got)
 	}
 }

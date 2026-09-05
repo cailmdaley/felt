@@ -3,6 +3,7 @@ package cmd
 import (
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"sort"
 	"testing"
 	"time"
@@ -294,7 +295,7 @@ func TestFetchComposite_ParsesSampleResponse(t *testing.T) {
 		"candide:tests/smoke-remote-haiku",
 		"cineca:",
 	}
-	if !equalSorted(ids, want) {
+	if !slices.Equal(ids, want) {
 		t.Errorf("unexpected row set:\n got: %v\nwant: %v", ids, want)
 	}
 }
@@ -309,16 +310,4 @@ func TestFetchComposite_ErrorOnNon200(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error on 500, got nil")
 	}
-}
-
-func equalSorted(got, want []string) bool {
-	if len(got) != len(want) {
-		return false
-	}
-	for i := range got {
-		if got[i] != want[i] {
-			return false
-		}
-	}
-	return true
 }

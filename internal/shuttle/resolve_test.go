@@ -67,10 +67,7 @@ func TestCodexModelFamily(t *testing.T) {
 }
 
 func TestResolveBlock_Oneshot(t *testing.T) {
-	reg, err := LoadAgentRegistry()
-	if err != nil {
-		t.Fatalf("LoadAgentRegistry: %v", err)
-	}
+	reg := builtinReg(t)
 	res, err := ResolveBlock(&Block{Kind: "oneshot", Agent: "claude-opus"}, reg, time.Now())
 	if err != nil {
 		t.Fatalf("ResolveBlock: %v", err)
@@ -90,10 +87,7 @@ func TestResolveBlock_Oneshot(t *testing.T) {
 }
 
 func TestResolveBlock_StandingNextDue(t *testing.T) {
-	reg, err := LoadAgentRegistry()
-	if err != nil {
-		t.Fatalf("LoadAgentRegistry: %v", err)
-	}
+	reg := builtinReg(t)
 	b := &Block{Kind: "standing", Agent: "claude-sonnet", Schedule: &Schedule{Expr: "0 9 * * 1-5", TZ: "Europe/Paris"}}
 	now := time.Date(2026, 6, 21, 12, 0, 0, 0, time.UTC)
 	res, err := ResolveBlock(b, reg, now)
@@ -119,10 +113,7 @@ func TestResolveBlock_StandingNextDue(t *testing.T) {
 // dispatch decision reads: a standing role resolves a prev_due (most recent tick
 // ≤ now) that brackets now with next_due. A oneshot has neither.
 func TestResolveBlock_StandingPrevDue(t *testing.T) {
-	reg, err := LoadAgentRegistry()
-	if err != nil {
-		t.Fatalf("LoadAgentRegistry: %v", err)
-	}
+	reg := builtinReg(t)
 	b := &Block{Kind: "standing", Agent: "claude-sonnet", Schedule: &Schedule{Expr: "0 9 * * 1-5", TZ: "Europe/Paris"}}
 	now := time.Date(2026, 6, 21, 12, 0, 0, 0, time.UTC)
 	res, err := ResolveBlock(b, reg, now)
@@ -157,10 +148,7 @@ func TestResolveBlock_StandingPrevDue(t *testing.T) {
 // ResolveBlock must drop rather than emit as a year-0001 next_due. The daemon
 // then sees an unschedulable (invalid) standing role, matching the old behavior.
 func TestResolveBlock_ImpossibleSchedule(t *testing.T) {
-	reg, err := LoadAgentRegistry()
-	if err != nil {
-		t.Fatalf("LoadAgentRegistry: %v", err)
-	}
+	reg := builtinReg(t)
 	b := &Block{Kind: "standing", Agent: "claude-sonnet", Schedule: &Schedule{Expr: "0 0 30 2 *", TZ: "UTC"}}
 	res, err := ResolveBlock(b, reg, time.Now())
 	if err != nil {
@@ -179,20 +167,14 @@ func TestResolveBlock_ImpossibleSchedule(t *testing.T) {
 }
 
 func TestResolveBlock_UnknownAgentErrors(t *testing.T) {
-	reg, err := LoadAgentRegistry()
-	if err != nil {
-		t.Fatalf("LoadAgentRegistry: %v", err)
-	}
+	reg := builtinReg(t)
 	if _, err := ResolveBlock(&Block{Kind: "oneshot", Agent: "no-such-agent"}, reg, time.Now()); err == nil {
 		t.Fatal("an unknown agent should make ResolveBlock error")
 	}
 }
 
 func TestResolveBlock_DefaultsUnnamedAgent(t *testing.T) {
-	reg, err := LoadAgentRegistry()
-	if err != nil {
-		t.Fatalf("LoadAgentRegistry: %v", err)
-	}
+	reg := builtinReg(t)
 	res, err := ResolveBlock(&Block{Kind: "oneshot"}, reg, time.Now())
 	if err != nil {
 		t.Fatalf("ResolveBlock: %v", err)
@@ -200,4 +182,15 @@ func TestResolveBlock_DefaultsUnnamedAgent(t *testing.T) {
 	if res.Agent == nil || res.Agent.ID != "claude-opus" {
 		t.Fatalf("unnamed agent should resolve to the registry default (claude-opus), got %+v", res.Agent)
 	}
+}
+
+// builtinReg reads the shipped built-in registry — the ResolveBlock tests
+// deliberately exercise the agents felt ships, not axes_test's fixture.
+func builtinReg(t *testing.T) *AgentRegistry {
+	t.Helper()
+	reg, err := LoadAgentRegistry()
+	if err != nil {
+		t.Fatalf("LoadAgentRegistry: %v", err)
+	}
+	return reg
 }

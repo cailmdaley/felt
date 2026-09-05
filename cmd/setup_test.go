@@ -293,21 +293,7 @@ func TestCodexMarketplaceConflict(t *testing.T) {
 // TestFindPluginDir verifies the resolver returns a valid plugin directory
 // from a --source path pointing at a felt repo checkout.
 func TestFindPluginDir_FromRepoCheckout(t *testing.T) {
-	// Find repo root by walking up from cwd.
-	root, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("getwd: %v", err)
-	}
-	for {
-		if _, err := os.Stat(filepath.Join(root, "go.mod")); err == nil {
-			break
-		}
-		parent := filepath.Dir(root)
-		if parent == root {
-			t.Fatal("could not find repo root with go.mod")
-		}
-		root = parent
-	}
+	root := repoRoot(t)
 
 	// The repo should have a claude-plugin/plugin.json.
 	pluginDir, err := findPluginDir(root)

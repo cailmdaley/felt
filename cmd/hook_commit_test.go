@@ -73,29 +73,6 @@ func writeCommit(t *testing.T, payload map[string]any) {
 	}
 }
 
-func readCommitLines(t *testing.T, path string) []map[string]any {
-	t.Helper()
-	data, err := os.ReadFile(path)
-	if os.IsNotExist(err) {
-		return nil
-	}
-	if err != nil {
-		t.Fatalf("read %s: %v", path, err)
-	}
-	var out []map[string]any
-	for _, line := range strings.Split(strings.TrimRight(string(data), "\n"), "\n") {
-		if line == "" {
-			continue
-		}
-		var m map[string]any
-		if err := json.Unmarshal([]byte(line), &m); err != nil {
-			t.Fatalf("line is not valid JSON: %v\n%s", err, line)
-		}
-		out = append(out, m)
-	}
-	return out
-}
-
 // TestCommitLineShape pins the record Shuttle.CommitLedger consumes: `at` an
 // integer and `sha` a non-empty string (parse_line/3 drops anything else), plus
 // the fields /api/v1/commits serves verbatim to the board's CommitRecord.
@@ -107,7 +84,7 @@ func TestCommitLineShape(t *testing.T) {
 
 	writeCommit(t, commitPayload(repo, `git commit -m "desk: cycle lens"`))
 
-	lines := readCommitLines(t, path)
+	lines := readEventLines(t, path)
 	if len(lines) != 1 {
 		t.Fatalf("got %d lines, want 1", len(lines))
 	}
@@ -171,7 +148,7 @@ func TestCommitProvenanceNulls(t *testing.T) {
 	payload["session_id"] = "unknown"
 	writeCommit(t, payload)
 
-	lines := readCommitLines(t, path)
+	lines := readEventLines(t, path)
 	if len(lines) != 1 {
 		t.Fatalf("got %d lines, want 1", len(lines))
 	}
@@ -245,7 +222,7 @@ func TestCommitRecordingCases(t *testing.T) {
 				tc.mutate(payload)
 			}
 			writeCommit(t, payload)
-			if got := len(readCommitLines(t, path)); got != tc.want {
+			if got := len(readEventLines(t, path)); got != tc.want {
 				t.Fatalf("got %d lines, want %d", got, tc.want)
 			}
 		})
@@ -263,7 +240,7 @@ func TestCommitDedupe(t *testing.T) {
 
 	writeCommit(t, commitPayload(repo, "git commit -m first"))
 	writeCommit(t, commitPayload(repo, "git commit -m first"))
-	lines := readCommitLines(t, path)
+	lines := readEventLines(t, path)
 	if len(lines) != 1 {
 		t.Fatalf("got %d lines after a repeat, want 1", len(lines))
 	}
@@ -277,7 +254,7 @@ func TestCommitDedupe(t *testing.T) {
 		t.Fatalf("second commit: %v\n%s", err, out)
 	}
 	writeCommit(t, commitPayload(repo, "git commit --allow-empty -m second"))
-	lines = readCommitLines(t, path)
+	lines = readEventLines(t, path)
 	if len(lines) != 2 {
 		t.Fatalf("got %d lines after a second commit, want 2", len(lines))
 	}
@@ -306,7 +283,7 @@ func TestCommitWriteGate(t *testing.T) {
 		t.Fatalf("mkdir: %v", err)
 	}
 	writeCommit(t, commitPayload(repo, "git commit -m gated"))
-	if lines := readCommitLines(t, filepath.Join(home, ".shuttle", "commits.jsonl")); len(lines) != 1 {
+	if lines := readEventLines(t, filepath.Join(home, ".shuttle", "commits.jsonl")); len(lines) != 1 {
 		t.Fatalf("got %d lines after enabling, want 1", len(lines))
 	}
 }
@@ -328,7 +305,7 @@ func TestCommitDataDirTier(t *testing.T) {
 		t.Fatalf("mkdir: %v", err)
 	}
 	writeCommit(t, commitPayload(repo, "git commit -m tiered"))
-	if lines := readCommitLines(t, filepath.Join(dataDir, "commits.jsonl")); len(lines) != 1 {
+	if lines := readEventLines(t, filepath.Join(dataDir, "commits.jsonl")); len(lines) != 1 {
 		t.Fatalf("got %d lines, want 1", len(lines))
 	}
 }
@@ -342,7 +319,7 @@ func TestCommitExplicitFileOverridesGate(t *testing.T) {
 	t.Setenv("SHUTTLE_COMMITS_FILE", path)
 
 	writeCommit(t, commitPayload(repo, "git commit -m explicit"))
-	if lines := readCommitLines(t, path); len(lines) != 1 {
+	if lines := readEventLines(t, path); len(lines) != 1 {
 		t.Fatalf("got %d lines, want 1", len(lines))
 	}
 }
@@ -364,7 +341,7 @@ func TestCommitDegenerateInput(t *testing.T) {
 			t.Fatalf("runCommitHook(%q) = %v, want nil", in, err)
 		}
 	}
-	if lines := readCommitLines(t, path); len(lines) != 0 {
+	if lines := readEventLines(t, path); len(lines) != 0 {
 		t.Fatalf("degenerate payloads recorded %d lines, want 0", len(lines))
 	}
 }
@@ -395,7 +372,7 @@ func TestCommitSubjectWithTabs(t *testing.T) {
 	t.Setenv("SHUTTLE_COMMITS_FILE", path)
 
 	writeCommit(t, commitPayload(repo, "git commit -m tabbed"))
-	lines := readCommitLines(t, path)
+	lines := readEventLines(t, path)
 	if len(lines) != 1 {
 		t.Fatalf("got %d lines, want 1", len(lines))
 	}

@@ -92,7 +92,7 @@ func TestSessionSectionPlacement(t *testing.T) {
 	}
 
 	ctx := sessionContextFor(t, dir)
-	inFlightSec, recentSec := splitSections(ctx)
+	inFlightSec, recentSec := sectionBody(ctx, "## Active / Open"), sectionBody(ctx, "## Recently Touched")
 
 	for _, id := range []string{"act", "opn"} {
 		if !strings.Contains(inFlightSec, id) {
@@ -521,12 +521,6 @@ func TestHookPreToolFlagPersists(t *testing.T) {
 func sessionContextFor(t *testing.T, dir string) string {
 	t.Helper()
 	return runHookCommand(t, dir, "session")
-}
-
-// splitSections returns the Active / Open and Recently Touched slices of a
-// session context, each bounded by the next "## " header.
-func splitSections(ctx string) (inFlight, recent string) {
-	return sectionBody(ctx, "## Active / Open"), sectionBody(ctx, "## Recently Touched")
 }
 
 func mustSection(t *testing.T, ctx, header string) string {
