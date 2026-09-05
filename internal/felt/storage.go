@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path"
 	"path/filepath"
@@ -1847,23 +1846,27 @@ func readMetadataFile(path, id string) (*Felt, error) {
 }
 
 func readFrontmatterFile(path string) ([]byte, error) {
-	file, err := os.Open(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
-
-	return readFrontmatter(file)
+	frontmatter, _, err := splitFrontmatter(data, false)
+	return frontmatter, err
 }
 
 func fileFrontmatterHasTopLevelFields(path string, fields []string) (bool, error) {
-	file, err := os.Open(path)
+	if len(fields) == 0 {
+		return true, nil
+	}
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return false, err
 	}
-	defer file.Close()
-
-	return scanFrontmatterTopLevelFields(file, fields)
+	frontmatter, _, err := splitFrontmatter(data, false)
+	if err != nil {
+		return false, err
+	}
+	return frontmatterHasTopLevelFields(frontmatter, fields), nil
 }
 
 func frontmatterHasTopLevelFields(frontmatter []byte, fields []string) bool {
@@ -1891,30 +1894,6 @@ func frontmatterHasTopLevelFields(frontmatter []byte, fields []string) bool {
 		}
 	}
 	return false
-}
-
-func scanFrontmatterTopLevelFields(r io.Reader, fields []string) (bool, error) {
-	if len(fields) == 0 {
-		return true, nil
-	}
-	data, err := io.ReadAll(r)
-	if err != nil {
-		return false, fmt.Errorf("reading file: %w", err)
-	}
-	frontmatter, _, err := splitFrontmatter(data, false)
-	if err != nil {
-		return false, err
-	}
-	return frontmatterHasTopLevelFields(frontmatter, fields), nil
-}
-
-func readFrontmatter(r io.Reader) ([]byte, error) {
-	data, err := io.ReadAll(r)
-	if err != nil {
-		return nil, fmt.Errorf("reading file: %w", err)
-	}
-	frontmatter, _, err := splitFrontmatter(data, false)
-	return frontmatter, err
 }
 
 func (s *Storage) nextAvailableMigrationID(baseID string, reserved map[string]struct{}) (string, error) {

@@ -452,7 +452,7 @@ func TestStorageFindMetadataFastPathRejectsParentTraversal(t *testing.T) {
 }
 
 func TestReadFrontmatter(t *testing.T) {
-	content := strings.NewReader(`---
+	content := []byte(`---
 name: Test Task
 status: open
 created-at: 2026-01-01T10:00:00Z
@@ -461,9 +461,9 @@ created-at: 2026-01-01T10:00:00Z
 Body should never be read.
 `)
 
-	frontmatter, err := readFrontmatter(content)
+	frontmatter, _, err := splitFrontmatter(content, false)
 	if err != nil {
-		t.Fatalf("readFrontmatter() error: %v", err)
+		t.Fatalf("splitFrontmatter() error: %v", err)
 	}
 
 	got := string(frontmatter)
@@ -476,7 +476,7 @@ Body should never be read.
 }
 
 func TestReadFrontmatterRespectsBlockScalarMarkers(t *testing.T) {
-	content := strings.NewReader(`---
+	content := []byte(`---
 name: Standing Inbox
 outcome: |-
   first run
@@ -490,9 +490,9 @@ tempered: true
 Body should never be read.
 `)
 
-	frontmatter, err := readFrontmatter(content)
+	frontmatter, _, err := splitFrontmatter(content, false)
 	if err != nil {
-		t.Fatalf("readFrontmatter() error: %v", err)
+		t.Fatalf("splitFrontmatter() error: %v", err)
 	}
 
 	got := string(frontmatter)
@@ -554,9 +554,9 @@ func TestReadFrontmatterErrors(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := readFrontmatter(strings.NewReader(tt.content))
+			_, _, err := splitFrontmatter([]byte(tt.content), false)
 			if err == nil {
-				t.Fatalf("readFrontmatter() error = nil, want error")
+				t.Fatalf("splitFrontmatter() error = nil, want error")
 			}
 		})
 	}
