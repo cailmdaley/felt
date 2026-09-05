@@ -875,20 +875,20 @@ defmodule Shuttle.Poller do
 
   def handle_call({:claim_session, fiber_id, tmux_session, opts}, _from, state) do
     {runtime_key, slug} = resolve_identity(state, fiber_id)
-    uid = running_uid(state, slug) || if(Shuttle.ULID.valid?(runtime_key), do: runtime_key)
+    uid = resolved_uid(state, slug, runtime_key)
     {state, reply} = do_claim_session(state, slug, uid, tmux_session, opts)
     {:reply, reply, state}
   end
 
   def handle_call({:inject, fiber_id, text}, _from, state) do
     {runtime_key, slug} = resolve_identity(state, fiber_id)
-    uid = running_uid(state, slug) || if(Shuttle.ULID.valid?(runtime_key), do: runtime_key)
+    uid = resolved_uid(state, slug, runtime_key)
 
     case fetch_fiber_full(slug, state) do
       {:ok, fiber} ->
         session =
           live_session_for_fiber(state, slug, uid) ||
-            live_session_by_names(state, slug, Map.get(fiber, "uid"))
+            live_session_for_fiber(state, slug, Map.get(fiber, "uid"))
 
         case session do
           nil ->
@@ -964,14 +964,26 @@ defmodule Shuttle.Poller do
         {:reply, {:error, :no_felt_stores}, state}
 
       true ->
-        do_capture(state, yap, work_dir, felt_store, opts)
+        result =
+          Dispatcher.capture(yap,
+            runner: state.runner,
+            work_dir: work_dir,
+            felt_store: felt_store,
+            agent: Keyword.get(opts, :agent),
+            effort: Keyword.get(opts, :effort),
+            chrome: Keyword.get(opts, :chrome) == true,
+            port: Shuttle.daemon_port(),
+            host: state.own_host_id
+          )
+
+        {:reply, result, state}
     end
   end
 
   def handle_call({:dispatch, fiber_id, opts}, _from, state) do
     {runtime_key, fiber_id} = resolve_identity(state, fiber_id)
     state = reconcile_running_fiber(state, fiber_id)
-    uid = running_uid(state, fiber_id) || if(Shuttle.ULID.valid?(runtime_key), do: runtime_key)
+    uid = resolved_uid(state, fiber_id, runtime_key)
 
     # "New session" on an OPEN session is a CUT, not a refusal: a forced fresh
     # dispatch (force + resume_mode:"fresh" — the kanban New-session button and
@@ -1070,22 +1082,6 @@ defmodule Shuttle.Poller do
     state = %{state | boot_quarantine: false, parked_launches: %{}}
     # Tick now so parked fibers dispatch immediately, not a poll interval later.
     {:reply, :ok, schedule_tick(state, 0)}
-  end
-
-  defp do_capture(%State{} = state, yap, work_dir, felt_store, opts) do
-    result =
-      Dispatcher.capture(yap,
-        runner: state.runner,
-        work_dir: work_dir,
-        felt_store: felt_store,
-        agent: Keyword.get(opts, :agent),
-        effort: Keyword.get(opts, :effort),
-        chrome: Keyword.get(opts, :chrome) == true,
-        port: Shuttle.daemon_port(),
-        host: state.own_host_id
-      )
-
-    {:reply, result, state}
   end
 
   # ── Snapshot ──
@@ -1236,7 +1232,7 @@ defmodule Shuttle.Poller do
   # down with the Task.
   defp poll_reads(%State{} = state) do
     state = refresh_felt_stores(state)
-    {:ok, candidates, host_map, host_listings} = discover_candidates(state)
+    {candidates, host_map, host_listings} = discover_candidates(state)
 
     # The poll-cycle document cache lives in `Shuttle.Poller.DocumentCache`; the
     # cache itself stays on `State`. Entries are built directly from the candidate
@@ -1488,7 +1484,7 @@ defmodule Shuttle.Poller do
         {acc_fibers ++ fibers, merged_map, acc_listings}
       end)
 
-    {:ok, all_fibers, host_map, host_listings}
+    {all_fibers, host_map, host_listings}
   end
 
   # Owner-only feed gate for a cached document entry: keep it iff its
@@ -2890,11 +2886,9 @@ defmodule Shuttle.Poller do
   end
 
   defp record_orphaned_running_worker(%State{} = state, fiber_id, meta) do
-    # Daemon-down analog of handle_worker_exit's standing branch. Both callers
-    # — `rehydrate_running_record` (init, the daemon was down when the worker
-    # died) and `reconcile_missing_running_sessions` (runtime, the watcher
-    # missed the exit) — land here for a running entry whose tmux session is
-    # gone. For an ordinary oneshot that's just an orphan to record; for a
+    # Daemon-down analog of handle_worker_exit's standing branch. The caller —
+    # `reconcile_missing_running_sessions` (runtime, the watcher missed the
+    # exit) — lands here for a running entry whose tmux session is gone. For an ordinary oneshot that's just an orphan to record; for a
     # standing role it is the exit that `handle_worker_exit` never got to run,
     # so the armed document would re-fire on the next poll. Mark it awaiting
     # (status:closed, untempered) here, keyed on the running-worker entry — a
@@ -3177,10 +3171,11 @@ defmodule Shuttle.Poller do
 
   # ── Helpers ──
 
-  defp live_session_by_names(state, fiber_id, uid) do
-    fiber_id
-    |> Dispatcher.session_names(uid)
-    |> Enum.find(&already_running_session?(state, &1))
+  # The fiber's uid: the running entry's when one exists, else the caller's
+  # runtime key when that key IS a uid (`resolve_identity/2` returns a ULID
+  # runtime key only for a uid-addressed call).
+  defp resolved_uid(state, fiber_id, runtime_key) do
+    running_uid(state, fiber_id) || if(Shuttle.ULID.valid?(runtime_key), do: runtime_key)
   end
 
   defp paste_into_session(runner, session, text) do
