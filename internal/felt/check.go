@@ -44,18 +44,7 @@ func Check(felts []*Felt, external *ExternalRefs) []CheckIssue {
 	issues = append(issues, checkRelationshipIntegrity(felts, external)...)
 	issues = append(issues, checkDependsOn(felts, external)...)
 
-	sort.Slice(issues, func(i, j int) bool {
-		if issues[i].FiberID != issues[j].FiberID {
-			return issues[i].FiberID < issues[j].FiberID
-		}
-		if issues[i].Path != issues[j].Path {
-			return issues[i].Path < issues[j].Path
-		}
-		if issues[i].Level != issues[j].Level {
-			return issues[i].Level < issues[j].Level
-		}
-		return issues[i].Message < issues[j].Message
-	})
+	sortIssues(issues)
 	return issues
 }
 
@@ -129,12 +118,7 @@ func CheckStructure(s *Storage) ([]CheckIssue, error) {
 		}
 	}
 
-	sort.Slice(issues, func(i, j int) bool {
-		if issues[i].FiberID != issues[j].FiberID {
-			return issues[i].FiberID < issues[j].FiberID
-		}
-		return issues[i].Message < issues[j].Message
-	})
+	sortIssues(issues)
 	return issues, nil
 }
 
@@ -186,15 +170,7 @@ func CheckLegacyFormat(s *Storage) ([]CheckIssue, error) {
 		}
 	}
 
-	sort.Slice(issues, func(i, j int) bool {
-		if issues[i].FiberID != issues[j].FiberID {
-			return issues[i].FiberID < issues[j].FiberID
-		}
-		if issues[i].Path != issues[j].Path {
-			return issues[i].Path < issues[j].Path
-		}
-		return issues[i].Message < issues[j].Message
-	})
+	sortIssues(issues)
 	return issues, nil
 }
 
@@ -472,12 +448,7 @@ func CheckParseability(s *Storage) ([]CheckIssue, error) {
 		}
 	}
 
-	sort.Slice(issues, func(i, j int) bool {
-		if issues[i].FiberID != issues[j].FiberID {
-			return issues[i].FiberID < issues[j].FiberID
-		}
-		return issues[i].Message < issues[j].Message
-	})
+	sortIssues(issues)
 	return issues, nil
 }
 
@@ -486,4 +457,22 @@ func CheckParseability(s *Storage) ([]CheckIssue, error) {
 // per issue buries the part the reader needs (the YAML line and reason).
 func parseFailureDetail(path string, err error) string {
 	return strings.TrimPrefix(err.Error(), fmt.Sprintf("reading file %s: ", path))
+}
+
+// sortIssues gives every check a single stable ordering. Path and Level are
+// constant within the checks that never set them, so the wider key sequence
+// leaves their output unchanged.
+func sortIssues(issues []CheckIssue) {
+	sort.Slice(issues, func(i, j int) bool {
+		if issues[i].FiberID != issues[j].FiberID {
+			return issues[i].FiberID < issues[j].FiberID
+		}
+		if issues[i].Path != issues[j].Path {
+			return issues[i].Path < issues[j].Path
+		}
+		if issues[i].Level != issues[j].Level {
+			return issues[i].Level < issues[j].Level
+		}
+		return issues[i].Message < issues[j].Message
+	})
 }

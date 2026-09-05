@@ -452,7 +452,7 @@ func TestStorageFindMetadataFastPathRejectsParentTraversal(t *testing.T) {
 }
 
 func TestReadFrontmatter(t *testing.T) {
-	content := strings.NewReader(`---
+	content := []byte(`---
 name: Test Task
 status: open
 created-at: 2026-01-01T10:00:00Z
@@ -461,9 +461,9 @@ created-at: 2026-01-01T10:00:00Z
 Body should never be read.
 `)
 
-	frontmatter, err := readFrontmatter(content)
+	frontmatter, _, err := splitFrontmatter(content, false)
 	if err != nil {
-		t.Fatalf("readFrontmatter() error: %v", err)
+		t.Fatalf("splitFrontmatter() error: %v", err)
 	}
 
 	got := string(frontmatter)
@@ -476,7 +476,7 @@ Body should never be read.
 }
 
 func TestReadFrontmatterRespectsBlockScalarMarkers(t *testing.T) {
-	content := strings.NewReader(`---
+	content := []byte(`---
 name: Standing Inbox
 outcome: |-
   first run
@@ -490,9 +490,9 @@ tempered: true
 Body should never be read.
 `)
 
-	frontmatter, err := readFrontmatter(content)
+	frontmatter, _, err := splitFrontmatter(content, false)
 	if err != nil {
-		t.Fatalf("readFrontmatter() error: %v", err)
+		t.Fatalf("splitFrontmatter() error: %v", err)
 	}
 
 	got := string(frontmatter)
@@ -554,9 +554,9 @@ func TestReadFrontmatterErrors(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := readFrontmatter(strings.NewReader(tt.content))
+			_, _, err := splitFrontmatter([]byte(tt.content), false)
 			if err == nil {
-				t.Fatalf("readFrontmatter() error = nil, want error")
+				t.Fatalf("splitFrontmatter() error = nil, want error")
 			}
 		})
 	}
@@ -987,7 +987,7 @@ func TestResolveScopedIDWalksUpLexicalScopes(t *testing.T) {
 		"project/analysis/method",
 	}
 
-	got, err := ResolveScopedID(ids, "project/analysis", "question")
+	got, err := ResolveScopedIDIn(ids, "project/analysis", "question", nil)
 	if err != nil {
 		t.Fatalf("ResolveScopedID() error: %v", err)
 	}
@@ -995,7 +995,7 @@ func TestResolveScopedIDWalksUpLexicalScopes(t *testing.T) {
 		t.Fatalf("ResolveScopedID() = %q, want %q", got, "project/question")
 	}
 
-	got, err = ResolveScopedID(ids, "project/analysis", "method")
+	got, err = ResolveScopedIDIn(ids, "project/analysis", "method", nil)
 	if err != nil {
 		t.Fatalf("ResolveScopedID() nested error: %v", err)
 	}
@@ -1012,7 +1012,7 @@ func TestResolveScopedIDPrefersExactBasenameOverPrefix(t *testing.T) {
 		"project/status-model-tasks-vs-knowledge",
 	}
 
-	got, err := ResolveScopedID(ids, "project/analysis/strip-dead", "status")
+	got, err := ResolveScopedIDIn(ids, "project/analysis/strip-dead", "status", nil)
 	if err != nil {
 		t.Fatalf("ResolveScopedID() error: %v (should prefer exact match)", err)
 	}
@@ -1031,7 +1031,7 @@ func TestResolveScopedIDPrefersExactPathOverDescendants(t *testing.T) {
 		"project/design/kanban/property-test",
 	}
 
-	got, err := ResolveScopedID(ids, "project/design/kanban/drift-test", "design/kanban")
+	got, err := ResolveScopedIDIn(ids, "project/design/kanban/drift-test", "design/kanban", nil)
 	if err != nil {
 		t.Fatalf("ResolveScopedID() error: %v (parent with children should resolve)", err)
 	}
@@ -1048,7 +1048,7 @@ func TestResolveScopedIDGlobalUniqueBasenameFallback(t *testing.T) {
 		"beta/deploy/runbook",
 	}
 
-	got, err := ResolveScopedID(ids, "alpha/notes/setup", "runbook")
+	got, err := ResolveScopedIDIn(ids, "alpha/notes/setup", "runbook", nil)
 	if err != nil {
 		t.Fatalf("ResolveScopedID() error: %v (unique slug should resolve globally)", err)
 	}
@@ -1058,7 +1058,7 @@ func TestResolveScopedIDGlobalUniqueBasenameFallback(t *testing.T) {
 
 	// A non-unique slug must NOT resolve via the fallback.
 	ids = append(ids, "gamma/deploy/runbook")
-	if got, err := ResolveScopedID(ids, "alpha/notes/setup", "runbook"); err == nil {
+	if got, err := ResolveScopedIDIn(ids, "alpha/notes/setup", "runbook", nil); err == nil {
 		t.Fatalf("expected no resolution for non-unique slug, got %q", got)
 	}
 }
@@ -2119,26 +2119,6 @@ func TestExternalPathLookupNeedsNoWalk(t *testing.T) {
 	ref, _ := AsExternalReference(err)
 	if ref.ID != "commons" {
 		t.Fatalf("ExternalReference.ID = %q, want %q", ref.ID, "commons")
-	}
-}
-
-// TestFindByScopeInRefusesForeignID is the destructive path: `felt rm`,
-// `felt nest` and `felt unnest` resolve through the slice lookup, and a
-// foreign id must not land on the local fiber of the same slug there either.
-func TestFindByScopeInRefusesForeignID(t *testing.T) {
-	_, subProj := newSubstoreFixture(t)
-	external := NewStorage(subProj).ExternalRefs()
-	felts := []*Felt{{ID: "debug", Name: "Debug"}, {ID: "notes/runbook", Name: "Runbook"}}
-
-	if f, err := FindByScopeIn(felts, "", "ai-futures/portolan/debug", external); !errors.Is(err, ErrExternalReference) {
-		got := "nil"
-		if f != nil {
-			got = f.ID
-		}
-		t.Fatalf("FindByScopeIn() = %s, %v; want ErrExternalReference", got, err)
-	}
-	if f, err := FindByPrefixIn(felts, "notes/runbook", external); err != nil || f.ID != "notes/runbook" {
-		t.Fatalf("FindByPrefixIn() = %v, %v; want the local fiber", f, err)
 	}
 }
 

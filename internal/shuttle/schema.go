@@ -7,14 +7,18 @@
 package shuttle
 
 import (
-	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/robfig/cron/v3"
 	"gopkg.in/yaml.v3"
 )
+
+// cronParser is the shared 5-field standard cron parser. cron.Parser is an
+// immutable value built from a field bitmask, so one instance serves every call.
+var cronParser = cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
 
 // ---- Types -----------------------------------------------------------------
 
@@ -66,30 +70,8 @@ func (s *Schedule) UnmarshalYAML(value *yaml.Node) error {
 	return nil
 }
 
-// UnmarshalJSON accepts the canonical `tz` field as well as the legacy
-// `timezone` alias used by pre-CLI standing-role frontmatter serialized
-// through felt's JSON view.
-func (s *Schedule) UnmarshalJSON(data []byte) error {
-	var aux struct {
-		Expr     string `json:"expr"`
-		TZ       string `json:"tz"`
-		Timezone string `json:"timezone"`
-		Kind     string `json:"kind"` // legacy: ignored
-	}
-	if err := json.Unmarshal(data, &aux); err != nil {
-		return err
-	}
-	s.Expr = aux.Expr
-	s.TZ = aux.TZ
-	if s.TZ == "" {
-		s.TZ = aux.Timezone
-	}
-	return nil
-}
-
 // UnmarshalYAML accepts the canonical `kind` field as well as the legacy `mode`
-// alias, mirroring UnmarshalJSON. felt decodes the block from a yaml.Node (not
-// from JSON), so without this the `mode` alias would be unreachable and a
+// alias. felt decodes the block from a yaml.Node, so without this the `mode` alias would be unreachable and a
 // `mode:`-only legacy block would decode to an empty Kind — failing validation
 // and skipping next_due resolution. The daemon tolerates `mode` (it reads
 // kind || mode); as felt becomes the schema authority it must tolerate it too.
@@ -107,44 +89,6 @@ func (b *Block) UnmarshalYAML(value *yaml.Node) error {
 		Schedule   *Schedule `yaml:"schedule"`
 	}
 	if err := value.Decode(&aux); err != nil {
-		return err
-	}
-	b.Kind = aux.Kind
-	if b.Kind == "" {
-		b.Kind = aux.Mode
-	}
-	b.Host = aux.Host
-	b.ProjectDir = aux.ProjectDir
-	b.Agent = aux.Agent
-	b.Effort = aux.Effort
-	b.Chrome = aux.Chrome
-	b.Schedule = aux.Schedule
-	return nil
-}
-
-// UnmarshalJSON accepts the canonical `kind` field as well as the legacy `mode`
-// alias used by pre-CLI shuttle blocks serialized through felt's JSON view.
-// Output always normalizes to `Kind`. Only the typed dispatch fields are
-// decoded. The runtime/continuation fields (session_uuid, dispatched_at,
-// handed_off_at, run_id) live as flat keys in the `shuttle:` block — that is
-// where continuation state lives now that felt history is gone — but they are
-// deliberately NOT decoded into the typed Block: they ride through as
-// forward-compatible unknowns, owned by the daemon, not the schema. Legacy
-// daemon-owned fields (enabled, review, next_due_at, last_run_at, session) and
-// the retired `interactive` axis are likewise NOT decoded — clean cutover, no
-// read-tolerance: a felt JSON view that still carries them simply ignores them.
-func (b *Block) UnmarshalJSON(data []byte) error {
-	var aux struct {
-		Kind       string    `json:"kind"`
-		Mode       string    `json:"mode"`
-		Host       string    `json:"host"`
-		ProjectDir string    `json:"project_dir"`
-		Agent      string    `json:"agent"`
-		Effort     string    `json:"effort"`
-		Chrome     bool      `json:"chrome"`
-		Schedule   *Schedule `json:"schedule"`
-	}
-	if err := json.Unmarshal(data, &aux); err != nil {
 		return err
 	}
 	b.Kind = aux.Kind
@@ -207,7 +151,7 @@ func Validate(b *Block, agents *AgentRegistry) ValidationErrors {
 		errs = append(errs, ValidationError{Field: field, Message: msg})
 	}
 
-	if !contains(ValidKinds, b.Kind) {
+	if !slices.Contains(ValidKinds, b.Kind) {
 		add("kind", fmt.Sprintf("must be one of %v, got %q", ValidKinds, b.Kind))
 	}
 
@@ -239,8 +183,8 @@ func Validate(b *Block, agents *AgentRegistry) ValidationErrors {
 		if b.Schedule == nil {
 			add("schedule", "required for kind=standing")
 		} else {
-			if err := ValidateCron(b.Schedule.Expr); err != nil {
-				add("schedule.expr", err.Error())
+			if _, err := cronParser.Parse(b.Schedule.Expr); err != nil {
+				add("schedule.expr", fmt.Sprintf("invalid cron expression %q: %v", b.Schedule.Expr, err))
 			}
 			if b.Schedule.TZ == "" {
 				add("schedule.tz", "required")
@@ -253,15 +197,6 @@ func Validate(b *Block, agents *AgentRegistry) ValidationErrors {
 	return errs
 }
 
-// ValidateCron checks that expr is a valid 5-field standard cron expression.
-func ValidateCron(expr string) error {
-	_, err := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow).Parse(expr)
-	if err != nil {
-		return fmt.Errorf("invalid cron expression %q: %w", expr, err)
-	}
-	return nil
-}
-
 // NextOccurrence returns the next scheduled time after `after`, using the
 // cron expression and IANA timezone from the schedule.
 func NextOccurrence(s *Schedule, after time.Time) (time.Time, error) {
@@ -270,7 +205,7 @@ func NextOccurrence(s *Schedule, after time.Time) (time.Time, error) {
 		return time.Time{}, fmt.Errorf("loading timezone %q: %w", s.TZ, err)
 	}
 
-	sched, err := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow).Parse(s.Expr)
+	sched, err := cronParser.Parse(s.Expr)
 	if err != nil {
 		return time.Time{}, fmt.Errorf("parsing cron %q: %w", s.Expr, err)
 	}
@@ -301,7 +236,7 @@ func PrevOccurrence(s *Schedule, before time.Time) (time.Time, error) {
 		return time.Time{}, fmt.Errorf("loading timezone %q: %w", s.TZ, err)
 	}
 
-	sched, err := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow).Parse(s.Expr)
+	sched, err := cronParser.Parse(s.Expr)
 	if err != nil {
 		return time.Time{}, fmt.Errorf("parsing cron %q: %w", s.Expr, err)
 	}
@@ -319,15 +254,4 @@ func PrevOccurrence(s *Schedule, before time.Time) (time.Time, error) {
 	}
 
 	return time.Time{}, fmt.Errorf("no occurrence of %q within one year before %v", s.Expr, before)
-}
-
-// ---- Helpers ---------------------------------------------------------------
-
-func contains(slice []string, s string) bool {
-	for _, v := range slice {
-		if v == s {
-			return true
-		}
-	}
-	return false
 }

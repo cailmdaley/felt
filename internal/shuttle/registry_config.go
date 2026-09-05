@@ -134,21 +134,6 @@ func parseAgentsFile(data []byte, path string) (agentsFile, []string, error) {
 	return file, warnings, nil
 }
 
-// parseAnyAgentsPayload accepts either shape — a bare array or the envelope —
-// and returns just the records. Version and builtins-mode validation still
-// applies to the envelope, so a file written for a newer felt fails loudly
-// wherever it is loaded from.
-func parseAnyAgentsPayload(data []byte, path string) ([]AgentRecord, error) {
-	if isBareArray(data) {
-		return parseAgentRecords(data, path)
-	}
-	file, _, err := parseAgentsFile(data, path)
-	if err != nil {
-		return nil, err
-	}
-	return file.Agents, nil
-}
-
 // parseAgentRecords decodes a bare array of records and normalizes them.
 func parseAgentRecords(data []byte, path string) ([]AgentRecord, error) {
 	var agents []AgentRecord

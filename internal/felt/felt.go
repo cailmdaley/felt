@@ -136,9 +136,6 @@ func (f *Felt) MarshalJSON() ([]byte, error) {
 	if err := json.Unmarshal(knownBytes, &merged); err != nil {
 		return nil, fmt.Errorf("decode known fields for merge: %w", err)
 	}
-	if merged == nil {
-		merged = map[string]interface{}{}
-	}
 
 	for key, node := range f.ExtraFields {
 		if node == nil {
@@ -836,7 +833,7 @@ func (f *Felt) MatchesUID(query string) bool {
 
 // SearchText returns searchable metadata content beyond the title.
 func (f *Felt) SearchText() string {
-	parts := []string{f.UID, f.Outcome, f.Description, f.ExtraFieldsSearchText()}
+	parts := []string{f.UID, f.Outcome, f.Description, f.ExtraFieldsYAML()}
 	return strings.Join(parts, "\n")
 }
 

@@ -15,9 +15,9 @@ func loadAgentRegistryFromFile(path string) (*AgentRegistry, error) {
 	if err != nil {
 		return nil, fmt.Errorf("reading %s: %w", path, err)
 	}
-	agents, err := parseAnyAgentsPayload(data, path)
+	file, _, err := parseAgentsFile(data, path)
 	if err != nil {
 		return nil, err
 	}
-	return &AgentRegistry{agents: agents, builtinsMode: BuiltinsMerge}, nil
+	return &AgentRegistry{agents: file.Agents, builtinsMode: BuiltinsMerge}, nil
 }
