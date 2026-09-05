@@ -66,7 +66,6 @@ type ReceiptDaemon struct {
 	Repair   string        `json:"repair,omitempty"`
 	Expected any           `json:"expected,omitempty"`
 	Observed any           `json:"observed,omitempty"`
-	CLI      any           `json:"cli_observed,omitempty"`
 	Contract bool          `json:"contract_ok"`
 }
 
@@ -91,13 +90,6 @@ type ReceiptHarnessGeneration struct {
 	Generation *pluginGenerationIdentity `json:"generation,omitempty"`
 }
 
-type receiptPluginManifest struct {
-	Name    string `json:"name"`
-	Version string `json:"version"`
-	Skills  string `json:"skills"`
-	Hooks   string `json:"hooks"`
-}
-
 type receiptClaudeSettings struct {
 	EnabledPlugins         map[string]bool           `json:"enabledPlugins"`
 	ExtraKnownMarketplaces map[string]map[string]any `json:"extraKnownMarketplaces"`
@@ -106,7 +98,6 @@ type receiptClaudeSettings struct {
 type receiptPluginSource struct {
 	Source string `json:"source"`
 	Path   string `json:"path"`
-	URL    string `json:"url"`
 }
 
 type receiptInstalledPlugin struct {
@@ -115,7 +106,6 @@ type receiptInstalledPlugin struct {
 	Name            string              `json:"name"`
 	MarketplaceName string              `json:"marketplaceName"`
 	Version         string              `json:"version"`
-	Installed       bool                `json:"installed"`
 	Enabled         bool                `json:"enabled"`
 	InstallPath     string              `json:"installPath"`
 	Source          receiptPluginSource `json:"source"`
@@ -157,7 +147,7 @@ every component that is enabled on this host to be present and compatible.`,
 func init() { setupCmd.AddCommand(setupReceiptCmd) }
 
 func collectRuntimeReceipt() RuntimeReceipt {
-	r := RuntimeReceipt{Schema: 1, Bundles: []ReceiptBundle{}}
+	r := RuntimeReceipt{Schema: 1}
 	r.Felt = collectFeltReceipt()
 	r.Bundles = collectCodexBundle()
 	r.Bundles = append(r.Bundles, collectClaudeBundle()...)
@@ -421,7 +411,7 @@ func readPluginVersion(path string) string {
 	if err != nil {
 		return ""
 	}
-	var manifest receiptPluginManifest
+	var manifest pluginManifest
 	if json.Unmarshal(data, &manifest) != nil {
 		return ""
 	}
@@ -436,7 +426,7 @@ func bundleFromManifest(harness, path, source string) ReceiptBundle {
 		b.Status, b.Repair = receiptMissing, "restore the plugin manifest with the matching setup command"
 		return b
 	}
-	var manifest receiptPluginManifest
+	var manifest pluginManifest
 	if err := json.Unmarshal(data, &manifest); err != nil || manifest.Name != "felt" || manifest.Version == "" {
 		b.Status, b.Repair = receiptMismatch, "install the felt plugin again; its manifest is malformed or belongs to another plugin"
 		return b
@@ -771,7 +761,7 @@ func combineReceiptStatus(felt receiptStatus, bundles []ReceiptBundle, hooks, da
 	for _, status := range []receiptStatus{receiptMismatch, receiptStale} {
 		for _, got := range statuses {
 			if got == status {
-				return status, receiptRepair(statuses, status)
+				return status, receiptRepair(status)
 			}
 		}
 	}
@@ -792,7 +782,7 @@ func combineReceiptStatus(felt receiptStatus, bundles []ReceiptBundle, hooks, da
 	return receiptHealthy, ""
 }
 
-func receiptRepair(_ []receiptStatus, status receiptStatus) string {
+func receiptRepair(status receiptStatus) string {
 	if status == receiptMismatch {
 		return "repair the mismatched felt plugin, hooks, or daemon contract, then rerun the receipt"
 	}
