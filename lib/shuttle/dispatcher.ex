@@ -11,7 +11,6 @@ defmodule Shuttle.Dispatcher do
   require Logger
 
   alias Shuttle.Agents
-  import Bitwise
 
   # Codex and pi mint their own session UUIDs after the process starts. A cold
   # harness can spend tens of seconds loading before it writes the transcript
@@ -81,7 +80,7 @@ defmodule Shuttle.Dispatcher do
          :ok <- check_not_running(fiber_id, uid, runner),
          {:ok, agent} <- resolve_agent(fiber),
          :ok <- validate_agent(agent),
-         :ok <- check_work_dir(agent, work_dir),
+         :ok <- check_work_dir(work_dir),
          :ok <- preflight_wrapper(agent, work_dir, runner) do
       resume_intent =
         if Keyword.get(opts, :force_fresh, false) do
@@ -355,7 +354,7 @@ defmodule Shuttle.Dispatcher do
       message when is_binary(message) ->
         case String.trim(message) do
           "" -> ""
-          trimmed -> render_block("From User", nil, trimmed)
+          trimmed -> render_block("From User", trimmed)
         end
 
       _ ->
@@ -363,38 +362,28 @@ defmodule Shuttle.Dispatcher do
     end
   end
 
-  # Render a labeled rule-bordered block. Header is "┌─ <label>[ · <time>] ─…",
+  # Render a labeled rule-bordered block. Header is "┌─ <label> ─…",
   # content is indented two spaces, closed with a matching bottom rule.
   # Total visual width is fixed at @rule_width chars so blocks align in the
   # terminal even when their headers differ in length.
   @rule_width 76
-  defp render_block(label, time_suffix, content) do
-    header_text =
-      case time_suffix do
-        nil -> label
-        "" -> label
-        t -> "#{label} · #{t}"
-      end
-
-    # "┌─ " (3) + header_text + " " (1) + trailing dashes = @rule_width
-    leading = "┌─ #{header_text} "
+  defp render_block(label, content) do
+    # "┌─ " (3) + label + " " (1) + trailing dashes = @rule_width
+    leading = "┌─ #{label} "
     trailing = max(@rule_width - String.length(leading), 3)
     top = leading <> String.duplicate("─", trailing)
     bottom = "└" <> String.duplicate("─", @rule_width - 1)
 
-    body = indent_block(content, "  ")
+    # Inset the content under the box header so multi-line directives stay
+    # visually grouped.
+    body =
+      content
+      |> String.trim()
+      |> String.split("\n")
+      |> Enum.map(&("  " <> &1))
+      |> Enum.join("\n")
 
     "#{top}\n#{body}\n#{bottom}"
-  end
-
-  # Indent every line of `text` by `prefix`. Used to inset event summaries
-  # under the box header so multi-line directives stay visually grouped.
-  defp indent_block(text, prefix) do
-    text
-    |> String.trim()
-    |> String.split("\n")
-    |> Enum.map(&(prefix <> &1))
-    |> Enum.join("\n")
   end
 
   @doc """
@@ -514,7 +503,7 @@ defmodule Shuttle.Dispatcher do
       header,
       render_exit_contract(Keyword.get(opts, :kind, "oneshot")),
       render_headless_notice(Keyword.get(opts, :headless, false)),
-      render_user_message_block(user_message: Keyword.get(opts, :user_message))
+      render_user_message_block(opts)
     ]
     |> Enum.reject(&(&1 == ""))
     |> Enum.join("\n\n")
@@ -530,7 +519,6 @@ defmodule Shuttle.Dispatcher do
   defp render_headless_notice(true) do
     render_block(
       "Headless",
-      nil,
       "Headless print-mode run: no human can attach to this session — work to completion and exit. The human-gate exception never applies here; if you hit something you would normally pause to ask about, record it in the outcome and `## Status`, keep driving to a clean checkpoint, then exit."
     )
   end
@@ -561,7 +549,6 @@ defmodule Shuttle.Dispatcher do
   defp render_exit_contract("pinned") do
     render_block(
       "Exit Contract",
-      nil,
       "This is a pinned interactive role — a standing interface a human drives, not a one-shot task. (a) While a human is driving and you run out of immediate work, DO NOT exit — stay alive and wait for the next message; the session is the interface. (b) On a long AUTONOMOUS arc, rewrite the constitution's `## Status` then run `felt shuttle handoff <fiber-id>` — only a clean handoff makes the daemon relaunch a fresh worker; an idle exit or crash parks the role back to the strip. (c) When the arc is genuinely done, set `status: closed` FIRST, then hand off — it lands in Awaiting review. Default when idle: (a) stay alive. The shuttle skill's exit semantics carry the rest."
     )
   end
@@ -575,7 +562,6 @@ defmodule Shuttle.Dispatcher do
   defp render_exit_contract(_kind) do
     render_block(
       "Exit Contract",
-      nil,
       "This is an autonomous Shuttle worker — a normal chat final response is not a worker exit. At a clean checkpoint, after updating the fiber (outcome, findings, commits), rewrite the constitution's `## Status` in prose — the handoff the next session lands on, rewritten, never a session log — then your FINAL action is `felt shuttle handoff <fiber-id>`: it marks the session complete and closes it. That mark is what tells the daemon you finished at a checkpoint, so the next worker starts fresh from your `## Status` instead of resuming this transcript mid-thought. Exception: if the directive or constitution asks you to wait for a human, or the state of the work makes human input the clear next move (taste calls open, feedback mid-loop), stay alive at that checkpoint instead — do not hand off. The shuttle skill's exit semantics carry the rest."
     )
   end
@@ -623,45 +609,29 @@ defmodule Shuttle.Dispatcher do
 
     with {:ok, agent} <- capture_resolve_axes(agent_name, effort, chrome, runner),
          :ok <- validate_agent(agent),
-         :ok <- check_work_dir(agent, work_dir),
+         :ok <- check_work_dir(work_dir),
          :ok <- preflight_wrapper(agent, work_dir, runner) do
       session = capture_session_name()
 
-      {command, session_uuid} =
-        case agent.cli do
-          "claude" ->
-            uuid = generate_uuid4()
+      # Only claude can be handed a session id up front; `build_command/3` and
+      # `render_capture_prompt/2` both treat a nil `session_id`/`session_uuid`
+      # as absent, so the other harnesses need no separate path.
+      session_uuid = if agent.cli == "claude", do: generate_uuid4()
 
-            prompt =
-              render_capture_prompt(yap,
-                session: session,
-                felt_store: felt_store,
-                port: port,
-                session_uuid: uuid,
-                agent_id: agent.id,
-                project_dir: work_dir,
-                host: host,
-                effort: effort,
-                chrome: chrome
-              )
+      prompt =
+        render_capture_prompt(yap,
+          session: session,
+          felt_store: felt_store,
+          port: port,
+          session_uuid: session_uuid,
+          agent_id: agent.id,
+          project_dir: work_dir,
+          host: host,
+          effort: effort,
+          chrome: chrome
+        )
 
-            {Agents.build_command(agent, prompt, session_id: uuid), uuid}
-
-          _ ->
-            prompt =
-              render_capture_prompt(yap,
-                session: session,
-                felt_store: felt_store,
-                port: port,
-                agent_id: agent.id,
-                project_dir: work_dir,
-                host: host,
-                effort: effort,
-                chrome: chrome
-              )
-
-            {Agents.build_command(agent, prompt), nil}
-        end
+      command = Agents.build_command(agent, prompt, session_id: session_uuid)
 
       # No `session:` opt: capture sessions are headless by design (the user
       # stays on the board), so the wait-for-client gate would only delay the
@@ -772,7 +742,7 @@ defmodule Shuttle.Dispatcher do
     [
       String.trim(header),
       render_exit_contract("oneshot"),
-      render_block("From User", nil, String.trim(yap))
+      render_block("From User", String.trim(yap))
     ]
     |> Enum.join("\n\n")
     |> String.trim()
@@ -1076,7 +1046,7 @@ defmodule Shuttle.Dispatcher do
   # the autonomous path, but a human force-dispatch (kanban Requeue, drag to
   # launch) bypasses eligibility entirely and lands straight here — so this is
   # the only place the forced path can learn it.
-  defp check_work_dir(_agent, work_dir) when is_binary(work_dir) and work_dir != "" do
+  defp check_work_dir(work_dir) when is_binary(work_dir) and work_dir != "" do
     if File.dir?(work_dir) do
       :ok
     else
@@ -1090,7 +1060,7 @@ defmodule Shuttle.Dispatcher do
     end
   end
 
-  defp check_work_dir(_agent, _work_dir), do: :ok
+  defp check_work_dir(_work_dir), do: :ok
 
   # The dispatch path's worst silent failure. `Agents.build_command/3` renders
   # the agent's `wrapper` into a script the daemon runs as `bash -l`. When the
@@ -1137,7 +1107,7 @@ defmodule Shuttle.Dispatcher do
 
     # Probed from the work_dir the run script will start in, so a per-directory
     # environment (direnv and kin) is in scope for the probe exactly as it will
-    # be for the worker. `check_work_dir/2` has already established it exists,
+    # be for the worker. `check_work_dir/1` has already established it exists,
     # so a failure here is about the wrapper and nothing else.
     opts = [stderr_to_stdout: true, timeout_ms: @wrapper_probe_timeout_ms]
 
@@ -1223,9 +1193,6 @@ defmodule Shuttle.Dispatcher do
     end
   end
 
-  # The standing run id carried in the prompt context tuple, stamped into the
-  # `shuttle.run_id` field at dispatch. nil for a plain oneshot/constitution
-  # dispatch.
   # The previous worker's session, for the prompt's lineage line. The session
   # ledger is authoritative (UUID + harness, newest line for the fiber's uid);
   # the runtime marker is the fallback for fibers whose sessions predate the
@@ -1245,6 +1212,9 @@ defmodule Shuttle.Dispatcher do
     end
   end
 
+  # The standing run id carried in the prompt context tuple, stamped into the
+  # `shuttle.run_id` field at dispatch. nil for a plain oneshot/constitution
+  # dispatch.
   defp prompt_context_run_id({:standing_run, run_id}), do: run_id
   defp prompt_context_run_id({:standing_run, run_id, _}), do: run_id
   defp prompt_context_run_id(_), do: nil
@@ -1310,7 +1280,7 @@ defmodule Shuttle.Dispatcher do
         # show this warning — and a headless `-p` resume has no TTY warning
         # page and no human to attach, so both the dismiss send-keys and the
         # wait-for-client gate are skipped for it.
-        headless = agent[:headless] == true
+        headless = Keyword.fetch!(prompt_opts, :headless)
 
         run_script =
           build_run_script(fiber_id, command, agent.id,
@@ -1389,11 +1359,8 @@ defmodule Shuttle.Dispatcher do
   # launch succeeds), they just don't reuse the id.
   defp fresh_fallback_command(agent, fiber_id, session_id, prompt_context, opts) do
     prompt = render_context_prompt(fiber_id, prompt_context, opts)
-
-    case agent.cli do
-      "claude" -> Agents.build_command(agent, prompt, session_id: session_id)
-      _ -> Agents.build_command(agent, prompt)
-    end
+    # `build_command/3` ignores `session_id` for every non-claude harness.
+    Agents.build_command(agent, prompt, session_id: session_id)
   end
 
   # Build the fresh dispatch command. For Claude we generate and inject a UUID
@@ -1803,17 +1770,12 @@ defmodule Shuttle.Dispatcher do
   # Sets version bits (byte 6 top nibble = 0100) and variant bits
   # (byte 8 top 2 bits = 10) per RFC 4122.
   defp generate_uuid4 do
-    <<b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12, b13, b14, b15>> =
-      :crypto.strong_rand_bytes(16)
+    <<a::48, _::4, b::12, _::2, c::62>> = :crypto.strong_rand_bytes(16)
 
-    v6 = (b6 &&& 0x0F) ||| 0x40
-    v8 = (b8 &&& 0x3F) ||| 0x80
+    <<g1::binary-8, g2::binary-4, g3::binary-4, g4::binary-4, g5::binary-12>> =
+      Base.encode16(<<a::48, 4::4, b::12, 2::2, c::62>>, case: :lower)
 
-    :io_lib.format(
-      "~2.16.0b~2.16.0b~2.16.0b~2.16.0b-~2.16.0b~2.16.0b-~2.16.0b~2.16.0b-~2.16.0b~2.16.0b-~2.16.0b~2.16.0b~2.16.0b~2.16.0b~2.16.0b~2.16.0b",
-      [b0, b1, b2, b3, b4, b5, v6, b7, v8, b9, b10, b11, b12, b13, b14, b15]
-    )
-    |> IO.chardata_to_string()
+    Enum.join([g1, g2, g3, g4, g5], "-")
   end
 
   # POSIX single-quote a value for safe interpolation into the run script's
