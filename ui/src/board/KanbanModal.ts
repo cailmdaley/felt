@@ -2692,17 +2692,12 @@ function applyOptimisticSurface(
   cardId: string,
   opts: { cold?: boolean; due?: string | null } = {},
 ): KanbanResponse | null {
-  if (!resp) return null
-  const { card, now, pinned, timeline, stash } = liftCardFromSurfaces(resp, cardId)
-  if (!card) return null
-
   // A planning-surface drop parks the card as a draft (commitSurface's
   // park-as-draft transition): closed reopens to open with the verdict
   // cleared, active pauses to open, and the kill strips the worker pill —
   // mirrored here so the optimistic card matches the committed reclassify
   // (the no-snap-back invariant).
-  const moved: KanbanCard = {
-    ...card,
+  return placeOptimistically(resp, cardId, 'stash', (card) => ({
     status: 'open',
     tempered: undefined,
     closedAt: undefined,
@@ -2718,8 +2713,31 @@ function applyOptimisticSurface(
     // it keeps the card's own; an explicit day or an explicit `null` — the
     // date-column snooze, and the stale-due clear — wins over it.
     due: opts.due === undefined ? card.due : (opts.due ?? undefined),
-  }
-  return withSurfaces(resp, { now, pinned, timeline, stash: [moved, ...stash] })
+  }))
+}
+
+/**
+ * The shared skeleton of the two relocators above: lift the card off whichever
+ * surface holds it, patch it, and put it back at the head of `surface`.
+ * Returns a fresh response (the input is never mutated), or null when there is
+ * no response or the card is absent from it.
+ */
+function placeOptimistically(
+  resp: KanbanResponse | null,
+  cardId: string,
+  surface: 'stash' | 'pinned',
+  patch: (card: KanbanCard) => Partial<KanbanCard>,
+): KanbanResponse | null {
+  if (!resp) return null
+  const { card, now, pinned, timeline, stash } = liftCardFromSurfaces(resp, cardId)
+  if (!card) return null
+  const moved: KanbanCard = { ...card, ...patch(card) }
+  return withSurfaces(resp, {
+    now,
+    timeline,
+    pinned: surface === 'pinned' ? [moved, ...pinned] : pinned,
+    stash: surface === 'stash' ? [moved, ...stash] : stash,
+  })
 }
 
 /**
@@ -2733,22 +2751,11 @@ function applyOptimisticPin(
   resp: KanbanResponse | null,
   cardId: string,
 ): KanbanResponse | null {
-  if (!resp) return null
-  const { card, now, pinned, timeline, stash } = liftCardFromSurfaces(resp, cardId)
-  if (!card) return null
-
-  const moved: KanbanCard = {
-    ...card,
+  return placeOptimistically(resp, cardId, 'pinned', () => ({
     shuttleKind: 'pinned',
     status: 'active',
     shuttleSchedule: undefined,
     shuttleTz: undefined,
     nextLaunchAt: undefined,
-  }
-  return withSurfaces(resp, {
-    now,
-    pinned: [moved, ...pinned],
-    timeline,
-    stash,
-  })
+  }))
 }
