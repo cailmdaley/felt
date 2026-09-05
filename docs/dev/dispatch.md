@@ -20,6 +20,16 @@ The operator-facing lifecycle is in [Lifecycle](../shuttle/lifecycle.md).
   running worker's dir is read from `state.project_dir_index`, a
   runtime_key→project_dir map rebuilt from the candidate rows each poll, so an
   adopted orphan — whose metadata never carried a project_dir — is covered too.
+  Paths are compared symlink-resolved (`Shuttle.Realpath`), so two fibers
+  naming one checkout by different symlink paths are still one holder. The
+  holder is anything in `state.running`: a worker this daemon dispatched, an
+  orphan it adopted at boot, or a session a human claimed via
+  `POST /api/v1/claim` — a person editing in a checkout is exactly what the
+  gate protects. There is no fairness or queueing: a long-lived holder keeps
+  the checkout until it exits, and the waiting fiber simply retries each tick.
+  While held, the fiber is recorded as a dispatch refusal so it appears in the
+  snapshot's `blocked` list with that reason instead of vanishing from the
+  board; the record is rebuilt each poll and gone the tick the holder exits.
 - **Configured stores** come from `FELT_STORES` (comma-separated env var) →
   persisted `~/.config/felt/stores.json`. There is no implicit default store
   and no legacy shuttle-named registry authority. `POST

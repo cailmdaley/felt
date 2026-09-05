@@ -1313,6 +1313,15 @@ defmodule Shuttle.Poller do
     # the poll loop.
     state = StandingRoles.reconcile_dead_standing_roles(state, candidates)
 
+    # The checkout gate is the one eligibility refusal with nothing to show for
+    # itself: its two siblings (resume-loop breaker, boot quarantine) both
+    # surface, while a fiber whose project_dir is held used to drop out of every
+    # snapshot list and simply vanish from the board. Record it the way any
+    # other dispatch refusal is recorded, so it lands in `blocked` with copy
+    # naming the checkout and its holder. Self-clearing: the entry is rebuilt
+    # from scratch each poll, so the tick the holder exits it is dropped.
+    state = record_held_checkouts(state, candidates)
+
     # Parking is dispatch-authority bookkeeping, not capacity accounting: while
     # quarantined, the parked map is rebuilt from the current dispatchable set
     # on EVERY cycle (a closed fiber drops out, a newly-active one appears)
@@ -1351,13 +1360,46 @@ defmodule Shuttle.Poller do
     # is re-checked against the accumulator: two fibers sharing a project_dir
     # both survive the sweep, and only the first may take the checkout.
     Enum.reduce(dispatchable, state, fn fiber, state_acc ->
-      if available_slots(state_acc) > 0 and project_dir_holder(fiber, state_acc) == nil do
-        {new_state, _result} = do_dispatch_fiber(state_acc, fiber)
-        new_state
-      else
-        state_acc
+      cond do
+        available_slots(state_acc) <= 0 ->
+          state_acc
+
+        true ->
+          case project_dir_holder(fiber, state_acc) do
+            nil ->
+              {new_state, _result} = do_dispatch_fiber(state_acc, fiber)
+              new_state
+
+            {dir, holder} ->
+              record_dispatch_failure(state_acc, fiber, {:project_dir_held, dir, holder})
+          end
       end
     end)
+  end
+
+  # Records a `blocked` row for every candidate a running worker's hold on its
+  # checkout refuses this tick, and drops the row for every candidate no longer
+  # held. Cheap and in-memory: `project_dir_holder/2` reads only runtime maps.
+  defp record_held_checkouts(%State{} = state, candidates) do
+    Enum.reduce(candidates, state, fn fiber, acc ->
+      case {Map.get(fiber, "status"), project_dir_holder(fiber, acc)} do
+        {"active", {dir, holder}} ->
+          record_dispatch_failure(acc, fiber, {:project_dir_held, dir, holder})
+
+        _ ->
+          clear_held_checkout(acc, runtime_key_for_fiber(fiber))
+      end
+    end)
+  end
+
+  defp clear_held_checkout(%State{} = state, runtime_key) do
+    case Map.get(state.dispatch_failures, runtime_key) do
+      %{reason: {:project_dir_held, _dir, _holder}} ->
+        %{state | dispatch_failures: Map.delete(state.dispatch_failures, runtime_key)}
+
+      _ ->
+        state
+    end
   end
 
   # ── Orphan Resurrection ──
@@ -2058,19 +2100,22 @@ defmodule Shuttle.Poller do
       not project_dir_available?(shuttle) ->
         {:not_eligible, {:project_dir_missing, Map.get(shuttle, "project_dir")}}
 
-      holder != nil ->
-        {dir, holder_id} = holder
-        {:not_eligible, {:project_dir_held, dir, holder_id}}
-
-      # The remaining cases only gate a NON-forced dispatch (force overrides
+      # The next two cases only gate a NON-forced dispatch (force overrides
       # status). status is the sole gate: a draft
       # (status: open) or a closed/awaiting fiber is reported so a plain
-      # dispatch failure is legible.
+      # dispatch failure is legible. They precede the held-checkout case for
+      # the same reason `dispatch_gates_pass?/2` orders them that way: a draft
+      # sharing a busy checkout is a draft first — telling it to wait for a
+      # checkout it was never going to take is a false lead.
       not forced? and status == "closed" ->
         {:not_eligible, :closed}
 
       not forced? and status != "active" ->
         {:not_eligible, :disabled}
+
+      holder != nil ->
+        {dir, holder_id} = holder
+        {:not_eligible, {:project_dir_held, dir, holder_id}}
 
       true ->
         {:not_eligible, :not_due_or_blocked}
@@ -2130,10 +2175,22 @@ defmodule Shuttle.Poller do
     end
   end
 
+  # Symlink-resolved, not merely expanded: the checkout-exclusion gate compares
+  # these strings, so two fibers naming ONE checkout through different symlink
+  # paths must produce one key. `Shuttle.Realpath` is the same resolver felt
+  # store ownership uses; a path it can't resolve (a symlink loop) keeps the
+  # expanded form — `project_dir_available?/1` reports a nonexistent dir
+  # separately.
   defp declared_project_dir(shuttle) when is_map(shuttle) do
     case Map.get(shuttle, "project_dir") do
-      dir when is_binary(dir) and dir != "" -> Path.expand(dir)
-      _ -> nil
+      dir when is_binary(dir) and dir != "" ->
+        case Shuttle.Realpath.resolve(dir) do
+          {:ok, resolved} -> resolved
+          {:error, _} -> Path.expand(dir)
+        end
+
+      _ ->
+        nil
     end
   end
 
