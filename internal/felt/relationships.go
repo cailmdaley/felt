@@ -189,7 +189,7 @@ type resolvedRef struct {
 // halts iteration and propagates.
 //
 // The resolver is built once for the whole walk rather than per-ref, since
-// newScopedIDResolver rebuilds maps + sorts over every id.
+// newScopedIDResolverIn rebuilds maps + sorts over every id.
 func iterRefs(felts []*Felt, ids []string, external *ExternalRefs, yield func(resolvedRef) error) error {
 	return iterRefsResolved(felts, newScopedIDResolverIn(ids, external), yield)
 }

@@ -301,14 +301,14 @@ func (x *ExternalRefs) Lookup(scopeID, query string) (string, bool) {
 		outer := &Storage{root: x.root}
 		files, err := outer.listFiberFiles()
 		if err != nil {
-			x.resolver = newScopedIDResolver(nil)
+			x.resolver = newScopedIDResolverIn(nil, nil)
 			return
 		}
 		ids := make([]string, 0, len(files))
 		for _, file := range files {
 			ids = append(ids, file.id)
 		}
-		x.resolver = newScopedIDResolver(ids)
+		x.resolver = newScopedIDResolverIn(ids, nil)
 	})
 
 	// The citing fiber sits at <prefix>/<scopeID> in the outer namespace;
@@ -1487,55 +1487,10 @@ func ResolveAddPath(slug string, existingIDs []string) (resolved string, rewritt
 	)
 }
 
-// FindByPrefix finds a fiber matching a query in an existing slice.
-// Use this instead of Find when you already have the list from List().
-func FindByPrefix(felts []*Felt, query string) (*Felt, error) {
-	return FindByScope(felts, "", query)
-}
-
-// FindByPrefixIn is FindByPrefix for a caller holding the *Storage the slice
-// came from — see FindByScopeIn.
-func FindByPrefixIn(felts []*Felt, query string, external *ExternalRefs) (*Felt, error) {
-	return FindByScopeIn(felts, "", query, external)
-}
-
-// FindByScope finds a fiber matching a query inside a lexical scope from an
-// existing slice.
-func FindByScope(felts []*Felt, scopeID, query string) (*Felt, error) {
-	return FindByScopeIn(felts, scopeID, query, nil)
-}
-
-// FindByScopeIn is FindByScope with knowledge of the enclosing store. Every
-// command that acts on the fiber it finds — rm, nest, unnest — must use this
-// form: without it a foreign id like `ai-futures/portolan/debug` falls through
-// to the basename fallback and the command operates on the unrelated local
-// `debug`, which for rm means deleting it. `felt show` refusing the same
-// argument while `felt rm` accepted it was the worst version of that: it
-// invites the reader to retype the id under a destructive verb.
-func FindByScopeIn(felts []*Felt, scopeID, query string, external *ExternalRefs) (*Felt, error) {
-	byID := make(map[string]*Felt, len(felts))
-	ids := make([]string, 0, len(felts))
-	for _, f := range felts {
-		byID[f.ID] = f
-		ids = append(ids, f.ID)
-	}
-
-	id, err := ResolveScopedIDIn(ids, scopeID, query, external)
-	if err != nil {
-		return nil, err
-	}
-	return byID[id], nil
-}
-
-// ResolveScopedID resolves query by walking up from scopeID like lexical scope.
-func ResolveScopedID(ids []string, scopeID, query string) (string, error) {
-	return ResolveScopedIDIn(ids, scopeID, query, nil)
-}
-
-// ResolveScopedIDIn is ResolveScopedID with knowledge of the enclosing store,
-// for callers that have a *Storage in hand (see Storage.ExternalRefs). A nil
-// external is the top-level-store case and behaves exactly like
-// ResolveScopedID.
+// ResolveScopedIDIn resolves query by walking up from scopeID like lexical
+// scope, with knowledge of the enclosing store for callers that have a *Storage
+// in hand (see Storage.ExternalRefs). A nil external is the top-level-store
+// case.
 func ResolveScopedIDIn(ids []string, scopeID, query string, external *ExternalRefs) (string, error) {
 	return newScopedIDResolverIn(ids, external).Resolve(scopeID, query)
 }
@@ -1552,10 +1507,6 @@ type scopedIDResolver struct {
 type scopedIDEntry struct {
 	base string
 	id   string
-}
-
-func newScopedIDResolver(ids []string) *scopedIDResolver {
-	return newScopedIDResolverIn(ids, nil)
 }
 
 func newScopedIDResolverIn(ids []string, external *ExternalRefs) *scopedIDResolver {
