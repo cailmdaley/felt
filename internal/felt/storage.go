@@ -46,16 +46,7 @@ type Storage struct {
 	quietWalk bool
 
 	enclosingOnce sync.Once
-	enclosing     enclosingStore
 	external      *ExternalRefs
-}
-
-// enclosingStore is the memoized answer to "is this store mounted inside
-// another one?" — see Storage.EnclosingStore.
-type enclosingStore struct {
-	root   string // absolute path of the enclosing `.felt/`
-	prefix string // this store's position inside it, slash-separated
-	ok     bool
 }
 
 // ErrExternalReference reports a query that names a real fiber in the
@@ -127,8 +118,7 @@ func (s *Storage) EnclosingStore() (root string, prefix string, ok bool) {
 				if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 					return
 				}
-				s.enclosing = enclosingStore{root: dir, prefix: filepath.ToSlash(rel), ok: true}
-				s.external = &ExternalRefs{root: dir, prefix: s.enclosing.prefix, cache: map[string]string{}}
+				s.external = &ExternalRefs{root: dir, prefix: filepath.ToSlash(rel), cache: map[string]string{}}
 				return
 			}
 			if parent := filepath.Dir(dir); parent == dir {
@@ -136,7 +126,7 @@ func (s *Storage) EnclosingStore() (root string, prefix string, ok bool) {
 			}
 		}
 	})
-	return s.enclosing.root, s.enclosing.prefix, s.enclosing.ok
+	return s.external.Root(), s.external.Prefix(), s.external != nil
 }
 
 // ExternalRefs returns the external-reference oracle for this store, or nil
@@ -446,7 +436,6 @@ func (s *Storage) Path(id string) string {
 // CheckAvailableID returns an error if the target fiber ID already exists.
 func (s *Storage) CheckAvailableID(id string) error {
 	id = filepath.ToSlash(filepath.Clean(strings.TrimSpace(id)))
-	id = strings.TrimPrefix(id, "./")
 	if id == "." || id == "" {
 		return fmt.Errorf("invalid felt id")
 	}
@@ -480,7 +469,7 @@ func (s *Storage) Write(f *Felt) error {
 
 // Read loads a felt from disk by ID.
 func (s *Storage) Read(id string) (*Felt, error) {
-	return s.readWithMode(id, ParseFull)
+	return s.readPathWithMode(s.Path(id), id, ParseFull)
 }
 
 // FindMetadataInScope returns the first felt matching the query using lexical
@@ -494,10 +483,6 @@ func (s *Storage) FindMetadataInScope(scopeID, query string) (*Felt, error) {
 // store, so narrow read paths can annotate exact refs without surprise work.
 func (s *Storage) FindExistingMetadataInScope(scopeID, query string) (*Felt, bool, error) {
 	return s.findExistingPathWithModeAndScope(scopeID, query, ParseMetadataOnly)
-}
-
-func (s *Storage) readWithMode(id string, mode ParseMode) (*Felt, error) {
-	return s.readPathWithMode(s.Path(id), id, mode)
 }
 
 // readPathWithMode reads a fiber from a known on-disk path. Used by list-time
@@ -520,24 +505,20 @@ func (s *Storage) readPathWithMode(path, id string, mode ParseMode) (*Felt, erro
 		carriedPath = resolved
 	}
 
+	var f *Felt
 	if mode == ParseMetadataOnly {
-		f, err := readMetadataFile(path, id)
+		var err error
+		if f, err = readMetadataFile(path, id); err != nil {
+			return nil, fmt.Errorf("reading file %s: %w", path, err)
+		}
+	} else {
+		data, err := os.ReadFile(path)
 		if err != nil {
 			return nil, fmt.Errorf("reading file %s: %w", path, err)
 		}
-		// Carry the on-disk path so consumers read it instead of
-		// reconstructing it from the id.
-		f.Path = carriedPath
-		return f, nil
-	}
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("reading file %s: %w", path, err)
-	}
-	f, err := ParseWithMode(id, data, mode)
-	if err != nil {
-		return nil, err
+		if f, err = ParseWithMode(id, data, mode); err != nil {
+			return nil, err
+		}
 	}
 	// Carry the on-disk path so consumers read it instead of
 	// reconstructing it from the id.
@@ -645,13 +626,9 @@ func (s *Storage) Migrate(dryRun bool) (*MigrationResult, error) {
 		return nil, err
 	}
 
-	titleIDs, dependsOnIDs, anchorIDs, err := s.NormalizeFiberFiles(dryRun)
-	if err != nil {
+	if err := s.normalizeFiberFiles(dryRun, result); err != nil {
 		return nil, err
 	}
-	result.TitleToNameIDs = titleIDs
-	result.RemovedDependsOnIDs = dependsOnIDs
-	result.StrippedMystAnchorIDs = anchorIDs
 	return result, nil
 }
 
@@ -739,6 +716,17 @@ func (s *Storage) MigrateFlatFiles(dryRun bool) (*MigrationResult, error) {
 	for _, entry := range result.Entries {
 		idMap[entry.OldID] = entry.NewID
 	}
+	remap := func(ref string) (string, bool) {
+		targetFiber, fragment := splitDataFlowRef(ref)
+		newID, ok := idMap[targetFiber]
+		if !ok {
+			return "", false
+		}
+		if fragment == "" {
+			return newID, true
+		}
+		return newID + "." + fragment, true
+	}
 
 	for _, item := range legacy {
 		f := item.felt
@@ -747,15 +735,7 @@ func (s *Storage) MigrateFlatFiles(dryRun bool) (*MigrationResult, error) {
 			if remappedFrom, ok := remapDataFlowRef(ref, item.oldID, f.ID); ok {
 				return remappedFrom, true
 			}
-			targetFiber, fragment := splitDataFlowRef(ref)
-			newTargetID, ok := idMap[targetFiber]
-			if !ok {
-				return "", false
-			}
-			if fragment == "" {
-				return newTargetID, true
-			}
-			return newTargetID + "." + fragment, true
+			return remap(ref)
 		})
 		if err := s.Write(f); err != nil {
 			return nil, err
@@ -774,17 +754,7 @@ func (s *Storage) MigrateFlatFiles(dryRun bool) (*MigrationResult, error) {
 		return nil, fmt.Errorf("listing fibers for input rewrite: %w", err)
 	}
 	for _, f := range allFibers {
-		changed := f.RewriteDataFlowRefs(func(ref string) (string, bool) {
-			targetFiber, fragment := splitDataFlowRef(ref)
-			newID, ok := idMap[targetFiber]
-			if !ok {
-				return "", false
-			}
-			if fragment == "" {
-				return newID, true
-			}
-			return newID + "." + fragment, true
-		})
+		changed := f.RewriteDataFlowRefs(remap)
 		if changed {
 			if err := s.Write(f); err != nil {
 				return nil, fmt.Errorf("rewriting inputs in %s: %w", f.ID, err)
@@ -795,51 +765,48 @@ func (s *Storage) MigrateFlatFiles(dryRun bool) (*MigrationResult, error) {
 	return result, nil
 }
 
-// NormalizeFiberFiles rewrites legacy per-file format details in-place:
+// normalizeFiberFiles rewrites legacy per-file format details in-place:
 // frontmatter `title` -> `name`, and leading MyST anchor lines in bodies.
-func (s *Storage) NormalizeFiberFiles(dryRun bool) ([]string, []string, []string, error) {
+func (s *Storage) normalizeFiberFiles(dryRun bool, result *MigrationResult) error {
 	files, err := s.listFiberFiles()
 	if err != nil {
-		return nil, nil, nil, err
+		return err
 	}
 
-	var titleIDs []string
-	var dependsOnIDs []string
-	var anchorIDs []string
 	for _, file := range files {
 		data, err := os.ReadFile(file.path)
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("reading fiber %s: %w", file.path, err)
+			return fmt.Errorf("reading fiber %s: %w", file.path, err)
 		}
 
-		rewritten, renamedTitle, removedDependsOn, strippedAnchor, changed, err := normalizeFiberFile(file.id, data)
+		rewritten, renamedTitle, removedDependsOn, strippedAnchor, err := normalizeFiberFile(file.id, data)
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("normalize fiber %s: %w", file.path, err)
+			return fmt.Errorf("normalize fiber %s: %w", file.path, err)
 		}
-		if !changed {
+		if !renamedTitle && !removedDependsOn && !strippedAnchor {
 			continue
 		}
 		if renamedTitle {
-			titleIDs = append(titleIDs, file.id)
+			result.TitleToNameIDs = append(result.TitleToNameIDs, file.id)
 		}
 		if removedDependsOn {
-			dependsOnIDs = append(dependsOnIDs, file.id)
+			result.RemovedDependsOnIDs = append(result.RemovedDependsOnIDs, file.id)
 		}
 		if strippedAnchor {
-			anchorIDs = append(anchorIDs, file.id)
+			result.StrippedMystAnchorIDs = append(result.StrippedMystAnchorIDs, file.id)
 		}
 		if dryRun {
 			continue
 		}
 		if err := os.WriteFile(file.path, rewritten, 0644); err != nil {
-			return nil, nil, nil, fmt.Errorf("writing normalized fiber %s: %w", file.path, err)
+			return fmt.Errorf("writing normalized fiber %s: %w", file.path, err)
 		}
 	}
 
-	slices.Sort(titleIDs)
-	slices.Sort(dependsOnIDs)
-	slices.Sort(anchorIDs)
-	return titleIDs, dependsOnIDs, anchorIDs, nil
+	slices.Sort(result.TitleToNameIDs)
+	slices.Sort(result.RemovedDependsOnIDs)
+	slices.Sort(result.StrippedMystAnchorIDs)
+	return nil
 }
 
 // BackfillIntrinsicIDs assigns an intrinsic ULID to every fiber missing one.
@@ -878,20 +845,19 @@ func (s *Storage) BackfillIntrinsicIDs(dryRun bool) (*IdentityBackfillResult, er
 	return result, nil
 }
 
-func normalizeFiberFile(id string, content []byte) ([]byte, bool, bool, bool, bool, error) {
+func normalizeFiberFile(id string, content []byte) ([]byte, bool, bool, bool, error) {
 	frontmatter, body, err := splitFrontmatter(content, true)
 	if err != nil {
-		return nil, false, false, false, false, err
+		return nil, false, false, false, err
 	}
 
 	rewrittenFrontmatter, renamedTitle, removedDependsOn, err := normalizeLegacyFrontmatter(frontmatter)
 	if err != nil {
-		return nil, false, false, false, false, err
+		return nil, false, false, false, err
 	}
 	rewrittenBody, strippedAnchor := stripLegacyMystAnchor(id, body)
-	changed := renamedTitle || removedDependsOn || strippedAnchor
-	if !changed {
-		return content, false, false, false, false, nil
+	if !renamedTitle && !removedDependsOn && !strippedAnchor {
+		return content, false, false, false, nil
 	}
 
 	var out bytes.Buffer
@@ -905,7 +871,7 @@ func normalizeFiberFile(id string, content []byte) ([]byte, bool, bool, bool, bo
 			out.WriteString("\n")
 		}
 	}
-	return out.Bytes(), renamedTitle, removedDependsOn, strippedAnchor, true, nil
+	return out.Bytes(), renamedTitle, removedDependsOn, strippedAnchor, nil
 }
 
 func backfillIntrinsicID(content []byte) ([]byte, bool, error) {
@@ -1006,15 +972,18 @@ func (s *Storage) listWithModeHavingFrontmatterFields(mode ParseMode, includeMod
 
 	var felts []*Felt
 	evicted := 0 // iCloud-dataless files that couldn't be materialized during the walk
+	note := func(p string, err error) {
+		if isEvictedFileError(err) {
+			evicted++
+		} else if !s.quietWalk {
+			fmt.Fprintf(os.Stderr, "warning: failed to parse %s: %v\n", p, err)
+		}
+	}
 	for _, file := range files {
 		if len(fields) > 0 && mode == ParseMetadataOnly {
 			matched, err := fileFrontmatterHasTopLevelFields(file.path, fields)
 			if err != nil {
-				if isEvictedFileError(err) {
-					evicted++
-				} else if !s.quietWalk {
-					fmt.Fprintf(os.Stderr, "warning: failed to parse %s: %v\n", file.path, err)
-				}
+				note(file.path, err)
 				continue
 			}
 			if !matched {
@@ -1023,11 +992,7 @@ func (s *Storage) listWithModeHavingFrontmatterFields(mode ParseMode, includeMod
 		}
 		f, err := s.readPathWithMode(file.path, file.id, mode)
 		if err != nil {
-			if isEvictedFileError(err) {
-				evicted++
-			} else if !s.quietWalk {
-				fmt.Fprintf(os.Stderr, "warning: failed to parse %s: %v\n", file.path, err)
-			}
+			note(file.path, err)
 			continue
 		}
 		if includeModTime {
@@ -1330,9 +1295,6 @@ func (s *Storage) listFiberFiles() ([]fiberFile, error) {
 				// applies at the root the user is asking about.
 				entryPoint = false
 			}
-			// report.html sibling: same directory as the fiber's own file,
-			// detected from the DirEntry list already read for this tier
-			// (hasReportHTML above) rather than an extra os.Stat per fiber.
 			var reportPath string
 			if hasReportHTML {
 				reportPath = filepath.Join(dir, "report.html")
@@ -1387,17 +1349,6 @@ func ParentPath(id string) string {
 	return parent
 }
 
-func disambiguateID(id string, n int) string {
-	id = filepath.ToSlash(id)
-	dir := path.Dir(id)
-	base := path.Base(id)
-	candidate := fmt.Sprintf("%s-%d", base, n)
-	if dir == "." {
-		return candidate
-	}
-	return path.Join(dir, candidate)
-}
-
 // ResolveAddPath disambiguates a new fiber's slug-path against the existing
 // tree. When the leading segment of slug matches the basename of an existing
 // fiber, the slug is rewritten so the new fiber lands under that fiber's
@@ -1420,9 +1371,6 @@ func disambiguateID(id string, n int) string {
 //     fully-qualify the slug or opt into top-level placement.
 func ResolveAddPath(slug string, existingIDs []string) (resolved string, rewritten bool, err error) {
 	slug = path.Clean(strings.TrimSpace(slug))
-	if slug == "" || slug == "." {
-		return slug, false, nil
-	}
 	if !strings.Contains(slug, "/") {
 		return slug, false, nil
 	}
@@ -1432,11 +1380,7 @@ func ResolveAddPath(slug string, existingIDs []string) (resolved string, rewritt
 	// leading segment contributes its parent directory. Parents are
 	// deduplicated because two fibers can't share the same id, but two
 	// fibers can share a basename in different subtrees.
-	type candidate struct {
-		parent   string
-		resolved string
-	}
-	var candidates []candidate
+	var candidates []string
 	seenParents := map[string]struct{}{}
 	for _, id := range existingIDs {
 		if path.Base(id) != leading {
@@ -1453,7 +1397,7 @@ func ResolveAddPath(slug string, existingIDs []string) (resolved string, rewritt
 		} else {
 			resolvedPath = parent + "/" + slug
 		}
-		candidates = append(candidates, candidate{parent: parent, resolved: resolvedPath})
+		candidates = append(candidates, resolvedPath)
 	}
 
 	if len(candidates) == 0 {
@@ -1463,26 +1407,20 @@ func ResolveAddPath(slug string, existingIDs []string) (resolved string, rewritt
 	// If the user's input already matches one of the candidate placements
 	// (e.g. they passed a fully-qualified path or top-level was the right
 	// answer), use it as-is — no rewrite, no info chatter.
-	for _, c := range candidates {
-		if c.resolved == slug {
-			return slug, false, nil
-		}
+	if slices.Contains(candidates, slug) {
+		return slug, false, nil
 	}
 
 	if len(candidates) == 1 {
-		return candidates[0].resolved, true, nil
+		return candidates[0], true, nil
 	}
 
 	// Ambiguous: stable-sorted candidate list for a deterministic error.
-	paths := make([]string, len(candidates))
-	for i, c := range candidates {
-		paths[i] = c.resolved
-	}
-	sort.Strings(paths)
+	sort.Strings(candidates)
 	return "", false, fmt.Errorf(
 		"%q could resolve to multiple existing locations:\n  %s\npass a fully-qualified path or --top-level to disambiguate",
 		slug,
-		strings.Join(paths, "\n  "),
+		strings.Join(candidates, "\n  "),
 	)
 }
 
@@ -1498,7 +1436,6 @@ type scopedIDResolver struct {
 	external     *ExternalRefs
 	ids          []string
 	exact        map[string]struct{}
-	parentBases  map[string]map[string]string
 	parentSorted map[string][]scopedIDEntry
 	byBase       map[string][]string
 }
@@ -1513,7 +1450,6 @@ func newScopedIDResolverIn(ids []string, external *ExternalRefs) *scopedIDResolv
 		external:     external,
 		ids:          make([]string, 0, len(ids)),
 		exact:        make(map[string]struct{}, len(ids)),
-		parentBases:  map[string]map[string]string{},
 		parentSorted: map[string][]scopedIDEntry{},
 		byBase:       map[string][]string{},
 	}
@@ -1524,10 +1460,6 @@ func newScopedIDResolverIn(ids []string, external *ExternalRefs) *scopedIDResolv
 
 		parent := ParentPath(cleanID)
 		base := path.Base(cleanID)
-		if resolver.parentBases[parent] == nil {
-			resolver.parentBases[parent] = map[string]string{}
-		}
-		resolver.parentBases[parent][base] = cleanID
 		resolver.parentSorted[parent] = append(resolver.parentSorted[parent], scopedIDEntry{base: base, id: cleanID})
 		resolver.byBase[base] = append(resolver.byBase[base], cleanID)
 	}
@@ -1545,22 +1477,14 @@ func newScopedIDResolverIn(ids []string, external *ExternalRefs) *scopedIDResolv
 }
 
 func (r *scopedIDResolver) Resolve(scopeID, query string) (string, error) {
-	id, ok, resolutionErr := r.resolve(scopeID, query)
-	if ok {
-		return id, nil
-	}
-	return "", resolutionErr
-}
-
-func (r *scopedIDResolver) resolve(scopeID, query string) (string, bool, error) {
 	query = cleanLookupQuery(query)
 	scopeID = cleanLookupScope(scopeID)
 	if query == "" {
-		return "", false, fmt.Errorf("no felt found matching %q", query)
+		return "", fmt.Errorf("no felt found matching %q", query)
 	}
 
 	if id, ok, err := r.resolveInStore(scopeID, query); ok || err != nil {
-		return id, ok, err
+		return id, err
 	}
 
 	// A target spelled from the enclosing store's namespace but pointing back
@@ -1570,7 +1494,7 @@ func (r *scopedIDResolver) resolve(scopeID, query string) (string, bool, error) 
 	// spelling — and a miss keeps the query the caller typed in its error.
 	if local, stripped := r.external.Localize(query); stripped {
 		if id, ok, _ := r.resolveInStore(scopeID, local); ok {
-			return id, true, nil
+			return id, nil
 		}
 	}
 
@@ -1589,7 +1513,7 @@ func (r *scopedIDResolver) resolve(scopeID, query string) (string, bool, error) 
 	// (`felt -C ...`), while the misresolution it replaces silently answered
 	// with the wrong fiber — and `felt rm` and `felt nest` act on that answer.
 	if id, inferred, ok := r.externalHit(scopeID, query); ok {
-		return "", false, r.external.err(query, id, inferred)
+		return "", r.external.err(query, id, inferred)
 	}
 
 	// Last resort: the query's final segment names exactly one fiber. This is
@@ -1600,10 +1524,10 @@ func (r *scopedIDResolver) resolve(scopeID, query string) (string, bool, error) 
 	// that misreads a foreign path as a local slug, which is why an id known to
 	// the enclosing store is refused above before ever reaching here.
 	if ids := r.byBase[path.Base(query)]; len(ids) == 1 {
-		return ids[0], true, nil
+		return ids[0], nil
 	}
 
-	return "", false, fmt.Errorf("no felt found matching %q", query)
+	return "", fmt.Errorf("no felt found matching %q", query)
 }
 
 // externalHit asks the enclosing store about a query this store could not
@@ -1646,39 +1570,33 @@ func (r *scopedIDResolver) resolveInStore(scopeID, query string) (string, bool, 
 		return query, true, nil
 	}
 
-	if strings.Contains(query, "/") {
-		for _, scope := range scopeChain(scopeID) {
+	segmented := strings.Contains(query, "/")
+	for _, scope := range scopeChain(scopeID) {
+		var matches []string
+		if segmented {
 			candidate := scopedQuery(scope, query)
 			// An exact id match wins over descendant prefix matches: resolving
 			// [[a/parent]] must not be defeated into ambiguity by a/parent/child.
 			if _, ok := r.exact[candidate]; ok {
 				return candidate, true, nil
 			}
-			matches := r.prefixMatches(candidate)
-			switch len(matches) {
-			case 0:
-				continue
-			case 1:
+			matches = r.prefixMatches(candidate)
+		} else {
+			matches = r.basenamePrefixMatches(scope, query)
+			// Exact basename match takes priority over prefix matches: entries
+			// are sorted by (base, id), so an exact base sorts strictly before
+			// any entry that merely has query as a prefix.
+			if len(matches) > 0 && path.Base(matches[0]) == query {
 				return matches[0], true, nil
-			default:
-				return "", false, fmt.Errorf("ambiguous ID %q in scope %q matches: %s", query, displayScope(scope), strings.Join(matches, ", "))
 			}
 		}
-	} else {
-		for _, scope := range scopeChain(scopeID) {
-			// Exact basename match takes priority over prefix matches.
-			if exact, ok := r.exactBasenameMatch(scope, query); ok {
-				return exact, true, nil
-			}
-			matches := r.basenamePrefixMatches(scope, query)
-			switch len(matches) {
-			case 0:
-				continue
-			case 1:
-				return matches[0], true, nil
-			default:
-				return "", false, fmt.Errorf("ambiguous ID %q in scope %q matches: %s", query, displayScope(scope), strings.Join(matches, ", "))
-			}
+		switch len(matches) {
+		case 0:
+			continue
+		case 1:
+			return matches[0], true, nil
+		default:
+			return "", false, fmt.Errorf("ambiguous ID %q in scope %q matches: %s", query, displayScope(scope), strings.Join(matches, ", "))
 		}
 	}
 
@@ -1736,15 +1654,6 @@ func (r *scopedIDResolver) prefixMatches(candidate string) []string {
 	return matches
 }
 
-func (r *scopedIDResolver) exactBasenameMatch(scopeID, query string) (string, bool) {
-	byBase := r.parentBases[scopeID]
-	if byBase == nil {
-		return "", false
-	}
-	id, ok := byBase[query]
-	return id, ok
-}
-
 func (r *scopedIDResolver) basenamePrefixMatches(scopeID, query string) []string {
 	entries := r.parentSorted[scopeID]
 	start := sort.Search(len(entries), func(i int) bool {
@@ -1769,7 +1678,7 @@ func cleanLookupQuery(query string) string {
 	if query == "." {
 		return ""
 	}
-	return strings.TrimPrefix(query, "./")
+	return query
 }
 
 func cleanLookupScope(scopeID string) string {
@@ -1855,14 +1764,7 @@ func readFrontmatterFile(path string) ([]byte, error) {
 }
 
 func fileFrontmatterHasTopLevelFields(path string, fields []string) (bool, error) {
-	if len(fields) == 0 {
-		return true, nil
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return false, err
-	}
-	frontmatter, _, err := splitFrontmatter(data, false)
+	frontmatter, err := readFrontmatterFile(path)
 	if err != nil {
 		return false, err
 	}
@@ -1900,7 +1802,7 @@ func (s *Storage) nextAvailableMigrationID(baseID string, reserved map[string]st
 	for n := 1; ; n++ {
 		candidate := baseID
 		if n > 1 {
-			candidate = disambiguateID(baseID, n)
+			candidate = fmt.Sprintf("%s-%d", baseID, n)
 		}
 		if _, ok := reserved[candidate]; ok {
 			continue

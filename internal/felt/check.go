@@ -374,7 +374,7 @@ func dependsOnEntries(node *yaml.Node) (refs []string, malformed []string) {
 // since depends_on may name a fiber by its intrinsic uid rather than its
 // path/slug.
 func dependsOnRefResolves(resolver *scopedIDResolver, byUID map[string]*Felt, scopeID, ref string) bool {
-	if _, ok, err := resolver.resolve(scopeID, ref); ok && err == nil {
+	if _, err := resolver.Resolve(scopeID, ref); err == nil {
 		return true
 	} else if errors.Is(err, ErrExternalReference) {
 		// Same silence as a body reference resolving into the enclosing
