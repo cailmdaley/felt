@@ -46,16 +46,7 @@ type Storage struct {
 	quietWalk bool
 
 	enclosingOnce sync.Once
-	enclosing     enclosingStore
 	external      *ExternalRefs
-}
-
-// enclosingStore is the memoized answer to "is this store mounted inside
-// another one?" — see Storage.EnclosingStore.
-type enclosingStore struct {
-	root   string // absolute path of the enclosing `.felt/`
-	prefix string // this store's position inside it, slash-separated
-	ok     bool
 }
 
 // ErrExternalReference reports a query that names a real fiber in the
@@ -127,8 +118,7 @@ func (s *Storage) EnclosingStore() (root string, prefix string, ok bool) {
 				if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 					return
 				}
-				s.enclosing = enclosingStore{root: dir, prefix: filepath.ToSlash(rel), ok: true}
-				s.external = &ExternalRefs{root: dir, prefix: s.enclosing.prefix, cache: map[string]string{}}
+				s.external = &ExternalRefs{root: dir, prefix: filepath.ToSlash(rel), cache: map[string]string{}}
 				return
 			}
 			if parent := filepath.Dir(dir); parent == dir {
@@ -136,7 +126,7 @@ func (s *Storage) EnclosingStore() (root string, prefix string, ok bool) {
 			}
 		}
 	})
-	return s.enclosing.root, s.enclosing.prefix, s.enclosing.ok
+	return s.external.Root(), s.external.Prefix(), s.external != nil
 }
 
 // ExternalRefs returns the external-reference oracle for this store, or nil
@@ -446,7 +436,6 @@ func (s *Storage) Path(id string) string {
 // CheckAvailableID returns an error if the target fiber ID already exists.
 func (s *Storage) CheckAvailableID(id string) error {
 	id = filepath.ToSlash(filepath.Clean(strings.TrimSpace(id)))
-	id = strings.TrimPrefix(id, "./")
 	if id == "." || id == "" {
 		return fmt.Errorf("invalid felt id")
 	}
@@ -480,7 +469,7 @@ func (s *Storage) Write(f *Felt) error {
 
 // Read loads a felt from disk by ID.
 func (s *Storage) Read(id string) (*Felt, error) {
-	return s.readWithMode(id, ParseFull)
+	return s.readPathWithMode(s.Path(id), id, ParseFull)
 }
 
 // FindMetadataInScope returns the first felt matching the query using lexical
@@ -494,10 +483,6 @@ func (s *Storage) FindMetadataInScope(scopeID, query string) (*Felt, error) {
 // store, so narrow read paths can annotate exact refs without surprise work.
 func (s *Storage) FindExistingMetadataInScope(scopeID, query string) (*Felt, bool, error) {
 	return s.findExistingPathWithModeAndScope(scopeID, query, ParseMetadataOnly)
-}
-
-func (s *Storage) readWithMode(id string, mode ParseMode) (*Felt, error) {
-	return s.readPathWithMode(s.Path(id), id, mode)
 }
 
 // readPathWithMode reads a fiber from a known on-disk path. Used by list-time
@@ -1330,9 +1315,6 @@ func (s *Storage) listFiberFiles() ([]fiberFile, error) {
 				// applies at the root the user is asking about.
 				entryPoint = false
 			}
-			// report.html sibling: same directory as the fiber's own file,
-			// detected from the DirEntry list already read for this tier
-			// (hasReportHTML above) rather than an extra os.Stat per fiber.
 			var reportPath string
 			if hasReportHTML {
 				reportPath = filepath.Join(dir, "report.html")
@@ -1385,17 +1367,6 @@ func ParentPath(id string) string {
 		return ""
 	}
 	return parent
-}
-
-func disambiguateID(id string, n int) string {
-	id = filepath.ToSlash(id)
-	dir := path.Dir(id)
-	base := path.Base(id)
-	candidate := fmt.Sprintf("%s-%d", base, n)
-	if dir == "." {
-		return candidate
-	}
-	return path.Join(dir, candidate)
 }
 
 // ResolveAddPath disambiguates a new fiber's slug-path against the existing
@@ -1769,7 +1740,7 @@ func cleanLookupQuery(query string) string {
 	if query == "." {
 		return ""
 	}
-	return strings.TrimPrefix(query, "./")
+	return query
 }
 
 func cleanLookupScope(scopeID string) string {
@@ -1900,7 +1871,7 @@ func (s *Storage) nextAvailableMigrationID(baseID string, reserved map[string]st
 	for n := 1; ; n++ {
 		candidate := baseID
 		if n > 1 {
-			candidate = disambiguateID(baseID, n)
+			candidate = fmt.Sprintf("%s-%d", baseID, n)
 		}
 		if _, ok := reserved[candidate]; ok {
 			continue
