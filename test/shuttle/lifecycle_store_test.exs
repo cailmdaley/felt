@@ -4,28 +4,7 @@ defmodule Shuttle.LifecycleStoreTest do
 
   alias Shuttle.LifecycleStore
 
-  # Records felt invocations, returns success — lets the conclude tests assert
-  # the daemon shells `felt shuttle mark-runtime --handed-off-at` without running
-  # felt (Stage 5: felt owns the runtime nesting; the daemon's contract is the
-  # verb it issues).
-  defmodule MarkRuntimeRunner do
-    @behaviour Shuttle.Runner
-
-    def start do
-      case Agent.start_link(fn -> [] end, name: __MODULE__) do
-        {:ok, pid} -> {:ok, pid}
-        {:error, {:already_started, pid}} -> Agent.update(pid, fn _ -> [] end) && {:ok, pid}
-      end
-    end
-
-    @impl true
-    def cmd(command, args, opts) do
-      Agent.update(__MODULE__, &(&1 ++ [{command, args, opts}]))
-      {"", 0}
-    end
-
-    def calls, do: Agent.get(__MODULE__, & &1)
-  end
+  alias Shuttle.Test.RecordingRunner
 
   describe "accept/resume recognize new-model awaiting (status:closed + untempered)" do
     test "accept re-arms a closed+untempered standing role from the doc schedule" do
@@ -90,9 +69,9 @@ defmodule Shuttle.LifecycleStoreTest do
   describe "conclude: status re-arm THEN `felt shuttle mark-runtime --handed-off-at` (Stage 5)" do
     test "accept re-arms the doc (atomic) then shells mark-runtime to stamp the handoff" do
       with_doc_awaiting_role(fn fiber_id, path ->
-        {:ok, _} = MarkRuntimeRunner.start()
+        {:ok, _} = RecordingRunner.start()
 
-        assert {:ok, _} = LifecycleStore.accept(fiber_id, runner: MarkRuntimeRunner)
+        assert {:ok, _} = LifecycleStore.accept(fiber_id, runner: RecordingRunner)
 
         # First write (atomic, surgical): status re-armed, verdict cleared.
         fm = read_frontmatter(path)
@@ -105,7 +84,7 @@ defmodule Shuttle.LifecycleStoreTest do
         refute get_in(fm, ["shuttle", "handed_off_at"])
         refute get_in(fm, ["shuttle", "runtime"])
 
-        assert Enum.any?(MarkRuntimeRunner.calls(), fn {cmd, args, _} ->
+        assert Enum.any?(RecordingRunner.calls(), fn {cmd, args, _} ->
                  cmd == "felt" and match?(["shuttle", "mark-runtime" | _], args) and
                    "--handed-off-at" in args
                end)
@@ -114,11 +93,11 @@ defmodule Shuttle.LifecycleStoreTest do
 
     test "resume also concludes via mark-runtime" do
       with_doc_awaiting_role(fn fiber_id, _path ->
-        {:ok, _} = MarkRuntimeRunner.start()
+        {:ok, _} = RecordingRunner.start()
 
-        assert {:ok, _} = LifecycleStore.resume(fiber_id, runner: MarkRuntimeRunner)
+        assert {:ok, _} = LifecycleStore.resume(fiber_id, runner: RecordingRunner)
 
-        assert Enum.any?(MarkRuntimeRunner.calls(), fn {cmd, args, _} ->
+        assert Enum.any?(RecordingRunner.calls(), fn {cmd, args, _} ->
                  cmd == "felt" and match?(["shuttle", "mark-runtime" | _], args) and
                    "--handed-off-at" in args
                end)

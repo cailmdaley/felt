@@ -7,23 +7,7 @@ defmodule ShuttleWeb.FiberControllerTest do
 
   @endpoint ShuttleWeb.Endpoint
 
-  # POST transport stub for the cross-host create forward test. Records the last
-  # (url, body) it was asked to POST and replays a scripted response, so the
-  # forward leg is exercised without a real tunnel.
-  defmodule StubPostClient do
-    use Agent
-
-    def start_link(_ \\ []),
-      do: Agent.start_link(fn -> %{response: nil, last: nil} end, name: __MODULE__)
-
-    def set_response(response), do: Agent.update(__MODULE__, &Map.put(&1, :response, response))
-    def last, do: Agent.get(__MODULE__, & &1.last)
-
-    def post(url, body, _content_type, _timeout_ms) do
-      Agent.update(__MODULE__, &Map.put(&1, :last, %{url: url, body: body}))
-      Agent.get(__MODULE__, & &1.response)
-    end
-  end
+  alias Shuttle.Test.StubPostClient
 
   setup do
     tmp =
@@ -300,7 +284,6 @@ defmodule ShuttleWeb.FiberControllerTest do
     assert %{"error" => error} = Jason.decode!(conn.resp_body)
     assert error =~ "does not match this daemon host"
   end
-
 
   defp frontmatter(content) do
     [_, frontmatter | _] = String.split(content, "---\n", parts: 3)

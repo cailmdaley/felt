@@ -9,33 +9,12 @@ defmodule ShuttleWeb.SessionsControllerTest do
   import Shuttle.Test.ApiConn
   import Plug.Conn
   import Phoenix.ConnTest
+  import Shuttle.Test.Ledgers
 
   @endpoint ShuttleWeb.Endpoint
 
   setup do
-    path =
-      Path.join(
-        System.tmp_dir!(),
-        "shuttle_sessions_ctrl_#{System.unique_integer([:positive])}.jsonl"
-      )
-
-    previous = System.get_env("SHUTTLE_SESSIONS_FILE")
-    previous_data_dir = System.get_env("SHUTTLE_DATA_DIR")
-    System.delete_env("SHUTTLE_DATA_DIR")
-    System.put_env("SHUTTLE_SESSIONS_FILE", path)
-
-    on_exit(fn ->
-      File.rm(path)
-      File.rm(path <> ".1")
-      if previous, do: System.put_env("SHUTTLE_SESSIONS_FILE", previous)
-      if previous_data_dir, do: System.put_env("SHUTTLE_DATA_DIR", previous_data_dir)
-    end)
-
-    {:ok, path: path}
-  end
-
-  defp write!(path, records) do
-    File.write!(path, Enum.map_join(records, "", &(Jason.encode!(&1) <> "\n")))
+    {:ok, path: ledger_setup!("SHUTTLE_SESSIONS_FILE", "shuttle_sessions_ctrl")}
   end
 
   defp record(overrides) do
@@ -54,9 +33,8 @@ defmodule ShuttleWeb.SessionsControllerTest do
     )
   end
 
-
   test "200 with the host stamp and every record, oldest first", %{path: path} do
-    write!(path, [
+    write_jsonl!(path, [
       record(%{"fiber" => "second", "at" => 200}),
       record(%{"fiber" => "first", "at" => 100, "kind" => "claim"})
     ])
@@ -82,7 +60,7 @@ defmodule ShuttleWeb.SessionsControllerTest do
   end
 
   test "since_ms filters, inclusively", %{path: path} do
-    write!(path, [
+    write_jsonl!(path, [
       record(%{"fiber" => "old", "at" => 100}),
       record(%{"fiber" => "edge", "at" => 200}),
       record(%{"fiber" => "new", "at" => 300})

@@ -9,6 +9,7 @@ defmodule ShuttleWeb.SpendControllerTest do
 
   import Plug.Conn
   import Phoenix.ConnTest
+  import Shuttle.Test.Ledgers
 
   @endpoint ShuttleWeb.Endpoint
 
@@ -38,10 +39,6 @@ defmodule ShuttleWeb.SpendControllerTest do
     end)
 
     {:ok, ledger: ledger, projects: projects}
-  end
-
-  defp ledger!(path, records) do
-    File.write!(path, Enum.map_join(records, "", &(Jason.encode!(&1) <> "\n")))
   end
 
   defp record(session, fiber, at \\ @t0) do
@@ -78,9 +75,8 @@ defmodule ShuttleWeb.SpendControllerTest do
     File.write!(Path.join(projects, "#{session}.jsonl"), Enum.join(lines))
   end
 
-
   test "one row per ledgered session, with its fiber and its counters", ctx do
-    ledger!(ctx.ledger, [record(@s1, "work/paper")])
+    write_jsonl!(ctx.ledger, [record(@s1, "work/paper")])
     transcript!(ctx.projects, @s1, [{"msg_a", 100}, {"msg_b", 50}])
 
     body = json_response(get(api_conn(), "/api/v1/spend"), 200)
@@ -97,7 +93,7 @@ defmodule ShuttleWeb.SpendControllerTest do
   end
 
   test "the fiber rollup sums a fiber's sessions", ctx do
-    ledger!(ctx.ledger, [
+    write_jsonl!(ctx.ledger, [
       record(@s1, "work/paper", @t0),
       record(@s2, "work/paper", @t0 + 10)
     ])
@@ -117,7 +113,7 @@ defmodule ShuttleWeb.SpendControllerTest do
   end
 
   test "the fiber rollup counts a resumed session's lifetime spend once", ctx do
-    ledger!(ctx.ledger, [
+    write_jsonl!(ctx.ledger, [
       record(@s1, "work/paper", @t0),
       Map.put(record(@s1, "work/paper", @t0 + 10), "kind", "resume"),
       record(@s2, "work/paper", @t0 + 20)
@@ -137,7 +133,7 @@ defmodule ShuttleWeb.SpendControllerTest do
   end
 
   test "a missing transcript is a zeroed row with found: false, still counted", ctx do
-    ledger!(ctx.ledger, [record(@s1, "work/paper"), record(@s2, "work/paper")])
+    write_jsonl!(ctx.ledger, [record(@s1, "work/paper"), record(@s2, "work/paper")])
     transcript!(ctx.projects, @s1, [{"msg_a", 100}])
 
     body = json_response(get(api_conn(), "/api/v1/spend"), 200)
@@ -153,7 +149,7 @@ defmodule ShuttleWeb.SpendControllerTest do
   end
 
   test "since_ms bounds the ledger walk", ctx do
-    ledger!(ctx.ledger, [
+    write_jsonl!(ctx.ledger, [
       record(@s1, "old", @t0),
       record(@s2, "new", @t0 + 1_000)
     ])

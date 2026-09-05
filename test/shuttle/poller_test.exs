@@ -1,6 +1,7 @@
 defmodule Shuttle.PollerTest do
   use ExUnit.Case
   import Shuttle.Test.EnvHelpers
+  import Shuttle.Test.PollerHelpers
 
   alias Shuttle.ActionQueries
   alias Shuttle.Poller
@@ -43,48 +44,7 @@ defmodule Shuttle.PollerTest do
     :ok
   end
 
-  # Start a Poller OWNED BY ExUnit's per-test supervisor, so it is terminated
-  # deterministically at the end of the test (before the next test runs).
-  #
-  # The bug this fixes: `Poller.start_link/1` links the poller to the *test
-  # process*, but a test process exits `:normal`, and normal exits do NOT
-  # propagate across links — so every poller SURVIVED its test as a zombie
-  # ticker. Dozens accumulated over a run, all polling the single shared
-  # MockRunner Agent + the /tmp/.felt store, dispatching and writing commands
-  # after later tests' `reset()`. That polluted later tests (sessions/commands
-  # they never created) and starved the scheduler (blowing the heartbeat-timing
-  # margins) — the rotating, order-dependent flakiness. `start_supervised!`
-  # hands the lifecycle to ExUnit; `restart: :temporary` so a poller that stops
-  # itself mid-test (crash-recovery cases) is not auto-restarted. Returns
-  # `{:ok, pid}` so existing `{:ok, poller} = ...` call sites are unchanged.
-  defp start_poller!(opts) do
-    pid =
-      start_supervised!(%{
-        id: make_ref(),
-        start: {Shuttle.Poller, :start_link, [opts]},
-        restart: :temporary
-      })
-
-    {:ok, pid}
-  end
-
   # ── Helpers ──
-
-  # Minimal shuttle: block YAML for a oneshot fiber ready for dispatch.
-  @oneshot_shuttle "enabled: true\nkind: oneshot\n"
-
-  defp make_fiber(id, attrs \\ %{}) do
-    Map.merge(
-      %{
-        "id" => id,
-        "name" => id,
-        "status" => "active",
-        "tags" => ["constitution"],
-        "created_at" => "2026-04-28T00:00:00Z"
-      },
-      attrs
-    )
-  end
 
   # Ceiling ~3s (was ~500ms). wait_until returns the instant the condition holds,
   # so a generous ceiling costs passing assertions nothing — but the poll cycle is
@@ -209,7 +169,7 @@ defmodule Shuttle.PollerTest do
     # alive by other tests' long-lived Pollers/Watchers.
     fiber = make_fiber("tests/haiku-dispatch")
     MockRunner.set_fiber("tests/haiku-dispatch", fiber)
-    MockRunner.set_shuttle("tests/haiku-dispatch", @oneshot_shuttle)
+    MockRunner.set_shuttle("tests/haiku-dispatch", oneshot_shuttle())
 
     {:ok, poller} =
       start_poller!(
@@ -495,7 +455,7 @@ defmodule Shuttle.PollerTest do
   test "poller uses the shuttle felt listing for discovery" do
     fiber = make_fiber("tests/projected-discovery")
     MockRunner.set_fiber("tests/projected-discovery", fiber)
-    MockRunner.set_shuttle("tests/projected-discovery", @oneshot_shuttle)
+    MockRunner.set_shuttle("tests/projected-discovery", oneshot_shuttle())
 
     {:ok, poller} =
       start_poller!(
@@ -531,7 +491,7 @@ defmodule Shuttle.PollerTest do
       })
 
     MockRunner.set_fiber("tests/cached-document", fiber)
-    MockRunner.set_shuttle("tests/cached-document", @oneshot_shuttle)
+    MockRunner.set_shuttle("tests/cached-document", oneshot_shuttle())
 
     {:ok, poller} =
       start_poller!(
@@ -601,7 +561,7 @@ defmodule Shuttle.PollerTest do
       })
 
     MockRunner.set_fiber("tests/retained-document", fiber)
-    MockRunner.set_shuttle("tests/retained-document", @oneshot_shuttle)
+    MockRunner.set_shuttle("tests/retained-document", oneshot_shuttle())
 
     {:ok, poller} =
       start_poller!(
@@ -670,7 +630,7 @@ defmodule Shuttle.PollerTest do
       })
 
     MockRunner.set_fiber("tests/seam", fiber)
-    MockRunner.set_shuttle("tests/seam", @oneshot_shuttle)
+    MockRunner.set_shuttle("tests/seam", oneshot_shuttle())
 
     {:ok, poller} =
       start_poller!(
@@ -728,7 +688,7 @@ defmodule Shuttle.PollerTest do
       })
 
     MockRunner.set_fiber("tests/report-toggle", fiber)
-    MockRunner.set_shuttle("tests/report-toggle", @oneshot_shuttle)
+    MockRunner.set_shuttle("tests/report-toggle", oneshot_shuttle())
 
     {:ok, poller} =
       start_poller!(
@@ -1059,59 +1019,15 @@ defmodule Shuttle.PollerTest do
     assert {:ok, :no_session} = Poller.kill_session(poller, "tests/killme")
   end
 
-  test "kill_session treats tmux's \"session not found\" as a successful teardown" do
-    uid = "01JZ00000000000000000000KN"
-
-    fiber =
-      make_fiber("tests/killme-gone", %{
-        "uid" => uid,
-        "modified_at" => "2026-06-08T01:00:00Z"
-      })
-
-    MockRunner.set_fiber("tests/killme-gone", fiber)
-    MockRunner.set_shuttle("tests/killme-gone", "enabled: true\nkind: oneshot\nhost: candide\n")
-
-    {:ok, poller} =
-      start_poller!(
-        name: :test_poller_kill_session_gone,
-        runner: MockRunner,
-        own_host_id: "candide",
-        poll_interval_ms: 60_000,
-        felt_stores: [MockRunner.felt_root()]
-      )
-
-    send(poller, :run_poll_cycle)
-
-    assert wait_until(fn ->
-             case Poller.cached_fiber_documents(poller) do
-               {:ok, %{fibers: [entry]}} -> Map.has_key?(entry, :runtime)
-               _ -> false
-             end
-           end)
-
-    {:ok, %{fibers: [live]}} = Poller.cached_fiber_documents(poller)
-    session = get_in(live, [:runtime, :tmux_session])
-
-    # tmux itself reports the session is already gone (exit 1, "can't find
-    # session") — the poller must still treat this as a successful kill and
-    # tear down runtime tracking, not surface it as a failure.
-    MockRunner.set_kill_session_failure(:not_found)
-    assert {:ok, ^session} = Poller.kill_session(poller, "tests/killme-gone")
-
-    assert wait_until(fn ->
-             case Poller.cached_fiber_documents(poller) do
-               {:ok, %{fibers: [entry]}} -> not Map.has_key?(entry, :runtime)
-               _ -> false
-             end
-           end)
-  end
-
-  # Twin of the "session not found" test above for the two other tmux
-  # "already gone" phrasings session_already_gone? must also treat as success:
-  # a whole-server-down "no server running" and the per-session "no such
-  # session". Each is its own test (not a loop) so a fresh MockRunner + poller
-  # keeps them from cross-claiming each other's fiber.
+  # The three tmux "already gone" phrasings session_already_gone? must treat as
+  # success: the per-session "session not found" and "no such session", and a
+  # whole-server-down "no server running". In every case tmux reports the
+  # session is already gone (exit 1) - the poller must still treat this as a
+  # successful kill and tear down runtime tracking, not surface it as a
+  # failure. Each is its own test (not one shared body) so a fresh MockRunner +
+  # poller keeps them from cross-claiming each other's fiber.
   for {variant, uid_suffix, gone_output} <- [
+        {:not_found, "KN", "\"session not found\""},
         {:no_server, "K0", "\"no server running\""},
         {:no_such, "K1", "\"no such session\""}
       ] do
@@ -1347,7 +1263,7 @@ defmodule Shuttle.PollerTest do
   test "snapshot remains responsive while poll cycle is reading felt" do
     fiber = make_fiber("tests/slow-felt-read")
     MockRunner.set_fiber("tests/slow-felt-read", fiber)
-    MockRunner.set_shuttle("tests/slow-felt-read", @oneshot_shuttle)
+    MockRunner.set_shuttle("tests/slow-felt-read", oneshot_shuttle())
     MockRunner.set_felt_ls_delay(1_000)
 
     {:ok, poller} =
@@ -1405,7 +1321,7 @@ defmodule Shuttle.PollerTest do
   test "repeated stalled reads advance the poller and supersede late replies" do
     fiber = make_fiber("tests/stalled-read")
     MockRunner.set_fiber("tests/stalled-read", fiber)
-    MockRunner.set_shuttle("tests/stalled-read", @oneshot_shuttle)
+    MockRunner.set_shuttle("tests/stalled-read", oneshot_shuttle())
     MockRunner.set_felt_ls_delay(200)
 
     {:ok, poller} =
@@ -1463,7 +1379,7 @@ defmodule Shuttle.PollerTest do
   test "poller supervision shuts down an in-flight read with its owner" do
     fiber = make_fiber("tests/shutdown-stalled-read")
     MockRunner.set_fiber("tests/shutdown-stalled-read", fiber)
-    MockRunner.set_shuttle("tests/shutdown-stalled-read", @oneshot_shuttle)
+    MockRunner.set_shuttle("tests/shutdown-stalled-read", oneshot_shuttle())
     MockRunner.set_felt_ls_delay(1_000)
 
     {:ok, poller} =
@@ -1488,7 +1404,7 @@ defmodule Shuttle.PollerTest do
   test "poller skips closed fibers" do
     fiber = make_fiber("tests/closed", %{"status" => "closed"})
     MockRunner.set_fiber("tests/closed", fiber)
-    MockRunner.set_shuttle("tests/closed", @oneshot_shuttle, "closed")
+    MockRunner.set_shuttle("tests/closed", oneshot_shuttle(), "closed")
 
     {:ok, poller} =
       start_poller!(
@@ -2116,7 +2032,7 @@ defmodule Shuttle.PollerTest do
   test "boot quarantine parks fresh launches and surfaces them as pending_launch" do
     fiber_id = "tests/quarantine-fresh"
     MockRunner.set_fiber(fiber_id, make_fiber(fiber_id))
-    MockRunner.set_shuttle(fiber_id, @oneshot_shuttle)
+    MockRunner.set_shuttle(fiber_id, oneshot_shuttle())
 
     {:ok, poller} =
       start_poller!(
@@ -2165,7 +2081,7 @@ defmodule Shuttle.PollerTest do
     # (see the was-running test below).
     fiber_id = "tests/quarantine-dirty-resume"
     MockRunner.set_fiber(fiber_id, make_fiber(fiber_id))
-    MockRunner.set_shuttle(fiber_id, @oneshot_shuttle)
+    MockRunner.set_shuttle(fiber_id, oneshot_shuttle())
     write_dispatch_marker(fiber_id, "b1e0a3c2-0000-4000-8000-000000000001")
 
     {:ok, poller} =
@@ -2201,7 +2117,7 @@ defmodule Shuttle.PollerTest do
     # adopted at boot, then exits mid-uptime, must re-dispatch, not park.
     fiber_id = "tests/quarantine-was-running"
     session = Dispatcher.session_name(fiber_id)
-    MockRunner.set_shuttle(fiber_id, @oneshot_shuttle)
+    MockRunner.set_shuttle(fiber_id, oneshot_shuttle())
     # Live worker present at boot → adopt_orphans adopts it (adoption runs
     # regardless of quarantine), so its runtime key enters the durable
     # `was_running` set.
@@ -2294,7 +2210,7 @@ defmodule Shuttle.PollerTest do
     # cycle; only actual dispatching is slot-gated.
     fiber_id = "tests/quarantine-slots-full"
     MockRunner.set_fiber(fiber_id, make_fiber(fiber_id))
-    MockRunner.set_shuttle(fiber_id, @oneshot_shuttle)
+    MockRunner.set_shuttle(fiber_id, oneshot_shuttle())
 
     {:ok, poller} =
       start_poller!(
@@ -2316,7 +2232,7 @@ defmodule Shuttle.PollerTest do
     # The fiber closes; the next cycle (slots still full) rebuilds the parked
     # map and the stale row drops out.
     MockRunner.set_fiber(fiber_id, make_fiber(fiber_id, %{"status" => "closed"}))
-    MockRunner.set_shuttle(fiber_id, @oneshot_shuttle, "closed")
+    MockRunner.set_shuttle(fiber_id, oneshot_shuttle(), "closed")
     send(poller, :run_poll_cycle)
 
     assert_eventually(fn ->
@@ -2327,7 +2243,7 @@ defmodule Shuttle.PollerTest do
   test "releasing the boot quarantine dispatches the parked launches" do
     fiber_id = "tests/quarantine-release"
     MockRunner.set_fiber(fiber_id, make_fiber(fiber_id))
-    MockRunner.set_shuttle(fiber_id, @oneshot_shuttle)
+    MockRunner.set_shuttle(fiber_id, oneshot_shuttle())
 
     {:ok, poller} =
       start_poller!(
@@ -2361,7 +2277,7 @@ defmodule Shuttle.PollerTest do
   test "force-dispatch bypasses the boot quarantine and does not clear it" do
     fiber_id = "tests/quarantine-force"
     MockRunner.set_fiber(fiber_id, make_fiber(fiber_id))
-    MockRunner.set_shuttle(fiber_id, @oneshot_shuttle)
+    MockRunner.set_shuttle(fiber_id, oneshot_shuttle())
 
     # max_concurrent_workers: 0 disables the autonomous tick's dispatch;
     # explicit Poller.dispatch_fiber/3 is not slot-gated, so only the manual
@@ -2408,7 +2324,7 @@ defmodule Shuttle.PollerTest do
     MockRunner.set_contract_level("2")
     fiber_id = "tests/contract-match"
     MockRunner.set_fiber(fiber_id, make_fiber(fiber_id))
-    MockRunner.set_shuttle(fiber_id, @oneshot_shuttle)
+    MockRunner.set_shuttle(fiber_id, oneshot_shuttle())
 
     {:ok, poller} =
       start_poller!(
@@ -2435,7 +2351,7 @@ defmodule Shuttle.PollerTest do
     MockRunner.set_contract_level("3")
     fiber_id = "tests/contract-mismatch"
     MockRunner.set_fiber(fiber_id, make_fiber(fiber_id))
-    MockRunner.set_shuttle(fiber_id, @oneshot_shuttle)
+    MockRunner.set_shuttle(fiber_id, oneshot_shuttle())
 
     {:ok, poller} =
       start_poller!(
@@ -2476,7 +2392,7 @@ defmodule Shuttle.PollerTest do
     MockRunner.set_contract_level("Error: unknown command \"contract\"", 1)
     fiber_id = "tests/contract-garbage"
     MockRunner.set_fiber(fiber_id, make_fiber(fiber_id))
-    MockRunner.set_shuttle(fiber_id, @oneshot_shuttle)
+    MockRunner.set_shuttle(fiber_id, oneshot_shuttle())
 
     {:ok, poller} =
       start_poller!(
@@ -2506,7 +2422,7 @@ defmodule Shuttle.PollerTest do
     MockRunner.set_contract_level("3")
     fiber_id = "tests/contract-skew-was-running"
     session = Dispatcher.session_name(fiber_id)
-    MockRunner.set_shuttle(fiber_id, @oneshot_shuttle)
+    MockRunner.set_shuttle(fiber_id, oneshot_shuttle())
     MockRunner.add_tmux_session(session)
 
     {:ok, poller} =
@@ -2999,7 +2915,7 @@ defmodule Shuttle.PollerTest do
     fiber_id = "tests/reconcile-dead-session"
     fiber = make_fiber(fiber_id)
     MockRunner.set_fiber(fiber_id, fiber)
-    MockRunner.set_shuttle(fiber_id, @oneshot_shuttle)
+    MockRunner.set_shuttle(fiber_id, oneshot_shuttle())
 
     {:ok, poller} =
       start_poller!(
@@ -3427,7 +3343,7 @@ defmodule Shuttle.PollerTest do
 
     MockRunner.set_fiber("tests/dependent", fiber)
     MockRunner.set_fiber("tests/dep", dep)
-    MockRunner.set_shuttle("tests/dependent", @oneshot_shuttle)
+    MockRunner.set_shuttle("tests/dependent", oneshot_shuttle())
 
     {:ok, poller} =
       start_poller!(
@@ -3451,7 +3367,7 @@ defmodule Shuttle.PollerTest do
   test "poller skips untracked fibers" do
     fiber = make_fiber("tests/untracked", %{"status" => "untracked"})
     MockRunner.set_fiber("tests/untracked", fiber)
-    MockRunner.set_shuttle("tests/untracked", @oneshot_shuttle, "untracked")
+    MockRunner.set_shuttle("tests/untracked", oneshot_shuttle(), "untracked")
 
     {:ok, poller} =
       start_poller!(
@@ -3477,7 +3393,7 @@ defmodule Shuttle.PollerTest do
 
     MockRunner.set_fiber("tests/dependent", fiber)
     MockRunner.set_fiber("tests/dep", dep)
-    MockRunner.set_shuttle("tests/dependent", @oneshot_shuttle)
+    MockRunner.set_shuttle("tests/dependent", oneshot_shuttle())
 
     {:ok, poller} =
       start_poller!(
@@ -3511,7 +3427,7 @@ defmodule Shuttle.PollerTest do
 
     MockRunner.set_fiber("tests/dependent", fiber)
     MockRunner.set_fiber("tests/dep", dep)
-    MockRunner.set_shuttle("tests/dependent", @oneshot_shuttle)
+    MockRunner.set_shuttle("tests/dependent", oneshot_shuttle())
 
     {:ok, poller} =
       start_poller!(
@@ -3538,7 +3454,7 @@ defmodule Shuttle.PollerTest do
 
     MockRunner.set_fiber("tests/dependent", fiber)
     MockRunner.set_fiber("tests/dep", dep)
-    MockRunner.set_shuttle("tests/dependent", @oneshot_shuttle)
+    MockRunner.set_shuttle("tests/dependent", oneshot_shuttle())
 
     {:ok, poller} =
       start_poller!(
@@ -3560,7 +3476,7 @@ defmodule Shuttle.PollerTest do
   test "poller does not double-dispatch" do
     fiber = make_fiber("tests/haiku-dedup")
     MockRunner.set_fiber("tests/haiku-dedup", fiber)
-    MockRunner.set_shuttle("tests/haiku-dedup", @oneshot_shuttle)
+    MockRunner.set_shuttle("tests/haiku-dedup", oneshot_shuttle())
     MockRunner.add_tmux_session(Dispatcher.session_name("tests/haiku-dedup"))
 
     {:ok, poller} =
@@ -3590,7 +3506,7 @@ defmodule Shuttle.PollerTest do
     # eligible) and starts a fresh session.
     fiber = make_fiber("tests/haiku-retry")
     MockRunner.set_fiber("tests/haiku-retry", fiber)
-    MockRunner.set_shuttle("tests/haiku-retry", @oneshot_shuttle)
+    MockRunner.set_shuttle("tests/haiku-retry", oneshot_shuttle())
 
     {:ok, poller} =
       start_poller!(
@@ -3638,7 +3554,7 @@ defmodule Shuttle.PollerTest do
 
     fiber = make_fiber(fiber_id, %{"uid" => uid})
     MockRunner.set_fiber(fiber_id, fiber)
-    MockRunner.set_shuttle(fiber_id, @oneshot_shuttle)
+    MockRunner.set_shuttle(fiber_id, oneshot_shuttle())
 
     {:ok, poller} =
       start_poller!(
@@ -3782,7 +3698,7 @@ defmodule Shuttle.PollerTest do
     # collide with sessions left over from other tests' Pollers/Watchers.
     fiber = make_fiber("tests/haiku-close")
     MockRunner.set_fiber("tests/haiku-close", fiber)
-    MockRunner.set_shuttle("tests/haiku-close", @oneshot_shuttle)
+    MockRunner.set_shuttle("tests/haiku-close", oneshot_shuttle())
 
     {:ok, poller} =
       start_poller!(
@@ -3809,7 +3725,7 @@ defmodule Shuttle.PollerTest do
   end
 
   test "poller adopts orphan tmux sessions on startup" do
-    MockRunner.set_shuttle("tests/orphan", @oneshot_shuttle)
+    MockRunner.set_shuttle("tests/orphan", oneshot_shuttle())
     MockRunner.add_tmux_session(Dispatcher.session_name("tests/orphan"))
 
     {:ok, poller} =
@@ -3831,7 +3747,7 @@ defmodule Shuttle.PollerTest do
     fiber_id = "tests/orphan-uid"
     uid = "01KTHDNZS287ZSSG8X8V59XKWB"
     MockRunner.set_fiber(fiber_id, make_fiber(fiber_id, %{"uid" => uid}))
-    MockRunner.set_shuttle(fiber_id, @oneshot_shuttle)
+    MockRunner.set_shuttle(fiber_id, oneshot_shuttle())
     MockRunner.add_tmux_session(Dispatcher.session_name(fiber_id, uid))
 
     {:ok, poller} =
@@ -3879,7 +3795,7 @@ defmodule Shuttle.PollerTest do
     fiber_id = "tests/orphan-legacy"
     uid = "01KTHDNZS287ZSSG8X8V59XKWC"
     MockRunner.set_fiber(fiber_id, make_fiber(fiber_id, %{"uid" => uid}))
-    MockRunner.set_shuttle(fiber_id, @oneshot_shuttle)
+    MockRunner.set_shuttle(fiber_id, oneshot_shuttle())
     # Live session carries the LEGACY name, not the uid-keyed one.
     MockRunner.add_tmux_session(Dispatcher.session_name(fiber_id))
 
@@ -4391,7 +4307,7 @@ defmodule Shuttle.PollerTest do
 
     fiber = make_fiber(fiber_id)
     MockRunner.set_fiber(fiber_id, fiber)
-    MockRunner.set_shuttle(fiber_id, @oneshot_shuttle)
+    MockRunner.set_shuttle(fiber_id, oneshot_shuttle())
 
     assert {:ok, session} = Poller.dispatch_fiber(poller, fiber_id, [])
     assert session == Dispatcher.session_name(fiber_id)
@@ -4437,7 +4353,7 @@ defmodule Shuttle.PollerTest do
 
     fiber = make_fiber(fiber_id)
     MockRunner.set_fiber(fiber_id, fiber)
-    MockRunner.set_shuttle(fiber_id, @oneshot_shuttle)
+    MockRunner.set_shuttle(fiber_id, oneshot_shuttle())
 
     {:ok, poller} =
       start_poller!(
@@ -4476,7 +4392,7 @@ defmodule Shuttle.PollerTest do
 
     fiber = make_fiber(fiber_id)
     MockRunner.set_fiber(fiber_id, fiber)
-    MockRunner.set_shuttle(fiber_id, @oneshot_shuttle)
+    MockRunner.set_shuttle(fiber_id, oneshot_shuttle())
 
     {:ok, poller} =
       start_poller!(
@@ -4519,7 +4435,7 @@ defmodule Shuttle.PollerTest do
 
     fiber = make_fiber(fiber_id)
     MockRunner.set_fiber(fiber_id, fiber)
-    MockRunner.set_shuttle(fiber_id, @oneshot_shuttle)
+    MockRunner.set_shuttle(fiber_id, oneshot_shuttle())
 
     assert {:ok, session} = Poller.dispatch_fiber(poller, fiber_id, [])
     MockRunner.remove_tmux_session(session)
@@ -4608,7 +4524,7 @@ defmodule Shuttle.PollerTest do
 
   test "poller adopts orphan sessions with literal hyphenated fiber ids" do
     fiber_id = "ai-futures/shuttle/constitution-shuttle-standalone"
-    MockRunner.set_shuttle(fiber_id, @oneshot_shuttle)
+    MockRunner.set_shuttle(fiber_id, oneshot_shuttle())
     fiber = make_fiber(fiber_id, %{"tags" => ["constitution", "codex"]})
 
     MockRunner.set_fiber(
@@ -4645,7 +4561,7 @@ defmodule Shuttle.PollerTest do
     fiber_id = "tests/untagged-shuttle"
     fiber = make_fiber(fiber_id, %{"tags" => []})
     MockRunner.set_fiber(fiber_id, fiber)
-    MockRunner.set_shuttle(fiber_id, @oneshot_shuttle)
+    MockRunner.set_shuttle(fiber_id, oneshot_shuttle())
 
     {:ok, poller} =
       start_poller!(
@@ -4673,7 +4589,7 @@ defmodule Shuttle.PollerTest do
     fiber_id = "tests/slow-api-dispatch"
     fiber = make_fiber(fiber_id)
     MockRunner.set_fiber(fiber_id, fiber)
-    MockRunner.set_shuttle(fiber_id, @oneshot_shuttle)
+    MockRunner.set_shuttle(fiber_id, oneshot_shuttle())
     MockRunner.set_new_session_delay(5_250)
 
     {:ok, poller} =
@@ -4721,15 +4637,43 @@ defmodule Shuttle.PollerTest do
     dir_path
   end
 
+  # A throwaway felt store dir for the multi-host tests, swept by this test's
+  # own `on_exit` — scoped to the dir this test made, so a sweep can't take
+  # another test's store out from under it (this module is not async).
+  defp multi_host_dir(label) do
+    dir =
+      Path.join(
+        System.tmp_dir!(),
+        "shuttle-multi-host-#{label}-#{System.unique_integer([:positive])}"
+      )
+
+    File.mkdir_p!(dir)
+    on_exit(fn -> File.rm_rf(dir) end)
+    dir
+  end
+
+  # The project-cities-on-loom topology: the physical fiber is rooted in loom
+  # under ai-futures/portolan/, and the project's `.felt/` symlinks into that
+  # subdir, so the same kanban-modal.md is also reachable as
+  # project/.felt/kanban-modal/.
+  defp loom_project_symlink! do
+    loom = multi_host_dir("loom")
+    project = multi_host_dir("project")
+
+    write_fiber_file(loom, "ai-futures/portolan/kanban-modal")
+
+    File.ln_s!(
+      Path.join([loom, ".felt", "ai-futures", "portolan"]),
+      Path.join(project, ".felt")
+    )
+
+    {loom, project}
+  end
+
   test "resolve_fiber_host finds a fiber in the first configured host" do
-    host_a =
-      Path.join(System.tmp_dir!(), "shuttle-multi-host-a-#{System.unique_integer([:positive])}")
+    host_a = multi_host_dir("a")
 
-    host_b =
-      Path.join(System.tmp_dir!(), "shuttle-multi-host-b-#{System.unique_integer([:positive])}")
-
-    File.mkdir_p!(host_a)
-    File.mkdir_p!(host_b)
+    host_b = multi_host_dir("b")
 
     write_fiber_file(host_a, "tests/fiber-in-a")
 
@@ -4742,22 +4686,12 @@ defmodule Shuttle.PollerTest do
       )
 
     assert {:ok, ^host_a} = Poller.resolve_fiber_host(poller, "tests/fiber-in-a")
-  after
-    Enum.each(
-      Path.wildcard(Path.join(System.tmp_dir!(), "shuttle-multi-host-*")),
-      &File.rm_rf/1
-    )
   end
 
   test "resolve_fiber_host finds a fiber in the second configured host" do
-    host_a =
-      Path.join(System.tmp_dir!(), "shuttle-multi-host-a-#{System.unique_integer([:positive])}")
+    host_a = multi_host_dir("a")
 
-    host_b =
-      Path.join(System.tmp_dir!(), "shuttle-multi-host-b-#{System.unique_integer([:positive])}")
-
-    File.mkdir_p!(host_a)
-    File.mkdir_p!(host_b)
+    host_b = multi_host_dir("b")
 
     write_fiber_file(host_b, "tests/fiber-in-b")
 
@@ -4770,18 +4704,10 @@ defmodule Shuttle.PollerTest do
       )
 
     assert {:ok, ^host_b} = Poller.resolve_fiber_host(poller, "tests/fiber-in-b")
-  after
-    Enum.each(
-      Path.wildcard(Path.join(System.tmp_dir!(), "shuttle-multi-host-*")),
-      &File.rm_rf/1
-    )
   end
 
   test "resolve_fiber_host returns :not_found for an unknown fiber" do
-    host_a =
-      Path.join(System.tmp_dir!(), "shuttle-multi-host-a-#{System.unique_integer([:positive])}")
-
-    File.mkdir_p!(host_a)
+    host_a = multi_host_dir("a")
 
     {:ok, poller} =
       start_poller!(
@@ -4792,22 +4718,12 @@ defmodule Shuttle.PollerTest do
       )
 
     assert {:error, :not_found} = Poller.resolve_fiber_host(poller, "tests/no-such-fiber")
-  after
-    Enum.each(
-      Path.wildcard(Path.join(System.tmp_dir!(), "shuttle-multi-host-*")),
-      &File.rm_rf/1
-    )
   end
 
   test "first-configured host wins for ID collisions" do
-    host_a =
-      Path.join(System.tmp_dir!(), "shuttle-multi-host-a-#{System.unique_integer([:positive])}")
+    host_a = multi_host_dir("a")
 
-    host_b =
-      Path.join(System.tmp_dir!(), "shuttle-multi-host-b-#{System.unique_integer([:positive])}")
-
-    File.mkdir_p!(host_a)
-    File.mkdir_p!(host_b)
+    host_b = multi_host_dir("b")
 
     # Same fiber ID in both hosts
     write_fiber_file(host_a, "tests/collision-fiber")
@@ -4823,22 +4739,12 @@ defmodule Shuttle.PollerTest do
 
     # host_a is first-configured → wins
     assert {:ok, ^host_a} = Poller.resolve_fiber_host(poller, "tests/collision-fiber")
-  after
-    Enum.each(
-      Path.wildcard(Path.join(System.tmp_dir!(), "shuttle-multi-host-*")),
-      &File.rm_rf/1
-    )
   end
 
   test "bust_fiber_host_cache allows re-resolution after a fiber moves" do
-    host_a =
-      Path.join(System.tmp_dir!(), "shuttle-multi-host-a-#{System.unique_integer([:positive])}")
+    host_a = multi_host_dir("a")
 
-    host_b =
-      Path.join(System.tmp_dir!(), "shuttle-multi-host-b-#{System.unique_integer([:positive])}")
-
-    File.mkdir_p!(host_a)
-    File.mkdir_p!(host_b)
+    host_b = multi_host_dir("b")
 
     path_a = write_fiber_file(host_a, "tests/movable-fiber")
 
@@ -4863,11 +4769,6 @@ defmodule Shuttle.PollerTest do
     # After bust, re-probes the file system → host_b
     :ok = Poller.bust_fiber_host_cache(poller, "tests/movable-fiber")
     assert {:ok, ^host_b} = Poller.resolve_fiber_host(poller, "tests/movable-fiber")
-  after
-    Enum.each(
-      Path.wildcard(Path.join(System.tmp_dir!(), "shuttle-multi-host-*")),
-      &File.rm_rf/1
-    )
   end
 
   test "subdirectory symlink: loom-walks-into-project subtree skipped" do
@@ -4879,20 +4780,11 @@ defmodule Shuttle.PollerTest do
     # its loom-relative id, dispatch later runs `felt -C ~/loom show
     # ai-futures/lightcone/...` which fails (loom's index doesn't have
     # the entry) and dispatch silently never happens.
-    host_a =
-      Path.join(
-        System.tmp_dir!(),
-        "shuttle-multi-host-loom-#{System.unique_integer([:positive])}"
-      )
+    host_a = multi_host_dir("loom")
 
-    host_b =
-      Path.join(
-        System.tmp_dir!(),
-        "shuttle-multi-host-lightcone-#{System.unique_integer([:positive])}"
-      )
+    host_b = multi_host_dir("lightcone")
 
     File.mkdir_p!(Path.join(host_a, ".felt/ai-futures"))
-    File.mkdir_p!(host_b)
 
     # The real fiber file is rooted in host_b's .felt/, accessible via the
     # project-canonical id `lightcone-ui/myst-as-ast/dual-branch`.
@@ -4922,41 +4814,13 @@ defmodule Shuttle.PollerTest do
 
     refute "ai-futures/lightcone/lightcone-ui/myst-as-ast/dual-branch" in candidate_ids,
            "loom-relative symlink-aliased id leaked into eligible: #{inspect(candidate_ids)}"
-  after
-    Enum.each(
-      Path.wildcard(Path.join(System.tmp_dir!(), "shuttle-multi-host-*")),
-      &File.rm_rf/1
-    )
   end
 
   test "host with symlinked .felt/ skipped entirely" do
     # Mirrors project-cities-on-loom topology: project's `.felt/` is a
     # symlink into loom's tree. Walking the project host should skip
     # everything — loom enumerates the same files canonically.
-    loom =
-      Path.join(
-        System.tmp_dir!(),
-        "shuttle-multi-host-loom-#{System.unique_integer([:positive])}"
-      )
-
-    project =
-      Path.join(
-        System.tmp_dir!(),
-        "shuttle-multi-host-project-#{System.unique_integer([:positive])}"
-      )
-
-    File.mkdir_p!(loom)
-    File.mkdir_p!(project)
-
-    # Physical fiber rooted in loom under ai-futures/portolan/.
-    write_fiber_file(loom, "ai-futures/portolan/kanban-modal")
-
-    # Project's .felt/ symlinks into loom's ai-futures/portolan/ subdir,
-    # so the same kanban-modal.md is reachable as project/.felt/kanban-modal/.
-    File.ln_s!(
-      Path.join([loom, ".felt", "ai-futures", "portolan"]),
-      Path.join(project, ".felt")
-    )
+    {loom, project} = loom_project_symlink!()
 
     {:ok, poller} =
       start_poller!(
@@ -4974,35 +4838,10 @@ defmodule Shuttle.PollerTest do
 
     refute "kanban-modal" in candidate_ids,
            "project-symlink alias surfaced: #{inspect(candidate_ids)}"
-  after
-    Enum.each(
-      Path.wildcard(Path.join(System.tmp_dir!(), "shuttle-multi-host-*")),
-      &File.rm_rf/1
-    )
   end
 
   test "resolve_fiber_host fallback ignores symlinked project view after cache bust" do
-    loom =
-      Path.join(
-        System.tmp_dir!(),
-        "shuttle-multi-host-loom-#{System.unique_integer([:positive])}"
-      )
-
-    project =
-      Path.join(
-        System.tmp_dir!(),
-        "shuttle-multi-host-project-#{System.unique_integer([:positive])}"
-      )
-
-    File.mkdir_p!(loom)
-    File.mkdir_p!(project)
-
-    write_fiber_file(loom, "ai-futures/portolan/kanban-modal")
-
-    File.ln_s!(
-      Path.join([loom, ".felt", "ai-futures", "portolan"]),
-      Path.join(project, ".felt")
-    )
+    {loom, project} = loom_project_symlink!()
 
     {:ok, poller} =
       start_poller!(
@@ -5015,11 +4854,6 @@ defmodule Shuttle.PollerTest do
     :ok = Poller.bust_fiber_host_cache(poller, "ai-futures/portolan/kanban-modal")
 
     assert {:ok, ^loom} = Poller.resolve_fiber_host(poller, "ai-futures/portolan/kanban-modal")
-  after
-    Enum.each(
-      Path.wildcard(Path.join(System.tmp_dir!(), "shuttle-multi-host-*")),
-      &File.rm_rf/1
-    )
   end
 
   test "snapshot includes felt_stores list" do
@@ -5129,7 +4963,7 @@ defmodule Shuttle.PollerTest do
   test "claim registers a live external session: rename, runtime, exit handling" do
     id = "tests/claim-me"
     MockRunner.set_fiber(id, make_fiber(id, %{"uid" => "01CLAIMUID"}))
-    MockRunner.set_shuttle(id, @oneshot_shuttle)
+    MockRunner.set_shuttle(id, oneshot_shuttle())
     MockRunner.add_tmux_session("capture-abc123")
 
     {:ok, poller} =
@@ -5238,7 +5072,7 @@ defmodule Shuttle.PollerTest do
   test "claim refuses closed fibers" do
     id = "tests/claim-closed"
     MockRunner.set_fiber(id, make_fiber(id, %{"status" => "closed"}))
-    MockRunner.set_shuttle(id, @oneshot_shuttle, "closed")
+    MockRunner.set_shuttle(id, oneshot_shuttle(), "closed")
     MockRunner.add_tmux_session("capture-closed1")
 
     {:ok, poller} =

@@ -7,6 +7,7 @@ defmodule ShuttleWeb.APIControllerTest do
   alias Shuttle.Test.ForwardStub
   import Shuttle.Test.ApiConn
   import Shuttle.Test.EnvHelpers
+  import Shuttle.Test.PollerHelpers
   import Plug.Conn
   import Phoenix.ConnTest
 
@@ -16,39 +17,7 @@ defmodule ShuttleWeb.APIControllerTest do
   alias Shuttle.Dispatcher
   alias Shuttle.Test.FeltStoreRunner, as: MockRunner
 
-  # POST transport stub for the cross-host /transition forward test. Records the
-  # last (url, body) it was asked to POST and replays a scripted response, so the
-  # forward leg is exercised without a real tunnel. Implements `post/4` only —
-  # the read `get/2` callback isn't needed here, so it doesn't declare the
-  # behaviour (which would warn about the missing required `get/2`).
-  defmodule StubPostClient do
-    use Agent
-
-    def start_link(_ \\ []),
-      do:
-        Agent.start_link(
-          fn -> %{response: nil, get_response: {:error, :not_set}, last: nil, last_get: nil} end,
-          name: __MODULE__
-        )
-
-    def set_response(response), do: Agent.update(__MODULE__, &Map.put(&1, :response, response))
-
-    def set_get_response(response),
-      do: Agent.update(__MODULE__, &Map.put(&1, :get_response, response))
-
-    def last, do: Agent.get(__MODULE__, & &1.last)
-    def last_get, do: Agent.get(__MODULE__, & &1.last_get)
-
-    def get(url, _timeout_ms) do
-      Agent.update(__MODULE__, &Map.put(&1, :last_get, %{url: url}))
-      Agent.get(__MODULE__, & &1.get_response)
-    end
-
-    def post(url, body, _content_type, _timeout_ms) do
-      Agent.update(__MODULE__, &Map.put(&1, :last, %{url: url, body: body}))
-      Agent.get(__MODULE__, & &1.response)
-    end
-  end
+  alias Shuttle.Test.StubPostClient
 
   # ── Setup ──
 
@@ -72,23 +41,6 @@ defmodule ShuttleWeb.APIControllerTest do
 
     Process.sleep(50)
     :ok
-  end
-
-  # Minimal shuttle: block YAML for a oneshot fiber ready for dispatch.
-  @oneshot_shuttle "enabled: true\nkind: oneshot\n"
-
-
-  defp make_fiber(id, attrs \\ %{}) do
-    Map.merge(
-      %{
-        "id" => id,
-        "name" => id,
-        "status" => "active",
-        "tags" => ["constitution"],
-        "created_at" => "2026-04-28T00:00:00Z"
-      },
-      attrs
-    )
   end
 
   defp with_actions_host do
@@ -126,7 +78,7 @@ defmodule ShuttleWeb.APIControllerTest do
   test "dispatches a fiber via API" do
     fiber = make_fiber("tests/api-dispatch")
     MockRunner.set_fiber("tests/api-dispatch", fiber)
-    MockRunner.set_shuttle("tests/api-dispatch", @oneshot_shuttle)
+    MockRunner.set_shuttle("tests/api-dispatch", oneshot_shuttle())
 
     conn =
       post(
@@ -166,7 +118,7 @@ defmodule ShuttleWeb.APIControllerTest do
     fiber_id = "tests/api-dispatch-live"
     fiber = make_fiber(fiber_id)
     MockRunner.set_fiber(fiber_id, fiber)
-    MockRunner.set_shuttle(fiber_id, @oneshot_shuttle)
+    MockRunner.set_shuttle(fiber_id, oneshot_shuttle())
 
     assert {:ok, session} = Poller.dispatch_fiber(fiber_id, [])
 
@@ -190,7 +142,7 @@ defmodule ShuttleWeb.APIControllerTest do
     fiber_id = "tests/api-stale-running"
     fiber = make_fiber(fiber_id)
     MockRunner.set_fiber(fiber_id, fiber)
-    MockRunner.set_shuttle(fiber_id, @oneshot_shuttle)
+    MockRunner.set_shuttle(fiber_id, oneshot_shuttle())
 
     assert {:ok, session} = Poller.dispatch_fiber(fiber_id, [])
     MockRunner.remove_tmux_session(session)
@@ -215,7 +167,7 @@ defmodule ShuttleWeb.APIControllerTest do
     fiber_id = "tests/api-slow-dispatch"
     fiber = make_fiber(fiber_id)
     MockRunner.set_fiber(fiber_id, fiber)
-    MockRunner.set_shuttle(fiber_id, @oneshot_shuttle)
+    MockRunner.set_shuttle(fiber_id, oneshot_shuttle())
     MockRunner.set_new_session_delay(5_250)
 
     started_at_ms = System.monotonic_time(:millisecond)
@@ -362,7 +314,7 @@ defmodule ShuttleWeb.APIControllerTest do
 
   test "transition for an unknown target returns 400" do
     with_actions_host()
-    MockRunner.set_shuttle("tests/transition-bad-target", @oneshot_shuttle)
+    MockRunner.set_shuttle("tests/transition-bad-target", oneshot_shuttle())
 
     conn =
       post(
@@ -693,7 +645,7 @@ defmodule ShuttleWeb.APIControllerTest do
     uid = "01KTCA2CWXBSNHETE66MXKPVE7"
     fiber = make_fiber("tests/state", %{"uid" => uid})
     MockRunner.set_fiber("tests/state", fiber)
-    MockRunner.set_shuttle("tests/state", @oneshot_shuttle)
+    MockRunner.set_shuttle("tests/state", oneshot_shuttle())
 
     send(Shuttle.Poller, :run_poll_cycle)
 
@@ -940,9 +892,15 @@ defmodule ShuttleWeb.APIControllerTest do
   # the caller's `assert` names the test that timed out.
   defp wait_until(fun, remaining_ms \\ 3_000) do
     cond do
-      fun.() -> true
-      remaining_ms <= 0 -> false
-      true -> (Process.sleep(20); wait_until(fun, remaining_ms - 20))
+      fun.() ->
+        true
+
+      remaining_ms <= 0 ->
+        false
+
+      true ->
+        Process.sleep(20)
+        wait_until(fun, remaining_ms - 20)
     end
   end
 end

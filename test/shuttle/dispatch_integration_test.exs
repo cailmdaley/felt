@@ -2,6 +2,7 @@ defmodule Shuttle.DispatchIntegrationTest do
   use ExUnit.Case, async: false
 
   alias Shuttle.{Dispatcher, Poller}
+  import Shuttle.Test.PollerHelpers
 
   # Every test here dispatches through the REAL `felt` binary (see
   # IntegrationRunner.cmd/3 below, and the direct `System.cmd("felt", ...)`
@@ -224,29 +225,6 @@ defmodule Shuttle.DispatchIntegrationTest do
       )
 
     :ok
-  end
-
-  # The fiber's on-disk `.md`: host/.felt/<id segments>/<basename>.md (mirrors
-  # write_fiber / read_frontmatter).
-  defp fiber_md_path(host, id) do
-    parts = String.split(id, "/")
-    Path.join([host, ".felt"] ++ parts ++ ["#{List.last(parts)}.md"])
-  end
-
-  # Start a Poller under ExUnit's per-test supervisor so it is torn down at test
-  # end rather than leaking as a zombie ticker (Poller.start_link links to the
-  # test process, but a :normal test exit doesn't kill linked processes). Returns
-  # {:ok, pid} so existing `{:ok, poller} = ...` call sites are unchanged. See the
-  # same helper + rationale in poller_test.exs.
-  defp start_poller!(opts) do
-    pid =
-      start_supervised!(%{
-        id: make_ref(),
-        start: {Poller, :start_link, [opts]},
-        restart: :temporary
-      })
-
-    {:ok, pid}
   end
 
   # ── Tests ──────────────────────────────────────────────────────────────────
