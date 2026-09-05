@@ -148,6 +148,20 @@ keys have dedicated flags; use those.`,
 			return err
 		}
 
+		// A status write that arms the fiber (status: active on a fiber
+		// carrying a shuttle: block) must resolve the agent, same as every
+		// other arming verb — otherwise `edit -s active` can arm a fiber
+		// whose shuttle.agent has since been retired from the registry.
+		if f.Status == felt.StatusActive {
+			if block, ok, err := f.ShuttleBlock(); err != nil {
+				return err
+			} else if ok {
+				if err := resolveBlockAgent(block); err != nil {
+					return err
+				}
+			}
+		}
+
 		if err := storage.Write(f); err != nil {
 			return err
 		}
